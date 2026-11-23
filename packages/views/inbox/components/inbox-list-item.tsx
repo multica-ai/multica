@@ -1,7 +1,7 @@
 "use client";
 
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
-import { StatusIcon } from "../../issues/components";
+import { StatusIcon } from "../../issues/components/status-icon";
 import {
   IssueAgentActivityIndicator,
 } from "../../issues/components/issue-agent-activity-indicator";
@@ -13,6 +13,7 @@ import type { InboxView } from "./inbox-view";
 import { InboxDetailLabel, useTypeLabels } from "./inbox-detail-label";
 import {
   getInboxDisplayTitle,
+  inboxIssueRef,
   isAutopilotQuotaNotice,
 } from "./inbox-display";
 import { useInboxContextMenu } from "./inbox-context-menu";
@@ -70,7 +71,7 @@ export function InboxListItem({
   const slug = useWorkspaceSlug();
   const issueHref =
     slug && item.issue_id
-      ? paths.workspace(slug).issueDetail(item.issue_id)
+      ? paths.workspace(slug).issueDetail(inboxIssueRef(item, item.issue_id))
       : null;
   const intentNavigate = useIntentNavigate();
   const displayTitle = isAutopilotQuotaNotice(item.type)

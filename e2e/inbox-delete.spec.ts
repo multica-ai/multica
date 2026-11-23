@@ -26,16 +26,18 @@ test("delete a failed inbox entry with confirmation, retry, and cross-session re
       localStorage.setItem("multica_token", token!);
       localStorage.setItem("multica:chat:isOpen", "false");
     }, api.getToken());
-    await page.setViewportSize({ width: 1280, height: 850 });
+    // Compact viewport renders InboxPage's own InboxList (with right-click
+    // Delete); at desktop widths the live list lives in the Work panel.
+    await page.setViewportSize({ width: 640, height: 850 });
     await page.goto(`/${workspace.slug}/inbox`, { waitUntil: "domcontentloaded" });
     const row = page.locator('[data-mc="inbox-item"]').filter({ hasText: "Failed test run" });
     await expect(row).toBeVisible({ timeout: 60000 });
     const other = await context.newPage();
+    await other.setViewportSize({ width: 640, height: 850 });
     await other.goto(`/${workspace.slug}/inbox`);
     const otherRow = other.locator('[data-mc="inbox-item"]').filter({ hasText: "Failed test run" });
     await expect(otherRow).toBeVisible();
 
-    await row.click();
     await row.click({ button: "right" });
     await expect(page.getByRole("menuitem", { name: "Delete", exact: true })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("inbox-delete-menu.png") });
@@ -104,14 +106,14 @@ test("deleting active issue notifications restores archived history with explici
       localStorage.setItem("multica_token", token!);
       localStorage.setItem("multica:chat:isOpen", "false");
     }, api.getToken());
-    await page.setViewportSize({ width: 1280, height: 850 });
+    await page.setViewportSize({ width: 640, height: 850 });
     await page.goto(`/${workspace.slug}/inbox`, { waitUntil: "domcontentloaded" });
     const row = page.locator('[data-mc="inbox-item"]').filter({ hasText: "Issue with archived history" });
     await expect(row).toBeVisible({ timeout: 60000 });
     await row.click({ button: "right" });
     await page.getByRole("menuitem", { name: "Delete", exact: true }).click();
     const dialog = page.getByRole("alertdialog", { name: "Delete notification?" });
-    await expect(dialog).toContainText("Previously archived notifications remain and will be visible again in Archived.");
+    await expect(dialog).toContainText("Previously archived notifications, the issue, and its runs are kept.");
     await expect(dialog).toHaveCSS("opacity", "1");
     await expect(page.getByRole("menuitem", { name: "Delete", exact: true })).not.toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("inbox-delete-history-warning.png") });
@@ -121,8 +123,7 @@ test("deleting active issue notifications restores archived history with explici
     expect((await db.query("SELECT id FROM inbox_item WHERE id = $1", [active.rows[0].id])).rowCount).toBe(0);
     expect((await db.query("SELECT id FROM inbox_item WHERE id = $1", [history.rows[0].id])).rowCount).toBe(1);
 
-    await page.getByRole("button", { name: "Inbox", exact: true }).click();
-    await page.getByRole("menuitemradio", { name: "Archived", exact: true }).click();
+    await page.getByRole("tab", { name: "Archived", exact: true }).click();
     await expect(row).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("inbox-delete-retained-archive.png") });
     await row.click({ button: "right" });

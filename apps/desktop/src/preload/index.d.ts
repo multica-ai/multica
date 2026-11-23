@@ -10,6 +10,7 @@ import type {
 } from "../shared/issue-window";
 import type {
   ManualUpdateCheckResult,
+  UpdaterDownloadState,
   UpdaterPreferences,
 } from "../shared/updater-types";
 import type {
@@ -46,6 +47,8 @@ interface DesktopAPI {
   };
   /** OS-preferred locale (BCP 47) injected by main via additionalArguments. */
   systemLocale: string;
+  /** Report the resolved in-app locale to main for native dialogs and daemon errors. */
+  setLocale?: (locale: string) => void;
   /** Subscribe to OS language changes detected after boot. Returns an unsubscribe function. */
   onSystemLocaleChanged: (callback: (locale: string) => void) => () => void;
   /** Validated runtime endpoint config, or a blocking config error. */
@@ -250,6 +253,8 @@ interface DaemonAPI {
 }
 
 interface UpdaterAPI {
+  getDownloadState: () => Promise<UpdaterDownloadState>;
+  onDownloadState: (callback: (state: UpdaterDownloadState) => void) => () => void;
   onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string }) => void) => () => void;
   onDownloadProgress: (callback: (progress: { percent: number }) => void) => () => void;
   onUpdateDownloaded: (

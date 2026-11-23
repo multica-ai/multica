@@ -44,6 +44,7 @@ export function MulticaLogo({ size = 24, color }: MulticaLogoProps) {
       width={(size * VIEW_BOX.w) / VIEW_BOX.h}
       height={size}
       viewBox={`${VIEW_BOX.x} ${VIEW_BOX.y} ${VIEW_BOX.w} ${VIEW_BOX.h}`}
+      // eslint-disable-next-line no-restricted-syntax -- brand proper noun
       accessibilityLabel="Multica"
     >
       <G fill="none" stroke={resolvedColor} strokeWidth={STROKE}>

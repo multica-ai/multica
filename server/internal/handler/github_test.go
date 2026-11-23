@@ -2065,6 +2065,65 @@ func TestListGitHubInstallations_RoleGating(t *testing.T) {
 	})
 }
 
+func TestGitHubInstallationConnectedByIsWorkspaceScoped(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	wsID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name": "GitHub connection attribution", "slug": fmt.Sprintf("github-connectors-%d", time.Now().UnixNano()), "issue_prefix": "ATTR",
+	})
+	connectors := []struct {
+		name   string
+		member bool
+	}{
+		{"Ada", true}, {"Grace", true}, {"Former member", false},
+	}
+	for index, connector := range connectors {
+		userID := dbfx.Insert(t, "user", testutil.Cols{
+			"name": connector.name, "email": fmt.Sprintf("github-connector-%s-%d@example.test", wsID, index),
+		})
+		if connector.member {
+			dbfx.Insert(t, "member", testutil.Cols{"workspace_id": wsID, "user_id": userID, "role": "admin"})
+		}
+		dbfx.Insert(t, "github_installation", testutil.Cols{
+			"workspace_id": wsID, "installation_id": 94670000 + index, "account_login": connector.name, "account_type": "User", "connected_by_id": userID,
+		})
+	}
+	dbfx.Insert(t, "github_installation", testutil.Cols{
+		"workspace_id": wsID, "installation_id": 94670003, "account_login": "legacy", "account_type": "User",
+	})
+	for _, role := range []string{"owner", "member"} {
+		t.Run(role, func(t *testing.T) {
+			req := withURLParam(httptest.NewRequest(http.MethodGet, "/", nil), "id", wsID)
+			req = req.WithContext(middleware.SetMemberContext(req.Context(), wsID, db.Member{Role: role}))
+			var out struct {
+				Installations []map[string]any `json:"installations"`
+			}
+			testutil.Call(t, testHandler.ListGitHubInstallations, req).Want(http.StatusOK).JSON(&out)
+			if len(out.Installations) != 4 {
+				t.Fatalf("installations = %d, want 4", len(out.Installations))
+			}
+			for _, installation := range out.Installations {
+				login := installation["account_login"]
+				name, _ := installation["connected_by"].(string)
+				if login == "Ada" || login == "Grace" {
+					if name != login {
+						t.Errorf("connected_by for %s = %q", login, name)
+					}
+				} else if _, present := installation["connected_by"]; present {
+					t.Errorf("must omit attribution for absent workspace member: %v", installation)
+				}
+				if _, present := installation["connected_by_id"]; present {
+					t.Error("connector user ID must not be exposed")
+				}
+				if _, present := installation["installation_id"]; role == "member" && present {
+					t.Error("numeric installation ID must remain admin-only")
+				}
+			}
+		})
+	}
+}
+
 // TestGitHubRoutes_RoleGating exercises the router-level middleware split
 // introduced in MUL-2413: GET installations runs under
 // RequireWorkspaceMemberFromURL while connect / delete remain behind

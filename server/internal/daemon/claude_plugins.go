@@ -41,6 +41,11 @@ func claudeFamilyConfigDir(home, provider string) (string, bool) {
 	if agent.ProtocolFamilyFor(provider) != "claude" {
 		return "", false
 	}
+	// The CLI resolves CLAUDE_CONFIG_DIR before its own default home, so an
+	// absolute override names the directory a fork's plugins live in too.
+	if configured := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); filepath.IsAbs(configured) {
+		return configured, true
+	}
 	dir := ".claude"
 	if desc, ok := agent.BuiltinRuntimeByID(provider); ok {
 		if declared := strings.TrimSpace(desc.ConfigHomeDir); declared != "" {

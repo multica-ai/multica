@@ -45,7 +45,7 @@ export const DEFAULT_SIDEBAR_PROJECT_SETTINGS: SidebarProjectSettings = {
   ordering: "manual",
   statuses: ["planned", "in_progress", "paused"],
   onlyMine: false,
-  showCount: true,
+  showCount: false,
   showNoProject: true,
   minimalIcons: false,
 };
@@ -144,7 +144,7 @@ const INITIAL: PersistedSidebarTree = {
   projectOrder: [],
   inboxSettings: DEFAULT_SIDEBAR_INBOX_SETTINGS,
   pinnedLimit: 5,
-  viewsShowCount: true,
+  viewsShowCount: false,
   inboxCollapsed: false,
   projectsCollapsed: false,
   viewsCollapsed: false,
@@ -177,6 +177,17 @@ export const useSidebarTreeStore = create<SidebarTreeState>()(
     {
       name: "multica_sidebar_tree",
       storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
+      // 1: the Inbox section briefly became compact by default, and turned
+      // compact on once for every stored copy.
+      // 2: compact is off by default again. A version-1 copy holds that forced
+      // value rather than a choice, so it goes back to off once; an older copy
+      // never ran version 1 and keeps what the user picked.
+      version: 2,
+      migrate: (persisted, version) => {
+        const p = (persisted ?? {}) as Partial<PersistedSidebarTree>;
+        if (version === 1 && p.inboxSettings) return { ...p, inboxSettings: { ...p.inboxSettings, compact: false } };
+        return p;
+      },
       partialize: (state): PersistedSidebarTree => ({
         expanded: state.expanded,
         issueSettings: state.issueSettings,

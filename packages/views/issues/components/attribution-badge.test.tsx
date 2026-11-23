@@ -47,7 +47,7 @@ describe("AttributionBadge", () => {
 
     expect(screen.getByText("On behalf of Grace")).toBeInTheDocument();
     expect(container.querySelector(".text-warning")).not.toBeNull();
-    expect(screen.getByTitle("No precise owner — attributed to the agent owner"))
+    expect(screen.getByTitle("Attributed to agent owner (default)"))
       .toBeInTheDocument();
   });
 
@@ -69,7 +69,7 @@ describe("AttributionBadge", () => {
     expect(container.querySelector(".text-warning")).toBeNull();
     expect(container.querySelector(".text-muted-foreground")).not.toBeNull();
     // The "backfilled" nuance still lives in the tooltip for anyone who looks.
-    expect(screen.getByTitle("Backfilled attribution")).toBeInTheDocument();
+    expect(screen.getByTitle("Historical attribution")).toBeInTheDocument();
   });
 
   it("avatar variant shows no warning ring for a backfilled attribution (MUL-4768)", () => {

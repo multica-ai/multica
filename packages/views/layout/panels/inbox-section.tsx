@@ -1,10 +1,14 @@
 "use client";
 
-import { type ReactNode, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { memo, type ReactNode, type Ref, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion, useIsPresent } from "motion/react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlarmClock, Archive, BellOff, BookCheck, CheckCheck, History, ListChecks, MoreHorizontal } from "@multica/ui/icons";
+import { useReducedMotion } from "@multica/core/appearance";
+import { AlarmClock, Archive, ArchiveRestore, BellOff, BookCheck, CheckCheck, ListChecks, MoreHorizontal, SlidersHorizontal } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
+import { UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { useIsCompact } from "@multica/ui/hooks/use-mobile";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
@@ -16,7 +20,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { inboxTypeGroup, useInboxFilterStore } from "@multica/core/inbox/filter-store";
@@ -27,48 +30,51 @@ import {
   useMarkAllInboxRead,
   useMarkInboxRead,
 } from "@multica/core/inbox/mutations";
-import { snoozedInboxOptions, useInboxUnreadCount } from "@multica/core/inbox/queries";
+import { useInboxUnreadCount } from "@multica/core/inbox/queries";
 import { inboxRowTime, inboxSnoozeReturnedAt } from "@multica/core/inbox/snooze";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
-import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
+import { useInboxSelectionStore, type LastInboxCleared } from "@multica/core/inbox/selection-store";
 import { inboxRowKey, nextInboxRow } from "@multica/core/inbox/open-row";
 import { useWorkspacePaths } from "@multica/core/paths";
-import type { InboxItem } from "@multica/core/types";
-import { useActorName } from "@multica/core/workspace/hooks";
+import type { InboxItem, SnoozedInboxIssue } from "@multica/core/types";
 import { AppLink, useNavigation } from "../../navigation";
-import { useViewStateWriter } from "../../platform";
-import { issueHighlightMementoKey } from "../../issues/components/issue-detail";
-import { useT } from "../../i18n";
+import { useLocale, useT } from "../../i18n";
 import { INBOX_TYPE_ICONS } from "../../inbox/components/inbox-filter-options";
 import { getInboxDisplayTitle, inboxRowHref, isAutopilotQuotaNotice } from "../../inbox/components/inbox-display";
-import { ARCHIVED_VIEW_PARAM } from "../../inbox/components/inbox-view";
-import { ActorAvatar } from "../../common/actor-avatar";
-import { InboxDetailLabel, useTypeLabels } from "../../inbox/components/inbox-detail-label";
+import { inboxTabFromParam, inboxTabHref, type InboxTab } from "../../inbox/components/inbox-view";
+import { InboxTabs } from "../../inbox/components/inbox-tabs";
+import { formatSnoozeTime } from "../../inbox/components/inbox-snooze-time";
+import { useArchivedInboxRows, useSnoozedInboxRows } from "../../inbox/components/use-inbox-tab-rows";
+import { useTypeLabels } from "../../inbox/components/inbox-detail-label";
+import { InboxActorAvatar, InboxActorLine } from "../../inbox/components/inbox-actor";
 import { InboxFilterMenu } from "../../inbox/components/inbox-filter-menu";
 import { InboxSnoozeMenu } from "../../inbox/components/inbox-snooze-menu";
 import { useInboxSnooze } from "../../inbox/components/use-inbox-snooze";
-import { useBuiltinViewNavigation } from "../../issue-views/builtin-views";
 import { useFilteredInboxRows } from "../../inbox/components/use-filtered-inbox-rows";
+import { useInboxIssuePrefetch } from "../../inbox/components/use-inbox-issue-prefetch";
 import { useTimeAgo } from "../../inbox/components/inbox-list-item";
 import { useInboxUnsubscribable, useUnsubscribeArchive } from "../../inbox/components/use-unsubscribe-archive";
 import {
+  clearedLabelForItem,
+  collectBatchArchiveIds,
   useArchiveInboxBatchWithUndo,
   useArchiveInboxWithUndo,
   useLeaveInboxRow,
+  useRestoreInbox,
 } from "../../inbox/components/use-leave-inbox-row";
 import { useKeptInboxRowText } from "../../inbox/components/inbox-kept-actions";
 import { StatusIcon } from "../../issues/components";
 import { useStatusLabel } from "../../issues/utils/status-label";
 import {
   PANEL_ROW_CLASS,
-  PanelCount,
   PanelLink,
   PanelList,
   PanelSection,
   panelRowAnchor,
   panelRowStateClass,
+  usePanelScrollRef,
 } from "../panel-nav";
 import { InboxSectionSettings, SECTION_SETTINGS_REVEAL_CLASS } from "./sidebar-settings";
 import {
@@ -78,18 +84,6 @@ import {
   TREE_ROW_BUTTON_CLASS,
   useIssueAgentState,
 } from "./sidebar-tree";
-
-/**
- * The unread count sits in the panel's number column (the rows' trailing
- * edge, 12px in from the label row's) and yields that spot to the section's
- * buttons while they show. Where they always show (coarse pointers) it stays
- * in line before them.
- */
-const HEADER_COUNT_CLASS = cn(
-  "pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 font-medium text-brand transition-opacity duration-150",
-  "group-hover/section:opacity-0 group-focus-within/section:opacity-0",
-  "[@media(pointer:coarse)]:pointer-events-auto [@media(pointer:coarse)]:static [@media(pointer:coarse)]:translate-y-0 [@media(pointer:coarse)]:px-1 [@media(pointer:coarse)]:group-focus-within/section:opacity-100",
-);
 
 /** The Inbox rows' place in the clicked-issue record, apart from every sidebar source. */
 export const INBOX_LIST = "inbox";
@@ -130,17 +124,19 @@ export function useInboxSectionRows(wsId: string | undefined, openKey: string | 
 
 type InboxSectionRows = ReturnType<typeof useInboxSectionRows>;
 
+/**
+ * The Work panel's Inbox: its three lists as tabs in the header, the live
+ * Inbox, the issues snoozed out of it, and the archive. Every row opens on
+ * the Inbox page, on its tab.
+ */
 export function InboxSection({
   wsId,
   rows,
   pathname,
-  activeIssueId,
 }: {
   wsId: string;
   rows: InboxSectionRows;
   pathname: string;
-  /** The open issue, when it was opened from this section. */
-  activeIssueId: string | null;
 }) {
   const { t } = useT("layout");
   const { t: tInbox } = useT("inbox");
@@ -155,19 +151,42 @@ export function InboxSection({
   const unsubscribable = useInboxUnsubscribable(wsId);
   const unsubscribeArchive = useUnsubscribeArchive();
   const { snooze } = useInboxSnooze();
-  const { searchParams } = useNavigation();
+  const { searchParams, replace } = useNavigation();
   const isCompact = useIsCompact();
   const { list, rows: all, displayed, expanded, limit, setExpanded } = rows;
   const keptText = useKeptInboxRowText(wsId);
   const clearFilters = useInboxFilterStore((state) => state.clearFilters);
-  // The notification the Inbox page has open, keyed as it groups rows.
-  const openKey = pathname === p.inbox() ? searchParams.get("issue") : null;
-  // The open notification, wherever it is open; acting on its row moves on.
-  const openRowKey = activeIssueId ?? openKey;
-  const leaveIfOpen = (item: InboxItem) => {
-    const key = inboxRowKey(item);
-    if (key === openRowKey) leave(key, nextInboxRow(all, key));
+  // On the Inbox page its URL names the tab; elsewhere the section keeps the
+  // one picked last.
+  const onInboxPage = pathname === p.inbox();
+  const pageTab = inboxTabFromParam(searchParams.get("view"));
+  const storedTab = useInboxSelectionStore((s) => s.sectionTabByWorkspace[wsId] ?? "inbox");
+  const setSectionTab = useInboxSelectionStore((s) => s.setSectionTab);
+  const tab = onInboxPage ? pageTab : storedTab;
+  useEffect(() => {
+    if (onInboxPage) setSectionTab(wsId, pageTab);
+  }, [onInboxPage, pageTab, setSectionTab, wsId]);
+  const selectTab = (next: InboxTab) => {
+    // The open tab is the section's title: selecting it again folds the
+    // section, as a click on another section's title does.
+    if (next === tab) {
+      setCollapsed(!collapsed);
+      return;
+    }
+    setSectionTab(wsId, next);
+    if (collapsed) setCollapsed(false);
+    if (onInboxPage && next !== pageTab) replace(inboxTabHref(p, next));
   };
+  // What the Inbox page has open, keyed as its tab groups rows.
+  const pageKey = onInboxPage ? searchParams.get("issue") : null;
+  const openRowKey = pageTab === "inbox" ? pageKey : null;
+  const snoozed = useSnoozedInboxRows(wsId);
+  const archived = useArchivedInboxRows(wsId, tab === "archived" && !collapsed);
+  const leaveIfOpen = (item: InboxItem, cleared: LastInboxCleared) => {
+    const key = inboxRowKey(item);
+    if (key === openRowKey) leave(key, nextInboxRow(all, key), cleared);
+  };
+  const prefetchRow = useInboxIssuePrefetch(wsId, collapsed ? [] : all, (item) => inboxRowHref(p, item), openRowKey);
   // What arrived on each issue while it was snoozed, for the rows back from one.
   const updatesWhileSnoozed = useMemo(() => {
     const counts = new Map<string, number>();
@@ -179,70 +198,167 @@ export function InboxSection({
     return counts;
   }, [list.notifications]);
 
+  const actionsRef = useRef<HTMLButtonElement>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const scrollRef = usePanelScrollRef();
+  // Rows are memoized and re-render only when their own props change, not on
+  // every navigation that re-renders this section (MUL-9609); the handlers
+  // keep one identity and read this render's state when they run.
+  const latest = {
+    prefetch: (item: InboxItem) => void prefetchRow(item),
+    archive: (item: InboxItem) => {
+      const key = inboxRowKey(item);
+      archive(item.id, key);
+      leaveIfOpen(item, {
+        kind: "archived",
+        itemId: item.id,
+        key,
+        label: clearedLabelForItem(item),
+        href: inboxRowHref(p, item),
+        clearedAt: Date.now(),
+      });
+    },
+    unsubscribe: (item: InboxItem) => {
+      const key = inboxRowKey(item);
+      unsubscribeArchive({ id: item.id, issueId: item.issue_id! });
+      leaveIfOpen(item, {
+        kind: "unsubscribed",
+        itemId: item.id,
+        issueId: item.issue_id!,
+        key,
+        label: clearedLabelForItem(item),
+        href: inboxRowHref(p, item),
+        undoable: true,
+        clearedAt: Date.now(),
+      });
+    },
+    snooze: (item: InboxItem, until: Date) => {
+      const key = inboxRowKey(item);
+      snooze(item, until);
+      leaveIfOpen(item, {
+        kind: "snoozed",
+        itemId: item.id,
+        key,
+        label: clearedLabelForItem(item),
+        href: inboxRowHref(p, item),
+        until: until.toISOString(),
+        wasRead: item.read === true,
+        clearedAt: Date.now(),
+      });
+    },
+  };
+  const latestRef = useRef(latest);
+  useLayoutEffect(() => {
+    latestRef.current = latest;
+  });
+  const handlers = useMemo<InboxRowHandlers>(() => ({
+    prefetch: (item) => latestRef.current.prefetch(item),
+    archive: (item) => latestRef.current.archive(item),
+    unsubscribe: (item) => latestRef.current.unsubscribe(item),
+    snooze: (item, until) => latestRef.current.snooze(item, until),
+  }), []);
+  const renderRow = (item: InboxItem, measure?: RowMeasure) => (
+    <InboxRow
+      key={item.id}
+      item={item}
+      // Two props rather than the object: a fresh object every render would
+      // defeat the row's memo (the measuring ref keeps one identity).
+      measureIndex={measure?.index}
+      measureRef={measure?.ref}
+      href={inboxRowHref(p, item)}
+      active={!!openRowKey && inboxRowKey(item) === openRowKey}
+      compact={compact}
+      kept={list.kept?.item.id === item.id ? keptText.line(list.kept) : null}
+      settled={list.kept?.item.id === item.id && list.kept.reason !== "filtered"}
+      updatesWhileSnoozed={item.issue_id ? (updatesWhileSnoozed.get(item.issue_id) ?? 0) : 0}
+      unsubscribable={!!item.issue_id && unsubscribable(item)}
+      handlers={handlers}
+    />
+  );
+
   return (
     <PanelSection
       label={t(($) => $.nav.inbox)}
+      heading={
+        <InboxTabs
+          tab={tab}
+          onSelect={selectTab}
+          unread={showCount ? unread : undefined}
+          snoozed={snoozed.rows.length}
+          expanded={!collapsed}
+        />
+      }
       collapsed={collapsed}
       onCollapsedChange={setCollapsed}
       action={
         <div className="relative flex items-center gap-1">
-          {showCount && <PanelCount value={unread} className={HEADER_COUNT_CLASS} />}
-          <InboxFilterMenu
-            wsId={wsId}
-            items={list.notifications}
-            priorityFilterSupport={list.priorityFilterSupport}
-            issueFieldsSupport={list.issueFieldsSupport}
-            activeIssueIds={list.activeIssueIds}
-            sectionTrigger={{
-              className: cn(TREE_ROW_BUTTON_CLASS, "text-muted-foreground", SECTION_SETTINGS_REVEAL_CLASS),
-              // A filtered list says so even while the section is not hovered.
-              activeClassName: "w-auto gap-0.5 px-1 text-brand opacity-100 hover:text-brand",
-            }}
-          />
-          <InboxSectionSettings className={SECTION_SETTINGS_REVEAL_CLASS} />
+          {tab !== "snoozed" && (
+            <InboxFilterMenu
+              wsId={wsId}
+              items={tab === "archived" ? archived.items : list.notifications}
+              priorityFilterSupport={tab === "archived" ? "supported" : list.priorityFilterSupport}
+              issueFieldsSupport={tab === "archived" ? archived.issueFieldsSupport : list.issueFieldsSupport}
+              activeIssueIds={list.activeIssueIds}
+              archived={tab === "archived"}
+              sectionTrigger={{
+                className: cn(TREE_ROW_BUTTON_CLASS, "text-muted-foreground", SECTION_SETTINGS_REVEAL_CLASS),
+                // A filtered list says so even while the section is not hovered.
+                activeClassName: "w-auto gap-0.5 px-1 text-brand opacity-100 hover:text-brand",
+              }}
+            />
+          )}
           <InboxSectionActions
             wsId={wsId}
             rows={all}
             openRowKey={openRowKey}
+            bulk={tab === "inbox"}
+            triggerRef={actionsRef}
+            settingsOpen={settingsOpen}
+            onOpenSettings={() => setSettingsOpen(true)}
             className={SECTION_SETTINGS_REVEAL_CLASS}
           />
+          <InboxSectionSettings opener={{ open: settingsOpen, onOpenChange: setSettingsOpen, anchor: actionsRef }} />
         </div>
       }
     >
-      {displayed.length > 0 ? (
-        <PanelList data-sidebar-list={INBOX_LIST} className={compact ? undefined : "space-y-0.5"}>
-          {displayed.map((item) => (
-            <InboxRow
-              key={item.id}
-              item={item}
-              href={inboxRowHref(p, item)}
-              active={
-                (!!item.issue_id && item.issue_id === activeIssueId) ||
-                (!!openKey && (item.issue_id ?? item.id) === openKey)
-              }
-              compact={compact}
-              kept={list.kept?.item.id === item.id ? keptText.line(list.kept) : null}
-              settled={list.kept?.item.id === item.id && list.kept.reason !== "filtered"}
-              updatesWhileSnoozed={item.issue_id ? (updatesWhileSnoozed.get(item.issue_id) ?? 0) : 0}
-              onArchive={() => {
-                archive(item.id, inboxRowKey(item));
-                leaveIfOpen(item);
-              }}
-              onUnsubscribe={
-                item.issue_id && unsubscribable(item)
-                  ? () => {
-                      unsubscribeArchive({ id: item.id, issueId: item.issue_id! });
-                      leaveIfOpen(item);
-                    }
-                  : undefined
-              }
-              onSnooze={(until) => {
-                snooze(item, until);
-                leaveIfOpen(item);
-              }}
-            />
-          ))}
-        </PanelList>
+      {tab === "snoozed" ? (
+        <SnoozedSectionList
+          wsId={wsId}
+          list={snoozed}
+          limit={limit}
+          openKey={pageTab === "snoozed" ? pageKey : null}
+        />
+      ) : tab === "archived" ? (
+        <ArchivedSectionList
+          archived={archived}
+          limit={limit}
+          openKey={pageTab === "archived" ? pageKey : null}
+        />
+      ) : displayed.length > 0 ? (
+        displayed.length > VIRTUALIZE_AFTER && scrollRef ? (
+          <VirtualInboxList items={displayed} compact={compact} renderRow={renderRow} />
+        ) : (
+          <PanelList data-sidebar-list={INBOX_LIST} className={compact ? undefined : "space-y-0.5"}>
+            <AnimatePresence initial={false}>
+              {displayed.map((item) => renderRow(item))}
+            </AnimatePresence>
+          </PanelList>
+        )
+      ) : list.load === "failed" ? (
+        // A list that never loaded is not an empty Inbox: say so and offer
+        // another try rather than "No notifications".
+        <div role="alert" className={cn(PANEL_ROW_CLASS, "pl-[2.375rem] text-caption text-faint-foreground")}>
+          <span className="min-w-0 flex-1 truncate">{tInbox(($) => $.errors.load_failed)}</span>
+          <button
+            type="button"
+            disabled={list.retrying}
+            className="shrink-0 rounded-md px-1 font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50"
+            onClick={list.retry}
+          >
+            {tInbox(($) => $.list.retry)}
+          </button>
+        </div>
       ) : list.filtered ? (
         <div className={cn(PANEL_ROW_CLASS, "pl-[2.375rem] text-caption text-faint-foreground")}>
           <span className="min-w-0 flex-1 truncate">{tInbox(($) => $.filters.empty)}</span>
@@ -254,12 +370,12 @@ export function InboxSection({
             {tInbox(($) => $.filters.clear)}
           </button>
         </div>
-      ) : (
+      ) : list.load === "loaded" ? (
         <p className={cn(PANEL_ROW_CLASS, "pl-[2.375rem] text-caption text-faint-foreground")}>
           {t(($) => $.panels.work.inbox_empty)}
         </p>
-      )}
-      {all.length > limit && (
+      ) : null}
+      {tab === "inbox" && all.length > limit && (
         <button
           type="button"
           aria-expanded={expanded}
@@ -275,12 +391,10 @@ export function InboxSection({
       {isCompact && (
         <PanelList>
           <PanelLink
-            href={p.inbox()}
+            href={inboxTabHref(p, tab)}
             icon={<span className="size-4" aria-hidden />}
             label={t(($) => $.panels.work.inbox_all)}
-            active={
-              pathname === p.inbox() && !openKey && searchParams.get("view") !== ARCHIVED_VIEW_PARAM
-            }
+            active={onInboxPage && !pageKey && pageTab === tab}
             className="text-caption"
           />
         </PanelList>
@@ -289,19 +403,123 @@ export function InboxSection({
   );
 }
 
+/**
+ * Past this many rows (only reachable through "Show N more") the section
+ * mounts just the rows near the panel's viewport. Every mounted row
+ * re-renders whenever the open issue changes, so a fully mounted list of
+ * ~1,000 notifications made each switch cost seconds.
+ */
+const VIRTUALIZE_AFTER = 50;
+
+/** Estimated row heights and the gaps `space-y-px` / `space-y-0.5` put between rows. */
+const ROW_ESTIMATE = { compact: 32, full: 50 } as const;
+const ROW_GAP = { compact: 1, full: 2 } as const;
+
+/** What a virtualized row hands its `<li>` so the list can measure it. */
+interface RowMeasure {
+  index: number;
+  ref: Ref<HTMLLIElement>;
+}
+
+/**
+ * The Inbox rows, windowed inside the Work panel's own scroll container. The
+ * list stays in normal flow: padding stands in for the rows above and below
+ * the window, so the sections after it keep their place.
+ */
+function VirtualInboxList({
+  items,
+  compact,
+  renderRow,
+}: {
+  items: readonly InboxItem[];
+  compact: boolean;
+  renderRow: (item: InboxItem, measure: RowMeasure) => ReactNode;
+}) {
+  const scrollRef = usePanelScrollRef()!;
+  const [list, setList] = useState<HTMLUListElement | null>(null);
+  // Where the list starts within the scroll container's content. The sections
+  // above it (Pinned) move it as they collapse, expand, mount or unmount.
+  const [scrollMargin, setScrollMargin] = useState(0);
+  useLayoutEffect(() => {
+    const scroller = scrollRef.current;
+    if (!list || !scroller) return;
+    const measure = () =>
+      setScrollMargin(list.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop);
+    const resize = new ResizeObserver(measure);
+    const observe = () => {
+      resize.disconnect();
+      resize.observe(scroller);
+      for (const child of scroller.children) {
+        if (child.contains(list)) break;
+        resize.observe(child);
+      }
+      measure();
+    };
+    observe();
+    const mutations = new MutationObserver(observe);
+    mutations.observe(scroller, { childList: true });
+    return () => {
+      mutations.disconnect();
+      resize.disconnect();
+    };
+  }, [list, scrollRef]);
+
+  const virtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => (compact ? ROW_ESTIMATE.compact : ROW_ESTIMATE.full),
+    gap: compact ? ROW_GAP.compact : ROW_GAP.full,
+    getItemKey: (index) => items[index]!.id,
+    scrollMargin,
+    // Rows past the viewport stay mounted, so Tab can always reach the next one.
+    overscan: 10,
+  });
+  const virtualRows = virtualizer.getVirtualItems();
+  const first = virtualRows[0];
+  const last = virtualRows[virtualRows.length - 1];
+  const paddingTop = first ? first.start - scrollMargin : 0;
+  const paddingBottom = last ? virtualizer.getTotalSize() - (last.end - scrollMargin) : 0;
+
+  return (
+    <PanelList
+      ref={setList}
+      data-sidebar-list={INBOX_LIST}
+      className={compact ? undefined : "space-y-0.5"}
+      style={{ paddingTop, paddingBottom }}
+    >
+      {virtualRows.map((row) => renderRow(items[row.index]!, { index: row.index, ref: virtualizer.measureElement }))}
+    </PanelList>
+  );
+}
+
+/**
+ * The section's ⋯ menu: the bulk actions on the Inbox tab, and on every tab
+ * the section's display settings.
+ */
 function InboxSectionActions({
   wsId,
   rows,
   openRowKey,
+  bulk,
+  triggerRef,
+  settingsOpen,
+  onOpenSettings,
   className,
 }: {
   wsId: string;
   rows: readonly InboxItem[];
   openRowKey: string | null;
+  /** Offers the bulk actions, which act on the live Inbox. */
+  bulk: boolean;
+  triggerRef: Ref<HTMLButtonElement>;
+  /** The settings hang from this menu's button, which stays shown meanwhile. */
+  settingsOpen: boolean;
+  onOpenSettings: () => void;
   className?: string;
 }) {
   const { t } = useT("layout");
   const { t: tInbox } = useT("inbox");
+  const qc = useQueryClient();
   const leave = useLeaveInboxRow();
   const archiveWithUndo = useArchiveInboxBatchWithUndo();
   const { categoryOf } = useIssueStatuses(wsId);
@@ -314,8 +532,23 @@ function InboxSectionActions({
   ) => {
     const open = openRowKey ? rows.find((item) => inboxRowKey(item) === openRowKey) : undefined;
     const takesOpen = !!open && archives(open);
+    const takenIds = takesOpen ? collectBatchArchiveIds(qc, wsId, archives) : [];
     void archiveWithUndo(archive, archives, failed, takesOpen ? openRowKey : null);
-    if (takesOpen) leave(openRowKey!, nextInboxRow(rows, openRowKey!, archives));
+    if (takesOpen) {
+      leave(
+        openRowKey!,
+        nextInboxRow(rows, openRowKey!, archives),
+        takenIds.length > 0
+          ? {
+              kind: "batch_archived",
+              count: takenIds.length,
+              itemIds: takenIds,
+              key: openRowKey,
+              clearedAt: Date.now(),
+            }
+          : undefined,
+      );
+    }
   };
   const isRead = (item: InboxItem) => item.read === true;
   const isFinished = (item: InboxItem) => {
@@ -326,10 +559,6 @@ function InboxSectionActions({
   const archiveAll = useArchiveAllInbox();
   const archiveAllRead = useArchiveAllReadInbox();
   const archiveCompleted = useArchiveCompletedInbox();
-  const { push } = useNavigation();
-  const p = useWorkspacePaths();
-  const builtinNav = useBuiltinViewNavigation();
-  const { data: snoozed } = useQuery(snoozedInboxOptions(wsId));
   const label = t(($) => $.panels.work.inbox_actions);
   const onError = (fallback: string) => (err: unknown) =>
     toast.error(err instanceof Error && err.message ? err.message : fallback);
@@ -339,6 +568,7 @@ function InboxSectionActions({
       <DropdownMenuTrigger
         render={
           <button
+            ref={triggerRef}
             type="button"
             aria-label={label}
             className={cn(
@@ -347,6 +577,7 @@ function InboxSectionActions({
               "size-[var(--button-height-xs)]",
               "text-muted-foreground data-popup-open:bg-surface-selected data-popup-open:text-foreground data-popup-open:opacity-100",
               className,
+              settingsOpen && "bg-surface-selected text-foreground opacity-100",
             )}
           />
         }
@@ -354,86 +585,92 @@ function InboxSectionActions({
         <MoreHorizontal className="size-3.5" />
       </DropdownMenuTrigger>
       <DropdownMenuContent side="right" align="start" className="w-auto min-w-48">
-        <DropdownMenuItem
-          onClick={() => {
-            builtinNav.prepare("snoozed");
-            push(builtinNav.hrefFor("snoozed"));
-          }}
-        >
-          <AlarmClock className="size-4" />
-          {t(($) => $.panels.work.inbox_view_snoozed)}
-          {!!snoozed?.length && (
-            <DropdownMenuShortcut className="tracking-normal tabular-nums">{snoozed.length}</DropdownMenuShortcut>
-          )}
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => push(`${p.inbox()}?${new URLSearchParams({ view: ARCHIVED_VIEW_PARAM })}`)}>
-          <History className="size-4" />
-          {t(($) => $.panels.work.inbox_view_archived)}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onClick={() =>
-            markAllRead.mutate(undefined, { onError: onError(tInbox(($) => $.errors.mark_all_read_failed)) })
-          }
-        >
-          <CheckCheck className="size-4" />
-          {tInbox(($) => $.menu.mark_all_read)}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onClick={() =>
-            archiveBatch(
-              () => archiveAllRead.mutateAsync(),
-              isRead,
-              tInbox(($) => $.errors.archive_all_read_failed),
-            )
-          }
-        >
-          <BookCheck className="size-4" />
-          {tInbox(($) => $.menu.archive_all_read)}
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() =>
-            archiveBatch(
-              () => archiveCompleted.mutateAsync(),
-              isFinished,
-              tInbox(($) => $.errors.archive_completed_failed),
-            )
-          }
-        >
-          <ListChecks className="size-4" />
-          {tInbox(($) => $.menu.archive_completed)}
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() =>
-            archiveBatch(
-              () => archiveAll.mutateAsync(),
-              () => true,
-              tInbox(($) => $.errors.archive_all_failed),
-            )
-          }
-        >
-          <Archive className="size-4" />
-          {tInbox(($) => $.menu.archive_all)}
+        {bulk && (
+          <>
+            <DropdownMenuItem
+              onClick={() =>
+                markAllRead.mutate(undefined, { onError: onError(tInbox(($) => $.errors.mark_all_read_failed)) })
+              }
+            >
+              <CheckCheck className="size-4" />
+              {tInbox(($) => $.menu.mark_all_read)}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() =>
+                archiveBatch(
+                  () => archiveAllRead.mutateAsync(),
+                  isRead,
+                  tInbox(($) => $.errors.archive_all_read_failed),
+                )
+              }
+            >
+              <BookCheck className="size-4" />
+              {tInbox(($) => $.menu.archive_all_read)}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() =>
+                archiveBatch(
+                  () => archiveCompleted.mutateAsync(),
+                  isFinished,
+                  tInbox(($) => $.errors.archive_completed_failed),
+                )
+              }
+            >
+              <ListChecks className="size-4" />
+              {tInbox(($) => $.menu.archive_completed)}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() =>
+                archiveBatch(
+                  () => archiveAll.mutateAsync(),
+                  () => true,
+                  tInbox(($) => $.errors.archive_all_failed),
+                )
+              }
+            >
+              <Archive className="size-4" />
+              {tInbox(($) => $.menu.archive_all)}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
+        )}
+        <DropdownMenuItem onClick={onOpenSettings}>
+          <SlidersHorizontal className="size-4" />
+          {t(($) => $.panels.work.inbox_settings)}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
-function InboxRow({
+/** What a row does with its notification; one stable set shared by every row. */
+interface InboxRowHandlers {
+  /** Warms the issue a row opens, so the click renders from cache. */
+  prefetch: (item: InboxItem) => void;
+  archive: (item: InboxItem) => void;
+  /** Unsubscribe & archive. */
+  unsubscribe: (item: InboxItem) => void;
+  snooze: (item: InboxItem, until: Date) => void;
+}
+
+const InboxRow = memo(function InboxRow({
   item,
+  measureIndex,
+  measureRef,
   href,
   active,
   compact,
   kept,
   settled,
   updatesWhileSnoozed,
-  onArchive,
-  onUnsubscribe,
-  onSnooze,
+  unsubscribable,
+  handlers,
 }: {
   item: InboxItem;
+  /** Set when the row is one of a virtualized list's window (`RowMeasure`). */
+  measureIndex?: number;
+  measureRef?: Ref<HTMLLIElement>;
   href: string;
   active: boolean;
   /** One line (status, title, agents, dot or time) instead of the actor line under the title. */
@@ -444,11 +681,14 @@ function InboxRow({
   settled: boolean;
   /** Notifications that arrived while the issue was snoozed. */
   updatesWhileSnoozed: number;
-  onArchive: () => void;
-  /** Unsubscribe & archive; only for issues that are not the viewer's own. */
-  onUnsubscribe?: () => void;
-  onSnooze: (until: Date) => void;
+  /** Offers Unsubscribe & archive; only for issues that are not the viewer's own. */
+  unsubscribable: boolean;
+  handlers: InboxRowHandlers;
 }) {
+  const onPrefetch = () => handlers.prefetch(item);
+  const onArchive = () => handlers.archive(item);
+  const onUnsubscribe = unsubscribable ? () => handlers.unsubscribe(item) : undefined;
+  const onSnooze = (until: Date) => handlers.snooze(item, until);
   const { t } = useT("inbox");
   const typeLabels = useTypeLabels();
   const timeAgo = useTimeAgo();
@@ -457,14 +697,11 @@ function InboxRow({
   const statusLabelOf = useStatusLabel(item.workspace_id);
   const status = item.issue_status;
   const title = inboxRowTitle(item, typeLabels);
-  const writeViewState = useViewStateWriter();
   const requestLanding = useInboxSelectionStore((s) => s.requestLanding);
   // Every click is a fresh intent to land on what the notification is about,
   // even on the issue already open, or one whose landing ran before.
   const land = () => {
-    if (!item.issue_id) return;
-    writeViewState(issueHighlightMementoKey(item.issue_id), undefined);
-    requestLanding(item.issue_id);
+    if (item.issue_id) requestLanding(item.issue_id);
   };
   // The card previews a notification you have not opened. A press opens it,
   // so the card goes at once, with no exit animation to compete with the
@@ -528,8 +765,10 @@ function InboxRow({
     </ShimmerText>
   );
 
-  return (
-    <li data-inbox-row data-read={unread ? "false" : "true"} className="group/inbox relative">
+  const isPresent = useIsPresent();
+  const reduceMotion = useReducedMotion();
+  const rowChildren = (
+    <>
       <HoverCard
         open={cardOpen && !snoozeOpen}
         onOpenChange={(open) => {
@@ -564,6 +803,7 @@ function InboxRow({
           <AppLink
             href={href}
             newTabTitle={title}
+            data-issue-id={item.issue_id ?? undefined}
             draggable={false}
             aria-current={active ? "page" : undefined}
             onNavigateInPlace={land}
@@ -692,6 +932,334 @@ function InboxRow({
           </button>
         </TooltipHint>
       )}
+    </>
+  );
+
+  if (measureRef) {
+    return (
+      <li
+        ref={measureRef}
+        data-index={measureIndex}
+        data-inbox-row
+        data-read={unread ? "false" : "true"}
+        className="group/inbox relative"
+        onPointerEnter={onPrefetch}
+        onFocus={onPrefetch}
+      >
+        {rowChildren}
+      </li>
+    );
+  }
+
+  return (
+    <motion.li
+      data-inbox-row={isPresent ? "" : undefined}
+      data-read={unread ? "false" : "true"}
+      aria-hidden={!isPresent || undefined}
+      initial={false}
+      exit={{
+        opacity: 0,
+        height: 0,
+        marginTop: 0,
+        marginBottom: 0,
+        overflow: "hidden",
+        transition: { duration: reduceMotion ? 0 : UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
+      }}
+      className={cn("group/inbox relative", !isPresent && "pointer-events-none")}
+      onPointerEnter={onPrefetch}
+      onFocus={onPrefetch}
+    >
+      {rowChildren}
+    </motion.li>
+  );
+});
+
+/** A tab's rows past the section's limit wait behind "Show N more". */
+function useSectionLimit<T>(rows: readonly T[], limit: number) {
+  const [expanded, setExpanded] = useState(false);
+  return {
+    shown: expanded ? rows : rows.slice(0, limit),
+    more: rows.length > limit,
+    expanded,
+    toggle: () => setExpanded((value) => !value),
+  };
+}
+
+function SectionMoreButton({ expanded, hidden, onToggle }: { expanded: boolean; hidden: number; onToggle: () => void }) {
+  const { t } = useT("layout");
+  return (
+    <button
+      type="button"
+      aria-expanded={expanded}
+      className={cn(PANEL_ROW_CLASS, panelRowStateClass(false), "pl-[2.375rem] text-caption")}
+      onClick={onToggle}
+    >
+      {expanded ? t(($) => $.sidebar.show_fewer_pins) : t(($) => $.sidebar.show_more_pins, { count: hidden })}
+    </button>
+  );
+}
+
+/** A quiet line in place of a tab's rows: empty, or failed with another try. */
+function SectionNote({ children, retry }: { children: ReactNode; retry?: { label: string; busy: boolean; run: () => void } }) {
+  return (
+    <div role={retry ? "alert" : undefined} className={cn(PANEL_ROW_CLASS, "pl-[2.375rem] text-caption text-faint-foreground")}>
+      <span className="min-w-0 flex-1 truncate">{children}</span>
+      {retry && (
+        <button
+          type="button"
+          disabled={retry.busy}
+          className="shrink-0 rounded-md px-1 font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50"
+          onClick={retry.run}
+        >
+          {retry.label}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** The Snoozed tab: each snoozed issue and when it comes back, soonest first. */
+function SnoozedSectionList({
+  wsId,
+  list,
+  limit,
+  openKey,
+}: {
+  wsId: string;
+  list: ReturnType<typeof useSnoozedInboxRows>;
+  limit: number;
+  openKey: string | null;
+}) {
+  const { t } = useT("inbox");
+  const { unsnooze } = useInboxSnooze();
+  const { shown, more, expanded, toggle } = useSectionLimit(list.rows, limit);
+  if (list.rows.length === 0) {
+    if (list.load === "failed") {
+      return (
+        <SectionNote retry={{ label: t(($) => $.list.retry), busy: list.retrying, run: list.retry }}>
+          {t(($) => $.errors.load_failed)}
+        </SectionNote>
+      );
+    }
+    return list.load === "loaded" ? <SectionNote>{t(($) => $.snooze.view_empty)}</SectionNote> : null;
+  }
+  return (
+    <>
+      <PanelList data-sidebar-list={INBOX_LIST}>
+        {shown.map((entry) => (
+          <SnoozedSectionRow
+            key={entry.issue_id}
+            wsId={wsId}
+            entry={entry}
+            active={entry.issue_id === openKey}
+            onUnsnooze={() => unsnooze(entry.item_id, entry.issue_id)}
+          />
+        ))}
+      </PanelList>
+      {more && <SectionMoreButton expanded={expanded} hidden={list.rows.length - limit} onToggle={toggle} />}
+    </>
+  );
+}
+
+function SnoozedSectionRow({
+  wsId,
+  entry,
+  active,
+  onUnsnooze,
+}: {
+  wsId: string;
+  entry: SnoozedInboxIssue;
+  active: boolean;
+  onUnsnooze: () => void;
+}) {
+  const { t } = useT("inbox");
+  const locale = useLocale();
+  const p = useWorkspacePaths();
+  const { data: issue } = useQuery(issueDetailOptions(wsId, entry.issue_id));
+  const { categoryOf, colorOf, iconOf } = useIssueStatuses(wsId);
+  const backAt = formatSnoozeTime(new Date(entry.snoozed_until), new Date(), locale);
+  const title = issue?.title ?? entry.issue_identifier ?? "";
+  const unsnoozeLabel = t(($) => $.snooze.unsnooze);
+  return (
+    <li data-inbox-snoozed-row className="group/inbox relative">
+      <div {...panelRowAnchor(active)} className={cn(PANEL_ROW_CLASS, panelRowStateClass(active), "relative")}>
+        <span aria-hidden className="flex size-3.5 shrink-0">
+          {issue && (
+            <StatusIcon
+              status={issue.status}
+              category={categoryOf(issue.status)}
+              color={colorOf(issue.status)}
+              icon={iconOf(issue.status)}
+              className="size-3.5"
+            />
+          )}
+        </span>
+        <AppLink
+          href={inboxTabHref(p, "snoozed", entry.issue_id)}
+          newTabTitle={title}
+          data-issue-id={entry.issue_id}
+          draggable={false}
+          aria-current={active ? "page" : undefined}
+          className={cn(ISSUE_ROW_LINK_CLASS, "gap-2.5 group-focus-within/inbox:pr-5 group-hover/inbox:pr-5")}
+        >
+          <span className="min-w-0 flex-1 truncate">{title}</span>
+          <span
+            title={t(($) => $.snooze.back_at, { time: backAt })}
+            className="shrink-0 text-caption tabular-nums text-faint-foreground group-hover/inbox:invisible group-focus-within/inbox:invisible"
+          >
+            {backAt}
+          </span>
+        </AppLink>
+      </div>
+      <TooltipHint label={unsnoozeLabel}>
+        <button
+          type="button"
+          aria-label={unsnoozeLabel}
+          className={cn(rowButtonClass(true), "right-1.5")}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onUnsnooze();
+          }}
+        >
+          <AlarmClock className="size-3" />
+        </button>
+      </TooltipHint>
+    </li>
+  );
+}
+
+/** The Archived tab, a page at a time under the Inbox filters. */
+function ArchivedSectionList({
+  archived,
+  limit,
+  openKey,
+}: {
+  archived: ReturnType<typeof useArchivedInboxRows>;
+  limit: number;
+  openKey: string | null;
+}) {
+  const { t } = useT("inbox");
+  const p = useWorkspacePaths();
+  const { replace } = useNavigation();
+  const { query, items } = archived;
+  const restoreInbox = useRestoreInbox();
+  const { shown, more, expanded, toggle } = useSectionLimit(items, limit);
+  // Restoring the open row moves the page on to the next archived one, as
+  // its own bar's restore does.
+  const restore = (item: InboxItem) => {
+    const key = inboxRowKey(item);
+    if (key === openKey) {
+      const next = nextInboxRow(items, key);
+      replace(inboxTabHref(p, "archived", next ? inboxRowKey(next) : null));
+    }
+    void restoreInbox(item.id);
+  };
+  if (items.length === 0) {
+    if (query.isError) {
+      return (
+        <SectionNote retry={{ label: t(($) => $.list.retry), busy: query.isFetching, run: () => void query.refetch() }}>
+          {t(($) => $.errors.load_failed)}
+        </SectionNote>
+      );
+    }
+    return query.isSuccess ? <SectionNote>{t(($) => $.list.archived_empty)}</SectionNote> : null;
+  }
+  return (
+    <>
+      <PanelList data-sidebar-list={INBOX_LIST}>
+        {shown.map((item) => (
+          <ArchivedSectionRow
+            key={item.id}
+            item={item}
+            active={inboxRowKey(item) === openKey}
+            onRestore={() => restore(item)}
+          />
+        ))}
+      </PanelList>
+      {more && <SectionMoreButton expanded={expanded} hidden={items.length - limit} onToggle={toggle} />}
+      {expanded && query.hasNextPage && (
+        <button
+          type="button"
+          disabled={query.isFetchingNextPage}
+          className={cn(PANEL_ROW_CLASS, panelRowStateClass(false), "pl-[2.375rem] text-caption disabled:opacity-50")}
+          onClick={() => void query.fetchNextPage()}
+        >
+          {query.isFetchingNextPage ? t(($) => $.list.loading_more) : t(($) => $.list.load_more)}
+        </button>
+      )}
+    </>
+  );
+}
+
+function ArchivedSectionRow({
+  item,
+  active,
+  onRestore,
+}: {
+  item: InboxItem;
+  active: boolean;
+  onRestore: () => void;
+}) {
+  const { t } = useT("inbox");
+  const p = useWorkspacePaths();
+  const typeLabels = useTypeLabels();
+  const timeAgo = useTimeAgo();
+  const { categoryOf, colorOf, iconOf } = useIssueStatuses(item.workspace_id);
+  const Icon = INBOX_TYPE_ICONS[inboxTypeGroup(item.type)];
+  const title = inboxRowTitle(item, typeLabels);
+  const status = item.issue_status;
+  const restoreLabel = t(($) => $.detail.restore);
+  const requestLanding = useInboxSelectionStore((s) => s.requestLanding);
+  return (
+    <li data-inbox-archived-row className="group/inbox relative">
+      <div {...panelRowAnchor(active)} className={cn(PANEL_ROW_CLASS, panelRowStateClass(active), "relative")}>
+        {status ? (
+          <span aria-hidden className="flex shrink-0">
+            <StatusIcon
+              status={status}
+              category={categoryOf(status)}
+              color={colorOf(status)}
+              icon={iconOf(status)}
+              className="size-3.5"
+            />
+          </span>
+        ) : (
+          <span title={typeLabels[item.type]} className="flex shrink-0 items-center">
+            <Icon aria-hidden className="size-4" />
+          </span>
+        )}
+        <AppLink
+          href={inboxRowHref(p, item, "archived")}
+          newTabTitle={title}
+          data-issue-id={item.issue_id ?? undefined}
+          draggable={false}
+          onNavigateInPlace={() => {
+            if (item.issue_id) requestLanding(item.issue_id);
+          }}
+          aria-current={active ? "page" : undefined}
+          className={cn(ISSUE_ROW_LINK_CLASS, "gap-2.5 group-focus-within/inbox:pr-5 group-hover/inbox:pr-5")}
+        >
+          <span className="min-w-0 flex-1 truncate text-muted-foreground">{title}</span>
+          <span className="shrink-0 text-caption tabular-nums text-faint-foreground group-hover/inbox:invisible group-focus-within/inbox:invisible">
+            {timeAgo(new Date(inboxRowTime(item)).toISOString())}
+          </span>
+        </AppLink>
+      </div>
+      <TooltipHint label={restoreLabel}>
+        <button
+          type="button"
+          aria-label={restoreLabel}
+          className={cn(rowButtonClass(true), "right-1.5")}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onRestore();
+          }}
+        >
+          <ArchiveRestore className="size-3" />
+        </button>
+      </TooltipHint>
     </li>
   );
 }
@@ -721,31 +1289,6 @@ function InboxReturnedLine({ updates }: { updates: number }) {
 
 function inboxRowTitle(item: InboxItem, typeLabels: ReturnType<typeof useTypeLabels>) {
   return isAutopilotQuotaNotice(item.type) ? typeLabels[item.type] : getInboxDisplayTitle(item);
-}
-
-function InboxActorAvatar({ item, size }: { item: InboxItem; size: "xs" | "sm" }) {
-  return (
-    <ActorAvatar
-      actorType={item.actor_type ?? item.recipient_type}
-      actorId={item.actor_id ?? item.recipient_id}
-      size={size}
-    />
-  );
-}
-
-/** Who did what: the actor's name, then what the notification says happened. */
-function InboxActorLine({ item, detail }: { item: InboxItem; detail?: ReactNode }) {
-  const { getActorName } = useActorName();
-  const name =
-    item.actor_type && item.actor_type !== "system" && item.actor_id
-      ? getActorName(item.actor_type, item.actor_id)
-      : null;
-  return (
-    <>
-      {name && <span className="font-medium">{name} </span>}
-      {detail ?? <InboxDetailLabel item={item} />}
-    </>
-  );
 }
 
 /** The whole notification, shown while a row is hovered. */
@@ -812,7 +1355,12 @@ function InboxRowCard({
         </div>
       )}
       <div className="-mx-1 mt-1 flex items-center gap-1 border-t border-border pt-2">
-        <AppLink href={href} onNavigateInPlace={onOpen} className={buttonVariants({ size: "sm", variant: "secondary" })}>
+        <AppLink
+          href={href}
+          data-issue-id={item.issue_id ?? undefined}
+          onNavigateInPlace={onOpen}
+          className={buttonVariants({ size: "sm", variant: "secondary" })}
+        >
           {t(($) => $.panels.work.inbox_open)}
         </AppLink>
         {unread && (

@@ -99,6 +99,8 @@ Multica 不提供跳過憑證校驗的選項，因為連線請求會攜帶你的
 </Tab>
 </Tabs>
 
+GitLab 管理員也可以設定實例級 [System Hook](https://docs.gitlab.com/administration/system_hooks/)：使用同一 Webhook 網址與密鑰，啟用 **Merge request events**。Multica 只處理目前工作區**設定 → 程式碼 → 程式碼倉庫**中列出、屬於已連接 GitLab 實例且可被連接權杖讀取的倉庫；其他系統事件會被忽略。倉庫可使用 HTTPS 或 SSH 複製網址。這樣不必逐專案註冊，但需要 GitLab 管理員設定。System Hook 不傳送 Pipeline 事件；如需 CI 狀態，仍需保留專案或群組的 Pipeline Webhook，兩者可以並存。回應 `202` 僅代表已接收請求，不保證任務已關聯或變更狀態；接入前已合併的 MR 不會自動補處理。
+
 Multica 會用儲存的金鑰校驗每次投遞，因此沒有匹配金鑰的 Webhook 會被拒絕。
 
 ## 映象的內容

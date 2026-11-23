@@ -3,7 +3,8 @@ import { createTestApi, loginAsDefault } from "./helpers";
 
 async function readingPosition(page: Page, commentId?: string) {
   return page.evaluate((id) => {
-    const container = document.querySelector<HTMLElement>('[data-tab-scroll-root^="main:"]')!;
+    const container = document.querySelector<HTMLElement>('[data-tab-scroll-root^="main:"]');
+    if (!container) return null;
     const c = container.getBoundingClientRect();
     const comment = id
       ? container.querySelector<HTMLElement>(`#comment-${id}`)
@@ -47,13 +48,32 @@ test("Inbox restores the current reply after leaving a virtualized long thread",
     await notification.click();
     const target = page.locator(`#comment-${targetId}`);
     await expect(target).toBeVisible();
-    await expect.poll(() => readingPosition(page, targetId).then((p) => p?.mounted)).toBe(true);
-    await expect.poll(() => readingPosition(page, targetId).then((p) => p?.visible)).toBe(true);
-    const before = (await readingPosition(page, targetId))!;
+    const waitForSettledPosition = async (commentId?: string) => {
+      let last: { id: string; offset: number } | null = null;
+      let stable = 0;
+      await expect.poll(async () => {
+        const current = await readingPosition(page, commentId);
+        if (!current?.mounted || !current.visible) {
+          last = null;
+          stable = 0;
+          return 0;
+        }
+        if (last && last.id === current.id && Math.abs(current.offset - last.offset) < 2) {
+          stable += 1;
+        } else {
+          stable = 1;
+        }
+        last = { id: current.id, offset: current.offset };
+        return stable;
+      }, { timeout: 10_000, intervals: [100] }).toBeGreaterThanOrEqual(3);
+      return last!;
+    };
+    const before = await waitForSettledPosition(targetId);
 
     const leaveAndReturn = async () => {
       await page.locator(`a[href="/${slug}/issues"]`).first().click();
-      await expect(page).toHaveURL(new RegExp(`/${slug}/issues`));
+      await expect(page).toHaveURL((url) => url.pathname === `/${slug}/issues`);
+      await expect(page.getByRole("heading", { name: "All issues" })).toBeVisible();
       await page.goBack();
     };
     const expectRestored = async (position: { id: string; offset: number }) => {
@@ -75,12 +95,13 @@ test("Inbox restores the current reply after leaving a virtualized long thread",
     await container.hover();
     await page.mouse.wheel(0, -1800);
     await expect.poll(async () => (await readingPosition(page))?.id).not.toBe(targetId);
-    const reading = (await readingPosition(page))!;
+    const reading = await waitForSettledPosition();
     expect(reading).not.toBeNull();
     await leaveAndReturn();
     await expectRestored(reading);
     await page.locator(`a[href="/${slug}/issues"]`).first().click();
-    await expect(page).toHaveURL(new RegExp(`/${slug}/issues`));
+    await expect(page).toHaveURL((url) => url.pathname === `/${slug}/issues`);
+    await expect(page.getByRole("heading", { name: "All issues" })).toBeVisible();
     await page.setViewportSize({ width: 1200, height: 900 });
     await page.goBack();
     await expectRestored(reading);
@@ -109,14 +130,13 @@ async function scrollUpShifts(page: Page, steps: number, delta = 150) {
       // move its top, so only layout changes above it show up as a shift.
       const ref = [...container.querySelectorAll<HTMLElement>('[id^="comment-"]')]
         .find((el) => { const r = el.getBoundingClientRect(); return r.top > c.top + 80 && r.top < c.bottom - 80; });
-      if (!ref) return null;
-      const before = ref.getBoundingClientRect().top;
+      const before = ref?.getBoundingClientRect().top;
       const scrollBefore = container.scrollTop;
       container.scrollTop = scrollBefore - d;
       const applied = scrollBefore - container.scrollTop;
       for (let f = 0; f < 10; f++) await new Promise((r) => requestAnimationFrame(r));
       await new Promise((r) => setTimeout(r, 60));
-      return ref.isConnected ? ref.getBoundingClientRect().top - before - applied : null;
+      return ref?.isConnected && before !== undefined ? ref.getBoundingClientRect().top - before - applied : null;
     }, delta);
     if (shift !== null) shifts.push(Math.round(shift));
   }
@@ -157,14 +177,14 @@ test("scrolling up a virtualized long thread keeps the reading position steady",
     await page.goto(`/${slug}/inbox`);
     await page.getByText(title, { exact: true }).first().click();
     await expect(page.locator(`#comment-${targetId}`)).toBeVisible();
-    await expect.poll(() => readingPosition(page, targetId).then((p) => p?.mounted && p.visible)).toBe(true);
+    await expect.poll(() => readingPosition(page, targetId).then((p) => p?.mounted && p.visible), { timeout: 10_000 }).toBe(true);
     await page.waitForTimeout(1000);
     const fromInbox = await scrollUpShifts(page, 40);
     expect(fromInbox.length).toBeGreaterThan(30);
     expect.soft(fromInbox.filter((s) => Math.abs(s) > 2), `Inbox landing shifts: ${fromInbox}`).toEqual([]);
 
     // 2. Open the issue normally, go to the end of the discussion, read upward.
-    await page.goto(`/${slug}/issues/${mixed.issue.id}`);
+    await page.goto(`/${slug}/issues/${mixed.issue.identifier}`);
     await expect(page.getByText("Long discussion root")).toBeVisible();
     const toEnd = () => page.evaluate(() => {
       const c = document.querySelector<HTMLElement>('[data-tab-scroll-root^="main:"]')!;
@@ -225,6 +245,68 @@ test("Inbox landing survives a comment that arrives while it is still aligning",
       await page.getByText("Another notification", { exact: true }).first().click();
       await expect(page.getByText("Other comment")).toBeVisible();
     }
+  } finally {
+    await api.cleanup();
+  }
+});
+
+test("a notification under a long description lands on its reply, and again from another page", async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.setViewportSize({ width: 1100, height: 620 });
+  const api = await createTestApi();
+  try {
+    const slug = await loginAsDefault(page);
+    const title = "Landing below a long description";
+    // MUL-9492: the description alone is several viewports tall, so the
+    // timeline starts far below the fold and Virtuoso has measured nothing yet.
+    const description = Array.from({ length: 7 }, (_, i) => [
+      `## Section ${i}`,
+      `Opening paragraph ${i}, see [MUL-${9000 + i}](mention://issue/01a1e252-c081-7b00-b653-${String(100000000000 + i)}). ${"The description runs long. ".repeat(4)}`,
+      ...Array.from({ length: 6 }, (_, j) => `- Point ${i}.${j}: ${"a clause that wraps. ".repeat(3)}`),
+      ["| Term | Value | Notes |", "|---|---|---|", ...Array.from({ length: 4 }, (_, j) => `| Row ${j} | ${j * 25}% | ${"A table cell that wraps. ".repeat(3)} |`)].join("\n"),
+    ].join("\n\n")).join("\n\n");
+    const issue = await api.createIssue(title, { description });
+    const first = await api.createComment(issue.id, "First thread root");
+    await api.createComment(issue.id, `Short reply. ${"Some context. ".repeat(10)}`, first.id);
+    const root = await api.createComment(issue.id, "Long discussion root");
+    let targetId = "";
+    for (let i = 0; i < 24; i++) {
+      const body = Array.from({ length: 3 + (i % 5) }, (_, j) => `Paragraph ${j}. ${"A long agent reply in a long thread. ".repeat(8)}`).join("\n\n");
+      targetId = (await api.createComment(issue.id, `Reply ${i}\n\n${body}`, root.id)).id;
+    }
+    const other = await api.createIssue("Another notification", { description: "Short." });
+    await api.seedCommentNotification(other.id, (await api.createComment(other.id, "Other comment")).id, "Another notification");
+    await api.seedCommentNotification(issue.id, targetId, title);
+
+    const landed = () => page.evaluate((id) => {
+      const container = [...document.querySelectorAll<HTMLElement>('[data-tab-scroll-root^="main:"]')].find((el) => el.clientHeight > 0);
+      const target = container?.querySelector<HTMLElement>(`[id="comment-${id}"]`);
+      if (!container || !target || target.dataset.virtualThreadMounted === "false") return null;
+      return Math.round(target.getBoundingClientRect().top - container.getBoundingClientRect().top);
+    }, targetId);
+    const expectLanded = async (message: string) => {
+      let stable = 0;
+      await expect.poll(async () => {
+        const offset = await landed();
+        stable = offset !== null && offset >= 0 && offset < 120 ? stable + 1 : 0;
+        return stable;
+      }, { message, timeout: 10_000, intervals: [100] }).toBeGreaterThanOrEqual(5);
+    };
+
+    await page.goto(`/${slug}/inbox`);
+    const notification = page.getByText(title, { exact: true }).first();
+    await notification.click();
+    await expectLanded("first click");
+
+    // Read elsewhere, leave, and click the same notification from another issue.
+    await page.evaluate(() => {
+      const container = [...document.querySelectorAll<HTMLElement>('[data-tab-scroll-root^="main:"]')].find((el) => el.clientHeight > 0)!;
+      container.scrollTop = 1500;
+    });
+    await page.getByText("Another notification", { exact: true }).first().click();
+    await expect(page.getByText("Other comment")).toBeVisible();
+    await notification.click();
+    await expectLanded("click from another issue");
   } finally {
     await api.cleanup();
   }

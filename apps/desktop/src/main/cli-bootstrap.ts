@@ -1,4 +1,4 @@
-import { app } from "electron";
+import { app, net } from "electron";
 import { execFile } from "child_process";
 import { createHash } from "crypto";
 import { createReadStream, createWriteStream, existsSync } from "fs";
@@ -32,12 +32,12 @@ function run(cmd: string, args: string[], cwd?: string): Promise<void> {
 }
 
 async function downloadToFile(url: string, dest: string): Promise<void> {
-  const res = await fetch(url, { redirect: "follow" });
+  const res = await net.fetch(url, { redirect: "follow" });
   if (!res.ok || !res.body) {
     throw new Error(`download failed: ${res.status} ${res.statusText}`);
   }
   await mkdir(dirname(dest), { recursive: true });
-  // Node's fetch returns a web ReadableStream; adapt to a Node stream for pipeline.
+  // Electron's net.fetch returns a web ReadableStream; adapt to a Node stream for pipeline.
   const nodeStream = Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]);
   await pipeline(nodeStream, createWriteStream(dest));
 }
@@ -46,7 +46,7 @@ async function downloadToFile(url: string, dest: string): Promise<void> {
 // filename → sha256 lookup. Format is `<hex>  <filename>` per line.
 async function fetchChecksums(): Promise<Map<string, string>> {
   const url = `${GITHUB_LATEST_BASE}/checksums.txt`;
-  const res = await fetch(url, { redirect: "follow" });
+  const res = await net.fetch(url, { redirect: "follow" });
   if (!res.ok) {
     throw new Error(
       `checksums.txt fetch failed: ${res.status} ${res.statusText}`,

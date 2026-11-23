@@ -7,7 +7,6 @@ import {
   useState,
   type ComponentProps,
   type ReactNode,
-  type Ref,
 } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { ChevronRight, PanelRight, type IconComponent } from "@multica/ui/icons";
@@ -24,6 +23,7 @@ import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { cn } from "@multica/ui/lib/utils";
 import { ActionShortcutKeycaps } from "../common/shortcut-keycaps";
 import { useT } from "../i18n";
+import { useRestoredScrollRef } from "../platform/scroll-restoration";
 import {
   AnimatedRightSidebar,
   getAnimatedRightSidebarInitialOpen,
@@ -37,8 +37,10 @@ import { BreadcrumbHeader, type BreadcrumbSegment } from "./breadcrumb-header";
 export const OBJECT_PAGE_BODY =
   "mx-auto w-full max-w-[var(--object-page-max-width,760px)] px-[var(--space-lg,1.5rem)] py-[var(--space-xl,2rem)]";
 
+const OBJECT_PAGE_SCROLL_KEY = "object";
+
 /** What an object page shows, as themes see it on `data-type`. */
-export type ObjectPageType = "project" | "agent" | "squad" | "runtime" | "member" | "autopilot" | "skill";
+export type ObjectPageType = "project" | "agent" | "squad" | "runtime" | "member" | "autopilot" | "skill" | "app";
 
 interface ObjectPageProps {
   type: ObjectPageType;
@@ -61,7 +63,7 @@ interface ObjectPageProps {
    */
   children: ReactNode;
   /** The body scroll owner, for sections that virtualize their rows. */
-  scrollRef?: Ref<HTMLDivElement>;
+  scrollRef?: (el: HTMLDivElement | null) => void;
 }
 
 /**
@@ -109,6 +111,17 @@ export function ObjectPage({ type, segments, leaf, actions, panel, layoutId, chi
 
   useRightSidebarShortcut(shortcutTargetRef, toggle);
 
+  // The body is the page's one vertical scroller: the platform restores its
+  // offset when the page mounts again (e.g. switching back to its tab).
+  const restoreScrollRef = useRestoredScrollRef(OBJECT_PAGE_SCROLL_KEY);
+  const attachBody = useCallback(
+    (el: HTMLDivElement | null) => {
+      scrollRef?.(el);
+      restoreScrollRef(el);
+    },
+    [scrollRef, restoreScrollRef],
+  );
+
   const header = (
     <BreadcrumbHeader
       segments={segments}
@@ -135,7 +148,15 @@ export function ObjectPage({ type, segments, leaf, actions, panel, layoutId, chi
     />
   );
 
-  const body = <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto">{children}</div>;
+  const body = (
+    <div
+      ref={attachBody}
+      data-tab-scroll-root={OBJECT_PAGE_SCROLL_KEY}
+      className="flex min-h-0 flex-1 flex-col overflow-y-auto"
+    >
+      {children}
+    </div>
+  );
 
   if (!panel) {
     return (
@@ -246,23 +267,54 @@ export function ObjectSection({
   action,
   children,
   className,
+  collapsible = false,
+  defaultOpen = true,
 }: {
   title: ReactNode;
   count?: ReactNode;
   action?: ReactNode;
   children: ReactNode;
   className?: string;
+  /** The title folds the section away, like a panel section; the action hides with it. */
+  collapsible?: boolean;
+  defaultOpen?: boolean;
 }) {
+  const [stateOpen, setOpen] = useState(defaultOpen);
+  const open = !collapsible || stateOpen;
   return (
     <section className={cn("space-y-2", className)}>
       <div className="flex h-7 items-center gap-2">
-        <h2 className="text-body font-medium">{title}</h2>
+        <h2 className="text-body font-medium">
+          {collapsible ? (
+            <button
+              type="button"
+              aria-expanded={open}
+              className={cn(
+                "-ml-1.5 flex items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors hover:bg-accent/70",
+                !open && "text-muted-foreground hover:text-foreground",
+              )}
+              onClick={() => setOpen(!open)}
+            >
+              {title}
+              <ChevronRight
+                aria-hidden="true"
+                className={cn(
+                  "!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform motion-reduce:transition-none",
+                  open && "rotate-90",
+                )}
+              />
+            </button>
+          ) : (
+            title
+          )}
+        </h2>
         {count !== undefined && count !== null ? (
           <span className="text-caption tabular-nums text-muted-foreground">{count}</span>
         ) : null}
-        {action ? <div className="ml-auto flex items-center gap-1">{action}</div> : null}
+        {open && action ? <div className="ml-auto flex items-center gap-1">{action}</div> : null}
       </div>
-      {children}
+      {/* Folded content stays mounted, so an editor's unsaved draft survives. */}
+      {collapsible ? <div hidden={!open}>{children}</div> : children}
     </section>
   );
 }
@@ -336,33 +388,39 @@ export function ObjectSectionEmpty({
 /** A titled group in the properties panel, collapsible like the issue page's. */
 export function ObjectPanelSection({
   title,
+  action,
   children,
   defaultOpen = true,
 }: {
   title: ReactNode;
+  /** A quiet action at the right of the title (View all), shown while open. */
+  action?: ReactNode;
   children: ReactNode;
   defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div>
-      <button
-        type="button"
-        aria-expanded={open}
-        className={cn(
-          "mb-2 flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors hover:bg-accent/70",
-          !open && "text-muted-foreground hover:text-foreground",
-        )}
-        onClick={() => setOpen(!open)}
-      >
-        {title}
-        <ChevronRight
+      <div className="mb-2 flex items-center gap-1">
+        <button
+          type="button"
+          aria-expanded={open}
           className={cn(
-            "!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform",
-            open && "rotate-90",
+            "flex min-w-0 flex-1 items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors hover:bg-accent/70",
+            !open && "text-muted-foreground hover:text-foreground",
           )}
-        />
-      </button>
+          onClick={() => setOpen(!open)}
+        >
+          {title}
+          <ChevronRight
+            className={cn(
+              "!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform",
+              open && "rotate-90",
+            )}
+          />
+        </button>
+        {open && action ? <div className="flex shrink-0 items-center">{action}</div> : null}
+      </div>
       {open ? <div className="space-y-0.5 pl-2">{children}</div> : null}
     </div>
   );

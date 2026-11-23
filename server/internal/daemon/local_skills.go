@@ -133,6 +133,7 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 	}
 
 	var providerRoot string
+	var claudeConfigDir string
 	var additionalProviderRoots []string
 	// Built-in runtime identities (e.g. "omp") declare their user skills dir
 	// in the descriptor; resolve to providerRoot and fall through to the
@@ -140,10 +141,24 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 	// import all still apply — same as every protocol-family provider.
 	if desc, ok := agent.BuiltinRuntimeByID(provider); ok {
 		providerRoot = filepath.Join(home, desc.UserSkillsDir)
+		// A claude-family fork's CLI still resolves CLAUDE_CONFIG_DIR first.
+		// Relative overrides depend on the task working directory, which the
+		// runtime-level list and import requests do not have.
+		if agent.ProtocolFamilyFor(provider) == "claude" {
+			if configured := os.Getenv("CLAUDE_CONFIG_DIR"); filepath.IsAbs(configured) {
+				providerRoot = filepath.Join(configured, "skills")
+			}
+		}
 	} else {
 		switch provider {
 		case "claude":
-			providerRoot = filepath.Join(home, ".claude", "skills")
+			claudeConfigDir = filepath.Join(home, ".claude")
+			// Relative overrides depend on the task working directory, which
+			// the runtime-level list and import requests do not have.
+			if configured := os.Getenv("CLAUDE_CONFIG_DIR"); filepath.IsAbs(configured) {
+				claudeConfigDir = configured
+			}
+			providerRoot = filepath.Join(claudeConfigDir, "skills")
 		case "codebuddy":
 			// CodeBuddy Code is a Claude Code fork but ships its own native
 			// config directory; it does NOT read ~/.claude/skills unless the

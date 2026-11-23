@@ -143,6 +143,29 @@ func TestReply_CommandOutcomes_PostGuidance(t *testing.T) {
 	}
 }
 
+func TestReply_HelpAdvertisesMentionCommands(t *testing.T) {
+	for _, chatType := range []channel.ChatType{channel.ChatTypeP2P, channel.ChatTypeGroup} {
+		t.Run(string(chatType), func(t *testing.T) {
+			sender := &fakeReplySender{}
+			r := newTestReplier(&fakeBindingMinter{}, sender)
+			msg := testInboundForReply()
+			msg.Source.ChatType = chatType
+			r.Reply(context.Background(), testResolvedInstallation(t), msg, engine.Result{Outcome: engine.OutcomeHelp})
+			if sender.calls != 1 || sender.sent == nil {
+				t.Fatalf("expected one help reply, got %d", sender.calls)
+			}
+			if sender.sent.ChatID != msg.Source.ChatID || sender.sent.ThreadID != msg.Source.ThreadID {
+				t.Fatalf("wrong help reply target: %+v", sender.sent)
+			}
+			for _, command := range []string{"/help", "/new [message]", "/clear [message]", "/issue <title>"} {
+				if !strings.Contains(sender.sent.Text, "`@Multica "+command+"`") {
+					t.Errorf("help must advertise the mention form of %s: %q", command, sender.sent.Text)
+				}
+			}
+		})
+	}
+}
+
 func TestReply_IngestedWithIssue_Confirms(t *testing.T) {
 	sender := &fakeReplySender{}
 	r := newTestReplier(&fakeBindingMinter{}, sender)

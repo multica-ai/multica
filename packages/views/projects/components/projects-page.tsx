@@ -5,7 +5,9 @@ import {
   Archive,
   ArchiveRestore,
   Columns3,
+  Folder,
   FolderKanban,
+  FolderMinus,
   Pin,
   Rows3,
   Trash2,
@@ -84,18 +86,21 @@ import { ProjectsIntro } from "./projects-intro";
 import { useT } from "../../i18n";
 import { DeleteProjectsDialog, ProjectRowActions } from "./project-row-actions";
 import { useArchiveProjects, useRestoreProjects } from "./project-archive";
+import { getProjectFoldersExtension, useProjectFolders } from "../../extensions";
 import { useFormatRelativeDate } from "./labels";
 import { ProjectStatusBadge, ProjectPriorityBadge } from "./project-badge";
 import { ProjectLeadPicker } from "./project-lead-picker";
 import { ProjectBoard, ProjectBoardLoading, type ProjectBoardColumn } from "./project-board";
 import { ProjectDate, projectDueState } from "./project-date";
 import {
+  NO_FOLDER_KEY,
   NO_LEAD_KEY,
   groupProjects,
   projectGroupUpdate,
   type ProjectGroupField,
 } from "./project-groups";
 import { PriorityIcon } from "../../issues/components/priority-icon";
+import { getProjectProgress } from "./project-issue-metrics";
 import { cn } from "@multica/ui/lib/utils";
 
 // Sort order maps for the enum columns (header sort needs a total order).
@@ -114,8 +119,10 @@ const STATUS_ORDER: Record<ProjectStatus, number> = {
   cancelled: 4,
 };
 
-const progressOf = (p: Project) =>
-  p.issue_count > 0 ? p.done_count / p.issue_count : -1;
+const progressOf = (p: Project) => {
+  const progress = getProjectProgress(p);
+  return progress.scope > 0 ? progress.completed / progress.scope : -1;
+};
 
 // Composite "type:id" lead value so the string[] filter holds member/agent
 // refs alike.
@@ -124,15 +131,16 @@ function leadFilterValue(p: Project): string | null {
 }
 
 function ProgressRing({ project }: { project: Project }) {
-  if (project.issue_count === 0) return <CollectionEmptyValue />;
-  const pct = Math.round((project.done_count / project.issue_count) * 100);
+  const progress = getProjectProgress(project);
+  if (progress.scope === 0) return <CollectionEmptyValue />;
+  const pct = progress.percent;
   return (
     <span className="flex items-center gap-1.5">
       <span className="relative h-3.5 w-3.5">
         <svg className="h-3.5 w-3.5 -rotate-90" viewBox="0 0 16 16">
           <circle className="text-muted" strokeWidth="2" stroke="currentColor" fill="none" r="6" cx="8" cy="8" />
           <circle
-            className="text-emerald-500"
+            className="text-info"
             strokeWidth="2"
             stroke="currentColor"
             fill="none"
@@ -145,7 +153,7 @@ function ProgressRing({ project }: { project: Project }) {
         </svg>
       </span>
       <span className="tabular-nums">
-        {project.done_count}/{project.issue_count}
+        {progress.completed}/{progress.scope}
       </span>
     </span>
   );
@@ -448,13 +456,19 @@ export function ProjectsPage() {
     return sorted;
   }, [projects, scope, query, filters, sortField, sortDirection]);
 
+  const folders = useProjectFolders(wsId);
+  const hasFolders = getProjectFoldersExtension() !== null;
+  const groupFields: ProjectGroupField[] = hasFolders ? [...GROUP_FIELDS, "folder"] : GROUP_FIELDS;
+  // A folder grouping saved where folders are unavailable shows ungrouped.
+  const shownGroupBy: ProjectGroupBy = groupBy === "folder" && !hasFolders ? "none" : groupBy;
+
   // The board always groups (status unless another field is chosen); the
   // table only when asked to.
   const groupField: ProjectGroupField | null = isTable
-    ? groupBy === "none"
+    ? shownGroupBy === "none"
       ? null
-      : groupBy
-    : boardGroupBy(groupBy);
+      : shownGroupBy
+    : boardGroupBy(shownGroupBy);
 
   const leadKeyName = useCallback(
     (key: string) => {
@@ -485,8 +499,9 @@ export function ProjectsPage() {
       );
       return filters.leads.length ? leads : [...leads, NO_LEAD_KEY];
     }
+    if (groupField === "folder") return [...folders.folders.map((folder) => folder.id), NO_FOLDER_KEY];
     return [];
-  }, [groupField, scope, filters, leadOptions, leadKeyName]);
+  }, [groupField, scope, filters, leadOptions, leadKeyName, folders.folders]);
 
   const groupHeading = useCallback(
     (field: ProjectGroupField, key: string): { label: string; icon: React.ReactNode } => {
@@ -508,6 +523,15 @@ export function ProjectsPage() {
           icon: <PriorityIcon priority={priority} />,
         };
       }
+      if (field === "folder") {
+        const folder = folders.folders.find((f) => f.id === key);
+        return folder
+          ? { label: folder.name, icon: <Folder className="size-4 shrink-0 text-muted-foreground" /> }
+          : {
+              label: folders.labels.noFolder,
+              icon: <FolderMinus className="size-4 shrink-0 text-muted-foreground" />,
+            };
+      }
       if (key === NO_LEAD_KEY) {
         return {
           label: t(($) => $.lead.no_lead),
@@ -522,12 +546,12 @@ export function ProjectsPage() {
         icon: <ActorAvatar actorType={type} actorId={id} size="sm" />,
       };
     },
-    [t, leadKeyName],
+    [t, leadKeyName, folders.folders, folders.labels.noFolder],
   );
 
   const buckets = useMemo(
-    () => (groupField ? groupProjects(visible, groupField, groupKeys) : []),
-    [visible, groupField, groupKeys],
+    () => (groupField ? groupProjects(visible, groupField, groupKeys, folders.folderOf) : []),
+    [visible, groupField, groupKeys, folders.folderOf],
   );
 
   const tableGroups = useMemo<CollectionGroup<Project>[] | undefined>(() => {
@@ -561,6 +585,10 @@ export function ProjectsPage() {
 
   const moveToGroup = (project: Project, key: string) => {
     if (!groupField) return;
+    if (groupField === "folder") {
+      if (key === NO_FOLDER_KEY || folders.canFile) folders.moveProject(project.id, key === NO_FOLDER_KEY ? null : key);
+      return;
+    }
     updateProject.mutate({ id: project.id, ...projectGroupUpdate(groupField, key) });
   };
 
@@ -581,6 +609,7 @@ export function ProjectsPage() {
           <CollectionNameCell
             icon={<ProjectIcon project={project} size="sm" />}
             title={project.title}
+            titleTooltip={project.title}
             muted={isProjectArchived(project)}
           />
         ),
@@ -753,6 +782,7 @@ export function ProjectsPage() {
     status: t(($) => $.toolbar.section_status),
     priority: t(($) => $.toolbar.section_priority),
     lead: t(($) => $.toolbar.section_lead),
+    folder: folders.labels.group,
   };
   const noMatches = (
     <CollectionNoMatches
@@ -877,10 +907,10 @@ export function ProjectsPage() {
               showColumns={isTable}
               triggerIcon={isTable ? Rows3 : Columns3}
               grouping={{
-                value: isTable ? groupBy : boardGroupBy(groupBy),
+                value: isTable ? shownGroupBy : boardGroupBy(shownGroupBy),
                 options: [
                   ...(isTable ? [{ value: "none", label: t(($) => $.page.group_none) }] : []),
-                  ...GROUP_FIELDS.map((field) => ({
+                  ...groupFields.map((field) => ({
                     value: field,
                     label: groupFieldLabels[field],
                   })),

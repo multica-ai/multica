@@ -27,6 +27,7 @@ import {
 } from "@multica/core/issues/stores/sidebar-tree-store";
 import { notificationPreferenceOptions } from "@multica/core/notification-preferences/queries";
 import { useUpdateNotificationPreferences } from "@multica/core/notification-preferences/mutations";
+import { notificationPreferenceValue } from "@multica/core/notification-preferences/patch";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { PROJECT_STATUS_CONFIG, PROJECT_STATUS_ORDER } from "@multica/core/projects/config";
 import type { NotificationGroupKey, NotificationPreferences, ProjectStatus } from "@multica/core/types";
@@ -319,41 +320,59 @@ export function ProjectsSectionSettings({ wsId, className }: { wsId: string; cla
   );
 }
 
-/** The sliders button at the end of a section's label row, and its popover. */
+/** Opens a section's settings from another control, such as a menu item. */
+export interface SectionSettingsAnchor {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** The control the popover hangs from and hands focus back to. */
+  anchor: React.RefObject<HTMLElement | null>;
+}
+
+/**
+ * The sliders button at the end of a section's label row, and its popover.
+ * With `opener`, there is no button: the popover opens from that control.
+ */
 function SectionSettingsPopover({
   label,
   className,
   onReset,
+  opener,
   children,
 }: {
   label: string;
   className?: string;
   /** Offered while the section's settings differ from the defaults. */
   onReset?: () => void;
+  opener?: SectionSettingsAnchor;
   children: React.ReactNode;
 }) {
   const { t } = useT("layout");
   return (
-    <Popover>
-      <PopoverTrigger
-        render={
-          <button
-            type="button"
-            aria-label={label}
-            className={cn(
-              TREE_ROW_BUTTON_CLASS,
-              "text-muted-foreground data-popup-open:bg-surface-selected data-popup-open:text-foreground data-popup-open:opacity-100",
-              className,
-            )}
-          />
-        }
-      >
-        <SlidersHorizontal className="size-3.5" />
-      </PopoverTrigger>
+    <Popover {...(opener && { open: opener.open, onOpenChange: opener.onOpenChange })}>
+      {!opener && (
+        <PopoverTrigger
+          render={
+            <button
+              type="button"
+              aria-label={label}
+              className={cn(
+                TREE_ROW_BUTTON_CLASS,
+                "text-muted-foreground data-popup-open:bg-surface-selected data-popup-open:text-foreground data-popup-open:opacity-100",
+                className,
+              )}
+            />
+          }
+        >
+          <SlidersHorizontal className="size-3.5" />
+        </PopoverTrigger>
+      )}
       <PopoverContent
         side="right"
         align="start"
         sideOffset={8}
+        anchor={opener?.anchor}
+        finalFocus={opener?.anchor}
+        aria-label={opener ? label : undefined}
         className="max-h-(--available-height) w-80 gap-0 overflow-y-auto p-3"
       >
         {/* Spacing separates sections — no dividers, as in the Display panel. */}
@@ -401,8 +420,6 @@ function InboxNotificationTypes() {
   const preferences = data?.preferences ?? {};
   const toggleGroup = (key: NotificationGroupKey, enabled: boolean) => {
     const next: NotificationPreferences = { ...preferences, [key]: enabled ? "all" : "muted" };
-    // "all" is the default; the stored object keeps only muted kinds.
-    if (enabled) delete next[key];
     updatePreferences.mutate(next, {
       onError: (err) =>
         toast.error(err instanceof Error && err.message ? err.message : ts(($) => $.notifications.toast_failed)),
@@ -419,7 +436,7 @@ function InboxNotificationTypes() {
         <SwitchField
           key={key}
           label={ts(($) => $.notifications.groups[key].label)}
-          checked={preferences[key] !== "muted"}
+          checked={notificationPreferenceValue(preferences, key) !== "muted"}
           onChange={(enabled) => toggleGroup(key, enabled)}
         />
       ))}
@@ -433,8 +450,12 @@ function InboxNotificationTypes() {
   );
 }
 
-/** The Inbox section's display, and which notifications reach the inbox. */
-export function InboxSectionSettings({ className }: { className?: string }) {
+/**
+ * The Inbox section's display, and which notifications reach the inbox. The
+ * section opens it from its actions menu, to keep the header's width for the
+ * tabs.
+ */
+export function InboxSectionSettings({ className, opener }: { className?: string; opener?: SectionSettingsAnchor }) {
   const { t } = useT("layout");
   const settings = useSidebarTreeStore((s) => s.inboxSettings);
   const update = useSidebarTreeStore((s) => s.setInboxSettings);
@@ -443,6 +464,7 @@ export function InboxSectionSettings({ className }: { className?: string }) {
     <SectionSettingsPopover
       label={t(($) => $.panels.work.inbox_settings)}
       className={className}
+      opener={opener}
       onReset={sameSettings(settings, DEFAULT_SIDEBAR_INBOX_SETTINGS) ? undefined : () => update(DEFAULT_SIDEBAR_INBOX_SETTINGS)}
     >
       <section className="space-y-3">

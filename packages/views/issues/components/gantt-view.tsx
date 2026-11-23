@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import type { GanttZoom } from "@multica/core/issues/stores/view-store";
 import { projectListOptions } from "@multica/core/projects/queries";
@@ -32,6 +32,7 @@ import { PriorityIcon } from "./priority-icon";
 import { IssueActionsContextMenu } from "../actions";
 import { sortIssues } from "../utils/sort";
 import { useLocale, useT } from "../../i18n";
+import { useRestoredScrollEntry, useRestoredScrollRef } from "../../platform";
 
 // Date utilities — everything is UTC-day-aligned so a `due_date` ISO string
 // produced anywhere maps to exactly one column on the axis.
@@ -323,7 +324,7 @@ function ScheduledRow({
   });
   const project = issue.project_id ? projects.find((pr) => pr.id === issue.project_id) : undefined;
   const peeked = useIsIssuePeeked(issue.id);
-  const peekLinkProps = useIssuePeekLinkProps(issue.id);
+  const peekLinkProps = useIssuePeekLinkProps(issue);
 
   const start = parseDay(issue.start_date);
   const due = parseDay(issue.due_date);
@@ -368,7 +369,7 @@ function ScheduledRow({
         {/* Sticky label cell — it also carries the peeked mark, since its
             opaque background covers the row's own. */}
         <AppLink
-          href={p.issueDetail(issue.id)}
+          href={p.issueDetail(issueRouteRef(issue))}
           newTabTitle={issue.identifier}
           className={cn(
             "sticky left-0 z-[1] flex shrink-0 items-center gap-2 border-r bg-background px-3 text-body min-w-0",
@@ -410,7 +411,7 @@ function ScheduledRow({
               <TooltipTrigger
                 render={
                   <AppLink
-                    href={p.issueDetail(issue.id)}
+                    href={p.issueDetail(issueRouteRef(issue))}
                     newTabTitle={issue.identifier}
                     {...peekLinkProps}
                     className={cn(
@@ -453,6 +454,8 @@ function ScheduledRow({
 }
 
 // GanttView — public component
+
+const GANTT_SCROLL_KEY = "gantt";
 
 export function GanttView({ issues }: { issues: Issue[] }) {
   const { t } = useT("issues");
@@ -498,9 +501,25 @@ export function GanttView({ issues }: { issues: Issue[] }) {
   const todayOffsetDays = daysBetween(range.start, today);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  // Pull-based scroll restoration (MUL-4741) for the two-axis scroller. A
+  // restored horizontal offset replaces the jump to today on mount.
+  const restoreScrollRef = useRestoredScrollRef(GANTT_SCROLL_KEY);
+  const restoredLeft = useRestoredScrollEntry(GANTT_SCROLL_KEY)?.left ?? 0;
+  const keepRestoredLeftRef = useRef(restoredLeft > 0);
+  const attachScroller = useCallback(
+    (el: HTMLDivElement | null) => {
+      scrollRef.current = el;
+      restoreScrollRef(el);
+    },
+    [restoreScrollRef],
+  );
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+    if (keepRestoredLeftRef.current) {
+      keepRestoredLeftRef.current = false;
+      return;
+    }
     const target = Math.max(0, LEFT_COL_WIDTH + todayOffsetDays * dayPx - 240);
     el.scrollLeft = target;
   }, [todayOffsetDays, dayPx]);
@@ -552,7 +571,11 @@ export function GanttView({ issues }: { issues: Issue[] }) {
       </div>
 
       {/* Body — single scroll container drives both vertical + horizontal */}
-      <div ref={scrollRef} className="flex-1 min-h-0 overflow-auto">
+      <div
+        ref={attachScroller}
+        data-tab-scroll-root={GANTT_SCROLL_KEY}
+        className="flex-1 min-h-0 overflow-auto"
+      >
         <div style={{ minWidth: LEFT_COL_WIDTH + timelineWidth }}>
           {/* Sticky header row */}
           <div className="sticky top-0 z-20 flex">

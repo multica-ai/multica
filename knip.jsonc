@@ -92,6 +92,9 @@
       "entry": ["test/timing-reporter.ts"],
       "project": ["**/*.{ts,tsx}"]
     },
+    "packages/ee": {
+      "project": ["**/*.{ts,tsx}"]
+    },
     "packages/core": {
       "entry": ["eslint.config.mjs"],
       "project": ["**/*.{ts,tsx}"]

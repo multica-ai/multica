@@ -24,6 +24,7 @@ import {
 import { SearchCommand } from "@multica/views/search";
 import { FloatingChat } from "@multica/views/chat";
 import { StarPrompt } from "@multica/views/star-prompt";
+import { WorkspaceTrialNotices } from "@multica/views/billing";
 import { WhatsNewDeck } from "@multica/views/whats-new";
 import { WorkspaceSlugProvider, useCurrentWorkspace } from "@multica/core/paths";
 import { workspaceListOptions } from "@multica/core/workspace";
@@ -286,6 +287,7 @@ export function DesktopShell() {
                         click just froze until the destination committed
                         (MUL-6404). */}
                     <NavigationProgress />
+                    {slug && <WorkspaceTrialNotices />}
                     <TabContent />
                     {slug && <FloatingChat />}
                     {slug && <StarPrompt />}

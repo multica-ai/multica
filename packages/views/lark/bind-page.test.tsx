@@ -63,7 +63,7 @@ describe("LarkBindPage", () => {
     mockAuthState.isLoading = true;
     mockAuthState.user = null;
     renderPage("tok123");
-    expect(screen.getByText(/redeeming binding token/i)).toBeInTheDocument();
+    expect(screen.getByText(/linking your account/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /sign in/i })).toBeNull();
   });
 
@@ -98,7 +98,7 @@ describe("LarkBindPage", () => {
     });
     renderPage("tok123");
     await waitFor(() => {
-      expect(screen.getByText(/you're bound/i)).toBeInTheDocument();
+      expect(screen.getByText(/account linked/i)).toBeInTheDocument();
     });
   });
 

@@ -87,9 +87,9 @@ import {
 import { useIssueCreateUploads } from "./use-issue-create-uploads";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useT } from "../i18n";
+import { StorageLimitNotice, storageLimitRefusal, type StorageLimitRefusal } from "../billing/storage-limit-notice";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";
 import { SourceContextPreviewCard, useSourceContextFailureMessage } from "./source-context-preview";
-import { useIssueLimitUpgradePrompt } from "./use-issue-limit-upgrade-prompt";
 
 type ActorSelection =
   | { type: "agent"; id: string }
@@ -141,7 +141,6 @@ export function AgentCreatePanel({
     : undefined;
   const onSourceContextExpandedChange = data?.source_context_on_expanded_change as ((expanded: boolean) => void) | undefined;
   const sourceContextFailureMessage = useSourceContextFailureMessage();
-  const showIssueLimitUpgradePrompt = useIssueLimitUpgradePrompt();
   const userId = useAuthStore((s) => s.user?.id);
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
@@ -401,7 +400,10 @@ export function AgentCreatePanel({
     attachments: pendingAttachments,
     handleUpload: handleUploadFile,
     gate,
+    storageRefusal,
+    dismissStorageRefusal,
   } = useIssueCreateUploads("agent", uploadGate, editorRef);
+  const [storageCopyRefusal, setStorageCopyRefusal] = useState<StorageLimitRefusal | null>(null);
   // The Qoder bridge cannot read attachments, so the issue it creates would be
   // assigned to an agent whose run fails immediately. Block instead of
   // silently dropping the attachment; the server re-checks.
@@ -498,6 +500,13 @@ export function AgentCreatePanel({
         });
         return true;
       } catch (e) {
+        // A sub-issue copies its source attachments; a full workspace refuses
+        // that before creating anything (MUL-9489).
+        const copyRefusal = anchorCommentId ? storageLimitRefusal(e, "") : null;
+        if (copyRefusal) {
+          setStorageCopyRefusal({ ...copyRefusal, kind: "copy" });
+          return false;
+        }
         // Server returns 422 with { code, ... } for the structured rejection
         // paths the modal cares about. Surface the reason in-modal so the
         // user can switch to a live agent / upgrade their daemon without
@@ -509,10 +518,6 @@ export function AgentCreatePanel({
             current_version?: string;
             min_version?: string;
           };
-          if (body.code === "issue_limit_reached") {
-            showIssueLimitUpgradePrompt();
-            return false;
-          }
           if (body.code === "agent_unavailable") {
             setError(body.reason || t(($) => $.create_issue.agent.error_agent_unavailable_fallback));
             return false;
@@ -676,7 +681,6 @@ export function AgentCreatePanel({
               shortcut={sendShortcut}
               decorative
               className="ml-1 max-sm:hidden"
-              keyClassName="border-background/30 bg-background/15 text-primary-foreground shadow-none"
             />
           ) : null}
         </>
@@ -799,6 +803,17 @@ export function AgentCreatePanel({
           />
           {isDragOver && <FileDropOverlay />}
         </div>
+
+        {storageRefusal && (
+          <StorageLimitNotice refusal={storageRefusal} onDismiss={dismissStorageRefusal} className="mx-5 mb-2" />
+        )}
+        {storageCopyRefusal && (
+          <StorageLimitNotice
+            refusal={storageCopyRefusal}
+            onDismiss={() => setStorageCopyRefusal(null)}
+            className="mx-5 mb-2"
+          />
+        )}
 
         {anchorCommentId && (
           <SourceContextPreviewCard

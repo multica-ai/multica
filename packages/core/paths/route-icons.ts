@@ -33,6 +33,7 @@ export type RouteIconName =
   | "Monitor"
   | "Server"
   | "BookOpenText"
+  | "Plug"
   | "Settings"
   | "File"
   | "FileText"
@@ -56,7 +57,9 @@ export type NavLabelKey =
   | "squads"
   | "usage"
   | "runtimes"
+  | "docs"
   | "skills"
+  | "apps"
   | "settings";
 
 /** Stable identifier for each workspace navigation page. */
@@ -72,7 +75,9 @@ export type WorkspacePageKey =
   | "squads"
   | "usage"
   | "runtimes"
+  | "docs"
   | "skills"
+  | "apps"
   | "settings";
 
 export interface WorkspacePage {
@@ -100,7 +105,9 @@ export const WORKSPACE_PAGES: Record<WorkspacePageKey, WorkspacePage> = {
   squads: { segment: "squads", icon: "Users", navKey: "squads" },
   usage: { segment: "usage", icon: "BarChart3", navKey: "usage" },
   runtimes: { segment: "runtimes", icon: "Monitor", navKey: "runtimes" },
+  docs: { segment: "docs", icon: "FileText", navKey: "docs" },
   skills: { segment: "skills", icon: "BookOpenText", navKey: "skills" },
+  apps: { segment: "apps", icon: "Plug", navKey: "apps" },
   settings: { segment: "settings", icon: "Settings", navKey: "settings" },
 };
 

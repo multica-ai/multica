@@ -63,7 +63,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	var supplements *cursorSupplementSession
 	var supplementErr error
 	if opts.EnableTaskSupplement {
-		supplements, supplementErr = startCursorSupplementSession(runCtx, opts.Cwd, opts.CursorHookCommand, b.cfg.Logger)
+		supplements, supplementErr = startCursorSupplementSession(runCtx, opts.Cwd, opts.SupplementHookCommand, b.cfg.Logger)
 		if supplementErr != nil {
 			b.cfg.Logger.Warn("cursor additional messages unavailable for this run", "error", supplementErr)
 			supplements = nil

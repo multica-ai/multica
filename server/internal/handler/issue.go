@@ -87,6 +87,10 @@ type IssueResponse struct {
 	CreatedAt string  `json:"created_at"`
 	UpdatedAt string  `json:"updated_at"`
 	Revision  int64   `json:"revision"`
+	// DescriptionRevision counts changes to the description alone. A whole
+	// rewrite sends it back as description_base_revision so it is merged
+	// with what others changed since. Omitted by list endpoints.
+	DescriptionRevision *int64 `json:"description_revision,omitempty"`
 	// LastActivityAt is the latest semantic issue activity. It stays nullable
 	// while the operator-run historical backfill is incomplete.
 	LastActivityAt *string `json:"last_activity_at"`
@@ -109,6 +113,9 @@ type IssueResponse struct {
 	// SourceContext is detail-only. List, board, search, and children responses
 	// deliberately omit the potentially large immutable snapshot.
 	SourceContext *sourceContextDetailResponse `json:"source_context,omitempty"`
+	// RunOutcome is set only on the response to the caller's own update
+	// (#10845); see IssueRunOutcome.
+	RunOutcome *IssueRunOutcome `json:"run_outcome,omitempty"`
 	// duplicateOfIssueID is the raw mark, kept off the wire; see DuplicateOf.
 	duplicateOfIssueID pgtype.UUID
 }
@@ -483,33 +490,34 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		statusCategory = i.Status
 	}
 	return IssueResponse{
-		ID:                 uuidToString(i.ID),
-		WorkspaceID:        uuidToString(i.WorkspaceID),
-		Number:             i.Number,
-		Identifier:         identifier,
-		Title:              i.Title,
-		Description:        textToPtr(i.Description),
-		Status:             i.Status,
-		StatusCategory:     statusCategory,
-		Priority:           i.Priority,
-		AssigneeType:       textToPtr(i.AssigneeType),
-		AssigneeID:         uuidToPtr(i.AssigneeID),
-		CreatorType:        i.CreatorType,
-		CreatorID:          uuidToString(i.CreatorID),
-		RequesterID:        uuidToPtr(i.RequesterUserID),
-		ParentIssueID:      uuidToPtr(i.ParentIssueID),
-		duplicateOfIssueID: duplicateOfPointer(i.Status, i.DuplicateOfIssueID),
-		ProjectID:          uuidToPtr(i.ProjectID),
-		Position:           i.Position,
-		Stage:              int4ToPtr(i.Stage),
-		StartDate:          dateToPtr(i.StartDate),
-		DueDate:            dateToPtr(i.DueDate),
-		CreatedAt:          timestampToString(i.CreatedAt),
-		UpdatedAt:          timestampToString(i.UpdatedAt),
-		Revision:           i.Revision,
-		LastActivityAt:     timestampToNanoPtr(i.LastActivityAt),
-		Metadata:           parseIssueMetadata(i.Metadata),
-		Properties:         parseIssueProperties(i.Properties),
+		ID:                  uuidToString(i.ID),
+		WorkspaceID:         uuidToString(i.WorkspaceID),
+		Number:              i.Number,
+		Identifier:          identifier,
+		Title:               i.Title,
+		Description:         textToPtr(i.Description),
+		Status:              i.Status,
+		StatusCategory:      statusCategory,
+		Priority:            i.Priority,
+		AssigneeType:        textToPtr(i.AssigneeType),
+		AssigneeID:          uuidToPtr(i.AssigneeID),
+		CreatorType:         i.CreatorType,
+		CreatorID:           uuidToString(i.CreatorID),
+		RequesterID:         uuidToPtr(i.RequesterUserID),
+		ParentIssueID:       uuidToPtr(i.ParentIssueID),
+		duplicateOfIssueID:  duplicateOfPointer(i.Status, i.DuplicateOfIssueID),
+		ProjectID:           uuidToPtr(i.ProjectID),
+		Position:            i.Position,
+		Stage:               int4ToPtr(i.Stage),
+		StartDate:           dateToPtr(i.StartDate),
+		DueDate:             dateToPtr(i.DueDate),
+		CreatedAt:           timestampToString(i.CreatedAt),
+		UpdatedAt:           timestampToString(i.UpdatedAt),
+		Revision:            i.Revision,
+		DescriptionRevision: &i.DescriptionRevision,
+		LastActivityAt:      timestampToNanoPtr(i.LastActivityAt),
+		Metadata:            parseIssueMetadata(i.Metadata),
+		Properties:          parseIssueProperties(i.Properties),
 	}
 }
 
@@ -1405,10 +1413,10 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		projectFilter = id
 	}
 	// involves_user_id widens the assignee filter to surface issues where the
-	// user is the indirect assignee (their owned agent, or a squad they belong
-	// to / lead / have an agent inside). Direct member-assignment is excluded
-	// by design — that is the meaning of `assignee_id` (tab 1), and tab 3 must
-	// be disjoint from tab 1.
+	// user is the indirect assignee (their owned agent, or a squad led by an
+	// agent they own). Direct member-assignment is excluded by design — that is
+	// the meaning of `assignee_id` (tab 1), and tab 3 must be disjoint from
+	// tab 1.
 	var involvesUserFilter pgtype.UUID
 	if u := r.URL.Query().Get("involves_user_id"); u != "" {
 		id, ok := parseUUIDOrBadRequest(w, u, "involves_user_id")
@@ -1763,38 +1771,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	}
 	where = appendIssueDateFilter(where, addArg, dateFilter)
 	if involvesUserFilter.Valid {
-		ref := addArg(involvesUserFilter)
-		where = append(where, fmt.Sprintf(`(
-    (i.assignee_type = 'agent' AND i.assignee_id IN (
-       SELECT a.id FROM agent a
-        WHERE a.workspace_id = $1
-          AND a.owner_id     = %[1]s::uuid
-    ))
-    OR (i.assignee_type = 'squad' AND i.assignee_id IN (
-       SELECT sm.squad_id
-         FROM squad_member sm
-         JOIN squad s ON s.id = sm.squad_id
-        WHERE s.workspace_id = $1
-          AND sm.member_type = 'member'
-          AND sm.member_id   = %[1]s::uuid
-       UNION
-       SELECT s.id
-         FROM squad s
-         JOIN agent a ON a.id = s.leader_id
-        WHERE s.workspace_id = $1
-          AND a.workspace_id = $1
-          AND a.owner_id     = %[1]s::uuid
-       UNION
-       SELECT sm.squad_id
-         FROM squad_member sm
-         JOIN squad s ON s.id = sm.squad_id
-         JOIN agent a ON a.id = sm.member_id
-        WHERE s.workspace_id = $1
-          AND sm.member_type = 'agent'
-          AND a.workspace_id = $1
-          AND a.owner_id     = %[1]s::uuid
-    ))
-)`, ref))
+		where = append(where, issueTableInvolvedPredicate(addArg(involvesUserFilter)))
 	}
 
 	whereSql := strings.Join(where, " AND ")
@@ -2226,10 +2203,8 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 	} else if filter != nil {
 		where = append(where, propertiesFilterPredicate(filter, addArg))
 	}
-	// Mirror the involves_user_id 4-branch UNION from sqlc's ListIssues /
-	// ListOpenIssues / CountIssues. ListGroupedIssues is a hand-written dynamic
-	// SQL builder that does not share parameters with sqlc, so the fragment is
-	// re-implemented here in lock-step. Member-direct assignment is excluded by
+	// Mirror the involves_user_id 2-branch predicate from sqlc's ListIssues /
+	// ListOpenIssues / CountIssues. Member-direct assignment is excluded by
 	// design: that semantics belongs to tab 1 (`assignee_id`), and tab 3 must
 	// stay disjoint from tab 1.
 	if raw := r.URL.Query().Get("involves_user_id"); raw != "" {
@@ -2237,38 +2212,7 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
-		ref := addArg(id)
-		where = append(where, fmt.Sprintf(`(
-    (i.assignee_type = 'agent' AND i.assignee_id IN (
-       SELECT a.id FROM agent a
-        WHERE a.workspace_id = $1
-          AND a.owner_id     = %[1]s::uuid
-    ))
-    OR (i.assignee_type = 'squad' AND i.assignee_id IN (
-       SELECT sm.squad_id
-         FROM squad_member sm
-         JOIN squad s ON s.id = sm.squad_id
-        WHERE s.workspace_id = $1
-          AND sm.member_type = 'member'
-          AND sm.member_id   = %[1]s::uuid
-       UNION
-       SELECT s.id
-         FROM squad s
-         JOIN agent a ON a.id = s.leader_id
-        WHERE s.workspace_id = $1
-          AND a.workspace_id = $1
-          AND a.owner_id     = %[1]s::uuid
-       UNION
-       SELECT sm.squad_id
-         FROM squad_member sm
-         JOIN squad s ON s.id = sm.squad_id
-         JOIN agent a ON a.id = sm.member_id
-        WHERE s.workspace_id = $1
-          AND sm.member_type = 'agent'
-          AND a.workspace_id = $1
-          AND a.owner_id     = %[1]s::uuid
-    ))
-)`, ref))
+		where = append(where, issueTableInvolvedPredicate(addArg(id)))
 	}
 
 	assigneeFilters, ok := parseActorFilterList(w, r.URL.Query().Get("assignee_filters"), "assignee_filters")
@@ -2579,6 +2523,9 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Agents quote the description back in edits; give them what people
+	// have typed, not the last autosave.
+	issue = h.flushIssueDescriptionCollab(r, issue)
 	hidden, ok := h.requestHiddenProjects(w, r, uuidToString(issue.WorkspaceID))
 	if !ok {
 		return
@@ -3069,9 +3016,6 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, priority, dueDate, projectUUID, parentIssueUUID, attachmentIDs)
 	if err != nil {
-		if writeIssueLimitReached(w, err) {
-			return
-		}
 		if errors.Is(err, service.ErrProjectAccessDenied) {
 			h.writeDispatchBlocked(w, http.StatusForbidden, ReasonProjectAccessBlocked)
 			return
@@ -3370,6 +3314,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	req.Title = sanitizeNullBytes(req.Title)
 
 	if req.Title == "" {
 		writeError(w, http.StatusBadRequest, "title is required")
@@ -3733,9 +3678,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	if writeIssueCreatePropertyError(w, err) {
 		return
 	}
-	if writeIssueLimitReached(w, err) {
-		return
-	}
 	if writeIssueNumberCollision(w, err) {
 		return
 	}
@@ -3774,17 +3716,22 @@ type UpdateIssueRequest struct {
 	// that landed asynchronously after that base without making media already
 	// present in the base impossible for the user to delete. Older clients omit
 	// it and receive conservative channel-media preservation.
-	DescriptionBase *string  `json:"description_base,omitempty"`
-	Status          *string  `json:"status"`
-	Priority        *string  `json:"priority"`
-	AssigneeType    *string  `json:"assignee_type"`
-	AssigneeID      *string  `json:"assignee_id"`
-	Position        *float64 `json:"position"`
-	StartDate       *string  `json:"start_date"`
-	DueDate         *string  `json:"due_date"`
-	ParentIssueID   *string  `json:"parent_issue_id"`
-	ProjectID       *string  `json:"project_id"`
-	Stage           *int32   `json:"stage"`
+	DescriptionBase *string `json:"description_base,omitempty"`
+	// DescriptionBaseRevision is the description_revision the writer read
+	// before producing Description. With live editing the write is merged
+	// with what changed since, block by block; without it a stale revision
+	// is refused instead of overwriting newer text.
+	DescriptionBaseRevision *int64   `json:"description_base_revision,omitempty"`
+	Status                  *string  `json:"status"`
+	Priority                *string  `json:"priority"`
+	AssigneeType            *string  `json:"assignee_type"`
+	AssigneeID              *string  `json:"assignee_id"`
+	Position                *float64 `json:"position"`
+	StartDate               *string  `json:"start_date"`
+	DueDate                 *string  `json:"due_date"`
+	ParentIssueID           *string  `json:"parent_issue_id"`
+	ProjectID               *string  `json:"project_id"`
+	Stage                   *int32   `json:"stage"`
 	// AttachmentIDs lets the description editor bind newly uploaded files to
 	// this issue so they surface in `GET /api/issues/:id/attachments` and the
 	// editor's preview Eye keeps working past a refresh. Existing bindings
@@ -3899,7 +3846,12 @@ func refreshUntouchedNullableIssueParams(params *db.UpdateIssueParams, current d
 
 var errIssueFieldConflict = errors.New("issue text field conflict")
 
-func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, titleBase, descriptionBase *string, attachmentIDs []pgtype.UUID, statusKey string, workflowAssignee bool) (db.Issue, db.Issue, bool, error) {
+// errIssueDescriptionRevisionConflict: a description written from a
+// description_base_revision that is no longer current, without the live
+// session that could merge it.
+var errIssueDescriptionRevisionConflict = errors.New("issue description revision conflict")
+
+func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, titleBase, descriptionBase *string, descriptionBaseRevision *int64, attachmentIDs []pgtype.UUID, statusKey string, workflowAssignee bool) (db.Issue, db.Issue, bool, error) {
 	if h.TxStarter == nil {
 		return db.Issue{}, db.Issue{}, false, errors.New("atomic issue update requires transaction starter")
 	}
@@ -3934,6 +3886,10 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 
 	if params.Title.Valid && titleBase != nil && current.Title != *titleBase && current.Title != params.Title.String {
 		return db.Issue{}, current, false, errIssueFieldConflict
+	}
+
+	if params.Description.Valid && descriptionBaseRevision != nil && current.DescriptionRevision != *descriptionBaseRevision {
+		return db.Issue{}, current, false, errIssueDescriptionRevisionConflict
 	}
 
 	if params.Description.Valid {
@@ -3974,6 +3930,11 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 	issue, cancelledWakeups, err := updateIssueStoppingWakeups(ctx, qtx, params)
 	if err != nil {
 		return db.Issue{}, current, false, fmt.Errorf("update locked issue: %w", err)
+	}
+	if issue.DescriptionRevision != current.DescriptionRevision {
+		if err := recordIssueDescriptionRevision(ctx, qtx, current, issue); err != nil {
+			return db.Issue{}, current, false, fmt.Errorf("record issue description revision: %w", err)
+		}
 	}
 
 	attachmentsChanged := false
@@ -4027,6 +3988,12 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	// PostgreSQL TEXT rejects NUL, which survives a JSON round trip. The bases
+	// are compared with the stored text, so they are cleaned the same way.
+	req.Title = sanitizeNullBytesPtr(req.Title)
+	req.TitleBase = sanitizeNullBytesPtr(req.TitleBase)
+	req.Description = sanitizeNullBytesPtr(req.Description)
+	req.DescriptionBase = sanitizeNullBytesPtr(req.DescriptionBase)
 
 	// Track which fields were explicitly present in JSON (even if null)
 	var rawFields map[string]json.RawMessage
@@ -4287,6 +4254,32 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// With live editing on, the description goes through its live session,
+	// merged into what people are typing; the other fields follow as usual.
+	// Everything above has been validated, so nothing is refused after it.
+	// A write pinned to expected_revision stays a direct compare-and-swap of
+	// the whole issue; the live session folds it in on its next save.
+	if client := h.issueCollab(r.Context()); req.Description != nil && req.ExpectedRevision == nil && client != nil {
+		writerType, writerID := h.resolveActor(r, userID, workspaceID)
+		handled, ok := h.updateIssueDescriptionViaCollab(w, r, client, prevIssue, req, writerType, writerID)
+		if !ok {
+			return
+		}
+		if handled {
+			if issueUpdateOnlyDescription(rawFields) {
+				updated, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{ID: prevIssue.ID, WorkspaceID: prevIssue.WorkspaceID})
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, "failed to load issue")
+					return
+				}
+				h.writeIssueForCaller(w, r, updated)
+				return
+			}
+			req.Description, req.DescriptionBase, req.DescriptionBaseRevision = nil, nil, nil
+			params.Description = pgtype.Text{}
+		}
+	}
+
 	// The agent this write hands the issue to gets the change as its own run,
 	// not also through its event wakeups.
 	writeCtx := withWakeupHandedTo(r.Context(), h.handedToAgent(r.Context(), prevIssue, params, handoff != nil))
@@ -4295,7 +4288,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if req.Description != nil || req.TitleBase != nil || req.DescriptionBase != nil || len(attachmentIDs) > 0 {
 		var lockedPrev db.Issue
 		issue, lockedPrev, attachmentsChanged, err = h.updateIssueAtomically(
-			writeCtx, prevIssue.WorkspaceID, params, rawFields, req.TitleBase, req.DescriptionBase, attachmentIDs, statusKeyForGuard, handoff != nil,
+			writeCtx, prevIssue.WorkspaceID, params, rawFields, req.TitleBase, req.DescriptionBase, req.DescriptionBaseRevision, attachmentIDs, statusKeyForGuard, handoff != nil,
 		)
 		if lockedPrev.ID.Valid {
 			prevIssue = lockedPrev
@@ -4312,6 +4305,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, errIssueFieldConflict) {
 			writeEditConflict(w, "issue", prevIssue.ID)
+			return
+		}
+		if errors.Is(err, errIssueDescriptionRevisionConflict) {
+			writeRevisionConflict(w, "issue_description", prevIssue.ID, *req.DescriptionBaseRevision, prevIssue.DescriptionRevision)
 			return
 		}
 		if errors.Is(err, pgx.ErrNoRows) && req.ExpectedRevision != nil {
@@ -4369,6 +4366,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		},
 		h.issueTriggerWriteProbe(r, actorType, actorID, issue),
 	)
+	logDeclinedIssueRun(r.Context(), issue, trigger)
+	runDecided := willRun
 	willRun = willRun && !req.SuppressRun
 
 	updatedPayload := map[string]any{
@@ -4436,8 +4435,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if handoff != nil && req.StopPreviousAssigneeRuns {
 		h.stopPreviousAssigneeRuns(r.Context(), prevIssue, issue, actorType, actorID)
 	}
-	if willRun {
-		h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, handoffNote)
+	resp.RunOutcome = h.resolveIssueRun(r, issue, trigger, runDecided, req.SuppressRun, actorType, actorID, workspaceID, handoffNote)
+	if issueRunTriggeredAgent(resp.RunOutcome) {
+		h.archiveActorInboxOnAgentTrigger(r.Context(), workspaceID, uuidToString(issue.ID), actorType, actorID)
 	}
 
 	// Sub-issue rules on the parent (the child_done system rule and sub-issue
@@ -4584,10 +4584,15 @@ func (h *Handler) assigneeFallbackAgent(ctx context.Context, issue db.Issue, act
 }
 
 // isAgentRunningOnIssue reports whether the calling agent's current task
-// (identified by X-Task-ID) is running for the exact issue being promoted.
+// (identified by X-Task-ID) is running for the exact issue being promoted
+// and belongs to the target receiving agent (assignee or squad leader).
 // That is the only true self-loop on backlog→active: the agent flipping
 // the same issue its own task is executing for would immediately re-enqueue
 // itself, complete the run, flip again, and so on.
+//
+// A coordinator whose run is bound to the issue but which promotes it for a
+// different receiving agent is not a loop: the run goes to another agent, and
+// suppressing it would leave the issue in an active status with no run.
 //
 // Same-agent cross-issue handoff (Agent A finishing a task on issue I1 then
 // promoting issue I2 — even when I2 is also assigned to A) is NOT a loop
@@ -4598,7 +4603,7 @@ func (h *Handler) assigneeFallbackAgent(ctx context.Context, issue db.Issue, act
 // "agent": resolveActor demotes the actor to "member" otherwise (handler.go
 // resolveActor). We still recheck defensively — a future caller could pass
 // agent identity through a different path.
-func (h *Handler) isAgentRunningOnIssue(r *http.Request, actorType string, issue db.Issue) bool {
+func (h *Handler) isAgentRunningOnIssue(r *http.Request, actorType string, issue db.Issue, targetAgentID pgtype.UUID) bool {
 	if actorType != "agent" {
 		return false
 	}
@@ -4617,7 +4622,11 @@ func (h *Handler) isAgentRunningOnIssue(r *http.Request, actorType string, issue
 	if !task.IssueID.Valid {
 		return false
 	}
-	return uuidToString(task.IssueID) == uuidToString(issue.ID)
+	if !targetAgentID.Valid {
+		return false
+	}
+	return uuidToString(task.IssueID) == uuidToString(issue.ID) &&
+		uuidToString(task.AgentID) == uuidToString(targetAgentID)
 }
 
 func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
@@ -4820,6 +4829,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	// See UpdateIssue: a failed write here is only logged and skipped.
+	req.Updates.Title = sanitizeNullBytesPtr(req.Updates.Title)
+	req.Updates.Description = sanitizeNullBytesPtr(req.Updates.Description)
 
 	if len(req.IssueIDs) == 0 {
 		writeError(w, http.StatusBadRequest, "issue_ids is required")
@@ -5167,7 +5179,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			// legacy single-update clients that omit description_base.
 			var lockedPrev db.Issue
 			issue, lockedPrev, _, err = h.updateIssueAtomically(
-				writeCtx, prevIssue.WorkspaceID, params, rawUpdates, nil, nil, nil, issueStatusGuard, handoff != nil,
+				writeCtx, prevIssue.WorkspaceID, params, rawUpdates, nil, nil, nil, nil, issueStatusGuard, handoff != nil,
 			)
 			if err == nil {
 				prevIssue = lockedPrev
@@ -5203,6 +5215,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		}
 
 		actorType, actorID := h.resolveActor(r, userID, workspaceID)
+		var runOutcome *IssueRunOutcome
 		if hasFieldUpdate {
 			resp := issueToResponse(issue, prefix)
 			h.advanceRunStep(r.Context(), callerRun, prevIssue, issue)
@@ -5225,6 +5238,8 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				},
 				h.issueTriggerWriteProbe(r, actorType, actorID, issue),
 			)
+			logDeclinedIssueRun(r.Context(), issue, trigger)
+			runDecided := willRun
 			willRun = willRun && !req.Updates.SuppressRun
 			batchPayload := map[string]any{
 				"issue":                      resp,
@@ -5254,8 +5269,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			if handoff != nil && req.Updates.StopPreviousAssigneeRuns {
 				h.stopPreviousAssigneeRuns(r.Context(), prevIssue, issue, actorType, actorID)
 			}
-			if willRun {
-				h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, batchHandoffNote)
+			runOutcome = h.resolveIssueRun(r, issue, trigger, runDecided, req.Updates.SuppressRun, actorType, actorID, workspaceID, batchHandoffNote)
+			if issueRunTriggeredAgent(runOutcome) {
+				h.archiveActorInboxOnAgentTrigger(r.Context(), workspaceID, issueID, actorType, actorID)
 			}
 
 			// No status change — not even → cancelled — cancels active tasks here,
@@ -5286,7 +5302,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if issue.Revision == prevIssue.Revision {
 			outcome = batchOutcomeUnchanged
 		}
-		results = append(results, batchIssueResult{IssueID: issueID, Identifier: identifier, Outcome: outcome})
+		results = append(results, batchIssueResult{IssueID: issueID, Identifier: identifier, Outcome: outcome, RunOutcome: runOutcome})
 		updated++
 	}
 

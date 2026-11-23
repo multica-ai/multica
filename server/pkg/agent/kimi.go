@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -74,6 +75,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		cmd.Dir = opts.Cwd
 	}
 	cmd.Env = buildEnv(b.cfg.Env)
+	kimiHome := kimiChildHome(cmd.Env, cmd.Dir)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -495,6 +497,13 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			fallbackModel = "unknown"
 		}
 
+		wireScan := kimiUsageScan{
+			startTime:     startTime,
+			kimiHome:      kimiHome,
+			sessionID:     sessionID,
+			resumed:       opts.ResumeSessionID != "",
+			fallbackModel: fallbackModel,
+		}
 		var usageMap map[string]TokenUsage
 		if acpTokenUsagePresent(u) {
 			usageMap = map[string]TokenUsage{fallbackModel: u}
@@ -502,13 +511,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			// Keyed per model by the scan itself: a task whose subagent
 			// or compaction step ran on a different model must not have
 			// that model's tokens priced at the main model's rate.
-			usageMap = scanKimiSessionUsage(kimiUsageScan{
-				startTime:     startTime,
-				kimiHome:      b.cfg.Env["KIMI_CODE_HOME"],
-				sessionID:     sessionID,
-				resumed:       opts.ResumeSessionID != "",
-				fallbackModel: fallbackModel,
-			})
+			usageMap = scanKimiSessionUsage(wireScan)
 			// A future Kimi build may expose provider cost before it exposes
 			// token buckets over ACP. Preserve that cost alongside the current
 			// wire-log fallback instead of dropping either source.
@@ -532,13 +535,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// completed run is promoted: timeout/abort/already-failed keep
 		// their own terminal semantics.
 		if finalStatus == "completed" {
-			if turnErr, failed := scanKimiMainTurnFailure(kimiUsageScan{
-				startTime:     startTime,
-				kimiHome:      b.cfg.Env["KIMI_CODE_HOME"],
-				sessionID:     sessionID,
-				resumed:       opts.ResumeSessionID != "",
-				fallbackModel: fallbackModel,
-			}); failed {
+			if turnErr, failed := scanKimiMainTurnFailure(wireScan); failed {
 				finalStatus = "failed"
 				finalError = "kimi turn failed: runtime did not record error details (error category unknown)"
 				if turnErr != "" {
@@ -902,34 +899,32 @@ func kimiWireTurnFailure(path string, scan kimiUsageScan) (string, bool) {
 	return detail, found
 }
 
-// kimiSessionRoot resolves kimi's session directory: an explicitly configured
-// home first, then the ambient KIMI_CODE_HOME, then ~/.kimi-code. Mirrors
-// codexSessionRoot.
-//
-// The env lookup is not redundant with cfg.Env: the kimi subprocess inherits
-// os.Environ() via buildEnv, so a KIMI_CODE_HOME exported to the daemon
-// relocates kimi's sessions without ever appearing in cfg.Env. Reading only
-// cfg.Env would leave the scan looking in ~/.kimi-code while kimi wrote
-// somewhere else. The stat check keeps a home without a sessions directory
-// from disabling the scan.
-func kimiSessionRoot(kimiHome string) string {
-	if kimiHome = strings.TrimSpace(kimiHome); kimiHome == "" {
-		kimiHome = strings.TrimSpace(os.Getenv("KIMI_CODE_HOME"))
-	}
-	if kimiHome != "" {
-		dir := filepath.Join(kimiHome, "sessions")
-		if info, err := os.Stat(dir); err == nil && info.IsDir() {
-			return dir
+// kimiChildHome follows the data directory selected by the launched CLI.
+func kimiChildHome(env []string, cwd string) string {
+	home, _ := lastAgentEnvValue(env, "KIMI_CODE_HOME")
+	if home == "" {
+		homeKey := "HOME"
+		if runtime.GOOS == "windows" {
+			homeKey = "USERPROFILE"
 		}
+		userHome, _ := lastAgentEnvValue(env, homeKey)
+		if userHome == "" {
+			userHome, _ = os.UserHomeDir()
+		}
+		if userHome == "" {
+			return ""
+		}
+		home = filepath.Join(userHome, ".kimi-code")
 	}
+	if cwd != "" && !filepath.IsAbs(home) {
+		home = filepath.Join(cwd, home)
+	}
+	return home
+}
 
-	home, err := os.UserHomeDir()
-	if err != nil {
+func kimiSessionRoot(kimiHome string) string {
+	if kimiHome == "" {
 		return ""
 	}
-	dir := filepath.Join(home, ".kimi-code", "sessions")
-	if info, err := os.Stat(dir); err == nil && info.IsDir() {
-		return dir
-	}
-	return ""
+	return filepath.Join(kimiHome, "sessions")
 }

@@ -219,6 +219,9 @@ func TestRunIssueCommentAddRewritesInlineAttachmentLinks(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"id": "att-1", "filename": "a.png", "content_type": "image/png", "markdown_url": markdownURL,
 			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/issue-1/comments/idempotent":
+			// Asked before uploading; an older server has no such route.
+			http.NotFound(w, r)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/issue-1/comments":
 			posts++
 			if err := json.NewDecoder(r.Body).Decode(&posted); err != nil {

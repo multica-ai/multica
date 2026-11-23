@@ -1,137 +1,165 @@
 ---
 title: 완전 가이드
-description: 빈 워크스페이스에서 시작해 개인 웹사이트 프로젝트로 Multica의 핵심 흐름을 모두 거칩니다. 에이전트를 만들고, 태스크로 결과물을 만들고, 스쿼드를 구성하고, 스킬을 축적하고, 자동화를 설정합니다.
+description: 빈 워크스페이스에서 시작해 개인 웹사이트 프로젝트로 Multica의 최신 핵심 흐름을 처음부터 끝까지 경험합니다. 스페이스 탐색, 런타임 연결, 에이전트 생성, 태스크와 로컬 환경 프리뷰, PR 리뷰, 스쿼드, 스킬, 오토파일럿까지 다룹니다.
 ---
 
 import { Step, Steps } from "fumadocs-ui/components/steps";
 
-Multica는 사람과 AI 에이전트가 함께 일하는 플랫폼입니다. 이 가이드는 아무것도 없는 상태에서 시작해 다음을 진행합니다.
+Multica는 사람과 AI 에이전트가 함께 일하는 플랫폼입니다. 이 가이드는 빈 워크스페이스에서 시작해 전체 워크플로를 끝까지 따라갑니다.
 
-- 자신의 워크스페이스 만들기
-- 사람과 에이전트의 협업, 그리고 에이전트 사이의 자동 협업 구현하기
-- 반복되는 작업을 자동화에 맡기기
-- 효과가 있었던 방법을 스킬로 축적해 에이전트를 계속 개선하기
+- 워크스페이스를 만들고 **작업**, **팀**, **채팅**, **오토파일럿** 4개 스페이스 익히기
+- 컴퓨터를 연결하고 직접 입력 또는 채팅으로 에이전트 구성하기
+- 태스크로 코드를 전달하고, 실행 로그를 확인하고, **환경(Environments)** 으로 원클릭 라이브 프리뷰 열기
+- 리뷰 피드백을 지침에 반영하고 **Engineer** 와 읽기 전용 **Reviewer** 를 함께 운용하기
+- 조율을 **스쿼드** 에 맡기고, 검증된 방식을 **스킬** 로 축적하고, 반복 점검을 **오토파일럿** 으로 자동화하기
 
-이 가이드는 개인 웹사이트를 예제 프로젝트로 삼아 Multica의 전체 흐름과 핵심 기능을 한 번씩 모두 다룹니다.
+예제 프로젝트는 사진작가의 개인 포트폴리오 웹사이트입니다. 실제 작업 위에서 Multica의 모든 핵심 기능이 어떻게 맞물려 돌아가는지 한눈에 확인할 수 있습니다.
 
 **시작하기 전 준비물:**
 
 - Multica 계정([multica.ai](https://multica.ai)에서 가입)
-- Claude Code나 Codex 같은 AI 코딩 도구를 하나 이상 설치하고 로그인한 컴퓨터 한 대. 지원되는 도구 전체는 [AI 코딩 도구 설치](/install-agent-runtime)를 참고하세요.
+- Claude Code나 Codex 같은 AI 코딩 도구를 하나 이상 설치하고 로그인한 컴퓨터 한 대. 지원 도구 전체 목록은 [AI 코딩 도구 설치](/install-agent-runtime)를 참고하세요.
 
 ## 워크스페이스 만들기
 
-워크스페이스는 팀이 일하는 공간입니다. 태스크, 프로젝트, 에이전트는 모두 특정 워크스페이스에 속합니다. 가입 후 안내를 따라 첫 워크스페이스를 만들게 되며, 팀에 초대받아 참여한 경우에는 로그인하면 바로 팀의 워크스페이스로 들어갑니다.
+워크스페이스는 팀이 일하는 경계입니다. 태스크, 프로젝트, 에이전트, 실행 기록이 모두 하나의 워크스페이스에 담깁니다. 가입 후 온보딩에서 첫 워크스페이스를 만들 수 있으며, 팀 초대를 받았다면 로그인하자마자 해당 팀 워크스페이스로 들어갑니다.
 
-이 가이드에서는 새 워크스페이스를 만들어 설명합니다.
+이 가이드에서는 새 워크스페이스를 만들어 진행합니다.
 
 <Steps>
 <Step>
 
-사이드바 위쪽의 워크스페이스 이름을 클릭하고 **워크스페이스 만들기**를 선택합니다.
+왼쪽 끝 앱 탐색 바 상단의 워크스페이스 아이콘을 클릭하고 **워크스페이스 만들기** 를 선택합니다.
 
-![워크스페이스 만들기 진입점](/images/docs/tutorial-create-workspace-menu.webp)
-
-</Step>
-<Step>
-
-두 항목을 입력합니다.
-
-- **이름**: 멤버에게 표시되는 이름이며 나중에 수정할 수 있습니다.
-- **URL**: 워크스페이스 주소의 slug입니다. 예를 들어 `multica.ai/my-team`의 `my-team`이며 만든 뒤에는 수정할 수 없습니다.
-
-![워크스페이스 만들기 화면](/images/docs/tutorial-create-workspace-form.webp)
+![앱 탐색 바의 워크스페이스 메뉴에서 워크스페이스 만들기 선택](/images/docs/tutorial-create-workspace-menu.webp)
 
 </Step>
 <Step>
 
-만들고 나면 새 워크스페이스로 들어갑니다. 왼쪽은 사이드바이며 이후 모든 작업은 여기에서 시작합니다. 가운데 태스크 목록은 아직 비어 있고, 다음 몇 단계에서 에이전트가 이 목록을 채우게 됩니다.
+세 가지 항목을 입력합니다.
 
-![방금 만든 빈 워크스페이스](/images/docs/tutorial-empty-workspace.webp)
+- **워크스페이스 이름**: 멤버에게 표시되는 이름이며 나중에 바꿀 수 있습니다.
+- **URL**: 워크스페이스 주소의 slug입니다(`multica.ai/personal-site` 의 `personal-site`). 생성 후에는 바꿀 수 없습니다.
+- **태스크 접두사**: URL에서 자동 입력되며 생성 전에 수정할 수 있습니다. `SITE` 로 설정하면 태스크 번호가 `SITE-1`, `SITE-2` 로 매겨집니다(나중에 설정에서 변경 가능).
+
+![이름, URL, 태스크 접두사를 입력한 워크스페이스 만들기 화면](/images/docs/tutorial-create-workspace-form.webp)
+
+</Step>
+<Step>
+
+생성을 마치면 새 워크스페이스가 열립니다. 화면 구성을 살펴봅니다.
+
+- **왼쪽 앱 탐색 바**: 상단에 워크스페이스 전환, **새 태스크** (`C`), **검색** (`⌘K`)이 있고, 가운데에 **작업**, **팀**, **채팅**, **오토파일럿** 4개 스페이스, 하단에 도움말, **설정**, 계정 메뉴가 있습니다.
+- **작업 패널**(탐색 바 옆): 맨 위에 **인박스**, 그 아래로 기본/저장 **뷰** 와 **프로젝트** 가 자리합니다.
+- **하단 상태 표시줄**: 왼쪽에 작업 중인 에이전트 수, 오른쪽에 **Ask Multica** 빠른 채팅(`⌘J`) 버튼이 있습니다.
+
+태스크 목록은 아직 비어 있습니다. 이제 에이전트를 불러와 채워 보겠습니다.
+
+![방금 만든 빈 워크스페이스(작업 스페이스)](/images/docs/tutorial-empty-workspace.webp)
 
 </Step>
 </Steps>
 
 ## 컴퓨터 연결
 
-에이전트는 연결한 컴퓨터에서 작업을 실행하며, 그 컴퓨터에 설치된 AI 코딩 도구를 사용합니다.
+에이전트는 연결된 컴퓨터에 설치된 AI 코딩 도구를 사용해 실제 작업을 수행합니다.
 
-이 가이드에서는 [Multica Desktop](https://multica.ai/download)으로 설명합니다. 내려받아 로그인하면 이 컴퓨터를 런타임으로 자동 등록하고 설치된 AI 코딩 도구를 감지합니다. 사이드바 **AI 팀** 아래의 **런타임**을 열고 이 컴퓨터가 온라인인지 확인합니다.
+이 가이드에서는 [Multica Desktop](https://multica.ai/download)을 사용합니다. 설치 후 로그인하면 데몬이 자동 실행되어 현재 컴퓨터를 런타임으로 등록하고 설치된 AI 코딩 도구를 감지합니다. 앱 탐색 바에서 **팀** 으로 이동해 **리소스** 아래의 **런타임** 을 열고 컴퓨터가 **온라인** 상태인지 확인하세요.
 
-![런타임 목록에 온라인으로 표시된 이 컴퓨터](/images/docs/tutorial-runtimes-list.webp)
+![팀 스페이스의 런타임 목록: 내 컴퓨터가 온라인 상태](/images/docs/tutorial-runtimes-list.webp)
 
-이 컴퓨터를 클릭하면 감지된 도구를 하나씩 확인할 수 있습니다.
+컴퓨터를 클릭하면 감지된 AI 코딩 도구별 상태를 확인할 수 있습니다.
 
-![런타임 상세: 감지된 AI 코딩 도구](/images/docs/tutorial-runtime-detail.webp)
+![머신 상세 화면: Claude Code와 Codex가 온라인](/images/docs/tutorial-runtime-detail.webp)
 
-Desktop을 쓰지 않아도 됩니다. 런타임 페이지에서 **추가**를 클릭하고 **다른 머신 또는 서버**를 선택한 뒤 안내에 따라 명령줄로 설치하면 데몬이 백그라운드에 상주하며 실행됩니다. 자세한 내용은 [데몬과 런타임](/daemon-runtimes)을 참고하세요.
+Desktop 없이도 연결할 수 있습니다. **런타임** 페이지 오른쪽 위 **+** 를 클릭해 **다른 머신 또는 서버** 를 선택하고 터미널에서 안내된 설치 명령을 실행하세요. 자세한 내용은 [데몬과 런타임](/daemon-runtimes)을 참고하세요.
 
-## 첫 에이전트 만들기
+## 첫 번째 에이전트 만들기
 
-에이전트는 워크스페이스의 정식 멤버입니다. 태스크를 할당받고, 댓글을 쓰고, 대화할 수 있습니다. 첫 에이전트로는 워크스페이스의 일상적인 일을 담당하는 helper를 만듭니다. 이후 가이드의 여러 작업을 이 에이전트에게 맡깁니다.
+에이전트는 워크스페이스의 정식 구성원입니다. 태스크를 배정받고, 댓글 스레드에 답하고, 채팅으로 대화할 수 있습니다. 먼저 워크스페이스 잡무를 처리하는 헬퍼 에이전트를 만들어 이후 설정 작업을 맡겨 보겠습니다.
 
-사이드바 **AI 팀** 아래의 **에이전트**를 열고 **새 에이전트**를 클릭합니다. 먼저 런타임으로 앞 단계에서 연결한 컴퓨터의 AI 코딩 도구 하나를 선택합니다. 이 가이드에서는 Claude를 사용합니다. 그다음 구성 화면에서 세 항목을 입력합니다.
+**팀** 스페이스 패널 헤더의 **+** 버튼(또는 **전체 에이전트** 에서 **새 에이전트**)을 클릭합니다.
 
-- **이름**: `Multica helper`.
-- **모델**: 그 도구가 지원하는 모델 중 하나를 고릅니다. 이 가이드에서는 Sonnet을 사용합니다.
-- **지시문**: 실행할 때마다 에이전트에게 제공되는 프롬프트입니다. 무엇을 담당하고 무엇을 담당하지 않는지 명확히 적습니다.
+<Steps>
+<Step>
+
+**런타임 선택**: 방금 연결한 컴퓨터에서 온라인 상태인 AI 코딩 도구를 고릅니다. 이 가이드에서는 **Claude Code** 를 선택합니다.
+
+</Step>
+<Step>
+
+**에이전트 구성**: 핵심 항목을 입력합니다(오른쪽 위의 **AI가 작성하기** 를 누르면 Agent Builder가 대화를 통해 초안을 채워 줍니다).
+
+- **이름**: `Multica helper`
+- **설명**: `Handles workspace chores, agent setup, and status updates.`
+- **지침**: 매 실행마다 전달되는 프롬프트입니다. 맡을 일과 건드리지 말아야 할 범위를 분명히 적습니다.
 
 ```text
 You are the helper of this workspace.
 
 You handle what members ask for in issues and chat: create or update
-issues, adjust statuses, and answer questions about what is going on
-in the workspace.
+issues, adjust statuses, configure agents, squads, skills, and autopilots,
+and answer questions about what is going on in the workspace.
 
 Keep replies short. After finishing something, reply with a one-line
 summary of what you did. Do not touch code or repositories. If a
 request is ambiguous, ask before acting.
 ```
 
-![에이전트 만들기 화면](/images/docs/tutorial-create-agent-form.webp)
+모델(여기서는 Claude Sonnet)을 선택하고 **접근 권한** 은 기본값(**나만 사용**)으로 둡니다.
 
-나머지 항목은 기본값으로 두고 **에이전트 만들기**를 클릭합니다. **에이전트** 페이지로 돌아오면 Multica helper가 온라인이며 작업을 받을 수 있습니다.
+![Multica helper 설정을 입력한 에이전트 생성 2단계 화면](/images/docs/tutorial-create-agent-form.webp)
 
-![에이전트 상세: 온라인 상태의 Multica helper](/images/docs/tutorial-agent-detail.webp)
+</Step>
+<Step>
 
-## 두 번째 에이전트: 대화로 만들기
+**에이전트 만들기** 를 클릭합니다. 상세 페이지에서 **Multica helper** 가 **온라인 · 대기 중** 상태라면 바로 일을 맡길 수 있습니다.
 
-웹사이트를 만들려면 코드를 작성할 엔지니어가 필요합니다. 이번에는 양식을 직접 채우지 않습니다. 워크스페이스에 이미 에이전트가 하나 있으므로 생성 작업을 그 에이전트에게 바로 맡길 수 있습니다.
+![Multica helper가 온라인으로 표시된 에이전트 상세 화면](/images/docs/tutorial-agent-detail.webp)
 
-사이드바에서 **채팅**을 열고 Multica helper를 선택해 이렇게 요청합니다. 같은 런타임에 Engineer라는 에이전트를 만들고, 모델은 Opus를 쓰며, 개인 웹사이트를 만들고 유지하는 일을 담당하게 합니다. Multica helper가 이 컴퓨터에서 생성을 실행하고 새 에이전트의 이름과 모델을 답변합니다. 새 에이전트는 기본적으로 생성자만 실행할 수 있으며, 이 가이드에서는 기본값 그대로 두면 됩니다.
+</Step>
+</Steps>
 
-![채팅에서 helper에게 Engineer 생성을 요청](/images/docs/tutorial-chat-create-engineer.webp)
+## 두 번째 에이전트: 채팅으로 만들기
 
-**에이전트 → Engineer**를 열어 결과를 확인합니다. 모델은 Opus이고 지시문은 Multica helper가 생성했습니다. 담당 범위, 저장소 코드를 가져오는 방식, 변경 사항을 제출할 때의 요구 사항이 담겨 있으며 언제든 수정할 수 있습니다.
+웹사이트를 만들려면 코드를 작성할 엔지니어가 필요합니다. 폼을 또 채울 필요 없이, 이미 만든 에이전트에게 채팅으로 요청하면 Multica CLI로 대신 만들어 줍니다.
 
-![Engineer의 지시문](/images/docs/tutorial-engineer-instructions.webp)
+앱 탐색 바에서 **채팅** 을 열고 **Multica helper** 를 선택한 뒤, 같은 Claude Code 런타임과 **Claude Opus 5** 모델로 개인 사진 포트폴리오 사이트를 구축·유지보수할 **Engineer** 에이전트를 만들어 달라고 요청합니다.
 
-## 웹사이트 저장소 준비
+![채팅에서 Multica helper에게 Engineer 생성 요청](/images/docs/tutorial-chat-create-engineer.webp)
 
-웹사이트 코드는 GitHub 저장소에 둡니다. 저장소를 만들고 등록하는 일도 에이전트에게 맡깁니다. 단, 이 컴퓨터에 [GitHub CLI](https://cli.github.com)가 설치되어 있고 로그인되어 있어야 합니다.
+**팀 → 전체 에이전트 → Engineer** 를 열어 보면 모델(`claude-opus-5`), 권한(소유자 전용), 그리고 helper가 작성한 상세 지침까지 갖춰져 있습니다. 지침은 언제든 수정할 수 있습니다.
 
-**채팅**에서 Engineer를 선택하고 이렇게 요청합니다. 내 GitHub 계정에 `personal-website`라는 빈 저장소를 만들고(이 컴퓨터에는 GitHub CLI가 있습니다) `multica repo add`로 이 워크스페이스에 등록해 달라고 합니다. Engineer가 로컬에서 저장소를 만들고 워크스페이스에 등록한 뒤 저장소 주소를 답변합니다. 메시지에서 공개 범위를 지정하지 않았으므로 기본값으로 만들고 답변에서 그 사실을 알려 줍니다. 공개든 비공개든 이후 단계에는 영향이 없습니다.
+![Engineer 상세 화면과 자동 작성된 지침](/images/docs/tutorial-engineer-instructions.webp)
 
-![채팅: 저장소를 만들고 등록했다는 Engineer의 답변](/images/docs/tutorial-chat-create-repo.webp)
+## 사이트 저장소 준비
 
-**설정 → 저장소**를 열어 확인합니다. `personal-website`가 목록에 있습니다. 이후 에이전트가 작업을 실행할 때 여기에서 저장소를 선택합니다.
+웹사이트 코드는 GitHub 저장소에 둡니다. 컴퓨터에 [GitHub CLI](https://cli.github.com)(`gh`)가 설치되고 로그인되어 있다면 저장소 생성과 등록도 에이전트에게 맡길 수 있습니다.
 
-![설정의 코드 저장소 목록](/images/docs/tutorial-repo-settings.webp)
+**채팅** 에서 **Engineer** 를 선택해 GitHub 계정에 `personal-website` 빈 저장소를 만들고 `multica repo add` 로 워크스페이스에 등록해 달라고 요청합니다.
 
-GitHub CLI를 쓰지 않는다면 GitHub에서 직접 저장소를 만들고 같은 페이지에서 수동으로 추가해도 결과는 같습니다.
+![Engineer가 personal-website 저장소 생성 및 등록 완료를 회신](/images/docs/tutorial-chat-create-repo.webp)
 
-마지막으로 같은 페이지에서 **GitHub 연결**을 클릭하고 안내에 따라 이 저장소를 인증합니다. 연결하면 태스크 번호를 참조한 pull request가 해당 태스크에 자동으로 연결되고, PR 상태와 CI 결과가 태스크에 바로 표시됩니다.
+앱 탐색 바 하단의 **설정** 아이콘을 누르고 **연결 및 확장 → 코드** 를 엽니다. **저장소** 목록에 `personal-website` 가 등록되어 있는지 확인하고 **GitHub 연결** 을 눌러 권한을 승인합니다. 연결이 끝나면 다음 기능이 동작합니다.
 
-## 첫 태스크: 웹사이트 만들기
+- 브랜치 이름이나 제목에 태스크 번호(`SITE-1` 등)가 들어간 PR이 태스크에 자동 연결됩니다.
+- PR 변경량과 CI 검사 결과가 태스크 오른쪽 사이드바에 바로 표시됩니다.
+- 연결된 PR이 모두 병합되면 태스크를 자동으로 **완료** 상태로 옮길 수 있습니다.
 
-설정은 여기까지입니다. 지금부터는 Multica의 일상적인 작업 방식입니다. 요구 사항을 태스크로 쓰고 에이전트에게 실행을 맡깁니다.
+![설정 -> 코드 화면: GitHub 연결 및 personal-website 등록 완료](/images/docs/tutorial-repo-settings.webp)
 
-웹사이트는 shadcn의 공식 템플릿에서 시작합니다. 템플릿에 기술 스택과 기본 설정이 이미 들어 있고, Engineer는 그 위에서 내용과 디자인을 작업합니다.
+GitHub CLI가 없다면 GitHub에서 직접 저장소를 만든 뒤 같은 페이지의 **+ 저장소 추가** 로 등록하면 됩니다.
+
+## 첫 번째 태스크: 사이트 만들기
+
+이제 준비가 끝났습니다. 일상적인 Multica 협업 방식대로 요구사항을 **태스크** 로 작성해 에이전트에게 맡기고, 실행 로그·댓글·PR을 한 타임라인에서 관리합니다.
+
+사이트는 shadcn의 Next.js 템플릿에서 시작해 Engineer가 디자인과 콘텐츠를 얹도록 합니다.
 
 <Steps>
 <Step>
 
-사이드바 위쪽의 **새 태스크**를 클릭합니다(단축키 `C`). 기본 에이전트 모드에서는 제목을 입력하지 않아도 됩니다. **생성자**에서 Engineer를 선택하고 요구 사항을 설명에 바로 작성하면 제목은 만들 때 자동으로 생성됩니다. 수동 모드로 전환해 제목과 내용을 직접 입력할 수도 있습니다. 설명은 다음과 같습니다.
+앱 탐색 바 상단의 **새 태스크** (단축키 `C`)를 클릭합니다. 기본 **에이전트로 만들기** 모드에서는 제목을 따로 쓸 필요가 없습니다. **생성자** 에서 **Engineer** 를 고르고 요구사항을 바로 입력합니다(하단의 **직접 입력으로 전환** 으로 언제든 수동 폼으로 바꿀 수 있습니다).
 
 ```text
 Work in the personal-website repository registered in this workspace.
@@ -148,13 +176,13 @@ The site is for a photographer. It needs:
 - My work — a selection of photos
 - Contact — an email link that is easy to find
 - Pricing — decide where a pricing table fits and how to present it
-- Use placeholder images (Unsplash or picsum.photos) wherever a photo
-  belongs, and list where I should replace them with my own work
+- Use placeholder images wherever a photo belongs, and list where I
+  should replace them with my own work
 
 Design:
 
 - Pick a style that fits a photography portfolio. It should feel
-  refined and understated; express that through layout, typography
+  refined and understated; express that through layout, typography,
   and spacing, and never use words like "premium" or "high-end"
   in the copy.
 - Choose the fonts.
@@ -162,263 +190,241 @@ Design:
 Open a pull request when it is ready.
 ```
 
-이 설명에는 세 종류의 정보가 있습니다. 제약(지정한 템플릿에서 시작), 내용 요구 사항(항목별로 나열), 여지(스타일은 Engineer가 판단)입니다. 의도와 경계를 적고 구현 방식은 에이전트에게 맡깁니다.
+좋은 프롬프트에는 세 가지가 담깁니다. 명확한 제약(지정 템플릿으로 시작), 구체적인 콘텐츠 요구사항, 그리고 의도적인 여백(레이아웃과 타이포그래피는 Engineer에게 위임)입니다.
 
-![새 태스크의 에이전트 모드: 생성자에 Engineer가 선택된 모습](/images/docs/tutorial-new-issue-agent-mode.webp)
-
-</Step>
-<Step>
-
-제출하면 Multica가 태스크를 만들고(번호는 `MUL-1`, 제목은 자동 생성) Engineer를 담당자로 지정합니다. Engineer는 곧바로 실행을 시작하고 상태가 진행 중으로 바뀝니다. 태스크 오른쪽에는 이 태스크의 모든 상황이 모입니다. 상태, 담당자, 연결된 pull request, 실행 기록입니다.
-
-실행에는 몇 분이 걸립니다. 진행 상황은 두 곳에서 확인합니다. 제목 옆의 작업 상태 배지, 그리고 오른쪽 **실행 로그**에서 현재 실행을 클릭하면 됩니다.
-
-![진행 상황을 확인하는 두 곳](/images/docs/tutorial-issue-engineer-working.webp)
+![에이전트로 만들기 모드의 새 태스크 대화상자(생성자: Engineer)](/images/docs/tutorial-new-issue-agent-mode.webp)
 
 </Step>
 <Step>
 
-실행 기록에는 이번 실행의 모든 단계가 있습니다. **Agent** 줄은 에이전트의 설명이고, **Bash**, **Read**, **Edit**는 실행한 명령과 읽고 쓴 파일입니다. 이 스크린샷 시점에는 완성한 페이지를 스크린샷으로 찍어 스스로 점검하던 중이었고, 가격표의 구분선이 정렬되지 않은 것을 막 발견했습니다. 오른쪽 위의 ⓘ를 클릭하면 이번 실행에 사용한 컴퓨터, AI 코딩 도구, 작업 디렉터리를 확인할 수 있습니다.
+제출하면 Multica가 제목을 자동 생성해 `SITE-1` 을 만들고 **Engineer** 를 담당자로 지정해 즉시 실행을 시작합니다. 상태가 **진행 중** 으로 바뀌고, 오른쪽 사이드바에 **속성**, **웨이크업**, **Pull requests**, **환경**, **실행 로그** 가 정리됩니다.
 
-![실행 기록: Engineer의 모든 단계](/images/docs/tutorial-execution-log.webp)
+진행 상황은 상단의 **Engineer is working** 배지나 오른쪽 **실행 로그** 에서 볼 수 있습니다. 실행 도중 방향을 바로잡고 싶다면 멈추지 않고 댓글 창에서 **현재 실행에 추가** 로 수정 지시를 보내 다음 단계 경계에서 [실행 중인 에이전트에게 끼어들기](/mentioning-agents#실행-중인-에이전트에게-끼어들기)를 할 수 있습니다.
+
+![Engineer가 작업 중인 SITE-1 화면과 오른쪽 실행 로그](/images/docs/tutorial-issue-engineer-working.webp)
+
+</Step>
+<Step>
+
+**실행 로그** 의 실행 항목에 마우스를 올리고 **전체 기록 보기** 를 클릭하면 에이전트 설명, **Bash** 명령, **Read / Edit** 편집 내역과 소요 시간을 단계별로 확인할 수 있습니다. 오른쪽 위 **ⓘ** 아이콘에서 머신, AI 코딩 도구, 전달된 스킬, 작업 디렉터리를 확인할 수 있습니다.
+
+![실행 로그 트랜스크립트: Engineer가 실행한 모든 명령과 편집 단계](/images/docs/tutorial-execution-log.webp)
 
 </Step>
 </Steps>
 
-## 검수: 태스크에서 대화하기
+## 프리뷰 및 검수: 빠른 채팅과 환경
 
-실행이 끝나면 Engineer가 상태를 리뷰 중으로 바꾸고 알림이 인박스로 들어옵니다. 태스크에는 완료 댓글과 함께 완성한 페이지 스크린샷을 남겼습니다.
+실행이 끝나면 Engineer는 `SITE-1` 상태를 **검토 중** 으로 바꾸고, 플레이스홀더 이미지 교체 경로가 담긴 요약 댓글을 남깁니다. 왼쪽 **작업** 패널 상단의 **인박스** 에도 알림이 도착합니다.
 
-![Engineer의 완료 댓글과 페이지 스크린샷](/images/docs/tutorial-issue-review-comment.webp)
+![검토 중인 SITE-1: Engineer의 완료 댓글과 인박스 알림](/images/docs/tutorial-issue-review-comment.webp)
 
-스크린샷으로 대략은 알 수 있지만 검수는 브라우저에서 직접 열어 봐야 합니다. 웹사이트는 내 컴퓨터에서 빌드되므로 Engineer에게 로컬 서버를 실행하게 하면 접속할 수 있습니다. 그리고 오른쪽의 **Pull requests** 영역은 아직 비어 있습니다. 태스크에서 PR 제출을 분명히 요구했으니 이 점도 함께 물어봅니다.
-
-이번에는 댓글 대신 채팅을 사용합니다.
+승인 전 확인할 것이 두 가지 있습니다. 브라우저에서 실제 페이지를 열어 보는 것과 오른쪽 사이드바의 **Pull requests** 가 아직 비어 있는 이유입니다. 태스크 타임라인을 어지럽히지 않고 하단 상태 표시줄의 **빠른 채팅** 을 사용해 봅시다.
 
 <Steps>
 <Step>
 
-화면 오른쪽 아래에는 채팅 버튼이 있어 워크스페이스의 어느 페이지에서든 열 수 있으며, 사이드바의 **채팅**과 같은 기능입니다.
+하단 상태 표시줄 오른쪽 끝의 **Ask Multica** 를 클릭(또는 `⌘J` / `⇧⌘J`)하고 **Engineer** 를 선택한 뒤 `@SITE-1` 을 참조해 두 가지를 물어봅니다.
 
-![오른쪽 아래의 채팅 버튼](/images/docs/tutorial-chat-fab.webp)
+Engineer가 플로팅 창에서 바로 답합니다. `multica env start web` 으로 로컬 서버를 띄웠으며, PR #1은 브랜치명과 제목에 `SITE-1` 이 빠져 자동 연결되지 않았기에 PR 제목을 업데이트했다고 알려 줍니다.
 
-</Step>
-<Step>
-
-열어서 Engineer를 선택하고 `@`를 입력해 현재 태스크를 참조합니다. 대화가 이 태스크의 컨텍스트를 함께 가져가므로 위의 두 가지를 그대로 보냅니다.
-
-![채팅에서 태스크를 참조해 질문](/images/docs/tutorial-chat-ask-in-issue.webp)
+![SITE-1에서 상태 표시줄로 연 플로팅 빠른 채팅 창](/images/docs/tutorial-chat-ask-in-issue.webp)
 
 </Step>
 <Step>
 
-Engineer의 답변은 두 부분입니다. 로컬 서버는 이미 실행했고 접속 주소를 알려 줍니다. PR도 이미 제출했지만 제목, 브랜치 이름, 본문 어디에도 `MUL-1`이 없어 자동 연결이 매칭되지 않았습니다. 이어서 PR 제목에 번호를 넣었습니다.
+빠른 채팅을 닫고 `SITE-1` 오른쪽 사이드바를 보면 두 카드가 새로 떠 있습니다.
 
-![Engineer의 답변: 로컬 주소와 PR이 연결되지 않은 이유](/images/docs/tutorial-chat-engineer-reply.webp)
+- **Pull requests**: `#1 Build photographer portfolio website` (`+648 -14`, 병합 시 자동 완료 안내 포함)
+- **환경(Environments)**: `Maya's MacBook Pro` 의 `Web app · Running · localhost:41000`. 한 번 클릭해 브라우저에서 열거나 메뉴에서 재시작·중지·실시간 로그 확인이 가능합니다(자세한 내용은 [환경](/environments) 참고).
 
-</Step>
-<Step>
-
-알려 준 주소를 브라우저에서 열면 웹사이트가 보입니다.
-
-![로컬에서 실행 중인 웹사이트 첫 화면](/images/docs/tutorial-site-localhost.webp)
+![SITE-1 오른쪽 사이드바에 연결된 PR 카드와 실행 중인 환경 프리뷰](/images/docs/tutorial-issue-pr-and-env.webp)
 
 </Step>
 <Step>
 
-태스크로 돌아오면 오른쪽 **Pull requests** 영역에 PR 카드가 나타납니다. 상태와 변경 규모가 표시되고 클릭하면 GitHub의 PR이 바로 열립니다. CI를 설정한 저장소라면 check 결과도 표시됩니다.
+**환경** 의 **Web app** 을 클릭해 `http://localhost:41000` 에서 완성된 포트폴리오 사이트를 직접 확인합니다.
 
-![태스크 오른쪽에 나타난 PR 카드](/images/docs/tutorial-issue-pr-linked.webp)
+![localhost:41000에서 실행 중인 사진작가 포트폴리오 사이트](/images/docs/tutorial-site-localhost.webp)
 
 </Step>
 </Steps>
 
-## 피드백을 지시문에 반영하기
+## 피드백을 지침에 반영하기
 
-이번 검수에서 Engineer의 작업 습관 두 가지가 드러났습니다. 완료 후 스크린샷을 반복해서 찍으며 스스로 점검하느라 실행 시간을 적지 않게 썼고, PR을 제출할 때 태스크 번호를 넣지 않아 연결되지 않았습니다. 둘 다 매번 반복될 방식이므로 고칠 것은 에이전트의 지시문이고, 이 태스크 자체는 그대로 둬도 됩니다.
+이번 검수에서 반복될 만한 습관 두 가지가 드러났습니다. PR에 태스크 번호를 빼먹어 자동 연결이 풀린 것과, 브라우저 프리뷰로 바로 볼 수 있는데도 반복 스크린샷 자가 점검에 시간을 쓴 것입니다.
 
-지시문은 직접 수정하지 않아도 됩니다. 에이전트는 multica CLI로 자기 설정을 업데이트할 수 있습니다. 앞의 대화에 이어서 Engineer에게 두 가지 규칙을 알려 주고 자기 지시문에 반영하게 합니다. 완료 후 스크린샷으로 자체 점검하지 말고 검수는 브라우저에서 진행한다는 것, 그리고 PR의 브랜치 이름이나 제목에 반드시 태스크 번호를 넣어야 한다는 것입니다.
+앞으로 모든 태스크에 적용될 규칙이므로, 같은 채팅에서 `multica agent update` 로 Engineer 자신의 지침에 직접 저장하라고 요청합니다.
 
-![Engineer에게 규칙을 자기 지시문에 반영하도록 요청](/images/docs/tutorial-chat-update-instructions.webp)
+![채팅에서 Engineer에게 두 규칙을 자신의 지침에 반영하도록 요청](/images/docs/tutorial-chat-update-instructions.webp)
 
-Engineer는 `multica agent update`로 업데이트를 마치고 지시문에 작업 규칙 항목을 새로 추가했으며, 첫 번째 규칙의 대가도 함께 알려 줍니다. 더 이상 스크린샷으로 자체 점검하지 않으므로 페이지의 시각적 문제는 브라우저에서 직접 찾아야 합니다.
+Engineer는 지침을 갱신하고, 스크린샷 자가 점검을 생략하면 시각적 회귀 확인이 브라우저 검수에 의존하게 된다는 트레이드오프도 함께 짚어 줍니다. **팀 → 전체 에이전트 → Engineer** 에서 추가된 **Working rules** 를 확인할 수 있습니다.
 
-**에이전트 → Engineer**를 열면 지시문에 이 두 가지가 추가되어 있습니다.
+![Working rules 섹션이 추가된 Engineer의 최신 지침](/images/docs/tutorial-engineer-updated-instructions.webp)
 
-![업데이트된 Engineer의 지시문](/images/docs/tutorial-engineer-updated-instructions.webp)
-
-이후 모든 실행에서 이 두 규칙이 지시문과 함께 적용됩니다. 에이전트는 대개 이렇게 다듬습니다. 반복해서 나타나는 문제를 발견하면 교정 내용을 지시문에 적어 두고, 매번 말로 상기시키지 않아도 되게 합니다.
+에이전트를 다듬는 핵심 방식은 이렇습니다. 여러 실행에 걸쳐 반복되는 문제가 보이면 지침에 한 번 적어 두면 됩니다.
 
 ## 세 번째 에이전트: Reviewer
 
-Engineer가 첫 번째 버전을 전달했지만 스스로 알아차리지 못하는 문제도 있습니다. 검토는 새 에이전트에게 맡깁니다. 완전히 새로운 컨텍스트에서 태스크의 요구 사항과 대조하며 코드 품질을 확인하는 역할입니다.
+Engineer가 좋은 초안을 만들었지만, 작성자 본인이 놓치는 빈틈은 늘 있습니다. 다른 도구와 모델, 새 컨텍스트로 코드 품질과 요구사항 일치 여부를 감사하는 읽기 전용 **Reviewer** 를 추가합니다.
 
 <Steps>
 <Step>
 
-생성은 이번에도 Multica helper에게 맡깁니다. Reviewer라는 에이전트를 만들고, 이번에는 Codex와 GPT-5.6 Sol 모델을 선택해 Engineer가 쓰는 도구, 모델과 모두 다르게 합니다. 검토만 하고 코드는 수정하지 않으며 결론은 태스크 댓글로 씁니다. 지시문은 이번에도 helper가 생성합니다. PR의 실제 상태를 읽은 뒤 검토할 것, 발견한 내용은 파일 위치와 함께 댓글로 쓸 것, 코드는 절대 수정하지 말 것입니다.
+채팅에서 **Multica helper** 에게 요청해 **Codex** (`gpt-5.6-sol`) 기반의 읽기 전용 **Reviewer** 를 만듭니다. PR diff를 코드 규칙과 요구사항 기준으로 검토하고, 파일·줄 번호와 함께 지적하며, 코드는 절대 수정하지 않도록 설정합니다. **팀 → 전체 에이전트 → Reviewer** 에서 확인합니다.
 
-![Reviewer의 설정](/images/docs/tutorial-reviewer-detail.webp)
-
-</Step>
-<Step>
-
-검토를 위해 태스크를 새로 만들거나 담당자를 바꿀 필요는 없습니다. MUL-1의 댓글 입력란으로 돌아와 `@Reviewer`로 멘션하고 할 일을 적어 보냅니다. 입력란 아래에는 전송하면 Reviewer가 실행을 시작한다는 안내가 표시됩니다.
-
-![댓글에서 @Reviewer를 멘션해 검토 시작](/images/docs/tutorial-comment-mention-reviewer.webp)
+![Codex 기반 읽기 전용 Reviewer 에이전트 상세 화면](/images/docs/tutorial-reviewer-detail.webp)
 
 </Step>
 <Step>
 
-몇 분 뒤 검토 댓글이 돌아왔고 결론은 merge 전에 수정이 필요하다는 것입니다. 다섯 건의 발견은 두 그룹으로 나뉩니다. 코드 규범 세 건, 요구 사항 부합도 두 건이며 각 건마다 파일과 줄 번호가 붙어 있습니다. 요구 사항 부합도 두 건이 바로 Engineer가 스스로 알아차리지 못한 문제입니다. 가격표가 가상의 가격, 예약금, 세금 조항을 확정된 내용처럼 표시하면서 미정 표시를 전혀 하지 않았고, 연락처에는 확인되지 않은 Instagram 링크가 들어 있었습니다. 댓글 끝에는 자신이 검증한 부분도 밝혔습니다. typecheck, lint, build가 모두 통과했습니다.
+리뷰를 위해 새 태스크를 만들거나 담당자를 바꿀 필요가 없습니다. `SITE-1` 댓글 창에서 `@Reviewer` 를 멘션하고 PR #1 검토를 요청합니다. 입력창 아래의 트리거 미리보기(`Reviewer · Will start when sent`)가 전송 시 실행될 에이전트를 미리 보여 줍니다.
+
+![SITE-1 댓글 창에서 @Reviewer 멘션과 하단 트리거 미리보기](/images/docs/tutorial-comment-mention-reviewer.webp)
 
 </Step>
 <Step>
 
-수정에도 새로운 절차는 필요 없습니다. 댓글에서 @Engineer를 멘션해 발견된 문제를 모두 고치게 합니다. 보내면 Engineer가 곧바로 실행을 시작하며 제목 옆 배지와 오른쪽 실행 기록에서 확인할 수 있습니다.
+Reviewer가 **Changes requested before merge** 결론과 함께 다섯 가지 지적을 남깁니다. 플레이스홀더 표시가 빠진 가격표와 확인되지 않은 Instagram 링크 같은 요구사항 누락 2건, 코드 규칙 3건이 모두 파일과 줄 번호로 정리되어 있습니다.
 
-![Reviewer의 검토 결론과 @Engineer에게 이어지는 수정 요청](/images/docs/tutorial-reviewer-findings.webp)
+같은 스레드에서 `@Engineer` 를 멘션해 5건을 모두 수정하도록 요청하면, Engineer가 PR #1에 수정 커밋을 올리고 항목별로 보고합니다.
 
-몇 분 뒤 Engineer가 보고합니다. 다섯 건을 모두 수정해 같은 PR에 반영했습니다. 두 에이전트가 같은 타임라인을 공유하므로 보고는 발견 항목마다 결과만 답하면 되고 배경을 다시 설명할 필요가 없습니다.
-
-![Engineer의 수정 보고](/images/docs/tutorial-engineer-fixed.webp)
+![Reviewer의 구조화된 리뷰 지적과 @Engineer 수정 요청](/images/docs/tutorial-reviewer-findings.webp)
 
 </Step>
 <Step>
 
-다시 Reviewer를 멘션해 한 번 더 확인하게 하면 결론은 다섯 건이 모두 해결되어 merge할 수 있고 낮은 우선순위의 후속 제안 두 건이 남았다는 것입니다.
+`@Reviewer` 를 다시 멘션해 재검토를 받으면, 5건 모두 해결되고 검사가 통과했다는 **Ready to merge** 결론이 돌아옵니다.
 
-![Reviewer의 재검토 통과](/images/docs/tutorial-reviewer-recheck.webp)
+![Reviewer의 재검토 통과 승인 댓글](/images/docs/tutorial-reviewer-recheck.webp)
 
 </Step>
 </Steps>
 
-이제 하나의 태스크에 에이전트 두 명이 붙어 있습니다. Engineer가 구현하고 Reviewer가 검토하며, 짧은 댓글 몇 개로 개발과 검토를 여러 차례 주고받게 할 수 있습니다.
+이제 하나의 태스크 스레드 안에서 Engineer는 구현과 수정을, Reviewer는 감사를 맡아 매끄럽게 왕복 협업합니다.
 
-## merge로 마무리
+## 병합하고 마무리하기
 
-merge도 댓글 하나로 지시합니다. Engineer에게 PR을 merge하고 태스크를 완료로 옮기게 합니다. Engineer는 merge하고, 브랜치를 삭제하고, merge된 main에서 검사를 다시 실행한 뒤 보고합니다. 태스크 상태는 완료로 바뀌고 인박스에 알림이 도착합니다.
+댓글로 `@Engineer` 에게 PR #1 병합과 마무리를 요청합니다. Engineer가 `main` 에 병합하고 브랜치를 정리한 뒤 빌드를 재확인해 보고합니다. PR 카드는 **Merged** 로 바뀌고 로컬 환경은 종료되며 `SITE-1` 은 **완료** 상태로 이동합니다.
 
-![merge 완료, 완료로 바뀐 태스크](/images/docs/tutorial-issue-done.webp)
+![PR #1 병합 완료 후 완료 상태가 된 SITE-1](/images/docs/tutorial-issue-done.webp)
 
-첫 번째 태스크는 여기서 끝납니다. 요구 사항 작성부터 merge까지 모든 단계가 같은 타임라인에 기록되어 있습니다.
+요구사항부터 실행 로그, 프리뷰, 리뷰, 수정, 승인, 병합까지 전 과정이 하나의 타임라인에 남습니다.
 
 ## 스쿼드 구성하기
 
-MUL-1의 순환은 잘 돌아갔지만 이어지는 단계는 매번 사람이 시작했습니다. 검수 후 Reviewer를 멘션하고, 검토 후 Engineer를 멘션했습니다. 조율 자체가 내 일이 된 것입니다. 이 일도 넘길 수 있으며, 이때 쓰는 것이 **스쿼드**(squad)입니다. 에이전트와 멤버를 묶어 이름을 붙인 집합이며 리더 에이전트 한 명이 이끕니다. 태스크를 스쿼드에 할당하면 리더가 받습니다. 태스크를 읽고, 작업을 나눠 주고, 상태를 진행합니다. 멤버가 답하면 자동으로 깨어나 다음 단계를 결정하고, 마무리할 때는 결과물을 보고합니다. 앞에서 MUL-1에서 내가 하던 일입니다.
+`SITE-1` 루프는 잘 돌아갔지만 매 단계마다 사람이 직접 멘션으로 연결해 주어야 했습니다. 이 조율 역할까지 맡기는 기능이 **스쿼드(Squad)** 입니다. 리더 에이전트가 여러 에이전트와 사람 멤버를 이끕니다.
 
-스쿼드는 기존 분업에 리더 한 명을 더한 것입니다.
+태스크를 스쿼드에 배정하면 리더가 먼저 받아 요구사항을 읽고 적절한 멤버를 `@` 멘션으로 호출합니다. 멤버가 결과를 남기면 리더가 자동으로 깨어나 다음 단계로 넘기고, 최종 완료 시 사람에게 승인 보고를 올립니다.
 
-- **Lead**(새로 만듦): 리더이며 관리를 담당합니다. 작업을 배분하고, 태스크 상태를 진행하고, 결과물을 보고하며 직접 구현하지는 않습니다.
-- **Engineer**(기존): 개발.
-- **Reviewer**(기존): 모든 PR 검토.
-- **당신**: 최종 검수.
+지금 역할 분담에 리더를 더해 **Website Team** 을 구성합니다.
 
-멤버는 에이전트로 한정되지 않습니다. 각 멤버에는 한 줄짜리 역할 설명이 붙고 리더가 작업을 배분할 때 참고합니다.
+- **Lead** (신규, Claude Sonnet): 리더. 범위 정리, Engineer·Reviewer 배분, 상태 관리, 승인 브리핑 작성(직접 코드는 수정하지 않음).
+- **Engineer** (기존): 기능 구현, 리뷰 수정, 승인 후 병합.
+- **Reviewer** (기존): 모든 PR 읽기 전용 검토.
+- **Maya Lin(나)**: 최종 제품 승인 및 병합 결정.
 
-이 구성은 Multica helper에게 설명하는 것으로 충분합니다. 스쿼드와 리더를 만들고, 멤버마다 역할을 정하고, Lead와 Engineer에 스킬을 하나씩 연결하고(다음 절에서 설명합니다), 스쿼드 지시문에 워크플로를 적습니다. 개발은 Engineer에게 배분하고, PR 검토를 통과해야 전달하며, 검수가 끝나면 Engineer가 merge합니다. helper가 CLI로 모든 설정을 한 번에 마칩니다.
+이 구성과 두 스킬(Engineer용 `tdd`, Lead용 `delivery-brief`), 스쿼드 지침을 **Multica helper** 에게 채팅으로 한 번에 설명하면 CLI로 일괄 설정해 줍니다.
 
-![helper가 스쿼드 설정을 한 번에 완료](/images/docs/tutorial-helper-create-squad.webp)
+![Multica helper가 Website Team 스쿼드, Lead, 스킬 연결을 한 번에 구성](/images/docs/tutorial-helper-create-squad.webp)
 
-사이드바에서 **스쿼드 → Website Team**을 열어 결과를 확인합니다. 리더, 멤버, 역할 설명이 모두 들어 있습니다. 스쿼드는 이 페이지에서 양식으로 만들 수도 있습니다. 전체 동작 방식은 [스쿼드 문서](/squads)를 참고하세요.
+**팀 → 스쿼드 → Website Team** 을 열면 리더, 멤버, 역할 설명, 스쿼드 지침을 확인할 수 있습니다(이 페이지에서 직접 폼으로 만들고 편집할 수도 있습니다. 자세한 내용은 [스쿼드](/squads) 참고).
 
-![스쿼드 상세 페이지: 리더, 멤버, 역할](/images/docs/tutorial-squad-detail.webp)
+![Website Team 상세 화면: 리더, 멤버, 역할, 워크플로 지침](/images/docs/tutorial-squad-detail.webp)
 
-## 스킬: 재사용 가능한 방법
+## 스킬: 재사용 가능한 방법론
 
-앞에서 피드백을 지시문에 반영한 것은 에이전트 한 명의 문제만 해결합니다. 지시문은 그 에이전트에게만 속하기 때문입니다. 하나의 방법을 여러 에이전트가 공유하게 하거나 다른 사람이 이미 작성해 둔 방법을 그대로 가져오려면 **스킬**을 사용합니다.
+앞에서 지침에 적은 규칙은 한 에이전트에만 적용됩니다. 여러 에이전트가 공유해야 하거나 커뮤니티 패키지를 가져다 쓸 방법은 **스킬(Skill)** 로 관리합니다.
 
-스킬은 에이전트에게 주는 지식 묶음입니다. `SKILL.md` 하나와 선택적인 지원 파일로 구성되며, 특정 유형의 작업을 만났을 때 어떻게 생각하고 어떻게 처리할지 알려 줍니다. Multica는 Anthropic Agent Skills 공개 표준을 따르므로 규격에 맞는 스킬은 바로 가져올 수 있습니다. 에이전트에 연결하면 실행할 때 런타임으로 자동 동기화됩니다. **스킬** 페이지를 열면 방금 가져온 두 개가 있고 오른쪽에는 각각 연결된 에이전트가 표시됩니다.
+스킬은 개방형 Agent Skills 표준을 따르며 `SKILL.md` 와 보조 참고 문서·스크립트로 구성됩니다. 에이전트에 연결해 두면 실행 시 런타임에 자동 동기화됩니다. **팀 → 리소스 → 스킬** 에서 방금 연결한 두 스킬과 사용 중인 에이전트를 확인할 수 있습니다.
 
-![워크스페이스의 스킬 페이지](/images/docs/tutorial-skills-list.webp)
+![팀 -> 스킬 목록: Lead의 delivery-brief와 Engineer의 tdd](/images/docs/tutorial-skills-list.webp)
 
-클릭하면 스킬의 모든 파일을 볼 수 있습니다.
+`tdd` 를 열면 `SKILL.md` 본문, 보조 파일(`examples/test-first.md`, `references/checklist.md`), 버전 기록, 연결된 에이전트를 볼 수 있습니다.
 
-![tdd 스킬의 파일 구조](/images/docs/tutorial-skill-detail.webp)
+![tdd 스킬 상세 화면: SKILL.md, 보조 파일, 연결된 Engineer](/images/docs/tutorial-skill-detail.webp)
 
-이 두 스킬은 하나는 일하는 방식을, 하나는 말하는 방식을 담당합니다.
+두 스킬은 워크플로의 서로 다른 지점을 다듬습니다.
 
-- **tdd**는 Engineer에 연결한 엔지니어링 방법입니다. 실패하는 테스트를 먼저 쓰고, 그 테스트를 통과시키는 만큼만 구현합니다.
-- **i-have-adhd**는 Lead에 연결한 보고 스타일입니다. 첫 줄은 항상 실행 가능한 다음 단계이고, 여러 단계는 번호를 붙이며, 진행 상황이 드러납니다. 리더의 결과물은 전부 사람에게 보내는 보고이므로 이 스킬이 읽게 되는 형태를 결정합니다.
+- **tdd** (Engineer에 연결): 실패하는 테스트를 먼저 쓰고, 최소 구현으로 통과시킨 뒤 깔끔하게 리팩터링합니다.
+- **delivery-brief** (Lead에 연결): 첫 줄에 결정 사항과 다음 액션을 두고, PR 요약과 사람 판단이 필요한 항목을 번호로 정리하며, 승인 없이는 병합하지 않습니다.
 
-팀의 작업 방식을 스킬로 축적하면 새 에이전트는 연결하는 것만으로 이어받습니다. 가져오기만 있는 것은 아닙니다. **새 스킬**은 직접 만들기, 로컬에서 가져오기, URL에서 가져오기, 로컬 런타임에서 복사하기 네 가지 방법을 제공합니다. 여기서는 다루지 않으며 [스킬 문서](/skills)를 참고하세요.
+**스킬** 페이지 오른쪽 위 **+** 를 누르면 **직접 만들기**, **로컬에서 가져오기**, **URL에서 가져오기**(GitHub, ClawHub, Skills.sh), **런타임에서 복사** 네 가지 추가 방식을 볼 수 있습니다(자세한 내용은 [스킬](/skills)).
 
-![새 스킬을 만드는 네 가지 방법](/images/docs/tutorial-skill-new-modal.webp)
+![+ 메뉴의 4가지 스킬 생성·가져오기 옵션](/images/docs/tutorial-skill-new-modal.webp)
 
-외부 스킬을 가져오기 전에 파일을 먼저 읽어 보세요. Multica는 샌드박스로 격리하지 않으며 스킬의 내용은 그대로 AI 코딩 도구에 전달됩니다.
+외부 스킬을 가져오기 전에 반드시 파일을 읽어 보세요. Multica는 스킬을 샌드박싱하지 않고 AI 코딩 도구에 그대로 전달합니다.
 
 ## 두 번째 태스크: 스쿼드에 맡기기
 
-스쿼드에 완결된 작업 하나를 맡깁니다. 웹사이트를 범용 템플릿으로 바꾸는 일입니다. 실제 이름은 플레이스홀더 사진작가 이름으로, 실제 이메일은 `hello@example.com`으로 바꾸고 레이아웃과 콘텐츠 구조는 그대로 둡니다. 이번 태스크는 직접 쓰지 않습니다. 채팅에서 Lead에게 요구 사항을 설명하고 **에이전트로 만들기**로 바로 만들며 담당자는 스쿼드입니다. 스쿼드도 에이전트, 멤버와 마찬가지로 담당자 자리에 올 수 있습니다.
+이제 **Website Team** 에 완전한 기능 작업을 맡겨 봅니다. 기존 레이아웃과 타이포그래피는 유지한 채 개인 이름(`Alex Rivera`)과 이메일(`hello@example.com`)을 플레이스홀더로 바꾼 재사용 템플릿으로 전환하는 작업입니다.
 
-![대화에서 "에이전트로 만들기"로 태스크 만들기](/images/docs/tutorial-create-with-agent.webp)
+`C` 를 눌러 **새 태스크** 를 열고 **에이전트로 만들기** 모드에서 **생성자** 로 **Website Team** 을 선택한 뒤 요청을 제출합니다. 스쿼드는 개인이나 단일 에이전트가 들어가는 모든 담당자 자리에 쓸 수 있습니다.
 
-생성된 태스크에는 요구 사항이 구조화된 설명으로 정리되어 있고, 제목 옆 배지는 리더가 이미 작업을 맡았음을 보여 줍니다.
+`SITE-2` 가 **Website Team** 에 배정되면 **Lead** 가 전체 과정을 자동으로 이어 갑니다.
 
-![MUL-2: Lead가 태스크를 만들고 작업을 시작](/images/docs/tutorial-issue-squad-created.webp)
+1. **Lead** 가 추가 제약(`<title>`, Open Graph, `README.md` 일괄 치환 및 `tdd` 테스트 추가)을 정리해 `@Engineer` 에게 위임합니다.
+2. **Engineer** 가 테스트를 먼저 작성하고 구현한 뒤 PR #2(`SITE-2: Convert portfolio into reusable template`)를 올려 보고합니다.
+3. **Lead** 가 자동으로 깨어나 PR #2를 `@Reviewer` 에게 넘깁니다.
+4. **Reviewer** 가 diff와 테스트를 확인해 지적 0건으로 **Ready to merge** 를 회신합니다.
 
-이후는 전부 리더의 작업입니다. 리더는 작업을 배분하는 댓글에서 태스크에 없던 제약 두 가지를 덧붙인 뒤(플레이스홀더 신원을 사이트 전체에서 통일, 점검 범위를 메타데이터와 README까지 포함) Engineer에게 넘깁니다. Engineer는 작업을 마친 뒤 같은 타임라인에 PR을 보고합니다.
+![SITE-2 스레드: Lead의 위임, Engineer의 PR #2 보고, Lead의 리뷰 요청과 Reviewer 승인](/images/docs/tutorial-squad-dispatch.webp)
 
-![Lead가 작업을 배분하고 Engineer가 PR을 보고](/images/docs/tutorial-squad-dispatch.webp)
+리뷰가 통과되면 **Lead** 가 `SITE-2` 를 **검토 중** 으로 옮기고, `delivery-brief` 스킬 형식에 맞춰 당신을 멘션하는 간결한 승인 브리핑을 게시합니다.
 
-검토에서 발견된 문제가 없자 Lead가 곧바로 전달합니다. 검수를 요청하며 멘션하고, 첫 줄은 결론, 그 아래는 PR 링크, 변경 설명, 판단이 필요한 두 가지 항목이며, 마지막에는 승인하기 전에는 merge하지 않는다고 적습니다.
+![SITE-2에 게시된 Lead의 간결한 전달 브리핑(Maya 멘션 포함)](/images/docs/tutorial-squad-delivery.webp)
 
-![Lead의 전달 보고](/images/docs/tutorial-squad-delivery.webp)
-
-요구 사항 정리, 방안 확정, 개발, 검토, 전달 보고까지 이 태스크에서는 사람이 단계를 이어 줄 일이 한 번도 없었습니다. 검수 방식은 MUL-1과 같습니다. 로컬 서버를 실행하게 해 브라우저에서 확인할 수도 있으며 여기서는 다시 설명하지 않습니다. 완료는 여전히 사람의 몫입니다. merge하라고 답하거나 상태를 직접 바꿉니다.
+범위 정리부터 테스트 주도 구현, PR 리뷰, 최종 승인 브리핑까지 사람이 중간에서 연결한 단계는 단 하나도 없습니다.
 
 ## 자동화: 오토파일럿
 
-지금까지의 모든 트리거는 사람이 시작했습니다. 할당, 멘션, 대화입니다. **오토파일럿**은 네 번째 트리거 방식으로, 시간에 맞춰 자동으로 작업을 시작합니다.
+지금까지의 실행은 모두 배정, 멘션, 채팅처럼 사람의 행동에서 시작되었습니다. **오토파일럿** 은 스케줄과 웹훅으로 반복 유지보수를 자동 실행합니다.
 
 <Steps>
 <Step>
 
-설정은 한 문장이면 됩니다. Multica helper에게 매주 월요일 아침 9시에 Reviewer가 웹사이트 코드베이스를 전면 점검하게 해 달라고 알려 줍니다. 중복과 죽은 코드, 부적절한 구조, 더 규범적으로 바꿀 수 있는 부분을 찾아 태스크 댓글에 쓰고 코드는 수정하지 않게 합니다.
+채팅에서 **Multica helper** 에게 요청해 매주 월요일 오전 9시에 **Reviewer** 가 `personal-website` 를 읽기 전용으로 점검(불필요 코드, 미사용 export, 오래된 의존성, 타입 개선)하는 **태스크 생성** 모드 오토파일럿을 만듭니다.
 
-![helper가 오토파일럿을 만드는 모습](/images/docs/tutorial-autopilot-create.webp)
+앱 탐색 바에서 **오토파일럿** 을 열면 **Runbook**, 스케줄(`0 9 * * 1`, 타임존, 다음 실행 시각), 실행 모드(**태스크 생성** / **실행만**)를 확인할 수 있습니다. 왼쪽 패널의 **태스크 웨이크업** 에서는 기존 태스크의 일회성·조건부 후속 알림을 관리합니다.
 
-</Step>
-<Step>
+월요일까지 기다리지 않고 오른쪽 위 **지금 실행** 을 눌러 바로 테스트합니다.
 
-**오토파일럿** 페이지를 열면 실행 주체, 프롬프트, 일정(cron과 시간대)이 모두 설정되어 있습니다. 실행 모드는 두 가지입니다.
-
-- **태스크 만들기**(기본값): 트리거할 때마다 태스크를 먼저 만들어 작업이 보드에 올라가며, 기록과 댓글이 일반 태스크와 완전히 같습니다.
-- **실행만**: 태스크를 만들지 않고 바로 실행하며 오토파일럿의 실행 기록에만 남습니다. 이번에 발견된 문제가 없다면 보드에는 아무것도 남지 않습니다.
-
-정기 점검에는 태스크 만들기 모드를 사용합니다. 월요일까지 기다리지 않으려면 **지금 실행**을 클릭해 바로 한 번 트리거합니다.
-
-![오토파일럿 상세 페이지: 일정과 지금 실행](/images/docs/tutorial-autopilot-detail.webp)
+![오토파일럿 상세 화면: Runbook, 매주 월요일 9:00 스케줄, 지금 실행 버튼](/images/docs/tutorial-autopilot-detail.webp)
 
 </Step>
 <Step>
 
-태스크가 곧바로 만들어지고 Reviewer가 점검을 시작합니다. 이후 매주 월요일 정해진 시각이 되면 같은 점검이 새 태스크를 자동으로 만들며 아무도 트리거할 필요가 없습니다.
+즉시 `SITE-3` 이 생성되고 **Reviewer** 가 읽기 전용 점검을 시작합니다. 이후 매주 월요일 오전 9시마다 같은 점검이 자동으로 실행됩니다.
 
-![오토파일럿이 자동으로 만든 태스크](/images/docs/tutorial-autopilot-issue.webp)
+![오토파일럿이 자동 생성한 SITE-3과 실행 중인 Reviewer](/images/docs/tutorial-autopilot-issue.webp)
 
 </Step>
 </Steps>
 
-트리거는 일정 외에 webhook도 지원하며 실행 주체를 스쿼드로 지정할 수도 있습니다. [오토파일럿 문서](/autopilots)를 참고하세요.
+오토파일럿은 스케줄 외에 GitHub·GitLab·범용 **웹훅** 도 지원하며 담당자로 **스쿼드** 를 지정할 수도 있습니다. 자세한 내용은 [오토파일럿](/autopilots)과 [태스크 웨이크업](/issue-wakeups)을 참고하세요.
 
-## 여러 사람과 협업
+## 다른 사람과 함께 일하기
 
-여기까지 워크스페이스의 사람 멤버는 계속 한 명뿐이었습니다. **설정 → 멤버**에서 이메일로 다른 사람을 초대하면 그들도 똑같이 태스크를 만들고, 에이전트를 @멘션하고, 스쿼드에 참여합니다. 여러 사람과 여러 에이전트가 같은 태스크들에서 함께 일합니다.
+지금까지 워크스페이스의 사람 멤버는 나 혼자였습니다. **팀** 패널 상단의 **멤버 초대** 아이콘이나 **설정 → 멤버** 에서 이메일로 동료를 초대할 수 있습니다. **멤버**, **관리자** 뿐 아니라 공유된 프로젝트만 볼 수 있는 무료 **게스트** 역할도 지원합니다.
 
-![이메일로 멤버를 워크스페이스에 초대](/images/docs/tutorial-invite-member.webp)
+![설정 -> 멤버의 멤버 초대 대화상자(멤버, 관리자, 게스트 역할)](/images/docs/tutorial-invite-member.webp)
 
-## 마치며
+초대된 동료도 똑같이 태스크를 만들고, 공유 에이전트를 `@` 멘션하고, 환경 프리뷰를 열고, 스쿼드에 참여해 사람과 에이전트가 함께 협업할 수 있습니다.
 
-태스크가 많아지면 이를 정리하는 도구도 있습니다. **프로젝트**는 관련 태스크를 한 묶음으로 모아 하나의 단위로 관리합니다([프로젝트 문서](/projects) 참고). 비슷한 정리 방식이 계속 늘고 있으며 **Space**도 곧 사용할 수 있습니다.
+## 마무리
 
-지금까지의 경로를 되짚어 보면, 빈 워크스페이스에서 시작해 컴퓨터 한 대를 연결하고, 에이전트 네 명을 만들고, 태스크 두 건을 끝낸 뒤, 조율은 리더에게 정기 점검은 오토파일럿에 넘겼습니다. 마지막에 내가 할 일은 요구 사항을 설명하고 결과를 검수하는 것뿐입니다.
+태스크와 프로젝트가 늘어나도 같은 방식을 그대로 확장할 수 있는 구조가 이미 마련되어 있습니다.
 
-Multica는 계속 빠르게 발전하고 있으며 더 많은 기능은 [문서](/)에서 확인할 수 있습니다.
+- **4개 스페이스** 가 일상 업무의 초점을 분리합니다: **작업**(인박스, 뷰, 프로젝트), **팀**(에이전트, 스쿼드, 스킬, 런타임, 분석), **채팅**, **오토파일럿**.
+- **프로젝트** 는 관련 태스크를 묶어 공통 지침, 저장소·로컬 폴더 리소스, 폴더 정리, 진행률 예측, 그리고 단계별 자동 핸드오프가 가능한 사용자 지정 [워크플로](/workflows)를 제공합니다.
+
+빈 워크스페이스에서 시작해 컴퓨터를 연결하고, 전문 에이전트 4개를 만들고, 환경 프리뷰로 첫 PR을 검수·병합하고, 피드백을 지침과 스킬로 굳히고, 조율을 스쿼드에, 주간 점검을 오토파일럿에 넘겼습니다. 결국 사람에게 남는 일은 방향 설정과 최종 승인뿐입니다.
 
 ## 다음 단계
 
-- [핵심 개념](/concepts) — 3분 안에 Multica의 모든 핵심 객체를 알아봅니다.
-- [스쿼드](/squads) — 리더가 작업을 어떻게 라우팅하는지, 언제 단일 에이전트 대신 스쿼드를 사용하는지 알아봅니다.
-- [스킬](/skills) — 에이전트의 방법을 가져오고, 작성하고, 공유합니다.
-- [오토파일럿](/autopilots) — 일정과 webhook 두 가지 트리거의 전체 설정을 확인합니다.
+- [핵심 개념](/concepts) — 3분 만에 Multica의 모든 핵심 객체 관계 파악하기.
+- [환경(Environments)](/environments) — `.multica/environments.toml` 로 원클릭 프리뷰와 실시간 로그 구성하기.
+- [프로젝트](/projects) — 공유 저장소, 폴더, 진행률 추적으로 다중 태스크 정리하기.
+- [스쿼드](/squads) — 리더 라우팅 규칙, 재트리거 조건, 운영 프로토콜.
+- [스킬](/skills) — 재사용 가능한 에이전트 방법 작성, 가져오기, 업데이트, 공유.
+- [오토파일럿](/autopilots) — 스케줄, 웹훅, 페이로드 필터링, 실행 기록.

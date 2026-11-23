@@ -1,4 +1,9 @@
 "use client";
+import { docKeys } from "../docs/queries";
+import { applyDocUpdated } from "../docs/realtime";
+
+import { weixinKeys } from "../weixin/queries";
+
 
 import { useEffect, useRef } from "react";
 import { forgetLocalSearchIndex } from "../search-index/instance";
@@ -54,6 +59,8 @@ import {
   onIssuePropertiesChanged,
   onIssueMetadataChanged,
   onIssueAuxiliaryRevision,
+  onIssueReactionAdded,
+  onIssueReactionRemoved,
   invalidateIssueOwnerProjections,
 } from "../issues/ws-updaters";
 import {
@@ -61,11 +68,13 @@ import {
   invalidateUpdatedAtSortedIssueLists,
 } from "../issues/cache-coordinator";
 import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted, onInboxSummaryInvalidate } from "../inbox/ws-updaters";
+import { noteInboxAutoArchive } from "../inbox/auto-archive";
 import {
   notificationPreferenceOptions,
   notificationPreferenceKeys,
 } from "../notification-preferences/queries";
 import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
+import { memberLimitKeys } from "../billing/member-limit";
 import { isWorkspaceDeletePending } from "../workspace/pending-delete";
 import {
   showSystemNotification,
@@ -105,6 +114,7 @@ import type {
   IssueMetadataChangedPayload,
   IssuePropertiesChangedPayload,
   InboxNewPayload,
+  InboxBatchArchivedPayload,
   InboxItem,
   NotificationPreferenceResponse,
   CommentCreatedPayload,
@@ -133,6 +143,8 @@ import type {
   ChatQuickActionsPendingState,
   ChatQuickActionsFailureState,
   ChatCancelFinalizedPayload,
+  ChatWakeupChangedPayload,
+  ChatWakeup,
   ChatMessage,
   ChatMessageEventPayload,
   ChatPendingTask,
@@ -714,6 +726,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: issueWorkflowKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: issueViewKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: issueViewPrefKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: docKeys.all(wsId) });
   }
   // Cross-workspace, so outside the wsId guard: a reconnect may have missed
   // inbox events from any workspace, so re-pull the switcher-dot summary.
@@ -729,7 +742,6 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   // get marked stale here and refetch on next mount; the one mounted issue
   // refetches immediately, same as its own useWSReconnect already does.
   qc.invalidateQueries({ queryKey: issueKeys.timelineAll() });
-  qc.invalidateQueries({ queryKey: issueKeys.reactionsAll() });
   qc.invalidateQueries({ queryKey: issueKeys.subscribersAll() });
   qc.invalidateQueries({ queryKey: issueKeys.usageAll() });
   qc.invalidateQueries({ queryKey: issueKeys.attachmentsAll() });
@@ -746,6 +758,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   // what the durable draft-restore rows exist for (#5219) — re-pull them so
   // a mounted composer recovers the prompt without a remount.
   qc.invalidateQueries({ queryKey: chatKeys.draftRestoresAll() });
+  qc.invalidateQueries({ queryKey: chatKeys.wakeupsAll() });
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
 
@@ -1077,6 +1090,10 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: wecomKeys.installations(wsId) });
       },
+      weixin_installation: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: weixinKeys.installations(wsId) });
+      },
       telegram_installation: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: telegramKeys.installations(wsId) });
@@ -1204,7 +1221,7 @@ export function useRealtimeSync(
       "subscriber:added", "subscriber:removed",
       "daemon:heartbeat",
       // Chat events are handled explicitly below; do not double-invalidate.
-      "chat:message", "chat:done", "chat:reply_notification", "chat:quick_actions", "chat:cancel_finalized", "chat:session_read",
+      "chat:message", "chat:done", "chat:reply_notification", "chat:quick_actions", "chat:cancel_finalized", "chat:wakeup_changed", "chat:session_read",
       "chat:session_created", "chat:session_deleted", "chat:session_updated",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
@@ -1355,10 +1372,9 @@ export function useRealtimeSync(
       if (wsId) {
         onIssuePropertiesChanged(qc, wsId, issue_id, properties ?? {}, issue_revision);
         scheduleProjectActivityRefresh(wsId);
-        // The catalog embeds per-definition usage counts; every value
-        // set/unset shifts them. The list is tiny, so a refetch beats
-        // trying to patch counts client-side.
-        qc.invalidateQueries({ queryKey: propertyKeys.all(wsId) });
+        // Value set/unset shifts usage counts only; the plain catalog is
+        // unchanged. Only the settings view observes the counted list.
+        qc.invalidateQueries({ queryKey: propertyKeys.withUsage(wsId) });
       }
     });
 
@@ -1380,6 +1396,12 @@ export function useRealtimeSync(
       const { item } = p as InboxNewPayload;
       if (!item) return;
       await handleInboxNew(qc, item);
+    });
+
+    // Recorded before the refresh the generic inbox handler schedules, so the
+    // Inbox knows why the open notification left once the list drops it.
+    const unsubInboxBatchArchived = ws.on("inbox:batch-archived", (p) => {
+      noteInboxAutoArchive(p as InboxBatchArchivedPayload);
     });
 
     // --- Timeline event handlers (global fallback) ---
@@ -1411,6 +1433,31 @@ export function useRealtimeSync(
       qc.invalidateQueries({ queryKey: issueKeys.attachments(issueId) });
     };
 
+    // Only the tree lists docs and folders; an open doc's body and comments
+    // are not touched by these.
+    const docUnsubs = ([
+      "doc:created", "doc_folder:created", "doc_folder:updated", "doc_folder:deleted",
+    ] as const).map((event) => ws.on(event, () => {
+      const wsId = getCurrentWsId();
+      if (wsId) void qc.invalidateQueries({ queryKey: docKeys.tree(wsId) });
+    }));
+    docUnsubs.push(ws.on("doc:updated", (p) => {
+      const wsId = getCurrentWsId();
+      if (wsId) applyDocUpdated(qc, wsId, p);
+    }));
+    docUnsubs.push(ws.on("doc:deleted", (p) => {
+      const wsId = getCurrentWsId();
+      if (!wsId) return;
+      void qc.invalidateQueries({ queryKey: docKeys.tree(wsId) });
+      const docId = (p as { doc_id?: string } | undefined)?.doc_id;
+      if (docId) void qc.invalidateQueries({ queryKey: docKeys.detail(wsId, docId) });
+    }));
+    // A discussion changed on one doc: refetch that doc's comments only.
+    docUnsubs.push(ws.on("doc_comment:changed", (p) => {
+      const wsId = getCurrentWsId();
+      const docId = (p as { doc_id?: string } | undefined)?.doc_id;
+      if (wsId && docId) void qc.invalidateQueries({ queryKey: docKeys.comments(wsId, docId) });
+    }));
     const unsubCommentCreated = ws.on("comment:created", (p) => {
       const { comment, issue_revision: issueRevision } = p as CommentCreatedPayload;
       if (!comment?.issue_id) return;
@@ -1499,20 +1546,18 @@ export function useRealtimeSync(
     // --- Issue-level reactions & subscribers (global fallback) ---
 
     const unsubIssueReactionAdded = ws.on("issue_reaction:added", (p) => {
-      const { issue_id, issue_revision } = p as IssueReactionAddedPayload;
-      if (issue_id) {
-        qc.invalidateQueries({ queryKey: issueKeys.reactions(issue_id) });
-        const wsId = getCurrentWsId();
-        if (wsId) onIssueAuxiliaryRevision(qc, wsId, issue_id, issue_revision);
+      const { issue_id, reaction, issue_revision } = p as IssueReactionAddedPayload;
+      const wsId = getCurrentWsId();
+      if (issue_id && wsId) {
+        onIssueReactionAdded(qc, wsId, issue_id, reaction, issue_revision);
       }
     });
 
     const unsubIssueReactionRemoved = ws.on("issue_reaction:removed", (p) => {
-      const { issue_id, issue_revision } = p as IssueReactionRemovedPayload;
-      if (issue_id) {
-        qc.invalidateQueries({ queryKey: issueKeys.reactions(issue_id) });
-        const wsId = getCurrentWsId();
-        if (wsId) onIssueAuxiliaryRevision(qc, wsId, issue_id, issue_revision);
+      const { issue_id, issue_revision, ...removed } = p as IssueReactionRemovedPayload;
+      const wsId = getCurrentWsId();
+      if (issue_id && wsId) {
+        onIssueReactionRemoved(qc, wsId, issue_id, removed, issue_revision);
       }
     });
 
@@ -1651,6 +1696,8 @@ export function useRealtimeSync(
         const currentWsId = getCurrentWsId();
         if (currentWsId) {
           qc.invalidateQueries({ queryKey: workspaceKeys.invitations(currentWsId) });
+          // A declined invitation frees its member slot.
+          qc.invalidateQueries({ queryKey: memberLimitKeys.all(currentWsId) });
         }
         if (actorId === authStore.getState().user?.id) {
           qc.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
@@ -1866,6 +1913,32 @@ export function useRealtimeSync(
       }
     });
 
+    // A wakeup changed. When it started a turn (task_id), the turn's hidden
+    // input row is new too, so the transcript and queue refetch.
+    const unsubChatWakeupChanged = ws.on("chat:wakeup_changed", (p) => {
+      const payload = p as ChatWakeupChangedPayload;
+      chatWsLogger.info("chat:wakeup_changed (global)", payload);
+      qc.invalidateQueries({ queryKey: chatKeys.wakeups(payload.chat_session_id) });
+      const id = getCurrentWsId();
+      if (id) qc.invalidateQueries({ queryKey: chatKeys.myWakeups(id) });
+      if (payload.task_id) {
+        qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
+        qc.invalidateQueries({ queryKey: chatKeys.messagesPage(payload.chat_session_id) });
+        qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
+        invalidatePendingAggregate();
+        invalidateSessionLists();
+      }
+    });
+
+    // A wakeup's row shows how its report turn is going (last_task_status),
+    // so task lifecycle in a conversation with started wakeups refreshes it.
+    const refreshWakeupTurns = (sessionId: string) => {
+      const cached = qc.getQueryData<ChatWakeup[]>(chatKeys.wakeups(sessionId));
+      if (cached?.some((w) => w.last_task_id)) {
+        qc.invalidateQueries({ queryKey: chatKeys.wakeups(sessionId) });
+      }
+    };
+
     // Lifecycle events are invalidation hints. They intentionally omit queue
     // previews and message ids, so only the pending-task endpoint can author
     // the complete queue shape.
@@ -1908,6 +1981,7 @@ export function useRealtimeSync(
       );
       invalidateChatMessageQueries(qc, payload.chat_session_id);
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
+      refreshWakeupTurns(payload.chat_session_id);
       invalidatePendingAggregate();
     });
 
@@ -1959,6 +2033,7 @@ export function useRealtimeSync(
       );
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidateChatMessageQueries(qc, payload.chat_session_id);
+      refreshWakeupTurns(payload.chat_session_id);
       invalidatePendingAggregate();
       invalidateSessionLists();
     });
@@ -1970,11 +2045,18 @@ export function useRealtimeSync(
         task_id: payload.task_id,
         chat_session_id: payload.chat_session_id,
       });
-      qc.setQueryData<ChatPendingTask>(
-        chatKeys.pendingTask(payload.chat_session_id),
-        (old) => removePendingChatTask(old, payload.task_id),
+      const pendingKey = chatKeys.pendingTask(payload.chat_session_id);
+      // chat:done normally clears this turn and refreshes its reply. If the
+      // turn is still pending locally, recover the persisted outcome here.
+      if (qc.getQueryData<ChatPendingTask>(pendingKey)?.task_id === payload.task_id) {
+        invalidateChatMessageQueries(qc, payload.chat_session_id);
+        invalidateSessionLists();
+      }
+      qc.setQueryData<ChatPendingTask>(pendingKey, (old) =>
+        removePendingChatTask(old, payload.task_id),
       );
-      qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
+      qc.invalidateQueries({ queryKey: pendingKey });
+      refreshWakeupTurns(payload.chat_session_id);
       invalidatePendingAggregate();
     });
 
@@ -1997,6 +2079,7 @@ export function useRealtimeSync(
       );
       invalidateChatMessageQueries(qc, payload.chat_session_id);
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
+      refreshWakeupTurns(payload.chat_session_id);
       invalidatePendingAggregate();
       // FailTask persisted a failure chat_message, so the thread list's
       // last_message / unread_count / sort order changed too. Mirror the
@@ -2057,6 +2140,7 @@ export function useRealtimeSync(
     return () => {
       releaseSyncTarget();
       unsubAny();
+      unsubChatWakeupChanged();
       unsubGitHubInstallationCreated();
       unsubIssueUpdated();
       unsubIssueCreated();
@@ -2068,6 +2152,8 @@ export function useRealtimeSync(
       unsubIssuePropertiesChanged();
       unsubPropertyChanged.forEach((unsub) => unsub());
       unsubInboxNew();
+      unsubInboxBatchArchived();
+      docUnsubs.forEach(unsub => unsub());
       unsubCommentCreated();
       unsubCommentUpdated();
       unsubCommentDeleted();

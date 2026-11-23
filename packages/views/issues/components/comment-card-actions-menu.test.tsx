@@ -10,6 +10,10 @@ import { renderWithI18n } from "../../test/i18n";
 // Copy link), and Delete alone at the bottom. Edit and Delete only show on
 // comments the viewer may change.
 
+vi.mock("@multica/core/permissions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/permissions")>()),
+  useIsGuest: () => false,
+}));
 vi.mock("@multica/core/api", () => ({
   api: { uploadFile: vi.fn() },
   dispatchReasonCode: () => undefined,
@@ -77,7 +81,7 @@ function comment(
 function renderThread(
   root: TimelineEntry,
   replies: TimelineEntry[],
-  { resolvable = true }: { resolvable?: boolean } = {},
+  { resolvable = true, canCreateSubIssue = true }: { resolvable?: boolean; canCreateSubIssue?: boolean } = {},
 ) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderWithI18n(
@@ -92,7 +96,7 @@ function renderThread(
         onDelete={vi.fn()}
         onToggleReaction={vi.fn()}
         onCopyLink={vi.fn()}
-        onCreateSubIssue={vi.fn()}
+        onCreateSubIssue={canCreateSubIssue ? vi.fn() : undefined}
         onResolveToggle={resolvable ? vi.fn() : undefined}
       />
     </QueryClientProvider>,
@@ -160,6 +164,41 @@ describe("CommentCard — actions menu layout", () => {
       SEPARATOR,
       "Resolve thread",
       "Create sub-issue from here",
+      SEPARATOR,
+      "Copy",
+      "Copy link",
+    ]);
+  });
+
+  // A guest (MUL-9420) is never a moderator and cannot create issues, so the
+  // issue page passes canModerate=false and no onCreateSubIssue.
+  it("gives a guest Edit and Delete on its own comment, without Create sub-issue", async () => {
+    renderThread(comment("root", null), [], { canCreateSubIssue: false });
+
+    expect(await openMenuLayout(0)).toEqual([
+      "Reply",
+      "Add reaction",
+      "Edit",
+      SEPARATOR,
+      "Resolve thread",
+      SEPARATOR,
+      "Copy",
+      "Copy link",
+      SEPARATOR,
+      "Delete",
+    ]);
+  });
+
+  it("gives a guest no Edit or Delete on another member's comment", async () => {
+    renderThread(comment("root", null, { actor_type: "member", actor_id: "user-2" }), [], {
+      canCreateSubIssue: false,
+    });
+
+    expect(await openMenuLayout(0)).toEqual([
+      "Reply",
+      "Add reaction",
+      SEPARATOR,
+      "Resolve thread",
       SEPARATOR,
       "Copy",
       "Copy link",

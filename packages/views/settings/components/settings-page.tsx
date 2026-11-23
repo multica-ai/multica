@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bell,
   Blocks,
@@ -13,7 +13,6 @@ import {
   MessagesSquare,
   Mic,
   Palette,
-  Plug,
   Search,
   Server,
   Settings,
@@ -34,8 +33,9 @@ import {
 } from "@multica/core/feature-flags";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { cn } from "@multica/ui/lib/utils";
-import { resolveSettingsLocation, settingsHref } from "./settings-navigation";
+import { movedAppsHref, resolveSettingsLocation, settingsHref } from "./settings-navigation";
 import { AppLink, useNavigation } from "../../navigation";
+import { useRestoredScrollRef } from "../../platform/scroll-restoration";
 import { AccountTab } from "./account-tab";
 import { PreferencesTab } from "./preferences-tab";
 import { AppearanceTab } from "./appearance-tab";
@@ -44,7 +44,6 @@ import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { CodeTab } from "./code-tab";
 import { ChannelsTab } from "./channels-tab";
-import { ConnectedAppsTab, useComposioAvailable } from "./connected-apps-tab";
 import { NotificationsTab } from "./notifications-tab";
 import { LabelsTab } from "./labels-tab";
 import { WorkflowsTab } from "../../workflows/workflows-tab";
@@ -130,6 +129,8 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
   const workspaceName = workspace?.name ?? t(($) => $.page.workspace_fallback);
   const { role } = useCurrentMember(workspace?.id ?? "");
   const isMember = role === "member";
+  // A guest (MUL-9420) has personal settings only.
+  const isGuest = role === "guest";
   const navigation = useNavigation();
   const paths = useWorkspacePaths();
   const listCollapsed = useListColumnCollapsed();
@@ -138,7 +139,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
     BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
     false,
   );
-  const appsAvailable = useComposioAvailable();
   const voiceInputAvailable = localVoiceAPI() !== undefined;
   const entry = (
     value: string,
@@ -148,7 +148,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
     options: { wide?: boolean; adminOnly?: boolean } = {},
   ): SettingsEntry => ({ value, label, icon, content, ...options });
 
-  const groups: SettingsScopeGroup[] = [
+  const scopeGroups: SettingsScopeGroup[] = [
     {
       key: "personal",
       label: t(($) => $.page.groups.personal),
@@ -254,9 +254,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               MessagesSquare,
               <ChannelsTab />,
             ),
-            ...(appsAvailable
-              ? [entry("apps", t(($) => $.page.tabs.apps), Plug, <ConnectedAppsTab />)]
-              : []),
             entry("mcp", t(($) => $.page.tabs.mcp), Server, <McpTab />, {
               adminOnly: true,
             }),
@@ -281,6 +278,9 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
         ]
       : []),
   ];
+  const groups = isGuest
+    ? scopeGroups.filter((group) => group.key !== "workspace")
+    : scopeGroups;
   const allEntries = groups.flatMap((group) =>
     group.subgroups.flatMap((subgroup) => subgroup.entries),
   );
@@ -288,10 +288,14 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
   // Wakeup defaults moved to the issue wakeups list; old links land there.
   const wakeupsMoved = location.tab === "wakeups";
   const wakeupsTarget = wakeupsHref(paths.autopilots());
+  // The workspace's apps and accounts moved to their own page.
+  const appsMoved = location.tab === "apps";
+  const appsTarget = movedAppsHref(paths.apps(), navigation.searchParams, location.section);
   const { replace } = navigation;
   useEffect(() => {
     if (wakeupsMoved) replace(wakeupsTarget);
-  }, [wakeupsMoved, wakeupsTarget, replace]);
+    else if (appsMoved) replace(appsTarget);
+  }, [wakeupsMoved, wakeupsTarget, appsMoved, appsTarget, replace]);
   const candidate =
     location.tab === "billing" && !billingEnabled ? "workspace" : location.tab;
   const active =
@@ -350,6 +354,16 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
   // page. Tab content can still be loading on the first frame, so wait briefly
   // for the anchor before scrolling it into view and flashing it.
   const contentRef = useRef<HTMLDivElement>(null);
+  // Every settings page shares the route, so each restores its own offset.
+  const contentKey = `${active.value}:${location.integration ?? ""}`;
+  const restoreScrollRef = useRestoredScrollRef(`settings:${contentKey}`);
+  const attachContent = useCallback(
+    (el: HTMLDivElement | null) => {
+      contentRef.current = el;
+      restoreScrollRef(el);
+    },
+    [restoreScrollRef],
+  );
   useEffect(() => {
     const anchor = location.section;
     if (!anchor) return;
@@ -602,8 +616,9 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
         </PageHeader>
         <SettingsHeaderContext.Provider value={headerSlots}>
           <div
-            ref={contentRef}
-            key={`${active.value}:${location.integration ?? ""}`}
+            ref={attachContent}
+            key={contentKey}
+            data-tab-scroll-root={`settings:${contentKey}`}
             className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain"
           >
             <div className="mx-auto w-full max-w-(--settings-column) px-4 py-6 sm:px-6 md:px-10 md:py-8">

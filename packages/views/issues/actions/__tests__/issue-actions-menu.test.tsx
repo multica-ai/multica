@@ -6,6 +6,7 @@ import type { AgentTask, Issue, QuickAction } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../../locales/en/common.json";
 import enIssues from "../../../locales/en/issues.json";
+import { useAssigneePicksStore } from "@multica/core/issues/stores/assignee-picks-store";
 
 const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 
@@ -13,9 +14,9 @@ const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 // Mocks — same pattern as the issue-detail test suite.
 // ---------------------------------------------------------------------------
 
-const deletionPolicy = vi.hoisted(() => ({ allowed: true }));
+const deletionPolicy = vi.hoisted(() => ({ allowed: true, offered: true }));
 vi.mock("@multica/core/issues/use-issue-deletion", () => ({
-  useIssueDeletion: () => ({ canDelete: () => deletionPolicy.allowed }),
+  useIssueDeletion: () => ({ canDelete: () => deletionPolicy.allowed, offersDelete: deletionPolicy.offered }),
 }));
 
 vi.mock("@multica/core/hooks", () => ({
@@ -42,12 +43,13 @@ vi.mock("@multica/core/auth", () => ({
   registerAuthStore: vi.fn(),
 }));
 
+const viewer = vi.hoisted(() => ({ role: "admin" }));
 vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({
     queryKey: ["workspaces", "ws-1", "members"],
     queryFn: () =>
       Promise.resolve([
-        { user_id: "user-1", name: "Test User", email: "t@t.com", role: "admin" },
+        { user_id: "user-1", name: "Test User", email: "t@t.com", role: viewer.role },
       ]),
   }),
   agentListOptions: () => ({
@@ -56,10 +58,6 @@ vi.mock("@multica/core/workspace/queries", () => ({
   }),
   squadListOptions: () => ({
     queryKey: ["workspaces", "ws-1", "squads"],
-    queryFn: () => Promise.resolve([]),
-  }),
-  assigneeFrequencyOptions: () => ({
-    queryKey: ["workspaces", "ws-1", "assignee-frequency"],
     queryFn: () => Promise.resolve([]),
   }),
 }));
@@ -87,7 +85,7 @@ const { cancelRunMock, updateIssueMock } = vi.hoisted(() => ({
 }));
 
 vi.mock("@multica/core/issues/mutations", () => ({
-  useUpdateIssue: () => ({ mutate: updateIssueMock }),
+  useUpdateIssue: () => ({ mutate: updateIssueMock, mutateAsync: updateIssueMock }),
   useCancelIssueRun: () => ({ mutateAsync: cancelRunMock }),
 }));
 
@@ -134,7 +132,7 @@ vi.mock("sonner", () => ({
   toast: { success: toastSuccessMock, error: toastErrorMock, info: vi.fn() },
 }));
 
-const { apiMocks, copyTextMock } = vi.hoisted(() => ({
+const { apiMocks, copyTextMock, copyTextAndHtmlMock } = vi.hoisted(() => ({
   apiMocks: {
     listTasksByIssue: vi.fn(),
     listIssueWorkflows: vi.fn(),
@@ -147,6 +145,7 @@ const { apiMocks, copyTextMock } = vi.hoisted(() => ({
     runQuickAction: vi.fn(),
   },
   copyTextMock: vi.fn(),
+  copyTextAndHtmlMock: vi.fn(),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -156,6 +155,7 @@ vi.mock("@multica/core/api", () => ({
 
 vi.mock("@multica/ui/lib/clipboard", () => ({
   copyText: copyTextMock,
+  copyTextAndHtml: copyTextAndHtmlMock,
 }));
 
 vi.mock("../../../common/actor-avatar", () => ({
@@ -169,6 +169,7 @@ vi.mock("../../../platform/local-directory", async (importOriginal) => ({
 }));
 
 // Import after mocks.
+import { memberListOptions } from "@multica/core/workspace/queries";
 import { IssueActionsDropdown, useIssuePageMenu } from "../issue-actions-dropdown";
 import {
   IssueActionsContextMenu,
@@ -210,8 +211,12 @@ function wrap(ui: React.ReactNode) {
 }
 
 beforeEach(() => {
+  // Picks persist in a real store; keep one test's picks out of the next's Recent.
+  useAssigneePicksStore.setState({ byScope: {} });
   platform.desktop = false;
   deletionPolicy.allowed = true;
+  deletionPolicy.offered = true;
+  viewer.role = "admin";
   mockOpenModal.mockReset();
   openInNewTabMock.mockReset();
   openInDesktopMock.mockReset();
@@ -222,6 +227,8 @@ beforeEach(() => {
   navState.hash = "";
   copyTextMock.mockReset();
   copyTextMock.mockResolvedValue(true);
+  copyTextAndHtmlMock.mockReset();
+  copyTextAndHtmlMock.mockResolvedValue(true);
   toastSuccessMock.mockReset();
   toastErrorMock.mockReset();
   apiMocks.listQuickActions.mockReset();
@@ -243,7 +250,7 @@ beforeEach(() => {
   apiMocks.markIssueUnread.mockResolvedValue({ unread: true });
   cancelRunMock.mockReset();
   cancelRunMock.mockResolvedValue(undefined);
-  updateIssueMock.mockReset();
+  updateIssueMock.mockReset().mockResolvedValue(mockIssue);
 });
 
 describe("IssueActionsDropdown", () => {
@@ -267,12 +274,32 @@ describe("IssueActionsDropdown", () => {
     expect(screen.getByText("Rename issue")).toBeInTheDocument();
     expect(screen.getByText("Open in new tab")).toBeInTheDocument();
     expect(screen.getByText("Copy link")).toBeInTheDocument();
+    expect(screen.getByText("Copy link with title")).toBeInTheDocument();
     expect(screen.getByText("Create sub-issue")).toBeInTheDocument();
     expect(screen.getByText("Relations")).toBeInTheDocument();
     expect(screen.getByText("Delete issue")).toBeInTheDocument();
     // Linking to existing issues stays inside the "Relations" submenu.
     expect(screen.queryByText("Set parent issue...")).not.toBeInTheDocument();
     expect(screen.queryByText("Add sub-issue...")).not.toBeInTheDocument();
+  });
+
+  it("copies the identifier and title as a rich link", async () => {
+    render(
+      wrap(
+        <IssueActionsDropdown
+          issue={mockIssue}
+          trigger={<button data-testid="trigger">Menu</button>}
+        />,
+      ),
+    );
+
+    fireEvent.click(screen.getByTestId("trigger"));
+    fireEvent.click(await screen.findByText("Copy link with title"));
+
+    expect(copyTextAndHtmlMock).toHaveBeenCalledWith(
+      "[TES-1 Example](https://app.example/test/issues/TES-1)",
+      '<a href="https://app.example/test/issues/TES-1">TES-1 Example</a>',
+    );
   });
 
   it("lists Create sub-issue directly below Rename issue", async () => {
@@ -366,6 +393,49 @@ describe("IssueActionsDropdown", () => {
     expect(item.closest('[role="menuitem"]')).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(item);
     expect(mockOpenModal).not.toHaveBeenCalled();
+  });
+
+  it("leaves Delete issue out for a viewer who can delete nothing (a guest)", async () => {
+    deletionPolicy.allowed = false;
+    deletionPolicy.offered = false;
+    render(wrap(<IssueActionsDropdown issue={mockIssue} trigger={<button data-testid="trigger">Menu</button>} />));
+    fireEvent.click(screen.getByTestId("trigger"));
+    expect(await screen.findByText("Copy link")).toBeInTheDocument();
+    expect(screen.queryByText("Delete issue")).not.toBeInTheDocument();
+  });
+
+  it("offers a guest only the entries the server lets it use, without asking for runs or quick actions (MUL-9883)", async () => {
+    viewer.role = "guest";
+    deletionPolicy.allowed = false;
+    deletionPolicy.offered = false;
+    apiMocks.listQuickActions.mockResolvedValue({
+      quick_actions: [{ id: "qa-1", name: "Triage", status: "active" }],
+    });
+    listTasksByIssueMock.mockResolvedValue([
+      { id: "task-1", status: "completed", work_dir: "/tmp/work", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // The shell has the member list cached before any menu opens.
+    await queryClient.fetchQuery(memberListOptions("ws-1"));
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={queryClient}>
+          <IssueActionsDropdown issue={mockIssue} trigger={<button data-testid="trigger">Menu</button>} />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+    fireEvent.click(screen.getByTestId("trigger"));
+    await screen.findByText("Copy link");
+
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent?.trim())).toEqual([
+      "Open in new tab",
+      "Pin to sidebar",
+      "Copy link",
+      "Copy link with title",
+      "Copy issue ID",
+    ]);
+    expect(listTasksByIssueMock).not.toHaveBeenCalled();
+    expect(apiMocks.listQuickActions).not.toHaveBeenCalled();
   });
 
   it("clicking Delete issue opens the delete-confirm modal", async () => {
@@ -486,7 +556,7 @@ describe("IssueActionsDropdown", () => {
     await waitFor(() => {
       expect(listTasksByIssueMock).toHaveBeenCalledWith("issue-1", false, { view: "timeline" });
     });
-    fireEvent.click(await screen.findByText("Copy local workdir path"));
+    fireEvent.click(await screen.findByText("Copy local working directory path"));
 
     await waitFor(() => {
       expect(copyTextMock).toHaveBeenCalledWith("/managed/task/worktree");
@@ -805,7 +875,8 @@ describe("Sidebar variant (MUL-8425)", () => {
       "Pin to sidebar",
       "Mark as unread",
       "Copy link",
-      "Copy identifier",
+      "Copy link with title",
+      "Copy issue ID",
     ]);
     expect(screen.getByTestId("row")).toHaveAttribute("data-popup-open");
     // No workdir entry, so the menu has no reason to fetch the task list.
@@ -836,7 +907,7 @@ describe("Sidebar variant (MUL-8425)", () => {
 
   it("copies the identifier", async () => {
     openSidebarMenu();
-    fireEvent.click(await screen.findByText("Copy identifier"));
+    fireEvent.click(await screen.findByText("Copy issue ID"));
 
     await waitFor(() => {
       expect(copyTextMock).toHaveBeenCalledWith("TES-1");

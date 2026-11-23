@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { setCurrentWorkspace } from "../../platform/workspace-storage";
-import { useSidebarTreeStore } from "./sidebar-tree-store";
+import { DEFAULT_SIDEBAR_INBOX_SETTINGS, useSidebarTreeStore } from "./sidebar-tree-store";
 
 beforeEach(() => {
   localStorage.clear();
@@ -63,5 +63,41 @@ describe("useSidebarTreeStore", () => {
     expect(state.pinnedCollapsed).toBe(true);
     expect(state.workingCollapsed).toBe(false);
     expect(state.needsAttentionCollapsed).toBe(false);
+  });
+
+  it("keeps Inbox rows off compact by default, and undoes the one-time compact switch", async () => {
+    expect(DEFAULT_SIDEBAR_INBOX_SETTINGS.compact).toBe(false);
+
+    // Version 1 forced compact on; that value goes back to off.
+    localStorage.setItem("multica_sidebar_tree:forced", JSON.stringify({
+      state: { inboxSettings: { limit: 10, showCount: false, railBadge: true, compact: true } },
+      version: 1,
+    }));
+    setCurrentWorkspace("forced", "ws-forced");
+    await Promise.resolve();
+    expect(useSidebarTreeStore.getState().inboxSettings).toEqual({
+      limit: 10,
+      showCount: false,
+      railBadge: true,
+      compact: false,
+    });
+
+    // A copy that never ran version 1 keeps the user's own choice.
+    localStorage.setItem("multica_sidebar_tree:chosen", JSON.stringify({
+      state: { inboxSettings: { limit: 5, showCount: true, railBadge: true, compact: true } },
+      version: 0,
+    }));
+    setCurrentWorkspace("chosen", "ws-chosen");
+    await Promise.resolve();
+    expect(useSidebarTreeStore.getState().inboxSettings.compact).toBe(true);
+
+    // A choice made after this version stays.
+    localStorage.setItem("multica_sidebar_tree:current", JSON.stringify({
+      state: { inboxSettings: { limit: 5, showCount: true, railBadge: true, compact: true } },
+      version: 2,
+    }));
+    setCurrentWorkspace("current", "ws-current");
+    await Promise.resolve();
+    expect(useSidebarTreeStore.getState().inboxSettings.compact).toBe(true);
   });
 });
