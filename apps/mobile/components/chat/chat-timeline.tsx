@@ -30,7 +30,6 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { useT } from "@/lib/i18n";
-import { isInternalRunMessage } from "@/lib/run-transcript";
 
 interface Props {
   items: TaskMessagePayload[];
@@ -40,7 +39,7 @@ interface Props {
 }
 
 export function ChatTimeline({ items, isStreaming = false }: Props) {
-  const processSteps = items.filter((i) => i.type !== "text" && !isInternalRunMessage(i));
+  const processSteps = items.filter((i) => i.type !== "text");
   const { t } = useT("chat");
   if (processSteps.length === 0) return null;
 

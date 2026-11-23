@@ -927,3 +927,33 @@ FROM comment c
 JOIN ancestor_ids path ON path.id = c.id
 ORDER BY c.id
 FOR UPDATE OF c;
+
+-- name: ListThreadMemberAuthors :many
+-- The members who wrote any other comment in the thread @comment_id belongs
+-- to: its root and every reply under that root, at any depth. Used by the
+-- bystander delivery tier, so a reply in a thread you took part in still
+-- reaches you on an issue you are only watching (MUL-9343).
+WITH RECURSIVE root_of AS (
+    SELECT c.id, c.parent_id
+    FROM comment c
+    WHERE c.id = @comment_id AND c.workspace_id = @workspace_id
+    UNION ALL
+    SELECT p.id, p.parent_id
+    FROM comment p
+    JOIN root_of r ON p.id = r.parent_id
+),
+thread AS (
+    SELECT c.id
+    FROM comment c
+    WHERE c.id = (SELECT id FROM root_of WHERE parent_id IS NULL LIMIT 1)
+    UNION ALL
+    SELECT c.id
+    FROM comment c
+    JOIN thread t ON c.parent_id = t.id
+)
+SELECT DISTINCT c.author_id
+FROM comment c
+JOIN thread t ON t.id = c.id
+WHERE c.id <> @comment_id
+  AND c.author_type = 'member'
+  AND c.deleted_at IS NULL;

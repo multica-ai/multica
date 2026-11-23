@@ -70,14 +70,12 @@ func (h *Handler) MoveIssue(w http.ResponseWriter, r *http.Request) {
 		if !valid {
 			return
 		}
-		var exists bool
+		var exists, archived bool
 		err := h.DB.QueryRow(r.Context(), `
-			SELECT EXISTS (
-				SELECT 1
-				FROM project
-				WHERE workspace_id = $1 AND id = $2
-			)
-		`, current.WorkspaceID, *projectID).Scan(&exists)
+			SELECT
+				EXISTS (SELECT 1 FROM project WHERE workspace_id = $1 AND id = $2),
+				EXISTS (SELECT 1 FROM project WHERE workspace_id = $1 AND id = $2 AND archived_at IS NOT NULL)
+		`, current.WorkspaceID, *projectID).Scan(&exists, &archived)
 		if err != nil {
 			writeIssueTableQueryFailure(w, r, "failed to validate move project")
 			return
@@ -87,6 +85,11 @@ func (h *Handler) MoveIssue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !h.requireProjectVisible(w, r, uuidToString(current.WorkspaceID), *projectID, http.StatusBadRequest, "project not found in this workspace") {
+			return
+		}
+		// Reordering inside an archived project is fine; moving into one is not.
+		if archived && *projectID != current.ProjectID {
+			writeProjectArchived(w)
 			return
 		}
 	}

@@ -88,6 +88,8 @@ Un contexte trop volumineux ne peut pas être capturé : au plus 256 commentaire
 
 Enregistrez qui appeler et quoi demander avec les [actions rapides](/quick-actions). Un clic dans la barre latérale de la tâche envoie la demande immédiatement. Saisissez `/` dans le commentaire pour l’insérer dans un brouillon modifiable avant l’envoi.
 
+Pour demander un [skill](/skills) dans un commentaire ou une réponse, saisissez `/` suivi d’une partie de son nom ou de sa description. Le menu propose les skills correspondants activés pour les agents auxquels s’adresse le brouillon. Sélectionnez un skill pour insérer son lien, puis envoyez le commentaire quand il est prêt.
+
 ## @mentions
 
 Tapez `@` et choisissez une cible dans la liste :
@@ -96,9 +98,10 @@ Tapez `@` et choisissez une cible dans la liste :
 |---|---|
 | **Membre** | Reçoit une notification de mention dans la boîte de réception ; une @mention dans un commentaire ne crée pas d'abonnement. |
 | **Agent** | Crée une exécution pour cet agent ; les agents n'ont pas de boîte de réception. |
-| **Squad** | Notifie les membres du squad et déclenche le chef du squad. |
+| **Squad** | Déclenche le chef du squad ; les membres du squad ne sont pas notifiés. |
 | **Tâche** | Insère un lien vers une autre tâche — aucune notification, aucun déclenchement d'agent. |
-| **@all** | Notifie tous les membres de l'espace de travail et ne déclenche aucun agent. |
+| **Projet** | Insère un lien vers un projet — aucune notification, aucun déclenchement d'agent. |
+| **@all** | Notifie tous les membres de l'espace de travail ; la mention elle-même ne lance aucun agent. Le commentaire d'un agent worker revient toujours au chef du squad assigné, ou au chef du squad invité dans son fil de délégation, sauf si un agent ou un squad est explicitement mentionné. |
 
 Taper `@name` en texte brut ne crée pas de mention ; choisissez dans la liste de suggestions de l'éditeur. Taper un identifiant de tâche valide le convertit automatiquement en lien vers la tâche.
 

@@ -40,24 +40,32 @@ function ActorAvatar({
   const diameter = `var(--avatar-slot-size, ${AVATAR_SIZE_PX[size]}px)`;
   const scaled = (ratio: number) => `calc(${diameter} * ${ratio})`;
   const emoji = parseAvatarEmoji(avatarUrl);
+  const showsSystemMark = isSystem && !emoji && (!avatarUrl || imgError);
 
   useEffect(() => {
     setImgError(false);
   }, [avatarUrl]);
 
-  // Every actor — member, agent, squad, or system — renders as a circle. This
-  // is the single source of truth for avatar shape; the upload editors mirror
-  // it (packages/views/common/avatar-upload-control.tsx).
+  // Every actor — member, agent, squad, or system — takes the same shape:
+  // `--avatar-radius`, a circle unless a theme sets it. This is the single
+  // source of truth for avatar shape; the upload editors mirror it
+  // (packages/views/common/avatar-upload-control.tsx, avatar-crop-dialog.tsx).
   return (
     <div
       data-slot="avatar"
+      data-mc="avatar"
+      data-type={isSystem ? "system" : isAgent ? "agent" : isSquad ? "squad" : "member"}
       className={cn(
         "inline-flex shrink-0 items-center justify-center font-medium overflow-hidden",
-        (!avatarUrl || emoji || imgError) && "bg-muted text-muted-foreground",
+        // The system mark draws a round tile; filling the box with the tile
+        // colour keeps it whole when a theme squares the avatar.
+        showsSystemMark
+          ? "bg-multica-ink dark:bg-multica-paper"
+          : (!avatarUrl || emoji || imgError) && "bg-muted text-muted-foreground",
         className,
-        // rounded-full stays last so a call-site `className` can never override
-        // the circle — avatar shape is a hard invariant, not a per-site choice.
-        "rounded-full"
+        // rounded-avatar stays last so a call-site `className` can never
+        // override the shape — it is the theme's choice, not a per-site one.
+        "rounded-avatar"
       )}
       style={{ width: diameter, height: diameter, fontSize: scaled(0.45) }}
     >

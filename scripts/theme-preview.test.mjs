@@ -96,6 +96,12 @@ const EXPECTED = [
     source: "packages/views/layout/panel-nav.tsx",
   },
   {
+    what: "the frame",
+    find: (els) => els.filter((el) => el.attrs["data-slot"] === "sidebar-wrapper"),
+    classes: ["bg-app-shell"],
+    source: "packages/views/layout/dashboard-layout.tsx",
+  },
+  {
     what: "the page",
     find: (els) => anchors(els, "page"),
     classes: ["rounded-page", "bg-page-canvas", "ring-page-border"],
@@ -154,6 +160,12 @@ const EXPECTED = [
     ],
     source: "packages/ui/components/ui/switch.tsx",
   },
+  {
+    what: "the avatars",
+    find: (els) => els.filter((el) => el.attrs["data-slot"] === "avatar"),
+    classes: ["rounded-avatar"],
+    source: "packages/ui/components/common/actor-avatar.tsx",
+  },
   ...[
     ["open", "git-pull-request-arrow"],
     ["merged", "git-merge"],
@@ -166,7 +178,14 @@ const EXPECTED = [
   })),
   {
     what: "the small buttons",
-    find: (els) => els.filter((el) => "data-variant" in el.attrs && ["sm", "icon-sm", "icon-xs"].includes(el.attrs["data-size"])),
+    // The composer's send button is the one round button (submit-button.tsx).
+    find: (els) =>
+      els.filter(
+        (el) =>
+          el.attrs["data-slot"] === "button" &&
+          ["sm", "icon-sm", "icon-xs"].includes(el.attrs["data-size"]) &&
+          !el.classes.has("rounded-full"),
+      ),
     classes: ["rounded-button-sm"],
     source: "packages/ui/components/ui/button.tsx",
   },
@@ -186,7 +205,6 @@ const NOT_DRAWN = {
     tooltip: "no tooltip is open",
     input: "the page has no text input",
     button: "only small buttons are on the page",
-    avatar: "actor avatars are round (rounded-full) in the app",
     "board-column": "the page shows the list, not the board",
     "board-card": "the page shows the list, not the board",
   },
@@ -299,7 +317,8 @@ test("anchors nest as they do in the app", () => {
   assert.ok(inside(sidebar, "page"), "the sidebar sits inside the page canvas");
   assert.ok(!inside(rail, "page"), "the rail sits outside the page canvas");
   for (const el of anchors(elements, "nav-item")) assert.ok(inside(el, "sidebar"), "nav items sit inside the sidebar");
-  for (const name of ["issue-group-header", "issue-row", "comment", "comment-composer"]) {
+  for (const el of anchors(elements, "panel-section")) assert.ok(inside(el, "sidebar"), "panel sections sit inside the sidebar");
+  for (const name of ["page-header", "issue-group-header", "issue-row", "comment", "comment-composer"]) {
     for (const el of anchors(elements, name)) assert.ok(inside(el, "page"), `${name} sits inside the page`);
   }
   for (const el of anchors(elements, "comment-reply")) assert.ok(inside(el, "comment"), "replies sit inside their comment");

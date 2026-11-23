@@ -294,6 +294,31 @@ describe("theme check", () => {
     ]);
   });
 
+  it("measures label text on the colour slots the theme declares", () => {
+    expect(errors(".theme-light { --palette-blue: #bfdbfe; }")).toEqual([
+      expect.stringMatching(
+        /^Contrast, light mode \(label\): --label-chip-color is below 4\.5:1 on --palette-blue \(1\.\d\d:1\)\. Without --label-chip-color/,
+      ),
+    ]);
+    expect(check(".theme-light { --palette-blue: #bfdbfe; --label-chip-color: #111827; }")).toMatchObject({ ok: true, issues: [] });
+    expect(errors(".theme-dark { --palette-yellow: #fde68a; --palette-red: #fecaca; --label-chip-color: #ffffff; }")).toEqual([
+      expect.stringMatching(/^Contrast, dark mode \(label\): --label-chip-color is below 4\.5:1 on --palette-red \(.*\) and --palette-yellow \([\d.]+:1\)\.$/),
+    ]);
+    expect(check(".theme-light { --radius: 0; }").contrast.some((c) => c.area === "label")).toBe(false);
+  });
+
+  it("measures the worse of the dark and light label text a slot can get", () => {
+    // A label picked as #fecaca falls in the red slot with dark text, which a
+    // dark red slot cannot carry, although the red preset itself takes light text.
+    const checked = check(".theme-light { --palette-red: #7f1d1d; }");
+    expect(checked.contrast.filter((c) => c.area === "label")).toEqual([
+      expect.objectContaining({ background: "--palette-red", ratio: 1.77, defaulted: true }),
+    ]);
+    expect(errors(".theme-light { --palette-red: #7f1d1d; }")).toEqual([
+      expect.stringMatching(/^Contrast, light mode \(label\): --label-chip-color is below 4\.5:1 on --palette-red \(1\.77:1\)\./),
+    ]);
+  });
+
   it("measures pressed display chips in the popover they sit in", () => {
     expect(errors(".theme-light { --input: #111111; }")).toEqual([
       expect.stringMatching(
@@ -419,6 +444,104 @@ describe("theme check", () => {
       issues: [{ level: "error", message: "manifest.json is missing" }],
       contrast: [],
     });
+  });
+});
+
+describe("theme check with a backdrop", () => {
+  const assets = { "sky.svg": "data:image/svg+xml;base64,PHN2Zy8+" };
+  const checkBackdrop = (css: string, extra: Record<string, unknown> = {}) =>
+    checkThemePackage({ manifest: { ...manifest, ...extra }, css, assets }, base);
+  const pair = (report: ReturnType<typeof checkBackdrop>, mode: string, foreground: string, background: string) =>
+    report.contrast.find((c) => c.mode === mode && c.foreground === foreground && c.background === background && !c.variant);
+
+  it("requires --backdrop-color, so the glass is never left unmeasured", () => {
+    const report = checkBackdrop(".theme-dark { --backdrop: url(sky.svg) center / cover; --glass-opacity: 70%; }");
+    expect(report.ok).toBe(false);
+    expect(report.issues).toContainEqual({
+      level: "error",
+      message: expect.stringMatching(/^Backdrop, dark mode: --backdrop is set without --backdrop-color\./),
+    });
+    expect(
+      checkBackdrop(".theme-dark { --backdrop: url(sky.svg); --backdrop-color: color-mix(in oklab, red, blue); }").issues,
+    ).toContainEqual({ level: "error", message: expect.stringMatching(/--backdrop-color must be an opaque colour/) });
+  });
+
+  it("measures the frame and the page as glass over --backdrop-color", () => {
+    const report = checkBackdrop(
+      ".theme-light { --backdrop: url(sky.svg); --backdrop-color: #000000; --app-shell: #ffffff; --page-canvas: #ffffff; --glass-opacity: 50%; }",
+    );
+    const frame = { r: 128, g: 128, b: 128, a: 1 };
+    const page = { r: 192, g: 192, b: 192, a: 1 };
+    const foreground = resolveColor(base.light, "--foreground");
+    if (!("color" in foreground)) throw new Error("tokens.css has no light --foreground");
+    expect(pair(report, "light", "--foreground", "--app-shell")).toMatchObject({
+      glass: true,
+      ratio: Math.round(contrastRatio(foreground.color, frame) * 100) / 100,
+    });
+    expect(pair(report, "light", "--foreground", "--page-canvas")).toMatchObject({
+      glass: true,
+      ratio: Math.round(contrastRatio(foreground.color, page) * 100) / 100,
+    });
+    expect(pair(report, "light", "--foreground", "--surface")?.glass).toBeUndefined();
+    expect(report.issues.filter((i) => i.message.startsWith("Contrast not checked"))).toEqual([]);
+  });
+
+  it("keeps the opaque colour for variables on <html> that read a glass surface", () => {
+    const report = checkBackdrop(`.theme-light {
+  --backdrop: #ffffff;
+  --backdrop-color: #ffffff;
+  --app-shell: #000000;
+  --frame-glass-opacity: 0%;
+  --glass-opacity: 90%;
+  --button-primary: #000000;
+  --button-primary-foreground: var(--app-shell);
+}`);
+    expect(report.ok).toBe(false);
+    expect(pair(report, "light", "--button-primary-foreground", "--button-primary")).toMatchObject({ ratio: 1 });
+    expect(report.issues).toEqual([
+      { level: "error", message: "Contrast, light mode: --button-primary-foreground is below 4.5:1 on --button-primary (1.00:1)." },
+    ]);
+  });
+
+  it("measures an alias of a glass surface, and portals, on the opaque colour", () => {
+    const report = checkBackdrop(
+      ".theme-light { --backdrop: url(sky.svg); --backdrop-color: #000000; --page-canvas: #ffffff; --background: #ffffff; --surface: var(--page-canvas); --tooltip: var(--background); --tooltip-foreground: #000000; --glass-opacity: 50%; }",
+    );
+    const foreground = resolveColor(base.light, "--foreground");
+    if (!("color" in foreground)) throw new Error("tokens.css has no light --foreground");
+    const white = { r: 255, g: 255, b: 255, a: 1 };
+    const opaque = Math.round(contrastRatio(foreground.color, white) * 100) / 100;
+    expect(pair(report, "light", "--foreground", "--surface")).toMatchObject({ ratio: opaque });
+    expect(pair(report, "light", "--foreground", "--surface")?.glass).toBeUndefined();
+    expect(pair(report, "light", "--foreground", "--page-canvas")?.ratio).toBeLessThan(opaque);
+    const tooltip = report.contrast.find((c) => c.mode === "light" && c.area === "tooltip" && !c.variant);
+    expect(tooltip?.glass).toBeUndefined();
+    expect(tooltip).toMatchObject({ foreground: "--tooltip-foreground", ratio: 21 });
+  });
+
+  it("names the glass when text fails on it", () => {
+    const found = checkBackdrop(".theme-light { --backdrop: url(sky.svg); --backdrop-color: #101010; --frame-glass-opacity: 0%; }")
+      .issues.filter((i) => i.level === "error")
+      .map((i) => i.message);
+    expect(found).toContainEqual(
+      expect.stringMatching(/^Contrast, light mode: --foreground is below 4\.5:1 on --app-shell \(1\.\d\d:1\)\. With the backdrop, it is measured as glass/),
+    );
+  });
+
+  it("reads the glass opacity from an option", () => {
+    const report = checkBackdrop(
+      ".theme-dark { --backdrop: url(sky.svg) center / cover; --backdrop-color: #070b1d; --glass-opacity: var(--page-opacity); --frame-glass-opacity: 0%; }",
+      { options: [{ id: "page-opacity", type: "slider", label: "Page opacity", default: 80, min: 40, max: 100, unit: "%" }] },
+    );
+    expect(report.issues).toEqual([]);
+    expect(pair(report, "dark", "--foreground", "--page-canvas")?.glass).toBe(true);
+  });
+
+  it("warns when solid glass hides the backdrop", () => {
+    const report = checkBackdrop(".theme-dark { --backdrop: url(sky.svg); --backdrop-color: #070b1d; }");
+    expect(report.issues).toEqual([
+      { level: "warning", message: expect.stringMatching(/^Backdrop, dark mode: .* cover the backdrop completely\.$/) },
+    ]);
   });
 });
 

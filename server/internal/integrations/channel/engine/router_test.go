@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"sync"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -546,6 +548,47 @@ func newHarness(t *testing.T) *harness {
 		OriginType:   "lark_chat",
 	})
 	return h
+}
+
+func TestRouterLogsResolvedChannelRoute(t *testing.T) {
+	h := newHarness(t)
+	var logs bytes.Buffer
+	h.router.logger = slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	message := p2pMessage(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := h.router.Handle(ctx, message); err != nil {
+		t.Fatal(err)
+	}
+	if !h.router.Drain(ctx) {
+		t.Fatal("router drain timed out")
+	}
+
+	decoder := json.NewDecoder(&logs)
+	for decoder.More() {
+		var entry map[string]any
+		if err := decoder.Decode(&entry); err != nil {
+			t.Fatal(err)
+		}
+		if entry["msg"] != "channel router: dispatch outcome" {
+			continue
+		}
+		for field, want := range map[string]any{
+			"event_id":        message.EventID,
+			"installation_id": util.UUIDToString(h.inst.inst.ID),
+			"chat_session_id": util.UUIDToString(h.binder.ensureID),
+			"route_revision":  float64(h.binder.appendResult.RouteRevision),
+		} {
+			if entry[field] != want {
+				t.Errorf("%s = %v, want %v", field, entry[field], want)
+			}
+		}
+		if _, logged := entry["text"]; logged {
+			t.Fatal("dispatch log includes message text")
+		}
+		return
+	}
+	t.Fatal("missing dispatch outcome log")
 }
 
 func TestRouter_NoResolverSet_ReturnsError(t *testing.T) {
@@ -1385,6 +1428,28 @@ func TestRouter_BareIssueReturnsUsageWithoutCreatingOrResolvingMedia(t *testing.
 	}
 	if h.media.calls() != 0 {
 		t.Fatalf("bare issue unexpectedly resolved media, calls=%d", h.media.calls())
+	}
+	if !waitFor(time.Second, func() bool {
+		calls := h.replier.calls()
+		return len(calls) == 1 && calls[0].Outcome == OutcomeIssueUsage && calls[0].IssueUsageHadMedia
+	}) {
+		t.Fatalf("issue usage result was not delivered: %+v", h.replier.calls())
+	}
+}
+
+func TestRouter_NULOnlyIssueTitleReturnsUsage(t *testing.T) {
+	h := newHarness(t)
+	h.binder.parseIssue = true
+	msg := p2pMessage(t)
+	msg.Text = "/issue \x00 \x00 "
+	msg.CommandText = msg.Text
+	msg.Type = channel.MsgTypeImage
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("NUL-only title must return usage, got error: %v", err)
+	}
+	if h.issues.called || h.tasks.calls() != 0 || h.media.calls() != 0 {
+		t.Fatalf("NUL-only title created issue=%v, chat tasks=%d, media resolutions=%d",
+			h.issues.called, h.tasks.calls(), h.media.calls())
 	}
 	if !waitFor(time.Second, func() bool {
 		calls := h.replier.calls()

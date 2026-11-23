@@ -44,6 +44,8 @@ interface SubmitButtonProps {
   stopTooltip?: ReactNode;
   /** Accessible name for the icon-only stop button. */
   stopAriaLabel?: string;
+  /** Applied to the send button, after its own classes. */
+  className?: string;
 }
 
 /** Keep the composer focused so Send and Stop do not dismiss Android's keyboard. */
@@ -63,6 +65,7 @@ function SubmitButton({
   ariaLabel,
   stopTooltip,
   stopAriaLabel,
+  className,
 }: SubmitButtonProps) {
   if (running) {
     const stopButton = (
@@ -95,6 +98,7 @@ function SubmitButton({
         // eslint-disable-next-line no-restricted-syntax -- composer send button, the one round button
         "rounded-full",
         showReason && "aria-disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:active:translate-y-0",
+        className,
       )}
       disabled={isDisabled}
       focusableWhenDisabled={showReason}

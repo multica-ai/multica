@@ -14,6 +14,10 @@ import { ReplyInput } from "./reply-input";
 import { CommentInput } from "./comment-input";
 
 // Avatar profile navigation is unrelated to composer behavior.
+vi.mock("@multica/core/permissions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/permissions")>()),
+  useIsGuest: () => false,
+}));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null, AgentStatusDot: () => null }));
 
 const preview = vi.hoisted(() => vi.fn<typeof import("@multica/core/api")["api"]["previewCommentTriggers"]>(async () => ({ agents: [], blocked: [] })));
@@ -110,6 +114,25 @@ describe("annotation draft submission through the real composer", () => {
     const next = await open(view.container, "A second note");
     fireEvent.click(popup(next).getByRole("button", { name: "Send" }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+  });
+
+  it.each([false, true])("clears the draft when Ctrl+Enter sends within the 100ms editor debounce (description: %s)", async (description) => {
+    const draftKey = description ? "new:issue" as const : key;
+    const onSubmit = vi.fn<Submit>(() => new Promise((resolve) => {
+      window.setTimeout(() => resolve("published"), 200);
+    }));
+    const view = renderWithI18n(<Fixture onSubmit={onSubmit} description={description} />);
+    selectText(view.container);
+    fireEvent.click(await screen.findByRole("button", { name: "Add to reply" }));
+    const input = await screen.findByRole("textbox", { name: "Comment" });
+    // Type and send immediately before the 100ms ContentEditor debounce fires.
+    await act(async () => {
+      (input as HTMLElement & { editor: Editor }).editor.commands.setContent("Fast send", { contentType: "markdown" });
+    });
+    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("> Child text\n\nFast send", undefined, undefined, undefined));
+    await waitFor(() => expect(useCommentDraftStore.getState().drafts[draftKey]).toBeUndefined());
+    expect(screen.queryByRole("textbox", { name: "Comment" })).not.toBeInTheDocument();
   });
 
   it("keeps the popover compact: icon send, short confirm label with a descriptive name", async () => {

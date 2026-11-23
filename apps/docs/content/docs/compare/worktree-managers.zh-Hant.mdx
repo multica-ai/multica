@@ -1,0 +1,65 @@
+---
+title: Multica 與本機 worktree 管理工具比較
+description: 在並行執行多個程式設計 AI 代理這件事上，Multica 與 Conductor、Claude Squad、Orca、Beads 有何不同，以及什麼時候個人工作臺就夠用。
+---
+
+Conductor、Claude Squad 和 Orca 幫助一名開發者並行執行多個程式設計 AI 代理，每個 AI 代理在自己的 git worktree 裡工作，再由開發者審查結果。Beads 為 AI 代理提供一個跟著倉庫存放的任務追蹤器。Multica 解決的是相鄰的另一個問題：一個**團隊**在同一個工作區裡共用 AI 代理、任務、執行時和 Skills。需要哪一種，主要取決於涉及多少人。
+
+本頁關於其他工具的描述來自它們截至 2026 年 11 月的公開文件：[Conductor](https://www.conductor.build/docs/concepts/git-worktrees)、[Claude Squad](https://github.com/smtg-ai/claude-squad)、[Orca](https://orca.dev/docs/model/worktrees) 和 [Beads](https://github.com/gastownhall/beads)。最新情況請以它們為準。
+
+## 簡短回答
+
+- **一名開發者，AI 代理跑在自己電腦上，逐一親自審查 diff**：Conductor、Claude Squad 或 Orca 這類 worktree 管理工具很合適，上手通常也更快。
+- **AI 代理需要在倉庫裡維護計畫和相依關係圖**：Beads。
+- **多人共用 AI 代理**、AI 代理要跑在筆電以外的機器上、工作像一般任務一樣分配、需要存取控制和重複性工作：Multica。
+
+它們並不互斥。開發者可以繼續用 worktree 管理工具做需要親自盯的工作，把耗時較長或例行的任務交給 Multica 裡共用的 AI 代理。
+
+## 比較
+
+| | Multica | Conductor | Claude Squad | Orca | Beads |
+|---|---|---|---|---|---|
+| 是什麼 | 把任務分配給 AI 代理的團隊工作區 | 在隔離工作區裡並行執行程式設計 AI 代理的 Mac 應用 | 在 tmux 工作階段中管理 AI 代理的終端機應用 | 執行一組 AI 代理的桌面、行動端和遠端應用 | 給程式設計 AI 代理用的圖結構任務追蹤器，透過 CLI 使用 |
+| 主要使用者 | 由人和 AI 代理組成的團隊 | 一名開發者 | 一名開發者 | 一名開發者，外加別人可以呼叫的 bot | 在倉庫裡工作的 AI 代理 |
+| 工作單位 | 共享看板上的任務 | 一個工作區（worktree 和分支） | 一個工作階段（tmux 和 worktree） | 一個 worktree | 一個帶相依關係的 bead（任務） |
+| 並行工作如何避免衝突 | 每次執行有自己的目錄和倉庫檢出；AI 代理也可以使用本機目錄的隔離 worktree | 每個工作區一個 git worktree | 每個工作階段一個 git worktree | 每個任務一個 git worktree | 不負責執行；任務以原子方式認領 |
+| AI 代理在哪裡執行 | 你連線的任何電腦；同事可以共用執行時 | 你的 Mac；也有雲端工作區 | 你的終端機 | 你的電腦、SSH 主機、遠端 Orca Server 或雲端虛擬機 | 你的 AI 代理在哪裡就在哪裡 |
+| 工具 | [31 種 AI 程式設計工具](/providers) | Claude Code、Codex、Cursor Agent、OpenCode | Claude Code、Codex、OpenCode、Amp 等終端機 AI 代理 | 你自己的 Claude Code、Codex、Grok、Antigravity 等 CLI | 任何能呼叫它 CLI 的 AI 代理 |
+| 團隊共用 | 支援：共享任務、AI 代理、執行時、Skills、角色，以及按 AI 代理的 Access | — | — | bot 接收來自 Slack、Linear 或 GitHub 的請求，用所有者的 AI 代理執行 | 透過 Dolt remote 同步 |
+| 應用內審查 diff | 不支援；審查在 pull request 上進行，執行日誌留在任務上 | 支援 | 支援 | 支援 | — |
+| 重複性和觸發式工作 | [自動化](/autopilots)按排程或 webhook 執行 | — | — | bot 的排程和觸發器（pull request、檢查失敗、webhook），以及定時自動化 | — |
+| 授權 | 原始碼可用（source-available），在組織內部免費使用 | 未公開原始碼 | AGPL-3.0 | MIT | MIT |
+
+## 什麼時候 worktree 管理工具更合適
+
+- 你是一名開發者，想並排看著幾個 AI 代理工作，每個都有終端機和 diff 檢視器。
+- 每個改動在離開你的電腦之前，你都要親自互動式地審查和合併。
+- 不需要別人看到、分配或複用你的 AI 代理。
+
+Multica 沒有應用內的 diff 檢視器，也沒有按任務的終端機。審查在 pull request 上進行，任務上保留這次執行的執行日誌。
+
+## 什麼時候 Multica 更合適
+
+- **不只一個人使用這些 AI 代理。** AI 代理、執行時和 [Skills](/skills) 屬於工作區；[Access](/agents#權限與-access) 決定誰能執行每個 AI 代理；所有人都能看到哪個 AI 代理在做什麼。見[團隊共享 AI 代理池](/team-agent-pool)。
+- **闔上筆電後 AI 代理也要繼續跑。** 把伺服器或虛擬機連線為[執行時](/daemon-runtimes)，讓 AI 代理在上面執行；同事可以共用它。
+- **工作要作為任務來追蹤。** 分配、狀態、評論、子任務、帶審查環節的[工作流](/workflows)和 PR 連結都在同一個任務上，而不是留在某個本機工作階段裡。
+- **有些工作會重複出現。** [自動化](/autopilots)按排程或 webhook 啟動 AI 代理，每次執行都有紀錄。
+- **需要從聊天工具接收工作。** AI 代理可以從 Slack、飛書等[聊天整合](/channels)觸發。
+
+## 在 Multica 裡如何同時執行多個 Claude Code 而不衝突？
+
+把不同的任務分配給同一個執行時上的一個或多個 AI 代理。每次執行在 `~/multica_workspaces` 下有自己的工作目錄，倉庫從共享快取檢出，通常是各自獨立的 git worktree，所以並行的執行不會改同一份檢出。預設情況下一臺電腦最多同時進行 20 次執行，每個 AI 代理最多 6 次，見[併發限制](/daemon-runtimes#併發限制)。並行的執行仍然共享這臺機器的資源和 Claude Code 帳號的用量額度。
+
+如果想直接在自己電腦上既有的目錄裡工作，把它新增為[專案資源](/project-resources)，並選擇 AI 代理直接修改它，還是在隔離的 worktree 裡修改。
+
+## Multica 是給 AI 程式設計代理用的任務追蹤器嗎？
+
+是，而且是團隊共用的。Multica 的任務設計成 AI 代理可以直接接手：AI 代理可以是負責人，用評論回報進度，交付時把狀態改為 `in_review`，較大的工作會拆成分階段的子任務。AI 代理透過 [Multica CLI](/cli) 讀取和更新任務。
+
+Beads 的思路不同：任務存放在程式碼旁邊的 Dolt 資料庫裡，AI 代理透過 `bd` 讀取和認領。它適合需要在倉庫內保存結構化記憶和相依關係的 AI 代理。Multica 適合希望人和 AI 代理在同一個看板上協作、並需要存取控制和執行紀錄的團隊。
+
+## 相關頁面
+
+- [Multica 與 Linear、Jira 比較](/compare/linear-jira)
+- [Multica 與 OpenHands、Devin、Factory 比較](/compare/openhands-devin-factory)
+- [守護程序與執行時](/daemon-runtimes)：執行在哪裡進行、目錄如何隔離。

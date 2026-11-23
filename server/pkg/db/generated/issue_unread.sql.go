@@ -29,7 +29,7 @@ WHERE u.workspace_id = $1
   AND ($3::uuid[] IS NULL OR NOT EXISTS (
     SELECT 1 FROM issue hidden_issue
     WHERE hidden_issue.id = u.issue_id
-      AND hidden_issue.project_id = ANY($3::uuid[])
+      AND COALESCE(hidden_issue.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY($3::uuid[])
   ))
   AND (
     $4::timestamptz IS NULL

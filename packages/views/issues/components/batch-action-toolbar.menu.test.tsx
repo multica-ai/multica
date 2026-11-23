@@ -14,7 +14,11 @@ vi.mock("@multica/core/issues/stores/selection-store", () => ({
   useIssueSelectionStore: (selector: (s: typeof selection) => unknown) => selector(selection),
 }));
 vi.mock("@multica/core/issues/use-issue-deletion", () => ({
-  useIssueDeletion: () => ({ canDelete: () => true }),
+  useIssueDeletion: () => ({ canDelete: () => true, offersDelete: true }),
+}));
+vi.mock("@multica/core/permissions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/permissions")>()),
+  useIsGuest: () => false,
 }));
 vi.mock("@multica/core/issues/mutations", () => ({
   useBatchUpdateIssues: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -43,6 +47,8 @@ vi.mock("./pickers", () => ({
   PriorityPicker: () => null,
   AssigneePicker: () => null,
   AssigneePickerPanel: () => null,
+  DueDatePicker: () => null,
+  StartDatePicker: () => null,
 }));
 vi.mock("../../search/register-context", () => ({ useRegisterCommandBarContext: () => {} }));
 vi.mock("../actions/use-issue-actions", () => ({
@@ -73,6 +79,9 @@ describe("BatchActionToolbar — batch context menu", () => {
     const menu = await screen.findByRole("menu");
     expect(menu).toHaveTextContent("2 selected");
     expect(screen.getByRole("menuitem", { name: "Delete 2 issues" })).toBeInTheDocument();
+    for (const field of ["Labels", "Project", "Due date"]) {
+      expect(screen.getByRole("menuitem", { name: field })).toBeInTheDocument();
+    }
 
     fireEvent.click(screen.getByRole("menuitem", { name: "Clear selection" }));
     expect(selection.clear).toHaveBeenCalledTimes(1);

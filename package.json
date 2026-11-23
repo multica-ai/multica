@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev:web": "turbo dev --filter=@multica/web",
+    "dev:collab": "pnpm --filter @multica/collab dev",
     "dev:docs": "turbo dev --filter=@multica/docs",
+    "storybook": "pnpm -C apps/storybook storybook",
     "dev:desktop": "turbo dev --filter=@multica/desktop",
     "dev:desktop:staging": "turbo dev:staging --filter=@multica/desktop",
     "dev:mobile": "pnpm -C apps/mobile dev",
@@ -59,7 +61,8 @@
       "builder-util-runtime": "9.7.0"
     },
     "patchedDependencies": {
-      "expo-modules-core@57.0.21": "apps/mobile/patches/expo-modules-core@57.0.21.patch"
+      "expo-modules-core@57.0.21": "apps/mobile/patches/expo-modules-core@57.0.21.patch",
+      "@tiptap/y-tiptap@3.3.1": "patches/@tiptap__y-tiptap@3.3.1.patch"
     }
   },
   "devDependencies": {
@@ -71,6 +74,7 @@
     "pg": "^8.20.0",
     "postcss": "catalog:",
     "turbo": "^2.5.4",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "yaml": "catalog:"
   }
 }

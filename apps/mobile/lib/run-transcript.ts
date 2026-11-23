@@ -1,6 +1,5 @@
 import type { AgentTask, TaskMessagePayload } from "@multica/core/types";
 import { redactSecrets } from "@multica/core/security/redact-secrets";
-import { COMMIT_DIFF_TOOL } from "@multica/core/chat/commit-diff";
 import { failureReasonKey } from "./failure-reason-label";
 
 const UUID_PATTERN =
@@ -34,20 +33,12 @@ export function isCancellableRunStatus(status: AgentTask["status"]): boolean {
   );
 }
 
-export function isInternalRunMessage(message: TaskMessagePayload): boolean {
-  return (
-    (message.type === "tool_use" || message.type === "tool_result") &&
-    message.tool === COMMIT_DIFF_TOOL
-  );
-}
-
 /** Match web transcript semantics without importing its UI or query layer. */
 export function buildRunTranscript(
   messages: readonly TaskMessagePayload[],
 ): TaskMessagePayload[] {
   const items: TaskMessagePayload[] = [];
   for (const message of [...messages].sort((a, b) => a.seq - b.seq)) {
-    if (isInternalRunMessage(message)) continue;
     const previous = items[items.length - 1];
     if (
       previous &&

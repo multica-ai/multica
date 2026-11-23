@@ -12,11 +12,6 @@ import { renderWithI18n } from "../../test/i18n";
 import { AgentTranscriptDialog } from "./agent-transcript-dialog";
 import type { TimelineItem } from "./build-timeline";
 
-vi.mock("../commit-changes/commit-changes", () => ({
-  TaskCommitChanges: ({ taskId }: { taskId: string }) => (
-    <button type="button" data-task-id={taskId}>Run changes</button>
-  ),
-}));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace" }));
 vi.mock("./use-trace-issue-labels", () => ({
   useTraceIssueLabels: () => (text: string) => text.replaceAll("01a07eca-8e82-775e-be06-e4a97ccfa299", "DEV-17"),
@@ -265,10 +260,6 @@ function codeBlock(text: string) {
 }
 
 describe("AgentTranscriptDialog", () => {
-  it("offers run changes for runs without an associated issue", () => {
-    renderDialog([], { task: { ...baseTask, issue_id: "" } });
-    expect(screen.getByRole("button", { name: "Run changes" })).toHaveAttribute("data-task-id", baseTask.id);
-  });
   it.each([
     { type: "text", label: "Agent", icon: ".icon-bot" },
     { type: "thinking", label: "Thinking", icon: ".icon-brain" },
@@ -600,7 +591,7 @@ describe("AgentTranscriptDialog", () => {
   it("narrows the list to steps matching the search", () => {
     renderDialog();
 
-    fireEvent.change(screen.getByLabelText("Search this run…"), {
+    fireEvent.change(screen.getByLabelText("Search this run..."), {
       target: { value: "pnpm" },
     });
 
@@ -1075,7 +1066,7 @@ describe("AgentTranscriptDialog — reason vs raw diagnostics", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "运行详情" }));
 
-    expect(screen.getByText("原始诊断")).toBeInTheDocument();
+    expect(screen.getByText("技术详情")).toBeInTheDocument();
     expect(screen.queryByText("Technical details")).not.toBeInTheDocument();
     // The diagnostic itself is not translated — it is the runner's own output.
     // Keeping it readable is the point; presenting it as the reason is not.

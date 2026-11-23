@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type MouseEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AppWindow, ArrowBigUp, Check, Link2, Mail, Pin, PinOff, Plus, Settings, UserPlus } from "@multica/ui/icons";
+import { AppWindow, Check, Link2, Mail, Pin, PinOff, Plus, Settings, UserPlus } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { copyText } from "@multica/ui/lib/clipboard";
 import type { api } from "@multica/core/api";
@@ -31,7 +31,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
-import { Kbd, KbdGroup } from "@multica/ui/components/ui/kbd";
+import { Kbd, KbdGlyph } from "@multica/ui/components/ui/kbd";
 import { cn } from "@multica/ui/lib/utils";
 import { useRowMenu } from "../common/point-menu";
 import { useT } from "../i18n";
@@ -67,12 +67,10 @@ function NewWindowButton({ onOpen }: { onOpen: () => void }) {
       label={label}
       side="right"
       shortcut={
-        <KbdGroup>
-          <Kbd>
-            <ArrowBigUp />
-          </Kbd>
-          <Kbd>{t(($) => $.rail.open_in_new_window_click)}</Kbd>
-        </KbdGroup>
+        <Kbd>
+          <KbdGlyph name="shift" />
+          <span>{t(($) => $.rail.open_in_new_window_click)}</span>
+        </Kbd>
       }
     >
       <button
@@ -173,12 +171,13 @@ export function RailWorkspaces() {
           <DropdownMenuTrigger
             aria-label={label}
             onContextMenu={tileMenu.openAtPointer}
-            className="relative inline-flex size-[34px] shrink-0 cursor-pointer items-center justify-center rounded-lg outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            className="relative inline-flex size-[34px] shrink-0 cursor-pointer items-center justify-center rounded-[var(--avatar-radius,var(--radius-lg))] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           >
             <WorkspaceAvatar
               name={current.name}
               avatarUrl={current.avatar_url}
-              className="h-[34px] w-[34px] rounded-lg border-surface-border bg-surface-raised text-body text-foreground shadow-[var(--surface-shadow)]"
+              radius="lg"
+              className="h-[34px] w-[34px] border-surface-border bg-surface-raised text-body text-foreground shadow-[var(--surface-shadow)]"
             />
             {(otherUnread || invitations.length > 0) && (
               <UnreadDot className="absolute -top-0.5 -right-0.5 ring-2 ring-app-shell" />

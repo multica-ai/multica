@@ -21,7 +21,8 @@
     "active": "啟用",
     "paused": "已暫停",
     "paused_runtime_required": "已暫停——執行 AI 代理需繫結執行時",
-    "archived": "已歸檔"
+    "archived": "已歸檔",
+    "paused_project_archived": "已暫停——所屬專案已歸檔"
   },
   "execution_mode": {
     "create_issue": "建立任務",
@@ -75,12 +76,11 @@
     "run_blocked_invocation_not_allowed": "未觸發——你沒有該自動化所用 AI 代理的使用權限",
     "run_blocked_runtime_offline": "未觸發——該 AI 代理的執行時已離線",
     "run_blocked_agent_runtime_required": "未觸發——該 AI 代理未繫結執行時，繫結後才能執行",
-    "run_blocked_runtime_access_denied": "未觸發——該 AI 代理無法在其私有執行時上執行。請將該執行時設為公開，或重新繫結/複製 AI 代理",
+    "run_blocked_runtime_access_denied": "未觸發——無法存取此 AI 代理的私有執行時。請將該執行時設為公開，或將 AI 代理綁定到可存取的執行時。",
     "run_blocked_target_unavailable": "未觸發——該 AI 代理不可用",
-    "run_blocked_attribution": "未觸發——無法確定本次執行的負責成員",
-    "run_blocked_already_active": "未觸發——最近已有一次執行覆蓋了本次",
+    "run_blocked_attribution": "未觸發——沒有可用的活躍成員來執行此自動化。",
+    "run_blocked_already_active": "未觸發——已有執行正在進行或剛剛完成。",
     "run_blocked_quota_exceeded": "未觸發——本週期的執行額度已用盡",
-    "run_blocked_issue_limit_reached": "未觸發——工作區任務總數已達到上限",
     "run_blocked_generic": "未觸發——本次執行已被攔截",
     "section_triggers": "觸發器",
     "section_run_history": "執行歷史",
@@ -90,10 +90,10 @@
     "field_project": "關聯專案",
     "no_project": "不關聯專案",
     "project_unavailable": "專案不可用",
-    "field_prompt": "Prompt",
+    "field_prompt": "執行指令",
     "field_subscribers": "訂閱者",
     "field_subscribers_none": "無",
-    "no_prompt": "還沒有 Prompt。",
+    "no_prompt": "尚未設定執行指令。",
     "copy_link": "複製連結",
     "link_copied": "連結已複製",
     "link_copy_failed": "無法複製連結",
@@ -104,7 +104,7 @@
       "with_trigger": "{{trigger}} · {{action}}"
     },
     "add_trigger": "新增觸發器",
-    "no_triggers": "未配置觸發器。新增一個時間表讓它自動執行。",
+    "no_triggers": "尚未設定觸發器。新增排程或 Webhook 即可自動執行。",
     "no_runs": "暫無執行記錄。點選\"立即執行\"手動觸發。",
     "delete_button": "刪除自動化",
     "toast_deleted": "已刪除自動化",
@@ -115,7 +115,8 @@
       "cancel": "取消",
       "confirm": "刪除",
       "deleting": "刪除中..."
-    }
+    },
+    "paused_project_archived": "由於所屬專案已歸檔，自動化已暫停。還原專案後請重新啟用。"
   },
   "access": {
     "title": "管理訪問",
@@ -182,6 +183,9 @@
     "url_copied": "已複製 Webhook URL",
     "url_copy_failed": "複製失敗",
     "edit_schedule": "編輯時間表",
+    "edit_webhook": "編輯 Webhook",
+    "event_filter_summary_all": "接收所有事件",
+    "event_filter_summary_conditions_other": "{{count}} 個條件",
     "rotate_url": "重新生成 URL",
     "rotate_confirm_title": "重新生成 Webhook URL",
     "rotate_confirm_description": "當前 URL 將立即失效。所有呼叫它的外部系統都需要更新為新 URL。繼續嗎？",
@@ -194,7 +198,7 @@
     "toast_delete_failed": "刪除觸發器失敗",
     "delete_dialog": {
       "title": "刪除觸發器",
-      "description": "將移除該觸發器，自動化不再按此時間表執行。此操作不可撤銷。",
+      "description": "此觸發器將被移除，且不再觸發此自動化。此操作無法復原。",
       "cancel": "取消",
       "confirm": "刪除",
       "deleting": "刪除中..."
@@ -244,7 +248,19 @@
       "toast_failed": "重放失敗",
       "disabled_invalid_signature": "無法重放——簽名校驗失敗",
       "disabled_rejected": "無法重放已拒絕的投遞",
-      "disabled_queued": "投遞仍在排隊，處理完成後再重放"
+      "disabled_queued": "已有重放正在排隊中，請等待其完成。"
+    },
+    "ignore": {
+      "title": "忽略原因",
+      "payload_filtered": "本文條件不符",
+      "event_filtered": "事件或動作不符",
+      "trigger_disabled": "觸發器已停用",
+      "autopilot_paused": "自動化已暫停",
+      "autopilot_archived": "自動化已封存",
+      "quota_exceeded": "已達執行配額",
+      "actual_value": "實際值",
+      "missing": "欄位不存在",
+      "truncated": "預覽已截斷，完整值請見原始本文。"
     }
   },
   "add_trigger_dialog": {
@@ -271,12 +287,18 @@
     "toast_updated": "時間表已更新",
     "toast_update_failed": "更新時間表失敗"
   },
+  "edit_webhook_dialog": {
+    "title": "編輯 Webhook",
+    "label_placeholder": "例如：GitHub PR",
+    "toast_updated": "Webhook 已更新",
+    "toast_update_failed": "更新 Webhook 失敗"
+  },
   "dialog": {
     "sr_create": "新建自動化",
     "sr_edit": "編輯自動化",
     "header_create": "新建自動化",
     "header_edit": "編輯自動化",
-    "subtitle": "週期性的 AI 工作",
+    "subtitle": "排程或由 Webhook 觸發的 AI 工作",
     "expand": "展開",
     "collapse": "收起",
     "close": "關閉",
@@ -326,12 +348,24 @@
     "webhook_created_done": "完成",
     "event_filter_label": "事件過濾",
     "event_filter_docs_link_label": "瞭解事件過濾的工作方式",
-    "event_filter_event_placeholder": "例如 workflow_run",
-    "event_filter_actions_placeholder": "completed, failed",
-    "event_filter_add": "新增",
-    "event_filter_remove_label": "移除過濾條件",
-    "event_filter_hint": "只處理匹配這些事件的 webhook。留空則接受所有事件。",
+    "event_filter_event_placeholder": "事件，例如 pull_request",
+    "event_filter_actions_placeholder": "動作（可選）",
+    "event_filter_add_rule": "新增規則",
+    "event_filter_event_label": "事件",
+    "event_filter_actions_label": "動作",
+    "event_filter_new_rule_label": "新規則",
+    "event_filter_condition_label": "條件",
+    "event_filter_error_event_required": "請填寫事件名稱。",
+    "event_filter_error_path_required": "請填寫本文欄位。",
+    "event_filter_error_path_invalid": "欄位名稱之間用點分隔，最多 {{path}} 個字元。",
+    "event_filter_error_value_required": "請填寫值。",
+    "event_filter_error_too_many_values": "最多 {{values}} 個值。",
+    "event_filter_remove_label": "移除規則",
+    "event_filter_hint": "只處理符合規則且本文符合全部條件的事件。留空則接收所有事件。",
     "schedule_multiple_notice": "該自動化有 {{count}} 條時間表。關閉此彈窗，在下方「觸發器」中逐條編輯。",
+    "webhook_multiple_notice": "該自動化有多個 Webhook。關閉此彈窗，在下方「觸發器」中逐條編輯。",
+    "webhook_edit_filters": "編輯過濾",
+    "webhook_filters_saved_separately": "事件篩選條件會立即儲存——在此點擊取消不會復原這些變更。",
     "schedule_empty": "還沒有時間表——這個自動化只在手動觸發時執行。",
     "schedule_add": "新增時間表",
     "error_title_required": "請填寫自動化名稱。",
@@ -345,7 +379,24 @@
         "label": "僅執行",
         "description": "靜默執行，不建立任務"
       }
-    }
+    },
+    "event_filter_condition_remove_label": "移除條件",
+    "event_filter_condition_add_label": "新增條件",
+    "event_filter_condition_ops": {
+      "equals": "是",
+      "not_equals": "不是",
+      "contains": "包含",
+      "in": "是其中之一",
+      "exists": "存在"
+    },
+    "event_filter_condition_path_label": "本文欄位",
+    "event_filter_condition_path_placeholder": "本文欄位，例如 pull_request.base.ref",
+    "event_filter_condition_op_label": "運算子",
+    "event_filter_condition_value_label": "值",
+    "event_filter_condition_value_placeholder": "例如 main",
+    "event_filter_condition_values_placeholder": "main, release",
+    "event_filter_condition_ignore_case": "忽略大小寫",
+    "event_filter_condition_all": "且本文符合全部條件"
   },
   "schedule_editor": {
     "time_label": "時間",
@@ -462,7 +513,9 @@
       "warning": "此操作無法撤銷。",
       "cancel": "取消",
       "confirm": "永久刪除",
-      "deleting": "刪除中…"
+      "deleting": "刪除中…",
+      "title_multiple": "刪除 {{count}} 個自動化任務？",
+      "description_single": "將永久刪除「{{name}}」及其執行歷史。"
     }
   },
   "wakeups": {
@@ -485,13 +538,13 @@
     "loading": "正在載入喚醒…",
     "disable_selected": "關閉所選",
     "confirm_title": "關閉 {{count}} 個喚醒？",
-    "confirm_body": "關閉後將停止後續喚醒，並撤回仍在排隊、尚未交給 AI 代理的執行。已交給 AI 代理的執行會繼續，可在執行日誌中停止。",
+    "confirm_body": "後續喚醒將停止。仍在排隊且尚未開始的執行將被取消。已在進行中的執行會繼續，你可在執行日誌中手動停止。",
     "cancel": "取消",
     "confirm": "關閉",
     "disabling": "正在關閉…",
     "batch_result": "已關閉 {{succeeded}} 項，失敗 {{failed}} 項。",
     "scopes": {
-      "active": "待喚醒或執行中",
+      "active": "等待中或執行中",
       "all": "全部喚醒",
       "disabled": "已關閉",
       "ended": "已結束",
@@ -562,7 +615,8 @@
       "load_error": "無法載入喚醒預設值。",
       "edit_instruction": "編輯預設指令",
       "view_instruction": "查看預設指令"
-    }
+    },
+    "banner_single": "1 條喚醒已自動暫停：{{issue}}「{{condition}}」——{{reason}}"
   },
   "intro": {
     "label": "自動化",

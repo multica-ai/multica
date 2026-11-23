@@ -65,7 +65,7 @@ describe("InlineCommentRun", () => {
     }]);
     await screen.findByText("Only touching web now.");
     fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
-    const steer = await screen.findByText("Reviewer added");
+    const steer = await screen.findByText("Message added by Reviewer");
     const row = steer.closest("[data-steer-comment]")!;
     expect(row).toHaveTextContent("Leave desktop alone.");
     const before = screen.getAllByText("cat login.tsx").find((node) => node.closest("summary"))!;
@@ -482,9 +482,7 @@ describe("InlineCommentRun", () => {
       vi.spyOn(window, "getComputedStyle").mockImplementation((el, pseudo) => {
         const style = originalComputedStyle(el, pseudo);
         if (!clipped(el)) return style;
-        style.overflowX = "hidden";
-        style.overflowY = "hidden";
-        return style;
+        return { overflowX: "hidden", overflowY: "hidden" } as CSSStyleDeclaration;
       });
     });
     afterEach(() => {

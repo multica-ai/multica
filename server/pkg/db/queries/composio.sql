@@ -8,9 +8,9 @@
 -- one. connected_at is preserved on conflict (first-connect time); updated_at
 -- moves so the reactivation is observable.
 INSERT INTO user_composio_connection (
-    user_id, toolkit_slug, auth_config_id, connected_account_id, composio_user_id, status
+    user_id, toolkit_slug, auth_config_id, connected_account_id, composio_user_id, status, workspace_id
 ) VALUES (
-    $1, $2, $3, $4, $5, 'active'
+    $1, $2, $3, $4, $5, 'active', sqlc.narg('workspace_id')::uuid
 )
 ON CONFLICT (user_id, connected_account_id) DO UPDATE SET
     toolkit_slug     = EXCLUDED.toolkit_slug,
@@ -21,6 +21,16 @@ ON CONFLICT (user_id, connected_account_id) DO UPDATE SET
 RETURNING *;
 
 -- name: ListActiveUserComposioConnections :many
+-- A member's active personal accounts in one workspace, plus the ones made
+-- before accounts belonged to a workspace. This workspace's own come first,
+-- so a reader keeping the first row per app prefers them.
+SELECT * FROM user_composio_connection
+WHERE user_id = $1 AND status = 'active'
+  AND (workspace_id = sqlc.arg('workspace_id')::uuid OR workspace_id IS NULL)
+ORDER BY (workspace_id IS NULL), connected_at DESC;
+
+-- name: ListAllActiveUserComposioConnections :many
+-- Every active personal account of a member, in any workspace.
 SELECT * FROM user_composio_connection
 WHERE user_id = $1 AND status = 'active'
 ORDER BY connected_at DESC;

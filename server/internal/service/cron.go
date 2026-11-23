@@ -79,7 +79,9 @@ func NextOccurrencesUTC(cronExpr, timezone string, after, until time.Time) ([]ti
 	untilLocal := until.In(loc)
 	for len(out) < hardCap {
 		next := sched.Next(cursor)
-		if next.After(untilLocal) {
+		// robfig reports "no further occurrence" (e.g. "0 0 30 2 *") as the
+		// zero time, which would otherwise pass the until check.
+		if next.IsZero() || next.After(untilLocal) {
 			break
 		}
 		out = append(out, next.UTC())

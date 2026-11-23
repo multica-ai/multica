@@ -1,4 +1,5 @@
 import { useIssueOpeningStore } from "@multica/core/issues/stores/issue-opening-store";
+import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,7 +10,7 @@ import {
   IssuePeekIdContext,
   type IssuePeekActions,
 } from "../surface/peek-context";
-import { ListRow } from "./list-row";
+import { ListRow, rowParity, type RowParity } from "./list-row";
 
 vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-query")>()),
@@ -25,6 +26,7 @@ vi.mock("@multica/core/properties", () => ({
 }));
 
 vi.mock("@multica/core/paths", () => ({
+  issueRouteRef: (issue: { id: string; identifier?: string | null }) => issue.identifier || issue.id,
   useWorkspacePaths: () => ({ issueDetail: (id: string) => `/acme/issues/${id}` }),
 }));
 
@@ -77,12 +79,12 @@ const issue = {
   properties: {},
 } as unknown as Issue;
 
-function renderRow(peekedId: string | null = null) {
+function renderRow(peekedId: string | null = null, parity: RowParity = "even") {
   return render(
     <NavigationProvider value={navigation}>
       <IssuePeekActionsContext.Provider value={peek}>
         <IssuePeekIdContext.Provider value={peekedId}>
-          <ListRow issue={issue} />
+          <ListRow issue={issue} parity={parity} />
         </IssuePeekIdContext.Provider>
       </IssuePeekActionsContext.Provider>
     </NavigationProvider>,
@@ -93,6 +95,7 @@ describe("ListRow side peek", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useIssueOpeningStore.setState({ openMode: "page" });
+    useIssueSelectionStore.getState().clear();
   });
 
   it("opens the peek on Shift+Click and still navigates on a plain click", () => {
@@ -102,7 +105,7 @@ describe("ListRow side peek", () => {
     expect(navigation.push).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("link"));
-    expect(navigation.push).toHaveBeenCalledWith("/acme/issues/issue-1");
+    expect(navigation.push).toHaveBeenCalledWith("/acme/issues/MUL-1");
   });
 
   it("opens on a plain click when side preview is preferred", () => {
@@ -117,5 +120,25 @@ describe("ListRow side peek", () => {
     const { container } = renderRow("issue-1");
     const row = container.querySelector('[data-peek-target="issue-1"]');
     expect(row).toHaveAttribute("data-peeked");
+  });
+});
+
+describe("ListRow theme hooks", () => {
+  beforeEach(() => {
+    useIssueSelectionStore.getState().clear();
+  });
+
+  it("alternates parity by index within the group", () => {
+    expect([0, 1, 2, 3].map(rowParity)).toEqual(["even", "odd", "even", "odd"]);
+  });
+
+  it("exposes parity and follows the selection", () => {
+    const { container } = renderRow(null, "odd");
+    const row = container.querySelector('[data-mc="issue-row"]');
+    expect(row).toHaveAttribute("data-parity", "odd");
+    expect(row).toHaveAttribute("data-selected", "false");
+
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(row).toHaveAttribute("data-selected", "true");
   });
 });

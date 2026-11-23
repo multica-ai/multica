@@ -42,7 +42,7 @@ describe("LabelPicker trigger semantics", () => {
     const error = vi.spyOn(console, "error");
     const user = userEvent.setup();
     renderWithI18n(<LabelPicker selectedIds={["bug"]} onSelectedIdsChange={() => {}} />);
-    const trigger = screen.getByRole("button", { name: /^Bug/ }).closest('[data-slot="popover-trigger"]')!;
+    const trigger = screen.getByRole("button", { name: /^Bug/ }).closest('[data-trigger="popover"]')!;
     expect(trigger.tagName).toBe("DIV");
     expect(trigger).not.toHaveAttribute("type");
     (trigger as HTMLElement).focus();
@@ -61,11 +61,11 @@ describe("LabelPicker trigger semantics", () => {
   it("retains native buttons for empty and custom triggers across selection changes", () => {
     const error = vi.spyOn(console, "error");
     const { rerender } = renderWithI18n(<LabelPicker selectedIds={[]} />);
-    expect(document.querySelector('[data-slot="popover-trigger"]')?.tagName).toBe("BUTTON");
+    expect(document.querySelector('[data-trigger="popover"]')?.tagName).toBe("BUTTON");
     rerender(<LabelPicker selectedIds={["bug"]} />);
-    expect(document.querySelector('[data-slot="popover-trigger"]')?.tagName).toBe("DIV");
+    expect(document.querySelector('[data-trigger="popover"]')?.tagName).toBe("DIV");
     rerender(<LabelPicker selectedIds={["bug"]} triggerRender={<button type="button" />} />);
-    expect(document.querySelector('[data-slot="popover-trigger"]')?.tagName).toBe("BUTTON");
+    expect(document.querySelector('[data-trigger="popover"]')?.tagName).toBe("BUTTON");
     expect(screen.queryByRole("button", { name: "Remove label Bug" })).not.toBeInTheDocument();
     expect(error).not.toHaveBeenCalled();
   });
@@ -79,7 +79,7 @@ describe("LabelPicker on a skill", () => {
 
     expect(spies.listTypes).toContain("skill");
     expect(spies.listTypes).not.toContain("issue");
-    await user.type(screen.getByPlaceholderText("Find or create a label…"), "Docs{Enter}");
+    await user.type(screen.getByPlaceholderText("Find or create a label..."), "Docs{Enter}");
 
     expect(spies.create).toHaveBeenCalledWith(
       expect.objectContaining({ name: "Docs", resource_type: "skill" }),
@@ -93,7 +93,7 @@ describe("LabelPicker on a skill", () => {
     const user = userEvent.setup();
     renderWithI18n(<LabelPicker skillId="skill-1" open onOpenChange={() => {}} />);
 
-    await user.click(screen.getByRole("button", { name: "Manage labels…" }));
+    await user.click(screen.getByRole("button", { name: "Manage labels..." }));
     expect(spies.push).toHaveBeenCalledWith("/settings?tab=labels&scope=skill");
   });
 });

@@ -69,12 +69,16 @@ function Button({
   size = "default",
   ...props
 }: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {
+  // The data attributes come after the spread: a Trigger that renders this
+  // Button hands down its own `data-slot`, and themes select every button by
+  // `[data-slot="button"]`. Triggers mark themselves with `data-trigger`.
   return (
     <ButtonPrimitive
-      data-slot="button"
-      data-variant={variant}
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
+      data-slot="button"
+      data-variant={variant}
+      data-size={size}
     />
   )
 }

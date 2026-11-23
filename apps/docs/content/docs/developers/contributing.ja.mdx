@@ -11,7 +11,7 @@ Multica は Go バックエンドと pnpm monorepo で構成されています�
 
 - Node.js 22
 - pnpm 10.28.2
-- Go 1.26.6
+- Go 1.26.9
 - Docker Engine または Docker Desktop
 - Git と Make
 
@@ -70,12 +70,19 @@ worktree 間で共有するのは PostgreSQL コンテナであり、データ�
 ### 全体フロー
 
 ```bash
-make dev              # 現在の checkout を準備して起動
-make start            # 既存の環境で API と Web を起動
-make stop             # 現在の checkout のプロセスを停止
+make up               # 現在の checkout の環境を起動（C=api,collab,web,daemon,desktop）
+make status           # 稼働中のコンポーネントとこの環境への帰属を表示
+make list             # このマシン上のすべての環境を一覧表示
+make down             # プロセスを停止し、データベースは保持
+make down C=daemon    # 指定したコンポーネントのみ停止
+make destroy          # 停止後、データベースを削除しスロットを解放
+make gc               # 期限切れまたはディレクトリが消えた環境を回収
+make dev              # 現在の checkout をフォアグラウンドで準備して起動
 make check            # ローカルの完全な検証フローを実行
 make build            # server、CLI、migrate バイナリをビルド
 ```
+
+`make up` は環境を名前付きオブジェクトとして扱います。ロック下で API、Web、Desktop レンダラーのポート、データベース名、CLI プロファイルを割り当てて `~/.multica/dev/` に記録するため、2 つの checkout が気づかずに同じスロットへ衝突することはありません。データベースは `DATABASE_URL` で検証し、バックエンドは `pid`、`commit`、`started_at` を返す `GET /health` で検証します（200 だけでは同じポートに残ったプロセスと区別できないためです）。`make destroy` はデータベース、CLI プロファイル、デーモンのワークスペース、Desktop の userData、レジストリ項目を削除します。削除に失敗した項目は再試行できるようレジストリに残ります。一時環境は TTL 経過後の次の `make up` でベストエフォートに回収されます。
 
 ### フロントエンド
 
@@ -102,11 +109,21 @@ make migrate-down
 make sqlc
 ```
 
+`make test` は Go テストの実行前にデータベースを準備し、マイグレーションを適用します。`.env` のないワークツリーでは、`make` は自動的に `.env.worktree` を選択します。`make test ENV_FILE=.env.worktree` で明示的に指定することもできます。
+
+`make test`、`make check`、`make check-worktree` の前に、同じデータベースを使う開発用 API を停止し、バックグラウンドワーカーがテストジョブを処理しないようにしてください。起動方法に対応する停止方法を使います。
+
+- `make up` → `make down C=api`。
+- `make start` / `make dev` → `make stop`。`make start-worktree` → `make stop-worktree`。
+- `make server` → 実行中のターミナルで Ctrl-C を押します。
+
 ソースから CLI コマンドを実行するには:
 
 ```bash
 make cli ARGS="issue list"
 ```
+
+登録が残っている環境を更新するには、期限切れの場合でも、そのチェックアウトで `make up ARGS="--ttl 48"` を実行します。データは保持され、有効期限は実行時点から 48 時間後になります。
 
 ## フロントエンド機能の変更
 
@@ -186,7 +203,7 @@ make start
 
 ## GitHub Issue の作成
 
-- **[機能リクエスト](https://github.com/multica-ai/multica/blob/main/.github/ISSUE_TEMPLATE/feature_request.yml)：** **問題（Problem）**と**目標（Goal）**を説明します。設計の概要（Proposal）、代替案（Alternatives）、スクリーンショット（Screenshots）は任意です。解決策を設計していなくても報告できます。
+- **[機能リクエスト](https://github.com/multica-ai/multica/blob/main/.github/ISSUE_TEMPLATE/feature_request.yml)：** **問題**（Problem）と**目標**（Goal）を説明します。設計の概要（Proposal）、代替案（Alternatives）、スクリーンショット（Screenshots）は任意です。解決策を設計していなくても報告できます。
 - **[バグ報告](https://github.com/multica-ai/multica/blob/main/.github/ISSUE_TEMPLATE/bug_report.yml)：** **問題**、**期待する動作**、**再現手順**を分けて記載します。断続的に発生する場合は、試した操作と頻度を説明してください。画像、ログ、環境情報は任意です。
 
 報告を担当者に振り分けるため、影響する領域を選びます。バグ報告ではデプロイ方法も選択します。Issue の報告では画像は任意であり、UI や操作を変更する PR の画像必須ルールは適用されません。

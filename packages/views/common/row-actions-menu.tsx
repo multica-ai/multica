@@ -9,7 +9,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
-import { usePointAnchor, type RowMenuState } from "./point-menu";
+import { nextRowMenuState, usePointAnchor, type RowMenuState } from "./point-menu";
 
 export interface RowActionItem {
   key: string;
@@ -92,18 +92,33 @@ export function RowActionsPointMenu({
   menu,
   onOpenChange,
   groups,
+  trailing,
+  finalFocus,
 }: {
   menu: RowMenuState;
   onOpenChange: (open: boolean) => void;
   groups: RowActionItem[][];
+  /** Rendered after the groups, e.g. the surrounding object's submenu. */
+  trailing?: ReactNode;
+  finalFocus?: () => boolean;
 }) {
   const anchor = usePointAnchor(menu.point);
   const filled = groups.filter((group) => group.length > 0);
 
   return (
-    <DropdownMenu open={menu.open && filled.length > 0} onOpenChange={onOpenChange}>
-      <DropdownMenuContent align="start" anchor={anchor} className="w-auto">
+    <DropdownMenu
+      open={menu.open && filled.length > 0}
+      onOpenChange={(open, details) => {
+        if (!nextRowMenuState(menu, open, details.reason)) {
+          details.cancel();
+          return;
+        }
+        onOpenChange(open);
+      }}
+    >
+      <DropdownMenuContent align="start" anchor={anchor} finalFocus={finalFocus} className="w-auto">
         <RowActionGroups groups={filled} />
+        {trailing}
       </DropdownMenuContent>
     </DropdownMenu>
   );

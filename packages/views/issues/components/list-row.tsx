@@ -11,7 +11,7 @@ import type { Issue, Project,
 import { formatDateOnly } from "@multica/core/issues/date";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropertyIcon } from "../../common/property-icon";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { useQuery } from "@tanstack/react-query";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -44,8 +44,16 @@ function formatDate(date: string, locale: string): string {
   return formatDateOnly(date, { month: "short", day: "numeric" }, locale);
 }
 
+/** A row's position within its status group, for themes that stripe rows. */
+export type RowParity = "even" | "odd";
+
+export function rowParity(index: number): RowParity {
+  return index % 2 === 0 ? "even" : "odd";
+}
+
 function ListRowContent({
   issue,
+  parity,
   childProgress,
   project,
   isDragging,
@@ -55,6 +63,7 @@ function ListRowContent({
   checkboxProps,
 }: {
   issue: Issue;
+  parity: RowParity;
   childProgress?: ChildProgress;
   project?: Project;
   isDragging?: boolean;
@@ -66,7 +75,7 @@ function ListRowContent({
   const locale = useLocale();
   const selection = useIssueSurfaceSelection();
   const peeked = useIsIssuePeeked(issue.id);
-  const peekLinkProps = useIssuePeekLinkProps(issue.id);
+  const peekLinkProps = useIssuePeekLinkProps(issue);
   const selected = selection.selectedIds.has(issue.id);
   const toggle = selection.toggle;
   const p = useWorkspacePaths();
@@ -97,6 +106,8 @@ function ListRowContent({
         data-status={issue.status}
         data-priority={issue.priority}
         data-assignee-type={issue.assignee_type ?? "none"}
+        data-parity={parity}
+        data-selected={selected ? "true" : "false"}
         {...{ [PEEK_TARGET_ATTR]: issue.id }}
         data-peeked={peeked ? "" : undefined}
         style={containerStyle}
@@ -127,7 +138,7 @@ function ListRowContent({
           />
         </div>
         <AppLink
-          href={p.issueDetail(issue.id)}
+          href={p.issueDetail(issueRouteRef(issue))}
           newTabTitle={issue.identifier}
           className={`flex flex-1 items-center gap-2 min-w-0 ${isDragging ? "pointer-events-none" : ""}`}
           {...peekLinkProps}
@@ -155,6 +166,7 @@ function ListRowContent({
               <IssuePullRequestChips
                 pullRequests={pullRequests}
                 max={2}
+                insideLink
                 className="max-w-[40%]"
               />
             )}
@@ -216,16 +228,19 @@ function ListRowContent({
 
 export const ListRow = memo(function ListRow({
   issue,
+  parity,
   childProgress,
   project,
 }: {
   issue: Issue;
+  parity: RowParity;
   childProgress?: ChildProgress;
   project?: Project;
 }) {
   return (
     <ListRowContent
       issue={issue}
+      parity={parity}
       childProgress={childProgress}
       project={project}
     />
@@ -244,11 +259,13 @@ const stopDrag = (e: React.SyntheticEvent) => {
 
 export const DraggableListRow = memo(function DraggableListRow({
   issue,
+  parity,
   childProgress,
   project,
   disableSorting,
 }: {
   issue: Issue;
+  parity: RowParity;
   childProgress?: ChildProgress;
   project?: Project;
   disableSorting?: boolean;
@@ -275,6 +292,7 @@ export const DraggableListRow = memo(function DraggableListRow({
   return (
     <ListRowContent
       issue={issue}
+      parity={parity}
       childProgress={childProgress}
       project={project}
       isDragging={isDragging}

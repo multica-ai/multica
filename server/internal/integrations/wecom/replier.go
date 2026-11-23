@@ -175,6 +175,11 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 			r.logger.WarnContext(ctx, "wecom replier: new-chat confirmation failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
+	case engine.OutcomeHelp:
+		if err := r.post(ctx, inst, msg, c.Help); err != nil {
+			r.logger.WarnContext(ctx, "wecom replier: help reply failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
 	case engine.OutcomeIssueUsage:
 		if err := r.post(ctx, inst, msg, c.IssueUsage); err != nil {
 			r.logger.WarnContext(ctx, "wecom replier: issue usage reply failed",

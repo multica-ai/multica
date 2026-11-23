@@ -45,6 +45,8 @@ multica daemon status --output json
 multica daemon logs --lines 100
 ```
 
+如果 CLI 無法驗證權杖，請先檢查提示中的錯誤，再決定是否重新登入。
+
 常見原因包括：
 
 - CLI 尚未登入，或本機儲存的令牌已經失效；
@@ -65,6 +67,8 @@ multica daemon restart
 ```bash
 multica config show
 ```
+
+在 macOS 上，如果守護程序日誌顯示 `connect: no route to host`，但同一台 Mac 的終端機可以成功執行 `curl -fsS <server-url>/health`，請記錄同一時段的兩項結果。附上守護程序的啟動方式（Desktop、登入服務或終端機），以及 macOS 和守護程序的版本。終端機的結果只說明該 shell 程序可以連線。
 
 </Accordion>
 <Accordion title={<><code>multica setup</code> 報告伺服器不可達</>} id="multica-setup-reports-the-server-is-not-reachable" value="multica-setup-reports-the-server-is-not-reachable">
@@ -139,11 +143,11 @@ multica issue runs <issue-id>
 </Tab>
 <Tab value="waiting_local_directory">
 
-這表示另一條在途執行正在使用同一個本地目錄。Multica 會等待目錄鎖釋放，避免兩個 AI 代理同時修改同一份檔案。
+這條執行在啟動前等待本地目錄或空閒的守護程序執行槽位。`held by task ...` 提示記錄開始等待時佔用目錄的執行，不會即時更新。
 
-這種等待只存在於目錄的 `in_place`（"原地"）模式。如果這個目錄是 git 倉庫，把資源切到 `worktree`（"並行"）就沒有佇列了：每次執行拿到自己的 worktree，並以分支形式交回結果，誰都不用等誰。見[專案資源](/project-resources#執行如何共享這個目錄)。
+直接修改模式（`in_place`）會序列執行對同一目錄的寫入。並行模式（`worktree`）使用獨立的工作副本，但如果來源路徑與直接修改模式的執行共用，準備來源目錄快照時仍可能等待。見[專案資源](/project-resources#執行如何共享這個目錄)。
 
-否則通常只需等前一次執行結束。若前一次已經卡住，可以從它的執行日誌中停止，也可以為當前 AI 代理選擇其他本地目錄。這個目錄互斥由守護程序在記憶體中維護，不寫磁碟鎖檔案。懷疑鎖狀態異常時，執行 `multica daemon restart` 即可釋放，沒有需要手動刪除的檔案。
+停止提示中的執行前，先確認它是否仍在執行。如果確實卡住，可以從執行日誌中停止，或選擇其他本地目錄。如果目錄已空閒，但守護程序正在執行其他工作，則等待執行槽位釋放。目錄互斥由守護程序在記憶體中維護，沒有需要刪除的鎖檔案。確認記憶體中的鎖狀態異常後，可使用 `multica daemon restart`。
 
 </Tab>
 </Tabs>
@@ -160,6 +164,15 @@ multica issue runs <issue-id>
 - AI 代理的自定義引數或環境變數是否有效。
 
 先在執行電腦的終端中直接執行同一款工具。工具自身也無法開始時，先修復工具登入或配置，再從執行日誌重試執行。
+
+</Accordion>
+<Accordion title="AI 程式設計工具在 macOS 代理環境中逾時" id="ai-coding-tool-times-out-behind-a-macos-proxy" value="ai-coding-tool-times-out-behind-a-macos-proxy">
+
+如果 Grok 等 AI 程式設計工具在終端機中執行正常，但在 Multica 桌面版中逾時，請檢查終端機是否匯出了代理環境變數。在 macOS 上，本機守護程序和它啟動的工具會繼承啟動它們的程序的環境變數。從 Dock 啟動桌面版時，應用程式不會讀取 shell 匯出的變數，也不會將 macOS「網路」中的代理設定轉換為環境變數。
+
+如果只有一名 AI 代理需要透過網路代理連線，請在該 AI 代理的[環境變數](/agents-create#環境變數與憑據)中加入其工具所需的代理變數。例如，本機 HTTP 代理可使用 `HTTPS_PROXY=http://127.0.0.1:7897`，請換成實際的代理位址。如果 Multica 部署在本機，請將需要直接連線的主機加入 `NO_PROXY`，例如 `localhost,127.0.0.1,::1`。啟動一次新的執行以套用變更。
+
+這些設定只適用於該 AI 代理的工具程序，不適用於守護程序。如果守護程序需要透過網路代理連線 Multica 伺服器，或需要取得最新的模型清單（守護程序以自身的環境取得模型清單），請另外設定其啟動環境。開機自啟的守護程序請見[開機自啟](/daemon-runtimes#autostart)。
 
 </Accordion>
 <Accordion title="升級 CLI 後 macOS 上的執行卡住" id="runs-hang-on-macos-after-a-cli-upgrade" value="runs-hang-on-macos-after-a-cli-upgrade">

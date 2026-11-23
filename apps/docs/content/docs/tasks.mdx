@@ -42,7 +42,7 @@ A run typically moves through these states:
 | `deferred` | Scheduled to fire later; enters the queue at the appointed time |
 | `queued` | Waiting for a runtime to claim it |
 | `dispatched` | A runtime has claimed it and is starting the AI coding tool |
-| `waiting_local_directory` | The target local directory is held by another run; waiting for the directory lock to release |
+| `waiting_local_directory` | Waiting for the target local directory or a daemon execution slot before startup |
 | `running` | The AI coding tool is executing |
 | `completed` | The run finished normally |
 | `failed` | The run errored or was interrupted |
@@ -105,6 +105,7 @@ The failure reasons shown in the execution log and [Analytics](/analytics#errors
 | `queued_expired` | The runtime stopped heartbeating for longer than the reconnect grace, and the run had also been queued that long | Confirm the runtime is online, then retry |
 | `runtime_recovery` | The daemon reclaimed an interrupted run after restarting | Retry directly |
 | `environment_prepare_failed` | The daemon could not set up the execution environment for this run — its working directory, or the local runtime config written into it | Read the raw error to see which step failed, then check that machine: disk space, permissions, a directory still in use, or the AI coding tool's local config |
+| `local_directory_missing` | The local folder linked to the project no longer exists on the computer running the agent — it was deleted or moved after it was linked | Restore the folder at the same path, then retry. To use a new location, remove the old folder under **Resources → Local folders** and link the new one from Desktop on that computer — browsers cannot pick folders; see [Project resources](/project-resources) |
 | `cancelled` | Stopped manually, or cancelled along with an archive or delete | Nothing to do |
 | `timeout` | Exceeded the daemon's configured execution time limit | Narrow the issue scope, or adjust the daemon's `agent_timeout` |
 | `iteration_limit` | Hit the iteration cap for a run | Narrow the issue scope |
@@ -120,8 +121,8 @@ The `agent_error.` prefix is omitted in this table.
 | Reason | Meaning | What to do |
 | --- | --- | --- |
 | `provider_auth_or_access` | Model provider authentication failed or access denied (401/403) | Sign in again in that AI coding tool, or check the API key |
-| `provider_quota_limit` | Quota or balance exhausted (402) | Top up or switch accounts |
-| `provider_capacity_or_rate_limit` | Rate limited or out of capacity (429/529) | Retry later |
+| `provider_quota_limit` | Quota or balance exhausted | Top up or switch accounts |
+| `provider_capacity_or_rate_limit` | Rate limited or out of capacity | Retry later |
 | `provider_server_error` | Model provider server error (5xx) | Retry later |
 | `provider_network` | Network failure reaching the model provider | Retries automatically; check the executing machine's network if it persists |
 | `model_not_found_or_unavailable` | The model does not exist or is currently unavailable | Pick an available model in the agent settings |
@@ -167,7 +168,7 @@ The numbers below are the server's defaults.
 | `deferred` | Scheduled to fire later | Enters `queued` at the scheduled time, then the rules below apply |
 | `queued` | Waiting for a runtime to claim it | Waits as long as its runtime keeps heartbeating, and in every case for at least one reconnect grace after being queued; fails only when both windows have passed, and is not retried automatically |
 | `dispatched` | Claimed; the tool is starting | Treated as failed after more than **5 minutes** in this state |
-| `waiting_local_directory` | Waiting for the local directory lock to release | No timeout of its own; returns to the startup flow once the directory is released |
+| `waiting_local_directory` | Waiting for the local directory and execution capacity | No timeout of its own; resumes startup once the directory and a daemon execution slot are available |
 | `running` | The AI coding tool is executing | No fixed duration cap; liveness follows the runtime heartbeat — one every 15 seconds; a runtime that loses its heartbeat is marked offline within about 3 minutes at the latest. Its runs fail only once the heartbeat has been missing longer than the reconnect grace (`MULTICA_RUNTIME_RECONNECT_GRACE`, 3 hours by default); a daemon restart reclaims them directly |
 
 Automatic retry covers only the transient faults below, and only applies to runs attached to an issue or a chat (excluding the Autopilot **run only** mode):
@@ -188,23 +189,3 @@ All other failure reasons (auth, quota, configuration, model, and so on) never r
 - [Daemon and runtimes](/daemon-runtimes) — which computer a run executes on.
 - [Assigning issues to agents](/assigning-issues) — trigger a run from an issue.
 - [Mentioning agents](/mentioning-agents) — add requirements in comments or bring in other agents.
-
-## Run changes
-
-Open **Run changes** below an agent's reply or in the run's transcript dialog. Select a file to see its additions and deletions.
-
-A repository can have several comparisons:
-
-- **Working tree, start to end** compares the files before and after the run, including uncommitted edits and new files Git does not ignore. Existing edits form the baseline. In an in-place run, concurrent edits to the same directory can also appear in this comparison.
-- **Commits** compares the run's start and end commits. For a delivered worktree, this is the range delivered to the issue branch.
-- **Saved draft** shows changes that worktree finalization saved separately from the delivered commits, compared with the delivered tip.
-
-The runtime covers configured local repositories and repositories registered through `multica repo checkout`. Each run has its own records, including any partial results successfully captured after a failure. The viewer distinguishes an empty comparison, a failed capture, and a truncated record. Older runs may have no recorded diff. Records follow task-message access and retention.
-
-For an in-place run bound to a subdirectory, both working-tree snapshots and commit comparisons are restricted to that configured directory. Sibling directories are excluded. File paths in the viewer remain relative to the repository root. Concurrent edits inside the configured directory can still appear in the comparison.
-
-If worktree finalization fails and preserves the checkout, the working-tree comparison is unavailable because its starting commit may use a different representation from the files on disk, such as Git LFS or clean/smudge filters. Valid commit ranges remain reviewable. Inspect uncommitted changes in the preserved checkout.
-
-The daemon automatically sends the captured file paths and textual patches to the Multica server, including captured uncommitted changes. It masks credentials recognized by the existing redaction rules before sending; these rules cannot detect every secret. Review who can access the run before using it with sensitive repositories.
-
-Capture is limited to eight repositories, 50 files per comparison, 64 KiB per patch, and 256 KiB of patch bodies per run. Repository registrations survive environment reuse, including repositories omitted by the capture limit. The temporary working-tree snapshots can use more disk space than the uploaded patches; capture timeouts do not impose a disk quota. The daemon sends the final records once with a three-second deadline. If reporting fails or the daemon exits before delivery, the records may be missing from history.

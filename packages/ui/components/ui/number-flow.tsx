@@ -1,6 +1,7 @@
 "use client"
 
 import NumberFlowPrimitive, {
+  continuous,
   NumberFlowGroup,
   type NumberFlowProps,
 } from "@number-flow/react"
@@ -156,6 +157,7 @@ function CappedNumberFlow({
 export {
   CappedNumberFlow,
   CompactNumberFlow,
+  continuous,
   CurrencyNumberFlow,
   NumberFlow,
   NumberFlowGroup,

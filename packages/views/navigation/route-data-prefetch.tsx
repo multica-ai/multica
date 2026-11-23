@@ -9,7 +9,15 @@ import { createContext, use } from "react";
  * inside the workspace shell; links rendered outside one get `null` and skip
  * it.
  */
-export type RouteDataPrefetcher = (href: string) => void;
+export interface RouteDataPrefetcher {
+  /**
+   * A link to `href` is pointed at or focused. A warm-up that costs a request
+   * per link may wait for a hovering pointer to rest before it starts.
+   */
+  prefetch(href: string, trigger: "hover" | "focus"): void;
+  /** The pointer left the link: drop what has not started yet. */
+  cancel(): void;
+}
 
 const RouteDataPrefetchContext = createContext<RouteDataPrefetcher | null>(
   null,

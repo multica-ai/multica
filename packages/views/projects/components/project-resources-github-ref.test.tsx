@@ -155,6 +155,15 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
     }
   });
 
+  it("lists the repositories read-only, with nothing to add, remove or change", () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" readOnly />);
+    expect(screen.getByText("Release line")).toBeTruthy();
+    expect(screen.getByText("release/2026-09")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /add repository/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /remove/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /release\/2026-09/ })).toBeNull();
+  });
+
   it("shows the ref beside a repo that has a custom label", () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
     expect(screen.getByText("Release line")).toBeTruthy();
@@ -293,20 +302,20 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
     expect(createMock).not.toHaveBeenCalled();
   });
 
-  it("splits a pasted /tree/ URL into the repo and the branch it points at", async () => {
+  it("saves the decoded branch from a pasted GitHub URL without page parameters", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
     fireEvent.click(screen.getByRole("button", { name: /add repository/i }));
     // What someone copies out of the address bar when they want a branch.
     // Stored whole, this is a clone URL that does not exist.
     fireEvent.change(screen.getByLabelText(/paste a github url/i), {
-      target: { value: "https://github.com/multica-ai/other/tree/release/2026-09" },
+      target: { value: "https://github.com/multica-ai/other/tree/release%2F%E4%B8%AD%E6%96%87?tab=readme-ov-file#readme" },
     });
 
     const urlInput = screen.getByLabelText(/paste a github url/i) as HTMLInputElement;
     const refInput = screen.getByLabelText(/starting branch/i) as HTMLInputElement;
     expect(urlInput.value).toBe("https://github.com/multica-ai/other");
-    expect(refInput.value).toBe("release/2026-09");
+    expect(refInput.value).toBe("release/中文");
 
     fireEvent.click(screen.getByRole("button", { name: /^add multica-ai\//i }));
     await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
@@ -314,7 +323,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
       resource_type: "github_repo",
       resource_ref: {
         url: "https://github.com/multica-ai/other",
-        ref: "release/2026-09",
+        ref: "release/中文",
       },
     });
   });
@@ -345,6 +354,31 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
     expect(createMock.mock.calls[0]?.[0]).toEqual({
       resource_type: "github_repo",
       resource_ref: { url: "https://github.com/multica-ai/two", ref: "main" },
+    });
+  });
+
+  it.each([
+    "https://github.com/multica-ai/one.git",
+    "https://github.com/multica-ai/two",
+    "git@github.com:multica-ai/two.git",
+  ])("clears the previous branch when replacing a browse URL with %s", async (url) => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /add repository/i }));
+    const input = screen.getByLabelText(/paste a github url/i);
+    fireEvent.change(input, {
+      target: { value: "https://github.com/multica-ai/one/tree/release/2026-09" },
+    });
+    expect((screen.getByLabelText(/starting branch/i) as HTMLInputElement).value).toBe("release/2026-09");
+
+    fireEvent.change(input, { target: { value: url } });
+    expect((screen.getByLabelText(/starting branch/i) as HTMLInputElement).value).toBe("");
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
+    expect(createMock.mock.calls[0]?.[0]).toEqual({
+      resource_type: "github_repo",
+      resource_ref: { url },
     });
   });
 

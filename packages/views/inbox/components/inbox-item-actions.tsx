@@ -1,12 +1,13 @@
 "use client";
 
-import { Archive, ArchiveRestore, Check, CircleDot, ExternalLink, Trash2 } from "@multica/ui/icons";
+import { Archive, ArchiveRestore, BellOff, Check, CircleDot, ExternalLink, Trash2 } from "@multica/ui/icons";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import type { InboxItem } from "@multica/core/types";
 import type { RowActionItem } from "../../common/row-actions-menu";
 import { useIntentNavigate } from "../../navigation";
 import { useT } from "../../i18n";
 import type { InboxView } from "./inbox-view";
+import { inboxIssueRef } from "./inbox-display";
 
 /** Row-level actions the menus invoke, all keyed by inbox item id. */
 export interface InboxRowActions {
@@ -18,6 +19,12 @@ export interface InboxRowActions {
    */
   onAction: (id: string) => void;
   onDelete: (id: string) => void;
+  /**
+   * Unsubscribe & archive, offered in the main list on rows `canUnsubscribe`
+   * accepts (issues that are not the viewer's own).
+   */
+  onUnsubscribeArchive?: (id: string) => void;
+  canUnsubscribe?: (item: InboxItem) => boolean;
 }
 
 /**
@@ -44,7 +51,7 @@ export function useInboxItemActions(
 
   const issueHref =
     slug && item.issue_id
-      ? paths.workspace(slug).issueDetail(item.issue_id)
+      ? paths.workspace(slug).issueDetail(inboxIssueRef(item, item.issue_id))
       : null;
   const isArchivedView = view === "archived";
 
@@ -99,6 +106,16 @@ export function useInboxItemActions(
       ),
       onSelect: () => actions.onAction(item.id),
     },
+    ...(!isArchivedView && actions.onUnsubscribeArchive && actions.canUnsubscribe?.(item)
+      ? [
+          {
+            key: "unsubscribe-archive",
+            label: t(($) => $.context_menu.unsubscribe_archive),
+            icon: <BellOff className="h-4 w-4" />,
+            onSelect: () => actions.onUnsubscribeArchive?.(item.id),
+          },
+        ]
+      : []),
   ]);
 
   groups.push([

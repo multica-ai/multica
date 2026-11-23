@@ -310,3 +310,30 @@ func TestUpdateCommentKeepsTheLatestEditsSuppression(t *testing.T) {
 		t.Fatalf("the latest edit starts A, but an earlier edit's choice stayed: %v", saved.SuppressedAgentIds)
 	}
 }
+
+func TestCreateCommentSteerKeepsSkillCapsuleCommentsAsOwnTurns(t *testing.T) {
+	f := newSupplementFixture(t, "codex", "running", true)
+	dbfx.Exec(t, `UPDATE comment SET content = $2 WHERE id = $1`, f.triggerID,
+		agentMention("Supplement", f.agentID)+" original objective")
+	dbfx.Exec(t, `UPDATE agent_task_queue SET delivered_comment_ids = ARRAY[trigger_comment_id] WHERE id = $1`, f.taskID)
+	dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE issue_id = $1`, f.issueID)
+
+	// A member's explicit skill selection cannot ride the text-only
+	// supplement channel: the comment must keep its own deferred turn even
+	// when the client asked to steer the running one.
+	var created CommentResponse
+	postSteeredComment(t, f.issueID, f.triggerID, "[/review](slash://skill/selected) review this", f.taskID).Want(http.StatusCreated).JSON(&created)
+	if len(created.Supplements) != 0 {
+		t.Fatalf("member skill capsule merged into the running turn's text channel: %+v", created.Supplements)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM task_supplement WHERE comment_id = $1`, created.ID); n != 0 {
+		t.Fatalf("stored %d supplement receipts", n)
+	}
+	completeTaskViaDaemon(t, f.taskID)
+	var trigger string
+	dbfx.QueryRow(t, `SELECT trigger_comment_id FROM agent_task_queue WHERE issue_id = $1 AND id <> $2`,
+		f.issueID, f.taskID).Scan(&trigger)
+	if trigger != created.ID {
+		t.Fatalf("follow-up trigger = %s, want the skill-capsule comment %s", trigger, created.ID)
+	}
+}

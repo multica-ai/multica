@@ -24,6 +24,7 @@ import { buildTimeline } from "../../common/task-transcript/build-timeline";
 import { buildSteps, groupSteps, isCallStep, isGroupRow, type TraceRow } from "../../common/task-transcript/build-steps";
 import { traceEventSummary, traceToolArgSummary } from "../../common/task-transcript/trace-event-presenter";
 import { redactSecrets } from "../../common/task-transcript/redact";
+import { runOutputKey } from "../utils/timeline-row-content";
 import { ReadonlyContent } from "../../editor";
 import { useLocale, useT, useTimeAgo } from "../../i18n";
 import { formatDuration } from "../../agents/components/agent-activity-hover-content";
@@ -33,7 +34,6 @@ import { TaskStatusIcon } from "./task-status-icon";
 import { useStatusLabel } from "./task-run-labels";
 import { commentRunOutput, isActiveCommentRun, showCommentRunInHeader, type CommentRun } from "./comment-runs";
 
-import { TaskCommitChanges } from "../../common/commit-changes/commit-changes";
 import { useRunAnimationVisibility, useRunDisclosureMotion } from "./use-run-comment-motion";
 
 function thinkingPreview(content: string | undefined, formatText: (text: string) => string): string {
@@ -234,14 +234,13 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
       </div>
       <div className={cn(showIdentity && "pl-8")}>
         {replyTo}
-        {output && <div className="mt-2 text-body"><ReadonlyContent content={redactSecrets(output)} /></div>}
+        {output && <div className="mt-2 text-body" data-find-unit={runOutputKey(task.id)}><ReadonlyContent content={redactSecrets(output)} /></div>}
         {needsAction && rawError && <TruncatedTooltip content={rawError} focusable>
           <p
             className="mt-1.5 line-clamp-4 whitespace-pre-wrap break-words rounded-md border bg-muted/50 px-2.5 py-1.5 font-mono text-caption text-muted-foreground">
             {rawError}
           </p>
         </TruncatedTooltip>}
-        {!hasReply && <TaskCommitChanges taskId={task.id} />}
         {expanded && <div id={regionId} className="mt-2 min-w-0 space-y-1">
           {isPending && <p className="text-caption text-muted-foreground">{t(($) => $.inline_run.loading)}</p>}
           {isError && <div role="alert" className="text-caption text-destructive">{t(($) => $.inline_run.load_failed)}

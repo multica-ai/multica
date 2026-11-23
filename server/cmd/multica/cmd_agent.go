@@ -259,6 +259,9 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	taskContext := inDaemonManagedExecutionContext()
 	token := resolveToken(cmd)
 	if taskContext && !strings.HasPrefix(token, "mat_") {
+		if hint := replacedTaskTokenHint(token); hint != "" {
+			return nil, fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token%s", hint)
+		}
 		// When the ONLY daemon signal is a workdir marker (no MULTICA_AGENT_ID /
 		// MULTICA_TASK_ID / MULTICA_DAEMON_PORT), name the exact file and say
 		// whether it can be a leftover, instead of an opaque "requires mat_
@@ -398,6 +401,19 @@ func daemonPortOnlyContextHint() string {
 		return ""
 	}
 	return "; MULTICA_DAEMON_PORT is set without task identity — if this is a host or container startup shell, remove that variable and retry"
+}
+
+// replacedTaskTokenHint explains a task that holds a personal access token.
+// The daemon always injects a mat_ token next to MULTICA_TASK_ID, and an
+// agent's custom env cannot override MULTICA_*, so a mul_ token here was put
+// back after launch — typically by a secrets manager wrapping the runtime
+// command (`doppler run`) or a shell profile exporting MULTICA_TOKEN (#7666).
+// The hint names the prefix only, never the token.
+func replacedTaskTokenHint(token string) string {
+	if !strings.HasPrefix(token, "mul_") || strings.TrimSpace(os.Getenv("MULTICA_TASK_ID")) == "" {
+		return ""
+	}
+	return "; MULTICA_TOKEN holds a personal access token (mul_) although MULTICA_TASK_ID is set, so something between the daemon and this command replaced the task token — usually a secrets manager in the runtime's launch command or a shell profile exporting MULTICA_TOKEN. Let the daemon's MULTICA_* values win (Doppler: doppler run --preserve-env=MULTICA_TOKEN -- <agent command>); see https://multica.ai/docs/daemon-runtimes#secrets-managers"
 }
 
 // requireTaskLocalConfigRoot prevents daemon-managed subprocesses that lost

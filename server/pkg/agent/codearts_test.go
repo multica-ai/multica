@@ -194,6 +194,29 @@ func TestDiscoverCodeArtsModels(t *testing.T) {
 	}
 }
 
+func TestDiscoverCodeArtsModelsRetriesAfterVerboseTimeout(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(codeartsModelHelperEnv, "1")
+	t.Setenv(codeartsModelHelperHangVerbose, "1")
+	argvPath := filepath.Join(t.TempDir(), "model-argv.txt")
+	t.Setenv(codeartsModelHelperArgvFile, argvPath)
+
+	models, err := discoverCodeArtsModelsWithin(t.Context(), Command{Path: self}, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 || models[0].ID != "huaweicloud-maas/deepseek-v3.2" {
+		t.Fatalf("plain listing after verbose timeout: got %+v", models)
+	}
+	argv, err := os.ReadFile(argvPath)
+	if err != nil || string(argv) != "models" {
+		t.Fatalf("last probe = %q, err = %v, want plain models", argv, err)
+	}
+}
+
 func TestDetectVersionUsesCodeArtsCommandPrefix(t *testing.T) {
 	self, err := os.Executable()
 	if err != nil {

@@ -102,23 +102,6 @@ afterEach(() => {
 });
 
 describe("TranscriptButton", () => {
-  it("keeps raw diff messages available when opening a completed unlinked run", async () => {
-    const diff: TaskMessagePayload = {
-      ...msg(1, "multica_commit_diff"),
-      input: {
-        repository: "demo", repository_id: "repo-1", base: "a".repeat(40), head: "b".repeat(40),
-        changes: [{ path: "result.ts", kind: "add", diff: "@@ -0,0 +1 @@\n+result" }],
-      },
-    };
-    listTaskMessages.mockResolvedValue([diff]);
-    const qc = newClient();
-    renderWith(qc, <TranscriptButton task={{ ...baseTask, issue_id: "", status: "completed" }} agentName="Codex" />);
-    fireEvent.click(screen.getByRole("button", { name: "View transcript" }));
-    await screen.findByRole("dialog");
-    expect(qc.getQueryData(chatKeys.taskMessages(baseTask.id))).toEqual([diff]);
-    expect(screen.queryByTestId("event")).not.toBeInTheDocument();
-    expect(listTaskMessages).toHaveBeenCalledTimes(1);
-  });
   it("closes the transcript dialog when desktop navigation starts", async () => {
     const items: TimelineItem[] = [{ seq: 1, type: "text", content: "hello" }];
     const qc = newClient();

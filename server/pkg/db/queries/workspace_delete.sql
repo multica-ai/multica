@@ -353,6 +353,9 @@ deleted_draft_restores AS (
     DELETE FROM chat_draft_restore
     WHERE chat_session_id IN (SELECT id FROM ws_sessions)
 ),
+deleted_chat_wakeups AS (
+    DELETE FROM chat_wakeup WHERE workspace_id = $1
+),
 -- Same no-FK chore as chat_draft_restore above. Matched on workspace_id rather
 -- than the session set because that column exists precisely so this statement
 -- does not have to join through chat_session, which it deletes in this same CTE.
@@ -361,6 +364,9 @@ deleted_agent_builder_drafts AS (
 ),
 deleted_comment_reactions AS (
     DELETE FROM comment_reaction WHERE workspace_id = $1
+),
+deleted_comment_idempotency_receipts AS (
+    DELETE FROM comment_idempotency_receipt WHERE comment_idempotency_receipt.workspace_id = $1
 ),
 deleted_issue_reactions AS (
     DELETE FROM issue_reaction WHERE workspace_id = $1
@@ -502,8 +508,22 @@ deleted_channel_binding_tokens AS (
 deleted_wecom_install_sessions AS (
     DELETE FROM wecom_install_session WHERE workspace_id = $1
 ),
+deleted_weixin_login_sessions AS (
+    DELETE FROM weixin_login_session WHERE workspace_id = $1
+),
+deleted_weixin_account_states AS (
+    DELETE FROM weixin_account_state
+    WHERE installation_id IN (SELECT id FROM ws_channel_installations)
+),
 deleted_workspace_composio_connections AS (
     DELETE FROM workspace_composio_connection WHERE workspace_id = $1
+),
+deleted_remote_app_connections AS (
+    DELETE FROM remote_app_connection
+    WHERE (scope = 'team' AND owner_id = $1) OR workspace_id = $1
+),
+deleted_personal_composio_connections AS (
+    DELETE FROM user_composio_connection WHERE workspace_id = $1
 ),
 deleted_agent_apps AS (
     DELETE FROM agent_app WHERE workspace_id = $1
@@ -604,6 +624,12 @@ deleted_child_events AS (
 deleted_unread AS (
  DELETE FROM issue_unread WHERE workspace_id=$1
 ),
+deleted_description_collab_state AS (
+ DELETE FROM issue_description_collab_state WHERE workspace_id=$1
+),
+deleted_description_revisions AS (
+ DELETE FROM issue_description_revision WHERE workspace_id=$1
+),
 deleted_issues AS (
     DELETE FROM issue WHERE issue.workspace_id = $1
 ),
@@ -635,6 +661,18 @@ WHERE autopilot_quota_reservation.workspace_id = $1;
 -- name: DeleteWorkspaceAutopilotQuotaPeriods :exec
 DELETE FROM autopilot_quota_period
 WHERE autopilot_quota_period.workspace_id = $1;
+
+-- name: DeleteWorkspaceEntitlementLimitOverages :exec
+DELETE FROM entitlement_limit_overage
+WHERE entitlement_limit_overage.workspace_id = $1;
+
+-- name: DeleteWorkspaceEntitlementFeatureAttempts :exec
+DELETE FROM entitlement_feature_attempt
+WHERE entitlement_feature_attempt.workspace_id = $1;
+
+-- name: DeleteWorkspaceDashboardRangeViews :exec
+DELETE FROM dashboard_range_view
+WHERE dashboard_range_view.workspace_id = $1;
 
 -- name: DeleteWorkspaceAutopilotChildren :exec
 WITH
@@ -733,6 +771,9 @@ WITH
 deleted_runtimes AS (
     DELETE FROM agent_runtime WHERE agent_runtime.workspace_id = $1
 ),
+deleted_runtime_rate_limits AS (
+    DELETE FROM runtime_rate_limit WHERE runtime_rate_limit.workspace_id = $1
+),
 deleted_profiles AS (
     DELETE FROM runtime_profile WHERE runtime_profile.workspace_id = $1
 ),
@@ -741,6 +782,9 @@ deleted_project_members AS (
 ),
 deleted_project_subscribers AS (
     DELETE FROM project_subscriber WHERE project_subscriber.workspace_id = $1
+),
+deleted_project_folders AS (
+    DELETE FROM project_folder WHERE project_folder.workspace_id = $1
 )
 DELETE FROM project WHERE project.workspace_id = $1;
 
