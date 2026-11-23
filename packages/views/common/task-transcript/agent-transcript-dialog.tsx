@@ -12,8 +12,6 @@ import {
   XCircle,
   X,
   Loader2,
-  Copy,
-  Check,
   ChevronRight,
   Filter,
   FilePen,
@@ -31,6 +29,7 @@ import {
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { Button } from "@multica/ui/components/ui/button";
+import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
@@ -256,11 +255,11 @@ function RunDetailRow({
           <span className="text-muted-foreground">{label}</span>
           <span className="flex min-w-0 items-start gap-1.5">
             <span className={cn(valueClass, "flex-1")}>{value}</span>
-            {copied ? (
-              <Check className="mt-0.5 h-3 w-3 shrink-0 text-success" />
-            ) : (
-              <Copy className="mt-0.5 h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
-            )}
+            <CopyCheckIcon
+              copied={Boolean(copied)}
+              className="mt-0.5 h-3 w-3 shrink-0"
+              copyClassName="opacity-0 group-hover:opacity-100"
+            />
           </span>
         </button>
       </TooltipHint>
@@ -1223,7 +1222,7 @@ export function AgentTranscriptDialog({
                   : t(($) => $.transcript.sort_chronological)}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={handleCopyAll}>
-                {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                <CopyCheckIcon copied={copied} />
                 {copyTranscriptLabel}
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -1633,7 +1632,7 @@ function GroupRow({
         <ChevronRight
           aria-hidden
           className={cn(
-            "mt-1 h-3 w-3 shrink-0 text-faint-foreground transition-transform",
+            "mt-1 h-3 w-3 shrink-0 text-faint-foreground transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
             expanded && "rotate-90",
           )}
         />
@@ -1781,7 +1780,7 @@ function StepInspector({
           tooltipSide="bottom"
           className="shrink-0 text-muted-foreground"
         >
-          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+          <CopyCheckIcon copied={copied} />
         </IconButton>
         <IconButton
           variant="ghost"
