@@ -65,7 +65,7 @@ Multica は、こうしたエージェントとチームメイトを 1 つのワ
 次のような場合に向いています。
 
 - **複数の人が同じエージェントを共有し**、誰がどのエージェントを実行できるかを管理し、それぞれが何に取り組んでいるかを把握し、
-  成果物をレビューしたい。[チームでエージェントプールを共有する（英語）](https://multica.ai/docs/team-agent-pool)をご覧ください。
+  成果物をレビューしたい。[チームでエージェントプールを共有する](https://multica.ai/docs/ja/team-agent-pool)をご覧ください。
 - **チームで複数のエージェント CLI を併用している**。Claude Code を使う人もいれば Codex や Cursor を使う人もいて、
   ベンダーごとにアプリを分けずに 1 つのボードにまとめたい。
 - **エージェントを自分たちが管理するマシンで動かしたい**。ノートパソコン、ビルドサーバー、VM で、すでに契約しているツールの
@@ -78,9 +78,9 @@ Multica は、こうしたエージェントとチームメイトを 1 つのワ
 - ベンダーのクラウドサンドボックスで動くエージェントを使い、自分のマシンを常時オンラインにしておきたくない場合。
 - 計画が業務の中心である場合。Multica にはプロジェクト、ワークフロー、ガントビューはありますが、スプリント、サイクル、ロードマップはありません。
 
-ほかのツールとの比較（英語）：[Linear と Jira](https://multica.ai/docs/compare/linear-jira) ·
-[OpenHands、Devin、Factory](https://multica.ai/docs/compare/openhands-devin-factory) ·
-[Conductor、Claude Squad、Orca、Beads](https://multica.ai/docs/compare/worktree-managers)
+ほかのツールとの比較：[Linear と Jira](https://multica.ai/docs/ja/compare/linear-jira) ·
+[OpenHands、Devin、Factory](https://multica.ai/docs/ja/compare/openhands-devin-factory) ·
+[Conductor、Claude Squad、Orca、Beads](https://multica.ai/docs/ja/compare/worktree-managers)
 
 ---
 
@@ -242,7 +242,7 @@ Gemini CLI には対応していません。組み込みツールから削除さ
 | --- | --- |
 | 今日からエージェントに何かをさせたい | [クイックスタート](https://multica.ai/docs/ja/cloud-quickstart) · [チュートリアル](https://multica.ai/docs/ja/tutorial) |
 | 各部分がどう組み合わさっているかを理解したい | [コアコンセプト](https://multica.ai/docs/ja/concepts) · [Multica の仕組み](https://multica.ai/docs/ja/how-multica-works) |
-| チームでエージェントを共有したい | [エージェントプールの共有（英語）](https://multica.ai/docs/team-agent-pool) · [メンバーとロール](https://multica.ai/docs/ja/members-roles) · [スクワッド](https://multica.ai/docs/ja/squads) |
+| チームでエージェントを共有したい | [エージェントプールの共有](https://multica.ai/docs/ja/team-agent-pool) · [メンバーとロール](https://multica.ai/docs/ja/members-roles) · [スクワッド](https://multica.ai/docs/ja/squads) |
 | エージェントを作成して設定したい | [エージェント](https://multica.ai/docs/ja/agents) · [エージェントの作成](https://multica.ai/docs/ja/agents-create) · [スキル](https://multica.ai/docs/ja/skills) |
 | エージェントに仕事を渡したい | [エージェントに仕事を任せる](https://multica.ai/docs/ja/triggering-agents) · [タスクの割り当て](https://multica.ai/docs/ja/assigning-issues) · [メンション](https://multica.ai/docs/ja/mentioning-agents) |
 | 自分のマシンを接続したい | [デーモンとランタイム](https://multica.ai/docs/ja/daemon-runtimes) · [AI コーディングツールのインストール](https://multica.ai/docs/ja/install-agent-runtime) |
@@ -250,7 +250,7 @@ Gemini CLI には対応していません。組み込みツールから削除さ
 | 自分のインフラストラクチャで動かしたい | [セルフホスト](SELF_HOSTING.md) · [セキュリティモデル](https://multica.ai/docs/ja/security-model) · [環境変数](https://multica.ai/docs/ja/environment-variables) |
 | スクリプトから操作したい | [CLI リファレンス](https://multica.ai/docs/ja/cli) · [CLI とデーモンのガイド](CLI_AND_DAEMON.md) · [認証トークン](https://multica.ai/docs/ja/auth-tokens) |
 | Codex、Claude Code、Cursor から Multica を操作したい | [Multica CLI skill](https://github.com/multica-ai/multica-cli) |
-| ほかのツールと比較したい | [Linear と Jira](https://multica.ai/docs/compare/linear-jira) · [OpenHands、Devin、Factory](https://multica.ai/docs/compare/openhands-devin-factory) · [worktree 管理ツール](https://multica.ai/docs/compare/worktree-managers)（いずれも英語） |
+| ほかのツールと比較したい | [Linear と Jira](https://multica.ai/docs/ja/compare/linear-jira) · [OpenHands、Devin、Factory](https://multica.ai/docs/ja/compare/openhands-devin-factory) · [worktree 管理ツール](https://multica.ai/docs/ja/compare/worktree-managers) |
 | エージェントが止まっている理由を突き止めたい | [実行](https://multica.ai/docs/ja/tasks) · [トラブルシューティング](https://multica.ai/docs/ja/troubleshooting) |
 
 ドキュメントは [English](https://multica.ai/docs)、[简体中文](https://multica.ai/docs/zh)、[繁體中文](https://multica.ai/docs/zh-Hant)、
