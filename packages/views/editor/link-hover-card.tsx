@@ -11,11 +11,14 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
+import { AnimatePresence, motion } from "motion/react";
 import { computePosition, offset, flip, shift } from "@floating-ui/dom";
+import { useReducedMotion } from "@multica/core/appearance";
 import { ExternalLink, Copy } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { copyText } from "@multica/ui/lib/clipboard";
+import { UI_EASE_IN, UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { useWorkspaceSlug } from "@multica/core/paths";
 import { useAppOrigin } from "../navigation";
 import { useT } from "../i18n";
@@ -143,6 +146,7 @@ function LinkHoverCard({
 }) {
   const [pos, setPos] = useState({ top: 0, left: 0 });
   const [positioned, setPositioned] = useState(false);
+  const reduceMotion = useReducedMotion();
   const slug = useWorkspaceSlug();
   const appOrigin = useAppOrigin();
   const { t } = useT("editor");
@@ -199,50 +203,75 @@ function LinkHoverCard({
   return (
     <>
       {attachmentLink.modal}
-      {visible && anchorEl
-        ? createPortal(
-            <div
-              ref={setCardRef}
-              className="link-hover-card"
-              data-editor-overlay-owner={overlayOwner}
-              style={{
-                position: "fixed",
-                top: pos.top,
-                left: pos.left,
-                zIndex: 50,
-                display: positioned ? undefined : "none",
-              }}
-              onMouseEnter={onCardEnter}
-              onMouseLeave={onCardLeave}
-            >
-              <span
-                className="min-w-0 flex-1 truncate text-caption text-muted-foreground px-1"
-                title={href}
+      {typeof document !== "undefined" &&
+        createPortal(
+          <AnimatePresence>
+            {visible && anchorEl && (
+              <motion.div
+                key="link-hover-card"
+                ref={setCardRef}
+                className="link-hover-card"
+                data-editor-overlay-owner={overlayOwner}
+                initial={reduceMotion ? false : { opacity: 0, y: 4, scale: 0.97 }}
+                animate={
+                  positioned
+                    ? {
+                        opacity: 1,
+                        y: 0,
+                        scale: 1,
+                        transition: { duration: reduceMotion ? 0 : UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
+                      }
+                    : { opacity: 0 }
+                }
+                exit={
+                  reduceMotion
+                    ? { opacity: 0, transition: { duration: 0 } }
+                    : {
+                        opacity: 0,
+                        y: 3,
+                        scale: 0.97,
+                        transition: { duration: UI_MOTION_DURATION.micro, ease: UI_EASE_IN },
+                      }
+                }
+                style={{
+                  position: "fixed",
+                  top: pos.top,
+                  left: pos.left,
+                  zIndex: 50,
+                  visibility: positioned ? "visible" : "hidden",
+                }}
+                onMouseEnter={onCardEnter}
+                onMouseLeave={onCardLeave}
               >
-                {truncateUrl(href)}
-              </span>
-              <IconButton
-                size="icon-xs"
-                variant="ghost"
-                className="text-muted-foreground"
-                onClick={handleCopy}
-                label={t(($) => $.link_hover.copy_link)}
-              >
-                <Copy className="size-3.5" />
-              </IconButton>
-              <IconButton
-                size="icon-xs"
-                variant="ghost"
-                className="text-muted-foreground"
-                onClick={handleOpen}
-                label={t(($) => $.link_hover.open_link)}
-              >
-                <ExternalLink className="size-3.5" />
-              </IconButton>
-            </div>,
-            document.body,
-          )
-        : null}
+                <span
+                  className="min-w-0 flex-1 truncate text-caption text-muted-foreground px-1"
+                  title={href}
+                >
+                  {truncateUrl(href)}
+                </span>
+                <IconButton
+                  size="icon-xs"
+                  variant="ghost"
+                  className="text-muted-foreground"
+                  onClick={handleCopy}
+                  label={t(($) => $.link_hover.copy_link)}
+                >
+                  <Copy className="size-3.5" />
+                </IconButton>
+                <IconButton
+                  size="icon-xs"
+                  variant="ghost"
+                  className="text-muted-foreground"
+                  onClick={handleOpen}
+                  label={t(($) => $.link_hover.open_link)}
+                >
+                  <ExternalLink className="size-3.5" />
+                </IconButton>
+              </motion.div>
+            )}
+          </AnimatePresence>,
+          document.body,
+        )}
     </>
   );
 }

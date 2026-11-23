@@ -22,12 +22,14 @@
 
 import {
   useCallback,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
   type Ref,
 } from "react";
+import { prefersReducedMotion } from "@multica/core/appearance";
 import {
   AppWindow,
   ChevronDown,
@@ -457,6 +459,47 @@ function DynamicBlockTitleInput({
  * its own layout height when `collapsed`), so expanding only lifts the clip
  * — an HTML preview or diagram is not rebuilt.
  */
+function useSmoothExpandStyle(collapsed: boolean, innerRef: React.RefObject<HTMLDivElement | null>) {
+  const prevCollapsedRef = useRef(collapsed);
+  const [animatingHeight, setAnimatingHeight] = useState<number | null>(null);
+
+  useLayoutEffect(() => {
+    const wasCollapsed = prevCollapsedRef.current;
+    prevCollapsedRef.current = collapsed;
+    if (!wasCollapsed || collapsed) return;
+    if (prefersReducedMotion()) return;
+    const el = innerRef.current;
+    const targetHeight = el?.scrollHeight ?? 0;
+    if (targetHeight <= DYNAMIC_BLOCK_COLLAPSE_AT_PX) return;
+    setAnimatingHeight(DYNAMIC_BLOCK_COLLAPSE_AT_PX);
+    const frame = requestAnimationFrame(() => {
+      setAnimatingHeight(targetHeight);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [collapsed, innerRef]);
+
+  useEffect(() => {
+    if (animatingHeight === null) return;
+    const timer = window.setTimeout(() => setAnimatingHeight(null), 240);
+    return () => window.clearTimeout(timer);
+  }, [animatingHeight]);
+
+  const maxHeight = collapsed
+    ? DYNAMIC_BLOCK_COLLAPSE_AT_PX
+    : animatingHeight !== null
+      ? animatingHeight
+      : undefined;
+
+  return {
+    style: maxHeight !== undefined ? { maxHeight } : undefined,
+    onTransitionEnd: (e: React.TransitionEvent<HTMLDivElement>) => {
+      if (e.target === e.currentTarget && e.propertyName === "max-height" && !collapsed) {
+        setAnimatingHeight(null);
+      }
+    },
+  };
+}
+
 function CollapsibleBody({
   collapsed,
   onExpand,
@@ -470,14 +513,25 @@ function CollapsibleBody({
   children: ReactNode;
 }) {
   const { t } = useT("editor");
+  const innerRef = useRef<HTMLDivElement | null>(null);
+  const setInnerRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      innerRef.current = node;
+      if (typeof measureRef === "function") measureRef(node);
+      else if (measureRef && "current" in measureRef) (measureRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
+    },
+    [measureRef],
+  );
+  const expandProps = useSmoothExpandStyle(collapsed, innerRef);
 
   return (
     <div
-      className="relative overflow-hidden"
+      className="relative overflow-hidden transition-[max-height] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none"
       data-collapsed={collapsed ? "" : undefined}
-      style={collapsed ? { maxHeight: DYNAMIC_BLOCK_COLLAPSE_AT_PX } : undefined}
+      style={expandProps.style}
+      onTransitionEnd={expandProps.onTransitionEnd}
     >
-      <div ref={measureRef}>{children}</div>
+      <div ref={setInnerRef}>{children}</div>
       {collapsed && (
         <>
           <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-b from-transparent to-surface" />
@@ -527,12 +581,14 @@ function SelfCollapsingBody({ children }: { children: ReactNode }) {
   }, [measure]);
 
   const collapsed = !expanded && contentHeight > DYNAMIC_BLOCK_COLLAPSE_AT_PX;
+  const expandProps = useSmoothExpandStyle(collapsed, contentRef);
 
   return (
     <div
-      className="relative overflow-hidden"
+      className="relative overflow-hidden transition-[max-height] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none"
       data-collapsed={collapsed ? "" : undefined}
-      style={collapsed ? { maxHeight: DYNAMIC_BLOCK_COLLAPSE_AT_PX } : undefined}
+      style={expandProps.style}
+      onTransitionEnd={expandProps.onTransitionEnd}
     >
       <div ref={contentRef}>{children}</div>
       {collapsed && (

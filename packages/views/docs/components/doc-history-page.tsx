@@ -1,8 +1,11 @@
 "use client";
 import { useState } from "react";
+import { motion } from "motion/react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useReducedMotion } from "@multica/core/appearance";
 import { Button } from "@multica/ui/components/ui/button";
+import { UI_EASE_OUT } from "@multica/ui/lib/motion";
 import {
   docDetailOptions,
   docVersionsOptions,
@@ -30,6 +33,7 @@ export function DocHistoryPage({ docId }: { docId: string }) {
 
 function DocHistoryPageContent({ docId }: { docId: string }) {
   const { t } = useT("docs");
+  const reduceMotion = useReducedMotion();
   const wsId = useWorkspaceId();
   const p = useWorkspacePaths();
   const { push } = useNavigation();
@@ -87,7 +91,7 @@ function DocHistoryPageContent({ docId }: { docId: string }) {
                 key={v.number}
                 onClick={() => setSelected(v.number)}
                 aria-pressed={number === v.number}
-                className={`mb-1 block w-full rounded-md p-3 text-left text-body ${number === v.number ? "bg-surface-selected text-surface-selected-foreground" : "hover:bg-surface-hover"}`}
+                className={`mb-1 block w-full rounded-md p-3 text-left text-body transition-colors ${number === v.number ? "bg-surface-selected text-surface-selected-foreground" : "hover:bg-surface-hover"}`}
               >
                 <span className="font-medium">
                   {t(($) => $.version_number, { number: v.number })}
@@ -124,7 +128,12 @@ function DocHistoryPageContent({ docId }: { docId: string }) {
                 {t(($) => $.editor.retry)}
               </Button>
             ) : version.data ? (
-              <>
+              <motion.div
+                key={version.data.number}
+                initial={reduceMotion ? false : { opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: reduceMotion ? 0 : 0.12, ease: UI_EASE_OUT }}
+              >
                 <div className="mb-6 flex items-start justify-between gap-3">
                   <h1 className="min-w-0 flex-1 text-display-sm font-semibold leading-snug wrap-anywhere">
                     {version.data.title || t(($) => $.untitled)}
@@ -145,7 +154,7 @@ function DocHistoryPageContent({ docId }: { docId: string }) {
                   </Button>
                 </div>
                 <ReadonlyContent content={version.data.content ?? ""} />
-              </>
+              </motion.div>
             ) : (
               t(($) => $.history.loading)
             )}
