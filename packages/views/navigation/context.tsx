@@ -5,10 +5,13 @@ import {
   use,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
   useTransition,
 } from "react";
+import { createReviewSession, ReviewSessionContext } from "../issues/review/session";
+import { currentPath } from "./current-path";
 import type { NavigationAdapter } from "./types";
 
 const NavigationContext = createContext<NavigationAdapter | null>(null);
@@ -32,6 +35,17 @@ export function NavigationProvider({
   // React pending signal during route commit. On web this stays true until
   // Next.js commits the new RSC payload; on desktop it flips off quickly
   // because react-router commits synchronously — both are correct.
+  const review = useMemo(() => createReviewSession(value.sessionKey), [value.sessionKey]);
+  const location = currentPath(value);
+  useLayoutEffect(() => {
+    if (review.location === location) return;
+    // Ignore stale renders while the owned transition is pending, and do not
+    // count its eventual commit as a second, manual navigation.
+    if (review.pendingLocation !== location) review.navigate();
+    review.pendingLocation = undefined;
+    review.location = location;
+  }, [review, location]);
+  useLayoutEffect(() => () => review.invalidate(), [review]);
   const [isPending, startTransition] = useTransition();
   // Second pending source: in-page content swaps reported through
   // `useReportNavigating`. The transition above only spans the adapter's
@@ -45,10 +59,18 @@ export function NavigationProvider({
   const wrapped = useMemo<NavigationAdapter>(
     () => ({
       ...value,
-      push: (path: string) => startTransition(() => value.push(path)),
-      replace: (path: string) => startTransition(() => value.replace(path)),
+      push: (path: string) => {
+        review.navigate(path);
+        startTransition(() => value.push(path));
+      },
+      replace: (path: string) => {
+        review.navigate(path);
+        startTransition(() => value.replace(path));
+      },
+      back: () => { review.navigate(); value.back(); },
+      forward: value.forward ? () => { review.navigate(); value.forward?.(); } : undefined,
     }),
-    [value],
+    [value, review],
   );
   return (
     <NavigationContext.Provider value={wrapped}>
@@ -56,7 +78,7 @@ export function NavigationProvider({
         <NavigationPendingContext.Provider
           value={isPending || reportedPending > 0}
         >
-          {children}
+          <ReviewSessionContext.Provider value={review}>{children}</ReviewSessionContext.Provider>
         </NavigationPendingContext.Provider>
       </NavigationPendingReportContext.Provider>
     </NavigationContext.Provider>

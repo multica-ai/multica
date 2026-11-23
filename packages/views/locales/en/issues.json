@@ -2120,5 +2120,13 @@
     "focus_failed": "Couldn't switch to {{name}}",
     "retry": "Retry",
     "dismiss": "Dismiss"
+  },
+  "review_queue": {
+    "completed": "Issue completed",
+    "undo": "Undo",
+    "changed": "The review list changed. Try again.",
+    "next_failed": "Issue completed, but the next issue could not be determined. You can return to the list or undo.",
+    "undo_failed": "Could not restore the issue. It may have changed since completion.",
+    "receipt_failed": "Could not verify the completion response."
   }
 }

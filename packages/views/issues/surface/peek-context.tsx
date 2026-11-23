@@ -1,5 +1,7 @@
 "use client";
 
+import { useReviewOriginLink } from "../review/session";
+
 import { createContext, useCallback, useContext, useMemo } from "react";
 import { useIssueOpeningStore, type IssueOpenMode } from "@multica/core/issues/stores/issue-opening-store";
 import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
@@ -151,6 +153,7 @@ export function useIssuePeekClick() {
   const peek = useIssuePeekActions();
   const openMode = useIssueOpeningStore((s) => s.openMode);
   const { push } = useNavigation();
+  const reviewLink = useReviewOriginLink();
   const paths = useWorkspacePaths();
   return useCallback((issue: PeekIssue, event?: React.MouseEvent) => {
     if (!peek || event?.defaultPrevented) return false;
@@ -163,15 +166,16 @@ export function useIssuePeekClick() {
       else peek.open(issue.id);
       return true;
     }
-    if (target === "page" && event?.shiftKey) {
+    if (target === "page" && (event?.shiftKey || reviewLink)) {
       // Shift+Click in preview mode opens the full page in place. Left alone,
       // a link would hand Shift to the browser — a new window on web.
-      event.preventDefault();
-      push(paths.issueDetail(issueRouteRef(issue)));
+      event?.preventDefault();
+      const href = paths.issueDetail(issueRouteRef(issue));
+      push(reviewLink ? reviewLink(href) : href);
       return true;
     }
     return false;
-  }, [peek, openMode, push, paths]);
+  }, [peek, openMode, push, paths, reviewLink]);
 }
 
 /** Empty outside a peek host, so other issue links retain normal navigation. */

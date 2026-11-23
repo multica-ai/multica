@@ -5,6 +5,7 @@ import { buildIssueStatusCatalog } from "@multica/core/issue-statuses";
 import { statusCategoryOfKey } from "@multica/core/issues";
 import type { Issue, IssueStatusEntry } from "@multica/core/types";
 import * as clipboard from "@multica/ui/lib/clipboard";
+import { NavigationProvider, type NavigationAdapter } from "../../../navigation";
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
@@ -102,17 +103,16 @@ vi.mock("@multica/core/paths", async () => {
   };
 });
 
-vi.mock("../../../navigation", () => ({
-  useNavigation: () => ({
-    push: vi.fn(),
-    pathname: "/test/issues/issue-1",
-    searchParams: new URLSearchParams(),
-    hash: "",
-    back: vi.fn(),
-    replace: vi.fn(),
-    getShareableUrl: (p: string) => `https://app.multica.com${p}`,
-  }),
-}));
+// Supply the same real context to actions and their nested completion hook.
+const navigation: NavigationAdapter = {
+  push: vi.fn(),
+  pathname: "/test/issues/issue-1",
+  searchParams: new URLSearchParams(),
+  hash: "",
+  back: vi.fn(),
+  replace: vi.fn(),
+  getShareableUrl: (p: string) => `https://app.multica.com${p}`,
+};
 
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
@@ -147,7 +147,11 @@ function wrapper({ children }: { children: React.ReactNode }) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+  return (
+    <QueryClientProvider client={qc}>
+      <NavigationProvider value={navigation}>{children}</NavigationProvider>
+    </QueryClientProvider>
+  );
 }
 
 beforeEach(() => {

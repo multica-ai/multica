@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useRef, useState, useImperativeHandle } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render as renderUI, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { AgentTask, Attachment, InboxItem, Issue, IssueStatusEntry, Label, TimelineEntry } from "@multica/core/types";
 import { issueKeys } from "@multica/core/issues/queries";
@@ -23,6 +23,8 @@ import { useSubIssuesCollapseStore } from "@multica/core/issues/stores/sub-issue
 import { configureShortcutPlatform } from "@multica/core/shortcuts";
 import { useAppearanceStore } from "@multica/core/appearance";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
+
+import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 
 const TEST_RESOURCES = { en: { agents: enAgents, common: enCommon, inbox: enInbox, issues: enIssues } };
 
@@ -127,9 +129,21 @@ vi.mock("@multica/core/paths", async () => {
 });
 
 const settingsPush = vi.hoisted(() => vi.fn());
+const navigation: NavigationAdapter = {
+  push: settingsPush, replace: vi.fn(), back: vi.fn(),
+  pathname: "/issues/issue-1", searchParams: new URLSearchParams(), hash: "",
+  getShareableUrl: (path) => `https://app.multica.com${path}`,
+};
+
+function render(ui: React.ReactNode) {
+  return renderUI(ui, { wrapper: ({ children }) => (
+    <NavigationProvider value={navigation}>{children}</NavigationProvider>
+  ) });
+}
 
 // Mock navigation
 vi.mock("../../navigation", async () => ({
+  ...(await vi.importActual<typeof import("../../navigation/context")>("../../navigation/context")),
   // Real hold hook (pure React) the header's Inbox actions read through.
   ...(await vi.importActual<typeof import("../../navigation/use-held-until-arrival")>(
     "../../navigation/use-held-until-arrival",
@@ -146,13 +160,7 @@ vi.mock("../../navigation", async () => ({
       </a>
     );
   }),
-  useNavigation: () => ({
-    push: settingsPush,
-    pathname: "/issues/issue-1",
-    getShareableUrl: (p: string) => `https://app.multica.com${p}`,
-  }),
   useBackOrReplace: () => vi.fn(),
-  NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
 // Mock editor components (Tiptap requires real DOM)

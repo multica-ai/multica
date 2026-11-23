@@ -2027,5 +2027,13 @@
     "focus_failed": "無法切到 {{name}}",
     "retry": "重試",
     "dismiss": "忽略"
+  },
+  "review_queue": {
+    "completed": "事項已完成",
+    "undo": "復原",
+    "changed": "審查清單已變更，請重試。",
+    "next_failed": "事項已完成，但無法確定下一項。可以返回清單或復原。",
+    "undo_failed": "無法復原事項，完成後它可能已被修改。",
+    "receipt_failed": "無法驗證完成回應。"
   }
 }
