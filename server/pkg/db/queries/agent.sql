@@ -360,7 +360,7 @@ WITH enqueue_agent AS MATERIALIZED (
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
     coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
-    squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    squad_id, usage_squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id, trigger_evidence_kind, trigger_evidence_ref_id,
     workflow_step, fire_at, id
 )
@@ -374,6 +374,7 @@ SELECT
     COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE),
     sqlc.narg(handoff_note),
     sqlc.narg(squad_id),
+    sqlc.narg(usage_squad_id),
     NULLIF(CASE
         WHEN COALESCE(sqlc.narg('head_sha')::text, '') <> ''
         THEN jsonb_build_object('head_sha', sqlc.narg('head_sha')::text)
@@ -422,7 +423,7 @@ WITH enqueue_agent AS MATERIALIZED (
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
     coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
-    squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    squad_id, usage_squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id,
     trigger_evidence_kind, trigger_evidence_ref_id, fire_at,
     workflow_step, id
@@ -435,6 +436,7 @@ SELECT
     COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE),
     sqlc.narg(handoff_note),
     sqlc.narg(squad_id),
+    sqlc.narg(usage_squad_id),
     jsonb_strip_nulls(jsonb_build_object(
         'head_sha', NULLIF(COALESCE(sqlc.narg('head_sha')::text, ''), ''),
         'channel_issue_media_pending', TRUE
@@ -496,13 +498,14 @@ WITH enqueue_agent AS MATERIALIZED (
     FOR KEY SHARE OF a
 )
 INSERT INTO agent_task_queue (
-    agent_id, runtime_id, issue_id, status, priority, context, originator_user_id,
+    agent_id, runtime_id, issue_id, status, priority, context, usage_squad_id, originator_user_id,
     accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
     id
 )
 SELECT
     sqlc.arg(agent_id), enqueue_agent.runtime_id, NULL, 'queued', sqlc.arg(priority), sqlc.narg(context),
+    sqlc.narg(usage_squad_id),
     sqlc.narg(originator_user_id),
     sqlc.narg(accountable_user_id),
     sqlc.narg(runtime_mcp_overlay),
@@ -560,7 +563,7 @@ INSERT INTO agent_task_queue (
     status, priority, trigger_comment_id, coalesced_comment_ids, trigger_summary, context,
     session_id, work_dir,
     attempt, max_attempts, parent_task_id, force_fresh_session, is_leader_task,
-    squad_id, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    squad_id, usage_squad_id, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     originator_source, delegated_from_task_id, rule_version_id,
     trigger_evidence_kind, trigger_evidence_ref_id, retry_of_task_id,
     chat_input_task_id, fire_at,
@@ -579,6 +582,7 @@ SELECT
     p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
     p.is_leader_task,
     p.squad_id,
+    p.usage_squad_id,
     p.originator_user_id,
     p.accountable_user_id,
     sqlc.narg(runtime_mcp_overlay),
@@ -621,14 +625,14 @@ UPDATE agent_task_queue SET workflow_step = @workflow_step WHERE id = @id;
 -- CreateRetryTask, the run is stamped with the agent's current runtime (#10717).
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, status, priority, context,
-    force_fresh_session, is_leader_task, squad_id,
+    force_fresh_session, is_leader_task, squad_id, usage_squad_id,
     originator_user_id, accountable_user_id,
     runtime_mcp_overlay, runtime_connected_apps,
     originator_source, rerun_of_task_id, id
 )
 SELECT
     p.agent_id, COALESCE(a.runtime_id, p.runtime_id), 'queued', p.priority, p.context,
-    TRUE, p.is_leader_task, p.squad_id,
+    TRUE, p.is_leader_task, p.squad_id, p.usage_squad_id,
     sqlc.arg(actor_user_id), sqlc.arg(actor_user_id),
     sqlc.narg(runtime_mcp_overlay), sqlc.narg(runtime_connected_apps),
     'direct_human', p.id, sqlc.arg(new_task_id)

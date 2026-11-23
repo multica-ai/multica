@@ -455,7 +455,13 @@ export function IssueAgentBadge({ agents }: { agents: NonNullable<IssueAgentStat
   const { t } = useT("issues");
   return (
     <>
-      <AgentAvatarStack agentIds={agents.agentIds} size="xs" max={2} opacity={agents.running ? "full" : "half"} />
+      <AgentAvatarStack
+        agentIds={agents.agentIds}
+        actors={agents.actors}
+        size="xs"
+        max={2}
+        opacity={agents.running ? "full" : "half"}
+      />
       <span className="sr-only">
         {agents.running
           ? t(($) => $.agent_activity.status_running)
