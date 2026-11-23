@@ -233,8 +233,40 @@ func TestReadResponseRejectsOversizedSSEStream(t *testing.T) {
 		Header: http.Header{"Content-Type": []string{"text/event-stream"}},
 		Body:   io.NopCloser(strings.NewReader(": " + padding + "\n\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n")),
 	}
-	_, err := readResponse(resp, nil)
-	if err == nil || !strings.Contains(err.Error(), "size limit") {
-		t.Fatalf("readResponse error = %v, want size limit error", err)
+	_, err := ReadResponse(resp, nil)
+	if !errors.Is(err, ErrResponseTooLarge) {
+		t.Fatalf("ReadResponse error = %v, want ErrResponseTooLarge", err)
+	}
+}
+
+func TestReadSSEResponseAcceptsLoneCRLineEndingsOnOpenStream(t *testing.T) {
+	reader, writer := io.Pipe()
+	defer writer.Close()
+	go func() {
+		// The stream stays open after the event, so the trailing CR must end
+		// the event without waiting to see whether a LF follows.
+		_, _ = io.WriteString(writer, "event: message\rdata: {\"jsonrpc\":\"2.0\",\r\ndata: \"id\":7,\"result\":{}}\r\r")
+	}()
+	done := make(chan struct{})
+	var raw []byte
+	var err error
+	go func() {
+		raw, err = readSSEResponse(reader, json.RawMessage("7"))
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("readSSEResponse waited for more data after a complete event")
+	}
+	if err != nil || string(raw) != "{\"jsonrpc\":\"2.0\",\n\"id\":7,\"result\":{}}" {
+		t.Fatalf("readSSEResponse = %q, %v", raw, err)
+	}
+}
+
+func TestReadSSEResponseReportsMissingMatchingResponse(t *testing.T) {
+	_, err := readSSEResponse(strings.NewReader("data: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{}}\n\n"), json.RawMessage("1"))
+	if err == nil || !strings.Contains(err.Error(), "no matching JSON-RPC response") {
+		t.Fatalf("readSSEResponse error = %v, want no matching response", err)
 	}
 }

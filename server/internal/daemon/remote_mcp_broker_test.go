@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
 	"github.com/multica-ai/multica/server/pkg/remotemcp/remotemcptest"
@@ -189,19 +190,13 @@ func TestRemoteMCPProviderMatrixAndConfigMerge(t *testing.T) {
 	}
 }
 
-func TestDecodeRemoteMCPSSEData(t *testing.T) {
-	raw, err := decodeRemoteMCPSSEData("text/event-stream; charset=utf-8", []byte("event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1}\n\n"), json.RawMessage("1"))
-	if err != nil || string(raw) != `{"jsonrpc":"2.0","id":1}` {
-		t.Fatalf("decodeRemoteMCPSSEData = %q, %v", raw, err)
-	}
-}
-
 func TestRemoteMCPProxyFiltersMultiLineAndNotificationPrefixedSSEToolsList(t *testing.T) {
 	schema := json.RawMessage(`{"type":"object","properties":{}}`)
 	canonical, err := canonicalRemoteMCPJSON(schema)
 	if err != nil {
 		t.Fatal(err)
 	}
+	release := make(chan struct{})
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 		_, _ = io.WriteString(w,
@@ -211,8 +206,15 @@ func TestRemoteMCPProxyFiltersMultiLineAndNotificationPrefixedSSEToolsList(t *te
 				"data: {\"name\":\"fixture.read\",\"description\":\"Read\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}},\n"+
 				"data: {\"name\":\"fixture.write\",\"description\":\"Write\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}\n"+
 				"data: ]}}\n\n")
+		w.(http.Flusher).Flush()
+		// Keep the stream open, as Streamable HTTP servers may.
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
 	}))
 	defer upstream.Close()
+	defer close(release)
 	endpoint, _ := url.Parse(upstream.URL)
 	proxy := &remoteMCPProxy{
 		taskID: "task", endpoint: endpoint, client: upstream.Client(), path: "/capability",
@@ -227,7 +229,9 @@ func TestRemoteMCPProxyFiltersMultiLineAndNotificationPrefixedSSEToolsList(t *te
 		},
 	}
 
-	request := httptest.NewRequest(http.MethodPost, "/capability", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`))
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	request := httptest.NewRequestWithContext(ctx, http.MethodPost, "/capability", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`))
 	response := httptest.NewRecorder()
 	proxy.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
