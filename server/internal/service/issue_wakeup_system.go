@@ -695,6 +695,17 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	if err = guardIssueNotInTriage(ctx, q, issue.ID, OriginDerived); err != nil {
 		return err
 	}
+	if err = guardIssueAgentFailureStreak(ctx, q, issue.ID, agent.ID, false); err != nil {
+		if !errors.Is(err, ErrIssueAgentConsecutiveFailures) {
+			return err
+		}
+		if err = q.NoteWakeupFailure(ctx, db.NoteWakeupFailureParams{
+			ID: w.ID, LastError: pgtype.Text{String: ErrIssueAgentConsecutiveFailures.Error(), Valid: true},
+		}); err != nil {
+			return err
+		}
+		return commit()
+	}
 	overlay := s.Tasks.buildRuntimeMCPOverlay(ctx, attr.UserID, agent)
 	source, delegatedFrom, _, _ := attributionCreateParams(attr)
 	contextJSON, _ := json.Marshal(map[string]any{"wakeup_id": util.UUIDToString(w.ID), "wakeup_revision": w.Revision, "wakeup_evidence": evidence, "wakeup_system": SystemRuleChildDone})

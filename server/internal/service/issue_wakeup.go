@@ -1242,11 +1242,13 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 		return commit()
 	}
 	ids := make([]pgtype.UUID, 0, len(receipts))
-	manual := true
+	manual, hasManualReceipt := true, false
 	for _, r := range receipts {
 		ids = append(ids, r.ID)
 		manual = manual && r.EventType == wakeupManualEventType
+		hasManualReceipt = hasManualReceipt || r.EventType == wakeupManualEventType
 	}
+	pendingNext := next
 	if w.Mode == "once" {
 		enabled = false
 		next = pgtype.Timestamptz{}
@@ -1299,6 +1301,23 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 	}
 	var chain []string
 	if !taskExists {
+		if err = guardIssueAgentFailureStreak(ctx, q, issue.ID, agent.ID, hasManualReceipt); err != nil {
+			if !errors.Is(err, ErrIssueAgentConsecutiveFailures) {
+				return err
+			}
+			if err = q.AdvanceIssueWakeup(ctx, db.AdvanceIssueWakeupParams{
+				ID: w.ID, Enabled: w.Enabled, NextFireAt: pendingNext,
+				LastError: pgtype.Text{String: ErrIssueAgentConsecutiveFailures.Error(), Valid: true},
+			}); err != nil {
+				return err
+			}
+			if timedOut {
+				if err = markTimedOut(); err != nil {
+					return err
+				}
+			}
+			return commit()
+		}
 		var loop bool
 		if chain, loop, err = wakeupChain(ctx, q, w, receipts); err != nil {
 			return err

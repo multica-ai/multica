@@ -1280,7 +1280,7 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 
 // ErrIssueAgentConsecutiveFailures pauses automatic dispatch until the agent
 // completes a run for the issue. An explicit human action can start that run.
-var ErrIssueAgentConsecutiveFailures = errors.New("automatic dispatch paused after three consecutive failures for this issue and agent")
+var ErrIssueAgentConsecutiveFailures = errors.New("automatic dispatch paused after three consecutive failures for this issue and agent. Complete a manual run to resume")
 
 func guardIssueAgentFailureStreak(ctx context.Context, q *db.Queries, issueID, agentID pgtype.UUID, humanAction bool) error {
 	if humanAction || !issueID.Valid {
