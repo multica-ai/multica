@@ -13,6 +13,10 @@
 // After an update, run `node --test scripts/fake-composio.test.mjs` and
 // `go test ./pkg/composio/... ./internal/integrations/composio/...` (from
 // server/): a failure there is Composio's API moving under the fake or the SDK.
+//
+// .github/workflows/composio-spec-drift.yml runs `update` against the live spec
+// every day and fails, with the diff and those test results in its summary,
+// when the snapshot no longer matches.
 
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -215,9 +219,13 @@ function format(value, indent = "") {
 
 async function update(args) {
   const from = args[args.indexOf("--from") + 1];
-  const spec = args.includes("--from")
-    ? JSON.parse(readFileSync(from, "utf8"))
-    : await (await fetch(SPEC_URL, { signal: AbortSignal.timeout(60_000) })).json();
+  let spec;
+  if (args.includes("--from")) spec = JSON.parse(readFileSync(from, "utf8"));
+  else {
+    const res = await fetch(SPEC_URL, { signal: AbortSignal.timeout(60_000) });
+    if (!res.ok) throw new Error(`GET ${SPEC_URL}: HTTP ${res.status}`);
+    spec = await res.json();
+  }
   writeFileSync(SNAPSHOT, `${format(prune(spec))}\n`);
   console.log(`[composio-spec] wrote ${OPERATIONS.length} operations of ${spec.info?.title} ${spec.info?.version} to ${SNAPSHOT}`);
 }
@@ -228,5 +236,10 @@ if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToP
     console.error("Usage: node scripts/composio-spec.mjs update [--from openapi.json]");
     process.exit(1);
   }
-  await update(args);
+  try {
+    await update(args);
+  } catch (error) {
+    console.error(`[composio-spec] ${error.message}`);
+    process.exit(1);
+  }
 }

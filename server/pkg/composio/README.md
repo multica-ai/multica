@@ -144,6 +144,14 @@ snapshot. When a new endpoint is called, add it to `OPERATIONS` in
 `scripts/composio-spec.mjs`; to pick up Composio's latest spec, run
 `node scripts/composio-spec.mjs update` and review the diff.
 
+The snapshot is frozen, so the fakes keep passing when Composio changes the
+live API. `.github/workflows/composio-spec-drift.yml` (daily, or run it by hand
+from the Actions tab) regenerates the snapshot from the live spec. When it
+differs, the job fails with the snapshot diff and the results of the Node and
+Go tests above, run against the new snapshot, in its summary; the regenerated
+`openapi-v3.1.json` is attached as an artifact. A failed fetch only warns, so
+a Composio outage does not raise a false alarm. It is not part of PR CI.
+
 ## Design notes
 
 - **Standalone.** Zero coupling to Multica internals — depend on this package
