@@ -52,6 +52,10 @@ var guestRoutes = compileGuestRoutes([]string{
 	"DELETE /api/issues/*/reactions",
 	"POST /api/issues/*/subscribe",
 	"POST /api/issues/*/unsubscribe",
+	// The Inbox's Unsubscribe & archive: its undo, and its choice to leave
+	// the sub-issues too (the caller's own subscriptions only, for a guest).
+	"POST /api/issues/*/unsubscribe/undo",
+	"POST /api/issues/*/unsubscribe/subtree",
 	"POST /api/issues/*/read",
 	"POST /api/issues/*/unread",
 	"PUT /api/comments/*",
@@ -66,6 +70,8 @@ var guestRoutes = compileGuestRoutes([]string{
 	"GET /api/projects",
 	"GET /api/projects/search",
 	"GET /api/projects/*",
+	"GET /api/projects/*/progress",
+	"GET /api/projects/*/activity",
 	"GET /api/projects/*/resources",
 	"GET /api/projects/*/subscription",
 	"PUT /api/projects/*/subscription",
@@ -91,6 +97,7 @@ var guestRoutes = compileGuestRoutes([]string{
 	"GET /api/notification-preferences",
 	"PATCH /api/notification-preferences",
 	"PUT /api/notification-preferences",
+	"POST /api/notification-preferences/auto-archive-prompt",
 	"GET /api/pins",
 	"POST /api/pins",
 	"PUT /api/pins/reorder",

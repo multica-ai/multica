@@ -140,6 +140,9 @@ var pgBigmOperatorClass = extensionOperatorClass{
 // they are still pending: a fresh self-hosted install, which is exactly where an
 // interrupted build would otherwise leave a permanently unusable index.
 var concurrentIndexCleanups = map[string]string{
+	"729_remote_app_connection_workspace_idx":                   "uq_remote_app_connection_owner_ws",
+	"720_remote_app_oauth_client_idx":                           "uq_remote_app_oauth_client_app_redirect",
+	"721_remote_app_connection_owner_idx":                       "uq_remote_app_connection_owner",
 	"676_chat_wakeup_due_idx":                                   "idx_chat_wakeup_due",
 	"677_chat_wakeup_session_idx":                               "idx_chat_wakeup_session",
 	"678_chat_wakeup_requester_idx":                             "idx_chat_wakeup_requester",
@@ -160,6 +163,10 @@ var concurrentIndexCleanups = map[string]string{
 	"707_doc_comment_workspace_idx":                             "doc_comment_workspace_idx",
 	"708_attachment_workspace_size_idx":                         "idx_attachment_workspace_size",
 	"712_dashboard_range_view_scope_idx":                        "uq_dashboard_range_view_scope",
+	"714_doc_collab_state_pkey_index":                           "doc_collab_state_pkey_idx",
+	"716_doc_revision_pkey_index":                               "doc_revision_pkey_idx",
+	"724_issue_description_collab_state_pkey_index":             "issue_description_collab_state_pkey_idx",
+	"726_issue_description_revision_pkey_index":                 "issue_description_revision_pkey_idx",
 	"671_weixin_account_state_unique_index":                     "weixin_account_state_pkey",
 	"669_weixin_login_session_unique_index":                     "weixin_login_session_pkey",
 	"666_weixin_login_expiry_idx":                               "weixin_login_expiry_idx",
@@ -426,6 +433,7 @@ var concurrentIndexCleanups = map[string]string{
 // the retry, while a bare CREATE would stay wedged on "already exists"; both
 // cases need direction-specific cleanup before the rollback can retry safely.
 var concurrentDownIndexCleanups = map[string]string{
+	"730_drop_remote_app_connection_owner_idx":              "uq_remote_app_connection_owner",
 	"144_drop_agent_task_queue_chat_pending_v1":             "idx_agent_task_queue_chat_pending",
 	"171_drop_legacy_label_namespace_index":                 "issue_label_workspace_name_lower_idx",
 	"256_drop_agent_task_queue_chat_pending_v2":             "idx_agent_task_queue_chat_pending_v2",

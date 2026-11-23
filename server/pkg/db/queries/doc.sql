@@ -83,7 +83,9 @@ RETURNING *;
 
 -- name: DeleteDoc :exec
 WITH v AS (DELETE FROM doc_version WHERE doc_version.doc_id = @id AND doc_version.workspace_id = @workspace_id),
-c AS (DELETE FROM doc_comment WHERE doc_comment.doc_id = @id AND doc_comment.workspace_id = @workspace_id)
+c AS (DELETE FROM doc_comment WHERE doc_comment.doc_id = @id AND doc_comment.workspace_id = @workspace_id),
+s AS (DELETE FROM doc_collab_state WHERE doc_collab_state.doc_id = @id AND doc_collab_state.workspace_id = @workspace_id),
+r AS (DELETE FROM doc_revision WHERE doc_revision.doc_id = @id)
 DELETE FROM doc WHERE doc.id = @id AND doc.workspace_id = @workspace_id;
 
 -- name: GetDocVersion :one
@@ -93,7 +95,7 @@ WHERE doc_id = $1 AND number = $2;
 -- name: ListDocVersions :many
 SELECT
     doc_id, workspace_id, number, title, author_type, author_id, message, action,
-    action_ref, task_id, issue_id, created_at, updated_at
+    action_ref, task_id, issue_id, contributors, created_at, updated_at
 FROM doc_version
 WHERE doc_id = $1
 ORDER BY number DESC
@@ -119,15 +121,18 @@ WHERE doc_id = @doc_id
 -- name: InsertDocVersion :one
 INSERT INTO doc_version (
     doc_id, workspace_id, number, title, content, author_type, author_id,
-    message, action, action_ref, task_id, issue_id
+    message, action, action_ref, task_id, issue_id, contributors
 ) VALUES (
     @doc_id, @workspace_id, @number, @title, @content, @author_type, @author_id,
-    @message, @action, sqlc.narg('action_ref'), sqlc.narg('task_id'), sqlc.narg('issue_id')
+    @message, @action, sqlc.narg('action_ref'), sqlc.narg('task_id'), sqlc.narg('issue_id'),
+    @contributors::jsonb
 )
 RETURNING *;
 
 -- name: DeleteWorkspaceDocs :exec
 WITH v AS (DELETE FROM doc_version WHERE doc_version.workspace_id = @workspace_id),
+s AS (DELETE FROM doc_collab_state WHERE doc_collab_state.doc_id IN (SELECT id FROM doc WHERE doc.workspace_id = @workspace_id)),
+r AS (DELETE FROM doc_revision WHERE doc_revision.doc_id IN (SELECT id FROM doc WHERE doc.workspace_id = @workspace_id)),
 c AS (DELETE FROM doc_comment WHERE doc_comment.workspace_id = @workspace_id),
 f AS (DELETE FROM doc_folder WHERE doc_folder.workspace_id = @workspace_id)
 DELETE FROM doc WHERE doc.workspace_id = @workspace_id;
@@ -173,3 +178,56 @@ SELECT DISTINCT author_id FROM doc_comment
 WHERE workspace_id = @workspace_id AND doc_id = @doc_id
   AND (id = @root_id OR parent_id = @root_id)
   AND author_type = 'member';
+
+-- name: GetDocForCollab :one
+-- The collaboration service's view of a doc: stored content plus the Yjs
+-- state last saved with it, which is only reusable at the same revision.
+SELECT d.workspace_id, d.title, d.content, d.revision,
+    s.ystate AS ystate, s.revision AS ystate_revision
+FROM doc d
+LEFT JOIN doc_collab_state s ON s.doc_id = d.id
+WHERE d.id = $1;
+
+-- name: GetDocByIDForUpdate :one
+SELECT * FROM doc WHERE id = $1 FOR UPDATE;
+
+-- name: UpsertDocCollabState :exec
+INSERT INTO doc_collab_state (doc_id, workspace_id, ystate, revision)
+VALUES (@doc_id, @workspace_id, @ystate, @revision)
+ON CONFLICT (doc_id) DO UPDATE SET
+    ystate = EXCLUDED.ystate,
+    revision = EXCLUDED.revision,
+    updated_at = now();
+
+-- name: InsertDocRevision :exec
+INSERT INTO doc_revision (doc_id, revision, content)
+VALUES (@doc_id, @revision, @content)
+ON CONFLICT (doc_id, revision) DO UPDATE SET content = EXCLUDED.content;
+
+-- name: PruneDocRevisions :exec
+DELETE FROM doc_revision
+WHERE doc_id = @doc_id AND revision < @keep_from;
+
+-- name: GetDocRevisionContent :one
+SELECT content FROM doc_revision
+WHERE doc_id = @doc_id AND revision = @revision;
+
+-- name: MergeCollabEditIntoVersion :execrows
+-- Folds a save from people editing together into the latest snapshot while
+-- the session lasts: an unlabeled member edit within 30 minutes of the
+-- snapshot's start. Everyone who joined is added to its contributors.
+UPDATE doc_version SET
+    title = @title,
+    content = @content,
+    contributors = (
+        SELECT COALESCE(jsonb_agg(DISTINCT e), '[]'::jsonb)
+        FROM jsonb_array_elements(doc_version.contributors || @contributors::jsonb) AS e
+    ),
+    updated_at = now()
+WHERE doc_id = @doc_id
+  AND number = @number
+  AND action = 'edit'
+  AND message = ''
+  AND author_type = 'member'
+  AND task_id IS NULL
+  AND created_at > now() - interval '30 minutes';

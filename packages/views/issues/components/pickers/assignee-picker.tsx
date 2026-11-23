@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Lock, UserMinus } from "@multica/ui/icons";
-import type { Agent, IssueAssigneeType, MemberWithUser, Squad, UpdateIssueRequest } from "@multica/core/types";
+import type { Agent, IssueAssigneeType, MemberRole, MemberWithUser, Squad, UpdateIssueRequest } from "@multica/core/types";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { isAgentRuntimeBound } from "@multica/core/agents";
@@ -36,10 +36,14 @@ export function canAssignAgent(
 ): boolean {
   return canAssignAgentToIssue(agent, {
     userId: userId ?? null,
-    role: memberRole === "owner" || memberRole === "admin" || memberRole === "member"
-      ? memberRole
-      : null,
+    role: toMemberRole(memberRole),
   }).allowed;
+}
+
+// Keeps "guest": the rules refuse a guest outright, while an unknown role
+// would fall through to the owner and member-grant checks.
+function toMemberRole(role: string | undefined): MemberRole | null {
+  return role === "owner" || role === "admin" || role === "member" || role === "guest" ? role : null;
 }
 
 interface AssigneePickerProps {
@@ -245,10 +249,7 @@ function useAssigneeChoices(filter: string) {
   // have a runtime, and squads whose leader is such an agent (the server
   // checks the leader's invoke permission). Anything else would be a row
   // that can't be clicked, or a pick the server rejects.
-  const role =
-    memberRole === "owner" || memberRole === "admin" || memberRole === "member"
-      ? memberRole
-      : null;
+  const role = toMemberRole(memberRole);
   const assignableAgents = agents.filter(
     (a) =>
       !a.archived_at &&

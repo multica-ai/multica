@@ -118,7 +118,7 @@ describe("JoinPage", () => {
         screen.getByText("You'll join this workspace as"),
       ).toBeInTheDocument(),
     );
-    expect(screen.getByText("Administrator")).toBeInTheDocument();
+    expect(screen.getByText("Admin")).toBeInTheDocument();
   });
 
   it("shows a Member badge when the link grants member access", async () => {
@@ -156,7 +156,7 @@ describe("JoinPage", () => {
     render(<JoinPage />, { wrapper: createWrapper() });
 
     await user.click(
-      await screen.findByRole("button", { name: "Log In to Join" }),
+      await screen.findByRole("button", { name: "Sign in to join" }),
     );
     expect(mockPush).toHaveBeenCalledWith(
       "/login?next=" + encodeURIComponent("/join?code=abc123"),
@@ -176,7 +176,7 @@ describe("JoinPage", () => {
     render(<JoinPage />, { wrapper: createWrapper() });
 
     await user.click(
-      await screen.findByRole("button", { name: "Join Workspace" }),
+      await screen.findByRole("button", { name: "Join workspace" }),
     );
     await waitFor(() => expect(mockJoinByShareLink).toHaveBeenCalledTimes(1));
     // The join succeeded — the page should transition to the Joined state
@@ -199,7 +199,7 @@ describe("JoinPage", () => {
     render(<JoinPage />, { wrapper: createWrapper() });
 
     await user.click(
-      await screen.findByRole("button", { name: "Join Workspace" }),
+      await screen.findByRole("button", { name: "Join workspace" }),
     );
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/acme/issues"));
   });
@@ -214,7 +214,7 @@ describe("JoinPage", () => {
     render(<JoinPage />, { wrapper: createWrapper() });
 
     await user.click(
-      await screen.findByRole("button", { name: "Join Workspace" }),
+      await screen.findByRole("button", { name: "Join workspace" }),
     );
     await waitFor(() =>
       expect(
@@ -242,7 +242,7 @@ describe("JoinPage", () => {
     render(<JoinPage />, { wrapper: createWrapper() });
 
     await user.click(
-      await screen.findByRole("button", { name: "Join Workspace" }),
+      await screen.findByRole("button", { name: "Join workspace" }),
     );
     await waitFor(() => expect(screen.getByText(message)).toBeInTheDocument());
   });
@@ -257,7 +257,7 @@ describe("JoinPage", () => {
     render(<JoinPage />, { wrapper: createWrapper() });
 
     await user.click(
-      await screen.findByRole("button", { name: "Join Workspace" }),
+      await screen.findByRole("button", { name: "Join workspace" }),
     );
     await waitFor(() =>
       expect(screen.getByRole("heading", { name: "Acme is full" })).toBeInTheDocument(),
@@ -265,7 +265,7 @@ describe("JoinPage", () => {
     expect(
       screen.getByText("Contact the person who invited you. This link works again once the workspace upgrades."),
     ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Join Workspace" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Join workspace" })).not.toBeInTheDocument();
 
     // A slot frees up (an invitation revoked): the same page joins on retry.
     mockJoinByShareLink.mockResolvedValue({ workspace_id: "ws-1", workspace_slug: "acme" });
@@ -281,7 +281,7 @@ describe("JoinPage", () => {
       new ApiError("server fallback", 403, "Forbidden", { code: "member_limit_reached" }),
     );
     render(<JoinPage />, { wrapper: createWrapper() });
-    await user.click(await screen.findByRole("button", { name: "Join Workspace" }));
+    await user.click(await screen.findByRole("button", { name: "Join workspace" }));
     await screen.findByRole("heading", { name: "Acme is full" });
 
     // The link was revoked in the meantime.

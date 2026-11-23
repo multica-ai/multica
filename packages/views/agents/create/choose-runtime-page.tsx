@@ -13,6 +13,7 @@ import { useWSEvent } from "@multica/core/realtime";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
+import { Kbd } from "@multica/ui/components/ui/kbd";
 import { useBackOrReplace, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { ConnectRemoteDialog } from "../../runtimes/components/connect-remote-dialog";
@@ -226,9 +227,9 @@ export function ChooseRuntimePage({
                 aria-label={t(($) => $.creation_studio.runtime_step.search_placeholder)}
                 className="h-8 pl-8 pr-8"
               />
-              <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded-xs border bg-muted px-1 text-micro text-muted-foreground">
+              <Kbd aria-hidden="true" compact className="absolute right-2 top-1/2 -translate-y-1/2">
                 /
-              </kbd>
+              </Kbd>
             </div>
           </div>
 

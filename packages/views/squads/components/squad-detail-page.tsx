@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
-import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useCurrentWorkspace, useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useModalStore } from "@multica/core/modals";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
@@ -673,7 +673,7 @@ function SquadMembersSection({
                       <>
                         <span className="shrink-0">{t(($) => $.detail.working_on)}</span>
                         <AppLink
-                          href={p.issueDetail(primaryIssue.issue_id)}
+                          href={p.issueDetail(issueRouteRef({ id: primaryIssue.issue_id, identifier: primaryIssue.identifier }))}
                           title={primaryIssue.title}
                           className="shrink-0 font-mono uppercase transition-colors hover:text-foreground"
                         >
@@ -885,7 +885,7 @@ function SquadRecentWorkSection({
           {issues.map((issue) => (
             <AppLink
               key={issue.id}
-              href={p.issueDetail(issue.id)}
+              href={p.issueDetail(issueRouteRef(issue))}
               className="flex h-10 items-center gap-3 px-3 text-body transition-colors hover:bg-accent/50"
             >
               <StatusIcon

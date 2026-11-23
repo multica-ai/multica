@@ -12,7 +12,7 @@ The **Analytics** page in the sidebar rolls up agent usage across the whole work
 
 The page has two tabs, **Usage** and **Errors**, which share the two filters at the top right:
 
-- **Time range**: `1d`, `7d`, `30d` (default), `90d`, `180d`, `365d`. `1d` means today, starting at midnight in your time zone, not the last 24 hours. On Multica Cloud, your plan sets how far back you can look; ranges beyond it are locked in the menu, and upgrading shows the earlier data, which is always kept.
+- **Time range**: `1d`, `7d`, `30d` (default), `90d`, `180d`, `365d`. `1d` means today, starting at midnight in your time zone, not the last 24 hours.
 - **Project**: **All projects** by default. With a project selected, only runs on that project's issues count; runs that belong to no issue, such as chat runs, drop out.
 
 Days are cut in your time zone: the one set under **Settings → Preferences → Time zone**, or the browser's if you have not set one. The header shows that time zone and when the data was last updated. The server rolls the figures up every 5 minutes and an open page refreshes on the same interval, so a run that just finished can take a few minutes to appear; the refresh button pulls the latest figures immediately.
@@ -32,7 +32,7 @@ Four figures sit at the top:
 
 Run time and Runs count only runs that actually started executing (completed, failed, or cancelled mid-run); a run cancelled while still queued is left out.
 
-The trend card plots Tokens, Cost, Time, or Runs on one time axis, at a **Daily** or **Weekly** grain. `30d` and `90d` offer both; `1d` and `7d` are daily only, `180d` and `365d` weekly only. Weeks start on Monday, and the current, unfinished week is drawn lighter; hovering it marks the bar as partial and says how many of its 7 days have passed. When your plan's range starts partway through the first week, that week is marked partial the same way.
+The trend card plots Tokens, Cost, Time, or Runs on one time axis, at a **Daily** or **Weekly** grain. `30d` and `90d` offer both; `1d` and `7d` are daily only, `180d` and `365d` weekly only. Weeks start on Monday, and the current, unfinished week is drawn lighter; hovering it marks the bar as partial and says how many of its 7 days have passed.
 
 The **Leaderboard** lists each agent's tokens, cost, run time, and runs, ranked by whichever of the four you pick. It shows the top 10; **Show all** reveals the rest. Two rows can stand for more than one agent:
 

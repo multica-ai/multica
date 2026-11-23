@@ -340,7 +340,7 @@ async function openErrorsTab(user: ReturnType<typeof userEvent.setup>) {
 // The offender ranking control. Named rather than reached through the DOM
 // tree so it survives the card's internal layout changing.
 function offenderSort(): HTMLElement {
-  return screen.getByRole("group", { name: "Rank offenders by" });
+  return screen.getByRole("group", { name: "Rank agents by" });
 }
 
 // The filled part of one offender row's bar. `role="img"` is on the fill (it
@@ -348,7 +348,7 @@ function offenderSort(): HTMLElement {
 // is currently ranked by.
 function offenderBar(index: number): HTMLElement {
   const rows = within(
-    screen.getByRole("list", { name: "Top offenders" }),
+    screen.getByRole("list", { name: "Errors by agent" }),
   ).getAllByRole("listitem");
   return within(rows[index] as HTMLElement).getByRole("img");
 }
@@ -524,7 +524,7 @@ describe("DashboardPage — failure visibility", () => {
     // rate over all 10 runs, this one splits the 4 failures.
     expect(screen.getByText("Failure mix · 4")).toBeInTheDocument();
 
-    const byAgent = within(screen.getByRole("list", { name: "Top offenders" }));
+    const byAgent = within(screen.getByRole("list", { name: "Errors by agent" }));
     const link = byAgent.getByRole("link", { name: /Agent One/ });
     // Overview, NOT ?view=work: Work lists the issues assigned to the agent,
     // while its recent runs (and each failure's reason) live in the Overview
@@ -592,7 +592,7 @@ describe("DashboardPage — failure visibility", () => {
     // 2/2 is a 100% rate and 4/10 is 40%, but two runs is not evidence. The
     // small-sample row is demoted, not dropped — the list still has to
     // reconcile with the workspace failure count above it.
-    const rows = within(screen.getByRole("list", { name: "Top offenders" }))
+    const rows = within(screen.getByRole("list", { name: "Errors by agent" }))
       .getAllByRole("listitem")
       .map((li) => li.textContent);
     expect(rows[0]).toMatch(/Agent One/);
@@ -656,7 +656,7 @@ describe("DashboardPage — the Errors list never exposes an agent the viewer ca
 
     expect(container).not.toHaveTextContent("0f9d1c2e-private-agent-uuid");
 
-    const byAgent = within(screen.getByRole("list", { name: "Top offenders" }));
+    const byAgent = within(screen.getByRole("list", { name: "Errors by agent" }));
     expect(byAgent.getByText("Other agents")).toBeInTheDocument();
     // Anonymous, and therefore not a link — there is no page to open.
     expect(
@@ -683,13 +683,13 @@ describe("DashboardPage — the two questions are separate tabs", () => {
     renderDashboard();
 
     expect(
-      screen.queryByRole("list", { name: "Top offenders" }),
+      screen.queryByRole("list", { name: "Errors by agent" }),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Leaderboard" })).toBeInTheDocument();
 
     await openErrorsTab(user);
 
-    expect(screen.getByRole("list", { name: "Top offenders" })).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Errors by agent" })).toBeInTheDocument();
     // The two per-agent rankings had near-identical shapes and used to stack
     // one above the other; each now belongs to the question it answers.
     expect(
@@ -713,7 +713,7 @@ describe("DashboardPage — the two questions are separate tabs", () => {
   it("opens straight onto Errors when the URL asks for it", () => {
     renderDashboard("tab=errors");
 
-    expect(screen.getByRole("list", { name: "Top offenders" })).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Errors by agent" })).toBeInTheDocument();
   });
 
   it("falls back to Usage for a tab value it does not recognise", () => {
@@ -728,7 +728,7 @@ describe("DashboardPage — the two questions are separate tabs", () => {
     renderDashboard();
     await openErrorsTab(user);
 
-    const list = () => screen.getByRole("list", { name: "Top offenders" });
+    const list = () => screen.getByRole("list", { name: "Errors by agent" });
     // 12 agents have failures, but an unbounded list is what made this card
     // taller than the rest of the page put together.
     expect(within(list()).getAllByRole("listitem")).toHaveLength(8);

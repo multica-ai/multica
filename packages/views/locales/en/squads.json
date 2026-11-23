@@ -23,14 +23,14 @@
     "description": "\"{{name}}\" will be archived. Issues currently assigned to this squad will be transferred to its leader. This can't be undone — create a new squad if you need the routing back.",
     "cancel": "Cancel",
     "confirm": "Archive",
-    "archiving": "Archiving…",
+    "archiving": "Archiving...",
     "success": "Squad archived"
   },
   "name_editor": {
     "placeholder": "Squad name"
   },
   "add_member_dialog": {
-    "title": "Add Member",
+    "title": "Add member",
     "description": "Choose workspace members or agents.",
     "label_member": "Member",
     "label_role": "Role",
@@ -44,7 +44,7 @@
     "add": "Add"
   },
   "role_editor": {
-    "empty": "Add role…",
+    "empty": "Add role...",
     "placeholder": "Role (e.g. Reviewer)"
   },
   "description_editor": {
@@ -56,7 +56,7 @@
     "add_member_button": "Add member",
     "empty_title": "No members yet",
     "empty_description": "Add agents or members, and issues assigned to this squad go to them.",
-    "create_agent_button": "Create Agent",
+    "create_agent_button": "Create agent",
     "leader_chip": "Leader",
     "view_agent_tooltip": "Open agent detail",
     "make_leader_tooltip": "Make squad leader",
@@ -108,7 +108,7 @@
   },
   "profile_card": {
     "unavailable": "Squad unavailable",
-    "detail_link": "Detail →",
+    "detail_link": "View details →",
     "archived": "Archived",
     "member_count_one": "{{count}} member",
     "member_count_other": "{{count}} members",
@@ -126,7 +126,6 @@
     "mine": "My squads",
     "all": "All squads"
   },
-  "toolbar": {},
   "intro": {
     "title": "Put agents in a squad and they work like a team",
     "description": "Assign an issue to the squad. Its leader agent reads it, hands each step to the member whose role fits, and follows up until the goal is met. You only deal with one assignee.",

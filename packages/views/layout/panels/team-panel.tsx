@@ -2,7 +2,7 @@
 
 import { useId, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowUpRight, BarChart3, BookOpenText, Bot, MessageSquare, Monitor, Plus, User, UserPlus, Users } from "@multica/ui/icons";
+import { ArrowUpRight, BarChart3, BookOpenText, Bot, MessageSquare, Monitor, Plug, Plus, User, UserPlus, Users } from "@multica/ui/icons";
 import { DropdownMenuItem } from "@multica/ui/components/ui/dropdown-menu";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -11,10 +11,11 @@ import { agentTaskSnapshotOptions, type AgentPresenceDetail } from "@multica/cor
 import { useAgentsViewStore } from "@multica/core/agents/stores";
 import { useAuthStore } from "@multica/core/auth";
 import { useChatStore } from "@multica/core/chat";
+import { appsOverviewOptions } from "@multica/core/connected-apps";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
-import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useCurrentWorkspace, useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { memberListOptions, skillListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
@@ -26,6 +27,9 @@ import { shouldOpenRowMenu, useRowMenu } from "../../common/point-menu";
 import { CollectionRowContext } from "../collection-list/row-context";
 import { availabilityConfig } from "../../agents/presence";
 import { useT } from "../../i18n";
+import { buildAppDirectory } from "../../apps/lib/directory";
+import { useComposioAvailable } from "../../common/use-composio-available";
+import { useViewerAppsOverview } from "../../common/use-viewer-apps-overview";
 import { buildRuntimeMachines, runtimeMachineCounts } from "../../runtimes/components/runtime-machines";
 import {
   PanelBody,
@@ -167,7 +171,7 @@ function AgentPanelLink({
           </DropdownMenuItem>
         )}
         {currentIssue && (
-          <DropdownMenuItem onClick={() => push(p.issueDetail(currentIssue.id))}>
+          <DropdownMenuItem onClick={() => push(p.issueDetail(issueRouteRef(currentIssue)))}>
             <ArrowUpRight className="h-3.5 w-3.5" />
             {t(($) => $.panels.team.open_issue, { identifier: currentIssue.identifier })}
           </DropdownMenuItem>
@@ -242,6 +246,29 @@ function WorkingAgentRow({
   );
 }
 
+/** The Apps link, counting the apps that need someone to act. */
+function AppsPanelLink({ wsId }: { wsId: string }) {
+  const { t } = useT("layout");
+  const p = useWorkspacePaths();
+  const { pathname } = useNavigation();
+  const viewerId = useAuthStore((s) => s.user?.id ?? null);
+  const { data } = useQuery({ ...appsOverviewOptions(wsId), enabled: !!wsId });
+  const overview = useViewerAppsOverview(wsId, data);
+  const attention = useMemo(() => {
+    if (!overview) return 0;
+    return buildAppDirectory({ overview, catalog: [], viewerId }).attention.length;
+  }, [overview, viewerId]);
+  return (
+    <PanelLink
+      href={p.apps()}
+      icon={<Plug />}
+      label={t(($) => $.nav.apps)}
+      active={isPathWithin(pathname, p.apps())}
+      trailing={<PanelCount value={attention} />}
+    />
+  );
+}
+
 export function TeamPanel() {
   const { t } = useT("layout");
   const p = useWorkspacePaths();
@@ -273,6 +300,7 @@ export function TeamPanel() {
   const { data: members = [] } = useQuery({ ...memberListOptions(wsId), enabled: !!wsId });
   const { data: skills = [] } = useQuery({ ...skillListOptions(wsId), enabled: !!wsId });
   const { data: runtimes = [] } = useQuery({ ...runtimeListOptions(wsId), enabled: !!wsId });
+  const appsAvailable = useComposioAvailable();
   const machineCounts = useMemo(() => {
     const machines = buildRuntimeMachines(runtimes, { now: Date.now() }).filter(
       (machine) => !machine.runtimes.every((runtime) => runtime.provider === "qoder_cloud"),
@@ -426,6 +454,7 @@ export function TeamPanel() {
               active={isPathWithin(pathname, p.skills())}
               trailing={<PanelCount value={skills.length} />}
             />
+            {appsAvailable && <AppsPanelLink wsId={wsId} />}
             <PanelLink
               href={p.runtimes()}
               icon={<Monitor />}

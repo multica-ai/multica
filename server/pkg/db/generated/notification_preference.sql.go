@@ -99,6 +99,26 @@ func (q *Queries) PatchNotificationPreference(ctx context.Context, arg PatchNoti
 	return i, err
 }
 
+const resolveAutoArchivePrompt = `-- name: ResolveAutoArchivePrompt :exec
+UPDATE notification_preference
+SET preferences = (preferences - 'auto_archive_prompt') || $1::jsonb,
+    updated_at = now()
+WHERE user_id = $2
+  AND preferences ->> 'auto_archive_prompt' IS NOT NULL
+`
+
+type ResolveAutoArchivePromptParams struct {
+	Preferences []byte      `json:"preferences"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+// Answers the one-time auto-archive question in every workspace where the
+// user still has it pending: merges their choice and drops the marker.
+func (q *Queries) ResolveAutoArchivePrompt(ctx context.Context, arg ResolveAutoArchivePromptParams) error {
+	_, err := q.db.Exec(ctx, resolveAutoArchivePrompt, arg.Preferences, arg.UserID)
+	return err
+}
+
 const upsertNotificationPreference = `-- name: UpsertNotificationPreference :one
 INSERT INTO notification_preference (workspace_id, user_id, preferences)
 VALUES ($1, $2, $3)

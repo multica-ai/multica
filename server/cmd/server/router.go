@@ -24,6 +24,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/attachmentpreview"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
+	"github.com/multica-ai/multica/server/internal/collab"
 	"github.com/multica-ai/multica/server/internal/connectedapps"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/entitlement"
@@ -469,6 +470,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.Metrics = opts.BusinessMetrics
 	h.InboxReads.Metrics = opts.InboxReadMetrics
 	h.FeatureFlags = opts.FeatureFlags
+	collabClient, err := collab.NewClient(os.Getenv("COLLAB_INTERNAL_URL"), os.Getenv("COLLAB_SECRET"))
+	if err != nil {
+		slog.Error("live doc editing disabled", "error", err)
+	}
+	h.Collab = collabClient
 	h.ThemeStore = themeStoreFromEnv()
 	h.TaskService.FeatureFlags = opts.FeatureFlags
 	h.TaskService.Metrics = opts.BusinessMetrics
@@ -1367,11 +1373,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// dynamically from the project's /auth_configs at request time, so enabling
 	// a toolkit is a dashboard action, not a redeploy. State signing uses
 	// COMPOSIO_STATE_SECRET, or a key derived from JWT_SECRET when that is unset.
+	// COMPOSIO_BASE_URL replaces the Composio API root; local environments set
+	// it to scripts/fake-composio.mjs. Unset means the real Composio API.
 	if composioAPIKey := strings.TrimSpace(os.Getenv("COMPOSIO_API_KEY")); composioAPIKey != "" {
 		if !featureflags.ComposioMCPAppsEnabled(context.Background(), opts.FeatureFlags) {
 			slog.Info("composio integration disabled (feature flag off)")
 		} else {
-			sdkClient, err := composiosdk.NewClient(composiosdk.Options{APIKey: composioAPIKey})
+			composioBaseURL := strings.TrimSpace(os.Getenv("COMPOSIO_BASE_URL"))
+			if composioBaseURL != "" {
+				slog.Warn("composio: COMPOSIO_BASE_URL overrides the Composio API", "base_url", composioBaseURL)
+			}
+			sdkClient, err := composiosdk.NewClient(composiosdk.Options{APIKey: composioAPIKey, BaseURL: composioBaseURL})
 			if err != nil {
 				slog.Error("composio: SDK client init failed; composio integration disabled", "error", err)
 			} else {
@@ -1398,17 +1410,32 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						// Connected Apps v2 (MUL-8516): runs reach their apps
 						// through the Multica gateway, which holds the Composio
 						// key and applies account rules and confirmations.
-						appsSvc, aerr := connectedapps.New(connectedapps.Config{
+						appsCfg := connectedapps.Config{
 							Queries:       queries,
+							TxStarter:     pool,
 							Composio:      svc,
 							TokenSecret:   connectedapps.DeriveTokenSecret(stateSecret),
 							PublicBaseURL: callbackBase,
 							Bus:           bus,
-						})
+						}
+						// Remote MCP apps (MUL-9792) store OAuth tokens, so
+						// they need their own at-rest key; without it they
+						// stay off and Composio apps work as before.
+						if appsKey, kerr := secretbox.LoadKey("MULTICA_APPS_SECRET_KEY"); kerr == nil {
+							if box, berr := secretbox.New(appsKey); berr == nil {
+								appsCfg.SecretBox, appsCfg.DB = box, pool
+							} else {
+								slog.Error("connected apps: secretbox.New failed; remote MCP apps disabled", "error", berr)
+							}
+						} else {
+							slog.Info("connected apps: remote MCP apps disabled (MULTICA_APPS_SECRET_KEY not set)")
+						}
+						appsSvc, aerr := connectedapps.New(appsCfg)
 						if aerr != nil {
 							slog.Error("connected apps: init failed; agents run without apps", "error", aerr)
 						} else {
 							appsSvc.SetResumer(h)
+							appsSvc.SetTeamConnectGate(h.TeamAppConnectGate)
 							h.ConnectedApps = appsSvc
 						}
 						// Stage 3 (MUL-3721) hook: feed the per-task MCP
@@ -1599,6 +1626,23 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		realtime.HandleWebSocket(hub, mc, pr, slugResolver, w, r)
 	})
 
+	// Live doc editing. Editors authenticate with a ticket from
+	// POST /api/docs/{id}/collab-ticket; the service calls back with the
+	// shared secret.
+	if h.Collab != nil {
+		r.Get("/collab", h.Collab.Proxy().ServeHTTP)
+		r.Route("/internal/collab/docs/{id}", func(r chi.Router) {
+			r.Use(h.RequireCollabSecret)
+			r.Get("/", h.GetCollabDoc)
+			r.Post("/store", h.StoreCollabDoc)
+		})
+		r.Route("/internal/collab/issues/{id}", func(r chi.Router) {
+			r.Use(h.RequireCollabSecret)
+			r.Get("/", h.GetCollabIssue)
+			r.Post("/store", h.StoreCollabIssue)
+		})
+	}
+
 	// Capability-authenticated attachment download (MUL-5292). Public by
 	// necessity: a native download (Electron's webContents.downloadURL, a
 	// cross-site webview <img>) carries neither Authorization nor a session
@@ -1688,6 +1732,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Apps MCP gateway (MUL-8516). Outside the Auth group: a run presents its
 	// task-scoped bearer token, verified by the gateway itself.
 	r.Post("/api/apps/mcp", h.AppsGateway)
+	r.Post("/api/apps/mcp/{app}", h.AppsRemoteGateway)
+	// Remote MCP app OAuth callback (MUL-9792). Public for the same reason
+	// as the Composio callback; the sealed state identifies the handshake.
+	r.Get("/api/apps/oauth/callback", h.AppsOAuthCallback)
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
@@ -2091,6 +2139,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/toolkits", h.ListComposioToolkits)
 			r.Get("/connections", h.ListComposioConnections)
 			r.Delete("/connections/{id}", h.DeleteComposioConnection)
+			r.Get("/connections/{id}/impact", h.GetComposioConnectionImpact)
 		})
 
 		// User-scoped invitation routes (no workspace context required)
@@ -2222,6 +2271,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetIssue)
 					r.Put("/", h.UpdateIssue)
+					r.Post("/description/edits", h.EditIssueDescription)
+					r.Post("/collab-ticket", h.CreateIssueCollabTicket)
 					r.Post("/move", h.MoveIssue)
 					r.Delete("/", h.DeleteIssue)
 					r.Post("/comments/trigger-preview", h.PreviewCommentTriggers)
@@ -2361,6 +2412,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetDoc)
 					r.Patch("/", h.UpdateDoc)
+					r.Post("/edits", h.EditDoc)
+					r.Post("/collab-ticket", h.CreateDocCollabTicket)
 					r.With(handler.RequireHumanActor).Delete("/", h.DeleteDoc)
 					r.Post("/move", h.MoveDoc)
 					r.Get("/versions", h.ListDocVersions)
@@ -2399,6 +2452,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/", h.CreateProject)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetProject)
+					r.Get("/progress", h.GetProjectProgress)
+					r.Get("/activity", h.ListProjectActivity)
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
 					r.With(handler.RequireHumanActor).Post("/join", h.JoinPrivateProject)
@@ -2760,6 +2815,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/team/connect", h.ConnectTeamApp)
 				r.Get("/team/impact", h.GetTeamAppImpact)
 				r.Delete("/team/connections/{id}", h.DisconnectTeamApp)
+				r.Post("/team/requests", h.RequestTeamApp)
+				r.Delete("/team/requests", h.DismissTeamAppRequests)
 				r.Post("/personal/connect", h.ConnectPersonalApp)
 				r.Get("/rules", h.GetAppRules)
 				r.Put("/rules", h.UpdateAppRules)
@@ -2813,6 +2870,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.GetNotificationPreferences)
 				r.Patch("/", h.PatchNotificationPreferences)
 				r.Put("/", h.UpdateNotificationPreferences)
+				r.Post("/auto-archive-prompt", h.ResolveAutoArchivePrompt)
 			})
 		})
 	})

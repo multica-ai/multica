@@ -1,5 +1,6 @@
 "use client";
 import { docKeys } from "../docs/queries";
+import { applyDocUpdated } from "../docs/realtime";
 
 import { weixinKeys } from "../weixin/queries";
 
@@ -58,6 +59,8 @@ import {
   onIssuePropertiesChanged,
   onIssueMetadataChanged,
   onIssueAuxiliaryRevision,
+  onIssueReactionAdded,
+  onIssueReactionRemoved,
   invalidateIssueOwnerProjections,
 } from "../issues/ws-updaters";
 import {
@@ -65,6 +68,7 @@ import {
   invalidateUpdatedAtSortedIssueLists,
 } from "../issues/cache-coordinator";
 import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted, onInboxSummaryInvalidate } from "../inbox/ws-updaters";
+import { noteInboxAutoArchive } from "../inbox/auto-archive";
 import {
   notificationPreferenceOptions,
   notificationPreferenceKeys,
@@ -110,6 +114,7 @@ import type {
   IssueMetadataChangedPayload,
   IssuePropertiesChangedPayload,
   InboxNewPayload,
+  InboxBatchArchivedPayload,
   InboxItem,
   NotificationPreferenceResponse,
   CommentCreatedPayload,
@@ -737,7 +742,6 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   // get marked stale here and refetch on next mount; the one mounted issue
   // refetches immediately, same as its own useWSReconnect already does.
   qc.invalidateQueries({ queryKey: issueKeys.timelineAll() });
-  qc.invalidateQueries({ queryKey: issueKeys.reactionsAll() });
   qc.invalidateQueries({ queryKey: issueKeys.subscribersAll() });
   qc.invalidateQueries({ queryKey: issueKeys.usageAll() });
   qc.invalidateQueries({ queryKey: issueKeys.attachmentsAll() });
@@ -1394,6 +1398,12 @@ export function useRealtimeSync(
       await handleInboxNew(qc, item);
     });
 
+    // Recorded before the refresh the generic inbox handler schedules, so the
+    // Inbox knows why the open notification left once the list drops it.
+    const unsubInboxBatchArchived = ws.on("inbox:batch-archived", (p) => {
+      noteInboxAutoArchive(p as InboxBatchArchivedPayload);
+    });
+
     // --- Timeline event handlers (global fallback) ---
     // These events are also handled granularly by useIssueTimeline when
     // IssueDetail is mounted. This global handler exists to mark the
@@ -1423,12 +1433,24 @@ export function useRealtimeSync(
       qc.invalidateQueries({ queryKey: issueKeys.attachments(issueId) });
     };
 
+    // Only the tree lists docs and folders; an open doc's body and comments
+    // are not touched by these.
     const docUnsubs = ([
-      "doc:created", "doc:updated", "doc:deleted",
-      "doc_folder:created", "doc_folder:updated", "doc_folder:deleted",
+      "doc:created", "doc_folder:created", "doc_folder:updated", "doc_folder:deleted",
     ] as const).map((event) => ws.on(event, () => {
       const wsId = getCurrentWsId();
-      if (wsId) void qc.invalidateQueries({ queryKey: docKeys.all(wsId) });
+      if (wsId) void qc.invalidateQueries({ queryKey: docKeys.tree(wsId) });
+    }));
+    docUnsubs.push(ws.on("doc:updated", (p) => {
+      const wsId = getCurrentWsId();
+      if (wsId) applyDocUpdated(qc, wsId, p);
+    }));
+    docUnsubs.push(ws.on("doc:deleted", (p) => {
+      const wsId = getCurrentWsId();
+      if (!wsId) return;
+      void qc.invalidateQueries({ queryKey: docKeys.tree(wsId) });
+      const docId = (p as { doc_id?: string } | undefined)?.doc_id;
+      if (docId) void qc.invalidateQueries({ queryKey: docKeys.detail(wsId, docId) });
     }));
     // A discussion changed on one doc: refetch that doc's comments only.
     docUnsubs.push(ws.on("doc_comment:changed", (p) => {
@@ -1524,20 +1546,18 @@ export function useRealtimeSync(
     // --- Issue-level reactions & subscribers (global fallback) ---
 
     const unsubIssueReactionAdded = ws.on("issue_reaction:added", (p) => {
-      const { issue_id, issue_revision } = p as IssueReactionAddedPayload;
-      if (issue_id) {
-        qc.invalidateQueries({ queryKey: issueKeys.reactions(issue_id) });
-        const wsId = getCurrentWsId();
-        if (wsId) onIssueAuxiliaryRevision(qc, wsId, issue_id, issue_revision);
+      const { issue_id, reaction, issue_revision } = p as IssueReactionAddedPayload;
+      const wsId = getCurrentWsId();
+      if (issue_id && wsId) {
+        onIssueReactionAdded(qc, wsId, issue_id, reaction, issue_revision);
       }
     });
 
     const unsubIssueReactionRemoved = ws.on("issue_reaction:removed", (p) => {
-      const { issue_id, issue_revision } = p as IssueReactionRemovedPayload;
-      if (issue_id) {
-        qc.invalidateQueries({ queryKey: issueKeys.reactions(issue_id) });
-        const wsId = getCurrentWsId();
-        if (wsId) onIssueAuxiliaryRevision(qc, wsId, issue_id, issue_revision);
+      const { issue_id, issue_revision, ...removed } = p as IssueReactionRemovedPayload;
+      const wsId = getCurrentWsId();
+      if (issue_id && wsId) {
+        onIssueReactionRemoved(qc, wsId, issue_id, removed, issue_revision);
       }
     });
 
@@ -2132,6 +2152,7 @@ export function useRealtimeSync(
       unsubIssuePropertiesChanged();
       unsubPropertyChanged.forEach((unsub) => unsub());
       unsubInboxNew();
+      unsubInboxBatchArchived();
       docUnsubs.forEach(unsub => unsub());
       unsubCommentCreated();
       unsubCommentUpdated();

@@ -1,0 +1,1 @@
+ALTER TABLE issue_description_collab_state ADD CONSTRAINT issue_description_collab_state_pkey PRIMARY KEY USING INDEX issue_description_collab_state_pkey_idx;

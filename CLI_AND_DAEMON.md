@@ -233,7 +233,7 @@ multica daemon status
 multica daemon status --output json
 ```
 
-Shows PID, uptime, detected agents, and watched workspaces.
+Shows PID, uptime, detected agents (including why any detected agent was skipped), and watched workspaces.
 
 ### Logs
 
@@ -427,7 +427,7 @@ The daemon periodically scans `MULTICA_WORKSPACES_ROOT` for cleanup. The active-
 
 Configured patterns are basename-only — entries containing `/` or `\` are silently dropped — and `.git` subtrees are never descended into. The managed Codex cache is matched by its exact relative path, so a repository's own `.sandbox-bin` is not removed unless an operator explicitly adds that basename to `MULTICA_GC_ARTIFACT_PATTERNS`. The default list (`node_modules`, `.next`, `.turbo`) is intentionally narrow; extend it per deployment if your repos consistently produce other regenerable directories (for example, `MULTICA_GC_ARTIFACT_PATTERNS=node_modules,.next,.turbo,target,__pycache__`). To disable artifact cleanup entirely, including the managed Codex cache, set `MULTICA_GC_ARTIFACT_TTL=0`.
 
-`multica daemon disk-usage` reports the `.repos` footprint on its own line rather than folding it into the per-task totals — every task in a workspace checks out from that shared cache, so attributing it to individual task directories would double-count it. Note that the repo cache is reclaimed on the schedule above and not by any per-issue status change, so it is normal for it to persist after every task directory is gone.
+`multica daemon disk-usage` reports the `.repos` footprint on its own line rather than folding it into the per-task totals — every task in a workspace checks out from that shared cache, so attributing it to individual task directories would double-count it. In per-task output (`--by-task`), the `MODE` column marks runs that worked in place in a project's local directory as `in place` (`local_directory: true` in JSON when recorded in local metadata). Note that the repo cache is reclaimed on the schedule above and not by any per-issue status change, so it is normal for it to persist after every task directory is gone.
 
 Agent-specific overrides:
 
@@ -719,10 +719,14 @@ Flags: `--title` (required), `--description`, `--status`, `--priority`, `--assig
 multica issue update <id> --title "New title" --priority urgent
 multica issue update <id> --position 4.5
 multica issue update <id> --attachment revised.png
+multica issue update <id> --description-file ./desc.md --description-base-revision <rev>
+multica issue edit-description <id> --old "Status: draft" --new "Status: ready"
 ```
 
 `--position` sets the raw ordering value within the board column (lower sorts first). For relative moves, `issue reorder` is easier because it works out the value for you.
 `--attachment` uploads a local file and appends its Markdown reference to the end of the issue description. Repeat the flag to attach multiple files. To replace an existing image, also use `--description-file` to remove the old reference from the description.
+`--description-base-revision` takes the `description_revision` from `multica issue get` and refuses stale description overwrites with HTTP 409 if the description changed since that revision.
+To change part of a description without rewriting the whole body, use `multica issue edit-description <id>` with `--old` / `--old-file` and `--new` / `--new-file` (add `--replace-all` to replace every occurrence; otherwise `--old` must match exactly once).
 
 ### Delete Issue
 
@@ -980,6 +984,50 @@ multica project get <id>
 multica project get <id> --output json
 ```
 
+The response includes `progress`: `scope` is every issue except cancelled ones,
+`completed` counts done issues, `started` issues are tracked but do not add to
+`percent`. The table output shows it as a PROGRESS column (`5/11 (45%)`).
+
+### Project Overview
+
+```bash
+multica project overview <id>                  # JSON by default
+multica project overview <id> --output table
+```
+
+Returns everything on the project page in one read:
+`{"project": ..., "progress": ..., "resources": [...], "working_agents": [...], "activity": [...]}`.
+`working_agents` lists the agents running a task on one of the project's issues
+right now, with the issue ids; `activity` is the 10 newest entries of
+`multica project activity`. New sections are added as new top-level keys.
+
+### Project Progress
+
+```bash
+multica project progress <id>                  # summary and forecast
+multica project progress <id> --history        # weekly scope / started / completed
+multica project progress <id> --by assignee    # per-assignee breakdown
+multica project progress <id> --by label       # per-label breakdown
+multica project progress <id> --output json    # everything above
+```
+
+The forecast is a completion date from the trailing 4-week completion rate;
+it is omitted when there is less than a week of history or nothing was
+completed recently.
+
+### Project Activity
+
+```bash
+multica project activity <id>                          # newest 30, table by default
+multica project activity <id> --limit 100 --output json
+multica project activity <id> --before <next_cursor>   # older entries
+```
+
+What changed on the project's issues, newest first: issue creation and status,
+assignee, priority, start/due date, title and duplicate changes. Each entry names
+the issue (`issue_identifier`, `issue_title`, `issue_status`), the actor and the
+`details` of the change. JSON output carries `next_cursor` until the last page.
+
 ### Create Project
 
 ```bash
@@ -1133,8 +1181,6 @@ To assign a squad instead, use `--squad` (name or ID) or `--squad-id` (canonical
 ```bash
 multica autopilot trigger <id>            # Fires the autopilot once, returns the run
 ```
-
-On Multica Cloud, a member running this command directly uses no automation quota. Runs triggered by an agent on a member's behalf, a schedule, or a webhook count toward the workspace quota. When an agent triggers a run after an enforced limit is reached, the API returns HTTP 429 with `reason_code: quota_exceeded` and a `Retry-After` header.
 
 The command exits non-zero unless the run actually started (`issue_created` or
 `running`). If a run is `skipped` (for example, the runtime is offline
@@ -1350,6 +1396,26 @@ On the API, both endpoints accept `?include=content` and `?include=metadata`.
 A request that sends neither still gets `content`, on both endpoints, so a
 server upgrade never changes what an un-upgraded client receives — it is the
 CLI that asks for the smaller shape.
+
+### Safe concurrent skill edits
+
+`multica skill get` includes a `revision` field (shown as a `REVISION` column in
+table output) that increments by 1 on every write to the skill or its supporting
+files. Pass `--base-revision <revision>` on `skill update`, `skill files upsert`,
+and `skill files delete` to avoid overwriting concurrent changes:
+
+```bash
+multica skill get <skill-id> --with-content --output json
+multica skill update <skill-id> --content-file ./SKILL.md --base-revision <revision>
+multica skill files upsert <skill-id> --path notes.md --content-file ./notes.md --base-revision <revision>
+multica skill files delete <skill-id> <file-id> --base-revision <revision>
+```
+
+If the skill changed since `--base-revision`, the server returns HTTP 409 with
+`"code": "revision_conflict"` and the current `actual_revision`, leaving the
+skill untouched. Re-read with `multica skill get --with-content`, merge your
+changes, and retry with the new revision. Omitting `--base-revision` preserves
+last-write-wins behavior for older scripts.
 
 ### Custom runtime compatibility targets
 

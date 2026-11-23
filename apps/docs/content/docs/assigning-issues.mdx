@@ -97,7 +97,7 @@ In scripts, use `--to-id <uuid>` to avoid matching the wrong object with the sam
 
 Use `--no-start` when the assignment should record ownership without creating a new run — for example, when the same agent is already handling the issue from another run. The same flag is available on `issue update` and `issue status`. If an ownership-only flow changes both assignment and status, pass it to both commands; suppressing the assignment does not suppress a later status-triggered run.
 
-If an assignment or status change starts no run — for example because the issue is in Triage or the agent has no runtime — the command says why on stderr. `issue batch update` shows the same note in its reason column.
+If an assignment or status change starts no run — for example because the issue is in `backlog` or the agent has no runtime — the command says why on stderr. `issue batch update` shows the same note in its reason column.
 
 ## Next steps
 

@@ -128,7 +128,7 @@ beforeEach(() => {
 
 describe("OnboardingFlow — skipping runtime setup", () => {
   it("creates the guide issue in the new workspace, then opens it", async () => {
-    mockCreateIssue.mockResolvedValueOnce({ id: "issue-guide" });
+    mockCreateIssue.mockResolvedValueOnce({ id: "issue-guide", identifier: "NEW-2" });
     mockCompleteOnboarding.mockResolvedValueOnce(undefined);
     const { onComplete, skip } = renderAtRuntimeStep();
 
@@ -137,7 +137,7 @@ describe("OnboardingFlow — skipping runtime setup", () => {
     await waitFor(() => {
       expect(onComplete).toHaveBeenCalledWith(NEW_WORKSPACE, {
         kind: "issue",
-        issueId: "issue-guide",
+        issueRef: "NEW-2",
       });
     });
     const [body, workspaceSlug] = mockCreateIssue.mock.calls[0]!;
@@ -162,7 +162,7 @@ describe("OnboardingFlow — skipping runtime setup", () => {
   it("stays on the step when the guide cannot be created", async () => {
     mockCreateIssue
       .mockRejectedValueOnce(new Error("network down"))
-      .mockResolvedValueOnce({ id: "issue-guide" });
+      .mockResolvedValueOnce({ id: "issue-guide", identifier: "NEW-2" });
     mockCompleteOnboarding.mockResolvedValue(undefined);
     const { onComplete, skip } = renderAtRuntimeStep();
 
@@ -175,13 +175,13 @@ describe("OnboardingFlow — skipping runtime setup", () => {
     await waitFor(() => {
       expect(onComplete).toHaveBeenCalledWith(NEW_WORKSPACE, {
         kind: "issue",
-        issueId: "issue-guide",
+        issueRef: "NEW-2",
       });
     });
   });
 
   it("reuses the guide issue when only completing onboarding failed", async () => {
-    mockCreateIssue.mockResolvedValueOnce({ id: "issue-guide" });
+    mockCreateIssue.mockResolvedValueOnce({ id: "issue-guide", identifier: "NEW-2" });
     mockCompleteOnboarding
       .mockRejectedValueOnce(new Error("network down"))
       .mockResolvedValueOnce(undefined);
@@ -195,7 +195,7 @@ describe("OnboardingFlow — skipping runtime setup", () => {
     await waitFor(() => {
       expect(onComplete).toHaveBeenCalledWith(NEW_WORKSPACE, {
         kind: "issue",
-        issueId: "issue-guide",
+        issueRef: "NEW-2",
       });
     });
     expect(mockCreateIssue).toHaveBeenCalledTimes(1);
@@ -205,7 +205,7 @@ describe("OnboardingFlow — skipping runtime setup", () => {
   // incomplete, so the next Skip hits the server's duplicate guard.
   it("opens the existing guide after a reload between creating it and completing onboarding", async () => {
     mockCreateIssue
-      .mockResolvedValueOnce({ id: "issue-existing" })
+      .mockResolvedValueOnce({ id: "issue-existing", identifier: "NEW-1" })
       .mockRejectedValueOnce(duplicateGuideConflict());
     mockCompleteOnboarding
       .mockRejectedValueOnce(new Error("network down"))
@@ -221,7 +221,7 @@ describe("OnboardingFlow — skipping runtime setup", () => {
     await waitFor(() => {
       expect(reloaded.onComplete).toHaveBeenCalledWith(NEW_WORKSPACE, {
         kind: "issue",
-        issueId: "issue-existing",
+        issueRef: "NEW-1",
       });
     });
     expect(mockCompleteOnboarding).toHaveBeenCalledTimes(2);
@@ -243,7 +243,7 @@ describe("OnboardingFlow — skipping runtime setup", () => {
     await waitFor(() => {
       expect(onComplete).toHaveBeenCalledWith(NEW_WORKSPACE, {
         kind: "issue",
-        issueId: "issue-existing",
+        issueRef: "NEW-1",
       });
     });
   });

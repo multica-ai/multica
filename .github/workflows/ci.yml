@@ -37,6 +37,7 @@ jobs:
       scripts: ${{ steps.decide.outputs.scripts }}
       installer: ${{ steps.decide.outputs.installer }}
       images: ${{ steps.decide.outputs.images }}
+      e2e: ${{ steps.decide.outputs.e2e }}
       full: ${{ steps.decide.outputs.full }}
     steps:
       - name: Checkout
@@ -267,7 +268,8 @@ jobs:
   # was too heavy (#1279). Its Vitest suite is not: it guards content such as
   # unrendered CJK bold and finishes in seconds. It gets its own scope so a
   # content-only PR runs it and an unrelated PR pays nothing, and installs only
-  # the docs package so the job stays far off the frontend critical path.
+  # the docs package and its workspace dependencies so the job stays far off
+  # the frontend critical path.
   docs-test:
     needs: changes
     if: ${{ needs.changes.outputs.docs == 'true' }}
@@ -286,14 +288,122 @@ jobs:
           cache: pnpm
 
       - name: Install docs dependencies
-        run: pnpm install --frozen-lockfile --filter @multica/docs
+        run: pnpm install --frozen-lockfile --filter @multica/docs...
 
       - name: Test docs
         run: pnpm --filter @multica/docs test
 
+  # Playwright against a real API and a production web build. Only the guest
+  # spec runs here so far: a guest passes an API allowlist that no member-side
+  # test exercises, so a member component reused on a guest page can fail with
+  # 403 unnoticed (MUL-9873). The rest of e2e/ runs locally through `make check`.
+  # The web app is served the way scripts/web-prod.mjs serves it: same-origin,
+  # with `next start` proxying /api and /ws to the API.
+  e2e:
+    needs: changes
+    if: ${{ needs.changes.outputs.e2e == 'true' }}
+    # Playwright 1.58 installs Chromium only up to Ubuntu 24.04; ubuntu-latest
+    # is past that.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: multica
+          POSTGRES_USER: multica
+          POSTGRES_PASSWORD: multica
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U multica -d multica"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://multica:multica@localhost:5432/multica?sslmode=disable
+      PORT: "8080"
+      FRONTEND_PORT: "3000"
+      FRONTEND_ORIGIN: http://localhost:3000
+      MULTICA_APP_URL: http://localhost:3000
+      PLAYWRIGHT_BASE_URL: http://localhost:3000
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "~1.27.4"
+          check-latest: true
+          cache: false
+
+      # Restore only: backend-tests owns publishing this entry.
+      - name: Restore Go module cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('server/go.sum') }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Build and migrate the API
+        working-directory: server
+        run: |
+          go build -o bin/server ./cmd/server
+          go run ./cmd/migrate up
+
+      # REMOTE_API_URL is a runtime setting; at build time it breaks prerendering.
+      - name: Build the web app
+        env:
+          NEXT_PUBLIC_API_URL: ""
+          NEXT_PUBLIC_WS_URL: ""
+          REMOTE_API_URL: ""
+        run: pnpm --filter @multica/web build
+
+      - name: Start the API and the web app
+        run: |
+          (cd server && nohup ./bin/server > "$RUNNER_TEMP/api.log" 2>&1 &)
+          (cd apps/web && PORT=3000 REMOTE_API_URL=http://localhost:8080 nohup node_modules/.bin/next start --port 3000 > "$RUNNER_TEMP/web.log" 2>&1 &)
+          for url in http://localhost:8080/health http://localhost:3000/; do
+            for _ in $(seq 1 60); do
+              curl -sf -o /dev/null "$url" && break
+              sleep 1
+            done
+            curl -sf -o /dev/null "$url" || { echo "$url did not answer within 60s"; exit 1; }
+          done
+
+      - name: Run the guest spec
+        run: pnpm exec playwright test e2e/guest.spec.ts
+
+      - name: Upload logs and Playwright results
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: |
+            test-results/
+            ${{ runner.temp }}/api.log
+            ${{ runner.temp }}/web.log
+          if-no-files-found: ignore
+
   # Preserve the aggregate check names while validating intentional skips.
   frontend:
-    needs: [changes, frontend-build, frontend-test, frontend-views-test, frontend-quality, docs-test]
+    needs: [changes, frontend-build, frontend-test, frontend-views-test, frontend-quality, docs-test, e2e]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -301,7 +411,7 @@ jobs:
       - name: Check frontend job results
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
-          JOB_SCOPES: '{"frontend-build":"frontend","frontend-test":"frontend","frontend-views-test":"frontend","frontend-quality":"quality_only","docs-test":"docs"}'
+          JOB_SCOPES: '{"frontend-build":"frontend","frontend-test":"frontend","frontend-views-test":"frontend","frontend-quality":"quality_only","docs-test":"docs","e2e":"e2e"}'
         run: node scripts/ci-scope.mjs gate
 
   # The Go caches are handled explicitly here rather than through setup-go's

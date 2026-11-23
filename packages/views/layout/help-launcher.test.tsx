@@ -138,7 +138,7 @@ describe("HelpLauncher", () => {
   ])("links Docs to the %s docs", (language, href) => {
     i18nState.language = language;
     render(<HelpLauncher />);
-    expect(screen.getByRole("link", { name: /Docs/ })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /Documentation/ })).toHaveAttribute(
       "href",
       href,
     );
@@ -151,7 +151,7 @@ describe("HelpLauncher", () => {
     render(<HelpLauncher />);
     expect(screen.queryByText("Desktop app")).not.toBeInTheDocument();
     // The rest of the menu is unaffected by the gate.
-    expect(screen.getByText("Docs")).toBeInTheDocument();
+    expect(screen.getByText("Documentation")).toBeInTheDocument();
   });
 
   it("links to the GitHub repo and retires the star prompt on click", () => {

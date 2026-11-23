@@ -25,19 +25,29 @@ import { CodeBlockExtension } from "./code-block";
 import Placeholder from "@tiptap/extension-placeholder";
 import Link from "@tiptap/extension-link";
 import Typography from "@tiptap/extension-typography";
-import Image from "@tiptap/extension-image";
 import TableRow from "@tiptap/extension-table-row";
 import TableHeader from "@tiptap/extension-table-header";
 import TableCell from "@tiptap/extension-table-cell";
 import { Table } from "@tiptap/extension-table";
 import { TaskList } from "@tiptap/extension-list";
 import { Markdown } from "@tiptap/markdown";
-import { Marked, type marked } from "marked";
+import Collaboration from "@tiptap/extension-collaboration";
+import CollaborationCaret from "@tiptap/extension-collaboration-caret";
+import { CollaborationSelectionSync } from "./collaboration-selection";
+import type * as Y from "yjs";
+import type { Awareness } from "y-protocols/awareness";
+import { coalesceAwarenessChanges } from "./coalesced-awareness";
+import {
+  COLLAB_FIELD,
+  createMarkedInstance,
+  ImageSchema,
+  MARKDOWN_OPTIONS,
+  STARTER_KIT_OPTIONS,
+} from "../schema";
 import { ReactNodeViewRenderer } from "@tiptap/react";
 import type { AnyExtension } from "@tiptap/core";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import { shouldAutoLink } from "@multica/ui/markdown";
-import { escapeMarkdownLabel } from "../utils/escape-markdown-label";
 import { BaseMentionExtension } from "./mention-extension";
 import { createMentionSuggestion, type MentionItem } from "./mention-suggestion";
 import {
@@ -52,7 +62,7 @@ import { SuggestionTriggerArmingExtension } from "./suggestion-trigger-arming";
 import { CodeBlockView } from "./code-block-view";
 import { TableView } from "./table-view";
 import { RICH_TABLE_CHROME_ATTRIBUTE } from "../../rich-content/rich-table";
-import { PatchedListItem, PatchedTaskItem } from "./list-item";
+import { PatchedListItem, PatchedOrderedList, PatchedTaskItem } from "./list-item";
 import { createMarkdownPasteExtension } from "./markdown-paste";
 import { createMarkdownCopyExtension } from "./markdown-copy";
 import { createBlurShortcutExtension } from "./blur-shortcut";
@@ -72,71 +82,18 @@ const LinkExtension = Link.extend({ inclusive: false }).configure({
   shouldAutoLink,
 });
 
-export const ImageExtension = Image.extend({
-  addAttributes() {
-    return {
-      ...this.parent?.(),
-      uploading: {
-        default: false,
-        renderHTML: (attrs: Record<string, unknown>) =>
-          attrs.uploading ? { "data-uploading": "" } : {},
-        parseHTML: (el: HTMLElement) => el.hasAttribute("data-uploading"),
-      },
-      // The upload this placeholder belongs to — the same value the draft
-      // store knows as `clientUploadId`. Lets a settle arriving at a mount
-      // that did not start the upload find the node to replace. Render-only,
-      // and cleared once the node holds a real URL.
-      uploadId: {
-        default: null,
-        rendered: false,
-      },
-      // Intrinsic pixel dimensions, captured on upload (file-upload.ts). The
-      // browser uses width/height on <img> to compute aspect-ratio and reserve
-      // the box before the image decodes, so inserting an image causes no
-      // layout shift (and the post-insert scrollIntoView stays correct). Not
-      // serialized to markdown — `renderMarkdown` only emits src/alt/title — so
-      // round-trips stay clean.
-      width: {
-        default: null,
-        renderHTML: (attrs: Record<string, unknown>) =>
-          attrs.width ? { width: attrs.width as number } : {},
-        parseHTML: (el: HTMLElement) => {
-          const w = parseInt(el.getAttribute("width") || "", 10);
-          return Number.isFinite(w) ? w : null;
-        },
-      },
-      height: {
-        default: null,
-        renderHTML: (attrs: Record<string, unknown>) =>
-          attrs.height ? { height: attrs.height as number } : {},
-        parseHTML: (el: HTMLElement) => {
-          const h = parseInt(el.getAttribute("height") || "", 10);
-          return Number.isFinite(h) ? h : null;
-        },
-      },
-    };
-  },
+export const ImageExtension = ImageSchema.extend({
   addNodeView() {
     return ReactNodeViewRenderer(ImageView);
   },
-  renderMarkdown: (node: any) => {
-    const src = node.attrs?.src || "";
-    // Same rule as fileCard: an in-flight placeholder is not content. Its src
-    // is a process-local `blob:` URL that expires on reload, so emitting it
-    // would put a dead link in the persisted draft. This replaces the
-    // after-the-fact regex scrub ContentEditor used to run on every serialise.
-    if (node.attrs?.uploading === true || !src) return "";
-    const alt = escapeMarkdownLabel(node.attrs?.alt || "");
-    const title = node.attrs?.title;
-    if (title) {
-      return `![${alt}](${src} "${title}")`;
-    }
-    return `![${alt}](${src})`;
-  },
-}).configure({
-  inline: false,
-  allowBase64: false,
 });
+
+export interface EditorCollaboration {
+  document: Y.Doc;
+  provider: { awareness: Awareness | null };
+  /** Shared with everyone in the session; the caret label shows `name`. */
+  user: { name: string; color: string; [field: string]: unknown };
+}
 
 export interface EditorExtensionsOptions {
   /**
@@ -195,6 +152,12 @@ export interface EditorExtensionsOptions {
    * context; the setup layer owns React Query + workspace access.
    */
   resolveIssueIdentifierRef?: RefObject<IssueIdentifierResolver | undefined>;
+  /**
+   * Bind the editor to a shared Yjs document instead of its own content.
+   * The document, not the `content` option, is then the source of truth, and
+   * history comes from Yjs so undo only reverts this user's changes.
+   */
+  collaboration?: EditorCollaboration;
 }
 
 export function createEditorExtensions(
@@ -204,30 +167,13 @@ export function createEditorExtensions(
 
   return [
     StarterKit.configure({
-      // Every level Markdown can express. The Markdown parser keeps the source
-      // depth of `#`…`######`, but Heading.renderHTML falls back to `levels[0]`
-      // for any level it was not configured with — so `levels: [1, 2, 3]` made
-      // the editor draw every H4–H6 as an H1 (MUL-6060). The same list drives
-      // parseHTML, so it also decides whether a pasted `<h4>` survives as a
-      // heading. This is about rendering headings the content already has; the
-      // bubble menu still offers only H1–H3 as authoring choices.
-      heading: { levels: [1, 2, 3, 4, 5, 6] },
-      link: false,
-      codeBlock: false,
-      // Underline has no Markdown representation. Tiptap's extension serializes
-      // the mark as `++text++`, which is not CommonMark or GFM, so ReadonlyContent
-      // (react-markdown + remark-gfm) renders the delimiters literally. Disabling
-      // the extension drops the mark at parse time instead: pasted `<u>` /
-      // `text-decoration: underline` keep their text, and Cmd+U becomes a no-op
-      // rather than a way to produce content the display layer cannot render.
-      underline: false,
-      // Disable StarterKit's stock ListItem — its Enter keybind binds only
-      // `splitListItem`, which leaves the user stuck inside an empty top-level
-      // list item (see list-item.ts). PatchedListItem below restores the
-      // standard split → lift fallback chain.
-      listItem: false,
+      ...STARTER_KIT_OPTIONS,
+      // Yjs owns history in a collaborative document: its undo only reverts
+      // this user's own changes, never a collaborator's or an agent's.
+      ...(options.collaboration ? { undoRedo: false } : {}),
     }),
     PatchedListItem,
+    PatchedOrderedList,
     // Checkbox task lists: `- [ ]` / `- [x]`. TaskList + TaskItem ship their own
     // markdown tokenizer / renderMarkdown, an input rule (typing `[] ` / `[x] `),
     // and a checkbox NodeView. The taskList tokenizer is consulted before
@@ -268,19 +214,7 @@ export function createEditorExtensions(
     BlockMathExtension,
     InlineMathExtension,
     HighlightExtension,
-    // 3-space indent so nested ordered lists survive CommonMark in ReadonlyContent.
-    // Each editor gets its own marked instance. Without one, @tiptap/markdown
-    // registers every editor's tokenizers on the global `marked` with `use()`
-    // and never removes them: the list grows by one editor's worth per mount,
-    // every inline parse runs all of them, and each tokenizer keeps its editor,
-    // the React refs its extensions close over and the unmounted DOM alive
-    // (MUL-9634: ~1,000 DOM nodes retained per issue opened).
-    Markdown.configure({
-      indentation: { style: "space", size: 3 },
-      // A Marked instance has every member MarkdownManager uses (use, Lexer,
-      // defaults, lexer, setOptions); the option is typed as the global's.
-      marked: new Marked() as unknown as typeof marked,
-    }),
+    Markdown.configure({ ...MARKDOWN_OPTIONS, marked: createMarkedInstance() }),
     // Make Cmd+C / Cmd+X / drag write Markdown source to clipboard text/plain
     // so users can copy rich content out as the original Markdown.
     createMarkdownCopyExtension(),
@@ -329,5 +263,40 @@ export function createEditorExtensions(
     }, () => options.onEnterRef?.current),
     createBlurShortcutExtension(),
     createFileUploadExtension(options.onUploadFileRef!, options.pasteAsFileThresholdRef),
+    ...(options.collaboration
+      ? [
+          Collaboration.configure({
+            document: options.collaboration.document,
+            field: COLLAB_FIELD,
+          }),
+          CollaborationSelectionSync.configure({ document: options.collaboration.document }),
+          CollaborationCaret.configure({
+            provider: {
+              awareness:
+                options.collaboration.provider.awareness &&
+                coalesceAwarenessChanges(options.collaboration.provider.awareness),
+            },
+            user: options.collaboration.user,
+            render: renderCaret,
+          }),
+        ]
+      : []),
   ];
+}
+
+/** A collaborator's caret, as the extension draws it but hidden from the text
+ *  index: comment anchors read the editor's text, and a caret label sitting
+ *  inside quoted text would otherwise put a name in the middle of it. */
+function renderCaret(user: Record<string, string>): HTMLElement {
+  const caret = document.createElement("span");
+  caret.classList.add("collaboration-carets__caret");
+  caret.setAttribute("aria-hidden", "true");
+  if (user.id) caret.dataset.collaborator = `${user.kind ?? "member"}:${user.id}`;
+  caret.style.borderColor = user.color ?? "";
+  const label = document.createElement("div");
+  label.classList.add("collaboration-carets__label");
+  label.style.backgroundColor = user.color ?? "";
+  label.textContent = user.name ?? "";
+  caret.append(label);
+  return caret;
 }

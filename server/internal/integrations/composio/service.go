@@ -87,7 +87,8 @@ type SDK interface {
 // satisfies it; tests use an in-memory fake.
 type Store interface {
 	UpsertUserComposioConnection(ctx context.Context, arg db.UpsertUserComposioConnectionParams) (db.UserComposioConnection, error)
-	ListActiveUserComposioConnections(ctx context.Context, userID pgtype.UUID) ([]db.UserComposioConnection, error)
+	ListActiveUserComposioConnections(ctx context.Context, arg db.ListActiveUserComposioConnectionsParams) ([]db.UserComposioConnection, error)
+	ListAllActiveUserComposioConnections(ctx context.Context, userID pgtype.UUID) ([]db.UserComposioConnection, error)
 	GetUserComposioConnection(ctx context.Context, arg db.GetUserComposioConnectionParams) (db.UserComposioConnection, error)
 	MarkUserComposioConnectionRevoked(ctx context.Context, arg db.MarkUserComposioConnectionRevokedParams) error
 }
@@ -246,12 +247,13 @@ func toolkitLogoURL(slug, upstreamLogoURL string) string {
 // The composio_user_id sent to Composio is the Multica user id verbatim — the
 // invariant the rest of the integration relies on.
 func (s *Service) BeginConnect(ctx context.Context, userID pgtype.UUID, toolkitSlug string) (string, error) {
-	return s.BeginConnectReturning(ctx, userID, toolkitSlug, "")
+	return s.BeginConnectReturning(ctx, userID, pgtype.UUID{}, toolkitSlug, "")
 }
 
-// BeginConnectReturning is BeginConnect whose callback sends the browser back
-// to returnTo, an app path; an unsafe or empty path keeps the settings page.
-func (s *Service) BeginConnectReturning(ctx context.Context, userID pgtype.UUID, toolkitSlug, returnTo string) (string, error) {
+// BeginConnectReturning is BeginConnect for an account that belongs to
+// workspaceID, whose callback sends the browser back to returnTo, an app
+// path; an unsafe or empty path keeps the settings page.
+func (s *Service) BeginConnectReturning(ctx context.Context, userID, workspaceID pgtype.UUID, toolkitSlug, returnTo string) (string, error) {
 	if !SafeReturnPath(returnTo) {
 		returnTo = ""
 	}
@@ -268,13 +270,17 @@ func (s *Service) BeginConnectReturning(ctx context.Context, userID pgtype.UUID,
 	}
 	composioUserID := util.UUIDToString(userID)
 
-	state, err := signState(s.secret, stateClaims{
+	claims := stateClaims{
 		UserID:       composioUserID,
 		ToolkitSlug:  slug,
 		AuthConfigID: authConfigID,
 		ReturnTo:     returnTo,
 		Exp:          s.now().Add(s.stateTTL).Unix(),
-	})
+	}
+	if workspaceID.Valid {
+		claims.PersonalWorkspaceID = util.UUIDToString(workspaceID)
+	}
+	state, err := signState(s.secret, claims)
 	if err != nil {
 		return "", fmt.Errorf("composio: sign state: %w", err)
 	}
@@ -307,9 +313,9 @@ func (s *Service) CompleteCallback(ctx context.Context, state, status, connected
 	if err != nil {
 		return CallbackResult{}, err
 	}
-	result := CallbackResult{ToolkitSlug: claims.ToolkitSlug, WorkspaceID: claims.WorkspaceID, ReturnTo: claims.ReturnTo}
+	result := CallbackResult{ToolkitSlug: claims.ToolkitSlug, WorkspaceID: claims.WorkspaceID, ConnectedBy: claims.ConnectedBy, ReturnTo: claims.ReturnTo}
 	if claims.WorkspaceID == "" {
-		result.UserID = claims.UserID
+		result.UserID, result.PersonalWorkspaceID = claims.UserID, claims.PersonalWorkspaceID
 	}
 
 	if !strings.EqualFold(strings.TrimSpace(status), "success") {
@@ -349,8 +355,15 @@ func (s *Service) CompleteCallback(ctx context.Context, state, status, connected
 		return result, err
 	}
 
+	var workspaceID pgtype.UUID
+	if claims.PersonalWorkspaceID != "" {
+		if workspaceID, err = util.ParseUUID(claims.PersonalWorkspaceID); err != nil {
+			return result, fmt.Errorf("composio: state has invalid workspace id: %w", err)
+		}
+	}
 	if _, err := s.store.UpsertUserComposioConnection(ctx, db.UpsertUserComposioConnectionParams{
 		UserID:             userID,
+		WorkspaceID:        workspaceID,
 		ToolkitSlug:        claims.ToolkitSlug,
 		AuthConfigID:       authConfigID,
 		ConnectedAccountID: connectedAccountID,
@@ -362,9 +375,9 @@ func (s *Service) CompleteCallback(ctx context.Context, state, status, connected
 	return result, nil
 }
 
-// ListConnections returns the user's active connections.
+// ListConnections returns the user's active connections in every workspace.
 func (s *Service) ListConnections(ctx context.Context, userID pgtype.UUID) ([]Connection, error) {
-	rows, err := s.store.ListActiveUserComposioConnections(ctx, userID)
+	rows, err := s.store.ListAllActiveUserComposioConnections(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -445,7 +458,7 @@ func (s *Service) Disconnect(ctx context.Context, userID, connectionID pgtype.UU
 // a multi-account request shape. Until then, newest-wins keeps behavior
 // deterministic rather than order-dependent.
 func (s *Service) CreateMCPSession(ctx context.Context, userID pgtype.UUID) (*MCPSession, error) {
-	rows, err := s.store.ListActiveUserComposioConnections(ctx, userID)
+	rows, err := s.store.ListAllActiveUserComposioConnections(ctx, userID)
 	if err != nil {
 		return nil, err
 	}

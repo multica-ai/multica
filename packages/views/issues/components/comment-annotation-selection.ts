@@ -8,16 +8,20 @@ const BLOCKS = new Set(["P", "DIV", "LI", "PRE", "BLOCKQUOTE", "H1", "H2", "H3",
  */
 export function indexCommentText(root: HTMLElement, editable = false) {
   let text = "";
+  // Reading the end of `text` would flatten it on every block, which is
+  // quadratic on a long doc.
+  let last = "";
   const nodes: { node: Text; start: number; end: number }[] = [];
-  const newline = () => { if (text && !text.endsWith("\n")) text += "\n"; };
+  const newline = () => { if (text && last !== "\n") { text += "\n"; last = "\n"; } };
   function visit(node: Node) {
     if (node.nodeType === Node.TEXT_NODE) {
       const value = node.textContent ?? "";
       nodes.push({ node: node as Text, start: text.length, end: text.length + value.length });
       text += value;
+      if (value) last = value[value.length - 1]!;
     } else if (node instanceof HTMLElement) {
       if (node.matches(EXCLUDED) || (!editable && node.matches('[contenteditable="true"]'))) return;
-      if (node.tagName === "BR") { text += "\n"; return; }
+      if (node.tagName === "BR") { text += "\n"; last = "\n"; return; }
       const block = BLOCKS.has(node.tagName);
       if (block) newline();
       node.childNodes.forEach(visit);

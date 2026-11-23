@@ -24,8 +24,9 @@ import {
   squadListOptions,
 } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
-import { runtimeDisplayName } from "@multica/core/runtimes";
+import { runtimeDisplayLabel } from "@multica/core/runtimes";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
+import { appCatalogOptions } from "@multica/core/connected-apps";
 import {
   inboxListOptions,
   archivedInboxPagesOptions,
@@ -73,6 +74,7 @@ const PENDING_RESOURCE_KEYS: ReadonlySet<TabLabelKey> = new Set<TabLabelKey>([
   "skill",
   "doc",
   "docFolder",
+  "app",
   "machine",
   "runtime",
 ]);
@@ -156,6 +158,7 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Re
   const squads = useQuery({ ...squadListOptions(wsId), enabled: false }).data;
   const runtimes = useQuery({ ...runtimeListOptions(wsId), enabled: false }).data;
   const sessions = useQuery({ ...chatSessionsOptions(wsId), enabled: false }).data;
+  const appCatalog = useQuery({ ...appCatalogOptions(wsId), enabled: false }).data;
 
   const data: ResolvedTabEntityData = {};
   switch (subject.kind) {
@@ -185,6 +188,11 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Re
     case "skill":
       if (skill) data.skill = { name: skill.name };
       break;
+    case "app": {
+      const name = appCatalog?.apps.find((a) => a.slug === subject.slug)?.name;
+      if (name) data.app = { name };
+      break;
+    }
     case "actor": {
       const name =
         subject.actorType === "agent"
@@ -197,12 +205,12 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Re
     }
     case "machine": {
       const rt = runtimes?.find((r) => r.id === subject.machineId);
-      if (rt) data.machine = { name: runtimeDisplayName(rt) };
+      if (rt) data.machine = { name: runtimeDisplayLabel(rt) };
       break;
     }
     case "runtime": {
       const rt = runtimes?.find((r) => r.id === subject.runtimeId);
-      if (rt) data.runtime = { name: runtimeDisplayName(rt) };
+      if (rt) data.runtime = { name: runtimeDisplayLabel(rt) };
       break;
     }
     case "chat":

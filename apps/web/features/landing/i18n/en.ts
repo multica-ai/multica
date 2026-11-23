@@ -9,11 +9,11 @@ export function createEnDict(): LandingDict {
     label: "FAQ",
     headline: "Questions & answers.",
     items: [
-      { question: "Can I chat with an agent from WeChat?", answer: "Yes. A workspace admin can connect an agent by scanning a WeChat QR code from its Integrations tab. Private messages from the scanning account run with that admin’s workspace permissions. Replies and supported attachments return to the same conversation. Group chats are not supported; self-hosted servers must enable the WeChat integration." },
+      { question: "Can I chat with an agent from WeChat?", answer: "Yes. Open an agent you own, choose Add messaging channel under Messaging, pick WeChat, and scan the QR code with your own WeChat. Private messages from the scanning account run with your workspace permissions, and replies and supported attachments return to the same conversation. Group chats are not supported; self-hosted servers must enable the WeChat integration." },
       {
         question: "What coding agents does Multica support?",
         answer:
-          "Multica supports 29 coding tools out of the box: Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Devin CLI, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw, and ZCode. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since the source code is public, you can also add your own backends. Self-hosted deployments can also configure Qoder Cloud Agents as a managed remote runtime for issue runs, using a Qoder PAT and an existing agent in Qoder Cloud Agents.",
+          "Multica supports 31 coding tools out of the box: Amp, Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Devin CLI, Dim, Factory Droid, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw, and ZCode. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since the source code is public, you can also add your own backends. Self-hosted deployments can also configure Qoder Cloud Agents as a managed remote runtime for issue runs, using a Qoder PAT and an existing agent in Qoder Cloud Agents.",
       },
       {
         question: "Do I need to self-host, or is there a cloud version?",

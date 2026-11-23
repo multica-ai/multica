@@ -9,6 +9,7 @@ Deploy Multica on your own infrastructure in minutes.
 | **Backend** | REST API + WebSocket server | Go (single binary) |
 | **Frontend** | Web application | Next.js 16 |
 | **Database** | Primary data store | PostgreSQL 17 (`pgcrypto` + `pg_trgm`) |
+| **Collab** (optional) | Live co-editing for Docs | Node.js (Hocuspocus + Yjs) |
 
 Each user who runs AI agents locally also installs the **`multica` CLI** and runs the **agent daemon** on their own machine.
 
@@ -93,6 +94,8 @@ Once ready:
 - **Backend API:** http://localhost:8080
 
 > **Note:** If you prefer to run the Docker Compose steps manually, see [Manual Docker Compose Setup](#manual-docker-compose-setup) below.
+
+> **Live doc co-editing (optional):** Docs are off until `FF_DOCS_V1=true` is set in `.env`, and then save through the API on their own. To let everyone in a doc edit it together in real time, add `COLLAB_SECRET=<output of openssl rand -hex 32>` and `COMPOSE_PROFILES=collab` to `.env` and run `make selfhost` again; this starts the `collab` service. Set both together. See [Advanced Configuration → Live Doc Co-editing](SELF_HOSTING_ADVANCED.md#live-doc-co-editing-optional).
 
 ### Step 2 — Log In
 
@@ -190,6 +193,7 @@ The chart creates the following resources in the target namespace:
 - `multica-postgres` — `pgvector/pgvector:pg17` backed by a 10Gi PVC
 - `multica-backend` — Go API/WS server. Backed by a 5Gi `ReadWriteOnce` uploads PVC by default; set `backend.uploads.persistence.enabled=false` when you have configured S3 (`backend.config.s3Bucket`) and don't want the chart to declare the PVC at all.
 - `multica-frontend` — Next.js standalone server
+- `multica-collab` — live doc co-editing, only when `collab.enabled=true` (see [Live doc co-editing](#live-doc-co-editing-optional))
 - Two `Ingress` resources: one for the web host, one for the backend host
 - `multica-config` ConfigMap (rendered from `values.yaml`)
 
@@ -266,6 +270,23 @@ helm install multica deploy/helm/multica -n multica
 ```
 
 If the backend has to reach services whose certificates come from an internal CA, such as a self-hosted Gitea, set `backend.extraCACerts.configMap`. See [Advanced Configuration → Private CA Certificates](SELF_HOSTING_ADVANCED.md#private-ca-certificates-optional).
+
+#### Live doc co-editing (optional)
+
+`collab.enabled` is off by default, and the chart then renders exactly what it did before. Turning it on runs one `multica-collab` pod and points the backend at it. Docs themselves are off until `backend.config.featureFlags.docs_v1=true` (see [Advanced Configuration → Feature Flags](SELF_HOSTING_ADVANCED.md#feature-flags-optional)). Add the shared secret to `multica-secrets` first, then upgrade:
+
+```bash
+kubectl -n multica patch secret multica-secrets --type=merge \
+  -p "{\"stringData\":{\"COLLAB_SECRET\":\"$(openssl rand -hex 32)\"}}"
+helm upgrade multica oci://ghcr.io/multica-ai/charts/multica \
+  --version <chart-version> \
+  -n multica \
+  -f my-values.yaml \
+  --set backend.config.featureFlags.docs_v1=true \
+  --set collab.enabled=true
+```
+
+The Ingress needs nothing new: editors open `/collab` on the backend host, which the backend forwards to collab, with the same WebSocket settings as `/ws`. Collab always runs as exactly one replica and is replaced with `Recreate`, because each open doc lives in that one process's memory. `collab.config.cdnDomain` is derived from the backend's storage settings; set it only if links to uploaded files stop turning into file cards in live docs.
 
 Watch the pods come up:
 

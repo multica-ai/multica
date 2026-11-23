@@ -240,6 +240,8 @@ export interface Issue {
   updated_at: string;
   /** Monotonic server revision; absent when connected to an older backend. */
   revision?: number;
+  /** Moves only when the description changes; absent on older backends. */
+  description_revision?: number;
   /**
    * Null until the server's historical activity backfill reaches this row.
    * This RFC3339 timestamp may include sub-second precision while legacy

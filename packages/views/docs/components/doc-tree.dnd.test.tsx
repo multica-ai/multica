@@ -34,6 +34,7 @@ vi.mock("../../navigation", () => ({
   useNavigation: () => ({ pathname: "/review/docs", push: vi.fn() }),
   AppLink: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a>,
 }));
+vi.mock("./use-prefetch-doc", () => ({ usePrefetchDoc: () => () => ({}), useWarmDocPage: () => undefined }));
 vi.mock("@multica/core/issue-statuses/hooks", () => ({
   useIssueStatuses: () => ({ iconOf: () => null, colorOf: () => null }),
 }));

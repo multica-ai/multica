@@ -35,6 +35,8 @@ export type TabSubject =
   | { kind: "skill"; id: string }
   | { kind: "doc"; id: string }
   | { kind: "docFolder"; id: string }
+  /** One app's page, addressed by its toolkit slug. */
+  | { kind: "app"; slug: string }
   /** A runtime machine detail. */
   | { kind: "machine"; machineId: string }
   /** A runtime nested under a machine. */
@@ -127,6 +129,8 @@ export function parseTabSubject(url: string): TabSubject {
       return id ? { kind: "doc", id } : { kind: "page", page: "docs" };
     case "skills":
       return id ? { kind: "skill", id } : { kind: "page", page: "skills" };
+    case "apps":
+      return id ? { kind: "app", slug: id } : { kind: "page", page: "apps" };
     case "settings":
       return { kind: "page", page: "settings" };
     case "attachments":
@@ -169,6 +173,8 @@ export function tabSubjectKey(subject: TabSubject): string {
       return `doc:${subject.id}`;
     case "docFolder":
       return `docFolder:${subject.id}`;
+    case "app":
+      return `app:${subject.slug}`;
     case "machine":
       return `machine:${subject.machineId}`;
     case "runtime":

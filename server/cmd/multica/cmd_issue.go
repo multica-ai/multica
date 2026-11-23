@@ -304,6 +304,20 @@ var issueUpdateCmd = &cobra.Command{
 	RunE:  runIssueUpdate,
 }
 
+var issueEditDescriptionCmd = &cobra.Command{
+	Use:   "edit-description <id>",
+	Short: "Replace exact text in an issue's description",
+	Long: "Replace text in an issue's description, quoting it exactly as it appears now " +
+		"(with enough surrounding text to be unique), or at least once with --replace-all. " +
+		"The edit lands wherever that text is, even while people are editing the description live; " +
+		"it fails only if someone changed that very text. Prefer this over `issue update --description*` " +
+		"for changing part of a description.",
+	Example: `  multica issue edit-description MUL-123 --old "Status: draft" --new "Status: ready"
+  multica issue edit-description MUL-123 --old-file old.md --new-file new.md`,
+	Args: exactArgs(1),
+	RunE: runIssueEditDescription,
+}
+
 var issueAssignCmd = &cobra.Command{
 	Use:   "assign <id>",
 	Short: "Assign an issue to a member, agent, or squad",
@@ -626,6 +640,7 @@ func init() {
 	issueCmd.AddCommand(issueChildrenCmd)
 	issueCmd.AddCommand(issueCreateCmd)
 	issueCmd.AddCommand(issueUpdateCmd)
+	issueCmd.AddCommand(issueEditDescriptionCmd)
 	issueCmd.AddCommand(issueAssignCmd)
 	issueCmd.AddCommand(issueStatusCmd)
 	issueCmd.AddCommand(issueDeleteCmd)
@@ -712,6 +727,7 @@ func init() {
 	issueUpdateCmd.Flags().String("description", "", "New description (preserves literal text. Use --description-stdin or --description-file for multi-line input)")
 	issueUpdateCmd.Flags().Bool("description-stdin", false, "Read new description from stdin (preserves multi-line content verbatim)")
 	issueUpdateCmd.Flags().String("description-file", "", "Read new description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
+	issueUpdateCmd.Flags().Int64("description-base-revision", 0, "The description_revision (from `multica issue get`) your new description was written from. Changes made since then are merged in, and the update is refused only where both changed the same paragraphs. Without it the description is replaced as given.")
 	issueUpdateCmd.Flags().Bool("allow-external-file", false, "Allow --description-file / --attachment to read a path outside the current working directory. Off by default so a stale temp file from another run/environment can't be picked up (MUL-4252).")
 	issueUpdateCmd.Flags().StringArray("attachment", nil, "Local file path to attach (one literal path per flag; repeat --attachment for multiple files); references are appended to the end of the description, except where the description already links the same path (e.g. ![shot](./a.png)), which is rewritten to the uploaded file in place")
 	issueUpdateCmd.Flags().String("status", "", "New status")
@@ -728,6 +744,14 @@ func init() {
 	issueUpdateCmd.Flags().Bool("no-start", false, "Apply the update without starting an agent run")
 	issueUpdateCmd.Flags().String("duplicate-of", "", "Mark the issue as a duplicate of this original issue (key like MUL-123, or full UUID) and cancel it; --status, if given, must be cancelled, and description/attachment changes must go in a separate update")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// issue edit-description
+	issueEditDescriptionCmd.Flags().String("old", "", "Exact text to replace (required)")
+	issueEditDescriptionCmd.Flags().String("old-file", "", "Read the text to replace from a UTF-8 file")
+	issueEditDescriptionCmd.Flags().String("new", "", "Replacement text")
+	issueEditDescriptionCmd.Flags().String("new-file", "", "Read the replacement from a UTF-8 file")
+	issueEditDescriptionCmd.Flags().Bool("replace-all", false, "Replace every occurrence of --old")
+	issueEditDescriptionCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue status
 	issueStatusCmd.Flags().Bool("no-start", false, "Change status without starting an agent run")
@@ -1998,6 +2022,11 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--duplicate-of cannot be combined with --description, --description-stdin, --description-file or --attachment; mark the duplicate first, then change the description in a separate update")
 	}
 
+	if descStdin, _ := cmd.Flags().GetBool("description-stdin"); cmd.Flags().Changed("description-base-revision") &&
+		!cmd.Flags().Changed("description") && !descStdin && !cmd.Flags().Changed("description-file") {
+		return fmt.Errorf("--description-base-revision needs a new description: pass --description, --description-stdin or --description-file")
+	}
+
 	client, err := newAPIClient(cmd)
 	if err != nil {
 		return err
@@ -2031,6 +2060,10 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		body["description"] = desc
+		if cmd.Flags().Changed("description-base-revision") {
+			base, _ := cmd.Flags().GetInt64("description-base-revision")
+			body["description_base_revision"] = base
+		}
 	}
 	if statusChanged {
 		body["status"] = statusFlag
@@ -2151,7 +2184,7 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 			if len(attachmentIDs) > 0 {
 				return fmt.Errorf("update issue (uploaded IDs: %v): %w", attachmentIDs, err)
 			}
-			return fmt.Errorf("update issue: %w", err)
+			return issueDescriptionWriteError("update issue", err)
 		}
 	} else {
 		// Keep issue update's response shape without issuing an empty update.
@@ -2189,6 +2222,78 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	return cli.PrintJSON(os.Stdout, result)
+}
+
+// issueDescriptionWriteError explains a refused description write and how to
+// redo it; other errors pass through.
+func issueDescriptionWriteError(action string, err error) error {
+	var httpErr *cli.HTTPError
+	if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusConflict {
+		switch {
+		case strings.Contains(httpErr.Body, "issue_description_merge_conflict"):
+			return fmt.Errorf("%s: someone changed the same paragraphs of the description since your base revision, so nothing was written. "+
+				"The conflicts list both versions; apply your change with `multica issue edit-description`, "+
+				"or run `multica issue get` and retry from the new description_revision (%s)", action, httpErr.Body)
+		case strings.Contains(httpErr.Body, "issue_description_edit_failed"):
+			return fmt.Errorf("%s: nothing was written because --old does not match the description exactly once. "+
+				"Run `multica issue get`, quote the current text (with more context if it repeats), and retry (%s)",
+				action, httpErr.Body)
+		case strings.Contains(httpErr.Body, "issue_description"):
+			return fmt.Errorf("%s: --description-base-revision is too old to merge from, so nothing was written. "+
+				"Run `multica issue get` for the latest description and description_revision, or change part of it with `multica issue edit-description` (%s)",
+				action, httpErr.Body)
+		}
+	}
+	return fmt.Errorf("%s: %w", action, err)
+}
+
+func runIssueEditDescription(cmd *cobra.Command, args []string) error {
+	oldText, hasOld, err := readEditText(cmd, "old")
+	if err != nil {
+		return err
+	}
+	if !hasOld || oldText == "" {
+		return fmt.Errorf("--old (or --old-file) is required: the exact text to replace")
+	}
+	newText, hasNew, err := readEditText(cmd, "new")
+	if err != nil {
+		return err
+	}
+	if !hasNew {
+		return fmt.Errorf("--new (or --new-file) is required; pass --new \"\" to delete the text")
+	}
+	if err := guardLocalPathLinks(newText, "issue description",
+		"Attach the file with `multica issue update <issue-id> --attachment <path>` instead."); err != nil {
+		return err
+	}
+	replaceAll, _ := cmd.Flags().GetBool("replace-all")
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+	body := map[string]any{
+		"edits": []map[string]any{{"old_text": oldText, "new_text": newText, "replace_all": replaceAll}},
+	}
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID)+"/description/edits", body, &result); err != nil {
+		return issueDescriptionWriteError("edit issue description", err)
+	}
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		cli.PrintTable(os.Stdout, []string{"KEY", "TITLE", "DESCRIPTION REVISION"}, [][]string{{
+			issueDisplayKey(result), strVal(result, "title"), strVal(result, "description_revision"),
+		}})
+		return nil
+	}
+	delete(result, "description")
 	return cli.PrintJSON(os.Stdout, result)
 }
 

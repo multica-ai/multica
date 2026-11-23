@@ -28,6 +28,7 @@ import {
   RotateCw,
 } from "@multica/ui/icons";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
+import { useReducedMotion } from "@multica/core/appearance";
 import { isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
 import { RichContent } from "../../rich-content";
 import { RichContentScrollRootProvider } from "../../rich-content/scroll-root";
@@ -52,18 +53,20 @@ import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 import { FOLLOW_EDGE_THRESHOLD } from "../../common/task-transcript/transcript-follow";
 import { LIVE_END_ROW_ATTR, useStickToBottom } from "./stick-to-bottom";
 import { JumpToLiveEndButton, useJumpToLiveEnd } from "./jump-to-live-end";
-import { formatElapsedMs } from "../lib/format";
+import { formatElapsedMs, formatMessageTime } from "../lib/format";
 import {
   canonicalAnswerText,
   extractCopyText,
   splitTimeline,
 } from "../lib/copy-text";
 import { stripChatQuickActionsProtocol } from "../lib/quick-actions";
-import { useT } from "../../i18n";
+import { useLocale, useT } from "../../i18n";
 import { isAnnotatableChatMessage, type ChatAnnotations } from "./use-chat-annotations";
 import { ChatWakeupCards, ChatWakeupDivider, useWakeupsBySourceTask } from "./chat-wakeups";
 
 // ─── Public component ────────────────────────────────────────────────────
+
+export type ChatMessageEnterTransition = "next" | "prev" | "fade";
 
 interface ChatMessageListProps {
   /** Pause bottom-stick effects while a closing floating window fades out. */
@@ -74,6 +77,13 @@ interface ChatMessageListProps {
    * (stick-to-bottom.ts). Omit to pay the settle on every mount.
    */
   revealKey?: string | null;
+  /**
+   * Subtle reveal transition played once the list has landed at the live end
+   * (`hasReachedLiveEnd`): directional glide for archive-advance (`"next"` /
+   * `"prev"`), or gentle opacity fade for direct session switches (`"fade"`).
+   * Respects `prefers-reduced-motion` by degrading directional glides to fade.
+   */
+  enterTransition?: ChatMessageEnterTransition | null;
   /** The list became visible to the reader — on reveal, and on each reactivation after it. */
   onRevealed?: () => void;
   messages: ChatMessage[];
@@ -196,6 +206,7 @@ const LIST_COMPONENTS: Components<ChatRenderItem, ChatListContext> = {
 export function ChatMessageList({
   active = true,
   revealKey = null,
+  enterTransition = null,
   onRevealed,
   messages,
   pendingTask,
@@ -237,6 +248,17 @@ export function ChatMessageList({
   // Soft edge fade hinting more content above/below. Kept small so it barely
   // grazes full-bleed previews (image / HTML) at the edges.
   const fadeStyle = useScrollFade(scrollRef, 16);
+  const reduceMotion = useReducedMotion();
+  const enterClass =
+    hasReachedLiveEnd && enterTransition
+      ? reduceMotion
+        ? "animate-chat-enter-fade"
+        : enterTransition === "next"
+          ? "animate-chat-enter-next"
+          : enterTransition === "prev"
+            ? "animate-chat-enter-prev"
+            : "animate-chat-enter-fade"
+      : undefined;
 
   const pendingTaskId = pendingTask?.task_id ?? null;
   const wakeupsBySourceTask = useWakeupsBySourceTask(wakeups);
@@ -366,9 +388,11 @@ export function ChatMessageList({
      *  pinned above the composer instead of scrolling with the rows. */}
     <div ref={annotations?.cardRef} {...annotations?.captureProps} className="relative flex min-h-0 flex-1 flex-col">
     {annotations?.popup}
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
     <div
       ref={setScrollContainerRef}
       data-tab-scroll-root
+      data-chat-enter-transition={hasReachedLiveEnd && enterTransition ? (reduceMotion ? "fade" : enterTransition) : undefined}
       style={fadeStyle}
       // The gutter lives on the scroll container, so it applies once to the
       // whole list — rows, header, footer — and the scrollbar still rides the
@@ -377,7 +401,7 @@ export function ChatMessageList({
       // container paints nothing for that whole window anyway — the rows are
       // not measured yet — so this costs no visible time and spares the
       // reader a frame of the wrong messages (see stick-to-bottom.ts).
-      className={cn("flex-1 overflow-y-auto", CHAT_GUTTER, !hasReachedLiveEnd && "invisible")}
+      className={cn("flex-1 overflow-y-auto", CHAT_GUTTER, !hasReachedLiveEnd && "invisible", enterClass)}
     >
       {/* Already inside the gutter + column, so this pre-mount frame renders the
        *  skeleton BODY rather than <ChatMessageSkeleton>, which brings its own
@@ -457,6 +481,7 @@ export function ChatMessageList({
       />
       </RichContentScrollRootProvider>
       )}
+    </div>
     </div>
     {jumpToLiveEnd.visible && (
       <JumpToLiveEndButton
@@ -694,6 +719,7 @@ function AssistantMessage({
         rawError={message.content}
         timeline={timeline}
         elapsedMs={message.elapsed_ms}
+        createdAt={message.created_at}
       />
     );
   }
@@ -914,7 +940,7 @@ function QuickActions({
 }
 
 // Light inline prefix label for the follow-up pill row — the row sits below
-// the reply footer ("Replied in Xs · Copy") behind a faint top border, so
+// the reply footer ("Replied in Xs · time · Copy") behind a faint top border, so
 // the pills read as a labelled next-steps strip, not part of the reply body.
 // shrink-0 keeps the label whole at the row start when narrow widths wrap
 // the pills.
@@ -960,8 +986,8 @@ function NoResponseNotice() {
   );
 }
 
-// Inline footer row beneath the assistant reply: "Replied in 38s · [Copy]".
-// Action icons live here (not as a hover-floating overlay) so they're
+// Inline footer row beneath the assistant reply: "Replied in 38s · 2:32 PM ·
+// [Copy]". Action icons live here (not as a hover-floating overlay) so they're
 // discoverable on first read and don't shift content. Buttons stay quiet
 // (muted) until hover. Copy is suppressed during streaming because the
 // final text is still being appended.
@@ -976,20 +1002,25 @@ function MessageFooter({
   isPending: boolean;
   transformContent?: (content: string) => string;
 }) {
+  const locale = useLocale();
   // A no_response turn has nothing to copy, and its caption uses a neutral
   // "Finished in Xs" instead of "Replied in Xs" (MUL-4351).
   const isNoResponse = message.message_kind === "no_response";
   const copyContent = extractCopyText(message, timeline, transformContent);
   const showCopy = !isPending && !isNoResponse && copyContent.trim().length > 0;
-  if (message.elapsed_ms == null && !showCopy) return null;
+  const timeLabel = formatMessageTime(message.created_at, locale);
+  if (message.elapsed_ms == null && !showCopy && !timeLabel) return null;
   return (
     <div className="flex items-center gap-1.5">
-      {message.elapsed_ms != null && (
+      {message.elapsed_ms != null ? (
         <ElapsedCaption
           variant={isNoResponse ? "finished" : "replied"}
           elapsedMs={message.elapsed_ms}
+          timeLabel={timeLabel || undefined}
         />
-      )}
+      ) : timeLabel ? (
+        <div className="text-caption text-muted-foreground">{timeLabel}</div>
+      ) : null}
       {showCopy && (
         <MessageCopyButton content={copyContent} />
       )}
@@ -1032,18 +1063,21 @@ function MessageCopyButton({
   );
 }
 
-// Persisted "Replied in 38s" / "Failed after 12s" line under the assistant
-// bubble. Reads `elapsed_ms` straight off the chat_message — server computes
-// it once at task completion, so this caption is identical across reloads
-// and devices. Skipped silently when null (legacy messages predating
-// migration 063 + user messages).
+// Persisted "Replied in 38s · 2:32 PM" / "Failed after 12s · 2:32 PM" line
+// under the assistant bubble. Reads `elapsed_ms` straight off the chat_message
+// — server computes it once at task completion, so this caption is identical
+// across reloads and devices; `timeLabel` is the pre-formatted wall-clock time
+// derived from `created_at`. Skipped silently when null (legacy messages
+// predating migration 063 + user messages).
 function ElapsedCaption({
   variant,
   elapsedMs,
+  timeLabel,
   className,
 }: {
   variant: "replied" | "failed" | "finished";
   elapsedMs: number;
+  timeLabel?: string;
   className?: string;
 }) {
   const { t } = useT("chat");
@@ -1056,7 +1090,7 @@ function ElapsedCaption({
         : t(($) => $.message_list.failed_after, { elapsed });
   return (
     <div className={cn("text-caption text-muted-foreground", className)}>
-      {text}
+      {timeLabel ? `${text} · ${timeLabel}` : text}
     </div>
   );
 }
@@ -1066,13 +1100,17 @@ function FailureBubble({
   rawError,
   timeline,
   elapsedMs,
+  createdAt,
 }: {
   reason: string;
   rawError: string;
   timeline: ChatTimelineItem[];
   elapsedMs?: number | null;
+  createdAt?: string;
 }) {
   const { t } = useT("chat");
+  const locale = useLocale();
+  const timeLabel = createdAt ? formatMessageTime(createdAt, locale) : "";
   const [open, setOpen] = useState(false);
   // Chat gets its own friendly, reassuring copy per failure reason — plain
   // language + a "try again" nudge — instead of the terse developer labels
@@ -1156,9 +1194,13 @@ function FailureBubble({
         </div>
       </div>
       {timeline.length > 0 && <TimelineView items={timeline} />}
-      {elapsedMs != null && (
-        <ElapsedCaption variant="failed" elapsedMs={elapsedMs} />
-      )}
+      {elapsedMs != null || timeLabel ? (
+        elapsedMs != null ? (
+          <ElapsedCaption variant="failed" elapsedMs={elapsedMs} timeLabel={timeLabel || undefined} />
+        ) : (
+          <div className="text-caption text-muted-foreground">{timeLabel}</div>
+        )
+      ) : null}
     </div>
   );
 }

@@ -1,6 +1,9 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { useEffect, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { issueKeys } from "@multica/core/issues/queries";
+import type { Issue } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import {
@@ -13,6 +16,8 @@ import { IssuePeekHost } from "./issue-peek";
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({ issueDetail: (id: string) => `/acme/issues/${id}` }),
 }));
+
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 
 // The panel's job is hosting; IssueDetail itself is covered by its own suite.
 vi.mock("./issue-detail", () => ({
@@ -91,13 +96,17 @@ function FakeCard({ id }: { id: string }) {
   );
 }
 
+let qc: QueryClient;
+
 function renderHost(columns: IssuePeekColumns = COLUMNS) {
   const ui = (cols: IssuePeekColumns) => (
-    <NavigationProvider value={navigation}>
-      <IssuePeekHost>
-        <FakeBoard columns={cols} />
-      </IssuePeekHost>
-    </NavigationProvider>
+    <QueryClientProvider client={qc}>
+      <NavigationProvider value={navigation}>
+        <IssuePeekHost>
+          <FakeBoard columns={cols} />
+        </IssuePeekHost>
+      </NavigationProvider>
+    </QueryClientProvider>
   );
   const result = renderWithI18n(ui(columns));
   return { ...result, setColumns: (cols: IssuePeekColumns) => result.rerender(ui(cols)) };
@@ -109,7 +118,10 @@ const waitForClosed = () => waitFor(() => expect(panel()).toBeNull());
 const openCard = (id: string) => fireEvent.click(screen.getByText(`card ${id}`));
 
 describe("IssuePeekHost", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    qc = new QueryClient();
+  });
 
   it("opens the peeked issue as a peek-variant detail and marks its card", () => {
     renderHost();
@@ -209,6 +221,17 @@ describe("IssuePeekHost", () => {
     expect(screen.getByRole("link", { name: "Open full page" })).toHaveAttribute(
       "href",
       "/acme/issues/i-3",
+    );
+  });
+
+  // The address the issue page settles on, so opening it navigates once.
+  it("links to the full page by identifier once the issue is loaded", () => {
+    qc.setQueryData(issueKeys.detail("ws-1", "i-3"), { id: "i-3", identifier: "MUL-3" } as Issue);
+    renderHost();
+    openCard("i-3");
+    expect(screen.getByRole("link", { name: "Open full page" })).toHaveAttribute(
+      "href",
+      "/acme/issues/MUL-3",
     );
   });
 

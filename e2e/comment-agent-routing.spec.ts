@@ -72,7 +72,7 @@ test("reply stays with the thread agent and hides unused historical fallbacks", 
       localStorage.setItem("multica:chat:isOpen", "false");
     }, api.getToken());
     await page.setViewportSize({ width: 1440, height: 1050 });
-    await page.goto(`/${workspace.slug}/issues/${issue.id}`, { waitUntil: "domcontentloaded" });
+    await page.goto(`/${workspace.slug}/issues/${issue.identifier}`, { waitUntil: "domcontentloaded" });
     await expect(page.getByText("Agent B is following this thread. Please reply here.", { exact: true })).toBeVisible({ timeout: 45_000 });
     await expect(page.locator(`[data-run-id="${controlId}"]`)).toBeVisible();
     for (const id of hiddenIds) await expect(page.locator(`[data-run-id="${id}"]`)).toHaveCount(0);

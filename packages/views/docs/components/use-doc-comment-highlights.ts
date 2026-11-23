@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useRef, useState, type RefObject } from "react";
+import { indexCommentText } from "../../issues/components/comment-annotation-selection";
 import { docAnchorRange, type DocAnchor } from "./doc-comment-anchors";
+import { watchDom } from "./dom-throttle";
 
 export interface AnchoredThread extends DocAnchor {
   id: string;
@@ -18,12 +20,14 @@ function canHighlight() {
  * Paints each open discussion's quoted text in the doc and keeps the ranges
  * current while the doc is edited. Returns which discussions could not be
  * found (their text was edited away) and a lookup from a DOM point to the
- * discussion it sits in, for clicking a highlight.
+ * discussion it sits in, for clicking a highlight. A new `bodyKey` paints
+ * again at once, for a host that swaps what the root shows.
  */
 export function useDocCommentHighlights(
   rootRef: RefObject<HTMLElement | null>,
   threads: AnchoredThread[],
   activeId: string | null,
+  bodyKey?: string | number,
 ) {
   const rangesRef = useRef(new Map<string, Range>());
   const [missing, setMissing] = useState<ReadonlySet<string>>(new Set());
@@ -34,14 +38,14 @@ export function useDocCommentHighlights(
   useEffect(() => {
     const host = rootRef.current;
     if (!host) return;
-    let frame = 0;
     const paint = () => {
       const root = host.querySelector<HTMLElement>(".ProseMirror");
       if (!root) return;
       const ranges = new Map<string, Range>();
       const gone = new Set<string>();
+      const index = indexCommentText(root, true);
       for (const thread of threadsRef.current) {
-        const range = docAnchorRange(root, thread);
+        const range = docAnchorRange(root, thread, index);
         if (range) ranges.set(thread.id, range);
         else gone.add(thread.id);
       }
@@ -56,22 +60,15 @@ export function useDocCommentHighlights(
         else CSS.highlights.delete(ACTIVE_HIGHLIGHT);
       }
     };
-    const schedule = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(paint);
-    };
-    schedule();
-    const observer = new MutationObserver(schedule);
-    observer.observe(host, { childList: true, subtree: true, characterData: true });
+    const stop = watchDom(host, paint);
     return () => {
-      observer.disconnect();
-      cancelAnimationFrame(frame);
+      stop();
       if (canHighlight()) {
         CSS.highlights.delete(HIGHLIGHT);
         CSS.highlights.delete(ACTIVE_HIGHLIGHT);
       }
     };
-  }, [rootRef, threadsKey, activeId]);
+  }, [rootRef, threadsKey, activeId, bodyKey]);
 
   /** The discussion whose quoted text contains this point, if any. */
   const threadAt = (node: Node, offset: number): string | null => {

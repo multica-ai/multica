@@ -10,6 +10,7 @@ import {
   DocSearchResponseSchema,
   DocCommentSchema,
   DocCommentListSchema,
+  DocCollabTicketSchema,
 } from "../docs/schemas";
 import type {
   Doc,
@@ -20,6 +21,7 @@ import type {
   CreateDocCommentRequest,
   DocTree,
   DocVersion,
+  DocCollabTicket,
   CreateDocRequest,
   UpdateDocRequest,
   CreateDocFolderRequest,
@@ -43,7 +45,6 @@ import type {
   BatchIssuePropertyOps,
   BatchUpdateIssuesResponse,
   IssueDuplicates,
-  GroupedIssuesResponse,
   ListIssuesResponse,
   SearchIssuesResponse,
   SearchProjectsResponse,
@@ -54,7 +55,6 @@ import type {
   CreateMemberRequest,
   UpdateMemberRequest,
   ListIssuesParams,
-  ListGroupedIssuesParams,
   IssueTableFacetsRequest,
   IssueTableFacetsResponse,
   IssueTableGroupsRequest,
@@ -110,7 +110,6 @@ import type {
   CreatePersonalAccessTokenResponse,
   RuntimeUsage,
   IssueUsageSummary,
-  RuntimeHourlyActivity,
   RuntimeUsageByAgent,
   RuntimeUsageByHour,
   DashboardUsageDaily,
@@ -144,6 +143,8 @@ import type {
   CancelTaskResponse,
   Project,
   ArchiveProjectResponse,
+  ProjectProgressDetail,
+  ProjectActivityPage,
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
@@ -241,11 +242,11 @@ import type {
   AppsOverview,
   AppCatalogResponse,
   AppRule,
-  AppTool,
   AppToolCall,
   IssueAppCall,
   AppRequestList,
   TeamAppImpact,
+  PersonalAppImpact,
   AppRequest,
   AgentApp,
   AppAccountScope,
@@ -374,7 +375,6 @@ import {
   EMPTY_CLOUD_RUNTIME_NODE,
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
   EMPTY_AGENT_BUILDER_SESSION,
-  EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_ISSUE_TABLE_FACETS_RESPONSE,
   EMPTY_ISSUE_TABLE_GROUPS_RESPONSE,
   EMPTY_ISSUE_TABLE_ROWS_RESPONSE,
@@ -397,7 +397,6 @@ import {
   type RefreshSessionResponse,
   RefreshSessionResponseSchema,
   EMPTY_REFRESH_SESSION_RESPONSE,
-  GroupedIssuesResponseSchema,
   IssueTableFacetsResponseSchema,
   IssueTableGroupsResponseSchema,
   IssueTableRowsResponseSchema,
@@ -415,7 +414,6 @@ import {
   SourceContextPreviewSchema,
   CommentSubIssueTaskResponseSchema,
   ListWebhookDeliveriesResponseSchema,
-  RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
@@ -425,6 +423,10 @@ import {
   SearchIssuesResponseSchema,
   ProjectSchema,
   ArchiveProjectResponseSchema,
+  ProjectProgressDetailSchema,
+  EMPTY_PROJECT_PROGRESS_DETAIL,
+  ProjectActivityPageSchema,
+  EMPTY_PROJECT_ACTIVITY_PAGE,
   ListProjectMembersResponseSchema,
   ListPrivateProjectsResponseSchema,
   ProjectSubscriptionSchema,
@@ -518,12 +520,12 @@ import {
   AppRequestSchema,
   AppRulesResponseSchema,
   AppSettingsResponseSchema,
-  AppToolsResponseSchema,
   AppsOverviewSchema,
   EMPTY_APP_CATALOG,
   EMPTY_APPS_OVERVIEW,
   EMPTY_TEAM_APP_IMPACT,
   IssueAppCallsResponseSchema,
+  PersonalAppImpactSchema,
   TeamAppImpactSchema,
   EMPTY_ISSUE_UNREAD_PAGE,
   SubscribedIssueIdsSchema,
@@ -556,7 +558,6 @@ import {
   IssuePropertiesResponseSchema,
   QuickActionSchema,
   ListQuickActionsResponseSchema,
-  QuickActionRenderSchema,
   EMPTY_QUICK_ACTION,
   EMPTY_LIST_QUICK_ACTIONS_RESPONSE,
   CommentSchema,
@@ -1094,6 +1095,31 @@ export class ApiClient {
       { endpoint: "GET /api/docs/{id}/versions" },
     ).versions;
   }
+  /** `state` also asks for the Yjs state saved with the doc, to show it
+   *  before the live session syncs. */
+  async createDocCollabTicket(id: string, options?: { state?: boolean }): Promise<DocCollabTicket> {
+    return parseWithFallback<DocCollabTicket>(
+      await this.fetch<unknown>(`/api/docs/${id}/collab-ticket`, {
+        method: "POST",
+        ...(options?.state ? { body: JSON.stringify({ state: true }) } : {}),
+      }),
+      DocCollabTicketSchema,
+      { enabled: false },
+      { endpoint: "POST /api/docs/{id}/collab-ticket" },
+    );
+  }
+  /** Joins the live session of an issue's description; same shape as a doc's. */
+  async createIssueCollabTicket(id: string, options?: { state?: boolean }): Promise<DocCollabTicket> {
+    return parseWithFallback<DocCollabTicket>(
+      await this.fetch<unknown>(`/api/issues/${id}/collab-ticket`, {
+        method: "POST",
+        ...(options?.state ? { body: JSON.stringify({ state: true }) } : {}),
+      }),
+      DocCollabTicketSchema,
+      { enabled: false },
+      { endpoint: "POST /api/issues/{id}/collab-ticket" },
+    );
+  }
   async getDocVersion(id: string, number: number): Promise<DocVersion | null> {
     return parseWithFallback<DocVersion | null>(
       await this.fetch<unknown>(`/api/docs/${id}/versions/${number}`),
@@ -1591,52 +1617,6 @@ export class ApiClient {
     }
     return parseWithFallback(raw, ListIssuesResponseSchema, EMPTY_LIST_ISSUES_RESPONSE, {
       endpoint: "GET /api/issues",
-    });
-  }
-
-  async listGroupedIssues(params: ListGroupedIssuesParams): Promise<GroupedIssuesResponse> {
-    const search = new URLSearchParams({ group_by: params.group_by });
-    if (params.limit) search.set("limit", String(params.limit));
-    if (params.offset) search.set("offset", String(params.offset));
-    if (params.workspace_id) search.set("workspace_id", params.workspace_id);
-    if (params.statuses?.length) search.set("statuses", params.statuses.join(","));
-    if (params.priorities?.length) search.set("priorities", params.priorities.join(","));
-    if (params.assignee_types?.length) search.set("assignee_types", params.assignee_types.join(","));
-    if (params.assignee_id) search.set("assignee_id", params.assignee_id);
-    if (params.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
-    if (params.creator_id) search.set("creator_id", params.creator_id);
-    if (params.created_by_user_id) search.set("created_by_user_id", params.created_by_user_id);
-    if (params.project_id) search.set("project_id", params.project_id);
-    if (params.involves_user_id) search.set("involves_user_id", params.involves_user_id);
-    if (params.metadata && Object.keys(params.metadata).length > 0) {
-      search.set("metadata", JSON.stringify(params.metadata));
-    }
-    if (params.properties && Object.keys(params.properties).length > 0) {
-      search.set("properties", JSON.stringify(params.properties));
-    }
-    if (params.assignee_filters?.length) {
-      search.set("assignee_filters", params.assignee_filters.map((f) => `${f.type}:${f.id}`).join(","));
-    }
-    if (params.include_no_assignee) search.set("include_no_assignee", "true");
-    if (params.creator_filters?.length) {
-      search.set("creator_filters", params.creator_filters.map((f) => `${f.type}:${f.id}`).join(","));
-    }
-    if (params.project_ids?.length) search.set("project_ids", params.project_ids.join(","));
-    if (params.include_no_project) search.set("include_no_project", "true");
-    if (params.label_ids?.length) search.set("label_ids", params.label_ids.join(","));
-    if (params.group_assignee_type) search.set("group_assignee_type", params.group_assignee_type);
-    if (params.group_assignee_id) search.set("group_assignee_id", params.group_assignee_id);
-    if (params.date_field) search.set("date_field", params.date_field);
-    if (params.date_start) search.set("date_start", params.date_start);
-    if (params.date_end) search.set("date_end", params.date_end);
-    if (params.sort_by) search.set("sort", params.sort_by);
-    if (params.sort_direction) search.set("direction", params.sort_direction);
-    const raw = await this.fetch<unknown>(`/api/issues/grouped?${search}`);
-    if (params.created_by_user_id && (!raw || typeof raw !== "object" || !("created_by_user_id" in raw) || raw.created_by_user_id !== params.created_by_user_id)) {
-      return this.listGroupedIssues({ ...params, created_by_user_id: undefined, creator_id: params.creator_id ?? params.created_by_user_id });
-    }
-    return parseWithFallback(raw, GroupedIssuesResponseSchema, EMPTY_GROUPED_ISSUES_RESPONSE, {
-      endpoint: "GET /api/issues/grouped",
     });
   }
 
@@ -3049,18 +3029,6 @@ export class ApiClient {
     );
   }
 
-  async getRuntimeProfile(
-    workspaceId: string,
-    profileId: string,
-  ): Promise<RuntimeProfile> {
-    const result = await this.fetch<RuntimeProfile>(
-      `/api/workspaces/${workspaceId}/runtime-profiles/${profileId}`,
-    );
-    return parseWithFallback(result, RuntimeProfileSchema, result, {
-      endpoint: "runtimeProfile",
-    });
-  }
-
   async createRuntimeProfile(
     workspaceId: string,
     body: CreateRuntimeProfileRequest,
@@ -3130,25 +3098,6 @@ export class ApiClient {
     return parseWithFallback<RuntimeUsage[]>(raw, RuntimeUsageListSchema, [], {
       endpoint: "GET /api/runtimes/:id/usage",
     });
-  }
-
-  async getRuntimeTaskActivity(
-    runtimeId: string,
-    params?: { tz?: string },
-  ): Promise<RuntimeHourlyActivity[]> {
-    // Hour-of-day heatmap follows the viewer's tz, like the other reports on
-    // this page. Pass the viewer's IANA zone so the server buckets correctly.
-    const search = new URLSearchParams();
-    if (params?.tz) search.set("tz", params.tz);
-    const raw = await this.fetch<unknown>(
-      `/api/runtimes/${runtimeId}/activity?${search}`,
-    );
-    return parseWithFallback<RuntimeHourlyActivity[]>(
-      raw,
-      RuntimeHourlyActivityListSchema,
-      [],
-      { endpoint: "GET /api/runtimes/:id/activity" },
-    );
   }
 
   async getRuntimeUsageByAgent(
@@ -3453,10 +3402,6 @@ export class ApiClient {
     return this.fetch(`/api/agent-run-counts`);
   }
 
-  async getActiveTasksForIssue(issueId: string): Promise<{ tasks: AgentTask[] }> {
-    return this.fetch(`/api/issues/${issueId}/active-task`);
-  }
-
   async listTaskMessages(taskId: string): Promise<TaskMessagePayload[]> {
     const raw = await this.fetch<unknown>(`/api/tasks/${taskId}/messages`);
     return parseWithFallback<TaskMessagePayload[]>(raw, TaskMessageListSchema, [], {
@@ -3712,6 +3657,25 @@ export class ApiClient {
     );
   }
 
+  /**
+   * Answer the one-time auto-archive question for every workspace where it is
+   * pending. Answers with the active workspace's preferences.
+   */
+  async resolveAutoArchivePrompt(
+    preferences: NotificationPreferences,
+  ): Promise<NotificationPreferenceResponse> {
+    const raw = await this.fetch<unknown>("/api/notification-preferences/auto-archive-prompt", {
+      method: "POST",
+      body: JSON.stringify({ preferences }),
+    });
+    return parseWithFallback(
+      raw,
+      NotificationPreferenceResponseSchema,
+      EMPTY_NOTIFICATION_PREFERENCE_RESPONSE,
+      { endpoint: "POST /api/notification-preferences/auto-archive-prompt" },
+    );
+  }
+
   // App Config
   async getConfig(): Promise<AppConfigResponse> {
     const raw = await this.fetch<unknown>("/api/config");
@@ -3765,10 +3729,6 @@ export class ApiClient {
       method: "PUT", body: JSON.stringify({ pinned }),
     });
     return parseWithFallback(raw, WorkspacePinnedSchema, { pinned_at: null }, { endpoint: "PUT /api/workspaces/{id}/pin" });
-  }
-
-  async getWorkspace(id: string): Promise<Workspace> {
-    return this.fetch(`/api/workspaces/${id}`);
   }
 
   async createWorkspace(data: { name: string; slug: string; description?: string; context?: string; issue_prefix?: string }): Promise<Workspace> {
@@ -4371,10 +4331,6 @@ export class ApiClient {
     });
   }
 
-  async listAgentSkills(agentId: string): Promise<SkillSummary[]> {
-    return this.fetch(`/api/agents/${agentId}/skills`);
-  }
-
   async setAgentSkills(agentId: string, data: SetAgentSkillsRequest): Promise<void> {
     await this.fetch(`/api/agents/${agentId}/skills`, {
       method: "PUT",
@@ -4833,10 +4789,6 @@ export class ApiClient {
     });
   }
 
-  async deleteAttachment(id: string): Promise<void> {
-    await this.fetch(`/api/attachments/${id}`, { method: "DELETE" });
-  }
-
   // Fetches the raw bytes of a text-previewable attachment.
   //
   // The endpoint sidesteps CloudFront CORS (not configured on the CDN) and
@@ -4924,6 +4876,27 @@ export class ApiClient {
   async getProject(id: string): Promise<Project> {
     const raw = await this.fetch<unknown>(`/api/projects/${id}`);
     return parseWithFallback(raw, ProjectSchema, EMPTY_PROJECT, { endpoint: "GET /api/projects/:id" });
+  }
+
+  async getProjectProgress(id: string): Promise<ProjectProgressDetail> {
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/progress`);
+    return parseWithFallback(raw, ProjectProgressDetailSchema, EMPTY_PROJECT_PROGRESS_DETAIL, {
+      endpoint: "GET /api/projects/:id/progress",
+    });
+  }
+
+  async listProjectActivity(
+    id: string,
+    params: { before?: string; limit?: number } = {},
+  ): Promise<ProjectActivityPage> {
+    const search = new URLSearchParams();
+    if (params.before) search.set("before", params.before);
+    if (params.limit) search.set("limit", String(params.limit));
+    const query = search.toString();
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/activity${query ? `?${query}` : ""}`);
+    return parseWithFallback(raw, ProjectActivityPageSchema, EMPTY_PROJECT_ACTIVITY_PAGE, {
+      endpoint: "GET /api/projects/:id/activity",
+    });
   }
 
   async createProject(data: CreateProjectRequest): Promise<Project> {
@@ -5110,7 +5083,7 @@ export class ApiClient {
    * Saves a workflow edit. When the edit removes statuses that issues of the
    * workflow's projects still use, the server answers 409
    * `workflow_status_mapping_required` with a plan; resend with
-   * `status_mapping`. `dryRunIssueWorkflowUpdate` fetches that plan up front.
+   * `status_mapping`.
    */
   async updateIssueWorkflow(id: string, data: IssueWorkflowWriteRequest): Promise<IssueWorkflow> {
     const raw = await this.fetch<unknown>(`/api/issue-workflows/${id}`, {
@@ -5119,16 +5092,6 @@ export class ApiClient {
     });
     return parseWithFallback(raw, IssueWorkflowSchema, EMPTY_ISSUE_WORKFLOW, {
       endpoint: "PATCH /api/issue-workflows/{id}",
-    });
-  }
-
-  async dryRunIssueWorkflowUpdate(id: string, data: IssueWorkflowWriteRequest): Promise<IssueWorkflowDryRunResponse> {
-    const raw = await this.fetch<unknown>(`/api/issue-workflows/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ ...data, dry_run: true }),
-    });
-    return parseWithFallback(raw, IssueWorkflowDryRunResponseSchema, EMPTY_ISSUE_WORKFLOW_DRY_RUN, {
-      endpoint: "PATCH /api/issue-workflows/{id} (dry run)",
     });
   }
 
@@ -5373,23 +5336,6 @@ export class ApiClient {
     return parseWithFallback(raw, CommentSchema, EMPTY_COMMENT, {
       endpoint: "POST /api/issues/{id}/quick-actions/{quickActionId}/run",
     });
-  }
-
-  /**
-   * What a quick action WOULD post, with server-side validation but no send.
-   * Retained for callers that resolve drafts over HTTP; the comment composer
-   * builds its draft synchronously from the quick-action catalog.
-   * Returns "" when the response cannot be read — callers must treat an empty
-   * string as "insert nothing" rather than clearing the composer.
-   */
-  async renderQuickAction(issueId: string, quickActionId: string): Promise<string> {
-    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/quick-actions/${quickActionId}/render`, {
-      method: "POST",
-    });
-    const parsed = parseWithFallback(raw, QuickActionRenderSchema, { content: "" }, {
-      endpoint: "POST /api/issues/{id}/quick-actions/{quickActionId}/render",
-    });
-    return parsed.content;
   }
 
   async createProperty(data: CreatePropertyRequest): Promise<IssueProperty> {
@@ -6138,15 +6084,6 @@ export class ApiClient {
     return this.fetch(`/api/integrations/composio/connections`);
   }
 
-  /** Starts a hosted Composio connect flow for a toolkit and returns the
-   * redirect URL the browser should be sent to. */
-  async beginComposioConnect(toolkitSlug: string): Promise<ComposioConnectInitResponse> {
-    return this.fetch(`/api/integrations/composio/connect/init`, {
-      method: "POST",
-      body: JSON.stringify({ toolkit_slug: toolkitSlug }),
-    });
-  }
-
   /** Disconnects a Composio connection the caller owns. */
   async deleteComposioConnection(connectionId: string): Promise<void> {
     await this.fetch(`/api/integrations/composio/connections/${connectionId}`, {
@@ -6191,6 +6128,29 @@ export class ApiClient {
     return parseWithFallback(raw, TeamAppImpactSchema, EMPTY_TEAM_APP_IMPACT, { endpoint: "GET /api/apps/team/impact" });
   }
 
+  /** Asks the workspace's admins to connect a team account for an app. */
+  async requestTeamApp(toolkitSlug: string, agentId?: string): Promise<void> {
+    await this.fetch(`/api/apps/team/requests`, {
+      method: "POST",
+      body: JSON.stringify({ toolkit_slug: toolkitSlug, ...(agentId ? { agent_id: agentId } : {}) }),
+    });
+  }
+
+  /** An admin declines every open team-account request for an app; a member
+   * withdraws their own. */
+  async dismissTeamAppRequests(toolkitSlug: string): Promise<void> {
+    await this.fetch(`/api/apps/team/requests?toolkit_slug=${encodeURIComponent(toolkitSlug)}`, { method: "DELETE" });
+  }
+
+  /** What disconnecting one of the caller's personal accounts would stop in
+   * its workspace. */
+  async getPersonalAppImpact(connectionId: string): Promise<PersonalAppImpact> {
+    const raw = await this.fetch<unknown>(`/api/integrations/composio/connections/${connectionId}/impact`);
+    return parseWithFallback(raw, PersonalAppImpactSchema, { agents: [] }, {
+      endpoint: "GET /api/integrations/composio/connections/:id/impact",
+    });
+  }
+
   // Write responses parse to null when malformed; callers refetch instead of
   // caching a guess.
 
@@ -6205,27 +6165,9 @@ export class ApiClient {
     return parseWithFallback(raw, AppSettingsResponseSchema, null, { endpoint: "PUT /api/apps/settings" });
   }
 
-  async listAppTools(toolkitSlug: string): Promise<{ tools: AppTool[] }> {
-    const raw = await this.fetch<unknown>(`/api/apps/tools?toolkit_slug=${encodeURIComponent(toolkitSlug)}`);
-    return parseWithFallback(raw, AppToolsResponseSchema, { tools: [] }, { endpoint: "GET /api/apps/tools" });
-  }
-
-  /** Corrects one tool's class; `null` restores the automatic class. */
-  async updateAppToolClass(toolkitSlug: string, toolSlug: string, actionClass: AppActionClass | null): Promise<void> {
-    await this.fetch(`/api/apps/tools/class`, {
-      method: "PUT",
-      body: JSON.stringify({ toolkit_slug: toolkitSlug, tool_slug: toolSlug, action_class: actionClass ?? "" }),
-    });
-  }
-
   async listIssueAppCalls(issueId: string): Promise<{ calls: IssueAppCall[] }> {
     const raw = await this.fetch<unknown>(`/api/app-calls?issue_id=${encodeURIComponent(issueId)}`);
     return parseWithFallback(raw, IssueAppCallsResponseSchema, { calls: [] }, { endpoint: "GET /api/app-calls" });
-  }
-
-  async getAppRules(toolkitSlug: string, scope: AppAccountScope): Promise<{ rules: AppRule[] }> {
-    const raw = await this.fetch<unknown>(`/api/apps/rules?toolkit_slug=${encodeURIComponent(toolkitSlug)}&scope=${scope}`);
-    return parseWithFallback(raw, AppRulesResponseSchema, { rules: [] }, { endpoint: "GET /api/apps/rules" });
   }
 
   async updateAppRules(

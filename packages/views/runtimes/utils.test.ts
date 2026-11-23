@@ -424,6 +424,8 @@ describe("estimateCost", () => {
 
   it("prices published Gemini token SKUs at standard rates in every bucket", () => {
     const cases = [
+      { model: "gemini-4-neon", input: 3, output: 15, cacheRead: 0.15, cacheWrite: 3 },
+      { model: "gemini-4-hydrogen", input: 1.5, output: 7.5, cacheRead: 0.075, cacheWrite: 1.5 },
       { model: "gemini-4-argon", input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2 },
       { model: "gemini-4-carbon", input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2 },
       { model: "gemini-3.8-flash", input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
@@ -476,9 +478,11 @@ describe("estimateCost", () => {
       ["Gemini 3.1 Pro", "gemini-3.1-pro", 2],
       ["Gemini 4 Argon", "gemini-4-argon", 2],
       ["Gemini 4 Carbon", "gemini-4-carbon", 2],
+      ["Gemini 4 Neon", "gemini-4-neon", 3],
+      ["Gemini 4 Hydrogen", "gemini-4-hydrogen", 1.5],
     ] as const) {
-      for (const model of [label, `${label} (High)`, `google/${label} (Low)`,
-        `${id}-minimal`, `antigravity:${id}-high`, `custom:google/${id}-low[1m]`]) {
+      for (const model of [label, `${label} (High)`, `google/${label} (Low)`, `${label} (Extra)`,
+        `${id}-minimal`, `${id}-xhigh`, `antigravity:${id}-high`, `custom:google/${id}-low[1m]`]) {
         expect(isModelPriced(model, "antigravity"), model).toBe(true);
         expect(estimateCost({ ...zeroUsage, provider: "antigravity", model, input_tokens: 1_000_000 }), model).toBeCloseTo(price, 5);
       }
@@ -486,9 +490,9 @@ describe("estimateCost", () => {
   });
 
   it("resolves Antigravity Claude effort suffixes and display labels at the base tier", () => {
-    // Antigravity appends the reasoning effort to Claude ids
-    // (`claude-opus-5-5-high`) or reports the display label. Effort is a
-    // reasoning dial, not a different SKU, so both price at the base model's
+    // Antigravity appends the reasoning effort or Thinking mode to Claude ids
+    // (`claude-opus-5-5-high`) or reports the display label. Both are a
+    // reasoning dial, not a different SKU, so they price at the base model's
     // tier — but only under the antigravity provider (the scoping stays
     // pinned by "keeps Cursor variant stripping scoped to Cursor rows"),
     // mirroring priceForAntigravityModel in server/internal/metrics/pricing.go.
@@ -499,10 +503,13 @@ describe("estimateCost", () => {
         cache_read_tokens: 1_000_000, cache_write_tokens: 1_000_000,
       });
     const opus55 = 4 + 20 + 0.2 + 5;
+    const sonnet55 = 2 + 10 + 0.1 + 2.5;
+    const opus46 = 5 + 25 + 0.5 + 6.25;
+    const sonnet46 = 3 + 15 + 0.3 + 3.75;
     for (const [model, want] of [
       ["claude-opus-5-5-high", opus55],
       ["claude-opus-5-5-medium", opus55],
-      ["claude-sonnet-5-5-low", 2 + 10 + 0.1 + 2.5],
+      ["claude-sonnet-5-5-low", sonnet55],
       ["claude-haiku-5-5-minimal", 0.1 + 0.5 + 0.01 + 0.125],
       ["claude-opus-5-5-high[1m]", opus55],
       ["claude-opus-5.5-high", opus55],
@@ -510,6 +517,13 @@ describe("estimateCost", () => {
       ["antigravity:claude-opus-5-5-high", opus55],
       ["Claude Opus 5.5 (High)", opus55],
       ["Claude Opus 5.5", opus55],
+      ["claude-opus-5-5-thinking", opus55],
+      ["Claude Opus 5.5 (Thinking)", opus55],
+      ["Claude Sonnet 5.5 (Thinking)", sonnet55],
+      ["claude-sonnet-5-5-thinking", sonnet55],
+      ["Claude Opus 4.6 (Thinking)", opus46],
+      ["claude-opus-4-6-thinking", opus46],
+      ["Claude Sonnet 4.6 (Thinking)", sonnet46],
     ] as const) {
       expect(isModelPriced(model, "antigravity"), model).toBe(true);
       expect(cost(model), model).toBeCloseTo(want, 5);
@@ -517,19 +531,53 @@ describe("estimateCost", () => {
     expect(collectUnmappedModels([
       { ...zeroUsage, provider: "antigravity", model: "claude-opus-5-5-high", input_tokens: 1 },
       { ...zeroUsage, provider: "antigravity", model: "Claude Sonnet 5.5 (Medium)", input_tokens: 1 },
+      { ...zeroUsage, provider: "antigravity", model: "Claude Opus 5.5 (Thinking)", input_tokens: 1 },
     ])).toEqual([]);
-    // Only the four effort levels Antigravity supports are stripped, the
+    // Only the levels Antigravity offers for Claude are stripped, the
     // version is a major or major.minor number, and one context tag at most;
     // everything else stays unmapped.
     for (const model of [
       "claude-opus-5-5-fast", "claude-opus-5-5-max", "claude-opus-5-5-xhigh",
-      "claude-opus-5-5-thinking", "claude-opus-5-5-preview",
+      "claude-opus-5-5-thinking-high", "Claude Opus 5.5 (Extra)", "claude-opus-5-5-preview",
       "claude-opus-5-5-99-high", "claude-opus-5-5-20261001-high",
       "claude-opus-5-5-high-latest", "/claude-opus-5-5-high",
       "claude-opus-5-5[]", "claude-opus-5-5-high[1m][2m]",
     ]) {
       expect(isModelPriced(model, "antigravity"), model).toBe(false);
       expect(cost(model), model).toBe(0);
+    }
+  });
+
+  it("prices Antigravity GPT-OSS 120B at Vertex AI's rate, scoped to Antigravity", () => {
+    const cost = (model: string, provider?: string) =>
+      estimateCost({
+        ...zeroUsage, provider, model,
+        input_tokens: 1_000_000, output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000, cache_write_tokens: 1_000_000,
+      });
+    for (const model of [
+      "GPT-OSS 120B (Medium)", "GPT-OSS 120B", "gpt-oss-120b", "gpt-oss-120b-medium",
+      "gpt-oss-120b-high[1m]", "openai/gpt-oss-120b",
+    ]) {
+      expect(isModelPriced(model, "antigravity"), model).toBe(true);
+      expect(cost(model, "antigravity"), model).toBeCloseTo(0.09 + 0.36 + 0.09 + 0.09, 5);
+    }
+    expect(collectUnmappedModels([
+      { ...zeroUsage, provider: "antigravity", model: "GPT-OSS 120B (Medium)", input_tokens: 1 },
+    ])).toEqual([]);
+    // Orchestrator splits a turn between a planner and an executor model, so
+    // no single rate fits; other gpt-oss sizes and variants are not guessed.
+    for (const model of [
+      "gpt-oss-20b", "GPT-OSS 20B (Medium)", "gpt-oss-120b-xhigh", "gpt-oss-120b-preview",
+      "GPT-OSS 120B (Turbo)", "gpt-oss-120b[1m][2m]",
+      "Orchestrator (Neon)", "Orchestrator (Carbon)", "gemini-pro-orchestrator",
+    ]) {
+      expect(isModelPriced(model, "antigravity"), model).toBe(false);
+      expect(cost(model, "antigravity"), model).toBe(0);
+    }
+    // Other runtimes reach gpt-oss through hosts with their own rates.
+    for (const provider of [undefined, "opencode", "cursor"]) {
+      expect(isModelPriced("gpt-oss-120b", provider), String(provider)).toBe(false);
     }
   });
 
@@ -563,6 +611,14 @@ describe("estimateCost", () => {
       "gemini-4-carbon-fast",
       "gemini-4-carbon[1m][2m]",
       "gemini-4-argon[1m][2m]",
+      "gemini-4-neon-fast",
+      "gemini-4-neon-max",
+      "gemini-4-neon-extra",
+      "gemini-4-neon[1m][2m]",
+      "gemini-4-hydrogen-fast",
+      "Gemini 4 Neon (Ultra)",
+      "Gemini 4 Hydrogen (Xhigh)",
+      "Gemini 4 Neon Medium",
     ]) {
       expect(isModelPriced(model, "antigravity"), model).toBe(false);
       expect(estimateCost({ ...zeroUsage, provider: "antigravity", model, input_tokens: 1_000_000 }), model).toBe(0);

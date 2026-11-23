@@ -91,7 +91,7 @@ describe("TelegramBindPage", () => {
     renderPage("tok123");
 
     await waitFor(() => expect(mockRedeemToken).toHaveBeenCalledWith("tok123"));
-    await waitFor(() => expect(screen.getByText(/you're linked/i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/account linked/i)).toBeInTheDocument());
   });
 
   it("redeems a one-time token exactly once under StrictMode", async () => {
@@ -111,7 +111,7 @@ describe("TelegramBindPage", () => {
       { wrapper: I18nWrapper },
     );
 
-    await waitFor(() => expect(screen.getByText(/you're linked/i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/account linked/i)).toBeInTheDocument());
     expect(mockRedeemToken).toHaveBeenCalledTimes(1);
   });
 
@@ -137,8 +137,8 @@ describe("TelegramBindPage", () => {
   it.each([
     ["410", /invalid or expired/i],
     ["expired", /invalid or expired/i],
-    ["409", /already linked to a different Multica user/i],
-    ["already bound", /already linked to a different Multica user/i],
+    ["409", /already linked to another Multica account/i],
+    ["already bound", /already linked to another Multica account/i],
     ["403", /isn't a member of this workspace/i],
     ["workspace member", /isn't a member of this workspace/i],
     ["unexpected failure", /something went wrong/i],

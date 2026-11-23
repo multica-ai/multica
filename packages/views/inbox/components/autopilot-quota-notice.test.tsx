@@ -27,7 +27,7 @@ vi.mock("@multica/core/billing", () => ({
 
 vi.mock("../../billing/autopilot-addon-dialog", () => ({
   AutopilotAddonDialog: ({ open }: { open: boolean }) =>
-    open ? <div role="dialog" aria-label="Buy more automation runs" /> : null,
+    open ? <div role="dialog" aria-label="Buy more autopilot runs" /> : null,
 }));
 
 import { AutopilotQuotaNotice } from "./autopilot-quota-notice";
@@ -131,7 +131,7 @@ describe("AutopilotQuotaNotice", () => {
     renderNotice(<AutopilotQuotaNotice item={item()} onOpenRecovery={onOpenRecovery} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Buy more runs" }));
-    expect(screen.getByRole("dialog", { name: "Buy more automation runs" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Buy more autopilot runs" })).toBeInTheDocument();
     expect(onOpenRecovery).not.toHaveBeenCalled();
   });
 

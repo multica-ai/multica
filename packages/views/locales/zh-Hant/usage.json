@@ -12,7 +12,7 @@
   },
   "history_limit": {
     "note": "目前方案可以查看最近 {{days}} 天。升級後可以查看更早的資料，資料一直保留。",
-    "fell_back": "目前方案只能查看最近 {{days}} 天。",
+    "fell_back": "目前顯示最近 {{days}} 天——這是你目前方案的上限。",
     "view_plans": "查看套餐",
     "locked": "目前方案不包含",
     "plan": {
@@ -30,7 +30,7 @@
     "tasks_hint": "失敗 {{failed}} 個"
   },
   "dim": {
-    "label": "維度",
+    "label": "時間區間",
     "daily": "按天",
     "weekly": "按周"
   },
@@ -60,8 +60,8 @@
     "kpi_failed_hint": "共 {{total}} 次執行",
     "kpi_rate_label": "失敗率 · {{days}}天",
     "kpi_agents_label": "受影響 AI 代理 · {{days}}天",
-    "kpi_agents_hint": "最多 {{name}} · {{count}} 次",
-    "tooltip_rate": "錯誤率",
+    "kpi_agents_hint": "最多：{{name}}（{{count}} 次失敗）",
+    "tooltip_rate": "失敗率",
     "class": {
       "auth": "認證",
       "rate_limit": "限流",
@@ -76,8 +76,8 @@
     "mix_title": "失敗構成 · {{failed}}",
     "mix_label": "失敗構成",
     "codes_label": "錯誤碼",
-    "by_agent": "問題最多的 AI 代理",
-    "sort_label": "錯誤榜排序依據",
+    "by_agent": "各 AI 代理錯誤統計",
+    "sort_label": "AI 代理排序依據",
     "sort_failed": "失敗數",
     "sort_rate": "失敗率",
     "header_agent": "AI 代理",

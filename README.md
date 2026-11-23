@@ -98,7 +98,7 @@ issue — so nobody reconstructs context, and nothing ships without a human sayi
 </p>
 
 - **[Execution log](https://multica.ai/docs/tasks) →** Replay every tool call, command, and error, timestamped.
-- **Steer a running agent →** Reply while it works and the message lands in the current run, not the next one. Claude Code, Codex, Grok, and Kiro today.
+- **Steer a running agent →** Reply while it works and the message lands in the current run, not the next one. Claude Code, Codex, Cursor Agent, Grok, Kiro, and Pi today.
 - **Usage analytics →** See what each run cost, per agent and per issue.
 - **[Review gates](https://multica.ai/docs/issues) →** Work lands in review, not in main. You decide what ships.
 - **[Inbox](https://multica.ai/docs/inbox) →** Get pinged when an agent needs a call, not for every step.
@@ -216,8 +216,8 @@ Installing and authenticating them: [Install an agent runtime](https://multica.a
 | Drive Multica from Codex, Claude Code, or Cursor | [Multica CLI skill](https://github.com/multica-ai/multica-cli) |
 | Work out why an agent is stuck | [Runs](https://multica.ai/docs/tasks) · [Troubleshooting](https://multica.ai/docs/troubleshooting) |
 
-The docs are also available in [简体中文](https://multica.ai/docs/zh), [日本語](https://multica.ai/docs/ja),
-[한국어](https://multica.ai/docs/ko), and [Français](https://multica.ai/docs/fr).
+The docs are also available in [简体中文](https://multica.ai/docs/zh), [繁體中文](https://multica.ai/docs/zh-Hant),
+[日本語](https://multica.ai/docs/ja), [한국어](https://multica.ai/docs/ko), and [Français](https://multica.ai/docs/fr).
 
 ---
 
