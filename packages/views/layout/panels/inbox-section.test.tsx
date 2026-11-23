@@ -77,6 +77,9 @@ vi.mock("@multica/core/hooks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/hooks")>()),
   useWorkspaceId: () => "ws-1",
 }));
+vi.mock("@multica/core/notification-preferences/mutations", () => ({
+  useUpdateNotificationPreferences: () => ({ mutate: vi.fn() }),
+}));
 vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({ getActorName: () => "Leo Park", getActorInitials: () => "LP", getActorAvatarUrl: () => null }),
 }));
@@ -470,6 +473,42 @@ describe("InboxSection", () => {
     expect(rows()).toHaveLength(0);
   });
 
+  it("collapses from its open tab, and a closed tab opens the section on that list", () => {
+    renderSection([item({ id: "n1", issue_id: "issue-a" })]);
+    const inbox = screen.getByRole("tab", { name: /^Inbox/ });
+    expect(inbox).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(inbox);
+    expect(useSidebarTreeStore.getState().inboxCollapsed).toBe(true);
+    expect(inbox).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(screen.getByRole("tab", { name: /^Snoozed/ }));
+    expect(useSidebarTreeStore.getState().inboxCollapsed).toBe(false);
+    expect(screen.getByRole("tab", { name: /^Snoozed/ })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("names only the open tab on screen, and keeps focus on the tab the arrow keys move to", () => {
+    renderSection([item({ id: "n1", issue_id: "issue-a" })]);
+    const tablist = screen.getByRole("tablist");
+    expect(within(tablist).getByText("Inbox")).not.toHaveClass("sr-only");
+    expect(within(tablist).getByText("Snoozed")).toHaveClass("sr-only");
+
+    const inbox = screen.getByRole("tab", { name: /^Inbox/ });
+    inbox.focus();
+    fireEvent.keyDown(inbox, { key: "ArrowRight" });
+    const snoozed = screen.getByRole("tab", { name: /^Snoozed/ });
+    expect(snoozed).toHaveAttribute("aria-selected", "true");
+    expect(snoozed).toHaveFocus();
+    expect(within(tablist).getByText("Snoozed")).not.toHaveClass("sr-only");
+  });
+
+  it("opens the display settings from the actions menu", async () => {
+    renderSection([item({ id: "n1", issue_id: "issue-a" })]);
+    expect(screen.queryByRole("button", { name: "Inbox display" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Inbox actions" }));
+    fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Inbox display" }));
+    expect(await screen.findByRole("dialog", { name: "Inbox display" })).toBeInTheDocument();
+  });
+
   it("is the whole list on a wide screen: no link out to another one, and a plain line when empty", () => {
     const { unmount } = renderSection([item({ id: "n1", issue_id: "issue-a", title: "Only one" })]);
     expect(screen.queryByRole("link", { name: "All notifications" })).toBeNull();
@@ -602,7 +641,11 @@ describe("InboxSection", () => {
     expect(tab).toHaveAttribute("aria-selected", "true");
     expect(rows()).toHaveLength(0);
     expect(screen.getByRole("link", { name: /^MUL-26/ })).toHaveAttribute("href", "/acme/inbox?view=snoozed&issue=issue-z");
-    expect(screen.queryByRole("button", { name: "Inbox actions" })).toBeNull();
+    // The bulk actions act on the live Inbox; the menu keeps only the display settings here.
+    fireEvent.click(screen.getByRole("button", { name: "Inbox actions" }));
+    expect(within(await screen.findByRole("menu")).getAllByRole("menuitem").map((el) => el.textContent)).toEqual([
+      "Inbox display",
+    ]);
 
     fireEvent.click(screen.getByRole("button", { name: "Bring back now" }));
     expect(state.unsnooze).toHaveBeenCalledWith(expect.objectContaining({ id: "z1" }));

@@ -115,7 +115,8 @@ export function PanelSection({
   /**
    * Shown in place of the label (the Inbox's tabs), which then only names the
    * section for assistive tech. With `onCollapsedChange`, a chevron after it
-   * toggles the section.
+   * toggles the section; it takes room only while the section is collapsed,
+   * so the heading must collapse it too.
    */
   heading?: React.ReactNode;
   /** Rendered at the end of the label row (e.g. a create button). */
@@ -156,7 +157,12 @@ export function PanelSection({
                   aria-expanded={!collapsed}
                   aria-controls={collapsed ? undefined : contentId}
                   onClick={() => onCollapsedChange(!collapsed)}
-                  className="flex size-5 shrink-0 items-center justify-center rounded-md outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                  className={cn(
+                    "flex size-5 shrink-0 items-center justify-center rounded-md outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring",
+                    // An open section leaves the row to its heading; the
+                    // heading itself collapses it (the Inbox's open tab).
+                    !collapsed && "sr-only focus-visible:not-sr-only",
+                  )}
                 >
                   {chevron}
                 </button>
