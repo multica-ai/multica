@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -254,6 +255,19 @@ func deliveredCommentIDsForTask(t *testing.T, taskID string) []string {
 	return ids
 }
 
+func deliveredCommentRevisionsForTask(t *testing.T, taskID string) map[string]int64 {
+	t.Helper()
+	var raw []byte
+	if err := testPool.QueryRow(t.Context(), `SELECT context->'delivered_comment_revisions' FROM agent_task_queue WHERE id=$1`, taskID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var revisions map[string]int64
+	if err := json.Unmarshal(raw, &revisions); err != nil {
+		t.Fatalf("decode persisted delivery revisions: %v", err)
+	}
+	return revisions
+}
+
 func TestClaimTaskByRuntime_CoalescedDeliveryMatrix(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -485,7 +499,7 @@ func TestDeleteComment_CancelsAndRequeuesWhenDeletedInputIsCoalesced(t *testing.
 	assertRepairedCommentBatch(t, fixture, fixture.commentID[2], fixture.commentID[1:2])
 }
 
-func TestDeleteComment_FailureRestoresCancelledCompleteBatch(t *testing.T) {
+func TestDeleteComment_FailurePreservesCompleteBatch(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -512,10 +526,10 @@ func TestDeleteComment_FailureRestoresCancelledCompleteBatch(t *testing.T) {
 	if existing != 1 {
 		t.Fatalf("failed delete unexpectedly removed trigger")
 	}
-	assertRepairedCommentBatch(t, fixture, fixture.commentID[2], fixture.commentID[:2])
+	assertPreservedCommentBatch(t, fixture)
 }
 
-func TestDeleteComment_ConcurrentNoOpIsReportedAndRestoresCancelledBatch(t *testing.T) {
+func TestDeleteComment_ConcurrentNoOpIsReportedAndPreservesCompleteBatch(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -535,7 +549,26 @@ func TestDeleteComment_ConcurrentNoOpIsReportedAndRestoresCancelledBatch(t *test
 		t.Fatalf("DeleteComment no-op: got %d: %s", w.Code, w.Body.String())
 	}
 
-	assertRepairedCommentBatch(t, fixture, fixture.commentID[2], fixture.commentID[:2])
+	assertPreservedCommentBatch(t, fixture)
+}
+
+func assertPreservedCommentBatch(t *testing.T, fixture commentDeliveryFixture) {
+	t.Helper()
+	task, err := testHandler.Queries.GetAgentTask(t.Context(), parseUUID(fixture.taskID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Status != "queued" || task.TriggerCommentID != parseUUID(fixture.commentID[2]) || len(task.DeliveredCommentIds) != 0 {
+		t.Fatal("failed deletion changed the original pending batch")
+	}
+	got := append([]pgtype.UUID{}, task.CoalescedCommentIds...)
+	want := []pgtype.UUID{parseUUID(fixture.commentID[1]), parseUUID(fixture.commentID[0])}
+	if !slices.Equal(got, want) {
+		t.Fatalf("failed deletion changed pending inputs: %v", got)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id=$1 AND agent_id=$2`, fixture.issueID, fixture.agentID); n != 1 {
+		t.Fatalf("failed deletion left %d runs instead of preserving the original", n)
+	}
 }
 
 func assertRepairedCommentBatch(t *testing.T, fixture commentDeliveryFixture, wantTrigger string, wantCoalesced []string) {
@@ -648,6 +681,9 @@ func TestClaimTaskByRuntime_StaleReclaimReplacesDeliveryReceipt(t *testing.T) {
 	if !slices.Equal(first.DeliveredCommentIDs, fixture.commentID) {
 		t.Fatalf("first receipt = %v, want all comments", first.DeliveredCommentIDs)
 	}
+	if revisions := deliveredCommentRevisionsForTask(t, fixture.taskID); len(revisions) != len(fixture.commentID) {
+		t.Fatalf("first revision receipt = %v, want every embedded comment", revisions)
+	}
 
 	oversized := strings.Repeat("x", maxClaimCommentPayloadBytes+1024)
 	if _, err := testPool.Exec(context.Background(), `UPDATE comment SET content = $2 WHERE id = $1`, fixture.commentID[0], oversized); err != nil {
@@ -668,6 +704,9 @@ func TestClaimTaskByRuntime_StaleReclaimReplacesDeliveryReceipt(t *testing.T) {
 	}
 	if got := deliveredCommentIDsForTask(t, fixture.taskID); !slices.Equal(got, want) {
 		t.Fatalf("reclaimed database receipt = %v, want replacement %v", got, want)
+	}
+	if revisions := deliveredCommentRevisionsForTask(t, fixture.taskID); len(revisions) != 1 || revisions[fixture.commentID[2]] != 1 {
+		t.Fatalf("reclaim retained revisions absent from the newest payload: %v", revisions)
 	}
 }
 
@@ -875,18 +914,23 @@ func TestSetTaskDeliveredCommentIDs_CASAndSubset(t *testing.T) {
 	}
 
 	params := db.SetTaskDeliveredCommentIDsParams{
-		DeliveredCommentIds:      []pgtype.UUID{util.MustParseUUID(commentIDs[1])},
-		TaskID:                   task.ID,
-		RuntimeID:                task.RuntimeID,
-		DispatchedAt:             task.DispatchedAt,
-		ExpectedTriggerCommentID: task.TriggerCommentID,
+		DeliveredCommentIds:       []pgtype.UUID{util.MustParseUUID(commentIDs[1])},
+		DeliveredCommentRevisions: []byte(`{"` + commentIDs[1] + `":1}`),
+		TaskID:                    task.ID,
+		RuntimeID:                 task.RuntimeID,
+		DispatchedAt:              task.DispatchedAt,
+		ExpectedTriggerCommentID:  task.TriggerCommentID,
 	}
 	if got, err := testHandler.Queries.SetTaskDeliveredCommentIDs(ctx, params); err != nil || len(got) != 1 {
 		t.Fatalf("valid receipt = %v, %v; want one id", got, err)
 	}
 	params.DeliveredCommentIds = []pgtype.UUID{}
+	params.DeliveredCommentRevisions = []byte(`{}`)
 	if got, err := testHandler.Queries.SetTaskDeliveredCommentIDs(ctx, params); err != nil || len(got) != 0 {
 		t.Fatalf("empty receipt = %v, %v; want authoritative empty array", got, err)
+	}
+	if revisions := deliveredCommentRevisionsForTask(t, taskID); len(revisions) != 0 {
+		t.Fatalf("empty receipt retained old revisions: %v", revisions)
 	}
 
 	params.DeliveredCommentIds = []pgtype.UUID{util.MustParseUUID("00000000-0000-0000-0000-000000000099")}
@@ -1000,7 +1044,7 @@ func TestFinalizeTaskClaim_ReceiptCASFailureRollsBackInsertedToken(t *testing.T)
 		WorkspaceID: parseUUID(testWorkspaceID),
 		UserID:      parseUUID(testUserID),
 		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
-	}, []pgtype.UUID{parseUUID("00000000-0000-0000-0000-000000000099")}, true, nil, nil, db.CreateDaemonTokenParams{
+	}, service.CommentDeliveryReceipt{IDs: []pgtype.UUID{parseUUID("00000000-0000-0000-0000-000000000099")}}, true, nil, nil, db.CreateDaemonTokenParams{
 		TokenHash:   daemonTokenHash,
 		WorkspaceID: parseUUID(testWorkspaceID),
 		DaemonID:    "daemon-claim-rollback",
@@ -1053,7 +1097,7 @@ func TestFinalizeTaskClaim_TriggerDeletedAfterClaimRejectsStaleProvenance(t *tes
 		WorkspaceID: parseUUID(testWorkspaceID),
 		UserID:      parseUUID(testUserID),
 		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
-	}, []pgtype.UUID{parseUUID(fixture.commentID[0]), parseUUID(fixture.commentID[1])}, true, nil, nil)
+	}, service.CommentDeliveryReceipt{IDs: []pgtype.UUID{parseUUID(fixture.commentID[0]), parseUUID(fixture.commentID[1])}}, true, nil, nil)
 	if err == nil {
 		t.Fatalf("FinalizeTaskClaim accepted a receipt after persisted trigger changed")
 	}

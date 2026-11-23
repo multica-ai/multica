@@ -23,7 +23,7 @@ var ErrProjectAccessDenied = errors.New("the run's member or the agent's owner c
 // guardRunProjectAccess is the enqueue-time check behind ErrProjectAccessDenied
 // for a run on an existing issue.
 func (s *TaskService) guardRunProjectAccess(ctx context.Context, issue db.Issue, agent db.Agent, originatorUserID, accountableUserID pgtype.UUID) error {
-	return s.guardRunProjectsAccess(ctx, issue.WorkspaceID, agent, originatorUserID, accountableUserID, issue.ProjectID)
+	return guardRunProjectsAccess(ctx, s.Queries, issue.WorkspaceID, agent, originatorUserID, accountableUserID, issue.ProjectID)
 }
 
 // guardQuickCreateProjectAccess covers a quick-create run, which has no issue
@@ -38,19 +38,19 @@ func (s *TaskService) guardQuickCreateProjectAccess(ctx context.Context, workspa
 		}
 		projects = append(projects, parentProject)
 	}
-	return s.guardRunProjectsAccess(ctx, workspaceID, agent, requesterID, accountableUserID, projects...)
+	return guardRunProjectsAccess(ctx, s.Queries, workspaceID, agent, requesterID, accountableUserID, projects...)
 }
 
 // guardRunProjectsAccess refuses the run when any of projectIDs is a private
 // project the run's human or the agent's owner cannot see. Projects that are
 // not private pass after one read each.
-func (s *TaskService) guardRunProjectsAccess(ctx context.Context, workspaceID pgtype.UUID, agent db.Agent, originatorUserID, accountableUserID pgtype.UUID, projectIDs ...pgtype.UUID) error {
+func guardRunProjectsAccess(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, agent db.Agent, originatorUserID, accountableUserID pgtype.UUID, projectIDs ...pgtype.UUID) error {
 	var private []pgtype.UUID
 	for _, projectID := range projectIDs {
 		if !projectID.Valid {
 			continue
 		}
-		project, err := s.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
+		project, err := q.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
 			ID:          projectID,
 			WorkspaceID: workspaceID,
 		})
@@ -71,7 +71,7 @@ func (s *TaskService) guardRunProjectsAccess(ctx context.Context, workspaceID pg
 	if !human.Valid {
 		human = accountableUserID
 	}
-	hidden, err := projectaccess.ForPrincipals(ctx, s.Queries, workspaceID, human, agent.OwnerID)
+	hidden, err := projectaccess.ForPrincipals(ctx, q, workspaceID, human, agent.OwnerID)
 	if err != nil {
 		return fmt.Errorf("resolve project access: %w", err)
 	}

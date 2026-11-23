@@ -368,6 +368,9 @@ deleted_comment_reactions AS (
 deleted_comment_idempotency_receipts AS (
     DELETE FROM comment_idempotency_receipt WHERE comment_idempotency_receipt.workspace_id = $1
 ),
+deleted_comment_delivery_obligations AS (
+    DELETE FROM comment_delivery_obligation WHERE workspace_id = $1
+),
 deleted_issue_reactions AS (
     DELETE FROM issue_reaction WHERE workspace_id = $1
 ),

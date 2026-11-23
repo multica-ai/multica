@@ -147,8 +147,13 @@ func TestSelfHostTelemetryCoalescedHumanActionsMustRetainUsersAndDates(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
+	commentRow, err := f.q.GetComment(ctx, parseTestUUID(t, commentB))
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted := db.CommentDeliveryObligation{WorkspaceID: issue.WorkspaceID, IssueID: issue.ID, AgentID: agentRow.ID, CommentID: commentRow.ID, ActorType: commentRow.AuthorType, ActorID: commentRow.AuthorID, InputUpdatedAt: commentRow.CreatedAt}
 	// The same steps handler.mergeCommentIntoPendingTask runs.
-	attr, err := s.Tasks.AttributionForMergedComment(ctx, issue.WorkspaceID, parseTestUUID(t, commentB), false, agentRow)
+	attr, err := s.Tasks.AttributionForMergedComment(ctx, issue, accepted, false, agentRow)
 	if err != nil {
 		t.Fatal(err)
 	}
