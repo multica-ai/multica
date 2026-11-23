@@ -214,6 +214,7 @@ func daemonCommonCapabilities() []string {
 		protocol.DaemonCapabilityCheckoutKeepsWorkV1,
 		protocol.DaemonCapabilityJoinedWakeupsV1,
 		protocol.DaemonCapabilityWorkflowStatusRulesV1,
+		protocol.DaemonCapabilityWorkflowStatusMapV1,
 		protocol.DaemonCapabilityCLICommentSteerV1,
 	}
 }

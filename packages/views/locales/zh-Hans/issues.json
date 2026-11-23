@@ -1668,7 +1668,6 @@
       "target_squad": "小队 · 由队长分派",
       "target_member": "成员",
       "instructions_hint": "作为这次运行的说明发给处理人，和任务描述、评论一起作为上下文。",
-      "next_hint": "由处理人自己改状态，只有需要返工时才退回，受阻不用退回。运行结束不会自动改状态。",
       "preview_brief": "预览智能体收到的说明",
       "preview_title": "\"{{status}}\"这一步的说明",
       "preview_description": "任务进入这一步时，处理人的运行会收到这段说明。预览不需要先保存。",
