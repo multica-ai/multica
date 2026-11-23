@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -710,13 +711,14 @@ func TestRunIssueCommentAddIdempotencyKey(t *testing.T) {
 func TestRunIssueCommentAddTimeoutSaysRerunIsSafe(t *testing.T) {
 	const issueID = "11111111-1111-4111-8111-111111111111"
 	const hint = "is safe: the server returns the comment already posted"
-	status := 0
+	var responseStatus atomic.Int32
 	release := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/"+issueID:
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": issueID, "identifier": "TST-1"})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/"+issueID+"/comments":
+			status := int(responseStatus.Load())
 			_, _ = io.ReadAll(r.Body)
 			if status != 0 {
 				http.Error(w, `{"error":"rejected"}`, status)
@@ -763,11 +765,11 @@ func TestRunIssueCommentAddTimeoutSaysRerunIsSafe(t *testing.T) {
 	if report := run(nil); !strings.Contains(report, "Rerunning this exact command "+hint) {
 		t.Fatalf("agent timeout stderr = %q", report)
 	}
-	status = http.StatusBadGateway
+	responseStatus.Store(http.StatusBadGateway)
 	if report := run(nil); !strings.Contains(report, hint) {
 		t.Fatalf("5xx stderr = %q, want the rerun hint", report)
 	}
-	status = http.StatusUnprocessableEntity
+	responseStatus.Store(http.StatusUnprocessableEntity)
 	if report := run(nil); strings.Contains(report, hint) {
 		t.Fatalf("422 stderr = %q, want no rerun hint", report)
 	}
