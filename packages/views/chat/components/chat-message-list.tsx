@@ -81,7 +81,7 @@ interface ChatMessageListProps {
    * Subtle reveal transition played once the list has landed at the live end
    * (`hasReachedLiveEnd`): directional glide for archive-advance (`"next"` /
    * `"prev"`), or gentle opacity fade for direct session switches (`"fade"`).
-   * Respects `prefers-reduced-motion` by degrading directional glides to fade.
+   * Skipped entirely under reduced motion (Appearance switch or system setting).
    */
   enterTransition?: ChatMessageEnterTransition | null;
   /** The list became visible to the reader — on reveal, and on each reactivation after it. */
