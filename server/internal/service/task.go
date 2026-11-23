@@ -7260,6 +7260,12 @@ func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, targ
 			}
 			return delegatedFailureRecoveryCovered, err
 		}
+		if err := guardIssueAgentFailureStreak(ctx, s.Queries, target.issue.ID, target.agent.ID, false); err != nil {
+			if errors.Is(err, ErrIssueAgentConsecutiveFailures) {
+				return delegatedFailureRecoveryCovered, nil
+			}
+			return delegatedFailureRecoveryCovered, err
+		}
 		overlay := s.buildRuntimeMCPOverlay(ctx, originator, target.agent)
 		task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 			ID:                   dbid.NewV7(),

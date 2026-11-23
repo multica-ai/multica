@@ -1340,3 +1340,52 @@ func TestPendingDelegatedFailureSweepSkipsTriageSourceIssue(t *testing.T) {
 		t.Fatalf("recovery tasks after accept = %d, want 1", n)
 	}
 }
+
+func TestDelegatedFailureRecoveryWaitsForManualCoordinatorSuccess(t *testing.T) {
+	f, svc := seedDelegatedFailureFixture(t)
+	ctx := t.Context()
+	fixture := dbfx.New(f.pool, f.workspaceID, f.userID)
+	now := time.Now()
+	fixture.Exec(t, "UPDATE agent_task_queue SET created_at=$1, started_at=$1, completed_at=$1 WHERE id=$2", now.Add(-10*time.Minute), f.sourceTask)
+	for _, minutesAgo := range []int{3, 2, 1} {
+		at := now.Add(-time.Duration(minutesAgo) * time.Minute)
+		fixture.Task(t, f.coordinator, dbfx.Cols{
+			"issue_id": f.issueID, "runtime_id": f.runtimeID,
+			"status": "failed", "failure_reason": "agent_error.process_failure",
+			"created_at": at, "started_at": at, "completed_at": at,
+		})
+	}
+	failedID := f.insertWorkerTask(t, "failed", "comment", 1, 2)
+	target, created, err := svc.ensureDelegatedFailureRecoveryComment(ctx, failedID)
+	if err != nil || target == nil || !created {
+		t.Fatalf("seed failure notification: created=%t err=%v", created, err)
+	}
+	if err := svc.DispatchDelegatedFailureRecoveryComment(ctx, target.comment, pgtype.UUID{}); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.recoveryTasks(t, failedID); n != 0 || f.settled(t, target.comment.ID) {
+		t.Fatalf("paused recovery queued %d runs or settled the signal", n)
+	}
+	if f.pending(t, svc, target.comment.ID) {
+		t.Fatal("paused signal would occupy a slot in the bounded recovery sweep")
+	}
+
+	issue, err := svc.Queries.GetIssue(ctx, util.MustParseUUID(f.issueID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manual, err := svc.EnqueueTaskForIssueByActor(ctx, issue, util.MustParseUUID(f.userID))
+	if err != nil {
+		t.Fatalf("enqueue manual coordinator run: %v", err)
+	}
+	fixture.Exec(t, "UPDATE agent_task_queue SET status='running', started_at=now() WHERE id=$1", manual.ID)
+	if _, err := svc.CompleteTask(ctx, manual.ID, []byte("{}"), "", "", "", false, "", ""); err != nil {
+		t.Fatalf("complete manual coordinator run: %v", err)
+	}
+	for range 2 {
+		sweepDelegatedFailureRecoveries(t, svc)
+		if n := f.recoveryTasks(t, failedID); n != 1 {
+			t.Fatalf("after manual success, recovery tasks = %d, want 1", n)
+		}
+	}
+}

@@ -2205,6 +2205,21 @@ WHERE recovery.author_type = 'system'
   AND source_agent.archived_at IS NULL
   AND source_agent.runtime_id IS NOT NULL
   AND source_agent.workspace_id = source_issue.workspace_id
+  -- Keep paused signals out of the bounded batch, using the same outcome
+  -- window as IssueAgentHasConsecutiveRunFailures.
+  AND (
+      SELECT count(*) FILTER (WHERE status = 'failed') < 3
+      FROM (
+          SELECT status
+          FROM agent_task_queue outcome
+          WHERE outcome.issue_id = source_issue.id AND outcome.agent_id = source_agent.id
+            AND status IN ('completed', 'failed')
+            AND COALESCE(context->>'type', '') <> 'triage'
+            AND COALESCE(context->>'preserve_issue_failure_streak', '') <> 'true'
+          ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC, id DESC
+          LIMIT 3
+      ) recent_outcomes
+  )
   AND NOT EXISTS (
       SELECT 1
       FROM agent_task_queue retry
