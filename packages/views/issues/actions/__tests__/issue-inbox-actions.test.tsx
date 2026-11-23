@@ -580,7 +580,7 @@ describe("IssueInboxBar once an action is undone", () => {
         { id: "task-1", issue_id: "issue-1", agent_id: "agent-1", status: "running" } as AgentTask,
       ]);
     });
-    noteInboxAutoArchive({ issue_id: "issue-1", reason: "agent_triggered" });
+    noteInboxAutoArchive({ issue_id: "issue-1", reason: "actor_acted", trigger: "agent_triggered" });
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
 
     const statusBar = await screen.findByRole("status");
@@ -596,7 +596,7 @@ describe("IssueInboxBar once an action is undone", () => {
 
   it("shows fallback agent-triggered copy before the agent snapshot updates", async () => {
     const nav = setup();
-    noteInboxAutoArchive({ issue_id: "issue-1", reason: "agent_triggered" });
+    noteInboxAutoArchive({ issue_id: "issue-1", reason: "actor_acted", trigger: "agent_triggered" });
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
 
     expect(await screen.findByText("Agent triggered")).toBeInTheDocument();

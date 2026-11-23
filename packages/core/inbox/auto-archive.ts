@@ -20,6 +20,17 @@ const AUTO_ARCHIVE_REASONS = new Set<string>([
   "agent_triggered",
 ]);
 
+function resolveAutoArchiveReason(payload: {
+  reason?: string;
+  trigger?: string;
+}): InboxAutoArchiveReason | null {
+  if (!payload.reason || !AUTO_ARCHIVE_REASONS.has(payload.reason)) return null;
+  if (payload.reason === "actor_acted" && payload.trigger === "agent_triggered") {
+    return "agent_triggered";
+  }
+  return payload.reason as InboxAutoArchiveReason;
+}
+
 /** The archive lands within moments of the action; anything older is stale. */
 const AUTO_ARCHIVE_TTL_MS = 30_000;
 
@@ -27,17 +38,15 @@ const archivedEntries = new Map<string, { at: number; reason: InboxAutoArchiveRe
 
 /** Record an `inbox:batch-archived` payload, if it is an archive the user caused. */
 export function noteInboxAutoArchive(
-  payload: { issue_id?: string; reason?: string },
+  payload: { issue_id?: string; reason?: string; trigger?: string },
   now = Date.now(),
 ): void {
-  if (!payload.issue_id || !payload.reason || !AUTO_ARCHIVE_REASONS.has(payload.reason)) return;
+  const reason = resolveAutoArchiveReason(payload);
+  if (!payload.issue_id || !reason) return;
   for (const [issueId, entry] of archivedEntries) {
     if (now - entry.at > AUTO_ARCHIVE_TTL_MS) archivedEntries.delete(issueId);
   }
-  archivedEntries.set(payload.issue_id, {
-    at: now,
-    reason: payload.reason as InboxAutoArchiveReason,
-  });
+  archivedEntries.set(payload.issue_id, { at: now, reason });
 }
 
 /** The user-caused reason that just archived `issueId`'s notifications, if any. Consumes the record. */
