@@ -12,8 +12,8 @@ import { useStatusLabel } from "../utils/status-label";
 import { formatActivity, type ActivityT } from "./activity-text";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, useId, Fragment, type ComponentProps, type ReactNode } from "react";
-import { AnimatePresence, motion } from "motion/react";
-import { UI_EASE_IN, UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
+import { AnimatePresence } from "motion/react";
+import { UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { Virtuoso, type ListRange, type VirtuosoHandle } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink, useBackOrReplace } from "../../navigation";
@@ -37,7 +37,6 @@ import {
   Tag,
   Unlink,
   Users,
-  ArrowDown,
   ArrowUpRight,
 } from "@multica/ui/icons";
 import { BreadcrumbHeader, type BreadcrumbSegment } from "../../layout/breadcrumb-header";
@@ -79,7 +78,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { MemberProfileCard } from "../../members/member-profile-card";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@multica/ui/components/ui/hover-card";
 import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
-import { InboxBarSkeleton } from "../../inbox/components/inbox-bar";
+import { COMPOSER_DOCK_GAP, ComposerDock, JumpToLatestButton } from "./composer-dock";
 import { InboxIssueActions } from "./inbox-issue-actions";
 import { useInboxSelectionStore, type InboxTransitionDirection } from "@multica/core/inbox/selection-store";
 import { useReducedMotion } from "@multica/core/appearance";
@@ -505,62 +504,6 @@ function shallowEqualEntries(a: TimelineEntry[], b: TimelineEntry[]): boolean {
     if (a[i] !== b[i]) return false;
   }
   return true;
-}
-
-function JumpToLatestButton({
-  onClick,
-  label,
-  hasNew = false,
-}: {
-  onClick: () => void;
-  label: string;
-  /** New comments arrived while the reader was away; `label` counts them. */
-  hasNew?: boolean;
-}) {
-  const reduceMotion = useReducedMotion();
-  return (
-    <motion.div
-      initial={reduceMotion ? false : { opacity: 0, y: 8, scale: 0.96 }}
-      animate={{
-        opacity: 1,
-        y: 0,
-        scale: 1,
-        transition: { duration: reduceMotion ? 0 : UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
-      }}
-      exit={
-        reduceMotion
-          ? { opacity: 0, transition: { duration: 0 } }
-          : {
-              opacity: 0,
-              y: 6,
-              scale: 0.96,
-              transition: { duration: UI_MOTION_DURATION.micro, ease: UI_EASE_IN },
-            }
-      }
-      className="pointer-events-none absolute inset-x-0 bottom-full mb-6 flex justify-center"
-    >
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={onClick}
-        className="pointer-events-auto bg-background shadow-md dark:bg-background dark:hover:bg-muted"
-      >
-        {hasNew ? (
-          <>
-            <span aria-hidden="true" className="size-1.5 rounded-full bg-brand" />
-            {label}
-            <ArrowDown />
-          </>
-        ) : (
-          <>
-            <ArrowDown />
-            {label}
-          </>
-        )}
-      </Button>
-    </motion.div>
-  );
 }
 
 const EMPTY_COLLAPSED_IDS: string[] = [];
@@ -1150,13 +1093,11 @@ function SubIssueDisplayPopover({
 /** The Inbox page, hosting this detail for the notification it has open. */
 export interface IssueDetailInboxHost {
   /**
-   * The breadcrumb's segment in place of the issue's container: back to the
-   * Inbox's list. Left out where the host's own way back already says so.
+   * The notification's group, floating over the end of the timeline, given
+   * the issue's own actions to keep in it.
    */
-  crumb?: BreadcrumbSegment;
-  /** The notification's bar under the header, given the issue's own actions to keep in it. */
   bar: (issueActions: ReactNode) => ReactNode;
-  /** The open notification, so a cold load shows its bar and title at once. */
+  /** The open notification, so a cold load shows its identifier at once. */
   item?: InboxItem;
 }
 
@@ -1164,9 +1105,10 @@ interface IssueDetailProps {
   issueId: string;
   onDelete?: () => void;
   /**
-   * Set on the Inbox page: the breadcrumb starts at the Inbox, the
-   * notification's bar sits under the header, and the header offers the
-   * issue's own page.
+   * Set on the Inbox page: the breadcrumb is the issue alone (the Inbox's
+   * list is beside it, or a phone's back control names it), the
+   * notification's group floats above the composer, and the header offers
+   * the issue's own page.
    */
   inbox?: IssueDetailInboxHost;
   defaultSidebarOpen?: boolean;
@@ -1376,14 +1318,12 @@ export function IssueDetailSkeleton({
   trailing,
   sidebar = true,
   layoutId = ISSUE_DETAIL_LAYOUT_ID,
-  showInboxBar = false,
   inboxItem,
 }: {
   leading?: ReactNode;
   trailing?: ReactNode;
   sidebar?: boolean;
   layoutId?: string;
-  showInboxBar?: boolean;
   inboxItem?: InboxItem | null;
 } = {}) {
   const { defaultLayout } = useDefaultLayout({ id: layoutId });
@@ -1409,7 +1349,6 @@ export function IssueDetailSkeleton({
           )
         )}
       </DetailStateBar>
-      {(showInboxBar || inboxItem) && <InboxBarSkeleton item={inboxItem} />}
       <div className="flex flex-1 min-h-0">
         {/* Same scrollbar-gutter as the loaded scroller below, so the skeleton
             column doesn't shift sideways when real content mounts. */}
@@ -2321,8 +2260,13 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
     let cancelled = false;
     const scrollEnd = () => {
       if (cancelled) return;
-      const composerHeight = composerRef.current?.getBoundingClientRect().height ?? 0;
-      virtuosoRef.current?.scrollToIndex({ index, align: "end", offset: composerHeight });
+      const composer = composerRef.current;
+      // The Inbox's group floats above the composer and covers the row too.
+      const group = composer?.parentElement?.querySelector("[data-inbox-bar]");
+      const offset =
+        (composer?.getBoundingClientRect().height ?? 0) +
+        (group ? group.getBoundingClientRect().height + COMPOSER_DOCK_GAP : 0);
+      virtuosoRef.current?.scrollToIndex({ index, align: "end", offset });
     };
     const container = scrollContainerElRef.current;
     const stopOnUserInput = () => {
@@ -3246,7 +3190,6 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
         trailing={trailingActions}
         sidebar={!isPeek && desktopSidebarOpen}
         layoutId={layoutId}
-        showInboxBar={!!inbox}
         inboxItem={inbox?.item}
       />
     );
@@ -3845,10 +3788,11 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
   // different project than its parent), so we never render both: parent wins,
   // else project, else nothing. The project is still shown in the properties
   // panel. The workspace name is intentionally absent — "all issues" is a view,
-  // not a container. On the Inbox page the issue is read as a notification, so
-  // the trail leads back to the Inbox instead.
+  // not a container. On the Inbox page the issue is read as a notification:
+  // the list it came from is beside it (or named by a phone's back control),
+  // so the header holds the issue alone.
   const breadcrumbSegments: BreadcrumbSegment[] = inbox
-    ? inbox.crumb ? [inbox.crumb] : []
+    ? []
     : parentIssue
       ? [{ href: paths.issueDetail(issueRouteRef(parentIssue)), label: parentIssue.identifier }]
       : breadcrumbProject
@@ -3879,6 +3823,15 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
       isDuplicate={isDuplicateIssue(issue)}
     />
   );
+  const inboxBar = inbox?.bar(inboxIssueActions);
+  const jumpToLatestButton = jumpToLatest.visible ? (
+    <JumpToLatestButton
+      key="jump-to-latest"
+      onClick={onJumpToLatest}
+      label={jumpToLatestLabel}
+      count={newComments.ids.length}
+    />
+  ) : null;
 
   const detailContent = (
     <CurrentIssueRenderContextProvider value={currentIssueRenderContext}>
@@ -3993,7 +3946,6 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
             </>
           }
         />
-        {inbox?.bar(inboxIssueActions)}
 
         {/* scrollbar-gutter both-edges: with classic (space-taking) scrollbars —
             macOS with a mouse or "always show", Windows, Linux — the global
@@ -4655,29 +4607,26 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
               page background and is invisible), and pb-4 so the card floats
               off the viewport edge — with -mb-4 giving the padding back to
               the column's py-8 so the at-rest layout doesn't shift. */}
-          {/* "Jump to latest" (MUL-8324, MUL-8951) floats centered just above the
-              composer's top edge. With the sticky composer it rides the
-              composer itself; without it, a zero-height sticky anchor pins
-              it to the viewport bottom until the composer scrolls in. */}
-          {!stickyComposer && (
-            <AnimatePresence initial={false}>
-              {jumpToLatest.visible && (
-                <motion.div
-                  key="jump-to-latest-anchor"
-                  exit={{ opacity: 0, transition: { duration: UI_MOTION_DURATION.micro } }}
-                  className="sticky bottom-0 z-10 h-0"
-                >
-                  <JumpToLatestButton onClick={onJumpToLatest} label={jumpToLatestLabel} hasNew={!!firstNewCommentId} />
-                </motion.div>
-              )}
-            </AnimatePresence>
-          )}
+          {/* The composer dock: the Inbox's group and "Jump to latest"
+              (MUL-8324, MUL-8951) float just above the composer's top edge.
+              With the sticky composer the dock rides the composer itself;
+              without it, it rides a zero-height sticky anchor just above the
+              composer, which holds it off the viewport bottom (clear of a
+              phone's chat launcher) until the composer scrolls in. Either way
+              the Inbox's group gets its own room at the end of the timeline
+              (the anchor's or the composer's margin), so it never covers the
+              last comment for good. */}
           <IssueAppRequests issueId={id} highlightId={highlightAppRequestId} highlightToken={highlightRequestToken} />
+          {!stickyComposer && (
+            <div className={cn("sticky bottom-6 z-10 h-0 max-md:above-chat-launcher", inboxBar && "mt-14")}>
+              <ComposerDock className="bottom-0" inboxBar={inboxBar} jump={jumpToLatestButton} />
+            </div>
+          )}
           <div
             ref={composerRef}
             data-comment-images={commentImageLayout}
             className={cn(
-              "mt-4",
+              !inboxBar ? "mt-4" : stickyComposer ? "mt-18" : "mt-3",
               stickyComposer &&
                 "sticky bottom-0 z-10 -mb-4 bg-background pb-4 before:pointer-events-none before:absolute before:inset-x-0 before:bottom-full before:h-4 before:bg-gradient-to-t before:from-background before:to-transparent",
             )}
@@ -4687,11 +4636,9 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
                 keeps the previous issue's in-memory content and the
                 next keystroke would flush it into the new issue's
                 draft key. */}
-            <AnimatePresence initial={false}>
-              {stickyComposer && jumpToLatest.visible && (
-                <JumpToLatestButton key="jump-to-latest" onClick={onJumpToLatest} label={jumpToLatestLabel} hasNew={!!firstNewCommentId} />
-              )}
-            </AnimatePresence>
+            {stickyComposer && (
+              <ComposerDock className="bottom-full mb-3" inboxBar={inboxBar} jump={jumpToLatestButton} />
+            )}
             {!landingChromeHeld && (
               <CommentInput
                 key={id}

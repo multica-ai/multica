@@ -9,7 +9,7 @@ import { renderWithI18n } from "../../test/i18n";
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 
-import { UnsubscribeArchiveButton } from "./unsubscribe-archive-button";
+import { InboxMoreMenu } from "./inbox-more-menu";
 
 const ISSUE_ID = "issue-1";
 
@@ -30,43 +30,53 @@ function setup({
     listChildIssues: vi.fn(async () => ({ issues: children })),
   } as unknown as ApiClient);
   const onConfirm = vi.fn();
+  const onToggleRead = vi.fn();
   renderWithI18n(
     <QueryClientProvider client={createQueryClient()}>
-      <UnsubscribeArchiveButton issueId={ISSUE_ID} userId="me" onConfirm={onConfirm} />
+      <InboxMoreMenu issueId={ISSUE_ID} userId="me" read onToggleRead={onToggleRead} onUnsubscribe={onConfirm} />
     </QueryClientProvider>,
   );
-  return { onConfirm };
+  return { onConfirm, onToggleRead };
 }
 
-// Without sub-issues the button acts directly, once the child count is known;
-// until then it is the scope menu's trigger.
-async function directButton() {
-  return waitFor(() => {
-    const button = screen.getByRole("button", { name: "Unsubscribe & archive" });
-    expect(button).not.toHaveAttribute("aria-haspopup");
-    return button;
+const openMenu = () => fireEvent.click(screen.getByRole("button", { name: "More notification actions" }));
+
+// Without sub-issues the item acts directly, once the child count is known;
+// until then it asks for the scope.
+async function directItem() {
+  openMenu();
+  return screen.findByRole("menuitem", { name: /^Unsubscribe & archive/ });
+}
+
+describe("InboxMoreMenu", () => {
+  it("marks the notification unread", async () => {
+    const { onToggleRead } = setup();
+    openMenu();
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^Mark as unread/ }));
+    expect(onToggleRead).toHaveBeenCalledTimes(1);
   });
-}
 
-describe("UnsubscribeArchiveButton", () => {
   it("leaves just this issue on an issue that is someone else's", async () => {
     const { onConfirm } = setup();
-    fireEvent.click(await directButton());
+    fireEvent.click(await directItem());
     expect(onConfirm).toHaveBeenCalledWith("issue");
   });
 
   it("runs on Shift+E", async () => {
     const { onConfirm } = setup();
-    await directButton();
+    await directItem();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
     fireEvent.keyDown(document.body, { key: "E", code: "KeyE", shiftKey: true });
     expect(onConfirm).toHaveBeenCalledWith("issue");
   });
 
-  it("asks for the scope when the issue has sub-issues", async () => {
+  it("asks for the scope when the issue has sub-issues, and opens on it with Shift+E", async () => {
     const { onConfirm } = setup({ children: [{ id: "c1" }, { id: "c2" }] });
-    const trigger = await screen.findByRole("button", { name: "Unsubscribe & archive" });
-    await waitFor(() => expect(trigger).toHaveAttribute("aria-haspopup"));
-    fireEvent.click(trigger);
+    await waitFor(() => {
+      fireEvent.keyDown(document.body, { key: "E", code: "KeyE", shiftKey: true });
+      expect(screen.getByRole("menu")).toBeInTheDocument();
+    });
     fireEvent.click(await screen.findByText("This issue and its 2 sub-issues"));
     expect(onConfirm).toHaveBeenCalledWith("subtree");
   });
@@ -74,15 +84,19 @@ describe("UnsubscribeArchiveButton", () => {
   it.each([
     ["assigned to the viewer", { assignee_type: "member", assignee_id: "me" }],
     ["assigned to the viewer's agent", { assignee_type: "agent", assignee_id: "agent-mine" }],
-  ] as const)("is not offered on an issue %s", async (_, assignee) => {
+  ] as const)("does not offer unsubscribing on an issue %s", async (_, assignee) => {
     setup({ assignee });
     await new Promise((r) => setTimeout(r, 50));
-    expect(screen.queryByRole("button", { name: "Unsubscribe & archive" })).toBeNull();
+    openMenu();
+    await screen.findByRole("menuitem", { name: /^Mark as unread/ });
+    expect(screen.queryByRole("menuitem", { name: /Unsubscribe/ })).toBeNull();
   });
 
-  it("is not offered when the viewer is not subscribed", async () => {
+  it("does not offer unsubscribing when the viewer is not subscribed", async () => {
     setup({ subscribed: false });
     await new Promise((r) => setTimeout(r, 50));
-    expect(screen.queryByRole("button", { name: "Unsubscribe & archive" })).toBeNull();
+    openMenu();
+    await screen.findByRole("menuitem", { name: /^Mark as unread/ });
+    expect(screen.queryByRole("menuitem", { name: /Unsubscribe/ })).toBeNull();
   });
 });

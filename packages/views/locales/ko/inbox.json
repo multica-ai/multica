@@ -65,6 +65,7 @@
   "detail": {
     "select_prompt": "자세히 볼 알림을 선택하세요",
     "restore": "인박스로 되돌리기",
+    "more_actions": "알림 작업 더 보기",
     "original_input": "원본 입력",
     "retry_with_context": "컨텍스트를 유지하여 재시도",
     "edit_advanced": "전체 양식 열기",
@@ -146,7 +147,6 @@
     "archived": "보관됨",
     "leaves": "다른 곳으로 이동하면 인박스에서 빠집니다",
     "filtered": "더 이상 필터와 일치하지 않음",
-    "notification_archived": "알림이 보관됨",
     "changed_status": "상태 변경됨: {{status}}",
     "reassigned": "{{name}}님에게 재할당됨",
     "unassigned": "할당 해제됨",

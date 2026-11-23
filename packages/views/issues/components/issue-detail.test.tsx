@@ -1584,11 +1584,10 @@ describe("IssueDetail (shared)", () => {
             <IssueDetail
               issueId="issue-1"
               inbox={{
-                crumb: { href: "/test/inbox", label: "Inbox" },
                 item: item ?? undefined,
                 bar: (issueActions) =>
                   item ? (
-                    <InboxOpenBar item={item} issueActions={issueActions}>
+                    <InboxOpenBar issueActions={issueActions}>
                       <InboxArchiveButton onClick={onArchive} />
                     </InboxOpenBar>
                   ) : null,
@@ -1599,12 +1598,12 @@ describe("IssueDetail (shared)", () => {
       );
     }
 
-    it("leads with the way back to the Inbox and opens the issue page on its own", async () => {
-      renderWithArchive();
+    it("opens the issue page on its own, with no Inbox crumb in the header", async () => {
+      const { container } = renderWithArchive();
 
       const open = await screen.findByRole("button", { name: enIssues.detail.open_issue_page });
       expect(open).toHaveAttribute("href", "/test/issues/TES-1");
-      expect(screen.getByRole("link", { name: "Inbox" })).toHaveAttribute("href", "/test/inbox");
+      expect(container.querySelector('header a[href="/test/inbox"]')).toBeNull();
     });
 
     it("leaves the issue page without either", async () => {
@@ -1615,16 +1614,33 @@ describe("IssueDetail (shared)", () => {
       expect(screen.queryByRole("button", { name: enInbox.context_menu.archive })).not.toBeInTheDocument();
     });
 
-    it("puts the notification's actions under the header, after why it is here and the issue's own", async () => {
+    it("floats the notification's actions above the composer, after the issue's own", async () => {
       const { container } = renderWithArchive();
 
       const archive = await screen.findByRole("button", { name: enInbox.context_menu.archive });
       expect(archive.closest("header")).toBeNull();
       const bar = archive.closest<HTMLElement>("[data-inbox-bar]")!;
-      expect(within(bar).getByText(enInbox.labels.commented)).toBeInTheDocument();
+      expect(bar.closest("[data-composer-dock]")).not.toBeNull();
+      expect(within(bar).queryByText(enInbox.labels.commented)).toBeNull();
       expect(within(bar).getByText(enIssues.status.in_progress)).toBeInTheDocument();
       expect(container.querySelector("header")).not.toHaveTextContent(enInbox.context_menu.archive);
       expect(screen.queryByRole("button", { name: "Mark as done" })).not.toBeInTheDocument();
+    });
+
+    it("gives the group its own room above a composer that rides the timeline, clear of the last comment", async () => {
+      mockViewport.isMobile = true;
+      const { container } = renderWithArchive();
+
+      const archive = await screen.findByRole("button", { name: enInbox.context_menu.archive });
+      const anchor = archive.closest("[data-composer-dock]")!.parentElement!;
+      const composer = container.querySelector("[data-mc='comment-composer']")?.parentElement;
+      // The group sits on the anchor, which keeps the room above it (mt-14)
+      // and stops just short of the composer (mt-3); pinned, it holds off the
+      // viewport bottom.
+      expect(anchor).toHaveClass("sticky", "h-0", "mt-14");
+      expect(anchor.nextElementSibling).toBe(composer);
+      expect(composer).toHaveClass("mt-3");
+      expect(composer).not.toHaveClass("sticky");
     });
 
     it("archives the notification without changing the issue's status", async () => {

@@ -15,12 +15,12 @@ import type { IssueAgentState } from "../../issues/surface/use-issue-agent-state
 import { useStatusLabel } from "../../issues/utils/status-label";
 import { formatSnoozeTime } from "./inbox-snooze-time";
 import { getInboxDisplayTitle, isAutopilotQuotaNotice } from "./inbox-display";
-import { InboxBar, InboxBarSeparator, InboxBarStatus } from "./inbox-bar";
+import { InboxBar, InboxBarKeycaps, InboxBarSeparator, InboxBarStatus } from "./inbox-bar";
 import { useInboxUndoShortcut } from "./use-inbox-shortcut";
 
 /**
  * How a kept row (`keepOpenInboxRow`) says why it is settled: `line` in its
- * place in the list, `notice` beside the open notification.
+ * place in the list, `status` in the open notification's floating group.
  */
 export function useKeptInboxRowText(wsId: string) {
   const { t } = useT("inbox");
@@ -80,24 +80,34 @@ export function useKeptInboxRowText(wsId: string) {
           : (finished(kept.item) ?? agentLabel(agents ?? null) ?? t(($) => $.kept.archived));
       return `${why} · ${t(($) => $.kept.leaves)}`;
     },
-    /** `cause` is the bar action that archived it (`useAutoArchiveCause`). */
-    notice: (kept: KeptInboxRow, cause?: InboxBarAction | null) => {
-      if (kept.reason === "snoozed") return backAt(kept.item);
-      const why = (cause && kept.reason === "archived" ? did(cause) : null) ?? finished(kept.item);
-      return why ? `${why} · ${t(($) => $.kept.notification_archived)}` : t(($) => $.kept.notification_archived);
+    /**
+     * The floating group's word for a kept row, and what its tooltip adds:
+     * why it was archived, when known, and that it comes back on new activity.
+     * `cause` is the group action that archived it, `agentTriggered` that an
+     * agent started on it (both from `useAutoArchiveCause`).
+     */
+    status: (kept: KeptInboxRow, cause?: InboxBarAction | null, agentTriggered = false) => {
+      if (kept.reason === "snoozed") return { label: backAt(kept.item), hint: undefined };
+      const why =
+        (cause && kept.reason === "archived" ? did(cause) : null) ??
+        finished(kept.item) ??
+        (agentTriggered ? t(($) => $.kept.agent_triggered) : null);
+      const returns = t(($) => $.kept.returns_on_activity);
+      return { label: t(($) => $.kept.archived), hint: why ? `${why} · ${returns}` : returns };
     },
   };
 }
 
 /**
- * What the open notification's bar offers once it has left the Inbox on its
+ * What the open notification's group offers once it has left the Inbox on its
  * own (its issue reached Done, another window archived it) and stays on
- * screen until the user moves on: what happened, the issue's own actions
- * when it was archived, so the next change needs no trip to its properties,
- * then the way to undo it (Z) and the next notification.
+ * screen until the user moves on: the issue's own actions when it was
+ * archived, so the next change needs no trip to its properties, what
+ * happened, then the way to undo it (Z) and the next notification.
  */
 export function InboxKeptActions({
   label,
+  hint,
   icon,
   issueActions,
   onUndo,
@@ -108,7 +118,9 @@ export function InboxKeptActions({
   onSnoozedClick,
   onGoToMyWork,
 }: {
+  /** What happened, in a word ("Archived"); `hint` says the rest on hover. */
   label: ReactNode;
+  hint?: ReactNode;
   /** Defaults to the archive icon (or a success check when the Inbox is cleared). */
   icon?: ReactNode;
   issueActions?: ReactNode;
@@ -126,49 +138,46 @@ export function InboxKeptActions({
   useInboxUndoShortcut(onUndo ?? null);
   const statusIcon =
     icon ?? (inboxCleared ? <CheckCircle2 className="text-success" /> : <Archive />);
-  const statusLabel = inboxCleared ? (
-    <span className="flex min-w-0 items-center gap-1.5 truncate">
-      <span className="shrink-0 font-medium text-foreground">{t(($) => $.zero.cleared_title)}</span>
-      <span aria-hidden className="text-faint-foreground">·</span>
-      <span className="min-w-0 truncate">{label}</span>
-      {snoozedCount > 0 && onSnoozedClick && (
-        <>
-          <span aria-hidden className="text-faint-foreground @max-[34rem]/inbox-bar:hidden">·</span>
-          <button
-            type="button"
-            onClick={onSnoozedClick}
-            className="shrink-0 underline decoration-surface-border underline-offset-2 transition-colors hover:text-foreground @max-[34rem]/inbox-bar:hidden"
-          >
-            {t(($) => $.zero.bar_snoozed, { count: snoozedCount })}
-          </button>
-        </>
-      )}
-    </span>
-  ) : (
-    label
-  );
+  const undoLabel = t(($) => $.toasts.undo);
+  const goToMyWorkLabel = t(($) => $.zero.go_to_my_work);
 
   return (
     <InboxBar settled>
-      <InboxBarStatus icon={statusIcon} label={statusLabel} />
       {issueActions}
-      {issueActions && (onUndo || next || (inboxCleared && onGoToMyWork)) && <InboxBarSeparator />}
-      {onUndo && (
-        <Button size="sm" variant="ghost" className="shrink-0 text-muted-foreground" onClick={onUndo}>
-          <Undo2 />
-          {t(($) => $.toasts.undo)}
-          <span className="flex @max-[30rem]/inbox-bar:hidden">
-            <ActionShortcutKeycaps action="undoInboxAction" />
-          </span>
+      {issueActions && <InboxBarSeparator />}
+      <InboxBarStatus
+        icon={statusIcon}
+        label={inboxCleared ? t(($) => $.zero.cleared_title) : label}
+        hint={hint}
+      />
+      {inboxCleared && snoozedCount > 0 && onSnoozedClick && (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="shrink-0 text-muted-foreground @max-[32rem]/inbox-bar:hidden"
+          onClick={onSnoozedClick}
+        >
+          {t(($) => $.zero.bar_snoozed, { count: snoozedCount })}
         </Button>
+      )}
+      {onUndo && (
+        <TooltipHint label={undoLabel} shortcut={<ActionShortcutKeycaps action="undoInboxAction" />} side="top">
+          <Button size="sm" variant="ghost" aria-label={undoLabel} className="shrink-0 text-muted-foreground" onClick={onUndo}>
+            <Undo2 />
+            <span className="@max-[32rem]/inbox-bar:hidden">{undoLabel}</span>
+            <InboxBarKeycaps action="undoInboxAction" />
+          </Button>
+        </TooltipHint>
       )}
       {next ? (
         <InboxNextButton next={next} onNext={onNext} />
       ) : inboxCleared && onGoToMyWork ? (
-        <Button size="sm" variant="outline" className="shrink-0" onClick={onGoToMyWork}>
-          {t(($) => $.zero.go_to_my_work)}
-          <ArrowRight />
-        </Button>
+        <TooltipHint label={goToMyWorkLabel} side="top">
+          <Button size="sm" aria-label={goToMyWorkLabel} className="shrink-0" onClick={onGoToMyWork}>
+            <span className="@max-[32rem]/inbox-bar:hidden">{goToMyWorkLabel}</span>
+            <ArrowRight />
+          </Button>
+        </TooltipHint>
       ) : null}
     </InboxBar>
   );
@@ -179,13 +188,15 @@ export function InboxNextButton({ next, onNext }: { next: InboxItem; onNext: () 
   const { t } = useT("inbox");
   const title = isAutopilotQuotaNotice(next.type) ? t(($) => $.types[next.type]) : getInboxDisplayTitle(next);
   return (
-    <TooltipHint label={t(($) => $.kept.next_tooltip, { title })} side="bottom">
-      <Button size="sm" variant="outline" className="shrink-0" onClick={onNext}>
+    <TooltipHint
+      label={t(($) => $.kept.next_tooltip, { title })}
+      shortcut={<ActionShortcutKeycaps action="archiveInboxItem" />}
+      side="top"
+    >
+      <Button size="sm" className="shrink-0" onClick={onNext}>
         {t(($) => $.kept.next)}
         <ArrowDown />
-        <span className="flex @max-[30rem]/inbox-bar:hidden">
-          <ActionShortcutKeycaps action="archiveInboxItem" />
-        </span>
+        <InboxBarKeycaps action="archiveInboxItem" />
       </Button>
     </TooltipHint>
   );

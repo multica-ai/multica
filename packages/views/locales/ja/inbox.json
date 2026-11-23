@@ -65,6 +65,7 @@
   "detail": {
     "select_prompt": "詳細を表示する通知を選択してください",
     "restore": "インボックスに戻す",
+    "more_actions": "その他の通知操作",
     "original_input": "元の入力",
     "retry_with_context": "コンテキストを保持して再試行",
     "edit_advanced": "詳細フォームを開く",
@@ -146,7 +147,6 @@
     "archived": "アーカイブ済み",
     "leaves": "移動するとインボックスから外れます",
     "filtered": "フィルターに一致しなくなりました",
-    "notification_archived": "通知をアーカイブしました",
     "changed_status": "{{status}} に変更",
     "reassigned": "{{name}} に再割り当て",
     "unassigned": "割り当て解除",

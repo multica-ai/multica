@@ -67,6 +67,7 @@
   "detail": {
     "select_prompt": "Select a notification to view details",
     "restore": "Move back to Inbox",
+    "more_actions": "More notification actions",
     "original_input": "Original input",
     "retry_with_context": "Retry with context",
     "edit_advanced": "Open full form",
@@ -149,7 +150,6 @@
     "archived": "Archived",
     "leaves": "Leaves the Inbox when you move on",
     "filtered": "No longer matches your filters",
-    "notification_archived": "Notification archived",
     "changed_status": "Changed to {{status}}",
     "reassigned": "Reassigned to {{name}}",
     "unassigned": "Unassigned",

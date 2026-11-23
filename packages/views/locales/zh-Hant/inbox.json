@@ -65,6 +65,7 @@
   "detail": {
     "select_prompt": "選擇一條通知檢視詳情",
     "restore": "移回收件箱",
+    "more_actions": "更多通知操作",
     "original_input": "原始輸入",
     "retry_with_context": "保留上下文重試",
     "edit_advanced": "開啟完整表單",
@@ -146,7 +147,6 @@
     "archived": "已歸檔",
     "leaves": "離開後移出收件箱",
     "filtered": "不再符合篩選",
-    "notification_archived": "通知已歸檔",
     "changed_status": "已改為{{status}}",
     "reassigned": "已改派給 {{name}}",
     "unassigned": "已取消分配",
