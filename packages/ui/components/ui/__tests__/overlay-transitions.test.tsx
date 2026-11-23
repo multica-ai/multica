@@ -128,12 +128,13 @@ describe("keyframe-animated Base UI overlays", () => {
     expectAnimationOnlyDuration(slotClasses("select-content"), ["animation-duration-100"]);
   });
 
-  it("uses animation-duration-100 on HoverCard content", () => {
+  it("uses animation-duration-100 on HoverCard content and preserves instant-close overrides", () => {
     render(
       <HoverCard open>
-        <HoverCardContent>Preview</HoverCardContent>
+        <HoverCardContent className="data-closed:animation-duration-0">Preview</HoverCardContent>
       </HoverCard>,
     );
-    expectAnimationOnlyDuration(slotClasses("hover-card-content"), ["animation-duration-100"]);
+    const classes = slotClasses("hover-card-content");
+    expectAnimationOnlyDuration(classes, ["animation-duration-100", "data-closed:animation-duration-0"]);
   });
 });
