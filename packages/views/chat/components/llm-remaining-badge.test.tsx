@@ -151,6 +151,39 @@ describe("reset countdown", () => {
     vi.unstubAllGlobals();
   });
 
+  it("renders Claude's weekly countdown when the live five-hour window has no reset", async () => {
+    const now = Date.now();
+    const futureReset = (hours: number) => new Date(now + hours * 3_600_000).toISOString();
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        claude_status: "available",
+        five_hour_pct: 0,
+        five_hour_resets_at: null,
+        seven_day_pct: 38,
+        seven_day_resets_at: futureReset(80),
+        sonnet_pct: null,
+        sonnet_resets_at: null,
+        gpt_status: "available",
+        gpt_five_hour_pct: 0,
+        gpt_five_resets_at: null,
+        gpt_seven_day_pct: 56,
+        gpt_seven_resets_at: futureReset(55),
+      }),
+    })));
+
+    try {
+      renderBadge();
+
+      const countdown = await screen.findByTestId("chat-reset-countdown");
+      expect(countdown.children).toHaveLength(2);
+      expect(countdown.children[0]).toHaveTextContent(/^C 리셋까지 3일 \d+시간 \d+분$/);
+      expect(countdown.children[1]).toHaveTextContent(/^· G 리셋까지 2일 \d+시간 \d+분$/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("drops malformed and unavailable reset timestamps at the API boundary", () => {
     expect(llmLimitStatusSchema.parse({ five_hour_resets_at: 123 }).five_hour_resets_at).toBeNull();
     expect(llmLimitStatusSchema.parse({ five_hour_resets_at: "bad" }).five_hour_resets_at).toBeNull();
