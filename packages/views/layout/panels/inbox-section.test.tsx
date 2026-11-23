@@ -1113,3 +1113,22 @@ describe("InboxSection while the Inbox loads", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 });
+
+describe("InboxSection kept open row while an agent works", () => {
+  it("shows the running agent status on the kept row instead of generic Archived", async () => {
+    const first = item({ id: "n1", issue_id: "issue-a", title: "Run agent on this", read: true });
+    const second = item({ id: "n2", issue_id: "issue-b", title: "Next item", read: true });
+    const { client } = renderSection(
+      [first, second],
+      "issue-a",
+      "/acme/inbox?issue=issue-a",
+      [{ id: "t1", issue_id: "issue-a", agent_id: "agent-1", status: "running" }],
+    );
+    // The open issue is auto-archived while its agent runs.
+    act(() => client.setQueryData(["inbox", "ws-1", "list"], [second]));
+
+    expect(
+      await screen.findByText("Leo Park is working · Leaves the Inbox when you move on"),
+    ).toBeInTheDocument();
+  });
+});

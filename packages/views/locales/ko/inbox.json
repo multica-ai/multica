@@ -151,6 +151,8 @@
     "reassigned": "{{name}}님에게 재할당됨",
     "unassigned": "할당 해제됨",
     "ran_quick_action": "{{name}} 실행됨",
+    "agent_triggered": "에이전트를 실행함",
+    "returns_on_activity": "새 활동이 있으면 인박스로 돌아옵니다",
     "next": "다음",
     "next_tooltip": "다음 열기: {{title}}"
   },

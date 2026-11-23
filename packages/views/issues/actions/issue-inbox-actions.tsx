@@ -2,8 +2,10 @@
 
 import { useMemo, useRef, type ReactNode, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlarmClock, Archive, ChevronDown } from "@multica/ui/icons";
+import { AlarmClock, Archive, Bot, ChevronDown } from "@multica/ui/icons";
+import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import { Button } from "@multica/ui/components/ui/button";
+import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
 import type { InboxUnsubscribeScope } from "@multica/core/inbox/mutations";
 import type { LastInboxCleared } from "@multica/core/inbox/selection-store";
@@ -23,16 +25,18 @@ import { useFilteredInboxRows } from "../../inbox/components/use-filtered-inbox-
 import { inboxTabHref } from "../../inbox/components/inbox-view";
 import { UnsubscribeArchiveButton } from "../../inbox/components/unsubscribe-archive-button";
 import { useUnsubscribeArchive } from "../../inbox/components/use-unsubscribe-archive";
-import { useMoveOnAfterAutoArchive } from "../../inbox/components/use-move-on-after-auto-archive";
+import { useAutoArchiveCause } from "../../inbox/components/use-auto-archive-cause";
 import {
   clearedLabelForItem,
   useArchiveInboxWithUndo,
   useLeaveInboxRow,
   useRestoreInbox,
 } from "../../inbox/components/use-leave-inbox-row";
+import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { useBuiltinViewNavigation } from "../../issue-views/builtin-views";
 import { useNavigation } from "../../navigation";
 import { useLocale, useT } from "../../i18n";
+import { useIssueAgentState } from "../surface/use-issue-agent-state";
 
 /**
  * The Inbox page's bar over an open issue notification: why it is here,
@@ -95,6 +99,7 @@ export function IssueInboxBar({
     return (snoozedList ?? []).filter((entry) => new Date(entry.snoozed_until).getTime() > now).length;
   }, [snoozedList]);
   const keptText = useKeptInboxRowText(wsId);
+  const agents = useIssueAgentState(wsId, issueId);
   const [snoozeOpen, setSnoozeOpen] = useState(false);
 
   const archiveItem = () => {
@@ -164,7 +169,7 @@ export function IssueInboxBar({
       : undefined;
     leave(issueId, next, cleared);
   };
-  const cause = useMoveOnAfterAutoArchive({ settled, next, onNext: moveOn });
+  const { cause, reason: archiveReason } = useAutoArchiveCause(settled);
 
   // Archived already, E moves on (to the next notification or Inbox Zero).
   useInboxShortcut("archiveInboxItem", item ? archiveItem : settled ? moveOn : null);
@@ -198,9 +203,55 @@ export function IssueInboxBar({
       return null;
     }
     const inboxCleared = !next && !filtered;
+    const showAgentWorking =
+      settled.reason === "archived" &&
+      !keptText.isFinished(settled.item) &&
+      (archiveReason === "agent_triggered" || (agents !== null && !cause));
+    const fallbackAgentId =
+      cause?.type === "assignee" && cause.assignee?.type === "agent" ? cause.assignee.id : null;
+    const settledIcon = showAgentWorking ? (
+      agents && agents.agentIds.length > 0 ? (
+        <AgentAvatarStack
+          agentIds={agents.agentIds}
+          size="xs"
+          max={2}
+          opacity={agents.running ? "full" : "half"}
+        />
+      ) : fallbackAgentId ? (
+        <AgentAvatarStack agentIds={[fallbackAgentId]} size="xs" max={2} opacity="half" />
+      ) : (
+        <Bot className="text-info" />
+      )
+    ) : undefined;
+    const agentWorkingText = showAgentWorking
+      ? (keptText.agentLabel(agents) ?? t(($) => $.kept.agent_triggered))
+      : null;
+    const settledLabel =
+      showAgentWorking && agentWorkingText ? (
+        <span className="inline-flex min-w-0 max-w-full items-center gap-1.5">
+          <ShimmerText
+            active={!!agents?.running}
+            className={cn(
+              "shrink-0 font-medium",
+              agents?.running ? "text-foreground" : "text-muted-foreground",
+            )}
+          >
+            {agentWorkingText}
+          </ShimmerText>
+          <span aria-hidden className="text-faint-foreground @max-[32rem]/inbox-bar:hidden">
+            ·
+          </span>
+          <span className="truncate text-muted-foreground @max-[32rem]/inbox-bar:hidden">
+            {t(($) => $.kept.returns_on_activity)}
+          </span>
+        </span>
+      ) : (
+        keptText.notice(settled, cause)
+      );
     return (
       <InboxKeptActions
-        label={keptText.notice(settled, cause)}
+        icon={settledIcon}
+        label={settledLabel}
         issueActions={settled.reason === "archived" ? issueActions : undefined}
         onUndo={() => restore(settled.item.id, { quiet: true })}
         next={next}

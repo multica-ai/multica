@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, memo, useCallback, useLayoutEffect, useRef, useState } from "react";
+import { forwardRef, memo, useLayoutEffect, useRef, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, ChevronUp, Lock } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
@@ -8,7 +8,6 @@ import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
-import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { issueStatusCategory } from "@multica/core/issues";
 import { issueDetailOptions, sidebarIssuesOptions } from "@multica/core/issues/queries";
@@ -18,14 +17,14 @@ import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-st
 import { issueUnreadTarget, useIssueUnread } from "@multica/core/issues/unread";
 import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
-import type { AgentTask, Issue, IssueUnread } from "@multica/core/types";
+import type { Issue, IssueUnread } from "@multica/core/types";
 import { AppLink, useWarmRoute } from "../../navigation";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { StatusIcon } from "../../issues/components/status-icon";
 import { StatusPicker } from "../../issues/components/pickers/status-picker";
 import { IssueActionsContextMenu } from "../../issues/actions";
 import { useIssueActions } from "../../issues/actions/use-issue-actions";
-import { selectIssueTasks } from "../../issues/surface/activity";
+import { type IssueAgentState, useIssueAgentState } from "../../issues/surface/use-issue-agent-state";
 import { useStatusLabel } from "../../issues/utils/status-label";
 import { DeferredPopup } from "../../common/deferred-popup";
 import { useT, useTimeAgo } from "../../i18n";
@@ -450,22 +449,7 @@ export function SidebarIssueList({
   );
 }
 
-type IssueAgentState = { running: boolean; agentIds: string[] } | null;
-
-/** The agents running on an issue, or queued for it when none is running yet. */
-export function useIssueAgentState(wsId: string, issueId: string): IssueAgentState {
-  const select = useCallback(
-    (snapshot: AgentTask[]): IssueAgentState => {
-      const { running, queued } = selectIssueTasks(snapshot, issueId);
-      const tasks = running.length > 0 ? running : queued;
-      if (tasks.length === 0) return null;
-      return { running: running.length > 0, agentIds: [...new Set(tasks.map((task) => task.agent_id))] };
-    },
-    [issueId],
-  );
-  const { data = null } = useQuery({ ...agentTaskSnapshotOptions(wsId), select });
-  return data;
-}
+export { type IssueAgentState, useIssueAgentState };
 
 export function IssueAgentBadge({ agents }: { agents: NonNullable<IssueAgentState> }) {
   const { t } = useT("issues");

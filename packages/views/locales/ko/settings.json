@@ -878,10 +878,6 @@
         "dates": "날짜 변경",
         "labels": "라벨 변경"
       },
-      "after_label": "보관한 뒤",
-      "after_description": "보고 있는 알림이 이렇게 보관될 때. 직접 보관(E)하면 지금처럼 다음 알림을 엽니다.",
-      "after_stay": "이 태스크에 머무르기",
-      "after_next": "다음 알림 열기",
       "archived_label": "보관된 알림",
       "archived_description": "여기서 다시 찾고 보관을 해제할 수 있습니다",
       "archived_action": "보관된 알림 보기"

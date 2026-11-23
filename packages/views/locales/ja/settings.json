@@ -878,10 +878,6 @@
         "dates": "日付変更",
         "labels": "ラベル変更"
       },
-      "after_label": "アーカイブ後",
-      "after_description": "表示中の通知がこの方法でアーカイブされたとき。手動のアーカイブ（E）は従来どおり次を開きます。",
-      "after_stay": "このタスクに留まる",
-      "after_next": "次の通知を開く",
       "archived_label": "アーカイブ済みの通知",
       "archived_description": "ここから見つけてアーカイブを解除できます",
       "archived_action": "アーカイブ済みを表示"

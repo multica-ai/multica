@@ -39,8 +39,9 @@ var autoArchiveOnByDefault = map[string]bool{
 // Why the actor's notifications were archived, sent as `reason` on
 // inbox:batch-archived so the client can tell its user's own action apart.
 const (
-	ArchiveReasonCompleted = "issue_status_terminal"
-	ArchiveReasonActed     = "actor_acted"
+	ArchiveReasonCompleted      = "issue_status_terminal"
+	ArchiveReasonAgentTriggered = "agent_triggered"
+	ArchiveReasonActed          = "actor_acted"
 )
 
 // AutoArchivesOn reports whether prefs archive the actor's notifications when
@@ -113,8 +114,11 @@ func ArchiveActorIssueInbox(
 		return
 	}
 	reason := ArchiveReasonActed
-	if slices.Contains(archivedOn, AutoArchiveCompletedPref) {
+	switch {
+	case slices.Contains(archivedOn, AutoArchiveCompletedPref):
 		reason = ArchiveReasonCompleted
+	case slices.Contains(archivedOn, AutoArchiveAgentTriggerPref):
+		reason = ArchiveReasonAgentTriggered
 	}
 
 	count, err := queries.ArchiveInboxByIssue(ctx, db.ArchiveInboxByIssueParams{
