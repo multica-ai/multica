@@ -66,14 +66,13 @@ const shell = vi.hoisted(() => ({
   appsAvailable: false,
   role: "owner" as "owner" | "admin" | "member",
 }));
-vi.mock("./connected-apps-tab", () => ({
-  ConnectedAppsTab: () => <div>ConnectedAppsTab</div>,
+vi.mock("../../common/use-composio-available", () => ({
   useComposioAvailable: () => shell.appsAvailable,
 }));
 
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ id: "ws-1", name: "Acme" }),
-  useWorkspacePaths: () => ({ autopilots: () => "/acme/autopilots" }),
+  useWorkspacePaths: () => ({ autopilots: () => "/acme/autopilots", apps: () => "/acme/apps" }),
 }));
 vi.mock("@multica/core/workspace/avatar-url", () => ({
   resolvePublicFileUrl: (url: string | null | undefined) => url ?? null,
@@ -290,7 +289,7 @@ describe("SettingsPage workflows", () => {
 
     expect(screen.getByText("WorkflowsTab")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Workflows" })).toHaveAttribute("aria-current", "page");
-    expect(screen.queryByRole("link", { name: "Issue Statuses" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Issue statuses" })).not.toBeInTheDocument();
   });
 
   it("opens old status catalog links in workflows", () => {
@@ -349,7 +348,7 @@ describe("SettingsPage information architecture", () => {
     ]);
     const personal = within(nav()).getByRole("region", { name: "Personal" });
     expect(within(personal).getByRole("link", { name: "Preferences" })).toBeInTheDocument();
-    expect(within(personal).getByRole("link", { name: "API Tokens" })).toBeInTheDocument();
+    expect(within(personal).getByRole("link", { name: "API tokens" })).toBeInTheDocument();
 
     const workspace = within(nav()).getByRole("region", { name: "Workspace" });
     expect(within(workspace).getByRole("link", { name: "Members" })).toBeInTheDocument();
@@ -390,20 +389,38 @@ describe("SettingsPage information architecture", () => {
     );
   });
 
-  it("lists Connected apps with the workspace connections only when Composio is available", () => {
+  it("keeps accounts out of settings, sending old links to the Apps page's Accounts", () => {
+    shell.appsAvailable = true;
     const first = renderWithI18n(<SettingsPage />);
-    expect(screen.queryByRole("link", { name: "Connected apps" })).toBeNull();
+    expect(within(nav()).queryByRole("link", { name: /Accounts|Connected apps/ })).toBeNull();
     first.unmount();
 
-    shell.appsAvailable = true;
-    navigationState.search = "tab=integrations&connected=notion";
+    navigationState.search = "tab=accounts";
+    const second = renderWithI18n(<SettingsPage />);
+    expect(replace).toHaveBeenLastCalledWith("/acme/apps?tab=accounts");
+    second.unmount();
+
+    navigationState.search = "tab=connected-accounts";
     renderWithI18n(<SettingsPage />);
-    const personal = within(nav()).getByRole("region", { name: /Personal/ });
-    expect(within(personal).queryByRole("link", { name: "Connected apps" })).toBeNull();
-    expect(
-      within(nav()).getByRole("link", { name: "Connected apps" }),
-    ).toHaveAttribute("aria-current", "page");
-    expect(screen.getByText("ConnectedAppsTab")).toBeInTheDocument();
+    expect(replace).toHaveBeenLastCalledWith("/acme/apps?tab=accounts");
+  });
+
+  it("sends the retired Apps tab and team connect returns to the Apps page", () => {
+    shell.appsAvailable = true;
+    navigationState.search = "tab=apps";
+    const first = renderWithI18n(<SettingsPage />);
+    expect(replace).toHaveBeenLastCalledWith("/acme/apps");
+    first.unmount();
+
+    navigationState.search = "tab=apps&connected=notion&scope=team";
+    renderWithI18n(<SettingsPage />);
+    expect(replace).toHaveBeenLastCalledWith("/acme/apps?connected=notion");
+  });
+
+  it("sends a personal connect return to the Apps page's Accounts", () => {
+    navigationState.search = "tab=apps&connected=notion";
+    renderWithI18n(<SettingsPage />);
+    expect(replace).toHaveBeenLastCalledWith("/acme/apps?tab=accounts&connected=notion");
   });
 
   it("marks pages a member can only view", () => {

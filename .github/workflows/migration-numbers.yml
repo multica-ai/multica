@@ -1,0 +1,131 @@
+name: Migration numbers
+
+# A PR's CI checks migration numbers only against the main it was pushed onto.
+# When main later gains a migration with the same number, nothing conflicts
+# textually and the PR stays green; merging it turns main red (MUL-9832).
+# Pull requests get the check as usual; every push that adds migrations to
+# main re-checks all open PRs and posts the result as a commit status on each
+# PR head, so a stale green turns red before anyone merges it.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "server/migrations/**"
+      - "scripts/check-migration-numbers.mjs"
+      - ".github/workflows/migration-numbers.yml"
+  push:
+    branches: [main]
+    paths:
+      - "server/migrations/**"
+  workflow_dispatch:
+
+# A newer main supersedes an older sweep: it re-checks every open PR anyway.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || 'open-prs' }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pull-request:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: Check against the latest main
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/check-migration-numbers.mjs --base origin/main --head "$HEAD_SHA"
+
+  open-prs:
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+    steps:
+      # Runs main's script only. PR heads are read as git trees, never
+      # checked out or executed, so the write token never meets PR code.
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: Fetch open PR heads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr list --repo "$GITHUB_REPOSITORY" --base main --state open --limit 2000 \
+            --json number --jq '.[].number' > "$RUNNER_TEMP/prs.txt"
+          echo "$(wc -l < "$RUNNER_TEMP/prs.txt") open PRs"
+          sed 's|.*|+refs/pull/&/head:refs/remotes/pull/&|' "$RUNNER_TEMP/prs.txt" \
+            | git fetch --no-tags --filter=blob:none --stdin origin
+
+      - name: Post migration-number status on PR heads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          base=$(git rev-parse origin/main)
+          context="Migration numbers vs latest main"
+          passed=0
+          failed=0
+          posted=0
+          errors=0
+          while read -r number; do
+            head=$(git rev-parse "refs/remotes/pull/$number")
+            # Most PRs touch no migrations; skip them before starting node.
+            # --name-only compares tree entries; --quiet would download blobs.
+            [ -n "$(git diff --name-only --no-renames "$base...$head" -- server/migrations/)" ] || continue
+
+            code=0
+            result=$(node scripts/check-migration-numbers.mjs --base origin/main --head "$head" --json) || code=$?
+            case "$code" in
+              0) state=success ;;
+              1) state=failure ;;
+              *) echo "::warning::PR #$number: migration check could not run"; continue ;;
+            esac
+            [ "$(jq '.added | length' <<<"$result")" -gt 0 ] || continue
+
+            description=$(jq -r '.summary' <<<"$result")
+            description=${description:0:140}
+            if [ "$state" = failure ]; then
+              failed=$((failed + 1))
+              echo "PR #$number: renumber $(jq -r '[.collisions[] | "\(.stem) to \(.suggestedNumber)"] | join(", ")' <<<"$result")"
+            else
+              passed=$((passed + 1))
+            fi
+
+            # Every migration that lands re-runs this sweep, while GitHub
+            # rate-limits status writes and caps them at 1000 per commit and
+            # context. Write only when the state or text changes, and never a
+            # first success: the pull-request job already reports that.
+            current=$(gh api "repos/$GITHUB_REPOSITORY/commits/$head/status" \
+              --jq ".statuses[] | select(.context == \"$context\") | [.state, .description] | @tsv") || current=""
+            [ "$current" = "$state"$'\t'"$description" ] && continue
+            [ -z "$current" ] && [ "$state" = success ] && continue
+
+            if gh api --silent "repos/$GITHUB_REPOSITORY/statuses/$head" \
+              -f state="$state" \
+              -f context="$context" \
+              -f description="$description" \
+              -f target_url="$RUN_URL"; then
+              posted=$((posted + 1))
+            else
+              errors=$((errors + 1))
+              echo "::warning::PR #$number: could not post the migration-number status"
+            fi
+            sleep 1
+          done < "$RUNNER_TEMP/prs.txt"
+          echo "Checked against main@${base:0:9}: $passed PR(s) clear, $failed PR(s) need a renumber; posted $posted status change(s), $errors failed" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+          [ "$errors" -eq 0 ]

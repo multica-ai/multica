@@ -36,7 +36,8 @@ import (
 // inherits the same cost silently. Keeping the list declarative puts the
 // internal/external payload boundary in one reviewable place.
 var internalOnlyPayloadKeys = map[string][]string{
-	protocol.EventIssueUpdated: {"prev_description", "prev_title"},
+	// The live-session keys feed activity folding and mention dedup.
+	protocol.EventIssueUpdated: {"prev_description", "prev_title", "description_live_editors", "description_seen_mentions"},
 	// task:failed error text is consumed synchronously by channel outbounds.
 	// It may contain provider/runtime detail that belongs in the originating
 	// chat transcript, not in the workspace-wide realtime fanout.

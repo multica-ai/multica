@@ -61,19 +61,19 @@ export function useProjectCommandGroup(
     const { project } = context;
     const pinned = pins.some((pin) => pin.item_type === "project" && pin.item_id === project.id);
     const commands: PaletteCommand[] = [
-      {
-        id: "project-status",
-        label: t(($) => $.project.change_status),
-        icon: CircleDashed,
-        keywords: ["status", "state", "状态"],
-        page: { type: "project-status", project },
-        crumb: project.title,
-        primary: true,
-      },
-      // A guest (MUL-9420) cannot create issues.
+      // A guest (MUL-9420) cannot change the project or create issues.
       ...(guest
         ? []
         : [
+            {
+              id: "project-status",
+              label: t(($) => $.project.change_status),
+              icon: CircleDashed,
+              keywords: ["status", "state", "状态"],
+              page: { type: "project-status" as const, project },
+              crumb: project.title,
+              primary: true,
+            },
             {
               id: "project-new-issue",
               label: t(($) => $.project.new_issue),

@@ -141,7 +141,7 @@
   },
   "delegate": {
     "row": "Encargar a un agente: «{{prompt}}»",
-    "hint": "Creación rápida"
+    "hint": "Crear con agente"
   },
   "best": {
     "assign": "Asignar {{subject}} a {{name}}",

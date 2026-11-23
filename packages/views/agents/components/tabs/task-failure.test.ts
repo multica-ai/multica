@@ -183,7 +183,7 @@ describe("failureReasonLabel", () => {
 
   it("covers operational reasons emitted outside the canonical taxonomy", () => {
     expect(failureReasonLabel("agent_fallback_message", enT)).toBe(
-      "Agent returned a fallback message",
+      "Agent couldn't produce a valid reply",
     );
     expect(failureReasonLabel("idle_watchdog", enT)).toBe(
       "Agent stopped after inactivity",
@@ -216,7 +216,7 @@ describe("failureReasonLabel", () => {
         "agent_error.provider_quota_limit",
         fixedT("zh-Hans"),
       ),
-    ).toBe("提供商配额已用尽");
+    ).toBe("提供方额度已用尽");
     expect(
       failureReasonLabel("agent_error.context_overflow", fixedT("ja")),
     ).toBe("コンテキストウィンドウを超過しました");

@@ -20,7 +20,7 @@
   },
   "archive": {
     "confirm_title": "全部歸檔？",
-    "confirm_body": "這會歸檔所有收件箱專案，包括已讀和未讀。你仍可在任務頁中找到它們。"
+    "confirm_body": "這會封存所有收件箱項目（無論已讀或未讀）。你仍可在任務頁面中找到它們。"
   },
   "errors": {
     "load_failed": "收件箱載入失敗：{{message}}"
@@ -31,10 +31,10 @@
     "priority_medium": "中",
     "priority_high": "高",
     "priority_urgent": "緊急",
-    "status_todo": "todo",
-    "status_in_progress": "in_progress",
-    "status_done": "done",
-    "status_blocked": "blocked",
+    "status_todo": "待辦",
+    "status_in_progress": "進行中",
+    "status_done": "已完成",
+    "status_blocked": "已阻塞",
     "notification": "通知",
     "close": "關閉通知",
     "unavailable": "此通知已不可用。",
@@ -65,9 +65,9 @@
     "agent_blocked": "AI 代理受阻",
     "agent_completed": "AI 代理已完成",
     "reaction_added": "新增了表情",
-    "quick_create_done": "快速建立完成",
-    "quick_create_failed": "快速建立失敗",
-    "quick_create_unconfirmed": "快速建立需要確認",
+    "quick_create_done": "已透過 AI 代理建立",
+    "quick_create_failed": "透過 AI 代理建立失敗",
+    "quick_create_unconfirmed": "透過 AI 代理建立待確認",
     "autopilot_paused": "自動化已暫停",
     "children_done": "子任務已全部結束",
     "project_owner_joined": "所有者加入了專案",
@@ -91,13 +91,5 @@
     "autopilot_title_limit": "自動化 \"{{title}}\" 未啟動，因為該工作區已達到當前週期 {{limit}} 次執行的上限。額度將在 {{resetAt}} 重置；工作區所有者或管理員也可以升級方案或加購執行次數。",
     "autopilot_limit": "該工作區已達到當前週期 {{limit}} 次自動化執行的上限。此執行未啟動。額度將在 {{resetAt}} 重置；工作區所有者或管理員也可以升級方案或加購執行次數。",
     "project_owner_joined": "{{name}} 是工作區所有者，已把自己加入這個私有專案，現在可以看到其中的任務、評論和附件。"
-  },
-  "actions.archive_completed": "歸檔已完成項",
-  "detail.status_todo": "todo",
-  "detail.status_done": "done",
-  "detail.status_blocked": "blocked",
-  "type.task_completed": "執行完成",
-  "type.task_failed": "執行失敗",
-  "type.run_limit_blocked": "已達到上限，本次執行被阻止",
-  "body.autopilot_title_limit": "自動化 \"{{title}}\" 未啟動，因為該工作區已達到當前週期 {{limit}} 次執行的上限。額度將在 {{resetAt}} 重置；工作區所有者或管理員也可以升級方案或加購執行次數。"
+  }
 }

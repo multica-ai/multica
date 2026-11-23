@@ -13,7 +13,6 @@ import {
   MessagesSquare,
   Mic,
   Palette,
-  Plug,
   Search,
   Server,
   Settings,
@@ -34,7 +33,7 @@ import {
 } from "@multica/core/feature-flags";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { cn } from "@multica/ui/lib/utils";
-import { resolveSettingsLocation, settingsHref } from "./settings-navigation";
+import { movedAppsHref, resolveSettingsLocation, settingsHref } from "./settings-navigation";
 import { AppLink, useNavigation } from "../../navigation";
 import { useRestoredScrollRef } from "../../platform/scroll-restoration";
 import { AccountTab } from "./account-tab";
@@ -45,7 +44,6 @@ import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { CodeTab } from "./code-tab";
 import { ChannelsTab } from "./channels-tab";
-import { ConnectedAppsTab, useComposioAvailable } from "./connected-apps-tab";
 import { NotificationsTab } from "./notifications-tab";
 import { LabelsTab } from "./labels-tab";
 import { WorkflowsTab } from "../../workflows/workflows-tab";
@@ -141,7 +139,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
     BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
     false,
   );
-  const appsAvailable = useComposioAvailable();
   const voiceInputAvailable = localVoiceAPI() !== undefined;
   const entry = (
     value: string,
@@ -257,9 +254,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               MessagesSquare,
               <ChannelsTab />,
             ),
-            ...(appsAvailable
-              ? [entry("apps", t(($) => $.page.tabs.apps), Plug, <ConnectedAppsTab />)]
-              : []),
             entry("mcp", t(($) => $.page.tabs.mcp), Server, <McpTab />, {
               adminOnly: true,
             }),
@@ -294,10 +288,14 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
   // Wakeup defaults moved to the issue wakeups list; old links land there.
   const wakeupsMoved = location.tab === "wakeups";
   const wakeupsTarget = wakeupsHref(paths.autopilots());
+  // The workspace's apps and accounts moved to their own page.
+  const appsMoved = location.tab === "apps";
+  const appsTarget = movedAppsHref(paths.apps(), navigation.searchParams, location.section);
   const { replace } = navigation;
   useEffect(() => {
     if (wakeupsMoved) replace(wakeupsTarget);
-  }, [wakeupsMoved, wakeupsTarget, replace]);
+    else if (appsMoved) replace(appsTarget);
+  }, [wakeupsMoved, wakeupsTarget, appsMoved, appsTarget, replace]);
   const candidate =
     location.tab === "billing" && !billingEnabled ? "workspace" : location.tab;
   const active =

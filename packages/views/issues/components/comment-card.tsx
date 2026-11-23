@@ -1365,10 +1365,14 @@ function CommentCardImpl({
     const anchorId = "run" in row
       ? (row.reply && !isDeletedComment(row.reply) ? row.reply.id : row.run.task.id)
       : row.id;
+    const rowCommentId = "run" in row
+      ? (row.reply && !isDeletedComment(row.reply) ? row.reply.id : undefined)
+      : row.id;
+    const rowEngaged = !!rowCommentId && annotation.activeSourceCommentId === rowCommentId;
     // Keyed like the inline rows: a run slot keeps its task key when its reply
     // arrives, so the slot (and its open activity panel) stays mounted.
     return <VirtualThreadRow key={"run" in row ? row.run.task.id : row.id} id={`comment-${anchorId}`} virtualize={virtualizeRows}
-      taskId={"run" in row ? row.run.task.id : undefined} scrollParent={replyScrollParent}>
+      engaged={rowEngaged} taskId={"run" in row ? row.run.task.id : undefined} scrollParent={replyScrollParent}>
       {() => renderThreadRow(row, virtualizeRows)}
     </VirtualThreadRow>;
   });

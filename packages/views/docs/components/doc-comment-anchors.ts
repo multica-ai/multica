@@ -73,9 +73,14 @@ function sharedPrefix(a: string, b: string): number {
   return n;
 }
 
-/** A DOM range over `anchor` in `root`, or null when the quote is gone. */
-export function docAnchorRange(root: HTMLElement, anchor: DocAnchor): Range | null {
-  const { text, nodes } = indexCommentText(root, true);
+/** A DOM range over `anchor` in `root`, or null when the quote is gone. Pass
+ *  `index` to locate several anchors with one walk over the doc. */
+export function docAnchorRange(
+  root: HTMLElement,
+  anchor: DocAnchor,
+  index: ReturnType<typeof indexCommentText> = indexCommentText(root, true),
+): Range | null {
+  const { text, nodes } = index;
   const start = locateDocAnchor(text, anchor);
   if (start === null) return null;
   const end = start + anchor.quote.length;

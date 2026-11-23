@@ -2,8 +2,8 @@
   "page": {
     "breadcrumb": "我的任务",
     "workspace_fallback": "工作区",
-    "empty_title": "没有分配给你的任务",
-    "empty_description": "你创建或被分配到的任务会显示在这里。"
+    "empty_title": "暂无任务",
+    "empty_description": "指派给你、由你创建，或涉及你的智能体和小队的任务会显示在这里。"
   },
   "header": {
     "scope": {
@@ -14,7 +14,7 @@
       "created_label": "我创建的",
       "created_description": "我创建的任务",
       "agents_label": "我的智能体和小队",
-      "agents_description": "分配给我的智能体的任务"
+      "agents_description": "指派给我的智能体和小队的任务"
     },
     "filter_button": "筛选",
     "filter_status": "状态",

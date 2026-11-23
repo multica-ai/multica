@@ -266,7 +266,12 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 
 	// Notify the invitee in real time if they are a registered user.
 	userID := requestUserID(r)
-	eventPayload := map[string]any{"invitation": resp}
+	// The event reaches every member, so it leaves out the projects, which
+	// may include private ones (ListWorkspaceInvitations filters them per
+	// viewer). Clients refetch on it rather than reading the payload.
+	eventInvitation := resp
+	eventInvitation.ProjectIDs = nil
+	eventPayload := map[string]any{"invitation": eventInvitation}
 	var workspaceName string
 	if ws, err := h.Queries.GetWorkspace(r.Context(), requester.WorkspaceID); err == nil {
 		workspaceName = ws.Name
@@ -313,6 +318,12 @@ func (h *Handler) ListWorkspaceInvitations(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "failed to list invitations")
 		return
 	}
+	// A guest invitation's projects are listed only where the viewer can see
+	// them, as on the members list.
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return
+	}
 
 	includeGuests := clientRendersGuestRole(r)
 	resp := make([]InvitationResponse, 0, len(rows))
@@ -327,7 +338,7 @@ func (h *Handler) ListWorkspaceInvitations(w http.ResponseWriter, r *http.Reques
 			InviteeEmail:  row.InviteeEmail,
 			InviteeUserID: uuidToPtr(row.InviteeUserID),
 			Role:          row.Role,
-			ProjectIDs:    uuidsToStrings(row.ProjectIds),
+			ProjectIDs:    visibleProjectIDs(hidden, uuidsToStrings(row.ProjectIds)),
 			Status:        row.Status,
 			CreatedAt:     timestampToString(row.CreatedAt),
 			UpdatedAt:     timestampToString(row.UpdatedAt),

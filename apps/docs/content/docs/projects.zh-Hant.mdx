@@ -37,10 +37,10 @@ import { ProjectDemo } from "@/components/demos/project-demo";
 專案進度按關聯任務自動計算：
 
 ```text
-進度 = 狀態屬於 done 或 closed 分類的任務數 ÷ 專案中的全部任務數
+進度 = 狀態屬於 done 分類的任務數 ÷（專案中的全部任務數 − 狀態屬於 closed 分類的任務數）
 ```
 
-內建狀態裡就是 `done` 和 `cancelled`，歸入這兩個分類的自定義狀態也一樣計入。`cancelled` 表示這項工作已從專案範圍中結束，所以算進進度。
+內建狀態裡，`done` 算作完成，`cancelled` 屬於 closed。closed 的任務已移出專案範圍，既不算完成，也不計入總數；專案會在進度旁單獨顯示已取消的數量。自定義狀態按所屬分類計算。百分比無條件捨去，所以 100% 表示範圍內的任務全部完成。範圍內沒有任務的專案顯示 0%。
 
 專案狀態和任務狀態各管各的：所有任務完成後，專案不會自動變為 `completed`；修改專案狀態，也不會批次修改其中的任務。
 
@@ -103,8 +103,6 @@ multica project member add <project-id> carol@example.com
 ```
 
 把私有專案改回**整個工作區**後，`owner`、`admin` 和 `member`都能看到這個專案及其中的任務、評論和附件。訪客仍需獲邀存取該專案。在介面中儲存前會要求確認；`multica project update --visibility workspace` 則直接生效。
-
-若工作區方案限制私有專案，現有私有專案的可見範圍與成員名單維持不變。此時無法建立私有專案、將專案改為私有，或在私有專案中新增成員，包括透過指定負責人來新增成員。有權限的成員仍可編輯專案詳情、移除成員、將存取權限改為**整個工作區**，以及歸檔或刪除專案。工作區 owner 仍可透過[工作區擁有者恢復存取](#workspace-owner-recovery)加入專案。
 
 ### 工作區擁有者恢復存取 [#workspace-owner-recovery]
 

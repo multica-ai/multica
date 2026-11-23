@@ -67,6 +67,31 @@ describe("knowledge base client", () => {
     ).rejects.toThrow(/Malformed response/);
   });
 
+  it("asks for the saved state with a collab ticket only when told to", async () => {
+    const client = new ApiClient("https://api.example.test");
+    const fetchMock = respond({ enabled: true, token: "t", document: "doc:d1", expires_at: "2026-11-21T00:00:00Z", state: "AAE=" });
+    expect(await client.createDocCollabTicket("d1", { state: true })).toEqual({
+      enabled: true,
+      token: "t",
+      document: "doc:d1",
+      expiresAt: "2026-11-21T00:00:00Z",
+      state: "AAE=",
+    });
+    expect(fetchMock.mock.calls[0]![1].body).toBe(JSON.stringify({ state: true }));
+
+    const plain = respond({ enabled: true, token: "t", document: "doc:d1" });
+    expect(await client.createDocCollabTicket("d1")).not.toHaveProperty("state");
+    expect(plain.mock.calls[0]![1].body).toBeUndefined();
+  });
+
+  it("treats a malformed collab ticket as live editing off", async () => {
+    const client = new ApiClient("https://api.example.test");
+    respond({ enabled: "yes", state: 42 });
+    expect(await client.createDocCollabTicket("d1", { state: true })).toEqual({ enabled: false });
+    respond({ enabled: true, document: "doc:d1" });
+    expect(await client.createDocCollabTicket("d1")).toEqual({ enabled: false });
+  });
+
   it("falls back to an empty tree and versions on malformed responses", async () => {
     const client = new ApiClient("https://api.example.test");
     respond({ folders: "nope" });
@@ -99,6 +124,17 @@ describe("knowledge base client", () => {
         new ApiError("x", 409, "Conflict", { code: "folder_not_empty" }),
       ),
     ).toBe(false);
+  });
+
+  it("treats a stale save that could not be merged as a revision conflict", async () => {
+    respond(
+      { error: "the doc changed in the same place", code: "doc_merge_conflict", actual_revision: 5 },
+      409,
+    );
+    const error = await new ApiClient("https://api.example.test")
+      .updateDoc("d1", { baseRevision: 3, content: "x" })
+      .catch((e: unknown) => e);
+    expect(isDocRevisionConflict(error)).toBe(true);
   });
 
   it("searches docs and keeps the hits it can read", async () => {

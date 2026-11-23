@@ -6,6 +6,7 @@ import type { AgentTask, Issue, QuickAction } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../../locales/en/common.json";
 import enIssues from "../../../locales/en/issues.json";
+import { useAssigneePicksStore } from "@multica/core/issues/stores/assignee-picks-store";
 
 const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 
@@ -13,9 +14,9 @@ const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 // Mocks — same pattern as the issue-detail test suite.
 // ---------------------------------------------------------------------------
 
-const deletionPolicy = vi.hoisted(() => ({ allowed: true }));
+const deletionPolicy = vi.hoisted(() => ({ allowed: true, offered: true }));
 vi.mock("@multica/core/issues/use-issue-deletion", () => ({
-  useIssueDeletion: () => ({ canDelete: () => deletionPolicy.allowed }),
+  useIssueDeletion: () => ({ canDelete: () => deletionPolicy.allowed, offersDelete: deletionPolicy.offered }),
 }));
 
 vi.mock("@multica/core/hooks", () => ({
@@ -42,12 +43,13 @@ vi.mock("@multica/core/auth", () => ({
   registerAuthStore: vi.fn(),
 }));
 
+const viewer = vi.hoisted(() => ({ role: "admin" }));
 vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({
     queryKey: ["workspaces", "ws-1", "members"],
     queryFn: () =>
       Promise.resolve([
-        { user_id: "user-1", name: "Test User", email: "t@t.com", role: "admin" },
+        { user_id: "user-1", name: "Test User", email: "t@t.com", role: viewer.role },
       ]),
   }),
   agentListOptions: () => ({
@@ -56,10 +58,6 @@ vi.mock("@multica/core/workspace/queries", () => ({
   }),
   squadListOptions: () => ({
     queryKey: ["workspaces", "ws-1", "squads"],
-    queryFn: () => Promise.resolve([]),
-  }),
-  assigneeFrequencyOptions: () => ({
-    queryKey: ["workspaces", "ws-1", "assignee-frequency"],
     queryFn: () => Promise.resolve([]),
   }),
 }));
@@ -171,6 +169,7 @@ vi.mock("../../../platform/local-directory", async (importOriginal) => ({
 }));
 
 // Import after mocks.
+import { memberListOptions } from "@multica/core/workspace/queries";
 import { IssueActionsDropdown, useIssuePageMenu } from "../issue-actions-dropdown";
 import {
   IssueActionsContextMenu,
@@ -212,8 +211,12 @@ function wrap(ui: React.ReactNode) {
 }
 
 beforeEach(() => {
+  // Picks persist in a real store; keep one test's picks out of the next's Recent.
+  useAssigneePicksStore.setState({ byScope: {} });
   platform.desktop = false;
   deletionPolicy.allowed = true;
+  deletionPolicy.offered = true;
+  viewer.role = "admin";
   mockOpenModal.mockReset();
   openInNewTabMock.mockReset();
   openInDesktopMock.mockReset();
@@ -392,6 +395,49 @@ describe("IssueActionsDropdown", () => {
     expect(mockOpenModal).not.toHaveBeenCalled();
   });
 
+  it("leaves Delete issue out for a viewer who can delete nothing (a guest)", async () => {
+    deletionPolicy.allowed = false;
+    deletionPolicy.offered = false;
+    render(wrap(<IssueActionsDropdown issue={mockIssue} trigger={<button data-testid="trigger">Menu</button>} />));
+    fireEvent.click(screen.getByTestId("trigger"));
+    expect(await screen.findByText("Copy link")).toBeInTheDocument();
+    expect(screen.queryByText("Delete issue")).not.toBeInTheDocument();
+  });
+
+  it("offers a guest only the entries the server lets it use, without asking for runs or quick actions (MUL-9883)", async () => {
+    viewer.role = "guest";
+    deletionPolicy.allowed = false;
+    deletionPolicy.offered = false;
+    apiMocks.listQuickActions.mockResolvedValue({
+      quick_actions: [{ id: "qa-1", name: "Triage", status: "active" }],
+    });
+    listTasksByIssueMock.mockResolvedValue([
+      { id: "task-1", status: "completed", work_dir: "/tmp/work", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // The shell has the member list cached before any menu opens.
+    await queryClient.fetchQuery(memberListOptions("ws-1"));
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={queryClient}>
+          <IssueActionsDropdown issue={mockIssue} trigger={<button data-testid="trigger">Menu</button>} />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+    fireEvent.click(screen.getByTestId("trigger"));
+    await screen.findByText("Copy link");
+
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent?.trim())).toEqual([
+      "Open in new tab",
+      "Pin to sidebar",
+      "Copy link",
+      "Copy link with title",
+      "Copy issue ID",
+    ]);
+    expect(listTasksByIssueMock).not.toHaveBeenCalled();
+    expect(apiMocks.listQuickActions).not.toHaveBeenCalled();
+  });
+
   it("clicking Delete issue opens the delete-confirm modal", async () => {
     render(
       wrap(
@@ -510,7 +556,7 @@ describe("IssueActionsDropdown", () => {
     await waitFor(() => {
       expect(listTasksByIssueMock).toHaveBeenCalledWith("issue-1", false, { view: "timeline" });
     });
-    fireEvent.click(await screen.findByText("Copy local workdir path"));
+    fireEvent.click(await screen.findByText("Copy local working directory path"));
 
     await waitFor(() => {
       expect(copyTextMock).toHaveBeenCalledWith("/managed/task/worktree");
@@ -830,7 +876,7 @@ describe("Sidebar variant (MUL-8425)", () => {
       "Mark as unread",
       "Copy link",
       "Copy link with title",
-      "Copy identifier",
+      "Copy issue ID",
     ]);
     expect(screen.getByTestId("row")).toHaveAttribute("data-popup-open");
     // No workdir entry, so the menu has no reason to fetch the task list.
@@ -861,7 +907,7 @@ describe("Sidebar variant (MUL-8425)", () => {
 
   it("copies the identifier", async () => {
     openSidebarMenu();
-    fireEvent.click(await screen.findByText("Copy identifier"));
+    fireEvent.click(await screen.findByText("Copy issue ID"));
 
     await waitFor(() => {
       expect(copyTextMock).toHaveBeenCalledWith("TES-1");

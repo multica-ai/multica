@@ -21,8 +21,8 @@
  * tracks the document that is actually shown.
  *
  * Reached through RichFenceBlock (rich-content/rich-code-block.tsx) for closed
- * fences only. NOT used in the editable Tiptap NodeView — that path must keep
- * `<NodeViewContent as="code" />` so the user can continue typing.
+ * fences, and from the editable code block's NodeView (MUL-9760), which hands
+ * in its own editable source through `editing`.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -36,6 +36,8 @@ import {
   DYNAMIC_BLOCK_MIN_BODY_PX,
   DynamicBlock,
   DynamicBlockSkeleton,
+  useValueWhileVisible,
+  type DynamicBlockEditing,
   type DynamicBlockError,
 } from "./dynamic-block";
 import { useThemeVersion } from "./hooks/use-theme-version";
@@ -44,8 +46,10 @@ import {
   HTML_BLOCK_EMBED_OPTIONS,
   HTML_BLOCK_MESSAGE_KEY,
   INITIAL_HTML_BLOCK_HEIGHT,
+  NO_HTML_BLOCK_THEME,
   buildHtmlBlockDocument,
   htmlBlockTheme,
+  mentionsThemeTokens,
   nextHtmlBlockHeight,
   readHtmlBlockMessage,
 } from "./utils/html-block-document";
@@ -109,9 +113,11 @@ interface HtmlBlockPreviewProps {
   html: string;
   /** From the fence info string: ```html title="…". */
   title?: string | null;
+  /** Set by the editor's NodeView. */
+  editing?: DynamicBlockEditing;
 }
 
-export function HtmlBlockPreview({ html, title }: HtmlBlockPreviewProps) {
+export function HtmlBlockPreview({ html: source, title, editing }: HtmlBlockPreviewProps) {
   const { t } = useT("editor");
   const hostRef = useRef<HTMLDivElement>(null);
   const themeVersion = useThemeVersion();
@@ -124,6 +130,12 @@ export function HtmlBlockPreview({ html, title }: HtmlBlockPreviewProps) {
   // (see the flicker note in the file header).
   const [bodyHeight, setBodyHeight] = useState<number | null>(null);
   const frameTitle = t(($) => $.code_block.html_preview);
+  // While the editor shows the source, edits wait for the preview to be shown
+  // (or enlarged) instead of reloading a hidden frame on every pause.
+  const html = useValueWhileVisible(
+    source,
+    !editing || editing.view === "preview" || fullscreen,
+  );
 
   const reload = () => {
     setError(null);
@@ -133,11 +145,20 @@ export function HtmlBlockPreview({ html, title }: HtmlBlockPreviewProps) {
   // Built after mount: the theme tokens come from the host's computed style.
   // A theme switch rebuilds the document, which reruns its scripts — a chart
   // reads its colors when it draws, so this is the only way it can follow.
+  // HTML that names no token gets the same document under every theme, so a
+  // switch does not reload it and lose what was typed or toggled inside.
+  const builtRef = useRef<string | null>(null);
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
+    const theme = mentionsThemeTokens(html)
+      ? htmlBlockTheme(readEmbedTheme(host, HTML_BLOCK_EMBED_OPTIONS))
+      : NO_HTML_BLOCK_THEME;
+    const next = buildHtmlBlockDocument(html, theme);
+    if (next === builtRef.current) return;
+    builtRef.current = next;
     setError(null);
-    setSrcDoc(buildHtmlBlockDocument(html, htmlBlockTheme(readEmbedTheme(host, HTML_BLOCK_EMBED_OPTIONS))));
+    setSrcDoc(next);
   }, [html, themeVersion]);
 
   return (
@@ -145,12 +166,13 @@ export function HtmlBlockPreview({ html, title }: HtmlBlockPreviewProps) {
       <DynamicBlock
         kind="html"
         title={title}
-        source={html}
+        source={source}
         error={error}
         fullscreen={fullscreen}
         onFullscreen={() => setFullscreen(true)}
         onReload={reload}
         bodyHeight={bodyHeight}
+        editing={editing}
         preview={({ active, collapsed }) => (
           // Keyed by the content: a re-authored block restarts measurement
           // from scratch — a stale `frozen`/`loaded` from the previous

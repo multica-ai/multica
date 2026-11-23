@@ -23,8 +23,8 @@
       "heading_3": "標題 3"
     },
     "list_dropdown": {
-      "bullet_list": "無序列表",
-      "ordered_list": "有序列表",
+      "bullet_list": "項目符號清單",
+      "ordered_list": "編號清單",
       "task_list": "待辦列表"
     },
     "sub_issue": {
@@ -44,7 +44,7 @@
     "image_copied": "已複製圖片",
     "copy_image_failed": "無法複製圖片",
     "canvas_label": "圖片畫布,拖動可平移,滾動可縮放,雙擊可切換實際大小。",
-    "unavailable": "這張圖片已失效,已跳過。"
+    "unavailable": "這張圖片已失效並已略過。"
   },
   "canvas": {
     "zoom_in": "放大",
@@ -100,7 +100,7 @@
     "copy_failed": "複製失敗"
   },
   "mention": {
-    "group_users": "使用者",
+    "group_users": "成員",
     "group_issues": "任務",
     "group_projects": "專案",
     "group_docs": "文件",
@@ -125,8 +125,6 @@
     "html_preview": "HTML 預覽",
     "close_preview": "關閉",
     "copy_code": "複製程式碼",
-    "show_preview": "顯示預覽",
-    "show_source": "顯示原始碼",
     "fullscreen": "放大"
   },
   "dynamic_block": {
@@ -140,7 +138,10 @@
     "error_mermaid": "無法繪製這張圖",
     "error_at_line": "{{message}}（第 {{line}} 行）",
     "view_source": "檢視原始碼",
-    "copy_error": "複製錯誤"
+    "copy_error": "複製錯誤",
+    "title": "標題",
+    "rename": "重新命名",
+    "add_title": "新增標題"
   },
   "file_card": {
     "uploading": "正在上傳 {{filename}}"

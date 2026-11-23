@@ -644,3 +644,23 @@ func TestMembershipBatchCoalescesAndDeduplicatesIdentities(t *testing.T) {
 		t.Fatal("one queued wave was checked with multiple queries")
 	}
 }
+
+func TestDisconnectMemberDeliversRemovalNoticeBeforeWritePumpClosesConn(t *testing.T) {
+	for range 30 {
+		hub := NewHub()
+		var revoked atomic.Bool
+		mc := membershipFunc(func(context.Context, string, string) (bool, error) {
+			return !revoked.Load(), nil
+		})
+		server := membershipServer(t, hub, mc)
+		conn := connectWS(t, server)
+		waitFor(t, "client registration", func() bool { return totalClients(hub) == 1 })
+
+		revoked.Store(true)
+		hub.DisconnectMember(testWorkspaceID, testUserID, "member-id")
+		wantMembershipFrame(t, conn, "member:removed")
+		wantMembershipClosed(t, conn)
+		conn.Close()
+		server.Close()
+	}
+}

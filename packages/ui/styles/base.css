@@ -139,6 +139,117 @@
   animation: onboarding-enter 0.4s ease both;
 }
 
+/* Inbox auto-advance / undo detail transition (MUL-9865).
+ * `backwards` fill-mode commits the initial offset pre-paint and releases
+ * `transform` once finished so sticky/fixed descendants inside the reading
+ * column keep their normal containing block. */
+@keyframes inbox-enter-next {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes inbox-enter-prev {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes inbox-enter-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-inbox-enter-next {
+  animation: inbox-enter-next 160ms cubic-bezier(0.23, 1, 0.32, 1) backwards;
+}
+
+.animate-inbox-enter-prev {
+  animation: inbox-enter-prev 160ms cubic-bezier(0.23, 1, 0.32, 1) backwards;
+}
+
+.animate-inbox-enter-fade {
+  animation: inbox-enter-fade 130ms ease-out backwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-inbox-enter-next,
+  .animate-inbox-enter-prev {
+    animation-name: inbox-enter-fade;
+    animation-duration: 120ms;
+  }
+}
+
+/* Chat session switch / archive-advance message transition (MUL-9881).
+ * Plays once the virtualized list has landed on its live end (`hasReachedLiveEnd`),
+ * so the reader never sees Virtuoso's unmeasured scroll jump. `backwards`
+ * releases `transform` on finish so sticky/fixed descendants keep their normal
+ * containing block. */
+@keyframes chat-enter-next {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes chat-enter-prev {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes chat-enter-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-chat-enter-next {
+  animation: chat-enter-next 160ms cubic-bezier(0.23, 1, 0.32, 1) backwards;
+}
+
+.animate-chat-enter-prev {
+  animation: chat-enter-prev 160ms cubic-bezier(0.23, 1, 0.32, 1) backwards;
+}
+
+.animate-chat-enter-fade {
+  animation: chat-enter-fade 130ms ease-out backwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-chat-enter-next,
+  .animate-chat-enter-prev {
+    animation-name: chat-enter-fade;
+    animation-duration: 120ms;
+  }
+}
+
 /* Chat FAB: gentle color + border tint while a chat task is running.
  * Keeps the ring at the same thickness — only hue shifts towards brand
  * at half-cycle, no outer glow. */
@@ -376,7 +487,18 @@ html[data-sidebar-resizing="true"] {
   transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-[data-group]:has(> [data-separator="active"]) > [data-right-sidebar-panel] {
+/* While a panel separator is dragged (ResizableHandle marks <html>), the
+ * resize cursor follows the captured pointer across the panels, and the
+ * right sidebar's flex-grow tracks the pointer without easing. */
+html[data-resizing="col"] * {
+  cursor: col-resize;
+}
+
+html[data-resizing="row"] * {
+  cursor: row-resize;
+}
+
+html[data-resizing] [data-right-sidebar-panel] {
   transition: none;
 }
 

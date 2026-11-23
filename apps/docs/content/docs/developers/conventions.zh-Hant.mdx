@@ -202,18 +202,19 @@ Agent 在簡體中文（`zh-Hans`）中譯為**智能体**，在繁體中文（`
 | Empty / Failed / Success | 空 / 失败 / 成功 |
 | Error / Warning | 错误 / 警告 |
 
-### 角色名 + 狀態名（小寫英文，不翻）
+### 角色名與狀態名：介面展示在地化，協議識別碼保留小寫英文
 
-這些是 schema-level 識別碼，中文環境也保持小寫英文：
+UI 中的展示標籤（狀態選擇器、角色下拉選單、篩選器、通知描述等）按各語言自然翻譯：
+
+- 角色展示名（`zh-Hans`）：所有者 / 管理员 / 成员 / 访客
+- 任務狀態展示名（`zh-Hans`）：待规划 / 待办 / 进行中 / 审核中 / 已完成 / 已阻塞 / 已取消
+- 狀態分類展示名（`zh-Hans`）：未开始 / 已开始 / 已完成 / 已关闭
+
+僅在 API、資料庫、CLI 命令與程式碼引用中保留小寫英文 schema 識別碼：
 
 - 角色：`owner` / `admin` / `member` / `guest`
 - Issue 狀態：`backlog` / `todo` / `in_progress` / `in_review` / `done` / `blocked` / `cancelled`
 - Issue 狀態分類：`unstarted` / `started` / `done` / `closed`
-
-UI 裡展示這些值時保持英文（必要時用 code-style 包起來）：
-
-- "你需要 owner 權限"
-- "已切換到 in_progress"
 
 ### 詞組組合規則
 

@@ -205,7 +205,7 @@ async function startEditing() {
 }
 
 function getSaveButton() {
-  return screen.getByRole("button", { name: /Save|Uploading…/ });
+  return screen.getByRole("button", { name: /Save|Uploading.../ });
 }
 
 beforeEach(() => {

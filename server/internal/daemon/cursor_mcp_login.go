@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
@@ -125,6 +127,47 @@ func cursorMcpLoginNoticeFor(check cursorMcpLoginCheck, taskLog *slog.Logger) cu
 	notice.WorkDir = workDir
 	notice.CursorDataDir = dataDir
 	return notice
+}
+
+// cursorMcpAuthSyncInterval is how often a running Cursor task's MCP login copy
+// is checked for changes to merge back into the agent's login.
+const cursorMcpAuthSyncInterval = 2 * time.Second
+
+// startCursorMcpAuthMirror merges the MCP login changes Cursor makes during a
+// run back into the agent's login while the run is still going, so a token it
+// refreshes reaches the agent's other tasks before this one ends. The returned
+// stop runs one last sync; it is safe to call more than once.
+func startCursorMcpAuthMirror(mirror *execenv.CursorMcpAuthMirror, interval time.Duration, taskLog *slog.Logger) func() {
+	if mirror == nil {
+		return func() {}
+	}
+	done := make(chan struct{})
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				if err := mirror.SyncIfChanged(); err != nil {
+					taskLog.Warn("cursor mcp login sync failed", "error", err)
+				}
+			}
+		}
+	}()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			close(done)
+			<-finished
+			if err := mirror.Sync(); err != nil {
+				taskLog.Warn("cursor mcp login sync failed", "error", err)
+			}
+		})
+	}
 }
 
 // reportCursorMcpLoginNotice posts the login notice for the servers that still

@@ -57,7 +57,7 @@ import {
 import type { MentionItem } from "./extensions/mention-suggestion";
 import type { IssueIdentifierResolver } from "./extensions/issue-identifier-autolink";
 import type { BuiltinCommandSuggestionOptions } from "./extensions/slash-command-suggestion";
-import { createEditorExtensions } from "./extensions";
+import { createEditorExtensions, type EditorCollaboration } from "./extensions";
 import {
   uploadAndInsertFile,
   insertUploadPlaceholder,
@@ -251,6 +251,14 @@ interface ContentEditorBaseProps {
    * signal to swap their static shell for the live editor.
    */
   onReady?: () => void;
+  /**
+   * Edit a shared Yjs document with other people and agents. The document is
+   * the source of truth: `value` / `defaultValue` are ignored, there is no
+   * local history to adopt external content into, and `onUpdate` only reports
+   * what the shared document now holds. The host remounts the editor (`key`)
+   * to switch documents.
+   */
+  collaboration?: EditorCollaboration;
 }
 
 type ContentEditorValueProps =
@@ -413,6 +421,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       attachments,
       flushPendingOnUnmount = false,
       onReady,
+      collaboration,
     },
     ref,
   ) {
@@ -589,7 +598,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       return issue ? { id: issue.id, identifier: issue.identifier } : null;
     };
 
-    const initialMarkdown = value ?? defaultValue ?? "";
+    const initialMarkdown = collaboration ? "" : (value ?? defaultValue ?? "");
     const initialContent = initialMarkdown
       ? // One-shot read: the editor preprocesses its initial document once at
         // load. Unlike the readonly renderer it does not need to re-run when
@@ -674,6 +683,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             quickActionMenuRef.current?.getQuickActionContent?.(id) ?? "",
         },
         resolveIssueIdentifierRef,
+        collaboration,
       }),
       onUpdate: ({ editor: ed }) => {
         if (!onUpdateRef.current) return;
@@ -901,7 +911,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // without this effect, a WS-driven description update keeps the editor
     // showing stale content until the issue is closed and reopened.
     useEffect(() => {
-      if (!editor || editor.isDestroyed || value === undefined) return;
+      if (!editor || editor.isDestroyed || value === undefined || collaboration) return;
 
       const previousValue = lastSyncedValueRef.current;
       lastSyncedValueRef.current = value;
@@ -949,7 +959,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       if (isDirty) return;
 
       applyExternalContent(value);
-    }, [value, editor, applyExternalContent]);
+    }, [value, editor, applyExternalContent, collaboration]);
 
     // Sync external `placeholder` changes into the mounted editor.
     // The Placeholder extension is configured with a getter over `placeholderRef`

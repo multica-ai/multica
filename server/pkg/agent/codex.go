@@ -1570,6 +1570,14 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			finalStatus = "failed"
 			stderrTail := sanitizeCodexDiagnostic(stderrBuf.Tail())
 			finalError = err.Error()
+			// No turn has started, so a reaped process tree makes the timeout safe
+			// for the daemon's bounded retry path.
+			retrySafe := timedOut && cleanupConfirmed
+			if retrySafe {
+				finalStatus = "timeout"
+			} else if timedOut {
+				finalError += "; retry suppressed: process cleanup/reap not confirmed"
+			}
 			if c.threadSetupMethod != "" {
 				classification := classifyCodexStartupStderr(stderrTail, timedOut)
 				b.cfg.Logger.Warn("codex lifecycle",
@@ -1584,7 +1592,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 					"latency_ms", time.Since(c.threadSetupStarted).Milliseconds(),
 					"cleanup_confirmed", cleanupConfirmed,
 					"reaped", cleanupConfirmed,
-					"retry_safe", false,
+					"retry_safe", retrySafe,
 					"retry_attempted", false,
 					"stderr_model_refresh_failure_count", classification.modelRefreshFailure,
 					"stderr_model_refresh_timeout_count", classification.modelRefreshTimeout,

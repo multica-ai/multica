@@ -95,7 +95,7 @@ diff，全都挂在同一个任务下——没人需要重新捋一遍上下文�
 </p>
 
 - **[执行日志](https://multica.ai/docs/zh/tasks) →** 每次工具调用、命令和报错都带时间戳，可以完整回放。
-- **运行中插话 →** 智能体干活时直接回复，消息会进到当前这次运行，不用等下一次。目前支持 Claude Code、Codex、Grok 和 Kiro。
+- **运行中插话 →** 智能体干活时直接回复，消息会进到当前这次运行，不用等下一次。目前支持 Claude Code、Codex、Cursor Agent、Grok、Kiro 和 Pi。
 - **用量统计 →** 每次运行花了多少，按智能体、按任务都看得到。
 - **[人来验收](https://multica.ai/docs/zh/issues) →** 活先进入审核中，不直接进 main。上不上线你说了算。
 - **[收件箱](https://multica.ai/docs/zh/inbox) →** 只在智能体需要你拍板时提醒你，而不是每一步都来烦你。
@@ -207,7 +207,7 @@ Multica 不自带模型。它驱动的是你本来就装好、登录好的那些
 | 在 Codex、Claude Code 或 Cursor 里驱动 Multica | [Multica CLI skill](https://github.com/multica-ai/multica-cli) |
 | 查智能体为什么卡住了 | [运行](https://multica.ai/docs/zh/tasks) · [问题排查](https://multica.ai/docs/zh/troubleshooting) |
 
-文档另有 [English](https://multica.ai/docs)、[日本語](https://multica.ai/docs/ja)、[한국어](https://multica.ai/docs/ko)
+文档另有 [English](https://multica.ai/docs)、[繁體中文](https://multica.ai/docs/zh-Hant)、[日本語](https://multica.ai/docs/ja)、[한국어](https://multica.ai/docs/ko)
 和 [Français](https://multica.ai/docs/fr) 版本。
 
 ---
