@@ -26,6 +26,8 @@ function makeDropArgs() {
 
   const overlayNode = document.createElement("div");
   const innerCard = document.createElement("div");
+  innerCard.style.rotate = "1deg";
+  innerCard.style.scale = "1.01";
   overlayNode.appendChild(innerCard);
 
   const outerAnim = makeFakeAnim();
@@ -87,13 +89,18 @@ describe("createIssueDropAnimation", () => {
       },
     );
     expect(innerAnimate).toHaveBeenCalledWith(
-      expect.arrayContaining([
+      [
         expect.objectContaining({
-          transform: "rotate(0deg) scale(1)",
+          rotate: "1deg",
+          scale: "1.01",
+        }),
+        {
+          rotate: "0deg",
+          scale: "1",
           opacity: "1",
           boxShadow: "none",
-        }),
-      ]),
+        },
+      ],
       {
         duration: ISSUE_DROP_DURATION_MS,
         easing: UI_EASE_OUT_CSS,

@@ -73,17 +73,29 @@ export function createIssueDropAnimation(
       timing,
     );
 
+    const innerStyle = innerCard ? getComputedStyle(innerCard) : null;
+    const fromRotate =
+      innerStyle?.rotate && innerStyle.rotate !== "none"
+        ? innerStyle.rotate
+        : "0deg";
+    const fromScale =
+      innerStyle?.scale && innerStyle.scale !== "none" ? innerStyle.scale : "1";
+
     const innerAnim =
-      innerCard && typeof innerCard.animate === "function"
+      innerCard && innerStyle && typeof innerCard.animate === "function"
         ? innerCard.animate(
             [
               {
-                transform: getComputedStyle(innerCard).transform,
-                opacity: getComputedStyle(innerCard).opacity,
-                boxShadow: getComputedStyle(innerCard).boxShadow,
+                // Tailwind v4 `rotate-*` and `scale-*` write the standalone
+                // `rotate` and `scale` properties, not `transform`.
+                rotate: fromRotate,
+                scale: fromScale,
+                opacity: innerStyle.opacity,
+                boxShadow: innerStyle.boxShadow,
               },
               {
-                transform: "rotate(0deg) scale(1)",
+                rotate: "0deg",
+                scale: "1",
                 opacity: "1",
                 boxShadow: "none",
               },
