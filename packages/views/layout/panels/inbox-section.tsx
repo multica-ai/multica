@@ -6,7 +6,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useReducedMotion } from "@multica/core/appearance";
-import { AlarmClock, Archive, ArchiveRestore, BellOff, BookCheck, CheckCheck, ListChecks, MoreHorizontal } from "@multica/ui/icons";
+import { AlarmClock, Archive, ArchiveRestore, BellOff, BookCheck, CheckCheck, ListChecks, MoreHorizontal, SlidersHorizontal } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
@@ -167,6 +167,12 @@ export function InboxSection({
     if (onInboxPage) setSectionTab(wsId, pageTab);
   }, [onInboxPage, pageTab, setSectionTab, wsId]);
   const selectTab = (next: InboxTab) => {
+    // The open tab is the section's title: selecting it again folds the
+    // section, as a click on another section's title does.
+    if (next === tab) {
+      setCollapsed(!collapsed);
+      return;
+    }
     setSectionTab(wsId, next);
     if (collapsed) setCollapsed(false);
     if (onInboxPage && next !== pageTab) replace(inboxTabHref(p, next));
@@ -191,6 +197,9 @@ export function InboxSection({
     }
     return counts;
   }, [list.notifications]);
+
+  const actionsRef = useRef<HTMLButtonElement>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const scrollRef = usePanelScrollRef();
   // Rows are memoized and re-render only when their own props change, not on
@@ -277,6 +286,7 @@ export function InboxSection({
           onSelect={selectTab}
           unread={showCount ? unread : undefined}
           snoozed={snoozed.rows.length}
+          expanded={!collapsed}
         />
       }
       collapsed={collapsed}
@@ -298,15 +308,17 @@ export function InboxSection({
               }}
             />
           )}
-          <InboxSectionSettings className={SECTION_SETTINGS_REVEAL_CLASS} />
-          {tab === "inbox" && (
-            <InboxSectionActions
-              wsId={wsId}
-              rows={all}
-              openRowKey={openRowKey}
-              className={SECTION_SETTINGS_REVEAL_CLASS}
-            />
-          )}
+          <InboxSectionActions
+            wsId={wsId}
+            rows={all}
+            openRowKey={openRowKey}
+            bulk={tab === "inbox"}
+            triggerRef={actionsRef}
+            settingsOpen={settingsOpen}
+            onOpenSettings={() => setSettingsOpen(true)}
+            className={SECTION_SETTINGS_REVEAL_CLASS}
+          />
+          <InboxSectionSettings opener={{ open: settingsOpen, onOpenChange: setSettingsOpen, anchor: actionsRef }} />
         </div>
       }
     >
@@ -480,15 +492,29 @@ function VirtualInboxList({
   );
 }
 
+/**
+ * The section's ⋯ menu: the bulk actions on the Inbox tab, and on every tab
+ * the section's display settings.
+ */
 function InboxSectionActions({
   wsId,
   rows,
   openRowKey,
+  bulk,
+  triggerRef,
+  settingsOpen,
+  onOpenSettings,
   className,
 }: {
   wsId: string;
   rows: readonly InboxItem[];
   openRowKey: string | null;
+  /** Offers the bulk actions, which act on the live Inbox. */
+  bulk: boolean;
+  triggerRef: Ref<HTMLButtonElement>;
+  /** The settings hang from this menu's button, which stays shown meanwhile. */
+  settingsOpen: boolean;
+  onOpenSettings: () => void;
   className?: string;
 }) {
   const { t } = useT("layout");
@@ -542,6 +568,7 @@ function InboxSectionActions({
       <DropdownMenuTrigger
         render={
           <button
+            ref={triggerRef}
             type="button"
             aria-label={label}
             className={cn(
@@ -550,6 +577,7 @@ function InboxSectionActions({
               "size-[var(--button-height-xs)]",
               "text-muted-foreground data-popup-open:bg-surface-selected data-popup-open:text-foreground data-popup-open:opacity-100",
               className,
+              settingsOpen && "bg-surface-selected text-foreground opacity-100",
             )}
           />
         }
@@ -557,50 +585,59 @@ function InboxSectionActions({
         <MoreHorizontal className="size-3.5" />
       </DropdownMenuTrigger>
       <DropdownMenuContent side="right" align="start" className="w-auto min-w-48">
-        <DropdownMenuItem
-          onClick={() =>
-            markAllRead.mutate(undefined, { onError: onError(tInbox(($) => $.errors.mark_all_read_failed)) })
-          }
-        >
-          <CheckCheck className="size-4" />
-          {tInbox(($) => $.menu.mark_all_read)}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onClick={() =>
-            archiveBatch(
-              () => archiveAllRead.mutateAsync(),
-              isRead,
-              tInbox(($) => $.errors.archive_all_read_failed),
-            )
-          }
-        >
-          <BookCheck className="size-4" />
-          {tInbox(($) => $.menu.archive_all_read)}
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() =>
-            archiveBatch(
-              () => archiveCompleted.mutateAsync(),
-              isFinished,
-              tInbox(($) => $.errors.archive_completed_failed),
-            )
-          }
-        >
-          <ListChecks className="size-4" />
-          {tInbox(($) => $.menu.archive_completed)}
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() =>
-            archiveBatch(
-              () => archiveAll.mutateAsync(),
-              () => true,
-              tInbox(($) => $.errors.archive_all_failed),
-            )
-          }
-        >
-          <Archive className="size-4" />
-          {tInbox(($) => $.menu.archive_all)}
+        {bulk && (
+          <>
+            <DropdownMenuItem
+              onClick={() =>
+                markAllRead.mutate(undefined, { onError: onError(tInbox(($) => $.errors.mark_all_read_failed)) })
+              }
+            >
+              <CheckCheck className="size-4" />
+              {tInbox(($) => $.menu.mark_all_read)}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() =>
+                archiveBatch(
+                  () => archiveAllRead.mutateAsync(),
+                  isRead,
+                  tInbox(($) => $.errors.archive_all_read_failed),
+                )
+              }
+            >
+              <BookCheck className="size-4" />
+              {tInbox(($) => $.menu.archive_all_read)}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() =>
+                archiveBatch(
+                  () => archiveCompleted.mutateAsync(),
+                  isFinished,
+                  tInbox(($) => $.errors.archive_completed_failed),
+                )
+              }
+            >
+              <ListChecks className="size-4" />
+              {tInbox(($) => $.menu.archive_completed)}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() =>
+                archiveBatch(
+                  () => archiveAll.mutateAsync(),
+                  () => true,
+                  tInbox(($) => $.errors.archive_all_failed),
+                )
+              }
+            >
+              <Archive className="size-4" />
+              {tInbox(($) => $.menu.archive_all)}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
+        )}
+        <DropdownMenuItem onClick={onOpenSettings}>
+          <SlidersHorizontal className="size-4" />
+          {t(($) => $.panels.work.inbox_settings)}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
