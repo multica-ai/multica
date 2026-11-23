@@ -86,16 +86,6 @@ export interface AppCatalogEntry {
   allowed?: boolean;
 }
 
-/** One tool of an app and how this workspace classifies it. */
-export interface AppTool {
-  slug: string;
-  name: string;
-  description: string;
-  auto_class: AppActionClass;
-  class: AppActionClass;
-  overridden: boolean;
-}
-
 export type AppCallOutcome =
   | "ok"
   | "error"
