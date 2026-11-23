@@ -9077,6 +9077,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			supplementHookCommand, supplementSupported = cursorSupplementHookCommand(env)
 		case "antigravity":
 			supplementHookCommand, supplementSupported = antigravitySupplementHookCommand(env)
+		case "opencode":
+			var customArgs []string
+			if task.Agent != nil {
+				customArgs = task.Agent.CustomArgs
+			}
+			supplementSupported = agent.OpenCodeSupportsTaskSupplement(agent.Config{
+				BuiltinRuntime: !usesCustomProfileCommand,
+				LaunchPrefix:   profileFixedArgs,
+				CLIVersion:     resolvedVersion,
+			}, agent.ExecOptions{CustomArgs: customArgs})
 		}
 	}
 	if supplementSupported {

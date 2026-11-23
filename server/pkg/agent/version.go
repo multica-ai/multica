@@ -153,6 +153,9 @@ func SupportsTaskSupplement(provider, version string) bool {
 		// into the running ACP turn (queued, then injected at the next
 		// tool/message boundary of the same session/prompt).
 		minimum = "2.33.0"
+	case "opencode":
+		// 2.2.7 is the oldest verified build advertising _session/steering.
+		minimum = "2.2.7"
 	case "antigravity":
 		// 1.4.8 is the oldest agy verified to append PreInvocation injectSteps
 		// userMessage entries to the running turn and to report each as a
