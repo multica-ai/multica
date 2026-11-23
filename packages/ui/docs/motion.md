@@ -83,6 +83,15 @@ Counts, progress, copy, send/stop, save state, toggles.
 - An icon that swaps to confirm an action (copy → check, send → stop) crossfades with a small scale, about 140ms: `CopyCheckIcon` for copy.
 - Color and background state changes use `transition-colors`.
 
+## Keep interaction intact
+
+An animated container must not break the controls inside it, while it moves or after it settles.
+
+- Clip only while the size changes. A permanent `overflow-hidden` cuts off the focus rings and drop rings of the rows inside it. With motion, put `overflow: "hidden"` in `initial` and `exit`, and end `animate` with `transitionEnd: { overflow: "visible" }`, as `PanelDisclosure` in `packages/views/layout/panel-nav.tsx` and `ChatBarChip` in `packages/views/chat/components/chat-bar.tsx` do. `CollapsibleContent` already clips only while its height moves. A container that clips by design, such as a drawer that slides in from an edge or a card with rounded corners, keeps its rows inside their own scroll area, with room for the ring.
+- Content that is leaving takes no clicks and no focus. Read `useIsPresent()` in the component that `AnimatePresence` renders, and set `inert={!isPresent}` on the leaving element. `pointer-events-none` alone still lets Tab land on it. `CollapsibleContent` is inert while it closes.
+- motion owns every size it animates. motion writes `width` and `height` as inline styles, which win over a Tailwind class for the same property, such as `max-md:w-full`. When the size depends on the breakpoint, choose motion's target by breakpoint (`useIsMobile()`), as `StepInspectorDrawer` in `packages/views/common/task-transcript/agent-transcript-dialog.tsx` does.
+- A focus ring has to be drawn before it can be kept whole. In Tailwind v4, `outline-none` also sets `--tw-outline-style: none`, which `focus-visible:outline-2` reads, so on the same element the two draw nothing. Add `focus-visible:outline-solid`, as `PANEL_ROW_CLASS` in `packages/views/layout/panel-nav.tsx` does. A ring on `::after` (`focus-visible:after:outline-2`) is unaffected, because the variable does not inherit.
+
 ## Reduced motion
 
 The Appearance setting "Reduce motion" and the system's `prefers-reduced-motion` both mean instant: no movement, no size animation, no fade in its place.
@@ -116,6 +125,7 @@ These stay instant:
 | Expand and collapse inside a `Collapsible` | `CollapsibleContent` | `packages/ui/components/ui/collapsible.tsx` |
 | Expand and collapse driven by an `open` prop (panel sections, tree rows, object page groups) | `PanelDisclosure` | `packages/views/layout/panel-nav.tsx` |
 | Issue drag lift and drop settle (board, list, swimlanes) | `ISSUE_DRAG_OVERLAY_CLASS`, `createIssueDropAnimation` | `packages/views/issues/components/drag-drop-animation.ts` |
+| motion container that clips only while it resizes, and leaves without taking input | `PanelDisclosure`, `ChatBarChip` | `packages/views/layout/panel-nav.tsx`, `packages/views/chat/components/chat-bar.tsx` |
 | Tabs indicator | `Tabs` | `packages/ui/components/ui/tabs.tsx` |
 | Segmented control indicator | `SegmentedToggle` | `packages/views/common/segmented-toggle.tsx` |
 | Reduced motion for motion/react | `MotionProvider` (mounted at the web and desktop roots) | `packages/views/common/motion-provider.tsx` |
