@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo, forwardRef } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useIsPresent } from "motion/react";
 import { prefersReducedMotion, useReducedMotion } from "@multica/core/appearance";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { UI_EASE_IN, UI_EASE_OUT, UI_EASE_OUT_CSS, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
@@ -1317,39 +1317,60 @@ export function AgentTranscriptDialog({
           </div>
           <AnimatePresence initial={false}>
             {selectedStep && (
-              <motion.div
+              <StepInspectorDrawer
                 key="step-inspector-drawer"
-                // Width is always owned by motion: below md the inspector
-                // fills the dialog (its close button must stay in view), so
-                // it only fades; from md up it slides in as a drawer.
-                initial={reduceMotion ? false : { opacity: 0, width: isMobile ? "100%" : 0 }}
-                animate={{
-                  opacity: 1,
-                  width: isMobile ? "100%" : "auto",
-                  transition: { duration: reduceMotion ? 0 : 0.2, ease: UI_EASE_OUT },
-                }}
-                exit={
-                  reduceMotion
-                    ? { opacity: 0, transition: { duration: 0 } }
-                    : {
-                        opacity: 0,
-                        ...(isMobile ? {} : { width: 0 }),
-                        transition: { duration: UI_MOTION_DURATION.fast, ease: UI_EASE_IN },
-                      }
-                }
-                className="flex shrink-0 overflow-hidden"
+                isMobile={isMobile}
+                reduceMotion={reduceMotion}
               >
                 <StepInspector
                   step={selectedStep}
                   runStartMs={runStartMs}
                   onClose={() => setSelectedSeq(null)}
                 />
-              </motion.div>
+              </StepInspectorDrawer>
             )}
           </AnimatePresence>
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function StepInspectorDrawer({
+  isMobile,
+  reduceMotion,
+  children,
+}: {
+  isMobile: boolean;
+  reduceMotion: boolean;
+  children: React.ReactNode;
+}) {
+  const isPresent = useIsPresent();
+  return (
+    <motion.div
+      inert={!isPresent}
+      // Width is always owned by motion: below md the inspector
+      // fills the dialog (its close button must stay in view), so
+      // it only fades; from md up it slides in as a drawer.
+      initial={reduceMotion ? false : { opacity: 0, width: isMobile ? "100%" : 0 }}
+      animate={{
+        opacity: 1,
+        width: isMobile ? "100%" : "auto",
+        transition: { duration: reduceMotion ? 0 : 0.2, ease: UI_EASE_OUT },
+      }}
+      exit={
+        reduceMotion
+          ? { opacity: 0, transition: { duration: 0 } }
+          : {
+              opacity: 0,
+              ...(isMobile ? {} : { width: 0 }),
+              transition: { duration: UI_MOTION_DURATION.fast, ease: UI_EASE_IN },
+            }
+      }
+      className="flex shrink-0 overflow-hidden"
+    >
+      {children}
+    </motion.div>
   );
 }
 

@@ -107,6 +107,7 @@ function ChatBarChip({
   const isPresent = useIsPresent();
   return (
     <motion.span
+      inert={!isPresent}
       initial={reduceMotion ? false : { opacity: 0, width: 0, scale: 0.95, overflow: "hidden" }}
       animate={{
         opacity: 1,
