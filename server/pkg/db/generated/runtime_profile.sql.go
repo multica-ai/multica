@@ -352,7 +352,7 @@ const listAgentRuntimeIDsByProfile = `-- name: ListAgentRuntimeIDsByProfile :man
 SELECT id FROM agent_runtime
 WHERE profile_id = $1 AND workspace_id = $2
 ORDER BY id
-FOR UPDATE
+FOR NO KEY UPDATE
 `
 
 type ListAgentRuntimeIDsByProfileParams struct {
@@ -365,6 +365,8 @@ type ListAgentRuntimeIDsByProfileParams struct {
 // archived-squad / autopilot teardown the runtime-delete path uses before
 // removing each runtime row — agent.runtime_id is ON DELETE RESTRICT, so a
 // bare delete would 500 whenever an archived agent still references the row.
+// Keep these rows stable while allowing in-flight enqueue to finish before
+// the teardown upgrades the locks.
 func (q *Queries) ListAgentRuntimeIDsByProfile(ctx context.Context, arg ListAgentRuntimeIDsByProfileParams) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, listAgentRuntimeIDsByProfile, arg.ProfileID, arg.WorkspaceID)
 	if err != nil {

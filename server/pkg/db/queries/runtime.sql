@@ -43,8 +43,8 @@ FROM agent_runtime
 WHERE id = ANY(@ids::uuid[]);
 
 -- name: LockAgentRuntime :one
--- Acquires a row-level exclusive lock on the runtime row. Used at the
--- top of the cascade-delete transaction so that:
+-- Upgrades the teardown's runtime lock after locking its existing agents and
+-- system chat sessions, so that:
 --   1. PostgreSQL's FK validation on agent.runtime_id (FK ... ON DELETE
 --      RESTRICT) needs FOR KEY SHARE on the parent runtime row, which
 --      conflicts with FOR UPDATE — so any concurrent INSERT or UPDATE
@@ -52,9 +52,7 @@ WHERE id = ANY(@ids::uuid[]);
 --      our transaction finishes; and
 --   2. concurrent UPDATE/DELETE of the runtime row itself (e.g. another
 --      delete attempt) waits for us to commit.
--- Combined with ListUserAgentsByRuntimeForUpdate (which row-locks active and
--- archived user agents) this closes both plan drift and archived-agent restore
--- races under read-committed isolation.
+-- Re-read dependent rows after the upgrade, before checking the delete plan.
 SELECT * FROM agent_runtime
 WHERE id = $1
 FOR UPDATE;

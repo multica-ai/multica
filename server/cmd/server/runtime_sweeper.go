@@ -503,19 +503,14 @@ func gcRuntime(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Qu
 	}()
 	qtx := queries.WithTx(tx)
 
-	runtime, err := qtx.LockAgentRuntime(ctx, runtimeID)
+	target, err := service.LockRuntimeTeardown(ctx, qtx, runtimeID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return result, nil
 	}
 	if err != nil {
 		return result, fmt.Errorf("lock runtime: %w", err)
 	}
-	result.workspaceID = util.UUIDToString(runtime.WorkspaceID)
-
-	lockedAgents, err := qtx.ListUserAgentsByRuntimeForUpdate(ctx, runtimeID)
-	if err != nil {
-		return result, fmt.Errorf("lock runtime agents: %w", err)
-	}
+	result.workspaceID = util.UUIDToString(target.Runtime.WorkspaceID)
 
 	eligible, err := qtx.IsAgentRuntimeEligibleForGC(ctx, db.IsAgentRuntimeEligibleForGCParams{
 		ID:           runtimeID,
@@ -528,7 +523,7 @@ func gcRuntime(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Qu
 		result.skipReason = obsmetrics.RuntimeGCSkipEligibilityChanged
 		return result, nil
 	}
-	if err := service.ValidateRuntimeAgentWorkspaces(runtime, lockedAgents); err != nil {
+	if err := service.ValidateRuntimeAgentWorkspaces(target.Runtime, target.UserAgents); err != nil {
 		if errors.Is(err, service.ErrRuntimeWorkspaceMismatch) {
 			result.skipReason = obsmetrics.RuntimeGCSkipWorkspaceMismatch
 			return result, nil
@@ -536,8 +531,8 @@ func gcRuntime(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Qu
 		return result, fmt.Errorf("validate runtime agent workspaces: %w", err)
 	}
 
-	lockedAgentIDs := make([]pgtype.UUID, len(lockedAgents))
-	for i, agent := range lockedAgents {
+	lockedAgentIDs := make([]pgtype.UUID, len(target.UserAgents))
+	for i, agent := range target.UserAgents {
 		lockedAgentIDs[i] = agent.ID
 	}
 
@@ -553,7 +548,7 @@ func gcRuntime(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Qu
 		return result, nil
 	}
 
-	teardown, err := service.TeardownRuntime(ctx, qtx, runtimeID, service.RuntimeTeardownOptions{CancelNonTerminalTasks: false})
+	teardown, err := service.TeardownRuntime(ctx, qtx, target, service.RuntimeTeardownOptions{CancelNonTerminalTasks: false})
 	if err != nil {
 		if errors.Is(err, service.ErrRuntimeNotDrained) {
 			result.skipReason = obsmetrics.RuntimeGCSkipNonTerminalTask

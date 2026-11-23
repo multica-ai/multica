@@ -384,6 +384,9 @@ func (h *Handler) UpdateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		}
 		params.DaemonID = strToText(machine)
 		binding, err = h.bindRuntimeProfileMachine(r.Context(), params)
+		if writeRuntimeTeardownBusy(w, err) {
+			return
+		}
 		profile = binding.profile
 	} else {
 		profile, err = h.Queries.UpdateRuntimeProfile(r.Context(), params)
@@ -586,9 +589,8 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Lock runtime rows in deterministic ID order. Their agent/task foreign-key
-	// inserts take KEY SHARE locks, preventing dependencies from appearing after
-	// the active-agent check.
+	// Stabilize the runtime list in ID order, then fence new references
+	// before inspecting the active agents.
 	runtimeIDs, err := qtx.ListAgentRuntimeIDsByProfile(r.Context(), db.ListAgentRuntimeIDsByProfileParams{
 		ProfileID:   profileUUID,
 		WorkspaceID: wsUUID,
@@ -601,11 +603,12 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "runtime profile not found")
 		return
 	}
-	for _, runtimeID := range runtimeIDs {
-		if _, err := qtx.ListUserAgentsByRuntimeForUpdate(r.Context(), runtimeID); err != nil {
+	targets, err := service.LockRuntimeTeardowns(r.Context(), qtx, runtimeIDs)
+	if err != nil {
+		if !writeRuntimeTeardownBusy(w, err) {
 			writeError(w, http.StatusInternalServerError, "failed to lock profile dependencies")
-			return
 		}
+		return
 	}
 
 	// Bounded read: the guard only needs "is there at least one", and the
@@ -633,8 +636,9 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	// in flight, and hard-delete only the system agents, so removing the runtime
 	// rows below cannot destroy an agent, a conversation or a task record.
 	var teardowns []service.RuntimeTeardownResult
-	for _, rid := range runtimeIDs {
-		teardown, err := service.TeardownRuntime(r.Context(), qtx, rid, service.RuntimeTeardownOptions{CancelNonTerminalTasks: true})
+	for _, target := range targets {
+		rid := target.Runtime.ID
+		teardown, err := service.TeardownRuntime(r.Context(), qtx, target, service.RuntimeTeardownOptions{CancelNonTerminalTasks: true})
 		if err != nil {
 			if errors.Is(err, service.ErrRuntimeNotDrained) {
 				slog.Error("runtime profile delete aborted: tasks not drained",
