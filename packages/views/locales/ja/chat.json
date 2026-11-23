@@ -1,10 +1,11 @@
 {
   "limit_reset": {
     "last_known": "{{provider}} 最後に確認した値 ({{time}})",
-    "label": "リセット",
+    "label": "リセットまで",
     "countdown_label": "上限リセットまでの時間",
-    "unknown": "リセット時刻を確認できません",
-    "at": "リセット {{time}} (KST)"
+    "unknown": "残り時間不明",
+    "duration_days": "{{days}}日{{hours}}時間{{minutes}}分",
+    "duration": "{{hours}}時間{{minutes}}分"
   },
   "fab": {
     "running": "AIDO が作業中です...",

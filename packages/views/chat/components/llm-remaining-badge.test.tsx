@@ -3,7 +3,7 @@ import { renderWithI18n } from "../../test/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { llmLimitStatusSchema } from "@multica/core/api/schemas";
-import { formatResetCountdown, retainKnownQuota, LlmRemainingBadge } from "./llm-remaining-badge";
+import { retainKnownQuota, LlmRemainingBadge } from "./llm-remaining-badge";
 
 function renderBadge() {
   const queryClient = new QueryClient({
@@ -51,15 +51,15 @@ describe("LlmRemainingBadge", () => {
     });
     expect(document.querySelector("[data-acceptance='chat-claude-token-remaining-badge']")).toHaveAttribute(
       "aria-label",
-      "Claude 5시간 잔량 75%, 리셋 (수) 오후 9:30; Claude 1주 잔량 40%, 리셋 (금) 오전 12:00",
+      "Claude 5시간 잔량 75%; Claude 1주 잔량 40%",
     );
     expect(document.querySelector("[data-acceptance='chat-gpt-token-remaining-badge']")).toHaveAttribute(
       "aria-label",
-      "GPT 5시간 잔량 90%, 리셋 10:45 PM; GPT 1주 잔량 70%, 리셋 May 17",
+      "GPT 5시간 잔량 90%; GPT 1주 잔량 70%",
     );
     expect(
       screen.getByLabelText(
-        "채팅 LLM 잔량: Claude 5시간 75%, 리셋 (수) 오후 9:30, Claude 1주 40%, 리셋 (금) 오전 12:00, GPT 5시간 90%, 리셋 10:45 PM, GPT 1주 70%, 리셋 May 17",
+        "채팅 LLM 잔량: Claude 5시간 75%, Claude 1주 40%, GPT 5시간 90%, GPT 1주 70%",
       ),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("채팅 LLM 잔량 새로고침"));
@@ -107,7 +107,7 @@ describe("LlmRemainingBadge", () => {
     });
     expect(document.querySelector("[data-acceptance='chat-gpt-token-remaining-badge']")).toHaveAttribute(
       "aria-label",
-      "GPT 5시간 잔량 확인 불가, 리셋 -; GPT 1주 잔량 확인 불가, 리셋 -",
+      "GPT 5시간 잔량 확인 불가; GPT 1주 잔량 확인 불가",
     );
     expect(screen.queryByText("100%")).not.toBeInTheDocument();
   });
@@ -123,20 +123,11 @@ it("does not invent quota for malformed API data", async () => {
 
 
 describe("reset countdown", () => {
-  it("formats day boundaries, expiry and unknown times without guessing", () => {
-    const now = Date.parse("2026-11-04T00:00:00Z");
-    expect(formatResetCountdown("2026-11-05T00:00:00Z", now)).toBe("D-1 00:00:00");
-    expect(formatResetCountdown("2026-11-04T23:59:59Z", now)).toBe("23:59:59");
-    expect(formatResetCountdown("2026-11-03T00:00:00Z", now)).toBe("00:00:00");
-    expect(formatResetCountdown(null, now)).toBe("--:--:--");
-    expect(formatResetCountdown("invalid", now)).toBe("--:--:--");
-  });
-
   it("shows one limiting reset per provider and falls back when its timestamp is missing", async () => {
     const now = Date.parse("2026-11-04T00:00:00Z");
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({
       five_hour_pct: 25, five_hour_resets_at: "2026-11-04T02:00:00Z",
-      seven_day_pct: 85, seven_day_resets_at: "2026-11-04T01:00:00Z",
+      seven_day_pct: 85, seven_day_resets_at: "2026-11-05T01:00:00Z",
       gpt_five_hour_pct: 95, gpt_seven_day_pct: 25,
       gpt_seven_resets_at: "2026-11-04T03:00:00Z",
     }) })));
@@ -147,12 +138,12 @@ describe("reset countdown", () => {
     vi.mocked(Date.now).mockReturnValue(now + 1000);
     act(() => { vi.advanceTimersByTime(1000); });
     const countdown = screen.getByTestId("chat-reset-countdown");
+    expect(screen.getAllByTestId("chat-reset-countdown")).toHaveLength(1);
+    expect(countdown).toHaveClass("whitespace-nowrap");
     expect(countdown.children).toHaveLength(2);
-    expect(countdown.children[0]).toHaveTextContent(/C 리셋 .*10:00 KST · 00:59:59/);
-    expect(countdown.children[1]).toHaveTextContent(/G 리셋 .*12:00 KST · 02:59:59/);
-    expect(countdown.querySelectorAll("time")).toHaveLength(2);
-    expect(countdown).not.toHaveTextContent("11:00");
-    expect(screen.getAllByTitle(/KST/).some(({ title }) => title.includes("10시 0분 0초"))).toBe(true);
+    expect(countdown.textContent).toBe("C 리셋까지 1일 0시간 59분 · G 리셋까지 2시간 59분");
+    expect(countdown.querySelectorAll("time, [title]")).toHaveLength(0);
+    expect(countdown).not.toHaveTextContent(/KST|오전|오후|\d월|\d{1,2}:\d{2}/);
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
     view.unmount();
     vi.useRealTimers();
@@ -183,7 +174,7 @@ describe("last known quota during failures", () => {
     renderBadge();
     await waitFor(() => expect(screen.getByTestId("chat-llm-gauge-compact")).toHaveTextContent("C*: 5h 91%/7d 18%"));
     expect(screen.getByTestId("chat-token-gauge").title).toContain("마지막 확인값");
-    expect(screen.getByTestId("chat-reset-countdown")).toHaveTextContent("C 리셋 --:--:--");
+    expect(screen.getByTestId("chat-reset-countdown")).toHaveTextContent("C 리셋까지 남은 시간 확인 불가");
     vi.unstubAllGlobals();
   });
 
