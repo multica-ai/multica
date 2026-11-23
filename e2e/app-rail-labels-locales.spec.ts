@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { SUPPORTED_LOCALES } from "../packages/core/i18n/types";
+import { RAIL_SPACES as SPACES, type RailSpaceId } from "../packages/core/paths/spaces";
 import { TestApiClient } from "./fixtures";
 
 // MUL-9942: a rail space tile is 48px wide and its label gets 44px at the
@@ -8,17 +9,20 @@ import { TestApiClient } from "./fixtures";
 // friends were cut to "Autop…" there, so each language's `rail.*` label is a
 // short name that must fit whole; the full name stays in the tooltip. A
 // selected tile sets its label in a heavier weight, so every tile is checked
-// while it is selected too. The Docs tile renders only with the `docs_v1`
-// flag on, so run this with `FF_DOCS_V1=true`, as CI's e2e job does. Larger
-// Appearance font sizes are not covered: the label grows with them and the
-// tile does not.
-const SPACES = ["work", "docs", "team", "chat", "autopilots"] as const;
+// while it is selected too. Larger Appearance font sizes are not covered: the
+// label grows with them and the tile does not.
+//
+// The tiles come from RAIL_SPACES, so a new rail space is checked as soon as
+// it is added. A space behind a feature flag renders no tile until the flag is
+// on, and this test then fails waiting for it: turn the flag on in CI's e2e
+// job rather than skipping the space here. Docs needs `FF_DOCS_V1=true` this
+// way.
 
 const railLabels = Object.fromEntries(
   SUPPORTED_LOCALES.map((locale) => {
     const layout = JSON.parse(
       readFileSync(new URL(`../packages/views/locales/${locale}/layout.json`, import.meta.url), "utf8"),
-    ) as { rail: Record<(typeof SPACES)[number], string> };
+    ) as { rail: Record<RailSpaceId, string> };
     return [locale, layout.rail];
   }),
 );
