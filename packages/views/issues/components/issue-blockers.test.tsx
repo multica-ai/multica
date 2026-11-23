@@ -6,7 +6,8 @@ import type { Issue } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
-vi.mock("@multica/core/paths", () => ({
+vi.mock("@multica/core/paths", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/paths")>()),
   useWorkspacePaths: () => ({ issueDetail: (id: string) => `/issues/${id}` }),
 }));
 vi.mock("@multica/core/issues/blockers", () => ({

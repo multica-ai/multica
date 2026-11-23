@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Flag, Plus, X } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { issueRouteRef, useWorkspacePaths } from "@multica/core/paths";
 import { useUpdateIssueBlockers } from "@multica/core/issues/blockers";
 import type { Issue } from "@multica/core/types";
 import { AppLink } from "../../navigation";
@@ -42,7 +42,7 @@ export function IssueBlockersSection({ issue }: { issue: Issue }) {
     {open && <div className="px-4 space-y-2 text-caption">
       {manual.map((blocker) => <div key={blocker.id} className="flex min-w-0 items-center gap-1">
         <Flag className={blocker.closed ? "size-3.5 shrink-0 text-muted-foreground" : "size-3.5 shrink-0 text-destructive"} aria-hidden="true" />
-        <AppLink href={paths.issueDetail(blocker.id)} className="min-w-0 flex-1 truncate hover:underline" title={blocker.title}>
+        <AppLink href={paths.issueDetail(issueRouteRef(blocker))} className="min-w-0 flex-1 truncate hover:underline" title={blocker.title}>
           <span className="text-muted-foreground">{blocker.identifier}</span>{" "}{blocker.title}
         </AppLink>
         <Button variant="ghost" size="icon-xs" disabled={mutation.isPending} aria-label={t(($) => $.waiting.remove, { identifier: blocker.identifier })}
@@ -50,7 +50,7 @@ export function IssueBlockersSection({ issue }: { issue: Issue }) {
       </div>)}
       {stages.length > 0 && <div>
         <p className="text-muted-foreground">{t(($) => $.waiting.stage, { finished: stageCount, total: stages.length })}</p>
-        {activeStages.map((blocker) => <AppLink key={blocker.id} href={paths.issueDetail(blocker.id)} className="block truncate py-1 hover:underline" title={blocker.title}>
+        {activeStages.map((blocker) => <AppLink key={blocker.id} href={paths.issueDetail(issueRouteRef(blocker))} className="block truncate py-1 hover:underline" title={blocker.title}>
           <span className="text-muted-foreground">{blocker.identifier}</span>{" "}{blocker.title}
         </AppLink>)}
       </div>}
