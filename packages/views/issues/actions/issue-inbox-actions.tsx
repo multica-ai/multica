@@ -56,10 +56,13 @@ export function IssueInboxBar({
   issueId,
   issueActions,
   movingOn = false,
+  isSnoozedView = false,
 }: {
   issueId: string;
   issueActions?: ReactNode;
   movingOn?: boolean;
+  /** Opened from the Snoozed tab: show only its snooze bar without touching the live Inbox list. */
+  isSnoozedView?: boolean;
 }) {
   const { t } = useT("inbox");
   const wsId = useWorkspaceId();
@@ -67,7 +70,7 @@ export function IssueInboxBar({
   const { push } = useNavigation();
   const builtinNav = useBuiltinViewNavigation();
   const guest = useIsGuest(wsId);
-  const { rows, kept, filtered } = useFilteredInboxRows(wsId, issueId);
+  const { rows, kept, filtered } = useFilteredInboxRows(wsId, isSnoozedView ? null : issueId, !isSnoozedView);
   const index = rows.findIndex((row) => row.issue_id === issueId);
   const row = index >= 0 ? rows[index]! : null;
   // A row kept after it left the Inbox on its own is no longer there to act on.

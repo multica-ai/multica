@@ -261,10 +261,12 @@ export function InboxPage() {
   });
   const lookupItems = useMemo(() => deduplicateArchivedInboxItems(lookup.data?.items ?? []), [lookup.data]);
   const presenceItems = lookupMissed ? presence.data?.items ?? [] : [];
-  // On desktop the live list is the Work panel's Inbox section, which applies
+  // On desktop the lists live in the Work panel's Inbox section, which applies
   // the filters itself. The page only opens the notification the URL names,
-  // so a filter can never refuse to open a row the section offered.
+  // so changing a filter in the sidebar (even on another tab) never closes the
+  // open detail.
   const opensAnyLiveRow = !isCompact && tab === "inbox";
+  const opensAnyArchivedRow = !isCompact && isArchivedView;
   // The open notification stays in place when something other than an Inbox
   // action takes it out of the live list (`keepOpenInboxRow`). On desktop
   // that list is the Work panel section's; a phone keeps it in the page's own.
@@ -287,12 +289,37 @@ export function InboxPage() {
     if (isSnoozedView) return [];
     if (opensAnyLiveRow) return settledRow ? [...items, settledRow.item] : items;
     if (!isArchivedView) return pageList.rows;
-    if (selectedOnPage) return filteredItems;
+    if (selectedOnPage) {
+      return opensAnyArchivedRow && !filteredItems.some((i) => (i.issue_id ?? i.id) === selectedKey)
+        ? [...filteredItems, selectedOnPage]
+        : filteredItems;
+    }
+    const matchedLookup = filterInboxItems(lookupItems, effectiveFilters, filterContext);
+    const fallbackLookup =
+      opensAnyArchivedRow && matchedLookup.length === 0
+        ? deduplicateArchivedInboxItems([...lookupItems, ...presenceItems])
+        : [];
     return deduplicateArchivedInboxItems([
       ...filteredItems,
-      ...filterInboxItems(lookupItems, effectiveFilters, filterContext),
+      ...matchedLookup,
+      ...fallbackLookup,
     ]);
-  }, [isSnoozedView, opensAnyLiveRow, settledRow, items, isArchivedView, pageList.rows, selectedOnPage, filteredItems, lookupItems, effectiveFilters, filterContext]);
+  }, [
+    isSnoozedView,
+    opensAnyLiveRow,
+    settledRow,
+    items,
+    isArchivedView,
+    pageList.rows,
+    selectedOnPage,
+    opensAnyArchivedRow,
+    filteredItems,
+    selectedKey,
+    lookupItems,
+    effectiveFilters,
+    filterContext,
+    presenceItems,
+  ]);
   const visibleItems =
     isArchivedView && pinnedKey ? selectionItems : isArchivedView || opensAnyLiveRow ? filteredItems : pageList.rows;
 
@@ -310,7 +337,7 @@ export function InboxPage() {
   const selectedInView = selectedOnPage ?? (isArchivedView
     ? [...lookupItems, ...presenceItems].find((i) => (i.issue_id ?? i.id) === selectedKey)
     : null);
-  const selectionFilteredOut = !isSnoozedView && !!selectedKey && !!selectedInView && !selected;
+  const selectionFilteredOut = isCompact && !isSnoozedView && !!selectedKey && !!selectedInView && !selected;
 
   // What the DETAIL pane shows, one React transition behind the click.
   //
@@ -1021,6 +1048,7 @@ export function InboxPage() {
   // The issue the detail shows: the open notification's, or on the Snoozed
   // tab the snoozed issue itself.
   const detailIssueId = isSnoozedView ? detailKey || null : (detailItem?.issue_id ?? null);
+  const TabIcon = tab === "archived" ? Archive : tab === "snoozed" ? AlarmClock : Inbox;
   const inboxHost = (issueId: string): IssueDetailInboxHost => ({
     // A phone's back control already names the list.
     crumb: isCompact
@@ -1030,8 +1058,8 @@ export function InboxPage() {
           className: "flex min-w-0 items-center gap-1",
           label: (
             <>
-              <Inbox className="size-3.5 shrink-0" />
-              <span className="truncate">{t(($) => $.page.title)}</span>
+              <TabIcon className="size-3.5 shrink-0" />
+              <span className="truncate">{tabLabel}</span>
             </>
           ),
         },
@@ -1040,7 +1068,7 @@ export function InboxPage() {
       isArchivedView && detailItem ? (
         <InboxArchivedBar item={detailItem} onRestore={() => handleUnarchive(detailItem.id)} />
       ) : (
-        <IssueInboxBar issueId={issueId} issueActions={issueActions} movingOn={detailSwapping} />
+        <IssueInboxBar issueId={issueId} issueActions={issueActions} movingOn={detailSwapping} isSnoozedView={isSnoozedView} />
       ),
   });
 

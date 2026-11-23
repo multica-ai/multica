@@ -379,6 +379,20 @@ describe("InboxPage", () => {
     expect(issueDetailProps.at(-1)?.highlightCommentId).toBe("c2");
   });
 
+  it("keeps an archived notification open on desktop when filters change in the sidebar", () => {
+    reset();
+    layout.width = DESKTOP;
+    searchParams = new URLSearchParams("view=archived&issue=issue-9");
+    listData.archived = [item({ id: "archived-1", issue_id: "issue-9", type: "new_comment", archived: true })];
+    render(<InboxPage />);
+    expect(screen.getByTestId("issue-detail")).toHaveTextContent("issue-9");
+
+    act(() => useInboxFilterStore.getState().toggleFilterValue("workspace-1", "type", "mention"));
+
+    expect(screen.getByTestId("issue-detail")).toHaveTextContent("issue-9");
+    expect(replace).not.toHaveBeenCalled();
+  });
+
   it("opens a notification the Work panel offered despite a type filter", () => {
     reset();
     layout.width = DESKTOP;

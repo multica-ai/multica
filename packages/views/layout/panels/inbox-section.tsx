@@ -22,7 +22,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
-import { inboxTypeGroup, useInboxFilterStore } from "@multica/core/inbox/filter-store";
+import { inboxFilterCount, inboxTypeGroup, useInboxFilterStore } from "@multica/core/inbox/filter-store";
 import {
   useArchiveAllInbox,
   useArchiveAllReadInbox,
@@ -156,16 +156,26 @@ export function InboxSection({
   const { list, rows: all, displayed, expanded, limit, setExpanded } = rows;
   const keptText = useKeptInboxRowText(wsId);
   const clearFilters = useInboxFilterStore((state) => state.clearFilters);
-  // On the Inbox page its URL names the tab; elsewhere the section keeps the
-  // one picked last.
+  // Follow the Inbox page's URL whenever navigation arrives at a new `/inbox`
+  // state, while letting the user switch sidebar tabs freely without closing
+  // an issue/notification currently open on the right.
   const onInboxPage = pathname === p.inbox();
   const pageTab = inboxTabFromParam(searchParams.get("view"));
+  // What the Inbox page has open, keyed as its tab groups rows.
+  const pageKey = onInboxPage ? searchParams.get("issue") : null;
+  const inboxUrl = onInboxPage ? `${pageTab}:${pageKey ?? ""}` : null;
   const storedTab = useInboxSelectionStore((s) => s.sectionTabByWorkspace[wsId] ?? "inbox");
+  const syncedUrl = useInboxSelectionStore((s) => s.sectionTabSyncedUrlByWorkspace[wsId]);
   const setSectionTab = useInboxSelectionStore((s) => s.setSectionTab);
-  const tab = onInboxPage ? pageTab : storedTab;
+  const clearSectionTabSync = useInboxSelectionStore((s) => s.clearSectionTabSync);
+  const tab = onInboxPage && syncedUrl !== inboxUrl ? pageTab : storedTab;
   useEffect(() => {
-    if (onInboxPage) setSectionTab(wsId, pageTab);
-  }, [onInboxPage, pageTab, setSectionTab, wsId]);
+    if (onInboxPage && inboxUrl !== null) {
+      if (syncedUrl !== inboxUrl) setSectionTab(wsId, pageTab, inboxUrl);
+    } else if (syncedUrl !== undefined) {
+      clearSectionTabSync(wsId);
+    }
+  }, [onInboxPage, inboxUrl, syncedUrl, pageTab, setSectionTab, clearSectionTabSync, wsId]);
   const selectTab = (next: InboxTab) => {
     // The open tab is the section's title: selecting it again folds the
     // section, as a click on another section's title does.
@@ -173,12 +183,12 @@ export function InboxSection({
       setCollapsed(!collapsed);
       return;
     }
-    setSectionTab(wsId, next);
+    setSectionTab(wsId, next, inboxUrl ?? undefined);
     if (collapsed) setCollapsed(false);
-    if (onInboxPage && next !== pageTab) replace(inboxTabHref(p, next));
+    // Keep an empty `/inbox` canvas in sync with the tab, but never dismiss an
+    // open issue/notification just because the user browsed another tab.
+    if (onInboxPage && !pageKey && next !== pageTab) replace(inboxTabHref(p, next));
   };
-  // What the Inbox page has open, keyed as its tab groups rows.
-  const pageKey = onInboxPage ? searchParams.get("issue") : null;
   const openRowKey = pageTab === "inbox" ? pageKey : null;
   const snoozed = useSnoozedInboxRows(wsId);
   const archived = useArchivedInboxRows(wsId, tab === "archived" && !collapsed);
@@ -351,6 +361,7 @@ export function InboxSection({
           />
         ) : tab === "archived" ? (
           <ArchivedSectionList
+            wsId={wsId}
             archived={archived}
             limit={limit}
             openKey={pageTab === "archived" ? pageKey : null}
@@ -1052,12 +1063,18 @@ const InboxRow = memo(function InboxRow({
   );
 });
 
-/** A tab's rows past the section's limit wait behind "Show N more". */
-function useSectionLimit<T>(rows: readonly T[], limit: number) {
+/** A tab's rows past the section's limit wait behind "Show N more", keeping the open row visible. */
+function useSectionLimit<T>(rows: readonly T[], limit: number, openIndex = -1) {
   const [expanded, setExpanded] = useState(false);
+  const shown = expanded
+    ? rows
+    : openIndex >= limit
+      ? [...rows.slice(0, limit - 1), rows[openIndex]!]
+      : rows.slice(0, limit);
   return {
-    shown: expanded ? rows : rows.slice(0, limit),
+    shown,
     more: rows.length > limit,
+    hidden: Math.max(0, rows.length - shown.length),
     expanded,
     toggle: () => setExpanded((value) => !value),
   };
@@ -1110,7 +1127,8 @@ function SnoozedSectionList({
 }) {
   const { t } = useT("inbox");
   const { unsnooze } = useInboxSnooze();
-  const { shown, more, expanded, toggle } = useSectionLimit(list.rows, limit);
+  const openIndex = openKey ? list.rows.findIndex((entry) => entry.issue_id === openKey) : -1;
+  const { shown, more, hidden, expanded, toggle } = useSectionLimit(list.rows, limit, openIndex);
   if (list.rows.length === 0) {
     if (list.load === "failed") {
       return (
@@ -1134,7 +1152,7 @@ function SnoozedSectionList({
           />
         ))}
       </PanelList>
-      {more && <SectionMoreButton expanded={expanded} hidden={list.rows.length - limit} onToggle={toggle} />}
+      {more && <SectionMoreButton expanded={expanded} hidden={hidden} onToggle={toggle} />}
     </>
   );
 }
@@ -1209,10 +1227,12 @@ function SnoozedSectionRow({
 
 /** The Archived tab, a page at a time under the Inbox filters. */
 function ArchivedSectionList({
+  wsId,
   archived,
   limit,
   openKey,
 }: {
+  wsId: string;
   archived: ReturnType<typeof useArchivedInboxRows>;
   limit: number;
   openKey: string | null;
@@ -1220,16 +1240,24 @@ function ArchivedSectionList({
   const { t } = useT("inbox");
   const p = useWorkspacePaths();
   const { replace } = useNavigation();
-  const { query, items } = archived;
+  const { query, items, filters } = archived;
+  const filtered = inboxFilterCount(filters) > 0;
+  const clearFilters = useInboxFilterStore((state) => state.clearFilters);
+  const leaveRow = useInboxSelectionStore((s) => s.leaveRow);
+  const recordTransition = useInboxSelectionStore((s) => s.recordTransition);
   const restoreInbox = useRestoreInbox();
-  const { shown, more, expanded, toggle } = useSectionLimit(items, limit);
+  const openIndex = openKey ? items.findIndex((item) => inboxRowKey(item) === openKey) : -1;
+  const { shown, more, hidden, expanded, toggle } = useSectionLimit(items, limit, openIndex);
   // Restoring the open row moves the page on to the next archived one, as
   // its own bar's restore does.
   const restore = (item: InboxItem) => {
     const key = inboxRowKey(item);
     if (key === openKey) {
+      leaveRow(wsId, key);
       const next = nextInboxRow(items, key);
-      replace(inboxTabHref(p, "archived", next ? inboxRowKey(next) : null));
+      const nextKey = next ? inboxRowKey(next) : "";
+      recordTransition(wsId, nextKey, "next");
+      replace(inboxTabHref(p, "archived", nextKey || null));
     }
     void restoreInbox(item.id);
   };
@@ -1239,6 +1267,20 @@ function ArchivedSectionList({
         <SectionNote retry={{ label: t(($) => $.list.retry), busy: query.isFetching, run: () => void query.refetch() }}>
           {t(($) => $.errors.load_failed)}
         </SectionNote>
+      );
+    }
+    if (filtered && query.isSuccess) {
+      return (
+        <div className={cn(PANEL_ROW_CLASS, "pl-[2.375rem] text-caption text-faint-foreground")}>
+          <span className="min-w-0 flex-1 truncate">{t(($) => $.filters.empty)}</span>
+          <button
+            type="button"
+            className="shrink-0 rounded-md px-1 font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+            onClick={() => clearFilters(wsId)}
+          >
+            {t(($) => $.filters.clear)}
+          </button>
+        </div>
       );
     }
     return query.isSuccess ? <SectionNote>{t(($) => $.list.archived_empty)}</SectionNote> : null;
@@ -1255,15 +1297,19 @@ function ArchivedSectionList({
           />
         ))}
       </PanelList>
-      {more && <SectionMoreButton expanded={expanded} hidden={items.length - limit} onToggle={toggle} />}
-      {expanded && query.hasNextPage && (
+      {more && <SectionMoreButton expanded={expanded} hidden={hidden} onToggle={toggle} />}
+      {(!more || expanded) && query.hasNextPage && (
         <button
           type="button"
           disabled={query.isFetchingNextPage}
           className={cn(PANEL_ROW_CLASS, panelRowStateClass(false), "pl-[2.375rem] text-caption disabled:opacity-50")}
           onClick={() => void query.fetchNextPage()}
         >
-          {query.isFetchingNextPage ? t(($) => $.list.loading_more) : t(($) => $.list.load_more)}
+          {query.isFetchingNextPage
+            ? t(($) => $.list.loading_more)
+            : query.isFetchNextPageError
+              ? t(($) => $.list.retry)
+              : t(($) => $.list.load_more)}
         </button>
       )}
     </>
