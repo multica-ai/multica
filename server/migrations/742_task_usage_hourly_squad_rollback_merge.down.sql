@@ -3,6 +3,12 @@
 -- a single squad_id = NULL row per 7-column key so the concurrent unique index
 -- builds succeed without uniqueness violations.
 --
+-- Operational note: pause the rollup worker before running rollback so the
+-- squad-aware rollup does not write new split squad_id rows during the window
+-- between 742 down and 741/740 down finishing their CONCURRENTLY index builds
+-- (if interrupted, concurrentDownIndexCleanups cleans up any INVALID index for
+-- safe retry).
+--
 -- Materialize merged rows into a transaction-scoped temp table and DELETE
 -- before INSERT as separate statements: a single CTE WITH DELETE + INSERT runs
 -- under one MVCC snapshot and collides with uq_task_usage_hourly_squad_key_idx

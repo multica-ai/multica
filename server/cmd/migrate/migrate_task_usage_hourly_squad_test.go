@@ -150,11 +150,18 @@ func TestTaskUsageHourlySquadMigrationsUpDownUp(t *testing.T) {
 		}
 	}
 
-	// 1. UP: 735..742
-	runDir("up", versions)
+	// 1a. UP through 739: legacy 7-column constraints must ALREADY be dropped
+	// atomically in 739 up (before 740/741 run) so there is zero intermediate
+	// window where 8-column ON CONFLICT statements collide with legacy constraints.
+	runDir("up", versions[:5])
 	assertIndexValidity(t, pool, schema, "uq_task_usage_hourly_squad_key_idx", true)
 	assertIndexValidity(t, pool, schema, "uq_task_usage_hourly_dirty_squad_key_idx", true)
 	assertIndexValidity(t, pool, schema, "idx_task_usage_hourly_workspace_squad_time", true)
+	assertIndexExists(t, pool, schema, "uq_task_usage_hourly_key", false)
+	assertIndexExists(t, pool, schema, "uq_task_usage_hourly_dirty_key", false)
+
+	// 1b. UP remaining 740..742 (forward no-ops paired with concurrent down rebuilds).
+	runDir("up", versions[5:])
 
 	// Insert two split squad rows + one standalone row sharing the same legacy
 	// 7-column key, plus a pending squad dirty row, to verify 742 down merges

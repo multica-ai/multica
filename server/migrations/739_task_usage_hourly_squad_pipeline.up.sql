@@ -2,16 +2,25 @@
 -- squad_id-aware unique indexes built concurrently in migrations 736–737,
 -- reading effective squad attribution via COALESCE(usage_squad_id, squad_id).
 --
--- The legacy unique constraints (uq_task_usage_hourly_key and
--- uq_task_usage_hourly_dirty_key) are dropped in the subsequent migrations
--- 740–741 so rollback can rebuild their backing indexes CONCURRENTLY before
--- 739 down attaches them via ADD CONSTRAINT ... UNIQUE USING INDEX.
+-- The legacy 7-column unique constraints (uq_task_usage_hourly_key and
+-- uq_task_usage_hourly_dirty_key) are dropped atomically in THIS same
+-- transaction so there is never an intermediate state where the new 8-column
+-- ON CONFLICT statements collide with the legacy 7-column UNIQUE constraints.
+-- Migrations 740–741 are forward no-ops whose down directions rebuild the two
+-- legacy backing indexes CONCURRENTLY (registered in concurrentDownIndexCleanups)
+-- before 739 down attaches them via ADD CONSTRAINT ... UNIQUE USING INDEX.
 --
 -- Both dirty_from_updates and dirty_from_queue UNION a NULL::uuid squad_id
 -- variant whenever a squad-attributed key is recomputed, so pre-735 legacy
 -- buckets (stored with squad_id = NULL) heal automatically on both watermark
 -- updates and trigger-driven invalidations (project move, issue delete,
 -- task/usage delete) without double-counting.
+
+ALTER TABLE task_usage_hourly
+    DROP CONSTRAINT IF EXISTS uq_task_usage_hourly_key;
+
+ALTER TABLE task_usage_hourly_dirty
+    DROP CONSTRAINT IF EXISTS uq_task_usage_hourly_dirty_key;
 
 CREATE OR REPLACE FUNCTION enqueue_task_usage_hourly_dirty_for_atq()
 RETURNS TRIGGER
