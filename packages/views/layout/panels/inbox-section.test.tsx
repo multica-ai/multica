@@ -679,6 +679,23 @@ describe("InboxSection", () => {
     }
   });
 
+  it("lets go of the list's height when another tab opens while the archive is still loading", async () => {
+    apiMock.listArchivedInboxPage.mockReturnValue(new Promise(() => {}));
+    renderSection([item({ id: "n1", issue_id: "issue-a" })], null, "/acme/issues", [], [
+      { issue_id: "issue-z", issue_identifier: "MUL-26", item_id: "z1", snoozed_until: "2099-01-01T09:00:00Z", snoozed_at: "2026-11-10T09:00:00Z", updates: 0 },
+    ]);
+    const body = () => document.querySelector<HTMLElement>("[data-inbox-body]")!;
+
+    fireEvent.click(screen.getByRole("tab", { name: /^Archived/ }));
+    await waitFor(() => expect(rows()).toHaveLength(0));
+    expect(body()).toHaveClass("overflow-hidden");
+
+    fireEvent.click(screen.getByRole("tab", { name: /^Snoozed/ }));
+    expect(await screen.findByRole("link", { name: /^MUL-26/ })).toBeInTheDocument();
+    await waitFor(() => expect(body()).not.toHaveClass("overflow-hidden"));
+    expect(body().style.height).not.toMatch(/px$/);
+  });
+
   it("lists the archive in a tab, each row opening there and restoring from its button", async () => {
     apiMock.listArchivedInboxPage.mockResolvedValue({
       items: [item({ id: "a1", issue_id: "issue-x", title: "Done with this", archived: true })],

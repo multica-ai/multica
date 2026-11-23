@@ -86,12 +86,29 @@ test("Work panel Inbox header keeps every tab label whole and clear of its actio
         await expect(tab(id)).toHaveAttribute("aria-selected", "true");
         if (id === "snoozed") await expect(tab(id), `${locale}: snoozed count`).toContainText(String(SNOOZED));
 
-        const found = await tab(id).evaluate((openTab) => {
+        const found = await tab(id).evaluate(async (openTab) => {
           const tablist = openTab.closest<HTMLElement>('[role="tablist"]')!;
           const header = tablist.closest("section")!.firstElementChild as HTMLElement;
+          // A switch slides the highlight and unfolds the new tab's name:
+          // measure once the tabs have held still for a few frames.
+          const frame = () => new Promise(requestAnimationFrame);
+          const layout = () =>
+            [...tablist.querySelectorAll("*")].map((el) => el.getBoundingClientRect().width).join();
+          for (let still = 0, last = "", n = 0; still < 5 && n < 120; n++) {
+            await frame();
+            const now = layout();
+            still = now === last ? still + 1 : 0;
+            last = now;
+          }
           // Visually hidden copy (sr-only names, the open section's chevron)
-          // is 1px wide by design and takes no part in the layout.
-          const shown = (el: Element) => el.getBoundingClientRect().width > 1;
+          // is 1px wide by design and takes no part in the layout, and so is
+          // a closed tab's name, folded to nothing beside its icon.
+          const shown = (el: Element) => {
+            for (let node: Element | null = el; node && node !== tablist; node = node.parentElement) {
+              if (node.getBoundingClientRect().width <= 1) return false;
+            }
+            return true;
+          };
           const name = (el: Element) =>
             el.getAttribute("aria-label") || el.getAttribute("data-inbox-tab") || el.textContent?.trim();
           const tabs = [...tablist.querySelectorAll<HTMLElement>("[data-inbox-tab]")];

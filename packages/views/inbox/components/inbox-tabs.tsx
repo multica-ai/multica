@@ -175,9 +175,19 @@ function useTabSwitchMotion(
 
   useLayoutEffect(() => {
     const list = listRef.current;
-    if (!enabled || !list) return;
+    if (!list) return;
     const button = (id: InboxTab) => list.querySelector<HTMLElement>(`[data-inbox-tab="${id}"]`)!;
     const part = (id: InboxTab, name: "icon" | "label") => button(id).querySelector<HTMLElement>(`[data-tab-${name}]`)!;
+    if (!enabled) {
+      // Motion turned off mid-switch: drop what the stopped animation left.
+      shown.current = null;
+      for (const el of list.querySelectorAll<HTMLElement>("[data-tab-icon], [data-tab-label]")) {
+        el.style.width = "";
+        el.style.opacity = "";
+        el.querySelector<HTMLElement>(".truncate")?.style.removeProperty("text-overflow");
+      }
+      return;
+    }
     const parts = TABS.flatMap((id) => [part(id, "icon"), part(id, "label")]);
     const box = (el: HTMLElement) => {
       const rect = el.getBoundingClientRect();
@@ -197,8 +207,6 @@ function useTabSwitchMotion(
 
     const from = shown.current;
     shown.current = tab;
-    for (const controls of running.current) controls.stop();
-    running.current = [];
 
     let cancelled = false;
     if (from !== null && from !== tab && seconds > 0) {
@@ -271,6 +279,9 @@ function useTabSwitchMotion(
     return () => {
       cancelled = true;
       observer.disconnect();
+      // Stopped where they are: a switch mid-way starts from these inline styles.
+      for (const controls of running.current) controls.stop();
+      running.current = [];
     };
   }, [listRef, tab, enabled, seconds, setFolding, x, width]);
 

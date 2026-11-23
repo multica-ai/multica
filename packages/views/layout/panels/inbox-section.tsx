@@ -434,23 +434,25 @@ function InboxTabBody({ tab, loading, children }: { tab: InboxTab; loading: bool
   const ref = useRef<HTMLDivElement>(null);
   // The height the list keeps from the switch until the next tab's rows are in.
   const [held, setHeld] = useState<number | null>(null);
-  const [leaving, setLeaving] = useState(false);
-  const shownTab = useRef(tab);
+  // The tab whose rows are in. A tab's rows mount once the previous rows have
+  // faded out, or at once when none were in (that tab was still loading).
+  const [shown, setShown] = useState<InboxTab | null>(loading ? null : tab);
+  const switchedTo = useRef(tab);
 
   useLayoutEffect(() => {
-    if (shownTab.current === tab) return;
-    shownTab.current = tab;
+    if (switchedTo.current === tab) return;
+    switchedTo.current = tab;
     if (!ref.current) return;
     // Measured before paint, while the old rows are still in.
     setHeld(ref.current.offsetHeight);
-    setLeaving(true);
   }, [tab, reduceMotion]);
 
   if (reduceMotion) return <>{children}</>;
-  const holding = held !== null && (leaving || loading);
+  const holding = held !== null && (shown !== tab || loading);
   return (
     <motion.div
       ref={ref}
+      data-inbox-body
       initial={false}
       animate={{ height: holding ? held : "auto" }}
       transition={{ duration: holding ? 0 : UI_MOTION_DURATION.standard, ease: UI_EASE_OUT }}
@@ -459,10 +461,13 @@ function InboxTabBody({ tab, loading, children }: { tab: InboxTab; loading: bool
       }}
       className={cn(held !== null && "overflow-hidden")}
     >
-      <AnimatePresence mode="wait" initial={false} onExitComplete={() => setLeaving(false)}>
+      <AnimatePresence mode="wait" initial={false}>
         {!loading && (
           <motion.div
             key={tab}
+            ref={(node) => {
+              if (node) setShown(tab);
+            }}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1, transition: { duration: UI_MOTION_DURATION.fast, ease: UI_EASE_OUT } }}
             exit={{ opacity: 0, transition: { duration: UI_MOTION_DURATION.micro, ease: UI_EASE_IN } }}
