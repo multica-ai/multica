@@ -304,14 +304,16 @@ export function createEnDict(): LandingDict {
       {
         version: "0.12.2",
         date: "2026-11-24",
-        title: "Quick-switch agents when creating Issues, and leave squad handoffs out of your Inbox",
+        title: "Quick-switch agents when creating Issues, see usage by squad, and leave squad handoffs out of your Inbox",
         changes: [],
         features: [
           "Create with agent shows your three most-used agents and squads; click one or press Alt/Option + 1–3 to switch.",
           "Turn off Include squad handoffs in Settings → Notifications to keep squad agents' handoff comments out of your Inbox.",
+          "On Analytics, filter usage by squad or group the leaderboard and errors by squad, with a breakdown per member.",
         ],
         improvements: [
           "Inbox actions sit above the reply box, and after you archive the last notification, it still shows Archived with Undo.",
+          "A squad working on an Issue shows as one squad avatar in headers, sidebars, and Working now.",
           "Jump to latest moves to the right and counts new comments, in the Inbox and on Issue pages.",
         ],
         fixes: [
