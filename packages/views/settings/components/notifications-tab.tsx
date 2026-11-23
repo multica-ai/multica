@@ -305,7 +305,7 @@ export function NotificationsTab() {
               </div>
             )}
           </div>
-          {autoArchiveOn.length > 0 && (
+          {autoArchiveOn.some((key) => key !== "auto_archive_on_agent_trigger") && (
             <SettingsRow
               anchor="after_auto_archive"
               className="pl-8"

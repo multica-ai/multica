@@ -160,6 +160,8 @@
     "reassigned": "Переназначено: {{name}}",
     "unassigned": "Исполнитель снят",
     "ran_quick_action": "Запущено: {{name}}",
+    "agent_triggered": "Агент запущен",
+    "returns_when_done": "Вернётся во входящие после завершения",
     "next": "Следующее",
     "next_tooltip": "Открыть следующее: {{title}}"
   },

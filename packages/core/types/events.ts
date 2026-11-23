@@ -277,7 +277,8 @@ export interface InboxBatchArchivedPayload {
   issue_id?: string;
   /**
    * Why the server archived them on its own: "issue_status_terminal" when the
-   * recipient completed the issue, "actor_acted" when they commented on it,
+   * recipient completed the issue, "agent_triggered" when their action started
+   * or steered an agent on it, or "actor_acted" when they commented on it,
    * changed its status or reassigned it. Other values may appear; absent for user-requested batches.
    */
   reason?: string;

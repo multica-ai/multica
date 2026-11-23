@@ -79,8 +79,8 @@ func TestAutoArchiveOnAgentTrigger_UpdateIssue(t *testing.T) {
 		mu.Lock()
 		reasons := archivedReasons[issue.ID]
 		mu.Unlock()
-		if len(reasons) != 1 || reasons[0] != "actor_acted" {
-			t.Fatalf("reasons = %v, want [actor_acted]", reasons)
+		if len(reasons) != 1 || reasons[0] != "agent_triggered" {
+			t.Fatalf("reasons = %v, want [agent_triggered]", reasons)
 		}
 	})
 

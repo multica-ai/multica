@@ -66,7 +66,8 @@ function setup(
   return {
     onNext,
     settle: (row: KeptInboxRow | null) => view.rerender({ settled: row }),
-    cause: () => view.result.current,
+    cause: () => view.result.current.cause,
+    reason: () => view.result.current.reason,
     qc,
   };
 }
@@ -99,6 +100,15 @@ describe("useMoveOnAfterAutoArchive", () => {
     await act(async () => action.onClick());
     expect(returnRow).toHaveBeenCalledWith("ws", "issue-b");
     expect(api.unarchiveInbox).toHaveBeenCalledWith("n-issue-b");
+  });
+
+  it("stays in place when triggering an agent archived it, even under after_auto_archive=next", () => {
+    const { onNext, settle, reason } = setup({ after_auto_archive: "next" });
+    noteInboxAutoArchive({ issue_id: "issue-agent", reason: "agent_triggered" });
+    settle(archived("issue-agent"));
+    expect(onNext).not.toHaveBeenCalled();
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(reason()).toBe("agent_triggered");
   });
 
   it("stays by default", () => {

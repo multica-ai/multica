@@ -151,6 +151,8 @@
     "reassigned": "已改派给 {{name}}",
     "unassigned": "已取消分配",
     "ran_quick_action": "已运行 {{name}}",
+    "agent_triggered": "已触发智能体",
+    "returns_when_done": "完成后会回到收件箱",
     "next": "下一条",
     "next_tooltip": "打开下一条：{{title}}"
   },

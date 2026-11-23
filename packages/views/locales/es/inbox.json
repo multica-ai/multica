@@ -154,6 +154,8 @@
     "reassigned": "Reasignada a {{name}}",
     "unassigned": "Desasignada",
     "ran_quick_action": "Se ejecutó {{name}}",
+    "agent_triggered": "Agente activado",
+    "returns_when_done": "Vuelve a la bandeja al terminar",
     "next": "Siguiente",
     "next_tooltip": "Abrir la siguiente: {{title}}"
   },

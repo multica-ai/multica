@@ -3,7 +3,12 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { type InboxBarAction, takeInboxAutoArchive, takeInboxBarAction } from "@multica/core/inbox/auto-archive";
+import {
+  type InboxAutoArchiveReason,
+  type InboxBarAction,
+  takeInboxAutoArchiveReason,
+  takeInboxBarAction,
+} from "@multica/core/inbox/auto-archive";
 import type { KeptInboxRow } from "@multica/core/inbox/open-row";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { issueDetailOptions } from "@multica/core/issues/queries";
@@ -16,16 +21,18 @@ import { useRestoreInbox } from "./use-leave-inbox-row";
 
 /**
  * Opens the next notification right away once the open one is archived because
- * the user handled its issue (`takeInboxAutoArchive`), when their
+ * the user handled its issue (`takeInboxAutoArchiveReason`), when their
  * `after_auto_archive` preference says "next", and confirms it with a toast
- * that can undo it. Otherwise the row stays in place, settled, as
+ * that can undo it. Triggering an agent (`reason === "agent_triggered"`) always
+ * stays in place so the user sees the run start and returns to the Inbox when
+ * the agent finishes. Otherwise the row stays in place, settled, as
  * `keepOpenInboxRow` keeps it.
  *
  * Only the focused window moves on: acting in another window or tab must not
  * pull this one away from what it shows.
  *
- * Returns the Inbox bar action that archived the settled row, when taken in
- * this window.
+ * Returns the Inbox bar action that archived the settled row (when taken in
+ * this window) and the user-caused auto-archive reason, if any.
  */
 export function useMoveOnAfterAutoArchive({
   settled,
@@ -35,7 +42,7 @@ export function useMoveOnAfterAutoArchive({
   settled: KeptInboxRow | null;
   next: InboxItem | null;
   onNext: () => void;
-}): InboxBarAction | null {
+}): { cause: InboxBarAction | null; reason: InboxAutoArchiveReason | null } {
   const { t } = useT("inbox");
   const wsId = useWorkspaceId();
   const { data } = useQuery(notificationPreferenceOptions(wsId));
@@ -43,7 +50,11 @@ export function useMoveOnAfterAutoArchive({
   const restore = useRestoreInbox();
   const qc = useQueryClient();
   const archivedKey = settled?.reason === "archived" ? settled.key : null;
-  const [cause, setCause] = useState<{ key: string; action: InboxBarAction } | null>(null);
+  const [settledMeta, setSettledMeta] = useState<{
+    key: string;
+    action: InboxBarAction | null;
+    reason: InboxAutoArchiveReason | null;
+  } | null>(null);
 
   const latest = useRef({ settled, next, onNext, movesOn });
   useLayoutEffect(() => {
@@ -54,11 +65,12 @@ export function useMoveOnAfterAutoArchive({
   useLayoutEffect(() => {
     if (!archivedKey) return;
     const { settled: row, onNext: moveOn, movesOn: moves } = latest.current;
-    const own = takeInboxAutoArchive(archivedKey);
+    const reason = takeInboxAutoArchiveReason(archivedKey);
+    const own = reason !== null;
     const action = takeInboxBarAction(archivedKey);
     const shown = own && action && reflects(qc.getQueryData(issueDetailOptions(wsId, archivedKey).queryKey), action);
-    setCause(shown ? { key: archivedKey, action } : null);
-    if (!own || !moves || !row || !document.hasFocus()) return;
+    setSettledMeta({ key: archivedKey, action: shown ? action : null, reason });
+    if (!own || reason === "agent_triggered" || !moves || !row || !document.hasFocus()) return;
     moveOn();
     toastInboxUndo(t(($) => $.toasts.archived), {
       label: t(($) => $.toasts.undo),
@@ -71,7 +83,10 @@ export function useMoveOnAfterAutoArchive({
     });
   }, [archivedKey, wsId, restore, t, qc]);
 
-  return cause && cause.key === archivedKey ? cause.action : null;
+  if (!settledMeta || settledMeta.key !== archivedKey) {
+    return { cause: null, reason: null };
+  }
+  return { cause: settledMeta.action, reason: settledMeta.reason };
 }
 
 /**

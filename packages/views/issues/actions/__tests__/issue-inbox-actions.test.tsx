@@ -13,7 +13,7 @@ import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { childIssuesOptions, issueDetailOptions, issueSubscribersOptions } from "@multica/core/issues/queries";
 import { notificationPreferenceKeys } from "@multica/core/notification-preferences/queries";
 import { agentListOptions } from "@multica/core/workspace/queries";
-import type { Agent, InboxItem, Issue, SnoozedInboxIssue } from "@multica/core/types";
+import type { Agent, AgentTask, InboxItem, Issue, SnoozedInboxIssue } from "@multica/core/types";
 import { renderWithI18n } from "../../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../../navigation";
 import { takeInboxUndo } from "../../../inbox/components/inbox-undo-toast";
@@ -581,5 +581,46 @@ describe("IssueInboxBar once an action is undone", () => {
     } finally {
       focusSpy.mockRestore();
     }
+  });
+
+  it("stays on the issue with live agent status when triggering an agent archives it, even under after_auto_archive=next", async () => {
+    const focusSpy = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    try {
+      const nav = setup();
+      act(() => {
+        nav.qc.setQueryData(notificationPreferenceKeys.all("ws"), {
+          workspace_id: "ws",
+          preferences: { after_auto_archive: "next" },
+        });
+        nav.qc.setQueryData(agentListOptions("ws").queryKey, [{ id: "agent-1", name: "Emacs" } as Agent]);
+        nav.qc.setQueryData(agentTaskSnapshotOptions("ws").queryKey, [
+          { id: "task-1", issue_id: "issue-1", agent_id: "agent-1", status: "running" } as AgentTask,
+        ]);
+      });
+      noteInboxAutoArchive({ issue_id: "issue-1", reason: "agent_triggered" });
+      act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
+
+      const statusBar = await screen.findByRole("status");
+      expect(statusBar).toHaveTextContent("Emacs is working");
+      expect(statusBar).toHaveTextContent("Returns to Inbox when done");
+      expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Next" })).toBeInTheDocument();
+      expect(nav.push).not.toHaveBeenCalled();
+
+      fireEvent.keyDown(document, { key: "e", code: "KeyE" });
+      expect(nav.push).toHaveBeenCalledWith("/acme/inbox?issue=issue-2");
+    } finally {
+      focusSpy.mockRestore();
+    }
+  });
+
+  it("shows fallback agent-triggered copy before the agent snapshot updates", async () => {
+    const nav = setup();
+    noteInboxAutoArchive({ issue_id: "issue-1", reason: "agent_triggered" });
+    act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
+
+    expect(await screen.findByText("Agent triggered")).toBeInTheDocument();
+    expect(screen.getByText("Returns to Inbox when done")).toBeInTheDocument();
+    expect(nav.push).not.toHaveBeenCalled();
   });
 });

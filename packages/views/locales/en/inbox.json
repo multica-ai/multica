@@ -154,6 +154,8 @@
     "reassigned": "Reassigned to {{name}}",
     "unassigned": "Unassigned",
     "ran_quick_action": "Ran {{name}}",
+    "agent_triggered": "Agent triggered",
+    "returns_when_done": "Returns to Inbox when done",
     "next": "Next",
     "next_tooltip": "Open next: {{title}}"
   },

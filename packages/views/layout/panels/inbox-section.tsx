@@ -155,6 +155,10 @@ export function InboxSection({
   const isCompact = useIsCompact();
   const { list, rows: all, displayed, expanded, limit, setExpanded } = rows;
   const keptText = useKeptInboxRowText(wsId);
+  const keptAgents = useIssueAgentState(
+    wsId,
+    list.kept?.reason === "archived" ? (list.kept.item.issue_id ?? "") : "",
+  );
   const clearFilters = useInboxFilterStore((state) => state.clearFilters);
   // On the Inbox page its URL names the tab; elsewhere the section keeps the
   // one picked last.
@@ -276,7 +280,7 @@ export function InboxSection({
       href={inboxRowHref(p, item)}
       active={!!openRowKey && inboxRowKey(item) === openRowKey}
       compact={compact}
-      kept={list.kept?.item.id === item.id ? keptText.line(list.kept) : null}
+      kept={list.kept?.item.id === item.id ? keptText.line(list.kept, keptAgents) : null}
       settled={list.kept?.item.id === item.id && list.kept.reason !== "filtered"}
       updatesWhileSnoozed={item.issue_id ? (updatesWhileSnoozed.get(item.issue_id) ?? 0) : 0}
       unsubscribable={!!item.issue_id && unsubscribable(item)}

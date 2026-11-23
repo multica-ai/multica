@@ -1,12 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { noteInboxAutoArchive, noteInboxBarAction, takeInboxAutoArchive, takeInboxBarAction } from "./auto-archive";
+import {
+  noteInboxAutoArchive,
+  noteInboxBarAction,
+  takeInboxAutoArchive,
+  takeInboxAutoArchiveReason,
+  takeInboxBarAction,
+} from "./auto-archive";
 
 describe("inbox auto-archive records", () => {
-  it.each(["issue_status_terminal", "actor_acted"])("records an archive the user caused: %s", (reason) => {
-    noteInboxAutoArchive({ issue_id: `issue-${reason}`, reason }, 1_000);
-    expect(takeInboxAutoArchive(`issue-${reason}`, 2_000)).toBe(true);
-    expect(takeInboxAutoArchive(`issue-${reason}`, 2_000)).toBe(false);
-  });
+  it.each(["issue_status_terminal", "actor_acted", "agent_triggered"] as const)(
+    "records an archive the user caused: %s",
+    (reason) => {
+      noteInboxAutoArchive({ issue_id: `issue-${reason}`, reason }, 1_000);
+      expect(takeInboxAutoArchiveReason(`issue-${reason}`, 2_000)).toBe(reason);
+      expect(takeInboxAutoArchiveReason(`issue-${reason}`, 2_000)).toBeNull();
+
+      noteInboxAutoArchive({ issue_id: `issue-bool-${reason}`, reason }, 1_000);
+      expect(takeInboxAutoArchive(`issue-bool-${reason}`, 2_000)).toBe(true);
+      expect(takeInboxAutoArchive(`issue-bool-${reason}`, 2_000)).toBe(false);
+    },
+  );
 
   it("ignores batches without a reason the user caused", () => {
     noteInboxAutoArchive({ issue_id: "issue-a" }, 1_000);

@@ -111,11 +111,11 @@ function InboxBarReason({ item }: { item: InboxItem }) {
 /** What happened to a settled notification, before the bar's actions. */
 export function InboxBarStatus({ icon, label }: { icon: ReactNode; label: ReactNode }) {
   return (
-    <span className="mr-1 flex min-w-0 flex-1 items-center gap-1 text-caption text-muted-foreground">
+    <span className="mr-1 flex min-w-0 flex-1 items-center gap-1.5 text-caption text-muted-foreground">
       <span aria-hidden className="flex shrink-0 [&_svg]:size-3.5">
         {icon}
       </span>
-      <span className="truncate">{label}</span>
+      <span className="min-w-0 truncate">{label}</span>
     </span>
   );
 }

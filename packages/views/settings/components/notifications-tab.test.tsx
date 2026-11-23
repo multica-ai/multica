@@ -225,6 +225,12 @@ describe("Inbox notification settings", () => {
     expect(within(leaving).queryByRole("combobox", { name: "After archiving" })).toBeNull();
   });
 
+  it("hides after archiving when only agent trigger auto-archive is enabled", () => {
+    renderTab(ACTIONS_OFF_BUT(["auto_archive_on_agent_trigger"]));
+    const leaving = screen.getByRole("region", { name: "Leaving the Inbox" });
+    expect(within(leaving).queryByRole("combobox", { name: "After archiving" })).toBeNull();
+  });
+
   it.each<{ preferences: Record<string, string>; shown: string }>([
     { preferences: {}, shown: "Stay on the issue" },
     { preferences: { after_auto_archive: "next" }, shown: "Open the next one" },

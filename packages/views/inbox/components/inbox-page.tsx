@@ -679,7 +679,7 @@ export function InboxPage() {
   // An issue's bar (`IssueInboxBar`) says, and moves on, when its row left
   // the Inbox on its own; the page does for a notification without an issue.
   const settledNotice = settledRow && !settledRow.item.issue_id ? settledRow : null;
-  const settledCause = useMoveOnAfterAutoArchive({
+  const { cause: settledCause } = useMoveOnAfterAutoArchive({
     settled: settledNotice,
     next: settledNotice ? nextInboxRow(listedItems, settledNotice.key) : null,
     onNext: () => {
