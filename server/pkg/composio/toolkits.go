@@ -27,6 +27,37 @@ type Toolkit struct {
 	NoAuth bool `json:"no_auth,omitempty"`
 }
 
+// ToolkitCategory is one category a toolkit is listed under.
+type ToolkitCategory struct {
+	ID   string
+	Name string
+}
+
+// PrimaryCategory returns the first category the toolkit is listed under, or
+// a zero value when it has none. The v3.1 list endpoint nests categories under
+// meta as {id, name} objects; a top-level list of names is read first.
+func (t Toolkit) PrimaryCategory() ToolkitCategory {
+	if len(t.Categories) > 0 {
+		return ToolkitCategory{Name: t.Categories[0]}
+	}
+	list, _ := t.Meta["categories"].([]any)
+	for _, item := range list {
+		switch v := item.(type) {
+		case string:
+			if v != "" {
+				return ToolkitCategory{Name: v}
+			}
+		case map[string]any:
+			id, _ := v["id"].(string)
+			name, _ := v["name"].(string)
+			if id != "" || name != "" {
+				return ToolkitCategory{ID: id, Name: name}
+			}
+		}
+	}
+	return ToolkitCategory{}
+}
+
 // ListToolkitsRequest carries the optional filters of GET /toolkits.
 type ListToolkitsRequest struct {
 	Category string

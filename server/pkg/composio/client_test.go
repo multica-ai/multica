@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -454,6 +455,55 @@ func TestListToolkits_Success(t *testing.T) {
 	}
 	if len(resp.Items) != 2 || resp.Items[0].Slug != "notion" {
 		t.Errorf("unexpected response: %+v", resp)
+	}
+}
+
+func TestToolkitPrimaryCategory(t *testing.T) {
+	var listed composio.ListToolkitsResponse
+	raw := `{"items":[
+		{"slug":"github","meta":{"categories":[{"id":"developer-tools","name":"Developer Tools"},{"id":"productivity","name":"Productivity"}]}},
+		{"slug":"legacy","categories":["email"],"meta":{"categories":[{"id":"ignored","name":"Ignored"}]}},
+		{"slug":"bare"}
+	]}`
+	if err := json.Unmarshal([]byte(raw), &listed); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	want := []composio.ToolkitCategory{
+		{ID: "developer-tools", Name: "Developer Tools"},
+		{Name: "email"},
+		{},
+	}
+	for i, tk := range listed.Items {
+		if got := tk.PrimaryCategory(); got != want[i] {
+			t.Errorf("%s: PrimaryCategory = %+v, want %+v", tk.Slug, got, want[i])
+		}
+	}
+}
+
+func TestCreateCustomAuthConfig_Body(t *testing.T) {
+	c, _ := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/auth_configs" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		var body map[string]any
+		readJSON(t, r, &body)
+		want := map[string]any{
+			"toolkit": map[string]any{"slug": "tavily"},
+			"auth_config": map[string]any{
+				"type":        "use_custom_auth",
+				"authScheme":  "API_KEY",
+				"name":        "Tavily",
+				"credentials": map[string]any{},
+			},
+		}
+		if !reflect.DeepEqual(body, want) {
+			t.Errorf("body = %#v, want %#v", body, want)
+		}
+		writeJSON(t, w, http.StatusCreated, map[string]any{"auth_config": map[string]any{"id": "ac_tavily"}})
+	})
+	id, err := c.CreateCustomAuthConfig(context.Background(), "tavily", "api_key", "Tavily")
+	if err != nil || id != "ac_tavily" {
+		t.Fatalf("CreateCustomAuthConfig = %q, %v", id, err)
 	}
 }
 
