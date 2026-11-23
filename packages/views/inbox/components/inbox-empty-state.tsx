@@ -242,7 +242,7 @@ export function InboxEmptyState({
         key={`card-${bleedKey}`}
         className={cn(
           "relative z-10 -mt-8 flex max-w-md flex-col items-center",
-          reduceMotion ? "animate-inbox-enter-fade" : rises ? "animate-inbox-enter-next" : "animate-inbox-enter-fade",
+          !reduceMotion && (rises ? "animate-inbox-enter-next" : "animate-inbox-enter-fade"),
         )}
       >
         <div

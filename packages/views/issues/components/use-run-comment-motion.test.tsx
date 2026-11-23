@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useAppearanceStore } from "@multica/core/appearance";
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentTask } from "@multica/core/types";
@@ -105,6 +106,33 @@ describe("run comment motion", () => {
     const view = render(<Slot />);
     view.rerender(<Slot entering />);
     expect(animate).not.toHaveBeenCalled();
+  });
+
+  it("disables run arrival, reply and status motion with the Appearance Reduce motion switch", () => {
+    useAppearanceStore.getState().set({ reduceMotion: true });
+    try {
+      const view = render(<Slot status="running" />);
+      view.rerender(<Slot status="running" entering />);
+      view.rerender(<Slot status="running" entering replyId="reply" />);
+      view.rerender(<Slot status="completed" entering replyId="reply" />);
+      expect(animate).not.toHaveBeenCalled();
+      expect(screen.getByText("completed")).toBeInTheDocument();
+      expect(screen.getByText("Reply")).toBeInTheDocument();
+    } finally {
+      useAppearanceStore.getState().reset();
+    }
+  });
+
+  it("turns the disclosure arrow at once with the Appearance Reduce motion switch", () => {
+    useAppearanceStore.getState().set({ reduceMotion: true });
+    try {
+      render(<Disclosure />);
+      fireEvent.click(screen.getByRole("button", { name: "Toggle" }), { detail: 1 });
+      expect(animate).not.toHaveBeenCalled();
+      expect(screen.getByText("Activity")).toBeInTheDocument();
+    } finally {
+      useAppearanceStore.getState().reset();
+    }
   });
 
   it("pauses ambient run motion outside the viewport", async () => {

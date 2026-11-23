@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useAppearanceStore } from "@multica/core/appearance";
 import { inboxKeys, snoozedInboxOptions } from "@multica/core/inbox/queries";
 import { useInboxSelectionStore, type InboxTab } from "@multica/core/inbox/selection-store";
 import type { SnoozedInboxIssue } from "@multica/core/types";
@@ -124,6 +125,21 @@ describe("InboxEmptyState", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /1 snoozed/ }));
     expect(nav.push).toHaveBeenCalledWith("/acme/inbox?view=snoozed");
+  });
+
+  it("rises into Inbox Zero, and shows it at once with reduced motion", () => {
+    const card = () => screen.getByRole("heading", { name: "Inbox cleared" }).closest("[class*='max-w-md']");
+    renderEmpty({ inboxZeroRises: true });
+    expect(card()).toHaveClass("animate-inbox-enter-next");
+    cleanup();
+
+    useAppearanceStore.getState().set({ reduceMotion: true });
+    try {
+      renderEmpty({ inboxZeroRises: true });
+      expect(card()?.className).not.toMatch(/animate-inbox-enter/);
+    } finally {
+      useAppearanceStore.getState().reset();
+    }
   });
 
   it("offers inline undo for the just-archived notification and navigates back on click", async () => {
