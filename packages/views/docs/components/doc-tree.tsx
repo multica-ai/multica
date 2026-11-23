@@ -1,9 +1,7 @@
 "use client";
 import { useMemo, useState, type DragEvent, type ReactNode } from "react";
-import { AnimatePresence, motion } from "motion/react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { useReducedMotion } from "@multica/core/appearance";
 import {
   ChevronRight,
   FileText,
@@ -14,8 +12,8 @@ import {
   Plus,
   Trash2,
 } from "@multica/ui/icons";
-import { UI_EASE_OUT } from "@multica/ui/lib/motion";
 import { Button } from "@multica/ui/components/ui/button";
+import { Collapsible, CollapsibleContent } from "@multica/ui/components/ui/collapsible";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { cn } from "@multica/ui/lib/utils";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
@@ -590,10 +588,9 @@ function DocFolderItem({
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(true);
-  const reduceMotion = useReducedMotion();
 
   return (
-    <li>
+    <Collapsible open={open} render={<li />}>
       <div
         data-doc-folder={folderId}
         {...dragProps}
@@ -627,28 +624,14 @@ function DocFolderItem({
         </TruncatedTooltip>
         {actions}
       </div>
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.div
-            key="folder-branch"
-            initial={reduceMotion ? false : { opacity: 0, height: 0, overflow: "hidden" }}
-            animate={{
-              opacity: 1,
-              height: "auto",
-              transitionEnd: { overflow: "visible" },
-            }}
-            exit={{ opacity: 0, height: 0, overflow: "hidden" }}
-            transition={{ duration: reduceMotion ? 0 : 0.16, ease: UI_EASE_OUT }}
-          >
-            <div
-              className="ml-5 border-l border-surface-border pl-[5px]"
-              {...dropProps}
-            >
-              {children}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </li>
+      <CollapsibleContent>
+        <div
+          className="ml-5 border-l border-surface-border pl-[5px]"
+          {...dropProps}
+        >
+          {children}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
