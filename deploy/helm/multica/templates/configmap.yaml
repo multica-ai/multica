@@ -17,6 +17,7 @@ data:
   CORS_ALLOWED_ORIGINS: {{ .Values.backend.config.corsAllowedOrigins | quote }}
   COOKIE_DOMAIN: {{ .Values.backend.config.cookieDomain | quote }}
   RESEND_FROM_EMAIL: {{ .Values.backend.config.resendFromEmail | quote }}
+  MULTICA_PLATFORM_ADMIN_EMAILS: {{ .Values.backend.config.platformAdminEmails | quote }}
   ALLOW_SIGNUP: {{ .Values.backend.config.allowSignup | quote }}
   ALLOWED_EMAILS: {{ .Values.backend.config.allowedEmails | quote }}
   ALLOWED_EMAIL_DOMAINS: {{ .Values.backend.config.allowedEmailDomains | quote }}

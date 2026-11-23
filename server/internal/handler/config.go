@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"os"
@@ -129,6 +130,12 @@ type AppConfig struct {
 // sign-in button and signup UI. Only add fields here that are safe to expose
 // to anonymous callers — never user- or tenant-scoped data.
 func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
+	settings, err := h.loadPlatformSettings(r.Context())
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "platform settings are unavailable")
+		return
+	}
+	ctx := context.WithValue(r.Context(), platformSettingsContextKey{}, settings)
 	config := AppConfig{
 		// A property of this build, not of the deployment: if this code is
 		// running, the save gate is running with it.
@@ -139,9 +146,9 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		IssueBlockersSupported:             true,
 		CommentDeleteKeepRepliesSupported:  true,
 		IssueBatchOpsSupported:             true,
-		AllowSignup:                        os.Getenv("ALLOW_SIGNUP") != "false",
+		AllowSignup:                        settingValue(settings, settingAllowSignup, h.cfg.AllowSignup),
 		GoogleClientID:                     os.Getenv("GOOGLE_CLIENT_ID"),
-		WorkspaceCreationDisabled:          os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
+		WorkspaceCreationDisabled:          !settingValue(settings, settingAllowWorkspaceCreation, !h.cfg.DisableWorkspaceCreation),
 	}
 	if h.Storage != nil {
 		config.CdnDomain = h.Storage.CdnDomain()
@@ -153,10 +160,10 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	config.DaemonServerURL, config.DaemonAppURL = daemonSetupURLsFromEnv()
 	config.DaemonSetupTarget = "self_host"
-	config.VCSIntegrationAvailable = h.cfg.VCSIntegrationEnabled
+	config.VCSIntegrationAvailable = settingValue(settings, settingVCSIntegration, h.cfg.VCSIntegrationEnabled)
 	config.ThemeStoreEnabled = h.ThemeStore != nil
-	config.FeatureFlags = featureflags.EvaluateFrontendPublicFlags(r.Context(), h.FeatureFlags)
-	config.FeatureFlags[WorkspaceGuestsConfigKey] = h.guestsReleased(r.Context())
+	config.FeatureFlags = featureflags.EvaluateFrontendPublicFlags(ctx, h.FeatureFlags)
+	config.FeatureFlags[WorkspaceGuestsConfigKey] = h.guestsReleased(ctx)
 	// Only surface the build version on self-hosted deployments. The managed
 	// cloud is continuously deployed and its users can't choose the build, so
 	// the Help popover's version row would just be noise there (MUL-4108).

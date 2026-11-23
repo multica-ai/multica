@@ -4,6 +4,7 @@ import { useReducedMotion } from "@multica/core/appearance";
 import { UI_EASE_IN, UI_EASE_OUT } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { InvitationsPage } from "@multica/views/invitations";
+import { PlatformAdminPage, WorkspaceAssignmentGate } from "@multica/views/platform-admin";
 import { OnboardingFlow } from "@multica/views/onboarding";
 import { useNavigation } from "@multica/views/navigation";
 import { paths } from "@multica/core/paths";
@@ -62,8 +63,10 @@ function WindowOverlayInner({
 }) {
   const isPresent = useIsPresent();
   const close = useWindowOverlayStore((s) => s.close);
+  const open = useWindowOverlayStore((s) => s.open);
   const { push } = useNavigation();
-  const { data: wsList = [] } = useQuery(workspaceListOptions());
+  const { data, isLoadingError, refetch } = useQuery(workspaceListOptions());
+  const wsList = data ?? [];
   // Live local-daemon signal for the onboarding runtime step so it doesn't
   // flash "no runtime found" while the daemon is still probing CLI versions.
   const runtimesPending = useLocalRuntimesPending();
@@ -79,6 +82,11 @@ function WindowOverlayInner({
   // same runtime step.
   const restartDaemon = async () => {
     await window.daemonAPI?.restart?.();
+  };
+
+  const enterAssignedWorkspace = (path: string) => {
+    close();
+    push(path);
   };
 
   return (
@@ -101,22 +109,24 @@ function WindowOverlayInner({
           workspace step: a second workspace still needs its own runtime and
           its own Mika, so running one flow keeps the two from drifting. */}
       {overlay.type === "new-workspace" && (
-        <OnboardingFlow
-          mode="new_workspace"
-          onCancel={onBack}
-          onRuntimeRefresh={restartDaemon}
-          runtimesPending={runtimesPending}
-          onComplete={(ws, destination) => {
-            close();
-            if (ws && destination?.kind === "chat") {
-              push(paths.workspace(ws.slug).chatSession(destination.sessionId));
-            } else if (ws && destination?.kind === "issue") {
-              push(paths.workspace(ws.slug).issueDetail(destination.issueRef));
-            } else if (ws) {
-              push(paths.workspace(ws.slug).issues());
-            }
-          }}
-        />
+        <WorkspaceAssignmentGate workspaceCount={wsList.length} ready={data !== undefined} onAssigned={enterAssignedWorkspace} unavailable={isLoadingError} onRetry={() => void refetch()}>
+          <OnboardingFlow
+            mode="new_workspace"
+            onCancel={onBack}
+            onRuntimeRefresh={restartDaemon}
+            runtimesPending={runtimesPending}
+            onComplete={(ws, destination) => {
+              close();
+              if (ws && destination?.kind === "chat") {
+                push(paths.workspace(ws.slug).chatSession(destination.sessionId));
+              } else if (ws && destination?.kind === "issue") {
+                push(paths.workspace(ws.slug).issueDetail(destination.issueRef));
+              } else if (ws) {
+                push(paths.workspace(ws.slug).issues());
+              }
+            }}
+          />
+        </WorkspaceAssignmentGate>
       )}
       {overlay.type === "invitations" && (
         <InvitationsPage
@@ -125,27 +135,35 @@ function WindowOverlayInner({
         />
       )}
       {overlay.type === "onboarding" && (
-        <OnboardingFlow
-          onComplete={(ws, destination) => {
-            close();
-            if (ws && destination?.kind === "chat") {
-              push(
-                paths.workspace(ws.slug).chatSession(destination.sessionId),
-              );
-            } else if (ws && destination?.kind === "issue") {
-              push(
-                paths.workspace(ws.slug).issueDetail(destination.issueRef),
-              );
-            } else if (ws) {
-              push(paths.workspace(ws.slug).issues());
-            } else {
-              push(paths.root());
-            }
-          }}
-          // Restart the bundled daemon when the user hits Refresh on
-          onRuntimeRefresh={restartDaemon}
-          runtimesPending={runtimesPending}
-        />
+        <WorkspaceAssignmentGate workspaceCount={wsList.length} ready={data !== undefined} onAssigned={enterAssignedWorkspace} unavailable={isLoadingError} onRetry={() => void refetch()}>
+          <OnboardingFlow
+            onComplete={(ws, destination) => {
+              close();
+              if (ws && destination?.kind === "chat") {
+                push(
+                  paths.workspace(ws.slug).chatSession(destination.sessionId),
+                );
+              } else if (ws && destination?.kind === "issue") {
+                push(
+                  paths.workspace(ws.slug).issueDetail(destination.issueRef),
+                );
+              } else if (ws) {
+                push(paths.workspace(ws.slug).issues());
+              } else {
+                push(paths.root());
+              }
+            }}
+            // Restart the bundled daemon when the user hits Refresh on
+            onRuntimeRefresh={restartDaemon}
+            runtimesPending={runtimesPending}
+          />
+        </WorkspaceAssignmentGate>
+      )}
+      {overlay.type === "admin" && (
+        <PlatformAdminPage onBack={() => {
+          if (overlay.returnTo && wsList.length === 0) open({ type: overlay.returnTo });
+          else close();
+        }} />
       )}
     </motion.div>
   );

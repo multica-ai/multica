@@ -30,7 +30,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/extension"
-	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/gitca"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
@@ -430,6 +429,7 @@ func seatCapacityExecutor(cloudURL string) seatcapacity.Executor {
 // NewRouter shim) discard the second value.
 func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analyticsClient analytics.Client, rdb redis.UniversalClient, opts RouterOptions) (chi.Router, *handler.Handler) {
 	queries := db.New(pool)
+	opts.FeatureFlags = handler.WithPlatformFeatureFlags(queries, opts.FeatureFlags)
 	emailSvc := service.NewEmailService()
 	daemonHub := opts.DaemonHub
 	if daemonHub == nil {
@@ -452,6 +452,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	origins := allowedOrigins()
 
 	signupConfig := handler.Config{
+		PlatformAdminEmails:            splitAndTrim(os.Getenv("MULTICA_PLATFORM_ADMIN_EMAILS")),
 		AllowSignup:                    os.Getenv("ALLOW_SIGNUP") != "false",
 		AllowedEmails:                  splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
 		AllowedEmailDomains:            splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
@@ -1382,9 +1383,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Composio integration (MUL-3720). Gated by COMPOSIO_API_KEY plus the
 	// composio_mcp_apps feature flag. The env var is the project-scoped key the
 	// standalone SDK authenticates Composio with (sent as x-api-key; the project
-	// is resolved from the key, so NO project id is configured). When unset or
-	// flag-disabled the whole block is skipped and the composio HTTP handlers
-	// return 503; existing deployments are unaffected. An operator opts in by
+	// is resolved from the key, so NO project id is configured). Initialize
+	// the integration when configured so the request-time feature check can
+	// observe a platform override without restarting. An operator opts in by
 	// setting COMPOSIO_API_KEY plus a callback base
 	// (COMPOSIO_CALLBACK_BASE_URL, falling back to MULTICA_PUBLIC_URL). The
 	// toolkit→auth-config mapping is NOT configured here — it is resolved
@@ -1394,88 +1395,84 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// COMPOSIO_BASE_URL replaces the Composio API root; local environments set
 	// it to scripts/fake-composio.mjs. Unset means the real Composio API.
 	if composioAPIKey := strings.TrimSpace(os.Getenv("COMPOSIO_API_KEY")); composioAPIKey != "" {
-		if !featureflags.ComposioMCPAppsEnabled(context.Background(), opts.FeatureFlags) {
-			slog.Info("composio integration disabled (feature flag off)")
+		composioBaseURL := strings.TrimSpace(os.Getenv("COMPOSIO_BASE_URL"))
+		if composioBaseURL != "" {
+			slog.Warn("composio: COMPOSIO_BASE_URL overrides the Composio API", "base_url", composioBaseURL)
+		}
+		sdkClient, err := composiosdk.NewClient(composiosdk.Options{APIKey: composioAPIKey, BaseURL: composioBaseURL})
+		if err != nil {
+			slog.Error("composio: SDK client init failed; composio integration disabled", "error", err)
 		} else {
-			composioBaseURL := strings.TrimSpace(os.Getenv("COMPOSIO_BASE_URL"))
-			if composioBaseURL != "" {
-				slog.Warn("composio: COMPOSIO_BASE_URL overrides the Composio API", "base_url", composioBaseURL)
-			}
-			sdkClient, err := composiosdk.NewClient(composiosdk.Options{APIKey: composioAPIKey, BaseURL: composioBaseURL})
-			if err != nil {
-				slog.Error("composio: SDK client init failed; composio integration disabled", "error", err)
-			} else {
-				stateSecret := composioStateSecret()
-				callbackBase := composioCallbackBaseURL(signupConfig.PublicURL)
-				switch {
-				case len(stateSecret) == 0:
-					slog.Error("composio: no state secret (set COMPOSIO_STATE_SECRET or JWT_SECRET); composio integration disabled")
-				case callbackBase == "":
-					slog.Error("composio: no callback base url (set COMPOSIO_CALLBACK_BASE_URL or MULTICA_PUBLIC_URL); composio integration disabled")
-				default:
-					svc, serr := composiointeg.NewService(sdkClient, queries, composiointeg.Config{
-						StateSecret:     stateSecret,
-						CallbackBaseURL: callbackBase,
-						FrontendBaseURL: appURLFromEnv(),
-					})
-					if serr != nil {
-						slog.Error("composio: service init failed; composio integration disabled", "error", serr)
-					} else {
-						h.Composio = svc
-						// Team Apps accounts are a paid feature (MUL-9491): the
-						// callback re-checks it right before writing an account.
-						svc.SetTeamConnectGate(h.TeamAppConnectGate)
-						// Connected Apps v2 (MUL-8516): runs reach their apps
-						// through the Multica gateway, which holds the Composio
-						// key and applies account rules and confirmations.
-						appsCfg := connectedapps.Config{
-							Queries:       queries,
-							TxStarter:     pool,
-							Composio:      svc,
-							TokenSecret:   connectedapps.DeriveTokenSecret(stateSecret),
-							PublicBaseURL: callbackBase,
-							Bus:           bus,
-						}
-						// Monthly app calls (MUL-10047) are metered only
-						// while Multica Cloud is connected.
-						if h.Entitlements != nil {
-							appsCfg.CallQuota = service.AppToolCallQuota{
-								Queries: queries, Entitlements: h.Entitlements, TxStarter: pool, Bus: bus,
-							}
-						}
-						// Remote MCP apps (MUL-9792) store OAuth tokens, so
-						// they need their own at-rest key; without it they
-						// stay off and Composio apps work as before.
-						if appsKey, kerr := secretbox.LoadKey("MULTICA_APPS_SECRET_KEY"); kerr == nil {
-							if box, berr := secretbox.New(appsKey); berr == nil {
-								appsCfg.SecretBox, appsCfg.DB = box, pool
-							} else {
-								slog.Error("connected apps: secretbox.New failed; remote MCP apps disabled", "error", berr)
-							}
-						} else {
-							slog.Info("connected apps: remote MCP apps disabled (MULTICA_APPS_SECRET_KEY not set)")
-						}
-						appsSvc, aerr := connectedapps.New(appsCfg)
-						if aerr != nil {
-							slog.Error("connected apps: init failed; agents run without apps", "error", aerr)
-						} else {
-							appsSvc.SetResumer(h)
-							appsSvc.SetTeamConnectGate(h.TeamAppConnectGate)
-							h.ConnectedApps = appsSvc
-						}
-						// Stage 3 (MUL-3721) hook: feed the per-task MCP
-						// overlay builder into TaskService so every Enqueue*
-						// path attaches the initiator user's Composio session
-						// URL to the task row before the daemon claims it.
-						// taskSvc already exists by this point — it was
-						// constructed inside NewHandler — and exposes its
-						// Composio field for exactly this kind of late wiring,
-						// so no Handler-level mutation is needed.
-						if h.TaskService != nil && h.ConnectedApps != nil {
-							h.TaskService.Composio = h.ConnectedApps
-						}
-						slog.Info("composio integration enabled")
+			stateSecret := composioStateSecret()
+			callbackBase := composioCallbackBaseURL(signupConfig.PublicURL)
+			switch {
+			case len(stateSecret) == 0:
+				slog.Error("composio: no state secret (set COMPOSIO_STATE_SECRET or JWT_SECRET); composio integration disabled")
+			case callbackBase == "":
+				slog.Error("composio: no callback base url (set COMPOSIO_CALLBACK_BASE_URL or MULTICA_PUBLIC_URL); composio integration disabled")
+			default:
+				svc, serr := composiointeg.NewService(sdkClient, queries, composiointeg.Config{
+					StateSecret:     stateSecret,
+					CallbackBaseURL: callbackBase,
+					FrontendBaseURL: appURLFromEnv(),
+				})
+				if serr != nil {
+					slog.Error("composio: service init failed; composio integration disabled", "error", serr)
+				} else {
+					h.Composio = svc
+					// Team Apps accounts are a paid feature (MUL-9491): the
+					// callback re-checks it right before writing an account.
+					svc.SetTeamConnectGate(h.TeamAppConnectGate)
+					// Connected Apps v2 (MUL-8516): runs reach their apps
+					// through the Multica gateway, which holds the Composio
+					// key and applies account rules and confirmations.
+					appsCfg := connectedapps.Config{
+						Queries:       queries,
+						TxStarter:     pool,
+						Composio:      svc,
+						TokenSecret:   connectedapps.DeriveTokenSecret(stateSecret),
+						PublicBaseURL: callbackBase,
+						Bus:           bus,
 					}
+					// Monthly app calls (MUL-10047) are metered only
+					// while Multica Cloud is connected.
+					if h.Entitlements != nil {
+						appsCfg.CallQuota = service.AppToolCallQuota{
+							Queries: queries, Entitlements: h.Entitlements, TxStarter: pool, Bus: bus,
+						}
+					}
+					// Remote MCP apps (MUL-9792) store OAuth tokens, so
+					// they need their own at-rest key; without it they
+					// stay off and Composio apps work as before.
+					if appsKey, kerr := secretbox.LoadKey("MULTICA_APPS_SECRET_KEY"); kerr == nil {
+						if box, berr := secretbox.New(appsKey); berr == nil {
+							appsCfg.SecretBox, appsCfg.DB = box, pool
+						} else {
+							slog.Error("connected apps: secretbox.New failed; remote MCP apps disabled", "error", berr)
+						}
+					} else {
+						slog.Info("connected apps: remote MCP apps disabled (MULTICA_APPS_SECRET_KEY not set)")
+					}
+					appsSvc, aerr := connectedapps.New(appsCfg)
+					if aerr != nil {
+						slog.Error("connected apps: init failed; agents run without apps", "error", aerr)
+					} else {
+						appsSvc.SetResumer(h)
+						appsSvc.SetTeamConnectGate(h.TeamAppConnectGate)
+						h.ConnectedApps = appsSvc
+					}
+					// Stage 3 (MUL-3721) hook: feed the per-task MCP
+					// overlay builder into TaskService so every Enqueue*
+					// path attaches the initiator user's Composio session
+					// URL to the task row before the daemon claims it.
+					// taskSvc already exists by this point — it was
+					// constructed inside NewHandler — and exposes its
+					// Composio field for exactly this kind of late wiring,
+					// so no Handler-level mutation is needed.
+					if h.TaskService != nil && h.ConnectedApps != nil {
+						h.TaskService.Composio = h.ConnectedApps
+					}
+					slog.Info("composio integration configured")
 				}
 			}
 		}
@@ -1869,6 +1866,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Get("/api/theme-store/themes", h.ListStoreThemes)
 		r.Get("/api/theme-store/themes/{themeId}/package", h.GetStoreThemePackage)
 		r.Get("/api/theme-store/themes/{themeId}/screenshots/{mode}", h.GetStoreThemeScreenshot)
+		r.Route("/api/admin", func(r chi.Router) {
+			r.Use(h.RequirePlatformAdmin)
+			r.Get("/settings", h.PlatformSettings)
+			r.Patch("/settings/{key}", h.UpdatePlatformSetting)
+			r.Get("/users", h.ListPlatformUsers)
+			r.Get("/workspaces", h.ListPlatformWorkspaces)
+			r.Post("/workspaces", h.CreatePlatformWorkspace)
+			r.Get("/workspaces/{id}/members", h.ListPlatformWorkspaceMembers)
+			r.Put("/workspaces/{id}/members", h.AssignPlatformWorkspaceMember)
+		})
 		r.Get("/api/me", h.GetMe)
 		r.Patch("/api/me", h.UpdateMe)
 		r.Patch("/api/me/onboarding", h.PatchOnboarding)

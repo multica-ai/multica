@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { WorkspaceAssignmentGate } from "@multica/views/platform-admin";
 import { useAuthStore } from "@multica/core/auth";
 import { paths } from "@multica/core/paths";
 import { workspaceListOptions } from "@multica/core/workspace/queries";
@@ -23,10 +24,12 @@ export default function Page() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
-  const { data: wsList = [] } = useQuery({
+  const { data, isLoadingError, refetch } = useQuery({
     ...workspaceListOptions(),
     enabled: !!user,
   });
+
+  const wsList = data ?? [];
 
   useEffect(() => {
     if (!isLoading && !user) router.replace(paths.login());
@@ -42,26 +45,28 @@ export default function Page() {
 
   return (
     <div className="h-full overflow-y-auto bg-background">
-      <OnboardingFlow
-        mode="new_workspace"
-        onCancel={onCancel}
-        onComplete={(ws, destination) => {
-          if (ws && destination?.kind === "chat") {
-            router.push(
-              paths.workspace(ws.slug).chatSession(destination.sessionId),
-            );
-          } else if (ws && destination?.kind === "issue") {
-            router.push(
-              paths.workspace(ws.slug).issueDetail(destination.issueRef),
-            );
-          } else if (ws) {
-            router.push(paths.workspace(ws.slug).issues());
-          } else {
-            router.push(paths.root());
-          }
-        }}
-        runtimeInstructions={<CliInstallInstructions />}
-      />
+      <WorkspaceAssignmentGate workspaceCount={wsList.length} ready={data !== undefined} onAssigned={router.replace} unavailable={isLoadingError} onRetry={() => void refetch()}>
+        <OnboardingFlow
+          mode="new_workspace"
+          onCancel={onCancel}
+          onComplete={(ws, destination) => {
+            if (ws && destination?.kind === "chat") {
+              router.push(
+                paths.workspace(ws.slug).chatSession(destination.sessionId),
+              );
+            } else if (ws && destination?.kind === "issue") {
+              router.push(
+                paths.workspace(ws.slug).issueDetail(destination.issueRef),
+              );
+            } else if (ws) {
+              router.push(paths.workspace(ws.slug).issues());
+            } else {
+              router.push(paths.root());
+            }
+          }}
+          runtimeInstructions={<CliInstallInstructions />}
+        />
+      </WorkspaceAssignmentGate>
     </div>
   );
 }

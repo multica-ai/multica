@@ -17,6 +17,7 @@ import { useCreateWorkspace } from "@multica/core/workspace/mutations";
 import type { Workspace } from "@multica/core/types";
 import { isImeComposing } from "@multica/core/utils";
 import { matchLocale } from "@multica/core/i18n";
+import { useCanCreateWorkspace } from "../../platform-admin/workspace-assignment";
 import { useConfigStore } from "@multica/core/config";
 import { workspaceUrlHost } from "@multica/core/workspace/workspace-url";
 import { useLogout } from "../../auth";
@@ -100,7 +101,7 @@ export function StepWorkspace({
 }) {
   const { t, i18n } = useT("onboarding");
   const locale = matchLocale([i18n.resolvedLanguage ?? i18n.language]);
-  const workspaceCreationDisabled = useConfigStore((s) => s.workspaceCreationDisabled);
+  const workspaceCreationDisabled = !useCanCreateWorkspace();
   const urlHost = workspaceUrlHost(useConfigStore((s) => s.daemonAppUrl));
   // Single source of truth for "can the user reach the create path on this
   // instance?" — drives the resume-mode picker, the eyebrow/headline/lede

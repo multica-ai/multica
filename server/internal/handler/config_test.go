@@ -71,7 +71,7 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 		testHandler.cfg = origCfg
 	}()
 
-	t.Setenv("ALLOW_SIGNUP", "false")
+	testHandler.cfg.AllowSignup = false
 	t.Setenv("GOOGLE_CLIENT_ID", "google-client-id")
 	t.Setenv("POSTHOG_API_KEY", "phc_test")
 	t.Setenv("POSTHOG_HOST", "https://eu.i.posthog.com")
@@ -365,10 +365,11 @@ func TestURLHostEqualsCanonicalizesCommonHostForms(t *testing.T) {
 // can hide every "Create workspace" affordance.
 func TestGetConfigExposesWorkspaceCreationDisabled(t *testing.T) {
 	origStorage := testHandler.Storage
+	origCfg := testHandler.cfg
 	testHandler.Storage = &mockStorage{}
-	defer func() { testHandler.Storage = origStorage }()
+	defer func() { testHandler.Storage = origStorage; testHandler.cfg = origCfg }()
 
-	t.Setenv("DISABLE_WORKSPACE_CREATION", "true")
+	testHandler.cfg.DisableWorkspaceCreation = true
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 	w := httptest.NewRecorder()

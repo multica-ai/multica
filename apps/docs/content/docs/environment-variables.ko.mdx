@@ -115,11 +115,20 @@ primary와 복제본의 연결 한도는 서로 독립적입니다. 모든 API �
 | `ALLOW_SIGNUP` | `true` | allowlist가 없을 때 새 계정 생성 허용 여부 |
 | `ALLOWED_EMAILS` | 비어 있음 | 가입을 허용할 전체 이메일 주소, 쉼표로 구분 |
 | `ALLOWED_EMAIL_DOMAINS` | 비어 있음 | 가입을 허용할 이메일 도메인, 쉼표로 구분 |
-| `DISABLE_WORKSPACE_CREATION` | `false` | 모든 사용자의 새 워크스페이스 생성을 금지. owner/admin 예외 없음 |
-| `WORKSPACE_CREATION_ALLOWED_EMAILS` | 비어 있음 | 워크스페이스 생성을 허용할 전체 이메일 주소, 쉼표로 구분. 설정하면 그 외 사용자는 403을 받습니다. `DISABLE_WORKSPACE_CREATION=true`가 우선합니다. 다른 워크스페이스에 대한 접근 권한은 부여하지 않습니다 |
+| `MULTICA_PLATFORM_ADMIN_EMAILS` | — | 자체 호스팅 환경의 플랫폼 관리를 사용할 수 있는 계정 이메일, 쉼표로 구분 |
+| `DISABLE_WORKSPACE_CREATION` | `false` | 사용자의 자체 워크스페이스 생성 기본 정책. 플랫폼 관리자는 관리 페이지에서 계속 생성할 수 있습니다 |
+| `WORKSPACE_CREATION_ALLOWED_EMAILS` | — | 워크스페이스 생성을 허용할 기본 이메일 목록. 사용자 생성 스위치가 우선합니다 |
 | `MULTICA_DEV_VERIFICATION_CODE` | 비어 있음 | production이 아닌 환경에서 사용하는 고정 6자리 테스트 인증 코드 |
 
 allowlist의 정확한 판단 순서는 [로그인과 가입](/auth-setup#가입-범위-제어)을 참고하세요.
+
+### 플랫폼 관리 [#platform-administration]
+
+`MULTICA_PLATFORM_ADMIN_EMAILS`에 있는 주소로 로그인한 후 `/admin`에서 플랫폼 관리를 엽니다. 이 역할은 플랫폼 설정과 워크스페이스 배정을 관리합니다. 워크스페이스 콘텐츠에는 구성원 자격이 필요합니다. 공개 가입이 중단되어도 목록에 있는 주소는 가입할 수 있습니다.
+
+관리 페이지에는 설정값과 출처가 표시됩니다. 저장된 값은 배포 환경, 기능 플래그 규칙 및 내장 기본값보다 우선합니다. 배포 설정값을 사용하여 재정의를 제거할 수 있습니다. 통합 자격 증명과 인프라 설정은 배포 환경에서 관리합니다.
+
+워크스페이스 생성 스위치가 둘 다 꺼져 있으면 해당 워크스페이스가 없는 사용자는 관리자 배정을 기다립니다. 등록된 계정을 소유자로 지정해 워크스페이스를 만들고 다른 등록 사용자를 구성원으로 배정합니다. 자동 생성은 기본적으로 꺼집니다. 활성화하면 가입 시 개인 워크스페이스를 생성합니다.
 
 ## 첨부 파일 저장소
 

@@ -42,7 +42,7 @@ func (h *Handler) ClaimStarPromptShowing(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed to claim star prompt")
 		return
 	}
-	writeJSON(w, http.StatusOK, h.userToResponse(user))
+	writeJSON(w, http.StatusOK, h.userToResponse(r.Context(), user))
 }
 
 // MarkStarPromptStarred records that the user clicked through to GitHub, which
@@ -62,5 +62,5 @@ func (h *Handler) MarkStarPromptStarred(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "failed to update star prompt")
 		return
 	}
-	writeJSON(w, http.StatusOK, h.userToResponse(user))
+	writeJSON(w, http.StatusOK, h.userToResponse(r.Context(), user))
 }

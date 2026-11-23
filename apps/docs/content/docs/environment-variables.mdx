@@ -115,11 +115,20 @@ SMTP takes priority over Resend whenever `SMTP_HOST` is non-empty.
 | `ALLOW_SIGNUP` | `true` | Whether new accounts can be created when no allowlist is configured |
 | `ALLOWED_EMAILS` | empty | Full email addresses allowed to sign up, comma-separated |
 | `ALLOWED_EMAIL_DOMAINS` | empty | Email domains allowed to sign up, comma-separated |
-| `DISABLE_WORKSPACE_CREATION` | `false` | Blocks all users from creating workspaces; no owner/admin exception |
-| `WORKSPACE_CREATION_ALLOWED_EMAILS` | empty | Full email addresses allowed to create workspaces, comma-separated. When set, all other users get 403. `DISABLE_WORKSPACE_CREATION=true` takes precedence. Grants no access to other workspaces |
+| `MULTICA_PLATFORM_ADMIN_EMAILS` | — | Authenticated accounts that may use **Platform administration** on a self-hosted instance, comma-separated |
+| `DISABLE_WORKSPACE_CREATION` | `false` | Default policy for self-service workspace creation. Platform administrators can still create workspaces from the management page |
+| `WORKSPACE_CREATION_ALLOWED_EMAILS` | — | Default workspace creator email allowlist. The self-service switch takes precedence |
 | `MULTICA_DEV_VERIFICATION_CODE` | empty | Fixed 6-digit test code for non-production environments |
 
 For the exact allowlist evaluation order, see [Sign-in and signup](/auth-setup#signup-restrictions).
+
+### Platform administration [#platform-administration]
+
+After signing in with an address in `MULTICA_PLATFORM_ADMIN_EMAILS`, open **Platform administration** at `/admin`. The role grants access to platform settings and workspace assignment. Workspace content still requires workspace membership. The listed addresses can sign up even when public signup is closed.
+
+The management page shows the configured value and its source. Saved values take precedence over the deployment environment, feature flag rules, and built-in defaults. Use **Use deployment value** to remove an override. Integration credentials and infrastructure configuration stay in the deployment environment.
+
+When both workspace creation switches are off, users without a workspace see **Waiting for administrator assignment**. Create a workspace with a registered account as its owner and assign additional registered users as members. Automatic creation is off by default. When enabled, it provisions a personal workspace during signup.
 
 ## Attachment storage
 

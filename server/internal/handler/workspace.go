@@ -301,30 +301,26 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Self-host gate (#3433): when the operator has set
-	// DISABLE_WORKSPACE_CREATION=true, no caller — including existing
-	// workspace owners — may create additional workspaces. The frontend
-	// hides every "Create workspace" affordance via /api/config, but the
-	// 403 here is the only authoritative check.
-	if h.cfg.DisableWorkspaceCreation {
+	settings, err := h.loadPlatformSettings(r.Context())
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "platform settings are unavailable")
+		return
+	}
+	if !settingValue(settings, settingAllowWorkspaceCreation, !h.cfg.DisableWorkspaceCreation) {
 		writeError(w, http.StatusForbidden, "workspace creation is disabled for this instance")
 		return
 	}
-
-	// Self-host allowlist (#9400): when WORKSPACE_CREATION_ALLOWED_EMAILS is
-	// set, only those accounts may create workspaces. The UI does not hide
-	// the entry points for other users; this 403 is the enforcement point.
-	if len(h.cfg.WorkspaceCreationAllowedEmails) > 0 {
+	if len(settingValue(settings, settingWorkspaceCreatorEmails, h.cfg.WorkspaceCreationAllowedEmails)) > 0 {
 		user, err := h.Queries.GetUser(r.Context(), parseUUID(userID))
+		if isNotFound(err) {
+			writeError(w, http.StatusUnauthorized, "user not found")
+			return
+		}
 		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				writeError(w, http.StatusUnauthorized, "user not found")
-				return
-			}
 			writeError(w, http.StatusInternalServerError, "failed to load user")
 			return
 		}
-		if !contains(h.cfg.WorkspaceCreationAllowedEmails, strings.TrimSpace(user.Email)) {
+		if !h.canCreateWorkspace(settings, user.Email) {
 			writeError(w, http.StatusForbidden, "workspace creation is restricted to selected users on this instance")
 			return
 		}
@@ -336,19 +332,20 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.createWorkspaceForOwner(w, r, req, parseUUID(userID), false)
+}
+
+func workspaceCreationParams(req CreateWorkspaceRequest) (db.CreateWorkspaceParams, string) {
 	req.Name = strings.TrimSpace(req.Name)
 	req.Slug = strings.ToLower(strings.TrimSpace(req.Slug))
 	if req.Name == "" || req.Slug == "" {
-		writeError(w, http.StatusBadRequest, "name and slug are required")
-		return
+		return db.CreateWorkspaceParams{}, "name and slug are required"
 	}
 	if !workspaceSlugPattern.MatchString(req.Slug) {
-		writeError(w, http.StatusBadRequest, "slug must contain only lowercase letters, numbers, and hyphens")
-		return
+		return db.CreateWorkspaceParams{}, "slug must contain only lowercase letters, numbers, and hyphens"
 	}
 	if isReservedSlug(req.Slug) {
-		writeError(w, http.StatusBadRequest, "slug is reserved")
-		return
+		return db.CreateWorkspaceParams{}, "slug is reserved"
 	}
 
 	// Resolve the prefix before opening the transaction: an invalid one is a
@@ -357,13 +354,39 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	if req.IssuePrefix != nil {
 		prefix, ok := normalizeIssuePrefix(*req.IssuePrefix)
 		if !ok {
-			writeError(w, http.StatusBadRequest, issuePrefixFormatError)
-			return
+			return db.CreateWorkspaceParams{}, issuePrefixFormatError
 		}
 		issuePrefix = prefix
 	}
 	if issuePrefix == "" {
 		issuePrefix = defaultIssuePrefixFromSlug(req.Slug)
+	}
+
+	return db.CreateWorkspaceParams{
+		Name: req.Name, Slug: req.Slug, Description: ptrToText(req.Description),
+		Context: ptrToText(req.Context), IssuePrefix: issuePrefix,
+	}, ""
+}
+
+func insertWorkspaceWithOwner(ctx context.Context, queries *db.Queries, params db.CreateWorkspaceParams, owner pgtype.UUID) (db.Workspace, error) {
+	ws, err := queries.CreateWorkspace(ctx, params)
+	if err != nil {
+		return db.Workspace{}, err
+	}
+	if _, err := queries.CreateMember(ctx, db.CreateMemberParams{WorkspaceID: ws.ID, UserID: owner, Role: "owner"}); err != nil {
+		return db.Workspace{}, fmt.Errorf("add workspace owner: %w", err)
+	}
+	if err := issuestatus.Ensure(ctx, queries, ws.ID); err != nil {
+		return db.Workspace{}, fmt.Errorf("seed workspace issue statuses: %w", err)
+	}
+	return ws, nil
+}
+
+func (h *Handler) createWorkspaceForOwner(w http.ResponseWriter, r *http.Request, req CreateWorkspaceRequest, owner pgtype.UUID, assigned bool) {
+	params, validationError := workspaceCreationParams(req)
+	if validationError != "" {
+		writeError(w, http.StatusBadRequest, validationError)
+		return
 	}
 
 	tx, err := h.TxStarter.Begin(r.Context())
@@ -374,13 +397,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 
 	qtx := h.Queries.WithTx(tx)
-	ws, err := qtx.CreateWorkspace(r.Context(), db.CreateWorkspaceParams{
-		Name:        req.Name,
-		Slug:        req.Slug,
-		Description: ptrToText(req.Description),
-		Context:     ptrToText(req.Context),
-		IssuePrefix: issuePrefix,
-	})
+	ws, err := insertWorkspaceWithOwner(r.Context(), qtx, params, owner)
 	if err != nil {
 		if isUniqueViolation(err) {
 			writeError(w, http.StatusConflict, "workspace slug already exists")
@@ -391,33 +408,14 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = qtx.CreateMember(r.Context(), db.CreateMemberParams{
-		WorkspaceID: ws.ID,
-		UserID:      parseUUID(userID),
-		Role:        "owner",
-	})
-	if err != nil {
-		slog.Warn("add owner failed", append(logger.RequestAttrs(r), "error", err)...)
-		writeError(w, http.StatusInternalServerError, "failed to add owner")
-		return
+	// A managed owner receives an already-provisioned workspace, like an invitee.
+	// Self-service creation still completes through the usual onboarding flow.
+	if assigned {
+		if _, err := qtx.MarkUserOnboarded(r.Context(), owner); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to prepare workspace owner")
+			return
+		}
 	}
-
-	// Seed the 7 built-in issue statuses inside the same transaction, so a
-	// workspace is never visible without its status catalog — an issue cannot
-	// be created before its status can be resolved. (MUL-6243)
-	if err := issuestatus.Ensure(r.Context(), qtx, ws.ID); err != nil {
-		slog.Warn("seed issue statuses failed", append(logger.RequestAttrs(r), "error", err)...)
-		writeError(w, http.StatusInternalServerError, "failed to seed issue statuses")
-		return
-	}
-
-	// NOTE: CreateWorkspace deliberately does NOT mark the user as
-	// onboarded. The `onboarded_at` flag is owned by CompleteOnboarding
-	// (Step 3 of the flow) and by AcceptInvitation (invitee joining an
-	// existing workspace). This decouples "the user has a workspace"
-	// from "the user has finished setup"; the workspace-layer route
-	// gate (web layout / desktop App.tsx overlay) redirects un-onboarded
-	// users back to /onboarding instead.
 
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create workspace")
@@ -425,6 +423,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	wsID := uuidToString(ws.ID)
+	userID := uuidToString(owner)
 
 	// "Is this the user's first workspace?" is derived in PostHog by looking
 	// at whether they have a prior workspace_created event, not stamped at

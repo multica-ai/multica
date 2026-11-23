@@ -115,11 +115,20 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `ALLOW_SIGNUP` | `true` | 未配置任何白名单时是否允许创建新账号 |
 | `ALLOWED_EMAILS` | 空 | 允许注册的完整邮箱，逗号分隔 |
 | `ALLOWED_EMAIL_DOMAINS` | 空 | 允许注册的邮箱域名，逗号分隔 |
-| `DISABLE_WORKSPACE_CREATION` | `false` | 禁止所有用户新建工作区；没有 owner/admin 例外 |
-| `WORKSPACE_CREATION_ALLOWED_EMAILS` | 空 | 允许新建工作区的完整邮箱地址，逗号分隔。设置后其他用户新建会返回 403。`DISABLE_WORKSPACE_CREATION=true` 优先。不授予访问其他工作区的权限 |
+| `MULTICA_PLATFORM_ADMIN_EMAILS` | — | 可使用自托管实例「平台管理」的登录账号邮箱，逗号分隔 |
+| `DISABLE_WORKSPACE_CREATION` | `false` | 普通用户自行创建工作区的默认策略。平台管理员仍可在管理页创建工作区 |
+| `WORKSPACE_CREATION_ALLOWED_EMAILS` | — | 工作区创建邮箱白名单的默认值。自行创建开关优先 |
 | `MULTICA_DEV_VERIFICATION_CODE` | 空 | 非 production 环境使用的固定 6 位测试验证码 |
 
 白名单的准确判断顺序见[登录与注册](/auth-setup#注册范围控制)。
+
+### 平台管理 [#platform-administration]
+
+使用 `MULTICA_PLATFORM_ADMIN_EMAILS` 中的邮箱登录，然后打开「平台管理」（`/admin`）。平台管理员可以调整平台设置和分配工作区，访问工作区内容仍需成为该工作区的成员。公开注册关闭时，配置中的邮箱仍可注册。
+
+管理页显示配置值和来源。保存的值优先于部署环境、功能开关规则和内置默认值。点击「恢复部署值」可移除覆盖值。集成凭据和基础设施配置仍由部署环境管理。
+
+两个工作区创建开关都关闭时，没有工作区的用户会看到「等待管理员分配」。管理员可以创建工作区并指定已注册用户为负责人，再将其他已注册用户分配为成员。自动创建默认关闭，开启后系统会在新用户注册时创建个人工作区。
 
 ## 附件存储
 

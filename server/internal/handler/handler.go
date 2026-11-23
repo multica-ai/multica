@@ -76,20 +76,11 @@ type Config struct {
 	AllowSignup         bool
 	AllowedEmails       []string
 	AllowedEmailDomains []string
-	// DisableWorkspaceCreation, when true, makes POST /api/workspaces return
-	// 403 for every caller. There is no role/owner exception because the repo
-	// has no platform-admin concept; operators bootstrap the workspace with
-	// the flag off, then flip it on and restart so subsequent users join via
-	// invitation only. The public /api/config endpoint mirrors this flag so
-	// the UI can hide every "Create workspace" affordance — see #3433.
-	DisableWorkspaceCreation bool
-	// WorkspaceCreationAllowedEmails, when non-empty, restricts
-	// POST /api/workspaces to callers whose account email matches one of
-	// the entries (case-insensitive). Empty means every signed-in user may
-	// create workspaces. DisableWorkspaceCreation takes precedence. This only
-	// decides who may create a workspace; it grants no cross-workspace
-	// visibility or admin rights (#9400).
+	// Deployment defaults for workspace policy, used until an operator saves
+	// an override. Platform-managed creation has its own authorization guard.
+	DisableWorkspaceCreation       bool
 	WorkspaceCreationAllowedEmails []string
+	PlatformAdminEmails            []string
 	// VCSIntegrationEnabled gates the self-hosted Git provider integration
 	// (Forgejo / Gitea / GitLab) at the deployment level, independent of whether
 	// MULTICA_VCS_SECRET_KEY is set. It is the product boundary: the feature is

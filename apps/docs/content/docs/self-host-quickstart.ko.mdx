@@ -242,7 +242,7 @@ docker compose -f docker-compose.selfhost.yml logs backend \
 [DEV] Verification code for you@example.com: 123456
 ```
 
-인증 코드를 입력하고 첫 워크스페이스를 만듭니다. Resend 또는 SMTP를 설정하면 이메일로 인증 코드가 전달되므로 멤버가 컨테이너 로그를 읽을 필요가 없습니다. 자세한 내용은 [로그인 및 가입 설정](/auth-setup)을 참고하세요.
+인증 코드를 입력하고 첫 워크스페이스를 만듭니다. 사용자 생성이 꺼져 있으면 [플랫폼 관리](/environment-variables#platform-administration)에서 배정받을 때까지 기다립니다. Resend 또는 SMTP를 설정하면 이메일로 인증 코드가 전달되므로 멤버가 컨테이너 로그를 읽을 필요가 없습니다. 자세한 내용은 [로그인 및 가입 설정](/auth-setup)을 참고하세요.
 
 <Callout type="warning">
 자체 호스팅 환경은 기본적으로 `APP_ENV=production`을 사용하므로 고정 인증 코드가 활성화되지 않습니다. 공개 인터넷 인스턴스에 `MULTICA_DEV_VERIFICATION_CODE`를 설정하지 마세요.

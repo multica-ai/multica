@@ -59,6 +59,8 @@ export interface Member {
 }
 
 export interface User {
+  platform_admin?: boolean;
+  can_create_workspace?: boolean;
   id: string;
   name: string;
   email: string;

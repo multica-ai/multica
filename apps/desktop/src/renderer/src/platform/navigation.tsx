@@ -43,6 +43,11 @@ function requireRuntimeAppUrl(scope: string): string {
  */
 function tryRouteToOverlay(path: string): boolean {
   const overlay = useWindowOverlayStore.getState();
+  if (path === "/admin") {
+    const previous = overlay.overlay?.type;
+    overlay.open({ type: "admin", returnTo: previous === "onboarding" || previous === "new-workspace" ? previous : undefined });
+    return true;
+  }
   if (path === "/workspaces/new") {
     overlay.open({ type: "new-workspace" });
     return true;

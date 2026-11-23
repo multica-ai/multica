@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { WorkspaceAssignmentGate } from "@multica/views/platform-admin";
 import { useAuthStore } from "@multica/core/auth";
 import {
   paths,
@@ -30,7 +31,7 @@ export default function OnboardingPage() {
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
   const hasOnboarded = useHasOnboarded();
-  const { workspaces, ready: workspacesReady } = useWorkspaceList({
+  const { workspaces, ready: workspacesReady, unavailable, refetch } = useWorkspaceList({
     enabled: !!user,
   });
   // The bootstrap path calls refreshMe() before returning, which flips
@@ -69,25 +70,27 @@ export default function OnboardingPage() {
   // wide two-column hero, all other steps wrap themselves at max-w-xl.
   return (
     <div className="h-full overflow-y-auto bg-background">
-      <OnboardingFlow
-        onComplete={(ws, destination) => {
-          completingRef.current = true;
-          if (ws && destination?.kind === "chat") {
-            router.push(
-              paths.workspace(ws.slug).chatSession(destination.sessionId),
-            );
-          } else if (ws && destination?.kind === "issue") {
-            router.push(
-              paths.workspace(ws.slug).issueDetail(destination.issueRef),
-            );
-          } else if (ws) {
-            router.push(paths.workspace(ws.slug).issues());
-          } else {
-            router.push(paths.root());
-          }
-        }}
-        runtimeInstructions={<CliInstallInstructions />}
-      />
+      <WorkspaceAssignmentGate workspaceCount={workspaces.length} ready={workspacesReady} onAssigned={router.replace} unavailable={unavailable} onRetry={() => void refetch()}>
+        <OnboardingFlow
+          onComplete={(ws, destination) => {
+            completingRef.current = true;
+            if (ws && destination?.kind === "chat") {
+              router.push(
+                paths.workspace(ws.slug).chatSession(destination.sessionId),
+              );
+            } else if (ws && destination?.kind === "issue") {
+              router.push(
+                paths.workspace(ws.slug).issueDetail(destination.issueRef),
+              );
+            } else if (ws) {
+              router.push(paths.workspace(ws.slug).issues());
+            } else {
+              router.push(paths.root());
+            }
+          }}
+          runtimeInstructions={<CliInstallInstructions />}
+        />
+      </WorkspaceAssignmentGate>
     </div>
   );
 }

@@ -160,6 +160,8 @@ ALLOWED_EMAILS=partner@example.net
 2 つの allowlist は、`ALLOW_SIGNUP=false` のときには明示的な例外リストとしても機能します。
 </Callout>
 
+`MULTICA_PLATFORM_ADMIN_EMAILS` に含まれる認証済みのアドレスは、[プラットフォーム管理](/environment-variables#platform-administration)の初期設定に使用するため登録できます。
+
 ## 招待とサインアップ制限
 
 保留中かつ有効期限内のワークスペース招待があれば、`ALLOW_SIGNUP=false` の場合や、メールアドレスが `ALLOWED_EMAILS` または `ALLOWED_EMAIL_DOMAINS` に一致しない場合でもアカウントを作成できます。この例外は `ALLOW_SIGNUP=true` で allowlist が設定されている場合にも適用されます。allowlist は有効な招待を持つユーザーを拒否する境界ではありません。

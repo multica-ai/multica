@@ -56,6 +56,7 @@
     "./dashboard": "./dashboard/index.ts",
     "./squads": "./squads/index.ts",
     "./squads/components": "./squads/components/index.ts",
+    "./platform-admin": "./platform-admin/index.ts",
     "./workspace/workspace-avatar": "./workspace/workspace-avatar.tsx",
     "./workspace/no-access-page": "./workspace/no-access-page.tsx",
     "./workspace/use-workspace-seen": "./workspace/use-workspace-seen.ts",

@@ -12,12 +12,19 @@ const state = vi.hoisted(() => ({
   summary: [] as { workspace_id: string; count: number }[],
   setPinned: vi.fn(),
   workspaceCreationDisabled: false,
+  accountCreationAllowed: undefined as boolean | undefined,
+  platformAdmin: false,
   openWorkspaceInNewWindow: undefined as undefined | Mock<(slug: string) => void>,
   workspacesInOtherWindows: undefined as undefined | (() => string[]),
 }));
 
 vi.mock("@multica/core/workspace/mutations", () => ({
   useSetWorkspacePinned: () => ({ mutate: state.setPinned }),
+}));
+
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: (selector: (store: { user: { can_create_workspace?: boolean; platform_admin: boolean } }) => unknown) =>
+    selector({ user: { can_create_workspace: state.accountCreationAllowed, platform_admin: state.platformAdmin } }),
 }));
 
 vi.mock("@multica/core/config", () => ({
@@ -89,6 +96,8 @@ beforeEach(() => {
   state.summary = [];
   state.setPinned.mockClear();
   state.workspaceCreationDisabled = false;
+  state.accountCreationAllowed = undefined;
+  state.platformAdmin = false;
   state.openWorkspaceInNewWindow = undefined;
   state.workspacesInOtherWindows = undefined;
 });
@@ -178,6 +187,15 @@ describe("RailWorkspaces", () => {
     renderWithI18n(<RailWorkspaces />);
     const menu = await openMenu();
     expect(within(menu).queryByRole("menuitem", { name: /Pending invitations/ })).toBeNull();
+  });
+
+  it("shows platform administration only for platform admins and respects account workspace policy", async () => {
+    state.platformAdmin = true;
+    state.accountCreationAllowed = false;
+    renderWithI18n(<RailWorkspaces />);
+    const menu = await openMenu();
+    expect(within(menu).getByRole("menuitem", { name: "Platform administration" })).toHaveAttribute("href", "/admin");
+    expect(within(menu).queryByRole("menuitem", { name: "Create workspace" })).not.toBeInTheDocument();
   });
 
   it("offers workspace creation unless the instance disables it", async () => {
