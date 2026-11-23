@@ -37,6 +37,7 @@ import {
 import { WakeupInstructionEditor } from "./wakeup-instruction-editor";
 import { WakeupControl } from "./wakeup-control";
 import { WakeupCreate } from "./wakeup-create";
+import { useSidebarRevealMotion } from "./use-sidebar-reveal-motion";
 import { TranscriptButton } from "../../common/task-transcript";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { useLocale, useT } from "../../i18n";
@@ -387,8 +388,9 @@ export function WakeupsSection({
   const text = useWakeupText();
   const disable = useDisableIssueWakeup(workspaceId, issueId);
   const enable = useEnableIssueWakeup(workspaceId, issueId);
+  const motion = useSidebarRevealMotion<HTMLElement>(reveal && !closed, hasContent, onRevealEnd);
   // An empty section is offered by the sidebar's add row instead.
-  if (!hasContent && !(reveal && !closed)) return null;
+  if (!motion.shown) return null;
   const current = data.filter((w) => isCurrentWakeup(w, wakeupRun(w, tasks)));
   const history = data.filter((w) => !isCurrentWakeup(w, wakeupRun(w, tasks)));
   const row = (wakeup: IssueWakeup) => (
@@ -422,7 +424,7 @@ export function WakeupsSection({
     />
   );
   return (
-    <section>
+    <section ref={motion.ref}>
       <IssueSidebarSectionHeader
         id={`issue-wakeups-${issueId}`}
         title={t(($) => $.wakeups.title)} open={open} onOpenChange={setOpen}
@@ -434,7 +436,7 @@ export function WakeupsSection({
             issueId={issueId}
             defaultAgentId={defaultAgentId}
             defaultOpen={reveal}
-            onOpenChange={(next) => !next && onRevealEnd?.()}
+            onOpenChange={(next) => !next && reveal && motion.end()}
           />
         ) : undefined}
       />

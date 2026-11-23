@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -104,6 +105,28 @@ describe("PullRequestsSection (MUL-7429)", () => {
     expect(screen.queryByText(enIssues.detail.pull_requests_empty_title)).not.toBeInTheDocument();
     fireEvent.keyDown(screen.getByRole("textbox", { name: "Link pull request" }), { key: "Escape" });
     await waitFor(() => expect(onRevealEnd).toHaveBeenCalled());
+  });
+
+  it("leaves the sidebar when a reveal is cancelled with nothing linked", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    mockAutoComplete = decision;
+    qc.setQueryData(["github", "pull-requests", "issue-1"], { pull_requests: [], auto_complete: decision });
+    function Revealed() {
+      const [reveal, setReveal] = useState(true);
+      return (
+        <PullRequestsSection issueId="issue-1" identifier="MUL-1" open onOpenChange={() => {}}
+          reveal={reveal} onRevealEnd={() => setReveal(false)} />
+      );
+    }
+    const { container } = render(
+      <QueryClientProvider client={qc}>
+        <I18nProvider resources={TEST_RESOURCES} locale="en">
+          <Revealed />
+        </I18nProvider>
+      </QueryClientProvider>,
+    );
+    fireEvent.keyDown(await screen.findByRole("textbox", { name: "Link pull request" }), { key: "Escape" });
+    await waitFor(() => expect(container).toBeEmptyDOMElement());
   });
 
   it("keeps a retry entry when loading fails with no cached PRs", async () => {

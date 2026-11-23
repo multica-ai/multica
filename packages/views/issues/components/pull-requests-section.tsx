@@ -28,6 +28,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { PullRequestList } from "./pull-request-list";
+import { useSidebarRevealMotion } from "./use-sidebar-reveal-motion";
 
 /**
  * The issue sidebar's Pull requests section: the linked PRs, what merging them
@@ -60,12 +61,13 @@ export function PullRequestsSection({
   // actions hidden until the server says it supports them.
   const supported = !!data?.auto_complete;
   const count = data?.pull_requests.length ?? 0;
+  const motion = useSidebarRevealMotion<HTMLDivElement>(reveal && supported, count > 0 || isError, onRevealEnd);
 
   // An empty section is offered by the sidebar's add row instead.
-  if (count === 0 && !isError && !(reveal && supported)) return null;
+  if (!motion.shown) return null;
 
   return (
-    <div>
+    <div ref={motion.ref}>
       <IssueSidebarSectionHeader
         title={t(($) => $.detail.section_pull_requests)} open={open} onOpenChange={onOpenChange} count={count} collapsible={count > 0 || isError}
         actions={supported ? <>
@@ -74,7 +76,7 @@ export function PullRequestsSection({
             identifier={identifier}
             defaultOpen={reveal}
             onLinked={() => onOpenChange(true)}
-            onClosed={onRevealEnd}
+            onClosed={() => reveal && motion.end()}
           />
           <AutoCompleteMenu issueId={issueId} disabled={data?.auto_complete?.issue_disabled ?? false} workspaceEnabled={data?.auto_complete?.workspace_enabled ?? true} />
         </> : undefined}

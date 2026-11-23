@@ -63,9 +63,10 @@ vi.mock("../../platform/use-local-daemon-status", () => ({
   useLocalDaemonStatus: () => ({ daemonId: mockLocalDaemonId, deviceName: null, running: !!mockLocalDaemonId }),
 }));
 const control = vi.hoisted(() => vi.fn());
+const controlState = vi.hoisted(() => ({ isPending: false, variables: undefined as { action: string } | undefined }));
 vi.mock("@multica/core/issues/environments", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/issues/environments")>()),
-  useControlIssueEnvironment: () => ({ mutate: control }),
+  useControlIssueEnvironment: () => ({ mutate: control, ...controlState }),
 }));
 const createComment = vi.hoisted(() => vi.fn());
 vi.mock("@multica/core/issues/mutations", () => ({
@@ -210,6 +211,8 @@ describe("IssueEnvironmentsSection", () => {
     focusEnvironment.mockReset();
     delete (window as { daemonAPI?: unknown }).daemonAPI;
     control.mockReset();
+    controlState.isPending = false;
+    controlState.variables = undefined;
     createComment.mockReset();
     apiMock.readIssueEnvironmentLogs.mockReset();
     apiMock.getIssueEnvironmentCommand.mockReset();
@@ -229,6 +232,29 @@ describe("IssueEnvironmentsSection", () => {
     expect(screen.queryByTestId("environment-row")).not.toBeInTheDocument();
     fireEvent.keyDown(await screen.findByRole("menu"), { key: "Escape" });
     await waitFor(() => expect(onRevealEnd).toHaveBeenCalled());
+  });
+
+  it("hides again once a reveal ends empty, but not while a start is in flight", async () => {
+    mockTasks = [];
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = (reveal: boolean) => (
+      <QueryClientProvider client={qc}>
+        <I18nProvider resources={TEST_RESOURCES} locale="en">
+          <IssueEnvironmentsSection issueId="issue-1" reveal={reveal} />
+        </I18nProvider>
+      </QueryClientProvider>
+    );
+    const { container, rerender } = render(view(true));
+    expect(await screen.findByText("Environments")).toBeVisible();
+
+    controlState.isPending = true;
+    controlState.variables = { action: "start" };
+    rerender(view(false));
+    expect(screen.getByText("Environments")).toBeVisible();
+
+    controlState.isPending = false;
+    rerender(view(false));
+    await waitFor(() => expect(container).toBeEmptyDOMElement());
   });
 
   it("names a lone machine on the row instead of above it", async () => {

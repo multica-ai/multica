@@ -82,6 +82,7 @@ import {
 } from "./environment-model";
 import { EnvironmentStartMenu, type DeclaredState } from "./environment-start-menu";
 import { IssueSidebarCollapsible, IssueSidebarSectionHeader } from "./issue-sidebar-section";
+import { useSidebarRevealMotion } from "./use-sidebar-reveal-motion";
 
 type IssuesT = ReturnType<typeof useT<"issues">>["t"];
 
@@ -399,12 +400,15 @@ export function IssueEnvironmentsSection({
     );
   };
 
-  const hasContent = envs.length > 0 || shownStarts.length > 0 || shownFailures.length > 0 || !!preparingShown || justRequested !== null;
+  // A start in flight counts: it settles only once the refetched list carries it.
+  const starting = control.isPending && control.variables?.action === "start";
+  const hasContent = envs.length > 0 || shownStarts.length > 0 || shownFailures.length > 0 || !!preparingShown || justRequested !== null || starting;
+  const motion = useSidebarRevealMotion<HTMLDivElement>(reveal, hasContent, onRevealEnd);
   // An empty section is offered by the sidebar's add row instead.
-  if (!hasContent && !reveal) return null;
+  if (!motion.shown) return null;
 
   return (
-    <div>
+    <div ref={motion.ref}>
       <IssueSidebarSectionHeader
         title={t(($) => $.environments.section_title)}
         open={open}
@@ -430,7 +434,7 @@ export function IssueEnvironmentsSection({
             preparing={!!preparing || justRequested !== null}
             onAskAgent={askAgent}
             defaultOpen={reveal}
-            onOpenChange={(next) => !next && onRevealEnd?.()}
+            onOpenChange={(next) => !next && reveal && motion.end()}
           />
         }
       />
