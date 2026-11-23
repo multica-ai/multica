@@ -250,6 +250,18 @@ vi.mock("./autopilot-quota-notice", () => ({
     </button>
   ),
 }));
+const archiveAllDialogProps = vi.hoisted(() => ({ count: -1, open: false }));
+vi.mock("./inbox-archive-all-dialog", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./inbox-archive-all-dialog")>();
+  return {
+    ...actual,
+    InboxArchiveAllDialog: (props: React.ComponentProps<typeof actual.InboxArchiveAllDialog>) => {
+      archiveAllDialogProps.count = props.count;
+      archiveAllDialogProps.open = props.open;
+      return actual.InboxArchiveAllDialog(props);
+    },
+  };
+});
 vi.mock("../../i18n", () => ({ useT: () => ({ t: () => "Inbox" }), useLocale: () => "en" }));
 
 function item(overrides: Partial<InboxItem> = {}): InboxItem {
@@ -281,7 +293,10 @@ function reset() {
     heldRows: {},
     leftRowKeyByWorkspace: {},
     lastClearedByWorkspace: {},
+    manualUnreadIdByWorkspace: {},
   });
+  archiveAllDialogProps.count = -1;
+  archiveAllDialogProps.open = false;
   listData.active = [];
   listData.archived = [];
   listData.lookup = undefined;
@@ -1397,5 +1412,43 @@ describe("InboxPage", () => {
     fireEvent.keyDown(document, { key: "u", code: "KeyU" });
     expect(markReadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
     expect(useInboxSelectionStore.getState().manualUnreadIdByWorkspace["workspace-1"]).toBeUndefined();
+  });
+
+  it("clears the manual-unread guard on unmount so reopening the notification marks it read again", () => {
+    reset();
+    layout.width = DESKTOP;
+    searchParams = new URLSearchParams("issue=issue-a");
+    listData.active = [item({ id: "inbox-a", issue_id: "issue-a", read: true })];
+
+    const first = render(<InboxPage />);
+    markReadMutate.mockClear();
+
+    fireEvent.keyDown(document, { key: "u", code: "KeyU" });
+    expect(useInboxSelectionStore.getState().manualUnreadIdByWorkspace["workspace-1"]).toBe("inbox-a");
+
+    // Navigate away from the Inbox page.
+    first.unmount();
+    expect(useInboxSelectionStore.getState().manualUnreadIdByWorkspace["workspace-1"]).toBeUndefined();
+
+    // Reopening the same unread notification later should auto-mark it read.
+    listData.active = [item({ id: "inbox-a", issue_id: "issue-a", read: false })];
+    render(<InboxPage />);
+    expect(markReadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
+  });
+
+  it("passes the unfiltered active count to the archive-all dialog when compact filters are active", () => {
+    reset();
+    layout.width = PHONE;
+    listData.active = [
+      item({ id: "inbox-a", issue_id: "issue-a", read: false }),
+      item({ id: "inbox-b", issue_id: "issue-b", read: true }),
+      item({ id: "inbox-c", issue_id: "issue-c", read: true }),
+    ];
+    useInboxFilterStore.getState().toggleUnreadOnly("workspace-1");
+
+    render(<InboxPage />);
+    // Only the 1 unread row is listed under the filter, but archive-all affects all 3 active rows.
+    expect(screen.getAllByTestId("row")).toHaveLength(1);
+    expect(archiveAllDialogProps.count).toBe(3);
   });
 });

@@ -24,7 +24,7 @@ export function InboxArchiveAllDialog({
   onConfirm,
 }: {
   open: boolean;
-  /** Number of visible active inbox rows (0 falls back to a count-less description). */
+  /** Total number of unfiltered active inbox rows (0 falls back to a count-less description). */
   count: number;
   onClose: () => void;
   onConfirm: () => void;

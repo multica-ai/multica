@@ -283,8 +283,16 @@ export function InboxPage() {
     effectiveFilters,
     isCompact && tab === "inbox",
   );
-  // Leaving the page leaves its open row.
-  useEffect(() => () => useInboxSelectionStore.getState().dropRow(wsId, INBOX_PAGE_LIST), [wsId]);
+  // Leaving the page leaves its open row and releases any manual-unread guard,
+  // so reopening the same notification later marks it read again.
+  useEffect(
+    () => () => {
+      const store = useInboxSelectionStore.getState();
+      store.dropRow(wsId, INBOX_PAGE_LIST);
+      store.clearManualUnread(wsId);
+    },
+    [wsId],
+  );
   const keptRow = tab !== "inbox" ? null : opensAnyLiveRow ? sectionList.kept : pageList.kept;
   // Left the Inbox rather than only the filters, so there is nothing left to act on.
   const settledRow = keptRow && keptRow.reason !== "filtered" ? keptRow : null;
@@ -1275,8 +1283,6 @@ export function InboxPage() {
             {t(($) => $.detail.edit_advanced)}
           </Button>
         )}
-        {/* Mirrors the row action: the button always reverses the view the
-            item is being read in. */}
         {!isArchivedView && !settledRow && (
           <Tooltip>
             <TooltipTrigger
@@ -1309,6 +1315,8 @@ export function InboxPage() {
             </TooltipContent>
           </Tooltip>
         )}
+        {/* Mirrors the row action: the button always reverses the view the
+            item is being read in. */}
         <Tooltip>
           <TooltipTrigger
             render={
@@ -1400,7 +1408,7 @@ export function InboxPage() {
         {listPanel}
         <InboxArchiveAllDialog
           open={archiveAllConfirmOpen}
-          count={listedItems.length}
+          count={items.length}
           onClose={() => setArchiveAllConfirmOpen(false)}
           onConfirm={handleArchiveAll}
         />

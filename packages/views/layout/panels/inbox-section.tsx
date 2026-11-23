@@ -31,7 +31,7 @@ import {
   useMarkInboxRead,
   useMarkInboxUnread,
 } from "@multica/core/inbox/mutations";
-import { useInboxUnreadCount } from "@multica/core/inbox/queries";
+import { deduplicateInboxItems, useInboxUnreadCount } from "@multica/core/inbox/queries";
 import { inboxRowTime, inboxSnoozeReturnedAt } from "@multica/core/inbox/snooze";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { issueDetailOptions } from "@multica/core/issues/queries";
@@ -48,6 +48,7 @@ import { inboxTabFromParam, inboxTabHref, type InboxTab, type InboxView } from "
 import { InboxTabs } from "../../inbox/components/inbox-tabs";
 import { InboxArchiveAllDialog } from "../../inbox/components/inbox-archive-all-dialog";
 import { InboxContextMenuProvider, useInboxContextMenu } from "../../inbox/components/inbox-context-menu";
+import type { InboxRowActions } from "../../inbox/components/inbox-item-actions";
 import { InboxDeleteDialog } from "../../inbox/components/inbox-delete-dialog";
 import { formatSnoozeTime } from "../../inbox/components/inbox-snooze-time";
 import { useArchivedInboxRows, useSnoozedInboxRows } from "../../inbox/components/use-inbox-tab-rows";
@@ -274,6 +275,7 @@ export function InboxSection({
       },
     });
   };
+  const contextView: InboxView = tab === "archived" ? "archived" : "inbox";
   const latest = {
     prefetch: (item: InboxItem) => void prefetchRow(item),
     markRead: (item: InboxItem) => markItemRead(item.id),
@@ -318,6 +320,38 @@ export function InboxSection({
         clearedAt: Date.now(),
       });
     },
+    contextMarkRead: (id: string) => markItemRead(id),
+    contextMarkUnread: (id: string) => {
+      const target = all.find((item) => item.id === id);
+      if (target) markItemUnread(target);
+      else {
+        markUnread.mutate(id, {
+          onError: (err) =>
+            toast.error(
+              err instanceof Error && err.message ? err.message : tInbox(($) => $.errors.mark_unread_failed),
+            ),
+        });
+      }
+    },
+    contextAction: (id: string) => {
+      if (contextView === "archived") {
+        const target = archived.items.find((item) => item.id === id);
+        if (target) restoreArchivedItem(target);
+        return;
+      }
+      const target = all.find((item) => item.id === id);
+      if (target) latestRef.current.archive(target);
+    },
+    contextDelete: (id: string) => {
+      const source = contextView === "archived" ? archived.items : all;
+      const target = source.find((item) => item.id === id);
+      if (target) setDeleteTarget({ item: target, view: contextView });
+    },
+    contextUnsubscribeArchive: (id: string) => {
+      const target = all.find((item) => item.id === id);
+      if (target?.issue_id) latestRef.current.unsubscribe(target);
+    },
+    canUnsubscribe: unsubscribable,
   };
   const latestRef = useRef(latest);
   useLayoutEffect(() => {
@@ -331,41 +365,22 @@ export function InboxSection({
     unsubscribe: (item) => latestRef.current.unsubscribe(item),
     snooze: (item, until) => latestRef.current.snooze(item, until),
   }), []);
-  const contextView: InboxView = tab === "archived" ? "archived" : "inbox";
-  const contextMenuActions = {
-    onMarkRead: (id: string) => markItemRead(id),
-    onMarkUnread: (id: string) => {
-      const target = all.find((item) => item.id === id);
-      if (target) markItemUnread(target);
-      else {
-        markUnread.mutate(id, {
-          onError: (err) =>
-            toast.error(
-              err instanceof Error && err.message ? err.message : tInbox(($) => $.errors.mark_unread_failed),
-            ),
-        });
-      }
-    },
-    onAction: (id: string) => {
-      if (contextView === "archived") {
-        const target = archived.items.find((item) => item.id === id);
-        if (target) restoreArchivedItem(target);
-        return;
-      }
-      const target = all.find((item) => item.id === id);
-      if (target) latestRef.current.archive(target);
-    },
-    onDelete: (id: string) => {
-      const source = contextView === "archived" ? archived.items : all;
-      const target = source.find((item) => item.id === id);
-      if (target) setDeleteTarget({ item: target, view: contextView });
-    },
-    onUnsubscribeArchive: (id: string) => {
-      const target = all.find((item) => item.id === id);
-      if (target?.issue_id) latestRef.current.unsubscribe(target);
-    },
-    canUnsubscribe: unsubscribable,
-  };
+  // Keep one stable identity for the context menu provider too: a fresh object
+  // every render would churn the context value and re-render every memoized row.
+  const contextMenuActions = useMemo<InboxRowActions>(() => ({
+    onMarkRead: (id) => latestRef.current.contextMarkRead(id),
+    onMarkUnread: (id) => latestRef.current.contextMarkUnread(id),
+    onAction: (id) => latestRef.current.contextAction(id),
+    onDelete: (id) => latestRef.current.contextDelete(id),
+    onUnsubscribeArchive: (id) => latestRef.current.contextUnsubscribeArchive(id),
+    canUnsubscribe: (item) => latestRef.current.canUnsubscribe(item),
+  }), []);
+  // Server-side `archive-all` ignores client filters and leaves snoozed issues
+  // alone, so the confirmation dialog counts every unfiltered active row group.
+  const totalActiveCount = useMemo(
+    () => deduplicateInboxItems(list.notifications).length,
+    [list.notifications],
+  );
   const renderRow = (item: InboxItem, measure?: RowMeasure) => (
     <InboxRow
       key={item.id}
@@ -431,6 +446,7 @@ export function InboxSection({
             <InboxSectionActions
               wsId={wsId}
               rows={all}
+              totalActiveCount={totalActiveCount}
               openRowKey={openRowKey}
               bulk={tab === "inbox"}
               triggerRef={actionsRef}
@@ -712,6 +728,7 @@ function VirtualInboxList({
 function InboxSectionActions({
   wsId,
   rows,
+  totalActiveCount,
   openRowKey,
   bulk,
   triggerRef,
@@ -721,6 +738,7 @@ function InboxSectionActions({
 }: {
   wsId: string;
   rows: readonly InboxItem[];
+  totalActiveCount: number;
   openRowKey: string | null;
   /** Offers the bulk actions, which act on the live Inbox. */
   bulk: boolean;
@@ -851,7 +869,7 @@ function InboxSectionActions({
     </DropdownMenu>
     <InboxArchiveAllDialog
       open={archiveAllConfirmOpen}
-      count={rows.length}
+      count={totalActiveCount}
       onClose={() => setArchiveAllConfirmOpen(false)}
       onConfirm={() =>
         archiveBatch(

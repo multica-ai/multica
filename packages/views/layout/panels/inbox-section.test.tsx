@@ -87,6 +87,17 @@ vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({ getActorName: () => "Leo Park", getActorInitials: () => "LP", getActorAvatarUrl: () => null }),
 }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
+const contextMenuActionsSeen = vi.hoisted(() => [] as unknown[]);
+vi.mock("../../inbox/components/inbox-context-menu", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../inbox/components/inbox-context-menu")>();
+  return {
+    ...actual,
+    InboxContextMenuProvider: (props: React.ComponentProps<typeof actual.InboxContextMenuProvider>) => {
+      contextMenuActionsSeen.push(props.actions);
+      return actual.InboxContextMenuProvider(props);
+    },
+  };
+});
 vi.mock("../../agents/components/agent-avatar-stack", () => ({
   AgentAvatarStack: ({ agentIds }: { agentIds: string[] }) => <span data-testid="agents">{agentIds.join(",")}</span>,
 }));
@@ -597,6 +608,61 @@ describe("InboxSection", () => {
     const dialog = await screen.findByRole("alertdialog");
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(state.archiveAll).not.toHaveBeenCalled();
+  });
+
+  it("shows the unfiltered active row count in the archive-all dialog even when filters narrow the list", async () => {
+    useInboxFilterStore.getState().toggleUnreadOnly("ws-1");
+    renderSection([
+      item({ id: "n1", issue_id: "issue-a", read: false }),
+      item({ id: "n2", issue_id: "issue-b", read: true }),
+      item({ id: "n3", issue_id: "issue-c", read: true }),
+      // Duplicate notification for issue-c should not double-count.
+      item({ id: "n4", issue_id: "issue-c", read: true, created_at: "2026-11-10T07:00:00Z" }),
+      // Snoozed issue is left untouched by archive-all and must not be counted.
+      item({ id: "n5", issue_id: "issue-d", read: false, snoozed_until: "2099-01-01T09:00:00Z" }),
+    ]);
+
+    expect(rows()).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Inbox actions" }));
+    fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Archive all" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent("All 3 active notifications in your inbox will move to Archived.");
+  });
+
+  it("keeps InboxContextMenuProvider actions referentially stable across navigation re-renders", () => {
+    contextMenuActionsSeen.length = 0;
+    const items = [
+      item({ id: "n1", issue_id: "issue-a", title: "Row A" }),
+      item({ id: "n2", issue_id: "issue-b", title: "Row B", created_at: "2026-11-10T07:00:00Z" }),
+    ];
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    client.setQueryData(["inbox", "ws-1", "list"], items);
+    client.setQueryData(snoozedInboxOptions("ws-1").queryKey, []);
+    client.setQueryData(agentListOptions("ws-1").queryKey, []);
+    client.setQueryData(agentTaskSnapshotOptions("ws-1").queryKey, []);
+
+    const nav = adapter("/acme/issues");
+    let setPathname!: (next: string) => void;
+    function NavigatingHarness() {
+      const [pathname, updatePathname] = useState("/acme/issues");
+      setPathname = updatePathname;
+      return <Harness pathname={pathname} openKey={null} />;
+    }
+
+    renderWithI18n(
+      <QueryClientProvider client={client}>
+        <NavigationProvider value={nav}>
+          <NavigatingHarness />
+        </NavigationProvider>
+      </QueryClientProvider>,
+    );
+    expect(rows()).toHaveLength(2);
+    const initialActions = contextMenuActionsSeen.at(-1);
+    expect(initialActions).toBeDefined();
+
+    act(() => setPathname("/acme/projects"));
+    expect(contextMenuActionsSeen.length).toBeGreaterThanOrEqual(2);
+    expect(contextMenuActionsSeen.at(-1)).toBe(initialActions);
   });
 
   it("offers right-click mark unread and delete on desktop sidebar rows", async () => {
