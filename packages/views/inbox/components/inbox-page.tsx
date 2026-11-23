@@ -422,6 +422,11 @@ export function InboxPage() {
 
   const markReadMutation = useMarkInboxRead();
   const [deleteTarget, setDeleteTarget] = useState<InboxItem | null>(null);
+  const [retainedDeleteTarget, setRetainedDeleteTarget] = useState<InboxItem | null>(null);
+  if (deleteTarget !== null && retainedDeleteTarget?.id !== deleteTarget.id) {
+    setRetainedDeleteTarget(deleteTarget);
+  }
+  const activeDeleteTarget = deleteTarget ?? retainedDeleteTarget;
   const markUnreadMutation = useMarkInboxUnread();
   const archiveWithUndo = useArchiveInboxWithUndo();
   const archiveBatchWithUndo = useArchiveInboxBatchWithUndo();
@@ -927,12 +932,20 @@ export function InboxPage() {
           ) : undefined
         }
       />
-      {deleteTarget && (
+      {activeDeleteTarget && (
         <InboxDeleteDialog
-          key={deleteTarget.id}
-          item={deleteTarget}
+          key={activeDeleteTarget.id}
+          open={deleteTarget !== null}
+          item={activeDeleteTarget}
           view={view}
           onClose={() => setDeleteTarget(null)}
+          onOpenChangeComplete={(nextOpen) => {
+            if (!nextOpen) {
+              setRetainedDeleteTarget((prev) =>
+                prev?.id === activeDeleteTarget.id ? null : prev,
+              );
+            }
+          }}
           onDeleted={(id) => {
             advanceSelectionPast(id, listedItems);
             toast.success(t(($) => $.toasts.deleted));

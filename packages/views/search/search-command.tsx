@@ -63,8 +63,10 @@ export function SearchCommand() {
             <DialogDescription>{t(($) => $.description)}</DialogDescription>
           </DialogHeader>
           {/* The desktop shell survives workspace navigation. Reset its query,
-              selection and pending searches together with their workspace. */}
-          {open && <PaletteBody key={workspaceSlug} close={close} openHostDialog={openHostDialog} />}
+              selection and pending searches together with their workspace.
+              Base UI's Portal keeps the body mounted through the exit animation
+              and unmounts it once closed, so no `{open && ...}` gate is needed. */}
+          <PaletteBody key={workspaceSlug} active={open} close={close} openHostDialog={openHostDialog} />
         </DialogContent>
       </Dialog>
       <PaletteHostDialogs dialog={hostDialog} onClose={() => setHostDialog(null)} />
@@ -73,9 +75,11 @@ export function SearchCommand() {
 }
 
 function PaletteBody({
+  active,
   close,
   openHostDialog,
 }: {
+  active: boolean;
   close: () => void;
   openHostDialog: (dialog: PaletteHostDialog) => void;
 }) {
@@ -122,6 +126,7 @@ function PaletteBody({
 
   // Close on single ESC — capture phase fires before base-ui Dialog's handlers
   useEffect(() => {
+    if (!active) return;
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -131,11 +136,12 @@ function PaletteBody({
     };
     document.addEventListener("keydown", handleEsc, true);
     return () => document.removeEventListener("keydown", handleEsc, true);
-  }, [close]);
+  }, [active, close]);
 
   return (
     <PaletteContext.Provider value={api}>
       <PaletteFrame
+        active={active}
         stack={stack}
         setStack={setStack}
         pageQuery={pageQuery}
@@ -148,12 +154,14 @@ function PaletteBody({
 
 /** Everything that reads the palette API lives under its provider. */
 function PaletteFrame({
+  active,
   stack,
   setStack,
   pageQuery,
   setPageQuery,
   recordIntent,
 }: {
+  active: boolean;
   stack: PaletteStackEntry[];
   setStack: React.Dispatch<React.SetStateAction<PaletteStackEntry[]>>;
   pageQuery: string;
@@ -167,7 +175,7 @@ function PaletteFrame({
   const current = stack[stack.length - 1] ?? null;
   const inputValue = current ? pageQuery : rawQuery;
 
-  const model = useRootModel(rawQuery, contexts, { active: true });
+  const model = useRootModel(rawQuery, contexts, { active });
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     // cmdk's root handler intercepts Home/End for list navigation; stop
