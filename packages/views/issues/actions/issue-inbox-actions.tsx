@@ -2,11 +2,8 @@
 
 import { useMemo, useRef, type ReactNode, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlarmClock, Archive, Bot, Check, ChevronDown, CircleDot } from "@multica/ui/icons";
-import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
+import { AlarmClock, Archive, CalendarClock, Check, CircleDot } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
-import { Button } from "@multica/ui/components/ui/button";
-import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
@@ -42,29 +39,27 @@ import {
   useRestoreInbox,
 } from "../../inbox/components/use-leave-inbox-row";
 import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
-import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { useBuiltinViewNavigation } from "../../issue-views/builtin-views";
 import { useNavigation } from "../../navigation";
 import { useLocale, useT } from "../../i18n";
-import { useIssueAgentState } from "../surface/use-issue-agent-state";
 
 /**
- * The Inbox page's bar over an open issue notification: why it is here,
+ * The Inbox page's floating group over an open issue notification:
  * `issueActions` (its status, assignee and quick actions), then the
  * notification's own. Snoozing, archiving or unsubscribing opens the next
  * notification the Work panel's Inbox section lists, so the Inbox can be
  * worked through without leaving the page.
  *
  * Once the notification leaves the Inbox on its own (the issue reached Done,
- * another window archived it, an action from this bar archived it), the
- * section keeps the row in place and the bar says so instead, with the
+ * another window archived it, an action from this group archived it), the
+ * section keeps the row in place and the group says so instead, with the
  * issue's actions still there, an undo and the way on to the next one.
  *
- * A snoozed issue's bar says when it comes back instead, with the way to
+ * A snoozed issue's group says when it comes back instead, with the way to
  * bring it back now or change the time.
  *
  * `movingOn`: the page is still handing off to another notification, so a
- * bar this issue showed holds its slot rather than shifting the issue up.
+ * group this issue showed stays up rather than blinking out and back in.
  */
 export function IssueInboxBar({
   issueId,
@@ -91,9 +86,9 @@ export function IssueInboxBar({
   const settled = kept && kept.reason !== "filtered" ? kept : null;
   const item = settled ? null : row;
   const next = row ? nextInboxRow(rows, issueId) : null;
-  // Remember that this issue mounted an InboxBar so while the page is still
-  // handing off to the next notification (`movingOn`), the 40px bar holds its
-  // slot instead of unmounting and shifting the old issue up by 40px.
+  // Remember that this issue showed a group, so while the page is still
+  // handing off to the next notification (`movingOn`) it stays up instead of
+  // blinking out until the next issue's group mounts.
   const hadBarForIssueRef = useRef<string | null>(null);
   if (item || settled) hadBarForIssueRef.current = issueId;
   else if (!movingOn && hadBarForIssueRef.current === issueId) hadBarForIssueRef.current = null;
@@ -111,7 +106,6 @@ export function IssueInboxBar({
     return (snoozedList ?? []).filter((entry) => new Date(entry.snoozed_until).getTime() > now).length;
   }, [snoozedList]);
   const keptText = useKeptInboxRowText(wsId);
-  const agents = useIssueAgentState(wsId, issueId);
   const [snoozeOpen, setSnoozeOpen] = useState(false);
 
   const archiveItem = () => {
@@ -215,55 +209,12 @@ export function IssueInboxBar({
       return null;
     }
     const inboxCleared = !next && !filtered;
-    const showAgentWorking =
-      settled.reason === "archived" &&
-      !keptText.isFinished(settled.item) &&
-      (archiveReason === "agent_triggered" || (agents !== null && !cause));
-    const fallbackAgentId =
-      cause?.type === "assignee" && cause.assignee?.type === "agent" ? cause.assignee.id : null;
-    const settledIcon = showAgentWorking ? (
-      agents && agents.agentIds.length > 0 ? (
-        <AgentAvatarStack
-          agentIds={agents.agentIds}
-          size="xs"
-          max={2}
-          opacity={agents.running ? "full" : "half"}
-        />
-      ) : fallbackAgentId ? (
-        <AgentAvatarStack agentIds={[fallbackAgentId]} size="xs" max={2} opacity="half" />
-      ) : (
-        <Bot className="text-info" />
-      )
-    ) : undefined;
-    const agentWorkingText = showAgentWorking
-      ? (keptText.agentLabel(agents) ?? t(($) => $.kept.agent_triggered))
-      : null;
-    const settledLabel =
-      showAgentWorking && agentWorkingText ? (
-        <span className="inline-flex min-w-0 max-w-full items-center gap-1.5">
-          <ShimmerText
-            active={!!agents?.running}
-            className={cn(
-              "shrink-0 font-medium",
-              agents?.running ? "text-foreground" : "text-muted-foreground",
-            )}
-          >
-            {agentWorkingText}
-          </ShimmerText>
-          <span aria-hidden className="text-faint-foreground @max-[32rem]/inbox-bar:hidden">
-            ·
-          </span>
-          <span className="truncate text-muted-foreground @max-[32rem]/inbox-bar:hidden">
-            {t(($) => $.kept.returns_on_activity)}
-          </span>
-        </span>
-      ) : (
-        keptText.notice(settled, cause)
-      );
+    // An agent at work says so in the header (`IssueAgentHeaderChip`), not here.
+    const status = keptText.status(settled, cause, archiveReason === "agent_triggered");
     return (
       <InboxKeptActions
-        icon={settledIcon}
-        label={settledLabel}
+        label={status.label}
+        hint={status.hint}
         issueActions={settled.reason === "archived" ? issueActions : undefined}
         onUndo={() => restore(settled.item.id, { quiet: true })}
         next={next}
@@ -312,11 +263,11 @@ export function IssueInboxBar({
   };
 
   return (
-    <InboxOpenBar item={item} issueActions={issueActions}>
+    <InboxOpenBar issueActions={issueActions}>
       <IconButton
         label={item.read === true ? t(($) => $.context_menu.mark_unread) : t(($) => $.context_menu.mark_read)}
         shortcut={<ActionShortcutKeycaps action="markInboxUnread" />}
-        tooltipSide="bottom"
+        tooltipSide="top"
         className="text-muted-foreground"
         onClick={toggleReadItem}
       >
@@ -327,6 +278,7 @@ export function IssueInboxBar({
         open={snoozeOpen}
         onOpenChange={setSnoozeOpen}
         onSnooze={snoozeItem}
+        side="top"
         trigger={<InboxBarButton icon={<AlarmClock />} label={t(($) => $.snooze.action)} shortcut="snoozeInboxItem" />}
       />
       <InboxArchiveButton onClick={archiveItem} />
@@ -365,12 +317,8 @@ function SnoozedBar({
         snoozed
         onSnooze={onSnooze}
         onUnsnooze={onUnsnooze}
-        trigger={
-          <Button size="sm" variant="ghost" className="shrink-0 text-muted-foreground">
-            {t(($) => $.snooze.change_time)}
-            <ChevronDown className="size-3" />
-          </Button>
-        }
+        side="top"
+        trigger={<InboxBarButton icon={<CalendarClock />} label={t(($) => $.snooze.change_time)} />}
       />
       {next && <InboxNextButton next={next} onNext={onNext} />}
     </InboxBar>

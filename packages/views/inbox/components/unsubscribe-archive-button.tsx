@@ -75,7 +75,7 @@ export function UnsubscribeArchiveButton({
       <IconButton
         label={label}
         shortcut={shortcut}
-        tooltipSide="bottom"
+        tooltipSide="top"
         className="text-muted-foreground"
         onClick={() => onConfirm("issue")}
       >
@@ -88,12 +88,12 @@ export function UnsubscribeArchiveButton({
     <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
       <DropdownMenuTrigger
         render={
-          <IconButton label={label} shortcut={shortcut} tooltipSide="bottom" className="text-muted-foreground" />
+          <IconButton label={label} shortcut={shortcut} tooltipSide="top" className="text-muted-foreground" />
         }
       >
         <BellOff />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-auto">
+      <DropdownMenuContent side="top" align="end" className="w-auto">
         <DropdownMenuGroup>
           <DropdownMenuLabel>{t(($) => $.unsubscribe.title)}</DropdownMenuLabel>
           {/* onClick, not onSelect: Base UI's Menu.Item has no onSelect. */}

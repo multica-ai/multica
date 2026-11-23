@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, Loader2, Zap } from "@multica/ui/icons";
+import { Loader2, Zap } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { dispatchReasonCode } from "@multica/core/api";
 import { useCurrentWorkspace } from "@multica/core/paths";
@@ -262,8 +262,8 @@ function QuickActionRow({
 }
 
 /**
- * The quick actions behind one button, for the Inbox bar. Nothing configured
- * renders nothing.
+ * The quick actions behind one icon button, for the Inbox's floating group.
+ * Nothing configured renders nothing.
  */
 export function QuickActionsMenu({
   issueId,
@@ -288,13 +288,11 @@ export function QuickActionsMenu({
   return (
     <>
       <DropdownMenu>
-        <TooltipHint label={label} side="bottom">
+        <TooltipHint label={label} side="top">
           <DropdownMenuTrigger
-            render={<Button variant="ghost" size="sm" aria-label={label} className="shrink-0" disabled={running} />}
+            render={<Button variant="ghost" size="icon-sm" aria-label={label} className="shrink-0" disabled={running} />}
           >
             {running ? <Loader2 className="animate-spin text-muted-foreground" /> : <Zap className="text-muted-foreground" />}
-            <span className="@max-[56rem]/inbox-bar:hidden">{label}</span>
-            <ChevronDown className="size-3 text-muted-foreground @max-[30rem]/inbox-bar:hidden" />
           </DropdownMenuTrigger>
         </TooltipHint>
         <DropdownMenuContent align="start" className="w-auto min-w-56 max-w-80">

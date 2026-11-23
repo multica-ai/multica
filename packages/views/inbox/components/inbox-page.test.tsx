@@ -547,14 +547,15 @@ describe("InboxPage", () => {
     expect(container.querySelector("[data-slot='list-column']")).toBeNull();
   });
 
-  it("leads the detail with the way back to the open tab on desktop, and leaves it to the back control on a phone", () => {
+  it("hands the detail the open notification, and leaves the way back to the list beside it", () => {
     reset();
     layout.width = DESKTOP;
     searchParams = new URLSearchParams("view=archived&issue=issue-9");
     listData.archived = [item({ id: "archived-1", issue_id: "issue-9", archived: true })];
-    const host = () => issueDetailProps.at(-1)?.inbox as { crumb?: { href: string }; item?: InboxItem } | undefined;
+    const host = () => issueDetailProps.at(-1)?.inbox as { crumb?: unknown; item?: InboxItem } | undefined;
     const { unmount } = render(<InboxPage />);
-    expect(host()?.crumb?.href).toBe("/acme/inbox?view=archived");
+    expect(host()).toBeDefined();
+    expect(host()?.crumb).toBeUndefined();
     // Archived, so the issue's own notification actions stay out of it.
     expect(host()?.item).toBeUndefined();
     unmount();

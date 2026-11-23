@@ -185,7 +185,7 @@ describe("IssueInboxBar", () => {
 
     // Still reading the issue (now still in Inbox), a later side-effect archive keeps it.
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, []));
-    expect(await screen.findByText("Notification archived")).toBeInTheDocument();
+    expect(await screen.findByText("Inbox cleared")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
   });
 
@@ -204,7 +204,7 @@ describe("IssueInboxBar", () => {
     expect(await screen.findByRole("button", { name: "Archive" })).toBeInTheDocument();
 
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, []));
-    expect(await screen.findByText("Notification archived")).toBeInTheDocument();
+    expect(await screen.findByText("Inbox cleared")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
   });
 
@@ -223,18 +223,35 @@ describe("IssueInboxBar", () => {
     expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
   });
 
-  it("says why the issue is here, then offers the issue's actions before the notification's", () => {
+  it("offers the issue's actions before the notification's, without restating why it is here", () => {
     setup({ issueActions: <button type="button">Set status</button> });
-    expect(screen.getByText("Commented")).toBeInTheDocument();
+    expect(screen.queryByText("Commented")).toBeNull();
     const issueAction = screen.getByRole("button", { name: "Set status" });
     const snooze = screen.getByRole("button", { name: "Snooze" });
     expect(issueAction.compareDocumentPosition(snooze) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("leads with Archive as its one filled action, its shortcuts kept to the tooltips", () => {
+    setup();
+    const bar = document.querySelector<HTMLElement>("[data-inbox-bar]")!;
+    expect(bar.querySelectorAll('[data-slot="button"][data-variant="default"]')).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Archive" })).toHaveAttribute("data-variant", "default");
+    expect(bar.querySelector('[data-slot="kbd"]')).toBeNull();
+  });
+
+  it("moves on with Next as the settled group's one filled action", async () => {
+    const nav = setup();
+    act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
+    const next = await screen.findByRole("button", { name: "Next" });
+    expect(next).toHaveAttribute("data-variant", "default");
+    expect(screen.getByRole("button", { name: "Undo" })).toHaveAttribute("data-variant", "ghost");
+    expect(document.querySelector('[data-inbox-bar] [data-slot="kbd"]')).toBeNull();
+  });
+
   it("keeps the issue's actions once the notification has left the Inbox", async () => {
     const nav = setup({ issueActions: <button type="button">Set status</button> });
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
-    expect(await screen.findByText("Notification archived")).toBeInTheDocument();
+    expect(await screen.findByText("Archived")).toBeInTheDocument();
     const issueAction = screen.getByRole("button", { name: "Set status" });
     const undo = screen.getByRole("button", { name: "Undo" });
     expect(issueAction.compareDocumentPosition(undo) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -251,7 +268,7 @@ describe("IssueInboxBar", () => {
     it("names the status it set, keeps the issue's actions, and undoes the archive", async () => {
       const nav = setup({ issueActions: <button type="button">Set status</button> });
       actFromBar(nav, { type: "status", status: "in_progress" });
-      expect(await screen.findByText("Changed to In Progress · Notification archived")).toBeInTheDocument();
+      expect(await screen.findByText("Changed to In Progress · Returns to Inbox on new activity")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Set status" })).toBeInTheDocument();
       expect(nav.push).not.toHaveBeenCalled();
 
@@ -263,26 +280,26 @@ describe("IssueInboxBar", () => {
       const nav = setup();
       nav.qc.setQueryData(agentListOptions("ws").queryKey, [{ id: "agent-nova", name: "Nova" } as Agent]);
       actFromBar(nav, { type: "assignee", assignee: { type: "agent", id: "agent-nova" } });
-      expect(await screen.findByText("Reassigned to Nova · Notification archived")).toBeInTheDocument();
+      expect(await screen.findByText("Reassigned to Nova · Returns to Inbox on new activity")).toBeInTheDocument();
     });
 
     it("names the quick action it ran", async () => {
       const nav = setup();
       actFromBar(nav, { type: "quick_action", name: "Code Review" });
-      expect(await screen.findByText("Ran Code Review · Notification archived")).toBeInTheDocument();
+      expect(await screen.findByText("Ran Code Review · Returns to Inbox on new activity")).toBeInTheDocument();
     });
 
     it("names the status for Done too, over the status alone", async () => {
       const nav = setup({ rows: [{ ...ROWS[0]!, issue_status: "done" }, ROWS[1]!] });
       actFromBar(nav, { type: "status", status: "done" });
-      expect(await screen.findByText("Changed to Done · Notification archived")).toBeInTheDocument();
+      expect(await screen.findByText("Changed to Done · Returns to Inbox on new activity")).toBeInTheDocument();
     });
 
     it("claims nothing when the archive came from elsewhere", async () => {
       const nav = setup();
       noteInboxBarAction("issue-1", { type: "status", status: "in_progress" });
       act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
-      expect(await screen.findByText("Notification archived")).toBeInTheDocument();
+      expect(await screen.findByText("Archived")).toBeInTheDocument();
     });
   });
 
@@ -329,7 +346,7 @@ describe("IssueInboxBar", () => {
     const nav = setup();
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
 
-    expect(await screen.findByText("Notification archived")).toBeInTheDocument();
+    expect(await screen.findByText("Archived")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
     expect(nav.push).not.toHaveBeenCalled();
 
@@ -357,7 +374,7 @@ describe("IssueInboxBar", () => {
   it("undoes the settled archive with Z", async () => {
     const nav = setup();
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
-    expect(await screen.findByText("Notification archived")).toBeInTheDocument();
+    expect(await screen.findByText("Archived")).toBeInTheDocument();
 
     await act(async () => fireEvent.keyDown(document, { key: "z", code: "KeyZ" }));
     expect(state.unarchiveInbox).toHaveBeenCalledWith("n-1");
@@ -367,7 +384,7 @@ describe("IssueInboxBar", () => {
     const nav = setup({ rows: [{ ...ROWS[0]!, issue_status: "done" }, ROWS[1]!] });
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
 
-    expect(await screen.findByText("Done · Notification archived")).toBeInTheDocument();
+    expect(await screen.findByText("Done · Returns to Inbox on new activity")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     expect(nav.push).toHaveBeenCalledWith("/acme/inbox?issue=issue-2");
   });
@@ -376,7 +393,7 @@ describe("IssueInboxBar", () => {
     const nav = setup();
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
 
-    await screen.findByText("Notification archived");
+    await screen.findByText("Archived");
     fireEvent.keyDown(document, { key: "e", code: "KeyE" });
     expect(nav.push).toHaveBeenCalledWith("/acme/inbox?issue=issue-2");
     expect(state.archiveInbox).not.toHaveBeenCalled();
@@ -453,7 +470,7 @@ describe("IssueInboxBar", () => {
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, []));
 
     expect(await screen.findByText("Inbox cleared")).toBeInTheDocument();
-    expect(screen.getByText("Notification archived")).toBeInTheDocument();
+    expect(screen.getByText("Returns to Inbox on new activity")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "1 snoozed" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Go to My work" })).toBeInTheDocument();
 
@@ -471,7 +488,7 @@ describe("IssueInboxBar", () => {
     const nav = setup({ rows: [{ ...ROWS[0]!, read: false }] });
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, []));
 
-    expect(await screen.findByText("Notification archived")).toBeInTheDocument();
+    expect(await screen.findByText("Archived")).toBeInTheDocument();
     expect(screen.queryByText("Inbox cleared")).toBeNull();
     expect(screen.queryByRole("button", { name: "Go to My work" })).toBeNull();
   });
@@ -557,10 +574,10 @@ describe("IssueInboxBar once an action is undone", () => {
     await screen.findByRole("button", { name: "Archive" });
     // The user continues reading the same issue; a later status change archives it.
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, []));
-    expect(await screen.findByText("Notification archived")).toBeInTheDocument();
+    expect(await screen.findByText("Inbox cleared")).toBeInTheDocument();
   });
 
-  it("keeps the 40px InboxBar mounted while handing off to the next notification", async () => {
+  it("keeps the group up while handing off to the next notification", async () => {
     const nav = setup();
     fireEvent.click(screen.getByRole("button", { name: "Archive" }));
     expect(nav.push).toHaveBeenCalledWith("/acme/inbox?issue=issue-2");
@@ -570,7 +587,7 @@ describe("IssueInboxBar once an action is undone", () => {
     });
 
     // Simulate the archive mutation removing the row from the Inbox cache before
-    // the next issue's route mounts: the bar keeps its 40px slot instead of collapsing.
+    // the next issue's route mounts: the group stays up instead of blinking out.
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
     expect(document.querySelector("[data-inbox-bar]")).not.toBeNull();
   });
@@ -581,13 +598,13 @@ describe("IssueInboxBar once an action is undone", () => {
     noteInboxAutoArchive({ issue_id: "issue-1", reason: "issue_status_terminal" });
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
 
-    expect(await screen.findByText("Changed to Done · Notification archived")).toBeInTheDocument();
+    expect(await screen.findByText("Changed to Done · Returns to Inbox on new activity")).toBeInTheDocument();
     expect(nav.push).not.toHaveBeenCalled();
     expect(toast.success).not.toHaveBeenCalled();
     expect(document.querySelector("[data-inbox-auto-advance-bar]")).toBeNull();
   });
 
-  it("stays on the issue with live agent status when triggering an agent archives it", async () => {
+  it("stays on the issue, leaving live agent status to the header, when triggering an agent archives it", async () => {
     const nav = setup();
     act(() => {
       nav.qc.setQueryData(agentListOptions("ws").queryKey, [{ id: "agent-1", name: "Emacs" } as Agent]);
@@ -599,8 +616,9 @@ describe("IssueInboxBar once an action is undone", () => {
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
 
     const statusBar = await screen.findByRole("status");
-    expect(statusBar).toHaveTextContent("Emacs is working");
-    expect(statusBar).toHaveTextContent("Returns to Inbox on new activity");
+    expect(statusBar).toHaveTextContent("Archived");
+    expect(statusBar).toHaveTextContent("Agent triggered · Returns to Inbox on new activity");
+    expect(statusBar).not.toHaveTextContent("Emacs is working");
     expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Next" })).toBeInTheDocument();
     expect(nav.push).not.toHaveBeenCalled();
@@ -614,8 +632,7 @@ describe("IssueInboxBar once an action is undone", () => {
     noteInboxAutoArchive({ issue_id: "issue-1", reason: "actor_acted", trigger: "agent_triggered" });
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
 
-    expect(await screen.findByText("Agent triggered")).toBeInTheDocument();
-    expect(screen.getByText("Returns to Inbox on new activity")).toBeInTheDocument();
+    expect(await screen.findByText("Agent triggered · Returns to Inbox on new activity")).toBeInTheDocument();
     expect(nav.push).not.toHaveBeenCalled();
   });
 });
