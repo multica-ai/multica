@@ -1921,6 +1921,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetWorkspace)
 					r.Put("/pin", h.SetWorkspacePinned)
 					r.Get("/members", h.ListMembersWithUser)
+					r.Get("/superusers", h.ListWorkspaceSuperusers)
 					// Paid-feature states for read-only and upgrade UI; the
 					// server enforces on every write regardless.
 					r.Get("/features", h.GetWorkspaceFeatures)
@@ -1966,6 +1967,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/", h.UpdateWorkspace)
 					r.Patch("/", h.UpdateWorkspace)
 					r.Post("/members", h.CreateInvitation)
+					r.Put("/superusers/{memberId}", h.ChangeWorkspaceSuperuser)
+					r.Delete("/superusers/{memberId}", h.ChangeWorkspaceSuperuser)
 					r.Route("/members/{memberId}", func(r chi.Router) {
 						r.Patch("/", h.UpdateMember)
 						r.Delete("/", h.DeleteMember)
@@ -2798,6 +2801,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/wakeups/{wakeupId}/cancel", h.CancelChatSessionWakeup)
 					r.Post("/wakeups/{wakeupId}/retry", h.RetryChatSessionWakeup)
 				})
+			})
+			r.Route("/api/chat/superuser", func(r chi.Router) {
+				r.Use(handler.RequireHumanActor)
+				r.Get("/sessions", h.ListSuperuserChats)
+				r.Get("/sessions/{sessionId}", h.GetSuperuserChat)
+				r.Get("/sessions/{sessionId}/messages", h.ListSuperuserChatMessages)
 			})
 			r.Get("/api/chat/pending-tasks", h.ListPendingChatTasks)
 			r.Get("/api/chat/pending-tasks/has-any", h.HasPendingChatTasks)

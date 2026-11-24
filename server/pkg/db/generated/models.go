@@ -2374,3 +2374,27 @@ type WorkspaceShareLink struct {
 	IsActive    bool               `json:"is_active"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
+
+type WorkspaceSuperuserAudit struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	ActorUserID   pgtype.UUID        `json:"actor_user_id"`
+	TargetUserID  pgtype.UUID        `json:"target_user_id"`
+	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
+	Action        string             `json:"action"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+type WorkspaceSuperuserGrant struct {
+	MemberID    pgtype.UUID        `json:"member_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	GrantedBy   pgtype.UUID        `json:"granted_by"`
+	GrantedAt   pgtype.Timestamptz `json:"granted_at"`
+}
+
+type WorkspaceSuperuserPolicy struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	EnabledAt   pgtype.Timestamptz `json:"enabled_at"`
+	EnabledBy   pgtype.UUID        `json:"enabled_by"`
+}

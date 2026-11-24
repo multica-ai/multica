@@ -36,6 +36,7 @@ const mockInvalidateQueries = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 
 vi.mock("@tanstack/react-query", () => ({
   queryOptions: <T,>(opts: T) => opts,
+  useMutation: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
   useQuery: (opts: { queryKey: unknown[] }) => {
     const key = JSON.stringify(opts.queryKey);
     if (key.includes('"limit"')) return { data: data.memberLimit };

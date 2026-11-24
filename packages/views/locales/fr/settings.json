@@ -1630,6 +1630,24 @@
     }
   },
   "members": {
+    "superusers": {
+      "title": "Superutilisateurs",
+      "description": "Les superutilisateurs désignés peuvent rechercher et lire tous les chats des membres, y compris les anciens. Seuls les propriétaires peuvent accorder ou révoquer cet accès.",
+      "loading": "Chargement des superutilisateurs...",
+      "error": "Impossible de modifier cet accès.",
+      "enabled": "Cet espace autorise des superutilisateurs désignés à consulter les chats.",
+      "disabled": "L’accès superutilisateur n’est pas activé.",
+      "none": "Aucun superutilisateur n’a accès.",
+      "choose": "Choisir un membre",
+      "grant": "Accorder l’accès",
+      "revoke": "Révoquer",
+      "chats_title": "Consulter les discussions",
+      "search": "Rechercher titres et messages",
+      "search_button": "Rechercher",
+      "chats_error": "Impossible de charger les discussions.",
+      "chats_empty": "Aucune discussion trouvée.",
+      "untitled": "Discussion sans titre"
+    },
     "invite_title": "Inviter un membre",
     "invite_email_placeholder": "utilisateur@entreprise.com",
     "invite_button": "Inviter",

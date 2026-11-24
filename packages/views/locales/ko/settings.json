@@ -1357,6 +1357,24 @@
     }
   },
   "members": {
+    "superusers": {
+      "title": "최고 관리자",
+      "description": "지정된 최고 관리자는 권한 부여 전의 대화를 포함해 모든 멤버의 채팅을 검색하고 읽을 수 있습니다. 워크스페이스 소유자만 이 권한을 부여하거나 취소할 수 있습니다.",
+      "loading": "최고 관리자 불러오는 중...",
+      "error": "권한을 변경하지 못했습니다.",
+      "enabled": "이 워크스페이스에서는 지정된 최고 관리자가 멤버 채팅을 볼 수 있습니다.",
+      "disabled": "최고 관리자 권한이 활성화되지 않았습니다.",
+      "none": "권한을 가진 최고 관리자가 없습니다.",
+      "choose": "멤버 선택",
+      "grant": "권한 부여",
+      "revoke": "취소",
+      "chats_title": "채팅 살펴보기",
+      "search": "제목과 메시지 검색",
+      "search_button": "검색",
+      "chats_error": "채팅을 불러오지 못했습니다.",
+      "chats_empty": "채팅을 찾지 못했습니다.",
+      "untitled": "제목 없는 채팅"
+    },
     "invite_title": "멤버 초대",
     "invite_email_placeholder": "user@company.com",
     "invite_button": "초대",

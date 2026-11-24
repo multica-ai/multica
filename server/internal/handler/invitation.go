@@ -36,9 +36,10 @@ type InvitationResponse struct {
 	UpdatedAt  string   `json:"updated_at"`
 	ExpiresAt  string   `json:"expires_at"`
 	// Enriched fields (present in list responses).
-	InviterName   string `json:"inviter_name,omitempty"`
-	InviterEmail  string `json:"inviter_email,omitempty"`
-	WorkspaceName string `json:"workspace_name,omitempty"`
+	InviterName            string `json:"inviter_name,omitempty"`
+	InviterEmail           string `json:"inviter_email,omitempty"`
+	WorkspaceName          string `json:"workspace_name,omitempty"`
+	SuperuserPolicyEnabled bool   `json:"superuser_policy_enabled"`
 }
 
 func invitationToResponse(inv db.WorkspaceInvitation) InvitationResponse {
@@ -263,6 +264,10 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 	slog.Info("invitation created", append(logger.RequestAttrs(r), "invitation_id", uuidToString(inv.ID), "workspace_id", workspaceID, "email", email, "role", role)...)
 
 	resp := invitationToResponse(inv)
+	if err := h.DB.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM workspace_superuser_policy WHERE workspace_id = $1)`, inv.WorkspaceID).Scan(&resp.SuperuserPolicyEnabled); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load workspace policy")
+		return
+	}
 
 	// Notify the invitee in real time if they are a registered user.
 	userID := requestUserID(r)
@@ -448,6 +453,10 @@ func (h *Handler) GetMyInvitation(w http.ResponseWriter, r *http.Request) {
 	resp := invitationToResponse(inv)
 
 	// Enrich with workspace name and inviter name.
+	if err := h.DB.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM workspace_superuser_policy WHERE workspace_id = $1)`, inv.WorkspaceID).Scan(&resp.SuperuserPolicyEnabled); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load workspace policy")
+		return
+	}
 	if ws, err := h.Queries.GetWorkspace(r.Context(), inv.WorkspaceID); err == nil {
 		resp.WorkspaceName = ws.Name
 	}
@@ -484,21 +493,43 @@ func (h *Handler) ListMyInvitations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := make([]InvitationResponse, len(rows))
+	policyRows, err := h.DB.Query(r.Context(), `SELECT workspace_id FROM workspace_superuser_policy`)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load workspace policies")
+		return
+	}
+	policies := make(map[string]bool)
+	for policyRows.Next() {
+		var workspaceID pgtype.UUID
+		if err := policyRows.Scan(&workspaceID); err != nil {
+			policyRows.Close()
+			writeError(w, http.StatusInternalServerError, "failed to load workspace policies")
+			return
+		}
+		policies[uuidToString(workspaceID)] = true
+	}
+	if err := policyRows.Err(); err != nil {
+		policyRows.Close()
+		writeError(w, http.StatusInternalServerError, "failed to load workspace policies")
+		return
+	}
+	policyRows.Close()
 	for i, row := range rows {
 		resp[i] = InvitationResponse{
-			ID:            uuidToString(row.ID),
-			WorkspaceID:   uuidToString(row.WorkspaceID),
-			InviterID:     uuidToString(row.InviterID),
-			InviteeEmail:  row.InviteeEmail,
-			InviteeUserID: uuidToPtr(row.InviteeUserID),
-			Role:          row.Role,
-			Status:        row.Status,
-			CreatedAt:     timestampToString(row.CreatedAt),
-			UpdatedAt:     timestampToString(row.UpdatedAt),
-			ExpiresAt:     timestampToString(row.ExpiresAt),
-			WorkspaceName: row.WorkspaceName,
-			InviterName:   row.InviterName,
-			InviterEmail:  row.InviterEmail,
+			ID:                     uuidToString(row.ID),
+			WorkspaceID:            uuidToString(row.WorkspaceID),
+			InviterID:              uuidToString(row.InviterID),
+			InviteeEmail:           row.InviteeEmail,
+			InviteeUserID:          uuidToPtr(row.InviteeUserID),
+			Role:                   row.Role,
+			Status:                 row.Status,
+			CreatedAt:              timestampToString(row.CreatedAt),
+			UpdatedAt:              timestampToString(row.UpdatedAt),
+			ExpiresAt:              timestampToString(row.ExpiresAt),
+			WorkspaceName:          row.WorkspaceName,
+			InviterName:            row.InviterName,
+			InviterEmail:           row.InviterEmail,
+			SuperuserPolicyEnabled: policies[uuidToString(row.WorkspaceID)],
 		}
 	}
 

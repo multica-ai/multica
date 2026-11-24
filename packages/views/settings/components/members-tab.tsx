@@ -74,6 +74,7 @@ import {
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { SuperusersSection } from "./superusers-section";
 import { useAuthStore } from "@multica/core/auth";
 import {
   clearUpgradeInvitesFor,
@@ -1240,6 +1241,7 @@ export function MembersTab() {
       {currentMember && !canManageWorkspace ? (
         <SettingsReadOnlyNotice wsId={wsId} />
       ) : null}
+      <SuperusersSection wsId={wsId} members={members} isOwner={isOwner} />
       <section className="space-y-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <SettingsViewTabs

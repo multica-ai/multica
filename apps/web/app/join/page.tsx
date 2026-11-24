@@ -165,6 +165,11 @@ function JoinInner() {
                   {info.role === "admin" ? t(($) => $.join.role_admin) : t(($) => $.join.role_member)}
                 </Badge>
               </p>
+              {info.superuser_policy_enabled && (
+                <p className="text-center text-caption text-muted-foreground">
+                  {t(($) => $.join.superuser_policy)}
+                </p>
+              )}
               {!user && (
                 <p className="text-center text-body text-muted-foreground">
                   {t(($) => $.join.login_required)}

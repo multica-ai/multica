@@ -1630,6 +1630,24 @@
     }
   },
   "members": {
+    "superusers": {
+      "title": "Superusuarios",
+      "description": "Los superusuarios designados pueden buscar y leer todos los chats de los miembros, incluso los anteriores a su autorización. Solo los propietarios pueden conceder o revocar este acceso.",
+      "loading": "Cargando superusuarios...",
+      "error": "No se pudo actualizar el acceso.",
+      "enabled": "Este espacio permite que superusuarios designados inspeccionen los chats.",
+      "disabled": "El acceso de superusuario no está habilitado.",
+      "none": "Nadie tiene acceso de superusuario.",
+      "choose": "Elige un miembro",
+      "grant": "Conceder acceso",
+      "revoke": "Revocar",
+      "chats_title": "Inspeccionar chats",
+      "search": "Buscar títulos y mensajes",
+      "search_button": "Buscar",
+      "chats_error": "No se pudieron cargar los chats.",
+      "chats_empty": "No se encontraron chats.",
+      "untitled": "Chat sin título"
+    },
     "invite_title": "Invitar miembro",
     "invite_email_placeholder": "usuario@empresa.com",
     "invite_button": "Invitar",

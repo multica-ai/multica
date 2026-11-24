@@ -14,7 +14,8 @@
     "joining": "Uniéndose...",
     "decline": "Rechazar",
     "declining": "Rechazando...",
-    "skip": "Omitir y configurar mi propio espacio de trabajo"
+    "skip": "Omitir y configurar mi propio espacio de trabajo",
+    "superuser_policy": "Los superusuarios designados del espacio de trabajo pueden buscar y leer todos los chats de los miembros, incluso los anteriores a su acceso."
   },
   "empty": {
     "title": "Sin invitaciones pendientes",
@@ -34,6 +35,7 @@
     "member_limit_reached": "{{workspace}} está lleno. Habla con quien te invitó; podrás unirte cuando el espacio de trabajo mejore su plan."
   },
   "join": {
+    "superuser_policy": "Los superusuarios designados del espacio de trabajo pueden buscar y leer todos los chats de los miembros, incluso los anteriores a su acceso.",
     "no_code": "No se encontró ningún código de invitación. Usa un enlace para compartir válido.",
     "invalid": "Este enlace de invitación no es válido o ha caducado.",
     "joined_title": "¡Te has unido!",

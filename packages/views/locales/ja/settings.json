@@ -1614,6 +1614,24 @@
     }
   },
   "members": {
+    "superusers": {
+      "title": "特権ユーザー",
+      "description": "指定された特権ユーザーは、権限付与前のものを含むすべてのメンバーのチャットを検索・閲覧できます。この権限を付与・取り消せるのはワークスペースの所有者だけです。",
+      "loading": "読み込み中...",
+      "error": "権限を更新できませんでした。",
+      "enabled": "このワークスペースでは、指定された特権ユーザーがメンバーのチャットを閲覧できます。",
+      "disabled": "特権ユーザー権限は有効になっていません。",
+      "none": "権限を持つ特権ユーザーはいません。",
+      "choose": "メンバーを選択",
+      "grant": "権限を付与",
+      "revoke": "取り消す",
+      "chats_title": "チャットを確認",
+      "search": "タイトルとメッセージを検索",
+      "search_button": "検索",
+      "chats_error": "チャットを読み込めませんでした。",
+      "chats_empty": "チャットが見つかりません。",
+      "untitled": "無題のチャット"
+    },
     "invite_title": "メンバーを招待",
     "invite_email_placeholder": "user@company.com",
     "invite_button": "招待",

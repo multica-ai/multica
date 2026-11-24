@@ -96,6 +96,9 @@ import type {
   WorkspaceRepo,
   WorkspaceMcpServer,
   MemberWithUser,
+  WorkspaceSuperuserPolicy,
+  SuperuserChatSummary,
+  SuperuserChatMessage,
   User,
   Skill,
   SkillSummary,
@@ -629,6 +632,9 @@ import {
   ShareLinkListResponseSchema,
   ShareLinkInfoSchema,
   JoinShareLinkResponseSchema,
+  WorkspaceSuperuserPolicySchema,
+  SuperuserChatSummaryListSchema,
+  SuperuserChatMessageListSchema,
   EMPTY_SHARE_LINK,
   EMPTY_SHARE_LINK_INFO,
   EMPTY_JOIN_SHARE_LINK_RESPONSE,
@@ -4153,6 +4159,29 @@ export class ApiClient {
     await this.fetch(`/api/workspaces/${workspaceId}/members/${memberId}`, {
       method: "DELETE",
     });
+  }
+
+  async listWorkspaceSuperusers(workspaceId: string): Promise<WorkspaceSuperuserPolicy> {
+    const raw = await this.fetch(`/api/workspaces/${workspaceId}/superusers`);
+    return parseWithFallback(raw, WorkspaceSuperuserPolicySchema, { enabled: false, grants: [] }, {
+      endpoint: "listWorkspaceSuperusers",
+    });
+  }
+
+  async setWorkspaceSuperuser(workspaceId: string, memberId: string, granted: boolean): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/superusers/${memberId}`, {
+      method: granted ? "PUT" : "DELETE",
+    });
+  }
+
+  async listSuperuserChats(query = ""): Promise<SuperuserChatSummary[]> {
+    const raw = await this.fetch(`/api/chat/superuser/sessions?q=${encodeURIComponent(query)}`);
+    return parseWithFallback(raw, SuperuserChatSummaryListSchema, [], { endpoint: "listSuperuserChats" });
+  }
+
+  async listSuperuserChatMessages(sessionId: string): Promise<SuperuserChatMessage[]> {
+    const raw = await this.fetch(`/api/chat/superuser/sessions/${encodeURIComponent(sessionId)}/messages`);
+    return parseWithFallback(raw, SuperuserChatMessageListSchema, [], { endpoint: "listSuperuserChatMessages" });
   }
 
   async leaveWorkspace(workspaceId: string): Promise<void> {

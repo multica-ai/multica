@@ -1630,6 +1630,24 @@
     }
   },
   "members": {
+    "superusers": {
+      "title": "Superusers",
+      "description": "Named superusers can search and read every member chat, including chats created before their grant. Only workspace owners can grant or revoke this access.",
+      "loading": "Loading superusers...",
+      "error": "Could not update superuser access.",
+      "enabled": "This workspace permits named superusers to inspect member chats.",
+      "disabled": "Superuser access has not been enabled.",
+      "none": "No superusers have access.",
+      "choose": "Choose a member",
+      "grant": "Grant access",
+      "revoke": "Revoke",
+      "chats_title": "Inspect chats",
+      "search": "Search titles and messages",
+      "search_button": "Search",
+      "chats_error": "Could not load chats.",
+      "chats_empty": "No chats found.",
+      "untitled": "Untitled chat"
+    },
     "invite_title": "Invite member",
     "invite_email_placeholder": "user@company.com",
     "invite_button": "Invite",

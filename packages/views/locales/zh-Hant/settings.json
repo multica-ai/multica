@@ -1614,6 +1614,24 @@
     }
   },
   "members": {
+    "superusers": {
+      "title": "超級使用者",
+      "description": "指定的超級使用者可以搜尋及閱讀所有成員的聊天，包括授權前的聊天。只有工作區擁有者可以授予或撤銷此權限。",
+      "loading": "正在載入超級使用者...",
+      "error": "無法更新超級使用者權限。",
+      "enabled": "此工作區允許指定的超級使用者檢視成員聊天。",
+      "disabled": "尚未啟用超級使用者權限。",
+      "none": "目前沒有超級使用者。",
+      "choose": "選擇成員",
+      "grant": "授予權限",
+      "revoke": "撤銷",
+      "chats_title": "檢視聊天",
+      "search": "搜尋標題和訊息",
+      "search_button": "搜尋",
+      "chats_error": "無法載入聊天。",
+      "chats_empty": "找不到聊天。",
+      "untitled": "無標題聊天"
+    },
     "invite_title": "邀請成員",
     "invite_email_placeholder": "user@company.com",
     "invite_button": "邀請",

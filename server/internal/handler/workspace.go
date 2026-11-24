@@ -1616,6 +1616,17 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			run:  func() error { return qtx.DeleteWorkspaceAdministration(ctx, requester.WorkspaceID) },
 		},
 		{
+			name: "delete superuser data",
+			run: func() error {
+				for _, table := range []string{"workspace_superuser_audit", "workspace_superuser_grant", "workspace_superuser_policy"} {
+					if _, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE workspace_id = $1", requester.WorkspaceID); err != nil {
+						return err
+					}
+				}
+				return nil
+			},
+		},
+		{
 			// At this point workspaceMember has resolved → workspaceID is a
 			// valid UUID, so reuse the resolved value. The existing final
 			// statement also sweeps any expand-phase compatibility leftovers.

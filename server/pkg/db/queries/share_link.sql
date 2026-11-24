@@ -23,7 +23,7 @@ WHERE code = $1
   AND (max_uses IS NULL OR use_count < max_uses);
 
 -- name: GetShareLinkInfoByCode :one
-SELECT wsl.role,
+SELECT wsl.workspace_id, wsl.role,
        w.name  AS workspace_name,
        w.slug  AS workspace_slug,
        u.name  AS creator_name
