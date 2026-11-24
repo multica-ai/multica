@@ -11,11 +11,10 @@ import * as Localization from "expo-localization";
 import { I18nextProvider, useTranslation } from "react-i18next";
 
 import { i18n } from "./singleton";
-import type { SupportedLocale } from "./types";
+import { DEFAULT_LOCALE, SUPPORTED_LOCALES, type SupportedLocale } from "./types";
 import "./resources-types";
 
 const LOCALE_STORAGE_KEY = "mobile.locale_preference";
-const DEFAULT_LOCALE: SupportedLocale = "en";
 const SYSTEM_LOCALE = matchSupportedLocale(systemLocaleCandidates());
 
 export type LocalePreference = SupportedLocale | "system";
@@ -42,6 +41,7 @@ function matchSupportedLocale(candidates: string[]): SupportedLocale {
       return "zh-Hant";
     }
     if (lowered.startsWith("zh")) return "zh-Hans";
+    if (lowered.split("-")[0] === "ru") return "ru";
     if (lowered.startsWith("en")) return "en";
   }
   return DEFAULT_LOCALE;
@@ -70,18 +70,10 @@ export function MobileI18nProvider({ children }: { children: ReactNode }) {
     void SecureStore.getItemAsync(LOCALE_STORAGE_KEY)
       .then((stored) => {
         if (cancelled || !stored) return;
-        if (
-          stored !== "system" &&
-          stored !== "en" &&
-          stored !== "zh-Hans" &&
-          stored !== "zh-Hant"
-        ) {
-          return;
-        }
-        setPreferenceState(stored);
-        if (stored !== "system") {
-          setPreferenceState(stored);
-          void i18n.changeLanguage(stored);
+        const locale = SUPPORTED_LOCALES.find((candidate) => candidate === stored);
+        if (locale) {
+          setPreferenceState(locale);
+          void i18n.changeLanguage(locale);
         }
       })
       .catch(() => {

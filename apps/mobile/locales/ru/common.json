@@ -1,0 +1,53 @@
+{
+  "actions": {
+    "add": "Добавить",
+    "back": "Назад",
+    "cancel": "Отмена",
+    "close": "Закрыть",
+    "confirm": "Подтвердить",
+    "continue": "Продолжить",
+    "copy": "Копировать",
+    "create": "Создать",
+    "delete": "Удалить",
+    "discard": "Сбросить",
+    "done": "Готово",
+    "download": "Скачать",
+    "edit": "Изменить",
+    "more": "Ещё",
+    "open": "Открыть",
+    "remove": "Убрать",
+    "retry": "Повторить",
+    "save": "Сохранить",
+    "search": "Поиск",
+    "send": "Отправить",
+    "share": "Поделиться",
+    "upload": "Загрузить"
+  },
+  "fields": {
+    "assignee": "Исполнитель",
+    "description": "Описание",
+    "due_date": "Срок",
+    "email": "Электронная почта",
+    "label": "Метка",
+    "name": "Имя",
+    "priority": "Приоритет",
+    "project": "Проект",
+    "status": "Статус",
+    "title": "Название"
+  },
+  "states": {
+    "loading": "Загружаем…",
+    "saving": "Сохраняем…",
+    "sending": "Отправляем…",
+    "offline": "Не в сети",
+    "empty": "Здесь пока пусто",
+    "error": "Что-то пошло не так"
+  },
+  "time": {
+    "just_now": "Только что",
+    "minutes_ago_other": "{{count}} мин назад",
+    "hours_ago_other": "{{count}} ч назад",
+    "days_ago_other": "{{count}} дн. назад",
+    "weeks_ago_other": "{{count}} нед. назад"
+  }
+}

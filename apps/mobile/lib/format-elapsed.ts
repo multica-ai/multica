@@ -1,3 +1,5 @@
+import { i18n } from "@/lib/i18n/singleton";
+
 /**
  * Format elapsed durations for chat timing captions.
  *
@@ -6,10 +8,12 @@
  * read identically across web / desktop / mobile.
  */
 export function formatElapsedSecs(secs: number): string {
-  if (secs < 60) return `${secs}s`;
-  const m = Math.floor(secs / 60);
-  const s = secs % 60;
-  return s ? `${m}m ${s}s` : `${m}m`;
+  const minutes = Math.floor(secs / 60);
+  const seconds = secs % 60;
+  const parts: string[] = [];
+  if (minutes) parts.push(i18n.t("chat:elapsed.minutes", { value: minutes }));
+  if (seconds || !minutes) parts.push(i18n.t("chat:elapsed.seconds", { value: seconds }));
+  return parts.join(" ");
 }
 
 /** Same formatting, but the input is milliseconds (server-stored `elapsed_ms`). */

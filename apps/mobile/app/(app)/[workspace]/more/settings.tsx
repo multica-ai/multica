@@ -31,15 +31,11 @@ import {
 } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 import { useLocalePreference, useT, type LocalePreference } from "@/lib/i18n";
+import { SUPPORTED_LOCALES } from "@/lib/i18n/types";
 import { cn } from "@/lib/utils";
 
 const THEME_OPTIONS: ThemePreference[] = ["light", "dark", "system"];
-const LANGUAGE_OPTIONS: LocalePreference[] = [
-  "system",
-  "en",
-  "zh-Hans",
-  "zh-Hant",
-];
+const LANGUAGE_OPTIONS: LocalePreference[] = ["system", ...SUPPORTED_LOCALES];
 
 function initialsOf(name: string | undefined): string {
   if (!name) return "?";
@@ -70,6 +66,7 @@ export default function SettingsPage() {
   const localeLabels = {
     system: t("language.system"),
     en: t("language.english"),
+    ru: t("language.russian"),
     "zh-Hans": t("language.chinese_simplified"),
     "zh-Hant": t("language.chinese_traditional"),
   };

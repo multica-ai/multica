@@ -8,6 +8,15 @@ import navigationEn from "@/locales/en/navigation.json";
 import projectsEn from "@/locales/en/projects.json";
 import settingsEn from "@/locales/en/settings.json";
 import workspaceEn from "@/locales/en/workspace.json";
+import authRu from "@/locales/ru/auth.json";
+import chatRu from "@/locales/ru/chat.json";
+import commonRu from "@/locales/ru/common.json";
+import editorRu from "@/locales/ru/editor.json";
+import inboxRu from "@/locales/ru/inbox.json";
+import issuesRu from "@/locales/ru/issues.json";
+import navigationRu from "@/locales/ru/navigation.json";
+import settingsRu from "@/locales/ru/settings.json";
+import workspaceRu from "@/locales/ru/workspace.json";
 import authZh from "@/locales/zh-Hans/auth.json";
 import chatZh from "@/locales/zh-Hans/chat.json";
 import commonZh from "@/locales/zh-Hans/common.json";
@@ -41,6 +50,17 @@ export const resources = {
     projects: projectsEn,
     settings: settingsEn,
     workspace: workspaceEn,
+  },
+  ru: {
+    auth: authRu,
+    chat: chatRu,
+    common: commonRu,
+    editor: editorRu,
+    inbox: inboxRu,
+    issues: issuesRu,
+    navigation: navigationRu,
+    settings: settingsRu,
+    workspace: workspaceRu,
   },
   "zh-Hans": {
     auth: authZh,

@@ -94,7 +94,9 @@
   "elapsed": {
     "replied": "Replied in {{time}}",
     "finished": "Finished in {{time}}",
-    "failed": "Failed after {{time}}"
+    "failed": "Failed after {{time}}",
+    "seconds": "{{value}}s",
+    "minutes": "{{value}}m"
   },
   "details": {
     "show": "Show details"

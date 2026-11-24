@@ -94,7 +94,9 @@
   "elapsed": {
     "replied": "用时 {{time}} 回复",
     "finished": "用时 {{time}} 完成",
-    "failed": "运行 {{time}} 后失败"
+    "failed": "运行 {{time}} 后失败",
+    "seconds": "{{value}}s",
+    "minutes": "{{value}}m"
   },
   "details": {
     "show": "显示详情"
