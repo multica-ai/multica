@@ -103,6 +103,10 @@ func TestChatExecutionSelectionSnapshotsFollowUpTasks(t *testing.T) {
 	assertTask(first, &inheritedModel, &inheritedLevel)
 	patch("model-a", "high", http.StatusBadRequest)
 	patch("missing", "low", http.StatusBadRequest)
+	patch("model-a[1m]", "low", http.StatusOK)
+	variantTask := send("context window")
+	variantModel, variantLevel := "model-a[1m]", "low"
+	assertTask(variantTask, &variantModel, &variantLevel)
 	patch(nil, nil, http.StatusOK)
 	third := send("third")
 	assertTask(third, &inheritedModel, &inheritedLevel)

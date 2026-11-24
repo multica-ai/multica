@@ -24,4 +24,9 @@ describe("chat model changes", () => {
       model: "b", thinkingLevel: "high",
     });
   });
+  it("recognizes Claude context window variants without changing the saved model", () => {
+    expect(nextChatModelSelection("a[1m]", null, "low", models, "claude")).toEqual({
+      model: "a[1m]", thinkingLevel: null,
+    });
+  });
 });

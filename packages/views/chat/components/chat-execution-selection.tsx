@@ -7,6 +7,7 @@ import { useSetChatExecutionSelection } from "@multica/core/chat/mutations";
 import { runtimeListOptions, runtimeModelsOptions } from "@multica/core/runtimes";
 import type { Agent, ChatSession, RuntimeModel } from "@multica/core/types";
 import { useT } from "../../i18n";
+import { findModelCapabilityEntry } from "../../agents/components/inspector/model-capability";
 
 const INHERIT = "__inherit__";
 
@@ -17,7 +18,7 @@ export function nextChatModelSelection(
   models: readonly RuntimeModel[],
   provider: string,
 ): { model: string | null; thinkingLevel: string | null } {
-  const selected = models.find((entry) => entry.id === (model || models.find((entry) => entry.default)?.id));
+  const selected = findModelCapabilityEntry(models, model || models.find((entry) => entry.default)?.id || "", provider);
   const inheritedLevel = thinkingLevel ?? agentLevel;
   const supported = selected?.thinking?.supported_levels.some((entry) => entry.value === inheritedLevel);
   if (inheritedLevel && !supported) {
@@ -53,7 +54,7 @@ export function ChatExecutionSelection({
   const model = session.model_override ?? null;
   const thinkingLevel = session.thinking_level_override ?? null;
   const effectiveModel = model ?? agent.model ?? "";
-  const selectedModel = models.find((entry) => entry.id === effectiveModel) ??
+  const selectedModel = findModelCapabilityEntry(models, effectiveModel, runtime?.provider ?? "") ??
     (effectiveModel === "" ? models.find((entry) => entry.default) : undefined);
   const effectiveLevel = thinkingLevel ?? agent.thinking_level ?? "";
   const levels = selectedModel?.thinking?.supported_levels ?? [];
@@ -83,7 +84,7 @@ export function ChatExecutionSelection({
           }}
         >
           <option value={INHERIT}>{t(($) => $.execution.inherit_model, { model: agent.model || t(($) => $.execution.runtime_default) })}</option>
-          {model !== null && !selectedModel && <option value={model}>{effectiveModel} ({t(($) => $.execution.unavailable)})</option>}
+          {model !== null && model !== selectedModel?.id && <option value={model}>{model || t(($) => $.execution.runtime_default)}{staleModel ? ` (${t(($) => $.execution.unavailable)})` : ""}</option>}
           {models.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
         </select>
       </label>

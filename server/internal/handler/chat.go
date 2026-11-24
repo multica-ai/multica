@@ -452,7 +452,7 @@ func (h *Handler) validateChatExecutionSelection(w http.ResponseWriter, r *http.
 	}
 	var selected *ModelEntry
 	for i := range snapshot.Models {
-		if snapshot.Models[i].ID == effectiveModel || (effectiveModel == "" && snapshot.Models[i].Default) {
+		if agent.ModelIDForCapabilityLookup(runtime.Provider, snapshot.Models[i].ID) == agent.ModelIDForCapabilityLookup(runtime.Provider, effectiveModel) || (effectiveModel == "" && snapshot.Models[i].Default) {
 			selected = &snapshot.Models[i]
 			break
 		}
