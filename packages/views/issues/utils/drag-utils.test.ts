@@ -270,9 +270,8 @@ describe("IssueCardPointerSensor", () => {
     const onActivation = vi.fn();
     const [activator] = IssueCardPointerSensor.activators;
     const started = activator!.handler(
-      { currentTarget: card, target, nativeEvent: { isPrimary: true, button: 0 } },
+      { currentTarget: card, target, nativeEvent: { isPrimary: true, button: 0 } } as never,
       { onActivation },
-      { active: null } as never,
     );
     return { started, onActivation };
   }

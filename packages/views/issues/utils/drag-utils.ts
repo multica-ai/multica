@@ -27,13 +27,12 @@ export type DragMoveUpdates = DragMoveTargetUpdates & {
  * the card's own DOM start a drag.
  */
 export class IssueCardPointerSensor extends PointerSensor {
-  static activators = PointerSensor.activators.map((activator) => ({
-    ...activator,
-    handler: (...args: Parameters<typeof activator.handler>) => {
-      const [event] = args as [React.PointerEvent];
-      return event.currentTarget.contains(event.target as Node) && activator.handler(...args);
-    },
-  }));
+  static activators: typeof PointerSensor.activators = [{
+    eventName: "onPointerDown",
+    handler: (event, options) =>
+      event.currentTarget.contains(event.target as Node) &&
+      PointerSensor.activators[0]!.handler(event, options),
+  }];
 }
 
 const UNASSIGNED_GROUP_ID = "assignee:unassigned";
