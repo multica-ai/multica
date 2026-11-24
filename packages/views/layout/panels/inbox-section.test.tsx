@@ -820,7 +820,8 @@ describe("InboxSection", () => {
     fireEvent.click(screen.getByRole("tab", { name: /^Snoozed/ }));
     expect(await screen.findByRole("link", { name: /^Ship the release notes/ })).toBeInTheDocument();
     expect(document.querySelector('[data-inbox-snoozed-row] [data-mc="status-icon"]')).not.toBeNull();
-    expect(apiMock.getIssue).not.toHaveBeenCalled();
+    // The unread row above is warmed once idle; the snoozed issue itself is never fetched.
+    expect(apiMock.getIssue.mock.calls.flat()).not.toContain("issue-z");
   });
 
   it("loads the archive when its tab is pointed at, so the click renders from cache", async () => {

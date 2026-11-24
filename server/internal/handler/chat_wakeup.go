@@ -313,6 +313,26 @@ func (h *Handler) CancelChatSessionWakeup(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, chatWakeupToResponse(ended))
 }
 
+// RescheduleChatSessionWakeup changes when an active wakeup runs: a reminder's
+// time, a check's interval or deadline, or a condition's deadline.
+func (h *Handler) RescheduleChatSessionWakeup(w http.ResponseWriter, r *http.Request) {
+	sessionID, id, ok := h.chatSessionWakeupForUser(w, r)
+	if !ok {
+		return
+	}
+	var timing service.ChatWakeupTiming
+	if err := json.NewDecoder(r.Body).Decode(&timing); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	updated, err := h.chatWakeups().Reschedule(r.Context(), sessionID, id, timing)
+	if err != nil {
+		chatWakeupError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, chatWakeupToResponse(updated))
+}
+
 // RetryChatSessionWakeup re-runs a wakeup whose report turn failed.
 func (h *Handler) RetryChatSessionWakeup(w http.ResponseWriter, r *http.Request) {
 	sessionID, id, ok := h.chatSessionWakeupForUser(w, r)
