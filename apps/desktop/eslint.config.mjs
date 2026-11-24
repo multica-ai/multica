@@ -12,6 +12,20 @@ import {
 export default [
   ...reactConfig,
   { ignores: ["out/", "dist/"] },
+  // electron-vite bundles the renderer into out/renderer, so its libraries
+  // are devDependencies: electron-builder copies only `dependencies` into
+  // app.asar, and those are what the main process requires at runtime.
+  // Renderer imports from devDependencies are expected; undeclared imports
+  // are still errors.
+  {
+    files: ["src/renderer/**/*.{ts,tsx}"],
+    rules: {
+      "import-x/no-extraneous-dependencies": [
+        "error",
+        { devDependencies: true, peerDependencies: true },
+      ],
+    },
+  },
   {
     files: ["scripts/**/*.{mjs,js,cjs}"],
     languageOptions: {
