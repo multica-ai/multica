@@ -175,8 +175,8 @@ function AppsDirectory() {
   const attention = loaded?.directory.attention.filter(matches) ?? [];
   const all = catalogReady ? (loaded?.directory.all.filter(matches) ?? []) : [];
   const accountCount =
-    accountRows.team.filter((row) => matchesAccount(row.name)).length +
-    accountRows.personal.filter((row) => matchesAccount(row.name)).length;
+    accountRows.team.filter((row) => matchesAccount(row.name) || matchesAccount(row.slug)).length +
+    accountRows.personal.filter((row) => matchesAccount(row.name) || matchesAccount(row.slug)).length;
 
   // An unknown category falls back to all apps once the catalog can tell;
   // until then the URL's choice stands so the view doesn't flip on arrival.
@@ -233,7 +233,13 @@ function AppsDirectory() {
 
   const viewTitle =
     activeView?.label ??
-    (category && !catalogReady ? <Skeleton aria-hidden="true" className="h-3.5 w-24" /> : categoryGroup ? categoryLabel.group(categoryGroup) : null);
+    (category && catalogPending ? (
+      <Skeleton aria-hidden="true" className="h-3.5 w-24" />
+    ) : categoryGroup ? (
+      categoryLabel.group(categoryGroup)
+    ) : (
+      t(($) => $.connected_apps.hub.tabs.all)
+    ));
   const ViewIcon = activeView?.icon ?? LayoutGrid;
   const viewCount =
     !loaded || tab === "accounts" ? null : tab === "all" && !catalogReady ? (

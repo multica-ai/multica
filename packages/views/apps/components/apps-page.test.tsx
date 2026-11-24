@@ -267,6 +267,15 @@ describe("AppsPage", () => {
     expect(navLink(/^All apps/)).toHaveTextContent(/4$/);
   });
 
+  it("names the view when a category link's catalog fails to load", async () => {
+    vi.mocked(api.listAppCatalog).mockRejectedValueOnce(new Error("upstream"));
+    nav.search = "tab=all&category=ai_ml";
+    renderPage();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't load the app catalog.");
+    const title = screen.getByRole("heading", { level: 2, name: /^All apps/ });
+    expect(title.querySelector("[data-slot=skeleton]")).toBeNull();
+  });
+
   it("recovers an empty saved catalog only after an admin confirms", async () => {
     overview = { ...overview, catalog_mode: "custom", allowed_toolkits: [], can_manage: true };
     vi.mocked(api.updateAppSettings).mockImplementation(async () => {
@@ -443,6 +452,20 @@ describe("AppsPage › Accounts", () => {
     expect(within(team).getByText("Notion")).toBeInTheDocument();
     expect(within(team).queryByText("Slack")).not.toBeInTheDocument();
     expect(within(screen.getByRole("region", { name: "Your accounts" })).getByText("You haven't connected any accounts in this workspace.")).toBeInTheDocument();
+    expect(navLink(/^Accounts/)).toHaveTextContent(/1$/);
+  });
+
+  it("counts accounts the search finds by slug, as the list does", async () => {
+    vi.mocked(api.listAppCatalog).mockResolvedValue({ catalog_mode: "all", apps: [
+      { slug: "googlecalendar", name: "Google Calendar", curated: true },
+    ] });
+    overview.personal = [{ id: "p-cal", toolkit_slug: "googlecalendar", status: "active", connected_at: "", last_used_at: null }];
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole("region", { name: "Your accounts" }).then((yours) => within(yours).findByText("Google Calendar"));
+    await user.type(screen.getByRole("searchbox", { name: "Search apps" }), "googlecalendar");
+    expect(within(screen.getByRole("region", { name: "Your accounts" })).getByText("Google Calendar")).toBeInTheDocument();
+    expect(navLink(/^Accounts/)).toHaveTextContent(/1$/);
   });
 
   it("follows the URL when it changes outside the page, e.g. the sidebar link or Back", async () => {
