@@ -310,6 +310,23 @@ func antigravitySupplementHookCommand(env *execenv.Environment) ([]string, bool)
 	return workdirSupplementHookCommand(env, agent.AntigravityHooksInstallable, agent.AntigravityHookHelperArg)
 }
 
+func taskSupplementLaunch(provider, version string, env *execenv.Environment, customArgs []string) ([]string, bool) {
+	if provider == "antigravity" && agent.AntigravityUsesACP(customArgs) {
+		return nil, agent.AntigravityACPSupportsTaskSupplement(version)
+	}
+	if !agent.SupportsTaskSupplement(provider, version) {
+		return nil, false
+	}
+	switch provider {
+	case "cursor":
+		return cursorSupplementHookCommand(env)
+	case "antigravity":
+		return antigravitySupplementHookCommand(env)
+	default:
+		return nil, true
+	}
+}
+
 // workdirSupplementHookCommand gates hook-based steering. The provider's hooks
 // file lands in the workdir, so steering is offered only for daemon-managed
 // workdirs, never inside a user's own directory or worktree, and only when the
@@ -8147,6 +8164,7 @@ func resolveTaskModelSelection(
 	runtimeCmd agent.Command,
 	sel taskModelSelection,
 	taskLog *slog.Logger,
+	customArgs ...string,
 ) taskModelSelection {
 	capabilityChecksPending := sel.ThinkingLevel != "" || sel.ServiceTier != ""
 
@@ -8202,7 +8220,9 @@ func resolveTaskModelSelection(
 	// drop a level: on a lookup error or a fallback/empty catalog we keep the
 	// persisted level and let the CLI object, unless the binary itself has no
 	// such effort flag (MUL-7691).
-	if sel.ThinkingLevel != "" {
+	// agy models describes print-mode variants. The live ACP session validates
+	// its own separate thinking selector after model selection.
+	if sel.ThinkingLevel != "" && !(provider == "antigravity" && agent.AntigravityUsesACP(customArgs)) {
 		check, err := agent.CheckThinkingLevelWith(loadCatalog, provider, sel.Model, sel.ThinkingLevel)
 		if err != nil {
 			taskLog.Warn("thinking_level: catalog cannot validate; passing through",
@@ -8842,6 +8862,31 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 		if localAssignment.UsesWorktree() {
 			prepParams.LocalWorktree = &execenv.LocalWorktreeParams{LocalPath: localAssignment.AbsPath}
+			if source := task.LocalWorktreeResumeSource; source != nil && task.PriorSessionID != "" &&
+				provider == "antigravity" && agent.AntigravityUsesACP(agentCustomArgs) &&
+				sameExistingDir(source.LocalPath, localAssignment.RealPath) {
+				owner := execenv.EnvRootOwner{WorkspaceID: task.WorkspaceID, TaskID: source.RootTaskID}
+				resumeRoot, resumeErr := execenv.LocalWorktreeResumeRoot(d.cfg.WorkspacesRoot, task.PriorWorkDir, owner)
+				if resumeErr == nil {
+					// Register before opening the root so GC either finishes
+					// first or leaves this checkout alone through Finalize.
+					unmark := d.markActiveEnvRoot(resumeRoot)
+					var claim *execenv.EnvRootClaim
+					claim, resumeErr = execenv.ClaimLocalWorktreeResumeRoot(d.cfg.WorkspacesRoot, resumeRoot, owner)
+					if resumeErr == nil {
+						defer unmark()
+						defer claim.Release()
+						prepParams.LocalWorktree.Resume = &execenv.LocalWorktreeResume{
+							RootDir: claim.RootDir(), WorkDir: task.PriorWorkDir, Branch: source.Branch,
+						}
+					} else {
+						unmark()
+					}
+				}
+				if resumeErr != nil {
+					taskLog.Info("local_directory: prior ACP worktree unavailable", "error", resumeErr)
+				}
+			}
 			// Take the per-path mutex for the snapshot alone, then hand it
 			// straight back — long enough to read a consistent tree, short
 			// enough that worktree tasks still overlap for the run itself.
@@ -9090,17 +9135,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		taskCapabilities = append(taskCapabilities, protocol.DaemonCapabilityMuseAppProcessCleanupV1)
 	}
 	var supplementHookCommand []string
-	supplementSupported := agent.SupportsTaskSupplement(provider, resolvedVersion) && (task.IssueID != "" || task.ChatSessionID != "")
-	if supplementSupported {
-		switch provider {
-		case "cursor":
-			supplementHookCommand, supplementSupported = cursorSupplementHookCommand(env)
-		case "antigravity":
-			supplementHookCommand, supplementSupported = antigravitySupplementHookCommand(env)
+	if task.IssueID != "" || task.ChatSessionID != "" {
+		var supplementSupported bool
+		supplementHookCommand, supplementSupported = taskSupplementLaunch(provider, resolvedVersion, env, agentCustomArgs)
+		if supplementSupported {
+			taskCapabilities = append(taskCapabilities, protocol.DaemonCapabilityTaskSupplementV1)
 		}
-	}
-	if supplementSupported {
-		taskCapabilities = append(taskCapabilities, protocol.DaemonCapabilityTaskSupplementV1)
 	}
 	taskSupplementNegotiated, err := d.client.StartTask(prepareCtx, task, taskCapabilities...)
 	if err != nil {
@@ -9450,7 +9490,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		serviceTier = task.Agent.ServiceTier
 	}
 	selection := resolveTaskModelSelection(ctx, provider, agent.NewCommand(entry.Path, profileFixedArgs),
-		taskModelSelection{Model: model, ThinkingLevel: thinkingLevel, ServiceTier: serviceTier}, taskLog)
+		taskModelSelection{Model: model, ThinkingLevel: thinkingLevel, ServiceTier: serviceTier}, taskLog, customArgs...)
 	model, thinkingLevel, serviceTier = selection.Model, selection.ThinkingLevel, selection.ServiceTier
 
 	var idleWatchdogTimeout time.Duration

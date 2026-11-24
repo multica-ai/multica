@@ -100,6 +100,18 @@ func TestThinkingLevelWarningSequenceAcrossResumeRetry(t *testing.T) {
 	}
 }
 
+func TestResolveTaskModelSelectionKeepsAntigravityACPEffort(t *testing.T) {
+	stubModelDiscovery(t, map[string]agent.Catalog{
+		"antigravity": {Models: []agent.Model{{ID: "test-model"}}},
+	})
+	sel := resolveTaskModelSelection(t.Context(), "antigravity", agent.Command{}, taskModelSelection{
+		Model: "test-model", ThinkingLevel: "max",
+	}, quietTaskLog(), "--multica-antigravity-acp")
+	if sel.ThinkingLevel != "max" || sel.ThinkingLevelWarning != "" {
+		t.Fatalf("ACP should validate thinking_level in the live session: %+v", sel)
+	}
+}
+
 func TestThinkingLevelWarningReportFailure(t *testing.T) {
 	t.Parallel()
 	var requests atomic.Int32

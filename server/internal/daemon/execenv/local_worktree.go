@@ -97,6 +97,9 @@ type LocalWorktreeParams struct {
 	// EnvRoot is the daemon-owned task env root. The worktree is created
 	// inside it so the ordinary env-root GC reclaims it.
 	EnvRoot string
+	// Resume may rebuild the checkout at a prior session's cwd. The caller
+	// holds that task root's lock while this checkout is in use.
+	Resume *LocalWorktreeResume
 	// AgentName and TaskID name the branch a task with no conversation behind
 	// it gets: agent/<name>/<short-task-id>.
 	AgentName string
@@ -413,9 +416,27 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 	}
 
 	plan := resolveTaskBranch(gitRoot, params, headSHA, logger)
-	actualBranch, createdBranch, err := addLocalWorktree(gitRoot, worktreePath, plan, params.TaskID)
-	if err != nil {
-		return nil, err
+	var actualBranch string
+	var createdBranch bool
+	if resume := params.Resume; resume != nil {
+		if priorPath := resume.checkoutPath(rel, plan); priorPath != "" {
+			// The regular add can fall back to a sibling branch. A session
+			// pinned to this cwd must only see its own conversation's work.
+			out, addErr := addPlannedLocalWorktree(gitRoot, priorPath, plan)
+			if addErr == nil {
+				worktreePath = priorPath
+				actualBranch, createdBranch = plan.name, !plan.continues
+			} else if logger != nil {
+				logger.Info("execenv: could not rebuild the prior ACP worktree; using a fresh checkout",
+					"path", priorPath, "output", strings.TrimSpace(out), "error", addErr)
+			}
+		}
+	}
+	if actualBranch == "" {
+		actualBranch, createdBranch, err = addLocalWorktree(gitRoot, worktreePath, plan, params.TaskID)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	wt := &LocalWorktree{
@@ -461,6 +482,14 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 		return nil, replayErr
 	}
 	wt.ReplayConflicts = replay.conflicts
+	if params.Resume != nil && worktreePath == filepath.Join(params.Resume.RootDir, localWorktreeDirName) {
+		// A branch can replace the configured subdirectory with a symlink or
+		// file. Never hand a restored session a cwd outside its checkout.
+		if err := validateRestoredWorktreeCwd(worktreePath, rel); err != nil {
+			rollback()
+			return nil, err
+		}
+	}
 	// An unresolved merge means the branch does not carry this turn's snapshot
 	// yet; only a commit after the agent resolves can put it there.
 	wt.snapshotPending = len(replay.conflicts) > 0
@@ -1535,18 +1564,7 @@ func branchOwnedBy(gitRoot, branch string, owner branchOwner, logger *slog.Logge
 // delivering onto a task-scoped branch. It forks from the same base, so the
 // sibling still stands on the conversation's latest work.
 func addLocalWorktree(gitRoot, worktreePath string, plan taskBranchPlan, taskID string) (string, bool, error) {
-	var args []string
-	switch {
-	case plan.continues:
-		args = []string{"worktree", "add", worktreePath, plan.name}
-	case plan.reset:
-		// -B moves the branch to base. Nothing is lost: this path only runs
-		// once the branch has been proven an ancestor of HEAD.
-		args = []string{"worktree", "add", "-B", plan.name, worktreePath, plan.base}
-	default:
-		args = []string{"worktree", "add", "-b", plan.name, worktreePath, plan.base}
-	}
-	out, err := runGit(gitRoot, args...)
+	out, err := addPlannedLocalWorktree(gitRoot, worktreePath, plan)
 	if err == nil {
 		return plan.name, !plan.continues, nil
 	}
@@ -1581,6 +1599,18 @@ func addLocalWorktree(gitRoot, worktreePath string, plan taskBranchPlan, taskID 
 		}
 	}
 	return "", false, fmt.Errorf("execenv: git worktree add: %s: %w", strings.TrimSpace(out), err)
+}
+
+func addPlannedLocalWorktree(gitRoot, worktreePath string, plan taskBranchPlan) (string, error) {
+	switch {
+	case plan.continues:
+		return runGit(gitRoot, "worktree", "add", worktreePath, plan.name)
+	case plan.reset:
+		// The branch has been proven to be an ancestor of HEAD.
+		return runGit(gitRoot, "worktree", "add", "-B", plan.name, worktreePath, plan.base)
+	default:
+		return runGit(gitRoot, "worktree", "add", "-b", plan.name, worktreePath, plan.base)
+	}
 }
 
 // maxFallbackBranchAttempts caps how many fallback names addLocalWorktree tries

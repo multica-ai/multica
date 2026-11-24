@@ -1704,6 +1704,10 @@ func ReadEnvRootOwner(envRoot string) (*EnvRootOwner, error) {
 	if err != nil {
 		return nil, err
 	}
+	return decodeEnvRootOwner(b)
+}
+
+func decodeEnvRootOwner(b []byte) (*EnvRootOwner, error) {
 	trimmed := strings.TrimSpace(string(b))
 	if !strings.HasPrefix(trimmed, "{") {
 		return &EnvRootOwner{TaskID: trimmed}, nil

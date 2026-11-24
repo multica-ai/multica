@@ -1113,11 +1113,11 @@ func ThinkingControlSupported(providerType string) bool {
 // catalog or per-model subset. Callers that surface a rejection to a user
 // should ask ThinkingControlSupported first so the message says "this runtime
 // has no reasoning control" instead of implying a bad token.
-func IsKnownThinkingValue(providerType, value string) bool {
+func IsKnownThinkingValue(providerType, value string, customArgs ...string) bool {
 	if value == "" {
 		return true
 	}
-	if usesDynamicThinkingCatalog(providerType) {
+	if usesDynamicThinkingCatalog(providerType) || (providerType == "antigravity" && AntigravityUsesACP(customArgs)) {
 		return isValidDynamicThinkingValue(value)
 	}
 	enum, ok := providerThinkingEnums[providerType]

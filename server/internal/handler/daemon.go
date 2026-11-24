@@ -4427,7 +4427,45 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		resp.InitiatorEmail = originator.Email
 	}
 
+	resp.LocalWorktreeResumeSource = h.localWorktreeResumeSource(r.Context(), *task, runtime, resp)
 	return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, nil
+}
+
+func (h *Handler) localWorktreeResumeSource(ctx context.Context, task db.AgentTaskQueue, runtime db.AgentRuntime, resp AgentTaskResponse) *protocol.LocalWorktreeResumeSource {
+	if resp.PriorSessionID == "" || resp.PriorWorkDir == "" || resp.Agent == nil ||
+		runtime.Provider != "antigravity" || !agent.AntigravityUsesACP(resp.Agent.CustomArgs) ||
+		!runtime.DaemonID.Valid {
+		return nil
+	}
+	for _, resource := range resp.ProjectResources {
+		var ref localDirectoryRef
+		if resource.ResourceType != "local_directory" || json.Unmarshal(resource.ResourceRef, &ref) != nil ||
+			ref.DaemonID != runtime.DaemonID.String || ref.ExecutionMode != localDirectoryModeWorktree {
+			continue
+		}
+		source, err := h.Queries.GetLocalWorktreeResumeSource(ctx, db.GetLocalWorktreeResumeSourceParams{
+			WorkspaceID:            runtime.WorkspaceID,
+			RuntimeID:              runtime.ID,
+			AgentID:                task.AgentID,
+			IssueID:                task.IssueID,
+			ChatSessionID:          task.ChatSessionID,
+			ChannelContextRevision: task.ChannelContextRevision,
+			SessionID:              resp.PriorSessionID,
+			WorkDir:                resp.PriorWorkDir,
+		})
+		if err != nil {
+			if !errors.Is(err, pgx.ErrNoRows) {
+				slog.Warn("daemon claim: could not resolve prior local worktree", "task_id", resp.ID, "error", err)
+			}
+			return nil
+		}
+		return &protocol.LocalWorktreeResumeSource{
+			RootTaskID: uuidToString(source.RootTaskID),
+			LocalPath:  source.DurableWorkDir.String,
+			Branch:     source.BranchName.String,
+		}
+	}
+	return nil
 }
 
 // worktreeClaimBlockReason returns a user-facing reason when this runtime must

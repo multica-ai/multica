@@ -43,6 +43,8 @@ func TestMain(m *testing.M) {
 		// Preserve the production relationships while avoiding hundreds of
 		// milliseconds of intentional silence in every ACP fixture.
 		acpNotificationQuietTime = 100 * time.Millisecond
+		antigravityACPSettleQuiet = 100 * time.Millisecond
+		antigravityACPReplyQuiet = 600 * time.Millisecond
 		hermesNotificationQuietTime = 100 * time.Millisecond
 		grokNotificationQuietTime = 100 * time.Millisecond
 		zeroclawNotificationQuietTime = 100 * time.Millisecond

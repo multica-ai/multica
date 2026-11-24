@@ -53,3 +53,22 @@ func TestAntigravitySupplementHookCommandGate(t *testing.T) {
 		t.Fatal("steering offered for a workdir whose own hooks.json blocks the managed hooks")
 	}
 }
+
+func TestAntigravityACPSupplementCapability(t *testing.T) {
+	dir := t.TempDir()
+	for name, env := range map[string]*execenv.Environment{
+		"managed clone":   {WorkDir: dir},
+		"local directory": {WorkDir: dir, LocalDirectory: true},
+		"local worktree":  {WorkDir: dir, LocalWorktree: &execenv.LocalWorktree{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, version := range []string{"1.5.0", "1.5.15", "1.4.12", ""} {
+				command, supported := taskSupplementLaunch("antigravity", version, env, []string{"--multica-antigravity-acp"})
+				want := version == "1.5.0" || version == "1.5.15"
+				if supported != want || command != nil {
+					t.Fatalf("version %q: steering=%v command=%q, want %v and no hook command", version, supported, command, want)
+				}
+			}
+		})
+	}
+}
