@@ -397,7 +397,11 @@ export type {
   SquadActiveIssueBrief,
   SquadMemberStatus,
   SquadMemberStatusListResponse,
+  SquadHandoffMode,
+  SquadBrief,
+  SquadBriefsResponse,
 } from "./squad";
+export { SQUAD_HANDOFF_ROUND_LIMIT, SQUAD_HANDOFF_DAILY_LIMIT } from "./squad";
 export type {
   BillingBalance,
   BillingTransaction,

@@ -58,9 +58,11 @@ import {
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
   SendChatMessageResponseSchema,
+  SquadBriefsResponseSchema,
   SquadListSchema,
   SquadSchema,
   SourceContextPreviewSchema,
+  EMPTY_SQUAD_BRIEFS,
   TimelineEntriesSchema,
   UserSchema,
   PluginInstallationSchema,
@@ -1212,6 +1214,34 @@ describe("SquadListSchema member preview drift", () => {
     expect(parsed[0]?.member_count).toBe(2);
     expect(parsed[0]?.member_preview).toHaveLength(2);
     expect(parsed[0]?.member_preview?.[0]?.role).toBe("leader");
+  });
+
+  it("treats a squad from an older backend as leader handoff", () => {
+    expect(SquadSchema.parse(baseSquad).handoff_mode).toBe("leader");
+  });
+
+  it("falls back to leader handoff for an unknown mode", () => {
+    expect(SquadSchema.parse({ ...baseSquad, handoff_mode: "round_robin" }).handoff_mode).toBe("leader");
+    expect(SquadSchema.parse({ ...baseSquad, handoff_mode: "direct" }).handoff_mode).toBe("direct");
+  });
+});
+
+describe("SquadBriefsResponseSchema drift", () => {
+  it("defaults missing fields instead of dropping the briefs", () => {
+    const parsed = SquadBriefsResponseSchema.parse({
+      briefs: [{ member_type: "agent", member_id: "agent-2" }],
+    });
+    expect(parsed.handoff_mode).toBe("leader");
+    expect(parsed.briefs).toEqual([{ member_type: "agent", member_id: "agent-2", is_leader: false, brief: "" }]);
+  });
+
+  it("returns the empty fallback for a malformed body", () => {
+    expect(
+      parseWithFallback({ briefs: "nope" }, SquadBriefsResponseSchema, EMPTY_SQUAD_BRIEFS, {
+        endpoint: "GET /api/squads/:id/briefs",
+      }),
+    ).toEqual(EMPTY_SQUAD_BRIEFS);
+    expect(SquadBriefsResponseSchema.parse({}).briefs).toEqual([]);
   });
 });
 
