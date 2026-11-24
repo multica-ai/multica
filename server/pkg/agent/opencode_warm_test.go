@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -319,5 +321,106 @@ func TestOpencodeWarmFingerprintIgnoresResumePointer(t *testing.T) {
 	fp4 := b.opencodeWarmFingerprint("opencode", ExecOptions{Cwd: "/work", Model: "m", WarmPoolBriefHash: "b1"}, envTok)
 	if fp4 != fp1 {
 		t.Fatal("volatile task env leaked into the fingerprint")
+	}
+}
+
+// A turn cancelled while a synchronous setup write is wedged must return
+// promptly: the stdin-close guard stays armed across the WHOLE setup (QA
+// regression — an initialize-only guard let a blocked session/new write hold
+// the turn until the CLI exited on its own). The fake answers initialize and
+// then stops reading stdin entirely; a 1MiB MCP payload wedges the
+// session/new write past the pipe buffer, and the run is cancelled 100ms in.
+func TestOpencodeWarmCancelledSetupWithBlockedWriteReturns(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+
+	dir := t.TempDir()
+	fakeOpencode := filepath.Join(dir, "opencode")
+	script := `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1}}\n' "$id"
+      # The wedge: answer initialize, then stop reading stdin entirely
+      # (replace the shell with a sleeper) so the next setup write wedges
+      # once the pipe buffer fills.
+      exec sleep 30
+      ;;
+  esac
+done
+`
+	writeTestExecutable(t, fakeOpencode, []byte(script))
+
+	// ~1MiB of local MCP servers: every entry survives the capability filter
+	// (local entries carry no transport type), so the session/new write is
+	// far larger than the pipe buffer.
+	var b strings.Builder
+	b.WriteString(`{"mcpServers":{"`)
+	for i := 0; i < 9000; i++ {
+		if i > 0 {
+			b.WriteString(`,"`)
+		}
+		b.WriteString(fmt.Sprintf("srv%04d", i))
+		b.WriteString(`":{"command":"node","args":["s.js","` + strings.Repeat("x", 90) + `"],"env":{"K":"` + strings.Repeat("v", 10) + `"}}`)
+	}
+	b.WriteString(`}}`)
+	bigMcp := json.RawMessage(b.String())
+	if len(bigMcp) < 900_000 {
+		t.Fatalf("mcp payload too small to wedge the pipe: %d bytes", len(bigMcp))
+	}
+
+	pool := NewWarmSessionPool(WarmSessionPoolConfig{
+		IdleTTL: 30 * time.Second,
+		MaxIdle: 4,
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	t.Cleanup(func() { pool.Close() })
+
+	cfg := Config{
+		ExecutablePath: fakeOpencode,
+		Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		TaskID:         "task-1",
+		BuiltinRuntime: true,
+		CLIVersion:     "2.2.0",
+		WarmPool:       pool,
+		Env: map[string]string{
+			"MULTICA_TOKEN":        "mat_x",
+			"MULTICA_TASK_ID":      "task-1",
+			"MULTICA_AGENT_ID":     "agent-1",
+			"MULTICA_WORKSPACE_ID": "ws-1",
+		},
+	}
+	// Sanity: the V2 env build must not refuse the MCP config before the
+	// turn starts (the MCP rides session/new, not the environment).
+	if _, err := openCodeEnvironment(cfg, ExecOptions{Cwd: dir}); err != nil {
+		t.Fatalf("openCodeEnvironment refused the V2 run: %v", err)
+	}
+
+	bk, err := New("opencode", cfg)
+	if err != nil {
+		t.Fatalf("New(opencode): %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	sess, err := bk.Execute(ctx, "hello", ExecOptions{
+		Cwd:       dir,
+		McpConfig: bigMcp,
+		Timeout:   30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	for range sess.Messages {
+	}
+	res := <-sess.Result
+	elapsed := time.Since(start)
+	if elapsed > 8*time.Second {
+		t.Fatalf("cancelled setup took %s to return; the blocked session/new write was not released (want <8s, ~3s)", elapsed)
+	}
+	if res.Status != "timeout" && res.Status != "failed" && res.Status != "aborted" {
+		t.Fatalf("cancelled setup result = %+v", res)
 	}
 }

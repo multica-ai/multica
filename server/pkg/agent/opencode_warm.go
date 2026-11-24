@@ -519,8 +519,13 @@ func (p *opencodeWarmProcess) runTurn(ctx context.Context, prompt string, opts E
 		// Bound only the setup RPCs by the handshake budget; the prompt
 		// itself is supervised by the daemon's watchdogs via ctx. The process
 		// is never cancelled through this context — it outlives the turn. A
-		// runtime that stops reading (a large session/new MCP payload) would
-		// hold the request write, so the timeout closes stdin to release it.
+		// runtime that stops reading holds the synchronous setup writes (a
+		// large session/new MCP payload, a slow handshake), so the timeout
+		// closes stdin to release them. The callback stays armed across the
+		// WHOLE setup — initialize, session/new|load, model and effort
+		// selection — not just the first RPC: a turn cancelled mid-setup must
+		// not wedge on a blocked session/new write. Every failure path below
+		// tears the process down anyway; the callback firing there is a no-op.
 		setupCtx, cancelSetup := context.WithTimeout(ctx, acpWarmHandshakeTimeout)
 		defer cancelSetup()
 		stopBlockedSetup := context.AfterFunc(setupCtx, func() { _ = p.stdin.Close() })
@@ -532,7 +537,6 @@ func (p *opencodeWarmProcess) runTurn(ctx context.Context, prompt string, opts E
 				"terminal": false,
 			},
 		})
-		stopBlockedSetup()
 		if err != nil {
 			status, errText, _ := classifyACPResumeFailure(setupCtx, "opencode", "initialize", err, opts.Timeout, p.cfg.Logger)
 			p.Close()
@@ -612,6 +616,9 @@ func (p *opencodeWarmProcess) runTurn(ctx context.Context, prompt string, opts E
 		} else if level != "" {
 			p.cfg.Logger.Warn("opencode session advertises no configuration after model selection; ignoring thinking level", "thinkingLevel", level)
 		}
+		// Setup is done: the process now has its session, and the prompt's
+		// own write window is guarded by the prompt context's callback below.
+		stopBlockedSetup()
 
 		p.cfg.Logger.Info("warm opencode session ready", "session_id", sessionID, "resumed", opts.ResumeSessionID != "")
 	}
