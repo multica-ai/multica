@@ -123,7 +123,7 @@ const copy = {
 
 export function AgentAccessDemo() {
   const t = useDemoCopy(copy);
-  const [scope, setScope] = useState<Scope>("members");
+  const [scope, setScope] = useState<Scope>("private");
 
   return (
     <EditorialUtility title={t.title}>

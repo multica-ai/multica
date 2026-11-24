@@ -166,6 +166,10 @@ async function completeTask(taskId, output) {
   await api("POST", `/api/daemon/tasks/${taskId}/complete`, { output });
 }
 
+async function failTask(taskId, error) {
+  await safeApi("POST", `/api/daemon/tasks/${taskId}/fail`, { error });
+}
+
 async function reportUsage(taskId, inputTokens, outputTokens, costUsd = 0.24) {
   await safeApi("POST", `/api/daemon/tasks/${taskId}/usage`, {
     usage: [
@@ -323,16 +327,17 @@ async function clickPopoverItem(page, textRegex, { pauseAfter = 450 } = {}) {
 
 async function focusAndTypeComment(page, text) {
   const shell = page.locator('[data-testid="comment-composer-shell"]').first();
-  if (await shell.isVisible({ timeout: 2500 }).catch(() => false)) {
-    await smoothClick(page, shell, { pauseAfter: 240 });
+  const shellReady = await shell.waitFor({ state: "visible", timeout: 8000 }).then(() => true).catch(() => false);
+  if (shellReady) {
+    const box = await shell.boundingBox();
+    if (box) await moveCursor(page, Math.round(box.x + box.width / 2), Math.round(box.y + box.height / 2));
+    await shell.click();
+    await sleep(350);
   }
-  const editor = page
-    .locator('[data-mc="comment-composer"] [contenteditable="true"], [data-mc="comment-composer"] textarea')
-    .or(page.getByPlaceholder("Leave a comment..."))
-    .first();
-  await editor.waitFor({ state: "visible", timeout: 4500 });
-  await editor.focus().catch(() => {});
-  await sleep(120);
+  const editor = page.locator('[data-mc="comment-composer"] [contenteditable="true"], [data-mc="comment-composer"] textarea').first();
+  await editor.waitFor({ state: "visible", timeout: 8000 });
+  await editor.click();
+  await sleep(150);
   await page.keyboard.type(text, { delay: 16 });
   await sleep(260);
 }
@@ -363,9 +368,14 @@ async function openPage(browser, path, theme) {
     [profile.token, theme],
   );
   const page = await context.newPage();
-  await page.goto(`${base}/${slug}${path}`, { waitUntil: "domcontentloaded" });
-  await page.waitForLoadState("networkidle").catch(() => {});
-  await sleep(600);
+  await page.goto(`${base}/${slug}${path}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await page.locator("h1, h2, [data-testid='comment-composer-shell'], [role='tablist'], table, textarea").first().waitFor({ state: "visible", timeout: 15_000 }).catch(() => {});
+  await sleep(900);
+  // Dismiss any one-time onboarding/announcement dialog before recording starts
+  if (await page.locator('[data-slot="dialog-portal"] [role="dialog"]').first().isVisible().catch(() => false)) {
+    await page.keyboard.press("Escape");
+    await sleep(300);
+  }
   await injectCursor(page);
   return { context, page };
 }
@@ -468,10 +478,18 @@ async function recordClip(browser, clipSlug, theme, path, run) {
 
   rmSync(tmpDir, { recursive: true, force: true });
 
-  const duration = Math.round(((shots.at(-1).t - shots[0].t) / 1000 + 0.65) * 10) / 10;
+  const probe = spawnSync(
+    "ffprobe",
+    ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", mp4],
+    { encoding: "utf8" },
+  );
+  const probed = Number.parseFloat((probe.stdout || "").trim());
+  const fallbackDur = Math.round(((shots.at(-1).t - shots[0].t) / 1000 + 0.65) * 10) / 10;
+  const duration = Number.isFinite(probed) && probed > 0 ? Math.round(probed * 10) / 10 : fallbackDur;
+  const clampedMarks = marks.map((m) => ({ id: m.id, at: Math.min(m.at, Math.max(0, Math.round((duration - 0.3) * 10) / 10)) }));
   const sizeKb = Math.round(readFileSync(mp4).length / 1024);
   log(`${clipSlug}-${theme}: ${shots.length} frames, ${duration}s, ${sizeKb} KB`);
-  return { duration, marks };
+  return { duration, marks: clampedMarks };
 }
 
 // ---------------------------------------------------------------------------
@@ -480,6 +498,9 @@ async function recordClip(browser, clipSlug, theme, path, run) {
 async function seedShared() {
   clearStaleQueuedTasks();
   await ensureDemoRuntime();
+  await safeApi("POST", "/api/notification-preferences/auto-archive-prompt", { preferences: {} });
+  // Mark acquisition survey permanently skipped so SourceBackfillModal never interrupts recordings
+  psql(`UPDATE "user" SET onboarding_questionnaire = COALESCE(onboarding_questionnaire, '{}'::jsonb) || '{"source":[],"source_skipped":true}'::jsonb;`);
 
   const me = await api("GET", "/api/me");
 
@@ -649,11 +670,14 @@ async function seedShared() {
     content: `Here is the 24-hour runtime comparison. **cloud-pool-b** is the outlier (p95 2.7× fleet median).\n\n| Runtime | Provider | p50 | p95 | Queue depth |\n| --- | --- | ---: | ---: | ---: |\n| build-mac-01 | Claude Code | 1.8 s | 7.4 s | 3 |\n| cloud-pool-a | Claude Code | 1.2 s | 4.9 s | 0 |\n| cloud-pool-b | Gemini CLI | 2.6 s | 11.3 s | 12 |\n\n\`\`\`diff\n--- a/server/internal/daemon/prepare.go\n+++ b/server/internal/daemon/prepare.go\n@@ -112,4 +112,4 @@\n-  p.client.ExtendPrepareLease(ctx, task.RuntimeID, task.ID)\n   p.cache.CopyInto(ctx, task.WorkDir, opts)\n+  p.client.ExtendPrepareLease(ctx, task.RuntimeID, task.ID)\n\`\`\`\n\nMoving lease extension after dependency copy cuts p95 from **11.3 s → 4.1 s**.`,
   });
 
-  // Clean any prior placeholder seed titles so the sidebar always reads like a real workspace
-  psql("DELETE FROM inbox_item WHERE details::text LIKE '%Analytics seed%';");
-  psql("UPDATE issue SET title = 'Audit webhook retry backoff timings' WHERE title LIKE 'Analytics seed%';");
+  // Ensure workspace has a connected repo so Pull Requests appear in the sidebar add-row
+  psql(`
+    UPDATE workspace
+    SET repos = '[{"url":"https://github.com/multica-ai/multica","description":"Multica platform monorepo"}]'::jsonb
+    WHERE id = '${profile.workspace_id}' AND (repos IS NULL OR jsonb_array_length(repos) = 0);
+  `);
 
-  // Seed realistic token usage over last 6 days so /usage chart is rich & populated
+  // Seed realistic token usage over last 6 days (+ 2 failed runs for the Errors tab)
   const usageRows = [
     { agent: engineer, title: "Add request ID correlation to gateway logs", inTok: 48200, outTok: 9400, cost: 0.31, daysAgo: 5 },
     { agent: reviewer, title: "Review OAuth PKCE state validation PR", inTok: 31500, outTok: 5200, cost: 0.19, daysAgo: 4 },
@@ -664,16 +688,18 @@ async function seedShared() {
   ];
   const existingUsageCount = Number(psql("SELECT count(*) FROM task_usage;") || "0");
   if (existingUsageCount < 4) {
+    const seedIssueIds = [];
     for (const row of usageRows) {
       const iss = await api("POST", "/api/issues", {
         title: row.title,
         description: "Completed run with usage metrics.",
-        status: "todo",
+        status: "done",
         priority: "low",
         assignee_type: "agent",
         assignee_id: row.agent.id,
         allow_duplicate: true,
       });
+      seedIssueIds.push(iss.id);
       const t = await claimTaskMatching((x) => x.issue_id === iss.id, 4000);
       if (t) {
         await startTask(t.id);
@@ -685,7 +711,40 @@ async function seedShared() {
         }
       }
     }
+    // Seed 2 realistic failed runs so Analytics > Errors tab is informative
+    const failedRuns = [
+      { agent: engineer, title: "Run integration suite against staging webhook receiver", error: "Command exited with code 1: webhook signature verification timed out after 30s", daysAgo: 2 },
+      { agent: reviewer, title: "Verify migration rollback on large issue table", error: "Provider rate limit exceeded (HTTP 429) while fetching diff context", daysAgo: 1 },
+    ];
+    for (const row of failedRuns) {
+      const iss = await api("POST", "/api/issues", {
+        title: row.title,
+        description: "Run failure diagnostics for Analytics > Errors.",
+        status: "todo",
+        priority: "medium",
+        assignee_type: "agent",
+        assignee_id: row.agent.id,
+        allow_duplicate: true,
+      });
+      seedIssueIds.push(iss.id);
+      const t = await claimTaskMatching((x) => x.issue_id === iss.id, 4000);
+      if (t) {
+        await startTask(t.id);
+        await reportUsage(t.id, 14200, 1800, 0.08);
+        await failTask(t.id, row.error);
+        psql(`UPDATE agent_task_queue SET created_at = NOW() - INTERVAL '${row.daysAgo} days', started_at = NOW() - INTERVAL '${row.daysAgo} days', completed_at = NOW() - INTERVAL '${row.daysAgo} days' + INTERVAL '28 seconds' WHERE id = '${t.id}';`);
+        psql(`UPDATE task_usage SET created_at = NOW() - INTERVAL '${row.daysAgo} days' WHERE task_id = '${t.id}';`);
+      }
+    }
+    // Keep background analytics seed noise out of the user's Inbox
+    if (seedIssueIds.length > 0) {
+      const idList = seedIssueIds.map((id) => `'${id}'`).join(", ");
+      psql(`DELETE FROM inbox_item WHERE issue_id IN (${idList});`);
+    }
   }
+  // Remove any leftover starter/fixture issues and inbox noise so the workspace is 100% clean
+  psql("DELETE FROM inbox_item WHERE details::text LIKE '%Analytics seed%' OR details::text LIKE '%Fixture%';");
+  psql("DELETE FROM issue WHERE title LIKE 'Fixture:%';");
   clearStaleQueuedTasks();
 
   return { me, engineer, reviewer, docsAgent, tddSkill, squad, quickAction, autopilot, project, wfProject, deliverableIssue };
@@ -759,26 +818,31 @@ function buildScenarios(ctx) {
       return recordClip(browser, "mention", theme, `/issues/${issue.identifier}`, async ({ page, mark, setPoster }) => {
         mark("compose");
         await focusAndTypeComment(page, "Please check proxy timeout logs @Reviewer");
-        await sleep(300);
-        await clickPopoverItem(page, /^Reviewer$/, { pauseAfter: 500 });
+        await sleep(450);
+        // Accept TipTap's highlighted mention suggestion so @Reviewer becomes a real mention node
+        // and reveals the trigger-preview bar above the composer.
+        await page.keyboard.press("Enter");
+        await sleep(450);
 
         mark("preview");
-        setPoster();
-        await sleep(750);
+        await sleep(850);
         await submitActiveComment(page);
 
         mark("reply");
-        const task = await claimTaskMatching((t) => t.issue_id === issue.id, 5000);
+        const task = await claimTaskMatching((t) => t.issue_id === issue.id, 6000);
         if (task) {
           const asAgent = task.auth_token ? { Authorization: `Bearer ${task.auth_token}` } : {};
           await startTask(task.id);
-          await sleep(700);
+          await sleep(750);
           await api("POST", `/api/issues/${issue.id}/comments`, {
             content: "Checked nginx upstream logs: idle keepalive timeout was 60s vs ALB 65s, causing reset-on-reuse 502s. Assignee unchanged.",
+            ...(task.trigger_comment_id ? { parent_id: task.trigger_comment_id } : {}),
           }, asAgent);
           await completeTask(task.id, "Diagnosed keepalive timeout mismatch.");
-          await sleep(1050);
+          await sleep(1100);
+          setPoster();
         } else {
+          setPoster();
           await sleep(750);
         }
       });
@@ -828,32 +892,73 @@ function buildScenarios(ctx) {
     },
 
     inbox: async (browser, theme) => {
+      // Ensure at least two fresh realistic unread inbox notifications exist so archiving advances visibly
+      const seedUnread = async (title, commentBody, agent) => {
+        const iss = await api("POST", "/api/issues", {
+          title,
+          description: "Track implementation and verification before release.",
+          status: "in_review",
+          priority: "high",
+          project_id: ctx.project?.id,
+          assignee_type: "agent",
+          assignee_id: agent.id,
+          allow_duplicate: true,
+        });
+        const task = await claimTaskMatching((t) => t.issue_id === iss.id, 4000);
+        if (task) {
+          const asAgent = task.auth_token ? { Authorization: `Bearer ${task.auth_token}` } : {};
+          await startTask(task.id);
+          await api("POST", `/api/issues/${iss.id}/comments`, { content: commentBody }, asAgent);
+          await completeTask(task.id, commentBody);
+        }
+        return iss;
+      };
+      await seedUnread(
+        "Retry webhook deliveries with jittered backoff",
+        "Added capped exponential backoff (5 retries, full jitter) and unit tests. Ready for review.",
+        ctx.engineer,
+      );
+      await seedUnread(
+        "Audit OAuth PKCE state validation on callback",
+        "Verified PKCE verifier check rejects replayed state tokens across tabs.",
+        ctx.reviewer,
+      );
+
       return recordClip(browser, "inbox", theme, "/issues", async ({ page, mark, setPoster }) => {
+        // Wait for the Inbox sidebar rows to finish loading (past skeleton state)
+        await page.getByText(/Audit OAuth|Retry webhook/i).first().waitFor({ state: "visible", timeout: 8000 }).catch(() => {});
+        await sleep(300);
         mark("unread");
-        await sleep(500);
-        // Click first notification row under Inbox in Work panel (left sidebar x: 60..300, y: 260..520)
+        // Click first notification row under Inbox in Work panel (left sidebar x: 50..300, y: 70..520)
         const rows = page.locator("a, button, [role='button']").filter({
-          hasText: /sliding-window|scroll position|Retry webhook|Summarize last month|Native menu/i,
+          hasText: /Audit OAuth|Retry webhook|sliding-window|Summarize last month/i,
         });
         const n = await rows.count();
         for (let i = 0; i < n; i++) {
           const el = rows.nth(i);
           if (!(await el.isVisible().catch(() => false))) continue;
           const box = await el.boundingBox();
-          if (box && box.x >= 50 && box.x < 300 && box.y >= 260 && box.y < 520) {
+          if (box && box.x >= 50 && box.x < 300 && box.y >= 70 && box.y < 520) {
             await clickAt(page, Math.round(box.x + box.width / 2), Math.round(box.y + box.height / 2), { pauseAfter: 900 });
-            await page.getByText("Activity").first().waitFor({ state: "visible", timeout: 3000 }).catch(() => {});
-            await sleep(450);
+            await page.locator('[data-inbox-bar="open"]').first().waitFor({ state: "visible", timeout: 5000 }).catch(() => {});
+            await sleep(500);
             break;
           }
         }
         setPoster();
 
         mark("archive");
-        await clickButtonInZone(page, /Archive/i, { minX: 800, maxY: 160, pauseAfter: 750 });
+        const archiveBtn = page.locator('[data-inbox-bar="open"] button[aria-label="Archive"]').first();
+        if (!(await trySmoothClick(page, archiveBtn, { pauseAfter: 900 }))) {
+          await page.keyboard.press("e");
+          await sleep(900);
+        }
 
         mark("archived");
-        await clickButtonInZone(page, /Archived/i, { minX: 50, maxX: 340, minY: 150, maxY: 320, pauseAfter: 850 });
+        const archivedTab = page.locator('button[aria-label*="Archived" i], button[title*="Archived" i]').first();
+        if (!(await trySmoothClick(page, archivedTab, { pauseAfter: 900 }))) {
+          await clickButtonInZone(page, /Archived/i, { minX: 50, maxX: 340, minY: 40, maxY: 220, pauseAfter: 900 });
+        }
       });
     },
 
@@ -901,28 +1006,52 @@ function buildScenarios(ctx) {
     },
 
     "issue-status": async (browser, theme) => {
+      clearStaleQueuedTasks();
       const issue = await api("POST", "/api/issues", {
         title: "Add CSV export to the invoices table",
         description: "Allow billing admins to download filtered monthly invoices as UTF-8 CSV.",
         status: "backlog",
         priority: "medium",
+        assignee_type: "agent",
+        assignee_id: ctx.engineer.id,
         project_id: ctx.project?.id,
         allow_duplicate: true,
       });
       return recordClip(browser, "issue-status", theme, `/issues/${issue.identifier}`, async ({ page, mark, setPoster }) => {
         mark("backlog");
-        await sleep(450);
+        await sleep(550);
         await clickButtonInZone(page, /Backlog/i, { minX: 860, maxY: 220, pauseAfter: 450 });
-        await clickPopoverItem(page, /^In Progress$/, { pauseAfter: 650 });
+        await clickPopoverItem(page, /^In Progress$/, { pauseAfter: 550 });
+        // Moving an agent-assigned issue out of Backlog opens the "Start work now?" confirmation modal
+        const startNowBtn = page.getByRole("button", { name: /Move and start/i }).first();
+        if (await startNowBtn.waitFor({ state: "visible", timeout: 2500 }).then(() => true).catch(() => false)) {
+          await sleep(350);
+          await smoothClick(page, startNowBtn, { pauseAfter: 550 });
+        }
 
         mark("progress");
-        setPoster();
-        await clickButtonInZone(page, /In Progress/i, { minX: 860, maxY: 220, pauseAfter: 450 });
-        await clickPopoverItem(page, /^In Review$/, { pauseAfter: 650 });
+        const task = await claimTaskMatching((t) => t.issue_id === issue.id, 4500);
+        if (task) {
+          const asAgent = task.auth_token ? { Authorization: `Bearer ${task.auth_token}` } : {};
+          await startTask(task.id);
+          await reportMessage(task.id, { type: "text", content: "Adding UTF-8 BOM CSV export endpoint and download button." });
+          await sleep(800);
+          setPoster();
+          await api("POST", `/api/issues/${issue.id}/comments`, {
+            content: "Implemented UTF-8 CSV export for filtered monthly invoices with tests.",
+          }, asAgent);
+          await api("PUT", `/api/issues/${issue.id}`, { status: "in_review" }, asAgent);
+          await completeTask(task.id, "CSV export implemented.");
+          await sleep(700);
+        } else {
+          setPoster();
+          await clickButtonInZone(page, /In Progress/i, { minX: 860, maxY: 220, pauseAfter: 450 });
+          await clickPopoverItem(page, /^In Review$/, { pauseAfter: 650 });
+        }
 
         mark("done");
         await clickButtonInZone(page, /In Review/i, { minX: 860, maxY: 220, pauseAfter: 450 });
-        await clickPopoverItem(page, /^Done$/, { pauseAfter: 850 });
+        await clickPopoverItem(page, /^Done$/, { pauseAfter: 900 });
       });
     },
 
@@ -1051,18 +1180,25 @@ function buildScenarios(ctx) {
         await trySmoothClick(page, newBtn, { pauseAfter: 650 });
 
         mark("runtime");
-        const rt = page.getByText(/Claude Code|Maya's MacBook Pro/i).first();
-        await trySmoothClick(page, rt, { pauseAfter: 450 });
-        await trySmoothClick(page, page.getByRole("button", { name: /Next|Continue/i }).first(), { pauseAfter: 600 });
-        setPoster();
+        // Wait for wizard Step 1 heading, expand Maya's MacBook Pro if collapsed, then pick Claude Code 2.1.0
+        await page.getByText("Where should this agent run?").waitFor({ state: "visible", timeout: 5000 }).catch(() => {});
+        const versionRow = page.getByText(/2\.1\.0/).first();
+        if (!(await versionRow.isVisible().catch(() => false))) {
+          await trySmoothClick(page, page.getByText("Maya's MacBook Pro", { exact: false }).first(), { pauseAfter: 500 });
+        }
+        await trySmoothClick(page, page.getByText(/2\.1\.0/).first(), { pauseAfter: 500 });
+        await trySmoothClick(page, page.getByRole("button", { name: /^Next/i }).first(), { pauseAfter: 750 });
 
         mark("configure");
-        const nameInput = page.locator('input[placeholder*="name" i], input[name="name"]').first();
-        if (await nameInput.isVisible({ timeout: 2000 }).catch(() => false)) {
+        const nameInput = page.locator('input[placeholder*="name" i], input[name="name"], input[type="text"]').first();
+        if (await nameInput.isVisible({ timeout: 2500 }).catch(() => false)) {
           await smoothClick(page, nameInput, { pauseAfter: 120 });
-          await page.keyboard.type("Release QA", { delay: 20 });
-          await sleep(600);
+          await page.keyboard.type("Release QA", { delay: 18 });
+          await sleep(500);
+          setPoster();
+          await sleep(550);
         } else {
+          setPoster();
           await sleep(750);
         }
       });
@@ -1075,12 +1211,14 @@ function buildScenarios(ctx) {
         setPoster();
 
         mark("issues");
-        const issuesTab = page.getByRole("tab", { name: /Issues/i }).or(page.getByRole("button", { name: /Issues/i })).first();
-        await trySmoothClick(page, issuesTab, { pauseAfter: 850 });
+        if (!(await clickButtonInZone(page, /^Issues/i, { minX: 300, maxY: 80, pauseAfter: 900 }))) {
+          await trySmoothClick(page, page.getByRole("tab", { name: /^Issues/i }).first(), { pauseAfter: 900 });
+        }
 
         mark("resources");
-        const resTab = page.getByRole("tab", { name: /Overview|Activity/i }).or(page.getByRole("button", { name: /Overview/i })).first();
-        await trySmoothClick(page, resTab, { pauseAfter: 850 });
+        if (!(await clickButtonInZone(page, /^Activity$/i, { minX: 300, maxY: 80, pauseAfter: 900 }))) {
+          await clickButtonInZone(page, /^Overview$/i, { minX: 300, maxY: 80, pauseAfter: 900 });
+        }
       });
     },
 
@@ -1101,33 +1239,81 @@ function buildScenarios(ctx) {
     },
 
     squad: async (browser, theme) => {
+      clearStaleQueuedTasks();
+      const issue = await api("POST", "/api/issues", {
+        title: "Ship webhook signing key rotation with zero downtime",
+        description: "Support dual-key verification during rotation, review edge cases, and update webhook docs.",
+        status: "todo",
+        priority: "high",
+        project_id: ctx.project?.id,
+        allow_duplicate: true,
+      });
       return recordClip(browser, "squad", theme, "/squads", async ({ page, mark, setPoster }) => {
         mark("list");
-        await sleep(600);
-        await trySmoothClick(page, page.getByText("Platform Team", { exact: false }).first(), { pauseAfter: 850 });
+        await sleep(550);
+        await trySmoothClick(page, page.getByText("Platform Team", { exact: false }).first(), { pauseAfter: 750 });
 
         mark("detail");
         setPoster();
-        await sleep(900);
+        await sleep(850);
 
         mark("workflow");
-        await page.mouse.wheel(0, 220);
-        await sleep(850);
+        // Navigate to the issue and assign it to Platform Team so Engineer (leader) starts coordinating
+        await page.goto(`${base}/${slug}/issues/${issue.identifier}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+        await page.locator('[data-testid="comment-composer-shell"]').first().waitFor({ state: "visible", timeout: 10_000 }).catch(() => {});
+        await sleep(500);
+        await injectCursor(page);
+        await clickButtonInZone(page, /Unassigned|Assignee/i, { minX: 860, pauseAfter: 450 });
+        await clickPopoverItem(page, /Platform Team/i, { pauseAfter: 450 });
+        const confirmBtn = page.getByRole("button", { name: /Confirm assignment/i });
+        if (await confirmBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+          await smoothClick(page, confirmBtn, { pauseAfter: 450 });
+        }
+        const task = await claimTaskMatching((t) => t.issue_id === issue.id, 5000);
+        if (task) {
+          const asAgent = task.auth_token ? { Authorization: `Bearer ${task.auth_token}` } : {};
+          await startTask(task.id);
+          await api("PUT", `/api/issues/${issue.id}`, { status: "in_progress" }, asAgent);
+          await api("POST", `/api/issues/${issue.id}/comments`, {
+            content: "Squad plan: Engineer implements dual-key verification, then Reviewer audits the PR and Docs updates the webhook guide.",
+          }, asAgent);
+          await completeTask(task.id, "Coordinated squad handoff.");
+          await sleep(1000);
+        } else {
+          await sleep(850);
+        }
       });
     },
 
     autopilot: async (browser, theme) => {
+      clearStaleQueuedTasks();
       return recordClip(browser, "autopilot", theme, "/autopilots", async ({ page, mark, setPoster }) => {
         mark("list");
-        await sleep(600);
-        await trySmoothClick(page, page.getByText("Weekly dead-code audit", { exact: false }).first(), { pauseAfter: 850 });
+        await sleep(550);
+        await trySmoothClick(page, page.getByText("Weekly dead-code audit", { exact: false }).first(), { pauseAfter: 750 });
 
         mark("detail");
-        setPoster();
         await sleep(750);
 
         mark("run");
-        await trySmoothClick(page, page.getByRole("button", { name: /Run now/i }).first(), { pauseAfter: 950 });
+        await trySmoothClick(page, page.getByRole("button", { name: /Run now/i }).first(), { pauseAfter: 1200 });
+        // Complete the triggered autopilot run so Run history shows the created issue live
+        const task = await claimTaskMatching(() => true, 4500);
+        if (task) {
+          const asAgent = task.auth_token ? { Authorization: `Bearer ${task.auth_token}` } : {};
+          await startTask(task.id);
+          if (task.issue_id) {
+            await api("POST", `/api/issues/${task.issue_id}/comments`, {
+              content: "Audit complete: found 3 unused exports in `packages/core/legacy` and 1 stale flag ready for removal.",
+            }, asAgent);
+          }
+          await completeTask(task.id, "Weekly dead-code audit completed.");
+        }
+        await sleep(900);
+        setPoster();
+        // Click the linked issue link in Run history if visible to show the created issue
+        const linkedIssue = page.locator("a, button").filter({ hasText: /Weekly audit|Issue linked/i }).first();
+        await trySmoothClick(page, linkedIssue, { pauseAfter: 950 });
       });
     },
 
@@ -1145,23 +1331,43 @@ function buildScenarios(ctx) {
       return recordClip(browser, "wakeup", theme, `/issues/${issue.identifier}`, async ({ page, mark, setPoster }) => {
         mark("sidebar");
         await sleep(550);
-        const wakeHeader = page.getByText("Wakeups", { exact: true }).first();
-        const addWakeBtn = wakeHeader.locator("xpath=ancestor::div[1]").locator("button").last();
-        if (!(await trySmoothClick(page, addWakeBtn, { pauseAfter: 650 }))) {
-          const box = await wakeHeader.boundingBox();
-          if (box) {
-            await clickAt(page, 1236, Math.round(box.y + box.height / 2), { pauseAfter: 650 });
+        // Slimmed sidebar (#11352): empty Wakeups section is opened via issue-sidebar-add-row
+        const addRow = page.locator('[data-testid="issue-sidebar-add-row"] button').first();
+        if (await addRow.isVisible({ timeout: 2500 }).catch(() => false)) {
+          await smoothClick(page, addRow, { pauseAfter: 450 });
+          // If multiple addable sections exist, pick Wakeup from the menu
+          const wakeItem = page.getByRole("menuitem", { name: /Wakeup/i }).first();
+          if (await wakeItem.isVisible({ timeout: 1200 }).catch(() => false)) {
+            await smoothClick(page, wakeItem, { pauseAfter: 550 });
           }
+        } else {
+          await trySmoothClick(page, page.getByRole("button", { name: /Add wakeup/i }).first(), { pauseAfter: 550 });
+        }
+
+        mark("configure");
+        // Choose condition: At a time (defaults to In 1 hour)
+        const condBtn = page.getByRole("button", { name: /Choose a condition/i }).first();
+        await trySmoothClick(page, condBtn, { pauseAfter: 400 });
+        const atItem = page.getByRole("menuitem", { name: /At a time/i }).first();
+        await trySmoothClick(page, atItem, { pauseAfter: 450 });
+
+        // Choose agent: Engineer
+        const agentBtn = page.getByRole("button", { name: /Choose an agent/i }).first();
+        await trySmoothClick(page, agentBtn, { pauseAfter: 400 });
+        await clickPopoverItem(page, /^Engineer$/, { pauseAfter: 400 });
+
+        // Fill instruction
+        const instr = page.locator('form textarea').first();
+        if (await instr.isVisible({ timeout: 2000 }).catch(() => false)) {
+          await smoothClick(page, instr, { pauseAfter: 120 });
+          await page.keyboard.type("Check EU canary p99 latency and 5xx rate, then post a summary.", { delay: 14 });
+          await sleep(450);
         }
         setPoster();
 
-        mark("configure");
-        const preset = page.getByRole("button", { name: /In 1 hour|In 10 minutes|At a time|Time/i }).first();
-        await trySmoothClick(page, preset, { pauseAfter: 600 });
-
         mark("saved");
-        const saveBtn = page.getByRole("button", { name: /Add wakeup|Create|Save/i }).last();
-        await trySmoothClick(page, saveBtn, { pauseAfter: 850 });
+        const createBtn = page.locator('form button[type="submit"]').last();
+        await trySmoothClick(page, createBtn, { pauseAfter: 1100 });
       });
     },
 
@@ -1197,8 +1403,8 @@ function buildScenarios(ctx) {
         project_id: ctx.project?.id,
         allow_duplicate: true,
       });
-      // Seed a real synced GitHub PR row + link in the isolated local dev DB
-      const prId = psql(`
+      // Seed the synced GitHub PR row in the local DB WITHOUT linking it yet so the UI links it live
+      psql(`
         INSERT INTO github_pull_request (
           workspace_id, installation_id, repo_owner, repo_name, pr_number,
           title, state, html_url, branch, author_login,
@@ -1212,44 +1418,52 @@ function buildScenarios(ctx) {
           184, 42, 6
         )
         ON CONFLICT (workspace_id, repo_owner, repo_name, pr_number) DO UPDATE SET
-          title = EXCLUDED.title, state = EXCLUDED.state
-        RETURNING id;
-      `).split("\n")[0].trim();
-      if (prId) {
-        psql(`
-          INSERT INTO issue_pull_request (issue_id, pull_request_id, linked_by_type)
-          VALUES ('${issue.id}', '${prId}', 'member')
-          ON CONFLICT DO NOTHING;
-        `);
-      }
+          title = EXCLUDED.title, state = EXCLUDED.state;
+      `);
 
       return recordClip(browser, "pr-link", theme, `/issues/${issue.identifier}`, async ({ page, mark, setPoster }) => {
         mark("panel");
-        await sleep(750);
-        setPoster();
+        await sleep(550);
+        // Slimmed sidebar (#11352): open Pull request link form via issue-sidebar-add-row
+        const addRow = page.locator('[data-testid="issue-sidebar-add-row"] button').first();
+        if (await addRow.isVisible({ timeout: 2500 }).catch(() => false)) {
+          await smoothClick(page, addRow, { pauseAfter: 450 });
+          const prItem = page.getByRole("menuitem", { name: /Pull request/i }).first();
+          if (await prItem.isVisible({ timeout: 1200 }).catch(() => false)) {
+            await smoothClick(page, prItem, { pauseAfter: 550 });
+          }
+        }
 
         mark("add");
-        const prHeader = page.getByText("Pull requests", { exact: true }).first();
-        const box = await prHeader.boundingBox();
-        if (box) await clickAt(page, 1205, Math.round(box.y + box.height / 2), { pauseAfter: 750 });
+        const urlInput = page.locator('input[inputmode="url"], input[id^="link-pr-"]').first();
+        if (await urlInput.isVisible({ timeout: 2500 }).catch(() => false)) {
+          await smoothClick(page, urlInput, { pauseAfter: 120 });
+          await page.keyboard.type("https://github.com/multica-ai/multica/pull/11306", { delay: 14 });
+          await sleep(450);
+          const submitBtn = page.locator('form button[type="submit"]').last();
+          await trySmoothClick(page, submitBtn, { pauseAfter: 900 });
+        }
 
         mark("synced");
-        await page.keyboard.press("Escape");
-        await sleep(750);
+        await sleep(950);
+        setPoster();
       });
     },
 
     usage: async (browser, theme) => {
       return recordClip(browser, "usage", theme, "/usage", async ({ page, mark, setPoster }) => {
         mark("overview");
-        await sleep(750);
+        await sleep(850);
         setPoster();
 
         mark("metrics");
-        await clickButtonInZone(page, /^Cost$/, { minX: 700, maxY: 420, pauseAfter: 800 });
+        await clickButtonInZone(page, /^Cost$/, { minX: 600, maxY: 450, pauseAfter: 950 });
 
         mark("errors");
-        await clickButtonInZone(page, /^Errors$/, { minX: 300, maxX: 620, maxY: 90, pauseAfter: 850 });
+        const errorsTab = page.getByRole("tab", { name: /^Errors$/i }).first();
+        if (!(await trySmoothClick(page, errorsTab, { pauseAfter: 1100 }))) {
+          await trySmoothClick(page, page.getByText(/^Errors$/).first(), { pauseAfter: 1100 });
+        }
       });
     },
   };
@@ -1258,9 +1472,13 @@ function buildScenarios(ctx) {
 function writeManifest(manifest) {
   writeFileSync(manifestJsonPath, `${JSON.stringify(manifest, null, 2)}\n`);
   const ts = `// Auto-generated by scripts/docs-demos/record.mjs — do not edit by hand.
-export interface ClipManifestEntry {
+export interface ClipManifestTiming {
   duration: number;
   chapters: { id: string; at: number }[];
+}
+
+export interface ClipManifestEntry extends ClipManifestTiming {
+  dark?: ClipManifestTiming;
 }
 
 export const CLIP_MANIFEST: Record<string, ClipManifestEntry> = ${JSON.stringify(manifest, null, 2)};
@@ -1285,9 +1503,12 @@ async function main() {
       existingManifest[name] = {
         duration: light.duration,
         chapters: light.marks,
+        dark: {
+          duration: dark.duration,
+          chapters: dark.marks,
+        },
       };
       writeManifest(existingManifest);
-      void dark;
     }
   } finally {
     if (heartbeatTimer) clearInterval(heartbeatTimer);

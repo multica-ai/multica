@@ -7,6 +7,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { useDocsLocale } from "@/components/locale-link";
 import type { Lang } from "@/lib/i18n";
 import { demoChromeCopy } from "@/lib/translations";
+import { CLIP_MANIFEST } from "./clip-manifest";
 
 // Shared primitives for the three native demo mediums in Multica Docs:
 //   1. EditorialClip    — real English product recordings + localized chapter scrubber
@@ -64,6 +65,15 @@ export function EditorialClip({
   const videoSrc = `${VIDEO_BASE}/${slug}-${theme}.mp4`;
   const posterSrc = `${VIDEO_BASE}/${slug}-${theme}.jpg`;
 
+  const darkVariant = theme === "dark" ? CLIP_MANIFEST[slug]?.dark : undefined;
+  const activeChapters = darkVariant
+    ? chapters.map((ch, i) => ({
+        label: ch.label,
+        at: darkVariant.chapters[i]?.at ?? ch.at,
+      }))
+    : chapters;
+  const nominalDuration = darkVariant?.duration ?? duration;
+
   const figureRef = useRef<HTMLElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -71,9 +81,9 @@ export function EditorialClip({
   const [userPaused, setUserPaused] = useState(false);
   const [inView, setInView] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const [mediaDuration, setMediaDuration] = useState(duration);
+  const [mediaDuration, setMediaDuration] = useState(nominalDuration);
 
-  const totalDuration = mediaDuration > 0 ? mediaDuration : duration;
+  const totalDuration = mediaDuration > 0 ? mediaDuration : nominalDuration;
 
   // Pause when scrolled offscreen; autoplay when visible unless user paused or reduced motion.
   useEffect(() => {
@@ -140,15 +150,15 @@ export function EditorialClip({
 
   const activeChapter = (() => {
     let idx = 0;
-    for (let i = 0; i < chapters.length; i++) {
-      if (currentTime + 0.08 >= chapters[i]!.at) idx = i;
+    for (let i = 0; i < activeChapters.length; i++) {
+      if (currentTime + 0.08 >= activeChapters[i]!.at) idx = i;
     }
     return idx;
   })();
 
   const chapterProgress = (idx: number) => {
-    const start = chapters[idx]!.at;
-    const end = chapters[idx + 1]?.at ?? totalDuration;
+    const start = activeChapters[idx]!.at;
+    const end = activeChapters[idx + 1]?.at ?? totalDuration;
     if (currentTime <= start) return 0;
     if (currentTime >= end) return 100;
     const span = Math.max(0.1, end - start);
@@ -204,12 +214,12 @@ export function EditorialClip({
         />
       </div>
 
-      {chapters.length > 0 && (
+      {activeChapters.length > 0 && (
         <div
           className="mt-3 grid gap-2.5"
-          style={{ gridTemplateColumns: `repeat(${chapters.length}, minmax(0, 1fr))` }}
+          style={{ gridTemplateColumns: `repeat(${activeChapters.length}, minmax(0, 1fr))` }}
         >
-          {chapters.map((chapter, idx) => {
+          {activeChapters.map((chapter, idx) => {
             const pct = chapterProgress(idx);
             const active = idx === activeChapter;
             const done = idx < activeChapter;
@@ -218,7 +228,7 @@ export function EditorialClip({
                 key={`${chapter.at}-${chapter.label}`}
                 type="button"
                 onClick={() => seekTo(chapter.at)}
-                className="group flex min-w-0 flex-col gap-1.5 text-left focus-visible:outline-none"
+                className="group flex min-w-0 flex-col gap-1.5 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               >
                 <span className="block h-[2.5px] w-full overflow-hidden rounded-full bg-border">
                   <span
