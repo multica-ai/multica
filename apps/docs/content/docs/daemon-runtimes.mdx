@@ -102,6 +102,22 @@ When a newer release is available for a standalone CLI daemon, runtime owners an
 
 Installation starts automatically once the last running task finishes. Only one unfinished update is allowed per machine; a queued update expires after 24 hours if the machine never becomes idle, and can be cancelled until installation begins. Daemons on older CLI versions without queue support refuse remote updates while busy; retry once the machine is idle. Daemons launched by Multica Desktop are managed by Desktop and upgraded with the Desktop app instead.
 
+### Pause new runs before maintenance [#drain]
+
+Before you restart or replace a daemon yourself (a new container image, a host reboot), you can stop it from claiming new runs and wait for the runs it already has to finish. The endpoints are on the daemon's local health port (`127.0.0.1:19514` for the default profile) and are not reachable through the Multica server:
+
+```bash
+curl -X POST http://127.0.0.1:19514/drain -d '{"timeout_ms": 1800000}'   # wait up to 30 minutes
+curl http://127.0.0.1:19514/drain                                        # status only
+curl -X POST http://127.0.0.1:19514/resume
+```
+
+`POST /drain` returns `200` with `"status": "drained"` once no claim is in flight and no claimed run is still running. New runs stay queued on the server and are claimed by the next daemon that comes online for the runtime. Running work is never interrupted. If the wait times out (`408`, at most one hour) or the caller disconnects before the drain completes, the daemon resumes claiming on its own. A completed drain lasts until `POST /resume` or the process exits, and repeated `POST /drain` calls join the same drain.
+
+Any process on the machine can reach the loopback port, including the runs themselves. To restrict the two write calls, set `MULTICA_DAEMON_CONTROL_TOKEN_FILE` to a file that only the operator can read; requests then need `Authorization: Bearer <file contents>`.
+
+To keep a daemon from claiming anything while you work on the machine, for example across several restarts, set `MULTICA_DAEMON_START_PAUSED=true`. The daemon then starts as if a drain had already completed: `GET /drain` reports `"status": "drained"` with `"started_paused": true`, it logs a warning every five minutes, and it claims runs only after `POST /resume`. While it waits, the runtime still shows as online and its runs queue.
+
 ## Dispatch and online status
 
 Once registered, a runtime keeps a persistent connection. When a new run enters the queue, the server notifies the matching daemon; the daemon also polls periodically so a dropped connection does not lose the notification. When a runtime is online with spare capacity, runs usually start immediately.
