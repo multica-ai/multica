@@ -180,7 +180,7 @@
       "permissions_owner": "Bạn có thể chỉnh sửa và xóa skill này. Thay đổi sẽ có hiệu lực ở lần chạy tiếp theo của agent.",
       "permissions_locked_creator": "Chỉ người tạo ({{name}}) hoặc quản trị viên của không gian làm việc mới có thể chỉnh sửa skill này.",
       "permissions_locked": "Chỉ người tạo hoặc quản trị viên của không gian làm việc mới có thể chỉnh sửa skill này.",
-      "character_count": "{{count}} ký tự"
+      "character_count_other": "{{count}} ký tự"
     },
     "files": {
       "list_aria": "Các tệp của skill",
@@ -342,8 +342,6 @@
     "toast_imported": "Đã nhập skill",
     "toast_import_failed": "Không nhập được skill",
     "select_all": "Chọn tất cả ({{count}})",
-    "bulk_ready": "Đã chọn {{count}} skill",
-    "bulk_import_button": "Nhập {{count}} skill",
     "bulk_progress": "Đang nhập {{completed}} / {{total}}…",
     "bulk_cancel_button": "Hủy",
     "bulk_complete_hint": "Đã nhập xong.",
@@ -355,7 +353,6 @@
     "bulk_summary_skipped": "Đã bỏ qua",
     "bulk_summary_failed": "Thất bại",
     "conflict_single_title": "Đã có skill với tên này",
-    "conflict_bulk_title": "{{count}} skill cần bạn quyết định",
     "conflict_hint": "Chọn ghi đè skill hiện có trong không gian làm việc, nhập với tên mới, hoặc bỏ qua.",
     "conflict_locked_creator": "Skill này do {{creator}} tạo. Chỉ người tạo mới có thể ghi đè nó qua nhập từ máy; hãy chỉnh sửa tại trang chi tiết Skill nếu bạn cần thay đổi.",
     "conflict_locked": "Chỉ người tạo mới có thể ghi đè skill này qua nhập từ máy; hãy chỉnh sửa tại trang chi tiết Skill nếu bạn cần thay đổi.",
@@ -366,10 +363,13 @@
     "conflict_overwrite_all": "Ghi đè tất cả",
     "conflict_skip_all": "Bỏ qua tất cả",
     "conflict_rename_label": "Tên skill mới",
-    "conflict_footer": "Còn {{count}} quyết định xử lý xung đột đang chờ.",
     "conflict_apply_button": "Áp dụng quyết định",
     "conflict_missing_resolution": "Hãy chọn cách xử lý xung đột này.",
-    "conflict_name_still_exists": "Tên đó đã tồn tại. Hãy chọn tên khác hoặc bỏ qua."
+    "conflict_name_still_exists": "Tên đó đã tồn tại. Hãy chọn tên khác hoặc bỏ qua.",
+    "bulk_ready_other": "Đã chọn {{count}} skill",
+    "bulk_import_button_other": "Nhập {{count}} skill",
+    "conflict_bulk_title_other": "{{count}} skill cần quyết định",
+    "conflict_footer_other": "Còn {{count}} quyết định xung đột đang chờ."
   },
   "file_tree": {
     "no_files": "Không có tệp",

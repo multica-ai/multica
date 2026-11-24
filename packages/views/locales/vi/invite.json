@@ -20,7 +20,7 @@
     "title": "Không có lời mời đang chờ",
     "hint": "Tiếp tục để thiết lập không gian làm việc của riêng bạn.",
     "continue": "Tiếp tục thiết lập",
-    "go_to_dashboard": "Đi tới bảng điều khiển"
+    "go_to_dashboard": "Đi tới không gian làm việc"
   },
   "linked": {
     "not_found": "Lời mời này có thể đã hết hạn, bị thu hồi, hoặc không thuộc về tài khoản của bạn.",
@@ -38,7 +38,7 @@
     "invalid": "Liên kết mời này không hợp lệ hoặc đã hết hạn.",
     "joined_title": "Đã tham gia!",
     "redirecting": "Đang chuyển tới không gian làm việc của bạn...",
-    "error_title": "Rất tiếc",
+    "error_title": "Không mở được lời mời",
     "go_home": "Về trang chủ",
     "loading": "Đang tải thông tin lời mời...",
     "title": "Bạn được mời vào {{workspace}}",

@@ -18,14 +18,14 @@
     "headline_line2": "trong",
     "headline_emphasis": "một không gian làm việc.",
     "lede": "Giao việc cho chúng như giao cho một đồng nghiệp — chúng sẽ nhận việc, cập nhật trạng thái và bình luận khi hoàn thành.",
-    "lede_web": "Bản Desktop đã tích hợp sẵn runtime — không cần cài đặt gì. Tiếp tục trên web để kết nối CLI của riêng bạn.",
+    "lede_web": "Bản Desktop đã bao gồm runtime cục bộ — không cần cài đặt CLI. Tiếp tục trên web để kết nối CLI của riêng bạn.",
     "download_desktop": "Tải bản Desktop",
     "continue_on_web": "Tiếp tục trên web",
     "start_exploring": "Bắt đầu khám phá",
     "skip_existing": "Tôi đã làm việc này rồi",
     "illustration": {
       "card1_actor_name": "Bạn",
-      "card1_actor_initial": "N",
+      "card1_actor_initial": "Y",
       "card1_body_prefix": " bạn soạn giúp một bài đăng ra mắt ngắn nhé? Hãy lấy từ kết quả phỏng vấn của ",
       "card1_body_suffix": ".",
       "card1_mention_content": "@Content Agent",
@@ -222,7 +222,7 @@
   },
   "errors": {
     "skip_failed": "Không hoàn tất được quá trình thiết lập ban đầu",
-    "guide_failed": "Không tạo được hướng dẫn runtime. Vui lòng thử lại.",
+    "guide_failed": "Không tạo được hướng dẫn cài đặt. Vui lòng thử lại.",
     "mika_setup_failed": "Không khởi động được không gian làm việc Mika của bạn"
   },
   "mika_intro": {

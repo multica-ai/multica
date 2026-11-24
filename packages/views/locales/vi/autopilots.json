@@ -76,10 +76,10 @@
     "run_blocked_invocation_not_allowed": "Không kích hoạt — bạn không có quyền dùng agent của autopilot này",
     "run_blocked_runtime_offline": "Không kích hoạt — runtime của agent đang ngoại tuyến",
     "run_blocked_agent_runtime_required": "Không kích hoạt — agent chưa có runtime; hãy gắn một runtime để chạy",
-    "run_blocked_runtime_access_denied": "Không kích hoạt — agent không chạy được trên runtime riêng tư của nó; hãy chuyển runtime sang công khai hoặc gắn lại/sao chép agent",
+    "run_blocked_runtime_access_denied": "Không kích hoạt — runtime riêng tư của agent này không truy cập được. Hãy chuyển runtime sang công khai, hoặc gắn agent với một runtime truy cập được.",
     "run_blocked_target_unavailable": "Không kích hoạt — agent không khả dụng",
-    "run_blocked_attribution": "Không kích hoạt — không xác định được thành viên chịu trách nhiệm cho lần chạy này",
-    "run_blocked_already_active": "Không kích hoạt — một lần chạy gần đây đã bao quát việc này",
+    "run_blocked_attribution": "Không kích hoạt — không có thành viên đang hoạt động nào có thể chạy autopilot này.",
+    "run_blocked_already_active": "Không kích hoạt — một lần chạy đang diễn ra hoặc vừa mới kết thúc.",
     "run_blocked_quota_exceeded": "Không kích hoạt — đã đạt giới hạn số lần chạy trong kỳ này",
     "run_blocked_generic": "Không kích hoạt — lần chạy đã bị chặn",
     "section_triggers": "Trigger",
@@ -90,10 +90,10 @@
     "field_project": "Dự án",
     "no_project": "Không có dự án",
     "project_unavailable": "Dự án không khả dụng",
-    "field_prompt": "Prompt",
+    "field_prompt": "Runbook",
     "field_subscribers": "Người theo dõi",
     "field_subscribers_none": "Không có",
-    "no_prompt": "Chưa có prompt nào.",
+    "no_prompt": "Chưa có runbook nào.",
     "copy_link": "Sao chép liên kết",
     "link_copied": "Đã sao chép liên kết",
     "link_copy_failed": "Không sao chép được liên kết",
@@ -104,7 +104,7 @@
       "with_trigger": "{{trigger}} · {{action}}"
     },
     "add_trigger": "Thêm trigger",
-    "no_triggers": "Chưa cấu hình trigger nào. Thêm lịch để chạy tự động.",
+    "no_triggers": "Chưa cấu hình trigger nào. Thêm lịch hoặc webhook để chạy tự động.",
     "no_runs": "Chưa có lần chạy nào. Nhấn \"Chạy ngay\" để kích hoạt thủ công.",
     "delete_button": "Xóa autopilot",
     "toast_deleted": "Đã xóa autopilot",
@@ -198,7 +198,7 @@
     "toast_delete_failed": "Không xóa được trigger",
     "delete_dialog": {
       "title": "Xóa trigger",
-      "description": "Trigger này sẽ bị loại bỏ và autopilot sẽ ngừng kích hoạt theo lịch này. Hành động này không thể hoàn tác.",
+      "description": "Trigger này sẽ bị loại bỏ và sẽ không còn kích hoạt autopilot này nữa. Hành động này không thể hoàn tác.",
       "cancel": "Hủy",
       "confirm": "Xóa",
       "deleting": "Đang xóa..."
@@ -248,7 +248,7 @@
       "toast_failed": "Gửi lại thất bại",
       "disabled_invalid_signature": "Không gửi lại được — chữ ký không hợp lệ",
       "disabled_rejected": "Không gửi lại được một lần gửi bị từ chối",
-      "disabled_queued": "Vẫn đang chờ — hãy gửi lại khi nó hoàn tất"
+      "disabled_queued": "Đã có một lần gửi lại đang chờ. Hãy chờ cho tới khi nó hoàn tất."
     },
     "ignore": {
       "title": "Lý do bỏ qua",
@@ -298,7 +298,7 @@
     "sr_edit": "Chỉnh sửa Autopilot",
     "header_create": "Autopilot mới",
     "header_edit": "Chỉnh sửa autopilot",
-    "subtitle": "Công việc AI định kỳ",
+    "subtitle": "Công việc AI theo lịch hoặc kích hoạt bằng webhook",
     "expand": "Mở rộng",
     "collapse": "Thu gọn",
     "close": "Đóng",
@@ -381,7 +381,7 @@
     "schedule_multiple_notice": "Autopilot này có {{count}} lịch. Đóng hộp thoại này và chỉnh sửa từng lịch ở mục Trigger bên dưới.",
     "webhook_multiple_notice": "Autopilot này có nhiều webhook. Đóng hộp thoại này và chỉnh sửa từng webhook trong mục Trigger bên dưới.",
     "webhook_edit_filters": "Chỉnh sửa bộ lọc",
-    "webhook_filters_saved_separately": "Lưu riêng: Hủy ở đây không hoàn tác được.",
+    "webhook_filters_saved_separately": "Bộ lọc sự kiện lưu ngay lập tức — nhấn Hủy ở đây không hoàn tác được.",
     "schedule_empty": "Không có lịch — autopilot này chỉ chạy khi được kích hoạt thủ công.",
     "schedule_add": "Thêm lịch",
     "error_title_required": "Hãy nhập tên cho autopilot này.",
@@ -513,7 +513,9 @@
       "warning": "Hành động này không thể hoàn tác.",
       "cancel": "Hủy",
       "confirm": "Xóa vĩnh viễn",
-      "deleting": "Đang xóa…"
+      "deleting": "Đang xóa…",
+      "title_multiple": "Xóa {{count}} autopilot?",
+      "description_single": "Thao tác này sẽ xóa vĩnh viễn \"{{name}}\" và lịch sử chạy của nó."
     }
   },
   "wakeups": {
@@ -536,13 +538,13 @@
     "loading": "Đang tải các lần đánh thức…",
     "disable_selected": "Tắt mục đã chọn",
     "confirm_title": "Tắt {{count}} lần đánh thức?",
-    "confirm_body": "Các lần đánh thức trong tương lai sẽ dừng. Các lần chạy vẫn đang chờ và chưa được giao cho agent sẽ bị rút lại. Các lần chạy đã giao sẽ tiếp tục; hãy dừng chúng từ nhật ký thực thi.",
+    "confirm_body": "Các lần đánh thức trong tương lai sẽ dừng. Các lần chạy đang chờ chưa bắt đầu sẽ bị hủy. Các lần chạy đang diễn ra sẽ tiếp tục — hãy dừng chúng từ nhật ký thực thi.",
     "cancel": "Hủy",
     "confirm": "Tắt",
     "disabling": "Đang tắt…",
     "batch_result": "Đã tắt: {{succeeded}}. Thất bại: {{failed}}.",
     "scopes": {
-      "active": "Đang chờ hoặc đang thực thi",
+      "active": "Đang chờ hoặc đang chạy",
       "all": "Tất cả wakeup",
       "disabled": "Đã tắt",
       "ended": "Đã kết thúc",
@@ -613,7 +615,8 @@
       "load_error": "Không tải được mặc định wakeup.",
       "edit_instruction": "Sửa hướng dẫn mặc định",
       "view_instruction": "Xem hướng dẫn mặc định"
-    }
+    },
+    "banner_single": "1 lần đánh thức đã bị tạm dừng tự động: {{issue}} “{{condition}}” — {{reason}}"
   },
   "intro": {
     "label": "Autopilot",

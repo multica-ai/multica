@@ -135,7 +135,7 @@
   },
   "delegate": {
     "row": "Giao cho agent: “{{prompt}}”",
-    "hint": "Tạo nhanh"
+    "hint": "Tạo bằng agent"
   },
   "best": {
     "assign": "Giao {{subject}} cho {{name}}",

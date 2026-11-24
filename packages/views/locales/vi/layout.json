@@ -13,7 +13,8 @@
     "skills": "Skills",
     "settings": "Cài đặt",
     "views": "Chế độ xem",
-    "docs": "Tài liệu"
+    "docs": "Tài liệu",
+    "apps": "Ứng dụng"
   },
   "tab": {
     "issue": "Công việc",
@@ -30,7 +31,8 @@
     "my_agents": "Việc của các agent của tôi",
     "unknown": "Trang không xác định",
     "doc": "Tài liệu",
-    "docFolder": "Thư mục"
+    "docFolder": "Thư mục",
+    "app": "Ứng dụng"
   },
   "help": {
     "trigger": "Trợ giúp",
@@ -99,7 +101,7 @@
   },
   "rail": {
     "label": "Điều hướng ứng dụng",
-    "sheet_description": "Chuyển đổi không gian và không gian làm việc.",
+    "sheet_description": "Chuyển đổi chế độ xem và không gian làm việc.",
     "work": "Công việc",
     "team": "Nhóm",
     "chat": "Trò chuyện",
@@ -172,8 +174,6 @@
       "view_delete": "Xóa chế độ xem",
       "new_issue_here": "Công việc mới trong dự án này",
       "inbox_actions": "Thao tác Hộp thư đến",
-      "inbox_view_snoozed": "Xem tạm ẩn",
-      "inbox_view_archived": "Xem đã lưu trữ",
       "inbox_empty": "Không có thông báo",
       "inbox_settings": "Hiển thị Hộp thư đến",
       "inbox_all": "Tất cả thông báo",
@@ -197,11 +197,11 @@
     "team": {
       "new_agent": "Agent mới",
       "needs_attention": "Cần chú ý",
-      "stuck_other": "{{count}} tác vụ đang chờ runtime ngoại tuyến",
+      "stuck_other": "{{count}} lần chạy đang chờ runtime ngoại tuyến",
       "working_now": "Đang làm việc",
       "show_more_agents": "Hiện thêm {{count}}…",
       "show_fewer_agents": "Hiện ít hơn",
-      "running_tasks_other": "{{count}} tác vụ đang chạy",
+      "running_tasks_other": "{{count}} lần chạy đang diễn ra",
       "all_agents": "Tất cả agent",
       "my_agents": "Agent của tôi",
       "squads_and_members": "Squad và thành viên",

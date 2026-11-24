@@ -37,7 +37,7 @@
     },
     "columns": {
       "name": "Tên",
-      "harness": "Harness",
+      "harness": "CLI",
       "agents": "Agent",
       "workload": "Tải công việc",
       "status": "Trạng thái"
@@ -88,7 +88,7 @@
     "section_local": "Cục bộ",
     "section_remote": "Từ xa",
     "section_cloud": "Đám mây",
-    "this_machine": "Thiết bị này",
+    "this_machine": "Máy này",
     "local_badge": "Cục bộ · máy này",
     "pending_custom_runtimes": "Runtime tùy chỉnh đang chờ",
     "daemon_title": "Daemon",
@@ -112,14 +112,14 @@
       "workload_idle": "Tất cả nhàn rỗi",
       "workload_hint": "{{running}} đang chạy · {{queued}} đang chờ",
       "cli": "CLI",
-      "cloud_worker": "Cloud worker",
+      "cloud_worker": "Cloud node",
       "local_daemon": "Daemon cục bộ"
     },
     "rename": "Đổi tên máy",
     "rename_dialog": {
       "title": "Đổi tên máy",
       "description": "Dùng cho máy này và tất cả runtime của nó.",
-      "placeholder": "vd. MacBook của Bohan",
+      "placeholder": "vd. MacBook làm việc",
       "hint": "Để trống để dùng tên mặc định của thiết bị.",
       "cancel": "Hủy",
       "save": "Lưu",
@@ -132,7 +132,7 @@
   "health": {
     "online": {
       "label": "Trực tuyến",
-      "description": "Đã nhận nhịp tim trong 45 giây qua. Sẵn sàng nhận các lần chạy."
+      "description": "Đã kết nối và sẵn sàng nhận các lần chạy."
     },
     "recently_lost": {
       "label": "Mới mất kết nối",
@@ -140,11 +140,11 @@
     },
     "offline": {
       "label": "Ngoại tuyến",
-      "description": "Không có nhịp tim trong hơn 5 phút. Khởi động lại daemon hoặc kiểm tra máy chủ."
+      "description": "Đã mất kết nối hơn 5 phút. Hãy khởi động lại daemon trên máy này hoặc kiểm tra mạng của máy."
     },
     "long_offline": {
       "label": "Ngoại tuyến lâu",
-      "description": "Không có nhịp tim trong hơn 6 ngày. Nếu máy này sẽ tiếp tục ngoại tuyến, hãy gắn lại các agent của nó sang runtime khác hoặc xóa runtime này."
+      "description": "Đã mất kết nối hơn 6 ngày. Nếu máy này sẽ không trực tuyến trở lại, hãy gắn lại các agent của nó sang runtime khác hoặc xóa runtime này."
     }
   },
   "detail": {
@@ -154,7 +154,7 @@
     "last_seen": "lần cuối xuất hiện {{when}}",
     "never_seen": "chưa từng kết nối",
     "fact_owner": "Chủ sở hữu",
-    "fact_device": "Thiết bị",
+    "fact_device": "Máy",
     "fact_runtime": "Runtime",
     "fact_daemon_cli": "CLI của daemon",
     "fact_daemon_id": "ID của daemon",
@@ -285,7 +285,7 @@
     "title": "Cloud Runtime",
     "description": "Tạo một cloud runtime.",
     "create_title": "Node mới",
-    "nodes_title": "Các node",
+    "nodes_title": "Các node cloud",
     "refresh": "Làm mới",
     "nodes_empty": "Chưa có node đám mây nào",
     "nodes_failed": "Cloud Runtime không khả dụng",
@@ -305,9 +305,9 @@
       "instance_type": "Loại instance",
       "region": "Khu vực",
       "disk_size": "Dung lượng đĩa GiB",
-      "image_id": "AMI ID",
+      "image_id": "Image ID (AMI)",
       "subnet_id": "Subnet ID",
-      "key_name": "Cặp khóa",
+      "key_name": "Cặp khóa SSH",
       "bootstrap_pat": "Bootstrap PAT"
     },
     "placeholders": {
@@ -339,8 +339,17 @@
       "running": "Đang cập nhật...",
       "completed": "Cập nhật hoàn tất. Daemon đang khởi động lại...",
       "failed": "Cập nhật thất bại",
-      "timeout": "Hết thời gian chờ"
-    }
+      "timeout": "Hết thời gian chờ",
+      "scheduled": "Cập nhật khi nhàn rỗi"
+    },
+    "cancel": "Hủy",
+    "cancel_failed": "Không xác nhận được việc hủy, nên bản cập nhật vẫn có thể chạy. Hãy thử lại.",
+    "cancel_conflict": "Không hủy được: quá trình cài đặt đã bắt đầu.",
+    "scheduled_tasks": "{{running}} đang chạy",
+    "note_no_interrupt": "Các tác vụ đang chạy sẽ không bị gián đoạn.",
+    "expired_note": "Đã hết hạn sau khi chờ 24 giờ để máy chuyển sang nhàn rỗi.",
+    "busy_note": "Máy đang bận nên bản cập nhật chưa bắt đầu. Hãy thử lại khi máy nhàn rỗi.",
+    "another_update_note": "Một bản cập nhật khác đã được xếp hàng hoặc đang cài đặt trên máy này."
   },
   "charts": {
     "heatmap_less": "Ít hơn",
@@ -391,21 +400,21 @@
     "learn_more": "Xem hướng dẫn thiết lập",
     "close": "Đóng",
     "add_new": "Runtime tùy chỉnh mới",
-    "list_title": "Các backend runtime",
+    "list_title": "Các runtime cơ sở",
     "custom_section_title": "Runtime tùy chỉnh ({{count}})",
     "custom_section_aria": "Runtime tùy chỉnh",
-    "builtin_section_title": "Họ giao thức cơ sở được hỗ trợ ({{count}})",
-    "builtin_section_hint": "Các họ tích hợp sẵn là tùy chọn tham khảo chỉ đọc.",
+    "builtin_section_title": "Runtime tích hợp sẵn ({{count}})",
+    "builtin_section_hint": "Các runtime tích hợp sẵn là tùy chọn tham khảo chỉ đọc.",
     "builtin_section_aria": "Các họ giao thức tích hợp sẵn được hỗ trợ",
     "builtin_reference": "Tham khảo",
     "empty_title": "Tạo runtime tùy chỉnh đầu tiên của bạn",
-    "empty_description": "Chọn một họ giao thức cơ sở, rồi trỏ Multica tới lệnh cần chạy.",
+    "empty_description": "Chọn một runtime cơ sở tương thích, rồi trỏ Multica tới lệnh cần chạy.",
     "badge_builtin": "Tích hợp sẵn",
     "badge_custom": "Tùy chỉnh",
     "badge_disabled": "Đã tắt",
     "builtin_detail": {
-      "title": "Họ giao thức tích hợp sẵn",
-      "description": "{{family}} là một họ giao thức tích hợp sẵn. Không thể chỉnh sửa hoặc loại bỏ.",
+      "title": "Runtime tích hợp sẵn",
+      "description": "{{family}} là một runtime tích hợp sẵn. Không thể chỉnh sửa hoặc loại bỏ.",
       "read_only": "Chỉ đọc"
     },
     "detail": {
@@ -526,7 +535,7 @@
     "title": "Runtime Qoder Cloud Agents",
     "description": "Kết nối Qoder Cloud Agents. Multica quản lý việc thực thi và lưu thông tin đăng nhập dưới dạng mã hóa. Quản trị viên không gian làm việc có thể thay đổi cấu hình này.",
     "loading": "Đang tải…",
-    "unavailable": "Cần thiết lập phía máy chủ: hãy cấu hình MULTICA_VCS_SECRET_KEY.",
+    "unavailable": "Qoder Cloud Agents chưa được bật trên máy chủ này. Quản trị viên máy chủ cần cấu hình mã hóa thông tin đăng nhập (MULTICA_VCS_SECRET_KEY).",
     "online": "Trực tuyến",
     "error": "Lỗi kết nối",
     "starting": "Đang khởi động",
@@ -674,7 +683,7 @@
     },
     "art": {
       "this_computer": "Máy này · Desktop",
-      "detected": "Harness đã phát hiện",
+      "detected": "Runtime đã phát hiện",
       "run_there": "Chạy trên máy đó",
       "connected": "{{name}} đã kết nối tới Multica"
     }

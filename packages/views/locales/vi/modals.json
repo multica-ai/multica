@@ -168,7 +168,7 @@
   },
   "create_issue": {
     "sr_manual": "Công việc mới",
-    "sr_agent": "Tạo công việc nhanh",
+    "sr_agent": "Tạo công việc bằng agent",
     "manual_breadcrumb": "Tạo thủ công",
     "agent_breadcrumb": "Tạo bằng agent",
     "title_placeholder": "Tiêu đề công việc",
@@ -185,15 +185,20 @@
     "autopilot_quota_limit": {
       "title": "Không gian làm việc này đã đạt giới hạn số lần chạy autopilot",
       "checking_description": "Đang kiểm tra các thao tác thanh toán khả dụng cho không gian làm việc này…",
-      "upgrade_description": "Nâng cấp lên Pro để khôi phục các lần chạy autopilot.",
+      "upgrade_description": "Nâng cấp lên Pro để tăng giới hạn hằng tháng và khôi phục các lần chạy autopilot, hoặc chờ hạn mức được đặt lại.",
       "portal_description": "Mở Cổng thanh toán để quản lý gói đăng ký của không gian làm việc này và khôi phục các lần chạy autopilot.",
-      "contact_description": "Hãy nhờ chủ sở hữu hoặc quản trị viên của không gian làm việc nâng cấp lên Pro.",
+      "contact_description": "Hãy nhờ chủ sở hữu hoặc quản trị viên của không gian làm việc nâng cấp gói, hoặc chờ hạn mức được đặt lại.",
       "billing_description": "Mở Thanh toán để xem các lựa chọn nâng cấp khả dụng cho không gian làm việc này.",
       "billing_unavailable_description": "Không tải được các thao tác thanh toán. Mở Thanh toán để thử lại.",
       "billing_disabled_description": "Chờ hạn mức hiện tại được đặt lại, hoặc liên hệ quản trị viên không gian làm việc của bạn.",
       "upgrade_action": "Nâng cấp lên Pro",
       "portal_action": "Mở Cổng thanh toán",
-      "billing_action": "Xem Thanh toán"
+      "billing_action": "Xem Thanh toán",
+      "addon_description": "Mua thêm lượt chạy để khôi phục các lần chạy autopilot trong tháng này, hoặc chờ hạn mức được đặt lại.",
+      "contact_addon_description": "Nhờ chủ sở hữu hoặc quản trị viên của không gian làm việc mua thêm lượt chạy, hoặc chờ hạn mức được đặt lại.",
+      "contact_addon_or_upgrade_description": "Nhờ chủ sở hữu hoặc quản trị viên của không gian làm việc mua thêm lượt chạy hoặc nâng cấp gói, hoặc chờ hạn mức được đặt lại.",
+      "addon_action": "Mua thêm lượt chạy",
+      "upgrade_business_action": "Nâng cấp lên Business"
     },
     "toast_link_subissues_all_failed": "Không liên kết được các công việc con",
     "toast_link_subissues_partial": "Không liên kết được {{failed}} trong số {{total}} công việc con",
@@ -240,7 +245,7 @@
       "squads_group": "Squad",
       "version_missing": "Daemon của agent này không báo cáo phiên bản CLI. Tạo bằng agent cần multica CLI ≥ {{min}}. Hãy nâng cấp daemon và kết nối lại, hoặc chuyển sang tạo thủ công.",
       "version_below": "CLI của daemon của agent này là {{current}} — Tạo bằng agent cần ≥ {{min}}. Hãy nâng cấp daemon, hoặc chuyển sang tạo thủ công.",
-      "prompt_placeholder": "Cho agent biết việc cần làm, ví dụ: \"nhờ Bohan sửa lỗi tải hộp thư đến chậm trong dự án Web\"",
+      "prompt_placeholder": "Cho agent biết việc cần làm, ví dụ: \"sửa lỗi tải hộp thư đến chậm trong dự án Web\"",
       "source_context_prompt_placeholder": "Cho agent biết cần làm gì với ngữ cảnh này, ví dụ: \"tiếp tục điều tra và sửa công việc được mô tả ở đây\"",
       "more_fields_aria": "Thêm trường",
       "set_project": "Đặt dự án...",
@@ -258,7 +263,9 @@
       "error_agent_unavailable_fallback": "Agent không khả dụng. Hãy chọn agent khác.",
       "error_daemon_version": "CLI của daemon của agent này ({{current}}) thấp hơn mức yêu cầu {{min}}. Hãy nâng cấp daemon để dùng Tạo bằng agent.",
       "error_unknown": "Không gửi được. Hãy thử lại.",
-      "sub_issue_of": "Công việc con của {{identifier}}"
+      "sub_issue_of": "Công việc con của {{identifier}}",
+      "all_actors": "Tất cả agent và squad",
+      "frequent_actors_aria": "Hay dùng"
     }
   },
   "mark_duplicate": {
@@ -273,8 +280,8 @@
     "trigger": "Sao chép trường của công việc cha",
     "title": "Sao chép trường của công việc cha",
     "description": "Từ {{identifier}}. Thay thế các giá trị nháp đã chọn một lần; thay đổi sau đó không đồng bộ.",
-    "apply": "Sao chép {{count}} trường",
     "no_labels": "Không có nhãn",
-    "manual_only": "Nhãn, ngày bắt đầu và thuộc tính tùy chỉnh chỉ áp dụng khi tạo thủ công."
+    "manual_only": "Nhãn, ngày bắt đầu và thuộc tính tùy chỉnh chỉ áp dụng khi tạo thủ công.",
+    "apply_other": "Sao chép {{count}} trường"
   }
 }

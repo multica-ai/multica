@@ -8,7 +8,11 @@
   "filter": {
     "project_label": "Dự án",
     "all_projects": "Tất cả dự án",
-    "period_label": "Kỳ"
+    "period_label": "Kỳ",
+    "attribution_label": "Phân bổ",
+    "all_attribution": "Mọi phân bổ",
+    "standalone_only": "Chỉ agent độc lập",
+    "squads_group": "Squad"
   },
   "kpi": {
     "cost_label": "Chi phí · {{days}} ngày",
@@ -17,10 +21,12 @@
     "run_time_label": "Thời gian chạy · {{days}} ngày",
     "run_time_hint": "Trên {{tasks}} lần chạy",
     "tasks_label": "Số lần chạy · {{days}} ngày",
-    "tasks_hint": "{{failed}} thất bại"
+    "tasks_hint": "{{failed}} thất bại",
+    "cost_squad_hint": "{{name}} tổng cộng (gồm cả thành viên được ủy quyền)",
+    "cost_squad_share_hint": "{{cost}} do squad kích hoạt ({{pct}}%)"
   },
   "dim": {
-    "label": "Chiều phân tích",
+    "label": "Khoảng thời gian",
     "daily": "Theo ngày",
     "weekly": "Theo tuần"
   },
@@ -50,7 +56,7 @@
     "kpi_failed_hint": "Trong tổng số {{total}} lần chạy",
     "kpi_rate_label": "Tỷ lệ thất bại · {{days}} ngày",
     "kpi_agents_label": "Agent bị ảnh hưởng · {{days}} ngày",
-    "kpi_agents_hint": "Nặng nhất {{name}} · {{count}}",
+    "kpi_agents_hint": "Nhiều nhất: {{name}} ({{count}} lỗi)",
     "tooltip_rate": "Tỷ lệ lỗi",
     "class": {
       "auth": "Xác thực",
@@ -66,7 +72,7 @@
     "mix_title": "Cơ cấu lỗi · {{failed}}",
     "mix_label": "Cơ cấu lỗi",
     "codes_label": "Mã lỗi",
-    "by_agent": "Agent gây lỗi nhiều nhất",
+    "by_agent": "Lỗi theo agent",
     "sort_label": "Xếp hạng agent theo",
     "sort_failed": "Số lần thất bại",
     "sort_rate": "Tỷ lệ",
@@ -80,7 +86,8 @@
     "show_reasons": "Hiện mã lỗi",
     "hide_reasons": "Ẩn mã lỗi",
     "show_all": "Hiện tất cả {{count}}",
-    "show_less": "Hiện {{count}} đầu"
+    "show_less": "Hiện {{count}} đầu",
+    "by_squad": "Lỗi theo squad"
   },
   "leaderboard": {
     "title": "Bảng xếp hạng",
@@ -99,7 +106,16 @@
     "usage_totals_pending": "Tổng mức sử dụng vẫn đang được xử lý",
     "show_all": "Hiện tất cả",
     "show_less": "Hiện {{count}} đầu",
-    "no_data": "Không có hoạt động của agent trong khoảng này."
+    "no_data": "Không có hoạt động của agent trong khoảng này.",
+    "group_label": "Nhóm bảng xếp hạng theo",
+    "group_agent": "Agent",
+    "group_squad": "Squad",
+    "header_squad": "Squad / Phân bổ",
+    "squad_caption": "{{count}} squad",
+    "squad_members_title": "Chi tiết thành viên của {{name}}",
+    "squad_members_count": "{{count}} thành viên tham gia",
+    "deleted_squads": "Squad đã xóa",
+    "toggle_squad_members": "Hiện/ẩn thành viên của {{name}}"
   },
   "empty": {
     "title": "Chưa có mức sử dụng",
@@ -107,5 +123,15 @@
   },
   "duration": {
     "less_than_minute": "<1 phút"
+  },
+  "history_limit": {
+    "note": "Gói của bạn bao gồm {{days}} ngày gần nhất. Nâng cấp để xem dữ liệu cũ hơn. Không có gì bị xóa.",
+    "fell_back": "Đang hiện {{days}} ngày gần nhất — giới hạn của gói hiện tại.",
+    "view_plans": "Xem các gói",
+    "locked": "Không có trong gói của bạn",
+    "plan": {
+      "pro": "Pro",
+      "business": "Business"
+    }
   }
 }

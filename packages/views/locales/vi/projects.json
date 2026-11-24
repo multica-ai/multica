@@ -102,7 +102,43 @@
     "toast_project_deleted": "Đã xóa dự án",
     "toast_move_issue_failed": "Không di chuyển được công việc",
     "archive_action": "Lưu trữ dự án",
-    "restore_action": "Khôi phục dự án"
+    "restore_action": "Khôi phục dự án",
+    "guest_readonly_note": "Khách có thể xem dự án này, nhưng không thể thay đổi thuộc tính của nó.",
+    "tab_overview": "Tổng quan",
+    "tab_issues": "Công việc",
+    "progress_panel": {
+      "summary_other": "Đã xong {{completed}} trên {{count}} công việc",
+      "legend_completed": "Hoàn thành",
+      "legend_started": "Đang tiến hành",
+      "legend_unstarted": "Chưa bắt đầu",
+      "cancelled_note_other": "{{count}} công việc đã hủy không được tính",
+      "empty_hint": "Tiến độ và xu hướng bắt đầu xuất hiện khi đã thêm công việc.",
+      "chart_label": "Tiến độ theo tuần",
+      "chart_today": "Hôm nay",
+      "forecast_no_due": "Với tốc độ gần đây, hoàn thành vào {{date}}",
+      "forecast_ahead_other": "Với tốc độ gần đây, hoàn thành vào {{date}}, sớm {{count}} ngày so với ngày đến hạn",
+      "forecast_behind_other": "Với tốc độ gần đây, hoàn thành vào {{date}}, muộn {{count}} ngày so với ngày đến hạn",
+      "forecast_on_due": "Với tốc độ gần đây, hoàn thành vào {{date}}, đúng ngày đến hạn",
+      "forecast_none": "Chưa đủ số công việc hoàn thành gần đây để dự báo ngày xong.",
+      "by_assignee": "Theo người được giao",
+      "agent_tag": "Agent",
+      "unassigned": "Chưa giao",
+      "axis_assignee": "Người được giao",
+      "axis_label": "Nhãn",
+      "by_label": "Theo nhãn",
+      "no_labels": "Chưa có công việc nào.",
+      "unlabeled": "Không có nhãn"
+    },
+    "tab_activity": "Hoạt động",
+    "agent_context_badge": "Ngữ cảnh agent",
+    "section_breakdown": "Phân bổ",
+    "section_activity": "Hoạt động gần đây",
+    "activity": {
+      "empty": "Chưa có hoạt động nào trên các công việc của dự án này.",
+      "load_more": "Tải thêm",
+      "view_all": "Xem tất cả",
+      "hint": "Thay đổi trạng thái, người được giao, mức ưu tiên và ngày trên các công việc của dự án."
+    }
   },
   "resources": {
     "section_header": "Tài nguyên",
@@ -152,7 +188,7 @@
     "mode_badge_in_place": "Trực tiếp",
     "ref_label": "Nhánh bắt đầu",
     "ref_placeholder": "main",
-    "ref_hint": "Các task bắt đầu từ nhánh này và mở pull request vào nó. Để trống để dùng nhánh mặc định của repo.",
+    "ref_hint": "Các lần chạy của agent rẽ nhánh từ nhánh này và mở pull request vào nó. Để trống để dùng nhánh mặc định.",
     "ref_error_too_long": "Dùng tối đa 255 ký tự.",
     "ref_error_characters": "Tên nhánh không được chứa khoảng trắng hoặc các ký tự ~ ^ : ? * [ \\",
     "ref_error_format": "Tên nhánh không hợp lệ.",
@@ -164,7 +200,7 @@
     "toast_ref_update_failed": "Không cập nhật được nhánh",
     "ref_error_commit": "Đó là một commit, không phải nhánh. Đối với một phiên bản cụ thể, dùng --ref với multica repo checkout.",
     "ref_default_label": "Nhánh mặc định",
-    "ref_running_note": "Các tác vụ đang chạy không bị ảnh hưởng."
+    "ref_running_note": "Các lần chạy đang diễn ra không bị ảnh hưởng."
   },
   "delete_dialog": {
     "offline_error": "Bạn đang ngoại tuyến. Kết nối lại rồi thử xóa lại.",
@@ -173,7 +209,7 @@
     "confirm": "Xóa",
     "cancel": "Hủy",
     "archive_instead": "Lưu trữ thay vì xóa",
-    "archive_hint": "Lưu trữ sẽ ẩn dự án nhưng giữ lại các công việc, lịch sử và cài đặt của nó. Bạn có thể khôi phục bất cứ lúc nào."
+    "archive_hint": "Lưu trữ sẽ giữ nguyên mọi công việc, lịch sử và cài đặt."
   },
   "picker": {
     "no_project": "Không có dự án",
@@ -196,7 +232,7 @@
     "slides": {
       "progress": {
         "title": "Nhìn tiến độ trong nháy mắt",
-        "description": "Trạng thái, người phụ trách, ngày mục tiêu và mức hoàn thành nằm trên một thẻ, không cần mở từng công việc."
+        "description": "Trạng thái, người phụ trách, ngày đến hạn và mức hoàn thành nằm trên một thẻ, không cần mở từng công việc."
       },
       "context": {
         "title": "Ngữ cảnh đi theo mọi lần chạy",

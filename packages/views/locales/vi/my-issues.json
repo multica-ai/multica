@@ -2,8 +2,8 @@
   "page": {
     "breadcrumb": "Công việc của tôi",
     "workspace_fallback": "Không gian làm việc",
-    "empty_title": "Không có công việc nào được giao cho bạn",
-    "empty_description": "Các công việc bạn tạo hoặc được giao cho bạn sẽ xuất hiện ở đây."
+    "empty_title": "Chưa có công việc nào",
+    "empty_description": "Các công việc được giao cho bạn, do bạn tạo, hoặc liên quan đến agent và squad của bạn sẽ xuất hiện ở đây."
   },
   "header": {
     "scope": {
@@ -14,7 +14,7 @@
       "created_label": "Đã tạo",
       "created_description": "Các công việc do tôi tạo",
       "agents_label": "Agent và Squad của tôi",
-      "agents_description": "Các công việc được giao cho agent của tôi"
+      "agents_description": "Các công việc được giao cho agent và squad của tôi"
     },
     "filter_button": "Bộ lọc",
     "filter_status": "Trạng thái",

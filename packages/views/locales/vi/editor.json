@@ -17,7 +17,7 @@
     },
     "heading_dropdown": {
       "text": "Văn bản",
-      "normal_text": "Văn bản thường",
+      "normal_text": "Văn bản",
       "heading_1": "Tiêu đề 1",
       "heading_2": "Tiêu đề 2",
       "heading_3": "Tiêu đề 3"
@@ -100,7 +100,7 @@
     "copy_failed": "Không sao chép được"
   },
   "mention": {
-    "group_users": "Người dùng",
+    "group_users": "Thành viên",
     "group_issues": "Công việc",
     "group_projects": "Dự án",
     "group_docs": "Tài liệu",
@@ -125,8 +125,6 @@
     "html_preview": "Xem trước HTML",
     "close_preview": "Đóng",
     "copy_code": "Sao chép code",
-    "show_preview": "Hiện bản xem trước",
-    "show_source": "Hiện nguồn",
     "fullscreen": "Toàn màn hình"
   },
   "dynamic_block": {
@@ -140,7 +138,10 @@
     "error_mermaid": "Không vẽ được sơ đồ này",
     "error_at_line": "{{message}} (dòng {{line}})",
     "view_source": "Xem nguồn",
-    "copy_error": "Sao chép lỗi"
+    "copy_error": "Sao chép lỗi",
+    "title": "Tiêu đề",
+    "rename": "Đổi tên",
+    "add_title": "Thêm tiêu đề"
   },
   "file_card": {
     "uploading": "Đang tải lên {{filename}}"

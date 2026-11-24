@@ -108,14 +108,14 @@
   },
   "profile_card": {
     "unavailable": "Squad không khả dụng",
-    "detail_link": "Chi tiết →",
+    "detail_link": "Xem chi tiết →",
     "archived": "Đã lưu trữ",
     "member_count_other": "{{count}} thành viên",
     "members_section": "Thành viên",
     "more_members_other": "+{{count}} nữa"
   },
   "instructions_tab": {
-    "description": "Trưởng nhóm đọc các hướng dẫn này mỗi khi làm việc trên một công việc được giao cho squad này.",
+    "description": "Trưởng nhóm và mọi agent thành viên đều đọc các hướng dẫn này mỗi khi làm việc trên một công việc được giao cho squad này.",
     "unsaved_changes": "Thay đổi chưa lưu",
     "save_button": "Lưu",
     "placeholder": "ví dụ: Luôn bắt đầu bằng cách viết một test đang lỗi. Ưu tiên các commit nhỏ, độc lập."
@@ -153,5 +153,20 @@
       "role_testing": "Testing",
       "role_product": "Product"
     }
+  },
+  "handoff": {
+    "section_title": "Cộng tác",
+    "mode_leader_title": "Trưởng nhóm giao việc",
+    "mode_leader_description": "Mỗi bước đều quay lại trưởng nhóm, {{leader}}, người chọn bước tiếp theo. Mặc định cho các squad đã có.",
+    "mode_direct_title": "Thành viên bàn giao trực tiếp",
+    "mode_direct_description": "Trưởng nhóm giao bước đầu tiên và xử lý các trường hợp ngoại lệ. Thành viên tự chọn bước tiếp theo; bàn giao để duyệt hay nhờ một người quyết định sẽ không còn đánh thức trưởng nhóm nữa.",
+    "guard_rounds": "Qua lại: tối đa {{limit}} vòng",
+    "guard_daily": "Tối đa {{limit}} lần bàn giao mỗi công việc mỗi ngày",
+    "guard_failed": "Lượt chạy thất bại → quay lại trưởng nhóm",
+    "guard_no_next": "Không còn bước tiếp theo → quay lại trưởng nhóm",
+    "saved": "Đã cập nhật chế độ cộng tác",
+    "brief_title": "Nội dung thành viên nhận được",
+    "brief_hint": "Được thêm vào mọi lượt chạy trên công việc giao cho squad này",
+    "brief_empty": "Chưa có thành viên agent nào"
   }
 }

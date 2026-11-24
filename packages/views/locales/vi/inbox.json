@@ -46,7 +46,6 @@
   "list": {
     "loading_selection": "Đang tải thông báo…",
     "empty": "Không có thông báo",
-    "mark_done_tooltip": "Đánh dấu là xong",
     "archive_tooltip": "Lưu trữ",
     "time": {
       "just_now": "Vừa xong",
@@ -60,20 +59,32 @@
     "actions_aria": "Thao tác với thông báo",
     "load_more": "Tải thêm",
     "loading_more": "Đang tải…",
-    "retry": "Thử lại"
+    "retry": "Thử lại",
+    "snoozed_title": "Đã tạm ẩn"
   },
   "detail": {
     "select_prompt": "Chọn một thông báo để xem chi tiết",
-    "empty": "Hộp thư đến của bạn trống",
     "original_input": "Nội dung nhập gốc",
     "retry_with_context": "Thử lại với ngữ cảnh",
-    "edit_advanced": "Chỉnh sửa dưới dạng biểu mẫu nâng cao",
-    "autopilot_quota_exceeded_body": "Không gian làm việc này đã đạt giới hạn {{limit}} lần chạy autopilot cho kỳ hiện tại. Các lần chạy autopilot tiếp theo sẽ không bắt đầu cho đến khi hạn mức được đặt lại {{resetAt}}.",
+    "edit_advanced": "Mở biểu mẫu đầy đủ",
+    "autopilot_quota_exceeded_body": "Không gian làm việc này đã đạt giới hạn {{limit}} lần chạy autopilot cho kỳ hiện tại. Các lần chạy autopilot tiếp theo sẽ không bắt đầu cho đến khi hạn mức được đặt lại {{resetAt}}, hoặc cho đến khi không gian làm việc nâng cấp hoặc mua thêm lượt chạy.",
+    "app_tool_calls_quota_exceeded_body": "Không gian làm việc này đã dùng hết {{limit}} lượt gọi app trong tháng này. Agent không thể chạy công cụ của app cho đến khi hạn mức được đặt lại {{resetAt}}, hoặc cho đến khi không gian làm việc nâng cấp hoặc thêm ghế.",
+    "app_tool_calls_quota_action": "Quản lý thanh toán",
     "project_owner_joined_body": "{{name}} là chủ sở hữu không gian làm việc và đã tự thêm mình vào dự án riêng tư này. Giờ họ có thể xem các công việc, bình luận và tệp đính kèm của nó.",
     "open_project": "Mở dự án",
-    "autopilot_quota_upgrade": "Xem các lựa chọn nâng cấp",
+    "autopilot_quota_upgrade": "Xem các lựa chọn",
     "archive": "Lưu trữ",
-    "unarchive": "Hủy lưu trữ"
+    "unarchive": "Hủy lưu trữ",
+    "restore": "Chuyển lại vào Hộp thư đến",
+    "more_actions": "Thêm thao tác với thông báo",
+    "open_app": "Mở ứng dụng",
+    "open_doc": "Mở tài liệu",
+    "autopilot_quota_upgrade_action": "Nâng cấp",
+    "autopilot_quota_addon_action": "Mua thêm lượt chạy",
+    "autopilot_quota_portal_action": "Quản lý thanh toán",
+    "autopilot_quota_contact_upgrade": "Nhờ chủ sở hữu hoặc quản trị viên của không gian làm việc nâng cấp gói.",
+    "autopilot_quota_contact_addon": "Nhờ chủ sở hữu hoặc quản trị viên của không gian làm việc mua thêm lượt chạy.",
+    "autopilot_quota_contact_addon_or_upgrade": "Nhờ chủ sở hữu hoặc quản trị viên của không gian làm việc mua thêm lượt chạy hoặc nâng cấp gói."
   },
   "types": {
     "issue_assigned": "Đã giao",
@@ -100,10 +111,14 @@
     "children_done": "Các công việc con đã hoàn thành",
     "project_owner_joined": "Chủ sở hữu đã tham gia dự án",
     "autopilot_quota_exceeded": "Đã đạt giới hạn số lần chạy autopilot",
+    "app_tool_calls_quota_exceeded": "Đã đạt giới hạn lượt gọi app",
     "app_action_requested": "Cần bạn xác nhận",
     "app_action_reminder": "Sắp hết hạn xác nhận",
     "app_connect_requested": "Kết nối ứng dụng",
-    "app_action_result": "Kết quả thao tác ứng dụng"
+    "app_action_result": "Kết quả thao tác ứng dụng",
+    "doc_comment": "Bình luận mới trên tài liệu",
+    "doc_mentioned": "Được nhắc đến trong tài liệu",
+    "blockers_done": "Các công việc đang chờ đã xong"
   },
   "labels": {
     "set_status_to": "Đặt trạng thái thành",
@@ -118,7 +133,9 @@
     "created_with_agent": "Đã tạo bằng agent: {{identifier}}",
     "failed_with_detail": "Thất bại: {{detail}}",
     "autopilot_quota_blocked": "Lần chạy bị chặn vì đã đạt giới hạn",
-    "children_done_stage": "Các công việc con của giai đoạn {{stage}} đã hoàn thành"
+    "app_tool_calls_quota_blocked": "Agent không còn chạy được công cụ của app trong tháng này",
+    "children_done_stage": "Các công việc con của giai đoạn {{stage}} đã hoàn thành",
+    "commented": "Đã bình luận"
   },
   "toasts": {
     "source_context_retry_started": "Đã bắt đầu thử lại với ngữ cảnh gốc",
@@ -135,18 +152,22 @@
     "archived": "Đã lưu trữ",
     "leaves": "Rời Hộp thư đến khi bạn chuyển đi",
     "filtered": "Không còn khớp với bộ lọc của bạn",
-    "notification_archived": "Đã lưu trữ thông báo",
     "next": "Tiếp theo",
-    "next_tooltip": "Mở tiếp theo: {{title}}"
+    "next_tooltip": "Mở tiếp theo: {{title}}",
+    "changed_status": "Đổi thành {{status}}",
+    "reassigned": "Đã giao lại cho {{name}}",
+    "unassigned": "Chưa giao",
+    "ran_quick_action": "Đã chạy {{name}}",
+    "agent_triggered": "Đã kích hoạt agent",
+    "returns_on_activity": "Quay lại Hộp thư đến khi có hoạt động mới"
   },
   "errors": {
     "archived_lookup_failed": "Không tải được thông báo đã liên kết",
     "source_context_retry_failed": "Không thử lại được với ngữ cảnh gốc",
-    "source_context_retry_unavailable": "Ngữ cảnh này không còn thử lại được nữa. Hãy bắt đầu lại từ điểm rẽ nhánh.",
+    "source_context_retry_unavailable": "Yêu cầu này không còn thử lại được nữa. Hãy bắt đầu lại từ tin nhắn gốc hoặc công việc gốc.",
     "mark_read_failed": "Không đánh dấu đã đọc được",
     "mark_unread_failed": "Không đánh dấu chưa đọc được",
     "archive_failed": "Không lưu trữ được",
-    "mark_done_failed": "Không đánh dấu là xong được",
     "mark_all_read_failed": "Không đánh dấu tất cả là đã đọc được",
     "archive_all_failed": "Không lưu trữ tất cả được",
     "archive_all_read_failed": "Không lưu trữ các mục đã đọc được",
@@ -200,8 +221,36 @@
     "failed": "Không tạm ẩn được",
     "unsnooze_failed": "Không hiện lại được",
     "view_empty": "Không có gì đang tạm ẩn",
-    "view_empty_description": "Tạm ẩn một công việc trong Hộp thư đến, nó sẽ chờ ở đây cho tới lúc trở lại.",
-    "col_updates": "Khi đang tạm ẩn",
-    "col_back": "Trở lại"
+    "view_empty_description": "Tạm ẩn một công việc trong Hộp thư đến, nó sẽ chờ ở đây cho tới lúc trở lại."
+  },
+  "archive_all_dialog": {
+    "title": "Lưu trữ tất cả thông báo?",
+    "description": "Mọi thông báo đang hoạt động trong hộp thư đến của bạn sẽ chuyển sang Đã lưu trữ. Các công việc đang tạm ẩn vẫn tạm ẩn, và bạn có thể khôi phục thông báo bất cứ lúc nào.",
+    "description_count_other": "Tất cả {{count}} thông báo đang hoạt động trong hộp thư đến của bạn sẽ chuyển sang Đã lưu trữ. Các công việc đang tạm ẩn vẫn tạm ẩn, và bạn có thể khôi phục chúng bất cứ lúc nào.",
+    "cancel": "Hủy",
+    "confirm": "Lưu trữ tất cả"
+  },
+  "auto_archive_prompt": {
+    "title": "Lưu trữ thông báo khi bạn đã xử lý xong",
+    "description": "Hộp thư đến giờ có thể lưu trữ thông báo của một công việc khi bạn xử lý nó. Chỉ hành động của chính bạn mới được tính, và một thông báo mới sau đó sẽ đưa công việc trở lại.",
+    "options": {
+      "handled": "Hoàn thành công việc hoặc cho agent bắt đầu sẽ lưu trữ nó; sắp xếp hay bình luận mà không đánh thức agent thì giữ nguyên",
+      "completed": "Chỉ hoàn thành hoặc hủy công việc mới lưu trữ nó",
+      "never": "Bạn tự lưu trữ thông báo"
+    },
+    "hint": "Bạn có thể đổi trong Cài đặt › Thông báo",
+    "confirm": "Xong"
+  },
+  "zero": {
+    "cleared_title": "Đã dọn sạch Hộp thư đến",
+    "just_archived": "Vừa lưu trữ {{label}}",
+    "just_snoozed": "Đã tạm ẩn {{label}} tới {{time}}",
+    "just_unsubscribed": "Đã bỏ theo dõi {{label}}",
+    "just_archived_many_other": "Đã lưu trữ {{count}} thông báo",
+    "snoozed_summary_other": "{{count}} đang tạm ẩn · tiếp theo trở lại {{time}}",
+    "filtered_title": "Đã xử lý hết với bộ lọc này",
+    "filtered_remaining_other": "{{count}} thông báo khác trong hộp thư đến của bạn",
+    "clear_and_continue": "Xóa bộ lọc và tiếp tục",
+    "undo_item": "Hoàn tác {{label}}"
   }
 }

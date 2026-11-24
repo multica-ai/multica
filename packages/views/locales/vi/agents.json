@@ -102,7 +102,6 @@
     "archive": "Lưu trữ",
     "set_access": "Đặt phạm vi truy cập",
     "set_access_dialog_title": "Đặt phạm vi truy cập",
-    "set_access_applies_to": "Áp dụng cho {{count}} agent.",
     "set_access_skipped": "Đã bỏ qua {{count}} (không thuộc sở hữu của bạn).",
     "set_access_dialog_confirm": "Áp dụng",
     "set_access_bulk_partial": "Đã áp dụng cho {{succeeded}}; {{failed}} thất bại (giữ nguyên trạng thái hiện tại).",
@@ -125,7 +124,8 @@
     "archive_dialog_title": "Lưu trữ \"{{name}}\"?",
     "archive_dialog_description": "Agent sẽ không thể được giao việc hay được nhắc đến, và mọi lượt chạy đang hoạt động sẽ bị hủy. Toàn bộ lịch sử được giữ lại và bạn có thể khôi phục sau.",
     "archive_dialog_cancel": "Hủy",
-    "archive_dialog_confirm": "Lưu trữ"
+    "archive_dialog_confirm": "Lưu trữ",
+    "set_access_applies_to_other": "Áp dụng cho {{count}} agent."
   },
   "detail": {
     "back_to_agents_full": "Quay lại danh sách agent",
@@ -141,7 +141,7 @@
     "bind_runtime": "Gắn runtime",
     "restore": "Khôi phục",
     "archive_dialog_title": "Lưu trữ agent?",
-    "archive_dialog_description": "\"{{name}}\" sẽ được lưu trữ. Nó sẽ không thể được giao việc hay được nhắc đến, nhưng toàn bộ lịch sử được giữ lại. Bạn có thể khôi phục sau.",
+    "archive_dialog_description": "“{{name}}” sẽ được lưu trữ. Nó sẽ không thể được giao việc hay được nhắc đến, và mọi lượt chạy đang hoạt động sẽ bị hủy. Toàn bộ lịch sử được giữ lại, và bạn có thể khôi phục sau.",
     "archive_dialog_cancel": "Hủy",
     "archive_dialog_confirm": "Lưu trữ",
     "more_archive": "Lưu trữ Agent",
@@ -211,7 +211,12 @@
     "status": "Trạng thái",
     "runs_7d": "Lần chạy (7 ngày)",
     "edit_access_aria": "Quyền truy cập: {{value}}. Đổi quyền truy cập",
-    "all_settings": "Tất cả cài đặt"
+    "all_settings": "Tất cả cài đặt",
+    "apps": "Ứng dụng",
+    "apps_needs_account_other": "{{count}} cần tài khoản của bạn",
+    "apps_count_other": "{{count}} ứng dụng",
+    "apps_none": "Không có",
+    "apps_aria": "Ứng dụng: {{value}}. Hiện ứng dụng"
   },
   "pickers": {
     "concurrency_range": "Số lượt chạy đồng thời tối đa ({{min}}–{{max}})",
@@ -242,7 +247,7 @@
     "thinking_default": "Theo cấu hình CLI",
     "thinking_tooltip": "Suy luận · {{value}}",
     "thinking_clear": "Theo cấu hình CLI",
-    "thinking_clear_title": "Xóa ghi đè và để cấu hình CLI cục bộ (claude/codex) quyết định mức suy luận",
+    "thinking_clear_title": "Xóa ghi đè và dùng cài đặt suy luận mặc định của runtime",
     "service_tier_default": "Mặc định của runtime",
     "service_tier_standard": "Tiêu chuẩn",
     "service_tier_standard_description": "Tốc độ tiêu chuẩn và mức sử dụng tiêu chuẩn",
@@ -330,7 +335,7 @@
       "runtime_online": "Runtime trực tuyến",
       "runtime_offline": "Runtime ngoại tuyến",
       "empty_title": "Agent này nên làm gì?",
-      "empty_description": "Mô tả những gì agent này nên làm.",
+      "empty_description": "Mô tả vai trò, workflow hoặc công cụ của agent — tôi sẽ soạn cấu hình giúp bạn.",
       "prompt_review": "Duyệt các pull request frontend",
       "prompt_research": "Nghiên cứu đối thủ và tóm tắt kết quả",
       "prompt_assistant": "Giúp nhóm của chúng tôi lên kế hoạch và viết dự án",
@@ -354,8 +359,8 @@
       "discard_confirm": "Cuộc trò chuyện và cấu hình của nó sẽ bị xóa vĩnh viễn.",
       "discard_title": "Hủy bản nháp này?",
       "discard_cancel": "Tiếp tục chỉnh sửa",
-      "banner": "Bạn có {{count}} bản nháp chưa hoàn thành",
-      "pick_hint": "Chọn một bản để tiếp tục."
+      "pick_hint": "Chọn một bản để tiếp tục.",
+      "banner_other": "Bạn có {{count}} bản nháp chưa xong"
     },
     "close": "Đóng",
     "steps": {
@@ -387,7 +392,7 @@
     },
     "runtime_step": {
       "title": "Agent này nên chạy ở đâu?",
-      "search_placeholder": "Tìm harness hoặc máy",
+      "search_placeholder": "Tìm runtime hoặc máy",
       "groups": {
         "machines": "Máy",
         "cloud": "Dịch vụ đám mây"
@@ -395,11 +400,11 @@
       "this_machine": "Máy này",
       "owner_you": "Bạn",
       "custom_badge": "Tùy chỉnh",
-      "web_local_title": "Dùng harness trên máy tính này với ứng dụng desktop",
+      "web_local_title": "Dùng runtime trên máy tính này với ứng dụng desktop",
       "download_desktop": "Tải ứng dụng desktop",
-      "harness_count_other": "{{count}} harness",
+      "harness_count_other": "{{count}} runtime",
       "local_starting": "Đang khởi động daemon cục bộ…",
-      "local_empty_title": "Không tìm thấy harness nào trên máy này",
+      "local_empty_title": "Không tìm thấy agent CLI nào trên máy này",
       "local_empty_hint": "Cài một CLI như Claude Code hoặc Codex, nó sẽ xuất hiện ở đây.",
       "more_harnesses_other": "Thêm {{count}}: {{names}}",
       "add_remote": "Kết nối một máy",
@@ -430,9 +435,9 @@
     "description_label": "Mô tả",
     "description_placeholder": "Agent này làm gì?",
     "access": {
-      "private_title": "Riêng tư",
+      "private_title": "Chỉ mình tôi",
       "private_desc": "Chỉ bạn mới chạy được agent này",
-      "public_title": "Công khai",
+      "public_title": "Đã chia sẻ",
       "public_desc": "Chọn người có thể chạy agent này",
       "public_workspace_option": "Mọi người trong không gian làm việc này",
       "public_members_group": "Người cụ thể",
@@ -503,8 +508,8 @@
       "discard": "Hủy bỏ"
     },
     "instructions": {
-      "intro": "Đặt prompt hệ thống dùng cho mọi lượt chạy. Hỗ trợ Markdown.",
-      "system_prompt_label": "Prompt hệ thống",
+      "intro": "Cho agent này biết cách làm việc trong mọi lượt chạy. Hỗ trợ Markdown.",
+      "system_prompt_label": "Hướng dẫn",
       "placeholder": "Xác định vai trò, chuyên môn và phong cách làm việc của agent này.\n\n# Ví dụ\nBạn là kỹ sư frontend chuyên về React và TypeScript.\n\n## Phong cách làm việc\n- Viết PR nhỏ, tập trung — mỗi thay đổi logic một commit\n- Ưu tiên composition hơn kế thừa\n- Luôn thêm kiểm thử đơn vị cho component mới\n\n## Ràng buộc\n- Không sửa các type trong shared/ khi chưa được phê duyệt rõ ràng\n- Tuân theo các mẫu component hiện có trong features/",
       "system_layer_label": "Do Multica duy trì",
       "system_layer_hint": "Cập nhật theo từng bản phát hành của Multica. Bạn không sửa được, và ghi chú của bạn bên dưới không bao giờ bị ghi đè.",
@@ -586,7 +591,7 @@
       "workspace_none_assigned": "Chưa có máy chủ MCP nào của không gian làm việc được gán cho agent này.",
       "workspace_add_action": "Thêm từ không gian làm việc",
       "workspace_loading": "Đang tải các máy chủ đã gán…",
-      "dialog_name_locked": "Không thể đổi tên ở đây — đổi tên sẽ thêm một máy chủ thứ hai và để lại máy chủ này. Hãy loại bỏ rồi thêm lại.",
+      "dialog_name_locked": "Không thể đổi tên máy chủ ở đây. Hãy dùng Đổi tên trong menu máy chủ, hoặc loại bỏ rồi thêm lại mục này.",
       "workspace_overridden_badge": "Bị ghi đè",
       "workspace_disabled_badge": "Đã tắt",
       "runtime_title": "Kế thừa từ runtime",
@@ -676,7 +681,7 @@
       "model_override_hint": "Áp dụng cho mọi lần chạy mà agent này nhận cho tới khi thay đổi hoặc xoá. Xoá sẽ dùng model gắn với OpenClaw agent đã chọn; danh tính của nó giữ nguyên.",
       "model_override_placeholder": "openrouter/@preset/agent-reasoning",
       "mode_local_hint": "Chạy trên máy tính này.",
-      "mode_gateway_hint": "Daemon quay số tới một OpenClaw Gateway. Để trống các trường endpoint để kế thừa chúng từ `~/.openclaw/openclaw.json` trên máy chủ của daemon.",
+      "mode_gateway_hint": "Kết nối tới một OpenClaw Gateway. Để trống các trường endpoint để kế thừa chúng từ `~/.openclaw/openclaw.json` trên máy.",
       "gateway_legend": "Endpoint của gateway",
       "host_label": "Host",
       "host_placeholder": "gw.internal",
@@ -686,7 +691,7 @@
       "token_placeholder": "Token Bearer do gateway cấp",
       "token_masked_placeholder": "Đã lưu — gửi giá trị mới để thay đổi, hoặc để trống để giữ nguyên",
       "tls_label": "Dùng TLS",
-      "tls_hint": "Quay số qua https:// thay vì http://",
+      "tls_hint": "Kết nối qua https:// thay vì http://",
       "saved_toast": "Đã lưu cấu hình định tuyến",
       "save_failed_toast": "Lưu cấu hình định tuyến thất bại"
     },
@@ -739,7 +744,7 @@
       "status": {
         "queued": "Đang chờ",
         "dispatched": "Đã điều phối",
-        "waiting_local_directory": "Đang chờ thư mục",
+        "waiting_local_directory": "Đang chờ thư mục cục bộ",
         "running": "Đang chạy",
         "completed": "Thành công",
         "failed": "Thất bại",
@@ -763,11 +768,13 @@
       "source_issue": "Công việc",
       "source_chat": "Trò chuyện",
       "source_autopilot": "Autopilot",
+      "source_doc": "Tài liệu",
       "source_untracked": "Không theo dõi",
       "source_quick_create": "Tạo nhanh",
       "source_creating_issue": "Đang tạo công việc",
       "source_chat_session": "Phiên trò chuyện",
       "source_autopilot_run": "Lượt chạy Autopilot",
+      "source_doc_comment": "Bình luận trong tài liệu",
       "issue_short_fallback": "Công việc {{prefix}}…",
       "triggered_by": "Được kích hoạt bởi",
       "open_issue_aria": "Mở công việc",
@@ -785,14 +792,10 @@
       "loading": "Đang tải ứng dụng…",
       "load_failed": "Không tải được các ứng dụng của agent này.",
       "empty": "Chưa có ứng dụng đã kết nối nào.",
-      "level": "Cấp độ",
-      "team_connected": "Đã kết nối tài khoản nhóm",
-      "team_missing": "Chưa kết nối tài khoản nhóm",
-      "personal_connected": "Tài khoản của bạn đã kết nối",
-      "personal_missing": "Bạn chưa kết nối ứng dụng này",
+      "level": "Phạm vi tài khoản",
       "team_admin_only": "Chỉ quản trị viên không gian làm việc mới được cấp tài khoản nhóm cho agent.",
       "team_shared_warning": "Bất kỳ ai chạy được agent này đều có thể dùng tài khoản nhóm này thông qua nó.",
-      "manage_link": "Quản lý tài khoản trong Cài đặt → Ứng dụng đã kết nối",
+      "manage_link": "Quản lý tài khoản trong Ứng dụng → Tài khoản",
       "save_failed_toast": "Không lưu được — hãy thử lại",
       "team_help": "Tài khoản dùng chung của không gian làm việc, do quản trị viên kết nối.",
       "personal_help": "Mỗi lượt chạy dùng tài khoản của người kích hoạt nó. Họ phải tự kết nối tài khoản của mình.",
@@ -811,11 +814,11 @@
   },
   "visibility": {
     "private": {
-      "label": "Cá nhân",
-      "tooltip": "Cá nhân · chỉ chủ sở hữu và những người họ cho phép mới chạy được agent này"
+      "label": "Chỉ mình tôi",
+      "tooltip": "Riêng tư · chỉ chủ sở hữu và những người họ cho phép mới chạy được agent này"
     },
     "workspace": {
-      "label": "Không gian làm việc",
+      "label": "Toàn bộ không gian làm việc",
       "tooltip": "Không gian làm việc · mọi người trong không gian làm việc này đều dùng được agent này"
     }
   },
@@ -829,7 +832,6 @@
       "specific_people": "Người cụ thể",
       "owner_only": "Chỉ chủ sở hữu"
     },
-    "trigger_members_count": "{{count}} người",
     "trigger_members_empty": "Người cụ thể",
     "trigger_team": "Nhóm",
     "private_title": "Chỉ mình tôi",
@@ -840,7 +842,7 @@
     "workspace_title": "Toàn bộ không gian làm việc",
     "workspace_desc": "Mọi thành viên trong không gian làm việc đều chạy được agent này",
     "members_title": "Người cụ thể",
-    "members_desc": "Chỉ người bạn chọn mới chạy được agent này",
+    "members_desc": "Bạn và những người bạn chọn đều chạy được agent này",
     "team_title": "Công khai với nhóm",
     "team_desc": "Cấp quyền truy cập cho cả một nhóm",
     "team_coming_soon": "Sắp ra mắt",
@@ -848,11 +850,12 @@
     "public_group": "Truy cập công khai",
     "owner_only_readonly": "Chỉ chủ sở hữu của agent mới thay đổi được ai có thể chạy agent này.",
     "members_empty": "Không có thành viên nào trong không gian làm việc để chọn",
-    "composio_switch_hint": "Lưu ý — agent này đã bật ứng dụng Composio. Chia sẻ nó sẽ cho phép mọi người có quyền truy cập dùng các ứng dụng đó thông qua agent này."
+    "composio_switch_hint": "Lưu ý — agent này đã bật các ứng dụng đã kết nối. Chia sẻ nó sẽ cho phép bất kỳ ai có quyền truy cập dùng các ứng dụng đó thông qua agent này.",
+    "trigger_members_count_other": "{{count}} người"
   },
   "profile_card": {
     "unavailable": "Agent không khả dụng",
-    "detail_link": "Chi tiết →",
+    "detail_link": "Xem chi tiết →",
     "runtime_label": "Runtime",
     "skills_label": "Skills",
     "owner_label": "Chủ sở hữu",
@@ -899,6 +902,7 @@
     "trigger_retry": "Thử lại",
     "trigger_chat": "Từ trò chuyện",
     "trigger_quick_create": "Tạo nhanh",
+    "trigger_doc_comment": "Từ bình luận trong tài liệu",
     "trigger_direct": "Giao việc trực tiếp",
     "run_info": "Chi tiết lượt chạy",
     "details_runtime": "Runtime",
@@ -1021,18 +1025,19 @@
       "agent_error_context_overflow": "Vượt quá cửa sổ ngữ cảnh",
       "agent_error_missing_config": "Thiếu khóa API hoặc cấu hình",
       "agent_error_model_not_found_or_unavailable": "Model không khả dụng",
-      "agent_error_runtime_version_unsupported": "Phiên bản CLI của runner không được hỗ trợ",
-      "agent_error_runtime_missing_executable": "CLI của runner chưa được cài đặt",
+      "agent_error_runtime_version_unsupported": "Phiên bản Agent CLI không được hỗ trợ",
+      "agent_error_runtime_missing_executable": "Agent CLI chưa được cài đặt",
       "agent_error_unknown": "Lỗi thực thi agent",
-      "agent_fallback_message": "Agent đã trả về thông điệp dự phòng",
+      "agent_fallback_message": "Agent không tạo được phản hồi hợp lệ",
       "codex_resume_oversized": "Phiên quá lớn để tiếp tục",
       "idle_watchdog": "Agent dừng sau khi không hoạt động",
       "local_directory_error": "Lỗi thư mục cục bộ",
       "cancelled": "Bị hệ thống hủy",
       "agent_error": "Lỗi thực thi agent",
-      "codex_semantic_inactivity": "Codex quá thời gian do không hoạt động",
+      "codex_semantic_inactivity": "Codex đã ngừng tiến triển",
       "manual": "Bị người dùng hủy",
-      "user_cancelled": "Bị người dùng hủy"
+      "user_cancelled": "Bị người dùng hủy",
+      "local_directory_missing": "Thư mục cục bộ của dự án không còn tồn tại"
     }
   },
   "last_active": {
@@ -1070,5 +1075,35 @@
       "comment": "Đã sửa: thẻ giá xếp thành một cột dưới 375px. PR đã mở và test đã pass.",
       "step_read": "Đọc {{file}}"
     }
+  },
+  "apps_section": {
+    "title": "Ứng dụng",
+    "empty": "Agent này chưa dùng ứng dụng nào.",
+    "connect_yours": "Kết nối tài khoản của bạn",
+    "reconnect": "Kết nối lại",
+    "connect_team": "Kết nối tài khoản nhóm",
+    "acts_as_team": "Hoạt động dưới tài khoản nhóm",
+    "acts_as_starter": "Hoạt động dưới tài khoản của người bắt đầu lần chạy"
+  },
+  "add_app_dialog": {
+    "title": "Thêm ứng dụng cho {{agent}}",
+    "description": "Ứng dụng tài khoản cá nhân dùng tài khoản của người bắt đầu agent, nên bạn có thể thêm mà không cần tài khoản của riêng mình.",
+    "search_other": "Tìm {{count}} ứng dụng",
+    "search_label": "Tìm ứng dụng",
+    "curated": "Được chọn lọc",
+    "recommended_team": "Thường là tài khoản nhóm",
+    "recommended_personal": "Thường là tài khoản cá nhân",
+    "team_connected": "Đã kết nối tài khoản nhóm",
+    "add": "Thêm",
+    "add_aria": "Thêm {{app}}",
+    "empty": "Không có ứng dụng nào khớp.",
+    "load_failed": "Không tải được ứng dụng.",
+    "added_toast": "Đã thêm {{app}} vào {{agent}}."
+  },
+  "app_requests": {
+    "title_adds_app": "{{agent}} muốn dùng {{app}}",
+    "new_app": "Ứng dụng mới cho agent này",
+    "adds_app_note": "Trả lời sẽ thêm {{app}} vào {{agent}} cho các lần chạy sau.",
+    "add_to_agent": "Thêm {{app}} vào {{agent}}"
   }
 }

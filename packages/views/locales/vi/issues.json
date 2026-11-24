@@ -21,7 +21,6 @@
     "load_failed": "Không thể tải hoạt động.",
     "try_again": "Thử lại",
     "empty": "Chưa ghi nhận hoạt động nào.",
-    "show_earlier": "Hiện {{count}} bước trước đó",
     "full_log": "Mở nhật ký đầy đủ",
     "message": "Tin nhắn của agent",
     "error": "Lỗi",
@@ -39,8 +38,9 @@
     "steer_not_received": "{{name}} không nhận được · {{reason}}",
     "steer_resend": "Gửi thành lần chạy mới",
     "steer_resend_failed": "Không thể gửi thành lần chạy mới.",
-    "steer_step": "{{name}} đã thêm",
-    "steer_step_read": "Đã đọc"
+    "steer_step": "Tin nhắn được thêm bởi {{name}}",
+    "steer_step_read": "Đã đọc",
+    "show_earlier_other": "Hiện {{count}} bước trước đó"
   },
   "working_filter_error": {
     "title": "Không thể tải các công việc có agent đang làm việc"
@@ -110,7 +110,7 @@
     "author_deleted_agent": "agent đã bị xóa",
     "author_left_workspace": "không còn trong không gian làm việc",
     "error_source_changed": "Nguồn đã thay đổi. Hãy xem lại bản xem trước đã làm mới, rồi gửi lại.",
-    "error_agent_unsupported": "Runtime của agent này phải được cập nhật để dùng ngữ cảnh đã ghi lại. Hãy chuyển sang chế độ Thủ công hoặc cập nhật runtime.",
+    "error_agent_unsupported": "Hãy cập nhật runtime của agent này để dùng ngữ cảnh đã ghi lại, hoặc chuyển sang tạo thủ công.",
     "error_server_unsupported": "Máy chủ này phải được cập nhật trước khi có thể tạo công việc con kèm ngữ cảnh đã ghi lại.",
     "error_too_large": "Ngữ cảnh đã ghi lại vượt quá giới hạn của máy chủ.",
     "error_comment_limit": "Lịch sử luồng bình luận của nguồn có ít nhất {{count}} bình luận; giới hạn là 256.",
@@ -189,7 +189,7 @@
     "section_project": "Dự án",
     "section_project_status": "Trạng thái dự án",
     "section_label": "Nhãn",
-    "section_relation": "Quan hệ với tôi",
+    "section_relation": "Mối quan hệ",
     "relation_assigned": "Được giao cho tôi",
     "relation_created": "Do tôi tạo",
     "relation_my_agents": "Công việc của các agent của tôi",
@@ -273,7 +273,8 @@
     "advanced_group_match_trailing": "trong số này",
     "advanced_group_hint": "Các điều kiện trong nhóm này được nối bằng “{{word}}”",
     "advanced_add_to_group": "Thêm vào nhóm",
-    "advanced_turn_into_group": "Chuyển thành nhóm"
+    "advanced_turn_into_group": "Chuyển thành nhóm",
+    "relation_blocked": "Bị chặn"
   },
   "display": {
     "tooltip": "Cài đặt hiển thị",
@@ -365,7 +366,6 @@
     "export": "Xuất",
     "export_all": "Xuất tất cả",
     "export_selected": "Xuất các mục đã chọn ({{count}})",
-    "export_success": "Đã xuất {{count}} công việc",
     "export_failed": "Xuất công việc thất bại",
     "columns": {
       "section": "Cột",
@@ -377,7 +377,7 @@
       "hide": "Ẩn cột",
       "reorder": "Sắp xếp lại cột {{column}}",
       "title": "Công việc",
-      "identifier": "Mã định danh",
+      "identifier": "ID công việc",
       "status": "Trạng thái",
       "priority": "Độ ưu tiên",
       "assignee": "Người được giao",
@@ -398,7 +398,8 @@
       "sum": "Tổng",
       "average": "Trung bình",
       "count": "Số lượng"
-    }
+    },
+    "export_success_other": "Đã xuất {{count}} công việc"
   },
   "gantt": {
     "header_issue": "Công việc",
@@ -488,7 +489,6 @@
     "section_parent_issue": "Công việc cha",
     "section_pull_requests": "Pull request",
     "section_metadata": "Siêu dữ liệu",
-    "section_details": "Chi tiết",
     "sidebar_settings": {
       "open": "Tùy chỉnh thanh bên",
       "title": "Thanh bên",
@@ -543,9 +543,6 @@
     "prop_project": "Dự án",
     "prop_labels": "Nhãn",
     "add_property_action": "Thêm thuộc tính",
-    "prop_created_by": "Người tạo",
-    "prop_created": "Ngày tạo",
-    "prop_updated": "Ngày cập nhật",
     "activity_section": "Hoạt động",
     "subscribe": "Đăng ký theo dõi",
     "unsubscribe": "Hủy đăng ký theo dõi",
@@ -568,15 +565,10 @@
     "change_subscribers_placeholder": "Thay đổi người theo dõi...",
     "members_group": "Thành viên",
     "agents_group": "Agent",
-    "mark_done_tooltip": "Đánh dấu hoàn thành",
     "archive_tooltip": "Lưu trữ",
-    "pin_tooltip": "Ghim vào thanh bên",
-    "unpin_tooltip": "Bỏ ghim khỏi thanh bên",
     "quick_jump_label": "Điều hướng nhanh",
     "description_nav_label": "Mô tả công việc",
     "sub_issues_nav_progress": "Đã hoàn thành {{done}}/{{total}}",
-    "sub_issues_show_more_other": "Hiện thêm {{count}}",
-    "sub_issues_show_less": "Thu gọn",
     "thread_nav_label": "Đi tới luồng bình luận",
     "thread_nav_resolved_label": "{{title}} (đã giải quyết)",
     "thread_nav_reply_label": "{{author}}: {{title}}",
@@ -595,13 +587,40 @@
     "link_copied": "Đã sao chép liên kết",
     "title_link_copied": "Đã sao chép link kèm tiêu đề",
     "link_copy_failed": "Sao chép liên kết thất bại",
-    "workdir_path_copied": "Đã sao chép đường dẫn workdir",
+    "workdir_path_copied": "Đã sao chép đường dẫn thư mục làm việc",
     "project_directory_path_copied": "Đã sao chép đường dẫn thư mục dự án",
     "project_directory_path_copied_with_branch": "Đã sao chép đường dẫn thư mục dự án — công việc đang ở nhánh {{branch}}",
-    "workdir_path_copy_failed": "Sao chép đường dẫn workdir thất bại",
-    "workdir_path_unavailable": "Chưa có workdir cục bộ — công việc chưa được agent cục bộ chạy",
+    "workdir_path_copy_failed": "Sao chép đường dẫn thư mục làm việc thất bại",
+    "workdir_path_unavailable": "Chưa có thư mục làm việc cục bộ — công việc này chưa được agent cục bộ chạy",
     "pull_requests_empty_title": "Không có pull request nào được liên kết.",
-    "guest_readonly_note": "Khách có thể xem và bình luận, nhưng không thể thay đổi thuộc tính công việc."
+    "guest_readonly_note": "Khách có thể xem và bình luận, nhưng không thể thay đổi thuộc tính công việc.",
+    "open_issue_page": "Mở trang công việc",
+    "add_row": {
+      "wakeups": "Thêm wakeup",
+      "pull_requests": "Thêm pull request",
+      "environments": "Thêm môi trường",
+      "relations": "Thêm quan hệ",
+      "pair": "Thêm {{first}} hoặc {{second}}",
+      "many": "Thêm...",
+      "menu": {
+        "wakeups": "Wakeup",
+        "pull_requests": "Pull request",
+        "environments": "Môi trường",
+        "relations": "Quan hệ"
+      },
+      "noun": {
+        "wakeups": "wakeup",
+        "pull_requests": "pull request",
+        "environments": "môi trường",
+        "relations": "quan hệ"
+      }
+    },
+    "footer": {
+      "created": "Tạo bởi {{creator}} · {{date}}",
+      "created_for": "Tạo bởi {{creator}} cho {{requester}} · {{date}}",
+      "created_at": "Đã tạo {{time}}",
+      "updated_at": "Cập nhật {{time}}"
+    }
   },
   "timeline": {
     "loading": "Đang tải...",
@@ -632,6 +651,13 @@
     "squad_leader_no_action_reason": "đã đánh giá: không cần hành động ({{reason}})",
     "squad_leader_failed": "đánh giá thất bại",
     "squad_leader_failed_reason": "đánh giá thất bại: {{reason}}",
+    "squad_handoff_to": "đã bàn giao cho {{name}}",
+    "squad_handoff_human": "đã nhờ {{name}} quyết định",
+    "squad_handoff_leader": "đã bàn giao lại cho {{name}}",
+    "squad_handoff_round": "vòng {{round}}",
+    "squad_handoff_reason_round_limit": "Đã chạm giới hạn {{limit}} vòng",
+    "squad_handoff_reason_daily_limit": "Đã chạm giới hạn bàn giao trong ngày",
+    "squad_handoff_reason_run_failed": "lượt chạy thất bại",
     "coalesced_badge": "×{{count}}",
     "activity_count_other": "{{count}} hoạt động",
     "show_more_activities_other": "Hiện thêm {{count}} hoạt động",
@@ -665,7 +691,11 @@
     "wakeup_chip_system": "Quy tắc hệ thống",
     "environment_stopped": "đã dừng môi trường {{name}}",
     "environment_restarted": "đã khởi động lại môi trường {{name}}",
-    "environment_started": "đã khởi động môi trường {{name}}"
+    "environment_started": "đã khởi động môi trường {{name}}",
+    "task_completed_single": "đã hoàn thành một lần chạy",
+    "task_failed_single": "lần chạy thất bại",
+    "wakeup_child_done_all_single": "Công việc con đã hoàn thành",
+    "wakeup_child_done_stage_single": "Công việc con của giai đoạn {{stage}} đã hoàn thành"
   },
   "comment": {
     "add_reaction": "Thêm biểu cảm",
@@ -694,12 +724,12 @@
     "posted_partial_trigger_named": "Đã đăng bình luận, nhưng {{name}} không được kích hoạt ({{reason}})",
     "trigger_blocked_chip_aria": "{{name}} sẽ không được kích hoạt — {{reason}}",
     "trigger_blocked_invocation_not_allowed": "Không tìm thấy đích này, hoặc bạn không có quyền sử dụng nó",
-    "trigger_blocked_target_unavailable": "Đích này không khả dụng",
+    "trigger_blocked_target_unavailable": "Không tìm thấy agent hoặc squad này — hãy tải lại trang và thử lại.",
     "trigger_blocked_runtime_offline": "Runtime của đích này đang ngoại tuyến",
     "trigger_blocked_runtime_unusable": "CLI agent của đích này không chạy được trên máy của nó — hãy cài đặt lại tại đó",
-    "trigger_blocked_runtime_profile_missing": "CLI agent của đích này thiếu hồ sơ runtime trên máy của nó — hãy cài đặt tại đó",
+    "trigger_blocked_runtime_profile_missing": "CLI của agent này thiếu cấu hình runtime trên máy của nó — hãy cài đặt tại đó.",
     "trigger_blocked_agent_runtime_required": "Đích này chưa có runtime — hãy liên kết một runtime để chạy nó",
-    "trigger_blocked_runtime_access_denied": "Agent của đích này không chạy được trên runtime riêng của nó — hãy đặt runtime thành công khai, hoặc liên kết lại/sao chép agent sang runtime mà chủ sở hữu của nó dùng được",
+    "trigger_blocked_runtime_access_denied": "Runtime riêng tư của agent này không truy cập được — hãy đặt runtime thành công khai, hoặc gắn agent với một runtime truy cập được.",
     "trigger_blocked_generic": "Đích này sẽ không được kích hoạt",
     "trigger_blocked_short_invocation_not_allowed": "Không tìm thấy hoặc không có quyền",
     "trigger_blocked_short_target_unavailable": "Không khả dụng",
@@ -736,9 +766,9 @@
     "trigger_chip_aria": "Kích hoạt {{name}}: {{state}}",
     "resolve": {
       "resolve_thread_action": "Giải quyết luồng",
-      "unresolve_thread_action": "Hủy giải quyết luồng",
+      "unresolve_thread_action": "Mở lại luồng",
       "resolve_with_comment_action": "Giải quyết luồng kèm bình luận",
-      "unresolve_action": "Hủy giải quyết",
+      "unresolve_action": "Mở lại",
       "resolution_badge": "Kết quả giải quyết",
       "thread_resolved_badge": "Đã giải quyết",
       "collapse": "Thu gọn",
@@ -821,6 +851,7 @@
   },
   "agent_live": {
     "is_working": "{{name}} đang làm việc",
+    "is_working_round": "{{label}} · vòng {{round}}",
     "is_queued": "{{name}} đang trong hàng đợi",
     "is_waiting_local_directory": "{{name}} đang chờ thư mục cục bộ",
     "queued_elapsed_prefix": "đã trong hàng đợi {{elapsed}}",
@@ -829,7 +860,7 @@
     "transcript_button": "Xem bản ghi",
     "stop_button": "Dừng",
     "stop_tooltip": "Dừng agent",
-    "cancel_failed": "Hủy lần chạy thất bại"
+    "cancel_failed": "Dừng lần chạy thất bại"
   },
   "execution_log": {
     "latest": "Mới nhất",
@@ -870,8 +901,8 @@
       "source_comment_source": "Từ một luồng bình luận",
       "source_trigger_owner": "Người tạo điều kiện kích hoạt Autopilot",
       "source_rule_owner": "Người phát hành quy tắc Autopilot",
-      "source_owner_fallback": "Không xác định được chủ sở hữu chính xác — ghi nhận cho chủ sở hữu của agent",
-      "source_backfill": "Ghi nhận được bổ sung sau",
+      "source_owner_fallback": "Ghi nhận cho chủ sở hữu của agent (mặc định)",
+      "source_backfill": "Ghi nhận theo lịch sử",
       "source_unattributed": "Không xác định được thành viên phụ trách"
     },
     "usage_total_tooltip": "Mở dòng thời gian của lần chạy",
@@ -880,8 +911,6 @@
     "summary_runs_other": "{{count}} lần chạy",
     "open_timeline": "Mở dòng thời gian",
     "more_runs_other": "Hiện thêm {{count}}",
-    "strip_aria": "Chi phí lũy kế theo thời gian — mở dòng thời gian của lần chạy",
-    "strip_no_usage": "Chưa ghi nhận mức sử dụng",
     "queued_count_other": "{{count}} đang chờ"
   },
   "runs_timeline": {
@@ -1032,9 +1061,9 @@
     "mark_unread": "Đánh dấu chưa đọc",
     "copy_link": "Sao chép liên kết",
     "copy_title_as_link": "Sao chép link kèm tiêu đề",
-    "copy_workdir_path": "Sao chép đường dẫn workdir cục bộ",
+    "copy_workdir_path": "Sao chép đường dẫn thư mục làm việc cục bộ",
     "copy_project_directory_path": "Sao chép đường dẫn thư mục dự án",
-    "copy_identifier": "Sao chép định danh",
+    "copy_identifier": "Sao chép ID công việc",
     "identifier_copied": "Đã sao chép {{identifier}}",
     "stop_agent_run": "Dừng lần chạy của {{name}}",
     "relations": "Quan hệ",
@@ -1044,6 +1073,8 @@
     "remove_parent_issue": "Xóa công việc cha",
     "remove_parent_issue_success": "Đã xóa công việc cha",
     "add_sub_issue": "Thêm công việc con...",
+    "add_blocker": "Chờ một công việc khác...",
+    "add_blocking": "Chặn một công việc khác...",
     "delete_issue": "Xóa công việc",
     "mark_duplicate": "Đánh dấu trùng lặp...",
     "open_in_new_window": "Mở trong cửa sổ mới"
@@ -1078,8 +1109,7 @@
       "members_group": "Thành viên",
       "agents_group": "Agent",
       "squads_group": "Squad",
-      "agent_runtime_required": "Hãy liên kết runtime trước khi giao việc cho agent này",
-      "squad_runtime_required": "Hãy liên kết runtime với trưởng squad này trước khi giao việc"
+      "recent_group": "Gần đây"
     },
     "start_date": {
       "trigger_label": "Ngày bắt đầu",
@@ -1200,11 +1230,10 @@
     "ended": "Lịch sử wakeup · {{count}}",
     "waiting_event": "Đang chờ kích hoạt",
     "triggered_by_wakeup": "Được kích hoạt bởi wakeup",
-    "upcoming": "{{count}} quy tắc wakeup đang bật",
     "more": "thêm {{count}}",
     "toggle": "Wakeup cho {{agent}}",
     "enable_error": "Không thể bật wakeup. Hãy thử lại.",
-    "withdraw": "Hủy lần thực thi này",
+    "withdraw": "Hủy lần chạy này",
     "resubscribe": "Bật lại",
     "reschedule": "Đặt thời gian mới",
     "future_time": "Chọn một thời gian trong tương lai.",
@@ -1223,11 +1252,11 @@
     "scheduled_time": "Đánh thức vào thời gian đã lên lịch",
     "every_hours": "Đánh thức mỗi {{hours}} giờ",
     "every_seconds": "Đánh thức mỗi {{seconds}} giây",
-    "edit_instruction": "Chỉnh sửa prompt",
+    "edit_instruction": "Chỉnh sửa hướng dẫn",
     "instruction_effect": "Các wakeup sau này dùng các hướng dẫn này. Lần chạy đang diễn ra không bị ảnh hưởng.",
-    "instruction_loading": "Đang tải prompt...",
+    "instruction_loading": "Đang tải hướng dẫn...",
     "instruction_invalid": "Nhập hướng dẫn trong giới hạn 12.000 byte UTF-8.",
-    "instruction_save_error": "Không thể lưu prompt.",
+    "instruction_save_error": "Không thể lưu hướng dẫn.",
     "instruction_cancel": "Hủy",
     "instruction_save": "Lưu",
     "instruction_saving": "Đang lưu...",
@@ -1235,9 +1264,9 @@
     "scope_title": "Phạm vi theo dõi",
     "scope_current": "Công việc này",
     "any_event": "Khi bất kỳ sự kiện nào trong số này xảy ra",
-    "execution_summary": "Lần thực thi này: {{state}}",
-    "recent_execution": "Lần thực thi gần nhất: {{state}}",
-    "stopped_running": "Wakeup sau này đã tắt · Một lần thực thi chưa hoàn thành",
+    "execution_summary": "Lần chạy hiện tại: {{state}}",
+    "recent_execution": "Lần chạy gần nhất: {{state}}",
+    "stopped_running": "Wakeup sau này đã tắt · Một lần chạy vẫn đang diễn ra",
     "next_at": "Tiếp theo: {{time}}",
     "no_run": "Chưa chạy",
     "permission_error": "Bạn không thể quản lý wakeup này. Hãy liên hệ người tạo nó hoặc quản trị viên không gian làm việc.",
@@ -1337,7 +1366,6 @@
       "members": "Thành viên",
       "agents": "Agent",
       "any_agent": "Bất kỳ agent nào",
-      "events_selected": "{{count}} sự kiện",
       "instruction_placeholder": "Ví dụ: kiểm tra kết quả và tiếp tục nếu thấy ổn",
       "trigger_count": "Số lần kích hoạt",
       "max_wait": "Chờ tối đa",
@@ -1362,8 +1390,8 @@
       "cond_field_hint": "Trạng thái, người được giao, nhãn, thuộc tính",
       "cond_children": "Công việc con hoàn thành",
       "cond_children_hint": "Tất cả, hoặc một giai đoạn",
-      "cond_pr": "CI của một PR liên kết hoàn thành",
-      "cond_pr_hint": "Hoặc nó hợp nhất",
+      "cond_pr": "Một PR liên kết được cập nhật",
+      "cond_pr_hint": "CI hoàn thành, hợp nhất, hoặc có xung đột",
       "cond_issue": "Trạng thái của công việc khác",
       "cond_issue_hint": "ví dụ: khi nó hoàn thành",
       "field_status": "Trạng thái",
@@ -1395,18 +1423,15 @@
       "missing_issue": "Hãy chọn một công việc.",
       "checked": "Đã chọn",
       "unchecked": "Chưa chọn",
-      "assignee_comment_hint": "{{name}} là người được giao và đã chạy khi một thành viên bình luận. Quy tắc này tham gia lần chạy đó thay vì bắt đầu lần chạy khác; chỉ thêm nó để đưa thêm hướng dẫn cho lần chạy đó."
+      "assignee_comment_hint": "{{name}} là người được giao và đã chạy khi một thành viên bình luận. Quy tắc này tham gia lần chạy đó thay vì bắt đầu lần chạy khác; chỉ thêm nó để đưa thêm hướng dẫn cho lần chạy đó.",
+      "events_selected_other": "{{count}} sự kiện"
     },
     "system": {
       "badge": "Hệ thống",
       "title_stage": "Khi mọi công việc con của giai đoạn {{stage}} đều hoàn thành",
       "title_all": "Khi mọi công việc con hoàn thành",
-      "wake_assignee": "Đánh thức người được giao {{name}}",
-      "remaining_other": "Còn {{count}}",
       "blocked_backlog": "Công việc đang ở trạng thái tồn đọng; tạm thời không có wakeup",
-      "blocked_member": "Người được giao là thành viên; họ nhận thông báo trong hộp thư đến",
       "blocked_none": "Không có agent được giao; không ai được đánh thức",
-      "turned_off": "Đã tắt cho công việc này",
       "target_title": "Đánh thức",
       "target_current": "Người được giao (hiện là {{name}})",
       "target_none": "Người được giao: agent hoặc squad được đánh thức, thành viên được thông báo",
@@ -1421,14 +1446,17 @@
       "save_error": "Không thể lưu quy tắc hệ thống.",
       "default_on": "Mặc định bật trong không gian làm việc này.",
       "default_off": "Mặc định tắt trong không gian làm việc này.",
-      "notify_member": "Thông báo cho {{name}} trong hộp thư đến của họ",
       "instruction": "Việc cần làm khi được đánh thức",
       "instruction_edit": "Chỉnh sửa hướng dẫn",
       "instruction_default": "Chưa đặt trên công việc này; dùng mặc định:",
       "instruction_placeholder": "Để trống để dùng mặc định",
       "instruction_invalid": "Giữ hướng dẫn trong giới hạn 4.000 byte.",
       "paused": "Đã tạm dừng: {{reason}}",
-      "default_change": "Thay đổi mặc định"
+      "default_change": "Thay đổi mặc định",
+      "chip_wake": "Đánh thức {{name}} khi mọi việc hoàn thành",
+      "chip_notify": "Thông báo cho {{name}} khi mọi việc hoàn thành",
+      "chip_assignee": "Đánh thức người được giao khi mọi việc hoàn thành",
+      "chip_off": "Wakeup công việc con đang tắt"
     },
     "cond": {
       "status": "Khi công việc này chuyển sang {{status}}",
@@ -1500,6 +1528,14 @@
       "max_fires": "đã đạt giới hạn {{count}} lần chạy",
       "loop": "nó liên tục đánh thức các quy tắc rồi lại bị các quy tắc đó đánh thức",
       "rate": "hơn 12 lần chạy trong một giờ"
+    },
+    "upcoming_other": "{{count}} quy tắc wakeup đang bật",
+    "short": {
+      "at_time": "{{time}}",
+      "scheduled_time": "Vào thời gian đã lên lịch",
+      "hourly": "Mỗi giờ",
+      "every_hours": "Mỗi {{hours}} giờ",
+      "every_seconds": "Mỗi {{seconds}} giây"
     }
   },
   "duplicates": {
@@ -1535,7 +1571,8 @@
     "not_merged_action": "Gỡ",
     "all_merged_to": "Mọi PR đã hợp nhất. PR hợp nhất tiếp theo sẽ chuyển công việc này sang {{status}}.",
     "issue_disabled": "Việc hợp nhất PR sẽ không thay đổi công việc này",
-    "issue_disabled_action": "Bật"
+    "issue_disabled_action": "Bật",
+    "on_merge_to": "Khi hợp nhất → {{status}}"
   },
   "deliverables": {
     "section_title": "Sản phẩm bàn giao",
@@ -1658,7 +1695,6 @@
       "target_squad": "Squad · trưởng nhóm điều phối",
       "target_member": "Thành viên",
       "instructions_hint": "Được gửi cho người phụ trách cùng lượt chạy này, kèm theo mô tả và các bình luận của công việc.",
-      "next_hint": "Người phụ trách tự di chuyển công việc và chỉ gửi lại khi cần làm lại, không gửi khi bị chặn. Lượt chạy kết thúc không bao giờ thay đổi trạng thái.",
       "preview_brief": "Xem trước bản tóm tắt của agent",
       "preview_title": "Bản tóm tắt cho bước “{{status}}”",
       "preview_description": "Những gì lượt chạy của người phụ trách nhận được khi một công việc vào bước này. Không cần lưu thay đổi để xem trước.",
@@ -1755,7 +1791,7 @@
       "next_default": "Cột tiếp theo ({{status}})",
       "saved": "Đã lưu bàn giao",
       "error": "Không lưu được bàn giao",
-      "read_only": "Bàn giao thuộc về quy trình; chủ sở hữu của quy trình và quản trị viên không gian làm việc thay đổi chúng.",
+      "read_only": "Bàn giao thuộc về quy trình; chỉ chủ sở hữu của quy trình và quản trị viên không gian làm việc mới có thể thay đổi chúng.",
       "to": "Bàn giao cho",
       "members": "Thành viên",
       "mode_none": "Không bàn giao",
@@ -1830,8 +1866,7 @@
       "all_issues": "Tất cả công việc",
       "my_work": "Công việc của tôi",
       "working": "Đang làm việc",
-      "subscribed": "Đã theo dõi",
-      "snoozed": "Đang tạm ẩn"
+      "subscribed": "Đã theo dõi"
     },
     "untitled": "Chế độ xem chưa đặt tên",
     "copy_name": "{{name}} (bản sao)",
@@ -1909,7 +1944,8 @@
       "pending": "Đang chờ",
       "approved": "Đã duyệt",
       "rejected": "Đã từ chối",
-      "rate_limited": "Vượt giới hạn tần suất"
+      "rate_limited": "Vượt giới hạn tần suất",
+      "quota_exceeded": "Đã đạt giới hạn tháng"
     }
   },
   "environments": {
@@ -2014,10 +2050,52 @@
     "app_remote_hint": "Chạy trên {{machine}}. Chuyển sang cửa sổ của nó từ Multica Desktop trên máy đó.",
     "focus": "Chuyển sang cửa sổ",
     "focus_gone": "{{name}} không còn chạy nữa",
-    "focus_unsupported": "Daemon của máy này chưa chuyển được sang cửa sổ ứng dụng. Cập nhật Multica rồi thử lại.",
-    "focus_unavailable": "Daemon cục bộ không chạy",
+    "focus_unsupported": "Multica trên máy này chưa chuyển được sang cửa sổ ứng dụng. Cập nhật Multica rồi thử lại.",
+    "focus_unavailable": "Dịch vụ cục bộ của Multica không chạy",
     "focus_failed": "Không chuyển được sang {{name}}",
     "retry": "Thử lại",
     "dismiss": "Bỏ qua"
+  },
+  "presence": {
+    "viewing_other": "{{count}} người đang xem",
+    "editing": "Đang chỉnh sửa",
+    "watching": "Đang xem",
+    "where": "Trong \"{{section}}\"",
+    "more_other": "Thêm {{count}}: {{names}}",
+    "name_separator": ", ",
+    "jump_hint": "Bấm vào một tên để nhảy tới con trỏ của người đó"
+  },
+  "relations": {
+    "title": "Quan hệ",
+    "add": "Thêm quan hệ",
+    "wait_title": "Chờ một công việc khác",
+    "block_title": "Chặn một công việc khác",
+    "blocked_by": "Bị chặn bởi",
+    "blocking": "Đang chặn",
+    "stage_tag": "Giai đoạn",
+    "stage_tag_hint": "Do các giai đoạn của công việc cha đặt",
+    "add_blocker_hint": "Công việc này bắt đầu sau khi công việc kia xong",
+    "add_blocking_hint": "Công việc kia bắt đầu sau khi công việc này xong",
+    "mark_duplicate_hint": "Hủy công việc này",
+    "blocking_picker_hint": "Chọn một công việc chưa thể bắt đầu cho đến khi công việc này xong."
+  },
+  "waiting": {
+    "remove": "Gỡ {{identifier}}",
+    "count": "Đang chờ {{count}} công việc",
+    "hint": "Sau khi các công việc này xong, người được giao sẽ tự động bắt đầu hoặc nhận được thông báo.",
+    "hint_backlog": "Công việc này đang ở Backlog nên sẽ không tự bắt đầu khi các công việc kia xong. Nó bắt đầu khi rời khỏi Backlog.",
+    "picker_hint": "Chọn một công việc phải xong trước khi công việc này bắt đầu.",
+    "restricted": "{{count}} điều kiện tiên quyết bị giới hạn",
+    "ended": "Các công việc đang chờ đã xong",
+    "count_other": "Đang chờ {{count}} công việc",
+    "marker_title": "Bị chặn bởi {{count}} công việc",
+    "marker_title_other": "Bị chặn bởi {{count}} công việc",
+    "marker_ended": "{{finished}}/{{total}} đã xong",
+    "marker_more": "thêm {{count}}",
+    "marker_more_other": "thêm {{count}}",
+    "marker_auto_start": "{{name}} sẽ tự động bắt đầu khi các công việc này xong.",
+    "marker_notify": "{{name}} sẽ được thông báo khi các công việc này xong.",
+    "marker_unavailable": "{{name}} hiện không thể chạy nên không có gì bắt đầu khi các công việc này xong.",
+    "marker_unassigned": "Chưa có người được giao nên không có gì bắt đầu khi các công việc này xong."
   }
 }

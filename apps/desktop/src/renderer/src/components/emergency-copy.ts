@@ -21,6 +21,7 @@ function matchSupportedLocale(raw: string): SupportedLocale {
   if (lang === "fr") return "fr";
   if (lang === "es") return "es";
   if (lang === "ru") return "ru";
+  if (lang === "vi") return "vi";
   return "en";
 }
 
@@ -149,5 +150,16 @@ export const DESKTOP_EMERGENCY_COPY: Record<
     configDescriptionBefore: "Multica не удалось загрузить ",
     configDescriptionAfter:
       ". Исправьте или удалите этот файл и перезапустите приложение.",
+  },
+  vi: {
+    crashTitle: "Đã xảy ra lỗi",
+    crashDescription:
+      "Multica gặp lỗi không mong muốn và không thể tiếp tục hiển thị. Tải lại thường sẽ khắc phục được — công việc của bạn đã được lưu trên máy chủ.",
+    crashFallbackError: "Đã xảy ra lỗi không mong muốn.",
+    reload: "Tải lại",
+    configTitle: "Lỗi cấu hình desktop",
+    configDescriptionBefore: "Multica không tải được ",
+    configDescriptionAfter:
+      ". Hãy sửa hoặc xóa file đó rồi khởi động lại ứng dụng.",
   },
 };
