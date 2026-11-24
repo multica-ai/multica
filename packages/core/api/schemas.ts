@@ -3469,6 +3469,9 @@ export const SnoozedInboxListSchema = z.array(
       issue_id: z.string(),
       // Older servers omit it; the row then links by issue_id.
       issue_identifier: z.string().min(1).nullish().catch(null),
+      // Older servers omit them; the row then fetches the issue.
+      issue_title: z.string().nullish().catch(null),
+      issue_status: z.string().min(1).nullish().catch(null),
       item_id: z.string(),
       snoozed_until: z.string(),
       snoozed_at: z.string(),
