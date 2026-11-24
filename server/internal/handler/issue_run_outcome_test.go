@@ -104,23 +104,36 @@ func TestUpdateIssueReportsRunOutcome(t *testing.T) {
 		}
 	})
 
-	t.Run("promotion that starts an agent the caller may not invoke", func(t *testing.T) {
-		// The write starts the run, but the outcome would expose a private
-		// agent's readiness to a caller who cannot invoke it.
-		var runtimeID string
-		dbfx.QueryRow(t, `SELECT runtime_id FROM agent WHERE id = $1`, agentID).Scan(&runtimeID)
+	t.Run("promotion without invocation permission", func(t *testing.T) {
 		otherUser := dbfx.User(t, "outcome-other-owner", fmt.Sprintf("outcome-other-%d@example.com", time.Now().UnixNano()))
+		dbfx.Member(t, testWorkspaceID, otherUser, "member")
+		runtimeID := dbfx.Runtime(t, "Outcome private runtime", testutil.Cols{"owner_id": otherUser})
 		privateAgent := dbfx.Agent(t, "Outcome Private Agent", runtimeID, testutil.Cols{"owner_id": otherUser})
-		issue := createIssueForTest(t, map[string]any{"title": "outcome private", "status": "backlog"})
-		dbfx.Exec(t, `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, issue.ID, privateAgent)
-		dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issue.ID)
 
-		resp := updateIssueForOutcome(t, issue.ID, map[string]any{"status": "todo"})
-		if resp.RunOutcome != nil {
-			t.Fatalf("run_outcome = %+v, want none for an agent the caller may not invoke", resp.RunOutcome)
-		}
-		if got := taskCountFor(t, issue.ID, privateAgent); got != 1 {
-			t.Fatalf("tasks = %d, want the promotion to start one run", got)
+		for _, batch := range []bool{false, true} {
+			t.Run(fmt.Sprintf("batch=%v", batch), func(t *testing.T) {
+				issueID := dbfx.Issue(t, "outcome private", testutil.Cols{"status": "backlog", "assignee_type": "agent", "assignee_id": privateAgent})
+				dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+				update := map[string]any{"status": "todo"}
+				var outcome *IssueRunOutcome
+				if batch {
+					code, resp, raw := batchUpdate(t, map[string]any{"issue_ids": []string{issueID}, "updates": update})
+					if code != http.StatusOK {
+						t.Fatalf("batch update: %d %s", code, raw)
+					}
+					outcome = resultFor(t, resp, issueID).RunOutcome
+				} else {
+					outcome = updateIssueForOutcome(t, issueID, update).RunOutcome
+				}
+				if outcome != nil {
+					t.Fatalf("private run outcome disclosed: %+v", outcome)
+				}
+				var status string
+				dbfx.QueryRow(t, `SELECT status FROM issue WHERE id=$1`, issueID).Scan(&status)
+				if status != "todo" || taskCountFor(t, issueID, privateAgent) != 0 {
+					t.Fatal("promotion must update the status to todo without starting the private agent")
+				}
+			})
 		}
 	})
 }
@@ -216,8 +229,8 @@ func TestUpdateIssueOutcomeVisibilityDoesNotLogInvocationDenial(t *testing.T) {
 	dbfx.QueryRow(t, `SELECT runtime_id FROM agent WHERE id = $1`, readyAgent).Scan(&runtimeID)
 	actor := dbfx.Agent(t, "outcome caller", runtimeID)
 	callerIssue := dbfx.Issue(t, "outcome caller issue")
-	// The request's delegation chain has no human, while the promoted issue
-	// has a member creator. Enqueue and outcome visibility judge those separately.
+	// The issue creator owns the targets, but the acting task has no human
+	// originator and cannot use the issue creator's invocation permission.
 	callerTask := dbfx.Task(t, actor, testutil.Cols{"issue_id": callerIssue, "runtime_id": runtimeID, "status": "running"})
 
 	for _, targetType := range []string{"agent", "squad"} {
@@ -243,11 +256,14 @@ func TestUpdateIssueOutcomeVisibilityDoesNotLogInvocationDenial(t *testing.T) {
 			if resp.RunOutcome != nil {
 				t.Errorf("run_outcome = %+v, want none without invocation permission", resp.RunOutcome)
 			}
-			if got := taskCountFor(t, issueID, leader); got != 1 {
-				t.Fatalf("tasks = %d, want promotion to start one run", got)
+			if resp.Status != "todo" {
+				t.Fatalf("status = %q, want todo", resp.Status)
+			}
+			if got := taskCountFor(t, issueID, leader); got != 0 {
+				t.Fatalf("tasks = %d, want none without invocation permission", got)
 			}
 			if strings.Contains(logs.String(), "agent invoke denied") {
-				t.Errorf("outcome visibility logged a denial after enqueue:\n%s", logs.String())
+				t.Errorf("outcome visibility logged an invocation denial:\n%s", logs.String())
 			}
 		})
 	}

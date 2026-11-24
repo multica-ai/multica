@@ -4,7 +4,7 @@
 
 A team should be able to share an agent's identity, instructions, and skills while each member explicitly chooses their own execution environment. Binding every invocation to the agent's default runtime can put another member's work on the default owner's machine and tool account.
 
-This proposal adds an explicit override keyed by `(workspace, agent, user)`. A member can select a runtime they own in that workspace, regardless of whether its provider matches the shared default. Without an override, the agent's default remains in effect, including the existing rule that an authorized agent invocation may use the agent owner's private default runtime. The preference changes execution routing; it neither grants agent invocation rights nor edits the shared agent configuration.
+This proposal adds an explicit override keyed by `(workspace, agent, user)`. A member can select a runtime they own in that workspace, regardless of whether its provider matches the shared default. Without an override, the agent's default remains in effect, including the existing rule that an authorized agent invocation may use the agent owner's private default runtime. The preference changes execution routing; it neither grants agent invocation rights nor edits the shared agent configuration. Moving an assigned issue out of backlog can update its status, but starting a run requires the caller to be allowed to invoke the assigned agent or squad leader.
 
 Related discussions:
 

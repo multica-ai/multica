@@ -19,14 +19,15 @@ import (
 // selection cannot fan out into thousands of readiness probes.
 const maxPreviewTriggerIssues = 500
 
-// issueTriggerWriteProbe builds the probe the write paths feed to
-// WillEnqueueRun. The private-agent gate is already enforced at the HTTP
-// boundary (validateAssigneePair on assign) and inside enqueueSquadLeaderTask
-// (canEnqueueSquadLeader), so a write must NOT re-run or sink it — it passes
-// allow-all. The self-loop check needs the request's X-Task-ID header.
+// The issue write may succeed even when its caller cannot invoke the existing
+// assignee. Check the acting principal before a promotion can enqueue a run.
 func (h *Handler) issueTriggerWriteProbe(r *http.Request, actorType, actorID string, issue db.Issue) service.IssueTriggerProbe {
 	return service.IssueTriggerProbe{
 		CanAccessAgent: func(agent db.Agent) bool {
+			originator := h.invokeOriginatorFromRequest(r, actorType, actorID)
+			if !h.invokeAgentDecision(r.Context(), agent, actorType, actorID, originator, uuidToString(issue.WorkspaceID)) {
+				return false
+			}
 			_, err := h.runtimeForRequest(r, agent, actorType, actorID)
 			return err == nil
 		},
@@ -128,9 +129,8 @@ type IssueRunOutcome struct {
 // result. willRun is the predicate's decision before suppress_run; a write
 // that could not have started a run (no reason either) reports nothing.
 //
-// The write probe admits every caller, so a promotion can start a private
-// agent the caller may not invoke. Its outcome would then expose that agent's
-// readiness, so the caller gets no outcome; the server log keeps the cause.
+// Private agent readiness is visible only to callers who can invoke the agent.
+// This also applies to outcomes reported for a declined or suppressed run.
 func (h *Handler) resolveIssueRun(r *http.Request, issue db.Issue, trigger service.IssueRunTrigger, willRun, suppressRun bool, actorType, actorID, workspaceID, handoffNote string) *IssueRunOutcome {
 	if issue.AssigneeType.String != "agent" && issue.AssigneeType.String != "squad" {
 		return nil
