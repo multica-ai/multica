@@ -7,11 +7,12 @@ import (
 
 const issueStateTestIssueID = "55555555-6666-7777-8888-999999999999"
 
-// coldIssueRead is the instruction every non-resumed run has always been
-// handed. It is spelled out here rather than taken from the helper so a silent
-// reword of the cold path fails this test instead of passing it.
-const coldIssueRead = "Start by running `multica issue get " + issueStateTestIssueID +
-	" --output json` to understand your task, then decide how to proceed.\n\n"
+// coldIssueRead is the instruction every non-resumed run is handed. It is
+// spelled out here rather than taken from the helper so a silent reword of the
+// cold path fails this test instead of passing it. It asks for the issue read
+// in the same turn as the comment reads, not before them (MUL-10028).
+const coldIssueRead = "Read the issue with `multica issue get " + issueStateTestIssueID +
+	" --output json` in the same turn as any comment reads below (workflow step 2).\n\n"
 
 // TestBuildIssueStateHintUnchangedReplacesTheRead pins the one rendering that
 // may stand in for workflow step 1: a real resume plus a server-computed
@@ -32,7 +33,7 @@ func TestBuildIssueStateHintUnchangedReplacesTheRead(t *testing.T) {
 			t.Errorf("unchanged hint missing %q\n---\n%s", want, hint)
 		}
 	}
-	if strings.Contains(hint, "Start by running") {
+	if strings.Contains(hint, "Read the issue with") {
 		t.Errorf("unchanged hint must not keep the unconditional read imperative\n---\n%s", hint)
 	}
 }

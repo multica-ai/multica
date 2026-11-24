@@ -358,7 +358,7 @@ func buildPromptBodyWithOptions(task Task, provider string, opts promptOpts) str
 	if task.WakeupID != "" {
 		var b strings.Builder
 		fmt.Fprintf(&b, "You are running as a local coding agent for a Multica workspace.\n\nYour assigned issue ID is: %s\n\n[WAKEUP]\n%s\n\n", task.IssueID, task.HandoffNote)
-		fmt.Fprintf(&b, "Start by running `multica issue get %s --output json`, then read current run/comment state. Decide whether the instruction's goal is met; the trigger reports a fact, not business completion. This is an ordinary run with normal result delivery, except where the [WAKEUP] block offers a check-in.\n", task.IssueID)
+		fmt.Fprintf(&b, "Read the issue (`multica issue get %s --output json`) and current run/comment state together in one turn. Decide whether the instruction's goal is met; the trigger reports a fact, not business completion. This is an ordinary run with normal result delivery, except where the [WAKEUP] block offers a check-in.\n", task.IssueID)
 		fmt.Fprintf(&b, "Scan comment threads with `multica issue comment list %s --roots-only --summary --compact --output json`, then expand relevant threads with `--thread <id> --tail 30`.\n", task.IssueID)
 		if task.WakeupSystemRule != "" {
 			// Platform rules belong to the issue, not to a run; members manage them.
@@ -395,7 +395,9 @@ func buildPromptBodyWithOptions(task Task, provider string, opts promptOpts) str
 		}
 		b.WriteString("\n")
 	}
-	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
+	// The issue read and the comment scan below are independent, so this line
+	// asks for them in one turn rather than ordering them (MUL-9919, MUL-10028).
+	fmt.Fprintf(&b, "Read the issue with `multica issue get %s --output json` in the same turn as the comment scan below (workflow step 2).\n", task.IssueID)
 	// Workflow step 2 owns the catch-up rule for every issue turn; this line
 	// only hands over the commands. It used to add "(assignment-triggered tasks
 	// treat the read as mandatory)", which read as if comment-triggered turns

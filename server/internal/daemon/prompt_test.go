@@ -1001,6 +1001,43 @@ func TestBuildPromptDefaultScansRootsFirst(t *testing.T) {
 	}
 }
 
+// TestBuildPromptOpeningReadsShareATurn pins MUL-10028: the per-turn issue
+// read on the assignment, comment and wakeup paths asks for the issue read in
+// the same turn as the comment reads instead of ordering it before them, which
+// is what the brief's batched-read rule requires (MUL-9919).
+func TestBuildPromptOpeningReadsShareATurn(t *testing.T) {
+	cases := map[string]struct {
+		task Task
+		want string
+	}{
+		"assignment": {
+			task: Task{IssueID: "issue-1"},
+			want: "Read the issue with `multica issue get issue-1 --output json` in the same turn as the comment scan below (workflow step 2).",
+		},
+		"comment": {
+			task: Task{IssueID: "issue-1", TriggerCommentID: "c1", TriggerCommentContent: "please look"},
+			want: "Read the issue with `multica issue get issue-1 --output json` in the same turn as any comment reads below (workflow step 2).",
+		},
+		"wakeup": {
+			task: Task{IssueID: "issue-1", WakeupID: "w1", HandoffNote: "check CI"},
+			want: "Read the issue (`multica issue get issue-1 --output json`) and current run/comment state together in one turn.",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			out := BuildPrompt(tc.task, "claude")
+			if !strings.Contains(out, tc.want) {
+				t.Errorf("prompt missing %q\n--- output ---\n%s", tc.want, out)
+			}
+			for _, stale := range []string{"Start by running `multica issue get", "then complete it", "then decide how to proceed"} {
+				if strings.Contains(out, stale) {
+					t.Errorf("prompt still orders the issue read before the comment reads (%q)\n--- output ---\n%s", stale, out)
+				}
+			}
+		})
+	}
+}
+
 // TestBuildPromptNonSquadLeaderNoRule verifies that non-squad-leader agents
 // do NOT get the squad leader no_action rule injected.
 func TestBuildPromptNonSquadLeaderNoRule(t *testing.T) {
@@ -2107,7 +2144,7 @@ func TestBuildPromptIssueUnchangedDropsTheIssueRead(t *testing.T) {
 	task.IssueAssigneeID = "agent-7"
 	out := BuildPrompt(task, "claude")
 
-	if strings.Contains(out, "Start by running `multica issue get") {
+	if strings.Contains(out, "Read the issue with `multica issue get") {
 		t.Errorf("an unchanged issue must not carry the unconditional read imperative, got:\n%s", out)
 	}
 	for _, want := range []string{
@@ -2181,7 +2218,7 @@ func TestBuildPromptIssueStateFallsBackToTheRead(t *testing.T) {
 			task.IssueStatus = "todo"
 			mutate(&task)
 			out := BuildPrompt(task, "claude")
-			if !strings.Contains(out, "Start by running `multica issue get "+issueID+" --output json` to understand your task, then decide how to proceed.") {
+			if !strings.Contains(out, "Read the issue with `multica issue get "+issueID+" --output json` in the same turn as any comment reads below (workflow step 2).") {
 				t.Errorf("expected the unconditional issue read, got:\n%s", out)
 			}
 			if strings.Contains(out, "The issue is unchanged") {
