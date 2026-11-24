@@ -548,7 +548,8 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | | `search <query>` | 搜索 skill | |
 | | `files list/upsert/delete <skill-id>` | 管理 skill 内的文件 | `list`：`--with-content`；`upsert` / `delete`：`--base-revision`（内容已变更时返回 HTTP 409 拒绝覆盖） |
 | | `label list/add/remove <skill-id>` | 管理 skill 上的标签 | `add` / `remove`：`<label-id>` 可使用完整 UUID 或短前缀 |
-| `squad` | `list/get/create/update/delete` | 管理小队（`delete` 为归档） | |
+| `squad` | `list/get/create/update/delete` | 管理小队（`delete` 为归档） | `update`：`--name`、`--description`、`--instructions`、`--leader`、`--avatar-url`、`--handoff-mode`（`leader` 或 `direct`，见[协作方式](/squads#协作方式)） |
+| | `briefs <squad>` | 查看每个智能体成员实际收到的小队内容；需要有管理该小队的权限 | `--agent`（名称或 ID） |
 | | `member list/add/set-role/remove` | 管理小队成员 | |
 | | `activity <issue-id> <outcome>` | 记录队长评价 | |
 | `chat` | `history`、`thread [id]` | 读取智能体当前正在处理的外部聊天会话 | `--limit`、`--before` |

@@ -102,12 +102,27 @@ func runSquadGet(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Name:         %s\n", strVal(squad, "name"))
 	fmt.Printf("Description:  %s\n", strVal(squad, "description"))
 	fmt.Printf("Leader ID:    %s\n", strVal(squad, "leader_id"))
+	fmt.Printf("Handoff mode: %s\n", squadHandoffModeDisplay(squad))
 	fmt.Printf("Created:      %s\n", strVal(squad, "created_at"))
 	if inst := strVal(squad, "instructions"); inst != "" {
 		fmt.Printf("Instructions: %s\n", inst)
 	}
 	return nil
 }
+
+// squadHandoffModeDisplay reads handoff_mode, treating a server that predates
+// the field as the original leader mode.
+func squadHandoffModeDisplay(squad map[string]any) string {
+	if mode := strVal(squad, "handoff_mode"); mode != "" {
+		return mode
+	}
+	return squadHandoffModeLeader
+}
+
+const (
+	squadHandoffModeLeader = "leader"
+	squadHandoffModeDirect = "direct"
+)
 
 // ── Create ──────────────────────────────────────────────────────────────────
 
@@ -166,11 +181,30 @@ func runSquadCreate(cmd *cobra.Command, _ []string) error {
 var squadUpdateCmd = &cobra.Command{
 	Use:   "update <squad-id>",
 	Short: "Update a squad",
-	Args:  exactArgs(1),
-	RunE:  runSquadUpdate,
+	Long: `Update a squad's fields. Only the flags you pass are changed.
+
+--handoff-mode decides who picks the next step after a member finishes:
+  leader  every member reply returns to the leader (default)
+  direct  members hand off to each other by @mention; the leader assigns the
+          first step and gets the issue back when a guard trips (3 rounds
+          between two members, 20 member handoffs per issue per day, a failed
+          member run, or a reply that names no next owner)
+
+Changing the handoff mode requires permission to manage the squad.`,
+	Args: exactArgs(1),
+	RunE: runSquadUpdate,
 }
 
 func runSquadUpdate(cmd *cobra.Command, args []string) error {
+	body := map[string]any{}
+	if cmd.Flags().Changed("handoff-mode") {
+		v, _ := cmd.Flags().GetString("handoff-mode")
+		if v != squadHandoffModeLeader && v != squadHandoffModeDirect {
+			return fmt.Errorf("--handoff-mode must be 'leader' or 'direct'")
+		}
+		body["handoff_mode"] = v
+	}
+
 	client, err := newAPIClient(cmd)
 	if err != nil {
 		return err
@@ -178,7 +212,6 @@ func runSquadUpdate(cmd *cobra.Command, args []string) error {
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
-	body := map[string]any{}
 	if cmd.Flags().Changed("name") {
 		v, _ := cmd.Flags().GetString("name")
 		body["name"] = v
@@ -205,7 +238,7 @@ func runSquadUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use flags like --name, --description, --instructions, --leader")
+		return fmt.Errorf("no fields to update; use flags like --name, --description, --instructions, --leader, --handoff-mode")
 	}
 
 	var result map[string]any
@@ -218,6 +251,80 @@ func runSquadUpdate(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, result)
 	}
 	fmt.Printf("Squad updated: %s (%s)\n", strVal(result, "name"), strVal(result, "id"))
+	return nil
+}
+
+// ── Briefs ──────────────────────────────────────────────────────────────────
+
+var squadBriefsCmd = &cobra.Command{
+	Use:   "briefs <squad-id>",
+	Short: "Show the squad context each agent receives",
+	Long: `Show the squad section Multica appends to each agent's instructions when it
+works on an issue assigned to this squad: the leader briefing for the leader,
+and the member brief for every other agent member. Use --agent to print one.
+
+Requires permission to manage the squad.`,
+	Args: exactArgs(1),
+	RunE: runSquadBriefs,
+}
+
+func runSquadBriefs(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	var resp struct {
+		HandoffMode string           `json:"handoff_mode"`
+		Briefs      []map[string]any `json:"briefs"`
+	}
+	if err := client.GetJSON(ctx, "/api/squads/"+args[0]+"/briefs", &resp); err != nil {
+		return fmt.Errorf("get squad briefs: %w", err)
+	}
+
+	briefs := resp.Briefs
+	if cmd.Flags().Changed("agent") {
+		v, _ := cmd.Flags().GetString("agent")
+		agentID, err := resolveAgent(ctx, client, v)
+		if err != nil {
+			return fmt.Errorf("resolve agent: %w", err)
+		}
+		briefs = nil
+		for _, b := range resp.Briefs {
+			if strVal(b, "member_id") == agentID {
+				briefs = append(briefs, b)
+			}
+		}
+		if len(briefs) == 0 {
+			return fmt.Errorf("agent %s is not an agent member of this squad", agentID)
+		}
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		if resp.HandoffMode == "" {
+			resp.HandoffMode = squadHandoffModeLeader
+		}
+		return cli.PrintJSON(os.Stdout, map[string]any{"handoff_mode": resp.HandoffMode, "briefs": briefs})
+	}
+
+	if len(briefs) == 0 {
+		fmt.Fprintln(os.Stderr, "No agent members.")
+		return nil
+	}
+	for i, b := range briefs {
+		if i > 0 {
+			fmt.Println()
+		}
+		role := "member"
+		if leader, _ := b["is_leader"].(bool); leader {
+			role = "leader"
+		}
+		fmt.Printf("==> %s (%s)\n", strVal(b, "member_id"), role)
+		fmt.Println(strVal(b, "brief"))
+	}
 	return nil
 }
 
@@ -523,7 +630,12 @@ func init() {
 	squadUpdateCmd.Flags().String("instructions", "", "New instructions")
 	squadUpdateCmd.Flags().String("leader", "", "New leader agent (name or ID)")
 	squadUpdateCmd.Flags().String("avatar-url", "", "New avatar URL")
+	squadUpdateCmd.Flags().String("handoff-mode", "", "How members hand off: leader or direct")
 	squadUpdateCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// briefs
+	squadBriefsCmd.Flags().String("agent", "", "Only this agent member (name or ID)")
+	squadBriefsCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// delete
 	squadDeleteCmd.Flags().String("output", "table", "Output format: table or json")
@@ -561,6 +673,7 @@ func init() {
 	squadCmd.AddCommand(squadGetCmd)
 	squadCmd.AddCommand(squadCreateCmd)
 	squadCmd.AddCommand(squadUpdateCmd)
+	squadCmd.AddCommand(squadBriefsCmd)
 	squadCmd.AddCommand(squadDeleteCmd)
 	squadCmd.AddCommand(squadMemberCmd)
 	squadCmd.AddCommand(squadActivityCmd)
