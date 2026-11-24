@@ -104,9 +104,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	var sessionTitle string
 	if !warmHit {
 		sessionTitle = b.sessionTitle(opts, buildClaudeArgs(opts, nil))
+		proc.titleHook = sessionTitle != ""
 	}
 	initializer := supplements
-	if initializer == nil && (opts.SkillInvocation != nil || sessionTitle != "") {
+	if initializer == nil && (opts.SkillInvocation != nil || proc.titleHook) {
 		initializer = newClaudeSupplementSession(runCtx)
 	}
 	if initializer != nil {
@@ -129,7 +130,6 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		coalescer:     newClaudeStreamCoalescer(msgCh, nil),
 		supplements:   supplements,
 		initializer:   initializer,
-		titleHook:     sessionTitle != "",
 		usageSnapshot: usageSnapshot,
 		baselineUsage: baselineUsage,
 		rateLimits:    newRateLimitTracker(opts.OnRateLimits),
@@ -424,7 +424,6 @@ type claudeTurn struct {
 	coalescer                *claudeStreamCoalescer
 	supplements              *claudeSupplementSession
 	initializer              *claudeSupplementSession
-	titleHook                bool
 	usageSnapshot            *claudeUsageSnapshot
 	baselineUsage            map[string]TokenUsage
 	rateLimits               *rateLimitTracker
@@ -550,7 +549,7 @@ func (t *claudeTurn) handleMessage(msg claudeSDKMessage) {
 	case "control_request":
 		t.mu.Unlock()
 		var reply func(io.Writer) error
-		if t.supplements != nil || t.titleHook {
+		if t.supplements != nil || t.proc.titleHook {
 			reply, _ = t.initializer.prepareHook(msg)
 		}
 		t.controlMu.Lock()

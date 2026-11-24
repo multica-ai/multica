@@ -39,6 +39,7 @@ type claudeProcess struct {
 	taskEnvFile              string
 	logger                   *slog.Logger
 	initialized              bool
+	titleHook                bool // The callback remains registered across warm turns.
 	initializedCommands      map[string]bool
 	lastCumulativeModelUsage map[string]TokenUsage
 

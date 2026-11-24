@@ -1551,7 +1551,7 @@ for turn in first second; do
   if [ "$turn" = first ]; then
     case "$reply" in *'"sessionTitle":"Original title"'*) ;; *) exit 13 ;; esac
   else
-    case "$reply" in *'"sessionTitle"'*) exit 14 ;; esac
+    case "$reply" in *'"response":{}'*) ;; *) exit 14 ;; esac
   fi
   printf '{"type":"result","subtype":"success","result":"%s","session_id":"warm-title"}\n' "$turn"
 done
