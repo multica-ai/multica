@@ -111,6 +111,7 @@ import { RunLifecycleDemo } from "@/components/demos/run-lifecycle-demo";
 | `iteration_limit` | 실행 반복 횟수 상한에 도달함 | 태스크 범위 축소 |
 | `agent_blocked` | 에이전트가 계속 진행할 수 없다고 직접 보고함 | 댓글의 설명에 따라 정보 보충 |
 | `api_invalid_request` | 플랫폼 API가 잘못된 요청을 거부함 | 재시도하고 반복되면 문제 신고 |
+| `skill_bundle_rejected` | 서버가 시작 전에 에이전트의 스킬 다운로드를 거부함 | 스킬 할당과 오류 세부 정보를 확인한 후 수동으로 재시도 |
 | `codex_semantic_inactivity` | Codex가 오랫동안 유효한 출력을 내지 않아 멈춘 것으로 판단됨 | 재시도하거나 Codex 정체 timeout 조정 |
 
 </Tab>

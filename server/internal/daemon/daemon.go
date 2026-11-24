@@ -6415,6 +6415,10 @@ func taskRunFailureReason(err error) string {
 	// per-skill download deadline firing inside a prepare budget that still had
 	// room (MUL-5370).
 	if errors.Is(err, errSkillBundleUnavailable) {
+		var response *requestError
+		if errors.As(err, &response) && !isTransientError(response) {
+			return taskfailure.ReasonSkillBundleRejected.String()
+		}
 		return taskfailure.ReasonSkillBundleUnavailable.String()
 	}
 	// Structural, not textual: the message ends in "context deadline exceeded",

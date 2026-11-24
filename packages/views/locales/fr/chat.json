@@ -83,6 +83,7 @@
       "runtime_access_revoked": "L'accès au runtime a été révoqué. Associez l'agent à un runtime accessible avant de lancer une nouvelle exécution.",
       "manual": "Cette réponse a été annulée.",
       "skill_bundle_unavailable": "Les skills de l'agent n'ont pas pu être téléchargés : il n'a donc jamais démarré. C'est généralement un problème de connexion — veuillez réessayer.",
+      "skill_bundle_rejected": "Le serveur a refusé le téléchargement des skills de l’agent. Consultez l’erreur ci-dessous avant de relancer.",
       "runtime_cli_timeout": "Le CLI OpenClaw local a expiré avant de répondre. Vérifiez votre configuration locale du CLI OpenClaw ou augmentez MULTICA_OPENCLAW_CLI_TIMEOUT avant de réessayer.",
       "environment_prepare_failed": "La machine de l'agent n'a pas pu préparer cette exécution, qui n'a donc jamais démarré. L'erreur ci-dessous indique la cause locale : souvent un manque d'espace disque, une permission, un dossier encore utilisé ou une configuration illisible. Le problème ne vient ni de l'agent ni du fournisseur du modèle.",
       "local_directory_missing": "Le dossier local lié à ce projet n'existe plus sur la machine de l'agent, donc l'exécution n'a jamais démarré. Restaurez le dossier, puis réessayez. Pour utiliser un autre dossier, ouvrez Ressources → Dossiers locaux du projet dans l'application de bureau de cette machine et liez-le à nouveau : un navigateur ne peut pas choisir de dossier.",

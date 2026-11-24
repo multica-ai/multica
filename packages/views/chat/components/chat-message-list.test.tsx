@@ -1055,10 +1055,10 @@ describe("ChatMessageList failure copy (MUL-5370 regression)", () => {
     expect(screen.queryByText(FALLBACK)).not.toBeInTheDocument();
   });
 
-  it("renders dedicated copy for a stalled skill bundle download", async () => {
-    renderFailure("skill_bundle_unavailable");
+  it.each(["skill_bundle_unavailable", "skill_bundle_rejected"] as const)("renders dedicated copy for %s", async (reason) => {
+    renderFailure(reason);
     expect(
-      await screen.findByText(enChat.message_list.failure.skill_bundle_unavailable),
+      await screen.findByText(enChat.message_list.failure[reason]),
     ).toBeInTheDocument();
     expect(screen.queryByText(FALLBACK)).not.toBeInTheDocument();
   });

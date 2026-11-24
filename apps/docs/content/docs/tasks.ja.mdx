@@ -111,6 +111,7 @@ import { RunLifecycleDemo } from "@/components/demos/run-lifecycle-demo";
 | `iteration_limit` | 実行の反復回数の上限に達した | タスクの範囲を狭める |
 | `agent_blocked` | エージェントが続行できないと自ら報告した | エージェントがコメントで求めた情報を補う |
 | `api_invalid_request` | プラットフォーム API が不正なリクエストを拒否した | リトライし、繰り返し発生する場合は問題を報告する |
+| `skill_bundle_rejected` | 起動前にサーバーがエージェントのスキルのダウンロードを拒否 | スキルの割り当てとエラーの詳細を確認してから手動で再試行 |
 | `codex_semantic_inactivity` | Codex が長時間有効な出力を出さず、停滞と判定された | リトライするか、Codex の停滞タイムアウトを調整する |
 
 </Tab>

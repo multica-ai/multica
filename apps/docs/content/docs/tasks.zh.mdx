@@ -111,6 +111,7 @@ import { RunLifecycleDemo } from "@/components/demos/run-lifecycle-demo";
 | `iteration_limit` | 达到执行轮次上限 | 缩小任务范围 |
 | `agent_blocked` | 智能体主动报告无法继续 | 按它在评论中的说明补充信息 |
 | `api_invalid_request` | 平台 API 拒绝了非法请求 | 重试；反复出现时报告问题 |
+| `skill_bundle_rejected` | 服务器在智能体启动前拒绝了 skill 下载请求 | 检查 skill 分配和错误详情，再手动重试 |
 | `codex_semantic_inactivity` | Codex 长时间无有效输出被判停滞 | 重试，或调整 Codex 停滞超时 |
 
 </Tab>

@@ -117,6 +117,7 @@
     "agent_blocked": "Waiting on human input",
     "api_invalid_request": "Rejected by the model API",
     "skill_bundle_unavailable": "Couldn't download the agent's skills",
+    "skill_bundle_rejected": "Skill download rejected",
     "runtime_cli_timeout": "Local runtime CLI timed out",
     "environment_prepare_failed": "Couldn't prepare the execution environment",
     "runtime_access_denied": "This agent's private runtime isn't accessible, so it couldn't reply. Make the runtime public, or bind the agent to an accessible runtime.",

@@ -1010,6 +1010,7 @@
       "agent_blocked": "等待人工输入",
       "api_invalid_request": "模型 API 拒绝了请求",
       "skill_bundle_unavailable": "无法下载智能体的 skill",
+      "skill_bundle_rejected": "skill 下载被拒绝",
       "runtime_cli_timeout": "本地运行时 CLI 超时",
       "environment_prepare_failed": "无法准备执行环境",
       "runtime_access_denied": "该智能体无法在其私有运行时上运行，暂时无法回复。请将该运行时设为公开，或将智能体重新绑定/复制到其所有者可用的运行时。",

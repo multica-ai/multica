@@ -1015,6 +1015,7 @@
       "agent_blocked": "Esperando entrada humana",
       "api_invalid_request": "Rechazada por la API del modelo",
       "skill_bundle_unavailable": "No se han podido descargar las skills del agente",
+      "skill_bundle_rejected": "Descarga de skills rechazada",
       "runtime_cli_timeout": "La CLI del runtime local agotó el tiempo",
       "environment_prepare_failed": "No se ha podido preparar el entorno de ejecución",
       "runtime_access_denied": "Este agente no puede ejecutarse en su runtime privado, así que no pudo responder. Haz el runtime público, o reenlaza/copia el agente a un runtime que su propietario pueda usar.",
