@@ -172,7 +172,7 @@ Metro on the Mac and forward its port over USB:
 
 ```bash
 adb reverse tcp:8081 tcp:8081
-pnpm dev:staging --localhost
+NODE_OPTIONS=--dns-result-order=ipv4first pnpm dev:staging --localhost
 ```
 
 Open the installed app and connect its development client to
