@@ -54,3 +54,19 @@ WITH acknowledged AS (
 )
 UPDATE issue_wakeup_receipt r SET processed_at=clock_timestamp(),task_id=sqlc.arg('task_id')
 FROM acknowledged a WHERE r.wakeup_id=a.id AND r.revision=a.revision AND r.processed_at IS NULL;
+
+-- name: DismissIssueBlockerRelease :exec
+-- The write that made the issue startable declined its run, which answers the
+-- pending release. A later wait resets condition_state and releases again.
+WITH dismissed AS (
+ UPDATE issue_wakeup w
+ SET condition_state='ready',next_fire_at=NULL,updated_at=clock_timestamp()
+ FROM issue i
+ WHERE i.id=sqlc.arg('issue_id') AND w.issue_id=i.id AND w.workspace_id=i.workspace_id
+ AND w.system_rule='blockers_done' AND w.enabled
+ AND i.status<>'backlog' AND i.triage_state IS NULL
+ AND NOT issue_has_open_blockers(i.workspace_id,i.id)
+ RETURNING w.id,w.revision
+)
+UPDATE issue_wakeup_receipt r SET processed_at=clock_timestamp()
+FROM dismissed d WHERE r.wakeup_id=d.id AND r.revision=d.revision AND r.processed_at IS NULL;
