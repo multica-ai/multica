@@ -74,6 +74,8 @@ func TestChatSessionTaskTokenOwnerAccess(t *testing.T) {
 				request(token, http.MethodGet, "/api/chat/sessions?status=all", nil))
 			messages := testutil.Call(t, serve((*Handler).ListChatMessages),
 				request(token, http.MethodGet, sessionPath+"/messages", nil))
+			wakeups := testutil.Call(t, serve((*Handler).ListMyChatWakeups),
+				request(token, http.MethodGet, "/api/chat/my-wakeups", nil))
 			if !tc.allowed {
 				// An empty list is also a refusal; what matters is that
 				// neither the session nor its transcript comes back.
@@ -83,6 +85,7 @@ func TestChatSessionTaskTokenOwnerAccess(t *testing.T) {
 				if strings.Contains(messages.Body.String(), secret) {
 					t.Fatalf("messages returned the owner's transcript: %d %s", messages.Code, messages.Body.String())
 				}
+				wakeups.Want(http.StatusForbidden)
 				testutil.Call(t, serve((*Handler).GetChatSession),
 					request(token, http.MethodGet, sessionPath, nil)).Want(http.StatusForbidden)
 				testutil.Call(t, serve((*Handler).SendChatMessage),
@@ -107,6 +110,7 @@ func TestChatSessionTaskTokenOwnerAccess(t *testing.T) {
 				t.Fatalf("owner-started run lost the owner's chat session: %s", list.Body.String())
 			}
 			messages.Want(http.StatusOK)
+			wakeups.Want(http.StatusOK)
 			if !strings.Contains(messages.Body.String(), secret) {
 				t.Fatalf("owner-started run lost the owner's transcript: %s", messages.Body.String())
 			}
