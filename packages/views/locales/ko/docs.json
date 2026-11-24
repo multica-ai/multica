@@ -15,14 +15,14 @@
     "copy_link": "링크 복사"
   },
   "errors": {
-    "move": "이동하지 못했습니다",
-    "delete": "삭제하지 못했습니다",
-    "save": "저장하지 못했습니다"
+    "move": "항목을 이동할 수 없습니다",
+    "delete": "항목을 삭제할 수 없습니다",
+    "save": "변경 사항을 저장할 수 없습니다"
   },
   "move": {
     "title": "‘{{title}}’ 이동",
     "destination": "대상 위치",
-    "root": "지식 베이스(최상위)",
+    "root": "문서(최상위)",
     "current": "현재",
     "confirm": "이동"
   },
@@ -31,7 +31,7 @@
     "description": "‘{{title}}’와 전체 기록이 삭제됩니다. 되돌릴 수 없습니다.",
     "confirm": "삭제",
     "folder_title": "폴더를 삭제할까요?",
-    "folder_description": "빈 폴더만 삭제할 수 있습니다."
+    "folder_description": "\"{{title}}\"을(를) 삭제하시겠습니까? 빈 폴더만 삭제할 수 있으며, 이 작업은 되돌릴 수 없습니다."
   },
   "tree": {
     "more": "{{title}} 더 보기",
@@ -48,23 +48,56 @@
     "conflict": "{{name}}님이 수정했습니다. 초안이 보존됩니다. 다시 불러와 계속하세요.",
     "reload": "최신 버전 불러오기",
     "draft": "보존된 초안",
-    "unsaved_changes": "저장하지 않은 변경사항"
+    "unsaved_changes": "저장하지 않은 변경사항",
+    "live": "실시간",
+    "reconnecting": "다시 연결하는 중...",
+    "connecting": "연결하는 중...",
+    "title_save_failed": "제목을 저장하지 못했습니다",
+    "editing_now": "편집 중"
   },
   "history": {
     "title": "기록",
     "current": "현재",
     "restore": "이 버전 복원",
-    "loading": "불러오는 중..."
+    "loading": "불러오는 중...",
+    "from_discussion": "댓글에서: {{quote}}"
   },
   "not_found": {
     "title": "문서를 찾을 수 없습니다",
     "description": "삭제되었을 수 있습니다."
   },
   "edited": "{{time}} 편집",
+  "view_history": "기록 보기",
   "outline": "개요",
   "link_copied": "링크를 복사했습니다",
   "unavailable": {
-    "title": "문서를 아직 사용할 수 없습니다",
+    "title": "이 워크스페이스에서는 문서가 활성화되어 있지 않습니다",
     "description": "이 워크스페이스에서는 문서가 켜져 있지 않습니다."
+  },
+  "comments": {
+    "title": "댓글",
+    "add": "댓글",
+    "open": "미해결 {{count}}",
+    "resolved": "해결됨 {{count}}",
+    "close": "댓글 닫기",
+    "quote_missing": "댓글을 단 텍스트가 변경되었습니다",
+    "reply_placeholder": "답글 또는 @ 멘션…",
+    "new_placeholder": "댓글을 추가하거나 @로 멘션하세요...",
+    "submit": "댓글",
+    "reply": "답글",
+    "cancel": "취소",
+    "resolve": "해결",
+    "reopen": "다시 열기",
+    "delete": "댓글 삭제",
+    "resolved_by": "{{name}} 님이 해결함",
+    "replies_other": "답글 {{count}}개",
+    "empty_open": "미해결 댓글이 없습니다. 텍스트를 선택하고 '댓글'을 눌러 시작하세요.",
+    "empty_resolved": "해결된 댓글이 없습니다.",
+    "errors": {
+      "save": "댓글을 게시하지 못했습니다",
+      "delete": "댓글을 삭제하지 못했습니다",
+      "resolve": "댓글을 업데이트할 수 없습니다"
+    },
+    "run_waiting_retry": "재시도 대기 중"
   }
 }

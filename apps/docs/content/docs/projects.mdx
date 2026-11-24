@@ -30,6 +30,18 @@ Open **All projects** and use the display menu to choose **Table** or **Board**.
 
 The table can show start date, due date, progress, and last activity. Sort by those fields, name, status, priority, or creation time. Layout, grouping, sorting, visible columns, and filters are saved per user and workspace across devices; search text is not saved.
 
+## Project page
+
+Opening a project shows three tabs:
+
+- **Overview** — the project's name, icon, collapsible description (shared with agents as context), and attached resources.
+- **Issues** — the project's issues in your chosen list, board, table, Gantt, or swimlane layout.
+- **Activity** — a newest-first feed of issue creation and status, assignee, priority, date, title, and duplicate changes across the project.
+
+Your last opened tab is remembered per project on this device; projects with no issues yet open on **Overview**.
+
+The right sidebar stays available across every tab: **Properties**, **Progress** (completed versus in-scope count, segmented done and in-progress bar, weekly progress chart, and a completion forecast from the trailing 4-week pace once enough history exists), **Breakdown** (switch between **Assignee** and **Label**; selecting a row opens **Issues** filtered to that slice), and **Recent activity** with **View all** opening the **Activity** tab.
+
 ## Projects and issues
 
 A project can contain any number of issues; an issue belongs to at most one project. Create issues directly inside the project, or pick or change the project from the issue's properties.
@@ -37,10 +49,10 @@ A project can contain any number of issues; an issue belongs to at most one proj
 Project progress is computed automatically from linked issues:
 
 ```text
-progress = issues whose status is in the done or closed category ÷ all issues in the project
+progress = issues in the done category ÷ (all issues in the project − issues in the closed category)
 ```
 
-Among the built-in statuses that means `done` and `cancelled`; custom statuses in those two categories count as well. `cancelled` means that work has been closed out of the project's scope, so it counts toward progress.
+Among the built-in statuses, `done` counts as completed and `cancelled` is closed. A closed issue has left the project's scope, so it counts neither as completed nor toward the total; the project shows how many were cancelled next to its progress. Custom statuses follow their category. The percentage is rounded down, so 100% means every issue still in scope is done. A project with no issues in scope shows 0%.
 
 Project status and issue status are independent: finishing every issue does not set the project to `completed`, and changing the project's status does not bulk-change its issues.
 
@@ -102,9 +114,7 @@ multica project update <project-id> --visibility private --member alice@example.
 multica project member add <project-id> carol@example.com
 ```
 
-Switching a private project back to **Entire workspace** makes the project and its issues, comments, and attachments visible to every workspace member. The app asks for confirmation first; `multica project update --visibility workspace` applies the change immediately.
-
-If your workspace plan restricts private projects, existing private projects keep their visibility and member lists. The restriction blocks creating a private project, making a project private, and adding people to a private project, including by naming a new member as lead. Members with permission can still edit project details, remove members, switch access to **Entire workspace**, and archive or delete the project. The workspace owner can still join through [Workspace owner recovery](#workspace-owner-recovery).
+Switching a private project back to **Entire workspace** makes the project and its issues, comments, and attachments visible to members with the `owner`, `admin`, or `member` role. Guests see the project only if it is shared with them. The app asks for confirmation first; `multica project update --visibility workspace` applies the change immediately.
 
 ### Workspace owner recovery
 
@@ -114,7 +124,7 @@ Click **Join** and confirm to add yourself to the member list. You appear in the
 
 ## Folders
 
-Folders group related projects, such as everything for one launch or one team, so the sidebar's Projects section stays short. Folders are shared: every member sees the same folders, and any member can create, rename, or delete one and move projects in and out of it. A project is in at most one folder, and folders do not nest. A folder only organizes projects; it does not change who can see them.
+Folders group related projects, such as everything for one launch or one team, so the sidebar's Projects section stays short. Owners, admins, and members share the same folders and can create, rename, or delete one and move projects in and out of it. A project is in at most one folder, and folders do not nest. A folder only organizes projects; it does not change who can see them.
 
 - **Create a folder**: click **+** on the sidebar's Projects section and choose **New folder**, or choose **Move to folder → New folder…** in a project's menu to create one with that project in it.
 - **Move a project**: choose **Move to folder** in the project's menu, or drag the project onto a folder in the sidebar, or out of it. When creating a project, pick its folder in the create dialog; **+** on a folder row creates a project in that folder.
@@ -136,7 +146,7 @@ Active autopilots that create issues in the project are paused. To restore the p
 
 ## Create, edit, and delete
 
-Any workspace member can create and edit projects. Members can delete projects they created or that an agent they currently own created; agents can delete only their own projects. Human `owner` and `admin` members can delete any project, including older projects with an unknown creator. A private project can only be edited or deleted by people on its member list, so an `owner` or `admin` has to be on the list first.
+Owners, admins, and members can create and edit projects. Members can delete projects they created or that an agent they currently own created; agents can delete only their own projects. Human `owner` and `admin` members can delete any project, including older projects with an unknown creator. A private project can only be edited or deleted by people on its member list, so an `owner` or `admin` has to be on the list first.
 
 <Callout type="warning">
 Deleting a project does not delete its issues: they detach and stay in the workspace. The project's description, status, and resources are permanently deleted.

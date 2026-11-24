@@ -3,14 +3,16 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"html"
 	"io"
 	"net/url"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
-	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/text"
 	"github.com/yuin/goldmark/util"
 
@@ -45,6 +47,13 @@ type attachmentLinkMatcher struct {
 	byName map[string][]int
 }
 
+func pathKey(s string) string {
+	if runtime.GOOS == "windows" {
+		return strings.ToLower(s)
+	}
+	return s
+}
+
 func newAttachmentLinkMatcher(paths []string) *attachmentLinkMatcher {
 	m := &attachmentLinkMatcher{byPath: map[string]int{}, byName: map[string][]int{}}
 	for i, p := range paths {
@@ -55,15 +64,15 @@ func newAttachmentLinkMatcher(paths []string) *attachmentLinkMatcher {
 		if len(keys) == 0 {
 			continue
 		}
-		if _, dup := m.byPath[keys[0]]; dup {
+		if _, dup := m.byPath[pathKey(keys[0])]; dup {
 			// The same file attached twice; the first upload wins and the
 			// duplicate must not make its bare name ambiguous.
 			continue
 		}
 		for _, key := range keys {
-			m.byPath[key] = i
+			m.byPath[pathKey(key)] = i
 		}
-		base := filepath.Base(p)
+		base := pathKey(filepath.Base(p))
 		m.byName[base] = append(m.byName[base], i)
 	}
 	return m
@@ -93,7 +102,7 @@ func (m *attachmentLinkMatcher) match(target string) (int, bool) {
 		return -1, false
 	}
 	candidates := []string{raw}
-	if unescaped := string(util.UnescapePunctuations([]byte(raw))); unescaped != raw {
+	if unescaped := unescapeMarkdownDestination(raw); unescaped != raw {
 		candidates = append(candidates, unescaped)
 	}
 	for _, c := range append([]string(nil), candidates...) {
@@ -107,6 +116,28 @@ func (m *attachmentLinkMatcher) match(target string) (int, bool) {
 		}
 	}
 	return -1, false
+}
+
+func unescapeMarkdownDestination(s string) string {
+	var b strings.Builder
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) && util.IsPunct(s[i+1]) {
+			if i > start {
+				b.WriteString(html.UnescapeString(s[start:i]))
+			}
+			b.WriteByte(s[i+1])
+			i++
+			start = i + 1
+		}
+	}
+	if start == 0 {
+		return html.UnescapeString(s)
+	}
+	if start < len(s) {
+		b.WriteString(html.UnescapeString(s[start:]))
+	}
+	return b.String()
 }
 
 func (m *attachmentLinkMatcher) matchPath(target string) (int, bool) {
@@ -125,17 +156,62 @@ func (m *attachmentLinkMatcher) matchPath(target string) (int, bool) {
 	}
 	local := filepath.FromSlash(target)
 	for _, key := range attachmentPathKeys(local) {
-		if i, ok := m.byPath[key]; ok {
+		if i, ok := m.byPath[pathKey(key)]; ok {
 			return i, true
 		}
 	}
 	cleaned := filepath.Clean(local)
 	if !filepath.IsAbs(cleaned) && !strings.ContainsRune(cleaned, filepath.Separator) {
-		if idx := m.byName[cleaned]; len(idx) == 1 {
+		if idx := m.byName[pathKey(cleaned)]; len(idx) == 1 {
 			return idx[0], true
 		}
 	}
 	return -1, false
+}
+
+type attachmentLinkParser struct {
+	parser.InlineParser
+	destSpans map[ast.Node]text.Segment
+}
+
+func (p *attachmentLinkParser) Parse(parent ast.Node, reader text.Reader, pc parser.Context) ast.Node {
+	line, _ := reader.PeekLine()
+	if len(line) == 0 || line[0] != ']' {
+		return p.InlineParser.Parse(parent, reader, pc)
+	}
+	openLine, openSeg := reader.Position()
+	n := p.InlineParser.Parse(parent, reader, pc)
+	var dest []byte
+	var ref *ast.ReferenceLink
+	switch node := n.(type) {
+	case *ast.Link:
+		dest, ref = node.Destination, node.Reference
+	case *ast.Image:
+		dest, ref = node.Destination, node.Reference
+	default:
+		return n
+	}
+	if ref != nil || len(dest) == 0 {
+		return n
+	}
+	endLine, endSeg := reader.Position()
+	reader.SetPosition(openLine, openSeg)
+	reader.Advance(1)
+	if reader.Peek() == '(' {
+		reader.Advance(1)
+		reader.SkipSpaces()
+		if reader.Peek() == '<' {
+			reader.Advance(1)
+		}
+		_, destSeg := reader.Position()
+		p.destSpans[n] = text.NewSegment(destSeg.Start, destSeg.Start+len(dest))
+	}
+	reader.SetPosition(endLine, endSeg)
+	return n
+}
+
+func (p *attachmentLinkParser) CloseBlock(parent ast.Node, reader text.Reader, pc parser.Context) {
+	p.InlineParser.(parser.CloseBlocker).CloseBlock(parent, reader, pc)
 }
 
 // rewriteAttachmentLinks replaces every inline link/image destination in body
@@ -151,60 +227,53 @@ func rewriteAttachmentLinks(body string, paths, urls []string) (string, []attach
 	}
 
 	source := []byte(body)
-	doc := goldmark.New().Parser().Parse(text.NewReader(source))
-
-	var codeSpans []text.Segment
-	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
-		if entering && n.Kind() == ast.KindCodeSpan {
-			for c := n.FirstChild(); c != nil; c = c.NextSibling() {
-				if t, ok := c.(*ast.Text); ok {
-					codeSpans = append(codeSpans, t.Segment)
-				}
-			}
+	links := &attachmentLinkParser{
+		InlineParser: parser.NewLinkParser(),
+		destSpans:    map[ast.Node]text.Segment{},
+	}
+	inlineParsers := parser.DefaultInlineParsers()
+	for i := range inlineParsers {
+		if inlineParsers[i].Value == links.InlineParser {
+			inlineParsers[i].Value = links
 		}
-		return ast.WalkContinue, nil
-	})
+	}
+	markdown := parser.NewParser(
+		parser.WithBlockParsers(parser.DefaultBlockParsers()...),
+		parser.WithInlineParsers(inlineParsers...),
+		parser.WithParagraphTransformers(parser.DefaultParagraphTransformers()...),
+	)
+	doc := markdown.Parse(text.NewReader(source))
 
 	type edit struct {
 		start, stop int
 		url         string
 	}
 	var edits []edit
-	claimed := map[int]bool{}
 	var rewrites []attachmentLinkRewrite
 	reported := map[string]bool{}
-	// Post-order: an image nested in a link label claims its own destination
-	// before the enclosing link searches past it for the outer one.
 	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
-		if entering {
+		if !entering {
 			return ast.WalkContinue, nil
 		}
-		var link *ast.Link
+		var dest []byte
 		switch node := n.(type) {
 		case *ast.Link:
-			link = node
+			dest = node.Destination
 		case *ast.Image:
-			link = &ast.Link{}
-			link.Destination, link.Reference = node.Destination, node.Reference
+			dest = node.Destination
 		default:
 			return ast.WalkContinue, nil
 		}
-		// Reference-style links keep their destination in a definition
-		// elsewhere in the body; they are left for the lint.
-		if link.Reference != nil || len(link.Destination) == 0 || n.Pos() < 0 {
+		span, ok := links.destSpans[n]
+		if !ok || span.Start < 0 || span.Stop > len(source) || !bytes.Equal(source[span.Start:span.Stop], dest) {
 			return ast.WalkContinue, nil
 		}
-		target := string(link.Destination)
+		target := string(dest)
 		idx, ok := matcher.match(target)
 		if !ok || idx >= len(urls) || urls[idx] == "" {
 			return ast.WalkContinue, nil
 		}
-		start := locateLinkDestination(source, n.Pos(), link.Destination, claimed, codeSpans)
-		if start < 0 {
-			return ast.WalkContinue, nil
-		}
-		claimed[start] = true
-		edits = append(edits, edit{start: start, stop: start + len(link.Destination), url: urls[idx]})
+		edits = append(edits, edit{start: span.Start, stop: span.Stop, url: urls[idx]})
 		if !reported[target] {
 			reported[target] = true
 			rewrites = append(rewrites, attachmentLinkRewrite{Target: target, URL: urls[idx]})
@@ -225,59 +294,6 @@ func rewriteAttachmentLinks(body string, paths, urls []string) (string, []attach
 	}
 	b.Write(source[last:])
 	return b.String(), rewrites
-}
-
-// locateLinkDestination returns the byte offset of a link's destination,
-// searching from the link's start for the first unclaimed occurrence that is a
-// whole destination directly after the `](` closing a label. The parser does
-// not record the destination's own position, and the same text may also
-// appear in the label or as a prefix of a nested link's destination.
-func locateLinkDestination(source []byte, from int, dest []byte, claimed map[int]bool, codeSpans []text.Segment) int {
-	for from < len(source) {
-		i := bytes.Index(source[from:], dest)
-		if i < 0 {
-			return -1
-		}
-		start := from + i
-		if !claimed[start] && !insideSegments(start, codeSpans) && isWholeLinkDestination(source, start, start+len(dest)) {
-			return start
-		}
-		from = start + 1
-	}
-	return -1
-}
-
-// isWholeLinkDestination reports whether source[start:stop] is an entire
-// inline link destination: opened by `](` (optionally `<`), and closed by the
-// matching `>` or by the whitespace / `)` that ends a bare destination.
-func isWholeLinkDestination(source []byte, start, stop int) bool {
-	j := start - 1
-	angle := j >= 0 && source[j] == '<'
-	if angle {
-		j--
-		if stop >= len(source) || source[stop] != '>' {
-			return false
-		}
-	} else if stop < len(source) && !isLinkSpace(source[stop]) && source[stop] != ')' {
-		return false
-	}
-	for j >= 0 && isLinkSpace(source[j]) {
-		j--
-	}
-	return j >= 1 && source[j] == '(' && source[j-1] == ']'
-}
-
-func isLinkSpace(c byte) bool {
-	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
-}
-
-func insideSegments(pos int, segments []text.Segment) bool {
-	for _, s := range segments {
-		if pos >= s.Start && pos < s.Stop {
-			return true
-		}
-	}
-	return false
 }
 
 // previewAttachmentLinks rewrites body against placeholder URLs, before

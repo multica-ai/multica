@@ -397,6 +397,7 @@ func TestBuildClaudeArgsInheritsMCPByDefault(t *testing.T) {
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
 		"--verbose",
+		"--include-partial-messages",
 		"--permission-mode", "bypassPermissions",
 		"--disallowedTools", "AskUserQuestion",
 	}
@@ -1528,5 +1529,64 @@ printf '%s\n' '{"type":"result","subtype":"success","result":"fixture completed"
 				t.Fatalf("result = %+v", result)
 			}
 		})
+	}
+}
+
+func TestClaudeWarmSessionKeepsItsOriginalTitle(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	dir := t.TempDir()
+	fakePath := filepath.Join(dir, "claude")
+	writeTestExecutable(t, fakePath, []byte(`#!/bin/sh
+set -eu
+IFS= read -r init
+case "$init" in *'"UserPromptSubmit"'*) ;; *) exit 11 ;; esac
+printf '%s\n' '{"type":"control_response","response":{"subtype":"success","request_id":"multica-supplement-initialize","response":{}}}'
+for turn in first second; do
+  IFS= read -r prompt
+  case "$prompt" in *'"type":"user"'*) ;; *) exit 12 ;; esac
+  printf '%s\n' '{"type":"control_request","request_id":"title-hook","request":{"subtype":"hook_callback","callback_id":"multica-supplement-UserPromptSubmit","input":{"hook_event_name":"UserPromptSubmit"}}}'
+  IFS= read -r reply
+  if [ "$turn" = first ]; then
+    case "$reply" in *'"sessionTitle":"Original title"'*) ;; *) exit 13 ;; esac
+  else
+    case "$reply" in *'"sessionTitle"'*) exit 14 ;; esac
+  fi
+  printf '{"type":"result","subtype":"success","result":"%s","session_id":"warm-title"}\n' "$turn"
+done
+while IFS= read -r unused; do :; done
+`))
+
+	pool := NewWarmSessionPool(WarmSessionPoolConfig{IdleTTL: time.Minute, MaxIdle: 1, Logger: slog.Default()})
+	defer pool.Close()
+	backend := &claudeBackend{cfg: Config{
+		ExecutablePath: fakePath, BuiltinRuntime: true, CLIVersion: "2.1.110",
+		Logger: slog.Default(), Env: map[string]string{"IS_SANDBOX": "1"}, WarmPool: pool,
+	}}
+	for _, turn := range []struct {
+		output string
+		title  string
+		resume string
+	}{
+		{output: "first", title: "Original title"},
+		{output: "second", title: "Different title", resume: "warm-title"},
+	} {
+		session, err := backend.Execute(t.Context(), "test prompt", ExecOptions{
+			Cwd: dir, ThreadName: turn.title, ResumeSessionID: turn.resume,
+			Timeout: 5 * time.Second, HandshakeTimeout: 500 * time.Millisecond,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for range session.Messages {
+		}
+		result := <-session.Result
+		if result.Status != "completed" || result.Output != turn.output || result.SessionID != "warm-title" {
+			t.Fatalf("%s turn: result = %+v", turn.output, result)
+		}
+		if got := pool.Len(); got != 1 {
+			t.Fatalf("%s turn: idle processes = %d, want 1", turn.output, got)
+		}
 	}
 }

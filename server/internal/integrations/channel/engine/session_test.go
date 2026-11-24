@@ -1412,3 +1412,48 @@ func TestAppendUserMessage_ReplyTargetSenderNullWhenAbsent(t *testing.T) {
 		t.Errorf("absent sender must be NULL; got %+v", f.lastContextReply.LastSenderID)
 	}
 }
+
+// Channel media is never refused for storage; the server's hook only records
+// it, once the attachments are committed (MUL-9489).
+func TestBindMediaRefs_RunsMediaStoredHookAfterCommit(t *testing.T) {
+	var stored []pgtype.UUID
+	var deadlines []bool
+	SetMediaStoredHook(func(ctx context.Context, workspaceID pgtype.UUID) {
+		stored = append(stored, workspaceID)
+		_, ok := ctx.Deadline()
+		deadlines = append(deadlines, ok)
+	})
+	t.Cleanup(func() { SetMediaStoredHook(nil) })
+
+	f := newFake()
+	s := newTestSession(f)
+	res, err := s.AppendUserMessage(context.Background(), AppendInput{SessionID: uid(1), Sender: uid(7), Body: "[File]", MessageID: "om_file"})
+	if err != nil {
+		t.Fatalf("AppendUserMessage: %v", err)
+	}
+	if err := s.BindMediaRefs(context.Background(), BindMediaInput{
+		MessageID: res.MessageID, SessionID: uid(1), WorkspaceID: uid(9), Sender: uid(7), Body: "[File]",
+		MediaRefs: []channel.MediaRef{{
+			Type: channel.MsgTypeFile, StorageKey: "slack/f.pdf", StorageURL: "https://cdn.example.test/slack/f.pdf",
+			Filename: "f.pdf", MimeType: "application/pdf", SizeBytes: 10,
+		}},
+	}); err != nil {
+		t.Fatalf("BindMediaRefs: %v", err)
+	}
+	if len(stored) != 1 || stored[0] != uid(9) {
+		t.Fatalf("hook calls = %+v, want one for the workspace", stored)
+	}
+	// The hook runs on a bounded budget so it cannot hold up the task start.
+	if !deadlines[0] {
+		t.Fatal("hook context has no deadline")
+	}
+	// A bind without media stores nothing and records nothing.
+	if err := s.BindMediaRefs(context.Background(), BindMediaInput{
+		MessageID: res.MessageID, SessionID: uid(1), WorkspaceID: uid(9), Sender: uid(7), Body: "[File]",
+	}); err != nil {
+		t.Fatalf("BindMediaRefs without media: %v", err)
+	}
+	if len(stored) != 1 {
+		t.Fatalf("hook calls = %d after an empty bind, want 1", len(stored))
+	}
+}

@@ -28,6 +28,8 @@
     "actions": {
       "retry": "Reintentar",
       "retry_autopilots": "Reintentar el uso de automatización",
+      "retry_storage": "Reintentar uso del almacenamiento de adjuntos",
+      "retry_app_calls": "Reintentar el uso de llamadas a aplicaciones",
       "upgrade_to": "Actualizar a {{plan}}",
       "switch_to": "Cambiar a {{plan}}",
       "manage": "Gestionar facturación",
@@ -41,7 +43,7 @@
       "temporarily_unavailable": "La facturación no está disponible temporalmente. Reintenta en un momento.",
       "not_enabled": "Las suscripciones de espacios de trabajo no están habilitadas en este despliegue. Contacta con tu administrador.",
       "permission_changed": "Tu rol en el espacio de trabajo ya no permite esta acción. Actualiza la página para ver tu acceso actual.",
-      "checkout_response": "No se ha podido abrir el checkout porque la respuesta del servidor era ilegible. Reintenta sin cambiar el intervalo seleccionado.",
+      "checkout_response": "No se pudo abrir el proceso de pago debido a una respuesta inesperada. Inténtalo de nuevo.",
       "already_subscribed": "Este espacio de trabajo ya tiene una suscripción. El plan actual se ha actualizado.",
       "checkout_failed": "No se ha podido crear el checkout. Reintenta en un momento.",
       "portal_response": "No se ha podido abrir el portal de facturación porque la respuesta del servidor era ilegible.",
@@ -81,7 +83,7 @@
       "title": "Plan actual",
       "plan": "Plan del espacio de trabajo",
       "members": "Miembros humanos",
-      "members_description": "Los agentes y las invitaciones pendientes no cuentan como puestos.",
+      "members_description": "Miembros humanos activos en este espacio de trabajo. Los agentes nunca ocupan un asiento.",
       "member_count_one": "{{count}} miembro",
       "member_count_other": "{{count}} miembros",
       "billing_interval": "Intervalo de facturación",
@@ -103,13 +105,13 @@
       "unit_price_month": "{{price}} por puesto humano / mes",
       "unit_price_year_monthly": "{{price}} por puesto humano / mes, facturado anualmente",
       "unit_price_year": "{{price}} por puesto humano / año",
-      "price_at_checkout": "El servidor vuelve a contar los miembros humanos antes de la compra. Stripe Checkout muestra el precio por puesto y el total autorizados antes de que pagues.",
+      "price_at_checkout": "Los miembros humanos activos se cuentan al finalizar la compra. Stripe muestra el precio final por puesto y el total antes de pagar.",
       "recommended": "Recomendado",
       "features": {
         "pro_members": "Miembros ilimitados",
         "pro_autopilots": "1.000 ejecuciones de automatización por miembro al mes",
         "pro_storage": "10 GB de almacenamiento de adjuntos por miembro",
-        "pro_dashboard": "90 días de historial en el panel",
+        "pro_dashboard": "90 días de historial de analítica",
         "business_everything": "Todo lo incluido en Pro",
         "business_access": "Proyectos privados y acceso por miembro",
         "business_apps": "Cuentas de apps del equipo y reglas de aprobación",
@@ -138,7 +140,25 @@
       "usage_unavailable": "El uso no está disponible temporalmente",
       "members": "Miembros",
       "members_pending": "Invitaciones pendientes: {{pending}}",
-      "metering": "Cuentan las ejecuciones de programaciones, webhooks y agentes. Las que un miembro inicia con Ejecutar ahora no cuentan."
+      "metering": "Cuentan las ejecuciones de programaciones, webhooks y agentes. Las que un miembro inicia con Ejecutar ahora no cuentan.",
+      "storage": "Almacenamiento de adjuntos",
+      "storage_description": "Adjuntos de incidencias, comentarios y chats.",
+      "storage_label": "Uso del almacenamiento de adjuntos",
+      "app_calls": "Llamadas a aplicaciones",
+      "app_calls_description": "Llamadas que los agentes ejecutan en aplicaciones conectadas. Buscar herramientas no cuenta.",
+      "app_calls_label": "Uso de llamadas a aplicaciones",
+      "app_calls_by_member": "Llamadas a aplicaciones por persona",
+      "app_calls_no_person": "Ejecuciones automáticas",
+      "app_calls_former_member": "Antiguo miembro",
+      "addon": "Ejecuciones adicionales",
+      "addon_description": "Cuando se agota la asignación, las automatizaciones se pausan hasta el próximo mes o hasta que compres más ejecuciones.",
+      "addon_included": "Incluye {{runs}} ejecuciones adicionales",
+      "addon_none": "Ninguna este mes",
+      "addon_purchased": "{{runs}} compradas este mes",
+      "addon_buy": "Comprar · {{price}} / {{runs}} ejecuciones",
+      "addon_buy_fallback": "Comprar más ejecuciones",
+      "dashboard_history": "Historial de analítica",
+      "dashboard_history_days": "Últimos {{days}} días"
     },
     "seats": {
       "title": "Puestos",
@@ -176,9 +196,9 @@
       "preview_unreadable": "No se ha podido leer el cálculo. Cambia el número de puestos o reintenta.",
       "preview_failed": "El cálculo no está disponible temporalmente. Reintenta en un momento.",
       "capacity_out_of_sync": "El número de puestos en Stripe no coincide con el registro de facturación. Contacta con soporte antes de reintentar esta compra.",
-      "in_progress": "Se está procesando otra compra de puestos. Espera a que termine; contacta con soporte si sigue así.",
+      "in_progress": "Se está procesando otra compra de puestos. Espera un momento a que termine o contacta con soporte si se queda bloqueada.",
       "plan_change_in_progress": "Todavía se está procesando un cambio de plan. Vuelve a intentarlo en unos minutos.",
-      "purchase_unreadable": "No se ha podido leer la respuesta de la compra. Reintenta este presupuesto; se reutilizará la misma solicitud de compra.",
+      "purchase_unreadable": "No pudimos confirmar la respuesta de la compra. Reintenta con seguridad: no se te cobrará dos veces.",
       "purchase_failed": "No se han podido añadir los puestos. Reintenta con el mismo presupuesto, o actualiza si ha caducado.",
       "payment_failed": "No se ha podido completar el pago. Actualiza el método de pago en Stripe y solicita un presupuesto nuevo.",
       "quote_changed": "El número de puestos o el cálculo cambió. Revisa el presupuesto actualizado antes de confirmar de nuevo.",
@@ -221,7 +241,9 @@
       "success_title": "Plan cambiado",
       "success_description": "Este espacio de trabajo ahora usa {{plan}}.",
       "unresolved": "No se ha podido confirmar el cambio de plan anterior. Contacta con soporte antes de cambiar de plan.",
-      "check_failed": "No se ha podido comprobar el cambio de plan. Vuelve a intentarlo."
+      "check_failed": "No se ha podido comprobar el cambio de plan. Vuelve a intentarlo.",
+      "addon_downgrade_notice": "Tras el cambio, el límite de este mes será de {{limit}} ejecuciones, incluidas las compradas. Este mes se han usado {{used}}.",
+      "addon_downgrade_notice_limit_only": "Tras el cambio, el límite de este mes será de {{limit}} ejecuciones, incluidas las compradas."
     },
     "confirm": {
       "title": "¿Continuar a Stripe Checkout?",
@@ -250,7 +272,22 @@
     "read_only": "Solo lectura. Mejora el plan para editar.",
     "unavailable": "No está incluido en el plan de este espacio de trabajo.",
     "view_plans": "Ver planes",
-    "locked_error": "No está incluido en el plan del espacio de trabajo. La configuración existente sigue funcionando; mejora el plan para añadir más."
+    "locked_error": "No está incluido en el plan del espacio de trabajo. La configuración existente sigue funcionando; mejora el plan para añadir más.",
+    "upgrade_to_add": "Mejorar el plan",
+    "business": "Business",
+    "badge_label": "Función de Business. Ver detalles",
+    "upgrade_to_business": "Pasar a Business",
+    "ask_admin": "Pide a un administrador del espacio de trabajo que pase el plan a Business.",
+    "upgrade_card": {
+      "agent_invocation_members": {
+        "title": "Permitir que personas concretas ejecuten un agente es una función de Business",
+        "description": "\"Solo yo\" y \"Todo el espacio de trabajo\" siguen disponibles en todos los planes."
+      },
+      "runtime_member_sharing": {
+        "title": "Compartir un runtime con miembros concretos es una función de Business",
+        "description": "\"Privado\" y \"Público\" siguen disponibles en todos los planes."
+      }
+    }
   },
   "trial": {
     "status": {
@@ -310,7 +347,7 @@
     },
     "features": {
       "title": "Funciones de Business en tu prueba",
-      "description": "Al terminar la prueba no se elimina ni se desactiva nada; solo no podrás añadir más.",
+      "description": "Cuando termine la prueba, no se eliminará ni se desactivará nada: la configuración existente seguirá activa en modo de solo lectura y no podrás añadir nuevas opciones.",
       "private_projects": {
         "name": "Proyectos privados",
         "after": "Siguen siendo privados después de la prueba. Sus listas de acceso pasan a solo lectura."
@@ -320,5 +357,35 @@
         "after": "Los invitados actuales conservan su acceso después de la prueba. Para invitar a nuevos invitados necesitas Pro o Business."
       }
     }
+  },
+  "storage_limit": {
+    "title": "{{filename}} no se subió",
+    "copy_title": "No se creó la subincidencia: no se pudieron copiar sus adjuntos de origen",
+    "admin_body": "El almacenamiento de adjuntos está lleno ({{used}} / {{limit}}). Los adjuntos existentes no se ven afectados.",
+    "admin_body_no_figures": "El almacenamiento de adjuntos está lleno. Los adjuntos existentes no se ven afectados.",
+    "member_body": "El almacenamiento de adjuntos está lleno. Pide a un administrador que actualice el plan o elimina los adjuntos que ya no necesites.",
+    "dismiss": "Cerrar"
+  },
+  "autopilot_addon": {
+    "title": "Comprar más ejecuciones de automatización",
+    "description": "Las ejecuciones adicionales valen para este mes y las comparte todo el espacio de trabajo. Primero se usa la asignación del plan.",
+    "options_label": "Número de ejecuciones",
+    "option": "{{runs}} ejecuciones",
+    "usage_summary": "{{used}} / {{limit}} usadas este mes; se restablece el {{date}}.",
+    "pay": "Continuar para pagar {{amount}}",
+    "pay_fallback": "Continuar al pago",
+    "cancel": "Cancelar",
+    "loading": "Cargando el precio del complemento…",
+    "unavailable": "Este espacio de trabajo no puede comprar ejecuciones adicionales ahora.",
+    "conflict": "No se pueden comprar ejecuciones ahora o el precio cambió. Revisa las opciones y vuelve a intentarlo.",
+    "error": "No se pudo abrir la página de pago. Vuelve a intentarlo.",
+    "success_title": "Ejecuciones añadidas",
+    "success_description": "Se añadieron {{runs}} ejecuciones para este mes. Las automatizaciones se reanudan en su próxima ejecución.",
+    "confirming_title": "Confirmando el pago",
+    "confirming_description": "Las ejecuciones se añaden en cuanto Stripe confirma el pago. Revisa el uso más abajo en unos momentos.",
+    "not_paid_title": "Pago no completado",
+    "not_paid_description": "No se cobró nada ni se añadieron ejecuciones.",
+    "cancel_title": "Pago cancelado",
+    "cancel_description": "No se cobró nada."
   }
 }

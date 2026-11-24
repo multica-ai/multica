@@ -16,7 +16,7 @@ An autopilot starts new work from a schedule or webhook, and can create a new is
 
 ## Create an autopilot
 
-Open **Autopilot** in the sidebar, pick a template or start from scratch, then configure:
+Open **Auto** in the app rail, pick a template or start from scratch, then configure:
 
 - **Name**: what this autopilot is responsible for;
 - **Runbook**: the goal, background, constraints, and steps the agent reads on every run;
@@ -28,7 +28,7 @@ Open **Autopilot** in the sidebar, pick a template or start from scratch, then c
 
 An autopilot is enabled by default after saving. **Run now** executes the full flow once at any time, without waiting for the schedule.
 
-Below is an autopilot whose execution mode is Create issue. Click **Run now**, or skip ahead to the next scheduled time, and watch it create an issue, hand it to the agent, and complete the run.
+The clip below opens a Create-issue autopilot (**Weekly dead-code audit**), triggers **Run now**, and follows the created run and linked issue in Run history.
 
 <AutopilotDemo />
 
@@ -177,7 +177,7 @@ Pausing manually stops schedules, webhooks, and **Run now**. Deletion is actuall
 
 ## Permissions
 
-- Any workspace member can create autopilots;
+- Members with the `owner`, `admin`, or `member` role can create autopilots.
 - the creator and workspace owners/admins can edit, run, delete, and manage triggers;
 - the creator and owners/admins can add collaborators to management access;
 - collaborators can edit, run, and manage triggers, but can't grant access to others;

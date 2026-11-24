@@ -16,6 +16,7 @@ import {
   RefreshCw,
 } from "@multica/ui/icons";
 import { ApiError, errorCode } from "@multica/core/api";
+import { prefersReducedMotion } from "@multica/core/appearance";
 import { autopilotQuotaUsageOptions } from "@multica/core/autopilots";
 import {
   useChangeWorkspacePlan,
@@ -31,8 +32,17 @@ import {
   listCheckoutHeldInvites,
   memberLimitKeys,
   memberLimitOptions,
+  appCallUsageKeys,
+  appCallUsageOptions,
+  resolveAppCallRow,
+  formatStorageBytes,
+  resolveStorageRow,
+  storageUsageKeys,
+  storageUsageOptions,
+  storageUsageProgress,
   readUpgradeInvite,
   type HeldInvite,
+  workspaceFeatureKeys,
   workspaceSubscriptionPricesOptions,
   workspaceSubscriptionSummaryOptions,
 } from "@multica/core/billing";
@@ -96,6 +106,7 @@ import {
   SettingsSection,
   SettingsTab,
 } from "./settings-layout";
+import { AppCallsLimitRow } from "./app-calls-limit-row";
 import {
   hasActiveWorkspaceSeatCapacity,
   resolveAutopilotUsage,
@@ -103,6 +114,8 @@ import {
   yearlyPriceMonthlyEquivalent,
 } from "./billing-state";
 import { formatStripeMinorAmount } from "./billing-format";
+import { AutopilotAddonDialog } from "../../billing/autopilot-addon-dialog";
+import { AutopilotAddonReturnNotice } from "../../billing/autopilot-addon-return-notice";
 import { BillingTrialSection } from "./billing-trial-section";
 import { settingsHref } from "./settings-navigation";
 
@@ -125,16 +138,18 @@ function scrollToUpgrade() {
   const target = document.querySelector<HTMLElement>(
     `[${SETTINGS_ANCHOR_ATTR}="${UPGRADE_SECTION_ANCHOR}"]`,
   );
-  const reduceMotion =
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  target?.scrollIntoView?.({ block: "start", behavior: reduceMotion ? "auto" : "smooth" });
+  target?.scrollIntoView?.({ block: "start", behavior: prefersReducedMotion() ? "auto" : "smooth" });
 }
 const SEAT_PURCHASE_POLL_TIMEOUT_MS = 2 * 60_000;
 const SEAT_PURCHASE_PREVIEW_DEBOUNCE_MS = 800;
 const PAID_PLANS = ["pro", "business"] as const;
 
-type WorkspaceBillingReturnResult = "success" | "cancel" | "portal";
+type WorkspaceBillingReturnResult =
+  | "success"
+  | "cancel"
+  | "portal"
+  | "autopilot_addon"
+  | "autopilot_addon_cancel";
 
 function parseReturnResult(
   value: string | null,
@@ -143,6 +158,8 @@ function parseReturnResult(
     case "success":
     case "cancel":
     case "portal":
+    case "autopilot_addon":
+    case "autopilot_addon_cancel":
       return value;
     default:
       return null;
@@ -219,23 +236,36 @@ function BillingTabContent() {
   const navigation = useNavigation();
   const workspace = useCurrentWorkspace();
   const wsId = workspace?.id ?? "";
-  const returnResultParam = parseReturnResult(
-    navigation.searchParams.get("result"),
-  );
-  const returnSessionId = navigation.searchParams.get("session_id");
-  const callbackKey =
+  const hasReturnParams =
     navigation.searchParams.has("result") ||
-    navigation.searchParams.has("session_id")
+    navigation.searchParams.has("session_id");
+  // Cloud stamps every Stripe return with the workspace it authorized. A
+  // return URL configured with a fixed workspace slug lands here for every
+  // workspace, so a return that belongs to another one is handed to
+  // /billing/return, which opens the workspace that started it.
+  const returnWorkspaceId = navigation.searchParams.get("workspace_id");
+  const returnBelongsElsewhere =
+    hasReturnParams && !!wsId && !!returnWorkspaceId && returnWorkspaceId !== wsId;
+  const returnResultParam = returnBelongsElsewhere
+    ? null
+    : parseReturnResult(navigation.searchParams.get("result"));
+  const returnSessionId = returnBelongsElsewhere
+    ? null
+    : navigation.searchParams.get("session_id");
+  const callbackKey =
+    hasReturnParams && !returnBelongsElsewhere
       ? `${navigation.searchParams.get("result") ?? ""}:${returnSessionId ?? ""}`
       : null;
   const [returnState, setReturnState] = useState<{
     workspaceId: string | null;
     result: WorkspaceBillingReturnResult | null;
     observedAt: number | null;
+    sessionId: string | null;
   }>(() => ({
     workspaceId: wsId || null,
     result: returnResultParam,
     observedAt: returnResultParam === "success" ? Date.now() : null,
+    sessionId: returnSessionId,
   }));
   const returnStateMatchesWorkspace =
     returnState.workspaceId === null || returnState.workspaceId === wsId;
@@ -304,6 +334,16 @@ function BillingTabContent() {
     inputKey: string;
     attempts: number;
   } | null>(null);
+  // Set when a purchase was refused because another seat purchase or plan
+  // change holds the subscription. The refetched summary would otherwise start
+  // a new quote at once and replace that explanation; the user retries by
+  // editing the seat count or reopening the dialog.
+  const seatPurchaseBlockedRef = useRef(false);
+  const blockSeatPurchase = () => {
+    seatPurchaseBlockedRef.current = true;
+    // A quote already in flight must not clear the explanation either.
+    seatPreviewInputRef.current = "";
+  };
   const consumedCallbackKeyRef = useRef<string | null>(null);
   const queryClient = useQueryClient();
   // The invitation Members held back for the checkout this page is about to
@@ -340,6 +380,8 @@ function BillingTabContent() {
   // the person to send or discard.
   const [heldInvitesToConfirm, setHeldInvitesToConfirm] = useState<HeldInvite[]>([]);
   const memberLimitQuery = useQuery(memberLimitOptions(wsId));
+  const storageUsageQuery = useQuery(storageUsageOptions(wsId));
+  const appCallUsageQuery = useQuery(appCallUsageOptions(wsId));
 
   useEffect(() => {
     checkoutIntentRef.current = null;
@@ -365,6 +407,19 @@ function BillingTabContent() {
     setSeatPurchaseMessage(null);
   }, [wsId]);
 
+  useEffect(() => {
+    if (!returnBelongsElsewhere) return;
+    const forward = new URLSearchParams();
+    for (const key of ["workspace_id", "result", "session_id"]) {
+      const value = navigation.searchParams.get(key);
+      if (value) forward.set(key, value);
+    }
+    const destination = `/billing/return?${forward.toString()}`;
+    if (consumedCallbackKeyRef.current === destination) return;
+    consumedCallbackKeyRef.current = destination;
+    navigation.replace(destination);
+  }, [navigation, returnBelongsElsewhere]);
+
   // Consume Stripe callback params once, then remove them with replace so a
   // refresh, copied URL, or settings-tab round trip cannot replay a banner or
   // restart subscription polling. Keep unrelated params, especially `tab`.
@@ -375,6 +430,7 @@ function BillingTabContent() {
       workspaceId: wsId || null,
       result: returnResultParam,
       observedAt: returnResultParam === "success" ? Date.now() : null,
+      sessionId: returnSessionId,
     });
     if (returnResultParam === "cancel") checkoutIntentRef.current = null;
 
@@ -385,7 +441,7 @@ function BillingTabContent() {
     navigation.replace(
       query ? `${navigation.pathname}?${query}` : navigation.pathname,
     );
-  }, [callbackKey, navigation, returnResultParam, wsId]);
+  }, [callbackKey, navigation, returnResultParam, returnSessionId, wsId]);
 
   useEffect(() => {
     if (returnResult !== "success") {
@@ -428,6 +484,22 @@ function BillingTabContent() {
   }, [awaitingHeldCheckoutAt, refetchSummary]);
 
   const entitlements = summaryQuery.data?.entitlement;
+  // Absent from an older Cloud; the row is then left out.
+  const dashboardHistoryLimit = entitlements?.limits.dashboardHistoryDays;
+  const dashboardHistoryDays =
+    dashboardHistoryLimit?.mode === "limited" ? dashboardHistoryLimit.limit : null;
+  // A confirmed upgrade or seat purchase changes the storage and app call
+  // limits; the entitlement already carries the new ones, and this refreshes
+  // the usage reads behind them.
+  const subscriptionVersion = summaryQuery.data?.entitlement.version;
+  const seenSubscriptionVersionRef = useRef(subscriptionVersion);
+  useEffect(() => {
+    const seen = seenSubscriptionVersionRef.current;
+    seenSubscriptionVersionRef.current = subscriptionVersion;
+    if (seen === undefined || subscriptionVersion === undefined || seen === subscriptionVersion) return;
+    void queryClient.invalidateQueries({ queryKey: storageUsageKeys.all(wsId) });
+    void queryClient.invalidateQueries({ queryKey: appCallUsageKeys.all(wsId) });
+  }, [queryClient, subscriptionVersion, wsId]);
   // Checkout is done once paid seats are in effect. Neither the plan nor
   // Checkout going away proves it: a trial already reports Business, and a
   // first payment still incomplete also takes Checkout away.
@@ -458,9 +530,14 @@ function BillingTabContent() {
   const quotaUsageQuery = useQuery(autopilotQuotaUsageOptions(wsId));
   const hasSeatCapacity = hasActiveWorkspaceSeatCapacity(summaryQuery.data);
   const canUpgrade = summaryQuery.data?.availableActions.checkout === true;
+  const [autopilotAddonOpen, setAutopilotAddonOpen] = useState(false);
   const pricesQuery = useQuery({
     ...workspaceSubscriptionPricesOptions(wsId),
-    enabled: wsId.length > 0 && canUpgrade,
+    // Also read for the add-on pack price shown on the Buy button.
+    enabled:
+      wsId.length > 0 &&
+      (canUpgrade ||
+        summaryQuery.data?.availableActions.purchaseAutopilotRuns === true),
   });
   const checkoutMutation = useCreateWorkspaceSubscriptionCheckout(wsId);
   const portalMutation = useCreateWorkspaceSubscriptionPortal(wsId);
@@ -534,7 +611,7 @@ function BillingTabContent() {
   ]);
 
   useEffect(() => {
-    if (!seatPurchaseOpen) return;
+    if (!seatPurchaseOpen || seatPurchaseBlockedRef.current) return;
     const value = additionalSeatsInput.trim();
     const additionalSeats = /^\d+$/.test(value) ? Number(value) : 0;
     const currentSeats = summaryQuery.data?.seatCapacity?.purchased ?? null;
@@ -686,8 +763,11 @@ function BillingTabContent() {
       setIsSyncingCheckout(false);
       setSyncTimedOut(false);
       checkoutIntentRef.current = null;
+      // The paid plan is now recorded: re-read the paid features and plan
+      // limits so nothing stays locked under the plan the user just left.
+      void queryClient.invalidateQueries({ queryKey: workspaceFeatureKeys.all(wsId) });
     }
-  }, [isCheckoutConfirmed, isSyncingCheckout]);
+  }, [isCheckoutConfirmed, isSyncingCheckout, queryClient, wsId]);
 
   const sendHeldInvite = (held: HeldInvite) => {
     setHeldInvitesToConfirm([]);
@@ -754,6 +834,11 @@ function BillingTabContent() {
     if (upgradeRequest === "pro" && summary.availableActions.checkout === true) {
       setHeldInvite(held);
       openCheckoutConfirm("pro");
+    } else if (upgradeRequest === "business" && !held && resolvePlanChangeTarget(summary) === "business") {
+      // A full workspace's storage notice (MUL-9489): Pro moves up to Business.
+      handlePlanChangeOpenChange(true, "business");
+    } else if (upgradeRequest === "business" && !held && summary.availableActions.checkout === true) {
+      openCheckoutConfirm("business");
     } else if (held) {
       clearUpgradeInvite(workspaceSlug, held.token);
     }
@@ -1121,6 +1206,7 @@ function BillingTabContent() {
         seatPurchaseIntentRef.current = null;
         setSeatPreview(null);
         if (purchaseErrorCode === "seat_purchase_in_progress") {
+          blockSeatPurchase();
           setSeatPurchaseError(
             t(($) => $.workspace.seat_purchase.in_progress),
           );
@@ -1131,6 +1217,7 @@ function BillingTabContent() {
           purchaseErrorCode === "plan_change_in_progress" ||
           purchaseErrorCode === "plan_change_unresolved"
         ) {
+          blockSeatPurchase();
           setSeatPurchaseError(
             purchaseErrorCode === "plan_change_unresolved"
               ? t(($) => $.workspace.seat_purchase.plan_change_unresolved)
@@ -1169,6 +1256,7 @@ function BillingTabContent() {
   const handleSeatPurchaseOpenChange = (open: boolean) => {
     if (!open && purchaseSeatsMutation.isPending) return;
     setSeatPurchaseOpen(open);
+    seatPurchaseBlockedRef.current = false;
     seatPreviewCapacityRetryRef.current = null;
     setSeatPreviewRefreshing(false);
     if (!open) {
@@ -1262,6 +1350,28 @@ function BillingTabContent() {
       ? formatDateTime(quotaUsage.resetAt, locale)
       : null;
   const numberFormatter = new Intl.NumberFormat(locale);
+  const storageRow = resolveStorageRow(
+    storageUsageQuery.data,
+    storageUsageQuery.isError,
+    entitlements?.limits.storageBytes,
+  );
+  const appCallRow = resolveAppCallRow(
+    appCallUsageQuery.data,
+    appCallUsageQuery.isError,
+    entitlements?.limits.appToolCalls,
+  );
+  // This month's add-on runs, already part of the limit Cloud reports.
+  const autopilotAddon = summaryQuery.data?.autopilotAddon ?? null;
+  const canBuyAutopilotAddon =
+    summaryQuery.data?.availableActions.purchaseAutopilotRuns === true;
+  const autopilotAddonPrice = pricesQuery.data?.autopilotAddon ?? null;
+  const formattedAutopilotAddonPrice = autopilotAddonPrice
+    ? formatStripeMinorAmount(
+        autopilotAddonPrice.unitAmount,
+        autopilotAddonPrice.currency,
+        locale,
+      )
+    : null;
   // Members and pending invitations against the plan's member limit, shown
   // whenever Cloud applies one (observed or enforced).
   const memberLimitData = memberLimitQuery.data;
@@ -1417,6 +1527,20 @@ function BillingTabContent() {
           <AlertTitle>{t(($) => $.workspace.return.cancel_title)}</AlertTitle>
           <AlertDescription>
             {t(($) => $.workspace.return.cancel_description)}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {returnResult === "autopilot_addon" ? (
+        <AutopilotAddonReturnNotice wsId={wsId} sessionId={returnState.sessionId} />
+      ) : null}
+
+      {returnResult === "autopilot_addon_cancel" ? (
+        <Alert>
+          <AlertCircle />
+          <AlertTitle>{t(($) => $.autopilot_addon.cancel_title)}</AlertTitle>
+          <AlertDescription>
+            {t(($) => $.autopilot_addon.cancel_description)}
           </AlertDescription>
         </Alert>
       ) : null}
@@ -1931,6 +2055,13 @@ function BillingTabContent() {
                     reserved: numberFormatter.format(quotaUsage.reserved),
                   })}
                 </p>
+                {autopilotAddon ? (
+                  <p className="text-caption text-muted-foreground tabular-nums">
+                    {t(($) => $.workspace.limits.addon_included, {
+                      runs: numberFormatter.format(autopilotAddon.purchasedRuns),
+                    })}
+                  </p>
+                ) : null}
                 {quotaResetAt ? (
                   <p className="text-caption text-muted-foreground tabular-nums">
                     {t(($) => $.workspace.limits.resets_at, {
@@ -1971,6 +2102,111 @@ function BillingTabContent() {
               </div>
             )}
           </SettingsRow>
+          {storageRow ? (
+            <SettingsRow
+              label={t(($) => $.workspace.limits.storage)}
+              description={t(($) => $.workspace.limits.storage_description)}
+            >
+              {storageRow.kind === "metered" ? (
+                <div className="w-full max-w-72">
+                  <Progress
+                    value={storageUsageProgress(storageRow.usedBytes, storageRow.limitBytes)}
+                    aria-label={t(($) => $.workspace.limits.storage_label)}
+                  >
+                    <ProgressLabel>
+                      {storageRow.reached
+                        ? t(($) => $.workspace.limits.reached)
+                        : t(($) => $.workspace.limits.current_usage)}
+                    </ProgressLabel>
+                    <ProgressValue>
+                      {() =>
+                        t(($) => $.workspace.limits.usage_total, {
+                          total: formatStorageBytes(storageRow.usedBytes, locale),
+                          limit: formatStorageBytes(storageRow.limitBytes, locale),
+                        })
+                      }
+                    </ProgressValue>
+                  </Progress>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2 sm:items-end">
+                  {storageRow.limitBytes !== null ? (
+                    <span className="tabular-nums">
+                      {formatStorageBytes(storageRow.limitBytes, locale)}
+                    </span>
+                  ) : null}
+                  <span className="text-caption text-muted-foreground">
+                    {t(($) => $.workspace.limits.usage_unavailable)}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    aria-label={t(($) => $.workspace.actions.retry_storage)}
+                    aria-busy={storageUsageQuery.isFetching}
+                    disabled={storageUsageQuery.isFetching}
+                    onClick={() => void storageUsageQuery.refetch()}
+                  >
+                    {storageUsageQuery.isFetching ? (
+                      <Loader2 className="animate-spin motion-reduce:animate-none" />
+                    ) : (
+                      <RefreshCw />
+                    )}
+                    {t(($) => $.workspace.actions.retry)}
+                  </Button>
+                </div>
+              )}
+            </SettingsRow>
+          ) : null}
+          {appCallRow ? (
+            <AppCallsLimitRow
+              wsId={wsId}
+              row={appCallRow}
+              retrying={appCallUsageQuery.isFetching}
+              onRetry={() => void appCallUsageQuery.refetch()}
+            />
+          ) : null}
+          {autopilotAddon ? (
+            <SettingsRow
+              label={t(($) => $.workspace.limits.addon)}
+              description={t(($) => $.workspace.limits.addon_description)}
+            >
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+                <span className="text-body text-muted-foreground tabular-nums">
+                  {autopilotAddon.purchasedRuns > 0
+                    ? t(($) => $.workspace.limits.addon_purchased, {
+                        runs: numberFormatter.format(autopilotAddon.purchasedRuns),
+                      })
+                    : t(($) => $.workspace.limits.addon_none)}
+                </span>
+                {canBuyAutopilotAddon ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setAutopilotAddonOpen(true)}
+                  >
+                    <Plus />
+                    {autopilotAddonPrice && formattedAutopilotAddonPrice
+                      ? t(($) => $.workspace.limits.addon_buy, {
+                          price: formattedAutopilotAddonPrice,
+                          runs: numberFormatter.format(autopilotAddonPrice.runsPerPack),
+                        })
+                      : t(($) => $.workspace.limits.addon_buy_fallback)}
+                  </Button>
+                ) : null}
+              </div>
+            </SettingsRow>
+          ) : null}
+          {dashboardHistoryDays !== null ? (
+            <SettingsRow label={t(($) => $.workspace.limits.dashboard_history)}>
+              <span className="tabular-nums">
+                {t(($) => $.workspace.limits.dashboard_history_days, {
+                  days: dashboardHistoryDays,
+                })}
+              </span>
+            </SettingsRow>
+          ) : null}
           {memberLimit ? (
             <SettingsRow label={t(($) => $.workspace.limits.members)}>
               <div className="flex flex-col gap-1 sm:items-end">
@@ -2270,6 +2506,7 @@ function BillingTabContent() {
                 value={additionalSeatsInput}
                 disabled={purchaseSeatsMutation.isPending}
                 onChange={(event) => {
+                  seatPurchaseBlockedRef.current = false;
                   seatPreviewCapacityRetryRef.current = null;
                   setSeatPreviewRefreshing(false);
                   setAdditionalSeatsInput(event.currentTarget.value);
@@ -2479,6 +2716,24 @@ function BillingTabContent() {
                 </p>
               </div>
             ) : null}
+            {planChangePreview &&
+            !planChangeIsUpgrade &&
+            (autopilotAddon?.purchasedRuns ?? 0) > 0 &&
+            planChangePreview.autopilotRunsLimitAfter !== null ? (
+              <Alert>
+                <AlertCircle />
+                <AlertDescription>
+                  {quotaUsage.kind === "metered"
+                    ? t(($) => $.workspace.plan_change.addon_downgrade_notice, {
+                        limit: numberFormatter.format(planChangePreview.autopilotRunsLimitAfter),
+                        used: numberFormatter.format(quotaUsage.total),
+                      })
+                    : t(($) => $.workspace.plan_change.addon_downgrade_notice_limit_only, {
+                        limit: numberFormatter.format(planChangePreview.autopilotRunsLimitAfter),
+                      })}
+                </AlertDescription>
+              </Alert>
+            ) : null}
           </div>
           <DialogFooter>
             <Button
@@ -2568,6 +2823,13 @@ function BillingTabContent() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      {autopilotAddonOpen ? (
+        <AutopilotAddonDialog
+          wsId={wsId}
+          open={autopilotAddonOpen}
+          onOpenChange={setAutopilotAddonOpen}
+        />
+      ) : null}
     </SettingsTab>
   );
 }

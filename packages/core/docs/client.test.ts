@@ -67,12 +67,68 @@ describe("knowledge base client", () => {
     ).rejects.toThrow(/Malformed response/);
   });
 
+  it("asks for the saved state with a collab ticket only when told to", async () => {
+    const client = new ApiClient("https://api.example.test");
+    const fetchMock = respond({ enabled: true, token: "t", document: "doc:d1", expires_at: "2026-11-21T00:00:00Z", state: "AAE=" });
+    expect(await client.createDocCollabTicket("d1", { state: true })).toEqual({
+      enabled: true,
+      token: "t",
+      document: "doc:d1",
+      expiresAt: "2026-11-21T00:00:00Z",
+      state: "AAE=",
+    });
+    expect(fetchMock.mock.calls[0]![1].body).toBe(JSON.stringify({ state: true }));
+
+    const plain = respond({ enabled: true, token: "t", document: "doc:d1" });
+    expect(await client.createDocCollabTicket("d1")).not.toHaveProperty("state");
+    expect(plain.mock.calls[0]![1].body).toBeUndefined();
+  });
+
+  it("treats a malformed collab ticket as live editing off", async () => {
+    const client = new ApiClient("https://api.example.test");
+    respond({ enabled: "yes", state: 42 });
+    expect(await client.createDocCollabTicket("d1", { state: true })).toEqual({ enabled: false });
+    respond({ enabled: true, document: "doc:d1" });
+    expect(await client.createDocCollabTicket("d1")).toEqual({ enabled: false });
+  });
+
   it("falls back to an empty tree and versions on malformed responses", async () => {
     const client = new ApiClient("https://api.example.test");
     respond({ folders: "nope" });
     expect(await client.listDocTree()).toEqual({ folders: [], docs: [] });
     respond({ versions: [{ number: "x" }] });
     expect(await client.listDocVersions("d1")).toEqual([]);
+  });
+
+  it("reads which discussion an agent's version came from, and tolerates a bad link", async () => {
+    const client = new ApiClient("https://api.example.test");
+    const version = {
+      doc_id: "d1", number: 2, title: "Runbook", author_type: "agent", author_id: "a1",
+      created_at: "2026-11-23T00:00:00Z", updated_at: "2026-11-23T00:00:00Z",
+    };
+    respond({ versions: [
+      { ...version, doc_thread_id: "c1", doc_thread_quote: "ship on Friday" },
+      { ...version, number: 1, doc_thread_id: 7 },
+    ] });
+    const [fromDiscussion, malformed] = await client.listDocVersions("d1");
+    expect(fromDiscussion).toMatchObject({ docThreadId: "c1", docThreadQuote: "ship on Friday" });
+    expect(malformed).toMatchObject({ number: 1, docThreadId: null, docThreadQuote: null });
+  });
+
+  it("lists a doc's discussion runs and falls back to none on a malformed response", async () => {
+    const client = new ApiClient("https://api.example.test");
+    const fetchMock = respond({ tasks: [
+      { id: "t1", agent_id: "a1", status: "running", doc_thread_id: "c1", error: null, can_cancel: true },
+      { id: "t2", status: 3 },
+      { id: "t3", agent_id: "a2", status: "failed", doc_thread_id: "c1", can_cancel: "yes" },
+    ] });
+    expect(await client.listDocTaskRuns("d1")).toMatchObject([
+      { id: "t1", agentId: "a1", docThreadId: "c1", canCancel: true },
+      { id: "t3", canCancel: false, error: null },
+    ]);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/api/docs/d1/task-runs");
+    respond({ tasks: "nope" });
+    expect(await client.listDocTaskRuns("d1")).toEqual([]);
   });
 
   it("sends the base revision and surfaces a stale write as a revision conflict", async () => {
@@ -99,6 +155,17 @@ describe("knowledge base client", () => {
         new ApiError("x", 409, "Conflict", { code: "folder_not_empty" }),
       ),
     ).toBe(false);
+  });
+
+  it("treats a stale save that could not be merged as a revision conflict", async () => {
+    respond(
+      { error: "the doc changed in the same place", code: "doc_merge_conflict", actual_revision: 5 },
+      409,
+    );
+    const error = await new ApiClient("https://api.example.test")
+      .updateDoc("d1", { baseRevision: 3, content: "x" })
+      .catch((e: unknown) => e);
+    expect(isDocRevisionConflict(error)).toBe(true);
   });
 
   it("searches docs and keeps the hits it can read", async () => {

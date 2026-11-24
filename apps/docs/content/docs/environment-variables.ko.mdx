@@ -47,6 +47,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `LOG_LEVEL` | 앱 기본값 | 로그 수준 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 종료 신호를 받은 뒤 graceful shutdown을 시작하기 전 대기 시간 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | 오프라인 런타임이 진행 중인 실행을 실패시키지 않고 재연결할 수 있는 유예 시간. `150s` 미만은 `150s`로 조정됨 |
+| `FF_LOCAL_SEARCH_INDEX` | `on` | Web과 Desktop이 워크스페이스별 로컬 검색 인덱스를 유지합니다. `off`로 설정하면 클라이언트가 다시 서버를 통해 검색합니다 |
+| `FF_DASHBOARD_HISTORY_365D` | `on` | 분석 페이지에서 365일 범위를 활성화합니다. 1년 단위 대시보드 쿼리가 데이터베이스에 너무 느리면 `off`로 설정하세요 |
 
 Kubernetes에서 shutdown hold를 설정하면 `terminationGracePeriodSeconds`가 hold와 실제 종료에 필요한 시간의 합보다 커야 합니다.
 
@@ -194,15 +196,8 @@ reverse proxy 뒤에 배포한다면 실제 proxy 네트워크를 입력해야 �
 | Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | base64로 인코딩한 32바이트 Bot token 암호화 키 |
 | WeChat | `MULTICA_WEIXIN_SECRET_KEY` | WeChat 자격 증명과 QR 상태를 암호화하는 Base64 인코딩 32바이트 키 |
 | Telegram | `MULTICA_TELEGRAM_TOOL_PROGRESS` | 스트리밍 응답에 표시할 도구 단계. `auto`(기본값: 개인 채팅은 상세, 그룹은 작업 종류만), `off`, `summary`, `detail` |
-| Composio | `COMPOSIO_API_KEY` | Composio 도구 연결 활성화 |
-| Composio | `COMPOSIO_CALLBACK_BASE_URL` | callback API 주소. `MULTICA_PUBLIC_URL`로 fallback 가능 |
-| Composio | `COMPOSIO_STATE_SECRET` | OAuth state 서명 키. `JWT_SECRET`에서 파생 가능 |
 | 자체 호스팅 Git | `MULTICA_VCS_INTEGRATION_ENABLED` | Forgejo/Gitea/GitLab 연동 스위치. compose에서는 기본 활성화 |
 | 자체 호스팅 Git | `MULTICA_VCS_SECRET_KEY` | base64로 인코딩한 32바이트 암호화 키(`openssl rand -base64 32`). 없으면 전체 기능을 사용할 수 없음 |
-| Plugins | `MULTICA_PLUGIN_SECRET_KEY` | 저장된 secret과 surface 실행 URL을 암호화하는 base64 인코딩 32바이트 키 |
-| Plugins | `MULTICA_PLUGIN_SURFACE_ORIGIN` | 백엔드로 라우팅되는 쿠키 없는 전용 origin. app/API origin과 달라야 하며 `Host`를 보존해야 함 |
-| Plugins | `MULTICA_PLUGIN_API_URL` | 버전을 포함한 Plugin Public API의 전체 Base URL(예: `https://plugin-api.example.com/v1`). 설정하지 않으면 `MULTICA_PUBLIC_URL` + `/v1` 사용 |
-| Plugins | `MULTICA_PLUGIN_DIR` | 개발 중 로컬 plugin bundle을 게시하는 선택적 절대 디렉터리 |
 | 테마 스토어 | `MULTICA_THEME_REGISTRY_URL` | 공식 레지스트리의 fork 등 다른 레지스트리의 `index.json`. [테마와 모양](/themes#셀프-호스팅)을 참고하세요 |
 
 `GITHUB_APP_ID`와 private key를 설정하지 않아도 PR 연결, 미러링, merge 시 상태 변경은 정상적으로 작동합니다. 다만 카드에 CI와 merge 가능 상태가 표시되지 않고 "GitHub에서 선택" 저장소 메뉴도 비활성화됩니다.
@@ -291,15 +286,17 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 
 ### 데몬 로그 [#daemon-logs]
 
+데몬의 기본 로그 수준은 `debug`입니다. 바꾸려면 `LOG_LEVEL`(`debug`, `info`, `warn`, `error`)을 설정하거나 `multica config set log_level info`로 프로필 기본값을 저장합니다. 환경 변수가 프로필보다 우선합니다.
+
 데몬이 백그라운드에서(터미널에 연결되지 않은 채) 실행될 때 로그는 `~/.multica/daemon.log`(이름 있는 프로필은 `~/.multica/profiles/<name>/daemon.log`)에 기록되고 크기에 따라 순환됩니다. 순환된 파일은 gzip으로 압축됩니다.
 
-| 변수 | 기본값 | 설명 |
-|---|---|---|
-| `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `20` | `daemon.log`를 순환할 크기(MB) |
-| `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `5` | 보관할 순환 파일의 최대 개수 |
-| `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `30` | 순환 파일을 보관할 일수 |
+| 변수 | 프로필 설정 키 | 기본값 | 설명 |
+|---|---|---|---|
+| `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `daemon_log_max_size_mb` | `20` | `daemon.log`를 순환할 크기(MB) |
+| `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `daemon_log_max_backups` | `5` | 보관할 순환 파일의 최대 개수 |
+| `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `daemon_log_max_age_days` | `30` | 순환 파일을 보관할 일수 |
 
-세 변수 모두 양의 정수를 받습니다. `0`, 음수, 해석할 수 없는 값은 기본값으로 처리되며 "무제한"이 되지 않습니다. 순환 파일은 개수와 일수 중 먼저 도달한 한도에 따라 삭제됩니다. 충돌 출력은 같은 디렉터리의 `daemon.err.log`에 기록되며, 시작할 때 5MB를 넘으면 `daemon.err.log.1`로 이름이 바뀝니다.
+세 값 모두 양의 정수를 받습니다. `multica --profile dev config set <key> <value>`로 저장하고 `config show`로 저장된 값을 확인합니다. `""`를 전달하면 설정을 지웁니다. 변경 사항은 다음 데몬 시작 또는 재시작에 적용됩니다. 유효한 환경 변수는 프로필보다 우선합니다. 미설정, 공백, 0, 음수, 잘못된 형식 또는 오버플로 값은 유효한 프로필 값으로, 그 값도 없으면 표의 기본값으로 돌아갑니다. 크기와 일수는 바이트와 시간으로 변환할 때도 오버플로가 없어야 하며, `config set`은 잘못된 값을 거부합니다. 0으로 보관 제한을 해제할 수 없습니다. 순환 파일은 개수와 일수 중 먼저 도달한 한도에 따라 삭제됩니다. 충돌 출력은 같은 디렉터리의 `daemon.err.log`에 기록되며, 시작할 때 5MB를 넘으면 `daemon.err.log.1`로 이름이 바뀝니다.
 
 ### 도구별 경로, 모델, 인수
 
@@ -310,6 +307,7 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 
 | 도구 | 접두사 | 모델 변수 |
 |---|---|---|
+| Amp | `MULTICA_AMP` | ✓(Amp 모드 선택, 예: `high`) |
 | Antigravity | `MULTICA_ANTIGRAVITY` | ✓(값은 `agy models`에 표시되는 이름 그대로) |
 | Claude Code | `MULTICA_CLAUDE` | ✓ |
 | CodeArts | `MULTICA_CODEARTS` | ✓ |
@@ -318,7 +316,9 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 | Cursor Agent | `MULTICA_CURSOR` | ✓ |
 | DeepSeek Harness | `MULTICA_DSH` | ✓(값은 dsh 모델 카탈로그의 ID, 예: `deepseek-official/deepseek-chat`) |
 | DevEco Code | `MULTICA_DEVECO` | ✓ |
+| Devin CLI | `MULTICA_DEVIN` | ✓ |
 | Dim | `MULTICA_DIM` | ✓(값은 dim 모델 카탈로그의 ID) |
+| Factory Droid | `MULTICA_DROID` | ✓ |
 | GitHub Copilot CLI | `MULTICA_COPILOT` | ✓ |
 | Grok | `MULTICA_GROK` | ✓ |
 | Hermes | `MULTICA_HERMES` | ✓ |
@@ -336,6 +336,7 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 | QwenPaw | `MULTICA_QWENPAW` | — |
 | Reasonix | `MULTICA_REASONIX` | ✓ |
 | Trae CLI | `MULTICA_TRAECLI` | ✓ |
+| ZCode | `MULTICA_ZCODE` | ✓ |
 | ZeroClaw | `MULTICA_ZEROCLAW` | —(모델은 ZeroClaw의 에이전트 설정에서 관리) |
 
 </Accordion>
@@ -343,7 +344,7 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 
 QwenPaw와 MiniMax Code에는 Multica가 모델을 전달하지 않으므로 모델 변수가 없습니다. 자세한 내용은 [AI 코딩 도구 비교](/providers#모델-출처)를 참고하세요. DeepSeek Harness에는 `MULTICA_DSH_PROFILE_BUNDLE`과 `MULTICA_DSH_PLUGIN_PATH`도 있으며 다음 섹션에서 설명합니다.
 
-컴퓨터 전체 기본 인수 `MULTICA_<PREFIX>_ARGS`는 현재 Claude Code, Codex, CodeBuddy, Qwen Code, QwenPaw 다섯 도구를 지원합니다. 해당 변수는 `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, `MULTICA_QWENPAW_ARGS`입니다. 예시:
+컴퓨터 전체 기본 인수 `MULTICA_<PREFIX>_ARGS`는 현재 Claude Code, Codex, CodeBuddy, Qwen Code, Amp, Factory Droid, QwenPaw 일곱 도구를 지원합니다. 해당 변수는 `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, `MULTICA_AMP_ARGS`, `MULTICA_DROID_ARGS`, `MULTICA_QWENPAW_ARGS`입니다. 예시:
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude
@@ -389,6 +390,7 @@ multica config show
 | `poll_interval` | `30s` | 실행 polling 간격 |
 | `ws_claim_poll_interval` | `3m` | 정상 WebSocket에서 claim 안전 polling의 상한. `poll_interval`과 독립적으로 설정되며 Daemon은 하향 jitter를 적용합니다 |
 | `heartbeat_interval` | `15s` | heartbeat 간격 |
+| `log_level` | `debug` | 데몬 로그 수준(`debug`, `info`, `warn`, `error`). `LOG_LEVEL`이 우선함 |
 | `agent_timeout` | 제한 없음 | 단일 실행의 절대 시간 제한 |
 | `agent_idle_watchdog` | `2h` | 실행 중인 도구 호출이 없을 때의 무응답 상한. `0s`이면 데몬 watchdog 전체가 꺼지며 `agent_tool_watchdog`도 적용되지 않습니다 |
 | `agent_tool_watchdog` | `agent_idle_watchdog`와 동일 | 도구 호출이 실행 중일 때의 무응답 상한. `0s`이면 데몬 watchdog이 무응답 도구 호출 때문에 실행을 멈추지 않으며, 실행은 `agent_timeout`(기본값은 제한 없음)으로만 제한됩니다 |
@@ -397,6 +399,9 @@ multica config show
 | `disable_auto_update` | 환경을 따름 | `true`는 자동 업데이트를 끔. `false`는 로컬 덮어쓰기를 지우고 환경 변수 또는 기본값으로 복귀 |
 | `auto_update_check_interval` | `6h` | 업데이트 확인 간격 |
 | `disable_auto_reload` | 환경을 따름 | `true`는 디스크에서 교체된 바이너리 추적을 끔. `false`는 로컬 덮어쓰기를 지움. `disable_auto_update`와 별도로 해석됨 |
+| `daemon_log_max_size_mb` | `20` | `daemon.log`를 순환할 크기(MB). [데몬 로그](#daemon-logs) 참고 |
+| `daemon_log_max_backups` | `5` | 보관할 순환 파일의 최대 개수 |
+| `daemon_log_max_age_days` | `30` | 순환 파일을 보관할 일수 |
 
 값에는 다음 규칙이 적용됩니다.
 

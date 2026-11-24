@@ -15,14 +15,14 @@
     "copy_link": "Copy link"
   },
   "errors": {
-    "move": "Couldn't move it",
-    "delete": "Couldn't delete it",
-    "save": "Couldn't save"
+    "move": "Couldn't move item",
+    "delete": "Couldn't delete item",
+    "save": "Couldn't save changes"
   },
   "move": {
     "title": "Move \"{{title}}\"",
     "destination": "Destination",
-    "root": "Knowledge base (top level)",
+    "root": "Docs (top level)",
     "current": "Current",
     "confirm": "Move"
   },
@@ -31,7 +31,7 @@
     "description": "\"{{title}}\" and its whole history will be deleted. This can't be undone.",
     "confirm": "Delete",
     "folder_title": "Delete this folder?",
-    "folder_description": "Only empty folders can be deleted."
+    "folder_description": "Delete \"{{title}}\"? Only empty folders can be deleted. This can't be undone."
   },
   "tree": {
     "more": "More actions for {{title}}",
@@ -48,23 +48,57 @@
     "conflict": "Updated by {{name}}. Your draft is kept. Reload to continue.",
     "reload": "Reload latest",
     "draft": "Your saved draft",
-    "unsaved_changes": "Unsaved changes"
+    "unsaved_changes": "Unsaved changes",
+    "live": "Live",
+    "reconnecting": "Reconnecting...",
+    "connecting": "Connecting...",
+    "title_save_failed": "Title not saved",
+    "editing_now": "Editing now"
   },
   "history": {
     "title": "History",
     "current": "Current",
     "restore": "Restore this version",
-    "loading": "Loading..."
+    "loading": "Loading...",
+    "from_discussion": "From comment: {{quote}}"
   },
   "not_found": {
     "title": "Doc not found",
     "description": "It may have been deleted."
   },
   "edited": "Edited {{time}}",
+  "view_history": "View history",
   "outline": "Outline",
   "link_copied": "Link copied",
   "unavailable": {
-    "title": "Docs isn't available here",
+    "title": "Docs isn't enabled in this workspace",
     "description": "This workspace doesn't have Docs turned on."
+  },
+  "comments": {
+    "title": "Comments",
+    "add": "Comment",
+    "open": "Open {{count}}",
+    "resolved": "Resolved {{count}}",
+    "close": "Close comments",
+    "quote_missing": "The commented text was changed",
+    "reply_placeholder": "Reply, or @ someone...",
+    "new_placeholder": "Add a comment, or @ someone...",
+    "submit": "Comment",
+    "reply": "Reply",
+    "cancel": "Cancel",
+    "resolve": "Resolve",
+    "reopen": "Reopen",
+    "delete": "Delete comment",
+    "resolved_by": "Resolved by {{name}}",
+    "replies_one": "{{count}} reply",
+    "replies_other": "{{count}} replies",
+    "empty_open": "No open comments. Select text and choose Comment to start one.",
+    "empty_resolved": "No resolved comments.",
+    "errors": {
+      "save": "Could not post the comment",
+      "delete": "Could not delete the comment",
+      "resolve": "Could not update the comment"
+    },
+    "run_waiting_retry": "Waiting to retry"
   }
 }

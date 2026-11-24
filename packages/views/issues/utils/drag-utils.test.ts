@@ -1,9 +1,10 @@
 // @vitest-environment node
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Issue } from "@multica/core/types";
 import type { BoardColumnGroup } from "../components/board-column";
 import {
+  IssueCardPointerSensor,
   buildColumns,
   getIssueGroupId,
   getMoveAnchors,
@@ -257,5 +258,33 @@ describe("project grouping", () => {
       [projectGroupId("proj-1")]: ["A"],
       [projectGroupId(null)]: ["B"],
     });
+  });
+});
+
+describe("IssueCardPointerSensor", () => {
+  // A stand-in DOM: `contains` is all the activator reads from the card.
+  const card = { contains: (node: unknown) => node === inside };
+  const inside = { id: "title" };
+  const portaled = { id: "hover-card" };
+  function press(target: unknown) {
+    const onActivation = vi.fn();
+    const [activator] = IssueCardPointerSensor.activators;
+    const started = activator!.handler(
+      { currentTarget: card, target, nativeEvent: { isPrimary: true, button: 0 } } as never,
+      { onActivation },
+    );
+    return { started, onActivation };
+  }
+
+  it("starts a drag for a press inside the card", () => {
+    const { started, onActivation } = press(inside);
+    expect(started).toBe(true);
+    expect(onActivation).toHaveBeenCalledOnce();
+  });
+
+  it("ignores a press that reaches the card from a portaled popup", () => {
+    const { started, onActivation } = press(portaled);
+    expect(started).toBe(false);
+    expect(onActivation).not.toHaveBeenCalled();
   });
 });

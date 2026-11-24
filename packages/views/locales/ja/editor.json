@@ -17,7 +17,7 @@
     },
     "heading_dropdown": {
       "text": "テキスト",
-      "normal_text": "標準テキスト",
+      "normal_text": "テキスト",
       "heading_1": "見出し 1",
       "heading_2": "見出し 2",
       "heading_3": "見出し 3"
@@ -44,7 +44,7 @@
     "image_copied": "画像をコピーしました",
     "copy_image_failed": "画像をコピーできませんでした",
     "canvas_label": "画像キャンバス。ドラッグで移動、スクロールで拡大縮小、ダブルクリックで実際のサイズに切り替えできます。",
-    "unavailable": "この画像は表示できないためスキップしました。"
+    "unavailable": "この画像は利用できなくなったためスキップされました。"
   },
   "canvas": {
     "zoom_in": "拡大",
@@ -100,7 +100,7 @@
     "copy_failed": "コピーできませんでした"
   },
   "mention": {
-    "group_users": "ユーザー",
+    "group_users": "メンバー",
     "group_issues": "タスク",
     "group_projects": "プロジェクト",
     "group_docs": "ドキュメント",
@@ -118,8 +118,6 @@
     "html_preview": "HTML プレビュー",
     "close_preview": "閉じる",
     "copy_code": "コードをコピー",
-    "show_preview": "プレビューを表示",
-    "show_source": "ソースを表示",
     "fullscreen": "全画面"
   },
   "dynamic_block": {
@@ -133,7 +131,10 @@
     "error_mermaid": "この図を描画できませんでした",
     "error_at_line": "{{message}}（{{line}} 行目）",
     "view_source": "ソースを表示",
-    "copy_error": "エラーをコピー"
+    "copy_error": "エラーをコピー",
+    "title": "タイトル",
+    "rename": "名前を変更",
+    "add_title": "タイトルを追加"
   },
   "file_card": {
     "uploading": "{{filename}} をアップロード中"

@@ -88,6 +88,62 @@ disabled_config="$(
 )"
 require_rendered_value "$disabled_config" 'MULTICA_VCS_INTEGRATION_ENABLED: "false"'
 
+# Live co-editing is off by default and then renders nothing: no collab
+# workload, and no backend setting that would point the API at one.
+default_all="$(helm template multica "$CHART_DIR")"
+reject_rendered_value "$default_all" 'multica-collab'
+reject_rendered_value "$default_all" 'COLLAB_'
+
+collab_all="$(helm template multica "$CHART_DIR" --set collab.enabled=true)"
+require_rendered_value "$collab_all" 'name: multica-collab'
+require_rendered_value "$collab_all" 'image: "ghcr.io/multica-ai/multica-collab:'
+require_rendered_value "$collab_all" 'value: "http://multica-backend:8080"'
+collab_deployment="$(helm template multica "$CHART_DIR" --set collab.enabled=true --show-only templates/collab.yaml | sed -n '/kind: Deployment/,$p')"
+require_rendered_value "$collab_deployment" 'replicas: 1'
+require_rendered_value "$collab_deployment" 'type: Recreate'
+require_rendered_value "$collab_deployment" 'terminationGracePeriodSeconds: 30'
+require_rendered_value "$collab_deployment" 'path: /health'
+require_rendered_value "$collab_deployment" 'key: COLLAB_SECRET'
+# The backend reports the host of LOCAL_UPLOAD_BASE_URL as its CDN domain
+# without S3, and CLOUDFRONT_DOMAIN with it; collab must agree.
+require_rendered_value "$collab_deployment" 'value: "api.multica.dev.lan"'
+collab_s3="$(helm template multica "$CHART_DIR" --set collab.enabled=true \
+  --set backend.config.s3Bucket=bucket --set backend.config.cloudfrontDomain=cdn.example.com \
+  --show-only templates/collab.yaml)"
+require_rendered_value "$collab_s3" 'value: "cdn.example.com"'
+
+collab_backend="$(helm template multica "$CHART_DIR" --set collab.enabled=true --show-only templates/backend.yaml)"
+require_rendered_value "$collab_backend" 'value: "http://multica-collab:8095"'
+require_rendered_value "$collab_backend" 'key: COLLAB_SECRET'
+require_rendered_value "$collab_backend" 'optional: true'
+# External postgres and no extra CAs leave the backend env block otherwise empty.
+collab_backend_external="$(helm template multica "$CHART_DIR" --set collab.enabled=true \
+  --set postgres.external.enabled=true --show-only templates/backend.yaml)"
+require_rendered_value "$collab_backend_external" 'name: COLLAB_INTERNAL_URL'
+reject_rendered_value "$collab_backend_external" 'name: DATABASE_URL'
+
+# Feature flags render nothing by default, so every flag keeps the default the
+# server gives it. Listed flags land in the ConfigMap the backend loads with
+# envFrom, under the FF_<KEY> name the server looks up.
+reject_rendered_value "$default_all" 'FF_'
+flags_config="$(
+  helm template multica "$CHART_DIR" \
+    --show-only templates/configmap.yaml \
+    --set backend.config.featureFlags.docs_v1=true \
+    --set backend.config.featureFlags.local_search_index=false \
+    --set-string 'backend.config.featureFlags.checkout\.algo-v2=25%'
+)"
+require_rendered_value "$flags_config" 'FF_DOCS_V1: "true"'
+require_rendered_value "$flags_config" 'FF_LOCAL_SEARCH_INDEX: "false"'
+require_rendered_value "$flags_config" 'FF_CHECKOUT_ALGO_V2: "25%"'
+# `helm upgrade --reuse-values` from a chart without featureFlags.
+legacy_flags_config="$(
+  helm template multica "$CHART_DIR" \
+    --show-only templates/configmap.yaml \
+    --set backend.config.featureFlags=null
+)"
+reject_rendered_value "$legacy_flags_config" 'FF_'
+
 capacity_config="$(
   helm template multica "$CHART_DIR" \
     --show-only templates/configmap.yaml \

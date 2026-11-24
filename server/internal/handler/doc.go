@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -87,9 +88,17 @@ type DocVersionResponse struct {
 	ActionRef  *int32  `json:"action_ref"`
 	TaskID     *string `json:"task_id"`
 	IssueID    *string `json:"issue_id"`
-	CreatedAt  string  `json:"created_at"`
-	UpdatedAt  string  `json:"updated_at"`
-	Content    *string `json:"content,omitempty"`
+	// DocThreadID and DocThreadQuote name the discussion an agent was
+	// answering when it made this edit; null when it was not, or when that
+	// discussion has since been deleted.
+	DocThreadID    *string `json:"doc_thread_id"`
+	DocThreadQuote *string `json:"doc_thread_quote"`
+	// Contributors lists everyone whose edits the version carries. Versions
+	// saved before live co-editing have none; their author is the one.
+	Contributors []DocContributor `json:"contributors"`
+	CreatedAt    string           `json:"created_at"`
+	UpdatedAt    string           `json:"updated_at"`
+	Content      *string          `json:"content,omitempty"`
 }
 
 func docToSummary(d db.Doc) DocSummaryResponse {
@@ -141,18 +150,19 @@ func docFolderToResponse(f db.DocFolder) DocFolderResponse {
 
 func docVersionToResponse(v db.DocVersion, withContent bool) DocVersionResponse {
 	resp := DocVersionResponse{
-		DocID:      uuidToString(v.DocID),
-		Number:     v.Number,
-		Title:      v.Title,
-		AuthorType: v.AuthorType,
-		AuthorID:   uuidToString(v.AuthorID),
-		Message:    v.Message,
-		Action:     v.Action,
-		ActionRef:  int4ToPtr(v.ActionRef),
-		TaskID:     uuidToPtr(v.TaskID),
-		IssueID:    uuidToPtr(v.IssueID),
-		CreatedAt:  timestampToString(v.CreatedAt),
-		UpdatedAt:  timestampToString(v.UpdatedAt),
+		DocID:        uuidToString(v.DocID),
+		Number:       v.Number,
+		Title:        v.Title,
+		AuthorType:   v.AuthorType,
+		AuthorID:     uuidToString(v.AuthorID),
+		Message:      v.Message,
+		Action:       v.Action,
+		ActionRef:    int4ToPtr(v.ActionRef),
+		TaskID:       uuidToPtr(v.TaskID),
+		IssueID:      uuidToPtr(v.IssueID),
+		Contributors: parseDocContributors(v.Contributors),
+		CreatedAt:    timestampToString(v.CreatedAt),
+		UpdatedAt:    timestampToString(v.UpdatedAt),
 	}
 	if withContent {
 		content := v.Content
@@ -162,19 +172,26 @@ func docVersionToResponse(v db.DocVersion, withContent bool) DocVersionResponse 
 }
 
 func docVersionRowToResponse(v db.ListDocVersionsRow) DocVersionResponse {
+	var threadQuote *string
+	if v.DocThreadID.Valid {
+		threadQuote = &v.DocThreadQuote
+	}
 	return DocVersionResponse{
-		DocID:      uuidToString(v.DocID),
-		Number:     v.Number,
-		Title:      v.Title,
-		AuthorType: v.AuthorType,
-		AuthorID:   uuidToString(v.AuthorID),
-		Message:    v.Message,
-		Action:     v.Action,
-		ActionRef:  int4ToPtr(v.ActionRef),
-		TaskID:     uuidToPtr(v.TaskID),
-		IssueID:    uuidToPtr(v.IssueID),
-		CreatedAt:  timestampToString(v.CreatedAt),
-		UpdatedAt:  timestampToString(v.UpdatedAt),
+		DocThreadID:    uuidToPtr(v.DocThreadID),
+		DocThreadQuote: threadQuote,
+		DocID:          uuidToString(v.DocID),
+		Number:         v.Number,
+		Title:          v.Title,
+		AuthorType:     v.AuthorType,
+		AuthorID:       uuidToString(v.AuthorID),
+		Message:        v.Message,
+		Action:         v.Action,
+		ActionRef:      int4ToPtr(v.ActionRef),
+		TaskID:         uuidToPtr(v.TaskID),
+		IssueID:        uuidToPtr(v.IssueID),
+		Contributors:   parseDocContributors(v.Contributors),
+		CreatedAt:      timestampToString(v.CreatedAt),
+		UpdatedAt:      timestampToString(v.UpdatedAt),
 	}
 }
 
@@ -303,13 +320,24 @@ func (h *Handler) ListDocTree(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetDoc(w http.ResponseWriter, r *http.Request) {
-	_, wsUUID, _, ok := h.docWorkspace(w, r)
+	userID, wsUUID, workspaceID, ok := h.docWorkspace(w, r)
 	if !ok {
 		return
 	}
 	doc, ok := h.loadDoc(w, r, wsUUID)
 	if !ok {
 		return
+	}
+	// Agents and the CLI read what people have typed so far. Editors in the
+	// app already see it live, and refetch on every save.
+	if h.Collab != nil {
+		actorType, _ := h.resolveActor(r, userID, workspaceID)
+		if actorType == "agent" || r.URL.Query().Get("flush") == "true" {
+			h.flushDocCollab(r.Context(), doc.ID)
+			if doc, ok = h.loadDoc(w, r, wsUUID); !ok {
+				return
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, DocResponse{DocSummaryResponse: docToSummary(doc), Content: doc.Content})
 }
@@ -372,18 +400,23 @@ func (h *Handler) CreateDoc(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := qtx.InsertDocVersion(ctx, db.InsertDocVersionParams{
-		DocID:       doc.ID,
-		WorkspaceID: wsUUID,
-		Number:      1,
-		Title:       doc.Title,
-		Content:     doc.Content,
-		AuthorType:  actorType,
-		AuthorID:    parseUUID(actorID),
-		Message:     req.Message,
-		Action:      "create",
-		TaskID:      taskID,
-		IssueID:     issueID,
+		DocID:        doc.ID,
+		WorkspaceID:  wsUUID,
+		Number:       1,
+		Title:        doc.Title,
+		Content:      doc.Content,
+		AuthorType:   actorType,
+		AuthorID:     parseUUID(actorID),
+		Message:      req.Message,
+		Action:       "create",
+		TaskID:       taskID,
+		IssueID:      issueID,
+		Contributors: docContributorsJSON([]DocContributor{{Type: actorType, ID: actorID}}),
 	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create doc")
+		return
+	}
+	if err := recordDocRevision(ctx, qtx, doc); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create doc")
 		return
 	}
@@ -459,6 +492,12 @@ func (h *Handler) UpdateDoc(w http.ResponseWriter, r *http.Request) {
 	taskID, issueID := h.docTaskContext(r, actorType)
 
 	ctx := r.Context()
+	if h.Collab != nil {
+		actor := h.collabActor(ctx, actorType, actorID)
+		if h.updateDocViaCollab(w, r, wsUUID, docUUID, req, actor, taskID) {
+			return
+		}
+	}
 	tx, err := h.TxStarter.Begin(ctx)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update doc")
@@ -507,42 +546,10 @@ func (h *Handler) UpdateDoc(w http.ResponseWriter, r *http.Request) {
 	}
 	// Autosave writes every pause; keep one snapshot per editing stretch
 	// instead of one per pause.
-	merged := false
-	if req.Action == "edit" && req.Message == "" {
-		rows, err := qtx.MergeDocEditIntoVersion(ctx, db.MergeDocEditIntoVersionParams{
-			Title: title, Content: content, DocID: doc.ID, Number: doc.VersionCount,
-			AuthorType: actorType, AuthorID: parseUUID(actorID), TaskID: taskID,
-		})
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to save version")
-			return
-		}
-		merged = rows == 1
-	}
-	number := doc.VersionCount
-	if !merged {
-		number++
-		var actionRef pgtype.Int4
-		if req.Action == "restore" {
-			actionRef = pgtype.Int4{Int32: *req.ActionRef, Valid: true}
-		}
-		if _, err := qtx.InsertDocVersion(ctx, db.InsertDocVersionParams{
-			DocID: doc.ID, WorkspaceID: wsUUID, Number: number, Title: title, Content: content,
-			AuthorType: actorType, AuthorID: parseUUID(actorID), Message: req.Message,
-			Action: req.Action, ActionRef: actionRef, TaskID: taskID, IssueID: issueID,
-		}); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to save version")
-			return
-		}
-	}
-	updated, err := qtx.UpdateDocContent(ctx, db.UpdateDocContentParams{
-		Title:         title,
-		Content:       content,
-		VersionCount:  number,
-		UpdatedByType: actorType,
-		UpdatedByID:   parseUUID(actorID),
-		ID:            doc.ID,
-		WorkspaceID:   wsUUID,
+	updated, number, err := commitDocWrite(ctx, qtx, doc, docWrite{
+		title: title, content: content, actorType: actorType, actorID: actorID,
+		message: req.Message, action: req.Action, actionRef: req.ActionRef,
+		taskID: taskID, issueID: issueID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update doc")
@@ -652,12 +659,16 @@ func (h *Handler) DeleteDoc(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "failed to delete doc")
 		return
 	}
+	// Runs answering the doc's discussions have nothing left to answer.
+	if err := h.TaskService.CancelTasksForDoc(ctx, id); err != nil {
+		slog.Warn("delete doc: cancel doc runs failed", "doc_id", uuidToString(id), "error", err)
+	}
 	h.publish(protocol.EventDocDeleted, workspaceID, actorType, actorID, map[string]any{"doc_id": uuidToString(id)})
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) ListDocVersions(w http.ResponseWriter, r *http.Request) {
-	_, wsUUID, _, ok := h.docWorkspace(w, r)
+	_, wsUUID, workspaceID, ok := h.docWorkspace(w, r)
 	if !ok {
 		return
 	}
@@ -671,14 +682,19 @@ func (h *Handler) ListDocVersions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	versions := make([]DocVersionResponse, len(rows))
+	issueIDs := make([]pgtype.UUID, len(rows))
 	for i, v := range rows {
 		versions[i] = docVersionRowToResponse(v)
+		issueIDs[i] = v.IssueID
+	}
+	if !h.hideDocVersionIssues(w, r, workspaceID, versions, issueIDs) {
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"versions": versions})
 }
 
 func (h *Handler) GetDocVersion(w http.ResponseWriter, r *http.Request) {
-	_, wsUUID, _, ok := h.docWorkspace(w, r)
+	_, wsUUID, workspaceID, ok := h.docWorkspace(w, r)
 	if !ok {
 		return
 	}
@@ -700,7 +716,40 @@ func (h *Handler) GetDocVersion(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, docVersionToResponse(v, true))
+	versions := []DocVersionResponse{docVersionToResponse(v, true)}
+	if !h.hideDocVersionIssues(w, r, workspaceID, versions, []pgtype.UUID{v.IssueID}) {
+		return
+	}
+	writeJSON(w, http.StatusOK, versions[0])
+}
+
+// hideDocVersionIssues clears issue_id on the versions whose issue sits in a
+// private project the caller cannot see (MUL-8472). The edit and its task_id
+// stay, as a restricted run does in an agent's history. versions and issueIDs
+// are parallel slices. It writes a 500 and returns false when access cannot
+// be resolved.
+func (h *Handler) hideDocVersionIssues(w http.ResponseWriter, r *http.Request, workspaceID string, versions []DocVersionResponse, issueIDs []pgtype.UUID) bool {
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return false
+	}
+	named := make([]pgtype.UUID, 0, len(issueIDs))
+	for _, id := range issueIDs {
+		if id.Valid {
+			named = append(named, id)
+		}
+	}
+	hiddenIssues, err := h.hiddenIssueIDs(r, hidden, named)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve project access")
+		return false
+	}
+	for i, id := range issueIDs {
+		if _, hide := hiddenIssues[id]; hide {
+			versions[i].IssueID = nil
+		}
+	}
+	return true
 }
 
 // --- Folders ---

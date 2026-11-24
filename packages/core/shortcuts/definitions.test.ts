@@ -174,6 +174,26 @@ describe("keyboard shortcut definitions", () => {
     expect(formatShortcut(shortcut, "linux")).toBe("Ctrl+Enter");
   });
 
+  it("formats macOS modifiers in canonical Control-Option-Shift-Command order", () => {
+    expect(
+      formatShortcut(
+        createShortcutChord("S", {
+          primary: true,
+          control: true,
+          alt: true,
+          shift: true,
+        }),
+        "macos",
+      ),
+    ).toBe("⌃⌥⇧⌘S");
+    expect(
+      formatShortcut(
+        createShortcutChord("J", { primary: true, shift: true }),
+        "macos",
+      ),
+    ).toBe("⇧⌘J");
+  });
+
   it("detects modern and legacy browser platform signals", () => {
     vi.stubGlobal("navigator", {
       userAgentData: { platform: "macOS" },

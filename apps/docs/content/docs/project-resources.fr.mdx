@@ -40,6 +40,8 @@ La `ref` d'une ressource définit la branche, le tag ou le commit que les checko
 
 Pour un dépôt géré, l'agent démarre dans le dossier de travail de la tâche. En général, `multica repo checkout` crée un sous-dossier pour le dépôt et affiche son chemin. Exécutez depuis ce chemin les commandes qui exigent la racine du dépôt. Si le processus de l'agent doit lui-même démarrer à la racine et que vous contrôlez la machine du runtime, ajoutez un checkout existant comme dossier local. Les modes `in_place` et `worktree` démarrent tous deux l'agent à la racine d'un dépôt ; pour les dépôts git, privilégiez `worktree` pour isoler les exécutions et les lancer en parallèle. Voir [Comment les exécutions partagent le répertoire](#comment-les-exécutions-partagent-le-répertoire).
 
+Si le sous-dossier prévu contient déjà un autre dépôt ou des fichiers résiduels et que le checkout signale un conflit de chemin, exécutez `multica repo checkout` depuis un autre dossier dans le dossier de travail de la même tâche. Conservez le dossier d’origine jusqu’à ce que vous ayez vérifié si son contenu vous est encore utile.
+
 ## Ajouter un répertoire local
 
 L'interface d'ajout d'un répertoire local n'existe que dans l'application de bureau, car les navigateurs ne peuvent pas sélectionner de dossiers sur votre ordinateur.
@@ -95,6 +97,8 @@ Un répertoire local dispose de deux modes d'exécution, définis par ressource 
 <Tab value="in_place (Direct, par défaut)" id="in-place">
 
 L'agent travaille directement dans votre répertoire, et les exécutions ont lieu une à la fois. Lorsque deux exécutions utilisent le même répertoire réel, la seconde passe en `waiting_local_directory` et reprend une fois que la première a libéré le répertoire. Deux chemins qui mènent au même répertoire via des liens symboliques différents sont sérialisés de la même manière.
+
+Si le chemin lié est introuvable au démarrage d’une exécution en attente, celle-ci signale que le dossier du projet n’existe plus. Restaurez le dossier ou mettez à jour le chemin de la ressource avant de réessayer.
 
 L'attente ne modifie pas le répertoire et n'occupe pas de slot d'exécution du daemon. Une exécution en attente peut être annulée ; sinon, elle reprend le démarrage lorsque le répertoire et la capacité d'exécution sont disponibles.
 

@@ -629,7 +629,8 @@ export function MembersTab() {
   const shareableProjects = useShareableProjects(wsId);
   const projectTitles = new Map(shareableProjects.map((project) => [project.id, project.title]));
   const guestCount = members.filter((m) => m.role === "guest").length;
-  // Workspaces that already have guests keep seeing them if the flag goes off.
+  // Workspaces that already have guests keep seeing them where adding guests
+  // is not offered (Cloud before billing launches).
   const showGuestViews = guestsEnabled || guestCount > 0;
   // A guest takes no member slot, so a full workspace still invites guests.
   const inviteLimited = inviteRole !== "guest";
@@ -1027,6 +1028,7 @@ export function MembersTab() {
       title: t(($) => $.members.revoke_invitation_title),
       description: t(($) => $.members.revoke_invitation_description, { email: invitation.invitee_email }),
       variant: "destructive",
+      actionLabel: t(($) => $.members.revoke_invitation_confirm),
       onConfirm: async () => {
         setInvitationActionId(invitation.id);
         try {
@@ -1115,6 +1117,7 @@ export function MembersTab() {
       title: t(($) => $.members.remove_member_title, { name: member.name }),
       description: t(($) => $.members.remove_member_description, { name: member.name, workspace: workspace.name }),
       variant: "destructive",
+      actionLabel: t(($) => $.members.remove_member_confirm),
       onConfirm: async () => {
         setMemberActionId(member.id);
         try {

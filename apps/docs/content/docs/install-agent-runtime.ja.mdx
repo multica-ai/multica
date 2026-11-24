@@ -107,6 +107,8 @@ Node.js 20+ をインストールして `npm install -g @deepseek-ai/dsh` を実
 
 **DSH のアップグレード後。** プローブがプロファイル内のコアパッケージの非互換を報告したら、デーモンの診断に示されたマニフェストをバックアップします。`@deepseek-ai/dsh-agent`、`@deepseek-ai/dsh-session`、`@deepseek-ai/dsh-tools`、`@deepseek-ai/dsh-llm` の上書きを確認し、可能ならアプリに付属するコアパッケージを使用するか、インストール済みの DSH と互換性のあるバージョンに揃えてください。必要な独立プラグインやフックは残し、依存関係をすべて削除しないでください。修復後に `dsh --profile multica --probe` を再実行します。Multica は確認済みの互換性拒否を手動修復が必要な状態として報告し、既存のプロファイルを上書きしません。
 
+プローブが、インストール済みの DSH と要件が合わないため `@multica-ai/dsh-runtime` を読み込まなかったと報告した場合は、マニフェストをバックアップし、Multica ブリッジを互換性のあるビルドに更新してください。更新後に `dsh --profile multica --probe` を再実行します。
+
 デーモンは `dsh --profile multica --probe` が成功した場合のみ DeepSeek Harness を登録します。`/health` の診断では、プロファイルの欠落、確認済みの手動修復、プロトコルの非互換、プローブの一時的な利用不可を区別します。起動失敗時には、検出した CLI バージョン、マニフェストの場所、取得できた機密情報を除去した診断出力を示します。
 
 </Accordion>

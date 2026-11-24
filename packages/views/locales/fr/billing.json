@@ -28,6 +28,8 @@
     "actions": {
       "retry": "Réessayer",
       "retry_autopilots": "Réessayer le chargement de la consommation des automatisations",
+      "retry_storage": "Réessayer l'utilisation du stockage des pièces jointes",
+      "retry_app_calls": "Réessayer la consommation d'appels d'apps",
       "upgrade_to": "Passer à {{plan}}",
       "switch_to": "Basculer vers {{plan}}",
       "manage": "Gérer la facturation",
@@ -41,7 +43,7 @@
       "temporarily_unavailable": "La facturation est temporairement indisponible. Réessayez dans un instant.",
       "not_enabled": "Les abonnements d’espace de travail ne sont pas activés pour ce déploiement. Contactez votre administrateur.",
       "permission_changed": "Votre rôle dans l'espace de travail n'autorise plus cette action. Actualisez la page pour voir vos droits actuels.",
-      "checkout_response": "Le paiement n'a pas pu s'ouvrir car la réponse du serveur était illisible. Réessayez sans changer l'intervalle sélectionné.",
+      "checkout_response": "Impossible d'ouvrir la page de paiement en raison d'une réponse inattendue. Veuillez réessayer.",
       "already_subscribed": "Cet espace de travail a déjà un abonnement. Le forfait actuel a été actualisé.",
       "checkout_failed": "Le paiement n'a pas pu être créé. Réessayez dans un instant.",
       "portal_response": "Le portail de facturation n'a pas pu s'ouvrir car la réponse du serveur était illisible.",
@@ -81,7 +83,7 @@
       "title": "Forfait actuel",
       "plan": "Forfait de l'espace de travail",
       "members": "Membres humains",
-      "members_description": "Les agents et les invitations en attente ne comptent pas comme des sièges.",
+      "members_description": "Membres humains actifs dans cet espace de travail. Les agents n'utilisent jamais de siège.",
       "member_count_one": "{{count}} membre",
       "member_count_other": "{{count}} membres",
       "billing_interval": "Intervalle de facturation",
@@ -103,13 +105,13 @@
       "unit_price_month": "{{price}} par siège humain / mois",
       "unit_price_year_monthly": "{{price}} par siège humain / mois, facturé annuellement",
       "unit_price_year": "{{price}} par siège humain / an",
-      "price_at_checkout": "Le serveur recompte les membres humains avant l'achat. Stripe Checkout affiche le tarif par siège et le total faisant foi avant le paiement.",
+      "price_at_checkout": "Les membres humains actifs sont comptés au moment du paiement. Stripe affiche le prix final par siège et le total avant que vous ne payiez.",
       "recommended": "Recommandé",
       "features": {
         "pro_members": "Membres illimités",
         "pro_autopilots": "1 000 exécutions d'automatisation par membre et par mois",
         "pro_storage": "10 Go de stockage de pièces jointes par membre",
-        "pro_dashboard": "90 jours d'historique dans le tableau de bord",
+        "pro_dashboard": "90 jours d'historique d'analyses",
         "business_everything": "Tout ce qui est inclus dans Pro",
         "business_access": "Projets privés et accès par membre",
         "business_apps": "Comptes d'applications d'équipe et règles d'approbation",
@@ -138,7 +140,25 @@
       "usage_unavailable": "La consommation est temporairement indisponible",
       "members": "Membres",
       "members_pending": "Invitations en attente : {{pending}}",
-      "metering": "Les exécutions lancées par une planification, un webhook ou un agent sont comptées. Celles qu'un membre lance avec Exécuter maintenant ne le sont pas."
+      "metering": "Les exécutions lancées par une planification, un webhook ou un agent sont comptées. Celles qu'un membre lance avec Exécuter maintenant ne le sont pas.",
+      "storage": "Stockage des pièces jointes",
+      "storage_description": "Pièces jointes des tickets, commentaires et discussions.",
+      "storage_label": "Utilisation du stockage des pièces jointes",
+      "app_calls": "Appels d'apps",
+      "app_calls_description": "Appels que les agents exécutent dans les apps connectées. La recherche d'outils n'est pas comptée.",
+      "app_calls_label": "Consommation d'appels d'apps",
+      "app_calls_by_member": "Appels d'apps par personne",
+      "app_calls_no_person": "Exécutions automatiques",
+      "app_calls_former_member": "Ancien membre",
+      "addon": "Exécutions supplémentaires",
+      "addon_description": "Une fois l'allocation épuisée, les automatisations sont suspendues jusqu'au mois prochain ou jusqu'à l'achat d'exécutions supplémentaires.",
+      "addon_included": "Dont {{runs}} exécutions supplémentaires",
+      "addon_none": "Aucune ce mois-ci",
+      "addon_purchased": "{{runs}} achetées ce mois-ci",
+      "addon_buy": "Acheter · {{price}} / {{runs}} exécutions",
+      "addon_buy_fallback": "Acheter des exécutions",
+      "dashboard_history": "Historique des statistiques",
+      "dashboard_history_days": "{{days}} derniers jours"
     },
     "seats": {
       "title": "Sièges",
@@ -176,9 +196,9 @@
       "preview_unreadable": "Impossible de lire l'estimation. Modifiez le nombre de sièges ou réessayez.",
       "preview_failed": "L'estimation est temporairement indisponible. Réessayez dans un instant.",
       "capacity_out_of_sync": "Le nombre de sièges dans Stripe ne correspond pas au relevé de facturation. Contactez l'assistance avant de réessayer cet achat.",
-      "in_progress": "Un autre achat de sièges est en cours de traitement. Attendez qu'il se termine ; contactez l'assistance si cet état persiste.",
+      "in_progress": "Un autre achat de sièges est en cours de traitement. Attendez un instant qu'il se termine, ou contactez l'assistance s'il reste bloqué.",
       "plan_change_in_progress": "Un changement de forfait est encore en cours de traitement. Réessayez dans quelques minutes.",
-      "purchase_unreadable": "Impossible de lire la réponse à l'achat. Réessayez avec ce devis : la même demande d'achat sera réutilisée.",
+      "purchase_unreadable": "Nous n'avons pas pu confirmer la réponse de l'achat. Réessayez en toute sécurité — vous ne serez pas facturé deux fois.",
       "purchase_failed": "Impossible d'ajouter les sièges. Réessayez avec le même devis ou actualisez s'il a expiré.",
       "payment_failed": "Le paiement n'a pas pu être effectué. Mettez à jour le moyen de paiement dans Stripe, puis demandez un nouveau devis.",
       "quote_changed": "Le nombre de sièges ou l'estimation a changé. Vérifiez le devis actualisé avant de confirmer à nouveau.",
@@ -221,7 +241,9 @@
       "success_title": "Forfait changé",
       "success_description": "Cet espace de travail utilise désormais {{plan}}.",
       "unresolved": "Le changement de forfait précédent n'a pas pu être confirmé. Contactez l'assistance avant de changer de forfait.",
-      "check_failed": "Impossible de vérifier le changement de forfait. Réessayez."
+      "check_failed": "Impossible de vérifier le changement de forfait. Réessayez.",
+      "addon_downgrade_notice": "Après le changement, la limite de ce mois sera de {{limit}} exécutions, achats compris. {{used}} exécutions ont été utilisées ce mois-ci.",
+      "addon_downgrade_notice_limit_only": "Après le changement, la limite de ce mois sera de {{limit}} exécutions, achats compris."
     },
     "confirm": {
       "title": "Continuer vers Stripe Checkout ?",
@@ -250,7 +272,22 @@
     "read_only": "Lecture seule. Passez à un forfait supérieur pour modifier.",
     "unavailable": "Non inclus dans le forfait de cet espace de travail.",
     "view_plans": "Voir les forfaits",
-    "locked_error": "Non inclus dans le forfait de l'espace de travail. Les réglages existants restent actifs ; changez de forfait pour en ajouter."
+    "locked_error": "Non inclus dans le forfait de l'espace de travail. Les réglages existants restent actifs ; changez de forfait pour en ajouter.",
+    "upgrade_to_add": "Changer de forfait",
+    "business": "Business",
+    "badge_label": "Fonctionnalité Business. Voir les détails",
+    "upgrade_to_business": "Passer à Business",
+    "ask_admin": "Demandez à un administrateur de l'espace de travail de passer au forfait Business.",
+    "upgrade_card": {
+      "agent_invocation_members": {
+        "title": "Autoriser des personnes précises à exécuter un agent est une fonctionnalité Business",
+        "description": "\"Moi uniquement\" et \"Tout l'espace de travail\" restent disponibles dans tous les forfaits."
+      },
+      "runtime_member_sharing": {
+        "title": "Partager un environnement avec des membres précis est une fonctionnalité Business",
+        "description": "\"Privé\" et \"Public\" restent disponibles dans tous les forfaits."
+      }
+    }
   },
   "trial": {
     "status": {
@@ -310,7 +347,7 @@
     },
     "features": {
       "title": "Fonctionnalités Business de votre essai",
-      "description": "À la fin de l'essai, rien n'est supprimé ni désactivé ; vous ne pouvez simplement plus en ajouter.",
+      "description": "À la fin de l'essai, rien n'est supprimé ni désactivé — les paramètres existants restent actifs en lecture seule, et vous ne pouvez pas en ajouter de nouveaux.",
       "private_projects": {
         "name": "Projets privés",
         "after": "Restent privés après l'essai. Leurs listes d'accès passent en lecture seule."
@@ -320,5 +357,35 @@
         "after": "Les invités existants gardent leur accès après l'essai. Inviter de nouveaux invités nécessite Pro ou Business."
       }
     }
+  },
+  "storage_limit": {
+    "title": "{{filename}} n'a pas été importé",
+    "copy_title": "Le sous-ticket n'a pas été créé : ses pièces jointes sources n'ont pas pu être copiées",
+    "admin_body": "Le stockage des pièces jointes est plein ({{used}} / {{limit}}). Les pièces jointes existantes ne sont pas affectées.",
+    "admin_body_no_figures": "Le stockage des pièces jointes est plein. Les pièces jointes existantes ne sont pas affectées.",
+    "member_body": "Le stockage des pièces jointes est plein. Demandez à un administrateur de changer de forfait, ou supprimez les pièces jointes dont vous n'avez plus besoin.",
+    "dismiss": "Fermer"
+  },
+  "autopilot_addon": {
+    "title": "Acheter des exécutions d'automatisation",
+    "description": "Les exécutions supplémentaires sont valables ce mois-ci et partagées par tout l'espace de travail. L'allocation du forfait est utilisée en premier.",
+    "options_label": "Nombre d'exécutions",
+    "option": "{{runs}} exécutions",
+    "usage_summary": "{{used}} / {{limit}} utilisées ce mois-ci, réinitialisation le {{date}}.",
+    "pay": "Continuer pour payer {{amount}}",
+    "pay_fallback": "Continuer vers le paiement",
+    "cancel": "Annuler",
+    "loading": "Chargement du prix du complément…",
+    "unavailable": "Cet espace de travail ne peut pas acheter d'exécutions pour le moment.",
+    "conflict": "Impossible d'acheter des exécutions pour le moment, ou le prix a changé. Vérifiez les options et réessayez.",
+    "error": "La page de paiement n'a pas pu s'ouvrir. Réessayez.",
+    "success_title": "Exécutions ajoutées",
+    "success_description": "{{runs}} exécutions ont été ajoutées pour ce mois. Les automatisations reprennent à leur prochaine exécution.",
+    "confirming_title": "Confirmation du paiement",
+    "confirming_description": "Les exécutions sont ajoutées dès que Stripe confirme le paiement. Consultez l'utilisation ci-dessous dans un instant.",
+    "not_paid_title": "Paiement non finalisé",
+    "not_paid_description": "Rien n'a été débité et aucune exécution n'a été ajoutée.",
+    "cancel_title": "Paiement annulé",
+    "cancel_description": "Rien n'a été débité."
   }
 }

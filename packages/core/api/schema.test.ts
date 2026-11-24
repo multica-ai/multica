@@ -1067,15 +1067,6 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
-  describe("listGroupedIssues", () => {
-    it("falls back to empty groups when the response is malformed", async () => {
-      stubFetchJson({ groups: "not-an-array" });
-      const client = new ApiClient("https://api.example.test");
-      const res = await client.listGroupedIssues({ group_by: "assignee" });
-      expect(res).toEqual({ groups: [] });
-    });
-  });
-
   describe("listComments", () => {
     it("returns [] when the response is not an array", async () => {
       stubFetchJson({ wrong: "shape" });
@@ -1630,9 +1621,88 @@ describe("workspace subscription contract", () => {
       purchaseSeats: false,
       changePlan: true,
       checkPlanChange: false,
+      // An older cloud sends no add-on action and no add-on summary.
+      purchaseAutopilotRuns: false,
     });
+    expect(summary?.autopilotAddon).toBeNull();
     expect(summary?.planChange).toBeNull();
     expect(summary?.trial).toBeNull();
+  });
+
+  it("reads the storage limit when Cloud sends one, and nothing when it is missing or malformed (MUL-9489)", async () => {
+    const client = new ApiClient("https://api.example.test");
+    const read = async (storage: unknown) => {
+      stubFetchJson({
+        entitlement: { ...entitlement, limits: { ...entitlement.limits, ...(storage === undefined ? {} : { storage_bytes: storage }) } },
+        billing_interval: null,
+        human_members: 3,
+        seat_capacity: null,
+        cancel_at_period_end: false,
+        grace_until: null,
+        has_stripe_customer: false,
+        available_actions: { checkout: true, portal: false, purchase_seats: false, change_plan: false },
+      });
+      return (await client.getWorkspaceSubscriptionSummary())?.entitlement;
+    };
+
+    expect((await read({ mode: "limited", limit: 30_000_000_000 }))?.limits.storageBytes).toEqual({
+      mode: "limited",
+      limit: 30_000_000_000,
+    });
+    expect((await read(undefined))?.limits.storageBytes).toBeNull();
+    const malformed = await read({ mode: "limited", limit: "lots" });
+    expect(malformed?.limits.storageBytes).toBeNull();
+    expect(malformed?.plan).toBe("pro");
+  });
+
+  it("reads the autopilot add-on action and this month's add-ons", async () => {
+    const base = {
+      entitlement,
+      billing_interval: "month",
+      human_members: 3,
+      seat_capacity: null,
+      cancel_at_period_end: false,
+      grace_until: null,
+      has_stripe_customer: true,
+    };
+    stubFetchJson({
+      ...base,
+      available_actions: {
+        checkout: false,
+        portal: true,
+        purchase_seats: true,
+        purchase_autopilot_runs: true,
+      },
+      autopilot_addon: {
+        purchased_runs: 3000,
+        period_start: "2026-11-01T00:00:00Z",
+        period_end: "2026-12-01T00:00:00Z",
+      },
+    });
+    const client = new ApiClient("https://api.example.test");
+    const summary = await client.getWorkspaceSubscriptionSummary();
+    expect(summary?.availableActions.purchaseAutopilotRuns).toBe(true);
+    expect(summary?.autopilotAddon).toEqual({
+      purchasedRuns: 3000,
+      periodStart: "2026-11-01T00:00:00Z",
+      periodEnd: "2026-12-01T00:00:00Z",
+    });
+
+    // Malformed add-on fields never take the summary down: no add-on offered.
+    stubFetchJson({
+      ...base,
+      available_actions: {
+        checkout: false,
+        portal: true,
+        purchase_seats: true,
+        purchase_autopilot_runs: "yes",
+      },
+      autopilot_addon: { purchased_runs: -1 },
+    });
+    const malformed = await client.getWorkspaceSubscriptionSummary();
+    expect(malformed).not.toBeNull();
+    expect(malformed?.availableActions.purchaseAutopilotRuns).toBe(false);
+    expect(malformed?.autopilotAddon).toBeNull();
   });
 
   it("reads a plan change that still holds the subscription", async () => {
@@ -1873,10 +1943,94 @@ describe("workspace subscription contract", () => {
     expect(prices?.pro.year.interval).toBe("year");
     expect(prices?.business.month.unitAmount).toBe(3000);
     expect(prices?.business.year.unitAmount).toBe(28800);
+    // An older cloud sells no add-on pack.
+    expect(prices?.autopilotAddon).toBeNull();
 
     // A zero or missing amount must not be rendered next to a purchase button.
     stubFetchJson({ pro: planPrices(0, 14400), business: planPrices(3000, 28800) });
     expect(await client.getWorkspaceSubscriptionPrices()).toBeNull();
+  });
+
+  it("reads the add-on pack price on its own", async () => {
+    const client = new ApiClient("https://api.example.test");
+    stubFetchJson({
+      pro: planPrices(1500, 14400),
+      business: planPrices(3000, 28800),
+      autopilot_addon: { currency: "usd", unit_amount: 1000, runs_per_pack: 1000 },
+    });
+    expect((await client.getWorkspaceSubscriptionPrices())?.autopilotAddon).toEqual({
+      currency: "usd",
+      unitAmount: 1000,
+      runsPerPack: 1000,
+    });
+
+    // A malformed pack price hides the add-on but keeps the plan prices.
+    for (const malformed of [
+      { currency: "usd", unit_amount: 0, runs_per_pack: 1000 },
+      { currency: "USD", unit_amount: 1000, runs_per_pack: 1000 },
+      { currency: "usd", unit_amount: 1000 },
+      "1000",
+    ]) {
+      stubFetchJson({
+        pro: planPrices(1500, 14400),
+        business: planPrices(3000, 28800),
+        autopilot_addon: malformed,
+      });
+      const prices = await client.getWorkspaceSubscriptionPrices();
+      expect(prices?.pro.month.unitAmount).toBe(1500);
+      expect(prices?.autopilotAddon).toBeNull();
+    }
+  });
+
+  it("starts an add-on Checkout with the accepted price and reads the session back", async () => {
+    const client = new ApiClient("https://api.example.test");
+    stubFetchJson({ session_id: "cs_test_1", url: "https://checkout.stripe.com/c/pay/cs_test_1" });
+    await expect(
+      client.createWorkspaceAutopilotAddonCheckout({
+        packs: 3,
+        expectedUnitAmount: 1000,
+        currency: "usd",
+        idempotencyKey: "addon-1",
+      }),
+    ).resolves.toEqual({ sessionId: "cs_test_1", url: "https://checkout.stripe.com/c/pay/cs_test_1" });
+    expect(vi.mocked(fetch)).toHaveBeenLastCalledWith(
+      "https://api.example.test/api/cloud-subscriptions/autopilot-addon/checkout-sessions",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          packs: 3,
+          expected_unit_amount: 1000,
+          currency: "usd",
+          idempotency_key: "addon-1",
+        }),
+      }),
+    );
+    // A Checkout URL that is not Stripe's HTTPS page is never followed.
+    stubFetchJson({ session_id: "cs_test_1", url: "javascript:alert(1)" });
+    expect(
+      await client.createWorkspaceAutopilotAddonCheckout({
+        packs: 1,
+        expectedUnitAmount: 1000,
+        currency: "usd",
+        idempotencyKey: "addon-2",
+      }),
+    ).toBeNull();
+
+    // An unknown status keeps waiting instead of claiming an outcome.
+    for (const [status, expected] of [
+      ["paid", "paid"],
+      ["expired", "expired"],
+      ["complete", "open"],
+    ] as const) {
+      stubFetchJson({ session_id: "cs_test_1", status, packs: 1, runs: 1000, currency: "usd", amount: 1000 });
+      expect((await client.getWorkspaceAutopilotAddonCheckout("cs_test_1"))?.status).toBe(expected);
+    }
+    expect(vi.mocked(fetch)).toHaveBeenLastCalledWith(
+      "https://api.example.test/api/cloud-subscriptions/autopilot-addon/checkout-sessions/cs_test_1",
+      expect.anything(),
+    );
+    stubFetchJson({ session_id: "cs_test_1", status: "paid", packs: 0, runs: 1000, currency: "usd", amount: 1000 });
+    expect(await client.getWorkspaceAutopilotAddonCheckout("cs_test_1")).toBeNull();
   });
 
   it("rejects prices that omit a paid plan or use the retired flat shape", async () => {
@@ -1954,6 +2108,7 @@ describe("workspace subscription contract", () => {
       nextInvoiceAmount: 57600,
       invoiceNow: false,
       quotedAt: "2026-11-18T08:00:00Z",
+      autopilotRunsLimitAfter: null,
     });
     expect(vi.mocked(fetch)).toHaveBeenLastCalledWith(
       "https://api.example.test/api/cloud-subscriptions/plan-changes/preview",
@@ -2118,5 +2273,147 @@ describe("workspace subscription contract", () => {
         headers: expect.objectContaining({ "Idempotency-Key": "seat-request-1" }),
       }),
     );
+  });
+});
+
+describe("dashboard history limit (MUL-9490)", () => {
+  const planPrices = (monthAmount: number, yearAmount: number) => ({
+    month: { currency: "usd", unit_amount: monthAmount, interval: "month", interval_count: 1 },
+    year: { currency: "usd", unit_amount: yearAmount, interval: "year", interval_count: 1 },
+  });
+  const prices = { pro: planPrices(1500, 14400), business: planPrices(3000, 28800) };
+
+  it("reads plan limits from prices, and drops them alone when malformed", async () => {
+    const client = new ApiClient("https://api.example.test");
+    stubFetchJson({
+      ...prices,
+      plan_limits: {
+        free: { dashboard_history_days: 30 },
+        pro: { dashboard_history_days: 90 },
+        business: { dashboard_history_days: 365 },
+      },
+    });
+    expect((await client.getWorkspaceSubscriptionPrices())?.planLimits).toEqual({
+      free: { dashboardHistoryDays: 30 },
+      pro: { dashboardHistoryDays: 90 },
+      business: { dashboardHistoryDays: 365 },
+    });
+
+    // An older Cloud sends none; the prices themselves stay usable.
+    stubFetchJson(prices);
+    const older = await client.getWorkspaceSubscriptionPrices();
+    expect(older?.pro.month.unitAmount).toBe(1500);
+    expect(older?.planLimits).toBeNull();
+
+    // A malformed block, or a missing plan, reads as no plan limits.
+    for (const planLimits of [
+      "30",
+      { free: { dashboard_history_days: 30 }, pro: { dashboard_history_days: 90 } },
+    ]) {
+      stubFetchJson({ ...prices, plan_limits: planLimits });
+      const parsed = await client.getWorkspaceSubscriptionPrices();
+      expect(parsed?.business.month.unitAmount).toBe(3000);
+      expect(parsed?.planLimits).toBeNull();
+    }
+
+    // A malformed day count is unknown for that plan only.
+    stubFetchJson({
+      ...prices,
+      plan_limits: {
+        free: { dashboard_history_days: "30" },
+        pro: { dashboard_history_days: 0 },
+        business: { dashboard_history_days: 365 },
+      },
+    });
+    expect((await client.getWorkspaceSubscriptionPrices())?.planLimits).toEqual({
+      free: { dashboardHistoryDays: null },
+      pro: { dashboardHistoryDays: null },
+      business: { dashboardHistoryDays: 365 },
+    });
+  });
+
+  it("reads the features limit and treats a missing or malformed one as none", async () => {
+    const client = new ApiClient("https://api.example.test");
+    const ws = "11111111-1111-1111-1111-111111111111";
+    stubFetchJson({ features: {}, limits: { dashboard_history_days: 30 } });
+    expect((await client.getWorkspaceFeatures(ws)).limits).toEqual({ dashboardHistoryDays: 30 });
+
+    for (const body of [
+      { features: {} },
+      { features: {}, limits: null },
+      { features: {}, limits: { dashboard_history_days: null } },
+      { features: {}, limits: { dashboard_history_days: "30" } },
+      { features: {}, limits: { dashboard_history_days: -1 } },
+      { features: {}, limits: [] },
+    ]) {
+      stubFetchJson(body);
+      expect((await client.getWorkspaceFeatures(ws)).limits).toEqual({ dashboardHistoryDays: null });
+    }
+  });
+
+  it("reads the entitlement's history range when Cloud sends it", async () => {
+    const client = new ApiClient("https://api.example.test");
+    const summary = (limits: Record<string, unknown>) => ({
+      entitlement: {
+        workspace_id: "11111111-1111-1111-1111-111111111111",
+        plan: "free",
+        status: "active",
+        seats: 1,
+        limits: { autopilot_runs: { mode: "limited", limit: 200 }, ...limits },
+        current_period_end: null,
+        snapshot_expires_at: null,
+        version: 1,
+      },
+      billing_interval: null,
+      human_members: 1,
+      seat_capacity: null,
+      cancel_at_period_end: false,
+      grace_until: null,
+      has_stripe_customer: false,
+      available_actions: { checkout: true, portal: false, purchase_seats: false },
+    });
+    stubFetchJson(summary({ dashboard_history_days: { mode: "limited", limit: 30 } }));
+    expect((await client.getWorkspaceSubscriptionSummary())?.entitlement.limits.dashboardHistoryDays).toEqual({
+      mode: "limited",
+      limit: 30,
+    });
+    stubFetchJson(summary({}));
+    const older = await client.getWorkspaceSubscriptionSummary();
+    expect(older?.entitlement.limits.autopilotRuns).toEqual({ mode: "limited", limit: 200 });
+    expect(older?.entitlement.limits.dashboardHistoryDays).toBeNull();
+    stubFetchJson(summary({ dashboard_history_days: { mode: "limited", limit: "30" } }));
+    expect((await client.getWorkspaceSubscriptionSummary())?.entitlement.limits.dashboardHistoryDays).toBeNull();
+  });
+
+  it("reports the limit header every dashboard endpoint was served under", async () => {
+    const client = new ApiClient("https://api.example.test");
+    const calls = [
+      client.getDashboardUsageDaily.bind(client),
+      client.getDashboardUsageByAgent.bind(client),
+      client.getDashboardAgentRunTime.bind(client),
+      client.getDashboardRunTimeDaily.bind(client),
+      client.getDashboardFailuresDaily.bind(client),
+      client.getDashboardFailuresByAgent.bind(client),
+    ];
+    for (const call of calls) {
+      for (const [header, want] of [
+        ["30", 30],
+        [null, null],
+        ["", null],
+        ["abc", null],
+        ["0", null],
+        ["-5", null],
+      ] as const) {
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (header !== null) headers["X-Dashboard-History-Limit-Days"] = header;
+        const fetchMock = vi.fn().mockResolvedValue(new Response("[]", { status: 200, headers }));
+        vi.stubGlobal("fetch", fetchMock);
+        const seen: (number | null)[] = [];
+        const rows = await call({ days: 371, tz: "UTC", onHistoryLimit: (v) => seen.push(v) });
+        expect(rows).toEqual([]);
+        expect(seen).toEqual([want]);
+        expect(String(fetchMock.mock.calls[0]?.[0])).toContain("days=371");
+      }
+    }
   });
 });

@@ -98,9 +98,15 @@ scripts/check.sh
 
 部分 AI 程式設計工具也會直接讀取程式碼倉庫中的專案級 skill，例如 `.claude/skills/` 或 `.agents/skills/`。這些檔案仍由倉庫管理，Multica 不會自動把它們登記為工作區 skill。具體支援方式取決於使用的工具，見 [AI 程式設計工具對照](/providers)。
 
-連線電腦上已安裝的執行時本地 skill（Claude Code 和 Codex）會顯示在 AI 代理的 **Skills** 標籤頁中，可以按 AI 代理單獨停用。停用同樣需要有權修改該 AI 代理。
+AI 代理的 **Skills** 標籤頁可顯示連線電腦上已安裝的執行時本地 skill。在 Multica 中，Claude Code 和 Codex 支援按 AI 代理單獨停用 skill，停用時需要有權修改該 AI 代理。
 
 對於 Oh-My-Pi，繼承列表和從執行時複製的操作會遵循啟動命令選定的 profile 及生效的 skill 篩選配置。發現過程在空目錄中執行，讀取使用者級配置；專案配置和顯式分配的 Multica skill 單獨處理。如果 OMP 無法返回 skill 清單，重新整理會報錯。
+
+### 查看 skill 交付和工具呼叫 [#skill-execution]
+
+在任務的執行日誌中開啟執行記錄，點選 **上下文回執** 圖示。回執列出本次執行的工作區 skill。如果某個 skill 顯示檔案路徑及 **未驗證**，表示 Multica 已將完整的 skill 套件寫入該路徑，執行環境是否讀取或執行了該 skill 仍待確認。**未送達** 表示交付失敗。
+
+工具列顯示執行環境回報的呼叫。如果 OpenCode 直接執行 skill 中的指令碼，日誌可能只顯示 shell 指令。查看工具輸出即可了解實際執行了什麼。
 
 ## 修改權限
 

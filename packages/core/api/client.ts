@@ -8,14 +8,22 @@ import {
   DocVersionSchema,
   DocVersionListSchema,
   DocSearchResponseSchema,
+  DocCommentSchema,
+  DocCommentListSchema,
+  DocCollabTicketSchema,
+  DocTaskRunListSchema,
 } from "../docs/schemas";
 import type {
   Doc,
   DocSummary,
   DocFolder,
   SearchDocsResponse,
+  DocComment,
+  CreateDocCommentRequest,
   DocTree,
   DocVersion,
+  DocCollabTicket,
+  DocTaskRun,
   CreateDocRequest,
   UpdateDocRequest,
   CreateDocFolderRequest,
@@ -39,7 +47,6 @@ import type {
   BatchIssuePropertyOps,
   BatchUpdateIssuesResponse,
   IssueDuplicates,
-  GroupedIssuesResponse,
   ListIssuesResponse,
   SearchIssuesResponse,
   SearchProjectsResponse,
@@ -50,7 +57,6 @@ import type {
   CreateMemberRequest,
   UpdateMemberRequest,
   ListIssuesParams,
-  ListGroupedIssuesParams,
   IssueTableFacetsRequest,
   IssueTableFacetsResponse,
   IssueTableGroupsRequest,
@@ -106,22 +112,23 @@ import type {
   CreatePersonalAccessTokenResponse,
   RuntimeUsage,
   IssueUsageSummary,
-  RuntimeHourlyActivity,
   RuntimeUsageByAgent,
   RuntimeUsageByHour,
   DashboardUsageDaily,
   DashboardUsageByAgent,
+  DashboardUsageBySquad,
   DashboardAgentRunTime,
+  DashboardSquadRunTime,
   DashboardRunTimeDaily,
   DashboardFailureDaily,
   DashboardFailureByAgent,
+  DashboardFailureBySquad,
   RuntimeUpdate,
   RuntimeModelListRequest,
   RuntimeLocalSkillListRequest,
   CreateRuntimeLocalSkillImportRequest,
   RuntimeLocalSkillImportRequest,
   TimelineEntry,
-  AssigneeFrequencyEntry,
   TaskMessagePayload,
   TaskContextReceiptResponse,
   RuntimeRateLimitsResponse,
@@ -132,6 +139,7 @@ import type {
   ChatMessagesPage,
   ChatDraftRestoresResponse,
   ChatWakeup,
+  ChatWakeupTiming,
   ChatPendingTask,
   PrioritizeQueuedChatTaskResponse,
   PendingChatTasksResponse,
@@ -141,6 +149,8 @@ import type {
   CancelTaskResponse,
   Project,
   ArchiveProjectResponse,
+  ProjectProgressDetail,
+  ProjectActivityPage,
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
@@ -238,11 +248,11 @@ import type {
   AppsOverview,
   AppCatalogResponse,
   AppRule,
-  AppTool,
   AppToolCall,
   IssueAppCall,
   AppRequestList,
   TeamAppImpact,
+  PersonalAppImpact,
   AppRequest,
   AgentApp,
   AppAccountScope,
@@ -273,6 +283,8 @@ import type {
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
+  SquadBriefsResponse,
+  SquadHandoffMode,
   BillingBalance,
   BillingTransactionsPage,
   BillingBatchesPage,
@@ -284,8 +296,13 @@ import type {
   CreateBillingPortalSessionResponse,
   WorkspaceSubscriptionSummary,
   WorkspaceSubscriptionPrices,
+  CreateWorkspaceAutopilotAddonCheckoutRequest,
+  CreateWorkspaceAutopilotAddonCheckoutResponse,
+  WorkspaceAutopilotAddonCheckout,
   WorkspaceFeatures,
   MemberLimit,
+  StorageUsage,
+  AppCallUsage,
   CreateWorkspaceSubscriptionCheckoutRequest,
   CreateWorkspaceSubscriptionCheckoutResponse,
   WorkspaceSubscriptionSeatReconcileResult,
@@ -352,10 +369,13 @@ import {
   EMPTY_AGENT_BUILDER_SESSION_LIST,
   agentBuilderRuntimeSwitchFallback,
   DashboardAgentRunTimeListSchema,
+  DashboardSquadRunTimeListSchema,
   DashboardRunTimeDailyListSchema,
   DashboardFailureDailyListSchema,
   DashboardFailureByAgentListSchema,
+  DashboardFailureBySquadListSchema,
   DashboardUsageByAgentListSchema,
+  DashboardUsageBySquadListSchema,
   DashboardUsageDailyListSchema,
   EMPTY_APP_CONFIG,
   EMPTY_ATTACHMENT,
@@ -367,7 +387,6 @@ import {
   EMPTY_CLOUD_RUNTIME_NODE,
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
   EMPTY_AGENT_BUILDER_SESSION,
-  EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_ISSUE_TABLE_FACETS_RESPONSE,
   EMPTY_ISSUE_TABLE_GROUPS_RESPONSE,
   EMPTY_ISSUE_TABLE_ROWS_RESPONSE,
@@ -390,7 +409,6 @@ import {
   type RefreshSessionResponse,
   RefreshSessionResponseSchema,
   EMPTY_REFRESH_SESSION_RESPONSE,
-  GroupedIssuesResponseSchema,
   IssueTableFacetsResponseSchema,
   IssueTableGroupsResponseSchema,
   IssueTableRowsResponseSchema,
@@ -408,14 +426,19 @@ import {
   SourceContextPreviewSchema,
   CommentSubIssueTaskResponseSchema,
   ListWebhookDeliveriesResponseSchema,
-  RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
   RuntimeRateLimitsResponseSchema,
+  RuntimeUpdateSchema,
+  ActiveRuntimeUpdateResponseSchema,
   SearchIssuesResponseSchema,
   ProjectSchema,
   ArchiveProjectResponseSchema,
+  ProjectProgressDetailSchema,
+  EMPTY_PROJECT_PROGRESS_DETAIL,
+  ProjectActivityPageSchema,
+  EMPTY_PROJECT_ACTIVITY_PAGE,
   ListProjectMembersResponseSchema,
   ListPrivateProjectsResponseSchema,
   ProjectSubscriptionSchema,
@@ -429,6 +452,8 @@ import {
   SquadSchema,
   SquadListSchema,
   SquadMemberStatusListResponseSchema,
+  SquadBriefsResponseSchema,
+  EMPTY_SQUAD_BRIEFS,
   SubscribersListSchema,
   TaskMessageListSchema,
   TaskContextReceiptResponseSchema,
@@ -447,8 +472,12 @@ import {
   BatchUpdateIssuesResponseSchema,
   UNCONFIRMED_BATCH_UPDATE,
   WorkspaceSubscriptionPricesSchema,
+  CreateWorkspaceAutopilotAddonCheckoutResponseSchema,
+  WorkspaceAutopilotAddonCheckoutSchema,
   WorkspaceFeaturesSchema,
   MemberLimitSchema,
+  StorageUsageSchema,
+  AppCallUsageSchema,
   CreateWorkspaceSubscriptionCheckoutResponseSchema,
   WorkspaceSubscriptionSeatReconcileResultSchema,
   WorkspaceSeatPurchasePreviewSchema,
@@ -506,12 +535,12 @@ import {
   AppRequestSchema,
   AppRulesResponseSchema,
   AppSettingsResponseSchema,
-  AppToolsResponseSchema,
   AppsOverviewSchema,
   EMPTY_APP_CATALOG,
   EMPTY_APPS_OVERVIEW,
   EMPTY_TEAM_APP_IMPACT,
   IssueAppCallsResponseSchema,
+  PersonalAppImpactSchema,
   TeamAppImpactSchema,
   EMPTY_ISSUE_UNREAD_PAGE,
   SubscribedIssueIdsSchema,
@@ -544,7 +573,6 @@ import {
   IssuePropertiesResponseSchema,
   QuickActionSchema,
   ListQuickActionsResponseSchema,
-  QuickActionRenderSchema,
   EMPTY_QUICK_ACTION,
   EMPTY_LIST_QUICK_ACTIONS_RESPONSE,
   CommentSchema,
@@ -670,8 +698,32 @@ export interface LoginResponse {
   user: User;
 }
 
+/** Response header carrying the plan's enforced dashboard history limit. */
+export const DASHBOARD_HISTORY_LIMIT_HEADER = "X-Dashboard-History-Limit-Days";
+
+/** A positive whole number of days, or null for absent or malformed. */
+export function parseDashboardHistoryLimit(value: string | null): number | null {
+  if (value === null || !/^\d+$/.test(value.trim())) return null;
+  const days = Number(value.trim());
+  return Number.isSafeInteger(days) && days > 0 ? days : null;
+}
+
+export interface DashboardRequestParams {
+  days?: number;
+  project_id?: string | null;
+  squad_id?: string | null;
+  tz?: string;
+  onHistoryLimit?: (limitDays: number | null) => void;
+}
+
 function parseSearchIndexResponse<T>(raw: unknown, schema: ZodType, endpoint: string): T {
   const parsed = parseWithFallback<T | null>(raw, schema, null, { endpoint });
+  if (parsed === null) throw new Error(`Malformed response from ${endpoint}`);
+  return parsed;
+}
+
+function parseRuntimeUpdate(raw: unknown, endpoint: string): RuntimeUpdate {
+  const parsed = parseWithFallback<RuntimeUpdate | null>(raw, RuntimeUpdateSchema, null, { endpoint });
   if (parsed === null) throw new Error(`Malformed response from ${endpoint}`);
   return parsed;
 }
@@ -861,6 +913,14 @@ function skillFromImportResult(raw: unknown, endpoint: string): Skill {
 export const CHAT_DRAFT_RESTORE_CAPABILITY = "chat-draft-restore-v1";
 
 /**
+ * Advertised in X-Client-Capabilities on member and invitation lists: without
+ * it the server leaves guest rows out, because clients released before guests
+ * crash on the unknown role. Must stay in sync with
+ * protocol.AppCapabilityWorkspaceGuestsV1.
+ */
+export const WORKSPACE_GUESTS_CAPABILITY = "workspace-guests-v1";
+
+/**
  * Body shared by both unsubscribe endpoints: an omitted target means "the
  * caller", which the server resolves from the request actor.
  */
@@ -1011,6 +1071,46 @@ export class ApiClient {
   async deleteDoc(id: string): Promise<void> {
     await this.fetch(`/api/docs/${id}`, { method: "DELETE" });
   }
+  async listDocComments(docId: string): Promise<DocComment[]> {
+    return parseWithFallback(
+      await this.fetch<unknown>(`/api/docs/${docId}/comments`),
+      DocCommentListSchema,
+      { comments: [] },
+      { endpoint: "GET /api/docs/{id}/comments" },
+    ).comments;
+  }
+  // Writes reject a malformed body instead of inventing a comment.
+  async createDocComment(docId: string, data: CreateDocCommentRequest): Promise<DocComment> {
+    const raw = await this.fetch<unknown>(`/api/docs/${docId}/comments`, {
+      method: "POST",
+      body: JSON.stringify({
+        content: data.content,
+        ...(data.parentId ? { parent_id: data.parentId } : {}),
+        ...(data.anchorQuote !== undefined
+          ? { anchor_quote: data.anchorQuote, anchor_prefix: data.anchorPrefix ?? "", anchor_suffix: data.anchorSuffix ?? "" }
+          : {}),
+      }),
+    });
+    return DocCommentSchema.parse(raw);
+  }
+  async setDocCommentResolved(docId: string, commentId: string, resolved: boolean): Promise<DocComment> {
+    const raw = await this.fetch<unknown>(
+      `/api/docs/${docId}/comments/${commentId}/${resolved ? "resolve" : "reopen"}`,
+      { method: "POST" },
+    );
+    return DocCommentSchema.parse(raw);
+  }
+  async deleteDocComment(docId: string, commentId: string): Promise<void> {
+    await this.fetch(`/api/docs/${docId}/comments/${commentId}`, { method: "DELETE" });
+  }
+  async listDocTaskRuns(docId: string): Promise<DocTaskRun[]> {
+    return parseWithFallback(
+      await this.fetch<unknown>(`/api/docs/${docId}/task-runs`),
+      DocTaskRunListSchema,
+      { tasks: [] },
+      { endpoint: "GET /api/docs/{id}/task-runs" },
+    ).tasks;
+  }
   async listDocVersions(id: string): Promise<DocVersion[]> {
     return parseWithFallback(
       await this.fetch<unknown>(`/api/docs/${id}/versions`),
@@ -1018,6 +1118,31 @@ export class ApiClient {
       { versions: [] },
       { endpoint: "GET /api/docs/{id}/versions" },
     ).versions;
+  }
+  /** `state` also asks for the Yjs state saved with the doc, to show it
+   *  before the live session syncs. */
+  async createDocCollabTicket(id: string, options?: { state?: boolean }): Promise<DocCollabTicket> {
+    return parseWithFallback<DocCollabTicket>(
+      await this.fetch<unknown>(`/api/docs/${id}/collab-ticket`, {
+        method: "POST",
+        ...(options?.state ? { body: JSON.stringify({ state: true }) } : {}),
+      }),
+      DocCollabTicketSchema,
+      { enabled: false },
+      { endpoint: "POST /api/docs/{id}/collab-ticket" },
+    );
+  }
+  /** Joins the live session of an issue's description; same shape as a doc's. */
+  async createIssueCollabTicket(id: string, options?: { state?: boolean }): Promise<DocCollabTicket> {
+    return parseWithFallback<DocCollabTicket>(
+      await this.fetch<unknown>(`/api/issues/${id}/collab-ticket`, {
+        method: "POST",
+        ...(options?.state ? { body: JSON.stringify({ state: true }) } : {}),
+      }),
+      DocCollabTicketSchema,
+      { enabled: false },
+      { endpoint: "POST /api/issues/{id}/collab-ticket" },
+    );
   }
   async getDocVersion(id: string, number: number): Promise<DocVersion | null> {
     return parseWithFallback<DocVersion | null>(
@@ -1443,6 +1568,7 @@ export class ApiClient {
   // Issues
   async listIssues(params?: ListIssuesParams): Promise<ListIssuesResponse> {
     const search = new URLSearchParams();
+    if (params?.blocked) search.set("blocked", "true");
     if (params?.limit) search.set("limit", String(params.limit));
     if (params?.offset) search.set("offset", String(params.offset));
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
@@ -1516,52 +1642,6 @@ export class ApiClient {
     }
     return parseWithFallback(raw, ListIssuesResponseSchema, EMPTY_LIST_ISSUES_RESPONSE, {
       endpoint: "GET /api/issues",
-    });
-  }
-
-  async listGroupedIssues(params: ListGroupedIssuesParams): Promise<GroupedIssuesResponse> {
-    const search = new URLSearchParams({ group_by: params.group_by });
-    if (params.limit) search.set("limit", String(params.limit));
-    if (params.offset) search.set("offset", String(params.offset));
-    if (params.workspace_id) search.set("workspace_id", params.workspace_id);
-    if (params.statuses?.length) search.set("statuses", params.statuses.join(","));
-    if (params.priorities?.length) search.set("priorities", params.priorities.join(","));
-    if (params.assignee_types?.length) search.set("assignee_types", params.assignee_types.join(","));
-    if (params.assignee_id) search.set("assignee_id", params.assignee_id);
-    if (params.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
-    if (params.creator_id) search.set("creator_id", params.creator_id);
-    if (params.created_by_user_id) search.set("created_by_user_id", params.created_by_user_id);
-    if (params.project_id) search.set("project_id", params.project_id);
-    if (params.involves_user_id) search.set("involves_user_id", params.involves_user_id);
-    if (params.metadata && Object.keys(params.metadata).length > 0) {
-      search.set("metadata", JSON.stringify(params.metadata));
-    }
-    if (params.properties && Object.keys(params.properties).length > 0) {
-      search.set("properties", JSON.stringify(params.properties));
-    }
-    if (params.assignee_filters?.length) {
-      search.set("assignee_filters", params.assignee_filters.map((f) => `${f.type}:${f.id}`).join(","));
-    }
-    if (params.include_no_assignee) search.set("include_no_assignee", "true");
-    if (params.creator_filters?.length) {
-      search.set("creator_filters", params.creator_filters.map((f) => `${f.type}:${f.id}`).join(","));
-    }
-    if (params.project_ids?.length) search.set("project_ids", params.project_ids.join(","));
-    if (params.include_no_project) search.set("include_no_project", "true");
-    if (params.label_ids?.length) search.set("label_ids", params.label_ids.join(","));
-    if (params.group_assignee_type) search.set("group_assignee_type", params.group_assignee_type);
-    if (params.group_assignee_id) search.set("group_assignee_id", params.group_assignee_id);
-    if (params.date_field) search.set("date_field", params.date_field);
-    if (params.date_start) search.set("date_start", params.date_start);
-    if (params.date_end) search.set("date_end", params.date_end);
-    if (params.sort_by) search.set("sort", params.sort_by);
-    if (params.sort_direction) search.set("direction", params.sort_direction);
-    const raw = await this.fetch<unknown>(`/api/issues/grouped?${search}`);
-    if (params.created_by_user_id && (!raw || typeof raw !== "object" || !("created_by_user_id" in raw) || raw.created_by_user_id !== params.created_by_user_id)) {
-      return this.listGroupedIssues({ ...params, created_by_user_id: undefined, creator_id: params.creator_id ?? params.created_by_user_id });
-    }
-    return parseWithFallback(raw, GroupedIssuesResponseSchema, EMPTY_GROUPED_ISSUES_RESPONSE, {
-      endpoint: "GET /api/issues/grouped",
     });
   }
 
@@ -2096,10 +2176,6 @@ export class ApiClient {
     return parseWithFallback(raw, TimelineEntriesSchema, EMPTY_TIMELINE_ENTRIES, {
       endpoint: "GET /api/issues/:id/timeline",
     });
-  }
-
-  async getAssigneeFrequency(): Promise<AssigneeFrequencyEntry[]> {
-    return this.fetch("/api/assignee-frequency");
   }
 
   async updateComment(commentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], contentBase?: string, expectedRevision?: number): Promise<Comment> {
@@ -2644,7 +2720,7 @@ export class ApiClient {
     return parseWithFallback<WorkspaceFeatures>(
       raw,
       WorkspaceFeaturesSchema,
-      { features: {} },
+      { features: {}, limits: { dashboardHistoryDays: null } },
       { endpoint: "GET /api/workspaces/:id/features" },
     );
   }
@@ -2658,6 +2734,30 @@ export class ApiClient {
       MemberLimitSchema,
       { action: "off", limit: null, members: null, pendingInvitations: null },
       { endpoint: "GET /api/workspaces/:id/member-limit" },
+    );
+  }
+
+  // The plan's attachment storage limit (MUL-9489). A response that cannot
+  // be read falls back to no limit: the server still checks every upload.
+  async getStorageUsage(workspaceId: string): Promise<StorageUsage> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/storage-usage`);
+    return parseWithFallback<StorageUsage>(
+      raw,
+      StorageUsageSchema,
+      { action: "off", usedBytes: null, limitBytes: null, reached: null },
+      { endpoint: "GET /api/workspaces/:id/storage-usage" },
+    );
+  }
+
+  // The plan's monthly app call limit (MUL-10047). A response that cannot be
+  // read falls back to no limit: the gateway still checks every call.
+  async getAppCallUsage(workspaceId: string): Promise<AppCallUsage> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/app-call-usage`);
+    return parseWithFallback<AppCallUsage>(
+      raw,
+      AppCallUsageSchema,
+      { action: "off", used: null, limit: null, reached: null, resetAt: null, members: [] },
+      { endpoint: "GET /api/workspaces/:id/app-call-usage" },
     );
   }
 
@@ -2829,6 +2929,51 @@ export class ApiClient {
     );
   }
 
+  // Autopilot add-on packs (managers only), paid on Stripe Checkout. A
+  // non-2xx answer throws ApiError with Cloud's status: 409 not purchasable or
+  // price changed.
+  async createWorkspaceAutopilotAddonCheckout(
+    data: CreateWorkspaceAutopilotAddonCheckoutRequest,
+  ): Promise<CreateWorkspaceAutopilotAddonCheckoutResponse | null> {
+    const res = await this.fetchRaw(
+      "/api/cloud-subscriptions/autopilot-addon/checkout-sessions",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          packs: data.packs,
+          expected_unit_amount: data.expectedUnitAmount,
+          currency: data.currency,
+          idempotency_key: data.idempotencyKey,
+        }),
+        extraHeaders: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": data.idempotencyKey,
+        },
+      },
+    );
+    const raw = (await res.json()) as unknown;
+    return parseWithFallback<CreateWorkspaceAutopilotAddonCheckoutResponse | null>(
+      raw,
+      CreateWorkspaceAutopilotAddonCheckoutResponseSchema,
+      null,
+      { endpoint: "POST /api/cloud-subscriptions/autopilot-addon/checkout-sessions" },
+    );
+  }
+
+  async getWorkspaceAutopilotAddonCheckout(
+    sessionId: string,
+  ): Promise<WorkspaceAutopilotAddonCheckout | null> {
+    const raw = await this.fetch<unknown>(
+      `/api/cloud-subscriptions/autopilot-addon/checkout-sessions/${encodeURIComponent(sessionId)}`,
+    );
+    return parseWithFallback<WorkspaceAutopilotAddonCheckout | null>(
+      raw,
+      WorkspaceAutopilotAddonCheckoutSchema,
+      null,
+      { endpoint: "GET /api/cloud-subscriptions/autopilot-addon/checkout-sessions/:id" },
+    );
+  }
+
   async deleteRuntime(runtimeId: string): Promise<void> {
     await this.fetch(`/api/runtimes/${runtimeId}`, { method: "DELETE" });
   }
@@ -2921,18 +3066,6 @@ export class ApiClient {
     );
   }
 
-  async getRuntimeProfile(
-    workspaceId: string,
-    profileId: string,
-  ): Promise<RuntimeProfile> {
-    const result = await this.fetch<RuntimeProfile>(
-      `/api/workspaces/${workspaceId}/runtime-profiles/${profileId}`,
-    );
-    return parseWithFallback(result, RuntimeProfileSchema, result, {
-      endpoint: "runtimeProfile",
-    });
-  }
-
   async createRuntimeProfile(
     workspaceId: string,
     body: CreateRuntimeProfileRequest,
@@ -3004,25 +3137,6 @@ export class ApiClient {
     });
   }
 
-  async getRuntimeTaskActivity(
-    runtimeId: string,
-    params?: { tz?: string },
-  ): Promise<RuntimeHourlyActivity[]> {
-    // Hour-of-day heatmap follows the viewer's tz, like the other reports on
-    // this page. Pass the viewer's IANA zone so the server buckets correctly.
-    const search = new URLSearchParams();
-    if (params?.tz) search.set("tz", params.tz);
-    const raw = await this.fetch<unknown>(
-      `/api/runtimes/${runtimeId}/activity?${search}`,
-    );
-    return parseWithFallback<RuntimeHourlyActivity[]>(
-      raw,
-      RuntimeHourlyActivityListSchema,
-      [],
-      { endpoint: "GET /api/runtimes/:id/activity" },
-    );
-  }
-
   async getRuntimeUsageByAgent(
     runtimeId: string,
     params?: { days?: number; tz?: string },
@@ -3059,128 +3173,151 @@ export class ApiClient {
     );
   }
 
-  // Workspace dashboard — three independent rollups for `/{slug}/dashboard`.
-  // Each accepts an optional `project_id` to narrow the scope to one project.
-  // Cost is computed client-side from the model pricing table (same contract
-  // as the per-runtime endpoints above).
-
-  async getDashboardUsageDaily(
-    params: { days?: number; project_id?: string | null; tz?: string },
-  ): Promise<DashboardUsageDaily[]> {
+  // Workspace dashboard — six rollups for `/{slug}/usage`. Each accepts an
+  // optional `project_id` to narrow the scope to one project and `tz` to cut
+  // its day boundary in the viewer's calendar. Cost is computed client-side
+  // from the model pricing table (same contract as the per-runtime endpoints
+  // above).
+  //
+  // `onHistoryLimit` receives the plan's enforced history limit the response
+  // was served under (X-Dashboard-History-Limit-Days), or null for none, so a
+  // page open across a plan change notices it (MUL-9490).
+  private async fetchDashboardRows<T>(
+    path: string,
+    params: DashboardRequestParams,
+    schema: ZodType,
+    endpoint: string,
+  ): Promise<T[]> {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
+    if (params.squad_id) search.set("squad_id", params.squad_id);
     if (params.tz) search.set("tz", params.tz);
-    const raw = await this.fetch<unknown>(`/api/dashboard/usage/daily?${search}`);
-    return parseWithFallback<DashboardUsageDaily[]>(
-      raw,
+    const res = await this.fetchRaw(`${path}?${search}`, {
+      extraHeaders: { "Content-Type": "application/json" },
+    });
+    params.onHistoryLimit?.(
+      parseDashboardHistoryLimit(res.headers.get(DASHBOARD_HISTORY_LIMIT_HEADER)),
+    );
+    const raw: unknown = await res.json();
+    return parseWithFallback<T[]>(raw, schema, [], { endpoint });
+  }
+
+  async getDashboardUsageDaily(params: DashboardRequestParams): Promise<DashboardUsageDaily[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/usage/daily",
+      params,
       DashboardUsageDailyListSchema,
-      [],
-      { endpoint: "GET /api/dashboard/usage/daily" },
+      "GET /api/dashboard/usage/daily",
     );
   }
 
-  async getDashboardUsageByAgent(
-    params: { days?: number; project_id?: string | null; tz?: string },
-  ): Promise<DashboardUsageByAgent[]> {
-    const search = new URLSearchParams();
-    if (params.days) search.set("days", String(params.days));
-    if (params.project_id) search.set("project_id", params.project_id);
-    if (params.tz) search.set("tz", params.tz);
-    const raw = await this.fetch<unknown>(`/api/dashboard/usage/by-agent?${search}`);
-    return parseWithFallback<DashboardUsageByAgent[]>(
-      raw,
+  async getDashboardUsageByAgent(params: DashboardRequestParams): Promise<DashboardUsageByAgent[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/usage/by-agent",
+      params,
       DashboardUsageByAgentListSchema,
-      [],
-      { endpoint: "GET /api/dashboard/usage/by-agent" },
+      "GET /api/dashboard/usage/by-agent",
     );
   }
 
-  async getDashboardAgentRunTime(
-    params: { days?: number; project_id?: string | null; tz?: string },
-  ): Promise<DashboardAgentRunTime[]> {
-    const search = new URLSearchParams();
-    if (params.days) search.set("days", String(params.days));
-    if (params.project_id) search.set("project_id", params.project_id);
-    // `tz` aligns the "last N days" cutoff with the viewer's calendar,
-    // matching the per-agent token card.
-    if (params.tz) search.set("tz", params.tz);
-    const raw = await this.fetch<unknown>(`/api/dashboard/agent-runtime?${search}`);
-    return parseWithFallback<DashboardAgentRunTime[]>(
-      raw,
+  async getDashboardAgentRunTime(params: DashboardRequestParams): Promise<DashboardAgentRunTime[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/agent-runtime",
+      params,
       DashboardAgentRunTimeListSchema,
-      [],
-      { endpoint: "GET /api/dashboard/agent-runtime" },
+      "GET /api/dashboard/agent-runtime",
     );
   }
 
-  async getDashboardRunTimeDaily(
-    params: { days?: number; project_id?: string | null; tz?: string },
-  ): Promise<DashboardRunTimeDaily[]> {
-    const search = new URLSearchParams();
-    if (params.days) search.set("days", String(params.days));
-    if (params.project_id) search.set("project_id", params.project_id);
-    // `tz` cuts the day buckets in the viewer's calendar so Time / Tasks
-    // align with the Cost / Tokens charts.
-    if (params.tz) search.set("tz", params.tz);
-    const raw = await this.fetch<unknown>(`/api/dashboard/runtime/daily?${search}`);
-    return parseWithFallback<DashboardRunTimeDaily[]>(
-      raw,
+  async getDashboardRunTimeDaily(params: DashboardRequestParams): Promise<DashboardRunTimeDaily[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/runtime/daily",
+      params,
       DashboardRunTimeDailyListSchema,
-      [],
-      { endpoint: "GET /api/dashboard/runtime/daily" },
+      "GET /api/dashboard/runtime/daily",
     );
   }
 
-  async getDashboardFailuresDaily(
-    params: { days?: number; project_id?: string | null; tz?: string },
-  ): Promise<DashboardFailureDaily[]> {
-    const search = new URLSearchParams();
-    if (params.days) search.set("days", String(params.days));
-    if (params.project_id) search.set("project_id", params.project_id);
-    // `tz` cuts the day buckets in the viewer's calendar so the Errors chart
-    // shares an x-axis with the other four metrics.
-    if (params.tz) search.set("tz", params.tz);
-    const raw = await this.fetch<unknown>(`/api/dashboard/failures/daily?${search}`);
-    return parseWithFallback<DashboardFailureDaily[]>(
-      raw,
+  async getDashboardFailuresDaily(params: DashboardRequestParams): Promise<DashboardFailureDaily[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/failures/daily",
+      params,
       DashboardFailureDailyListSchema,
-      [],
-      { endpoint: "GET /api/dashboard/failures/daily" },
+      "GET /api/dashboard/failures/daily",
     );
   }
 
-  async getDashboardFailuresByAgent(
-    params: { days?: number; project_id?: string | null; tz?: string },
-  ): Promise<DashboardFailureByAgent[]> {
-    const search = new URLSearchParams();
-    if (params.days) search.set("days", String(params.days));
-    if (params.project_id) search.set("project_id", params.project_id);
-    if (params.tz) search.set("tz", params.tz);
-    const raw = await this.fetch<unknown>(`/api/dashboard/failures/by-agent?${search}`);
-    return parseWithFallback<DashboardFailureByAgent[]>(
-      raw,
+  async getDashboardFailuresByAgent(params: DashboardRequestParams): Promise<DashboardFailureByAgent[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/failures/by-agent",
+      params,
       DashboardFailureByAgentListSchema,
-      [],
-      { endpoint: "GET /api/dashboard/failures/by-agent" },
+      "GET /api/dashboard/failures/by-agent",
     );
   }
 
+  async getDashboardUsageBySquad(params: DashboardRequestParams): Promise<DashboardUsageBySquad[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/usage/by-squad",
+      params,
+      DashboardUsageBySquadListSchema,
+      "GET /api/dashboard/usage/by-squad",
+    );
+  }
+
+  async getDashboardSquadRunTime(params: DashboardRequestParams): Promise<DashboardSquadRunTime[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/squad-runtime",
+      params,
+      DashboardSquadRunTimeListSchema,
+      "GET /api/dashboard/squad-runtime",
+    );
+  }
+
+  async getDashboardFailuresBySquad(params: DashboardRequestParams): Promise<DashboardFailureBySquad[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/failures/by-squad",
+      params,
+      DashboardFailureBySquadListSchema,
+      "GET /api/dashboard/failures/by-squad",
+    );
+  }
+
+  // queue_when_busy: a busy daemon holds the update and installs it once
+  // idle, instead of failing it; this UI can show and cancel the queue.
   async initiateUpdate(
     runtimeId: string,
     targetVersion: string,
   ): Promise<RuntimeUpdate> {
-    return this.fetch(`/api/runtimes/${runtimeId}/update`, {
+    const raw = await this.fetch<unknown>(`/api/runtimes/${runtimeId}/update`, {
       method: "POST",
-      body: JSON.stringify({ target_version: targetVersion }),
+      body: JSON.stringify({ target_version: targetVersion, queue_when_busy: true }),
     });
+    return parseRuntimeUpdate(raw, "POST /api/runtimes/:id/update");
   }
 
   async getUpdateResult(
     runtimeId: string,
     updateId: string,
   ): Promise<RuntimeUpdate> {
-    return this.fetch(`/api/runtimes/${runtimeId}/update/${updateId}`);
+    const raw = await this.fetch<unknown>(`/api/runtimes/${runtimeId}/update/${updateId}`);
+    return parseRuntimeUpdate(raw, "GET /api/runtimes/:id/update/:updateId");
+  }
+
+  /** The machine's unfinished update, started through any of its runtimes. */
+  async getActiveUpdate(runtimeId: string): Promise<RuntimeUpdate | null> {
+    const raw = await this.fetch<unknown>(`/api/runtimes/${runtimeId}/update`);
+    return parseWithFallback(raw, ActiveRuntimeUpdateResponseSchema, { update: null }, {
+      endpoint: "GET /api/runtimes/:id/update",
+    }).update;
+  }
+
+  async cancelUpdate(runtimeId: string, updateId: string): Promise<RuntimeUpdate> {
+    const raw = await this.fetch<unknown>(`/api/runtimes/${runtimeId}/update/${updateId}/cancel`, {
+      method: "POST",
+    });
+    return parseRuntimeUpdate(raw, "POST /api/runtimes/:id/update/:updateId/cancel");
   }
 
   // Both discovery endpoints feed a UI state machine (poll while
@@ -3328,10 +3465,6 @@ export class ApiClient {
   // Per-agent 30-day total run count for the Agents-list RUNS column.
   async getWorkspaceAgentRunCounts(): Promise<AgentRunCount[]> {
     return this.fetch(`/api/agent-run-counts`);
-  }
-
-  async getActiveTasksForIssue(issueId: string): Promise<{ tasks: AgentTask[] }> {
-    return this.fetch(`/api/issues/${issueId}/active-task`);
   }
 
   async listTaskMessages(taskId: string): Promise<TaskMessagePayload[]> {
@@ -3589,6 +3722,25 @@ export class ApiClient {
     );
   }
 
+  /**
+   * Answer the one-time auto-archive question for every workspace where it is
+   * pending. Answers with the active workspace's preferences.
+   */
+  async resolveAutoArchivePrompt(
+    preferences: NotificationPreferences,
+  ): Promise<NotificationPreferenceResponse> {
+    const raw = await this.fetch<unknown>("/api/notification-preferences/auto-archive-prompt", {
+      method: "POST",
+      body: JSON.stringify({ preferences }),
+    });
+    return parseWithFallback(
+      raw,
+      NotificationPreferenceResponseSchema,
+      EMPTY_NOTIFICATION_PREFERENCE_RESPONSE,
+      { endpoint: "POST /api/notification-preferences/auto-archive-prompt" },
+    );
+  }
+
   // App Config
   async getConfig(): Promise<AppConfigResponse> {
     const raw = await this.fetch<unknown>("/api/config");
@@ -3642,10 +3794,6 @@ export class ApiClient {
       method: "PUT", body: JSON.stringify({ pinned }),
     });
     return parseWithFallback(raw, WorkspacePinnedSchema, { pinned_at: null }, { endpoint: "PUT /api/workspaces/{id}/pin" });
-  }
-
-  async getWorkspace(id: string): Promise<Workspace> {
-    return this.fetch(`/api/workspaces/${id}`);
   }
 
   async createWorkspace(data: { name: string; slug: string; description?: string; context?: string; issue_prefix?: string }): Promise<Workspace> {
@@ -4005,7 +4153,9 @@ export class ApiClient {
 
   // Members
   async listMembers(workspaceId: string): Promise<MemberWithUser[]> {
-    return this.fetch(`/api/workspaces/${workspaceId}/members`);
+    return this.fetch(`/api/workspaces/${workspaceId}/members`, {
+      headers: { "X-Client-Capabilities": WORKSPACE_GUESTS_CAPABILITY },
+    });
   }
 
   async createMember(workspaceId: string, data: CreateMemberRequest): Promise<Invitation> {
@@ -4043,7 +4193,9 @@ export class ApiClient {
 
   // Invitations
   async listWorkspaceInvitations(workspaceId: string): Promise<Invitation[]> {
-    return this.fetch(`/api/workspaces/${workspaceId}/invitations`);
+    return this.fetch(`/api/workspaces/${workspaceId}/invitations`, {
+      headers: { "X-Client-Capabilities": WORKSPACE_GUESTS_CAPABILITY },
+    });
   }
 
   async revokeInvitation(workspaceId: string, invitationId: string): Promise<void> {
@@ -4244,10 +4396,6 @@ export class ApiClient {
     });
   }
 
-  async listAgentSkills(agentId: string): Promise<SkillSummary[]> {
-    return this.fetch(`/api/agents/${agentId}/skills`);
-  }
-
   async setAgentSkills(agentId: string, data: SetAgentSkillsRequest): Promise<void> {
     await this.fetch(`/api/agents/${agentId}/skills`, {
       method: "PUT",
@@ -4335,9 +4483,11 @@ export class ApiClient {
 
     if (!res.ok) {
       if (res.status === 401) this.handleUnauthorized(credentialUsed);
-      const message = await this.parseErrorMessage(res, `Upload failed: ${res.status}`);
+      // An ApiError, so callers can branch on the body's `code` (for example
+      // storage_limit_reached) instead of the message.
+      const { message, body } = await this.parseErrorBody(res, `Upload failed: ${res.status}`);
       this.logger.error(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms`, error: message });
-      throw new Error(message);
+      throw new ApiError(message, res.status, res.statusText, body);
     }
 
     this.logger.info(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms` });
@@ -4611,6 +4761,13 @@ export class ApiClient {
     });
   }
 
+  async rescheduleChatWakeup(sessionId: string, wakeupId: string, timing: ChatWakeupTiming): Promise<void> {
+    await this.fetch(`/api/chat/sessions/${sessionId}/wakeups/${wakeupId}`, {
+      method: "PATCH",
+      body: JSON.stringify(timing),
+    });
+  }
+
   async cancelChatWakeup(sessionId: string, wakeupId: string): Promise<void> {
     await this.fetch(`/api/chat/sessions/${sessionId}/wakeups/${wakeupId}/cancel`, {
       method: "POST",
@@ -4704,10 +4861,6 @@ export class ApiClient {
     });
   }
 
-  async deleteAttachment(id: string): Promise<void> {
-    await this.fetch(`/api/attachments/${id}`, { method: "DELETE" });
-  }
-
   // Fetches the raw bytes of a text-previewable attachment.
   //
   // The endpoint sidesteps CloudFront CORS (not configured on the CDN) and
@@ -4795,6 +4948,27 @@ export class ApiClient {
   async getProject(id: string): Promise<Project> {
     const raw = await this.fetch<unknown>(`/api/projects/${id}`);
     return parseWithFallback(raw, ProjectSchema, EMPTY_PROJECT, { endpoint: "GET /api/projects/:id" });
+  }
+
+  async getProjectProgress(id: string): Promise<ProjectProgressDetail> {
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/progress`);
+    return parseWithFallback(raw, ProjectProgressDetailSchema, EMPTY_PROJECT_PROGRESS_DETAIL, {
+      endpoint: "GET /api/projects/:id/progress",
+    });
+  }
+
+  async listProjectActivity(
+    id: string,
+    params: { before?: string; limit?: number } = {},
+  ): Promise<ProjectActivityPage> {
+    const search = new URLSearchParams();
+    if (params.before) search.set("before", params.before);
+    if (params.limit) search.set("limit", String(params.limit));
+    const query = search.toString();
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/activity${query ? `?${query}` : ""}`);
+    return parseWithFallback(raw, ProjectActivityPageSchema, EMPTY_PROJECT_ACTIVITY_PAGE, {
+      endpoint: "GET /api/projects/:id/activity",
+    });
   }
 
   async createProject(data: CreateProjectRequest): Promise<Project> {
@@ -4981,7 +5155,7 @@ export class ApiClient {
    * Saves a workflow edit. When the edit removes statuses that issues of the
    * workflow's projects still use, the server answers 409
    * `workflow_status_mapping_required` with a plan; resend with
-   * `status_mapping`. `dryRunIssueWorkflowUpdate` fetches that plan up front.
+   * `status_mapping`.
    */
   async updateIssueWorkflow(id: string, data: IssueWorkflowWriteRequest): Promise<IssueWorkflow> {
     const raw = await this.fetch<unknown>(`/api/issue-workflows/${id}`, {
@@ -4990,16 +5164,6 @@ export class ApiClient {
     });
     return parseWithFallback(raw, IssueWorkflowSchema, EMPTY_ISSUE_WORKFLOW, {
       endpoint: "PATCH /api/issue-workflows/{id}",
-    });
-  }
-
-  async dryRunIssueWorkflowUpdate(id: string, data: IssueWorkflowWriteRequest): Promise<IssueWorkflowDryRunResponse> {
-    const raw = await this.fetch<unknown>(`/api/issue-workflows/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ ...data, dry_run: true }),
-    });
-    return parseWithFallback(raw, IssueWorkflowDryRunResponseSchema, EMPTY_ISSUE_WORKFLOW_DRY_RUN, {
-      endpoint: "PATCH /api/issue-workflows/{id} (dry run)",
     });
   }
 
@@ -5149,11 +5313,20 @@ export class ApiClient {
   }
 
   // Custom issue properties
-  async listProperties(includeArchived = false): Promise<ListPropertiesResponse> {
-    const suffix = includeArchived ? "?include_archived=true" : "";
+  /**
+   * Usage counts cost the server a pass over the workspace's issues, so they
+   * are opt-in: without `includeUsage` every `usage_count` comes back 0.
+   */
+  async listProperties(
+    includeArchived = false,
+    { includeUsage = false }: { includeUsage?: boolean } = {},
+  ): Promise<ListPropertiesResponse> {
+    const params = new URLSearchParams();
+    if (includeArchived) params.set("include_archived", "true");
+    if (!includeUsage) params.set("include_usage", "false");
     let raw: unknown;
     try {
-      raw = await this.fetch<unknown>(`/api/properties${suffix}`);
+      raw = await this.fetch<unknown>(`/api/properties?${params}`);
     } catch (error) {
       // A backend predating custom properties 404s here (e.g. after a
       // server-only rollback). Treat it as an empty catalog: the property
@@ -5235,23 +5408,6 @@ export class ApiClient {
     return parseWithFallback(raw, CommentSchema, EMPTY_COMMENT, {
       endpoint: "POST /api/issues/{id}/quick-actions/{quickActionId}/run",
     });
-  }
-
-  /**
-   * What a quick action WOULD post, with server-side validation but no send.
-   * Retained for callers that resolve drafts over HTTP; the comment composer
-   * builds its draft synchronously from the quick-action catalog.
-   * Returns "" when the response cannot be read — callers must treat an empty
-   * string as "insert nothing" rather than clearing the composer.
-   */
-  async renderQuickAction(issueId: string, quickActionId: string): Promise<string> {
-    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/quick-actions/${quickActionId}/render`, {
-      method: "POST",
-    });
-    const parsed = parseWithFallback(raw, QuickActionRenderSchema, { content: "" }, {
-      endpoint: "POST /api/issues/{id}/quick-actions/{quickActionId}/render",
-    });
-    return parsed.content;
   }
 
   async createProperty(data: CreatePropertyRequest): Promise<IssueProperty> {
@@ -5501,7 +5657,7 @@ export class ApiClient {
     }) as Squad;
   }
 
-  async updateSquad(id: string, data: { name?: string; description?: string; instructions?: string; leader_id?: string; avatar_url?: string }): Promise<Squad> {
+  async updateSquad(id: string, data: { name?: string; description?: string; instructions?: string; leader_id?: string; avatar_url?: string; handoff_mode?: SquadHandoffMode }): Promise<Squad> {
     const raw = await this.fetch<unknown>(`/api/squads/${id}`, { method: "PUT", body: JSON.stringify(data) });
     return parseWithFallback(raw, SquadSchema, EMPTY_SQUAD, {
       endpoint: "PUT /api/squads/:id",
@@ -5537,6 +5693,15 @@ export class ApiClient {
     return parseWithFallback(raw, SquadMemberStatusListResponseSchema, EMPTY_SQUAD_MEMBER_STATUS_LIST, {
       endpoint: "GET /api/squads/:id/members/status",
     }) as SquadMemberStatusListResponse;
+  }
+
+  // What each agent of the squad receives as squad context on its runs.
+  // Restricted server-side to the people who can edit the squad.
+  async getSquadBriefs(squadId: string): Promise<SquadBriefsResponse> {
+    const raw = await this.fetch<unknown>(`/api/squads/${squadId}/briefs`);
+    return parseWithFallback(raw, SquadBriefsResponseSchema, EMPTY_SQUAD_BRIEFS, {
+      endpoint: "GET /api/squads/:id/briefs",
+    }) as SquadBriefsResponse;
   }
 
   // Autopilots
@@ -6000,15 +6165,6 @@ export class ApiClient {
     return this.fetch(`/api/integrations/composio/connections`);
   }
 
-  /** Starts a hosted Composio connect flow for a toolkit and returns the
-   * redirect URL the browser should be sent to. */
-  async beginComposioConnect(toolkitSlug: string): Promise<ComposioConnectInitResponse> {
-    return this.fetch(`/api/integrations/composio/connect/init`, {
-      method: "POST",
-      body: JSON.stringify({ toolkit_slug: toolkitSlug }),
-    });
-  }
-
   /** Disconnects a Composio connection the caller owns. */
   async deleteComposioConnection(connectionId: string): Promise<void> {
     await this.fetch(`/api/integrations/composio/connections/${connectionId}`, {
@@ -6053,6 +6209,29 @@ export class ApiClient {
     return parseWithFallback(raw, TeamAppImpactSchema, EMPTY_TEAM_APP_IMPACT, { endpoint: "GET /api/apps/team/impact" });
   }
 
+  /** Asks the workspace's admins to connect a team account for an app. */
+  async requestTeamApp(toolkitSlug: string, agentId?: string): Promise<void> {
+    await this.fetch(`/api/apps/team/requests`, {
+      method: "POST",
+      body: JSON.stringify({ toolkit_slug: toolkitSlug, ...(agentId ? { agent_id: agentId } : {}) }),
+    });
+  }
+
+  /** An admin declines every open team-account request for an app; a member
+   * withdraws their own. */
+  async dismissTeamAppRequests(toolkitSlug: string): Promise<void> {
+    await this.fetch(`/api/apps/team/requests?toolkit_slug=${encodeURIComponent(toolkitSlug)}`, { method: "DELETE" });
+  }
+
+  /** What disconnecting one of the caller's personal accounts would stop in
+   * its workspace. */
+  async getPersonalAppImpact(connectionId: string): Promise<PersonalAppImpact> {
+    const raw = await this.fetch<unknown>(`/api/integrations/composio/connections/${connectionId}/impact`);
+    return parseWithFallback(raw, PersonalAppImpactSchema, { agents: [] }, {
+      endpoint: "GET /api/integrations/composio/connections/:id/impact",
+    });
+  }
+
   // Write responses parse to null when malformed; callers refetch instead of
   // caching a guess.
 
@@ -6067,27 +6246,9 @@ export class ApiClient {
     return parseWithFallback(raw, AppSettingsResponseSchema, null, { endpoint: "PUT /api/apps/settings" });
   }
 
-  async listAppTools(toolkitSlug: string): Promise<{ tools: AppTool[] }> {
-    const raw = await this.fetch<unknown>(`/api/apps/tools?toolkit_slug=${encodeURIComponent(toolkitSlug)}`);
-    return parseWithFallback(raw, AppToolsResponseSchema, { tools: [] }, { endpoint: "GET /api/apps/tools" });
-  }
-
-  /** Corrects one tool's class; `null` restores the automatic class. */
-  async updateAppToolClass(toolkitSlug: string, toolSlug: string, actionClass: AppActionClass | null): Promise<void> {
-    await this.fetch(`/api/apps/tools/class`, {
-      method: "PUT",
-      body: JSON.stringify({ toolkit_slug: toolkitSlug, tool_slug: toolSlug, action_class: actionClass ?? "" }),
-    });
-  }
-
   async listIssueAppCalls(issueId: string): Promise<{ calls: IssueAppCall[] }> {
     const raw = await this.fetch<unknown>(`/api/app-calls?issue_id=${encodeURIComponent(issueId)}`);
     return parseWithFallback(raw, IssueAppCallsResponseSchema, { calls: [] }, { endpoint: "GET /api/app-calls" });
-  }
-
-  async getAppRules(toolkitSlug: string, scope: AppAccountScope): Promise<{ rules: AppRule[] }> {
-    const raw = await this.fetch<unknown>(`/api/apps/rules?toolkit_slug=${encodeURIComponent(toolkitSlug)}&scope=${scope}`);
-    return parseWithFallback(raw, AppRulesResponseSchema, { rules: [] }, { endpoint: "GET /api/apps/rules" });
   }
 
   async updateAppRules(

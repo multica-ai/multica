@@ -2,6 +2,7 @@ export type NotificationGroupKey =
   | "assignments"
   | "status_changes"
   | "comments"
+  | "squad_handoffs"
   | "chat_replies"
   | "mentions"
   | "reactions"
@@ -9,7 +10,26 @@ export type NotificationGroupKey =
   | "new_issues"
   | "agent_activity"
   | "system_notifications"
-  | "auto_archive_completed";
+  | AutoArchiveKey;
+
+/**
+ * Each action you take on an issue that can archive your own notifications on
+ * it. `auto_archive_completed` is moving it to a done or closed status;
+ * `auto_archive_on_agent_trigger` is any action that starts, merges into,
+ * steers or reruns an agent on the issue; `auto_archive_on_status` is moving
+ * it to a started status (unstarted statuses like backlog/todo archive nothing
+ * unless they trigger an agent).
+ */
+export type AutoArchiveKey =
+  | "auto_archive_completed"
+  | "auto_archive_on_agent_trigger"
+  | "auto_archive_on_comment"
+  | "auto_archive_on_status"
+  | "auto_archive_on_assignee"
+  | "auto_archive_on_priority"
+  | "auto_archive_on_project"
+  | "auto_archive_on_dates"
+  | "auto_archive_on_labels";
 
 export type NotificationGroupValue = "all" | "muted";
 
@@ -27,4 +47,10 @@ export type NotificationPreferences = Partial<Record<NotificationGroupKey, Notif
 export interface NotificationPreferenceResponse {
   workspace_id: string;
   preferences: NotificationPreferences;
+  /**
+   * The member has not yet chosen which of their actions archive notifications
+   * since replying, changing status and reassigning started doing so by
+   * default. Their auto-archive keys keep the old behavior until they answer.
+   */
+  auto_archive_prompt?: boolean;
 }

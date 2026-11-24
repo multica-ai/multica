@@ -17,6 +17,7 @@ import {
 } from "@/features/auth/auth-cookie";
 import { detectWebOS } from "@/platform/client-os";
 import { useUserLocaleSyncEnabled } from "@/platform/user-locale-sync";
+import { MotionProvider } from "@multica/views/common/motion-provider";
 
 // Client-only: every reading is a live client measurement the server cannot
 // render, so server HTML would only ever mismatch on hydration.
@@ -86,28 +87,30 @@ export function WebProviders({
     if (process.env.NODE_ENV === "development") installUserTimingCap();
   }, []);
   return (
-    <LocaleBundle locale={locale}>
-      {(resources) => (
-        <CoreProvider
-          apiBaseUrl={apiBaseUrl}
-          wsUrl={wsUrl || deriveWsUrl()}
-          cookieAuth={cookieAuth}
-          onLogin={setLoggedInCookie}
-          onLogout={clearLoggedInCookie}
-          identity={identity}
-          locale={locale}
-          resources={resources}
-          localeAdapter={localeAdapter}
-          syncUserLocale={syncUserLocale}
-        >
-          <WebNavigationProvider>
-            <WebScrollRestorationProvider>{children}</WebScrollRestorationProvider>
-            {process.env.NODE_ENV === "development" && devToolbarApiUrl && (
-              <WebDevToolbar apiUrl={devToolbarApiUrl} />
-            )}
-          </WebNavigationProvider>
-        </CoreProvider>
-      )}
-    </LocaleBundle>
+    <MotionProvider>
+      <LocaleBundle locale={locale}>
+        {(resources) => (
+          <CoreProvider
+            apiBaseUrl={apiBaseUrl}
+            wsUrl={wsUrl || deriveWsUrl()}
+            cookieAuth={cookieAuth}
+            onLogin={setLoggedInCookie}
+            onLogout={clearLoggedInCookie}
+            identity={identity}
+            locale={locale}
+            resources={resources}
+            localeAdapter={localeAdapter}
+            syncUserLocale={syncUserLocale}
+          >
+            <WebNavigationProvider>
+              <WebScrollRestorationProvider>{children}</WebScrollRestorationProvider>
+              {process.env.NODE_ENV === "development" && devToolbarApiUrl && (
+                <WebDevToolbar apiUrl={devToolbarApiUrl} />
+              )}
+            </WebNavigationProvider>
+          </CoreProvider>
+        )}
+      </LocaleBundle>
+    </MotionProvider>
   );
 }

@@ -88,6 +88,16 @@ function responseFor(pathname: string): unknown | undefined {
     case "/api/me": return me;
     case "/api/workspaces": return [workspace];
     case "/api/client-usage": return {};
+    case "/api/issue-view-preferences": return { prefs: { hidden: [], order: [] } };
+    case "/api/issue-views": case "/api/agent-run-counts": case "/api/agent-activity-30d":
+    case "/api/working-agents": case "/api/inbox/snoozed": case "/api/skills":
+      return [];
+    case "/api/autopilots": return { autopilots: [], total: 0 };
+    case "/api/project-folders": return { folders: [], filed: [] };
+    case "/api/notification-preferences": return { workspace_id: fx.WORKSPACE_ID, preferences: {} };
+    case "/api/issues/unread": return { items: [], next_cursor: null };
+    case "/api/inbox/archived/page": return { items: [], next_cursor: null, has_more: false };
+    case `/api/inbox/issues/${fx.ISSUE_ID}/read`: return { count: 0 };
     case "/api/agents": case "/api/runtimes": case "/api/squads":
     case "/api/agent-task-snapshot": case "/api/invitations": case "/api/inbox":
     case "/api/inbox/unread-summary": case "/api/pins": case "/api/chat/sessions":
@@ -100,6 +110,13 @@ function responseFor(pathname: string): unknown | undefined {
     case "/api/properties": return { properties: [], total: 0 };
     case "/api/quick-actions": return { quick_actions: [] };
     case "/api/assignee-frequency": return [];
+    case "/api/labels": return { labels: [], total: 0 };
+    case "/api/issue-workflows": return { workflows: [], total: 0 };
+    case `/api/issues/${fx.ISSUE_ID}/duplicates`: return { duplicate_of: null, duplicates: [] };
+    case `/api/issues/${fx.ISSUE_ID}/environments`:
+      return { environments: [], configs: [], pending_starts: [], failed_starts: [] };
+    // No live session: the description edits locally, as with no collab server.
+    case `/api/issues/${fx.ISSUE_ID}/collab-ticket`: return { enabled: false };
     // Typing debounces a trigger preview. It is part of the cost being
     // measured, so it is answered rather than blocked.
     case `/api/issues/${fx.ISSUE_ID}/comments/trigger-preview`:
@@ -118,6 +135,12 @@ function responseFor(pathname: string): unknown | undefined {
     default: return undefined;
   }
 }
+
+/**
+ * The local search copy syncs in the background on every page and is not part
+ * of this one's cost, so it is declined rather than seeded.
+ */
+const DECLINED = new Set(["/api/search-index/manifest"]);
 
 const nextFrame = (page: Page) =>
   page.evaluate(() => new Promise<void>((done) => {
@@ -177,6 +200,9 @@ test("comment typing stays responsive while runs stream", async ({ page, context
       return route.abort();
     }
     if (!url.pathname.startsWith("/api/")) return route.continue();
+    if (DECLINED.has(url.pathname)) {
+      return route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
+    }
     const body = responseFor(url.pathname);
     if (body === undefined) {
       unknownRequests.push(`${route.request().method()} ${url.pathname}${url.search}`);
@@ -234,16 +260,17 @@ test("comment typing stays responsive while runs stream", async ({ page, context
     throw error;
   });
 
+  const bodies = page.locator("[data-comment-block]");
+  try {
+    await expect(bodies.first()).toBeVisible({ timeout: setupLeft() });
+  } catch (error) { failSetup("comment bodies never rendered"); throw error; }
+  // The thread mounts its replies on demand (MUL-9409), and the unanchored
+  // runs sit at its live end, above the composer: where the user types.
+  await page.getByRole("button", { name: "Jump to latest" }).click({ timeout: setupLeft() });
   const summaries = page.locator("[data-run-summary]");
   try {
     await expect(summaries).toHaveCount(fx.RUN_COUNT, { timeout: setupLeft() });
   } catch (error) { failSetup("run summaries never rendered"); throw error; }
-  const bodies = page.locator("[data-comment-block]");
-  try {
-    await expect
-      .poll(() => bodies.count(), { timeout: setupLeft() })
-      .toBeGreaterThanOrEqual(fx.ROOT_COMMENT_COUNT + fx.REPLY_COMMENT_COUNT);
-  } catch (error) { failSetup("comment bodies never rendered"); throw error; }
   // Activity detail stays collapsed: the row shows a summary, not a step list.
   await expect(page.locator("[data-run-summary] >> nth=0")).toBeVisible();
   await page.evaluate(() => document.fonts?.ready);

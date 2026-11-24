@@ -197,3 +197,87 @@ func TestRefreshGateWithoutCloudIsOff(t *testing.T) {
 		t.Fatalf("decision = %+v", decision)
 	}
 }
+
+func TestStorageBytesGateIsAPeriodlessCeiling(t *testing.T) {
+	server := httptest.NewServer(policyHandler(func(p *wirePolicy) {
+		p.Gates[string(GateStorageBytes)] = membersGate(ActionEnforce, 1_000_000_000)
+	}))
+	defer server.Close()
+	client := newTestClient(t, server.URL, nil)
+
+	decision := client.Gate(context.Background(), uuid.New(), GateStorageBytes)
+	if decision.Gate.Action != ActionEnforce || decision.Gate.Limit == nil ||
+		*decision.Gate.Limit != 1_000_000_000 || decision.Gate.PeriodStart != nil {
+		t.Fatalf("decision = %+v, want enforce 1e9 without a period", decision)
+	}
+}
+
+// A Cloud that does not send storage_bytes yet, or sends it malformed, leaves
+// storage off without touching the other gates.
+func TestStorageBytesGateFailsOpenAlone(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		mutate func(*wirePolicy)
+		reason Reason
+	}{
+		{"missing", func(*wirePolicy) {}, ReasonGateMissing},
+		{"enforce without limit", func(p *wirePolicy) {
+			p.Gates[string(GateStorageBytes)] = wireGate{Action: string(ActionEnforce)}
+		}, ReasonGateInvalid},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(policyHandler(tt.mutate))
+			defer server.Close()
+			client := newTestClient(t, server.URL, nil)
+			workspaceID := uuid.New()
+
+			storage := client.Gate(context.Background(), workspaceID, GateStorageBytes)
+			if storage.Gate.Action != ActionOff || storage.Reason != tt.reason {
+				t.Fatalf("storage = %+v, want off/%s", storage, tt.reason)
+			}
+			if autopilot := client.Gate(context.Background(), workspaceID, GateAutopilotRuns); autopilot.Gate.Action != ActionEnforce {
+				t.Fatalf("autopilot = %+v, want the enforced quota from the same policy", autopilot)
+			}
+		})
+	}
+}
+
+func TestRefreshGateNowSkipsTheReuseWindow(t *testing.T) {
+	clock := time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC)
+	var calls atomic.Int64
+	var limit atomic.Int64
+	limit.Store(10)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		policy := samplePolicy(6, 1, 60, ActionEnforce)
+		gate := policy.Gates[string(GateAutopilotRuns)]
+		value := int(limit.Load())
+		gate.Limit = &value
+		policy.Gates[string(GateAutopilotRuns)] = gate
+		writePolicy(t, w, policy)
+	}))
+	defer server.Close()
+	client := newTestClient(t, server.URL, nil)
+	client.now = func() time.Time { return clock }
+	workspaceID := uuid.New()
+
+	if first := client.Gate(context.Background(), workspaceID, GateAutopilotRuns); first.Gate.Limit == nil || *first.Gate.Limit != 10 {
+		t.Fatalf("first = %+v; want limit 10", first)
+	}
+
+	// Cloud raises the limit one second later (an add-on confirmed by
+	// Stripe's webhook), inside RefreshGate's reuse window.
+	limit.Store(1010)
+	clock = clock.Add(time.Second)
+	if reused := client.RefreshGate(context.Background(), workspaceID, GateAutopilotRuns); *reused.Gate.Limit != 10 || calls.Load() != 1 {
+		t.Fatalf("RefreshGate = %+v, calls = %d; it reuses a policy this young", reused, calls.Load())
+	}
+	refreshed := client.RefreshGateNow(context.Background(), workspaceID, GateAutopilotRuns)
+	if refreshed.Gate.Limit == nil || *refreshed.Gate.Limit != 1010 || refreshed.Reason != ReasonRefreshed || calls.Load() != 2 {
+		t.Fatalf("RefreshGateNow = %+v, calls = %d; want the new limit", refreshed, calls.Load())
+	}
+	// The refreshed policy is cached for everyone else.
+	if cached := client.Gate(context.Background(), workspaceID, GateAutopilotRuns); *cached.Gate.Limit != 1010 || calls.Load() != 2 {
+		t.Fatalf("Gate after refresh = %+v, calls = %d", cached, calls.Load())
+	}
+}

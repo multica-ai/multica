@@ -45,6 +45,8 @@ multica daemon status --output json
 multica daemon logs --lines 100
 ```
 
+If the CLI cannot verify the token, check the reported error before signing in again.
+
 Common causes include:
 
 - The CLI has not signed in, or the token stored on this machine has expired.
@@ -65,6 +67,8 @@ Self-hosted deployments should also request the API's `/health` from the **execu
 ```bash
 multica config show
 ```
+
+On macOS, if daemon logs say `connect: no route to host` while `curl -fsS <server-url>/health` succeeds from a terminal on the same Mac, collect both results from the same time window. Include how the daemon was launched (Desktop, login service, or terminal) and the macOS and daemon versions. The shell result only confirms connectivity for that shell process.
 
 </Accordion>
 <Accordion title={<><code>multica setup</code> reports the server is not reachable</>} id="multica-setup-reports-the-server-is-not-reachable" value="multica-setup-reports-the-server-is-not-reachable">
@@ -160,6 +164,15 @@ An online daemon does not mean the tool itself works. Open the run's detailed re
 - Whether the agent's custom arguments or environment variables are valid.
 
 Run the same tool directly in a terminal on the executing computer first. If the tool cannot start on its own, fix its sign-in or configuration, then retry the run from the execution log.
+
+</Accordion>
+<Accordion title="AI coding tool times out behind a macOS proxy" id="ai-coding-tool-times-out-behind-a-macos-proxy" value="ai-coding-tool-times-out-behind-a-macos-proxy">
+
+If an AI coding tool such as Grok works in a terminal but times out in Multica Desktop, check whether the terminal exports proxy variables. On macOS, the local daemon and the tools it starts inherit environment variables from their launcher. Starting Desktop from the Dock does not load your shell exports or turn macOS Network proxy settings into environment variables.
+
+For a single agent, add the proxy variables its tool needs under [Environment variables](/agents-create#environment-variables-and-credentials), for example `HTTPS_PROXY=http://127.0.0.1:7897` for a local HTTP proxy. Use your actual proxy address. If you host Multica locally, add the local hosts that should connect directly to `NO_PROXY`, for example `localhost,127.0.0.1,::1`. Start a new run to apply the changes.
+
+These settings apply only to that agent's tool process, not to the daemon. If the daemon needs the proxy to reach the Multica server, or to fetch up-to-date model lists (it fetches them with its own environment), configure the daemon's launch environment separately. For a daemon that starts at login, see [Start at login](/daemon-runtimes#autostart).
 
 </Accordion>
 <Accordion title="Runs hang on macOS after a CLI upgrade" id="runs-hang-on-macos-after-a-cli-upgrade" value="runs-hang-on-macos-after-a-cli-upgrade">

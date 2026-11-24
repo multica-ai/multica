@@ -16,6 +16,7 @@ export type WSEventType =
   | "doc_folder:created"
   | "doc_folder:updated"
   | "doc_folder:deleted"
+  | "doc_comment:changed"
   | "issue:created"
   | "issue:updated"
   | "issue_attachments:changed"
@@ -135,8 +136,12 @@ export interface IssueUpdatedPayload {
   assignee_changed?: boolean;
   status_changed?: boolean;
   project_changed?: boolean;
+  stage_changed?: boolean;
   title_changed?: boolean;
   parent_changed?: boolean;
+  // A blocker edge was added or removed; the issue at its other end lists
+  // this one under `blocking`, so the change reaches past this issue.
+  blockers_changed?: boolean;
   prev_parent_issue_id?: string | null;
   // Both ends of a duplicate-mark change (MUL-7349). The mark is not on Issue,
   // so these tell the realtime layer whose duplicate relations to refresh.
@@ -272,6 +277,22 @@ export interface InboxBatchReadPayload {
 export interface InboxBatchArchivedPayload {
   recipient_id: string;
   count: number;
+  /** Set when the batch is one issue's notifications. */
+  issue_id?: string;
+  /**
+   * Why the server archived them on its own: "issue_status_terminal" when the
+   * recipient completed the issue, or "actor_acted" when they triggered an
+   * agent, commented on it, changed its status, or reassigned it. Older clients
+   * (v0.12.0 and earlier) only recognize these two values, so agent-triggered
+   * auto-archives keep `reason: "actor_acted"` and pass `trigger: "agent_triggered"`.
+   * Other values may appear; absent for user-requested batches.
+   */
+  reason?: string;
+  /**
+   * Optional finer-grained trigger for newer clients when `reason` remains
+   * `"actor_acted"` for backward compatibility (e.g. `"agent_triggered"`).
+   */
+  trigger?: string;
 }
 
 export interface CommentCreatedPayload {

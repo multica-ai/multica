@@ -10,6 +10,7 @@ import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { deriveAgentPresenceDetail } from "@multica/core/agents/derive-presence";
 import type { AgentTask, Issue } from "@multica/core/types";
+import { groupExecutionTasksByActor } from "../../issues/surface/execution-actors";
 import { workloadConfig } from "../presence";
 import { useT } from "../../i18n";
 
@@ -141,8 +142,16 @@ export function AgentActivityHoverContent({
   const { t } = useT("issues");
   const now = useActivityNow();
   const { agentById, runtimeById } = useActivityLookups();
+  const { getActorName, getActorInitials, getActorAvatarUrl, hasActor } =
+    useActorName();
+  const isKnownSquad = hasActor
+    ? (id: string) => hasActor("squad", id) !== false
+    : null;
 
   if (tasks.length === 0) return null;
+
+  const groups = groupExecutionTasksByActor(tasks, isKnownSquad);
+  const hasSquadGroup = groups.some((g) => g.type === "squad");
 
   return (
     <div className="flex flex-col gap-2">
@@ -152,17 +161,66 @@ export function AgentActivityHoverContent({
             disagree with the row count below. */}
         {t(($) => $.agent_activity.hover_header_tasks, { count: tasks.length })}
       </div>
-      <div className="flex flex-col gap-1.5">
-        {tasks.map((task) => (
-          <AgentActivityTaskRow
-            key={task.id}
-            task={task}
-            now={now}
-            agentById={agentById}
-            runtimeById={runtimeById}
-          />
-        ))}
-      </div>
+      {hasSquadGroup ? (
+        <div className="flex flex-col gap-2">
+          {groups.map((group) =>
+            group.type === "squad" ? (
+              <div
+                key={`squad:${group.id}`}
+                className="flex flex-col gap-1.5 rounded-md border border-border/70 bg-muted/20 p-2"
+              >
+                <div className="flex items-center gap-1.5 text-caption">
+                  <ActorAvatarBase
+                    name={getActorName("squad", group.id)}
+                    initials={getActorInitials("squad", group.id)}
+                    avatarUrl={getActorAvatarUrl("squad", group.id)}
+                    isSquad
+                    size="xs"
+                  />
+                  <span className="min-w-0 flex-1 truncate font-medium">
+                    {getActorName("squad", group.id)}
+                  </span>
+                </div>
+                <div className="flex flex-col gap-1.5 pl-1">
+                  {group.tasks.map((task) => (
+                    <AgentActivityTaskRow
+                      key={task.id}
+                      task={task}
+                      now={now}
+                      agentById={agentById}
+                      runtimeById={runtimeById}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div key={`agent:${group.id}`} className="flex flex-col gap-1.5">
+                {group.tasks.map((task) => (
+                  <AgentActivityTaskRow
+                    key={task.id}
+                    task={task}
+                    now={now}
+                    agentById={agentById}
+                    runtimeById={runtimeById}
+                  />
+                ))}
+              </div>
+            ),
+          )}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          {tasks.map((task) => (
+            <AgentActivityTaskRow
+              key={task.id}
+              task={task}
+              now={now}
+              agentById={agentById}
+              runtimeById={runtimeById}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

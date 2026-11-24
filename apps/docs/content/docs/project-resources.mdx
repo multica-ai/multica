@@ -40,6 +40,8 @@ A resource's `ref` sets the branch, tag, or commit that later checkouts use by d
 
 For a managed repository, the agent starts in the task working directory. `multica repo checkout` normally creates a subdirectory for the repository and prints its path. Run commands that need the repository root from that path. If the agent process itself must start at the root and you control the runtime computer, attach an existing checkout as a local directory. Both `in_place` and `worktree` start the agent at a repository root; prefer `worktree` for git repositories to keep runs isolated and parallel. See [How runs share the directory](#how-runs-share-the-directory).
 
+If the repository's target subdirectory already contains another repository or leftover files and checkout reports a path conflict, run `multica repo checkout` from a different directory inside the same task working directory. Keep the original directory until you've checked whether it contains work you need.
+
 ## Add a local directory
 
 The UI for adding a local directory is Desktop-only, because browsers cannot pick folders on your computer.
@@ -95,6 +97,8 @@ A local directory has two execution modes, set per resource with `execution_mode
 <Tab value="in_place (Direct, default)" id="in-place">
 
 The agent works directly in your directory, and runs execute one at a time. When two runs use the same real directory, the later one enters `waiting_local_directory` and continues after the earlier one releases the directory. Two paths that reach the same directory through different symlinks serialize the same way.
+
+If the linked path is missing when a waiting run is about to start, the run reports that the project folder no longer exists. Restore the folder or update the resource path before retrying.
 
 Waiting does not modify the directory or consume a daemon execution slot. A waiting run can be cancelled; otherwise it resumes startup once both the directory and execution capacity are available.
 

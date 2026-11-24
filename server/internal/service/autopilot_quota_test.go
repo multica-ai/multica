@@ -634,6 +634,15 @@ func TestAutopilotQuotaNoticeRetriesAfterWorkspaceManagerIsRestored(t *testing.T
 	); err != nil {
 		t.Fatalf("remove final workspace manager role: %v", err)
 	}
+	// The demoted owner also created the autopilot, and an autopilot's creator
+	// is notified too. Point the autopilot at a creator who is no longer a
+	// member so the rejection has no recipient at all.
+	if _, err := fixture.pool.Exec(ctx, `
+		UPDATE autopilot SET created_by_type = 'member', created_by_id = $2 WHERE id = $1`,
+		fixture.autopilotID, uuid.New(),
+	); err != nil {
+		t.Fatalf("point autopilot at a departed creator: %v", err)
+	}
 
 	assertRejected := func(key string) {
 		t.Helper()

@@ -17,6 +17,8 @@ func createDocForTest(t *testing.T) DocResponse {
 	testutil.Call(t, testHandler.CreateDoc, newRequest("POST", "/api/docs", map[string]any{"title": "Runbook", "content": "# First\n\nOriginal"})).Want(http.StatusCreated).JSON(&doc)
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), "DELETE FROM doc_version WHERE doc_id = $1", doc.ID)
+		testPool.Exec(context.Background(), "DELETE FROM doc_revision WHERE doc_id = $1", doc.ID)
+		testPool.Exec(context.Background(), "DELETE FROM doc_collab_state WHERE doc_id = $1", doc.ID)
 		testPool.Exec(context.Background(), "DELETE FROM doc WHERE id = $1", doc.ID)
 	})
 	return doc
@@ -159,6 +161,8 @@ func TestDocTextDropsNULBytes(t *testing.T) {
 	})).Want(http.StatusCreated).JSON(&doc)
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), "DELETE FROM doc_version WHERE doc_id = $1", doc.ID)
+		testPool.Exec(context.Background(), "DELETE FROM doc_revision WHERE doc_id = $1", doc.ID)
+		testPool.Exec(context.Background(), "DELETE FROM doc_collab_state WHERE doc_id = $1", doc.ID)
 		testPool.Exec(context.Background(), "DELETE FROM doc WHERE id = $1", doc.ID)
 	})
 	if doc.Title != "Runbook" || doc.Content != "Step one" {
@@ -268,5 +272,69 @@ func TestSearchDocsRanksTitleHitsAndExcerptsContent(t *testing.T) {
 	testutil.Call(t, testHandler.SearchDocs, cross).JSON(&other)
 	if len(other.Docs) != 0 {
 		t.Fatalf("search leaked across workspaces: %v", ids(other))
+	}
+}
+
+// History links an agent's edit to the run and the issue it came from. An
+// issue in a private project is not named to a member who cannot see that
+// project; the edit and its run stay in the history.
+func TestDocVersionsHideIssuesInPrivateProjects(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	agentID := createHandlerTestAgent(t, f.marker+"-writer", []byte(`{}`))
+	doc := createDocForTest(t)
+	revision := doc.Revision
+	edit := func(issueID, content string) string {
+		t.Helper()
+		taskID := dbfx.Task(t, agentID, testutil.Cols{"issue_id": issueID, "runtime_id": testRuntimeID, "status": "running"})
+		req := agentRequest("PATCH", "/api/docs/"+doc.ID, map[string]any{"base_revision": revision, "content": content}, agentID, taskID)
+		var updated DocResponse
+		testutil.Call(t, testHandler.UpdateDoc, withURLParam(req, "id", doc.ID)).Want(http.StatusOK).JSON(&updated)
+		revision = updated.Revision
+		return taskID
+	}
+	secretTask := edit(f.secretIssue, "from the private project")
+	publicTask := edit(f.publicIssue, "from a workspace issue")
+
+	issueOf := func(v DocVersionResponse) string {
+		if v.IssueID == nil {
+			return ""
+		}
+		return *v.IssueID
+	}
+	for _, tc := range []struct {
+		name, userID, secretIssue string
+	}{
+		{"project member", f.insider, f.secretIssue},
+		{"workspace member outside the project", f.outsider, ""},
+		{"workspace admin outside the project", f.outsideAdmin, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var history struct {
+				Versions []DocVersionResponse `json:"versions"`
+			}
+			list := asUser(newRequest("GET", "/api/docs/"+doc.ID+"/versions", nil), tc.userID)
+			testutil.Call(t, testHandler.ListDocVersions, withURLParam(list, "id", doc.ID)).Want(http.StatusOK).JSON(&history)
+			if len(history.Versions) != 3 {
+				t.Fatalf("history has %d versions, want 3", len(history.Versions))
+			}
+			// Newest first: the workspace issue's edit, then the private one.
+			for i, want := range []struct{ number, task, issue string }{
+				{"3", publicTask, f.publicIssue},
+				{"2", secretTask, tc.secretIssue},
+			} {
+				listed := history.Versions[i]
+				var single DocVersionResponse
+				get := asUser(newRequest("GET", "/api/docs/"+doc.ID+"/versions/"+want.number, nil), tc.userID)
+				testutil.Call(t, testHandler.GetDocVersion, withURLParams(get, "id", doc.ID, "number", want.number)).Want(http.StatusOK).JSON(&single)
+				for where, v := range map[string]DocVersionResponse{"list": listed, "single version": single} {
+					if v.TaskID == nil || *v.TaskID != want.task {
+						t.Errorf("%s v%s: task_id = %v, want %s", where, want.number, v.TaskID, want.task)
+					}
+					if got := issueOf(v); got != want.issue {
+						t.Errorf("%s v%s: issue_id = %q, want %q", where, want.number, got, want.issue)
+					}
+				}
+			}
+		})
 	}
 }

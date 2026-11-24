@@ -24,8 +24,9 @@ import {
   squadListOptions,
 } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
-import { runtimeDisplayName } from "@multica/core/runtimes";
+import { runtimeDisplayLabel } from "@multica/core/runtimes";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
+import { appCatalogOptions } from "@multica/core/connected-apps";
 import {
   inboxListOptions,
   archivedInboxPagesOptions,
@@ -73,6 +74,7 @@ const PENDING_RESOURCE_KEYS: ReadonlySet<TabLabelKey> = new Set<TabLabelKey>([
   "skill",
   "doc",
   "docFolder",
+  "app",
   "machine",
   "runtime",
 ]);
@@ -86,7 +88,8 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Re
 
   // Read both inbox lists cache-only; the archived view keeps its own list, so
   // an archived selection has to resolve against the archived cache — the same
-  // list the InboxPage populates when `?view=archived` is active.
+  // list the InboxPage populates when `?view=archived` is active. A Snoozed
+  // selection is the snoozed issue itself.
   const inboxList = useQuery({ ...inboxListOptions(wsId), enabled: false }).data;
   const inboxFilters = useInboxFilters(wsId);
   const archivedPages = useInfiniteQuery({ ...archivedInboxPagesOptions(wsId, inboxFilters), enabled: false }).data;
@@ -99,7 +102,7 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Re
     ...(archivedLookup?.items ?? []),
   ], [archivedPages, archivedLookup]);
   const activeInboxList =
-    subject.kind === "inbox" && subject.archived ? archivedInboxList : inboxList;
+    subject.kind === "inbox" && subject.view === "archived" ? archivedInboxList : inboxList;
   const inboxItem =
     subject.kind === "inbox" && subject.selectedKey
       ? (activeInboxList?.find(
@@ -127,7 +130,8 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Re
   // The canonical query seeds/subscribes to the UUID entry even when the URL
   // uses an identifier, so background tabs receive realtime patches too.
   const { issue } = useCanonicalIssue(wsId, issueId, {
-    enabled: fetch && (subject.kind === "issue" || !!inboxItem?.issue_id),
+    enabled:
+      fetch && (subject.kind === "issue" || !!inboxItem?.issue_id || (subject.kind === "inbox" && subject.view === "snoozed")),
   });
 
   const project = useQuery({
@@ -156,6 +160,7 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Re
   const squads = useQuery({ ...squadListOptions(wsId), enabled: false }).data;
   const runtimes = useQuery({ ...runtimeListOptions(wsId), enabled: false }).data;
   const sessions = useQuery({ ...chatSessionsOptions(wsId), enabled: false }).data;
+  const appCatalog = useQuery({ ...appCatalogOptions(wsId), enabled: false }).data;
 
   const data: ResolvedTabEntityData = {};
   switch (subject.kind) {
@@ -185,6 +190,11 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Re
     case "skill":
       if (skill) data.skill = { name: skill.name };
       break;
+    case "app": {
+      const name = appCatalog?.apps.find((a) => a.slug === subject.slug)?.name;
+      if (name) data.app = { name };
+      break;
+    }
     case "actor": {
       const name =
         subject.actorType === "agent"
@@ -197,12 +207,12 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Re
     }
     case "machine": {
       const rt = runtimes?.find((r) => r.id === subject.machineId);
-      if (rt) data.machine = { name: runtimeDisplayName(rt) };
+      if (rt) data.machine = { name: runtimeDisplayLabel(rt) };
       break;
     }
     case "runtime": {
       const rt = runtimes?.find((r) => r.id === subject.runtimeId);
-      if (rt) data.runtime = { name: runtimeDisplayName(rt) };
+      if (rt) data.runtime = { name: runtimeDisplayLabel(rt) };
       break;
     }
     case "chat":

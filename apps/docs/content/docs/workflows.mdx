@@ -42,7 +42,7 @@ Select a column and choose what happens when an issue enters it: **No handoff**,
 </Step>
 <Step>
 
-For an agent step, write what it should do. Then set **When done, move to** (the next column if you leave it unset) and **If rejected, send back to** (used when this step finds the work it received unacceptable and it needs rework). Use **Blocked**, not send-back, when the step cannot continue for an outside reason.
+For an agent step, write what it should do. Then set **When done, move to** (if you leave it unset, the next column, skipping closed columns such as Won't Fix; a Done or Closed column moves nowhere by default) and **If rejected, send back to** (used when this step finds the work it received unacceptable and it needs rework). Use **Blocked**, not send-back, when the step cannot continue for an outside reason; the step sends the issue back instead only when the workflow has no Blocked column, or at a Done or Closed column.
 
 </Step>
 <Step>

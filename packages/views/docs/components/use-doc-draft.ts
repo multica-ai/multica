@@ -22,7 +22,12 @@ const fromDoc = (doc: Doc): DocDraft => ({
   baseContent: doc.content,
   baseRevision: doc.revision,
 });
-export function useDocDraft(doc: Doc) {
+/**
+ * The doc as edited through the API: a local draft, saved after a pause and
+ * when the page goes away. `enabled` is false while the doc is (or may be)
+ * edited live, when the shared document saves the body: nothing is sent then.
+ */
+export function useDocDraft(doc: Doc, enabled = true) {
   const wsId = useWorkspaceId();
   const key = `${wsId}:${doc.id}`;
   const draft = useDocDraftStore((s) => s.draft.entries[key]);
@@ -39,6 +44,8 @@ export function useDocDraft(doc: Doc) {
   // before the parent passes the refreshed `doc`, so falling back to the prop
   // would briefly hand the editor the pre-save content and reset its caret.
   const savedDoc = useRef<Doc | null>(null);
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
   // The server trims titles. Keep what was typed in the field, so a pause
   // after a space does not join the next word to the previous one.
   const typedTitle = useRef<{ typed: string; saved: string } | null>(null);
@@ -59,7 +66,7 @@ export function useDocDraft(doc: Doc) {
       // Child editor cleanup can still publish its final pending update.
       // StrictMode's effect replay remounts before this microtask runs.
       queueMicrotask(() => {
-        if (!alive.current && statusRef.current === "saved")
+        if (!alive.current && enabledRef.current && statusRef.current === "saved")
           void saveRef.current();
       });
     };
@@ -141,17 +148,17 @@ export function useDocDraft(doc: Doc) {
     } finally {
       saving.current = false;
       // Edits made during the request still need saving after navigation.
-      if (saved && !alive.current) void save();
+      if (saved && !alive.current && enabledRef.current) void save();
     }
   };
   saveRef.current = save;
   useEffect(() => {
-    if (!dirty || status !== "saved") return;
+    if (!enabled || !draft || !dirty || status !== "saved") return;
     const timer = setTimeout(() => {
-      void save();
+      void saveRef.current();
     }, 1500);
     return () => clearTimeout(timer);
-  });
+  }, [enabled, draft, dirty, status]);
   const change = (patch: Partial<Pick<DocDraft, "title" | "content">>) => {
     if (!inScope()) return;
     const current =
@@ -176,5 +183,16 @@ export function useDocDraft(doc: Doc) {
       if (inScope()) updateStatus("error");
     }
   };
-  return { draft: value, status, dirty, change, retry: save, reload };
+  /** Keeps unsaved edits as a read-only backup instead of saving them: they
+   *  were made against an older copy, and the live document has moved on. */
+  const setAside = () => {
+    const current = useDocDraftStore.getState().draft.entries[key];
+    if (!current || !inScope()) return;
+    if (current.title === current.baseTitle && current.content === current.baseContent) return;
+    setDocDraft(key, {
+      ...fromDoc(latestDoc),
+      backup: { title: current.title, content: current.content },
+    });
+  };
+  return { draft: value, status, dirty, change, retry: save, reload, setAside };
 }

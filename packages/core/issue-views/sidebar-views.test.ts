@@ -5,7 +5,6 @@ import {
   migrateSidebarViewOrder,
   reorderSidebarViewOrder,
   resolveSidebarViewItems,
-  withLaterBuiltins,
 } from "./sidebar-views";
 
 const view = (id: string, owner_id: string): IssueView => ({
@@ -33,7 +32,6 @@ describe("defaultSidebarViewOrder", () => {
       "builtin:my_work",
       "builtin:working",
       "builtin:subscribed",
-      "builtin:snoozed",
       "view:a",
       "view:c",
     ]);
@@ -81,31 +79,6 @@ describe("migrateSidebarViewOrder", () => {
     expect(migrateSidebarViewOrder(["builtin:all_issues", "builtin:unread"])).toEqual(["builtin:all_issues"]);
     const current = ["builtin:subscribed", "view:a"];
     expect(migrateSidebarViewOrder(current)).toEqual(current);
-  });
-});
-
-describe("withLaterBuiltins", () => {
-  it("adds Snoozed after Subscribed to an order saved before it existed", () => {
-    expect(withLaterBuiltins(["builtin:subscribed", "view:a"], [])).toEqual([
-      "builtin:subscribed",
-      "builtin:snoozed",
-      "view:a",
-    ]);
-  });
-
-  it("puts it after the last built-in when Subscribed was removed", () => {
-    expect(withLaterBuiltins(["view:a", "builtin:my_work", "view:b"], [])).toEqual([
-      "view:a",
-      "builtin:my_work",
-      "builtin:snoozed",
-      "view:b",
-    ]);
-  });
-
-  it("leaves an order that holds it, or hid it, alone", () => {
-    const moved = ["builtin:snoozed", "builtin:subscribed"];
-    expect(withLaterBuiltins(moved, [])).toEqual(moved);
-    expect(withLaterBuiltins(["builtin:subscribed"], ["builtin:snoozed"])).toEqual(["builtin:subscribed"]);
   });
 });
 

@@ -1,12 +1,12 @@
 ---
 title: "Comparatif des outils de codage IA"
-description: "Comparez les outils de codage IA pris en charge par Multica, et leurs différences en matière de modèles, de MCP, de sessions et de skills."
+description: "Les 31 outils de codage IA pris en charge par Multica, dont Claude Code, Codex, Cursor et Copilot, et leurs différences en matière de détection, de modèles, de MCP, de sessions, de réorientation et de skills."
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { ProviderPickerDemo } from "@/components/demos/provider-picker-demo";
 
-Multica ne remplace pas l'outil de codage IA que vous utilisez : un runtime invoque l'outil déjà installé et connecté sur l'ordinateur, puis renvoie la progression et les résultats dans la tâche. Si vous utilisez déjà l'un de ces outils, vous pouvez généralement le garder. Si vous n'avez pas encore choisi, regardez quatre points :
+Multica prend en charge 31 outils de codage IA. Il ne remplace pas l'outil que vous utilisez : un runtime invoque l'outil déjà installé et connecté sur l'ordinateur, puis renvoie la progression et les résultats dans la tâche. Si vous utilisez déjà l'un de ces outils, vous pouvez généralement le garder. Si vous n'avez pas encore choisi, regardez quatre points :
 
 - s'il est déjà installé sur l'ordinateur ;
 - quels modèles votre compte peut utiliser ;
@@ -53,6 +53,12 @@ Les étapes d'installation se trouvent dans [Installer les outils de codage IA](
 | ZeroClaw | `zeroclaw` | ✓ | — | — | — |
 | ZCode | `zcode` / ZCode Desktop | ✓ | ✓ | ✓ | `.zcode/skills/` |
 
+<Callout type="info">
+Gemini CLI n'est pas pris en charge. Il a été retiré des outils intégrés : une page qui cite Gemini parmi les outils que Multica exécute n'est plus à jour.
+</Callout>
+
+Pour Claude Code, Multica liste et importe les compétences utilisateur et de plugins depuis le chemin absolu `CLAUDE_CONFIG_DIR` défini dans l’environnement du daemon. Le scanner ne voit pas les chemins définis uniquement dans un script de lancement.
+
 Pour Amp, le champ du modèle sélectionne un **mode** Amp, comme `high`, et non l’identifiant du modèle sous-jacent. Laissez-le vide pour utiliser le mode par défaut d’Amp.
 
 Amp exige aussi `AMP_API_KEY` dans l’environnement du daemon ou de l’agent ; une connexion interactive enregistrée ne suffit pas.
@@ -60,6 +66,41 @@ Amp exige aussi `AMP_API_KEY` dans l’environnement du daemon ou de l’agent ;
 « MCP géré par Multica » signifie que vous pouvez définir des serveurs MCP dans la configuration de l'agent et que Multica les transmet à l'outil avant une exécution. Cette colonne indique seulement si Multica peut s'en charger, pas si l'outil dispose d'autres moyens de configurer MCP.
 
 Pour les outils marqués — dans « Modèle choisi dans Multica », le modèle se choisit dans la configuration propre à l'outil ; voir [Sources des modèles](#sources-des-modèles).
+
+## Connecter un outil
+
+Tous les outils du tableau se connectent de la même façon : le daemon Multica d'un ordinateur cherche la commande de chaque outil dans le `PATH` et enregistre un runtime par outil trouvé. Les exécutions ont lieu sur cet ordinateur, avec la connexion et l'abonnement de l'outil ; Multica ne fournit pas ces outils et ne relaie pas leurs appels aux modèles.
+
+1. Installez l'outil et connectez-vous, comme l'indique sa propre documentation.
+2. Sur le même ordinateur, ouvrez [Multica Desktop](/desktop-app), qui connecte l'ordinateur automatiquement, ou installez la CLI et démarrez le daemon :
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+   multica setup
+   ```
+
+   Sous Windows, remplacez la première ligne par `irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex`. Les instances auto-hébergées utilisent les commandes du [Démarrage rapide en auto-hébergement](/self-host-quickstart).
+3. Vérifiez que l'outil apparaît sous cet ordinateur sur la page **Runtimes**, ou avec `multica runtime list`. Après avoir installé un autre outil, lancez `multica daemon restart` ou rouvrez Desktop.
+4. [Créez un agent](/agents-create) sur ce runtime et assignez-lui une tâche.
+
+Si l'outil est installé hors du `PATH` du daemon, indiquez son emplacement avec `MULTICA_<PREFIX>_PATH` ; voir [Variables d'environnement](/environment-variables#configuration-du-daemon). Un ordinateur peut héberger plusieurs outils et un espace de travail peut regrouper plusieurs ordinateurs : une équipe peut faire tourner Claude Code sur une machine et Codex ou Kimi sur une autre, depuis le même tableau.
+
+## Prise en charge de la réorientation
+
+Vous pouvez [ajouter un message à une exécution encore en cours](/mentioning-agents#réorienter-un-agent-en-cours-dexécution) au lieu d'attendre la suivante. L'outil de codage IA doit le prendre en charge, à partir de ces versions :
+
+| Outil | Version minimale |
+|---|---|
+| Antigravity | 1.4.8 |
+| Claude Code | 2.1.110 |
+| Codex | 0.100.0 |
+| Cursor Agent | 2026.10.14 |
+| Grok | 1.0.14 |
+| Hermes | 0.22.3 |
+| Kiro CLI | 2.33.0 |
+| Pi | 1.4.0 |
+
+Avec les autres outils ou des versions plus anciennes, « Ajouter à l'exécution en cours » n'est pas proposé : la réponse est traitée dans une nouvelle exécution après celle en cours, ou vous arrêtez l'exécution en cours pour recommencer.
 
 ## Sources des modèles
 

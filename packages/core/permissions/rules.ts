@@ -17,10 +17,18 @@ import { ALLOW, deny, type Decision, type PermissionContext } from "./types";
  * Returning a `Decision` (not a boolean) lets every surface — disabled state,
  * tooltip, banner copy — read the same `reason` and stay consistent without
  * sprinkling copy through the view layer.
+ *
+ * Guests (MUL-9420) are deny-by-default, like the server's route allowlist in
+ * `server/internal/middleware/guest.go`: a rule allows a guest only for what
+ * that list lets through, even on a resource the guest created or owned
+ * before it became a guest. Add every new rule to the guest table in
+ * `guest-deny.test.ts`.
  */
 
 const isAdminLike = (role: MemberRole | null) =>
   role === "owner" || role === "admin";
+
+const guestDenied = (message: string) => deny("guest_role", message);
 
 // ---- Agents ----------------------------------------------------------------
 
@@ -33,6 +41,7 @@ export function canEditAgent(agent: Agent, ctx: PermissionContext): Decision {
   if (ctx.userId === null) {
     return deny("not_authenticated", "Sign in to edit this agent.");
   }
+  if (ctx.role === "guest") return guestDenied("Guests can't edit agents.");
   if (isAdminLike(ctx.role)) return ALLOW;
   if (agent.owner_id !== null && agent.owner_id === ctx.userId) return ALLOW;
   return deny(
@@ -61,6 +70,8 @@ export function canAssignAgentToIssue(
   if (ctx.userId === null) {
     return deny("not_authenticated", "Sign in to assign agents.");
   }
+  // Guests never run agents, not even one they owned as a member.
+  if (ctx.role === "guest") return guestDenied("Guests can't assign work to agents.");
 
   // The owner may always invoke their own agent, regardless of mode.
   if (agent.owner_id !== null && agent.owner_id === ctx.userId) {
@@ -108,6 +119,7 @@ export function canEditSkill(skill: Skill, ctx: PermissionContext): Decision {
   if (ctx.userId === null) {
     return deny("not_authenticated", "Sign in to edit this skill.");
   }
+  if (ctx.role === "guest") return guestDenied("Guests can't edit skills.");
   if (isAdminLike(ctx.role)) return ALLOW;
   if (skill.created_by !== null && skill.created_by === ctx.userId) {
     return ALLOW;
@@ -123,6 +135,9 @@ export function canDeleteSkill(skill: Skill, ctx: PermissionContext): Decision {
 }
 
 // ---- Comments --------------------------------------------------------------
+
+// A guest may edit and delete its own comments: the server lets those routes
+// through and the handler allows only the author.
 
 export function canEditComment(
   comment: Comment,
@@ -173,6 +188,7 @@ export function canDeleteRuntime(
   if (ctx.userId === null) {
     return deny("not_authenticated", "Sign in to delete runtimes.");
   }
+  if (ctx.role === "guest") return guestDenied("Guests can't delete runtimes.");
   if (isAdminLike(ctx.role)) return ALLOW;
   if (runtime.owner_id !== null && runtime.owner_id === ctx.userId) {
     return ALLOW;

@@ -109,7 +109,7 @@ func (d *skillReadDBTX) Query(_ context.Context, sql string, _ ...any) (pgx.Rows
 func skillRow(id pgtype.UUID, name, description, content string) []any {
 	return []any{
 		id, testUUID(0xF0), name, description, content,
-		[]byte(nil), pgtype.UUID{}, pgtype.Timestamptz{}, pgtype.Timestamptz{}, pgtype.UUID{},
+		[]byte(nil), pgtype.UUID{}, pgtype.Timestamptz{}, pgtype.Timestamptz{}, pgtype.UUID{}, int64(1),
 	}
 }
 

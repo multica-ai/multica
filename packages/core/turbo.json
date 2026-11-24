@@ -4,7 +4,9 @@
     "test": {
       "inputs": [
         "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/server/internal/handler/testdata/quick_action_bodies.json"
+        "$TURBO_ROOT$/server/internal/handler/testdata/quick_action_bodies.json",
+        // appearance/theme-check.test.ts checks themes against the shipped palette.
+        "$TURBO_ROOT$/packages/ui/styles/tokens.css"
       ]
     }
   }

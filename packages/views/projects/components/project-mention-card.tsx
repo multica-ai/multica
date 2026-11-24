@@ -63,7 +63,7 @@ export function ProjectMentionCard({
       <AppLink
         href={p.projectDetail(projectId)}
         newTabTitle={fallbackLabel}
-        className="project-mention inline-flex"
+        className="project-mention align-middle"
         onContextMenu={
           project
             ? (event) => {

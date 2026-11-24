@@ -299,7 +299,11 @@ type delegatedFailureFixture struct {
 
 func seedDelegatedFailureFixture(t *testing.T) (*delegatedFailureFixture, *TaskService) {
 	t.Helper()
-	pool := newResolveOriginatorPool(t)
+	return seedDelegatedFailureFixtureIn(t, newResolveOriginatorPool(t))
+}
+
+func seedDelegatedFailureFixtureIn(t *testing.T, pool *pgxpool.Pool) (*delegatedFailureFixture, *TaskService) {
+	t.Helper()
 	ctx := context.Background()
 	workspaceID, userID, coordinatorID, issueID := seedAttributionFixture(t, pool)
 	if _, err := pool.Exec(ctx, `UPDATE issue SET status = 'in_progress' WHERE id = $1`, issueID); err != nil {

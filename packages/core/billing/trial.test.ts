@@ -38,7 +38,9 @@ function summary(
       purchaseSeats: false,
       changePlan: false,
       checkPlanChange: false,
+      purchaseAutopilotRuns: false,
     },
+    autopilotAddon: null,
     planChange: null,
     trial: trial
       ? {

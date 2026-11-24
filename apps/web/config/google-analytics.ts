@@ -75,6 +75,7 @@ const GLOBAL_ROUTES_OUTSIDE_RESERVED = new Set(["join", "lark", "slack", "telegr
 // workspace page rather than echoing an unknown segment.
 const WORKSPACE_SECTIONS = new Set([
   "agents",
+  "apps",
   "attachments",
   "autopilots",
   "billing",

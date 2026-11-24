@@ -562,7 +562,13 @@ func probeDshMulticaProfile(ctx context.Context, executablePath string) dshProbe
 	var exitErr *exec.ExitError
 	completed := runErr == nil || (errors.As(runErr, &exitErr) && exitErr.ProcessState.Exited())
 	if ctx.Err() == nil && completed {
-		if summary := dshCoreCompatibilitySummary(stderr.String()); summary != "" {
+		if summary := dshCompatibilitySummary(stderr.String(), dshBridgeCompatibilityRefusal); summary != "" {
+			repairSummary := fmt.Sprintf(
+				"%s; back up and inspect %q, update the Multica bridge to a build compatible with the installed DSH, and rerun dsh --profile multica --probe.",
+				summary, dshMulticaProfileManifestPath())
+			return dshProbeResult{verdict: dshProbeNeedsMigration, repairSummary: repairSummary, detail: repairSummary + " " + detail}
+		}
+		if summary := dshCompatibilitySummary(stderr.String(), dshCoreCompatibilityRefusal); summary != "" {
 			repairSummary := fmt.Sprintf(
 				"%s; back up and inspect %q to align profile-local DSH core dependencies with the application packages, retain required independent plugins, and rerun dsh --profile multica --probe.",
 				summary, dshMulticaProfileManifestPath())

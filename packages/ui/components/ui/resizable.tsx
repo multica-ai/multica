@@ -1,5 +1,6 @@
 "use client"
 
+import * as React from "react"
 import * as ResizablePrimitive from "react-resizable-panels"
 
 import { cn } from "@multica/ui/lib/utils"
@@ -15,18 +16,11 @@ function ResizablePanelGroup({
       // while dragging, and narrows it to a one-way arrow the moment a panel
       // hits a bound — so the cursor flips between two icons mid-drag. It is
       // truthful, but it reads as a glitch. The handle carries `cursor-col-resize`
-      // instead, which stays put.
+      // instead, which stays put; during a drag `data-resizing` on <html>
+      // (see ResizableHandle) keeps it wherever the pointer travels.
       disableCursor
       className={cn(
         "flex h-full w-full aria-[orientation=vertical]:flex-col",
-        // A drag captures the pointer, which then travels across the panels —
-        // away from the handle that carries the cursor. `:has` puts the same
-        // cursor on the whole group for as long as a separator is active, which
-        // is what the library's global rule was doing before `disableCursor`
-        // turned it off. Without this the cursor reverts to a text caret the
-        // moment the pointer leaves the 8px handle.
-        "[&:has([data-separator=active])_*]:cursor-col-resize [&:has([data-separator=active])]:cursor-col-resize",
-        "aria-[orientation=vertical]:[&:has([data-separator=active])_*]:cursor-row-resize aria-[orientation=vertical]:[&:has([data-separator=active])]:cursor-row-resize",
         className
       )}
       {...props}
@@ -38,16 +32,63 @@ function ResizablePanel({ ...props }: ResizablePrimitive.PanelProps) {
   return <ResizablePrimitive.Panel data-slot="resizable-panel" {...props} />
 }
 
+/**
+ * Marks <html> with `data-resizing="col" | "row"` while this separator is
+ * dragged. A drag captures the pointer, which then travels across the panels,
+ * away from the handle that carries the cursor; base.css puts the same cursor
+ * on everything for as long as the mark is there. A `:has()` on the group
+ * would do the same without script, but it makes every DOM change inside the
+ * panels restyle their whole subtree, which live editing does many times a
+ * second.
+ */
+function useResizingMark(element: HTMLDivElement | null) {
+  React.useEffect(() => {
+    if (!element) return
+    const root = element.ownerDocument.documentElement
+    let marked = false
+    const sync = () => {
+      const active = element.getAttribute("data-separator") === "active"
+      if (active === marked) return
+      marked = active
+      if (active) {
+        root.dataset.resizing =
+          element.getAttribute("aria-orientation") === "horizontal" ? "row" : "col"
+      } else {
+        delete root.dataset.resizing
+      }
+    }
+    const observer = new MutationObserver(sync)
+    observer.observe(element, { attributes: true, attributeFilter: ["data-separator"] })
+    sync()
+    return () => {
+      observer.disconnect()
+      if (marked) delete root.dataset.resizing
+    }
+  }, [element])
+}
+
 function ResizableHandle({
   withHandle,
   className,
+  elementRef,
   ...props
 }: ResizablePrimitive.SeparatorProps & {
   withHandle?: boolean
 }) {
+  const [element, setElement] = React.useState<HTMLDivElement | null>(null)
+  useResizingMark(element)
+  const ref = React.useCallback(
+    (node: HTMLDivElement | null) => {
+      setElement(node)
+      if (typeof elementRef === "function") elementRef(node)
+      else if (elementRef) elementRef.current = node
+    },
+    [elementRef]
+  )
   return (
     <ResizablePrimitive.Separator
       data-slot="resizable-handle"
+      elementRef={ref}
       className={cn(
         // The only cursor source: the group opts out of the library's own
         // (see ResizablePanelGroup). One icon for hover and for the whole drag.

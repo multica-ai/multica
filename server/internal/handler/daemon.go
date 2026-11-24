@@ -89,9 +89,9 @@ func (h *Handler) requireDaemonWorkspaceAccess(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	_, ok := h.requireWorkspaceMember(w, r, workspaceID, "not found")
+	member, ok := h.requireWorkspaceMember(w, r, workspaceID, "not found")
 	if ok && userID != "" {
-		h.MembershipCache.Set(r.Context(), userID, workspaceID)
+		h.cacheMembership(r.Context(), member)
 	}
 	return ok
 }
@@ -317,11 +317,13 @@ func (h *Handler) verifyDaemonWorkspaceAccess(r *http.Request, workspaceID strin
 	if h.MembershipCache.Get(r.Context(), userID, workspaceID) {
 		return true
 	}
-	_, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
-	if err != nil {
+	// The same rule as requireWorkspaceMember: a guest reaches only the
+	// routes on its allowlist, which no daemon route is.
+	member, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
+	if err != nil || (projectaccess.IsGuestRole(member.Role) && !middleware.GuestMayRequest(r)) {
 		return false
 	}
-	h.MembershipCache.Set(r.Context(), userID, workspaceID)
+	h.cacheMembership(r.Context(), member)
 	return true
 }
 
@@ -1121,6 +1123,9 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 	})
 
 	repoResp := workspaceReposResponse(req.WorkspaceID, ws.Repos, ws.Settings, h.cfg.GitExtraCACerts)
+	if !h.daemonCredentialSeesWorkspaceConfig(r, req.WorkspaceID) {
+		repoResp = workspaceReposResponse(req.WorkspaceID, nil, nil, h.cfg.GitExtraCACerts)
+	}
 
 	body := map[string]any{
 		"runtimes":      resp,
@@ -1332,6 +1337,10 @@ func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request
 	if !h.requireDaemonWorkspaceAccess(w, r, workspaceID) {
 		return
 	}
+	if !h.daemonCredentialSeesWorkspaceConfig(r, workspaceID) {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
 
 	ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(workspaceID))
 	if err != nil {
@@ -1340,6 +1349,25 @@ func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, workspaceReposResponse(workspaceID, ws.Repos, ws.Settings, h.cfg.GitExtraCACerts))
+}
+
+// daemonCredentialSeesWorkspaceConfig reports whether a daemon request may
+// read the workspace's repositories and settings. They configure the
+// workspace, which a guest is not shown (MUL-9420), so the person the
+// credential acts for (a PAT or JWT user, or the owner a daemon token is bound
+// to) must hold a non-guest role now. The membership cache cannot answer this:
+// it holds no role. Qoder-managed and pre-owner daemon tokens act for no
+// person and keep their access.
+func (h *Handler) daemonCredentialSeesWorkspaceConfig(r *http.Request, workspaceID string) bool {
+	userID := requestUserID(r)
+	if middleware.DaemonWorkspaceIDFromContext(r.Context()) != "" {
+		userID = middleware.DaemonTokenOwnerIDFromContext(r.Context())
+		if userID == "" {
+			return true
+		}
+	}
+	member, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
+	return err == nil && !projectaccess.IsGuestRole(member.Role)
 }
 
 // setRuntimeOffline flips a runtime offline, recording the daemon's reason when
@@ -1441,10 +1469,7 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-type DaemonHeartbeatRequest struct {
-	RuntimeID           string `json:"runtime_id"`
-	SupportsBatchImport bool   `json:"supports_batch_import,omitempty"`
-}
+type DaemonHeartbeatRequest = protocol.DaemonHeartbeatRequestPayload
 
 // heartbeatHasPendingTimeout bounds the cheap HasPending probe on the
 // heartbeat hot path. Probes are read-only (ZCARD in Redis) so a timeout is
@@ -1553,6 +1578,10 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	rt, lookupErr := h.getAgentRuntime(r.Context(), obsmetrics.RuntimeLookupSourceHeartbeatHTTP, runtimeUUID)
 	runtimeLookupMs = time.Since(lookupStart).Milliseconds()
 	if lookupErr != nil {
+		if writeQueryCancellation(w, r, lookupErr) {
+			outcome = "request_canceled"
+			return
+		}
 		// Only pgx.ErrNoRows means the runtime row is gone. Daemon reads this
 		// 404 as a signal to drop the stale runtime locally; treating a
 		// transient DB error the same way would force daemons to self-cleanup
@@ -1585,7 +1614,7 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	updateMs = time.Since(updateStart).Milliseconds()
 
-	ack, m, err := h.processHeartbeat(r.Context(), runtimeID, req.SupportsBatchImport)
+	ack, m, err := h.processHeartbeat(r.Context(), runtimeID, req)
 	probeModelMs = m.ProbeModelMs
 	popModelMs = m.PopModelMs
 	probeSkillsMs = m.ProbeSkillsMs
@@ -1629,7 +1658,7 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 // captured each runtime's liveness state in a connection lease, so the hot
 // path never reads agent_runtime. HTTP heartbeat remains the stateless lookup
 // fallback for a daemon that stops receiving WebSocket acknowledgements.
-func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, error) {
+func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, req protocol.DaemonHeartbeatRequestPayload) (*protocol.DaemonHeartbeatAckPayload, error) {
 	lease := identity.RuntimeLeases[runtimeID]
 	if lease == nil {
 		return nil, fmt.Errorf("runtime not in connection lease")
@@ -1649,7 +1678,7 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 		}
 		return nil, err
 	}
-	ack, _, err := h.processHeartbeat(ctx, runtimeID, supportsBatchImport)
+	ack, _, err := h.processHeartbeat(ctx, runtimeID, req)
 	return ack, err
 }
 
@@ -1789,7 +1818,7 @@ type heartbeatMetrics struct {
 // heartbeats using only the runtime ID. Each transport records liveness first:
 // HTTP uses its stateless runtime row, while WebSocket uses the connection
 // lease. Auth and request decoding also remain transport-specific.
-func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, heartbeatMetrics, error) {
+func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, req protocol.DaemonHeartbeatRequestPayload) (*protocol.DaemonHeartbeatAckPayload, heartbeatMetrics, error) {
 	var m heartbeatMetrics
 
 	slog.Debug("daemon heartbeat", "runtime_id", runtimeID)
@@ -1805,13 +1834,14 @@ func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, suppor
 	cancelProbeUpdate()
 	switch {
 	case probeUpdateErr == nil && hasUpdate:
-		pending, popUpdateErr := h.UpdateStore.PopPending(ctx, runtimeID)
+		pending, popUpdateErr := h.UpdateStore.PopPending(ctx, runtimeID, req.SupportsQueuedUpdate)
 		if popUpdateErr != nil {
 			slog.Warn("update PopPending failed", "error", popUpdateErr, "runtime_id", runtimeID)
 		} else if pending != nil {
 			ack.PendingUpdate = &protocol.DaemonHeartbeatPendingUpdate{
 				ID:            pending.ID,
 				TargetVersion: pending.TargetVersion,
+				Deferrable:    offerDeferrable(pending, req.SupportsQueuedUpdate),
 			}
 		}
 	case probeUpdateErr != nil:
@@ -1886,7 +1916,7 @@ func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, suppor
 	switch {
 	case probeErr == nil && hasImport:
 		popStart := time.Now()
-		if supportsBatchImport {
+		if req.SupportsBatchImport {
 			pendingImports, popErr := h.LocalSkillImportStore.PopPendingBatch(ctx, runtimeID, maxLocalSkillImportBatch)
 			m.PopImportMs = time.Since(popStart).Milliseconds()
 			if popErr != nil {
@@ -2925,6 +2955,12 @@ func claimResponseAgentIdentityMatches(resp AgentTaskResponse) bool {
 func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQueue, runtime db.AgentRuntime, runtimeID, runtimeWorkspaceID string) (resp AgentTaskResponse, deliveredCommentIDs []pgtype.UUID, issueSnapshot []byte, agentSkillCount, builtinSkillCount int, failure *claimBuildFailure) {
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp = taskToResponse(*task, runtimeWorkspaceID)
+	// Installed daemons treat a non-empty claim `squad_id` as a quick-create
+	// squad-leader signal (daemon/prompt.go:taskIsSquadLeader). Clear the row's
+	// attribution SquadID here so non-leader squad member runs are never promoted
+	// to leader role; the quick-create branch below re-populates resp.SquadID
+	// exclusively when qc.SquadID is present.
+	resp.SquadID = ""
 	if err := (&service.IssueWakeupService{Tasks: h.TaskService}).CheckClaim(r.Context(), *task); err != nil {
 		if !errors.Is(err, service.ErrWakeupForbidden) {
 			return resp, nil, nil, 0, 0, h.rejectClaimSourceLoad(r.Context(), task, err, "wakeup", resp.WakeupID)
@@ -3304,10 +3340,14 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		// Resolved before the leader briefing, which words the owning
 		// leader's status moves by it (MUL-8145).
 		legacyRuntimeRules := !requestHasClientCapability(r, protocol.DaemonCapabilityWorkflowStatusRulesV1)
-		projectWorkflow := h.claimProjectWorkflow(r.Context(), issue, task, legacyRuntimeRules)
+		stepCommands := !requestHasClientCapability(r, protocol.DaemonCapabilityWorkflowStatusMapV1)
+		projectWorkflow := h.claimProjectWorkflow(r.Context(), issue, task, legacyRuntimeRules, stepCommands)
 		leaderWorkflow := leaderNoWorkflow
 		if projectWorkflow != nil {
 			leaderWorkflow = leaderWorkflowCurrentDaemon
+			if projectWorkflow.StatusMap {
+				leaderWorkflow = leaderWorkflowStatusMap
+			}
 			if projectWorkflow.stepMoved {
 				leaderWorkflow = leaderWorkflowStepMoved
 			} else if legacyRuntimeRules {
@@ -3362,6 +3402,18 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					"squad_id", uuidToString(task.SquadID),
 					"agent_id", uuidToString(task.AgentID),
 				)
+			}
+		} else if resp.Agent != nil {
+			// A member's run on its squad's issue carries the squad context the
+			// leader already gets: roster, rules, its role, and how to hand off.
+			if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
+				if brief := squadMemberBriefingForClaim(r.Context(), h.Queries, issue, agent); brief != "" {
+					if strings.TrimSpace(resp.Agent.Instructions) == "" {
+						resp.Agent.Instructions = brief
+					} else {
+						resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + brief
+					}
+				}
 			}
 		}
 
@@ -4061,6 +4113,14 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}
 		}
 		projectCtx.applyTo(&resp)
+	}
+
+	// Doc discussion run (MUL-9933): the workspace comes from the task
+	// context; the doc, discussion and resume session from their own rows.
+	if task.DocID.Valid {
+		if failure := h.applyDocCommentClaim(r, task, &resp, runtimeID, runtimeWorkspaceID); failure != nil {
+			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, failure
+		}
 	}
 
 	// Quick-create task: no issue / chat / autopilot link — workspace and
@@ -5755,6 +5815,9 @@ func (h *Handler) GetTaskStatus(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "task not found")
 			return
 		}
+		if writeQueryCancellation(w, r, err) {
+			return
+		}
 		slog.Warn("get agent task status failed", "task_id", taskID, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to load task")
 		return
@@ -6779,6 +6842,17 @@ func (h *Handler) loadTaskForUser(w http.ResponseWriter, r *http.Request) (db.Ag
 	// page being unreachable.
 	if !h.requireTaskVisible(w, r, wsID, task, http.StatusNotFound, "task not found") {
 		return db.AgentTaskQueue{}, false
+	}
+	// A doc discussion run has no project to gate it, and every doc reader
+	// sees its status. Its transcript follows the agent's own visibility, as
+	// the discussion's run list does (MUL-9933).
+	if task.DocID.Valid {
+		agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{ID: task.AgentID, WorkspaceID: parseUUID(wsID)})
+		actorType, actorID := h.resolveActor(r, requestUserID(r), wsID)
+		if err != nil || !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, wsID) {
+			writeError(w, http.StatusNotFound, "task not found")
+			return db.AgentTaskQueue{}, false
+		}
 	}
 	return task, true
 }

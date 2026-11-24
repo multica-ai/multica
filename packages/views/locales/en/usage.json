@@ -8,7 +8,21 @@
   "filter": {
     "project_label": "Project",
     "all_projects": "All projects",
-    "period_label": "Period"
+    "period_label": "Period",
+    "attribution_label": "Attribution",
+    "all_attribution": "All attribution",
+    "standalone_only": "Standalone agents only",
+    "squads_group": "Squads"
+  },
+  "history_limit": {
+    "note": "Your plan covers the last {{days}} days. Upgrade to see earlier data. Nothing is deleted.",
+    "fell_back": "Showing the last {{days}} days — the limit for your current plan.",
+    "view_plans": "View plans",
+    "locked": "Not included in your plan",
+    "plan": {
+      "pro": "Pro",
+      "business": "Business"
+    }
   },
   "kpi": {
     "cost_label": "Cost · {{days}}D",
@@ -17,10 +31,12 @@
     "run_time_label": "Run time · {{days}}D",
     "run_time_hint": "Across {{tasks}} runs",
     "tasks_label": "Runs · {{days}}D",
-    "tasks_hint": "{{failed}} failed"
+    "tasks_hint": "{{failed}} failed",
+    "cost_squad_hint": "{{name}} overall (incl. delegated members)",
+    "cost_squad_share_hint": "Squad-triggered {{cost}} ({{pct}}%)"
   },
   "dim": {
-    "label": "Dimension",
+    "label": "Interval",
     "daily": "Daily",
     "weekly": "Weekly"
   },
@@ -50,8 +66,8 @@
     "kpi_failed_hint": "Of {{total}} runs",
     "kpi_rate_label": "Failure rate · {{days}}D",
     "kpi_agents_label": "Agents affected · {{days}}D",
-    "kpi_agents_hint": "Worst {{name}} · {{count}}",
-    "tooltip_rate": "Error rate",
+    "kpi_agents_hint": "Most: {{name}} ({{count}} failed)",
+    "tooltip_rate": "Failure rate",
     "class": {
       "auth": "Auth",
       "rate_limit": "Rate limit",
@@ -66,8 +82,8 @@
     "mix_title": "Failure mix · {{failed}}",
     "mix_label": "Failure mix",
     "codes_label": "Error codes",
-    "by_agent": "Top offenders",
-    "sort_label": "Rank offenders by",
+    "by_agent": "Errors by agent",
+    "sort_label": "Rank agents by",
     "sort_failed": "Failures",
     "sort_rate": "Rate",
     "header_agent": "Agent",
@@ -80,7 +96,8 @@
     "show_reasons": "Show error codes",
     "hide_reasons": "Hide error codes",
     "show_all": "Show all {{count}}",
-    "show_less": "Show top {{count}}"
+    "show_less": "Show top {{count}}",
+    "by_squad": "Errors by squad"
   },
   "leaderboard": {
     "title": "Leaderboard",
@@ -101,7 +118,16 @@
     "usage_totals_pending": "Usage totals are still being processed",
     "show_all": "Show all",
     "show_less": "Show top {{count}}",
-    "no_data": "No agent activity in this window."
+    "no_data": "No agent activity in this window.",
+    "group_label": "Group leaderboard by",
+    "group_agent": "Agents",
+    "group_squad": "Squads",
+    "header_squad": "Squad",
+    "squad_caption": "{{count}} squads",
+    "squad_members_title": "{{name}} member breakdown",
+    "squad_members_count": "{{count}} members involved",
+    "deleted_squads": "Deleted squads",
+    "toggle_squad_members": "Toggle members for {{name}}"
   },
   "empty": {
     "title": "No usage yet",

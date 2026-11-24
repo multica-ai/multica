@@ -68,6 +68,7 @@ func (q *Queries) GetMember(ctx context.Context, id pgtype.UUID) (Member, error)
 const getMemberByUserAndWorkspace = `-- name: GetMemberByUserAndWorkspace :one
 SELECT id, workspace_id, user_id, role, created_at, pinned_at FROM member
 WHERE user_id = $1 AND workspace_id = $2
+  AND role IN ('owner', 'admin', 'member', 'guest')
 `
 
 type GetMemberByUserAndWorkspaceParams struct {
@@ -75,6 +76,10 @@ type GetMemberByUserAndWorkspaceParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
+// A role this build does not know is no membership: every access check that
+// starts from this lookup refuses it. A later release can then add a role
+// and still be rolled back to this one without the old build reading the new
+// role as a full member, the way builds before guests read 'guest'.
 func (q *Queries) GetMemberByUserAndWorkspace(ctx context.Context, arg GetMemberByUserAndWorkspaceParams) (Member, error) {
 	row := q.db.QueryRow(ctx, getMemberByUserAndWorkspace, arg.UserID, arg.WorkspaceID)
 	var i Member
@@ -117,7 +122,7 @@ JOIN (
            unnest($2::uuid[]) AS workspace_id
 ) AS requested
     ON m.user_id = requested.user_id AND m.workspace_id = requested.workspace_id
-WHERE m.role <> 'guest'
+WHERE m.role IN ('owner', 'admin', 'member')
 `
 
 type GetRealtimeMembershipsParams struct {
@@ -131,7 +136,8 @@ type GetRealtimeMembershipsRow struct {
 }
 
 // Guests (MUL-9420) get no realtime stream: workspace fanout is not narrowed
-// to their projects, so a socket that becomes a guest's is closed.
+// to their projects, so a socket that becomes a guest's is closed. Neither
+// does a role this build does not know (see GetMemberByUserAndWorkspace).
 func (q *Queries) GetRealtimeMemberships(ctx context.Context, arg GetRealtimeMembershipsParams) ([]GetRealtimeMembershipsRow, error) {
 	rows, err := q.db.Query(ctx, getRealtimeMemberships, arg.UserIds, arg.WorkspaceIds)
 	if err != nil {
@@ -253,6 +259,36 @@ func (q *Queries) ListWorkspaceManagerUserIDs(ctx context.Context, workspaceID p
 			return nil, err
 		}
 		items = append(items, user_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockWorkspaceOwners = `-- name: LockWorkspaceOwners :many
+SELECT id FROM member
+WHERE workspace_id = $1 AND role = 'owner'
+ORDER BY id
+FOR UPDATE
+`
+
+// Locks a workspace's owner rows in id order, so changes that could take away
+// its last owner apply one after the other and each counts the owners the
+// previous one left.
+func (q *Queries) LockWorkspaceOwners(ctx context.Context, workspaceID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, lockWorkspaceOwners, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

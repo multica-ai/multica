@@ -127,15 +127,15 @@ func TestIssueTableRowsNegationAndRelations(t *testing.T) {
 	assertRows("relation assigned",
 		issueTableFiltersRequest{Relations: []string{"assigned"}},
 		assignedToMe)
-	assertRows("relation my agents matches the involved scope: my agents and my squads",
+	assertRows("relation my agents matches owned agents and squads led by owned agents",
 		issueTableFiltersRequest{Relations: []string{"my_agents"}},
-		mineByAgent, mySquad, squadWithMe, squadWithMyAgent)
+		mineByAgent, mySquad)
 	assertRows("relations OR within the dimension",
 		issueTableFiltersRequest{Relations: []string{"assigned", "my_agents"}},
-		assignedToMe, mineByAgent, mySquad, squadWithMe, squadWithMyAgent)
+		assignedToMe, mineByAgent, mySquad)
 	assertRows("relation is not my agents",
 		issueTableFiltersRequest{Relations: []string{"my_agents"}, Negate: []string{"relations"}},
-		assignedToMe, theirAgent, unassignedByOther, theirSquad)
+		assignedToMe, theirAgent, unassignedByOther, squadWithMe, squadWithMyAgent, theirSquad)
 	assertRows("relation subscribed matches only my member subscriptions",
 		issueTableFiltersRequest{Relations: []string{"subscribed"}},
 		assignedToMe, theirAgent)
@@ -165,7 +165,7 @@ func TestIssueTableRowsNegationAndRelations(t *testing.T) {
 	for _, id := range involvedSquadIDs(t) {
 		involved[id] = true
 	}
-	for squad, want := range map[string]bool{ledByMyAgent: true, withMe: true, withMyAgent: true, notMine: false} {
+	for squad, want := range map[string]bool{ledByMyAgent: true, withMe: false, withMyAgent: false, notMine: false} {
 		if involved[squad] != want {
 			t.Fatalf("involved squads include %s = %v, want %v", squad, involved[squad], want)
 		}

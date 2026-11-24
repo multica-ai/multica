@@ -61,6 +61,7 @@ type Client struct {
 var (
 	_ Provider        = (*Client)(nil)
 	_ Refresher       = (*Client)(nil)
+	_ FreshRefresher  = (*Client)(nil)
 	_ FeatureProvider = (*Client)(nil)
 )
 
@@ -130,6 +131,26 @@ func (c *Client) RefreshGate(ctx context.Context, workspaceID uuid.UUID, name Ga
 		func(cached cacheEntry, now time.Time) bool {
 			return cached.hasPolicy && now.Before(cached.freshUntil) && now.Sub(cached.receivedAt) < minForcedRefreshAge
 		})
+	if err != nil {
+		return c.Gate(ctx, workspaceID, name)
+	}
+	reason := ReasonCacheFresh
+	if refreshed {
+		reason = ReasonRefreshed
+	}
+	return c.recordDecision(name, decisionFromEntry(entry, name, reason, false))
+}
+
+// RefreshGateNow fetches the workspace's policy from Cloud now, without
+// RefreshGate's reuse window, then resolves the gate from it. Concurrent
+// callers for the workspace share one fetch. When the fetch fails it answers
+// exactly like Gate, from the cache or fail-open.
+func (c *Client) RefreshGateNow(ctx context.Context, workspaceID uuid.UUID, name GateName) Decision {
+	if !c.Enabled() || workspaceID == uuid.Nil || !name.valid() {
+		return c.Gate(ctx, workspaceID, name)
+	}
+	entry, refreshed, err := c.refreshShared(ctx, workspaceID, "now:"+workspaceID.String(),
+		func(cacheEntry, time.Time) bool { return false })
 	if err != nil {
 		return c.Gate(ctx, workspaceID, name)
 	}
@@ -389,7 +410,7 @@ func normalizePolicy(wire wirePolicy) (fetchedPolicy, error) {
 		return fetchedPolicy{}, ErrInvalidPolicy
 	}
 	// Unknown gates are ignored for additive compatibility.
-	gates := make(map[GateName]Gate, 2)
+	gates := make(map[GateName]Gate, 5)
 	wireAutopilot, ok := wire.Gates[string(GateAutopilotRuns)]
 	if !ok {
 		return fetchedPolicy{}, ErrInvalidPolicy
@@ -404,7 +425,7 @@ func normalizePolicy(wire wirePolicy) (fetchedPolicy, error) {
 	// Cloud and Multica can deploy in either order and a bad value cannot turn
 	// the autopilot quota off.
 	gateReasons := make(map[GateName]Reason)
-	for _, name := range []GateName{GateMembers} {
+	for _, name := range []GateName{GateMembers, GateStorageBytes, GateDashboardHistoryDays, GateAppToolCalls} {
 		if wire.undecodableGates[string(name)] {
 			gates[name] = Gate{Action: ActionOff}
 			gateReasons[name] = ReasonGateInvalid
@@ -460,7 +481,13 @@ func normalizeGate(name GateName, wire wireGate) (Gate, error) {
 	if periodFields != 0 && periodFields != 3 {
 		return Gate{}, ErrInvalidPolicy
 	}
-	if name == GateAutopilotRuns && periodFields != 3 {
+	// A budget that resets needs its period.
+	if (name == GateAutopilotRuns || name == GateAppToolCalls) && periodFields != 3 {
+		return Gate{}, ErrInvalidPolicy
+	}
+	// A day count: positive, within the product's range, never a period.
+	if name == GateDashboardHistoryDays &&
+		(periodFields != 0 || *wire.Limit < 1 || *wire.Limit > MaxDashboardHistoryDays) {
 		return Gate{}, ErrInvalidPolicy
 	}
 	if periodFields == 3 && (!wire.PeriodStart.Before(*wire.PeriodEnd) || !wire.PeriodStart.Before(*wire.ResetAt)) {
@@ -523,7 +550,12 @@ func normalizeFeature(raw json.RawMessage) featureEntry {
 // notification object must never invalidate the enforcement gate and fail open
 // the underlying quota, so it is dropped independently.
 func normalizeNotificationPolicy(wire *wireNotificationPolicy) *NotificationPolicy {
-	if wire == nil || wire.OnRejection != NotificationFirstRejectionPerPeriod {
+	if wire == nil {
+		return nil
+	}
+	switch wire.OnRejection {
+	case NotificationFirstRejectionPerPeriod, NotificationFirstRejectionPerLimit:
+	default:
 		return nil
 	}
 	return &NotificationPolicy{
@@ -536,12 +568,14 @@ func decisionFromEntry(entry cacheEntry, name GateName, reason Reason, stale boo
 	if fallback, ok := entry.policy.gateReasons[name]; ok {
 		reason = fallback
 	}
-	if stale && gate.Action == ActionEnforce {
+	downgraded := stale && gate.Action == ActionEnforce
+	if downgraded {
 		gate.Action = ActionObserve
 	}
 	return Decision{
 		Gate:                gate,
 		Reason:              reason,
+		Downgraded:          downgraded,
 		PolicyRevision:      entry.policy.policyRevision,
 		SubscriptionVersion: entry.policy.subscriptionVersion,
 		CloudValidUntil:     entry.policy.cloudValidUntil,

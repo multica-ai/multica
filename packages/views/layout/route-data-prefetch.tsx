@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
   agentActivity30dOptions,
@@ -9,7 +9,9 @@ import {
 } from "@multica/core/agents/queries";
 import { autopilotListOptions } from "@multica/core/autopilots/queries";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
+import { appCatalogOptions, appsOverviewOptions } from "@multica/core/connected-apps";
 import { inboxListOptions } from "@multica/core/inbox/queries";
+import { fetchIssueByRef, prefetchIssuePage } from "@multica/core/issues/queries";
 import { useAuthStore } from "@multica/core/auth";
 import { useIsGuest } from "@multica/core/permissions";
 import { paths, useCurrentWorkspace, useWorkspaceSlug } from "@multica/core/paths";
@@ -47,6 +49,11 @@ const ROUTES = {
     void qc.prefetchQuery(memberListOptions(wsId));
     void qc.prefetchQuery(runtimeListOptions(wsId));
   },
+  apps: (qc, wsId) => {
+    void qc.prefetchQuery(appsOverviewOptions(wsId));
+    void qc.prefetchQuery(appCatalogOptions(wsId));
+    void qc.prefetchQuery(agentListOptions(wsId));
+  },
   squads: (qc, wsId) => {
     void qc.prefetchQuery(squadListOptions(wsId));
     void qc.prefetchQuery(agentListOptions(wsId));
@@ -73,6 +80,13 @@ const ROUTES = {
 
 type RouteKey = keyof typeof ROUTES;
 
+// A pointer sweeping across a list of issues is not heading for every row it
+// crosses. A hovered issue is fetched once the pointer has rested on its link
+// for ISSUE_FETCH_INTENT_MS, and what its page fills in after that once it has
+// rested ISSUE_HOVER_INTENT_MS. Focus fetches the issue at once.
+const ISSUE_FETCH_INTENT_MS = 40;
+const ISSUE_HOVER_INTENT_MS = 80;
+
 // A guest (MUL-9420) only reaches these pages.
 const GUEST_ROUTES: RouteKey[] = ["projects", "inbox"];
 
@@ -88,9 +102,10 @@ const WARM_ON_IDLE: RouteKey[] = [
 ];
 
 /**
- * Feeds `AppLink`'s hover/focus prefetch with the destination page's data and
- * warms the common list pages once the workspace is idle. Mount inside the
- * workspace shell, around the navigation that should benefit.
+ * Feeds `AppLink`'s hover/focus prefetch with the destination page's data, an
+ * issue page's included, and warms the common list pages once the workspace
+ * is idle. Mount inside the workspace shell, around the navigation that
+ * should benefit.
  */
 export function RouteDataPrefetch({
   wsId,
@@ -114,14 +129,51 @@ export function RouteDataPrefetch({
     return new Map<string, WarmRoute>(keys.map((key) => [p[key](), ROUTES[key]]));
   }, [slug, guest]);
 
+  const issuePrefix = slug ? `${paths.workspace(slug).issues()}/` : null;
+  const pending = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const cancel = useCallback(() => {
+    for (const timer of pending.current) clearTimeout(timer);
+    pending.current = [];
+  }, []);
+  // Nothing scheduled for one workspace starts in another.
+  useEffect(() => cancel, [cancel, wsId]);
+
   const prefetch = useCallback(
-    (href: string) => {
+    (href: string, trigger: "hover" | "focus") => {
+      cancel();
       if (!wsId) return;
       const path = href.split(/[?#]/)[0] ?? href;
+      const segment = issuePrefix && path.startsWith(issuePrefix) ? path.slice(issuePrefix.length) : "";
+      if (segment && !segment.includes("/")) {
+        let ref: string;
+        try {
+          ref = decodeURIComponent(segment);
+        } catch {
+          return;
+        }
+        const later = (run: () => void, ms: number) => {
+          pending.current.push(setTimeout(run, ms));
+        };
+        // A failed warm-up is the page's own first request again.
+        const warm = () => {
+          const issue = fetchIssueByRef(qc, wsId, ref);
+          issue.catch(() => undefined);
+          // A guest's issue page reads the issue alone (MUL-9420).
+          if (guest) return;
+          later(
+            () => issue.then((loaded) => prefetchIssuePage(qc, wsId, loaded.id)).catch(() => undefined),
+            trigger === "hover" ? ISSUE_HOVER_INTENT_MS - ISSUE_FETCH_INTENT_MS : ISSUE_HOVER_INTENT_MS,
+          );
+        };
+        if (trigger === "hover") later(warm, ISSUE_FETCH_INTENT_MS);
+        else warm();
+        return;
+      }
       routeByHref.get(path)?.(qc, wsId, userId);
     },
-    [qc, routeByHref, wsId, userId],
+    [qc, routeByHref, issuePrefix, wsId, userId, guest, cancel],
   );
+  const prefetcher = useMemo(() => ({ prefetch, cancel }), [prefetch, cancel]);
 
   useEffect(() => {
     if (!wsId) return;
@@ -137,7 +189,7 @@ export function RouteDataPrefetch({
   }, [qc, wsId, userId, guest]);
 
   return (
-    <RouteDataPrefetchProvider value={prefetch}>
+    <RouteDataPrefetchProvider value={prefetcher}>
       {children}
     </RouteDataPrefetchProvider>
   );

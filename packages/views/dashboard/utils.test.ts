@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   aggregateAgentFailures,
+  aggregateSquadDashboardRows,
+  aggregateSquadFailures,
   anonymizeUnresolvedAgentRows,
   UNRESOLVED_AGENTS_ROW_ID,
   aggregateAgentTokens,
@@ -16,12 +18,15 @@ import {
   computeDailyTotals,
   computeFailureTotals,
   DELETED_AGENTS_ROW_ID,
+  DELETED_SQUADS_ROW_ID,
   formatDuration,
   hasRateSample,
   isSyntheticAgentRow,
+  isSyntheticSquadRow,
   mergeAgentDashboardRows,
   RESTRICTED_AGENTS_ROW_ID,
   sortAgentFailures,
+  sortSquadFailures,
 } from "./utils";
 
 describe("aggregateDailyCost", () => {
@@ -912,5 +917,129 @@ describe("anonymizeUnresolvedAgentRows", () => {
     const known = new Set(["visible", "private-a", "private-b"]);
     // Same reference, not just equal — nothing needed rewriting.
     expect(anonymizeUnresolvedAgentRows(rows, known)).toBe(rows);
+  });
+});
+
+describe("aggregateSquadDashboardRows", () => {
+  it("groups leader + delegated member usage under each squad and leaves standalone runs out", () => {
+    const rows = aggregateSquadDashboardRows(
+      [
+        {
+          squad_id: "squad-jsquad",
+          agent_id: "xeon",
+          provider: "claude",
+          model: "claude-sonnet-4-6",
+          input_tokens: 1_000_000,
+          output_tokens: 0,
+          cache_read_tokens: 0,
+          cache_write_tokens: 0,
+          task_count: 2,
+        },
+        {
+          squad_id: "squad-jsquad",
+          agent_id: "emacs",
+          provider: "claude",
+          model: "claude-sonnet-4-6",
+          input_tokens: 2_000_000,
+          output_tokens: 0,
+          cache_read_tokens: 0,
+          cache_write_tokens: 0,
+          task_count: 3,
+        },
+        {
+          squad_id: "",
+          agent_id: "emacs",
+          provider: "claude",
+          model: "claude-sonnet-4-6",
+          input_tokens: 500_000,
+          output_tokens: 0,
+          cache_read_tokens: 0,
+          cache_write_tokens: 0,
+          task_count: 1,
+        },
+      ],
+      [
+        { squad_id: "squad-jsquad", agent_id: "xeon", total_seconds: 120, task_count: 2, failed_count: 0, cancelled_count: 0 },
+        { squad_id: "squad-jsquad", agent_id: "emacs", total_seconds: 300, task_count: 3, failed_count: 1, cancelled_count: 0 },
+        { squad_id: "", agent_id: "emacs", total_seconds: 60, task_count: 1, failed_count: 0, cancelled_count: 0 },
+      ],
+      new Set(["xeon", "emacs"]),
+      new Set(["squad-jsquad"]),
+    );
+
+    expect(rows.map((r) => r.squadId)).toEqual(["squad-jsquad"]);
+    const jsquad = rows[0]!;
+    expect(jsquad.tokens).toBe(3_000_000);
+    expect(jsquad.cost).toBeCloseTo(9, 2);
+    expect(jsquad.seconds).toBe(420);
+    expect(jsquad.taskCount).toBe(5);
+    expect(jsquad.members.map((m) => m.agentId)).toEqual(["emacs", "xeon"]);
+  });
+
+  it("returns no rows when every run is standalone", () => {
+    const rows = aggregateSquadDashboardRows(
+      [
+        {
+          squad_id: "",
+          agent_id: "emacs",
+          provider: "claude",
+          model: "claude-sonnet-4-6",
+          input_tokens: 500_000,
+          output_tokens: 0,
+          cache_read_tokens: 0,
+          cache_write_tokens: 0,
+          task_count: 1,
+        },
+      ],
+      [
+        { squad_id: "", agent_id: "emacs", total_seconds: 60, task_count: 1, failed_count: 0, cancelled_count: 0 },
+      ],
+      new Set(["emacs"]),
+      new Set(["squad-jsquad"]),
+    );
+
+    expect(rows).toEqual([]);
+  });
+
+  it("buckets unknown/deleted squad IDs and unknown agents cleanly", () => {
+    const rows = aggregateSquadDashboardRows(
+      [],
+      [
+        { squad_id: "gone-squad", agent_id: "gone-agent", total_seconds: 180, task_count: 2, failed_count: 0, cancelled_count: 0 },
+      ],
+      new Set(["xeon"]),
+      new Set(["squad-jsquad"]),
+    );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.squadId).toBe(DELETED_SQUADS_ROW_ID);
+    expect(isSyntheticSquadRow(rows[0]!.squadId)).toBe(true);
+    expect(rows[0]!.members.map((m) => m.agentId)).toEqual([DELETED_AGENTS_ROW_ID]);
+  });
+});
+
+describe("aggregateSquadFailures & sortSquadFailures", () => {
+  it("computes per-squad error rates and demotes small-sample squads on rate sort", () => {
+    const rows = aggregateSquadFailures(
+      [
+        { squad_id: "squad-a", agent_id: "a1", failure_reason: "", task_count: 16 },
+        { squad_id: "squad-a", agent_id: "a1", failure_reason: "timeout", task_count: 4 },
+        { squad_id: "squad-b", agent_id: "a2", failure_reason: "timeout", task_count: 2 },
+        { squad_id: "", agent_id: "a3", failure_reason: "", task_count: 10 },
+        { squad_id: "", agent_id: "a3", failure_reason: "agent_error.provider_auth_or_access", task_count: 5 },
+      ],
+      new Set(["squad-a", "squad-b"]),
+    );
+
+    // Standalone runs (squad_id "") are not a squad and stay out of the list.
+    expect(sortSquadFailures(rows, "failed").map((r) => r.squadId)).toEqual([
+      "squad-a",
+      "squad-b",
+    ]);
+    // squad-b is 100% failed but only 2 runs (< MIN_RATE_SAMPLE=10), so demoted below squad-a (20%).
+    expect(sortSquadFailures(rows, "rate").map((r) => r.squadId)).toEqual([
+      "squad-a",
+      "squad-b",
+    ]);
   });
 });

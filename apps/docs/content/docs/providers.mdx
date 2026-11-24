@@ -1,12 +1,12 @@
 ---
-title: AI coding tools comparison
-description: Compare the AI coding tools Multica supports, and how models, MCP, sessions, and skills differ.
+title: Supported AI coding tools
+description: The 31 AI coding tools Multica works with, including Claude Code, Codex, Cursor, and Copilot, and how detection, models, MCP, sessions, steering, and skills differ.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { ProviderPickerDemo } from "@/components/demos/provider-picker-demo";
 
-Multica does not replace the AI coding tool you use: a runtime invokes the tool already installed and signed in on the computer, then writes progress and results back to the issue. If you already use one of these tools, you can usually keep it. If you have not picked one yet, weigh four things:
+Multica works with 31 AI coding tools. It does not replace the tool you use: a runtime invokes the tool already installed and signed in on the computer, then writes progress and results back to the issue. If you already use one of these tools, you can usually keep it, and different agents in one workspace can use different tools. If you have not picked one yet, weigh four things:
 
 - whether it is already installed on the computer;
 - which models your account can use;
@@ -53,6 +53,12 @@ Install steps are in [Install AI coding tools](/install-agent-runtime).
 | ZeroClaw | `zeroclaw` | ✓ | — | — | — |
 | ZCode | `zcode` / ZCode Desktop | ✓ | ✓ | ✓ | `.zcode/skills/` |
 
+<Callout type="info">
+Gemini CLI is not supported. It was removed from the built-in tools, so a page that lists Gemini among the tools Multica runs is out of date.
+</Callout>
+
+For Claude Code, Multica lists and imports user and plugin skills from an absolute `CLAUDE_CONFIG_DIR` set in the daemon environment. Paths set only inside a launch wrapper are not visible to the scanner.
+
 For Amp, the model field selects an Amp **mode**, such as `high`, rather than an underlying model ID. Leave it empty to use Amp’s default.
 
 Amp also requires `AMP_API_KEY` in the daemon or agent environment; a saved interactive login alone is not enough.
@@ -62,6 +68,41 @@ Amp also requires `AMP_API_KEY` in the daemon or agent environment; a saved inte
 Tools with — under "Model picked in Multica" take their model from their own configuration; see [Model sources](#model-sources).
 
 Devin supports stdio MCP servers; HTTP/SSE entries are passed only if the CLI advertises support. Devin skills are imported from `$XDG_CONFIG_HOME/devin/skills` (default `~/.config/devin/skills`) or `%APPDATA%\devin\skills` on Windows, then the legacy `cognition/skills` root, then `~/.codeium/<channel>/skills` (`windsurf`, `windsurf-next`, `windsurf-insiders`, in that order), and finally `~/.agents/skills`. On duplicate skill keys, the first root wins for both listing and import.
+
+## Connect a tool
+
+Every tool in the table connects the same way: the Multica daemon on a computer looks up each tool's command on `PATH` and registers one runtime per tool it finds. Runs execute on that computer, with the tool's own login and subscription; Multica does not ship the tools or proxy their model calls.
+
+1. Install the tool and sign in to it, the way its own docs describe.
+2. On the same computer, open [Multica Desktop](/desktop-app), which connects the computer automatically, or install the CLI and start the daemon:
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+   multica setup
+   ```
+
+   On Windows, use `irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex` for the first line. Self-hosted instances use the commands in the [Self-host quickstart](/self-host-quickstart).
+3. Check that the tool shows up as a runtime under that computer on the **Runtimes** page, or with `multica runtime list`. After installing another tool, run `multica daemon restart` or reopen Desktop.
+4. [Create an agent](/agents-create) on that runtime and assign it an issue.
+
+If the tool is installed somewhere the daemon's `PATH` does not reach, point `MULTICA_<PREFIX>_PATH` at it; see [Environment variables](/environment-variables#daemon-configuration). One computer can host several tools, and a workspace can mix computers, so a team can run Claude Code on one machine and Codex or Kimi on another from the same board.
+
+## Steer a running run
+
+You can [add a message to a run that is still working](/mentioning-agents#steer-a-running-agent) instead of waiting for the next run. This needs support from the AI coding tool, and from these versions on:
+
+| Tool | Minimum version |
+|---|---|
+| Antigravity | 1.4.8 |
+| Claude Code | 2.1.110 |
+| Codex | 0.100.0 |
+| Cursor Agent | 2026.10.14 |
+| Grok | 1.0.14 |
+| Hermes | 0.22.3 |
+| Kiro CLI | 2.33.0 |
+| Pi | 1.4.0 |
+
+With other tools or older versions, **Add to current run** is not offered: a reply is handled in a new run after the current one, or you stop the current run and start over.
 
 ## Model sources
 
