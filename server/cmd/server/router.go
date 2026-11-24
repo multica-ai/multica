@@ -288,6 +288,12 @@ type RouterOptions struct {
 	// than read here, for the same fail-the-boot-in-main-only reason: the raw
 	// value is validated by parseLLMDisableThinking before the router exists.
 	LLMDisableThinking bool
+	// CapacityRetryPolicy opts the deployment into retrying provider
+	// capacity/rate-limit failures (MULTICA_CAPACITY_RETRY_*). The zero value
+	// keeps the upstream behavior of terminating on those failures. Read via
+	// capacityRetryPolicyFromEnv in main.go and injected here so the wiring
+	// stays in one place.
+	CapacityRetryPolicy service.CapacityRetryPolicy
 }
 
 func buildChannelSupervisor(
@@ -496,6 +502,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.ThemeStore = themeStoreFromEnv()
 	h.TaskService.FeatureFlags = opts.FeatureFlags
 	h.TaskService.Metrics = opts.BusinessMetrics
+	h.TaskService.CapacityRetryPolicy = opts.CapacityRetryPolicy
 	h.IssueService.Metrics = opts.BusinessMetrics
 	entitlementClient, entitlementErr := entitlement.New(entitlement.Config{
 		BaseURL:  signupConfig.CloudURL,

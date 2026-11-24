@@ -81,6 +81,12 @@ type TaskService struct {
 	// state for a self-hosted deployment with no MULTICA_LLM_* configuration.
 	// Wired in router.go from the same *llm.Client that backs chat auto-titling.
 	QuickActions ChatQuickActionsLLM
+	// CapacityRetryPolicy opts the deployment into retrying
+	// agent_error.provider_capacity_or_rate_limit failures; the zero value
+	// keeps the upstream behavior of terminating on them. Each knob falls
+	// back to the upstream schedule independently. Wired in router.go from
+	// MULTICA_CAPACITY_RETRY_* env vars parsed in main.go.
+	CapacityRetryPolicy CapacityRetryPolicy
 	// quickActionsInFlight (chat session id -> struct{}{}) and
 	// quickActionsRunning admit suggestion passes: one per session, and a
 	// process-wide ceiling. Both zero values are usable, so a TaskService built
@@ -92,6 +98,36 @@ type TaskService struct {
 	analyticsContextMu    sync.Mutex
 	analyticsContextCache map[string]analytics.TaskContext
 	analyticsContextOrder []string
+}
+
+// CapacityRetryPolicy opts a deployment INTO retrying
+// agent_error.provider_capacity_or_rate_limit failures (429/529-class), which
+// upstream Multica terminates on. The zero value keeps that upstream behavior:
+// capacity failures are not retryable. Each knob is INDEPENDENT and falls back
+// to the upstream schedule for whatever it governs when unset:
+//
+//   - MaxAttempts <= 0: the task column's max_attempts applies (default 2 =
+//     first run + one retry).
+//   - BaseDelay <= 0: retries are immediate (the upstream zero-delay default).
+//   - MaxDelay <= 0: no cap — BaseDelay doubling runs unbounded for as many
+//     attempts as the ceiling allows.
+type CapacityRetryPolicy struct {
+	// MaxAttempts is the total-execution ceiling for a capacity failure chain
+	// (first run + retries). It only ever WIDENS a task's generic max_attempts
+	// and never overrides the max_attempts<=1 "retry disabled" contract.
+	MaxAttempts int32
+	// BaseDelay backs off the first capacity retry; the failure at attempt N
+	// defers the next attempt by BaseDelay << (N-1). Unset means immediate
+	// retries.
+	BaseDelay time.Duration
+	// MaxDelay caps the backoff. Unset means uncapped exponential growth.
+	MaxDelay time.Duration
+}
+
+// capacityRetryEnabled reports whether the deployment opted into retrying
+// capacity/rate-limit failures. Any single configured knob opts in.
+func (s *TaskService) capacityRetryEnabled() bool {
+	return s.CapacityRetryPolicy != CapacityRetryPolicy{}
 }
 
 type SourceContextObjectStore interface {
@@ -5403,20 +5439,20 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 	)
 	// Restoring a Trae session replays history, but the next prompt can still
 	// execute the same tool again. Older reporters cannot certify this turn.
-	if retryableReasons[failureReason] && (report.NoToolCallsStarted || !taskfailure.IsTraePromptStreamDisconnect(errMsg)) {
+	if s.reasonIsRetryable(failureReason) && (report.NoToolCallsStarted || !taskfailure.IsTraePromptStreamDisconnect(errMsg)) {
 		if parent, perr := s.Queries.GetAgentTask(ctx, taskID); perr != nil {
 			slog.Warn("fail task auto-retry: load parent failed",
 				"task_id", util.UUIDToString(taskID), "error", perr)
-		} else if retryEligible(failureReason, parent) {
+		} else if s.retryEligible(failureReason, parent) {
 			wantRetry = true
 			// Persist the reason-aware effective budget into the child so the
 			// retry chain self-describes (e.g. provider_network → max_attempts=3),
 			// rather than leaking a contradictory attempt=N/max_attempts=2 row.
-			retryMaxAttempts = pgtype.Int4{Int32: retryAttemptCeiling(failureReason, parent.MaxAttempts), Valid: true}
+			retryMaxAttempts = pgtype.Int4{Int32: s.retryAttemptCeiling(failureReason, parent.MaxAttempts), Valid: true}
 			// Defer this attempt when the reason's schedule calls for a backoff
 			// (provider_network's final attempt waits ~5s); a zero delay leaves
 			// fire_at NULL so the child is created immediately-claimable.
-			if delay := retryDelayForAttempt(failureReason, parent.Attempt); delay > 0 {
+			if delay := s.retryDelayForAttempt(failureReason, parent.Attempt); delay > 0 {
 				retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true}
 			}
 			if agent, aerr := s.Queries.GetAgent(ctx, parent.AgentID); aerr != nil {
@@ -5799,6 +5835,10 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 // never started, so there is nothing to be idempotent about, and every bundle
 // that did download is already cached on disk — a retry resumes from there
 // instead of re-fetching the whole set (MUL-5370).
+//
+// provider_capacity_or_rate_limit is deliberately NOT here: upstream
+// terminates on it, and a deployment only opts into retrying it by configuring
+// TaskService.CapacityRetryPolicy (see capacityRetryEnabled).
 var retryableReasons = map[string]bool{
 	string(taskfailure.ReasonRuntimeOffline):         true,
 	string(taskfailure.ReasonRuntimeRecovery):        true,
@@ -5806,6 +5846,15 @@ var retryableReasons = map[string]bool{
 	"codex_semantic_inactivity":                      true,
 	string(taskfailure.ReasonAgentProviderNetwork):   true,
 	string(taskfailure.ReasonSkillBundleUnavailable): true,
+}
+
+// reasonIsRetryable reports whether a failure reason is auto-retryable under
+// this deployment's configuration. It is retryableReasons plus the optional
+// capacity opt-in; every reason gate (FailTask, the orphan sweeper,
+// retryEligible) goes through here so the opt-in applies uniformly.
+func (s *TaskService) reasonIsRetryable(reason string) bool {
+	return retryableReasons[reason] ||
+		(s.capacityRetryEnabled() && reason == string(taskfailure.ReasonAgentProviderCapacityOrRateLimit))
 }
 
 // runtime_offline retries start deferred, not queued: their positive fire_at
@@ -5837,9 +5886,16 @@ const (
 // child (CreateRetryTask's max_attempts) so the row stays self-consistent:
 // provider_network's chain records attempt=3, max_attempts=3, not a
 // contradictory attempt=3, max_attempts=2 (MUL-4910).
-func retryAttemptCeiling(reason string, taskMaxAttempts int32) int32 {
+func (s *TaskService) retryAttemptCeiling(reason string, taskMaxAttempts int32) int32 {
 	if taskMaxAttempts <= 1 {
 		return taskMaxAttempts
+	}
+	// Capacity widening only when the operator configured it; unset keeps the
+	// task column's value (default 2), exactly as upstream.
+	if reason == string(taskfailure.ReasonAgentProviderCapacityOrRateLimit) &&
+		s.CapacityRetryPolicy.MaxAttempts > 0 &&
+		taskMaxAttempts < s.CapacityRetryPolicy.MaxAttempts {
+		return s.CapacityRetryPolicy.MaxAttempts
 	}
 	if reason == string(taskfailure.ReasonAgentProviderNetwork) && taskMaxAttempts < providerNetworkMaxAttempts {
 		return providerNetworkMaxAttempts
@@ -5850,12 +5906,32 @@ func retryAttemptCeiling(reason string, taskMaxAttempts int32) int32 {
 // retryDelayForAttempt reports how long to defer the NEXT attempt after a
 // failure at failedAttempt. runtime_offline always gets a positive fire_at so
 // it waits for the health-gated promotion path. provider_network's final
-// attempt is deferred ~5s; every other retry remains immediate (zero delay →
-// the child is created 'queued', claimable at once). Callers pass the returned
-// delay to CreateRetryTask via fire_at.
-func retryDelayForAttempt(reason string, failedAttempt int32) time.Duration {
+// attempt is deferred ~5s. Capacity/rate-limit retries back off exponentially
+// when the operator configured BaseDelay (unset keeps the upstream immediate
+// retry); a configured MaxDelay caps the doubling, unset runs it unbounded.
+// Every other retry remains immediate (zero delay → the child is created
+// 'queued', claimable at once). Callers pass the returned delay to
+// CreateRetryTask via fire_at.
+func (s *TaskService) retryDelayForAttempt(reason string, failedAttempt int32) time.Duration {
 	if reason == string(taskfailure.ReasonRuntimeOffline) {
 		return runtimeOfflineRetryDeferral
+	}
+	if reason == string(taskfailure.ReasonAgentProviderCapacityOrRateLimit) &&
+		s.CapacityRetryPolicy.BaseDelay > 0 {
+		if failedAttempt < 1 {
+			failedAttempt = 1
+		}
+		// Shift is bounded by the cap check, so it cannot overflow for any
+		// realistic attempt count; the cap wins long before the shift does.
+		shift := uint(failedAttempt - 1)
+		if shift > 16 {
+			shift = 16
+		}
+		delay := s.CapacityRetryPolicy.BaseDelay << shift
+		if maxDelay := s.CapacityRetryPolicy.MaxDelay; maxDelay > 0 && delay > maxDelay {
+			return maxDelay
+		}
+		return delay
 	}
 	if reason == string(taskfailure.ReasonAgentProviderNetwork) &&
 		failedAttempt >= providerNetworkMaxAttempts-1 {
@@ -5936,9 +6012,9 @@ func ResumeUnsafeFailure(failureReason, errorText string) bool {
 // it has its own recovery. Re-triaging reads the entry as it stands now, which
 // a human may have edited in the meantime, so replaying the failed attempt is
 // never what the workspace wants.
-func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
-	return retryableReasons[failureReason] &&
-		t.Attempt < retryAttemptCeiling(failureReason, t.MaxAttempts) &&
+func (s *TaskService) retryEligible(failureReason string, t db.AgentTaskQueue) bool {
+	return s.reasonIsRetryable(failureReason) &&
+		t.Attempt < s.retryAttemptCeiling(failureReason, t.MaxAttempts) &&
 		!t.AutopilotRunID.Valid &&
 		!IsTriageTask(t) &&
 		(t.IssueID.Valid || t.ChatSessionID.Valid || t.DocID.Valid || isSourceContextQuickCreateTask(t))
@@ -6006,19 +6082,19 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	// allowed its deferred 3rd attempt (retryAttemptCeiling raises the ceiling
 	// to 3). Kept in sync with retryEligible below, which applies the same
 	// ceiling to the primary FailTask path.
-	if parent.Attempt >= retryAttemptCeiling(reason, parent.MaxAttempts) {
+	if parent.Attempt >= s.retryAttemptCeiling(reason, parent.MaxAttempts) {
 		slog.Info("task auto-retry skipped: budget exhausted",
 			"task_id", util.UUIDToString(parent.ID),
 			"attempt", parent.Attempt,
 			"max_attempts", parent.MaxAttempts,
-			"ceiling", retryAttemptCeiling(reason, parent.MaxAttempts),
+			"ceiling", s.retryAttemptCeiling(reason, parent.MaxAttempts),
 		)
 		return nil, nil
 	}
 	// Autopilot has its own retry semantics (don't double-trigger) and a task
 	// with no issue/chat link has nowhere to report its retry — retryEligible
 	// covers both, keeping this sweeper path in sync with FailTask's in-tx retry.
-	if !retryEligible(reason, parent) {
+	if !s.retryEligible(reason, parent) {
 		return nil, nil
 	}
 
@@ -6041,7 +6117,7 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	// NULL for an immediate child), and write the reason-aware ceiling into the
 	// child's max_attempts so the retry chain stays self-consistent.
 	var retryFireAt pgtype.Timestamptz
-	if delay := retryDelayForAttempt(reason, parent.Attempt); delay > 0 {
+	if delay := s.retryDelayForAttempt(reason, parent.Attempt); delay > 0 {
 		retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true}
 	}
 	// Same advisory slot check as FailTask's path, for the same reason: skip the
@@ -6083,7 +6159,7 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 			NewTaskID:            dbid.NewV7(),
 			ID:                   parent.ID,
 			FireAt:               retryFireAt,
-			MaxAttempts:          pgtype.Int4{Int32: retryAttemptCeiling(reason, parent.MaxAttempts), Valid: true},
+			MaxAttempts:          pgtype.Int4{Int32: s.retryAttemptCeiling(reason, parent.MaxAttempts), Valid: true},
 			RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
 			RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
 		})
@@ -6612,7 +6688,7 @@ func (s *TaskService) terminateTasksInTx(ctx context.Context, fail func(*db.Quer
 		// Retain guidance in that same input batch instead of creating a turn
 		// that could run before the original request's retry.
 		for _, task := range failed {
-			if task.ChatSessionID.Valid && task.Status == "failed" && retryEligible(task.FailureReason.String, task) {
+			if task.ChatSessionID.Valid && task.Status == "failed" && s.retryEligible(task.FailureReason.String, task) {
 				if err := qtx.RetainChatTaskSupplementsForRetry(ctx, task.ID); err != nil {
 					return err
 				}

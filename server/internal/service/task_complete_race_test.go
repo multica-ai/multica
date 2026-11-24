@@ -183,6 +183,9 @@ func TestFailTask_AlreadyFinalized(t *testing.T) {
 // max_attempts=2 (single, immediate retry).
 func TestProviderNetworkRetrySchedule(t *testing.T) {
 	const provNet = "agent_error.provider_network"
+	// The capacity policy does not apply to provider_network, so a bare
+	// TaskService is enough as the receiver.
+	svc := &TaskService{}
 
 	// Attempt ceiling: provider_network is raised to 3, but only ever WIDENS the
 	// budget and never overrides the max_attempts<=1 "retry disabled" contract.
@@ -198,7 +201,7 @@ func TestProviderNetworkRetrySchedule(t *testing.T) {
 		{"timeout", 1, 1},                        // unrelated + disabled → untouched
 	}
 	for _, tc := range ceilingCases {
-		if got := retryAttemptCeiling(tc.reason, tc.max); got != tc.want {
+		if got := svc.retryAttemptCeiling(tc.reason, tc.max); got != tc.want {
 			t.Errorf("ceiling(%q, %d) = %d, want %d", tc.reason, tc.max, got, tc.want)
 		}
 	}
@@ -216,7 +219,7 @@ func TestProviderNetworkRetrySchedule(t *testing.T) {
 		{"timeout", 2, 0}, // unrelated reason → never deferred
 	}
 	for _, tc := range delayCases {
-		if got := retryDelayForAttempt(tc.reason, tc.failedAttempt); got != tc.want {
+		if got := svc.retryDelayForAttempt(tc.reason, tc.failedAttempt); got != tc.want {
 			t.Errorf("retryDelayForAttempt(%q, %d) = %s, want %s", tc.reason, tc.failedAttempt, got, tc.want)
 		}
 	}
@@ -246,9 +249,177 @@ func TestProviderNetworkRetrySchedule(t *testing.T) {
 		{"non-retryable reason never retries", "agent_error.unknown", 1, 2, false},
 	}
 	for _, tc := range eligCases {
-		if got := retryEligible(tc.reason, mkTask(tc.attempt, tc.max)); got != tc.want {
+		if got := svc.retryEligible(tc.reason, mkTask(tc.attempt, tc.max)); got != tc.want {
 			t.Errorf("%s: retryEligible(%q, attempt=%d/max=%d) = %v, want %v", tc.name, tc.reason, tc.attempt, tc.max, got, tc.want)
 		}
+	}
+}
+
+// TestCapacityRetrySchedule covers the capacity/rate-limit chain: the
+// opted-out upstream contract (zero policy → the reason never retries),
+// fully-configured schedules (ceiling widening + exponential deferral +
+// cap), and — the part this deployment's operators rely on — the per-knob
+// independence: an unset knob falls back to the upstream schedule for
+// exactly what it governs and never drags the others with it.
+func TestCapacityRetrySchedule(t *testing.T) {
+	const capacity = "agent_error.provider_capacity_or_rate_limit"
+
+	mkTask := func(attempt, max int32) db.AgentTaskQueue {
+		return db.AgentTaskQueue{
+			Attempt:     attempt,
+			MaxAttempts: max,
+			IssueID:     pgtype.UUID{Bytes: [16]byte{1}, Valid: true},
+		}
+	}
+
+	// Opted-out: zero policy keeps the upstream behavior — capacity failures
+	// are not retryable at all, and neither the ceiling nor the delay for the
+	// reason is widened.
+	t.Run("opted-out", func(t *testing.T) {
+		svc := &TaskService{}
+		if svc.reasonIsRetryable(capacity) {
+			t.Fatal("reasonIsRetryable(capacity) = true with zero policy, want false (upstream behavior)")
+		}
+		if got := svc.retryEligible(capacity, mkTask(1, 2)); got {
+			t.Fatal("retryEligible(capacity) = true with zero policy, want false (upstream behavior)")
+		}
+		if got, want := svc.retryAttemptCeiling(capacity, 2), int32(2); got != want {
+			t.Errorf("ceiling(capacity, 2) = %d, want %d (unwidened)", got, want)
+		}
+		if got := svc.retryDelayForAttempt(capacity, 1); got != 0 {
+			t.Errorf("retryDelayForAttempt(capacity, 1) = %s, want 0 (no schedule without opt-in)", got)
+		}
+		// Unrelated reasons keep their own retryability regardless of the knob.
+		if !svc.reasonIsRetryable("timeout") {
+			t.Error("reasonIsRetryable(timeout) = false, want true: the knob must not leak to other reasons")
+		}
+	})
+
+	// Per-knob independence: each knob only governs its own dimension, and
+	// an unset one keeps the upstream default for that dimension.
+	t.Run("knobs are independent", func(t *testing.T) {
+		t.Run("only MaxAttempts widens the ceiling; retries stay immediate", func(t *testing.T) {
+			svc := &TaskService{CapacityRetryPolicy: CapacityRetryPolicy{MaxAttempts: 5}}
+			if !svc.reasonIsRetryable(capacity) {
+				t.Fatal("reasonIsRetryable(capacity) = false with a configured knob, want true")
+			}
+			if got, want := svc.retryAttemptCeiling(capacity, 2), int32(5); got != want {
+				t.Errorf("ceiling(capacity, 2) = %d, want %d", got, want)
+			}
+			if got := svc.retryDelayForAttempt(capacity, 1); got != 0 {
+				t.Errorf("retryDelayForAttempt(capacity, 1) = %s, want 0: unset BaseDelay keeps immediate retries", got)
+			}
+		})
+		t.Run("only BaseDelay backs off; ceiling stays the task column's", func(t *testing.T) {
+			svc := &TaskService{CapacityRetryPolicy: CapacityRetryPolicy{BaseDelay: 10 * time.Second}}
+			if got, want := svc.retryAttemptCeiling(capacity, 2), int32(2); got != want {
+				t.Errorf("ceiling(capacity, 2) = %d, want %d: unset MaxAttempts keeps the column value", got, want)
+			}
+			if got, want := svc.retryDelayForAttempt(capacity, 1), 10*time.Second; got != want {
+				t.Errorf("retryDelayForAttempt(capacity, 1) = %s, want %s", got, want)
+			}
+			// No MaxDelay: the doubling runs unbounded (attempt 5 = 10s<<4).
+			if got, want := svc.retryDelayForAttempt(capacity, 5), 160*time.Second; got != want {
+				t.Errorf("retryDelayForAttempt(capacity, 5) = %s, want %s (uncapped)", got, want)
+			}
+		})
+		t.Run("only MaxDelay caps; without BaseDelay there is nothing to cap", func(t *testing.T) {
+			svc := &TaskService{CapacityRetryPolicy: CapacityRetryPolicy{MaxDelay: time.Minute}}
+			if got := svc.retryDelayForAttempt(capacity, 1); got != 0 {
+				t.Errorf("retryDelayForAttempt(capacity, 1) = %s, want 0: a cap without a base is inert", got)
+			}
+			if got, want := svc.retryAttemptCeiling(capacity, 2), int32(2); got != want {
+				t.Errorf("ceiling(capacity, 2) = %d, want %d", got, want)
+			}
+		})
+	})
+
+	// Fully-configured schedules: the exponential deferral and cap matrices.
+	for name, tc := range map[string]struct {
+		policy     CapacityRetryPolicy
+		wantCeil   int32
+		delayCases []struct {
+			failedAttempt int32
+			want          time.Duration
+		}
+	}{
+		"this deployment": {
+			policy:   CapacityRetryPolicy{MaxAttempts: 10, BaseDelay: 30 * time.Second, MaxDelay: 2 * time.Minute},
+			wantCeil: 10,
+			delayCases: []struct {
+				failedAttempt int32
+				want          time.Duration
+			}{
+				{1, 30 * time.Second}, // 30s << 0
+				{2, time.Minute},      // 30s << 1 = 1m
+				{3, 2 * time.Minute},  // 30s << 2 = 2m, reaches the cap exactly
+				{4, 2 * time.Minute},  // 30s << 3 = 4m exceeds cap → 2m
+				{6, 2 * time.Minute},  // deep in the chain → cap holds
+				{10, 2 * time.Minute}, // deep in the chain → cap holds
+			},
+		},
+		"custom": {
+			policy:   CapacityRetryPolicy{MaxAttempts: 4, BaseDelay: 15 * time.Second, MaxDelay: time.Minute},
+			wantCeil: 4,
+			delayCases: []struct {
+				failedAttempt int32
+				want          time.Duration
+			}{
+				{1, 15 * time.Second}, // 15s << 0
+				{2, 30 * time.Second}, // 15s << 1
+				{3, time.Minute},      // 15s << 2 = 1m reaches the cap exactly
+				{4, time.Minute},      // deep in the chain → cap holds
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			svc := &TaskService{CapacityRetryPolicy: tc.policy}
+			if !svc.reasonIsRetryable(capacity) {
+				t.Fatal("reasonIsRetryable(capacity) = false with a configured policy, want true")
+			}
+			ceilingCases := []struct {
+				reason string
+				max    int32
+				want   int32
+			}{
+				{capacity, 2, tc.wantCeil}, // default budget → raised to the policy ceiling
+				{capacity, 1, 1},           // disabled → stays disabled, not revived
+				{capacity, 20, 20},         // higher configured budget → kept (widen-only)
+				{"timeout", 2, 2},          // unrelated reason → column value untouched
+			}
+			for _, cc := range ceilingCases {
+				if got := svc.retryAttemptCeiling(cc.reason, cc.max); got != cc.want {
+					t.Errorf("ceiling(%q, %d) = %d, want %d", cc.reason, cc.max, got, cc.want)
+				}
+			}
+
+			for _, dc := range tc.delayCases {
+				if got := svc.retryDelayForAttempt(capacity, dc.failedAttempt); got != dc.want {
+					t.Errorf("retryDelayForAttempt(%q, %d) = %s, want %s", capacity, dc.failedAttempt, got, dc.want)
+				}
+			}
+
+			// Eligibility follows the effective ceiling: retryable at every
+			// attempt below it, disabled tasks never revive.
+			lastAttempt := tc.wantCeil - 1
+			eligCases := []struct {
+				name    string
+				attempt int32
+				max     int32
+				want    bool
+			}{
+				{"first run retries deferred", 1, 2, true},
+				{"mid-chain retries deferred", 2, 2, true},
+				{"last allowed attempt retries", lastAttempt, 2, true},
+				{"ceiling attempt stops the chain", tc.wantCeil, 2, false},
+				{"disabled (max_attempts=1) never retries", 1, 1, false},
+			}
+			for _, ec := range eligCases {
+				if got := svc.retryEligible(capacity, mkTask(ec.attempt, ec.max)); got != ec.want {
+					t.Errorf("%s: retryEligible(%q, attempt=%d/max=%d) = %v, want %v", ec.name, capacity, ec.attempt, ec.max, got, ec.want)
+				}
+			}
+		})
 	}
 }
 
@@ -264,8 +435,10 @@ func TestTaskFailureClassifiers(t *testing.T) {
 		// Transient mid-stream provider disconnect (MUL-4910): retryable, and
 		// resume-safe so the retry continues the truncated conversation.
 		{reason: "agent_error.provider_network", wantType: "agent_error", wantResumeOK: true, wantRetry: true},
-		// Capacity/rate-limit failures keep their existing user-retry posture.
-		// Correcting a misleading auth label must not enable an automatic resend.
+		// Capacity/rate-limit failures: upstream terminates on them
+		// (wantRetry: false against the bare map); a deployment opts into
+		// retrying them via CapacityRetryPolicy, which TestCapacityRetrySchedule
+		// pins. Resume stays safe either way.
 		{reason: "agent_error.provider_capacity_or_rate_limit", wantType: "agent_error", wantResumeOK: true, wantRetry: false},
 		{reason: "runtime_recovery", wantType: "runtime", wantResumeOK: true, wantRetry: true},
 		{reason: "iteration_limit", wantType: "agent_output", wantResumeOK: false, wantRetry: false},
@@ -407,13 +580,16 @@ func TestOpencodeStreamEndedFailureRetries(t *testing.T) {
 				if resumeUnsafeFailureReason(reason) {
 					t.Errorf("resumeUnsafeFailureReason(%q) = true, want false", reason)
 				}
-				// With an attempt left, the failure produces a retry task.
-				if !retryEligible(reason, mkTask(1, 2)) {
+				// With an attempt left, the failure produces a retry task. The
+				// capacity policy does not apply to provider_network, so a bare
+				// TaskService is enough as the receiver.
+				svc := &TaskService{}
+				if !svc.retryEligible(reason, mkTask(1, 2)) {
 					t.Errorf("retryEligible(%q, attempt=1/max=2) = false, want true", reason)
 				}
 				// And still terminates once the ceiling is reached, so a
 				// deterministically broken provider cannot loop forever.
-				if retryEligible(reason, mkTask(providerNetworkMaxAttempts, 2)) {
+				if svc.retryEligible(reason, mkTask(providerNetworkMaxAttempts, 2)) {
 					t.Errorf("retryEligible(%q, attempt=%d/max=2) = true, want false at the ceiling",
 						reason, providerNetworkMaxAttempts)
 				}
@@ -455,8 +631,11 @@ func TestSkillBundleFailureFromLegacyDaemonRetries(t *testing.T) {
 	}
 
 	// What an old daemon puts on the wire, and what FailTask does with it.
+	// The capacity policy does not apply to skill-bundle failures, so a bare
+	// TaskService is enough as the receiver.
+	svc := &TaskService{}
 	legacyReason := taskfailure.ReasonAgentUnknown.String()
-	if retryEligible(legacyReason, task) {
+	if svc.retryEligible(legacyReason, task) {
 		t.Fatal("precondition: the raw catchall must not be retryable, or this test proves nothing")
 	}
 
@@ -464,7 +643,7 @@ func TestSkillBundleFailureFromLegacyDaemonRetries(t *testing.T) {
 	if normalized != taskfailure.ReasonSkillBundleUnavailable.String() {
 		t.Fatalf("normalized reason = %q, want %q", normalized, taskfailure.ReasonSkillBundleUnavailable)
 	}
-	if !retryEligible(normalized, task) {
+	if !svc.retryEligible(normalized, task) {
 		t.Errorf("a skill-bundle failure reported by an old daemon must still be retried; got reason %q", normalized)
 	}
 
@@ -474,7 +653,7 @@ func TestSkillBundleFailureFromLegacyDaemonRetries(t *testing.T) {
 		taskfailure.ReasonSkillBundleUnavailable.String(),
 		`skill bundle unavailable: skill "x" (id=1, 10 bytes) after 30s: context deadline exceeded`,
 	).String()
-	if !retryEligible(current, task) {
+	if !svc.retryEligible(current, task) {
 		t.Errorf("a skill-bundle failure reported by a current daemon must be retried; got reason %q", current)
 	}
 }
