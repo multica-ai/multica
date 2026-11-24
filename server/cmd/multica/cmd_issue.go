@@ -729,7 +729,7 @@ func init() {
 	issueUpdateCmd.Flags().String("description", "", "New description (preserves literal text. Use --description-stdin or --description-file for multi-line input)")
 	issueUpdateCmd.Flags().Bool("description-stdin", false, "Read new description from stdin (preserves multi-line content verbatim)")
 	issueUpdateCmd.Flags().String("description-file", "", "Read new description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
-	issueUpdateCmd.Flags().Int64("description-base-revision", 0, "The description_revision (from `multica issue get`) your new description was written from. Changes made since then are merged in, and the update is refused only where both changed the same paragraphs. Without it the description is replaced as given.")
+	issueUpdateCmd.Flags().Int64("description-base-revision", 0, "The description_revision (from `multica issue get`) your new description was written from. Changes made since then are merged in when live description editing is on and the description is the only field you change, and the update is refused only where both changed the same paragraphs; otherwise the update is refused if the description changed at all. Without it the description is replaced as given.")
 	issueUpdateCmd.Flags().Bool("allow-external-file", false, "Allow --description-file / --attachment to read a path outside the current working directory. Off by default so a stale temp file from another run/environment can't be picked up (MUL-4252).")
 	issueUpdateCmd.Flags().StringArray("attachment", nil, "Local file path to attach (one literal path per flag; repeat --attachment for multiple files); references are appended to the end of the description, except where the description already links the same path (e.g. ![shot](./a.png)), which is rewritten to the uploaded file in place")
 	issueUpdateCmd.Flags().String("status", "", "New status")
@@ -748,9 +748,9 @@ func init() {
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue edit-description
-	issueEditDescriptionCmd.Flags().String("old", "", "Exact text to replace (required)")
+	issueEditDescriptionCmd.Flags().String("old", "", "Exact text to replace (this or --old-file is required)")
 	issueEditDescriptionCmd.Flags().String("old-file", "", "Read the text to replace from a UTF-8 file")
-	issueEditDescriptionCmd.Flags().String("new", "", "Replacement text")
+	issueEditDescriptionCmd.Flags().String("new", "", "Replacement text; \"\" deletes it (this or --new-file is required)")
 	issueEditDescriptionCmd.Flags().String("new-file", "", "Read the replacement from a UTF-8 file")
 	issueEditDescriptionCmd.Flags().Bool("replace-all", false, "Replace every occurrence of --old")
 	issueEditDescriptionCmd.Flags().String("output", "json", "Output format: table or json")
@@ -2243,7 +2243,7 @@ func issueDescriptionWriteError(action string, err error) error {
 				"Run `multica issue get`, quote the current text (with more context if it repeats), and retry (%s)",
 				action, httpErr.Body)
 		case strings.Contains(httpErr.Body, "issue_description"):
-			return fmt.Errorf("%s: --description-base-revision is too old to merge from, so nothing was written. "+
+			return fmt.Errorf("%s: the description changed since --description-base-revision and could not be merged, so nothing was written. "+
 				"Run `multica issue get` for the latest description and description_revision, or change part of it with `multica issue edit-description` (%s)",
 				action, httpErr.Body)
 		}
