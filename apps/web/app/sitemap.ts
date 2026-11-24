@@ -1,50 +1,39 @@
 import type { MetadataRoute } from "next";
 import { landingAlternates } from "@/lib/landing-locale-path";
+import { createEnDict } from "@/features/landing/i18n/en";
+import { isLiveRoute, siteRoutes } from "@/features/landing/site/sitemap";
+import { SITE_ORIGIN } from "@/features/landing/structured-data";
+
+type SitemapHints = Pick<MetadataRoute.Sitemap[number], "changeFrequency" | "priority">;
+
+const HINTS: Readonly<Record<string, SitemapHints>> = {
+  "/": { changeFrequency: "weekly", priority: 1.0 },
+  "/about": { changeFrequency: "monthly", priority: 0.7 },
+  "/changelog": { changeFrequency: "weekly", priority: 0.6 },
+  "/contact-sales": { changeFrequency: "monthly", priority: 0.7 },
+  "/download": { changeFrequency: "weekly", priority: 0.8 },
+  "/licensing": { changeFrequency: "monthly", priority: 0.6 },
+  "/privacy": { changeFrequency: "yearly", priority: 0.3 },
+};
+
+/** Pages that list recent releases change with each one. */
+const RELEASE_PAGES = new Set(["/", "/changelog"]);
+
+function latestReleaseDate(): Date | undefined {
+  const dates = createEnDict().changelog.entries.map((entry) => entry.date).sort();
+  const latest = dates.at(-1);
+  return latest ? new Date(latest) : undefined;
+}
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const baseUrl = "https://www.multica.ai";
+  const releasedAt = latestReleaseDate();
 
-  const pages: MetadataRoute.Sitemap = [
-    {
-      url: baseUrl,
-      lastModified: new Date("2026-04-01"),
-      changeFrequency: "weekly",
-      priority: 1.0,
-    },
-    {
-      url: `${baseUrl}/about`,
-      lastModified: new Date("2026-04-01"),
-      changeFrequency: "monthly",
-      priority: 0.7,
-    },
-    {
-      url: `${baseUrl}/changelog`,
-      lastModified: new Date("2026-04-01"),
-      changeFrequency: "weekly",
-      priority: 0.6,
-    },
-    {
-      url: `${baseUrl}/contact-sales`,
-      lastModified: new Date("2026-05-21"),
-      changeFrequency: "monthly",
-      priority: 0.7,
-    },
-    {
-      url: `${baseUrl}/licensing`,
-      lastModified: new Date("2026-09-21"),
-      changeFrequency: "monthly",
-      priority: 0.6,
-    },
-    {
-      url: `${baseUrl}/privacy`,
-      lastModified: new Date("2026-09-21"),
-      changeFrequency: "yearly",
-      priority: 0.3,
-    },
-  ];
-
-  return pages.map((page) => ({
-    ...page,
-    alternates: { languages: landingAlternates(page.url.slice(baseUrl.length) || "/", baseUrl) },
-  }));
+  return siteRoutes()
+    .filter(isLiveRoute)
+    .map((route) => ({
+      url: route === "/" ? SITE_ORIGIN : `${SITE_ORIGIN}${route}`,
+      ...(RELEASE_PAGES.has(route) && releasedAt ? { lastModified: releasedAt } : {}),
+      ...(HINTS[route] ?? { changeFrequency: "monthly", priority: 0.5 }),
+      alternates: { languages: landingAlternates(route, SITE_ORIGIN) },
+    }));
 }

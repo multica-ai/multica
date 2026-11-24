@@ -158,12 +158,13 @@ describe("resolveDetailItem", () => {
 describe("inboxRowHref", () => {
   const p = paths.workspace("acme");
 
-  it("links to the issue identifier, keeping the comment anchor", () => {
+  it("opens an issue's notification on the Inbox page, keyed by the issue", () => {
     expect(inboxRowHref(p, item({ issue_identifier: "MUL-7", details: { comment_id: "c-1" } })))
-      .toBe("/acme/issues/MUL-7#comment-c-1");
+      .toBe("/acme/inbox?issue=issue-1");
   });
 
-  it("falls back to the issue id when the server sent no identifier", () => {
-    expect(inboxRowHref(p, item({ details: { comment_id: "c-1" } }))).toBe("/acme/issues/issue-1#comment-c-1");
+  it("opens an issue-less notification by its own id, on the tab it is listed in", () => {
+    expect(inboxRowHref(p, item({ id: "n-1", issue_id: null }))).toBe("/acme/inbox?issue=n-1");
+    expect(inboxRowHref(p, item({}), "archived")).toBe("/acme/inbox?view=archived&issue=issue-1");
   });
 });

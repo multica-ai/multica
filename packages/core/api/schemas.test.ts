@@ -42,17 +42,18 @@ import {
   EMPTY_CREATE_FEEDBACK_RESPONSE,
   EMPTY_INBOX_ITEMS,
   EMPTY_INBOX_UNREAD_SUMMARY,
+  EMPTY_SNOOZED_INBOX,
   EMPTY_SEARCH_PROJECTS_RESPONSE,
   EMPTY_USER,
   InboxItemListSchema,
   InboxUnreadSummarySchema,
+  SnoozedInboxListSchema,
   IssueTriggerPreviewSchema,
   ListIssuesResponseSchema,
   ListPropertiesResponseSchema,
   MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
   RuntimeModelListRequestSchema,
   SearchProjectsResponseSchema,
-  RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
@@ -208,6 +209,21 @@ describe("ChatSessionSchema", () => {
   });
 });
 describe("IssueSchema (via ListIssuesResponseSchema)", () => {
+  it("keeps older and malformed blocker projections from breaking an issue list", () => {
+    for (const fields of [{}, { blocked_count: "one", blocked_by: "bad" }, { blocked_count: -1, blocked_by: [{}] }]) {
+      const parsed = ListIssuesResponseSchema.parse({ issues: [{ ...baseIssue, ...fields }], total: 1 });
+      expect(parsed.issues[0]?.id).toBe(baseIssue.id);
+      expect(parsed.issues[0]?.blocked_count).toBeUndefined();
+      expect(parsed.issues[0]?.blocked_by).toBeUndefined();
+    }
+  });
+  it("carries manual and stage blockers independently of status", () => {
+    const blocker = { id: "b", identifier: "MUL-2", title: "Contract", status: "done", via: "stage", closed: true };
+    const parsed = ListIssuesResponseSchema.parse({ issues: [{ ...baseIssue, blocked_by: [blocker], blocked_count: 0 }], total: 1 });
+    expect(parsed.issues[0]?.blocked_by).toEqual([blocker]);
+    expect(parsed.issues[0]?.status).toBe(baseIssue.status);
+  });
+
   // A custom status key can be derived rather than readable — "客户确认" becomes
   // `in_review_2` — so the display name travels with it. The field has to
   // survive a server that predates it, since an issue that fails validation
@@ -1286,7 +1302,6 @@ describe("dashboard + runtime usage schema drift", () => {
 
   it("coerces missing fields on every runtime usage schema", () => {
     expect(RuntimeUsageListSchema.parse([{ date: "2026-05-19" }])[0]?.input_tokens).toBe(0);
-    expect(RuntimeHourlyActivityListSchema.parse([{ hour: 9 }])[0]?.count).toBe(0);
     expect(RuntimeUsageByAgentListSchema.parse([{ model: "x" }])[0]?.agent_id).toBe("");
     expect(RuntimeUsageByHourListSchema.parse([{ hour: 9 }])[0]?.model).toBe("");
   });
@@ -1522,6 +1537,28 @@ describe("InboxUnreadSummarySchema", () => {
         ENDPOINT,
       ),
     ).toBe(EMPTY_INBOX_UNREAD_SUMMARY);
+  });
+});
+
+describe("SnoozedInboxListSchema", () => {
+  const ENDPOINT = { endpoint: "GET /api/inbox/snoozed" };
+  const row = (overrides: Record<string, unknown> = {}) => ({
+    issue_id: "issue-1",
+    item_id: "inbox-1",
+    snoozed_until: "2026-06-16T08:00:00Z",
+    snoozed_at: "2026-06-15T08:00:00Z",
+    updates: 0,
+    ...overrides,
+  });
+
+  it("keeps a row whose issue identifier is missing or unusable", () => {
+    const parsed = parseWithFallback(
+      [row(), row({ issue_id: "issue-2", issue_identifier: 7 }), row({ issue_id: "issue-3", issue_identifier: "MUL-3" })],
+      SnoozedInboxListSchema,
+      EMPTY_SNOOZED_INBOX,
+      ENDPOINT,
+    );
+    expect(parsed.map((item) => item.issue_identifier)).toEqual([undefined, null, "MUL-3"]);
   });
 });
 

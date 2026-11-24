@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev:web": "turbo dev --filter=@multica/web",
+    "dev:collab": "pnpm --filter @multica/collab dev",
     "dev:docs": "turbo dev --filter=@multica/docs",
     "storybook": "pnpm -C apps/storybook storybook",
     "dev:desktop": "turbo dev --filter=@multica/desktop",
@@ -27,8 +28,11 @@
     "lint": "turbo lint --filter=!@multica/mobile",
     "knip": "knip",
     "check:ui-exports": "node scripts/check-ui-wildcard-exports.mjs",
+    "check:ui-outlines": "node scripts/check-ui-focus-outlines.mjs",
     "check:ui-radii": "node scripts/check-ui-radius-tokens.mjs",
+    "check:ui-transitions": "node scripts/check-ui-transition-properties.mjs",
     "check:deps-catalog": "node scripts/check-dependency-catalog.mjs",
+    "check:test-inputs": "node scripts/check-test-cache-inputs.mjs",
     "theme:check": "node scripts/theme-check.mjs",
     "theme:preview": "node scripts/theme-preview.mjs",
     "clean": "turbo clean && rm -rf node_modules",
@@ -60,7 +64,8 @@
       "builder-util-runtime": "9.7.0"
     },
     "patchedDependencies": {
-      "expo-modules-core@57.0.21": "apps/mobile/patches/expo-modules-core@57.0.21.patch"
+      "expo-modules-core@57.0.21": "apps/mobile/patches/expo-modules-core@57.0.21.patch",
+      "@tiptap/y-tiptap@3.3.1": "patches/@tiptap__y-tiptap@3.3.1.patch"
     }
   },
   "devDependencies": {

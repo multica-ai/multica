@@ -94,7 +94,7 @@ import {
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { propertyListOptions } from "@multica/core/properties";
 import { projectListOptions } from "@multica/core/projects/queries";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { buildActorNameResolver, useActorName } from "@multica/core/workspace/hooks";
 import {
   agentListOptions,
@@ -166,6 +166,7 @@ import {
 import type { ChildProgress } from "./list-row";
 import { ListLoadMoreFooter } from "./list-load-more-footer";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
+import { IssueBlockedMarker } from "./issue-blockers";
 import { IssueDuplicateOfMarker } from "./issue-duplicates";
 import { IssuePullRequestChips, useIssuePullRequestSummaries } from "./pull-request-chips";
 import { issuePullRequestSummariesOptions } from "@multica/core/github";
@@ -741,11 +742,12 @@ export function InlineTitle({
               }}
               onAuxClick={stopRowNavigation}
             >
-              {row.collapsed ? (
-                <ChevronRight className="size-3.5" />
-              ) : (
-                <ChevronDown className="size-3.5" />
-              )}
+              <ChevronRight
+                className={cn(
+                  "size-3.5 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+                  !row.collapsed && "rotate-90",
+                )}
+              />
             </button>
           }
         />
@@ -784,6 +786,7 @@ export function InlineTitle({
           >
             {row.issue.title}
           </button>
+          <IssueBlockedMarker issue={row.issue} />
           <IssueDuplicateOfMarker issue={row.issue} />
           {/* Lifted out of the flex flow, the way SidebarMenuAction is. Laid
             * out inline these two reserved ~40px of the title column for
@@ -925,11 +928,12 @@ export function IssueTableGroupRow({
           type="button"
           className="sticky left-4 flex w-fit items-center gap-2 text-caption font-medium"
         >
-          {group.collapsed ? (
-            <ChevronRight className="size-3.5" />
-          ) : (
-            <ChevronDown className="size-3.5" />
-          )}
+          <ChevronRight
+            className={cn(
+              "size-3.5 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+              !group.collapsed && "rotate-90",
+            )}
+          />
           {group.label}
           <span className="font-normal tabular-nums text-muted-foreground">
             {group.count}
@@ -2225,7 +2229,7 @@ export function TableView({
   const openIssue = useCallback(
     (issue: Issue, event?: React.MouseEvent) => {
       // Match card links, including the preferred default and modifier keys.
-      if (handlePeekClick(issue.id, event)) {
+      if (handlePeekClick(issue, event)) {
         if (event?.shiftKey) window.getSelection()?.removeAllRanges();
         return;
       }
@@ -2233,7 +2237,7 @@ export function TableView({
       // middle clicks open tabs. Callbacks without an event (keyboard
       // affordances) count as plain clicks.
       intentNavigate(
-        paths.issueDetail(issue.id),
+        paths.issueDetail(issueRouteRef(issue)),
         event ? resolveClickIntent(event) : "push",
         issue.identifier,
       );

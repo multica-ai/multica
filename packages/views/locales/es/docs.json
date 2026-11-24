@@ -48,7 +48,12 @@
     "conflict": "{{name}} actualizó el documento. Tu borrador se conserva. Recarga para continuar.",
     "reload": "Cargar última versión",
     "draft": "Tu borrador guardado",
-    "unsaved_changes": "Cambios sin guardar"
+    "unsaved_changes": "Cambios sin guardar",
+    "live": "En vivo",
+    "reconnecting": "Reconectando...",
+    "connecting": "Conectando...",
+    "title_save_failed": "No se guardó el título",
+    "editing_now": "Editando ahora"
   },
   "history": {
     "title": "Historial",
@@ -61,6 +66,7 @@
     "description": "Puede haberse eliminado."
   },
   "edited": "Editado {{time}}",
+  "view_history": "Ver historial",
   "outline": "Esquema",
   "link_copied": "Enlace copiado",
   "unavailable": {

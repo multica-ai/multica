@@ -565,6 +565,7 @@ type Resolver struct {
 	workspaceID pgtype.UUID
 	categories  map[string]string
 	names       map[string]string
+	descs       map[string]string
 	archived    map[string]bool
 	loaded      bool
 	loadErr     error
@@ -595,10 +596,12 @@ func (r *Resolver) load(ctx context.Context, q Querier) {
 	}
 	r.categories = make(map[string]string, len(entries))
 	r.names = make(map[string]string, len(entries))
+	r.descs = make(map[string]string, len(entries))
 	r.archived = make(map[string]bool)
 	for _, e := range entries {
 		r.categories[e.Key] = e.Category
 		r.names[e.Key] = e.Name
+		r.descs[e.Key] = e.Description
 		if e.ArchivedAt.Valid {
 			r.archived[e.Key] = true
 		}
@@ -680,6 +683,16 @@ func (r *Resolver) Name(ctx context.Context, q Querier, status string) string {
 	}
 	r.load(ctx, q)
 	return r.names[status]
+}
+
+// Description returns a CUSTOM status's catalog description, or "" for a
+// built-in — the same rule as Name — and for a key the catalog does not hold.
+func (r *Resolver) Description(ctx context.Context, q Querier, status string) string {
+	if IsBuiltIn(status) {
+		return ""
+	}
+	r.load(ctx, q)
+	return r.descs[status]
 }
 
 // ExpandCategories turns a set of categories into the status keys that belong

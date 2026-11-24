@@ -375,6 +375,9 @@ type TaskIssueStatusData struct {
 // in the per-turn prompt, never in the cached runtime brief.
 type TaskProjectWorkflowData struct {
 	Brief string `json:"brief"`
+	// StatusMap marks a status-map brief, which the daemon pairs with the
+	// status-map rules; without it the brief lists per-step commands.
+	StatusMap bool `json:"status_map,omitempty"`
 	// stepMoved selects the server-side leader briefing without changing the wire.
 	stepMoved bool
 }
@@ -888,6 +891,13 @@ func visibleTaskHistory(tasks []db.AgentTaskQueue) []db.AgentTaskQueue {
 // down. It populates WorkspaceID and powers the privacy-safe RelativeWorkDir
 // derivation; pass "" only on daemon-facing paths that genuinely don't have
 // it, in which case RelativeWorkDir falls back to the existing WorkDir.
+func effectiveTaskSquadID(t db.AgentTaskQueue) pgtype.UUID {
+	if t.UsageSquadID.Valid {
+		return t.UsageSquadID
+	}
+	return t.SquadID
+}
+
 func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	var cancellation struct {
 		TaskID string `json:"comment_change_cancelled_task_id"`
@@ -945,6 +955,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		MaxAttempts:            t.MaxAttempts,
 		ParentTaskID:           uuidToPtr(t.ParentTaskID),
 		IsLeaderTask:           t.IsLeaderTask,
+		SquadID:                uuidToString(effectiveTaskSquadID(t)),
 		CreatedAt:              timestampToString(t.CreatedAt),
 		TriggerCommentID:       uuidToPtr(t.TriggerCommentID),
 		CoalescedCommentIDs:    uuidsToStrings(t.CoalescedCommentIds),
@@ -3201,7 +3212,8 @@ type WorkspaceWorkingAgent struct {
 // the workspace, independent of issue filters or Table pagination. The
 // optional type query selects issue, autopilot, or chat work; omitting it keeps
 // the all-sources projection. scope=mine narrows issue work to the authenticated
-// member's selected My Issues relation. Access filtering mirrors the other
+// member's selected My Issues relation; parent and project narrow it to one
+// issue's children or one project's issues. Access filtering mirrors the other
 // workspace-wide agent aggregations so a private/non-allow-listed agent is
 // never exposed by its name, avatar, count, or even presence.
 func (h *Handler) ListWorkspaceWorkingAgents(w http.ResponseWriter, r *http.Request) {
@@ -3279,6 +3291,35 @@ func (h *Handler) ListWorkspaceWorkingAgents(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	// Narrows the projection to one project's issues, for the project page.
+	// Like parent, absent means workspace-wide.
+	var projectID pgtype.UUID
+	if raw := strings.TrimSpace(r.URL.Query().Get("project")); raw != "" {
+		if workType != "issue" {
+			writeError(w, http.StatusBadRequest, "project requires type=issue")
+			return
+		}
+		if scope != "" || parentIssueID.Valid {
+			writeError(w, http.StatusBadRequest, "project cannot be combined with scope or parent")
+			return
+		}
+		var ok bool
+		projectID, ok = parseUUIDOrBadRequest(w, raw, "project")
+		if !ok {
+			return
+		}
+		// A private project the caller cannot see (MUL-8472) is answered like
+		// one with nobody working, so its agents and run count stay hidden.
+		hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+		if !ok {
+			return
+		}
+		if !hidden.CanSeeProject(projectID) {
+			writeJSON(w, http.StatusOK, []WorkspaceWorkingAgent{})
+			return
+		}
+	}
+
 	rows, err := h.Queries.ListWorkspaceWorkingAgents(
 		r.Context(),
 		db.ListWorkspaceWorkingAgentsParams{
@@ -3287,6 +3328,7 @@ func (h *Handler) ListWorkspaceWorkingAgents(w http.ResponseWriter, r *http.Requ
 			MineRelation:  mineRelation,
 			MemberID:      memberID,
 			ParentIssueID: parentIssueID,
+			ProjectID:     projectID,
 		},
 	)
 	if err != nil {

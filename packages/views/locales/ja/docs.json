@@ -48,7 +48,12 @@
     "conflict": "{{name}} が更新しました。下書きを保持しています。再読み込みして続けてください。",
     "reload": "最新版を読み込む",
     "draft": "保存した下書き",
-    "unsaved_changes": "保存していない変更"
+    "unsaved_changes": "保存していない変更",
+    "live": "ライブ",
+    "reconnecting": "再接続中...",
+    "connecting": "接続中...",
+    "title_save_failed": "タイトルを保存できませんでした",
+    "editing_now": "編集中"
   },
   "history": {
     "title": "履歴",
@@ -61,6 +66,7 @@
     "description": "削除された可能性があります。"
   },
   "edited": "最終編集 {{time}}",
+  "view_history": "履歴を表示",
   "outline": "目次",
   "link_copied": "リンクをコピーしました",
   "unavailable": {

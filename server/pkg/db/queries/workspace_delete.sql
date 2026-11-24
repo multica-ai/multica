@@ -365,6 +365,9 @@ deleted_agent_builder_drafts AS (
 deleted_comment_reactions AS (
     DELETE FROM comment_reaction WHERE workspace_id = $1
 ),
+deleted_comment_idempotency_receipts AS (
+    DELETE FROM comment_idempotency_receipt WHERE comment_idempotency_receipt.workspace_id = $1
+),
 deleted_issue_reactions AS (
     DELETE FROM issue_reaction WHERE workspace_id = $1
 ),
@@ -373,6 +376,9 @@ deleted_activity AS (
 ),
 deleted_inbox AS (
     DELETE FROM inbox_item WHERE workspace_id = $1
+),
+deleted_issue_blockers AS (
+ DELETE FROM issue_blocker WHERE workspace_id=$1
 ),
 deleted_issue_dependencies AS (
     DELETE FROM issue_dependency
@@ -515,6 +521,13 @@ deleted_weixin_account_states AS (
 deleted_workspace_composio_connections AS (
     DELETE FROM workspace_composio_connection WHERE workspace_id = $1
 ),
+deleted_remote_app_connections AS (
+    DELETE FROM remote_app_connection
+    WHERE (scope = 'team' AND owner_id = $1) OR workspace_id = $1
+),
+deleted_personal_composio_connections AS (
+    DELETE FROM user_composio_connection WHERE workspace_id = $1
+),
 deleted_agent_apps AS (
     DELETE FROM agent_app WHERE workspace_id = $1
 ),
@@ -613,6 +626,12 @@ deleted_child_events AS (
 ),
 deleted_unread AS (
  DELETE FROM issue_unread WHERE workspace_id=$1
+),
+deleted_description_collab_state AS (
+ DELETE FROM issue_description_collab_state WHERE workspace_id=$1
+),
+deleted_description_revisions AS (
+ DELETE FROM issue_description_revision WHERE workspace_id=$1
 ),
 deleted_issues AS (
     DELETE FROM issue WHERE issue.workspace_id = $1

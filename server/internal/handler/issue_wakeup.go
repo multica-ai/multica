@@ -369,6 +369,8 @@ func (h *Handler) TriggerIssueWakeup(w http.ResponseWriter, r *http.Request) {
 		wakeupError(w, err)
 		return
 	}
+	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(issue.WorkspaceID))
+	h.archiveActorInboxOnAgentTrigger(r.Context(), uuidToString(issue.WorkspaceID), uuidToString(issue.ID), actorType, actorID)
 	w.WriteHeader(http.StatusNoContent)
 }
 

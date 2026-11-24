@@ -48,7 +48,12 @@
     "conflict": "Updated by {{name}}. Your draft is kept. Reload to continue.",
     "reload": "Reload latest",
     "draft": "Your saved draft",
-    "unsaved_changes": "Unsaved changes"
+    "unsaved_changes": "Unsaved changes",
+    "live": "Live",
+    "reconnecting": "Reconnecting...",
+    "connecting": "Connecting...",
+    "title_save_failed": "Title not saved",
+    "editing_now": "Editing now"
   },
   "history": {
     "title": "History",
@@ -61,6 +66,7 @@
     "description": "It may have been deleted."
   },
   "edited": "Edited {{time}}",
+  "view_history": "View history",
   "outline": "Outline",
   "link_copied": "Link copied",
   "unavailable": {

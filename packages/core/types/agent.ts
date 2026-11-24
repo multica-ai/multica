@@ -364,6 +364,10 @@ export interface AgentTask {
   chat_session_id?: string;
   /** Non-empty when the task was spawned by an autopilot run. */
   autopilot_run_id?: string;
+  /** Non-empty when this task belongs to a squad execution chain (leader or delegated member). */
+  squad_id?: string;
+  /** True when this task runs the agent as a squad leader. */
+  is_leader_task?: boolean;
   /** Set when this task was created as an auto-retry of a parent task. */
   parent_task_id?: string;
   /** 1-based attempt counter; >1 means this is a retry. */
@@ -1066,11 +1070,6 @@ export interface RuntimeUsage {
   uncosted_cache_write_tokens?: number;
 }
 
-export interface RuntimeHourlyActivity {
-  hour: number;
-  count: number;
-}
-
 // Subscription rate limits of the account a runtime's agent CLI runs under
 // (`GET /api/runtimes/:id/rate-limits`, MUL-9427), as the CLI last reported
 // them during a task. Window kinds and statuses fall back to "other" / ""
@@ -1183,6 +1182,27 @@ export interface DashboardUsageByAgent {
   uncosted_output_tokens?: number;
   uncosted_cache_read_tokens?: number;
   uncosted_cache_write_tokens?: number;
+  task_count: number;
+}
+
+// Per-(squad, agent, model) token totals for the workspace dashboard.
+// squad_id is "" for standalone (non-squad-triggered) agent runs.
+export interface DashboardUsageBySquad extends DashboardUsageByAgent {
+  squad_id: string;
+}
+
+// Per-(squad, agent) terminal-task run-time + counts for the workspace dashboard.
+// squad_id is "" for standalone (non-squad-triggered) agent runs.
+export interface DashboardSquadRunTime extends DashboardAgentRunTime {
+  squad_id: string;
+}
+
+// Per-(squad, agent, failure_reason) terminal-task counts for the Errors tab.
+// squad_id is "" for standalone (non-squad-triggered) agent runs.
+export interface DashboardFailureBySquad {
+  squad_id: string;
+  agent_id: string;
+  failure_reason: string;
   task_count: number;
 }
 

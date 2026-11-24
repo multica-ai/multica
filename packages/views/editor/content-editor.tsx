@@ -41,6 +41,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
+import type { EditorProps } from "@tiptap/pm/view";
 import { cn } from "@multica/ui/lib/utils";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import { useWorkspaceSlug } from "@multica/core/paths";
@@ -57,7 +58,7 @@ import {
 import type { MentionItem } from "./extensions/mention-suggestion";
 import type { IssueIdentifierResolver } from "./extensions/issue-identifier-autolink";
 import type { BuiltinCommandSuggestionOptions } from "./extensions/slash-command-suggestion";
-import { createEditorExtensions } from "./extensions";
+import { createEditorExtensions, type EditorCollaboration } from "./extensions";
 import {
   uploadAndInsertFile,
   insertUploadPlaceholder,
@@ -251,6 +252,14 @@ interface ContentEditorBaseProps {
    * signal to swap their static shell for the live editor.
    */
   onReady?: () => void;
+  /**
+   * Edit a shared Yjs document with other people and agents. The document is
+   * the source of truth: `value` / `defaultValue` are ignored, there is no
+   * local history to adopt external content into, and `onUpdate` only reports
+   * what the shared document now holds. The host remounts the editor (`key`)
+   * to switch documents.
+   */
+  collaboration?: EditorCollaboration;
 }
 
 type ContentEditorValueProps =
@@ -413,6 +422,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       attachments,
       flushPendingOnUnmount = false,
       onReady,
+      collaboration,
     },
     ref,
   ) {
@@ -589,7 +599,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       return issue ? { id: issue.id, identifier: issue.identifier } : null;
     };
 
-    const initialMarkdown = value ?? defaultValue ?? "";
+    const initialMarkdown = collaboration ? "" : (value ?? defaultValue ?? "");
     const initialContent = initialMarkdown
       ? // One-shot read: the editor preprocesses its initial document once at
         // load. Unlike the readonly renderer it does not need to re-run when
@@ -611,46 +621,14 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // parseMarkdownChunked). Small docs stay on the single-parse fast path.
     const mountChunked = initialContent.length > MARKDOWN_CHUNK_THRESHOLD;
 
-    const editor = useEditor({
-      immediatelyRender: false,
-      // Explicit for clarity — the real perf win is useEditorState in BubbleMenu.
-      shouldRerenderOnTransaction: false,
-      onCreate: ({ editor: ed }) => {
-        // For large docs we mount empty (below) and parse in chunks here, so the
-        // O(n²) marked tokenizer never sees the whole document at once.
-        if (mountChunked) {
-          const manager = (
-            ed.storage as { markdown?: { manager?: MarkdownManagerLike } }
-          ).markdown?.manager;
-          if (manager) {
-            ed.commands.setContent(
-              parseMarkdownChunked(manager, initialContent),
-              { emitUpdate: false },
-            );
-          } else {
-            ed.commands.setContent(initialContent, {
-              emitUpdate: false,
-              contentType: "markdown",
-            });
-          }
-        }
-        // A markdown draft ending in an empty list item (e.g. `"1. \n\n"` left
-        // after typing `1.`) parses into a caretless, schema-invalid item;
-        // repair it so the mounted editor has a real cursor in the list.
-        repairEmptyListItems(ed);
-        lastEmittedRef.current = normalizeEditorMarkdown(ed);
-        if (focusOnReadyRef.current) {
-          focusOnReadyRef.current = false;
-          ed.commands.focus("end");
-        }
-      },
-      content: mountChunked ? "" : initialContent,
-      contentType: mountChunked
-        ? undefined
-        : initialMarkdown
-          ? "markdown"
-          : undefined,
-      extensions: createEditorExtensions({
+    // Tiptap compares these to the editor's options after every render and,
+    // when they differ, calls `setOptions`, which re-runs every plugin view.
+    // The collaboration plugin answers that by diffing the whole document
+    // against the shared one, so a fresh array or object on each render made
+    // every host re-render cost a pass over the doc (MUL-9751). Extensions are
+    // only read when the editor is created; editorProps follow their inputs.
+    const [extensions] = useState(() =>
+      createEditorExtensions({
         placeholder: () => placeholderRef.current,
         queryClient,
         onSubmitRef,
@@ -674,32 +652,11 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             quickActionMenuRef.current?.getQuickActionContent?.(id) ?? "",
         },
         resolveIssueIdentifierRef,
+        collaboration,
       }),
-      onUpdate: ({ editor: ed }) => {
-        if (!onUpdateRef.current) return;
-        pendingBaseRef.current = documentBaseRef.current;
-        if (flushPendingOnUnmountRef.current) {
-          pendingFlushRef.current = normalizeEditorMarkdown(ed);
-        }
-        if (debounceRef.current) clearTimeout(debounceRef.current);
-        debounceRef.current = setTimeout(() => {
-          debounceRef.current = undefined;
-          pendingFlushRef.current = null;
-          const base = pendingBaseRef.current ?? documentBaseRef.current;
-          pendingBaseRef.current = null;
-          const md = normalizeEditorMarkdown(ed);
-          if (md === lastEmittedRef.current) return;
-          lastEmittedRef.current = md;
-          onUpdateRef.current?.(md, base);
-        }, debounceMs);
-      },
-      onFocus: () => {
-        caretPlacedRef.current = true;
-      },
-      onBlur: () => {
-        onBlurRef.current?.();
-      },
-      editorProps: {
+    );
+    const editorProps = useMemo<EditorProps>(
+      () => ({
         handleDOMEvents: {
           click(_view, event) {
             const target = event.target as HTMLElement;
@@ -751,7 +708,76 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           "data-mc": "content",
           ...(ariaLabel ? { role: "textbox", "aria-label": ariaLabel, "aria-multiline": "true" } : {}),
         },
+      }),
+      // The handlers read everything else through refs.
+      [className, ariaLabel],
+    );
+
+    const editor = useEditor({
+      immediatelyRender: false,
+      // Explicit for clarity — the real perf win is useEditorState in BubbleMenu.
+      shouldRerenderOnTransaction: false,
+      onCreate: ({ editor: ed }) => {
+        // For large docs we mount empty (below) and parse in chunks here, so the
+        // O(n²) marked tokenizer never sees the whole document at once.
+        if (mountChunked) {
+          const manager = (
+            ed.storage as { markdown?: { manager?: MarkdownManagerLike } }
+          ).markdown?.manager;
+          if (manager) {
+            ed.commands.setContent(
+              parseMarkdownChunked(manager, initialContent),
+              { emitUpdate: false },
+            );
+          } else {
+            ed.commands.setContent(initialContent, {
+              emitUpdate: false,
+              contentType: "markdown",
+            });
+          }
+        }
+        // A markdown draft ending in an empty list item (e.g. `"1. \n\n"` left
+        // after typing `1.`) parses into a caretless, schema-invalid item;
+        // repair it so the mounted editor has a real cursor in the list.
+        repairEmptyListItems(ed);
+        lastEmittedRef.current = normalizeEditorMarkdown(ed);
+        if (focusOnReadyRef.current) {
+          focusOnReadyRef.current = false;
+          ed.commands.focus("end");
+        }
       },
+      content: mountChunked ? "" : initialContent,
+      contentType: mountChunked
+        ? undefined
+        : initialMarkdown
+          ? "markdown"
+          : undefined,
+      extensions,
+      onUpdate: ({ editor: ed }) => {
+        if (!onUpdateRef.current) return;
+        pendingBaseRef.current = documentBaseRef.current;
+        if (flushPendingOnUnmountRef.current) {
+          pendingFlushRef.current = normalizeEditorMarkdown(ed);
+        }
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+        debounceRef.current = setTimeout(() => {
+          debounceRef.current = undefined;
+          pendingFlushRef.current = null;
+          const base = pendingBaseRef.current ?? documentBaseRef.current;
+          pendingBaseRef.current = null;
+          const md = normalizeEditorMarkdown(ed);
+          if (md === lastEmittedRef.current) return;
+          lastEmittedRef.current = md;
+          onUpdateRef.current?.(md, base);
+        }, debounceMs);
+      },
+      onFocus: () => {
+        caretPlacedRef.current = true;
+      },
+      onBlur: () => {
+        onBlurRef.current?.();
+      },
+      editorProps,
     });
 
     // Catalog queries can settle after the last keystroke. Refresh the active
@@ -901,7 +927,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // without this effect, a WS-driven description update keeps the editor
     // showing stale content until the issue is closed and reopened.
     useEffect(() => {
-      if (!editor || editor.isDestroyed || value === undefined) return;
+      if (!editor || editor.isDestroyed || value === undefined || collaboration) return;
 
       const previousValue = lastSyncedValueRef.current;
       lastSyncedValueRef.current = value;
@@ -949,7 +975,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       if (isDirty) return;
 
       applyExternalContent(value);
-    }, [value, editor, applyExternalContent]);
+    }, [value, editor, applyExternalContent, collaboration]);
 
     // Sync external `placeholder` changes into the mounted editor.
     // The Placeholder extension is configured with a getter over `placeholderRef`

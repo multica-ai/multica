@@ -281,6 +281,9 @@ func (r *Router) Handle(ctx context.Context, msg channel.InboundMessage) error {
 		"event_id", msg.EventID,
 		"outcome", string(res.Outcome),
 		"drop_reason", string(res.DropReason),
+		"installation_id", util.UUIDToString(res.InstallationID),
+		"chat_session_id", util.UUIDToString(res.ChatSessionID),
+		"route_revision", res.ChannelRouteRevision,
 	)
 
 	// Typing indicator on ingest, detached so the reaction HTTP call never

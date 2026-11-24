@@ -31,6 +31,7 @@ import { ProjectIcon } from "./project-icon";
 import { ProjectLeadPicker } from "./project-lead-picker";
 import { ProjectRowActions } from "./project-row-actions";
 import { ProjectDate, projectDueState } from "./project-date";
+import { getProjectProgress } from "./project-issue-metrics";
 
 const COLUMN_WIDTH = 280;
 const CARD_WIDTH = COLUMN_WIDTH - 16 - 8;
@@ -231,8 +232,7 @@ function ProjectBoardCardContent({
   onUpdate: (data: UpdateProjectRequest) => void;
 }) {
   const { t } = useT("projects");
-  const pct =
-    project.issue_count > 0 ? Math.round((project.done_count / project.issue_count) * 100) : 0;
+  const progress = getProjectProgress(project);
 
   return (
     <div className="flex flex-col gap-2 rounded-board-card border-[0.5px] border-board-card-border bg-board-card px-[var(--board-card-padding-x,0.625rem)] py-[var(--board-card-padding-y,var(--space-sm,0.75rem))] shadow-[var(--board-card-shadow,var(--surface-shadow))] transition-colors group-hover/card:border-foreground/15 group-hover/card:bg-board-card-hover">
@@ -240,9 +240,9 @@ function ProjectBoardCardContent({
         <ProjectIcon project={project} size="sm" />
         <span className="min-w-0 flex-1 truncate text-body font-medium">{project.title}</span>
       </div>
-      {project.issue_count > 0 ? (
+      {progress.scope > 0 ? (
         <div className="h-1 overflow-hidden rounded-full bg-muted">
-          <div className="h-full rounded-full bg-emerald-500" style={{ width: `${pct}%` }} />
+          <div className="h-full rounded-full bg-emerald-500" style={{ width: `${progress.percent}%` }} />
         </div>
       ) : null}
       <div className="flex min-w-0 items-center gap-1.5 text-caption text-muted-foreground">

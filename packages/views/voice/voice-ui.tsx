@@ -1,11 +1,14 @@
 "use client";
 
 import { useEffect, useRef, type PointerEvent, type SyntheticEvent } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { AlertCircle, Check, Mic, MicOff, RotateCcw, X } from "@multica/ui/icons";
+import { prefersReducedMotion, useReducedMotion } from "@multica/core/appearance";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
+import { UI_EASE_IN, UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { createShortcutChord } from "@multica/core/shortcuts";
 import {
@@ -71,7 +74,7 @@ function Waveform({ density, className }: { density: keyof typeof WAVE_GEOMETRY;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
     const { pitch, bar, fade } = WAVE_GEOMETRY[density];
-    const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    const still = prefersReducedMotion();
     const color = getComputedStyle(canvas).color;
     let width = 0;
     let height = 0;
@@ -287,31 +290,69 @@ export function VoiceStrip({ voice }: { voice: ComposerVoice }) {
  */
 export function VoiceHud({ voice }: { voice: ComposerVoice }) {
   const { t } = useT("editor");
+  const reduceMotion = useReducedMotion();
   const phase = voice.session?.phase;
-  if (!voice.showHud) return null;
+  const isRecording = phase === "recording";
+
   return (
-    <div className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-3 -translate-x-1/2">
-      <div
-        role="status"
-        className="flex h-10 items-center gap-2.5 whitespace-nowrap rounded-full bg-multica-ink pl-3.5 pr-4 text-multica-paper shadow-[var(--floating-shadow)] animate-in fade-in zoom-in-95 slide-in-from-bottom-2"
-      >
-        {phase === "recording" ? (
-          <>
-            <RecDot className="bg-[#ff5a52]" />
-            <span className="sr-only">{t(($) => $.voice.recording)}</span>
-            <Waveform density="hud" className="w-[86px]" />
-            <Elapsed className="opacity-70" />
-            <span className="text-caption opacity-70">{t(($) => $.voice.release_to_insert)}</span>
-          </>
-        ) : (
-          <>
-            <Mic className="size-4 opacity-70" />
-            <span className="text-caption opacity-80">
-              {phase === "transcribing" ? t(($) => $.voice.transcribing) : t(($) => $.voice.requesting)}
-            </span>
-          </>
+    <div className="pointer-events-none absolute inset-x-0 bottom-full z-30 mb-3 flex justify-center">
+      <AnimatePresence>
+        {voice.showHud && (
+          <motion.div
+            key="voice-hud"
+            layout={!reduceMotion}
+            role="status"
+            initial={reduceMotion ? false : { opacity: 0, y: 6, scale: 0.96 }}
+            animate={{
+              opacity: 1,
+              y: 0,
+              scale: 1,
+              transition: {
+                duration: reduceMotion ? 0 : UI_MOTION_DURATION.fast,
+                ease: UI_EASE_OUT,
+                layout: { duration: reduceMotion ? 0 : UI_MOTION_DURATION.standard, ease: UI_EASE_OUT },
+              },
+            }}
+            exit={
+              reduceMotion
+                ? { opacity: 0, transition: { duration: 0 } }
+                : {
+                    opacity: 0,
+                    y: 4,
+                    scale: 0.96,
+                    transition: { duration: UI_MOTION_DURATION.micro, ease: UI_EASE_IN },
+                  }
+            }
+            className="flex h-10 items-center overflow-hidden whitespace-nowrap rounded-full bg-multica-ink pl-3.5 pr-4 text-multica-paper shadow-[var(--floating-shadow)]"
+          >
+            <motion.div
+              key={isRecording ? "recording" : phase ?? "idle"}
+              layout={false}
+              initial={reduceMotion ? false : { opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: reduceMotion ? 0 : 0.12, ease: UI_EASE_OUT }}
+              className="flex items-center gap-2.5"
+            >
+              {isRecording ? (
+                <>
+                  <RecDot className="bg-[#ff5a52]" />
+                  <span className="sr-only">{t(($) => $.voice.recording)}</span>
+                  <Waveform density="hud" className="w-[86px]" />
+                  <Elapsed className="opacity-70" />
+                  <span className="text-caption opacity-70">{t(($) => $.voice.release_to_insert)}</span>
+                </>
+              ) : (
+                <>
+                  <Mic className="size-4 opacity-70" />
+                  <span className="text-caption opacity-80">
+                    {phase === "transcribing" ? t(($) => $.voice.transcribing) : t(($) => $.voice.requesting)}
+                  </span>
+                </>
+              )}
+            </motion.div>
+          </motion.div>
         )}
-      </div>
+      </AnimatePresence>
     </div>
   );
 }

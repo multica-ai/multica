@@ -222,7 +222,16 @@ export function useRestoreProjects() {
 }
 
 /** Notice under the project page header while the project is archived. */
-export function ArchivedProjectNotice({ project, className }: { project: Project; className?: string }) {
+export function ArchivedProjectNotice({
+  project,
+  className,
+  readOnly = false,
+}: {
+  project: Project;
+  className?: string;
+  /** Says the project is archived without offering Restore (a guest's view). */
+  readOnly?: boolean;
+}) {
   const { t } = useT("projects");
   const restore = useRestoreProjects();
   return (
@@ -235,9 +244,11 @@ export function ArchivedProjectNotice({ project, className }: { project: Project
     >
       <Archive className="size-3.5 shrink-0 text-muted-foreground" />
       <span className="min-w-0 flex-1">{t(($) => $.archive.notice)}</span>
-      <Button variant="outline" size="xs" onClick={() => restore(project)}>
-        {t(($) => $.page.restore)}
-      </Button>
+      {!readOnly && (
+        <Button variant="outline" size="xs" onClick={() => restore(project)}>
+          {t(($) => $.page.restore)}
+        </Button>
+      )}
     </div>
   );
 }

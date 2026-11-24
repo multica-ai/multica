@@ -48,7 +48,12 @@
     "conflict": "{{name}} a modifié le document. Votre brouillon est conservé. Rechargez pour continuer.",
     "reload": "Recharger la dernière version",
     "draft": "Votre brouillon conservé",
-    "unsaved_changes": "Modifications non enregistrées"
+    "unsaved_changes": "Modifications non enregistrées",
+    "live": "En direct",
+    "reconnecting": "Reconnexion...",
+    "connecting": "Connexion...",
+    "title_save_failed": "Titre non enregistré",
+    "editing_now": "En train de modifier"
   },
   "history": {
     "title": "Historique",
@@ -61,6 +66,7 @@
     "description": "Il a peut-être été supprimé."
   },
   "edited": "Modifié {{time}}",
+  "view_history": "Voir l'historique",
   "outline": "Plan",
   "link_copied": "Lien copié",
   "unavailable": {

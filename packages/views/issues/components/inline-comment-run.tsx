@@ -241,7 +241,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
             {rawError}
           </p>
         </TruncatedTooltip>}
-        {expanded && <div id={regionId} className="mt-2 min-w-0 space-y-1">
+        {expanded && <div ref={state.disclosure.contentRef} id={regionId} className="mt-2 min-w-0 space-y-1">
           {isPending && <p className="text-caption text-muted-foreground">{t(($) => $.inline_run.loading)}</p>}
           {isError && <div role="alert" className="text-caption text-destructive">{t(($) => $.inline_run.load_failed)}
             <button className="ml-2 underline" type="button" onClick={() => void refetch()}>{t(($) => $.inline_run.try_again)}</button></div>}
@@ -361,7 +361,7 @@ function InlineStep({ row, live, formatText }: { row: TraceRow; live: boolean; f
         <ChevronRight ref={disclosure.chevronRef} aria-hidden className={cn("size-3 shrink-0 text-muted-foreground", open && "rotate-90")} />
       </summary>
     </TruncatedTooltip>
-    {open && <div className="min-w-0 space-y-2 overflow-hidden pl-5.5">
+    {open && <div ref={disclosure.contentRef} className="min-w-0 space-y-2 overflow-hidden pl-5.5">
       {grouped ? <>
         {row.steps.length > limit && <button type="button" className="py-1 text-muted-foreground" onClick={() => setLimit((value) => value + 12)}>
           {t(($) => $.inline_run.show_earlier, { count: row.steps.length - limit })}</button>}

@@ -1,8 +1,11 @@
 "use client";
 import { useState } from "react";
+import { motion } from "motion/react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useReducedMotion } from "@multica/core/appearance";
 import { Button } from "@multica/ui/components/ui/button";
+import { UI_EASE_OUT } from "@multica/ui/lib/motion";
 import {
   docDetailOptions,
   docVersionsOptions,
@@ -30,6 +33,7 @@ export function DocHistoryPage({ docId }: { docId: string }) {
 
 function DocHistoryPageContent({ docId }: { docId: string }) {
   const { t } = useT("docs");
+  const reduceMotion = useReducedMotion();
   const wsId = useWorkspaceId();
   const p = useWorkspacePaths();
   const { push } = useNavigation();
@@ -69,9 +73,10 @@ function DocHistoryPageContent({ docId }: { docId: string }) {
           {
             href: p.docDetail(docId),
             label: doc.data?.title || t(($) => $.untitled),
+            className: "min-w-0 max-w-72 truncate",
           },
         ]}
-        leaf={t(($) => $.history.title)}
+        leaf={<span className="shrink-0">{t(($) => $.history.title)}</span>}
       />
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <div className="max-h-52 shrink-0 overflow-auto border-b p-3 md:max-h-none md:w-60 md:border-r md:border-b-0">
@@ -86,7 +91,7 @@ function DocHistoryPageContent({ docId }: { docId: string }) {
                 key={v.number}
                 onClick={() => setSelected(v.number)}
                 aria-pressed={number === v.number}
-                className={`mb-1 block w-full rounded-md p-3 text-left text-body ${number === v.number ? "bg-surface-selected text-surface-selected-foreground" : "hover:bg-surface-hover"}`}
+                className={`mb-1 block w-full rounded-md p-3 text-left text-body transition-colors ${number === v.number ? "bg-surface-selected text-surface-selected-foreground" : "hover:bg-surface-hover"}`}
               >
                 <span className="font-medium">
                   {t(($) => $.version_number, { number: v.number })}
@@ -97,8 +102,18 @@ function DocHistoryPageContent({ docId }: { docId: string }) {
                     : ""}
                 </span>
                 <span className="mt-1 block truncate text-caption">
-                  {getActorName(v.authorType, v.authorId)}
+                  {(v.contributors.length > 1
+                    ? v.contributors
+                    : [{ type: v.authorType, id: v.authorId }]
+                  )
+                    .map((c) => getActorName(c.type, c.id))
+                    .join(", ")}
                 </span>
+                {v.message && (
+                  <span className="block truncate text-caption text-muted-foreground">
+                    {v.message}
+                  </span>
+                )}
                 <span className="block text-caption text-muted-foreground">
                   {new Date(v.updatedAt).toLocaleString()}
                 </span>
@@ -113,14 +128,20 @@ function DocHistoryPageContent({ docId }: { docId: string }) {
                 {t(($) => $.editor.retry)}
               </Button>
             ) : version.data ? (
-              <>
-                <div className="mb-6 flex items-center justify-between gap-3">
-                  <h1 className="text-display-sm font-semibold">
+              <motion.div
+                key={version.data.number}
+                initial={reduceMotion ? false : { opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: reduceMotion ? 0 : 0.12, ease: UI_EASE_OUT }}
+              >
+                <div className="mb-6 flex items-start justify-between gap-3">
+                  <h1 className="min-w-0 flex-1 text-display-sm font-semibold leading-snug wrap-anywhere">
                     {version.data.title || t(($) => $.untitled)}
                   </h1>
                   <Button
                     variant="outline"
                     size="sm"
+                    className="shrink-0"
                     disabled={
                       update.isPending ||
                       !doc.data ||
@@ -133,7 +154,7 @@ function DocHistoryPageContent({ docId }: { docId: string }) {
                   </Button>
                 </div>
                 <ReadonlyContent content={version.data.content ?? ""} />
-              </>
+              </motion.div>
             ) : (
               t(($) => $.history.loading)
             )}

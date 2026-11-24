@@ -36,11 +36,14 @@ export function DocMentionCard({
   const title = doc
     ? doc.title || t(($) => $.untitled)
     : fallbackLabel || t(($) => $.untitled);
+  // The link stays a plain inline box, as in IssueMentionCard: a flex wrapper
+  // drops the chip's percentage cap while sizing itself, so the link grows to
+  // the untruncated title and leaves a blank gap after the chip.
   return (
     <AppLink
       href={p.docDetail(docId)}
       newTabTitle={title}
-      className="doc-mention inline-flex"
+      className="doc-mention align-middle"
     >
       <span className="doc-chip mx-0.5 inline-flex min-w-0 max-w-[min(18rem,100%)] items-center gap-1.5 rounded-md border px-2 py-0.5 text-caption">
         <FileText className="size-3.5 shrink-0 text-muted-foreground" />

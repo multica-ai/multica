@@ -3,17 +3,14 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/logger"
-	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -274,47 +271,15 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 // that same human upstream; every inbox endpoint goes through this gate. Auth
 // strips client identity headers and stamps the task/agent from the token.
 func (h *Handler) requireInboxOwnerAccess(w http.ResponseWriter, r *http.Request, userID string, workspaceID pgtype.UUID) bool {
-	source := r.Header.Get("X-Actor-Source")
-	if source == "" {
-		return true
-	}
-	deny := func() bool {
-		writeError(w, http.StatusForbidden, "inbox access requires the runtime owner's verified human trigger")
-		return false
-	}
-	queryFailure := func(err error) bool {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return deny()
-		}
+	ok, err := h.requestRepresentsUser(r, userID, workspaceID)
+	if err != nil {
 		slog.Warn("resolve inbox access failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeInboxReadError(w, err, "failed to resolve inbox access")
 		return false
 	}
-	// A cloud-node PAT has no authenticated task binding or human trigger.
-	if source != "task_token" {
-		return deny()
-	}
-	taskID, err := util.ParseUUID(r.Header.Get("X-Task-ID"))
-	if err != nil {
-		return deny()
-	}
-	task, err := h.Queries.GetAgentTask(r.Context(), taskID)
-	if err != nil {
-		return queryFailure(err)
-	}
-	if isTerminalTaskStatus(task.Status) ||
-		!task.OriginatorUserID.Valid || uuidToString(task.OriginatorUserID) != userID ||
-		uuidToString(task.AgentID) != r.Header.Get("X-Agent-ID") {
-		return deny()
-	}
-	runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
-		ID: task.RuntimeID, WorkspaceID: workspaceID,
-	})
-	if err != nil {
-		return queryFailure(err)
-	}
-	if !runtime.OwnerID.Valid || uuidToString(runtime.OwnerID) != userID {
-		return deny()
+	if !ok {
+		writeError(w, http.StatusForbidden, "inbox access requires the runtime owner's verified human trigger")
+		return false
 	}
 	return true
 }

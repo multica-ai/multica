@@ -77,10 +77,26 @@ export interface DocVersion {
   actionRef: number | null;
   taskId: string | null;
   issueId: string | null;
+  /** Everyone whose edits the version carries. Empty for versions saved
+   *  before live co-editing; the author is the one then. */
+  contributors: { type: DocAuthorType; id: string }[];
   createdAt: string;
   updatedAt: string;
   content?: string;
 }
+/** Lets an editor join a doc's live session; `enabled: false` when the
+ *  server runs without the collaboration service. */
+export type DocCollabTicket =
+  | {
+      enabled: true;
+      token: string;
+      document: string;
+      expiresAt: string;
+      /** Base64 Yjs state saved with the doc's current revision, when asked
+       *  for and the live session would load it unchanged. */
+      state?: string;
+    }
+  | { enabled: false };
 export interface CreateDocRequest {
   title: string;
   content?: string;

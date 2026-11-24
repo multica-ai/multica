@@ -320,6 +320,10 @@ case "${1:-}" in
   info) exit 0 ;;
   compose)
     shift
+    if [ -n "${MULTICA_TEST_NO_COMPOSE:-}" ]; then
+      echo "docker: 'compose' is not a docker command." >&2
+      exit 1
+    fi
     subcommand=""
     for arg in "$@"; do
       case "$arg" in
@@ -329,6 +333,17 @@ case "${1:-}" in
     case "$subcommand" in
       up) : >.stub-stack-up ;;
       config)
+        # `config --quiet` is the installer's validation step. An old Compose
+        # rejects the file's top-level `name:` here (#1401).
+        for arg in "$@"; do
+          if [ "$arg" = "--quiet" ]; then
+            if [ -n "${MULTICA_TEST_COMPOSE_REJECTS_NAME:-}" ]; then
+              echo "(root) Additional property name is not allowed" >&2
+              exit 1
+            fi
+            exit 0
+          fi
+        done
         # Opt-in, so the port matrix above never probes real host ports.
         [ -n "${MULTICA_TEST_COMPOSE_CONFIG:-}" ] || exit 1
         cat <<JSON
@@ -378,7 +393,13 @@ JSON
           *) exit 1 ;;
         esac
         ;;
-      version) echo "2.30.0" ;;
+      version)
+        if [ -n "${MULTICA_TEST_COMPOSE_REJECTS_NAME:-}" ]; then
+          echo "Docker Compose version v2.2.3"
+        else
+          echo "2.30.0"
+        fi
+        ;;
     esac
     exit 0
     ;;
@@ -763,6 +784,55 @@ test_with_server_port_preflight_allows_free_and_own_ports() {
   _require_server_ports "$tmp" "own running stack" "$held" "3000" || return 1
 }
 
+# A Compose release too old for the file's top-level `name:` (or no Compose v2
+# plugin at all) must stop the installer before anything is pulled or started,
+# with an error that says what to upgrade, instead of Compose's bare
+# "(root) Additional property name is not allowed" from `up` (#1401).
+_require_compose_preflight_failure() {
+  local tmp="$1" label="$2" expected="$3"
+
+  if grep -q "Pulling official Multica images" "$tmp/install.out" || [ -f "$tmp/server/.stub-stack-up" ]; then
+    echo "[$label] installer pulled or started the stack despite an unusable Docker Compose" >&2
+    cat "$tmp/install.out" >&2 || true
+    return 1
+  fi
+  if ! grep -qF "$expected" "$tmp/install.err"; then
+    echo "[$label] expected the error to contain: $expected" >&2
+    cat "$tmp/install.err" >&2 || true
+    return 1
+  fi
+}
+
+test_with_server_stops_on_compose_too_old_for_name() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
+
+  _setup_server_sandbox "$tmp"
+  cp "$tmp/server/.env.example" "$tmp/server/.env"
+  if _run_with_server "$tmp" MULTICA_TEST_COMPOSE_REJECTS_NAME=1 >/dev/null 2>&1; then
+    echo "installer must fail when Docker Compose rejects the self-host compose file" >&2
+    return 1
+  fi
+  _require_compose_preflight_failure "$tmp" "old compose" "Your Docker Compose is too old" || return 1
+  _require_compose_preflight_failure "$tmp" "old compose" "Found: Docker Compose version v2.2.3" || return 1
+  _require_compose_preflight_failure "$tmp" "old compose" "Additional property name is not allowed" || return 1
+}
+
+test_with_server_stops_without_compose_v2() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
+
+  _setup_server_sandbox "$tmp"
+  cp "$tmp/server/.env.example" "$tmp/server/.env"
+  if _run_with_server "$tmp" MULTICA_TEST_NO_COMPOSE=1 >/dev/null 2>&1; then
+    echo "installer must fail when 'docker compose' is not available" >&2
+    return 1
+  fi
+  _require_compose_preflight_failure "$tmp" "no compose v2" "Docker Compose v2 is required" || return 1
+}
+
 test_brew_install_failure_falls_back_to_release_binary
 test_brew_tap_failure_falls_back_to_release_binary
 test_remote_ssh_install_prints_token_login_hint
@@ -771,6 +841,8 @@ test_with_server_uses_compose_published_ports
 test_with_server_fails_when_compose_port_is_unavailable
 test_with_server_refuses_ports_already_in_use
 test_with_server_port_preflight_allows_free_and_own_ports
+test_with_server_stops_on_compose_too_old_for_name
+test_with_server_stops_without_compose_v2
 test_with_server_fails_when_checkout_does_not_land
 test_cli_lookup_failure_does_not_claim_up_to_date
 echo "install.sh tests passed"

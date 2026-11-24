@@ -25,7 +25,7 @@ test.describe("Issue detail sidebar containment", () => {
     const title = "E2E sidebar containment " + Date.now();
     const issue = await api.createIssue(title);
     const slug = await loginAsDefault(page);
-    await page.goto(`/${slug}/issues/${issue.id}`, { waitUntil: "domcontentloaded" });
+    await page.goto(`/${slug}/issues/${issue.identifier}`, { waitUntil: "domcontentloaded" });
     await waitForPageText(page, title);
     await expect(page.locator("text=Properties")).toBeVisible();
 

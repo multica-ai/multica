@@ -72,21 +72,25 @@ export function resetRememberedThreadRowHeights() {
  * The anchor `id` lives on the wrapper only while virtualized; otherwise the
  * row content carries it as before.
  */
-export function VirtualThreadRow({ id, taskId, scrollParent, virtualize = true, children }: {
+export function VirtualThreadRow({ id, taskId, scrollParent, virtualize = true, engaged: forceEngaged = false, children }: {
   id: string;
   taskId?: string;
   scrollParent?: HTMLElement | null;
   /** False renders the row inline; switching it never remounts the row. */
   virtualize?: boolean;
+  /** True while an external control (e.g. a portaled annotation editor) targets this row. */
+  engaged?: boolean;
   children: () => ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const height = useRef(rememberedHeights.get(id) ?? UNMEASURED_ROW_HEIGHT);
   const active = !!scrollParent && virtualize;
+  const forceEngagedRef = useRef(forceEngaged);
+  forceEngagedRef.current = forceEngaged;
   // A row that starts inline counts as visible, so turning virtualization on
   // later keeps it mounted until the observer reports it offscreen.
-  const [visible, setVisible] = useState(!active);
-  const mounted = !active || visible;
+  const [visible, setVisible] = useState(!active || forceEngaged);
+  const mounted = !active || visible || forceEngaged;
 
   useEffect(() => {
     const node = ref.current;
@@ -102,7 +106,8 @@ export function VirtualThreadRow({ id, taskId, scrollParent, virtualize = true, 
     const observer = new IntersectionObserver((entries) => {
       const intersecting = entries.at(-1)?.isIntersecting ?? false;
       // Editing and open controls own transient state; don't discard it on scroll.
-      const engaged = node.contains(document.activeElement)
+      const engaged = forceEngagedRef.current
+        || node.contains(document.activeElement)
         || !!node.querySelector('[contenteditable="true"], [aria-expanded="true"]');
       setVisible(intersecting || engaged);
     }, { root: scrollParent, rootMargin: "800px 0px" });

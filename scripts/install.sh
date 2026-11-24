@@ -120,6 +120,45 @@ host_port_in_use() {
   (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
 }
 
+# Fail early, with a fix the user can act on, when this machine's Docker Compose
+# cannot run the self-host stack. Without this, a missing Compose v2 plugin or a
+# Compose release too old for the file's top-level `name:` only surfaces once
+# `pull` / `up` runs, as a bare "(root) Additional property name is not allowed"
+# (#1401). `config --quiet` validates the file and .env the same way `up` would,
+# without contacting the Docker daemon. Must be called from the installation
+# directory.
+check_compose_supports_selfhost() {
+  local version output
+
+  if ! version="$(docker compose version 2>/dev/null)"; then
+    fail "Docker Compose v2 is required, but 'docker compose' is not available.
+  The legacy standalone 'docker-compose' (v1) is not supported.
+  Install or update Docker Desktop, or on Linux the docker-compose-plugin package:
+    https://docs.docker.com/compose/install/
+  Then re-run the installer."
+  fi
+
+  if output="$(docker compose -f docker-compose.selfhost.yml config --quiet 2>&1)"; then
+    return
+  fi
+
+  case "$output" in
+    *"Additional property"*)
+      fail "Your Docker Compose is too old for Multica's docker-compose.selfhost.yml.
+  Found: ${version}
+  Compose said: ${output}
+  Update Docker Desktop, or on Linux the docker-compose-plugin package, to the latest release:
+    https://docs.docker.com/compose/install/
+  Then re-run the installer."
+      ;;
+    *)
+      fail "Docker Compose could not load $INSTALL_DIR/docker-compose.selfhost.yml:
+  ${output}
+  Fix the problem above (for example a malformed line in $INSTALL_DIR/.env) and re-run the installer."
+      ;;
+  esac
+}
+
 # Fail before pulling and starting anything when a host port the stack needs is
 # already taken, instead of letting Docker abort halfway through `up -d` with
 # "port is already allocated" (#883). A port this installation's own running
@@ -466,6 +505,7 @@ setup_server() {
     ok "Using existing .env"
   fi
 
+  check_compose_supports_selfhost
   check_selfhost_ports
 
   # Start Docker Compose

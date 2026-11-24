@@ -46,7 +46,6 @@
   "list": {
     "loading_selection": "正在加载通知...",
     "empty": "暂无通知",
-    "mark_done_tooltip": "标为已完成",
     "archive_tooltip": "归档",
     "time": {
       "just_now": "刚刚",
@@ -55,6 +54,7 @@
       "days": "{{count}} 天"
     },
     "archived_title": "已归档",
+    "snoozed_title": "已延后",
     "archived_empty": "暂无已归档通知",
     "unarchive_tooltip": "取消归档",
     "actions_aria": "通知操作",
@@ -64,13 +64,15 @@
   },
   "detail": {
     "select_prompt": "选择一条通知查看详情",
-    "empty": "收件箱为空",
+    "restore": "移回收件箱",
+    "more_actions": "更多通知操作",
     "original_input": "原始输入",
     "retry_with_context": "保留上下文重试",
     "edit_advanced": "在完整表单中编辑",
     "autopilot_quota_exceeded_body": "当前周期的 {{limit}} 次自动化执行额度已用完。在 {{resetAt}} 重置、升级套餐或加购之前，后续自动化执行将不会启动。",
     "project_owner_joined_body": "{{name}} 是工作区所有者，已把自己加入这个私有项目，现在可以看到其中的任务、评论和附件。",
     "open_project": "打开项目",
+    "open_app": "打开应用",
     "autopilot_quota_upgrade": "查看选项",
     "archive": "归档",
     "unarchive": "取消归档",
@@ -112,7 +114,8 @@
     "app_connect_requested": "请连接应用",
     "app_action_result": "应用操作结果",
     "doc_comment": "文档有新评论",
-    "doc_mentioned": "在文档中提到了你"
+    "doc_mentioned": "在文档中提到了你",
+    "blockers_done": "等待的任务已结束"
   },
   "labels": {
     "set_status_to": "状态设为",
@@ -124,6 +127,7 @@
     "set_due_date_to": "截止日期设为 {{date}}",
     "removed_due_date": "移除了截止日期",
     "reacted_to_comment": "用 {{emoji}} 回应了你的评论",
+    "commented": "评论了",
     "created_with_agent": "通过智能体创建：{{identifier}}",
     "failed_with_detail": "失败：{{detail}}",
     "autopilot_quota_blocked": "执行已被阻止：额度已用完",
@@ -144,7 +148,12 @@
     "archived": "已归档",
     "leaves": "离开后移出收件箱",
     "filtered": "不再符合筛选",
-    "notification_archived": "通知已归档",
+    "changed_status": "已改为{{status}}",
+    "reassigned": "已改派给 {{name}}",
+    "unassigned": "已取消分配",
+    "ran_quick_action": "已运行 {{name}}",
+    "agent_triggered": "已触发智能体",
+    "returns_on_activity": "有新动态时会回到收件箱",
     "next": "下一条",
     "next_tooltip": "打开下一条：{{title}}"
   },
@@ -155,7 +164,6 @@
     "mark_read_failed": "标为已读失败",
     "mark_unread_failed": "标为未读失败",
     "archive_failed": "归档失败",
-    "mark_done_failed": "标为已完成失败",
     "mark_all_read_failed": "全部标为已读失败",
     "archive_all_failed": "归档全部失败",
     "archive_all_read_failed": "归档已读失败",
@@ -174,6 +182,13 @@
     "issue_description": "当前视图中此任务的通知将被永久删除，任务和运行记录不受影响。",
     "cancel": "取消",
     "active_issue_description": "此任务在收件箱中的通知将被永久删除，此前归档的通知、任务本身及运行记录均不受影响。"
+  },
+  "archive_all_dialog": {
+    "title": "归档全部通知？",
+    "description": "收件箱中的所有活跃通知都会移至已归档。已延后的任务会保持延后，你随时可以恢复通知。",
+    "description_count_other": "收件箱中的全部 {{count}} 条活跃通知都会移至已归档。已延后的任务会保持延后，你随时可以恢复它们。",
+    "cancel": "取消",
+    "confirm": "归档全部"
   },
   "unsubscribe": {
     "title": "取消订阅并归档：不再收到它的订阅通知，@你时仍会通知",
@@ -209,8 +224,29 @@
     "failed": "延后失败",
     "unsnooze_failed": "恢复失败",
     "view_empty": "没有延后的事项",
-    "view_empty_description": "在收件箱里延后一个任务，它会在这里等到时间再回来。",
-    "col_updates": "延后期间",
-    "col_back": "恢复时间"
+    "view_empty_description": "在收件箱里延后一个任务，它会在这里等到时间再回来。"
+  },
+  "auto_archive_prompt": {
+    "title": "处理完的通知，可以自动归档",
+    "description": "收件箱新增了自动归档：你处理完一个任务，它的通知就会移出收件箱。只算你自己的操作，有新动态会重新进收件箱。",
+    "options": {
+      "handled": "完成任务或触发智能体运行时自动归档；只整理字段或不触发智能体的评论留在原地",
+      "completed": "只有完成或取消任务才归档",
+      "never": "自己手动归档"
+    },
+    "hint": "之后可以在 设置 › 通知 里修改",
+    "confirm": "确定"
+  },
+  "zero": {
+    "cleared_title": "收件箱已清空",
+    "just_archived": "刚归档了 {{label}}",
+    "just_snoozed": "已将 {{label}} 延后至 {{time}}",
+    "just_unsubscribed": "已取消订阅并归档 {{label}}",
+    "just_archived_many_other": "已归档 {{count}} 条通知",
+    "snoozed_summary_other": "{{count}} 条延后通知 · 最早 {{time}} 回来",
+    "filtered_title": "当前筛选下的通知已处理完",
+    "filtered_remaining_other": "收件箱里还有 {{count}} 条其他通知待处理",
+    "clear_and_continue": "清除筛选，继续处理",
+    "undo_item": "撤销 {{label}}"
   }
 }

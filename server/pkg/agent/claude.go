@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,7 +16,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
@@ -69,70 +69,34 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
 
-	args := buildClaudeArgs(opts, b.cfg.Logger)
-
-	// If the caller provided an MCP config, write it to a temp file and pass
-	// --mcp-config <path> so the agent uses a controlled set of MCP servers
-	// instead of inheriting from the outer Claude Code session.
-	var mcpConfigPath string
-	var mcpFileCleanup func() // non-nil while this function owns the temp file
-	if hasManagedMcpConfig(opts.McpConfig) {
-		path, err := writeMcpConfigToTemp(opts.McpConfig)
+	// Getting a process is the only step that depends on the warm pool. A
+	// pooled spawn must outlive runCtx so it can be parked after the turn; a
+	// one-shot spawn is bound to it.
+	pooled := b.cfg.WarmPool != nil
+	var proc *claudeProcess
+	var fingerprint string
+	if pooled {
+		fingerprint = b.warmFingerprint(execPath, opts)
+		proc = b.acquireWarmProcess(opts.ResumeSessionID, fingerprint)
+	}
+	warmHit := proc != nil
+	var usageSnapshot *claudeUsageSnapshot
+	if !warmHit {
+		spawnCtx := runCtx
+		if pooled {
+			spawnCtx = context.Background()
+		}
+		var err error
+		proc, usageSnapshot, err = b.spawnClaudeProcess(spawnCtx, execPath, opts, pooled, fingerprint)
 		if err != nil {
 			cancel()
 			return nil, err
 		}
-		mcpConfigPath = path
-		mcpFileCleanup = func() { cleanupMcpConfigTemp(mcpConfigPath) }
-		args = append(args, "--mcp-config", mcpConfigPath)
-	}
-	// Clean up the temp file if we return before the goroutine takes ownership.
-	defer func() {
-		if mcpFileCleanup != nil {
-			mcpFileCleanup()
-		}
-	}()
-
-	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
-	hideAgentWindow(cmd)
-	// Take over context cancellation: the default kills the whole group the
-	// instant runCtx is done. We instead drive a graceful group-wide
-	// SIGTERM→SIGKILL from the cancellation goroutine below and close stdout
-	// only after the tree has been signalled. Returning nil keeps os/exec from
-	// racing us with its own kill; WaitDelay remains the hard backstop.
-	cmd.Cancel = func() error { return nil }
-	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(args))
-	cmd.WaitDelay = 10 * time.Second
-	if opts.Cwd != "" {
-		cmd.Dir = opts.Cwd
-	}
-	cmd.Env = buildEnv(b.cfg.Env)
-	if err := claudeRootSudoPreflight(args, cmd.Env); err != nil {
-		cancel()
-		return nil, err
 	}
 
-	var usageSnapshot *claudeUsageSnapshot
-	if opts.ResumeSessionID != "" {
-		snapshot, snapshotErr := captureClaudeUsageSnapshot(cmd.Env, cmd.Dir, opts.ResumeSessionID)
-		if snapshotErr != nil {
-			b.cfg.Logger.Warn("claude usage baseline unavailable; ignoring reported session totals, keeping per-run stream usage", "error", snapshotErr)
-		} else {
-			usageSnapshot = snapshot
-		}
-	}
+	msgCh := make(chan Message, 256)
+	resCh := make(chan Result, 1)
 
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("claude stdout pipe: %w", err)
-	}
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("claude stdin pipe: %w", err)
-	}
-	inputWriter := &claudeInputWriter{w: stdin}
 	var supplements *claudeSupplementSession
 	if opts.EnableTaskSupplement {
 		supplements = newClaudeSupplementSession(runCtx)
@@ -141,38 +105,48 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	if initializer == nil && opts.SkillInvocation != nil {
 		initializer = newClaudeSupplementSession(runCtx)
 	}
-	var closeStdinOnce sync.Once
-	closeStdin := func() {
-		closeStdinOnce.Do(func() { _ = stdin.Close() })
-		if initializer != nil {
-			initializer.end()
-		}
-	}
-	// Capture stderr into both the daemon log (as before) and a bounded tail
-	// buffer so we can include the last few KB in Result.Error when claude
-	// exits unexpectedly. Without the tail, an exit-code-only failure looks
-	// like "claude exited with error: exit status 3" — which is useless for
-	// root-causing V8 aborts, Bun panics, or any other CLI-side crash.
-	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[claude:stderr] "), agentStderrTailBytes)
-	cmd.Stderr = stderrBuf
 
-	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
-		closeStdin()
-		cancel()
-		return nil, fmt.Errorf("start claude: %w", err)
+	// A reused process reports cumulative session totals, so its result usage
+	// is measured against what the previous turn already reported.
+	var baselineUsage map[string]TokenUsage
+	if warmHit && len(proc.lastCumulativeModelUsage) > 0 {
+		baselineUsage = maps.Clone(proc.lastCumulativeModelUsage)
 	}
 
-	b.cfg.Logger.Info("claude started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
-
-	// The process started — transfer temp file ownership to the goroutine.
-	mcpFileCleanup = nil
-
-	msgCh := make(chan Message, 256)
-	resCh := make(chan Result, 1)
-
-	// procDone closes once cmd.Wait() returns, letting the cancellation handler
-	// skip a process that already exited and avoid signalling a dead/reused pid.
-	procDone := make(chan struct{})
+	turn := &claudeTurn{
+		backend:       b,
+		proc:          proc,
+		cancel:        cancel,
+		opts:          opts,
+		msgCh:         msgCh,
+		coalescer:     newClaudeStreamCoalescer(msgCh, nil),
+		supplements:   supplements,
+		initializer:   initializer,
+		usageSnapshot: usageSnapshot,
+		baselineUsage: baselineUsage,
+		rateLimits:    newRateLimitTracker(opts.OnRateLimits),
+		controlErrors: make(chan error, 1),
+		resultCh:      make(chan struct{}),
+		usage:         make(map[string]TokenUsage),
+		seenUsage:     make(map[string]struct{}),
+	}
+	if warmHit {
+		turn.sessionID = proc.sessionID
+	}
+	proc.setActiveTurn(turn)
+	if warmHit {
+		b.cfg.Logger.Info("claude warm session reused",
+			"pid", proc.cmd.Process.Pid,
+			"session_id", proc.sessionID,
+			"cwd", opts.Cwd,
+			"model", opts.Model,
+		)
+		trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: proc.sessionID})
+	} else {
+		// Start reading only once the turn is attached so no early event is
+		// dropped.
+		go proc.readStdout()
+	}
 
 	// writeClaudeInput runs in its own goroutine so it cannot deadlock
 	// against the stdout reader. With --verbose --output-format stream-json
@@ -190,22 +164,34 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	// timeout.
 	writeDone := make(chan error, 1)
 	go func() {
+		slashCommandsAllowed := !slashCommandsDisabled(b.cfg.LaunchPrefix, opts.ExtraArgs, opts.CustomArgs)
 		var commands map[string]bool
-		if initializer != nil {
-			if initErr := initializer.initialize(inputWriter, opts.HandshakeTimeout, opts.EnableTaskSupplement); initErr != nil {
+		switch {
+		case warmHit:
+			// The process answered initialize on its first turn; it does not
+			// accept a second handshake.
+			if proc.initialized && slashCommandsAllowed {
+				commands = proc.initializedCommands
+			}
+		case initializer != nil:
+			if initErr := initializer.initialize(proc.inputWriter, opts.HandshakeTimeout, opts.EnableTaskSupplement); initErr != nil {
 				b.cfg.Logger.Warn("Claude initialization unavailable; continuing with text input", "error", initErr)
 				initializer.end()
-			} else if !slashCommandsDisabled(b.cfg.LaunchPrefix, opts.ExtraArgs, opts.CustomArgs) {
-				commands = initializer.availableCommands()
+			} else {
+				proc.initialized = true
+				proc.initializedCommands = initializer.availableCommands()
+				if slashCommandsAllowed {
+					commands = proc.initializedCommands
+				}
 			}
 		}
 		blocks := []string{prompt}
 		if opts.SkillInvocation != nil {
 			blocks = opts.SkillInvocation.claudeTextBlocks(commands)
 		}
-		err := writeClaudeInput(inputWriter, blocks...)
+		err := writeClaudeInput(proc.inputWriter, blocks...)
 		if err != nil {
-			closeStdin()
+			turn.closeInput()
 			if supplements != nil {
 				cancel()
 			}
@@ -217,234 +203,58 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
-		if mcpConfigPath != "" {
-			defer cleanupMcpConfigTemp(mcpConfigPath)
-		}
 
 		startTime := time.Now()
-		var lastAssistantText string
-		var finalResultText string
-		sawResult := false
-		resultIsError := false
-		terminalReasonError := ""
-		var sessionID string
-		var lastUsageResult *claudeSDKMessage
-		sawAsyncLaunch := false
-		usage := make(map[string]TokenUsage)
-		seenUsage := make(map[string]struct{})
-		rateLimits := newRateLimitTracker(opts.OnRateLimits)
-		eventCount := 0
-		invalidEventCount := 0
-		assistantEventCount := 0
-		toolUseCount := 0
-		unreadableAssistantCount := 0
-		controlErrors := make(chan error, 1)
-		var controlWrites sync.WaitGroup
-		var controlMu sync.Mutex
-		pendingControls := 0
-		closeRequested := false
-		closeAfterControls := func() {
-			if initializer != nil {
-				initializer.end()
-			}
-			controlMu.Lock()
-			defer controlMu.Unlock()
-			closeRequested = true
-			if pendingControls == 0 {
-				closeStdin()
-			}
+
+		// A pooled process stays up between turns, so its turn ends at the
+		// result event. A one-shot process closes stdin after its result and
+		// the turn lasts until it exits, so anything it emits meanwhile still
+		// streams.
+		var resultSeen <-chan struct{}
+		if proc.pooled {
+			resultSeen = turn.resultCh
 		}
-		var stopAfterErrorResultOnce sync.Once
-		// stopAfterErrorResult terminates a claude that outlives its error
-		// result past the grace period, the same way cancellation does.
-		stopAfterErrorResult := func() {
-			select {
-			case <-procDone:
-				return
-			case <-time.After(claudeErrorResultGrace()):
-			}
-			b.cfg.Logger.Warn("claude still running after an error result; terminating process group", "pid", cmd.Process.Pid)
-			signalProcessGroup(cmd, syscall.SIGTERM)
-			if !waitProcessGroupGone(cmd, claudeTerminateGrace()) {
-				signalProcessGroup(cmd, syscall.SIGKILL)
-			}
-			_ = stdout.Close()
+		cancelledOrTimedOut := false
+		select {
+		case <-resultSeen:
+		case <-proc.procDone:
+		case <-runCtx.Done():
+			cancelledOrTimedOut = true
+			proc.terminate()
+			<-proc.procDone
 		}
+		turn.endInitializer()
+		// Detach before reading the turn's state or waiting on its control
+		// writes: a pooled process keeps emitting after its result event.
+		proc.setActiveTurn(nil)
 
-		// On cancellation / timeout, terminate claude (and every MCP server and
-		// tool subprocess it spawned) BEFORE unblocking the scanner. EOF stdin
-		// to nudge a clean exit, then SIGTERM the whole process group, give it a
-		// grace period, and SIGKILL the group if any member is still alive.
-		// SIGKILL is uncatchable, so once delivered no group member can write
-		// again — only then is it safe to close the stdout read end as a
-		// last-resort unblock for a scanner a wedged descendant still keeps
-		// open. WaitDelay is the final backstop (#5918).
-		go func() {
-			select {
-			case <-procDone:
-				return // finished on its own; nothing to terminate
-			case <-runCtx.Done():
-			}
-			closeStdin()
-			if cmd.Process != nil {
-				signalProcessGroup(cmd, syscall.SIGTERM)
-				// Escalate to a group SIGKILL unless the WHOLE process group has
-				// exited within the grace window. This must key off the process
-				// group, not procDone: procDone only means cmd.Wait() returned
-				// for the leader, so a SIGTERM-ignoring descendant that does not
-				// hold claude's stdout would let the leader exit, close procDone,
-				// and skip the SIGKILL — leaking exactly the orphan this fix
-				// targets. waitProcessGroupGone returns as soon as the group is
-				// empty, so the graceful case adds no latency.
-				if !waitProcessGroupGone(cmd, claudeTerminateGrace()) {
-					signalProcessGroup(cmd, syscall.SIGKILL)
-				}
-			}
-			_ = stdout.Close()
-		}()
+		turn.mu.Lock()
+		turn.coalescer.flushAll()
+		sawResult := turn.sawResult
+		resultIsError := turn.resultIsError
+		terminalReasonError := turn.terminalReasonError
+		sawAsyncLaunch := turn.sawAsyncLaunch
+		sessionID := turn.sessionID
+		lastAssistantText := turn.lastAssistantText
+		finalResultText := turn.finalResultText
+		lastUsageResult := turn.lastUsageResult
+		lastRawModelUsage := turn.lastRawModelUsage
+		usage := turn.usage
+		eventCount := turn.eventCount
+		invalidEventCount := turn.invalidEventCount
+		assistantEventCount := turn.assistantEventCount
+		toolUseCount := turn.toolUseCount
+		unreadableAssistantCount := turn.unreadableAssistantCount
+		turn.mu.Unlock()
 
-		scanner := newAgentStreamScanner(stdout)
-
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line == "" {
-				continue
-			}
-
-			var msg claudeSDKMessage
-			if err := json.Unmarshal([]byte(line), &msg); err != nil {
-				invalidEventCount++
-				continue
-			}
-			eventCount++
-
-			switch msg.Type {
-			case "assistant":
-				assistantEventCount++
-				turn := b.handleAssistant(msg, msgCh, usage, seenUsage)
-				toolUseCount += turn.toolUses
-				if !turn.understood {
-					unreadableAssistantCount++
-				}
-				lastAssistantText = turn.resolveFallback(lastAssistantText)
-			case "user":
-				if b.handleUser(msg, msgCh) {
-					sawAsyncLaunch = true
-				}
-			case "rate_limit_event":
-				if update, ok := parseClaudeRateLimitEvent(msg.RateLimitInfo); ok {
-					rateLimits.apply(update)
-				}
-			case "system":
-				if msg.SessionID != "" {
-					sessionID = msg.SessionID
-				}
-				trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
-			case "result":
-				sawResult = true
-				finalResultText = msg.ResultText
-				resultIsError = msg.IsError
-				terminalReasonError = claudeTerminalReasonFailure(msg.TerminalReason, msg.ResultText)
-				sessionID = msg.SessionID
-				// A resume whose baseline capture failed cannot trust the
-				// result's modelUsage: newer Claude Code restores the session's
-				// cumulative counters on resume, so the reported total may span
-				// every prior task (GH #9564), and without a baseline there is
-				// no way to verify it is per-run. Keep the stream-derived
-				// per-run usage in that case; the reported totals are recorded
-				// in lastUsageResult only for the resume-rejected recapture
-				// below, where the run is known to have started a fresh session
-				// whose totals are its own.
-				unverifiableBaseline := usageSnapshot == nil && opts.ResumeSessionID != ""
-				var baseline map[string]TokenUsage
-				if usageSnapshot != nil {
-					baseline = usageSnapshot.baseline
-				}
-				if resultUsage, authoritative := claudeResultUsageSince(msg, opts.Model, baseline); authoritative {
-					usageMsg := msg
-					lastUsageResult = &usageMsg
-					if !unverifiableBaseline {
-						usage = resultUsage
-					}
-				}
-				// Keep draining stdout while accepted control replies finish writing.
-				// Once those replies drain, stdin closes; requests arriving after that
-				// cannot be answered.
-				closeAfterControls()
-				if resultIsError || terminalReasonError != "" {
-					stopAfterErrorResultOnce.Do(func() { go stopAfterErrorResult() })
-				}
-			case "log":
-				if msg.Log != nil {
-					trySend(msgCh, Message{
-						Type:    MessageLog,
-						Level:   msg.Log.Level,
-						Content: msg.Log.Message,
-					})
-				}
-			case "control_request":
-				var reply func(io.Writer) error
-				if supplements != nil {
-					reply, _ = supplements.prepareHook(msg)
-				}
-				controlMu.Lock()
-				pendingControls++
-				controlMu.Unlock()
-				controlWrites.Add(1)
-				go func(msg claudeSDKMessage, reply func(io.Writer) error) {
-					defer controlWrites.Done()
-					defer func() {
-						controlMu.Lock()
-						defer controlMu.Unlock()
-						pendingControls--
-						if closeRequested && pendingControls == 0 {
-							closeStdin()
-						}
-					}()
-					if reply == nil {
-						b.handleControlRequest(msg, inputWriter)
-						return
-					}
-					if err := reply(inputWriter); err != nil {
-						select {
-						case controlErrors <- err:
-						default:
-						}
-						cancel()
-					}
-				}(msg, reply)
-			case "control_response":
-				if initializer != nil {
-					initializer.handleResponse(msg.Response)
-				}
-			}
-		}
-		scanErr := scanner.Err()
-		if scanErr != nil {
-			// Scanner stopped consuming stdout. Close the pipe before Wait so a
-			// child still writing a malformed/oversized event cannot deadlock on
-			// the full OS pipe; the scanner error remains the primary failure.
-			_ = stdout.Close()
-		}
-
-		closeStdin()
-
-		// Wait for process exit, then release the cancellation handler.
-		exitErr := cmd.Wait()
-		close(procDone)
-		// The leader is reaped; drop ownership. On Windows that closes the Job
-		// Object, which kills anything still inside it — precisely what should
-		// happen to a descendant that outlived the CLI (GH #7522).
-		releaseProcessGroup(cmd)
-		duration := time.Since(startTime)
-		// writeDone is buffered (cap 1) and the writer always sends — by the
-		// time cmd has exited, the prompt write has either succeeded, hit a
-		// broken pipe, or been unblocked by the kill that ended cmd.
+		// writeDone is buffered (cap 1) and the writer always sends — by now
+		// the prompt write has either succeeded, hit a broken pipe, or been
+		// unblocked by the kill that ended the process.
+		turn.controlWrites.Wait()
 		writeErr := <-writeDone
-		controlWrites.Wait()
 		if writeErr == nil {
 			select {
-			case writeErr = <-controlErrors:
+			case writeErr = <-turn.controlErrors:
 			default:
 			}
 		}
@@ -453,6 +263,36 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		if supplements != nil && writeErr != nil && ctx.Err() == nil && terminalReasonError == "" && !errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 			terminalReasonError = fmt.Sprintf("claude input/control protocol failed: %v", writeErr)
 		}
+
+		proc.clearTaskEnv()
+
+		scanErr, exitErr := proc.getErrors()
+		parked := proc.pooled &&
+			sawResult &&
+			!resultIsError &&
+			terminalReasonError == "" &&
+			!sawAsyncLaunch &&
+			!cancelledOrTimedOut &&
+			writeErr == nil &&
+			scanErr == nil &&
+			runCtx.Err() == nil &&
+			sessionID != "" &&
+			proc.Alive()
+		if parked {
+			proc.sessionID = sessionID
+			if len(lastRawModelUsage) > 0 {
+				proc.lastCumulativeModelUsage = lastRawModelUsage
+			}
+			b.cfg.WarmPool.Park("claude", sessionID, proc)
+		} else {
+			// A pooled CLI still waiting for its next user frame exits on this
+			// stdin EOF instead of blocking for the error result grace window.
+			// A one-shot process has already exited; this releases its temp files.
+			proc.Close()
+			scanErr, exitErr = proc.getErrors()
+		}
+
+		duration := time.Since(startTime)
 
 		if !sawResult && usageSnapshot != nil {
 			appendedUsage, found, snapshotErr := usageSnapshot.appendedCostStateUsage()
@@ -486,12 +326,11 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			completionGuardError,
 		)
 
-		// cmd.Wait() has returned — os/exec's stderr copy goroutine has
-		// observed every byte claude wrote to stderr before exiting, so
-		// stderrBuf.Tail() is safe to sample now. Attach the tail to any
-		// non-empty failure message; callers upstream surface this as the
-		// task's error field, which is the only place users see it.
-		stderrTail := stderrBuf.Tail()
+		// Attach the stderr tail to any non-empty failure message; callers
+		// upstream surface this as the task's error field, which is the only
+		// place users see it. A process that exited has been reaped, so
+		// os/exec's stderr copy goroutine has observed every byte.
+		stderrTail := proc.stderrBuf.Tail()
 		if finalError != "" {
 			finalError = withAgentStderr(finalError, "claude", stderrTail)
 		}
@@ -513,7 +352,13 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			anthropicBaseURLConfigured: strings.TrimSpace(b.cfg.Env["ANTHROPIC_BASE_URL"]) != "",
 		})
 
-		b.cfg.Logger.Info("claude finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info("claude finished",
+			"pid", proc.cmd.Process.Pid,
+			"warm_hit", warmHit,
+			"parked", parked,
+			"status", finalStatus,
+			"duration", duration.Round(time.Millisecond).String(),
+		)
 
 		// The account-binding 400 arrives in the result event (finalError);
 		// "no conversation found" is printed to stderr. Check both.
@@ -552,15 +397,231 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	return session, nil
 }
 
+// claudeTurn is one turn's stream state. The process's stdout reader feeds it
+// events; Execute's lifecycle goroutine reads the outcome once the turn ends.
+type claudeTurn struct {
+	backend                  *claudeBackend
+	proc                     *claudeProcess
+	cancel                   context.CancelFunc
+	opts                     ExecOptions
+	msgCh                    chan Message
+	coalescer                *claudeStreamCoalescer
+	supplements              *claudeSupplementSession
+	initializer              *claudeSupplementSession
+	usageSnapshot            *claudeUsageSnapshot
+	baselineUsage            map[string]TokenUsage
+	rateLimits               *rateLimitTracker
+	controlWrites            sync.WaitGroup
+	controlErrors            chan error
+	resultCh                 chan struct{}
+	resultOnce               sync.Once
+	stopAfterErrorResultOnce sync.Once
+
+	controlMu       sync.Mutex
+	pendingControls int
+	closeRequested  bool
+
+	mu                       sync.Mutex
+	lastAssistantText        string
+	finalResultText          string
+	sawResult                bool
+	resultIsError            bool
+	terminalReasonError      string
+	sessionID                string
+	lastUsageResult          *claudeSDKMessage
+	lastRawModelUsage        map[string]TokenUsage
+	sawAsyncLaunch           bool
+	usage                    map[string]TokenUsage
+	seenUsage                map[string]struct{}
+	eventCount               int
+	invalidEventCount        int
+	assistantEventCount      int
+	toolUseCount             int
+	unreadableAssistantCount int
+}
+
+func (t *claudeTurn) handleMessage(msg claudeSDKMessage) {
+	t.mu.Lock()
+	t.eventCount++
+	switch msg.Type {
+	case "stream_event":
+		if msg.ParentToolUseID == "" {
+			t.coalescer.handleEvent(msg.Event)
+		}
+		t.mu.Unlock()
+	case "assistant":
+		t.assistantEventCount++
+		turn := t.backend.handleAssistantWithStream(msg, t.msgCh, t.usage, t.seenUsage, t.coalescer)
+		t.toolUseCount += turn.toolUses
+		if !turn.understood {
+			t.unreadableAssistantCount++
+		}
+		t.lastAssistantText = turn.resolveFallback(t.lastAssistantText)
+		t.mu.Unlock()
+	case "user":
+		t.coalescer.flushAll()
+		if t.backend.handleUser(msg, t.msgCh) {
+			t.sawAsyncLaunch = true
+		}
+		t.mu.Unlock()
+	case "rate_limit_event":
+		rl := t.rateLimits
+		t.mu.Unlock()
+		if update, ok := parseClaudeRateLimitEvent(msg.RateLimitInfo); ok {
+			rl.apply(update)
+		}
+	case "system":
+		if msg.SessionID != "" {
+			t.sessionID = msg.SessionID
+		}
+		sid := t.sessionID
+		t.mu.Unlock()
+		trySend(t.msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sid})
+	case "result":
+		t.coalescer.flushAll()
+		t.sawResult = true
+		t.finalResultText = msg.ResultText
+		t.resultIsError = msg.IsError
+		t.terminalReasonError = claudeTerminalReasonFailure(msg.TerminalReason, msg.ResultText)
+		if msg.SessionID != "" {
+			t.sessionID = msg.SessionID
+		}
+		if len(msg.ModelUsage) > 0 {
+			t.lastRawModelUsage = claudeModelUsage(msg.ModelUsage)
+		}
+		// A resume whose baseline capture failed cannot trust the result's
+		// modelUsage: newer Claude Code restores the session's cumulative
+		// counters on resume, so the reported total may span every prior task
+		// (GH #9564), and without a baseline there is no way to verify it is
+		// per-run. Keep the stream-derived per-run usage in that case; the
+		// reported totals are recorded in lastUsageResult only for the
+		// resume-rejected recapture, where the run is known to have started a
+		// fresh session whose totals are its own.
+		unverifiableBaseline := t.usageSnapshot == nil && t.baselineUsage == nil && t.opts.ResumeSessionID != ""
+		baseline := t.baselineUsage
+		if baseline == nil && t.usageSnapshot != nil {
+			baseline = t.usageSnapshot.baseline
+		}
+		if resultUsage, authoritative := claudeResultUsageSince(msg, t.opts.Model, baseline); authoritative {
+			usageMsg := msg
+			t.lastUsageResult = &usageMsg
+			if !unverifiableBaseline {
+				t.usage = resultUsage
+			}
+		}
+		failed := t.resultIsError || t.terminalReasonError != ""
+		t.mu.Unlock()
+		t.resultOnce.Do(func() { close(t.resultCh) })
+		if !t.proc.pooled {
+			// Keep draining stdout while accepted control replies finish
+			// writing. Once those replies drain, stdin closes; requests
+			// arriving after that cannot be answered.
+			t.closeInputAfterControls()
+			if failed {
+				t.stopAfterErrorResultOnce.Do(func() { go t.proc.stopAfterErrorResult() })
+			}
+		}
+	case "log":
+		t.mu.Unlock()
+		if msg.Log != nil {
+			trySend(t.msgCh, Message{
+				Type:    MessageLog,
+				Level:   msg.Log.Level,
+				Content: msg.Log.Message,
+			})
+		}
+	case "control_request":
+		supplements := t.supplements
+		t.mu.Unlock()
+		var reply func(io.Writer) error
+		if supplements != nil {
+			reply, _ = supplements.prepareHook(msg)
+		}
+		t.controlMu.Lock()
+		t.pendingControls++
+		t.controlMu.Unlock()
+		t.controlWrites.Add(1)
+		go func(msg claudeSDKMessage, reply func(io.Writer) error) {
+			defer t.controlWrites.Done()
+			defer t.controlReplied()
+			if reply == nil {
+				t.backend.handleControlRequest(msg, t.proc.inputWriter)
+				return
+			}
+			if err := reply(t.proc.inputWriter); err != nil {
+				select {
+				case t.controlErrors <- err:
+				default:
+				}
+				t.cancel()
+			}
+		}(msg, reply)
+	case "control_response":
+		init := t.initializer
+		t.mu.Unlock()
+		if init != nil {
+			init.handleResponse(msg.Response)
+		}
+	default:
+		t.mu.Unlock()
+	}
+}
+
+func (t *claudeTurn) noteInvalidEvent() {
+	t.mu.Lock()
+	t.invalidEventCount++
+	t.mu.Unlock()
+}
+
+func (t *claudeTurn) endInitializer() {
+	if t.initializer != nil {
+		t.initializer.end()
+	}
+}
+
+// closeInput EOFs the process's stdin and ends the initializer so a handshake
+// still waiting for its reply gives up.
+func (t *claudeTurn) closeInput() {
+	t.proc.closeStdin()
+	t.endInitializer()
+}
+
+func (t *claudeTurn) closeInputAfterControls() {
+	t.endInitializer()
+	t.controlMu.Lock()
+	defer t.controlMu.Unlock()
+	t.closeRequested = true
+	if t.pendingControls == 0 {
+		t.closeInput()
+	}
+}
+
+func (t *claudeTurn) controlReplied() {
+	t.controlMu.Lock()
+	defer t.controlMu.Unlock()
+	t.pendingControls--
+	if t.closeRequested && t.pendingControls == 0 {
+		t.closeInput()
+	}
+}
+
 func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, usage map[string]TokenUsage, seenUsage map[string]struct{}) assistantTurn {
+	return b.handleAssistantWithStream(msg, ch, usage, seenUsage, nil)
+}
+
+func (b *claudeBackend) handleAssistantWithStream(msg claudeSDKMessage, ch chan<- Message, usage map[string]TokenUsage, seenUsage map[string]struct{}, coalescer *claudeStreamCoalescer) assistantTurn {
 	var content claudeMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
 		// Unreadable body: understood stays false so the caller drops any
 		// fallback rather than let an older turn stand in for this one.
 		return assistantTurn{}
 	}
+	if coalescer != nil && msg.ParentToolUseID == "" {
+		coalescer.flushAll()
+	}
 	turn := assistantTurn{understood: true}
 	var assistantText strings.Builder
+	var assistantThinking strings.Builder
 	toolUseCount := 0
 
 	// A response can emit several assistant blocks with the same message ID
@@ -589,11 +650,16 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 		case "text":
 			if block.Text != "" {
 				assistantText.WriteString(block.Text)
-				trySend(ch, Message{Type: MessageText, Content: block.Text})
+				if coalescer == nil || msg.ParentToolUseID != "" || !coalescer.hasStreamedText() {
+					trySend(ch, Message{Type: MessageText, Content: block.Text})
+				}
 			}
 		case "thinking":
 			if block.Thinking != "" {
-				trySend(ch, Message{Type: MessageThinking, Content: block.Thinking})
+				assistantThinking.WriteString(block.Thinking)
+				if coalescer == nil || msg.ParentToolUseID != "" || !coalescer.hasStreamedThinking() {
+					trySend(ch, Message{Type: MessageThinking, Content: block.Thinking})
+				}
 			}
 		case "tool_use":
 			toolUseCount++
@@ -615,9 +681,174 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 			turn.understood = false
 		}
 	}
+	if coalescer != nil && msg.ParentToolUseID == "" {
+		coalescer.reconcileAssistant(assistantText.String(), assistantThinking.String())
+	}
 	turn.text = assistantText.String()
 	turn.toolUses = toolUseCount
 	return turn
+}
+
+const (
+	claudeStreamFlushInterval  = 50 * time.Millisecond
+	claudeStreamAggregateBytes = agentStreamMaxLineBytes / 64
+)
+
+// claudeStreamCoalescer handles Anthropic SSE `stream_event` envelopes emitted
+// by `claude --include-partial-messages`, delivering the leading delta
+// immediately and coalescing subsequent tokens at claudeStreamFlushInterval.
+// When the matching `assistant` snapshot arrives, reconcileAssistant emits any
+// trailing suffix not already delivered and resets per-message state so zero
+// text is duplicated or dropped.
+type claudeStreamCoalescer struct {
+	ch  chan<- Message
+	now func() time.Time
+
+	streamedText     bool
+	deliveredText    strings.Builder
+	pendingText      strings.Builder
+	lastTextFlush    time.Time
+	streamedThinking bool
+	deliveredThink   strings.Builder
+	pendingThink     strings.Builder
+	lastThinkFlush   time.Time
+}
+
+func newClaudeStreamCoalescer(ch chan<- Message, now func() time.Time) *claudeStreamCoalescer {
+	if now == nil {
+		now = time.Now
+	}
+	return &claudeStreamCoalescer{ch: ch, now: now}
+}
+
+func (c *claudeStreamCoalescer) hasStreamedText() bool {
+	return c != nil && c.streamedText
+}
+
+func (c *claudeStreamCoalescer) hasStreamedThinking() bool {
+	return c != nil && c.streamedThinking
+}
+
+func (c *claudeStreamCoalescer) handleEvent(raw json.RawMessage) {
+	if c == nil || len(raw) == 0 {
+		return
+	}
+	var env struct {
+		Type  string `json:"type"`
+		Delta struct {
+			Type     string `json:"type"`
+			Text     string `json:"text"`
+			Thinking string `json:"thinking"`
+		} `json:"delta"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return
+	}
+	switch env.Type {
+	case "message_start":
+		c.flushAll()
+		c.resetMessage()
+	case "content_block_delta":
+		switch env.Delta.Type {
+		case "text_delta":
+			if env.Delta.Text != "" {
+				c.appendText(env.Delta.Text)
+			}
+		case "thinking_delta":
+			if env.Delta.Thinking != "" {
+				c.appendThinking(env.Delta.Thinking)
+			}
+		}
+	case "content_block_stop", "message_stop":
+		c.flushAll()
+	}
+}
+
+func (c *claudeStreamCoalescer) appendText(delta string) {
+	firstDelta := !c.streamedText && c.pendingText.Len() == 0
+	c.streamedText = true
+	c.pendingText.WriteString(delta)
+	now := c.now()
+	if firstDelta || c.pendingText.Len() >= claudeStreamAggregateBytes || (!c.lastTextFlush.IsZero() && now.Sub(c.lastTextFlush) >= claudeStreamFlushInterval) {
+		c.flushText(now)
+	}
+}
+
+func (c *claudeStreamCoalescer) appendThinking(delta string) {
+	firstDelta := !c.streamedThinking && c.pendingThink.Len() == 0
+	c.streamedThinking = true
+	c.pendingThink.WriteString(delta)
+	now := c.now()
+	if firstDelta || c.pendingThink.Len() >= claudeStreamAggregateBytes || (!c.lastThinkFlush.IsZero() && now.Sub(c.lastThinkFlush) >= claudeStreamFlushInterval) {
+		c.flushThinking(now)
+	}
+}
+
+func (c *claudeStreamCoalescer) flushText(now time.Time) {
+	if c.pendingText.Len() == 0 {
+		return
+	}
+	chunk := c.pendingText.String()
+	if trySend(c.ch, Message{Type: MessageText, Content: chunk}) {
+		c.deliveredText.WriteString(chunk)
+		c.pendingText.Reset()
+		c.lastTextFlush = now
+	}
+}
+
+func (c *claudeStreamCoalescer) flushThinking(now time.Time) {
+	if c.pendingThink.Len() == 0 {
+		return
+	}
+	chunk := c.pendingThink.String()
+	if trySend(c.ch, Message{Type: MessageThinking, Content: chunk}) {
+		c.deliveredThink.WriteString(chunk)
+		c.pendingThink.Reset()
+		c.lastThinkFlush = now
+	}
+}
+
+func (c *claudeStreamCoalescer) flushAll() {
+	if c == nil {
+		return
+	}
+	now := c.now()
+	c.flushText(now)
+	c.flushThinking(now)
+}
+
+func (c *claudeStreamCoalescer) reconcileAssistant(fullText, fullThinking string) {
+	if c == nil {
+		return
+	}
+	if c.streamedText && fullText != "" {
+		delivered := c.deliveredText.String()
+		if len(fullText) > len(delivered) && strings.HasPrefix(fullText, delivered) {
+			if tail := fullText[len(delivered):]; tail != "" {
+				trySend(c.ch, Message{Type: MessageText, Content: tail})
+			}
+		}
+	}
+	if c.streamedThinking && fullThinking != "" {
+		delivered := c.deliveredThink.String()
+		if len(fullThinking) > len(delivered) && strings.HasPrefix(fullThinking, delivered) {
+			if tail := fullThinking[len(delivered):]; tail != "" {
+				trySend(c.ch, Message{Type: MessageThinking, Content: tail})
+			}
+		}
+	}
+	c.resetMessage()
+}
+
+func (c *claudeStreamCoalescer) resetMessage() {
+	c.streamedText = false
+	c.deliveredText.Reset()
+	c.pendingText.Reset()
+	c.lastTextFlush = time.Time{}
+	c.streamedThinking = false
+	c.deliveredThink.Reset()
+	c.pendingThink.Reset()
+	c.lastThinkFlush = time.Time{}
 }
 
 func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) bool {
@@ -761,6 +992,9 @@ type claudeSDKMessage struct {
 
 	// rate_limit_event fields
 	RateLimitInfo json.RawMessage `json:"rate_limit_info,omitempty"`
+
+	// stream_event fields (--include-partial-messages)
+	Event json.RawMessage `json:"event,omitempty"`
 
 	// control request fields
 	RequestID string          `json:"request_id,omitempty"`
@@ -983,14 +1217,14 @@ func ClaudeConfigDir(extraEnv map[string]string, cwd string) (string, error) {
 }
 
 func claudeConfigDir(env []string, cwd string) (string, error) {
-	if value, ok := lastClaudeEnvValue(env, "CLAUDE_CONFIG_DIR"); ok && value != "" {
+	if value, ok := lastAgentEnvValue(env, "CLAUDE_CONFIG_DIR"); ok && value != "" {
 		return resolveClaudeConfigPath(value, cwd)
 	}
 	if runtime.GOOS == "windows" {
-		if value, ok := lastClaudeEnvValue(env, "USERPROFILE"); ok && value != "" {
+		if value, ok := lastAgentEnvValue(env, "USERPROFILE"); ok && value != "" {
 			return resolveClaudeConfigPath(filepath.Join(value, ".claude"), cwd)
 		}
-	} else if value, ok := lastClaudeEnvValue(env, "HOME"); ok && value != "" {
+	} else if value, ok := lastAgentEnvValue(env, "HOME"); ok && value != "" {
 		return resolveClaudeConfigPath(filepath.Join(value, ".claude"), cwd)
 	}
 	home, err := os.UserHomeDir()
@@ -1021,7 +1255,7 @@ func resolveClaudeConfigPath(path, cwd string) (string, error) {
 	return absolutePath, nil
 }
 
-func lastClaudeEnvValue(env []string, key string) (string, bool) {
+func lastAgentEnvValue(env []string, key string) (string, bool) {
 	for i := len(env) - 1; i >= 0; i-- {
 		name, value, ok := strings.Cut(env[i], "=")
 		matches := name == key
@@ -1164,11 +1398,12 @@ func trySend(ch chan<- Message, msg Message) bool {
 // overridden by user-configured custom_args. Overriding these would break
 // the daemon↔Claude communication protocol.
 var claudeBlockedArgs = map[string]blockedArgMode{
-	"-p":                blockedStandalone, // non-interactive mode
-	"--output-format":   blockedWithValue,  // stream-json protocol
-	"--input-format":    blockedWithValue,  // stream-json protocol
-	"--permission-mode": blockedWithValue,  // bypassPermissions for autonomous operation
-	"--mcp-config":      blockedWithValue,  // set by daemon from agent.mcp_config
+	"-p":                         blockedStandalone, // non-interactive mode
+	"--output-format":            blockedWithValue,  // stream-json protocol
+	"--input-format":             blockedWithValue,  // stream-json protocol
+	"--include-partial-messages": blockedStandalone, // incremental stream_event deltas
+	"--permission-mode":          blockedWithValue,  // bypassPermissions for autonomous operation
+	"--mcp-config":               blockedWithValue,  // set by daemon from agent.mcp_config
 	// `--effort` is owned by the per-agent thinking_level picker so a
 	// user-supplied custom_arg cannot silently outvote it. The daemon
 	// injects --effort only when opts.ThinkingLevel is set; if a user
@@ -1184,6 +1419,7 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
 		"--verbose",
+		"--include-partial-messages",
 		"--permission-mode", "bypassPermissions",
 		// AskUserQuestion is Claude Code's built-in interactive question tool.
 		// The daemon runs Claude in non-interactive stream-json mode and has

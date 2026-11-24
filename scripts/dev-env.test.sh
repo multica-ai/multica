@@ -19,6 +19,7 @@ fake_bin="$tmp_dir/bin"
 mkdir -p "$fake_bin"
 cat > "$fake_bin/psql" <<'EOF'
 #!/usr/bin/env bash
+[ -z "${PSQL_LOG:-}" ] || printf '%s\n' "$*" >> "$PSQL_LOG"
 case " $* " in
   *" DROP DATABASE "*) [ "${FAIL_DROP:-0}" != 1 ] ;;
   *) printf '1\n' ;;
@@ -185,6 +186,7 @@ assert_component_state() {
     mkdir -p "$STATE_DIR"
     BACKEND_PORT=18080
     FRONTEND_PORT=13000
+    COLLAB_PORT=14000
     TEST_LISTENER=$listener
     TEST_COMMIT=$reported_commit
     TEST_PROBE_OK=$probe_ok
@@ -315,6 +317,140 @@ assert_start_api() {
   )
 }
 
+# The same current api as above, with `components` selected and collab's
+# listener running or not. `recorded` is the collab URL the api was launched
+# with ("-" for an api started before collab existed).
+assert_start_api_collab() {
+  local case_name=$1 components=$2 collab_running=$3 recorded=$4 expected_output=$5
+  local expected_events=$6 expected_recorded=$7
+  (
+    # shellcheck disable=SC1090
+    source "$root_dir/scripts/dev-env.sh"
+    STATE_DIR="$tmp_dir/start-api-collab-$case_name"
+    LOG_DIR="$STATE_DIR"
+    mkdir -p "$STATE_DIR"
+    BACKEND_PORT=18080
+    COLLAB_PORT=14000
+    COMPONENTS="$components"
+    ENV_FILE=.env.example
+    COLLAB_SECRET=test-secret
+    local events="$STATE_DIR/events"
+    : > "$events"
+    printf '100\n' > "$(pid_file api)"
+    printf '100 fp-now\n' > "$(api_build_file)"
+    [ "$recorded" = - ] || printf '%s\n' "$recorded" > "$(api_collab_file)"
+    TEST_COLLAB_RUNNING=$collab_running
+
+    eval "original_$(declare -f listener_belongs_to_component)"
+    listener_belongs_to_component() {
+      if [ "$1" = collab ]; then [ "$TEST_COLLAB_RUNNING" = 1 ]; else original_listener_belongs_to_component "$@"; fi
+    }
+    component_pid() { cat "$(pid_file api)"; }
+    port_listener_pid() { printf '200'; }
+    port_free() { :; }
+    process_group_id() { [ "$1" = 200 ] && component_pid api || printf '%s' "$1"; }
+    process_parent_id() { printf '1'; }
+    checkout_commit() { printf 'bbb2222'; }
+    api_source_fingerprint() { printf 'fp-now'; }
+    health_json() {
+      printf '{"pid":200,"commit":"bbb2222","started_at":"2026-01-01T00:00:00Z"}'
+    }
+    now_epoch() { printf '1000'; }
+    sleep() { :; }
+    stop_component() { printf 'stop %s\n' "$1" >> "$events"; }
+    launch_detached() {
+      local arg wiring=""
+      for arg in "$@"; do
+        case "$arg" in COLLAB_INTERNAL_URL=*) wiring="$arg" ;; esac
+      done
+      printf 'launch %s %s\n' "$1" "$wiring" >> "$events"
+      printf '101\n' > "$(pid_file api)"
+    }
+
+    local status=0
+    ( start_api ) > "$out" 2>&1 || status=$?
+    [ "$status" = 0 ] \
+      || { sed 's/^/  /' "$out" >&2; fail "$case_name start_api exited $status"; }
+    require_contains "$out" "$expected_output"
+    [ "$(cat "$events")" = "$expected_events" ] \
+      || fail "$case_name events = $(cat "$events"), want $expected_events"
+    [ "$(cat "$(api_collab_file)" 2>/dev/null)" = "$expected_recorded" ] \
+      || fail "$case_name recorded collab URL = '$(cat "$(api_collab_file)" 2>/dev/null)', want '$expected_recorded'"
+  )
+}
+
+# The generated secret is created once, private, and reused; one set in the env
+# file wins over it.
+assert_collab_secret() (
+  # shellcheck disable=SC1090
+  source "$root_dir/scripts/dev-env.sh"
+  STATE_DIR="$tmp_dir/collab-secret"
+  mkdir -p "$STATE_DIR"
+  unset COLLAB_SECRET
+  local first second
+  first="$(collab_secret)"
+  second="$(collab_secret)"
+  [ "${#first}" = 64 ] || fail "generated collab secret has ${#first} characters, want 64"
+  [ "$first" = "$second" ] || fail "collab secret changed between calls"
+  case "$(ls -l "$STATE_DIR/collab.secret")" in
+    -rw-------*) ;;
+    *) fail "collab secret file is readable by others: $(ls -l "$STATE_DIR/collab.secret")" ;;
+  esac
+  [ "$(COLLAB_SECRET=from-env-file collab_secret)" = from-env-file ] \
+    || fail "a COLLAB_SECRET from the env file did not win"
+)
+
+# Launcher 100 owns listener 200; listener 999 is someone else's ("" for a free
+# port). /health answers when `healthy` is 1.
+assert_start_collab() {
+  local case_name=$1 listener=$2 healthy=$3 expected_status=$4
+  local expected_output=$5 expected_events=$6
+  (
+    # shellcheck disable=SC1090
+    source "$root_dir/scripts/dev-env.sh"
+    STATE_DIR="$tmp_dir/start-collab-$case_name"
+    LOG_DIR="$STATE_DIR"
+    mkdir -p "$STATE_DIR"
+    BACKEND_PORT=18080
+    COLLAB_PORT=14000
+    ENV_FILE=.env.example
+    COLLAB_SECRET=test-secret
+    local events="$STATE_DIR/events"
+    printf '%s' "$listener" > "$STATE_DIR/listener"
+    printf '%s' "$healthy" > "$STATE_DIR/healthy"
+    : > "$events"
+
+    component_pid() { printf '100'; }
+    port_listener_pid() { cat "$STATE_DIR/listener"; }
+    port_free() { [ -z "$(port_listener_pid)" ]; }
+    process_group_id() { [ "$1" = 200 ] && printf '100' || printf '%s' "$1"; }
+    process_parent_id() { printf '1'; }
+    describe_port_owner() { printf 'pid %s' "$(port_listener_pid "$1")"; }
+    collab_healthy() { [ "$(cat "$STATE_DIR/healthy")" = 1 ]; }
+    collab_cdn_domain() { printf 'localhost'; }
+    sleep() { :; }
+    stop_component() { printf 'stop %s\n' "$1" >> "$events"; : > "$STATE_DIR/listener"; }
+    launch_detached() {
+      local arg wiring=""
+      for arg in "$@"; do
+        case "$arg" in COLLAB_PORT=*|MULTICA_API_URL=*) wiring="$wiring $arg" ;; esac
+      done
+      printf 'launch %s%s\n' "$1" "$wiring" >> "$events"
+      printf '100\n' > "$(pid_file collab)"
+      printf '200' > "$STATE_DIR/listener"
+      printf '1' > "$STATE_DIR/healthy"
+    }
+
+    local status=0
+    ( start_collab ) > "$out" 2>&1 || status=$?
+    [ "$status" = "$expected_status" ] \
+      || { sed 's/^/  /' "$out" >&2; fail "$case_name start_collab exited $status, want $expected_status"; }
+    require_contains "$out" "$expected_output"
+    [ "$(cat "$events")" = "$expected_events" ] \
+      || fail "$case_name events = $(cat "$events"), want $expected_events"
+  )
+}
+
 # The fingerprint follows server/'s uncommitted state in a real repository:
 # tracked edits, staged edits and untracked files count, ignored files and
 # changes outside server/ do not, and undoing an edit restores it.
@@ -428,7 +564,9 @@ node -e '
   if (payload.backend_port !== 18981) throw new Error("backend_port = " + payload.backend_port);
   if (payload.desktop_cdp_port !== null) throw new Error("desktop_cdp_port = " + payload.desktop_cdp_port);
   if (payload.workspace_slug !== "dev") throw new Error("workspace_slug = " + payload.workspace_slug);
-  for (const key of ["api", "web", "daemon", "desktop"]) {
+  // Manifests written before collab existed derive its port from the offset.
+  if (payload.collab_port !== 14901) throw new Error("collab_port = " + payload.collab_port);
+  for (const key of ["api", "collab", "web", "daemon", "desktop"]) {
     if (!payload.components[key]) throw new Error("missing component " + key);
     if (payload.components[key].state !== "stopped") {
       throw new Error(key + " state = " + payload.components[key].state);
@@ -544,6 +682,38 @@ assert_start_api unchanged bbb2222 "100 fp-now" "api already running on :18080 (
 assert_start_api dirty bbb2222 "100 fp-old" "was compiled before server/ changed (uncommitted changes differ); restarting it" $'stop api\nlaunch api' "101 fp-now"
 assert_start_api unrecorded bbb2222 - "has no recorded source fingerprint" $'stop api\nlaunch api' "101 fp-now"
 assert_start_api old-commit aaa1111 "100 fp-now" "is ours but not commit bbb2222; restarting it" $'stop api\nlaunch api' "101 fp-now"
+
+# The api is wired to collab only when collab is selected or already running,
+# so a doc page never waits on a collab that is not there, and `make up`
+# restarts an api whose wiring no longer matches.
+assert_start_api_collab selected-new "api collab web" 0 - \
+  "is not connected to collab on :14000; restarting it" \
+  $'stop api\nlaunch api COLLAB_INTERNAL_URL=http://localhost:14000' "http://localhost:14000"
+assert_start_api_collab selected-wired "api collab web" 0 "http://localhost:14000" \
+  "api already running on :18080" "" "http://localhost:14000"
+assert_start_api_collab running-unselected "api web" 1 "" \
+  "is not connected to collab on :14000; restarting it" \
+  $'stop api\nlaunch api COLLAB_INTERNAL_URL=http://localhost:14000' "http://localhost:14000"
+assert_start_api_collab gone "api web" 0 "http://localhost:14000" \
+  "points at a collab service that is not running; restarting it" \
+  $'stop api\nlaunch api COLLAB_INTERNAL_URL=' ""
+assert_start_api_collab never-wired "api web" 0 - \
+  "api already running on :18080" "" ""
+
+stopped_in="$(bash -c 'source "$1"; stop_order api collab web daemon' _ "$root_dir/scripts/dev-env.sh")"
+[ "$stopped_in" = "collab api web daemon " ] \
+  || fail "down must stop collab before the api it saves docs through, got: $stopped_in"
+
+assert_collab_secret
+assert_start_collab running 200 1 0 "collab already running on :14000 (pid 200)" ""
+assert_start_collab hung 200 0 0 "is ours but not answering /health; restarting it" \
+  $'stop collab\nlaunch collab COLLAB_PORT=14000 MULTICA_API_URL=http://localhost:18080'
+assert_start_collab fresh "" 1 0 "collab serving ws://localhost:14000 (pid 200)" \
+  $'launch collab COLLAB_PORT=14000 MULTICA_API_URL=http://localhost:18080'
+assert_start_collab foreign 999 1 1 "Port 14000 is busy: pid 999" ""
+assert_component_state collab-running collab 200 - 1 running "pid 200"
+assert_component_state collab-busy collab 200 - 0 busy "not answering /health"
+assert_component_state collab-foreign collab 999 - 1 mismatch "listener pid 999 is not owned"
 
 # ---------------------------------------------------------------------------
 # Daemon: `daemon start` is a no-op while one is running, so `make up` has to
@@ -728,7 +898,7 @@ status=0
 (
   # shellcheck disable=SC1090
   source "$root_dir/scripts/dev-env.sh"
-  BACKEND_PORT=18080 MULTICA_BIN="$fake_checkout/server/bin/multica" DIR="$fake_checkout"
+  OFFSET=0 BACKEND_PORT=18080 MULTICA_BIN="$fake_checkout/server/bin/multica" DIR="$fake_checkout"
   stop_desktop_daemon
 ) > "$out" 2>&1 || status=$?
 [ "$status" -ne 0 ] || fail "stop_desktop_daemon trusted a stop that left the daemon running"
@@ -749,6 +919,236 @@ dev_env destroy desktop-profile-906 --yes > "$out" 2>&1 \
   || { sed 's/^/  /' "$out" >&2; fail "retrying destroy after the daemon could be stopped failed"; }
 ! kill -0 "$desktop_daemon" 2>/dev/null || fail "Desktop's daemon is still running after destroy"
 [ ! -d "$desktop_profile_dir" ] || fail "destroy left Desktop's CLI profile behind"
+
+# ---------------------------------------------------------------------------
+# A slot is one backend port and one database name derived from its offset.
+# `make` exports PORT=8080, POSTGRES_DB=multica and their DATABASE_URL before
+# this script runs, so an env file that lacks those keys used to register the
+# shared backend and database, and destroy then dropped `multica`.
+# ---------------------------------------------------------------------------
+assert_slot_identity() (
+  local expected=$1
+  shift
+  # shellcheck disable=SC1090
+  source "$root_dir/scripts/dev-env.sh"
+  local problem
+  problem="$(slot_identity_problem "$@")"
+  case "$expected" in
+    ok) [ -z "$problem" ] || fail "slot_identity_problem $* = '$problem', want none" ;;
+    *) case "$problem" in *"$expected"*) ;; *) fail "slot_identity_problem $* = '$problem', want '$expected'" ;; esac ;;
+  esac
+)
+slot_url() { printf 'postgres://multica:multica@localhost:5432/%s?sslmode=disable' "$1"; }
+assert_slot_identity ok 283 18363 multica_multica_283 "$(slot_url multica_multica_283)"
+assert_slot_identity ok 790 18870 multica_mul_8357_team_790 "$(slot_url multica_mul_8357_team_790)"
+assert_slot_identity ok 0 18080 multica_env_0 "$(slot_url multica_env_0)"
+assert_slot_identity "outside the slot range" -10000 8080 multica "$(slot_url multica)"
+assert_slot_identity "outside the slot range" 1920 20000 multica_x_1920 "$(slot_url multica_x_1920)"
+assert_slot_identity "not slot 283's port 18363" 283 8080 multica_multica_283 "$(slot_url multica_multica_283)"
+assert_slot_identity "database multica is not slot 283's" 283 18363 multica "$(slot_url multica)"
+assert_slot_identity "is not slot 5's" 5 18085 multica_foo_15 "$(slot_url multica_foo_15)"
+assert_slot_identity "DATABASE_URL points at database multica" 283 18363 multica_multica_283 "$(slot_url multica)"
+
+oneline_bin="$tmp_dir/oneline-bin"
+mkdir -p "$oneline_bin"
+cat > "$oneline_bin/go" <<'EOF'
+#!/usr/bin/env bash
+[ -z "${GO_ENV_LOG:-}" ] || env > "$GO_ENV_LOG"
+exit 1
+EOF
+chmod +x "$oneline_bin/go"
+
+# Runs `up` in a fresh checkout whose .env holds one flag (plus ONELINE_ENV),
+# with the values `make` exports. The stub `go` fails the migration, which comes
+# right after the environment is registered, so nothing is started; with
+# GO_ENV_LOG set it records the environment the api would have inherited.
+# ONELINE_WORKTREE=1 makes it a worktree with no env file, so `up` generates
+# .env.worktree the way a fresh worktree does.
+oneline_up() (
+  local checkout=$1
+  shift
+  rm -rf "$checkout"
+  mkdir -p "$checkout/scripts" "$checkout/server"
+  cp "$root_dir/scripts/dev-env.sh" "$root_dir/scripts/local-env.sh" "$checkout/scripts/"
+  if [ "${ONELINE_WORKTREE:-0}" = 1 ]; then
+    cp "$root_dir/scripts/init-worktree-env.sh" "$checkout/scripts/"
+    printf 'gitdir: %s/.git-dir\n' "$checkout" > "$checkout/.git"
+    cd "$checkout"
+  else
+    printf 'FF_DOCS_V1=true\n%s' "${ONELINE_ENV:-}" > "$checkout/.env"
+  fi
+  export MULTICA_DEV_HOME="$tmp_dir/dev-$(basename "$checkout")" MULTICA_DEV_TMPDIR="$tmp_dir/dev-tmp"
+  export PATH="$oneline_bin:$PATH"
+  export PORT=8080 FRONTEND_PORT=3000 FRONTEND_ORIGIN=http://localhost:3000 POSTGRES_DB=multica
+  export MULTICA_PUBLIC_URL=http://localhost:8080 LOCAL_UPLOAD_BASE_URL=http://localhost:8080 GOOGLE_REDIRECT_URI=http://localhost:3000/auth/callback
+  export DATABASE_URL="$(slot_url multica)"
+  for assignment in "$@"; do export "${assignment?}"; done
+  bash "$checkout/scripts/dev-env.sh" up --components api --ephemeral
+)
+
+oneline_checkout="$tmp_dir/oneline-checkout"
+oneline_env_log="$tmp_dir/oneline-go.env"
+status=0
+oneline_up "$oneline_checkout" GO_ENV_LOG="$oneline_env_log" > "$out" 2>&1 || status=$?
+[ "$status" -ne 0 ] && grep -Fq "Migrations failed" "$out" \
+  || { sed 's/^/  /' "$out" >&2; fail "up with a one-line .env did not register and reach the migration"; }
+(
+  # shellcheck disable=SC1090
+  . "$tmp_dir"/dev-oneline-checkout/envs/*/manifest.env
+  [ "$BACKEND_PORT" = $((18080 + OFFSET)) ] || fail "one-line .env registered backend $BACKEND_PORT for slot $OFFSET"
+  [ "$DB_NAME" = "multica_oneline_checkout_$OFFSET" ] || fail "one-line .env registered database $DB_NAME"
+  [ "$DATABASE_URL" = "$(slot_url "$DB_NAME")" ] || fail "one-line .env registered DATABASE_URL $DATABASE_URL"
+  for line in FF_DOCS_V1=true "PORT=$BACKEND_PORT" "FRONTEND_PORT=$FRONTEND_PORT" "POSTGRES_DB=$DB_NAME" \
+    "DATABASE_URL=$DATABASE_URL" "MULTICA_PUBLIC_URL=http://localhost:$BACKEND_PORT" \
+    "LOCAL_UPLOAD_BASE_URL=http://localhost:$BACKEND_PORT" \
+    "GOOGLE_REDIRECT_URI=http://localhost:$FRONTEND_PORT/auth/callback"; do
+    grep -Fqx "$line" "$oneline_checkout/.env" || fail "the rewritten .env lacks the line $line"
+  done
+  # `make` exported the :8080 and :3000 values before the slot existed; the run
+  # that allocates the slot must already hand the api the slot's URLs.
+  for line in "PORT=$BACKEND_PORT" "LOCAL_UPLOAD_BASE_URL=http://localhost:$BACKEND_PORT" \
+    "GOOGLE_REDIRECT_URI=http://localhost:$FRONTEND_PORT/auth/callback"; do
+    grep -Fqx "$line" "$oneline_env_log" || fail "the first up launched with $(grep "^${line%%=*}=" "$oneline_env_log"), want $line"
+  done
+  psql_log="$tmp_dir/psql-oneline.log"
+  MULTICA_DEV_HOME="$tmp_dir/dev-oneline-checkout" PSQL_LOG="$psql_log" \
+    bash "$oneline_checkout/scripts/dev-env.sh" destroy "$NAME" --yes > "$out" 2>&1 \
+    || { sed 's/^/  /' "$out" >&2; fail "destroying the one-line .env environment failed"; }
+  grep -Fq "DROP DATABASE IF EXISTS \"$DB_NAME\"" "$psql_log" || fail "destroy did not drop the slot database"
+)
+
+# An explicit TTL renewal must reuse this checkout even after its previous
+# expiry. The automatic collection of another checkout still takes place.
+renewal_checkout="$tmp_dir/renewal-checkout"
+status=0
+oneline_up "$renewal_checkout" > "$out" 2>&1 || status=$?
+[ "$status" -ne 0 ] || fail "renewal fixture unexpectedly started a backend"
+require_contains "$out" "Migrations failed"
+(
+  export MULTICA_DEV_HOME="$tmp_dir/dev-renewal-checkout"
+  export PATH="$oneline_bin:$PATH"
+  manifests=("$MULTICA_DEV_HOME"/envs/*/manifest.env)
+  manifest="${manifests[0]}"
+  # shellcheck disable=SC1090
+  . "$manifest"
+  expired=2000-01-01T00:00:00Z
+  printf 'EXPIRES_AT=%s\n' "$expired" >> "$manifest"
+  neighbor="expired-neighbor-$((OFFSET + 1))"
+  neighbor_checkout="$tmp_dir/expired-neighbor"
+  mkdir -p "$neighbor_checkout"
+  write_manifest "$neighbor" "$neighbor_checkout" "$((OFFSET + 1))"
+  printf 'TTL_HOURS=24\nEXPIRES_AT=%s\n' "$expired" >> "$MULTICA_DEV_HOME/envs/$neighbor/manifest.env"
+
+  cd "$renewal_checkout"
+  psql_log="$tmp_dir/psql-renewal.log"
+  status=0
+  PSQL_LOG="$psql_log" bash scripts/dev-env.sh up --components api --ttl 48 > "$out" 2>&1 || status=$?
+  [ "$status" -ne 0 ] || fail "renewal fixture unexpectedly started a backend"
+  require_contains "$out" "Migrations failed"
+  require_contains "$out" "Reusing environment $NAME"
+  if grep -Fq "DROP DATABASE IF EXISTS \"$DB_NAME\"" "$psql_log"; then
+    fail "renewing an expired environment dropped its database"
+  fi
+  [ ! -f "$MULTICA_DEV_HOME/envs/$neighbor/manifest.env" ] \
+    || fail "renewal prevented collecting another expired environment"
+  # shellcheck disable=SC1090
+  . "$manifest"
+  [ "$TTL_HOURS" = 48 ] && [ "$EXPIRES_AT" != "$expired" ] \
+    || fail "renewal did not update the recorded expiration"
+)
+
+# A setting the rewrite does not own can still win when the file is loaded
+# back; `up` must refuse rather than register the shared port.
+status=0
+oneline_up "$tmp_dir/override-checkout" BACKEND_PORT=8080 > "$out" 2>&1 || status=$?
+[ "$status" -ne 0 ] || fail "up registered an environment while BACKEND_PORT=8080 overrode the slot"
+require_contains "$out" "still resolves to: PORT=8080"
+if ls "$tmp_dir"/dev-override-checkout/envs/*/manifest.env >/dev/null 2>&1; then
+  fail "up wrote a manifest although the slot did not take effect"
+fi
+
+# A localhost upload or redirect URL follows the slot; one that names another
+# host is what someone configured, and stays as written like a ${...} line that
+# already resolves to the slot.
+assert_local_url() (
+  local label=$1 key=$2 env_lines=$3 shell_value=$4 want=$5 want_line=${6:-}
+  local checkout="$tmp_dir/local-url-$label" log="$tmp_dir/local-url-$label.env" backend frontend
+  local args=("GO_ENV_LOG=$log")
+  [ -z "$shell_value" ] || args+=("$key=$shell_value")
+  ONELINE_ENV="$env_lines" oneline_up "$checkout" "${args[@]}" > "$out" 2>&1 || true
+  grep -Fq "Migrations failed" "$out" || { sed 's/^/  /' "$out" >&2; fail "$label: up did not reach the migration"; }
+  # shellcheck disable=SC1090
+  backend="$(. "$tmp_dir/dev-local-url-$label"/envs/*/manifest.env && printf '%s' "$BACKEND_PORT")"
+  frontend=$((backend - 18080 + 13000))
+  want="${want//@BACKEND@/$backend}"
+  want="${want//@FRONTEND@/$frontend}"
+  grep -Fqx "$key=$want" "$log" || fail "$label: the api got $(grep "^$key=" "$log"), want $key=$want"
+  case "$want_line" in
+    "") ;;
+    -) ! grep -q "^$key=" "$checkout/.env" || fail "$label: up wrote $key into .env" ;;
+    *) grep -Fqx "$want_line" "$checkout/.env" || fail "$label: .env lost the line $want_line" ;;
+  esac
+)
+assert_local_url file-localhost LOCAL_UPLOAD_BASE_URL $'LOCAL_UPLOAD_BASE_URL=http://localhost:8080\n' "" \
+  "http://localhost:@BACKEND@"
+assert_local_url file-quoted-loopback LOCAL_UPLOAD_BASE_URL $'LOCAL_UPLOAD_BASE_URL="http://127.0.0.1:8080/"\n' "" \
+  "http://localhost:@BACKEND@"
+assert_local_url file-remote LOCAL_UPLOAD_BASE_URL $'LOCAL_UPLOAD_BASE_URL=https://files.example.test\n' "" \
+  "https://files.example.test" "LOCAL_UPLOAD_BASE_URL=https://files.example.test"
+assert_local_url file-localhost-path LOCAL_UPLOAD_BASE_URL $'LOCAL_UPLOAD_BASE_URL=http://localhost:9000/files\n' "" \
+  "http://localhost:9000/files" "LOCAL_UPLOAD_BASE_URL=http://localhost:9000/files"
+assert_local_url shell-remote LOCAL_UPLOAD_BASE_URL "" "https://cdn.example.test" "https://cdn.example.test" -
+# shellcheck disable=SC2016
+assert_local_url file-derived GOOGLE_REDIRECT_URI \
+  $'FRONTEND_ORIGIN=http://localhost:${FRONTEND_PORT}\nGOOGLE_REDIRECT_URI=${FRONTEND_ORIGIN}/auth/callback\n' "" \
+  "http://localhost:@FRONTEND@/auth/callback" 'GOOGLE_REDIRECT_URI=${FRONTEND_ORIGIN}/auth/callback'
+# FRONTEND_ORIGIN is appended below this line, so it still expands to make's :3000.
+# shellcheck disable=SC2016
+assert_local_url file-derived-early GOOGLE_REDIRECT_URI $'GOOGLE_REDIRECT_URI=${FRONTEND_ORIGIN}/auth/callback\n' "" \
+  "http://localhost:@FRONTEND@/auth/callback"
+
+# A fresh worktree's generated .env.worktree already names the slot, so `up`
+# adopts it without rewriting anything; make's :8080 upload URL must still go.
+worktree_checkout="$tmp_dir/worktree-checkout"
+worktree_env_log="$tmp_dir/worktree-go.env"
+ONELINE_WORKTREE=1 oneline_up "$worktree_checkout" GO_ENV_LOG="$worktree_env_log" > "$out" 2>&1 || true
+grep -Fq "Migrations failed" "$out" || { sed 's/^/  /' "$out" >&2; fail "worktree up did not reach the migration"; }
+[ -f "$worktree_checkout/.env.worktree" ] || fail "worktree up did not generate .env.worktree"
+(
+  # shellcheck disable=SC1090
+  . "$tmp_dir"/dev-worktree-checkout/envs/*/manifest.env
+  for line in "PORT=$BACKEND_PORT" "LOCAL_UPLOAD_BASE_URL=http://localhost:$BACKEND_PORT" \
+    "GOOGLE_REDIRECT_URI=http://localhost:$FRONTEND_PORT/auth/callback"; do
+    grep -Fqx "$line" "$worktree_env_log" \
+      || fail "the first worktree up launched with $(grep "^${line%%=*}=" "$worktree_env_log"), want $line"
+  done
+  grep -Fqx "LOCAL_UPLOAD_BASE_URL=http://localhost:$BACKEND_PORT" "$worktree_checkout/.env.worktree" \
+    || fail "the worktree .env.worktree does not pin LOCAL_UPLOAD_BASE_URL to the slot"
+)
+
+# A manifest that names the shared backend and database is never acted on:
+# destroy keeps `multica`, Desktop's 8080 profile and its daemon, and the
+# manifest so the leftover stays visible.
+write_manifest "poisoned-907" "$fake_checkout" 907
+printf 'BACKEND_PORT=8080\nDB_NAME=multica\nDATABASE_URL=%s\n' "$(slot_url multica)" \
+  >> "$MULTICA_DEV_HOME/envs/poisoned-907/manifest.env"
+shared_profile_dir="$MULTICA_DEV_PROFILES_HOME/desktop-localhost-8080"
+mkdir -p "$shared_profile_dir"
+shared_daemon="$(sleep 60 > /dev/null 2>&1 & printf '%s' "$!")"
+printf '%s\n' "$shared_daemon" > "$shared_profile_dir/daemon.pid"
+psql_log="$tmp_dir/psql-poisoned.log"
+status=0
+PSQL_LOG="$psql_log" dev_env destroy poisoned-907 --yes > "$out" 2>&1 || status=$?
+kill -0 "$shared_daemon" 2>/dev/null || fail "destroy stopped the daemon of Desktop's shared 8080 profile"
+kill "$shared_daemon" 2>/dev/null || true
+[ "$status" -ne 0 ] || fail "destroy reported success while refusing to drop the shared database"
+! grep -Fq "DROP DATABASE" "$psql_log" 2>/dev/null || fail "destroy dropped a database that is not the slot's: $(cat "$psql_log")"
+require_contains "$out" "refusing to drop database multica"
+require_contains "$out" "refusing to remove Desktop's CLI profile desktop-localhost-8080"
+require_contains "$out" "left Desktop's daemon for profile desktop-localhost-8080 alone"
+[ -d "$shared_profile_dir" ] || fail "destroy removed Desktop's shared 8080 profile"
+[ -f "$MULTICA_DEV_HOME/envs/poisoned-907/manifest.env" ] || fail "destroy discarded the poisoned manifest"
+rm -rf "$MULTICA_DEV_HOME/envs/poisoned-907" "$shared_profile_dir"
 
 # ---------------------------------------------------------------------------
 # Unknown names and components fail loudly instead of doing something else.
@@ -787,6 +1187,70 @@ FAIL_DROP=1 dev_env destroy drop-fails-904 --yes > "$out" 2>&1 || status=$?
   || fail "destroy discarded the manifest after DROP DATABASE failed"
 require_contains "$out" "manifest and slot were kept"
 dev_env destroy drop-fails-904 --yes > "$out" 2>&1 || fail "retrying destroy after database recovery failed"
+
+# ---------------------------------------------------------------------------
+# Without psql, `up` creates the database through the shared compose container,
+# so destroy has to drop it there too, or every destroy on such a machine leaks
+# its slot database.
+# ---------------------------------------------------------------------------
+no_psql_path=""
+IFS=: read -ra path_dirs <<< "$PATH"
+for dir in "${path_dirs[@]}"; do
+  [ "$dir" != "$fake_bin" ] || continue
+  if [ -e "$dir/psql" ]; then
+    shadow="$tmp_dir/no-psql/$(printf '%s' "$dir" | cksum | cut -d' ' -f1)"
+    mkdir -p "$shadow"
+    for exe in "$dir"/*; do [ "${exe##*/}" = psql ] || ln -sf "$exe" "$shadow/"; done
+    dir=$shadow
+  fi
+  no_psql_path="${no_psql_path:+$no_psql_path:}$dir"
+done
+docker_bin="$tmp_dir/docker-bin"
+mkdir -p "$docker_bin"
+cat > "$docker_bin/docker" <<'EOF'
+#!/usr/bin/env bash
+[ -z "${DOCKER_LOG:-}" ] || printf '%s\n' "$*" >> "$DOCKER_LOG"
+[ "${DOCKER_POSTGRES_UP:-1}" = 1 ] || { echo 'service "postgres" is not running' >&2; exit 1; }
+case " $* " in
+  *" exec -T postgres psql "*"DROP DATABASE "*) exit 0 ;;
+  *" exec -T postgres psql "*) printf '1\n' ;;
+  *) exit 1 ;;
+esac
+EOF
+chmod +x "$docker_bin/docker"
+no_psql_dev_env() {
+  PATH="$docker_bin:$no_psql_path" bash "$root_dir/scripts/dev-env.sh" "$@"
+}
+PATH="$docker_bin:$no_psql_path" command -v psql >/dev/null 2>&1 \
+  && fail "the no-psql PATH still resolves psql"
+
+docker_log="$tmp_dir/docker-no-psql.log"
+write_manifest "no-psql-908" "$root_dir" 908
+status=0
+DOCKER_POSTGRES_UP=0 DOCKER_LOG="$docker_log" no_psql_dev_env destroy no-psql-908 --yes > "$out" 2>&1 || status=$?
+[ "$status" -ne 0 ] || fail "destroy succeeded with neither psql nor the PostgreSQL container"
+require_contains "$out" "psql not found and the shared PostgreSQL container is not reachable"
+[ -f "$MULTICA_DEV_HOME/envs/no-psql-908/manifest.env" ] \
+  || fail "destroy discarded the manifest while the database was left in place"
+! grep -Fq "DROP DATABASE" "$docker_log" || fail "destroy tried to drop through a container that is not running"
+
+: > "$docker_log"
+DOCKER_LOG="$docker_log" no_psql_dev_env destroy no-psql-908 --yes > "$out" 2>&1 \
+  || { sed 's/^/  /' "$out" >&2; fail "destroy without psql did not drop the database through the container"; }
+grep -Fq "exec -T postgres psql -U multica -d postgres -v ON_ERROR_STOP=1 -c DROP DATABASE IF EXISTS \"multica_dev_env_test_908\" WITH (FORCE)" "$docker_log" \
+  || fail "destroy without psql did not drop the slot database in the container: $(cat "$docker_log")"
+[ ! -d "$MULTICA_DEV_HOME/envs/no-psql-908" ] || fail "destroy without psql kept the manifest after dropping the database"
+
+# The container only serves localhost:5432; a database elsewhere is not its to drop.
+write_manifest "no-psql-remote-909" "$root_dir" 909
+sed -i.bak 's#@localhost:5432/#@db.example.com:5432/#' "$MULTICA_DEV_HOME/envs/no-psql-remote-909/manifest.env"
+: > "$docker_log"
+status=0
+DOCKER_LOG="$docker_log" no_psql_dev_env destroy no-psql-remote-909 --yes > "$out" 2>&1 || status=$?
+[ "$status" -ne 0 ] || fail "destroy without psql reported success for a remote database"
+[ ! -s "$docker_log" ] || fail "destroy dropped a remote environment's database through the local container: $(cat "$docker_log")"
+[ -f "$MULTICA_DEV_HOME/envs/no-psql-remote-909/manifest.env" ] || fail "destroy discarded the remote environment's manifest"
+rm -rf "$MULTICA_DEV_HOME/envs/no-psql-remote-909"
 
 # ---------------------------------------------------------------------------
 # destroy consumes the manifest: the slot is free afterwards, which is what

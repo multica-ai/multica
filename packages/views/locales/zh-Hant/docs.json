@@ -48,7 +48,12 @@
     "conflict": "{{name}} 已更新文件。草稿已保留，重新載入後繼續編輯。",
     "reload": "載入最新版本",
     "draft": "保留的草稿",
-    "unsaved_changes": "未儲存的修改"
+    "unsaved_changes": "未儲存的修改",
+    "live": "即時協作",
+    "reconnecting": "正在重新連線...",
+    "connecting": "正在連線...",
+    "title_save_failed": "標題未儲存",
+    "editing_now": "正在編輯"
   },
   "history": {
     "title": "歷史",
@@ -61,6 +66,7 @@
     "description": "它可能已被刪除。"
   },
   "edited": "{{time}}編輯",
+  "view_history": "查看歷史",
   "outline": "大綱",
   "link_copied": "連結已複製",
   "unavailable": {

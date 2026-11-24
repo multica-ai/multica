@@ -129,8 +129,6 @@
     "html_preview": "HTML preview",
     "close_preview": "Close",
     "copy_code": "Copy code",
-    "show_preview": "Show preview",
-    "show_source": "View source",
     "fullscreen": "Fullscreen"
   },
   "dynamic_block": {
@@ -144,7 +142,10 @@
     "error_mermaid": "Couldn't draw this diagram",
     "error_at_line": "{{message}} (line {{line}})",
     "view_source": "View source",
-    "copy_error": "Copy error"
+    "copy_error": "Copy error",
+    "title": "Title",
+    "rename": "Rename",
+    "add_title": "Add title"
   },
   "file_card": {
     "uploading": "Uploading {{filename}}"

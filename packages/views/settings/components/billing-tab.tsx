@@ -16,6 +16,7 @@ import {
   RefreshCw,
 } from "@multica/ui/icons";
 import { ApiError, errorCode } from "@multica/core/api";
+import { prefersReducedMotion } from "@multica/core/appearance";
 import { autopilotQuotaUsageOptions } from "@multica/core/autopilots";
 import {
   useChangeWorkspacePlan,
@@ -133,10 +134,7 @@ function scrollToUpgrade() {
   const target = document.querySelector<HTMLElement>(
     `[${SETTINGS_ANCHOR_ATTR}="${UPGRADE_SECTION_ANCHOR}"]`,
   );
-  const reduceMotion =
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  target?.scrollIntoView?.({ block: "start", behavior: reduceMotion ? "auto" : "smooth" });
+  target?.scrollIntoView?.({ block: "start", behavior: prefersReducedMotion() ? "auto" : "smooth" });
 }
 const SEAT_PURCHASE_POLL_TIMEOUT_MS = 2 * 60_000;
 const SEAT_PURCHASE_PREVIEW_DEBOUNCE_MS = 800;
@@ -234,13 +232,24 @@ function BillingTabContent() {
   const navigation = useNavigation();
   const workspace = useCurrentWorkspace();
   const wsId = workspace?.id ?? "";
-  const returnResultParam = parseReturnResult(
-    navigation.searchParams.get("result"),
-  );
-  const returnSessionId = navigation.searchParams.get("session_id");
-  const callbackKey =
+  const hasReturnParams =
     navigation.searchParams.has("result") ||
-    navigation.searchParams.has("session_id")
+    navigation.searchParams.has("session_id");
+  // Cloud stamps every Stripe return with the workspace it authorized. A
+  // return URL configured with a fixed workspace slug lands here for every
+  // workspace, so a return that belongs to another one is handed to
+  // /billing/return, which opens the workspace that started it.
+  const returnWorkspaceId = navigation.searchParams.get("workspace_id");
+  const returnBelongsElsewhere =
+    hasReturnParams && !!wsId && !!returnWorkspaceId && returnWorkspaceId !== wsId;
+  const returnResultParam = returnBelongsElsewhere
+    ? null
+    : parseReturnResult(navigation.searchParams.get("result"));
+  const returnSessionId = returnBelongsElsewhere
+    ? null
+    : navigation.searchParams.get("session_id");
+  const callbackKey =
+    hasReturnParams && !returnBelongsElsewhere
       ? `${navigation.searchParams.get("result") ?? ""}:${returnSessionId ?? ""}`
       : null;
   const [returnState, setReturnState] = useState<{
@@ -321,6 +330,16 @@ function BillingTabContent() {
     inputKey: string;
     attempts: number;
   } | null>(null);
+  // Set when a purchase was refused because another seat purchase or plan
+  // change holds the subscription. The refetched summary would otherwise start
+  // a new quote at once and replace that explanation; the user retries by
+  // editing the seat count or reopening the dialog.
+  const seatPurchaseBlockedRef = useRef(false);
+  const blockSeatPurchase = () => {
+    seatPurchaseBlockedRef.current = true;
+    // A quote already in flight must not clear the explanation either.
+    seatPreviewInputRef.current = "";
+  };
   const consumedCallbackKeyRef = useRef<string | null>(null);
   const queryClient = useQueryClient();
   // The invitation Members held back for the checkout this page is about to
@@ -382,6 +401,19 @@ function BillingTabContent() {
     setActionError(null);
     setSeatPurchaseMessage(null);
   }, [wsId]);
+
+  useEffect(() => {
+    if (!returnBelongsElsewhere) return;
+    const forward = new URLSearchParams();
+    for (const key of ["workspace_id", "result", "session_id"]) {
+      const value = navigation.searchParams.get(key);
+      if (value) forward.set(key, value);
+    }
+    const destination = `/billing/return?${forward.toString()}`;
+    if (consumedCallbackKeyRef.current === destination) return;
+    consumedCallbackKeyRef.current = destination;
+    navigation.replace(destination);
+  }, [navigation, returnBelongsElsewhere]);
 
   // Consume Stripe callback params once, then remove them with replace so a
   // refresh, copied URL, or settings-tab round trip cannot replay a banner or
@@ -573,7 +605,7 @@ function BillingTabContent() {
   ]);
 
   useEffect(() => {
-    if (!seatPurchaseOpen) return;
+    if (!seatPurchaseOpen || seatPurchaseBlockedRef.current) return;
     const value = additionalSeatsInput.trim();
     const additionalSeats = /^\d+$/.test(value) ? Number(value) : 0;
     const currentSeats = summaryQuery.data?.seatCapacity?.purchased ?? null;
@@ -1168,6 +1200,7 @@ function BillingTabContent() {
         seatPurchaseIntentRef.current = null;
         setSeatPreview(null);
         if (purchaseErrorCode === "seat_purchase_in_progress") {
+          blockSeatPurchase();
           setSeatPurchaseError(
             t(($) => $.workspace.seat_purchase.in_progress),
           );
@@ -1178,6 +1211,7 @@ function BillingTabContent() {
           purchaseErrorCode === "plan_change_in_progress" ||
           purchaseErrorCode === "plan_change_unresolved"
         ) {
+          blockSeatPurchase();
           setSeatPurchaseError(
             purchaseErrorCode === "plan_change_unresolved"
               ? t(($) => $.workspace.seat_purchase.plan_change_unresolved)
@@ -1216,6 +1250,7 @@ function BillingTabContent() {
   const handleSeatPurchaseOpenChange = (open: boolean) => {
     if (!open && purchaseSeatsMutation.isPending) return;
     setSeatPurchaseOpen(open);
+    seatPurchaseBlockedRef.current = false;
     seatPreviewCapacityRetryRef.current = null;
     setSeatPreviewRefreshing(false);
     if (!open) {
@@ -2452,6 +2487,7 @@ function BillingTabContent() {
                 value={additionalSeatsInput}
                 disabled={purchaseSeatsMutation.isPending}
                 onChange={(event) => {
+                  seatPurchaseBlockedRef.current = false;
                   seatPreviewCapacityRetryRef.current = null;
                   setSeatPreviewRefreshing(false);
                   setAdditionalSeatsInput(event.currentTarget.value);

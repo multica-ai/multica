@@ -123,13 +123,13 @@ export function MoveDialog({
         onClick={() => setSelected(id)}
         style={{ paddingLeft: 8 + depth * 16 }}
         className={cn(
-          "flex h-8 w-full items-center gap-2 rounded-md pr-2 text-left text-body outline-none transition-colors focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40",
+          "flex h-8 w-full items-center gap-2 rounded-md pr-2 text-left text-body outline-none transition-colors focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40",
           choice === id
             ? "bg-surface-selected text-surface-selected-foreground"
             : "hover:bg-surface-hover",
         )}
       >
-        <span className="text-muted-foreground [&_svg]:size-4">{icon}</span>
+        <span className="shrink-0 text-muted-foreground [&_svg]:size-4">{icon}</span>
         <span className="min-w-0 flex-1 truncate">{label}</span>
         {id === current && (
           <span className="shrink-0 text-caption text-faint-foreground">
@@ -146,15 +146,15 @@ export function MoveDialog({
       onOpenChange={(open) => (open ? onOpenChange(true) : close())}
     >
       <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="truncate">
+        <DialogHeader className="min-w-0 pr-8">
+          <DialogTitle className="min-w-0 truncate">
             {t(($) => $.move.title, { title: target?.title ?? "" })}
           </DialogTitle>
         </DialogHeader>
         <div
           role="listbox"
           aria-label={t(($) => $.move.destination)}
-          className="max-h-80 overflow-y-auto"
+          className="max-h-80 min-w-0 overflow-y-auto"
         >
           {option(
             null,
