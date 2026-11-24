@@ -288,6 +288,11 @@
     "cancel_failed": "Couldn't cancel the wakeup",
     "retry": "Retry",
     "retry_failed": "Couldn't retry the wakeup",
+    "change_timing": "Change timing",
+    "timing_remind": "Remind in",
+    "timing_interval": "Check every",
+    "timing_deadline": "Stop waiting in",
+    "timing_failed": "Couldn't change the timing",
     "status": {
       "active": "Waiting",
       "fired": "Reported back",

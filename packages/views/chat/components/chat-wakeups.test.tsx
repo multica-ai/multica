@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage, ChatWakeup } from "@multica/core/types";
@@ -6,16 +6,21 @@ import enChat from "../../locales/en/chat.json";
 
 const cancelMutate = vi.hoisted(() => vi.fn());
 const retryMutate = vi.hoisted(() => vi.fn());
+const rescheduleMutateAsync = vi.hoisted(() => vi.fn());
+const toastError = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/chat/mutations", () => ({
   useCancelChatWakeup: () => ({ mutate: cancelMutate }),
   useRetryChatWakeup: () => ({ mutate: retryMutate, isPending: false }),
+  useRescheduleChatWakeup: () => ({ mutateAsync: rescheduleMutateAsync, isPending: false }),
 }));
+vi.mock("sonner", () => ({ toast: { error: toastError } }));
 
 import { ChatQueue } from "./chat-queue";
 import {
   ChatWakeupCards,
   ChatWakeupDivider,
+  ChatWakeupHeaderButton,
   ChatWakeupStrip,
   isWakeupRunningOut,
   wakeupReportState,
@@ -221,5 +226,63 @@ describe("ChatQueue wakeup turns", () => {
     );
     expect(screen.getByText("Wakeup: PR #42 merged")).toBeInTheDocument();
     expect(screen.getByText("Wakeup")).toBeInTheDocument();
+  });
+});
+
+describe("changing a wakeup's timing", () => {
+  async function openTimingMenu(w: ChatWakeup) {
+    renderWithI18n(<ChatWakeupHeaderButton sessionId="session-1" wakeups={[w]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Wakeups" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Change timing" }));
+    await screen.findByRole("menu");
+  }
+
+  it("offers a check a new interval or deadline, and leaves out the current interval", async () => {
+    rescheduleMutateAsync.mockResolvedValue(undefined);
+    await openTimingMenu(wakeup({ id: "check-1", kind: "check", condition: undefined, interval_seconds: 1800 }));
+
+    expect(screen.getByText("Check every")).toBeInTheDocument();
+    expect(screen.getByText("Stop waiting in")).toBeInTheDocument();
+    expect(screen.getAllByRole("menuitem", { name: "30 minutes" })[0]).toHaveAttribute("aria-disabled", "true");
+
+    fireEvent.click(screen.getAllByRole("menuitem", { name: "15 minutes" })[0]!);
+    expect(rescheduleMutateAsync).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      wakeupId: "check-1",
+      timing: { interval_seconds: 900 },
+    });
+  });
+
+  it("moves a reminder and reports a refused change", async () => {
+    rescheduleMutateAsync.mockRejectedValue(new Error("the reminder time must be in the future"));
+    await openTimingMenu(wakeup({ id: "at-1", kind: "at", condition: undefined, fire_at: new Date(Date.now() + HOUR).toISOString() }));
+
+    expect(screen.getByText("Remind in")).toBeInTheDocument();
+    expect(screen.queryByText("Stop waiting in")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "5 minutes" }));
+    expect(rescheduleMutateAsync).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      wakeupId: "at-1",
+      timing: { after_seconds: 300 },
+    });
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith("Couldn't change the timing", {
+        description: "the reminder time must be in the future",
+      }),
+    );
+  });
+
+  it("offers a condition only a new deadline", async () => {
+    await openTimingMenu(wakeup({ id: "cond-1" }));
+    expect(screen.getByText("Stop waiting in")).toBeInTheDocument();
+    expect(screen.queryByText("Check every")).not.toBeInTheDocument();
+    expect(screen.queryByText("Remind in")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: "4 hours" }));
+    expect(rescheduleMutateAsync).toHaveBeenLastCalledWith({
+      sessionId: "session-1",
+      wakeupId: "cond-1",
+      timing: { expires_in_seconds: 14400 },
+    });
   });
 });

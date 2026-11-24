@@ -283,6 +283,11 @@
     "cancel_failed": "웨이크업을 취소하지 못했습니다",
     "retry": "다시 시도",
     "retry_failed": "웨이크업을 다시 시도하지 못했습니다",
+    "change_timing": "시간 변경",
+    "timing_remind": "알림까지",
+    "timing_interval": "확인 간격",
+    "timing_deadline": "대기 종료까지",
+    "timing_failed": "시간을 변경하지 못했습니다",
     "status": {
       "active": "대기 중",
       "fired": "보고함",

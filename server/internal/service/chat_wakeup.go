@@ -416,6 +416,101 @@ func (s *ChatWakeupService) Update(ctx context.Context, task db.AgentTaskQueue, 
 	return updated, nil
 }
 
+// ChatWakeupTiming is a member's change to an active wakeup's timing. Which
+// fields apply depends on the wakeup's kind: a reminder takes a new time, a
+// check a new interval and/or deadline, a condition a new deadline. A field
+// left out keeps its current value.
+type ChatWakeupTiming struct {
+	At               *time.Time `json:"at,omitempty"`
+	AfterSeconds     int64      `json:"after_seconds,omitempty"`
+	IntervalSeconds  int64      `json:"interval_seconds,omitempty"`
+	ExpiresAt        *time.Time `json:"expires_at,omitempty"`
+	ExpiresInSeconds int64      `json:"expires_in_seconds,omitempty"`
+}
+
+func (t ChatWakeupTiming) setsReminder() bool { return t.At != nil || t.AfterSeconds != 0 }
+func (t ChatWakeupTiming) setsDeadline() bool { return t.ExpiresAt != nil || t.ExpiresInSeconds != 0 }
+
+// Reschedule changes when an active wakeup runs, from the conversation's side:
+// its title, instruction and condition stay as the agent wrote them, and the
+// same limits apply as when the agent sets the timing.
+func (s *ChatWakeupService) Reschedule(ctx context.Context, sessionID, id pgtype.UUID, timing ChatWakeupTiming) (db.ChatWakeup, error) {
+	now := s.clock()
+	var updated db.ChatWakeup
+	err := s.inTx(ctx, func(_ pgx.Tx, qtx *db.Queries) error {
+		current, err := qtx.LockChatWakeupInSession(ctx, db.LockChatWakeupInSessionParams{ID: id, ChatSessionID: sessionID})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrChatWakeupNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if current.Status != "active" {
+			return ErrChatWakeupEnded
+		}
+		in := ChatWakeupInput{ExpiresAt: timing.ExpiresAt, ExpiresInSeconds: timing.ExpiresInSeconds}
+		switch current.Kind {
+		case "at":
+			if !timing.setsReminder() || timing.IntervalSeconds != 0 || timing.setsDeadline() {
+				return chatWakeupInputError("a reminder takes a new time and nothing else")
+			}
+			in.At, in.AfterSeconds = timing.At, timing.AfterSeconds
+		case "check":
+			if timing.setsReminder() || (timing.IntervalSeconds == 0 && !timing.setsDeadline()) {
+				return chatWakeupInputError("a check takes a new interval, a new deadline, or both")
+			}
+			in.IntervalSeconds = timing.IntervalSeconds
+			if in.IntervalSeconds == 0 {
+				in.IntervalSeconds = current.IntervalSeconds.Int64
+			}
+			if !timing.setsDeadline() {
+				deadline := current.ExpiresAt.Time
+				in.ExpiresAt = &deadline
+			}
+		case "condition":
+			if timing.setsReminder() || timing.IntervalSeconds != 0 || !timing.setsDeadline() {
+				return chatWakeupInputError("a condition takes a new deadline and nothing else")
+			}
+			in.Condition = current.Condition
+		default:
+			return chatWakeupInputError("this wakeup's timing cannot be changed")
+		}
+		plan, err := in.plan(now)
+		if err != nil {
+			return err
+		}
+		next := plan.nextEval
+		if current.Kind == "condition" || (current.Kind == "check" && timing.IntervalSeconds == 0) {
+			// Only the deadline moved: the next evaluation stays where it was,
+			// unless the new deadline comes first.
+			next = current.NextEvalAt.Time
+			if next.After(plan.expiresAt) {
+				next = plan.expiresAt
+			}
+		}
+		updated, err = qtx.UpdateChatWakeupConfig(ctx, db.UpdateChatWakeupConfigParams{
+			ID:              id,
+			Title:           current.Title,
+			Instruction:     current.Instruction,
+			Condition:       current.Condition,
+			ConditionState:  current.ConditionState,
+			IntervalSeconds: plan.interval,
+			FireAt:          plan.fireAt,
+			NextEvalAt:      pgtype.Timestamptz{Time: next, Valid: true},
+			ExpiresAt:       pgtype.Timestamptz{Time: plan.expiresAt, Valid: true},
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrChatWakeupEnded
+		}
+		return err
+	})
+	if err != nil {
+		return db.ChatWakeup{}, err
+	}
+	s.publish(ctx, updated, pgtype.UUID{})
+	return updated, nil
+}
+
 // Cancel ends an active wakeup. by is "user" or "agent".
 func (s *ChatWakeupService) Cancel(ctx context.Context, sessionID, id pgtype.UUID, by string) (db.ChatWakeup, error) {
 	return s.end(ctx, sessionID, id, "cancelled", "cancelled_by_"+by)

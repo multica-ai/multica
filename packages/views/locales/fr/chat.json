@@ -288,6 +288,11 @@
     "cancel_failed": "Impossible d'annuler le réveil",
     "retry": "Réessayer",
     "retry_failed": "Impossible de relancer le réveil",
+    "change_timing": "Modifier le délai",
+    "timing_remind": "Rappeler dans",
+    "timing_interval": "Vérifier toutes les",
+    "timing_deadline": "Arrêter d'attendre dans",
+    "timing_failed": "Impossible de modifier le délai",
     "status": {
       "active": "En attente",
       "fired": "Point fait",

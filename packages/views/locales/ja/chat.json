@@ -283,6 +283,11 @@
     "cancel_failed": "ウェイクアップをキャンセルできませんでした",
     "retry": "再試行",
     "retry_failed": "ウェイクアップを再試行できませんでした",
+    "change_timing": "時間を変更",
+    "timing_remind": "リマインドまで",
+    "timing_interval": "確認の間隔",
+    "timing_deadline": "待機を終えるまで",
+    "timing_failed": "時間を変更できませんでした",
     "status": {
       "active": "待機中",
       "fired": "報告済み",

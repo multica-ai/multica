@@ -205,6 +205,7 @@ export type {
   ChatDraftRestore,
   ChatDraftRestoresResponse,
   ChatWakeup,
+  ChatWakeupTiming,
   ChatWakeupKind,
   ChatWakeupStatus,
 } from "./chat";

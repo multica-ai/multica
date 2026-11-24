@@ -2797,6 +2797,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/wakeups", h.ListChatSessionWakeups)
 					r.Post("/wakeups/{wakeupId}/cancel", h.CancelChatSessionWakeup)
 					r.Post("/wakeups/{wakeupId}/retry", h.RetryChatSessionWakeup)
+					r.Patch("/wakeups/{wakeupId}/timing", h.RescheduleChatSessionWakeup)
 				})
 			})
 			r.Get("/api/chat/pending-tasks", h.ListPendingChatTasks)

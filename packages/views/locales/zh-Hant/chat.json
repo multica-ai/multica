@@ -283,6 +283,11 @@
     "cancel_failed": "無法取消喚醒",
     "retry": "重試",
     "retry_failed": "無法重試此喚醒",
+    "change_timing": "調整時間",
+    "timing_remind": "多久後提醒",
+    "timing_interval": "檢查間隔",
+    "timing_deadline": "多久後停止等待",
+    "timing_failed": "調整時間失敗",
     "status": {
       "active": "等待中",
       "fired": "已回報",

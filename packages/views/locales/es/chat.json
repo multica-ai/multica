@@ -288,6 +288,11 @@
     "cancel_failed": "No se pudo cancelar el recordatorio",
     "retry": "Reintentar",
     "retry_failed": "No se pudo reintentar el aviso",
+    "change_timing": "Cambiar el horario",
+    "timing_remind": "Recordar en",
+    "timing_interval": "Comprobar cada",
+    "timing_deadline": "Dejar de esperar en",
+    "timing_failed": "No se pudo cambiar el horario",
     "status": {
       "active": "Esperando",
       "fired": "Informado",

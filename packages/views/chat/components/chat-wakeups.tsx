@@ -3,14 +3,23 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlarmClock, RotateCcw, X } from "@multica/ui/icons";
+import { AlarmClock, Clock, RotateCcw, X } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Button } from "@multica/ui/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
 import { cn } from "@multica/ui/lib/utils";
 import { chatWakeupsOptions } from "@multica/core/chat/queries";
-import { useCancelChatWakeup, useRetryChatWakeup } from "@multica/core/chat/mutations";
-import type { ChatMessage, ChatWakeup } from "@multica/core/types";
+import { useCancelChatWakeup, useRescheduleChatWakeup, useRetryChatWakeup } from "@multica/core/chat/mutations";
+import type { ChatMessage, ChatWakeup, ChatWakeupTiming } from "@multica/core/types";
 import { useLocale, useT } from "../../i18n";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 
@@ -161,6 +170,84 @@ function RetryButton({ wakeup, sessionId }: { wakeup: ChatWakeup; sessionId: str
   );
 }
 
+const MIN_S = 60;
+const HOUR_S = 60 * MIN_S;
+const DAY_S = 24 * HOUR_S;
+
+/**
+ * Preset timings a member can pick per kind. The server applies the same
+ * limits as for the agent (checks every 10 minutes at most, 100 checks, 7-day
+ * waits), so a preset that breaks one is reported back instead of hidden.
+ */
+const TIMING_PRESETS = {
+  remind: [5 * MIN_S, 15 * MIN_S, 30 * MIN_S, HOUR_S],
+  interval: [10 * MIN_S, 15 * MIN_S, 30 * MIN_S, HOUR_S],
+  deadline: [HOUR_S, 4 * HOUR_S, DAY_S, 3 * DAY_S],
+} as const;
+
+function formatDuration(locale: string, seconds: number): string {
+  const [value, unit] =
+    seconds % DAY_S === 0 ? [seconds / DAY_S, "day"] : seconds % HOUR_S === 0 ? [seconds / HOUR_S, "hour"] : [seconds / MIN_S, "minute"];
+  return new Intl.NumberFormat(locale, { style: "unit", unit, unitDisplay: "long" }).format(value);
+}
+
+/** Change an active wakeup's timing without asking the agent. */
+function WakeupTimingMenu({ wakeup, sessionId }: { wakeup: ChatWakeup; sessionId: string }) {
+  const { t } = useT("chat");
+  const locale = useLocale();
+  const reschedule = useRescheduleChatWakeup();
+  const apply = (timing: ChatWakeupTiming) => {
+    // The menu closes on pick; tie the error to the request, not the item.
+    reschedule.mutateAsync({ sessionId, wakeupId: wakeup.id, timing }).catch((err: unknown) => {
+      const detail = err instanceof Error && err.message ? err.message : "";
+      toast.error(t(($) => $.wakeup.timing_failed), detail ? { description: detail } : undefined);
+    });
+  };
+  const group = (label: string, presets: readonly number[], toTiming: (seconds: number) => ChatWakeupTiming) => (
+    <DropdownMenuGroup>
+      <DropdownMenuLabel>{label}</DropdownMenuLabel>
+      {presets.map((seconds) => (
+        <DropdownMenuItem
+          key={seconds}
+          disabled={wakeup.kind === "check" && toTiming(seconds).interval_seconds === wakeup.interval_seconds}
+          onClick={() => apply(toTiming(seconds))}
+        >
+          {formatDuration(locale, seconds)}
+        </DropdownMenuItem>
+      ))}
+    </DropdownMenuGroup>
+  );
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <IconButton
+            variant="ghost"
+            size="icon-xs"
+            className="shrink-0 text-muted-foreground"
+            label={t(($) => $.wakeup.change_timing)}
+            disabled={reschedule.isPending}
+          />
+        }
+      >
+        <Clock aria-hidden />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-auto min-w-44">
+        {wakeup.kind === "at" &&
+          group(t(($) => $.wakeup.timing_remind), TIMING_PRESETS.remind, (s) => ({ after_seconds: s }))}
+        {wakeup.kind === "check" && (
+          <>
+            {group(t(($) => $.wakeup.timing_interval), TIMING_PRESETS.interval, (s) => ({ interval_seconds: s }))}
+            <DropdownMenuSeparator />
+          </>
+        )}
+        {wakeup.kind !== "at" &&
+          group(t(($) => $.wakeup.timing_deadline), TIMING_PRESETS.deadline, (s) => ({ expires_in_seconds: s }))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function WakeupRow({ wakeup, sessionId, now }: { wakeup: ChatWakeup; sessionId: string; now: number }) {
   const text = useWakeupText();
   const cancel = useCancel(sessionId);
@@ -194,6 +281,7 @@ function WakeupRow({ wakeup, sessionId, now }: { wakeup: ChatWakeup; sessionId: 
         {failure && <div className="truncate text-caption text-destructive">{failure}</div>}
       </div>
       {report === "failed" && <RetryButton wakeup={wakeup} sessionId={sessionId} />}
+      {active && <WakeupTimingMenu wakeup={wakeup} sessionId={sessionId} />}
       {active && (
         <IconButton
           variant="ghost"

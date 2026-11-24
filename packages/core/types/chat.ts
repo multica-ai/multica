@@ -333,6 +333,17 @@ export type ChatWakeupStatus =
   | "failed";
 
 /**
+ * A member's change to an active wakeup's timing (PATCH …/wakeups/{id}/timing).
+ * A reminder takes `after_seconds`; a check `interval_seconds` and/or
+ * `expires_in_seconds`; a condition `expires_in_seconds`.
+ */
+export interface ChatWakeupTiming {
+  after_seconds?: number;
+  interval_seconds?: number;
+  expires_in_seconds?: number;
+}
+
+/**
  * A promise an agent made in a chat to come back and report: when a condition
  * holds ("condition"), at a time ("at"), or on periodic checks ("check"). Every
  * wakeup ends; `expires_at` is its deadline, and the agent comes back once more
