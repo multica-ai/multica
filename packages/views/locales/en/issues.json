@@ -2171,6 +2171,7 @@
     "marker_more_other": "{{count}} more",
     "marker_auto_start": "{{name}} starts automatically once these end.",
     "marker_notify": "{{name}} is notified once these end.",
+    "marker_unavailable": "{{name}} can't run right now, so nothing starts when these end.",
     "marker_unassigned": "No assignee, so nothing starts when these end."
   }
 }

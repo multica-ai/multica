@@ -2171,6 +2171,7 @@
     "marker_more_other": "{{count}} más",
     "marker_auto_start": "{{name}} comenzará automáticamente cuando terminen.",
     "marker_notify": "{{name}} recibirá una notificación cuando terminen.",
+    "marker_unavailable": "{{name}} no puede ejecutarse ahora, así que nada comenzará cuando terminen.",
     "marker_unassigned": "Sin responsable: nada comenzará cuando terminen."
   }
 }

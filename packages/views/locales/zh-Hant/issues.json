@@ -2077,6 +2077,7 @@
     "marker_more_other": "還有 {{count}} 個",
     "marker_auto_start": "阻塞結束後 {{name}} 自動開始。",
     "marker_notify": "阻塞結束後通知 {{name}}。",
+    "marker_unavailable": "{{name}} 目前無法執行，阻塞結束後不會自動開始。",
     "marker_unassigned": "未指派負責人，阻塞結束後不會自動開始。"
   }
 }

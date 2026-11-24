@@ -2171,6 +2171,7 @@
     "marker_more_other": "{{count}} de plus",
     "marker_auto_start": "{{name}} démarrera automatiquement une fois celles-ci terminées.",
     "marker_notify": "{{name}} sera notifié une fois celles-ci terminées.",
+    "marker_unavailable": "{{name}} ne peut pas s'exécuter pour l'instant : rien ne démarrera une fois celles-ci terminées.",
     "marker_unassigned": "Aucun responsable : rien ne démarrera une fois celles-ci terminées."
   }
 }

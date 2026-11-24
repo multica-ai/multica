@@ -2077,6 +2077,7 @@
     "marker_more_other": "ほか {{count}} 件",
     "marker_auto_start": "すべて終了すると {{name}} が自動的に開始します。",
     "marker_notify": "すべて終了すると {{name}} に通知されます。",
+    "marker_unavailable": "{{name}} は現在実行できないため、すべて終了しても自動では開始しません。",
     "marker_unassigned": "担当者がいないため、すべて終了しても自動では開始しません。"
   }
 }

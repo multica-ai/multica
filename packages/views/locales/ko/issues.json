@@ -2077,6 +2077,7 @@
     "marker_more_other": "{{count}}개 더 보기",
     "marker_auto_start": "모두 종료되면 {{name}}이(가) 자동으로 시작합니다.",
     "marker_notify": "모두 종료되면 {{name}}에게 알림이 갑니다.",
+    "marker_unavailable": "{{name}}이(가) 지금 실행할 수 없어 모두 종료되어도 자동으로 시작되지 않습니다.",
     "marker_unassigned": "담당자가 없어 모두 종료되어도 자동으로 시작되지 않습니다."
   }
 }

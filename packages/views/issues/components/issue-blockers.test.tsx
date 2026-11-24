@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Issue } from "@multica/core/types";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderWithI18n } from "../../test/i18n";
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
@@ -18,6 +19,21 @@ vi.mock("../../navigation", () => ({
 }));
 vi.mock("@multica/core/issue-statuses/hooks", () => ({
   useIssueStatuses: () => ({ categoryOf: () => "unstarted", colorOf: () => null, iconOf: () => null }),
+}));
+const directory = vi.hoisted(() => ({
+  agents: [
+    { id: "agent-1", runtime_id: "runtime-1", archived_at: null },
+    { id: "agent-archived", runtime_id: "runtime-1", archived_at: "2026-11-01T00:00:00Z" },
+    { id: "agent-no-runtime", runtime_id: "", archived_at: null },
+  ],
+  squads: [
+    { id: "squad-1", leader_id: "agent-1" },
+    { id: "squad-idle", leader_id: "agent-archived" },
+  ],
+}));
+vi.mock("@multica/core/workspace/queries", () => ({
+  agentListOptions: () => ({ queryKey: ["agents"], queryFn: async () => directory.agents }),
+  squadListOptions: () => ({ queryKey: ["squads"], queryFn: async () => directory.squads }),
 }));
 vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({ getActorName: () => "Lambda" }),
@@ -84,7 +100,7 @@ describe("IssueBlockedMarker hover card", () => {
   }
 
   async function hover(issue: Issue) {
-    renderWithI18n(<IssueBlockedMarker issue={issue} delay={0} />);
+    renderWithI18n(<QueryClientProvider client={new QueryClient()}><IssueBlockedMarker issue={issue} delay={0} /></QueryClientProvider>);
     fireEvent.mouseEnter(screen.getByLabelText("Waiting for 1 task"));
     fireEvent.pointerEnter(screen.getByLabelText("Waiting for 1 task"));
     return screen.findByText("Blocked by 1 task");
@@ -95,7 +111,17 @@ describe("IssueBlockedMarker hover card", () => {
     expect(screen.getByText("· 1/2 ended", { exact: false })).toBeInTheDocument();
     const links = screen.getAllByRole("link").map((a) => a.getAttribute("href"));
     expect(links).toEqual(["/issues/TEST-1", "/issues/TEST-2"]);
-    expect(screen.getByText("Lambda starts automatically once these end.")).toBeInTheDocument();
+    expect(await screen.findByText("Lambda starts automatically once these end.")).toBeInTheDocument();
+  });
+
+  it("says nothing starts when the agent, or a squad's leader, cannot run", async () => {
+    for (const [assignee_type, assignee_id] of [["agent", "agent-archived"], ["agent", "agent-no-runtime"], ["agent", "agent-deleted"], ["squad", "squad-idle"]]) {
+      await hover(blockedIssue({ assignee_type, assignee_id } as Partial<Issue>));
+      expect(await screen.findByText("Lambda can't run right now, so nothing starts when these end.")).toBeInTheDocument();
+      cleanup();
+    }
+    await hover(blockedIssue({ assignee_type: "squad", assignee_id: "squad-1" }));
+    expect(await screen.findByText("Lambda starts automatically once these end.")).toBeInTheDocument();
   });
 
   it("says a member assignee is notified", async () => {
