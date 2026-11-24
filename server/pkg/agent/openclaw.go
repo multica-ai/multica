@@ -698,18 +698,33 @@ func tryParseOpenclawEvent(line string) (openclawEvent, bool) {
 // (the legacy format with payloads + meta). Lines must start with '{' to be
 // considered — we no longer scan for braces at arbitrary positions, which
 // avoids false matches on log lines containing JSON fragments.
+//
+// Gateway-routed runs (runtime_config.mode == "gateway") wrap the same blob
+// in an envelope: {"runId", "status", "summary", "result": {payloads, meta}}.
+// The envelope's result is accepted too, so gateway replies are not posted as
+// raw JSON.
 func tryParseOpenclawResult(raw string) (openclawResult, bool) {
 	if len(raw) == 0 || raw[0] != '{' {
 		return openclawResult{}, false
 	}
-	var result openclawResult
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+	var blob struct {
+		openclawResult
+		Result *openclawResult `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(raw), &blob); err != nil {
 		return openclawResult{}, false
 	}
-	if result.Payloads == nil && result.Meta.DurationMs == 0 {
-		return openclawResult{}, false
+	if isOpenclawResult(blob.openclawResult) {
+		return blob.openclawResult, true
 	}
-	return result, true
+	if blob.Result != nil && isOpenclawResult(*blob.Result) {
+		return *blob.Result, true
+	}
+	return openclawResult{}, false
+}
+
+func isOpenclawResult(result openclawResult) bool {
+	return result.Payloads != nil || result.Meta.DurationMs != 0
 }
 
 // buildOpenclawEventResult extracts text and metadata from a final result blob.
