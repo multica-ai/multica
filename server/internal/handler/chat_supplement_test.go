@@ -427,8 +427,8 @@ func TestChatSupplementRetryClaimKeepsColdInputAndOmitsResumedGuidance(t *testin
 				if resp.ChatResumeMessage == nil || *resp.ChatResumeMessage != "original objective\n\npending guidance" {
 					t.Fatalf("resumed input: %+v", resp.ChatResumeMessage)
 				}
-			} else if resp.ChatResumeMessage != nil {
-				t.Fatal("omitted guidance from a different provider session")
+			} else if resp.ChatResumeMessage != nil || resp.PriorSessionID == "provider-session" {
+				t.Fatalf("retry reused the superseded session or its delivery receipts: prior=%q resume=%v", resp.PriorSessionID, resp.ChatResumeMessage)
 			}
 		})
 	}

@@ -3962,6 +3962,12 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				})
 				h.Metrics.ObserveChatClaimLastSessionQuery(time.Since(started).Seconds())
 				switch {
+				case err == nil && task.RetryOfTaskID.Valid && !contextRevision.Valid &&
+					cs.SessionID.Valid && cs.SessionID.String != prior.SessionID.String &&
+					(!cs.RuntimeID.Valid || cs.RuntimeID == task.RuntimeID):
+					// The direct chat has moved on from this attempt's session.
+					// Its delivery receipts cannot shorten the retry's input.
+					h.Metrics.RecordChatClaimSessionFallbackMiss()
 				case err == nil && prior.SessionID.Valid && canReuseTaskExecution(task.AgentID, task.RuntimeID, task.RuntimeRouting, prior.RuntimeID, prior.RuntimeRouting):
 					h.Metrics.RecordChatClaimSessionFallbackHit()
 					if resp.PriorSessionID == "" && prior.RuntimeID == task.RuntimeID {
