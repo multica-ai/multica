@@ -1645,7 +1645,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	// Build dynamic SQL — same approach as ListGroupedIssues.
 	where := []string{"i.workspace_id = $1"}
 	if r.URL.Query().Get("blocked") == "true" {
-		where = append(where, "issue_has_open_blockers(i.workspace_id,i.id)")
+		where = append(where, blockedIssuePredicate)
 	}
 	args := []any{wsUUID}
 	addArg := func(v any) string {
@@ -2121,7 +2121,7 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 
 	where := []string{"i.workspace_id = $1"}
 	if r.URL.Query().Get("blocked") == "true" {
-		where = append(where, "issue_has_open_blockers(i.workspace_id,i.id)")
+		where = append(where, blockedIssuePredicate)
 	}
 	args := []any{wsUUID}
 	addArg := func(v any) string {

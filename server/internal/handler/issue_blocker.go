@@ -25,6 +25,15 @@ func issueBlockerGraphTouched(fields map[string]json.RawMessage) bool {
 	return false
 }
 
+// blockedIssuePredicate matches issues that are still waiting: at least one
+// unfinished blocker, and the issue itself not finished. A done or cancelled
+// issue whose earlier stage is still open is not waiting for anything, so the
+// Blocked filter leaves it out. Finished means the done or closed category,
+// the same rule issue_has_open_blockers applies to blockers.
+const blockedIssuePredicate = `(issue_has_open_blockers(i.workspace_id,i.id)
+ AND i.status NOT IN ('done','cancelled')
+ AND NOT EXISTS(SELECT 1 FROM issue_status s WHERE s.workspace_id=i.workspace_id AND s.key=i.status AND s.category IN ('done','closed')))`
+
 type IssueBlockerResponse struct {
 	private   bool
 	projectID pgtype.UUID
@@ -34,8 +43,8 @@ type IssueBlockerResponse struct {
 }
 
 func writeIssueBlockerError(w http.ResponseWriter, err error) bool {
-	if errors.Is(err, service.ErrIssueBlockerNotFound) {
-		writeError(w, 400, err.Error())
+	if errors.Is(err, service.ErrIssueBlockerNotFound) || errors.Is(err, service.ErrIssueBlockerSelf) {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return true
 	}
 	var pgErr *pgconn.PgError
