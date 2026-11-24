@@ -1,40 +1,10 @@
 import "@testing-library/jest-dom/vitest";
-
-function createMemoryStorage(): Storage {
-  const values = new Map<string, string>();
-
-  return {
-    get length() {
-      return values.size;
-    },
-    clear: () => values.clear(),
-    getItem: (key: string) => values.get(key) ?? null,
-    key: (index: number) => Array.from(values.keys())[index] ?? null,
-    removeItem: (key: string) => {
-      values.delete(key);
-    },
-    setItem: (key: string, value: string) => {
-      values.set(key, value);
-    },
-  };
-}
+import "@multica/vitest-setup/web-storage";
 
 // Everything below patches gaps in jsdom. Pure-logic suites opt out of jsdom
 // with `// @vitest-environment node` and share this file, so there is no DOM to
 // patch there — bail out rather than guard each stub.
 if (typeof window !== "undefined") {
-  if (typeof globalThis.localStorage?.clear !== "function") {
-    const storage = createMemoryStorage();
-    Object.defineProperty(globalThis, "localStorage", {
-      configurable: true,
-      value: storage,
-    });
-    Object.defineProperty(window, "localStorage", {
-      configurable: true,
-      value: storage,
-    });
-  }
-
   // jsdom doesn't provide matchMedia; useIsMobile() relies on it.
   if (typeof window.matchMedia !== "function") {
     window.matchMedia = (query: string) =>
@@ -69,5 +39,17 @@ if (typeof window !== "undefined") {
   // that keep a keyboard cursor in view (e.g. the thread navigator) call it.
   if (typeof Element.prototype.scrollIntoView !== "function") {
     Element.prototype.scrollIntoView = () => {};
+  }
+
+  // jsdom doesn't implement Range geometry. ProseMirror's post-dispatch
+  // scrollToSelection measures the caret through coordsAtPos, which calls these
+  // on a text Range, so any test that types into an editor would throw.
+  // Return an empty layout; tests that need real geometry override them.
+  if (typeof Range.prototype.getClientRects !== "function") {
+    Range.prototype.getClientRects = () =>
+      ({ length: 0, item: () => null, [Symbol.iterator]: function* () {} }) as unknown as DOMRectList;
+  }
+  if (typeof Range.prototype.getBoundingClientRect !== "function") {
+    Range.prototype.getBoundingClientRect = () => new DOMRect(0, 0, 0, 0);
   }
 }

@@ -58,13 +58,14 @@ WHERE id = sqlc.arg('id')::uuid
   AND workspace_id = sqlc.arg('workspace_id')::uuid;
 
 -- name: CreateIssueWorkflow :one
-INSERT INTO issue_workflow (workspace_id, name, description, initial_status_key, steps)
+INSERT INTO issue_workflow (workspace_id, name, description, initial_status_key, steps, owner_id)
 VALUES (
     sqlc.arg('workspace_id')::uuid,
     sqlc.arg('name')::text,
     sqlc.arg('description')::text,
     sqlc.arg('initial_status_key')::text,
-    sqlc.arg('steps')::jsonb
+    sqlc.arg('steps')::jsonb,
+    sqlc.arg('owner_id')::uuid
 )
 RETURNING *;
 

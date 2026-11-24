@@ -11,6 +11,7 @@ function workflow(id: string, name: string, isDefault: boolean): IssueWorkflow {
     name,
     description: "",
     is_default: isDefault,
+    owner_id: null,
     steps: [],
     project_ids: [],
     created_at: "",
@@ -18,7 +19,6 @@ function workflow(id: string, name: string, isDefault: boolean): IssueWorkflow {
   };
 }
 
-vi.mock("@multica/core/config", () => ({ useFeatureEnabled: () => true }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace-1" }));
 const workflows = vi.hoisted(() => ({ list: [] as IssueWorkflow[] }));
 vi.mock("@multica/core/issue-workflows", () => ({

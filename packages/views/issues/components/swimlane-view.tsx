@@ -24,7 +24,7 @@ import {
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Virtuoso } from "react-virtuoso";
-import { ChevronRight, EyeOff, GripVertical, MoreHorizontal, Pencil, Plus } from "lucide-react";
+import { ChevronRight, EyeOff, GripVertical, MoreHorizontal, Pencil, Plus } from "@multica/ui/icons";
 import { useQuery, useQueries, useQueryClient } from "@tanstack/react-query";
 import type {
   Issue,
@@ -39,7 +39,7 @@ import { useViewBaseline } from "../surface/view-baseline-context";
 import { filterIssues, type IssueFilters } from "../utils/filter";
 import { getMoveAnchors } from "../utils/drag-utils";
 import type { SwimlaneGrouping } from "@multica/core/issues/stores/view-store";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import type { IssueStatusCatalog } from "@multica/core/issue-statuses";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
@@ -54,10 +54,10 @@ import {
 import { sortIssues } from "../utils/sort";
 import { BUILT_IN_STATUS_ORDER, STATUS_CONFIG } from "@multica/core/issues/config";
 import { DraggableBoardCard, BoardCardContent } from "./board-card";
+import { createIssueDropAnimation, ISSUE_DRAG_OVERLAY_CLASS } from "./drag-drop-animation";
 import { StatusIcon } from "./status-icon";
 import { Button } from "@multica/ui/components/ui/button";
 import { StatusHeading } from "./status-heading";
-import { HiddenColumnsPanel, HiddenColumnRow } from "./hidden-columns-panel";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
 import { ListLoadMoreFooter } from "./list-load-more-footer";
 import { AppLink } from "../../navigation";
@@ -234,7 +234,7 @@ interface LaneGroup {
   title: string;
   identifier: string;
   /** Parent issue (parent grouping only) — drives the open-parent link + status icon in the header. */
-  parentIssue: Pick<Issue, "id" | "status"> | null;
+  parentIssue: Pick<Issue, "id" | "identifier" | "status"> | null;
   /** Project metadata (project grouping only) — drives the icon in the header. */
   project: Project | null;
   /** Actor (assignee grouping only) — drives the avatar in the header. */
@@ -577,7 +577,7 @@ function buildServerLanes(
           (unavailable ? labels.otherParents : labels.noParent),
         identifier: value.parent?.identifier ?? "",
         parentIssue: value.parent
-          ? { id: value.parent.id, status: value.parent.status as IssueStatus }
+          ? { id: value.parent.id, identifier: value.parent.identifier, status: value.parent.status as IssueStatus }
           : null,
         project: null,
         actor: null,
@@ -613,7 +613,6 @@ function SwimLaneViewImpl({
   unfilteredIssues,
   activeFilters: activeFiltersProp,
   visibleStatuses = BUILT_IN_STATUS_ORDER,
-  hiddenStatuses = [],
   onMoveIssue,
   childProgressMap = EMPTY_PROGRESS_MAP,
   projectMap,
@@ -627,13 +626,12 @@ function SwimLaneViewImpl({
    * status totals. Lane discovery still drives off the visible `issues`
    * set so that parents whose children are all in hidden statuses don't
    * produce empty rows, but header chrome (identifier, title, issue ref
-   * for the Open-parent link) and hidden-column counts read from here so
-   * a parent in a hidden status still surfaces its label correctly.
+   * for the Open-parent link) and status counts read from here so a
+   * parent in a hidden status still surfaces its label correctly.
    */
   unfilteredIssues?: Issue[];
   activeFilters?: Omit<IssueFilters, "statusFilters">;
   visibleStatuses?: IssueStatus[];
-  hiddenStatuses?: IssueStatus[];
   onMoveIssue: (
     issueId: string,
     updates: SwimLaneMoveUpdates,
@@ -673,7 +671,11 @@ function SwimLaneViewImpl({
     // Extra children are not part of the server-grouped page yet, so apply
     // the same running-task issue ids returned by `/api/working-agents`.
     agentRunningFilter: activeFiltersProp?.agentRunningFilter ?? false,
+    agentIdleFilter: activeFiltersProp?.agentIdleFilter ?? false,
+    activeIssueIds: activeFiltersProp?.activeIssueIds,
     runningIssueIds: activeFiltersProp?.runningIssueIds,
+    unreadFilter: activeFiltersProp?.unreadFilter ?? false,
+    unreadIssueIds: activeFiltersProp?.unreadIssueIds,
     creatorFilters: activeFiltersProp?.creatorFilters ?? [],
     projectFilters: activeFiltersProp?.projectFilters ?? [],
     includeNoProject: activeFiltersProp?.includeNoProject ?? false,
@@ -682,6 +684,12 @@ function SwimLaneViewImpl({
     // `project_id`. Absent → the predicate is a no-op, never match-none.
     projectStatusById: activeFiltersProp?.projectStatusById,
     labelFilters: activeFiltersProp?.labelFilters ?? [],
+    relationFilters: activeFiltersProp?.relationFilters ?? [],
+    relationContext: activeFiltersProp?.relationContext,
+    dueDateFilters: activeFiltersProp?.dueDateFilters ?? [],
+    today: activeFiltersProp?.today,
+    advancedFilter: activeFiltersProp?.advancedFilter ?? null,
+    negatedFilters: activeFiltersProp?.negatedFilters ?? [],
     // Carry the "Show sub-issues" toggle through to the extra-children merge
     // path (see `filterIssues(extra, activeFilters)` below); otherwise batch /
     // per-parent loaded sub-issues get re-added even when the toggle is off.
@@ -931,7 +939,7 @@ function SwimLaneViewImpl({
     return ids;
   }, [laneGroups, sortedStatuses]);
 
-  // Drives both visible status-header counts AND hidden-column panel rows.
+  // Drives the status-header counts.
   // Known limitation (parent grouping): `headerIssueIds` is derived from
   // lanes that exist in the current render (only parents with ≥1 visible
   // child). A parent whose children are all hidden doesn't get a lane, so
@@ -983,12 +991,27 @@ function SwimLaneViewImpl({
   );
 
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
+  const skipDropAnimationRef = useRef(false);
+  const dropAnimation = useMemo(() => createIssueDropAnimation(skipDropAnimationRef), []);
   // The outer scroll box is the customScrollParent for the lane Virtuoso.
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  const laneListRef = useRef<HTMLDivElement>(null);
   // Pull-based scroll restoration (MUL-4741): same wiring as board/list/
   // issue-detail — ref-attach assigns the saved offset pre-paint, and the
-  // lane Virtuoso is born at it via initialScrollTop.
+  // lane Virtuoso starts at it via an initial item offset. Unlike
+  // initialScrollTop, this also restores a single tall lane.
   const restoredScrollTop = useRestoredScrollOffset("swimlane");
+  const initialLaneLocation = useMemo(() => {
+    const list = laneListRef.current;
+    if (restoredScrollTop === undefined || !scrollEl || !list) return 0;
+    // Item offsets are relative to the lane list, while the memento includes
+    // the outer padding and sticky status header above it.
+    const listTop =
+      list.getBoundingClientRect().top -
+      scrollEl.getBoundingClientRect().top +
+      scrollEl.scrollTop;
+    return { index: 0, offset: restoredScrollTop - listTop };
+  }, [restoredScrollTop, scrollEl]);
   const restoreScrollRef = useRestoredScrollRef("swimlane");
   const attachScroller = useCallback(
     (el: HTMLDivElement | null) => {
@@ -1061,11 +1084,13 @@ function SwimLaneViewImpl({
   );
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
+    skipDropAnimationRef.current = false;
     isDraggingRef.current = true;
     const activeId = event.active.id as string;
     // Lane drags don't carry an Issue payload — clear the card overlay so
     // we don't show a stale card during a lane reorder.
     if (parseLaneId(activeId) !== null) {
+      skipDropAnimationRef.current = true;
       setActiveIssue(null);
       return;
     }
@@ -1169,7 +1194,10 @@ function SwimLaneViewImpl({
       isDraggingRef.current = false;
       setActiveIssue(null);
 
-      const reset = () => setLocalCells(cells);
+      const reset = () => {
+        skipDropAnimationRef.current = true;
+        setLocalCells(cells);
+      };
 
       if (!over) {
         reset();
@@ -1390,6 +1418,7 @@ function SwimLaneViewImpl({
   // localCells resyncing with the cache afterwards — see the same handler in
   // list-view for the touch path that makes this routine (MUL-6240).
   const handleDragCancel = useCallback(() => {
+    skipDropAnimationRef.current = true;
     isDraggingRef.current = false;
     setActiveIssue(null);
     setLocalCells(cells);
@@ -1463,13 +1492,14 @@ function SwimLaneViewImpl({
                       DeferredPopup. */}
                   <DeferredPopup
                     ariaHasPopup="menu"
+                    tooltip={t(($) => $.board.hide_column)}
                     triggerRender={
                       <Button
                         type="button"
                         variant="ghost"
                         size="icon-sm"
                         aria-label={t(($) => $.board.hide_column)}
-                        className="rounded-full text-muted-foreground"
+                        className="text-muted-foreground"
                       >
                         <MoreHorizontal className="size-3.5" />
                       </Button>
@@ -1477,17 +1507,22 @@ function SwimLaneViewImpl({
                   >
                     {(open, onOpenChange) => (
                       <DropdownMenu open={open} onOpenChange={onOpenChange}>
-                        <DropdownMenuTrigger
-                          render={
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-sm"
-                              aria-label={t(($) => $.board.hide_column)}
-                              className="rounded-full text-muted-foreground"
-                            >
-                              <MoreHorizontal className="size-3.5" />
-                            </Button>
+                        <DeferredTooltip
+                          content={t(($) => $.board.hide_column)}
+                          trigger={
+                            <DropdownMenuTrigger
+                              render={
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  aria-label={t(($) => $.board.hide_column)}
+                                  className="text-muted-foreground"
+                                >
+                                  <MoreHorizontal className="size-3.5" />
+                                </Button>
+                              }
+                            />
                           }
                         />
                         <DropdownMenuContent align="end">
@@ -1526,39 +1561,34 @@ function SwimLaneViewImpl({
               settled after a remount, so the lane area never paints blank; once
               it's set, mount the Virtuoso with a matching `initialItemCount` to
               survive the measurement frame (MUL-4750). */}
-          {scrollEl ? (
-            <Virtuoso
-              customScrollParent={scrollEl}
-              data={orderedLanes}
-              computeItemKey={computeLaneKey}
-              initialScrollTop={restoredScrollTop}
-              initialItemCount={Math.min(orderedLanes.length, SWIMLANE_LANE_SEED_COUNT)}
-              increaseViewportBy={{ top: 600, bottom: 600 }}
-              components={laneComponents}
-              itemContent={renderLane}
-            />
-          ) : (
-            <VirtuosoSeed
-              data={orderedLanes}
-              itemContent={renderLane}
-              computeItemKey={computeLaneKey}
-              count={SWIMLANE_LANE_SEED_COUNT}
-            />
-          )}
+          <div ref={laneListRef}>
+            {scrollEl ? (
+              <Virtuoso
+                customScrollParent={scrollEl}
+                data={orderedLanes}
+                computeItemKey={computeLaneKey}
+                initialTopMostItemIndex={initialLaneLocation}
+                initialItemCount={Math.min(orderedLanes.length, SWIMLANE_LANE_SEED_COUNT)}
+                increaseViewportBy={{ top: 600, bottom: 600 }}
+                components={laneComponents}
+                itemContent={renderLane}
+              />
+            ) : (
+              <VirtuosoSeed
+                data={orderedLanes}
+                itemContent={renderLane}
+                computeItemKey={computeLaneKey}
+                count={SWIMLANE_LANE_SEED_COUNT}
+              />
+            )}
+          </div>
         </SortableContext>
         </div>
-
-        {hiddenStatuses.length > 0 && (
-          <SwimLaneHiddenColumnsPanel
-            hiddenStatuses={hiddenStatuses}
-            statusTotals={statusTotals}
-          />
-        )}
       </div>
 
-      <DragOverlay dropAnimation={null}>
+      <DragOverlay dropAnimation={dropAnimation}>
         {activeIssue ? (
-          <div className="w-[280px] rotate-2 scale-105 cursor-grabbing opacity-90 shadow-lg shadow-black/10">
+          <div className={`w-[280px] ${ISSUE_DRAG_OVERLAY_CLASS}`}>
             <BoardCardContent
               issue={activeIssue}
               childProgress={childProgressMap.get(activeIssue.id)}
@@ -1644,7 +1674,7 @@ function DraggableSwimLane({
   }, 0);
 
   return (
-    <div ref={setNodeRef} style={style} className={`flex flex-col ${isDragging ? "opacity-50" : ""}`}>
+    <div ref={setNodeRef} style={style} className={`flex flex-col transition-opacity duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none ${isDragging ? "opacity-50" : ""}`}>
       {/* Non-interactive container — the inner collapse button and any
           ancillary links (e.g. open-parent) are independent controls so we
           don't nest an <a> inside a <button>. The drag listeners attach
@@ -1701,7 +1731,7 @@ function DraggableSwimLane({
             content={t(($) => $.swimlane.open_parent)}
             trigger={
               <AppLink
-                href={paths.issueDetail(lane.parentIssue.id)}
+                href={paths.issueDetail(issueRouteRef(lane.parentIssue))}
                 aria-label={t(($) => $.swimlane.open_parent)}
                 className="inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
               >
@@ -1868,27 +1898,6 @@ function SwimLaneCell({
         />
       )}
     </div>
-  );
-}
-
-function SwimLaneHiddenColumnsPanel({
-  hiddenStatuses,
-  statusTotals,
-}: {
-  hiddenStatuses: IssueStatus[];
-  statusTotals: Map<IssueStatus, number>;
-}) {
-  return (
-    <HiddenColumnsPanel
-      hiddenStatuses={hiddenStatuses}
-      renderRow={(status) => (
-        <HiddenColumnRow
-          key={status}
-          status={status}
-          total={statusTotals.get(status) ?? 0}
-        />
-      )}
-    />
   );
 }
 

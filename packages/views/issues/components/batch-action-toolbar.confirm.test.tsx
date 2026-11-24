@@ -14,6 +14,15 @@ const selection = vi.hoisted(() => ({
   select: vi.fn(),
   deselect: vi.fn(),
 }));
+const deletionPolicy = vi.hoisted(() => ({ allowed: true }));
+vi.mock("@multica/core/issues/use-issue-deletion", () => ({
+  useIssueDeletion: () => ({ canDelete: () => deletionPolicy.allowed, offersDelete: true }),
+}));
+vi.mock("@multica/core/permissions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/permissions")>()),
+  useIsGuest: () => false,
+}));
+
 vi.mock("@multica/core/issues/stores/selection-store", () => ({
   useIssueSelectionStore: (selector: (s: typeof selection) => unknown) => selector(selection),
 }));
@@ -40,7 +49,18 @@ vi.mock("@multica/core/modals", () => ({
   useModalStore: (selector: (s: { open: typeof openModal }) => unknown) => selector({ open: openModal }),
 }));
 
-vi.mock("../../i18n", () => ({ useT: () => ({ t: () => "label" }) }));
+// Render each message as its key path ("batch.delete_count"), so the menu
+// items the tests click are distinguishable.
+vi.mock("../../i18n", () => ({
+  useT: () => ({
+    t: (select: (keys: unknown) => unknown) => {
+      const path: string[] = [];
+      const keys: unknown = new Proxy({}, { get: (_target, key) => (path.push(String(key)), keys) });
+      select(keys);
+      return path.join(".");
+    },
+  }),
+}));
 const toast = vi.hoisted(() => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn() }));
 vi.mock("sonner", () => ({ toast }));
 
@@ -73,7 +93,24 @@ vi.mock("./pickers", () => ({
       />
     </div>
   ),
+  AssigneePickerPanel: () => null,
+  DueDatePicker: () => null,
+  StartDatePicker: () => null,
 }));
+vi.mock("./pickers/batch-label-picker", () => ({ BatchLabelPicker: () => null }));
+vi.mock("../../projects/components/project-picker", () => ({ ProjectPicker: () => null }));
+vi.mock("@multica/core/paths", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/paths")>()),
+  useWorkspacePaths: () => ({ issueDetail: (id: string) => `/acme/issues/${id}` }),
+}));
+vi.mock("../../navigation", () => ({
+  useNavigation: () => ({ getShareableUrl: (path: string) => `https://app.example${path}` }),
+}));
+
+async function openDeleteItem() {
+  fireEvent.click(screen.getByRole("button", { name: "batch.more" }));
+  return screen.findByRole("menuitem", { name: "batch.delete_count" });
+}
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
@@ -104,10 +141,12 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
 }
 
 beforeEach(() => {
+  deletionPolicy.allowed = true;
   selection.selectedIds = new Set(["a"]);
   batchUpdate.mockClear();
   batchDelete.mockClear();
   openModal.mockClear();
+  selection.clear.mockClear();
   toast.success.mockClear();
   toast.warning.mockClear();
 });
@@ -156,11 +195,60 @@ describe("BatchActionToolbar status routing (MUL-4155)", () => {
     });
   });
 
-  it("opens the dedicated delete confirmation, not the run-confirm modal", () => {
+  it("disables deleting a selection containing an unauthorized issue", async () => {
+    deletionPolicy.allowed = false;
+    render(<BatchActionToolbar issues={[makeIssue()]} />);
+    const item = await openDeleteItem();
+    expect(item).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(item);
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(batchDelete).not.toHaveBeenCalled();
+  });
+
+  it("keeps delete out of the bar and opens the dedicated confirmation from the More menu", async () => {
     render(<BatchActionToolbar issues={[makeIssue({ status: "todo" })]} />);
-    fireEvent.click(screen.getByText("label", { selector: "button.text-destructive" }));
-    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /delete/ })).not.toBeInTheDocument();
+    fireEvent.click(await openDeleteItem());
+    expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
     expect(openModal).not.toHaveBeenCalled();
     expect(batchDelete).not.toHaveBeenCalled();
+  });
+});
+
+describe("BatchActionToolbar selection after apply (MUL-8179)", () => {
+  it("keeps the selection after an update by default, so edits can be chained", async () => {
+    render(<BatchActionToolbar issues={[makeIssue()]} />);
+    fireEvent.click(screen.getByTestId("status-done"));
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    expect(selection.clear).not.toHaveBeenCalled();
+  });
+
+  it("clears the selection once an update fully applies when opted in", async () => {
+    render(<BatchActionToolbar issues={[makeIssue()]} clearSelectionOnApply />);
+    fireEvent.click(screen.getByTestId("status-done"));
+    await waitFor(() => expect(selection.clear).toHaveBeenCalledTimes(1));
+  });
+
+  it("keeps the selection after a partial update so it can be retried", async () => {
+    selection.selectedIds = new Set(["a", "b"]);
+    batchUpdate.mockResolvedValueOnce({ updated: 1 });
+    render(
+      <BatchActionToolbar
+        issues={[makeIssue({ id: "a" }), makeIssue({ id: "b" })]}
+        clearSelectionOnApply
+      />,
+    );
+    fireEvent.click(screen.getByTestId("status-done"));
+    await waitFor(() => expect(toast.warning).toHaveBeenCalled());
+    expect(selection.clear).not.toHaveBeenCalled();
+  });
+
+  it("hands the run-confirm modal a clear callback instead of clearing up front", () => {
+    render(<BatchActionToolbar issues={[makeIssue({ status: "todo" })]} clearSelectionOnApply />);
+    fireEvent.click(screen.getByTestId("assign-agent"));
+    expect(selection.clear).not.toHaveBeenCalled();
+    const data = openModal.mock.calls[0]![1] as { onApplied?: () => void };
+    data.onApplied?.();
+    expect(selection.clear).toHaveBeenCalledTimes(1);
   });
 });

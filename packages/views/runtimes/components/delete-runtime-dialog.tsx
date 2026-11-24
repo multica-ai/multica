@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Globe, Info, Lock } from "lucide-react";
+import { AlertTriangle, Globe, Info, Lock } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "@multica/core/api";
@@ -200,8 +200,8 @@ export function DeleteRuntimeDialog({
       <AlertDialogContent
         className={
           cascade
-            ? "w-[calc(100vw-2rem)] !max-w-[640px] gap-0 overflow-hidden p-0"
-            : "w-[calc(100vw-2rem)] !max-w-[440px] gap-0 overflow-hidden p-0"
+            ? "w-[calc(100%-2rem)] !max-w-[640px] gap-0 overflow-hidden p-0"
+            : "w-[calc(100%-2rem)] !max-w-[440px] gap-0 overflow-hidden p-0"
         }
         onClick={(e) => e.stopPropagation()}
       >
@@ -587,7 +587,7 @@ function VisibilityCell({ visibility }: { visibility: string }) {
 
 // Server response parsing
 
-interface ActiveAgentsConflict {
+export interface ActiveAgentsConflict {
   code: "runtime_has_active_agents" | "runtime_delete_plan_changed";
   activeAgents: Agent[];
 }
@@ -595,7 +595,9 @@ interface ActiveAgentsConflict {
 // parseActiveAgentsConflict pulls the structured 409 fields off an ApiError.
 // Non-409s, non-active-agents codes, and missing bodies all collapse to
 // `null` so callers can fall through to the generic error toast.
-function parseActiveAgentsConflict(err: unknown): ActiveAgentsConflict | null {
+export function parseActiveAgentsConflict(
+  err: unknown,
+): ActiveAgentsConflict | null {
   if (!(err instanceof ApiError)) return null;
   if (err.status !== 409) return null;
   const body = err.body;

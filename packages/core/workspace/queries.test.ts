@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { Agent, Workspace } from "../types";
-import { agentListOptions, workspaceBySlugOptions } from "./queries";
+import {
+  agentListOptions,
+  workspaceBySlugOptions,
+} from "./queries";
 
 function makeWorkspace(slug: string): Workspace {
   return {

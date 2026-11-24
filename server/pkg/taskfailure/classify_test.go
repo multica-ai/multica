@@ -70,11 +70,15 @@ func TestClassifyRules(t *testing.T) {
 		// 4. Provider quota / billing.
 		{"402", "API Error: 402 Payment Required", ReasonAgentProviderQuotaLimit},
 		{"insufficient_balance", `{"error":{"code":"insufficient_balance"}}`, ReasonAgentProviderQuotaLimit},
+		{"provider 429 with insufficient balance", "API Error: Request rejected (429) · [1113][Insufficient balance or no resource package. Please recharge.]", ReasonAgentProviderQuotaLimit},
 		{"balance is too low", "balance is too low to make this request", ReasonAgentProviderQuotaLimit},
 		{"monthly usage limit", "You've hit your org's monthly usage limit", ReasonAgentProviderQuotaLimit},
 		{"usage limit", "Account exceeded the daily usage limit", ReasonAgentProviderQuotaLimit},
 		{"hit your limit ascii", "you've hit your limit; upgrade to continue", ReasonAgentProviderQuotaLimit},
 		{"hit your limit curly", "you\u2019ve hit your limit", ReasonAgentProviderQuotaLimit},
+		{"session limit ascii", "You've hit your session limit \u00b7 resets 2pm (UTC)", ReasonAgentProviderQuotaLimit},
+		{"session limit curly", "You\u2019ve hit your session limit \u00b7 resets 2pm (UTC)", ReasonAgentProviderQuotaLimit},
+		{"weekly limit", "You've hit your weekly limit \u00b7 resets Nov 3, 9am (UTC)", ReasonAgentProviderQuotaLimit},
 		{"credits", "Your account has 0 credits remaining", ReasonAgentProviderQuotaLimit},
 		{"quota", "quota exceeded for project foo", ReasonAgentProviderQuotaLimit},
 
@@ -188,6 +192,29 @@ func TestClassifyRules(t *testing.T) {
 		{"402 boundary still quota", "API Error: 402 Payment Required", ReasonAgentProviderQuotaLimit},
 		{"403 boundary still auth", "HTTP 403 Forbidden", ReasonAgentProviderAuthOrAccess},
 		{"429 boundary still capacity", "got 429 from provider", ReasonAgentProviderCapacityOrRateLimit},
+
+		// 16. Letter-boundary regression (#9146): hex IDs in workspace and
+		//     task paths embed digit runs like "429" between letters
+		//     ("...c429f4b..."), which the digit-only boundary guard let
+		//     through — every failure quoting such a path landed in the
+		//     provider capacity/auth/quota/server-error buckets and sent
+		//     users to check their provider accounts for a 429 no provider
+		//     ever returned. Letters must count as embedded context, same
+		//     as digits.
+		{"429 in hex id not capacity", "local_directory worktree: refusing to record branch agent/a/b: " +
+			"the delivered commit a806f863 no longer contains e8574f2b, the commit this turn started from; " +
+			"the task worktree is preserved at /Users/u/multica_workspaces_x/ws-0000c429f4b/b-1/worktree", ReasonAgentUnknown},
+		{"403 in hex id not auth", "refusing to write /users/u/ws-c403f1b9/worktree", ReasonAgentUnknown},
+		{"401 in hex id not auth", "artifact stored at /tmp/run-00be401d7c/output.log", ReasonAgentUnknown},
+		{"402 in hex id not quota", "cache dir /var/cache/ws-0000d402aa9f removed", ReasonAgentUnknown},
+		{"5xx in hex id not server error", "log at /ws/branch-c503ba4e/worktree", ReasonAgentUnknown},
+		// A model name carrying "500" before a letter is an identifier,
+		// not a status code — same widening, same rationale.
+		{"model name 500 suffix not server error", "artifact model-pack qwen3-500b saved", ReasonAgentUnknown},
+		// Widening must not dull real detection: a genuine status code
+		// next to hex IDs still classifies.
+		{"429 still capacity alongside hex ids", "commit e8574f2b retry failed: HTTP 429 too many requests", ReasonAgentProviderCapacityOrRateLimit},
+		{"503 still server error alongside letters", "model qwen3-500b request died with HTTP 503", ReasonAgentProviderServerError},
 	}
 
 	for _, c := range cases {
@@ -642,5 +669,93 @@ func TestClassifyKeepsDeadlineExceededAsProviderNetwork(t *testing.T) {
 
 	if got := Classify("post to provider: context deadline exceeded"); got != ReasonAgentProviderNetwork {
 		t.Errorf("Classify(provider deadline) = %q, want %q", got, ReasonAgentProviderNetwork)
+	}
+}
+
+// TestClassifyTokenQuotaIsCapacity pins per-minute token and request quota
+// rejections to the capacity bucket. Gateways answer them with the "token" and
+// "limit" words that rule 1 matches, so they are a rate limit, not a full
+// context window. Explicit overflow wording still lands in context_overflow.
+func TestClassifyTokenQuotaIsCapacity(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		in   string
+		want Reason
+	}{
+		{"TPM quota with rate_limit_error body", `API Error: Request rejected (429) · {"type":"error","error":{"type":"rate_limit_error","code":"429003","message":"Token usage exceeds the current model TPM (tokens per minute) limit 1000000. Please reduce the request frequency."}}`, ReasonAgentProviderCapacityOrRateLimit},
+		{"TPM quota without status line", "Token usage exceeds the current model TPM (tokens per minute) limit 4000000", ReasonAgentProviderCapacityOrRateLimit},
+		{"input tokens per minute rate limit", "This request would exceed your organization's rate limit of 30000 input tokens per minute", ReasonAgentProviderCapacityOrRateLimit},
+		{"explicit overflow beats quota wording", "prompt is too long: 250000 tokens > 200000 maximum (tokens per minute limit also reported)", ReasonAgentContextOverflow},
+		{"plain token limit stays overflow", "Hit the token limit for this conversation", ReasonAgentContextOverflow},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := Classify(tc.in); got != tc.want {
+				t.Errorf("Classify(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestNormalizeDaemonReasonUpgradesTokenQuota covers a daemon whose rule 1
+// predates the quota guard: it reports context_overflow for a TPM rejection,
+// and the server relabels it. An explicit overflow keeps its label.
+func TestNormalizeDaemonReasonUpgradesTokenQuota(t *testing.T) {
+	t.Parallel()
+
+	quota := "API Error: Request rejected (429) · Token usage exceeds the current model TPM (tokens per minute) limit 1000000"
+	if got := NormalizeDaemonReason(string(ReasonAgentContextOverflow), quota); got != ReasonAgentProviderCapacityOrRateLimit {
+		t.Errorf("NormalizeDaemonReason(context_overflow, TPM quota) = %q, want %q", got, ReasonAgentProviderCapacityOrRateLimit)
+	}
+	if got := NormalizeDaemonReason(string(ReasonAgentContextOverflow), "prompt is too long: tokens per minute limit reached"); got != ReasonAgentContextOverflow {
+		t.Errorf("explicit overflow relabelled to %q", got)
+	}
+	if got := NormalizeDaemonReason(string(ReasonAgentContextOverflow), "you exceeded the token limit"); got != ReasonAgentContextOverflow {
+		t.Errorf("ordinary token overflow changed to %q", got)
+	}
+}
+
+func TestTokenQuotaRequestSize(t *testing.T) {
+	t.Parallel()
+
+	const oversized = "Request too large for gpt-4o on tokens per min (TPM): Limit 30000, Requested 45000. The input or output tokens must be reduced in order to run successfully."
+	cases := []struct {
+		name string
+		in   string
+		want Reason
+	}{
+		{"Azure token rate limit without per-minute wording", "rate_limit_exceeded: Your requests to gpt-6.1-sol for gpt-6.1-sol in eastus2 have exceeded token rate limit.", ReasonAgentProviderCapacityOrRateLimit},
+		{"temporary TPM exhaustion", "Rate limit reached for gpt-4o on tokens per min (TPM): Limit 30000, Used 29000, Requested 2000. Please try again in 2s.", ReasonAgentProviderCapacityOrRateLimit},
+		{"single request exceeds TPM allowance", oversized, ReasonAgentContextOverflow},
+		{"single request exceeds TPM allowance with HTTP wrapper", "API Error: 429 " + oversized, ReasonAgentContextOverflow},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := Classify(tc.in); got != tc.want {
+				t.Errorf("Classify(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+			if got := NormalizeDaemonReason(string(ReasonAgentContextOverflow), tc.in); got != tc.want {
+				t.Errorf("NormalizeDaemonReason(context_overflow, %q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeDaemonReasonDistinguishesInsufficientBalanceFromRateLimit(t *testing.T) {
+	legacy := ReasonAgentProviderCapacityOrRateLimit.String()
+	for _, tc := range []struct {
+		raw  string
+		want Reason
+	}{
+		{"API Error: Request rejected (429) · [1113][Insufficient balance or no resource package. Please recharge.]", ReasonAgentProviderQuotaLimit},
+		{"API Error: 429 Too Many Requests", ReasonAgentProviderCapacityOrRateLimit},
+	} {
+		if got := NormalizeDaemonReason(legacy, tc.raw); got != tc.want {
+			t.Errorf("NormalizeDaemonReason(%q, %q) = %q, want %q", legacy, tc.raw, got, tc.want)
+		}
 	}
 }

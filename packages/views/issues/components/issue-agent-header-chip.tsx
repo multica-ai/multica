@@ -8,16 +8,17 @@ import {
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
 import { useActorName } from "@multica/core/workspace/hooks";
+import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { cn } from "@multica/ui/lib/utils";
 import { BorderBeam } from "@multica/ui/components/common/border-beam";
-import { api } from "@multica/core/api";
-import { issueKeys } from "@multica/core/issues/queries";
+import { issueTasksOptions } from "@multica/core/issues/queries";
 import type { AgentTask } from "@multica/core/types";
 import { TranscriptButton } from "../../common/task-transcript";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { ActiveTaskRow } from "./execution-log-section";
 import { useT } from "../../i18n";
 import { compareActiveIssueTasks } from "./active-task-order";
+import { groupExecutionTasksByActor } from "../surface/execution-actors";
 
 // Per-issue "is an agent working on this right now?" chip for the issue
 // detail header. Lives in the header (not the scrollable body) so the live
@@ -40,23 +41,21 @@ import { compareActiveIssueTasks } from "./active-task-order";
 // Hovering the chip opens a compact Popover card with the same active rows as
 // the right panel (click / keyboard still toggle it for touch and a11y). Those
 // rows show necessary status/time and task entry actions, but do not render
-// event counts or prefetch task messages for a count.
+// event counts or prefetch task messages for a count. Clicking a row's trigger
+// closes the card and takes the reader to that run's block in the timeline.
 
 interface IssueAgentHeaderChipProps {
   issueId: string;
+  onJumpToRun?: (taskId: string) => void;
 }
 
 export const IssueAgentHeaderChip = memo(function IssueAgentHeaderChip({
   issueId,
+  onJumpToRun,
 }: IssueAgentHeaderChipProps) {
   const { t } = useT("issues");
   // Same query options as ExecutionLogSection so both observe one cache entry.
-  const { data: tasks = [] } = useQuery({
-    queryKey: issueKeys.tasks(issueId),
-    queryFn: () => api.listTasksByIssue(issueId),
-    staleTime: 30_000,
-    refetchOnWindowFocus: true,
-  });
+  const { data: tasks = [] } = useQuery(issueTasksOptions(issueId));
 
   const { running, queued } = useMemo(() => {
     const running: AgentTask[] = [];
@@ -99,6 +98,7 @@ export const IssueAgentHeaderChip = memo(function IssueAgentHeaderChip({
           issueId={issueId}
           running={running}
           queued={queued}
+          onJumpToRun={onJumpToRun}
           onTranscriptOpenChange={(task, open, fromKeyboard) => {
             setOpenedTranscript(open ? { task, fromKeyboard } : null);
           }}
@@ -126,6 +126,7 @@ interface ActiveChipProps {
   issueId: string;
   running: AgentTask[];
   queued: AgentTask[];
+  onJumpToRun?: (taskId: string) => void;
   onTranscriptOpenChange: (
     task: AgentTask,
     open: boolean,
@@ -137,107 +138,157 @@ function ActiveChip({
   issueId,
   running,
   queued,
+  onJumpToRun,
   onTranscriptOpenChange,
 }: ActiveChipProps) {
   const { t } = useT("issues");
-  const { getActorName } = useActorName();
+  const { getActorName, getActorInitials, getActorAvatarUrl, hasActor } =
+    useActorName();
+  const isKnownSquad = useMemo(
+    () => (hasActor ? (id: string) => hasActor("squad", id) !== false : null),
+    [hasActor],
+  );
+  const [open, setOpen] = useState(false);
 
   const activeTasks = [...running, ...queued];
   const agentIds = [...new Set(activeTasks.map((task) => task.agent_id))];
+  const groupedActors = useMemo(
+    () => groupExecutionTasksByActor(activeTasks, isKnownSquad),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [running, queued, isKnownSquad],
+  );
+  const actors = groupedActors.map(({ type, id }) => ({ type, id }));
+  const hasSquadGroup = groupedActors.some((group) => group.type === "squad");
   const anyRunning = running.length > 0;
-  const isSingle = agentIds.length === 1;
+  const isSingle = groupedActors.length === 1;
+  const singleActor = groupedActors[0];
   // Copy must follow the actual state: "is working" only when something is
   // truly running. With nothing running (queued / dispatched / parked on a
-  // path lock) the chip reads "is queued" so a not-yet-started agent isn't
-  // mislabelled as working.
-  const label = isSingle
+  // path lock) the chip reads "is queued" so a not-yet-started agent or squad
+  // isn't mislabelled as working.
+  const label = isSingle && singleActor
     ? t(
         ($) =>
           anyRunning ? $.agent_live.is_working : $.agent_live.is_queued,
-        { name: getActorName("agent", agentIds[0] ?? "") },
+        { name: getActorName(singleActor.type, singleActor.id) },
       )
     : t(
         ($) =>
           anyRunning
             ? $.agent_activity.hover_header
             : $.agent_activity.hover_header_queued,
-        { count: agentIds.length },
+        { count: groupedActors.length },
       );
 
+  const renderTaskRow = (task: AgentTask) => (
+    <ActiveTaskRow
+      key={task.id}
+      task={task}
+      issueId={issueId}
+      onJump={
+        onJumpToRun
+          ? () => {
+              setOpen(false);
+              onJumpToRun(task.id);
+            }
+          : undefined
+      }
+      onTranscriptOpenChange={(isOpen, fromKeyboard) => {
+        onTranscriptOpenChange(task, isOpen, fromKeyboard === true);
+      }}
+    />
+  );
+
   return (
-    <div className="flex items-center gap-1">
-      <Popover>
-        {/* Hover opens the card so the live activity reads as a glanceable
-            status surface, not a click target. In Base UI the hover config
-            lives on the Trigger (a popover can have multiple triggers), not
-            the Root. The trigger stays a real button, so click and keyboard
-            (Enter/Space) still toggle it for touch and a11y. A short open
-            delay avoids flicker when the pointer merely passes over the chip;
-            the close delay keeps it open while the pointer travels across the
-            hover bridge into the interactive rows. */}
-        <PopoverTrigger
-          openOnHover
-          delay={150}
-          closeDelay={200}
-          render={
-            <button
-              type="button"
-              aria-label={label}
-              // While an agent is actively running, the chip wears the
-              // brand border beam — a highlight sweeping around its rounded
-              // edge — so a triggered run is unmistakably "alive" in the
-              // header. Queued-only state stays calm (no beam) to reserve the
-              // motion for work that is genuinely in flight.
-              className={cn(
-                "flex h-9 min-w-9 max-w-[11rem] items-center justify-center gap-1.5 rounded-md px-2 text-muted-foreground outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring md:h-7 md:min-w-0 md:justify-start md:px-1.5",
-                anyRunning && "relative bg-brand/5",
-              )}
-            />
-          }
-        >
-          <AgentAvatarStack
-            agentIds={agentIds}
-            size="sm"
-            max={3}
-            opacity={anyRunning ? "full" : "half"}
-          />
-          <span
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        openOnHover
+        delay={150}
+        closeDelay={200}
+        render={
+          <button
+            type="button"
+            aria-label={label}
             className={cn(
-              "hidden min-w-0 truncate text-caption md:inline",
-              anyRunning ? "text-info" : "text-muted-foreground",
+              "flex h-9 min-w-9 max-w-[11rem] items-center justify-center gap-1.5 rounded-md px-2 text-muted-foreground outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring md:h-7 md:min-w-0 md:justify-start md:px-1.5",
+              anyRunning && "relative bg-brand/5",
             )}
-          >
-            {label}
-          </span>
-          {anyRunning && <BorderBeam />}
-        </PopoverTrigger>
-        <PopoverContent align="end" keepMounted className="w-80">
-          <div className="text-caption font-medium text-muted-foreground">
-            {t(
-              ($) =>
-                anyRunning
-                  ? $.agent_activity.hover_header
-                  : $.agent_activity.hover_header_queued,
-              { count: agentIds.length },
+          />
+        }
+      >
+        <AgentAvatarStack
+          agentIds={agentIds}
+          actors={actors}
+          size="sm"
+          max={3}
+          opacity={anyRunning ? "full" : "half"}
+        />
+        <span
+          className={cn(
+            "hidden min-w-0 truncate text-caption md:inline",
+            anyRunning ? "text-info" : "text-muted-foreground",
+          )}
+        >
+          {label}
+        </span>
+        {anyRunning && <BorderBeam />}
+      </PopoverTrigger>
+      <PopoverContent align="end" keepMounted className="w-80">
+        <div className="text-caption font-medium text-muted-foreground">
+          {hasSquadGroup
+            ? t(($) => $.agent_activity.hover_header_tasks, {
+                count: activeTasks.length,
+              })
+            : t(
+                ($) =>
+                  anyRunning
+                    ? $.agent_activity.hover_header
+                    : $.agent_activity.hover_header_queued,
+                { count: agentIds.length },
+              )}
+        </div>
+        {hasSquadGroup ? (
+          <div className="mt-1.5 flex flex-col gap-2">
+            {groupedActors.map((group) =>
+              group.type === "squad" ? (
+                <div
+                  key={`squad:${group.id}`}
+                  className="overflow-hidden rounded-lg border border-border/80 bg-surface"
+                >
+                  <div className="flex items-center gap-2 border-b border-border/70 bg-muted/40 px-2.5 py-1.5">
+                    <ActorAvatarBase
+                      name={getActorName("squad", group.id)}
+                      initials={getActorInitials("squad", group.id)}
+                      avatarUrl={getActorAvatarUrl("squad", group.id)}
+                      isSquad
+                      size="sm"
+                    />
+                    <span className="min-w-0 flex-1 truncate text-caption font-semibold text-foreground">
+                      {getActorName("squad", group.id)}
+                    </span>
+                    <span className="shrink-0 text-micro tabular-nums text-muted-foreground">
+                      {t(($) => $.agent_activity.tasks_count, {
+                        count: group.tasks.length,
+                      })}
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-0.5 p-1">
+                    {group.tasks.map(renderTaskRow)}
+                  </div>
+                </div>
+              ) : (
+                <div key={`agent:${group.id}`} className="flex flex-col gap-0.5">
+                  {group.tasks.map(renderTaskRow)}
+                </div>
+              ),
             )}
           </div>
+        ) : (
           <div className="flex flex-col gap-0.5">
-            {activeTasks.map((task) => (
-              <ActiveTaskRow
-                key={task.id}
-                task={task}
-                issueId={issueId}
-                onTranscriptOpenChange={(open, fromKeyboard) => {
-                  onTranscriptOpenChange(task, open, fromKeyboard === true);
-                }}
-              />
-            ))}
+            {activeTasks.map(renderTaskRow)}
           </div>
-        </PopoverContent>
-      </Popover>
-      {/* Separator from the action buttons — the chip is a status segment,
-          not another button, so a hairline keeps the two groups legible. */}
-      <span className="h-4 w-px bg-border" aria-hidden="true" />
-    </div>
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }

@@ -1,0 +1,23 @@
+{
+  "a11y": {
+    "mention_someone": "提及某人",
+    "bullet_list": "無序列表",
+    "checklist": "清單",
+    "code_block": "程式碼塊",
+    "quote": "引用",
+    "attach_image": "新增圖片",
+    "attach_file": "新增檔案"
+  },
+  "code": {
+    "copied": "程式碼已複製",
+    "copy": "複製程式碼"
+  },
+  "upload": {
+    "file_too_large_title": "檔案過大",
+    "file_too_large_message": "檔案必須小於 100 MB。",
+    "failed": "上傳失敗",
+    "error": "未知錯誤",
+    "storage_full_title": "附件儲存空間已滿",
+    "storage_full_message": "這個檔案沒有上傳，既有附件不受影響。請聯絡管理員升級套餐，或刪除不需要的附件。"
+  }
+}

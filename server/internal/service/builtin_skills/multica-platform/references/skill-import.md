@@ -1,7 +1,8 @@
-# Importing skills
+# Importing and editing skills
 
 Use this when the user already provided a skill URL, slug, or a clear intent to
-import a specific skill into the current Multica workspace. It does not help you
+import a specific skill into the current Multica workspace, or when you are
+changing the content of a skill that is already there. It does not help you
 decide WHICH skill the user needs — if they only described a capability and no
 URL is known, external search may produce candidates, but importing starts only
 once a URL or concrete target exists.
@@ -14,6 +15,7 @@ once a URL or concrete target exists.
 - [Reserved SKILL.md supporting file](#reserved-skillmd-supporting-file)
 - [Same-name conflicts: --on-conflict](#same-name-conflicts---on-conflict)
 - [Updating an already-imported skill](#updating-an-already-imported-skill)
+- [Editing a skill's content](#editing-a-skills-content)
 - [Reading a skill back](#reading-a-skill-back)
 - [Incorrect to correct](#incorrect-to-correct)
 
@@ -63,6 +65,11 @@ multica skill import --url github.com/owner/repo/blob/main/path/to/SKILL.md --ou
 - A bare ClawHub slug (no host) is accepted and routed to ClawHub.
 - Any other host is rejected with a 400 naming the supported sources.
 
+URL imports and refreshes require every directory listing and eligible
+supporting-file download to succeed before saving the bundle. A failed refresh
+leaves the existing content, supporting files, and agent-skill bindings unchanged;
+a failed listing is not treated as an empty directory.
+
 ## Local archive import
 
 `multica skill import --file <path> --output json` imports a skill from a local
@@ -78,7 +85,7 @@ skill folder works too. The server:
   wrapper directory name and then the uploaded filename;
 - carries the supporting files — dropping any `SKILL.md`, dotfiles, `__MACOSX`,
   license files, and binary assets — under the same per-file (1 MiB),
-  per-bundle (8 MiB), and file-count (256) caps as URL imports, and rejects path
+  per-bundle (8 MiB), and file-count (512) caps as URL imports, and rejects path
   traversal (zip-slip);
 - returns the same structured result envelope and honors the same
   `--on-conflict` strategies as URL imports.
@@ -264,6 +271,35 @@ modes to report instead of retrying in a loop:
 - `403`: caller is neither the creator nor a workspace admin.
 - `502` / `503` / `504` / `413`: upstream fetch failed (gone, unavailable,
   timed out, or now exceeds import caps); the skill is left untouched.
+
+## Editing a skill's content
+
+`multica skill update --content-file` and `multica skill files upsert` replace
+the whole SKILL.md body or the whole file. Workspace skills are shared, and
+another agent may be editing the same one: an update based on what you read a
+minute ago silently erases whatever they saved in between. Always edit from a
+revision:
+
+```bash
+multica skill get <skill-id> --with-content --output json   # note "revision"
+# edit the content you just read, then:
+multica skill update <skill-id> --content-file ./SKILL.md --base-revision <revision> --output json
+multica skill files upsert <skill-id> --path notes.md --content-file ./notes.md --base-revision <revision> --output json
+multica skill files delete <skill-id> <file-id> --base-revision <revision>
+```
+
+Every successful write to the skill or any of its files moves `revision` up by
+exactly one, so when you make several writes in a row, pass your previous
+`--base-revision` plus one to the next. If someone else saved in between, that
+next write conflicts, as it should. When the skill changed since `--base-revision`, the server
+answers `409` with `"code": "revision_conflict"` and the current
+`actual_revision`, and nothing is written. Run `multica skill get --with-content`
+again, merge your change into the latest content, and retry with the new
+revision. Do not drop `--base-revision` to force the write through: that is the
+overwrite the check exists to stop.
+
+Without `--base-revision` the commands keep their old last-write-wins behavior,
+for scripts written before skill revisions existed.
 
 ## Reading a skill back
 

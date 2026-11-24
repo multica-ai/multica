@@ -43,10 +43,10 @@ func TestCursorRealSupplementReachesTheTurn(t *testing.T) {
 	session, err := backend.Execute(ctx,
 		"Run `sleep 5 && echo step-one` in the shell. After it finishes, run `echo step-two` in the shell. Then reply with a one-line summary.",
 		ExecOptions{
-			Cwd:                  t.TempDir(),
-			Timeout:              230 * time.Second,
-			EnableTaskSupplement: true,
-			CursorHookCommand:    []string{relay, CursorHookHelperArg},
+			Cwd:                   t.TempDir(),
+			Timeout:               230 * time.Second,
+			EnableTaskSupplement:  true,
+			SupplementHookCommand: []string{relay, CursorHookHelperArg},
 		})
 	if err != nil {
 		t.Fatalf("execute: %v", err)

@@ -19,14 +19,6 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run && bash scripts/ios-run.test.sh"
   },
-  "expo": {
-    "install": {
-      "exclude": [
-        "eslint-config-expo",
-        "typescript"
-      ]
-    }
-  },
   "dependencies": {
     "@expo/dom-webview": "~57.0.1",
     "@expo/metro-runtime": "~57.0.16",
@@ -69,6 +61,8 @@
     "i18next": "catalog:",
     "input-otp-native": "^0.5.0",
     "marked": "^18.0.3",
+    "mdast-util-from-markdown": "2.0.3",
+    "micromark-util-sanitize-uri": "2.0.1",
     "nativewind": "^4.1.23",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -97,8 +91,8 @@
     "@types/react": "~19.0.0",
     "cross-env": "^7.0.3",
     "dotenv-cli": "^7.4.4",
-    "eslint-config-expo": "~55.0.0",
-    "typescript": "~5.9.0",
+    "eslint-config-expo": "~57.0.2",
+    "typescript": "~6.0.3",
     "vitest": "catalog:"
   }
 }

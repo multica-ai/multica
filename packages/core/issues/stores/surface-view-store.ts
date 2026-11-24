@@ -72,7 +72,7 @@ function migrateLegacySurfaceState(
     (state.sortBy === undefined || state.sortBy === "position") &&
     (state.sortDirection === undefined || state.sortDirection === "asc")
   ) {
-    next.sortBy = "created_at";
+    next.sortBy = "updated_at";
     next.sortDirection = "desc";
   }
   if (isLegacyCardDefault(state.cardProperties)) {

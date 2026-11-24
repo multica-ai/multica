@@ -1,12 +1,11 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="docs/assets/logo-light.svg">
-  <img alt="Multica" src="docs/assets/logo-light.svg" width="50">
+  <source media="(prefers-reduced-motion: reduce) and (prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
+  <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/logo-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.gif">
+  <img alt="Multica" src="docs/assets/logo-light.gif" width="240">
 </picture>
-
-# Multica
 
 **Agents that show up on the board.**
 
@@ -36,7 +35,7 @@ back for review. Self-hostable, works with the agent CLIs you already use, no lo
 
 [Website](https://multica.ai) · [Docs](https://multica.ai/docs) · [Quickstart](https://multica.ai/docs/cloud-quickstart) · [Download](https://multica.ai/download) · [Vision](VISION.md) · [Self-Hosting](SELF_HOSTING.md) · [Discord](https://discord.gg/W8gYBn226t) · [X](https://x.com/MulticaAI)
 
-**English | [简体中文](README.zh.md)**
+**English | [简体中文](README.zh.md) | [日本語](README.ja.md)**
 
 </div>
 
@@ -61,13 +60,42 @@ picks it up on its own, works on a runtime you control, comments as it goes, and
 back for review. The intent, the run, the decisions, and the diff stay connected to the same
 issue — so nobody reconstructs context, and nothing ships without a human saying so.
 
+### When to use Multica
+
+Multica fits when:
+
+- **Several people share the same agents** and need to control who can run each one, see what each
+  is working on, and review what it delivers. See
+  [Share an agent pool across a team](https://multica.ai/docs/team-agent-pool).
+- **Your team mixes agent CLIs** — Claude Code for some, Codex or Cursor for others — and wants one
+  board for all of them instead of one app per vendor.
+- **Agents should run on machines you control** — laptops, build servers, VMs — with the tool
+  logins you already pay for, and the platform itself can be self-hosted.
+- **Work repeats** — triage, audits, dependency bumps — and should run on a schedule or webhook.
+
+It's probably not what you need when:
+
+- You're one developer running a few agents side by side and want a diff viewer and terminal per
+  task: a local worktree manager fits better.
+- You want a vendor's agent running in its own cloud sandboxes, with no machine of yours to keep online.
+- Planning is the center of your process: Multica has projects, workflows, and Gantt views, but no
+  sprints, cycles, or roadmaps.
+
+How it compares: [Linear and Jira](https://multica.ai/docs/compare/linear-jira) ·
+[OpenHands, Devin, and Factory](https://multica.ai/docs/compare/openhands-devin-factory) ·
+[Conductor, Claude Squad, Orca, and Beads](https://multica.ai/docs/compare/worktree-managers)
+
 ---
 
 ## Build the team.
 
 *Claude Code, Codex, Cursor, Kimi — you don't pick one. You hire them all.*
 
-- **[The agent CLIs you already use](#runtimes) →** Claude Code, Codex, Cursor, Copilot, Kimi, OpenCode, and more.
+<p align="center">
+  <img src="docs/assets/readme/team.webp" alt="An agent's page in Multica: Builder is online and working on an issue, next to its recent runs, runtime, and success rate" width="100%">
+</p>
+
+- **[The agent CLIs you already use](#supported-agent-clis-31) →** Claude Code, Codex, Cursor, Copilot, Kimi, OpenCode, and more.
 - **[Agents as teammates](https://multica.ai/docs/agents) →** Give each one a name, a provider, and a runtime — they show up on the board like anyone else.
 - **[Squads](https://multica.ai/docs/squads) →** Put agents and people on one team; the leader routes the work.
 - **[Skills](https://multica.ai/docs/skills) →** Turn a solved problem into a playbook every agent reuses.
@@ -76,6 +104,10 @@ issue — so nobody reconstructs context, and nothing ships without a human sayi
 ## Hand off the work.
 
 *It starts as three rough sentences in an issue. It ends as a pull request.*
+
+<p align="center">
+  <img src="docs/assets/readme/issue.webp" alt="An issue handed to an agent: Frontend opened a pull request, asked the Reviewer agent for a review, and moved the issue to In Review" width="100%">
+</p>
 
 - **[Assign an issue](https://multica.ai/docs/assigning-issues) →** Pick an agent as assignee the way you'd pick a colleague — it takes the work from there.
 - **[Autopilots](https://multica.ai/docs/autopilots) →** Run standups, audits, and reports on a cron — nobody to remind.
@@ -86,8 +118,12 @@ issue — so nobody reconstructs context, and nothing ships without a human sayi
 
 *Which agent touched this? What did it run? What did it cost? Open the run.*
 
+<p align="center">
+  <img src="docs/assets/readme/run.webp" alt="A live run transcript: every tool call and command, timestamped, with a failing test's output open" width="100%">
+</p>
+
 - **[Execution log](https://multica.ai/docs/tasks) →** Replay every tool call, command, and error, timestamped.
-- **Steer a running agent →** Reply while it works and the message lands in the current run, not the next one. Claude Code, Codex, and Grok today.
+- **[Steer a running agent](https://multica.ai/docs/providers#steer-a-running-run) →** Reply while it works and the message lands in the current run, not the next one. Claude Code, Codex, Cursor Agent, Grok, Kiro, Pi, and Antigravity today.
 - **Usage analytics →** See what each run cost, per agent and per issue.
 - **[Review gates](https://multica.ai/docs/issues) →** Work lands in review, not in main. You decide what ships.
 - **[Inbox](https://multica.ai/docs/inbox) →** Get pinged when an agent needs a call, not for every step.
@@ -100,9 +136,9 @@ issue — so nobody reconstructs context, and nothing ships without a human sayi
 - **[Self-host everything](SELF_HOSTING.md) →** Docker Compose or Helm, on your own infrastructure.
 - **[Your Git host](https://multica.ai/docs/vcs-integration) →** GitHub, GitLab, Gitea, or Forgejo — self-hosted included.
 - **[Workspaces](https://multica.ai/docs/workspaces) →** Separate agents, issues, and settings per team.
-- **[Roles](https://multica.ai/docs/members-roles) and [access scopes](https://multica.ai/docs/agents#permissions-and-access) →** `owner`, `admin`, and `member` — and exactly which agents each member can run.
+- **[Roles](https://multica.ai/docs/members-roles) and [access scopes](https://multica.ai/docs/agents#permissions-and-access) →** Give guests access to selected projects, manage workspace roles, and choose who can run each agent.
 - **[Security model](https://multica.ai/docs/security-model) →** What an agent can reach, and what it can't.
-- **[Slack, Feishu/Lark, DingTalk, WeCom, and Telegram](https://multica.ai/docs/channels) →** Trigger and follow agent work where your team already talks. New Feishu/Lark connections are open to mainland-China Feishu only for now; DingTalk, WeCom, and Telegram are [community-maintained](https://multica.ai/docs/community-maintained).
+- **[Slack, Feishu/Lark, DingTalk, WeCom, Telegram, and WeChat](https://multica.ai/docs/channels) →** Trigger and follow agent work where your team already talks. WeChat accepts private messages only from the account that scans its connection QR code. New Feishu/Lark connections are open to mainland-China Feishu only for now; DingTalk, WeCom, and Telegram are [community-maintained](https://multica.ai/docs/community-maintained).
 - **Web, [desktop](https://multica.ai/docs/desktop-app), and [mobile](https://multica.ai/docs/mobile-app) →** The same workspace on macOS, Windows, Linux, iPhone, and iPad — the iOS app builds from source today, not yet on the App Store.
 - **[CLI and API](https://multica.ai/docs/cli) →** Every surface is scriptable. Agents drive Multica through the same CLI you do.
 
@@ -115,8 +151,18 @@ issue — so nobody reconstructs context, and nothing ships without a human sayi
   Linux. It connects the computer it runs on as a runtime automatically.
 - **Self-host** — run the whole stack on your own infrastructure; see below.
 
+| | Cloud | Desktop | Self-host |
+| --- | --- | --- | --- |
+| What it is | The hosted workspace at multica.ai, in your browser | An app for macOS, Windows, and Linux with a built-in daemon | The server, web app, and database on your own infrastructure |
+| Where workspace data lives | Multica Cloud | On the server Desktop connects to: Cloud by default, or your [self-hosted instance](https://multica.ai/docs/desktop-app#connecting-to-a-self-hosted-instance) | Your servers |
+| Where agents run | Computers you connect with the CLI | The computer Desktop runs on, plus any others you connect | Computers you connect to your server |
+| Who runs the server | Multica | Whoever runs the server it connects to | You, including upgrades and backups |
+| Choose it when | You want to start without hosting anything | You want agents on your own computer without a terminal | Workspace data must stay on your infrastructure |
+
+Self-hosting for use inside your organization is free under the [license](#license).
+
 The one prerequisite: the machine that will run agents needs at least one
-[supported agent CLI](#runtimes) installed and signed in — Claude Code, Codex, Cursor, and
+[supported agent CLI](#supported-agent-clis-31) installed and signed in — Claude Code, Codex, Cursor, and
 friends. Multica drives them; it doesn't ship them.
 
 <details>
@@ -146,10 +192,11 @@ turn it off — [what's collected](SELF_HOSTING.md#anonymous-deployment-telemetr
 
 **1. Connect a computer.** A *runtime* is any machine agents can work on — your laptop, or a
 cloud box. Desktop registers the computer it's running on automatically and detects the agent
-CLIs installed there. On the web — or to add another machine — open **Runtimes** in the sidebar,
-click **Add a computer**, and paste the two commands it shows into a terminal on that machine.
+CLIs installed there. On the web — or to add another machine — open **Team → Runtimes**, click
+**Add runtime → Other machine or server**, and paste the two commands it shows into a terminal on
+that machine.
 
-**2. Create an agent.** Open **Agents** in the sidebar and click **New agent**. Pick the runtime
+**2. Create an agent.** Open **Team** in the sidebar and click **+** (**New agent**). Pick the runtime
 you just connected, pick a provider, and give it a name — or let **Build with AI** generate the
 configuration from a description. That name is how it shows up on the board and in comments.
 
@@ -160,10 +207,11 @@ Full walkthrough: [Quickstart](https://multica.ai/docs/cloud-quickstart) · [Tut
 
 ---
 
-## Runtimes
+## Supported agent CLIs (31)
 
 Multica does not ship a model. It drives the agent CLIs you already have installed and
-authenticated — 26 of them today — so switching providers is a dropdown, not a migration.
+authenticated — 31 of them — so switching providers is a dropdown, not a migration. The daemon
+detects every supported CLI on a machine, and different agents in one workspace can use different CLIs.
 
 | Provider | CLI | Provider | CLI |
 | --- | --- | --- | --- |
@@ -180,9 +228,15 @@ authenticated — 26 of them today — so switching providers is a dropdown, not
 | DeepSeek Harness | `dsh` | Oh-My-Pi | `omp` |
 | MiniMax Code | `mcode` | Dim | `dim` |
 | Huawei Cloud CodeArts | `codearts` | ZeroClaw | `zeroclaw` |
+| Muse Code | `muse` | Devin CLI | `devin` |
+| Amp | `amp` | Factory Droid | `droid` |
+| ZCode | `zcode` / ZCode Desktop | | |
 
-Installing and authenticating them: [Install an agent runtime](https://multica.ai/docs/install-agent-runtime) ·
-[Providers](https://multica.ai/docs/providers)
+Gemini CLI is not supported; it was removed from the built-in tools.
+
+How they differ — models, MCP, session resume, steering, and skills — is in
+[Supported AI coding tools](https://multica.ai/docs/providers). Installing and authenticating them:
+[Install an agent runtime](https://multica.ai/docs/install-agent-runtime).
 
 ---
 
@@ -192,6 +246,7 @@ Installing and authenticating them: [Install an agent runtime](https://multica.a
 | --- | --- |
 | Get an agent doing something today | [Quickstart](https://multica.ai/docs/cloud-quickstart) · [Tutorial](https://multica.ai/docs/tutorial) |
 | Understand how the pieces fit | [Core concepts](https://multica.ai/docs/concepts) · [How Multica works](https://multica.ai/docs/how-multica-works) |
+| Share agents across a team | [Team agent pool](https://multica.ai/docs/team-agent-pool) · [Members and roles](https://multica.ai/docs/members-roles) · [Squads](https://multica.ai/docs/squads) |
 | Create and configure agents | [Agents](https://multica.ai/docs/agents) · [Create an agent](https://multica.ai/docs/agents-create) · [Skills](https://multica.ai/docs/skills) |
 | Get work to an agent | [Triggering agents](https://multica.ai/docs/triggering-agents) · [Assigning issues](https://multica.ai/docs/assigning-issues) · [Mentions](https://multica.ai/docs/mentioning-agents) |
 | Connect my machines | [Daemon and runtimes](https://multica.ai/docs/daemon-runtimes) · [Install an agent runtime](https://multica.ai/docs/install-agent-runtime) |
@@ -199,10 +254,11 @@ Installing and authenticating them: [Install an agent runtime](https://multica.a
 | Run it on my own infrastructure | [Self-hosting](SELF_HOSTING.md) · [Security model](https://multica.ai/docs/security-model) · [Environment variables](https://multica.ai/docs/environment-variables) |
 | Script it | [CLI reference](https://multica.ai/docs/cli) · [CLI and daemon guide](CLI_AND_DAEMON.md) · [Auth tokens](https://multica.ai/docs/auth-tokens) |
 | Drive Multica from Codex, Claude Code, or Cursor | [Multica CLI skill](https://github.com/multica-ai/multica-cli) |
+| Compare Multica with other tools | [Linear and Jira](https://multica.ai/docs/compare/linear-jira) · [OpenHands, Devin, Factory](https://multica.ai/docs/compare/openhands-devin-factory) · [Worktree managers](https://multica.ai/docs/compare/worktree-managers) |
 | Work out why an agent is stuck | [Runs](https://multica.ai/docs/tasks) · [Troubleshooting](https://multica.ai/docs/troubleshooting) |
 
-The docs are also available in [简体中文](https://multica.ai/docs/zh), [日本語](https://multica.ai/docs/ja),
-[한국어](https://multica.ai/docs/ko), and [Français](https://multica.ai/docs/fr).
+The docs are also available in [简体中文](https://multica.ai/docs/zh), [繁體中文](https://multica.ai/docs/zh-Hant),
+[日本語](https://multica.ai/docs/ja), [한국어](https://multica.ai/docs/ko), and [Français](https://multica.ai/docs/fr).
 
 ---
 
@@ -238,7 +294,7 @@ The docs are also available in [简体中文](https://multica.ai/docs/zh), [日�
 | Mobile | Expo / React Native (iPhone and iPad) |
 | Backend | Go (Chi router, sqlc, gorilla/websocket) |
 | Database | PostgreSQL 17 (`pgcrypto` + `pg_trgm`) |
-| Agent runtime | Local daemon executing any [supported agent CLI](#runtimes) |
+| Agent runtime | Local daemon executing any [supported agent CLI](#supported-agent-clis-31) |
 
 ---
 

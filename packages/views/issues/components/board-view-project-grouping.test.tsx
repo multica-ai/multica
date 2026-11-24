@@ -17,6 +17,10 @@ import { renderWithI18n } from "../../test/i18n";
 import { IssueContextMenuProvider } from "../actions/issue-actions-context-menu";
 import type { IssueGroupBranches } from "../surface/use-issue-group-branches";
 import { BoardView } from "./board-view";
+import {
+  ScrollRestorationProvider,
+  type ScrollRestorationAdapter,
+} from "../../platform";
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 
@@ -196,9 +200,11 @@ describe("Board grouped by project", () => {
   function render({
     descriptors = [NO_PROJECT_DESCRIPTOR, ...PROJECT_DESCRIPTORS],
     issues = ISSUES,
+    scrollAdapter = { get: () => undefined },
   }: {
     descriptors?: IssueGroupBranches["descriptors"];
     issues?: Issue[];
+    scrollAdapter?: ScrollRestorationAdapter;
   } = {}) {
     const store = getIssueSurfaceViewStore(
       `board-project-${Math.floor(Math.random() * 1e9)}`,
@@ -212,11 +218,11 @@ describe("Board grouped by project", () => {
     renderWithI18n(
       <QueryClientProvider client={queryClient}>
         <ViewStoreProvider store={store}>
+          <ScrollRestorationProvider adapter={scrollAdapter}>
           <IssueContextMenuProvider>
           <BoardView
             issues={issues}
             visibleStatuses={["todo"]}
-            hiddenStatuses={[]}
             onMoveIssue={() => {}}
             projectMap={
               new Map([[ACME_ID, makeProject(ACME_ID, "Acme Corp", "🚀")]])
@@ -224,6 +230,7 @@ describe("Board grouped by project", () => {
             groupBranches={makeGroupBranches(descriptors, issues)}
           />
           </IssueContextMenuProvider>
+          </ScrollRestorationProvider>
         </ViewStoreProvider>
       </QueryClientProvider>,
     );
@@ -289,5 +296,20 @@ describe("Board grouped by project", () => {
     const acmeColumn = screen.getByText("Acme Corp").closest("div.flex-col")!;
     expect(acmeColumn.textContent).toContain("MUL-acme");
     expect(acmeColumn.textContent).not.toContain("MUL-loose");
+  });
+
+  it("brings the column strip back to where it was scrolled sideways", () => {
+    render({
+      scrollAdapter: {
+        get: (key) =>
+          key === "board" ? { top: 0, height: 600, left: 480 } : undefined,
+      },
+    });
+
+    const strip = document.querySelector<HTMLElement>("[data-board-scroller]")!;
+    // Marked so the tab coordinator captures it on the way out …
+    expect(strip.getAttribute("data-tab-scroll-root")).toBe("board");
+    // … and given the saved offset back when it mounts again.
+    expect(strip.scrollLeft).toBe(480);
   });
 });

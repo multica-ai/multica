@@ -1,0 +1,101 @@
+{
+  "untitled": "Tanpa judul",
+  "version_number": "v{{number}}",
+  "kb": "Dokumen",
+  "actions": {
+    "new": "Baru",
+    "new_doc": "Dokumen baru",
+    "new_folder": "Folder baru",
+    "rename": "Ganti nama",
+    "move": "Pindahkan ke...",
+    "delete": "Hapus",
+    "cancel": "Batal",
+    "history": "Riwayat",
+    "more": "Lainnya",
+    "copy_link": "Salin tautan"
+  },
+  "errors": {
+    "move": "Tidak dapat memindahkan item",
+    "delete": "Tidak dapat menghapus item",
+    "save": "Tidak dapat menyimpan perubahan"
+  },
+  "move": {
+    "title": "Pindahkan \"{{title}}\"",
+    "destination": "Tujuan",
+    "root": "Dokumen (tingkat teratas)",
+    "current": "Saat ini",
+    "confirm": "Pindahkan"
+  },
+  "delete": {
+    "title": "Hapus dokumen ini?",
+    "description": "\"{{title}}\" beserta seluruh riwayatnya akan dihapus. Tindakan ini tidak dapat dibatalkan.",
+    "confirm": "Hapus",
+    "folder_title": "Hapus folder ini?",
+    "folder_description": "Hapus \"{{title}}\"? Hanya folder kosong yang dapat dihapus. Tindakan ini tidak dapat dibatalkan."
+  },
+  "tree": {
+    "more": "Tindakan lainnya untuk {{title}}",
+    "empty": "Belum ada dokumen",
+    "new_doc_in": "Dokumen baru di {{title}}"
+  },
+  "editor": {
+    "placeholder": "Tulis, atau ketik / untuk perintah...",
+    "title_label": "Judul",
+    "saving": "Menyimpan...",
+    "saved": "Tersimpan",
+    "save_failed": "Belum tersimpan · Coba lagi",
+    "retry": "Coba lagi",
+    "conflict": "Diperbarui oleh {{name}}. Draf Anda tetap tersimpan. Muat ulang untuk melanjutkan.",
+    "reload": "Muat versi terbaru",
+    "draft": "Draf tersimpan Anda",
+    "unsaved_changes": "Perubahan belum disimpan",
+    "live": "Langsung",
+    "reconnecting": "Menyambung kembali...",
+    "connecting": "Menyambung...",
+    "title_save_failed": "Judul belum tersimpan",
+    "editing_now": "Sedang mengedit"
+  },
+  "history": {
+    "title": "Riwayat",
+    "current": "Saat ini",
+    "restore": "Pulihkan versi ini",
+    "loading": "Memuat..."
+  },
+  "not_found": {
+    "title": "Dokumen tidak ditemukan",
+    "description": "Dokumen mungkin telah dihapus."
+  },
+  "edited": "Diedit {{time}}",
+  "view_history": "Lihat riwayat",
+  "outline": "Kerangka",
+  "link_copied": "Tautan disalin",
+  "unavailable": {
+    "title": "Dokumen belum diaktifkan di workspace ini",
+    "description": "Workspace ini belum mengaktifkan Dokumen."
+  },
+  "comments": {
+    "title": "Komentar",
+    "add": "Komentar",
+    "open": "Terbuka {{count}}",
+    "resolved": "Selesai {{count}}",
+    "close": "Tutup komentar",
+    "quote_missing": "Teks yang dikomentari telah diubah",
+    "reply_placeholder": "Balas, atau @ seseorang...",
+    "new_placeholder": "Tambahkan komentar, atau @ seseorang...",
+    "submit": "Komentar",
+    "reply": "Balas",
+    "cancel": "Batal",
+    "resolve": "Tandai selesai",
+    "reopen": "Buka kembali",
+    "delete": "Hapus komentar",
+    "resolved_by": "Diselesaikan oleh {{name}}",
+    "replies_other": "{{count}} balasan",
+    "empty_open": "Tidak ada komentar terbuka. Pilih teks lalu pilih Komentar untuk memulai.",
+    "empty_resolved": "Tidak ada komentar yang selesai.",
+    "errors": {
+      "save": "Tidak dapat mengirim komentar",
+      "delete": "Tidak dapat menghapus komentar",
+      "resolve": "Tidak dapat memperbarui komentar"
+    }
+  }
+}

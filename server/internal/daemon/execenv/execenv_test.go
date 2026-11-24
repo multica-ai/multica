@@ -735,6 +735,21 @@ func TestProjectReposReplaceWorkspaceReposInMetaSkill(t *testing.T) {
 	}
 }
 
+func TestProjectContextNotesArchivedProject(t *testing.T) {
+	t.Parallel()
+	for _, archived := range []bool{false, true} {
+		var b strings.Builder
+		writeProjectContext(&b, TaskContextForEnv{
+			ProjectID:       "22222222-3333-4444-5555-666666666666",
+			ProjectTitle:    "Old Project",
+			ProjectArchived: archived,
+		})
+		if got := strings.Contains(b.String(), "This project is **archived**"); got != archived {
+			t.Errorf("archived=%v: brief archived note present=%v:\n%s", archived, got, b.String())
+		}
+	}
+}
+
 func TestWriteProjectResourcesSkippedWhenNone(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -822,7 +837,7 @@ func TestWriteContextFiles(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "", ctx, nil); err != nil {
+	if _, err := writeContextFiles(dir, "", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -863,7 +878,7 @@ func TestWriteContextFilesLeavesNoAgentContextWhenNothingToWrite(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	if err := writeContextFiles(dir, "", TaskContextForEnv{IssueID: "minimal-issue-id"}, nil); err != nil {
+	if _, err := writeContextFiles(dir, "", TaskContextForEnv{IssueID: "minimal-issue-id"}, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -894,7 +909,7 @@ func TestWriteContextFilesClaudeNativeSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "claude", ctx, nil); err != nil {
+	if _, err := writeContextFiles(dir, "claude", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -954,7 +969,7 @@ func TestWriteContextFilesCodebuddyNativeSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "codebuddy", ctx, nil); err != nil {
+	if _, err := writeContextFiles(dir, "codebuddy", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -1159,7 +1174,7 @@ func TestReuseSkillRefreshIsCanonicalAcrossProviders(t *testing.T) {
 
 			// First dispatch: write context + persist the manifest.
 			m1 := &sidecarManifest{}
-			if err := writeContextFiles(workDir, provider, task, m1); err != nil {
+			if _, err := writeContextFiles(workDir, provider, task, m1); err != nil {
 				t.Fatalf("first writeContextFiles: %v", err)
 			}
 			if err := writeSidecarManifest(envRoot, m1); err != nil {
@@ -1181,7 +1196,7 @@ func TestReuseSkillRefreshIsCanonicalAcrossProviders(t *testing.T) {
 				t.Fatalf("CleanupSidecars: %v", err)
 			}
 			m2 := &sidecarManifest{}
-			if err := writeContextFiles(workDir, provider, task, m2); err != nil {
+			if _, err := writeContextFiles(workDir, provider, task, m2); err != nil {
 				t.Fatalf("second writeContextFiles: %v", err)
 			}
 			if err := writeSidecarManifest(envRoot, m2); err != nil {
@@ -1314,6 +1329,8 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 	}{
 		{"claude", "CLAUDE.md"},
 		{"codex", "AGENTS.md"},
+		{"codebuddy", "CODEBUDDY.md"},
+		{"antigravity", "AGENTS.md"},
 		{"opencode", "AGENTS.md"},
 		{"codearts", "AGENTS.md"},
 		{"hermes", "AGENTS.md"},
@@ -1332,6 +1349,26 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 				t.Fatalf("read %s: %v", tc.file, err)
 			}
 			s := string(data)
+			providerPins := []string{
+				"no background-completion wakeup",
+				"whatever a tool response promises",
+				"Never background-and-yield",
+			}
+			if tc.name == "antigravity" {
+				// Its model subturn can end while the same agy process waits.
+				// Detached processes and the shared CI contract stay restricted.
+				providerPins = []string{
+					"completion notifications in the same process",
+					"yield the model subturn while waiting",
+					"without polling `manage_task` or task logs",
+					"have no such wakeup",
+				}
+			}
+			for _, want := range providerPins {
+				if !strings.Contains(s, want) {
+					t.Errorf("%s missing provider boundary %q", tc.name, want)
+				}
+			}
 			for _, want := range []string{
 				"## Background Task Safety",
 				// MUL-5442 judgment rewrite (owner-authorized pin renegotiation): the
@@ -1345,12 +1382,9 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 				// What stays pinned: the fact, each boundary, each exception, and
 				// the handoff triple — the things an agent cannot infer.
 				"any run-owned work still active is orphaned",
-				"no background-completion wakeup",
-				"whatever a tool response promises",
-				"Never background-and-yield",
+				"standing by",
 				"foreground tool calls that block",
 				"run unobservable work synchronously",
-				"standing by",
 				"are not run-owned: do not wait",
 				// The full compound ban, not its first item — MUL-5223 made this a
 				// non-derivable boundary, so no member may be silently dropped.
@@ -1555,7 +1589,7 @@ func TestWriteContextFilesCopilotNativeSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "copilot", ctx, nil); err != nil {
+	if _, err := writeContextFiles(dir, "copilot", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -1609,7 +1643,7 @@ func TestWriteContextFilesOpencodeNativeSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "opencode", ctx, nil); err != nil {
+	if _, err := writeContextFiles(dir, "opencode", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -1688,7 +1722,7 @@ func TestWriteContextFilesForcesSkillFrontmatterNameToSlug(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "opencode", ctx, nil); err != nil {
+	if _, err := writeContextFiles(dir, "opencode", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -1732,7 +1766,7 @@ func TestWriteContextFilesFrontmatterNameFollowsCollisionSlug(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "opencode", ctx, nil); err != nil {
+	if _, err := writeContextFiles(dir, "opencode", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -1774,7 +1808,7 @@ func TestWriteContextFilesLeavesNestedFrontmatterNameAlone(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "opencode", ctx, nil); err != nil {
+	if _, err := writeContextFiles(dir, "opencode", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -1813,7 +1847,7 @@ func TestWriteContextFilesInjectsNameIntoNamelessFrontmatter(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "opencode", ctx, nil); err != nil {
+	if _, err := writeContextFiles(dir, "opencode", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -1851,7 +1885,7 @@ func TestWriteContextFilesOpenclawNativeSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "openclaw", ctx, nil); err != nil {
+	if _, err := writeContextFiles(dir, "openclaw", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -1891,7 +1925,7 @@ func TestWriteContextFilesKiroNativeSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "kiro", ctx, nil); err != nil {
+	if _, err := writeContextFiles(dir, "kiro", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -1918,7 +1952,7 @@ func TestWriteContextFilesQoderNativeSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "qoder", ctx, nil); err != nil {
+	if _, err := writeContextFiles(dir, "qoder", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -1945,7 +1979,7 @@ func TestWriteContextFilesQoderCNNativeSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "qoderclicn", ctx, nil); err != nil {
+	if _, err := writeContextFiles(dir, "qoderclicn", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -1972,7 +2006,7 @@ func TestWriteContextFilesQwenNativeSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "qwen", ctx, nil); err != nil {
+	if _, err := writeContextFiles(dir, "qwen", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -2193,7 +2227,7 @@ func TestWriteContextFilesAntigravityNativeSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "antigravity", ctx, nil); err != nil {
+	if _, err := writeContextFiles(dir, "antigravity", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -2681,7 +2715,7 @@ func TestWriteContextFilesHermesSkipsWorkdirSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "hermes", ctx, nil); err != nil {
+	if _, err := writeContextFiles(dir, "hermes", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -4872,8 +4906,8 @@ func TestPrepareCodexSeedsUserSkills(t *testing.T) {
 
 	if data, err := os.ReadFile(filepath.Join(env.CodexHome, "skills", "summarize", "SKILL.md")); err != nil {
 		t.Fatalf("user skill SKILL.md not seeded: %v", err)
-	} else if string(data) != "summarize" {
-		t.Errorf("summarize SKILL.md = %q, want %q", data, "summarize")
+	} else if !strings.HasSuffix(string(data), "summarize") || !strings.Contains(string(data), "name: summarize") || !strings.Contains(string(data), "description:") {
+		t.Errorf("summarize SKILL.md not normalized: %q", data)
 	}
 	if data, err := os.ReadFile(filepath.Join(env.CodexHome, "skills", "summarize", "examples", "ex.md")); err != nil {
 		t.Fatalf("user skill support file not seeded: %v", err)
@@ -4882,8 +4916,8 @@ func TestPrepareCodexSeedsUserSkills(t *testing.T) {
 	}
 	if data, err := os.ReadFile(filepath.Join(env.CodexHome, "skills", "translate", "SKILL.md")); err != nil {
 		t.Fatalf("second user skill not seeded: %v", err)
-	} else if string(data) != "translate" {
-		t.Errorf("translate SKILL.md = %q, want %q", data, "translate")
+	} else if !strings.HasSuffix(string(data), "translate") || !strings.Contains(string(data), "name: translate") || !strings.Contains(string(data), "description:") {
+		t.Errorf("translate SKILL.md not normalized: %q", data)
 	}
 	if _, err := os.Stat(filepath.Join(env.CodexHome, "skills", ".DS_Store")); !os.IsNotExist(err) {
 		t.Errorf("ignored dotfile leaked into codex-home/skills: err=%v", err)
@@ -4985,10 +5019,11 @@ func TestPrepareCodexResolvesUserSkillSymlinks(t *testing.T) {
 	t.Setenv("CODEX_HOME", sharedHome)
 
 	installerRoot := filepath.Join(t.TempDir(), "installer", "lark-mail")
+	const skillContent = "---\nname: lark-mail\ndescription: Mail instructions\n---\nlark"
 	if err := os.MkdirAll(installerRoot, 0o755); err != nil {
 		t.Fatalf("seed installer dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(installerRoot, "SKILL.md"), []byte("lark"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(installerRoot, "SKILL.md"), []byte(skillContent), 0o644); err != nil {
 		t.Fatalf("seed installer SKILL.md: %v", err)
 	}
 
@@ -5032,8 +5067,8 @@ func TestPrepareCodexResolvesUserSkillSymlinks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seeded SKILL.md missing: %v", err)
 	}
-	if string(data) != "lark" {
-		t.Errorf("seeded SKILL.md = %q, want %q", data, "lark")
+	if string(data) != skillContent {
+		t.Errorf("seeded SKILL.md = %q, want %q", data, skillContent)
 	}
 }
 
@@ -5081,8 +5116,9 @@ func TestReuseSeedsUserSkillUpdates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("user skill not refreshed on reuse: %v", err)
 	}
-	if string(data) != "v2" {
-		t.Errorf("after Reuse, user skill content = %q, want %q", data, "v2")
+	want := synthesizeFrontmatter("v2", "summarize", "Instructions for the summarize skill.")
+	if string(data) != want {
+		t.Errorf("after Reuse, user skill content = %q, want %q", data, want)
 	}
 }
 

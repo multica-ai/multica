@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, Gauge } from "lucide-react";
+import { ChevronDown, Gauge } from "@multica/ui/icons";
 import type { RuntimeModelServiceTier } from "@multica/core/types";
 import { runtimeModelsOptions } from "@multica/core/runtimes";
 import {
@@ -12,6 +12,7 @@ import {
 import { SettingsRow } from "../../../settings/components/settings-layout";
 import { useT } from "../../../i18n";
 import { findModelCapabilityEntry } from "./model-capability";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 
 /**
  * Full-width service-tier field for Codex agents. Capability comes from the
@@ -162,14 +163,15 @@ function ServiceTierPicker({
         </PickerItem>
       ))}
       {value ? (
-        <button
-          type="button"
-          onClick={() => void select("")}
-          className="mt-1 flex w-full items-center border-t px-3 py-2 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50"
-          title={t(($) => $.pickers.service_tier_clear_title)}
-        >
-          {t(($) => $.pickers.service_tier_clear)}
-        </button>
+        <TooltipHint label={t(($) => $.pickers.service_tier_clear_title)}>
+          <button
+            type="button"
+            onClick={() => void select("")}
+            className="mt-1 flex w-full items-center border-t px-3 py-2 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50"
+          >
+            {t(($) => $.pickers.service_tier_clear)}
+          </button>
+        </TooltipHint>
       ) : null}
     </PropertyPicker>
   );

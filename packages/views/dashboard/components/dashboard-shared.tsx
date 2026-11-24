@@ -1,5 +1,9 @@
 "use client";
 
+import { useId } from "react";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
+import { UI_INDICATOR_SPRING } from "@multica/ui/lib/motion";
 import {
   NumberFlow,
   NumberFlowGroup,
@@ -9,7 +13,7 @@ import { formatDuration } from "../utils";
 // Period selector — mirrors the runtime detail page so users see the same
 // option set across both dashboards. `dims` declares which chart dimensions
 // each range may be drawn at: 1d / 7d at the weekly grain collapse to a single
-// bar, 180d at the daily grain is 180 unreadable bars.
+// bar, 180d / 365d at the daily grain are hundreds of unreadable bars.
 //
 // 1d semantic: "today" (the natural calendar day from 00:00 in the viewer's
 // timezone), not "the last 24 hours". The `dailyCutoffIso` filter on the page
@@ -20,9 +24,20 @@ export const TIME_RANGES = [
   { label: "30d", days: 30, dims: ["daily", "weekly"] as const },
   { label: "90d", days: 90, dims: ["daily", "weekly"] as const },
   { label: "180d", days: 180, dims: ["weekly"] as const },
+  { label: "365d", days: 365, dims: ["weekly"] as const },
 ] as const;
 
 export type TimeRange = (typeof TIME_RANGES)[number]["days"];
+export type TimeRangeOption = (typeof TIME_RANGES)[number];
+
+/**
+ * The ranges the dashboard offers. 365d follows the dashboard_history_365d
+ * flag: on by default on servers that support it, and a kill switch should
+ * the year-long queries be too slow for a deployment (MUL-9490).
+ */
+export function dashboardTimeRanges(allowYear: boolean): readonly TimeRangeOption[] {
+  return allowYear ? TIME_RANGES : TIME_RANGES.filter((r) => r.days !== 365);
+}
 export type Dim = "daily" | "weekly";
 
 /**
@@ -45,6 +60,10 @@ export function dimsForDays(days: TimeRange): readonly Dim[] {
 /** Sentinel for "no project filter" — kept distinct from the empty string so
  *  it survives a refactor that ever lets a project be slug-keyed. */
 export const ALL_PROJECTS = "__all__";
+
+/** Sentinels for the dashboard's attribution (Squad / standalone) filter. */
+export const ALL_SQUADS = "__all__";
+export const STANDALONE_SQUAD = "__standalone__";
 
 /**
  * Card-local segmented control — the pill toggle used *inside* a card to pick
@@ -72,27 +91,43 @@ export function Segmented<T extends string | number>({
   options: readonly { label: string; value: T }[];
   label: string;
 }) {
+  const indicatorId = useId();
+  const prefersReducedMotion = useReducedMotion();
+  const transition = prefersReducedMotion ? { duration: 0 } : UI_INDICATOR_SPRING;
+
   return (
     <div
       role="group"
       aria-label={label}
       className="inline-flex items-center gap-0.5 rounded-md bg-muted p-0.5"
     >
-      {options.map((o) => (
-        <button
-          key={String(o.value)}
-          type="button"
-          aria-pressed={o.value === value}
-          onClick={() => onChange(o.value)}
-          className={`rounded-sm px-2.5 py-1 text-caption font-medium transition-colors ${
-            o.value === value
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          {o.label}
-        </button>
-      ))}
+      {options.map((o) => {
+        const active = o.value === value;
+        return (
+          <button
+            key={String(o.value)}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChange(o.value)}
+            className={`relative rounded-sm px-2.5 py-1 text-caption font-medium transition-colors ${
+              active
+                ? "text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {active && (
+              <motion.span
+                layoutId={indicatorId}
+                transition={transition}
+                aria-hidden="true"
+                data-slot="segmented-indicator"
+                className="pointer-events-none absolute inset-0 rounded-sm bg-background shadow-sm"
+              />
+            )}
+            <span className="relative z-10">{o.label}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

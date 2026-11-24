@@ -613,6 +613,9 @@ func TestNewAPIClient_AgentContextRequiresTaskToken(t *testing.T) {
 		if !strings.Contains(err.Error(), "mat_ token") {
 			t.Fatalf("newAPIClient() error = %q, want mat_ token guidance", err.Error())
 		}
+		if strings.Contains(err.Error(), "preserve-env") {
+			t.Fatalf("newAPIClient() error = %q, secrets manager hint is only for a replaced mul_ token", err.Error())
+		}
 	})
 
 	t.Run("member token fails closed", func(t *testing.T) {
@@ -624,6 +627,16 @@ func TestNewAPIClient_AgentContextRequiresTaskToken(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "mat_ token") {
 			t.Fatalf("newAPIClient() error = %q, want mat_ token guidance", err.Error())
+		}
+		// #7666: a secrets manager wrapping the runtime re-exported a
+		// project-level PAT over the injected task token.
+		for _, want := range []string{"secrets manager", "--preserve-env=MULTICA_TOKEN", "daemon-runtimes#secrets-managers"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("newAPIClient() error = %q, want %q", err.Error(), want)
+			}
+		}
+		if strings.Contains(err.Error(), "mul_member_token") {
+			t.Fatalf("newAPIClient() error leaked the token: %q", err.Error())
 		}
 	})
 

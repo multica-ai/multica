@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -74,6 +75,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		cmd.Dir = opts.Cwd
 	}
 	cmd.Env = buildEnv(b.cfg.Env)
+	kimiHome := kimiChildHome(cmd.Env, cmd.Dir)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -495,6 +497,13 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			fallbackModel = "unknown"
 		}
 
+		wireScan := kimiUsageScan{
+			startTime:     startTime,
+			kimiHome:      kimiHome,
+			sessionID:     sessionID,
+			resumed:       opts.ResumeSessionID != "",
+			fallbackModel: fallbackModel,
+		}
 		var usageMap map[string]TokenUsage
 		if acpTokenUsagePresent(u) {
 			usageMap = map[string]TokenUsage{fallbackModel: u}
@@ -502,13 +511,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			// Keyed per model by the scan itself: a task whose subagent
 			// or compaction step ran on a different model must not have
 			// that model's tokens priced at the main model's rate.
-			usageMap = scanKimiSessionUsage(kimiUsageScan{
-				startTime:     startTime,
-				kimiHome:      b.cfg.Env["KIMI_CODE_HOME"],
-				sessionID:     sessionID,
-				resumed:       opts.ResumeSessionID != "",
-				fallbackModel: fallbackModel,
-			})
+			usageMap = scanKimiSessionUsage(wireScan)
 			// A future Kimi build may expose provider cost before it exposes
 			// token buckets over ACP. Preserve that cost alongside the current
 			// wire-log fallback instead of dropping either source.
@@ -532,15 +535,9 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// completed run is promoted: timeout/abort/already-failed keep
 		// their own terminal semantics.
 		if finalStatus == "completed" {
-			if turnErr, failed := scanKimiMainTurnFailure(kimiUsageScan{
-				startTime:     startTime,
-				kimiHome:      b.cfg.Env["KIMI_CODE_HOME"],
-				sessionID:     sessionID,
-				resumed:       opts.ResumeSessionID != "",
-				fallbackModel: fallbackModel,
-			}); failed {
+			if turnErr, failed := scanKimiMainTurnFailure(wireScan); failed {
 				finalStatus = "failed"
-				finalError = "kimi turn failed"
+				finalError = "kimi turn failed: runtime did not record error details (error category unknown)"
 				if turnErr != "" {
 					finalError = fmt.Sprintf("kimi turn failed: %s", turnErr)
 				}
@@ -621,7 +618,7 @@ const kimiUsageRecordType = "usage.record"
 // fields sum exactly to the `used` figure kimi reports over ACP (22530 and
 // 22566). So `inputOther` is uncached input only and maps straight onto
 // TokenUsage.InputTokens with no cached-prefix subtraction — unlike the ACP
-// `inputTokens` case excludeACPCachedInput exists to correct.
+// `inputTokens` case normalizeACPTokenUsage exists to correct.
 type kimiWireUsage struct {
 	Type string `json:"type"`
 	// Time is the record's epoch-millisecond write time. It is what keeps a
@@ -794,10 +791,39 @@ const kimiTurnEndedRecordType = "agent.turn.ended"
 // Turn ids alternate between number and string across kimi builds, so they
 // are deliberately not modeled — only the outcome and diagnostic matter.
 type kimiWireTurnEnd struct {
-	Type         string `json:"type"`
-	Outcome      string `json:"outcome"`
-	ErrorMessage string `json:"errorMessage"`
-	Time         int64  `json:"time"`
+	Type         string          `json:"type"`
+	Outcome      string          `json:"outcome"`
+	ErrorMessage json.RawMessage `json:"errorMessage"`
+	Time         int64           `json:"time"`
+}
+
+// kimiWireErrorMessage accepts string diagnostics and structured error payloads.
+// An unsupported diagnostic shape must not hide an otherwise valid failed turn.
+// Only code/message are surfaced; details may contain private provider context.
+func kimiWireErrorMessage(raw json.RawMessage) string {
+	text := func(value json.RawMessage) string {
+		var s string
+		if err := json.Unmarshal(value, &s); err != nil {
+			return ""
+		}
+		s = strings.TrimSpace(sanitizeAgentDiagnostic(s))
+		if s == "[object Object]" {
+			return ""
+		}
+		return s
+	}
+	var payload struct {
+		Code    json.RawMessage `json:"code"`
+		Message json.RawMessage `json:"message"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return text(raw)
+	}
+	code, message := text(payload.Code), text(payload.Message)
+	if code == "" {
+		return message
+	}
+	return strings.TrimSpace(fmt.Sprintf("[%s] %s", code, message))
 }
 
 // scanKimiMainTurnFailure reports whether the main agent's wire log recorded
@@ -862,7 +888,7 @@ func kimiWireTurnFailure(path string, scan kimiUsageScan) (string, bool) {
 				// the raw string and the shared redact.Text, so it takes
 				// the same sanitize pass as every child-process diagnostic
 				// before this reaches Result.Error (review on #9057).
-				detail = sanitizeAgentDiagnostic(record.ErrorMessage)
+				detail = kimiWireErrorMessage(record.ErrorMessage)
 				found = true
 			}
 		}
@@ -873,34 +899,32 @@ func kimiWireTurnFailure(path string, scan kimiUsageScan) (string, bool) {
 	return detail, found
 }
 
-// kimiSessionRoot resolves kimi's session directory: an explicitly configured
-// home first, then the ambient KIMI_CODE_HOME, then ~/.kimi-code. Mirrors
-// codexSessionRoot.
-//
-// The env lookup is not redundant with cfg.Env: the kimi subprocess inherits
-// os.Environ() via buildEnv, so a KIMI_CODE_HOME exported to the daemon
-// relocates kimi's sessions without ever appearing in cfg.Env. Reading only
-// cfg.Env would leave the scan looking in ~/.kimi-code while kimi wrote
-// somewhere else. The stat check keeps a home without a sessions directory
-// from disabling the scan.
-func kimiSessionRoot(kimiHome string) string {
-	if kimiHome = strings.TrimSpace(kimiHome); kimiHome == "" {
-		kimiHome = strings.TrimSpace(os.Getenv("KIMI_CODE_HOME"))
-	}
-	if kimiHome != "" {
-		dir := filepath.Join(kimiHome, "sessions")
-		if info, err := os.Stat(dir); err == nil && info.IsDir() {
-			return dir
+// kimiChildHome follows the data directory selected by the launched CLI.
+func kimiChildHome(env []string, cwd string) string {
+	home, _ := lastAgentEnvValue(env, "KIMI_CODE_HOME")
+	if home == "" {
+		homeKey := "HOME"
+		if runtime.GOOS == "windows" {
+			homeKey = "USERPROFILE"
 		}
+		userHome, _ := lastAgentEnvValue(env, homeKey)
+		if userHome == "" {
+			userHome, _ = os.UserHomeDir()
+		}
+		if userHome == "" {
+			return ""
+		}
+		home = filepath.Join(userHome, ".kimi-code")
 	}
+	if cwd != "" && !filepath.IsAbs(home) {
+		home = filepath.Join(cwd, home)
+	}
+	return home
+}
 
-	home, err := os.UserHomeDir()
-	if err != nil {
+func kimiSessionRoot(kimiHome string) string {
+	if kimiHome == "" {
 		return ""
 	}
-	dir := filepath.Join(home, ".kimi-code", "sessions")
-	if info, err := os.Stat(dir); err == nil && info.IsDir() {
-		return dir
-	}
-	return ""
+	return filepath.Join(kimiHome, "sessions")
 }

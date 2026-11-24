@@ -1,18 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { MemberWithUser } from "@multica/core/types";
 import { api } from "@multica/core/api";
+import { usesInvocationMembers } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
+import {
+  isFeatureLockedError,
+  refreshFeaturesOnLockedError,
+  usePaidFeatureAccess,
+} from "@multica/core/billing";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
-import {
-  UI_EASE_OUT,
-  UI_MOTION_DURATION,
-} from "@multica/ui/lib/motion";
 import {
   Dialog,
   DialogContent,
@@ -21,8 +22,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
-import { Archive, ArchiveRestore, Loader2, X } from "lucide-react";
+import { Archive, ArchiveRestore, Loader2 } from "@multica/ui/icons";
 import { useT } from "../../i18n";
+import { usePaidFeatureErrorMessage } from "../../billing";
+import { CollectionBatchBar } from "../../layout/collection-list";
 import { AccessPicker, type AccessChange } from "./inspector/access-picker";
 import type { AgentListRow } from "./agents-page";
 
@@ -50,11 +53,24 @@ export function AgentBatchToolbar({
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
-  const shouldReduceMotion = useReducedMotion() ?? false;
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [confirmAccess, setConfirmAccess] = useState(false);
   const [accessChange, setAccessChange] = useState<AccessChange | null>(null);
   const [busy, setBusy] = useState(false);
+  const paidFeatureError = usePaidFeatureErrorMessage();
+  const ownedRows = rows.filter((r) => r.isOwnedByMe);
+  // A locked plan still lets every owned agent shrink its own member list. In
+  // bulk that means picking only people all of them already have: any
+  // non-empty subset of that intersection is a reduction for each agent.
+  // Without a common person, a bulk member list would be new configuration
+  // for some agent, so the option stays disabled.
+  const sharedMembers = useMemo(
+    () => sharedInvocationMembers(rows.filter((r) => r.isOwnedByMe)),
+    [rows],
+  );
+  const membersAccess = usePaidFeatureAccess(wsId, "agent_invocation_members", {
+    hasExistingConfig: sharedMembers.length > 0,
+  });
 
   // Must be stable: AccessPicker lists this in the effect that notifies us, so
   // an inline callback would re-notify on every render we cause by storing the
@@ -74,7 +90,6 @@ export function AgentBatchToolbar({
   }, []);
 
   const allManageable = rows.every((r) => r.canManage);
-  const ownedRows = rows.filter((r) => r.isOwnedByMe);
   const anyOwned = ownedRows.length > 0;
   const anyActive = rows.some((r) => !r.agent.archived_at);
   const anyArchived = rows.some((r) => !!r.agent.archived_at);
@@ -124,67 +139,24 @@ export function AgentBatchToolbar({
     onClear();
     setBusy(false);
     if (failed > 0) {
-      const first = settled.find((s) => s.status === "rejected") as
-        | PromiseRejectedResult
-        | undefined;
-      if (first) {
-        toast.error(first.reason instanceof Error ? first.reason.message : String(first.reason));
-      }
+      const reasons = settled.flatMap((s) =>
+        s.status === "rejected" ? [s.reason as unknown] : [],
+      );
+      // A plan refusal explains the failure better than whichever error came
+      // first, and means this client's view of the plan is stale.
+      const locked = reasons.find(isFeatureLockedError);
+      if (locked) refreshFeaturesOnLockedError(qc, wsId, locked);
+      const first = locked ?? reasons[0];
+      toast.error(
+        paidFeatureError(first, first instanceof Error ? first.message : String(first)),
+      );
     }
     return { succeeded, failed };
   };
 
   return (
     <>
-      <AnimatePresence initial={false}>
-        {rows.length > 0 && (
-          <div
-            key="agent-batch-toolbar"
-            className="absolute bottom-6 left-1/2 z-50 -translate-x-1/2 max-md:above-chat-launcher"
-          >
-            <motion.div
-              className="flex items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg"
-              initial={{
-                opacity: 0,
-                transform: shouldReduceMotion
-                  ? "translateY(0)"
-                  : "translateY(8px)",
-              }}
-              animate={{
-                opacity: 1,
-                transform: "translateY(0)",
-                transition: {
-                  duration: UI_MOTION_DURATION.fast,
-                  ease: UI_EASE_OUT,
-                },
-              }}
-              exit={{
-                opacity: 0,
-                transform: shouldReduceMotion
-                  ? "translateY(0)"
-                  : "translateY(8px)",
-                transition: {
-                  duration: shouldReduceMotion
-                    ? UI_MOTION_DURATION.fast
-                    : UI_MOTION_DURATION.micro,
-                  ease: UI_EASE_OUT,
-                },
-              }}
-            >
-        <div className="mr-1 flex items-center gap-1.5 border-r pl-1 pr-2">
-          <span className="text-body font-medium">
-            {t(($) => $.actions.selected, { count: rows.length })}
-          </span>
-          <button
-            type="button"
-            aria-label={t(($) => $.actions.clear_selection)}
-            onClick={onClear}
-            className="rounded-xs p-0.5 transition-colors hover:bg-accent"
-          >
-            <X className="size-3.5 text-muted-foreground" />
-          </button>
-        </div>
-
+      <CollectionBatchBar count={rows.length} onClear={onClear}>
         {anyArchived && (
           <Button
             variant="ghost"
@@ -224,10 +196,7 @@ export function AgentBatchToolbar({
             {t(($) => $.row_actions.archive)}
           </Button>
         )}
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      </CollectionBatchBar>
 
       {/* Archive confirm dialog */}
       {rows.length > 0 && <Dialog open={confirmArchive} onOpenChange={setConfirmArchive}>
@@ -308,6 +277,8 @@ export function AgentBatchToolbar({
             ownerId={currentUserId}
             canEdit
             hideFooter
+            membersAccess={membersAccess}
+            lockedMemberPool={sharedMembers}
             onReadyChange={handleAccessReadyChange}
           />
           <DialogFooter>
@@ -341,4 +312,21 @@ export function AgentBatchToolbar({
       </Dialog>}
     </>
   );
+}
+
+/** The member targets every given agent already uses; empty when any of them
+ *  has no specific-people list. */
+function sharedInvocationMembers(rows: AgentListRow[]): string[] {
+  let shared: string[] | null = null;
+  for (const { agent } of rows) {
+    if (!usesInvocationMembers(agent.permission_mode, agent.invocation_targets)) return [];
+    const ids = new Set(
+      (agent.invocation_targets ?? []).flatMap((target) =>
+        target.target_type === "member" && target.target_id ? [target.target_id] : [],
+      ),
+    );
+    shared = (shared ?? Array.from(ids)).filter((id) => ids.has(id));
+    if (shared.length === 0) return [];
+  }
+  return shared ?? [];
 }

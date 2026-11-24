@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { GitHubPullRequest, PRAutoComplete } from "@multica/core/types";
@@ -350,12 +350,12 @@ describe("PullRequestList sidebar rows", () => {
     expect(screen.queryByText(/^\+0/)).not.toBeInTheDocument();
   });
 
-  it("shortens the diff size to thousands", async () => {
+  it("leaves the diff size to the tooltip", async () => {
     mockPRs = [makePR({ additions: 6743, deletions: 6, changed_files: 119 })];
     renderList();
     await waitForRender();
-    expect(screen.getByText("+6.7k")).toBeInTheDocument();
-    expect(screen.getByText("−6")).toBeInTheDocument();
+    expect(screen.getByTestId("pull-request-row")).not.toHaveTextContent("+6.7k");
+    expect(screen.queryByText("−6")).not.toBeInTheDocument();
   });
 
   // --- Collapse behaviour --------------------------------------------------
@@ -424,10 +424,19 @@ describe("PullRequestList auto-complete", () => {
   });
 
   it("falls back to Done on a backend that does not name the target", async () => {
-    mockPRs = [makePR({ id: "b", number: 19 })];
+    mockPRs = [makePR({ id: "a", number: 12, state: "merged" }), makePR({ id: "b", number: 19 })];
     mockAutoComplete = decision("waiting", ["b"], { target_status: undefined });
     renderList();
     expect(await screen.findByTestId("pr-auto-complete-line")).toHaveTextContent("Moves to Done when #19 merges");
+  });
+
+  it("says what merging a lone PR does on the PR's own row", async () => {
+    mockPRs = [makePR({ id: "b", number: 19 })];
+    mockAutoComplete = decision("waiting", ["b"], { target_status: "in_review" });
+    renderList();
+    const row = await screen.findByTestId("pull-request-row");
+    expect(within(row).getByTestId("pr-merge-target")).toHaveTextContent("On merge → In Review");
+    expect(screen.queryByTestId("pr-auto-complete-line")).toBeNull();
   });
 
   it("offers to remove a PR that closed without merging", async () => {
@@ -448,7 +457,7 @@ describe("PullRequestList auto-complete", () => {
 
   // The workspace chose to leave status alone: a team choice, not repeated on
   // every issue. An older backend's no_close_intent says nothing either.
-  it.each(["workspace_disabled", "no_close_intent", "at_target", "terminal"])("says nothing for %s", async (state) => {
+  it.each(["workspace_disabled", "no_close_intent", "not_in_workflow", "at_target", "terminal"])("says nothing for %s", async (state) => {
     mockPRs = [makePR({ id: "a", number: 12, state: "merged" })];
     mockAutoComplete = decision(state, [], state === "workspace_disabled" ? { workspace_enabled: false, target_status: "none" } : {});
     renderList();

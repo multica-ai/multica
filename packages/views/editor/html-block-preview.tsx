@@ -9,12 +9,23 @@
  * charts floating in blank space. An uncaught script error replaces the
  * preview with an explanation; fullscreen still shows whatever did render.
  *
+ * The laid-out height is also handed up to the frame (`onBodyHeightChange`),
+ * so the collapse clip decision lands in the same paint the height arrives: a
+ * tall document is clipped at the collapse point immediately instead of
+ * painting unclamped for a frame and then folding back — that total-height
+ * shock wave is what virtualized timelines render as flicker when a scroll
+ * jump lands on the block. The enlarged surface draws no extra height either:
+ * while the dialog is open the in-place footprint stays at the collapse clamp
+ * (the dialog is fixed-position, so it fills itself regardless of the inline
+ * clip), and the bridge re-reports after close so the collapse decision
+ * tracks the document that is actually shown.
+ *
  * Reached through RichFenceBlock (rich-content/rich-code-block.tsx) for closed
- * fences only. NOT used in the editable Tiptap NodeView — that path must keep
- * `<NodeViewContent as="code" />` so the user can continue typing.
+ * fences, and from the editable code block's NodeView (MUL-9760), which hands
+ * in its own editable source through `editing`.
  */
 
-import { useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import { HtmlPreviewSurface } from "./html-preview-surface";
 import { useT } from "../i18n";
@@ -25,16 +36,22 @@ import {
   DYNAMIC_BLOCK_MIN_BODY_PX,
   DynamicBlock,
   DynamicBlockSkeleton,
+  useValueWhileVisible,
+  type DynamicBlockEditing,
   type DynamicBlockError,
 } from "./dynamic-block";
 import { useThemeVersion } from "./hooks/use-theme-version";
+import { readEmbedTheme } from "../common/embed-theme";
 import {
+  HTML_BLOCK_EMBED_OPTIONS,
   HTML_BLOCK_MESSAGE_KEY,
   INITIAL_HTML_BLOCK_HEIGHT,
+  NO_HTML_BLOCK_THEME,
   buildHtmlBlockDocument,
+  htmlBlockTheme,
+  mentionsThemeTokens,
   nextHtmlBlockHeight,
   readHtmlBlockMessage,
-  readHtmlBlockTheme,
 } from "./utils/html-block-document";
 import { hashSource } from "./utils/source-hash";
 
@@ -96,25 +113,52 @@ interface HtmlBlockPreviewProps {
   html: string;
   /** From the fence info string: ```html title="…". */
   title?: string | null;
+  /** Set by the editor's NodeView. */
+  editing?: DynamicBlockEditing;
 }
 
-export function HtmlBlockPreview({ html, title }: HtmlBlockPreviewProps) {
+export function HtmlBlockPreview({ html: source, title, editing }: HtmlBlockPreviewProps) {
   const { t } = useT("editor");
   const hostRef = useRef<HTMLDivElement>(null);
   const themeVersion = useThemeVersion();
   const [srcDoc, setSrcDoc] = useState<string | null>(null);
   const [error, setError] = useState<DynamicBlockError | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  // The body's laid-out height, reported by HtmlBlockBody below. The frame
+  // turns it into the collapse decision in the same paint the height lands
+  // (see the flicker note in the file header).
+  const [bodyHeight, setBodyHeight] = useState<number | null>(null);
   const frameTitle = t(($) => $.code_block.html_preview);
+  // While the editor shows the source, edits wait for the preview to be shown
+  // (or enlarged) instead of reloading a hidden frame on every pause.
+  const html = useValueWhileVisible(
+    source,
+    !editing || editing.view === "preview" || fullscreen,
+  );
+
+  const reload = () => {
+    setError(null);
+    setReloadKey((key) => key + 1);
+  };
 
   // Built after mount: the theme tokens come from the host's computed style.
   // A theme switch rebuilds the document, which reruns its scripts — a chart
   // reads its colors when it draws, so this is the only way it can follow.
+  // HTML that names no token gets the same document under every theme, so a
+  // switch does not reload it and lose what was typed or toggled inside.
+  const builtRef = useRef<string | null>(null);
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
+    const theme = mentionsThemeTokens(html)
+      ? htmlBlockTheme(readEmbedTheme(host, HTML_BLOCK_EMBED_OPTIONS))
+      : NO_HTML_BLOCK_THEME;
+    const next = buildHtmlBlockDocument(html, theme);
+    if (next === builtRef.current) return;
+    builtRef.current = next;
     setError(null);
-    setSrcDoc(buildHtmlBlockDocument(html, readHtmlBlockTheme(getComputedStyle(host))));
+    setSrcDoc(next);
   }, [html, themeVersion]);
 
   return (
@@ -122,11 +166,17 @@ export function HtmlBlockPreview({ html, title }: HtmlBlockPreviewProps) {
       <DynamicBlock
         kind="html"
         title={title}
-        source={html}
+        source={source}
         error={error}
         fullscreen={fullscreen}
         onFullscreen={() => setFullscreen(true)}
-        preview={({ active }) => (
+        onReload={reload}
+        bodyHeight={bodyHeight}
+        editing={editing}
+        preview={({ active, collapsed }) => (
+          // Keyed by the content: a re-authored block restarts measurement
+          // from scratch — a stale `frozen`/`loaded` from the previous
+          // document must never pin or reveal the new one.
           <HtmlBlockBody
             key={html}
             html={html}
@@ -134,7 +184,11 @@ export function HtmlBlockPreview({ html, title }: HtmlBlockPreviewProps) {
             title={frameTitle}
             active={active}
             fullscreen={fullscreen}
+            collapsed={collapsed}
+            reloadKey={reloadKey}
+            onReload={reload}
             onFullscreenChange={setFullscreen}
+            onBodyHeightChange={setBodyHeight}
             onError={setError}
           />
         )}
@@ -149,7 +203,11 @@ function HtmlBlockBody({
   title,
   active,
   fullscreen,
+  collapsed,
+  reloadKey,
+  onReload,
   onFullscreenChange,
+  onBodyHeightChange,
   onError,
 }: {
   html: string;
@@ -157,14 +215,26 @@ function HtmlBlockBody({
   title: string;
   active: boolean;
   fullscreen: boolean;
+  /** The frame is clipping the inline body at the collapse point. */
+  collapsed: boolean;
+  reloadKey: number;
+  onReload: () => void;
   onFullscreenChange: (open: boolean) => void;
+  onBodyHeightChange: (height: number) => void;
   onError: (error: DynamicBlockError) => void;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const [measured, reportHeight] = useReducer(nextHtmlBlockHeight, INITIAL_HTML_BLOCK_HEIGHT);
+  const [measured, setMeasured] = useState(INITIAL_HTML_BLOCK_HEIGHT);
   const [cachedHeight, setCachedHeight] = useState<number | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [timedOut, setTimedOut] = useState(false);
+
+  useLayoutEffect(() => {
+    setMeasured(INITIAL_HTML_BLOCK_HEIGHT);
+    setLoaded(false);
+    setTimedOut(false);
+    setCachedHeight(readCachedHeight(html));
+  }, [html, srcDoc, reloadKey]);
 
   // The listener is registered once; these refs give it the current values.
   const activeRef = useRef(active);
@@ -174,10 +244,6 @@ function HtmlBlockBody({
     activeRef.current = active && !fullscreen;
     onErrorRef.current = onError;
   });
-
-  useEffect(() => {
-    setCachedHeight(readCachedHeight(html));
-  }, [html]);
 
   useEffect(() => {
     if (!active || fullscreen) return;
@@ -202,7 +268,9 @@ function HtmlBlockBody({
       }
       // A hidden frame lays out at zero width; what it reports is not its
       // height. It reports again once it is shown and resized back.
-      if (activeRef.current) reportHeight(message.height);
+      if (activeRef.current) {
+        setMeasured((previous) => nextHtmlBlockHeight(previous, message.height));
+      }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
@@ -224,11 +292,31 @@ function HtmlBlockBody({
     height ?? (timedOut ? UNMEASURED_HEIGHT_PX : (cachedHeight ?? DYNAMIC_BLOCK_MIN_BODY_PX)),
   );
 
+  // Hand the laid-out height up to the frame so its collapse clip applies in
+  // the same paint the height lands — a layout effect keeps any intermediate
+  // (unclipped) frame from painting. See the flicker note in the file header.
+  const onBodyHeightChangeRef = useRef(onBodyHeightChange);
+  useLayoutEffect(() => {
+    onBodyHeightChangeRef.current = onBodyHeightChange;
+  });
+  useLayoutEffect(() => {
+    onBodyHeightChangeRef.current(bodyHeight);
+  }, [bodyHeight]);
+
   return (
     <HtmlPreviewSurface
       open={fullscreen}
-      inlineHeight={active ? bodyHeight : 0}
+      // While enlarged, the wrapper holds the block's in-place footprint. A
+      // collapsed body keeps showing its clamp there — reserving the full
+      // document height would re-expand the timeline for as long as the
+      // dialog is open, the same total-height jump this file exists to
+      // prevent. The dialog itself is fixed-position: it fills its own box
+      // and is untouched by the inline clip.
+      inlineHeight={
+        active ? (collapsed ? Math.min(bodyHeight, DYNAMIC_BLOCK_COLLAPSE_AT_PX) : bodyHeight) : 0
+      }
       onOpenChange={onFullscreenChange}
+      onReload={onReload}
       title={title}
     >
       <div
@@ -237,6 +325,7 @@ function HtmlBlockBody({
       >
         {srcDoc != null && (
           <CodeBlockIframe
+            key={reloadKey}
             ref={iframeRef}
             html={srcDoc}
             title={title}

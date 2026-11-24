@@ -23,7 +23,7 @@ beforeAll(() => {
 
 describe("comment composer store", () => {
   beforeEach(() => {
-    useCommentComposerStore.setState({ sticky: true, runningAgentReply: "steer" });
+    useCommentComposerStore.setState({ sticky: true, runningAgentReply: "steer", imageLayout: "thumbnails" });
   });
 
   it("toggleSticky flips the preference", () => {
@@ -44,6 +44,13 @@ describe("comment composer store", () => {
   it("keeps steering as the default for preferences saved before the option existed", async () => {
     localStorage.setItem("multica_comment_composer", JSON.stringify({ state: { sticky: false }, version: 0 }));
     await useCommentComposerStore.persist.rehydrate();
-    expect(useCommentComposerStore.getState()).toMatchObject({ sticky: false, runningAgentReply: "steer" });
+    expect(useCommentComposerStore.getState()).toMatchObject({ sticky: false, runningAgentReply: "steer", imageLayout: "thumbnails" });
+  });
+
+  it("shows comment images as thumbnails by default and remembers full size", () => {
+    expect(useCommentComposerStore.getState().imageLayout).toBe("thumbnails");
+    useCommentComposerStore.getState().setImageLayout("full");
+    expect(useCommentComposerStore.getState().imageLayout).toBe("full");
+    expect(JSON.parse(localStorage.getItem("multica_comment_composer")!).state.imageLayout).toBe("full");
   });
 });

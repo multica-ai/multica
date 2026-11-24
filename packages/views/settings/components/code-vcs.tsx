@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Copy, FolderGit2, GitBranch, MoreHorizontal, RefreshCw, Unplug } from "lucide-react";
+import { FolderGit2, GitBranch, MoreHorizontal, RefreshCw, Unplug } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import {
@@ -188,10 +190,10 @@ export function VCSConnectionRows() {
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={
-                  <Button
+                  <IconButton
                     variant="ghost"
                     size="icon-sm"
-                    aria-label={t(($) => $.vcs.connection_actions, { url: c.instance_url })}
+                    label={t(($) => $.vcs.connection_actions, { url: c.instance_url })}
                   />
                 }
               >
@@ -435,6 +437,22 @@ function CopyField({
   copyLabel: string;
   mono?: boolean;
 }) {
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const handleClick = () => {
+    onCopy(value);
+    setCopied(true);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
     <div className="space-y-1.5">
       <Label htmlFor={id} className="text-caption">
@@ -447,15 +465,15 @@ function CopyField({
           value={value}
           className={mono ? "min-w-0 font-mono text-caption" : "min-w-0 text-caption"}
         />
-        <Button
+        <IconButton
           variant="outline"
           size="icon-sm"
           className="shrink-0"
-          onClick={() => onCopy(value)}
-          aria-label={`${copyLabel}: ${label}`}
+          onClick={handleClick}
+          label={`${copyLabel}: ${label}`}
         >
-          <Copy />
-        </Button>
+          <CopyCheckIcon copied={copied} />
+        </IconButton>
       </div>
     </div>
   );

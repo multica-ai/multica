@@ -10,7 +10,7 @@
  * store via setUser — same source-of-truth pattern as web (server response
  * is authoritative, never the local form state).
  */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   ActionSheetIOS,
   Alert,
@@ -29,6 +29,7 @@ import { useAuthStore } from "@/data/auth-store";
 import { api } from "@/data/api";
 import type { FileAsset } from "@/data/api";
 import { useT } from "@/lib/i18n";
+import { isStorageLimitReached } from "@/lib/upload-error";
 
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024; // 5 MB — matches what's reasonable on cellular.
 
@@ -54,9 +55,11 @@ export default function ProfileSettingsScreen() {
 
   // Resync if `user` updates from outside (avatar upload, refetch, login as
   // different user). Without this the form would render stale init forever.
-  useEffect(() => {
+  const [previousUser, setPreviousUser] = useState(user);
+  if (previousUser !== user) {
+    setPreviousUser(user);
     setName(user?.name ?? "");
-  }, [user]);
+  }
 
   const dirty = name.trim() !== (user?.name ?? "") && name.trim().length > 0;
 
@@ -139,6 +142,13 @@ export default function ProfileSettingsScreen() {
       const updated = await api.updateMe({ avatar_url: attachment.url });
       setUser(updated);
     } catch (err) {
+      if (isStorageLimitReached(err)) {
+        Alert.alert(
+          t("editor:upload.storage_full_title"),
+          t("editor:upload.storage_full_message"),
+        );
+        return;
+      }
       Alert.alert(
         t("avatar.upload_failed"),
         err instanceof Error

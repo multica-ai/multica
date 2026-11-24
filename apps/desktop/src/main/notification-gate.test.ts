@@ -33,6 +33,13 @@ describe("NotificationGate", () => {
 });
 
 describe("parseNativeNotificationPayload", () => {
+  it("accepts a direct Chat target without an inbox row", () => {
+    const payload = { slug: "acme", itemId: "chat:message-1", chatSessionId: "session-1", title: "Chat reply", body: "Done" };
+    expect(parseNativeNotificationPayload(payload)).toEqual(payload);
+    expect(parseNativeNotificationPayload({ ...payload, chatSessionId: "" })).toBeNull();
+    expect(parseNativeNotificationPayload({ ...payload, chatSessionId: 7 })).toBeNull();
+  });
+
   it("rejects malformed renderer payloads before native side effects", () => {
     expect(parseNativeNotificationPayload(null)).toBeNull();
     expect(

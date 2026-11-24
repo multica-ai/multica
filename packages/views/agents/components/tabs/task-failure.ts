@@ -10,6 +10,7 @@ export const FAILURE_REASON_I18N_KEYS = {
   // Platform / scheduler side.
   queued_expired: "queued_expired",
   runtime_offline: "runtime_offline",
+  runtime_access_revoked: "runtime_access_revoked",
   runtime_reconnect_timeout: "runtime_reconnect_timeout",
   runtime_recovery: "runtime_recovery",
   timeout: "timeout",
@@ -52,6 +53,7 @@ export const FAILURE_REASON_I18N_KEYS = {
   codex_resume_oversized: "codex_resume_oversized",
   idle_watchdog: "idle_watchdog",
   local_directory_error: "local_directory_error",
+  local_directory_missing: "local_directory_missing",
   cancelled: "cancelled",
 
   // Pre-MUL-1949 coarse values, still present on historical rows.

@@ -1,6 +1,8 @@
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { I18nProvider } from "@multica/core/i18n/react";
+import { RESOURCES } from "@multica/views/locales";
 
 const historyState = vi.hoisted(() => ({
   canGoBack: true,
@@ -17,9 +19,8 @@ const historyState = vi.hoisted(() => ({
   goToHistoryIndex: vi.fn(),
 }));
 
-const sidebarState = vi.hoisted(() => ({
-  state: "expanded" as "expanded" | "collapsed",
-  isCompact: false,
+const shellState = vi.hoisted(() => ({
+  current: { toggleNav: () => {} } as { toggleNav: () => void } | null,
 }));
 
 vi.mock("@/hooks/use-tab-history", () => ({
@@ -32,10 +33,10 @@ vi.mock("@multica/views/layout", () => ({
     title: fallbackTitle ?? `Title ${url}`,
   }),
   ResourceLeadingVisual: () => <span aria-hidden />,
+  useAppShell: () => shellState.current,
 }));
 
 vi.mock("@multica/ui/components/ui/sidebar", () => ({
-  useSidebar: () => sidebarState,
   SidebarTrigger: (props: ComponentProps<"button">) => (
     <button type="button" aria-label="Toggle sidebar" {...props} />
   ),
@@ -43,6 +44,14 @@ vi.mock("@multica/ui/components/ui/sidebar", () => ({
 
 const { WINDOW_TOOLBAR_CLEARANCE, WindowToolbar, historyIndicesForMenu } =
   await import("./window-toolbar");
+
+function I18nWrapper({ children }: { children: ReactNode }) {
+  return (
+    <I18nProvider locale="en" resources={RESOURCES}>
+      {children}
+    </I18nProvider>
+  );
+}
 
 beforeEach(() => {
   historyState.canGoBack = true;
@@ -61,8 +70,7 @@ beforeEach(() => {
   historyState.goBack.mockReset();
   historyState.goForward.mockReset();
   historyState.goToHistoryIndex.mockReset();
-  sidebarState.state = "expanded";
-  sidebarState.isCompact = false;
+  shellState.current = { toggleNav: vi.fn() };
   vi.useFakeTimers();
 });
 
@@ -87,32 +95,38 @@ describe("historyIndicesForMenu", () => {
 });
 
 describe("WindowToolbar history controls", () => {
-  it("left-aligns the controls past the traffic lights across the expanded sidebar", () => {
-    render(<WindowToolbar />);
-
-    const toolbar = document.querySelector('[data-slot="window-toolbar"]');
-    expect(toolbar).not.toHaveClass("justify-end");
-    expect(toolbar).toHaveStyle({
-      paddingLeft: "88px",
-      width:
-        "max(var(--sidebar-live-width, var(--sidebar-width)), 200px)",
-    });
-    expect(toolbar).toHaveAttribute("data-sidebar-resize-consumer");
-    expect(toolbar).not.toHaveClass("transition-[width]");
-  });
-
-  it("keeps the controls clear of the traffic lights after toggling the sidebar", () => {
-    const { rerender } = render(<WindowToolbar />);
-    sidebarState.state = "collapsed";
-    rerender(<WindowToolbar />);
+  it("left-aligns the controls past the traffic lights at a fixed width", () => {
+    render(<WindowToolbar />, { wrapper: I18nWrapper });
 
     const toolbar = document.querySelector('[data-slot="window-toolbar"]');
     expect(WINDOW_TOOLBAR_CLEARANCE).toBe(200);
+    expect(toolbar).not.toHaveClass("justify-end");
     expect(toolbar).toHaveStyle({ paddingLeft: "88px", width: "200px" });
   });
 
+  it("keeps the controls clear of the traffic lights after toggling the panel", () => {
+    render(<WindowToolbar />, { wrapper: I18nWrapper });
+    fireEvent.click(screen.getByRole("button", { name: "Toggle sidebar" }));
+
+    const toolbar = document.querySelector('[data-slot="window-toolbar"]');
+    expect(toolbar).toHaveStyle({ paddingLeft: "88px", width: "200px" });
+  });
+
+  // Inside the shell the toggle routes through toggleNav, which collapses the
+  // space panel or, in Inbox, Chat and Settings, the page's own list column.
+  it("routes the panel toggle through the shell", () => {
+    const toggleNav = vi.fn();
+    shellState.current = { toggleNav };
+    render(<WindowToolbar />, { wrapper: I18nWrapper });
+
+    const toggle = screen.getByRole("button", { name: "Toggle sidebar" });
+    expect(toggle).toBeEnabled();
+    fireEvent.click(toggle);
+    expect(toggleNav).toHaveBeenCalledOnce();
+  });
+
   it("orders Back, Forward, then the sidebar toggle with no separate History button", () => {
-    render(<WindowToolbar />);
+    render(<WindowToolbar />, { wrapper: I18nWrapper });
 
     expect(
       screen.getAllByRole("button").map((button) => button.getAttribute("aria-label")),
@@ -126,21 +140,21 @@ describe("WindowToolbar history controls", () => {
     historyState.historyEntries = ["/acme/issues"];
     historyState.historyIndex = 0;
 
-    render(<WindowToolbar />);
+    render(<WindowToolbar />, { wrapper: I18nWrapper });
 
     expect(screen.getByRole("button", { name: "Go back" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Go forward" })).toBeDisabled();
   });
 
   it("keeps a normal Back click as one-step navigation", () => {
-    render(<WindowToolbar />);
+    render(<WindowToolbar />, { wrapper: I18nWrapper });
 
     fireEvent.click(screen.getByRole("button", { name: "Go back" }));
     expect(historyState.goBack).toHaveBeenCalledOnce();
   });
 
   it("opens Back history on a sustained hold without also stepping back", () => {
-    render(<WindowToolbar />);
+    render(<WindowToolbar />, { wrapper: I18nWrapper });
     const back = screen.getByRole("button", { name: "Go back" });
 
     fireEvent.pointerDown(back, { button: 0, clientX: 20, clientY: 20 });
@@ -154,7 +168,7 @@ describe("WindowToolbar history controls", () => {
   });
 
   it("offers the same menu from ArrowDown for keyboard users", () => {
-    render(<WindowToolbar />);
+    render(<WindowToolbar />, { wrapper: I18nWrapper });
     const forward = screen.getByRole("button", { name: "Go forward" });
 
     fireEvent.keyDown(forward, { key: "ArrowDown" });
@@ -162,7 +176,7 @@ describe("WindowToolbar history controls", () => {
   });
 
   it("jumps to the selected Back history index", () => {
-    render(<WindowToolbar />);
+    render(<WindowToolbar />, { wrapper: I18nWrapper });
     const back = screen.getByRole("button", { name: "Go back" });
 
     fireEvent.keyDown(back, { key: "ArrowDown" });
@@ -174,7 +188,7 @@ describe("WindowToolbar history controls", () => {
   });
 
   it("restores focus to the toolbar button when its menu closes", () => {
-    render(<WindowToolbar />);
+    render(<WindowToolbar />, { wrapper: I18nWrapper });
     const forward = screen.getByRole("button", { name: "Go forward" });
     forward.focus();
 

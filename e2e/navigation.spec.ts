@@ -1,43 +1,44 @@
 import { test, expect } from "@playwright/test";
-import { loginAsDefault, waitForPageText } from "./helpers";
+import { appRail, loginAsDefault, waitForPageText } from "./helpers";
 
 const ROUTE_CHANGE_TIMEOUT = 30000;
 
 test.describe("Navigation", () => {
   test.beforeEach(async ({ page }) => {
     await loginAsDefault(page);
-    await page.waitForLoadState("networkidle");
   });
 
-  test("sidebar navigation works", async ({ page }) => {
-    await page.getByRole("link", { name: "Inbox" }).click();
-    await expect(page).toHaveURL(/\/inbox/, { timeout: ROUTE_CHANGE_TIMEOUT });
-    await waitForPageText(page, "Inbox");
-    // Each destination renames the browser tab after itself (MUL-6222).
-    await expect(page).toHaveTitle("Inbox | Multica");
-
-    await page.getByRole("link", { name: "Agents" }).click();
+  test("rail navigation works", async ({ page }) => {
+    const rail = appRail(page);
+    // Team lands on its first page, Agents.
+    await rail.getByRole("link", { name: "Team" }).click();
     await expect(page).toHaveURL(/\/agents/, { timeout: ROUTE_CHANGE_TIMEOUT });
     await waitForPageText(page, "Agents");
+    // Each destination renames the browser tab after itself (MUL-6222).
     await expect(page).toHaveTitle("Agents | Multica");
 
-    await page.getByRole("link", { name: "Issues", exact: true }).click();
+    await rail.getByRole("link", { name: "Chat" }).click();
+    await expect(page).toHaveURL(/\/chat/, { timeout: ROUTE_CHANGE_TIMEOUT });
+    await expect(page).toHaveTitle("Chat | Multica");
+
+    // Work lands on its first page, Issues.
+    await rail.getByRole("link", { name: "Work", exact: true }).click();
     await expect(page).toHaveURL(/\/issues/, { timeout: ROUTE_CHANGE_TIMEOUT });
-    await waitForPageText(page, "Issues");
+    await waitForPageText(page, "All issues");
     await expect(page).toHaveTitle("Issues | Multica");
   });
 
-  test("settings page loads via sidebar", async ({ page }) => {
-    await page.getByRole("link", { name: "Settings", exact: true }).click();
+  test("settings page loads via the rail", async ({ page }) => {
+    await appRail(page).getByRole("link", { name: "Settings", exact: true }).click();
     await expect(page).toHaveURL(/\/settings/, { timeout: ROUTE_CHANGE_TIMEOUT });
     await waitForPageText(page, "Settings");
 
-    await expect(page.getByRole("tab", { name: "General" })).toBeVisible();
-    await expect(page.getByRole("tab", { name: "Members" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "General" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Members" })).toBeVisible();
   });
 
   test("agents page shows agent list", async ({ page }) => {
-    await page.getByRole("link", { name: "Agents" }).click();
+    await appRail(page).getByRole("link", { name: "Team" }).click();
     await expect(page).toHaveURL(/\/agents/, { timeout: ROUTE_CHANGE_TIMEOUT });
     await waitForPageText(page, "Agents");
 

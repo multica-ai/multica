@@ -1,5 +1,6 @@
 import { afterEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
+import "@multica/vitest-setup/web-storage";
 
 // jsdom ships neither class. use-scroll-fade observes both.
 const roInstances: ResizeObserverStub[] = [];
@@ -50,7 +51,25 @@ declare global {
 
 globalThis.triggerResizeObservers = ResizeObserverStub.triggerAll;
 
-afterEach(() => {
+// Run leftover frames instead of dropping them: Base UI's module-level frame
+// scheduler only requests a new frame after its pending one has run, so a
+// dropped frame stalls every later Base UI animation in the same file.
+const MAX_TEARDOWN_FRAMES = 100;
+
+function drainRaf(): void {
+  for (let i = 0; i < MAX_TEARDOWN_FRAMES && rafQueue.length > 0; i++) {
+    for (const cb of rafQueue.splice(0, rafQueue.length)) {
+      try {
+        cb?.(performance.now());
+      } catch {
+        // The component is already unmounted; its late frame has nothing to update.
+      }
+    }
+  }
   rafQueue.length = 0;
+}
+
+afterEach(() => {
+  drainRaf();
   roInstances.length = 0;
 });

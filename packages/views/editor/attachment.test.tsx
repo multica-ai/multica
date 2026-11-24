@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import type { ReactElement, ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Attachment as AttachmentRecord } from "@multica/core/types";
@@ -232,11 +232,11 @@ describe("Attachment — image dispatch", () => {
     // attachment.tsx for the rationale (MUL-3130 review follow-up).
     expect(img?.getAttribute("src")).toBe(att.download_url);
     expect(img?.getAttribute("alt")).toBe("shot.png");
-    expect(screen.getByTitle("View")).toBeTruthy();
-    expect(screen.getByTitle("Download")).toBeTruthy();
-    expect(screen.getByTitle("Copy link")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "View" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Download" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Copy link" })).toBeTruthy();
     // Trash only shows in editable mode.
-    expect(screen.queryByTitle("Delete")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
   });
 
   it("editable image shows Trash button and wires onDelete", () => {
@@ -249,9 +249,41 @@ describe("Attachment — image dispatch", () => {
         onDelete={onDelete}
       />,
     );
-    const trash = screen.getByTitle("Delete");
+    const trash = screen.getByRole("button", { name: "Delete" });
     fireEvent.click(trash);
     expect(onDelete).toHaveBeenCalled();
+  });
+
+  it("keeps the editable image toolbar open after a touch tap until tapping outside", () => {
+    const onDelete = vi.fn();
+    const { container } = renderWithQuery(
+      <Attachment
+        attachment={{ kind: "record", attachment: makeRecord() }}
+        editable
+        onDelete={onDelete}
+      />,
+    );
+    const image = screen.getByRole("img", { name: "shot.png" });
+    const trash = screen.getByRole("button", { name: "Delete" });
+    const toolbar = trash.closest(".image-toolbar");
+    const touch = { pointerId: 1, pointerType: "touch" };
+
+    expect(toolbar).not.toHaveAttribute("data-placement");
+    fireEvent.pointerOver(image, touch);
+    fireEvent.pointerDown(image, touch);
+    fireEvent.pointerUp(image, touch);
+    fireEvent.pointerOut(image, touch);
+    fireEvent.click(image);
+
+    expect(toolbar).toHaveAttribute("data-placement");
+    fireEvent.pointerDown(trash, touch);
+    fireEvent.pointerUp(trash, touch);
+    fireEvent.pointerOut(trash, touch);
+    fireEvent.click(trash);
+    expect(onDelete).toHaveBeenCalledOnce();
+
+    fireEvent.pointerDown(container, touch);
+    expect(toolbar).not.toHaveAttribute("data-placement");
   });
 
   it("url-only image resolves to a record via context and uses its id for download", () => {
@@ -276,7 +308,7 @@ describe("Attachment — image dispatch", () => {
     // (MUL-3130 review). The raw stored url is the fallback for
     // unresolved markdown only.
     expect(img?.getAttribute("src")).toBe(att.download_url);
-    fireEvent.click(screen.getByTitle("Download"));
+    fireEvent.click(screen.getByRole("button", { name: "Download" }));
     expect(downloadMock).toHaveBeenCalledWith("att-1");
   });
 
@@ -313,11 +345,11 @@ describe("Attachment — image dispatch", () => {
     );
   });
 
-  it("prefers a local disk /uploads URL over API markdown in split-origin self-host", () => {
+  it("authenticates local disk images in split-origin self-host", async () => {
     getBaseUrlMock.mockReturnValue("https://api.example.test");
     const id = "11111111-2222-3333-4444-555555555555";
     const markdownUrl = `https://api.example.test/api/attachments/${id}/download`;
-    const mediaUrl = "https://api.example.test/uploads/workspaces/ws-1/shot.png";
+    const mediaUrl = OBJECT_URL;
     const att = makeRecord({
       id,
       url: "/uploads/workspaces/ws-1/shot.png",
@@ -325,6 +357,8 @@ describe("Attachment — image dispatch", () => {
       download_url: `/api/attachments/${id}/download`,
     });
     resolverState.attachments = [att];
+    getAttachmentMock.mockResolvedValue({ ...att, download_url: `/api/attachments/${id}/signed-download?exp=1&sig=short` });
+    getAttachmentBlobMock.mockResolvedValue(new Blob(["image"], { type: "image/png" }));
 
     renderWithQuery(
       <Attachment
@@ -337,9 +371,14 @@ describe("Attachment — image dispatch", () => {
       />,
     );
 
-    expect(document.querySelector("img")?.getAttribute("src")).toBe(mediaUrl);
+    await waitFor(() => expect(document.querySelector("img")?.getAttribute("src")).toBe(mediaUrl));
+    expect(getAttachmentBlobMock).toHaveBeenCalledWith(id);
 
-    fireEvent.click(screen.getByTitle("View"));
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+
+    await waitFor(() =>
+      expect(document.querySelectorAll("img")).toHaveLength(2),
+    );
 
     const imageSrcs = [...document.querySelectorAll("img")].map((img) =>
       img.getAttribute("src"),
@@ -347,7 +386,20 @@ describe("Attachment — image dispatch", () => {
     expect(imageSrcs).toEqual([mediaUrl, mediaUrl]);
   });
 
-  it("opens preview with the same resolved media URL when a reopened draft record has no download_url", () => {
+  it.each(["draft", "historical body"])("authenticates a local %s without a current attachment list", async (source) => {
+    const id = "11111111-2222-3333-4444-555555555555";
+    const raw = `/uploads/workspaces/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/${id}.png`;
+    getBaseUrlMock.mockReturnValue("https://api.example.test");
+    configStore.setState({ cdnDomain: "api.example.test", cdnSigned: false });
+    const att = makeRecord({ id, url: raw, markdown_url: "", download_url: "" });
+    getAttachmentMock.mockResolvedValue({ ...att, download_url: `/api/attachments/${id}/signed-download?exp=1&sig=short` });
+    getAttachmentBlobMock.mockResolvedValue(new Blob(["image"], { type: "image/png" }));
+    renderWithQuery(<Attachment attachment={source === "draft" ? { kind: "record", attachment: att } : { kind: "url", url: `https://old-host.test${raw}`, filename: "shot.png", forceKind: "image" }} />);
+    await waitFor(() => expect(document.querySelector("img")?.getAttribute("src")).toBe(OBJECT_URL));
+    expect(getAttachmentBlobMock).toHaveBeenCalledWith(id);
+  });
+
+  it("opens preview with the same resolved media URL when a reopened draft record has no download_url", async () => {
     configStore.setState({ cdnDomain: "cdn.example.test" });
     const id = "11111111-2222-3333-4444-555555555555";
     const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
@@ -359,6 +411,7 @@ describe("Attachment — image dispatch", () => {
       download_url: "",
     });
     resolverState.attachments = [att];
+    getAttachmentMock.mockResolvedValue({ ...att, download_url: mediaUrl });
 
     renderWithQuery(
       <Attachment
@@ -371,7 +424,10 @@ describe("Attachment — image dispatch", () => {
       />,
     );
 
-    fireEvent.click(screen.getByTitle("View"));
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+
+    await waitFor(() =>
+      expect(document.querySelectorAll("img")).toHaveLength(2));
 
     const imageSrcs = [...document.querySelectorAll("img")].map((img) =>
       img.getAttribute("src"),
@@ -609,7 +665,7 @@ describe("Attachment — image dispatch", () => {
     await waitFor(() => {
       expect(document.querySelector("img")?.getAttribute("src")).toBe(OBJECT_URL);
     });
-    fireEvent.click(screen.getByTitle("Copy link"));
+    fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(markdownUrl));
   });
 
@@ -713,7 +769,7 @@ describe("Attachment — image dispatch", () => {
         }}
       />,
     );
-    fireEvent.click(screen.getByTitle("View"));
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
     expect(screen.queryByText("This file type can't be previewed.")).toBeNull();
     expect(screen.getByRole("dialog").querySelector("img")).toBeTruthy();
   });
@@ -730,7 +786,7 @@ describe("Attachment — image dispatch", () => {
     );
     const img = document.querySelector("img");
     expect(img?.getAttribute("src")).toBe("https://external.example/foo.png");
-    fireEvent.click(screen.getByTitle("Download"));
+    fireEvent.click(screen.getByRole("button", { name: "Download" }));
     expect(openByUrlMock).toHaveBeenCalledWith("https://external.example/foo.png");
     expect(downloadMock).not.toHaveBeenCalled();
   });
@@ -746,8 +802,8 @@ describe("Attachment — image dispatch", () => {
         }}
       />,
     );
-    expect(screen.queryByTitle("View")).toBeNull();
-    expect(screen.queryByTitle("Download")).toBeNull();
+    expect(screen.queryByRole("button", { name: "View" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
   });
 
   it("stable /api/attachments/<id>/download download_url falls through to the durable record.markdown_url for native <img> loadability (MUL-3192)", () => {
@@ -788,6 +844,69 @@ describe("Attachment — image dispatch", () => {
   });
 });
 
+describe("Attachment — lazy images and reserved box (MUL-8182)", () => {
+  it("loads the original lazily in the recorded box", () => {
+    const att = makeRecord({ width: 3200, height: 2000 });
+    renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
+    const img = document.querySelector("img")!;
+    expect(img.getAttribute("src")).toBe(att.download_url);
+    expect(img.getAttribute("loading")).toBe("lazy");
+    expect(img.getAttribute("decoding")).toBe("async");
+    expect(img.getAttribute("width")).toBe("3200");
+    const figure = img.closest(".image-figure") as HTMLElement;
+    expect(figure.hasAttribute("data-sized")).toBe(true);
+    expect(figure.hasAttribute("data-pending")).toBe(false);
+    expect(figure.style.getPropertyValue("--image-width")).toBe("3200px");
+    expect(figure.style.getPropertyValue("--image-aspect")).toBe("1.6");
+  });
+
+  it("takes dimensions from the resolved record for markdown images", () => {
+    const att = makeRecord({ width: 1170, height: 2532 });
+    resolverState.attachments = [att];
+    renderWithQuery(<Attachment attachment={{ kind: "url", url: att.url, filename: "", forceKind: "image" }} />);
+    expect(document.querySelector("img")?.getAttribute("height")).toBe("2532");
+  });
+
+  it("ignores malformed dimensions on an unparsed record", () => {
+    const att = makeRecord({ width: -1, height: "big" as unknown as number });
+    renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
+    expect(document.querySelector("img")?.hasAttribute("width")).toBe(false);
+  });
+
+  it("holds an unknown-size placeholder until load or error", () => {
+    const att = makeRecord();
+    renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
+    const img = document.querySelector("img")!;
+    const figure = img.closest(".image-figure") as HTMLElement;
+    expect(figure.hasAttribute("data-pending")).toBe(true);
+    fireEvent.load(img);
+    expect(figure.hasAttribute("data-pending")).toBe(false);
+    expect(img.hasAttribute("data-loaded")).toBe(true);
+  });
+
+  it("restores the placeholder when a reused image changes source", () => {
+    const att = makeRecord();
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+    const { rerender } = render(
+      <QueryClientProvider client={client}>
+        <Attachment attachment={{ kind: "record", attachment: att }} />
+      </QueryClientProvider>,
+    );
+    fireEvent.load(document.querySelector("img")!);
+    rerender(
+      <QueryClientProvider client={client}>
+        <Attachment attachment={{
+          kind: "record",
+          attachment: { ...att, id: "att-2", download_url: "https://cdn.example.test/second.png" },
+        }} />
+      </QueryClientProvider>,
+    );
+    expect(document.querySelector(".image-figure")?.hasAttribute("data-pending")).toBe(true);
+  });
+});
+
 describe("Attachment — html dispatch", () => {
   // An HTML file is a file (MUL-7649): the row opens it in the viewer, and
   // nothing is fetched to embed it inline.
@@ -799,8 +918,8 @@ describe("Attachment — html dispatch", () => {
     });
     renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
     expect(screen.getByText("report.html")).toBeTruthy();
-    expect(screen.getByTitle("Preview")).toBeTruthy();
-    expect(screen.getByTitle("Download")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Preview" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Download" })).toBeTruthy();
     expect(document.querySelector("iframe")).toBeNull();
     expect(getAttachmentTextContentMock).not.toHaveBeenCalled();
   });
@@ -856,7 +975,7 @@ describe("Attachment — file-card dispatch", () => {
     );
 
     expect(screen.getByText("manual.pdf")).toBeTruthy();
-    fireEvent.mouseDown(screen.getByTitle("Download"));
+    fireEvent.mouseDown(screen.getByRole("button", { name: "Download" }));
     expect(downloadMock).toHaveBeenCalledWith(id);
   });
 
@@ -873,8 +992,8 @@ describe("Attachment — file-card dispatch", () => {
     );
     expect(screen.getByText("Uploading {{filename}}")).toBeTruthy();
     // Preview/Download chrome is hidden while uploading.
-    expect(screen.queryByTitle("Preview")).toBeNull();
-    expect(screen.queryByTitle("Download")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Preview" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
   });
 });
 
@@ -1191,5 +1310,47 @@ describe("Attachment — blob URL GC (MUL-7741)", () => {
     // and B still shows fallback, not A's bytes. The GC timer itself is
     // exercised by the sibling tests above.
     expect(revokeObjectURLMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("image download feedback", () => {
+  it("shows pending feedback and blocks repeat clicks until completion", async () => {
+    const pending = Promise.withResolvers<void>();
+    downloadMock.mockReturnValueOnce(pending.promise);
+    renderWithQuery(<Attachment attachment={{ kind: "record", attachment: makeRecord() }} />);
+    const button = screen.getByRole("button", { name: "Download" });
+    const toolbar = button.closest(".image-toolbar");
+
+    fireEvent.click(button);
+
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(button.querySelector(".animate-spin")).toBeInTheDocument();
+    expect(toolbar).toHaveAttribute("data-placement");
+    fireEvent.click(button);
+    expect(downloadMock).toHaveBeenCalledExactlyOnceWith("att-1");
+
+    await act(async () => pending.resolve());
+
+    expect(button).toBeEnabled();
+    expect(button).toHaveAttribute("aria-busy", "false");
+    expect(button.querySelector(".animate-spin")).toBeNull();
+    expect(toolbar).not.toHaveAttribute("data-placement");
+  });
+
+  it("keeps sibling images available while preparing a download", async () => {
+    const pending = Promise.withResolvers<void>();
+    downloadMock.mockReturnValueOnce(pending.promise);
+    renderWithQuery(<>
+      <Attachment attachment={{ kind: "record", attachment: makeRecord() }} />
+      <Attachment attachment={{ kind: "record", attachment: makeRecord({ id: "att-2" }) }} />
+    </>);
+    const [first, second] = screen.getAllByRole("button", { name: "Download" });
+
+    fireEvent.click(first!);
+    fireEvent.click(second!);
+
+    expect(downloadMock.mock.calls).toEqual([["att-1"], ["att-2"]]);
+    await act(async () => pending.resolve());
   });
 });

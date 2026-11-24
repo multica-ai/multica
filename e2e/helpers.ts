@@ -8,8 +8,8 @@ const DEFAULT_E2E_EMAIL = `e2e-${E2E_WORKER}-${E2E_RUN_ID}@multica.ai`;
 const DEFAULT_E2E_WORKSPACE = `e2e-workspace-${E2E_WORKER}-${E2E_RUN_ID}`;
 
 async function waitForIssuesPage(page: Page) {
-  await waitForPageText(page, "New Issue");
-  await expect(page.getByRole("button", { name: "New Issue" })).toBeVisible({
+  // The Issues panel's create button is icon-only; its label is the name.
+  await expect(page.getByRole("button", { name: "New Issue" }).first()).toBeVisible({
     timeout: 15000,
   });
 }
@@ -24,7 +24,7 @@ export async function waitForPageText(page: Page, text: string, timeout = 30000)
 
 export async function reloadAppPage(page: Page) {
   await page.reload({ waitUntil: "domcontentloaded" });
-  await waitForPageText(page, "Issues");
+  await waitForIssuesPage(page);
 }
 
 /**
@@ -80,11 +80,22 @@ export async function preferManualCreateMode(page: Page) {
   await waitForIssuesPage(page);
 }
 
-export async function openWorkspaceMenu(page: Page) {
-  // Click the workspace switcher button (has ChevronDown icon)
-  const workspaceButton = page.getByRole("button", { name: /E2E Workspace/ }).first();
-  await expect(workspaceButton).toBeVisible({ timeout: 15000 });
-  await workspaceButton.click();
-  // Wait for dropdown to appear
-  await expect(page.locator('[class*="popover"]')).toBeVisible();
+/** The app rail: workspace tiles, spaces, and the account menu. */
+export function appRail(page: Page) {
+  return page.getByRole("navigation", { name: "App navigation" });
+}
+
+/** The workspace switcher button at the top of the rail. */
+export function currentWorkspaceTile(page: Page) {
+  return appRail(page).getByRole("button", { name: "Switch workspace" });
+}
+
+export async function openAccountMenu(page: Page) {
+  // In `next dev`, the Next.js dev indicator sits in the bottom-left corner
+  // directly over the rail's Account button and intercepts pointer clicks.
+  await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
+  const accountButton = appRail(page).getByRole("button", { name: "Account" });
+  await expect(accountButton).toBeVisible({ timeout: 15000 });
+  await accountButton.click();
+  await expect(page.getByRole("menu")).toBeVisible();
 }

@@ -12,6 +12,8 @@ import { useNavigation } from "./context";
  * Nested interactive cells use rowLinkInteractiveProps to stop both click and
  * auxclick propagation. Do not prevent their defaults: anchors must retain native
  * middle-click behavior. Callers own cursor styling and temporary tab titles.
+ * `onNavigateInPlace` has AppLink's contract: it runs only when the row is
+ * about to navigate the current page.
  */
 export const rowLinkInteractiveProps = {
   onClick: (e: React.MouseEvent) => e.stopPropagation(),
@@ -22,9 +24,10 @@ export function useRowLink() {
   const { push, openInNewTab, prefetch, getShareableUrl } = useNavigation();
 
   return useCallback(
-    (href: string, newTabTitle?: string) => {
+    (href: string, newTabTitle?: string, onNavigateInPlace?: () => void) => {
       const open = (intent: LinkClickIntent) => {
         if (intent === "push") {
+          onNavigateInPlace?.();
           push(href);
           return;
         }

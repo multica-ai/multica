@@ -24,7 +24,27 @@ import (
 // developer's ~/.dsh.
 func fakeDsh(t *testing.T) (path, record string) {
 	t.Helper()
-	return fakeDshScript(t, `mkdir -p "$DSH_HOME/profiles/multica" && printf '{}' > "$DSH_HOME/profiles/multica/package.json"`)
+	return fakeDshScript(t, dshProfileWriteCommand(installedDshProfileManifest())+"\nexit 0")
+}
+
+// installedDshProfileManifest is a profile whose dependencies and bundle list
+// both name the runtime. The bundle list decides what DSH loads;
+// writing both matches what a finished `dsh plugin add` leaves.
+func installedDshProfileManifest() string {
+	return "{\"dependencies\":{\"@multica-ai/dsh-runtime\":\"1.0.0\"},\"dsh\":{\"profile\":{\"bundles\":[\"@multica-ai/dsh-runtime\"]}}}\n"
+}
+
+// dshSkeletonProfileManifest is what a refused `dsh plugin add` restores: empty
+// dependencies and only DSH's own template bundle.
+func dshSkeletonProfileManifest() string {
+	return "{\"name\":\"dsh-profile-multica\",\"private\":true,\"dependencies\":{},\"dsh\":{\"profile\":{\"bundles\":[\"@deepseek-ai/dsh-base\"]}}}\n"
+}
+
+// dshProfileWriteCommand is the shell that creates the multica profile manifest.
+// The manifest is fed through a quoted heredoc so its JSON quotes need no
+// escaping inside the fixture script.
+func dshProfileWriteCommand(manifest string) string {
+	return "mkdir -p \"$DSH_HOME/profiles/multica\" && cat > \"$DSH_HOME/profiles/multica/package.json\" <<'EOF'\n" + manifest + "EOF"
 }
 
 // fakeDshSilentlySucceeds exits 0 from `add` and writes no profile: a package
@@ -72,14 +92,20 @@ func pinnedDshHome(t *testing.T) string {
 	return home
 }
 
-// installMulticaProfile creates the manifest dshMulticaProfilePresent looks for.
+// installMulticaProfile creates the manifest dshMulticaProfilePresent looks for:
+// one that names the Multica runtime, not a file that merely exists.
 func installMulticaProfile(t *testing.T, dshHome string) {
+	t.Helper()
+	writeDshProfileManifest(t, dshHome, installedDshProfileManifest())
+}
+
+func writeDshProfileManifest(t *testing.T, dshHome, manifest string) {
 	t.Helper()
 	dir := filepath.Join(dshHome, "profiles", dshMulticaProfileName)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte("{}\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -230,6 +256,127 @@ func TestProvisionDshMulticaProfile_ExitZeroWithoutAProfileIsAFailedCandidate(t 
 	}
 }
 
+// A refused install can leave a profile directory whose manifest does not name
+// the runtime. That directory stays. The manifest check already classifies it
+// as missing, so the next restart retries over it, and deleting it would also
+// remove files that were already there.
+func TestProvisionDshMulticaProfile_FailedInstallLeavesTheProfileDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	tests := []struct {
+		name     string
+		manifest string
+		code     int
+	}{
+		{name: "exit 1 restores the skeleton", manifest: dshSkeletonProfileManifest(), code: 1},
+		{name: "exit 0 writes an empty manifest", manifest: "{}\n", code: 0},
+		{name: "empty dependencies", manifest: "{\"dependencies\":{}}\n", code: 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			body := dshProfileWriteCommand(tc.manifest) + "\nprintf 'x\\n' > \"$DSH_HOME/profiles/multica/cordis.yml\"\nexit " + strconv.Itoa(tc.code)
+			dshPath, _ := fakeDshScript(t, body)
+			t.Setenv(dshProfileBundleEnv, "@multica-ai/dsh-runtime")
+			t.Setenv(dshPluginPathEnv, "")
+
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			err := provisionDshMulticaProfile(context.Background(), dshPath, logger)
+			if err == nil {
+				t.Fatal("provision returned nil for a manifest that does not name the runtime")
+			}
+			dir := filepath.Join(os.Getenv("DSH_HOME"), "profiles", dshMulticaProfileName)
+			got, readErr := os.ReadFile(filepath.Join(dir, "package.json"))
+			if readErr != nil {
+				t.Fatalf("profile manifest was removed: %v", readErr)
+			}
+			if string(got) != tc.manifest {
+				t.Fatalf("manifest = %q, want %q", got, tc.manifest)
+			}
+			config, readErr := os.ReadFile(filepath.Join(dir, "cordis.yml"))
+			if readErr != nil {
+				t.Fatalf("profile file written by the failed install was removed: %v", readErr)
+			}
+			if string(config) != "x\n" {
+				t.Fatalf("cordis.yml = %q, want the file the failed install wrote", config)
+			}
+		})
+	}
+}
+
+// A failed install that never touches an existing profile has no reason to
+// remove it. The directory may already hold the user's own files.
+func TestProvisionDshMulticaProfile_PreservesPreexistingProfileOnFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	// An installer that fails without touching the profile, like an early network error.
+	dshPath, _ := fakeDshScript(t, "printf 'registry unreachable\\n' >&2\nexit 1")
+	t.Setenv(dshProfileBundleEnv, "@multica-ai/dsh-runtime")
+	t.Setenv(dshPluginPathEnv, "")
+	home := os.Getenv("DSH_HOME")
+	writeDshProfileManifest(t, home, dshSkeletonProfileManifest())
+	configPath := filepath.Join(home, "profiles", dshMulticaProfileName, "cordis.yml")
+	want := "# user-maintained profile configuration\nplugins: {}\n"
+	if err := os.WriteFile(configPath, []byte(want), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if err := provisionDshMulticaProfile(context.Background(), dshPath, logger); err == nil {
+		t.Fatal("expected failed install")
+	}
+	got, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("pre-existing user configuration was deleted after a failed install: %v", err)
+	}
+	if string(got) != want {
+		t.Fatalf("pre-existing user configuration changed: %q", got)
+	}
+	manifestPath := filepath.Join(home, "profiles", dshMulticaProfileName, "package.json")
+	manifest, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("pre-existing manifest was deleted after a failed install: %v", err)
+	}
+	if string(manifest) != dshSkeletonProfileManifest() {
+		t.Fatalf("pre-existing manifest changed: %q", manifest)
+	}
+}
+
+// A failed install that left other packages, the runtime itself, or a manifest
+// that cannot be read must not delete the directory. The first is someone
+// else's install; the second is a profile this daemon must not overwrite; the
+// third is a file it cannot safely judge.
+func TestProvisionDshMulticaProfile_FailedInstallKeepsNonSkeletonProfiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	tests := []struct {
+		name     string
+		manifest string
+	}{
+		{name: "other dependency", manifest: "{\"dependencies\":{\"some-plugin\":\"1.0.0\"}}\n"},
+		{name: "runtime already named", manifest: installedDshProfileManifest()},
+		{name: "unparseable", manifest: "{\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			body := dshProfileWriteCommand(tc.manifest) + "\nexit 1"
+			dshPath, _ := fakeDshScript(t, body)
+			t.Setenv(dshProfileBundleEnv, "@multica-ai/dsh-runtime")
+			t.Setenv(dshPluginPathEnv, "")
+
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			if err := provisionDshMulticaProfile(context.Background(), dshPath, logger); err == nil {
+				t.Fatal("provision returned nil after dsh exited 1")
+			}
+			manifestPath := filepath.Join(os.Getenv("DSH_HOME"), "profiles", dshMulticaProfileName, "package.json")
+			if _, err := os.Stat(manifestPath); err != nil {
+				t.Fatalf("manifest was removed: %v", err)
+			}
+		})
+	}
+}
+
 // Once per daemon, not once per discovery round: this is a network install that
 // writes into the user's DSH home, and the caller uses the return value to tell
 // the user which of the two situations they are in.
@@ -257,12 +404,16 @@ func TestStartDshProfileProvision_RunsAtMostOnce(t *testing.T) {
 
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		if strings.Contains(readRecord(t, record), "plugin --profile multica add") {
+		if !d.dshInstallInFlight.Load() {
+			got := readRecord(t, record)
+			if count := strings.Count(got, "args=plugin --profile multica add "); count != 1 {
+				t.Fatalf("install invocation count = %d, want 1; recorded %q", count, got)
+			}
 			return
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("the install never ran; recorded %q", readRecord(t, record))
+	t.Fatalf("the install did not finish; recorded %q", readRecord(t, record))
 }
 
 func TestStartDshProfileProvision_UnconfiguredNeverStarts(t *testing.T) {
@@ -389,9 +540,10 @@ func TestKickAgentDiscovery_NonBlockingAndCollapsing(t *testing.T) {
 	(&Daemon{}).kickAgentDiscovery()
 }
 
-// The stat is what the discovery loop polls every tick to decide whether to
-// force a round, so it has to mean exactly what DSH means by "this profile is
-// installed" — a directory alone is not one.
+// The discovery loop polls this every tick to decide whether to force a round.
+// A file existing is not an installed profile: a refused plugin install leaves
+// a manifest that does not name the runtime, and treating that as installed is
+// what made the runtime permanently undiagnosable.
 func TestDshMulticaProfilePresent(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("DSH_HOME", home)
@@ -409,12 +561,43 @@ func TestDshMulticaProfilePresent(t *testing.T) {
 	if dshMulticaProfilePresent() {
 		t.Fatal("a directory without a manifest was reported as an installed profile")
 	}
-	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte("{}\n"), 0o644); err != nil {
-		t.Fatal(err)
+
+	absent := []struct {
+		name     string
+		manifest string
+	}{
+		{name: "dependency names the runtime", manifest: "{\"dependencies\":{\"@multica-ai/dsh-runtime\":\"1.0.0\"}}\n"},
+		{name: "dependency value is an object", manifest: "{\"dependencies\":{\"@multica-ai/dsh-runtime\":{\"version\":\"1.0.0\"}}}\n"},
+		{name: "empty object", manifest: "{}\n"},
+		{name: "empty dependencies", manifest: "{\"dependencies\":{}}\n"},
+		{name: "refused-install skeleton", manifest: dshSkeletonProfileManifest()},
+		{name: "similar package name", manifest: "{\"dependencies\":{\"@multica-ai/dsh-runtime-extra\":\"1.0.0\"}}\n"},
 	}
-	if !dshMulticaProfilePresent() {
-		t.Fatal("manifest present but the profile was reported missing")
+	for _, tc := range absent {
+		t.Run(tc.name, func(t *testing.T) {
+			writeDshProfileManifest(t, home, tc.manifest)
+			if dshMulticaProfilePresent() {
+				t.Fatal("profile reported installed without the Multica runtime")
+			}
+		})
 	}
+
+	present := []struct {
+		name     string
+		manifest string
+	}{
+		{name: "bundle names the runtime", manifest: "{\"dsh\":{\"profile\":{\"bundles\":[\"@multica-ai/dsh-runtime\"]}}}\n"},
+		{name: "unparseable manifest", manifest: "{\n"},
+	}
+	for _, tc := range present {
+		t.Run(tc.name, func(t *testing.T) {
+			writeDshProfileManifest(t, home, tc.manifest)
+			if !dshMulticaProfilePresent() {
+				t.Fatal("profile reported missing")
+			}
+		})
+	}
+
 	if err := os.RemoveAll(dir); err != nil {
 		t.Fatal(err)
 	}
@@ -477,9 +660,22 @@ func TestDshProvisionCommand(t *testing.T) {
 }
 
 func TestDshProvisionOutput(t *testing.T) {
+	t.Run("invalid bytes keep readable diagnostic labels", func(t *testing.T) {
+		got := dshDiagnosticOutput([]byte("profile\xff startup failure"))
+		if got != "profile� startup failure" {
+			t.Fatal("diagnostic retained invalid UTF-8")
+		}
+	})
+	t.Run("retains a non-ASCII diagnostic tail", func(t *testing.T) {
+		got := dshDiagnosticOutput([]byte(strings.Repeat("界", dshProvisionOutputBytes)))
+		want := "…" + strings.Repeat("界", dshProvisionOutputBytes/len("界"))
+		if got != want {
+			t.Fatalf("Unicode tail was discarded: got %d bytes, want %d", len(got), len(want))
+		}
+	})
 	t.Run("bounded from the tail", func(t *testing.T) {
 		long := strings.Repeat("x", dshProvisionOutputBytes*2) + "THE-END"
-		got := dshProvisionOutput([]byte(long))
+		got := dshDiagnosticOutput([]byte(long))
 		if len(got) > dshProvisionOutputBytes+len("…") {
 			t.Fatalf("len = %d, want at most %d", len(got), dshProvisionOutputBytes+1)
 		}
@@ -499,7 +695,7 @@ func TestDshProvisionOutput(t *testing.T) {
 			{"npm ERR! 404 https://deploy:hunter2@registry.example.com/@acme/dsh-runtime", "hunter2"},
 			{"ERR_PNPM_FETCH_401 GET http://ci-bot:s3cr3t@npm.internal/@corp%2fdsh", "s3cr3t"},
 		} {
-			got := dshProvisionOutput([]byte(tc.raw))
+			got := dshDiagnosticOutput([]byte(tc.raw))
 			if strings.Contains(got, tc.secret) {
 				t.Errorf("output = %q, want %q redacted", got, tc.secret)
 			}
@@ -509,7 +705,7 @@ func TestDshProvisionOutput(t *testing.T) {
 	// The host has to survive: which registry refused the request is what an
 	// operator reads, and it is not the secret.
 	t.Run("keeps the host", func(t *testing.T) {
-		got := dshProvisionOutput([]byte("npm ERR! 404 https://deploy:hunter2@registry.example.com/pkg"))
+		got := dshDiagnosticOutput([]byte("npm ERR! 404 https://deploy:hunter2@registry.example.com/pkg"))
 		if !strings.Contains(got, "registry.example.com") {
 			t.Errorf("output = %q, want the host kept", got)
 		}
@@ -523,8 +719,8 @@ func TestDshProvisionOutput(t *testing.T) {
 			"cloning ssh://git@github.com/multica-ai/multica.git",
 			"see https://example.com/a:b for details",
 		} {
-			if got := dshProvisionOutput([]byte(raw)); got != raw {
-				t.Errorf("dshProvisionOutput(%q) = %q, want it unchanged", raw, got)
+			if got := dshDiagnosticOutput([]byte(raw)); got != raw {
+				t.Errorf("dshDiagnosticOutput(%q) = %q, want it unchanged", raw, got)
 			}
 		}
 	})
@@ -612,5 +808,62 @@ func TestProvisionDshMulticaProfile_CancellationKillsTheWholeTree(t *testing.T) 
 	}
 	if data, err := os.ReadFile(record); err == nil {
 		t.Fatalf("a grandchild outlived cancellation and wrote: %s", data)
+	}
+}
+
+func TestDshMulticaProfileUnreadableManifest(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("DSH_HOME", home)
+	// A directory produces a read error even when tests run with elevated permissions.
+	if err := os.MkdirAll(dshMulticaProfileManifestPath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !dshMulticaProfilePresent() || dshMulticaProfileNeedsMigration() {
+		t.Fatal("an unreadable manifest must remain unknown, not missing or requiring migration")
+	}
+}
+
+func TestDshDiagnosticOutputRedactsQuotedCredentials(t *testing.T) {
+	for _, key := range []string{"access_token", "apiKey", "password", "client_secret", "refresh_token", "authorization"} {
+		raw := `prefixed startup: {"` + key + `":"opaque-synthetic-value","message":"permission denied"}`
+		got := dshDiagnosticOutput([]byte(raw))
+		if strings.Contains(got, "opaque-synthetic-value") {
+			t.Errorf("quoted %s credential survived", key)
+		}
+		if !strings.Contains(got, "permission denied") {
+			t.Errorf("%s lost useful diagnostic", key)
+		}
+	}
+}
+
+func TestProvisionDshMulticaProfileRechecksCurrentManifest(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX fake CLI")
+	}
+	for _, existing := range []bool{true, false} {
+		t.Run(strconv.FormatBool(existing), func(t *testing.T) {
+			dshPath, record := fakeDshScript(t, dshProfileWriteCommand(installedDshProfileManifest())+"\nexit 1")
+			t.Setenv(dshProfileBundleEnv, "first,second")
+			if existing {
+				writeDshProfileManifest(t, os.Getenv("DSH_HOME"), installedDshProfileManifest())
+			}
+			want := installedDshProfileManifest()
+			err := provisionDshMulticaProfile(context.Background(), dshPath, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			calls := strings.Count(readRecord(t, record), "args=")
+			expected := 1
+			if existing {
+				expected = 0
+			}
+			if calls != expected {
+				t.Errorf("install calls=%d, want %d", calls, expected)
+			}
+			if !existing && err == nil {
+				t.Error("partial failed install reported success")
+			}
+			got, readErr := os.ReadFile(dshMulticaProfileManifestPath())
+			if readErr != nil || string(got) != want {
+				t.Fatalf("populated manifest changed: %v", readErr)
+			}
+		})
 	}
 }

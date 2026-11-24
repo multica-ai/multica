@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/cli"
 )
 
 // TestEnvPositiveIntOrDefault locks in the parse-or-fallback behaviour the log
@@ -35,7 +37,7 @@ func TestEnvPositiveIntOrDefault(t *testing.T) {
 			if c.set {
 				t.Setenv(key, c.val)
 			}
-			if got := envPositiveIntOrDefault(key, c.def); got != c.want {
+			if got := envPositiveIntOrDefault(key, c.def, maxDaemonLogBackups); got != c.want {
 				t.Errorf("envPositiveIntOrDefault(%q, %d) = %d, want %d", c.val, c.def, got, c.want)
 			}
 		})
@@ -103,7 +105,7 @@ func TestNewDaemonLogRotatorEnvOverride(t *testing.T) {
 	t.Setenv("MULTICA_DAEMON_LOG_MAX_BACKUPS", "2")
 	t.Setenv("MULTICA_DAEMON_LOG_MAX_AGE_DAYS", "7")
 
-	r := newDaemonLogRotator(filepath.Join(t.TempDir(), "daemon.log"))
+	r := newDaemonLogRotator(filepath.Join(t.TempDir(), "daemon.log"), cli.CLIConfig{})
 	if r.MaxSize != 5 || r.MaxBackups != 2 || r.MaxAge != 7 {
 		t.Errorf("rotator = {MaxSize:%d MaxBackups:%d MaxAge:%d}, want {5 2 7}", r.MaxSize, r.MaxBackups, r.MaxAge)
 	}
@@ -119,7 +121,7 @@ func TestDaemonLogRotatorRotates(t *testing.T) {
 	// racing lumberjack's async gzip of the rotated file.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "daemon.log")
-	r := newDaemonLogRotator(path)
+	r := newDaemonLogRotator(path, cli.CLIConfig{})
 	r.Compress = false
 
 	// Write ~1.5 MB in chunks; at least one rotation must happen.

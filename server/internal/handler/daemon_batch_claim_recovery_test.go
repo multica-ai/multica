@@ -49,7 +49,7 @@ func TestClaimTasksByRuntime_DeadlineRecoveryOverWebSocket(t *testing.T) {
 	h.TaskService = service.NewTaskService(testHandler.Queries, testPool, testHandler.TaskService.Hub, testHandler.TaskService.Bus, hub)
 	hub.SetRPCHandler(h.DaemonRPCHandler)
 	identity := daemonws.ClientIdentity{
-		DaemonID: batchClaimTestDaemonID, UserID: testUserID,
+		UserID:      testUserID, // user-credential connection: no daemon id
 		WorkspaceID: testWorkspaceID, WorkspaceIDs: []string{testWorkspaceID},
 		RuntimeIDs: []string{runtimeID}, Capabilities: protocol.DaemonCapabilityClaimPollHintsV1,
 	}

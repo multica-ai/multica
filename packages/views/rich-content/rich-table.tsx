@@ -31,10 +31,12 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { ExtraProps } from "react-markdown";
-import { Check, Copy, Maximize2, RotateCcw } from "lucide-react";
+import { Maximize2, RotateCcw } from "@multica/ui/icons";
+import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../i18n";
+import { DeferredTooltip } from "../common/deferred-tooltip";
 import { RichTableDialog } from "./rich-table-dialog";
 import {
   columnWidthKey,
@@ -90,7 +92,10 @@ function headerCells(table: HTMLTableElement): HTMLTableCellElement[] {
 // sizing lifted and restored within the same task, so the browser paints only
 // the restored layout. Only the <table> and its <col>s are touched: in the
 // editor, a style written to a cell would reach ProseMirror as an edit.
-function measureColumns(table: HTMLTableElement): { min: number[]; max: number[] } {
+function measureColumns(
+  table: HTMLTableElement,
+  available?: number,
+): { min: number[]; max: number[] } {
   const { style } = table;
   const saved = { layout: style.tableLayout, width: style.width, minWidth: style.minWidth };
   const fixed = table.hasAttribute("data-column-widths");
@@ -102,10 +107,13 @@ function measureColumns(table: HTMLTableElement): { min: number[]; max: number[]
   for (const col of cols) col.style.width = "";
   style.tableLayout = "auto";
   style.minWidth = "0";
-  style.width = "max-content";
-  const max = read();
   style.width = "min-content";
   const min = read();
+  let max: number[] = [];
+  if (available === undefined || sum(min) > available) {
+    style.width = "max-content";
+    max = read();
+  }
 
   style.tableLayout = saved.layout;
   style.width = saved.width;
@@ -125,7 +133,7 @@ function measureColumns(table: HTMLTableElement): { min: number[]; max: number[]
 const PREFERRED_MAX_COLUMN_WIDTH = 320;
 
 function overflowWidths(table: HTMLTableElement, available: number): number[] | null {
-  const { min, max } = measureColumns(table);
+  const { min, max } = measureColumns(table, available);
   if (min.length === 0 || sum(min) <= available) return null;
   return min.map((least, i) => Math.max(least, Math.min(max[i] ?? least, PREFERRED_MAX_COLUMN_WIDTH)));
 }
@@ -236,11 +244,15 @@ export function RichTableFrame({ model, getMarkdown, tableRef: onTable, children
     fit();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(fit);
     observer?.observe(wrapper);
-    // Content widths change when a web font replaces its fallback.
-    void document.fonts?.ready.then(() => {
-      measuredAt = -1;
-      fit();
-    });
+    // Content widths change when a web font replaces its fallback. Once the
+    // fonts have loaded, `ready` resolves at once and a second measure of every
+    // table would only repeat the first.
+    if (document.fonts && document.fonts.status !== "loaded") {
+      void document.fonts.ready.then(() => {
+        measuredAt = -1;
+        fit();
+      });
+    }
     return () => {
       active = false;
       observer?.disconnect();
@@ -392,12 +404,13 @@ export function RichTableFrame({ model, getMarkdown, tableRef: onTable, children
     "flex h-6 items-center justify-center gap-1 rounded-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
   return (
-    <div className="rich-table group/table" data-resized={resized ? "" : undefined}>
-      {/* A row of its own above the table: over the table it would cover the
-          last columns' headers and resize handles. */}
+    <div className="rich-table group/table relative" data-resized={resized ? "" : undefined}>
+      {/* Above the table, inside its top margin: over the table it would cover
+          the last columns' headers and resize handles, and in the flow it
+          would make the space above the table taller than the space below. */}
       <div
         {...chrome}
-        className="rich-table-toolbar flex h-7 items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover/table:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100"
+        className="rich-table-toolbar absolute right-0 bottom-full flex h-6 items-center gap-0.5 opacity-0 transition-opacity group-hover/table:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100"
       >
         {resized && (
           <button type="button" onClick={resetWidths} className={cn(toolbarButton, "px-1.5 text-caption")}>
@@ -405,24 +418,32 @@ export function RichTableFrame({ model, getMarkdown, tableRef: onTable, children
             {t(($) => $.table.reset_widths)}
           </button>
         )}
-        <button
-          type="button"
-          onClick={() => setExpanded(true)}
-          className={cn(toolbarButton, "w-6")}
-          title={t(($) => $.table.expand)}
-          aria-label={t(($) => $.table.expand)}
-        >
-          <Maximize2 className="size-3.5" />
-        </button>
-        <button
-          type="button"
-          onClick={copyMarkdown}
-          className={cn(toolbarButton, "w-6")}
-          title={copied ? t(($) => $.table.copied) : t(($) => $.table.copy_markdown)}
-          aria-label={t(($) => $.table.copy_markdown)}
-        >
-          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-        </button>
+        <DeferredTooltip
+          content={t(($) => $.table.expand)}
+          trigger={
+            <button
+              type="button"
+              onClick={() => setExpanded(true)}
+              className={cn(toolbarButton, "w-6")}
+              aria-label={t(($) => $.table.expand)}
+            >
+              <Maximize2 className="size-3.5" />
+            </button>
+          }
+        />
+        <DeferredTooltip
+          content={copied ? t(($) => $.table.copied) : t(($) => $.table.copy_markdown)}
+          trigger={
+            <button
+              type="button"
+              onClick={copyMarkdown}
+              className={cn(toolbarButton, "w-6")}
+              aria-label={t(($) => $.table.copy_markdown)}
+            >
+              <CopyCheckIcon copied={copied} />
+            </button>
+          }
+        />
       </div>
       <div className="relative">
         <div ref={wrapperRef} className="tableWrapper">
@@ -464,20 +485,24 @@ export function RichTableFrame({ model, getMarkdown, tableRef: onTable, children
         </div>
         {/* Columns continue past the edge: a shadow, not a fade to a background
             colour, because the same table renders on cards, pages and chat. */}
-        {overflow.start && (
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-y-px left-px w-3 rounded-l-[var(--radius)]"
-            style={{ background: `linear-gradient(to right, ${SCROLL_SHADOW}, transparent)` }}
-          />
-        )}
-        {overflow.end && (
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-y-px right-px w-3 rounded-r-[var(--radius)]"
-            style={{ background: `linear-gradient(to left, ${SCROLL_SHADOW}, transparent)` }}
-          />
-        )}
+        <div
+          aria-hidden
+          data-overflow-shadow={overflow.start ? "start" : undefined}
+          className={cn(
+            "pointer-events-none absolute inset-y-px left-px w-3 rounded-l-[var(--radius)] transition-opacity duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+            overflow.start ? "opacity-100" : "opacity-0",
+          )}
+          style={{ background: `linear-gradient(to right, ${SCROLL_SHADOW}, transparent)` }}
+        />
+        <div
+          aria-hidden
+          data-overflow-shadow={overflow.end ? "end" : undefined}
+          className={cn(
+            "pointer-events-none absolute inset-y-px right-px w-3 rounded-r-[var(--radius)] transition-opacity duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+            overflow.end ? "opacity-100" : "opacity-0",
+          )}
+          style={{ background: `linear-gradient(to left, ${SCROLL_SHADOW}, transparent)` }}
+        />
       </div>
       {expanded && (
         <RichTableDialog model={model} open={expanded} onOpenChange={setExpanded} getMarkdown={getMarkdown} />

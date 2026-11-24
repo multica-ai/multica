@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CornerDownRight } from "lucide-react";
+import { CornerDownRight } from "@multica/ui/icons";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { ActorAvatar } from "../common/actor-avatar";
 import { useT } from "../i18n";

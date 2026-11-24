@@ -74,6 +74,26 @@ describe("RichTable", () => {
     expect(screen.queryByRole("button", { name: "Reset widths" })).toBeNull();
   });
 
+  it("skips max-content measurements when minimum column widths fit", () => {
+    const measurements: string[] = [];
+    const rect = vi
+      .spyOn(HTMLTableCellElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLTableCellElement) {
+        measurements.push(this.closest("table")?.style.width ?? "");
+        return new DOMRect(0, 0, 100, 20);
+      });
+    const clientWidth = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(560);
+    try {
+      const { table } = renderTable();
+      expect(measurements).toContain("min-content");
+      expect(measurements).not.toContain("max-content");
+      expect(table).not.toHaveAttribute("data-column-widths");
+    } finally {
+      rect.mockRestore();
+      clientWidth.mockRestore();
+    }
+  });
+
   it("gives an overflowing table capped content widths without saving them", () => {
     const natural = { "max-content": [500, 260, 90], "min-content": [200, 330, 64] } as const;
     const rect = vi
@@ -93,6 +113,36 @@ describe("RichTable", () => {
       expect(screen.queryByRole("button", { name: "Reset widths" })).toBeNull();
       expect(window.localStorage.getItem("multica:rich-table-widths")).toBeNull();
     } finally {
+      rect.mockRestore();
+      clientWidth.mockRestore();
+    }
+  });
+
+  it("measures again for web fonts only while they are still loading", async () => {
+    const rect = vi.spyOn(HTMLTableCellElement.prototype, "getBoundingClientRect").mockReturnValue({ width: 100 } as DOMRect);
+    const clientWidth = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(560);
+    const measures = async (status: FontFaceSet["status"]) => {
+      let fontsLoaded!: () => void;
+      const ready = new Promise<void>((resolve) => (fontsLoaded = resolve));
+      Object.defineProperty(document, "fonts", { configurable: true, value: { status, ready } });
+      rect.mockClear();
+      const view = renderTable();
+      const first = rect.mock.calls.length;
+      fontsLoaded();
+      await ready;
+      await Promise.resolve();
+      const total = rect.mock.calls.length;
+      view.unmount();
+      return { first, total };
+    };
+    try {
+      const loaded = await measures("loaded");
+      expect(loaded.first).toBeGreaterThan(0);
+      expect(loaded.total).toBe(loaded.first);
+      const loading = await measures("loading");
+      expect(loading.total).toBeGreaterThan(loading.first);
+    } finally {
+      delete (document as { fonts?: unknown }).fonts;
       rect.mockRestore();
       clientWidth.mockRestore();
     }

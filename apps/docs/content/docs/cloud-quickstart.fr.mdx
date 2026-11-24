@@ -4,40 +4,50 @@ description: Connectez un ordinateur, créez votre premier agent et faites-lui a
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 
 <Callout type="info">
 Avant qu'un agent puisse s'exécuter, l'ordinateur qui l'exécute doit disposer d'au moins un [outil de codage IA pris en charge](/providers), installé et connecté — par exemple Claude Code, Codex ou Cursor. Multica ne fournit pas ces outils.
 </Callout>
 
-## 1. Connectez-vous et ouvrez votre espace de travail
+<Steps>
+<Step>
 
-Connectez-vous sur le web ([multica.ai](https://multica.ai)) ou avec [Multica Desktop](https://multica.ai/download). La connexion par code de vérification envoyé par e-mail et la connexion Google sont toutes deux prises en charge.
+## Connectez-vous et ouvrez votre espace de travail [#1-connectez-vous-et-ouvrez-votre-espace-de-travail]
 
-- **Desktop** : peut connecter automatiquement cet ordinateur.
-- **Web** : connectez l'ordinateur depuis la ligne de commande à l'étape suivante.
+Connectez-vous sur le web ([multica.ai](https://multica.ai)) ou avec [Multica Desktop](https://multica.ai/download). La connexion par code de vérification envoyé par e-mail et la connexion Google sont toutes deux prises en charge. Avec Desktop, l'étape suivante peut connecter cet ordinateur automatiquement ; sur le web, vous le connectez depuis la ligne de commande.
 
-## 2. Connectez un ordinateur
+</Step>
+<Step>
 
-Les agents exécutent le travail sur les ordinateurs que vous connectez. Ouvrez **Équipe IA → Runtimes** en bas de la barre latérale :
+## Connectez un ordinateur [#2-connectez-un-ordinateur]
+
+Les agents exécutent le travail sur les ordinateurs que vous connectez. Ouvrez **Runtimes** sous **Équipe IA** dans la barre latérale :
 
 - **Avec Desktop** : Desktop enregistre automatiquement cet ordinateur comme runtime et détecte les outils de codage IA installés. Pour un outil que vous venez d'installer, cliquez sur **Actualiser** pour relancer la détection.
-- **Avec le Web, ou pour ajouter un autre ordinateur** : cliquez sur **Ajouter un ordinateur** en haut à droite, puis exécutez les deux commandes de la boîte de dialogue dans un terminal de l'ordinateur cible :
+- **Avec le Web, ou pour ajouter un autre ordinateur** : cliquez sur **Ajouter** en haut à droite, choisissez **Autre machine ou serveur**, puis exécutez les deux commandes de la boîte de dialogue dans un terminal de l'ordinateur cible :
 
-  **macOS / Linux**
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
 
-  ```bash
-  curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
-  multica setup
-  ```
+```bash
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+multica setup
+```
 
-  **Windows PowerShell**
+</Tab>
+<Tab value="Windows">
 
-  ```powershell
-  irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
-  multica setup
-  ```
+```powershell
+irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+multica setup
+```
 
-  `multica setup` ouvre un navigateur pour finaliser la connexion, puis laisse le daemon tourner en arrière-plan. Une fois le daemon en ligne, la boîte de dialogue détecte généralement l'ordinateur en moins d'une minute.
+</Tab>
+</Tabs>
+
+`multica setup` ouvre un navigateur pour finaliser la connexion, puis laisse le daemon tourner en arrière-plan. Une fois le daemon en ligne, la boîte de dialogue détecte généralement l'ordinateur en moins d'une minute.
 
 **Vérification** : un ordinateur en ligne apparaît dans la liste des runtimes.
 
@@ -47,20 +57,21 @@ Les agents exécutent le travail sur les ordinateurs que vous connectez. Ouvrez 
 Les commandes de connexion diffèrent légèrement sur les instances auto-hébergées — consultez le [démarrage rapide en auto-hébergement](/self-host-quickstart).
 </Callout>
 
-## 3. Créez un agent
+</Step>
+<Step>
 
-Ouvrez **Équipe IA → Agents** dans la barre latérale, cliquez sur **Nouvel agent** et choisissez une méthode :
+## Créez un agent [#3-créez-un-agent]
 
-- **Partir de zéro** : remplissez vous-même les champs. Seul le nom est strictement obligatoire — confirmez le runtime et l'outil de codage IA, puis créez l'agent.
-- **Construire avec l'IA** : décrivez ce que vous voulez ; l'Agent Builder vous pose des questions et génère la configuration. Cette méthode nécessite un runtime en ligne.
+Ouvrez **Agents** sous **Équipe IA** dans la barre latérale et cliquez sur **Nouvel agent**. Choisissez d'abord un outil de codage IA sur l'ordinateur que vous venez de connecter, saisissez un nom, puis cliquez sur **Créer l'agent**. Seuls le runtime et le nom sont obligatoires.
 
-Tout le reste peut être affiné plus tard — voir [Créer et configurer des agents](/agents-create).
+Si vous ne voulez pas rédiger la configuration vous-même, cliquez sur **Laisser l'IA rédiger** sur la page de configuration : l'Agent Builder vous pose quelques questions et la complète. Le runtime sélectionné doit être en ligne. Tout le reste peut être affiné plus tard — voir [Créer et configurer un agent](/agents-create).
 
 **Vérification** : votre agent apparaît dans la liste des agents et s'affiche comme en ligne.
 
-![Choix du point de départ pour créer un agent : Partir de zéro et Construire avec l'IA](/images/docs/quickstart-new-agent.webp)
+</Step>
+<Step>
 
-## 4. Confiez-lui votre première tâche
+## Confiez-lui votre première tâche [#4-confiez-lui-votre-première-tâche]
 
 Cliquez sur **Nouvelle tâche** en haut de la barre latérale (ou appuyez sur `C`). Dans le mode agent par défaut :
 
@@ -70,13 +81,19 @@ Cliquez sur **Nouvelle tâche** en haut de la barre latérale (ou appuyez sur `C
 
 ![Boîte de dialogue Nouvelle tâche en mode agent : Créé par défini sur Multica Assistant](/images/docs/quickstart-new-issue.webp)
 
-## 5. Suivez l'avancement et les résultats
+</Step>
+<Step>
+
+## Suivez l'avancement et les résultats [#5-suivez-lavancement-et-les-résultats]
 
 Après validation, ouvrez la tâche : le journal d'exécution affiche le statut de l'exécution, et l'avancement ainsi que les réponses de l'agent apparaissent dans le fil d'activité.
 
 **Vérification** : le statut du journal d'exécution passe à Terminée et la réponse de l'agent apparaît dans le fil d'activité. Pour voir la transcription complète, cliquez sur **Voir la transcription**.
 
 ![La réponse de l'agent dans la tâche et un journal d'exécution terminé](/images/docs/quickstart-run-result.webp)
+
+</Step>
+</Steps>
 
 ## Problèmes courants
 
@@ -92,4 +109,4 @@ Pour d'autres cas, consultez [Dépannage](/troubleshooting).
 
 - [Concepts clés](/concepts) — découvrez en trois minutes tous les objets clés de Multica.
 - [Fonctionnement de Multica](/how-multica-works) — comment les tâches, les agents, les runtimes et chaque exécution s'articulent.
-- [Mettre les agents au travail](/triggering-agents) — au-delà de l'assignation : @mentions, Discussion et automatisations.
+- [Mettre les agents au travail](/triggering-agents) — en plus de l'assignation, une @mention, une discussion ou une automatisation peuvent aussi lancer un agent.
