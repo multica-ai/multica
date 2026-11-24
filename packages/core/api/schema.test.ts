@@ -28,9 +28,11 @@ afterEach(() => {
 describe("ApiClient schema fallback", () => {
   it("parses workspace grants and fails closed on malformed grant lists", async () => {
     const client = new ApiClient("https://api.example.test");
+    stubFetchJson({ grants: [{ workspace_id: "ws-2", can_create_agents: true }] });
+    await expect(client.listAgentWorkspaceGrants("agent-1")).resolves.toEqual([{ workspace_id: "ws-2", can_create_agents: true }]);
     stubFetchJson({ workspace_ids: ["ws-2"] });
-    await expect(client.listAgentWorkspaceGrants("agent-1")).resolves.toEqual(["ws-2"]);
-    stubFetchJson({ workspace_ids: "ws-2" });
+    await expect(client.listAgentWorkspaceGrants("agent-1")).resolves.toEqual([{ workspace_id: "ws-2", can_create_agents: false }]);
+    stubFetchJson({ grants: "ws-2" });
     await expect(client.listAgentWorkspaceGrants("agent-1")).resolves.toEqual([]);
   });
   describe("workspace pin responses", () => {

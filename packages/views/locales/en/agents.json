@@ -878,7 +878,8 @@
     "workspace_grants_title": "Other workspaces this agent can use",
     "workspace_grants_description": "A run can list, read, and create issues there when its initiating person and this agent's owner still have access. This does not allow assignment of this agent to those issues.",
     "workspace_grants_empty": "You do not belong to another workspace.",
-    "workspace_grants_error": "Could not update workspace access."
+    "workspace_grants_error": "Could not update workspace access.",
+    "workspace_grants_agent_creation": "Allow this agent to create agents in this workspace"
   },
   "profile_card": {
     "unavailable": "Agent unavailable",

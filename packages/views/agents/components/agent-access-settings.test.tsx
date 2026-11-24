@@ -28,6 +28,8 @@ const MEMBERS = [
 
 let feature: WorkspaceFeatureState;
 const addGrant = vi.fn(async () => {});
+const setCreation = vi.fn(async () => {});
+let grants: Array<{ workspace_id: string; can_create_agents: boolean }>;
 
 function agent(overrides: Partial<Agent>): Agent {
   return {
@@ -54,15 +56,18 @@ describe("AgentAccessSettings plan access", () => {
   beforeEach(() => {
     feature = "available";
     addGrant.mockClear();
+    setCreation.mockClear();
+    grants = [];
     setApiInstance({
       getWorkspaceFeatures: vi.fn(async () => ({ features: { agent_invocation_members: feature } })),
       listWorkspaces: vi.fn(async () => [
         { id: "ws-1", name: "Home" },
         { id: "ws-2", name: "Target" },
       ]),
-      listAgentWorkspaceGrants: vi.fn(async () => []),
+      listAgentWorkspaceGrants: vi.fn(async () => grants),
       addAgentWorkspaceGrant: addGrant,
       removeAgentWorkspaceGrant: vi.fn(async () => {}),
+      setAgentWorkspaceGrantAgentCreation: setCreation,
     } as unknown as ApiClient);
   });
   afterEach(cleanup);
@@ -94,5 +99,20 @@ describe("AgentAccessSettings plan access", () => {
     expect(checkbox).not.toBeChecked();
     fireEvent.click(checkbox);
     await waitFor(() => expect(addGrant).toHaveBeenCalledWith("a1", "ws-2"));
+  });
+
+  it("keeps agent creation disabled until separately granted", async () => {
+    renderSettings(agent({}));
+    expect(await screen.findByRole("checkbox", { name: "Allow this agent to create agents in this workspace" })).toHaveAttribute("aria-disabled", "true");
+    expect(setCreation).not.toHaveBeenCalled();
+  });
+
+  it("lets the owner enable agent creation for an existing target grant", async () => {
+    grants = [{ workspace_id: "ws-2", can_create_agents: false }];
+    renderSettings(agent({}));
+    const checkbox = await screen.findByRole("checkbox", { name: "Allow this agent to create agents in this workspace" });
+    expect(checkbox).toBeEnabled();
+    fireEvent.click(checkbox);
+    await waitFor(() => expect(setCreation).toHaveBeenCalledWith("a1", "ws-2", true));
   });
 });

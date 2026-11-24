@@ -1,8 +1,8 @@
 -- name: ListAgentWorkspaceGrants :many
-SELECT workspace_id FROM agent_workspace_grant WHERE agent_id = $1 ORDER BY created_at;
+SELECT workspace_id, can_create_agents FROM agent_workspace_grant WHERE agent_id = $1 ORDER BY created_at;
 
 -- name: AuthorizeTaskWorkspaceGrant :one
-SELECT a.owner_id, t.originator_user_id
+SELECT a.owner_id, t.originator_user_id, g.can_create_agents
 FROM agent_task_queue t
 JOIN agent a ON a.id = t.agent_id
 JOIN agent_workspace_grant g ON g.agent_id = a.id AND g.workspace_id = sqlc.arg(target_workspace_id)
@@ -21,6 +21,11 @@ VALUES ($1, $2, $3) ON CONFLICT (agent_id, workspace_id) DO NOTHING;
 
 -- name: RemoveAgentWorkspaceGrant :exec
 DELETE FROM agent_workspace_grant WHERE agent_id = $1 AND workspace_id = $2;
+
+-- name: SetAgentWorkspaceGrantAgentCreation :one
+UPDATE agent_workspace_grant SET can_create_agents = sqlc.arg(can_create_agents)
+WHERE agent_id = sqlc.arg(agent_id) AND workspace_id = sqlc.arg(workspace_id)
+RETURNING workspace_id, can_create_agents;
 
 -- name: DeleteAgentWorkspaceGrantsForWorkspace :exec
 DELETE FROM agent_workspace_grant

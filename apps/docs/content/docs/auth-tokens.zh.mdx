@@ -81,6 +81,8 @@ curl https://api.multica.ai/api/issues \
 
 智能体所有者可以在**智能体设置 → Access** 中，或选中智能体所属工作区后运行 `multica agent workspace-grant add <agent-id> <target-workspace-id>`，授权特定的其他工作区。对于由用户直接发起的运行，`multica --workspace-id <target-workspace-id> issue list`、`issue get` 和 `issue create` 使用同一个临时令牌。服务器会在每次请求时检查授权，以及发起人和智能体所有者当前的成员身份。撤销授权立即生效。其他跨工作区操作（包括将此智能体分配到目标议题）仍不可用。
 
+在其他工作区创建智能体需要单独授权。所有者可在智能体的访问设置中开启，或在源工作区运行 `multica agent workspace-grant agent-creation <agent-id> <target-workspace-id> allow`。已有的工作区授权不会自动开启此权限。由用户直接发起的运行可先用 `multica --workspace-id <target-workspace-id> runtime list` 查找可用运行时，再用 `multica --workspace-id <target-workspace-id> agent create --name <name> --runtime-id <runtime-id>` 创建。新智能体及后续运行属于目标工作区，发起用户是其所有者。运行时的所有权和共享规则仍然适用。使用 `agent-creation ... deny` 撤销此权限。
+
 守护进程把这个临时令牌注入 AI 编程工具，不会把用户 PAT 交给智能体。所以智能体发出的请求会记录为智能体行为，也不能借此调用只允许用户或 owner 执行的敏感操作。
 
 这类令牌由服务器自动创建，用户不需要保存或管理。

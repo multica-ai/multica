@@ -143,3 +143,103 @@ func TestGrantedTaskTokenCanCreateAndReadTargetIssue(t *testing.T) {
 		t.Fatalf("list: %d %s", listed.Code, listed.Body.String())
 	}
 }
+
+func TestGrantedTaskTokenCreatesTargetOwnedAgent(t *testing.T) {
+	home := dbfx.Workspace(t, "creation source", "creation-source-"+uuid.NewString()[:8])
+	sourceOwner := dbfx.User(t, "source owner", "source-owner-"+uuid.NewString()[:8]+"@example.test")
+	runtimeOwner := dbfx.User(t, "source runtime owner", "source-runtime-"+uuid.NewString()[:8]+"@example.test")
+	dbfx.Member(t, home, sourceOwner, "member")
+	dbfx.Member(t, home, runtimeOwner, "member")
+	dbfx.Member(t, testWorkspaceID, sourceOwner, "member")
+	sourceRuntime := dbfx.Runtime(t, "creation source runtime", testutil.Cols{"workspace_id": home, "owner_id": runtimeOwner})
+	sourceAgent := dbfx.Agent(t, "creation source agent", sourceRuntime, testutil.Cols{"workspace_id": home, "owner_id": sourceOwner})
+	task := dbfx.Task(t, sourceAgent, testutil.Cols{
+		"status": "running", "runtime_id": sourceRuntime, "originator_user_id": testUserID,
+		"accountable_user_id": testUserID, "originator_source": "direct_human",
+	})
+	dbfx.InsertNoID(t, "agent_workspace_grant", testutil.Cols{"agent_id": sourceAgent, "workspace_id": testWorkspaceID, "created_by": sourceOwner}, "agent_id=$1 AND workspace_id=$2", sourceAgent, testWorkspaceID)
+	targetRuntime := dbfx.Runtime(t, "creation target runtime", testutil.Cols{"workspace_id": testWorkspaceID, "owner_id": testUserID, "visibility": "private"})
+	privateRuntime := dbfx.Runtime(t, "creation private runtime", testutil.Cols{"workspace_id": testWorkspaceID, "owner_id": sourceOwner, "visibility": "private"})
+	token := "mat_cross_create_" + uuid.NewString()
+	dbfx.Insert(t, "task_token", testutil.Cols{
+		"token_hash": auth.HashToken(token), "task_id": task, "agent_id": sourceAgent,
+		"workspace_id": home, "user_id": runtimeOwner, "expires_at": testutil.Raw("now() + interval '1 hour'"),
+	})
+	router := chi.NewRouter()
+	router.Use(middleware.Auth(testHandler.Queries, nil, nil, nil))
+	router.Use(middleware.RequireWorkspaceMember(testHandler.Queries))
+	router.Get("/api/runtimes", testHandler.ListAgentRuntimes)
+	router.Post("/api/agents", testHandler.CreateAgent)
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, path, bytes.NewBufferString(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("X-Workspace-ID", testWorkspaceID)
+		req.Header.Set("X-User-ID", sourceOwner)                    // forged; Auth must replace it
+		req.Header.Set("X-Task-Home-Workspace-ID", testWorkspaceID) // forged
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+	createBody := `{"name":"target-created-` + uuid.NewString()[:8] + `","runtime_id":"` + targetRuntime + `"}`
+	if got := call(http.MethodPost, "/api/agents", createBody); got.Code != http.StatusForbidden {
+		t.Fatalf("default grant created agent: %d %s", got.Code, got.Body.String())
+	}
+	dbfx.Exec(t, "UPDATE agent_workspace_grant SET can_create_agents=true WHERE agent_id=$1 AND workspace_id=$2", sourceAgent, testWorkspaceID)
+	listed := call(http.MethodGet, "/api/runtimes", "")
+	if listed.Code != http.StatusOK || !bytes.Contains(listed.Body.Bytes(), []byte(targetRuntime)) || bytes.Contains(listed.Body.Bytes(), []byte(privateRuntime)) {
+		t.Fatalf("runtime discovery: %d %s", listed.Code, listed.Body.String())
+	}
+	if got := call(http.MethodPost, "/api/agents", `{"name":"private denied","runtime_id":"`+privateRuntime+`"}`); got.Code != http.StatusForbidden {
+		t.Fatalf("private runtime accepted: %d %s", got.Code, got.Body.String())
+	}
+	if got := call(http.MethodPost, "/api/agents", `{"name":"secrets denied","runtime_id":"`+targetRuntime+`","custom_env":{"TOKEN":"secret"}}`); got.Code != http.StatusForbidden {
+		t.Fatalf("cross-workspace secrets accepted: %d %s", got.Code, got.Body.String())
+	}
+	created := call(http.MethodPost, "/api/agents", createBody)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", created.Code, created.Body.String())
+	}
+	var result map[string]any
+	if err := json.Unmarshal(created.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result["workspace_id"] != testWorkspaceID || result["owner_id"] != testUserID || result["runtime_id"] != targetRuntime {
+		t.Fatalf("wrong target agent ownership: %+v", result)
+	}
+	dbfx.Exec(t, "UPDATE member SET role='guest' WHERE user_id=$1 AND workspace_id=$2", testUserID, testWorkspaceID)
+	defer dbfx.Exec(t, "UPDATE member SET role='owner' WHERE user_id=$1 AND workspace_id=$2", testUserID, testWorkspaceID)
+	if got := call(http.MethodPost, "/api/agents", createBody); got.Code != http.StatusForbidden {
+		t.Fatalf("guest originator created agent: %d %s", got.Code, got.Body.String())
+	}
+}
+
+func TestAgentCreationGrantOwnerControl(t *testing.T) {
+	target := dbfx.Workspace(t, "creation grant target", "creation-grant-"+uuid.NewString()[:8])
+	dbfx.Member(t, target, testUserID, "member")
+	runtime := dbfx.Runtime(t, "creation grant runtime")
+	agent := dbfx.Agent(t, "creation grant agent", runtime)
+	path := "/api/agents/" + agent + "/workspace-grants/" + target + "/agent-creation"
+	request := func(actor string, body map[string]any) *httptest.ResponseRecorder {
+		t.Helper()
+		req := newRequestAs(actor, http.MethodPut, path, body)
+		req = withURLParams(req, "id", agent, "workspaceId", target)
+		w := httptest.NewRecorder()
+		testHandler.SetAgentWorkspaceGrantAgentCreation(w, req)
+		return w
+	}
+	if got := request(testUserID, map[string]any{"can_create_agents": true}); got.Code != http.StatusNotFound {
+		t.Fatalf("missing base grant enabled creation: %d %s", got.Code, got.Body.String())
+	}
+	dbfx.InsertNoID(t, "agent_workspace_grant", testutil.Cols{"agent_id": agent, "workspace_id": target, "created_by": testUserID}, "agent_id=$1 AND workspace_id=$2", agent, target)
+	if got := request(testUserID, map[string]any{"can_create_agents": true}); got.Code != http.StatusOK {
+		t.Fatalf("owner enable: %d %s", got.Code, got.Body.String())
+	}
+	grants, err := testHandler.Queries.ListAgentWorkspaceGrants(context.Background(), util.MustParseUUID(agent))
+	if err != nil || len(grants) != 1 || !grants[0].CanCreateAgents {
+		t.Fatalf("grant state: %+v %v", grants, err)
+	}
+	if got := request(testUserID, map[string]any{"can_create_agents": false}); got.Code != http.StatusOK {
+		t.Fatalf("owner revoke: %d %s", got.Code, got.Body.String())
+	}
+}
