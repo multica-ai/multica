@@ -82,6 +82,10 @@ The agent list shows two kinds of status side by side:
 
 "Offline" does not mean the agent was deleted. Already-enqueued runs wait for the runtime to recover; only "archived" means it can no longer take new work.
 
+## Cancel queued runs
+
+On the agent detail page, open the actions menu and select **Cancel all queued runs**. The agent owner and workspace owners and admins can confirm cancellation for the workflow runs shown in the queue. Runs that leave the queue before confirmation are skipped. The result shows how many were cancelled or skipped, and cancelled runs remain in the agent’s run history.
+
 ## Archive and restore
 
 Agents you no longer use can be archived. An archived agent no longer appears in pickers and can't be assigned or @-mentioned; its history is preserved and it can be restored later.

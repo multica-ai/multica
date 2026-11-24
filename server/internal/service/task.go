@@ -2878,6 +2878,35 @@ func (s *TaskService) CancelTasksForAgent(ctx context.Context, agentID pgtype.UU
 	}); err != nil {
 		return nil, err
 	}
+	s.publishAgentTaskCancellations(ctx, agentID, cancelled)
+	return cancelled, nil
+}
+
+func (s *TaskService) CancelQueuedAgentTasks(ctx context.Context, agentID pgtype.UUID, taskIDs []pgtype.UUID, actor TaskCancellationActor) (int, error) {
+	var cancelled []db.AgentTaskQueue
+	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		var err error
+		cancelled, err = qtx.CancelQueuedAgentTasks(ctx, db.CancelQueuedAgentTasksParams{
+			AgentID:         agentID,
+			TaskIds:         taskIDs,
+			CancelledByType: pgtype.Text{String: actor.Type, Valid: true},
+			CancelledByID:   actor.ID,
+			CancelledByName: pgtype.Text{String: actor.Name, Valid: actor.Name != ""},
+		})
+		if err != nil {
+			return err
+		}
+		return SettleTerminalTaskState(ctx, qtx, cancelled...)
+	}); err != nil {
+		return 0, err
+	}
+	if len(cancelled) > 0 {
+		s.publishAgentTaskCancellations(ctx, agentID, cancelled)
+	}
+	return len(cancelled), nil
+}
+
+func (s *TaskService) publishAgentTaskCancellations(ctx context.Context, agentID pgtype.UUID, cancelled []db.AgentTaskQueue) {
 	for _, t := range cancelled {
 		s.captureTaskCancelled(ctx, t)
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
@@ -2887,7 +2916,6 @@ func (s *TaskService) CancelTasksForAgent(ctx context.Context, agentID pgtype.UU
 	// per row (the rows we just cancelled all belong to the same agent).
 	s.ReconcileAgentStatus(ctx, agentID)
 	s.notifyTasksFinished(cancelled)
-	return cancelled, nil
 }
 
 // CancelTasksByTriggerComment cancels active tasks whose planned comment batch
