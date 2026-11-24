@@ -32,6 +32,7 @@ import { ConversationStartersEditor } from "./conversation-starters-editor";
 import { NewChatPreview } from "./new-chat-preview";
 import { useConversationStartersFocus } from "./use-conversation-starters-focus";
 import { ModelPicker } from "./inspector/model-picker";
+import { PersonalRuntimeSettings } from "./personal-runtime-settings";
 import { RuntimePicker } from "./inspector/runtime-picker";
 import { ThinkingSettingField } from "./inspector/thinking-prop-row";
 import { ServiceTierSettingField } from "./inspector/service-tier-setting-field";
@@ -281,6 +282,8 @@ export function AgentDetailInspector({
             </SettingsCard>
           </SettingsSection>
 
+          <PersonalRuntimeSettings agent={agent} runtimes={runtimes} members={members} currentUserId={currentUserId} />
+
           <SettingsSection
             title={t(($) => $.inspector.section_execution)}
             description={
@@ -289,7 +292,8 @@ export function AgentDetailInspector({
           >
             <SettingsCard>
               <SettingsRow
-                label={t(($) => $.inspector.prop_runtime)}
+                label={t(($) => $.personal_runtime.settings.shared_default)}
+                description={t(($) => $.personal_runtime.settings.shared_default_hint)}
                 size="select-wide"
               >
                 <RuntimePicker

@@ -34,6 +34,7 @@ func TestRerunTaskByUserContinuity(t *testing.T) {
 			})
 			commentID := dbfx.Comment(t, issueID, "continue this work")
 			sourceID := dbfx.Task(t, agentID, testutil.Cols{
+				"runtime_routing": defaultRoutingForTest(t, agentID),
 				"runtime_id": runtimeID, "issue_id": issueID, "status": "completed",
 				"session_id": "source-session", "work_dir": "/tmp/source-workdir",
 				"trigger_comment_id": commentID,

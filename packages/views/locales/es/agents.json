@@ -1137,5 +1137,37 @@
     "new_app": "Nueva aplicación para este agente",
     "adds_app_note": "Al responder, se añade {{app}} a {{agent}} para las próximas ejecuciones.",
     "add_to_agent": "Añadir {{app}} a {{agent}}"
+  },
+  "personal_runtime": {
+    "settings": {
+      "title": "Mis ajustes de ejecución",
+      "hint": "Se aplican a las tareas nuevas que inicies. Las ejecuciones automáticas posteriores conservan el runtime original. Las ejecuciones en curso, los archivos y las sesiones de CLI permanecen en su máquina actual.",
+      "label": "Runtime personal",
+      "use_default": "Usar el valor predeterminado del agente",
+      "unavailable": "El runtime que seleccionaste no está disponible. Elige otro o restablece el predeterminado del agente.",
+      "load_failed": "No se pudo cargar tu preferencia de runtime.",
+      "save_failed": "No se pudo guardar tu preferencia de runtime.",
+      "shared_default": "Runtime predeterminado del agente",
+      "shared_default_hint": "Se usa cuando la persona que inicia la ejecución no ha elegido un runtime personal.",
+      "model_mode": "Selección de modelo",
+      "model_inherit": "Usar el modelo del agente",
+      "model_runtime_default": "Usar el modelo predeterminado del runtime",
+      "model_custom": "Elegir un modelo",
+      "model_id": "ID del modelo",
+      "model_hint": "Elige un modelo disponible o introduce un ID compatible con tu runtime y tu cuenta.",
+      "concurrency": "Mi límite de concurrencia",
+      "concurrency_inherit": "Usar el límite del agente ({{count}})",
+      "concurrency_hint": "Limita tus ejecuciones simultáneas de este agente entre todas tus máquinas. Déjalo vacío para usar el límite del agente. Sigue aplicándose la capacidad de cada máquina. Si reduces el límite, las ejecuciones activas pueden terminar.",
+      "execution_hint": "La ejecución personal usa los ajustes predeterminados del runtime o el modelo que elijas. Los cambios se aplican a las nuevas cadenas de ejecución. Al restablecer el runtime se borran estos ajustes personales.",
+      "save_execution": "Guardar ajustes de ejecución",
+      "owner_default": "Usas los ajustes de ejecución predeterminados del agente que se muestran a continuación.",
+      "owner_customize": "Configurar para mí",
+      "owner_override": "Estás usando tus ajustes personales",
+      "owner_restore": "Restablecer los ajustes predeterminados"
+    },
+    "task": {
+      "source": "Selección del runtime",
+      "execution_user": "Usuario de ejecución"
+    }
   }
 }

@@ -2833,6 +2833,7 @@ func TestBacklogToTodoByAgentTriggersDifferentAssignee(t *testing.T) {
 	req = withURLParam(req, "id", created.ID)
 	req.Header.Set("X-Agent-ID", parentAgent)
 	req.Header.Set("X-Task-ID", parentTask)
+	req.Header.Set("X-Actor-Source", "task_token")
 	w = testutil.Call(t, testHandler.UpdateIssue, req).Want(http.StatusOK)
 
 	var childTasks int
@@ -2885,6 +2886,7 @@ func TestBacklogToTodoByAgentSameIssueDoesNotSelfTrigger(t *testing.T) {
 	req = withURLParam(req, "id", created.ID)
 	req.Header.Set("X-Agent-ID", selfAgent)
 	req.Header.Set("X-Task-ID", selfTask)
+	req.Header.Set("X-Actor-Source", "task_token")
 	w = testutil.Call(t, testHandler.UpdateIssue, req).Want(http.StatusOK)
 
 	var tasks int
@@ -2948,6 +2950,7 @@ func TestBacklogToTodoByAgentSameAgentDifferentIssue(t *testing.T) {
 	req = withURLParam(req, "id", step2.ID)
 	req.Header.Set("X-Agent-ID", agentID)
 	req.Header.Set("X-Task-ID", step1Task)
+	req.Header.Set("X-Actor-Source", "task_token")
 	w = testutil.Call(t, testHandler.UpdateIssue, req).Want(http.StatusOK)
 
 	var step2Tasks int
@@ -2994,6 +2997,7 @@ func TestBacklogToTodoByAgentSameIssueOtherAssigneeEnqueues(t *testing.T) {
 	req = withURLParam(req, "id", created.ID)
 	req.Header.Set("X-Agent-ID", coordinator)
 	req.Header.Set("X-Task-ID", coordinatorTask)
+	req.Header.Set("X-Actor-Source", "task_token")
 	testutil.Call(t, testHandler.UpdateIssue, req).Want(http.StatusOK)
 
 	var workerTasks int
@@ -3026,6 +3030,7 @@ func TestAssignIssueToSelfWithActiveTargetRunDoesNotDuplicate(t *testing.T) {
 	})
 	previewReq.Header.Set("X-Agent-ID", agentID)
 	previewReq.Header.Set("X-Task-ID", runningTask)
+	previewReq.Header.Set("X-Actor-Source", "task_token")
 	previewRecorder := testutil.Call(t, testHandler.PreviewIssueTrigger, previewReq).Want(http.StatusOK)
 	var preview IssueTriggerPreviewResponse
 	previewRecorder.JSON(&preview)
@@ -3039,6 +3044,7 @@ func TestAssignIssueToSelfWithActiveTargetRunDoesNotDuplicate(t *testing.T) {
 	}), "id", issue.ID)
 	req.Header.Set("X-Agent-ID", agentID)
 	req.Header.Set("X-Task-ID", runningTask)
+	req.Header.Set("X-Actor-Source", "task_token")
 	testutil.Call(t, testHandler.UpdateIssue, req).Want(http.StatusOK)
 	if got := queuedTaskCountFor(t, issue.ID, agentID); got != 0 {
 		t.Fatalf("self-assignment duplicated an active target run: got %d queued task(s)", got)
@@ -3086,6 +3092,7 @@ func TestAssignDifferentIssueToSelfStillEnqueues(t *testing.T) {
 	}), "id", target.ID)
 	req.Header.Set("X-Agent-ID", agentID)
 	req.Header.Set("X-Task-ID", sourceTask)
+	req.Header.Set("X-Actor-Source", "task_token")
 	testutil.Call(t, testHandler.UpdateIssue, req).Want(http.StatusOK)
 	if got := queuedTaskCountFor(t, target.ID, agentID); got != 1 {
 		t.Fatalf("cross-issue self-assignment should enqueue one run, got %d", got)
@@ -3114,6 +3121,7 @@ func TestBatchAssignFreshIssuesToSelfEnqueuesEach(t *testing.T) {
 	})
 	req.Header.Set("X-Agent-ID", agentID)
 	req.Header.Set("X-Task-ID", sourceTask)
+	req.Header.Set("X-Actor-Source", "task_token")
 	testutil.Call(t, testHandler.BatchUpdateIssues, req).Want(http.StatusOK)
 	for _, target := range []IssueResponse{target1, target2} {
 		if got := queuedTaskCountFor(t, target.ID, agentID); got != 1 {
@@ -3140,6 +3148,7 @@ func TestAssignActiveIssueToDifferentAgentStillEnqueues(t *testing.T) {
 	}), "id", issue.ID)
 	req.Header.Set("X-Agent-ID", actorAgent)
 	req.Header.Set("X-Task-ID", actorTask)
+	req.Header.Set("X-Actor-Source", "task_token")
 	testutil.Call(t, testHandler.UpdateIssue, req).Want(http.StatusOK)
 	if got := queuedTaskCountFor(t, issue.ID, targetAgent); got != 1 {
 		t.Fatalf("new assignee should get one queued run, got %d", got)
@@ -3185,6 +3194,7 @@ func TestBatchBacklogToTodoByAgentTriggersAssignee(t *testing.T) {
 	})
 	req.Header.Set("X-Agent-ID", parentAgent)
 	req.Header.Set("X-Task-ID", parentTask)
+	req.Header.Set("X-Actor-Source", "task_token")
 	w = testutil.Call(t, testHandler.BatchUpdateIssues, req).Want(http.StatusOK)
 
 	var childTasks int
@@ -3235,6 +3245,7 @@ func TestBacklogToTodoByAgentTriggersSquadLeader(t *testing.T) {
 	req = withURLParam(req, "id", created.ID)
 	req.Header.Set("X-Agent-ID", driverAgent)
 	req.Header.Set("X-Task-ID", driverTask)
+	req.Header.Set("X-Actor-Source", "task_token")
 	w = testutil.Call(t, testHandler.UpdateIssue, req).Want(http.StatusOK)
 
 	var leaderTasks int
@@ -3434,6 +3445,7 @@ func TestMemberReplyToAgentRootDoesNotInheritParentMentions(t *testing.T) {
 	r = withURLParam(r, "id", issueID)
 	r.Header.Set("X-Agent-ID", jAgent)
 	r.Header.Set("X-Task-ID", jAgentTask)
+	r.Header.Set("X-Actor-Source", "task_token")
 	w = testutil.Call(t, testHandler.CreateComment, r).Want(http.StatusCreated)
 	var rootComment CommentResponse
 	json.NewDecoder(w.Body).Decode(&rootComment)
@@ -3673,6 +3685,7 @@ func TestAgentExplicitMentionStillTriggers(t *testing.T) {
 	r = withURLParam(r, "id", issueID)
 	r.Header.Set("X-Agent-ID", agentA)
 	r.Header.Set("X-Task-ID", agentATask)
+	r.Header.Set("X-Actor-Source", "task_token")
 	w = testutil.Call(t, testHandler.CreateComment, r).Want(http.StatusCreated)
 	if got := countTasks(agentB); got != 1 {
 		t.Fatalf("expected 1 task for Agent B after explicit mention by Agent A, got %d", got)

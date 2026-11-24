@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/multica-ai/multica/server/internal/attribution"
 	"log/slog"
 	"strings"
 	"time"
@@ -696,7 +697,8 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 			return commit()
 		}
 	}
-	attr, err := s.childDoneRunAs(ctx, issue, agent)
+	origin := s.Tasks.attributionForIssueTask(ctx, issue, pgtype.UUID{}, attribution.SourceDelegation, pgtype.UUID{})
+	attr, err := s.Tasks.applyAttributionFallback(ctx, origin, agent)
 	if err != nil {
 		return err
 	}
@@ -741,11 +743,17 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	if err = guardIssueNotInTriage(ctx, q, issue.ID, OriginDerived); err != nil {
 		return err
 	}
-	overlay := s.Tasks.buildRuntimeMCPOverlay(ctx, attr.UserID, agent)
+	// An automatic status transition has no human requester. Only a verified parent
+	// can carry a personal route into this system wakeup.
+	selection, err := s.Tasks.resolveTaskRuntime(ctx, q, agent, pgtype.UUID{}, origin.DelegatedFromTaskID)
+	if err != nil {
+		return err
+	}
+	overlay := s.Tasks.buildRoutedRuntimeMCPOverlay(ctx, attr.UserID, agent, selection)
 	source, delegatedFrom, _, _ := attributionCreateParams(attr)
 	contextJSON, _ := json.Marshal(map[string]any{"wakeup_id": util.UUIDToString(w.ID), "wakeup_revision": w.Revision, "wakeup_evidence": evidence, "wakeup_system": w.SystemRule.String})
 	task, err = q.CreateWakeupTask(ctx, db.CreateWakeupTaskParams{
-		ID: dbid.NewV7(), AgentID: agent.ID, RuntimeID: agent.RuntimeID, IssueID: issue.ID, Priority: priorityToInt(issue.Priority),
+		ID: dbid.NewV7(), AgentID: agent.ID, RuntimeID: selection.RuntimeID, RuntimeRouting: selection.Routing, IssueID: issue.ID, Priority: priorityToInt(issue.Priority),
 		TriggerSummary: pgtype.Text{String: systemTriggerSummary(w), Valid: true}, HandoffNote: pgtype.Text{String: noteText, Valid: true},
 		IsLeaderTask: pgtype.Bool{Bool: current.Type == "squad", Valid: current.Type == "squad"}, SquadID: current.SquadID,
 		OriginatorUserID: attr.UserID, AccountableUserID: attr.AccountableUserID, OriginatorSource: source, DelegatedFromTaskID: delegatedFrom,

@@ -74,6 +74,30 @@ function createWrapper(qc: QueryClient) {
   };
 }
 
+it("invalidates personal provider metadata when another client changes the agent default runtime", () => {
+  vi.useFakeTimers();
+  const qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
+  const key = runtimeKeys.preference("ws-1", "agent-1");
+  const otherWorkspaceKey = runtimeKeys.preference("ws-2", "agent-2");
+  qc.setQueryData(key, { runtimeId: "personal-claude", provider: "claude" });
+  qc.setQueryData(otherWorkspaceKey, { runtimeId: null, provider: "claude" });
+  const ws = createMockWs();
+  const { unmount } = renderHook(() => useRealtimeSync(ws, createStores()), { wrapper: createWrapper(qc) });
+  try {
+    const onAny = vi.mocked(ws.onAny).mock.calls[0]![0];
+    onAny({ type: "agent:status", payload: { agent: { id: "agent-1", runtime_id: "runtime-codex" } } } as never);
+    vi.advanceTimersByTime(100);
+
+    expect(qc.getQueryState(key)?.isInvalidated).toBe(true);
+    expect(qc.getQueryData(key)).toEqual({ runtimeId: "personal-claude", provider: "claude" });
+    expect(qc.getQueryState(otherWorkspaceKey)?.isInvalidated).toBe(false);
+  } finally {
+    unmount();
+    qc.clear();
+    vi.useRealTimers();
+  }
+});
+
 describe("useRealtimeSync — ws instance change", () => {
   let qc: QueryClient;
   let stores: RealtimeSyncStores;

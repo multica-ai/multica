@@ -141,6 +141,7 @@ func TestEnqueueTaskForIssueByActorAttributesToActor(t *testing.T) {
 		t.Fatalf("seed actor member: %v", err)
 	}
 
+	grantAttributionTestExecutor(t, pool, workspaceID, agentID, actorID)
 	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
 	task, err := svc.EnqueueTaskForIssueByActor(ctx, db.Issue{
 		ID:           util.MustParseUUID(issueID),
@@ -632,6 +633,10 @@ func TestEnqueueTaskForIssueAutopilotOriginStampsRuleOwner(t *testing.T) {
 	}
 	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
 
+	if _, err := pool.Exec(ctx, `INSERT INTO autopilot(id,workspace_id,title,assignee_id,created_by_type,created_by_id) VALUES ($1,$2,'attribution fixture',$3,'member',$4)`, autopilotID, workspaceID, agentID, publisherID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM autopilot WHERE id=$1`, autopilotID) })
 	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
 	task, err := svc.EnqueueTaskForIssue(ctx, db.Issue{
 		ID:           util.MustParseUUID(issueID),
@@ -697,6 +702,10 @@ func TestEnqueueTaskForIssueAutopilotOriginWithoutVersionOwnerFallback(t *testin
 	}
 	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
 
+	if _, err := pool.Exec(ctx, `INSERT INTO autopilot(id,workspace_id,title,assignee_id,created_by_type,created_by_id) VALUES ($1,$2,'attribution fixture',$3,'member',$4)`, autopilotID, workspaceID, agentID, ownerID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM autopilot WHERE id=$1`, autopilotID) })
 	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
 	task, err := svc.EnqueueTaskForIssue(ctx, db.Issue{
 		ID:           util.MustParseUUID(issueID),
@@ -882,6 +891,7 @@ func TestDispatchRunOnlyManualStampsDirectHuman(t *testing.T) {
 		t.Fatalf("seed actor member: %v", err)
 	}
 
+	grantAttributionTestExecutor(t, pool, workspaceID, agentID, actorID)
 	svc := &AutopilotService{Queries: q, TxStarter: pool, Bus: events.New(), TaskSvc: &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}}
 	ap, err := q.GetAutopilot(ctx, util.MustParseUUID(autopilotID))
 	if err != nil {
@@ -1034,6 +1044,7 @@ func TestEnqueueTaskForIssueAutopilotManualStampsDirectHuman(t *testing.T) {
 	}
 	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, actorID) })
 
+	grantAttributionTestExecutor(t, pool, workspaceID, agentID, actorID)
 	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
 	// dispatchCreateIssue routes a manual trigger through the actor-carrying enqueue.
 	task, err := svc.EnqueueTaskForIssueByActor(ctx, db.Issue{
@@ -1215,6 +1226,7 @@ func TestRerunIssueAttributesToRerunningMember(t *testing.T) {
 		WorkspaceID:  util.MustParseUUID(workspaceID),
 		AssigneeType: pgtype.Text{String: "agent", Valid: true},
 	}
+	grantAttributionTestExecutor(t, pool, workspaceID, agentID, rerunnerID)
 	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
 	// The original run, attributed to the issue creator.
 	orig, err := svc.EnqueueTaskForIssue(ctx, issueStruct)
@@ -1320,8 +1332,8 @@ func TestEnqueueChatTaskDefersForChannelMediaAndPromotesWhenReady(t *testing.T) 
 	})
 	seedChannelTaskBinding(t, pool, chatSessionID)
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO chat_message (chat_session_id, role, content)
-		VALUES ($1, 'user', 'first') RETURNING id`, chatSessionID).Scan(&priorMessageID); err != nil {
+		INSERT INTO chat_message (chat_session_id, role, content,channel_sender_user_id,channel_ingested)
+		VALUES ($1, 'user', 'first',$2,true) RETURNING id`, chatSessionID, userID).Scan(&priorMessageID); err != nil {
 		t.Fatalf("seed prior message: %v", err)
 	}
 
@@ -1335,8 +1347,8 @@ func TestEnqueueChatTaskDefersForChannelMediaAndPromotesWhenReady(t *testing.T) 
 	}
 	deadline := time.Now().Add(time.Minute)
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO chat_message (chat_session_id, role, content, channel_media_pending_until)
-		VALUES ($1, 'user', '[Image]', $2) RETURNING id`, chatSessionID, deadline).Scan(&messageID); err != nil {
+		INSERT INTO chat_message (chat_session_id, role, content, channel_media_pending_until,channel_sender_user_id,channel_ingested)
+		VALUES ($1, 'user', '[Image]', $2,$3,true) RETURNING id`, chatSessionID, deadline, userID).Scan(&messageID); err != nil {
 		t.Fatalf("seed pending media message: %v", err)
 	}
 
@@ -1386,5 +1398,22 @@ func TestEnqueueChatTaskDefersForChannelMediaAndPromotesWhenReady(t *testing.T) 
 	}
 	if status != "queued" || fireAt.Valid {
 		t.Fatalf("promoted task = status %q fire_at %v, want queued with no deadline", status, fireAt)
+	}
+}
+
+// Attribution tests exercise another authorized member, not an invocation or
+// machine-access bypass. The service now enforces both at task creation.
+func grantAttributionTestExecutor(t *testing.T, pool *pgxpool.Pool, workspaceID, agentID, userID string) {
+	t.Helper()
+	ctx := context.Background()
+	for _, statement := range []string{
+		`INSERT INTO member(workspace_id,user_id,role) SELECT $1,$3,'member' WHERE $2::uuid IS NOT NULL ON CONFLICT DO NOTHING`,
+		`UPDATE agent SET permission_mode='public_to' WHERE workspace_id=$1 AND id=$2 AND $3::uuid IS NOT NULL`,
+		`INSERT INTO agent_invocation_target(agent_id,target_type,target_id) SELECT $2,'member',$3 WHERE $1::uuid IS NOT NULL ON CONFLICT DO NOTHING`,
+		`UPDATE agent_runtime SET visibility='public' WHERE workspace_id=$1 AND id=(SELECT runtime_id FROM agent WHERE id=$2) AND $3::uuid IS NOT NULL`,
+	} {
+		if _, err := pool.Exec(ctx, statement, workspaceID, agentID, userID); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

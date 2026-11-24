@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 // createPrivateAgentOwnedBy inserts a private agent owned by ownerID and
@@ -26,7 +28,7 @@ func createPrivateAgentOwnedBy(t *testing.T, name, ownerID string) string {
 		VALUES ($1, $2, '', 'cloud', '{}'::jsonb,
 		        $3, 'private', 1, $4, '', '{}'::jsonb, '[]'::jsonb)
 		RETURNING id
-	`, testWorkspaceID, name, handlerTestRuntimeID(t), ownerID).Scan(&agentID); err != nil {
+	`, testWorkspaceID, name, dbfx.Runtime(t, name+" runtime", testutil.Cols{"owner_id": ownerID}), ownerID).Scan(&agentID); err != nil {
 		t.Fatalf("create private agent %q: %v", name, err)
 	}
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID) })
@@ -97,6 +99,7 @@ func TestAgentCreateOriginator_E2E_CreateAssignSquad_PrivateWorkerTriggered(t *t
 	})
 	r.Header.Set("X-Agent-ID", creatorAID)
 	r.Header.Set("X-Task-ID", creatorTaskID)
+	r.Header.Set("X-Actor-Source", "task_token")
 	testHandler.CreateIssue(w, r)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
@@ -145,6 +148,7 @@ func TestAgentCreateOriginator_E2E_CreateAssignSquad_PrivateWorkerTriggered(t *t
 	})
 	r.Header.Set("X-Agent-ID", leaderID)
 	r.Header.Set("X-Task-ID", leaderTaskID)
+	r.Header.Set("X-Actor-Source", "task_token")
 	r = withURLParam(r, "id", created.ID)
 	testHandler.CreateComment(w, r)
 	if w.Code != http.StatusCreated {
@@ -216,6 +220,7 @@ func TestAgentCreateOriginator_E2E_UpdateAssignSquad_HandlerGateAdmitsPrivateLea
 	})
 	r.Header.Set("X-Agent-ID", creatorAID)
 	r.Header.Set("X-Task-ID", creatorTaskID)
+	r.Header.Set("X-Actor-Source", "task_token")
 	testHandler.CreateIssue(w, r)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
@@ -238,6 +243,7 @@ func TestAgentCreateOriginator_E2E_UpdateAssignSquad_HandlerGateAdmitsPrivateLea
 	})
 	r.Header.Set("X-Agent-ID", creatorAID)
 	r.Header.Set("X-Task-ID", creatorTaskID)
+	r.Header.Set("X-Actor-Source", "task_token")
 	r = withURLParam(r, "id", created.ID)
 	testHandler.UpdateIssue(w, r)
 	if w.Code != http.StatusOK {

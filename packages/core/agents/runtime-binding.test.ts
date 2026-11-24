@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { isAgentRuntimeBound } from "./runtime-binding";
 
@@ -7,6 +8,11 @@ describe("isAgentRuntimeBound", () => {
       isAgentRuntimeBound({ runtime_id: "runtime-1", runtime_bound: true }),
     ).toBe(true);
     expect(isAgentRuntimeBound({ runtime_id: "runtime-1" })).toBe(true);
+  });
+
+  it("accepts a personal execution binding independently of the shared default", () => {
+    expect(isAgentRuntimeBound({ runtime_id: "", runtime_bound: false, personal_runtime_id: "mine" })).toBe(true);
+    expect(isAgentRuntimeBound({ runtime_id: "", runtime_bound: false, personal_runtime_id: "" })).toBe(false);
   });
 
   it("rejects explicit and legacy unbound responses", () => {

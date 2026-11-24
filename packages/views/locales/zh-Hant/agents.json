@@ -1105,5 +1105,37 @@
     "new_app": "此 AI 代理的新應用",
     "adds_app_note": "回應後，{{agent}} 之後的執行都可以使用 {{app}}。",
     "add_to_agent": "將 {{app}} 新增至 {{agent}}"
+  },
+  "personal_runtime": {
+    "settings": {
+      "title": "我的執行配置",
+      "hint": "用於你新發起的工作。自動後續運行 沿用原運行時。已有運行、文件和 CLI 會話保留在原機器上。",
+      "label": "個人運行時",
+      "use_default": "使用智能體默認運行時",
+      "unavailable": "你選擇的運行時不可用。請選擇其他運行時或恢復智能體默認設置。",
+      "load_failed": "無法加載你的運行時偏好。",
+      "save_failed": "無法保存你的運行時偏好。",
+      "shared_default": "智能體默認運行時",
+      "shared_default_hint": "未設置個人偏好時使用的共享默認運行時。",
+      "model_mode": "模型選擇",
+      "model_inherit": "沿用智能體模型",
+      "model_runtime_default": "使用運行時默認模型",
+      "model_custom": "指定模型",
+      "model_id": "模型 ID",
+      "model_hint": "選擇可用模型，或輸入當前運行時及賬號支持的模型 ID。",
+      "concurrency": "我的併發上限",
+      "concurrency_inherit": "沿用智能體上限（{{count}}）",
+      "concurrency_hint": "僅統計你執行此智能體的運行，跨個人機器合計。留空沿用智能體上限，實際併發仍受機器容量限制。降低上限會等待已有運行結束。",
+      "execution_hint": "個人運行時使用自身默認配置或你指定的模型，不繼承智能體的執行配置。修改對新運行鏈生效；恢復默認運行時會清除這些個人設置。",
+      "save_execution": "保存執行配置",
+      "owner_default": "你默認使用下方的智能體執行配置，無需重復綁定。",
+      "owner_customize": "為自己單獨配置",
+      "owner_override": "當前使用個人覆蓋",
+      "owner_restore": "恢復使用默認配置"
+    },
+    "task": {
+      "source": "運行時選擇",
+      "execution_user": "執行用戶"
+    }
   }
 }

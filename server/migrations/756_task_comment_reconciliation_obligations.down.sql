@@ -1,0 +1,1 @@
+ALTER TABLE agent_task_queue DROP COLUMN reconciliation_comment_ids;

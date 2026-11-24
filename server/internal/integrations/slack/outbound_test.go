@@ -243,3 +243,17 @@ func TestOutbound_IgnoresNonSlackAndEmptyAndRevoked(t *testing.T) {
 		})
 	}
 }
+
+func TestOutbound_UsesTaskReplyTargetAfterAnotherSenderUpdatesSession(t *testing.T) {
+	q := &fakeOutboundQueries{
+		task:                db.AgentTaskQueue{ChatInputTaskID: uid(2), Context: []byte(`{"channel_reply_target":{"message_id":"original-message","thread_id":"original-thread"}}`)},
+		taskChannelIngested: true,
+		binding:             db.ChannelChatSessionBinding{InstallationID: uid(1), ChannelChatID: "C123", Config: []byte(`{"channel_id":"C123"}`), LastThreadID: pgtype.Text{String: "another-users-thread", Valid: true}},
+		inst:                db.ChannelInstallation{ID: uid(1), Status: "active", Config: slackInstallConfigJSON()},
+	}
+	fs := &fakeSender{}
+	newTestOutbound(q, fs).handleEvent(chatDoneEvent("00000000-0000-0000-0000-000000000001", "original answer"))
+	if fs.called != 1 || fs.got.ThreadID != "original-thread" {
+		t.Fatalf("reply sent %d times to thread %q; want original task thread", fs.called, fs.got.ThreadID)
+	}
+}

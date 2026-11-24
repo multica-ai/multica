@@ -114,6 +114,17 @@ type AgentRuntime struct {
 	MaxConcurrentTasks pgtype.Int4        `json:"max_concurrent_tasks"`
 }
 
+type AgentRuntimePreference struct {
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	UserID             pgtype.UUID        `json:"user_id"`
+	AgentID            pgtype.UUID        `json:"agent_id"`
+	RuntimeID          pgtype.UUID        `json:"runtime_id"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ModelMode          string             `json:"model_mode"`
+	Model              string             `json:"model"`
+	MaxConcurrentTasks pgtype.Int4        `json:"max_concurrent_tasks"`
+}
+
 type AgentSkill struct {
 	AgentID   pgtype.UUID        `json:"agent_id"`
 	SkillID   pgtype.UUID        `json:"skill_id"`
@@ -194,10 +205,12 @@ type AgentTaskQueue struct {
 	IssueSnapshot             []byte      `json:"issue_snapshot"`
 	WorkflowStep              pgtype.Text `json:"workflow_step"`
 	// Squad UUID for usage attribution and unified execution avatar grouping. Separate from squad_id (which carries leader/worker routing authority). NULL for standalone non-squad runs.
-	UsageSquadID pgtype.UUID `json:"usage_squad_id"`
-	DocID        pgtype.UUID `json:"doc_id"`
-	DocThreadID  pgtype.UUID `json:"doc_thread_id"`
-	DocCommentID pgtype.UUID `json:"doc_comment_id"`
+	UsageSquadID             pgtype.UUID   `json:"usage_squad_id"`
+	DocID                    pgtype.UUID   `json:"doc_id"`
+	DocThreadID              pgtype.UUID   `json:"doc_thread_id"`
+	DocCommentID             pgtype.UUID   `json:"doc_comment_id"`
+	RuntimeRouting           []byte        `json:"runtime_routing"`
+	ReconciliationCommentIds []pgtype.UUID `json:"reconciliation_comment_ids"`
 }
 
 type AgentToLabel struct {
@@ -637,6 +650,10 @@ type ChatMessage struct {
 	ChannelOutboundMessageIds     []string           `json:"channel_outbound_message_ids"`
 	ChannelTypingSettled          bool               `json:"channel_typing_settled"`
 	WakeupID                      pgtype.UUID        `json:"wakeup_id"`
+	ChannelSenderUserID           pgtype.UUID        `json:"channel_sender_user_id"`
+	ChannelSourceMessageID        pgtype.Text        `json:"channel_source_message_id"`
+	ChannelSourceThreadID         pgtype.Text        `json:"channel_source_thread_id"`
+	ChannelSourceSenderID         pgtype.Text        `json:"channel_source_sender_id"`
 }
 
 type ChatPinnedAgent struct {

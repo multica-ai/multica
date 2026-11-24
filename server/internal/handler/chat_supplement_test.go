@@ -21,10 +21,12 @@ func newChatSupplementFixture(t *testing.T, negotiated bool) (string, string, st
 	}
 	runtimeID := dbfx.Runtime(t, "chat-steering", testutil.Cols{"provider": "codex"})
 	agentID := dbfx.Agent(t, "Chat steering "+uuid.NewString(), runtimeID)
-	sessionID := dbfx.ChatSession(t, agentID)
-	taskID := dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "chat_session_id": sessionID, "issue_id": nil, "status": "dispatched"})
-	dbfx.Exec(t, `UPDATE agent_task_queue SET chat_input_task_id=id WHERE id=$1`, taskID)
-	dbfx.Insert(t, "chat_message", testutil.Cols{"chat_session_id": sessionID, "task_id": taskID, "role": "user", "content": "original objective"})
+	sessionID := dbfx.ChatSession(t, agentID, testutil.Cols{"explicitly_created_at": testutil.Raw("now()")})
+	turn := sendChatGuidance(t, sessionID, map[string]any{"content": "original objective"})
+	taskID := turn.TaskID
+	dbfx.Cleanup(t, `DELETE FROM chat_message WHERE chat_session_id=$1`, sessionID)
+	dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE id=$1`, taskID)
+	dbfx.Exec(t, `UPDATE agent_task_queue SET status='dispatched' WHERE id=$1`, taskID)
 	dbfx.Cleanup(t, `DELETE FROM chat_task_supplement WHERE chat_session_id=$1`, sessionID)
 	dbfx.Cleanup(t, `DELETE FROM task_supplement_capability WHERE task_id=$1`, taskID)
 	dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE chat_session_id=$1 AND id<>$2`, sessionID, taskID)
@@ -97,6 +99,15 @@ func TestChatSupplementStartReplayAndBurst(t *testing.T) {
 	}
 	if n := dbfx.Count(t, `SELECT count(*) FROM chat_message WHERE chat_session_id=$1 AND role='assistant'`, sessionID); n != 1 {
 		t.Fatalf("burst produced %d replies", n)
+	}
+}
+
+func TestChatSupplementUnknownExecutionStartsSeparateTurn(t *testing.T) {
+	sessionID, taskID, _ := newChatSupplementFixture(t, true)
+	dbfx.Exec(t, `UPDATE agent_task_queue SET runtime_routing=NULL WHERE id=$1`, taskID)
+	sent := sendChatGuidance(t, sessionID, map[string]any{"content": "follow-up", "steer": true})
+	if sent.Steered || !sent.Queued || sent.TaskID == taskID {
+		t.Fatalf("guidance attached to an unverified execution: %+v", sent)
 	}
 }
 
@@ -416,8 +427,8 @@ func TestChatSupplementRetryClaimKeepsColdInputAndOmitsResumedGuidance(t *testin
 				if resp.ChatResumeMessage == nil || *resp.ChatResumeMessage != "original objective\n\npending guidance" {
 					t.Fatalf("resumed input: %+v", resp.ChatResumeMessage)
 				}
-			} else if resp.ChatResumeMessage != nil {
-				t.Fatal("omitted guidance from a different provider session")
+			} else if resp.ChatResumeMessage != nil || resp.PriorSessionID == "provider-session" {
+				t.Fatalf("retry reused the superseded session or its delivery receipts: prior=%q resume=%v", resp.PriorSessionID, resp.ChatResumeMessage)
 			}
 		})
 	}

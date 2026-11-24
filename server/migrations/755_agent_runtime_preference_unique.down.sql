@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY agent_runtime_preference_identity_idx;

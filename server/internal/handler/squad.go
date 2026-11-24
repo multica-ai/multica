@@ -1242,7 +1242,7 @@ func commentMentionsAnyone(content string) bool {
 // paths go through computeCommentAgentTriggers so preview and create share the
 // same trigger set.
 // It reports whether a leader task was enqueued and, if not, why.
-func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, authorType, authorID, handoffNote string, workflowHandoff bool) (DispatchStatus, DispatchReasonCode) {
+func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, authorType, authorID, handoffNote string, workflowHandoff bool, sourceTaskID ...pgtype.UUID) (DispatchStatus, DispatchReasonCode) {
 	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 		ID:          issue.AssigneeID,
 		WorkspaceID: issue.WorkspaceID,
@@ -1264,6 +1264,17 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, au
 	leaderOriginator := ""
 	if authorType == "member" {
 		leaderOriginator = authorID
+	} else if len(sourceTaskID) > 0 && sourceTaskID[0].Valid {
+		parent, err := h.Queries.GetAgentTask(ctx, sourceTaskID[0])
+		if err != nil || uuidToString(parent.AgentID) != authorID {
+			return DispatchBlocked, ReasonInvocationNotAllowed
+		}
+		leaderOriginator = uuidToString(parent.OriginatorUserID)
+		if snapshot, err := service.ParseRuntimeRouting(parent.RuntimeRouting); err != nil {
+			return DispatchBlocked, ReasonInvocationNotAllowed
+		} else if snapshot != nil {
+			leaderOriginator = snapshot.ExecutionUserID
+		}
 	} else {
 		leaderOriginator = uuidToString(h.TaskService.OriginatorForIssueTask(ctx, issue, pgtype.UUID{}))
 	}
@@ -1296,9 +1307,9 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, au
 	// leader run (MUL-4302 §4) — the same principal the gate above judged. An agent
 	// author is not a human, so only a member actor is threaded.
 	if workflowHandoff {
-		_, err = h.TaskService.EnqueueTaskForWorkflowSquadLeader(ctx, issue, squad.LeaderID, squad.ID, handoffNote, memberActorUserID(authorType, authorID))
+		_, err = h.TaskService.EnqueueTaskForWorkflowSquadLeader(ctx, issue, squad.LeaderID, squad.ID, handoffNote, memberActorUserID(authorType, authorID), sourceTaskID...)
 	} else {
-		_, err = h.TaskService.EnqueueTaskForSquadLeaderWithHandoff(ctx, issue, squad.LeaderID, squad.ID, handoffNote, memberActorUserID(authorType, authorID))
+		_, err = h.TaskService.EnqueueTaskForSquadLeaderWithHandoff(ctx, issue, squad.LeaderID, squad.ID, handoffNote, memberActorUserID(authorType, authorID), sourceTaskID...)
 	}
 	if err != nil {
 		return issueEnqueueFailure(issue, squad.LeaderID, err)

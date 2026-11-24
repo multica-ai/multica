@@ -2651,3 +2651,15 @@ describe("Issue requester compatibility", () => {
     expect(IssueSchema.parse({ ...baseIssue, requester_id: 42 }).requester_id).toBeUndefined();
   });
 });
+
+describe("task runtime routing metadata", () => {
+  it("retains known routing sources and execution identity", () => {
+    const [task] = AgentTaskListSchema.parse([{ id: "task", runtime_id: "actual-runtime", runtime_routing_source: "personal", runtime_execution_user_id: "user-1" }]);
+    expect(task).toMatchObject({ runtime_id: "actual-runtime", runtime_routing_source: "personal", runtime_execution_user_id: "user-1" });
+  });
+  it("drops malformed optional metadata without losing the task", () => {
+    const [task] = AgentTaskListSchema.parse([{ id: "task", runtime_routing_source: {}, runtime_execution_user_id: [] }]);
+    expect(task?.runtime_routing_source).toBeUndefined();
+    expect(task?.runtime_execution_user_id).toBeUndefined();
+  });
+});

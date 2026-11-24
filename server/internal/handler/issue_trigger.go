@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issueworkflow"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -18,14 +19,21 @@ import (
 // selection cannot fan out into thousands of readiness probes.
 const maxPreviewTriggerIssues = 500
 
-// issueTriggerWriteProbe builds the probe the write paths feed to
-// WillEnqueueRun. The private-agent gate is already enforced at the HTTP
-// boundary (validateAssigneePair on assign) and inside enqueueSquadLeaderTask
-// (canEnqueueSquadLeader), so a write must NOT re-run or sink it — it passes
-// allow-all. The self-loop check needs the request's X-Task-ID header.
+// The issue write may succeed even when its caller cannot invoke the existing
+// assignee. Check the acting principal before a promotion can enqueue a run.
 func (h *Handler) issueTriggerWriteProbe(r *http.Request, actorType, actorID string, issue db.Issue) service.IssueTriggerProbe {
 	return service.IssueTriggerProbe{
-		CanAccessAgent: nil, // allow-all; gate lives at the write boundary
+		CanAccessAgent: func(agent db.Agent) bool {
+			originator := h.invokeOriginatorFromRequest(r, actorType, actorID)
+			if !h.invokeAgentDecision(r.Context(), agent, actorType, actorID, originator, uuidToString(issue.WorkspaceID)) {
+				return false
+			}
+			_, err := h.runtimeForRequest(r, agent, actorType, actorID)
+			return err == nil
+		},
+		IsRuntimeReady: func(agent db.Agent) bool {
+			return h.runtimeReadyForRequest(r, agent, actorType, actorID)
+		},
 		IsSelfLoop: func(targetAgentID pgtype.UUID) bool {
 			return h.isAgentRunningOnIssue(r, actorType, issue, targetAgentID)
 		},
@@ -50,7 +58,14 @@ func (h *Handler) issueTriggerPreviewProbe(r *http.Request, actorType, actorID, 
 	originatorUserID := h.invokeOriginatorFromRequest(r, actorType, actorID)
 	return service.IssueTriggerProbe{
 		CanAccessAgent: func(agent db.Agent) bool {
-			return h.canInvokeAgent(r.Context(), agent, actorType, actorID, originatorUserID, workspaceID)
+			if !h.canInvokeAgent(r.Context(), agent, actorType, actorID, originatorUserID, workspaceID) {
+				return false
+			}
+			_, err := h.runtimeForRequest(r, agent, actorType, actorID)
+			return err == nil
+		},
+		IsRuntimeReady: func(agent db.Agent) bool {
+			return h.runtimeReadyForRequest(r, agent, actorType, actorID)
 		},
 		IsSelfLoop: func(targetAgentID pgtype.UUID) bool {
 			return h.isAgentRunningOnIssue(r, actorType, issue, targetAgentID)
@@ -114,9 +129,8 @@ type IssueRunOutcome struct {
 // result. willRun is the predicate's decision before suppress_run; a write
 // that could not have started a run (no reason either) reports nothing.
 //
-// The write probe admits every caller, so a promotion can start a private
-// agent the caller may not invoke. Its outcome would then expose that agent's
-// readiness, so the caller gets no outcome; the server log keeps the cause.
+// Private agent readiness is visible only to callers who can invoke the agent.
+// This also applies to outcomes reported for a declined or suppressed run.
 func (h *Handler) resolveIssueRun(r *http.Request, issue db.Issue, trigger service.IssueRunTrigger, willRun, suppressRun bool, actorType, actorID, workspaceID, handoffNote string) *IssueRunOutcome {
 	if issue.AssigneeType.String != "agent" && issue.AssigneeType.String != "squad" {
 		return nil
@@ -127,7 +141,7 @@ func (h *Handler) resolveIssueRun(r *http.Request, issue db.Issue, trigger servi
 	case willRun && suppressRun:
 		status, reason = DispatchDeferred, ReasonDeferred
 	case willRun:
-		status, reason = h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, handoffNote)
+		status, reason = h.dispatchIssueRun(r, issue, trigger, actorType, actorID, handoffNote)
 	case trigger.DeclineReason != "":
 		status, reason = declinedRunStatus(trigger.DeclineReason), trigger.DeclineReason
 	default:
@@ -181,19 +195,28 @@ func (h *Handler) callerCanInvokeIssueAssignee(r *http.Request, issue db.Issue, 
 // retained for installed clients and travels only with a run that actually
 // starts. The squad path still flows through enqueueSquadLeaderTask so the
 // leader access gate and pending dedup stay in one place.
-func (h *Handler) dispatchIssueRun(ctx context.Context, issue db.Issue, trigger service.IssueRunTrigger, actorType, actorID, handoffNote string) (DispatchStatus, DispatchReasonCode) {
+func (h *Handler) dispatchIssueRun(r *http.Request, issue db.Issue, trigger service.IssueRunTrigger, actorType, actorID, handoffNote string) (DispatchStatus, DispatchReasonCode) {
+	ctx := r.Context()
+	var sourceTaskID pgtype.UUID
+	if actorType == "agent" {
+		task, ok := h.taskFromRequestHeader(r)
+		if !ok || r.Header.Get("X-Actor-Source") != "task_token" || uuidToString(task.AgentID) != actorID {
+			return DispatchBlocked, ReasonInvocationNotAllowed
+		}
+		sourceTaskID = task.ID
+	}
 	switch trigger.AssigneeType {
 	case "agent":
 		// The member who performed this assign/promote is the accountable human
 		// for the run (MUL-4302 §4). An agent actor is not a human, so only a
 		// member actor is threaded; otherwise attribution falls back to the chain.
-		_, err := h.TaskService.EnqueueTaskForIssueWithHandoff(ctx, issue, handoffNote, memberActorUserID(actorType, actorID))
+		_, err := h.TaskService.EnqueueTaskForIssueWithHandoff(ctx, issue, handoffNote, memberActorUserID(actorType, actorID), sourceTaskID)
 		if err == nil {
 			return DispatchQueued, ReasonQueued
 		}
 		return issueEnqueueFailure(issue, issue.AssigneeID, err)
 	case "squad":
-		return h.enqueueSquadLeaderTask(ctx, issue, actorType, actorID, handoffNote, trigger.WorkflowHandoff)
+		return h.enqueueSquadLeaderTask(ctx, issue, actorType, actorID, handoffNote, trigger.WorkflowHandoff, sourceTaskID)
 	}
 	return DispatchBlocked, ReasonTargetUnavailable
 }
@@ -414,4 +437,36 @@ func (h *Handler) PreviewIssueTrigger(w http.ResponseWriter, r *http.Request) {
 
 	resp.TotalCount = len(resp.Triggers)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// runtimeForRequest only inherits execution authority from a verified task token.
+func (h *Handler) runtimeForRequest(r *http.Request, agent db.Agent, actorType, actorID string) (pgtype.UUID, error) {
+	resolved, err := h.runtimeReadinessAgentForRequest(r, agent, actorType, actorID)
+	return resolved.RuntimeID, err
+}
+
+func (h *Handler) runtimeReadinessAgentForRequest(r *http.Request, agent db.Agent, actorType, actorID string) (db.Agent, error) {
+	userID := memberActorUserID(actorType, actorID)
+	var sourceTaskID pgtype.UUID
+	if actorType == "agent" {
+		if r.Header.Get("X-Actor-Source") != "task_token" {
+			return db.Agent{}, service.ErrTaskRuntimeUnavailable
+		}
+		task, ok := h.taskFromRequestHeader(r)
+		if !ok || uuidToString(task.AgentID) != actorID {
+			return db.Agent{}, service.ErrTaskRuntimeUnavailable
+		}
+		sourceTaskID = task.ID
+		userID = task.OriginatorUserID
+	}
+	return h.TaskService.AgentForRuntimeReadiness(r.Context(), agent, userID, sourceTaskID)
+}
+
+func (h *Handler) runtimeReadyForRequest(r *http.Request, agent db.Agent, actorType, actorID string) bool {
+	agent, err := h.runtimeReadinessAgentForRequest(r, agent, actorType, actorID)
+	if err != nil {
+		return false
+	}
+	verdict, err := service.AgentReadiness(r.Context(), h.runtimeLookup(obsmetrics.RuntimeLookupSourceIssue), agent)
+	return err == nil && verdict.Ready()
 }

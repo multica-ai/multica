@@ -477,7 +477,7 @@ func TestChannelChatStaleTaskPreparationLeavesRouteAndChatUntouched(t *testing.T
 			return enqueueErr
 		},
 	})
-	if !errors.Is(err, service.ErrChatTaskAgentNoRuntime) {
+	if !errors.Is(err, service.ErrTaskRuntimeUnavailable) {
 		t.Fatalf("start with stale preparation error = %v, want no-runtime rejection", err)
 	}
 
@@ -822,11 +822,16 @@ func runChannelClearCommandE2E(t *testing.T, channelType channel.Type, text, com
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, chat_session_id, status, priority,
 			started_at, completed_at, session_id, work_dir,
-			channel_context_revision
+			channel_context_revision, runtime_routing
 		)
 		VALUES ($1, $2, $3, 'completed', 0, now(), now(),
-		        'old-provider-session', '/tmp/old-provider-workdir', 1)
-	`, agentID, runtimeID, sessionID); err != nil {
+		        'old-provider-session', '/tmp/old-provider-workdir', 1,
+		        (SELECT jsonb_build_object('version', 1, 'execution_user_id', $4::text,
+		            'routes', jsonb_build_object(a.id::text, jsonb_build_object(
+		                'runtime_id', r.id::text, 'runtime_owner_id', r.owner_id::text,
+		                'provider', r.provider, 'source', 'default', 'model', COALESCE(a.model, ''))))
+		         FROM agent a JOIN agent_runtime r ON r.id = $2 WHERE a.id = $1))
+	`, agentID, runtimeID, sessionID, testUserID); err != nil {
 		t.Fatalf("seed prior provider task: %v", err)
 	}
 
@@ -1039,6 +1044,7 @@ func (b *channelNewE2ESessionBinder) StartSession(ctx context.Context, p engine.
 		Initiator: p.Sender,
 		Body:      p.Message.Text, MessageID: p.Message.MessageID,
 		ThreadID: p.Message.Source.ThreadID, ClaimToken: p.ClaimToken,
+		SenderChannelID:     p.Message.Source.SenderID,
 		MediaPendingSeconds: p.MediaPendingSeconds, PersistMessage: p.PersistMessage,
 		HistoryBoundaryPending: p.HistoryBoundaryPending,
 		BeforeCommit:           p.BeforeCommit,
@@ -1064,6 +1070,7 @@ func (b *channelNewE2ESessionBinder) AppendMessage(ctx context.Context, p engine
 		CommandText:         p.Message.CommandText,
 		MessageID:           p.Message.MessageID,
 		ThreadID:            p.Message.Source.ThreadID,
+		SenderChannelID:     p.Message.Source.SenderID,
 		ClaimToken:          p.ClaimToken,
 		MediaPendingSeconds: p.MediaPendingSeconds,
 		ForceFresh:          p.Message.ForceFresh,

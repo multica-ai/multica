@@ -48,6 +48,7 @@ export function RuntimePicker({
   canEdit = true,
   variant = "chip",
   showLabel = true,
+  defaultLabel,
   onChange,
 }: {
   value: string;
@@ -58,6 +59,8 @@ export function RuntimePicker({
   canEdit?: boolean;
   variant?: "chip" | "field";
   showLabel?: boolean;
+  /** Enables an explicit reset option; the empty value selects the default. */
+  defaultLabel?: string;
   onChange: (runtimeId: string) => Promise<void> | void;
 }) {
   const { t } = useT("agents");
@@ -109,7 +112,7 @@ export function RuntimePicker({
     ? selectedMachine && selectedMachine.title !== selectedLabel
       ? `${selectedLabel} · ${selectedMachine.title}`
       : (selectedLabel ?? "")
-    : t(($) => $.pickers.runtime_none);
+    : !value && defaultLabel ? defaultLabel : t(($) => $.pickers.runtime_none);
 
   const isOnline = selected?.status === "online";
 
@@ -172,7 +175,7 @@ export function RuntimePicker({
         name: combinedLabel,
         status: isOnline ? t(($) => $.pickers.runtime_online) : t(($) => $.pickers.runtime_offline),
       })
-    : t(($) => $.pickers.runtime_tooltip_none);
+    : !value && defaultLabel ? defaultLabel : t(($) => $.pickers.runtime_tooltip_none);
 
   const hasOtherRuntimes = runtimes.some((r) => r.owner_id !== currentUserId);
 
@@ -350,6 +353,11 @@ export function RuntimePicker({
         ) : undefined
       }
     >
+      {defaultLabel && (
+        <PickerItem selected={!value} onClick={() => void select("")}>
+          {defaultLabel}
+        </PickerItem>
+      )}
       {drilled ? (
         drilled.runtimes.map((rt) => {
           const owner = getOwner(rt.owner_id);

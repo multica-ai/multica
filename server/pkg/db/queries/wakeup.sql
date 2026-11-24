@@ -175,10 +175,10 @@ SELECT * FROM agent_task_queue WHERE context->>'wakeup_id'= @wakeup_id::text AND
 -- that passes no id still inserts — it just gets a random v4, exactly as before.
 -- The same pattern is used by every INSERT listed in pkg/dbid's write table.
 WITH enqueue_agent AS MATERIALIZED (
-    SELECT a.id, COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid) AS runtime_id
+    SELECT a.id, CASE WHEN sqlc.narg(runtime_routing)::jsonb IS NULL THEN COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid) ELSE sqlc.narg(runtime_id)::uuid END AS runtime_id
     FROM agent a
     WHERE a.id = sqlc.arg(agent_id)
-      AND lock_task_owner_rows(a.id, sqlc.narg(issue_id), COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid))
+      AND lock_task_owner_rows(a.id, sqlc.narg(issue_id), CASE WHEN sqlc.narg(runtime_routing)::jsonb IS NULL THEN COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid) ELSE sqlc.narg(runtime_id)::uuid END)
     FOR KEY SHARE OF a
 )
 INSERT INTO agent_task_queue (
@@ -186,7 +186,7 @@ INSERT INTO agent_task_queue (
     coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
     squad_id, usage_squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id, trigger_evidence_kind, trigger_evidence_ref_id,
-    workflow_step, id
+    workflow_step, runtime_routing, id
 )
 SELECT
     sqlc.arg(agent_id), enqueue_agent.runtime_id, sqlc.narg(issue_id), 'queued', sqlc.arg(priority), sqlc.narg(trigger_comment_id),
@@ -220,6 +220,7 @@ SELECT
         (SELECT s.workflow_step FROM agent_task_queue s WHERE s.id = sqlc.narg(delegated_from_task_id) AND s.issue_id = sqlc.narg(issue_id)),
         (SELECT i.status FROM issue i WHERE i.id = sqlc.narg(issue_id))
     ),
+    sqlc.narg(runtime_routing)::jsonb,
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 FROM enqueue_agent
 RETURNING *;

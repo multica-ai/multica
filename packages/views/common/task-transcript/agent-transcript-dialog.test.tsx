@@ -26,6 +26,8 @@ vi.mock("@multica/core/api", () => ({
   },
 }));
 
+vi.mock("@multica/core/workspace/hooks", () => ({ useActorName: () => ({ getActorName: () => "Personal executor" }) }));
+
 vi.mock("@multica/ui/lib/clipboard", () => ({
   copyText: copyTextMock,
 }));
@@ -313,6 +315,15 @@ describe("AgentTranscriptDialog", () => {
   it("has no trigger row for a run with no snapshot", () => {
     renderDialog(items, { task: { ...baseTask, trigger_summary: undefined } });
     expect(screen.queryByText("Trigger")).not.toBeInTheDocument();
+  });
+
+  it("shows the actual task runtime and personal execution identity", async () => {
+    vi.mocked(api.listRuntimes).mockResolvedValue([{ ...runtimeFor("codex"), custom_name: "My laptop" }]);
+    renderDialog([], { task: { ...liveTask, runtime_routing_source: "personal", runtime_execution_user_id: "user-1" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Run details" }));
+    expect(await screen.findByText("My laptop")).toBeInTheDocument();
+    expect(screen.getByText("Personal runtime")).toBeInTheDocument();
+    expect(screen.getByText("Personal executor")).toBeInTheDocument();
   });
 
   it("opens the matching result and duration for parallel same-tool calls", () => {

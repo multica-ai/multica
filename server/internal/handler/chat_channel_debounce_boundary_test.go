@@ -18,10 +18,10 @@ func appendChannelUserMessage(t *testing.T, ctx context.Context, sessionID, body
 	t.Helper()
 	var id string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_message (chat_session_id, role, content, channel_ingested)
-		VALUES ($1, 'user', $2, TRUE)
+		INSERT INTO chat_message (chat_session_id, role, content, channel_ingested, channel_sender_user_id)
+		VALUES ($1, 'user', $2, TRUE, $3)
 		RETURNING id
-	`, sessionID, body).Scan(&id); err != nil {
+	`, sessionID, body, testUserID).Scan(&id); err != nil {
 		t.Fatalf("append channel user message %q: %v", body, err)
 	}
 	return id

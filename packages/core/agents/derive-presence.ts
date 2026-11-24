@@ -124,7 +124,9 @@ export function deriveAgentPresenceDetail(input: DerivePresenceInput): AgentPres
 
   const availability = input.runtime
     ? deriveAgentAvailability(input.runtime, input.now)
-    : runtimeAvailabilityFromAgent(input.agent) ?? "offline";
+    : input.agent.personal_runtime_id
+      ? input.agent.personal_runtime_availability ?? "offline"
+      : runtimeAvailabilityFromAgent(input.agent) ?? "offline";
   const detail = deriveWorkloadDetail(input.tasks);
 
   return {
@@ -132,7 +134,9 @@ export function deriveAgentPresenceDetail(input: DerivePresenceInput): AgentPres
     workload: detail.workload,
     runningCount: detail.runningCount,
     queuedCount: detail.queuedCount,
-    capacity: input.agent.max_concurrent_tasks,
+    // Routed task counts span users; there is no single agent-wide limit.
+    capacity: input.tasks.some((task) => task.runtime_execution_user_id)
+      ? null : input.agent.max_concurrent_tasks,
   };
 }
 
@@ -163,7 +167,7 @@ export function buildPresenceMap(args: {
   }
 
   for (const agent of args.agents) {
-    const runtime = runtimesById.get(agent.runtime_id) ?? null;
+    const runtime = runtimesById.get(agent.personal_runtime_id || agent.runtime_id) ?? null;
     const tasks = tasksByAgent.get(agent.id) ?? [];
     out.set(agent.id, deriveAgentPresenceDetail({ agent, runtime, tasks, now: args.now }));
   }

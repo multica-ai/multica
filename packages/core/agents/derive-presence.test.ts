@@ -485,3 +485,42 @@ describe("buildPresenceMap", () => {
     expect(map.get("a")?.workload).toBe("idle");
   });
 });
+
+describe("personal execution presence", () => {
+  it("keeps an older agent payload without personal fields on its shared runtime", () => {
+    const agent = makeAgent();
+    const detail = buildPresenceMap({ agents: [agent], runtimes: [makeRuntime({ id: agent.runtime_id })], snapshot: [], now: NOW }).get(agent.id);
+    expect(detail?.availability).toBe("online");
+  });
+  it("derives each viewer's presence for the same shared agent without reusing another viewer's runtime", () => {
+    const shared = makeAgent({ id: "shared", runtime_id: "default", runtime_availability: "online" });
+    const runtimes = [makeRuntime({ id: "viewer-a", status: "online" }), makeRuntime({ id: "viewer-b", status: "offline", last_seen_at: "2026-04-27T11:00:00Z" })];
+    const forViewer = (personalRuntimeId: string) => buildPresenceMap({
+      agents: [{ ...shared, personal_runtime_id: personalRuntimeId }], runtimes, snapshot: [], now: NOW,
+    }).get(shared.id);
+    expect(forViewer("viewer-a")?.availability).toBe("online");
+    expect(forViewer("viewer-b")?.availability).toBe("offline");
+    expect(forViewer("deleted")?.availability).toBe("offline");
+  });
+  it("uses the viewer's personal runtime when the shared default is inaccessible", () => {
+    const agent = makeAgent({ personal_runtime_id: "mine" } as Partial<Agent>);
+    const detail = buildPresenceMap({ agents: [agent], runtimes: [makeRuntime({ id: "mine" })], snapshot: [], now: NOW }).get(agent.id);
+    expect(detail?.availability).toBe("online");
+  });
+  it.each(["online", "unstable", "offline"] as const)("uses the viewer projection %s when their runtime list is incomplete", (availability) => {
+    const agent = makeAgent({ personal_runtime_id: "mine", personal_runtime_availability: availability, runtime_availability: "online" });
+    const detail = buildPresenceMap({ agents: [agent], runtimes: [], snapshot: [], now: NOW }).get(agent.id);
+    expect(detail?.availability).toBe(availability);
+  });
+  it("prefers a loaded personal runtime over its older projected status", () => {
+    const agent = makeAgent({ personal_runtime_id: "mine", personal_runtime_availability: "offline" });
+    const detail = buildPresenceMap({ agents: [agent], runtimes: [makeRuntime({ id: "mine" })], snapshot: [], now: NOW }).get(agent.id);
+    expect(detail?.availability).toBe("online");
+  });
+  it("does not show a per-user capacity against all users' running tasks", () => {
+    const tasks = Array.from({ length: 9 }, (_, i) => makeTask({ id: String(i), status: "running", runtime_execution_user_id: String(i % 3) }));
+    const detail = deriveAgentPresenceDetail({agent:makeAgent({max_concurrent_tasks:3}),runtime:makeRuntime(),tasks,now:NOW});
+    expect(detail.runningCount).toBe(9);
+    expect(detail.capacity).toBeNull();
+  });
+});

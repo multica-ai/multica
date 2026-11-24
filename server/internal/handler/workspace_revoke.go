@@ -255,6 +255,14 @@ func (h *Handler) revokeMember(ctx context.Context, workspaceID, userID, memberI
 	}); err != nil {
 		return empty, err
 	}
+	// Personal routing is membership-scoped. Keep preferences in other
+	// workspaces and serialize against preference saves via the lock above.
+	if err := qtx.DeleteAgentRuntimePreferencesByMember(ctx, db.DeleteAgentRuntimePreferencesByMemberParams{
+		WorkspaceID: workspaceID,
+		UserID:      userID,
+	}); err != nil {
+		return empty, err
+	}
 
 	// App requests waiting on the member would otherwise let a later OAuth
 	// connect, or a stale tab, resume an agent in a workspace they left.

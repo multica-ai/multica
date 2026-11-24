@@ -70,18 +70,30 @@ func (q *Queries) DeleteTaskTokensByTask(ctx context.Context, taskID pgtype.UUID
 }
 
 const getTaskTokenByHash = `-- name: GetTaskTokenByHash :one
-SELECT tt.id, tt.token_hash, tt.task_id, tt.agent_id, tt.workspace_id, tt.user_id, tt.expires_at, tt.created_at FROM task_token tt
-JOIN agent_task_queue q ON q.id = tt.task_id
+SELECT tt.id, tt.token_hash, tt.task_id, tt.agent_id, tt.workspace_id, tt.user_id, tt.expires_at, tt.created_at
+FROM task_token tt
+JOIN agent_task_queue atq ON atq.id = tt.task_id
+JOIN agent a ON a.id = atq.agent_id AND a.id = tt.agent_id
+JOIN agent_runtime r ON r.id = atq.runtime_id
 WHERE tt.token_hash = $1
   AND tt.expires_at > now()
-  AND q.status NOT IN ('completed', 'failed', 'cancelled')
+  AND tt.workspace_id = r.workspace_id
+  AND (
+      (atq.runtime_routing IS NULL AND tt.user_id = r.owner_id)
+      OR (
+          atq.runtime_routing IS NOT NULL
+          AND tt.user_id::text = atq.runtime_routing->>'execution_user_id'
+      )
+  )
+  AND task_runtime_allowed(atq.agent_id, atq.runtime_id, atq.runtime_routing)
+  AND a.workspace_id = r.workspace_id
+  AND a.archived_at IS NULL
+  AND atq.status IN ('dispatched', 'waiting_local_directory', 'running')
 `
 
-// A token authenticates only while its task is live. Terminal task rows never
-// return to a live status (retries are new rows), so a token whose task is
-// completed, failed or cancelled is dead even when no path deleted it: the
-// bulk failure sweeps (runtime offline, stale tasks, daemon recovery) never
-// delete it, and the per-task deletes are best-effort (GitHub #11378).
+// A mat_ token remains valid only while its task is active and its
+// Agent/runtime/owner binding is still authorized.
+// Live routing checks revoke access when membership or invocation authority changes.
 func (q *Queries) GetTaskTokenByHash(ctx context.Context, tokenHash string) (TaskToken, error) {
 	row := q.db.QueryRow(ctx, getTaskTokenByHash, tokenHash)
 	var i TaskToken

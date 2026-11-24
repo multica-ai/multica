@@ -10,7 +10,8 @@ import {
   within,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ApiError } from "@multica/core/api";
+import { agentRuntimePreferenceOptions, runtimeKeys } from "@multica/core/runtimes";
+import { api, ApiError } from "@multica/core/api";
 import { configStore } from "@multica/core/config";
 import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
 import type { Agent } from "@multica/core/types";
@@ -40,6 +41,7 @@ vi.mock("./agent-properties-panel", () => ({
   }) => (
     <div>
       <span>model:{agent.model}</span>
+      <button onClick={() => void onUpdate(agent.id, { runtime_id: "runtime-2" })}>Change default runtime</button>
       <button
         type="button"
         // The page rethrows a failed update for the caller; the real panel
@@ -157,8 +159,7 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
 vi.mock("@multica/core/agents", () => ({
-  isAgentRuntimeBound: (agent: { runtime_id: string; runtime_bound?: boolean }) =>
-    agent.runtime_bound !== false && agent.runtime_id.length > 0,
+  isAgentRuntimeBound: (agent: Agent) => !!agent.personal_runtime_id || (agent.runtime_bound !== false && agent.runtime_id.length > 0),
   useWorkspacePresenceMap: () => ({ byAgent: presenceRef.current }),
 }));
 vi.mock("@multica/core/workspace/queries", () => ({
@@ -206,7 +207,8 @@ vi.mock("@multica/core/workspace/queries", () => ({
     ],
   },
 }));
-vi.mock("@multica/core/runtimes", () => ({
+vi.mock("@multica/core/runtimes", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@multica/core/runtimes")>(),
   runtimeListOptions: (wsId: string) => ({
     queryKey: ["runtimes", wsId],
     queryFn: () => Promise.resolve(runtimesRef.current),
@@ -249,6 +251,7 @@ vi.mock("@multica/core/api", () => {
     api: {
       getAgent: mockGetAgent,
       updateAgent: mockUpdateAgent,
+      getAgentRuntimePreference: vi.fn(),
       archiveAgent: mockArchiveAgent,
       restoreAgent: vi.fn(),
       cancelAgentTasks: mockCancelAgentTasks,
@@ -290,10 +293,7 @@ const baseAgent: Agent = {
   archived_by: null,
 };
 
-function renderPage(search = "") {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
+function renderPage(search = "", queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   const push = vi.fn();
   const replace = vi.fn();
   const navigation: NavigationAdapter = {
@@ -700,7 +700,29 @@ describe("AgentDetailPage deep links", () => {
   });
 });
 
+it("refreshes the personal provider after changing the shared default runtime locally", async () => {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+  const key = runtimeKeys.preference("ws-1", "agent-1");
+  qc.setQueryData(key, { runtimeId: null, provider: "claude" });
+  vi.mocked(api.getAgentRuntimePreference).mockResolvedValue({ runtimeId: null, provider: "codex" });
+  renderPage("", qc);
+
+  fireEvent.click(await screen.findByRole("button", { name: "Change default runtime" }));
+
+  await waitFor(() => expect(qc.getQueryState(key)?.isInvalidated).toBe(true));
+  expect(await qc.fetchQuery(agentRuntimePreferenceOptions("ws-1", "agent-1")))
+    .toEqual({ runtimeId: null, provider: "codex" });
+});
+
 describe("AgentDetailPage DM button", () => {
+  it("allows a personal runtime when the shared agent default is unbound", async () => {
+    agentsRef.current = [{ ...baseAgent, owner_id: "user-1", runtime_id: "", runtime_bound: false, personal_runtime_id: "mine" }];
+    const { push } = renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "DM" }));
+    expect(push).toHaveBeenCalledWith("/acme/chat?agent=agent-1");
+    expect(mockToastError).not.toHaveBeenCalled();
+    expect(screen.queryByText(/needs a runtime before it can run/i)).not.toBeInTheDocument();
+  });
   it("navigates to the chat deep link when the user can chat with the agent", async () => {
     const { push } = renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "DM" }));

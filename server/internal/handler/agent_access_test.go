@@ -119,20 +119,6 @@ func privateAgentTestFixture(t *testing.T) (agentID, ownerID, memberID string) {
 	t.Helper()
 
 	ctx := context.Background()
-	// Keep these permission-focused fixtures out of the private-runtime owner
-	// fence. Their agents remain private; the public runtime isolates invocation
-	// authorization from the separate runtime/agent ownership rule.
-	runtimeID := handlerTestRuntimeID(t)
-	var runtimeVisibility string
-	if err := testPool.QueryRow(ctx, `SELECT visibility FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&runtimeVisibility); err != nil {
-		t.Fatalf("read fixture runtime visibility: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `UPDATE agent_runtime SET visibility = 'public' WHERE id = $1`, runtimeID); err != nil {
-		t.Fatalf("make fixture runtime public: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `UPDATE agent_runtime SET visibility = $1 WHERE id = $2`, runtimeVisibility, runtimeID)
-	})
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO "user" (name, email)
 		VALUES ('Private Agent Owner', 'private-agent-owner@multica.test')
@@ -180,7 +166,7 @@ func privateAgentTestFixture(t *testing.T) (agentID, ownerID, memberID string) {
 		VALUES ($1, 'private-access-test-agent', '', 'cloud', '{}'::jsonb,
 		        $2, 'private', 1, $3, '', '{}'::jsonb, '[]'::jsonb)
 		RETURNING id
-	`, testWorkspaceID, runtimeID, ownerID).Scan(&agentID); err != nil {
+	`, testWorkspaceID, dbfx.Runtime(t, "Private agent owner's runtime", testutil.Cols{"owner_id": ownerID}), ownerID).Scan(&agentID); err != nil {
 		t.Fatalf("create private agent: %v", err)
 	}
 	t.Cleanup(func() {
@@ -219,8 +205,8 @@ func TestGetAgent_PrivateAgentForbidsPlainMember(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &ownerResponse); err != nil {
 		t.Fatalf("decode GetAgent owner response: %v", err)
 	}
-	if _, ok := ownerResponse["runtime_availability"]; ok {
-		t.Fatal("runtime_availability should be omitted when the viewer owns the runtime")
+	if got := string(ownerResponse["runtime_availability"]); got != `"online"` {
+		t.Fatalf("hidden runtime availability = %s, want online", got)
 	}
 
 	// Agent owner (plain member who happens to own the agent): allowed.

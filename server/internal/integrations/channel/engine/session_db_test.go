@@ -246,7 +246,7 @@ func TestChannelIssueCommandIsExcludedFromLaterChatTaskBatch(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
 	})
 	if err := db.New(pool).LinkUnownedChannelChatMessagesToTask(context.Background(), db.LinkUnownedChannelChatMessagesToTaskParams{
-		TaskID: taskID, ChatSessionID: fixture.sessionID,
+		TaskID: taskID, ChatSessionID: fixture.sessionID, SenderUserID: fixture.userID,
 	}); err != nil {
 		t.Fatalf("seal chat input: %v", err)
 	}

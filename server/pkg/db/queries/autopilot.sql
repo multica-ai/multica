@@ -622,17 +622,17 @@ ORDER BY t.id;
 -- accountable + originator_source='unattributed' so the row is still not a
 -- NULL-source bypass (MUL-4302 §2).
 WITH enqueue_agent AS MATERIALIZED (
-    SELECT a.id, COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid) AS runtime_id
+    SELECT a.id, CASE WHEN sqlc.narg(runtime_routing)::jsonb IS NULL THEN COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid) ELSE sqlc.narg(runtime_id)::uuid END AS runtime_id
     FROM agent a
     WHERE a.id = sqlc.arg(agent_id)
-      AND lock_task_owner_rows(a.id, NULL, COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid))
+      AND lock_task_owner_rows(a.id, NULL, CASE WHEN sqlc.narg(runtime_routing)::jsonb IS NULL THEN COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid) ELSE sqlc.narg(runtime_id)::uuid END)
     FOR KEY SHARE OF a
 )
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary,
     originator_user_id, accountable_user_id, rule_version_id,
     originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
-    id
+    runtime_routing, runtime_mcp_overlay, runtime_connected_apps, id
 )
 SELECT
     sqlc.arg(agent_id), enqueue_agent.runtime_id, NULL, 'queued', sqlc.arg(priority), sqlc.narg(autopilot_run_id), sqlc.narg(trigger_summary),
@@ -642,6 +642,7 @@ SELECT
     sqlc.narg(originator_source),
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
+    sqlc.narg(runtime_routing), sqlc.narg(runtime_mcp_overlay), sqlc.narg(runtime_connected_apps),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 FROM enqueue_agent
 RETURNING *;
@@ -856,3 +857,8 @@ SELECT EXISTS (
 -- Powers the per-row can_write flag on the list endpoint without an N+1.
 SELECT autopilot_id FROM autopilot_collaborator
 WHERE user_type = 'member' AND user_id = $1;
+
+-- name: SetAutopilotRunTask :exec
+UPDATE autopilot_run
+SET task_id = @task_id
+WHERE id = @id AND task_id IS NULL;

@@ -161,7 +161,7 @@ func TestEnqueueChatTaskLeavesAlreadyPassedMessagesUnowned(t *testing.T) {
 	chatSessionID := seedChannelChatSession(t, ctx, pool, workspaceID, agentID, userID)
 
 	// A pre-ownership pair: user row and reply, neither carrying a task.
-	legacy := appendChannelUserMessage(t, ctx, pool, chatSessionID, "老消息")
+	legacy := appendChannelUserMessage(t, ctx, pool, chatSessionID, "老消息", true)
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO chat_message (chat_session_id, role, content)
 		VALUES ($1, 'assistant', '老回复')`, chatSessionID); err != nil {
@@ -170,7 +170,7 @@ func TestEnqueueChatTaskLeavesAlreadyPassedMessagesUnowned(t *testing.T) {
 
 	// The orphan the pre-fix seal stranded, then a later turn (created after it)
 	// that ran on its own input and replied.
-	orphan := appendChannelUserMessage(t, ctx, pool, chatSessionID, "被漏掉的")
+	orphan := appendChannelUserMessage(t, ctx, pool, chatSessionID, "被漏掉的", true)
 	var laterTurn pgtype.UUID
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, priority, completed_at)
@@ -240,12 +240,12 @@ func seedChannelChatSession(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 // ChatSession.AppendUserMessage does: durable, unowned, and stamped with the
 // immutable channel_ingested provenance. The debounced flush is what later
 // seals it to a task.
-func appendChannelUserMessage(t *testing.T, ctx context.Context, pool *pgxpool.Pool, chatSessionID, body string) string {
+func appendChannelUserMessage(t *testing.T, ctx context.Context, pool *pgxpool.Pool, chatSessionID, body string, legacy ...bool) string {
 	t.Helper()
 	var id string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO chat_message (chat_session_id, role, content, channel_ingested)
-		VALUES ($1, 'user', $2, TRUE) RETURNING id`, chatSessionID, body).Scan(&id); err != nil {
+		INSERT INTO chat_message (channel_sender_user_id, chat_session_id, role, content, channel_ingested)
+		VALUES ((CASE WHEN $3::boolean THEN NULL ELSE (SELECT creator_id FROM chat_session WHERE id = $1) END), $1, 'user', $2, TRUE) RETURNING id`, chatSessionID, body, len(legacy) > 0 && legacy[0]).Scan(&id); err != nil {
 		t.Fatalf("append channel user message %q: %v", body, err)
 	}
 	return id

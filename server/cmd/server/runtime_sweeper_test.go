@@ -49,11 +49,10 @@ func setupSweeperTestFixture(t *testing.T, taskStatus string) (string, string, s
 	var agentID, runtimeID string
 	err := testPool.QueryRow(ctx, `
 		SELECT a.id, a.runtime_id FROM agent a
-		JOIN member m ON m.workspace_id = a.workspace_id
-		JOIN "user" u ON u.id = m.user_id
-		WHERE u.email = $1
-		LIMIT 1
-	`, integrationTestEmail).Scan(&agentID, &runtimeID)
+		JOIN agent_runtime r ON r.id = a.runtime_id
+		WHERE a.workspace_id = $1 AND a.owner_id = $2 AND r.owner_id = $2
+		  AND a.name = 'Integration Test Agent'
+	`, testWorkspaceID, testUserID).Scan(&agentID, &runtimeID)
 	if err != nil {
 		t.Fatalf("failed to find test agent: %v", err)
 	}

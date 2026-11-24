@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -31,4 +32,19 @@ func TaskInputIsChannelIngested(ctx context.Context, q ChannelProvenanceQueries,
 		return true, nil
 	}
 	return q.TaskHasChannelIngestedMessages(ctx, task.ChatInputTaskID)
+}
+
+// TaskReplyTarget is immutable input provenance. A later message in the same
+// session must not redirect this execution's reply into another sender's thread.
+func TaskReplyTarget(task db.AgentTaskQueue) (messageID, threadID string, ok bool) {
+	var envelope struct {
+		Target *struct {
+			MessageID string `json:"message_id"`
+			ThreadID  string `json:"thread_id"`
+		} `json:"channel_reply_target"`
+	}
+	if json.Unmarshal(task.Context, &envelope) != nil || envelope.Target == nil {
+		return "", "", false
+	}
+	return envelope.Target.MessageID, envelope.Target.ThreadID, true
 }

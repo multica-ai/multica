@@ -204,6 +204,7 @@ func TestUpdateComment_EditedTriggerReachesResumedRun(t *testing.T) {
 	}
 	fixture := createCommentDeliveryFixture(t, "Edited trigger resumed run")
 	makeCommentDeliverySingleThread(t, fixture)
+	dbfx.Exec(t, `UPDATE agent_task_queue SET runtime_routing=$2 WHERE id=$1`, fixture.taskID, defaultRoutingForTest(t, fixture.agentID))
 	dbfx.Exec(t, `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, fixture.issueID, fixture.agentID)
 	triggerID := fixture.commentID[2]
 
@@ -260,6 +261,7 @@ func TestClaimTask_EditThenResolveKeepsEditFlag(t *testing.T) {
 	}
 	f := createCommentDeliveryFixture(t, "Review edit then resolve")
 	makeCommentDeliverySingleThread(t, f)
+	dbfx.Exec(t, `UPDATE agent_task_queue SET runtime_routing=$2 WHERE id=$1`, f.taskID, defaultRoutingForTest(t, f.agentID))
 	dbfx.Exec(t, `UPDATE issue SET assignee_type='agent', assignee_id=$2 WHERE id=$1`, f.issueID, f.agentID)
 	first := claimCommentDeliveryFixture(t, f, "")
 	dbfx.Exec(t, `UPDATE agent_task_queue SET status='running', started_at=now()-interval '30 seconds', session_id='review-edit-resolve-session' WHERE id=$1`, first.ID)
@@ -282,6 +284,7 @@ func TestClaimTask_FlagsEditedCoalescedComment(t *testing.T) {
 	}
 	f := createCommentDeliveryFixture(t, "Review edit coalesced")
 	makeCommentDeliverySingleThread(t, f)
+	dbfx.Exec(t, `UPDATE agent_task_queue SET runtime_routing=$2 WHERE id=$1`, f.taskID, defaultRoutingForTest(t, f.agentID))
 	dbfx.Exec(t, `UPDATE issue SET assignee_type='agent', assignee_id=$2 WHERE id=$1`, f.issueID, f.agentID)
 	first := claimCommentDeliveryFixture(t, f, "coalesced-comments-v1")
 	dbfx.Exec(t, `UPDATE agent_task_queue SET status='running', started_at=now()-interval '30 seconds', session_id='review-edit-coalesced-session' WHERE id=$1`, first.ID)

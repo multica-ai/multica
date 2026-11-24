@@ -102,7 +102,7 @@ export function AgentPresenceIndicator({
         </span>
         {showWorkingCount && (
           <span className="font-mono text-caption tabular-nums text-muted-foreground">
-            {detail.runningCount} / {detail.capacity}
+            {detail.runningCount}{detail.capacity != null && <> / {detail.capacity}</>}
           </span>
         )}
         {showQueueBadge && (

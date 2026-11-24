@@ -41,7 +41,7 @@ import {
   memberListOptions,
   workspaceKeys,
 } from "@multica/core/workspace/queries";
-import { runtimeListOptions } from "@multica/core/runtimes";
+import { runtimeKeys, runtimeListOptions } from "@multica/core/runtimes";
 import { useAgentPermissions } from "@multica/core/permissions";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
@@ -280,6 +280,9 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           data as UpdateAgentRequest,
         );
         cacheAgentResponse(qc, wsId, updatedAgent, { insertIntoList: false });
+        if ("runtime_id" in data) {
+          void qc.invalidateQueries({ queryKey: runtimeKeys.preference(wsId, id) });
+        }
         void qc.invalidateQueries({ queryKey });
         toast.success(t(($) => $.detail.agent_updated_toast));
       } catch (e) {
