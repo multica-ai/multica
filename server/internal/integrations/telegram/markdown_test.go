@@ -227,6 +227,8 @@ func distinctBackticksLine(targetLen int) string {
 }
 
 func TestFormatHTMLUnfinishedMarkdown(t *testing.T) {
+	const maxRenderTime = 100 * time.Millisecond
+
 	cases := []struct {
 		name string
 		in   string
@@ -282,8 +284,8 @@ func TestFormatHTMLUnfinishedMarkdown(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			start := time.Now()
 			got := formatHTML(tc.in)
-			if elapsed := time.Since(start); elapsed > 2*time.Second {
-				t.Fatalf("formatHTML(%s) took %v, expected bounded linear time", tc.name, elapsed)
+			if elapsed := time.Since(start); elapsed > maxRenderTime {
+				t.Fatalf("formatHTML took %v, want at most %v", elapsed, maxRenderTime)
 			}
 			assertValidTelegramHTML(t, got)
 			if tc.want != "" && got != tc.want {
