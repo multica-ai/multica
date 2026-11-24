@@ -137,8 +137,12 @@ export interface IssueUpdatedPayload {
   assignee_changed?: boolean;
   status_changed?: boolean;
   project_changed?: boolean;
+  stage_changed?: boolean;
   title_changed?: boolean;
   parent_changed?: boolean;
+  // A blocker edge was added or removed; the issue at its other end lists
+  // this one under `blocking`, so the change reaches past this issue.
+  blockers_changed?: boolean;
   prev_parent_issue_id?: string | null;
   // Both ends of a duplicate-mark change (MUL-7349). The mark is not on Issue,
   // so these tell the realtime layer whose duplicate relations to refresh.

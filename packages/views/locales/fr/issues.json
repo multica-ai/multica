@@ -192,7 +192,7 @@
     "section_project": "Projet",
     "section_project_status": "Statut du projet",
     "section_label": "Étiquette",
-    "section_relation": "Lien avec moi",
+    "section_relation": "Relations",
     "relation_assigned": "Qui me sont assignés",
     "relation_created": "Créés par moi",
     "relation_my_agents": "Travail de mes agents",
@@ -280,7 +280,8 @@
     "advanced_group_match_trailing": "de ces conditions",
     "advanced_group_hint": "Les conditions de ce groupe sont reliées par « {{word}} »",
     "advanced_add_to_group": "Ajouter au groupe",
-    "advanced_turn_into_group": "Transformer en groupe"
+    "advanced_turn_into_group": "Transformer en groupe",
+    "relation_blocked": "Bloqué"
   },
   "display": {
     "tooltip": "Paramètres d'affichage",
@@ -609,14 +610,20 @@
       "wakeups": "Ajouter un réveil",
       "pull_requests": "Ajouter une pull request",
       "environments": "Ajouter un environnement",
-      "wakeups_pull_requests": "Ajouter un réveil ou une pull request",
-      "wakeups_environments": "Ajouter un réveil ou un environnement",
-      "pull_requests_environments": "Ajouter une pull request ou un environnement",
-      "all": "Ajouter un réveil, une pull request ou un environnement",
+      "relations": "Ajouter une relation",
+      "pair": "Ajouter {{first}} ou {{second}}",
+      "many": "Ajouter...",
+      "noun": {
+        "wakeups": "un réveil",
+        "pull_requests": "une pull request",
+        "environments": "un environnement",
+        "relations": "une relation"
+      },
       "menu": {
         "wakeups": "Réveil",
         "pull_requests": "Pull request",
-        "environments": "Environnement"
+        "environments": "Environnement",
+        "relations": "Relations"
       }
     },
     "footer": {
@@ -658,6 +665,13 @@
     "squad_leader_no_action_reason": "a évalué : aucune action nécessaire ({{reason}})",
     "squad_leader_failed": "évaluation en échec",
     "squad_leader_failed_reason": "évaluation en échec : {{reason}}",
+    "squad_handoff_to": "a passé la main à {{name}}",
+    "squad_handoff_human": "a demandé à {{name}} de décider",
+    "squad_handoff_leader": "a rendu la main à {{name}}",
+    "squad_handoff_round": "tour {{round}}",
+    "squad_handoff_reason_round_limit": "limite de {{limit}} tours atteinte",
+    "squad_handoff_reason_daily_limit": "limite quotidienne de passations atteinte",
+    "squad_handoff_reason_run_failed": "exécution échouée",
     "coalesced_badge": "×{{count}}",
     "activity_count_one": "{{count}} activité",
     "activity_count_other": "{{count}} activités",
@@ -881,6 +895,7 @@
   },
   "agent_live": {
     "is_working": "{{name}} travaille",
+    "is_working_round": "{{label}} · tour {{round}}",
     "is_queued": "{{name}} est en file d'attente",
     "is_waiting_local_directory": "{{name}} attend le répertoire local",
     "queued_elapsed_prefix": "en file d'attente depuis {{elapsed}}",
@@ -1125,6 +1140,8 @@
     "remove_parent_issue": "Retirer la tâche parente",
     "remove_parent_issue_success": "Tâche parente retirée",
     "add_sub_issue": "Ajouter une sous-tâche...",
+    "add_blocker": "Attendre une autre tâche...",
+    "add_blocking": "Bloquer une autre tâche...",
     "delete_issue": "Supprimer la tâche",
     "mark_duplicate": "Marquer comme doublon...",
     "open_in_new_window": "Ouvrir dans une nouvelle fenêtre"
@@ -2020,7 +2037,8 @@
       "pending": "En attente",
       "approved": "Approuvé",
       "rejected": "Refusé",
-      "rate_limited": "Limite atteinte"
+      "rate_limited": "Limite atteinte",
+      "quota_exceeded": "Limite mensuelle atteinte"
     }
   },
   "environments": {
@@ -2137,5 +2155,41 @@
     "focus_failed": "Impossible de basculer vers {{name}}",
     "retry": "Réessayer",
     "dismiss": "Ignorer"
+  },
+  "relations": {
+    "title": "Relations",
+    "add": "Ajouter une relation",
+    "wait_title": "Attendre une autre tâche",
+    "block_title": "Bloquer une autre tâche",
+    "blocked_by": "Bloquée par",
+    "blocking": "Bloque",
+    "stage_tag": "Étape",
+    "stage_tag_hint": "Défini par les étapes de la tâche parente",
+    "add_blocker_hint": "Cette tâche commence quand elle se termine",
+    "add_blocking_hint": "Elle commence quand cette tâche se termine",
+    "mark_duplicate_hint": "Annule cette tâche",
+    "blocking_picker_hint": "Sélectionnez une tâche qui ne peut pas commencer avant la fin de celle-ci."
+  },
+  "waiting": {
+    "remove": "Retirer {{identifier}}",
+    "count": "En attente de {{count}} tâches",
+    "count_one": "En attente de {{count}} tâche",
+    "count_other": "En attente de {{count}} tâches",
+    "hint": "Une fois ces tâches terminées, le responsable démarre automatiquement ou reçoit une notification.",
+    "hint_backlog": "Cette tâche est « À planifier » : elle ne démarrera pas automatiquement à la fin de ces tâches. Elle démarrera une fois sortie de « À planifier ».",
+    "picker_hint": "Sélectionnez une tâche qui doit se terminer avant celle-ci.",
+    "restricted": "{{count}} prérequis à accès restreint",
+    "ended": "Les tâches attendues sont terminées",
+    "marker_title": "Bloquée par {{count}} tâches",
+    "marker_title_one": "Bloquée par {{count}} tâche",
+    "marker_title_other": "Bloquée par {{count}} tâches",
+    "marker_ended": "{{finished}}/{{total}} terminées",
+    "marker_more": "{{count}} de plus",
+    "marker_more_one": "{{count}} de plus",
+    "marker_more_other": "{{count}} de plus",
+    "marker_auto_start": "{{name}} démarrera automatiquement une fois celles-ci terminées.",
+    "marker_notify": "{{name}} sera notifié une fois celles-ci terminées.",
+    "marker_unavailable": "{{name}} ne peut pas s'exécuter pour l'instant : rien ne démarrera une fois celles-ci terminées.",
+    "marker_unassigned": "Aucun responsable : rien ne démarrera une fois celles-ci terminées."
   }
 }

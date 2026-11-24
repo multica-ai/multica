@@ -192,7 +192,7 @@
     "section_project": "Project",
     "section_project_status": "Project status",
     "section_label": "Label",
-    "section_relation": "Relation to me",
+    "section_relation": "Relationships",
     "relation_assigned": "Assigned to me",
     "relation_created": "Created by me",
     "relation_my_agents": "My agents' work",
@@ -280,7 +280,8 @@
     "advanced_group_match_trailing": "of these",
     "advanced_group_hint": "Conditions in this group are joined with “{{word}}”",
     "advanced_add_to_group": "Add to group",
-    "advanced_turn_into_group": "Turn into group"
+    "advanced_turn_into_group": "Turn into group",
+    "relation_blocked": "Blocked"
   },
   "display": {
     "tooltip": "Display settings",
@@ -609,14 +610,20 @@
       "wakeups": "Add wakeup",
       "pull_requests": "Add pull request",
       "environments": "Add environment",
-      "wakeups_pull_requests": "Add wakeup or pull request",
-      "wakeups_environments": "Add wakeup or environment",
-      "pull_requests_environments": "Add pull request or environment",
-      "all": "Add wakeup, pull request, or environment",
+      "relations": "Add relation",
+      "pair": "Add {{first}} or {{second}}",
+      "many": "Add...",
+      "noun": {
+        "wakeups": "wakeup",
+        "pull_requests": "pull request",
+        "environments": "environment",
+        "relations": "relation"
+      },
       "menu": {
         "wakeups": "Wakeup",
         "pull_requests": "Pull request",
-        "environments": "Environment"
+        "environments": "Environment",
+        "relations": "Relations"
       }
     },
     "footer": {
@@ -658,6 +665,13 @@
     "squad_leader_no_action_reason": "evaluated: no action needed ({{reason}})",
     "squad_leader_failed": "evaluation failed",
     "squad_leader_failed_reason": "evaluation failed: {{reason}}",
+    "squad_handoff_to": "handed off to {{name}}",
+    "squad_handoff_human": "asked {{name}} to decide",
+    "squad_handoff_leader": "handed back to {{name}}",
+    "squad_handoff_round": "round {{round}}",
+    "squad_handoff_reason_round_limit": "{{limit}}-round limit reached",
+    "squad_handoff_reason_daily_limit": "daily handoff limit reached",
+    "squad_handoff_reason_run_failed": "run failed",
     "coalesced_badge": "×{{count}}",
     "activity_count_one": "{{count}} activity",
     "activity_count_other": "{{count}} activities",
@@ -881,6 +895,7 @@
   },
   "agent_live": {
     "is_working": "{{name}} is working",
+    "is_working_round": "{{label}} · round {{round}}",
     "is_queued": "{{name}} is queued",
     "is_waiting_local_directory": "{{name}} is waiting for the local directory",
     "queued_elapsed_prefix": "queued for {{elapsed}}",
@@ -1125,6 +1140,8 @@
     "remove_parent_issue": "Remove parent issue",
     "remove_parent_issue_success": "Removed parent issue",
     "add_sub_issue": "Add sub-issue...",
+    "add_blocker": "Wait for another task...",
+    "add_blocking": "Block another task...",
     "delete_issue": "Delete issue",
     "mark_duplicate": "Mark as duplicate...",
     "open_in_new_window": "Open in new window"
@@ -2020,7 +2037,8 @@
       "pending": "Waiting",
       "approved": "Approved",
       "rejected": "Declined",
-      "rate_limited": "Rate limited"
+      "rate_limited": "Rate limited",
+      "quota_exceeded": "Monthly limit reached"
     }
   },
   "environments": {
@@ -2137,5 +2155,41 @@
     "focus_failed": "Couldn't switch to {{name}}",
     "retry": "Retry",
     "dismiss": "Dismiss"
+  },
+  "relations": {
+    "title": "Relations",
+    "add": "Add relation",
+    "wait_title": "Wait for another task",
+    "block_title": "Block another task",
+    "blocked_by": "Blocked by",
+    "blocking": "Blocking",
+    "stage_tag": "Stage",
+    "stage_tag_hint": "Set by the parent issue's stages",
+    "add_blocker_hint": "This task starts after it ends",
+    "add_blocking_hint": "It starts after this task ends",
+    "mark_duplicate_hint": "Cancels this task",
+    "blocking_picker_hint": "Select a task that can't start until this one ends."
+  },
+  "waiting": {
+    "remove": "Remove {{identifier}}",
+    "count": "Waiting for {{count}} tasks",
+    "hint": "After these tasks end, the assignee starts automatically or receives a notification.",
+    "hint_backlog": "This task is in Backlog, so it won't start automatically when these tasks end. It starts once it leaves Backlog.",
+    "picker_hint": "Select a task that must end before this one can start.",
+    "restricted": "{{count}} restricted prerequisites",
+    "ended": "Waiting tasks ended",
+    "count_one": "Waiting for {{count}} task",
+    "count_other": "Waiting for {{count}} tasks",
+    "marker_title": "Blocked by {{count}} tasks",
+    "marker_title_one": "Blocked by {{count}} task",
+    "marker_title_other": "Blocked by {{count}} tasks",
+    "marker_ended": "{{finished}}/{{total}} ended",
+    "marker_more": "{{count}} more",
+    "marker_more_one": "{{count}} more",
+    "marker_more_other": "{{count}} more",
+    "marker_auto_start": "{{name}} starts automatically once these end.",
+    "marker_notify": "{{name}} is notified once these end.",
+    "marker_unavailable": "{{name}} can't run right now, so nothing starts when these end.",
+    "marker_unassigned": "No assignee, so nothing starts when these end."
   }
 }

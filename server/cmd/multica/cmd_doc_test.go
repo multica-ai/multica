@@ -41,9 +41,9 @@ func TestDocCommandsExposeOnlyAgentReadWrite(t *testing.T) {
 	if len(expectedFolder) != 0 {
 		t.Fatalf("missing doc folder commands: %v", expectedFolder)
 	}
-	// Writing in doc discussions is human-only on the server.
-	if names := commandNames(docCommentCmd); len(names) != 1 || names[0] != "list" {
-		t.Fatalf("doc comment commands = %v, want only list", names)
+	// Agents reply in doc discussions; resolving and deleting stay with people.
+	if names := commandNames(docCommentCmd); len(names) != 2 || names[0] != "add" || names[1] != "list" {
+		t.Fatalf("doc comment commands = %v, want add and list", names)
 	}
 	if !docFolderUpdateCmd.HasAlias("rename") {
 		t.Fatal("doc folder update should accept rename as an alias")
@@ -58,6 +58,54 @@ func TestDocConflictErrorExplainsRecovery(t *testing.T) {
 	cause := errors.New("connection closed")
 	if !errors.Is(docWriteError("update doc", 3, cause), cause) {
 		t.Fatal("lost underlying error")
+	}
+}
+
+func TestDocMergeConflictErrorForbidsResendingTheBody(t *testing.T) {
+	err := docWriteError("update doc", 3, &cli.HTTPError{StatusCode: http.StatusConflict, Body: `{"code":"doc_merge_conflict"}`})
+	for _, want := range []string{"nothing was written", "redo your change", "Do not resend the same body"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("merge conflict error missing %q: %v", want, err)
+		}
+	}
+}
+
+// renderHelp renders cmd's --help the way the CLI prints it. Group commands
+// use subHelpTemplate, which prints only Short, so rules agents need must
+// live on the leaf commands the brief points at.
+func renderHelp(t *testing.T, cmd *cobra.Command) string {
+	t.Helper()
+	var out strings.Builder
+	cmd.SetOut(&out)
+	defer cmd.SetOut(nil)
+	if err := cmd.Help(); err != nil {
+		t.Fatalf("render %s help: %v", cmd.CommandPath(), err)
+	}
+	return out.String()
+}
+
+func TestDocHelpRendersWriteRules(t *testing.T) {
+	tests := []struct {
+		cmd  *cobra.Command
+		want []string
+	}{
+		{docUpdateCmd, []string{"--base-revision", "refused, with nothing written", "never resend the same body"}},
+		{docEditCmd, []string{"without --replace-all, appears more than once", "this or --old-file is required", "this or --new-file is required"}},
+		{docCommentListCmd, []string{"reserved for people", "multica doc comment add"}},
+		{docCommentAddCmd, []string{"--parent string", "reserved for people"}},
+		{docMoveCmd, []string{`--folder string`, `or "root" for the top level`}},
+		{docFolderCreateCmd, []string{`--parent string`, `or "root" for the top level`}},
+		{docFolderMoveCmd, []string{`--parent string`, `or "root" for the top level`}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.cmd.CommandPath(), func(t *testing.T) {
+			help := renderHelp(t, tt.cmd)
+			for _, want := range tt.want {
+				if !strings.Contains(help, want) {
+					t.Fatalf("%s --help missing %q; rendered:\n%s", tt.cmd.CommandPath(), want, help)
+				}
+			}
+		})
 	}
 }
 
@@ -630,6 +678,22 @@ func TestRunDocCommentListGroupsThreadsAndHidesResolved(t *testing.T) {
 		t.Fatalf("--include-resolved list = %v", ids)
 	}
 
+	setDocFlag(t, docCommentListCmd, "thread", "c-done")
+	out, err = captureStdout(t, func() error { return runDocCommentList(docCommentListCmd, []string{docID}) })
+	if err != nil {
+		t.Fatalf("list --thread: %v", err)
+	}
+	threads = nil
+	_ = json.Unmarshal([]byte(out), &threads)
+	if ids := commentIDs(threads); strings.Join(ids, ",") != "c-done,c-done-reply" {
+		t.Fatalf("--thread list = %v, want only that discussion even when resolved", ids)
+	}
+	setDocFlag(t, docCommentListCmd, "thread", "c-missing")
+	if _, err = captureStdout(t, func() error { return runDocCommentList(docCommentListCmd, []string{docID}) }); err == nil {
+		t.Fatal("--thread with an unknown discussion should fail")
+	}
+	setDocFlag(t, docCommentListCmd, "thread", "")
+
 	setDocFlag(t, docCommentListCmd, "output", "table")
 	out, err = captureStdout(t, func() error { return runDocCommentList(docCommentListCmd, []string{docID}) })
 	if err != nil {
@@ -639,6 +703,40 @@ func TestRunDocCommentListGroupsThreadsAndHidesResolved(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("table missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestRunDocCommentAddRepliesInDiscussion(t *testing.T) {
+	const docID = "11111111-2222-3333-4444-555555555555"
+	var gotPath string
+	var gotBody map[string]any
+	setDocTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "c-new", "parent_id": "c-root", "content": "Done."})
+	})
+
+	setDocFlag(t, docCommentAddCmd, "content", "")
+	setDocFlag(t, docCommentAddCmd, "parent", "")
+	if _, err := captureStdout(t, func() error { return runDocCommentAdd(docCommentAddCmd, []string{docID}) }); err == nil ||
+		!strings.Contains(err.Error(), "--parent") {
+		t.Fatalf("a reply without --parent must fail, got %v", err)
+	}
+
+	setDocFlag(t, docCommentAddCmd, "parent", "c-root")
+	setDocFlag(t, docCommentAddCmd, "content", "Done.")
+	setDocFlag(t, docCommentAddCmd, "output", "json")
+	out, err := captureStdout(t, func() error { return runDocCommentAdd(docCommentAddCmd, []string{docID}) })
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if gotPath != "/api/docs/"+docID+"/comments" || gotBody["parent_id"] != "c-root" || gotBody["content"] != "Done." {
+		t.Fatalf("request = %s %v", gotPath, gotBody)
+	}
+	if !strings.Contains(out, "c-new") {
+		t.Fatalf("output missing the new comment: %s", out)
 	}
 }
 

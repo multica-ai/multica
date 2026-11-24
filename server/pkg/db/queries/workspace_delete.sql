@@ -377,6 +377,9 @@ deleted_activity AS (
 deleted_inbox AS (
     DELETE FROM inbox_item WHERE workspace_id = $1
 ),
+deleted_issue_blockers AS (
+ DELETE FROM issue_blocker WHERE workspace_id=$1
+),
 deleted_issue_dependencies AS (
     DELETE FROM issue_dependency
     WHERE issue_id IN (SELECT id FROM ws_issues)
@@ -661,6 +664,10 @@ WHERE autopilot_quota_reservation.workspace_id = $1;
 -- name: DeleteWorkspaceAutopilotQuotaPeriods :exec
 DELETE FROM autopilot_quota_period
 WHERE autopilot_quota_period.workspace_id = $1;
+
+-- name: DeleteWorkspaceAppToolCallQuotaPeriods :exec
+DELETE FROM app_tool_call_quota_period
+WHERE app_tool_call_quota_period.workspace_id = $1;
 
 -- name: DeleteWorkspaceEntitlementLimitOverages :exec
 DELETE FROM entitlement_limit_overage

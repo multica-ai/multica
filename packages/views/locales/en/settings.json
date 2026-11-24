@@ -1961,7 +1961,8 @@
       "pending": "Waiting",
       "approved": "Approved",
       "rejected": "Declined",
-      "rate_limited": "Rate limited"
+      "rate_limited": "Rate limited",
+      "quota_exceeded": "Monthly limit reached"
     },
     "scopes": {
       "team": "Team account",
@@ -2009,7 +2010,7 @@
       "title_member_ask": "{{name}} asked for a team {{app}} account",
       "waiting_for_admin": "Waiting for an admin",
       "team_note": "Every agent that acts as the team account can use it.",
-      "admins_notified": "Workspace admins were notified in Inbox.",
+      "admins_notified": "A workspace admin was notified in Inbox.",
       "connect_team": "Connect for the team"
     },
     "tools": {
@@ -2058,7 +2059,7 @@
       "personal": "Your account"
     },
     "account_row": {
-      "admins_notified": "admins notified",
+      "admins_notified": "admin notified",
       "withdraw": "Withdraw",
       "decline": "Decline",
       "toast_declined": "Requests declined. Waiting agents continue without it.",

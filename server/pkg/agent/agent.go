@@ -8,6 +8,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -207,6 +208,11 @@ func runContext(ctx context.Context, timeout time.Duration) (context.Context, co
 	}
 	return context.WithCancel(ctx)
 }
+
+// ErrSupplementTurnEnded is returned (wrapped) by a Session.Supplement whose
+// target turn finished before the provider accepted the message. The daemon
+// reports it as turn_ended rather than as a provider rejection.
+var ErrSupplementTurnEnded = errors.New("turn ended before the message was accepted")
 
 // Session represents a running agent execution.
 type Session struct {

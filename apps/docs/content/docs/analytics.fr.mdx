@@ -10,10 +10,11 @@ La page **Statistiques** de la barre latérale regroupe la consommation des agen
 
 ## Organisation de la page
 
-La page a deux onglets, **Consommation** et **Erreurs**, qui partagent les deux filtres en haut à droite :
+La page a deux onglets, **Consommation** et **Erreurs**, qui partagent les filtres en haut à droite :
 
 - **Période** : `1d`, `7d`, `30d` (par défaut), `90d`, `180d`, `365d`. `1d` signifie aujourd'hui, à partir de minuit dans votre fuseau horaire, et non les dernières 24 heures.
 - **Projet** : **Tous les projets** par défaut. Avec un projet sélectionné, seules les exécutions des tâches de ce projet comptent ; celles qui n'appartiennent à aucune tâche, comme les exécutions de chat, sont exclues.
+- **Attribution** (affiché dès que l'espace de travail contient des squads) : **Toute attribution** par défaut. Choisissez **Agents autonomes uniquement** pour voir les exécutions qui ne passent par aucun squad, ou sélectionnez un squad précis pour limiter tous les graphiques, indicateurs et listes des deux onglets à ce squad — y compris les exécutions de son leader, les exécutions déléguées à ses membres et celles des sous-tâches créées par le squad.
 
 Les jours sont découpés selon votre fuseau horaire : celui choisi dans **Paramètres → Préférences → Fuseau horaire**, ou celui du navigateur si vous n'en avez pas choisi. L'en-tête affiche ce fuseau et l'heure de la dernière mise à jour. Le serveur agrège les chiffres toutes les 5 minutes et une page ouverte se rafraîchit au même rythme ; une exécution qui vient de se terminer peut donc mettre quelques minutes à apparaître. Le bouton d'actualisation récupère tout de suite les derniers chiffres.
 
@@ -25,7 +26,7 @@ Quatre chiffres en haut :
 
 | Carte | Contenu |
 | --- | --- |
-| **Coût** | Coût estimé en USD ; voir [Calcul du coût](#calcul-du-coût) |
+| **Coût** | Coût estimé en USD ; voir [Calcul du coût](#calcul-du-coût). Sous **Toute attribution**, indique la part déclenchée par les squads lorsqu'ils ont une consommation ; filtré sur un squad, précise que les membres délégués sont inclus |
 | **Tokens** | Total des tokens d'entrée, de sortie, de lecture et d'écriture de cache, avec l'entrée et la sortie détaillées en dessous |
 | **Temps d'exécution** | Durée cumulée des exécutions terminées, du début à la fin de chacune |
 | **Exécutions** | Exécutions terminées sur la période, et combien ont échoué |
@@ -34,14 +35,17 @@ Le temps d'exécution et le nombre d'exécutions ne comptent que les exécutions
 
 La carte de tendance affiche Tokens, Coût, Temps ou Exécutions sur un même axe temporel, en **Quotidien** ou **Hebdomadaire**. `30d` et `90d` proposent les deux ; `1d` et `7d` sont uniquement quotidiens, `180d` et `365d` uniquement hebdomadaires. Les semaines commencent le lundi, et la semaine en cours, pas encore terminée, est dessinée plus pâle ; au survol, la barre est marquée comme partielle avec le nombre de jours écoulés sur 7.
 
-Le **Classement** liste les tokens, le coût, le temps et les exécutions de chaque agent, triés selon l'une de ces quatre valeurs. Il affiche les 10 premiers ; **Tout afficher** montre le reste. Deux lignes peuvent regrouper plusieurs agents :
+Le **Classement** liste les tokens, le coût, le temps et les exécutions, triés selon l'une de ces quatre valeurs. Il affiche les 10 premiers ; **Tout afficher** montre le reste. Quand l'espace de travail contient des squads et qu'Attribution est sur **Toute attribution**, basculez entre **Agents** et **Squads** :
 
-- **Agents supprimés** : la consommation des agents supprimés depuis, fusionnée en une ligne pour que les lignes s'additionnent toujours aux totaux du haut.
-- **Autres agents** : les agents que vous ne pouvez pas voir, fusionnés en une ligne. Les propriétaires et administrateurs de l'espace de travail voient tous les agents créés par les membres ; un membre ordinaire ne voit pas les agents privés des autres, dont la consommation n'apparaît qu'ici, sans nom.
+- Par **Agents**, deux lignes agrégées maintiennent la concordance avec les totaux du haut :
+  - **Agents supprimés** : la consommation des agents supprimés depuis, fusionnée en une ligne.
+  - **Autres agents** : les agents que vous ne pouvez pas voir, fusionnés en une ligne. Les propriétaires et administrateurs de l'espace de travail voient tous les agents créés par les membres ; un membre ordinaire ne voit pas les agents privés des autres, dont la consommation n'apparaît qu'ici, sans nom.
+- Par **Squads**, chaque squad regroupe les exécutions de son leader et de ses membres délégués ; dépliez une ligne pour voir la répartition par membre (avec le leader indiqué). Deux lignes supplémentaires complètent les totaux : **Agents autonomes (hors Squad)** — épinglée en bas pour les `@`-mentions et assignations directes — et **Squads supprimés**.
+- Lorsque **Attribution** est filtré sur un squad, le classement affiche directement la répartition des membres de ce squad.
 
-Quand une partie des exécutions d'un agent n'a pas transmis de tokens, ses Tokens et son Coût sont précédés de `≥`, et une ligne sous son nom indique combien d'exécutions n'ont pas transmis leur consommation.
+Quand une partie des exécutions d'un agent ou d'un squad n'a pas transmis de tokens, ses Tokens et son Coût sont précédés de `≥`, et une ligne sous son nom indique combien d'exécutions n'ont pas transmis leur consommation.
 
-Dans la démo ci-dessous, une équipe ops a trois agents. Regardez d'abord la tendance du coût, puis qui dépense le plus, et cherchez enfin la cause des échecs dans l'onglet Erreurs.
+La séquence ci-dessous présente un espace de travail avec trois agents (Engineer, Reviewer et Docs) : elle parcourt les tokens quotidiens et le classement, bascule vers le coût, puis examine les échecs dans l'onglet Errors.
 
 <UsageDemo />
 
@@ -53,7 +57,7 @@ Ensuite :
 
 - **Erreurs quotidiennes** (ou hebdomadaires) : chaque couleur d'une barre est une catégorie d'échec.
 - **Répartition des échecs** : tous les échecs de la période, répartis par catégorie. **Afficher les codes d'erreur** affiche à la place les codes de motif d'échec bruts, à rechercher dans les journaux ou à coller dans une tâche.
-- **Principaux fautifs** : classés par nombre d'échecs par défaut, au-delà des 8 premiers derrière un bouton. Classés par **Taux**, les agents qui ont moins de 10 exécutions passent en dernier : sur si peu d'exécutions, un taux ne dit pas grand-chose. Cliquer sur le nom d'un agent ouvre sa page de détail, avec ses exécutions récentes et le motif de chaque échec.
+- **Erreurs par agent** (ou **Erreurs par squad**) : classées par nombre d'échecs par défaut, au-delà des 8 premiers derrière un bouton. Classées par **Taux**, les entrées qui ont moins de 10 exécutions passent en dernier : sur si peu d'exécutions, un taux ne dit pas grand-chose. Quand l'espace de travail contient des squads et qu'Attribution est sur **Toute attribution**, basculez entre **Agents** et **Squads** pour voir les échecs par squad aux côtés d'**Agents autonomes (hors Squad)** et de **Squads supprimés**. Cliquer sur le nom d'un agent ou d'un squad ouvre sa page de détail.
 
 Les codes de motif d'échec se répartissent en sept catégories :
 

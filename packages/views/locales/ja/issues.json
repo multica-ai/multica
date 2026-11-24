@@ -189,7 +189,7 @@
     "section_project": "プロジェクト",
     "section_project_status": "プロジェクトステータス",
     "section_label": "ラベル",
-    "section_relation": "自分との関係",
+    "section_relation": "関連",
     "relation_assigned": "自分が担当",
     "relation_created": "自分が作成",
     "relation_my_agents": "マイエージェントの作業",
@@ -273,7 +273,8 @@
     "advanced_group_match_trailing": "に一致",
     "advanced_group_hint": "このグループの条件は「{{word}}」でつながります",
     "advanced_add_to_group": "グループに追加",
-    "advanced_turn_into_group": "グループに変換"
+    "advanced_turn_into_group": "グループに変換",
+    "relation_blocked": "ブロック中"
   },
   "display": {
     "tooltip": "表示設定",
@@ -598,14 +599,20 @@
       "wakeups": "ウェイクアップを追加",
       "pull_requests": "Pull request を追加",
       "environments": "環境を追加",
-      "wakeups_pull_requests": "ウェイクアップまたは Pull request を追加",
-      "wakeups_environments": "ウェイクアップまたは環境を追加",
-      "pull_requests_environments": "Pull request または環境を追加",
-      "all": "ウェイクアップ、Pull request、環境を追加",
+      "relations": "関係を追加",
+      "pair": "{{first}}または{{second}}を追加",
+      "many": "追加...",
+      "noun": {
+        "wakeups": "ウェイクアップ",
+        "pull_requests": "Pull request",
+        "environments": "環境",
+        "relations": "関係"
+      },
       "menu": {
         "wakeups": "ウェイクアップ",
         "pull_requests": "Pull request",
-        "environments": "環境"
+        "environments": "環境",
+        "relations": "関係"
       }
     },
     "footer": {
@@ -644,6 +651,13 @@
     "squad_leader_no_action_reason": "評価完了: 必要なアクションはありません（{{reason}}）",
     "squad_leader_failed": "評価に失敗しました",
     "squad_leader_failed_reason": "評価に失敗しました: {{reason}}",
+    "squad_handoff_to": "{{name}} に引き継ぎました",
+    "squad_handoff_human": "{{name}} に判断を依頼しました",
+    "squad_handoff_leader": "{{name}} に差し戻しました",
+    "squad_handoff_round": "{{round}} 往復目",
+    "squad_handoff_reason_round_limit": "{{limit}} 往復の上限に到達",
+    "squad_handoff_reason_daily_limit": "本日の引き継ぎ上限に到達",
+    "squad_handoff_reason_run_failed": "実行失敗",
     "coalesced_badge": "×{{count}}",
     "activity_count_other": "アクティビティ {{count}} 件",
     "show_more_activities_other": "アクティビティをさらに {{count}} 件表示",
@@ -846,6 +860,7 @@
   },
   "agent_live": {
     "is_working": "{{name}} が作業中",
+    "is_working_round": "{{label}} · {{round}} 往復目",
     "is_queued": "{{name}} が待機中",
     "is_waiting_local_directory": "{{name}} がローカルディレクトリを待機中",
     "queued_elapsed_prefix": "{{elapsed}} 待機中",
@@ -1067,6 +1082,8 @@
     "remove_parent_issue": "親タスクを解除",
     "remove_parent_issue_success": "親タスクを解除しました",
     "add_sub_issue": "サブタスクを追加...",
+    "add_blocker": "他のタスクを待つ...",
+    "add_blocking": "他のタスクをブロック...",
     "delete_issue": "タスクを削除",
     "mark_duplicate": "重複としてマーク...",
     "open_in_new_window": "新しいウィンドウで開く"
@@ -1936,7 +1953,8 @@
       "pending": "確認待ち",
       "approved": "承認済み",
       "rejected": "却下",
-      "rate_limited": "レート制限"
+      "rate_limited": "レート制限",
+      "quota_exceeded": "月間上限に到達"
     }
   },
   "environments": {
@@ -2046,5 +2064,38 @@
     "focus_failed": "{{name}} に切り替えられませんでした",
     "retry": "再試行",
     "dismiss": "閉じる"
+  },
+  "relations": {
+    "title": "関係",
+    "add": "関係を追加",
+    "wait_title": "他のタスクを待つ",
+    "block_title": "他のタスクをブロック",
+    "blocked_by": "ブロック元",
+    "blocking": "ブロック中",
+    "stage_tag": "ステージ",
+    "stage_tag_hint": "親タスクのステージで決まります",
+    "add_blocker_hint": "終了後にこのタスクが始まります",
+    "add_blocking_hint": "このタスクの終了後に始まります",
+    "mark_duplicate_hint": "このタスクはキャンセルされます",
+    "blocking_picker_hint": "このタスクが終了するまで開始できないタスクを選択してください。"
+  },
+  "waiting": {
+    "remove": "{{identifier}} を削除",
+    "count": "{{count}} 件のタスクを待機中",
+    "count_other": "{{count}} 件のタスクを待機中",
+    "hint": "すべて終了すると、担当者が自動的に開始するか通知を受け取ります。",
+    "hint_backlog": "このタスクはバックログにあるため、すべて終了しても自動では開始しません。バックログから移動すると開始します。",
+    "picker_hint": "このタスクの前に終了する必要があるタスクを選択してください。",
+    "restricted": "閲覧できない先行タスク {{count}} 件",
+    "ended": "待機中のタスクが終了しました",
+    "marker_title": "{{count}} 件のタスクにブロックされています",
+    "marker_title_other": "{{count}} 件のタスクにブロックされています",
+    "marker_ended": "{{finished}}/{{total}} 件終了",
+    "marker_more": "ほか {{count}} 件",
+    "marker_more_other": "ほか {{count}} 件",
+    "marker_auto_start": "すべて終了すると {{name}} が自動的に開始します。",
+    "marker_notify": "すべて終了すると {{name}} に通知されます。",
+    "marker_unavailable": "{{name}} は現在実行できないため、すべて終了しても自動では開始しません。",
+    "marker_unassigned": "担当者がいないため、すべて終了しても自動では開始しません。"
   }
 }

@@ -70,6 +70,8 @@
     "retry_with_context": "保留上下文重试",
     "edit_advanced": "在完整表单中编辑",
     "autopilot_quota_exceeded_body": "当前周期的 {{limit}} 次自动化执行额度已用完。在 {{resetAt}} 重置、升级套餐或加购之前，后续自动化执行将不会启动。",
+    "app_tool_calls_quota_exceeded_body": "本工作区本月的 {{limit}} 次应用调用已用完。在 {{resetAt}} 重置、升级套餐或增加席位之前，智能体无法调用应用工具。",
+    "app_tool_calls_quota_action": "管理账单",
     "project_owner_joined_body": "{{name}} 是工作区所有者，已把自己加入这个私有项目，现在可以看到其中的任务、评论和附件。",
     "open_project": "打开项目",
     "open_app": "打开应用",
@@ -109,12 +111,14 @@
     "children_done": "子任务已全部结束",
     "project_owner_joined": "所有者加入了项目",
     "autopilot_quota_exceeded": "自动化执行次数已用完",
+    "app_tool_calls_quota_exceeded": "应用调用次数已用完",
     "app_action_requested": "等待你确认",
     "app_action_reminder": "确认即将过期",
     "app_connect_requested": "请连接应用",
     "app_action_result": "应用操作结果",
     "doc_comment": "文档有新评论",
-    "doc_mentioned": "在文档中提到了你"
+    "doc_mentioned": "在文档中提到了你",
+    "blockers_done": "等待的任务已结束"
   },
   "labels": {
     "set_status_to": "状态设为",
@@ -130,6 +134,7 @@
     "created_with_agent": "通过智能体创建：{{identifier}}",
     "failed_with_detail": "失败：{{detail}}",
     "autopilot_quota_blocked": "执行已被阻止：额度已用完",
+    "app_tool_calls_quota_blocked": "本月智能体无法再调用应用工具",
     "children_done_stage": "第 {{stage}} 阶段的子任务已全部结束"
   },
   "toasts": {

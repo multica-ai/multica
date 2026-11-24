@@ -72,6 +72,8 @@
     "retry_with_context": "Retry with context",
     "edit_advanced": "Open full form",
     "autopilot_quota_exceeded_body": "This workspace has reached its limit of {{limit}} autopilot runs for the current period. Further autopilot runs will not start until the allowance resets {{resetAt}}, or until the workspace upgrades or buys more runs.",
+    "app_tool_calls_quota_exceeded_body": "This workspace has used its {{limit}} app calls for this month. Agents can't run app tools until the allowance resets {{resetAt}}, or until the workspace upgrades or adds seats.",
+    "app_tool_calls_quota_action": "Manage billing",
     "project_owner_joined_body": "{{name}} is a workspace owner and added themselves to this private project. They can now see its issues, comments, and attachments.",
     "open_project": "Open project",
     "open_app": "Open app",
@@ -111,12 +113,14 @@
     "children_done": "Sub-issues finished",
     "project_owner_joined": "Owner joined project",
     "autopilot_quota_exceeded": "Autopilot run limit reached",
+    "app_tool_calls_quota_exceeded": "App call limit reached",
     "app_action_requested": "Needs your confirmation",
     "app_action_reminder": "Confirmation expiring soon",
     "app_connect_requested": "Connect an app",
     "app_action_result": "App action result",
     "doc_comment": "New comment on a doc",
-    "doc_mentioned": "Mentioned in a doc"
+    "doc_mentioned": "Mentioned in a doc",
+    "blockers_done": "Waiting tasks ended"
   },
   "labels": {
     "set_status_to": "Set status to",
@@ -132,6 +136,7 @@
     "created_with_agent": "Created with agent: {{identifier}}",
     "failed_with_detail": "Failed: {{detail}}",
     "autopilot_quota_blocked": "Run blocked because the limit was reached",
+    "app_tool_calls_quota_blocked": "Agents can no longer run app tools this month",
     "children_done_stage": "Stage {{stage}}'s sub-issues finished"
   },
   "toasts": {

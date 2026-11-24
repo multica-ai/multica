@@ -548,7 +548,8 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | | `search <query>` | 스킬 검색 | |
 | | `files list/upsert/delete <skill-id>` | 스킬 내부 파일 관리 | `list`: `--with-content`; `upsert` / `delete`: `--base-revision`(내용이 변경되었으면 HTTP 409로 덮어쓰기 거부) |
 | | `label list/add/remove <skill-id>` | 스킬 라벨 관리 | `add` / `remove`: `<label-id>`에 전체 UUID 또는 짧은 접두사 사용 가능 |
-| `squad` | `list/get/create/update/delete` | 스쿼드 관리(`delete`는 보관) | |
+| `squad` | `list/get/create/update/delete` | 스쿼드 관리(`delete`는 보관) | `update`: `--name`, `--description`, `--instructions`, `--leader`, `--avatar-url`, `--handoff-mode`(`leader` 또는 `direct`, [협업 방식](/squads#협업-방식) 참고) |
+| | `briefs <squad>` | 각 에이전트 멤버가 받는 스쿼드 내용 보기. 스쿼드를 관리할 권한 필요 | `--agent`(이름 또는 ID) |
 | | `member list/add/set-role/remove` | 스쿼드 멤버 관리 | |
 | | `activity <issue-id> <outcome>` | 리더 평가 기록 | |
 | `chat` | `history`, `thread [id]` | 에이전트가 현재 처리 중인 외부 채팅 대화 읽기 | `--limit`, `--before` |

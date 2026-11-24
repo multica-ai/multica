@@ -262,16 +262,19 @@ function QuickActionRow({
 }
 
 /**
- * The quick actions behind one icon button, for the Inbox's floating group.
- * Nothing configured renders nothing.
+ * The quick actions behind one icon button, for the Inbox's floating group and
+ * the issue page header. Nothing configured renders nothing.
  */
 export function QuickActionsMenu({
   issueId,
   onRun,
+  side,
 }: {
   issueId: string;
   /** Called as an action starts, with whether its comment was posted. */
   onRun?: (action: QuickAction, ran: Promise<boolean>) => void;
+  /** Where the menu and its tooltip open: up from the Inbox's floating group, down from the header. */
+  side: "top" | "bottom";
 }) {
   const { t } = useT("issues");
   const wsId = useCurrentWorkspace()?.id ?? "";
@@ -288,14 +291,14 @@ export function QuickActionsMenu({
   return (
     <>
       <DropdownMenu>
-        <TooltipHint label={label} side="top">
+        <TooltipHint label={label} side={side}>
           <DropdownMenuTrigger
             render={<Button variant="ghost" size="icon-sm" aria-label={label} className="shrink-0" disabled={running} />}
           >
             {running ? <Loader2 className="animate-spin text-muted-foreground" /> : <Zap className="text-muted-foreground" />}
           </DropdownMenuTrigger>
         </TooltipHint>
-        <DropdownMenuContent side="top" align="start" className="w-auto min-w-56 max-w-80">
+        <DropdownMenuContent side={side} align="start" className="w-auto min-w-56 max-w-80">
           {actions.map((action) => (
             <DropdownMenuItem
               key={action.id}

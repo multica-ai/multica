@@ -120,7 +120,7 @@ Multica は、こうしたエージェントとチームメイトを 1 つのワ
 </p>
 
 - **[実行ログ](https://multica.ai/docs/ja/tasks) →** すべてのツール呼び出し、コマンド、エラーをタイムスタンプ付きで再生できます。
-- **[実行中のエージェントに指示を出す](https://multica.ai/docs/ja/providers#割り込みへの対応) →** 作業中に返信すると、メッセージは次の実行ではなく今の実行に届きます。現在は Claude Code、Codex、Cursor Agent、Grok、Kiro、Pi、Antigravity に対応しています。
+- **[実行中のエージェントに指示を出す](https://multica.ai/docs/ja/providers#割り込みへの対応) →** 作業中に返信すると、メッセージは次の実行ではなく今の実行に届きます。現在は Claude Code、Codex、Cursor Agent、Grok、Hermes、Kiro、Pi、Antigravity に対応しています。
 - **利用状況の分析 →** 各実行にかかったコストを、エージェント別・タスク別に確認できます。
 - **[レビューゲート](https://multica.ai/docs/ja/issues) →** 作業は main に直接入らず、まずレビューに回ります。何をリリースするかはあなたが決めます。
 - **[インボックス](https://multica.ai/docs/ja/inbox) →** 細かなステップごとではなく、エージェントが判断を求めてきたときだけ通知が届きます。

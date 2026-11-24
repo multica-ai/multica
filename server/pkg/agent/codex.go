@@ -2472,6 +2472,10 @@ func (c *codexClient) activeTurnID() string {
 type pendingRPC struct {
 	ch     chan rpcResult
 	method string
+	// command marks a Hermes `/steer` sent as its own session/prompt beside
+	// the primary one. Its response settles only the command, never the
+	// turn's stop reason or usage.
+	command bool
 }
 
 type rpcResult struct {

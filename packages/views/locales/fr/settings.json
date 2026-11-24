@@ -1961,7 +1961,8 @@
       "pending": "En attente",
       "approved": "Approuvé",
       "rejected": "Refusé",
-      "rate_limited": "Limite atteinte"
+      "rate_limited": "Limite atteinte",
+      "quota_exceeded": "Limite mensuelle atteinte"
     },
     "scopes": {
       "team": "Compte d'équipe",
@@ -1978,7 +1979,7 @@
       "personal": "Votre compte"
     },
     "account_row": {
-      "admins_notified": "admins prévenus",
+      "admins_notified": "admin prévenu",
       "withdraw": "Retirer",
       "decline": "Refuser",
       "toast_declined": "Demandes refusées. Les agents en attente continuent sans.",
@@ -2039,7 +2040,7 @@
       "title_member_ask": "{{name}} a demandé un compte d'équipe {{app}}",
       "waiting_for_admin": "En attente d'un admin",
       "team_note": "Tous les agents qui agissent avec le compte d'équipe pourront l'utiliser.",
-      "admins_notified": "Les admins de l'espace de travail ont été prévenus dans la boîte de réception.",
+      "admins_notified": "Un admin de l'espace de travail a été prévenu dans la boîte de réception.",
       "connect_team": "Connecter pour l'équipe"
     },
     "tools": {

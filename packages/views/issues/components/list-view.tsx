@@ -9,7 +9,6 @@ import { Accordion } from "@base-ui/react/accordion";
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
   useDroppable,
   useSensor,
   useSensors,
@@ -39,6 +38,7 @@ import {
   insertIdByPosition,
   issueMatchesGroup,
   getMoveUpdates,
+  IssueCardPointerSensor,
 } from "../utils/drag-utils";
 import type { BoardColumnGroup } from "./board-column";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
@@ -181,7 +181,7 @@ function ListViewImpl({
   );
 
   const sensors = useSensors(
-    useSensor(PointerSensor, {
+    useSensor(IssueCardPointerSensor, {
       activationConstraint: { distance: 5 },
     })
   );

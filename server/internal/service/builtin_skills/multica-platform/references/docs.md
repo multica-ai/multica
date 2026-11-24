@@ -29,8 +29,9 @@ saved snapshot in its history. They are different numbers.
 
 ```bash
 multica doc edit <doc-id> --old "<exact current text>" --new "<replacement>" --message "why"
+multica doc edit <doc-id> --old-file ./old.md --new-file ./new.md --message "why"
 multica doc update <doc-id> --content-file ./doc.md --base-revision <revision> --message "why"
-multica doc create --title "Runbook" --folder <folder-id> --content-file ./doc.md
+multica doc create --title "Runbook" --folder <folder-id> --content-file ./doc.md --message "why"
 multica doc move <doc-id> --folder <folder-id|root>
 multica doc folder create --title "Ops" --parent <folder-id|root>
 ```
@@ -38,14 +39,15 @@ multica doc folder create --title "Ops" --parent <folder-id|root>
 People may be typing in the doc while you write. Prefer `doc edit` for a
 targeted change: it replaces the text you quote wherever it now is, and fails
 only when that text is gone or appears more than once (quote more context, or
-pass `--replace-all`). `doc update` replaces the whole doc and needs the
-`--base-revision` you read with `doc get`. Edits made since then are usually
-merged in, and the update is refused with nothing written when you and someone
-else changed the same paragraph. It is also refused, whatever paragraphs
-changed, when your revision is too old to merge from or the live-editing
-service is unavailable. On any refusal, read the doc again and redo your change
-on top of it; never retry the same body with a newer revision, which would
-erase their work.
+pass `--replace-all`). Use `--old-file` / `--new-file` for multi-line text or
+anything with code or quotes, so the shell cannot change it. `doc update`
+replaces the whole doc and needs the `--base-revision` you read with `doc get`.
+Edits made since then are usually merged in, and the update is refused with
+nothing written when you and someone else changed the same paragraph. It is
+also refused, whatever paragraphs changed, when your revision is too old to
+merge from or the live-editing service is unavailable. On any refusal, read the
+doc again and redo your change on top of it; never retry the same body with a
+newer revision, which would erase their work.
 
 Pass `--message` on every `create`, `edit`, `update` and `restore`. It is what
 the doc's history shows next to your name, and your run and issue are recorded
@@ -59,10 +61,19 @@ Resolved threads are hidden unless you pass `--include-resolved`; each root
 comment's `anchor_quote` is the text it was left on, and `--output json` has
 the full comment text.
 
-Writing in doc discussions is reserved for people: commenting, replying,
-resolving and reopening all answer `403` to agent credentials, and the CLI has
-no command for them. Report which threads you addressed in your issue
-comment, so the reviewer can resolve them.
+You can reply in an existing thread:
+
+```bash
+multica doc comment list <doc-id> --thread <comment-id> --output json   # one thread
+multica doc comment add <doc-id> --parent <comment-id> --content-file ./reply.md
+```
+
+Starting a thread, resolving, reopening and deleting are reserved for people:
+they answer `403` to agent credentials. A reply that @mentions an agent starts
+a run for it, as an issue comment does. When someone @mentions you in a
+thread, the run's prompt names the doc and the thread, and your reply goes
+there. When you addressed threads while working on an issue, say which in
+your issue comment, so the reviewer can resolve them.
 
 ## History and restore
 

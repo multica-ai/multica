@@ -3403,6 +3403,18 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					"agent_id", uuidToString(task.AgentID),
 				)
 			}
+		} else if resp.Agent != nil {
+			// A member's run on its squad's issue carries the squad context the
+			// leader already gets: roster, rules, its role, and how to hand off.
+			if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
+				if brief := squadMemberBriefingForClaim(r.Context(), h.Queries, issue, agent); brief != "" {
+					if strings.TrimSpace(resp.Agent.Instructions) == "" {
+						resp.Agent.Instructions = brief
+					} else {
+						resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + brief
+					}
+				}
+			}
 		}
 
 		projectCtx, projectErr := h.resolveClaimProjectContext(r.Context(), issue.ProjectID, issue.WorkspaceID)
@@ -4104,6 +4116,14 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}
 		}
 		projectCtx.applyTo(&resp)
+	}
+
+	// Doc discussion run (MUL-9933): the workspace comes from the task
+	// context; the doc, discussion and resume session from their own rows.
+	if task.DocID.Valid {
+		if failure := h.applyDocCommentClaim(r, task, &resp, runtimeID, runtimeWorkspaceID); failure != nil {
+			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, failure
+		}
 	}
 
 	// Quick-create task: no issue / chat / autopilot link — workspace and
@@ -6825,6 +6845,17 @@ func (h *Handler) loadTaskForUser(w http.ResponseWriter, r *http.Request) (db.Ag
 	// page being unreachable.
 	if !h.requireTaskVisible(w, r, wsID, task, http.StatusNotFound, "task not found") {
 		return db.AgentTaskQueue{}, false
+	}
+	// A doc discussion run has no project to gate it, and every doc reader
+	// sees its status. Its transcript follows the agent's own visibility, as
+	// the discussion's run list does (MUL-9933).
+	if task.DocID.Valid {
+		agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{ID: task.AgentID, WorkspaceID: parseUUID(wsID)})
+		actorType, actorID := h.resolveActor(r, requestUserID(r), wsID)
+		if err != nil || !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, wsID) {
+			writeError(w, http.StatusNotFound, "task not found")
+			return db.AgentTaskQueue{}, false
+		}
 	}
 	return task, true
 }

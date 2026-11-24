@@ -11,7 +11,7 @@ export const ISSUE_SIDEBAR_SECTIONS = [
   "wakeups",
   "plugins",
   "parent",
-  "duplicates",
+  "relations",
   "pull_requests",
   "environments",
   "deliverables",

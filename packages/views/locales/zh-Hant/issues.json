@@ -189,7 +189,7 @@
     "section_project": "專案",
     "section_project_status": "專案狀態",
     "section_label": "標籤",
-    "section_relation": "與我的關係",
+    "section_relation": "任務關係",
     "relation_assigned": "分配給我的",
     "relation_created": "我建立的",
     "relation_my_agents": "我的 AI 代理在做",
@@ -273,7 +273,8 @@
     "advanced_group_match_trailing": "條件",
     "advanced_group_hint": "組內條件之間用「{{word}}」連接",
     "advanced_add_to_group": "新增到條件組",
-    "advanced_turn_into_group": "轉為條件組"
+    "advanced_turn_into_group": "轉為條件組",
+    "relation_blocked": "被阻塞"
   },
   "display": {
     "tooltip": "顯示設定",
@@ -598,14 +599,20 @@
       "wakeups": "新增喚醒",
       "pull_requests": "新增 Pull Request",
       "environments": "新增環境",
-      "wakeups_pull_requests": "新增喚醒或 Pull Request",
-      "wakeups_environments": "新增喚醒或環境",
-      "pull_requests_environments": "新增 Pull Request 或環境",
-      "all": "新增喚醒、Pull Request 或環境",
+      "relations": "新增關係",
+      "pair": "新增{{first}}或{{second}}",
+      "many": "新增...",
+      "noun": {
+        "wakeups": "喚醒",
+        "pull_requests": "Pull Request",
+        "environments": "環境",
+        "relations": "關係"
+      },
       "menu": {
         "wakeups": "喚醒",
         "pull_requests": "Pull Request",
-        "environments": "環境"
+        "environments": "環境",
+        "relations": "關係"
       }
     },
     "footer": {
@@ -644,6 +651,13 @@
     "squad_leader_no_action_reason": "已評估：無需操作（{{reason}}）",
     "squad_leader_failed": "評估失敗",
     "squad_leader_failed_reason": "評估失敗：{{reason}}",
+    "squad_handoff_to": "交給了 {{name}}",
+    "squad_handoff_human": "請 {{name}} 決定",
+    "squad_handoff_leader": "交回 {{name}}",
+    "squad_handoff_round": "第 {{round}} 輪",
+    "squad_handoff_reason_round_limit": "已來回 {{limit}} 輪",
+    "squad_handoff_reason_daily_limit": "今日交接已達上限",
+    "squad_handoff_reason_run_failed": "執行失敗",
     "coalesced_badge": "×{{count}}",
     "activity_count_other": "{{count}} 條動態",
     "show_more_activities_other": "展開更早 {{count}} 條動態",
@@ -846,6 +860,7 @@
   },
   "agent_live": {
     "is_working": "{{name}} 在工作",
+    "is_working_round": "{{label}} · 第 {{round}} 輪",
     "is_queued": "{{name}} 排隊中",
     "is_waiting_local_directory": "{{name}} 正在等待本地目錄",
     "queued_elapsed_prefix": "已排隊 {{elapsed}}",
@@ -1067,6 +1082,8 @@
     "remove_parent_issue": "移除父任務",
     "remove_parent_issue_success": "已移除父任務",
     "add_sub_issue": "新增子任務...",
+    "add_blocker": "等待其他任務...",
+    "add_blocking": "阻塞其他任務...",
     "delete_issue": "刪除任務",
     "mark_duplicate": "標記為重複...",
     "open_in_new_window": "在新視窗中開啟"
@@ -1936,7 +1953,8 @@
       "pending": "等待確認",
       "approved": "已核准",
       "rejected": "已拒絕",
-      "rate_limited": "已限流"
+      "rate_limited": "已限流",
+      "quota_exceeded": "已達每月上限"
     }
   },
   "environments": {
@@ -2046,5 +2064,38 @@
     "focus_failed": "無法切到 {{name}}",
     "retry": "重試",
     "dismiss": "忽略"
+  },
+  "relations": {
+    "title": "關係",
+    "add": "新增關係",
+    "wait_title": "等待其他任務",
+    "block_title": "阻塞其他任務",
+    "blocked_by": "被阻塞",
+    "blocking": "正在阻塞",
+    "stage_tag": "階段",
+    "stage_tag_hint": "由父任務的階段決定",
+    "add_blocker_hint": "它們結束後，本任務才開工",
+    "add_blocking_hint": "本任務結束後，它們才開工",
+    "mark_duplicate_hint": "本任務會被取消",
+    "blocking_picker_hint": "選擇一個要等本任務結束才能開工的任務。"
+  },
+  "waiting": {
+    "remove": "移除 {{identifier}}",
+    "count": "等待 {{count}} 個任務",
+    "count_other": "等待 {{count}} 個任務",
+    "hint": "全部結束後，負責人將自動開始或收到通知。",
+    "hint_backlog": "任務在待規劃中，全部結束後不會自動開始，移出待規劃後才會開始。",
+    "picker_hint": "選擇一個必須先結束的任務。",
+    "restricted": "{{count}} 個無權查看的前置任務",
+    "ended": "等待的任務已結束",
+    "marker_title": "被 {{count}} 個任務阻塞",
+    "marker_title_other": "被 {{count}} 個任務阻塞",
+    "marker_ended": "已結束 {{finished}}/{{total}}",
+    "marker_more": "還有 {{count}} 個",
+    "marker_more_other": "還有 {{count}} 個",
+    "marker_auto_start": "阻塞結束後 {{name}} 自動開始。",
+    "marker_notify": "阻塞結束後通知 {{name}}。",
+    "marker_unavailable": "{{name}} 目前無法執行，阻塞結束後不會自動開始。",
+    "marker_unassigned": "未指派負責人，阻塞結束後不會自動開始。"
   }
 }

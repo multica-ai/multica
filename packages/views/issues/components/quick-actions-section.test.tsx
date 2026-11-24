@@ -273,13 +273,13 @@ describe("QuickActionsMenu", () => {
 
   it("renders nothing before the workspace has any actions", () => {
     listData = [];
-    renderWithI18n(<QuickActionsMenu issueId="i-1" />);
+    renderWithI18n(<QuickActionsMenu issueId="i-1" side="top" />);
     expect(screen.queryByRole("button", { name: "Quick actions" })).not.toBeInTheDocument();
   });
 
   it("lists the active actions and runs one, saying what came of it", async () => {
     runMock.mockResolvedValue(outcome("queued"));
-    renderWithI18n(<QuickActionsMenu issueId="i-1" />);
+    renderWithI18n(<QuickActionsMenu issueId="i-1" side="top" />);
 
     fireEvent.click(screen.getByRole("button", { name: "Quick actions" }));
     expect(screen.queryByRole("menuitem", { name: /Old one/ })).not.toBeInTheDocument();
@@ -292,7 +292,7 @@ describe("QuickActionsMenu", () => {
   it("explains a refusal in a dialog, as the sidebar does", async () => {
     reasonCode = "invocation_not_allowed";
     runMock.mockRejectedValue(new Error("forbidden"));
-    renderWithI18n(<QuickActionsMenu issueId="i-1" />);
+    renderWithI18n(<QuickActionsMenu issueId="i-1" side="top" />);
 
     fireEvent.click(screen.getByRole("button", { name: "Quick actions" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: /Code Review/ }));

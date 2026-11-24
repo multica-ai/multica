@@ -189,7 +189,7 @@
     "section_project": "项目",
     "section_project_status": "项目状态",
     "section_label": "标签",
-    "section_relation": "与我的关系",
+    "section_relation": "任务关系",
     "relation_assigned": "分配给我的",
     "relation_created": "我创建的",
     "relation_my_agents": "我的智能体在做",
@@ -273,7 +273,8 @@
     "advanced_group_match_trailing": "条件",
     "advanced_group_hint": "组内条件之间用\"{{word}}\"连接",
     "advanced_add_to_group": "添加到条件组",
-    "advanced_turn_into_group": "转为条件组"
+    "advanced_turn_into_group": "转为条件组",
+    "relation_blocked": "被阻塞"
   },
   "display": {
     "tooltip": "显示设置",
@@ -598,14 +599,20 @@
       "wakeups": "添加唤醒",
       "pull_requests": "添加 Pull Request",
       "environments": "添加环境",
-      "wakeups_pull_requests": "添加唤醒或 Pull Request",
-      "wakeups_environments": "添加唤醒或环境",
-      "pull_requests_environments": "添加 Pull Request 或环境",
-      "all": "添加唤醒、Pull Request 或环境",
+      "relations": "添加关系",
+      "pair": "添加{{first}}或{{second}}",
+      "many": "添加...",
+      "noun": {
+        "wakeups": "唤醒",
+        "pull_requests": "Pull Request",
+        "environments": "环境",
+        "relations": "关系"
+      },
       "menu": {
         "wakeups": "唤醒",
         "pull_requests": "Pull Request",
-        "environments": "环境"
+        "environments": "环境",
+        "relations": "关系"
       }
     },
     "footer": {
@@ -644,6 +651,13 @@
     "squad_leader_no_action_reason": "已评估：无需操作（{{reason}}）",
     "squad_leader_failed": "评估失败",
     "squad_leader_failed_reason": "评估失败：{{reason}}",
+    "squad_handoff_to": "交给了 {{name}}",
+    "squad_handoff_human": "请 {{name}} 决定",
+    "squad_handoff_leader": "交回 {{name}}",
+    "squad_handoff_round": "第 {{round}} 轮",
+    "squad_handoff_reason_round_limit": "已来回 {{limit}} 轮",
+    "squad_handoff_reason_daily_limit": "今日交接已达上限",
+    "squad_handoff_reason_run_failed": "运行失败",
     "coalesced_badge": "×{{count}}",
     "activity_count_other": "{{count}} 条动态",
     "show_more_activities_other": "展开更早 {{count}} 条动态",
@@ -846,6 +860,7 @@
   },
   "agent_live": {
     "is_working": "{{name}} 在工作",
+    "is_working_round": "{{label}} · 第 {{round}} 轮",
     "is_queued": "{{name}} 排队中",
     "is_waiting_local_directory": "{{name}} 正在等待本地目录",
     "queued_elapsed_prefix": "已排队 {{elapsed}}",
@@ -1067,6 +1082,8 @@
     "remove_parent_issue": "移除父任务",
     "remove_parent_issue_success": "已移除父任务",
     "add_sub_issue": "添加子任务...",
+    "add_blocker": "等待其他任务...",
+    "add_blocking": "阻塞其他任务...",
     "delete_issue": "删除任务",
     "mark_duplicate": "标记为重复...",
     "open_in_new_window": "在新窗口中打开"
@@ -1936,7 +1953,8 @@
       "pending": "等待确认",
       "approved": "已批准",
       "rejected": "已拒绝",
-      "rate_limited": "已限流"
+      "rate_limited": "已限流",
+      "quota_exceeded": "已达月度上限"
     }
   },
   "environments": {
@@ -2046,5 +2064,38 @@
     "focus_failed": "无法切到 {{name}}",
     "retry": "重试",
     "dismiss": "忽略"
+  },
+  "relations": {
+    "title": "关系",
+    "add": "添加关系",
+    "wait_title": "等待其他任务",
+    "block_title": "阻塞其他任务",
+    "blocked_by": "被阻塞",
+    "blocking": "正在阻塞",
+    "stage_tag": "阶段",
+    "stage_tag_hint": "由父任务的阶段决定",
+    "add_blocker_hint": "它们结束后，本任务才开工",
+    "add_blocking_hint": "本任务结束后，它们才开工",
+    "mark_duplicate_hint": "本任务会被取消",
+    "blocking_picker_hint": "选择一个要等本任务结束才能开工的任务。"
+  },
+  "waiting": {
+    "remove": "移除 {{identifier}}",
+    "count": "等待 {{count}} 个任务",
+    "count_other": "等待 {{count}} 个任务",
+    "hint": "全部结束后，负责人将自动开工或收到通知。",
+    "hint_backlog": "任务在待规划中，全部结束后不会自动开始，移出待规划后才会开始。",
+    "picker_hint": "选择一个必须先结束的任务。",
+    "restricted": "{{count}} 个无权查看的前置任务",
+    "ended": "等待的任务已结束",
+    "marker_title": "被 {{count}} 个任务阻塞",
+    "marker_title_other": "被 {{count}} 个任务阻塞",
+    "marker_ended": "已结束 {{finished}}/{{total}}",
+    "marker_more": "还有 {{count}} 个",
+    "marker_more_other": "还有 {{count}} 个",
+    "marker_auto_start": "阻塞结束后 {{name}} 自动开始。",
+    "marker_notify": "阻塞结束后通知 {{name}}。",
+    "marker_unavailable": "{{name}} 当前无法运行，阻塞结束后不会自动开始。",
+    "marker_unassigned": "未指派负责人，阻塞结束后不会自动开始。"
   }
 }

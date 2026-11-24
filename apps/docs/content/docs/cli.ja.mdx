@@ -548,7 +548,8 @@ CSV 形式からの移行: 2 つのファイルを添付する場合は `--attac
 | | `search <query>` | スキルを検索 | |
 | | `files list/upsert/delete <skill-id>` | スキル内のファイルを管理 | `list`: `--with-content`；`upsert` / `delete`: `--base-revision`（更新済みなら HTTP 409 で上書きを拒否） |
 | | `label list/add/remove <skill-id>` | スキルのラベルを管理 | `add` / `remove`: `<label-id>` は完全な UUID または短いプレフィックス |
-| `squad` | `list/get/create/update/delete` | スクワッドを管理（`delete` はアーカイブ） | |
+| `squad` | `list/get/create/update/delete` | スクワッドを管理（`delete` はアーカイブ） | `update`：`--name`、`--description`、`--instructions`、`--leader`、`--avatar-url`、`--handoff-mode`（`leader` または `direct`。[連携方法](/squads#連携方法)を参照） |
+| | `briefs <squad>` | 各エージェントメンバーが受け取るスクワッドの内容を表示。スクワッドを管理できる権限が必要 | `--agent`（名前または ID） |
 | | `member list/add/set-role/remove` | スクワッドのメンバーを管理 | |
 | | `activity <issue-id> <outcome>` | リーダーの評価を記録 | |
 | `chat` | `history`、`thread [id]` | エージェントが現在処理している外部チャットセッションを読み取り | `--limit`、`--before` |

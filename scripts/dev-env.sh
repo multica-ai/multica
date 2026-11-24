@@ -52,14 +52,17 @@ DEV_TMPDIR="${MULTICA_DEV_TMPDIR:-$HOME/.multica/dev-tmp}"
 # silently outranks server_url in a saved profile config. Every long-lived child
 # is launched without them, so a local daemon cannot authenticate its local
 # token against the production API — which fails as a bare 401 and reads like a
-# product bug. PATH is never stripped: the daemon resolves agent CLI paths by
-# forking the login shell.
+# product bug. MULTICA_TASK_ENV_FILE goes too: a warm pooled session exports it,
+# and the CLI reloads MULTICA_TOKEN / MULTICA_TASK_ID from that file on every
+# start, replacing the local token with the task's production one. PATH is
+# never stripped: the daemon resolves agent CLI paths by forking the login
+# shell.
 CLEAN_ENV=(env
   -u MULTICA_SERVER_URL -u MULTICA_TOKEN -u MULTICA_WORKSPACE_ID
   -u MULTICA_DAEMON_PORT -u MULTICA_AGENT_ID -u MULTICA_AGENT_NAME
   -u MULTICA_TASK_ID -u MULTICA_TASK_SLOT
   -u MULTICA_TASK_CONFIG_ROOT -u MULTICA_TASK_WORKSPACES_ROOT
-  -u MULTICA_WORKSPACES_ROOT)
+  -u MULTICA_WORKSPACES_ROOT -u MULTICA_TASK_ENV_FILE)
 
 # ---------------------------------------------------------------- output ----
 

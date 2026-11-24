@@ -1961,7 +1961,8 @@
       "pending": "En espera",
       "approved": "Aprobada",
       "rejected": "Rechazada",
-      "rate_limited": "Límite de llamadas alcanzado"
+      "rate_limited": "Límite de llamadas alcanzado",
+      "quota_exceeded": "Límite mensual alcanzado"
     },
     "scopes": {
       "team": "Cuenta del equipo",
@@ -1978,7 +1979,7 @@
       "personal": "Tu cuenta"
     },
     "account_row": {
-      "admins_notified": "administradores avisados",
+      "admins_notified": "administrador avisado",
       "withdraw": "Retirar",
       "decline": "Rechazar",
       "toast_declined": "Solicitudes rechazadas. Los agentes en espera siguen sin ella.",
@@ -2039,7 +2040,7 @@
       "title_member_ask": "{{name}} pidió una cuenta del equipo de {{app}}",
       "waiting_for_admin": "Esperando a un administrador",
       "team_note": "Todos los agentes que actúan con la cuenta del equipo podrán usarla.",
-      "admins_notified": "Se avisó a los administradores en la bandeja de entrada.",
+      "admins_notified": "Se avisó a un administrador en la bandeja de entrada.",
       "connect_team": "Conectar para el equipo"
     },
     "tools": {
