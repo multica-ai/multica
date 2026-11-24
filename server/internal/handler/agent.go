@@ -406,6 +406,8 @@ type AgentTaskResponse struct {
 	// cannot see (MUL-8472): only identity, status, timing and usage remain.
 	Restricted bool `json:"restricted,omitempty"`
 
+	LocalWorktreeResumeSource *protocol.LocalWorktreeResumeSource `json:"local_worktree_resume_source,omitempty"` // daemon claim only
+
 	StartClaimSupported      bool                   `json:"start_claim_supported,omitempty"`
 	CancelledByCommentChange bool                   `json:"cancelled_by_comment_change,omitempty"`
 	CancelledBy              *TaskCancellationActor `json:"cancelled_by,omitempty"`

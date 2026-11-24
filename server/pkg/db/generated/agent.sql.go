@@ -4580,6 +4580,80 @@ func (q *Queries) GetLatestTaskRolloutMissing(ctx context.Context, arg GetLatest
 	return session_rollout_missing, err
 }
 
+const getLocalWorktreeResumeSource = `-- name: GetLocalWorktreeResumeSource :one
+WITH history AS (
+    SELECT t.id, t.session_id, t.durable_work_dir, t.branch_name, t.created_at,
+           COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) AS terminal_at
+    FROM agent_task_queue t
+    JOIN agent a ON a.id = t.agent_id
+    WHERE a.workspace_id = $1
+      AND t.runtime_id = $2
+      AND t.agent_id = $3
+      AND t.work_dir = $4::text
+      AND t.status IN ('completed', 'failed', 'cancelled')
+      AND COALESCE(t.context->>'type', '') <> 'triage'
+      AND (
+        t.issue_id = $5::uuid
+        OR (
+          t.chat_session_id = $6::uuid
+          AND (
+            $7::bigint IS NULL
+            OR COALESCE(t.channel_context_revision, 1) = $7::bigint
+          )
+        )
+      )
+), source AS (
+    SELECT durable_work_dir, branch_name
+    FROM history
+    WHERE session_id = $8::text
+    ORDER BY terminal_at DESC, id DESC
+    LIMIT 1
+)
+SELECT origin.id AS root_task_id, source.durable_work_dir, source.branch_name
+FROM source
+CROSS JOIN LATERAL (
+    SELECT id FROM history
+    ORDER BY created_at, id
+    LIMIT 1
+) AS origin
+WHERE NULLIF(source.durable_work_dir, '') IS NOT NULL
+`
+
+type GetLocalWorktreeResumeSourceParams struct {
+	WorkspaceID            pgtype.UUID `json:"workspace_id"`
+	RuntimeID              pgtype.UUID `json:"runtime_id"`
+	AgentID                pgtype.UUID `json:"agent_id"`
+	WorkDir                string      `json:"work_dir"`
+	IssueID                pgtype.UUID `json:"issue_id"`
+	ChatSessionID          pgtype.UUID `json:"chat_session_id"`
+	ChannelContextRevision pgtype.Int8 `json:"channel_context_revision"`
+	SessionID              string      `json:"session_id"`
+}
+
+type GetLocalWorktreeResumeSourceRow struct {
+	RootTaskID     pgtype.UUID `json:"root_task_id"`
+	DurableWorkDir pgtype.Text `json:"durable_work_dir"`
+	BranchName     pgtype.Text `json:"branch_name"`
+}
+
+// Resolve provenance for the exact session/cwd pair picked by the claim. The
+// cwd names the original task's root even after later turns have used it.
+func (q *Queries) GetLocalWorktreeResumeSource(ctx context.Context, arg GetLocalWorktreeResumeSourceParams) (GetLocalWorktreeResumeSourceRow, error) {
+	row := q.db.QueryRow(ctx, getLocalWorktreeResumeSource,
+		arg.WorkspaceID,
+		arg.RuntimeID,
+		arg.AgentID,
+		arg.WorkDir,
+		arg.IssueID,
+		arg.ChatSessionID,
+		arg.ChannelContextRevision,
+		arg.SessionID,
+	)
+	var i GetLocalWorktreeResumeSourceRow
+	err := row.Scan(&i.RootTaskID, &i.DurableWorkDir, &i.BranchName)
+	return i, err
+}
+
 const getWorkspaceAgentActivity30d = `-- name: GetWorkspaceAgentActivity30d :many
 SELECT
     atq.agent_id,

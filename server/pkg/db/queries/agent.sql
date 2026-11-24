@@ -1107,6 +1107,46 @@ SET status = 'completed', completed_at = now(), result = $2,
 WHERE id = $1 AND status = 'running'
 RETURNING *;
 
+-- name: GetLocalWorktreeResumeSource :one
+-- Resolve provenance for the exact session/cwd pair picked by the claim. The
+-- cwd names the original task's root even after later turns have used it.
+WITH history AS (
+    SELECT t.id, t.session_id, t.durable_work_dir, t.branch_name, t.created_at,
+           COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) AS terminal_at
+    FROM agent_task_queue t
+    JOIN agent a ON a.id = t.agent_id
+    WHERE a.workspace_id = sqlc.arg(workspace_id)
+      AND t.runtime_id = sqlc.arg(runtime_id)
+      AND t.agent_id = sqlc.arg(agent_id)
+      AND t.work_dir = sqlc.arg(work_dir)::text
+      AND t.status IN ('completed', 'failed', 'cancelled')
+      AND COALESCE(t.context->>'type', '') <> 'triage'
+      AND (
+        t.issue_id = sqlc.narg(issue_id)::uuid
+        OR (
+          t.chat_session_id = sqlc.narg(chat_session_id)::uuid
+          AND (
+            sqlc.narg(channel_context_revision)::bigint IS NULL
+            OR COALESCE(t.channel_context_revision, 1) = sqlc.narg(channel_context_revision)::bigint
+          )
+        )
+      )
+), source AS (
+    SELECT durable_work_dir, branch_name
+    FROM history
+    WHERE session_id = sqlc.arg(session_id)::text
+    ORDER BY terminal_at DESC, id DESC
+    LIMIT 1
+)
+SELECT origin.id AS root_task_id, source.durable_work_dir, source.branch_name
+FROM source
+CROSS JOIN LATERAL (
+    SELECT id FROM history
+    ORDER BY created_at, id
+    LIMIT 1
+) AS origin
+WHERE NULLIF(source.durable_work_dir, '') IS NOT NULL;
+
 -- name: GetLastTaskSession :one
 -- Find resume context for an agent/issue from completed, failed, or cancelled
 -- execution tasks. Manual rerun uses its exact source task instead; its fresh

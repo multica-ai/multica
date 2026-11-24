@@ -8843,6 +8843,31 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 		if localAssignment.UsesWorktree() {
 			prepParams.LocalWorktree = &execenv.LocalWorktreeParams{LocalPath: localAssignment.AbsPath}
+			if source := task.LocalWorktreeResumeSource; source != nil && task.PriorSessionID != "" &&
+				provider == "antigravity" && agent.AntigravityUsesACP(agentCustomArgs) &&
+				sameExistingDir(source.LocalPath, localAssignment.RealPath) {
+				owner := execenv.EnvRootOwner{WorkspaceID: task.WorkspaceID, TaskID: source.RootTaskID}
+				resumeRoot, resumeErr := execenv.LocalWorktreeResumeRoot(d.cfg.WorkspacesRoot, task.PriorWorkDir, owner)
+				if resumeErr == nil {
+					// Register before opening the root so GC either finishes
+					// first or leaves this checkout alone through Finalize.
+					unmark := d.markActiveEnvRoot(resumeRoot)
+					var claim *execenv.EnvRootClaim
+					claim, resumeErr = execenv.ClaimLocalWorktreeResumeRoot(d.cfg.WorkspacesRoot, resumeRoot, owner)
+					if resumeErr == nil {
+						defer unmark()
+						defer claim.Release()
+						prepParams.LocalWorktree.Resume = &execenv.LocalWorktreeResume{
+							RootDir: claim.RootDir(), WorkDir: task.PriorWorkDir, Branch: source.Branch,
+						}
+					} else {
+						unmark()
+					}
+				}
+				if resumeErr != nil {
+					taskLog.Info("local_directory: prior ACP worktree unavailable", "error", resumeErr)
+				}
+			}
 			// Take the per-path mutex for the snapshot alone, then hand it
 			// straight back — long enough to read a consistent tree, short
 			// enough that worktree tasks still overlap for the run itself.
