@@ -18,7 +18,12 @@ export function useChatFork(
 ) {
   const { t } = useT("chat");
   const queryClient = useQueryClient();
-  const [pending, setPending] = useState<{ sessionId: string; taskId: string; workspaceId: string } | null>(null);
+  const [pending, setPending] = useState<{
+    sessionId: string;
+    taskId: string;
+    workspaceId: string;
+    toastId: ReturnType<typeof toast.info>;
+  } | null>(null);
   const { data: runtimes } = useQuery({
     ...runtimeListOptions(workspaceId),
     enabled: enabled && !!workspaceId && !!agent?.runtime_id && session?.status === "active",
@@ -35,8 +40,8 @@ export function useChatFork(
       return fork;
     },
     onSuccess: ({ task_id }, sessionId) => {
-      setPending({ sessionId, taskId: task_id, workspaceId });
-      toast.info(t(($) => $.header.fork_pending));
+      const toastId = toast.info(t(($) => $.header.fork_pending));
+      setPending({ sessionId, taskId: task_id, workspaceId, toastId });
     },
     onError: () => toast.error(t(($) => $.header.fork_failed)),
   });
@@ -59,16 +64,17 @@ export function useChatFork(
     const fork = status.data;
     if (status.isError || fork?.status === "failed" || fork?.status === "cancelled" || fork?.status === "unknown") {
       setPending(null);
-      toast.error(t(($) => $.header.fork_failed));
+      toast.error(t(($) => $.header.fork_failed), { id: current.toastId });
     } else if (fork?.status === "completed") {
       setPending(null);
       if (!fork.chat_id) {
-        toast.error(t(($) => $.header.fork_failed));
+        toast.error(t(($) => $.header.fork_failed), { id: current.toastId });
         return;
       }
       const childId = fork.chat_id;
       void queryClient.invalidateQueries({ queryKey: chatKeys.sessions(workspaceId) });
       toast.success(t(($) => $.header.fork_ready), {
+        id: current.toastId,
         action: {
           label: t(($) => $.header.open_fork),
           onClick: () => onOpen(childId),
