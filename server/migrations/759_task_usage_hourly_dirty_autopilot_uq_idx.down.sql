@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS uq_task_usage_hourly_dirty_autopilot_key_idx;

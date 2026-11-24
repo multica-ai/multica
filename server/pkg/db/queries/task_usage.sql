@@ -206,6 +206,41 @@ WHERE workspace_id = $1
 GROUP BY agent_id, LOWER(provider), model
 ORDER BY agent_id, LOWER(provider), model;
 
+-- name: ListDashboardUsageBySource :many
+-- Daily per-(date, agent, autopilot, provider, model) token aggregates from
+-- `task_usage_hourly`, so the Usage page can split manual runs from autopilot
+-- runs. autopilot_id is NULL for manual runs (and for buckets rolled up
+-- before the autopilot dimension existed). Same viewing-tz day slicing and
+-- project / squad scope as ListDashboardUsageDaily; provider + model stay so
+-- the client can price the rows.
+SELECT
+    DATE(bucket_hour AT TIME ZONE sqlc.arg('tz')::text) AS date,
+    agent_id,
+    autopilot_id,
+    LOWER(provider) AS provider,
+    model,
+    SUM(input_tokens)::bigint        AS input_tokens,
+    SUM(output_tokens)::bigint       AS output_tokens,
+    SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
+    SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
+    SUM(cost_usd_ticks)::bigint                                          AS cost_usd_ticks,
+    SUM(COALESCE(uncosted_input_tokens, input_tokens))::bigint           AS uncosted_input_tokens,
+    SUM(COALESCE(uncosted_output_tokens, output_tokens))::bigint         AS uncosted_output_tokens,
+    SUM(COALESCE(uncosted_cache_read_tokens, cache_read_tokens))::bigint AS uncosted_cache_read_tokens,
+    SUM(COALESCE(uncosted_cache_write_tokens, cache_write_tokens))::bigint AS uncosted_cache_write_tokens,
+    SUM(task_count)::int             AS task_count
+FROM task_usage_hourly
+WHERE workspace_id = $1
+  AND bucket_hour >= sqlc.arg('since')::timestamptz
+  AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
+  AND (
+      sqlc.arg('squad_scope')::text = ''
+      OR (sqlc.arg('squad_scope')::text = 'standalone' AND squad_id IS NULL)
+      OR (sqlc.arg('squad_scope')::text = 'squad' AND squad_id = sqlc.narg('squad_id')::uuid)
+  )
+GROUP BY DATE(bucket_hour AT TIME ZONE sqlc.arg('tz')::text), agent_id, autopilot_id, LOWER(provider), model
+ORDER BY DATE(bucket_hour AT TIME ZONE sqlc.arg('tz')::text) DESC, agent_id, autopilot_id NULLS FIRST, LOWER(provider), model;
+
 -- name: ListDashboardUsageBySquad :many
 -- Per-(squad, agent, provider, model) token aggregates from `task_usage_hourly`.
 -- Preserves agent_id so the UI can render both squad-overall totals and inline

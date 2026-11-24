@@ -2131,6 +2131,8 @@ type TaskUsageHourly struct {
 	UncostedCacheWriteTokens pgtype.Int8 `json:"uncosted_cache_write_tokens"`
 	// Triggering squad UUID (from COALESCE(agent_task_queue.usage_squad_id, agent_task_queue.squad_id)). NULL for standalone non-squad runs and legacy pre-backfill buckets.
 	SquadID pgtype.UUID `json:"squad_id"`
+	// Autopilot the run belongs to: autopilot_run.autopilot_id of the task, else issue.origin_id when the issue was created by an autopilot. NULL for manual runs and buckets rolled up before this column existed.
+	AutopilotID pgtype.UUID `json:"autopilot_id"`
 }
 
 type TaskUsageHourlyDirty struct {
@@ -2143,6 +2145,7 @@ type TaskUsageHourlyDirty struct {
 	Model       string             `json:"model"`
 	EnqueuedAt  pgtype.Timestamptz `json:"enqueued_at"`
 	SquadID     pgtype.UUID        `json:"squad_id"`
+	AutopilotID pgtype.UUID        `json:"autopilot_id"`
 }
 
 type TaskUsageHourlyRollupState struct {
