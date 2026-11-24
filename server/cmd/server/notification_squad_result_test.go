@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -58,6 +61,14 @@ func TestNotification_SquadResult(t *testing.T) {
 				fx.f.Task(t, fx.outsideID, testutil.Cols{
 					"runtime_id": fx.runtimeID, "issue_id": issueID, "delegated_from_task_id": leaderTask,
 				})
+			}},
+		{name: "leader waits on a wakeup", leader: true, result: false,
+			followUp: func(t *testing.T, issueID, leaderTask string) {
+				leaderWakeup(t, fx, issueID, leaderTask, true)
+			}},
+		{name: "leader's wakeup already disabled", leader: true, result: true,
+			followUp: func(t *testing.T, issueID, leaderTask string) {
+				leaderWakeup(t, fx, issueID, leaderTask, false)
 			}},
 		{name: "leader woken by a person", leader: true, result: false,
 			trigger: func(t *testing.T, issueID string) string {
@@ -117,6 +128,18 @@ func TestNotification_SquadResult(t *testing.T) {
 			}
 		})
 	}
+}
+
+// leaderWakeup records a one-time wakeup the leader run left on issueID, the
+// way `multica issue wakeup create` does from inside that run.
+func leaderWakeup(t *testing.T, fx squadHandoffFixture, issueID, leaderTask string, enabled bool) {
+	t.Helper()
+	fx.f.Insert(t, "issue_wakeup", testutil.Cols{
+		"id": util.UUIDToString(dbid.NewV7()), "workspace_id": testWorkspaceID, "issue_id": issueID,
+		"agent_id": fx.leaderID, "created_by": testUserID, "source_task_id": leaderTask,
+		"instruction": "check CI", "kind": "at", "mode": "once",
+		"next_fire_at": time.Now().Add(time.Hour), "enabled": enabled,
+	})
 }
 
 func publishAgentComment(bus *events.Bus, issueID, commentID, authorID, content string) {

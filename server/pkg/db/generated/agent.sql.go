@@ -9263,6 +9263,9 @@ SELECT (
     ) OR EXISTS (
         SELECT 1 FROM agent_task_queue t
         WHERE t.issue_id = $1::uuid AND t.delegated_from_task_id = $2::uuid
+    ) OR EXISTS (
+        SELECT 1 FROM issue_wakeup w
+        WHERE w.issue_id = $1::uuid AND w.source_task_id = $2::uuid AND w.enabled
     )
 )::boolean AS passed_on
 `
@@ -9272,9 +9275,9 @@ type TaskPassedWorkOnParams struct {
 	TaskID  pgtype.UUID `json:"task_id"`
 }
 
-// Whether a run posted a comment on its issue or started another agent run
-// there: a squad leader run that did neither ended its squad's chain of
-// handoffs.
+// Whether a run posted a comment on its issue, started another agent run
+// there, or left an enabled wakeup waiting on it: a squad leader run that did
+// none of these ended its squad's chain of handoffs.
 func (q *Queries) TaskPassedWorkOn(ctx context.Context, arg TaskPassedWorkOnParams) (bool, error) {
 	row := q.db.QueryRow(ctx, taskPassedWorkOn, arg.IssueID, arg.TaskID)
 	var passed_on bool

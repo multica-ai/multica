@@ -12,15 +12,16 @@ import (
 )
 
 // deliverSquadResult runs when an agent run completes. A squad leader run that
-// a handoff woke, and that neither posted a comment nor started another agent
-// run on its issue, is where the squad stopped passing the work on: the
-// handoff that woke it is the squad's result (MUL-10054). Members who muted
-// squad handoffs never received it, so it is delivered to them now as a
-// new_comment row marked inbox.SquadResultDetail; Deliver keeps it from
-// everyone else, who already have the handoff's own row.
+// a handoff woke, and that neither posted a comment, started another agent run
+// nor left a wakeup waiting on its issue, is where the squad stopped passing
+// the work on: the handoff that woke it is the squad's result (MUL-10054).
+// Members who muted squad handoffs never received it, so it is delivered to
+// them now as a new_comment row marked inbox.SquadResultDetail; Deliver keeps
+// it from everyone else, who already have the handoff's own row.
 //
-// A leader that dispatched again keeps the chain going, and one that wrote to
-// people has delivered its own comment, so neither delivers the handoff.
+// A leader that dispatched again or is waiting (for CI, say) keeps the chain
+// going, and one that wrote to people has delivered its own comment, so none
+// of them delivers the handoff.
 func deliverSquadResult(ctx context.Context, queries *db.Queries, bus *events.Bus, e events.Event) {
 	payload, ok := e.Payload.(map[string]any)
 	if !ok {
@@ -39,7 +40,7 @@ func deliverSquadResult(ctx context.Context, queries *db.Queries, bus *events.Bu
 		ID:          task.TriggerCommentID,
 		WorkspaceID: parseUUID(e.WorkspaceID),
 	})
-	if err != nil || handoff.AuthorType != "agent" || handoff.AuthorID == task.AgentID || handoff.IssueID != task.IssueID {
+	if err != nil || handoff.DeletedAt.Valid || handoff.AuthorType != "agent" || handoff.AuthorID == task.AgentID || handoff.IssueID != task.IssueID {
 		return
 	}
 	handoffID := util.UUIDToString(handoff.ID)
