@@ -295,7 +295,7 @@ describe("AppsPage › Accounts", () => {
     expect(within(team).getAllByText(/^(Notion|Linear|Slack)$/).map((el) => el.textContent)).toEqual(["Notion", "Linear", "Slack"]);
     expect(screen.getByRole("tab", { name: /Accounts/ })).toHaveTextContent("5");
     expect(within(row("team", "notion")).getAllByText("Needs reconnecting").length).toBeGreaterThan(0);
-    expect(within(row("team", "linear")).getAllByText(/Requested · admins notified/).length).toBeGreaterThan(0);
+    expect(within(row("team", "linear")).getAllByText(/Requested · admin notified/).length).toBeGreaterThan(0);
     expect(row("team", "linear")).toHaveTextContent("Name a2 needs it");
     // A member asks an admin; nothing connects an account apart from an app.
     expect(within(row("team", "notion")).getByRole("button", { name: "Ask an admin" })).toBeInTheDocument();
