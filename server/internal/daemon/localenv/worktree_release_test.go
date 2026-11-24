@@ -56,10 +56,10 @@ func TestEnvironmentReleasePreservesPostDeliveryEdits(t *testing.T) {
 			// Exercise the persisted cleanup record too, rather than only an in-memory token.
 			restored := NewManager(f.m.dir, f.m.logger)
 			restored.now = f.m.now
+			f.useManager(restored)
 			if err := restored.Load(); err != nil {
 				t.Fatal(err)
 			}
-			f.m = restored
 			f.stop("web")
 			f.m.Tick()
 			snapshot := f.m.Snapshot()
@@ -241,10 +241,10 @@ func TestEditedWorktreeCleanupHasPersistentRetryDelay(t *testing.T) {
 	}
 	restored := NewManager(f.m.dir, f.m.logger)
 	restored.now = f.m.now
+	f.useManager(restored)
 	if err := restored.Load(); err != nil {
 		t.Fatal(err)
 	}
-	f.m = restored
 	f.m.Tick()
 	if got := events.warningCount(); got != first {
 		t.Errorf("Load bypassed persisted retry delay: %d -> %d", first, got)
@@ -327,10 +327,10 @@ func TestSharedWorktreeRetrySurvivesLoadAndOldRecords(t *testing.T) {
 	}
 	restored := NewManager(f.m.dir, f.m.logger)
 	restored.now = f.m.now
+	f.useManager(restored)
 	if err := restored.Load(); err != nil {
 		t.Fatal(err)
 	}
-	f.m = restored
 	for range 4 {
 		f.m.Tick()
 	}
@@ -421,9 +421,74 @@ func TestLegacyWorktreeCleanupRecordGetsFirstAttempt(t *testing.T) {
 	}
 	fixtureWrite(t, filepath.Join(f.wt.Path, "delivered.txt"), "agent delivery\n")
 	restored := NewManager(f.m.dir, f.m.logger)
+	f.useManager(restored)
 	if err := restored.Load(); err != nil {
 		t.Fatal(err)
 	}
-	f.m = restored
 	f.eventuallyRemoved()
+}
+
+// A real recovered Manager can finish Stop while the original Manager still
+// has a release blocked on Git. Fixture destruction must collect the latter.
+func TestRecoveredEnvironmentCollectsOriginalManagerRelease(t *testing.T) {
+	f := newWorktreeFixture(t, "24h")
+	original := f.m
+	events := &worktreeEvents{waits: make(chan struct{}, 10)}
+	original.logger = slog.New(slog.NewTextHandler(events, nil))
+	env := f.start("web")
+
+	// Recover the live record before delivery gives the original Manager its
+	// cleanup token. Neither Manager's records nor waiter are discarded.
+	restored := NewManager(original.dir, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	f.useManager(restored)
+	if err := restored.Load(); err != nil {
+		t.Fatal(err)
+	}
+	fixtureWrite(t, filepath.Join(f.wt.Path, "delivered.txt"), "agent delivery\n")
+	out, err := original.FinalizeWorktree(f.wt)
+	if err != nil || out.RetainedWorktree == nil {
+		t.Fatalf("Finalize: %+v %v", out, err)
+	}
+	tip := fixtureGit(t, f.repo, "rev-parse", out.Branch)
+	fixtureWrite(t, filepath.Join(f.wt.Path, "delivered.txt"), "later review edits\n")
+
+	unlock := holdWorktreeGit(t, f)
+	f.auditProcess(env)
+	stopped, err := restored.Stop(f.task, "web")
+	if err != nil || stopped.State != StateStopped || groupAlive(env.pgid) {
+		t.Fatalf("recovered Stop: %+v %v", stopped, err)
+	}
+	select {
+	case <-events.waits:
+	case <-time.After(10 * time.Second):
+		t.Fatal("original Manager did not reach the real Git lock")
+	}
+	collected := make(chan struct{})
+	go func() {
+		f.joinWorktreeReleases(true)
+		close(collected)
+	}()
+	// Always release the real lock and join our collector, including on Fatal.
+	defer func() { unlock(); <-collected }()
+	select {
+	case <-collected:
+		t.Fatal("fixture collection ignored the original Manager's blocked release")
+	case <-time.After(100 * time.Millisecond):
+	}
+	unlock()
+	select {
+	case <-collected:
+	case <-time.After(10 * time.Second):
+		t.Fatal("original Manager release was not collected after unlocking Git")
+	}
+	if got, err := os.ReadFile(filepath.Join(f.wt.Path, "delivered.txt")); err != nil || string(got) != "later review edits\n" {
+		t.Fatalf("original release lost review edits: %q %v", got, err)
+	}
+	if !strings.Contains(fixtureGit(t, f.repo, "worktree", "list", "--porcelain"), f.wt.Path) {
+		t.Fatal("edited checkout unregistered")
+	}
+	if got := fixtureGit(t, f.repo, "rev-parse", out.Branch); got != tip {
+		t.Fatal("delivered branch rewritten")
+	}
+	t.Log("COLLECTED original Manager release after recovered Stop and real Git unlock")
 }

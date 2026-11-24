@@ -25,13 +25,14 @@ import (
 )
 
 type worktreeFixture struct {
-	t      *testing.T
-	repo   string
-	root   string
-	wt     *execenv.LocalWorktree
-	m      *Manager
-	task   Task
-	params execenv.LocalWorktreeParams
+	t        *testing.T
+	repo     string
+	root     string
+	wt       *execenv.LocalWorktree
+	m        *Manager
+	managers []*Manager
+	task     Task
+	params   execenv.LocalWorktreeParams
 }
 
 func fixtureGit(t *testing.T, dir string, args ...string) string {
@@ -83,31 +84,84 @@ func newWorktreeFixture(t *testing.T, ttl string) *worktreeFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &worktreeFixture{t: t, repo: repo, root: root, wt: wt, m: NewManager(t.TempDir(), logger), task: Task{TaskID: params.TaskID, IssueID: params.ConversationID, WorkspaceID: params.WorkspaceID, RootDir: root}, params: params}
+	f := &worktreeFixture{t: t, repo: repo, root: root, wt: wt, task: Task{TaskID: params.TaskID, IssueID: params.ConversationID, WorkspaceID: params.WorkspaceID, RootDir: root}, params: params}
+	// Register collectors after every TempDir, before any Manager can Load or
+	// Start work. Each owned Manager gets a separate stop callback; those run
+	// first, including when another cleanup callback calls Fatal.
+	dir := t.TempDir()
+	t.Cleanup(func() { f.joinWorktreeReleases(true) })
+	f.useManager(NewManager(dir, logger))
 	// Stand in for dependencies installed inside the actual checkout.
 	fixtureWrite(t, filepath.Join(wt.Path, ".dependencies/package/file"), "installed dependency\n")
-	// Cleanup runs in reverse registration order: stop live environments first,
-	// then collect releases even for already-stopped records before TempDir removal.
-	t.Cleanup(f.collectWorktreeReleases)
-	t.Cleanup(func() {
-		for _, e := range f.m.List(f.task) {
-			if e.State == StateRunning || e.State == StateStarting {
-				f.stop(e.Name)
-			}
-		}
-	})
 	return f
 }
 
-// Collect only release attempts already reserved for this checkout. A stopped
-// environment can still be writing Git objects, and retention also covers those
-// in-flight operations; neither state is a completion notification.
+// Keep the original Manager alive across recovery and shared-manager tests.
+// Ownership is registered before Load, which can itself start release work.
+func (f *worktreeFixture) useManager(m *Manager) {
+	for _, owned := range f.managers {
+		if owned == m {
+			f.m = m
+			return
+		}
+	}
+	f.managers = append(f.managers, m)
+	f.m = m
+	f.t.Cleanup(func() {
+		for _, env := range m.List(f.task) {
+			if !f.ownsDirectory(env.Dir) || (env.State != StateRunning && env.State != StateStarting) {
+				continue
+			}
+			// Separate callbacks also collect the remaining environments if one
+			// process audit or Stop fails with Fatal.
+			f.t.Cleanup(func() {
+				f.auditProcess(env)
+				if _, err := m.StopID(strings.TrimPrefix(env.Key, "config:")); err != nil {
+					f.t.Error(err)
+				}
+			})
+		}
+	})
+}
+
+func (f *worktreeFixture) ownsDirectory(dir string) bool {
+	return dir == f.wt.Path || dir == f.repo
+}
+
+// Final cleanup joins every owned leader. Mid-test collection selects only
+// exited groups, so a partial Stop never waits for a shared API
+// that is still serving. Group exit selects the waiter to join; it is not the
+// completion signal. The original leaderDone and a subsequent lock acquisition
+// cover wait's endLocked/persist/release work, even after f.m was replaced.
 func (f *worktreeFixture) collectWorktreeReleases() {
+	f.joinWorktreeReleases(false)
+}
+
+func (f *worktreeFixture) joinWorktreeReleases(all bool) {
 	f.t.Helper()
-	f.m.mu.Lock()
-	pending := f.m.cleanupDoneLocked(checkoutPath(f.wt.Path))
-	f.m.mu.Unlock()
-	waitWorktrees(pending)
+	for _, m := range f.managers {
+		m.mu.Lock()
+		var leaders []<-chan struct{}
+		for _, e := range m.envs {
+			if f.ownsDirectory(e.rec.RepoRoot) && e.leaderDone != nil && (all || !groupAlive(e.rec.PID)) {
+				leaders = append(leaders, e.leaderDone)
+			}
+		}
+		m.mu.Unlock()
+		waitWorktrees(leaders)
+		// leaderDone closes under mu before wait finishes its record writes.
+		m.mu.Lock()
+		m.mu.Unlock()
+	}
+	// Every original waiter above has now reserved its release, if any.
+	// Take each Manager's real operation notifications under its mutex and
+	// wait outside it. Do not Tick, retry or manufacture a release here.
+	for _, m := range f.managers {
+		m.mu.Lock()
+		pending := m.cleanupDoneLocked(checkoutPath(f.wt.Path))
+		m.mu.Unlock()
+		waitWorktrees(pending)
+	}
 }
 
 func (f *worktreeFixture) start(name string) Environment {
@@ -176,6 +230,7 @@ func (f *worktreeFixture) stop(name string) {
 	if stopped.State != StateStopped || groupAlive(env.pgid) {
 		f.t.Fatalf("Stop did not collect group %d: %+v", env.pgid, stopped)
 	}
+	f.collectWorktreeReleases()
 	f.t.Logf("STOP owned=%d state=%s", env.pgid, stopped.State)
 }
 
@@ -261,10 +316,10 @@ func TestDeclaredEnvironmentsShareFinalizedWorktree(t *testing.T) {
 			f.present(api)
 			// Restore from actual persisted records, without starting a daemon.
 			restored := NewManager(f.m.dir, f.m.logger)
+			f.useManager(restored)
 			if err := restored.Load(); err != nil {
 				t.Fatal(err)
 			}
-			f.m = restored
 			f.present(api)
 			f.stop("api")
 			f.removed()
@@ -327,7 +382,7 @@ func TestWorktreeFinalizeIgnoresUnrelatedEnvironment(t *testing.T) {
 	f := newWorktreeFixture(t, "24h")
 	other := newWorktreeFixture(t, "24h")
 	// One manager supervises two independent checkouts.
-	other.m = f.m
+	other.useManager(f.m)
 	e := other.start("web")
 	fixtureWrite(t, filepath.Join(f.wt.Path, "delivered.txt"), "task delivery\n")
 	out, err := f.m.FinalizeWorktree(f.wt)
@@ -673,7 +728,7 @@ func TestWorktreeGitWaitDoesNotBlockOtherRepositories(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			a := newWorktreeFixture(t, "24h")
 			b := newWorktreeFixture(t, "1m")
-			b.m = a.m
+			b.useManager(a.m)
 			advance := fixtureClock(b) // Installed before any probes exist.
 			fixtureWrite(t, filepath.Join(a.wt.Path, "delivered.txt"), "task delivery\n")
 			events := &worktreeEvents{waits: make(chan struct{}, 10)}
