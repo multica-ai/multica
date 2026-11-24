@@ -99,6 +99,6 @@
       "delete": "No se pudo eliminar el comentario",
       "resolve": "No se pudo actualizar el comentario"
     },
-    "run_waiting_runtime": "Esperando a que el runtime vuelva a estar en línea"
+    "run_waiting_retry": "Esperando para reintentar"
   }
 }

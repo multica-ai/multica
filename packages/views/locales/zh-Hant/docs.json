@@ -98,6 +98,6 @@
       "delete": "評論刪除失敗",
       "resolve": "無法更新評論"
     },
-    "run_waiting_runtime": "等待執行環境重新上線"
+    "run_waiting_retry": "等待重試"
   }
 }

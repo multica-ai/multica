@@ -6,6 +6,15 @@ LEFT JOIN project p ON p.id=i.project_id AND p.workspace_id=i.workspace_id
 WHERE b.workspace_id = sqlc.arg('workspace_id') AND b.issue_id=ANY(sqlc.arg('issue_ids')::uuid[])
 ORDER BY b.issue_id,b.via,i.number;
 
+-- name: ListIssueDependents :many
+-- The reverse of ListIssueBlockers: the issues that wait on one issue.
+SELECT i.id,i.number,i.title,i.status,i.project_id,COALESCE(p.visibility='private',false)::boolean AS private,b.via,
+ (i.status IN ('done','cancelled') OR EXISTS(SELECT 1 FROM issue_status s WHERE s.workspace_id=i.workspace_id AND s.key=i.status AND s.category IN ('done','closed'))) AS closed
+FROM effective_issue_blocker b JOIN issue i ON i.id=b.issue_id AND i.workspace_id=b.workspace_id
+LEFT JOIN project p ON p.id=i.project_id AND p.workspace_id=i.workspace_id
+WHERE b.workspace_id = sqlc.arg('workspace_id') AND b.blocker_issue_id = sqlc.arg('issue_id')
+ORDER BY b.via,i.number;
+
 -- name: HasOpenIssueBlockers :one
 SELECT issue_has_open_blockers(sqlc.arg('workspace_id')::uuid,sqlc.arg('issue_id')::uuid)::boolean AS blocked;
 

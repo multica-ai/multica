@@ -17,8 +17,8 @@ import { UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { Virtuoso, type ListRange, type VirtuosoHandle } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink, useBackOrReplace } from "../../navigation";
-import { IssueBlockersSection } from "./issue-blockers";
-import { IssueDuplicateBanner, IssueDuplicatesSection, isDuplicateIssue } from "./issue-duplicates";
+import { IssueRelationsSection } from "./issue-blockers";
+import { IssueDuplicateBanner, isDuplicateIssue } from "./issue-duplicates";
 import {
   AlertTriangle,
   Calendar,
@@ -79,7 +79,7 @@ import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar"
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { COMPOSER_DOCK_GAP, ComposerDock, JumpToLatestButton } from "./composer-dock";
-import { InboxIssueActions } from "./inbox-issue-actions";
+import { InboxIssueActions, IssueBarActions } from "./inbox-issue-actions";
 import { useInboxSelectionStore, type InboxTransitionDirection } from "@multica/core/inbox/selection-store";
 import { useReducedMotion } from "@multica/core/appearance";
 import { PropRow } from "../../common/prop-row";
@@ -3571,8 +3571,8 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
           </div></IssueSidebarCollapsible>
         </div>
     ),
-    waiting: <IssueBlockersSection issue={issue} />,
-    duplicates: <IssueDuplicatesSection issueId={issue.id} />,
+    // Blockers, the issues this one blocks, and duplicates (MUL-10050).
+    relations: <IssueRelationsSection issue={issue} />,
     // Pull requests — unavailable when the workspace disables the PR sidebar
     // (or the GitHub master switch is off). Backend data is kept either
     // way so re-enabling restores the section instantly.
@@ -3623,7 +3623,7 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
             ? GUEST_SIDEBAR_SECTIONS.has(section)
             : (section !== "pull_requests" || githubSettings.prSidebar) && (section !== "plugins" || pluginsEnabled),
       )}
-      addRow={<IssueSidebarAddRow items={sidebarAddables.filter((item) => item !== sidebarReveal)} onPick={setSidebarReveal} />}
+      addRow={<IssueSidebarAddRow items={sidebarAddables.filter((item) => item !== sidebarReveal)} onPick={setSidebarReveal} issue={issue} />}
       footer={guest ? undefined : <IssueSidebarFooter issue={issue} />}
     />
   );
@@ -3775,6 +3775,8 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
     />
   ) : null;
 
+  const showHeaderIssueActions = !guest && !inbox && !isPeek && !isMobile && !sidebarOpen;
+
   const detailContent = (
     <CurrentIssueRenderContextProvider value={currentIssueRenderContext}>
     <div
@@ -3838,6 +3840,26 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
                   />
                 )}
                 <IssueAgentHeaderChip issueId={id} onJumpToRun={jumpToRun} handoffRound={handoffRound} />
+              </div>
+            )}
+            {/* With the properties sidebar closed, its most used controls
+                move into the header so status, assignee and quick actions
+                stay one click away. The Inbox's floating group already
+                carries them, and the peek shows them as pills under the
+                title. */}
+            {showHeaderIssueActions && (
+              <div
+                data-testid="issue-header-actions"
+                className="flex min-w-0 items-center gap-0.5 after:ml-1 after:h-4 after:w-px after:bg-border"
+              >
+                <IssueBarActions
+                  issue={issue}
+                  onUpdate={handleUpdateField}
+                  onMarkDuplicate={actions.openMarkDuplicate}
+                  isDuplicate={isDuplicateIssue(issue)}
+                  container="issue-header"
+                  side="bottom"
+                />
               </div>
             )}
             {inbox && (

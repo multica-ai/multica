@@ -119,7 +119,7 @@ describe("AgentAppsSection", () => {
     await screen.findByText("PostHog");
     await user.click(within(row("team", "posthog")).getByRole("button", { name: "Ask an admin" }));
     expect(api.requestTeamApp).toHaveBeenCalledWith("posthog", "a1");
-    await waitFor(() => expect(row("team", "posthog")).toHaveTextContent("Requested · admins notified"));
+    await waitFor(() => expect(row("team", "posthog")).toHaveTextContent("Requested · admin notified"));
     expect(within(row("team", "posthog")).getByRole("button", { name: "Withdraw" })).toBeVisible();
     expect(toast.success).toHaveBeenCalled();
   });

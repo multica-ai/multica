@@ -325,6 +325,18 @@ export interface ChatPendingTask {
 }
 
 export type ChatWakeupKind = "condition" | "at" | "check";
+
+/**
+ * A member's change to an active wakeup's timing (PATCH …/wakeups/{id}). A
+ * reminder takes `at`; a check `interval_seconds` and/or `expires_at`; a
+ * condition `expires_at`. What is left out keeps its current value.
+ */
+export interface ChatWakeupTiming {
+  at?: string;
+  interval_seconds?: number;
+  expires_at?: string;
+}
+
 export type ChatWakeupStatus =
   | "active"
   | "fired"

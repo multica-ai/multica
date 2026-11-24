@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlarmClock, RotateCcw, X } from "@multica/ui/icons";
+import { AlarmClock, Clock, RotateCcw, X } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Button } from "@multica/ui/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@multica/ui/components/ui/collapsible";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
 import { cn } from "@multica/ui/lib/utils";
 import { chatWakeupsOptions } from "@multica/core/chat/queries";
@@ -13,6 +14,7 @@ import { useCancelChatWakeup, useRetryChatWakeup } from "@multica/core/chat/muta
 import type { ChatMessage, ChatWakeup } from "@multica/core/types";
 import { useLocale, useT } from "../../i18n";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
+import { WakeupTimingEditor } from "./chat-wakeup-timing-editor";
 
 const EMPTY: ChatWakeup[] = [];
 const MINUTE = 60_000;
@@ -161,7 +163,19 @@ function RetryButton({ wakeup, sessionId }: { wakeup: ChatWakeup; sessionId: str
   );
 }
 
-function WakeupRow({ wakeup, sessionId, now }: { wakeup: ChatWakeup; sessionId: string; now: number }) {
+function WakeupRow({
+  wakeup,
+  sessionId,
+  now,
+  editing = false,
+  onEditingChange,
+}: {
+  wakeup: ChatWakeup;
+  sessionId: string;
+  now: number;
+  editing?: boolean;
+  onEditingChange?: (editing: boolean) => void;
+}) {
   const text = useWakeupText();
   const cancel = useCancel(sessionId);
   const urgent = isWakeupRunningOut(wakeup, now);
@@ -169,52 +183,80 @@ function WakeupRow({ wakeup, sessionId, now }: { wakeup: ChatWakeup; sessionId: 
   const report = wakeupReportState(wakeup);
   const failure = text.failure(wakeup);
   const details = [text.kind(wakeup), text.timing(wakeup, now), text.nextCheck(wakeup, now)].filter(Boolean);
+  const isEditing = editing && active;
   return (
-    <div data-slot="chat-wakeup-row" className="flex min-w-0 items-start gap-2 rounded-md px-2 py-1.5">
-      <AlarmClock
-        aria-hidden
-        className={cn("mt-0.5 size-3.5 shrink-0", active ? "text-brand" : "text-faint-foreground")}
-      />
-      <div className="min-w-0 flex-1">
-        <div className={cn("truncate text-body", !active && "text-muted-foreground")}>{wakeup.title}</div>
-        <div
-          className={cn(
-            "text-caption text-muted-foreground",
-            urgent && "text-warning",
-            report === "failed" && "text-destructive",
-          )}
-        >
-          {active ? details.join(" · ") : text.status(wakeup)}
-        </div>
-        {wakeup.last_check_note && active && (
-          <div className="truncate text-caption text-muted-foreground">
-            {text.t(($) => $.wakeup.last_check, { note: wakeup.last_check_note })}
+    <Collapsible
+      data-slot="chat-wakeup-row"
+      open={isEditing}
+      onOpenChange={(open) => onEditingChange?.(open)}
+      className={cn("rounded-md px-2 py-1.5 transition-colors", isEditing && "bg-surface-hover")}
+    >
+      <div className="flex min-w-0 items-start gap-2">
+        <AlarmClock
+          aria-hidden
+          className={cn("mt-0.5 size-3.5 shrink-0", active ? "text-brand" : "text-faint-foreground")}
+        />
+        <div className="min-w-0 flex-1">
+          <div className={cn("truncate text-body", !active && "text-muted-foreground")}>{wakeup.title}</div>
+          <div
+            className={cn(
+              "text-caption text-muted-foreground",
+              urgent && "text-warning",
+              report === "failed" && "text-destructive",
+            )}
+          >
+            {active ? details.join(" · ") : text.status(wakeup)}
           </div>
+          {wakeup.last_check_note && active && (
+            <div className="truncate text-caption text-muted-foreground">
+              {text.t(($) => $.wakeup.last_check, { note: wakeup.last_check_note })}
+            </div>
+          )}
+          {failure && <div className="truncate text-caption text-destructive">{failure}</div>}
+        </div>
+        {report === "failed" && <RetryButton wakeup={wakeup} sessionId={sessionId} />}
+        {active && onEditingChange && (
+          <CollapsibleTrigger
+            render={
+              <IconButton
+                variant="ghost"
+                size="icon-xs"
+                className="shrink-0 text-muted-foreground aria-expanded:bg-surface-selected aria-expanded:text-foreground"
+                label={text.t(($) => $.wakeup.change_timing)}
+              />
+            }
+          >
+            <Clock aria-hidden />
+          </CollapsibleTrigger>
         )}
-        {failure && <div className="truncate text-caption text-destructive">{failure}</div>}
+        {active && (
+          <IconButton
+            variant="ghost"
+            size="icon-xs"
+            className="shrink-0 text-muted-foreground"
+            label={text.t(($) => $.wakeup.cancel)}
+            onClick={() => cancel(wakeup.id)}
+          >
+            <X aria-hidden />
+          </IconButton>
+        )}
       </div>
-      {report === "failed" && <RetryButton wakeup={wakeup} sessionId={sessionId} />}
-      {active && (
-        <IconButton
-          variant="ghost"
-          size="icon-xs"
-          className="shrink-0 text-muted-foreground"
-          label={text.t(($) => $.wakeup.cancel)}
-          onClick={() => cancel(wakeup.id)}
-        >
-          <X aria-hidden />
-        </IconButton>
+      {active && onEditingChange && (
+        <CollapsibleContent>
+          <WakeupTimingEditor wakeup={wakeup} sessionId={sessionId} onClose={() => onEditingChange(false)} />
+        </CollapsibleContent>
       )}
-    </div>
+    </Collapsible>
   );
 }
 
-/** Every wakeup of the conversation, plus the limits that bound them. */
+/** Every wakeup of the conversation; an active one can change its timing in place. */
 function WakeupPanel({ wakeups, sessionId }: { wakeups: ChatWakeup[]; sessionId: string }) {
   const { t } = useT("chat");
   const now = useNow();
   const active = activeFirst(wakeups);
   const ended = wakeups.filter((w) => w.status !== "active");
+  const [editingId, setEditingId] = useState<string | null>(null);
   return (
     <>
       <div className="shrink-0 px-2 py-1.5 text-caption font-medium text-muted-foreground">
@@ -224,7 +266,16 @@ function WakeupPanel({ wakeups, sessionId }: { wakeups: ChatWakeup[]; sessionId:
         {wakeups.length === 0 && (
           <div className="px-2 py-1.5 text-caption text-muted-foreground">{t(($) => $.wakeup.panel_empty)}</div>
         )}
-        {active.map((w) => <WakeupRow key={w.id} wakeup={w} sessionId={sessionId} now={now} />)}
+        {active.map((w) => (
+          <WakeupRow
+            key={w.id}
+            wakeup={w}
+            sessionId={sessionId}
+            now={now}
+            editing={editingId === w.id}
+            onEditingChange={(editing) => setEditingId(editing ? w.id : null)}
+          />
+        ))}
         {ended.length > 0 && (
           <div className="border-t border-surface-border pt-1">
             <div className="px-2 py-1 text-caption text-muted-foreground">{t(($) => $.wakeup.panel_ended)}</div>
@@ -232,9 +283,6 @@ function WakeupPanel({ wakeups, sessionId }: { wakeups: ChatWakeup[]; sessionId:
           </div>
         )}
       </div>
-      <p className="shrink-0 border-t border-surface-border px-2 pt-2 pb-1 text-caption text-muted-foreground">
-        {t(($) => $.wakeup.limits_hint)}
-      </p>
     </>
   );
 }

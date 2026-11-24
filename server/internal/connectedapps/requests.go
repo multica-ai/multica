@@ -137,16 +137,19 @@ func (s *Service) WithdrawTeamAsk(ctx context.Context, workspaceID, memberID pgt
 		return err
 	}
 	s.withdraw(ctx, req)
-	s.archiveAdminNotifications(ctx, req)
+	s.archiveAdminNotifications(ctx, req, pgtype.UUID{}, "app_request_withdrawn")
 	return nil
 }
 
-func (s *Service) archiveAdminNotifications(ctx context.Context, req db.AppActionRequest) {
+// archiveAdminNotifications archives the admins' open notifications for a
+// team account request nobody needs to answer any more, except keep's: the
+// admin who decided it keeps theirs where they acted on it.
+func (s *Service) archiveAdminNotifications(ctx context.Context, req db.AppActionRequest, keep pgtype.UUID, reason string) {
 	rows, err := s.q.ArchiveAppRequestInbox(ctx, db.ArchiveAppRequestInboxParams{
-		WorkspaceID: req.WorkspaceID, RequestID: util.UUIDToString(req.ID),
+		WorkspaceID: req.WorkspaceID, RequestID: util.UUIDToString(req.ID), KeepRecipientID: keep,
 	})
 	if err != nil {
-		slog.Warn("connectedapps: archive withdrawn request notifications failed", "request_id", util.UUIDToString(req.ID), "error", err)
+		slog.Warn("connectedapps: archive team request notifications failed", "request_id", util.UUIDToString(req.ID), "error", err)
 		return
 	}
 	if s.bus == nil {
@@ -162,7 +165,7 @@ func (s *Service) archiveAdminNotifications(ctx context.Context, req db.AppActio
 			Payload: map[string]any{
 				"recipient_id": util.UUIDToString(row.RecipientID),
 				"count":        int64(1),
-				"reason":       "app_request_withdrawn",
+				"reason":       reason,
 			},
 		})
 	}
@@ -214,6 +217,9 @@ func (s *Service) Approve(ctx context.Context, workspaceID, actorID, requestID p
 		return db.AppActionRequest{}, err
 	}
 	if decided.Kind == KindConnect {
+		if isTeamConnect(decided) {
+			s.archiveAdminNotifications(ctx, decided, actorID, "app_request_decided")
+		}
 		if !decided.TaskID.Valid {
 			s.publishChange(decided)
 			s.notify(ctx, decided, NotifActionResult)
@@ -334,6 +340,9 @@ func (s *Service) Reject(ctx context.Context, workspaceID, actorID, requestID pg
 			toolkit: decided.ToolkitSlug, tool: decided.ToolSlug, class: decided.ActionClass,
 			outcome: "rejected", requestID: decided.ID,
 		})
+	}
+	if isTeamConnect(decided) {
+		s.archiveAdminNotifications(ctx, decided, actorID, "app_request_decided")
 	}
 	s.publishChange(decided)
 	if !decided.TaskID.Valid {
@@ -656,27 +665,62 @@ func (s *Service) notify(ctx context.Context, req db.AppActionRequest, notifType
 	s.deliver(ctx, req, notifType, req.ApproverUserID)
 }
 
-// notifyAdmins tells the workspace's admins a team account is wanted. Only
-// the first open request for an app notifies: the rest wait in the same
-// place, and connecting the account answers them all.
+// notifyAdmins tells the admins a team account is wanted, but only the ones
+// it concerns: the person who started the run when they are an admin, else
+// the agent's owner when they are an admin, else every admin. An admin who
+// already holds an open notification for this app is not told again: they
+// answer every request for it at once.
 func (s *Service) notifyAdmins(ctx context.Context, req db.AppActionRequest) {
-	open, err := s.q.ListPendingTeamConnectRequests(ctx, db.ListPendingTeamConnectRequestsParams{
-		WorkspaceID: req.WorkspaceID, ToolkitSlug: req.ToolkitSlug,
-	})
-	if err == nil && len(open) > 0 && open[0].ID != req.ID {
+	recipients := s.teamConnectRecipients(ctx, req)
+	if len(recipients) == 0 {
 		return
+	}
+	notified, err := s.q.ListTeamConnectNotifiedRecipients(ctx, db.ListTeamConnectNotifiedRecipientsParams{
+		WorkspaceID: req.WorkspaceID, ToolkitSlug: req.ToolkitSlug, RecipientIds: recipients,
+	})
+	if err != nil {
+		slog.Warn("connectedapps: list notified admins for team request failed", "toolkit", req.ToolkitSlug, "error", err)
+	}
+	told := make(map[pgtype.UUID]bool, len(notified))
+	for _, id := range notified {
+		told[id] = true
+	}
+	for _, admin := range recipients {
+		if !told[admin] {
+			s.deliver(ctx, req, NotifConnectRequested, admin)
+		}
+	}
+}
+
+// teamConnectRecipients picks who is asked to connect a team account. A
+// member asking outside any run is never asked themselves.
+func (s *Service) teamConnectRecipients(ctx context.Context, req db.AppActionRequest) []pgtype.UUID {
+	eligible := func(id pgtype.UUID) bool {
+		if !id.Valid || (id == req.ApproverUserID && !req.TaskID.Valid) {
+			return false
+		}
+		return s.IsAdmin(ctx, req.WorkspaceID, id)
+	}
+	if req.TaskID.Valid && eligible(req.ApproverUserID) {
+		return []pgtype.UUID{req.ApproverUserID}
+	}
+	if req.AgentID.Valid {
+		if agent, err := s.q.GetAgent(ctx, req.AgentID); err == nil && eligible(agent.OwnerID) {
+			return []pgtype.UUID{agent.OwnerID}
+		}
 	}
 	admins, err := s.q.ListWorkspaceManagerUserIDs(ctx, req.WorkspaceID)
 	if err != nil {
 		slog.Warn("connectedapps: list admins for team request failed", "toolkit", req.ToolkitSlug, "error", err)
-		return
+		return nil
 	}
+	out := make([]pgtype.UUID, 0, len(admins))
 	for _, admin := range admins {
-		if admin == req.ApproverUserID && !req.TaskID.Valid {
-			continue
+		if admin != req.ApproverUserID || req.TaskID.Valid {
+			out = append(out, admin)
 		}
-		s.deliver(ctx, req, NotifConnectRequested, admin)
 	}
+	return out
 }
 
 func (s *Service) deliver(ctx context.Context, req db.AppActionRequest, notifType string, recipient pgtype.UUID) {

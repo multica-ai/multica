@@ -2806,6 +2806,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/draft-restores", h.ListChatDraftRestores)
 					r.Delete("/draft-restores/{restoreId}", h.ConsumeChatDraftRestore)
 					r.Get("/wakeups", h.ListChatSessionWakeups)
+					r.Patch("/wakeups/{wakeupId}", h.RescheduleChatSessionWakeup)
 					r.Post("/wakeups/{wakeupId}/cancel", h.CancelChatSessionWakeup)
 					r.Post("/wakeups/{wakeupId}/retry", h.RetryChatSessionWakeup)
 				})

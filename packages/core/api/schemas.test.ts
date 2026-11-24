@@ -219,6 +219,14 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
       expect(parsed.issues[0]?.blocked_by).toBeUndefined();
     }
   });
+  it("reads blocking from a detail response and tolerates it missing or malformed", () => {
+    const dependent = { id: "d", identifier: "MUL-3", title: "Dashboard", status: "todo", via: "manual", closed: false };
+    const parsed = ListIssuesResponseSchema.parse({
+      issues: [{ ...baseIssue, blocking: [dependent] }, { ...baseIssue, blocking: "bad" }, baseIssue],
+      total: 3,
+    });
+    expect(parsed.issues.map((issue) => issue.blocking)).toEqual([[dependent], undefined, undefined]);
+  });
   it("carries manual and stage blockers independently of status", () => {
     const blocker = { id: "b", identifier: "MUL-2", title: "Contract", status: "done", via: "stage", closed: true };
     const parsed = ListIssuesResponseSchema.parse({ issues: [{ ...baseIssue, blocked_by: [blocker], blocked_count: 0 }], total: 1 });
@@ -1589,6 +1597,24 @@ describe("SnoozedInboxListSchema", () => {
       ENDPOINT,
     );
     expect(parsed.map((item) => item.issue_identifier)).toEqual([undefined, null, "MUL-3"]);
+  });
+
+  it("keeps a row whose issue title or status is missing or unusable", () => {
+    const parsed = parseWithFallback(
+      [
+        row(),
+        row({ issue_id: "issue-2", issue_title: 7, issue_status: "" }),
+        row({ issue_id: "issue-3", issue_title: "Fix login", issue_status: "in_review" }),
+      ],
+      SnoozedInboxListSchema,
+      EMPTY_SNOOZED_INBOX,
+      ENDPOINT,
+    );
+    expect(parsed.map((item) => [item.issue_title, item.issue_status])).toEqual([
+      [undefined, undefined],
+      [null, null],
+      ["Fix login", "in_review"],
+    ]);
   });
 });
 

@@ -73,6 +73,9 @@ type IssueResponse struct {
 	ParentIssueID *string                `json:"parent_issue_id"`
 	BlockedBy     []IssueBlockerResponse `json:"blocked_by"`
 	BlockedCount  int                    `json:"blocked_count"`
+	// Blocking lists the issues that wait on this one. Only the detail read
+	// fills it; every other rendering omits the key.
+	Blocking *[]IssueBlockerResponse `json:"blocking,omitempty"`
 	// DuplicateOf is the original this issue duplicates (MUL-7349), set only
 	// while the mark counts: the issue is cancelled and the original still
 	// exists. newStatusCategoryFiller resolves it from duplicateOfIssueID;
@@ -2566,6 +2569,17 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	resp.Labels = &detailLabels
 
+	blocking, err := h.issueDependents(r.Context(), issue, prefix, hidden)
+	if writeQueryCancellation(w, r, err) {
+		return
+	}
+	if err != nil {
+		// Leave the key out rather than claim nothing waits on this issue.
+		slog.Warn("list issue dependents failed", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "error", err)...)
+	} else {
+		resp.Blocking = &blocking
+	}
+
 	// Fetch issue reactions.
 	reactions, err := h.Queries.ListIssueReactions(r.Context(), issue.ID)
 	if writeQueryCancellation(w, r, err) {
@@ -4494,6 +4508,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"duplicate_of_issue_id":      liveDuplicateMark(issue.Status, issue.DuplicateOfIssueID),
 		"prev_duplicate_of_issue_id": liveDuplicateMark(prevIssue.Status, prevIssue.DuplicateOfIssueID),
 	}
+	// The other end of each edge lists this issue under blocking, so clients
+	// refresh more than this issue when its blockers change.
+	updatedPayload["blockers_changed"] = len(req.BlockedBy)+len(req.RemoveBlockedBy) > 0
 	if handoff != nil {
 		updatedPayload["workflow_handoff"] = workflowHandoffPayload(issue, handoff, h.workflowHandoffBrief(r.Context(), issue, handoff), willRun)
 	}
@@ -5373,6 +5390,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				"title_changed":              req.Updates.Title != nil && prevIssue.Title != issue.Title,
 				"prev_title":                 prevIssue.Title,
 				"parent_changed":             prevIssue.ParentIssueID != issue.ParentIssueID,
+				"blockers_changed":           len(req.Updates.BlockedBy)+len(req.Updates.RemoveBlockedBy) > 0,
 				"prev_parent_issue_id":       uuidToPtr(prevIssue.ParentIssueID),
 				"prev_status":                prevIssue.Status,
 				"duplicate_of_issue_id":      liveDuplicateMark(issue.Status, issue.DuplicateOfIssueID),

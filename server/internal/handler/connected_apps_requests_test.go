@@ -205,6 +205,83 @@ func TestConnectedApps_AgentTeamConnectRequestGoesToAdmins(t *testing.T) {
 	}
 }
 
+// teamNotices counts a member's team account notifications for one app,
+// open or archived.
+func teamNotices(t *testing.T, recipient, slug string, archived bool) int {
+	t.Helper()
+	return dbfx.Count(t, `SELECT count(*) FROM inbox_item WHERE workspace_id=$1 AND recipient_id=$2 AND type=$3
+		AND details->>'toolkit_slug'=$4 AND archived=$5`, testWorkspaceID, recipient, connectedapps.NotifConnectRequested, slug, archived)
+}
+
+// A team account request goes to the admin it concerns: the run's starter
+// when they are an admin, else the agent's owner when they are one, else
+// every admin. Deciding it archives the other admins' notifications.
+func TestConnectedApps_TeamConnectRequestRecipients(t *testing.T) {
+	f := newAppsFixture(t)
+	other := createTestUserAndMember(t, "admin")
+	plain := createTestUserAndMember(t, "member")
+	team := []map[string]string{}
+	for _, slug := range []string{"notion", "slack", "linear"} {
+		team = append(team, map[string]string{"toolkit_slug": slug, "account_scope": "team", "level": "write"})
+	}
+	if w := f.putAgentApps(t, testUserID, team); w.Code != http.StatusOK {
+		t.Fatalf("attach: %d %s", w.Code, w.Body.String())
+	}
+	ask := func(slug, originator, owner string) {
+		t.Helper()
+		dbfx.Exec(t, `UPDATE agent_task_queue SET originator_user_id=$1, accountable_user_id=$1 WHERE id=$2`, originator, f.taskID)
+		dbfx.Exec(t, `UPDATE agent SET owner_id=$1 WHERE id=$2`, owner, f.agentID)
+		if _, text, isErr := f.gateway(t, f.token(t), "apps_request_connection", map[string]any{"app": slug}); isErr {
+			t.Fatalf("request %s: %s", slug, text)
+		}
+	}
+	want := func(slug string, counts map[string]int) {
+		t.Helper()
+		for user, n := range counts {
+			if got := teamNotices(t, user, slug, false); got != n {
+				t.Fatalf("%s: open notifications for %s = %d, want %d", slug, user, got, n)
+			}
+		}
+	}
+
+	// The run's starter is an admin: only they are asked.
+	ask("notion", testUserID, other)
+	want("notion", map[string]int{testUserID: 1, other: 0, f.member: 0})
+
+	// The starter is not an admin, the agent's owner is: only the owner.
+	ask("slack", f.member, other)
+	want("slack", map[string]int{testUserID: 0, other: 1, f.member: 0})
+
+	// Neither is an admin: every admin.
+	ask("linear", f.member, f.member)
+	want("linear", map[string]int{testUserID: 1, other: 1, f.member: 0})
+
+	// A later request for the same app reaches an admin nobody asked yet,
+	// and does not repeat for one who already holds an open notification.
+	if code := f.requestTeamApp(t, plain, map[string]any{"toolkit_slug": "slack"}); code != http.StatusNoContent {
+		t.Fatalf("member asks for slack: %d", code)
+	}
+	want("slack", map[string]int{testUserID: 1, other: 1, plain: 0})
+
+	// Connecting answers every request: the other admins' notifications are
+	// archived, the connecting admin's stays where they acted on it.
+	f.teamAccount(t, "linear")
+	f.h.ConnectedApps.ResolveTeamConnectRequests(context.Background(), parseUUID(testWorkspaceID), parseUUID(testUserID), "linear")
+	want("linear", map[string]int{testUserID: 1, other: 0})
+	if n := teamNotices(t, other, "linear", true); n != 1 {
+		t.Fatalf("archived linear notifications for the other admin = %d, want 1", n)
+	}
+
+	// So does declining.
+	if code := f.dismissTeamRequests(t, other, "slack"); code != http.StatusNoContent {
+		t.Fatalf("decline slack: %d", code)
+	}
+	want("slack", map[string]int{testUserID: 0, other: 1})
+	if n := dbfx.Count(t, `SELECT count(*) FROM app_action_request WHERE workspace_id=$1 AND toolkit_slug='slack' AND status='pending'`, testWorkspaceID); n != 0 {
+		t.Fatalf("pending slack requests after decline = %d", n)
+	}
+}
+
 func TestConnectedApps_PersonalConnectionImpact(t *testing.T) {
 	f := newAppsFixture(t)
 	if w := f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "gmail", "account_scope": "personal"}}); w.Code != http.StatusOK {

@@ -631,14 +631,20 @@
       "wakeups": "Добавить будильник",
       "pull_requests": "Добавить pull request",
       "environments": "Добавить окружение",
-      "wakeups_pull_requests": "Добавить будильник или pull request",
-      "wakeups_environments": "Добавить будильник или окружение",
-      "pull_requests_environments": "Добавить pull request или окружение",
-      "all": "Добавить будильник, pull request или окружение",
+      "relations": "Добавить связь",
+      "pair": "Добавить {{first}} или {{second}}",
+      "many": "Добавить...",
+      "noun": {
+        "wakeups": "будильник",
+        "pull_requests": "pull request",
+        "environments": "окружение",
+        "relations": "связь"
+      },
       "menu": {
         "wakeups": "Будильник",
         "pull_requests": "Pull request",
-        "environments": "Окружение"
+        "environments": "Окружение",
+        "relations": "Связи"
       }
     },
     "footer": {
@@ -1247,7 +1253,8 @@
     "remove_parent_issue": "Убрать родительскую задачу",
     "remove_parent_issue_success": "Родительская задача убрана",
     "add_sub_issue": "Добавить подзадачу...",
-    "add_blocker": "Добавить зависимость...",
+    "add_blocker": "Ждать другую задачу...",
+    "add_blocking": "Блокировать другую задачу...",
     "delete_issue": "Удалить задачу",
     "mark_duplicate": "Отметить как дубликат...",
     "locate_in_sidebar": "Показать на боковой панели",
@@ -2337,19 +2344,29 @@
     "retry": "Повторить",
     "dismiss": "Скрыть"
   },
+  "relations": {
+    "title": "Связи",
+    "add": "Добавить связь",
+    "wait_title": "Ждать другую задачу",
+    "block_title": "Блокировать другую задачу",
+    "blocked_by": "Заблокировано",
+    "blocking": "Блокирует",
+    "stage_tag": "Этап",
+    "stage_tag_hint": "Задано этапами родительской задачи",
+    "add_blocker_hint": "Эта задача начнётся после её завершения",
+    "add_blocking_hint": "Она начнётся после завершения этой задачи",
+    "mark_duplicate_hint": "Отменяет эту задачу",
+    "blocking_picker_hint": "Выберите задачу, которая не может начаться, пока не завершится эта."
+  },
   "waiting": {
-    "title": "Ожидание",
-    "add": "Добавить зависимость",
     "remove": "Удалить {{identifier}}",
     "count": "Ожидание задач: {{count}}",
     "count_one": "Ожидание задач: {{count}}",
     "count_few": "Ожидание задач: {{count}}",
     "count_many": "Ожидание задач: {{count}}",
     "count_other": "Ожидание задач: {{count}}",
-    "stage": "Предыдущие этапы · {{finished}}/{{total}} завершено",
     "hint": "После завершения этих задач исполнитель начнёт работу автоматически или получит уведомление.",
     "hint_backlog": "Задача в бэклоге, поэтому она не начнётся автоматически после завершения этих задач. Она начнётся, когда её переведут из бэклога.",
-    "empty": "Нет ожидаемых задач",
     "picker_hint": "Выберите задачу, которая должна завершиться раньше этой.",
     "restricted": "Ограниченные зависимости: {{count}}",
     "ended": "Ожидаемые задачи завершены",
