@@ -158,3 +158,39 @@ func TestCheckoutInitiatorAuthorPreservesConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckoutInitiatorAuthorKeepsUnrelatedIncludes(t *testing.T) {
+	identityTestEnvironment(t)
+	for _, mode := range checkoutModes {
+		t.Run(mode.name, func(t *testing.T) {
+			f := newExistingCheckoutFixture(t, mode.isolated)
+			params := WorktreeParams{WorkspaceID: "ws-1", RepoURL: f.source, WorkDir: f.workDir, AgentName: "Agent", TaskID: firstTaskID, IsolatedGitMetadata: mode.isolated, CommitAuthorIsInitiatorEnabled: true, InitiatorType: "member", InitiatorName: "Human", InitiatorEmail: "human@example.com"}
+			result, err := f.cache.CreateWorktree(params)
+			if err != nil {
+				t.Fatal(err)
+			}
+			scope := "--worktree"
+			if mode.isolated {
+				scope = "--local"
+			}
+			gitDir := gitIdentityCommand(t, "-C", result.Path, "rev-parse", "--absolute-git-dir")
+			if err := os.WriteFile(filepath.Join(gitDir, "extra.config"), []byte("[multica]\n\tkept = yes\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			// Git appends this entry to the last [include] section, which is the managed one.
+			gitIdentityCommand(t, "-C", result.Path, "config", scope, "--add", "include.path", "extra.config")
+			for _, enabled := range []bool{true, false, true, false} {
+				params.CommitAuthorIsInitiatorEnabled = enabled
+				if _, err := f.cache.CreateWorktree(params); err != nil {
+					t.Fatal(err)
+				}
+				if got := gitIdentityCommand(t, "-C", result.Path, "config", "multica.kept"); got != "yes" {
+					t.Fatalf("enabled=%v: unrelated include lost, multica.kept = %q", enabled, got)
+				}
+			}
+			if out, _ := runGitCombinedOutput("-C", result.Path, "config", "author.name"); strings.TrimSpace(string(out)) == "Human" {
+				t.Fatal("override not removed after disabling")
+			}
+		})
+	}
+}

@@ -48,7 +48,7 @@ func applyInitiatorAuthorContext(ctx context.Context, checkoutPath string, param
 			return nil
 		}
 		if err := editGitConfigFile(configPath, func(contents []byte, _ string) ([]byte, error) {
-			return []byte(strings.ReplaceAll(string(contents), initiatorAuthorInclude, "")), nil
+			return []byte(removeInitiatorAuthorInclude(string(contents))), nil
 		}); err != nil {
 			return err
 		}
@@ -64,7 +64,40 @@ func applyInitiatorAuthorContext(ctx context.Context, checkoutPath string, param
 		return err
 	}
 	return editGitConfigFile(configPath, func(contents []byte, _ string) ([]byte, error) {
-		original := strings.ReplaceAll(string(contents), initiatorAuthorInclude, "")
+		original := removeInitiatorAuthorInclude(string(contents))
 		return []byte(original + initiatorAuthorInclude), nil
 	})
+}
+
+// removeInitiatorAuthorInclude drops the managed include entry. Git appends a
+// later `include.path` to the last [include] section, which may be ours, so the
+// section header stays whenever other entries follow the managed one.
+func removeInitiatorAuthorInclude(contents string) string {
+	for {
+		i := strings.Index(contents, initiatorAuthorInclude)
+		if i < 0 {
+			return contents
+		}
+		rest := contents[i+len(initiatorAuthorInclude):]
+		replacement := ""
+		if sectionHasEntries(rest) {
+			replacement = "\n[include]\n"
+		}
+		contents = contents[:i] + replacement + rest
+	}
+}
+
+// sectionHasEntries reports whether text before the next section header holds
+// any key, ignoring blank lines and comments.
+func sectionHasEntries(text string) bool {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "[") {
+			return false
+		}
+		if line != "" && !strings.HasPrefix(line, "#") && !strings.HasPrefix(line, ";") {
+			return true
+		}
+	}
+	return false
 }
