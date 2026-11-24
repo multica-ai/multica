@@ -16,6 +16,8 @@
     "file_too_large_title": "File terlalu besar",
     "file_too_large_message": "File harus lebih kecil dari 100 MB.",
     "failed": "Unggahan gagal",
-    "error": "Error tidak diketahui"
+    "error": "Error tidak diketahui",
+    "storage_full_title": "Penyimpanan lampiran penuh",
+    "storage_full_message": "File ini tidak diunggah. Lampiran yang sudah ada tidak terpengaruh. Minta admin untuk upgrade paket, atau hapus lampiran yang tidak lagi Anda perlukan."
   }
 }

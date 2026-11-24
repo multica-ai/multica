@@ -27,7 +27,8 @@
     "title": "Bahasa",
     "system": "Sistem",
     "english": "English",
-    "chinese_simplified": "中文",
+    "chinese_simplified": "简体中文",
+    "chinese_traditional": "繁體中文",
     "indonesian": "Bahasa Indonesia"
   },
   "notifications": {
@@ -71,15 +72,21 @@
     "status_changes": "Perubahan status",
     "comments": "Komentar",
     "comments_description": "Komentar baru pada tugas yang Anda ikuti.",
+    "squad_handoffs": "Sertakan serah terima squad",
+    "squad_handoffs_description": "Komentar yang digunakan leader dan agent squad untuk saling menyerahkan pekerjaan. @mention untuk Anda, eksekusi agent yang gagal, dan status yang perlu perhatian tetap diterima.",
     "mentions": "Sebutan",
     "mentions_description": "Saat seseorang men-@mention Anda, termasuk @all dan @squad.",
-    "updates": "Perubahan tugas",
-    "updates_description": "Perubahan pada judul, deskripsi, label, prioritas, atau tanggal tenggat.",
+    "reactions": "Reaksi",
+    "reactions_description": "Saat seseorang memberi reaksi pada tugas yang Anda buat atau komentar yang Anda tulis.",
+    "updates": "Prioritas & tenggat",
+    "updates_description": "Saat prioritas atau tanggal tenggat berubah pada tugas yang Anda ikuti.",
+    "new_issues": "Tugas baru",
+    "new_issues_description": "Saat tugas dibuat di proyek yang Anda ikuti.",
     "agent_activity": "Aktivitas agent",
-    "agent_activity_description": "Saat eksekusi agent gagal.",
+    "agent_activity_description": "Saat eksekusi agent gagal, atau tindakan aplikasi yang diminta agent diblokir atau kedaluwarsa.",
     "inbox_notifications": "Notifikasi kotak masuk",
     "system": "Sistem",
     "system_notifications": "Notifikasi sistem",
-    "system_description": "Perubahan akun, peringatan keamanan, pembaruan produk."
+    "chat_replies": "Sertakan balasan chat"
   }
 }

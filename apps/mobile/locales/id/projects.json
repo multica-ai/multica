@@ -24,7 +24,9 @@
     "resources": "Resource",
     "lead": "Lead",
     "no_resources": "Tidak ada resource yang dilampirkan.",
-    "add_resource": "Tambah resource"
+    "add_resource": "Tambah resource",
+    "add_description": "Tambahkan deskripsi",
+    "progress": "Progres"
   },
   "form": {
     "icon_emoji": "Ikon (emoji)",

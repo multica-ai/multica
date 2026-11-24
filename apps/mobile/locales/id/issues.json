@@ -49,7 +49,8 @@
   "list": {
     "empty": "Tidak ada tugas yang cocok dengan filter Anda",
     "count_other": "{{count}} tugas",
-    "search_placeholder": "Cari tugas dan proyek"
+    "search_placeholder": "Cari tugas dan proyek",
+    "search_no_results": "Tidak ada hasil untuk \"{{query}}\""
   },
   "detail": {
     "properties": "Properti",
@@ -59,6 +60,7 @@
     "reply": "Balasan",
     "add_comment": "Tambah komentar...",
     "description": "Deskripsi",
+    "no_description": "Tidak ada deskripsi.",
     "add_description": "Tambah deskripsi...",
     "runs": "Eksekusi",
     "copy_link": "Salin tautan",
@@ -132,6 +134,9 @@
     "issue_actions": "Tindakan tugas"
   },
   "delete": {
+    "failed_title": "Tidak dapat menghapus tugas",
+    "permission_denied": "Anda tidak memiliki izin untuk menghapus tugas ini.",
+    "failed": "Tugas tidak dapat dihapus. Silakan coba lagi.",
     "title": "Hapus tugas?",
     "message": "{{identifier}} beserta komentar, reaksi, dan lampirannya akan dihapus secara permanen. Tindakan ini tidak dapat dibatalkan."
   },
@@ -146,7 +151,10 @@
     "title": "Batalkan eksekusi?",
     "message": "Agent akan berhenti setelah langkah saat ini.",
     "keep_running": "Tetap jalankan",
-    "cancel_task": "Batalkan eksekusi"
+    "cancel_task": "Batalkan eksekusi",
+    "waiting_for_connection": "Menunggu koneksi...",
+    "stopping": "Menghentikan...",
+    "failed": "Tidak dapat menghentikan eksekusi. Coba lagi."
   },
   "form": {
     "discard_title": "Buang perubahan?",
@@ -162,7 +170,7 @@
     "squad": "Squad",
     "no_matches": "Tidak ada yang cocok.",
     "no_project": "Tanpa proyek",
-    "no_projects": "Belum ada proyek di ruang kerja ini.\nBuat di web.",
+    "no_projects": "Belum ada proyek di ruang kerja ini.",
     "no_labels": "Belum ada label di ruang kerja ini.",
     "create_label": "Buat \"{{name}}\"",
     "no_members_agents": "Belum ada anggota atau agent di ruang kerja ini.",
@@ -184,15 +192,17 @@
     "reply": "Balas",
     "react": "Beri reaksi...",
     "copy": "Salin",
-    "select_text": "Pilih Teks",
-    "copy_link": "Salin Tautan",
-    "resolve": "Selesaikan Thread",
-    "unresolve": "Batalkan Penyelesaian Thread",
+    "select_text": "Pilih teks",
+    "copy_link": "Salin tautan",
+    "resolve": "Selesaikan thread",
+    "unresolve": "Buka kembali thread",
     "delete": "Hapus",
     "delete_title": "Hapus komentar?",
     "delete_keep_replies": "Komentar ini akan dihapus secara permanen. Balasan apa pun tetap ada di thread. Tindakan ini tidak dapat dibatalkan.",
     "delete_with_replies": "Komentar ini akan dihapus secara permanen. Balasan dalam thread ini juga akan dihapus. Tindakan ini tidak dapat dibatalkan.",
     "more_reactions": "Reaksi lainnya...",
+    "add_reaction": "Tambah reaksi",
+    "deleted": "Komentar ini telah dihapus",
     "fallback_actor": "komentar",
     "composer_placeholder": "Tambah komentar…",
     "composer_pill": "Tambah komentar, ketik @ untuk menyebut..."
@@ -223,6 +233,8 @@
     "url": "URL repository",
     "branch": "Cabang awal (opsional)",
     "label": "Label (opsional)",
+    "label_placeholder": "misalnya Backend",
+    "open_attachment": "Buka {{filename}}",
     "attach": "Lampirkan",
     "attaching": "Melampirkan...",
     "branch_hint": "Eksekusi dimulai dari cabang ini dan membuka pull request terhadapnya. Biarkan kosong untuk menggunakan cabang default repository.",
@@ -236,7 +248,26 @@
   "runs": {
     "active": "Aktif",
     "past": "Lampau",
-    "title": "Eksekusi Agent",
+    "title": "Eksekusi agent",
+    "open_transcript": "Buka catatan eksekusi untuk {{summary}}",
+    "transcript": {
+      "title": "Catatan eksekusi",
+      "loading": "Memuat catatan eksekusi...",
+      "load_error": "Tidak dapat memuat catatan eksekusi ini.",
+      "retry": "Coba lagi",
+      "missing": "Eksekusi ini tidak tersedia atau sudah tidak ada.",
+      "empty": "Tidak ada catatan eksekusi yang disimpan untuk eksekusi ini.",
+      "thinking": "Berpikir",
+      "tool_call": "Panggilan tool",
+      "tool_output": "Output tool",
+      "output": "Output",
+      "error": "Kesalahan",
+      "unknown_tool": "Tool tidak dikenal",
+      "truncated": "Output ini dipotong saat disimpan.",
+      "diagnostics": "Detail teknis",
+      "show_full_output": "Tampilkan output lengkap",
+      "show_less": "Tampilkan lebih sedikit"
+    },
     "status": {
       "queued": "Dalam antrean",
       "deferred": "Ditangguhkan",
@@ -246,21 +277,49 @@
       "completed": "Eksekusi berhasil",
       "failed": "Eksekusi gagal",
       "cancelled": "Dibatalkan"
+    },
+    "failure_badge": {
+      "queued_expired": "Antrean kedaluwarsa",
+      "runtime_offline": "Runtime offline",
+      "runtime_access_revoked": "Akses dicabut",
+      "runtime_recovery": "Pemulihan runtime",
+      "timeout": "Waktu habis",
+      "iteration_limit": "Batas iterasi",
+      "agent_blocked": "Perlu input",
+      "api_invalid_request": "Permintaan ditolak",
+      "skill_bundle_unavailable": "Unduhan skill gagal",
+      "runtime_cli_timeout": "CLI runtime waktu habis",
+      "environment_prepare_failed": "Penyiapan lingkungan gagal",
+      "runtime_access_denied": "Tanpa akses runtime",
+      "local_directory_missing": "Folder hilang",
+      "agent_error_provider_auth_or_access": "Autentikasi gagal",
+      "agent_error_provider_quota_limit": "Kuota habis",
+      "agent_error_provider_capacity_or_rate_limit": "Dibatasi laju",
+      "agent_error_provider_server_error": "Kesalahan provider",
+      "agent_error_provider_network": "Kesalahan jaringan",
+      "agent_error_process_failure": "Proses mengalami crash",
+      "agent_error_empty_or_unparseable_output": "Tidak ada output yang dapat digunakan",
+      "agent_error_agent_timeout": "Agent waktu habis",
+      "agent_error_context_overflow": "Konteks melebihi batas",
+      "agent_error_missing_config": "Konfigurasi hilang",
+      "agent_error_model_not_found_or_unavailable": "Model tidak tersedia",
+      "agent_error_runtime_version_unsupported": "CLI tidak didukung",
+      "agent_error_runtime_missing_executable": "CLI belum terpasang",
+      "agent_error_unknown": "Kesalahan agent",
+      "agent_error": "Kesalahan agent",
+      "codex_semantic_inactivity": "Codex tidak aktif",
+      "manual": "Manual"
     }
   },
   "header_filter": "Filter",
   "new_badge": "Baru",
   "jump_a11y_other": "Lompat ke {{count}} pesan baru",
+  "jump_new_other": "{{count}} baru",
   "a11y": {
     "agent_working": "Agent bekerja — buka eksekusi",
     "remove_mention": "Hapus sebutan {{name}}",
     "retry_upload": "Coba lagi unggah {{name}}",
     "open_file": "Buka {{name}}",
     "remove_file": "Hapus {{name}}"
-  },
-  "summary.comment": "Eksekusi komentar",
-  "summary.chat": "Eksekusi obrolan",
-  "summary.direct": "Eksekusi",
-  "cancel.title": "Batalkan eksekusi?",
-  "cancel.cancel_task": "Batalkan eksekusi"
+  }
 }

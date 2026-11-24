@@ -14,6 +14,7 @@
     "upload_image": "Unggah gambar",
     "upload_file": "Unggah file",
     "send": "Kirim",
+    "queue": "Antrekan pesan",
     "default_placeholder": "Tulis pesan…",
     "unavailable": "Obrolan tidak tersedia",
     "stop_agent": "Hentikan agent",
@@ -76,15 +77,15 @@
     "agent_runtime_required": "Hubungkan runtime ke agent ini sebelum mengirim pesan.",
     "runtime_access_denied": "Pesan tidak terkirim — {{detail}}",
     "default": "Pesan Anda tidak dapat terkirim. Silakan coba lagi.",
-    "runtime_access_recovery": "Agent ini tidak dapat berjalan pada runtime privatnya. Jadikan runtime publik, atau hubungkan ulang/salin agent ke runtime yang dapat digunakan pemiliknya."
+    "runtime_access_recovery": "Runtime pribadi agent ini tidak dapat diakses. Jadikan runtime publik, atau kaitkan agent ke runtime yang dapat diakses."
   },
   "a11y": {
     "suggested_followups": "Pertanyaan lanjutan yang disarankan",
     "show_error_details": "Tampilkan detail error",
     "no_agents": "Tidak ada agent yang tersedia",
-    "session_actions": "Tindakan sesi obrolan",
+    "session_actions": "Tindakan obrolan",
     "new_chat": "Obrolan baru",
-    "sessions_agent_picker": "Sesi obrolan dan pemilih agent"
+    "sessions_agent_picker": "Obrolan dan pemilih agent"
   },
   "title": {
     "fallback": "Obrolan",
@@ -104,7 +105,6 @@
     "archived": "diarsipkan",
     "new_chat": "Obrolan baru"
   },
-  "picker.title": "Pilih agent",
   "no_response": "Agent menyelesaikan giliran ini tanpa balasan teks.",
   "failure_reason": {
     "default": "Eksekusi gagal",
@@ -119,7 +119,8 @@
     "skill_bundle_unavailable": "Skill agent tidak dapat diunduh",
     "runtime_cli_timeout": "CLI runtime lokal melebihi batas waktu",
     "environment_prepare_failed": "Lingkungan eksekusi tidak dapat disiapkan",
-    "runtime_access_denied": "Agent ini tidak dapat berjalan pada runtime privatnya, sehingga tidak dapat membalas. Jadikan runtime publik, atau hubungkan ulang/salin agent ke runtime yang dapat digunakan pemiliknya.",
+    "runtime_access_denied": "Runtime pribadi agent ini tidak dapat diakses, sehingga tidak dapat membalas. Jadikan runtime publik, atau kaitkan agent ke runtime yang dapat diakses.",
+    "runtime_access_revoked": "Akses runtime dicabut. Hubungkan agent ke runtime yang dapat diakses sebelum memulai eksekusi lain.",
     "invalid_task_identity": "Identitas eksekusi tidak cocok",
     "agent_error_provider_auth_or_access": "Autentikasi penyedia gagal",
     "agent_error_provider_quota_limit": "Kuota penyedia habis",
@@ -132,16 +133,17 @@
     "agent_error_context_overflow": "Jendela konteks terlampaui",
     "agent_error_missing_config": "API key atau konfigurasi tidak ada",
     "agent_error_model_not_found_or_unavailable": "Model tidak tersedia",
-    "agent_error_runtime_version_unsupported": "Versi CLI runner tidak didukung",
-    "agent_error_runtime_missing_executable": "CLI runner tidak terpasang",
+    "agent_error_runtime_version_unsupported": "Versi CLI agent tidak didukung",
+    "agent_error_runtime_missing_executable": "CLI agent tidak terpasang",
     "agent_error_unknown": "Error eksekusi agent",
-    "agent_fallback_message": "Agent mengembalikan pesan fallback",
+    "agent_fallback_message": "Agent tidak dapat menghasilkan balasan yang valid",
     "codex_resume_oversized": "Sesi terlalu besar untuk dilanjutkan",
     "idle_watchdog": "Agent berhenti setelah tidak aktif",
     "local_directory_error": "Error direktori lokal",
+    "local_directory_missing": "Folder lokal proyek tidak lagi ada",
     "cancelled": "Dibatalkan oleh sistem",
     "agent_error": "Error eksekusi agent",
-    "codex_semantic_inactivity": "Batas waktu inaktivitas semantik Codex",
+    "codex_semantic_inactivity": "Codex berhenti membuat kemajuan",
     "manual": "Dibatalkan oleh pengguna",
     "user_cancelled": "Dibatalkan oleh pengguna"
   },

@@ -39,13 +39,16 @@
     "close": "Tutup notifikasi",
     "unavailable": "Notifikasi ini tidak lagi tersedia.",
     "billing_disabled": "Perubahan penagihan tidak tersedia untuk ruang kerja ini. Hubungi administrator ruang kerja Anda untuk bantuan.",
-    "contact_admin": "Minta owner atau admin ruang kerja untuk meninjau opsi penagihan.",
+    "contact_admin": "Minta owner atau admin ruang kerja untuk meningkatkan paket atau membeli eksekusi tambahan.",
     "review_billing": "Tinjau opsi penagihan",
-    "review_billing_web": "Buka Multica di web untuk meninjau opsi penagihan."
+    "review_billing_web": "Buka Multica di web untuk meninjau opsi penagihan.",
+    "buy_runs": "Beli eksekusi tambahan",
+    "buy_runs_web": "Buka Multica di web untuk membeli eksekusi tambahan."
   },
   "type": {
     "assigned": "Ditugaskan",
     "subscribed": "Berlangganan",
+    "issue_created": "Tugas baru",
     "unassigned": "Penugasan dibatalkan",
     "reassigned": "Ditugaskan ulang",
     "status_changed": "Status berubah",
@@ -54,17 +57,20 @@
     "due_date_changed": "Tanggal tenggat berubah",
     "new_comment": "Komentar baru",
     "mentioned": "Disebut",
+    "doc_comment": "Komentar baru pada dokumen",
+    "doc_mentioned": "Disebut dalam dokumen",
     "review_requested": "Peninjauan diminta",
     "task_completed": "Eksekusi selesai",
     "task_failed": "Eksekusi gagal",
     "agent_blocked": "Agent terblokir",
     "agent_completed": "Agent selesai",
     "reaction_added": "Reaksi ditambahkan",
-    "quick_create_done": "Pembuatan cepat selesai",
-    "quick_create_failed": "Pembuatan cepat gagal",
-    "quick_create_unconfirmed": "Pembuatan cepat perlu diperiksa",
+    "quick_create_done": "Dibuat dengan agent",
+    "quick_create_failed": "Pembuatan dengan agent gagal",
+    "quick_create_unconfirmed": "Pembuatan dengan agent belum terkonfirmasi",
     "autopilot_paused": "Autopilot dijeda",
     "children_done": "Sub-tugas selesai",
+    "project_owner_joined": "Pemilik bergabung ke proyek",
     "autopilot_quota_exceeded": "Batas eksekusi autopilot tercapai",
     "set_status": "Setel status ke",
     "set_priority": "Setel prioritas ke",
@@ -75,10 +81,15 @@
     "reacted_with": "Memberi reaksi {{emoji}}",
     "created_with_agent": "Dibuat dengan agent: {{identifier}}",
     "failed_with_detail": "Gagal: {{detail}}",
-    "run_limit_blocked": "Eksekusi diblokir karena batas telah tercapai"
+    "run_limit_blocked": "Eksekusi diblokir karena batas telah tercapai",
+    "app_action_requested": "Perlu konfirmasi Anda",
+    "app_action_reminder": "Konfirmasi segera kedaluwarsa",
+    "app_connect_requested": "Hubungkan aplikasi",
+    "app_action_result": "Hasil tindakan aplikasi"
   },
   "body": {
-    "autopilot_title_limit": "Autopilot \"{{title}}\" tidak dimulai karena ruang kerja ini telah mencapai batas {{limit}} eksekusi untuk periode saat ini. Kuota akan diatur ulang pada {{resetAt}}.",
-    "autopilot_limit": "Ruang kerja ini telah mencapai batas {{limit}} eksekusi autopilot untuk periode saat ini. Eksekusi ini tidak dimulai. Kuota akan diatur ulang pada {{resetAt}}."
+    "autopilot_title_limit": "Autopilot \"{{title}}\" tidak dimulai karena ruang kerja ini telah mencapai batas {{limit}} eksekusi untuk periode saat ini. Kuota diatur ulang {{resetAt}}; owner atau admin ruang kerja juga dapat meningkatkan paket atau membeli eksekusi tambahan.",
+    "autopilot_limit": "Ruang kerja ini telah mencapai batas {{limit}} eksekusi autopilot untuk periode saat ini. Eksekusi ini tidak dimulai. Kuota diatur ulang {{resetAt}}; owner atau admin ruang kerja juga dapat meningkatkan paket atau membeli eksekusi tambahan.",
+    "project_owner_joined": "{{name}} adalah pemilik ruang kerja dan menambahkan dirinya ke proyek privat ini. Mereka kini dapat melihat tugas, komentar, dan lampirannya."
   }
 }
