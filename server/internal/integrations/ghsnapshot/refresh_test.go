@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -276,20 +277,47 @@ func TestRateLimitedRefreshRetriesAfterPause(t *testing.T) {
 	}
 }
 
-// TestPersistentRateLimitBacksOffAndStops keeps GitHub answering 403: each
-// retry waits at least Retry-After, doubled per consecutive 403, and the
-// address is given up after maxRateLimitRetries retries.
+// fakeClock drives a Manager's pause and retry timers: each timer advances
+// the clock by its delay and fires at once.
+type fakeClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func useFakeClock(m *Manager) *fakeClock {
+	c := &fakeClock{now: time.Unix(0, 0)}
+	m.now = c.Now
+	m.after = func(d time.Duration, f func()) {
+		c.mu.Lock()
+		c.now = c.now.Add(d)
+		c.mu.Unlock()
+		go f()
+	}
+	return c
+}
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+// TestPersistentRateLimitBacksOffAndStops keeps GitHub answering 403 with its
+// default one-minute wait. The retries double the wait and stop, and together
+// they span the 12 minutes between #11397's checks finishing and its snapshot
+// landing.
 func TestPersistentRateLimitBacksOffAndStops(t *testing.T) {
 	m := NewManager(enabledClient(t), nil, nil, nil)
 	m.concurrency = 1
 	m.sweepInterval = time.Hour
 	m.jitter = func() time.Duration { return 0 }
+	clock := useFakeClock(m)
+	start := clock.Now()
 
-	const retryAfter = 40 * time.Millisecond
-	fetches := make(chan time.Time, 16)
+	fetches := make(chan time.Duration, 16)
 	m.fetch = func(context.Context, *Client, int64, string, string, int32) (*PRSnapshot, error) {
-		fetches <- time.Now()
-		return nil, &RateLimitError{RetryAfter: retryAfter}
+		fetches <- clock.Now().Sub(start)
+		return nil, &RateLimitError{RetryAfter: time.Minute}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -298,28 +326,76 @@ func TestPersistentRateLimitBacksOffAndStops(t *testing.T) {
 	addr := address{InstallationID: 1, Owner: "o", Repo: "r", Number: 1}
 	m.Enqueue(addr.InstallationID, addr.Owner, addr.Repo, addr.Number)
 
-	last := <-fetches
-	for retry := 1; retry <= maxRateLimitRetries; retry++ {
-		want := retryAfter << (retry - 1)
+	want := []time.Duration{0, time.Minute, 3 * time.Minute, 7 * time.Minute, 15 * time.Minute}
+	for i, at := range want {
 		select {
-		case at := <-fetches:
-			if gap := at.Sub(last); gap < want-10*time.Millisecond {
-				t.Fatalf("retry %d after %v, want at least %v", retry, gap, want)
+		case got := <-fetches:
+			if got != at {
+				t.Fatalf("request %d at %v, want %v", i, got, at)
 			}
-			last = at
 		case <-time.After(2 * time.Second):
-			t.Fatalf("retry %d never ran", retry)
+			t.Fatalf("request %d (at %v) never ran", i, at)
 		}
 	}
 	select {
-	case <-fetches:
-		t.Fatalf("retried past %d consecutive 403s", maxRateLimitRetries)
-	case <-time.After(8 * retryAfter):
+	case got := <-fetches:
+		t.Fatalf("retried at %v, past %d consecutive 403s", got, maxRateLimitRetries)
+	case <-time.After(100 * time.Millisecond):
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.active[addr] || m.rateRetries[addr] != 0 {
 		t.Fatalf("given-up address still tracked: active=%v retries=%d", m.active[addr], m.rateRetries[addr])
+	}
+}
+
+// TestRateLimitCapKeepsEventFromLastRequest: a check event that arrives while
+// the last allowed request is in flight is fetched once the pause ends, even
+// though that request's 403 exhausts the retries.
+func TestRateLimitCapKeepsEventFromLastRequest(t *testing.T) {
+	m := NewManager(enabledClient(t), nil, nil, nil)
+	m.concurrency = 1
+	m.sweepInterval = time.Hour
+	m.jitter = func() time.Duration { return 0 }
+	clock := useFakeClock(m)
+	start := clock.Now()
+	addr := address{InstallationID: 1, Owner: "o", Repo: "r", Number: 1}
+
+	last := int32(maxRateLimitRetries + 1)
+	fetches := make(chan time.Duration, 16)
+	var calls atomic.Int32
+	m.fetch = func(context.Context, *Client, int64, string, string, int32) (*PRSnapshot, error) {
+		n := calls.Add(1)
+		fetches <- clock.Now().Sub(start)
+		if n == last {
+			m.Enqueue(addr.InstallationID, addr.Owner, addr.Repo, addr.Number)
+		}
+		if n > last {
+			return nil, errors.New("stop after fetch")
+		}
+		return nil, &RateLimitError{RetryAfter: time.Minute}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	m.Start(ctx)
+	m.Enqueue(addr.InstallationID, addr.Owner, addr.Repo, addr.Number)
+
+	var lastAt time.Duration
+	for i := int32(0); i < last; i++ {
+		select {
+		case lastAt = <-fetches:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("request %d never ran", i)
+		}
+	}
+	select {
+	case got := <-fetches:
+		if got-lastAt < time.Minute {
+			t.Fatalf("event fetched %v after the last 403, inside its one-minute pause", got-lastAt)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("event that arrived during the last allowed request was dropped")
 	}
 }
 

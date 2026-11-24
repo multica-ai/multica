@@ -150,7 +150,9 @@ func TestRateLimitFromResponse(t *testing.T) {
 		{"reset fallback", map[string]string{"X-RateLimit-Reset": "1090"}, 90 * time.Second},
 		{"default", map[string]string{}, time.Minute},
 		{"long retry-after honored", map[string]string{"Retry-After": "900"}, 15 * time.Minute},
-		{"clamped to 1h", map[string]string{"Retry-After": "99999"}, time.Hour},
+		{"retry-after past the primary hour honored", map[string]string{"Retry-After": "7200"}, 2 * time.Hour},
+		{"clamped to 24h", map[string]string{"Retry-After": "99999"}, 24 * time.Hour},
+		{"overflowing retry-after clamped", map[string]string{"Retry-After": "99999999999999"}, 24 * time.Hour},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

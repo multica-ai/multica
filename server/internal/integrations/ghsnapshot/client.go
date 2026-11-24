@@ -41,6 +41,8 @@ const (
 	// in-flight request never races the expiry boundary. GitHub tokens live
 	// one hour.
 	tokenRenewSkew = 5 * time.Minute
+	// maxRateLimitWait bounds a rate-limit wait read from GitHub's headers.
+	maxRateLimitWait = 24 * time.Hour
 )
 
 // RateLimitError signals that GitHub asked us to back off. RetryAfter is how
@@ -283,14 +285,15 @@ func isRateLimited(resp *http.Response, body []byte) bool {
 
 // rateLimitFromResponse builds a RateLimitError from GitHub's throttling
 // headers. Retry-After (seconds) wins; then X-RateLimit-Reset (unix seconds);
-// otherwise a conservative 60s. The wait is clamped to [1s, 1h]: GitHub's
-// primary limit resets within the hour, and retrying before the wait it asked
-// for only prolongs the limit.
+// otherwise a conservative 60s. GitHub's wait is honored in full, since
+// retrying before it only prolongs the limit, and a secondary limit can ask
+// for longer than the primary hour. The wait is clamped to [1s, 24h]; the cap
+// only guards against a malformed header and duration overflow.
 func rateLimitFromResponse(resp *http.Response, now time.Time) *RateLimitError {
 	wait := time.Minute
 	if v := resp.Header.Get("Retry-After"); v != "" {
 		if secs, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && secs >= 0 {
-			wait = time.Duration(secs) * time.Second
+			wait = time.Duration(min(secs, int(maxRateLimitWait/time.Second))) * time.Second
 		}
 	} else if v := resp.Header.Get("X-RateLimit-Reset"); v != "" {
 		if unix, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64); err == nil {
@@ -302,8 +305,8 @@ func rateLimitFromResponse(resp *http.Response, now time.Time) *RateLimitError {
 	if wait < time.Second {
 		wait = time.Second
 	}
-	if wait > time.Hour {
-		wait = time.Hour
+	if wait > maxRateLimitWait {
+		wait = maxRateLimitWait
 	}
 	return &RateLimitError{RetryAfter: wait}
 }
