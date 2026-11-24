@@ -1,6 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render as rtlRender, screen } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
+import { I18nProvider } from "@multica/core/i18n/react";
+import { RESOURCES } from "@multica/views/locales";
+
+function render(ui: ReactElement) {
+  return rtlRender(
+    <I18nProvider locale="en" resources={RESOURCES}>
+      {ui}
+    </I18nProvider>,
+  );
+}
 
 const openModal = vi.fn();
 const reloadActiveTab = vi.fn();
@@ -29,7 +40,10 @@ vi.mock("@/stores/tab-store", () => {
   return { useTabStore };
 });
 
-import { DesktopRouteErrorPage, formatRouteErrorReport } from "./route-error-page";
+import {
+  createRouteErrorFeedbackContext,
+  DesktopRouteErrorPage,
+} from "./route-error-page";
 
 function Boom(): null {
   throw new Error("route render exploded");
@@ -96,7 +110,7 @@ describe("DesktopRouteErrorPage", () => {
     expect(closeActiveTab).toHaveBeenCalledTimes(1);
   });
 
-  it("opens the existing feedback modal with a structured markdown report only after click", async () => {
+  it("opens the feedback modal with structured error context only after click", async () => {
     const router = createMemoryRouter(
       [{ path: "/acme/issues", element: <Boom />, errorElement: <DesktopRouteErrorPage /> }],
       { initialEntries: ["/acme/issues"] },
@@ -110,23 +124,39 @@ describe("DesktopRouteErrorPage", () => {
     expect(openModal).toHaveBeenCalledWith(
       "feedback",
       expect.objectContaining({
-        initialMessage: expect.stringContaining("kind: desktop_route_error"),
         kind: "bug",
+        context: {
+          kind: "desktop_route_error",
+          trigger: "route-errorElement",
+          error: {
+            name: "Error",
+            message: "route render exploded",
+            stack: expect.stringContaining("route render exploded"),
+          },
+        },
       }),
     );
+    expect(openModal.mock.calls[0]?.[1]).not.toHaveProperty("initialMessage");
   });
 
-  it("documents the structured context follow-up debt in the report template", () => {
-    const report = formatRouteErrorReport({
-      error: new Error("bad route"),
-      url: "app://desktop/acme/issues",
-      appInfo: { version: "1.2.3", os: "macos" },
+  it("keeps system diagnostics out of the member-editable message", () => {
+    const error = new Error("bad route");
+    error.stack = "Error: bad route\n  at Route";
+
+    const context = createRouteErrorFeedbackContext({
+      error,
       trigger: "route-errorElement",
     });
 
-    expect(report).toContain("kind: desktop_route_error");
-    expect(report).toContain("trigger: route-errorElement");
-    expect(report).toContain("TODO: promote error context to structured feedback fields");
+    expect(context).toEqual({
+      kind: "desktop_route_error",
+      trigger: "route-errorElement",
+      error: {
+        name: "Error",
+        message: "bad route",
+        stack: "Error: bad route\n  at Route",
+      },
+    });
   });
 
   // --- 404 as a first-class product state (MUL-4899) -----------------------

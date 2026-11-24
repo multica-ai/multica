@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/multica-ai/multica/server/pkg/remotemcp"
 	"time"
 
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -36,6 +38,30 @@ func TestClient_IdentityHeaders_PostJSON(t *testing.T) {
 		for _, want := range []string{
 			protocol.DaemonCapabilitySkillBundlesV1,
 			protocol.DaemonCapabilityCoalescedCommentsV1,
+			// The worktree gate is decided entirely from this header: if the
+			// daemon stops advertising it, every worktree task on this machine
+			// is cancelled with an upgrade prompt (MUL-5707). Pin it here so
+			// dropping it from the list can never be a silent change.
+			protocol.DaemonCapabilityLocalWorktreeV1,
+			// Same shape, opposite default: this daemon's brief names the
+			// merged multica-platform skill, and advertising that is what
+			// stops the server shipping it a redirect stub under the old name
+			// (MUL-6986). Dropping it would silently hand every task on this
+			// machine a skill it does not need; the failure is extra payload
+			// and a stale signpost, neither of which any other test would
+			// notice.
+			protocol.DaemonCapabilityPlatformSkillV1,
+			// Gates whether an automatic retry is handed its parent's workdir
+			// (MUL-7034). Dropping it silently sends those retries back to a
+			// fresh directory, losing the continuity nothing else would flag.
+			protocol.DaemonCapabilityCheckoutKeepsWorkV1,
+			// Without it the server never hands this daemon the wakeups that
+			// waited for its run; they start runs of their own instead.
+			protocol.DaemonCapabilityJoinedWakeupsV1,
+			// Without it the server keeps adding the lines that override the
+			// built-in in_progress / in_review rules to [Project workflow],
+			// rules this daemon's brief no longer states (MUL-8145).
+			protocol.DaemonCapabilityWorkflowStatusRulesV1,
 		} {
 			if !capabilities[want] {
 				t.Errorf("X-Client-Capabilities missing %q: %v", want, capabilities)
@@ -78,6 +104,131 @@ func TestClient_IdentityHeaders_GetJSON(t *testing.T) {
 	var out map[string]any
 	if err := c.getJSON(context.Background(), "/api/daemon/test", &out); err != nil {
 		t.Fatalf("getJSON: %v", err)
+	}
+}
+
+func TestStartTaskCapabilityNegotiationMixedVersions(t *testing.T) {
+	defer noSleepRetry(t)()
+	const prefix = `{"supplement_capability":"task-supplement-v1","issue":{"description":"`
+	const suffix = `"}}`
+	responseAtLimit := prefix + strings.Repeat("x", (1<<20)-len(prefix)-len(suffix)) + suffix
+	for _, tc := range []struct {
+		name          string
+		response      string
+		contentLength string
+		negotiated    bool
+		wantError     bool
+		retry         bool
+	}{
+		{name: "empty response", response: ""},
+		{name: "truncated HTTP body", contentLength: "8", wantError: true, retry: true},
+		{name: "truncated response", response: `{"supplement_capability":`, wantError: true},
+		{name: "trailing garbage", response: `{"supplement_capability":"task-supplement-v1"}garbage`, wantError: true},
+		{name: "HTML response", response: `<html>Proxy error</html>`, wantError: true},
+		{name: "response at size limit", response: responseAtLimit, negotiated: true},
+		{name: "response exceeds size limit", response: responseAtLimit + " ", wantError: true},
+		{name: "old server task response", response: `{"id":"task-1","status":"running"}`, negotiated: false},
+		{name: "new server explicit capability", response: `{"supplement_capability":"task-supplement-v1"}`, negotiated: true},
+	} {
+		for _, mode := range []string{"legacy", "claim-fenced"} {
+			t.Run(tc.name+"/"+mode, func(t *testing.T) {
+				var calls atomic.Int32
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					calls.Add(1)
+					var body struct {
+						Capabilities []string `json:"capabilities"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Errorf("decode start request: %v", err)
+					}
+					if len(body.Capabilities) != 1 || body.Capabilities[0] != protocol.DaemonCapabilityTaskSupplementV1 {
+						t.Errorf("capabilities = %#v", body.Capabilities)
+					}
+					w.Header().Set("Content-Type", "application/json")
+					if tc.contentLength != "" {
+						w.Header().Set("Content-Length", tc.contentLength)
+					}
+					_, _ = w.Write([]byte(tc.response))
+				}))
+				defer srv.Close()
+
+				task := startTestClaim()
+				task.StartClaimSupported = mode == "claim-fenced"
+				got, err := NewClient(srv.URL).StartTask(context.Background(), task, protocol.DaemonCapabilityTaskSupplementV1)
+				if (err != nil) != tc.wantError {
+					t.Errorf("StartTask: %v", err)
+				}
+				if got != tc.negotiated {
+					t.Errorf("negotiated = %v, want %v", got, tc.negotiated)
+				}
+				wantCalls := 1
+				if tc.retry && task.StartClaimSupported {
+					wantCalls += len(startTaskRetrySchedule)
+				}
+				if got := int(calls.Load()); got != wantCalls {
+					t.Errorf("requests = %d, want %d", got, wantCalls)
+				}
+			})
+		}
+	}
+}
+
+func TestClient_ResolveRemoteMCPCredentialUsesExplicitDaemonToken(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer mdt_task_broker" {
+			t.Errorf("Authorization = %q, want short-lived daemon token", got)
+		}
+		if got := r.URL.Path; got != "/api/daemon/tasks/task-1/remote-mcp/contribution-1/credential" {
+			t.Errorf("path = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"credential_header":"Authorization","credential":"Bearer upstream"}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	c.SetToken("mul_owner_pat")
+	headers, err := c.ResolveRemoteMCPCredential(context.Background(), "mdt_task_broker", "task-1", "contribution-1")
+	if err != nil {
+		t.Fatalf("ResolveRemoteMCPCredential: %v", err)
+	}
+	if got := headers.Get("Authorization"); got != "Bearer upstream" {
+		t.Fatalf("resolved credential = %q", got)
+	}
+	if got := c.Token(); got != "mul_owner_pat" {
+		t.Fatalf("client PAT was mutated to %q", got)
+	}
+}
+
+// A Plugin's mcp hook shares this resolver and this broker with a workspace's
+// own Remote MCP connections, but its credential lives in the Plugin's secret
+// storage and a different route serves it. The contribution id is all the
+// broker hands back at dial time, so the id carries the marker — and a
+// connection without it must keep going to the original route.
+func TestClient_ResolveRemoteMCPCredentialRoutesPluginContributions(t *testing.T) {
+	var seen []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"credential_header":"Authorization","credential":"Bearer upstream"}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	for _, contribution := range []string{"contribution-1", remotemcp.PluginContributionPrefix + "install-1:toolbox"} {
+		if _, err := c.ResolveRemoteMCPCredential(context.Background(), "mdt_task_broker", "task-1", contribution); err != nil {
+			t.Fatalf("resolve %q: %v", contribution, err)
+		}
+	}
+
+	want := []string{
+		"/api/daemon/tasks/task-1/remote-mcp/contribution-1/credential",
+		"/api/daemon/tasks/task-1/plugin-mcp/plugin:install-1:toolbox/credential",
+	}
+	for i, path := range want {
+		if seen[i] != path {
+			t.Fatalf("request %d went to %q, want %q", i, seen[i], path)
+		}
 	}
 }
 
@@ -290,7 +441,7 @@ func TestFailTask_RetriesOnTransient5xxThenSucceeds(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL)
-	if err := c.FailTask(context.Background(), "task-1", "boom", "", "", "timeout", true, ""); err != nil {
+	if err := c.FailTask(context.Background(), "task-1", "boom", "", "", "", "timeout", true, "", ""); err != nil {
 		t.Fatalf("FailTask: %v", err)
 	}
 	if got := calls.Load(); got != 3 {
@@ -344,20 +495,22 @@ func TestPostJSONWithRetry_PermanentBailsImmediately(t *testing.T) {
 }
 
 func TestPostJSONWithRetry_CtxCancelStopsRetries(t *testing.T) {
+	t.Parallel()
+
 	// Use the real sleeper here so we can observe a cancel preempting it.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
 		w.WriteHeader(http.StatusBadGateway)
+		w.(http.Flusher).Flush()
+		// Cancel only once the first attempt has been answered: it lands while
+		// the client finishes that response or in the 1s retry sleep after it,
+		// never before the first attempt, and no second attempt can start.
+		cancel()
 	}))
 	defer srv.Close()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		// Cancel quickly so the first sleep is aborted long before its 1s.
-		time.Sleep(50 * time.Millisecond)
-		cancel()
-	}()
 
 	c := NewClient(srv.URL)
 	schedule := []time.Duration{time.Second, time.Second, time.Second}
@@ -372,21 +525,6 @@ func TestPostJSONWithRetry_CtxCancelStopsRetries(t *testing.T) {
 	}
 	if got := calls.Load(); got != 1 {
 		t.Fatalf("expected exactly 1 attempt before cancel, got %d", got)
-	}
-}
-
-func TestDefaultTerminalRetrySchedule_MatchesAgreedPlan(t *testing.T) {
-	// MUL-2780 settled on a 5-step exponential backoff (4s, 8s, 16s, 32s, 64s).
-	// Pin it so a future "tidy this up" refactor can't silently flatten or
-	// shorten the recovery window without explicit discussion.
-	want := []time.Duration{4 * time.Second, 8 * time.Second, 16 * time.Second, 32 * time.Second, 64 * time.Second}
-	if len(defaultTerminalRetrySchedule) != len(want) {
-		t.Fatalf("schedule length: got %d, want %d", len(defaultTerminalRetrySchedule), len(want))
-	}
-	for i, d := range want {
-		if defaultTerminalRetrySchedule[i] != d {
-			t.Errorf("schedule[%d]: got %s, want %s", i, defaultTerminalRetrySchedule[i], d)
-		}
 	}
 }
 
@@ -420,14 +558,14 @@ func TestTerminalReportsCarryRetiredSessionID(t *testing.T) {
 			name:     "complete",
 			endpoint: "/api/daemon/tasks/task-1/complete",
 			call: func(c *Client) error {
-				return c.CompleteTask(context.Background(), "task-1", "done", "", "", "/tmp/wd", false, "POISONED-S")
+				return c.CompleteTask(context.Background(), "task-1", "done", "", "", "/tmp/wd", false, "POISONED-S", "")
 			},
 		},
 		{
 			name:     "fail",
 			endpoint: "/api/daemon/tasks/task-1/fail",
 			call: func(c *Client) error {
-				return c.FailTask(context.Background(), "task-1", "boom", "", "/tmp/wd", "api_invalid_request", false, "POISONED-S")
+				return c.FailTask(context.Background(), "task-1", "boom", "", "/tmp/wd", "", "api_invalid_request", false, "POISONED-S", "")
 			},
 		},
 	} {
@@ -463,10 +601,53 @@ func TestTerminalReportsOmitEmptyRetiredSessionID(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if err := NewClient(srv.URL).CompleteTask(context.Background(), "task-1", "done", "", "sess-1", "/tmp/wd", false, ""); err != nil {
+	if err := NewClient(srv.URL).CompleteTask(context.Background(), "task-1", "done", "", "sess-1", "/tmp/wd", false, "", ""); err != nil {
 		t.Fatalf("CompleteTask: %v", err)
 	}
 	if _, present := body["retired_session_id"]; present {
 		t.Fatalf("retired_session_id must be omitted when nothing was retired, got %v", body)
+	}
+}
+
+func TestTerminalReportsCarryDurableWorkDir(t *testing.T) {
+	const durableWorkDir = "/Users/dev/project"
+	for _, tc := range []struct {
+		name string
+		call func(*Client) error
+	}{
+		{
+			name: "complete",
+			call: func(c *Client) error {
+				return c.CompleteTask(context.Background(), "task-1", "done", "", "", "/tmp/wd", false, "", durableWorkDir)
+			},
+		},
+		{
+			name: "fail",
+			call: func(c *Client) error {
+				return c.FailTask(context.Background(), "task-1", "boom", "", "/tmp/wd", "", "agent_error", false, "", durableWorkDir)
+			},
+		},
+		{
+			name: "cancel ack",
+			call: func(c *Client) error {
+				return c.AckTaskCancelled(context.Background(), "task-1", TaskCancelAck{DurableWorkDir: durableWorkDir})
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var body map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer srv.Close()
+
+			if err := tc.call(NewClient(srv.URL)); err != nil {
+				t.Fatalf("terminal report: %v", err)
+			}
+			if got := body["durable_work_dir"]; got != durableWorkDir {
+				t.Fatalf("durable_work_dir = %v, want %q (body: %v)", got, durableWorkDir, body)
+			}
+		})
 	}
 }

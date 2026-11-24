@@ -14,9 +14,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -233,7 +235,6 @@ func emitAutopilotPausedNotifications(
 		"reason":               "auto_paused_high_failure_rate",
 	})
 
-	workspaceID := util.UUIDToString(autopilot.WorkspaceID)
 	autopilotIDStr := util.UUIDToString(autopilot.ID)
 
 	emitted := make(map[string]bool, len(recipients))
@@ -244,7 +245,8 @@ func emitAutopilotPausedNotifications(
 		}
 		emitted[key] = true
 
-		item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+		_, _, err := inbox.Deliver(ctx, queries, bus, inbox.Notification{Params: db.CreateInboxItemParams{
+			ID:            dbid.NewV7(),
 			WorkspaceID:   autopilot.WorkspaceID,
 			RecipientType: r.Type,
 			RecipientID:   r.ID,
@@ -256,7 +258,7 @@ func emitAutopilotPausedNotifications(
 			ActorType:     util.StrToText("system"),
 			ActorID:       pgtype.UUID{},
 			Details:       details,
-		})
+		}})
 		if err != nil {
 			slog.Warn("autopilot failure monitor: inbox write failed",
 				"autopilot_id", autopilotIDStr,
@@ -264,57 +266,38 @@ func emitAutopilotPausedNotifications(
 				"recipient_id", util.UUIDToString(r.ID),
 				"error", err,
 			)
-			continue
 		}
-
-		bus.Publish(events.Event{
-			Type:        protocol.EventInboxNew,
-			WorkspaceID: workspaceID,
-			ActorType:   "system",
-			ActorID:     "",
-			Payload:     map[string]any{"item": inboxItemToResponse(item)},
-		})
 	}
-}
-
-// pausedRecipient identifies a single inbox_item recipient.
-type pausedRecipient struct {
-	Type string // "member" or "agent"
-	ID   pgtype.UUID
 }
 
 func resolveAutopilotPausedRecipients(
 	ctx context.Context,
 	queries *db.Queries,
 	autopilot db.Autopilot,
-) []pausedRecipient {
-	if autopilot.CreatedByType == "member" {
-		return []pausedRecipient{{Type: "member", ID: autopilot.CreatedByID}}
-	}
-
-	// Creator is an agent — find the agent's human owner so the alert lands
-	// somewhere actionable. If we can't resolve a member, skip notification
-	// rather than spam an agent that can't act on it.
-	agent, err := queries.GetAgent(ctx, autopilot.CreatedByID)
+) []service.AutopilotNotificationRecipient {
+	recipient, ok, err := service.ResolveAutopilotNotificationRecipient(ctx, queries, autopilot)
 	if err != nil {
-		slog.Debug("autopilot failure monitor: failed to load creator agent",
-			"agent_id", util.UUIDToString(autopilot.CreatedByID),
+		slog.Debug("autopilot failure monitor: failed to resolve recipient",
+			"autopilot_id", util.UUIDToString(autopilot.ID),
 			"error", err,
 		)
 		return nil
 	}
-	if !agent.OwnerID.Valid {
-		return nil
+	if ok {
+		return []service.AutopilotNotificationRecipient{recipient}
 	}
 
-	member, err := queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
-		UserID:      agent.OwnerID,
-		WorkspaceID: autopilot.WorkspaceID,
-	})
+	recipients, err := service.ListWorkspaceManagerNotificationRecipients(
+		ctx, queries, autopilot.WorkspaceID,
+	)
 	if err != nil {
+		slog.Debug("autopilot failure monitor: failed to resolve workspace manager fallback recipients",
+			"autopilot_id", util.UUIDToString(autopilot.ID),
+			"error", err,
+		)
 		return nil
 	}
-	return []pausedRecipient{{Type: "member", ID: member.UserID}}
+	return recipients
 }
 
 // autopilotEventPayload builds the minimal payload shape consumed by

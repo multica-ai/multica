@@ -51,9 +51,7 @@ cat <<'JSON'
 JSON
 ` + tail + `
 `
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatalf("write openclaw stub: %v", err)
-	}
+	writeTestExecutable(t, bin, []byte(script))
 	return bin
 }
 
@@ -96,6 +94,8 @@ func (b *syncBuffer) String() string {
 // TestOpenclawExecuteCompletesWhenCLINeverExits is the assertion that would have
 // caught the undelivered-reply incident.
 func TestOpenclawExecuteCompletesWhenCLINeverExits(t *testing.T) {
+	t.Parallel()
+
 	bin := writeOpenclawStub(t, completeOpenclawResult, true)
 	b := newOpenclawTestBackend(bin)
 
@@ -188,6 +188,8 @@ func TestOpenclawExecuteStillWorksWhenCLIExits(t *testing.T) {
 // that pipe), while the descendant keeps stderr open for 5s, well past the
 // 500ms delay.
 func TestOpenclawExecuteToleratesLingeringStderrHolder(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "openclaw")
 	script := `#!/bin/sh
@@ -208,9 +210,7 @@ cat <<'JSON'
 JSON
 exit 0
 `
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatalf("write openclaw stub: %v", err)
-	}
+	writeTestExecutable(t, bin, []byte(script))
 	b, logs := newOpenclawTestBackendWithLog(bin)
 
 	session, err := b.Execute(context.Background(), "hi", ExecOptions{})
@@ -272,31 +272,140 @@ func TestReadOpenclawStdoutDoesNotWaitForIdleGraceAtEOF(t *testing.T) {
 	}
 }
 
+// stagedOpenclawEOFReader returns an incomplete result first, then waits until
+// the test releases the final bytes. The final Read returns data and io.EOF
+// together, so completion and clean EOF are one deterministic observation
+// rather than two independently scheduled pipe operations.
+type stagedOpenclawEOFReader struct {
+	prefix        string
+	suffix        string
+	suffixRead    chan struct{}
+	releaseSuffix chan struct{}
+	readCount     int
+}
+
+func (r *stagedOpenclawEOFReader) Read(p []byte) (int, error) {
+	switch r.readCount {
+	case 0:
+		r.readCount++
+		return copy(p, r.prefix), nil
+	case 1:
+		r.readCount++
+		close(r.suffixRead)
+		<-r.releaseSuffix
+		return copy(p, r.suffix), io.EOF
+	default:
+		return 0, io.EOF
+	}
+}
+
+// lingeringOpenclawReader delivers the whole result in one Read and then keeps
+// the stream open until the test releases it — an openclaw that printed its
+// complete blob and refused to exit, without spawning a process.
+type lingeringOpenclawReader struct {
+	body    string
+	release chan struct{}
+	sent    bool
+}
+
+func (r *lingeringOpenclawReader) Read(p []byte) (int, error) {
+	if !r.sent {
+		r.sent = true
+		return copy(p, r.body), nil
+	}
+	<-r.release
+	return 0, io.EOF
+}
+
+// TestReadOpenclawStdoutCutsShortWhenCLILingers pins the half of the mechanism
+// the atomicity fix must not weaken: a complete result followed by silence on a
+// stream that never reaches EOF still has to return cutShort, or the caller
+// never cancels and the hang this whole file exists for comes back.
+//
+// The counterpart, TestReadOpenclawStdoutWaitsForCompleteResult, only proves
+// that a clean EOF is *not* reported as cut short; on its own it would still
+// pass if the shortcut stopped firing entirely.
+func TestReadOpenclawStdoutCutsShortWhenCLILingers(t *testing.T) {
+	r := &lingeringOpenclawReader{
+		body:    completeOpenclawResult,
+		release: make(chan struct{}),
+	}
+	// Matches the documented contract: the read goroutine is still parked in
+	// r.Read on the cutShort path and exits when the caller unblocks it, which
+	// in production is Execute closing stdout on cancellation.
+	defer close(r.release)
+
+	// Off the test goroutine with a bound: a regression that stopped cutting
+	// short would otherwise park here until the package timeout, reporting a
+	// whole-package failure instead of this assertion.
+	type outcome struct {
+		buf      string
+		cutShort bool
+		err      error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		buf, cutShort, err := readOpenclawStdout(r, 100*time.Millisecond)
+		done <- outcome{buf: string(buf), cutShort: cutShort, err: err}
+	}()
+
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatalf("readOpenclawStdout: %v", got.err)
+		}
+		if !got.cutShort {
+			t.Error("cutShort = false for a complete result on a stream that " +
+				"never ends, want true")
+		}
+		if got.buf != completeOpenclawResult {
+			t.Errorf("buf = %q, want the full blob", got.buf)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("readOpenclawStdout never cut short on a complete result whose " +
+			"stream stays open — the caller would wait forever on a process " +
+			"that has already delivered its reply")
+	}
+}
+
 // TestReadOpenclawStdoutWaitsForCompleteResult pins the safety half of the
 // shortcut: idle output alone is not enough. Cutting off a partial buffer would
 // throw away work the agent has already done, which is worse than the hang this
 // change fixes.
 func TestReadOpenclawStdoutWaitsForCompleteResult(t *testing.T) {
-	pr, pw, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("pipe: %v", err)
-	}
-	defer pr.Close()
+	t.Parallel()
 
-	// A partial blob that cannot parse, followed by silence.
-	if _, err := pw.WriteString(`{"payloads":[{"text":"half`); err != nil {
-		t.Fatalf("write: %v", err)
+	r := &stagedOpenclawEOFReader{
+		prefix:        `{"payloads":[{"text":"half`,
+		suffix:        `"}],"meta":{"durationMs":1}}`,
+		suffixRead:    make(chan struct{}),
+		releaseSuffix: make(chan struct{}),
 	}
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			close(r.releaseSuffix)
+		}
+	})
 
 	type outcome struct {
 		cutShort bool
 		buf      string
+		err      error
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		buf, cutShort, _ := readOpenclawStdout(pr, 200*time.Millisecond)
-		done <- outcome{cutShort: cutShort, buf: string(buf)}
+		buf, cutShort, err := readOpenclawStdout(r, 200*time.Millisecond)
+		done <- outcome{cutShort: cutShort, buf: string(buf), err: err}
 	}()
+
+	select {
+	case <-r.suffixRead:
+		// The incomplete prefix has been consumed and the reader is now
+		// deliberately silent until the test releases the suffix.
+	case <-time.After(5 * time.Second):
+		t.Fatal("readOpenclawStdout did not request the final bytes")
+	}
 
 	// Well past the idle grace: without the parse guard the reader would have
 	// returned cutShort by now.
@@ -309,14 +418,22 @@ func TestReadOpenclawStdoutWaitsForCompleteResult(t *testing.T) {
 	default:
 	}
 
-	// Completing the blob and closing gives the reader a clean EOF.
-	if _, err := pw.WriteString(`"}],"meta":{"durationMs":1}}`); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	pw.Close()
+	// Complete the blob and report EOF in the same Read: the strictest shape
+	// io.Reader permits, and deliberately harsher than the os/exec StdoutPipe
+	// production reads, which splits the final bytes and the EOF across two
+	// adjacent reads. Collapsing them into one observation is what makes the
+	// assertion below deterministic — readOpenclawStdout publishes those bytes
+	// and that EOF in a single critical section, so no poll can catch the
+	// buffer parseable-but-not-yet-ended, whatever the runner's scheduling
+	// looks like.
+	released = true
+	close(r.releaseSuffix)
 
 	select {
 	case got := <-done:
+		if got.err != nil {
+			t.Errorf("readOpenclawStdout: %v", got.err)
+		}
 		if got.cutShort {
 			t.Error("cutShort = true after a clean EOF, want false")
 		}

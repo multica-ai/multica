@@ -79,7 +79,12 @@ describe("useIssueStatusBranches", () => {
         };
       },
     );
-    setApiInstance({ listIssueTableRows } as unknown as ApiClient);
+    setApiInstance({
+      listIssueTableRows,
+      // The hook pages by category, so it reads the catalog. Empty is the real
+      // shape for a workspace with no custom statuses. (MUL-6243)
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
+    } as unknown as ApiClient);
     // Mirror the production client (createQueryClient): row pages stay fresh
     // until explicitly invalidated, so re-expanding a collapsed section reuses
     // settled cursor pages instead of refetching them on observer reattach.

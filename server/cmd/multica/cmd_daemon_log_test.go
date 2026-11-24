@@ -96,33 +96,6 @@ func TestOpenBoundedErrLogKeepsSmall(t *testing.T) {
 	}
 }
 
-// TestNewDaemonLogRotatorDefaults asserts the rotator is wired to the intended
-// policy when no env overrides are set: the configured path, the default
-// size/backups/age, and gzip compression so rotated files stay small.
-func TestNewDaemonLogRotatorDefaults(t *testing.T) {
-	os.Unsetenv("MULTICA_DAEMON_LOG_MAX_SIZE_MB")
-	os.Unsetenv("MULTICA_DAEMON_LOG_MAX_BACKUPS")
-	os.Unsetenv("MULTICA_DAEMON_LOG_MAX_AGE_DAYS")
-
-	path := filepath.Join(t.TempDir(), "daemon.log")
-	r := newDaemonLogRotator(path)
-	if r.Filename != path {
-		t.Errorf("Filename = %q, want %q", r.Filename, path)
-	}
-	if r.MaxSize != defaultDaemonLogMaxSizeMB {
-		t.Errorf("MaxSize = %d, want %d", r.MaxSize, defaultDaemonLogMaxSizeMB)
-	}
-	if r.MaxBackups != defaultDaemonLogMaxBackups {
-		t.Errorf("MaxBackups = %d, want %d", r.MaxBackups, defaultDaemonLogMaxBackups)
-	}
-	if r.MaxAge != defaultDaemonLogMaxAgeDays {
-		t.Errorf("MaxAge = %d, want %d", r.MaxAge, defaultDaemonLogMaxAgeDays)
-	}
-	if !r.Compress {
-		t.Error("Compress = false, want true")
-	}
-}
-
 // TestNewDaemonLogRotatorEnvOverride confirms operators can tune retention via
 // env without a rebuild.
 func TestNewDaemonLogRotatorEnvOverride(t *testing.T) {

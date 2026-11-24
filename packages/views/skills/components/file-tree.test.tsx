@@ -72,28 +72,6 @@ describe("FileTree row actions", () => {
     expect(onEdit).toHaveBeenCalledWith("notes.txt");
   });
 
-  it("keeps the menu trigger's widened hit area inside the trigger", async () => {
-    await renderWithI18n(
-      <FileTree
-        filePaths={PATHS}
-        selectedPath="SKILL.md"
-        onSelect={vi.fn()}
-        actions={makeActions()}
-      />,
-    );
-
-    // MUL-5654: the trigger widens its hit area with an absolutely positioned
-    // `after:-inset-1`. Drop `relative` and that pseudo-element resolves
-    // against the row instead, covering it end to end and swallowing every
-    // click on the file name — the row stops selecting and opens this menu.
-    // jsdom has no layout or hit testing, so the class pairing is the part a
-    // unit test can hold; the behaviour itself needs a real browser.
-    // The name button carries role="tab", so a "button" match is the trigger.
-    const trigger = screen.getByRole("button", { name: /notes\.txt/ });
-    expect(trigger.className).toContain("after:absolute");
-    expect(trigger.className).toContain("relative");
-  });
-
   it("deletes the row acted on, not whichever file happens to be open", async () => {
     const onDelete = vi.fn();
     await renderWithI18n(

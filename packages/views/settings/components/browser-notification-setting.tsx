@@ -13,6 +13,15 @@ import { useT } from "../../i18n";
 import { SettingsCard, SettingsRow } from "./settings-layout";
 
 /**
+ * Whether the browser-permission row exists on this platform: web only, and
+ * only where the Notification API is present. The settings search index reads
+ * this too, so search never offers a row the page will not render.
+ */
+export function browserNotificationSettingAvailable(): boolean {
+  return !isDesktopShell() && isWebNotificationSupported();
+}
+
+/**
  * Web-only control for the browser permission that native notification banners
  * require. Desktop delivers banners through the OS via Electron (no browser
  * permission involved), so this renders nothing there. It also renders nothing
@@ -34,7 +43,7 @@ export function BrowserNotificationSetting() {
   }, []);
 
   // Pre-mount, on desktop, or where the API is missing → nothing to manage.
-  if (!mounted || isDesktopShell() || !isWebNotificationSupported()) return null;
+  if (!mounted || !browserNotificationSettingAvailable()) return null;
 
   const handleEnable = async () => {
     setPermission(await requestWebNotificationPermission());
@@ -50,6 +59,7 @@ export function BrowserNotificationSetting() {
   return (
     <SettingsCard>
       <SettingsRow
+        anchor="browser"
         label={t(($) => $.notifications.browser.label)}
         description={statusHint}
       >

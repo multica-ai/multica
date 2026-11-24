@@ -5,6 +5,8 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
 import { parseMentions } from "@multica/core/issues/comment-trigger-outcomes";
+import { useCurrentWorkspace } from "@multica/core/paths";
+import { useIsGuest } from "@multica/core/permissions";
 import type { CommentTriggerPreviewAgent, CommentTriggerOutcome } from "@multica/core/types";
 
 const COMMENT_TRIGGER_PREVIEW_DEBOUNCE_MS = 300;
@@ -15,6 +17,16 @@ export interface UseCommentTriggerPreviewResult {
   // Explicit @agent / @squad mentions that will NOT trigger if posted as-is
   // (MUL-4525 §2), so the composer can warn before sending.
   blocked: CommentTriggerOutcome[];
+  // A structured @all mention is a member broadcast, but never starts agents
+  // by itself. This is static mention semantics, not a delivery guarantee:
+  // edits do not notify, and a new comment may have no eligible recipients.
+  hasAllMembersMention: boolean;
+  /**
+   * Whether `agents` answers the draft's current mentions. While a changed
+   * @mention is still debouncing or loading, the previous answer is shown;
+   * nothing destructive may act on it.
+   */
+  isCurrent: boolean;
 }
 
 export function isNoteCommentDraft(content: string): boolean {
@@ -83,7 +95,14 @@ export function useCommentTriggerPreview({
   content: string;
 }): UseCommentTriggerPreviewResult {
   const signature = useMemo(() => commentTriggerPreviewSignature(content), [content]);
+  const hasAllMembersMention = useMemo(
+    () => parseMentions(content).some(({ type, id }) => type === "all" && id === "all"),
+    [content],
+  );
   const debouncedSignature = useDebouncedSignature(signature);
+  // A guest's comment never starts an agent (MUL-9420), so there is nothing
+  // to preview and the server refuses the request.
+  const guest = useIsGuest(useCurrentWorkspace()?.id);
   const contentRef = useRef(content);
   const parentKey = parentId ?? "";
   const editingKey = editingCommentId ?? "";
@@ -95,7 +114,7 @@ export function useCommentTriggerPreview({
   const previewQuery = useQuery({
     queryKey: [...issueKeys.commentTriggerPreview(issueId), parentKey, editingKey, debouncedSignature],
     queryFn: () => api.previewCommentTriggers(issueId, contentRef.current, parentId, editingCommentId),
-    enabled: signature !== "empty" && debouncedSignature !== "empty",
+    enabled: !guest && signature !== "empty" && debouncedSignature !== "empty",
     retry: false,
     // The answer depends on live queue state (pending-task dedup), not just
     // the mention set, so a cached result must revalidate when its signature
@@ -114,11 +133,13 @@ export function useCommentTriggerPreview({
   // Loading and errors intentionally surface as "no agents": the preview is
   // an enhancement, and the composer renders nothing for an empty list.
   if (signature === "empty" || debouncedSignature === "empty") {
-    return { agents: [], blocked: [] };
+    return { agents: [], blocked: [], hasAllMembersMention, isCurrent: signature === "empty" };
   }
 
   return {
     agents: previewQuery.data?.agents ?? [],
     blocked: previewQuery.data?.blocked ?? [],
+    hasAllMembersMention,
+    isCurrent: signature === debouncedSignature && previewQuery.isSuccess && !previewQuery.isPlaceholderData,
   };
 }

@@ -17,6 +17,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -81,19 +82,44 @@ type issueTableDateFilterRequest struct {
 }
 
 type issueTableFiltersRequest struct {
-	Statuses          []string                     `json:"statuses,omitempty"`
-	Priorities        []string                     `json:"priorities,omitempty"`
-	Assignees         []issueTableActorRef         `json:"assignees,omitempty"`
-	IncludeNoAssignee bool                         `json:"include_no_assignee,omitempty"`
-	Creators          []issueTableActorRef         `json:"creators,omitempty"`
-	ProjectIDs        []string                     `json:"project_ids,omitempty"`
-	IncludeNoProject  bool                         `json:"include_no_project,omitempty"`
-	LabelIDs          []string                     `json:"label_ids,omitempty"`
-	Properties        map[string][]string          `json:"properties,omitempty"`
-	Date              *issueTableDateFilterRequest `json:"date,omitempty"`
-	WorkingOnly       bool                         `json:"working_only,omitempty"`
-	WorkingIssueIDs   []string                     `json:"working_issue_ids,omitempty"`
-	IncludeSubIssues  *bool                        `json:"include_sub_issues,omitempty"`
+	Statuses          []string             `json:"statuses,omitempty"`
+	Priorities        []string             `json:"priorities,omitempty"`
+	Assignees         []issueTableActorRef `json:"assignees,omitempty"`
+	IncludeNoAssignee bool                 `json:"include_no_assignee,omitempty"`
+	Creators          []issueTableActorRef `json:"creators,omitempty"`
+	ProjectIDs        []string             `json:"project_ids,omitempty"`
+	IncludeNoProject  bool                 `json:"include_no_project,omitempty"`
+	// ProjectStatuses filters on the parent project's lifecycle status
+	// (`validProjectStatuses`), independently of ProjectIDs.
+	ProjectStatuses []string `json:"project_statuses,omitempty"`
+	LabelIDs        []string `json:"label_ids,omitempty"`
+	// Relations narrows by how the requesting user relates to the issue
+	// (`issueTableRelations`), OR within the list.
+	Relations []string `json:"relations,omitempty"`
+	// DueDates narrows by relative due-date bucket (`issueTableDueDates`),
+	// OR within the list, resolved against Today.
+	DueDates []string `json:"due_dates,omitempty"`
+	// Today is the viewer's calendar day (YYYY-MM-DD). Required whenever a
+	// due-date bucket is filtered on, here or in Advanced.
+	Today string `json:"today,omitempty"`
+	// Negate names the dimensions above (by JSON field) whose predicate is
+	// inverted. A listed dimension with no values of its own changes nothing.
+	Negate []string `json:"negate,omitempty"`
+	// Advanced is a condition tree ANDed with every flat filter: the one
+	// place an "or" can span dimensions.
+	Advanced *issueTableFilterNode `json:"advanced,omitempty"`
+	// Members are raw JSON so operator objects ({op, value}) and plain
+	// strings both survive the round-trip into parsePropertiesFilterParam.
+	Properties      map[string][]json.RawMessage `json:"properties,omitempty"`
+	Date            *issueTableDateFilterRequest `json:"date,omitempty"`
+	WorkingOnly     bool                         `json:"working_only,omitempty"`
+	IdleOnly        bool                         `json:"idle_only,omitempty"`
+	WorkingIssueIDs []string                     `json:"working_issue_ids,omitempty"`
+	// UnreadIssueIDs is the viewer's unread issues as the client holds them
+	// (`/api/issues/unread`, plus any it keeps on screen after reading). An
+	// explicit empty list matches nothing.
+	UnreadIssueIDs   []string `json:"unread_issue_ids,omitempty"`
+	IncludeSubIssues *bool    `json:"include_sub_issues,omitempty"`
 }
 
 type issueTableSortRequest struct {
@@ -109,6 +135,8 @@ type issueTableQuerySpec struct {
 }
 
 type issueTableGroupSpec struct {
+	// Empty preserves the seven-value protocol used by installed clients.
+	CategoryFormat  string   `json:"category_format,omitempty"`
 	Kind            string   `json:"kind"`
 	PropertyID      string   `json:"property_id,omitempty"`
 	IncludeEmpty    bool     `json:"include_empty,omitempty"`
@@ -157,6 +185,19 @@ type issueTableSQL struct {
 	args        []any
 	fingerprint string
 	workspaceID pgtype.UUID
+	hidden      projectaccess.Hidden
+	// hiddenProjectsRef is the placeholder holding the viewer's hidden project
+	// ids, empty when the viewer sees every project.
+	hiddenProjectsRef string
+}
+
+// parentVisible is a predicate on a parent issue aliased p: true unless the
+// parent sits in a project the viewer cannot see.
+func (s issueTableSQL) parentVisible() string {
+	if s.hiddenProjectsRef == "" {
+		return "TRUE"
+	}
+	return hiddenProjectPredicate("p.project_id", s.hiddenProjectsRef)
 }
 
 type issueTableCursor struct {
@@ -248,29 +289,39 @@ func canonicalIssueTableFingerprint(workspaceID string, spec issueTableQuerySpec
 		spec.Filters.Assignees != nil && len(spec.Filters.Assignees) == 0
 	explicitEmptyWorkingIssues :=
 		spec.Filters.WorkingIssueIDs != nil && len(spec.Filters.WorkingIssueIDs) == 0
+	explicitEmptyUnreadIssues :=
+		spec.Filters.UnreadIssueIDs != nil && len(spec.Filters.UnreadIssueIDs) == 0
 	normalized := spec
 	normalized.Search = strings.TrimSpace(normalized.Search)
 	normalized.Scope.AssigneeTypes = sortedUniqueStrings(normalized.Scope.AssigneeTypes)
 	normalized.Filters.Statuses = sortedUniqueStrings(normalized.Filters.Statuses)
 	normalized.Filters.Priorities = sortedUniqueStrings(normalized.Filters.Priorities)
 	normalized.Filters.ProjectIDs = sortedUniqueStrings(normalized.Filters.ProjectIDs)
+	normalized.Filters.ProjectStatuses = sortedUniqueStrings(normalized.Filters.ProjectStatuses)
 	normalized.Filters.LabelIDs = sortedUniqueStrings(normalized.Filters.LabelIDs)
+	normalized.Filters.Relations = sortedUniqueStrings(normalized.Filters.Relations)
+	normalized.Filters.Negate = sortedUniqueStrings(normalized.Filters.Negate)
+	normalized.Filters.DueDates = sortedUniqueStrings(normalized.Filters.DueDates)
+	normalized.Filters.Advanced = canonicalIssueTableFilterNode(normalized.Filters.Advanced)
 	normalized.Filters.Assignees = sortedUniqueActors(normalized.Filters.Assignees)
 	normalized.Filters.WorkingIssueIDs = sortedUniqueStrings(normalized.Filters.WorkingIssueIDs)
+	normalized.Filters.UnreadIssueIDs = sortedUniqueStrings(normalized.Filters.UnreadIssueIDs)
 	normalized.Filters.Creators = sortedUniqueActors(normalized.Filters.Creators)
 	for key, values := range normalized.Filters.Properties {
-		normalized.Filters.Properties[key] = sortedUniqueStrings(values)
+		normalized.Filters.Properties[key] = sortedUniqueRawJSON(values)
 	}
 	encoded, err := json.Marshal(struct {
 		WorkspaceID                string              `json:"workspace_id"`
 		Query                      issueTableQuerySpec `json:"query"`
 		ExplicitEmptyAssignees     bool                `json:"explicit_empty_assignees,omitempty"`
 		ExplicitEmptyWorkingIssues bool                `json:"explicit_empty_working_issues,omitempty"`
+		ExplicitEmptyUnreadIssues  bool                `json:"explicit_empty_unread_issues,omitempty"`
 	}{
 		WorkspaceID:                workspaceID,
 		Query:                      normalized,
 		ExplicitEmptyAssignees:     explicitEmptyAssignees,
 		ExplicitEmptyWorkingIssues: explicitEmptyWorkingIssues,
+		ExplicitEmptyUnreadIssues:  explicitEmptyUnreadIssues,
 	})
 	if err != nil {
 		return "", err
@@ -299,6 +350,32 @@ func sortedUniqueStrings(values []string) []string {
 	sort.Strings(result)
 	if len(result) == 0 {
 		return nil
+	}
+	return result
+}
+
+// sortedUniqueRawJSON canonicalizes property filter members for the query
+// fingerprint: byte-exact dedup + ordering. Members are raw JSON (strings and
+// operator objects), and marshaling the map back into the fingerprint input
+// must reproduce the same bytes for the same query regardless of member order.
+func sortedUniqueRawJSON(values []json.RawMessage) []json.RawMessage {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	unique := make([]string, 0, len(values))
+	for _, value := range values {
+		key := string(value)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		unique = append(unique, key)
+	}
+	sort.Strings(unique)
+	result := make([]json.RawMessage, len(unique))
+	for i, value := range unique {
+		result[i] = json.RawMessage(value)
 	}
 	return result
 }
@@ -359,39 +436,61 @@ func parseIssueTableActor(w http.ResponseWriter, actor issueTableActorRef, field
 	return issueActorFilter{actorType: actor.Type, actorID: id}, true
 }
 
+// issueTableRelations are the viewer relations `filters.relations` accepts.
+var issueTableRelations = []string{"assigned", "created", "my_agents", "subscribed"}
+
+// issueTableNegatableFilters are the `filters` fields `filters.negate` may name.
+var issueTableNegatableFilters = []string{
+	"statuses", "priorities", "assignees", "creators",
+	"project_ids", "project_statuses", "label_ids", "relations", "due_dates",
+}
+
+func issueCreatedByUserPredicate(userRef string) string {
+	return fmt.Sprintf("((i.creator_type = 'member' AND i.creator_id = %[1]s::uuid) OR i.requester_user_id = %[1]s::uuid)", userRef)
+}
+
+// issueTableRelationPredicate matches issues related to the user one way.
+func issueTableRelationPredicate(relation string, userRef string) string {
+	switch relation {
+	case "assigned":
+		return fmt.Sprintf("(i.assignee_type = 'member' AND i.assignee_id = %s::uuid)", userRef)
+	case "created":
+		return issueCreatedByUserPredicate(userRef)
+	case "subscribed":
+		return fmt.Sprintf(`EXISTS (
+    SELECT 1 FROM issue_subscriber isub
+     WHERE isub.issue_id  = i.id
+       AND isub.user_type = 'member'
+       AND isub.user_id   = %s::uuid
+       AND isub.unsubscribed_at IS NULL
+  )`, userRef)
+	default: // my_agents — the same issues as the "involved" scope
+		return issueTableInvolvedPredicate(userRef)
+	}
+}
+
 func appendIssueTableInvolvedPredicate(where []string, addArg func(any) string, userID pgtype.UUID) []string {
-	ref := addArg(userID)
-	return append(where, fmt.Sprintf(`(
+	return append(where, issueTableInvolvedPredicate(addArg(userID)))
+}
+
+// issueTableInvolvedPredicate matches issues assigned to an agent the user
+// owns, or to a squad led by an agent the user owns.
+func issueTableInvolvedPredicate(userRef string) string {
+	return fmt.Sprintf(`(
     (i.assignee_type = 'agent' AND i.assignee_id IN (
        SELECT a.id FROM agent a
         WHERE a.workspace_id = $1
           AND a.owner_id     = %[1]s::uuid
     ))
     OR (i.assignee_type = 'squad' AND i.assignee_id IN (
-       SELECT sm.squad_id
-         FROM squad_member sm
-         JOIN squad s ON s.id = sm.squad_id
-        WHERE s.workspace_id = $1
-          AND sm.member_type = 'member'
-          AND sm.member_id   = %[1]s::uuid
-       UNION
        SELECT s.id
          FROM squad s
          JOIN agent a ON a.id = s.leader_id
         WHERE s.workspace_id = $1
           AND a.workspace_id = $1
           AND a.owner_id     = %[1]s::uuid
-       UNION
-       SELECT sm.squad_id
-         FROM squad_member sm
-         JOIN squad s ON s.id = sm.squad_id
-         JOIN agent a ON a.id = sm.member_id
-        WHERE s.workspace_id = $1
-          AND sm.member_type = 'agent'
-          AND a.workspace_id = $1
-          AND a.owner_id     = %[1]s::uuid
     ))
-)`, ref))
+)`, userRef)
 }
 
 func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request, spec issueTableQuerySpec) (issueTableSQL, bool) {
@@ -412,15 +511,49 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 		args = append(args, value)
 		return "$" + strconv.Itoa(len(args))
 	}
+	hidden, ok := h.requestHiddenProjects(w, r, util.UUIDToString(workspaceUUID))
+	if !ok {
+		return issueTableSQL{}, false
+	}
+	hiddenProjectsRef := ""
+	if ids := hidden.Param(); ids != nil {
+		hiddenProjectsRef = addArg(ids)
+		where = append(where, hiddenProjectPredicate("i.project_id", hiddenProjectsRef))
+	}
 
+	negated := make(map[string]bool, len(spec.Filters.Negate))
+	for _, field := range spec.Filters.Negate {
+		if !issueTableContainsString(issueTableNegatableFilters, field) {
+			writeError(w, http.StatusBadRequest, "invalid filters.negate")
+			return issueTableSQL{}, false
+		}
+		negated[field] = true
+	}
+	// "Is not" keeps every row the positive predicate does not accept,
+	// including rows where it is NULL (no assignee, no project): `IS NOT TRUE`
+	// rather than `NOT`, which would drop those too.
+	appendFilter := func(field, predicate string) {
+		if negated[field] {
+			where = append(where, "("+predicate+") IS NOT TRUE")
+			return
+		}
+		where = append(where, predicate)
+	}
+
+	// Any non-empty status KEY, not just the 7 built-ins. A status filter names
+	// the exact statuses the user picked, and since MUL-6243 those can be custom
+	// — rejecting them here 400'd the entire request, so filtering a board by a
+	// custom status errored the surface instead of narrowing it. The predicate
+	// below is a parameterized `status = ANY(...)`, so an unknown key simply
+	// matches nothing; length-bounded so an arbitrary blob cannot ride in.
 	for _, status := range spec.Filters.Statuses {
-		if !issueTableContainsString(validIssueStatuses, status) {
+		if status == "" || len(status) > 64 {
 			writeError(w, http.StatusBadRequest, "invalid filters.statuses")
 			return issueTableSQL{}, false
 		}
 	}
 	if len(spec.Filters.Statuses) > 0 {
-		where = append(where, fmt.Sprintf("i.status = ANY(%s::text[])", addArg(sortedUniqueStrings(spec.Filters.Statuses))))
+		appendFilter("statuses", fmt.Sprintf("i.status = ANY(%s::text[])", addArg(sortedUniqueStrings(spec.Filters.Statuses))))
 	}
 	for _, priority := range spec.Filters.Priorities {
 		if !issueTableContainsString(validIssuePriorities, priority) {
@@ -429,19 +562,27 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 		}
 	}
 	if len(spec.Filters.Priorities) > 0 {
-		where = append(where, fmt.Sprintf("i.priority = ANY(%s::text[])", addArg(sortedUniqueStrings(spec.Filters.Priorities))))
+		appendFilter("priorities", fmt.Sprintf("i.priority = ANY(%s::text[])", addArg(sortedUniqueStrings(spec.Filters.Priorities))))
 	}
 
-	switch spec.Scope.Kind {
-	case "workspace":
+	// Workspace and project scopes share the optional assignee-type
+	// narrowing (the Members/Agents tabs above both surfaces).
+	appendAssigneeTypes := func() bool {
 		for _, actorType := range spec.Scope.AssigneeTypes {
 			if !isIssueActorType(actorType) {
 				writeError(w, http.StatusBadRequest, "invalid scope.assignee_types")
-				return issueTableSQL{}, false
+				return false
 			}
 		}
 		if len(spec.Scope.AssigneeTypes) > 0 {
 			where = append(where, fmt.Sprintf("i.assignee_type = ANY(%s::text[])", addArg(sortedUniqueStrings(spec.Scope.AssigneeTypes))))
+		}
+		return true
+	}
+	switch spec.Scope.Kind {
+	case "workspace":
+		if !appendAssigneeTypes() {
+			return issueTableSQL{}, false
 		}
 	case "project":
 		projectID, err := util.ParseUUID(spec.Scope.ProjectID)
@@ -450,6 +591,9 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 			return issueTableSQL{}, false
 		}
 		where = append(where, fmt.Sprintf("i.project_id = %s::uuid", addArg(projectID)))
+		if !appendAssigneeTypes() {
+			return issueTableSQL{}, false
+		}
 	case "assignee":
 		if spec.Scope.Actor == nil {
 			writeError(w, http.StatusBadRequest, "scope.actor is required")
@@ -488,14 +632,14 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 		case "assigned":
 			where = append(where, fmt.Sprintf("i.assignee_type = 'member' AND i.assignee_id = %s::uuid", addArg(userUUID)))
 		case "created":
-			where = append(where, fmt.Sprintf("i.creator_type = 'member' AND i.creator_id = %s::uuid", addArg(userUUID)))
+			where = append(where, issueCreatedByUserPredicate(addArg(userUUID)))
 		case "involved":
 			where = appendIssueTableInvolvedPredicate(where, addArg, userUUID)
 		case "any":
 			assignedRef := addArg(userUUID)
 			createdRef := addArg(userUUID)
 			involved := appendIssueTableInvolvedPredicate(nil, addArg, userUUID)[0]
-			where = append(where, fmt.Sprintf("((i.assignee_type = 'member' AND i.assignee_id = %s::uuid) OR (i.creator_type = 'member' AND i.creator_id = %s::uuid) OR %s)", assignedRef, createdRef, involved))
+			where = append(where, fmt.Sprintf("((i.assignee_type = 'member' AND i.assignee_id = %s::uuid) OR %s OR %s)", assignedRef, issueCreatedByUserPredicate(createdRef), involved))
 		default:
 			writeError(w, http.StatusBadRequest, "invalid scope.relation")
 			return issueTableSQL{}, false
@@ -521,9 +665,9 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 			// Omitted assignees means "no assignee filter"; an explicitly
 			// empty list means "match none", so API callers can preserve an
 			// intentionally active empty predicate.
-			where = append(where, "FALSE")
+			appendFilter("assignees", "FALSE")
 		} else {
-			where = append(where, "("+strings.Join(ors, " OR ")+")")
+			appendFilter("assignees", "("+strings.Join(ors, " OR ")+")")
 		}
 	}
 
@@ -536,7 +680,31 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 			}
 			ors = append(ors, fmt.Sprintf("(i.creator_type = %s::text AND i.creator_id = %s::uuid)", addArg(actor.actorType), addArg(actor.actorID)))
 		}
-		where = append(where, "("+strings.Join(ors, " OR ")+")")
+		appendFilter("creators", "("+strings.Join(ors, " OR ")+")")
+	}
+
+	for _, relation := range spec.Filters.Relations {
+		if !issueTableContainsString(issueTableRelations, relation) {
+			writeError(w, http.StatusBadRequest, "invalid filters.relations")
+			return issueTableSQL{}, false
+		}
+	}
+	if relations := sortedUniqueStrings(spec.Filters.Relations); len(relations) > 0 {
+		userID, ok := requireUserID(w, r)
+		if !ok {
+			return issueTableSQL{}, false
+		}
+		userUUID, err := util.ParseUUID(userID)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, "user not authenticated")
+			return issueTableSQL{}, false
+		}
+		userRef := addArg(userUUID)
+		ors := make([]string, 0, len(relations))
+		for _, relation := range relations {
+			ors = append(ors, issueTableRelationPredicate(relation, userRef))
+		}
+		appendFilter("relations", "("+strings.Join(ors, " OR ")+")")
 	}
 
 	projectIDs, ok := parseIssueTableUUIDList(w, spec.Filters.ProjectIDs, "filters.project_ids")
@@ -551,7 +719,25 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 		if spec.Filters.IncludeNoProject {
 			ors = append(ors, "i.project_id IS NULL")
 		}
-		where = append(where, "("+strings.Join(ors, " OR ")+")")
+		appendFilter("project_ids", "("+strings.Join(ors, " OR ")+")")
+	}
+
+	if len(spec.Filters.ProjectStatuses) > 0 {
+		for _, status := range spec.Filters.ProjectStatuses {
+			if !validateProjectEnum(w, "filters.project_statuses", status, validProjectStatuses) {
+				return issueTableSQL{}, false
+			}
+		}
+		// A projectless issue has no row to match, so EXISTS is false and the
+		// issue drops out — "no project" is deliberately not a project status.
+		// `p.workspace_id = i.workspace_id` is not redundant: the schema has no
+		// foreign keys by design, so a stale or corrupt `issue.project_id` can
+		// name a project in another workspace. Without the bound, that
+		// tenant's project status would decide this row's membership.
+		appendFilter("project_statuses", fmt.Sprintf(
+			"EXISTS (SELECT 1 FROM project p WHERE p.id = i.project_id AND p.workspace_id = i.workspace_id AND p.status = ANY(%s::text[]))",
+			addArg(spec.Filters.ProjectStatuses),
+		))
 	}
 
 	labelIDs, ok := parseIssueTableUUIDList(w, spec.Filters.LabelIDs, "filters.label_ids")
@@ -559,7 +745,71 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 		return issueTableSQL{}, false
 	}
 	if len(labelIDs) > 0 {
-		where = append(where, fmt.Sprintf("EXISTS (SELECT 1 FROM issue_to_label itl WHERE itl.issue_id = i.id AND itl.label_id = ANY(%s::uuid[]))", addArg(labelIDs)))
+		appendFilter("label_ids", fmt.Sprintf("EXISTS (SELECT 1 FROM issue_to_label itl WHERE itl.issue_id = i.id AND itl.label_id = ANY(%s::uuid[]))", addArg(labelIDs)))
+	}
+
+	var (
+		today         time.Time
+		todayResolved bool
+	)
+	resolveToday := func() (time.Time, error) {
+		if !todayResolved {
+			parsed, ok := parseIssueTableToday(spec.Filters.Today)
+			if !ok {
+				return time.Time{}, invalidIssueTableFilter("filters.today is required for due-date filters")
+			}
+			today, todayResolved = parsed, true
+		}
+		return today, nil
+	}
+	writeFilterError := func(err error) {
+		var filterErr issueTableFilterError
+		if errors.As(err, &filterErr) {
+			writeError(w, filterErr.status, filterErr.message)
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
+	}
+
+	for _, bucket := range spec.Filters.DueDates {
+		if !issueTableContainsString(issueTableDueDates, bucket) {
+			writeError(w, http.StatusBadRequest, "invalid filters.due_dates")
+			return issueTableSQL{}, false
+		}
+	}
+	if buckets := sortedUniqueStrings(spec.Filters.DueDates); len(buckets) > 0 {
+		day, err := resolveToday()
+		if err != nil {
+			writeFilterError(err)
+			return issueTableSQL{}, false
+		}
+		ors := make([]string, 0, len(buckets))
+		for _, bucket := range buckets {
+			ors = append(ors, issueTableDueDatePredicate(bucket, day, addArg))
+		}
+		appendFilter("due_dates", "("+strings.Join(ors, " OR ")+")")
+	}
+
+	if spec.Filters.Advanced != nil {
+		compiler := issueTableFilterCompiler{
+			addArg: addArg,
+			today:  resolveToday,
+			userRef: func() (string, error) {
+				userUUID, err := util.ParseUUID(requestUserID(r))
+				if err != nil {
+					return "", issueTableFilterError{status: http.StatusUnauthorized, message: "user not authenticated"}
+				}
+				return addArg(userUUID), nil
+			},
+		}
+		predicate, err := compiler.compile(*spec.Filters.Advanced)
+		if err != nil {
+			writeFilterError(err)
+			return issueTableSQL{}, false
+		}
+		if predicate != "" {
+			where = append(where, predicate)
+		}
 	}
 
 	if len(spec.Filters.Properties) > 0 {
@@ -598,6 +848,37 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 	if spec.Filters.WorkingOnly {
 		where = append(where, "EXISTS (SELECT 1 FROM agent_task_queue atq WHERE atq.issue_id = i.id AND atq.status = 'running')")
 	}
+	if spec.Filters.IdleOnly {
+		if spec.Filters.WorkingOnly || spec.Filters.WorkingIssueIDs != nil {
+			writeError(w, http.StatusBadRequest, "idle_only cannot be combined with working filters")
+			return issueTableSQL{}, false
+		}
+		// Match the same visible-agent snapshot as Inbox, including queued and
+		// deferred wakeup work. A private agent must not change membership for
+		// a member who cannot see it.
+		member, ok := h.workspaceMember(w, r, workspaceID)
+		if !ok {
+			return issueTableSQL{}, false
+		}
+		actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+		allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+		if !ok {
+			writeIssueTableQueryFailure(w, r, "failed to resolve agent access")
+			return issueTableSQL{}, false
+		}
+		agentIDs := make([]pgtype.UUID, 0, len(allowed))
+		for id := range allowed {
+			agentIDs = append(agentIDs, parseUUID(id))
+		}
+		if len(agentIDs) > 0 {
+			where = append(where, fmt.Sprintf(`NOT EXISTS (
+  SELECT 1 FROM agent_task_queue atq
+  WHERE atq.issue_id = i.id AND atq.agent_id = ANY(%s::uuid[])
+    AND (atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+      OR (atq.status = 'deferred' AND COALESCE(atq.context->>'wakeup_id', '') <> ''))
+)`, addArg(agentIDs)))
+		}
+	}
 	workingIssueIDs, ok := parseIssueTableUUIDList(w, spec.Filters.WorkingIssueIDs, "filters.working_issue_ids")
 	if !ok {
 		return issueTableSQL{}, false
@@ -612,15 +893,31 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 			))
 		}
 	}
+	unreadIssueIDs, ok := parseIssueTableUUIDList(w, spec.Filters.UnreadIssueIDs, "filters.unread_issue_ids")
+	if !ok {
+		return issueTableSQL{}, false
+	}
+	if spec.Filters.UnreadIssueIDs != nil {
+		if len(unreadIssueIDs) == 0 {
+			where = append(where, "FALSE")
+		} else {
+			where = append(where, fmt.Sprintf(
+				"i.id = ANY(%s::uuid[])",
+				addArg(unreadIssueIDs),
+			))
+		}
+	}
 	if spec.Filters.IncludeSubIssues != nil && !*spec.Filters.IncludeSubIssues {
 		where = append(where, "i.parent_issue_id IS NULL")
 	}
 	where = appendIssueTableSearchFilter(where, addArg, spec.Search)
 
 	return issueTableSQL{
-		where:       strings.Join(where, " AND "),
-		args:        args,
-		fingerprint: fingerprint,
-		workspaceID: workspaceUUID,
+		where:             strings.Join(where, " AND "),
+		args:              args,
+		fingerprint:       fingerprint,
+		workspaceID:       workspaceUUID,
+		hidden:            hidden,
+		hiddenProjectsRef: hiddenProjectsRef,
 	}, true
 }

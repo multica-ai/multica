@@ -1,45 +1,25 @@
 import { useMemo } from "react";
 import { isRouteErrorResponse, useLocation, useRouteError } from "react-router-dom";
-import { AlertTriangle, Compass, RotateCw, Send, X } from "lucide-react";
+import { AlertTriangle, Compass, RotateCw, Send, X } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import { useT } from "@multica/views/i18n";
+import type { DesktopRouteErrorFeedbackContext } from "@multica/core/feedback";
 import { useModalStore } from "@multica/core/modals";
 import { useTabStore } from "@/stores/tab-store";
 
-type DesktopAppInfo = {
-  version?: string;
-  os?: string;
-};
-
-export function formatRouteErrorReport({
+export function createRouteErrorFeedbackContext({
   error,
-  url,
-  appInfo,
   trigger,
 }: {
   error: unknown;
-  url: string;
-  appInfo?: DesktopAppInfo;
   trigger: string;
-}) {
+}): DesktopRouteErrorFeedbackContext {
   const normalized = normalizeError(error);
-  return [
-    "kind: desktop_route_error",
-    `trigger: ${trigger}`,
-    `url: ${url}`,
-    `app_version: ${appInfo?.version ?? "unknown"}`,
-    `runtime_os: ${appInfo?.os ?? "unknown"}`,
-    "",
-    "context:",
-    `- name: ${normalized.name}`,
-    `- message: ${normalized.message}`,
-    "",
-    "stack:",
-    "```",
-    normalized.stack ?? "<no stack>",
-    "```",
-    "",
-    "TODO: promote error context to structured feedback fields once the feedback API supports them.",
-  ].join("\n");
+  return {
+    kind: "desktop_route_error",
+    trigger,
+    error: normalized,
+  };
 }
 
 /**
@@ -77,6 +57,7 @@ export function DesktopRouteErrorPage() {
 }
 
 function DesktopNotFoundPage() {
+  const { t } = useT("settings");
   const location = useLocation();
   const recoveryRoute = useRecoveryRoute();
 
@@ -89,11 +70,11 @@ function DesktopNotFoundPage() {
         <Compass className="h-6 w-6" aria-hidden="true" />
       </div>
       <div className="space-y-2">
-        <h2 className="text-title font-semibold">This page doesn&apos;t exist</h2>
+        <h2 className="text-title font-semibold">
+          {t(($) => $.desktop.errors.not_found_title)}
+        </h2>
         <p className="max-w-lg text-body text-muted-foreground">
-          Nothing in Multica matches this address. If you got here from a link,
-          it probably points at a file on someone else&apos;s computer rather
-          than a page.
+          {t(($) => $.desktop.errors.not_found_description)}
         </p>
         <p className="max-w-lg truncate font-mono text-caption text-muted-foreground">
           {location.pathname}
@@ -112,7 +93,7 @@ function DesktopNotFoundPage() {
                 .navigateActiveSession(recoveryRoute, { replace: true })
             }
           >
-            Go to issues
+            {t(($) => $.desktop.errors.go_to_issues)}
           </Button>
         ) : null}
         <Button
@@ -120,7 +101,7 @@ function DesktopNotFoundPage() {
           onClick={() => useTabStore.getState().closeActiveTab()}
         >
           <X className="mr-2 h-4 w-4" aria-hidden="true" />
-          Close tab
+          {t(($) => $.desktop.errors.close_tab)}
         </Button>
       </div>
     </div>
@@ -128,22 +109,21 @@ function DesktopNotFoundPage() {
 }
 
 function DesktopUnexpectedErrorPage({ error }: { error: unknown }) {
-  const location = useLocation();
+  const { t } = useT("settings");
   const recoveryRoute = useRecoveryRoute();
-  const report = useMemo(
+  const feedbackContext = useMemo(
     () =>
-      formatRouteErrorReport({
+      createRouteErrorFeedbackContext({
         error,
-        url:
-          typeof window !== "undefined"
-            ? `${window.location.origin}${location.pathname}${location.search}${location.hash}`
-            : location.pathname,
-        appInfo: typeof window !== "undefined" ? window.desktopAPI?.appInfo : undefined,
         trigger: "route-errorElement",
       }),
-    [error, location.hash, location.pathname, location.search],
+    [error],
   );
-  const message = normalizeError(error).message;
+  const rawMessage = normalizeError(error).message;
+  const message =
+    rawMessage === "Unknown route error"
+      ? t(($) => $.desktop.errors.unknown_route_error)
+      : rawMessage;
 
   return (
     <div
@@ -154,10 +134,11 @@ function DesktopUnexpectedErrorPage({ error }: { error: unknown }) {
         <AlertTriangle className="h-6 w-6" aria-hidden="true" />
       </div>
       <div className="space-y-2">
-        <h2 className="text-title font-semibold">Something went wrong in this tab</h2>
+        <h2 className="text-title font-semibold">
+          {t(($) => $.desktop.errors.tab_error_title)}
+        </h2>
         <p className="max-w-lg text-body text-muted-foreground">
-          A route-level renderer error was contained before it could take down the
-          desktop shell. Reload this tab, or send the report if it keeps happening.
+          {t(($) => $.desktop.errors.tab_error_description)}
         </p>
         <p className="max-w-lg truncate text-caption text-muted-foreground">{message}</p>
       </div>
@@ -168,7 +149,7 @@ function DesktopUnexpectedErrorPage({ error }: { error: unknown }) {
           onClick={() => useTabStore.getState().reloadActiveTab()}
         >
           <RotateCw className="mr-2 h-4 w-4" aria-hidden="true" />
-          Reload tab
+          {t(($) => $.desktop.errors.reload_tab)}
         </Button>
         {recoveryRoute ? (
           <Button
@@ -182,7 +163,7 @@ function DesktopUnexpectedErrorPage({ error }: { error: unknown }) {
                 .navigateActiveSession(recoveryRoute, { replace: true })
             }
           >
-            Go to issues
+            {t(($) => $.desktop.errors.go_to_issues)}
           </Button>
         ) : null}
         <Button
@@ -191,19 +172,19 @@ function DesktopUnexpectedErrorPage({ error }: { error: unknown }) {
           onClick={() => useTabStore.getState().closeActiveTab()}
         >
           <X className="mr-2 h-4 w-4" aria-hidden="true" />
-          Close tab
+          {t(($) => $.desktop.errors.close_tab)}
         </Button>
         <Button
           type="button"
           onClick={() =>
             useModalStore.getState().open("feedback", {
-              initialMessage: report,
               kind: "bug",
+              context: feedbackContext,
             })
           }
         >
           <Send className="mr-2 h-4 w-4" aria-hidden="true" />
-          Report error
+          {t(($) => $.desktop.errors.report_error)}
         </Button>
       </div>
     </div>

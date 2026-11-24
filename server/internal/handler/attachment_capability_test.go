@@ -54,12 +54,12 @@ func TestAttachmentCapability_RoundTrips(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	query := capabilityQuery(t, capabilityTestAttachmentID, now)
 
-	if !verifyAttachmentCapability(capabilityTestAttachmentID, query.Get("exp"), query.Get("sig"), now) {
+	if !verifyAttachmentCapability(capabilityTestAttachmentID, query.Get("exp"), query.Get("sig"), "", now) {
 		t.Fatal("freshly minted capability did not verify")
 	}
 	// Still valid one second before the TTL elapses.
 	if !verifyAttachmentCapability(
-		capabilityTestAttachmentID, query.Get("exp"), query.Get("sig"),
+		capabilityTestAttachmentID, query.Get("exp"), query.Get("sig"), "",
 		now.Add(attachmentCapabilityTTL-time.Second),
 	) {
 		t.Fatal("capability expired before its TTL elapsed")
@@ -103,10 +103,53 @@ func TestAttachmentCapability_FailsClosed(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := verifyAttachmentCapability(tc.id, tc.exp, tc.sig, tc.now); got != tc.expected {
+			if got := verifyAttachmentCapability(tc.id, tc.exp, tc.sig, "", tc.now); got != tc.expected {
 				t.Fatalf("verify = %v, want %v", got, tc.expected)
 			}
 		})
+	}
+}
+
+// TestAttachmentDownloadCapability_IntentIsDomainSeparated pins the follow-up
+// download-intent split (dl=1): a forced-attachment capability verifies only
+// under the attachment intent, and a load-intent link cannot be flipped to a
+// forced download by appending dl=1 — its signature does not cover the intent.
+func TestAttachmentDownloadCapability_IntentIsDomainSeparated(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	exp := now.Add(attachmentCapabilityTTL).Unix()
+	expStr := strconv.FormatInt(exp, 10)
+
+	loadSig := signAttachmentCapability(capabilityTestAttachmentID, exp)
+	dlSig := signAttachmentCapabilityIntent(capabilityTestAttachmentID, exp, attachmentCapabilityDownloadIntent)
+
+	if loadSig == dlSig {
+		t.Fatal("load-intent and download-intent signatures must differ")
+	}
+
+	// The download capability verifies only under the download intent.
+	if !verifyAttachmentCapability(capabilityTestAttachmentID, expStr, dlSig, attachmentCapabilityDownloadIntent, now) {
+		t.Fatal("download capability did not verify under its own intent")
+	}
+	if verifyAttachmentCapability(capabilityTestAttachmentID, expStr, dlSig, "", now) {
+		t.Fatal("download signature must not verify as a load-intent link")
+	}
+
+	// A load-intent link cannot be promoted to a forced-attachment download by
+	// tacking on dl=1 (which the handler maps to the attachment intent).
+	if verifyAttachmentCapability(capabilityTestAttachmentID, expStr, loadSig, attachmentCapabilityDownloadIntent, now) {
+		t.Fatal("load signature must not verify as a download (dl=1) capability")
+	}
+	if !verifyAttachmentCapability(capabilityTestAttachmentID, expStr, loadSig, "", now) {
+		t.Fatal("load capability must still verify under the empty intent")
+	}
+
+	// The minted download path carries dl=1 and a distinct signature.
+	path := attachmentDownloadCapabilityPath(capabilityTestAttachmentID, now)
+	if !strings.Contains(path, "dl=1") {
+		t.Fatalf("download capability path missing dl=1: %q", path)
+	}
+	if strings.Contains(attachmentCapabilityPath(capabilityTestAttachmentID, now), "dl=1") {
+		t.Fatal("load-intent capability path must not carry dl=1")
 	}
 }
 
@@ -277,7 +320,7 @@ func TestGetAttachmentByID_ProxyModeReturnsRedeemableCapability(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse download_url: %v", err)
 	}
-	if !verifyAttachmentCapability(id, parsed.Query().Get("exp"), parsed.Query().Get("sig"), time.Now()) {
+	if !verifyAttachmentCapability(id, parsed.Query().Get("exp"), parsed.Query().Get("sig"), "", time.Now()) {
 		t.Fatalf("minted capability does not verify: %q", resp.DownloadURL)
 	}
 
@@ -286,6 +329,72 @@ func TestGetAttachmentByID_ProxyModeReturnsRedeemableCapability(t *testing.T) {
 	// exact class of bug MUL-3130 fixed.
 	if strings.Contains(resp.MarkdownURL, "signed-download") {
 		t.Fatalf("markdown_url = %q, must not embed a short-lived capability", resp.MarkdownURL)
+	}
+}
+
+// TestGetAttachmentByID_ProxyModeDownloadURLForcesAttachment is the end-to-end
+// proof for the download-intent field: the minted attachment_download_url is a
+// site-relative dl=1 capability that verifies only under the attachment intent
+// and, once redeemed, forces Content-Disposition: attachment even for an image
+// — which the load-intent download_url path serves inline.
+func TestGetAttachmentByID_ProxyModeDownloadURLForcesAttachment(t *testing.T) {
+	store := installProxyModeStorage(t)
+	body := []byte("png-bytes")
+	id := seedPreviewAttachment(t, store, "downloads/pic.png", "pic.png", "image/png", body)
+
+	req := httptest.NewRequest("GET", "/api/attachments/"+id, nil)
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", id)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	w := httptest.NewRecorder()
+
+	testHandler.GetAttachmentByID(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	var resp AttachmentResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v; body=%s", err, w.Body.String())
+	}
+
+	// Site-relative dl=1 capability, distinct from the load-intent download_url,
+	// and verifiable only under the attachment intent.
+	if !strings.HasPrefix(resp.AttachmentDownloadURL, "/api/attachments/"+id+"/signed-download?") {
+		t.Fatalf("attachment_download_url = %q, want a site-relative capability path", resp.AttachmentDownloadURL)
+	}
+	parsed, err := url.Parse(resp.AttachmentDownloadURL)
+	if err != nil {
+		t.Fatalf("parse attachment_download_url: %v", err)
+	}
+	if parsed.Query().Get("dl") != "1" {
+		t.Fatalf("attachment_download_url missing dl=1: %q", resp.AttachmentDownloadURL)
+	}
+	if !verifyAttachmentCapability(id, parsed.Query().Get("exp"), parsed.Query().Get("sig"), attachmentCapabilityDownloadIntent, time.Now()) {
+		t.Fatalf("download capability does not verify under the attachment intent: %q", resp.AttachmentDownloadURL)
+	}
+	// A 60-second capability must never leak into the persisted markdown_url.
+	if strings.Contains(resp.MarkdownURL, "signed-download") {
+		t.Fatalf("markdown_url = %q, must not embed a short-lived capability", resp.MarkdownURL)
+	}
+
+	// Redeeming it forces an attachment disposition even for an image.
+	req2, w2 := newCapabilityRequest(id, parsed.Query())
+	testHandler.DownloadAttachmentWithCapability(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("redeem status = %d, want 200; body=%s", w2.Code, w2.Body.String())
+	}
+	if !bytes.Equal(w2.Body.Bytes(), body) {
+		t.Fatalf("redeemed body mismatch: got %q", w2.Body.String())
+	}
+	disposition := w2.Header().Get("Content-Disposition")
+	if !strings.HasPrefix(disposition, "attachment") {
+		t.Fatalf("Content-Disposition = %q, want it to force attachment", disposition)
+	}
+	if !strings.Contains(disposition, "pic.png") {
+		t.Fatalf("Content-Disposition = %q, want the original filename", disposition)
 	}
 }
 

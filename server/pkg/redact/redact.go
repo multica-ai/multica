@@ -3,10 +3,7 @@
 package redact
 
 import (
-	"os"
-	"os/user"
 	"regexp"
-	"strings"
 )
 
 // secretPattern pairs a compiled regex with its replacement text.
@@ -152,30 +149,21 @@ func redactValue(v any, depth int) any {
 	}
 }
 
-// homeDir is resolved once at init for path redaction.
-var homeDir string
-var username string
-
-func init() {
-	homeDir, _ = os.UserHomeDir()
-	if u, err := user.Current(); err == nil {
-		username = u.Username
-	}
-}
-
 // Text scans the input string for known secret patterns and replaces
-// matches with safe placeholders. It also masks the local user's home
-// directory path to prevent leaking the username.
+// matches with safe placeholders.
+//
+// It deliberately does NOT mask the local home directory. That masking used to
+// live here, but it was never a boundary: anyone who can read a transcript
+// already sees repository paths, file contents, commands and diffs, so hiding
+// one path segment protected nothing while making paths unusable for copy-paste
+// and debugging. It was also incoherent about whose home directory it hid —
+// Content/Output are redacted in the server's ingest handler, so a hosted
+// deployment matched them against the *server's* home, never the machine
+// running the agent. Transcript visibility is an authorization concern and is
+// handled at that layer, not by string replacement here.
 func Text(s string) string {
 	for _, p := range patterns {
 		s = p.re.ReplaceAllString(s, p.replacement)
 	}
-
-	// Redact home directory paths (e.g. /Users/john/ → /Users/****/).
-	if homeDir != "" && username != "" {
-		masked := strings.Replace(homeDir, username, "****", 1)
-		s = strings.ReplaceAll(s, homeDir, masked)
-	}
-
 	return s
 }

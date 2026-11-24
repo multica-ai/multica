@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  actorKindForViewVariant,
+  assigneeTypesForActorKind,
+  myRelationForViewVariant,
   UnsupportedIssueScopeError,
   issueScopeKey,
 } from "./scope";
@@ -28,107 +31,41 @@ describe("issue surface scope", () => {
     expect(issueScopeKey({ type: "team", teamId: "t1" })).toBe("team:t1");
   });
 
-  it("builds the workspace query plan", () => {
-    // The unfiltered tab shares the workspace list cache.
-    expect(buildIssueSurfaceQueryPlan({ type: "workspace" })).toMatchObject({
-      kind: "workspace",
+  it("compiles each scope to its key, gantt filter, and create defaults", () => {
+    expect(buildIssueSurfaceQueryPlan({ type: "workspace" })).toEqual({
       scopeKey: "workspace:all",
       queryFilter: {},
-      groupedScopeFilter: {},
       createDefaults: {},
     });
-
-    // Members/Agents tabs are server-filtered scoped lists: assignee_types
-    // rides the list + grouped requests, and each tab owns its cache entry
-    // (correct totals + load-more, no client post-filtering).
     expect(
       buildIssueSurfaceQueryPlan({ type: "workspace", actorKind: "agents" }),
-    ).toMatchObject({
-      kind: "scoped",
+    ).toEqual({
       scopeKey: "workspace:agents",
-      queryScope: "workspace:agents",
       queryFilter: { assignee_types: ["agent", "squad"] },
-      groupedScopeFilter: { assignee_types: ["agent", "squad"] },
-      loadMoreScope: "workspace:agents",
-      loadMoreFilter: { assignee_types: ["agent", "squad"] },
       createDefaults: {},
     });
     expect(
-      buildIssueSurfaceQueryPlan({ type: "workspace", actorKind: "members" }),
-    ).toMatchObject({
-      kind: "scoped",
-      scopeKey: "workspace:members",
-      queryFilter: { assignee_types: ["member"] },
-      groupedScopeFilter: { assignee_types: ["member"] },
-      createDefaults: {},
+      buildIssueSurfaceQueryPlan({
+        type: "project",
+        projectId: "p1",
+        actorKind: "members",
+      }),
+    ).toEqual({
+      scopeKey: "project:p1:members",
+      queryFilter: { project_id: "p1", assignee_types: ["member"] },
+      createDefaults: { project_id: "p1" },
     });
-  });
-
-  it("builds personal issue query plans using the existing query contracts", () => {
     expect(
       buildIssueSurfaceQueryPlan({
         type: "my",
         relation: "assigned",
         userId: "u1",
       }),
-    ).toMatchObject({
+    ).toEqual({
       scopeKey: "my:u1:assigned",
-      queryScope: "assigned",
       queryFilter: { assignee_id: "u1" },
-      groupedScopeFilter: { assignee_id: "u1" },
-      loadMoreScope: "assigned",
-      loadMoreFilter: { assignee_id: "u1" },
-      userId: undefined,
       createDefaults: { assignee_type: "member", assignee_id: "u1" },
     });
-    expect(
-      buildIssueSurfaceQueryPlan({
-        type: "my",
-        relation: "created",
-        userId: "u1",
-      }),
-    ).toMatchObject({
-      queryScope: "created",
-      queryFilter: { creator_id: "u1" },
-      createDefaults: {},
-    });
-    expect(
-      buildIssueSurfaceQueryPlan({
-        type: "my",
-        relation: "involved",
-        userId: "u1",
-      }),
-    ).toMatchObject({
-      queryScope: "agents",
-      queryFilter: { involves_user_id: "u1" },
-      createDefaults: {},
-    });
-    expect(
-      buildIssueSurfaceQueryPlan({
-        type: "my",
-        relation: "all",
-        userId: "u1",
-      }),
-    ).toMatchObject({
-      queryScope: "all",
-      queryFilter: {},
-      groupedScopeFilter: {},
-      userId: "u1",
-      createDefaults: {},
-    });
-  });
-
-  it("builds project and actor query plans", () => {
-    expect(
-      buildIssueSurfaceQueryPlan({ type: "project", projectId: "p1" }),
-    ).toMatchObject({
-      scopeKey: "project:p1",
-      queryScope: "project:p1",
-      queryFilter: { project_id: "p1" },
-      groupedScopeFilter: { project_id: "p1" },
-      createDefaults: { project_id: "p1" },
-    });
-
     expect(
       buildIssueSurfaceQueryPlan({
         type: "actor",
@@ -136,11 +73,9 @@ describe("issue surface scope", () => {
         actorId: "a1",
         relation: "assigned",
       }),
-    ).toMatchObject({
+    ).toEqual({
       scopeKey: "actor:agent:a1:assigned",
-      queryScope: "actor:agent:a1:assigned",
       queryFilter: { assignee_id: "a1" },
-      groupedScopeFilter: { assignee_id: "a1" },
       createDefaults: { assignee_type: "agent", assignee_id: "a1" },
     });
   });
@@ -150,5 +85,35 @@ describe("issue surface scope", () => {
     expect(() => buildIssueSurfaceQueryPlan(scope)).toThrow(
       UnsupportedIssueScopeError,
     );
+  });
+});
+
+describe("assigneeTypesForActorKind", () => {
+  it("maps the three tabs to their API values", () => {
+    expect(assigneeTypesForActorKind("members")).toEqual(["member"]);
+    expect(assigneeTypesForActorKind("agents")).toEqual(["agent", "squad"]);
+    expect(assigneeTypesForActorKind("all")).toBeUndefined();
+    expect(assigneeTypesForActorKind(undefined)).toBeUndefined();
+  });
+});
+
+describe("actorKindForViewVariant", () => {
+  it("resolves saved-view variants to a tab, defaulting to all", () => {
+    expect(actorKindForViewVariant("members")).toBe("members");
+    expect(actorKindForViewVariant("agents")).toBe("agents");
+    expect(actorKindForViewVariant(null)).toBe("all");
+    expect(actorKindForViewVariant(undefined)).toBe("all");
+    expect(actorKindForViewVariant("involved")).toBe("all");
+  });
+});
+
+describe("myRelationForViewVariant", () => {
+  it("resolves my-view variants to a relation, defaulting to all", () => {
+    expect(myRelationForViewVariant("assigned")).toBe("assigned");
+    expect(myRelationForViewVariant("created")).toBe("created");
+    expect(myRelationForViewVariant("involved")).toBe("involved");
+    expect(myRelationForViewVariant("any")).toBe("all");
+    expect(myRelationForViewVariant(null)).toBe("all");
+    expect(myRelationForViewVariant("members")).toBe("all");
   });
 });

@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -30,6 +29,10 @@ const openclawNoParseableOutput = "openclaw returned no parseable output"
 // of "openclaw returned no parseable output".
 const minOpenclawVersion = "2026.5.5"
 
+const openclawStateOwnershipLockError = "OpenClaw could not acquire ownership of its state directory because another OpenClaw process owns it. Stop that process, or configure a dedicated state directory through backends.openclaw.state_dir / OPENCLAW_STATE_DIR and retry. A dedicated directory has separate credentials and sessions."
+
+const openclawResidentGatewayLocalRefusalError = "OpenClaw Gateway is already running for this state directory. Switch this OpenClaw runtime's runtime_config.mode to gateway so Multica uses the resident Gateway, or stop it with openclaw gateway stop before retrying in local mode. To keep local mode, configure a dedicated state directory through backends.openclaw.state_dir / OPENCLAW_STATE_DIR; that directory has separate credentials and sessions."
+
 // openclawVersionPattern extracts a three-segment dotted version from
 // arbitrary `openclaw --version` output (e.g. "openclaw 2026.5.5",
 // "openclaw v2026.5.5 c37871e").
@@ -42,7 +45,7 @@ var openclawBlockedArgs = map[string]blockedArgMode{
 	"--json":          blockedStandalone, // JSON output for daemon communication
 	"--session-id":    blockedWithValue,  // managed by daemon for session resumption
 	"--message":       blockedWithValue,  // prompt is set by daemon
-	"--model":         blockedWithValue,  // openclaw agent does not accept --model; model is bound at registration via `openclaw agents add/update --model`
+	"--model":         blockedWithValue,  // managed by OpenclawModelOverride; never accept an untracked duplicate from custom_args
 	"--system-prompt": blockedWithValue,  // openclaw agent does not accept --system-prompt; instructions are injected into --message
 }
 
@@ -62,7 +65,7 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		return nil, fmt.Errorf("openclaw executable not found at %q: %w", execPath, err)
 	}
 
-	if err := checkOpenclawVersion(ctx, execPath); err != nil {
+	if err := checkOpenclawVersion(ctx, b.cfg.commandAt(execPath)); err != nil {
 		return nil, err
 	}
 
@@ -75,9 +78,9 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	}
 	args := buildOpenclawArgs(prompt, sessionID, opts, b.cfg.Logger)
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
+	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(args, trustAgentCommandPositional(0, "agent")))
 	// 500ms, matching cursor-agent — the other backend whose CLI can deliver a
 	// terminal result while keeping a process alive.
 	//
@@ -109,9 +112,10 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		cancel()
 		return nil, fmt.Errorf("openclaw stdout pipe: %w", err)
 	}
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[openclaw:stderr] ")
+	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[openclaw:stderr] "), agentStderrTailBytes)
+	cmd.Stderr = stderrBuf
 
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start openclaw: %w", err)
 	}
@@ -149,6 +153,7 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 
 		// Wait for process exit.
 		exitErr := cmd.Wait()
+		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
 
 		switch {
@@ -189,24 +194,31 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 			scanResult.errMsg = fmt.Sprintf("openclaw exited with error: %v", exitErr)
 		}
 
+		// A resident OpenClaw Gateway may already own the default ~/.openclaw
+		// state directory. Local mode cannot share that ownership lock; surface
+		// the configuration needed to use an isolated state directory instead of
+		// leaving users with the generic "no parseable output" failure. Gateway
+		// mode talks to the resident Gateway and is unaffected by this lock.
+		if opts.OpenclawMode != "gateway" && scanResult.status == "failed" {
+			stderr := stderrBuf.Tail()
+			if guidance, ok := openclawStateLockGuidance(stderr); ok {
+				scanResult.errMsg = withAgentStderr(guidance, "OpenClaw", sanitizeAgentDiagnostic(stderr))
+			}
+		}
+
 		b.cfg.Logger.Info("openclaw finished", "pid", cmd.Process.Pid, "status", scanResult.status, "duration", duration.Round(time.Millisecond).String())
 
 		// Build usage map. Prefer the model openclaw reported in
-		// `meta.agentMeta.model` (the actual LLM, e.g. `deepseek-chat`).
-		// Fall back to opts.Model — which for openclaw is the agent name
-		// passed via `--agent`, not a real model identifier — only when
-		// the runtime didn't surface its own model. Last resort is the
-		// daemon's `unknown` placeholder.
+		// `meta.agentMeta.model` (the actual LLM, e.g. `deepseek-chat`), then the
+		// agent model override snapshotted for this claim. Never fall
+		// back to opts.Model: for the openclaw backend that is the OpenClaw
+		// *agent* name passed via `--agent`, not a model identifier, and
+		// attributing usage to it would key the dashboard on the agent id. Last
+		// resort is the daemon's `unknown` placeholder.
 		var usage map[string]TokenUsage
 		u := scanResult.usage
 		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
-			model := scanResult.model
-			if model == "" {
-				model = opts.Model
-			}
-			if model == "" {
-				model = "unknown"
-			}
+			model := openclawUsageModel(scanResult.model, opts.OpenclawModelOverride)
 			usage = map[string]TokenUsage{model: u}
 		}
 
@@ -223,14 +235,61 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	return &Session{Messages: msgCh, Result: resCh}, nil
 }
 
+type openclawStateLockFailure int
+
+const (
+	openclawStateLockNone openclawStateLockFailure = iota
+	openclawStateLockOwnership
+	openclawStateLockResidentGateway
+)
+
+// openclawStateLockGuidance recognizes the two ways `openclaw agent --local`
+// can be refused by a state directory that is already in use. Keep the match
+// anchored to state ownership or the resident-Gateway refusal so unrelated
+// lock failures are not rewritten.
+func openclawStateLockGuidance(message string) (string, bool) {
+	switch classifyOpenclawStateLockFailure(message) {
+	case openclawStateLockResidentGateway:
+		return openclawResidentGatewayLocalRefusalError, true
+	case openclawStateLockOwnership:
+		return openclawStateOwnershipLockError, true
+	default:
+		return "", false
+	}
+}
+
+func classifyOpenclawStateLockFailure(message string) openclawStateLockFailure {
+	normalized := strings.ToLower(strings.Join(strings.Fields(message), " "))
+	if normalized == "" {
+		return openclawStateLockNone
+	}
+	if strings.Contains(normalized, "a gateway is running for this state directory") {
+		return openclawStateLockResidentGateway
+	}
+	if strings.Contains(normalized, "gatewaylockerror") && strings.Contains(normalized, "state ownership") {
+		return openclawStateLockOwnership
+	}
+	if strings.Contains(normalized, "failed to acquire gateway state ownership") {
+		return openclawStateLockOwnership
+	}
+	if strings.Contains(normalized, "ownership lock") {
+		if strings.Contains(normalized, "state-directory") ||
+			strings.Contains(normalized, "state directory") ||
+			strings.Contains(normalized, "state dir") {
+			return openclawStateLockOwnership
+		}
+	}
+	return openclawStateLockNone
+}
+
 // buildOpenclawArgs assembles the argv for a one-shot `openclaw agent` invocation.
 //
-// The CLI only accepts --local, --json, --session-id, --timeout, --message (and
-// flags like --agent / --channel that users pass through CustomArgs). Notably
-// it does NOT accept --model or --system-prompt — model is bound at agent
-// registration time via `openclaw agents add/update --model`, and instructions
-// must be injected inline into --message because openclaw loads AGENTS.md from
-// its own workspace directory, not from cwd.
+// The CLI accepts separate --agent and --model flags. Multica intentionally
+// keeps those concerns separate: opts.Model selects the registered OpenClaw
+// agent (identity / workspace / session state), while opts.OpenclawModelOverride
+// carries the agent's persistent underlying-model setting as of this claim.
+// Instructions must still be injected inline into --message because openclaw
+// loads AGENTS.md from its own workspace directory, not from cwd.
 //
 // Routing (issue #3260): `openclaw agent` defaults to Gateway routing; --local
 // is the embedded-mode opt-in. The daemon historically forced --local so every
@@ -261,6 +320,12 @@ func buildOpenclawArgs(prompt, sessionID string, opts ExecOptions, logger *slog.
 	if opts.Model != "" && !customArgsContains(customArgs, "--agent") {
 		args = append(args, "--agent", opts.Model)
 	}
+	// The saved agent model override arrives in the claim payload; --model
+	// stays blocked in custom_args. Emit it after --agent to keep the OpenClaw
+	// agent identity and the underlying model independently addressable.
+	if opts.OpenclawModelOverride != "" {
+		args = append(args, "--model", opts.OpenclawModelOverride)
+	}
 	args = append(args, customArgs...)
 
 	if opts.SystemPrompt != "" {
@@ -282,21 +347,68 @@ func customArgsContains(args []string, flag string) bool {
 	return false
 }
 
+// openclawUsageModel picks the model key for a run's usage record. It prefers
+// the model openclaw reported in the result, then the agent model override
+// snapshotted for this claim, and finally the daemon's `unknown`
+// placeholder. It deliberately never falls back to the OpenClaw agent identity
+// (ExecOptions.Model): that value is a registered OpenClaw agent id, not a
+// model, so keying usage on it would misattribute tokens on the dashboard.
+func openclawUsageModel(reportedModel, modelOverride string) string {
+	if m := strings.TrimSpace(reportedModel); m != "" {
+		return m
+	}
+	if m := strings.TrimSpace(modelOverride); m != "" {
+		return m
+	}
+	return "unknown"
+}
+
 // checkOpenclawVersion runs `<execPath> --version` and returns a
 // user-facing error when the installed openclaw is older than
 // minOpenclawVersion. The returned error becomes the task's failure
 // comment, so the message intentionally names the detected version
 // and the upgrade command.
-func checkOpenclawVersion(ctx context.Context, execPath string) error {
-	cmd := exec.CommandContext(ctx, execPath, "--version")
+func checkOpenclawVersion(ctx context.Context, runtimeCmd Command) error {
+	// This runs synchronously before Execute creates the provider session, so a
+	// pipe-holding descendant here would otherwise leave a task marked running
+	// with no backend and no inactivity watchdog to stop it. ctx is the task's
+	// and can be hours long, so the probe carries the same bound every other
+	// provider's version probe gets.
+	ctx, cancel := context.WithTimeout(ctx, detectVersionTimeout)
+	defer cancel()
+
+	// combinedOutputOwned, for the reason recorded on detectCLIVersion: pipe EOF
+	// is the signal that no more output is coming, and the direct child's exit is
+	// not. openclaw is npm-installed, so on Windows the direct child is a shim and
+	// the real CLI is already a descendant.
+	//
+	// Both streams are parsed, and extractVersionLine is deliberately bypassed.
+	// CombinedOutput rather than separate buffers because a build that prints its
+	// banner on stderr must still pass the gate, and one shared writer is what
+	// makes os/exec give the two streams a single pipe and therefore one
+	// interleaving. parseOpenclawVersion already scans the whole text with
+	// openclaw's own version pattern, whereas picking "the first line containing a
+	// semver" first would let unrelated stderr noise answer for it — a node
+	// deprecation warning carries one.
+	cmd := runtimeCmd.exec(ctx, "--version")
 	hideAgentWindow(cmd)
-	out, err := cmd.CombinedOutput()
+	raw, err := combinedOutputOwned(cmd, runtimeCmd.logger)
+	out := string(raw)
+	detected, parsed := parseOpenclawVersion(out)
 	if err != nil {
-		return fmt.Errorf("openclaw --version failed: %w", err)
+		// The gate may proceed on a version that arrived before a lingering
+		// `openclaw-config` helper held the pipes past WaitDelay — failing here
+		// would fail the task over an answer we have. Anything else (non-zero
+		// exit, deadline) still fails; see salvageProbeAnswer.
+		if !salvageProbeAnswer(runtimeCmd, "--version", parsed, err) {
+			// ExplainExecError by hand: detectCLIVersion applies it on the daemon's
+			// probe path, and this is the other gate that has to name an ENOEXEC
+			// shim rather than report an opaque exec failure (MUL-6164).
+			return fmt.Errorf("openclaw --version failed: %w", ExplainExecError(err))
+		}
 	}
-	detected, ok := parseOpenclawVersion(string(out))
-	if !ok {
-		return fmt.Errorf("could not parse openclaw version from output: %q", strings.TrimSpace(string(out)))
+	if !parsed {
+		return fmt.Errorf("could not parse openclaw version from output: %q", strings.TrimSpace(out))
 	}
 	if compareOpenclawVersion(detected, minOpenclawVersion) < 0 {
 		return fmt.Errorf("openclaw %s is below the minimum supported version %s. Run `openclaw update` to upgrade and try again.", detected, minOpenclawVersion)
@@ -405,8 +517,7 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 	// backend on this code path emits real NDJSON streams and needs live
 	// progress updates, we'll need to split the fast path off a streaming
 	// reader instead of io.ReadAll.
-	scanner := bufio.NewScanner(bytes.NewReader(buf))
-	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+	scanner := newAgentStreamScanner(bytes.NewReader(buf))
 
 	var output strings.Builder
 	var sessionID string

@@ -5,81 +5,7 @@ import { autoUpdate, computePosition, flip, offset, shift, size } from "@floatin
 import { ReactRenderer } from "@tiptap/react";
 import { exitSuggestion, type SuggestionKeyDownProps, type SuggestionProps } from "@tiptap/suggestion";
 import type { PluginKey } from "@tiptap/pm/state";
-
-/**
- * Keys that accept the currently highlighted suggestion row.
- *
- * `Enter` is the canonical accept (WAI-ARIA combobox guidance). Plain `Tab` is
- * an additive convenience that matches terminal / CLI / editor completion
- * muscle memory (MUL-3685). `Shift+Tab` and any `Ctrl/Cmd/Alt + Tab` are
- * deliberately NOT accept keys: they stay reverse focus navigation / OS window
- * switching, so standard keyboard accessibility is preserved.
- *
- * Centralizing the rule here keeps every picker built on
- * `createSuggestionPopupRender` (mention, slash-skill, builtin command, and any
- * future suggestion list) consistent instead of each list re-deciding what
- * counts as "accept". Callers use it in place of a bare `event.key === "Enter"`
- * check, so `Tab` becomes a strict alias of `Enter` inside their accept branch.
- */
-export function isPickerAcceptKey(event: KeyboardEvent): boolean {
-  if (event.key === "Enter") return true;
-  return (
-    event.key === "Tab" &&
-    !event.shiftKey &&
-    !event.ctrlKey &&
-    !event.metaKey &&
-    !event.altKey
-  );
-}
-
-/** Which way a key press moves the highlight in a suggestion list. */
-export type PickerNavigationDirection = "next" | "prev";
-
-/**
- * Resolves a key press to a suggestion-list move, or `null` when the key is not
- * navigation.
- *
- * Arrow keys are the canonical bindings. `Ctrl+N`/`Ctrl+J` (down) and
- * `Ctrl+P`/`Ctrl+K` (up) are additive Emacs/readline aliases that the command
- * bar already accepts for free: it is built on cmdk, whose `vimBindings` option
- * (on by default) maps exactly this set. Mirroring it here means the pickers
- * stop being the one place in the product where that muscle memory dies
- * (MUL-5495).
- *
- * `Cmd`-based aliases are deliberately absent. cmdk does not bind them either,
- * so the command bar never supported them, and `Cmd+P`/`Cmd+N` are browser and
- * OS accelerators (print, new window) that a web page cannot own — the same
- * rule `isReservedShortcut` in `@multica/core/shortcuts` already encodes.
- *
- * The letter aliases require Ctrl *alone*. With another modifier the chord
- * belongs to the browser or OS (`Ctrl+Shift+N` opens an incognito window), so
- * those fall through untouched. Arrow keys stay modifier-agnostic, exactly as
- * before.
- *
- * Centralizing this next to `isPickerAcceptKey` keeps every picker built on
- * `createSuggestionPopupRender` navigating identically instead of each list
- * re-deciding what counts as "move down".
- */
-export function pickerNavigationDirection(
-  event: KeyboardEvent,
-): PickerNavigationDirection | null {
-  if (event.key === "ArrowDown") return "next";
-  if (event.key === "ArrowUp") return "prev";
-  if (!event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) {
-    return null;
-  }
-  // Lowercase because Caps Lock reports "N" without setting shiftKey.
-  switch (event.key.toLowerCase()) {
-    case "n":
-    case "j":
-      return "next";
-    case "p":
-    case "k":
-      return "prev";
-    default:
-      return null;
-  }
-}
+import { contextMenuOrigin } from "@multica/ui/lib/context-menu-origin";
 
 interface SuggestionPopupRenderOptions<
   TItem,
@@ -90,10 +16,14 @@ interface SuggestionPopupRenderOptions<
   pluginKey: PluginKey;
   component: ComponentType<TComponentProps>;
   getProps: (props: SuggestionProps<TItem, TSelected>) => TComponentProps;
+  /** Refresh an active popup when its externally supplied catalog changes. */
+  subscribe?: (refresh: () => void) => () => void;
   onKeyDown?: (
     ref: TRef | null | undefined,
     props: SuggestionKeyDownProps,
   ) => boolean;
+  /** Preferred side; `flip` still moves it when that side lacks room. */
+  placement?: "top-start" | "bottom-start";
 }
 
 export function createSuggestionPopupRender<
@@ -105,15 +35,22 @@ export function createSuggestionPopupRender<
   pluginKey,
   component,
   getProps,
+  subscribe,
   onKeyDown,
+  placement = "top-start",
 }: SuggestionPopupRenderOptions<TItem, TSelected, TRef, TComponentProps>) {
   return () => {
     let renderer: ReactRenderer<TRef> | null = null;
     let popup: HTMLDivElement | null = null;
     let removeOutsideListeners: (() => void) | null = null;
     let removeAutoUpdate: (() => void) | null = null;
+    let unsubscribe: (() => void) | undefined;
+    let currentProps: SuggestionProps<TItem, TSelected> | null = null;
 
     const cleanup = () => {
+      unsubscribe?.();
+      unsubscribe = undefined;
+      currentProps = null;
       removeOutsideListeners?.();
       removeOutsideListeners = null;
       removeAutoUpdate?.();
@@ -129,9 +66,10 @@ export function createSuggestionPopupRender<
     };
 
     const isInsideSuggestionSurface = (
-      target: EventTarget | null,
+      eventTarget: EventTarget | null,
       props: SuggestionProps<TItem, TSelected>,
     ) => {
+      const target = contextMenuOrigin(eventTarget);
       if (!(target instanceof Node)) return false;
       return props.editor.view.dom.contains(target) || !!popup?.contains(target);
     };
@@ -185,7 +123,8 @@ export function createSuggestionPopupRender<
         // squashed". Document-body editors (issue/project description, agent
         // instructions) also host this popup; there the caret usually has room
         // both ways, so `flip` keeps them on-screen regardless of the default.
-        placement: "top-start",
+        // The Docs block menu opts into `bottom-start`: it reads down the page.
+        placement,
         strategy: "fixed",
         middleware: [
           offset(6),
@@ -239,6 +178,7 @@ export function createSuggestionPopupRender<
 
     return {
       onStart: (props: SuggestionProps<TItem, TSelected>) => {
+        currentProps = props;
         renderer = new ReactRenderer(component, {
           props: getProps(props),
           editor: props.editor,
@@ -248,15 +188,23 @@ export function createSuggestionPopupRender<
         popup = doc.createElement("div");
         popup.style.position = "fixed";
         popup.style.zIndex = "50";
+        const owner = props.editor.view.dom.closest("[data-editor-overlay-owner]")?.getAttribute("data-editor-overlay-owner");
+        if (owner) popup.setAttribute("data-editor-overlay-owner", owner);
         popup.appendChild(renderer.element);
         doc.body.appendChild(popup);
 
         installOutsideListeners(props);
         trackPosition(popup, props.clientRect);
         updatePosition(popup, props.clientRect);
+        unsubscribe = subscribe?.(() => {
+          if (!currentProps || !renderer) return;
+          renderer.updateProps(getProps(currentProps));
+          if (popup) updatePosition(popup, currentProps.clientRect);
+        });
       },
 
       onUpdate: (props: SuggestionProps<TItem, TSelected>) => {
+        currentProps = props;
         renderer?.updateProps(getProps(props));
         if (popup) {
           trackPosition(popup, props.clientRect);

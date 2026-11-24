@@ -1,7 +1,10 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { onlineManager, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { projectKeys } from "./queries";
+import { issueKeys } from "../issues/queries";
+import { autopilotKeys } from "../autopilots/queries";
 import { useWorkspaceId } from "../hooks";
+import { refreshFeaturesOnLockedError } from "../billing/paid-features";
 import { useRecentContextStore } from "../chat/recent-context-store";
 import { clearIssueSurfaceViewState } from "../issues/stores/surface-view-store";
 import { issueScopeKey } from "../issues/surface/scope";
@@ -12,6 +15,7 @@ export function useCreateProject() {
   const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: (data: CreateProjectRequest) => api.createProject(data),
+    onError: (err) => refreshFeaturesOnLockedError(qc, wsId, err),
     onSuccess: (newProject) => {
       qc.setQueryData<ListProjectsResponse>(projectKeys.list(wsId), (old) =>
         old && !old.projects.some((p) => p.id === newProject.id)
@@ -43,40 +47,135 @@ export function useUpdateProject() {
       );
       return { prevList, prevDetail, id };
     },
-    onError: (_err, _vars, ctx) => {
+    onError: (err, _vars, ctx) => {
       if (ctx?.prevList) qc.setQueryData(projectKeys.list(wsId), ctx.prevList);
       if (ctx?.prevDetail) qc.setQueryData(projectKeys.detail(wsId, ctx.id), ctx.prevDetail);
+      refreshFeaturesOnLockedError(qc, wsId, err);
     },
     onSettled: (_data, _err, vars) => {
       qc.invalidateQueries({ queryKey: projectKeys.detail(wsId, vars.id) });
       qc.invalidateQueries({ queryKey: projectKeys.list(wsId) });
+      // A project's status is a filter dimension of the issue table, so
+      // changing it moves issues in and out of a filtered window. Nothing
+      // in the issue payload changes, so only this invalidation can
+      // refresh it — the global staleTime is Infinity.
+      if ("status" in vars) {
+        qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
+      }
     },
   });
+}
+
+export class ProjectDeletionOfflineError extends Error {
+  constructor() {
+    super("You're offline. Reconnect and try deleting again.");
+    this.name = "ProjectDeletionOfflineError";
+  }
 }
 
 export function useDeleteProject() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
-    mutationFn: (id: string) => api.deleteProject(id),
-    onMutate: async (id) => {
+    // Fail offline deletions instead of queuing a destructive action behind a modal.
+    networkMode: "always",
+    retry: false,
+    mutationFn: (id: string) => {
+      if (!onlineManager.isOnline()) throw new ProjectDeletionOfflineError();
+      return api.deleteProject(id);
+    },
+    onSuccess: async (_data, id) => {
+      // Reads started during DELETE may still contain the removed project.
       await qc.cancelQueries({ queryKey: projectKeys.list(wsId) });
-      const prevList = qc.getQueryData<ListProjectsResponse>(projectKeys.list(wsId));
       qc.setQueryData<ListProjectsResponse>(projectKeys.list(wsId), (old) =>
-        old ? { ...old, projects: old.projects.filter((p) => p.id !== id), total: old.total - 1 } : old,
+        old && old.projects.some((p) => p.id === id)
+          ? { ...old, projects: old.projects.filter((p) => p.id !== id), total: old.total - 1 }
+          : old,
       );
       qc.removeQueries({ queryKey: projectKeys.detail(wsId, id) });
-      return { prevList };
-    },
-    onError: (_err, _id, ctx) => {
-      if (ctx?.prevList) qc.setQueryData(projectKeys.list(wsId), ctx.prevList);
-    },
-    onSuccess: (_data, id) => {
       useRecentContextStore.getState().forgetContext(wsId, { type: "project", id });
       clearIssueSurfaceViewState(issueScopeKey({ type: "project", projectId: id }));
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: projectKeys.list(wsId) });
+      // Deleting a project removes its status from the workspace, so a table
+      // window filtered on that status still holds its issues. The realtime
+      // event invalidates too, but a delivery gap must not leave the window
+      // wrong forever — the global staleTime is Infinity.
+      qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
+    },
+  });
+}
+
+function useWriteProjectToCache() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return (project: Project) => {
+    qc.setQueryData<ListProjectsResponse>(projectKeys.list(wsId), (old) =>
+      old ? { ...old, projects: old.projects.map((p) => (p.id === project.id ? { ...p, ...project } : p)) } : old,
+    );
+    qc.setQueryData<Project>(projectKeys.detail(wsId, project.id), (old) =>
+      old ? { ...old, ...project } : project,
+    );
+  };
+}
+
+export function useArchiveProject() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  const writeProject = useWriteProjectToCache();
+  return useMutation({
+    mutationFn: (id: string) => api.archiveProject(id),
+    onSuccess: ({ paused_autopilot_ids: _paused, ...project }) => writeProject(project),
+    onSettled: (_data, _err, id) => {
+      qc.invalidateQueries({ queryKey: projectKeys.detail(wsId, id) });
+      qc.invalidateQueries({ queryKey: projectKeys.list(wsId) });
+      // Archiving pauses the autopilots that file into the project.
+      qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
+    },
+  });
+}
+
+export function useRestoreProject() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  const writeProject = useWriteProjectToCache();
+  return useMutation({
+    mutationFn: (id: string) => api.restoreProject(id),
+    onSuccess: (project) => writeProject(project),
+    onSettled: (_data, _err, id) => {
+      qc.invalidateQueries({ queryKey: projectKeys.detail(wsId, id) });
+      qc.invalidateQueries({ queryKey: projectKeys.list(wsId) });
+    },
+  });
+}
+
+// A workspace owner adding themselves to a private project they could not see.
+// Everything keyed on project visibility may have changed for them, the same
+// as when someone else adds them.
+export function useJoinPrivateProject() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (id: string) => api.joinPrivateProject(id),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+    },
+  });
+}
+
+export function useSetProjectSubscription() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ id, subscribed }: { id: string; subscribed: boolean }) =>
+      api.setProjectSubscription(id, subscribed),
+    onSuccess: (subscribed, { id }) => {
+      qc.setQueryData(projectKeys.subscription(wsId, id), subscribed);
+      // Issue subscriber lists include project subscribers, so any open issue
+      // of this project may have just gained or lost the caller.
+      qc.invalidateQueries({ queryKey: issueKeys.subscribersAll() });
     },
   });
 }

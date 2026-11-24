@@ -33,6 +33,8 @@ import type {
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { StatusIcon } from "@/components/ui/status-icon";
+import { issueColumnCategory } from "@/lib/issue-status";
+import { useIssueStatuses } from "@/lib/use-issue-statuses";
 import { memberListOptions } from "@/data/queries/members";
 import { agentListOptions } from "@/data/queries/agents";
 import { squadListOptions } from "@/data/queries/squads";
@@ -46,7 +48,10 @@ import {
 import { useScrollToTopOnChange } from "@/lib/use-scroll-to-top-on-change";
 import { THEME } from "@/lib/theme";
 import { isAgentRuntimeBound } from "@/lib/is-agent-runtime-bound";
+import { commentMentionCandidates } from "@/lib/comment-mention-candidates";
+import { useIsGuest } from "@/lib/use-is-guest";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n";
 
 const AVATAR_SIZE = 36;
 
@@ -70,9 +75,21 @@ interface Props {
 
 export function MentionPickerBody({ query, mode = "comment" }: Props) {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const { t } = useT("issues");
+  // Rows are icon-only here too — colour is what names a custom status.
+  const catalog = useIssueStatuses();
+  // A guest (MUL-9420) mentions people only, so it skips the agent and squad
+  // lists the server would refuse it anyway.
+  const guest = useIsGuest();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { data: squads = [] } = useQuery(squadListOptions(wsId));
+  const { data: agents = [] } = useQuery({
+    ...agentListOptions(wsId),
+    enabled: !!wsId && !guest,
+  });
+  const { data: squads = [] } = useQuery({
+    ...squadListOptions(wsId),
+    enabled: !!wsId && !guest,
+  });
   const runnableAgentIds = useMemo(
     () =>
       new Set(
@@ -93,13 +110,17 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
   // Server-side issue search (mirrors web's mention-suggestion.tsx). Empty
   // query → no fetch + no issues section. Debounced 200ms; in-flight
   // cancelled on every keystroke via AbortController.
-  const [issueResults, setIssueResults] = useState<Issue[]>([]);
+  const [searchResult, setSearchResult] = useState<{ query: string; issues: Issue[] }>({
+    query: "",
+    issues: [],
+  });
+  const issueResults = useMemo(
+    () => searchResult.query === query.trim() ? searchResult.issues : [],
+    [searchResult, query],
+  );
   useEffect(() => {
     const trimmed = query.trim();
-    if (!trimmed) {
-      setIssueResults([]);
-      return;
-    }
+    if (!trimmed) return;
     const ac = new AbortController();
     const timer = setTimeout(() => {
       void api
@@ -107,8 +128,12 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
           { q: trimmed, limit: 8, include_closed: false },
           { signal: ac.signal },
         )
-        .then((res) => setIssueResults(res.issues))
-        .catch(() => setIssueResults([]));
+        .then((res) => {
+          if (!ac.signal.aborted) setSearchResult({ query: trimmed, issues: res.issues });
+        })
+        .catch(() => {
+          if (!ac.signal.aborted) setSearchResult({ query: trimmed, issues: [] });
+        });
     }, 200);
     return () => {
       ac.abort();
@@ -130,9 +155,6 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
   };
 
   const rows = useMemo<Row[]>(() => {
-    const q = query.trim().toLowerCase();
-    const matchName = (name: string) => !q || name.toLowerCase().includes(q);
-
     const out: Row[] = [];
 
     // People-style sections only render in comment mode. Chat is single-
@@ -140,40 +162,44 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
     // people. The Issues section IS useful in chat ("reference ticket
     // for context"), so it stays for both modes.
     if (mode === "comment") {
-      if (!q || "all".includes(q)) {
+      const candidates = commentMentionCandidates({
+        query,
+        members,
+        agents,
+        squads,
+        guest,
+      });
+      if (candidates.all) {
         out.push({ kind: "all" });
       }
-      const memberRows = [...members]
-        .filter((m) => matchName(m.name))
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .map((m): Row => ({ kind: "member", member: m }));
-      if (memberRows.length > 0) {
-        out.push({ kind: "section", label: "People" }, ...memberRows);
+      if (candidates.members.length > 0) {
+        out.push(
+          { kind: "section", label: t("picker.people") },
+          ...candidates.members.map((m): Row => ({ kind: "member", member: m })),
+        );
       }
-      const agentRows = [...agents]
-        .filter((a) => matchName(a.name))
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .map((a): Row => ({ kind: "agent", agent: a }));
-      if (agentRows.length > 0) {
-        out.push({ kind: "section", label: "Agents" }, ...agentRows);
+      if (candidates.agents.length > 0) {
+        out.push(
+          { kind: "section", label: t("picker.agents") },
+          ...candidates.agents.map((a): Row => ({ kind: "agent", agent: a })),
+        );
       }
-      const squadRows = [...squads]
-        .filter((s) => !s.archived_at && matchName(s.name))
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .map((s): Row => ({ kind: "squad", squad: s }));
-      if (squadRows.length > 0) {
-        out.push({ kind: "section", label: "Squads" }, ...squadRows);
+      if (candidates.squads.length > 0) {
+        out.push(
+          { kind: "section", label: t("picker.squads") },
+          ...candidates.squads.map((s): Row => ({ kind: "squad", squad: s })),
+        );
       }
     }
 
     if (issueResults.length > 0) {
-      out.push({ kind: "section", label: "Issues" });
+      out.push({ kind: "section", label: t("picker.issues") });
       for (const i of issueResults) {
         out.push({ kind: "issue", issue: i });
       }
     }
     return out;
-  }, [mode, members, agents, squads, issueResults, query]);
+  }, [mode, members, agents, squads, guest, issueResults, query, t]);
 
   const pick = (row: Row) => {
     let chip: MentionChipDraft | null = null;
@@ -261,7 +287,12 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
                 className="items-center justify-center"
                 style={{ width: AVATAR_SIZE, height: AVATAR_SIZE }}
               >
-                <StatusIcon status={item.issue.status} size={22} />
+                <StatusIcon
+                  status={item.issue.status}
+                  category={issueColumnCategory(item.issue)}
+                  icon={catalog.iconOf(item.issue.status)} color={catalog.colorOf(item.issue.status)}
+                  size={22}
+                />
               </View>
             )}
             {item.kind === "issue" ? (
@@ -279,7 +310,7 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
             ) : (
               <Text className="flex-1 text-base text-foreground">
                 {item.kind === "all"
-                  ? "Everyone (@all)"
+                  ? t("picker.everyone")
                   : item.kind === "member"
                     ? item.member.name
                     : item.kind === "agent"
@@ -289,11 +320,15 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
             )}
             {item.kind === "agent" ? (
               <Text className="text-sm text-muted-foreground">
-                {isAgentRuntimeBound(item.agent) ? "Agent" : "Needs runtime"}
+                {isAgentRuntimeBound(item.agent)
+                  ? t("picker.agent")
+                  : t("picker.needs_runtime")}
               </Text>
             ) : item.kind === "squad" ? (
               <Text className="text-sm text-muted-foreground">
-                {needsRuntime ? "Leader needs runtime" : "Squad"}
+                {needsRuntime
+                  ? t("picker.leader_needs_runtime")
+                  : t("picker.squad")}
               </Text>
             ) : null}
             {isSelected(item) ? (
@@ -304,7 +339,9 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
       }}
       ListEmptyComponent={
         <View className="px-3 py-8 items-center">
-          <Text className="text-sm text-muted-foreground">No matches.</Text>
+          <Text className="text-sm text-muted-foreground">
+            {t("picker.no_matches")}
+          </Text>
         </View>
       }
     />

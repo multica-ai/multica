@@ -1,22 +1,36 @@
 {
-  "title": "Usage",
-  "subtitle": "Token spend and agent activity across this workspace.",
+  "title": "Analytics",
+  "tab_usage": "Usage",
+  "header": {
+    "timezone_and_updated": "{{tz}} · updated {{time}}",
+    "refresh": "Refresh"
+  },
   "filter": {
     "project_label": "Project",
     "all_projects": "All projects",
     "period_label": "Period"
+  },
+  "history_limit": {
+    "note": "Your plan covers the last {{days}} days. Upgrade to see earlier data. Nothing is deleted.",
+    "fell_back": "Showing the last {{days}} days — the limit for your current plan.",
+    "view_plans": "View plans",
+    "locked": "Not included in your plan",
+    "plan": {
+      "pro": "Pro",
+      "business": "Business"
+    }
   },
   "kpi": {
     "cost_label": "Cost · {{days}}D",
     "tokens_label": "Tokens · {{days}}D",
     "tokens_hint": "Input {{input}} · Output {{output}}",
     "run_time_label": "Run time · {{days}}D",
-    "run_time_hint": "Across {{tasks}} tasks",
-    "tasks_label": "Tasks · {{days}}D",
+    "run_time_hint": "Across {{tasks}} runs",
+    "tasks_label": "Runs · {{days}}D",
     "tasks_hint": "{{failed}} failed"
   },
   "dim": {
-    "label": "Dimension",
+    "label": "Interval",
     "daily": "Daily",
     "weekly": "Weekly"
   },
@@ -24,13 +38,12 @@
     "title_cost": "Daily cost",
     "title_tokens": "Daily tokens",
     "title_time": "Daily run time",
-    "title_tasks": "Daily tasks",
+    "title_tasks": "Daily runs",
     "title_errors": "Daily errors",
     "metric_cost": "Cost",
     "metric_tokens": "Tokens",
     "metric_time": "Time",
-    "metric_tasks": "Tasks",
-    "metric_errors": "Errors",
+    "metric_tasks": "Runs",
     "no_data": "No usage in this window.",
     "metric_label": "Metric"
   },
@@ -38,12 +51,17 @@
     "title_cost": "Weekly cost",
     "title_tokens": "Weekly tokens",
     "title_time": "Weekly run time",
-    "title_tasks": "Weekly tasks",
+    "title_tasks": "Weekly runs",
     "title_errors": "Weekly errors",
     "partial_label": "{{range}} (partial · {{covered}} / 7 days)"
   },
   "errors": {
-    "tooltip_rate": "Error rate",
+    "kpi_failed_label": "Failed runs · {{days}}D",
+    "kpi_failed_hint": "Of {{total}} runs",
+    "kpi_rate_label": "Failure rate · {{days}}D",
+    "kpi_agents_label": "Agents affected · {{days}}D",
+    "kpi_agents_hint": "Most: {{name}} ({{count}} failed)",
+    "tooltip_rate": "Failure rate",
     "class": {
       "auth": "Auth",
       "rate_limit": "Rate limit",
@@ -58,8 +76,8 @@
     "mix_title": "Failure mix · {{failed}}",
     "mix_label": "Failure mix",
     "codes_label": "Error codes",
-    "by_agent": "Top offenders",
-    "sort_label": "Rank offenders by",
+    "by_agent": "Errors by agent",
+    "sort_label": "Rank agents by",
     "sort_failed": "Failures",
     "sort_rate": "Rate",
     "header_agent": "Agent",
@@ -68,7 +86,7 @@
     "header_rate": "Rate",
     "other_agents": "Other agents",
     "low_sample": "Fewer than {{count}} runs in this window — this rate is not meaningful.",
-    "no_data": "No failed runs in this window.",
+    "no_data": "No failed runs in this window",
     "show_reasons": "Show error codes",
     "hide_reasons": "Hide error codes",
     "show_all": "Show all {{count}}",
@@ -85,14 +103,19 @@
     "header_tokens": "Tokens",
     "header_cost": "Cost",
     "header_time": "Time",
-    "header_tasks": "Tasks",
+    "header_tasks": "Runs",
+    "usage_unreported_one": "{{count}} run did not report usage",
+    "usage_unreported_other": "{{count}} runs did not report usage",
+    "usage_unreported_pending_one": "{{count}} run did not report usage · totals are still being processed",
+    "usage_unreported_pending_other": "{{count}} runs did not report usage · totals are still being processed",
+    "usage_totals_pending": "Usage totals are still being processed",
     "show_all": "Show all",
     "show_less": "Show top {{count}}",
     "no_data": "No agent activity in this window."
   },
   "empty": {
     "title": "No usage yet",
-    "body": "Once agents start running tasks here, their token spend and run time will appear in this view."
+    "body": "Once agents start running, token usage, cost, and failure rate show up here."
   },
   "duration": {
     "less_than_minute": "<1m"

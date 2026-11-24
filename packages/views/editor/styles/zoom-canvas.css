@@ -33,6 +33,14 @@
   outline-offset: -2px;
 }
 
+/* Focus the canvas placed on itself when it opened (`autoFocus`) is for the
+   keyboard controls; it can still match :focus-visible, which drew the ring
+   around the whole stage of the full-window viewer. No ring until focus has
+   left once — tabbing back in shows it as usual. */
+.zoom-canvas[data-autofocused]:focus-visible {
+  outline: none;
+}
+
 .zoom-canvas.is-panning {
   cursor: grabbing;
 }

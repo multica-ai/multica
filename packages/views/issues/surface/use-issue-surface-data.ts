@@ -1,31 +1,36 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
-import {
-  useQuery,
-  type QueryKey,
-} from "@tanstack/react-query";
-import type { Issue, IssueAssigneeGroup, Project } from "@multica/core/types";
-import { ALL_STATUSES } from "@multica/core/issues/config";
+import { useQuery } from "@tanstack/react-query";
+import type { Issue, Project } from "@multica/core/types";
 import { projectListOptions } from "@multica/core/projects/queries";
-import {
-  childIssueProgressOptions,
-  type AssigneeGroupedIssuesFilter,
-  type IssueSortParam,
-  type MyIssuesFilter,
-} from "@multica/core/issues/queries";
-import {
-  issueSurfaceAssigneeGroupsOptions,
-  issueSurfaceGanttOptions,
-  issueSurfaceListOptions,
-} from "@multica/core/issues/surface/repository";
+import { childIssueProgressOptions } from "@multica/core/issues/queries";
+import { issueSurfaceGanttOptions } from "@multica/core/issues/surface/repository";
 import type { IssueSurfaceQueryPlan } from "@multica/core/issues/surface/query-plan";
-import type { IssueStatus } from "@multica/core/types";
+import {
+  filterDependencyState,
+  type FilterDependencySource,
+  type FilterDependencyState,
+} from "@multica/core/issues/surface/filter-dependency";
+import type { IssueStatus, ProjectStatus, PropertyFilterValue } from "@multica/core/types";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import {
+  advancedFilterUsesField,
+  statusColumnFilter,
+  type AdvancedFilterGroup,
+  type DueDateFilter,
+} from "@multica/core/issues/stores/filter-tree";
+import { useColumnWorkflow, workflowColumns } from "../utils/workflow-columns";
+import { issueBehavesAsAny, statusColumnKeys, visibleStatusKeys } from "@multica/core/issues";
+import type {
+  IssueRelationFilter,
+  NegatableFilterDimension,
+} from "@multica/core/issues/stores/view-store";
 import {
   applyIssueFilters,
-  filterAssigneeGroups,
   type IssueFilterState,
   type IssueFilters,
+  type IssueRelationContext,
 } from "../utils/filter";
 import type { ChildProgress } from "../components/list-row";
 import type {
@@ -57,7 +62,9 @@ const EMPTY_PROJECTS: Project[] = [];
 function ganttCanvasRows(issues: Issue[], showCompleted: boolean): Issue[] {
   const dated = issues.filter((i) => i.start_date || i.due_date);
   if (showCompleted) return dated;
-  return dated.filter((i) => i.status !== "done" && i.status !== "cancelled");
+  // By CATEGORY: a custom status in done/cancelled is completed work, and
+  // "show completed" has to hide it too. (MUL-6243)
+  return dated.filter((i) => !issueBehavesAsAny(i, ["done", "closed"]));
 }
 
 export interface IssueSurfaceData {
@@ -70,15 +77,9 @@ export interface IssueSurfaceData {
    *  sources its count from the `working_agents` server facet instead. */
   ganttWorkingScopeIssues: Issue[] | undefined;
   filteredGanttIssues: Issue[];
-  assigneeGroups?: IssueAssigneeGroup[];
-  assigneeGroupQueryKey?: QueryKey;
-  assigneeGroupFilter?: AssigneeGroupedIssuesFilter;
-  filter: MyIssuesFilter;
-  loadMoreScope?: string;
-  loadMoreFilter?: MyIssuesFilter;
   ganttIssues: Issue[];
   visibleStatuses: IssueStatus[];
-  hiddenStatuses: IssueStatus[];
+  columnStatuses: IssueStatus[];
   statusPagination: IssueStatusPagination;
   activeFilters: Omit<IssueFilters, "statusFilters">;
   childProgressMap: Map<string, ChildProgress>;
@@ -91,6 +92,12 @@ export interface IssueSurfaceData {
     childProgressMap: Map<string, ChildProgress>;
   }>;
   isLoading: boolean;
+  /** The project list behind a project-status filter this surface applies
+   *  itself. */
+  projectCatalogDependency: FilterDependencyState;
+  /** The viewer's subscriptions / agents behind a relation filter this
+   *  surface applies itself. */
+  relationDependency: FilterDependencyState;
   /** The window's data is being revalidated while the previous snapshot is
    *  shown as a placeholder (sort/date change, or any grouped-board filter
    *  change). Drives the header's deferred refresh indicator — content stays
@@ -103,31 +110,42 @@ export function useIssueSurfaceData({
   wsId,
   queryPlan,
   projectId,
-  usesAssigneeBoard,
   usesGantt,
   usesTable,
   serverStatusBranches,
   serverGroupBranches,
   ganttShowCompleted,
-  sort,
   statusFilters,
+  hiddenStatusKeys,
+  statusDependency,
   priorityFilters,
   assigneeFilters,
   includeNoAssignee,
   agentRunningFilter,
+  agentIdleFilter,
+  activeIssueIDs,
+  unreadFilter,
   creatorFilters,
   projectFilters,
   includeNoProject,
+  projectStatusFilters,
   labelFilters,
+  relationFilters,
+  relationContext,
+  relationSources,
+  dueDateFilters,
+  advancedFilter,
+  today,
+  negatedFilters,
   propertyFilters,
   workingIssueIDs,
+  unreadIssueIDs,
   showSubIssues,
   loadProjects,
 }: {
   wsId: string;
   queryPlan: IssueSurfaceQueryPlan;
   projectId?: string;
-  usesAssigneeBoard: boolean;
   usesGantt: boolean;
   usesTable: boolean;
   serverStatusBranches: IssueStatusBranches;
@@ -135,98 +153,100 @@ export function useIssueSurfaceData({
   /** Gantt's "show completed" display toggle. The canvas hides done/cancelled
    *  rows without it, so the working scope has to honour it too. */
   ganttShowCompleted: boolean;
-  sort: IssueSortParam;
   statusFilters: IssueStatus[];
+  hiddenStatusKeys: IssueStatus[];
+  /** The status catalog the columns and a custom status filter route through. */
+  statusDependency: FilterDependencyState;
   priorityFilters: IssueFilterState["priorityFilters"];
   assigneeFilters: IssueFilterState["assigneeFilters"];
   includeNoAssignee: boolean;
   agentRunningFilter: boolean;
+  agentIdleFilter: boolean;
+  activeIssueIDs: ReadonlySet<string> | undefined;
+  unreadFilter: boolean;
   creatorFilters: IssueFilterState["creatorFilters"];
   projectFilters: string[];
   includeNoProject: boolean;
+  projectStatusFilters: ProjectStatus[];
   labelFilters: string[];
-  propertyFilters: Record<string, string[]>;
+  relationFilters: IssueRelationFilter[];
+  relationContext: IssueRelationContext | undefined;
+  /** What the active relation values read: the viewer's agents and squads
+   *  for "my_agents", their subscriptions for "subscribed". */
+  relationSources: readonly (FilterDependencySource | false)[];
+  dueDateFilters: DueDateFilter[];
+  /** The scoped, pruned rule tree. */
+  advancedFilter: AdvancedFilterGroup | null;
+  /** Set when due-date buckets are in play. */
+  today: string | undefined;
+  /** Negations that change the result (`effectiveNegatedFilters`). */
+  negatedFilters: NegatableFilterDimension[];
+  propertyFilters: Record<string, PropertyFilterValue[]>;
   /** Distinct running-task issue ids projected by `/api/working-agents`. */
   workingIssueIDs: ReadonlySet<string>;
+  /** The viewer's unread issue ids, plus those kept on screen after reading. */
+  unreadIssueIDs: ReadonlySet<string>;
   showSubIssues: boolean;
   loadProjects: boolean;
 }): IssueSurfaceData {
-  const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(
-    () => ({
-      ...queryPlan.groupedScopeFilter,
-      statuses: statusFilters.length > 0 ? statusFilters : [...ALL_STATUSES],
-      priorities: priorityFilters,
-      assignee_filters: assigneeFilters,
-      include_no_assignee: includeNoAssignee,
-      creator_filters: creatorFilters,
-      project_ids: projectFilters,
-      include_no_project: includeNoProject,
-      label_ids: labelFilters,
-    }),
-    [
-      assigneeFilters,
-      creatorFilters,
-      includeNoAssignee,
-      includeNoProject,
-      labelFilters,
-      priorityFilters,
-      projectFilters,
-      queryPlan.groupedScopeFilter,
-      statusFilters,
-    ],
-  );
-
-  const activeAssigneeGroupsOptions = issueSurfaceAssigneeGroupsOptions(
-    wsId,
-    queryPlan,
-    assigneeGroupFilter,
-    sort,
-  );
-
-  const statusIssuesQuery = useQuery({
-    ...issueSurfaceListOptions(wsId, queryPlan, sort),
-    enabled:
-      !usesAssigneeBoard &&
-      !usesGantt &&
-      !usesTable &&
-      !serverStatusBranches.enabled &&
-      !serverGroupBranches.enabled,
-  });
-  const assigneeGroupsQuery = useQuery({
-    ...activeAssigneeGroupsOptions,
-    enabled: usesAssigneeBoard && !serverGroupBranches.enabled,
-  });
   const ganttIssuesQuery = useQuery({
-    ...issueSurfaceGanttOptions(wsId, projectId ?? ""),
+    ...issueSurfaceGanttOptions(wsId, projectId ?? "", queryPlan),
     enabled: usesGantt,
   });
-  const workingFilterContext = useMemo(
-    () => ({ runningIssueIds: workingIssueIDs }),
-    [workingIssueIDs],
+  const projectsQuery = useQuery({
+    ...projectListOptions(wsId),
+    enabled: loadProjects,
+  });
+  const { data: projectData, refetch: refetchProjects } = projectsQuery;
+  const projects = projectData ?? EMPTY_PROJECTS;
+  const projectMap = useMemo(
+    () => new Map(projects.map((project) => [project.id, project])),
+    [projects],
   );
-  const bucketedIssues = useMemo(() => {
-    return serverStatusBranches.enabled
-      ? serverStatusBranches.issues
-      : serverGroupBranches.enabled
-      ? serverGroupBranches.issues
-      : usesAssigneeBoard
-      ? (assigneeGroupsQuery.data?.groups.flatMap((group) => group.issues) ?? [])
-      : (statusIssuesQuery.data ?? EMPTY_ISSUES);
-  }, [
-    assigneeGroupsQuery.data?.groups,
-    serverStatusBranches.enabled,
-    serverStatusBranches.issues,
-    serverGroupBranches.enabled,
-    serverGroupBranches.issues,
-    statusIssuesQuery.data,
-    usesAssigneeBoard,
-  ]);
+  // Keyed off `projectData`, NOT `projects`: the latter falls back to
+  // EMPTY_PROJECTS while the query is loading or failed, which would build a
+  // defined-but-empty map. `applyIssueFilters` treats a defined map as
+  // authoritative, so that map would drop every issue and blank the board.
+  // `undefined` is the honest answer until the catalog actually arrives, and
+  // it makes the predicate a no-op.
+  const projectStatusById = useMemo(
+    () =>
+      projectData
+        ? new Map(projectData.map((project) => [project.id, project.status]))
+        : undefined,
+    [projectData],
+  );
+  // Only where this surface applies a predicate itself does it wait on that
+  // predicate's data. Table and the server-status branches filter server-side.
+  const usesClientPredicates = !usesTable && (usesGantt || !serverStatusBranches.enabled);
+  const projectCatalogDependency = filterDependencyState(
+    usesClientPredicates &&
+      (projectStatusFilters.length > 0 || advancedFilterUsesField(advancedFilter, "projectStatus")),
+    [projectsQuery],
+  );
+  const relationDependency = filterDependencyState(usesClientPredicates, relationSources);
 
-  // `cancelled` is a first-class default status (MUL-4290): it is fetched into
-  // the cache like every other status and flows straight through to list /
-  // board / swimlane columns, header facet counts, batch selection, and the
-  // isEmpty check. The status filter narrows this set like any other status —
-  // it no longer unlocks an otherwise-hidden bucket.
+  const workingFilterContext = useMemo(
+    () => ({
+      runningIssueIds: workingIssueIDs,
+      activeIssueIds: activeIssueIDs,
+      unreadIssueIds: unreadIssueIDs,
+      projectStatusById,
+      relation: relationContext,
+      today,
+    }),
+    [activeIssueIDs, projectStatusById, relationContext, today, unreadIssueIDs, workingIssueIDs],
+  );
+  const bucketedIssues = serverStatusBranches.enabled
+    ? serverStatusBranches.issues
+    : serverGroupBranches.enabled
+      ? serverGroupBranches.issues
+      : EMPTY_ISSUES;
+
+  // Status branches already reflect the visible category set chosen by the
+  // controller. Cancelled is hidden for a new view, but remains a first-class
+  // branch once the user restores it or selects it explicitly in a status
+  // filter; no client-only exclusion happens here.
   const ganttIssues = ganttIssuesQuery.data ?? EMPTY_ISSUES;
   const surfaceIssues = usesGantt
     ? ganttIssues
@@ -243,21 +263,35 @@ export function useIssueSurfaceData({
       creatorFilters,
       projectFilters,
       includeNoProject,
+      projectStatusFilters,
       labelFilters,
+      relationFilters,
+      dueDateFilters,
+      advancedFilter,
+      negatedFilters,
       propertyFilters,
       workingOnly: agentRunningFilter,
+      idleOnly: agentIdleFilter,
+      unreadOnly: unreadFilter,
       showSubIssues,
     }),
     [
+      advancedFilter,
       assigneeFilters,
       agentRunningFilter,
+      agentIdleFilter,
+      unreadFilter,
       creatorFilters,
+      dueDateFilters,
       includeNoAssignee,
       includeNoProject,
       labelFilters,
+      negatedFilters,
       priorityFilters,
       projectFilters,
+      projectStatusFilters,
       propertyFilters,
+      relationFilters,
       showSubIssues,
       statusFilters,
     ],
@@ -312,31 +346,11 @@ export function useIssueSurfaceData({
     ],
   );
 
-  // The assignee-grouped board renders straight from `groups`, bypassing the
-  // flat applyIssueFilters output — re-apply the remaining client-only
-  // display filters per group. Server-owned group paths encode running-task
-  // membership in the canonical query; this fallback uses the same issue ids.
-  const filteredAssigneeGroups = useMemo(
-    () =>
-      filterAssigneeGroups(assigneeGroupsQuery.data?.groups, {
-        agentRunningFilter,
-        runningIssueIds: workingIssueIDs,
-        showSubIssues,
-        propertyFilters,
-      }),
-    [
-      assigneeGroupsQuery.data?.groups,
-      agentRunningFilter,
-      propertyFilters,
-      showSubIssues,
-      workingIssueIDs,
-    ],
-  );
-
   const workingFilterState = useMemo<IssueFilterState>(
     () => ({
       ...baseFilterState,
       workingOnly: true,
+      idleOnly: false,
     }),
     [baseFilterState],
   );
@@ -373,18 +387,6 @@ export function useIssueSurfaceData({
     refetch: refetchChildProgress,
   } = useQuery(childIssueProgressOptions(wsId));
   const childProgressMap = childProgressData ?? EMPTY_CHILD_PROGRESS;
-  const {
-    data: projectData,
-    refetch: refetchProjects,
-  } = useQuery({
-    ...projectListOptions(wsId),
-    enabled: loadProjects,
-  });
-  const projects = projectData ?? EMPTY_PROJECTS;
-  const projectMap = useMemo(
-    () => new Map(projects.map((project) => [project.id, project])),
-    [projects],
-  );
   const resolveTableExportLookups = useCallback(
     async (needs: { projects: boolean; childProgress: boolean }) => {
       const [projectResult, progressResult] = await Promise.all([
@@ -417,22 +419,40 @@ export function useIssueSurfaceData({
     ],
   );
 
-  const visibleStatuses = useMemo<IssueStatus[]>(() => {
-    // Default view shows every lifecycle status, `cancelled` last (its
-    // canonical position in ALL_STATUSES). An active status filter narrows to
-    // the selected subset while preserving that order.
-    if (statusFilters.length > 0) {
-      return ALL_STATUSES.filter((s) => statusFilters.includes(s));
-    }
-    return ALL_STATUSES;
-  }, [statusFilters]);
+  const catalog = useIssueStatuses(wsId);
+  // Columns follow the project's workflow, or Default outside a project.
+  // (MUL-7420)
+  const statusNegated = negatedFilters.includes("status");
+  const columnStatus = useMemo(
+    () => statusColumnFilter(statusFilters, statusNegated, advancedFilter, hiddenStatusKeys),
+    [advancedFilter, hiddenStatusKeys, statusFilters, statusNegated],
+  );
+  const { workflow: projectWorkflow } = useColumnWorkflow(
+    wsId,
+    projectId,
+    columnStatus.statuses.length > 0 && !columnStatus.negated,
+  );
+  const { workflow: scopeWorkflow } = useColumnWorkflow(wsId, projectId, false);
 
-  // Hidden columns are the lifecycle statuses not currently visible, so
-  // `cancelled` participates in the board show/hide controls exactly like the
-  // rest of the statuses.
-  const hiddenStatuses = useMemo<IssueStatus[]>(
-    () => ALL_STATUSES.filter((s) => !visibleStatuses.includes(s)),
-    [visibleStatuses],
+  const visibleStatuses = useMemo<IssueStatus[]>(() => {
+    // An explicit exact-key filter wins over hidden column preferences.
+    return workflowColumns(
+      visibleStatusKeys(
+        columnStatus.statuses,
+        columnStatus.hiddenStatuses,
+        catalog,
+        columnStatus.negated,
+      ),
+      projectWorkflow,
+    );
+  }, [columnStatus, catalog, projectWorkflow]);
+
+  // The columns Display can show or hide: this surface's workflow steps, or
+  // the whole catalog without a workflow. A status filter does not change
+  // them, since it overrides hidden columns rather than replacing them.
+  const columnStatuses = useMemo<IssueStatus[]>(
+    () => workflowColumns(statusColumnKeys(catalog), scopeWorkflow),
+    [catalog, scopeWorkflow],
   );
 
   const activeFilters = useMemo(
@@ -442,54 +462,72 @@ export function useIssueSurfaceData({
       includeNoAssignee,
       agentRunningFilter,
       runningIssueIds: workingIssueIDs,
+      agentIdleFilter,
+      activeIssueIds: activeIssueIDs,
+      unreadFilter,
+      unreadIssueIds: unreadIssueIDs,
       creatorFilters,
       projectFilters,
       includeNoProject,
+      projectStatusFilters,
+      projectStatusById,
       labelFilters,
+      relationFilters,
+      relationContext,
+      dueDateFilters,
+      advancedFilter,
+      today,
+      negatedFilters,
       propertyFilters,
       showSubIssues,
     }),
     [
+      advancedFilter,
       assigneeFilters,
       agentRunningFilter,
       creatorFilters,
+      agentIdleFilter,
+      activeIssueIDs,
+      dueDateFilters,
       includeNoAssignee,
       includeNoProject,
       labelFilters,
+      negatedFilters,
       propertyFilters,
       priorityFilters,
       projectFilters,
+      projectStatusById,
+      projectStatusFilters,
+      relationContext,
+      relationFilters,
       showSubIssues,
+      today,
+      unreadFilter,
+      unreadIssueIDs,
       workingIssueIDs,
     ],
   );
 
-  const isLoading = serverGroupBranches.enabled
-    ? serverGroupBranches.isLoading
-    : usesAssigneeBoard
-      ? assigneeGroupsQuery.isLoading
+  const isLoading =
+    statusDependency.pending ||
+    projectCatalogDependency.pending ||
+    relationDependency.pending ||
+    (serverGroupBranches.enabled
+      ? serverGroupBranches.isLoading
       : usesGantt
-      ? ganttIssuesQuery.isLoading
-      : usesTable
-        ? false
+        ? ganttIssuesQuery.isLoading
         : serverStatusBranches.enabled
           ? serverStatusBranches.isLoading
-          : statusIssuesQuery.isLoading;
+          : false);
 
   // Placeholder-backed revalidation of the ACTIVE query only. First loads are
   // isLoading (no previous data to place-hold); gantt has no placeholder
   // phase (its key carries no sort/filter).
   const isRefreshing = serverGroupBranches.enabled
     ? serverGroupBranches.isRefreshing
-    : usesAssigneeBoard
-      ? assigneeGroupsQuery.isPlaceholderData
-      : usesGantt
-      ? false
-      : usesTable
-        ? false
-        : serverStatusBranches.enabled
-          ? serverStatusBranches.isRefreshing
-          : statusIssuesQuery.isPlaceholderData;
+    : serverStatusBranches.enabled
+      ? serverStatusBranches.isRefreshing
+      : false;
 
   return {
     surfaceIssues,
@@ -498,17 +536,9 @@ export function useIssueSurfaceData({
     swimlaneIssues,
     ganttWorkingScopeIssues,
     filteredGanttIssues,
-    assigneeGroups: usesAssigneeBoard ? filteredAssigneeGroups : undefined,
-    assigneeGroupQueryKey: usesAssigneeBoard
-      ? activeAssigneeGroupsOptions.queryKey
-      : undefined,
-    assigneeGroupFilter: usesAssigneeBoard ? assigneeGroupFilter : undefined,
-    filter: queryPlan.queryFilter,
-    loadMoreScope: queryPlan.loadMoreScope,
-    loadMoreFilter: queryPlan.loadMoreFilter,
     ganttIssues,
     visibleStatuses,
-    hiddenStatuses,
+    columnStatuses,
     statusPagination: serverStatusBranches.pagination,
     activeFilters,
     childProgressMap,
@@ -526,14 +556,18 @@ export function useIssueSurfaceData({
     // so this shared legacy surface projection never asserts Table empty.
     isEmpty:
       !isLoading &&
+      !statusDependency.error &&
+      !projectCatalogDependency.error &&
+      !relationDependency.error &&
       !usesGantt &&
       !usesTable &&
       (serverStatusBranches.enabled
         ? serverStatusBranches.isTotalKnown &&
           serverStatusBranches.total === 0
-        : serverGroupBranches.enabled
-          ? !serverGroupBranches.isError &&
-            serverGroupBranches.total === 0
-        : surfaceIssues.length === 0),
+        : serverGroupBranches.enabled &&
+          !serverGroupBranches.isError &&
+          serverGroupBranches.total === 0),
+    projectCatalogDependency,
+    relationDependency,
   };
 }

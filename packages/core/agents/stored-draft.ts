@@ -6,13 +6,16 @@ export type { StoredAgentDraft };
 export function toStoredAgentDraft(
   draft: AgentDraft,
   appliedMessageId: string | null,
+  dismissedMessageId: string | null = null,
 ): StoredAgentDraft {
   return {
     name: draft.name,
     description: draft.description,
     instructions: draft.instructions,
+    conversation_starters: draft.conversationStarters,
     avatar_url: draft.avatarUrl,
     model: draft.model,
+    qoder_agent_id: draft.qoderAgentId,
     thinking_level: draft.thinkingLevel,
     service_tier: draft.serviceTier,
     skill_ids: [...draft.skillIds],
@@ -20,6 +23,7 @@ export function toStoredAgentDraft(
     member_ids: [...draft.memberIds],
     team_ids: [...draft.teamIds],
     applied_message_id: appliedMessageId,
+    ...(dismissedMessageId ? { dismissed_message_id: dismissedMessageId } : {}),
   };
 }
 
@@ -36,9 +40,11 @@ export function fromStoredAgentDraft(
     name: stored.name,
     description: stored.description,
     instructions: stored.instructions,
+    conversationStarters: stored.conversation_starters ?? [],
     avatarUrl: stored.avatar_url,
     runtimeId,
     model: stored.model,
+    qoderAgentId: stored.qoder_agent_id ?? "",
     thinkingLevel: stored.thinking_level,
     serviceTier: stored.service_tier,
     skillIds: new Set(stored.skill_ids),

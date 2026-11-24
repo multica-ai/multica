@@ -4,7 +4,6 @@ import { projectKeys } from "./queries";
 import type {
   CreateProjectResourceRequest,
   ListProjectResourcesResponse,
-  ProjectResource,
   UpdateProjectResourceRequest,
 } from "../types";
 
@@ -84,32 +83,22 @@ export function useDeleteProjectResource(wsId: string, projectId: string) {
   return useMutation({
     mutationFn: (resourceId: string) =>
       api.deleteProjectResource(projectId, resourceId),
-    onMutate: async (resourceId) => {
+    onSuccess: async (_data, resourceId) => {
+      // Reads started during DELETE may still contain the removed resource.
       await qc.cancelQueries({
         queryKey: projectResourceKeys.list(wsId, projectId),
       });
-      const prev = qc.getQueryData<ListProjectResourcesResponse>(
-        projectResourceKeys.list(wsId, projectId),
-      );
       qc.setQueryData<ListProjectResourcesResponse>(
         projectResourceKeys.list(wsId, projectId),
         (old) =>
-          old
+          old && old.resources.some((r) => r.id === resourceId)
             ? {
                 ...old,
-                resources: old.resources.filter(
-                  (r: ProjectResource) => r.id !== resourceId,
-                ),
+                resources: old.resources.filter((r) => r.id !== resourceId),
                 total: old.total - 1,
               }
             : old,
       );
-      return { prev };
-    },
-    onError: (_err, _id, ctx) => {
-      if (ctx?.prev) {
-        qc.setQueryData(projectResourceKeys.list(wsId, projectId), ctx.prev);
-      }
     },
     onSettled: () => {
       qc.invalidateQueries({

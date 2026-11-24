@@ -21,7 +21,7 @@ import type { AgentRuntime } from "@multica/core/types";
  *     Only runs when the user hasn't picked anything, so a manual
  *     selection survives subsequent refetches.
  */
-export function useRuntimePicker(wsId: string): {
+export function useRuntimePicker(wsId: string, wsSlug?: string): {
   runtimes: AgentRuntime[];
   selected: AgentRuntime | null;
   selectedId: string | null;
@@ -31,7 +31,7 @@ export function useRuntimePicker(wsId: string): {
   const qc = useQueryClient();
 
   const { data: runtimes = [] } = useQuery({
-    ...runtimeListOptions(wsId, "me"),
+    ...runtimeListOptions(wsId, "me", wsSlug),
     refetchInterval: (q) => (q.state.data?.length ? false : 2000),
   });
 

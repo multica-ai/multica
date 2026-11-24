@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Bot, Users } from "lucide-react";
+import { Bot, Users } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import {
   AVATAR_SIZE_PX,
@@ -33,35 +33,48 @@ function ActorAvatar({
   className,
 }: ActorAvatarProps) {
   const [imgError, setImgError] = useState(false);
-  const px = AVATAR_SIZE_PX[size];
+  // A control that fixes its own content size (e.g. a toolbar pill) sets
+  // `--avatar-slot-size`; it wins over `size` so the avatar can't outgrow the
+  // control. A CSS variable rather than React context: it follows the DOM, so
+  // hover cards portaled out of the control keep their own avatar sizes.
+  const diameter = `var(--avatar-slot-size, ${AVATAR_SIZE_PX[size]}px)`;
+  const scaled = (ratio: number) => `calc(${diameter} * ${ratio})`;
   const emoji = parseAvatarEmoji(avatarUrl);
+  const showsSystemMark = isSystem && !emoji && (!avatarUrl || imgError);
 
   useEffect(() => {
     setImgError(false);
   }, [avatarUrl]);
 
-  // Every actor — member, agent, squad, or system — renders as a circle. This
-  // is the single source of truth for avatar shape; the upload editors mirror
-  // it (packages/views/common/avatar-upload-control.tsx).
+  // Every actor — member, agent, squad, or system — takes the same shape:
+  // `--avatar-radius`, a circle unless a theme sets it. This is the single
+  // source of truth for avatar shape; the upload editors mirror it
+  // (packages/views/common/avatar-upload-control.tsx, avatar-crop-dialog.tsx).
   return (
     <div
       data-slot="avatar"
+      data-mc="avatar"
+      data-type={isSystem ? "system" : isAgent ? "agent" : isSquad ? "squad" : "member"}
       className={cn(
         "inline-flex shrink-0 items-center justify-center font-medium overflow-hidden",
-        (!avatarUrl || emoji || imgError) && "bg-muted text-muted-foreground",
+        // The system mark draws a round tile; filling the box with the tile
+        // colour keeps it whole when a theme squares the avatar.
+        showsSystemMark
+          ? "bg-multica-ink dark:bg-multica-paper"
+          : (!avatarUrl || emoji || imgError) && "bg-muted text-muted-foreground",
         className,
-        // rounded-full stays last so a call-site `className` can never override
-        // the circle — avatar shape is a hard invariant, not a per-site choice.
-        "rounded-full"
+        // rounded-avatar stays last so a call-site `className` can never
+        // override the shape — it is the theme's choice, not a per-site one.
+        "rounded-avatar"
       )}
-      style={{ width: px, height: px, fontSize: px * 0.45 }}
+      style={{ width: diameter, height: diameter, fontSize: scaled(0.45) }}
     >
       {emoji ? (
         <span
           role="img"
           aria-label={name}
           className="select-none leading-none"
-          style={{ fontSize: px * 0.58 }}
+          style={{ fontSize: scaled(0.58) }}
         >
           {emoji}
         </span>
@@ -73,11 +86,12 @@ function ActorAvatar({
           onError={() => setImgError(true)}
         />
       ) : isSystem ? (
-        <MulticaIcon noSpin style={{ width: px * 0.55, height: px * 0.55 }} />
+        // `size` only picks the optical size; the slot decides the rendered size.
+        <MulticaIcon shape="circle" size={AVATAR_SIZE_PX[size]} style={{ width: "100%", height: "100%" }} />
       ) : isAgent ? (
-        <Bot style={{ width: px * 0.55, height: px * 0.55 }} />
+        <Bot style={{ width: scaled(0.55), height: scaled(0.55) }} />
       ) : isSquad ? (
-        <Users style={{ width: px * 0.55, height: px * 0.55 }} />
+        <Users style={{ width: scaled(0.55), height: scaled(0.55) }} />
       ) : (
         initials
       )}

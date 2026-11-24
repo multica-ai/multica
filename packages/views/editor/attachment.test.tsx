@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import type { ReactElement, ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Attachment as AttachmentRecord } from "@multica/core/types";
@@ -78,6 +78,7 @@ vi.mock("../navigation", () => ({
     back: vi.fn(),
     pathname: "/acme/issues",
     searchParams: new URLSearchParams(),
+    hash: "",
     openInNewTab: vi.fn(),
     getShareableUrl: (p: string) => `https://app.example${p}`,
   }),
@@ -100,7 +101,8 @@ function attachmentIdFromTestDownloadURL(url: string): string | undefined {
     ? (() => {
         try {
           return new URL(url).pathname;
-        } catch {
+        } catch (_err) {
+          void _err;
           return "";
         }
       })()
@@ -189,7 +191,18 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // Flush any pending blob URL GC timers that use fake timers in suites.
+  if (vi.isFakeTimers()) {
+    await vi.runAllTimersAsync();
+    vi.useRealTimers();
+  }
+  try {
+    const { __resetInlineMediaBlobCacheForTests } = await import("./hooks/use-inline-media-url");
+    __resetInlineMediaBlobCacheForTests();
+  } catch (_err) {
+    void _err;
+  }
   restoreObjectURL("createObjectURL", originalCreateObjectURL);
   restoreObjectURL("revokeObjectURL", originalRevokeObjectURL);
   vi.restoreAllMocks();
@@ -219,11 +232,11 @@ describe("Attachment — image dispatch", () => {
     // attachment.tsx for the rationale (MUL-3130 review follow-up).
     expect(img?.getAttribute("src")).toBe(att.download_url);
     expect(img?.getAttribute("alt")).toBe("shot.png");
-    expect(screen.getByTitle("View")).toBeTruthy();
-    expect(screen.getByTitle("Download")).toBeTruthy();
-    expect(screen.getByTitle("Copy link")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "View" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Download" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Copy link" })).toBeTruthy();
     // Trash only shows in editable mode.
-    expect(screen.queryByTitle("Delete")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
   });
 
   it("editable image shows Trash button and wires onDelete", () => {
@@ -236,9 +249,41 @@ describe("Attachment — image dispatch", () => {
         onDelete={onDelete}
       />,
     );
-    const trash = screen.getByTitle("Delete");
+    const trash = screen.getByRole("button", { name: "Delete" });
     fireEvent.click(trash);
     expect(onDelete).toHaveBeenCalled();
+  });
+
+  it("keeps the editable image toolbar open after a touch tap until tapping outside", () => {
+    const onDelete = vi.fn();
+    const { container } = renderWithQuery(
+      <Attachment
+        attachment={{ kind: "record", attachment: makeRecord() }}
+        editable
+        onDelete={onDelete}
+      />,
+    );
+    const image = screen.getByRole("img", { name: "shot.png" });
+    const trash = screen.getByRole("button", { name: "Delete" });
+    const toolbar = trash.closest(".image-toolbar");
+    const touch = { pointerId: 1, pointerType: "touch" };
+
+    expect(toolbar).not.toHaveAttribute("data-placement");
+    fireEvent.pointerOver(image, touch);
+    fireEvent.pointerDown(image, touch);
+    fireEvent.pointerUp(image, touch);
+    fireEvent.pointerOut(image, touch);
+    fireEvent.click(image);
+
+    expect(toolbar).toHaveAttribute("data-placement");
+    fireEvent.pointerDown(trash, touch);
+    fireEvent.pointerUp(trash, touch);
+    fireEvent.pointerOut(trash, touch);
+    fireEvent.click(trash);
+    expect(onDelete).toHaveBeenCalledOnce();
+
+    fireEvent.pointerDown(container, touch);
+    expect(toolbar).not.toHaveAttribute("data-placement");
   });
 
   it("url-only image resolves to a record via context and uses its id for download", () => {
@@ -263,7 +308,7 @@ describe("Attachment — image dispatch", () => {
     // (MUL-3130 review). The raw stored url is the fallback for
     // unresolved markdown only.
     expect(img?.getAttribute("src")).toBe(att.download_url);
-    fireEvent.click(screen.getByTitle("Download"));
+    fireEvent.click(screen.getByRole("button", { name: "Download" }));
     expect(downloadMock).toHaveBeenCalledWith("att-1");
   });
 
@@ -300,11 +345,11 @@ describe("Attachment — image dispatch", () => {
     );
   });
 
-  it("prefers a local disk /uploads URL over API markdown in split-origin self-host", () => {
+  it("authenticates local disk images in split-origin self-host", async () => {
     getBaseUrlMock.mockReturnValue("https://api.example.test");
     const id = "11111111-2222-3333-4444-555555555555";
     const markdownUrl = `https://api.example.test/api/attachments/${id}/download`;
-    const mediaUrl = "https://api.example.test/uploads/workspaces/ws-1/shot.png";
+    const mediaUrl = OBJECT_URL;
     const att = makeRecord({
       id,
       url: "/uploads/workspaces/ws-1/shot.png",
@@ -312,6 +357,8 @@ describe("Attachment — image dispatch", () => {
       download_url: `/api/attachments/${id}/download`,
     });
     resolverState.attachments = [att];
+    getAttachmentMock.mockResolvedValue({ ...att, download_url: `/api/attachments/${id}/signed-download?exp=1&sig=short` });
+    getAttachmentBlobMock.mockResolvedValue(new Blob(["image"], { type: "image/png" }));
 
     renderWithQuery(
       <Attachment
@@ -324,9 +371,14 @@ describe("Attachment — image dispatch", () => {
       />,
     );
 
-    expect(document.querySelector("img")?.getAttribute("src")).toBe(mediaUrl);
+    await waitFor(() => expect(document.querySelector("img")?.getAttribute("src")).toBe(mediaUrl));
+    expect(getAttachmentBlobMock).toHaveBeenCalledWith(id);
 
-    fireEvent.click(screen.getByTitle("View"));
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+
+    await waitFor(() =>
+      expect(document.querySelectorAll("img")).toHaveLength(2),
+    );
 
     const imageSrcs = [...document.querySelectorAll("img")].map((img) =>
       img.getAttribute("src"),
@@ -334,7 +386,20 @@ describe("Attachment — image dispatch", () => {
     expect(imageSrcs).toEqual([mediaUrl, mediaUrl]);
   });
 
-  it("opens preview with the same resolved media URL when a reopened draft record has no download_url", () => {
+  it.each(["draft", "historical body"])("authenticates a local %s without a current attachment list", async (source) => {
+    const id = "11111111-2222-3333-4444-555555555555";
+    const raw = `/uploads/workspaces/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/${id}.png`;
+    getBaseUrlMock.mockReturnValue("https://api.example.test");
+    configStore.setState({ cdnDomain: "api.example.test", cdnSigned: false });
+    const att = makeRecord({ id, url: raw, markdown_url: "", download_url: "" });
+    getAttachmentMock.mockResolvedValue({ ...att, download_url: `/api/attachments/${id}/signed-download?exp=1&sig=short` });
+    getAttachmentBlobMock.mockResolvedValue(new Blob(["image"], { type: "image/png" }));
+    renderWithQuery(<Attachment attachment={source === "draft" ? { kind: "record", attachment: att } : { kind: "url", url: `https://old-host.test${raw}`, filename: "shot.png", forceKind: "image" }} />);
+    await waitFor(() => expect(document.querySelector("img")?.getAttribute("src")).toBe(OBJECT_URL));
+    expect(getAttachmentBlobMock).toHaveBeenCalledWith(id);
+  });
+
+  it("opens preview with the same resolved media URL when a reopened draft record has no download_url", async () => {
     configStore.setState({ cdnDomain: "cdn.example.test" });
     const id = "11111111-2222-3333-4444-555555555555";
     const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
@@ -346,6 +411,7 @@ describe("Attachment — image dispatch", () => {
       download_url: "",
     });
     resolverState.attachments = [att];
+    getAttachmentMock.mockResolvedValue({ ...att, download_url: mediaUrl });
 
     renderWithQuery(
       <Attachment
@@ -358,7 +424,10 @@ describe("Attachment — image dispatch", () => {
       />,
     );
 
-    fireEvent.click(screen.getByTitle("View"));
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+
+    await waitFor(() =>
+      expect(document.querySelectorAll("img")).toHaveLength(2));
 
     const imageSrcs = [...document.querySelectorAll("img")].map((img) =>
       img.getAttribute("src"),
@@ -547,9 +616,13 @@ describe("Attachment — image dispatch", () => {
     expect(getAttachmentBlobMock).toHaveBeenCalledWith(id);
     expect(createObjectURLMock).toHaveBeenCalledWith(blob);
 
-    // The bytes are released once nothing renders them.
+    // The bytes are scheduled for release 5 min after last unmount.
+    vi.useFakeTimers();
     unmount();
+    expect(revokeObjectURLMock).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
     expect(revokeObjectURLMock).toHaveBeenCalledWith(OBJECT_URL);
+    vi.useRealTimers();
   });
 
   it("copies the durable URL, not the session-local object URL (MUL-5445)", async () => {
@@ -592,7 +665,7 @@ describe("Attachment — image dispatch", () => {
     await waitFor(() => {
       expect(document.querySelector("img")?.getAttribute("src")).toBe(OBJECT_URL);
     });
-    fireEvent.click(screen.getByTitle("Copy link"));
+    fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(markdownUrl));
   });
 
@@ -681,6 +754,26 @@ describe("Attachment — image dispatch", () => {
     expect(screen.queryByText("Uploading")).toBeNull();
   });
 
+  it("View opens the image preview when the caption is prose, not a filename (MUL-7518)", () => {
+    // Outside an image sequence the dispatcher falls back to its own
+    // single-image preview. It must carry the kind it already resolved over
+    // to the modal — re-reading "报告图表" as a filename finds no extension
+    // and used to leave the reader on "can't be previewed".
+    renderWithQuery(
+      <Attachment
+        attachment={{
+          kind: "url",
+          url: "https://external.example/chart.png",
+          filename: "报告图表",
+          forceKind: "image",
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    expect(screen.queryByText("This file type can't be previewed.")).toBeNull();
+    expect(screen.getByRole("dialog").querySelector("img")).toBeTruthy();
+  });
+
   it("external image (no resolver match) renders <img> and falls back to openByUrl on Download", () => {
     renderWithQuery(
       <Attachment
@@ -693,7 +786,7 @@ describe("Attachment — image dispatch", () => {
     );
     const img = document.querySelector("img");
     expect(img?.getAttribute("src")).toBe("https://external.example/foo.png");
-    fireEvent.click(screen.getByTitle("Download"));
+    fireEvent.click(screen.getByRole("button", { name: "Download" }));
     expect(openByUrlMock).toHaveBeenCalledWith("https://external.example/foo.png");
     expect(downloadMock).not.toHaveBeenCalled();
   });
@@ -709,8 +802,8 @@ describe("Attachment — image dispatch", () => {
         }}
       />,
     );
-    expect(screen.queryByTitle("View")).toBeNull();
-    expect(screen.queryByTitle("Download")).toBeNull();
+    expect(screen.queryByRole("button", { name: "View" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
   });
 
   it("stable /api/attachments/<id>/download download_url falls through to the durable record.markdown_url for native <img> loadability (MUL-3192)", () => {
@@ -751,22 +844,84 @@ describe("Attachment — image dispatch", () => {
   });
 });
 
-describe("Attachment — html dispatch", () => {
-  it("record html with attachmentId renders HtmlAttachmentPreview (no file-card chrome)", () => {
-    getAttachmentTextContentMock.mockResolvedValueOnce({
-      text: "<p>chart</p>",
-      originalContentType: "text/html",
+describe("Attachment — lazy images and reserved box (MUL-8182)", () => {
+  it("loads the original lazily in the recorded box", () => {
+    const att = makeRecord({ width: 3200, height: 2000 });
+    renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
+    const img = document.querySelector("img")!;
+    expect(img.getAttribute("src")).toBe(att.download_url);
+    expect(img.getAttribute("loading")).toBe("lazy");
+    expect(img.getAttribute("decoding")).toBe("async");
+    expect(img.getAttribute("width")).toBe("3200");
+    const figure = img.closest(".image-figure") as HTMLElement;
+    expect(figure.hasAttribute("data-sized")).toBe(true);
+    expect(figure.hasAttribute("data-pending")).toBe(false);
+    expect(figure.style.getPropertyValue("--image-width")).toBe("3200px");
+    expect(figure.style.getPropertyValue("--image-aspect")).toBe("1.6");
+  });
+
+  it("takes dimensions from the resolved record for markdown images", () => {
+    const att = makeRecord({ width: 1170, height: 2532 });
+    resolverState.attachments = [att];
+    renderWithQuery(<Attachment attachment={{ kind: "url", url: att.url, filename: "", forceKind: "image" }} />);
+    expect(document.querySelector("img")?.getAttribute("height")).toBe("2532");
+  });
+
+  it("ignores malformed dimensions on an unparsed record", () => {
+    const att = makeRecord({ width: -1, height: "big" as unknown as number });
+    renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
+    expect(document.querySelector("img")?.hasAttribute("width")).toBe(false);
+  });
+
+  it("holds an unknown-size placeholder until load or error", () => {
+    const att = makeRecord();
+    renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
+    const img = document.querySelector("img")!;
+    const figure = img.closest(".image-figure") as HTMLElement;
+    expect(figure.hasAttribute("data-pending")).toBe(true);
+    fireEvent.load(img);
+    expect(figure.hasAttribute("data-pending")).toBe(false);
+    expect(img.hasAttribute("data-loaded")).toBe(true);
+  });
+
+  it("restores the placeholder when a reused image changes source", () => {
+    const att = makeRecord();
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
     });
+    const { rerender } = render(
+      <QueryClientProvider client={client}>
+        <Attachment attachment={{ kind: "record", attachment: att }} />
+      </QueryClientProvider>,
+    );
+    fireEvent.load(document.querySelector("img")!);
+    rerender(
+      <QueryClientProvider client={client}>
+        <Attachment attachment={{
+          kind: "record",
+          attachment: { ...att, id: "att-2", download_url: "https://cdn.example.test/second.png" },
+        }} />
+      </QueryClientProvider>,
+    );
+    expect(document.querySelector(".image-figure")?.hasAttribute("data-pending")).toBe(true);
+  });
+});
+
+describe("Attachment — html dispatch", () => {
+  // An HTML file is a file (MUL-7649): the row opens it in the viewer, and
+  // nothing is fetched to embed it inline.
+  it("record html renders the file-card row, not an embedded preview", () => {
     const att = makeRecord({
       filename: "report.html",
       content_type: "text/html",
       url: "https://cdn.example.test/report.html",
     });
     renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
-    // HtmlAttachmentPreview hides the filename row.
-    expect(screen.queryByText("report.html")).toBeNull();
-    expect(screen.getByTitle("Preview")).toBeTruthy();
-    expect(screen.getByTitle("Download")).toBeTruthy();
+    expect(screen.getByText("report.html")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Preview" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Download" })).toBeTruthy();
+    expect(document.querySelector("iframe")).toBeNull();
+    expect(getAttachmentTextContentMock).not.toHaveBeenCalled();
   });
 
   it("url-only html (no resolver match) falls back to AttachmentCard chrome", () => {
@@ -820,7 +975,7 @@ describe("Attachment — file-card dispatch", () => {
     );
 
     expect(screen.getByText("manual.pdf")).toBeTruthy();
-    fireEvent.mouseDown(screen.getByTitle("Download"));
+    fireEvent.mouseDown(screen.getByRole("button", { name: "Download" }));
     expect(downloadMock).toHaveBeenCalledWith(id);
   });
 
@@ -837,8 +992,8 @@ describe("Attachment — file-card dispatch", () => {
     );
     expect(screen.getByText("Uploading {{filename}}")).toBeTruthy();
     // Preview/Download chrome is hidden while uploading.
-    expect(screen.queryByTitle("Preview")).toBeNull();
-    expect(screen.queryByTitle("Download")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Preview" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
   });
 });
 
@@ -956,5 +1111,246 @@ describe("Attachment — absolutize site-relative URLs (MUL-3192)", () => {
     // /api/* to the API host, so the relative path loads through the same
     // origin as the rendered HTML.
     expect(img?.getAttribute("src")).toBe("/api/attachments/abc-3/download");
+  });
+});
+
+describe("Attachment — blob URL GC (MUL-7741)", () => {
+  it("defers revoke by 5 min after last unmount", async () => {
+    getBaseUrlMock.mockReturnValue("https://multica-api.copilothub.ai");
+    const id = "11111111-2222-3333-4444-555555555555";
+    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    resolverState.attachments = [
+      makeRecord({ id, url: "https://minio:9000/multica/uploads/ws/shot.png", markdown_url: markdownUrl, download_url: "" }),
+    ];
+    getAttachmentMock.mockResolvedValue(makeRecord({ id, download_url: `/api/attachments/${id}/download` }));
+    const blob = new Blob(["png-bytes"], { type: "image/png" });
+    getAttachmentBlobMock.mockResolvedValue(blob);
+
+    const { unmount } = renderWithQuery(
+      <Attachment attachment={{ kind: "url", url: markdownUrl, filename: "shot.png", forceKind: "image" }} />,
+    );
+    await waitFor(() => expect(document.querySelector("img")?.getAttribute("src")).toBe(OBJECT_URL));
+    expect(createObjectURLMock).toHaveBeenCalledTimes(1);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    unmount();
+    expect(revokeObjectURLMock).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000 - 1000);
+    expect(revokeObjectURLMock).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(revokeObjectURLMock).toHaveBeenCalledWith(OBJECT_URL);
+    vi.useRealTimers();
+  });
+
+  it("cancels pending GC on re-enter before expiry", async () => {
+    getBaseUrlMock.mockReturnValue("https://multica-api.copilothub.ai");
+    const id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    resolverState.attachments = [makeRecord({ id, url: "https://minio:9000/a.png", markdown_url: markdownUrl, download_url: "" })];
+    getAttachmentMock.mockResolvedValue(makeRecord({ id, download_url: `/api/attachments/${id}/download` }));
+    const blob = new Blob(["x"], { type: "image/png" });
+    getAttachmentBlobMock.mockResolvedValue(blob);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const first = render(
+      <QueryClientProvider client={qc}>
+        <Attachment attachment={{ kind: "url", url: markdownUrl, filename: "shot.png", forceKind: "image" }} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(document.querySelector("img")?.getAttribute("src")).toBe(OBJECT_URL));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    first.unmount();
+    await vi.advanceTimersByTimeAsync(60 * 1000);
+    vi.useRealTimers();
+    const second = render(
+      <QueryClientProvider client={qc}>
+        <Attachment attachment={{ kind: "url", url: markdownUrl, filename: "shot.png", forceKind: "image" }} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(document.querySelector("img")?.getAttribute("src")).toBe(OBJECT_URL));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    // Pending GC was cancelled on re-enter — advancing to original expiry must NOT revoke
+    await vi.advanceTimersByTimeAsync(4 * 60 * 1000);
+    expect(revokeObjectURLMock).not.toHaveBeenCalled();
+    second.unmount();
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+    expect(revokeObjectURLMock).toHaveBeenCalledWith(OBJECT_URL);
+    vi.useRealTimers();
+  });
+
+  it("reuses cached blob URL on re-enter before GC expiry without new createObjectURL", async () => {
+    getBaseUrlMock.mockReturnValue("https://multica-api.copilothub.ai");
+    const id = "99999999-aaaa-bbbb-cccc-dddddddddddd";
+    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    resolverState.attachments = [makeRecord({ id, url: "https://minio:9000/r.png", markdown_url: markdownUrl, download_url: "" })];
+    getAttachmentMock.mockResolvedValue(makeRecord({ id, download_url: `/api/attachments/${id}/download` }));
+    getAttachmentBlobMock.mockResolvedValue(new Blob(["r"], { type: "image/png" }));
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const first = render(
+      <QueryClientProvider client={qc}>
+        <Attachment attachment={{ kind: "url", url: markdownUrl, filename: "r.png", forceKind: "image" }} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(document.querySelector("img")?.getAttribute("src")).toBe(OBJECT_URL));
+    expect(createObjectURLMock).toHaveBeenCalledTimes(1);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    first.unmount();
+    await vi.advanceTimersByTimeAsync(60 * 1000);
+    createObjectURLMock.mockClear();
+    const second = render(
+      <QueryClientProvider client={qc}>
+        <Attachment attachment={{ kind: "url", url: markdownUrl, filename: "r.png", forceKind: "image" }} />
+      </QueryClientProvider>,
+    );
+    // Same session — cached fresh + blob URL reused synchronously (no network).
+    expect(document.querySelector("img")?.getAttribute("src")).toBe(OBJECT_URL);
+    expect(createObjectURLMock).not.toHaveBeenCalled();
+    second.unmount();
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+    expect(revokeObjectURLMock).toHaveBeenCalledWith(OBJECT_URL);
+    vi.useRealTimers();
+  });
+
+  it("both concurrent consumers of same id get blob URL (no fallback stick)", async () => {
+    getBaseUrlMock.mockReturnValue("https://multica-api.copilothub.ai");
+    const id = "cccccccc-cccc-cccc-cccc-cccccccccccc";
+    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    resolverState.attachments = [makeRecord({ id, url: "https://minio:9000/c.png", markdown_url: markdownUrl, download_url: "" })];
+    getAttachmentMock.mockResolvedValue(makeRecord({ id, download_url: `/api/attachments/${id}/download` }));
+    getAttachmentBlobMock.mockResolvedValue(new Blob(["c"], { type: "image/png" }));
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const { unmount } = render(
+      <QueryClientProvider client={qc}>
+        <Attachment attachment={{ kind: "url", url: markdownUrl, filename: "c.png", forceKind: "image" }} />
+        <Attachment attachment={{ kind: "url", url: markdownUrl, filename: "c.png", forceKind: "image" }} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => {
+      const imgs = document.querySelectorAll("img");
+      expect(imgs).toHaveLength(2);
+      expect(imgs[0]?.getAttribute("src")).toBe(OBJECT_URL);
+      expect(imgs[1]?.getAttribute("src")).toBe(OBJECT_URL);
+    });
+    expect(createObjectURLMock).toHaveBeenCalledTimes(1);
+    vi.useFakeTimers();
+    unmount();
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+    expect(revokeObjectURLMock).toHaveBeenCalledWith(OBJECT_URL);
+    vi.useRealTimers();
+  });
+
+  it("does not show previous image when gallery id changes and new blob fetch fails (A→B) via rerender", async () => {
+    getBaseUrlMock.mockReturnValue("https://multica-api.copilothub.ai");
+    const idA = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    const idB = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+    const urlA = `https://multica-api.copilothub.ai/api/attachments/${idA}/download`;
+    const urlB = `https://multica-api.copilothub.ai/api/attachments/${idB}/download`;
+    resolverState.attachments = [
+      makeRecord({ id: idA, url: "https://minio:9000/a.png", markdown_url: urlA, download_url: "" }),
+      makeRecord({ id: idB, url: "https://minio:9000/b.png", markdown_url: urlB, download_url: "" }),
+    ];
+    getAttachmentMock.mockImplementation((id: string) => Promise.resolve(makeRecord({ id, download_url: `/api/attachments/${id}/download` })));
+    getAttachmentBlobMock.mockImplementation((id: string) => {
+      if (id === idA) return Promise.resolve(new Blob(["a"], { type: "image/png" }));
+      return Promise.reject(new Error("fetch failed"));
+    });
+    const { rerender, unmount } = renderWithQuery(<Attachment attachment={{ kind: "url", url: urlA, filename: "a.png", forceKind: "image" }} />);
+    await waitFor(() => expect(document.querySelector("img")?.getAttribute("src")).toBe(OBJECT_URL));
+    // Same instance id change — panel reuse, not unmount+mount
+    rerender(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })}>
+        <Attachment attachment={{ kind: "url", url: urlB, filename: "b.png", forceKind: "image" }} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(document.querySelector("img")?.getAttribute("src")).toBe(urlB));
+    expect(document.querySelector("img")?.getAttribute("src")).not.toBe(OBJECT_URL);
+    unmount();
+  });
+
+  it("does not reuse previous account blob URL after query cache clear on account switch", async () => {
+    getBaseUrlMock.mockReturnValue("https://multica-api.copilothub.ai");
+    const id = "dddddddd-eeee-ffff-aaaa-bbbbbbbbbbbb";
+    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    const record = makeRecord({ id, url: "https://minio:9000/d.png", markdown_url: markdownUrl, download_url: "" });
+    resolverState.attachments = [record];
+    getAttachmentMock.mockResolvedValue(record);
+    getAttachmentBlobMock.mockResolvedValue(new Blob(["d"], { type: "image/png" }));
+    const qcA = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const first = render(
+      <QueryClientProvider client={qcA}>
+        <Attachment attachment={{ kind: "url", url: markdownUrl, filename: "d.png", forceKind: "image" }} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(document.querySelector("img")?.getAttribute("src")).toBe(OBJECT_URL));
+    first.unmount();
+    expect(revokeObjectURLMock).not.toHaveBeenCalled();
+    getAttachmentMock.mockImplementation(() => new Promise(() => {}));
+    getAttachmentBlobMock.mockClear();
+    const qcB = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const { unmount: unmountB } = render(
+      <QueryClientProvider client={qcB}>
+        <Attachment attachment={{ kind: "url", url: markdownUrl, filename: "d.png", forceKind: "image" }} />
+      </QueryClientProvider>,
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    expect(document.querySelector("img")?.getAttribute("src")).toBe(markdownUrl);
+    expect(document.querySelector("img")?.getAttribute("src")).not.toBe(OBJECT_URL);
+    expect(getAttachmentBlobMock).not.toHaveBeenCalled();
+    unmountB();
+    getAttachmentMock.mockRejectedValue(new Error("forbidden"));
+    const qcB2 = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const { unmount: unmountB2 } = render(
+      <QueryClientProvider client={qcB2}>
+        <Attachment attachment={{ kind: "url", url: markdownUrl, filename: "d.png", forceKind: "image" }} />
+      </QueryClientProvider>,
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    expect(document.querySelector("img")?.getAttribute("src")).not.toBe(OBJECT_URL);
+    expect(getAttachmentBlobMock).not.toHaveBeenCalled();
+    unmountB2();
+    // A's blob cache still exists (GC is 5 min) — verify revoke hasn't happened yet
+    // and B still shows fallback, not A's bytes. The GC timer itself is
+    // exercised by the sibling tests above.
+    expect(revokeObjectURLMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("image download feedback", () => {
+  it("shows pending feedback and blocks repeat clicks until completion", async () => {
+    const pending = Promise.withResolvers<void>();
+    downloadMock.mockReturnValueOnce(pending.promise);
+    renderWithQuery(<Attachment attachment={{ kind: "record", attachment: makeRecord() }} />);
+    const button = screen.getByRole("button", { name: "Download" });
+    const toolbar = button.closest(".image-toolbar");
+
+    fireEvent.click(button);
+
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(button.querySelector(".animate-spin")).toBeInTheDocument();
+    expect(toolbar).toHaveAttribute("data-placement");
+    fireEvent.click(button);
+    expect(downloadMock).toHaveBeenCalledExactlyOnceWith("att-1");
+
+    await act(async () => pending.resolve());
+
+    expect(button).toBeEnabled();
+    expect(button).toHaveAttribute("aria-busy", "false");
+    expect(button.querySelector(".animate-spin")).toBeNull();
+    expect(toolbar).not.toHaveAttribute("data-placement");
+  });
+
+  it("keeps sibling images available while preparing a download", async () => {
+    const pending = Promise.withResolvers<void>();
+    downloadMock.mockReturnValueOnce(pending.promise);
+    renderWithQuery(<>
+      <Attachment attachment={{ kind: "record", attachment: makeRecord() }} />
+      <Attachment attachment={{ kind: "record", attachment: makeRecord({ id: "att-2" }) }} />
+    </>);
+    const [first, second] = screen.getAllByRole("button", { name: "Download" });
+
+    fireEvent.click(first!);
+    fireEvent.click(second!);
+
+    expect(downloadMock.mock.calls).toEqual([["att-1"], ["att-2"]]);
+    await act(async () => pending.resolve());
   });
 });

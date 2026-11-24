@@ -9,6 +9,9 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -33,7 +36,9 @@ func dupRaceFixture(t *testing.T, agentName string, issueNumber int) (agentID, i
 	`, testWorkspaceID, testUserID, issueNumber, agentID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID) })
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+	})
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID) })
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
 	return agentID, issueID, runtimeID
@@ -41,14 +46,11 @@ func dupRaceFixture(t *testing.T, agentName string, issueNumber int) (agentID, i
 
 func insertDupRaceComment(t *testing.T, issueID, content, age string) string {
 	t.Helper()
-	var id string
-	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
-		VALUES ($1, $2, 'member', $3, $4, 'comment', now() - $5::interval)
-		RETURNING id
-	`, issueID, testWorkspaceID, testUserID, content, age).Scan(&id); err != nil {
-		t.Fatalf("insert comment %q: %v", content, err)
-	}
+	// These race cases compete for the same thread slot.
+	var parentID *string
+	dbfx.QueryRow(t, `SELECT (SELECT id::text FROM comment WHERE issue_id=$1 AND parent_id IS NULL ORDER BY created_at, id LIMIT 1)`, issueID).Scan(&parentID)
+	id := dbfx.Comment(t, issueID, content, testutil.Cols{"parent_id": parentID})
+	dbfx.Exec(t, `UPDATE comment SET created_at=now()-$2::interval WHERE id=$1`, id, age)
 	return id
 }
 
@@ -70,52 +72,97 @@ func commentCovered(t *testing.T, issueID, agentID, commentID, statusFilter stri
 // it (the merge makes the newer comment the trigger and pushes the prior trigger
 // into coalesced), so the single run covers both. Coalesced outcome, one pending
 // task, and no warning / constraint-name leak.
+//
+// Run once per trigger source that can lose this race on an issue whose agent is
+// the assignee. The mention source has been covered since #5958; the
+// ISSUE-ASSIGNEE source is the half #5914 left behind, and it is not redundant:
+// its enqueue surfaced the RAW unique violation, so the loser came back
+// blocked/internal_error instead of coalescing. That dropped the comment's
+// instruction outright — the comment-creation path has no obligation hand-off
+// (unlike completion reconcile), and a losing comment usually PREDATES the
+// winning task row, so completion reconcile's created_at window cannot pick it
+// up either.
 func TestCommentEnqueueRaceQueuedWinnerFoldsLoser(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	ctx := context.Background()
-	agentID, issueID, _ := dupRaceFixture(t, "dup-race-queued", 999311)
-	agentUUID := util.MustParseUUID(agentID)
-	issue, err := testHandler.Queries.GetIssue(ctx, util.MustParseUUID(issueID))
-	if err != nil {
-		t.Fatalf("load issue: %v", err)
-	}
-	agent, err := testHandler.Queries.GetAgent(ctx, agentUUID)
-	if err != nil {
-		t.Fatalf("load agent: %v", err)
+	cases := []struct {
+		name          string
+		agentName     string
+		issueNumber   int
+		source        commentAgentTriggerSource
+		enqueueWinner func(ctx context.Context, issue db.Issue, agentID, commentID pgtype.UUID) error
+	}{
+		{
+			name:        "mention",
+			agentName:   "dup-race-queued",
+			issueNumber: 999311,
+			source:      commentTriggerSourceMentionAgent,
+			enqueueWinner: func(ctx context.Context, issue db.Issue, agentID, commentID pgtype.UUID) error {
+				_, err := testHandler.TaskService.EnqueueTaskForMention(ctx, issue, agentID, commentID, service.OriginNamed)
+				return err
+			},
+		},
+		{
+			name:        "issue_assignee",
+			agentName:   "dup-race-assignee",
+			issueNumber: 999316,
+			source:      commentTriggerSourceIssueAssignee,
+			enqueueWinner: func(ctx context.Context, issue db.Issue, _, commentID pgtype.UUID) error {
+				_, err := testHandler.TaskService.EnqueueTaskForIssue(ctx, issue, commentID)
+				return err
+			},
+		},
 	}
 
-	winnerCommentID := insertDupRaceComment(t, issueID, "first instruction", "6 minutes")
-	if _, err := testHandler.TaskService.EnqueueTaskForMention(ctx, issue, agentUUID, util.MustParseUUID(winnerCommentID)); err != nil {
-		t.Fatalf("enqueue winning task: %v", err)
-	}
-	loserCommentID := insertDupRaceComment(t, issueID, "second distinct instruction", "1 minute")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			agentID, issueID, _ := dupRaceFixture(t, tc.agentName, tc.issueNumber)
+			agentUUID := util.MustParseUUID(agentID)
+			issue, err := testHandler.Queries.GetIssue(ctx, util.MustParseUUID(issueID))
+			if err != nil {
+				t.Fatalf("load issue: %v", err)
+			}
+			agent, err := testHandler.Queries.GetAgent(ctx, agentUUID)
+			if err != nil {
+				t.Fatalf("load agent: %v", err)
+			}
 
-	var logs bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+			winnerCommentID := insertDupRaceComment(t, issueID, "first instruction", "6 minutes")
+			if err := tc.enqueueWinner(ctx, issue, agentUUID, util.MustParseUUID(winnerCommentID)); err != nil {
+				t.Fatalf("enqueue winning task: %v", err)
+			}
+			loserCommentID := insertDupRaceComment(t, issueID, "second distinct instruction", "1 minute")
 
-	trigger := commentAgentTrigger{Agent: agent, Source: commentTriggerSourceMentionAgent}
-	results := testHandler.enqueueCommentAgentTriggers(ctx, issue, util.MustParseUUID(loserCommentID), []commentAgentTrigger{trigger})
+			var logs bytes.Buffer
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
+			t.Cleanup(func() { slog.SetDefault(prev) })
 
-	if res := results[agentID]; res.status != DispatchCoalesced {
-		t.Fatalf("queued-winner race: got status %q reason %q, want coalesced", res.status, res.reason)
-	}
-	if !commentCovered(t, issueID, agentID, loserCommentID, "queued") {
-		t.Fatal("losing comment was NOT folded into the queued winner — its instruction would be dropped")
-	}
-	if !commentCovered(t, issueID, agentID, winnerCommentID, "queued") {
-		t.Fatal("winner comment is no longer covered after the fold")
-	}
-	if n := pendingTaskCountForAgentIssue(t, issueID, agentID); n != 1 {
-		t.Fatalf("pending task count = %d, want exactly 1", n)
-	}
-	for _, leak := range []string{"idx_one_pending_task_per_issue_agent", "level=WARN", "level=ERROR"} {
-		if strings.Contains(logs.String(), leak) {
-			t.Fatalf("benign enqueue race leaked %q into logs:\n%s", leak, logs.String())
-		}
+			trigger := commentAgentTrigger{Agent: agent, Source: tc.source}
+			results := testHandler.enqueueCommentAgentTriggers(ctx, issue, util.MustParseUUID(loserCommentID), []commentAgentTrigger{trigger})
+
+			// Guards the service hunk: the lost race must coalesce, not block.
+			if res := results[agentID]; res.status != DispatchCoalesced {
+				t.Fatalf("queued-winner race: got status %q reason %q, want coalesced", res.status, res.reason)
+			}
+			if !commentCovered(t, issueID, agentID, loserCommentID, "queued") {
+				t.Fatal("losing comment was NOT folded into the queued winner — its instruction would be dropped")
+			}
+			if !commentCovered(t, issueID, agentID, winnerCommentID, "queued") {
+				t.Fatal("winner comment is no longer covered after the fold")
+			}
+			if n := pendingTaskCountForAgentIssue(t, issueID, agentID); n != 1 {
+				t.Fatalf("pending task count = %d, want exactly 1", n)
+			}
+			// Guards the handler hunk: a benign race must not surface as WARN/ERROR.
+			for _, leak := range []string{"idx_one_pending_task_per_issue_agent", "level=WARN", "level=ERROR"} {
+				if strings.Contains(logs.String(), leak) {
+					t.Fatalf("benign enqueue race leaked %q into logs:\n%s", leak, logs.String())
+				}
+			}
+		})
 	}
 }
 
@@ -219,7 +266,9 @@ func TestCommentEnqueueRaceDifferentHeadNotCoalesced(t *testing.T) {
 	`, testWorkspaceID, dupRaceHeadB).Scan(&prID); err != nil {
 		t.Fatalf("seed PR: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue_pull_request WHERE pull_request_id = $1`, prID) })
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue_pull_request WHERE pull_request_id = $1`, prID)
+	})
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM github_pull_request WHERE id = $1`, prID) })
 	if _, err := testPool.Exec(ctx, `INSERT INTO issue_pull_request (issue_id, pull_request_id) VALUES ($1, $2)`, issueID, prID); err != nil {
 		t.Fatalf("link PR: %v", err)
@@ -389,10 +438,10 @@ func TestCommentEnqueueRaceQueuedWinnerReattributesOriginator(t *testing.T) {
 
 	// Winner: a queued task attributed to M1 (testUserID) via its own comment.
 	winnerCommentID := insertDupRaceComment(t, issueID, "M1 instruction", "6 minutes")
-	if _, err := testHandler.TaskService.EnqueueTaskForMention(ctx, issue, agentUUID, util.MustParseUUID(winnerCommentID)); err != nil {
+	if _, err := testHandler.TaskService.EnqueueTaskForMention(ctx, issue, agentUUID, util.MustParseUUID(winnerCommentID), service.OriginNamed); err != nil {
 		t.Fatalf("enqueue winning task: %v", err)
 	}
-	// Losing comment authored by M2.
+	// Losing comment authored by M2 in the same thread.
 	var loserCommentID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
@@ -401,6 +450,8 @@ func TestCommentEnqueueRaceQueuedWinnerReattributesOriginator(t *testing.T) {
 	`, issueID, testWorkspaceID, m2).Scan(&loserCommentID); err != nil {
 		t.Fatalf("insert M2 loser comment: %v", err)
 	}
+
+	dbfx.Exec(t, `UPDATE comment SET parent_id=$2 WHERE id=$1`, loserCommentID, winnerCommentID)
 
 	trigger := commentAgentTrigger{Agent: agent, Source: commentTriggerSourceMentionAgent}
 	results := testHandler.enqueueCommentAgentTriggers(ctx, issue, util.MustParseUUID(loserCommentID), []commentAgentTrigger{trigger})
@@ -425,7 +476,6 @@ func TestCommentEnqueueRaceQueuedWinnerReattributesOriginator(t *testing.T) {
 	}
 }
 
-
 // TestCommentEnqueueRaceNewerDifferentHeadNotDeferred is the regression for Elon
 // round-5 must-fix: when the different-head task holding the slot is NEWER than
 // the losing comment (and the comment is not in its planned ids), completion
@@ -449,7 +499,9 @@ func TestCommentEnqueueRaceNewerDifferentHeadNotDeferred(t *testing.T) {
 	`, testWorkspaceID, dupRaceHeadB).Scan(&prID); err != nil {
 		t.Fatalf("seed PR: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue_pull_request WHERE pull_request_id = $1`, prID) })
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue_pull_request WHERE pull_request_id = $1`, prID)
+	})
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM github_pull_request WHERE id = $1`, prID) })
 	if _, err := testPool.Exec(ctx, `INSERT INTO issue_pull_request (issue_id, pull_request_id) VALUES ($1, $2)`, issueID, prID); err != nil {
 		t.Fatalf("link PR: %v", err)
@@ -525,7 +577,9 @@ func TestCommentEnqueueRaceMixedCoveringAndNewerNotDeferred(t *testing.T) {
 	`, testWorkspaceID, dupRaceHeadB).Scan(&prID); err != nil {
 		t.Fatalf("seed PR: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue_pull_request WHERE pull_request_id = $1`, prID) })
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue_pull_request WHERE pull_request_id = $1`, prID)
+	})
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM github_pull_request WHERE id = $1`, prID) })
 	if _, err := testPool.Exec(ctx, `INSERT INTO issue_pull_request (issue_id, pull_request_id) VALUES ($1, $2)`, issueID, prID); err != nil {
 		t.Fatalf("link PR: %v", err)
@@ -636,7 +690,9 @@ func seedDupRacePR(t *testing.T, issueID string, prNumber int) {
 	`, testWorkspaceID, prNumber, dupRaceHeadB).Scan(&prID); err != nil {
 		t.Fatalf("seed PR: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue_pull_request WHERE pull_request_id = $1`, prID) })
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue_pull_request WHERE pull_request_id = $1`, prID)
+	})
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM github_pull_request WHERE id = $1`, prID) })
 	if _, err := testPool.Exec(ctx, `INSERT INTO issue_pull_request (issue_id, pull_request_id) VALUES ($1, $2)`, issueID, prID); err != nil {
 		t.Fatalf("link PR: %v", err)

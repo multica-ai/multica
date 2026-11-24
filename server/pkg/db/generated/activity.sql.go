@@ -60,8 +60,8 @@ func (q *Queries) CountAssigneeChangesByActor(ctx context.Context, arg CountAssi
 
 const createActivity = `-- name: CreateActivity :one
 INSERT INTO activity_log (
-    workspace_id, issue_id, actor_type, actor_id, action, details
-) VALUES ($1, $2, $3, $4, $5, $6)
+    workspace_id, issue_id, actor_type, actor_id, action, details, id
+) VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::uuid, gen_random_uuid()))
 RETURNING id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at
 `
 
@@ -72,6 +72,7 @@ type CreateActivityParams struct {
 	ActorID     pgtype.UUID `json:"actor_id"`
 	Action      string      `json:"action"`
 	Details     []byte      `json:"details"`
+	ID          pgtype.UUID `json:"id"`
 }
 
 func (q *Queries) CreateActivity(ctx context.Context, arg CreateActivityParams) (ActivityLog, error) {
@@ -82,6 +83,7 @@ func (q *Queries) CreateActivity(ctx context.Context, arg CreateActivityParams) 
 		arg.ActorID,
 		arg.Action,
 		arg.Details,
+		arg.ID,
 	)
 	var i ActivityLog
 	err := row.Scan(
@@ -115,6 +117,27 @@ func (q *Queries) GetActivity(ctx context.Context, id pgtype.UUID) (ActivityLog,
 		&i.Details,
 		&i.CreatedAt,
 	)
+	return i, err
+}
+
+const getLastIssueStatusChange = `-- name: GetLastIssueStatusChange :one
+SELECT actor_type, actor_id FROM activity_log
+WHERE issue_id = $1 AND action = 'status_changed'
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+type GetLastIssueStatusChangeRow struct {
+	ActorType pgtype.Text `json:"actor_type"`
+	ActorID   pgtype.UUID `json:"actor_id"`
+}
+
+// Who last changed an issue's status, and to what: names the mover when an
+// agent's status change is refused because the issue left its step (MUL-7420).
+func (q *Queries) GetLastIssueStatusChange(ctx context.Context, issueID pgtype.UUID) (GetLastIssueStatusChangeRow, error) {
+	row := q.db.QueryRow(ctx, getLastIssueStatusChange, issueID)
+	var i GetLastIssueStatusChangeRow
+	err := row.Scan(&i.ActorType, &i.ActorID)
 	return i, err
 }
 

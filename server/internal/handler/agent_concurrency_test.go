@@ -160,66 +160,52 @@ func TestUpdateAgent_MaxConcurrentTasksBoundsAndOmission(t *testing.T) {
 	})
 }
 
-func TestCreateAgentFromTemplate_MaxConcurrentTasksBoundsAndDefault(t *testing.T) {
+// Raising an agent's cap can make its queued work claimable right away, so the
+// update must nudge the agent's runtime like a runtime cap change does,
+// instead of leaving the queue to the daemon's next poll (#10455). Updates
+// that leave the cap alone send nothing.
+func TestUpdateAgent_MaxConcurrentTasksChangeWakesRuntime(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
 
-	const templateSlug = "commit-message"
-	if _, ok := agentTemplates.Get(templateSlug); !ok {
-		t.Fatalf("expected template %q to be loaded", templateSlug)
+	agentID := createHandlerTestAgent(t, "concurrency-wakeup", nil)
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE agent SET max_concurrent_tasks = 2 WHERE id = $1`, agentID,
+	); err != nil {
+		t.Fatalf("setup: set cap: %v", err)
 	}
 
-	tests := []struct {
-		name     string
-		value    any
-		provided bool
-		wantCode int
-		want     int32
-	}{
-		{name: "omitted defaults to six", provided: false, wantCode: http.StatusCreated, want: 6},
-		{name: "null defaults to six", value: nil, provided: true, wantCode: http.StatusCreated, want: 6},
-		{name: "minimum accepted", value: 1, provided: true, wantCode: http.StatusCreated, want: 1},
-		{name: "maximum accepted", value: 50, provided: true, wantCode: http.StatusCreated, want: 50},
-		{name: "zero rejected", value: 0, provided: true, wantCode: http.StatusBadRequest},
-		{name: "negative rejected", value: -1, provided: true, wantCode: http.StatusBadRequest},
-		{name: "above maximum rejected", value: 51, provided: true, wantCode: http.StatusBadRequest},
+	recorder := &terminalWakeupRecorder{}
+	previous := testHandler.TaskService.Wakeup
+	testHandler.TaskService.Wakeup = recorder
+	t.Cleanup(func() { testHandler.TaskService.Wakeup = previous })
+
+	update := func(body map[string]any) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		testHandler.UpdateAgent(w, withURLParam(
+			newRequest(http.MethodPut, "/api/agents/"+agentID, body), "id", agentID))
+		if w.Code != http.StatusOK {
+			t.Fatalf("UpdateAgent(%v): expected 200, got %d: %s", body, w.Code, w.Body.String())
+		}
 	}
 
-	for i, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			body := map[string]any{
-				"template_slug": templateSlug,
-				"name":          fmt.Sprintf("concurrency-template-%d", i),
-				"runtime_id":    handlerTestRuntimeID(t),
-			}
-			if tt.provided {
-				body["max_concurrent_tasks"] = tt.value
-			}
+	update(map[string]any{"max_concurrent_tasks": 4})
+	if got := len(recorder.calls); got != 1 {
+		t.Fatalf("raising the cap: expected 1 runtime wakeup, got %d", got)
+	}
+	if recorder.calls[0].runtimeID != handlerTestRuntimeID(t) {
+		t.Fatalf("wakeup runtime = %q, want the agent's runtime %q", recorder.calls[0].runtimeID, handlerTestRuntimeID(t))
+	}
+	if recorder.calls[0].taskID != "" {
+		t.Fatalf("a capacity wakeup names no task, got %q", recorder.calls[0].taskID)
+	}
 
-			w := httptest.NewRecorder()
-			testHandler.CreateAgentFromTemplate(w, newRequest(http.MethodPost, "/api/agents/from-template", body))
-			if w.Code != tt.wantCode {
-				t.Fatalf("status = %d, want %d: %s", w.Code, tt.wantCode, w.Body.String())
-			}
-
-			if tt.wantCode == http.StatusBadRequest {
-				if !strings.Contains(w.Body.String(), "between 1 and 50") {
-					t.Fatalf("error should explain the 1-50 range: %s", w.Body.String())
-				}
-				return
-			}
-
-			var response CreateAgentFromTemplateResponse
-			if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
-				t.Fatalf("decode response: %v", err)
-			}
-			t.Cleanup(func() {
-				testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, response.Agent.ID)
-			})
-			if response.Agent.MaxConcurrentTasks != tt.want {
-				t.Fatalf("max_concurrent_tasks = %d, want %d", response.Agent.MaxConcurrentTasks, tt.want)
-			}
-		})
+	recorder.calls = nil
+	update(map[string]any{"max_concurrent_tasks": 4})
+	update(map[string]any{"description": "unrelated edit"})
+	if got := len(recorder.calls); got != 0 {
+		t.Fatalf("updates that leave the cap unchanged: expected no wakeup, got %d", got)
 	}
 }

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentTask } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
@@ -24,10 +24,30 @@ vi.mock("../../common/task-transcript", () => ({
 }));
 
 vi.mock("./terminate-task-confirm-dialog", () => ({
-  TerminateTaskConfirmDialog: () => null,
+  TerminateTaskConfirmDialog: ({ open, onConfirm }: { open: boolean; onConfirm: () => void }) =>
+    open ? <button type="button" onClick={onConfirm}>Confirm stop</button> : null,
 }));
 
-import { ActiveTaskRow, TaskCommentCoverage } from "./execution-log-section";
+vi.mock("@multica/core/workspace/hooks", () => ({
+  useActorName: () => ({
+    getActorName: () => "Lambda",
+    getActorInitials: () => "L",
+    getActorAvatarUrl: () => null,
+  }),
+}));
+
+import {
+  ActiveTaskRow,
+  ExecutionLogSection,
+  TaskCommentCoverage,
+  IssueRunsTotal,
+} from "./execution-log-section";
+import type { TaskUsage } from "@multica/core/types";
+import { act, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { issueKeys } from "@multica/core/issues/queries";
+import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
+import { ApiClient, setApiInstance } from "@multica/core/api";
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
@@ -57,6 +77,215 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
+describe("subtree execution log", () => {
+  function renderParent(own: AgentTask[], subtree: AgentTask[]) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData(issueKeys.tasks("issue-1"), own);
+    queryClient.setQueryData(issueKeys.subtreeTasks("issue-1"), subtree);
+    queryClient.setQueryData([...issueKeys.tasks("issue-1"), "history"], own);
+    queryClient.setQueryData([...issueKeys.subtreeTasks("issue-1"), "history"], subtree);
+    return renderWithI18n(
+      <QueryClientProvider client={queryClient}>
+        <ExecutionLogSection issueId="issue-1" identifier="MUL-1" hasChildren />
+      </QueryClientProvider>,
+    );
+  }
+
+  it("switches counts, cost, active status, rows, and the full timeline together", () => {
+    const own = makeTask({ id: "own", status: "completed", completed_at: "2026-06-08T08:02:00Z", trigger_summary: "Parent run", usage: [usageSlice({ cost_usd_ticks: 1e10 })] });
+    const child = makeTask({ id: "child", issue_id: "child-issue", issue_identifier: "MUL-2", issue_title: "Child", status: "completed", completed_at: "2026-06-08T08:03:00Z", trigger_summary: "Child run", usage: [usageSlice({ cost_usd_ticks: 2e10 })] });
+    const grandchild = makeTask({ id: "grandchild", issue_id: "deep-issue", issue_identifier: "MUL-3", issue_title: "Grandchild", trigger_summary: "Grandchild run" });
+    renderParent([own], [own, child, grandchild]);
+    const toggle = screen.getByRole("checkbox", { name: "Include sub-issues" });
+    expect(toggle).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "Execution log 1" })).toBeInTheDocument();
+    expect(screen.getAllByText("$1.00").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Child run")).not.toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(toggle).toBeChecked();
+    expect(screen.getByRole("button", { name: "Execution log 3" })).toBeInTheDocument();
+    expect(screen.getAllByText("$3.00").length).toBeGreaterThan(0);
+    expect(screen.getByText("Child run")).toBeInTheDocument();
+    expect(screen.getByText("Grandchild run")).toBeInTheDocument();
+    expect(screen.getByText("MUL-2")).toHaveAttribute("title", "Child");
+    expect(screen.getByText("MUL-3")).toBeInTheDocument();
+    const header = screen.getByText("Execution log").closest("div")!;
+    expect(within(header).getByText("1 active")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open timeline" }));
+    const dialog = screen.getByRole("dialog");
+    const dialogToggle = within(dialog).getByRole("checkbox", { name: "Include sub-issues" });
+    expect(dialogToggle).toBeChecked();
+    expect(within(dialog).getByRole("img", { name: "Run activity: $3.00 across 3 runs" })).toBeInTheDocument();
+    expect(within(dialog).getByText("MUL-3")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cumulative" }));
+    expect(within(dialog).getByRole("img", { name: "Cumulative cost over time: $3.00 across 3 runs" })).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Per run" }));
+    fireEvent.click(dialogToggle);
+    expect(dialogToggle).not.toBeChecked();
+    expect(toggle).toBeChecked();
+    expect(within(dialog).getByText("Spent").parentElement).toHaveTextContent("$1.00");
+    expect(within(dialog).getByRole("img", { name: "Run activity: $1.00 across 1 run" })).toBeInTheDocument();
+    expect(within(dialog).getByText("Parent run")).toBeInTheDocument();
+    expect(within(dialog).queryByText("Grandchild run")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("MUL-2")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText(/1 running/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open timeline" }));
+    expect(within(screen.getByRole("dialog")).getByRole("checkbox", { name: "Include sub-issues" })).toBeChecked();
+    expect(within(screen.getByRole("dialog")).getByText("Grandchild run")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(toggle);
+    expect(screen.getByRole("button", { name: "Execution log 1" })).toBeInTheDocument();
+    expect(screen.queryByText("Grandchild run")).not.toBeInTheDocument();
+  });
+
+  it("keeps descendant scope while using the shared disclosure and scrolling active list", () => {
+    const own = makeTask({ id: "own", status: "completed", completed_at: "2026-06-08T08:02:00Z" });
+    const descendants = Array.from({ length: 8 }, (_, index) => makeTask({
+      id: `child-${index}`, issue_id: `child-issue-${index}`, issue_identifier: `MUL-${index + 2}`,
+      status: "queued", trigger_summary: `Descendant ${index}`,
+    }));
+    renderParent([own], [own, ...descendants]);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Include sub-issues" }));
+    const active = screen.getByRole("region", { name: "8 active" });
+    expect(within(active).queryByText(/^Descendant /)).not.toBeInTheDocument();
+    fireEvent.click(within(active).getByRole("button", { name: /8 queued/ }));
+    expect(within(active).getAllByText(/^Descendant /)).toHaveLength(8);
+    expect(within(active).getByText("MUL-9")).toBeInTheDocument();
+    expect(active).toHaveClass("max-h-48", "overflow-y-auto");
+    const disclosure = screen.getByRole("button", { name: "Execution log 9" });
+    fireEvent.click(disclosure);
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("checkbox", { name: "Include sub-issues" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open timeline" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("checkbox", { name: "Include sub-issues" })).toBeChecked();
+    expect(within(dialog).getByText("MUL-9")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(disclosure);
+    expect(screen.getByRole("checkbox", { name: "Include sub-issues" })).toBeChecked();
+  });
+
+  it("can expand only the dialog when the sidebar excludes descendants", async () => {
+    vi.useRealTimers();
+    const own = makeTask({ status: "completed", completed_at: "2026-06-08T08:02:00Z", trigger_summary: "Parent run" });
+    const child = makeTask({ id: "child", issue_id: "child-issue", issue_identifier: "MUL-2", trigger_summary: "Child run" });
+    const client = new ApiClient("https://api.example.test");
+    setApiInstance(client);
+    let rejectRequest!: (error: Error) => void;
+    const list = vi.spyOn(client, "listTasksByIssue").mockImplementation(() =>
+      new Promise((_, reject) => { rejectRequest = reject; }),
+    );
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData(issueKeys.tasks("issue-1"), [own]);
+    renderWithI18n(
+      <QueryClientProvider client={queryClient}>
+        <ExecutionLogSection issueId="issue-1" hasChildren />
+      </QueryClientProvider>,
+    );
+    const outerToggle = screen.getByRole("checkbox", { name: "Include sub-issues" });
+    fireEvent.click(screen.getByRole("button", { name: "Open timeline" }));
+    const dialog = screen.getByRole("dialog");
+    const toggle = within(dialog).getByRole("checkbox", { name: "Include sub-issues" });
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(toggle);
+    expect(list).toHaveBeenCalledWith("issue-1", true);
+    expect(within(dialog).getByRole("status", { name: "Loading runs..." })).toBeInTheDocument();
+    expect(within(dialog).queryByRole("img")).not.toBeInTheDocument();
+    await act(async () => { rejectRequest(new Error("unavailable")); });
+    const retry = await within(dialog).findByRole("button", { name: "Could not load runs. Retry" });
+    list.mockResolvedValue([own, child]);
+    fireEvent.click(retry);
+    expect(await within(dialog).findByText("Child run")).toBeInTheDocument();
+    expect(outerToggle).not.toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByText("Child run")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open timeline" }));
+    expect(within(screen.getByRole("dialog")).getByRole("checkbox", { name: "Include sub-issues" })).not.toBeChecked();
+    queryClient.clear();
+  });
+
+  it("shows an empty dialog scope when only descendants have runs", () => {
+    renderParent([], [makeTask({ id: "child", issue_id: "child-issue" })]);
+    const outerToggle = screen.getByRole("checkbox", { name: "Include sub-issues" });
+    fireEvent.click(outerToggle);
+    fireEvent.click(screen.getByRole("button", { name: "Open timeline" }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "Include sub-issues" }));
+    expect(within(dialog).getByText("No runs in this scope.")).toBeInTheDocument();
+    expect(within(dialog).queryByRole("img")).not.toBeInTheDocument();
+    expect(outerToggle).toBeChecked();
+  });
+
+  it("offers subtree history even when the parent has no runs, and retries the owning child", async () => {
+    const child = makeTask({ id: "child", issue_id: "child-issue", issue_identifier: "MUL-2", status: "failed", completed_at: "2026-06-08T08:03:00Z" });
+    renderParent([], [child]);
+    expect(screen.getByText("No runs in this scope.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Include sub-issues" }));
+    const client = new ApiClient("https://api.example.test");
+    setApiInstance(client);
+    const retry = vi.spyOn(client, "rerunIssue").mockResolvedValue({} as never);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Retry run" })); });
+    expect(retry).toHaveBeenCalledWith("child-issue", "child");
+  });
+
+  it("stops a descendant run through its owning issue", async () => {
+    renderParent([], [makeTask({ id: "deep-run", issue_id: "grandchild-issue" })]);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Include sub-issues" }));
+    const client = new ApiClient("https://api.example.test");
+    setApiInstance(client);
+    const stop = vi.spyOn(client, "cancelTask").mockResolvedValue({} as never);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel run" }));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Confirm stop" })); });
+    expect(stop).toHaveBeenCalledWith("grandchild-issue", "deep-run");
+  });
+
+  it("stops an expanded queued descendant through its owning issue", async () => {
+    renderParent([], [
+      makeTask({ id: "child-queued", issue_id: "child-issue", issue_identifier: "MUL-2", status: "queued" }),
+      makeTask({ id: "deep-queued", issue_id: "grandchild-issue", issue_identifier: "MUL-3", status: "queued" }),
+    ]);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Include sub-issues" }));
+    fireEvent.click(screen.getByRole("button", { name: /2 queued/ }));
+    const row = screen.getByText("MUL-3").parentElement!;
+    const client = new ApiClient("https://api.example.test");
+    setApiInstance(client);
+    const stop = vi.spyOn(client, "cancelTask").mockResolvedValue({} as never);
+    fireEvent.click(within(row).getByRole("button", { name: "Cancel run" }));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Confirm stop" })); });
+    expect(stop).toHaveBeenCalledWith("grandchild-issue", "deep-queued");
+  });
+
+  it("shows loading and a retryable error instead of keeping the parent's partial totals", async () => {
+    vi.useRealTimers();
+    const client = new ApiClient("https://api.example.test");
+    setApiInstance(client);
+    let rejectRequest!: (error: Error) => void;
+    const list = vi.spyOn(client, "listTasksByIssue").mockImplementation(() =>
+      new Promise((_, reject) => { rejectRequest = reject; }),
+    );
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData(issueKeys.tasks("issue-1"), [makeTask()]);
+    renderWithI18n(
+      <QueryClientProvider client={queryClient}>
+        <ExecutionLogSection issueId="issue-1" hasChildren />
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: "Include sub-issues" }));
+    expect(screen.getByRole("status", { name: "Loading runs..." })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Execution log 1" })).not.toBeInTheDocument();
+    expect(list).toHaveBeenCalledWith("issue-1", true, { view: "timeline" });
+    await act(async () => { rejectRequest(new Error("unavailable")); });
+    const retry = await screen.findByRole("button", { name: "Could not load runs. Retry" });
+    list.mockResolvedValue([makeTask({ id: "deep", issue_id: "deep-issue" })]);
+    fireEvent.click(retry);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Execution log 1" })).toBeInTheDocument());
+    expect(list).toHaveBeenCalledTimes(2);
+    queryClient.clear();
+  });
 });
 
 describe("ActiveTaskRow", () => {
@@ -79,21 +308,16 @@ describe("ActiveTaskRow", () => {
     expect(mockState.taskMessagesOptions).not.toHaveBeenCalled();
   });
 
-  it("does not make transcript actions depend on hover-only rendering", () => {
-    renderWithI18n(<ActiveTaskRow task={makeTask()} issueId="issue-1" />);
+  it("makes the trigger a jump button only when given a jump handler", () => {
+    const onJump = vi.fn();
+    const { rerender } = renderWithI18n(<ActiveTaskRow task={makeTask({})} issueId="issue-1" />);
+    expect(screen.queryByRole("button", { name: /Go to run/ })).not.toBeInTheDocument();
 
-    const transcriptButton = screen.getByRole("button", { name: "View transcript" });
-    const status = screen.getByText("5m 04s");
-
-    expect(status.parentElement?.className).toContain("flex h-7");
-    expect(status.parentElement?.className).toContain(
-      "[@media(hover:hover)]:group-hover/execution-log-row:hidden",
-    );
-    expect(transcriptButton.parentElement?.className).toContain("flex h-7");
-    expect(transcriptButton.parentElement?.className).toContain("[@media(hover:hover)]:hidden");
-    expect(transcriptButton.parentElement?.className).toContain(
-      "[@media(hover:hover)]:group-hover/execution-log-row:flex",
-    );
+    rerender(<ActiveTaskRow task={makeTask({})} issueId="issue-1" onJump={onJump} />);
+    const jump = screen.getByRole("button", { name: /Go to run/ });
+    expect(jump).toHaveTextContent("Started from comment");
+    fireEvent.click(jump);
+    expect(onJump).toHaveBeenCalledOnce();
   });
 });
 
@@ -214,5 +438,427 @@ describe("TaskCommentCoverage", () => {
     );
 
     expect(screen.getByText("包含 3 条评论")).toBeInTheDocument();
+  });
+});
+
+describe("execution log failure reasons", () => {
+  function failedLogClient() {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    queryClient.setQueryData(issueKeys.tasks("issue-1"), [
+      makeTask({
+        status: "failed",
+        completed_at: "2026-06-08T08:04:00Z",
+        error: "provider returned 402",
+        failure_reason: "agent_error.provider_quota_limit",
+      }),
+    ]);
+    return queryClient;
+  }
+
+  it("renders a failed run's reason in the active locale", () => {
+    renderWithI18n(
+      <QueryClientProvider client={failedLogClient()}>
+        <ExecutionLogSection issueId="issue-1" />
+      </QueryClientProvider>,
+      { locale: "zh-Hans" },
+    );
+
+    // The latest past runs are listed without a toggle.
+    expect(screen.getByText(/提供方额度已用尽/)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Provider quota exhausted/),
+    ).not.toBeInTheDocument();
+  });
+
+  // #7411: the raw `task.error` is English prose the server writes for logs
+  // and classification. It used to be concatenated into the status tooltip,
+  // which put untranslated text — and absolute worktree paths — in front of
+  // every non-English workspace. The localized reason is the whole hover text
+  // now; the raw diagnostic lives in the transcript's Run details.
+  it("keeps the raw server error out of the status tooltip", () => {
+    renderWithI18n(
+      <QueryClientProvider client={failedLogClient()}>
+        <ExecutionLogSection issueId="issue-1" />
+      </QueryClientProvider>,
+      { locale: "zh-Hans" },
+    );
+
+    expect(screen.queryByTitle(/provider returned 402/)).not.toBeInTheDocument();
+    expect(screen.getByTitle("提供方额度已用尽")).toBeInTheDocument();
+  });
+});
+
+// claude-opus-5 at 5 / 25 / 0.50 / 6.25 per million.
+function usageSlice(overrides: Partial<TaskUsage> = {}): TaskUsage {
+  return {
+    provider: "anthropic",
+    model: "claude-opus-5",
+    input_tokens: 96_000,
+    output_tokens: 34_000,
+    cache_read_tokens: 712_000,
+    cache_write_tokens: 50_000,
+    ...overrides,
+  };
+}
+
+describe("per-run token usage", () => {
+  it.each([
+    ["en", "1.25 Qoder Cloud Agents credits"],
+    ["zh-Hans", "1.25 Qoder Cloud Agents 积分"],
+  ] as const)("names the provider's credits in %s", (locale, expected) => {
+    renderWithI18n(
+      <IssueRunsTotal alone onOpen={() => {}} tasks={[makeTask({
+        status: "completed",
+        usage: [usageSlice({
+          provider: "qoder_cloud", model: "",
+          input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0,
+          credits_micros: 1_250_000,
+        })],
+      })]} />,
+      { locale },
+    );
+    expect(screen.getByText(expected)).toBeInTheDocument();
+    expect(screen.queryByText("1.25 credits")).not.toBeInTheDocument();
+  });
+
+  // An active row shows only its timer. The daemon reports usage once, after
+  // the run returns, and that write publishes no realtime event — so no
+  // running task carries usage in production. Asserting a token figure here
+  // would only prove that a hand-written fixture renders.
+  it("shows a running row's timer, and no token figure even if usage exists", () => {
+    renderWithI18n(
+      <ActiveTaskRow
+        task={makeTask({ usage: [usageSlice()] })}
+        issueId="issue-1"
+      />,
+    );
+
+    expect(screen.getByText("5m 04s")).toBeInTheDocument();
+    expect(screen.queryByText("892K")).not.toBeInTheDocument();
+    // And no em dash either — mid-run, "no figure yet" is not a claim worth
+    // making next to a ticking timer.
+    expect(screen.queryByText("—")).not.toBeInTheDocument();
+  });
+});
+
+// Header figures stay readable at every supported sidebar width.
+describe("execution log header geometry", () => {
+  function renderSection(tasks: AgentTask[], seedHistory = true) {
+    // Seed the cache instead of mocking the API: the query is fresh for 30s,
+    // so `listTasksByIssue` is never reached and the section renders its real
+    // header markup.
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    queryClient.setQueryData(issueKeys.tasks("issue-1"), tasks);
+    if (seedHistory) queryClient.setQueryData([...issueKeys.tasks("issue-1"), "history"], tasks);
+    return renderWithI18n(
+      <QueryClientProvider client={queryClient}>
+        <ExecutionLogSection issueId="issue-1" identifier="MUL-1" />
+      </QueryClientProvider>,
+    );
+  }
+
+  it("requests complete run history only when its dialog opens", async () => {
+    const client = new ApiClient("http://localhost");
+    setApiInstance(client);
+    const request = vi.spyOn(client, "listTasksByIssue").mockResolvedValue([]);
+    try {
+      renderSection([makeTask({ status: "completed", completed_at: "2026-06-08T08:01:00Z" })], false);
+      expect(request).not.toHaveBeenCalled();
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Open timeline" })));
+      expect(request).toHaveBeenCalledWith("issue-1", false);
+    } finally { request.mockRestore(); }
+  });
+
+  it("shows the running task before pending tasks in queue order", () => {
+    renderSection([
+      makeTask({ id: "new", status: "queued", trigger_summary: "Order: second", created_at: "2026-09-08T03:02:00Z" }),
+      makeTask({ id: "old", status: "queued", trigger_summary: "Order: first", created_at: "2026-09-08T03:01:00Z" }),
+      makeTask({ id: "running", status: "running", trigger_summary: "Order: running", created_at: "2026-09-08T03:00:00Z" }),
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: /2 queued/ }));
+    expect(screen.getAllByText(/^Order:/).map((el) => el.textContent))
+      .toEqual(["Order: running", "Order: first", "Order: second"]);
+  });
+
+  it("folds several queued runs into one expandable row, but not a lone one", () => {
+    const { unmount } = renderSection([
+      makeTask({ id: "running", status: "running", trigger_summary: "Live run" }),
+      makeTask({ id: "q1", status: "queued", trigger_summary: "Queued one" }),
+      makeTask({ id: "q2", status: "queued", trigger_summary: "Queued two" }),
+    ]);
+    const group = screen.getByRole("button", { name: /2 queued/ });
+    expect(group).toHaveAttribute("aria-expanded", "false");
+    expect(group).toHaveTextContent("Lambda");
+    expect(screen.getByText("Live run")).toBeInTheDocument();
+    expect(screen.queryByText("Queued one")).not.toBeInTheDocument();
+    fireEvent.click(group);
+    expect(group).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Queued one")).toBeInTheDocument();
+    expect(screen.getByText("Queued two")).toBeInTheDocument();
+    unmount();
+
+    renderSection([makeTask({ id: "q1", status: "queued", trigger_summary: "Queued one" })]);
+    expect(screen.queryByRole("button", { name: /queued/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Queued one")).toBeInTheDocument();
+  });
+
+  function headerOf(): HTMLElement {
+    const label = screen.getByText("Execution log");
+    const header = label.closest("div");
+    if (!header) throw new Error("header row not found");
+    return header;
+  }
+
+  const completed = makeTask({
+    status: "completed",
+    completed_at: "2026-06-08T08:04:00Z",
+    usage: [usageSlice()],
+  });
+
+  it("keeps the header independent of viewport breakpoints", () => {
+    renderSection([completed]);
+    for (const el of headerOf().querySelectorAll("*")) {
+      for (const cls of el.classList) {
+        expect(cls).not.toMatch(/^(sm|md|lg|xl|2xl):/);
+      }
+    }
+    expect(screen.getByRole("button", { name: "Execution log 1" })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("keeps complete cost figures in the summary rather than crowding the header", () => {
+    renderSection([completed]);
+    expect(within(headerOf()).queryByText("$2.00")).not.toBeInTheDocument();
+    const spent = screen.getByText("Spent", { selector: "dt" }).parentElement!;
+    expect(spent).toHaveTextContent("$2.00");
+    fireEvent.click(screen.getByRole("button", { name: "Execution log 1" }));
+    expect(screen.getByRole("button", { name: "Execution log 1" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Spent", { selector: "dt" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the count without inventing zero cost when no usage was reported", () => {
+    renderSection([makeTask({ status: "completed", completed_at: "2026-06-08T08:04:00Z" })]);
+    expect(within(headerOf()).getByText("1")).toBeVisible();
+    expect(screen.queryByText("$0.00")).not.toBeInTheDocument();
+  });
+});
+
+describe("execution log past runs", () => {
+  function renderSection(tasks: AgentTask[]) {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    queryClient.setQueryData(issueKeys.tasks("issue-1"), tasks);
+    return renderWithI18n(
+      <QueryClientProvider client={queryClient}>
+        <ExecutionLogSection issueId="issue-1" identifier="MUL-1" issueTitle="Wakeups" />
+      </QueryClientProvider>,
+    );
+  }
+
+  const past = (i: number, overrides: Partial<AgentTask> = {}) =>
+    makeTask({
+      id: `past-${i}`,
+      status: "completed",
+      trigger_summary: `Past run ${i}`,
+      started_at: `2026-06-0${i}T08:00:00Z`,
+      completed_at: `2026-06-0${i}T08:10:00Z`,
+      usage: [usageSlice()],
+      ...overrides,
+    });
+
+  it("lists the latest three and hands the rest to the Runs dialog", () => {
+    renderSection([past(1), past(2), past(3), past(4), past(5)]);
+
+    expect(screen.getAllByText(/^Past run \d$/).map((el) => el.textContent)).toEqual([
+      "Past run 5",
+      "Past run 4",
+      "Past run 3",
+    ]);
+    expect(screen.getByRole("button", { name: "Open timeline · Show 2 more" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Open timeline/ }));
+    expect(screen.getByRole("heading", { name: "Runs" })).toBeInTheDocument();
+    expect(screen.getByText("MUL-1 · Wakeups")).toBeInTheDocument();
+  });
+
+  it("lets active runs take the three rows first and fills the rest with past runs", () => {
+    const active = [
+      makeTask({ id: "running", status: "running", trigger_summary: "Live run" }),
+      makeTask({ id: "q1", status: "queued", trigger_summary: "Queued one" }),
+      makeTask({ id: "q2", status: "queued", trigger_summary: "Queued two" }),
+    ];
+    const { unmount } = renderSection([...active, past(1), past(2), past(3), past(4)]);
+    // One running row + one folded queued row leave a single past slot.
+    expect(screen.getAllByText(/^Past run \d$/).map((el) => el.textContent)).toEqual(["Past run 4"]);
+    expect(screen.getByRole("button", { name: "Open timeline · Show 3 more" })).toBeInTheDocument();
+    unmount();
+
+    renderSection([
+      ...active,
+      makeTask({ id: "running-2", status: "running", trigger_summary: "Second live run" }),
+      makeTask({ id: "running-3", status: "running", trigger_summary: "Third live run" }),
+      past(1),
+    ]);
+    expect(screen.queryByText("Past run 1")).not.toBeInTheDocument();
+    expect(screen.getByText("Third live run")).toBeInTheDocument();
+  });
+
+  it("keeps a finished run to one line, with agent, duration and usage in the tooltip", () => {
+    renderSection([past(1)]);
+
+    const row = screen.getByText("Past run 1").closest("[title]") as HTMLElement;
+    expect(within(row).getByText("$2.00")).toBeInTheDocument();
+    expect(row).not.toHaveTextContent("Lambda");
+    expect(row).not.toHaveTextContent("10m");
+    expect(row).not.toHaveTextContent("892K tokens");
+    const title = row.getAttribute("title");
+    expect(title).toContain("Lambda · 10m");
+    expect(title).toContain("892K tokens");
+    expect(title).toContain("claude-opus-5");
+  });
+
+  it("puts a failed run's reason where its duration would be", () => {
+    renderSection([past(1, { status: "failed", failure_reason: "agent_error.provider_quota_limit" })]);
+
+    const row = screen.getByText("Past run 1").closest("[title]") as HTMLElement;
+    expect(row).toHaveTextContent("Lambda · Provider quota exhausted");
+    expect(row).not.toHaveTextContent("10m");
+  });
+
+  it("totals the spend, tokens and agent time", () => {
+    renderSection([past(1), past(2), past(3, { status: "failed", usage: [] })]);
+
+    const term = (label: string) => screen.getByText(label, { selector: "dt" }).parentElement!;
+    expect(term("Spent")).toHaveTextContent("$4.00");
+    expect(term("Tokens")).toHaveTextContent("1.8M");
+    expect(term("Agent time")).toHaveTextContent("30m");
+  });
+
+  it("opens the full history from the compact cost chart", () => {
+    renderSection([past(1), past(2), past(3, { status: "failed", usage: [] })]);
+    fireEvent.click(screen.getByRole("button", { name: /Cost per run/ }));
+    expect(screen.getByRole("heading", { name: "Runs" })).toBeInTheDocument();
+  });
+
+  it("bounds the chart and recent list while keeping all-run totals and a visible history entry", () => {
+    const tasks = Array.from({ length: 35 }, (_, i) => past(i + 1, {
+      started_at: new Date(Date.UTC(2026, 5, i + 1, 8)).toISOString(),
+      completed_at: new Date(Date.UTC(2026, 5, i + 1, 8, 10)).toISOString(),
+      usage: [usageSlice({ cost_usd_ticks: 20_000_000_000 })],
+    }));
+    renderSection(tasks);
+    const chart = screen.getByRole("button", { name: /Cost per run/ });
+    expect(chart.querySelectorAll("[data-run]")).toHaveLength(30);
+    expect(chart.querySelector("[data-run]")).toHaveAttribute("data-run", "past-6");
+    expect(chart.querySelectorAll("[data-run]")[29]).toHaveAttribute("data-run", "past-35");
+    expect(screen.getByText("Spent", { selector: "dt" }).parentElement).toHaveTextContent("$70.00");
+    expect(screen.getAllByText(/^Past run \d+$/)).toHaveLength(3);
+    expect(screen.queryByText("Latest")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open timeline · Show 32 more" }));
+    expect(screen.getByRole("heading", { name: "Runs" })).toBeInTheDocument();
+  });
+
+  it("keeps all active tasks reachable in a separate scrolling region", () => {
+    renderSection(Array.from({ length: 8 }, (_, i) => makeTask({ id: `active-${i}`, status: "queued", trigger_summary: `Queued ${i}`, usage: [] })));
+    const active = screen.getByRole("region", { name: "8 active" });
+    fireEvent.click(within(active).getByRole("button", { name: /8 queued/ }));
+    expect(within(active).getAllByText(/^Queued \d$/)).toHaveLength(8);
+    expect(active).toHaveAttribute("tabindex", "0");
+  });
+
+  it("scales sidebar bars by cost to match the default run history", () => {
+    renderSection([
+      past(1, { usage: [usageSlice({ input_tokens: 100, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, cost_usd_ticks: 100_000_000_000 })] }),
+      past(2, { usage: [usageSlice({ input_tokens: 1000, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, cost_usd_ticks: 10_000_000_000 })] }),
+    ]);
+    const bars = screen.getByRole("button", { name: /Cost per run/ }).querySelectorAll("[data-run]");
+    expect((bars[0] as HTMLElement).style.height).toBe("24px");
+    expect(parseFloat((bars[1] as HTMLElement).style.height)).toBeCloseTo(2.4);
+  });
+
+  it.each([1, 8, 15, 30])("preserves upstream slots for %i runs", (count) => {
+    renderSection(Array.from({ length: count }, (_, i) => past(i + 1, {
+      started_at: new Date(Date.UTC(2026, 5, i + 1, 8)).toISOString(),
+      completed_at: new Date(Date.UTC(2026, 5, i + 1, 8, 10)).toISOString(),
+    })));
+    const chart = screen.getByRole("button", { name: /Cost per run/ });
+    const plot = chart.querySelector("[aria-hidden]") as HTMLElement;
+    expect(plot.style.height).toBe("24px");
+    expect(plot.children).toHaveLength(Math.max(20, count));
+    expect(chart.querySelectorAll("[data-run]")).toHaveLength(count);
+    expect(plot.children[plot.children.length - count]).toHaveAttribute("data-run");
+    expect(chart).not.toHaveTextContent("Latest");
+    expect(chart).not.toHaveTextContent("Cost per run");
+    expect(chart).not.toHaveTextContent("#1");
+  });
+
+  it("preserves run status colors and marks missing usage", () => {
+    renderSection([
+      past(1, { status: "failed" }),
+      past(2, { status: "cancelled" }),
+      past(3, { usage: [] }),
+      makeTask({ id: "active", status: "running", usage: [] }),
+    ]);
+    const chart = screen.getByRole("button", { name: /Cost per run/ });
+    expect(chart.querySelector('[data-run="past-1"]')).toHaveClass("bg-destructive");
+    expect(chart.querySelector('[data-run="past-2"]')).toHaveClass("bg-faint-foreground");
+    expect(chart.querySelector('[data-run="past-3"]')).toHaveClass("border-dashed");
+    expect(chart.querySelector('[data-run="active"]')).toHaveClass("bg-info");
+  });
+
+  it("makes full details reachable from the first priced run", () => {
+    renderSection([past(1)]);
+    fireEvent.click(screen.getByRole("button", { name: /Open timeline/ }));
+    expect(screen.getByRole("heading", { name: "Runs" })).toBeInTheDocument();
+  });
+
+  it("skips the bars when no run recorded usage — there are no costs to compare", () => {
+    renderSection([past(1, { usage: [] }), past(2, { usage: [] })]);
+    expect(screen.queryByRole("button", { name: /Cost per run/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("IssueRunsTotal pricing", () => {
+  afterEach(() => {
+    useCustomPricingStore.setState({ pricings: {} });
+  });
+
+  it("recomputes when a custom model rate is saved", () => {
+    // `estimateCost` reads the custom-rate store imperatively, so nothing
+    // re-renders this on a rate change unless the component subscribes. Before
+    // that subscription existed the figure stayed stale until the task list
+    // happened to refetch.
+    const unpriced: TaskUsage = {
+      provider: "acme",
+      model: "totally-made-up-model",
+      input_tokens: 1_000_000,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+    };
+    const task = makeTask({ status: "completed", usage: [unpriced] });
+
+    renderWithI18n(
+      <IssueRunsTotal tasks={[task]} alone onOpen={() => {}} />,
+    );
+
+    // No rate on file for this model yet.
+    expect(screen.getByText("$0.00")).toBeInTheDocument();
+
+    act(() => {
+      useCustomPricingStore.getState().setCustomPricing("acme/totally-made-up-model", {
+        input: 7,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+      });
+    });
+
+    // 1M input tokens at $7/M, without any refetch.
+    expect(screen.getByText("$7.00")).toBeInTheDocument();
   });
 });

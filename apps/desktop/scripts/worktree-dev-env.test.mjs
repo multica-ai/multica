@@ -47,6 +47,31 @@ describe("worktree-dev-env", () => {
     expect(rendererPortForPath("/tmp/multica-3494")).not.toBe(5173);
   });
 
+  it("skips 6000, which Chromium refuses to load (ERR_UNSAFE_PORT)", () => {
+    // POSIX cksum("/tmp/wt-570") === 109908826, % 1000 === 826 → 5174 + 826 === 6000
+    expect(offsetForPath("/tmp/wt-570")).toBe(826);
+    expect(rendererPortForPath("/tmp/wt-570")).toBe(6174);
+  });
+
+  it("stays collision-free across every offset while skipping restricted ports", () => {
+    // The remap must stay injective: two worktrees sharing a port means the
+    // second Electron dies on EADDRINUSE. Cover all 1000 offsets with real
+    // paths so this exercises rendererPortForPath rather than restating it.
+    const pathForOffset = new Map();
+    for (let i = 0; pathForOffset.size < 1000; i++) {
+      const path = `/tmp/wt-${i}`;
+      const offset = offsetForPath(path);
+      if (!pathForOffset.has(offset)) pathForOffset.set(offset, path);
+    }
+
+    const ports = new Set(
+      [...pathForOffset.values()].map((path) => rendererPortForPath(path)),
+    );
+    expect(ports.size).toBe(1000);
+    expect(ports.has(6000)).toBe(false);
+    expect(ports.has(5173)).toBe(false);
+  });
+
   it("suffix is '<folder>-<offset>' so it stays recognizable and unique", () => {
     expect(appSuffixForPath("/work/MUL-3724_Desktop")).toBe(
       `mul-3724-desktop-${offsetForPath("/work/MUL-3724_Desktop")}`,

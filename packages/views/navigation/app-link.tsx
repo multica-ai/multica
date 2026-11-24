@@ -1,7 +1,9 @@
 "use client";
 
 import { forwardRef } from "react";
+import { resolveClickIntent } from "./click-intent";
 import { useNavigation } from "./context";
+import { useRouteDataPrefetch } from "./route-data-prefetch";
 
 interface AppLinkProps extends React.AnchorHTMLAttributes<HTMLAnchorElement> {
   href: string;
@@ -11,6 +13,13 @@ interface AppLinkProps extends React.AnchorHTMLAttributes<HTMLAnchorElement> {
    * path.
    */
   newTabTitle?: string;
+  /**
+   * Runs right before the link navigates the current page, and on no other
+   * path: page state that only the current page should take (an open view,
+   * a selected tab) belongs here rather than in `onClick`, which also sees
+   * clicks that open a new tab or window.
+   */
+  onNavigateInPlace?: () => void;
 }
 
 export const AppLink = forwardRef<HTMLAnchorElement, AppLinkProps>(
@@ -21,26 +30,59 @@ export const AppLink = forwardRef<HTMLAnchorElement, AppLinkProps>(
       onClick,
       onAuxClick,
       onMouseEnter,
+      onMouseLeave,
       onFocus,
       target,
       newTabTitle,
+      onNavigateInPlace,
       ...props
     },
     ref,
   ) {
-    const { push, openInNewTab, prefetch } = useNavigation();
+    const { push, openInNewTab, getShareableUrl, prefetch } = useNavigation();
+    const prefetchData = useRouteDataPrefetch();
+    // A packaged Electron renderer runs at file://.../index.html. Keeping a
+    // route-relative href there makes native affordances such as right-click
+    // "Copy Link Address" expose (or reject) a local file URL. Desktop is
+    // identified by its tab adapter; render the connected environment's web
+    // URL in the DOM while click handlers continue routing with the original
+    // in-app path. Web stays route-relative, preserving SSR hydration and the
+    // browser's native navigation semantics.
+    const anchorHref =
+      openInNewTab && href.startsWith("/") ? getShareableUrl(href) : href;
 
     const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
-      if (e.metaKey || e.ctrlKey || e.shiftKey) {
+      // Caller's onClick runs BEFORE any navigation, on every path, so:
+      //   - synchronous side effects (close popover, clear selection, blur
+      //     the trigger) land in the same tick rather than getting deferred
+      //     behind the transition, and
+      //   - calling preventDefault() inside it cancels the navigation
+      //     entirely — the escape hatch drag guards and permission gates
+      //     need, and the same one onAuxClick already offers.
+      onClick?.(e);
+      if (e.defaultPrevented) return;
+      const intent = resolveClickIntent(e);
+      if (intent !== "push") {
         if (openInNewTab) {
           e.preventDefault();
-          openInNewTab(href, newTabTitle);
+          if (intent === "foreground-tab") {
+            openInNewTab(href, newTabTitle, { activate: true });
+          } else {
+            openInNewTab(href, newTabTitle);
+          }
         }
+        // Web: no adapter — the browser's native anchor handling already
+        // implements the spec (cmd = background tab, cmd+shift = foreground).
+        return;
+      }
+      if (e.shiftKey && !openInNewTab) {
+        // Web shift-click is the browser's "new window". Shift alone is not a
+        // spec modifier (it resolves to "push"), but fighting the native
+        // behavior with an in-place push would swallow a deliberate gesture.
+        // Desktop has no native path, so it falls through to a plain push.
         return;
       }
       if (target === "_blank") {
-        // Caller's onClick runs first — same contract as the push path below.
-        onClick?.(e);
         if (openInNewTab) {
           // Desktop: foreground app tab. target="_blank" carries "take me
           // there" intent, matching the browser's foreground-tab behavior.
@@ -52,10 +94,7 @@ export const AppLink = forwardRef<HTMLAnchorElement, AppLinkProps>(
         return;
       }
       e.preventDefault();
-      // Caller's onClick runs BEFORE push so any synchronous side effect
-      // (close popover, clear selection, blur the trigger) lands in the
-      // same tick rather than getting deferred behind the transition.
-      onClick?.(e);
+      onNavigateInPlace?.();
       push(href);
     };
 
@@ -90,30 +129,38 @@ export const AppLink = forwardRef<HTMLAnchorElement, AppLinkProps>(
 
     const handleMouseEnter = (e: React.MouseEvent<HTMLAnchorElement>) => {
       prefetch?.(href);
+      prefetchData?.prefetch(href, "hover");
       onMouseEnter?.(e);
+    };
+
+    const handleMouseLeave = (e: React.MouseEvent<HTMLAnchorElement>) => {
+      prefetchData?.cancel();
+      onMouseLeave?.(e);
     };
 
     const handleFocus = (e: React.FocusEvent<HTMLAnchorElement>) => {
       prefetch?.(href);
+      prefetchData?.prefetch(href, "focus");
       onFocus?.(e);
     };
 
     return (
       <a
         ref={ref}
-        href={href}
+        href={anchorHref}
         target={target}
         // Referrer is same-origin noise here and noopener hygiene applies
         // even though the destination is our own app.
         rel={target === "_blank" ? "noopener noreferrer" : undefined}
         // Spread props first so that the navigation handlers below cannot be
         // silently overridden by a caller passing
-        // onClick/onAuxClick/onMouseEnter/onFocus through {...rest}. AppLink
-        // owns these four events.
+        // onClick/onAuxClick/onMouseEnter/onMouseLeave/onFocus through
+        // {...rest}. AppLink owns these five events.
         {...props}
         onClick={handleClick}
         onAuxClick={handleAuxClick}
         onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
         onFocus={handleFocus}
       >
         {children}

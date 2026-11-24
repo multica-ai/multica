@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { readFileSync } from "node:fs";
 
 vi.mock("../i18n", async () => {
   const editor = (await import("../locales/en/editor.json")).default;
@@ -68,6 +67,8 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   document.documentElement.className = "";
+  document.documentElement.removeAttribute("style");
+  document.body.removeAttribute("style");
 });
 
 function currentScale(): number {
@@ -79,6 +80,19 @@ async function openViewer() {
   const expand = await screen.findByRole("button", { name: "Open diagram viewer" });
   fireEvent.click(expand);
   await screen.findByRole("application");
+}
+
+/** jsdom has no layout; give the preview a column to fit against. */
+function stubColumnWidth(width: number) {
+  vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(width);
+}
+
+async function findFrame(): Promise<HTMLIFrameElement> {
+  return waitFor(() => {
+    const found = document.querySelector<HTMLIFrameElement>(".mermaid-diagram-frame");
+    expect(found).not.toBeNull();
+    return found!;
+  });
 }
 
 async function findScroller(): Promise<HTMLElement> {
@@ -196,35 +210,50 @@ describe("MermaidDiagram theme changes", () => {
     });
     expect(document.querySelector(".mermaid-diagram-frame")).not.toBeNull();
   });
-});
 
-// Verified in Chromium: dragging a diagram starts a native text selection that
-// paints the whole iframe box with the selection highlight (it is a replaced
-// element) and runs on into the surrounding comment text. Asserted against the
-// stylesheet because jsdom has no layout and cannot reproduce a real selection.
-// Deliberately NOT solved by preventDefault-ing pointerdown: that also drops
-// the default focus, which silently kills the viewer's keyboard controls.
-describe("Mermaid selection suppression", () => {
-  function blockFor(css: string, selector: string): string {
-    const start = css.indexOf(selector);
-    expect(start, `${selector} missing from stylesheet`).toBeGreaterThan(-1);
-    return css.slice(start, css.indexOf("}", start));
-  }
+  it("does not re-render when a dialog's scroll lock rewrites the page style", async () => {
+    render(<MermaidDiagram chart={CHART} />);
+    await waitFor(() => {
+      expect(mermaidRenderMock).toHaveBeenCalledTimes(1);
+    });
 
-  it("stops a drag on the inline diagram from selecting text", () => {
-    const mermaidCss = readFileSync("editor/styles/mermaid.css", "utf8");
+    // What the Dialog's scroll lock writes on every open and close. Taken for a
+    // theme switch, it re-rendered every diagram on the page as the viewer
+    // closed, and that stall made the page flash (MUL-7760).
+    await act(async () => {
+      document.body.style.overflow = "hidden";
+      await Promise.resolve();
+    });
+    await act(async () => {
+      document.body.style.removeProperty("overflow");
+      await Promise.resolve();
+    });
 
-    expect(blockFor(mermaidCss, ".mermaid-diagram-scroll {")).toContain(
-      "user-select: none",
-    );
+    // A real theme switch still re-renders, and it is the only extra render:
+    // any from the scroll lock would already have pushed the count past two.
+    await act(async () => {
+      document.documentElement.classList.add("dark");
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(mermaidRenderMock).toHaveBeenCalledTimes(2);
+    });
   });
 
-  it("stops a pan that leaves the viewer canvas from selecting text", () => {
-    // The canvas moved to the shared stylesheet when the image preview started
-    // using it; the rule still has to be there.
-    const zoomCss = readFileSync("editor/styles/zoom-canvas.css", "utf8");
+  it("re-renders when a theme token is written straight into the root style", async () => {
+    render(<MermaidDiagram chart={CHART} />);
+    await waitFor(() => {
+      expect(mermaidRenderMock).toHaveBeenCalledTimes(1);
+    });
 
-    expect(blockFor(zoomCss, ".zoom-canvas {")).toContain("user-select: none");
+    await act(async () => {
+      document.documentElement.style.setProperty("--muted", "rgb(1, 2, 3)");
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(mermaidRenderMock).toHaveBeenCalledTimes(2);
+    });
   });
 });
 
@@ -252,18 +281,100 @@ describe("MermaidDiagram rendering config", () => {
 });
 
 describe("MermaidDiagram inline presentation", () => {
-  it("renders the diagram in an empty sandbox at its natural size", async () => {
+  it("renders the diagram in an empty sandbox, fitted to the column", async () => {
+    stubColumnWidth(800);
     render(<MermaidDiagram chart={CHART} />);
 
-    const frame = await waitFor(() => {
-      const found = document.querySelector<HTMLIFrameElement>(".mermaid-diagram-frame");
-      expect(found).not.toBeNull();
-      return found!;
-    });
+    expect(screen.getByLabelText("Mermaid diagram")).toBeInTheDocument();
+
+    const frame = await findFrame();
 
     expect(frame.getAttribute("sandbox")).toBe("");
+    // 1000x500 in an 800px column: the whole diagram, at 80%.
+    expect(frame.style.width).toBe("800px");
+    expect(frame.style.height).toBe("400px");
+    expect(frame.title).toBe("Mermaid diagram");
+    // The SVG fills the iframe, so resizing the iframe is what zooms it.
+    expect(frame.srcdoc).toContain("width: 100%; height: 100%; max-width: none !important");
+    expect(screen.getByText("80%")).toBeInTheDocument();
+  });
+
+  it("fits a tall diagram to the preview's height cap", async () => {
+    mermaidRenderMock.mockResolvedValue({
+      svg: '<svg viewBox="0 0 400 1792"><g><text>tall</text></g></svg>',
+    });
+    stubColumnWidth(800);
+    render(<MermaidDiagram chart={CHART} />);
+
+    const frame = await findFrame();
+
+    // Capped at 448px tall, so the preview never grows past the frame's
+    // collapse threshold and always shows the whole diagram.
+    expect(frame.style.width).toBe("100px");
+    expect(frame.style.height).toBe("448px");
+  });
+
+  it("never upscales a diagram that already fits", async () => {
+    mermaidRenderMock.mockResolvedValue({
+      svg: '<svg viewBox="0 0 300 120"><g><text>small</text></g></svg>',
+    });
+    stubColumnWidth(800);
+    render(<MermaidDiagram chart={CHART} />);
+
+    const frame = await findFrame();
+
+    expect(frame.style.width).toBe("300px");
+    expect(frame.style.height).toBe("120px");
+    expect(screen.getByRole("button", { name: "Zoom out" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Fit to view" })).toBeDisabled();
+  });
+
+  it("zooms in and back out from the fit with the preview's buttons", async () => {
+    stubColumnWidth(800);
+    render(<MermaidDiagram chart={CHART} />);
+    const frame = await findFrame();
+
+    const zoomIn = screen.getByRole("button", { name: "Zoom in" });
+    const zoomOut = screen.getByRole("button", { name: "Zoom out" });
+    const fit = screen.getByRole("button", { name: "Fit to view" });
+    expect(zoomOut).toBeDisabled();
+    expect(fit).toBeDisabled();
+
+    fireEvent.click(zoomIn);
+    // 80% x 1.2 = 96%.
+    expect(frame.style.width).toBe("960px");
+    expect(screen.getByText("96%")).toBeInTheDocument();
+    expect(zoomOut).toBeEnabled();
+    expect(fit).toBeEnabled();
+
+    // The next step would pass 100%, so it lands there exactly.
+    fireEvent.click(zoomIn);
     expect(frame.style.width).toBe("1000px");
     expect(frame.style.height).toBe("500px");
+
+    fireEvent.click(zoomOut);
+    expect(frame.style.width).toBe("833px");
+
+    // Stepping below the fit stops at the fit: it already shows everything.
+    fireEvent.click(zoomOut);
+    expect(frame.style.width).toBe("800px");
+    expect(zoomOut).toBeDisabled();
+
+    fireEvent.click(zoomIn);
+    fireEvent.click(zoomIn);
+    fireEvent.click(fit);
+    expect(frame.style.width).toBe("800px");
+    expect(fit).toBeDisabled();
+  });
+
+  it("does not open the viewer when a zoom button is pressed", async () => {
+    stubColumnWidth(800);
+    render(<MermaidDiagram chart={CHART} />);
+    await findFrame();
+
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+
+    await expectViewerStaysClosed();
   });
 
   it("copies the source straight from the inline toolbar", async () => {
@@ -348,6 +459,23 @@ describe("MermaidDiagram inline tap vs drag", () => {
     fireEvent.pointerMove(scroll, { pointerId: 1, clientX: 260, clientY: 100 });
     // Tracks the pointer from the gesture's origin, not incrementally.
     expect(scroll.scrollLeft).toBe(40);
+  });
+
+  it("pans vertically too, for a zoomed-in diagram taller than the preview", async () => {
+    const scroll = await setupScroller();
+    let scrollTop = 0;
+    Object.defineProperty(scroll, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value: number) => {
+        scrollTop = Math.min(Math.max(value, 0), 2000);
+      },
+    });
+
+    fireEvent.pointerDown(scroll, { pointerId: 1, clientX: 300, clientY: 300 });
+    fireEvent.pointerMove(scroll, { pointerId: 1, clientX: 300, clientY: 180 });
+
+    expect(scroll.scrollTop).toBe(120);
   });
 
   it("does not open the viewer after dragging a diagram that cannot scroll", async () => {

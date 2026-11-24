@@ -14,7 +14,7 @@
  * Icon values are *names*, not React components, so this module stays
  * React-free and safe inside `@multica/core`. The name → component registry
  * lives in `packages/views/layout/route-icon-components.tsx`; its
- * `Record<RouteIconName, LucideIcon>` type makes a missing component a compile
+ * `Record<RouteIconName, IconComponent>` type makes a missing component a compile
  * error.
  */
 
@@ -25,6 +25,7 @@ export type RouteIconName =
   | "CircleUser"
   | "ListTodo"
   | "FolderKanban"
+  | "Layers"
   | "Zap"
   | "Bot"
   | "Users"
@@ -32,6 +33,7 @@ export type RouteIconName =
   | "Monitor"
   | "Server"
   | "BookOpenText"
+  | "Plug"
   | "Settings"
   | "File"
   | "FileText"
@@ -49,12 +51,15 @@ export type NavLabelKey =
   | "my_issues"
   | "issues"
   | "projects"
+  | "views"
   | "autopilots"
   | "agents"
   | "squads"
   | "usage"
   | "runtimes"
+  | "docs"
   | "skills"
+  | "apps"
   | "settings";
 
 /** Stable identifier for each workspace navigation page. */
@@ -64,12 +69,15 @@ export type WorkspacePageKey =
   | "myIssues"
   | "issues"
   | "projects"
+  | "views"
   | "autopilots"
   | "agents"
   | "squads"
   | "usage"
   | "runtimes"
+  | "docs"
   | "skills"
+  | "apps"
   | "settings";
 
 export interface WorkspacePage {
@@ -91,12 +99,15 @@ export const WORKSPACE_PAGES: Record<WorkspacePageKey, WorkspacePage> = {
   myIssues: { segment: "my-issues", icon: "CircleUser", navKey: "my_issues" },
   issues: { segment: "issues", icon: "ListTodo", navKey: "issues" },
   projects: { segment: "projects", icon: "FolderKanban", navKey: "projects" },
+  views: { segment: "views", icon: "Layers", navKey: "views" },
   autopilots: { segment: "autopilots", icon: "Zap", navKey: "autopilots" },
   agents: { segment: "agents", icon: "Bot", navKey: "agents" },
   squads: { segment: "squads", icon: "Users", navKey: "squads" },
   usage: { segment: "usage", icon: "BarChart3", navKey: "usage" },
   runtimes: { segment: "runtimes", icon: "Monitor", navKey: "runtimes" },
+  docs: { segment: "docs", icon: "FileText", navKey: "docs" },
   skills: { segment: "skills", icon: "BookOpenText", navKey: "skills" },
+  apps: { segment: "apps", icon: "Plug", navKey: "apps" },
   settings: { segment: "settings", icon: "Settings", navKey: "settings" },
 };
 

@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -22,6 +23,19 @@ const manyAgentsRef = vi.hoisted(() => ({ current: false }));
 // — what a plain member actually receives once the backend folds the agents
 // they may not view (MUL-5409).
 const restrictedBucketRef = vi.hoisted(() => ({ current: false }));
+// Simulates the real-time task_usage coverage field independently from the
+// delayed by-agent aggregate. Undefined keeps the default fixture on the old
+// server compatibility path.
+const runtimeMeteredCountRef = vi.hoisted(() => ({
+  current: undefined as number | undefined,
+}));
+// The plan's enforced dashboard history limit GET /features reports
+// (MUL-9490). Null is no limit, the self-hosted and observed case.
+const historyLimitRef = vi.hoisted(() => ({ current: null as number | null }));
+// Plan limits from GET /prices, which label the locked ranges.
+const planLimitsRef = vi.hoisted(() => ({
+  current: null as null | Record<string, { dashboardHistoryDays: number | null }>,
+}));
 
 // Kept out of the fixture ternary so the sentinel's shape reads at a glance.
 // Unlike the deleted-agents bucket this one carries real seconds / tasks: the
@@ -63,8 +77,30 @@ vi.mock("@tanstack/react-query", async () => {
     );
   return {
     ...actual,
+    // The page reads the client only to invalidate the dashboard keys from
+    // the refresh button; there is no provider in these renders.
+    useQueryClient: () => ({ invalidateQueries: vi.fn() }),
     useQuery: (opts: { queryKey: unknown[] }) => {
       queryKeys.push(opts.queryKey);
+      if (opts.queryKey[0] === "workspace-features") {
+        return {
+          data: { features: {}, limits: { dashboardHistoryDays: historyLimitRef.current } },
+          isPending: false,
+          isSuccess: true,
+          dataUpdatedAt: 1,
+        };
+      }
+      if (opts.queryKey[0] === "dashboard-history-observed") {
+        return { data: undefined, isPending: true };
+      }
+      if (opts.queryKey[0] === "workspace-subscriptions") {
+        return {
+          data: planLimitsRef.current
+            ? { pro: {}, business: {}, planLimits: planLimitsRef.current }
+            : undefined,
+          isPending: false,
+        };
+      }
       if (dashboardDataRef.current) {
         // ["workspaces", wsId, "agents"] — needed so the Errors breakdown can
         // resolve agent-1 to a name and render its drill-down link.
@@ -144,6 +180,7 @@ vi.mock("@tanstack/react-query", async () => {
                     agent_id: "agent-1",
                     total_seconds: 3 * 3_600 + 17 * 60,
                     task_count: 12,
+                    metered_task_count: runtimeMeteredCountRef.current,
                     failed_count: 1,
                   },
                 ]
@@ -204,6 +241,13 @@ vi.mock("@tanstack/react-query", async () => {
   };
 });
 
+const billingEnabledRef = vi.hoisted(() => ({ current: true }));
+const yearRangeEnabledRef = vi.hoisted(() => ({ current: true }));
+vi.mock("@multica/core/config", () => ({
+  useFeatureEnabled: (key: string) =>
+    key === "dashboard_history_365d" ? yearRangeEnabledRef.current : billingEnabledRef.current,
+}));
+
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
@@ -217,6 +261,7 @@ vi.mock("@multica/core/api", () => ({
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     agentDetail: (id: string) => `/acme/agents/${id}`,
+    settings: () => "/acme/settings",
   }),
 }));
 
@@ -244,33 +289,58 @@ vi.mock("@multica/core/runtimes/custom-pricing-store", () => {
 
 import { DashboardPage } from "./dashboard-page";
 
-// A minimal adapter — the Errors breakdown's drill-down renders an <AppLink>,
-// which reads the navigation context. Asserting on the rendered href (rather
-// than a push spy) keeps the test on the contract that matters: the row points
-// at the agent's Overview, whose ActivityTab lists its runs and each failure's
-// reason.
-const navAdapter: NavigationAdapter = {
-  push: vi.fn(),
-  replace: vi.fn(),
-  back: vi.fn(),
-  pathname: "/acme/usage",
-  searchParams: new URLSearchParams(),
-  getShareableUrl: (path: string) => `https://example.test${path}`,
-};
+const replaceSpy = vi.fn();
 
-function renderDashboard() {
-  return renderWithI18n(
-    <NavigationProvider value={navAdapter}>
+/**
+ * A navigation adapter that actually holds the query string, because the tab
+ * IS the URL: the page reads `?tab=` and writes it back through `replace`. A
+ * spy-only adapter would swallow the write and the tab could never change,
+ * which would make every Errors assertion below test a screen the user cannot
+ * reach.
+ *
+ * The adapter also backs the offender drill-down's <AppLink>. Asserting on the
+ * rendered href (rather than a push spy) keeps that test on the contract that
+ * matters: the row points at the agent's Overview, whose ActivityTab lists its
+ * runs and each failure's reason.
+ */
+function DashboardHarness({ initialSearch = "" }: { initialSearch?: string }) {
+  const [search, setSearch] = useState(initialSearch);
+  const adapter = useMemo<NavigationAdapter>(
+    () => ({
+      push: vi.fn(),
+      replace: (path: string) => {
+        replaceSpy(path);
+        setSearch(path.split("?")[1] ?? "");
+      },
+      back: vi.fn(),
+      pathname: "/acme/usage",
+      searchParams: new URLSearchParams(search),
+      hash: "",
+      getShareableUrl: (path: string) => `https://example.test${path}`,
+    }),
+    [search],
+  );
+  return (
+    <NavigationProvider value={adapter}>
       <DashboardPage />
-    </NavigationProvider>,
+    </NavigationProvider>
   );
 }
 
-// The Top offenders section — the sort control and column headers sit beside
-// the list, not inside it.
-function offenderCard(): HTMLElement {
-  return screen.getByRole("list", { name: "Top offenders" })
-    .parentElement as HTMLElement;
+function renderDashboard(initialSearch = "") {
+  return renderWithI18n(<DashboardHarness initialSearch={initialSearch} />);
+}
+
+/** Everything about failures now lives behind its own tab, so a test that
+ *  wants it has to go there first — exactly as a reader does. */
+async function openErrorsTab(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("tab", { name: /Errors/ }));
+}
+
+// The offender ranking control. Named rather than reached through the DOM
+// tree so it survives the card's internal layout changing.
+function offenderSort(): HTMLElement {
+  return screen.getByRole("group", { name: "Rank agents by" });
 }
 
 // The filled part of one offender row's bar. `role="img"` is on the fill (it
@@ -278,7 +348,7 @@ function offenderCard(): HTMLElement {
 // is currently ranked by.
 function offenderBar(index: number): HTMLElement {
   const rows = within(
-    screen.getByRole("list", { name: "Top offenders" }),
+    screen.getByRole("list", { name: "Errors by agent" }),
   ).getAllByRole("listitem");
   return within(rows[index] as HTMLElement).getByRole("img");
 }
@@ -290,17 +360,17 @@ describe("DashboardPage — viewing timezone drives the query key", () => {
     cleanup();
   });
 
-  // The `tz` segment is the last element of every dashboard key
-  // (see dashboardKeys in @multica/core/dashboard/queries).
+  // The `tz` segment sits after the project in every dashboard key, before
+  // the history limit (see dashboardKeys in @multica/core/dashboard/queries).
   function tzSegments(): unknown[] {
     return queryKeys
       .filter((k) => k[0] === "dashboard")
-      .map((k) => k[k.length - 1]);
+      .map((k) => k[5]);
   }
 
   it("uses the stored timezone in every dashboard query key", () => {
     tzRef.current = "UTC";
-    renderWithI18n(<DashboardPage />);
+    renderDashboard();
 
     const tzs = tzSegments();
     expect(tzs.length).toBeGreaterThan(0);
@@ -309,14 +379,14 @@ describe("DashboardPage — viewing timezone drives the query key", () => {
 
   it("flips the query key when the stored timezone changes", () => {
     tzRef.current = "UTC";
-    renderWithI18n(<DashboardPage />);
+    renderDashboard();
     const utcKeys = queryKeys.filter((k) => k[0] === "dashboard");
 
     queryKeys.length = 0;
     cleanup();
 
     tzRef.current = "Asia/Tokyo";
-    renderWithI18n(<DashboardPage />);
+    renderDashboard();
     const tokyoKeys = queryKeys.filter((k) => k[0] === "dashboard");
 
     expect(utcKeys.length).toBe(tokyoKeys.length);
@@ -353,29 +423,95 @@ describe("DashboardPage — viewing timezone drives the query key", () => {
   });
 });
 
+describe("DashboardPage — unreported usage", () => {
+  beforeEach(() => {
+    queryKeys.length = 0;
+    dashboardDataRef.current = true;
+    manyAgentsRef.current = false;
+    restrictedBucketRef.current = false;
+    runtimeMeteredCountRef.current = undefined;
+    tzRef.current = "UTC";
+    cleanup();
+  });
+
+  it("keeps the run visible while replacing invented token and cost zeroes", () => {
+    runtimeMeteredCountRef.current = 0;
+    renderDashboard();
+
+    const list = within(screen.getByRole("list", { name: "Leaderboard" }));
+    const row = list.getAllByRole("listitem")[0] as HTMLElement;
+    expect(row).toHaveTextContent("Agent One");
+    expect(row).toHaveTextContent("12 runs did not report usage");
+    expect(within(row).getAllByText("—")).toHaveLength(2);
+    expect(row).toHaveTextContent("3h 17m");
+    expect(row).toHaveTextContent("12");
+  });
+
+  it("shows rollup lag as pending without inventing zero or an unreported run", () => {
+    runtimeMeteredCountRef.current = 12;
+    renderDashboard();
+
+    const list = within(screen.getByRole("list", { name: "Leaderboard" }));
+    const row = list.getAllByRole("listitem")[0] as HTMLElement;
+    expect(row).toHaveTextContent("Usage totals are still being processed");
+    expect(row).not.toHaveTextContent("did not report usage");
+    expect(within(row).getAllByText("—")).toHaveLength(2);
+  });
+
+  it("keeps old-server coverage unknown without claiming unreported usage", () => {
+    runtimeMeteredCountRef.current = undefined;
+    renderDashboard();
+
+    const list = within(screen.getByRole("list", { name: "Leaderboard" }));
+    const row = list.getAllByRole("listitem")[0] as HTMLElement;
+    expect(row).not.toHaveTextContent("did not report usage");
+    expect(row).not.toHaveTextContent("still being processed");
+    expect(within(row).getAllByText("—")).toHaveLength(2);
+  });
+
+  it("shows both missing coverage and delayed totals", () => {
+    runtimeMeteredCountRef.current = 6;
+    renderDashboard();
+
+    const list = within(screen.getByRole("list", { name: "Leaderboard" }));
+    const row = list.getAllByRole("listitem")[0] as HTMLElement;
+    const coverageText =
+      "6 runs did not report usage · totals are still being processed";
+    expect(row).toHaveTextContent(coverageText);
+    expect(within(row).getAllByText("—")).toHaveLength(2);
+  });
+});
+
 describe("DashboardPage — failure visibility", () => {
   beforeEach(() => {
     queryKeys.length = 0;
     dashboardDataRef.current = true;
     tzRef.current = "UTC";
+    replaceSpy.mockClear();
     cleanup();
   });
 
-  it("states the error rate with its denominator spelled out", () => {
+  it("states the error rate with its denominator spelled out", async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+
+    // The Tasks tile on the Usage tab keeps its own started-tasks-only figure.
+    expect(screen.getByText("1 failed")).toBeInTheDocument();
+
+    await openErrorsTab(user);
+
     // The run-time rollup sees 1 failure out of 12 tasks — it only counts
     // tasks that actually started. The failure rollup also sees tasks that
-    // never started, so it reports 4 out of 10. The Errors card quotes the
-    // latter *with* its denominator, which is what keeps it from reading as
-    // a contradiction of the Tasks tile above.
-    renderDashboard();
-
+    // never started, so it reports 4 out of 10. The rate tile quotes the
+    // latter *with* its denominator, which is what keeps it from reading as a
+    // contradiction of the Tasks tile on the other tab.
     expect(screen.getByText("4 of 10 runs failed · 40%")).toBeInTheDocument();
-    // The Tasks tile keeps its own started-tasks-only figure.
-    expect(screen.getByText("1 failed")).toBeInTheDocument();
   });
 
-  it("breaks failures down by class and links the offending agent to its runs", () => {
+  it("breaks failures down by class and links the offending agent to its runs", async () => {
+    const user = userEvent.setup();
     renderDashboard();
+    await openErrorsTab(user);
 
     // Auth (3) outranks Timeout (1), and both are named by class rather than
     // by the raw failure_reason enum.
@@ -384,11 +520,11 @@ describe("DashboardPage — failure visibility", () => {
       "Auth3",
       "Timeout1",
     ]);
-    // The section names its own denominator: the header above it quotes a
+    // The section names its own denominator: the rate tile above quotes a
     // rate over all 10 runs, this one splits the 4 failures.
     expect(screen.getByText("Failure mix · 4")).toBeInTheDocument();
 
-    const byAgent = within(screen.getByRole("list", { name: "Top offenders" }));
+    const byAgent = within(screen.getByRole("list", { name: "Errors by agent" }));
     const link = byAgent.getByRole("link", { name: /Agent One/ });
     // Overview, NOT ?view=work: Work lists the issues assigned to the agent,
     // while its recent runs (and each failure's reason) live in the Overview
@@ -408,6 +544,7 @@ describe("DashboardPage — failure visibility", () => {
   it("moves the bar onto whichever metric the list is ranked by", async () => {
     const user = userEvent.setup();
     renderDashboard();
+    await openErrorsTab(user);
 
     // Agent One failed 4 of 10; the anonymous bucket failed 2 of 2. Under
     // Failures the bucket is half the leader's bar. Under Rate it is 100% —
@@ -415,7 +552,7 @@ describe("DashboardPage — failure visibility", () => {
     // exactly the mismatch this control exists to remove.
     expect(offenderBar(1).style.width).toBe("50%");
 
-    await user.click(within(offenderCard()).getByRole("button", { name: "Rate" }));
+    await user.click(within(offenderSort()).getByRole("button", { name: "Rate" }));
 
     expect(offenderBar(1).style.width).toBe("100%");
   });
@@ -423,11 +560,12 @@ describe("DashboardPage — failure visibility", () => {
   it("says which metric the list is ranked by without relying on colour", async () => {
     const user = userEvent.setup();
     renderDashboard();
+    await openErrorsTab(user);
 
     // The active option used to be a colour swap and nothing else, which is
     // invisible to a screen reader. The group is named too — "Rate, pressed"
     // means nothing until you know the group ranks the offender list.
-    const group = screen.getByRole("group", { name: "Rank offenders by" });
+    const group = offenderSort();
     expect(
       within(group).getByRole("button", { name: "Failures" }),
     ).toHaveAttribute("aria-pressed", "true");
@@ -447,13 +585,14 @@ describe("DashboardPage — failure visibility", () => {
   it("keeps a two-run agent from hijacking the rate ranking", async () => {
     const user = userEvent.setup();
     renderDashboard();
+    await openErrorsTab(user);
 
-    await user.click(within(offenderCard()).getByRole("button", { name: "Rate" }));
+    await user.click(within(offenderSort()).getByRole("button", { name: "Rate" }));
 
     // 2/2 is a 100% rate and 4/10 is 40%, but two runs is not evidence. The
     // small-sample row is demoted, not dropped — the list still has to
     // reconcile with the workspace failure count above it.
-    const rows = within(screen.getByRole("list", { name: "Top offenders" }))
+    const rows = within(screen.getByRole("list", { name: "Errors by agent" }))
       .getAllByRole("listitem")
       .map((li) => li.textContent);
     expect(rows[0]).toMatch(/Agent One/);
@@ -463,6 +602,7 @@ describe("DashboardPage — failure visibility", () => {
   it("reveals the raw failure_reason values behind the class summary", async () => {
     const user = userEvent.setup();
     renderDashboard();
+    await openErrorsTab(user);
 
     expect(
       screen.queryByText("agent_error.provider_auth_or_access"),
@@ -477,11 +617,20 @@ describe("DashboardPage — failure visibility", () => {
     ).toBeInTheDocument();
   });
 
-  it("adds Errors to the trend toggle without disturbing the other metrics", async () => {
+  it("gives failures their own chart instead of a slot on the spend toggle", async () => {
     const user = userEvent.setup();
     const { container } = renderDashboard();
 
-    await user.click(screen.getByRole("button", { name: "Errors" }));
+    // Charting failures used to mean hiding spend: Errors was the fifth option
+    // of the single trend toggle, so "what did it cost" and "what broke" could
+    // not be on screen in the same breath.
+    const metrics = within(screen.getByRole("group", { name: "Metric" }));
+    expect(
+      metrics.queryByRole("button", { name: "Errors" }),
+    ).not.toBeInTheDocument();
+    expect(metrics.getByRole("button", { name: "Tokens" })).toBeInTheDocument();
+
+    await openErrorsTab(user);
 
     expect(container).toHaveTextContent("Daily errors");
   });
@@ -492,19 +641,22 @@ describe("DashboardPage — the Errors list never exposes an agent the viewer ca
     queryKeys.length = 0;
     dashboardDataRef.current = true;
     tzRef.current = "UTC";
+    replaceSpy.mockClear();
     cleanup();
   });
 
-  it("folds an unresolvable agent into an anonymous row instead of printing its UUID", () => {
+  it("folds an unresolvable agent into an anonymous row instead of printing its UUID", async () => {
     // The failure rollups are workspace-scoped and deliberately skip
     // per-agent visibility, but the agent list does not: a private agent
     // this member can't see never appears there. Rendering `row.agentId`
     // would leak its existence, failure count and failure rate.
+    const user = userEvent.setup();
     const { container } = renderDashboard();
+    await openErrorsTab(user);
 
     expect(container).not.toHaveTextContent("0f9d1c2e-private-agent-uuid");
 
-    const byAgent = within(screen.getByRole("list", { name: "Top offenders" }));
+    const byAgent = within(screen.getByRole("list", { name: "Errors by agent" }));
     expect(byAgent.getByText("Other agents")).toBeInTheDocument();
     // Anonymous, and therefore not a link — there is no page to open.
     expect(
@@ -513,37 +665,70 @@ describe("DashboardPage — the Errors list never exposes an agent the viewer ca
   });
 });
 
-describe("DashboardPage — Errors card placement and density", () => {
+// The page answers two questions — "what did this cost" and "what broke" —
+// and used to answer both on one scroll, where the failure breakdown sat
+// below a leaderboard that can itself run to thirty rows (MUL-5759).
+describe("DashboardPage — the two questions are separate tabs", () => {
   beforeEach(() => {
     queryKeys.length = 0;
     dashboardDataRef.current = true;
     manyAgentsRef.current = false;
     tzRef.current = "UTC";
+    replaceSpy.mockClear();
     cleanup();
   });
 
-  it("renders the Errors card after the leaderboard, at the bottom of the page", () => {
-    // Spend is the headline; failures are the follow-up question you ask
-    // after seeing who is spending. Asserting document order rather than a
-    // class name keeps this about the reading sequence.
+  it("keeps failures off the Usage tab and reaches them in one click", async () => {
+    const user = userEvent.setup();
     renderDashboard();
 
-    // By heading, not by text: "Errors" also names the trend-chart toggle.
-    const leaderboard = screen.getByRole("heading", { name: "Leaderboard" });
-    const errors = screen.getByRole("heading", { name: "Errors" });
-
     expect(
-      leaderboard.compareDocumentPosition(errors) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+      screen.queryByRole("list", { name: "Errors by agent" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Leaderboard" })).toBeInTheDocument();
+
+    await openErrorsTab(user);
+
+    expect(screen.getByRole("list", { name: "Errors by agent" })).toBeInTheDocument();
+    // The two per-agent rankings had near-identical shapes and used to stack
+    // one above the other; each now belongs to the question it answers.
+    expect(
+      screen.queryByRole("list", { name: "Leaderboard" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("puts the tab in the URL so an Errors view can be linked", async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+
+    await openErrorsTab(user);
+    expect(replaceSpy).toHaveBeenLastCalledWith("/acme/usage?tab=errors");
+
+    // Returning to the default view drops the param instead of pinning
+    // ?tab=usage onto every link out of this page.
+    await user.click(screen.getByRole("tab", { name: "Usage" }));
+    expect(replaceSpy).toHaveBeenLastCalledWith("/acme/usage");
+  });
+
+  it("opens straight onto Errors when the URL asks for it", () => {
+    renderDashboard("tab=errors");
+
+    expect(screen.getByRole("list", { name: "Errors by agent" })).toBeInTheDocument();
+  });
+
+  it("falls back to Usage for a tab value it does not recognise", () => {
+    renderDashboard("tab=nonsense");
+
+    expect(screen.getByRole("list", { name: "Leaderboard" })).toBeInTheDocument();
   });
 
   it("caps the offender list and expands it on demand", async () => {
     manyAgentsRef.current = true;
     const user = userEvent.setup();
     renderDashboard();
+    await openErrorsTab(user);
 
-    const list = () => screen.getByRole("list", { name: "Top offenders" });
+    const list = () => screen.getByRole("list", { name: "Errors by agent" });
     // 12 agents have failures, but an unbounded list is what made this card
     // taller than the rest of the page put together.
     expect(within(list()).getAllByRole("listitem")).toHaveLength(8);
@@ -556,12 +741,55 @@ describe("DashboardPage — Errors card placement and density", () => {
     expect(within(list()).getAllByRole("listitem")).toHaveLength(8);
   });
 
-  it("shows no expand affordance when every offender already fits", () => {
+  it("shows no expand affordance when every offender already fits", async () => {
+    const user = userEvent.setup();
     renderDashboard();
+    await openErrorsTab(user);
 
     expect(
       screen.queryByRole("button", { name: /Show all/ }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("DashboardPage — one header carries the tabs and the filters", () => {
+  beforeEach(() => {
+    queryKeys.length = 0;
+    dashboardDataRef.current = true;
+    manyAgentsRef.current = false;
+    tzRef.current = "UTC";
+    cleanup();
+  });
+
+  it("puts the title, both tabs, the filters and refresh in a single header", () => {
+    renderDashboard();
+
+    const [header, ...rest] = screen.getAllByRole("banner");
+    expect(rest).toHaveLength(0);
+    const bar = within(header as HTMLElement);
+    expect(bar.getByRole("heading", { name: "Analytics" })).toBeInTheDocument();
+    expect(bar.getByRole("tab", { name: "Usage" })).toHaveAttribute("aria-selected", "true");
+    expect(bar.getByRole("tab", { name: /Errors/ })).toBeInTheDocument();
+    expect(bar.getByText(/^GMT/)).toBeInTheDocument();
+    expect(bar.getByRole("button", { name: "Refresh" })).toBeInTheDocument();
+  });
+
+  it("shows each filter's current value on its trigger", () => {
+    renderDashboard();
+
+    const bar = within(screen.getByRole("banner"));
+    expect(bar.getByRole("button", { name: "Period" })).toHaveTextContent("30d");
+    expect(bar.getByRole("button", { name: "Project" })).toHaveTextContent("All projects");
+  });
+
+  it("keeps the header in place when switching to Errors", async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+    await openErrorsTab(user);
+
+    const bar = within(screen.getByRole("banner"));
+    expect(bar.getByRole("tab", { name: /Errors/ })).toHaveAttribute("aria-selected", "true");
+    expect(bar.getByRole("button", { name: "Period" })).toHaveTextContent("30d");
   });
 });
 
@@ -655,13 +883,12 @@ describe("DashboardPage — leaderboard density", () => {
     const user = userEvent.setup();
     renderDashboard();
 
-    // Scoped to the leaderboard card — the trend chart's metric toggle owns
-    // a "Time" button too.
-    const card = screen.getByRole("list", { name: "Leaderboard" })
-      .parentElement as HTMLElement;
     // Re-ranking must not quietly reveal the tail: the cap belongs to the
     // list, not to one metric.
-    await user.click(within(card).getByRole("button", { name: "Time" }));
+    const sortControls = within(
+      screen.getByRole("group", { name: "Rank agents by" }),
+    );
+    await user.click(sortControls.getByRole("button", { name: "Time" }));
 
     const list = within(screen.getByRole("list", { name: "Leaderboard" }));
     expect(list.getAllByRole("listitem")).toHaveLength(10);
@@ -675,5 +902,157 @@ describe("DashboardPage — leaderboard density", () => {
     expect(
       screen.queryByRole("button", { name: "Show all" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("exposes wide columns through a named keyboard-focusable local scroller", () => {
+    renderDashboard();
+
+    const scroller = screen.getByRole("region", { name: "Leaderboard" });
+    const list = within(scroller).getByRole("list", { name: "Leaderboard" });
+    const row = within(list).getByRole("listitem");
+
+    expect(scroller).toHaveAttribute("tabindex", "0");
+    scroller.focus();
+    expect(scroller).toHaveFocus();
+    expect(scroller).toHaveClass(
+      "overflow-x-auto",
+      "overscroll-x-contain",
+      "[-webkit-overflow-scrolling:touch]",
+    );
+    expect(row).toHaveStyle({
+      minWidth: "fit-content",
+      gridTemplateColumns:
+        "minmax(10rem, 1.6fr) minmax(6rem, 1fr) 5rem 5rem 5rem 4rem",
+    });
+  });
+});
+
+describe("DashboardPage — plan history limit (MUL-9490)", () => {
+  beforeEach(() => {
+    queryKeys.length = 0;
+    dashboardDataRef.current = true;
+    manyAgentsRef.current = false;
+    restrictedBucketRef.current = false;
+    historyLimitRef.current = null;
+    planLimitsRef.current = null;
+    billingEnabledRef.current = true;
+    yearRangeEnabledRef.current = true;
+    tzRef.current = "UTC";
+    cleanup();
+  });
+  afterEach(() => {
+    historyLimitRef.current = null;
+    planLimitsRef.current = null;
+  });
+
+  const daysInKeys = (part: string) =>
+    queryKeys.filter((k) => k[0] === "dashboard" && k[2] === part).map((k) => k[3]);
+
+  async function openRangeMenu(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole("button", { name: "Period" }));
+    return screen.findByRole("menu");
+  }
+
+  it("offers 365 days and fetches 371 for its weekly chart when nothing is enforced", async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+    const menu = await openRangeMenu(user);
+    const option = within(menu).getByRole("menuitemradio", { name: /365d/ });
+    expect(option).not.toHaveAttribute("aria-disabled", "true");
+    expect(within(menu).queryByText(/Your plan covers/)).toBeNull();
+
+    queryKeys.length = 0;
+    await user.click(option);
+    expect(daysInKeys("daily")).toContain(371);
+    expect(daysInKeys("by-agent")).toContain(365);
+  });
+
+  it("leaves 365 days out until its flag is on", async () => {
+    yearRangeEnabledRef.current = false;
+    historyLimitRef.current = 30;
+    const user = userEvent.setup();
+    renderDashboard();
+    const menu = await openRangeMenu(user);
+    expect(within(menu).queryByRole("menuitemradio", { name: /365d/ })).toBeNull();
+    expect(within(menu).getByRole("menuitemradio", { name: /180d/ })).toHaveAttribute("aria-disabled", "true");
+    expect(queryKeys.filter((k) => k[0] === "dashboard").every((k) => k[3] !== 365 && k[3] !== 371)).toBe(true);
+  });
+
+  it("locks ranges past the plan and labels the plan that covers each", async () => {
+    historyLimitRef.current = 30;
+    planLimitsRef.current = {
+      free: { dashboardHistoryDays: 30 },
+      pro: { dashboardHistoryDays: 90 },
+      business: { dashboardHistoryDays: 365 },
+    };
+    const user = userEvent.setup();
+    renderDashboard();
+    const menu = await openRangeMenu(user);
+
+    for (const label of ["1d", "7d", "30d"]) {
+      expect(within(menu).getByRole("menuitemradio", { name: new RegExp(`^${label}`) })).not.toHaveAttribute(
+        "aria-disabled",
+        "true",
+      );
+    }
+    expect(within(menu).getByRole("menuitemradio", { name: /90d/ })).toHaveAttribute("aria-disabled", "true");
+    expect(within(menu).getByRole("menuitemradio", { name: /90d/ })).toHaveTextContent("Pro");
+    expect(within(menu).getByRole("menuitemradio", { name: /180d/ })).toHaveTextContent("Business");
+    expect(within(menu).getByRole("menuitemradio", { name: /365d/ })).toHaveTextContent("Business");
+    expect(menu).toHaveTextContent("Your plan covers the last 30 days.");
+    expect(within(menu).getByRole("button", { name: "View plans" })).toBeInTheDocument();
+    // Every query is keyed on the limit it is made under.
+    expect(queryKeys.filter((k) => k[0] === "dashboard").every((k) => k[6] === 30)).toBe(true);
+  });
+
+  it("labels plans from the configured limits, not a fixed table", async () => {
+    historyLimitRef.current = 30;
+    planLimitsRef.current = {
+      free: { dashboardHistoryDays: 30 },
+      pro: { dashboardHistoryDays: 180 },
+      business: { dashboardHistoryDays: 365 },
+    };
+    const user = userEvent.setup();
+    renderDashboard();
+    const menu = await openRangeMenu(user);
+    expect(within(menu).getByRole("menuitemradio", { name: /180d/ })).toHaveTextContent("Pro");
+    expect(within(menu).getByRole("menuitemradio", { name: /365d/ })).toHaveTextContent("Business");
+  });
+
+  it("shows only the lock when plan limits are unavailable, and no button without billing", async () => {
+    historyLimitRef.current = 30;
+    billingEnabledRef.current = false;
+    const user = userEvent.setup();
+    renderDashboard();
+    const menu = await openRangeMenu(user);
+    const option = within(menu).getByRole("menuitemradio", { name: /90d/ });
+    expect(option).toHaveAttribute("aria-disabled", "true");
+    expect(option).not.toHaveTextContent("Pro");
+    expect(option).not.toHaveTextContent("Business");
+    expect(menu).toHaveTextContent("Your plan covers the last 30 days.");
+    expect(within(menu).queryByRole("button", { name: "View plans" })).toBeNull();
+  });
+
+  it("reads the longest range the plan covers after a downgrade, and restores the pick on upgrade", async () => {
+    const user = userEvent.setup();
+    const view = renderDashboard();
+    const menu = await openRangeMenu(user);
+    await user.click(within(menu).getByRole("menuitemradio", { name: /90d/ }));
+    expect(screen.getByRole("button", { name: "Period" })).toHaveTextContent("90d");
+
+    // The trial ends: the limit drops to 30 while the page is open.
+    historyLimitRef.current = 30;
+    queryKeys.length = 0;
+    view.rerender(<DashboardHarness />);
+    expect(screen.getByRole("button", { name: "Period" })).toHaveTextContent("30d");
+    expect(daysInKeys("by-agent")).toEqual(expect.arrayContaining([30]));
+    expect(daysInKeys("by-agent")).not.toContain(90);
+    expect(daysInKeys("daily")).toContain(35);
+    expect(screen.getByText(/Cost · 30D/)).toBeInTheDocument();
+
+    // An upgrade lifts it; the reader's pick comes back.
+    historyLimitRef.current = null;
+    view.rerender(<DashboardHarness />);
+    expect(screen.getByRole("button", { name: "Period" })).toHaveTextContent("90d");
   });
 });

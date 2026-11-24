@@ -11,6 +11,26 @@ import (
 	"testing"
 )
 
+func TestGetJSONReportsIncompleteResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		_, _ = io.WriteString(w, `{"messages":`)
+	}))
+	t.Cleanup(srv.Close)
+
+	var history map[string]any
+	err := NewAPIClient(srv.URL, "", "").GetJSON(context.Background(), "/api/chat/history", &history)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("expected truncated body error, got %v", err)
+	}
+	if message := userMessage(err, LangEN); !strings.Contains(message, "response ended before it was complete") {
+		t.Errorf("got %q, want incomplete response guidance", message)
+	}
+	if got := ExitCodeFor(err); got != ExitNetwork {
+		t.Errorf("exit code = %d, want %d", got, ExitNetwork)
+	}
+}
+
 func TestPostJSON(t *testing.T) {
 	type reqBody struct {
 		Name string `json:"name"`
@@ -414,6 +434,42 @@ func TestUploadFileWithURL(t *testing.T) {
 	})
 }
 
+func TestUploadPrivatePlugin(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/workspaces/ws-1/plugins/private/install" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer test-token" || r.Header.Get("X-Workspace-ID") != "ws-1" {
+			t.Fatalf("missing authenticated workspace headers: %#v", r.Header)
+		}
+		file, header, err := r.FormFile("artifact")
+		if err != nil {
+			t.Fatalf("artifact form file: %v", err)
+		}
+		defer file.Close()
+		contents, err := io.ReadAll(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if header.Filename != "private.zip" || string(contents) != "zip-bytes" {
+			t.Fatalf("unexpected artifact filename=%q content=%q", header.Filename, contents)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"id": "installation-1"})
+	}))
+	defer server.Close()
+
+	client := NewAPIClient(server.URL, "ws-1", "test-token")
+	var response map[string]string
+	err := client.UploadPrivatePlugin(context.Background(), "/api/workspaces/ws-1/plugins/private/install", []byte("zip-bytes"), "private.zip", &response)
+	if err != nil {
+		t.Fatalf("UploadPrivatePlugin: %v", err)
+	}
+	if response["id"] != "installation-1" {
+		t.Fatalf("unexpected response: %#v", response)
+	}
+}
+
 func TestNormalizeGOOS(t *testing.T) {
 	cases := map[string]string{
 		"darwin":  "macos",
@@ -438,11 +494,14 @@ func TestNormalizeGOOS(t *testing.T) {
 // every other test green while the CLI silently went back to receiving ~800-char
 // signed URLs on every attachment of every list read.
 //
+// The same holds for workspace-guests-v1: without it, guests drop out of the
+// member lists the CLI resolves names from.
+//
 // The exact string is load-bearing: the server matches the token literally
 // (handler.requestHasClientCapability), so it is asserted verbatim rather than
 // through the constant.
 func TestSetHeaders_AdvertisesStableAttachmentURLs(t *testing.T) {
-	const wantCapability = "stable_attachment_urls"
+	const wantCapability = "stable_attachment_urls,workspace-guests-v1"
 
 	// Every verb goes through setHeaders, and an agent's read path is not only
 	// GET (comment add posts, attachment upload multiparts). Cover the shapes
@@ -524,4 +583,113 @@ func TestSetHeaders_AdvertisesStableAttachmentURLs(t *testing.T) {
 			t.Errorf("X-Client-Capabilities = %q, want %q", got, wantCapability)
 		}
 	})
+}
+
+// TestHTTPErrorTaskScopedFollowsTheRequestNotTheClient wires the credential
+// claim to what actually went out on the wire.
+//
+// Reading the client's Token field instead is wrong in a way a hand-built
+// HTTPError cannot show: DownloadFile deliberately sends no Authorization
+// header for an absolute signed URL, so a 401 from object storage would be
+// reported to an agent as "your task token was rejected, stop" purely because
+// the client happened to hold one.
+func TestHTTPErrorTaskScopedFollowsTheRequestNotTheClient(t *testing.T) {
+	var sawAuth []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawAuth = append(sawAuth, r.Header.Get("Authorization"))
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"error":"unauthorized"}`)
+	}))
+	defer srv.Close()
+
+	taskClient := NewAPIClient(srv.URL, "ws-1", TaskTokenPrefix+"0123456789abcdef")
+
+	t.Run("api call sends the task token", func(t *testing.T) {
+		err := taskClient.GetJSON(context.Background(), "/api/me", &struct{}{})
+		var httpErr *HTTPError
+		if !errors.As(err, &httpErr) {
+			t.Fatalf("err = %v, want an *HTTPError", err)
+		}
+		if !httpErr.TaskScoped {
+			t.Error("a 401 on a request that carried the task token must be marked task-scoped")
+		}
+		if got := FormatError(err, false); !strings.Contains(got, "task token") {
+			t.Errorf("message did not use the task-token copy: %q", got)
+		}
+	})
+
+	t.Run("signed absolute URL sends no credential at all", func(t *testing.T) {
+		before := len(sawAuth)
+		_, err := taskClient.DownloadFile(context.Background(), srv.URL+"/signed-object?sig=abc")
+		var httpErr *HTTPError
+		if !errors.As(err, &httpErr) {
+			t.Fatalf("err = %v, want an *HTTPError", err)
+		}
+		if auth := sawAuth[before]; auth != "" {
+			t.Fatalf("DownloadFile sent %q on an absolute URL; the test no longer covers the unauthenticated path", auth)
+		}
+		if httpErr.TaskScoped {
+			t.Error("a 401 from an unauthenticated signed URL must not be reported as a rejected task token")
+		}
+		if got := FormatError(err, false); strings.Contains(got, "task token") {
+			t.Errorf("storage 401 got the task-token copy: %q", got)
+		}
+	})
+
+	t.Run("member token is never task-scoped", func(t *testing.T) {
+		memberClient := NewAPIClient(srv.URL, "ws-1", "mul_0123456789abcdef")
+		err := memberClient.GetJSON(context.Background(), "/api/me", &struct{}{})
+		var httpErr *HTTPError
+		if !errors.As(err, &httpErr) {
+			t.Fatalf("err = %v, want an *HTTPError", err)
+		}
+		if httpErr.TaskScoped {
+			t.Error("a member credential must not be reported as a task token")
+		}
+	})
+}
+
+// A structured error body past 4 KiB must arrive whole: callers parse it as
+// JSON (e.g. a workflow's 409 status mapping plan), and a cut body does not
+// parse.
+func TestHTTPErrorKeepsLargeStructuredBody(t *testing.T) {
+	required := make([]map[string]any, 0, 45)
+	for i := 0; i < 45; i++ {
+		required = append(required, map[string]any{
+			"status_key":  "custom_status_" + strings.Repeat("x", 20) + string(rune('a'+i%26)) + string(rune('a'+i/26)),
+			"issue_count": 1, "suggested_status_key": "todo",
+		})
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"error": "map every status", "code": "workflow_status_mapping_required",
+		"plan": map[string]any{"required": required},
+	})
+	if len(payload) <= 4096 {
+		t.Fatalf("fixture is %d bytes; it must exceed 4096 to cover the old cap", len(payload))
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write(payload)
+	}))
+	defer srv.Close()
+
+	client := NewAPIClient(srv.URL, "", "test-token")
+	err := client.PostJSON(context.Background(), "/api/projects/p/workflow", map[string]any{}, nil)
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("err = %v, want *HTTPError", err)
+	}
+	var got struct {
+		Code string `json:"code"`
+		Plan struct {
+			Required []any `json:"required"`
+		} `json:"plan"`
+	}
+	if jerr := json.Unmarshal([]byte(httpErr.Body), &got); jerr != nil {
+		t.Fatalf("body of %d bytes did not parse (kept %d): %v", len(payload), len(httpErr.Body), jerr)
+	}
+	if got.Code != "workflow_status_mapping_required" || len(got.Plan.Required) != 45 {
+		t.Fatalf("code = %q, required = %d; want the full plan", got.Code, len(got.Plan.Required))
+	}
 }

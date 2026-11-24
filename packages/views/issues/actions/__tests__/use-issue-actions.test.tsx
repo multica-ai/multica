@@ -1,7 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { Issue } from "@multica/core/types";
+import { buildIssueStatusCatalog } from "@multica/core/issue-statuses";
+import { statusCategoryOfKey } from "@multica/core/issues";
+import type { Issue, IssueStatusEntry } from "@multica/core/types";
+import * as clipboard from "@multica/ui/lib/clipboard";
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
@@ -43,8 +46,49 @@ vi.mock("@multica/core/pins", () => ({
 }));
 
 const mockUpdateMutate = vi.fn();
+const mockUpdateMutateAsync = vi.fn();
 vi.mock("@multica/core/issues/mutations", () => ({
-  useUpdateIssue: () => ({ mutate: mockUpdateMutate }),
+  useUpdateIssue: () => ({ mutate: mockUpdateMutate, mutateAsync: mockUpdateMutateAsync }),
+}));
+
+// The status catalog is server state; this suite only needs it to answer which
+// CATEGORY a key belongs to, so the entries are fed in directly. `later` parks
+// like Backlog and `rework` starts work like Todo — the two cases a raw
+// `status === "backlog"` / `=== "todo"` comparison gets wrong (MUL-6463).
+const catalogEntries: IssueStatusEntry[] = [
+  ...(["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"] as const).map(
+    (key, i) =>
+      statusEntry({
+        id: key,
+        key,
+        name: key,
+        category: statusCategoryOfKey(key),
+        is_system: true,
+        position: i,
+      }),
+  ),
+  statusEntry({ id: "later", key: "later", name: "Later", category: "unstarted", position: 7 }),
+  statusEntry({ id: "rework", key: "rework", name: "Rework", category: "unstarted", position: 8 }),
+];
+function statusEntry(overrides: Partial<IssueStatusEntry>): IssueStatusEntry {
+  return {
+    id: "id",
+    workspace_id: "ws-1",
+    key: "custom",
+    name: "Custom",
+    description: "",
+    category: "unstarted",
+    color: "#22c55e",
+    is_system: false,
+    position: 0,
+    archived_at: null,
+    created_at: "",
+    updated_at: "",
+    ...overrides,
+  };
+}
+vi.mock("@multica/core/issue-statuses/hooks", () => ({
+  useIssueStatuses: () => buildIssueStatusCatalog(catalogEntries),
 }));
 
 vi.mock("@multica/core/paths", async () => {
@@ -63,6 +107,7 @@ vi.mock("../../../navigation", () => ({
     push: vi.fn(),
     pathname: "/test/issues/issue-1",
     searchParams: new URLSearchParams(),
+    hash: "",
     back: vi.fn(),
     replace: vi.fn(),
     getShareableUrl: (p: string) => `https://app.multica.com${p}`,
@@ -108,6 +153,7 @@ function wrapper({ children }: { children: React.ReactNode }) {
 beforeEach(() => {
   mockOpenModal.mockReset();
   mockUpdateMutate.mockReset();
+  mockUpdateMutateAsync.mockReset().mockResolvedValue(mockIssue);
   mockCreatePinMutate.mockReset();
   mockDeletePinMutate.mockReset();
   vi.mocked(toast.success).mockReset();
@@ -120,15 +166,19 @@ beforeEach(() => {
   });
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("useIssueActions", () => {
-  it("updateField dispatches useUpdateIssue.mutate with the correct payload", () => {
+  it("updateField dispatches useUpdateIssue.mutateAsync with the correct payload", () => {
     const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
 
     act(() => {
       result.current.updateField({ status: "done" });
     });
 
-    expect(mockUpdateMutate).toHaveBeenCalledWith(
+    expect(mockUpdateMutateAsync).toHaveBeenCalledWith(
       { id: "issue-1", status: "done" },
       expect.any(Object),
     );
@@ -150,7 +200,7 @@ describe("useIssueActions", () => {
       assigneeType: "agent",
       assigneeId: "agent-1",
     });
-    expect(mockUpdateMutate).not.toHaveBeenCalled();
+    expect(mockUpdateMutateAsync).not.toHaveBeenCalled();
   });
 
   it("assigning an agent to a backlog issue applies directly — backlog never starts a run", () => {
@@ -164,8 +214,48 @@ describe("useIssueActions", () => {
       });
     });
 
-    expect(mockUpdateMutate).toHaveBeenCalledWith(
+    expect(mockUpdateMutateAsync).toHaveBeenCalledWith(
       { id: "issue-1", assignee_type: "agent", assignee_id: "agent-1" },
+      expect.any(Object),
+    );
+    expect(mockOpenModal).not.toHaveBeenCalled();
+  });
+
+  // Which writes need confirming is decided by runConfirmIntent, whose matrix
+  // (parked / unresolvable categories, every promotion target) is canonical in
+  // ../run-confirm-gate.test.ts. These two only prove the hook routes on it.
+  it("promoting an agent-owned parked issue routes through the run-confirm modal", () => {
+    const parked = {
+      ...mockIssue,
+      status: "backlog",
+      assignee_type: "agent",
+      assignee_id: "agent-1",
+    } as Issue;
+    const { result } = renderHook(() => useIssueActions(parked), { wrapper });
+
+    act(() => {
+      result.current.updateField({ status: "rework" });
+    });
+
+    expect(mockOpenModal).toHaveBeenCalledWith("issue-run-confirm", {
+      issueIds: ["issue-1"],
+      mode: "promote",
+      status: "rework",
+      assigneeType: "agent",
+      assigneeId: "agent-1",
+    });
+    expect(mockUpdateMutateAsync).not.toHaveBeenCalled();
+  });
+
+  it("a status change that starts no run applies directly", () => {
+    const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
+
+    act(() => {
+      result.current.updateField({ status: "in_progress" });
+    });
+
+    expect(mockUpdateMutateAsync).toHaveBeenCalledWith(
+      { id: "issue-1", status: "in_progress" },
       expect.any(Object),
     );
     expect(mockOpenModal).not.toHaveBeenCalled();
@@ -181,7 +271,7 @@ describe("useIssueActions", () => {
       });
     });
 
-    expect(mockUpdateMutate).toHaveBeenCalledWith(
+    expect(mockUpdateMutateAsync).toHaveBeenCalledWith(
       { id: "issue-1", assignee_type: "member", assignee_id: "user-1" },
       expect.any(Object),
     );
@@ -212,6 +302,42 @@ describe("useIssueActions", () => {
 
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
       "https://app.multica.com/test/issues/issue-1",
+    );
+  });
+
+  it("copyTitleAsLink copies the identifier and title as a Markdown link", async () => {
+    const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
+
+    await act(async () => {
+      await result.current.copyTitleAsLink();
+    });
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      "[TES-1 Example](https://app.multica.com/test/issues/TES-1)",
+    );
+  });
+
+  it("copyTitleAsLink reports a failed copy without a success toast", async () => {
+    vi.spyOn(clipboard, "copyTextAndHtml").mockResolvedValueOnce(false);
+    const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
+
+    await act(async () => {
+      await result.current.copyTitleAsLink();
+    });
+
+    expect(toast.error).toHaveBeenCalledOnce();
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("copyCommentLink writes the issue's shareable URL anchored at the comment", async () => {
+    const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
+
+    await act(async () => {
+      await result.current.copyCommentLink("comment-7");
+    });
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      "https://app.multica.com/test/issues/TES-1#comment-comment-7",
     );
   });
 
@@ -247,6 +373,48 @@ describe("useIssueActions", () => {
       issueId: "issue-1",
       identifier: "TES-1",
       onDeletedFallbackPath: "/test/issues",
+    });
+  });
+
+  it("openCreateSubIssue seeds the parent's project and assignee so the sub-issue inherits them", () => {
+    const parentIssue = {
+      ...mockIssue,
+      project_id: "project-1",
+      assignee_type: "agent",
+      assignee_id: "agent-1",
+    } as Issue;
+    const { result } = renderHook(() => useIssueActions(parentIssue), { wrapper });
+
+    act(() => {
+      result.current.openCreateSubIssue();
+    });
+
+    expect(mockOpenModal).toHaveBeenLastCalledWith("create-issue", {
+      parent_issue_id: "issue-1",
+      parent_issue_identifier: "TES-1",
+      project_id: "project-1",
+      assignee_type: "agent",
+      assignee_id: "agent-1",
+    });
+  });
+
+  it("openCreateSubIssue omits assignee when the parent has none", () => {
+    const parentIssue = {
+      ...mockIssue,
+      project_id: "project-1",
+      assignee_type: null,
+      assignee_id: null,
+    } as Issue;
+    const { result } = renderHook(() => useIssueActions(parentIssue), { wrapper });
+
+    act(() => {
+      result.current.openCreateSubIssue();
+    });
+
+    expect(mockOpenModal).toHaveBeenLastCalledWith("create-issue", {
+      parent_issue_id: "issue-1",
+      parent_issue_identifier: "TES-1",
+      project_id: "project-1",
     });
   });
 

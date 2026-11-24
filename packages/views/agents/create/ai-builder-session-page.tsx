@@ -43,19 +43,24 @@ export function AiBuilderSessionPage({ sessionId }: { sessionId: string }) {
   // link that outlived it. Replace rather than push: the address no longer
   // resolves, so it must not stay on the stack for a back to land on.
   const leave = useCallback(
-    () => navigation.replace(withSquadParam(paths.newAgentAi(), squadId)),
+    () => navigation.replace(withSquadParam(paths.newAgent(), squadId)),
     [navigation, paths, squadId],
   );
 
   return (
     <AgentCreateShell
+      fitVisualViewport
       title={
         squadId
           ? t(($) => $.creation_studio.squad_title)
           : t(($) => $.creation_studio.title)
       }
       step={t(($) => $.creation_studio.step_ai)}
-      onBack={() => navigation.push(paths.newAgent())}
+      // Leaving keeps the conversation — step 1 lists it to resume — so close
+      // exits the flow instead of stepping back to the runtime list.
+      onClose={() =>
+        navigation.push(squadId ? paths.squadDetail(squadId) : paths.agents())
+      }
       chips={
         <>
           <AgentCreateChip>

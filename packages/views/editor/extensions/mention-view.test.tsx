@@ -21,26 +21,22 @@ vi.mock("@tiptap/react", () => ({
 }));
 
 vi.mock("@multica/core/paths", () => ({
+  issueRouteRef: (issue: { id: string; identifier?: string | null }) => issue.identifier || issue.id,
   useWorkspacePaths: () => ({
     issueDetail: (id: string) => `/acme/issues/${id}`,
     projectDetail: (id: string) => `/acme/projects/${id}`,
   }),
 }));
 
-const { newTabPreferred } = vi.hoisted(() => ({ newTabPreferred: { value: false } }));
-
-vi.mock("@multica/core/issues/stores", () => ({
-  useIssueLinkStore: (selector: (s: { openInNewTab: boolean }) => unknown) =>
-    selector({ openInNewTab: newTabPreferred.value }),
-}));
-
 vi.mock("../../issues/components/issue-chip", () => ({
+  useChipIssue: () => undefined,
   IssueChip: ({ fallbackLabel }: { fallbackLabel?: string }) => (
     <span data-testid="issue-chip">{fallbackLabel}</span>
   ),
 }));
 
 vi.mock("../../projects/components/project-chip", () => ({
+  useChipProject: () => undefined,
   ProjectChip: ({ fallbackLabel }: { fallbackLabel?: string }) => (
     <span data-testid="project-chip">{fallbackLabel}</span>
   ),
@@ -58,6 +54,7 @@ function makeAdapter(overrides: Partial<NavigationAdapter> = {}): NavigationAdap
     back: vi.fn(),
     pathname: "/",
     searchParams: new URLSearchParams(),
+    hash: "",
     getShareableUrl: (p) => `https://app.example${p}`,
     ...overrides,
   };
@@ -137,6 +134,19 @@ describe("MentionView project mention", () => {
 describe("MentionView issue mention", () => {
   const ISSUE_ID = "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed";
   const ISSUE_PATH = `/acme/issues/${ISSUE_ID}`;
+
+  it("pushes in place on plain click — same as the readonly chip", () => {
+    const push = vi.fn();
+    const openInNewTab = vi.fn();
+    renderMention(
+      { type: "issue", id: ISSUE_ID, label: "MUL-7" },
+      makeAdapter({ push, openInNewTab }),
+    );
+
+    fireEvent.click(screen.getByTestId("issue-chip"));
+    expect(push).toHaveBeenCalledWith(ISSUE_PATH);
+    expect(openInNewTab).not.toHaveBeenCalled();
+  });
 
   // The reference implementation the project mention was aligned to — guard it
   // so the two chips can't drift apart again.

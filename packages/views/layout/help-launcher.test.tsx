@@ -1,14 +1,39 @@
-import type { ReactNode } from "react";
-import { render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { cloneElement, type ReactElement, type ReactNode } from "react";
+import { fireEvent, render as rtlRender, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { configStore } from "@multica/core/config";
+import { githubStarsOptions } from "@multica/core/github/stars";
+import { markStarPromptStarred } from "@multica/core/star-prompt";
 import enLayout from "../locales/en/layout.json";
+import { isDesktopShell } from "../platform/local-directory";
 import { HelpLauncher } from "./help-launcher";
+
+// The download entry is gated on the desktop-shell probe, which reads a
+// preload-injected bridge that jsdom never has. Mock it so both platforms are
+// reachable from the same suite.
+vi.mock("../platform/local-directory", () => ({
+  isDesktopShell: vi.fn(() => false),
+}));
+
+vi.mock("@multica/core/star-prompt", () => ({
+  markStarPromptStarred: vi.fn(() => Promise.resolve()),
+}));
+
+// The What's new entry is covered with the real menu in whats-new-menu-panel.test.tsx.
+vi.mock("../whats-new/whats-new-menu-panel", () => ({
+  useWhatsNewMenuPanel: () => ({ available: false }),
+  WhatsNewMenuPanel: () => null,
+}));
+
+// The UI language the mocked i18n instance reports; drives locale-aware links.
+const i18nState = vi.hoisted(() => ({ language: "en" }));
 
 // react-i18next isn't initialised in the views test env, so resolve the
 // selector against the real en/layout.json to assert on actual copy.
 vi.mock("../i18n", () => ({
   useT: () => ({
+    i18n: i18nState,
     t: (
       sel: (r: typeof enLayout) => string,
       vars?: Record<string, string>,
@@ -38,7 +63,19 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", async () => {
   return {
     DropdownMenu: ({ children }: { children: ReactNode }) => <>{children}</>,
     DropdownMenuContent: ({ children }: { children: ReactNode }) => <>{children}</>,
-    DropdownMenuItem: ({ children }: { children: ReactNode }) => <>{children}</>,
+    // Base UI's `render` prop swaps in a caller-supplied element (here the
+    // <a>) and adopts the item's children. Flattening it to a bare fragment —
+    // as this mock originally did — would drop the anchor entirely and make an
+    // href assertion silently unfalsifiable.
+    DropdownMenuItem: ({
+      children,
+      render,
+      onClick,
+    }: {
+      children: ReactNode;
+      render?: ReactElement;
+      onClick?: () => void;
+    }) => (render ? cloneElement(render, { onClick } as object, children) : <>{children}</>),
     DropdownMenuGroup: ({ children }: { children: ReactNode }) => (
       <GroupContext.Provider value={true}>{children}</GroupContext.Provider>
     ),
@@ -55,8 +92,21 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", async () => {
   };
 });
 
+let qc: QueryClient;
+
+function render(ui: ReactElement) {
+  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+}
+
+beforeEach(() => {
+  qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  vi.mocked(isDesktopShell).mockReturnValue(false);
+  i18nState.language = "en";
+});
+
 afterEach(() => {
   configStore.getState().setServerVersion("");
+  qc.clear();
 });
 
 describe("HelpLauncher", () => {
@@ -71,13 +121,50 @@ describe("HelpLauncher", () => {
     expect(screen.getByText("Server version 1.2.3")).toBeInTheDocument();
   });
 
-  // MUL-4819: the version row's DropdownMenuLabel must sit inside a
-  // DropdownMenuGroup. Rendering it bare made Base UI's Menu.GroupLabel throw
-  // on open, unmounting the whole app (black screen, no error) because no error
-  // boundary sits above the sidebar. Rendering here must not throw.
-  it("renders the version row without a missing-group crash", () => {
-    configStore.getState().setServerVersion("9.9.9");
-    expect(() => render(<HelpLauncher />)).not.toThrow();
-    expect(screen.getByText("Server version 9.9.9")).toBeInTheDocument();
+  // MUL-6462: after web onboarding the desktop download CTA was unreachable —
+  // no entry anywhere in the app, so users had to remember the URL or detour
+  // through the marketing site. The Help menu is the persistent home for it.
+  it("links to the download page on web", () => {
+    render(<HelpLauncher />);
+    const link = screen.getByRole("link", { name: /Desktop app/ });
+    expect(link).toHaveAttribute("href", "https://multica.ai/download");
+  });
+
+  it.each([
+    ["en", "https://multica.ai/docs"],
+    ["zh-Hans", "https://multica.ai/docs/zh"],
+    ["zh-Hant", "https://multica.ai/docs/zh-Hant"],
+    ["fr", "https://multica.ai/docs/fr"],
+  ])("links Docs to the %s docs", (language, href) => {
+    i18nState.language = language;
+    render(<HelpLauncher />);
+    expect(screen.getByRole("link", { name: /Documentation/ })).toHaveAttribute(
+      "href",
+      href,
+    );
+  });
+
+  // AppSidebar is shared: apps/desktop renders the same component tree. Without
+  // this gate the desktop app would offer to download the desktop app.
+  it("hides the download entry inside the desktop shell", () => {
+    vi.mocked(isDesktopShell).mockReturnValue(true);
+    render(<HelpLauncher />);
+    expect(screen.queryByText("Desktop app")).not.toBeInTheDocument();
+    // The rest of the menu is unaffected by the gate.
+    expect(screen.getByText("Documentation")).toBeInTheDocument();
+  });
+
+  it("links to the GitHub repo and retires the star prompt on click", () => {
+    render(<HelpLauncher />);
+    const link = screen.getByRole("link", { name: /Star on GitHub/ });
+    expect(link).toHaveAttribute("href", "https://github.com/multica-ai/multica");
+    fireEvent.click(link);
+    expect(markStarPromptStarred).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the star count once it is known", () => {
+    qc.setQueryData(githubStarsOptions().queryKey, 37_612);
+    render(<HelpLauncher />);
+    expect(screen.getByRole("link", { name: /Star on GitHub/ })).toHaveTextContent("37.6k");
   });
 });

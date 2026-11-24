@@ -20,6 +20,7 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = Split-Path (Split-Path $PSCommandPath -Parent) -Parent
 $InstallerPath = Join-Path $RepoRoot "scripts/install.ps1"
+$PowerShellPath = (Get-Process -Id $PID).Path
 
 # install.ps1 resolves its default install directory from USERPROFILE at load
 # time. Provide one so these tests also run on a non-Windows agent.
@@ -49,6 +50,8 @@ function Get-InstallerDefinitions {
 # 1. install.ps1 must parse, and must no longer derive ports from .env
 # ---------------------------------------------------------------------------
 $parseErrors = $null
+# Parse the file directly: Windows PowerShell 5.1 reads BOM-less files as ANSI,
+# unlike PowerShell 7. Decoding as UTF-8 first would hide regressions like #8660.
 [System.Management.Automation.Language.Parser]::ParseFile($InstallerPath, [ref]$null, [ref]$parseErrors) | Out-Null
 if ($parseErrors) {
     $parseErrors | ForEach-Object { Write-Host "  $($_.Message) (line $($_.Extent.StartLineNumber))" }
@@ -135,7 +138,9 @@ $cases = @(
 
 $runnerScript = Join-Path ([System.IO.Path]::GetTempPath()) "multica-install-ps1-case.ps1"
 
-# Each case runs in its own pwsh process: install.ps1 uses `exit` on failure, and
+# Each case runs in its own process using the current PowerShell host, so the
+# Windows PowerShell 5.1 suite cannot silently delegate its cases to PowerShell 7.
+# install.ps1 uses `exit` on failure, and
 # a child process is also the only way to control the ambient environment
 # cleanly rather than inheriting a CI runner's PORT.
 @'
@@ -190,12 +195,37 @@ function Get-StubFrontendPort {
 }
 
 # Stand in for the external commands the installer shells out to.
+$script:StubStackUp = $false
 function docker {
     $global:LASTEXITCODE = 0
     $args_ = @($args)
     if ($args_.Count -ge 1 -and $args_[0] -eq "info") { return }
     if ($args_.Count -ge 1 -and $args_[0] -eq "compose") {
+        if ($args_ -contains "up") {
+            $script:StubStackUp = $true
+            return
+        }
+        if ($args_ -contains "config") {
+            # Opt-in, so the port matrix never probes real host ports.
+            if (-not $env:MULTICA_TEST_COMPOSE_CONFIG) {
+                $global:LASTEXITCODE = 1
+                return
+            }
+            $config = @{
+                services = @{
+                    backend  = @{ ports = @(@{ mode = "ingress"; host_ip = "127.0.0.1"; target = 8080; published = "$(Get-StubBackendPort)"; protocol = "tcp" }) }
+                    frontend = @{ ports = @(@{ mode = "ingress"; host_ip = "127.0.0.1"; target = 3000; published = "$(Get-StubFrontendPort)"; protocol = "tcp" }) }
+                }
+            }
+            return (($config | ConvertTo-Json -Depth 6) -split "`n")
+        }
         if ($args_ -contains "port") {
+            # Nothing is published until `up`, unless the case models this
+            # installation's own stack already running (an upgrade re-run).
+            if (-not $script:StubStackUp -and -not $env:MULTICA_TEST_STACK_RUNNING) {
+                $global:LASTEXITCODE = 1
+                return
+            }
             if ($args_ -contains "backend") { return "127.0.0.1:$(Get-StubBackendPort)" }
             if ($args_ -contains "frontend") { return "127.0.0.1:$(Get-StubFrontendPort)" }
             $global:LASTEXITCODE = 1
@@ -226,7 +256,11 @@ function Test-Docker { }
 Start-LocalInstall
 '@ | Set-Content -Path $runnerScript -Encoding UTF8
 
-foreach ($case in $cases) {
+# Runs install.ps1 for one case in a child process and returns its exit code,
+# rendered output and probe log. Ambient environment comes from $case.Env only.
+function Invoke-InstallerCase {
+    param([hashtable]$Case)
+
     $workDir = Join-Path ([System.IO.Path]::GetTempPath()) ("multica-ps1-" + [guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Path (Join-Path $workDir ".git") -Force | Out-Null
 
@@ -239,9 +273,9 @@ foreach ($case in $cases) {
         "JWT_SECRET=change-me-in-production"
         "POSTGRES_PASSWORD=multica"
     )
-    if ($case.Mutation) {
-        foreach ($key in $case.Mutation.Keys) {
-            $value = $case.Mutation[$key]
+    if ($Case.Mutation) {
+        foreach ($key in $Case.Mutation.Keys) {
+            $value = $Case.Mutation[$key]
             $envLines = $envLines | ForEach-Object {
                 if ($_ -match "^#?\s*$key=") { "$key=$value" } else { $_ }
             }
@@ -257,22 +291,22 @@ foreach ($case in $cases) {
     # Control the ambient environment explicitly so a CI runner's own PORT
     # cannot leak into the matrix. Absent must mean absent: an empty string is a
     # different input, and the chain treats it as "set but no value".
-    $portVars = @("PORT", "BACKEND_PORT", "API_PORT", "SERVER_PORT", "FRONTEND_PORT")
+    $caseVars = @("PORT", "BACKEND_PORT", "API_PORT", "SERVER_PORT", "FRONTEND_PORT", "MULTICA_TEST_COMPOSE_CONFIG", "MULTICA_TEST_STACK_RUNNING")
     $previous = @{}
-    foreach ($key in $portVars) {
+    foreach ($key in $caseVars) {
         $previous[$key] = [System.Environment]::GetEnvironmentVariable($key)
-        if ($case.Env.ContainsKey($key)) {
-            Set-Item -Path "Env:$key" -Value $case.Env[$key]
+        if ($Case.Env.ContainsKey($key)) {
+            Set-Item -Path "Env:$key" -Value $Case.Env[$key]
         } else {
             Remove-Item -Path "Env:$key" -ErrorAction SilentlyContinue
         }
     }
 
     try {
-        $output = & pwsh -NoProfile -File $runnerScript -InstallerPath $InstallerPath -WorkDir $workDir -ProbeLog $probeLog 2>&1
+        $output = & $PowerShellPath -NoProfile -File $runnerScript -InstallerPath $InstallerPath -WorkDir $workDir -ProbeLog $probeLog 2>&1
         $exitCode = $LASTEXITCODE
     } finally {
-        foreach ($key in $portVars) {
+        foreach ($key in $caseVars) {
             if ($null -eq $previous[$key]) {
                 Remove-Item -Path "Env:$key" -ErrorAction SilentlyContinue
             } else {
@@ -281,27 +315,86 @@ foreach ($case in $cases) {
         }
     }
 
-    $rendered = ($output | Out-String)
-    if ($exitCode -ne 0) {
+    $probes = @(Get-Content $probeLog)
+    Remove-Item $workDir -Recurse -Force -ErrorAction SilentlyContinue
+    return @{ ExitCode = $exitCode; Output = ($output | Out-String); Probes = $probes }
+}
+
+function Assert-PublishedPorts {
+    param([hashtable]$Case, [hashtable]$Result)
+
+    $rendered = $Result.Output
+    if ($Result.ExitCode -ne 0) {
         Write-Host $rendered
-        Fail-Test "[$($case.Label)] install.ps1 exited $exitCode"
+        Fail-Test "[$($Case.Label)] install.ps1 exited $($Result.ExitCode)"
     }
 
-    $probed = (Get-Content $probeLog | Select-Object -First 1)
+    $probed = ($Result.Probes | Select-Object -First 1)
     $probedPort = if ($probed -match "localhost:(\d+)/health") { $Matches[1] } else { $null }
     $printedBackend = if ($rendered -match "Backend:\s+http://localhost:(\d+)") { $Matches[1] } else { $null }
     $printedFrontend = if ($rendered -match "Frontend:\s+http://localhost:(\d+)") { $Matches[1] } else { $null }
 
-    if ($probedPort -ne $case.Backend -or $printedBackend -ne $case.Backend -or $printedFrontend -ne $case.Frontend) {
+    if ($probedPort -ne $Case.Backend -or $printedBackend -ne $Case.Backend -or $printedFrontend -ne $Case.Frontend) {
         Write-Host $rendered
-        Write-Host "  compose published:   backend=$($case.Backend) frontend=$($case.Frontend)"
+        Write-Host "  compose published:   backend=$($Case.Backend) frontend=$($Case.Frontend)"
         Write-Host "  health check probed: $probedPort"
         Write-Host "  printed:             backend=$printedBackend frontend=$printedFrontend"
-        Fail-Test "[$($case.Label)] installer ports disagree with the port Compose published"
+        Fail-Test "[$($Case.Label)] installer ports disagree with the port Compose published"
+    }
+}
+
+foreach ($case in $cases) {
+    Assert-PublishedPorts -Case $case -Result (Invoke-InstallerCase -Case $case)
+}
+
+# ---------------------------------------------------------------------------
+# 4. A host port that is already taken stops the installer before anything is
+#    pulled or started, with a fix the user can act on (#883). The port comes
+#    from Compose's own resolution, so an ambient override is what gets checked.
+# ---------------------------------------------------------------------------
+$listener = New-Object System.Net.Sockets.TcpListener ([System.Net.IPAddress]::Loopback, 0)
+$listener.Start()
+try {
+    $held = "$($listener.LocalEndpoint.Port)"
+
+    $occupiedCases = @(
+        @{ Label = "env-file PORT"; Env = @{ MULTICA_TEST_COMPOSE_CONFIG = "1" }; Mutation = @{ PORT = $held }; Setting = "PORT=<free port>" }
+        @{ Label = "ambient PORT beats .env"; Env = @{ MULTICA_TEST_COMPOSE_CONFIG = "1"; PORT = $held }; Mutation = $null; Setting = "PORT=<free port>" }
+        @{ Label = "env-file BACKEND_PORT"; Env = @{ MULTICA_TEST_COMPOSE_CONFIG = "1" }; Mutation = @{ BACKEND_PORT = $held }; Setting = "PORT=<free port>" }
+        @{ Label = "env-file FRONTEND_PORT"; Env = @{ MULTICA_TEST_COMPOSE_CONFIG = "1" }; Mutation = @{ FRONTEND_PORT = $held }; Setting = "FRONTEND_PORT=<free port>" }
+    )
+    foreach ($case in $occupiedCases) {
+        $result = Invoke-InstallerCase -Case $case
+        if ($result.ExitCode -eq 0) {
+            Write-Host $result.Output
+            Fail-Test "[$($case.Label)] installer must not continue when port $held is already in use"
+        }
+        if ($result.Output -notmatch [regex]::Escape("Port $held is already in use") -or
+            $result.Output -notmatch [regex]::Escape($case.Setting)) {
+            Write-Host $result.Output
+            Fail-Test "[$($case.Label)] expected an actionable occupied-port error naming $held and $($case.Setting)"
+        }
+        if ($result.Probes.Count -gt 0 -or $result.Output -match "Starting Multica services") {
+            Write-Host $result.Output
+            Fail-Test "[$($case.Label)] installer started the stack despite the occupied port"
+        }
     }
 
-    Remove-Item $workDir -Recurse -Force -ErrorAction SilentlyContinue
+    # Re-running over this installation's own running stack: the port is busy
+    # only because Compose already publishes it for us, which is not a conflict.
+    $ownStack = @{ Label = "own running stack"; Env = @{ MULTICA_TEST_COMPOSE_CONFIG = "1"; MULTICA_TEST_STACK_RUNNING = "1" }; Mutation = @{ PORT = $held }; Backend = $held; Frontend = "3000" }
+    Assert-PublishedPorts -Case $ownStack -Result (Invoke-InstallerCase -Case $ownStack)
+} finally {
+    $listener.Stop()
 }
+
+# A free port goes straight through the preflight.
+$probe = New-Object System.Net.Sockets.TcpListener ([System.Net.IPAddress]::Loopback, 0)
+$probe.Start()
+$free = "$($probe.LocalEndpoint.Port)"
+$probe.Stop()
+$freeCase = @{ Label = "free port"; Env = @{ MULTICA_TEST_COMPOSE_CONFIG = "1" }; Mutation = @{ PORT = $free }; Backend = $free; Frontend = "3000" }
+Assert-PublishedPorts -Case $freeCase -Result (Invoke-InstallerCase -Case $freeCase)
 
 Remove-Item $runnerScript -Force -ErrorAction SilentlyContinue
 Write-Host "install.ps1 tests passed" -ForegroundColor Green

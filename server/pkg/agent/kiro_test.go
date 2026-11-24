@@ -11,17 +11,6 @@ import (
 	"time"
 )
 
-func TestNewReturnsKiroBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("kiro", Config{ExecutablePath: "/nonexistent/kiro-cli"})
-	if err != nil {
-		t.Fatalf("New(kiro) error: %v", err)
-	}
-	if _, ok := b.(*kiroBackend); !ok {
-		t.Fatalf("expected *kiroBackend, got %T", b)
-	}
-}
-
 func TestKiroToolNameFromTitle(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -106,7 +95,7 @@ while IFS= read -r line; do
       esac
       printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"ToolCallUpdate","toolCallId":"tc-current","status":"completed","name":"Shell","parameters":{"command":"echo current"},"output":"current tool output\\n"}}}\n'
       printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"loaded"}}}}\n'
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":2,"outputTokens":1,"cacheReadTokens":7,"cacheWriteTokens":3}}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":2,"outputTokens":1,"cacheReadTokens":7,"cacheWriteTokens":3,"costUsdTicks":900}}}\n' "$id"
       if [ -n "$KIRO_LATE_CHUNK" ]; then
         sleep 0.05
         printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"AgentMessageChunk","content":{"type":"text","text":" tail"}}}}\n'
@@ -158,8 +147,13 @@ func TestKiroBackendSetModelFailureFailsTask(t *testing.T) {
 		if !strings.Contains(result.Error, "model not available") {
 			t.Errorf("expected error to surface upstream message, got %q", result.Error)
 		}
-		if result.SessionID != "ses_new" {
-			t.Errorf("expected session id to be preserved on failure, got %q", result.SessionID)
+		// A fresh session that never reached session/prompt must NOT be
+		// published as a resume pointer: the runtime may never have persisted
+		// it, and a pointer to a session that does not exist wedges the whole
+		// conversation forever (GH #8116). There is no transcript behind an id
+		// that never ran a prompt, so nothing is lost by withholding it.
+		if result.SessionID != "" {
+			t.Errorf("expected the never-prompted session id to be withheld, got %q", result.SessionID)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
@@ -202,8 +196,8 @@ func TestKiroBackendAttributesUsageToCurrentModel(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected usage under current model auto, got %+v", result.Usage)
 	}
-	if usage.InputTokens != 2 || usage.OutputTokens != 1 || usage.CacheReadTokens != 7 || usage.CacheWriteTokens != 3 {
-		t.Fatalf("usage = %+v, want input=2 output=1 cache_read=7 cache_write=3", usage)
+	if usage != (TokenUsage{InputTokens: 2, OutputTokens: 1, CacheReadTokens: 7, CacheWriteTokens: 3, CostUSDTicks: 900}) {
+		t.Fatalf("usage = %+v, want all prompt-result fields", usage)
 	}
 }
 
@@ -403,9 +397,32 @@ func TestKiroIssueCommentAddCommand(t *testing.T) {
 		{`sh -c "multica issue comment add issue-1 --content-file ./reply.md"`, true},
 		{`bash -c 'multica issue comment add issue-1'`, true},
 		{`/bin/sh -c "multica issue comment add issue-1"`, true},
+		{`"$MULTICA_CLI_PATH" issue comment add issue-1 --content-file ./reply.md`, true},
+		{`"$MULTICA_CLI_PATH" issue comment add issue-1 --content-file ./reply.md --output table && rm ./reply.md`, true},
+		{`${MULTICA_CLI_PATH} issue comment add issue-1`, true},
+		{`"${MULTICA_CLI_PATH}" issue comment add issue-1`, true},
+		{`'/Applications/Multica App/bin/multica' issue comment add issue-1`, true},
+		{`"/Applications/Multica App/bin/multica" issue comment add issue-1`, true},
+		{`MULTICA_TOKEN=x "$MULTICA_CLI_PATH" issue comment add issue-1`, true},
+		{`sh -c '"$MULTICA_CLI_PATH" issue comment add issue-1'`, true},
+		{`bash -c '"/Applications/Multica App/bin/multica" issue comment add issue-1'`, true},
+		{`& "$env:MULTICA_CLI_PATH" issue comment add issue-1 --content-file ./reply.md`, true},
+		{`& $env:MULTICA_CLI_PATH issue comment add issue-1`, true},
+		{`& "${env:MULTICA_CLI_PATH}" issue comment add issue-1`, true},
+		{`& "C:\Program Files\Multica\multica.exe" issue comment add issue-1`, true},
+		{`& 'C:\Program Files\Multica\multica.exe' issue comment add issue-1`, true},
 		{"multica issue get issue-1", false},
 		{"echo multica issue comment add issue-1", false},
 		{`sh -c "echo multica issue comment add issue-1"`, false},
+		{`echo "$MULTICA_CLI_PATH" issue comment add issue-1`, false},
+		{`echo done; "$MULTICA_CLI_PATH" issue comment add issue-1`, false},
+		{`sh -c 'echo "$MULTICA_CLI_PATH" issue comment add issue-1'`, false},
+		{`& echo "$env:MULTICA_CLI_PATH" issue comment add issue-1`, false},
+		{`"$MULTICA_CLI_PATH" issue get issue-1`, false},
+		{`"$OTHER_CLI_PATH" issue comment add issue-1`, false},
+		{`& "$env:OTHER_CLI_PATH" issue comment add issue-1`, false},
+		{`"/Applications/Multica App/bin/not-multica" issue comment add issue-1`, false},
+		{`"$MULTICA_CLI_PATH issue comment add issue-1`, false},
 		{"FOO=bar", false},
 		{"", false},
 	}
@@ -500,10 +517,7 @@ const closeErrorFrame = `printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603
 // close handshake. `toolName` picks a title that does NOT normalize to
 // "terminal"; `command` selects goal_complete (empty) vs comment-add.
 func fakeKiroACPRunningToolCloseErrorScript(toolName, command string) string {
-	params := `{}`
-	if command != "" {
-		params = `{"command":"` + command + `"}`
-	}
+	params, _ := json.Marshal(map[string]string{"command": command})
 	return `#!/bin/sh
 while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
@@ -515,7 +529,7 @@ while IFS= read -r line; do
       printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_running"}}\n' "$id"
       ;;
     *'"method":"session/prompt"'*)
-      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_running","update":{"type":"ToolCall","toolCallId":"tc-running","name":"` + toolName + `","status":"pending","parameters":` + params + `}}}\n'
+      printf '%s\n' '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_running","update":{"type":"ToolCall","toolCallId":"tc-running","name":"` + toolName + `","status":"pending","parameters":` + string(params) + `}}}'
       ` + closeErrorFrame + `
       exit 0
       ;;
@@ -559,10 +573,7 @@ func TestKiroBackendDoesNotCompleteRunningGoalCompleteWithoutResult(t *testing.T
 // before the -32603 close handshake. `toolName` deliberately uses a title that
 // does NOT normalize to "terminal" to prove recognition is title-independent.
 func fakeKiroACPCompletedToolCloseErrorScript(toolName, command string) string {
-	params := `{}`
-	if command != "" {
-		params = `{"command":"` + command + `"}`
-	}
+	params, _ := json.Marshal(map[string]string{"command": command})
 	return `#!/bin/sh
 while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
@@ -574,7 +585,7 @@ while IFS= read -r line; do
       printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_completed"}}\n' "$id"
       ;;
     *'"method":"session/prompt"'*)
-      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_completed","update":{"type":"ToolCall","toolCallId":"tc-done","name":"` + toolName + `","status":"pending","parameters":` + params + `}}}\n'
+      printf '%s\n' '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_completed","update":{"type":"ToolCall","toolCallId":"tc-done","name":"` + toolName + `","status":"pending","parameters":` + string(params) + `}}}'
       printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_completed","update":{"type":"ToolCallUpdate","toolCallId":"tc-done","status":"completed","name":"` + toolName + `","output":"ok"}}}\n'
       ` + closeErrorFrame + `
       exit 0
@@ -600,6 +611,33 @@ func TestKiroBackendTreatsCompletedCommentAddWithNonTerminalTitleAsCompleted(t *
 	}
 	if result.Error != "" {
 		t.Fatalf("expected close-handshake error to be suppressed, got %q", result.Error)
+	}
+}
+
+func TestKiroBackendPreservesPinnedCLICommentResult(t *testing.T) {
+	t.Parallel()
+	const command = `"$MULTICA_CLI_PATH" issue comment add issue-1 --content-file ./reply.md`
+	completed := fakeKiroACPCompletedToolCloseErrorScript("execute_bash", command)
+	for _, tc := range []struct {
+		name, script, wantStatus string
+	}{
+		{"completed comment", completed, "completed"},
+		{"failed comment", strings.Replace(completed, `"status":"completed"`, `"status":"failed"`, 1), "failed"},
+		{"comment without result", fakeKiroACPRunningToolCloseErrorScript("execute_bash", command), "failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			result := runKiroCloseErrorScript(t, tc.script)
+			if result.Status != tc.wantStatus {
+				t.Fatalf("status = %q, want %q (error=%q)", result.Status, tc.wantStatus, result.Error)
+			}
+			if tc.wantStatus == "completed" && result.Error != "" {
+				t.Fatalf("completed comment retained close error: %q", result.Error)
+			}
+			if tc.wantStatus == "failed" && !strings.Contains(result.Error, "Kiro failed to generate a response") {
+				t.Fatalf("unsuccessful comment lost close error: %q", result.Error)
+			}
+		})
 	}
 }
 
@@ -1010,8 +1048,8 @@ func TestKiroBackendUsesSessionLoadForResume(t *testing.T) {
 	if result.Output != "loaded" {
 		t.Fatalf("output = %q, want loaded", result.Output)
 	}
-	if usage := result.Usage["unknown"]; usage.InputTokens != 2 || usage.OutputTokens != 1 || usage.CacheReadTokens != 7 || usage.CacheWriteTokens != 3 {
-		t.Fatalf("usage = %+v, want input=2 output=1 cache_read=7 cache_write=3", usage)
+	if usage := result.Usage["unknown"]; usage != (TokenUsage{InputTokens: 2, OutputTokens: 1, CacheReadTokens: 7, CacheWriteTokens: 3, CostUSDTicks: 900}) {
+		t.Fatalf("usage = %+v, want all prompt-result fields", usage)
 	}
 	if len(messages) != 3 {
 		t.Fatalf("messages = %+v, want current tool use, tool result, and text only", messages)

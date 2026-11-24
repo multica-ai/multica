@@ -10,8 +10,16 @@ import type { Label } from "./label";
 
 // WebSocket event types (matching Go server protocol/events.go)
 export type WSEventType =
+  | "doc:created"
+  | "doc:updated"
+  | "doc:deleted"
+  | "doc_folder:created"
+  | "doc_folder:updated"
+  | "doc_folder:deleted"
+  | "doc_comment:changed"
   | "issue:created"
   | "issue:updated"
+  | "issue_attachments:changed"
   | "issue:deleted"
   | "comment:created"
   | "comment:updated"
@@ -23,10 +31,12 @@ export type WSEventType =
   | "agent:archived"
   | "agent:restored"
   | "task:queued"
+  | "task:coalesced"
   | "task:dispatch"
   | "task:running"
   | "task:waiting_local_directory"
   | "task:progress"
+  | "task:usage"
   | "task:completed"
   | "task:failed"
   | "task:message"
@@ -36,6 +46,7 @@ export type WSEventType =
   | "inbox:unread"
   | "inbox:archived"
   | "inbox:unarchived"
+  | "inbox:deleted"
   | "inbox:batch-read"
   | "inbox:batch-archived"
   | "workspace:updated"
@@ -57,8 +68,11 @@ export type WSEventType =
   | "issue_reaction:removed"
   | "chat:message"
   | "chat:done"
+  | "chat:reply_notification"
   | "chat:quick_actions"
   | "chat:cancel_finalized"
+  | "chat:wakeup_changed"
+  | "chat:session_created"
   | "chat:session_read"
   | "chat:session_deleted"
   | "chat:session_updated"
@@ -72,10 +86,17 @@ export type WSEventType =
   | "label:updated"
   | "label:deleted"
   | "issue_labels:changed"
+  | "issue_unread:changed"
+  | "app_request:changed"
+  | "app_call:created"
   | "issue_metadata:changed"
   | "issue_properties:changed"
   | "property:created"
   | "property:updated"
+  | "issue_status:changed"
+  | "issue_workflow:changed"
+  | "issue_view:changed"
+  | "issue_view_preference:changed"
   | "pin:created"
   | "pin:deleted"
   | "pin:reordered"
@@ -87,7 +108,8 @@ export type WSEventType =
   | "github_installation:deleted"
   | "pull_request:linked"
   | "pull_request:updated"
-  | "pull_request:unlinked";
+  | "pull_request:unlinked"
+  | "environment:changed";
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;
@@ -114,6 +136,13 @@ export interface IssueUpdatedPayload {
   assignee_changed?: boolean;
   status_changed?: boolean;
   project_changed?: boolean;
+  title_changed?: boolean;
+  parent_changed?: boolean;
+  prev_parent_issue_id?: string | null;
+  // Both ends of a duplicate-mark change (MUL-7349). The mark is not on Issue,
+  // so these tell the realtime layer whose duplicate relations to refresh.
+  duplicate_of_issue_id?: string | null;
+  prev_duplicate_of_issue_id?: string | null;
 }
 
 export interface IssueDeletedPayload {
@@ -123,20 +152,63 @@ export interface IssueDeletedPayload {
 export interface IssueLabelsChangedPayload {
   issue_id: string;
   labels: Label[];
+  issue_revision?: number;
+}
+
+export interface IssueAttachmentsChangedPayload {
+  issue_id: string;
+  issue_revision?: number;
 }
 
 export interface IssueMetadataChangedPayload {
   issue_id: string;
   metadata: IssueMetadata;
+  issue_revision?: number;
 }
 
 export interface IssuePropertiesChangedPayload {
   issue_id: string;
   properties: IssuePropertyValues;
+  issue_revision?: number;
 }
 
 export interface PropertyChangedPayload {
   property: IssueProperty;
+}
+
+/**
+ * The workspace issue status catalog changed (MUL-6243).
+ *
+ * One event covers all four writes because clients answer them the same way:
+ * re-read the catalog. It deliberately carries no entry — merging a row out of
+ * an event would have to be reconciled against writes this client never saw,
+ * and the catalog is small enough that a refetch is both simpler and safer.
+ *
+ * `action` is advisory: it makes the frame self-describing in devtools. Nothing
+ * routes on it, so a future write verb this client has never heard of still
+ * refreshes the catalog correctly.
+ */
+export interface IssueStatusChangedPayload {
+  action?: "created" | "updated" | "archived" | "reordered";
+}
+
+export interface IssueWorkflowChangedPayload {
+  action?: "created" | "updated" | "deleted";
+}
+
+/**
+ * A saved view was created, edited or deleted. Clients re-read their views;
+ * the payload names the view only, so a view going private carries nothing out.
+ */
+export interface IssueViewChangedPayload {
+  view_id: string;
+  action?: "created" | "updated" | "deleted";
+}
+
+/** One of this member's own preference documents was saved, on any device. */
+export interface IssueViewPreferenceChangedPayload {
+  scope_type: string;
+  scope_id: string | null;
 }
 
 export interface AgentStatusPayload {
@@ -181,27 +253,50 @@ export interface InboxUnarchivedPayload {
   recipient_id: string;
 }
 
+/** Personal: the recipient's unread mark on an issue changed. Workspace-tagged
+ *  because personal events reach every connection the user has. */
+export interface IssueUnreadChangedPayload {
+  workspace_id: string;
+  recipient_id: string;
+  issue_id: string;
+  unread: boolean;
+}
+
 export interface InboxBatchReadPayload {
   recipient_id: string;
   count: number;
+  /** Set when the batch is one issue's notifications, read by viewing the
+   *  issue outside the inbox. Absent for "mark all as read". */
+  issue_id?: string;
 }
 
 export interface InboxBatchArchivedPayload {
   recipient_id: string;
   count: number;
+  /** Set when the batch is one issue's notifications. */
+  issue_id?: string;
+  /**
+   * Why the server archived them on its own: "issue_status_terminal" when the
+   * recipient completed the issue, "actor_acted" when they commented on it,
+   * changed its status or reassigned it. Other values may appear; absent for user-requested batches.
+   */
+  reason?: string;
 }
 
 export interface CommentCreatedPayload {
   comment: Comment;
+  issue_revision?: number;
 }
 
 export interface CommentUpdatedPayload {
   comment: Comment;
+  issue_revision?: number;
 }
 
 export interface CommentDeletedPayload {
   comment_id: string;
   issue_id: string;
+  issue_revision?: number;
 }
 
 export interface CommentResolvedPayload {
@@ -255,6 +350,8 @@ export interface ActivityCreatedPayload {
 }
 
 export interface TaskMessagePayload {
+  /** Opaque tool-call identity, scoped to one backend execution. */
+  call_id?: string;
   task_id: string;
   issue_id: string;
   chat_session_id?: string;
@@ -264,10 +361,33 @@ export interface TaskMessagePayload {
   content?: string;
   input?: Record<string, unknown>;
   output?: string;
+  /**
+   * Whether `output` is the whole tool output that ran (`tool_result` only).
+   *
+   * Tri-state on purpose. `undefined` means no daemon ever measured this
+   * record — messages stored before the flag existed, and messages from an
+   * older installed daemon — and must be presented as unknown, never as
+   * complete: the original length is gone and cannot be reconstructed.
+   * `true` means the remainder was never uploaded and no amount of expanding
+   * or scrolling recovers it, which is what separates it from a client-side
+   * display clip.
+   */
+  output_truncated?: boolean;
   created_at?: string;
 }
 
 export interface TaskQueuedPayload {
+  task_id: string;
+  agent_id: string;
+  issue_id: string;
+  chat_session_id?: string;
+  status: string;
+}
+
+// task:coalesced fires when a comment folds into a run that has not started.
+// The status is unchanged, but the run's trigger and covered comments changed,
+// which moves its block under the newest comment it answers.
+export interface TaskCoalescedPayload {
   task_id: string;
   agent_id: string;
   issue_id: string;
@@ -291,11 +411,18 @@ export interface TaskRunningPayload {
   status: string;
 }
 
+export interface TaskUsageUpdatedPayload {
+  task_id: string;
+}
+
 // task:waiting_local_directory fires when the daemon dequeues a task but
 // can't immediately acquire the on-disk path lock — another task on this
-// daemon is already executing in the same local_directory. The optional
-// `wait_reason` mirrors the server-side hint (path / holder task id), but
-// is not yet surfaced end-to-end; the UI today only reads the status.
+// daemon is already executing in the same local_directory. `wait_reason` names
+// the directory and, when known, the short id of the task holding it; the
+// StatusPill renders it so a parked task explains itself instead of just
+// spinning. It is a display name, never an absolute path — the daemon strips
+// that at the source (localDirectoryAssignment.DisplayName), because this text
+// reaches every client on the session and lands in screenshots.
 export interface TaskWaitingLocalDirectoryPayload {
   task_id: string;
   agent_id: string;
@@ -319,6 +446,8 @@ export interface TaskFailedPayload {
   issue_id: string;
   chat_session_id?: string;
   status: string;
+  failure_reason?: string;
+  retry_pending?: boolean;
 }
 
 export interface TaskCancelledPayload {
@@ -332,6 +461,7 @@ export interface TaskCancelledPayload {
 export interface ReactionAddedPayload {
   reaction: Reaction;
   issue_id: string;
+  comment_revision?: number;
 }
 
 export interface ReactionRemovedPayload {
@@ -340,11 +470,13 @@ export interface ReactionRemovedPayload {
   emoji: string;
   actor_type: string;
   actor_id: string;
+  comment_revision?: number;
 }
 
 export interface IssueReactionAddedPayload {
   reaction: IssueReaction;
   issue_id: string;
+  issue_revision?: number;
 }
 
 export interface IssueReactionRemovedPayload {
@@ -352,6 +484,7 @@ export interface IssueReactionRemovedPayload {
   emoji: string;
   actor_type: string;
   actor_id: string;
+  issue_revision?: number;
 }
 
 export interface ChatMessageEventPayload {
@@ -363,9 +496,20 @@ export interface ChatMessageEventPayload {
   created_at: string;
 }
 
+/** Owner-only system alert, also received while connected to another workspace. */
+export interface ChatReplyNotificationPayload {
+  workspace_id: string;
+  chat_session_id: string;
+  message_id: string;
+  title: string;
+  body: string;
+}
+
 export interface ChatDonePayload {
   chat_session_id: string;
   task_id: string;
+  /** Optional OS-alert context for completed direct-chat replies. */
+  notification?: { workspace_id: string; title: string };
   /**
    * Server populates these from the freshly-persisted assistant ChatMessage
    * row so the WS handler can write it into the messages cache inline. Older
@@ -425,6 +569,17 @@ export interface ChatQuickActionsPayload {
  * draft-restores endpoint. All fields beyond the discriminator are optional —
  * treat defensively and fall back to a refetch.
  */
+/**
+ * A chat wakeup was created, changed, ended, or started a turn (`task_id`).
+ * Delivered only to the conversation's owner.
+ */
+export interface ChatWakeupChangedPayload {
+  chat_session_id: string;
+  wakeup_id: string;
+  status: string;
+  task_id?: string;
+}
+
 export interface ChatCancelFinalizedPayload {
   outcome: "stopped" | "restored";
   chat_session_id: string;
@@ -484,6 +639,20 @@ export interface InvitationRevokedPayload {
   invitee_email: string;
 }
 
+export interface ChatSessionCreatedPayload {
+  workspace_id: string;
+  chat_session_id: string;
+  agent_id: string;
+  creator_id: string;
+  title: string;
+  channel_source: {
+    channel_type: string;
+    installation_id: string;
+    route_revision: number;
+  };
+  is_current_channel_route: boolean;
+}
+
 /**
  * Maps every WSEventType to its payload interface. Events whose payload
  * shape isn't formally typed (server emits an object the client doesn't
@@ -501,10 +670,16 @@ export interface WSEventPayloadMap {
   "issue:created": IssueCreatedPayload;
   "issue:updated": IssueUpdatedPayload;
   "issue:deleted": IssueDeletedPayload;
+  "issue_attachments:changed": IssueAttachmentsChangedPayload;
   "issue_labels:changed": IssueLabelsChangedPayload;
+  "issue_unread:changed": IssueUnreadChangedPayload;
   "issue_properties:changed": IssuePropertiesChangedPayload;
   "property:created": PropertyChangedPayload;
   "property:updated": PropertyChangedPayload;
+  "issue_status:changed": IssueStatusChangedPayload;
+  "issue_workflow:changed": IssueWorkflowChangedPayload;
+  "issue_view:changed": IssueViewChangedPayload;
+  "issue_view_preference:changed": IssueViewPreferenceChangedPayload;
   "issue_reaction:added": IssueReactionAddedPayload;
   "issue_reaction:removed": IssueReactionRemovedPayload;
   "comment:created": CommentCreatedPayload;
@@ -519,6 +694,7 @@ export interface WSEventPayloadMap {
   "agent:archived": AgentArchivedPayload;
   "agent:restored": AgentRestoredPayload;
   "task:queued": TaskQueuedPayload;
+  "task:coalesced": TaskCoalescedPayload;
   "task:dispatch": TaskDispatchPayload;
   "task:running": TaskRunningPayload;
   "task:waiting_local_directory": TaskWaitingLocalDirectoryPayload;
@@ -527,11 +703,13 @@ export interface WSEventPayloadMap {
   "task:message": TaskMessagePayload;
   "task:cancelled": TaskCancelledPayload;
   "task:progress": unknown;
+  "task:usage": TaskUsageUpdatedPayload;
   "inbox:new": InboxNewPayload;
   "inbox:read": InboxReadPayload;
   "inbox:unread": InboxUnreadPayload;
   "inbox:archived": InboxArchivedPayload;
   "inbox:unarchived": InboxUnarchivedPayload;
+  "inbox:deleted": { item_id: string; recipient_id: string; count: number };
   "inbox:batch-read": InboxBatchReadPayload;
   "inbox:batch-archived": InboxBatchArchivedPayload;
   "workspace:updated": WorkspaceUpdatedPayload;
@@ -544,8 +722,11 @@ export interface WSEventPayloadMap {
   "activity:created": ActivityCreatedPayload;
   "chat:message": ChatMessageEventPayload;
   "chat:done": ChatDonePayload;
+  "chat:reply_notification": ChatReplyNotificationPayload;
   "chat:quick_actions": ChatQuickActionsPayload;
   "chat:cancel_finalized": ChatCancelFinalizedPayload;
+  "chat:wakeup_changed": ChatWakeupChangedPayload;
+  "chat:session_created": ChatSessionCreatedPayload;
   "chat:session_read": ChatSessionReadPayload;
   "chat:session_deleted": ChatSessionDeletedPayload;
   "chat:session_updated": unknown;
@@ -577,6 +758,7 @@ export interface WSEventPayloadMap {
   "pull_request:linked": unknown;
   "pull_request:updated": unknown;
   "pull_request:unlinked": unknown;
+  "environment:changed": { issue_id: string };
 }
 
 /**

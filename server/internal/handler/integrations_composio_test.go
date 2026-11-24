@@ -109,7 +109,16 @@ func (s *composioFakeStore) UpsertUserComposioConnection(_ context.Context, arg 
 	s.rows = append(s.rows, row)
 	return row, nil
 }
-func (s *composioFakeStore) ListActiveUserComposioConnections(_ context.Context, userID pgtype.UUID) ([]db.UserComposioConnection, error) {
+func (s *composioFakeStore) ListActiveUserComposioConnections(_ context.Context, arg db.ListActiveUserComposioConnectionsParams) ([]db.UserComposioConnection, error) {
+	out := []db.UserComposioConnection{}
+	for _, r := range s.rows {
+		if r.UserID.Bytes == arg.UserID.Bytes && r.Status == "active" && (!r.WorkspaceID.Valid || r.WorkspaceID.Bytes == arg.WorkspaceID.Bytes) {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+func (s *composioFakeStore) ListAllActiveUserComposioConnections(_ context.Context, userID pgtype.UUID) ([]db.UserComposioConnection, error) {
 	out := []db.UserComposioConnection{}
 	for _, r := range s.rows {
 		if r.UserID.Bytes == userID.Bytes && r.Status == "active" {
@@ -163,27 +172,31 @@ func composioReq(method, target, body string) *http.Request {
 
 // --- tests ---
 
-func TestComposio_ServiceUnavailableWhenNil(t *testing.T) {
+func TestComposio_ForbiddenWhenNil(t *testing.T) {
 	h := &Handler{}
 	for _, hf := range []http.HandlerFunc{
 		h.ComposioConnectInit, h.ComposioCallback, h.ListComposioConnections, h.DeleteComposioConnection,
 	} {
 		w := httptest.NewRecorder()
 		hf(w, composioReq(http.MethodGet, "/", ""))
-		if w.Code != http.StatusServiceUnavailable {
-			t.Errorf("expected 503 when Composio nil, got %d", w.Code)
+		if w.Code != http.StatusForbidden {
+			t.Errorf("expected 403 when Composio nil, got %d", w.Code)
 		}
 	}
 }
 
-func TestComposio_ServiceUnavailableWhenFlagDisabled(t *testing.T) {
+func TestComposio_ForbiddenWhenFlagDisabled(t *testing.T) {
 	h := newComposioTestHandler(t, &composioFakeSDK{}, &composioFakeStore{})
 	withComposioMCPAppsFlag(t, h, false)
 
 	w := httptest.NewRecorder()
 	h.ListComposioToolkits(w, composioReq(http.MethodGet, "/toolkits", ""))
-	if w.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected 503 when feature flag disabled, got %d", w.Code)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 when feature flag disabled, got %d", w.Code)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || body["code"] != "composio_not_configured" {
+		t.Fatalf("unexpected disabled response: body=%v err=%v", body, err)
 	}
 }
 

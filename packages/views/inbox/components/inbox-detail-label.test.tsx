@@ -2,23 +2,50 @@ import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { InboxItem } from "@multica/core/types";
 import en from "../../locales/en/inbox.json";
+import zhHansIssues from "../../locales/zh-Hans/issues.json";
 import { InboxDetailLabel } from "./inbox-detail-label";
 
-vi.mock("../../issues/components", () => ({
-  StatusIcon: () => null,
-  PriorityIcon: () => null,
-}));
+vi.mock("../../issues/components/status-icon", () => ({ StatusIcon: () => null }));
+vi.mock("../../issues/components/priority-icon", () => ({ PriorityIcon: () => null }));
 vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({ getActorName: () => "Someone" }),
+}));
+vi.mock("@multica/core/issue-statuses/hooks", () => ({
+  // Leaf render test: stub the catalog the same way the other data hooks are
+  // stubbed, so the component can be mounted without a QueryClientProvider.
+  useIssueStatuses: () => ({
+    statuses: [],
+    activeStatuses: [],
+    categoryOf: (key: string) => key,
+    iconOf: () => null,
+    colorOf: () => null,
+    labelOf: (key: string) => key,
+    entryOf: (key: string) =>
+      key === "in_progress" ? { key, name: "In Progress" } : undefined,
+    inCategory: () => [],
+    isLoaded: true,
+  }),
+}));
+// Scope note: stubbing the resolver keeps this suite about the ONE thing this
+// component owns — which resolver it asks. The catalog stub above still hands
+// back the English seed name for `in_progress`, so a component that went back
+// to reading `entryOf(...).name` renders "In Progress" and fails here. What
+// the real `useStatusLabel` does with a key (built-in through i18n, custom
+// through the catalog) is its own contract, covered by `run-confirm.test.tsx`
+// and `issues/utils/status-options.test.tsx`.
+vi.mock("../../issues/utils/status-label", () => ({
+  useStatusLabel: () => (key: string) =>
+    key === "in_progress" ? "进行中" : key,
 }));
 
 // Resolve accessors against the REAL en locale rather than a stub, so this
 // test fails if the unconfirmed case is ever re-pointed at a label that
 // carries failure wording.
 vi.mock("../../i18n", () => ({
-  useT: () => ({
+  useLocale: () => "zh-Hans",
+  useT: (namespace: string) => ({
     t: (accessor: (dict: unknown) => string, params?: Record<string, string>) => {
-      const template = accessor(en);
+      const template = accessor(namespace === "issues" ? zhHansIssues : en);
       if (!params) return template;
       return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => params[key] ?? "");
     },
@@ -83,5 +110,57 @@ describe("InboxDetailLabel quick-create outcomes", () => {
 
     expect(container.textContent).toBe(en.types.quick_create_unconfirmed);
     expect(container.textContent).not.toMatch(/failed/i);
+  });
+});
+
+describe("InboxDetailLabel localized values", () => {
+  it("uses the localized built-in status instead of the English catalog seed", () => {
+    const { container } = render(
+      <InboxDetailLabel
+        item={item({ type: "status_changed", details: { to: "in_progress" } })}
+      />,
+    );
+
+    expect(container.textContent).toContain("进行中");
+    expect(container.textContent).not.toContain("In Progress");
+  });
+
+  it("uses the translated priority label", () => {
+    const { container } = render(
+      <InboxDetailLabel
+        item={item({ type: "priority_changed", details: { to: "high" } })}
+      />,
+    );
+
+    expect(container.textContent).toContain("高");
+    expect(container.textContent).not.toContain("High");
+  });
+
+  it("formats calendar dates with the selected UI locale", () => {
+    const { container } = render(
+      <InboxDetailLabel
+        item={item({ type: "due_date_changed", details: { to: "2026-08-21" } })}
+      />,
+    );
+
+    expect(container.textContent).toContain("8月21日");
+    expect(container.textContent).not.toContain("Aug");
+  });
+});
+
+describe("InboxDetailLabel in a truncated row", () => {
+  // MUL-9407: an inline-flex wrapper is one atomic box. In a one-line row with
+  // text-overflow: ellipsis the browser hides the whole box once it does not
+  // fit, so the row read "Fy …". The label must stay plain inline text that
+  // truncates character by character.
+  it.each([
+    ["status_changed", "in_progress"],
+    ["priority_changed", "high"],
+  ] as const)("renders %s as plain inline text with spaced words", (type, to) => {
+    const { container } = render(<InboxDetailLabel item={item({ type, details: { to } })} />);
+    const label = container.firstElementChild as HTMLElement;
+
+    expect(label.className).not.toMatch(/\b(inline-)?flex\b/);
+    expect(label.textContent).toMatch(/\S\s+\S/);
   });
 });

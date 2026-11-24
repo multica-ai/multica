@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -30,6 +31,7 @@ func TestBuildAntigravityArgsBasic(t *testing.T) {
 	want := []string{
 		"-p", "hello",
 		"--dangerously-skip-permissions",
+		"--output-format", "stream-json",
 		"--print-timeout", "20m0s",
 		"--log-file", "/tmp/agy.log",
 		"--add-dir", "/work",
@@ -56,6 +58,7 @@ func TestBuildAntigravityArgsModel(t *testing.T) {
 	want := []string{
 		"-p", "hello",
 		"--dangerously-skip-permissions",
+		"--output-format", "stream-json",
 		"--model", "Claude Opus 4.6 (Thinking)",
 		"--print-timeout", "20m0s",
 		"--log-file", "/tmp/agy.log",
@@ -91,6 +94,7 @@ func TestBuildAntigravityArgsNoCapUsesLargePrintTimeout(t *testing.T) {
 	want := []string{
 		"-p", "hello",
 		"--dangerously-skip-permissions",
+		"--output-format", "stream-json",
 		"--print-timeout", antigravityFormatTimeout(antigravityNoCapPrintTimeout),
 		"--log-file", "/tmp/agy.log",
 		"--add-dir", "/work",
@@ -229,6 +233,7 @@ func TestBuildAntigravityArgsFiltersBlockedCustomArgs(t *testing.T) {
 				"-c",
 				"--conversation", "bad-id",
 				"--model", "sneaky-model", // managed via ExecOptions.Model
+				"--output-format", "text",
 				"--dangerously-skip-permissions",
 				"--print-timeout", "1h",
 				"--log-file", "/elsewhere.log",
@@ -262,6 +267,9 @@ func TestBuildAntigravityArgsFiltersBlockedCustomArgs(t *testing.T) {
 	}
 	if strings.Contains(joined, "sneaky-model") {
 		t.Errorf("custom --model value leaked through filter: %v", args)
+	}
+	if strings.Contains(joined, "--output-format text") {
+		t.Errorf("custom --output-format value leaked through filter: %v", args)
 	}
 	if strings.Contains(joined, "/elsewhere.log") {
 		t.Errorf("custom --log-file value leaked through filter: %v", args)
@@ -709,5 +717,831 @@ func TestAntigravityBackendRecoversEmptyStdoutFromTranscript(t *testing.T) {
 	}
 	if !recoveredMessage {
 		t.Fatalf("expected recovered transcript reply to be emitted as MessageText, got %#v", messages)
+	}
+}
+
+// fakeAgyMarkdownReplyScript streams a blank-line-separated markdown reply to
+// stdout — a heading and a list, exactly the shape that renders as literal
+// `###`/`-` in chat when the streamed text loses its newlines (#6149).
+func fakeAgyMarkdownReplyScript() string {
+	return `#!/bin/sh
+cat <<'AGYREPLY'
+Intro line.
+
+### Heading
+
+- item one
+- item two
+AGYREPLY
+exit 0
+`
+}
+
+// TestAntigravityBackendStreamPreservesNewlines is the regression guard for
+// #6149: the daemon concatenates streamed MessageText with no separator
+// (pendingText.WriteString), so the adapter must emit the line breaks itself.
+// Before the fix each line was streamed without its "\n", so the reconstructed
+// task_message text glued every block onto one line and block markdown
+// (headings, lists) rendered as literal text.
+func TestAntigravityBackendStreamPreservesNewlines(t *testing.T) {
+	t.Parallel()
+
+	const wantReply = "Intro line.\n\n### Heading\n\n- item one\n- item two"
+
+	fakePath := filepath.Join(t.TempDir(), "agy")
+	writeTestExecutable(t, fakePath, []byte(fakeAgyMarkdownReplyScript()))
+
+	backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
+	if err != nil {
+		t.Fatalf("new antigravity backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	// Reconstruct the persisted text the way the daemon does: concatenate every
+	// streamed MessageText with no separator.
+	var streamed strings.Builder
+	for msg := range session.Messages {
+		if msg.Type == MessageText {
+			streamed.WriteString(msg.Content)
+		}
+	}
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "completed" {
+			t.Fatalf("expected status=completed, got %q (error=%q)", result.Status, result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	if got := streamed.String(); got != wantReply {
+		t.Fatalf("streamed task_message text lost its line breaks (#6149):\n got  %q\n want %q", got, wantReply)
+	}
+}
+
+func fakeAgyStreamJSONScript() string {
+	return `#!/bin/sh
+log=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --log-file) log="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+[ -z "$log" ] || printf '%s\n' 'I0903 12:00:00.000000 1 model_config_manager.go:311] Propagating selected model override to backend: label="Gemini 3.8 Flash (High)"' >> "$log"
+cat <<'JSONL'
+{"event":"init","conversation_id":"07a6d8f2-8523-46fc-8fc9-87e630cbe295","init":{}}
+{"event":"step_update","step_update":{"conversation_id":"07a6d8f2-8523-46fc-8fc9-87e630cbe295","step_index":2,"state":"ACTIVE","step_type":"agent_response","text_delta":"Hello"}}
+{"event":"step_update","step_update":{"conversation_id":"07a6d8f2-8523-46fc-8fc9-87e630cbe295","step_index":2,"state":"DONE","step_type":"agent_response","text_delta":"\n","usage":{"input_tokens":1000,"output_tokens":50,"thinking_tokens":30,"cache_read_tokens":400,"cache_write_tokens":0,"total_tokens":1050}}}
+{"event":"step_update","step_update":{"conversation_id":"07a6d8f2-8523-46fc-8fc9-87e630cbe295","step_index":3,"state":"DONE","step_type":"checkpoint","usage":{"input_tokens":100,"output_tokens":4,"thinking_tokens":0,"cache_read_tokens":0,"cache_write_tokens":0,"total_tokens":104}}}
+{"event":"result","result":{"conversation_id":"07a6d8f2-8523-46fc-8fc9-87e630cbe295","status":"SUCCESS","response":"Hello\n","usage":{"input_tokens":5000,"output_tokens":200,"thinking_tokens":120,"cache_read_tokens":1200,"cache_write_tokens":0,"total_tokens":5200}}}
+JSONL
+exit 0
+`
+}
+
+func fakeAgyFailedStreamJSONScript() string {
+	return `#!/bin/sh
+printf '%s\n' '{"event":"result","result":{"conversation_id":"17a6d8f2-8523-46fc-8fc9-87e630cbe295","status":"ERROR","error":"provider failed","usage":{"input_tokens":12,"output_tokens":3,"thinking_tokens":2,"cache_read_tokens":7,"cache_write_tokens":2,"total_tokens":15}}}'
+exit 1
+`
+}
+
+func fakeAgyTrailingNetworkErrorScript(responseDone bool) string {
+	state := "ACTIVE"
+	if responseDone {
+		state = "DONE"
+	}
+	return fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' '{"event":"step_update","step_update":{"conversation_id":"37a6d8f2-8523-46fc-8fc9-87e630cbe295","step_index":2,"state":"%s","step_type":"agent_response","text_delta":"Complete answer."}}'
+printf '%%s\n' '{"event":"result","result":{"conversation_id":"37a6d8f2-8523-46fc-8fc9-87e630cbe295","status":"ERROR","response":"Complete answer.","error":"There was a network issue connecting to the server, please try again."}}'
+exit 1
+`, state)
+}
+
+// fakeAgyTrailingNetworkErrorWithStaleActiveStepScript reproduces the real
+// agy 1.1.27 sequence from 2026-09-07: a background command reports ACTIVE,
+// is later cancelled through a separate manage_task step (so the original
+// step never receives DONE), and the agent still emits a complete DONE reply
+// before the exact trailing network error.
+func fakeAgyTrailingNetworkErrorWithStaleActiveStepScript() string {
+	return `#!/bin/sh
+printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"47a6d8f2-8523-46fc-8fc9-87e630cbe295","step_index":1,"state":"ACTIVE","step_type":"tool"}}'
+printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"47a6d8f2-8523-46fc-8fc9-87e630cbe295","step_index":2,"state":"DONE","step_type":"tool"}}'
+printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"47a6d8f2-8523-46fc-8fc9-87e630cbe295","step_index":3,"state":"DONE","step_type":"agent_response","text_delta":"Complete answer after cancelling the background task."}}'
+printf '%s\n' '{"event":"result","result":{"conversation_id":"47a6d8f2-8523-46fc-8fc9-87e630cbe295","status":"ERROR","response":"Complete answer after cancelling the background task.","error":"There was a network issue connecting to the server, please try again."}}'
+exit 1
+`
+}
+
+// fakeAgyTrailingTransportErrorScript reproduces the real agy 1.2.13/1.2.14
+// sequence observed on 2026-09-30: the agent emits a complete DONE reply, agy
+// then makes one more streamGenerateContent call whose round trip never
+// produces a response, and reports the exhausted retries as
+// `API error (attempt N): request failed: Post "...": EOF`. This is the same
+// shape as the trailing network error above — a finished answer followed by a
+// transport failure — spelled differently, so it must be preserved too.
+func fakeAgyTrailingTransportErrorScript() string {
+	return `#!/bin/sh
+printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"67a6d8f2-8523-46fc-8fc9-87e630cbe295","step_index":1,"state":"DONE","step_type":"agent_response","text_delta":"Complete answer before the transport failure."}}'
+printf '%s\n' '{"event":"result","result":{"conversation_id":"67a6d8f2-8523-46fc-8fc9-87e630cbe295","status":"ERROR","response":"Complete answer before the transport failure.","error":"API error (attempt 3): request failed: Post \"https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse\": EOF"}}'
+exit 1
+`
+}
+
+// fakeAgyTrailingNonTransportErrorScript is the negative control for the above:
+// the answer is complete and DONE, but the trailing failure is a provider-side
+// quota/capacity error rather than a transport one. That is a real failure the
+// user must see, so it must stay failed.
+func fakeAgyTrailingNonTransportErrorScript() string {
+	return `#!/bin/sh
+printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"77a6d8f2-8523-46fc-8fc9-87e630cbe295","step_index":1,"state":"DONE","step_type":"agent_response","text_delta":"Answer produced before quota ran out."}}'
+printf '%s\n' '{"event":"result","result":{"conversation_id":"77a6d8f2-8523-46fc-8fc9-87e630cbe295","status":"ERROR","response":"Answer produced before quota ran out.","error":"API error (attempt 3): model capacity exhausted, retry later"}}'
+exit 1
+`
+}
+
+// fakeAgyTrailingNetworkErrorAfterNewPartialResponseScript guards against a
+// completed earlier answer making a later, interrupted answer look complete.
+func fakeAgyTrailingNetworkErrorAfterNewPartialResponseScript() string {
+	return `#!/bin/sh
+printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"57a6d8f2-8523-46fc-8fc9-87e630cbe295","step_index":2,"state":"DONE","step_type":"agent_response","text_delta":"Earlier answer."}}'
+printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"57a6d8f2-8523-46fc-8fc9-87e630cbe295","step_index":3,"state":"DONE","step_type":"tool"}}'
+printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"57a6d8f2-8523-46fc-8fc9-87e630cbe295","step_index":4,"state":"ACTIVE","step_type":"agent_response","text_delta":"Partial final answer."}}'
+printf '%s\n' '{"event":"result","result":{"conversation_id":"57a6d8f2-8523-46fc-8fc9-87e630cbe295","status":"ERROR","response":"Partial final answer.","error":"There was a network issue connecting to the server, please try again."}}'
+exit 1
+`
+}
+
+func fakeAgyCancelledStreamJSONScript() string {
+	return `#!/bin/sh
+printf '%s\n' '{"event":"init","conversation_id":"27a6d8f2-8523-46fc-8fc9-87e630cbe295","init":{"model":"gemini-3.8-flash-high"}}'
+printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"27a6d8f2-8523-46fc-8fc9-87e630cbe295","step_index":1,"state":"DONE","step_type":"tool","usage":{"input_tokens":100,"output_tokens":10,"cache_read_tokens":20,"total_tokens":110}}}'
+printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"27a6d8f2-8523-46fc-8fc9-87e630cbe295","step_index":1,"state":"DONE","step_type":"tool","usage":{"input_tokens":120,"output_tokens":12,"cache_read_tokens":20,"total_tokens":132}}}'
+printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"27a6d8f2-8523-46fc-8fc9-87e630cbe295","step_index":2,"state":"DONE","step_type":"agent_response","text_delta":"working","usage":{"input_tokens":50,"output_tokens":5,"cache_read_tokens":10,"total_tokens":55}}}'
+sleep 60
+`
+}
+
+func TestAntigravityBackendManagedWakeup(t *testing.T) {
+	t.Parallel()
+
+	// Trimmed agy 1.5.12 capture with one repeated final usage snapshot.
+	fakePath := filepath.Join(t.TempDir(), "agy")
+	writeTestExecutable(t, fakePath, []byte(`#!/bin/sh
+cat <<'JSONL'
+{"event":"step_update","step_update":{"step_index":0,"state":"DONE","step_type":"user_input"}}
+{"event":"step_update","step_update":{"step_index":1,"state":"DONE","step_type":"agent_response","usage":{"input_tokens":8975,"output_tokens":84,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":9059}}}
+{"event":"step_update","step_update":{"step_index":2,"state":"ACTIVE","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","parameters":{"CommandLine":"sleep 25"}}}}
+{"event":"step_update","step_update":{"step_index":2,"state":"DONE","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","parameters":{"CommandLine":"sleep 25"},"output":"Command exited with code 0."}}}
+{"event":"step_update","step_update":{"step_index":3,"state":"DONE","step_type":"agent_response","text_delta":"Waiting for completion.\n","usage":{"input_tokens":2325,"output_tokens":8,"thinking_tokens":0,"cache_read_tokens":6935,"total_tokens":2333}}}
+{"event":"step_update","step_update":{"step_index":4,"state":"DONE","step_type":"system_message"}}
+{"event":"step_update","step_update":{"step_index":5,"state":"ACTIVE","step_type":"agent_response","text_delta":"Command finished."}}
+{"event":"step_update","step_update":{"step_index":5,"state":"DONE","step_type":"agent_response","text_delta":"\n","usage":{"input_tokens":2297,"output_tokens":7,"thinking_tokens":0,"cache_read_tokens":7227,"total_tokens":2304}}}
+{"event":"step_update","step_update":{"step_index":5,"state":"DONE","step_type":"agent_response","usage":{"input_tokens":2297,"output_tokens":7,"thinking_tokens":0,"cache_read_tokens":7227,"total_tokens":2304}}}
+{"event":"result","result":{"status":"SUCCESS","response":"Waiting for completion.\nCommand finished.\n","usage":{"input_tokens":13597,"output_tokens":99,"thinking_tokens":0,"cache_read_tokens":14162,"total_tokens":13696}}}
+JSONL
+`))
+	backend := &antigravityBackend{cfg: Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()}}
+	ctx, cancel := context.WithTimeout(context.Background(), testFallbackTimeout)
+	defer cancel()
+	session, err := backend.Execute(ctx, "fixture prompt", ExecOptions{ResumeSessionID: "conversation"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tools []Message
+	for msg := range session.Messages {
+		if msg.Type == MessageToolUse || msg.Type == MessageToolResult {
+			tools = append(tools, msg)
+		}
+	}
+	result := <-session.Result
+	if result.Status != "completed" || result.Output != "Waiting for completion.\nCommand finished.\n" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if len(tools) != 2 || tools[0].Type != MessageToolUse || tools[1].Type != MessageToolResult ||
+		tools[0].Tool != "run_command" || tools[0].CallID == "" || tools[0].CallID != tools[1].CallID {
+		t.Fatalf("expected one closed run_command call, got %+v", tools)
+	}
+	want := TokenUsage{InputTokens: 13597, OutputTokens: 99, CacheReadTokens: 14162}
+	if len(result.Usage) != 1 || result.Usage["unknown"] != want {
+		t.Fatalf("usage = %+v, want %+v", result.Usage, want)
+	}
+}
+
+func TestAntigravityBackendStreamJSONCapturesUsage(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "agy")
+	writeTestExecutable(t, fakePath, []byte(fakeAgyStreamJSONScript()))
+
+	backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
+	if err != nil {
+		t.Fatalf("new antigravity backend: %v", err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt-ignored", ExecOptions{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	var streamed strings.Builder
+	for msg := range session.Messages {
+		if msg.Type == MessageText {
+			streamed.WriteString(msg.Content)
+		}
+	}
+	result, ok := <-session.Result
+	if !ok {
+		t.Fatal("result channel closed without a value")
+	}
+	if result.Status != "completed" || result.Output != "Hello\n" {
+		t.Fatalf("result = status %q output %q error %q", result.Status, result.Output, result.Error)
+	}
+	if streamed.String() != "Hello\n" {
+		t.Fatalf("streamed output = %q, want %q", streamed.String(), "Hello\n")
+	}
+	if result.SessionID != "07a6d8f2-8523-46fc-8fc9-87e630cbe295" {
+		t.Fatalf("session id = %q", result.SessionID)
+	}
+	usage, ok := result.Usage["Gemini 3.8 Flash (High)"]
+	if !ok {
+		t.Fatalf("usage missing model key: %#v", result.Usage)
+	}
+	// result.usage is cumulative across a resumed conversation. The two DONE
+	// steps are this execution's usage and must win without double-counting the
+	// terminal aggregate.
+	want := TokenUsage{InputTokens: 1100, OutputTokens: 54, CacheReadTokens: 400}
+	if usage != want {
+		t.Fatalf("usage = %+v, want %+v", usage, want)
+	}
+}
+
+func TestAntigravityBackendIgnoresTrailingNetworkErrorAfterDoneResponse(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "agy")
+	writeTestExecutable(t, fakePath, []byte(fakeAgyTrailingNetworkErrorScript(true)))
+
+	backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
+	if err != nil {
+		t.Fatalf("new antigravity backend: %v", err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt-ignored", ExecOptions{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	for range session.Messages {
+	}
+	result, ok := <-session.Result
+	if !ok {
+		t.Fatal("result channel closed without a value")
+	}
+	if result.Status != "completed" || result.Output != "Complete answer." || result.Error != "" {
+		t.Fatalf("result = status %q output %q error %q", result.Status, result.Output, result.Error)
+	}
+}
+
+// agy 1.4.6 can retain an earlier interruption in the result of a resumed
+// conversation, even after the current response finishes successfully (#9528).
+func TestAntigravityBackendRecoveredStreamInterruption(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		done     bool
+		exitCode int
+	}{
+		{done: true, exitCode: 0},
+		{done: false, exitCode: 0},
+		{done: true, exitCode: 1},
+	} {
+		t.Run(fmt.Sprintf("response_done=%v/exit=%d", tc.done, tc.exitCode), func(t *testing.T) {
+			t.Parallel()
+			fakePath := filepath.Join(t.TempDir(), "agy")
+			script := strings.ReplaceAll(fakeAgyTrailingNetworkErrorScript(tc.done), antigravityNetworkIssueError,
+				"The stream was interrupted. Please continue the task you were working on.")
+			script = strings.ReplaceAll(script, "exit 1", fmt.Sprintf("exit %d", tc.exitCode))
+			writeTestExecutable(t, fakePath, []byte(script))
+
+			backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
+			if err != nil {
+				t.Fatalf("new antigravity backend: %v", err)
+			}
+			session, err := backend.Execute(context.Background(), "follow-up", ExecOptions{
+				ResumeSessionID: "37a6d8f2-8523-46fc-8fc9-87e630cbe295",
+			})
+			if err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			for range session.Messages {
+			}
+			result, ok := <-session.Result
+			if !ok {
+				t.Fatal("result channel closed without a value")
+			}
+			wantStatus := "failed"
+			completed := tc.done && tc.exitCode == 0
+			if completed {
+				wantStatus = "completed"
+			}
+			if result.Status != wantStatus || result.Output != "Complete answer." || (result.Error == "") != completed {
+				t.Fatalf("result = status %q output %q error %q", result.Status, result.Output, result.Error)
+			}
+		})
+	}
+}
+
+func TestAntigravityBackendIgnoresStaleActiveStepAfterDoneResponse(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "agy")
+	writeTestExecutable(t, fakePath, []byte(fakeAgyTrailingNetworkErrorWithStaleActiveStepScript()))
+
+	backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
+	if err != nil {
+		t.Fatalf("new antigravity backend: %v", err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt-ignored", ExecOptions{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	for range session.Messages {
+	}
+	result, ok := <-session.Result
+	if !ok {
+		t.Fatal("result channel closed without a value")
+	}
+	if result.Status != "completed" || result.Output != "Complete answer after cancelling the background task." || result.Error != "" {
+		t.Fatalf("result = status %q output %q error %q", result.Status, result.Output, result.Error)
+	}
+}
+
+// A complete DONE answer followed by an exhausted-retry transport error is a
+// finished turn. agy spells such a failure `API error (attempt N): request
+// failed: Post "...": EOF` rather than the network-issue sentence, and matching
+// only the latter discarded an answer that had already been produced and
+// streamed (2026-09-30: every turn of one conversation reported
+// blocked/agent_error.unknown while the reply sat in result.response).
+func TestAntigravityBackendIgnoresTrailingTransportErrorAfterDoneResponse(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "agy")
+	writeTestExecutable(t, fakePath, []byte(fakeAgyTrailingTransportErrorScript()))
+
+	backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
+	if err != nil {
+		t.Fatalf("new antigravity backend: %v", err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt-ignored", ExecOptions{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	for range session.Messages {
+	}
+	result, ok := <-session.Result
+	if !ok {
+		t.Fatal("result channel closed without a value")
+	}
+	if result.Status != "completed" || result.Output != "Complete answer before the transport failure." || result.Error != "" {
+		t.Fatalf("result = status %q output %q error %q", result.Status, result.Output, result.Error)
+	}
+}
+
+// The negative control: a complete DONE answer does not on its own make a turn
+// successful. When the trailing failure is provider-side (quota, capacity,
+// policy, auth) rather than transport, the turn must stay failed so the user
+// sees the real cause instead of an answer presented as a finished result.
+func TestAntigravityBackendKeepsNonTransportFailureAfterDoneResponse(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "agy")
+	writeTestExecutable(t, fakePath, []byte(fakeAgyTrailingNonTransportErrorScript()))
+
+	backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
+	if err != nil {
+		t.Fatalf("new antigravity backend: %v", err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt-ignored", ExecOptions{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	for range session.Messages {
+	}
+	result, ok := <-session.Result
+	if !ok {
+		t.Fatal("result channel closed without a value")
+	}
+	if result.Status != "failed" || result.Output != "Answer produced before quota ran out." || !strings.Contains(result.Error, "model capacity exhausted") {
+		t.Fatalf("result = status %q output %q error %q", result.Status, result.Output, result.Error)
+	}
+}
+
+// TestAntigravityTrailingTransportErrorClassification pins both edges of the
+// classifier. The "want true" half is the field-observed spelling plus the
+// other causes Go's http client reports for a round trip that never produced a
+// response. The "want false" half is the one that matters: a provider
+// rejection that happens to travel inside agy's `request failed:` wrapper must
+// stay a failure, otherwise a quota or overload error would be laundered into a
+// successful turn just because the model had already emitted some text.
+func TestAntigravityTrailingTransportErrorClassification(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  string
+		want bool
+	}{
+		{
+			name: "field observed EOF after exhausted retries",
+			err:  `API error (attempt 3): request failed: Post "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse": EOF`,
+			want: true,
+		},
+		{
+			name: "legacy provider sentence",
+			err:  antigravityNetworkIssueError,
+			want: true,
+		},
+		{
+			name: "legacy provider sentence in other case and padding",
+			err:  "  THERE WAS A NETWORK ISSUE CONNECTING TO THE SERVER, PLEASE TRY AGAIN.  ",
+			want: true,
+		},
+		{name: "recovered stream interruption", err: "The stream was interrupted. Please continue the task you were working on.", want: true},
+		{name: "unexpected EOF", err: `Post "https://host/v1": unexpected EOF`, want: true},
+		{name: "connection reset", err: `read tcp 1.2.3.4:443: connection reset by peer`, want: true},
+		{name: "broken pipe", err: `write tcp 1.2.3.4:443: broken pipe`, want: true},
+		{name: "connection refused", err: `dial tcp 1.2.3.4:443: connection refused`, want: true},
+		{name: "socket i/o timeout", err: `read tcp 1.2.3.4:443: i/o timeout`, want: true},
+		{name: "tls handshake timeout", err: `net/http: TLS handshake timeout`, want: true},
+		{name: "tls handshake failure", err: `remote error: tls: handshake failure`, want: true},
+		{name: "closed connection", err: `use of closed network connection`, want: true},
+		{name: "dns no such host", err: `dial tcp: lookup host: no such host`, want: true},
+		{name: "dns server misbehaving", err: `lookup host: server misbehaving`, want: true},
+		{name: "network unreachable", err: `connect: network is unreachable`, want: true},
+		{name: "malformed response", err: `malformed HTTP response`, want: true},
+		{name: "http2 connection lost", err: `http2: client connection lost`, want: true},
+		{name: "http2 goaway", err: `http2: server sent GOAWAY and closed the connection`, want: true},
+
+		{name: "empty", err: "", want: false},
+		{name: "whitespace only", err: "   ", want: false},
+		{
+			name: "quota rejection inside the request-failed wrapper",
+			err:  `API error (attempt 3): request failed: 429 Too Many Requests`,
+			want: false,
+		},
+		{
+			name: "status error inside the request-failed wrapper",
+			err:  `API error (attempt 3): request failed: unexpected status code 503`,
+			want: false,
+		},
+		{name: "model capacity exhausted", err: `API error (attempt 3): model capacity exhausted, retry later`, want: false},
+		{name: "prefill queue overloaded", err: `PREFILL_QUEUE_OVERLOADED: Overloaded`, want: false},
+		{name: "resource exhausted", err: `RESOURCE_EXHAUSTED: Quota exceeded for quota group`, want: false},
+		{name: "safety policy", err: `The request was rejected by the safety filter`, want: false},
+		{name: "auth", err: `unauthenticated: invalid API key`, want: false},
+		{name: "invalid argument", err: `INVALID_ARGUMENT: request contains an invalid argument`, want: false},
+		{name: "permission denied", err: `permission denied`, want: false},
+		{name: "tool crash", err: `agent executor error: tool crashed`, want: false},
+		{name: "bare status text", err: `agy returned status ERROR`, want: false},
+		{name: "cancelled", err: `execution cancelled`, want: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := antigravityTrailingTransportError(tc.err); got != tc.want {
+				t.Fatalf("antigravityTrailingTransportError(%q) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// The classifier must not fire on a complete answer alone. Each of these has a
+// non-empty response and a DONE agent_response step, so the error class is the
+// only thing standing between a preserved answer and a laundered failure.
+func TestAntigravityCompletedDespiteTrailingNetworkErrorRequiresAllThree(t *testing.T) {
+	t.Parallel()
+
+	const transport = `API error (attempt 3): request failed: Post "https://host/v1": EOF`
+	const quota = `API error (attempt 3): model capacity exhausted`
+
+	tests := []struct {
+		name              string
+		err               string
+		response          string
+		agentResponseDone bool
+		want              bool
+	}{
+		{name: "all three hold", err: transport, response: "answer", agentResponseDone: true, want: true},
+		{name: "response whitespace only", err: transport, response: "  \n ", agentResponseDone: true, want: false},
+		{name: "response empty", err: transport, response: "", agentResponseDone: true, want: false},
+		{name: "answer still being written", err: transport, response: "partial", agentResponseDone: false, want: false},
+		{name: "interrupted response whitespace only", err: "The stream was interrupted. Please continue the task you were working on.", response: "  ", agentResponseDone: true, want: false},
+		{name: "provider rejection", err: quota, response: "answer", agentResponseDone: true, want: false},
+		{name: "no error at all", err: "", response: "answer", agentResponseDone: true, want: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := antigravityCompletedDespiteTrailingNetworkError(tc.err, tc.response, tc.agentResponseDone, false)
+			if got != tc.want {
+				t.Fatalf("antigravityCompletedDespiteTrailingNetworkError(%q, %q, %v) = %v, want %v",
+					tc.err, tc.response, tc.agentResponseDone, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAntigravityBackendKeepsNetworkFailureForPartialResponse(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "agy")
+	writeTestExecutable(t, fakePath, []byte(fakeAgyTrailingNetworkErrorScript(false)))
+
+	backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
+	if err != nil {
+		t.Fatalf("new antigravity backend: %v", err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt-ignored", ExecOptions{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	for range session.Messages {
+	}
+	result, ok := <-session.Result
+	if !ok {
+		t.Fatal("result channel closed without a value")
+	}
+	if result.Status != "failed" || result.Output != "Complete answer." || !strings.Contains(result.Error, antigravityNetworkIssueError) {
+		t.Fatalf("result = status %q output %q error %q", result.Status, result.Output, result.Error)
+	}
+}
+
+func TestAntigravityBackendKeepsNetworkFailureForNewerPartialResponse(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "agy")
+	writeTestExecutable(t, fakePath, []byte(fakeAgyTrailingNetworkErrorAfterNewPartialResponseScript()))
+
+	backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
+	if err != nil {
+		t.Fatalf("new antigravity backend: %v", err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt-ignored", ExecOptions{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	for range session.Messages {
+	}
+	result, ok := <-session.Result
+	if !ok {
+		t.Fatal("result channel closed without a value")
+	}
+	if result.Status != "failed" || result.Output != "Partial final answer." || !strings.Contains(result.Error, antigravityNetworkIssueError) {
+		t.Fatalf("result = status %q output %q error %q", result.Status, result.Output, result.Error)
+	}
+}
+
+func TestAntigravityStreamUsageMapsProviderBucketsDirectly(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		raw  antigravityStreamUsage
+		want TokenUsage
+	}{
+		{
+			name: "official example cache larger than input",
+			raw:  antigravityStreamUsage{InputTokens: 278, OutputTokens: 4, CacheReadTokens: 30214, TotalTokens: 282},
+			want: TokenUsage{InputTokens: 278, OutputTokens: 4, CacheReadTokens: 30214},
+		},
+		{
+			name: "official example cache smaller than input",
+			raw:  antigravityStreamUsage{InputTokens: 10418, OutputTokens: 589, CacheReadTokens: 8113, TotalTokens: 11007},
+			want: TokenUsage{InputTokens: 10418, OutputTokens: 589, CacheReadTokens: 8113},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tt.raw.tokenUsage(); got != tt.want {
+				t.Fatalf("tokenUsage() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReadAntigravitySelectedModelPrecedence(t *testing.T) {
+	t.Parallel()
+
+	logPath := filepath.Join(t.TempDir(), "agy.log")
+	if err := os.WriteFile(logPath, []byte(
+		`I0903 12:00:00 model_config_manager.go:311] Propagating selected model override to backend: label="Gemini 3.8 Flash (High)"`+"\n",
+	), 0o600); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+	if got := readAntigravitySelectedModel(logPath, "gemini-stream-model", "gemini-configured-model"); got != "gemini-stream-model" {
+		t.Fatalf("stream model = %q", got)
+	}
+	if got := readAntigravitySelectedModel(logPath, "", "gemini-configured-model"); got != "Gemini 3.8 Flash (High)" {
+		t.Fatalf("log model = %q", got)
+	}
+	if got := readAntigravitySelectedModel("", "", "gemini-configured-model"); got != "gemini-configured-model" {
+		t.Fatalf("configured model = %q", got)
+	}
+	if got := readAntigravitySelectedModel("", "", ""); got != "unknown" {
+		t.Fatalf("fallback model = %q", got)
+	}
+}
+
+func TestAntigravityResultStatus(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]string{
+		"SUCCESS":        "completed",
+		"completed":      "completed",
+		"CANCELLED":      "cancelled",
+		"canceled":       "cancelled",
+		"ABORTED":        "aborted",
+		"TIMEOUT":        "timeout",
+		"timed_out":      "timeout",
+		"provider_error": "failed",
+	}
+	for input, want := range tests {
+		if got := antigravityResultStatus(input); got != want {
+			t.Errorf("antigravityResultStatus(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestAntigravityBackendReportsStructuredFailureUsage(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "agy")
+	writeTestExecutable(t, fakePath, []byte(fakeAgyFailedStreamJSONScript()))
+	backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
+	if err != nil {
+		t.Fatalf("new antigravity backend: %v", err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt-ignored", ExecOptions{Model: ""})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	for range session.Messages {
+	}
+	result := <-session.Result
+	if result.Status != "failed" || result.Error != "provider failed" {
+		t.Fatalf("result = status %q error %q", result.Status, result.Error)
+	}
+	want := TokenUsage{InputTokens: 12, OutputTokens: 3, CacheReadTokens: 7, CacheWriteTokens: 2}
+	if got := result.Usage["unknown"]; got != want {
+		t.Fatalf("usage = %+v, want %+v", got, want)
+	}
+}
+
+func TestAntigravityBackendSumsCompletedStepsWhenCancelled(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "agy")
+	writeTestExecutable(t, fakePath, []byte(fakeAgyCancelledStreamJSONScript()))
+	backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
+	if err != nil {
+		t.Fatalf("new antigravity backend: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	for msg := range session.Messages {
+		if msg.Type == MessageText && msg.Content == "working" {
+			cancel()
+		}
+	}
+	result := <-session.Result
+	if result.Status != "aborted" {
+		t.Fatalf("status = %q, want aborted (error=%q)", result.Status, result.Error)
+	}
+	// step 1's second DONE event replaces its first snapshot; step 2 is then
+	// added once. Provider buckets retain their documented meanings.
+	want := TokenUsage{InputTokens: 170, OutputTokens: 17, CacheReadTokens: 30}
+	if got := result.Usage["gemini-3.8-flash-high"]; got != want {
+		t.Fatalf("usage = %+v, want %+v", got, want)
+	}
+}
+
+func TestAntigravityCurrentTurnRecovery(t *testing.T) {
+	t.Parallel()
+	step := func(index int, kind, state, text string) string {
+		return fmt.Sprintf("{\"event\":\"step_update\",\"step_update\":{\"step_index\":%d,\"step_type\":%q,\"state\":%q,\"text_delta\":%q}}\n", index, kind, state, text)
+	}
+	boundary := step(10, "user_input", "DONE", "")
+	answer := step(14, "agent_response", "ACTIVE", "Final answer.") + step(14, "agent_response", "DONE", "\n")
+	const retryError = "Malformed function call: Function call is empty - no input to parse. Retries remaining: 3"
+	const resumeEOF = "API error (attempt 3): request failed: Post \"https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse\": EOF"
+	for _, tc := range []struct {
+		name, steps, status, response, cause string
+		exit                                 int
+		resumed, completed                   bool
+	}{
+		{name: "retry with narration and executor log", steps: boundary + step(11, "agent_response", "DONE", "Working.\n") + step(12, "tool", "DONE", "") + step(13, "error_message", "DONE", "") + answer, completed: true},
+		{name: "partial attempt before retry", steps: boundary + step(11, "agent_response", "ACTIVE", "Partial attempt") + step(13, "error_message", "DONE", "") + answer, completed: true},
+		{name: "canonical response need not equal deltas", steps: boundary + answer, response: "Canonical answer from agy.", completed: true},
+		{name: "historical quota", steps: step(1, "error_message", "DONE", "") + boundary + answer, cause: "RESOURCE_EXHAUSTED (429)", resumed: true, completed: true},
+		{name: "historical unavailable", steps: boundary + answer, cause: "UNAVAILABLE (503)", resumed: true, completed: true},
+		{name: "diagnostic line", steps: "CLI diagnostic\n" + boundary + answer, completed: true},
+		{name: "completed metadata", steps: boundary + answer + step(15, "checkpoint", "DONE", ""), completed: true},
+		{name: "exit 1", steps: boundary + answer, exit: 1},
+		{name: "exit 3", steps: boundary + answer, exit: 3},
+		{name: "active final response", steps: boundary + step(14, "agent_response", "ACTIVE", "Partial answer.")},
+		{name: "newer active response", steps: boundary + answer + step(15, "agent_response", "ACTIVE", "Partial answer.")},
+		{name: "empty final response", steps: boundary + step(14, "agent_response", "DONE", " \n")},
+		{name: "empty result response", steps: boundary + answer, response: " \n"},
+		{name: "unfinished boundary", steps: step(10, "user_input", "ACTIVE", "") + answer},
+		{name: "two boundaries", steps: boundary + step(11, "user_input", "DONE", "") + answer},
+		{name: "missing index", steps: boundary + "{\"event\":\"step_update\",\"step_update\":{\"step_type\":\"tool\",\"state\":\"DONE\"}}\n" + answer},
+		{name: "negative index", steps: boundary + step(-1, "tool", "DONE", "") + answer},
+		{name: "history is not an answer", steps: step(1, "agent_response", "DONE", "Old answer.") + boundary},
+		{name: "error after answer", steps: boundary + answer + step(15, "error_message", "DONE", "")},
+		{name: "unfinished tool after answer", steps: boundary + answer + step(15, "tool", "ACTIVE", "")},
+		{name: "done tool after answer", steps: boundary + answer + step(15, "tool", "DONE", "")},
+		{name: "subagent after answer", steps: boundary + answer + step(15, "subagent", "DONE", "")},
+		{name: "unfinished metadata", steps: boundary + answer + step(15, "checkpoint", "ACTIVE", "")},
+		{name: "quota without recovery", steps: boundary + step(13, "error_message", "DONE", ""), cause: "RESOURCE_EXHAUSTED (429)"},
+		{name: "permission without recovery", steps: boundary + step(13, "error_message", "DONE", ""), cause: "PERMISSION_DENIED (403)"},
+		{name: "cancelled result", steps: boundary + answer, status: "CANCELLED"},
+		{name: "legacy fresh transport", steps: answer, cause: antigravityNetworkIssueError, exit: 1, completed: true},
+		{name: "legacy resumed EOF exit 0", steps: step(1, "agent_response", "DONE", "RESUME-BC-OK"), response: "RESUME-BC-OK\n", cause: resumeEOF, exit: 0, resumed: true, completed: true},
+		{name: "legacy resumed EOF exit 1", steps: step(1, "agent_response", "DONE", "RESUME-BC-OK"), response: "RESUME-BC-OK\n", cause: resumeEOF, exit: 1, resumed: true, completed: true},
+		{name: "legacy trailing error", steps: answer + step(15, "error_message", "DONE", ""), cause: antigravityNetworkIssueError},
+		{name: "legacy trailing tool", steps: answer + step(15, "tool", "ACTIVE", ""), cause: antigravityNetworkIssueError},
+		{name: "legacy unfinished metadata", steps: answer + step(15, "checkpoint", "ACTIVE", ""), cause: antigravityNetworkIssueError},
+		{name: "resumed without boundary", steps: answer, resumed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if tc.status == "" {
+				tc.status = "ERROR"
+			}
+			if tc.response == "" {
+				tc.response = "Working.\nFinal answer.\n"
+			}
+			if tc.cause == "" {
+				tc.cause = retryError
+			}
+			script := `#!/bin/sh
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --log-file) printf '%s\n' 'agent executor error: recovered attempt' > "$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+cat <<'JSONL'
+` + tc.steps + fmt.Sprintf("{\"event\":\"result\",\"result\":{\"status\":%q,\"response\":%q,\"error\":%q}}\nJSONL\nexit %d\n", tc.status, tc.response, tc.cause, tc.exit)
+			fakePath := filepath.Join(t.TempDir(), "agy")
+			writeTestExecutable(t, fakePath, []byte(script))
+			logs := &strings.Builder{}
+			backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: slog.New(slog.NewTextHandler(logs, nil))})
+			if err != nil {
+				t.Fatal(err)
+			}
+			opts := ExecOptions{}
+			if tc.resumed {
+				opts.ResumeSessionID = "fixture-conversation"
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			session, err := backend.Execute(ctx, "fixture prompt", opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for range session.Messages {
+			}
+			result := <-session.Result
+			want := "failed"
+			if tc.completed {
+				want = "completed"
+			} else if tc.status == "CANCELLED" {
+				want = "cancelled"
+			}
+			if result.Status != want || result.Output != tc.response || (result.Error == "") != tc.completed {
+				t.Fatalf("result = %+v, want %s preserving canonical response", result, want)
+			}
+			if tc.completed && (!strings.Contains(logs.String(), "level=WARN") || !strings.Contains(logs.String(), fmt.Sprintf("err=%q", tc.cause))) {
+				t.Fatalf("missing warning with original error: %s", logs.String())
+			}
+		})
 	}
 }

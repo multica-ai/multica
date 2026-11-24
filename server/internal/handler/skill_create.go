@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	skillpkg "github.com/multica-ai/multica/server/internal/skill"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -19,6 +20,9 @@ type skillCreateInput struct {
 	Content     string
 	Config      any
 	Files       []CreateSkillFileRequest
+	// VersionSource labels the skill's first version. Empty means
+	// skillVersionSourceCreate.
+	VersionSource string
 }
 
 // createSkillWithFilesInTx writes a skill plus its supporting files using the
@@ -65,6 +69,17 @@ func createSkillWithFilesInTx(ctx context.Context, qtx *db.Queries, input skillC
 		fileResps = append(fileResps, skillFileToResponse(sf))
 	}
 
+	source := input.VersionSource
+	if source == "" {
+		source = skillVersionSourceCreate
+	}
+	if _, err := recordSkillVersion(ctx, qtx, skill.ID, skillVersionRecord{
+		Source:    source,
+		CreatedBy: input.CreatorID,
+	}); err != nil {
+		return SkillWithFilesResponse{}, err
+	}
+
 	return SkillWithFilesResponse{
 		SkillResponse: skillToResponse(skill),
 		Files:         fileResps,
@@ -101,6 +116,7 @@ var (
 	errSkillOverwriteNotFound     = errors.New("target skill not found")
 	errSkillOverwriteForbidden    = errors.New("not permitted to overwrite target skill")
 	errSkillOverwriteNameMismatch = errors.New("target skill name does not match the imported skill")
+	errSkillOverwriteNameConflict = errors.New("another skill in the workspace already has the imported name")
 )
 
 type skillOverwriteInput struct {
@@ -112,10 +128,20 @@ type skillOverwriteInput struct {
 	// different skill than the one the conflict dialog showed the user. The
 	// caller passes the sanitized effective import name.
 	ExpectedName string
-	Description  string
-	Content      string
-	Config       any
-	Files        []CreateSkillFileRequest
+	// NewName, when non-empty, renames the target to the imported skill's name.
+	// A collision with another skill in the workspace (UNIQUE(workspace_id,
+	// name)) fails the whole overwrite with errSkillOverwriteNameConflict.
+	NewName string
+	// AllowOverwrite overrides the in-tx permission recheck. Nil keeps the
+	// default creator-only policy (canOverwriteSkillByLocalImport).
+	AllowOverwrite func(userID string, skill db.Skill) bool
+	Description    string
+	Content        string
+	Config         any
+	Files          []CreateSkillFileRequest
+	// VersionSource labels the version this overwrite records. Empty means
+	// skillVersionSourceImport.
+	VersionSource string
 }
 
 // overwriteSkillWithFiles re-imports a bundle onto an existing skill in a single
@@ -157,7 +183,11 @@ func (h *Handler) overwriteSkillWithFiles(ctx context.Context, input skillOverwr
 		}
 		return SkillWithFilesResponse{}, err
 	}
-	if !canOverwriteSkillByLocalImport(input.UserID, existing) {
+	allowOverwrite := input.AllowOverwrite
+	if allowOverwrite == nil {
+		allowOverwrite = canOverwriteSkillByLocalImport
+	}
+	if !allowOverwrite(input.UserID, existing) {
 		return SkillWithFilesResponse{}, errSkillOverwriteForbidden
 	}
 	// The overwrite is keyed on target_skill_id, but the conflict the user
@@ -168,11 +198,21 @@ func (h *Handler) overwriteSkillWithFiles(ctx context.Context, input skillOverwr
 		return SkillWithFilesResponse{}, errSkillOverwriteNameMismatch
 	}
 
-	// Name is intentionally left unset (COALESCE keeps the existing name): the
-	// overwrite targets the same-name skill, so preserving it avoids any
-	// unique-name churn.
+	if err := ensureSkillVersionBaseline(ctx, qtx, existing.ID); err != nil {
+		return SkillWithFilesResponse{}, err
+	}
+
+	// Name stays unset by default (COALESCE keeps the existing name): the
+	// import-conflict overwrite targets the same-name skill, so preserving it
+	// avoids any unique-name churn. Refresh-from-source passes NewName to adopt
+	// an upstream rename.
+	var newName pgtype.Text
+	if n := sanitizeNullBytes(input.NewName); n != "" && n != existing.Name {
+		newName = pgtype.Text{String: n, Valid: true}
+	}
 	skill, err := qtx.UpdateSkill(ctx, db.UpdateSkillParams{
 		ID:          existing.ID,
+		Name:        newName,
 		Description: pgtype.Text{String: sanitizeNullBytes(input.Description), Valid: true},
 		Content:     pgtype.Text{String: sanitizeNullBytes(input.Content), Valid: true},
 		Config:      config,
@@ -183,6 +223,9 @@ func (h *Handler) overwriteSkillWithFiles(ctx context.Context, input skillOverwr
 		// the same "target gone" terminal case rather than a generic failure.
 		if errors.Is(err, pgx.ErrNoRows) {
 			return SkillWithFilesResponse{}, errSkillOverwriteNotFound
+		}
+		if newName.Valid && isUniqueViolation(err) {
+			return SkillWithFilesResponse{}, errSkillOverwriteNameConflict
 		}
 		return SkillWithFilesResponse{}, err
 	}
@@ -203,6 +246,21 @@ func (h *Handler) overwriteSkillWithFiles(ctx context.Context, input skillOverwr
 			return SkillWithFilesResponse{}, err
 		}
 		fileResps = append(fileResps, skillFileToResponse(sf))
+	}
+
+	source := input.VersionSource
+	if source == "" {
+		source = skillVersionSourceImport
+	}
+	var versionAuthor pgtype.UUID
+	if u, err := util.ParseUUID(input.UserID); err == nil {
+		versionAuthor = u
+	}
+	if _, err := recordSkillVersion(ctx, qtx, skill.ID, skillVersionRecord{
+		Source:    source,
+		CreatedBy: versionAuthor,
+	}); err != nil {
+		return SkillWithFilesResponse{}, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {

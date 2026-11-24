@@ -127,6 +127,18 @@ var (
 		"other":             "other",
 	}
 
+	knownEmailRateLimitActions = map[string]string{
+		"workspace_invitation": "workspace_invitation",
+		"other":                "other",
+	}
+
+	knownEmailRateLimitGates = map[string]string{
+		"actor":     "actor",
+		"workspace": "workspace",
+		"recipient": "recipient",
+		"other":     "other",
+	}
+
 	knownGithubEventKinds = map[string]string{
 		"pull_request":              "pull_request",
 		"pull_request_review":       "pull_request_review",
@@ -347,6 +359,14 @@ func NormalizeWebhookRateLimitGate(value string) string {
 	return normalizeFromAllowList(value, knownWebhookRateLimitGates, "other")
 }
 
+func NormalizeEmailRateLimitAction(value string) string {
+	return normalizeFromAllowList(value, knownEmailRateLimitActions, "other")
+}
+
+func NormalizeEmailRateLimitGate(value string) string {
+	return normalizeFromAllowList(value, knownEmailRateLimitGates, "other")
+}
+
 func NormalizeGithubEventKind(value string) string {
 	return normalizeFromAllowList(value, knownGithubEventKinds, "other")
 }
@@ -385,21 +405,6 @@ func NormalizeCloudRuntimeStatus(value string) string {
 		}
 	}
 	return "error"
-}
-
-// CloudRuntimeStatusForCode maps an HTTP status code to its bucket label.
-// Used by cloudruntime client instrumentation.
-func CloudRuntimeStatusForCode(code int) string {
-	switch {
-	case code >= 200 && code < 400:
-		return "ok"
-	case code >= 400 && code < 500:
-		return "4xx"
-	case code >= 500 && code < 600:
-		return "5xx"
-	default:
-		return "error"
-	}
 }
 
 func NormalizeDaemonWSKind(value string) string {

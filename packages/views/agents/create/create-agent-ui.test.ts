@@ -1,9 +1,14 @@
 import { createElement } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
+import type { Agent } from "@multica/core/types";
+import {
+  cacheAgentResponse,
+  workspaceKeys,
+} from "@multica/core/workspace/queries";
 import { AgentNameField } from "./agent-configuration-panel";
-import { CreateMethodChooser } from "./choose-create-method-page";
 import { CreateAgentFooter } from "./create-agent-footer";
 import { draftPreview } from "./unfinished-drafts";
 import { classifyAgentCreateError } from "./use-create-agent-submit";
@@ -13,16 +18,7 @@ vi.mock("../../i18n", () => ({
     t: (
       selector: (translations: {
         creation_studio: {
-          eyebrow: string;
-          choose_title: string;
-          choose_description: string;
-          recommended: string;
-          continue: string;
-          modes: {
-            blank: { title: string; description: string };
-            ai: { title: string; description: string };
-          };
-          create_and_open: string;
+          create_agent: string;
           create_and_add: string;
           creating: string;
           name_conflict: string;
@@ -35,22 +31,7 @@ vi.mock("../../i18n", () => ({
     ) =>
       selector({
         creation_studio: {
-          eyebrow: "Agent creation",
-          choose_title: "How would you like to start?",
-          choose_description: "Choose a creation mode.",
-          recommended: "Recommended",
-          continue: "Continue",
-          modes: {
-            blank: {
-              title: "Start blank",
-              description: "Configure every field yourself.",
-            },
-            ai: {
-              title: "Build with AI",
-              description: "Describe the outcome you want.",
-            },
-          },
-          create_and_open: "Create and open",
+          create_agent: "Create agent",
           create_and_add: "Create and add",
           creating: "Creating…",
           name_conflict: "An agent with this name already exists.",
@@ -152,11 +133,81 @@ describe("Agent creation errors", () => {
     );
 
     const error = screen.getByRole("alert");
-    const button = screen.getByRole("button", { name: "Create and open" });
-    expect(error.parentElement).toBe(button.parentElement);
+    const button = screen.getByRole("button", { name: "Create agent" });
+    expect(error.closest("footer")).toContainElement(button);
     expect(
       error.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+});
+
+const CREATED_AGENT: Agent = {
+  id: "agent-new",
+  workspace_id: "ws-1",
+  runtime_id: "runtime-1",
+  name: "Blank agent",
+  description: "",
+  instructions: "",
+  avatar_url: null,
+  runtime_mode: "local",
+  runtime_config: {},
+  custom_args: [],
+  visibility: "workspace",
+  permission_mode: "public_to",
+  invocation_targets: [{ target_type: "workspace", target_id: null }],
+  status: "idle",
+  max_concurrent_tasks: 1,
+  model: "",
+  owner_id: "user-1",
+  skills: [],
+  created_at: "2026-08-15T00:00:00Z",
+  updated_at: "2026-08-15T00:00:00Z",
+  archived_at: null,
+  archived_by: null,
+};
+
+describe("Agent creation cache handoff", () => {
+  it("hydrates detail and upserts an already-loaded agent list", () => {
+    const queryClient = new QueryClient();
+    const existingAgent = { ...CREATED_AGENT, id: "agent-existing" };
+    queryClient.setQueryData(workspaceKeys.agents("ws-1"), [existingAgent]);
+
+    cacheAgentResponse(queryClient, "ws-1", CREATED_AGENT);
+
+    expect(
+      queryClient.getQueryData(workspaceKeys.agent("ws-1", CREATED_AGENT.id)),
+    ).toEqual(CREATED_AGENT);
+    expect(queryClient.getQueryData(workspaceKeys.agents("ws-1"))).toEqual([
+      existingAgent,
+      CREATED_AGENT,
+    ]);
+  });
+
+  it("does not turn one create response into a partial cold list", () => {
+    const queryClient = new QueryClient();
+
+    cacheAgentResponse(queryClient, "ws-1", CREATED_AGENT);
+
+    expect(
+      queryClient.getQueryData(workspaceKeys.agents("ws-1")),
+    ).toBeUndefined();
+    expect(
+      queryClient.getQueryData(workspaceKeys.agent("ws-1", CREATED_AGENT.id)),
+    ).toEqual(CREATED_AGENT);
+  });
+
+  it("can update detail without inserting a list entry that was not present", () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData<Agent[]>(workspaceKeys.agents("ws-1"), []);
+
+    cacheAgentResponse(queryClient, "ws-1", CREATED_AGENT, {
+      insertIntoList: false,
+    });
+
+    expect(queryClient.getQueryData(workspaceKeys.agents("ws-1"))).toEqual([]);
+    expect(
+      queryClient.getQueryData(workspaceKeys.agent("ws-1", CREATED_AGENT.id)),
+    ).toEqual(CREATED_AGENT);
   });
 });
 
@@ -188,19 +239,5 @@ describe("Unfinished draft preview", () => {
     expect(
       draftPreview({ last_message_role: "", last_message_content: "" }),
     ).toBe("");
-  });
-});
-
-describe("Agent creation method chooser", () => {
-  it("always offers AI-assisted creation", () => {
-    render(
-      createElement(CreateMethodChooser, {
-        onBlank: vi.fn(),
-        onAI: vi.fn(),
-      }),
-    );
-
-    expect(screen.getByText("Start blank")).toBeInTheDocument();
-    expect(screen.getByText("Build with AI")).toBeInTheDocument();
   });
 });

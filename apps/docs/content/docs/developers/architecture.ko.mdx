@@ -3,7 +3,9 @@ title: 프로젝트 아키텍처
 description: Multica의 클라이언트, Go 서비스, 실행 데몬, 공유 프런트엔드 패키지가 함께 작동하는 방식을 알아봅니다.
 ---
 
-Multica는 Go backend, 여러 클라이언트, 실행 컴퓨터에서 동작하는 데몬으로 구성됩니다. PostgreSQL이 협업 데이터를 저장하고 데몬이 태스크를 가져가 로컬 AI 코딩 도구를 호출합니다.
+Multica는 Go backend, 여러 클라이언트, 실행 컴퓨터에서 동작하는 데몬으로 구성됩니다. PostgreSQL이 협업 데이터를 저장하고 데몬이 작업을 가져가 로컬 AI 코딩 도구를 호출합니다.
+
+이 페이지는 구현을 다루므로 본문의 **task**는 제품의 **Run**(실행)을 지원하는 내부 스케줄러, API, 데이터베이스 엔터티를 뜻합니다. UI와 제품 문서에서는 Run이라고 부르며, `TaskService`, `task_id` 같은 식별자는 호환성을 위해 그대로 유지합니다.
 
 ```text
 Web / Desktop / Mobile / CLI
@@ -23,7 +25,7 @@ Web / Desktop / Mobile / CLI
 
 | 디렉터리 | 역할 | 주요 기술 |
 | --- | --- | --- |
-| `server/` | API, 인증, 태스크 스케줄링, 연동, CLI, 데몬 | Go, Chi, sqlc, gorilla/websocket |
+| `server/` | API, 인증, 작업 스케줄링, 연동, CLI, 데몬 | Go, Chi, sqlc, gorilla/websocket |
 | `apps/web/` | 브라우저 클라이언트와 landing page | Next.js App Router |
 | `apps/desktop/` | 데스크톱 클라이언트와 로컬 프로세스 관리 | Electron, electron-vite |
 | `apps/mobile/` | 독립적인 iOS 클라이언트 | Expo, React Native |
@@ -45,7 +47,7 @@ Web과 Desktop은 세 계층을 공유합니다.
 
 라우팅, cookie, Electron IPC 같은 플랫폼 기능은 애플리케이션 계층에 둡니다. 공유 페이지는 `NavigationAdapter`를 통해 이동하며 `next/*` 또는 `react-router-dom`을 직접 import하지 않습니다.
 
-예를 들어 Web과 Desktop에 모두 필요한 이슈 기능은 일반적으로 다음 위치에 걸쳐 있습니다.
+예를 들어 Web과 Desktop에 모두 필요한 태스크 기능은 일반적으로 다음 위치에 걸쳐 있습니다.
 
 ```text
 packages/core/issues/      query, mutation, cache 업데이트
@@ -60,7 +62,7 @@ Mobile은 이 React 페이지를 재사용하지 않습니다. `@multica/core`�
 
 서버 데이터와 클라이언트 상태를 분리해 관리합니다.
 
-- **TanStack Query**는 이슈, 에이전트, 멤버, 인박스 같은 서버 데이터를 보관합니다.
+- **TanStack Query**는 태스크, 에이전트, 멤버, 인박스 같은 서버 데이터를 보관합니다.
 - **Zustand**는 필터, 초안, 팝업, 레이아웃 같은 클라이언트 상태를 보관합니다.
 - 현재 워크스페이스는 route가 결정하며 요청, 영속화 namespace, 재연결에 필요한 범위만 플랫폼 계층에 반영합니다.
 - React Context는 워크스페이스 ID와 navigation adapter 같은 플랫폼 plumbing만 전달합니다.
@@ -100,20 +102,20 @@ PostgreSQL은 비즈니스 데이터의 신뢰할 수 있는 원본입니다. Re
 
 Multica에는 서로 다른 두 WebSocket 경로가 있습니다.
 
-- `internal/realtime/`은 이슈, 댓글, 인박스 등의 변경을 사용자 클라이언트로 전달합니다.
+- `internal/realtime/`은 태스크, 댓글, 인박스 등의 변경을 사용자 클라이언트로 전달합니다.
 - `internal/daemonws/`는 데몬을 연결해 런타임을 깨우고 daemon RPC를 실행합니다.
 
-WebSocket은 지연을 줄이지만 최종 상태는 데이터베이스에 있습니다. 클라이언트는 재연결 후 query로 다시 동기화해야 합니다. 데몬도 polling 경로를 유지해 한 번의 연결 끊김으로 queued 태스크가 영구히 멈추지 않게 합니다.
+WebSocket은 지연을 줄이지만 최종 상태는 데이터베이스에 있습니다. 클라이언트는 재연결 후 query로 다시 동기화해야 합니다. 데몬도 polling 경로를 유지해 한 번의 연결 끊김으로 queued 작업이 영구히 멈추지 않게 합니다.
 
 ## 한 번의 실행 코드 경로
 
-1. 사용자가 이슈를 할당하거나 에이전트를 멘션하거나 자동화가 트리거됩니다.
-2. `TaskService`가 queued 태스크를 만들고 해당 런타임에 알립니다.
-3. 데몬이 daemon API를 통해 태스크를 가져갑니다.
-4. 서버가 태스크와 에이전트에 연결된 임시 자격 증명을 발급합니다.
+1. 사용자가 태스크를 할당하거나 에이전트를 멘션하거나 자동화가 트리거됩니다.
+2. `TaskService`가 queued 작업을 만들고 해당 런타임에 알립니다.
+3. 데몬이 daemon API를 통해 작업을 가져갑니다.
+4. 서버가 작업과 에이전트에 연결된 임시 자격 증명을 발급합니다.
 5. 데몬이 로컬 디렉터리를 준비하고 `pkg/agent`에서 해당 provider backend를 호출합니다.
 6. 도구가 로컬에서 실행되고 데몬이 진행 상황, 메시지, 최종 상태를 업로드합니다.
-7. 서버가 태스크와 이슈를 업데이트하고 실시간 이벤트로 클라이언트를 새로 고칩니다.
+7. 서버가 작업과 태스크를 업데이트하고 실시간 이벤트로 클라이언트를 새로 고칩니다.
 
 provider adapter 계층은 AI 코딩 도구별 시작, streaming 이벤트, 취소, 사용량 데이터를 통일하지만 로컬 디렉터리와 세션은 계속 데몬이 관리합니다.
 
@@ -121,7 +123,7 @@ provider adapter 계층은 AI 코딩 도구별 시작, streaming 이벤트, 취�
 
 비즈니스 query는 반드시 `workspace_id`로 제한해야 하며 요청이 워크스페이스 route에 들어가기 전에 멤버 자격을 확인합니다. `X-Workspace-ID`는 현재 워크스페이스를 선택하지만 권한 검사를 대체하지 않습니다.
 
-이슈 담당자는 polymorphic 관계이며 멤버, 에이전트, 스쿼드 중 하나를 가리킬 수 있습니다. 새 query, cache key, 실시간 이벤트를 추가할 때 리소스 ID만으로 전역에서 고유한 컨텍스트라고 가정하지 말고 워크스페이스와 담당자 유형을 유지해야 합니다.
+태스크 담당자는 polymorphic 관계이며 멤버, 에이전트, 스쿼드 중 하나를 가리킬 수 있습니다. 새 query, cache key, 실시간 이벤트를 추가할 때 리소스 ID만으로 전역에서 고유한 컨텍스트라고 가정하지 말고 워크스페이스와 담당자 유형을 유지해야 합니다.
 
 ## 다음 단계
 

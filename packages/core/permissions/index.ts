@@ -18,3 +18,4 @@ export {
   useAgentPermissions,
   useSkillPermissions,
 } from "./use-resource-permissions";
+export { useCurrentMember, useIsGuest } from "./use-current-member";

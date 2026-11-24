@@ -96,6 +96,67 @@ func TestPrepareQwenpawWorkspace(t *testing.T) {
 	}
 }
 
+func TestPrepareQwenpawWorkspacePreservesCollidingSkillSlugs(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := t.TempDir()
+	skills := []SkillContextForEnv{
+		{Name: "A B", Content: "# First\n\nfirst skill body"},
+		{Name: "A-B", Content: "# Second\n\nsecond skill body"},
+	}
+
+	if err := prepareQwenpawWorkspace(workspaceDir, skills, testLogger()); err != nil {
+		t.Fatalf("prepareQwenpawWorkspace failed: %v", err)
+	}
+
+	expectedSkills := map[string]string{
+		"a-b":         "first skill body",
+		"a-b-multica": "second skill body",
+	}
+	for slug, wantBody := range expectedSkills {
+		data, err := os.ReadFile(filepath.Join(workspaceDir, "skills", slug, "SKILL.md"))
+		if err != nil {
+			t.Fatalf("read SKILL.md for %q: %v", slug, err)
+		}
+		body := string(data)
+		if !frontmatterNameIs(body, slug) {
+			t.Errorf("SKILL.md for %q does not use its directory slug in frontmatter", slug)
+		}
+		if !strings.Contains(body, wantBody) {
+			t.Errorf("SKILL.md for %q does not contain %q", slug, wantBody)
+		}
+	}
+
+	data, err := os.ReadFile(filepath.Join(workspaceDir, "skill.json"))
+	if err != nil {
+		t.Fatalf("read skill.json: %v", err)
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatalf("unmarshal skill.json: %v", err)
+	}
+	skillsMap, ok := manifest["skills"].(map[string]any)
+	if !ok {
+		t.Fatal("skills is not a map")
+	}
+	if len(skillsMap) != len(expectedSkills) {
+		t.Fatalf("manifest has %d skills, want %d", len(skillsMap), len(expectedSkills))
+	}
+	for slug := range expectedSkills {
+		entry, ok := skillsMap[slug].(map[string]any)
+		if !ok {
+			t.Fatalf("skill entry %q is not a map", slug)
+		}
+		metadata, ok := entry["metadata"].(map[string]any)
+		if !ok {
+			t.Fatalf("metadata for %q is not a map", slug)
+		}
+		if metadata["name"] != slug {
+			t.Errorf("metadata name for %q = %v, want %q", slug, metadata["name"], slug)
+		}
+	}
+}
+
 // TestPrepareQwenpawWorkspaceEmpty verifies that an empty skills list creates
 // the workspace directory but removes any existing skills dir and manifest.
 func TestPrepareQwenpawWorkspaceEmpty(t *testing.T) {
@@ -269,7 +330,7 @@ func TestPrepareQwenpawWorkspaceReplace(t *testing.T) {
 	for _, slug := range []string{"bug-finder", "review-helper"} {
 		dir := filepath.Join(skillsDir, slug)
 		if _, err := os.Stat(dir); err != nil {
-				t.Fatalf("new skill dir %q should exist: %v", slug, err)
+			t.Fatalf("new skill dir %q should exist: %v", slug, err)
 		}
 		// Verify no collision suffix
 		if _, err := os.Stat(filepath.Join(skillsDir, slug+"-multica")); !os.IsNotExist(err) {

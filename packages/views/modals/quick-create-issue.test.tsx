@@ -1,11 +1,31 @@
-import { forwardRef, useImperativeHandle, useRef, useState, type ReactNode } from "react";
+import {
+  cloneElement,
+  forwardRef,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const mockQuickCreateIssue = vi.hoisted(() => vi.fn());
+type VoiceOptions = { insert: (text: string) => boolean; submit?: () => void };
+const voiceOptions = vi.hoisted(() => ({ last: null as VoiceOptions | null }));
+
+// Voice input has its own tests; here only its wiring to the editor matters.
+vi.mock("../voice", () => ({
+  useComposerVoice: (options: VoiceOptions) => {
+    voiceOptions.last = options;
+    return { rootRef: () => {}, onFocusCapture: () => {} };
+  },
+  VoiceDialogFooter: ({ children }: { children: ReactNode }) => children,
+  VoiceMicButton: () => null,
+}));
+const mockCreateCommentSubIssue = vi.hoisted(() => vi.fn());
 const mockSetLastActor = vi.hoisted(() => vi.fn());
-const mockSetLastProjectId = vi.hoisted(() => vi.fn());
 const mockSetQuickCreateFieldVisible = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockSetLastMode = vi.hoisted(() => vi.fn());
@@ -19,6 +39,37 @@ const mockSetManual = vi.hoisted(() => vi.fn());
 const mockSetAgent = vi.hoisted(() => vi.fn());
 const mockSetActiveMode = vi.hoisted(() => vi.fn());
 const mockClearDraft = vi.hoisted(() => vi.fn());
+
+const sourceContextPanelData = {
+  anchor_comment_id: "comment-source",
+  source_context_preview: {
+    source_issue: {
+      id: "issue-source",
+      identifier: "MUL-9",
+      number: 9,
+      title: "Source",
+      description: "Historical body",
+      created_at: "2026-08-20T00:00:00Z",
+      updated_at: "2026-08-21T00:00:00Z",
+      revision: 1,
+      attachments: [],
+    },
+    comment_thread: [{
+      id: "comment-source",
+      parent_id: null,
+      type: "comment",
+      content: "Historical comment",
+      author: { type: "member", id: "user-1", name: "Alice" },
+      created_at: "2026-08-21T00:00:00Z",
+      updated_at: "2026-08-21T00:00:00Z",
+      revision: 1,
+      attachments: [],
+    }],
+    anchor_comment_id: "comment-source",
+    capture_token: "sha256:preview-token",
+    limits: { comment_count: 1, text_bytes: 100, attachment_count: 0, attachment_bytes: 0 },
+  },
+};
 
 const emptyIssueDraft = () => ({
   shared: {
@@ -58,10 +109,12 @@ const mockQuickCreateStore = {
   lastActorType: null as "agent" | "squad" | null,
   lastActorId: null as string | null,
   setLastActor: mockSetLastActor,
-  lastProjectId: null as string | null,
-  setLastProjectId: mockSetLastProjectId,
   keepOpen: false,
   setKeepOpen: mockSetKeepOpen,
+  // Not part of the store's interface any more (MUL-5862), but an older
+  // build persisted it and localStorage still hands it back on rehydrate.
+  // Kept here so the tests can prove the panel ignores it.
+  lastProjectId: null as string | null,
 };
 
 const mockCreateSettingsStore = {
@@ -84,6 +137,16 @@ const mockSquadsData = vi.hoisted(
   () => ({ list: [] as Array<{ id: string; name: string; leader_id: string; archived_at: string | null }> }),
 );
 
+// Per-test override for the runtimes list. Non-admin members receive a
+// filtered list (ListVisibleAgentRuntimes) that omits other members' private
+// machines, so a selected agent can point at a runtime_id that is simply not
+// present here — the case that used to be misreported as "daemon has no CLI
+// version" (#7633). Tests flip this to drop the row and prove the panel no
+// longer blocks on it.
+const mockRuntimesData = vi.hoisted(
+  () => ({ list: [{ id: "runtime-1", metadata: { cli_version: "1.2.3" } }] as Array<{ id: string; provider?: string; metadata: Record<string, unknown> }> }),
+);
+
 // The real handle mints an id when it inserts the placeholder and hands it to
 // the uploader, which adopts it as the draft `clientUploadId`. Mocks must do
 // the same or the two records drift apart only in tests.
@@ -104,7 +167,7 @@ vi.mock("@tanstack/react-query", () => ({
           data: [{ id: "agent-1", name: "Bohan", archived_at: null, runtime_id: "runtime-1" }],
         };
       case "runtimes":
-        return { data: [{ id: "runtime-1", metadata: { cli_version: "1.2.3" } }] };
+        return { data: mockRuntimesData.list };
       case "projects":
         return mockProjectsQuery;
       default:
@@ -113,14 +176,29 @@ vi.mock("@tanstack/react-query", () => ({
   },
 }));
 
+const { ApiError } = vi.hoisted(() => {
+  class ApiErrorImpl extends Error {
+    readonly status: number;
+    readonly statusText: string;
+    readonly body?: unknown;
+    constructor(message: string, status: number, statusText: string, body?: unknown) {
+      super(message);
+      this.name = "ApiError";
+      this.status = status;
+      this.statusText = statusText;
+      this.body = body;
+    }
+  }
+  return { ApiError: ApiErrorImpl };
+});
+
 vi.mock("@multica/core/api", () => ({
   api: {
+    createCommentSubIssue: mockCreateCommentSubIssue,
     quickCreateIssue: mockQuickCreateIssue,
     uploadFile: mockApiUploadFile,
   },
-  ApiError: class ApiError extends Error {
-    body?: unknown;
-  },
+  ApiError,
 }));
 
 vi.mock("@multica/core/hooks", () => ({
@@ -134,7 +212,9 @@ vi.mock("@multica/core/paths", () => ({
   }),
 }));
 
-vi.mock("../navigation", () => ({
+// Mocked at the context module rather than the barrel so <AppLink> stays the
+// real component and its click contract is what the test exercises.
+vi.mock("../navigation/context", () => ({
   useNavigation: () => ({ push: mockNavigationPush }),
 }));
 
@@ -179,12 +259,13 @@ vi.mock("@multica/core/auth", () => ({
     (selector ? selector({ user: { id: "user-1" } }) : { user: { id: "user-1" } }),
 }));
 
-vi.mock("@multica/core/runtimes", () => ({
+// Use the REAL version-check helpers (not stubs): the fix hinges on how the
+// panel reacts when the selected runtime is absent vs. present-but-old, and a
+// constant-"ok" stub would mask exactly that. Only runtimeListOptions is
+// overridden so the query key routes to our mocked useQuery above.
+vi.mock("@multica/core/runtimes", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/runtimes")>()),
   runtimeListOptions: () => ({ queryKey: ["runtimes"] }),
-  checkQuickCreateCliVersion: () => ({ state: "ok", min: "1.0.0" }),
-  checkQuickCreateFieldsCliVersion: () => ({ state: "ok", min: "1.0.0" }),
-  readRuntimeCliVersion: () => "1.2.3",
-  MIN_QUICK_CREATE_CLI_VERSION: "1.0.0",
 }));
 
 
@@ -211,24 +292,38 @@ vi.mock("../issues/components", () => ({
 }));
 
 vi.mock("../projects/components/project-picker", () => ({
-  ProjectPicker: ({ projectId, onUpdate }: any) => (
-    <button type="button" data-testid="project-picker" onClick={() => onUpdate({ project_id: "proj-1" })}>
-      Project {projectId ?? "none"}
-    </button>
+  ProjectPicker: ({ projectId, onUpdate, triggerRender }: any) => (
+    <>
+      <button type="button" data-testid="project-picker" onClick={() => onUpdate({ project_id: "proj-1" })}>
+        Project {projectId ?? "none"}
+      </button>
+      {/* The caller's own trigger renders too — the pill carries the
+          quick-clear ×, which belongs to this panel, not to the picker. */}
+      {triggerRender}
+    </>
   ),
-}));
-
-vi.mock("../common/pill-button", () => ({
-  PillButton: ({ children, ...props }: any) => <button type="button" {...props}>{children}</button>,
 }));
 
 vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
   DropdownMenu: ({ children }: { children: ReactNode }) => <>{children}</>,
   DropdownMenuTrigger: ({ render }: { render: ReactNode }) => <>{render}</>,
   DropdownMenuContent: ({ children }: { children: ReactNode }) => <>{children}</>,
-  DropdownMenuItem: ({ children, onClick }: any) => (
-    <button type="button" onClick={onClick}>{children}</button>
-  ),
+  // `render` mirrors Base UI: an item can BE another element (an <AppLink>).
+  // The real Item gives that element role="button", which the queries match.
+  DropdownMenuItem: ({
+    children,
+    onClick,
+    render,
+  }: {
+    children: ReactNode;
+    onClick?: () => void;
+    render?: ReactElement<{ role?: string; children?: ReactNode }>;
+  }) =>
+    render ? (
+      cloneElement(render, { role: "button" }, children)
+    ) : (
+      <button type="button" onClick={onClick}>{children}</button>
+    ),
   DropdownMenuSeparator: () => null,
 }));
 
@@ -273,6 +368,12 @@ vi.mock("../editor", async () => {
       },
       uploadFile: runUpload,
       focus: vi.fn(),
+      insertText: (text: string) => {
+        valueRef.current += text;
+        setValue(valueRef.current);
+        onUpdate?.(valueRef.current);
+        return true;
+      },
       hasActiveUploads: () => inFlightRef.current > 0,
       // Placeholder rebuild contract: the real handle draws a card for an
       // upload the document is not showing and reports whether it landed.
@@ -367,14 +468,6 @@ vi.mock("../issues/components/pickers/property-picker", () => ({
   PickerEmpty: () => <div data-testid="picker-empty" />,
 }));
 
-vi.mock("@multica/ui/components/ui/button", () => ({
-  Button: ({ children, disabled, onClick }: { children: ReactNode; disabled?: boolean; onClick?: () => void }) => (
-    <button type="button" disabled={disabled} onClick={onClick}>
-      {children}
-    </button>
-  ),
-}));
-
 vi.mock("@multica/ui/components/ui/switch", () => ({
   Switch: ({ checked, onCheckedChange }: { checked: boolean; onCheckedChange: (v: boolean) => void }) => (
     <input
@@ -388,8 +481,8 @@ vi.mock("@multica/ui/components/ui/switch", () => ({
 vi.mock("@multica/ui/components/common/file-upload-button", () => ({
   // `disabled` is forwarded so the "can still queue another file mid-upload"
   // guarantee is actually assertable here (MUL-4808).
-  FileUploadButton: ({ disabled }: { disabled?: boolean }) => (
-    <button type="button" disabled={disabled}>Upload file</button>
+  FileUploadButton: ({ disabled, size }: { disabled?: boolean; size?: string }) => (
+    <button type="button" disabled={disabled} data-size={size}>Upload file</button>
   ),
 }));
 
@@ -403,9 +496,13 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../locales/en/common.json";
 import enModals from "../locales/en/modals.json";
 import enEditor from "../locales/en/editor.json";
+import enProjects from "../locales/en/projects.json";
+import enIssues from "../locales/en/issues.json";
 import { AgentCreatePanel } from "./quick-create-issue";
 
-const TEST_RESOURCES = { en: { common: enCommon, modals: enModals, editor: enEditor } };
+const TEST_RESOURCES = {
+  en: { common: enCommon, modals: enModals, editor: enEditor, projects: enProjects, issues: enIssues },
+};
 
 function renderPanel(props: React.ComponentProps<typeof AgentCreatePanel>) {
   return render(
@@ -416,6 +513,43 @@ function renderPanel(props: React.ComponentProps<typeof AgentCreatePanel>) {
 }
 
 describe("AgentCreatePanel", () => {
+  it("does not replace an explicitly cleared manual assignee with the filing agent", async () => {
+    const user = userEvent.setup();
+    renderPanel({ onClose: vi.fn(), onSwitchMode: vi.fn(), isExpanded: false, setIsExpanded: vi.fn(), data: { manual_assignee_cleared: true } });
+    await user.click(screen.getByRole("button", { name: /Switch to Manual/i }));
+    expect(mockIssueDraftStore.draft.manual.assigneeId).toBeUndefined();
+    expect(mockSetManual.mock.calls.some(([patch]) => "assigneeId" in patch)).toBe(false);
+  });
+
+  it("selects Qoder agents without the daemon CLI version gate", () => {
+    mockRuntimesData.list = [{ id: "runtime-1", provider: "qoder_cloud", metadata: {} }];
+    mockQuickCreateStore.lastActorType = "agent";
+    mockQuickCreateStore.lastActorId = "agent-1";
+    mockSquadsData.list = [{ id: "squad-1", name: "Cloud Squad", leader_id: "agent-1", archived_at: null }];
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+    expect(screen.getByRole("button", { name: /^Create$/i })).toBeEnabled();
+    expect(screen.queryByText(/daemon.*version/i)).not.toBeInTheDocument();
+    expect(screen.getAllByText("Bohan").length).toBeGreaterThan(0);
+    expect(screen.getByText("Cloud Squad")).toBeInTheDocument();
+  });
+
+  it("blocks Qoder agents when the prompt references an attachment", () => {
+    mockRuntimesData.list = [{ id: "runtime-1", provider: "qoder_cloud", metadata: {} }];
+    mockQuickCreateStore.lastActorType = "agent";
+    mockQuickCreateStore.lastActorId = "agent-1";
+    const attachmentId = "019ec09d-6222-722b-bdfa-427b105d80be";
+    mockIssueDraftStore.draft.agent.prompt = `See ![shot](/api/attachments/${attachmentId}/download)`;
+    mockIssueDraftStore.draft.shared.attachments = [{
+      clientUploadId: attachmentId,
+      status: "uploaded",
+      filename: "shot.png",
+      attachment: { id: attachmentId, url: "https://cdn.example/shot.png", filename: "shot.png" },
+    } as never];
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+    expect(screen.getByRole("button", { name: /^Create$/i })).toBeDisabled();
+    expect(screen.getByText(/can't read attachments/i)).toBeInTheDocument();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockQuickCreateStore.lastActorType = null;
@@ -441,7 +575,9 @@ describe("AgentCreatePanel", () => {
     mockProjectsQuery.data = [];
     mockProjectsQuery.isSuccess = true;
     mockSquadsData.list = [];
+    mockRuntimesData.list = [{ id: "runtime-1", metadata: { cli_version: "1.2.3" } }];
     mockQuickCreateIssue.mockResolvedValue(undefined);
+    mockCreateCommentSubIssue.mockResolvedValue({ task_id: "task-source-child" });
     mockApiUploadFile.mockResolvedValue({
       id: "019ec09d-6222-722b-bdfa-427b105d80be",
       workspace_id: "ws-test",
@@ -469,9 +605,25 @@ describe("AgentCreatePanel", () => {
 
     expect(
       screen.getByPlaceholderText(
-        'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+        'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
       ),
     ).toHaveValue("Persisted draft prompt");
+  });
+
+  it("prefers a prompt handed in by the opener over the draft and saves it to the draft", () => {
+    renderPanel({
+      onClose: vi.fn(),
+      isExpanded: false,
+      setIsExpanded: vi.fn(),
+      data: { prompt: "fix the Safari login callback 500" },
+    });
+
+    expect(
+      screen.getByPlaceholderText(
+        'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
+      ),
+    ).toHaveValue("fix the Safari login callback 500");
+    expect(mockIssueDraftStore.draft.agent.prompt).toBe("fix the Safari login callback 500");
   });
 
   it("restores unfinished actor, project, priority, and due-date selections after remount", async () => {
@@ -523,7 +675,7 @@ describe("AgentCreatePanel", () => {
     renderPanel({ onClose, isExpanded: false, setIsExpanded: vi.fn() });
 
     const editor = screen.getByPlaceholderText(
-      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+      'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
     );
 
     await user.clear(editor);
@@ -541,13 +693,24 @@ describe("AgentCreatePanel", () => {
     });
 
     expect(mockSetLastActor).toHaveBeenCalledWith("agent", "agent-1");
-    // No project picked → persisted project preference is cleared so the
-    // store stays in sync with the actual outgoing request.
-    expect(mockSetLastProjectId).toHaveBeenCalledWith(null);
     // A successful create ends the whole unified draft.
     expect(mockClearDraft).toHaveBeenCalled();
     expect(mockSetLastMode).toHaveBeenCalledWith("agent");
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("dictates into the prompt and lets voice send it to the agent", async () => {
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+    act(() => {
+      expect(voiceOptions.last?.insert("fix the inbox")).toBe(true);
+    });
+    expect(mockSetAgent).toHaveBeenLastCalledWith({ prompt: expect.stringContaining("fix the inbox") });
+    act(() => voiceOptions.last?.submit?.());
+    await waitFor(() => {
+      expect(mockQuickCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({ agent_id: "agent-1", prompt: expect.stringContaining("fix the inbox") }),
+      );
+    });
   });
 
   it("reveals optional fields from the overflow and submits their values", async () => {
@@ -570,24 +733,24 @@ describe("AgentCreatePanel", () => {
     });
   });
 
-  it("routes Customize fields to Settings → Issue, keeping the typed prompt", async () => {
+  it("routes Customize fields to Settings → Preferences → Issue creation, keeping the typed prompt", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
 
     renderPanel({ onClose, isExpanded: false, setIsExpanded: vi.fn() });
 
     const editor = screen.getByPlaceholderText(
-      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+      'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
     );
     fireEvent.change(editor, { target: { value: "Half-typed request" } });
     await user.click(screen.getByRole("button", { name: "Customize fields..." }));
 
     expect(mockSetAgent).toHaveBeenLastCalledWith({ prompt: "Half-typed request" });
     expect(onClose).toHaveBeenCalled();
-    expect(mockNavigationPush).toHaveBeenCalledWith("/ws-test/settings?tab=issue");
+    expect(mockNavigationPush).toHaveBeenCalledWith("/ws-test/settings?tab=preferences&section=issue");
   });
 
-  it("respects fields enabled in Settings → Issue by rendering them inline", () => {
+  it("respects fields enabled in Settings → Preferences → Issue creation by rendering them inline", () => {
     mockCreateSettingsStore.quickCreateFields = ["project", "priority", "due_date"];
 
     renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
@@ -629,7 +792,7 @@ describe("AgentCreatePanel", () => {
     const onClose = vi.fn();
     renderPanel({ onClose, isExpanded: false, setIsExpanded: vi.fn() });
     const editor = screen.getByPlaceholderText(
-      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+      'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
     );
     fireEvent.change(editor, { target: { value: "Draft A prompt" } });
     fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
@@ -660,7 +823,7 @@ describe("AgentCreatePanel", () => {
     );
     const view = renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
     const editor = screen.getByPlaceholderText(
-      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+      'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
     );
     fireEvent.change(editor, { target: { value: "Draft A prompt" } });
     fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
@@ -688,7 +851,7 @@ describe("AgentCreatePanel", () => {
     );
     const view = renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
     const editor = screen.getByPlaceholderText(
-      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+      'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
     );
     fireEvent.change(editor, { target: { value: "Draft A prompt" } });
     fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
@@ -713,7 +876,7 @@ describe("AgentCreatePanel", () => {
     await waitFor(() => expect(mockApiUploadFile).toHaveBeenCalled());
 
     const editor = screen.getByPlaceholderText(
-      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+      'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
     );
     await user.clear(editor);
     fireEvent.change(editor, {
@@ -753,7 +916,7 @@ describe("AgentCreatePanel", () => {
     await user.click(screen.getByRole("button", { name: /Frontend Squad/ }));
 
     const editor = screen.getByPlaceholderText(
-      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+      'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
     );
     await user.clear(editor);
     await user.type(editor, "Investigate the regression");
@@ -783,35 +946,124 @@ describe("AgentCreatePanel", () => {
     expect(screen.queryByRole("button", { name: /Orphan Squad/ })).toBeNull();
   });
 
-  // If the user's persisted `lastProjectId` points at a project that has
-  // been deleted (or moved to another workspace), the modal must not keep
-  // submitting that dead UUID. Once the projects query resolves and the id
-  // is missing, we clear BOTH local state and the persisted preference;
-  // dropping only local state would leave the next open re-seeding the same
-  // dead value and trigger the server's `project not found` rejection.
-  it("clears a stale persisted project once the projects list resolves without it", async () => {
-    mockQuickCreateStore.lastProjectId = "deleted-proj";
+  // A successful create used to persist its project, so the NEXT open
+  // re-seeded the pill with it and quietly filed the following issue into the
+  // same place. The target project belongs to the issue being filed, not to
+  // the user as a standing preference — the actor is the only thing that
+  // carries over now (MUL-5862).
+  describe("project is not remembered across creates", () => {
+    it("ignores a lastProjectId left behind by an older build", () => {
+      mockQuickCreateStore.lastProjectId = "proj-1";
+      mockProjectsQuery.data = [{ id: "proj-1", title: "Web", icon: null }];
+      mockProjectsQuery.isSuccess = true;
+
+      renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+      // Seeding from it is exactly the removed behavior — the pill must be
+      // empty, and with no value there is nothing to clear.
+      expect(screen.getByTestId("project-picker")).toHaveTextContent("Project none");
+      expect(screen.queryByRole("button", { name: "Clear project" })).not.toBeInTheDocument();
+    });
+
+    it("still submits the project picked in this session", async () => {
+      // Guard against over-removal: dropping the memory must not drop the
+      // field from the outgoing request.
+      const user = userEvent.setup();
+      mockProjectsQuery.data = [{ id: "proj-1", title: "Web", icon: null }];
+      mockProjectsQuery.isSuccess = true;
+
+      renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+      await user.click(screen.getByRole("button", { name: /Bohan/ }));
+      await user.click(screen.getByTestId("project-picker"));
+      await user.type(
+        screen.getByPlaceholderText(
+          'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
+        ),
+        "Ship it",
+      );
+      await user.click(screen.getByRole("button", { name: /^Create$/i }));
+
+      await waitFor(() => {
+        expect(mockQuickCreateIssue).toHaveBeenCalledWith(
+          expect.objectContaining({ project_id: "proj-1" }),
+        );
+      });
+      // The actor is still remembered — only the project memory is gone.
+      expect(mockSetLastActor).toHaveBeenCalledWith("agent", "agent-1");
+    });
+  });
+
+  // If the unfinished draft points at a project that has been deleted (or
+  // moved to another workspace), the modal must not keep submitting that dead
+  // UUID. Once the projects query resolves and the id is missing, we clear
+  // BOTH local state and the draft; dropping only local state would leave the
+  // next open re-seeding the same dead value and trigger the server's
+  // `project not found` rejection. The draft is now the only persisted copy —
+  // the last-create memory is gone (MUL-5862).
+  it("clears a stale drafted project once the projects list resolves without it", async () => {
+    mockIssueDraftStore.draft.shared.projectId = "deleted-proj";
     mockProjectsQuery.data = [];
     mockProjectsQuery.isSuccess = true;
 
     renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
 
     await waitFor(() => {
-      expect(mockSetLastProjectId).toHaveBeenCalledWith(null);
+      expect(mockSetShared).toHaveBeenCalledWith({ projectId: undefined });
+    });
+    expect(screen.getByTestId("project-picker")).toHaveTextContent("Project none");
+  });
+
+  // Dropping a project used to cost two clicks — open the popover, hit
+  // "No project" — because the pill had no clear affordance of its own
+  // (MUL-5862). The × is part of the pill, so it only exists once the field
+  // has a value to drop.
+  describe("project pill quick-clear", () => {
+    it("has no × while no project is selected", () => {
+      renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+      expect(screen.getByTestId("project-picker")).toHaveTextContent("Project none");
+      expect(screen.queryByRole("button", { name: "Clear project" })).not.toBeInTheDocument();
+    });
+
+    it("clears local state and the shared draft in one click", async () => {
+      const user = userEvent.setup();
+      mockIssueDraftStore.draft.shared.projectId = "proj-1";
+      mockProjectsQuery.data = [{ id: "proj-1", title: "Web", icon: null }];
+      mockProjectsQuery.isSuccess = true;
+
+      renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+      expect(screen.getByTestId("project-picker")).toHaveTextContent("Project proj-1");
+
+      await user.click(screen.getByRole("button", { name: "Clear project" }));
+
+      expect(screen.getByTestId("project-picker")).toHaveTextContent("Project none");
+      expect(mockSetShared).toHaveBeenCalledWith({ projectId: undefined });
+      // The × retires with the value it cleared.
+      expect(screen.queryByRole("button", { name: "Clear project" })).not.toBeInTheDocument();
     });
   });
 
   // Mirror case: while the query is still loading, we must NOT preemptively
-  // clear the persisted preference — that would wipe a perfectly valid
-  // selection on every open before the list ever renders.
-  it("keeps the persisted project while the projects list is still loading", () => {
-    mockQuickCreateStore.lastProjectId = "proj-1";
+  // clear the drafted project — that would wipe a perfectly valid selection
+  // on every open before the list ever renders.
+  it("keeps the drafted project while the projects list is still loading", () => {
+    mockIssueDraftStore.draft.shared.projectId = "proj-1";
     mockProjectsQuery.data = [];
     mockProjectsQuery.isSuccess = false;
 
     renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
 
-    expect(mockSetLastProjectId).not.toHaveBeenCalled();
+    expect(mockSetShared).not.toHaveBeenCalled();
+    expect(screen.getByTestId("project-picker")).toHaveTextContent("Project proj-1");
+  });
+
+  it("opens without a project when asked for none, over an unfinished draft's project", () => {
+    mockIssueDraftStore.draft.shared.projectId = "proj-1";
+
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn(), data: { project_id: null } });
+
+    expect(screen.queryByText("Project proj-1")).toBeNull();
   });
 
   // When the modal was opened from "Add sub issue" on an existing issue,
@@ -838,7 +1090,7 @@ describe("AgentCreatePanel", () => {
     expect(screen.getByTestId("agent-sub-issue-chip")).toBeInTheDocument();
 
     const editor = screen.getByPlaceholderText(
-      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+      'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
     );
     await user.clear(editor);
     await user.type(editor, "Investigate the regression");
@@ -862,6 +1114,60 @@ describe("AgentCreatePanel", () => {
   it("does not render the sub-issue chip when no parent is seeded", () => {
     renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
     expect(screen.queryByTestId("agent-sub-issue-chip")).toBeNull();
+  });
+
+  it("keeps captured context separate from the upstream prompt scroller", () => {
+    renderPanel({
+      onClose: vi.fn(),
+      isExpanded: false,
+      setIsExpanded: vi.fn(),
+      data: sourceContextPanelData,
+    });
+
+    const prompt = screen.getByPlaceholderText(
+      'Tell the agent what to do with this context, e.g. "continue investigating and fix the issue described here"',
+    ).parentElement;
+    const sourceContext = document.querySelector<HTMLElement>('[data-slot="source-context-preview"]');
+
+    expect(prompt).toHaveClass("flex-1", "min-h-[140px]", "overflow-y-auto");
+    expect(sourceContext).toHaveClass("shrink-0");
+    expect(prompt?.parentElement).toBe(sourceContext?.parentElement);
+    expect(prompt?.nextElementSibling).toBe(sourceContext);
+    expect(prompt).not.toContainElement(sourceContext);
+  });
+
+  it("submits source-context agent create through the dedicated endpoint", async () => {
+    const user = userEvent.setup();
+    renderPanel({
+      onClose: vi.fn(),
+      isExpanded: false,
+      setIsExpanded: vi.fn(),
+      data: {
+        ...sourceContextPanelData,
+        parent_issue_id: "parent-uuid-1",
+        parent_issue_identifier: "MUL-9",
+      },
+    });
+
+    const editor = screen.getByPlaceholderText(
+      'Tell the agent what to do with this context, e.g. "continue investigating and fix the issue described here"',
+    );
+    await user.clear(editor);
+    await user.type(editor, "Investigate with captured context");
+    await user.click(screen.getByRole("button", { name: /^Create$/i }));
+
+    await waitFor(() => expect(mockCreateCommentSubIssue).toHaveBeenCalledWith(
+      "comment-source",
+      {
+        mode: "agent",
+        capture_token: "sha256:preview-token",
+        quick_create: expect.objectContaining({
+          agent_id: "agent-1",
+          prompt: "Investigate with captured context",
+        }),
+      },
+    ));
+    expect(mockQuickCreateIssue).not.toHaveBeenCalled();
   });
 
   // MUL-4808 — Quick Create already gated Create; these pin the two gaps:
@@ -899,15 +1205,76 @@ describe("AgentCreatePanel", () => {
       // Each file is its own queue entry — making users wait for the first to
       // land before picking the second was a restriction with no race behind
       // it, and this issue explicitly removed it.
-      const submit = await screen.findByRole("button", { name: "Uploading…" });
+      const submit = await screen.findByRole("button", { name: "Uploading..." });
       expect(submit).toBeDisabled();
       expect(screen.getByRole("button", { name: "Upload file" })).not.toBeDisabled();
     });
   });
 
-  // MUL-4931 — this path files a real issue, so a double-fire is a duplicate
-  // issue, not a cosmetic glitch. `submitting` is state: two chords landing in
-  // one tick both read the pre-update value, so only a synchronously-flipped
+  // #7633 — a non-admin member's runtime list (ListVisibleAgentRuntimes) omits
+  // other members' private machines, so a selected agent can point at a
+  // runtime_id that is simply absent from the list the panel sees. That absence
+  // used to collapse into "daemon reported no CLI version" and wall the member
+  // off with a bogus upgrade prompt — even though the runtime is new enough and
+  // the same create succeeds the instant the user is promoted to admin (which
+  // only widens the list). The panel must NOT pre-block when it cannot see the
+  // runtime at all; the server's version gate (which reads the row by id,
+  // regardless of role) stays the trust boundary.
+  describe("version pre-check with an unlisted runtime (#7633)", () => {
+    it("does not block Create when the selected agent's runtime is not in the visible list", async () => {
+      const user = userEvent.setup();
+      // Member view: the agent's runtime-1 is a private machine they don't own,
+      // so it never appears in their list.
+      mockRuntimesData.list = [];
+
+      renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+      await user.click(screen.getByRole("button", { name: /Bohan/ }));
+
+      // No misleading "daemon has no CLI version" wall...
+      expect(
+        screen.queryByText(/doesn't report a CLI version/i),
+      ).not.toBeInTheDocument();
+      // ...and Create is reachable (gated only by prompt content, as usual).
+      await user.type(
+        screen.getByPlaceholderText(
+          'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
+        ),
+        "Ship it",
+      );
+      const create = screen.getByRole("button", { name: /^Create$/i });
+      expect(create).not.toBeDisabled();
+
+      await user.click(create);
+      await waitFor(() => expect(mockQuickCreateIssue).toHaveBeenCalledTimes(1));
+    });
+
+    it("still blocks a runtime that is visible but genuinely too old", async () => {
+      const user = userEvent.setup();
+      // The runtime IS in the list and reports a real, below-minimum version —
+      // the case the gate exists for. We must keep failing closed here.
+      mockRuntimesData.list = [{ id: "runtime-1", metadata: { cli_version: "0.0.1" } }];
+
+      renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+      await user.click(screen.getByRole("button", { name: /Bohan/ }));
+
+      expect(screen.getByText(/Create with agent needs ≥/i)).toBeInTheDocument();
+      await user.type(
+        screen.getByPlaceholderText(
+          'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
+        ),
+        "Ship it",
+      );
+      // Blocked but still hoverable so its tooltip can explain why.
+      const create = screen.getByRole("button", { name: /^Create$/i });
+      expect(create).toHaveAttribute("aria-disabled", "true");
+      await user.click(create);
+      expect(mockQuickCreateIssue).not.toHaveBeenCalled();
+    });
+  });
+
+
   // ref can gate it. Mirrors the manual-create regression.
   describe("send shortcut single-flight", () => {
     it("creates once when the send chord fires twice in the same tick", async () => {
@@ -920,7 +1287,7 @@ describe("AgentCreatePanel", () => {
       renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
 
       const editor = screen.getByPlaceholderText(
-        'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+        'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
       );
 
       // Both presses inside ONE act: React cannot re-render between them, so
@@ -938,6 +1305,36 @@ describe("AgentCreatePanel", () => {
       await act(async () => { release(undefined); });
 
       expect(mockQuickCreateIssue).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // MUL-6236 — the footer reflows to a 2x2 grid on phones. jsdom has no
+  // layout, so these pin the two structural preconditions the grid depends
+  // on rather than the rendered geometry.
+  describe("phone footer layout", () => {
+    beforeEach(() => {
+      renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+    });
+
+    it("keeps every footer control a direct child of the grid container", () => {
+      const switchToManual = screen.getByRole("button", { name: /Switch to Manual/i });
+      const create = screen.getByRole("button", { name: /^Create$/i });
+      const keepOpen = screen.getByRole("checkbox");
+      const attach = screen.getByRole("button", { name: "Upload file" });
+
+      const footer = switchToManual.parentElement;
+      expect(footer?.className).toContain("grid-cols-[auto_1fr]");
+      // From `sm` up the same children lay out as the original single row.
+      expect(footer?.className).toContain("sm:flex");
+
+      // Grid placement only sees direct children: re-wrapping any of these in
+      // a <div> collapses the 2x2 back to the jammed single row the bug
+      // report showed. The attach button keeps its own wrapper because it can
+      // gain a "N sent" badge — that wrapper is itself the first grid cell.
+      expect(create.parentElement).toBe(footer);
+      expect(keepOpen.parentElement?.parentElement).toBe(footer);
+      expect(attach.parentElement?.parentElement).toBe(footer);
+      expect(attach).not.toHaveAttribute("data-size");
     });
   });
 });

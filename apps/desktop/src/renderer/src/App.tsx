@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { CoreProvider } from "@multica/core/platform";
 import { pickLocale, type SupportedLocale } from "@multica/core/i18n";
 import { useAuthStore } from "@multica/core/auth";
-import { useWelcomeStore } from "@multica/core/onboarding";
-import { workspaceKeys, workspaceListOptions } from "@multica/core/workspace/queries";
+import { workspaceKeys } from "@multica/core/workspace/queries";
+import { useWorkspaceList } from "@multica/core/workspace";
 import { api } from "@multica/core/api";
 import { useHasOnboarded } from "@multica/core/paths";
 import { setCurrentWorkspace } from "@multica/core/platform";
@@ -12,19 +12,42 @@ import { ThemeProvider } from "@multica/ui/components/common/theme-provider";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { Toaster } from "@multica/ui/components/ui/sonner";
 import { DesktopLoginPage } from "./pages/login";
+import { DesktopAuthRecoveryPage } from "./pages/auth-recovery";
 import { DesktopShell } from "./components/desktop-layout";
 import { UpdateNotification } from "./components/update-notification";
+import { NativeContextMenu } from "./components/native-context-menu";
 import { IssueWindow } from "./components/issue-window";
+import { DesktopDevToolbar } from "./components/desktop-dev-toolbar";
+import {
+  DESKTOP_EMERGENCY_COPY,
+  resolveDesktopEmergencyLocale,
+} from "./components/emergency-copy";
 import { useTabStore } from "./stores/tab-store";
 import { useWindowOverlayStore } from "./stores/window-overlay-store";
+import { useOpenSettingsShortcut } from "./hooks/use-open-settings-shortcut";
+import { useTabSelectionShortcut } from "./hooks/use-tab-selection-shortcut";
 import { useDaemonIPCBridge } from "./platform/daemon-ipc-bridge";
+import { syncDaemonOnLogin } from "./platform/daemon-login-sync";
 import { createDesktopLocaleAdapter } from "./platform/i18n-adapter";
 import { captureEvent } from "@multica/core/analytics";
+import { AppearanceSync } from "@multica/views/common/appearance-sync";
 import { RESOURCES } from "@multica/views/locales";
 import { DesktopClientUsageReporter } from "./platform/client-usage-reporter";
 import { DiagnosticRouteReporter } from "./platform/diagnostic-route-reporter";
 import { flushFreezeBreadcrumb } from "./freeze-flush";
-import { DiagnosticsControlReporter } from "./platform/diagnostics-control-reporter";
+import { DesktopAuthSessionBridge } from "./platform/auth-session-bridge";
+import { WorkspaceWindowBridge } from "./platform/workspace-window-bridge";
+import { IssueDeepLinkBridge } from "./platform/issue-deep-link-bridge";
+import {
+  launchWorkspaceSlug,
+  otherWindowWorkspaces,
+  resolveWindowWorkspace,
+} from "./platform/workspace-windows";
+import {
+  tearDownOnLogout,
+  tearDownOnSessionExpiry,
+  type SessionTeardown,
+} from "./platform/session-teardown";
 
 // BCP-47 region tags for the <html lang> attribute, mirroring
 // apps/web/app/layout.tsx HTML_LANG. index.html ships a static lang="en";
@@ -34,8 +57,12 @@ import { DiagnosticsControlReporter } from "./platform/diagnostics-control-repor
 const HTML_LANG: Record<SupportedLocale, string> = {
   en: "en",
   "zh-Hans": "zh-CN",
+  "zh-Hant": "zh-TW",
   ko: "ko-KR",
   ja: "ja-JP",
+  fr: "fr-FR",
+  es: "es",
+  ru: "ru",
 };
 
 
@@ -77,13 +104,15 @@ function useCmdWCloseTab() {
 function IssueWindowContent() {
   const user = useAuthStore((state) => state.user);
   const isLoading = useAuthStore((state) => state.isLoading);
+  const authStatus = useAuthStore((state) => state.status);
   const context = window.desktopAPI.windowContext ?? { kind: "main" as const };
 
   if (context.kind !== "issue") return null;
+  if (authStatus === "recovering") return <DesktopAuthRecoveryPage />;
   if (isLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <MulticaIcon className="size-6 animate-pulse" />
+        <MulticaIcon mode="think" size={40} />
       </div>
     );
   }
@@ -91,28 +120,10 @@ function IssueWindowContent() {
   return user ? <IssueWindow context={context} /> : <DesktopLoginPage />;
 }
 
-/**
- * Keep the main process informed of the resolved account identity without
- * sharing credentials between renderer processes. Main uses this signal to
- * close dedicated windows on logout/account switch.
- */
-function DesktopAuthSessionBridge() {
-  const userId = useAuthStore((state) => state.user?.id ?? null);
-  const isLoading = useAuthStore((state) => state.isLoading);
-
-  useEffect(() => {
-    if (isLoading) return;
-    // Optional chaining keeps renderer HMR safe during the brief interval in
-    // which an old preload is still attached to the refreshed React tree.
-    window.desktopAPI.reportAuthSession?.(userId);
-  }, [isLoading, userId]);
-
-  return null;
-}
-
 function AppContent() {
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
+  const authStatus = useAuthStore((s) => s.status);
   const qc = useQueryClient();
 
   // Deep-link login runs loginWithToken → syncToken → listWorkspaces →
@@ -137,12 +148,12 @@ function AppContent() {
 
   // Listen for invite IDs delivered via deep link (multica://invite/<id>).
   // We open the overlay regardless of login state — if the user isn't logged
-  // in, InvitePage's queries will fail and render the "not found" state,
+  // in, InvitationsPage's queries will fail and render the "not found" state,
   // which is acceptable; the expected pre-flight happens in the web app
   // (login + next=/invite/... dance) before the deep link is ever dispatched.
   useEffect(() => {
     return window.desktopAPI.onInviteOpen((invitationId) => {
-      useWindowOverlayStore.getState().open({ type: "invite", invitationId });
+      useWindowOverlayStore.getState().open({ type: "invitations", invitationId });
     });
   }, []);
 
@@ -169,21 +180,26 @@ function AppContent() {
     });
   }, [qc]);
 
-  // Sync token and start the daemon whenever the user logs in.
+  // Sync token and start the daemon whenever the user logs in. The ordering
+  // inside syncDaemonOnLogin is load-bearing — see that module.
   useEffect(() => {
-    if (!user) return;
+    if (!user || !runtimeConfig) return;
     const token = localStorage.getItem("multica_token");
     if (!token) return;
     const userId = user.id;
     (async () => {
       try {
-        await window.daemonAPI.syncToken(token, userId);
-        await window.daemonAPI.autoStart();
+        await syncDaemonOnLogin(
+          window.daemonAPI,
+          runtimeConfig.apiUrl,
+          token,
+          userId,
+        );
       } catch (err) {
         console.error("Failed to sync daemon on login", err);
       }
     })();
-  }, [user]);
+  }, [user, runtimeConfig]);
 
   // When a user who started the session with zero workspaces creates their
   // first one, restart the daemon so it picks up the new workspace
@@ -192,8 +208,13 @@ function AppContent() {
   // account switches (user A logout → user B login) should not trigger a
   // daemon restart here — daemon-manager already restarts on user change
   // via syncToken.
-  const { data: workspaces = [], isFetched: workspaceListFetched } = useQuery({
-    ...workspaceListOptions(),
+  const {
+    workspaces,
+    ready: workspaceListReady,
+    unavailable: workspaceListUnavailable,
+    isFetching: workspaceListRetrying,
+    refetch: retryWorkspaceList,
+  } = useWorkspaceList({
     enabled: !!user,
   });
   const wsCount = workspaces.length;
@@ -225,7 +246,7 @@ function AppContent() {
   // /onboarding — we also clear the active workspace so the dashboard
   // doesn't render under the overlay with stale workspace context.
   useEffect(() => {
-    if (!user || !workspaceListFetched) return undefined;
+    if (!user || !workspaceListReady) return undefined;
     const { overlay, open } = useWindowOverlayStore.getState();
     if (overlay) return undefined;
     if (hasOnboarded && wsCount > 0) return undefined;
@@ -266,7 +287,7 @@ function AppContent() {
     }
     open({ type: "new-workspace" });
     return undefined;
-  }, [user, workspaceListFetched, wsCount, workspaces, hasOnboarded, qc]);
+  }, [user, workspaceListReady, wsCount, workspaces, hasOnboarded, qc]);
 
 
   // Validate persisted tab state against the current user's workspace list,
@@ -278,20 +299,22 @@ function AppContent() {
   // TabBar is subscribed to. useLayoutEffect flushes both renders before
   // the user sees anything, so there's no visible flicker.
   //
-  // Gate on `workspaceListFetched`: useQuery defaults `data` to `[]` before
-  // the first fetch, so without this guard we'd run validation against an
-  // empty slug set, wipe the persisted `activeWorkspaceSlug`, then fall
-  // back to `workspaces[0]` once the real list arrives — losing the user's
-  // last-opened workspace on every app start.
+  // Gate on authoritative data: pending and initial errors expose no data,
+  // while a failed background refetch retains the last successful list.
   useLayoutEffect(() => {
-    if (!workspaceListFetched) return;
-    const validSlugs = new Set(workspaces.map((w) => w.slug));
-    useTabStore.getState().validateWorkspaceSlugs(validSlugs);
+    if (!workspaceListReady) return;
+    const slugs = workspaces.map((w) => w.slug);
+    useTabStore.getState().validateWorkspaceSlugs(new Set(slugs));
     const { activeWorkspaceSlug, switchWorkspace } = useTabStore.getState();
-    if (!activeWorkspaceSlug && workspaces.length > 0) {
-      switchWorkspace(workspaces[0].slug);
-    }
-  }, [workspaces, workspaceListFetched]);
+    if (slugs.length === 0) return;
+    const target = resolveWindowWorkspace(
+      slugs,
+      activeWorkspaceSlug,
+      launchWorkspaceSlug(),
+      otherWindowWorkspaces(),
+    );
+    if (target && target !== activeWorkspaceSlug) switchWorkspace(target);
+  }, [workspaces, workspaceListReady]);
 
   // null = undecided (pre-login or list hasn't settled yet)
   // true  = session started with zero workspaces; next transition to >=1 triggers restart
@@ -302,7 +325,7 @@ function AppContent() {
       sessionStartedEmptyRef.current = null;
       return;
     }
-    if (!workspaceListFetched) return;
+    if (!workspaceListReady) return;
     if (sessionStartedEmptyRef.current === null) {
       sessionStartedEmptyRef.current = wsCount === 0;
       return;
@@ -311,26 +334,49 @@ function AppContent() {
       void window.daemonAPI.restart();
       sessionStartedEmptyRef.current = false;
     }
-  }, [user, workspaceListFetched, wsCount]);
+  }, [user, workspaceListReady, wsCount]);
 
+  if (authStatus === "recovering") {
+    return <DesktopAuthRecoveryPage />;
+  }
   if (isLoading || bootstrapping) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <MulticaIcon className="size-6 animate-pulse" />
+        <MulticaIcon mode="think" size={40} />
       </div>
+    );
+  }
+
+  if (workspaceListUnavailable) {
+    return (
+      <DesktopAuthRecoveryPage
+        isRetrying={workspaceListRetrying}
+        onRetry={() => {
+          void retryWorkspaceList();
+        }}
+      />
     );
   }
 
   return user ? <DesktopShell /> : <DesktopLoginPage />;
 }
 
-function BlockingRuntimeConfigError({ message }: { message: string }) {
+function BlockingRuntimeConfigError({
+  locale,
+  message,
+}: {
+  locale: SupportedLocale;
+  message: string;
+}) {
+  const copy = DESKTOP_EMERGENCY_COPY[resolveDesktopEmergencyLocale(locale)];
   return (
     <div className="flex h-screen items-center justify-center bg-background p-8 text-foreground">
       <div className="max-w-xl rounded-lg border bg-card p-6 shadow-sm">
-        <h1 className="text-title font-semibold">Desktop configuration error</h1>
+        <h1 className="text-title font-semibold">{copy.configTitle}</h1>
         <p className="mt-3 text-body text-muted-foreground">
-          Multica Desktop could not load <code>~/.multica/desktop.json</code>. Fix or remove the file and restart the app.
+          {copy.configDescriptionBefore}
+          <code>~/.multica/desktop.json</code>
+          {copy.configDescriptionAfter}
         </p>
         <pre className="mt-4 whitespace-pre-wrap rounded-md bg-muted p-3 text-caption text-muted-foreground">
           {message}
@@ -340,30 +386,24 @@ function BlockingRuntimeConfigError({ message }: { message: string }) {
   );
 }
 
-// On logout, wipe desktop-only in-memory state and stop the daemon so that
-// a subsequent login as a different user never inherits the previous user's
-// tabs, overlay, or credentials. Zustand persist only writes to localStorage;
-// useLogout clears the storage key, but the live stores stay populated until
-// we explicitly reset them here.
-async function handleDaemonLogout() {
-  // Report synchronously before async daemon cleanup so a rapidly closed main
-  // window cannot leave authenticated issue renderers behind.
-  window.desktopAPI.reportAuthSession?.(null);
-  useTabStore.getState().reset();
-  useWindowOverlayStore.getState().close();
-  // Drop any post-onboarding welcome signal so user B logging in next
-  // doesn't inherit user A's pending modal state.
-  useWelcomeStore.getState().reset();
-  try {
-    await window.daemonAPI.clearToken();
-  } catch {
-    // Best-effort — clearing is followed by stop which also hardens state.
-  }
-  try {
-    await window.daemonAPI.stop();
-  } catch {
-    // Daemon may already be stopped.
-  }
+// Binds the teardown steps to this renderer's real stores and IPC. Which of
+// them each path runs — and why logout stops the daemon while an expiry
+// leaves it running — lives in platform/session-teardown.
+const sessionTeardown: SessionTeardown = {
+  reportAuthSession: (userId) =>
+    window.desktopAPI.reportAuthSession?.(userId),
+  resetTabs: () => useTabStore.getState().reset(),
+  closeOverlay: () => useWindowOverlayStore.getState().close(),
+  clearDaemonToken: () => window.daemonAPI.clearToken(),
+  stopDaemon: () => window.daemonAPI.stop(),
+};
+
+function handleDaemonLogout() {
+  return tearDownOnLogout(sessionTeardown);
+}
+
+function handleSessionExpired() {
+  tearDownOnSessionExpiry(sessionTeardown);
 }
 
 export default function App() {
@@ -375,6 +415,12 @@ export default function App() {
   const windowContext =
     window.desktopAPI.windowContext ?? { kind: "main" as const };
   useCmdWCloseTab();
+  // Mounted at the App root for the same reason as Cmd+W: the chord has to
+  // work in every renderer state, not only inside the tab shell.
+  useOpenSettingsShortcut();
+  // Fixed browser-style tab selection is also owned by main so it remains
+  // available while focus sits inside editors, inputs, menus, or dialogs.
+  useTabSelectionShortcut();
 
   // Flush a freeze/crash breadcrumb the main process parked from a previous
   // session. A true hang or process death can't report itself when it happens
@@ -416,6 +462,7 @@ export default function App() {
   // with the Chinese-first fallback stack before the override kicks in.
   useLayoutEffect(() => {
     document.documentElement.lang = HTML_LANG[locale];
+    window.desktopAPI.setLocale?.(locale);
   }, [locale]);
 
   // React to OS-level language changes detected by main on focus regain.
@@ -438,6 +485,7 @@ export default function App() {
 
   return (
     <ThemeProvider>
+      <AppearanceSync />
       {runtimeConfigResult.ok ? (
         <CoreProvider
           apiBaseUrl={runtimeConfigResult.config.apiUrl}
@@ -445,14 +493,19 @@ export default function App() {
           onLogout={
             windowContext.kind === "main" ? handleDaemonLogout : undefined
           }
+          onSessionExpired={
+            windowContext.kind === "main" ? handleSessionExpired : undefined
+          }
           identity={identity}
           locale={locale}
           resources={resources}
           localeAdapter={localeAdapter}
         >
           <DesktopAuthSessionBridge />
+          <NativeContextMenu />
           {windowContext.kind === "main" && <DiagnosticRouteReporter />}
-          <DiagnosticsControlReporter />
+          {windowContext.kind === "main" && <WorkspaceWindowBridge />}
+          {windowContext.kind === "main" && <IssueDeepLinkBridge />}
           {windowContext.kind === "main" && (
             <DesktopClientUsageReporter
               apiUrl={runtimeConfigResult.config.apiUrl}
@@ -463,9 +516,18 @@ export default function App() {
           ) : (
             <AppContent />
           )}
+          {/* Opt-in dev status bar; see "Dev Toolbar" in CONTRIBUTING.md. */}
+          {import.meta.env.DEV &&
+            import.meta.env.VITE_DEV_TOOLBAR &&
+            windowContext.kind === "main" && (
+              <DesktopDevToolbar apiUrl={runtimeConfigResult.config.apiUrl} />
+            )}
         </CoreProvider>
       ) : (
-        <BlockingRuntimeConfigError message={runtimeConfigResult.error.message} />
+        <BlockingRuntimeConfigError
+          locale={locale}
+          message={runtimeConfigResult.error.message}
+        />
       )}
       <Toaster />
       {windowContext.kind === "main" && <UpdateNotification />}

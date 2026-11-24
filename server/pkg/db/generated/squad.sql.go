@@ -267,6 +267,42 @@ func (q *Queries) ListAllSquads(ctx context.Context, workspaceID pgtype.UUID) ([
 	return items, nil
 }
 
+const listInvolvedSquadIDs = `-- name: ListInvolvedSquadIDs :many
+SELECT s.id
+  FROM squad s
+  JOIN agent a ON a.id = s.leader_id
+ WHERE s.workspace_id = $1
+   AND a.workspace_id = $1
+   AND a.owner_id     = $2
+`
+
+type ListInvolvedSquadIDsParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+// Squads whose issues count as the user's agents' work: squads led by an agent
+// the user owns. Must match the squad branch of issueTableInvolvedPredicate.
+func (q *Queries) ListInvolvedSquadIDs(ctx context.Context, arg ListInvolvedSquadIDsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listInvolvedSquadIDs, arg.WorkspaceID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSquadMemberPreviewRows = `-- name: ListSquadMemberPreviewRows :many
 SELECT
     sm.squad_id,
@@ -410,10 +446,12 @@ type ListSquadMemberStatusRowsRow struct {
 }
 
 // Per-row join used to build the squad-members status view. One row per
-// (squad_member × active_task); members with no active task return a
+// (squad_member × in_flight_task); members with no in-flight task return a
 // single row with NULL task_* columns. Human members and agent members
 // with no agent row also return one row with NULL agent_/runtime_ columns.
-// The handler aggregates rows by member_id.
+// waiting_local_directory stays in the row set so its issue remains visible,
+// but the handler only treats dispatched/running rows as working because the
+// squad status vocabulary has no queued bucket.
 func (q *Queries) ListSquadMemberStatusRows(ctx context.Context, squadID pgtype.UUID) ([]ListSquadMemberStatusRowsRow, error) {
 	rows, err := q.db.Query(ctx, listSquadMemberStatusRows, squadID)
 	if err != nil {
@@ -652,7 +690,7 @@ func (q *Queries) RemoveSquadMember(ctx context.Context, arg RemoveSquadMemberPa
 }
 
 const transferSquadAssignees = `-- name: TransferSquadAssignees :exec
-UPDATE issue SET assignee_type = 'agent', assignee_id = $2, updated_at = now()
+UPDATE issue SET assignee_type = 'agent', assignee_id = $2, revision = revision + 1, updated_at = now()
 WHERE assignee_type = 'squad' AND assignee_id = $1
 `
 

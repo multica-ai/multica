@@ -27,6 +27,7 @@ type TaskDiskUsage struct {
 	Kind              string `json:"kind"`
 	ParentID          string `json:"parent_id,omitempty"`
 	ParentStatus      string `json:"parent_status"`
+	LocalDirectory    bool   `json:"local_directory,omitempty"`
 	AgeSeconds        int64  `json:"age_seconds"`
 	SizeBytes         int64  `json:"size_bytes"`
 	ArtifactSizeBytes int64  `json:"artifact_size_bytes"`
@@ -190,8 +191,8 @@ func ScanDiskUsage(workspacesRoot string, artifactPatterns []string) (DiskUsageR
 		if strings.HasPrefix(wsEntry.Name(), ".") {
 			continue
 		}
-		wsID := wsEntry.Name()
-		wsDir := filepath.Join(workspacesRoot, wsID)
+		physicalWorkspace := wsEntry.Name()
+		wsDir := filepath.Join(workspacesRoot, physicalWorkspace)
 		taskEntries, err := os.ReadDir(wsDir)
 		if err != nil {
 			continue
@@ -201,19 +202,20 @@ func ScanDiskUsage(workspacesRoot string, artifactPatterns []string) (DiskUsageR
 				continue
 			}
 			taskDir := filepath.Join(wsDir, t.Name())
-			usage := buildTaskUsage(taskDir, wsID, t.Name(), matcher)
+			usage := buildTaskUsage(taskDir, physicalWorkspace, t.Name(), matcher)
 
 			report.Tasks = append(report.Tasks, usage)
 			report.TotalSizeBytes += usage.SizeBytes
 			report.TotalArtifactSizeBytes += usage.ArtifactSizeBytes
 
-			ws, ok := wsAgg[wsID]
+			workspaceID := usage.WorkspaceID
+			ws, ok := wsAgg[workspaceID]
 			if !ok {
 				ws = &WorkspaceDiskUsage{
-					WorkspaceID:    wsID,
-					WorkspaceShort: ShortID(wsID),
+					WorkspaceID:    workspaceID,
+					WorkspaceShort: usage.WorkspaceShort,
 				}
-				wsAgg[wsID] = ws
+				wsAgg[workspaceID] = ws
 			}
 			ws.TaskCount++
 			ws.SizeBytes += usage.SizeBytes
@@ -313,10 +315,27 @@ func buildTaskUsage(taskDir, wsID, taskShort string, matcher artifactMatcher) Ta
 	}
 
 	metaPresent := false
+	if provenance, err := execenv.ReadManagedEnvProvenance(taskDir); err == nil && provenance != nil {
+		if workspaceID := strings.TrimSpace(provenance.WorkspaceID); workspaceID != "" {
+			usage.WorkspaceID = workspaceID
+			usage.WorkspaceShort = ShortID(workspaceID)
+		}
+	}
+	if owner, err := execenv.ReadEnvRootOwner(taskDir); err == nil && owner != nil {
+		if workspaceID := strings.TrimSpace(owner.WorkspaceID); workspaceID != "" {
+			usage.WorkspaceID = workspaceID
+			usage.WorkspaceShort = ShortID(workspaceID)
+		}
+	}
 	if meta, err := execenv.ReadGCMeta(taskDir); err == nil && meta != nil {
 		metaPresent = true
+		if workspaceID := strings.TrimSpace(meta.WorkspaceID); workspaceID != "" {
+			usage.WorkspaceID = workspaceID
+			usage.WorkspaceShort = ShortID(workspaceID)
+		}
 		usage.Kind = string(meta.Kind)
 		usage.ParentID = parentIDForMeta(meta)
+		usage.LocalDirectory = meta.LocalDirectory
 		if !meta.CompletedAt.IsZero() {
 			usage.AgeSeconds = int64(time.Since(meta.CompletedAt).Seconds())
 		} else if age, ok := gcMetaFileAge(taskDir); ok {
@@ -462,11 +481,19 @@ func taskSize(taskDir string, matcher artifactMatcher) (totalBytes int64, artifa
 		if path == absRoot {
 			return nil
 		}
-		// Symlinks: never followed, never counted. WalkDir already refuses to
-		// descend through them, but a symlinked file would otherwise show up
-		// here as a non-dir entry — drop it explicitly so the size stays
-		// consistent with cleanTaskArtifacts' refusal to touch link targets.
-		if entry.Type()&os.ModeSymlink != 0 {
+		// Links: never followed, never counted. WalkDir already refuses to
+		// descend through a symlink, but a symlinked file would otherwise show
+		// up here as a non-dir entry, and a Windows junction is reported as a
+		// directory WalkDir does descend (see linkedDirModes) — drop both
+		// explicitly so the size stays consistent with cleanTaskArtifacts'
+		// refusal to touch link targets.
+		if entry.Type()&linkedDirModes != 0 {
+			if entry.IsDir() {
+				// A junction: WalkDir would descend into the link target.
+				// SkipDir is safe here only because the entry is a directory —
+				// returning it for a file would skip the remaining siblings.
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if entry.IsDir() {

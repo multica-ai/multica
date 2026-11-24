@@ -19,6 +19,15 @@ export {
 } from "./needs-backfill";
 export { agentCompletedIssueCountOptions } from "./queries";
 export {
-  useWelcomeStore,
-  type WelcomeSignal,
-} from "./welcome-store";
+  bootstrapMika,
+  useBootstrapMika,
+  type BootstrapMikaInput,
+  type BootstrapMikaResult,
+  type MikaOnboardingLanguage,
+} from "./use-bootstrap-mika";
+export {
+  MIKA_SYSTEM_KEY,
+  isMikaAgent,
+  memberNeedsMikaSetup,
+  workspaceNeedsMika,
+} from "./mika";

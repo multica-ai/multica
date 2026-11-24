@@ -15,7 +15,8 @@ import (
 // mid-write if a future openclaw flushes a result and then appends more. 2s is
 // far longer than the gap inside one flush, and it costs nothing in the normal
 // case because a CLI that exits reaches EOF and never consults it.
-const openclawResultIdleGrace = 2 * time.Second
+// Package tests shorten it; production never reassigns it.
+var openclawResultIdleGrace = 2 * time.Second
 
 // openclawStdoutPoll is how often the reader re-evaluates its exit conditions.
 const openclawStdoutPoll = 100 * time.Millisecond
@@ -79,19 +80,36 @@ func readOpenclawStdout(r io.Reader, idleGrace time.Duration) (buf []byte, cutSh
 		chunk := make([]byte, 32*1024)
 		for {
 			n, rerr := r.Read(chunk)
-			if n > 0 {
+			// A terminating Read may carry data and its error at once:
+			// io.Reader permits returning n > 0 with io.EOF, and this function
+			// accepts any io.Reader. Publishing the bytes and the end of the
+			// stream in one critical section keeps that a single observation —
+			// split across two locks, a poll landing in between sees a buffer
+			// that has just become parseable while atEOF is still false, and
+			// reports a stream that in fact ended cleanly as cut short.
+			//
+			// os/exec's StdoutPipe is not one of those readers: *os.File
+			// reports the final bytes and the EOF as two adjacent reads, since
+			// only a zero-byte read is turned into io.EOF. Production
+			// therefore reaches this seam through the wider gap between those
+			// two reads, which still has to outlast idleGrace to fool the
+			// poll. The narrower race that does not need starvation at all is
+			// the one in the tick branch below.
+			if n > 0 || rerr != nil {
 				mu.Lock()
-				acc = append(acc, chunk[:n]...)
-				lastByte = time.Now()
+				if n > 0 {
+					acc = append(acc, chunk[:n]...)
+					lastByte = time.Now()
+				}
+				if rerr != nil {
+					if rerr != io.EOF {
+						readErr = rerr
+					}
+					atEOF = true
+				}
 				mu.Unlock()
 			}
 			if rerr != nil {
-				mu.Lock()
-				if rerr != io.EOF {
-					readErr = rerr
-				}
-				atEOF = true
-				mu.Unlock()
 				return
 			}
 		}
@@ -111,27 +129,27 @@ func readOpenclawStdout(r io.Reader, idleGrace time.Duration) (buf []byte, cutSh
 			return out, false, rerr
 
 		case <-ticker.C:
-			// Check the cheap conditions under the lock first and only copy the
-			// buffer once the silence threshold is actually met. Copying on every
-			// tick would allocate the whole accumulated result ~20 times per wait
-			// window, which for a large result is pure waste.
+			// Decide and copy in one critical section: the bytes returned must be
+			// the same bytes the silence check was made about. Snapshotting the
+			// conditions, releasing the lock and re-reading acc would let output
+			// that arrived in between complete the buffer, so a stream that had
+			// just ended cleanly would be reported as cut short.
+			//
+			// The cheap conditions are still checked first and the buffer copied
+			// only once the silence threshold is met. Copying on every tick would
+			// allocate the whole accumulated result ~20 times per wait window,
+			// which for a large result is pure waste.
 			mu.Lock()
-			size := len(acc)
-			last := lastByte
-			done := atEOF
+			var out []byte
+			// atEOF: let the <-finished branch report the final state.
+			if !atEOF && len(acc) > 0 && time.Since(lastByte) >= idleGrace {
+				out = append([]byte(nil), acc...)
+			}
 			mu.Unlock()
 
-			if done {
-				continue // let the <-finished branch report the final state
-			}
-			if size == 0 || time.Since(last) < idleGrace {
+			if out == nil {
 				continue
 			}
-
-			mu.Lock()
-			out := append([]byte(nil), acc...)
-			mu.Unlock()
-
 			if _, ok := parseWholeBufferOpenclawResult(out); !ok {
 				continue
 			}

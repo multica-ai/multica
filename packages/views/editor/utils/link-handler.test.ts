@@ -1,3 +1,8 @@
+import {
+  bindWorkspaceSlugLookup,
+  createQueryClient,
+} from "@multica/core/query-client";
+import { workspaceKeys } from "@multica/core/workspace/queries";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   openLink,
@@ -14,6 +19,16 @@ function navigatedPaths(): string[] {
 let dispatched: Event[] = [];
 let openSpy: ReturnType<typeof vi.spyOn>;
 
+let unbindWorkspaces: () => void = () => {};
+
+/** Give the current account membership of `slugs`, as the mounted provider would. */
+function withWorkspaces(slugs: string[]) {
+  const client = createQueryClient();
+  unbindWorkspaces = bindWorkspaceSlugLookup(client);
+  client.setQueryData(workspaceKeys.list(), slugs.map((slug) => ({ slug })));
+  return client;
+}
+
 beforeEach(() => {
   dispatched = [];
   vi.spyOn(window, "dispatchEvent").mockImplementation((e: Event) => {
@@ -24,6 +39,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  unbindWorkspaces();
   vi.restoreAllMocks();
 });
 
@@ -110,6 +126,28 @@ describe("openLink", () => {
     openLink("/other/issues/MUL-1", "acme", APP_ORIGIN);
     expect(navigatedPaths()).toEqual(["/other/issues/MUL-1"]);
   });
+
+  it("defaults the disposition to push and carries an explicit click intent through the event", () => {
+    openLink("/acme/issues/MUL-1", "acme", APP_ORIGIN);
+    openLink("/acme/issues/MUL-2", "acme", APP_ORIGIN, "background-tab");
+    const details = dispatched.map(
+      (e) => (e as CustomEvent<{ path: string; disposition: string }>).detail,
+    );
+    expect(details).toEqual([
+      { path: "/acme/issues/MUL-1", disposition: "push" },
+      { path: "/acme/issues/MUL-2", disposition: "background-tab" },
+    ]);
+  });
+
+  it("ignores the intent for an external URL — it always hands off to the browser", () => {
+    openLink("https://github.com/a/b", "acme", APP_ORIGIN, "foreground-tab");
+    expect(dispatched).toHaveLength(0);
+    expect(openSpy).toHaveBeenCalledWith(
+      "https://github.com/a/b",
+      "_blank",
+      "noopener,noreferrer",
+    );
+  });
 });
 
 describe("parseWorkspaceEntityLink", () => {
@@ -129,6 +167,15 @@ describe("parseWorkspaceEntityLink", () => {
     expect(
       parseWorkspaceEntityLink(`${APP_ORIGIN}/acme/issues/${ISSUE_ID}`, APP_ORIGIN),
     ).toEqual({ kind: "issue", id: ISSUE_ID, slug: "acme" });
+  });
+
+  it("parses a doc URL, the shape the doc page's Copy link produces", () => {
+    expect(
+      parseWorkspaceEntityLink(`${APP_ORIGIN}/acme/docs/${PROJECT_ID}`, APP_ORIGIN),
+    ).toEqual({ kind: "doc", id: PROJECT_ID, slug: "acme" });
+    // A doc's history page and a folder page are not the doc itself.
+    expect(parseWorkspaceEntityLink(`/acme/docs/${PROJECT_ID}/history`)).toBeNull();
+    expect(parseWorkspaceEntityLink(`/acme/docs/folders/${PROJECT_ID}`)).toBeNull();
   });
 
   it("parses a site-relative path without needing an app origin", () => {
@@ -237,5 +284,39 @@ describe("parseWorkspaceEntityLink", () => {
 
   it("returns null for a malformed percent-escape", () => {
     expect(parseWorkspaceEntityLink("/acme/projects/%E0%A4%A")).toBeNull();
+  });
+});
+
+
+describe("existing reserved-slug workspaces", () => {
+  it("keeps known reserved workspace links internal, including route-name slugs", () => {
+    const client = withWorkspaces(["dingtalk", "issues"]);
+    expect(toInternalAppPath(`${APP_ORIGIN}/dingtalk/issues/MUL-123`, APP_ORIGIN)).toBe(
+      "/dingtalk/issues/MUL-123",
+    );
+    expect(
+      parseWorkspaceEntityLink(`${APP_ORIGIN}/dingtalk/issues/MUL-123`, APP_ORIGIN),
+    ).toEqual({ kind: "issue", id: "MUL-123", slug: "dingtalk" });
+    openLink(`${APP_ORIGIN}/dingtalk/issues/MUL-123`, "acme", APP_ORIGIN);
+    openLink("/issues/issues/MUL-123", "acme", APP_ORIGIN);
+    expect(navigatedPaths()).toEqual(["/dingtalk/issues/MUL-123", "/issues/issues/MUL-123"]);
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(toInternalAppPath(`${APP_ORIGIN}/dingtalk/bind`, APP_ORIGIN)).toBeNull();
+    client.clear();
+    expect(toInternalAppPath(`${APP_ORIGIN}/dingtalk/issues/MUL-123`, APP_ORIGIN)).toBeNull();
+  });
+
+  it("still scopes legacy unscoped links whose route is not a reserved slug", () => {
+    withWorkspaces(["acme"]);
+    openLink("/chat", "acme", APP_ORIGIN);
+    openLink("/inbox", "acme", APP_ORIGIN);
+    expect(navigatedPaths()).toEqual(["/acme/chat", "/acme/inbox"]);
+  });
+
+  it("leaves a member workspace named after a route alone", () => {
+    withWorkspaces(["chat"]);
+    openLink("/chat/issues", "acme", APP_ORIGIN);
+    openLink("/chat", "acme", APP_ORIGIN);
+    expect(navigatedPaths()).toEqual(["/chat/issues", "/acme/chat"]);
   });
 });

@@ -1,7 +1,16 @@
-import { Cloud, Monitor, Wifi, WifiHigh, WifiOff } from "lucide-react";
+import {
+  Cloud,
+  Laptop,
+  Monitor,
+  Wifi,
+  WifiHigh,
+  WifiOff,
+  type IconComponent,
+} from "@multica/ui/icons";
 import { Badge } from "@multica/ui/components/ui/badge";
 import type { RuntimeHealth } from "@multica/core/runtimes";
 import { ProviderLogo } from "./provider-logo";
+import type { RuntimeMachine } from "./runtime-machines";
 import { useT } from "../../i18n";
 
 export function RuntimeModeIcon({ mode }: { mode: string }) {
@@ -9,6 +18,42 @@ export function RuntimeModeIcon({ mode }: { mode: string }) {
     <Cloud className="h-3.5 w-3.5" />
   ) : (
     <Monitor className="h-3.5 w-3.5" />
+  );
+}
+
+export function machineIcon(
+  machine: Pick<RuntimeMachine, "isCurrent" | "section">,
+): IconComponent {
+  if (machine.isCurrent) return Laptop;
+  return machine.section === "cloud" ? Cloud : Monitor;
+}
+
+export function shortDaemonId(id: string | null): string | null {
+  if (!id) return null;
+  if (id.length <= 10) return id;
+  return `${id.slice(0, 6)}··${id.slice(-2)}`;
+}
+
+export function ProviderIconStack({ providers }: { providers: string[] }) {
+  const visible = providers.slice(0, 4);
+  const extra = providers.length - visible.length;
+  if (visible.length === 0) return null;
+  return (
+    <span className="flex min-w-0 items-center -space-x-1">
+      {visible.map((provider) => (
+        <span
+          key={provider}
+          className="inline-flex h-5 w-5 items-center justify-center rounded-xs bg-background ring-1 ring-border"
+        >
+          <ProviderLogo provider={provider} className="h-3.5 w-3.5" />
+        </span>
+      ))}
+      {extra > 0 && (
+        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-xs bg-muted px-1 text-micro font-medium text-muted-foreground ring-1 ring-border">
+          +{extra}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -27,13 +72,12 @@ export function ProviderChip({ provider }: { provider: string }) {
 // The mapping intentionally reuses our existing tokens (success/warning/
 // muted-foreground/destructive) instead of introducing runtime-specific
 // colours — keeps the palette small and consistent with Skills.
-// Maps each derived 4-state runtime health to a semantic colour class.
 // Labels flow through useT — see useHealthLabel below.
 const HEALTH_VISUAL: Record<RuntimeHealth, { dot: string; tone: string }> = {
   online: { dot: "bg-success", tone: "bg-success/10 text-success" },
   recently_lost: { dot: "bg-warning", tone: "bg-warning/10 text-warning" },
   offline: { dot: "bg-muted-foreground/40", tone: "bg-muted text-muted-foreground" },
-  about_to_gc: { dot: "bg-destructive", tone: "bg-destructive/10 text-destructive" },
+  long_offline: { dot: "bg-destructive", tone: "bg-destructive/10 text-destructive" },
 };
 
 export function HealthDot({
@@ -65,7 +109,7 @@ export function HealthDot({
 //   online        → Wifi (full bars, success)
 //   recently_lost → WifiHigh (fewer bars, warning) — transient hiccup
 //   offline       → WifiOff (slashed, muted) — long unreachable
-//   about_to_gc   → WifiOff (slashed, destructive) — sweeper coming
+//   long_offline  → WifiOff (slashed, destructive) — prolonged outage
 const HEALTH_ICON: Record<
   RuntimeHealth,
   { Icon: typeof Wifi; tone: string }
@@ -73,7 +117,7 @@ const HEALTH_ICON: Record<
   online: { Icon: Wifi, tone: "text-success" },
   recently_lost: { Icon: WifiHigh, tone: "text-warning" },
   offline: { Icon: WifiOff, tone: "text-muted-foreground" },
-  about_to_gc: { Icon: WifiOff, tone: "text-destructive" },
+  long_offline: { Icon: WifiOff, tone: "text-destructive" },
 };
 
 export function HealthIcon({
@@ -97,7 +141,7 @@ const HEALTH_LABEL_EN: Record<RuntimeHealth, string> = {
   online: "Online",
   recently_lost: "Recently lost",
   offline: "Offline",
-  about_to_gc: "About to GC",
+  long_offline: "Long offline",
 };
 
 export function healthLabel(health: RuntimeHealth | "loading"): string {

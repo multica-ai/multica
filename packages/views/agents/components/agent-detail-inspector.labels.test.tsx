@@ -12,8 +12,8 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
 // The picker is the only way agent labels ever reached the agent settings
 // form. Mocking it means the assertion below fails loudly if the row is
 // re-added, instead of passing because a real picker rendered nothing.
-vi.mock("../../labels/resource-label-picker", () => ({
-  ResourceLabelPicker: () => <div data-testid="resource-label-picker" />,
+vi.mock("../../issues/components/pickers/label-picker", () => ({
+  LabelPicker: () => <div data-testid="label-picker" />,
 }));
 
 vi.mock("../../common/avatar-upload-control", () => ({
@@ -45,7 +45,9 @@ const agent = {
 } as Agent;
 
 describe("AgentDetailInspector labels", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+  });
 
   // Agent labels were removed from the product (MUL-5600). Label Settings no
   // longer manages an agent catalog, so an attach-only picker here would be a
@@ -66,7 +68,7 @@ describe("AgentDetailInspector labels", () => {
     // Sanity check: the profile card actually rendered.
     expect(screen.getByLabelText("Name")).toBeInTheDocument();
 
-    expect(screen.queryByTestId("resource-label-picker")).toBeNull();
+    expect(screen.queryByTestId("label-picker")).toBeNull();
     expect(screen.queryByText("Labels")).toBeNull();
   });
 });

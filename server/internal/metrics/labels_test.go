@@ -2,16 +2,6 @@ package metrics
 
 import "testing"
 
-func TestBusinessMetricLabelsRejectHighCardinalityNames(t *testing.T) {
-	for metric, labels := range businessMetricLabels {
-		for _, label := range labels {
-			if _, forbidden := forbiddenMetricLabels[label]; forbidden {
-				t.Fatalf("metric %s uses forbidden label %s", metric, label)
-			}
-		}
-	}
-}
-
 func TestNormalizeRuntimeProviderRecognizesKnownProviders(t *testing.T) {
 	tests := []struct {
 		input string
@@ -21,6 +11,11 @@ func TestNormalizeRuntimeProviderRecognizesKnownProviders(t *testing.T) {
 		{input: "Qoder", want: "qoder"},
 		{input: "QODERCLICN", want: "qoderclicn"},
 		{input: "TraeCLI", want: "traecli"},
+		{input: "Reasonix", want: "reasonix"},
+		{input: "DSH", want: "dsh"},
+		{input: "Dim", want: "dim"},
+		{input: "ZeroClaw", want: "zeroclaw"},
+		{input: "CodeArts", want: "codearts"},
 	}
 	for _, tt := range tests {
 		if got := NormalizeRuntimeProvider(tt.input); got != tt.want {

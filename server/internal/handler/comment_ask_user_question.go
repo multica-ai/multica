@@ -37,6 +37,7 @@ type AskUserQuestionOption struct {
 //   - single-select: SelectedIndex (kept for backward compat with old rows)
 //   - multi-select:  SelectedIndices
 //   - custom input:  CustomText (when the user picked the auto-appended "Other")
+//
 // A multi-select + allow_custom question may set both SelectedIndices and CustomText.
 type AskUserQuestionAnswer struct {
 	State           string `json:"state"` // "submitted" | "ignored"
@@ -154,6 +155,12 @@ func (h *Handler) AnswerAskUserQuestion(w http.ResponseWriter, r *http.Request) 
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "comment not found")
+		return
+	}
+	// The workspace check above only proves membership; the issue may live in a
+	// project this member cannot see. Respond 404 rather than 400 so the route
+	// does not leak the comment's existence/type across a project boundary.
+	if !h.requireIssueIDVisible(w, r, workspaceID, comment.IssueID, http.StatusNotFound, "comment not found") {
 		return
 	}
 	if comment.Type != commentMetadataKey {
@@ -288,10 +295,11 @@ func (h *Handler) AnswerAskUserQuestion(w http.ResponseWriter, r *http.Request) 
 
 // buildSelectedSummary renders the human-readable selection for the reply
 // text, unifying single-select / multi-select / custom-input. Examples:
-//   single:          "Redis"
-//   multi:           "Redis、Local"
-//   multi + custom:  "Redis、其他:自定义方案"
-//   custom only:     "其他:自定义方案"
+//
+//	single:          "Redis"
+//	multi:           "Redis、Local"
+//	multi + custom:  "Redis、其他:自定义方案"
+//	custom only:     "其他:自定义方案"
 func buildSelectedSummary(aq *AskUserQuestionMeta, answer *AskUserQuestionAnswer) string {
 	labelAt := func(i int) string {
 		if i >= 0 && i < len(aq.Options) {
@@ -344,7 +352,8 @@ func (h *Handler) postAskUserQuestionReply(r *http.Request, parent db.Comment, a
 		return
 	}
 
-	resp := commentToResponse(reply, nil, nil)
+	resp := commentToResponse(reply.Comment(), nil, nil)
+	resp.IssueRevision = reply.IssueRevision
 	workspaceID := uuidToString(parent.WorkspaceID)
 	issue, issueErr := h.Queries.GetIssue(r.Context(), parent.IssueID)
 	if issueErr == nil {
@@ -359,6 +368,6 @@ func (h *Handler) postAskUserQuestionReply(r *http.Request, parent db.Comment, a
 		// comment path's mention-driven enqueue. The member confirming is the
 		// originator; there is no autopilot delegation and no agents to
 		// suppress on this member-authored reply.
-		h.triggerTasksForComment(r.Context(), issue, reply, &parent, "member", memberUserID, memberUserID, "", nil)
+		h.triggerTasksForComment(r.Context(), issue, reply.Comment(), &parent, "member", memberUserID, memberUserID, nil, commentSteerRequest{})
 	}
 }

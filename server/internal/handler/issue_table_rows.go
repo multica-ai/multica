@@ -35,12 +35,16 @@ type resolvedIssueTableSort struct {
 	direction  string
 	castType   string
 	nullsLast  bool
+	idOnlyTie  bool
 }
 
 func (sort resolvedIssueTableSort) orderBy() string {
 	orderBy := sort.expression + " " + strings.ToUpper(sort.direction)
 	if sort.nullsLast {
 		orderBy += " NULLS LAST"
+	}
+	if sort.idOnlyTie {
+		return orderBy + ", i.id DESC"
 	}
 	return orderBy + ", i.created_at DESC, i.id DESC"
 }
@@ -49,8 +53,7 @@ func (sort resolvedIssueTableSort) cursorPredicate(w http.ResponseWriter, cursor
 	if cursor == nil {
 		return "TRUE", true
 	}
-	createdAt, err := time.Parse(time.RFC3339Nano, cursor.RowCreatedAt)
-	if err != nil || cursor.RowID == "" {
+	if cursor.RowID == "" {
 		writeError(w, http.StatusBadRequest, "invalid cursor")
 		return "", false
 	}
@@ -59,9 +62,17 @@ func (sort resolvedIssueTableSort) cursorPredicate(w http.ResponseWriter, cursor
 		writeError(w, http.StatusBadRequest, "invalid cursor")
 		return "", false
 	}
-	createdRef := addArg(createdAt)
 	idRef := addArg(rowID)
-	tie := fmt.Sprintf("(i.created_at < %s::timestamptz OR (i.created_at = %s::timestamptz AND i.id < %s::uuid))", createdRef, createdRef, idRef)
+	tie := fmt.Sprintf("i.id < %s::uuid", idRef)
+	if !sort.idOnlyTie {
+		createdAt, err := time.Parse(time.RFC3339Nano, cursor.RowCreatedAt)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid cursor")
+			return "", false
+		}
+		createdRef := addArg(createdAt)
+		tie = fmt.Sprintf("(i.created_at < %s::timestamptz OR (i.created_at = %s::timestamptz AND i.id < %s::uuid))", createdRef, createdRef, idRef)
+	}
 	if cursor.SortIsNull {
 		if !sort.nullsLast || cursor.SortValue != nil {
 			writeError(w, http.StatusBadRequest, "invalid cursor")
@@ -116,7 +127,13 @@ func (sort resolvedIssueTableSort) cursorPredicate(w http.ResponseWriter, cursor
 	return predicate, true
 }
 
-func (h *Handler) issueTableOrderBy(w http.ResponseWriter, r *http.Request, workspaceID string, sortRequest issueTableSortRequest) (resolvedIssueTableSort, bool) {
+func (h *Handler) issueTableOrderBy(
+	w http.ResponseWriter,
+	r *http.Request,
+	workspaceID pgtype.UUID,
+	sortRequest issueTableSortRequest,
+	addArg func(any) string,
+) (resolvedIssueTableSort, bool) {
 	sortField := strings.TrimSpace(sortRequest.Field)
 	if sortField == "" {
 		sortField = "position"
@@ -134,18 +151,29 @@ func (h *Handler) issueTableOrderBy(w http.ResponseWriter, r *http.Request, work
 	case "created_at", "updated_at":
 		resolved.expression = "i." + sortField
 		resolved.castType = "timestamptz"
+	case "last_activity":
+		resolved.expression = "i.last_activity_at"
+		resolved.castType = "timestamptz"
+		resolved.nullsLast = true
+		resolved.idOnlyTie = true
 	case "start_date", "due_date":
 		resolved.expression = "i." + sortField
 		resolved.castType = "date"
 		resolved.nullsLast = true
 	case "status":
-		resolved.expression = "CASE i.status WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'done' THEN 4 WHEN 'blocked' THEN 5 WHEN 'cancelled' THEN 6 ELSE 7 END"
+		expr, err := h.issueStatusSortExpression(r.Context(), workspaceID, addArg)
+		if err != nil {
+			slog.Warn("resolve table status sort failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeIssueTableQueryFailure(w, r, "failed to resolve table sort")
+			return resolvedIssueTableSort{}, false
+		}
+		resolved.expression = expr
 		resolved.castType = "integer"
 	case "priority":
 		resolved.expression = "CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"
 		resolved.castType = "integer"
 	default:
-		expr, handled, err := h.propertySortExpr(r, workspaceID, sortField)
+		expr, handled, err := h.propertySortExpr(r, util.UUIDToString(workspaceID), sortField)
 		if !handled {
 			writeError(w, http.StatusBadRequest, "invalid query.sort.field")
 			return resolvedIssueTableSort{}, false
@@ -172,6 +200,9 @@ func (h *Handler) issueTableOrderBy(w http.ResponseWriter, r *http.Request, work
 	direction := strings.ToLower(strings.TrimSpace(sortRequest.Direction))
 	if direction == "" {
 		direction = "asc"
+		if resolved.idOnlyTie {
+			direction = "desc"
+		}
 	}
 	if direction != "asc" && direction != "desc" {
 		writeError(w, http.StatusBadRequest, "invalid query.sort.direction")
@@ -204,18 +235,28 @@ func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "database is unavailable")
 		return
 	}
-	baseHandler := h
 	var request issueTableRowsRequest
 	if !decodeIssueTableJSON(w, r, &request) {
 		return
 	}
+	response, ok := h.queryIssueTableRows(w, r, request)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+// queryIssueTableRows runs one table rows request. On failure it has already
+// written the error response and returns ok=false.
+func (h *Handler) queryIssueTableRows(w http.ResponseWriter, r *http.Request, request issueTableRowsRequest) (issueTableRowsResponse, bool) {
+	baseHandler := h
 	r, cancel := withIssueTableQueryTimeout(r)
 	defer cancel()
 	snapshot, tx, err := h.beginIssueTableSnapshot(r.Context())
 	if err != nil {
 		slog.Warn("ListIssueTableRows snapshot failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeIssueTableQueryFailure(w, r, "failed to start table query")
-		return
+		return issueTableRowsResponse{}, false
 	}
 	committed := false
 	defer func() {
@@ -226,22 +267,22 @@ func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
 	h = snapshot
 	limit, cursor, ok := normalizeIssueTablePage(w, request.Page)
 	if !ok {
-		return
+		return issueTableRowsResponse{}, false
 	}
 	groupKey, ok := normalizeIssueTableGroupKey(w, request.Group, request.GroupKey)
 	if !ok {
-		return
+		return issueTableRowsResponse{}, false
 	}
 	if !request.Hierarchy.Enabled && request.ParentID != nil {
 		writeError(w, http.StatusBadRequest, "parent_id requires hierarchy.enabled=true")
-		return
+		return issueTableRowsResponse{}, false
 	}
 	compiled, ok := h.compileIssueTableQuery(w, r, request.Query)
 	if !ok {
-		return
+		return issueTableRowsResponse{}, false
 	}
 	if !issueTableCursorMatches(w, cursor, compiled.fingerprint, groupKey, request.ParentID) {
-		return
+		return issueTableRowsResponse{}, false
 	}
 	branchIdentity := issueTableGroupIdentity(request.Group) + ":hierarchy=" + strconv.FormatBool(request.Hierarchy.Enabled)
 	if cursor != nil && cursor.BranchIdentity != branchIdentity {
@@ -249,21 +290,26 @@ func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
 			"error":   "cursor_query_mismatch",
 			"message": "cursor does not belong to this table branch",
 		})
-		return
+		return issueTableRowsResponse{}, false
 	}
 	group, ok := h.resolveIssueTableGroup(w, r, compiled.workspaceID, request.Group, true)
 	if !ok {
-		return
+		return issueTableRowsResponse{}, false
 	}
-	resolvedSort, ok := h.issueTableOrderBy(w, r, util.UUIDToString(compiled.workspaceID), request.Query.Sort)
-	if !ok {
-		return
-	}
-
 	args := append([]any(nil), compiled.args...)
 	addArg := func(value any) string {
 		args = append(args, value)
 		return "$" + strconv.Itoa(len(args))
+	}
+	resolvedSort, ok := h.issueTableOrderBy(
+		w,
+		r,
+		compiled.workspaceID,
+		request.Query.Sort,
+		addArg,
+	)
+	if !ok {
+		return issueTableRowsResponse{}, false
 	}
 	predicateKey := ""
 	if groupKey != nil {
@@ -271,7 +317,7 @@ func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
 	}
 	groupPredicate, ok := group.predicate(w, predicateKey, addArg)
 	if !ok {
-		return
+		return issueTableRowsResponse{}, false
 	}
 	branchPredicate := "TRUE"
 	if request.Hierarchy.Enabled {
@@ -284,7 +330,7 @@ func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
 			parentUUID, err := util.ParseUUID(*request.ParentID)
 			if err != nil {
 				writeError(w, http.StatusBadRequest, "invalid parent_id")
-				return
+				return issueTableRowsResponse{}, false
 			}
 			parentRef := addArg(parentUUID)
 			branchPredicate = fmt.Sprintf("i.parent_issue_id = %s::uuid AND EXISTS (SELECT 1 FROM membership parent WHERE parent.id = %s::uuid)", parentRef, parentRef)
@@ -292,7 +338,7 @@ func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
 	}
 	cursorPredicate, ok := resolvedSort.cursorPredicate(w, cursor, addArg)
 	if !ok {
-		return
+		return issueTableRowsResponse{}, false
 	}
 	limitRef := addArg(limit + 1)
 
@@ -316,7 +362,14 @@ func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
 		group.primary != nil &&
 		group.primary.kind == "parent" &&
 		group.secondaryFiltered {
-		visibleRef := addArg(group.secondaryValues)
+		visibleKeys := group.secondaryValues
+		if group.secondaryCategory {
+			visibleKeys = nil
+			for _, category := range group.secondaryValues {
+				visibleKeys = append(visibleKeys, group.categoryKeysFor(category)...)
+			}
+		}
+		visibleRef := addArg(visibleKeys)
 		ctePrefix += fmt.Sprintf(`membership AS NOT MATERIALIZED (
   SELECT i.*
   FROM issue i
@@ -347,9 +400,10 @@ func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
 
 	query := fmt.Sprintf(`%s
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
-       i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
+       i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.requester_user_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at,
-	       i.updated_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
+	       i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
+	       i.revision, i.duplicate_of_issue_id,
 	       %s AS direct_child_count, i.table_sort_key
 	FROM page i
 	ORDER BY %s`, cte, childCountExpr, resolvedSort.orderBy())
@@ -358,7 +412,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 	if err != nil {
 		slog.Warn("ListIssueTableRows query failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeIssueTableQueryFailure(w, r, "failed to list table rows")
-		return
+		return issueTableRowsResponse{}, false
 	}
 	defer rows.Close()
 
@@ -381,28 +435,32 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 			&row.issue.AssigneeID,
 			&row.issue.CreatorType,
 			&row.issue.CreatorID,
+			&row.issue.RequesterUserID,
 			&row.issue.ParentIssueID,
 			&row.issue.Position,
 			&row.issue.StartDate,
 			&row.issue.DueDate,
 			&row.issue.CreatedAt,
 			&row.issue.UpdatedAt,
+			&row.issue.LastActivityAt,
 			&row.issue.Number,
 			&row.issue.ProjectID,
 			&row.issue.Metadata,
 			&row.issue.Stage,
 			&row.issue.Properties,
+			&row.issue.Revision,
+			&row.issue.DuplicateOfIssueID,
 			&row.childCount,
 			&row.sortKey,
 		); err != nil {
 			writeIssueTableQueryFailure(w, r, "failed to list table rows")
-			return
+			return issueTableRowsResponse{}, false
 		}
 		scanned = append(scanned, row)
 	}
 	if err := rows.Err(); err != nil {
 		writeIssueTableQueryFailure(w, r, "failed to list table rows")
-		return
+		return issueTableRowsResponse{}, false
 	}
 	rows.Close()
 
@@ -414,7 +472,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		if err := h.DB.QueryRow(r.Context(), fmt.Sprintf("SELECT COUNT(*)::bigint FROM issue i WHERE %s", compiled.where), compiled.args...).Scan(&total); err != nil {
 			slog.Warn("ListIssueTableRows total count failed", append(logger.RequestAttrs(r), "error", err)...)
 			writeIssueTableQueryFailure(w, r, "failed to count table rows")
-			return
+			return issueTableRowsResponse{}, false
 		}
 	}
 
@@ -448,19 +506,25 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 	if err := tx.Commit(r.Context()); err != nil {
 		slog.Warn("ListIssueTableRows snapshot commit failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeIssueTableQueryFailure(w, r, "failed to finish table query")
-		return
+		return issueTableRowsResponse{}, false
 	}
 	committed = true
 
 	prefix := baseHandler.getIssuePrefix(r.Context(), compiled.workspaceID)
 	issueIDs := make([]pgtype.UUID, len(scanned))
+	var originals []pgtype.UUID
 	for index, row := range scanned {
 		issueIDs[index] = row.issue.ID
+		originals = appendDuplicateOriginal(originals, row.issue.Status, row.issue.DuplicateOfIssueID)
 	}
 	labelsByIssue := baseHandler.labelsByIssue(r.Context(), compiled.workspaceID, issueIDs)
+	// One Resolver and one originals read for the page — see
+	// newStatusCategoryFiller. (MUL-6243, MUL-7349)
+	fillTableRow := baseHandler.newStatusCategoryFiller(r.Context(), compiled.workspaceID, compiled.hidden, originals...)
 	responseRows := make([]issueTableRowResponse, len(scanned))
 	for index, row := range scanned {
 		issue := issueListRowToResponse(row.issue, prefix)
+		fillTableRow(&issue)
 		labels := labelsByIssue[issue.ID]
 		if labels == nil {
 			labels = []LabelResponse{}
@@ -481,5 +545,5 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		BranchTotal:      int64(len(responseRows)),
 		NextCursor:       nextCursor,
 	}
-	writeJSON(w, http.StatusOK, response)
+	return response, true
 }

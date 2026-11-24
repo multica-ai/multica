@@ -1,40 +1,68 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { hashKey, keepPreviousData, useQuery } from "@tanstack/react-query";
-import type { QueryKey } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import type {
   Issue,
-  IssueAssigneeGroup,
   IssueStatus,
   IssueTableFacetSpec,
   IssueTableFacetsResponse,
   IssueTableGroupsRequest,
+  IssueTableNegatableFilter,
   IssueTableQuerySpec,
   Project,
   WorkingAgentSummary,
 } from "@multica/core/types";
-import { workspaceWorkingAgentsOptions } from "@multica/core/agents";
+import { agentTaskSnapshotOptions, workspaceWorkingAgentsOptions } from "@multica/core/agents/queries";
+import { deriveIssueSurfaceActivity } from "./activity";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { ALL_STATUSES } from "@multica/core/issues/config";
-import { dateOnlyToLocalDate } from "@multica/core/issues/date";
-import type {
-  AssigneeGroupedIssuesFilter,
-  IssueSortParam,
-  MyIssuesFilter,
-} from "@multica/core/issues/queries";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { useColumnWorkflow, workflowColumns } from "../utils/workflow-columns";
+import { statusFilterColumns, visibleStatusKeys } from "@multica/core/issues";
+import { dateOnlyToLocalDate, todayDateOnly } from "@multica/core/issues/date";
+import { useIssueUnreadIds } from "@multica/core/issues/unread";
+import {
+  advancedFilterToTableQuery,
+  advancedFilterUsesField,
+  advancedFilterUsesValue,
+  FILTER_DIMENSION_TABLE_FIELD,
+  statusColumnFilter,
+  propertyIdOfField,
+  withoutAdvancedFilterConditions,
+} from "@multica/core/issues/stores/filter-tree";
+import type { IssueSortParam } from "@multica/core/issues/queries";
 import { issueTableFacetsOptions } from "@multica/core/issues/queries";
 import {
   buildIssueSurfaceQueryPlan,
   type IssueSurfaceQueryPlan,
 } from "@multica/core/issues/surface/query-plan";
-import type { IssueScope } from "@multica/core/issues/surface/scope";
-import type { IssueDateFilter, SortField } from "@multica/core/issues/stores/view-store";
+import {
+  assigneeTypesForActorKind,
+  type IssueScope,
+} from "@multica/core/issues/surface/scope";
+import {
+  combineFilterDependencies,
+  filterDependencyState,
+  statusCatalogSource,
+  type FilterDependencyState,
+} from "@multica/core/issues/surface/filter-dependency";
+import type {
+  IssueDateFilter,
+  NegatableFilterDimension,
+  SortField,
+} from "@multica/core/issues/stores/view-store";
 import { propertyListOptions } from "@multica/core/properties";
-import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
+import {
+  effectiveNegatedFilters,
+  propertyIdFromViewKey,
+} from "@multica/core/issues/stores/view-store";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
-import type { IssueFilters } from "../utils/filter";
+import { useAuthStore } from "@multica/core/auth";
+import { agentListOptions, involvedSquadIdsOptions } from "@multica/core/workspace/queries";
+import { subscribedIssueIdsOptions } from "@multica/core/issues/subscribed";
+import { useShallow } from "zustand/react/shallow";
+import type { IssueFilters, IssueRelationContext } from "../utils/filter";
 import type { ChildProgress } from "../components/list-row";
 import { IssueTableExportIntegrityError } from "../components/table-view-model";
 import type { IssueSurfaceMode } from "./types";
@@ -57,6 +85,14 @@ import {
   useIssueGroupBranches,
   type IssueGroupBranches,
 } from "./use-issue-group-branches";
+
+/** Which filter's data failed, for the error state's copy. */
+export type FilterDependencyKind = "status" | "working" | "unread" | "relation";
+
+export interface FilterDependencyError {
+  kind: FilterDependencyKind;
+  retry: () => void;
+}
 
 interface UseIssueSurfaceControllerInput {
   scope: IssueScope;
@@ -82,16 +118,11 @@ export interface IssueSurfaceController {
    *  number it cannot stand behind. */
   workingAgents: WorkingAgentSummary[] | undefined;
   filteredGanttIssues: Issue[];
-  assigneeGroups?: IssueAssigneeGroup[];
-  assigneeGroupQueryKey?: QueryKey;
-  assigneeGroupFilter?: AssigneeGroupedIssuesFilter;
-  filter: MyIssuesFilter;
-  loadMoreScope?: string;
-  loadMoreFilter?: MyIssuesFilter;
   sort: IssueSortParam;
   ganttIssues: Issue[];
   visibleStatuses: IssueStatus[];
-  hiddenStatuses: IssueStatus[];
+  /** Columns the viewer can show or hide from Display, in column order. */
+  columnStatuses: IssueStatus[];
   /** Exact server counts plus cursor controls for List/status Board. */
   statusPagination?: IssueStatusPagination;
   /** Exact group catalog plus independent row cursors for Assignee/Property
@@ -127,6 +158,9 @@ export interface IssueSurfaceController {
   /** See IssueSurfaceData.isRefreshing — placeholder-backed revalidation. */
   isRefreshing: boolean;
   isEmpty: boolean;
+  /** Data an active filter needs failed to load, so the filter cannot be
+   *  honoured. The surface shows a retryable error instead of rows. */
+  filterDependencyError: FilterDependencyError | null;
   openCreateIssue: (defaults?: IssueCreateDefaults) => void;
   moveIssue: (
     issueId: string,
@@ -177,6 +211,9 @@ function useDebouncedTableSearch(value: string, delayMs = 250) {
  * and the branch query list once per render (MUL-5477). */
 const EMPTY_LIST: never[] = [];
 
+const TABLE_NEGATE_FIELD: Record<NegatableFilterDimension, IssueTableNegatableFilter> =
+  FILTER_DIMENSION_TABLE_FIELD;
+
 /**
  * Pin a derived value's identity to its CONTENT.
  *
@@ -224,16 +261,119 @@ export function useIssueSurfaceController({
   const creatorFilters = useViewStore((s) => s.creatorFilters);
   const projectFilters = useViewStore((s) => s.projectFilters);
   const includeNoProject = useViewStore((s) => s.includeNoProject);
+  const projectStatusFilters = useViewStore((s) => s.projectStatusFilters);
   const labelFilters = useViewStore((s) => s.labelFilters);
+  const storedRelationFilters = useViewStore((s) => s.relationFilters);
+  const dueDateFilters = useViewStore((s) => s.dueDateFilters);
+  const storedAdvancedFilter = useViewStore((s) => s.advancedFilter);
+  const negatedFilters = useViewStore(useShallow(effectiveNegatedFilters));
   const propertyFilters = useViewStore((s) => s.propertyFilters);
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
+  const agentIdleFilter = useViewStore((s) => s.agentIdleFilter);
+  const unreadFilter = useViewStore((s) => s.unreadFilter);
   const showSubIssues = useViewStore((s) => s.showSubIssues);
   const ganttShowCompleted = useViewStore((s) => s.ganttShowCompleted);
   const cardProperties = useViewStore((s) => s.cardProperties);
   const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
   const tableColumns = useViewStore((s) => s.tableColumns);
+  const tableGrouping = useViewStore((s) => s.tableGrouping);
   const listCollapsedStatuses = useViewStore((s) => s.listCollapsedStatuses);
+  const hiddenStatusKeys = useViewStore((s) => s.hiddenStatuses);
+  const catalog = useIssueStatuses(wsId);
+  const statusNegated = negatedFilters.includes("status");
   const [tableSearch, setTableSearch] = useState("");
+  // A "my issues" surface already scopes by relation; the menu hides the
+  // dimension there, and a persisted value must not silently narrow it.
+  const relationFilters = scope.type === "my" ? EMPTY_LIST : storedRelationFilters;
+  // Active property catalog. Persisted view state can outlive definitions
+  // (archive/delete): filters keyed by a non-active definition are stripped
+  // before they reach the predicates, and a sort on a non-active definition
+  // degrades to manual order — matching what the header already shows.
+  const { data: workspaceProperties = EMPTY_LIST, isSuccess: catalogSettled } = useQuery(propertyListOptions(wsId));
+  const activePropertyIds = useMemo(
+    () => new Set(workspaceProperties.map((p) => p.id)),
+    [workspaceProperties],
+  );
+  // The same rule for the rule tree, and a project surface already fixes the
+  // project; conditions on a non-active property go like flat ones do.
+  // Pruned: empty rows the panel is still editing filter nothing.
+  const advancedFilter = useMemo(() => {
+    const fixed: readonly string[] = [
+      ...(scope.type === "my" ? ["relation"] : []),
+      ...(scope.type === "project" ? ["project"] : []),
+    ];
+    return withoutAdvancedFilterConditions(storedAdvancedFilter, (condition) => {
+      if (fixed.includes(condition.field)) return true;
+      const propertyId = propertyIdOfField(condition.field);
+      return propertyId !== null && catalogSettled && !activePropertyIds.has(propertyId);
+    });
+  }, [activePropertyIds, catalogSettled, scope.type, storedAdvancedFilter]);
+  // Columns follow a status the tree requires as they follow the simple one.
+  const columnStatus = useMemo(
+    () => statusColumnFilter(statusFilters, statusNegated, advancedFilter, hiddenStatusKeys),
+    [advancedFilter, hiddenStatusKeys, statusFilters, statusNegated],
+  );
+  const { workflow: projectWorkflow } = useColumnWorkflow(
+    wsId,
+    projectId,
+    columnStatus.statuses.length > 0 && !columnStatus.negated,
+  );
+  const advancedTableFilter = useMemo(
+    () => advancedFilterToTableQuery(advancedFilter),
+    [advancedFilter],
+  );
+  // Due-date buckets resolve against the viewer's calendar day. Sent only
+  // when a bucket is in play, so other queries keep one cache key across
+  // midnight.
+  const usesDueDates =
+    dueDateFilters.length > 0 || advancedFilterUsesField(advancedFilter, "dueDate");
+  const today = usesDueDates ? todayDateOnly() : undefined;
+  const userId = useAuthStore((s) => s.user?.id);
+  // Each relation value reads only its own dependency, so a slow or failed
+  // agent list never switches off "subscribed" (and vice versa).
+  const usesMyAgents =
+    relationFilters.includes("my_agents") ||
+    advancedFilterUsesValue(advancedFilter, "relation", "my_agents");
+  const usesSubscribed =
+    relationFilters.includes("subscribed") ||
+    advancedFilterUsesValue(advancedFilter, "relation", "subscribed");
+  const agentsQuery = useQuery({
+    ...agentListOptions(wsId),
+    enabled: usesMyAgents,
+  });
+  const agents = agentsQuery.data;
+  const involvedSquadIdsQuery = useQuery({
+    ...involvedSquadIdsOptions(wsId),
+    enabled: usesMyAgents,
+  });
+  const involvedSquadIds = involvedSquadIdsQuery.data;
+  const subscribedIssueIdsQuery = useQuery({
+    ...subscribedIssueIdsOptions(wsId),
+    enabled: usesSubscribed,
+  });
+  const subscribedIssueIds = subscribedIssueIdsQuery.data;
+  const relationSources = [
+    usesMyAgents && agentsQuery,
+    usesMyAgents && involvedSquadIdsQuery,
+    usesSubscribed && subscribedIssueIdsQuery,
+  ];
+  const relationContext = useMemo<IssueRelationContext | undefined>(() => {
+    if (!userId) return undefined;
+    return {
+      userId,
+      ...(usesMyAgents && agents
+        ? {
+            myAgentIds: new Set(
+              agents.filter((agent) => agent.owner_id === userId).map((agent) => agent.id),
+            ),
+          }
+        : {}),
+      ...(usesMyAgents && involvedSquadIds ? { mySquadIds: new Set(involvedSquadIds) } : {}),
+      ...(usesSubscribed && subscribedIssueIds
+        ? { subscribedIssueIds: new Set(subscribedIssueIds) }
+        : {}),
+    };
+  }, [agents, involvedSquadIds, subscribedIssueIds, userId, usesMyAgents, usesSubscribed]);
 
   const allowedModes = useMemo(() => new Set<IssueSurfaceMode>(modes), [modes]);
   const fallbackMode = modes[0] ?? "list";
@@ -255,15 +395,6 @@ export function useIssueSurfaceController({
   const dateParams = useMemo(
     () => issueDateFilterToApiParams(dateFilter),
     [dateFilter],
-  );
-  // Active property catalog. Persisted view state can outlive definitions
-  // (archive/delete): filters keyed by a non-active definition are stripped
-  // before they reach the predicates, and a sort on a non-active definition
-  // degrades to manual order — matching what the header already shows.
-  const { data: workspaceProperties = EMPTY_LIST, isSuccess: catalogSettled } = useQuery(propertyListOptions(wsId));
-  const activePropertyIds = useMemo(
-    () => new Set(workspaceProperties.map((p) => p.id)),
-    [workspaceProperties],
   );
   const effectivePropertyFilters = useMemo(() => {
     // While the catalog is still loading (or errored), persisted filters are
@@ -316,8 +447,6 @@ export function useIssueSurfaceController({
     groupingPropertyId && catalogSettled && !activeGroupingProperty
       ? "status"
       : grouping;
-  const usesAssigneeBoard =
-    effectiveViewMode === "board" && effectiveGrouping === "assignee";
   const usesGantt = effectiveViewMode === "gantt" && !!projectId;
   const usesTable = effectiveViewMode === "table";
   const activeSearch = usesTable ? tableSearch : search;
@@ -330,17 +459,53 @@ export function useIssueSurfaceController({
     effectiveViewMode === "swimlane";
   const usesServerFacets =
     usesTable || usesServerStatusSurface || usesServerGroupSurface;
+  const statusColumnsForFilters = useMemo(
+    // Exclusion needs no category: it only removes the listed keys.
+    () =>
+      columnStatus.negated
+        ? ({ state: "resolved", columns: new Set<IssueStatus>() } as const)
+        : statusFilterColumns(columnStatus.statuses, catalog),
+    [catalog, columnStatus],
+  );
+  /**
+   * A custom-status filter is routed through the catalog, and status columns
+   * come from it. Until it answers, fetching is suspended: with the filter
+   * unresolved the visible column set falls back to ALL categories, so
+   * fetching anyway would briefly show the UNFILTERED board to someone who
+   * opened a saved `qa` view.
+   */
+  const statusDependency = filterDependencyState(
+    statusColumnsForFilters.state !== "resolved" ||
+      usesServerStatusSurface ||
+      effectiveViewMode === "swimlane",
+    [statusCatalogSource(catalog)],
+  );
+  const statusFilterUnresolved = statusDependency.unresolved;
+
+  // Display preferences hide individual columns; status filters independently
+  // select exact keys. Selecting a key explicitly restores its hidden column.
   const serverStatuses = useMemo<IssueStatus[]>(
     () => {
-      const visible =
-        statusFilters.length > 0
-          ? ALL_STATUSES.filter((status) => statusFilters.includes(status))
-          : [...ALL_STATUSES];
+      const visible = workflowColumns(
+        visibleStatusKeys(
+          columnStatus.statuses,
+          columnStatus.hiddenStatuses,
+          catalog,
+          columnStatus.negated,
+        ),
+        projectWorkflow,
+      );
       return effectiveViewMode === "list"
         ? visible.filter((status) => !listCollapsedStatuses.includes(status))
         : visible;
     },
-    [effectiveViewMode, listCollapsedStatuses, statusFilters],
+    [
+      effectiveViewMode,
+      listCollapsedStatuses,
+      catalog,
+      columnStatus,
+      projectWorkflow,
+    ],
   );
 
   const projectFilterState = useMemo(
@@ -366,10 +531,16 @@ export function useIssueSurfaceController({
     creatorFilters.length > 0 ||
     viewProjectFilters.length > 0 ||
     viewIncludeNoProject ||
+    projectStatusFilters.length > 0 ||
     labelFilters.length > 0 ||
+    relationFilters.length > 0 ||
+    dueDateFilters.length > 0 ||
+    advancedFilter !== null ||
     Object.keys(effectivePropertyFilters).length > 0 ||
     dateFilter != null ||
-    agentRunningFilter === true;
+    agentRunningFilter === true ||
+    agentIdleFilter === true ||
+    unreadFilter === true;
 
   const workingAgentMineRelation =
     scope.type === "my"
@@ -377,9 +548,29 @@ export function useIssueSurfaceController({
         ? "any"
         : scope.relation
       : undefined;
-  const { data: workspaceWorkingAgents = EMPTY_LIST } = useQuery(
-    workspaceWorkingAgentsOptions(wsId, "issue", workingAgentMineRelation),
+  const workingAgentsProjection = useQuery({
+    ...workspaceWorkingAgentsOptions(wsId, "issue", workingAgentMineRelation),
+    // Ordinary surfaces get their chip count from the scoped facet. Only an
+    // active working filter or Gantt's canvas count consumes the issue ids.
+    enabled: usesGantt || agentRunningFilter,
+  });
+  const workspaceWorkingAgents = workingAgentsProjection.data ?? EMPTY_LIST;
+  const idleTasksProjection = useQuery({
+    ...agentTaskSnapshotOptions(wsId),
+    enabled: agentIdleFilter,
+  });
+  const idleTasks = agentIdleFilter ? idleTasksProjection.data : undefined;
+  const activeIssueIDs = useMemo(
+    () => idleTasks === undefined
+      ? undefined
+      : new Set(deriveIssueSurfaceActivity(idleTasks).activityByIssueId.keys()),
+    [idleTasks],
   );
+  const workingDependency = combineFilterDependencies(
+    filterDependencyState(agentRunningFilter, [workingAgentsProjection]),
+    filterDependencyState(agentIdleFilter, [idleTasksProjection]),
+  );
+  const workingFilterUnresolved = workingDependency.unresolved;
   const workingIssueIDs = useMemo(() => {
     const issueIDs = new Set<string>();
     for (const agent of workspaceWorkingAgents) {
@@ -388,22 +579,45 @@ export function useIssueSurfaceController({
     return issueIDs;
   }, [workspaceWorkingAgents]);
 
+  // The unread filter matches the viewer's unread list. An issue read while
+  // the filter is on stays in the set, so it keeps its place on screen (and
+  // the query keeps its identity) until the filter turns off or the surface
+  // unmounts; a newly unread issue grows the set and refetches.
+  const unreadProjection = useIssueUnreadIds(wsId, unreadFilter);
+  const unreadIssueList = unreadProjection.data;
+  const unreadDependency = filterDependencyState(unreadFilter, [unreadProjection]);
+  const unreadFilterUnresolved = unreadDependency.unresolved;
+  const keptUnreadRef = useRef<Set<string>>(new Set());
+  const unreadIssueIDs = useMemo<ReadonlySet<string>>(() => {
+    if (!unreadFilter) {
+      keptUnreadRef.current = new Set();
+      return keptUnreadRef.current;
+    }
+    for (const issueID of unreadIssueList ?? EMPTY_LIST) keptUnreadRef.current.add(issueID);
+    return new Set(keptUnreadRef.current);
+  }, [unreadFilter, unreadIssueList]);
+  const membershipUnresolved = workingFilterUnresolved || unreadFilterUnresolved;
+
   const derivedTableQuerySpec = useMemo<IssueTableQuerySpec>(() => {
     let queryScope: IssueTableQuerySpec["scope"];
     switch (scope.type) {
-      case "workspace":
+      case "workspace": {
+        const assigneeTypes = assigneeTypesForActorKind(scope.actorKind);
         queryScope = {
           kind: "workspace",
-          ...(scope.actorKind === "members"
-            ? { assignee_types: ["member" as const] }
-            : scope.actorKind === "agents"
-              ? { assignee_types: ["agent" as const, "squad" as const] }
-              : {}),
+          ...(assigneeTypes ? { assignee_types: assigneeTypes } : {}),
         };
         break;
-      case "project":
-        queryScope = { kind: "project", project_id: scope.projectId };
+      }
+      case "project": {
+        const assigneeTypes = assigneeTypesForActorKind(scope.actorKind);
+        queryScope = {
+          kind: "project",
+          project_id: scope.projectId,
+          ...(assigneeTypes ? { assignee_types: assigneeTypes } : {}),
+        };
         break;
+      }
       case "my":
         queryScope = {
           kind: "my",
@@ -428,6 +642,17 @@ export function useIssueSurfaceController({
             end: dateParams.date_end,
           }
         : undefined;
+    const negate = negatedFilters
+      .filter((dimension) =>
+        // A project surface drops the project dimension; and on a "my"
+        // surface the relation dimension (see `relationFilters`).
+        dimension === "project"
+          ? viewProjectFilters.length > 0 || viewIncludeNoProject
+          : dimension === "relation"
+            ? relationFilters.length > 0
+            : true,
+      )
+      .map((dimension) => TABLE_NEGATE_FIELD[dimension]);
     return {
       scope: queryScope,
       filters: {
@@ -440,13 +665,27 @@ export function useIssueSurfaceController({
           ? { project_ids: viewProjectFilters }
           : {}),
         ...(viewIncludeNoProject ? { include_no_project: true } : {}),
+        ...(projectStatusFilters.length > 0
+          ? { project_statuses: projectStatusFilters }
+          : {}),
         ...(labelFilters.length > 0 ? { label_ids: labelFilters } : {}),
+        ...(relationFilters.length > 0 ? { relations: relationFilters } : {}),
+        ...(dueDateFilters.length > 0 ? { due_dates: dueDateFilters } : {}),
+        ...(today ? { today } : {}),
+        ...(negate.length > 0 ? { negate } : {}),
+        ...(advancedTableFilter ? { advanced: advancedTableFilter } : {}),
         ...(Object.keys(effectivePropertyFilters).length > 0
           ? { properties: effectivePropertyFilters }
           : {}),
         ...(date ? { date } : {}),
-        ...(agentRunningFilter
+        // Unknown membership must not create a temporary match-nothing query
+        // key. Dependent fetches stay gated until the projection resolves.
+        ...(agentRunningFilter && !workingFilterUnresolved
           ? { working_issue_ids: [...workingIssueIDs] }
+          : {}),
+        ...(agentIdleFilter ? { idle_only: true } : {}),
+        ...(unreadFilter && !unreadFilterUnresolved
+          ? { unread_issue_ids: [...unreadIssueIDs].sort() }
           : {}),
         include_sub_issues: showSubIssues,
       },
@@ -457,22 +696,33 @@ export function useIssueSurfaceController({
       },
     };
   }, [
+    advancedTableFilter,
     agentRunningFilter,
+    agentIdleFilter,
     assigneeFilters,
     creatorFilters,
     dateParams,
     debouncedActiveSearch,
+    dueDateFilters,
     effectivePropertyFilters,
     includeNoAssignee,
     labelFilters,
+    negatedFilters,
     priorityFilters,
+    projectStatusFilters,
+    relationFilters,
     scope,
     showSubIssues,
     sort.sort_by,
     sort.sort_direction,
     statusFilters,
+    today,
+    unreadFilter,
+    unreadFilterUnresolved,
+    unreadIssueIDs,
     viewIncludeNoProject,
     viewProjectFilters,
+    workingFilterUnresolved,
     workingIssueIDs,
   ]);
   // Every consumer below — the facet request, the status/group branch hooks and
@@ -518,20 +768,22 @@ export function useIssueSurfaceController({
     // every custom-property facet made a Table mount issue up to 47 SQL
     // statements and repeatedly scan the issue table after invalidation.
     enabled:
-      usesServerStatusSurface ||
-      ((usesTable || usesServerGroupSurface) && activeTableFacet !== null),
+      !membershipUnresolved && (
+        usesServerStatusSurface ||
+        ((usesTable || usesServerGroupSurface) && activeTableFacet !== null)
+      ),
   });
   // The header chip's count, kept on its own query rather than folded into the
   // submenu facet request above. Two reasons: that request is deliberately
   // lazy (an always-on facet would re-enable it for Table/grouped surfaces on
-  // mount), and this spec drops `working_issue_ids` so toggling the filter
+  // mount), and this spec drops both activity filters so toggling the filter
   // does not change the query identity — the number must not flicker when you
   // click the very chip it labels.
   const workingAgentsQuerySpec = useMemo<IssueTableQuerySpec>(() => {
-    if (!agentRunningFilter) return tableQuerySpec;
-    const { working_issue_ids: _working, ...filters } = tableQuerySpec.filters;
+    if (!agentRunningFilter && !agentIdleFilter) return tableQuerySpec;
+    const { working_issue_ids: _working, idle_only: _idle, ...filters } = tableQuerySpec.filters;
     return { ...tableQuerySpec, filters };
-  }, [agentRunningFilter, tableQuerySpec]);
+  }, [agentRunningFilter, agentIdleFilter, tableQuerySpec]);
   const workingAgentsFacetRequest = useMemo(
     () => ({
       query: workingAgentsQuerySpec,
@@ -547,10 +799,10 @@ export function useIssueSurfaceController({
     // expressible as a Table query spec, so a facet answer would over-count.
     //
     // The actor panel (member / agent detail) renders no agents-working chip at
-    // all, so nothing would read the answer — and with no control to toggle it,
-    // `agentRunningFilter` is unreachable there. Skip the aggregation rather
-    // than pay for it on every panel mount. Adding the chip to that header
-    // means dropping this clause.
+    // all, so nothing would read the answer; its filter menu toggles
+    // `agentRunningFilter` through the issue ids above, not this count. Skip
+    // the aggregation rather than pay for it on every panel mount. Adding the
+    // chip to that header means dropping this clause.
     enabled: !usesGantt && scope.type !== "actor",
   });
   const facetWorkingAgents = useMemo<WorkingAgentSummary[] | undefined>(() => {
@@ -581,7 +833,7 @@ export function useIssueSurfaceController({
     facets: tableFacetsQuery.data,
     facetsPending: tableFacetsQuery.isPending,
     facetsFetching: tableFacetsQuery.isFetching,
-    enabled: usesServerStatusSurface,
+    enabled: usesServerStatusSurface && !statusFilterUnresolved && !membershipUnresolved,
   });
   const serverGroupSpec = useMemo<IssueTableGroupsRequest["group"]>(() => {
     if (effectiveViewMode === "swimlane") {
@@ -592,6 +844,7 @@ export function useIssueSurfaceController({
         secondary_values: serverStatuses,
       };
     }
+    if (effectiveGrouping === "project") return { kind: "project" };
     const propertyId = propertyIdFromViewKey(effectiveGrouping);
     if (propertyId) {
       return {
@@ -609,8 +862,13 @@ export function useIssueSurfaceController({
   ]);
   const serverGroupQuery = useMemo<IssueTableQuerySpec>(() => {
     if (effectiveViewMode !== "swimlane") return tableQuerySpec;
-    const { statuses: _statuses, ...filters } = tableQuerySpec.filters;
-    return { ...tableQuerySpec, filters };
+    // Status is the secondary axis here: its columns already apply it.
+    const { statuses: _statuses, negate, ...filters } = tableQuerySpec.filters;
+    const otherNegate = negate?.filter((field) => field !== "statuses") ?? [];
+    return {
+      ...tableQuerySpec,
+      filters: { ...filters, ...(otherNegate.length > 0 ? { negate: otherNegate } : {}) },
+    };
   }, [effectiveViewMode, tableQuerySpec]);
   const serverGroupBranches = useIssueGroupBranches({
     wsId,
@@ -621,7 +879,7 @@ export function useIssueSurfaceController({
     observeEmptyBranches:
       effectiveViewMode === "swimlane" ||
       (effectiveViewMode === "board" && activeGroupingProperty !== null),
-    enabled: usesServerGroupSurface,
+    enabled: usesServerGroupSurface && !statusFilterUnresolved && !membershipUnresolved,
   });
 
   // Selection is only meaningful within the current membership window: batch
@@ -642,25 +900,41 @@ export function useIssueSurfaceController({
         creatorFilters,
         viewProjectFilters,
         viewIncludeNoProject,
+        projectStatusFilters,
         labelFilters,
+        relationFilters,
+        dueDateFilters,
+        advancedTableFilter,
+        today,
+        negatedFilters,
         effectivePropertyFilters,
         agentRunningFilter,
+        agentIdleFilter,
+        unreadFilter,
         showSubIssues,
         dateParams,
         debouncedActiveSearch,
       ]),
     [
+      advancedTableFilter,
       agentRunningFilter,
+      agentIdleFilter,
+      unreadFilter,
       assigneeFilters,
       creatorFilters,
       dateParams,
       debouncedActiveSearch,
+      dueDateFilters,
       effectivePropertyFilters,
       includeNoAssignee,
       labelFilters,
+      negatedFilters,
       priorityFilters,
+      projectStatusFilters,
+      relationFilters,
       showSubIssues,
       statusFilters,
+      today,
       viewIncludeNoProject,
       viewProjectFilters,
     ],
@@ -674,28 +948,50 @@ export function useIssueSurfaceController({
     wsId,
     queryPlan,
     projectId,
-    usesAssigneeBoard,
     usesGantt,
     usesTable,
     serverStatusBranches,
     serverGroupBranches,
     ganttShowCompleted,
-    sort,
     statusFilters,
+    hiddenStatusKeys,
+    statusDependency,
     priorityFilters,
     assigneeFilters,
     includeNoAssignee,
     agentRunningFilter,
+    unreadFilter,
+    agentIdleFilter,
+    activeIssueIDs,
     creatorFilters,
     projectFilters: viewProjectFilters,
     includeNoProject: viewIncludeNoProject,
+    projectStatusFilters,
     labelFilters,
+    relationFilters,
+    relationContext,
+    relationSources,
+    dueDateFilters,
+    advancedFilter,
+    today,
+    negatedFilters,
     propertyFilters: effectivePropertyFilters,
     workingIssueIDs,
+    unreadIssueIDs,
     showSubIssues,
     loadProjects:
+      // The client-side project-status predicate (Gantt / swimlane extras)
+      // cannot be evaluated without the catalog, so the filter itself has to
+      // pull it in.
+      projectStatusFilters.length > 0 ||
+      advancedFilterUsesField(advancedFilter, "projectStatus") ||
       cardProperties.project ||
       (usesTable && tableColumns.some((column) => column.key === "project")) ||
+      // Project group headers resolve their title through the projects query,
+      // so grouping by project has to load it even when no card/column shows
+      // the project itself.
+      (usesTable && tableGrouping === "project") ||
+      (effectiveViewMode === "board" && effectiveGrouping === "project") ||
       (effectiveViewMode === "swimlane" && swimlaneGrouping === "project"),
   });
 
@@ -704,7 +1000,7 @@ export function useIssueSurfaceController({
   const workingAgents = useMemo<WorkingAgentSummary[] | undefined>(() => {
     if (!usesGantt) return facetWorkingAgents;
     const rows = data.ganttWorkingScopeIssues;
-    if (!rows) return undefined;
+    if (!rows || workingAgentsProjection.data === undefined) return undefined;
     const visible = new Set(rows.map((issue) => issue.id));
     const summaries: WorkingAgentSummary[] = [];
     for (const agent of workspaceWorkingAgents) {
@@ -719,6 +1015,7 @@ export function useIssueSurfaceController({
     facetWorkingAgents,
     usesGantt,
     workspaceWorkingAgents,
+    workingAgentsProjection.data,
   ]);
 
   const exportTableIssues = useCallback(async () => {
@@ -774,7 +1071,20 @@ export function useIssueSurfaceController({
     createDefaults: resolvedCreateDefaults,
   });
 
-  const { ganttWorkingScopeIssues: _ganttWorkingScope, ...surfaceData } = data;
+  const {
+    ganttWorkingScopeIssues: _ganttWorkingScope,
+    projectCatalogDependency,
+    relationDependency,
+    ...surfaceData
+  } = data;
+  // In the order the surface reports them when several fail at once.
+  const dependencies: [FilterDependencyKind, FilterDependencyState][] = [
+    ["status", combineFilterDependencies(statusDependency, projectCatalogDependency)],
+    ["working", workingDependency],
+    ["unread", unreadDependency],
+    ["relation", relationDependency],
+  ];
+  const failedDependency = dependencies.find(([, state]) => state.error);
 
   return {
     scopeKey,
@@ -783,6 +1093,7 @@ export function useIssueSurfaceController({
     viewMode: effectiveViewMode,
     allowGantt: allowedModes.has("gantt") && !!projectId,
     ...surfaceData,
+    isLoading: data.isLoading || workingDependency.pending || unreadDependency.pending,
     workingAgents,
     hasActiveFilters,
     statusPagination: usesServerStatusSurface
@@ -796,9 +1107,13 @@ export function useIssueSurfaceController({
     // debounced value as well to avoid a brief empty-screen flash while a
     // cleared query is waiting to re-fetch the unsearched window.
     isEmpty:
+      !membershipUnresolved &&
       data.isEmpty &&
       !data.isRefreshing &&
       !(usesTable && (tableSearch.trim() || debouncedActiveSearch)),
+    filterDependencyError: failedDependency
+      ? { kind: failedDependency[0], retry: failedDependency[1].retry }
+      : null,
     sort,
     actions,
     selection,

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"mime"
 	"path"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -50,8 +51,9 @@ func NewFeishuMediaResolver(api APIClient, creds CredentialsResolver, storage me
 }
 
 // HasMedia reports whether the message carries downloadable Feishu resources
-// (standalone image/video or post-embedded img/media spans). Pure in-memory
-// decode of the already-received payload — it runs on the connector ACK path.
+// (standalone image/video/file/audio or post-embedded img/media/file spans). Pure
+// in-memory decode of the already-received payload — it runs on the connector
+// ACK path.
 func (r *feishuMediaResolver) HasMedia(msg channel.InboundMessage) bool {
 	lm, err := larkMsgFromRaw(msg)
 	if err != nil {
@@ -84,7 +86,7 @@ func (r *feishuMediaResolver) ResolveMedia(ctx context.Context, inst engine.Reso
 		r.logMediaWarn("lark media ingest skipped: credentials unavailable", lm, err)
 		return msg
 	}
-	for _, res := range resources {
+	for resIndex, res := range resources {
 		key := mediaObjectKey(inst, chatMessageID, res)
 		link := r.storage.ObjectURL(key)
 		// Persist the upload intent BEFORE any write can happen. Every
@@ -117,14 +119,10 @@ func (r *feishuMediaResolver) ResolveMedia(ctx context.Context, inst engine.Reso
 			r.logMediaWarn("lark media download failed", lm, err)
 			continue
 		}
-		contentType := got.ContentType
-		if contentType == "" {
-			contentType = res.mimeType
-		}
-		if contentType == "" {
-			contentType = "application/octet-stream"
-		}
-		filename := mediaFilename(lm, res, got, contentType)
+		contentType := mediaContentType(res, got)
+		source := lm
+		source.MessageID = res.messageID
+		filename := mediaFilename(source, res, got, contentType, resIndex)
 		uploadedBytes, err := r.uploadResource(ctx, key, got.Body, got.SizeBytes, contentType, filename)
 		if err != nil {
 			// The store may still be processing the PUT — deleting here
@@ -138,12 +136,15 @@ func (r *feishuMediaResolver) ResolveMedia(ctx context.Context, inst engine.Reso
 			sizeBytes = uploadedBytes
 		}
 		msg.MediaRefs = append(msg.MediaRefs, channel.MediaRef{
-			Type:       res.kind,
-			StorageKey: key,
-			StorageURL: link,
-			Filename:   filename,
-			MimeType:   contentType,
-			SizeBytes:  sizeBytes,
+			Type:              res.kind,
+			StorageKey:        key,
+			StorageURL:        link,
+			Filename:          filename,
+			MimeType:          contentType,
+			SizeBytes:         sizeBytes,
+			InlinePlaceholder: res.placeholder,
+			InlineCount:       res.occurrences,
+			InlineIDOnly:      res.placeholder != "",
 		})
 	}
 	return msg
@@ -226,16 +227,38 @@ func (r *feishuMediaResolver) logMediaWarn(msg string, lm InboundMessage, err er
 }
 
 type larkMediaResource struct {
-	key       string
-	kind      channel.MsgType
-	fetchType string
-	filename  string
-	mimeType  string
-	sizeBytes int64
-	messageID string
+	key         string
+	kind        channel.MsgType
+	fetchType   string
+	filename    string
+	mimeType    string
+	sizeBytes   int64
+	messageID   string
+	placeholder string
+	occurrences int
 }
 
 func mediaResourcesFromMessage(lm InboundMessage) []larkMediaResource {
+	out := currentMediaResources(lm)
+	for _, media := range lm.ContextMedia {
+		if media.MessageID == "" || media.ResourceKey == "" || media.Placeholder == "" || media.Occurrences < 1 {
+			continue
+		}
+		if (media.Type == channel.MsgTypeImage && media.FetchType != "image") ||
+			((media.Type == channel.MsgTypeFile || media.Type == channel.MsgTypeAudio || media.Type == channel.MsgTypeVideo) && media.FetchType != "file") {
+			continue
+		}
+		switch media.Type {
+		case channel.MsgTypeImage, channel.MsgTypeFile, channel.MsgTypeAudio, channel.MsgTypeVideo:
+			out = append(out, larkMediaResource{key: media.ResourceKey, kind: media.Type,
+				fetchType: media.FetchType, messageID: media.MessageID, filename: media.Filename,
+				mimeType: media.MimeType, placeholder: media.Placeholder, occurrences: media.Occurrences})
+		}
+	}
+	return out
+}
+
+func currentMediaResources(lm InboundMessage) []larkMediaResource {
 	var payload struct {
 		ImageKey    string `json:"image_key"`
 		FileKey     string `json:"file_key"`
@@ -284,6 +307,23 @@ func mediaResourcesFromMessage(lm InboundMessage) []larkMediaResource {
 			sizeBytes: sizeBytes,
 			messageID: lm.MessageID,
 		}}
+	case "file", "audio":
+		if payload.FileKey == "" {
+			return nil
+		}
+		kind := channel.MsgTypeFile
+		if lm.MessageType == "audio" {
+			kind = channel.MsgTypeAudio
+		}
+		return []larkMediaResource{{
+			key:       payload.FileKey,
+			kind:      kind,
+			fetchType: "file",
+			filename:  filename,
+			mimeType:  mimeType,
+			sizeBytes: sizeBytes,
+			messageID: lm.MessageID,
+		}}
 	default:
 		return nil
 	}
@@ -293,8 +333,8 @@ func mediaResourcesFromPost(lm InboundMessage) []larkMediaResource {
 	if lm.Content == "" {
 		return nil
 	}
-	var doc larkPostContent
-	if err := json.Unmarshal([]byte(lm.Content), &doc); err != nil {
+	doc, err := decodePostContent(lm.Content)
+	if err != nil {
 		return nil
 	}
 	var out []larkMediaResource
@@ -307,43 +347,46 @@ func mediaResourcesFromPost(lm InboundMessage) []larkMediaResource {
 	seen := make(map[string]bool)
 	for _, para := range doc.Content {
 		for _, span := range para {
-			switch span.Tag {
-			case "img":
-				if span.ImageKey == "" || seen["image\x00"+span.ImageKey] {
-					continue
-				}
-				seen["image\x00"+span.ImageKey] = true
-				out = append(out, larkMediaResource{
-					key:       span.ImageKey,
-					kind:      channel.MsgTypeImage,
-					fetchType: "image",
-					filename:  firstNonEmpty(span.FileName, span.Name),
-					mimeType:  span.MimeType,
-					messageID: lm.MessageID,
-				})
-			case "media":
-				if span.FileKey == "" || seen["file\x00"+span.FileKey] {
-					continue
-				}
-				seen["file\x00"+span.FileKey] = true
-				out = append(out, larkMediaResource{
-					key:       span.FileKey,
-					kind:      channel.MsgTypeVideo,
-					fetchType: "file",
-					filename:  firstNonEmpty(span.FileName, span.Name),
-					mimeType:  span.MimeType,
-					messageID: lm.MessageID,
-				})
+			res, ok := postSpanMediaResource(span, lm.MessageID)
+			if !ok || seen[res.fetchType+"\x00"+res.key] {
+				continue
 			}
+			seen[res.fetchType+"\x00"+res.key] = true
+			out = append(out, res)
 		}
 	}
 	return out
 }
 
-func mediaFilename(lm InboundMessage, res larkMediaResource, got DownloadedResourceStream, contentType string) string {
+// Share the post resource contract between current-message ingestion and
+// context rendering so a rendered marker always refers to the same resource.
+func postSpanMediaResource(span larkPostSpan, messageID string) (larkMediaResource, bool) {
+	res := larkMediaResource{filename: firstNonEmpty(span.FileName, span.Name), mimeType: span.MimeType, messageID: messageID}
+	switch span.Tag {
+	case "img":
+		res.key, res.kind, res.fetchType = span.ImageKey, channel.MsgTypeImage, "image"
+	case "media", "file":
+		if span.IsFolder {
+			return larkMediaResource{}, false
+		}
+		res.key, res.kind, res.fetchType = span.FileKey, channel.MsgTypeVideo, "file"
+		if span.Tag == "file" {
+			res.kind = channel.MsgTypeFile
+		}
+	default:
+		return larkMediaResource{}, false
+	}
+	return res, res.key != ""
+}
+
+// mediaFilename picks a name for the stored object. index disambiguates the
+// generated form: every resource on one message shares a MessageID, so three
+// photos in one send used to produce three objects all named
+// "feishu-image-<msg>.jpg".
+func mediaFilename(lm InboundMessage, res larkMediaResource, got DownloadedResourceStream, contentType string, index int) string {
 	for _, candidate := range []string{got.Filename, res.filename} {
 		if name := cleanFilename(candidate); name != "" {
-			return name
+			return ensureAudioFilenameExtension(name, res.kind, contentType)
 		}
 	}
 	prefix := "feishu-file"
@@ -352,8 +395,53 @@ func mediaFilename(lm InboundMessage, res larkMediaResource, got DownloadedResou
 		prefix = "feishu-image"
 	case channel.MsgTypeVideo:
 		prefix = "feishu-video"
+	case channel.MsgTypeAudio:
+		prefix = "feishu-audio"
 	}
-	return prefix + "-" + safePathSegment(lm.MessageID) + mediaExtension(contentType)
+	name := prefix + "-" + safePathSegment(lm.MessageID)
+	if index > 0 {
+		name += "-" + strconv.Itoa(index+1)
+	}
+	return name + mediaExtension(contentType)
+}
+
+func mediaContentType(res larkMediaResource, got DownloadedResourceStream) string {
+	contentType := strings.TrimSpace(got.ContentType)
+	if res.kind == channel.MsgTypeAudio && isGenericBinaryContentType(contentType) {
+		if hinted := strings.TrimSpace(res.mimeType); !isGenericBinaryContentType(hinted) {
+			return hinted
+		}
+		// Feishu audio messages are Opus. Its resource endpoint can return an
+		// extensionless Content-Disposition filename together with the generic
+		// audio/octet-stream type, so preserve the protocol-level format here.
+		return "audio/opus"
+	}
+	if contentType == "" {
+		contentType = strings.TrimSpace(res.mimeType)
+	}
+	if contentType == "" {
+		return "application/octet-stream"
+	}
+	return contentType
+}
+
+func isGenericBinaryContentType(contentType string) bool {
+	if semi := strings.IndexByte(contentType, ';'); semi >= 0 {
+		contentType = contentType[:semi]
+	}
+	switch strings.ToLower(strings.TrimSpace(contentType)) {
+	case "", "application/octet-stream", "audio/octet-stream":
+		return true
+	default:
+		return false
+	}
+}
+
+func ensureAudioFilenameExtension(name string, kind channel.MsgType, contentType string) string {
+	if kind != channel.MsgTypeAudio || path.Ext(name) != "" {
+		return name
+	}
+	return name + mediaExtension(contentType)
 }
 
 func cleanFilename(name string) string {
@@ -362,7 +450,11 @@ func cleanFilename(name string) string {
 		return ""
 	}
 	name = path.Base(strings.ReplaceAll(name, "\\", "/"))
-	if name == "." || name == "/" {
+	// path.Base resolves a path, but it hands back ".." and "..." unchanged.
+	// A name made only of dots is not a filename; letting one through means
+	// the object's display name is ".." wherever it is later rendered or
+	// re-saved. Fall through to the generated name instead.
+	if strings.Trim(name, ".") == "" || name == "/" {
 		return ""
 	}
 	return name
@@ -383,6 +475,20 @@ func mediaExtension(contentType string) string {
 		return ".webp"
 	case "video/mp4":
 		return ".mp4"
+	case "audio/opus":
+		return ".opus"
+	case "audio/ogg":
+		return ".ogg"
+	case "audio/amr":
+		return ".amr"
+	case "audio/mpeg":
+		return ".mp3"
+	case "application/pdf":
+		// mime.ExtensionsByType returns ExtensionsByType(".pdf") on most
+		// systems, but it reads /etc/mime.types — which a slim container
+		// image does not ship — so the common document type is pinned here
+		// rather than left to the host.
+		return ".pdf"
 	}
 	if exts, err := mime.ExtensionsByType(contentType); err == nil && len(exts) > 0 {
 		return exts[0]

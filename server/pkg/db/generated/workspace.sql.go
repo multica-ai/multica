@@ -56,6 +56,9 @@ const deleteWorkspace = `-- name: DeleteWorkspace :exec
 WITH ws_installations AS (
     SELECT id FROM channel_installation WHERE workspace_id = $1
 ),
+ws_sessions AS (
+    SELECT id FROM chat_session WHERE workspace_id = $1
+),
 ws_agents AS (
     SELECT id FROM agent WHERE workspace_id = $1
 ),
@@ -68,9 +71,23 @@ cleared_agent_label_assignments AS (
 cleared_skill_label_assignments AS (
     DELETE FROM skill_to_label WHERE skill_id IN (SELECT id FROM ws_skills)
 ),
+cleared_channel_task_deliveries AS (
+    DELETE FROM channel_task_delivery WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_channel_outbound_messages AS (
+    DELETE FROM channel_outbound_message WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_channel_reply_deliveries AS (
+    DELETE FROM channel_reply_delivery WHERE installation_id IN (SELECT id FROM ws_installations)
+),
 cleared_chat_sessions AS (
     DELETE FROM channel_chat_session_binding WHERE installation_id IN (SELECT id FROM ws_installations)
     RETURNING chat_session_id
+),
+cleared_chat_contexts AS (
+    DELETE FROM channel_chat_context_generation
+    WHERE chat_session_id IN (SELECT chat_session_id FROM cleared_chat_sessions)
+       OR chat_session_id IN (SELECT id FROM ws_sessions)
 ),
 cleared_outbound_cards AS (
     -- channel_outbound_card_message is keyed by chat_session_id (no FK); its own
@@ -78,6 +95,9 @@ cleared_outbound_cards AS (
     -- the just-removed chat-session bindings, which still carry the id.
     DELETE FROM channel_outbound_card_message
     WHERE chat_session_id IN (SELECT chat_session_id FROM cleared_chat_sessions)
+),
+cleared_chat_submission_receipts AS (
+    DELETE FROM chat_submission_receipt WHERE chat_submission_receipt.workspace_id = $1
 ),
 cleared_draft_restores AS (
     -- chat_draft_restore is keyed by chat_session_id with no FK (MUL-3515) and has
@@ -94,6 +114,15 @@ cleared_draft_restores AS (
 ),
 cleared_inbound_dedup AS (
     DELETE FROM channel_inbound_message_dedup WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_dingtalk_group_presence AS (
+    DELETE FROM dingtalk_group_presence WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_dingtalk_bot_identity AS (
+    DELETE FROM dingtalk_bot_identity WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_dingtalk_group_routes AS (
+    DELETE FROM dingtalk_group_route WHERE workspace_id = $1
 ),
 cleared_audit AS (
     -- Purge, don't detach: the workspace is gone and channel_inbound_audit has no
@@ -115,6 +144,20 @@ cleared_issue_properties AS (
 ),
 cleared_quick_actions AS (
     DELETE FROM quick_action WHERE workspace_id = $1
+),
+ws_mcp_servers AS (
+    SELECT id FROM workspace_mcp_server WHERE workspace_id = $1
+),
+cleared_agent_mcp_bindings AS (
+    -- agent_mcp_server carries no FK in either direction, so sweep it from
+    -- both sides: the workspace's own servers, and any binding held by an
+    -- agent that is about to be removed with the workspace.
+    DELETE FROM agent_mcp_server
+    WHERE server_id IN (SELECT id FROM ws_mcp_servers)
+       OR agent_id IN (SELECT id FROM ws_agents)
+),
+cleared_workspace_mcp_servers AS (
+    DELETE FROM workspace_mcp_server WHERE workspace_id = $1
 ),
 deleted_pending_check_suites AS (
     DELETE FROM github_pending_check_suite WHERE workspace_id = $1
@@ -255,6 +298,46 @@ func (q *Queries) GetWorkspaceBySlug(ctx context.Context, slug string) (Workspac
 	return i, err
 }
 
+const healIssueCounter = `-- name: HealIssueCounter :one
+WITH target AS (
+    SELECT w.id, w.issue_counter,
+           (SELECT COALESCE(MAX(i.number), 0)::int FROM issue i WHERE i.workspace_id = w.id) AS max_number
+    FROM workspace w
+    WHERE w.id = $1
+)
+UPDATE workspace w SET issue_counter = t.max_number
+FROM target t
+WHERE w.id = t.id AND w.issue_counter < t.max_number
+RETURNING w.issue_counter AS issue_counter,
+          t.issue_counter AS previous_counter,
+          t.max_number AS max_number
+`
+
+type HealIssueCounterRow struct {
+	IssueCounter    int32 `json:"issue_counter"`
+	PreviousCounter int32 `json:"previous_counter"`
+	MaxNumber       int32 `json:"max_number"`
+}
+
+// Operator-shaped repair for a workspace whose issue_counter sits below
+// MAX(issue.number): something persisted a numbered issue row without this
+// counter ever being advanced for it. Deliberately a separate statement from
+// IncrementIssueCounter so a healthy create pays nothing for it, and scoped to
+// one workspace.
+//
+// The WHERE guard is what makes a retry meaningful: no row is updated, and sqlc
+// returns no row, unless the counter really is behind — so a collision caused by
+// anything else is never retried against the same taken number. It returns the
+// value it wrote, the value it replaced and the highest number the workspace
+// holds, so a repair can be logged with its before and after instead of leaving
+// no trace for whoever debugs the next occurrence.
+func (q *Queries) HealIssueCounter(ctx context.Context, id pgtype.UUID) (HealIssueCounterRow, error) {
+	row := q.db.QueryRow(ctx, healIssueCounter, id)
+	var i HealIssueCounterRow
+	err := row.Scan(&i.IssueCounter, &i.PreviousCounter, &i.MaxNumber)
+	return i, err
+}
+
 const incrementIssueCounter = `-- name: IncrementIssueCounter :one
 UPDATE workspace SET issue_counter = issue_counter + 1
 WHERE id = $1
@@ -273,6 +356,7 @@ SELECT w.id, w.name
 FROM member m
 JOIN workspace w ON w.id = m.workspace_id
 WHERE m.user_id = $1
+  AND m.role IN ('owner', 'admin', 'member', 'guest')
 ORDER BY w.id ASC
 `
 
@@ -284,7 +368,8 @@ type ListDaemonWorkspacesRow struct {
 // Daemons only need the membership set and display name to discover which
 // workspaces should have local runtimes. Keep this projection intentionally
 // narrow so the periodic consistency check never reads UI-only JSON/text
-// columns such as settings, repos, or context.
+// columns such as settings, repos, or context. A role this build does not
+// know is no membership (see GetMemberByUserAndWorkspace).
 func (q *Queries) ListDaemonWorkspaces(ctx context.Context, userID pgtype.UUID) ([]ListDaemonWorkspacesRow, error) {
 	rows, err := q.db.Query(ctx, listDaemonWorkspaces, userID)
 	if err != nil {
@@ -308,22 +393,44 @@ func (q *Queries) ListDaemonWorkspaces(ctx context.Context, userID pgtype.UUID) 
 const listWorkspaces = `-- name: ListWorkspaces :many
 SELECT w.id, w.name, w.slug, w.description, w.settings,
        w.created_at, w.updated_at, w.context, w.repos,
-       w.issue_prefix, w.issue_counter, w.avatar_url, w.attribution_fail_closed
+       w.issue_prefix, w.issue_counter, w.avatar_url, w.attribution_fail_closed, m.pinned_at,
+       m.role
 FROM member m
 JOIN workspace w ON w.id = m.workspace_id
 WHERE m.user_id = $1
-ORDER BY w.created_at ASC
+  AND m.role IN ('owner', 'admin', 'member', 'guest')
+ORDER BY m.pinned_at DESC NULLS LAST, w.created_at ASC
 `
 
-func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Workspace, error) {
+type ListWorkspacesRow struct {
+	ID                    pgtype.UUID        `json:"id"`
+	Name                  string             `json:"name"`
+	Slug                  string             `json:"slug"`
+	Description           pgtype.Text        `json:"description"`
+	Settings              []byte             `json:"settings"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	Context               pgtype.Text        `json:"context"`
+	Repos                 []byte             `json:"repos"`
+	IssuePrefix           string             `json:"issue_prefix"`
+	IssueCounter          int32              `json:"issue_counter"`
+	AvatarUrl             pgtype.Text        `json:"avatar_url"`
+	AttributionFailClosed bool               `json:"attribution_fail_closed"`
+	PinnedAt              pgtype.Timestamptz `json:"pinned_at"`
+	Role                  string             `json:"role"`
+}
+
+// The role narrows what a guest is shown (workspaceResponseFor). A role this
+// build does not know is no membership (see GetMemberByUserAndWorkspace).
+func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]ListWorkspacesRow, error) {
 	rows, err := q.db.Query(ctx, listWorkspaces, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Workspace{}
+	items := []ListWorkspacesRow{}
 	for rows.Next() {
-		var i Workspace
+		var i ListWorkspacesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
@@ -338,6 +445,8 @@ func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Wor
 			&i.IssueCounter,
 			&i.AvatarUrl,
 			&i.AttributionFailClosed,
+			&i.PinnedAt,
+			&i.Role,
 		); err != nil {
 			return nil, err
 		}
@@ -391,6 +500,26 @@ func (q *Queries) LockWorkspaceForDelete(ctx context.Context, id pgtype.UUID) (p
 	var id_2 pgtype.UUID
 	err := row.Scan(&id_2)
 	return id_2, err
+}
+
+const setWorkspacePinned = `-- name: SetWorkspacePinned :one
+UPDATE member
+SET pinned_at = CASE WHEN $1::bool THEN COALESCE(pinned_at, now()) ELSE NULL END
+WHERE workspace_id = $2 AND user_id = $3
+RETURNING pinned_at
+`
+
+type SetWorkspacePinnedParams struct {
+	Pinned      bool        `json:"pinned"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) SetWorkspacePinned(ctx context.Context, arg SetWorkspacePinnedParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, setWorkspacePinned, arg.Pinned, arg.WorkspaceID, arg.UserID)
+	var pinned_at pgtype.Timestamptz
+	err := row.Scan(&pinned_at)
+	return pinned_at, err
 }
 
 const updateWorkspace = `-- name: UpdateWorkspace :one

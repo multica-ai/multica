@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,17 +11,6 @@ import (
 
 	"log/slog"
 )
-
-func TestNewReturnsTraecliBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("traecli", Config{ExecutablePath: "/nonexistent/traecli"})
-	if err != nil {
-		t.Fatalf("New(traecli) error: %v", err)
-	}
-	if _, ok := b.(*traecliBackend); !ok {
-		t.Fatalf("expected *traecliBackend, got %T", b)
-	}
-}
 
 // fakeTraecliACPScript impersonates the official `traecli acp serve` for unit
 // tests. It speaks the SAME wire format the real traecli v0.120.42 emits
@@ -67,7 +57,7 @@ while IFS= read -r line; do
       printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_new","update":{"sessionUpdate":"tool_call","toolCallId":"tc-1","name":"Shell","status":"pending","parameters":{"command":"echo hi"}}}}\n'
       printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_new","update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-1","status":"completed","name":"Shell","output":"hi\\n"}}}\n'
       printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_new","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"pong"}}}}\n'
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":17,"outputTokens":5,"cachedReadTokens":3,"cachedWriteTokens":2,"costUsdTicks":900}}}\n' "$id"
       if [ -n "$TRAECLI_LATE_CHUNK" ]; then
         sleep 0.05
         printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_new","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":" tail"}}}}\n'
@@ -114,6 +104,9 @@ func TestTraecliBackendStreamsAndCompletes(t *testing.T) {
 	}
 	if result.SessionID != "ses_new" {
 		t.Fatalf("session id = %q, want ses_new", result.SessionID)
+	}
+	if usage := result.Usage["unknown"]; usage != (TokenUsage{InputTokens: 17, OutputTokens: 5, CacheReadTokens: 3, CacheWriteTokens: 2, CostUSDTicks: 900}) {
+		t.Fatalf("usage = %+v, want all prompt-result fields", usage)
 	}
 	// The agent_message_chunk must surface as MessageText; the tool_call must
 	// surface as a MessageToolUse normalized to a canonical tool name.
@@ -209,6 +202,91 @@ func countTokens(lines []string, tok string) int {
 		}
 	}
 	return n
+}
+
+func TestTraecliExecutionModeNewAndResumedSessions(t *testing.T) {
+	t.Parallel()
+	for _, resumeID := range []string{"", "ses_existing"} {
+		name := "new"
+		if resumeID != "" {
+			name = "resumed"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			argsFile := filepath.Join(dir, "args.txt")
+			requestsFile := filepath.Join(dir, "requests.jsonl")
+			fakePath := filepath.Join(dir, "traecli")
+			writeTestExecutable(t, fakePath, []byte(fakeTraecliACPScript()))
+			backend, err := New("traecli", Config{
+				ExecutablePath: fakePath, Logger: slog.Default(),
+				Env: map[string]string{"TRAECLI_ARGS_FILE": argsFile, "TRAECLI_REQUESTS_FILE": requestsFile},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			const prompt = "Only explain the implementation plan. Do not change code or implement it."
+			session, err := backend.Execute(ctx, prompt, ExecOptions{ResumeSessionID: resumeID, Timeout: 5 * time.Second})
+			if err != nil {
+				t.Fatal(err)
+			}
+			go func() {
+				for range session.Messages {
+				}
+			}()
+			result := <-session.Result
+			if result.Status != "completed" || result.Output != "pong" {
+				t.Fatalf("status=%q error=%q output=%q", result.Status, result.Error, result.Output)
+			}
+			rawArgs, err := os.ReadFile(argsFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := strings.Split(strings.TrimSpace(string(rawArgs)), "\n")
+			for _, tool := range []string{"EnterPlanMode", "ExitPlanMode"} {
+				found := false
+				for i := 1; i < len(args); i++ {
+					if args[i-1] == "--disallowed-tool" && args[i] == tool {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("native %s must be disabled, args=%q", tool, args)
+				}
+			}
+			raw, err := os.ReadFile(requestsFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prompts := 0
+			for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+				var request struct {
+					Method string `json:"method"`
+					Params struct {
+						SessionID string `json:"sessionId"`
+						Prompt    []struct {
+							Text string `json:"text"`
+						} `json:"prompt"`
+					} `json:"params"`
+				}
+				if err := json.Unmarshal([]byte(line), &request); err != nil {
+					t.Fatal(err)
+				}
+				if request.Method != "session/prompt" {
+					continue
+				}
+				prompts++
+				if len(request.Params.Prompt) != 1 || request.Params.Prompt[0].Text != prompt || request.Params.SessionID != result.SessionID {
+					t.Fatalf("original request or session changed: %+v", request)
+				}
+			}
+			if prompts != 1 {
+				t.Fatalf("sent %d prompts, want only the original request", prompts)
+			}
+		})
+	}
 }
 
 func TestTraecliSetModelFailureFailsTask(t *testing.T) {

@@ -20,14 +20,15 @@ import (
 // InstallationService.DecryptAppSecret server-side). Likewise, the WS
 // lease columns are omitted; they are runtime state, not API surface.
 type LarkInstallationResponse struct {
-	ID              string  `json:"id"`
-	WorkspaceID     string  `json:"workspace_id"`
-	AgentID         string  `json:"agent_id"`
-	AppID           string  `json:"app_id"`
-	TenantKey       *string `json:"tenant_key,omitempty"`
-	BotOpenID       string  `json:"bot_open_id"`
-	InstallerUserID string  `json:"installer_user_id"`
-	Status          string  `json:"status"`
+	ID                     string     `json:"id"`
+	WorkspaceID            string     `json:"workspace_id"`
+	AgentID                string     `json:"agent_id"`
+	AppID                  string     `json:"app_id"`
+	TenantKey              *string    `json:"tenant_key,omitempty"`
+	BotOpenID              string     `json:"bot_open_id"`
+	InstallerUserID        string     `json:"installer_user_id"`
+	Status                 string     `json:"status"`
+	FirstMessageReceivedAt *time.Time `json:"first_message_received_at,omitempty"`
 	// Region is the Lark cloud this installation lives on: "feishu"
 	// (mainland) or "lark" (international). The UI uses it to render a
 	// badge and to build the correct "Manage in Lark" dev-console host.
@@ -39,17 +40,18 @@ type LarkInstallationResponse struct {
 
 func larkInstallationToResponse(row lark.Installation) LarkInstallationResponse {
 	resp := LarkInstallationResponse{
-		ID:              uuidToString(row.ID),
-		WorkspaceID:     uuidToString(row.WorkspaceID),
-		AgentID:         uuidToString(row.AgentID),
-		AppID:           row.AppID,
-		BotOpenID:       row.BotOpenID,
-		InstallerUserID: uuidToString(row.InstallerUserID),
-		Status:          row.Status,
-		Region:          row.Region,
-		InstalledAt:     row.InstalledAt.Time.UTC().Format(time.RFC3339),
-		CreatedAt:       row.CreatedAt.Time.UTC().Format(time.RFC3339),
-		UpdatedAt:       row.UpdatedAt.Time.UTC().Format(time.RFC3339),
+		FirstMessageReceivedAt: row.FirstMessageReceivedAt,
+		ID:                     uuidToString(row.ID),
+		WorkspaceID:            uuidToString(row.WorkspaceID),
+		AgentID:                uuidToString(row.AgentID),
+		AppID:                  row.AppID,
+		BotOpenID:              row.BotOpenID,
+		InstallerUserID:        uuidToString(row.InstallerUserID),
+		Status:                 row.Status,
+		Region:                 row.Region,
+		InstalledAt:            row.InstalledAt.Time.UTC().Format(time.RFC3339),
+		CreatedAt:              row.CreatedAt.Time.UTC().Format(time.RFC3339),
+		UpdatedAt:              row.UpdatedAt.Time.UTC().Format(time.RFC3339),
 	}
 	if row.TenantKey.Valid {
 		tk := row.TenantKey.String
@@ -122,7 +124,7 @@ func (h *Handler) ListLarkInstallations(w http.ResponseWriter, r *http.Request) 
 // rights.
 func (h *Handler) RevokeLarkInstallation(w http.ResponseWriter, r *http.Request) {
 	if h.LarkInstallations == nil {
-		writeError(w, http.StatusServiceUnavailable, "lark integration not configured")
+		writeFeatureDisabled(w, "lark_not_configured", "lark integration not configured")
 		return
 	}
 	userID, ok := requireUserID(w, r)
@@ -209,7 +211,7 @@ type RedeemLarkBindingTokenResponse struct {
 //   - 403 Forbidden:  redeemer is not a workspace member
 func (h *Handler) RedeemLarkBindingToken(w http.ResponseWriter, r *http.Request) {
 	if h.LarkBindingTokens == nil {
-		writeError(w, http.StatusServiceUnavailable, "lark integration not configured")
+		writeFeatureDisabled(w, "lark_not_configured", "lark integration not configured")
 		return
 	}
 	userID, ok := requireUserID(w, r)
@@ -277,7 +279,7 @@ type BeginLarkInstallResponse struct {
 // in that case so this should not be reached through the normal flow.
 func (h *Handler) BeginLarkInstall(w http.ResponseWriter, r *http.Request) {
 	if h.LarkRegistration == nil {
-		writeError(w, http.StatusServiceUnavailable, "lark install not configured")
+		writeFeatureDisabled(w, "lark_not_configured", "lark install not configured")
 		return
 	}
 	userID, ok := requireUserID(w, r)
@@ -385,7 +387,7 @@ type LarkInstallStatusResponse struct {
 // idempotent.
 func (h *Handler) GetLarkInstallStatus(w http.ResponseWriter, r *http.Request) {
 	if h.LarkRegistration == nil {
-		writeError(w, http.StatusServiceUnavailable, "lark install not configured")
+		writeFeatureDisabled(w, "lark_not_configured", "lark install not configured")
 		return
 	}
 	userID, ok := requireUserID(w, r)
@@ -401,7 +403,7 @@ func (h *Handler) GetLarkInstallStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "session id is required")
 		return
 	}
-	state, err := h.LarkRegistration.GetSession(wsUUID, sessionID)
+	state, err := h.LarkRegistration.GetSession(r.Context(), wsUUID, sessionID)
 	if err != nil {
 		if errors.Is(err, lark.ErrRegistrationSessionNotFound) {
 			writeError(w, http.StatusNotFound, "install session not found")

@@ -28,8 +28,8 @@ WHERE id = $1;
 
 -- name: CreateActivity :one
 INSERT INTO activity_log (
-    workspace_id, issue_id, actor_type, actor_id, action, details
-) VALUES ($1, $2, $3, $4, $5, $6)
+    workspace_id, issue_id, actor_type, actor_id, action, details, id
+) VALUES ($1, $2, $3, $4, $5, $6, COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()))
 RETURNING *;
 
 -- name: HasSquadLeaderNoActionEvaluationForTask :one
@@ -58,3 +58,11 @@ WHERE workspace_id = $1
   AND details->>'to_type' IS NOT NULL
   AND details->>'to_id' IS NOT NULL
 GROUP BY details->>'to_type', details->>'to_id';
+
+-- name: GetLastIssueStatusChange :one
+-- Who last changed an issue's status, and to what: names the mover when an
+-- agent's status change is refused because the issue left its step (MUL-7420).
+SELECT actor_type, actor_id FROM activity_log
+WHERE issue_id = @issue_id AND action = 'status_changed'
+ORDER BY created_at DESC, id DESC
+LIMIT 1;

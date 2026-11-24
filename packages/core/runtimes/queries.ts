@@ -12,7 +12,20 @@ export const runtimeKeys = {
   // by-hour now follows the viewer's tz, like the other reports.
   usageByHour: (rid: string, days: number, tz: string) =>
     ["runtimes", "usage", "by-hour", rid, days, tz] as const,
+  rateLimits: (rid: string) => ["runtimes", "rate-limits", rid] as const,
 };
+
+// The daemon posts a runtime's rate limits while its tasks run, so the
+// snapshot only moves while something is running. A slow poll keeps an open
+// page roughly in step without a realtime event.
+export function runtimeRateLimitsOptions(runtimeId: string) {
+  return queryOptions({
+    queryKey: runtimeKeys.rateLimits(runtimeId),
+    queryFn: () => api.getRuntimeRateLimits(runtimeId),
+    staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
+  });
+}
 
 // `tz` is the viewer's IANA name — all reports follow the viewer's tz.
 export function runtimeUsageOptions(
@@ -47,9 +60,15 @@ export function runtimeUsageByHourOptions(runtimeId: string, days: number, tz: s
   });
 }
 
-export function runtimeListOptions(wsId: string, owner?: "me") {
+/**
+ * `wsSlug` targets a workspace other than the active one. The server resolves
+ * the workspace from the slug header before the `workspace_id` param, so the
+ * param alone cannot reach a workspace the app has not navigated to — which is
+ * exactly the create-workspace flow's situation.
+ */
+export function runtimeListOptions(wsId: string, owner?: "me", wsSlug?: string) {
   return queryOptions({
     queryKey: owner === "me" ? runtimeKeys.listMine(wsId) : runtimeKeys.list(wsId),
-    queryFn: () => api.listRuntimes({ workspace_id: wsId, owner }),
+    queryFn: () => api.listRuntimes({ workspace_id: wsId, owner }, wsSlug),
   });
 }

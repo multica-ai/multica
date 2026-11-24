@@ -16,14 +16,22 @@ const minShortIDPrefixLen = 4
 const resolverListPageLimit = 50
 
 type resolvedID struct {
-	ID      string
+	ID string
+	// Display is a best-effort label for human-facing messages. It may equal
+	// ID when resolution does not fetch display metadata from the server.
 	Display string
+	// Archived is set when the prefix matched only an archived candidate. A
+	// full UUID is not looked up, so it never sets this.
+	Archived bool
 }
 
 type idCandidate struct {
 	ID      string
 	Display string
 	Detail  string
+	// Archived candidates only resolve when no live candidate matches the
+	// prefix, so an archived project never makes a live one ambiguous.
+	Archived bool
 }
 
 func displayID(id string, full bool) string {
@@ -73,7 +81,16 @@ func compactUUID(id string) string {
 	return strings.ToLower(strings.ReplaceAll(strings.TrimSpace(id), "-", ""))
 }
 
+const defaultListHint = "run the list command with --full-id"
+
 func resolveIDByPrefix(ctx context.Context, client *cli.APIClient, kind, input string, fetch func(context.Context, *cli.APIClient) ([]idCandidate, error)) (resolvedID, error) {
+	return resolveIDByPrefixWithListHint(ctx, client, kind, input, defaultListHint, fetch)
+}
+
+// resolveIDByPrefixWithListHint is resolveIDByPrefix for resources whose list
+// command needs a different hint, e.g. one that always prints full UUIDs and
+// has no --full-id flag. listHint completes "Use more characters or ...".
+func resolveIDByPrefixWithListHint(ctx context.Context, client *cli.APIClient, kind, input, listHint string, fetch func(context.Context, *cli.APIClient) ([]idCandidate, error)) (resolvedID, error) {
 	trimmed := strings.TrimSpace(input)
 	if trimmed == "" {
 		return resolvedID{}, fmt.Errorf("%s id is required", kind)
@@ -102,21 +119,35 @@ func resolveIDByPrefix(ctx context.Context, client *cli.APIClient, kind, input s
 		}
 	}
 
+	live := make([]idCandidate, 0, len(matches))
+	for _, m := range matches {
+		if !m.Archived {
+			live = append(live, m)
+		}
+	}
+	if len(live) > 0 {
+		matches = live
+	}
+
 	switch len(matches) {
 	case 0:
-		return resolvedID{}, fmt.Errorf("no %s found matching id prefix %q; run the list command with --full-id to copy the full UUID", kind, input)
+		return resolvedID{}, fmt.Errorf("no %s found matching id prefix %q; %s to copy the full UUID", kind, input, listHint)
 	case 1:
 		display := matches[0].Display
 		if display == "" {
 			display = matches[0].ID
 		}
-		return resolvedID{ID: matches[0].ID, Display: display}, nil
+		return resolvedID{ID: matches[0].ID, Display: display, Archived: matches[0].Archived}, nil
 	default:
-		return resolvedID{}, ambiguousIDPrefixError(kind, input, matches)
+		return resolvedID{}, ambiguousIDPrefixErrorWithListHint(kind, input, listHint, matches)
 	}
 }
 
 func ambiguousIDPrefixError(kind, input string, matches []idCandidate) error {
+	return ambiguousIDPrefixErrorWithListHint(kind, input, defaultListHint, matches)
+}
+
+func ambiguousIDPrefixErrorWithListHint(kind, input, listHint string, matches []idCandidate) error {
 	sort.Slice(matches, func(i, j int) bool {
 		return matches[i].ID < matches[j].ID
 	})
@@ -124,7 +155,7 @@ func ambiguousIDPrefixError(kind, input string, matches []idCandidate) error {
 	for _, m := range matches {
 		parts = append(parts, "  "+m.ID)
 	}
-	return fmt.Errorf("ambiguous %s id prefix %q; matches:\n%s\nUse more characters or run the list command with --full-id", kind, input, strings.Join(parts, "\n"))
+	return fmt.Errorf("ambiguous %s id prefix %q; matches:\n%s\nUse more characters or %s", kind, input, strings.Join(parts, "\n"), listHint)
 }
 
 // resolveIssueRef accepts only the two canonical issue references:
@@ -151,7 +182,16 @@ func resolveIssueRef(ctx context.Context, client *cli.APIClient, input string) (
 		return fetchIssueRef(ctx, client, trimmed)
 	}
 	if uuidRegexp.MatchString(trimmed) {
-		return fetchIssueRef(ctx, client, trimmed)
+		// A full UUID is self-identifying: the resolver GET added a round
+		// trip and no information, and agents pay it several times per run
+		// during bootstrap (GH #7017). Lowercased to the canonical form the
+		// server emits. Messages without an issue response may show this UUID
+		// rather than the issue key, and failures now come from the command's
+		// next issue-aware endpoint. Every write path re-validates server-side
+		// (e.g. parent_issue_id on create), so nothing is stored on the strength
+		// of the ref alone.
+		id := strings.ToLower(trimmed)
+		return resolvedID{ID: id, Display: id}, nil
 	}
 
 	// Detect the common "I copied a truncated UUID" case and give a
@@ -342,11 +382,29 @@ func resolveProjectID(ctx context.Context, client *cli.APIClient, input string) 
 	return resolveIDByPrefix(ctx, client, "project", input, fetchProjectCandidates)
 }
 
+// resolveProjectIDForNewWork resolves --project on creates that file new work
+// into a project (issue create, autopilot create). Updates use
+// resolveProjectID: the server alone knows whether the project changes. A prefix that
+// only matches an archived project is refused here with the restore command,
+// instead of round-tripping to the server's 409 project_archived.
+func resolveProjectIDForNewWork(ctx context.Context, client *cli.APIClient, input string) (resolvedID, error) {
+	ref, err := resolveProjectID(ctx, client, input)
+	if err != nil {
+		return resolvedID{}, err
+	}
+	if ref.Archived {
+		return resolvedID{}, fmt.Errorf("project %q is archived and accepts no new work; restore it first with: multica project restore %s", ref.Display, ref.ID)
+	}
+	return ref, nil
+}
+
 func fetchProjectCandidates(ctx context.Context, client *cli.APIClient) ([]idCandidate, error) {
 	if client.WorkspaceID == "" {
 		return nil, fmt.Errorf("workspace_id is required to resolve project id prefixes")
 	}
-	params := url.Values{"workspace_id": {client.WorkspaceID}}
+	// Archived projects are candidates too, so get / restore / issue list
+	// --project still reach them; resolveIDByPrefix prefers live projects.
+	params := url.Values{"workspace_id": {client.WorkspaceID}, "include_archived": {"true"}}
 	var result map[string]any
 	if err := client.GetJSON(ctx, "/api/projects?"+params.Encode(), &result); err != nil {
 		return nil, err
@@ -358,10 +416,15 @@ func fetchProjectCandidates(ctx context.Context, client *cli.APIClient) ([]idCan
 		if !ok {
 			continue
 		}
+		detail := strVal(p, "status")
+		if strVal(p, "archived_at") != "" {
+			detail += ", archived"
+		}
 		candidates = append(candidates, idCandidate{
-			ID:      strVal(p, "id"),
-			Display: strVal(p, "title"),
-			Detail:  strVal(p, "status"),
+			ID:       strVal(p, "id"),
+			Display:  strVal(p, "title"),
+			Detail:   detail,
+			Archived: strVal(p, "archived_at") != "",
 		})
 	}
 	return candidates, nil
@@ -395,31 +458,39 @@ func resolveProjectResourceID(ctx context.Context, client *cli.APIClient, projec
 	return resolveIDByPrefix(ctx, client, "project resource", input, fetch)
 }
 
-func resolveLabelID(ctx context.Context, client *cli.APIClient, input string) (resolvedID, error) {
-	return resolveIDByPrefix(ctx, client, "label", input, fetchLabelCandidates)
+func resolveLabelID(ctx context.Context, client *cli.APIClient, input, resourceType string) (resolvedID, error) {
+	return resolveIDByPrefix(ctx, client, "label", input, func(ctx context.Context, client *cli.APIClient) ([]idCandidate, error) {
+		return fetchLabelCandidates(ctx, client, resourceType)
+	})
 }
 
-func fetchLabelCandidates(ctx context.Context, client *cli.APIClient) ([]idCandidate, error) {
+func fetchLabelCandidates(ctx context.Context, client *cli.APIClient, resourceType string) ([]idCandidate, error) {
 	if client.WorkspaceID == "" {
 		return nil, fmt.Errorf("workspace_id is required to resolve label id prefixes")
 	}
-	params := url.Values{"workspace_id": {client.WorkspaceID}}
-	var result map[string]any
-	if err := client.GetJSON(ctx, "/api/labels?"+params.Encode(), &result); err != nil {
-		return nil, err
+	resourceTypes := []string{resourceType}
+	if resourceType == "" {
+		resourceTypes = []string{"issue", "skill"}
 	}
-	labelsRaw, _ := result["labels"].([]any)
-	candidates := make([]idCandidate, 0, len(labelsRaw))
-	for _, raw := range labelsRaw {
-		l, ok := raw.(map[string]any)
-		if !ok {
-			continue
+	candidates := make([]idCandidate, 0)
+	for _, candidateType := range resourceTypes {
+		params := url.Values{"workspace_id": {client.WorkspaceID}, "resource_type": {candidateType}}
+		var result map[string]any
+		if err := client.GetJSON(ctx, "/api/labels?"+params.Encode(), &result); err != nil {
+			return nil, err
 		}
-		candidates = append(candidates, idCandidate{
-			ID:      strVal(l, "id"),
-			Display: strVal(l, "name"),
-			Detail:  strVal(l, "color"),
-		})
+		labelsRaw, _ := result["labels"].([]any)
+		for _, raw := range labelsRaw {
+			l, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			candidates = append(candidates, idCandidate{
+				ID:      strVal(l, "id"),
+				Display: strVal(l, "name"),
+				Detail:  strVal(l, "color"),
+			})
+		}
 	}
 	return candidates, nil
 }

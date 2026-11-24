@@ -1,4 +1,9 @@
 import type { RuntimeDevice, RuntimeModel } from "../types";
+import {
+  AGENT_CONVERSATION_STARTER_LABEL_MAX_LENGTH,
+  AGENT_CONVERSATION_STARTER_MAX_LENGTH,
+  AGENT_CONVERSATION_STARTERS_MAX,
+} from "./constants";
 import type { AgentDraft } from "./draft";
 
 /**
@@ -22,20 +27,39 @@ export interface BuilderDraftPayload {
   name?: unknown;
   description?: unknown;
   instructions?: unknown;
+  conversation_starters?: unknown;
   model?: unknown;
   skill_ids?: unknown;
   permission_scope?: unknown;
   member_ids?: unknown;
 }
 
-export function parseBuilderDraft(content: string): BuilderDraftPayload | null {
+function isBuilderDraftPayload(value: unknown): value is BuilderDraftPayload {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+export function parseBuilderDraft(
+  content: string,
+  { completed = false }: { completed?: boolean } = {},
+): BuilderDraftPayload | null {
   const match = content.match(/<agent_draft>([\s\S]*?)<\/agent_draft>/);
-  if (!match?.[1]) return null;
+  if (!match?.[1]) {
+    // Completed CLI replies can omit the closing tag and include literal
+    // string control characters. Apply the same repair as closed blocks,
+    // but never recover a live stream or truncate trailing text.
+    if (!completed || content.includes("</agent_draft>")) return null;
+    const parts = content.split("<agent_draft>");
+    if (parts.length !== 2 || !parts[1]) return null;
+    try {
+      const value = JSON.parse(escapeJsonStringControlCharacters(parts[1]));
+      return isBuilderDraftPayload(value) ? value : null;
+    } catch {
+      return null;
+    }
+  }
   try {
     const value = JSON.parse(match[1]);
-    return value && typeof value === "object"
-      ? (value as BuilderDraftPayload)
-      : null;
+    return isBuilderDraftPayload(value) ? value : null;
   } catch {
     // Some CLI-backed models emit literal newlines in the Markdown
     // instructions string even when asked for compact JSON. Repair only JSON
@@ -43,9 +67,7 @@ export function parseBuilderDraft(content: string): BuilderDraftPayload | null {
     // other syntax still have to pass JSON.parse.
     try {
       const value = JSON.parse(escapeJsonStringControlCharacters(match[1]));
-      return value && typeof value === "object"
-        ? (value as BuilderDraftPayload)
-        : null;
+      return isBuilderDraftPayload(value) ? value : null;
     } catch {
       return null;
     }
@@ -130,6 +152,7 @@ export function encodeBuilderInput(
           name: draft.name,
           description: draft.description,
           instructions: draft.instructions,
+          conversation_starters: draft.conversationStarters,
           model: draft.model,
           skill_ids: [...draft.skillIds],
           permission_scope: draft.permissionScope,
@@ -244,6 +267,28 @@ export function mergeBuilderDraft(
       ? payload.model
       : current.model;
 
+  const conversationStarters = Array.isArray(payload.conversation_starters)
+    ? payload.conversation_starters
+        .slice(0, AGENT_CONVERSATION_STARTERS_MAX)
+        .filter(
+          (item): item is { label: string; prompt: string } =>
+            !!item &&
+            typeof item === "object" &&
+            typeof (item as { label?: unknown }).label === "string" &&
+            typeof (item as { prompt?: unknown }).prompt === "string" &&
+            (item as { label: string }).label.trim().length > 0 &&
+            (item as { prompt: string }).prompt.trim().length > 0,
+        )
+        .map((item) => ({
+          label: [...item.label.trim()]
+            .slice(0, AGENT_CONVERSATION_STARTER_LABEL_MAX_LENGTH)
+            .join(""),
+          prompt: [...item.prompt.trim()]
+            .slice(0, AGENT_CONVERSATION_STARTER_MAX_LENGTH)
+            .join(""),
+        }))
+    : current.conversationStarters;
+
   return {
     ...current,
     name: typeof payload.name === "string" ? payload.name : current.name,
@@ -255,6 +300,7 @@ export function mergeBuilderDraft(
       typeof payload.instructions === "string"
         ? payload.instructions
         : current.instructions,
+    conversationStarters,
     model,
     // The builder can move the model, which invalidates whatever thinking /
     // speed the user picked for the previous one. It never sets these two

@@ -91,8 +91,8 @@ func (p resolvedPermission) legacyVisibility() string {
 //   - permissionMode == nil && visibility == nil  -> caller default (returns ok=false, nil)
 //   - permissionMode provided                     -> authoritative
 //   - only legacy visibility provided             -> mapped:
-//       "private"   -> private
-//       "workspace" -> public_to + workspace target
+//     "private"   -> private
+//     "workspace" -> public_to + workspace target
 //
 // workspaceID seeds workspace targets (stored as the workspace id). The
 // returned error is a client-facing 400 message.
@@ -194,10 +194,9 @@ func (h *Handler) replaceInvocationTargets(ctx context.Context, agentID pgtype.U
 
 // replaceInvocationTargetsWithQueries is the tx-friendly variant: callers that
 // hold a `qtx := h.Queries.WithTx(tx)` can pass it here so the invocation
-// target rows are written inside the same transaction as the agent row (the
-// template create path in agent_template.go depends on this — a fresh agent
-// row must not observe a state where the row exists but its targets are
-// missing).
+// target rows are written inside the same transaction as the agent row. A
+// fresh agent row must not observe a state where the row exists but its targets
+// are missing.
 func replaceInvocationTargetsWithQueries(ctx context.Context, q *db.Queries, agentID pgtype.UUID, createdBy pgtype.UUID, targets []targetSpec) error {
 	if err := q.DeleteAgentInvocationTargets(ctx, agentID); err != nil {
 		return err

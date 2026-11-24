@@ -1,4 +1,4 @@
-import { Lock } from "lucide-react";
+import { Lock } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 
 type Resource = "agent" | "skill" | "comment" | "runtime" | "workspace";
@@ -7,6 +7,7 @@ type Reason =
   | "allowed"
   | "not_authenticated"
   | "not_member"
+  | "guest_role"
   | "not_owner_role"
   | "not_admin_role"
   | "not_resource_owner"
@@ -67,6 +68,8 @@ function getCopy(reason: Reason, noun: string, ownerName?: string): string {
       return `Sign in to edit this ${noun}.`;
     case "not_member":
       return `Join this workspace to edit this ${noun}.`;
+    case "guest_role":
+      return `View only — guests can't edit this ${noun}.`;
     case "not_owner_role":
       return `View only — only the workspace owner can manage this ${noun}.`;
     case "not_admin_role":

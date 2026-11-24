@@ -1,12 +1,14 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"sort"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -19,6 +21,11 @@ type TimelineEntry struct {
 	ActorType string `json:"actor_type"`
 	ActorID   string `json:"actor_id"`
 	CreatedAt string `json:"created_at"`
+	// Display-only identity is hydrated from the global user row for member
+	// actors. It remains available after the member leaves this workspace;
+	// actor_type + actor_id stay the durable attribution keys.
+	ActorName      string `json:"actor_name,omitempty"`
+	ActorAvatarURL string `json:"actor_avatar_url,omitempty"`
 
 	// Activity-only fields
 	Action  *string         `json:"action,omitempty"`
@@ -28,6 +35,7 @@ type TimelineEntry struct {
 	Content     *string `json:"content,omitempty"`
 	ParentID    *string `json:"parent_id,omitempty"`
 	UpdatedAt   *string `json:"updated_at,omitempty"`
+	Revision    int64   `json:"revision,omitempty"`
 	CommentType *string `json:"comment_type,omitempty"`
 	// Set only on comments produced by a quick action run. Unforgeable: there
 	// is no request field for it on the generic comment endpoint.
@@ -41,18 +49,28 @@ type TimelineEntry struct {
 	// Metadata carries the structured payload for typed comments (currently
 	// ask_user_question). Omitted for ordinary comments and activities.
 	Metadata *CommentMetadata `json:"metadata,omitempty"`
+	// Set only on a tombstone: a comment deleted while it still had replies.
+	DeletedAt *string `json:"deleted_at,omitempty"`
+	// Supplements lists every running turn this comment steered; the single
+	// supplement_* fields mirror the first receipt for older clients.
+	Supplements             []CommentSupplementResponse `json:"supplements,omitempty"`
+	SupplementTaskID        string                      `json:"supplement_task_id,omitempty"`
+	SupplementStatus        string                      `json:"supplement_status,omitempty"`
+	SupplementFailureReason *string                     `json:"supplement_failure_reason,omitempty"`
+	SupplementDeliveredAt   *string                     `json:"supplement_delivered_at,omitempty"`
 }
 
 // timelineHardCap bounds the per-issue timeline payload. Sized as a defensive
 // safety net, not a UX page window: see commentHardCap in comment.go for the
-// data-shape rationale (#1929).
-const timelineHardCap = 2000
+// data-shape rationale (#1929). A variable only so the cap tests can shrink it,
+// like commentHardCap; nothing outside tests assigns it.
+var timelineHardCap = 2000
 
 // timelineProbeLimit reads one row past the cap so "we hit the cap" can be
 // distinguished from "the issue happens to have exactly timelineHardCap rows".
 // Without the probe row an issue sitting exactly on the boundary would report a
 // complete timeline as truncated and pay a needless ancestor-backfill query.
-const timelineProbeLimit = timelineHardCap + 1
+func timelineProbeLimit() int32 { return int32(timelineHardCap) + 1 }
 
 // Truncation is signalled with a response header rather than a body field
 // because the unpaginated response is a bare JSON array (TimelineEntriesSchema =
@@ -149,7 +167,7 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 	comments, err := h.Queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
-		Limit:       timelineProbeLimit,
+		Limit:       timelineProbeLimit(),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list comments")
@@ -157,7 +175,7 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 	}
 	activities, err := h.Queries.ListActivitiesForIssue(ctx, db.ListActivitiesForIssueParams{
 		IssueID: issue.ID,
-		Limit:   timelineProbeLimit,
+		Limit:   timelineProbeLimit(),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list activities")
@@ -206,11 +224,17 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set(HeaderTimelineTruncated, kinds)
 	}
 
+	entries := h.mergeTimeline(r, comments, activities, !wantWrapped)
+	// The current-member directory deliberately excludes departed members, but
+	// timeline attribution must remain readable after they leave. Hydrate only
+	// the member ids already present in this authorised issue response; lookup
+	// failure is display-only and must not make the timeline unavailable.
+	h.hydrateTimelineMemberActors(ctx, entries)
+	if entries == nil {
+		entries = []TimelineEntry{}
+	}
+
 	if wantWrapped {
-		entries := h.mergeTimeline(r, comments, activities, false)
-		if entries == nil {
-			entries = []TimelineEntry{}
-		}
 		resp := timelinePaginatedResponse{
 			Entries:       entries,
 			HasMoreBefore: commentsTruncated || activitiesTruncated,
@@ -230,10 +254,6 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entries := h.mergeTimeline(r, comments, activities, true)
-	if entries == nil {
-		entries = []TimelineEntry{}
-	}
 	writeJSON(w, http.StatusOK, entries)
 }
 
@@ -273,6 +293,7 @@ func (h *Handler) commentsToEntries(r *http.Request, comments []db.Comment) []Ti
 	}
 	reactions := h.groupReactions(r, ids)
 	attachments := h.groupAttachments(r, ids)
+	supplements := h.listCommentSupplements(r.Context(), comments[0].WorkspaceID, ids)
 
 	out := make([]TimelineEntry, len(comments))
 	for i, c := range comments {
@@ -297,6 +318,7 @@ func (h *Handler) commentsToEntries(r *http.Request, comments []db.Comment) []Ti
 			ParentID:       uuidToPtr(c.ParentID),
 			CreatedAt:      timestampToString(c.CreatedAt),
 			UpdatedAt:      &updatedAt,
+			Revision:       c.Revision,
 			Reactions:      reactions[cid],
 			Attachments:    attachments[cid],
 			ResolvedAt:     timestampToPtr(c.ResolvedAt),
@@ -304,6 +326,14 @@ func (h *Handler) commentsToEntries(r *http.Request, comments []db.Comment) []Ti
 			ResolvedByID:   uuidToPtr(c.ResolvedByID),
 			SourceTaskID:   uuidToPtr(c.SourceTaskID),
 			Metadata:       metadata,
+			DeletedAt:      timestampToPtr(c.DeletedAt),
+		}
+		if receipts := supplements[cid]; len(receipts) > 0 {
+			out[i].Supplements = receipts
+			out[i].SupplementTaskID = receipts[0].TaskID
+			out[i].SupplementStatus = receipts[0].Status
+			out[i].SupplementFailureReason = receipts[0].FailureReason
+			out[i].SupplementDeliveredAt = receipts[0].DeliveredAt
 		}
 	}
 	return out
@@ -323,6 +353,57 @@ func activityToEntry(a db.ActivityLog) TimelineEntry {
 		Action:    &action,
 		Details:   a.Details,
 		CreatedAt: timestampToString(a.CreatedAt),
+	}
+}
+
+// hydrateTimelineMemberActors adds display identity for member-authored rows
+// without changing the active-member directory's semantics. The ids came from
+// comments/activity rows on an issue loadIssueForUser already authorised, so
+// this creates no arbitrary user lookup surface. The query is bounded by the
+// timeline hard caps and runs once for the whole response, never once per row.
+func (h *Handler) hydrateTimelineMemberActors(ctx context.Context, entries []TimelineEntry) {
+	seen := make(map[string]struct{})
+	ids := make([]pgtype.UUID, 0)
+	for i := range entries {
+		entry := &entries[i]
+		if entry.ActorType != "member" || entry.ActorID == "" {
+			continue
+		}
+		if _, ok := seen[entry.ActorID]; ok {
+			continue
+		}
+		id, err := util.ParseUUID(entry.ActorID)
+		if err != nil {
+			continue
+		}
+		seen[entry.ActorID] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return
+	}
+
+	users, err := h.Queries.GetUsersByIDs(ctx, ids)
+	if err != nil {
+		return
+	}
+	byID := make(map[string]db.GetUsersByIDsRow, len(users))
+	for _, user := range users {
+		byID[uuidToString(user.ID)] = user
+	}
+	for i := range entries {
+		entry := &entries[i]
+		if entry.ActorType != "member" {
+			continue
+		}
+		user, ok := byID[entry.ActorID]
+		if !ok {
+			continue
+		}
+		entry.ActorName = user.Name
+		if user.AvatarUrl.Valid {
+			entry.ActorAvatarURL = h.resolveAvatarURL(user.AvatarUrl.String)
+		}
 	}
 }
 

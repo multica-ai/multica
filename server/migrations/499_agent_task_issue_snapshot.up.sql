@@ -1,0 +1,43 @@
+-- issue_snapshot records the comparable state of the issue AS THIS CLAIM SAW IT,
+-- so the next run this agent takes on the same issue can be told whether the
+-- issue itself moved instead of re-reading it unconditionally.
+--
+-- Written once per claim, next to the comment-delivery receipt and under the
+-- same CAS. It is read back by a LATER claim only off the row whose provider
+-- session that claim actually resumes — the row GetLastTaskSession returns, or
+-- the operator-chosen source of a manual rerun — and only when that row
+-- actually started. "The run that started last" is a different row whenever a
+-- poisoned session is skipped or an older run is rerun, and comparing against
+-- it would report "unchanged" to an agent whose resumed memory predates the
+-- change.
+--
+-- One writer per row is why the column lives here and not on `issue`: a
+-- content_revision on the issue row would have to be bumped by every one of the
+-- dozen-odd writers that touch any compared field, and the first one missed
+-- would report "unchanged" forever with no symptom. A snapshot taken at claim
+-- time has exactly one writer, whatever the compared set happens to be.
+--
+-- Shape is {"v":1,...}: version plus sha256 of title and description. Hashes,
+-- not bodies — this column is a comparison key, never a second copy of the
+-- issue text. `v` gates the comparison: a snapshot written by a different
+-- version is treated as unknown, which degrades to the pre-existing "read the
+-- issue" instruction.
+--
+-- The set answers only "must the agent re-read the issue BODY?", so only title
+-- and description qualify — they are the task itself and nothing but a read
+-- delivers them. Status, assignee and priority are out: the claim ships the
+-- current status and assignee on every response, so no comparison is needed to
+-- learn them, and priority does not change the agent's work. Labels, parent,
+-- due date, stage, project and metadata are out too.
+--
+-- Rows written by an earlier shape of this column also carry a "status" key;
+-- it is ignored. Removing a field from the set is backward compatible, so it
+-- does not bump `v` — only adding one, or changing how a value is derived,
+-- makes an old row unable to answer the current question.
+--
+-- Nullable, and NULL is the normal state for every row written before this
+-- migration. A reader must treat NULL as "not compared", never as "unchanged".
+-- No index: the column is never a lookup key. It is only ever projected off a
+-- row some other query already located by (agent_id, issue_id), alongside the
+-- started_at that dates the comment delta.
+ALTER TABLE agent_task_queue ADD COLUMN IF NOT EXISTS issue_snapshot JSONB;

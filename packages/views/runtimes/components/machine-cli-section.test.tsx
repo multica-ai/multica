@@ -52,6 +52,7 @@ function machine(runtimes: AgentRuntime[]): RuntimeMachine {
     daemonId: "daemon-1",
     title: "dev.local",
     subtitle: null,
+    deviceSummary: null,
     deviceInfo: "dev.local",
     cliVersion: "0.3.17",
     launchedBy: launchedBy ?? null,
@@ -89,7 +90,6 @@ describe("MachineCliSection", () => {
       <MachineCliSection
         machine={machine([offlineOwned, onlineOwned, otherUsers])}
         currentUserId="user-1"
-        canManageAnyRuntime={false}
       />,
     );
 
@@ -103,7 +103,7 @@ describe("MachineCliSection", () => {
     });
   });
 
-  it("lets a workspace admin update through an online teammate-owned runtime", () => {
+  it("does not update through a private teammate-owned runtime for an admin", () => {
     const offline = runtime({
       id: "offline-other-user",
       owner_id: "user-2",
@@ -118,7 +118,39 @@ describe("MachineCliSection", () => {
       <MachineCliSection
         machine={machine([offline, online])}
         currentUserId="user-1"
-        canManageAnyRuntime
+        canManagePublicRuntimes
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Update" }),
+    ).not.toBeInTheDocument();
+    expect(mockUpdateSection).toHaveBeenCalledWith({
+      runtimeId: null,
+      currentVersion: "0.3.17",
+      isOnline: false,
+      launchedBy: null,
+    });
+  });
+
+  it("updates through an online public teammate-owned runtime for an admin", () => {
+    const offline = runtime({
+      id: "offline-other-user",
+      owner_id: "user-2",
+      status: "offline",
+      visibility: "public",
+    });
+    const online = runtime({
+      id: "online-other-user",
+      owner_id: "user-2",
+      visibility: "public",
+    });
+
+    render(
+      <MachineCliSection
+        machine={machine([offline, online])}
+        currentUserId="user-1"
+        canManagePublicRuntimes
       />,
     );
 
@@ -127,6 +159,32 @@ describe("MachineCliSection", () => {
       runtimeId: "online-other-user",
       currentVersion: "0.3.17",
       isOnline: true,
+      launchedBy: null,
+    });
+  });
+
+  it("does not update through a public teammate-owned runtime for a member", () => {
+    const online = runtime({
+      id: "online-other-user",
+      owner_id: "user-2",
+      visibility: "public",
+    });
+
+    render(
+      <MachineCliSection
+        machine={machine([online])}
+        currentUserId="user-1"
+        canManagePublicRuntimes={false}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Update" }),
+    ).not.toBeInTheDocument();
+    expect(mockUpdateSection).toHaveBeenCalledWith({
+      runtimeId: null,
+      currentVersion: "0.3.17",
+      isOnline: false,
       launchedBy: null,
     });
   });
@@ -144,7 +202,6 @@ describe("MachineCliSection", () => {
           }),
         ])}
         currentUserId="user-1"
-        canManageAnyRuntime={false}
       />,
     );
 

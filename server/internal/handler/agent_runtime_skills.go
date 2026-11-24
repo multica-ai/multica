@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/logger"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -110,7 +111,7 @@ func (h *Handler) SetAgentRuntimeSkillEnabled(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusConflict, "agent is no longer assigned to this runtime")
 		return
 	}
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeID)
+	rt, err := h.getAgentRuntime(r.Context(), obsmetrics.RuntimeLookupSourceRuntimeAPI, runtimeID)
 	if err != nil || rt.WorkspaceID != agent.WorkspaceID {
 		writeError(w, http.StatusNotFound, "runtime not found")
 		return

@@ -1,12 +1,18 @@
 "use client";
 
 import { createContext, useContext, type ReactNode } from "react";
-import type { UpdateIssueRequest } from "@multica/core/types";
+import type {
+  BatchIssueLabelOps,
+  BatchIssuePropertyOps,
+  BatchUpdateIssuesResponse,
+  Issue,
+  UpdateIssueRequest,
+} from "@multica/core/types";
 import type { IssueCreateDefaults } from "./types";
 
 export type IssueSurfaceMutationOptions = {
   errorMessage?: string;
-  onSuccess?: () => void;
+  onSuccess?: (issue: Issue) => void;
   onError?: (err: unknown) => void;
   onSettled?: () => void;
 };
@@ -24,10 +30,12 @@ export interface IssueSurfaceActions {
     updates: Partial<UpdateIssueRequest>,
     options?: IssueSurfaceMutationOptions,
   ) => void;
+  /** Resolves with the server's per-issue results; it skips the ones its per-issue guards refuse. */
   batchUpdate: (
     issueIds: string[],
     updates: Partial<UpdateIssueRequest>,
-  ) => Promise<void>;
+    ops?: { labels?: BatchIssueLabelOps; properties?: BatchIssuePropertyOps },
+  ) => Promise<BatchUpdateIssuesResponse>;
   batchDelete: (issueIds: string[]) => Promise<void>;
 }
 

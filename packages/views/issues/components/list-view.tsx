@@ -1,7 +1,10 @@
 "use client";
 
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { useWorkspaceId } from "@multica/core/hooks";
+
 import { memo, useState, useCallback, useMemo, useEffect, useRef } from "react";
-import { ChevronRight, Plus } from "lucide-react";
+import { ChevronRight, Plus } from "@multica/ui/icons";
 import { Accordion } from "@base-ui/react/accordion";
 import {
   DndContext,
@@ -20,7 +23,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import type { Issue, IssueStatus, Project } from "@multica/core/types";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { StatusHeading } from "./status-heading";
-import { ListRow, DraggableListRow, type ChildProgress } from "./list-row";
+import { ListRow, DraggableListRow, rowParity, type ChildProgress } from "./list-row";
 import { useDragSettle } from "./use-drag-settle";
 import { ListLoadMoreFooter } from "./list-load-more-footer";
 import { useT } from "../../i18n";
@@ -38,6 +41,7 @@ import {
 } from "../utils/drag-utils";
 import type { BoardColumnGroup } from "./board-column";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
+import { useIssuePeekActions } from "../surface/peek-context";
 import type { IssueCreateDefaults } from "../surface/types";
 import type {
   IssueStatusPageState,
@@ -46,23 +50,25 @@ import type {
 import { VirtuosoSeed, VIRTUOSO_SEED_COUNT } from "../../common/virtuoso-seed";
 import { DeferredTooltip } from "../../common/deferred-tooltip";
 import { useRestoredScrollRef } from "../../platform";
+import { toast } from "sonner";
 
-// List rows are a fixed 36px (h-9). Sharing the estimate between the seed's
-// trailing spacer and Virtuoso's defaultItemHeight keeps the shared
-// scroller's height truthful from the first frame — which both stops the
-// scrollbar from re-drawing across the seed → Virtuoso handoff and lets the
-// restored scrollTop assignment stick at ref-attach (MUL-4741).
-const LIST_ROW_ESTIMATED_HEIGHT = 36;
+// The seed must use the same CSS height as ListRow before scroll restoration
+// runs at ref-attach. Virtuoso receives the seed's resolved pixel height below.
+const LIST_ROW_HEIGHT = "var(--issue-row-height)";
 
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
 const EMPTY_IDS: string[] = [];
+const EMPTY_STATUS_PAGE: IssueStatusPageState = {
+  total: 0, loaded: 0, hasMore: false, isLoading: false,
+  isFetching: false, isError: false, loadMore: () => {}, retry: () => {},
+};
 
 function buildListGroups(visibleStatuses: IssueStatus[]): BoardColumnGroup[] {
   return visibleStatuses.map((status) => ({
     id: statusGroupId(status),
     title: status,
     status,
-    createData: { status },
+    createData: { status: status },
   }));
 }
 
@@ -93,6 +99,8 @@ function ListViewImpl({
   );
   const sortBy = useViewStore((s) => s.sortBy);
   const { t } = useT("issues");
+  const wsId = useWorkspaceId();
+  const catalog = useIssueStatuses(wsId);
 
   const sortFieldKey = sortBy === "created_at" ? "created" : sortBy;
   const sortLabel = sortBy !== "position"
@@ -108,6 +116,9 @@ function ListViewImpl({
   );
 
   const dragEnabled = !!onMoveIssue;
+
+  // Side peek steps through the list top to bottom, skipping collapsed groups.
+  const peek = useIssuePeekActions();
 
   const groups = useMemo(
     () => buildListGroups(visibleStatuses),
@@ -154,6 +165,13 @@ function ListViewImpl({
     issueMapRef.current = issueMap;
   }
 
+  useEffect(() => {
+    peek?.publishColumns([
+      expandedStatuses.flatMap((status) => columns[statusGroupId(status)] ?? EMPTY_IDS),
+    ]);
+  }, [peek, expandedStatuses, columns]);
+  useEffect(() => () => peek?.publishColumns(null), [peek]);
+
   const collisionDetection = useMemo(
     () => makeKanbanCollision(groupIds),
     [groupIds],
@@ -186,6 +204,8 @@ function ListViewImpl({
         const activeCol = findColumn(prev, activeId, groupIds);
         const overCol = findColumn(prev, overId, groupIds);
         if (!activeCol || !overCol || activeCol === overCol) return prev;
+        const targetStatus = groups.find((group) => group.id === overCol)?.status;
+        if (targetStatus && catalog.entryOf(targetStatus)?.archived_at) return prev;
 
         if (sortBy !== "position") return prev;
 
@@ -198,7 +218,7 @@ function ListViewImpl({
         return { ...prev, [activeCol]: oldIds, [overCol]: newIds };
       });
     },
-    [groupIds, sortBy, recentlyMovedRef, setColumns],
+    [groupIds, groups, catalog, sortBy, recentlyMovedRef, setColumns],
   );
 
   const handleDragEnd = useCallback(
@@ -252,11 +272,20 @@ function ListViewImpl({
       }
 
       const map = issueMapRef.current;
+      if (finalGroup.status && map.get(activeId)?.status !== finalGroup.status && catalog.entryOf(finalGroup.status)?.archived_at) {
+        resetColumns();
+        return;
+      }
 
       if (sortBy !== "position") {
         const currentIssue = map.get(activeId);
         if (!currentIssue || issueMatchesGroup(currentIssue, finalGroup)) {
           resetColumns();
+          if (activeId !== overId) {
+            toast.info(t(($) => $.board.manual_reorder_hint), {
+              id: "issue-manual-reorder-hint",
+            });
+          }
           return;
         }
         // Optimistically move the row into the target group *now*. Without this
@@ -278,7 +307,7 @@ function ListViewImpl({
         onMoveIssue(
           activeId,
           {
-            ...getMoveUpdates(finalGroup, currentIssue.position),
+            ...getMoveUpdates(finalGroup, currentIssue.position, currentIssue),
             ...getMoveAnchors(targetIds, activeId),
           },
           beginSettle(),
@@ -304,14 +333,29 @@ function ListViewImpl({
       onMoveIssue(
         activeId,
         {
-          ...getMoveUpdates(finalGroup, newPosition),
+          ...getMoveUpdates(finalGroup, newPosition, currentIssue),
           ...getMoveAnchors(finalIds, activeId),
         },
         beginSettle(),
       );
     },
-    [issues, groups, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, setColumns, columnsRef, isDraggingRef],
+    [issues, groups, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, setColumns, columnsRef, isDraggingRef, catalog, t],
   );
+
+  // dnd-kit fires onDragCancel — never onDragEnd — when an active drag is
+  // aborted: pointercancel, window resize, tab hide, or Escape. Touch browsers
+  // hit that path constantly, because a scroll gesture that starts on a row
+  // moves past the 5px activation distance and *then* the browser takes the
+  // gesture over for native scrolling and cancels the pointer. Without this
+  // handler `isDraggingRef` stayed true for the rest of the session, which
+  // froze the column mirror against cache updates and — because the accordion's
+  // onValueChange is guarded by the same ref — made tapping a status header a
+  // no-op, so groups could no longer be collapsed at all (MUL-6240).
+  const handleDragCancel = useCallback(() => {
+    isDraggingRef.current = false;
+    setActiveIssue(null);
+    setColumns(buildColumns(issues, groups, "status"));
+  }, [issues, groups, setColumns, isDraggingRef]);
 
   // The single scroll container is shared by every status panel's Virtuoso as
   // its customScrollParent, so a callback ref hands the element to the panels
@@ -319,12 +363,19 @@ function ListViewImpl({
   // the current sticky-header + cross-section scroll behavior; only the rows
   // inside each expanded panel virtualize.
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  const [rowHeight, setRowHeight] = useState<number>();
   // Pull-based scroll restoration (MUL-4741): assign the saved offset when
   // the shared scroller attaches — the per-status seeds plus their estimate
   // spacers give it a truthful height on the first commit.
   const restoreScrollRef = useRestoredScrollRef("list");
   const attachScroller = useCallback(
     (el: HTMLDivElement | null) => {
+      const row = el?.querySelector<HTMLElement>('[data-slot="issue-list-row"]');
+      // Read the rendered height, not parseFloat of the custom property: the
+      // source token may be a rem/calc length. With no seed rows, let Virtuoso
+      // measure its first item when a group is expanded or data arrives.
+      const height = row ? Number.parseFloat(getComputedStyle(row).height) : 0;
+      setRowHeight(height > 0 ? height : undefined);
       setScrollEl(el);
       restoreScrollRef(el);
     },
@@ -332,42 +383,45 @@ function ListViewImpl({
   );
 
   const content = (
-    <Accordion.Root
-      multiple
-      className="space-y-1"
-      value={expandedStatuses}
-      onValueChange={(value: string[]) => {
-        if (isDraggingRef.current) return;
-        for (const status of visibleStatuses) {
-          const wasExpanded = expandedStatuses.includes(status);
-          const isExpanded = value.includes(status);
-          if (wasExpanded !== isExpanded) {
-            toggleListCollapsed(status as IssueStatus);
+    <>
+      <Accordion.Root
+        multiple
+        className="space-y-1"
+        value={expandedStatuses}
+        onValueChange={(value: string[]) => {
+          if (isDraggingRef.current) return;
+          for (const status of visibleStatuses) {
+            const wasExpanded = expandedStatuses.includes(status);
+            const isExpanded = value.includes(status);
+            if (wasExpanded !== isExpanded) {
+              toggleListCollapsed(status as IssueStatus);
+            }
           }
-        }
-      }}
-    >
-      {visibleStatuses.map((status) => {
-        const isExpanded = expandedStatuses.includes(status);
-        return (
-          <StatusAccordionItem
-            key={status}
-            status={status}
-            issueIds={columns[statusGroupId(status)] ?? EMPTY_IDS}
-            issueMap={issueMapRef.current}
-            childProgressMap={childProgressMap}
-            projectMap={projectMap}
-            page={statusPagination[status]}
-            projectId={projectId}
-            onCreateIssue={onCreateIssue}
-            dragEnabled={dragEnabled}
-            isExpanded={isExpanded}
-            sortLabel={sortLabel}
-            scrollParent={scrollEl}
-          />
-        );
-      })}
-    </Accordion.Root>
+        }}
+      >
+        {visibleStatuses.map((status) => {
+          const isExpanded = expandedStatuses.includes(status);
+          return (
+            <StatusAccordionItem
+              key={status}
+              status={status}
+              issueIds={columns[statusGroupId(status)] ?? EMPTY_IDS}
+              issueMap={issueMapRef.current}
+              childProgressMap={childProgressMap}
+              projectMap={projectMap}
+              page={statusPagination[status] ?? EMPTY_STATUS_PAGE}
+              projectId={projectId}
+              onCreateIssue={onCreateIssue}
+              dragEnabled={dragEnabled}
+              isExpanded={isExpanded}
+              sortLabel={sortLabel}
+              scrollParent={scrollEl}
+              rowHeight={rowHeight}
+            />
+          );
+        })}
+      </Accordion.Root>
+    </>
   );
 
   if (!dragEnabled) {
@@ -385,6 +439,7 @@ function ListViewImpl({
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
+      onDragCancel={handleDragCancel}
     >
       <div ref={attachScroller} data-tab-scroll-root="list" className="flex-1 min-h-0 overflow-y-auto p-2 pt-0">
         {content}
@@ -415,6 +470,7 @@ function StatusAccordionItem({
   isExpanded,
   sortLabel,
   scrollParent,
+  rowHeight,
 }: {
   status: IssueStatus;
   issueIds: string[];
@@ -428,6 +484,7 @@ function StatusAccordionItem({
   isExpanded: boolean;
   sortLabel: string | null;
   scrollParent: HTMLElement | null;
+  rowHeight: number | undefined;
 }) {
   const { t } = useT("issues");
   const selection = useIssueSurfaceSelection();
@@ -447,12 +504,16 @@ function StatusAccordionItem({
   const allSelected = issues.length > 0 && selectedCount === issues.length;
   const someSelected = selectedCount > 0;
 
-  const { setNodeRef: setDroppableRef, isOver } = useDroppable({
+  const statusWsId = useWorkspaceId();
+  const statusCatalog = useIssueStatuses(statusWsId);
+  const { setNodeRef: setDroppableRef, isOver: droppableIsOver } = useDroppable({
     id: statusGroupId(status),
     disabled: !dragEnabled,
   });
+  const isOver = droppableIsOver && !statusCatalog.entryOf(status)?.archived_at;
 
   const disableSorting = !!sortLabel;
+  const addIssueLabel = t(($) => $.list.add_issue_tooltip);
 
   // The infinite-scroll sentinel rides Virtuoso's Footer so it sits at the true
   // end of the virtualized rows and still fires loadMore when scrolled to it.
@@ -476,22 +537,28 @@ function StatusAccordionItem({
   );
 
   const computeItemKey = (_index: number, issue: Issue) => issue.id;
-  const itemContent = (_index: number, issue: Issue) =>
+  const itemContent = (index: number, issue: Issue) =>
     dragEnabled ? (
       <DraggableListRow
         issue={issue}
+        parity={rowParity(index)}
         childProgress={childProgressMap.get(issue.id)}
         project={
-          issue.project_id ? projectMap?.get(issue.project_id) : undefined
+          issue.project_id && issue.project_id !== projectId
+            ? projectMap?.get(issue.project_id)
+            : undefined
         }
         disableSorting={disableSorting}
       />
     ) : (
       <ListRow
         issue={issue}
+        parity={rowParity(index)}
         childProgress={childProgressMap.get(issue.id)}
         project={
-          issue.project_id ? projectMap?.get(issue.project_id) : undefined
+          issue.project_id && issue.project_id !== projectId
+            ? projectMap?.get(issue.project_id)
+            : undefined
         }
       />
     );
@@ -513,7 +580,7 @@ function StatusAccordionItem({
           data={issues}
           computeItemKey={computeItemKey}
           initialItemCount={Math.min(issues.length, VIRTUOSO_SEED_COUNT)}
-          defaultItemHeight={LIST_ROW_ESTIMATED_HEIGHT}
+          defaultItemHeight={rowHeight}
           increaseViewportBy={{ top: 400, bottom: 400 }}
           components={listComponents}
           itemContent={itemContent}
@@ -523,7 +590,7 @@ function StatusAccordionItem({
           data={issues}
           itemContent={itemContent}
           computeItemKey={computeItemKey}
-          estimatedItemHeight={LIST_ROW_ESTIMATED_HEIGHT}
+          estimatedItemHeight={LIST_ROW_HEIGHT}
         />
       )
     ) : null;
@@ -531,7 +598,10 @@ function StatusAccordionItem({
   return (
     <Accordion.Item value={status} ref={dragEnabled ? setDroppableRef : undefined}>
       <Accordion.Header
-        className={`group/header sticky top-0 z-10 flex h-10 items-center rounded-lg bg-muted transition-colors hover:bg-accent ${
+        data-slot="issue-group-header"
+        data-mc="issue-group-header"
+        data-status={status}
+        className={`group/header sticky top-0 z-10 flex h-[var(--issue-group-header-height,2.5rem)] items-center rounded-issue-group-header bg-issue-group-header transition-colors hover:bg-issue-group-header-hover ${
           isOver && !isExpanded
             ? "ring-2 ring-brand/25 bg-accent/15"
             : ""
@@ -558,19 +628,20 @@ function StatusAccordionItem({
           <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-aria-expanded/trigger:rotate-90" />
           <StatusHeading status={status} count={page.total} />
         </Accordion.Trigger>
-        {onCreateIssue && (
+        {onCreateIssue && !statusCatalog.entryOf(status)?.archived_at && (
           <div className="pr-2">
             {/* Lazy-mounted tooltip machinery — see DeferredTooltip. */}
             <DeferredTooltip
-              content={t(($) => $.list.add_issue_tooltip)}
+              content={addIssueLabel}
               trigger={
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className="rounded-full text-muted-foreground opacity-0 group-hover/header:opacity-100 transition-opacity"
+                  className="text-muted-foreground opacity-0 group-hover/header:opacity-100 transition-opacity"
+                  aria-label={addIssueLabel}
                   onClick={() => {
                     const defaults = {
-                      status,
+                      status: status,
                       ...(projectId ? { project_id: projectId } : {}),
                     };
                     onCreateIssue(defaults);
@@ -592,6 +663,16 @@ function StatusAccordionItem({
           ) : (
             rows
           )
+        ) : page.isError ? (
+          <ListLoadMoreFooter
+            hasMore={page.hasMore}
+            isLoading={page.isLoading || page.isFetching}
+            total={page.total}
+            onLoadMore={page.loadMore}
+            isError
+            onRetry={page.retry}
+            errorLabel={t(($) => $.detail.section_load_failed_retry)}
+          />
         ) : (
           <p className="py-6 text-center text-caption text-muted-foreground">
             {t(($) => $.list.empty_status)}

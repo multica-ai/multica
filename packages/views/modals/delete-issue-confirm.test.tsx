@@ -40,6 +40,7 @@ function makeAdapter(
     back: vi.fn(),
     pathname: "/acme/issues/issue-1",
     searchParams: new URLSearchParams(),
+    hash: "",
     getShareableUrl: (p) => p,
     ...overrides,
   };

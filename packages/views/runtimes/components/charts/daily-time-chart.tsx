@@ -52,7 +52,7 @@ export function DailyTimeChart({
           axisLine={false}
           tickMargin={8}
           tickFormatter={(v: number) => formatY(v)}
-          width={56}
+          width="auto"
         />
         <ChartTooltip
           content={

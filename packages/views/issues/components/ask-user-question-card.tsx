@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useState } from "react";
-import { CheckCircle2, XCircle } from "lucide-react";
+import { CheckCircle2, XCircle } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { RadioGroup, RadioGroupItem } from "@multica/ui/components/ui/radio-group";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";

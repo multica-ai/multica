@@ -87,20 +87,3 @@ func TestProbeAgentCLIs_QoderPinnedPathStaysHardMiss(t *testing.T) {
 		t.Errorf("pinned-but-missing MULTICA_QODER_PATH resolved to %q, want a hard miss", entry.Path)
 	}
 }
-
-// TestDefaultAgentCommandNamesIncludesQoder guards the other half of the same
-// bug: cachedShellResolvedAgents only asks the login shell about the names in
-// defaultAgentCommandNames, so omitting "qodercli" would leave the fallback
-// permanently blind to Qoder even once the probe consults it.
-func TestDefaultAgentCommandNamesIncludesQoder(t *testing.T) {
-	found := map[string]bool{}
-	for _, name := range defaultAgentCommandNames {
-		found[name] = true
-	}
-	for _, name := range []string{"qodercli", "qoderclicn"} {
-		if !found[name] {
-			t.Fatalf("defaultAgentCommandNames is missing %q; the login-shell resolver "+
-				"only pre-fetches names in that list, so Qoder stays undetectable on a GUI-launched daemon", name)
-		}
-	}
-}

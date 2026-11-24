@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	skillpkg "github.com/multica-ai/multica/server/internal/skill"
+	"github.com/multica-ai/multica/server/pkg/agent"
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,9 +24,10 @@ const TaskContextMarkerRelPath = ".multica/daemon_task_context.json"
 const TaskContextMarkerManagedBy = "multica-daemon-task"
 
 type taskContextMarkerFile struct {
-	ManagedBy string `json:"managed_by"`
-	AgentID   string `json:"agent_id,omitempty"`
-	IssueID   string `json:"issue_id,omitempty"`
+	ManagedBy     string `json:"managed_by"`
+	AgentID       string `json:"agent_id,omitempty"`
+	IssueID       string `json:"issue_id,omitempty"`
+	ChatSessionID string `json:"chat_session_id,omitempty"`
 }
 
 // EnsureWorkspacesRootMarker writes a persistent daemon-task marker at
@@ -116,8 +118,17 @@ func writeWorkspacesRootMarkerAtomic(path string, data []byte) error {
 	return nil
 }
 
-// writeContextFiles renders and writes .agent_context/issue_context.md and
-// skills into the appropriate provider-native location.
+// writeContextFiles writes the task's sidecar files: the task-context marker,
+// agent skills in the appropriate provider-native location, and project
+// resources.
+//
+// It deliberately writes no per-task Markdown brief. There used to be an
+// .agent_context/issue_context.md carrying the issue id, trigger comment id,
+// handoff note, quick-create input, and autopilot run data — every one of
+// which the runtime brief and the per-turn user message already carry. No
+// provider read the file (nothing in either surface pointed at it), so it was
+// a third copy that had to be kept in sync with the two that agents actually
+// see, for no reader at all (MUL-6984).
 //
 // Claude:      skills → {workDir}/.claude/skills/{name}/SKILL.md  (native discovery)
 // CodeBuddy:   skills → {workDir}/.codebuddy/skills/{name}/SKILL.md  (native discovery — CodeBuddy is a Claude Code fork but uses its own config directory, not .claude/; see https://www.codebuddy.ai/docs/cli/skills)
@@ -126,13 +137,18 @@ func writeWorkspacesRootMarkerAtomic(path string, data []byte) error {
 // Copilot:     skills → {workDir}/.github/skills/{name}/SKILL.md  (native project-level discovery)
 // OpenCode:    skills → {workDir}/.opencode/skills/{name}/SKILL.md  (native discovery)
 // OpenClaw:    skills → {workDir}/skills/{name}/SKILL.md  (native discovery — paired with a per-task synthesized openclaw-config.json that pins agents.defaults.workspace to workDir; see openclaw_config.go)
-// Pi:          skills → {workDir}/.pi/skills/{name}/SKILL.md  (native discovery)
+// Pi:          skills → {workDir}/.pi/skills/{name}/SKILL.md  (explicit --skill loading)
 // Cursor:      skills → {workDir}/.cursor/skills/{name}/SKILL.md  (native discovery)
 // Kimi:        skills → {workDir}/.kimi/skills/{name}/SKILL.md  (native discovery)
+// Reasonix:    skills → {workDir}/.reasonix/skills/{name}/SKILL.md  (native discovery)
+// DSH:         skills → {workDir}/.dsh/skills/{name}/SKILL.md  (native discovery)
 // Kiro:        skills → {workDir}/.kiro/skills/{name}/SKILL.md  (native discovery)
 // Qoder/Qoder CN: skills → {workDir}/.qoder/skills/{name}/SKILL.md  (project-level; see the provider docs)
 // Qwen Code:    skills → {workDir}/.qwen/skills/{name}/SKILL.md  (native project-level discovery)
-// QwenPaw:      skills → {workDir}/.qwenpaw/skills/{name}/SKILL.md  (native project-level discovery)
+// QwenPaw:      sidecar → {workDir}/.qwenpaw/skills/{name}/SKILL.md;
+// actual discovery uses per-task qwenpaw-workspace/skills passed via --workspace
+// MiniMax Code: skills → {workDir}/.minimax/skills/{name}/SKILL.md  (native project-level discovery)
+// Muse Code:   skills → {workDir}/.agents/skills/{name}/SKILL.md  (native project-level discovery)
 // Antigravity: skills → {workDir}/.agents/skills/{name}/SKILL.md  (native discovery — see https://antigravity.google/docs/gcli-migration "Workspace skills")
 // Default:     skills → {workDir}/.agent_context/skills/{name}/SKILL.md
 //
@@ -142,32 +158,18 @@ func writeWorkspacesRootMarkerAtomic(path string, data []byte) error {
 // state for local_directory tasks. Callers that don't need cleanup —
 // cloud-mode tasks whose envRoot is wiped wholesale by the GC loop — may
 // pass nil to skip the bookkeeping entirely.
-func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest *sidecarManifest) error {
+func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest *sidecarManifest) ([]string, error) {
+	return writeContextFilesTracked(workDir, provider, ctx, manifest, nil)
+}
+
+// writeContextFilesTracked additionally records, when installed is non-nil,
+// each successful skill write's absolute directory keyed by skill ID.
+func writeContextFilesTracked(workDir, provider string, ctx TaskContextForEnv, manifest *sidecarManifest, installed map[string]string) ([]string, error) {
 	if err := writeTaskContextMarker(workDir, ctx, manifest); err != nil {
-		return err
+		return nil, err
 	}
 
-	contextDir := filepath.Join(workDir, ".agent_context")
-	if err := recordMkdirAll(contextDir, 0o755, manifest); err != nil {
-		return fmt.Errorf("create .agent_context dir: %w", err)
-	}
-
-	content := renderIssueContext(provider, ctx)
-	path := filepath.Join(contextDir, "issue_context.md")
-	if err := recordWriteFile(path, []byte(content), 0o644, manifest); err != nil {
-		// A pre-existing path means the user already owns
-		// .agent_context/issue_context.md — either they created it
-		// themselves or it survived from a crashed prior run we can't
-		// safely distinguish from intentional content. Refusing the
-		// write is the correct call: the runtime brief (CLAUDE.md /
-		// AGENTS.md) already carries every fact this file
-		// would, so the agent runs fine without the sidecar copy.
-		// Anything else is a real failure.
-		if !errors.Is(err, errPathPreExists) {
-			return fmt.Errorf("write issue_context.md: %w", err)
-		}
-	}
-
+	preparedSkillNames := resolveSkillSlugs(ctx.AgentSkills)
 	if len(ctx.AgentSkills) > 0 {
 		// Hermes materializes skills into its per-task HERMES_HOME/skills during
 		// Prepare (Hermes has no workspace-relative discovery), so it needs no
@@ -176,12 +178,13 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest
 		if provider != "hermes" {
 			skillsDir, err := resolveSkillsDir(workDir, provider, manifest)
 			if err != nil {
-				return fmt.Errorf("resolve skills dir: %w", err)
+				return nil, fmt.Errorf("resolve skills dir: %w", err)
 			}
 			// Codex skills are written to codex-home in Prepare; skip here.
 			if provider != "codex" {
-				if err := writeSkillFiles(skillsDir, ctx.AgentSkills, manifest); err != nil {
-					return fmt.Errorf("write skill files: %w", err)
+				preparedSkillNames, err = writeSkillFilesWithNamesTracked(skillsDir, ctx.AgentSkills, manifest, installed)
+				if err != nil {
+					return nil, fmt.Errorf("write skill files: %w", err)
 				}
 			}
 		}
@@ -193,10 +196,10 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest
 	// meta skill content always lists what the agent should expect).
 	if err := writeProjectResources(workDir, ctx, manifest); err != nil {
 		// Caller logs warnings; avoid noisy returns for non-fatal context.
-		return fmt.Errorf("write project resources: %w", err)
+		return preparedSkillNames, fmt.Errorf("write project resources: %w", err)
 	}
 
-	return nil
+	return preparedSkillNames, nil
 }
 
 func writeTaskContextMarker(workDir string, ctx TaskContextForEnv, manifest *sidecarManifest) error {
@@ -208,9 +211,10 @@ func writeTaskContextMarker(workDir string, ctx TaskContextForEnv, manifest *sid
 	// cleanup. If a crash leaves it behind, the CLI intentionally treats it
 	// as daemon context and fails closed instead of using a user PAT.
 	payload := taskContextMarkerFile{
-		ManagedBy: TaskContextMarkerManagedBy,
-		AgentID:   ctx.AgentID,
-		IssueID:   ctx.IssueID,
+		ManagedBy:     TaskContextMarkerManagedBy,
+		AgentID:       ctx.AgentID,
+		IssueID:       ctx.IssueID,
+		ChatSessionID: ctx.ChatSessionID,
 	}
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
@@ -332,6 +336,11 @@ func resolveSkillsDir(workDir, provider string, manifest *sidecarManifest) (stri
 // (removeReusedManagedSkillDirs) needs the bare path with no side effects so
 // it can match the managed skill roots the prior manifest recorded.
 func skillsDirPath(workDir, provider string) string {
+	// Built-in runtime identities (e.g. "omp") declare their skills dir in
+	// the descriptor; resolve generically before the protocol-family switch.
+	if desc, ok := agent.BuiltinRuntimeByID(provider); ok {
+		return filepath.Join(workDir, desc.SkillsDir)
+	}
 	switch provider {
 	case "claude":
 		// Claude Code natively discovers skills from .claude/skills/ in the workdir.
@@ -357,6 +366,10 @@ func skillsDirPath(workDir, provider string) string {
 		// without those, OpenCode walks from the daemon's inherited PWD and
 		// misses .opencode/skills + AGENTS.md entirely (MUL-2416).
 		return filepath.Join(workDir, ".opencode", "skills")
+	case "codearts":
+		// CodeArts Agent discovers project skills from its provider-owned
+		// .codeartsdoer/skills directory.
+		return filepath.Join(workDir, ".codeartsdoer", "skills")
 	case "deveco":
 		// DevEco Code (Huawei's OpenCode fork) natively discovers project
 		// skills from .deveco/skills/ in the workdir, mirroring OpenCode's
@@ -373,7 +386,7 @@ func skillsDirPath(workDir, provider string) string {
 		// no openclaw scan path ever inspected.
 		return filepath.Join(workDir, "skills")
 	case "pi":
-		// Pi natively discovers skills from .pi/skills/ in the workdir.
+		// The Pi backend explicitly loads skills from .pi/skills/ via --skill.
 		return filepath.Join(workDir, ".pi", "skills")
 	case "cursor":
 		// Cursor natively discovers skills from .cursor/skills/ in the workdir.
@@ -382,6 +395,14 @@ func skillsDirPath(workDir, provider string) string {
 		// Kimi Code CLI auto-discovers project-level skills from .kimi/skills/
 		// in the workdir. See https://moonshotai.github.io/kimi-cli/en/customization/skills.html
 		return filepath.Join(workDir, ".kimi", "skills")
+	case "reasonix":
+		// Reasonix discovers project skills from .reasonix/skills/ and loads
+		// AGENTS.md independently, so repository memory and task skills coexist.
+		return filepath.Join(workDir, ".reasonix", "skills")
+	case "dsh":
+		// DSH scans both .dsh/skills and .agents/skills. Prefer its branded
+		// project root so runtime-specific skills stay isolated.
+		return filepath.Join(workDir, ".dsh", "skills")
 	case "kiro":
 		// Kiro CLI auto-discovers project-level skills from .kiro/skills/
 		// in the workdir.
@@ -394,10 +415,24 @@ func skillsDirPath(workDir, provider string) string {
 	case "qwen":
 		// Qwen Code discovers project-level skills from .qwen/skills/ in the workdir.
 		return filepath.Join(workDir, ".qwen", "skills")
+	case "amp":
+		return filepath.Join(workDir, ".agents", "skills")
+	case "droid":
+		return filepath.Join(workDir, ".factory", "skills")
 	case "qwenpaw":
 		// QwenPaw discovers workspace-level skills from <workDir>/skill_pool/.
 		// See get_workspace_skills_dir in QwenPaw's skill_system/store.py.
 		return filepath.Join(workDir, "skill_pool")
+	case "mcode":
+		// MiniMax Code discovers project-level skills from .minimax/skills/.
+		return filepath.Join(workDir, ".minimax", "skills")
+	case "devin":
+		return filepath.Join(workDir, ".devin", "skills")
+	case "zcode":
+		return filepath.Join(workDir, ".zcode", "skills")
+	case "muse":
+		// Muse's native project root: https://meta-models.github.io/muse-code-sdk/next/guides/extend/skills/
+		return filepath.Join(workDir, ".agents", "skills")
 	case "traecli":
 		// Official TRAE CLI discovers project-level skills from .traecli/skills/
 		// in the workdir (global skills live in ~/.traecli/skills). See
@@ -551,6 +586,14 @@ func isFrontmatterValidYAML(content string) bool {
 	}
 	var m map[string]any
 	return yaml.Unmarshal([]byte(fmBody), &m) == nil
+}
+
+// SkillBody removes a complete frontmatter block for explicit prompt
+// injection. Malformed/unclosed frontmatter is preserved instead of dropping
+// skill text.
+func SkillBody(content string) string {
+	_, body, _ := frontmatterParts(content)
+	return body
 }
 
 // frontmatterParts splits content into the raw YAML frontmatter body (the text
@@ -920,8 +963,28 @@ func sanitizeSkillName(name string) string {
 // skill entirely (which would silently drop a Multica skill the agent
 // expects to see).
 func writeSkillFiles(skillsDir string, skills []SkillContextForEnv, manifest *sidecarManifest) error {
+	return writeSkillFilesTracked(skillsDir, skills, manifest, nil)
+}
+
+// writeSkillFilesTracked additionally records, when installed is non-nil,
+// each successful write's absolute directory by skill ID.
+func writeSkillFilesTracked(skillsDir string, skills []SkillContextForEnv, manifest *sidecarManifest, installed map[string]string) error {
+	_, err := writeSkillFilesWithNamesTracked(skillsDir, skills, manifest, installed)
+	return err
+}
+
+// writeSkillFilesWithNames returns the allocated invocation names in input
+// order, including suffixes needed to preserve user-owned skill directories.
+func writeSkillFilesWithNames(skillsDir string, skills []SkillContextForEnv, manifest *sidecarManifest) ([]string, error) {
+	return writeSkillFilesWithNamesTracked(skillsDir, skills, manifest, nil)
+}
+
+// writeSkillFilesWithNamesTracked additionally records, when installed is
+// non-nil, each successful write's absolute directory by skill ID, so
+// explicit invocation never has to repeat the allocator.
+func writeSkillFilesWithNamesTracked(skillsDir string, skills []SkillContextForEnv, manifest *sidecarManifest, installed map[string]string) ([]string, error) {
 	if err := recordMkdirAll(skillsDir, 0o755, manifest); err != nil {
-		return fmt.Errorf("create skills dir: %w", err)
+		return nil, fmt.Errorf("create skills dir: %w", err)
 	}
 
 	// resolveSkillSlugs deduplicates within the batch first, so two skills whose
@@ -931,14 +994,15 @@ func writeSkillFiles(skillsDir string, skills []SkillContextForEnv, manifest *si
 	// allocateCollisionFreeSkillDir still runs on top, for collisions against
 	// directories we did not write (user-installed skills).
 	batchSlugs := resolveSkillSlugs(skills)
+	preparedSkillNames := make([]string, len(skills))
 
 	for i, skill := range skills {
 		slug, dir, err := allocateCollisionFreeSkillDir(skillsDir, batchSlugs[i])
 		if err != nil {
-			return fmt.Errorf("allocate skill dir for %q: %w", skill.Name, err)
+			return nil, fmt.Errorf("allocate skill dir for %q: %w", skill.Name, err)
 		}
 		if err := recordMkdirAll(dir, 0o755, manifest); err != nil {
-			return err
+			return nil, err
 		}
 
 		// ensureSkillFrontmatter synthesises a `name:` value when the
@@ -948,7 +1012,7 @@ func writeSkillFiles(skillsDir string, skills []SkillContextForEnv, manifest *si
 		// stay consistent.
 		body := ensureSkillFrontmatter(skill.Content, slug, skill.Description)
 		if err := recordWriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644, manifest); err != nil {
-			return err
+			return nil, err
 		}
 
 		// Write supporting files. The skill directory is collision-
@@ -970,96 +1034,17 @@ func writeSkillFiles(skillsDir string, skills []SkillContextForEnv, manifest *si
 			}
 			fpath := filepath.Join(dir, f.Path)
 			if err := recordMkdirAll(filepath.Dir(fpath), 0o755, manifest); err != nil {
-				return err
+				return nil, err
 			}
 			if err := recordWriteFile(fpath, []byte(f.Content), 0o644, manifest); err != nil {
-				return err
+				return nil, err
 			}
 		}
+		if installed != nil && skill.ID != "" {
+			installed[skill.ID] = dir
+		}
+		preparedSkillNames[i] = slug
 	}
 
-	return nil
-}
-
-// renderIssueContext builds the markdown content for issue_context.md.
-func renderIssueContext(provider string, ctx TaskContextForEnv) string {
-	if ctx.AutopilotRunID != "" {
-		return renderAutopilotContext(ctx)
-	}
-	if ctx.QuickCreatePrompt != "" {
-		return renderQuickCreateContext(ctx)
-	}
-
-	var b strings.Builder
-
-	b.WriteString("# Task Assignment\n\n")
-	fmt.Fprintf(&b, "**Issue ID:** %s\n\n", ctx.IssueID)
-
-	if ctx.TriggerCommentID != "" {
-		b.WriteString("**Trigger:** Comment Reply\n")
-		b.WriteString("**Triggering comment ID:** `" + ctx.TriggerCommentID + "`\n\n")
-	} else {
-		b.WriteString("**Trigger:** New Assignment\n\n")
-	}
-
-	// Assignment handoff note (MUL-3375): the assigner's scoping instruction for
-	// this run. Distinct from a comment — there is no thread to reply to.
-	if ctx.HandoffNote != "" {
-		b.WriteString("## Handoff Note\n\n")
-		b.WriteString("The person who assigned this issue left this instruction for the run. Treat it as scope guidance and follow it before doing anything broader:\n\n")
-		fmt.Fprintf(&b, "> %s\n\n", ctx.HandoffNote)
-	}
-
-	b.WriteString("## Quick Start\n\n")
-	fmt.Fprintf(&b, "Run `multica issue get %s --output json` to fetch the full issue details.\n\n", ctx.IssueID)
-
-	return b.String()
-}
-
-// renderQuickCreateContext renders issue_context.md for quick-create tasks.
-// This file carries only task data (the user input). Behavioral rules and
-// guardrails live in AGENTS.md (runtime config) and the per-turn prompt to
-// avoid redundancy and conflicting instructions; the skill index lives in the
-// runtime brief like every other kind (MUL-5529).
-func renderQuickCreateContext(ctx TaskContextForEnv) string {
-	var b strings.Builder
-	b.WriteString("# Quick Create\n\n")
-	b.WriteString("**Trigger:** Quick-create modal\n\n")
-	b.WriteString("## User input\n\n")
-	b.WriteString("> ")
-	b.WriteString(ctx.QuickCreatePrompt)
-	b.WriteString("\n\n")
-	return b.String()
-}
-
-func renderAutopilotContext(ctx TaskContextForEnv) string {
-	var b strings.Builder
-
-	b.WriteString("# Autopilot Run\n\n")
-	fmt.Fprintf(&b, "**Autopilot run ID:** %s\n\n", ctx.AutopilotRunID)
-	if ctx.AutopilotID != "" {
-		fmt.Fprintf(&b, "**Autopilot ID:** %s\n\n", ctx.AutopilotID)
-	}
-	if ctx.AutopilotTitle != "" {
-		fmt.Fprintf(&b, "**Title:** %s\n\n", ctx.AutopilotTitle)
-	}
-	if ctx.AutopilotSource != "" {
-		fmt.Fprintf(&b, "**Trigger source:** %s\n\n", ctx.AutopilotSource)
-	}
-	if ctx.AutopilotTriggerPayload != "" {
-		fmt.Fprintf(&b, "## Trigger Payload\n\n```json\n%s\n```\n\n", ctx.AutopilotTriggerPayload)
-	}
-
-	b.WriteString("## Quick Start\n\n")
-	b.WriteString("This is a run-only autopilot task with no assigned issue. Do not run `multica issue get` unless the autopilot instructions explicitly ask you to create or update an issue.\n\n")
-	if ctx.AutopilotID != "" {
-		fmt.Fprintf(&b, "Run `multica autopilot get %s --output json` if you need the full autopilot configuration.\n\n", ctx.AutopilotID)
-	}
-	if strings.TrimSpace(ctx.AutopilotDescription) != "" {
-		b.WriteString("## Autopilot Instructions\n\n")
-		b.WriteString(ctx.AutopilotDescription)
-		b.WriteString("\n\n")
-	}
-
-	return b.String()
+	return preparedSkillNames, nil
 }

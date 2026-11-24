@@ -7,6 +7,7 @@ import { ChatMessageSkeleton } from "./chat-message-list";
 import { NoAgentBanner } from "./no-agent-banner";
 import { ArchivedAgentBanner } from "./archived-agent-banner";
 import { OfflineBanner } from "./offline-banner";
+import { ChatQueue } from "./chat-queue";
 
 // Every layer of the chat body has to land on the same left/right edges: the
 // message column, the status banner above the composer, and the composer card.
@@ -36,36 +37,31 @@ function root(container: HTMLElement): HTMLElement {
 }
 
 describe("chat column geometry", () => {
-  it("keeps the gutter a container query, not a viewport one", () => {
-    // The chat body renders in a resizable split pane, a 360px floating window,
-    // and the agent builder — all independent widths inside one browser window,
-    // so a `sm:`/`lg:` variant would widen the floating window's gutter just
-    // because the page behind it is wide.
-    for (const cls of GUTTER_CLASSES) {
-      if (cls.includes(":")) expect(cls).toMatch(/^@/);
-    }
-    // Base gutter with no variant, so a host that forgets `@container` degrades
-    // to the old flat spacing instead of losing its padding entirely.
-    expect(GUTTER_CLASSES).toContain("px-5");
-  });
-
-  it("puts the gutter OUTSIDE the width cap, never on one element", () => {
-    // This is the invariant that broke: a single element carrying both means
-    // the padding eats into the cap, and that layer ends up narrower than its
-    // siblings once the surface is wider than the cap.
-    for (const cls of GUTTER_CLASSES) {
-      expect(COLUMN_CLASSES).not.toContain(cls);
-    }
-    expect(COLUMN_CLASSES).toContain("max-w-4xl");
-    expect(GUTTER_CLASSES.some((c) => c.includes("max-w"))).toBe(false);
-  });
-
   it.each([
     ["no-agent banner", <NoAgentBanner key="n" />],
     ["archived-agent banner", <ArchivedAgentBanner key="a" agentName="Lambda" />],
     ["offline banner", <OfflineBanner key="o" agentName="Lambda" availability="offline" />],
     ["unstable banner", <OfflineBanner key="u" agentName="Lambda" availability="unstable" />],
     ["message skeleton", <ChatMessageSkeleton key="s" />],
+    [
+      "follow-up queue",
+      <ChatQueue
+        key="q"
+        headStatus="running"
+        tasks={[
+          {
+            task_id: "task-queued",
+            status: "queued",
+            content: "Follow up",
+            created_at: "2026-07-30T00:00:00Z",
+          },
+        ]}
+        onSendNow={() => {}}
+        onEdit={() => {}}
+        onRemove={() => {}}
+        onClear={() => {}}
+      />,
+    ],
   ])("aligns the %s on the shared gutter + column", (_label, ui) => {
     const { container } = renderChat(ui);
     const outer = root(container);

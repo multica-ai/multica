@@ -1,13 +1,17 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"reflect"
 	"sort"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -126,27 +130,28 @@ func fullyPopulatedIssue(t *testing.T) db.Issue {
 		return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 	}
 	return db.Issue{
-		ID:            parseUUID("11111111-1111-1111-1111-111111111111"),
-		WorkspaceID:   parseUUID("22222222-2222-2222-2222-222222222222"),
-		Number:        42,
-		Title:         "Fix login",
-		Description:   pgtype.Text{String: "details", Valid: true},
-		Status:        "todo",
-		Priority:      "high",
-		AssigneeType:  pgtype.Text{String: "agent", Valid: true},
-		AssigneeID:    parseUUID("33333333-3333-3333-3333-333333333333"),
-		CreatorType:   "member",
-		CreatorID:     parseUUID("44444444-4444-4444-4444-444444444444"),
-		ParentIssueID: parseUUID("55555555-5555-5555-5555-555555555555"),
-		ProjectID:     parseUUID("66666666-6666-6666-6666-666666666666"),
-		Position:      1024.5,
-		Stage:         pgtype.Int4{Int32: 2, Valid: true},
-		StartDate:     pgtype.Date{Time: utcDate(2026, time.January, 1), Valid: true},
-		DueDate:       pgtype.Date{Time: utcDate(2026, time.February, 1), Valid: true},
-		CreatedAt:     pgtype.Timestamptz{Time: utcDate(2026, time.January, 1), Valid: true},
-		UpdatedAt:     pgtype.Timestamptz{Time: utcDate(2026, time.January, 2), Valid: true},
-		Metadata:      []byte(`{"pr_url":"https://example.test/pr/1"}`),
-		Properties:    []byte(`{"77777777-7777-7777-7777-777777777777":"done"}`),
+		ID:             parseUUID("11111111-1111-1111-1111-111111111111"),
+		WorkspaceID:    parseUUID("22222222-2222-2222-2222-222222222222"),
+		Number:         42,
+		Title:          "Fix login",
+		Description:    pgtype.Text{String: "details", Valid: true},
+		Status:         "todo",
+		Priority:       "high",
+		AssigneeType:   pgtype.Text{String: "agent", Valid: true},
+		AssigneeID:     parseUUID("33333333-3333-3333-3333-333333333333"),
+		CreatorType:    "member",
+		CreatorID:      parseUUID("44444444-4444-4444-4444-444444444444"),
+		ParentIssueID:  parseUUID("55555555-5555-5555-5555-555555555555"),
+		ProjectID:      parseUUID("66666666-6666-6666-6666-666666666666"),
+		Position:       1024.5,
+		Stage:          pgtype.Int4{Int32: 2, Valid: true},
+		StartDate:      pgtype.Date{Time: utcDate(2026, time.January, 1), Valid: true},
+		DueDate:        pgtype.Date{Time: utcDate(2026, time.February, 1), Valid: true},
+		CreatedAt:      pgtype.Timestamptz{Time: utcDate(2026, time.January, 1), Valid: true},
+		UpdatedAt:      pgtype.Timestamptz{Time: utcDate(2026, time.January, 2), Valid: true},
+		LastActivityAt: pgtype.Timestamptz{Time: utcDate(2026, time.January, 3), Valid: true},
+		Metadata:       []byte(`{"pr_url":"https://example.test/pr/1"}`),
+		Properties:     []byte(`{"77777777-7777-7777-7777-777777777777":"done"}`),
 	}
 }
 
@@ -179,4 +184,43 @@ func hasKey(keys []string, key string) bool {
 		}
 	}
 	return false
+}
+
+// Events published outside the handler render the issue through
+// service.IssueToMapResolved. Its duplicate_of must match the HTTP rendering
+// exactly: clients patch the same cache entry from both.
+func TestResolvedBroadcastDuplicateOfMatchesResponse(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	original := dbfx.Issue(t, "dup-broadcast-original", testutil.Cols{"status": "in_review"})
+	duplicate := seedDuplicate(t, "dup-broadcast-duplicate", original)
+	row, err := testHandler.Queries.GetIssue(ctx, parseUUID(duplicate))
+	if err != nil {
+		t.Fatalf("GetIssue: %v", err)
+	}
+	prefix := testHandler.getIssuePrefix(ctx, row.WorkspaceID)
+
+	resp := issueToResponse(row, prefix)
+	testHandler.fillStatusCategory(ctx, row.WorkspaceID, projectaccess.Hidden{}, &resp)
+	if resp.DuplicateOf == nil {
+		t.Fatal("HTTP rendering lost the mark")
+	}
+	decode := func(v any) map[string]any {
+		raw, err := json.Marshal(v)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		var out map[string]any
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		return out
+	}
+	fromResponse := decode(resp.DuplicateOf)
+	fromBroadcast := decode(service.IssueToMapResolved(ctx, testHandler.Queries, row, prefix)["duplicate_of"])
+	if !reflect.DeepEqual(fromBroadcast, fromResponse) {
+		t.Fatalf("broadcast duplicate_of = %v, HTTP duplicate_of = %v", fromBroadcast, fromResponse)
+	}
 }

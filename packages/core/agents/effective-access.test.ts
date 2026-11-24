@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { AgentInvocationTarget } from "../types";
 import {
-  ALL_ACCESS_SCOPES,
   effectiveAccessScope,
   isAccessChangeReady,
+  usesInvocationMembers,
 } from "./effective-access";
 
 function ws(): AgentInvocationTarget {
@@ -52,16 +52,6 @@ describe("effectiveAccessScope", () => {
   });
 });
 
-describe("ALL_ACCESS_SCOPES", () => {
-  it("lists the three scopes in display order", () => {
-    expect(ALL_ACCESS_SCOPES).toEqual([
-      "workspace",
-      "specific-people",
-      "owner-only",
-    ]);
-  });
-});
-
 describe("isAccessChangeReady", () => {
   it("null is not ready (no scope picked yet)", () => {
     expect(isAccessChangeReady(null)).toBe(false);
@@ -95,5 +85,16 @@ describe("isAccessChangeReady", () => {
     expect(
       isAccessChangeReady({ permission_mode: "public_to", invocation_targets: [] }),
     ).toBe(false);
+  });
+});
+
+describe("usesInvocationMembers", () => {
+  it("is true only for public_to with member or team targets and no workspace target", () => {
+    expect(usesInvocationMembers("public_to", [member("u1")])).toBe(true);
+    expect(usesInvocationMembers("public_to", [team("t1")])).toBe(true);
+    expect(usesInvocationMembers("public_to", [ws(), member("u1")])).toBe(false);
+    expect(usesInvocationMembers("public_to", [])).toBe(false);
+    expect(usesInvocationMembers("public_to", undefined)).toBe(false);
+    expect(usesInvocationMembers("private", [member("u1")])).toBe(false);
   });
 });

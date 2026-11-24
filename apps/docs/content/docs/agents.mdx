@@ -4,10 +4,11 @@ description: An agent is a reusable set of identity, capabilities, and execution
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { AgentAccessDemo } from "@/components/demos/agent-access-demo";
 
 An agent is a collaborator in a [Multica workspace](/workspaces). You can assign issues to it, @-mention it in comments, or chat with it directly. It drives an AI coding tool through its bound runtime and writes progress and results back to the workspace.
 
-An agent is not a continuously running process. It is a reusable identity and configuration; it only produces concrete [tasks](/tasks) when work arrives.
+An agent doesn't keep running in the background. It stores a reusable identity and configuration, and produces concrete [runs](/tasks) only when work arrives.
 
 ## Agent configuration
 
@@ -15,26 +16,27 @@ An agent is not a continuously running process. It is a reusable identity and co
 |---|---|
 | **Name, avatar, and description** | Tell the team who the agent is and what it is good at. The description is display-only and never enters the execution prompt. |
 | **Instructions** | Define its responsibilities, working style, boundaries, and delivery requirements. Used on every run. |
+| **Conversation starters** | Give people up to three agent-specific examples, shown when they open a new chat with the agent. Selecting one fills the composer without sending. |
 | **Skills** | Provide reusable methods, reference material, and supporting files. |
 | **Runtime, model, and thinking level** | Decide which runtime, AI coding tool, and model it runs on; some tools (such as Codex) also offer a service tier. |
 | **Access** | Decides which members can run it. |
 | **Execution settings** | Include the concurrency limit, environment variables, CLI arguments, MCP, and external integrations. |
 
-Switching models or editing instructions does not create a new agent, and past issues, comments, and task history are not lost.
+Switching models or editing instructions does not create a new agent, and past issues, comments, and run history are not lost.
 
-## Agents, runtimes, and tasks
+## Agents, runtimes, and runs
 
 | Concept | Responsibility |
 |---|---|
 | **Agent** | Decides who does the work and how |
 | **Runtime** | Decides which computer and which AI coding tool executes it |
-| **Task** | Records the process and result of one run |
+| **Run** | Records the process and result of one run |
 
-One runtime can host multiple agents, and one agent can complete many tasks over time. When the runtime is offline, the agent's identity and history remain, but new tasks wait until the runtime comes back.
+One runtime can host multiple agents, and one agent can complete many runs over time. When the runtime is offline, the agent's identity and history remain, but new runs wait until the runtime comes back.
 
 ## Ways an agent participates
 
-- **Own an issue** — set the agent as the assignee; it starts once the task is enqueued.
+- **Own an issue** — set the agent as the assignee; it starts once the run is enqueued.
 - **Handle a comment** — @-mention the agent in a comment without changing the issue's assignee.
 - **Continue a discussion** — reply to the agent's comment; the new information feeds into subsequent runs.
 - **Chat directly** — start a conversation that isn't attached to an issue.
@@ -45,46 +47,54 @@ Agents can create issues, post comments, and change work status, but they have n
 
 ## Permissions and Access
 
-Every agent has one owner and an Access setting:
+Every agent has one owner and an Access setting. Access decides who can run the agent, meaning assign issues to it, @-mention it in comments, or chat with it:
 
 | Access | Who can run it |
 |---|---|
 | **Only me** | Only the agent owner. |
-| **Entire workspace** | Every member of the workspace. |
+| **Entire workspace** | Members with the `owner`, `admin`, or `member` role. |
 | **Specific people** | The agent owner and the selected members. |
 
-New agents default to **Only me**.
+New agents default to **Only me**. The demo below starts at Only me, switches to the other two options in turn, and shows what each member then gets in the assignee picker and the @-mention menu.
+
+<AgentAccessDemo />
 
 <Callout type="info">
-Workspace `owner`s and `admin`s can see and manage every agent, but cannot bypass Access to run someone else's "Only me" agent. Regular members only see agents they own or are allowed to run.
+Workspace `owner`s and `admin`s can see and manage every agent, but cannot bypass Access to run someone else's "Only me" agent.
 </Callout>
 
-**Seeing** an agent is determined by ownership, workspace admin roles, and Access together; **modifying** is open to the agent owner and workspace owners/admins, except Access itself, which only the agent owner can change.
+Everything other than running it is split like this:
 
-Configuration that may contain credentials, such as environment variables and MCP, has stricter read rules — see [Create and configure an agent](/agents-create#environment-variables-and-credentials).
+| Action | Who can |
+|---|---|
+| See it in the agent list and pickers | The agent owner, workspace `owner`s and `admin`s, and members Access grants |
+| Edit its configuration | The agent owner and workspace `owner`s and `admin`s |
+| Change Access | Only the agent owner |
+
+Configuration that may contain credentials, such as environment variables and MCP, has stricter read rules. See [Create and configure an agent](/agents-create#environment-variables-and-credentials).
 
 ## Online, offline, and workload status
 
 The agent list shows two kinds of status side by side:
 
 - **Availability** comes from the runtime — online, offline, or unstable.
-- **Workload** comes from tasks — working, queued, or idle.
+- **Workload** comes from runs — working, queued, or idle.
 
-"Offline" does not mean the agent was deleted. Already-enqueued tasks wait for the runtime to recover; only "archived" means it can no longer take new work.
+"Offline" does not mean the agent was deleted. Already-enqueued runs wait for the runtime to recover; only "archived" means it can no longer take new work.
 
 ## Archive and restore
 
 Agents you no longer use can be archived. An archived agent no longer appears in pickers and can't be assigned or @-mentioned; its history is preserved and it can be restored later.
 
 <Callout type="warning">
-Archiving cancels all of the agent's unfinished tasks, including queued and running ones.
+Archiving cancels all of the agent's unfinished runs, including queued and running ones.
 </Callout>
 
 The agent owner and workspace `owner`s and `admin`s can archive or restore an agent.
 
 ## Next steps
 
-- [Create and configure an agent](/agents-create) — start blank, or build with AI.
+- [Create and configure an agent](/agents-create) — fill in the configuration yourself, or let AI draft it.
 - [Skills](/skills) — add reusable methods and material to an agent.
 - [Squads](/squads) — let a leader pick the right member for the work.
 - [Daemon and runtimes](/daemon-runtimes) — where agents actually execute.

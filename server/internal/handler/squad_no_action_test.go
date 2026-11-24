@@ -9,10 +9,12 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 type runningSquadLeaderTaskFixture struct {
 	IssueID          string
+	SquadID          string
 	LeaderID         string
 	TaskID           string
 	TriggerCommentID string
@@ -20,44 +22,30 @@ type runningSquadLeaderTaskFixture struct {
 
 func newRunningSquadLeaderTaskFixture(t *testing.T) runningSquadLeaderTaskFixture {
 	t.Helper()
-	ctx := context.Background()
 
 	fx := newSquadCommentTriggerFixture(t)
 	issueID := uuidToString(fx.Issue.ID)
 
 	var runtimeID string
-	if err := testPool.QueryRow(ctx, `
-		SELECT runtime_id FROM agent WHERE id = $1
-	`, fx.LeaderID).Scan(&runtimeID); err != nil {
-		t.Fatalf("load leader runtime: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT runtime_id FROM agent WHERE id = $1`, fx.LeaderID).Scan(&runtimeID)
 
-	var triggerCommentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
-		VALUES ($1, $2, 'member', $3, 'LGTM', 'comment')
-		RETURNING id
-	`, issueID, testWorkspaceID, testUserID).Scan(&triggerCommentID); err != nil {
-		t.Fatalf("create trigger comment: %v", err)
-	}
+	triggerCommentID := dbfx.Comment(t, issueID, "LGTM")
 
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, issue_id, trigger_comment_id,
-			status, priority, started_at
-		)
-		VALUES ($1, $2, $3, $4, 'running', 0, now())
-		RETURNING id
-	`, fx.LeaderID, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
-		t.Fatalf("create running squad leader task: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	// is_leader_task + squad_id are what RecordSquadLeaderEvaluation authorizes
+	// against (MUL-6622); a leader task without them is not a leader turn.
+	taskID := dbfx.Task(t, fx.LeaderID, testutil.Cols{
+		"runtime_id":         runtimeID,
+		"issue_id":           issueID,
+		"trigger_comment_id": triggerCommentID,
+		"status":             "running",
+		"started_at":         testutil.Raw("now()"),
+		"is_leader_task":     true,
+		"squad_id":           fx.SquadID,
 	})
 
 	return runningSquadLeaderTaskFixture{
 		IssueID:          issueID,
+		SquadID:          fx.SquadID,
 		LeaderID:         fx.LeaderID,
 		TaskID:           taskID,
 		TriggerCommentID: triggerCommentID,
@@ -91,9 +79,9 @@ func completeRunningTask(t *testing.T, fx runningSquadLeaderTaskFixture, output 
 	t.Helper()
 
 	w := httptest.NewRecorder()
-	r := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+fx.TaskID+"/complete",
+	r := newOwnerDaemonRequest("POST", "/api/daemon/tasks/"+fx.TaskID+"/complete",
 		map[string]any{"output": output},
-		testWorkspaceID, "legit-daemon")
+	)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("taskId", fx.TaskID)
 	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))

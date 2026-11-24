@@ -32,8 +32,10 @@ func createChatSessionWithProjectForTest(t *testing.T, agentID, projectID string
 
 	var sessionID string
 	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, status, project_id)
-		VALUES ($1, $2, $3, 'Project context chat', 'active', $4)
+		INSERT INTO chat_session (
+			workspace_id, agent_id, creator_id, title, status, project_id, explicitly_created_at
+		)
+		VALUES ($1, $2, $3, 'Project context chat', 'active', $4, now())
 		RETURNING id
 	`, testWorkspaceID, agentID, testUserID, projectID).Scan(&sessionID); err != nil {
 		t.Fatalf("create chat session: %v", err)
@@ -325,12 +327,10 @@ func TestClaimTaskByRuntime_ChatProjectContext(t *testing.T) {
 	})
 
 	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest(
+	req := newOwnerDaemonRequest(
 		http.MethodPost,
 		"/api/daemon/runtimes/"+runtimeID+"/claim",
 		nil,
-		testWorkspaceID,
-		"chat-project-context-test",
 	)
 	req = withURLParam(req, "runtimeId", runtimeID)
 	testHandler.ClaimTaskByRuntime(w, req)

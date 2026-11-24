@@ -1,6 +1,7 @@
 "use client";
 
 import { cloneElement, useState, type ReactElement, type ReactNode } from "react";
+import { DeferredTooltip } from "@multica/ui/components/common/deferred-tooltip";
 
 /**
  * Defers mounting a popup component (Popover/Menu root + trigger machinery)
@@ -19,9 +20,10 @@ import { cloneElement, useState, type ReactElement, type ReactNode } from "react
  *   swaps the element mid-gesture (no pointerenter/pointerdown warming),
  *   every event of the gesture lands on a node that is still attached —
  *   both for real pointers and for synthetic sequences (tests, assistive
- *   tech). The in-flight click is stopped from propagating so the popup's
- *   just-mounted outside-press dismissal doesn't treat it as an outside
- *   click and close the popover in the same breath.
+ *   tech). The in-flight click is prevented and stopped so an enclosing link
+ *   cannot perform native navigation, and the popup's just-mounted
+ *   outside-press dismissal doesn't treat it as an outside click and close
+ *   the popover in the same breath.
  * - `Enter`/`Space` do the same for keyboard.
  *
  * Only for uncontrolled usages: callers that pass `open`/`onOpenChange`/
@@ -32,6 +34,8 @@ export function DeferredPopup({
   triggerRender,
   triggerClassName,
   ariaHasPopup = "dialog",
+  tooltip,
+  tooltipSide,
   children,
 }: {
   /** Trigger content, matching what the host passes to its popup trigger. */
@@ -47,6 +51,10 @@ export function DeferredPopup({
   /** ARIA popup kind of the real trigger ("dialog" for popovers, "menu" for
    *  dropdown menus) so the cold trigger reads the same to assistive tech. */
   ariaHasPopup?: "dialog" | "menu";
+  /** Hover tooltip for the cold trigger. Pass the same content to the real
+   *  component so the tooltip survives the upgrade. */
+  tooltip?: ReactNode;
+  tooltipSide?: "top" | "bottom" | "left" | "right";
   /** Renders the real component once upgraded. */
   children: (open: boolean, onOpenChange: (v: boolean) => void) => ReactNode;
 }) {
@@ -70,6 +78,7 @@ export function DeferredPopup({
   };
   const handlers = {
     onClick: (e: React.MouseEvent) => {
+      e.preventDefault();
       e.stopPropagation();
       mountOpen();
     },
@@ -77,18 +86,22 @@ export function DeferredPopup({
     "aria-haspopup": ariaHasPopup,
   };
 
+  let cold: ReactElement<Record<string, unknown>>;
   if (triggerRender) {
     // Mirror Base UI's render-prop semantics: the render element's own
     // children win over the component-level trigger content.
-    if (triggerRender.props.children != null) {
-      return cloneElement(triggerRender, handlers);
-    }
-    return cloneElement(triggerRender, handlers, trigger);
+    cold =
+      triggerRender.props.children != null
+        ? cloneElement(triggerRender, handlers)
+        : cloneElement(triggerRender, handlers, trigger);
+  } else {
+    cold = (
+      <button type="button" className={triggerClassName} {...handlers}>
+        {trigger}
+      </button>
+    );
   }
 
-  return (
-    <button type="button" className={triggerClassName} {...handlers}>
-      {trigger}
-    </button>
-  );
+  if (tooltip == null) return cold;
+  return <DeferredTooltip trigger={cold} content={tooltip} side={tooltipSide} />;
 }

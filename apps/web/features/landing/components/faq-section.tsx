@@ -1,71 +1,85 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
+import { Plus } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
+import { Container, Section, SectionHeader, focusRing } from "../site/primitives";
+import { InlineLinks } from "./inline-links";
 import { useLocale } from "../i18n";
+
+const EASE = "ease-[cubic-bezier(0.32,0.72,0,1)]";
+
+function FAQItem({ question, answer }: { question: string; answer: string }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  const panelId = `${id}-panel`;
+  const buttonId = `${id}-button`;
+
+  return (
+    <div
+      className={cn(
+        "rounded-site-card border bg-site-surface transition-colors duration-300",
+        open ? "border-site-line-strong" : "border-site-line",
+      )}
+    >
+      <h3>
+        <button
+          type="button"
+          id={buttonId}
+          aria-expanded={open}
+          aria-controls={panelId}
+          onClick={() => setOpen((current) => !current)}
+          className={cn(
+            "group flex w-full items-center justify-between gap-6 rounded-site-card px-5 py-4 text-left text-site-body text-site-ink",
+            focusRing,
+          )}
+        >
+          {question}
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-full border border-site-line text-site-muted transition-colors group-hover:text-site-ink">
+            <Plus
+              aria-hidden
+              className={cn("size-3.5 transition-transform duration-300 motion-reduce:transition-none", EASE, open && "rotate-45")}
+            />
+          </span>
+        </button>
+      </h3>
+      <div
+        id={panelId}
+        role="region"
+        aria-labelledby={buttonId}
+        inert={!open}
+        className={cn(
+          "grid transition-[grid-template-rows,opacity] duration-300 motion-reduce:transition-none",
+          EASE,
+          open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+        )}
+      >
+        <div className="overflow-hidden">
+          <p className="-mt-1 px-5 pb-5 text-site-body text-site-muted">
+            <InlineLinks
+              text={answer}
+              linkClassName="text-site-ink underline decoration-site-line-strong underline-offset-4 hover:decoration-site-ink"
+            />
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function FAQSection() {
   const { t } = useLocale();
-  const [openIndex, setOpenIndex] = useState<number | null>(null);
 
   return (
-    <section id="faq" className="bg-[#f8f8f8] text-[#0a0d12]">
-      <div className="mx-auto max-w-[860px] px-4 py-24 sm:px-6 sm:py-32 lg:py-40">
-        <div className="text-center">
-          <p className="text-micro font-semibold uppercase tracking-[0.16em] text-[#0a0d12]/40">
-            {t.faq.label}
-          </p>
-          <h2 className="mt-4 landing-serif text-[2.6rem] leading-[1.05] tracking-[-0.03em] sm:text-[3.4rem] lg:text-[4.2rem]">
-            {t.faq.headline}
-          </h2>
-        </div>
-
-        <div className="mt-14 divide-y divide-[#0a0d12]/10 sm:mt-16">
-          {t.faq.items.map((faq, i) => (
-            <div key={i}>
-              <button
-                type="button"
-                onClick={() => setOpenIndex(openIndex === i ? null : i)}
-                className="flex w-full items-start justify-between gap-4 py-6 text-left"
-              >
-                <span className="text-title-sm font-semibold leading-snug text-[#0a0d12] sm:text-title">
-                  {faq.question}
-                </span>
-                <span
-                  className={cn(
-                    "mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border border-[#0a0d12]/12 text-[#0a0d12]/40 transition-transform",
-                    openIndex === i && "rotate-45",
-                  )}
-                >
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 12 12"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                  >
-                    <path d="M6 1v10M1 6h10" />
-                  </svg>
-                </span>
-              </button>
-              <div
-                className={cn(
-                  "grid transition-[grid-template-rows] duration-200 ease-out",
-                  openIndex === i ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
-                )}
-              >
-                <div className="overflow-hidden">
-                  <p className="pb-6 pr-12 text-body leading-[1.7] text-[#0a0d12]/56 sm:text-body-lg">
-                    {faq.answer}
-                  </p>
-                </div>
-              </div>
-            </div>
+    <Section id="faq">
+      <Container className="flex flex-col items-center">
+        <SectionHeader eyebrow={t.faq.label} title={t.faq.headline} className="text-center" />
+        <div className="mt-site-block flex w-full max-w-[48rem] flex-col gap-2">
+          {t.faq.items.map((faq) => (
+            <FAQItem key={faq.question} question={faq.question} answer={faq.answer} />
           ))}
         </div>
-      </div>
-    </section>
+      </Container>
+    </Section>
   );
 }

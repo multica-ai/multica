@@ -5,7 +5,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -60,9 +59,7 @@ while IFS= read -r line; do
   esac
 done
 `
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatalf("write codebuddy ACP stub: %v", err)
-	}
+	writeTestExecutable(t, path, []byte(script))
 	return path
 }
 
@@ -85,7 +82,7 @@ func TestDiscoverCodebuddyModelsFromACP(t *testing.T) {
 	resetCodebuddyDiscoveryCaches(t)
 	path := writeCodebuddyACPStub(t, codebuddyACPSessionResult)
 
-	catalog, err := discoverCodebuddyModels(context.Background(), path)
+	catalog, err := discoverCodebuddyModels(context.Background(), Command{Path: path})
 	if err != nil {
 		t.Fatalf("discoverCodebuddyModels: %v", err)
 	}
@@ -184,7 +181,7 @@ func TestDiscoverCodebuddyModelsACPEffort(t *testing.T) {
 	resetCodebuddyDiscoveryCaches(t)
 	path := writeCodebuddyACPStub(t, codebuddyACPSessionResult)
 
-	catalog, err := discoverCodebuddyModels(context.Background(), path)
+	catalog, err := discoverCodebuddyModels(context.Background(), Command{Path: path})
 	if err != nil {
 		t.Fatalf("discoverCodebuddyModels: %v", err)
 	}
@@ -252,7 +249,7 @@ func TestDiscoverCodebuddyModelsFallsBackOnACPFailure(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resetCodebuddyDiscoveryCaches(t)
-			catalog, err := discoverCodebuddyModels(context.Background(), tc.path(t))
+			catalog, err := discoverCodebuddyModels(context.Background(), Command{Path: tc.path(t)})
 			if err != nil {
 				t.Fatalf("discoverCodebuddyModels: %v", err)
 			}

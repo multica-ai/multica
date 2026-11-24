@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -142,8 +143,11 @@ func (defaultRenderer) Render(in RenderInput) (CardRender, error) {
 // needs. Declared as an interface so the patcher is unit-testable
 // without a real Postgres connection.
 type PatcherQueries interface {
+	mediaDeliveryQueries
+	referenceLinkQueries
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
 	TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error)
+	GetChannelTaskDelivery(ctx context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error)
 	GetChatSession(ctx context.Context, id pgtype.UUID) (db.ChatSession, error)
 	GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error)
 	GetLarkInstallation(ctx context.Context, id pgtype.UUID) (Installation, error)
@@ -151,6 +155,13 @@ type PatcherQueries interface {
 	GetLarkOutboundCardByTask(ctx context.Context, taskID pgtype.UUID) (OutboundCardMessage, error)
 	CreateLarkOutboundCardMessage(ctx context.Context, arg CreateOutboundCardMessageParams) (OutboundCardMessage, error)
 	UpdateLarkOutboundCardStatus(ctx context.Context, arg UpdateOutboundCardStatusParams) error
+	// ListAttachmentsByChatMessage reads the files an agent bound to one
+	// assistant message at task completion. Taken with the generated db
+	// params rather than a domain type because ChannelStore embeds
+	// *db.Queries and therefore already satisfies it — this list is the
+	// one seam where the narrow interface would cost a hand-written
+	// adapter for no gain. See outbound_media.go for the caller.
+	ListAttachmentsByChatMessage(ctx context.Context, arg db.ListAttachmentsByChatMessageParams) ([]db.Attachment, error)
 }
 
 // CredentialsResolver decrypts an installation's app_secret for the
@@ -163,10 +174,11 @@ type CredentialsResolver interface {
 // PatcherConfig tunes the outbound Patcher. Defaults via withDefaults;
 // tests typically override Renderer / Now / Logger.
 type PatcherConfig struct {
+	// AppURL is the deployment's web URL for verified outbound reference links.
+	AppURL string
 	// Renderer drives the error card template used on the EventTaskFailed
 	// path. The success path (EventChatDone) bypasses the renderer
-	// entirely — it sends the raw assistant reply as a plain text IM
-	// message — so this only matters for the failure branch.
+	// and sends a text message or Markdown card.
 	Renderer Renderer
 	Now      func() time.Time
 	Logger   *slog.Logger
@@ -211,19 +223,48 @@ type Patcher struct {
 	credentials     CredentialsResolver
 	client          APIClient
 	typingIndicator *TypingIndicatorManager
-	cfg             PatcherConfig
+	// media is the same client as `client`, narrowed to the four
+	// upload/send methods the attachment hop needs. It is nil for any
+	// APIClient that does not implement them (the stub, the test
+	// fakes), which is how "attachments are not deliverable in this
+	// deployment" is expressed — see outbound_media.go.
+	media mediaAPIClient
+	// objects is the deployment's object store, or nil when this
+	// deployment configured none. Set via SetAttachments. Both it and
+	// media must be non-nil before a file can be delivered.
+	objects        mediaObjectStore
+	mediaAdmission chan struct{}
+	mediaPending   chan struct{}
+	// mediaSlots bounds concurrent transfers. Per-patcher, like the two
+	// admission tiers above, so all three limits share one scope.
+	mediaSlots  chan struct{}
+	mediaBudget time.Duration
+	spawn       func(func())
+	cfg         PatcherConfig
 }
 
 // NewPatcher constructs a Patcher bound to its dependencies. The
 // patcher does not subscribe to the bus until Register is called.
 func NewPatcher(queries PatcherQueries, credentials CredentialsResolver, client APIClient, cfg PatcherConfig) *Patcher {
 	cfg = cfg.withDefaults()
-	return &Patcher{
-		queries:     queries,
-		credentials: credentials,
-		client:      client,
-		cfg:         cfg,
+	p := &Patcher{
+		queries:        queries,
+		credentials:    credentials,
+		client:         client,
+		cfg:            cfg,
+		mediaAdmission: make(chan struct{}, maxAdmittedAttachmentDeliveries),
+		mediaPending:   make(chan struct{}, maxPendingAttachmentDeliveries),
+		mediaSlots:     make(chan struct{}, maxConcurrentAttachmentDeliveries),
+		mediaBudget:    attachmentBudget,
+		spawn:          func(f func()) { go f() },
 	}
+	// A type assertion rather than a fifth constructor argument: the
+	// media methods are an optional capability of the transport, and
+	// the fakes that do not have them must keep compiling.
+	if m, ok := client.(mediaAPIClient); ok {
+		p.media = m
+	}
+	return p
 }
 
 // SetTypingIndicatorManager wires the typing-indicator manager into the
@@ -234,34 +275,18 @@ func (p *Patcher) SetTypingIndicatorManager(m *TypingIndicatorManager) {
 	p.typingIndicator = m
 }
 
-// Register subscribes the patcher to the task-lifecycle events it
-// cares about on the supplied bus. Idempotent only if you call it
-// against a fresh bus; call sites should invoke it exactly once
-// during server boot (after the bus + patcher are constructed and
-// before HTTP traffic starts).
+// Register attaches the patcher once during boot, before traffic starts.
+// ChatDone sends the reply, TaskFailed sends an error, and TaskCancelled clears
+// typing state without an answer. Every cancellation path must publish its event
+// after commit, including deletion paths whose workspace must come from the caller.
 //
-// Subscriptions are deliberately minimal:
-//
-//   - EventChatDone — the agent finished replying. The Patcher sends
-//     the reply as a plain text IM message (Lark's `msg_type=text`),
-//     not as an interactive card. The earlier card-based design (with
-//     thinking → running → final patches) made every reply look like
-//     a system notification nested in card chrome; flipping to plain
-//     text makes free-form chat feel native.
-//
-//   - EventTaskFailed — the run failed; surface a short error card
-//     so the failure is visually distinct from a successful reply.
-//
-// We deliberately do NOT subscribe to EventTaskQueued / EventTaskRunning
-// (no thinking-card lifecycle anymore — adds noise without value) or to
-// EventTaskCompleted (chat tasks always emit EventChatDone first, which
-// is what we care about; non-chat tasks have no Lark binding anyway and
-// would early-return). Leaving EventTaskCompleted unsubscribed also
-// avoids the prior "Done." overwrite regression where the no-content
-// EventTaskCompleted payload would wipe the real reply.
+// Do not subscribe to TaskCompleted: chat tasks already emit ChatDone, and the
+// empty completion payload must not overwrite the reply. Queued/running events
+// do not drive a thinking-card lifecycle.
 func (p *Patcher) Register(bus *events.Bus) {
 	bus.Subscribe(protocol.EventTaskFailed, p.handleEvent)
 	bus.Subscribe(protocol.EventChatDone, p.handleEvent)
+	bus.Subscribe(protocol.EventTaskCancelled, p.handleEvent)
 }
 
 func (p *Patcher) handleEvent(e events.Event) {
@@ -289,13 +314,37 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 		// Issue / autopilot tasks have no chat_session.
 		return nil
 	}
-	binding, err := p.queries.GetLarkChatSessionBindingBySession(ctx, chatSessionID)
+	// Cleanup runs after reply delivery (including failed sends and early
+	// returns), with its own budget. A slow reaction API cannot consume the
+	// reply's context deadline. The bus still waits for bounded cleanup.
+	if p.typingIndicator != nil {
+		defer func() {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), typingCleanupTimeout)
+			defer cancel()
+			covered := p.typingIndicator.Reconcile(cleanupCtx, chatSessionID)
+			p.sweepTypingForTask(cleanupCtx, taskID, e.ChannelReactionTarget, covered)
+		}()
+	}
+	if e.Type == protocol.EventTaskCancelled {
+		return nil
+	}
+
+	delivery, err := p.queries.GetChannelTaskDelivery(ctx, taskID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			// Web-only chat session — not a Lark target.
 			return nil
 		}
-		return fmt.Errorf("lookup chat session binding: %w", err)
+		return fmt.Errorf("lookup lark task delivery: %w", err)
+	}
+	if delivery.ChannelType != channelTypeFeishu {
+		return nil
+	}
+	binding := ChatSessionBinding{
+		ChatSessionID: chatSessionID,
+		ID:            delivery.BindingID, InstallationID: delivery.InstallationID,
+		ChannelChatID: delivery.ChannelChatID, ChatType: delivery.ChatType, Config: delivery.Config,
+		LastMessageID: delivery.ChannelMessageID, LastThreadID: delivery.ChannelThreadID,
+		LastSenderID: delivery.ChannelSenderID,
 	}
 
 	// Only bound sessions reach here, so classify the task origin before
@@ -335,70 +384,230 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 		agentName = agent.Name
 	}
 
-	// Clear the "processing" reaction before the reply is visible so the
-	// user sees a clean transition. Best-effort: a failure here is logged
-	// but does not block the actual reply.
-	if p.typingIndicator != nil {
-		p.typingIndicator.Clear(ctx, chatSessionID)
-	}
-
 	switch e.Type {
 	case protocol.EventChatDone:
-		return p.sendChatReply(ctx, creds, binding, e.Payload)
+		return p.sendChatReply(ctx, creds, binding, mentionOpenID(binding), inst.WorkspaceID, e.Payload)
 	case protocol.EventTaskFailed:
 		return p.fail(ctx, creds, binding, taskID, agentName, e.Payload)
 	}
 	return nil
 }
 
+// sweepTypingForTask uses the frozen trigger message. Session deletion carries
+// that anchor on the internal event before deleting the delivery row.
+func (p *Patcher) sweepTypingForTask(ctx context.Context, taskID pgtype.UUID, target *events.ChannelReactionTarget, covered map[string]bool) {
+	delivery, err := p.queries.GetChannelTaskDelivery(ctx, taskID)
+	if errors.Is(err, pgx.ErrNoRows) && target != nil {
+		installationID, parseErr := util.ParseUUID(target.InstallationID)
+		if parseErr != nil {
+			return
+		}
+		delivery = db.ChannelTaskDelivery{
+			ChannelType: target.ChannelType, InstallationID: installationID,
+			ChannelMessageID: pgtype.Text{String: target.MessageID, Valid: target.MessageID != ""},
+		}
+		err = nil
+	}
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			p.cfg.Logger.Warn("lark patcher: typing sweep delivery lookup failed",
+				"task_id", uuidString(taskID),
+				"error", err,
+			)
+		}
+		return
+	}
+	if delivery.ChannelType != channelTypeFeishu || !delivery.ChannelMessageID.Valid || delivery.ChannelMessageID.String == "" {
+		return
+	}
+	if covered[uuidString(delivery.InstallationID)+"/"+delivery.ChannelMessageID.String] {
+		return
+	}
+	inst, err := p.queries.GetLarkInstallation(ctx, delivery.InstallationID)
+	if err != nil {
+		p.cfg.Logger.Warn("lark patcher: typing sweep installation lookup failed",
+			"task_id", uuidString(taskID),
+			"error", err,
+		)
+		return
+	}
+	creds, err := p.installationCredentials(inst)
+	if err != nil {
+		p.cfg.Logger.Warn("lark patcher: typing sweep credentials resolution failed",
+			"task_id", uuidString(taskID),
+			"error", err,
+		)
+		return
+	}
+	p.typingIndicator.SweepMessage(ctx, creds, delivery.ChannelMessageID.String)
+}
+
+// mentionOpenID returns the Feishu open_id to @-mention on this reply, or ""
+// for "send without a mention".
+//
+// It reads the sender frozen onto this task's delivery row — the same
+// per-task snapshot the reply target comes from, recorded together with it on
+// the inbound turn. Two properties follow, and both matter:
+//
+//   - The mention names the account that sent THIS trigger, not whoever
+//     messaged the chat most recently, so a slow answer cannot mention a
+//     later speaker.
+//
+//   - It is the exact platform identity, not one re-derived from the Multica
+//     member. channel_user_binding is unique on (installation_id,
+//     channel_user_id) only, so one member can hold several open_ids on a
+//     single installation; a member-keyed reverse lookup would then be free
+//     to name whichever it found first, and a reply to one account could
+//     mention another.
+//
+// Group chats only. A p2p reply already lands in a 1:1 conversation that
+// notifies on its own, so a mention there is pure noise.
+//
+// Pre-migration deliveries carry no sender and mention nobody, which is the
+// same degradation as an unresolvable one — the answer still goes out.
+func mentionOpenID(binding ChatSessionBinding) string {
+	if ChatType(binding.ChatType) != ChatTypeGroup || !binding.LastSenderID.Valid {
+		return ""
+	}
+	return binding.LastSenderID.String
+}
+
 // sendChatReply turns ChatDonePayload.Content into a Lark message.
 // The wire shape is chosen per-reply based on whether the body
 // contains any markdown syntax:
 //
-//   - Plain prose (no markdown) → `msg_type=text`. A one-line "Hi!"
+//   - Plain prose without bound images → `msg_type=text`. A one-line "Hi!"
 //     reply should feel like a normal IM message, not a notification
 //     card with chrome around it.
 //
-//   - Anything with markdown (headings, lists, code blocks, tables,
+//   - Bound images or markdown (headings, lists, code blocks, tables,
 //     bold/italic, links) → schema-2.0 interactive card with a
-//     `tag: "markdown"` body element so Lark's client renders the
+//     `tag: "markdown"` body element; uploaded images update this same
+//     card at their Markdown positions. Lark's client renders the
 //     formatting instead of leaving raw `**bold**` characters in
 //     the transcript. The card is visually subtler than the legacy
 //     binding-prompt template — just a single markdown block, no
 //     header / icon / CTA buttons.
 //
-// Empty content is silently dropped: we'd rather show nothing than
-// "Done." (the prior card fallback that confused Bohan in the live
-// dev env). In practice an empty Content means the daemon completed
-// the task without producing visible output, which only happens for
-// edge cases like a chat task that just acknowledged a system event;
-// not emitting a message there is the right product call.
-func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentials, binding ChatSessionBinding, payload any) error {
+// Empty content skips the REPLY, not the delivery. An agent that produced
+// only files writes a real 'message' outcome with empty text — task.go's
+// pendingAttachments branch exists precisely for that shape, "the
+// attachment cards ARE the response". Returning before the attachment hop
+// would make the one case where the files are the whole answer the one case
+// the user hears nothing at all.
+//
+// mentionOpenID, when non-empty, prefixes the body with a native mention of
+// that member (see mention.go). The wire shape is chosen from the agent's own
+// content BEFORE the mention is attached, so a mention can never flip a plain
+// prose answer onto the card path.
+func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentials, binding ChatSessionBinding, mentionOpenID string, workspaceID pgtype.UUID, payload any) error {
 	content := chatDoneContent(payload)
-	if content == "" {
+	if topicSendWithoutTrigger(binding) {
+		p.cfg.Logger.Warn("lark: no trigger for a topic-isolated session; skipping reply rather than posting it to the parent group",
+			"chat_session_id", uuidString(binding.ChatSessionID),
+			"channel_chat_id", binding.ChannelChatID)
 		return nil
 	}
 	target := threadReplyTarget(binding)
-	if containsMarkdown(content) {
-		return sendWithThreadFallback(p.cfg.Logger, "send markdown card", target, func(t ReplyTarget) error {
-			_, err := p.client.SendMarkdownCard(ctx, SendMarkdownCardParams{
+	// Own the complete reply before any external write. The background file
+	// worker inherits this lease; duplicate events cannot repeat the text while
+	// waiting for the files or after the provider's UUID window has expired.
+	handedOff := false
+	if p.objects != nil && p.media != nil && chatDoneMessageID(payload) != "" {
+		taskID, err := util.ParseUUID(chatDoneTaskID(payload))
+		if err != nil || !taskID.Valid {
+			return errors.New("lark reply missing task identity")
+		}
+		var finish func()
+		var acquired bool
+		ctx, finish, acquired = p.claimMediaDelivery(ctx, taskID, binding)
+		if !acquired {
+			return nil
+		}
+		defer func() {
+			if !handedOff {
+				finish()
+			}
+		}()
+		ctx = context.WithValue(ctx, mediaWorkspaceContextKey{}, workspaceID)
+		if !p.markMediaSending(ctx) {
+			p.tellUser(ctx, creds, binding, target, mediaSendUnknownText)
+			return nil
+		}
+		if _, err := p.currentMediaCredentials(ctx, creds, binding, workspaceID); err != nil {
+			return err
+		}
+	}
+	if content == "" {
+		// Nothing to say, but there may be something to show. The
+		// delivery path no-ops on its own when the reply carried no
+		// files, so this costs one lookup and never a stray message.
+		handedOff = p.deliverAttachmentsAsync(ctx, creds, binding, target, workspaceID, payload)
+		return nil
+	}
+	content = p.linkReplyReferences(ctx, workspaceID, content)
+	// A plain answer with bound images also needs an updatable card. The
+	// bounded metadata probe does not read bytes or wait for an upload.
+	markdown := containsMarkdown(content) || p.replyNeedsMediaCard(ctx, workspaceID, payload)
+
+	// used records the target the send actually went out on. The whole
+	// point of sendWithReplyFallback is that it may retry without
+	// threading, and files must land in the same conversation the answer
+	// landed in — not in the topic the answer was bounced out of.
+	var used ReplyTarget
+	var cardID string
+	send := func(t ReplyTarget) error {
+		if _, owned := ctx.Value(mediaDeliveryContextKey{}).(*mediaDeliveryOwner); owned {
+			// Metadata lookup and reply fallback can outlive a revocation or
+			// takeover. Re-prove authority immediately before each send.
+			current, err := p.currentMediaCredentials(ctx, creds, binding, workspaceID)
+			if err != nil {
+				return err
+			}
+			creds = current
+		}
+		used = t
+		if markdown {
+			var err error
+			cardID, err = p.client.SendMarkdownCard(ctx, SendMarkdownCardParams{
 				InstallationID: creds,
 				ChatID:         outboundChatID(binding),
-				Markdown:       content,
+				Markdown:       prependMarkdownMention(mentionOpenID, content),
 				ReplyTarget:    t,
 			})
 			return err
-		})
-	}
-	return sendWithThreadFallback(p.cfg.Logger, "send text message", target, func(t ReplyTarget) error {
+		}
 		_, err := p.client.SendTextMessage(ctx, SendTextParams{
 			InstallationID: creds,
 			ChatID:         outboundChatID(binding),
-			Text:           content,
+			Text:           prependTextMention(mentionOpenID, content),
 			ReplyTarget:    t,
 		})
 		return err
-	})
+	}
+	op := "send text message"
+	if markdown {
+		op = "send markdown card"
+	}
+	if err := sendWithReplyFallback(p.cfg.Logger, op, target, send); err != nil {
+		return err
+	}
+	if markdown && p.objects != nil && p.media != nil {
+		if cardID == "" {
+			return errors.New("lark reply card identity unconfirmed")
+		}
+		ctx = context.WithValue(ctx, mediaReplyCardContextKey{}, &mediaReplyCard{
+			messageID: cardID, markdown: prependMarkdownMention(mentionOpenID, content),
+		})
+	}
+
+	// The answer is out; the files are the second hop. Spawned rather
+	// than awaited because this runs on the synchronous publish
+	// goroutine — see outbound_media.go for why the answer must never
+	// wait behind an upload. Best-effort by construction: the reply is
+	// already delivered, so nothing here can fail the reply.
+	handedOff = p.deliverAttachmentsAsync(ctx, creds, binding, used, workspaceID, payload)
+	return nil
 }
 
 // outboundChatID recovers the real Lark chat id from the chat binding. The
@@ -416,27 +625,87 @@ func outboundChatID(b ChatSessionBinding) ChatID {
 	return ChatID(b.ChannelChatID)
 }
 
-// threadReplyTarget derives the outbound reply target from the chat
-// binding's most-recent inbound trigger. We thread the reply ONLY when
-// that trigger was itself inside a Lark topic (last_lark_thread_id
-// present): normal group / p2p chats keep the unchanged chat-level send
-// path, and only an @-mention that happened inside a thread gets a
-// threaded reply (replying to last_lark_message_id with reply_in_thread).
-// The zero ReplyTarget means "send at the chat level".
-func threadReplyTarget(binding ChatSessionBinding) ReplyTarget {
-	if binding.LastThreadID.Valid && binding.LastThreadID.String != "" &&
-		binding.LastMessageID.Valid && binding.LastMessageID.String != "" {
-		return ReplyTarget{MessageID: binding.LastMessageID.String, InThread: true}
+// threadReplyTarget derives the outbound reply target from the trigger
+// snapshot the delivery row froze for THIS task. Three cases:
+//
+//   - Trigger inside a Lark topic (last_lark_thread_id present) → reply
+//     with reply_in_thread so the answer stays in the 话题 rather than
+//     leaking into the main group chat. Unchanged.
+//
+//   - Trigger in an ordinary group → reply to that message natively
+//     (#8234). A standalone message in a busy group loses which of the
+//     several questions in flight it answers; the native reply is what
+//     restores that attribution.
+//
+//   - Anything else (p2p, or no trigger message id recorded) → the
+//     chat-level send, unchanged. A 1:1 conversation has no ambiguity
+//     for a quote to resolve, so quoting every DM turn would be chrome
+//     without a reader.
+//
+// isTopicIsolated reports whether this binding is one Lark topic (话题) rather
+// than a whole chat. larkSessionRouting writes a config only for topic
+// sessions — key "chat:thread", config {"chat_id": real} — so a decoded
+// chat_id IS the isolation marker. Pre-topic rows carry "{}" and plain chats
+// carry no config, both of which read as not isolated.
+func isTopicIsolated(b ChatSessionBinding) bool {
+	if len(b.Config) == 0 {
+		return false
 	}
-	return ReplyTarget{}
+	var cfg larkBindingConfig
+	if err := json.Unmarshal(b.Config, &cfg); err != nil {
+		return false
+	}
+	return cfg.ChatID != "" && cfg.ChatID != b.ChannelChatID
 }
 
-// sendWithThreadFallback runs send with the thread reply target and,
-// ONLY when the threaded attempt fails with a Lark error that means the
-// topic reply legitimately cannot land (trigger message recalled, topic
-// gone, topics disabled, aggregated message — see
-// threadReplyUnsupportedCodes), retries once at the chat level so the
-// reply is not silently lost. Any other failure — transport error,
+// topicSendWithoutTrigger reports that this task belongs to a topic-isolated
+// session but carries no trigger message to reply to.
+//
+// It is the one combination Lark cannot serve. Slack and Telegram can place a
+// message in a thread from the thread id alone (thread_ts,
+// message_thread_id); Lark's only route into a topic is replying to a message
+// inside it, so with no trigger the send would fall through to
+// outboundChatID, which resolves the composite key to the whole chat. The
+// answer to a question asked in one topic would then appear in the main group
+// — not a confidentiality break (group members can open the topic either way)
+// but the wrong place, and the session isolation that topic routing exists to
+// provide would be silently undone.
+//
+// So we decline to send. The member can ask again, the answer is still in
+// Multica, and this is a one-time window: it is reachable only for
+// generations predating migration 460 that are recovered after deploy without
+// a new inbound turn, since every turn after deploy records a trigger before
+// its task is enqueued.
+//
+// Deliberately narrower than sendWithReplyFallback's chat-level retry, which
+// fires only when Lark reports the topic itself cannot receive the reply. The
+// topic is unusable there, so delivering beats losing the reply; here the
+// topic is fine and only our own bookkeeping is missing.
+func topicSendWithoutTrigger(b ChatSessionBinding) bool {
+	hasTrigger := b.LastMessageID.Valid && b.LastMessageID.String != ""
+	return isTopicIsolated(b) && !hasTrigger
+}
+
+func threadReplyTarget(binding ChatSessionBinding) ReplyTarget {
+	if !binding.LastMessageID.Valid || binding.LastMessageID.String == "" {
+		return ReplyTarget{}
+	}
+	if binding.LastThreadID.Valid && binding.LastThreadID.String != "" {
+		return ReplyTarget{MessageID: binding.LastMessageID.String, InThread: true}
+	}
+	if ChatType(binding.ChatType) != ChatTypeGroup {
+		return ReplyTarget{}
+	}
+	return ReplyTarget{MessageID: binding.LastMessageID.String}
+}
+
+// sendWithReplyFallback runs send against the reply target and, ONLY
+// when the attempt fails with a Lark error that means this specific
+// trigger message legitimately cannot receive a reply (message
+// recalled, invisible to the operator, self-destructing; plus the
+// topic-only cases: topic gone, topics disabled, aggregated message —
+// see threadReplyUnsupportedCodes), retries once at the chat level so
+// the reply is not silently lost. Any other failure — transport error,
 // 5xx, timeout, rate limit, or an ambiguous "the server may have
 // received it" error — is logged and returned as a failure rather than
 // retried: a blind chat-level retry could duplicate the reply or leak a
@@ -446,22 +715,28 @@ func threadReplyTarget(binding ChatSessionBinding) ReplyTarget {
 // It is a package-level function (rather than a Patcher method) so the
 // event-driven Patcher and the immediate OutcomeReplier share one
 // classified fallback path.
-func sendWithThreadFallback(log *slog.Logger, op string, target ReplyTarget, send func(ReplyTarget) error) error {
+func sendWithReplyFallback(log *slog.Logger, op string, target ReplyTarget, send func(ReplyTarget) error) error {
 	err := send(target)
 	if err == nil {
 		return nil
 	}
+	// A later explicit refusal cannot disprove an earlier accepted send whose
+	// response was lost. Never move that uncertain reply to a new destination.
+	var uncertain *mediaSendUnconfirmed
+	if errors.As(err, &uncertain) {
+		return fmt.Errorf("%s: %w", op, err)
+	}
 	if target.IsSet() && isThreadReplyUnsupported(err) {
-		log.Warn("lark: thread reply unsupported for target, retrying at chat level",
-			"op", op, "reply_message_id", target.MessageID, "error", err)
+		log.Warn("lark: reply target unusable, retrying at chat level",
+			"op", op, "reply_message_id", target.MessageID, "in_thread", target.InThread, "error", err)
 		if fallbackErr := send(ReplyTarget{}); fallbackErr != nil {
-			return fmt.Errorf("%s (chat-level fallback after thread-unsupported reply: %v): %w", op, err, fallbackErr)
+			return fmt.Errorf("%s (chat-level fallback after unusable reply target: %v): %w", op, err, fallbackErr)
 		}
 		return nil
 	}
 	if target.IsSet() {
-		log.Warn("lark: thread reply failed; not falling back (non-classified error)",
-			"op", op, "reply_message_id", target.MessageID, "error", err)
+		log.Warn("lark: reply failed; not falling back (non-classified error)",
+			"op", op, "reply_message_id", target.MessageID, "in_thread", target.InThread, "error", err)
 	}
 	return fmt.Errorf("%s: %w", op, err)
 }
@@ -495,6 +770,12 @@ func (p *Patcher) installationCredentials(inst Installation) (InstallationCreden
 // time we'd just send a second card, which is fine — failure is
 // usually a single terminal event.
 func (p *Patcher) fail(ctx context.Context, creds InstallationCredentials, binding ChatSessionBinding, taskID pgtype.UUID, agentName string, payload any) error {
+	if topicSendWithoutTrigger(binding) {
+		p.cfg.Logger.Warn("lark: no trigger for a topic-isolated session; skipping error card rather than posting it to the parent group",
+			"chat_session_id", uuidString(binding.ChatSessionID),
+			"channel_chat_id", binding.ChannelChatID)
+		return nil
+	}
 	render, err := p.cfg.Renderer.Render(RenderInput{
 		Kind:         CardKindError,
 		AgentName:    agentName,
@@ -504,7 +785,7 @@ func (p *Patcher) fail(ctx context.Context, creds InstallationCredentials, bindi
 	if err != nil {
 		return fmt.Errorf("render error card: %w", err)
 	}
-	return sendWithThreadFallback(p.cfg.Logger, "send error card", threadReplyTarget(binding), func(t ReplyTarget) error {
+	return sendWithReplyFallback(p.cfg.Logger, "send error card", threadReplyTarget(binding), func(t ReplyTarget) error {
 		_, err := p.client.SendInteractiveCard(ctx, SendCardParams{
 			InstallationID: creds,
 			ChatID:         outboundChatID(binding),
@@ -515,8 +796,8 @@ func (p *Patcher) fail(ctx context.Context, creds InstallationCredentials, bindi
 	})
 }
 
-// taskAndSessionFromEvent parses the typed-ish payload broadcastTaskEvent
-// publishes — a map[string]any with `task_id` (always) and
+// taskAndSessionFromEvent parses the typed-ish payload the task publishers
+// emit — a map[string]any with `task_id` (always) and
 // `chat_session_id` (chat tasks only). EventChatDone carries a
 // ChatDonePayload struct instead.
 func taskAndSessionFromEvent(e events.Event) (taskID, chatSessionID pgtype.UUID, ok bool) {

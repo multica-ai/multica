@@ -5,26 +5,10 @@ beforeEach(() => {
   useTranscriptViewStore.setState({
     sortDirection: "chronological",
     selectedFilterKeys: [],
-    density: "smart",
   });
 });
 
 describe("useTranscriptViewStore", () => {
-  it("defaults to chronological, unfiltered, and smart density", () => {
-    expect(useTranscriptViewStore.getState().sortDirection).toBe("chronological");
-    expect(useTranscriptViewStore.getState().selectedFilterKeys).toEqual([]);
-    expect(useTranscriptViewStore.getState().density).toBe("smart");
-  });
-
-  it("setSortDirection switches between the two known directions", () => {
-    const { setSortDirection } = useTranscriptViewStore.getState();
-
-    setSortDirection("newest_first");
-    expect(useTranscriptViewStore.getState().sortDirection).toBe("newest_first");
-
-    setSortDirection("chronological");
-    expect(useTranscriptViewStore.getState().sortDirection).toBe("chronological");
-  });
 
   it("stores filter preferences as unique serializable keys", () => {
     const { setSelectedFilterKeys, toggleFilterKey, clearFilterKeys } =
@@ -49,24 +33,16 @@ describe("useTranscriptViewStore", () => {
     expect(useTranscriptViewStore.getState().selectedFilterKeys).toEqual([]);
   });
 
-  it("stores the density preference", () => {
-    const { setDensity } = useTranscriptViewStore.getState();
-
-    setDensity("expanded");
-    expect(useTranscriptViewStore.getState().density).toBe("expanded");
-
-    setDensity("collapsed");
-    expect(useTranscriptViewStore.getState().density).toBe("collapsed");
-  });
-
-  it("migrates the legacy defaultExpanded boolean and rejects unknown density values", () => {
+  it("drops a persisted density from before the reading hierarchy replaced it", () => {
     const merge = useTranscriptViewStore.persist.getOptions().merge!;
     const current = useTranscriptViewStore.getState();
 
-    expect(merge({ defaultExpanded: true }, current)).toMatchObject({ density: "expanded" });
-    expect(merge({ defaultExpanded: false }, current)).toMatchObject({ density: "smart" });
-    expect(merge({ density: "collapsed" }, current)).toMatchObject({ density: "collapsed" });
-    expect(merge({ density: "bogus" }, current)).toMatchObject({ density: "smart" });
-    expect(merge(undefined, current)).toMatchObject({ density: "smart" });
+    // Expand mode is no longer a setting: agent prose reads open and tool
+    // calls fold, so a stale persisted value must not resurface as state.
+    expect(merge({ density: "collapsed", sortDirection: "newest_first" }, current)).toMatchObject({
+      sortDirection: "newest_first",
+    });
+    expect(merge({ density: "collapsed" }, current)).not.toHaveProperty("density");
+    expect(merge(undefined, current)).toMatchObject({ sortDirection: "chronological" });
   });
 });

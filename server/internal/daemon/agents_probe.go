@@ -1,10 +1,21 @@
 package daemon
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/daemon/processtree"
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // shellResolveTTL bounds how long one login-shell PATH resolution is reused
@@ -134,7 +145,28 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 			// Codex Desktop bundles its CLI inside the macOS app instead of
 			// installing it onto PATH.
 			for _, p := range codexDesktopAppBundlePaths() {
-				if _, err := os.Stat(p); err == nil {
+				if executableCandidate(p) {
+					return AgentEntry{
+						Path:    p,
+						Command: cmd,
+						Model:   strings.TrimSpace(os.Getenv(modelEnv)),
+					}, true
+				}
+			}
+		}
+		if defaultCmd == "dsh" && cmd == defaultCmd {
+			// DeepSeek Harness Desktop bundles its CLI inside the macOS app
+			// instead of installing `dsh` onto PATH, and the login-shell
+			// fallback above cannot rescue it: no rc file knows that path.
+			// The candidate is a Node script rather than a native binary, so
+			// it only counts while it is executable — an entry discovered
+			// without the executable bit would be advertised as a healthy
+			// runtime and then fail on every spawn.
+			//
+			// The Multica runtime profile gate in the caller still applies:
+			// a bundled CLI without the `multica` profile is not a runtime.
+			for _, p := range dshDesktopAppBundlePaths() {
+				if executableCandidate(p) {
 					return AgentEntry{
 						Path:    p,
 						Command: cmd,
@@ -156,6 +188,30 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_OPENCODE_PATH", "opencode", "MULTICA_OPENCODE_MODEL"); ok {
 		agents["opencode"] = e
 	}
+	if e, ok := probe("MULTICA_CODEARTS_PATH", "codearts", "MULTICA_CODEARTS_MODEL"); ok {
+		agents["codearts"] = e
+	} else if strings.TrimSpace(os.Getenv("MULTICA_CODEARTS_PATH")) == "" {
+		// The native CodeArts installer may update PATH only for future
+		// terminals. A GUI-launched daemon can still discover its stable
+		// user-level launcher. An explicit but invalid override remains a hard
+		// miss and never falls back here.
+		home, err := os.UserHomeDir()
+		if err == nil {
+			for _, name := range []string{"codearts.cmd", "codearts"} {
+				candidate := filepath.Join(home, ".codeartsdoer", "installers", name)
+				path, resolveErr := resolveAgentExecutablePath(candidate)
+				if resolveErr != nil {
+					continue
+				}
+				agents["codearts"] = AgentEntry{
+					Path:    path,
+					Command: "codearts",
+					Model:   strings.TrimSpace(os.Getenv("MULTICA_CODEARTS_MODEL")),
+				}
+				break
+			}
+		}
+	}
 	if e, ok := probe("MULTICA_DEVECO_PATH", "deveco", "MULTICA_DEVECO_MODEL"); ok {
 		agents["deveco"] = e
 	}
@@ -168,6 +224,18 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_PI_PATH", "pi", "MULTICA_PI_MODEL"); ok {
 		agents["pi"] = e
 	}
+	// Built-in runtime identities (e.g. omp) are derived from the descriptor
+	// registry in server/pkg/agent/builtin_runtimes.go. Each one probes a
+	// separate CLI independently so a host with both pi and omp installed gets
+	// two runtimes. The env prefix and default command come from the
+	// descriptor, so adding a new fork is a descriptor entry, not a probe edit.
+	for _, desc := range agent.BuiltinRuntimes {
+		pathEnv := desc.EnvPrefix + "_PATH"
+		modelEnv := desc.EnvPrefix + "_MODEL"
+		if e, ok := probe(pathEnv, desc.DefaultCommand, modelEnv); ok {
+			agents[desc.ID] = e
+		}
+	}
 	if e, ok := probe("MULTICA_CURSOR_PATH", "cursor-agent", "MULTICA_CURSOR_MODEL"); ok {
 		agents["cursor"] = e
 	}
@@ -176,6 +244,20 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	}
 	if e, ok := probe("MULTICA_KIMI_PATH", "kimi", "MULTICA_KIMI_MODEL"); ok {
 		agents["kimi"] = e
+	}
+	if e, ok := probe("MULTICA_REASONIX_PATH", "reasonix", "MULTICA_REASONIX_MODEL"); ok {
+		agents["reasonix"] = e
+	}
+	// DSH resolves here like any other CLI. Whether it is *usable* is decided
+	// one layer up: the Multica runtime profile is what gives it the --stdio
+	// protocol, so a bare `dsh` prints a version and still cannot run a task.
+	// That check lives in probeBuiltinRuntime, where a failure produces a
+	// verdict the user can actually see — /health reports it as a skipped
+	// agent carrying the repair command, and the daemon logs it. Gating here
+	// instead made the drop invisible: the provider vanished from the
+	// availability set with nothing anywhere saying why.
+	if e, ok := probe("MULTICA_DSH_PATH", "dsh", "MULTICA_DSH_MODEL"); ok {
+		agents["dsh"] = e
 	}
 	if e, ok := probe("MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {
 		agents["kiro"] = e
@@ -189,6 +271,15 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	// (e.g. "Claude Opus 4.6 (Thinking)"), not a provider/model slug.
 	if e, ok := probe("MULTICA_ANTIGRAVITY_PATH", "agy", "MULTICA_ANTIGRAVITY_MODEL"); ok {
 		agents["antigravity"] = e
+	}
+	// Meta Muse Code (`muse`) exposes its session protocol (MSP) through
+	// `muse serve`. The launcher script installs and updates the real binary
+	// under ~/.local/bin, so the PATH entry is what a host actually has.
+	if e, ok := probe("MULTICA_MUSE_PATH", "muse", "MULTICA_MUSE_MODEL"); ok {
+		agents["muse"] = e
+	}
+	if e, ok := probe("MULTICA_DEVIN_PATH", "devin", "MULTICA_DEVIN_MODEL"); ok {
+		agents["devin"] = e
 	}
 	// Qoder CLI ships as the `qodercli` binary (Qoder Desktop does not put it
 	// on PATH; users install it separately, often via an npm global prefix).
@@ -224,10 +315,265 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_QWEN_PATH", "qwen", "MULTICA_QWEN_MODEL"); ok {
 		agents["qwen"] = e
 	}
+	if e, ok := probe("MULTICA_AMP_PATH", "amp", "MULTICA_AMP_MODEL"); ok {
+		agents["amp"] = e
+	}
+	if e, ok := probe("MULTICA_DROID_PATH", "droid", "MULTICA_DROID_MODEL"); ok {
+		agents["droid"] = e
+	}
 	// QwenPaw (`qwenpaw`) is the QwenPaw CLI agent, driven over ACP via
-	// `qwenpaw acp serve`. MULTICA_QWENPAW_MODEL seeds the daemon-wide default.
-	if e, ok := probe("MULTICA_QWENPAW_PATH", "qwenpaw", "MULTICA_QWENPAW_MODEL"); ok {
+	// `qwenpaw acp`. It takes no model env var: the backend never calls
+	// session/set_model (it would rewrite QwenPaw's shared agent config), so
+	// ExecOptions.Model is ignored — see ModelSelectionSupported. Reading one
+	// here would only advertise a knob that silently does nothing.
+	if e, ok := probe("MULTICA_QWENPAW_PATH", "qwenpaw", ""); ok {
 		agents["qwenpaw"] = e
 	}
+	// Dim (`dim`) is the DimCode CLI agent, driven over ACP via `dim acp`.
+	// MULTICA_DIM_MODEL seeds the daemon-wide default (a model id from the
+	// user's logged-in dim catalog).
+	if e, ok := probe("MULTICA_DIM_PATH", "dim", "MULTICA_DIM_MODEL"); ok {
+		agents["dim"] = e
+	}
+	// MiniMax Code (`mcode`) exposes an ACP v1 server through `mcode acp`.
+	// Model selection is owned by the MCode runtime, so there is no model env.
+	if e, ok := probe("MULTICA_MCODE_PATH", "mcode", ""); ok {
+		agents["mcode"] = e
+	}
+	// ZeroClaw (`zeroclaw`) is a Rust-based generic agent CLI, driven over
+	// ACP via `zeroclaw acp`. It takes no model env var: its ACP server has no
+	// `session/set_model` and no handler reads a model param, so the model
+	// comes from ZeroClaw's own agent profile and ExecOptions.Model can never
+	// be applied — see ModelSelectionSupported. Reading one here would only
+	// advertise a knob that silently does nothing.
+	if e, ok := probe("MULTICA_ZEROCLAW_PATH", "zeroclaw", ""); ok {
+		agents["zeroclaw"] = e
+	}
+	// museapp (muse.ai) is not a CLI: there is no binary to discover. The
+	// daemon advertises a museapp runtime exactly when
+	// MULTICA_MUSEAPP_ENDPOINT points at a Muse receptionist; reachability and
+	// protocol version are verified against the receptionist itself in
+	// probeBuiltinRuntime (there is no --version to run).
+	// MULTICA_MUSEAPP_MODEL is informational only — the backend's wire
+	// protocol has no model parameter, see ModelSelectionSupported.
+	if strings.TrimSpace(os.Getenv("MULTICA_MUSEAPP_ENDPOINT")) != "" {
+		agents["museapp"] = AgentEntry{
+			Command: "museapp",
+			Model:   strings.TrimSpace(os.Getenv("MULTICA_MUSEAPP_MODEL")),
+		}
+	}
+	if e, ok := probe("MULTICA_ZCODE_PATH", "zcode", "MULTICA_ZCODE_MODEL"); ok {
+		agents["zcode"] = e
+	} else if strings.TrimSpace(os.Getenv("MULTICA_ZCODE_PATH")) == "" {
+		for _, candidate := range zcodeDesktopAppBundlePaths() {
+			if executableCandidate(candidate) {
+				agents["zcode"] = AgentEntry{
+					Path: candidate, Command: "zcode",
+					Model: os.Getenv("MULTICA_ZCODE_MODEL"),
+				}
+				break
+			}
+		}
+	}
 	return agents
+}
+
+// executableCandidate reports whether a Desktop-app bundle candidate can be
+// spawned directly. Bundle candidates reached through probe() never went
+// through exec.LookPath, which is what normally enforces this.
+//
+// "Executable" is not the same fact on both platforms, and the difference is
+// not cosmetic. On Unix it is the executable bit — the macOS candidate is a
+// Node script that runs through its shebang, and one that lost its bit would be
+// advertised as a healthy runtime and then fail on every spawn.
+//
+// Windows has no such bit: Go synthesizes a regular file's mode from the
+// read-only attribute and never sets 0111 on one, so the Unix test would reject
+// every candidate and the whole fallback would be dead code there. What decides
+// on Windows is the extension, and exec.LookPath is the component that already
+// knows the rule (PATHEXT) — the same check agentExecutablePresent makes, so a
+// candidate accepted here is one the launcher can actually start.
+func executableCandidate(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		_, err := exec.LookPath(path)
+		return err == nil
+	}
+	return info.Mode().Perm()&0o111 != 0
+}
+
+// dshProbeFrame is the discovery frame a Multica-capable DSH profile prints for
+// `--probe`. Only these fields are read; the bundle owns everything else.
+type dshProbeFrame struct {
+	Version         int    `json:"v"`
+	Type            string `json:"type"`
+	Runtime         string `json:"runtime"`
+	ProtocolVersion int    `json:"protocol_version"`
+}
+
+// dshProbeVerdict is what `dsh --profile multica --probe` actually said.
+//
+// The distinction is the point. "The profile is not installed" is a confirmed,
+// locally repairable fact that justifies installing it and taking a live
+// runtime offline; a timeout or an unparseable answer is evidence about this
+// instant and nothing more. Collapsing both into one bool is what let a
+// momentary failure during a DSH upgrade demote a working runtime, and — with a
+// bundle configured — start overwriting an installation that was already there.
+type dshProbeVerdict int
+
+const (
+	// dshProbeOK: the profile answered with the protocol version this backend drives.
+	dshProbeOK dshProbeVerdict = iota
+	// An existing profile needs manual repair, never provisioning over it.
+	dshProbeNeedsMigration
+	// dshProbeMissingProfile: the manifest does not name the Multica runtime.
+	// A file that merely exists is not enough — a refused install leaves one.
+	// This is the only verdict that may install a bundle.
+	dshProbeMissingProfile
+	// dshProbeIncompatible: something answered, with a protocol this daemon does
+	// not drive. The profile is installed, so installing over it would replace a
+	// deliberate configuration with one this daemon still cannot drive.
+	dshProbeIncompatible
+	// dshProbeUnavailable: nothing usable was learned — the probe timed out,
+	// could not be executed, or printed something unparseable. Transient.
+	dshProbeUnavailable
+)
+
+type dshProbeResult struct {
+	verdict       dshProbeVerdict
+	detail        string
+	repairSummary string
+}
+
+// dshProbeTimeout bounds one `--probe`.
+//
+// The healthy path boots a whole DSH process — on a Desktop install that means
+// starting the app's Electron binary as node — and then prints one line. Five
+// seconds was too thin for that on a cold VM, and cutting a slow-but-healthy
+// probe short reports it as unusable. This is generous instead, because the
+// cost is paid only by a probe that has nothing to say, and it stays well
+// inside the daemon's own 45s startup window.
+//
+// A manifest that does not name the runtime returns before this budget.
+// Probing that state hangs, and the manifest is enough to call it missing.
+// The budget is spent only when a manifest that does name the runtime
+// produces no frame.
+//
+// A var so tests can shrink it instead of waiting out a real timeout.
+var dshProbeTimeout = 15 * time.Second
+
+// parseDshProbeFrame returns the first decodable probe frame in the output.
+func parseDshProbeFrame(output string) (dshProbeFrame, bool) {
+	for _, line := range strings.Split(output, "\n") {
+		var frame dshProbeFrame
+		if json.Unmarshal([]byte(line), &frame) != nil {
+			continue
+		}
+		if frame.Type == "probe" && frame.Runtime != "" {
+			return frame, true
+		}
+	}
+	return dshProbeFrame{}, false
+}
+
+// probeDshMulticaProfile classifies one `--probe` attempt. See dshProbeVerdict
+// for why this is not a bool.
+//
+// Scoped to the caller's context as well as its own timeout: `--probe` boots a
+// whole DSH process, and a round abandoned by a shutting-down daemon should not
+// go on holding one for the rest of the timeout — once per retry, per provider.
+func probeDshMulticaProfile(ctx context.Context, executablePath string) dshProbeResult {
+	// A cancelled round says nothing about the profile, and it must be decided
+	// before the manifest: a shutdown is not evidence the profile is missing.
+	if ctx.Err() != nil {
+		return dshProbeResult{verdict: dshProbeUnavailable}
+	}
+	if dshMulticaProfileNeedsMigration() {
+		return dshProbeResult{verdict: dshProbeNeedsMigration}
+	}
+	// A manifest that does not name the runtime is missing. Decide that before
+	// starting dsh: on current DSH, --probe against the skeleton a refused
+	// install leaves hangs until this timeout, and the file is already the answer.
+	if !dshMulticaProfilePresent() {
+		return dshProbeResult{verdict: dshProbeMissingProfile}
+	}
+
+	parent := ctx
+	ctx, cancel := context.WithTimeout(parent, dshProbeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, executablePath, "--profile", dshMulticaProfileName, "--probe")
+	// processtree, not cmd.Output: `--probe` boots a whole DSH profile, so the
+	// process it starts is a tree. Killing only the direct child leaves
+	// grandchildren holding the stdout pipe open — which is both a leaked
+	// process and, as this probe's own tests showed, a wait that outlives the
+	// timeout it was supposed to be bounded by.
+	// Keep protocol stdout separate from diagnostics: stderr must never turn
+	// a failed startup into an affirmative probe response. Run uses the same
+	// ownership/lifetime as Output, while retaining stderr on timeout too.
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	runErr := processtree.Run(ctx, cmd, time.Second)
+
+	// The frame decides, not the exit status. A profile that printed a valid
+	// answer has answered, whatever the process did on its way out — and the
+	// run helper reports a lifecycle error for a tree that outlived its leader,
+	// which says nothing about the protocol.
+	//
+	// agent.DshProtocolVersion, not a local copy: this decides whether the
+	// daemon may drive the profile, and the code that drives it is the only
+	// honest source for that number.
+	if frame, ok := parseDshProbeFrame(stdout.String()); ok {
+		if frame.Version == 1 && frame.Runtime == "dsh" && frame.ProtocolVersion == agent.DshProtocolVersion {
+			return dshProbeResult{verdict: dshProbeOK}
+		}
+		return dshProbeResult{verdict: dshProbeIncompatible}
+	}
+
+	// No usable answer. A cancelled ROUND is the one case that says nothing
+	// about the profile: the daemon is shutting down, or this round was
+	// abandoned, and the probe never got to finish on its own terms.
+	if parent.Err() != nil {
+		return dshProbeResult{verdict: dshProbeUnavailable, detail: dshProbeDiagnostic(runErr, stdout.Bytes(), stderr.Bytes())}
+	}
+
+	// Otherwise the manifest decides, and how the probe failed does not.
+	//
+	// Timeouts used to be classed transient on the reasoning that a busy
+	// machine is not a missing profile. That reasoning does not survive
+	// contact with DSH: asked for a profile it does not have, `--probe` does
+	// not refuse — it HANGS, printing nothing, until something kills it. So a
+	// timeout is the ordinary way a missing profile presents, and treating it
+	// as transient made the profile undetectable on exactly the host the
+	// install exists for: the daemon reported "the probe returned no usable
+	// answer", never started the install, and exited for want of a runtime.
+	//
+	// The manifest is the same file DSH's own loadProfile consults before it
+	// refuses to boot, so a confirmed-absent one is evidence, not a guess —
+	// A present manifest must never authorize installation. Unknown failures
+	// stay transient; a completed core-compatibility refusal below is manual
+	// repair and uses the existing confirmation lifecycle before demotion.
+	if !dshMulticaProfilePresent() {
+		return dshProbeResult{verdict: dshProbeMissingProfile}
+	}
+	detail := dshProbeDiagnostic(runErr, stdout.Bytes(), stderr.Bytes())
+	var exitErr *exec.ExitError
+	completed := runErr == nil || (errors.As(runErr, &exitErr) && exitErr.ProcessState.Exited())
+	if ctx.Err() == nil && completed {
+		if summary := dshCompatibilitySummary(stderr.String(), dshBridgeCompatibilityRefusal); summary != "" {
+			repairSummary := fmt.Sprintf(
+				"%s; back up and inspect %q, update the Multica bridge to a build compatible with the installed DSH, and rerun dsh --profile multica --probe.",
+				summary, dshMulticaProfileManifestPath())
+			return dshProbeResult{verdict: dshProbeNeedsMigration, repairSummary: repairSummary, detail: repairSummary + " " + detail}
+		}
+		if summary := dshCompatibilitySummary(stderr.String(), dshCoreCompatibilityRefusal); summary != "" {
+			repairSummary := fmt.Sprintf(
+				"%s; back up and inspect %q to align profile-local DSH core dependencies with the application packages, retain required independent plugins, and rerun dsh --profile multica --probe.",
+				summary, dshMulticaProfileManifestPath())
+			return dshProbeResult{verdict: dshProbeNeedsMigration, repairSummary: repairSummary, detail: repairSummary + " " + detail}
+		}
+	}
+	return dshProbeResult{verdict: dshProbeUnavailable, detail: detail}
 }

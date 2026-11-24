@@ -11,6 +11,7 @@ function makeAdapter(overrides: Partial<NavigationAdapter> = {}): NavigationAdap
     back: vi.fn(),
     pathname: "/",
     searchParams: new URLSearchParams(),
+    hash: "",
     getShareableUrl: (p) => p,
     ...overrides,
   };
@@ -28,6 +29,33 @@ function renderLink(
 }
 
 describe("AppLink", () => {
+  it("renders the public web URL on desktop so native copy-link affordances never expose the renderer URL", () => {
+    const adapter = makeAdapter({
+      openInNewTab: vi.fn(),
+      getShareableUrl: (path) => `https://app.example${path}`,
+    });
+
+    renderLink(adapter, { href: "/acme/issues/MUL-7" });
+
+    expect(screen.getByRole("link", { name: "go" })).toHaveAttribute(
+      "href",
+      "https://app.example/acme/issues/MUL-7",
+    );
+  });
+
+  it("keeps web anchors route-relative for SSR and native browser navigation", () => {
+    const adapter = makeAdapter({
+      getShareableUrl: (path) => `https://app.example${path}`,
+    });
+
+    renderLink(adapter, { href: "/acme/issues/MUL-7" });
+
+    expect(screen.getByRole("link", { name: "go" })).toHaveAttribute(
+      "href",
+      "/acme/issues/MUL-7",
+    );
+  });
+
   it("calls caller onClick BEFORE push so synchronous side effects (close menu, etc) commit before the transition starts", () => {
     const order: string[] = [];
     const adapter = makeAdapter({
@@ -97,6 +125,101 @@ describe("AppLink", () => {
     renderLink(adapter, { href: "/issues", newTabTitle: "MUL-7" });
     fireEvent.click(screen.getByText("go"), { metaKey: true });
     expect(openInNewTab).toHaveBeenCalledWith("/issues", "MUL-7");
+  });
+
+  it("cmd+shift-click opens a FOREGROUND tab (activate) — the spec's 'take me there' modifier", () => {
+    const push = vi.fn();
+    const openInNewTab = vi.fn();
+    const adapter = makeAdapter({ push, openInNewTab });
+
+    renderLink(adapter);
+    fireEvent.click(screen.getByText("go"), { metaKey: true, shiftKey: true });
+    expect(openInNewTab).toHaveBeenCalledWith("/issues", undefined, {
+      activate: true,
+    });
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("shift-alone click on desktop is a plain click (in-place push) — shift is not a spec modifier", () => {
+    const push = vi.fn();
+    const openInNewTab = vi.fn();
+    const adapter = makeAdapter({ push, openInNewTab });
+
+    renderLink(adapter);
+    fireEvent.click(screen.getByText("go"), { shiftKey: true });
+    expect(push).toHaveBeenCalledWith("/issues");
+    expect(openInNewTab).not.toHaveBeenCalled();
+  });
+
+  it("shift-alone click without an adapter (web) is left to the browser's native new-window handling", () => {
+    const push = vi.fn();
+    const adapter = makeAdapter({ push });
+
+    renderLink(adapter);
+    const defaultNotPrevented = fireEvent.click(screen.getByText("go"), {
+      shiftKey: true,
+    });
+    expect(defaultNotPrevented).toBe(true);
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  describe("onNavigateInPlace", () => {
+    function renderWithInPlace(adapter: NavigationAdapter, extra: Partial<React.ComponentProps<typeof AppLink>> = {}) {
+      const onNavigateInPlace = vi.fn();
+      renderLink(adapter, { href: "/issues", onNavigateInPlace, ...extra });
+      return onNavigateInPlace;
+    }
+
+    it("runs right before an in-place push, after the caller's onClick", () => {
+      const order: string[] = [];
+      const adapter = makeAdapter({ push: vi.fn(() => order.push("push")) });
+      renderLink(adapter, {
+        href: "/issues",
+        onClick: () => order.push("onClick"),
+        onNavigateInPlace: () => order.push("inPlace"),
+      });
+      fireEvent.click(screen.getByText("go"));
+      expect(order).toEqual(["onClick", "inPlace", "push"]);
+    });
+
+    it("runs for a desktop shift-click, which pushes in place", () => {
+      const onNavigateInPlace = renderWithInPlace(makeAdapter({ openInNewTab: vi.fn() }));
+      fireEvent.click(screen.getByText("go"), { shiftKey: true });
+      expect(onNavigateInPlace).toHaveBeenCalledTimes(1);
+    });
+
+    it("skips a web shift-click, which the browser opens in a new window", () => {
+      const onNavigateInPlace = renderWithInPlace(makeAdapter());
+      fireEvent.click(screen.getByText("go"), { shiftKey: true });
+      expect(onNavigateInPlace).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["desktop", { openInNewTab: vi.fn() }],
+      ["web", {}],
+    ])("skips modifier and middle clicks on %s", (_platform, overrides) => {
+      const onNavigateInPlace = renderWithInPlace(makeAdapter(overrides));
+      const link = screen.getByText("go");
+      fireEvent.click(link, { metaKey: true });
+      fireEvent.click(link, { ctrlKey: true });
+      fireEvent.click(link, { metaKey: true, shiftKey: true });
+      fireEvent(link, new MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 1 }));
+      expect(onNavigateInPlace).not.toHaveBeenCalled();
+    });
+
+    it("skips a target=_blank link, which opens a tab", () => {
+      const blank = renderWithInPlace(makeAdapter({ openInNewTab: vi.fn() }), { target: "_blank" });
+      fireEvent.click(screen.getByText("go"));
+      expect(blank).not.toHaveBeenCalled();
+    });
+
+    it("skips a click whose onClick called preventDefault", () => {
+      const push = vi.fn();
+      const onNavigateInPlace = renderWithInPlace(makeAdapter({ push }), { onClick: (e) => e.preventDefault() });
+      fireEvent.click(screen.getByText("go"));
+      expect(onNavigateInPlace).not.toHaveBeenCalled();
+      expect(push).not.toHaveBeenCalled();
+    });
   });
 
   describe("target=_blank (open-in-new-tab links)", () => {
@@ -285,7 +408,7 @@ describe("AppLink", () => {
   it("a caller-supplied onClick passed via spread cannot silently override the navigation handler", () => {
     const push = vi.fn();
     const adapter = makeAdapter({ push });
-    const spreadOnClick = vi.fn((e: React.MouseEvent) => e.preventDefault());
+    const spreadOnClick = vi.fn();
 
     render(
       <NavigationProvider value={adapter}>
@@ -297,8 +420,50 @@ describe("AppLink", () => {
     );
 
     fireEvent.click(screen.getByText("go"));
-    // Caller still runs (it was hoisted into the named param), but push runs too.
+    // Caller still runs (it was hoisted into the named param), and push runs too.
     expect(spreadOnClick).toHaveBeenCalled();
     expect(push).toHaveBeenCalledWith("/issues");
+  });
+
+  describe("caller opt-out via preventDefault (drag guards, permission gates)", () => {
+    it("onClick calling preventDefault cancels the in-place push", () => {
+      const push = vi.fn();
+      const adapter = makeAdapter({ push });
+
+      renderLink(adapter, {
+        href: "/issues",
+        onClick: (e) => e.preventDefault(),
+      });
+      fireEvent.click(screen.getByText("go"));
+      expect(push).not.toHaveBeenCalled();
+    });
+
+    it("onClick calling preventDefault cancels a modifier-click new tab too", () => {
+      const push = vi.fn();
+      const openInNewTab = vi.fn();
+      const adapter = makeAdapter({ push, openInNewTab });
+
+      renderLink(adapter, {
+        href: "/issues",
+        onClick: (e) => e.preventDefault(),
+      });
+      fireEvent.click(screen.getByText("go"), { metaKey: true });
+      expect(openInNewTab).not.toHaveBeenCalled();
+      expect(push).not.toHaveBeenCalled();
+    });
+
+    it("onClick runs before a modifier-click open, so side effects (close menu) still land", () => {
+      const order: string[] = [];
+      const adapter = makeAdapter({
+        openInNewTab: vi.fn(() => order.push("openInNewTab")),
+      });
+
+      renderLink(adapter, {
+        href: "/issues",
+        onClick: () => order.push("onClick"),
+      });
+      fireEvent.click(screen.getByText("go"), { metaKey: true });
+      expect(order).toEqual(["onClick", "openInNewTab"]);
+    });
   });
 });

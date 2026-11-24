@@ -7,7 +7,7 @@ import {
   RefreshCw,
   Server,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { SkillIcon } from "../../../skills/lib/skill-icon";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -20,6 +20,7 @@ import type {
 import { api, ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
+  isRuntimeUsableForUser,
   runtimeCapabilitiesOptions,
   runtimeDisplayLabel,
 } from "@multica/core/runtimes";
@@ -30,6 +31,8 @@ import {
 } from "@multica/core/workspace/queries";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
+import { ObjectSectionEmpty } from "../../../layout/object-page";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   Dialog,
   DialogContent,
@@ -50,18 +53,24 @@ type SelectedSkill =
 export function SkillsTab({
   agent,
   runtime,
+  currentUserId,
   canEdit = true,
 }: {
   agent: Agent;
   runtime: AgentRuntime | null;
+  currentUserId?: string | null;
   canEdit?: boolean;
 }) {
   const { t } = useT("agents");
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   const { data: workspaceSkills = [] } = useQuery(skillListOptions(wsId));
+  const canReadRuntime =
+    runtime != null && isRuntimeUsableForUser(runtime, currentUserId ?? null);
   const runtimeId =
-    runtime?.runtime_mode === "local" && runtime.status === "online"
+    runtime?.runtime_mode === "local" &&
+    runtime.status === "online" &&
+    canReadRuntime
       ? runtime.id
       : null;
   const runtimeQuery = useQuery(runtimeCapabilitiesOptions(runtimeId));
@@ -139,9 +148,6 @@ export function SkillsTab({
 
   return (
     <div className="space-y-8">
-      <p className="text-body leading-6 text-muted-foreground">
-        {t(($) => $.tab_body.skills.intro)}
-      </p>
 
       <CapabilitySection
         title={t(($) => $.tab_body.skills.assigned_title)}
@@ -161,10 +167,9 @@ export function SkillsTab({
         }
       >
         {agent.skills.length === 0 ? (
-          <EmptyState
-            icon={<SkillIcon className="h-6 w-6" />}
-            title={t(($) => $.tab_body.skills.empty_title)}
-            hint={t(($) => $.tab_body.skills.empty_hint)}
+          <ObjectSectionEmpty
+            icon={SkillIcon}
+            description={t(($) => $.tab_body.skills.empty_title)}
           />
         ) : (
           <ul className="divide-y rounded-lg border bg-surface-raised/40">
@@ -208,18 +213,18 @@ export function SkillsTab({
                           })}
                         />
                       )}
-                      <Button
+                      <IconButton
                         variant="ghost"
                         size="icon-sm"
                         onClick={() => handleRemove(skill.id)}
                         disabled={busyId !== null}
-                        aria-label={t(($) => $.tab_body.skills.remove_aria, {
+                        label={t(($) => $.tab_body.skills.remove_aria, {
                           name: skill.name,
                         })}
                         className="text-muted-foreground hover:text-destructive"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+                      </IconButton>
                     </>
                   )}
                 </li>
@@ -255,6 +260,8 @@ export function SkillsTab({
       >
         {!runtime ? (
           <RuntimeNotice text={t(($) => $.tab_body.skills.runtime_missing)} />
+        ) : !canReadRuntime ? (
+          <RuntimeNotice text={t(($) => $.tab_body.skills.runtime_forbidden)} />
         ) : runtime.status !== "online" ? (
           <RuntimeNotice text={t(($) => $.tab_body.skills.runtime_offline)} />
         ) : runtimeQuery.isLoading ? (
@@ -397,16 +404,6 @@ function CapabilitySection({
   );
 }
 
-function EmptyState({ icon, title, hint }: { icon: React.ReactNode; title: string; hint: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-10 text-muted-foreground">
-      <span className="opacity-50">{icon}</span>
-      <p className="mt-3 text-body">{title}</p>
-      <p className="mt-1 max-w-sm text-center text-caption">{hint}</p>
-    </div>
-  );
-}
-
 function RuntimeNotice({ text, loading = false }: { text: string; loading?: boolean }) {
   return (
     <div className="flex items-center gap-2 rounded-lg border border-dashed px-4 py-6 text-caption text-muted-foreground">
@@ -438,7 +435,7 @@ function SkillDetailDialog({
 
   return (
     <Dialog open={selected !== null} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="max-h-[80%] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <div className="flex items-center gap-2 pr-8">
             <DialogTitle>{title}</DialogTitle>

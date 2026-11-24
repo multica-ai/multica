@@ -150,6 +150,88 @@ func TestDaemonAuth_StripsClientSuppliedActorSource(t *testing.T) {
 	}
 }
 
+// TestDaemonAuth_StripsForgedAgentIdentityHeaders mirrors
+// TestAuth_StripsForgedAgentIdentityHeaders on the daemon chain, so a handler
+// reachable through either middleware gets the same guarantee. The daemon's
+// own endpoints carry task ids in the request body, never in these headers,
+// so the strip costs the daemon nothing. MUL-3428.
+func TestDaemonAuth_StripsForgedAgentIdentityHeaders(t *testing.T) {
+	rdb := newRedisTestClient(t)
+	cache := auth.NewDaemonTokenCache(rdb)
+
+	const rawToken = "mdt_agent_header_strip_test"
+	hash := auth.HashToken(rawToken)
+	cache.Set(context.Background(), hash, auth.DaemonTokenIdentity{
+		WorkspaceID: "ws-1",
+		DaemonID:    "daemon-1",
+	}, auth.AuthCacheTTL)
+
+	var gotAgentID, gotTaskID string
+	mw := DaemonAuth(nil, nil, cache, nil)
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAgentID = r.Header.Get("X-Agent-ID")
+		gotTaskID = r.Header.Get("X-Task-ID")
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("POST", "/api/daemon/heartbeat", nil)
+	req.Header.Set("Authorization", "Bearer "+rawToken)
+	req.Header.Set("X-Agent-ID", "11111111-1111-1111-1111-111111111111")
+	req.Header.Set("X-Task-ID", "22222222-2222-2222-2222-222222222222")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if gotAgentID != "" || gotTaskID != "" {
+		t.Fatalf("agent identity headers must be cleared on the mdt_ path, got agent=%q task=%q", gotAgentID, gotTaskID)
+	}
+}
+
+// TestDaemonAuth_StripsClientSuppliedUserID: a daemon token carries no user,
+// so the user identity a handler reads must be empty on the mdt_ path rather
+// than whatever the client sent. The PAT branch still stamps its own user.
+func TestDaemonAuth_StripsClientSuppliedUserID(t *testing.T) {
+	rdb := newRedisTestClient(t)
+	cache := auth.NewDaemonTokenCache(rdb)
+
+	const rawToken = "mdt_user_header_strip_test"
+	cache.Set(context.Background(), auth.HashToken(rawToken), auth.DaemonTokenIdentity{
+		WorkspaceID: "ws-1",
+		DaemonID:    "daemon-1",
+		OwnerID:     "33333333-3333-3333-3333-333333333333",
+	}, auth.AuthCacheTTL)
+	const rawPAT = "mul_user_header_strip_test"
+	patCache := auth.NewPATCache(rdb)
+	patCache.Set(context.Background(), auth.HashToken(rawPAT), "44444444-4444-4444-4444-444444444444", auth.AuthCacheTTL)
+
+	var gotUserID string
+	mw := DaemonAuth(nil, patCache, cache, nil)
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUserID = r.Header.Get("X-User-ID")
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	for _, tc := range []struct{ token, want string }{
+		{rawToken, ""},
+		{rawPAT, "44444444-4444-4444-4444-444444444444"},
+	} {
+		gotUserID = "unset"
+		req := httptest.NewRequest("GET", "/api/daemon/workspaces", nil)
+		req.Header.Set("Authorization", "Bearer "+tc.token)
+		req.Header.Set("X-User-ID", "11111111-1111-1111-1111-111111111111")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: expected 200, got %d: %s", tc.token, w.Code, w.Body.String())
+		}
+		if gotUserID != tc.want {
+			t.Fatalf("%s: X-User-ID = %q, want %q", tc.token, gotUserID, tc.want)
+		}
+	}
+}
+
 func TestDaemonAuth_InvalidMDT_NilQueries(t *testing.T) {
 	mw := DaemonAuth(nil, nil, nil, nil) // no caches, no DB
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -165,7 +247,7 @@ func TestDaemonAuth_InvalidMDT_NilQueries(t *testing.T) {
 }
 
 // TestDaemonAuth_MCN_NoVerifierConfigured pins the fail-closed
-// behaviour when MULTICA_CLOUD_FLEET_URL is empty: an mcn_ token MUST
+// behaviour when MULTICA_CLOUD_URL is empty: an mcn_ token MUST
 // be rejected at the prefix branch with 401, not silently fall
 // through to the mul_/JWT paths (an mcn_ string would never match a
 // valid PAT or JWT, but failing closed makes the contract explicit).

@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
@@ -20,11 +21,52 @@ import (
 // does not — read back only inside the Slack resolvers (team_id routes the
 // installation; the core never reads Raw).
 type slackRawEvent struct {
-	TeamID      string `json:"team_id"`
-	APIAppID    string `json:"api_app_id,omitempty"`
-	EventType   string `json:"event_type"`
-	SubType     string `json:"subtype,omitempty"`
-	ChannelType string `json:"channel_type,omitempty"`
+	TeamID      string         `json:"team_id"`
+	APIAppID    string         `json:"api_app_id,omitempty"`
+	EventType   string         `json:"event_type"`
+	SubType     string         `json:"subtype,omitempty"`
+	ChannelType string         `json:"channel_type,omitempty"`
+	Files       []slackRawFile `json:"files,omitempty"`
+}
+
+// slackRawFile is the subset of a Slack file object the media resolver needs
+// to fetch the file later, off the connector ACK path. The download URL is a
+// Slack-hosted url_private(_download) that requires the installation's bot
+// token — it is never handed to the core or persisted beyond Raw.
+type slackRawFile struct {
+	ID          string `json:"id"`
+	Name        string `json:"name,omitempty"`
+	Mimetype    string `json:"mimetype,omitempty"`
+	Size        int64  `json:"size,omitempty"`
+	DownloadURL string `json:"download_url"`
+}
+
+// rawFilesFrom maps the event's file objects to the raw envelope, keeping only
+// files the media resolver could actually fetch: ones with a downloadable URL
+// on a Slack host. That drops uploads still processing (no URL yet) and remote
+// "external" files whose url_private points at Google Drive or Dropbox — the
+// resolver refuses to send the bot token off-domain, so carrying them would
+// only make HasMedia promise media the pipeline can never bind, costing the
+// message a deferred run and an intent-ledger row per doomed download.
+func rawFilesFrom(files []slack.File) []slackRawFile {
+	var out []slackRawFile
+	for _, f := range files {
+		downloadURL := f.URLPrivateDownload
+		if downloadURL == "" {
+			downloadURL = f.URLPrivate
+		}
+		if !isFetchableSlackFileURL(downloadURL) {
+			continue
+		}
+		out = append(out, slackRawFile{
+			ID:          f.ID,
+			Name:        f.Name,
+			Mimetype:    f.Mimetype,
+			Size:        int64(f.Size),
+			DownloadURL: downloadURL,
+		})
+	}
+	return out
 }
 
 // compileMentionRe builds the regexp that matches an @-mention of botUserID.
@@ -64,6 +106,12 @@ func inboundFromMessage(e slackevents.EventsAPIEvent, m *slackevents.MessageEven
 
 	chatType := slackChatType(m.Channel, m.ChannelType)
 	addressed := chatType == channel.ChatTypeP2P || mentionsBot(m.Text, mentionRe)
+	// File attachments live on the normalized Msg (slackevents copies the
+	// top-level message payload there for brand-new messages).
+	var files []slackRawFile
+	if m.Message != nil {
+		files = rawFilesFrom(m.Message.Files)
+	}
 	return buildInbound(e, buildInboundParams{
 		eventType: "message",
 		subType:   m.SubType,
@@ -74,6 +122,7 @@ func inboundFromMessage(e slackevents.EventsAPIEvent, m *slackevents.MessageEven
 		threadTS:  m.ThreadTimeStamp,
 		chatType:  chatType,
 		addressed: addressed,
+		files:     files,
 	}, mentionRe), true
 }
 
@@ -95,6 +144,7 @@ func inboundFromAppMention(e slackevents.EventsAPIEvent, m *slackevents.AppMenti
 		threadTS:  m.ThreadTimeStamp,
 		chatType:  channel.ChatTypeGroup,
 		addressed: true,
+		files:     rawFilesFrom(m.Files),
 	}, mentionRe), true
 }
 
@@ -108,6 +158,7 @@ type buildInboundParams struct {
 	threadTS  string
 	chatType  channel.ChatType
 	addressed bool
+	files     []slackRawFile
 }
 
 func buildInbound(e slackevents.EventsAPIEvent, p buildInboundParams, mentionRe *regexp.Regexp) channel.InboundMessage {
@@ -117,6 +168,7 @@ func buildInbound(e slackevents.EventsAPIEvent, p buildInboundParams, mentionRe 
 		EventType:   p.eventType,
 		SubType:     p.subType,
 		ChannelType: string(p.chatType),
+		Files:       p.files,
 	})
 	var reply *channel.ReplyCtx
 	if p.threadTS != "" && p.threadTS != p.ts {

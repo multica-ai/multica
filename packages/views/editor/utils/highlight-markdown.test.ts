@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { highlightToHtml } from "./highlight-markdown";
 
@@ -36,6 +37,23 @@ describe("highlightToHtml", () => {
   it("ignores == inside fenced code blocks", () => {
     const md = "```\nx ==y== z\n```";
     expect(highlightToHtml(md)).toBe(md);
+  });
+
+  it("ignores == inside a longer fence that contains a nested fence", () => {
+    // The editor saves a block containing ``` with a ```` outer fence.
+    const md = '````markdown\n```js\nconst a = "==keep==";\n```\n````';
+    expect(highlightToHtml(md)).toBe(md);
+  });
+
+  it("ignores == inside inline code delimited by several backticks", () => {
+    const md = "before ```a `b` ==keep==``` after";
+    expect(highlightToHtml(md)).toBe(md);
+  });
+
+  it("highlights after a quoted unclosed fence ends", () => {
+    expect(highlightToHtml("> ```\n> code\n\n==outside==")).toBe(
+      "> ```\n> code\n\n<mark>outside</mark>",
+    );
   });
 
   it("ignores == inside inline math", () => {

@@ -81,6 +81,8 @@ vi.mock("../../navigation", () => ({
     <a {...props}>{children}</a>
   ),
   useNavigation: () => navigation.value,
+  resolveClickIntent: () => "push",
+  useIntentNavigate: () => () => {},
 }));
 
 vi.mock("@multica/core/paths", async () => {
@@ -291,7 +293,6 @@ describe("Table view on the production virtualized hierarchy path", () => {
       listMembers: async () => [],
       listAgents: async () => [],
       listSquads: async () => [],
-      getAssigneeFrequency: async () => [],
       listIssueTableRows: async (request: IssueTableRowsRequest) => {
         const parent = request.parent_id ?? "root";
         rowRequests.push(parent);

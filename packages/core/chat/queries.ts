@@ -1,7 +1,15 @@
-import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
+import {
+  infiniteQueryOptions,
+  queryOptions,
+  useQuery,
+  type InfiniteData,
+  type QueryClient,
+} from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
 import { api } from "../api";
 import type { TaskMessagePayload } from "../types/events";
 import type {
+  ChatMessagesPage,
   ChatQuickActionsFailureState,
   ChatQuickActionsPendingState,
   ChatSession,
@@ -22,12 +30,10 @@ import type {
  */
 export const QUICK_ACTIONS_PENDING_TIMEOUT_MS = 12_000;
 
-// NOTE on workspace scoping:
-// `wsId` is used only as part of queryKey for cache isolation per workspace.
-// The actual workspace context comes from ApiClient's X-Workspace-Slug header,
-// which is set by the URL-driven [workspaceSlug] layout. Callers must ensure
-// the header is in sync with the wsId they pass here — otherwise cache writes
-// will be misattributed during a workspace switch race window.
+// Sessions, pinned agents, pending tasks, and the running indicator explicitly
+// bind requests to the workspace UUID in their query key. Other session/task
+// queries still use ApiClient's current workspace header, which callers must
+// keep aligned with the resource's workspace and any wsId in the query key.
 
 export const chatKeys = {
   all: (wsId: string) => ["chat", wsId] as const,
@@ -51,6 +57,11 @@ export const chatKeys = {
   draftRestoresAll: () => ["chat", "draft-restores"] as const,
   /** Durable deferred-cancellation draft restores for a session (#5219). */
   draftRestores: (sessionId: string) => [...chatKeys.draftRestoresAll(), sessionId] as const,
+  wakeupsAll: () => ["chat", "wakeups"] as const,
+  /** A conversation's wakeups: active ones plus those that ended recently. */
+  wakeups: (sessionId: string) => [...chatKeys.wakeupsAll(), sessionId] as const,
+  /** The caller's wakeups across their conversations in this workspace. */
+  myWakeups: (wsId: string) => [...chatKeys.all(wsId), "my-wakeups"] as const,
   /** Aggregate of in-flight chat tasks for the current user — FAB reads this. */
   pendingTasks: (wsId: string) => [...chatKeys.all(wsId), "pending-tasks"] as const,
   /** Per-user pinned agents for the quick-agent bar. */
@@ -76,7 +87,7 @@ export function isTaskMessageTaskId(taskId: string | null | undefined): taskId i
 export function chatSessionsOptions(wsId: string) {
   return queryOptions({
     queryKey: chatKeys.sessions(wsId),
-    queryFn: () => api.listChatSessions({ status: "all" }),
+    queryFn: () => api.listChatSessions({ status: "all" }, { workspaceId: wsId }),
     staleTime: Infinity,
   });
 }
@@ -95,12 +106,16 @@ function sessionActivityTime(s: ChatSession): number {
  * order when pin timestamps aren't carried in the list payload.
  */
 export function sortChatSessions(sessions: ChatSession[]): ChatSession[] {
-  return [...sessions].sort((a, b) => {
-    const ap = a.pinned ? 1 : 0;
-    const bp = b.pinned ? 1 : 0;
-    if (ap !== bp) return bp - ap;
-    return sessionActivityTime(b) - sessionActivityTime(a);
-  });
+  // Parse dates once per session, rather than on each comparison.
+  return sessions
+    .map((session) => ({ session, activity: sessionActivityTime(session) }))
+    .sort((a, b) => {
+      const ap = a.session.pinned ? 1 : 0;
+      const bp = b.session.pinned ? 1 : 0;
+      if (ap !== bp) return bp - ap;
+      return b.activity - a.activity;
+    })
+    .map(({ session }) => session);
 }
 
 /**
@@ -120,7 +135,7 @@ export function countUnreadChatSessions(sessions: ChatSession[]): number {
 export function chatPinnedAgentsOptions(wsId: string) {
   return queryOptions({
     queryKey: chatKeys.pinnedAgents(wsId),
-    queryFn: () => api.listChatPinnedAgents(),
+    queryFn: () => api.listChatPinnedAgents({ workspaceId: wsId }),
     staleTime: Infinity,
   });
 }
@@ -190,6 +205,69 @@ export function chatDraftRestoresOptions(sessionId: string) {
   });
 }
 
+/** Kept fresh by chat:wakeup_changed; the countdowns tick client-side. */
+export function chatWakeupsOptions(sessionId: string) {
+  return queryOptions({
+    queryKey: chatKeys.wakeups(sessionId),
+    queryFn: () => api.listChatSessionWakeups(sessionId),
+    enabled: !!sessionId,
+    staleTime: Infinity,
+  });
+}
+
+/**
+ * How many trailing assistant turns' task timelines to warm after prefetching
+ * a session's newest message page. Keeps the visible tail from expanding
+ * asynchronously when `AssistantMessage` upgrades from plain text to its
+ * collapsible `TimelineView`, while capping cache entries for MUL-6396.
+ */
+const PREFETCH_TAIL_TASK_LIMIT = 2;
+
+/**
+ * Warms a chat session's conversation queries in parallel so archiving and
+ * advancing to the next thread — or clicking an adjacent row — renders from
+ * cache without flashing the skeleton or asynchronously popping in bottom
+ * strips (wakeups). All warmed queries use `staleTime: Infinity`, so an
+ * already-warm session costs nothing.
+ */
+export async function prefetchChatSession(
+  qc: QueryClient,
+  sessionId: string,
+): Promise<void> {
+  if (!sessionId) return;
+  await Promise.all([
+    qc.prefetchInfiniteQuery(chatMessagesPageOptions(sessionId)),
+    qc.prefetchQuery(pendingChatTaskOptions(sessionId)),
+    qc.prefetchQuery(chatWakeupsOptions(sessionId)),
+  ]);
+
+  const newestMessages =
+    qc.getQueryData<InfiniteData<ChatMessagesPage>>(chatKeys.messagesPage(sessionId))
+      ?.pages?.[0]?.messages ?? [];
+  const tailTaskIds: string[] = [];
+  const seen = new Set<string>();
+  for (let i = newestMessages.length - 1; i >= 0 && tailTaskIds.length < PREFETCH_TAIL_TASK_LIMIT; i--) {
+    const m = newestMessages[i];
+    if (!m || m.role !== "assistant" || !isTaskMessageTaskId(m.task_id) || seen.has(m.task_id)) {
+      continue;
+    }
+    seen.add(m.task_id);
+    tailTaskIds.push(m.task_id);
+  }
+  if (tailTaskIds.length > 0) {
+    await Promise.all(tailTaskIds.map((taskId) => qc.prefetchQuery(taskMessagesOptions(taskId))));
+  }
+}
+
+export function myChatWakeupsOptions(wsId: string) {
+  return queryOptions({
+    queryKey: chatKeys.myWakeups(wsId),
+    queryFn: () => api.listMyChatWakeups(),
+    enabled: !!wsId,
+    staleTime: Infinity,
+  });
+}
+
 /**
  * Timeline for a single task — rendered by both the live chat view (while a
  * task is running) and AssistantMessage (for completed tasks). WS
@@ -201,7 +279,36 @@ export function taskMessagesOptions(taskId: string) {
     queryFn: () => api.listTaskMessages(taskId),
     enabled: isTaskMessageTaskId(taskId),
     staleTime: Infinity,
+    // Every write to this cache — this fetch, a backfill, or a realtime batch —
+    // folds into what is already there instead of replacing it. Without this a
+    // response that resolves after a live frame was written would drop that
+    // seq, and staleTime:Infinity means nothing would ever fetch it again.
+    structuralSharing: (prev, next) =>
+      unionTaskMessagesBySeq(
+        prev as TaskMessagePayload[] | undefined,
+        next as TaskMessagePayload[],
+      ),
   });
+}
+
+/** A visible run follows WS updates and backfills on mount and completion. */
+export function useTaskMessages(taskId: string, isLive: boolean, enabled = true) {
+  const query = useQuery({
+    ...taskMessagesOptions(taskId),
+    enabled: enabled && isTaskMessageTaskId(taskId),
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
+  });
+  const previous = useRef({ isLive, enabled });
+  const { refetch } = query;
+  useEffect(() => {
+    if (enabled && isTaskMessageTaskId(taskId)
+      && (!previous.current.enabled || (previous.current.isLive && !isLive))) {
+      void refetch({ cancelRefetch: false });
+    }
+    previous.current = { isLive, enabled };
+  }, [taskId, isLive, enabled, refetch]);
+  return query;
 }
 
 /**
@@ -228,6 +335,76 @@ export function mergeTaskMessagesBySeq(
 }
 
 /**
+ * Union two task-message lists by seq, with `authoritative` winning on conflict.
+ *
+ * This is the rule every write to the `["task-messages", taskId]` cache goes
+ * through, wired in as `structuralSharing` on the query itself so a fetch
+ * result cannot replace the array wholesale.
+ *
+ * That matters because a normal query response and the realtime stream race:
+ * the timeline is fetched on first open, and any frame that arrives while that
+ * request is in flight is written to the cache before the response lands. A
+ * plain replace would drop those seqs, and `staleTime: Infinity` means nothing
+ * would ever refetch them — the gap would survive until a reload.
+ *
+ * Server data wins on conflict because the persisted row is the authority.
+ * Rows the response did not mention are kept rather than deleted — a response
+ * snapshotted before a seq was persisted must not erase it.
+ *
+ * The `base` reference is returned unchanged when nothing differs, so an event
+ * that adds nothing does not re-render every subscriber.
+ */
+export function unionTaskMessagesBySeq(
+  base: readonly TaskMessagePayload[] | undefined,
+  authoritative: readonly TaskMessagePayload[],
+): TaskMessagePayload[] {
+  if (!base || base.length === 0) {
+    return [...authoritative].sort((a, b) => a.seq - b.seq);
+  }
+
+  const bySeq = new Map(base.map((m) => [m.seq, m]));
+  let changed = false;
+  for (const msg of authoritative) {
+    if (bySeq.get(msg.seq) !== msg) {
+      bySeq.set(msg.seq, msg);
+      changed = true;
+    }
+  }
+  if (!changed) return base as TaskMessagePayload[];
+  return [...bySeq.values()].sort((a, b) => a.seq - b.seq);
+}
+
+/**
+ * True when this client holds a timeline cache entry for `taskId` — i.e. the
+ * task was opened at some point and has not been garbage-collected since.
+ *
+ * Deliberately NOT "a view is mounted right now". Observer count would be a
+ * tighter bound but an unsafe one: with `staleTime: Infinity` a task that
+ * briefly drops to zero observers (an unmount/remount while navigating) would
+ * discard frames, and the remount would read the surviving cache as fresh and
+ * never fetch them back. Entry presence has no such gap — either the entry is
+ * there and keeps accumulating, or it is gone and the next open fetches the
+ * whole timeline. The cost is a bounded tail: writes do not postpone the GC
+ * timer, so an entry outlives its last viewer by at most one `gcTime`.
+ *
+ * The realtime layer uses this to decide whether a `task:message` frame is
+ * worth caching. Every client in the workspace receives every run's frames,
+ * but only a handful of runs are ever opened; without this gate every client
+ * accumulates the transcript of runs its user will never look at (MUL-6396).
+ *
+ * Presence, not data: mounting a `useQuery` registers the entry before the
+ * fetch resolves, so a frame that lands mid-backfill is still kept. Dropping
+ * a frame for an unregistered task is safe — the row is persisted before it
+ * is broadcast, so whoever opens the task next fetches it from the server.
+ */
+export function isTaskMessageTimelineHeld(
+  qc: QueryClient,
+  taskId: string,
+): boolean {
+  return qc.getQueryCache().find({ queryKey: chatKeys.taskMessages(taskId) }) !== undefined;
+}
+
+/**
  * Aggregate of in-flight chat tasks for the current user in this workspace.
  * Drives the FAB "running" indicator while the chat window is minimised —
  * no per-session query is active then, so we need this roll-up.
@@ -235,7 +412,7 @@ export function mergeTaskMessagesBySeq(
 export function pendingChatTasksOptions(wsId: string) {
   return queryOptions({
     queryKey: chatKeys.pendingTasks(wsId),
-    queryFn: () => api.listPendingChatTasks(),
+    queryFn: () => api.listPendingChatTasks({ workspaceId: wsId }),
     staleTime: Infinity,
   });
 }
@@ -250,7 +427,7 @@ export function pendingChatTasksOptions(wsId: string) {
 export function hasPendingChatTasksOptions(wsId: string) {
   return queryOptions({
     queryKey: chatKeys.pendingTasksHasAny(wsId),
-    queryFn: () => api.hasAnyPendingChatTasks(),
+    queryFn: () => api.hasAnyPendingChatTasks({ workspaceId: wsId }),
     staleTime: Infinity,
   });
 }

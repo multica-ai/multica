@@ -89,12 +89,7 @@ func registerSubscriberListeners(bus *events.Bus, pool *pgxpool.Pool) {
 		if descriptionChanged, _ := payload["description_changed"].(bool); descriptionChanged && issue.Description != nil {
 			newMentions := parseMentions(*issue.Description)
 			if len(newMentions) > 0 {
-				prevMentioned := map[string]bool{}
-				if prevDescription, _ := payload["prev_description"].(*string); prevDescription != nil {
-					for _, m := range parseMentions(*prevDescription) {
-						prevMentioned[m.Type+":"+m.ID] = true
-					}
-				}
+				prevMentioned := previousDescriptionMentions(payload)
 				for _, m := range newMentions {
 					if !prevMentioned[m.Type+":"+m.ID] {
 						addSubscriber(bus, queries, e.WorkspaceID, issue.ID, m.Type, m.ID, "mentioned")
@@ -152,6 +147,12 @@ func registerSubscriberListeners(bus *events.Bus, pool *pgxpool.Pool) {
 // rule is the point: the defect being fixed is attribution and notification
 // disagreeing about whose behalf an issue exists on.
 //
+// Attribution answers "whose authority does this run carry", which since MUL-6951
+// is a broader population than "who asked for this work" — an armed autopilot
+// trigger carries its creator's. Visibility follows the narrower one, so the read
+// also walks the chain back to the run that resolved the human and hands the rule
+// that root's label (MUL-7051).
+//
 // Everything is best-effort and logged, never fatal — the issue is already
 // committed and a subscription hiccup must not look like a creation failure.
 func subscribeDelegatedHuman(bus *events.Bus, pool *pgxpool.Pool, queries *db.Queries, workspaceID, issueID string) {
@@ -169,11 +170,13 @@ func subscribeDelegatedHuman(bus *events.Bus, pool *pgxpool.Pool, queries *db.Qu
 		return
 	}
 
-	// Workspace-scoped so a foreign origin id can never resolve a human from
-	// another tenant (the MUL-4252 guard the comment chain already applies).
-	originTask, err := queries.GetAgentTaskInWorkspace(ctx, db.GetAgentTaskInWorkspaceParams{
-		ID:          issue.OriginID,
-		WorkspaceID: parseUUID(workspaceID),
+	// The origin run's human, plus how the chain it belongs to acquired that
+	// human — one walk, workspace-scoped at every hop so a foreign origin id can
+	// never resolve someone from another tenant (the MUL-4252 guard the comment
+	// chain already applies).
+	facts, err := queries.GetDelegatedSubscriptionFacts(ctx, db.GetDelegatedSubscriptionFactsParams{
+		OriginTaskID: issue.OriginID,
+		WorkspaceID:  parseUUID(workspaceID),
 	})
 	if err != nil {
 		// A missing origin task is normal (cancelled/reaped run), not an error
@@ -186,7 +189,8 @@ func subscribeDelegatedHuman(bus *events.Bus, pool *pgxpool.Pool, queries *db.Qu
 	human, reason, ok := attribution.DelegatedSubscriber(attribution.SubscriptionFacts{
 		CreatorType:      issue.CreatorType,
 		OriginType:       issue.OriginType.String,
-		OriginOriginator: originTask.OriginatorUserID,
+		OriginOriginator: facts.OriginatorUserID,
+		OriginRootSource: attribution.Source(facts.RootSource.String),
 	})
 	if !ok {
 		return
@@ -276,6 +280,11 @@ func extractIssueFields(v any) (handler.IssueResponse, bool) {
 // addSubscriber adds a user as an issue subscriber and publishes a
 // subscriber:added event for real-time frontend sync.
 func addSubscriber(bus *events.Bus, queries *db.Queries, workspaceID, issueID, userType, userID, reason string) {
+	// Filter before UUID parsing: @all uses the non-UUID sentinel "all".
+	if !isAssignmentRecipientType(userType) {
+		return
+	}
+
 	affected, err := queries.AddIssueSubscriber(context.Background(), db.AddIssueSubscriberParams{
 		IssueID:  parseUUID(issueID),
 		UserType: userType,

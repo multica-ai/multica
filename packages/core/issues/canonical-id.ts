@@ -1,13 +1,40 @@
 import { useEffect } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { issueRouteRef, type IssueRouteRef } from "../paths/paths";
 import type { Issue } from "../types";
 import { issueDetailOptions, issueKeys } from "./queries";
+import { useIssueReadState } from "./read-state";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** True for a canonical issue UUID; false for an identifier like `MUL-123`. */
 export function isIssueUuid(value: string): boolean {
   return UUID_RE.test(value);
+}
+
+/**
+ * The `/{ws}/issues/{segment}` a link to an issue known only by its UUID
+ * should carry: the identifier once the issue is cached, else the UUID. The
+ * issue page rewrites a UUID address to the identifier after load, and on web
+ * that rewrite mounts the page a second time.
+ */
+export function useIssueRouteRef(wsId: string, issueId: string): IssueRouteRef {
+  const { data } = useQuery({ ...issueDetailOptions(wsId, issueId), enabled: false });
+  return issueRouteRef({ id: issueId, identifier: data?.identifier });
+}
+
+/** `useIssueRouteRef` for event handlers: reads the cache once, without subscribing. */
+export function cachedIssueRouteRef(qc: QueryClient, wsId: string, issueId: string): IssueRouteRef {
+  const data = qc.getQueryData<Issue>(issueKeys.detail(wsId, issueId));
+  return issueRouteRef({ id: issueId, identifier: data?.identifier });
+}
+
+/** An issue cached under its UUID whose identifier is `identifier`. */
+function cachedIssueByIdentifier(qc: QueryClient, wsId: string, identifier: string): Issue | undefined {
+  for (const [key, data] of qc.getQueriesData<Issue>({ queryKey: [...issueKeys.all(wsId), "detail"] })) {
+    if (data?.identifier === identifier && key[key.length - 1] === data.id) return data;
+  }
+  return undefined;
 }
 
 export interface CanonicalIssue {
@@ -20,7 +47,7 @@ export interface CanonicalIssue {
   issue: Issue | undefined;
   isResolving: boolean;
   /**
-   * Terminal: this identifier does not name an issue in this workspace.
+   * Terminal: the primary read returned an opaque unavailable response.
    *
    * Callers MUST branch on this and render a not-found state rather than
    * handing the unresolved segment to a view that will query it again. A
@@ -30,6 +57,11 @@ export interface CanonicalIssue {
    * that never settles on "not found".
    */
   notFound: boolean;
+  loadFailed: boolean;
+  /** A successful primary read completed during this mount. */
+  hasLoaded: boolean;
+  isRetrying: boolean;
+  retry: () => Promise<void>;
 }
 
 /**
@@ -50,22 +82,31 @@ export interface CanonicalIssue {
  * canonical query never observes an empty cache and never fires a fetch of its
  * own. Seeding the cache from an effect instead would run after that decision
  * and leave the single-request property resting on hook ordering.
+ *
+ * `enabled: false` keeps the cache subscriptions without starting requests.
  */
-export function useCanonicalIssue(wsId: string, routeId: string): CanonicalIssue {
+export function useCanonicalIssue(
+  wsId: string,
+  routeId: string,
+  { enabled = true }: { enabled?: boolean } = {},
+): CanonicalIssue {
   const qc = useQueryClient();
   const isUuid = isIssueUuid(routeId);
-  const resolveEnabled = !isUuid && !!wsId && !!routeId;
+  const resolveEnabled = enabled && !isUuid && !!wsId && !!routeId;
 
   const resolve = useQuery({
     ...issueDetailOptions(wsId, routeId),
     enabled: resolveEnabled,
+    // An identifier link to an issue some list or peek already loaded by UUID
+    // opens from that entry instead of fetching the issue again.
+    initialData: resolveEnabled ? () => cachedIssueByIdentifier(qc, wsId, routeId) : undefined,
   });
 
   const canonicalId = isUuid ? routeId : (resolve.data?.id ?? null);
 
   const detail = useQuery({
     ...issueDetailOptions(wsId, canonicalId ?? ""),
-    enabled: !!canonicalId && !!wsId,
+    enabled: enabled && !!canonicalId && !!wsId,
     // Ignored once the entry holds data, so a row already patched by a realtime
     // event is never overwritten by this older resolution response.
     initialData: isUuid ? undefined : resolve.data,
@@ -74,9 +115,10 @@ export function useCanonicalIssue(wsId: string, routeId: string): CanonicalIssue
   // Mirror the loaded row into its identifier-keyed entry, the reverse of the
   // `initialData` hop above.
   //
-  // In-app links still carry the UUID, so opening one lands on the UUID URL and
-  // the route then rewrites the address bar to the identifier. That rewrite is
-  // a navigation: the route re-renders with the identifier as its segment, and
+  // A link that only knows the UUID (an old URL, or an issue not yet cached)
+  // lands on the UUID URL and the route then rewrites the address bar to the
+  // identifier. That rewrite is a navigation: the route re-renders with the
+  // identifier as its segment, and
   // without this seed the resolution query above would miss on a cache entry
   // nothing has filled and re-fetch an issue already in hand — a second request
   // for one issue open. The `??` keeps a realtime-patched entry intact, and
@@ -91,16 +133,21 @@ export function useCanonicalIssue(wsId: string, routeId: string): CanonicalIssue
     );
   }, [qc, wsId, loadedIdentifier, loadedIssue, routeId]);
 
-  // Read the resolution query's own settled state rather than "pending and no
-  // data": a failed resolution must present as terminally not-found, never as
-  // still-resolving, or the caller flips back to a loading frame and the
-  // remount loop described on `notFound` starts.
-  const failed = resolveEnabled && resolve.isError;
+  // A failed identifier must settle here without mounting a second observer.
+  // Once resolved, the UUID entry owns both the data and background failures.
+  const readState = useIssueReadState(
+    wsId,
+    canonicalId ?? routeId,
+    canonicalId ? detail : resolve,
+  );
 
   return {
     canonicalId,
+    hasLoaded:
+      (resolve.isSuccess && resolve.isFetchedAfterMount) ||
+      (detail.isSuccess && detail.isFetchedAfterMount),
     issue: detail.data,
-    isResolving: resolveEnabled && !failed && resolve.data === undefined,
-    notFound: failed,
+    isResolving: resolveEnabled && !canonicalId && !readState.notFound && !readState.loadFailed,
+    ...readState,
   };
 }

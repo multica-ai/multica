@@ -21,7 +21,7 @@ export function AddChildIssueModal({
   const { t } = useT("modals");
   const issueId = (data?.issueId as string) || "";
   const wsId = useWorkspaceId();
-  const updateIssue = useUpdateIssue();
+  const { mutateAsync: updateIssue } = useUpdateIssue();
 
   const { data: issue = null } = useQuery({
     ...issueDetailOptions(wsId, issueId),
@@ -38,6 +38,8 @@ export function AddChildIssueModal({
     ...children.map((c) => c.id),
   ];
 
+  // The picker closes as soon as an issue is picked, unmounting this modal, so
+  // the toasts follow the request's promise rather than per-call callbacks.
   return (
     <IssuePickerModal
       open
@@ -48,18 +50,23 @@ export function AddChildIssueModal({
       description={t(($) => $.add_child.description)}
       excludeIds={excludeIds}
       onSelect={(selected) => {
-        updateIssue.mutate(
-          { id: selected.id, parent_issue_id: issueId },
-          {
-            onError: (err) =>
-              toast.error(
-                err instanceof Error && err.message
-                  ? err.message
-                  : t(($) => $.add_child.toast_failed),
-              ),
-          },
+        updateIssue({
+          id: selected.id,
+          parent_issue_id: issueId,
+        }).then(
+          () =>
+            toast.success(
+              t(($) => $.add_child.toast_success, {
+                identifier: selected.identifier,
+              }),
+            ),
+          (err) =>
+            toast.error(
+              err instanceof Error && err.message
+                ? err.message
+                : t(($) => $.add_child.toast_failed),
+            ),
         );
-        toast.success(t(($) => $.add_child.toast_success, { identifier: selected.identifier }));
       }}
     />
   );

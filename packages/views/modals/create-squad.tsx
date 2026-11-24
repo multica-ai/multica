@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, UserPlus, X } from "lucide-react";
+import { ChevronDown, UserPlus, X } from "@multica/ui/icons";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -20,7 +20,6 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogDescription,
 } from "@multica/ui/components/ui/dialog";
 import {
   Popover,
@@ -30,6 +29,7 @@ import {
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { toast } from "sonner";
 
 import { useNavigation } from "../navigation";
@@ -142,20 +142,16 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
 
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="p-0 gap-0 flex flex-col overflow-hidden !top-1/2 !left-1/2 !-translate-x-1/2 !-translate-y-1/2 !w-full !max-w-2xl !h-[85vh]">
+      <DialogContent className="p-0 gap-0 flex flex-col overflow-hidden !top-1/2 !left-1/2 !-translate-x-1/2 !-translate-y-1/2 !w-full !max-w-2xl !h-[85%]">
         <DialogHeader className="border-b px-5 py-3 space-y-0">
           <DialogTitle className="text-title-sm font-semibold">
             {t(($) => $.create_squad.title)}
           </DialogTitle>
-          <DialogDescription className="mt-1 text-caption">
-            {t(($) => $.create_squad.description)}
-          </DialogDescription>
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto p-5">
           <div className="space-y-4 min-w-0">
-            {/* Identity row mirrors CreateAgentDialog so the two creates read
-                as siblings — avatar (left) + name/description stack (right). */}
+            {/* Identity row: avatar (left) + name/description stack (right). */}
             <div className="flex items-start gap-4">
               <AvatarUploadControl
                 variant="squad"
@@ -224,7 +220,7 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
-        {/* Inline footer — see CreateAgentDialog: shadcn DialogFooter applies
+        {/* Inline footer: shadcn DialogFooter applies
             negative margins assuming a padded DialogContent. Our content is
             p-0, so a plain bordered row is the right call. */}
         <div className="flex items-center justify-end gap-2 border-t bg-background px-5 py-3">
@@ -242,11 +238,9 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // LeaderPicker — single-select agent picker, grouped "My Agents" first then
 // "Workspace Agents". Empty workspaces render a disabled trigger that points
 // the user at agent creation.
-// ---------------------------------------------------------------------------
 function LeaderPicker({
   agents,
   currentUserId,
@@ -385,12 +379,10 @@ function LeaderPicker({
   );
 }
 
-// ---------------------------------------------------------------------------
 // AdditionalMembersPicker — multi-select agents + workspace members. The
 // trigger shows up to 3 chips inline; the rest collapse into "+N". The popup
 // stays open while the user toggles selections so they can pick multiple
 // without re-opening it.
-// ---------------------------------------------------------------------------
 function AdditionalMembersPicker({
   agents,
   members,
@@ -478,6 +470,7 @@ function AdditionalMembersPicker({
             nesting interactive content. Base UI injects click/keyboard/ARIA
             wiring into the rendered element. */}
         <PopoverTrigger
+          nativeButton={false}
           render={
             <div
               role="combobox"
@@ -597,21 +590,23 @@ function MemberChip({
 }) {
   const { t } = useT("modals");
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border bg-background px-1.5 py-0.5 text-caption">
+    <span className="inline-flex items-center gap-1 rounded-md border bg-background px-1.5 py-0.5 text-caption">
       <ActorAvatar actorType={m.type} actorId={m.id} size="xs" />
       <span className="max-w-[120px] truncate">{m.name}</span>
-      <button
-        type="button"
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          onRemove();
-        }}
-        aria-label={t(($) => $.create_squad.members_remove_aria, { name: m.name })}
-        className="rounded-full text-muted-foreground hover:text-foreground"
-      >
-        <X className="h-3 w-3" />
-      </button>
+      <TooltipHint label={t(($) => $.create_squad.members_remove_aria, { name: m.name })}>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onRemove();
+          }}
+          aria-label={t(($) => $.create_squad.members_remove_aria, { name: m.name })}
+          className="rounded-sm text-muted-foreground hover:text-foreground"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      </TooltipHint>
     </span>
   );
 }

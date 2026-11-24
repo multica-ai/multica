@@ -150,6 +150,71 @@ func TestProjectOutbound_DoesNotMutateProducerPayload(t *testing.T) {
 	}
 }
 
+func TestProjectOutbound_TaskFailedKeepsErrorInternal(t *testing.T) {
+	original := map[string]any{
+		"task_id":        "task-1",
+		"failure_reason": "timeout",
+		"retry_pending":  false,
+		"error":          "task timed out",
+	}
+
+	projected, ok := projectOutbound(protocol.EventTaskFailed, original).(map[string]any)
+	if !ok {
+		t.Fatal("task:failed projection did not return a map")
+	}
+	if _, present := projected["error"]; present {
+		t.Fatal("task:failed error reached the workspace realtime payload")
+	}
+	if projected["failure_reason"] != "timeout" || projected["retry_pending"] != false {
+		t.Fatalf("safe task failure metadata was lost: %#v", projected)
+	}
+	if original["error"] != "task timed out" {
+		t.Fatal("task:failed projection mutated the in-process payload")
+	}
+}
+
+func TestTaskFailedBroadcast_DeliversErrorOnlyInProcess(t *testing.T) {
+	bus := events.New()
+	fb := &fakeBroadcaster{}
+	payload := map[string]any{
+		"task_id":        "task-1",
+		"failure_reason": "timeout",
+		"retry_pending":  false,
+		"error":          "task timed out",
+	}
+
+	var inProcessError string
+	bus.Subscribe(protocol.EventTaskFailed, func(e events.Event) {
+		m, _ := e.Payload.(map[string]any)
+		inProcessError, _ = m["error"].(string)
+	})
+	registerListeners(bus, fb)
+	bus.Publish(events.Event{
+		Type:        protocol.EventTaskFailed,
+		WorkspaceID: "workspace-1",
+		Payload:     payload,
+	})
+
+	if inProcessError != "task timed out" {
+		t.Fatalf("in-process channel listener error = %q, want task timed out", inProcessError)
+	}
+	if len(fb.workspaceCalls) != 1 {
+		t.Fatalf("workspace broadcasts = %d, want 1", len(fb.workspaceCalls))
+	}
+	var frame struct {
+		Payload map[string]any `json:"payload"`
+	}
+	if err := json.Unmarshal(fb.workspaceCalls[0].msg, &frame); err != nil {
+		t.Fatalf("unmarshal workspace frame: %v", err)
+	}
+	if _, present := frame.Payload["error"]; present {
+		t.Fatal("channel-only failure error reached the workspace broadcast")
+	}
+	if payload["error"] != "task timed out" {
+		t.Fatal("broadcast projection mutated the producer payload")
+	}
+}
+
 // TestProjectOutbound_PassesThroughUnlistedEvents keeps the projection from
 // becoming a general-purpose payload filter: an event type with no entry in the
 // table must be forwarded byte-for-byte, and a non-map payload must survive.

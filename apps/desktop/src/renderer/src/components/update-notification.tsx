@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { RefreshCw, X } from "lucide-react";
+import { RefreshCw, X } from "@multica/ui/icons";
+import { useT } from "@multica/views/i18n";
 
 // Downloads run silently in the background (main process has
 // autoDownload=true). The renderer only renders UI once the package is fully
@@ -8,7 +9,12 @@ type UpdateState =
   | { status: "idle" }
   | { status: "ready"; version: string };
 
+function changelogUrl(version: string): string {
+  return `https://multica.ai/changelog#release-${version.replace(/\./g, "-")}`;
+}
+
 export function UpdateNotification() {
+  const { t } = useT("settings");
   const [state, setState] = useState<UpdateState>({ status: "idle" });
   const [dismissed, setDismissed] = useState(false);
 
@@ -29,6 +35,7 @@ export function UpdateNotification() {
         type="button"
         onClick={() => setDismissed(true)}
         className="absolute top-2 right-2 rounded-md p-1 text-muted-foreground hover:text-foreground transition-colors"
+        aria-label={t(($) => $.desktop.updates.banner_dismiss)}
       >
         <X className="size-3.5" />
       </button>
@@ -38,24 +45,28 @@ export function UpdateNotification() {
           <RefreshCw className="size-4 text-success" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-body font-medium">Update ready</p>
+          <p className="text-body font-medium">
+            {t(($) => $.desktop.updates.banner_title)}
+          </p>
           <p className="text-caption text-muted-foreground mt-0.5">
-            v{state.version} will be applied on next launch.
+            {t(($) => $.desktop.updates.banner_body, { version: state.version })}
           </p>
           <div className="mt-2 flex items-center gap-1.5">
             <button
               type="button"
-              onClick={() => setDismissed(true)}
+              onClick={() =>
+                window.desktopAPI.openExternal(changelogUrl(state.version))
+              }
               className="inline-flex items-center rounded-md border border-border bg-background px-3 py-1.5 text-caption font-medium text-foreground hover:bg-accent transition-colors"
             >
-              Later
+              {t(($) => $.desktop.updates.banner_changelog)}
             </button>
             <button
               type="button"
               onClick={() => window.updater.installUpdate()}
               className="inline-flex items-center rounded-md bg-primary px-3 py-1.5 text-caption font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
             >
-              Restart now
+              {t(($) => $.desktop.updates.banner_restart)}
             </button>
           </div>
         </div>

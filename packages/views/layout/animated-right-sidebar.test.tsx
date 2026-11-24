@@ -1,10 +1,20 @@
 import { act, renderHook } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  configureShortcutPlatform,
+  useShortcutStore,
+} from "@multica/core/shortcuts";
 
 import {
   getAnimatedRightSidebarInitialOpen,
   useAnimatedRightSidebarState,
+  useRightSidebarShortcut,
 } from "./animated-right-sidebar";
+
+afterEach(() => {
+  configureShortcutPlatform(null);
+  useShortcutStore.getState().resetAll();
+});
 
 describe("animated right sidebar state", () => {
   it("uses a restored collapsed layout before falling back to the default", () => {
@@ -68,5 +78,52 @@ describe("animated right sidebar state", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("right sidebar shortcut", () => {
+  it("toggles the visible detail sidebar on Mod+/", () => {
+    configureShortcutPlatform("macos");
+    const onToggle = vi.fn();
+    const target = document.createElement("div");
+    vi.spyOn(target, "getClientRects").mockReturnValue(
+      [{}] as unknown as DOMRectList,
+    );
+    const targetRef = { current: target };
+    const { unmount } = renderHook(() =>
+      useRightSidebarShortcut(targetRef, onToggle),
+    );
+    const event = new KeyboardEvent("keydown", {
+      key: "/",
+      metaKey: true,
+      cancelable: true,
+    });
+
+    document.dispatchEvent(event);
+
+    expect(onToggle).toHaveBeenCalledTimes(1);
+    expect(event.defaultPrevented).toBe(true);
+    unmount();
+  });
+
+  it("leaves the shortcut unclaimed when its detail page is hidden", () => {
+    configureShortcutPlatform("macos");
+    const onToggle = vi.fn();
+    const target = document.createElement("div");
+    const targetRef = { current: target };
+    const { unmount } = renderHook(() =>
+      useRightSidebarShortcut(targetRef, onToggle),
+    );
+    const event = new KeyboardEvent("keydown", {
+      key: "/",
+      metaKey: true,
+      cancelable: true,
+    });
+
+    document.dispatchEvent(event);
+
+    expect(onToggle).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+    unmount();
   });
 });

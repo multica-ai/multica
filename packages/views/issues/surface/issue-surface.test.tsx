@@ -23,8 +23,14 @@ import type {
   IssueTableRowsRequest,
   ListIssuesParams,
   ListIssuesResponse,
+  WorkspaceWorkingAgent,
 } from "@multica/core/types";
-import { IssueSurface } from "./issue-surface";
+import { IssueSurface, IssueSurfaceWithStore } from "./issue-surface";
+import { createIssueStatusListStore } from "@multica/core/issue-statuses";
+import { baselineFromQuery } from "@multica/core/issue-views/baseline";
+import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
+import { setCurrentWorkspace } from "@multica/core/platform";
+import { memberListOptions } from "@multica/core/workspace/queries";
 import { statusTableMethodsFromLegacy } from "./status-table-test-api";
 
 // Mutable so tests can simulate a workspace switch — the workspace layout
@@ -77,18 +83,22 @@ vi.mock("@multica/core/auth", () => ({
 }));
 
 vi.mock("../../i18n", () => ({
+  useLocale: () => "en",
   // TableView also reads `i18n.language` for its date formatting.
   useT: () => ({ t: mockTranslate, i18n: { language: "en" } }),
   useTimeAgo: () => () => "now",
 }));
 
 vi.mock("../../navigation", () => ({
+  useWarmRoute: () => undefined,
   AppLink: ({ children, href, ...props }: React.ComponentProps<"a">) => (
     <a href={href} {...props}>
       {children}
     </a>
   ),
   useNavigation: () => ({ push: vi.fn(), pathname: "/" }),
+  resolveClickIntent: () => "push",
+  useIntentNavigate: () => () => {},
 }));
 
 vi.mock("@multica/core/paths", async () => {
@@ -161,6 +171,10 @@ describe("IssueSurface — scope switch loading semantics", () => {
       return Promise.resolve({ issues, total: issues.length });
     });
     setApiInstance({
+      // The board pages by category, so every surface stub answers the catalog
+      // read. Empty is the real shape for a workspace with no custom statuses:
+      // a built-in key IS its own category. (MUL-6243)
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       ...statusTableMethodsFromLegacy(listIssues),
       listGroupedIssues: vi.fn(() => never()),
@@ -176,6 +190,24 @@ describe("IssueSurface — scope switch loading semantics", () => {
     qc.clear();
     pruneIssueSurfaceViewStates([]);
     vi.restoreAllMocks();
+  });
+
+  it("renders an exact-status transient list without reading or changing the active saved view", async () => {
+    const stored = getIssueSurfaceViewStore("workspace:all");
+    stored.setState({ statusFilters: ["cancelled"], showSubIssues: false });
+    const previous = stored.getState();
+    useActiveIssueViewStore.getState().setActive("ws-1:workspace", "saved-view");
+    const store = createIssueStatusListStore("todo");
+    const { unmount } = render(<QueryClientProvider client={qc}>
+      <IssueSurfaceWithStore store={store} baseline={baselineFromQuery({ statusFilters: ["todo"] })}
+        scope={{ type: "workspace", actorKind: "all" }} modes={["list"]} renderHeader={() => null} batchToolbar="never" />
+    </QueryClientProvider>);
+    await screen.findByText("P1 issue");
+    expect(store.getState().statusFilters).toEqual(["todo"]);
+    unmount();
+    expect(stored.getState()).toBe(previous);
+    expect(useActiveIssueViewStore.getState().active["ws-1:workspace"]).toBe("saved-view");
+    useActiveIssueViewStore.getState().setActive("ws-1:workspace", null);
   });
 
   it("shows loading — not the previous project's issues — while the next project is fetching", async () => {
@@ -248,6 +280,10 @@ describe("IssueSurface — scope switch loading semantics", () => {
       return Promise.resolve({ issues, total: issues.length });
     });
     setApiInstance({
+      // The board pages by category, so every surface stub answers the catalog
+      // read. Empty is the real shape for a workspace with no custom statuses:
+      // a built-in key IS its own category. (MUL-6243)
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       ...statusTableMethodsFromLegacy(listIssues),
       listGroupedIssues: vi.fn(() => never()),
@@ -307,7 +343,7 @@ describe("IssueSurface — table pagination ownership", () => {
     vi.restoreAllMocks();
   });
 
-  it("does not materialize the legacy offset window and starts one cursor root branch", async () => {
+  it("waits for working membership, offers retry on failure, and starts only the resolved cursor root branch", async () => {
     const { getIssueSurfaceViewStore } = await import(
       "@multica/core/issues/stores/surface-view-store"
     );
@@ -322,7 +358,23 @@ describe("IssueSurface — table pagination ownership", () => {
       status: "in_progress" as const,
     }));
     const listIssueTableRows = vi.fn(() => never());
+    let failMembership!: (reason: Error) => void;
+    const getWorkspaceWorkingAgents = vi.fn(async (): Promise<WorkspaceWorkingAgent[]> =>
+      runningIssues.map((issue, index) => ({
+        id: `agent-${index}`,
+        name: `Agent ${index}`,
+        avatar_url: null,
+        running_task_count: 1,
+        issue_ids: [issue.id],
+      })),
+    ).mockImplementationOnce(() => new Promise<WorkspaceWorkingAgent[]>((_, reject) => {
+      failMembership = reject;
+    }));
     setApiInstance({
+      // The board pages by category, so every surface stub answers the catalog
+      // read. Empty is the real shape for a workspace with no custom statuses:
+      // a built-in key IS its own category. (MUL-6243)
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       listIssueTableRows,
       listIssueTableFacets: vi.fn(() => never()),
@@ -338,17 +390,7 @@ describe("IssueSurface — table pagination ownership", () => {
           })) as unknown as AgentTask[],
         ),
       ),
-      getWorkspaceWorkingAgents: vi.fn(() =>
-        Promise.resolve(
-          runningIssues.map((issue, index) => ({
-            id: `agent-${index}`,
-            name: `Agent ${index}`,
-            avatar_url: null,
-            running_task_count: 1,
-            issue_ids: [issue.id],
-          })),
-        ),
-      ),
+      getWorkspaceWorkingAgents,
       getChildIssueProgress: vi.fn(() => never()),
       listProperties: vi.fn(() => never()),
       listMembers: vi.fn(() => never()),
@@ -368,11 +410,17 @@ describe("IssueSurface — table pagination ownership", () => {
       </QueryClientProvider>,
     );
 
-    // The first render has not received the independent working-agents query
-    // yet and therefore requests the explicit match-none form. Once that
-    // query resolves, the Table owns a new query key containing the agent id
-    // list and starts the real branch.
-    await waitFor(() => expect(listIssueTableRows).toHaveBeenCalledTimes(2));
+    // Unknown membership must not mount an empty Table branch or show an
+    // empty-state claim. A failed initial request must provide recovery.
+    expect(screen.queryByTestId("surface-loading")).not.toBeNull();
+    expect(listIssueTableRows).not.toHaveBeenCalled();
+    await act(async () => failMembership(new Error("offline")));
+    const alert = await screen.findByRole("alert");
+    expect(screen.queryByTestId("surface-loading")).toBeNull();
+    expect(listIssueTableRows).not.toHaveBeenCalled();
+    fireEvent.click(alert.querySelector("button")!);
+    await waitFor(() => expect(listIssueTableRows).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("alert")).toBeNull();
     expect(listIssueTableRows).toHaveBeenLastCalledWith(
       expect.objectContaining({
         group: { kind: "none" },
@@ -420,6 +468,10 @@ describe("IssueSurface — table pagination ownership", () => {
       ),
     );
     setApiInstance({
+      // The board pages by category, so every surface stub answers the catalog
+      // read. Empty is the real shape for a workspace with no custom statuses:
+      // a built-in key IS its own category. (MUL-6243)
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       listIssueTableRows,
       listIssueTableFacets: vi.fn(() => never()),
@@ -488,6 +540,10 @@ describe("IssueSurface — table pagination ownership", () => {
     const issue = makeIssue("table-selected", "Loaded Table issue", "pt-batch");
 
     setApiInstance({
+      // The board pages by category, so every surface stub answers the catalog
+      // read. Empty is the real shape for a workspace with no custom statuses:
+      // a built-in key IS its own category. (MUL-6243)
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       listIssueTableRows: vi.fn(() =>
         Promise.resolve({
@@ -543,7 +599,7 @@ describe("IssueSurface — table pagination ownership", () => {
       "pt-sort-transition",
     );
     const listIssueTableRows = vi.fn((request: IssueTableRowsRequest) =>
-      request.query.sort.field === "position"
+      request.query.sort.field === "updated_at"
         ? Promise.resolve({
             query_fingerprint: "sha256:initial-sort",
             group_key: null,
@@ -556,6 +612,10 @@ describe("IssueSurface — table pagination ownership", () => {
         : never(),
     );
     setApiInstance({
+      // The board pages by category, so every surface stub answers the catalog
+      // read. Empty is the real shape for a workspace with no custom statuses:
+      // a built-in key IS its own category. (MUL-6243)
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       listIssueTableRows,
       listIssueTableFacets: vi.fn(() => never()),
@@ -624,6 +684,10 @@ describe("IssueSurface — table pagination ownership", () => {
     );
 
     setApiInstance({
+      // The board pages by category, so every surface stub answers the catalog
+      // read. Empty is the real shape for a workspace with no custom statuses:
+      // a built-in key IS its own category. (MUL-6243)
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       listIssueTableGroups: vi.fn(() =>
         Promise.resolve({
@@ -713,6 +777,10 @@ describe("IssueSurface — filtered empty state", () => {
       Promise.resolve({ issues: [], total: 0 } satisfies ListIssuesResponse),
     );
     setApiInstance({
+      // The board pages by category, so every surface stub answers the catalog
+      // read. Empty is the real shape for a workspace with no custom statuses:
+      // a built-in key IS its own category. (MUL-6243)
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       ...statusTableMethodsFromLegacy(listIssues),
       listGroupedIssues: vi.fn(() => never()),
@@ -720,6 +788,9 @@ describe("IssueSurface — filtered empty state", () => {
       getAgentTaskSnapshot: vi.fn(() => never<AgentTask[]>()),
       getWorkspaceWorkingAgents: vi.fn(() => Promise.resolve([])),
       getChildIssueProgress: vi.fn(() => never()),
+      listIssueUnread: vi.fn(() => Promise.resolve([])),
+      listSubscribedIssueIds: vi.fn(() => Promise.resolve([])),
+      listIssueViews: vi.fn(() => Promise.resolve([])),
     } as unknown as ApiClient);
     pruneIssueSurfaceViewStates([]);
   });
@@ -728,6 +799,7 @@ describe("IssueSurface — filtered empty state", () => {
     cleanup();
     qc.clear();
     pruneIssueSurfaceViewStates([]);
+    useActiveIssueViewStore.getState().setActive("ws-1:workspace", null);
     mockTranslate.mockImplementation(() => "translated");
     vi.restoreAllMocks();
   });
@@ -752,7 +824,7 @@ describe("IssueSurface — filtered empty state", () => {
     render(filteredSurface());
 
     await screen.findByText("filtered_empty.title");
-    expect(screen.getByText("filtered_empty.hint")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "filtered_empty.clear_button" })).toBeEnabled();
     // The project's own "nothing linked yet" copy would be a lie here.
     expect(screen.queryByText("detail.empty_issues_title")).toBeNull();
   });
@@ -778,5 +850,425 @@ describe("IssueSurface — filtered empty state", () => {
 
     await screen.findByText("detail.empty_issues_title");
     expect(screen.queryByText("filtered_empty.title")).toBeNull();
+  });
+
+  function subscribedViewSurface() {
+    useActiveIssueViewStore.getState().setActive("ws-1:workspace", "subscribed");
+    return (
+      <QueryClientProvider client={qc}>
+        <IssueSurface
+          scope={{ type: "workspace", actorKind: "all" }}
+          modes={["list"]}
+          renderHeader={() => null}
+          batchToolbar="never"
+        />
+      </QueryClientProvider>
+    );
+  }
+
+  it("keeps a built-in view's condition when its filters are cleared", async () => {
+    const store = getIssueSurfaceViewStore("view:subscribed");
+    act(() => store.setState({ relationFilters: ["subscribed"], agentRunningFilter: true }));
+
+    render(subscribedViewSurface());
+
+    fireEvent.click(await screen.findByRole("button", { name: "filtered_empty.clear_button" }));
+    expect(store.getState().agentRunningFilter).toBe(false);
+    expect(store.getState().relationFilters).toEqual(["subscribed"]);
+    await screen.findByText("filtered_empty.title");
+    expect(screen.queryByRole("button", { name: "filtered_empty.clear_button" })).toBeNull();
+  });
+
+  it.each(["created_at", "updated_at"] as const)(
+    "clears %s with other user filters while preserving the built-in view's condition and display",
+    async (field) => {
+      const store = getIssueSurfaceViewStore("view:subscribed");
+      act(() => store.setState({
+        dateFilter: { field, from: "2026-01-01", to: "2026-01-02" },
+        priorityFilters: ["high"],
+        agentRunningFilter: true,
+        sortBy: "title",
+        sortDirection: "asc",
+        showSubIssues: false,
+      }));
+
+      render(subscribedViewSurface());
+
+      fireEvent.click(await screen.findByRole("button", { name: "filtered_empty.clear_button" }));
+
+      expect(store.getState()).toMatchObject({
+        dateFilter: null,
+        priorityFilters: [],
+        agentRunningFilter: false,
+        relationFilters: ["subscribed"],
+        sortBy: "title",
+        sortDirection: "asc",
+        showSubIssues: false,
+      });
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: "filtered_empty.clear_button" })).toBeNull(),
+      );
+    },
+  );
+
+  it("clears a date interval on an ordinary surface without adding a relation", async () => {
+    const store = getIssueSurfaceViewStore("project:pf");
+    act(() => store.getState().setDateFilter({ field: "created_at", from: "2026-01-01", to: "2026-01-02" }));
+
+    render(filteredSurface());
+
+    fireEvent.click(await screen.findByRole("button", { name: "filtered_empty.clear_button" }));
+
+    expect(store.getState().dateFilter).toBeNull();
+    expect(store.getState().relationFilters).toEqual([]);
+    await screen.findByText("detail.empty_issues_title");
+  });
+
+  it("keeps a built-in view's condition when a workspace switch reloads its state", async () => {
+    setCurrentWorkspace("acme", "ws-1");
+    const store = getIssueSurfaceViewStore("view:subscribed");
+    render(subscribedViewSurface());
+    await screen.findByText("filtered_empty.title");
+
+    // The next workspace has no saved state for this view, so the reload
+    // resets the store to defaults, without the relation.
+    await act(async () => {
+      setCurrentWorkspace("beta", "ws-1");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    expect(store.getState().relationFilters).toEqual(["subscribed"]);
+    setCurrentWorkspace(null, null);
+  });
+
+  it("restores a built-in view's condition from state saved without it, and un-negates it", async () => {
+    const store = getIssueSurfaceViewStore("view:subscribed");
+    act(() => store.setState({ relationFilters: [], negatedFilters: ["relation"] }));
+
+    render(subscribedViewSurface());
+
+    await screen.findByText("filtered_empty.title");
+    expect(store.getState().relationFilters).toEqual(["subscribed"]);
+    expect(store.getState().negatedFilters).toEqual([]);
+  });
+
+  it("keeps a built-in view to exactly its relations: another one would widen it", async () => {
+    const store = getIssueSurfaceViewStore("view:subscribed");
+    render(subscribedViewSurface());
+    await screen.findByText("filtered_empty.title");
+
+    act(() => store.getState().toggleRelationFilter("assigned"));
+
+    expect(store.getState().relationFilters).toEqual(["subscribed"]);
+  });
+
+  it("keeps Working to running agents: adding idle would list every issue", async () => {
+    const store = getIssueSurfaceViewStore("view:working");
+    useActiveIssueViewStore.getState().setActive("ws-1:workspace", "working");
+    render(
+      <QueryClientProvider client={qc}>
+        <IssueSurface
+          scope={{ type: "workspace", actorKind: "all" }}
+          modes={["list"]}
+          renderHeader={() => null}
+          batchToolbar="never"
+        />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(store.getState().agentRunningFilter).toBe(true));
+
+    act(() => store.setState({ agentIdleFilter: true }));
+
+    expect(store.getState()).toMatchObject({ agentRunningFilter: true, agentIdleFilter: false });
+  });
+
+  it("puts back the agent filter Working is defined by", async () => {
+    const store = getIssueSurfaceViewStore("view:working");
+    act(() => store.setState({ agentRunningFilter: false, agentIdleFilter: true }));
+    useActiveIssueViewStore.getState().setActive("ws-1:workspace", "working");
+
+    render(
+      <QueryClientProvider client={qc}>
+        <IssueSurface
+          scope={{ type: "workspace", actorKind: "all" }}
+          modes={["list"]}
+          renderHeader={() => null}
+          batchToolbar="never"
+        />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(store.getState()).toMatchObject({ agentRunningFilter: true, agentIdleFilter: false }));
+  });
+});
+
+/**
+ * The status catalog is server state, so it can fail. A CUSTOM status filter
+ * cannot be routed to a column without it, so row fetching is suspended — which
+ * means every other branch of the surface would render an unexplained empty
+ * view. The user has to see WHY and be able to do something about it.
+ */
+describe("IssueSurface — status catalog failure", () => {
+  let qc: QueryClient;
+
+  function installApi(listIssueStatuses: () => Promise<unknown>) {
+    rowRequests.length = 0;
+    const listIssues = vi.fn(() => Promise.resolve({ issues: [], total: 0 }));
+    const tableMethods = statusTableMethodsFromLegacy(listIssues);
+    setApiInstance({
+      listIssueStatuses,
+      listIssues,
+      ...tableMethods,
+      listIssueTableRows: vi.fn((request: IssueTableRowsRequest) => {
+        rowRequests.push(request);
+        return tableMethods.listIssueTableRows(request);
+      }),
+      listGroupedIssues: vi.fn(() => never()),
+      listProjects: vi.fn(() => never()),
+      getAgentTaskSnapshot: vi.fn(() => never<AgentTask[]>()),
+      getChildIssueProgress: vi.fn(() => never()),
+    } as unknown as ApiClient);
+  }
+
+  const rowRequests: IssueTableRowsRequest[] = [];
+
+  const QA_ENTRY = {
+    id: "s-qa",
+    workspace_id: "ws-1",
+    key: "qa",
+    name: "QA",
+    description: "",
+    category: "in_progress" as const,
+    color: "#ff0000",
+    is_system: false,
+    position: 1,
+    archived_at: null,
+    created_at: "",
+    updated_at: "",
+  };
+
+  beforeEach(() => {
+    mockWsId.current = "ws-1";
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    pruneIssueSurfaceViewStates([]);
+  });
+
+  afterEach(() => {
+    cleanup();
+    qc.clear();
+    pruneIssueSurfaceViewStates([]);
+    vi.restoreAllMocks();
+  });
+
+  it("shows a retryable error, and recovers fetching when the retry succeeds", async () => {
+    let attempt = 0;
+    installApi(() => {
+      attempt += 1;
+      return attempt === 1
+        ? Promise.reject(new Error("catalog unavailable"))
+        // The retry answers with the entry the `qa` filter needs, so a
+        // recovered catalog routes it to the in_review column and fetches.
+        : Promise.resolve({ statuses: [QA_ENTRY], categories: [], total: 1 });
+    });
+
+    const store = getIssueSurfaceViewStore("project:cat-fail");
+    act(() => store.getState().toggleStatusFilter("qa"));
+
+    render(
+      <QueryClientProvider client={qc}>
+        <IssueSurface
+          scope={{ type: "project", projectId: "cat-fail" }}
+          modes={["list"]}
+          renderHeader={() => null}
+          renderLoading={() => <div data-testid="surface-loading" />}
+          batchToolbar="never"
+        />
+      </QueryClientProvider>,
+    );
+
+    // The regression: row fetching is suspended, isLoading/isEmpty are both
+    // false, and the surface fell straight through to the content branch — an
+    // empty view with no explanation and no way out.
+    const alert = await screen.findByRole("alert");
+    expect(rowRequests).toEqual([]);
+    expect(screen.queryByTestId("surface-loading")).toBeNull();
+
+    const retry = alert.querySelector("button");
+    expect(retry).not.toBeNull();
+
+    fireEvent.click(retry!);
+
+    // Retry succeeds → the error clears and the surface resumes fetching.
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    await waitFor(() => expect(rowRequests.length).toBeGreaterThan(0));
+  });
+
+  // The stale-data RULE lives in status-behavior.test.ts ("keeps resolving from
+  // a cached catalog when a refetch fails"); this is the wiring check that the
+  // surface actually honours it end to end.
+  it("keeps using the last successful catalog when a refetch fails", async () => {
+    let attempt = 0;
+    installApi(() => {
+      attempt += 1;
+      return attempt === 1
+        ? Promise.resolve({ statuses: [QA_ENTRY], categories: [], total: 1 })
+        : Promise.reject(new Error("refetch failed"));
+    });
+
+    const store = getIssueSurfaceViewStore("project:cat-stale");
+    act(() => store.getState().toggleStatusFilter("qa"));
+
+    render(
+      <QueryClientProvider client={qc}>
+        <IssueSurface
+          scope={{ type: "project", projectId: "cat-stale" }}
+          modes={["list"]}
+          renderHeader={() => null}
+          renderLoading={() => <div data-testid="surface-loading" />}
+          batchToolbar="never"
+        />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(rowRequests.length).toBeGreaterThan(0));
+    const before = rowRequests.length;
+
+    await act(async () => {
+      await qc.refetchQueries({ queryKey: ["issue-statuses", "ws-1"] }).catch(() => {});
+    });
+
+    // Precondition: the refetch really did fail, and the cached catalog
+    // survived it. Without this the assertions below would pass vacuously.
+    const state = qc.getQueryState(["issue-statuses", "ws-1", "list"]);
+    expect(state?.status).toBe("error");
+    expect(state?.data).toBeDefined();
+
+    // Still no blocking error, and the surface never stopped fetching.
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(rowRequests.length).toBeGreaterThanOrEqual(before);
+  });
+});
+
+describe("IssueSurface — guest create affordances (MUL-9420)", () => {
+  let qc: QueryClient;
+
+  function seedRole(role: "member" | "guest") {
+    qc.setQueryData(memberListOptions("ws-1").queryKey, [
+      {
+        id: "m-1",
+        workspace_id: "ws-1",
+        user_id: mockAuthUser.id,
+        role,
+        created_at: "2026-01-01T00:00:00Z",
+        name: mockAuthUser.name,
+        email: mockAuthUser.email,
+        avatar_url: null,
+      },
+    ]);
+  }
+
+  function useIssues(issues: Issue[]) {
+    const listIssues = vi.fn((params?: ListIssuesParams) => {
+      const rows = params?.status === "todo" ? issues : [];
+      return Promise.resolve({ issues: rows, total: rows.length } satisfies ListIssuesResponse);
+    });
+    setApiInstance({
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
+      listIssues,
+      ...statusTableMethodsFromLegacy(listIssues),
+      listGroupedIssues: vi.fn(() => never()),
+      listProjects: vi.fn(() => never()),
+      listMembers: vi.fn(() => never()),
+      getAgentTaskSnapshot: vi.fn(() => never<AgentTask[]>()),
+      getWorkspaceWorkingAgents: vi.fn(() => Promise.resolve([])),
+      getChildIssueProgress: vi.fn(() => never()),
+      listIssueUnread: vi.fn(() => Promise.resolve([])),
+      listSubscribedIssueIds: vi.fn(() => Promise.resolve([])),
+      listIssueViews: vi.fn(() => Promise.resolve([])),
+    } as unknown as ApiClient);
+  }
+
+  beforeEach(() => {
+    mockWsId.current = "ws-1";
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // Resolve `t(($) => $.a.b)` to "a.b" so controls can be found by key.
+    mockTranslate.mockImplementation(((...args: unknown[]) => {
+      const path: string[] = [];
+      const probe: unknown = new Proxy(() => {}, {
+        get: (_target, property) => {
+          path.push(String(property));
+          return probe;
+        },
+      });
+      (args[0] as (value: unknown) => unknown)(probe);
+      return path.join(".");
+    }) as unknown as () => string);
+    pruneIssueSurfaceViewStates([]);
+  });
+
+  afterEach(() => {
+    cleanup();
+    qc.clear();
+    pruneIssueSurfaceViewStates([]);
+    mockTranslate.mockImplementation(() => "translated");
+    vi.restoreAllMocks();
+  });
+
+  function surface(renderEmpty?: (context: { canCreate: boolean }) => React.ReactNode) {
+    return (
+      <QueryClientProvider client={qc}>
+        <IssueSurface
+          scope={{ type: "project", projectId: "pg" }}
+          modes={["list"]}
+          renderHeader={() => null}
+          renderEmpty={renderEmpty}
+          batchToolbar="never"
+        />
+      </QueryClientProvider>
+    );
+  }
+
+  it("offers a member the empty state's create actions", async () => {
+    useIssues([]);
+    seedRole("member");
+    render(surface());
+
+    await screen.findByText("detail.empty_issues_title");
+    expect(screen.getByRole("button", { name: "detail.empty_issues_new_button" })).toBeInTheDocument();
+  });
+
+  it("drops the empty state's create actions for a guest", async () => {
+    useIssues([]);
+    seedRole("guest");
+    render(surface());
+
+    await screen.findByText("detail.empty_issues_title");
+    expect(screen.queryByRole("button", { name: "detail.empty_issues_new_button" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "detail.empty_issues_add_existing" })).toBeNull();
+  });
+
+  it("tells a page's own empty state that a guest cannot create", async () => {
+    useIssues([]);
+    seedRole("guest");
+    const renderEmpty = vi.fn(({ canCreate }: { canCreate: boolean }) => (
+      <div data-testid="custom-empty">{String(canCreate)}</div>
+    ));
+    render(surface(renderEmpty));
+
+    expect(await screen.findByTestId("custom-empty")).toHaveTextContent("false");
+  });
+
+  it("hides the list group's add-issue button from a guest only", async () => {
+    useIssues([makeIssue("g1", "Guest-visible issue", "pg")]);
+    seedRole("member");
+    const { unmount } = render(surface());
+    await screen.findByText("Guest-visible issue");
+    expect(screen.getAllByRole("button", { name: "list.add_issue_tooltip" }).length).toBeGreaterThan(0);
+    unmount();
+
+    seedRole("guest");
+    render(surface());
+    await screen.findByText("Guest-visible issue");
+    expect(screen.queryByRole("button", { name: "list.add_issue_tooltip" })).toBeNull();
   });
 });

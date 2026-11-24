@@ -15,7 +15,7 @@ const acceptInvitation = `-- name: AcceptInvitation :one
 UPDATE workspace_invitation
 SET status = 'accepted', updated_at = now()
 WHERE id = $1 AND status = 'pending'
-RETURNING id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at
+RETURNING id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at, project_ids
 `
 
 func (q *Queries) AcceptInvitation(ctx context.Context, id pgtype.UUID) (WorkspaceInvitation, error) {
@@ -32,31 +32,38 @@ func (q *Queries) AcceptInvitation(ctx context.Context, id pgtype.UUID) (Workspa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ExpiresAt,
+		&i.ProjectIds,
 	)
 	return i, err
 }
 
 const createInvitation = `-- name: CreateInvitation :one
-INSERT INTO workspace_invitation (workspace_id, inviter_id, invitee_email, invitee_user_id, role)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at
+INSERT INTO workspace_invitation (id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, expires_at, project_ids)
+VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::uuid[], '{}'))
+RETURNING id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at, project_ids
 `
 
 type CreateInvitationParams struct {
-	WorkspaceID   pgtype.UUID `json:"workspace_id"`
-	InviterID     pgtype.UUID `json:"inviter_id"`
-	InviteeEmail  string      `json:"invitee_email"`
-	InviteeUserID pgtype.UUID `json:"invitee_user_id"`
-	Role          string      `json:"role"`
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	InviterID     pgtype.UUID        `json:"inviter_id"`
+	InviteeEmail  string             `json:"invitee_email"`
+	InviteeUserID pgtype.UUID        `json:"invitee_user_id"`
+	Role          string             `json:"role"`
+	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+	ProjectIds    []pgtype.UUID      `json:"project_ids"`
 }
 
 func (q *Queries) CreateInvitation(ctx context.Context, arg CreateInvitationParams) (WorkspaceInvitation, error) {
 	row := q.db.QueryRow(ctx, createInvitation,
+		arg.ID,
 		arg.WorkspaceID,
 		arg.InviterID,
 		arg.InviteeEmail,
 		arg.InviteeUserID,
 		arg.Role,
+		arg.ExpiresAt,
+		arg.ProjectIds,
 	)
 	var i WorkspaceInvitation
 	err := row.Scan(
@@ -70,6 +77,7 @@ func (q *Queries) CreateInvitation(ctx context.Context, arg CreateInvitationPara
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ExpiresAt,
+		&i.ProjectIds,
 	)
 	return i, err
 }
@@ -78,7 +86,7 @@ const declineInvitation = `-- name: DeclineInvitation :one
 UPDATE workspace_invitation
 SET status = 'declined', updated_at = now()
 WHERE id = $1 AND status = 'pending'
-RETURNING id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at
+RETURNING id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at, project_ids
 `
 
 func (q *Queries) DeclineInvitation(ctx context.Context, id pgtype.UUID) (WorkspaceInvitation, error) {
@@ -95,17 +103,19 @@ func (q *Queries) DeclineInvitation(ctx context.Context, id pgtype.UUID) (Worksp
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ExpiresAt,
+		&i.ProjectIds,
 	)
 	return i, err
 }
 
-const expireStalePendingInvitations = `-- name: ExpireStalePendingInvitations :exec
+const expireStalePendingInvitations = `-- name: ExpireStalePendingInvitations :many
 UPDATE workspace_invitation
 SET status = 'expired', updated_at = now()
 WHERE workspace_id = $1
   AND invitee_email = $2
   AND status = 'pending'
   AND expires_at <= now()
+RETURNING id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at, project_ids
 `
 
 type ExpireStalePendingInvitationsParams struct {
@@ -117,13 +127,40 @@ type ExpireStalePendingInvitationsParams struct {
 // so the next CreateInvitation does not collide with the partial unique index
 // idx_invitation_unique_pending (which is WHERE status = 'pending' and cannot
 // itself reference now() in its predicate).
-func (q *Queries) ExpireStalePendingInvitations(ctx context.Context, arg ExpireStalePendingInvitationsParams) error {
-	_, err := q.db.Exec(ctx, expireStalePendingInvitations, arg.WorkspaceID, arg.InviteeEmail)
-	return err
+func (q *Queries) ExpireStalePendingInvitations(ctx context.Context, arg ExpireStalePendingInvitationsParams) ([]WorkspaceInvitation, error) {
+	rows, err := q.db.Query(ctx, expireStalePendingInvitations, arg.WorkspaceID, arg.InviteeEmail)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []WorkspaceInvitation{}
+	for rows.Next() {
+		var i WorkspaceInvitation
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.InviterID,
+			&i.InviteeEmail,
+			&i.InviteeUserID,
+			&i.Role,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ExpiresAt,
+			&i.ProjectIds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getInvitation = `-- name: GetInvitation :one
-SELECT id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at FROM workspace_invitation
+SELECT id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at, project_ids FROM workspace_invitation
 WHERE id = $1
 `
 
@@ -141,12 +178,13 @@ func (q *Queries) GetInvitation(ctx context.Context, id pgtype.UUID) (WorkspaceI
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ExpiresAt,
+		&i.ProjectIds,
 	)
 	return i, err
 }
 
 const getPendingInvitationByEmail = `-- name: GetPendingInvitationByEmail :one
-SELECT id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at FROM workspace_invitation
+SELECT id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at, project_ids FROM workspace_invitation
 WHERE workspace_id = $1 AND invitee_email = $2 AND status = 'pending' AND expires_at > now()
 `
 
@@ -169,12 +207,30 @@ func (q *Queries) GetPendingInvitationByEmail(ctx context.Context, arg GetPendin
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ExpiresAt,
+		&i.ProjectIds,
 	)
 	return i, err
 }
 
+const hasPendingInvitationForEmail = `-- name: HasPendingInvitationForEmail :one
+SELECT EXISTS (
+    SELECT 1
+    FROM workspace_invitation
+    WHERE invitee_email = $1
+      AND status = 'pending'
+      AND expires_at > now()
+)
+`
+
+func (q *Queries) HasPendingInvitationForEmail(ctx context.Context, inviteeEmail string) (bool, error) {
+	row := q.db.QueryRow(ctx, hasPendingInvitationForEmail, inviteeEmail)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const listPendingInvitationsByWorkspace = `-- name: ListPendingInvitationsByWorkspace :many
-SELECT wi.id, wi.workspace_id, wi.inviter_id, wi.invitee_email, wi.invitee_user_id, wi.role, wi.status, wi.created_at, wi.updated_at, wi.expires_at,
+SELECT wi.id, wi.workspace_id, wi.inviter_id, wi.invitee_email, wi.invitee_user_id, wi.role, wi.status, wi.created_at, wi.updated_at, wi.expires_at, wi.project_ids,
        u.name  AS inviter_name,
        u.email AS inviter_email
 FROM workspace_invitation wi
@@ -194,6 +250,7 @@ type ListPendingInvitationsByWorkspaceRow struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+	ProjectIds    []pgtype.UUID      `json:"project_ids"`
 	InviterName   string             `json:"inviter_name"`
 	InviterEmail  string             `json:"inviter_email"`
 }
@@ -218,6 +275,7 @@ func (q *Queries) ListPendingInvitationsByWorkspace(ctx context.Context, workspa
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ExpiresAt,
+			&i.ProjectIds,
 			&i.InviterName,
 			&i.InviterEmail,
 		); err != nil {
@@ -232,7 +290,7 @@ func (q *Queries) ListPendingInvitationsByWorkspace(ctx context.Context, workspa
 }
 
 const listPendingInvitationsForUser = `-- name: ListPendingInvitationsForUser :many
-SELECT wi.id, wi.workspace_id, wi.inviter_id, wi.invitee_email, wi.invitee_user_id, wi.role, wi.status, wi.created_at, wi.updated_at, wi.expires_at,
+SELECT wi.id, wi.workspace_id, wi.inviter_id, wi.invitee_email, wi.invitee_user_id, wi.role, wi.status, wi.created_at, wi.updated_at, wi.expires_at, wi.project_ids,
        w.name AS workspace_name,
        u.name AS inviter_name,
        u.email AS inviter_email
@@ -261,6 +319,7 @@ type ListPendingInvitationsForUserRow struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+	ProjectIds    []pgtype.UUID      `json:"project_ids"`
 	WorkspaceName string             `json:"workspace_name"`
 	InviterName   string             `json:"inviter_name"`
 	InviterEmail  string             `json:"inviter_email"`
@@ -286,6 +345,7 @@ func (q *Queries) ListPendingInvitationsForUser(ctx context.Context, arg ListPen
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ExpiresAt,
+			&i.ProjectIds,
 			&i.WorkspaceName,
 			&i.InviterName,
 			&i.InviterEmail,
@@ -300,12 +360,15 @@ func (q *Queries) ListPendingInvitationsForUser(ctx context.Context, arg ListPen
 	return items, nil
 }
 
-const revokeInvitation = `-- name: RevokeInvitation :exec
+const revokeInvitation = `-- name: RevokeInvitation :execrows
 DELETE FROM workspace_invitation
 WHERE id = $1 AND status = 'pending'
 `
 
-func (q *Queries) RevokeInvitation(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, revokeInvitation, id)
-	return err
+func (q *Queries) RevokeInvitation(ctx context.Context, id pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeInvitation, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

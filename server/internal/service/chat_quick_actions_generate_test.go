@@ -4,11 +4,59 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-	"unicode"
+
+	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+func TestSelectChatQuickActionsContextExcludesFutureTurnAfterItCompletes(t *testing.T) {
+	previousID := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	targetID := pgtype.UUID{Bytes: [16]byte{2}, Valid: true}
+	futureID := pgtype.UUID{Bytes: [16]byte{3}, Valid: true}
+	rows := []db.ChatMessage{
+		{Role: "user", Content: "future queued prompt", TaskID: futureID, MessageKind: protocol.ChatMessageKindMessage},
+		{Role: "user", Content: "target prompt", TaskID: targetID, MessageKind: protocol.ChatMessageKindMessage},
+		{Role: "assistant", Content: "previous reply", TaskID: previousID, MessageKind: protocol.ChatMessageKindMessage},
+		{Role: "user", Content: "previous prompt", TaskID: previousID, MessageKind: protocol.ChatMessageKindMessage},
+	}
+	target := db.ChatMessage{
+		Role:        "assistant",
+		Content:     "target reply",
+		TaskID:      targetID,
+		MessageKind: protocol.ChatMessageKindMessage,
+	}
+
+	selected := selectChatQuickActionsContext(rows, target, targetID)
+	if len(selected) != 4 {
+		t.Fatalf("selected %d messages, want previous turn + target turn", len(selected))
+	}
+	for _, msg := range selected {
+		if msg.Content == "future queued prompt" {
+			t.Fatal("a later turn must stay out even if its task completed before generation")
+		}
+	}
+}
+
+func TestSelectChatQuickActionsContextIncludesAutoRetryInputOwner(t *testing.T) {
+	rootID := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	retryID := pgtype.UUID{Bytes: [16]byte{2}, Valid: true}
+	rows := []db.ChatMessage{
+		{Role: "user", Content: "root prompt", TaskID: rootID, MessageKind: protocol.ChatMessageKindMessage},
+	}
+	target := db.ChatMessage{
+		Role:        "assistant",
+		Content:     "retry reply",
+		TaskID:      retryID,
+		MessageKind: protocol.ChatMessageKindMessage,
+	}
+
+	selected := selectChatQuickActionsContext(rows, target, rootID)
+	if len(selected) != 2 || selected[0].Content != "root prompt" {
+		t.Fatalf("selected messages = %+v, want retry input followed by its reply", selected)
+	}
+}
 
 func chatMsg(role, content string, actions ...protocol.ChatQuickAction) db.ChatMessage {
 	msg := db.ChatMessage{
@@ -219,26 +267,5 @@ func TestRenderChatQuickActionsContextClosesWithTheLanguageRule(t *testing.T) {
 	// it does not scrub the input.
 	if !strings.Contains(out, "已创建工单 EFF-359") || !strings.Contains(out, "- 查看工单详情") {
 		t.Fatalf("conversation and previous labels must survive intact:\n%s", out)
-	}
-}
-
-// Neither prompt may name or contain a language: that is what taught the model
-// Chinese was on the table in the first place.
-func TestChatQuickActionsPromptsNameNoLanguage(t *testing.T) {
-	for name, text := range map[string]string{
-		"system prompt": chatQuickActionsSystemPrompt,
-		"language rule": chatQuickActionsLanguageRule,
-	} {
-		for _, r := range text {
-			if unicode.Is(unicode.Han, r) || unicode.Is(unicode.Hiragana, r) ||
-				unicode.Is(unicode.Katakana, r) || unicode.Is(unicode.Hangul, r) {
-				t.Fatalf("%s must contain no CJK, found %q", name, r)
-			}
-		}
-		for _, named := range []string{"Chinese", "Japanese", "Korean", "English"} {
-			if strings.Contains(text, named) {
-				t.Fatalf("%s must not name a language, found %q", name, named)
-			}
-		}
 	}
 }

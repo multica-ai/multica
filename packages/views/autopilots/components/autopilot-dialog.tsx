@@ -12,6 +12,7 @@ import {
   FolderKanban,
   Maximize2,
   Minimize2,
+  Pencil,
   Play,
   Plus,
   Rocket,
@@ -19,7 +20,7 @@ import {
   Webhook,
   X as XIcon,
   Zap,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import {
   Dialog,
@@ -67,15 +68,13 @@ import { getDefaultScheduleConfig, type ScheduleConfig } from "./schedule-editor
 import { browserTimezone } from "../../common/timezone-select";
 import { parseCron, toCron } from "./schedule-editor/cron-mapping";
 import { useScheduleSubmitGate } from "./schedule-editor/validate";
-import { WebhookEventFilterSection } from "./webhook-event-filter-section";
+import { WebhookEventFilterSummary } from "./webhook-event-filter-section";
+import { EditWebhookTriggerDialog } from "./edit-webhook-trigger-dialog";
 import { WebhookUrlField } from "./webhook-url-field";
 import { useT } from "../../i18n";
 import { formatSchedulePartialFailureToast } from "./autopilot-dialog-toast";
-import type { WebhookEventFilter } from "@multica/core/types";
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 export interface AutopilotInitial {
   title: string;
@@ -106,9 +105,7 @@ export type AutopilotDialogProps =
       canManageAccess: boolean;
     };
 
-// ---------------------------------------------------------------------------
 // Static schema-level data (not user-visible)
-// ---------------------------------------------------------------------------
 
 const OUTPUT_MODE_KEYS: AutopilotExecutionMode[] = ["create_issue", "run_only"];
 
@@ -117,23 +114,7 @@ const OUTPUT_MODE_ICONS: Record<AutopilotExecutionMode, typeof FilePlus2> = {
   run_only: Play,
 };
 
-// ---------------------------------------------------------------------------
-// Webhook event-filter dirty detection
-// ---------------------------------------------------------------------------
-
-// serializeEventFilters returns a stable JSON string so the edit-mode dirty
-// check can compare the current filters against the snapshot taken on open
-// without depending on reference equality. Normalizes empty Actions to []
-// so omitted-vs-explicit-empty doesn't show as a phantom change.
-function serializeEventFilters(filters: WebhookEventFilter[]): string {
-  return JSON.stringify(
-    filters.map((f) => ({ event: f.event, actions: f.actions ?? [] })),
-  );
-}
-
-// ---------------------------------------------------------------------------
 // AutopilotDialog
-// ---------------------------------------------------------------------------
 
 export function AutopilotDialog(props: AutopilotDialogProps) {
   const { t } = useT("autopilots");
@@ -207,34 +188,43 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   })();
   const [triggerKind, setTriggerKind] = useState<"schedule" | "webhook">(initialKind);
 
-  const initialEventFilters: WebhookEventFilter[] =
-    !isCreate && props.triggers[0]?.event_filters ? props.triggers[0].event_filters : [];
-  const [eventFilters, setEventFilters] = useState<WebhookEventFilter[]>(initialEventFilters);
+  // Event filters are edited in one place, the per-webhook dialog. The webhook
+  // panel (rendered when the first trigger is a webhook) reads them back and
+  // opens that dialog for the autopilot's only webhook; with two or more it
+  // points at their rows. Read live, so a save there shows here at once.
+  const existingWebhook = isCreate
+    ? null
+    : props.triggers.find((trig) => trig.kind === "webhook") ?? null;
+  const webhookTriggerCount = isCreate
+    ? 0
+    : props.triggers.filter((trig) => trig.kind === "webhook").length;
 
   const initialCronRef = useRef(toCron(initialCfg));
   const initialTimezoneRef = useRef(initialCfg.timezone);
-  const initialEventFiltersRef = useRef(serializeEventFilters(initialEventFilters));
   const scheduleDirty =
     toCron(schedule) !== initialCronRef.current ||
     schedule.timezone !== initialTimezoneRef.current;
-  const eventFiltersDirty =
-    serializeEventFilters(eventFilters) !== initialEventFiltersRef.current;
 
-  const firstTriggerIdRef = useRef(
-    !isCreate && props.triggers[0] ? props.triggers[0].id : null,
-  );
-  // The row the schedule write targets, snapshotted at mount like the one
-  // above. Null means there is none to patch, so the write creates one.
+  // The row the schedule write targets, snapshotted at mount. Null means there
+  // is none to patch, so the write creates one.
   const scheduleTriggerIdRef = useRef(existingSchedule?.id ?? null);
 
-  const triggerCount = isCreate ? 0 : props.triggers.length;
-  const schedulePillDisabled = !isCreate && triggerCount >= 2;
+  // Only SCHEDULE rows can make this panel ambiguous, so only they are counted.
+  // Counting every kind locked a 1 schedule + 1 webhook autopilot (MUL-7478),
+  // where `existingSchedule` above names exactly one row and the write below
+  // has nowhere else to land. Two schedules is the real ambiguity: this editor
+  // holds one `ScheduleConfig`, so it would show the first row as if it were
+  // the whole story and save would silently rewrite that one alone.
+  const scheduleTriggerCount = isCreate
+    ? 0
+    : props.triggers.filter((trig) => trig.kind === "schedule").length;
+  const schedulePillDisabled = !isCreate && scheduleTriggerCount >= 2;
 
   // The manual-autopilot empty state, and the only path to a first schedule
-  // from this dialog. Skipped when the panel is locked (2+ triggers), which
-  // keeps that case rendering exactly the disabled editor it always has.
+  // from this dialog. A locked panel never reaches it: locking means two
+  // schedules exist, so `existingSchedule` is non-null whenever it is true.
   const showScheduleEmptyState =
-    !isCreate && existingSchedule === null && !scheduleAdded && !schedulePillDisabled;
+    !isCreate && existingSchedule === null && !scheduleAdded;
 
   const selectedAssignee = useMemo(() => {
     if (!assigneeId) return null;
@@ -315,7 +305,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
         const autopilot = await createAutopilot.mutateAsync({
           title: title.trim(),
           description: description.trim() || undefined,
-          project_id: executionMode === "create_issue" ? projectId : null,
+          project_id: projectId,
           assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
@@ -332,7 +322,6 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             webhookTrigger = await createTrigger.mutateAsync({
               autopilotId: autopilot.id,
               kind: "webhook",
-              event_filters: eventFilters.length > 0 ? eventFilters : undefined,
             });
           } else {
             await createTrigger.mutateAsync({
@@ -368,7 +357,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           id: props.autopilotId,
           title: title.trim(),
           description: description.trim() || null,
-          project_id: executionMode === "create_issue" ? projectId : null,
+          project_id: projectId,
           assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
@@ -406,28 +395,6 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
               err instanceof Error && err.message ? err.message : null;
           }
         }
-        // Webhook autopilots have no schedule, but the user can still edit
-        // event_filters from the same dialog. PATCH only when the snapshot
-        // taken on open differs from the live state. Sending an explicit
-        // empty array clears filters server-side (tri-state semantics — see
-        // UpdateAutopilotTriggerRequest in autopilot.go).
-        if (
-          triggerKind === "webhook" &&
-          eventFiltersDirty &&
-          firstTriggerIdRef.current
-        ) {
-          try {
-            await updateTrigger.mutateAsync({
-              autopilotId: props.autopilotId,
-              triggerId: firstTriggerIdRef.current,
-              event_filters: eventFilters,
-            });
-          } catch (err) {
-            triggerOk = false;
-            triggerErrMessage =
-              err instanceof Error && err.message ? err.message : null;
-          }
-        }
         onOpenChange(false);
         if (triggerOk) {
           toast.success(t(($) => $.dialog.toast_updated));
@@ -457,10 +424,10 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
         className={cn(
           "p-0 gap-0 flex flex-col overflow-hidden",
           "!transition-all !duration-300 !ease-out !-translate-y-1/2",
-          "!w-[calc(100vw-2rem)]",
+          "!w-[calc(100%-2rem)]",
           isExpanded
-            ? "!max-w-6xl !h-[calc(100vh-4rem)]"
-            : "!max-w-5xl !h-[min(720px,calc(100vh-4rem))]",
+            ? "!max-w-6xl !h-[calc(100%-4rem)]"
+            : "!max-w-5xl !h-[min(720px,calc(100%-4rem))]",
         )}
       >
         <DialogTitle className="sr-only">
@@ -520,6 +487,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                     type="button"
                     onClick={() => setIsExpanded((v) => !v)}
                     className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                    aria-label={isExpanded ? t(($) => $.dialog.collapse) : t(($) => $.dialog.expand)}
                   >
                     {isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
                   </button>
@@ -536,6 +504,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                     type="button"
                     onClick={() => onOpenChange(false)}
                     className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                    aria-label={t(($) => $.dialog.close)}
                   >
                     <XIcon className="size-4" />
                   </button>
@@ -621,13 +590,19 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
 
             <OutputModeSection mode={executionMode} onChange={setExecutionMode} />
 
-            {executionMode === "create_issue" && (
-              <ProjectSection
-                projectId={projectId}
-                selectedProject={selectedProject}
-                onChange={setProjectId}
-              />
-            )}
+            {/* Shown for BOTH output modes (MUL-6681). The project is not only
+                issue routing: for a run_only autopilot it is the ONLY source of
+                project context the daemon has (there is no issue to inherit it
+                from), so it decides whether the run gets the project's
+                repository / local_directory — and with it worktree isolation —
+                or a bare workdir. Hiding it here left run_only autopilots with
+                no way to bind one, and the save below used to send null for
+                run_only, silently clearing a binding made via the CLI. */}
+            <ProjectSection
+              projectId={projectId}
+              selectedProject={selectedProject}
+              onChange={setProjectId}
+            />
 
             {executionMode === "create_issue" && (
               <SubscribersSection
@@ -643,7 +618,9 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             {triggerKind === "schedule" ? (
               <div>
                 <SectionLabel>{t(($) => $.dialog.section_schedule)}</SectionLabel>
-                {showScheduleEmptyState ? (
+                {schedulePillDisabled ? (
+                  <ScheduleMultipleNotice count={scheduleTriggerCount} />
+                ) : showScheduleEmptyState ? (
                   <ScheduleEmptyState onAdd={() => setScheduleAdded(true)} />
                 ) : (
                   /* No `onValidityChange` / `clearRejection` here, unlike the
@@ -660,20 +637,15 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                     // over the network and then writes the schedule it read before
                     // that round trip, so an edit made in between would be dropped
                     // on the floor with a success toast over it.
-                    disabled={schedulePillDisabled || submitting}
-                    disabledReason={
-                      schedulePillDisabled
-                        ? t(($) => $.dialog.schedule_disabled_reason)
-                        : undefined
-                    }
+                    disabled={submitting}
                   />
                 )}
               </div>
             ) : (
               <WebhookSection
-                isCreate={isCreate}
-                eventFilters={eventFilters}
-                onEventFiltersChange={setEventFilters}
+                autopilotId={isCreate ? null : props.autopilotId}
+                webhook={existingWebhook}
+                webhookCount={webhookTriggerCount}
               />
             )}
           </aside>
@@ -726,9 +698,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Right column sections
-// ---------------------------------------------------------------------------
 
 function SectionLabel({
   children,
@@ -902,6 +872,9 @@ function ProjectSection({
   return (
     <div>
       <SectionLabel>{t(($) => $.dialog.section_project)}</SectionLabel>
+      <p className="mb-2 text-micro text-muted-foreground">
+        {t(($) => $.dialog.project_hint)}
+      </p>
       <ProjectPicker
         projectId={projectId}
         onUpdate={(updates) => onChange(updates.project_id ?? null)}
@@ -955,6 +928,22 @@ function SubscribersSection({
 }
 
 
+// The panel cannot speak for two schedules, and a disabled editor showing the
+// first of them is still half a truth — the one the reader would set their
+// clock by. It says what it cannot do and where the reader can: this dialog
+// only ever opens from the detail page, so the Triggers list is already on
+// screen behind it.
+function ScheduleMultipleNotice({ count }: { count: number }) {
+  const { t } = useT("autopilots");
+  return (
+    <div className="rounded-md border border-dashed p-3">
+      <p className="text-caption text-muted-foreground">
+        {t(($) => $.dialog.schedule_multiple_notice, { count })}
+      </p>
+    </div>
+  );
+}
+
 // The schedule section of an autopilot that has none. Mirrors the detail
 // page's trigger empty state — a dashed card that states the autopilot is
 // manual — so the two surfaces agree on what "no schedule" looks like instead
@@ -975,9 +964,7 @@ function ScheduleEmptyState({ onAdd }: { onAdd: () => void }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Trigger kind segmented control + webhook help section
-// ---------------------------------------------------------------------------
 
 function TriggerKindSection({
   kind,
@@ -1016,15 +1003,19 @@ function TriggerKindSection({
 }
 
 function WebhookSection({
-  isCreate,
-  eventFilters,
-  onEventFiltersChange,
+  autopilotId,
+  webhook,
+  webhookCount,
 }: {
-  isCreate: boolean;
-  eventFilters: WebhookEventFilter[];
-  onEventFiltersChange: (filters: WebhookEventFilter[]) => void;
+  // Null while creating: there is no webhook to filter until the autopilot
+  // exists, and its row on the detail page then offers the editor.
+  autopilotId: string | null;
+  webhook: AutopilotTrigger | null;
+  webhookCount: number;
 }) {
   const { t } = useT("autopilots");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const isCreate = autopilotId === null;
   return (
     <div className="space-y-3">
       <div>
@@ -1035,18 +1026,45 @@ function WebhookSection({
             : t(($) => $.dialog.webhook_help_edit)}
         </p>
       </div>
-      <WebhookEventFilterSection
-        filters={eventFilters}
-        onChange={onEventFiltersChange}
-      />
+      {webhookCount >= 2 ? (
+        <div className="rounded-md border border-dashed p-3">
+          <p className="text-caption text-muted-foreground">
+            {t(($) => $.dialog.webhook_multiple_notice)}
+          </p>
+        </div>
+      ) : autopilotId && webhook ? (
+        <div className="space-y-1.5">
+          <SectionLabel>{t(($) => $.dialog.event_filter_label)}</SectionLabel>
+          <WebhookEventFilterSummary filters={webhook.event_filters ?? []} />
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            className="text-muted-foreground"
+            onClick={() => setFiltersOpen(true)}
+          >
+            <Pencil />
+            {t(($) => $.dialog.webhook_edit_filters)}
+          </Button>
+          {/* The editor writes on its own Save, so this dialog's Cancel has
+              nothing of it to undo; say so before someone relies on it. */}
+          <p className="text-micro text-muted-foreground">
+            {t(($) => $.dialog.webhook_filters_saved_separately)}
+          </p>
+          <EditWebhookTriggerDialog
+            open={filtersOpen}
+            onOpenChange={setFiltersOpen}
+            autopilotId={autopilotId}
+            trigger={webhook}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
 // Post-create state for webhook autopilots: shows the freshly minted URL
 // inline so the user can copy it without leaving the dialog.
-// ---------------------------------------------------------------------------
 
 function WebhookCreatedPanel({
   trigger,

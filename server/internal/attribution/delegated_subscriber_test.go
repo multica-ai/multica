@@ -14,6 +14,7 @@ func TestDelegatedSubscriber_AgentCreateInheritsHuman(t *testing.T) {
 		CreatorType:      "agent",
 		OriginType:       "agent_create",
 		OriginOriginator: human,
+		OriginRootSource: SourceDirectHuman,
 	})
 
 	if !ok {
@@ -36,6 +37,7 @@ func TestDelegatedSubscriber_QuickCreateIsDirectIntent(t *testing.T) {
 		CreatorType:      "agent",
 		OriginType:       "quick_create",
 		OriginOriginator: human,
+		OriginRootSource: SourceDirectHuman,
 	})
 
 	if !ok {
@@ -58,6 +60,7 @@ func TestDelegatedSubscriber_AutopilotExcluded(t *testing.T) {
 		CreatorType:      "agent",
 		OriginType:       "autopilot",
 		OriginOriginator: human,
+		OriginRootSource: SourceTriggerOwner,
 	}); ok {
 		t.Fatal("autopilot issues must not take a delegated subscription")
 	}
@@ -71,6 +74,7 @@ func TestDelegatedSubscriber_NoHumanNoSubscription(t *testing.T) {
 		CreatorType:      "agent",
 		OriginType:       "agent_create",
 		OriginOriginator: pgtype.UUID{},
+		OriginRootSource: SourceDirectHuman,
 	}); ok {
 		t.Fatal("an unattributed origin task must not produce a subscriber")
 	}
@@ -84,6 +88,7 @@ func TestDelegatedSubscriber_MemberCreatedIssueUnaffected(t *testing.T) {
 		CreatorType:      "member",
 		OriginType:       "agent_create",
 		OriginOriginator: human,
+		OriginRootSource: SourceDirectHuman,
 	}); ok {
 		t.Fatal("member-created issues must not take a delegated subscription")
 	}
@@ -97,7 +102,46 @@ func TestDelegatedSubscriber_UnknownOriginIsInert(t *testing.T) {
 		CreatorType:      "agent",
 		OriginType:       "some_future_origin",
 		OriginOriginator: human,
+		OriginRootSource: SourceDirectHuman,
 	}); ok {
 		t.Fatal("an unrecognized origin_type must not subscribe anyone")
+	}
+}
+
+// TestDelegatedSubscriber_ArmedTriggerChainSubscribesNobody is MUL-7051. The
+// originator is a real, valid member — the person who armed the schedule — and
+// before MUL-6951 no such value existed, so "there is a human here" was safe to
+// read as "a human asked for this". It no longer is, and every issue the
+// autopilot's agent filed started subscribing that member: the exact outcome
+// TestDelegatedSubscriber_AutopilotExcluded forbids, one hop further down.
+func TestDelegatedSubscriber_ArmedTriggerChainSubscribesNobody(t *testing.T) {
+	if _, _, ok := DelegatedSubscriber(SubscriptionFacts{
+		CreatorType:      "agent",
+		OriginType:       "agent_create",
+		OriginOriginator: human,
+		OriginRootSource: SourceTriggerOwner,
+	}); ok {
+		t.Fatal("an issue filed inside an autopilot run must not subscribe whoever armed the trigger")
+	}
+}
+
+// TestDelegatedSubscriber_UnknownRootIsInert is the origin-vocabulary guard
+// (TestDelegatedSubscriber_UnknownOriginIsInert) applied to the other open
+// vocabulary this rule now reads. MUL-7051 happened because a new root source
+// turned the rule on for a population nobody had chosen; a whitelist means the
+// next one has to be chosen deliberately.
+//
+// An empty label — a pre-attribution row, or a lineage truncated before its root
+// — is the same answer: unproven, so no subscription.
+func TestDelegatedSubscriber_UnknownRootIsInert(t *testing.T) {
+	for _, root := range []Source{SourceDelegation, SourceCommentSource, SourceRuleOwner, SourceOwnerFallback, SourceBackfill, SourceUnattributed, "some_future_root", ""} {
+		if _, _, ok := DelegatedSubscriber(SubscriptionFacts{
+			CreatorType:      "agent",
+			OriginType:       "agent_create",
+			OriginOriginator: human,
+			OriginRootSource: root,
+		}); ok {
+			t.Fatalf("root source %q must not subscribe anyone: only a direct human act is a request", root)
+		}
 	}
 }
