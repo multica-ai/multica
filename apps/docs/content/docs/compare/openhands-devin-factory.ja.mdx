@@ -1,0 +1,61 @@
+---
+title: Multica と OpenHands、Devin、Factory の比較
+description: OpenHands、Devin、Factory はコーディングエージェントを作っています。Multica は、Devin CLI や Factory Droid を含む多くのエージェントに、チームが作業を割り当て、実行し、レビューするワークスペースです。
+---
+
+OpenHands、Devin、Factory は、それぞれコーディングエージェントとそれを取り巻くプラットフォームを作っています。Multica はエージェントを作りません。チームに 1 つのワークスペースを提供し、[31 種類の AI コーディングツール](/providers)をベースにしたエージェントにタスクを割り当て、チームが接続したコンピューターでそれらを動かし、すべての実行をタスクに記録します。Devin CLI と Factory Droid もその 31 種類に含まれるため、必ずしもどちらか一方を選ぶ話ではありません。
+
+このページの OpenHands、Devin、Factory に関する記述は、2026 年 11 月時点の公開ドキュメントと料金ページに基づいています：[OpenHands](https://docs.openhands.dev/enterprise)、[Devin](https://docs.devin.ai/admin/billing/self-serve)、[Factory](https://docs.factory.com/remote-control)。最新の情報はそれぞれを確認してください。
+
+## 結論
+
+- **Devin か Factory を選ぶ**：1 社のベンダーのエージェントとマネージドなクラウド環境を使い、そのベンダーに統一してよい場合。
+- **OpenHands を選ぶ**：変更、セルフホスト、SDK での拡張ができる MIT ライセンスのエージェントが欲しい場合。
+- **Multica を選ぶ**：チームが Claude Code、Codex、Cursor Agent、Copilot CLI、Devin CLI、Factory Droid など複数のコーディングツールを使っていて、それらをチームメイトとして 1 つのボードで管理し、自分のマシンで動かし、エージェントごとのアクセス制御とレビューの手順を持ちたい場合。Multica はセルフホストできます。
+
+## 比較
+
+| | Multica | OpenHands | Devin | Factory |
+|---|---|---|---|---|
+| 何か | コーディングエージェントに作業を割り当て、実行し、追跡するワークスペース | オープンソースのコーディングエージェントと SDK。Cloud 版と Enterprise 版もある | Cognition の AI ソフトウェアエンジニア。クラウドセッション、CLI、デスクトップアプリがある | Droid エージェントのためのプラットフォーム。CLI、デスクトップ、Web がある |
+| 独自のコーディングエージェント | なし。エージェントは選んだツールで動く | あり | あり | あり |
+| 1 つのワークスペースで使えるツール | 31 種類。Devin CLI と Factory Droid を含み、エージェントごとに別のツールを使える | 自社のエージェント。料金ページには Codex や Claude など他のエージェントの実行も記載 | Devin | Droid |
+| エージェントが動く場所 | あなたが接続したコンピューター：ノートパソコン、サーバー、VM | ローカル、Docker や Kubernetes、OpenHands Cloud、セルフホストの Enterprise | Devin のクラウド VM、または Devin CLI 経由であなたのマシン | Remote Control 経由であなたのマシン、または Factory が管理する Droid Computers |
+| 作業の入り口 | 自身のタスク、コメント、チャット、オートパイロット、Slack や Feishu などのチャット連携 | Git ホスティング、Jira、Slack との連携 | Slack や Linear などとの連携。Enterprise では Jira | Factory のアプリ、CLI、連携 |
+| チームのアクセス制御 | エージェントごとの Access、ワークスペースのロール、ゲスト、プライベートプロジェクト | Teams と Enterprise でマルチユーザーの RBAC | Team プランで SSO とコスト管理 | Business と Enterprise で管理機能 |
+| セルフホスト | 可能。Docker Compose または Helm | 可能 | ホスト型サービス。Devin CLI はローカルで動く | Enterprise でオンプレミスの選択肢 |
+| ライセンス | ソースアベイラブル（source-available）。組織内での利用は無料 | MIT | プロプライエタリ | プロプライエタリ |
+| 支払い方法 | 社内利用のセルフホストは無料。各ツールはそれぞれのサブスクリプションか API キーで課金 | オープンソースは無料。Teams と Enterprise は有料 | 使用量の枠付きのサブスクリプション。Enterprise は ACU で課金 | 席数ごとのプラン。Enterprise は個別見積もり |
+
+## Multica は Devin のオープンソース代替か
+
+部分的にはそうですが、違いは重要です。
+
+- **Multica はソースアベイラブルで、OSI 定義のオープンソースではありません。** [Multica License](https://github.com/multica-ai/multica/blob/main/LICENSE)、つまり追加条件付きの Apache License 2.0 で公開されています。組織内での利用は、チーム全体のためのセルフホストを含めて無料です。ホスト型サービスとして他者に提供する場合や、販売する製品に組み込む場合は商用ライセンスが必要です。OSI ライセンスのエージェントが必要なら、OpenHands は MIT です。
+- **Multica 自体は自律型エージェントではありません。** 作業の割り当て、進捗の把握、レビュー、定期的な作業の実行といった、Devin のチーム向けの部分を担い、コーディングそのものは Claude Code や Codex など、すでに持っているエージェントが行います。
+
+## OpenHands、Devin、Factory が向いている場合
+
+- タスクごとにマネージドなクラウド環境が欲しく、エージェントのためにマシンをオンラインにしておきたくない。
+- 1 社のベンダーのエージェント、モデル、サポート契約に統一したい。
+- SDK をもとに自社のエージェント製品を作りたい。OpenHands Software Agent SDK はそのためのものです。
+- エンジニアが主に 1 つのエージェントのアプリで、一度に 1 つのエージェントと作業する。
+
+## Multica が向いている場合
+
+- **チームが複数のツールを併用している。** Claude Code を好む人もいれば、Codex、Cursor、Copilot を使う人もいます。Multica では各エージェントがツールとモデルを選び、全員が 1 つのボード、1 つの[インボックス](/inbox)、1 つの[分析](/analytics)ビューを共有します。
+- **すでに支払っているサブスクリプションを使いたい。** Multica は各ツール自身のログインでツールを動かし、モデルの再販やエージェントの計算量への課金はしません。
+- **コードと秘密情報がある場所でエージェントを動かしたい。** ランタイムはあなたのノートパソコン、ビルドサーバー、VM です。Multica をセルフホストすれば、ワークスペースのデータも自社のサーバーに残ります。
+- **複数の人がエージェントを共有する。** [Access](/agents#権限と-access) で誰が各エージェントを実行できるかを決め、[スクワッド](/squads)で適切なエージェントに作業を振り分け、[ワークフロー](/workflows)でレビューの手順を加えます。[チームでエージェントプールを共有する](/team-agent-pool)を参照してください。
+- **作業が繰り返し発生する。** [オートパイロット](/autopilots)がスケジュールや webhook でタスクを作成して割り当てます。
+
+## Multica の中で Devin や Factory を使う
+
+Devin CLI（`devin`）と Factory Droid（`droid`）は Multica の組み込みツールです。Multica に接続したコンピューターに CLI をインストールしてサインインし、そのランタイムでエージェントを作ります。そのエージェントはほかのエージェントと同じようにタスク、コメント、レビューを受け持ち、使用量はツール自身のプランでまかなわれます。Devin のモデルエイリアスや Droid のスキルのパスなどの詳細は [AI コーディングツール比較](/providers)にあります。OpenHands は現在、組み込みツールではありません。
+
+## 関連ページ
+
+- [Multica と Linear、Jira の比較](/compare/linear-jira)
+- [Multica とローカルの worktree 管理ツールの比較](/compare/worktree-managers)
+- [チームでエージェントプールを共有する](/team-agent-pool)
+- [セキュリティモデル](/security-model)：ランタイム上でエージェントが何にアクセスできるか。

@@ -266,6 +266,36 @@ func (q *Queries) ListWorkspaceManagerUserIDs(ctx context.Context, workspaceID p
 	return items, nil
 }
 
+const lockWorkspaceOwners = `-- name: LockWorkspaceOwners :many
+SELECT id FROM member
+WHERE workspace_id = $1 AND role = 'owner'
+ORDER BY id
+FOR UPDATE
+`
+
+// Locks a workspace's owner rows in id order, so changes that could take away
+// its last owner apply one after the other and each counts the owners the
+// previous one left.
+func (q *Queries) LockWorkspaceOwners(ctx context.Context, workspaceID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, lockWorkspaceOwners, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateMemberRole = `-- name: UpdateMemberRole :one
 UPDATE member SET role = $2
 WHERE id = $1

@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Radio } from "@base-ui/react/radio";
 import { RadioGroup } from "@base-ui/react/radio-group";
 import { toast } from "sonner";
 import { AlertTriangle, Loader2, Lock, Plug, User, Users } from "@multica/ui/icons";
+import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
@@ -24,12 +25,16 @@ import type {
   AppAccountScope,
   AppCatalogEntry,
 } from "@multica/core/types";
+import { appAccountStatus } from "../../../common/app-status";
 import { ComposioToolkitLogo } from "../../../common/composio-toolkit-logo";
+import { ConnectAppDialog } from "../../../common/connect-app-dialog";
 import { SavedAppRestriction } from "../../../common/saved-app-restriction";
 import { AppLink } from "../../../navigation";
 import { PaidFeatureNotice, usePaidFeatureErrorMessage } from "../../../billing";
 import { useT } from "../../../i18n";
 import { ObjectSectionEmpty } from "../../../layout/object-page";
+import { scopeForNewApp } from "../agent-app-status";
+import { useAppStatusLabel } from "../use-agent-apps";
 
 const SCOPES: readonly AppAccountScope[] = ["team", "personal"];
 
@@ -47,6 +52,8 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
   const restore = useRestoreAppAccess();
   const qc = useQueryClient();
   const paidFeatureError = usePaidFeatureErrorMessage();
+  const statusLabel = useAppStatusLabel();
+  const [connect, setConnect] = useState<{ scope: AppAccountScope; slug: string; name: string; logo?: string } | null>(null);
 
   const canManageTeam = overview.data?.can_manage ?? false;
   const apps = useMemo(() => appsQuery.data ?? [], [appsQuery.data]);
@@ -143,22 +150,15 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
             const hasPersonal = connected.has(`personal:${slug}`);
             const availableScopes = SCOPES.filter((scope) => connected.has(`${scope}:${slug}`));
             const canUseTeam = canManageTeam && (canAddTeam || app?.account_scope === "team");
-            const defaultScope: AppAccountScope = hasTeam && canManageTeam && canAddTeam && (entry?.recommended_scope === "team" || !hasPersonal)
-              ? "team" : "personal";
+            const defaultScope = scopeForNewApp(overview.data, slug, entry?.recommended_scope, canAddTeam);
             const scope = app?.account_scope ?? defaultScope;
-            const isConnected = connected.has(`${scope}:${slug}`);
+            const accountStatus = appAccountStatus(overview.data, scope, slug);
+            const isConnected = accountStatus === "connected";
             const lockedTeam = scope === "team" && !canManageTeam;
-            const canEnable = catalog.isSuccess && !!entry && entry.allowed !== false && (hasPersonal || (hasTeam && canManageTeam && canAddTeam));
+            const canEnable = catalog.isSuccess && !!entry && entry.allowed !== false;
             const canRaiseLevel = scope !== "team" || canAddTeam;
+            const canConnect = !!app && !isConnected && (scope === "personal" || (canManageTeam && (canAddTeam || accountStatus === "needs_reconnecting")));
             const AccountIcon = scope === "team" ? Users : User;
-            const status =
-              scope === "team"
-                ? isConnected
-                  ? t(($) => $.tab_body.connected_apps.team_connected)
-                  : t(($) => $.tab_body.connected_apps.team_missing)
-                : isConnected
-                  ? t(($) => $.tab_body.connected_apps.personal_connected)
-                  : t(($) => $.tab_body.connected_apps.personal_missing);
             return (
               <li key={slug} className="space-y-2 p-3">
                 <div className="flex flex-wrap items-center gap-3">
@@ -175,7 +175,7 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
                       {app ? (
                         <>
                           <AccountIcon className="mt-0.5 size-3 shrink-0" />
-                          <span>{scope === "personal" && <>{scopeLabel(scope)} · </>}{status}</span>
+                          <span>{scopeLabel(scope)} · {statusLabel(accountStatus)}</span>
                         </>
                       ) : t(($) => $.tab_body.connected_apps.available_accounts, {
                         accounts: availableScopes.map((value) => value === "personal"
@@ -189,6 +189,19 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
                       </p>
                     )}
                   </div>
+                  {canConnect && (
+                    <Button
+                      size="xs"
+                      variant={scope === "personal" && accountStatus === "not_connected" ? "default" : "outline"}
+                      onClick={() => setConnect({ scope, slug, name, logo: entry?.logo })}
+                    >
+                      {accountStatus === "needs_reconnecting"
+                        ? t(($) => $.apps_section.reconnect)
+                        : scope === "team"
+                          ? t(($) => $.apps_section.connect_team)
+                          : t(($) => $.apps_section.connect_yours)}
+                    </Button>
+                  )}
                   {app && hasTeam && hasPersonal && (
                     <RadioGroup
                       className="inline-flex h-7 shrink-0 items-center rounded-lg bg-muted p-[3px]"
@@ -217,7 +230,7 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
                     checked={!!app}
                     disabled={update.isPending || (app ? lockedTeam : !canEnable)}
                     aria-label={t(($) => $.tab_body.connected_apps.enable, { app: name })}
-                    title={!canManageTeam && (lockedTeam || (!app && hasTeam && !hasPersonal)) ? t(($) => $.tab_body.connected_apps.team_admin_only) : undefined}
+                    title={lockedTeam ? t(($) => $.tab_body.connected_apps.team_admin_only) : undefined}
                     onCheckedChange={(checked) => {
                       if (checked && canEnable) save([...apps, { agent_id: agent.id, toolkit_slug: slug, account_scope: defaultScope, level: "write" }]);
                       else if (!checked && app && !lockedTeam) save(apps.filter((item) => item.toolkit_slug !== slug));
@@ -254,13 +267,26 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-caption text-muted-foreground">{t(($) => $.tab_body.connected_apps.connect_hint)}</p>
         <AppLink
-          href={`${paths.settings()}?tab=apps`}
+          href={`${paths.apps()}?tab=accounts`}
           className="inline-flex items-center gap-1.5 text-caption font-medium text-primary hover:underline"
         >
           <Plug className="size-3" />
           {t(($) => $.tab_body.connected_apps.manage_link)}
         </AppLink>
       </div>
+
+      {connect && (
+        <ConnectAppDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setConnect(null);
+          }}
+          scope={connect.scope}
+          slug={connect.slug}
+          name={connect.name}
+          logo={connect.logo}
+        />
+      )}
 
       {update.isPending && (
         <p className="flex items-center gap-1.5 text-caption text-muted-foreground">

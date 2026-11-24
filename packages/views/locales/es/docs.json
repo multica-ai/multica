@@ -59,13 +59,15 @@
     "title": "Historial",
     "current": "Actual",
     "restore": "Restaurar esta versión",
-    "loading": "Cargando..."
+    "loading": "Cargando...",
+    "from_discussion": "Desde el comentario: {{quote}}"
   },
   "not_found": {
     "title": "Documento no encontrado",
     "description": "Puede haberse eliminado."
   },
   "edited": "Editado {{time}}",
+  "view_history": "Ver historial",
   "outline": "Esquema",
   "link_copied": "Enlace copiado",
   "unavailable": {
@@ -96,6 +98,7 @@
       "save": "No se pudo publicar el comentario",
       "delete": "No se pudo eliminar el comentario",
       "resolve": "No se pudo actualizar el comentario"
-    }
+    },
+    "run_waiting_retry": "Esperando para reintentar"
   }
 }

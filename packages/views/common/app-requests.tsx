@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Loader2, Pencil, Plug, ShieldCheck } from "@multica/ui/icons";
+import { Building2, Loader2, Pencil, Plug, ShieldCheck } from "@multica/ui/icons";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -16,16 +16,21 @@ import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { FEATURE_LOCKED_CODE, workspaceFeatureKeys } from "@multica/core/billing";
 import {
+  appCatalogOptions,
+  appsOverviewOptions,
   chatAppRequestsOptions,
   connectedAppsKeys,
   issueAppRequestsOptions,
   useDecideAppRequest,
+  useDismissTeamAppRequests,
 } from "@multica/core/connected-apps";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { AppRequest } from "@multica/core/types";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { useLocale, useT } from "../i18n";
-import { currentPath, useNavigation } from "../navigation";
-import { isDesktopShell, openExternal } from "../platform";
+import { AppLink, useNavigation } from "../navigation";
+import { appAccountStatus } from "./app-status";
+import { ConnectAppDialog } from "./connect-app-dialog";
 
 const CONNECTED_PARAM = "app_connected";
 const CONNECT_ERROR_PARAM = "app_connect_error";
@@ -115,7 +120,99 @@ export function InboxAppRequest({ requestId, chatSessionId }: { requestId: strin
   });
   const request = data?.find((r) => r.id === requestId);
   if (!request) return null;
+  if (isTeamConnect(request) && request.can_decide && request.status === "pending") {
+    const waiting = (data ?? []).filter(
+      (r) => isTeamConnect(r) && r.status === "pending" && r.toolkit_slug === request.toolkit_slug,
+    );
+    return <TeamAccountRequests slug={request.toolkit_slug} requests={waiting} />;
+  }
   return <AppRequestList requests={[request]} showDecided />;
+}
+
+function isTeamConnect(request: AppRequest) {
+  return request.kind === "connect" && request.account_scope === "team";
+}
+
+/**
+ * Everything waiting for one team account, as an admin sees it in the Inbox:
+ * agents' runs and members' asks are one kind of request, so connecting the
+ * account once answers them all.
+ */
+function TeamAccountRequests({ slug, requests }: { slug: string; requests: AppRequest[] }) {
+  const { t } = useT("settings");
+  const wsId = useWorkspaceId();
+  const paths = useWorkspacePaths();
+  const { getActorName } = useActorName();
+  const catalog = useQuery(appCatalogOptions(wsId));
+  const decline = useDismissTeamAppRequests();
+  const [connectOpen, setConnectOpen] = useState(false);
+  const entry = catalog.data?.apps.find((a) => a.slug === slug);
+  const app = entry?.name || slug;
+  const declineAll = () =>
+    decline.mutateAsync(slug).then(
+      () => toast.success(t(($) => $.connected_apps.account_row.toast_declined)),
+      () => toast.error(t(($) => $.connected_apps.request.toast_failed)),
+    );
+
+  return (
+    <section className="my-3 space-y-2 rounded-lg border border-brand/40 bg-brand/5 p-3" data-team-account-requests={slug}>
+      <div className="flex items-start gap-2">
+        <ShieldCheck className="mt-0.5 size-4 shrink-0 text-brand" />
+        <div className="min-w-0 flex-1 space-y-1">
+          <p className="text-body font-medium">{t(($) => $.connected_apps.team_requests.title, { app })}</p>
+          <p className="flex items-center gap-1 text-caption text-muted-foreground">
+            <Building2 className="size-3" aria-hidden="true" />
+            {t(($) => $.connected_apps.owner.team)}
+          </p>
+        </div>
+      </div>
+      <ul className="divide-y rounded-md border bg-background">
+        {requests.map((r) => {
+          const run = !!r.agent_id && !!(r.issue_id || r.chat_session_id);
+          return (
+            <li key={r.id} className="flex items-center gap-2 px-3 py-2 text-body">
+              <span className="min-w-0 flex-1 truncate">
+                <span className="font-medium">
+                  {run ? getActorName("agent", r.agent_id) : getActorName("member", r.approver_user_id)}
+                </span>
+                {r.summary ? (
+                  <span className="text-muted-foreground">
+                    {t(($) => $.connected_apps.team_requests.summary, { summary: r.summary })}
+                  </span>
+                ) : null}
+              </span>
+              <Badge variant="outline" className="shrink-0">
+                {run ? t(($) => $.connected_apps.team_requests.run_waiting) : t(($) => $.connected_apps.team_requests.asked)}
+              </Badge>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="text-caption text-muted-foreground">
+        {t(($) => $.connected_apps.team_requests.resumes)}
+      </p>
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <Button size="xs" variant="ghost" nativeButton={false} render={<AppLink href={paths.appDetail(slug)} />}>
+          {t(($) => $.connected_apps.team_requests.open_app)}
+        </Button>
+        <Button size="xs" variant="ghost" disabled={decline.isPending} onClick={declineAll}>
+          {t(($) => $.connected_apps.team_requests.decline_all)}
+        </Button>
+        <Button size="xs" onClick={() => setConnectOpen(true)}>
+          <Plug />
+          {t(($) => $.connected_apps.request.connect_team)}
+        </Button>
+      </div>
+      <ConnectAppDialog
+        open={connectOpen}
+        onOpenChange={setConnectOpen}
+        scope="team"
+        slug={slug}
+        name={app}
+        logo={entry?.logo}
+      />
+    </section>
+  );
 }
 
 function AppRequestList({
@@ -206,8 +303,9 @@ function AppRequestCard({
   highlightToken?: number;
 }) {
   const { t } = useT("settings");
+  const { t: ta } = useT("agents");
   const locale = useLocale();
-  const navigation = useNavigation();
+  const wsId = useWorkspaceId();
   const ref = useRef<HTMLDivElement>(null);
   const [highlighted, setHighlighted] = useState(false);
   useEffect(() => {
@@ -223,12 +321,22 @@ function AppRequestCard({
   const [draft, setDraft] = useState(() => prettyArgs(request.arguments));
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
-  const [connecting, setConnecting] = useState(false);
+  const [connectOpen, setConnectOpen] = useState(false);
 
   const agent = getActorName("agent", request.agent_id);
   const approver = getActorName("member", request.approver_user_id);
-  const app = request.toolkit_slug;
   const pending = request.status === "pending";
+  const isConnect = request.kind === "connect";
+  const team = isTeamConnect(request);
+  // Older servers omit can_decide; the approver answered everything then.
+  const canDecide = request.can_decide ?? isApprover;
+  const memberAsk = team && !request.agent_id;
+  const addsApp = isConnect && request.adds_app === true;
+  const catalog = useQuery({ ...appCatalogOptions(wsId), enabled: isConnect });
+  const overview = useQuery({ ...appsOverviewOptions(wsId), enabled: addsApp && pending && isApprover });
+  const entry = catalog.data?.apps.find((a) => a.slug === request.toolkit_slug);
+  const app = entry?.name || request.toolkit_slug;
+  const hasAccount = appAccountStatus(overview.data, "personal", request.toolkit_slug) === "connected";
 
   const approve = () => {
     let args: Record<string, unknown> | undefined;
@@ -258,22 +366,14 @@ function AppRequestCard({
         onError: () => toast.error(t(($) => $.connected_apps.request.toast_failed)),
       },
     );
-  const connect = async () => {
-    setConnecting(true);
-    try {
-      // The callback appends its own query, so the fragment stays behind.
-      const returnTo = currentPath({ ...navigation, hash: "" });
-      const { redirect_url } = await api.connectApp("personal", app, returnTo);
-      openExternal(redirect_url, { webTarget: "same-tab" });
-      // Desktop opens the hosted flow in the system browser and stays here;
-      // the card resolves through the request's realtime update.
-      if (isDesktopShell()) setConnecting(false);
-    } catch {
-      toast.error(t(($) => $.connected_apps.toast_failed));
-      setConnecting(false);
-    }
-  };
-
+  const withdraw = () =>
+    decide.mutate(
+      { id: request.id, decision: "reject" },
+      {
+        onSuccess: () => toast.success(t(($) => $.connected_apps.account_row.toast_withdrawn)),
+        onError: () => toast.error(t(($) => $.connected_apps.request.toast_failed)),
+      },
+    );
   const statusLabel = (status: string) => {
     switch (status) {
       case "approved":
@@ -300,16 +400,28 @@ function AppRequestCard({
         <ShieldCheck className="mt-0.5 size-4 shrink-0 text-brand" />
         <div className="min-w-0 flex-1 space-y-1">
           <p className="text-body font-medium">
-            {request.kind === "connect"
-              ? t(($) => $.connected_apps.request.title_connect, { agent, app })
-              : t(($) => $.connected_apps.request.title_action, { agent, tool: request.tool_slug })}
+            {addsApp
+              ? ta(($) => $.app_requests.title_adds_app, { agent, app })
+              : memberAsk
+                ? t(($) => $.connected_apps.request.title_member_ask, { name: approver, app })
+                : team
+                  ? t(($) => $.connected_apps.request.title_connect_team, { agent, app })
+                  : isConnect
+                    ? t(($) => $.connected_apps.request.title_connect, { agent, app })
+                    : t(($) => $.connected_apps.request.title_action, { agent, tool: request.tool_slug })}
           </p>
           <p className="flex flex-wrap items-center gap-1.5 text-caption text-muted-foreground">
-            <Badge variant="outline">{t(($) => $.connected_apps.scopes[request.account_scope])}</Badge>
+            <Badge variant="outline">
+              {addsApp
+                ? ta(($) => $.app_requests.new_app)
+                : request.account_scope === "personal" && isApprover
+                  ? t(($) => $.connected_apps.owner.personal)
+                  : t(($) => $.connected_apps.scopes[request.account_scope])}
+            </Badge>
             {request.kind === "action" && <Badge variant="outline">{request.action_class}</Badge>}
             <span>
               {pending
-                ? `${t(($) => $.connected_apps.request.waiting_for, { name: approver })} · ${t(($) => $.connected_apps.request.expires, { when: new Date(request.expires_at).toLocaleString(locale, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) })}`
+                ? `${team ? t(($) => $.connected_apps.request.waiting_for_admin) : t(($) => $.connected_apps.request.waiting_for, { name: approver })} · ${t(($) => $.connected_apps.request.expires, { when: new Date(request.expires_at).toLocaleString(locale, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) })}`
                 : statusLabel(request.status)}
             </span>
           </p>
@@ -335,7 +447,31 @@ function AppRequestCard({
         </div>
       </div>
 
-      {pending && isApprover && (
+      {pending && team && (
+        <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+          <p className="mr-auto text-caption text-muted-foreground">
+            {canDecide
+              ? t(($) => $.connected_apps.request.team_note)
+              : t(($) => $.connected_apps.request.admins_notified)}
+          </p>
+          {canDecide ? (
+            <>
+              <Button size="xs" variant="ghost" disabled={decide.isPending} onClick={reject}>
+                {t(($) => $.connected_apps.request.reject)}
+              </Button>
+              <Button size="xs" onClick={() => setConnectOpen(true)}>
+                <Plug />
+                {t(($) => $.connected_apps.request.connect_team)}
+              </Button>
+            </>
+          ) : isApprover ? (
+            <Button size="xs" variant="ghost" disabled={decide.isPending} onClick={withdraw}>
+              {t(($) => $.connected_apps.account_row.withdraw)}
+            </Button>
+          ) : null}
+        </div>
+      )}
+      {pending && !team && isApprover && (
         <div className="mt-3 space-y-2">
           {rejecting && (
             <Input
@@ -346,6 +482,11 @@ function AppRequestCard({
             />
           )}
           <div className="flex flex-wrap items-center justify-end gap-2">
+            {addsApp && (
+              <p className="mr-auto text-caption text-muted-foreground">
+                {ta(($) => $.app_requests.adds_app_note, { app, agent })}
+              </p>
+            )}
             {request.kind === "action" && !editing && !rejecting && (
               <Button size="xs" variant="ghost" onClick={() => setEditing(true)}>
                 <Pencil />
@@ -354,16 +495,28 @@ function AppRequestCard({
             )}
             <Button
               size="xs"
-              variant="outline"
+              variant={addsApp ? "ghost" : "outline"}
               disabled={decide.isPending}
               onClick={() => (rejecting ? reject() : setRejecting(true))}
             >
               {t(($) => $.connected_apps.request.reject)}
             </Button>
-            {request.kind === "connect" ? (
+            {addsApp ? (
+              hasAccount ? (
+                <Button size="xs" disabled={decide.isPending} onClick={approve}>
+                  {decide.isPending && <Loader2 className="animate-spin" />}
+                  {ta(($) => $.app_requests.add_to_agent, { app, agent })}
+                </Button>
+              ) : (
+                <Button size="xs" onClick={() => setConnectOpen(true)}>
+                  <Plug />
+                  {t(($) => $.connected_apps.request.connect, { app })}
+                </Button>
+              )
+            ) : isConnect ? (
               <>
-                <Button size="xs" variant="outline" disabled={connecting} onClick={connect}>
-                  {connecting ? <Loader2 className="animate-spin" /> : <Plug />}
+                <Button size="xs" variant="outline" onClick={() => setConnectOpen(true)}>
+                  <Plug />
                   {t(($) => $.connected_apps.request.connect, { app })}
                 </Button>
                 <Button size="xs" disabled={decide.isPending} onClick={approve}>
@@ -380,6 +533,16 @@ function AppRequestCard({
             )}
           </div>
         </div>
+      )}
+      {isConnect && (
+        <ConnectAppDialog
+          open={connectOpen}
+          onOpenChange={setConnectOpen}
+          scope={team ? "team" : "personal"}
+          slug={request.toolkit_slug}
+          name={app}
+          logo={entry?.logo}
+        />
       )}
     </div>
   );

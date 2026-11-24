@@ -1,6 +1,9 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion, useIsPresent } from "motion/react";
 import { useQuery } from "@tanstack/react-query";
+import { useReducedMotion } from "@multica/core/appearance";
+import { UI_EASE_OUT } from "@multica/ui/lib/motion";
 import {
   History,
   Link as LinkIcon,
@@ -11,7 +14,10 @@ import {
 } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { copyText } from "@multica/ui/lib/clipboard";
+import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
   Tooltip,
@@ -22,6 +28,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import {
@@ -32,9 +39,12 @@ import {
   holdLiveDoc,
   isDocNotFound,
 } from "@multica/core/docs";
+import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWS } from "@multica/core/realtime";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
+import { isImeComposing } from "@multica/core/utils";
 import type { Doc } from "@multica/core/types";
 import { ContentEditor, ReadonlyContent, useEditorUpload } from "../../editor";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -43,6 +53,7 @@ import { AppLink, useNavigation } from "../../navigation";
 import { useT, useTimeAgo } from "../../i18n";
 import { useDocDraft } from "./use-doc-draft";
 import { useDocCollab, type DocCollaborator } from "./use-doc-collab";
+import { findDocSession, liveEditingOff, peekDocLive, prefetchDocLive } from "./doc-live-session";
 import { useLiveDocTitle } from "./use-live-doc-title";
 import { DocOutline, MIN_OUTLINE_HEADINGS, useDocOutline } from "./doc-outline";
 import { DocCommentsPanel, groupDocThreads } from "./doc-comments-panel";
@@ -62,13 +73,52 @@ export function DocPage({ docId }: { docId: string }) {
   );
 }
 
+/** How long the page waits for the doc's live session info before showing
+ *  the doc without it. The two requests leave together, so this is rarely
+ *  reached. */
+const LIVE_INFO_WAIT_MS = 1000;
+
+/**
+ * Whether the page knows how the doc opens: solo, or live with the saved
+ * state to show at once. Waiting for that briefly lets the doc appear in its
+ * editor in one paint instead of as a static copy swapped out later. Once
+ * settled it stays so for the doc: the editor consumes what settled it, and
+ * falling back to the skeleton would unmount the editor.
+ */
+function useLiveInfoSettled(docId: string): boolean {
+  const { collabUrl } = useWS();
+  const userId = useAuthStore((s) => s.user?.id ?? "");
+  const [settledDoc, setSettledDoc] = useState<string | null>(null);
+  const settled =
+    settledDoc === docId ||
+    liveEditingOff.has(collabUrl) ||
+    peekDocLive(collabUrl, docId, userId) !== undefined ||
+    !!findDocSession(collabUrl, docId, userId)?.getState().ready;
+  if (settled && settledDoc !== docId) setSettledDoc(docId);
+  useEffect(() => {
+    if (settled) return;
+    let cancelled = false;
+    const done = () => {
+      if (!cancelled) setSettledDoc(docId);
+    };
+    prefetchDocLive(collabUrl, docId, userId).then(done, done);
+    const wait = setTimeout(done, LIVE_INFO_WAIT_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(wait);
+    };
+  }, [settled, collabUrl, docId, userId]);
+  return settled;
+}
+
 function DocPageContent({ docId }: { docId: string }) {
   const wsId = useWorkspaceId();
   const { t } = useT("docs");
   const query = useQuery(docDetailOptions(wsId, docId));
+  const liveSettled = useLiveInfoSettled(docId);
   // Also when it was open: a refetch answered 404 once someone deleted it.
   if (isDocNotFound(query.error)) return <DocNotFound docId={docId} />;
-  if (!query.data)
+  if (!query.data || !liveSettled)
     return (
       <DocPageSkeleton docId={docId}>
         {query.isError ? (
@@ -79,6 +129,66 @@ function DocPageContent({ docId }: { docId: string }) {
       </DocPageSkeleton>
     );
   return <DocEditor key={`${wsId}:${docId}`} doc={query.data} />;
+}
+
+const DOC_TITLE_CLASS = "text-display-sm font-semibold leading-snug wrap-anywhere";
+const BREADCRUMB_FOLDER_CLASS = "min-w-0 max-w-48 truncate";
+
+/**
+ * Single-paragraph title input that wraps and grows with its text instead of
+ * clipping inside a single line. Uses a CSS grid pseudo-element mirror so the
+ * height matches the wrapped text on first paint and across resizes without
+ * extra DOM text nodes.
+ */
+function DocTitleInput({
+  value,
+  placeholder,
+  ariaLabel,
+  autoFocus,
+  onChange,
+  onBlur,
+}: {
+  value: string;
+  placeholder: string;
+  ariaLabel: string;
+  autoFocus?: boolean;
+  onChange: (value: string) => void;
+  onBlur?: () => void;
+}) {
+  return (
+    <div
+      data-replicated-value={value || placeholder}
+      className={cn(
+        "grid whitespace-pre-wrap",
+        DOC_TITLE_CLASS,
+        "after:invisible after:pointer-events-none after:col-start-1 after:row-start-1 after:min-w-0 after:content-[attr(data-replicated-value)]",
+      )}
+    >
+      <textarea
+        aria-label={ariaLabel}
+        rows={1}
+        value={value}
+        autoFocus={autoFocus}
+        maxLength={300}
+        placeholder={placeholder}
+        onKeyDown={(e) => {
+          if (
+            (e.key === "Enter" || e.key === "Escape") &&
+            !isImeComposing(e.nativeEvent)
+          ) {
+            e.preventDefault();
+            e.currentTarget.blur();
+          }
+        }}
+        onChange={(e) => onChange(e.target.value.replace(/[\r\n]+/g, " "))}
+        onBlur={onBlur}
+        className={cn(
+          "col-start-1 row-start-1 h-full min-w-0 w-full resize-none overflow-hidden border-0 bg-transparent p-0 whitespace-pre-wrap outline-none placeholder:text-muted-foreground",
+          DOC_TITLE_CLASS,
+        )}
+      />
+    </div>
+  );
 }
 
 /**
@@ -104,11 +214,15 @@ function DocPageSkeleton({
       <BreadcrumbHeader
         segments={[
           { href: p.docs(), label: t(($) => $.kb) },
-          ...ancestors.map((f) => ({ href: p.docFolder(f.id), label: f.title })),
+          ...ancestors.map((f) => ({
+            href: p.docFolder(f.id),
+            label: f.title,
+            className: BREADCRUMB_FOLDER_CLASS,
+          })),
         ]}
         leaf={
           summary ? (
-            <span className="truncate">{summary.title || t(($) => $.untitled)}</span>
+            <span className="min-w-0 truncate">{summary.title || t(($) => $.untitled)}</span>
           ) : (
             <Skeleton className="h-4 w-32" />
           )
@@ -119,7 +233,7 @@ function DocPageSkeleton({
           {children ?? (
             <>
               {summary ? (
-                <div className="text-display-sm font-semibold">
+                <div className={DOC_TITLE_CLASS}>
                   {summary.title || (
                     <span className="text-muted-foreground">{t(($) => $.untitled)}</span>
                   )}
@@ -155,15 +269,22 @@ function DocEditor({ doc }: { doc: Doc }) {
   // itself; only the title goes through the API. Until the page knows which
   // mode it is in, nothing is saved: the body is shown read-only and a typed
   // title is held.
-  const collab = useDocCollab(doc.id);
+  const collab = useDocCollab(doc.id, doc.content);
   const live = collab.mode === "live" ? collab : null;
   const solo = collab.mode === "solo";
   const { draft, status, dirty, change, retry, reload, setAside } = useDocDraft(doc, solo);
   const liveTitle = useLiveDocTitle(doc, !!live);
+  // The live editor appears once its Tiptap instance exists; until then the
+  // static copy stands in, so the body never goes blank.
+  const [editorReadyFor, setEditorReadyFor] = useState<number | null>(null);
+  const showLiveEditor = !!live?.ready && editorReadyFor === live.generation;
   useEffect(() => {
     if (solo) {
       const title = liveTitle.take();
-      if (title !== null) change({ title });
+      const content = collab.carried ?? null;
+      if (title !== null || content !== null) {
+        change({ ...(title !== null ? { title } : {}), ...(content !== null ? { content } : {}) });
+      }
     } else if (live) {
       setAside();
     }
@@ -187,9 +308,12 @@ function DocEditor({ doc }: { doc: Doc }) {
   const uploadFile = useCallback((file: File) => uploadWithToast(file), [uploadWithToast]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
-  const outline = useDocOutline(bodyRef, scrollRef);
+  // Changes when the body switches between the static copy and an editor.
+  const bodyKey = solo ? "solo" : showLiveEditor ? live!.generation : "static";
+  const outline = useDocOutline(bodyRef, scrollRef, bodyKey);
   const showOutline = outline.headings.length >= MIN_OUTLINE_HEADINGS;
 
+  const reduceMotion = useReducedMotion();
   // Discussions. A link from the inbox names one with ?thread=.
   const { data: comments } = useQuery(docCommentsOptions(wsId, doc.id));
   const threads = useMemo(() => groupDocThreads(comments ?? []), [comments]);
@@ -215,7 +339,7 @@ function DocEditor({ doc }: { doc: Doc }) {
         })),
     [threads, activeThread],
   );
-  const highlights = useDocCommentHighlights(bodyRef, anchored, activeThread);
+  const highlights = useDocCommentHighlights(bodyRef, anchored, activeThread, bodyKey);
   const activateThread = (id: string) => {
     setActiveThread(id);
     setCommentsOpen(true);
@@ -246,6 +370,8 @@ function DocEditor({ doc }: { doc: Doc }) {
       setCommentsOpen(true);
     }
   };
+  const titleValue = solo ? draft.title : liveTitle.value;
+  const headerTitle = titleValue.trim() || t(($) => $.untitled);
   return (
     <div className="flex h-full min-h-0 flex-col">
       <BreadcrumbHeader
@@ -254,10 +380,13 @@ function DocEditor({ doc }: { doc: Doc }) {
           ...ancestors.map((f) => ({
             href: p.docFolder(f.id),
             label: f.title,
+            className: BREADCRUMB_FOLDER_CLASS,
           })),
         ]}
         leaf={
-          <span className="truncate">{doc.title || t(($) => $.untitled)}</span>
+          <TruncatedTooltip content={headerTitle} side="bottom" focusable>
+            <span className="min-w-0 truncate">{headerTitle}</span>
+          </TruncatedTooltip>
         }
         actions={
           <>
@@ -265,6 +394,7 @@ function DocEditor({ doc }: { doc: Doc }) {
               <LiveStatus
                 connected={live.connected}
                 synced={live.synced}
+                slow={live.slow}
                 collaborators={live.collaborators}
                 titleFailed={liveTitle.failed}
                 onRetryTitle={liveTitle.retry}
@@ -282,35 +412,25 @@ function DocEditor({ doc }: { doc: Doc }) {
               ) : null}
             </span>
             )}
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              aria-label={t(($) => $.actions.copy_link)}
-              title={t(($) => $.actions.copy_link)}
-              onClick={copyLink}
-            >
-              <LinkIcon className="size-4" />
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              aria-pressed={commentsOpen}
-              className={commentsOpen ? "bg-surface-selected" : undefined}
-              onClick={() => setCommentsOpen((open) => !open)}
-            >
-              <MessageSquare className="size-4" />
-              {t(($) => $.comments.title)}
-              {openThreads.length > 0 && (
-                <span className="text-caption text-muted-foreground">{openThreads.length}</span>
-              )}
-            </Button>
-            <AppLink
-              href={p.docHistory(doc.id)}
-              className="flex items-center gap-1 rounded-md px-2 py-1 text-caption hover:bg-surface-hover"
-            >
-              <History className="size-4" />
-              {t(($) => $.actions.history)}
-            </AppLink>
+            <TooltipHint label={t(($) => $.comments.title)} side="bottom">
+              <Button
+                size={openThreads.length > 0 ? "sm" : "icon-sm"}
+                variant="ghost"
+                aria-pressed={commentsOpen}
+                className={cn(
+                  "text-muted-foreground",
+                  openThreads.length > 0 && "px-2",
+                  commentsOpen && "bg-surface-selected text-foreground",
+                )}
+                onClick={() => setCommentsOpen((open) => !open)}
+              >
+                <MessageSquare className="size-4" />
+                <span className="sr-only">{t(($) => $.comments.title)}</span>
+                {openThreads.length > 0 && (
+                  <span className="text-caption tabular-nums">{openThreads.length}</span>
+                )}
+              </Button>
+            </TooltipHint>
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={
@@ -324,6 +444,15 @@ function DocEditor({ doc }: { doc: Doc }) {
                 <MoreHorizontal className="size-4" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={copyLink}>
+                  <LinkIcon />
+                  {t(($) => $.actions.copy_link)}
+                </DropdownMenuItem>
+                <DropdownMenuItem render={<AppLink href={p.docHistory(doc.id)} />}>
+                  <History />
+                  {t(($) => $.actions.history)}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => setMoving(true)}>
                   <FolderInput />
                   {t(($) => $.actions.move)}
@@ -373,18 +502,16 @@ function DocEditor({ doc }: { doc: Doc }) {
                   />
                 </details>
               )}
-              <input
-                aria-label={t(($) => $.editor.title_label)}
-                value={solo ? draft.title : liveTitle.value}
+              <DocTitleInput
+                ariaLabel={t(($) => $.editor.title_label)}
+                value={titleValue}
                 // A doc just created from the tree is blank: start in its title.
                 autoFocus={!doc.title && !doc.content}
-                maxLength={300}
                 placeholder={t(($) => $.untitled)}
-                onChange={(e) =>
-                  solo ? change({ title: e.target.value }) : liveTitle.change(e.target.value)
+                onChange={(title) =>
+                  solo ? change({ title }) : liveTitle.change(title)
                 }
                 onBlur={solo ? undefined : liveTitle.blur}
-                className="w-full bg-transparent text-display-sm font-semibold outline-none"
               />
               <div className="mt-3 mb-8 flex items-center gap-2 text-caption text-muted-foreground">
                 <ActorAvatar
@@ -396,30 +523,51 @@ function DocEditor({ doc }: { doc: Doc }) {
                 <span aria-hidden>·</span>
                 <Tooltip>
                   <TooltipTrigger
-                    render={<time dateTime={doc.updatedAt} className="shrink-0" />}
+                    render={
+                      <AppLink
+                        href={p.docHistory(doc.id)}
+                        className="shrink-0 underline-offset-3 decoration-faint-foreground hover:text-foreground hover:underline"
+                      />
+                    }
                   >
-                    {t(($) => $.edited, { time: timeAgo(doc.updatedAt) })}
+                    <time dateTime={doc.updatedAt}>
+                      {t(($) => $.edited, { time: timeAgo(doc.updatedAt) })}
+                    </time>
                   </TooltipTrigger>
-                  <TooltipContent>
+                  <TooltipContent side="bottom">
                     {new Date(doc.updatedAt).toLocaleString()}
+                    <span className="text-muted-foreground">{t(($) => $.view_history)}</span>
                   </TooltipContent>
                 </Tooltip>
               </div>
-              <div ref={bodyRef} onClick={onBodyClick}>
-                {collab.mode === "checking" || (live && !live.synced) ? (
-                  <ReadonlyContent content={doc.content} className="min-h-80" />
-                ) : live ? (
-                  <ContentEditor
-                    key={live.generation}
-                    collaboration={live.collaboration}
-                    selectionAction={commentAction}
-                    placeholder={t(($) => $.editor.placeholder)}
-                    enableSlashCommands
-                    slashCommandMode="blocks"
-                    showBlockHandles
-                    onUploadFile={uploadFile}
-                    className="min-h-80"
-                  />
+              <motion.div
+                key={doc.id}
+                ref={bodyRef}
+                onClick={onBodyClick}
+                initial={reduceMotion ? false : { opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: reduceMotion ? 0 : 0.12, ease: UI_EASE_OUT }}
+              >
+                {!solo ? (
+                  <>
+                    {!showLiveEditor && <ReadonlyContent content={doc.content} className="min-h-80" />}
+                    {live?.ready && (
+                      <div hidden={!showLiveEditor}>
+                        <ContentEditor
+                          key={live.generation}
+                          collaboration={live.collaboration}
+                          onReady={() => setEditorReadyFor(live.generation)}
+                          selectionAction={commentAction}
+                          placeholder={t(($) => $.editor.placeholder)}
+                          enableSlashCommands
+                          slashCommandMode="blocks"
+                          showBlockHandles
+                          onUploadFile={uploadFile}
+                          className="min-h-80"
+                        />
+                      </div>
+                    )}
+                  </>
                 ) : (
                 <ContentEditor
                   selectionAction={commentAction}
@@ -435,7 +583,7 @@ function DocEditor({ doc }: { doc: Doc }) {
                   className="min-h-80"
                 />
                 )}
-              </div>
+              </motion.div>
             </div>
           </div>
           {/* The discussions panel takes the right side; the outline yields. */}
@@ -443,32 +591,36 @@ function DocEditor({ doc }: { doc: Doc }) {
             <aside className="hidden w-56 shrink-0 py-8 pr-6 @5xl:block">
               <DocOutline
                 headings={outline.headings}
-                activeIndex={outline.activeIndex}
+                scrollRef={scrollRef}
                 onSelect={outline.scrollTo}
               />
             </aside>
           )}
         </div>
       </div>
-      {commentsOpen && (
-        <DocCommentsPanel
-          docId={doc.id}
-          threads={threads}
-          missing={highlights.missing}
-          activeId={activeThread}
-          draft={newAnchor}
-          onActivate={activateThread}
-          onDeactivate={() => setActiveThread(null)}
-          onDraftDone={(id) => {
-            setNewAnchor(null);
-            if (id) setActiveThread(id);
-          }}
-          onClose={() => {
-            setCommentsOpen(false);
-            setNewAnchor(null);
-          }}
-        />
-      )}
+      <AnimatePresence initial={false}>
+        {commentsOpen && (
+          <DocCommentsDrawer key="doc-comments-panel" reduceMotion={reduceMotion}>
+            <DocCommentsPanel
+              docId={doc.id}
+              threads={threads}
+              missing={highlights.missing}
+              activeId={activeThread}
+              draft={newAnchor}
+              onActivate={activateThread}
+              onDeactivate={() => setActiveThread(null)}
+              onDraftDone={(id) => {
+                setNewAnchor(null);
+                if (id) setActiveThread(id);
+              }}
+              onClose={() => {
+                setCommentsOpen(false);
+                setNewAnchor(null);
+              }}
+            />
+          </DocCommentsDrawer>
+        )}
+      </AnimatePresence>
       </div>
       <MoveDialog
         target={moving ? { kind: "doc", id: doc.id, title: doc.title } : null}
@@ -482,15 +634,42 @@ function DocEditor({ doc }: { doc: Doc }) {
   );
 }
 
+function DocCommentsDrawer({
+  reduceMotion,
+  children,
+}: {
+  reduceMotion: boolean;
+  children: React.ReactNode;
+}) {
+  const isPresent = useIsPresent();
+  return (
+    <motion.div
+      inert={!isPresent}
+      initial={reduceMotion ? false : { width: 0, opacity: 0 }}
+      animate={{ width: 360, opacity: 1 }}
+      exit={{ width: 0, opacity: 0 }}
+      transition={{
+        duration: reduceMotion ? 0 : 0.22,
+        ease: [0.22, 1, 0.36, 1],
+      }}
+      className="flex h-full shrink-0 overflow-hidden"
+    >
+      {children}
+    </motion.div>
+  );
+}
+
 function LiveStatus({
   connected,
   synced,
+  slow,
   collaborators,
   titleFailed,
   onRetryTitle,
 }: {
   connected: boolean;
   synced: boolean;
+  slow: boolean;
   collaborators: DocCollaborator[];
   titleFailed: boolean;
   onRetryTitle: () => void;
@@ -547,9 +726,11 @@ function LiveStatus({
           <span aria-hidden className="size-1.5 rounded-full bg-success" />
           {t(($) => $.editor.live)}
         </span>
-      ) : (
-        t(($) => (synced ? $.editor.reconnecting : $.editor.connecting))
-      )}
+      ) : synced ? (
+        t(($) => $.editor.reconnecting)
+      ) : slow ? (
+        t(($) => $.editor.connecting)
+      ) : null}
     </span>
   );
 }

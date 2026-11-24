@@ -166,6 +166,15 @@ multica issue runs <issue-id>
 먼저 실행 컴퓨터의 터미널에서 같은 도구를 직접 실행하세요. 도구 자체도 시작할 수 없다면 도구 로그인 또는 설정을 먼저 수정하고 실행 로그에서 실행을 재시도합니다.
 
 </Accordion>
+<Accordion title="macOS에서 프록시를 사용할 때 AI 코딩 도구 시간이 초과됨" id="ai-coding-tool-times-out-behind-a-macos-proxy" value="ai-coding-tool-times-out-behind-a-macos-proxy">
+
+Grok 같은 AI 코딩 도구가 터미널에서는 동작하지만 Multica Desktop에서는 시간이 초과된다면 터미널에서 프록시 환경 변수를 내보내는지 확인하세요. macOS에서는 로컬 데몬과 데몬이 시작한 도구가 자신을 시작한 프로세스의 환경 변수를 상속합니다. Dock에서 Desktop을 시작하면 셸에서 내보낸 변수를 읽거나 macOS 네트워크 프록시 설정을 환경 변수로 변환하지 않습니다.
+
+특정 에이전트에만 프록시가 필요하면 해당 에이전트의 [환경 변수](/agents-create#환경-변수와-자격-증명)에 도구에 필요한 프록시 변수를 추가하세요. 로컬 HTTP 프록시라면 `HTTPS_PROXY=http://127.0.0.1:7897`과 같이 설정하고 실제 프록시 주소를 사용하세요. Multica를 로컬에서 호스팅한다면 직접 연결할 호스트를 `NO_PROXY`에 추가하세요. 예를 들어 `localhost,127.0.0.1,::1`을 사용할 수 있습니다. 새 실행을 시작하면 설정이 적용됩니다.
+
+이 설정은 해당 에이전트의 도구 프로세스에만 적용되고 데몬에는 적용되지 않습니다. 데몬이 Multica 서버에 연결할 때 프록시가 필요하거나 최신 모델 목록을 가져와야 한다면(데몬은 자신의 환경으로 모델 목록을 가져옵니다) 데몬의 시작 환경을 별도로 설정하세요. 로그인 시 자동으로 시작되는 데몬은 [로그인 시 자동 시작](/daemon-runtimes#autostart)을 참고하세요.
+
+</Accordion>
 <Accordion title="CLI 업그레이드 후 macOS에서 실행이 멈춤" id="runs-hang-on-macos-after-a-cli-upgrade" value="runs-hang-on-macos-after-a-cli-upgrade">
 
 Homebrew로 설치한 `multica` CLI가 `brew upgrade`, `multica update`, **런타임** 페이지의 **업데이트** 또는 데몬 자동 업데이트로 업그레이드된 뒤, `~/Desktop`, `~/Documents`, `~/Downloads`, iCloud Drive 등 보호된 폴더를 읽는 실행이 더 이상 진행되지 않을 수 있습니다. 에이전트 프로세스는 CPU를 사용하지 않고, 실행은 완료되지도 실패하지도 않습니다.

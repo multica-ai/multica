@@ -24,7 +24,7 @@ export async function waitForPageText(page: Page, text: string, timeout = 30000)
 
 export async function reloadAppPage(page: Page) {
   await page.reload({ waitUntil: "domcontentloaded" });
-  await waitForPageText(page, "Issues");
+  await waitForIssuesPage(page);
 }
 
 /**
@@ -85,14 +85,15 @@ export function appRail(page: Page) {
   return page.getByRole("navigation", { name: "App navigation" });
 }
 
-/** The current workspace's tile in the rail; its accessible name is the workspace name. */
+/** The workspace switcher button at the top of the rail. */
 export function currentWorkspaceTile(page: Page) {
-  return appRail(page)
-    .getByRole("link", { name: /E2E Workspace|Renamed WS/ })
-    .and(page.locator('[aria-current="page"]'));
+  return appRail(page).getByRole("button", { name: "Switch workspace" });
 }
 
 export async function openAccountMenu(page: Page) {
+  // In `next dev`, the Next.js dev indicator sits in the bottom-left corner
+  // directly over the rail's Account button and intercepts pointer clicks.
+  await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
   const accountButton = appRail(page).getByRole("button", { name: "Account" });
   await expect(accountButton).toBeVisible({ timeout: 15000 });
   await accountButton.click();

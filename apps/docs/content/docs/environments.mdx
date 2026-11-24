@@ -195,9 +195,9 @@ Environments belong to the issue, not to a single run: a later run on the same i
 
 ## Manage environments in the sidebar [#sidebar]
 
-Each environment shows its state, when it started or ended, when it expires, and who started it. **Open** opens its URL and **Copy URL** copies it. Environments that ended are folded under "N ended".
+Each environment shows its state, when it started or ended, and who started it. When it expires shows on the row once that is under an hour away, and in the row's tooltip before then. **Open** opens its URL and **Copy URL** copies it. Environments that ended are folded under "N ended".
 
-- **Start**: click **+** next to **Environments**. The menu lists the environments the latest run on each machine declared, and starts the one you pick in that run's code. If the issue has not run yet or that code has been cleaned up, it offers to ask an agent instead: the agent gets the code ready and runs `multica env start`, or works out how to start the project if it declares nothing.
+- **Start**: click **+** next to **Environments**. The menu lists the environments the latest run on each machine declared, and starts the one you pick in that run's code. It also offers to ask an agent instead, for example when that code has been cleaned up: the agent gets the code ready and runs `multica env start`, or works out how to start the project if it declares nothing. While the issue has no environments, the section is hidden; once a run has declared one, use the **Add …** row at the bottom of the sidebar instead, such as **Add environment** or **Add wakeup or environment**. To have an agent start one on an issue whose runs declared none, mention the agent in a comment.
 - **Stop, restart, view logs**: open an environment's **More actions** menu. **Restart** reads the declaration in the checkout again, so the checkout and its `.multica/environments.toml` must still exist. A detected server offers only **Stop**, after a confirmation.
 
 Starting, stopping, and restarting require a workspace member who can access the issue and use that machine's runtime (see [Daemon and runtimes](/daemon-runtimes)). The machine must be online, and its Multica must be recent enough to support environment controls; otherwise the buttons explain what is missing. Reading logs only requires access to the issue.

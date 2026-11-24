@@ -18,6 +18,15 @@ DO UPDATE SET
     updated_at = now()
 RETURNING *;
 
+-- name: ResolveAutoArchivePrompt :exec
+-- Answers the one-time auto-archive question in every workspace where the
+-- user still has it pending: merges their choice and drops the marker.
+UPDATE notification_preference
+SET preferences = (preferences - 'auto_archive_prompt') || sqlc.arg('preferences')::jsonb,
+    updated_at = now()
+WHERE user_id = sqlc.arg('user_id')
+  AND preferences ->> 'auto_archive_prompt' IS NOT NULL;
+
 -- name: ListNotificationPreferencesByUsers :many
 SELECT * FROM notification_preference
 WHERE workspace_id = $1 AND user_id = ANY(sqlc.arg('user_ids')::uuid[]);

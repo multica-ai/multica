@@ -1578,6 +1578,10 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	rt, lookupErr := h.getAgentRuntime(r.Context(), obsmetrics.RuntimeLookupSourceHeartbeatHTTP, runtimeUUID)
 	runtimeLookupMs = time.Since(lookupStart).Milliseconds()
 	if lookupErr != nil {
+		if writeQueryCancellation(w, r, lookupErr) {
+			outcome = "request_canceled"
+			return
+		}
 		// Only pgx.ErrNoRows means the runtime row is gone. Daemon reads this
 		// 404 as a signal to drop the stale runtime locally; treating a
 		// transient DB error the same way would force daemons to self-cleanup
@@ -2951,6 +2955,12 @@ func claimResponseAgentIdentityMatches(resp AgentTaskResponse) bool {
 func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQueue, runtime db.AgentRuntime, runtimeID, runtimeWorkspaceID string) (resp AgentTaskResponse, deliveredCommentIDs []pgtype.UUID, issueSnapshot []byte, agentSkillCount, builtinSkillCount int, failure *claimBuildFailure) {
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp = taskToResponse(*task, runtimeWorkspaceID)
+	// Installed daemons treat a non-empty claim `squad_id` as a quick-create
+	// squad-leader signal (daemon/prompt.go:taskIsSquadLeader). Clear the row's
+	// attribution SquadID here so non-leader squad member runs are never promoted
+	// to leader role; the quick-create branch below re-populates resp.SquadID
+	// exclusively when qc.SquadID is present.
+	resp.SquadID = ""
 	if err := (&service.IssueWakeupService{Tasks: h.TaskService}).CheckClaim(r.Context(), *task); err != nil {
 		if !errors.Is(err, service.ErrWakeupForbidden) {
 			return resp, nil, nil, 0, 0, h.rejectClaimSourceLoad(r.Context(), task, err, "wakeup", resp.WakeupID)
@@ -3330,10 +3340,14 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		// Resolved before the leader briefing, which words the owning
 		// leader's status moves by it (MUL-8145).
 		legacyRuntimeRules := !requestHasClientCapability(r, protocol.DaemonCapabilityWorkflowStatusRulesV1)
-		projectWorkflow := h.claimProjectWorkflow(r.Context(), issue, task, legacyRuntimeRules)
+		stepCommands := !requestHasClientCapability(r, protocol.DaemonCapabilityWorkflowStatusMapV1)
+		projectWorkflow := h.claimProjectWorkflow(r.Context(), issue, task, legacyRuntimeRules, stepCommands)
 		leaderWorkflow := leaderNoWorkflow
 		if projectWorkflow != nil {
 			leaderWorkflow = leaderWorkflowCurrentDaemon
+			if projectWorkflow.StatusMap {
+				leaderWorkflow = leaderWorkflowStatusMap
+			}
 			if projectWorkflow.stepMoved {
 				leaderWorkflow = leaderWorkflowStepMoved
 			} else if legacyRuntimeRules {
@@ -3388,6 +3402,18 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					"squad_id", uuidToString(task.SquadID),
 					"agent_id", uuidToString(task.AgentID),
 				)
+			}
+		} else if resp.Agent != nil {
+			// A member's run on its squad's issue carries the squad context the
+			// leader already gets: roster, rules, its role, and how to hand off.
+			if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
+				if brief := squadMemberBriefingForClaim(r.Context(), h.Queries, issue, agent); brief != "" {
+					if strings.TrimSpace(resp.Agent.Instructions) == "" {
+						resp.Agent.Instructions = brief
+					} else {
+						resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + brief
+					}
+				}
 			}
 		}
 
@@ -4087,6 +4113,14 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}
 		}
 		projectCtx.applyTo(&resp)
+	}
+
+	// Doc discussion run (MUL-9933): the workspace comes from the task
+	// context; the doc, discussion and resume session from their own rows.
+	if task.DocID.Valid {
+		if failure := h.applyDocCommentClaim(r, task, &resp, runtimeID, runtimeWorkspaceID); failure != nil {
+			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, failure
+		}
 	}
 
 	// Quick-create task: no issue / chat / autopilot link — workspace and
@@ -5033,7 +5067,7 @@ func sanitizeTaskCompleteRequest(req *TaskCompleteRequest) {
 	req.RetiredSessionID = util.SanitizeTextForPostgres(req.RetiredSessionID)
 }
 
-func sanitizeTaskFailRequest(req *TaskFailRequest) {
+func sanitizeTaskFailRequest(req *protocol.TaskFailRequest) {
 	req.Error = util.SanitizeTextForPostgres(req.Error)
 	req.SessionID = util.SanitizeTextForPostgres(req.SessionID)
 	req.WorkDir = util.SanitizeTextForPostgres(req.WorkDir)
@@ -5083,7 +5117,7 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 			"task_id", taskID,
 			"failure_reason", taskfailure.ReasonAgentContextOverflow,
 		)
-		h.failTask(w, r, taskID, workspaceID, TaskFailRequest{
+		h.failTask(w, r, taskID, workspaceID, protocol.TaskFailRequest{
 			Error:          req.Output,
 			FailureReason:  string(taskfailure.ReasonAgentContextOverflow),
 			SessionID:      req.SessionID,
@@ -5781,6 +5815,9 @@ func (h *Handler) GetTaskStatus(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "task not found")
 			return
 		}
+		if writeQueryCancellation(w, r, err) {
+			return
+		}
 		slog.Warn("get agent task status failed", "task_id", taskID, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to load task")
 		return
@@ -5805,28 +5842,6 @@ func (h *Handler) GetTaskStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": task.Status})
 }
 
-// FailTask marks a running task as failed.
-type TaskFailRequest struct {
-	Error          string `json:"error"`
-	SessionID      string `json:"session_id,omitempty"`
-	WorkDir        string `json:"work_dir,omitempty"`
-	DurableWorkDir string `json:"durable_work_dir,omitempty"`
-	FailureReason  string `json:"failure_reason,omitempty"`
-	// BranchName: a failed run can still have produced a branch — worktree mode
-	// commits whatever the agent left before tearing the worktree down. Report
-	// it so a partially-successful run is still findable.
-	BranchName string `json:"branch_name,omitempty"`
-	// SessionRolloutMissing: the daemon withheld this task's Codex session
-	// because its rollout was missing (MUL-5305). Clear the resume pointer and
-	// flag the continuity gap for the next claim.
-	SessionRolloutMissing bool `json:"session_rollout_missing,omitempty"`
-	// RetiredSessionID: a session this run proved unresumable and abandoned
-	// (GH #6066). Distinct from an empty SessionID, which only means "nothing
-	// to report" — this says "never hand this id to a later run". Older
-	// daemons omit it, which is exactly the pre-fix behaviour.
-	RetiredSessionID string `json:"retired_session_id,omitempty"`
-}
-
 func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
 
@@ -5836,7 +5851,7 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req TaskFailRequest
+	var req protocol.TaskFailRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -5854,13 +5869,13 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 // run re-classified at the /complete boundary lands through exactly the same
 // transaction, token revocation and runtime wake-up as one the daemon reported
 // as failed itself.
-func (h *Handler) failTask(w http.ResponseWriter, r *http.Request, taskID, workspaceID string, req TaskFailRequest) {
+func (h *Handler) failTask(w http.ResponseWriter, r *http.Request, taskID, workspaceID string, req protocol.TaskFailRequest) {
 	// MUL-5305: SessionRolloutMissing is applied inside FailTask's terminal
 	// transaction — forcing session_id NULL (overriding the COALESCE that would
 	// keep a stale mid-flight pin) and flagging the row in the same commit that
 	// creates and wakes the auto-retry, so the retry can never claim the withheld
 	// pointer or miss the continuity gap.
-	task, transitioned, err := h.TaskService.FailTaskWithTransition(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.BranchName, req.FailureReason, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir)
+	task, transitioned, err := h.TaskService.FailTaskWithTransition(r.Context(), parseUUID(taskID), req)
 	if err != nil {
 		// A FailTask error is an infrastructure failure (the terminal
 		// transaction that also clears the withheld session, writes the
@@ -6805,6 +6820,17 @@ func (h *Handler) loadTaskForUser(w http.ResponseWriter, r *http.Request) (db.Ag
 	// page being unreachable.
 	if !h.requireTaskVisible(w, r, wsID, task, http.StatusNotFound, "task not found") {
 		return db.AgentTaskQueue{}, false
+	}
+	// A doc discussion run has no project to gate it, and every doc reader
+	// sees its status. Its transcript follows the agent's own visibility, as
+	// the discussion's run list does (MUL-9933).
+	if task.DocID.Valid {
+		agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{ID: task.AgentID, WorkspaceID: parseUUID(wsID)})
+		actorType, actorID := h.resolveActor(r, requestUserID(r), wsID)
+		if err != nil || !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, wsID) {
+			writeError(w, http.StatusNotFound, "task not found")
+			return db.AgentTaskQueue{}, false
+		}
 	}
 	return task, true
 }

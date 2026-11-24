@@ -13,6 +13,7 @@ WORKDIR /app
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json .npmrc ./
 # Root pnpm patchedDependencies is read even without the mobile workspace.
 COPY apps/mobile/patches/ apps/mobile/patches/
+COPY patches/ patches/
 COPY apps/collab/package.json apps/collab/
 COPY packages/views/package.json packages/views/
 COPY packages/core/package.json packages/core/

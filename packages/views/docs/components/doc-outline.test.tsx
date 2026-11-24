@@ -32,15 +32,32 @@ describe("readOutline", () => {
   });
 });
 
+describe("readOutline: hidden editor", () => {
+  it("skips an editor still mounting behind `hidden`", () => {
+    const root = document.createElement("div");
+    root.innerHTML =
+      '<div class="ProseMirror"><h1>Shown</h1></div><div hidden><div class="ProseMirror"><h1>Mounting</h1></div></div>';
+    expect(readOutline(root).map(({ text }) => text)).toEqual(["Shown"]);
+  });
+});
+
 describe("DocOutline", () => {
   it("marks the current heading and reports clicks", () => {
     const headings = readOutline(
       renderedDoc("<h2>Goals</h2><h3>Scope</h3><h2>Plan</h2>"),
     );
-    const onSelect = vi.fn();
-    render(<DocOutline headings={headings} activeIndex={1} onSelect={onSelect} />, {
-      wrapper: I18nWrapper,
+    // The second heading is the last one above the active line.
+    headings.forEach((heading, i) => {
+      vi.spyOn(heading.element, "getBoundingClientRect").mockReturnValue({
+        top: [0, 50, 500][i],
+      } as DOMRect);
     });
+    const scroller = document.createElement("div");
+    const onSelect = vi.fn();
+    render(
+      <DocOutline headings={headings} scrollRef={{ current: scroller }} onSelect={onSelect} />,
+      { wrapper: I18nWrapper },
+    );
     expect(screen.getByRole("navigation", { name: "Outline" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Scope" })).toHaveAttribute(
       "aria-current",

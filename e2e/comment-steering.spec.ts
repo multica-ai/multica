@@ -54,7 +54,7 @@ for (const provider of ["codex", "pi"]) {
         localStorage.setItem("multica:chat:isOpen", "false");
       }, api.getToken());
       await page.setViewportSize({ width: 1440, height: 1000 });
-      await page.goto(`/${workspace.slug}/issues/${issue.id}`, { waitUntil: "domcontentloaded" });
+      await page.goto(`/${workspace.slug}/issues/${issue.identifier}`, { waitUntil: "domcontentloaded" });
       await expect(page.locator(`[data-run-id="${turnId}"]`)).toBeVisible({ timeout: 45_000 });
 
       const shell = page.getByTestId("reply-composer-shell").first();

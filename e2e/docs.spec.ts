@@ -1,10 +1,39 @@
-import { test, expect, type FileChooser } from "@playwright/test";
+import { test, expect, type FileChooser, type Page } from "@playwright/test";
 // Docs sits behind the docs_v1 flag: run the server with FF_DOCS_V1=true.
+//
+// The spec passes with or without collab, and each covers a different save path:
+// - `make up` (API + collab + Web): docs edit live, the header says "Live",
+//   and collab stores the body. Reads pass `flush` so they see what was typed
+//   without waiting out collab's store debounce.
+// - `make up C=api,web` after `make down C=collab`: docs save through the API
+//   and the header says "Saved". A running collab stays wired to the API
+//   whatever `C=` says, so stop it first.
+// Tests read the mode from that status. The few that exist in one mode only
+// skip in the other and say why; run both setups to cover everything.
 import { TestApiClient } from "./fixtures";
+
+type DocMode = "live" | "solo";
+
+/** Waits for the open doc to settle into a mode. The wait outlasts the page's 8s fallback to solo. */
+async function docMode(page: Page): Promise<DocMode> {
+  const status = page.getByRole("status").filter({ hasText: /^(Live|Saved)$/ });
+  await expect(status).toBeVisible({ timeout: 10_000 });
+  return (await status.textContent())?.trim() === "Live" ? "live" : "solo";
+}
 
 let api: TestApiClient;
 let slug: string;
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || `http://localhost:${process.env.PORT || "8080"}`;
+let docsEnabledPromise: Promise<boolean> | null = null;
+function isDocsEnabled() {
+  return (docsEnabledPromise ??= fetch(`${API_BASE}/api/config`)
+    .then((res) => (res.ok ? res.json() : null))
+    .then((body: { feature_flags?: { docs_v1?: boolean } } | null) => body?.feature_flags?.docs_v1 === true)
+    .catch(() => false));
+}
+
 test.beforeEach(async ({ page }) => {
+  test.skip(!(await isDocsEnabled()), "Docs is off; start the API with FF_DOCS_V1=true.");
   page.on("pageerror", (error) => {
     throw error;
   });
@@ -21,8 +50,8 @@ test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
 });
 test.afterEach(async () => {
-  await api.cleanup();
-  await api.deleteWorkspace();
+  await api?.cleanup();
+  await api?.deleteWorkspace();
 });
 
 test("Markdown autosave, folder move, immutable history and restore", async ({
@@ -52,7 +81,8 @@ test("Markdown autosave, folder move, immutable history and restore", async ({
     animations: "disabled",
     style: "nextjs-portal { display: none; }",
   });
-  await page.getByRole("link", { name: "History", exact: true }).click();
+  await page.getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("menuitem", { name: "History", exact: true }).click();
   await page.getByRole("button", { name: /^v1 / }).click();
   await expect(
     page.getByRole("heading", { name: "Release runbook", exact: true }),
@@ -83,6 +113,7 @@ test("navigating to history saves the last title and Markdown before the debounc
   const title = page.getByRole("textbox", { name: "Title", exact: true });
   const editor = page.locator('[contenteditable="true"]').first();
   await expect(title).toHaveValue("Quick edit");
+  const mode = await docMode(page);
   await expect(editor).toBeVisible();
   await page.clock.install({ time: new Date("2026-11-09T12:00:00Z") });
   await page.clock.pauseAt(new Date("2026-11-09T12:00:01Z"));
@@ -92,14 +123,24 @@ test("navigating to history saves the last title and Markdown before the debounc
   );
   await title.fill("Final title");
   await editor.fill("Last Markdown edit before leaving.");
-  await page.getByRole("link", { name: "History", exact: true }).click();
+  await page.getByRole("link", { name: /^Edited / }).click();
   await expect(page).toHaveURL(new RegExp(`/${doc.id}/history$`));
-  expect((await saving).postDataJSON()).toMatchObject({
-    title: "Final title", content: "Last Markdown edit before leaving.", base_revision: 1,
-  });
-  await expect.poll(async () => api.getDoc(doc.id)).toMatchObject({
-    title: "Final title", content: "Last Markdown edit before leaving.", revision: 2, version_count: 2,
-  });
+  const sent = (await saving).postDataJSON();
+  if (mode === "solo") {
+    expect(sent).toMatchObject({
+      title: "Final title", content: "Last Markdown edit before leaving.", base_revision: 1,
+    });
+    await expect.poll(async () => api.getDoc(doc.id)).toMatchObject({
+      title: "Final title", content: "Last Markdown edit before leaving.", revision: 2, version_count: 2,
+    });
+  } else {
+    // Live, the request carries the title alone; the body went to collab as it was typed.
+    expect(sent).toMatchObject({ title: "Final title" });
+    expect(sent).not.toHaveProperty("content");
+    await expect.poll(async () => api.getDoc(doc.id, { flush: true })).toMatchObject({
+      title: "Final title", content: "Last Markdown edit before leaving.",
+    });
+  }
 });
 
 test("stale save keeps a draft across reload and lets the human load the latest", async ({
@@ -109,6 +150,10 @@ test("stale save keeps a draft across reload and lets the human load the latest"
   await page.goto(`/${slug}/docs/${doc.id}`);
   const title = page.getByRole("textbox", { name: "Title", exact: true });
   await expect(title).toHaveValue("Design notes");
+  test.skip(
+    (await docMode(page)) === "live",
+    "Live editing merges a colleague's write instead of rejecting a stale save; the next test covers that.",
+  );
   await title.fill("My unsaved title");
   await api.updateDoc(doc.id, 1, "A colleague's newer content");
   await expect(
@@ -135,6 +180,27 @@ test("stale save keeps a draft across reload and lets the human load the latest"
   );
 });
 
+test("a colleague's write merges into a doc open for live editing", async ({ page }) => {
+  const doc = await api.createDoc("Design notes", "Original shared content");
+  await page.goto(`/${slug}/docs/${doc.id}`);
+  const title = page.getByRole("textbox", { name: "Title", exact: true });
+  await expect(title).toHaveValue("Design notes");
+  test.skip(
+    (await docMode(page)) === "solo",
+    "Without collab a colleague's write makes the open page's save stale; the previous test covers that.",
+  );
+  await title.fill("My new title");
+  await expect.poll(async () => (await api.getDoc(doc.id)).title).toBe("My new title");
+  await api.updateDoc(doc.id, 1, "A colleague's newer content");
+  const editor = page.locator('.ProseMirror[contenteditable="true"]').first();
+  await expect(editor).toHaveText("A colleague's newer content");
+  await expect(title).toHaveValue("My new title");
+  await expect(page.getByRole("alert").filter({ hasText: "Your draft is kept" })).toHaveCount(0);
+  await expect.poll(async () => api.getDoc(doc.id, { flush: true })).toMatchObject({
+    title: "My new title", content: "A colleague's newer content",
+  });
+});
+
 test("create a nested doc, edit Markdown, and delete it with confirmation", async ({page}) => {
   await page.goto(`/${slug}/docs`);
   await page.getByRole("button", {name: "New", exact: true}).click();
@@ -147,9 +213,10 @@ test("create a nested doc, edit Markdown, and delete it with confirmation", asyn
   await expect(page.getByRole("textbox", {name: "Title", exact: true})).toBeFocused();
   await page.keyboard.type("Architecture notes");
   const id = page.url().split("/").at(-1)!;
+  await docMode(page);
   const editor = page.locator('[contenteditable="true"]').first();
   await editor.fill("A shared architecture decision.");
-  await expect.poll(async () => (await api.getDoc(id)).content).toContain("A shared architecture decision.");
+  await expect.poll(async () => (await api.getDoc(id, { flush: true })).content).toContain("A shared architecture decision.");
   expect((await api.getDoc(id)).folder_id).not.toBeNull();
   await page.getByRole("button", {name: "More", exact: true}).click();
   await page.getByRole("menuitem", {name: "Delete", exact: true}).click();
@@ -172,8 +239,8 @@ test("block menu, block handle and outline shape a document", async ({ page }, i
   const choosers: FileChooser[] = [];
   page.on("filechooser", (chooser) => choosers.push(chooser));
   await page.goto(`/${slug}/docs/${doc.id}`);
-  const content = async () => (await api.getDoc(doc.id)).content;
-  await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
+  const content = async () => (await api.getDoc(doc.id, { flush: true })).content;
+  await docMode(page);
   await expect(page.locator("time")).toHaveText(/^Edited /);
 
   const outline = page.getByRole("navigation", { name: "Outline" });
@@ -310,6 +377,43 @@ test("docs link from issues, show up in Cmd+K, and reorganize from the tree", as
   await expect.poll(async () => (await api.getDoc(created)).title).toBe("On-call handbook");
   expect((await api.getDoc(created)).folder_id).toBe(folder.id);
   await page.screenshot({ path: info.outputPath("docs-tree.png"), animations: "disabled", style: "nextjs-portal { display: none; }" });
+});
+
+test("a doc or project mention's link is no wider than its truncated chip", async ({ page }) => {
+  // A flex link around the chip drops the chip's min(18rem, 100%) cap while
+  // sizing itself, so a long title leaves a blank gap after the truncated
+  // chip and pushes the following text away (MUL-9859).
+  const doc = await api.createDoc(
+    "GEO baseline report: share of voice across buyer prompts and competitor citations",
+    "Baseline.",
+  );
+  const project = await api.createProject(
+    "GEO observability: daily buyer prompt tracking and citation share dashboard",
+  );
+  const body = [
+    "1. Fix existing pages first",
+    `   - The [baseline](mention://doc/${doc.id}) confirms it, and [the project](mention://project/${project.id}) tracks it.`,
+    "",
+    `In a paragraph: [baseline](mention://doc/${doc.id}) and [the project](mention://project/${project.id}).`,
+  ].join("\n");
+  const issue = await api.createIssue("Mention chips in a list", { description: body });
+  await api.createComment(issue.id, body);
+
+  // The description renders through the editor, the comment through the
+  // readonly renderer: two of each chip on both.
+  await page.goto(`/${slug}/issues/${issue.id}`);
+  await expect(page.locator(".doc-chip").filter({ hasText: "GEO baseline report" })).toHaveCount(4);
+  await expect(page.locator(".project-chip").filter({ hasText: "GEO observability" })).toHaveCount(4);
+
+  const gaps = await page.locator("a.doc-mention, a.project-mention").evaluateAll((links) =>
+    links.map((link) => {
+      const chip = link.querySelector(".doc-chip, .project-chip")!;
+      const { marginLeft, marginRight } = getComputedStyle(chip);
+      const hug = chip.getBoundingClientRect().width + parseFloat(marginLeft) + parseFloat(marginRight);
+      return Math.round(Math.abs(link.getBoundingClientRect().width - hug));
+    }),
+  );
+  expect(gaps).toEqual(Array(8).fill(0));
 });
 
 test("Cmd+K finds a doc by words that only appear in its content", async ({ page }) => {

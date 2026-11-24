@@ -116,20 +116,13 @@ describe("Connected Apps API parsing", () => {
     expect(JSON.parse(String(ok.fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ toolkit_slug: "gmail", return_to: "/ws/issues/1" });
   });
 
-  it("parses tools and issue calls, dropping malformed pages", async () => {
+  it("parses issue calls, dropping malformed pages", async () => {
     let { client } = respondWith({
-      tools: [{ slug: "GMAIL_SEND_EMAIL", name: "Send", auto_class: "send", class: "unknown", overridden: true }],
-    });
-    expect((await client.listAppTools("gmail")).tools[0]).toMatchObject({ class: "send", description: "" });
-    ({ client } = respondWith({ tools: null }));
-    expect(await client.listAppTools("gmail")).toEqual({ tools: [] });
-
-    ({ client } = respondWith({
       calls: [{
         id: "c1", agent_id: "a1", account_scope: "team", toolkit_slug: "gmail", tool_slug: "GMAIL_SEND_EMAIL",
         action_class: "send", outcome: "rate_limited", created_at: "t",
       }],
-    }));
+    });
     expect((await client.listIssueAppCalls("i1")).calls[0]).toMatchObject({ task_id: null, error: null, outcome: "rate_limited" });
     ({ client } = respondWith("oops"));
     expect(await client.listIssueAppCalls("i1")).toEqual({ calls: [] });

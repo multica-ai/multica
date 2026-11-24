@@ -1,8 +1,11 @@
 "use client";
 
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useStatusLabel } from "../utils/status-label";
 import { useMemo, type ReactNode } from "react";
+import { UI_EASE_IN, UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import {
   Bot,
   CalendarClock,
@@ -777,35 +780,62 @@ export function FilterChipsBar({
   viewBaseline?: IssueViewBaseline;
 }) {
   const { t } = useT("issues");
+  const reduceMotion = useReducedMotion();
   const { chips, hasAny, clearAll } = useFilterChips(dateFilter, onDateFilterChange, viewBaseline);
 
-  if (!hasAny) return null;
-
   return (
-    <div className="mx-4 mb-2 flex shrink-0 flex-wrap items-center gap-1.5 rounded-lg bg-muted/50 px-2 py-1.5">
-      {chips.map((chip) => (
-        <ChipSpan key={chip.key} chip={chip} />
-      ))}
-      <span className="ml-auto flex items-center gap-1.5">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={clearAll}
-          className="h-6 px-2 text-caption text-muted-foreground"
+    <AnimatePresence initial={false}>
+      {hasAny && (
+        <motion.div
+          key="filter-chips-bar"
+          initial={reduceMotion ? false : { opacity: 0, height: 0, marginBottom: 0, overflow: "hidden" }}
+          animate={{
+            opacity: 1,
+            height: "auto",
+            marginBottom: 8,
+            transition: { duration: reduceMotion ? 0 : UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
+            transitionEnd: { overflow: "visible" },
+          }}
+          exit={
+            reduceMotion
+              ? { opacity: 0, transition: { duration: 0 } }
+              : {
+                  opacity: 0,
+                  height: 0,
+                  marginBottom: 0,
+                  overflow: "hidden",
+                  transition: { duration: UI_MOTION_DURATION.micro, ease: UI_EASE_IN },
+                }
+          }
+          className="mx-4 shrink-0"
         >
-          {t(($) => $.filters.chip_clear)}
-        </Button>
-        {onSave && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onSave}
-            className="h-6 px-2 text-caption"
-          >
-            {saveLabel ?? t(($) => $.filters.chip_save)}
-          </Button>
-        )}
-      </span>
-    </div>
+          <div className="flex flex-wrap items-center gap-1.5 rounded-lg bg-muted/50 px-2 py-1.5">
+            {chips.map((chip) => (
+              <ChipSpan key={chip.key} chip={chip} />
+            ))}
+            <span className="ml-auto flex items-center gap-1.5">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={clearAll}
+                className="h-6 px-2 text-caption text-muted-foreground"
+              >
+                {t(($) => $.filters.chip_clear)}
+              </Button>
+              {onSave && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={onSave}
+                  className="h-6 px-2 text-caption"
+                >
+                  {saveLabel ?? t(($) => $.filters.chip_save)}
+                </Button>
+              )}
+            </span>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }

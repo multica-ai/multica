@@ -90,6 +90,7 @@ vi.mock("../../i18n", () => ({
 }));
 
 vi.mock("../../navigation", () => ({
+  useWarmRoute: () => undefined,
   AppLink: ({ children, href, ...props }: React.ComponentProps<"a">) => (
     <a href={href} {...props}>
       {children}
@@ -176,7 +177,6 @@ describe("IssueSurface — scope switch loading semantics", () => {
       listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       ...statusTableMethodsFromLegacy(listIssues),
-      listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot: vi.fn(() => never<AgentTask[]>()),
       getChildIssueProgress: vi.fn(() => never()),
@@ -285,7 +285,6 @@ describe("IssueSurface — scope switch loading semantics", () => {
       listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       ...statusTableMethodsFromLegacy(listIssues),
-      listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot: vi.fn(() => never<AgentTask[]>()),
       getChildIssueProgress: vi.fn(() => never()),
@@ -377,7 +376,6 @@ describe("IssueSurface — table pagination ownership", () => {
       listIssues,
       listIssueTableRows,
       listIssueTableFacets: vi.fn(() => never()),
-      listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot: vi.fn(() =>
         Promise.resolve(
@@ -474,7 +472,6 @@ describe("IssueSurface — table pagination ownership", () => {
       listIssues,
       listIssueTableRows,
       listIssueTableFacets: vi.fn(() => never()),
-      listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => Promise.resolve([])),
       getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
       getChildIssueProgress: vi.fn(() => Promise.resolve([])),
@@ -556,7 +553,6 @@ describe("IssueSurface — table pagination ownership", () => {
         }),
       ),
       listIssueTableFacets: vi.fn(() => never()),
-      listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => Promise.resolve([])),
       getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
       getChildIssueProgress: vi.fn(() => Promise.resolve([])),
@@ -618,7 +614,6 @@ describe("IssueSurface — table pagination ownership", () => {
       listIssues,
       listIssueTableRows,
       listIssueTableFacets: vi.fn(() => never()),
-      listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => Promise.resolve([])),
       getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
       getChildIssueProgress: vi.fn(() => Promise.resolve([])),
@@ -714,7 +709,6 @@ describe("IssueSurface — table pagination ownership", () => {
         }),
       ),
       listIssueTableFacets: vi.fn(() => never()),
-      listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => Promise.resolve([])),
       getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
       getChildIssueProgress: vi.fn(() => Promise.resolve([])),
@@ -782,7 +776,6 @@ describe("IssueSurface — filtered empty state", () => {
       listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       ...statusTableMethodsFromLegacy(listIssues),
-      listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot: vi.fn(() => never<AgentTask[]>()),
       getWorkspaceWorkingAgents: vi.fn(() => Promise.resolve([])),
@@ -1022,7 +1015,6 @@ describe("IssueSurface — status catalog failure", () => {
         rowRequests.push(request);
         return tableMethods.listIssueTableRows(request);
       }),
-      listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot: vi.fn(() => never<AgentTask[]>()),
       getChildIssueProgress: vi.fn(() => never()),
@@ -1175,7 +1167,6 @@ describe("IssueSurface — guest create affordances (MUL-9420)", () => {
       listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       ...statusTableMethodsFromLegacy(listIssues),
-      listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       listMembers: vi.fn(() => never()),
       getAgentTaskSnapshot: vi.fn(() => never<AgentTask[]>()),

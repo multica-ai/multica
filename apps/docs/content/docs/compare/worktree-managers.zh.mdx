@@ -1,0 +1,65 @@
+---
+title: Multica 与本地 worktree 管理工具对比
+description: 在并行运行多个编程智能体这件事上，Multica 与 Conductor、Claude Squad、Orca、Beads 有何不同，以及什么时候个人工作台就够用。
+---
+
+Conductor、Claude Squad 和 Orca 帮助一名开发者并行运行多个编程智能体，每个智能体在自己的 git worktree 里工作，再由开发者审查结果。Beads 给智能体提供一个跟随仓库存放的任务跟踪器。Multica 解决的是相邻的另一个问题：一个**团队**在同一个工作区里共用智能体、任务、运行时和 Skills。需要哪一种，主要取决于涉及多少人。
+
+本页关于其他工具的描述来自它们截至 2026 年 11 月的公开文档：[Conductor](https://www.conductor.build/docs/concepts/git-worktrees)、[Claude Squad](https://github.com/smtg-ai/claude-squad)、[Orca](https://orca.dev/docs/model/worktrees) 和 [Beads](https://github.com/gastownhall/beads)。最新情况请以它们为准。
+
+## 简短回答
+
+- **一名开发者，智能体跑在自己电脑上，逐个亲自审查 diff**：Conductor、Claude Squad 或 Orca 这类 worktree 管理工具很合适，上手通常也更快。
+- **智能体需要在仓库里维护计划和依赖关系图**：Beads。
+- **多人共用智能体**、智能体要跑在笔记本以外的机器上、工作像普通任务一样分配、需要访问控制和重复性工作：Multica。
+
+它们并不互斥。开发者可以继续用 worktree 管理工具做需要亲自盯的工作，把耗时较长或例行的任务交给 Multica 里共用的智能体。
+
+## 对比
+
+| | Multica | Conductor | Claude Squad | Orca | Beads |
+|---|---|---|---|---|---|
+| 是什么 | 把任务分配给智能体的团队工作区 | 在隔离工作区里并行运行编程智能体的 Mac 应用 | 在 tmux 会话中管理智能体的终端应用 | 运行一组智能体的桌面、移动端和远程应用 | 给编程智能体用的图结构任务跟踪器，通过 CLI 使用 |
+| 主要使用者 | 由人和智能体组成的团队 | 一名开发者 | 一名开发者 | 一名开发者，外加别人可以调用的 bot | 在仓库里工作的智能体 |
+| 工作单位 | 共享看板上的任务 | 一个工作区（worktree 和分支） | 一个会话（tmux 和 worktree） | 一个 worktree | 一个带依赖关系的 bead（任务） |
+| 并行工作如何避免冲突 | 每次运行有自己的目录和仓库检出；智能体也可以使用本地目录的隔离 worktree | 每个工作区一个 git worktree | 每个会话一个 git worktree | 每个任务一个 git worktree | 不负责运行；任务以原子方式认领 |
+| 智能体在哪里运行 | 你连接的任何电脑；同事可以共用运行时 | 你的 Mac；也有云端工作区 | 你的终端 | 你的电脑、SSH 主机、远程 Orca Server 或云端虚拟机 | 你的智能体在哪里就在哪里 |
+| 工具 | [31 种 AI 编程工具](/providers) | Claude Code、Codex、Cursor Agent、OpenCode | Claude Code、Codex、OpenCode、Amp 等终端智能体 | 你自己的 Claude Code、Codex、Grok、Antigravity 等 CLI | 任何能调用它 CLI 的智能体 |
+| 团队共用 | 支持：共享任务、智能体、运行时、Skills、角色，以及按智能体的 Access | — | — | bot 接收来自 Slack、Linear 或 GitHub 的请求，用所有者的智能体运行 | 通过 Dolt remote 同步 |
+| 应用内审查 diff | 不支持；审查在 pull request 上进行，运行日志留在任务上 | 支持 | 支持 | 支持 | — |
+| 重复性和触发式工作 | [自动化](/autopilots)按计划或 webhook 运行 | — | — | bot 的计划和触发器（pull request、检查失败、webhook），以及定时自动化 | — |
+| 许可证 | 源码可用（source-available），在组织内部免费使用 | 未公开源码 | AGPL-3.0 | MIT | MIT |
+
+## 什么时候 worktree 管理工具更合适
+
+- 你是一名开发者，想并排看着几个智能体工作，每个都有终端和 diff 查看器。
+- 每个改动在离开你的电脑之前，你都要亲自交互式地审查和合并。
+- 不需要别人看到、分配或复用你的智能体。
+
+Multica 没有应用内的 diff 查看器，也没有按任务的终端。审查在 pull request 上进行，任务上保留这次运行的执行日志。
+
+## 什么时候 Multica 更合适
+
+- **不止一个人使用这些智能体。** 智能体、运行时和 [Skills](/skills) 属于工作区；[Access](/agents#权限与-access) 决定谁能运行每个智能体；所有人都能看到哪个智能体在做什么。见[团队共享智能体池](/team-agent-pool)。
+- **合上笔记本后智能体也要继续跑。** 把服务器或虚拟机连接为[运行时](/daemon-runtimes)，让智能体在上面运行；同事可以共用它。
+- **工作要作为任务来跟踪。** 分配、状态、评论、子任务、带审查环节的[工作流](/workflows)和 PR 链接都在同一个任务上，而不是留在某个本地会话里。
+- **有些工作会重复出现。** [自动化](/autopilots)按计划或 webhook 启动智能体，每次运行都有记录。
+- **需要从聊天工具接收工作。** 智能体可以从 Slack、飞书等[聊天集成](/channels)触发。
+
+## 在 Multica 里如何同时运行多个 Claude Code 而不冲突？
+
+把不同的任务分配给同一个运行时上的一个或多个智能体。每次运行在 `~/multica_workspaces` 下有自己的工作目录，仓库从共享缓存检出，通常是各自独立的 git worktree，所以并行运行不会改同一份检出。默认情况下一台电脑最多同时执行 20 次运行，每个智能体最多 6 次，见[并发限制](/daemon-runtimes#并发限制)。并行运行仍然共享这台机器的资源和 Claude Code 账号的用量额度。
+
+如果想直接在自己电脑上已有的目录里工作，把它添加为[项目资源](/project-resources)，并选择智能体直接修改它，还是在隔离的 worktree 里修改。
+
+## Multica 是给 AI 编程智能体用的任务跟踪器吗？
+
+是，而且是团队共用的。Multica 的任务设计成智能体可以直接接手：智能体可以是负责人，用评论汇报进度，交付时把状态改为 `in_review`，较大的工作会拆成分阶段的子任务。智能体通过 [Multica CLI](/cli) 读取和更新任务。
+
+Beads 的思路不同：任务存放在代码旁边的 Dolt 数据库里，智能体通过 `bd` 读取和认领。它适合需要在仓库内保存结构化记忆和依赖关系的智能体。Multica 适合希望人和智能体在同一个看板上协作、并需要访问控制和运行记录的团队。
+
+## 相关页面
+
+- [Multica 与 Linear、Jira 对比](/compare/linear-jira)
+- [Multica 与 OpenHands、Devin、Factory 对比](/compare/openhands-devin-factory)
+- [守护进程与运行时](/daemon-runtimes)：运行在哪里执行、目录如何隔离。

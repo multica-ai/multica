@@ -132,7 +132,7 @@ export function ProjectAccessControl({ project }: { project: Project }) {
   const Icon = project.visibility === "private" ? Lock : Globe;
   return (
     <Dialog open={open} onOpenChange={(value) => { if (!changeAccess.isPending) setOpen(value); }}>
-      <DialogTrigger render={<Button type="button" variant="ghost" size="sm" className="h-auto min-h-7 max-w-full justify-start px-0" aria-label={t(($) => $.access.label)}><Icon /><span className="truncate">{project.visibility === "private" ? t(($) => $.access.private) : t(($) => $.access.workspace)}</span></Button>} />
+      <DialogTrigger render={<Button type="button" variant="ghost" size="sm" className="h-auto min-h-7 max-w-full justify-start gap-1.5 px-0 text-caption font-normal hover:bg-transparent dark:hover:bg-transparent" aria-label={t(($) => $.access.label)}><Icon className="size-3.5 text-muted-foreground" /><span className="truncate">{project.visibility === "private" ? t(($) => $.access.private) : t(($) => $.access.workspace)}</span></Button>} />
       <DialogContent className="flex max-h-[90%] flex-col sm:max-w-lg">
         <DialogHeader><DialogTitle>{t(($) => $.access.title, { title: project.title })}</DialogTitle><DialogDescription>{t(($) => $.access.description)}</DialogDescription></DialogHeader>
         {open ? <ProjectAccessEditor project={project} onClose={() => setOpen(false)} changeAccess={changeAccess} /> : null}

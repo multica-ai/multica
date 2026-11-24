@@ -7,6 +7,8 @@ dist
 # build outputs
 .turbo
 .next
+# Written by next dev / build / typegen, with paths that differ between them.
+next-env.d.ts
 out
 build
 bin

@@ -1,12 +1,12 @@
 ---
 title: AI 코딩 도구 비교
-description: Multica가 지원하는 AI 코딩 도구와 모델, MCP, 세션, 스킬의 차이를 비교합니다.
+description: Multica가 지원하는 31가지 AI 코딩 도구(Claude Code, Codex, Cursor, Copilot 등)와 감지, 모델, MCP, 세션, 끼어들기, 스킬의 차이를 비교합니다.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { ProviderPickerDemo } from "@/components/demos/provider-picker-demo";
 
-Multica는 사용 중인 AI 코딩 도구를 대체하지 않습니다. 런타임이 컴퓨터에 이미 설치되어 로그인된 도구를 호출하고 실행 진행 상황과 결과를 태스크에 기록합니다. 이미 사용 중인 도구가 있다면 보통 그대로 쓰면 됩니다. 아직 정하지 않았다면 다음 네 가지를 보세요.
+Multica는 31개 AI 코딩 도구를 지원합니다. 사용 중인 도구를 대체하지는 않습니다. 런타임이 컴퓨터에 이미 설치되어 로그인된 도구를 호출하고 실행 진행 상황과 결과를 태스크에 기록합니다. 이미 사용 중인 도구가 있다면 보통 그대로 쓰면 됩니다. 아직 정하지 않았다면 다음 네 가지를 보세요.
 
 - 컴퓨터에 이미 설치되어 있는가
 - 계정에서 어떤 모델을 사용할 수 있는가
@@ -53,6 +53,10 @@ Multica는 사용 중인 AI 코딩 도구를 대체하지 않습니다. 런타�
 | ZeroClaw | `zeroclaw` | ✓ | — | — | — |
 | ZCode | `zcode` / ZCode Desktop | ✓ | ✓ | ✓ | `.zcode/skills/` |
 
+<Callout type="info">
+Gemini CLI는 지원하지 않습니다. 내장 도구에서 제거되었으므로, Multica가 실행할 수 있는 도구로 Gemini를 소개하는 페이지는 정보가 오래된 것입니다.
+</Callout>
+
 Claude Code에서 데몬 환경 변수 `CLAUDE_CONFIG_DIR`에 절대 경로를 지정하면 Multica는 해당 위치에서 사용자 및 플러그인 스킬을 조회하고 가져옵니다. 시작 래퍼 내부에서만 설정한 경로는 스캐너에 반영되지 않습니다.
 
 Amp의 모델 필드는 기반 모델 ID가 아니라 `high` 같은 Amp **모드**를 선택합니다. 비워 두면 Amp의 기본값을 사용합니다.
@@ -62,6 +66,41 @@ Amp는 데몬 또는 에이전트 환경에 `AMP_API_KEY`도 필요하며, 저�
 "Multica의 MCP 관리"는 에이전트 설정에 MCP server를 입력하면 Multica가 실행 전에 해당 도구로 전달할 수 있다는 뜻입니다. 이 열은 Multica가 대신 설정할 수 있는지만 나타내며, 도구 자체에 다른 MCP 설정 방법이 있는지와는 관계없습니다.
 
 "Multica에서 모델 선택"이 —인 도구는 도구 자체 설정에서 모델을 고릅니다. [모델 출처](#모델-출처)를 참고하세요.
+
+## 도구 연결
+
+표의 모든 도구는 같은 방식으로 연결됩니다. 컴퓨터의 Multica 데몬이 `PATH`에서 각 도구의 명령을 찾고, 찾은 도구마다 런타임을 하나씩 등록합니다. 실행은 그 컴퓨터에서 도구 자체의 로그인과 구독으로 이루어집니다. Multica는 도구를 함께 배포하지 않으며 모델 호출을 대신 중계하지도 않습니다.
+
+1. 도구의 문서에 따라 설치하고 로그인합니다.
+2. 같은 컴퓨터에서 [Multica 데스크톱 앱](/desktop-app)을 열면 컴퓨터가 자동으로 연결됩니다. 또는 CLI를 설치하고 데몬을 시작합니다.
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+   multica setup
+   ```
+
+   Windows에서는 첫 줄을 `irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex`로 바꿉니다. 자체 호스팅 인스턴스는 [자체 호스팅 빠른 시작](/self-host-quickstart)의 명령을 사용합니다.
+3. **런타임** 페이지에서 그 컴퓨터 아래에 도구가 나타나는지 확인합니다. `multica runtime list`로도 확인할 수 있습니다. 나중에 다른 도구를 설치했다면 `multica daemon restart`를 실행하거나 데스크톱 앱을 다시 엽니다.
+4. 그 런타임에서 [에이전트를 만들고](/agents-create) 태스크를 할당합니다.
+
+데몬의 `PATH`가 닿지 않는 위치에 도구를 설치했다면 `MULTICA_<PREFIX>_PATH`로 그 위치를 지정합니다. [환경 변수](/environment-variables#데몬-설정)를 참고하세요. 컴퓨터 한 대에 여러 도구를 둘 수 있고 워크스페이스 하나에 여러 컴퓨터를 연결할 수 있으므로, 같은 보드에서 한 컴퓨터는 Claude Code를, 다른 컴퓨터는 Codex나 Kimi를 실행할 수 있습니다.
+
+## 끼어들기 지원
+
+다음 실행을 기다리지 않고 [작업 중인 실행에 메시지를 추가](/mentioning-agents#실행-중인-에이전트에게-끼어들기)할 수 있습니다. AI 코딩 도구가 이를 지원해야 하며, 다음 버전 이상이어야 합니다.
+
+| 도구 | 최소 버전 |
+|---|---|
+| Antigravity | 1.4.8 |
+| Claude Code | 2.1.110 |
+| Codex | 0.100.0 |
+| Cursor Agent | 2026.10.14 |
+| Grok | 1.0.14 |
+| Hermes | 0.22.3 |
+| Kiro CLI | 2.33.0 |
+| Pi | 1.4.0 |
+
+그 밖의 도구나 이전 버전에서는 '현재 실행에 추가'가 나오지 않습니다. 답장은 현재 실행이 끝난 뒤 새 실행에서 처리되거나, 현재 실행을 중지하고 다시 시작하게 됩니다.
 
 ## 모델 출처
 

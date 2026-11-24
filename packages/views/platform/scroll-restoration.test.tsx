@@ -181,4 +181,54 @@ describe("useRestoredScrollRef while the content settles", () => {
     nextFrame();
     expect(view.el.scrollTop).toBe(0);
   });
+
+  it("skips pixel restore when disabled while still registering capture", () => {
+    const view = scroller(3000);
+    const registerScrollRoot = vi.fn(() => vi.fn());
+    const get = vi.fn(() => ({ top: 1500, height: 3000 }));
+    const adapter: ScrollRestorationAdapter = { get, registerScrollRoot };
+    const { result } = renderHook(
+      () => useRestoredScrollRef("main", { disabled: true }),
+      {
+        wrapper: ({ children }) => (
+          <ScrollRestorationProvider adapter={adapter}>{children}</ScrollRestorationProvider>
+        ),
+      },
+    );
+
+    result.current(view.el);
+    expect(get).not.toHaveBeenCalled();
+    expect(registerScrollRoot).toHaveBeenCalledWith("main", view.el);
+    expect(view.el.scrollTop).toBe(0);
+
+    view.resize(3400);
+    nextFrame();
+    expect(view.el.scrollTop).toBe(0);
+  });
+
+  it("cancels an active settle hold if disabled flips true after attach", () => {
+    const view = scroller(3000);
+    const adapter = makeAdapter(() => ({ top: 1500, height: 3000 }));
+    const { result, rerender } = renderHook(
+      ({ disabled }: { disabled: boolean }) =>
+        useRestoredScrollRef("main", { disabled }),
+      {
+        initialProps: { disabled: false },
+        wrapper: ({ children }) => (
+          <ScrollRestorationProvider adapter={adapter}>{children}</ScrollRestorationProvider>
+        ),
+      },
+    );
+    const refBefore = result.current;
+    result.current(view.el);
+    expect(view.el.scrollTop).toBe(1500);
+
+    rerender({ disabled: true });
+    expect(result.current).toBe(refBefore);
+
+    view.el.scrollTop = 400;
+    view.resize(3400);
+    nextFrame();
+    expect(view.el.scrollTop).toBe(400);
+  });
 });

@@ -55,3 +55,9 @@ func SignTicket(secret string, t Ticket) string {
 func DocumentName(docID string) string {
 	return "doc:" + docID
 }
+
+// IssueDocumentName is the collaboration service's name for an issue's
+// description.
+func IssueDocumentName(issueID string) string {
+	return "issue:" + issueID
+}

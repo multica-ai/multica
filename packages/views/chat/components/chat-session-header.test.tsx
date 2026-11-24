@@ -248,4 +248,28 @@ describe("ChatSessionHeader rename keyboard behavior", () => {
     expect(screen.queryByRole("textbox", { name: RENAME_LABEL })).not.toBeInTheDocument();
     expect(screen.getByText("Original title")).toBeInTheDocument();
   });
+
+  it("resets inline rename state when switching to another session", () => {
+    const nextSession: ChatSession = {
+      ...session,
+      id: "session-2",
+      title: "Next session",
+    };
+    const { rerender } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <ChatSessionHeader session={session} agent={null} />
+      </I18nProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Original title" }));
+    expect(screen.getByRole("textbox", { name: RENAME_LABEL })).toBeInTheDocument();
+
+    rerender(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <ChatSessionHeader session={nextSession} agent={null} />
+      </I18nProvider>,
+    );
+
+    expect(screen.queryByRole("textbox", { name: RENAME_LABEL })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Next session" })).toBeInTheDocument();
+  });
 });
