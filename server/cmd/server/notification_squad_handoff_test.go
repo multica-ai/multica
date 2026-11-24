@@ -61,6 +61,12 @@ func TestNotification_SquadHandoffs(t *testing.T) {
 	leaderTask := fx.f.Task(t, fx.leaderID, testutil.Cols{
 		"runtime_id": fx.runtimeID, "is_leader_task": true, "squad_id": fx.squadID,
 	})
+	// leaderTaskOn is the leader run an @squad mention starts on issueID.
+	leaderTaskOn := func(t *testing.T, issueID string) string {
+		return fx.f.Task(t, fx.leaderID, testutil.Cols{
+			"runtime_id": fx.runtimeID, "issue_id": issueID, "is_leader_task": true, "squad_id": fx.squadID,
+		})
+	}
 
 	cases := []struct {
 		name     string
@@ -98,6 +104,36 @@ func TestNotification_SquadHandoffs(t *testing.T) {
 			}},
 		{name: "roster worker on an issue not assigned to the squad", assignee: "agent", author: fx.workerID,
 			content: "Done.", handoff: false},
+		{name: "leader called in with @squad dispatching", assignee: "agent", author: fx.leaderID,
+			content: agentMention(fx.workerID) + " review the PR", handoff: true,
+			task: func(t *testing.T, issueID string) string { return leaderTaskOn(t, issueID) }},
+		{name: "leader called in with @squad without a mention", assignee: "agent", author: fx.leaderID,
+			content: "Review is done, ready to merge.", handoff: false,
+			task: func(t *testing.T, issueID string) string { return leaderTaskOn(t, issueID) }},
+		{name: "outside agent the called-in leader dispatched", assignee: "agent", author: fx.outsideID,
+			content: "Review: request changes.", handoff: true,
+			task: func(t *testing.T, issueID string) string {
+				return fx.f.Task(t, fx.outsideID, testutil.Cols{
+					"runtime_id": fx.runtimeID, "issue_id": issueID, "delegated_from_task_id": leaderTaskOn(t, issueID),
+				})
+			}},
+		{name: "roster worker a dispatched worker handed to", assignee: "agent", author: fx.workerID,
+			content: "Fixed.", handoff: true,
+			task: func(t *testing.T, issueID string) string {
+				first := fx.f.Task(t, fx.outsideID, testutil.Cols{
+					"runtime_id": fx.runtimeID, "issue_id": issueID, "delegated_from_task_id": leaderTaskOn(t, issueID),
+				})
+				return fx.f.Task(t, fx.workerID, testutil.Cols{
+					"runtime_id": fx.runtimeID, "issue_id": issueID, "delegated_from_task_id": first,
+				})
+			}},
+		{name: "agent the leader dispatched from another issue", assignee: "agent", author: fx.outsideID,
+			content: "Done.", handoff: false,
+			task: func(t *testing.T, issueID string) string {
+				return fx.f.Task(t, fx.outsideID, testutil.Cols{
+					"runtime_id": fx.runtimeID, "issue_id": issueID, "delegated_from_task_id": leaderTask,
+				})
+			}},
 	}
 
 	for _, tc := range cases {

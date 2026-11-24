@@ -148,7 +148,7 @@ export const homeCopy = {
   },
 } as const satisfies Record<Lang, unknown>;
 
-// Chrome around the interactive demos embedded in docs pages. Each demo keeps
+// Chrome around the editorial demos embedded in docs pages. Each demo keeps
 // its own scenario copy next to its component.
 export const demoChromeCopy = {
   en: { label: "Try it", replay: "Replay", click: "Click" },
