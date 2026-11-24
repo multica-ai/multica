@@ -1,9 +1,12 @@
 package handler
 
 import (
+	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -31,11 +34,52 @@ func (h *Handler) ListAgentWorkspaceGrants(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "failed to list workspace grants")
 		return
 	}
-	result := make([]string, 0, len(ids))
-	for _, id := range ids {
-		result = append(result, uuidToString(id))
+	result := make([]map[string]any, 0, len(ids))
+	workspaceIDs := make([]string, 0, len(ids))
+	for _, grant := range ids {
+		id := uuidToString(grant.WorkspaceID)
+		workspaceIDs = append(workspaceIDs, id)
+		result = append(result, map[string]any{"workspace_id": id, "can_create_agents": grant.CanCreateAgents})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"workspace_ids": result})
+	writeJSON(w, http.StatusOK, map[string]any{"workspace_ids": workspaceIDs, "grants": result})
+}
+
+func (h *Handler) SetAgentWorkspaceGrantAgentCreation(w http.ResponseWriter, r *http.Request) {
+	agent, ok := h.agentForWorkspaceGrants(w, r)
+	if !ok {
+		return
+	}
+	target, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "workspaceId"), "workspace_id")
+	if !ok {
+		return
+	}
+	if target == agent.WorkspaceID {
+		writeError(w, http.StatusBadRequest, "the agent already has access to its home workspace")
+		return
+	}
+	if member, err := h.Queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{UserID: agent.OwnerID, WorkspaceID: target}); err != nil || member.Role == "guest" {
+		writeError(w, http.StatusForbidden, "agent owner must be a member of the target workspace")
+		return
+	}
+	var body struct {
+		CanCreateAgents *bool `json:"can_create_agents"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.CanCreateAgents == nil {
+		writeError(w, http.StatusBadRequest, "can_create_agents is required")
+		return
+	}
+	grant, err := h.Queries.SetAgentWorkspaceGrantAgentCreation(r.Context(), db.SetAgentWorkspaceGrantAgentCreationParams{
+		AgentID: agent.ID, WorkspaceID: target, CanCreateAgents: *body.CanCreateAgents,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "workspace grant not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update agent creation grant")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"workspace_id": uuidToString(grant.WorkspaceID), "can_create_agents": grant.CanCreateAgents})
 }
 
 func (h *Handler) AddAgentWorkspaceGrant(w http.ResponseWriter, r *http.Request) {

@@ -2312,11 +2312,15 @@ export class ApiClient {
     return this.fetch(`/api/agents/${id}`);
   }
 
-  async listAgentWorkspaceGrants(id: string): Promise<string[]> {
+  async listAgentWorkspaceGrants(id: string): Promise<Array<{ workspace_id: string; can_create_agents: boolean }>> {
     const raw = await this.fetch<unknown>(`/api/agents/${id}/workspace-grants`);
-    return parseWithFallback(raw, z.object({ workspace_ids: z.array(z.string()).default([]) }), { workspace_ids: [] as string[] }, {
+    const parsed = parseWithFallback(raw, z.object({
+      workspace_ids: z.array(z.string()).default([]),
+      grants: z.array(z.object({ workspace_id: z.string(), can_create_agents: z.boolean().default(false) })).optional(),
+    }), { workspace_ids: [] as string[], grants: undefined as Array<{ workspace_id: string; can_create_agents: boolean }> | undefined }, {
       endpoint: "GET /api/agents/{id}/workspace-grants",
-    }).workspace_ids;
+    });
+    return parsed.grants ?? parsed.workspace_ids.map((workspace_id) => ({ workspace_id, can_create_agents: false }));
   }
 
   async addAgentWorkspaceGrant(id: string, workspaceId: string): Promise<void> {
@@ -2325,6 +2329,13 @@ export class ApiClient {
 
   async removeAgentWorkspaceGrant(id: string, workspaceId: string): Promise<void> {
     await this.fetch(`/api/agents/${id}/workspace-grants/${workspaceId}`, { method: "DELETE" });
+  }
+
+  async setAgentWorkspaceGrantAgentCreation(id: string, workspaceId: string, allow: boolean): Promise<void> {
+    await this.fetch(`/api/agents/${id}/workspace-grants/${workspaceId}/agent-creation`, {
+      method: "PUT",
+      body: JSON.stringify({ can_create_agents: allow }),
+    });
   }
 
   async createAgent(data: CreateAgentRequest): Promise<Agent> {

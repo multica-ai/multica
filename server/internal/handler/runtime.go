@@ -1329,9 +1329,23 @@ func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := make([]AgentRuntimeResponse, len(runtimes))
-	for i, rt := range runtimes {
-		resp[i] = runtimeToResponse(rt)
+	// A cross-workspace task may discover only runtimes its initiating person
+	// can actually bind. Do not expose machine metadata or sharing inventory.
+	crossTask := r.Header.Get("X-Actor-Source") == "task_token" && r.Header.Get("X-Task-Home-Workspace-ID") != workspaceID
+	resp := make([]AgentRuntimeResponse, 0, len(runtimes))
+	for _, rt := range runtimes {
+		if crossTask && !canUseRuntimeForAgent(member, rt) {
+			continue
+		}
+		item := runtimeToResponse(rt)
+		if crossTask {
+			item.Metadata = map[string]any{}
+			item.DeviceInfo = ""
+			item.SharedWith = nil
+			item.DaemonID = nil
+			item.OwnerID = nil
+		}
+		resp = append(resp, item)
 	}
 
 	writeJSON(w, http.StatusOK, resp)

@@ -714,7 +714,8 @@
     "workspace_grants_title": "このエージェントが利用できる他のワークスペース",
     "workspace_grants_description": "実行を開始した人とエージェントの所有者にアクセス権がある場合、そこでイシューの一覧表示、閲覧、作成ができます。このエージェントをそのイシューに割り当てることはできません。",
     "workspace_grants_empty": "所属する他のワークスペースはありません。",
-    "workspace_grants_error": "ワークスペースへのアクセスを変更できませんでした。"
+    "workspace_grants_error": "ワークスペースへのアクセスを変更できませんでした。",
+    "workspace_grants_agent_creation": "このエージェントがこのワークスペースでエージェントを作成できるようにする"
   },
   "profile_card": {
     "unavailable": "エージェントを利用できません",

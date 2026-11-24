@@ -28,7 +28,7 @@ func (q *Queries) AddAgentWorkspaceGrant(ctx context.Context, arg AddAgentWorksp
 }
 
 const authorizeTaskWorkspaceGrant = `-- name: AuthorizeTaskWorkspaceGrant :one
-SELECT a.owner_id, t.originator_user_id
+SELECT a.owner_id, t.originator_user_id, g.can_create_agents
 FROM agent_task_queue t
 JOIN agent a ON a.id = t.agent_id
 JOIN agent_workspace_grant g ON g.agent_id = a.id AND g.workspace_id = $1
@@ -52,6 +52,7 @@ type AuthorizeTaskWorkspaceGrantParams struct {
 type AuthorizeTaskWorkspaceGrantRow struct {
 	OwnerID          pgtype.UUID `json:"owner_id"`
 	OriginatorUserID pgtype.UUID `json:"originator_user_id"`
+	CanCreateAgents  bool        `json:"can_create_agents"`
 }
 
 func (q *Queries) AuthorizeTaskWorkspaceGrant(ctx context.Context, arg AuthorizeTaskWorkspaceGrantParams) (AuthorizeTaskWorkspaceGrantRow, error) {
@@ -62,7 +63,7 @@ func (q *Queries) AuthorizeTaskWorkspaceGrant(ctx context.Context, arg Authorize
 		arg.HomeWorkspaceID,
 	)
 	var i AuthorizeTaskWorkspaceGrantRow
-	err := row.Scan(&i.OwnerID, &i.OriginatorUserID)
+	err := row.Scan(&i.OwnerID, &i.OriginatorUserID, &i.CanCreateAgents)
 	return i, err
 }
 
@@ -78,22 +79,27 @@ func (q *Queries) DeleteAgentWorkspaceGrantsForWorkspace(ctx context.Context, wo
 }
 
 const listAgentWorkspaceGrants = `-- name: ListAgentWorkspaceGrants :many
-SELECT workspace_id FROM agent_workspace_grant WHERE agent_id = $1 ORDER BY created_at
+SELECT workspace_id, can_create_agents FROM agent_workspace_grant WHERE agent_id = $1 ORDER BY created_at
 `
 
-func (q *Queries) ListAgentWorkspaceGrants(ctx context.Context, agentID pgtype.UUID) ([]pgtype.UUID, error) {
+type ListAgentWorkspaceGrantsRow struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	CanCreateAgents bool        `json:"can_create_agents"`
+}
+
+func (q *Queries) ListAgentWorkspaceGrants(ctx context.Context, agentID pgtype.UUID) ([]ListAgentWorkspaceGrantsRow, error) {
 	rows, err := q.db.Query(ctx, listAgentWorkspaceGrants, agentID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []pgtype.UUID{}
+	items := []ListAgentWorkspaceGrantsRow{}
 	for rows.Next() {
-		var workspace_id pgtype.UUID
-		if err := rows.Scan(&workspace_id); err != nil {
+		var i ListAgentWorkspaceGrantsRow
+		if err := rows.Scan(&i.WorkspaceID, &i.CanCreateAgents); err != nil {
 			return nil, err
 		}
-		items = append(items, workspace_id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -113,4 +119,28 @@ type RemoveAgentWorkspaceGrantParams struct {
 func (q *Queries) RemoveAgentWorkspaceGrant(ctx context.Context, arg RemoveAgentWorkspaceGrantParams) error {
 	_, err := q.db.Exec(ctx, removeAgentWorkspaceGrant, arg.AgentID, arg.WorkspaceID)
 	return err
+}
+
+const setAgentWorkspaceGrantAgentCreation = `-- name: SetAgentWorkspaceGrantAgentCreation :one
+UPDATE agent_workspace_grant SET can_create_agents = $1
+WHERE agent_id = $2 AND workspace_id = $3
+RETURNING workspace_id, can_create_agents
+`
+
+type SetAgentWorkspaceGrantAgentCreationParams struct {
+	CanCreateAgents bool        `json:"can_create_agents"`
+	AgentID         pgtype.UUID `json:"agent_id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+}
+
+type SetAgentWorkspaceGrantAgentCreationRow struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	CanCreateAgents bool        `json:"can_create_agents"`
+}
+
+func (q *Queries) SetAgentWorkspaceGrantAgentCreation(ctx context.Context, arg SetAgentWorkspaceGrantAgentCreationParams) (SetAgentWorkspaceGrantAgentCreationRow, error) {
+	row := q.db.QueryRow(ctx, setAgentWorkspaceGrantAgentCreation, arg.CanCreateAgents, arg.AgentID, arg.WorkspaceID)
+	var i SetAgentWorkspaceGrantAgentCreationRow
+	err := row.Scan(&i.WorkspaceID, &i.CanCreateAgents)
+	return i, err
 }

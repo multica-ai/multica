@@ -1528,6 +1528,16 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if r.Header.Get("X-Actor-Source") == "task_token" && r.Header.Get("X-Task-Home-Workspace-ID") != workspaceID {
+		// A task may create a target-owned agent, but cannot supply its own
+		// execution secrets or runtime configuration across workspaces.
+		for _, field := range []string{"custom_env", "mcp_config", "runtime_config", "composio_toolkit_allowlist"} {
+			if _, present := rawFields[field]; present {
+				writeError(w, http.StatusForbidden, field+" is unavailable for cross-workspace agent creation")
+				return
+			}
+		}
+	}
 
 	if req.Name == "" {
 		writeError(w, http.StatusBadRequest, "name is required")
@@ -1806,7 +1816,8 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	invocationAdmission.admitted(r.Context())
-	slog.Info("agent created", append(logger.RequestAttrs(r), "agent_id", uuidToString(created.ID), "name", created.Name, "workspace_id", workspaceID)...)
+	slog.Info("agent created", append(logger.RequestAttrs(r), "agent_id", uuidToString(created.ID), "name", created.Name, "workspace_id", workspaceID,
+		"source_agent_id", r.Header.Get("X-Agent-ID"), "source_task_id", r.Header.Get("X-Task-ID"), "source_workspace_id", r.Header.Get("X-Task-Home-Workspace-ID"))...)
 
 	if runtime.Status == "online" {
 		h.TaskService.ReconcileAgentStatus(r.Context(), created.ID)

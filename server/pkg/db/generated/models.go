@@ -207,10 +207,11 @@ type AgentToLabel struct {
 }
 
 type AgentWorkspaceGrant struct {
-	AgentID     pgtype.UUID        `json:"agent_id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	CreatedBy   pgtype.UUID        `json:"created_by"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	AgentID         pgtype.UUID        `json:"agent_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	CreatedBy       pgtype.UUID        `json:"created_by"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	CanCreateAgents bool               `json:"can_create_agents"`
 }
 
 type AppActionRequest struct {
