@@ -1,7 +1,11 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
 import { ChevronRight, SearchIcon } from "@multica/ui/icons";
+import { UI_EASE_OUT } from "@multica/ui/lib/motion";
+import { cn } from "@multica/ui/lib/utils";
 import { Command as CommandPrimitive } from "cmdk";
 import {
   selectCommandBarContexts,
@@ -141,6 +145,7 @@ function PaletteBody({
   return (
     <PaletteContext.Provider value={api}>
       <PaletteFrame
+        active={active}
         stack={stack}
         setStack={setStack}
         pageQuery={pageQuery}
@@ -151,14 +156,18 @@ function PaletteBody({
   );
 }
 
+const PALETTE_NAV_DURATION = 0.14;
+
 /** Everything that reads the palette API lives under its provider. */
 function PaletteFrame({
+  active,
   stack,
   setStack,
   pageQuery,
   setPageQuery,
   recordIntent,
 }: {
+  active: boolean;
   stack: PaletteStackEntry[];
   setStack: React.Dispatch<React.SetStateAction<PaletteStackEntry[]>>;
   pageQuery: string;
@@ -166,11 +175,85 @@ function PaletteFrame({
   recordIntent: (e: Pick<MouseEvent, "button" | "metaKey" | "ctrlKey" | "shiftKey">) => void;
 }) {
   const { t } = useT("search");
+  const reduceMotion = useReducedMotion();
   const entries = useCommandBarContextStore(selectCommandBarContexts);
   const contexts = useMemo(() => entries.map((entry) => entry.context), [entries]);
   const [rawQuery, setRawQuery] = useState("");
   const current = stack[stack.length - 1] ?? null;
   const inputValue = current ? pageQuery : rawQuery;
+
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const prevDepthRef = useRef(stack.length);
+  const navDirectionRef = useRef<-1 | 0 | 1>(0);
+  if (stack.length !== prevDepthRef.current) {
+    navDirectionRef.current = stack.length > prevDepthRef.current ? 1 : -1;
+    prevDepthRef.current = stack.length;
+  }
+  const navDirection = navDirectionRef.current;
+  const pageKey = current ? `${stack.length}:${current.page.type}` : "root";
+
+  const [listHeight, setListHeight] = useState<number | undefined>(undefined);
+  const [animateHeight, setAnimateHeight] = useState(false);
+  const activeRef = useRef(active);
+  activeRef.current = active;
+
+  // Keep list height smooth as filtering or subpage navigation changes the
+  // rendered rows, without animating from 0 on initial open or collapsing
+  // while the dialog exits.
+  useLayoutEffect(() => {
+    if (reduceMotion) {
+      setListHeight(undefined);
+      setAnimateHeight(false);
+      return;
+    }
+    const content = contentRef.current;
+    const list = listRef.current;
+    if (!content || !list || typeof ResizeObserver === "undefined") return;
+
+    let initialized = false;
+    let rafId = 0;
+    const syncHeight = () => {
+      if (!activeRef.current) return;
+      // offsetHeight ignores the dialog's zoom-in transform; a scaled
+      // getBoundingClientRect() read would pin the list at ~95% height.
+      const contentHeight = content.offsetHeight;
+      if (contentHeight <= 0) return;
+      const styles = getComputedStyle(list);
+      const padY =
+        (Number.parseFloat(styles.paddingTop) || 0) +
+        (Number.parseFloat(styles.paddingBottom) || 0);
+      const maxH = Number.parseFloat(styles.maxHeight);
+      const rawNext = contentHeight + padY;
+      const clamped = Number.isFinite(maxH) && maxH > 0 ? Math.min(rawNext, maxH) : rawNext;
+      setListHeight(clamped);
+      if (!initialized) {
+        initialized = true;
+        rafId = requestAnimationFrame(() => setAnimateHeight(true));
+      }
+    };
+
+    syncHeight();
+    const observer = new ResizeObserver(syncHeight);
+    observer.observe(content);
+    return () => {
+      cancelAnimationFrame(rafId);
+      observer.disconnect();
+    };
+  }, [reduceMotion]);
+
+  // Reset scroll to the top and keep the caret at the end of any carried query
+  // when drilling into or returning from a subpage.
+  useLayoutEffect(() => {
+    if (listRef.current) listRef.current.scrollTop = 0;
+    if (navDirection === 0) return;
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus();
+    const end = el.value.length;
+    el.setSelectionRange(end, end);
+  }, [pageKey, navDirection]);
 
   // Base UI's DialogPortal only mounts PaletteBody while open or exiting, so
   // keeping `active: true` does not fetch while closed and prevents recent
@@ -194,7 +277,6 @@ function PaletteFrame({
     <>
       <CommandPrimitive
         data-mc="command-palette"
-        key={stack.length}
         label={t(($) => $.title)}
         shouldFilter={false}
         onPointerDownCapture={recordIntent}
@@ -209,7 +291,17 @@ function PaletteFrame({
         <div className="flex items-center gap-2 border-b px-4 py-3">
           <SearchIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           {current && (
-            <nav aria-label={t(($) => $.breadcrumb_aria)} className="flex min-w-0 shrink items-center gap-1">
+            <motion.nav
+              key={pageKey}
+              aria-label={t(($) => $.breadcrumb_aria)}
+              initial={reduceMotion ? false : { opacity: 0, x: -6 }}
+              animate={{
+                opacity: 1,
+                x: 0,
+                transition: { duration: reduceMotion ? 0 : PALETTE_NAV_DURATION, ease: UI_EASE_OUT },
+              }}
+              className="flex min-w-0 shrink items-center gap-1"
+            >
               {current.crumbs.map((crumb, index) => (
                 <Fragment key={`${index}:${crumb}`}>
                   {index > 0 && <ChevronRight className="size-3 shrink-0 text-muted-foreground" />}
@@ -218,16 +310,15 @@ function PaletteFrame({
                   </span>
                 </Fragment>
               ))}
-            </nav>
+            </motion.nav>
           )}
           <CommandPrimitive.Input
+            ref={inputRef}
             autoFocus
             placeholder={current ? t(($) => $.page_placeholder) : t(($) => $.placeholder)}
             value={inputValue}
             onValueChange={(value) => (current ? setPageQuery(value) : setRawQuery(value))}
             onKeyDown={handleKeyDown}
-            // The input remounts when a page opens or closes; keep the caret
-            // after text carried across.
             onFocus={(e) => {
               const end = e.currentTarget.value.length;
               e.currentTarget.setSelectionRange(end, end);
@@ -237,12 +328,31 @@ function PaletteFrame({
           <ShortcutKeycaps shortcut={ESCAPE} className="hidden shrink-0 sm:inline-flex" />
         </div>
 
-        <CommandPrimitive.List className="max-h-[min(440px,55vh)] overflow-y-auto overflow-x-hidden py-1">
-          {current ? (
-            <PageView page={current.page} query={pageQuery} />
-          ) : (
-            <RootView model={model} rawQuery={rawQuery} />
+        <CommandPrimitive.List
+          ref={listRef}
+          style={listHeight !== undefined ? { height: listHeight } : undefined}
+          className={cn(
+            "max-h-[min(440px,55vh)] overflow-y-auto overflow-x-hidden py-1",
+            animateHeight && "transition-[height] duration-[140ms] ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
           )}
+        >
+          <div ref={contentRef}>
+            <motion.div
+              key={pageKey}
+              initial={reduceMotion || navDirection === 0 ? false : { opacity: 0, x: navDirection * 10 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{
+                duration: reduceMotion || navDirection === 0 ? 0 : PALETTE_NAV_DURATION,
+                ease: UI_EASE_OUT,
+              }}
+            >
+              {current ? (
+                <PageView page={current.page} query={pageQuery} />
+              ) : (
+                <RootView model={model} rawQuery={rawQuery} />
+              )}
+            </motion.div>
+          </div>
         </CommandPrimitive.List>
 
         <PaletteFooter mode={current ? "page" : "root"} />

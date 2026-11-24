@@ -433,6 +433,18 @@
         "label": "延後通知",
         "description": "延後從收件箱開啟的任務；已延後時讓它現在回來。"
       },
+      "markInboxUnread": {
+        "label": "切換通知未讀狀態",
+        "description": "在目前開啟的收件匣通知上切換已讀或未讀，不離開目前頁面。"
+      },
+      "nextInboxItem": {
+        "label": "下一則通知",
+        "description": "開啟目前收件匣清單中的下一則通知。"
+      },
+      "prevInboxItem": {
+        "label": "上一則通知",
+        "description": "開啟目前收件匣清單中的上一則通知。"
+      },
       "undoInboxAction": {
         "label": "復原收件箱操作",
         "description": "提示還在時，復原上一次歸檔、延後或取消訂閱；提示消失後，開啟的通知已歸檔時把它放回收件箱，在「收件箱已清空」頁復原頁面上寫明的操作。"
@@ -878,10 +890,6 @@
         "dates": "改日期",
         "labels": "改標籤"
       },
-      "after_label": "歸檔後",
-      "after_description": "正在看的通知被自動歸檔時。手動歸檔（E）照舊打開下一條。",
-      "after_stay": "停在目前任務",
-      "after_next": "打開下一條",
       "archived_label": "已歸檔的通知",
       "archived_description": "可以在這裡找回並取消歸檔",
       "archived_action": "查看已歸檔"
@@ -899,6 +907,10 @@
       "comments": {
         "label": "評論",
         "description": "你訂閱的任務有新評論時"
+      },
+      "squad_handoffs": {
+        "label": "包含小隊內部交接",
+        "description": "小隊隊長指派工作給成員、成員向隊長回報的評論。@ 提及、AI 代理執行失敗和需要關注的狀態照常通知。"
       },
       "mentions": {
         "label": "提及",

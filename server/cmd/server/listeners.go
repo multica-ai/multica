@@ -118,6 +118,7 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster, audience ...priv
 	personalEvents := map[string]bool{
 		protocol.EventInboxNew:           true,
 		protocol.EventInboxRead:          true,
+		protocol.EventInboxUnread:        true,
 		protocol.EventInboxArchived:      true,
 		protocol.EventInboxUnarchived:    true,
 		protocol.EventInboxDeleted:       true,
@@ -171,11 +172,12 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster, audience ...priv
 		sendToRecipient(b, e, recipientID)
 	})
 
-	// inbox:read, inbox:archived, inbox:unarchived, inbox:batch-read,
+	// inbox:read, inbox:unread, inbox:archived, inbox:unarchived, inbox:batch-read,
 	// inbox:batch-archived, issue_unread:changed — extract recipient from
 	// top-level payload
 	for _, eventType := range []string{
-		protocol.EventInboxRead, protocol.EventInboxArchived, protocol.EventInboxUnarchived,
+		protocol.EventInboxRead, protocol.EventInboxUnread,
+		protocol.EventInboxArchived, protocol.EventInboxUnarchived,
 		protocol.EventInboxDeleted,
 		protocol.EventInboxBatchRead, protocol.EventInboxBatchArchived,
 		protocol.EventInboxUnsnoozed,
@@ -346,7 +348,8 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster, audience ...priv
 			if err == nil {
 				refReaders, err = projectAudience.IssueRefReaders(ctx, e)
 			}
-			perReader := len(refReaders) > 0 && duplicateMarkMoved(e)
+			moved := len(refReaders) > 0 && duplicateMarkMoved(e)
+			perReader := moved && anyRefReader(refReaders)
 			if err == nil && perReader && !private {
 				recipients, err = projectAudience.Members(ctx, e.WorkspaceID)
 			}
@@ -361,7 +364,7 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster, audience ...priv
 				return
 			}
 			if len(refReaders) > 0 {
-				if data, err = strippedFrame(e, true, func(id string) bool { return refReaders[id] != nil }); err != nil {
+				if data, err = strippedFrame(e, !moved, func(id string) bool { return refReaders[id] != nil }); err != nil {
 					slog.Error("failed to marshal event", "event_type", e.Type, "error", err)
 					return
 				}

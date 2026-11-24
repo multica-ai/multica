@@ -140,8 +140,11 @@ var pgBigmOperatorClass = extensionOperatorClass{
 // they are still pending: a fresh self-hosted install, which is exactly where an
 // interrupted build would otherwise leave a permanently unusable index.
 var concurrentIndexCleanups = map[string]string{
-	"736_issue_share_issue_key":                                 "uq_issue_share_issue",
-	"737_issue_share_token_key":                                 "uq_issue_share_token",
+	"744_issue_share_issue_key":                                 "uq_issue_share_issue",
+	"745_issue_share_token_key":                                 "uq_issue_share_token",
+	"736_task_usage_hourly_squad_uq_idx":                        "uq_task_usage_hourly_squad_key_idx",
+	"737_task_usage_hourly_dirty_squad_uq_idx":                  "uq_task_usage_hourly_dirty_squad_key_idx",
+	"738_task_usage_hourly_workspace_squad_idx":                 "idx_task_usage_hourly_workspace_squad_time",
 	"733_comment_idempotency_receipt_key":                       "uq_comment_idempotency_receipt_key",
 	"734_comment_idempotency_receipt_created":                   "idx_comment_idempotency_receipt_created",
 	"729_remote_app_connection_workspace_idx":                   "uq_remote_app_connection_owner_ws",
@@ -437,6 +440,8 @@ var concurrentIndexCleanups = map[string]string{
 // the retry, while a bare CREATE would stay wedged on "already exists"; both
 // cases need direction-specific cleanup before the rollback can retry safely.
 var concurrentDownIndexCleanups = map[string]string{
+	"740_task_usage_hourly_drop_legacy_key":                 "uq_task_usage_hourly_key",
+	"741_task_usage_hourly_dirty_drop_legacy_key":           "uq_task_usage_hourly_dirty_key",
 	"730_drop_remote_app_connection_owner_idx":              "uq_remote_app_connection_owner",
 	"144_drop_agent_task_queue_chat_pending_v1":             "idx_agent_task_queue_chat_pending",
 	"171_drop_legacy_label_namespace_index":                 "issue_label_workspace_name_lower_idx",

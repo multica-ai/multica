@@ -8,7 +8,11 @@
   "filter": {
     "project_label": "Project",
     "all_projects": "All projects",
-    "period_label": "Period"
+    "period_label": "Period",
+    "attribution_label": "Attribution",
+    "all_attribution": "All attribution",
+    "standalone_only": "Standalone agents only",
+    "squads_group": "Squads"
   },
   "history_limit": {
     "note": "Your plan covers the last {{days}} days. Upgrade to see earlier data. Nothing is deleted.",
@@ -27,7 +31,9 @@
     "run_time_label": "Run time · {{days}}D",
     "run_time_hint": "Across {{tasks}} runs",
     "tasks_label": "Runs · {{days}}D",
-    "tasks_hint": "{{failed}} failed"
+    "tasks_hint": "{{failed}} failed",
+    "cost_squad_hint": "{{name}} overall (incl. delegated members)",
+    "cost_squad_share_hint": "Squad-triggered {{cost}} ({{pct}}%)"
   },
   "dim": {
     "label": "Interval",
@@ -90,7 +96,8 @@
     "show_reasons": "Show error codes",
     "hide_reasons": "Hide error codes",
     "show_all": "Show all {{count}}",
-    "show_less": "Show top {{count}}"
+    "show_less": "Show top {{count}}",
+    "by_squad": "Errors by squad"
   },
   "leaderboard": {
     "title": "Leaderboard",
@@ -111,7 +118,19 @@
     "usage_totals_pending": "Usage totals are still being processed",
     "show_all": "Show all",
     "show_less": "Show top {{count}}",
-    "no_data": "No agent activity in this window."
+    "no_data": "No agent activity in this window.",
+    "group_label": "Group leaderboard by",
+    "group_agent": "Agents",
+    "group_squad": "Squads",
+    "header_squad": "Squad / Attribution",
+    "squad_caption": "{{count}} squads",
+    "squad_caption_with_standalone": "{{count}} squads · incl. standalone",
+    "squad_members_title": "{{name}} member breakdown",
+    "squad_members_count": "{{count}} members involved",
+    "standalone_agents": "Standalone agents (non-Squad)",
+    "standalone_agents_hint": "Direct @mention or assignment · {{count}} agents",
+    "deleted_squads": "Deleted squads",
+    "toggle_squad_members": "Toggle members for {{name}}"
   },
   "empty": {
     "title": "No usage yet",

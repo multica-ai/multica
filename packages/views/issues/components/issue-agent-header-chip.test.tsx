@@ -25,17 +25,23 @@ vi.mock("@multica/core/api", () => ({
 
 vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({
-    getActorName: (_type: string, id: string) =>
-      ({
-        "agent-1": "Walt",
-        "agent-2": "Gus",
-      })[id] ?? "Unknown Agent",
-    getActorInitials: (_type: string, id: string) =>
-      ({
-        "agent-1": "WA",
-        "agent-2": "GU",
-      })[id] ?? "UA",
+    getActorName: (type: string, id: string) =>
+      type === "squad"
+        ? ({ "squad-1": "JSquad" }[id] ?? "Unknown Squad")
+        : ({
+            "agent-1": "Walt",
+            "agent-2": "Gus",
+          }[id] ?? "Unknown Agent"),
+    getActorInitials: (type: string, id: string) =>
+      type === "squad"
+        ? ({ "squad-1": "JS" }[id] ?? "US")
+        : ({
+            "agent-1": "WA",
+            "agent-2": "GU",
+          }[id] ?? "UA"),
     getActorAvatarUrl: () => null,
+    hasActor: (type: string, id: string) =>
+      type === "squad" ? id === "squad-1" : true,
   }),
 }));
 
@@ -406,5 +412,37 @@ describe("IssueAgentHeaderChip", () => {
     renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
 
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("collapses multiple members of the same squad into one squad chip and groups them in the popover", () => {
+    mockState.tasks = [
+      makeTask({ id: "task-1", agent_id: "agent-1", squad_id: "squad-1", is_leader_task: true }),
+      makeTask({ id: "task-2", agent_id: "agent-2", squad_id: "squad-1", is_leader_task: false }),
+    ];
+
+    renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />, {
+      locale: "zh-Hans",
+    });
+
+    expect(
+      screen.getByRole("button", { name: "JSquad 在工作" }),
+    ).toBeInTheDocument();
+    // Both underlying member tasks remain visible inside the grouped popover.
+    expect(screen.getAllByTestId("active-task-row")).toHaveLength(2);
+    expect(
+      screen.getByTestId("agent-popover-content").textContent,
+    ).toContain("JSquad");
+  });
+
+  it("falls back to the underlying agent when a task references a deleted squad", () => {
+    mockState.tasks = [
+      makeTask({ id: "task-1", agent_id: "agent-1", squad_id: "deleted-squad" }),
+    ];
+
+    renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
+
+    expect(
+      screen.getByRole("button", { name: "Walt is working" }),
+    ).toBeInTheDocument();
   });
 });

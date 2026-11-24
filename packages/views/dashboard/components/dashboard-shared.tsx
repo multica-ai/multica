@@ -61,6 +61,10 @@ export function dimsForDays(days: TimeRange): readonly Dim[] {
  *  it survives a refactor that ever lets a project be slug-keyed. */
 export const ALL_PROJECTS = "__all__";
 
+/** Sentinels for the dashboard's attribution (Squad / standalone) filter. */
+export const ALL_SQUADS = "__all__";
+export const STANDALONE_SQUAD = "__standalone__";
+
 /**
  * Card-local segmented control — the pill toggle used *inside* a card to pick
  * what that card shows. The page header deliberately uses outline Buttons

@@ -188,9 +188,9 @@
 
 @media (prefers-reduced-motion: reduce) {
   .animate-inbox-enter-next,
-  .animate-inbox-enter-prev {
-    animation-name: inbox-enter-fade;
-    animation-duration: 120ms;
+  .animate-inbox-enter-prev,
+  .animate-inbox-enter-fade {
+    animation: none;
   }
 }
 
@@ -244,9 +244,9 @@
 
 @media (prefers-reduced-motion: reduce) {
   .animate-chat-enter-next,
-  .animate-chat-enter-prev {
-    animation-name: chat-enter-fade;
-    animation-duration: 120ms;
+  .animate-chat-enter-prev,
+  .animate-chat-enter-fade {
+    animation: none;
   }
 }
 

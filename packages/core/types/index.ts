@@ -93,10 +93,13 @@ export type {
   RuntimeUsageByHour,
   DashboardUsageDaily,
   DashboardUsageByAgent,
+  DashboardUsageBySquad,
   DashboardAgentRunTime,
+  DashboardSquadRunTime,
   DashboardRunTimeDaily,
   DashboardFailureDaily,
   DashboardFailureByAgent,
+  DashboardFailureBySquad,
   RuntimeUpdate,
   RuntimeUpdateStatus,
   RuntimeModel,
@@ -147,7 +150,7 @@ export type {
   PluginTokenIssue,
 } from "./plugin";
 export type { InboxItem, InboxSeverity, InboxItemType, InboxWorkspaceUnread, ArchivedInboxPage, ArchivedInboxFacets, SnoozedInboxIssue } from "./inbox";
-export type { AfterAutoArchiveValue, AutoArchiveKey, NotificationGroupKey, NotificationGroupValue, NotificationPreferences, NotificationPreferenceResponse, OthersIssuesValue } from "./notification-preference";
+export type { AutoArchiveKey, NotificationGroupKey, NotificationGroupValue, NotificationPreferences, NotificationPreferenceResponse, OthersIssuesValue } from "./notification-preference";
 export type { Comment, CommentType, CommentAuthorType, CommentSupplementReceipt, CommentSupplementStatus, CommentTriggerPreview, CommentTriggerPreviewAgent, CommentTriggerSource, CommentTriggerOutcome, CommentTriggerStatus, Reaction } from "./comment";
 export type { Label, LabelResourceType, CreateLabelRequest, UpdateLabelRequest, ListLabelsResponse, IssueLabelsResponse, ResourceLabelsResponse } from "./label";
 export type { IssueProperty, IssuePropertyType, ScalarIssuePropertyType, ListIssuePropertyType, IssuePropertyOption, IssuePropertyConfig, IssuePropertyValue, IssuePropertyValues, CreatePropertyRequest, UpdatePropertyRequest, ListPropertiesResponse, IssuePropertiesResponse, IssuePropertyActorKind, IssuePropertyActorRef, PropertyFilterOp, PropertyOperatorFilter, PropertyFilterValue } from "./property";

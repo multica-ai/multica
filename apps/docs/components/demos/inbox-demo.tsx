@@ -12,6 +12,7 @@ import {
   CircleDashed,
   CircleDot,
   Filter,
+  MoreHorizontal,
   SlidersHorizontal,
   X,
 } from "@multica/ui/icons";
@@ -28,8 +29,6 @@ type Notice = {
   title: string;
   actor: string;
   agent: boolean;
-  /** Who did what, under the title. */
-  detail: string;
   time: string;
   /** What the issue shows when the notification is opened. */
   body: string;
@@ -45,7 +44,7 @@ type Copy = {
   /** Newest first, as the section lists them. */
   notices: Notice[];
   selectPrompt: string;
-  /** The Inbox bar under the issue's header. */
+  /** The Inbox's floating group above the composer. */
   snooze: string;
   /** The assignee of the issues that aren't an agent's. */
   you: string;
@@ -74,7 +73,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
         title: "Sort out March expense claims",
         actor: "Lei Li",
         agent: false,
-        detail: "Mentioned you",
         time: "5m",
         mention: "@You",
         body: "Two March invoices are still missing. Can you send them by Friday?",
@@ -85,7 +83,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
         title: "Write the November campaign post",
         actor: "Writing helper",
         agent: true,
-        detail: "The first draft is in the comments.",
         time: "20m",
         body: "The first draft is ready. Pick one of the two titles and I'll finish it.",
       },
@@ -95,7 +92,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
         title: "Update the customer service FAQ",
         actor: "Ops helper",
         agent: true,
-        detail: "Run failed",
         time: "1h",
         body: "Ops helper's run failed before it finished.",
       },
@@ -105,7 +101,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
         title: "Prepare the quarterly supplier review",
         actor: "Lei Li",
         agent: false,
-        detail: "Assigned to you",
         time: "3h",
         body: "",
       },
@@ -144,7 +139,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
         title: "整理三月报销单",
         actor: "李雷",
         agent: false,
-        detail: "提及了你",
         time: "5 分钟",
         mention: "@你",
         body: "三月还差两张发票，周五前能补上吗？",
@@ -155,7 +149,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
         title: "写 11 月活动推文",
         actor: "文案助手",
         agent: true,
-        detail: "初稿放在评论里了。",
         time: "20 分钟",
         body: "初稿写好了。两个标题选一个，我来收尾。",
       },
@@ -165,7 +158,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
         title: "更新客服常见问题",
         actor: "运营助手",
         agent: true,
-        detail: "运行失败",
         time: "1 小时",
         body: "运营助手的运行没有完成。",
       },
@@ -175,7 +167,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
         title: "准备季度供应商评估",
         actor: "李雷",
         agent: false,
-        detail: "分配给你",
         time: "3 小时",
         body: "",
       },
@@ -212,7 +203,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
         title: "整理三月報銷單",
         actor: "李雷",
         agent: false,
-        detail: "提及了你",
         time: "5 分鐘",
         mention: "@你",
         body: "三月還差兩張發票，週五前能補上嗎？",
@@ -223,7 +213,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
         title: "寫 11 月活動推文",
         actor: "文案助手",
         agent: true,
-        detail: "初稿放在評論裡了。",
         time: "20 分鐘",
         body: "初稿寫好了。兩個標題選一個，我來收尾。",
       },
@@ -233,7 +222,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
         title: "更新客服常見問題",
         actor: "營運助手",
         agent: true,
-        detail: "執行失敗",
         time: "1 小時",
         body: "營運助手的執行沒有完成。",
       },
@@ -243,7 +231,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
         title: "準備季度供應商評估",
         actor: "李雷",
         agent: false,
-        detail: "分配給你",
         time: "3 小時",
         body: "",
       },
@@ -280,7 +267,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
         title: "3 月の経費精算を整理する",
         actor: "李雷",
         agent: false,
-        detail: "メンションされました",
         time: "5分",
         mention: "@あなた",
         body: "3 月分の領収書がまだ 2 枚足りません。金曜までに出してもらえますか？",
@@ -291,7 +277,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
         title: "11 月のキャンペーン投稿を書く",
         actor: "ライティングアシスタント",
         agent: true,
-        detail: "初稿をコメントに載せました。",
         time: "20分",
         body: "初稿ができました。タイトル案を 2 つから選んでもらえれば仕上げます。",
       },
@@ -301,7 +286,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
         title: "カスタマーサポートの FAQ を更新する",
         actor: "運用アシスタント",
         agent: true,
-        detail: "実行失敗",
         time: "1時間",
         body: "運用アシスタントの実行は、終わる前に失敗しました。",
       },
@@ -311,7 +295,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
         title: "四半期のサプライヤー評価を準備する",
         actor: "李雷",
         agent: false,
-        detail: "あなた に割り当て",
         time: "3時間",
         body: "",
       },
@@ -350,7 +333,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
         title: "3월 경비 청구 정리",
         actor: "리레이",
         agent: false,
-        detail: "멘션됨",
         time: "5분",
         mention: "@나",
         body: "3월 영수증이 아직 두 장 빠져 있어요. 금요일까지 보내 주실 수 있나요?",
@@ -361,7 +343,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
         title: "11월 캠페인 게시물 작성",
         actor: "글쓰기 도우미",
         agent: true,
-        detail: "초안을 댓글에 올렸습니다.",
         time: "20분",
         body: "초안이 준비됐습니다. 제목 두 가지 중 하나를 골라 주시면 마무리하겠습니다.",
       },
@@ -371,7 +352,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
         title: "고객 지원 FAQ 업데이트",
         actor: "운영 도우미",
         agent: true,
-        detail: "실행 실패함",
         time: "1시간",
         body: "운영 도우미의 실행이 끝나기 전에 실패했습니다.",
       },
@@ -381,7 +361,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
         title: "분기별 공급업체 평가 준비",
         actor: "리레이",
         agent: false,
-        detail: "나에게 할당",
         time: "3시간",
         body: "",
       },
@@ -420,7 +399,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
         title: "Régulariser les notes de frais de mars",
         actor: "Lei Li",
         agent: false,
-        detail: "Vous a mentionné",
         time: "5 min",
         mention: "@Vous",
         body: "Il manque encore deux factures de mars. Pouvez-vous les envoyer d'ici vendredi ?",
@@ -431,7 +409,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
         title: "Rédiger le post de la campagne de novembre",
         actor: "Assistant rédaction",
         agent: true,
-        detail: "Le premier jet est dans les commentaires.",
         time: "20 min",
         body: "Le premier jet est prêt. Choisissez l'un des deux titres et je le termine.",
       },
@@ -441,7 +418,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
         title: "Mettre à jour la FAQ du service client",
         actor: "Assistant ops",
         agent: true,
-        detail: "Exécution en échec",
         time: "1 h",
         body: "L'exécution d'Assistant ops a échoué avant la fin.",
       },
@@ -451,7 +427,6 @@ const copy: { en: Copy } & Partial<Record<Lang, Copy>> = {
         title: "Préparer la revue trimestrielle des fournisseurs",
         actor: "Lei Li",
         agent: false,
-        detail: "Assigné à vous",
         time: "3 h",
         body: "",
       },
@@ -539,37 +514,58 @@ function RowAvatar({ name, agent }: { name: string; agent: boolean }) {
   );
 }
 
-/** A control in the Inbox bar; unless `pinned`, its label gives way when the bar is narrow. */
+/**
+ * A control in the Inbox's floating group. When the group is narrow its
+ * shortcut gives way, with the issue's labels, then the rest of the labels;
+ * a `pinned` control keeps both.
+ */
 function BarButton({
   icon,
   label,
   shortcut,
   muted = true,
   pinned = false,
+  issue = false,
+  primary = false,
   onClick,
 }: {
   icon: ReactNode;
-  label: string;
+  label?: string;
   shortcut?: string;
   muted?: boolean;
   pinned?: boolean;
+  issue?: boolean;
+  primary?: boolean;
   onClick?: () => void;
 }) {
   return (
     <Button
       type="button"
-      variant="ghost"
+      variant={primary ? "default" : "ghost"}
       size="xs"
       aria-label={label}
       title={label}
       disabled={!onClick}
       onClick={onClick}
-      className={cn("shrink-0 gap-1 px-1.5 disabled:opacity-100 [&_svg]:size-3.5", muted && "text-muted-foreground")}
+      className={cn(
+        "shrink-0 gap-1 px-1.5 disabled:opacity-100 [&_svg]:size-3.5",
+        muted && !primary && "text-muted-foreground",
+      )}
     >
       {icon}
-      <span className={cn(!pinned && "@max-[30rem]/bar:hidden")}>{label}</span>
+      {label && (
+        <span className={cn(!pinned && (issue ? "@max-[30rem]/bar:hidden" : "@max-[18rem]/bar:hidden"))}>
+          {label}
+        </span>
+      )}
       {shortcut && (
-        <kbd className="rounded border bg-muted px-1 font-mono text-[0.625rem] leading-4 text-muted-foreground @max-[24rem]/bar:hidden">
+        <kbd
+          className={cn(
+            "rounded border px-1 font-mono text-[0.625rem] leading-4",
+            !pinned && "@max-[30rem]/bar:hidden",
+            primary ? "border-current/25 bg-current/14" : "bg-muted text-muted-foreground",
+          )}
+        >
           {shortcut}
         </kbd>
       )}
@@ -578,8 +574,9 @@ function BarButton({
 }
 
 /**
- * The bar under an issue opened from the Inbox: who did what and when, the
- * issue's status and assignee, then the notification's Snooze and Archive.
+ * The group floating above the composer of an issue opened from the Inbox:
+ * the issue's status and assignee, then the notification's own actions, the
+ * rarer ones behind ⋯, with Archive last.
  */
 function InboxBar({
   notice,
@@ -595,20 +592,14 @@ function InboxBar({
   const status = statusOf(notice.id);
   const assignee = notice.agent ? notice.actor : copy.you;
   return (
-    <div className="@container/bar flex h-9 items-center gap-0.5 border-b px-3">
-      <span className="mr-1 flex min-w-0 flex-1 items-center gap-1.5 text-caption text-muted-foreground">
-        <RowAvatar name={notice.actor} agent={notice.agent} />
-        <span className="min-w-0 truncate">
-          <span className="font-medium text-foreground">{notice.actor}</span> {notice.detail}
-        </span>
-        <span className="shrink-0 tabular-nums text-faint-foreground @max-[30rem]/bar:hidden">· {notice.time}</span>
-      </span>
-      <BarButton icon={<DemoStatus status={status} />} label={copy.statuses[status]} muted={false} />
-      <BarButton icon={<RowAvatar name={assignee} agent={notice.agent} />} label={assignee} muted={false} />
+    <div className="flex min-w-0 max-w-full items-center gap-0.5 rounded-lg border bg-background px-1.5 py-1 shadow-lg">
+      <BarButton icon={<DemoStatus status={status} />} label={copy.statuses[status]} muted={false} issue />
+      <BarButton icon={<RowAvatar name={assignee} agent={notice.agent} />} label={assignee} muted={false} issue />
       <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
+      <BarButton icon={<MoreHorizontal />} />
       <BarButton icon={<AlarmClock />} label={copy.snooze} shortcut="H" />
-      <CoachMark active={coach} side="bottom" align="end" ringClassName="rounded-md">
-        <BarButton icon={<Archive />} label={copy.archive} shortcut="E" pinned onClick={coach ? onArchive : undefined} />
+      <CoachMark active={coach} side="top" align="end" ringClassName="rounded-md">
+        <BarButton icon={<Archive />} label={copy.archive} shortcut="E" pinned primary onClick={coach ? onArchive : undefined} />
       </CoachMark>
     </div>
   );
@@ -704,35 +695,24 @@ export function InboxDemo() {
                       aria-current={active ? "page" : undefined}
                       onClick={() => setPhase("opened")}
                       className={cn(
-                        "flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left motion-safe:animate-in motion-safe:fade-in",
+                        "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left motion-safe:animate-in motion-safe:fade-in",
                         active ? "bg-accent" : "enabled:hover:bg-accent/50",
                       )}
                     >
-                      <span className="mt-[3px] flex shrink-0">
-                        <DemoStatus status={statusOf(notice.id)} />
+                      <DemoStatus status={statusOf(notice.id)} />
+                      <span
+                        className={cn(
+                          "min-w-0 flex-1 truncate text-body",
+                          rowUnread ? "font-medium text-foreground" : "text-muted-foreground",
+                        )}
+                      >
+                        {notice.title}
                       </span>
-                      <span className="flex min-w-0 flex-1 flex-col">
-                        <span className="flex min-w-0 items-center gap-2 leading-5">
-                          <span
-                            className={cn(
-                              "min-w-0 flex-1 truncate text-body",
-                              rowUnread ? "font-medium text-foreground" : "text-muted-foreground",
-                            )}
-                          >
-                            {notice.title}
-                          </span>
-                          <span className="shrink-0 text-caption text-faint-foreground tabular-nums">{notice.time}</span>
-                        </span>
-                        <span className="mt-0.5 flex min-w-0 items-center gap-2 text-caption leading-4 text-muted-foreground">
-                          <span className="flex min-w-0 flex-1 items-center gap-1.5">
-                            <RowAvatar name={notice.actor} agent={notice.agent} />
-                            <span className="min-w-0 flex-1 truncate">
-                              <span className="font-medium">{notice.actor}</span> {notice.detail}
-                            </span>
-                          </span>
-                          {rowUnread && <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-brand" />}
-                        </span>
-                      </span>
+                      <span className="shrink-0 text-caption text-faint-foreground tabular-nums">{notice.time}</span>
+                      <span
+                        aria-hidden
+                        className={cn("size-1.5 shrink-0 rounded-full", rowUnread ? "bg-brand" : "bg-transparent")}
+                      />
                     </button>
                   </CoachMark>
                 </li>
@@ -753,18 +733,10 @@ export function InboxDemo() {
   const detail = selected ? (
     <div key={selected.id} className="flex min-w-0 flex-1 flex-col motion-safe:animate-in motion-safe:fade-in">
       <div className="flex h-10 items-center gap-1.5 border-b px-3 text-caption">
-        <span className="shrink-0 text-muted-foreground">{t.inbox}</span>
-        <ChevronRight aria-hidden className="size-3 shrink-0 text-faint-foreground" />
         <span className="shrink-0 text-muted-foreground">{selected.issue}</span>
         <span className="min-w-0 flex-1 truncate text-label font-medium">{selected.title}</span>
       </div>
-      <InboxBar
-        notice={selected}
-        copy={t}
-        coach={phase === "opened" || phase === "archived"}
-        onArchive={() => setPhase(phase === "opened" ? "archived" : "archivedAgain")}
-      />
-      <div className="flex flex-col gap-2 p-3">
+      <div className="flex flex-1 flex-col gap-2 p-3">
         {selected.id === "failed" ? (
           <>
             <div className="flex items-center gap-2 text-body">
@@ -784,6 +756,15 @@ export function InboxDemo() {
           </DemoComment>
         )}
       </div>
+      <div className="@container/bar flex justify-center px-3 pb-2">
+        <InboxBar
+          notice={selected}
+          copy={t}
+          coach={phase === "opened" || phase === "archived"}
+          onArchive={() => setPhase(phase === "opened" ? "archived" : "archivedAgain")}
+        />
+      </div>
+      <div aria-hidden className="mx-3 mb-3 h-12 rounded-lg border bg-card" />
     </div>
   ) : (
     <div className="flex min-h-32 flex-1 items-center justify-center p-4 text-caption text-muted-foreground">

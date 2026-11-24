@@ -241,7 +241,7 @@ const CONTROLS: Entry[] = [
   ["switch-unchecked-thumb", "Thumb of a switch that is off.", "var(--background)", "var(--foreground)"],
   ["switch-border-color", "Outline of a switch, on or off.", "transparent"],
   ["popover-radius", "Popovers.", "var(--radius)"],
-  ["floating-border-color", "Hairline around layers that float over the page without a backdrop: menus, popovers, select lists and floating panels.", "color-mix(in oklab, var(--surface-border), var(--foreground) 6%)"],
+  ["floating-border-color", "Hairline around layers that float over the page: menus, popovers, select lists, floating panels, dialogs and alert dialogs.", "color-mix(in oklab, var(--surface-border), var(--foreground) 6%)"],
   ["dialog-radius", "Dialogs and alert dialogs.", "calc(var(--radius) * 1.5)"],
   ["tooltip-radius", "Tooltips.", "var(--radius)"],
   ["avatar-radius", "Avatars. Set a length for square avatars.", "calc(infinity * 1px)"],

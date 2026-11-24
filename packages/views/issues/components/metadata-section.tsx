@@ -9,7 +9,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, Di
 import { copyText } from "@multica/ui/lib/clipboard";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
-import { IssueSidebarSectionHeader } from "./issue-sidebar-section";
+import { IssueSidebarCollapsible, IssueSidebarSectionHeader } from "./issue-sidebar-section";
 
 export function MetadataSection({ metadata }: { metadata: IssueMetadata }) {
   const { t } = useT("issues");
@@ -35,11 +35,13 @@ export function MetadataSection({ metadata }: { metadata: IssueMetadata }) {
             {copyButton()}
             <DialogTrigger render={<IconButton size="icon-xs" label={t(($) => $.detail.metadata_view)}><Maximize2 /></IconButton>} />
           </>} />
-        {open && <div className="px-2">
-          <div className="max-h-64 overflow-auto overscroll-contain px-2" role="region" aria-label={t(($) => $.detail.section_metadata)} tabIndex={0}>
-            <MetadataEntries metadata={metadata} />
+        <IssueSidebarCollapsible open={open}>
+          <div className="px-2">
+            <div className="max-h-64 overflow-auto overscroll-contain px-2" role="region" aria-label={t(($) => $.detail.section_metadata)} tabIndex={0}>
+              <MetadataEntries metadata={metadata} />
+            </div>
           </div>
-        </div>}
+        </IssueSidebarCollapsible>
         <DialogContent showCloseButton={false} className={cn("flex flex-col overflow-hidden sm:max-w-3xl", expanded && "h-[calc(100%-2rem)] sm:max-w-[calc(100%-2rem)]")}>
           <DialogHeader className="shrink-0">
             <div className="flex min-w-0 items-center justify-between gap-2">

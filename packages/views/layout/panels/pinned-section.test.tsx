@@ -167,9 +167,9 @@ describe("PinnedSection", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Pinned" }));
     expect(useSidebarTreeStore.getState().pinnedCollapsed).toBe(true);
-    expect(screen.queryByText("Keep this pin")).toBeNull();
     expect(screen.getByRole("button", { name: "Pinned" })).toHaveAttribute("aria-expanded", "false");
     expect(activePinnedRoute).toBe(false);
+    await waitFor(() => expect(screen.queryByText("Keep this pin")).toBeNull());
   });
 
   it("shows a pinned project's chosen icon, keeping the folder when it has none", async () => {

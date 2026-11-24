@@ -2,6 +2,7 @@ import globals from "globals";
 import reactConfig from "@multica/eslint-config/react";
 import { ICON_LIBRARY_IMPORT_PATTERNS, REDUCED_MOTION_IMPORT } from "@multica/eslint-config/base";
 import { NO_ROUND_CONTROLS } from "@multica/eslint-config/control-shape";
+import { NO_SYSTEM_ONLY_REDUCED_MOTION } from "@multica/eslint-config/reduced-motion";
 import {
   NO_UNTRANSLATED_ATTRIBUTES,
   NO_UNTRANSLATED_JSX_TEXT,
@@ -86,6 +87,7 @@ export default [
         NO_UNTRANSLATED_JSX_TEXT,
         NO_UNTRANSLATED_TOAST,
         NO_ROUND_CONTROLS,
+        NO_SYSTEM_ONLY_REDUCED_MOTION,
       ],
     },
   },
@@ -101,6 +103,7 @@ export default [
             "Direct router.navigate from application code breaks the Coordinator protocol (MUL-4741). Route it through the navigation adapter in src/platform.",
         },
         NO_ROUND_CONTROLS,
+        NO_SYSTEM_ONLY_REDUCED_MOTION,
       ],
     },
   },

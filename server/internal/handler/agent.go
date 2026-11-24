@@ -891,6 +891,13 @@ func visibleTaskHistory(tasks []db.AgentTaskQueue) []db.AgentTaskQueue {
 // down. It populates WorkspaceID and powers the privacy-safe RelativeWorkDir
 // derivation; pass "" only on daemon-facing paths that genuinely don't have
 // it, in which case RelativeWorkDir falls back to the existing WorkDir.
+func effectiveTaskSquadID(t db.AgentTaskQueue) pgtype.UUID {
+	if t.UsageSquadID.Valid {
+		return t.UsageSquadID
+	}
+	return t.SquadID
+}
+
 func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	var cancellation struct {
 		TaskID string `json:"comment_change_cancelled_task_id"`
@@ -948,6 +955,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		MaxAttempts:            t.MaxAttempts,
 		ParentTaskID:           uuidToPtr(t.ParentTaskID),
 		IsLeaderTask:           t.IsLeaderTask,
+		SquadID:                uuidToString(effectiveTaskSquadID(t)),
 		CreatedAt:              timestampToString(t.CreatedAt),
 		TriggerCommentID:       uuidToPtr(t.TriggerCommentID),
 		CoalescedCommentIDs:    uuidsToStrings(t.CoalescedCommentIds),

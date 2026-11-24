@@ -433,6 +433,18 @@
         "label": "알림 미루기",
         "description": "인박스에서 연 태스크를 미룹니다. 이미 미뤘다면 지금 되돌립니다."
       },
+      "markInboxUnread": {
+        "label": "알림 읽지 않음으로 표시",
+        "description": "열려 있는 인박스 알림을 닫지 않고 읽음 또는 읽지 않음으로 전환합니다."
+      },
+      "nextInboxItem": {
+        "label": "다음 알림",
+        "description": "현재 인박스 목록에서 다음 알림을 엽니다."
+      },
+      "prevInboxItem": {
+        "label": "이전 알림",
+        "description": "현재 인박스 목록에서 이전 알림을 엽니다."
+      },
       "undoInboxAction": {
         "label": "인박스 작업 실행 취소",
         "description": "토스트가 보이는 동안 마지막 보관, 미루기, 구독 해제를 취소합니다. 토스트가 사라진 뒤에는 열린 알림이 보관되었다면 인박스로 되돌리고, '인박스가 비었습니다' 화면에서는 그곳에 표시된 작업을 취소합니다."
@@ -878,10 +890,6 @@
         "dates": "날짜 변경",
         "labels": "라벨 변경"
       },
-      "after_label": "보관한 뒤",
-      "after_description": "보고 있는 알림이 이렇게 보관될 때. 직접 보관(E)하면 지금처럼 다음 알림을 엽니다.",
-      "after_stay": "이 태스크에 머무르기",
-      "after_next": "다음 알림 열기",
       "archived_label": "보관된 알림",
       "archived_description": "여기서 다시 찾고 보관을 해제할 수 있습니다",
       "archived_action": "보관된 알림 보기"
@@ -899,6 +907,10 @@
       "comments": {
         "label": "댓글",
         "description": "팔로우 중인 태스크에 새 댓글이 달릴 때"
+      },
+      "squad_handoffs": {
+        "label": "스쿼드 내부 인계 포함",
+        "description": "스쿼드 리더와 에이전트가 서로 작업을 넘기는 댓글입니다. @멘션, 에이전트 실행 실패, 확인이 필요한 상태는 계속 알림이 옵니다."
       },
       "mentions": {
         "label": "멘션",

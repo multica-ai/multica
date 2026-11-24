@@ -203,7 +203,10 @@ function Meter({
       className={cn("relative h-2 rounded-full bg-foreground/10", className)}
     >
       <div
-        className={cn("absolute inset-y-0 left-0 rounded-full", FILL_TONE[view.tone])}
+        className={cn(
+          "absolute inset-y-0 left-0 rounded-full transition-[width,background-color] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+          FILL_TONE[view.tone],
+        )}
         style={{ width: `${Math.min(used, 100)}%` }}
       />
       {view.elapsedPercent !== undefined && !view.limited && (
@@ -212,7 +215,7 @@ function Meter({
         <div
           aria-hidden="true"
           data-slot="rate-limit-pace"
-          className="absolute -inset-y-1 w-0.5 -translate-x-1/2 rounded-full bg-foreground/50"
+          className="absolute -inset-y-1 w-0.5 -translate-x-1/2 rounded-full bg-foreground/50 transition-[left] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none"
           style={{ left: `${view.elapsedPercent}%` }}
         />
       )}

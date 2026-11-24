@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useReducedMotion } from "@multica/core/appearance";
+import { cn } from "@multica/ui/lib/utils";
 import {
   AlarmClock,
   Archive,
@@ -158,6 +160,7 @@ export function InboxEmptyState({
   const showsUndo = isLive && visibleCount === 0 && !!lastCleared && canUndoCleared(lastCleared);
   useInboxUndoShortcut(showsUndo && lastCleared ? () => void handleUndoCleared(lastCleared) : null);
   const undoKeycaps = !isCompact && <ActionShortcutKeycaps action="undoInboxAction" />;
+  const reduceMotion = useReducedMotion();
 
   // Desktop prompt when active notifications exist in the Work panel.
   if (visibleCount > 0) {
@@ -235,7 +238,13 @@ export function InboxEmptyState({
         enterDelay={rises ? 0.2 : undefined}
         className="pointer-events-none absolute -right-[14%] -bottom-[26%] w-[min(560px,58%)] text-muted"
       />
-      <div className="relative z-10 -mt-8 flex max-w-md flex-col items-center">
+      <div
+        key={`card-${bleedKey}`}
+        className={cn(
+          "relative z-10 -mt-8 flex max-w-md flex-col items-center",
+          !reduceMotion && (rises ? "animate-inbox-enter-next" : "animate-inbox-enter-fade"),
+        )}
+      >
         <div
           aria-hidden
           className="mb-4 flex size-11 items-center justify-center rounded-xl border border-surface-border bg-surface text-success shadow-[var(--surface-shadow)]"

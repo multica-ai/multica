@@ -2,7 +2,7 @@ import { AlarmClock, BellOff, CircleDot, CodeXml, Command, Folder, FolderKanban,
 import type { SupportedLocale } from "@multica/core/i18n";
 import type { WorkspacePaths } from "@multica/core/paths";
 import type { ReleaseStamp } from "@multica/core/whats-new";
-import { ANNOTATIONS_HERO, CHAT_STEERING_HERO, CHAT_WAKEUP_HERO, ENVIRONMENTS_HERO, INBOX_TABS_HERO, PROJECT_FOLDERS_HERO, PROJECT_OVERVIEW_HERO, SNOOZE_HERO, THEMES_HERO, VOICE_HERO, WEIXIN_HERO, type WhatsNewHero } from "./heroes";
+import { ANNOTATIONS_HERO, CHAT_STEERING_HERO, CHAT_WAKEUP_HERO, ENVIRONMENTS_HERO, INBOX_TABS_HERO, INBOX_TRIAGE_HERO, PROJECT_FOLDERS_HERO, PROJECT_OVERVIEW_HERO, QUICK_SWITCH_HERO, SNOOZE_HERO, THEMES_HERO, VOICE_HERO, WEIXIN_HERO, type WhatsNewHero } from "./heroes";
 
 export interface HighlightCopy {
   title: string;
@@ -51,6 +51,175 @@ export type CompleteWhatsNewRelease = Omit<WhatsNewRelease, "highlights"> & {
 };
 
 export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
+  {
+    version: "0.12.2",
+    date: "2026-11-24",
+    highlights: [
+      {
+        id: "quick-switch-agents",
+        icon: Users,
+        hero: QUICK_SWITCH_HERO,
+        copy: {
+          en: {
+            title: "Pick your usual agent in one keystroke",
+            body: "When you create an issue with an agent, your three most-used agents and squads sit next to Created by. Click one or press Alt/Option+1–3 to switch, or click the arrow beside them to search them all.",
+          },
+          "zh-Hans": {
+            title: "一键切换常用智能体",
+            body: "通过智能体创建任务时，「创建者」旁会列出你最常用的三个智能体或小队。点击或按 Alt/Option+1–3 即可切换，点旁边的箭头可以搜索全部。",
+          },
+          "zh-Hant": {
+            title: "一鍵切換常用 AI 代理",
+            body: "透過 AI 代理建立任務時，「建立者」旁會列出你最常用的三個 AI 代理或小隊。點選或按 Alt/Option+1–3 即可切換，點旁邊的箭頭可以搜尋全部。",
+          },
+          ja: {
+            title: "よく使うエージェントをワンキーで選ぶ",
+            body: "エージェントでタスクを作成するとき、「作成者」の横によく使うエージェントやスクワッドが 3 つ並びます。クリックするか Alt/Option+1–3 で切り替え、横の矢印からすべてを検索できます。",
+          },
+          ko: {
+            title: "자주 쓰는 에이전트를 키 하나로 고르기",
+            body: "에이전트로 태스크를 만들 때 '생성자' 옆에 자주 쓰는 에이전트와 스쿼드 3개가 표시됩니다. 클릭하거나 Alt/Option+1–3으로 전환하고, 옆의 화살표를 누르면 전체를 검색할 수 있습니다.",
+          },
+          fr: {
+            title: "Choisissez votre agent habituel d'une touche",
+            body: "Quand vous créez une tâche avec un agent, vos trois agents et squads les plus utilisés s'affichent à côté de Créé par. Cliquez sur l'un d'eux ou appuyez sur Alt/Option+1–3 pour changer, ou ouvrez la flèche à côté pour les chercher tous.",
+          },
+          es: {
+            title: "Elige tu agente habitual con una tecla",
+            body: "Al crear una tarea con un agente, tus tres agentes y squads más usados aparecen junto a Creado por. Haz clic en uno o pulsa Alt/Option+1–3 para cambiar, o abre la flecha de al lado para buscar entre todos.",
+          },
+          ru: {
+            title: "Выбирайте привычного агента одной клавишей",
+            body: "При создании задачи с агентом рядом с «Создано» появляются три агента и команды, которых вы выбираете чаще всего. Нажмите на нужного или Alt/Option+1–3, а стрелка рядом открывает поиск по всем.",
+          },
+        },
+      },
+      {
+        id: "squad-handoff-notifications",
+        icon: BellOff,
+        action: { kind: "route", to: (p) => `${p.settings()}?tab=notifications` },
+        copy: {
+          en: {
+            title: "Keep squad handoffs out of your Inbox",
+            body: "In Settings → Notifications, turn off Include squad handoffs under Comments to stop the comments a squad's leader and agents pass work with. @mentions of you and runs that need attention still arrive.",
+          },
+          "zh-Hans": {
+            title: "让小队内部交接不进收件箱",
+            body: "在「设置 → 通知」的「评论」下关闭「包含小队内部交接」，小队队长和成员之间派活、回报的评论就不再通知你。@你的评论和需要关注的运行照常通知。",
+          },
+          "zh-Hant": {
+            title: "讓小隊內部交接不進收件箱",
+            body: "在「設定 → 通知」的「評論」下關閉「包含小隊內部交接」，小隊隊長和成員之間指派工作、回報的評論就不再通知你。@ 提及你的評論和需要關注的執行照常通知。",
+          },
+          ja: {
+            title: "スクワッド内の引き継ぎをインボックスに入れない",
+            body: "「設定 → 通知」の「コメント」で「スクワッド内の引き継ぎを含める」をオフにすると、スクワッドのリーダーとエージェントが作業を受け渡すコメントは通知されなくなります。自分への @メンションや確認が必要な実行は引き続き届きます。",
+          },
+          ko: {
+            title: "스쿼드 내부 인계는 인박스에서 빼기",
+            body: "'설정 → 알림'의 '댓글'에서 '스쿼드 내부 인계 포함'을 끄면 스쿼드 리더와 에이전트가 작업을 주고받는 댓글은 알림이 오지 않습니다. 나를 @멘션한 댓글과 확인이 필요한 실행은 계속 알림이 옵니다.",
+          },
+          fr: {
+            title: "Gardez les passations de squad hors de la boîte de réception",
+            body: "Dans Paramètres → Notifications, désactivez Inclure les passations de squad sous Commentaires pour ne plus recevoir les commentaires par lesquels le chef et les agents d'un squad se transmettent le travail. Les @mentions et les exécutions qui demandent votre attention arrivent toujours.",
+          },
+          es: {
+            title: "Deja los traspasos del squad fuera de la bandeja de entrada",
+            body: "En Ajustes → Notificaciones, desactiva Incluir traspasos del squad en Comentarios para dejar de recibir los comentarios con los que el líder y los agentes de un squad se pasan el trabajo. Las @menciones y las ejecuciones que requieren atención te siguen llegando.",
+          },
+          ru: {
+            title: "Передачи внутри команды — не во «Входящие»",
+            body: "В «Настройки → Уведомления» в разделе «Комментарии» отключите «Включать передачи внутри команды», и комментарии, которыми лидер и агенты команды передают друг другу работу, перестанут приходить. @упоминания и запуски, требующие внимания, по-прежнему приходят.",
+          },
+        },
+      },
+      {
+        id: "squad-usage",
+        icon: Gauge,
+        action: { kind: "route", to: (p) => p.usage() },
+        copy: {
+          en: {
+            title: "See usage by squad",
+            body: "On Analytics, pick a squad in the Attribution filter to scope every chart to it, or group the leaderboard and errors by squad. Expand a squad to see what each member spent.",
+          },
+          "zh-Hans": {
+            title: "按小队查看用量",
+            body: "在「统计」页的「归属」筛选里选一个小队，所有图表就只看它；也可以把排行榜和错误按小队分组。展开小队能看到每个成员的消耗。",
+          },
+          "zh-Hant": {
+            title: "按小隊查看用量",
+            body: "在「統計」頁的「歸屬」篩選裡選一個小隊，所有圖表就只看它；也可以把排行榜和錯誤按小隊分組。展開小隊能看到每個成員的消耗。",
+          },
+          ja: {
+            title: "スクワッド別に使用量を確認",
+            body: "「分析」ページの「帰属」フィルターでスクワッドを選ぶと、すべてのグラフがそのスクワッドに絞られます。ランキングとエラーもスクワッド別にまとめられ、スクワッドを展開するとメンバーごとの消費がわかります。",
+          },
+          ko: {
+            title: "스쿼드별 사용량 보기",
+            body: "'분석' 페이지의 '귀속' 필터에서 스쿼드를 고르면 모든 차트가 그 스쿼드 기준으로 바뀝니다. 순위와 오류도 스쿼드별로 묶을 수 있고, 스쿼드를 펼치면 멤버별 사용량을 볼 수 있습니다.",
+          },
+          fr: {
+            title: "Consultez l'utilisation par squad",
+            body: "Dans Statistiques, choisissez un squad dans le filtre Attribution pour limiter tous les graphiques à ce squad, ou regroupez le classement et les erreurs par squad. Dépliez un squad pour voir la part de chaque membre.",
+          },
+          es: {
+            title: "Consulta el uso por squad",
+            body: "En Analítica, elige un squad en el filtro Atribución para que todos los gráficos muestren solo ese squad, o agrupa la clasificación y los errores por squad. Despliega un squad para ver lo que gastó cada miembro.",
+          },
+          ru: {
+            title: "Расход по командам",
+            body: "В разделе «Аналитика» выберите команду в фильтре «Принадлежность», чтобы все графики показывали только её, или сгруппируйте рейтинг и ошибки по командам. Разверните команду, чтобы увидеть расход каждого участника.",
+          },
+        },
+      },
+    ],
+  },
+  {
+    version: "0.12.1",
+    date: "2026-11-24",
+    highlights: [
+      {
+        id: "inbox-triage",
+        icon: Inbox,
+        hero: INBOX_TRIAGE_HERO,
+        action: { kind: "route", to: (p) => p.inbox() },
+        copy: {
+          en: {
+            title: "Triage the Inbox from the keyboard",
+            body: "On the Inbox page, press J and K to move to the next or previous notification without archiving, and U to mark the open one unread. Right-click a notification in the Work panel's Inbox to mark it unread, archive, or delete it.",
+          },
+          "zh-Hans": {
+            title: "用键盘处理收件箱",
+            body: "在收件箱页面按 J、K 切换到下一条或上一条通知，不会归档；按 U 把当前通知标为未读。在「工作」面板的收件箱里右键一条通知，可以标为未读、归档或删除。",
+          },
+          "zh-Hant": {
+            title: "用鍵盤處理收件箱",
+            body: "在收件箱頁面按 J、K 切換到下一則或上一則通知，不會歸檔；按 U 把目前的通知標為未讀。在「工作」面板的收件箱裡右鍵一則通知，可以標為未讀、歸檔或刪除。",
+          },
+          ja: {
+            title: "キーボードでインボックスを整理",
+            body: "インボックスページでは J と K でアーカイブせずに次や前の通知へ移動し、U で開いている通知を未読にできます。「作業」パネルのインボックスで通知を右クリックすると、未読にする、アーカイブ、削除を選べます。",
+          },
+          ko: {
+            title: "키보드로 인박스 정리하기",
+            body: "인박스 페이지에서 J와 K로 보관하지 않고 다음·이전 알림으로 이동하고, U로 열린 알림을 읽지 않음으로 표시합니다. '작업' 패널의 인박스에서 알림을 우클릭하면 읽지 않음으로 표시, 보관, 삭제할 수 있습니다.",
+          },
+          fr: {
+            title: "Triez la boîte de réception au clavier",
+            body: "Sur la page Boîte de réception, appuyez sur J et K pour passer à la notification suivante ou précédente sans archiver, et sur U pour marquer celle qui est ouverte comme non lue. Faites un clic droit sur une notification dans la boîte de réception du panneau Travail pour la marquer comme non lue, l'archiver ou la supprimer.",
+          },
+          es: {
+            title: "Gestiona la bandeja de entrada con el teclado",
+            body: "En la página de la bandeja de entrada, pulsa J y K para pasar a la notificación siguiente o anterior sin archivar, y U para marcar como no leída la que tienes abierta. Haz clic derecho en una notificación de la bandeja de entrada del panel Trabajo para marcarla como no leída, archivarla o eliminarla.",
+          },
+          ru: {
+            title: "Разбирайте «Входящие» с клавиатуры",
+            body: "На странице «Входящие» нажимайте J и K, чтобы перейти к следующему или предыдущему уведомлению без архивации, и U, чтобы отметить открытое уведомление непрочитанным. Щёлкните правой кнопкой по уведомлению во «Входящих» на панели «Работа», чтобы отметить его непрочитанным, архивировать или удалить.",
+          },
+        },
+      },
+    ],
+  },
   {
     version: "0.12.0",
     date: "2026-11-23",

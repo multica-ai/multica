@@ -1,9 +1,10 @@
 "use client";
 
 import { useId, useState } from "react";
-import { ListChecks, Pencil } from "@multica/ui/icons";
+import { useQuery } from "@tanstack/react-query";
+import { Bell, BellOff, Pencil } from "@multica/ui/icons";
 import { toast } from "sonner";
-import { useUpdateIssueSystemWakeup } from "@multica/core/issues";
+import { issueSystemWakeupsOptions, useUpdateIssueSystemWakeup } from "@multica/core/issues";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { SystemWakeup } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
@@ -17,6 +18,7 @@ import {
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
+import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 import { AppLink } from "../../navigation";
 import { wakeupsHref } from "../../autopilots/components/wakeups-tab";
@@ -24,17 +26,36 @@ import { useWakeupText } from "./wakeup-presentation";
 
 const MAX_INSTRUCTION_BYTES = 4000;
 
-/** The platform's child-done wakeup, shown beside the rules people created. */
-export function SystemWakeupRow({
+/**
+ * The platform's sub-issue wakeups, as chips beside the sub-issue heading.
+ * A turned-off rule keeps a quiet chip so it can be turned back on.
+ */
+export function SystemWakeupChips({
+  workspaceId,
+  issueId,
+}: {
+  workspaceId: string;
+  issueId: string;
+}) {
+  const { data: rules = [] } = useQuery(issueSystemWakeupsOptions(workspaceId, issueId));
+  if (rules.length === 0) return null;
+  return (
+    <>
+      {rules.map((rule) => (
+        <SystemWakeupChip key={rule.rule} rule={rule} workspaceId={workspaceId} issueId={issueId} />
+      ))}
+    </>
+  );
+}
+
+function SystemWakeupChip({
   rule,
   workspaceId,
   issueId,
-  onTurnedOff,
 }: {
   rule: SystemWakeup;
   workspaceId: string;
   issueId: string;
-  onTurnedOff?: () => void;
 }) {
   const { t } = useT("issues");
   const text = useWakeupText();
@@ -44,110 +65,101 @@ export function SystemWakeupRow({
     rule.staged && rule.stage !== null
       ? t(($) => $.wakeups.system.title_stage, { stage: rule.stage })
       : t(($) => $.wakeups.system.title_all);
-  const blocked = {
-    "": null,
-    backlog: t(($) => $.wakeups.system.blocked_backlog),
-    member_assignee: t(($) => $.wakeups.system.blocked_member),
-    no_assignee: t(($) => $.wakeups.system.blocked_none),
-  }[rule.blocked];
   const paused = rule.paused_reason
     ? t(($) => $.wakeups.system.paused, {
         reason: text.pausedReason({ paused_reason: rule.paused_reason, max_fires: null, fire_count: 0 }) ?? "",
       })
     : null;
-  const target =
-    rule.target?.type === "member"
-      ? t(($) => $.wakeups.system.notify_member, { name: rule.target.name })
-      : t(($) => $.wakeups.system.wake_assignee, { name: rule.target?.name ?? "" });
-  const summary =
-    paused ??
-    (!rule.enabled
-      ? t(($) => $.wakeups.system.turned_off)
-      : rule.blocked && rule.blocked !== "member_assignee"
-        ? blocked
-        : [target, t(($) => $.wakeups.system.remaining, { count: rule.remaining })].join(" · "));
+  // Why an enabled rule will not wake anyone right now. A member assignee is
+  // already named on the chip ("Notifies …").
+  const blocked = rule.enabled && !paused
+    ? rule.blocked === "backlog"
+      ? t(($) => $.wakeups.system.blocked_backlog)
+      : rule.blocked === "no_assignee"
+        ? t(($) => $.wakeups.system.blocked_none)
+        : null
+    : null;
+  const label = !rule.enabled
+    ? t(($) => $.wakeups.system.chip_off)
+    : !rule.target
+      ? t(($) => $.wakeups.system.chip_assignee)
+      : rule.target.type === "member"
+        ? t(($) => $.wakeups.system.chip_notify, { name: rule.target.name })
+        : t(($) => $.wakeups.system.chip_wake, { name: rule.target.name });
   const save = (input: { enabled: boolean; instruction: string }) =>
     update.mutateAsync({ rule: rule.rule, ...input });
   const toggle = (enabled: boolean) => {
-    if (!enabled) onTurnedOff?.();
     void save({ enabled, instruction: rule.instruction }).catch(() =>
       toast.error(t(($) => $.wakeups.system.save_error)),
     );
   };
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto]" aria-busy={update.isPending}>
-      <Popover>
-        <PopoverTrigger
-          render={
-            <button
-              type="button"
-              className="col-span-2 col-start-1 row-start-1 grid min-w-0 grid-cols-subgrid rounded-md py-2 text-left text-label hover:bg-accent/50 focus-visible:outline-2 focus-visible:outline-ring"
-            />
-          }
-        >
-          <span className="flex min-h-7 min-w-0 items-center gap-2 pl-2 pr-1">
-            <ListChecks className="mt-px size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-            <span className="line-clamp-2 min-w-0 break-words">{title}</span>
-            <SystemBadge />
-          </span>
-          <span className={`col-span-2 min-w-0 break-words pl-7.5 pr-2 text-caption ${paused ? "text-warning" : "text-muted-foreground"}`}>
-            {summary}
-          </span>
-        </PopoverTrigger>
-        <PopoverContent align="end" className="max-h-[70dvh] w-80 max-w-[calc(100vw-2rem)] overflow-y-auto" keepMounted>
-          <div className="flex items-start gap-2">
-            <PopoverTitle className="flex-1">{title}</PopoverTitle>
-            <SystemBadge />
-          </div>
-          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 text-caption">
-            <dt className="text-muted-foreground">{t(($) => $.wakeups.system.target_title)}</dt>
-            <dd>
-              {rule.target
-                ? t(($) => $.wakeups.system.target_current, { name: rule.target.name })
-                : t(($) => $.wakeups.system.target_none)}
-            </dd>
-            <dt className="text-muted-foreground">{t(($) => $.wakeups.system.progress_title)}</dt>
-            <dd>
-              {t(($) => $.wakeups.system.progress, { done: rule.total - rule.remaining, total: rule.total })}
-              {rule.waiting.length > 0 &&
-                ` · ${t(($) => $.wakeups.system.waiting_on, { ids: rule.waiting.join(", ") })}`}
-            </dd>
-            <dt className="text-muted-foreground">{t(($) => $.wakeups.system.skip_title)}</dt>
-            <dd>{t(($) => $.wakeups.system.skip)}</dd>
-            <dt className="text-muted-foreground">{t(($) => $.wakeups.source_title)}</dt>
-            <dd>{t(($) => $.wakeups.system.source)}</dd>
-          </dl>
-          <InstructionEditor rule={rule} pending={update.isPending} onSave={save} />
-          <div className="flex items-center gap-2 border-t border-border pt-2.5">
-            <span className="flex-1 text-caption">{t(($) => $.wakeups.system.enable)}</span>
-            <Switch
-              checked={rule.enabled}
-              disabled={update.isPending}
-              aria-label={t(($) => $.wakeups.system.toggle)}
-              onCheckedChange={toggle}
-            />
-          </div>
-          <p className="text-caption text-muted-foreground">
-            {rule.workspace_default ? t(($) => $.wakeups.system.default_on) : t(($) => $.wakeups.system.default_off)}{" "}
-            <AppLink
-              href={wakeupsHref(paths.autopilots())}
-              className="rounded-xs font-medium text-brand hover:underline focus-visible:outline-2 focus-visible:outline-ring"
-            >
-              {t(($) => $.wakeups.system.default_change)}
-            </AppLink>
-          </p>
-        </PopoverContent>
-      </Popover>
-      <div className="z-10 col-start-2 row-start-1 flex min-h-10 items-center self-start px-2">
-        <Switch
-          size="sm"
-          checked={rule.enabled}
-          disabled={update.isPending}
-          aria-label={t(($) => $.wakeups.system.toggle)}
-          onCheckedChange={toggle}
-        />
-      </div>
-    </div>
+    <Popover>
+      <PopoverTrigger
+        render={
+          <button
+            type="button"
+            aria-busy={update.isPending}
+            className={cn(
+              "inline-flex h-6 min-w-0 shrink items-center gap-1 rounded-md px-1.5 text-caption transition-colors hover:bg-accent/50 focus-visible:outline-2 focus-visible:outline-ring data-popup-open:bg-accent",
+              paused ? "text-warning" : "text-muted-foreground",
+            )}
+          />
+        }
+      >
+        {rule.enabled ? (
+          <Bell className="size-3.5 shrink-0" aria-hidden="true" />
+        ) : (
+          <BellOff className="size-3.5 shrink-0 text-faint-foreground" aria-hidden="true" />
+        )}
+        <span className="truncate">{label}</span>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="max-h-[70dvh] w-80 max-w-[calc(100vw-2rem)] overflow-y-auto" keepMounted>
+        <div className="flex items-start gap-2">
+          <PopoverTitle className="flex-1">{title}</PopoverTitle>
+          <SystemBadge />
+        </div>
+        {paused && <p className="break-words text-caption text-warning">{paused}</p>}
+        {blocked && <p className="break-words text-caption text-muted-foreground">{blocked}</p>}
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 text-caption">
+          <dt className="text-muted-foreground">{t(($) => $.wakeups.system.target_title)}</dt>
+          <dd>
+            {rule.target
+              ? t(($) => $.wakeups.system.target_current, { name: rule.target.name })
+              : t(($) => $.wakeups.system.target_none)}
+          </dd>
+          <dt className="text-muted-foreground">{t(($) => $.wakeups.system.progress_title)}</dt>
+          <dd>
+            {t(($) => $.wakeups.system.progress, { done: rule.total - rule.remaining, total: rule.total })}
+            {rule.waiting.length > 0 &&
+              ` · ${t(($) => $.wakeups.system.waiting_on, { ids: rule.waiting.join(", ") })}`}
+          </dd>
+          <dt className="text-muted-foreground">{t(($) => $.wakeups.system.skip_title)}</dt>
+          <dd>{t(($) => $.wakeups.system.skip)}</dd>
+          <dt className="text-muted-foreground">{t(($) => $.wakeups.source_title)}</dt>
+          <dd>{t(($) => $.wakeups.system.source)}</dd>
+        </dl>
+        <InstructionEditor rule={rule} pending={update.isPending} onSave={save} />
+        <div className="flex items-center gap-2 border-t border-border pt-2.5">
+          <span className="flex-1 text-caption">{t(($) => $.wakeups.system.enable)}</span>
+          <Switch
+            checked={rule.enabled}
+            disabled={update.isPending}
+            aria-label={t(($) => $.wakeups.system.toggle)}
+            onCheckedChange={toggle}
+          />
+        </div>
+        <p className="text-caption text-muted-foreground">
+          {rule.workspace_default ? t(($) => $.wakeups.system.default_on) : t(($) => $.wakeups.system.default_off)}{" "}
+          <AppLink
+            href={wakeupsHref(paths.autopilots())}
+            className="rounded-xs font-medium text-brand hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+          >
+            {t(($) => $.wakeups.system.default_change)}
+          </AppLink>
+        </p>
+      </PopoverContent>
+    </Popover>
   );
 }
 

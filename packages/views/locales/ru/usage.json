@@ -8,7 +8,11 @@
   "filter": {
     "project_label": "Проект",
     "all_projects": "Все проекты",
-    "period_label": "Период"
+    "period_label": "Период",
+    "attribution_label": "Принадлежность",
+    "all_attribution": "Все источники",
+    "standalone_only": "Только отдельные агенты",
+    "squads_group": "Squad"
   },
   "history_limit": {
     "note": "Ваш тариф охватывает последние {{days}} дн. Перейдите на другой тариф, чтобы увидеть более ранние данные. Данные не удаляются.",
@@ -27,7 +31,9 @@
     "run_time_label": "Время выполнения · {{days}} дн.",
     "run_time_hint": "Всего запусков: {{tasks}}",
     "tasks_label": "Запуски · {{days}} дн.",
-    "tasks_hint": "{{failed}} с ошибкой"
+    "tasks_hint": "{{failed}} с ошибкой",
+    "cost_squad_hint": "{{name}} целиком (включая делегированных участников)",
+    "cost_squad_share_hint": "Через Squad {{cost}} ({{pct}}%)"
   },
   "dim": {
     "label": "Интервал",
@@ -90,7 +96,8 @@
     "show_reasons": "Показать коды ошибок",
     "hide_reasons": "Скрыть коды ошибок",
     "show_all": "Показать все {{count}}",
-    "show_less": "Показать топ {{count}}"
+    "show_less": "Показать топ {{count}}",
+    "by_squad": "Ошибки по Squad"
   },
   "leaderboard": {
     "title": "Рейтинг",
@@ -115,7 +122,19 @@
     "usage_unreported_few": "{{count}} запуска не сообщили об использовании",
     "usage_unreported_many": "{{count}} запусков не сообщили об использовании",
     "usage_unreported_pending_few": "{{count}} запуска не сообщили об использовании · итоги ещё обрабатываются",
-    "usage_unreported_pending_many": "{{count}} запусков не сообщили об использовании · итоги ещё обрабатываются"
+    "usage_unreported_pending_many": "{{count}} запусков не сообщили об использовании · итоги ещё обрабатываются",
+    "group_label": "Группировка рейтинга",
+    "group_agent": "Агенты",
+    "group_squad": "Squad",
+    "header_squad": "Squad / Источник",
+    "squad_caption": "{{count}} Squad",
+    "squad_caption_with_standalone": "{{count}} Squad · включая отдельных",
+    "squad_members_title": "Состав расходов {{name}}",
+    "squad_members_count": "Участвуют {{count}} участников",
+    "standalone_agents": "Отдельные агенты (вне Squad)",
+    "standalone_agents_hint": "Прямое упоминание или назначение · {{count}} агентов",
+    "deleted_squads": "Удалённые Squad",
+    "toggle_squad_members": "Показать или скрыть участников {{name}}"
   },
   "empty": {
     "title": "Данных пока нет",

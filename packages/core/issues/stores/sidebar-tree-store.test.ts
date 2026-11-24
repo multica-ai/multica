@@ -65,39 +65,60 @@ describe("useSidebarTreeStore", () => {
     expect(state.needsAttentionCollapsed).toBe(false);
   });
 
-  it("keeps Inbox rows off compact by default, and undoes the one-time compact switch", async () => {
-    expect(DEFAULT_SIDEBAR_INBOX_SETTINGS.compact).toBe(false);
+  describe("compact Inbox rows", () => {
+    async function open(slug: string, stored?: { state: unknown; version: number }) {
+      if (stored) localStorage.setItem(`multica_sidebar_tree:${slug}`, JSON.stringify(stored));
+      setCurrentWorkspace(slug, `ws-${slug}`);
+      await Promise.resolve();
+      return useSidebarTreeStore.getState().inboxSettings;
+    }
 
-    // Version 1 forced compact on; that value goes back to off.
-    localStorage.setItem("multica_sidebar_tree:forced", JSON.stringify({
-      state: { inboxSettings: { limit: 10, showCount: false, railBadge: true, compact: true } },
-      version: 1,
-    }));
-    setCurrentWorkspace("forced", "ws-forced");
-    await Promise.resolve();
-    expect(useSidebarTreeStore.getState().inboxSettings).toEqual({
-      limit: 10,
-      showCount: false,
-      railBadge: true,
-      compact: false,
+    it("are on by default where nothing is stored yet", async () => {
+      expect(DEFAULT_SIDEBAR_INBOX_SETTINGS.compact).toBe(true);
+      expect((await open("fresh")).compact).toBe(true);
     });
 
-    // A copy that never ran version 1 keeps the user's own choice.
-    localStorage.setItem("multica_sidebar_tree:chosen", JSON.stringify({
-      state: { inboxSettings: { limit: 5, showCount: true, railBadge: true, compact: true } },
-      version: 0,
-    }));
-    setCurrentWorkspace("chosen", "ws-chosen");
-    await Promise.resolve();
-    expect(useSidebarTreeStore.getState().inboxSettings.compact).toBe(true);
+    it("stay off for a copy stored while two-line rows were the default", async () => {
+      const inboxSettings = await open("existing", {
+        state: { inboxSettings: { limit: 10, showCount: false, railBadge: true, compact: false } },
+        version: 2,
+      });
+      expect(inboxSettings).toEqual({ limit: 10, showCount: false, railBadge: true, compact: false });
+    });
 
-    // A choice made after this version stays.
-    localStorage.setItem("multica_sidebar_tree:current", JSON.stringify({
-      state: { inboxSettings: { limit: 5, showCount: true, railBadge: true, compact: true } },
-      version: 2,
-    }));
-    setCurrentWorkspace("current", "ws-current");
-    await Promise.resolve();
-    expect(useSidebarTreeStore.getState().inboxSettings.compact).toBe(true);
+    it("stay off for a copy stored before the setting existed", async () => {
+      const inboxSettings = await open("legacy", { state: { expanded: ["project:p1"] }, version: 0 });
+      expect(inboxSettings).toEqual({ ...DEFAULT_SIDEBAR_INBOX_SETTINGS, compact: false });
+    });
+
+    it("go back off once for a copy that version 1 forced on", async () => {
+      const inboxSettings = await open("forced", {
+        state: { inboxSettings: { limit: 5, showCount: true, railBadge: true, compact: true } },
+        version: 1,
+      });
+      expect(inboxSettings.compact).toBe(false);
+    });
+
+    it("keep a value the user picked", async () => {
+      expect((await open("chosen-v0", {
+        state: { inboxSettings: { limit: 5, showCount: true, railBadge: true, compact: true } },
+        version: 0,
+      })).compact).toBe(true);
+      expect((await open("chosen-v2", {
+        state: { inboxSettings: { limit: 5, showCount: true, railBadge: true, compact: true } },
+        version: 2,
+      })).compact).toBe(true);
+      expect((await open("chosen-v3", {
+        state: { inboxSettings: { limit: 5, showCount: true, railBadge: true, compact: false } },
+        version: 3,
+      })).compact).toBe(false);
+    });
+
+    it("save the kept value with the copy, so a later default leaves it alone", async () => {
+      await open("saved", { state: { expanded: [] }, version: 0 });
+      const saved = JSON.parse(localStorage.getItem("multica_sidebar_tree:saved")!);
+      expect(saved.version).toBe(3);
+      expect(saved.state.inboxSettings.compact).toBe(false);
+    });
   });
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence } from "motion/react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { Virtuoso, type Components, type VirtuosoHandle } from "react-virtuoso";
@@ -80,7 +81,7 @@ interface ChatMessageListProps {
    * Subtle reveal transition played once the list has landed at the live end
    * (`hasReachedLiveEnd`): directional glide for archive-advance (`"next"` /
    * `"prev"`), or gentle opacity fade for direct session switches (`"fade"`).
-   * Respects `prefers-reduced-motion` by degrading directional glides to fade.
+   * Skipped entirely under reduced motion (Appearance switch or system setting).
    */
   enterTransition?: ChatMessageEnterTransition | null;
   /** The list became visible to the reader — on reveal, and on each reactivation after it. */
@@ -248,16 +249,15 @@ export function ChatMessageList({
   // grazes full-bleed previews (image / HTML) at the edges.
   const fadeStyle = useScrollFade(scrollRef, 16);
   const reduceMotion = useReducedMotion();
+  const playedTransition = hasReachedLiveEnd && !reduceMotion ? enterTransition : null;
   const enterClass =
-    hasReachedLiveEnd && enterTransition
-      ? reduceMotion
-        ? "animate-chat-enter-fade"
-        : enterTransition === "next"
-          ? "animate-chat-enter-next"
-          : enterTransition === "prev"
-            ? "animate-chat-enter-prev"
-            : "animate-chat-enter-fade"
-      : undefined;
+    playedTransition === "next"
+      ? "animate-chat-enter-next"
+      : playedTransition === "prev"
+        ? "animate-chat-enter-prev"
+        : playedTransition === "fade"
+          ? "animate-chat-enter-fade"
+          : undefined;
 
   const pendingTaskId = pendingTask?.task_id ?? null;
   const wakeupsBySourceTask = useWakeupsBySourceTask(wakeups);
@@ -391,7 +391,7 @@ export function ChatMessageList({
     <div
       ref={setScrollContainerRef}
       data-tab-scroll-root
-      data-chat-enter-transition={hasReachedLiveEnd && enterTransition ? (reduceMotion ? "fade" : enterTransition) : undefined}
+      data-chat-enter-transition={playedTransition ?? undefined}
       style={fadeStyle}
       // The gutter lives on the scroll container, so it applies once to the
       // whole list — rows, header, footer — and the scrollbar still rides the
@@ -482,13 +482,17 @@ export function ChatMessageList({
       )}
     </div>
     </div>
-    {jumpToLiveEnd.visible && (
-      <JumpToLiveEndButton
-        hasNewReply={jumpToLiveEnd.hasNewReply}
-        onClick={jumpToLiveEnd.jump}
-        className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2"
-      />
-    )}
+    <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center">
+      <AnimatePresence initial={false}>
+        {jumpToLiveEnd.visible && (
+          <JumpToLiveEndButton
+            key="jump-to-live-end"
+            hasNewReply={jumpToLiveEnd.hasNewReply}
+            onClick={jumpToLiveEnd.jump}
+          />
+        )}
+      </AnimatePresence>
+    </div>
     </div>
     </PreviewSequenceProvider>
   );

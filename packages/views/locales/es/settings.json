@@ -439,6 +439,18 @@
         "label": "Posponer notificación",
         "description": "Pospone el issue abierto de la bandeja, o lo recupera ahora si ya está pospuesto."
       },
+      "markInboxUnread": {
+        "label": "Marcar notificación como no leída",
+        "description": "Alterna entre leída y no leída en la notificación abierta sin salir de ella."
+      },
+      "nextInboxItem": {
+        "label": "Siguiente notificación",
+        "description": "Abre la siguiente notificación en la lista activa de la bandeja de entrada."
+      },
+      "prevInboxItem": {
+        "label": "Notificación anterior",
+        "description": "Abre la notificación anterior en la lista activa de la bandeja de entrada."
+      },
       "undoInboxAction": {
         "label": "Deshacer acción de la bandeja",
         "description": "Deshace el último archivado, posposición o baja mientras se ve su aviso; después, restaura la notificación abierta una vez archivada o lo que indica Bandeja de entrada vacía."
@@ -888,10 +900,6 @@
         "dates": "Cambiar fechas",
         "labels": "Cambiar etiquetas"
       },
-      "after_label": "Después de archivar",
-      "after_description": "Cuando la notificación que estás leyendo se archiva así. Archivar a mano (E) sigue abriendo la siguiente.",
-      "after_stay": "Quedarse en la tarea",
-      "after_next": "Abrir la siguiente",
       "archived_label": "Notificaciones archivadas",
       "archived_description": "Encuéntralas de nuevo y desarchívalas",
       "archived_action": "Ver archivadas"
@@ -909,6 +917,10 @@
       "comments": {
         "label": "Comentarios",
         "description": "Comentarios nuevos en tareas que sigues"
+      },
+      "squad_handoffs": {
+        "label": "Incluir traspasos del squad",
+        "description": "Comentarios con los que el líder y los agentes de un squad se pasan el trabajo. Las @menciones, las ejecuciones de agente fallidas y los estados que requieren atención te siguen llegando."
       },
       "mentions": {
         "label": "Menciones",
