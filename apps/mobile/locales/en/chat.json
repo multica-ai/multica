@@ -113,6 +113,8 @@
     "runtime_reconnect_timeout": "Daemon did not reconnect in time",
     "runtime_recovery": "Daemon restarted",
     "timeout": "Run timed out",
+    "cleanup_unconfirmed": "Couldn't confirm the agent process stopped",
+    "cleanup_blocked": "An earlier run's process may still be running; rerun manually",
     "iteration_limit": "Hit the iteration limit",
     "agent_blocked": "Waiting on human input",
     "api_invalid_request": "Rejected by the model API",
