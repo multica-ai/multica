@@ -123,7 +123,7 @@ function HeatmapCard({ summary, tz }: { summary: ContributionSummary; tz: string
               <span
                 key={cell.date}
                 title={cell.inRange ? t(($) => $.contribution.heatmap.cell, { date: cell.date, count: cell.count }) : undefined}
-                className="aspect-square rounded-[2px]"
+                className="aspect-square rounded-xs"
                 style={{ background: heatColor(cell.level, cell.inRange) }}
               />
             )),
@@ -133,7 +133,7 @@ function HeatmapCard({ summary, tz }: { summary: ContributionSummary; tz: string
       <div className="mt-3 flex items-center justify-end gap-1 text-caption text-muted-foreground">
         {t(($) => $.contribution.heatmap.less)}
         {[0, 1, 2, 3, 4].map((l) => (
-          <span key={l} aria-hidden className="size-2.5 rounded-[2px]" style={{ background: heatColor(l, true) }} />
+          <span key={l} aria-hidden className="size-2.5 rounded-xs" style={{ background: heatColor(l, true) }} />
         ))}
         {t(($) => $.contribution.heatmap.more)}
       </div>
