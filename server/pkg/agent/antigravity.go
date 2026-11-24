@@ -549,7 +549,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 					streamModel = event.Init.Model
 					supplements.activate(streamSessionID)
 					announceSession(streamSessionID)
-					thinking.setScope(streamSessionID, turn.start)
+					thinking.setScope(streamSessionID, turn.start, turn.injected)
 				case "step_update":
 					if event.StepUpdate == nil {
 						turn.invalid = true
@@ -573,7 +573,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 						announceSession(streamSessionID)
 					}
 					turn.confirmInjected(supplements, transcript, streamSessionID)
-					thinking.setScope(streamSessionID, turn.start)
+					thinking.setScope(streamSessionID, turn.start, turn.injected)
 					for _, message := range antigravityToolMessages(event.StepUpdate, streamTools) {
 						// Tool lifecycle events also drive the daemon's in-flight
 						// counter. Unlike best-effort text, neither half may be

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,22 +61,29 @@ func (s *antigravityMessages) send(ctx context.Context, msg Message, reliable bo
 type antigravityThinkingProgress struct {
 	logPath string
 	send    func(Message) bool
-	mu      sync.Mutex
-	scope   antigravityThinkingScope
+
+	mu       sync.Mutex
+	scope    antigravityThinkingScope
+	injected map[int]bool
 
 	reading antigravityThinkingScope
 	path    string
 	offset  int64
 	seen    map[int]bool
-	ended   bool
 }
 
-func (p *antigravityThinkingProgress) setScope(conversationID string, start *int) {
+func (p *antigravityThinkingProgress) setScope(conversationID string, start *int, injected map[int]bool) {
+	scope := antigravityThinkingScope{conversationID: conversationID}
+	if conversationID != "" && start != nil && *start >= 0 {
+		scope.turnStart, scope.valid = *start, true
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.scope = antigravityThinkingScope{conversationID: conversationID}
-	if conversationID != "" && start != nil && *start >= 0 {
-		p.scope.turnStart, p.scope.valid = *start, true
+	// Stdout only adds indices to the turn. Share a fresh snapshot when the
+	// set grows so the reader never races with a stdout update.
+	if p.scope != scope || len(p.injected) != len(injected) {
+		p.scope = scope
+		p.injected = maps.Clone(injected)
 	}
 }
 
@@ -97,17 +105,14 @@ func (p *antigravityThinkingProgress) follow(ctx context.Context) {
 // until the writer appends their newline. Missing files never fail execution.
 func (p *antigravityThinkingProgress) poll() {
 	p.mu.Lock()
-	scope := p.scope
+	scope, injected := p.scope, p.injected
 	p.mu.Unlock()
 	if !scope.valid {
 		return
 	}
 	if p.reading != scope {
-		p.reading, p.path, p.offset, p.ended = scope, "", 0, false
+		p.reading, p.path, p.offset = scope, "", 0
 		p.seen = make(map[int]bool)
-	}
-	if p.ended {
-		return
 	}
 	if p.path == "" {
 		root := readAntigravityAppDataDir(p.logPath)
@@ -141,11 +146,12 @@ func (p *antigravityThinkingProgress) poll() {
 			Thinking  string `json:"thinking"`
 		}
 		if json.Unmarshal(line, &record) == nil && record.StepIndex != nil && *record.StepIndex > scope.turnStart {
-			if record.Type == "USER_INPUT" {
-				p.ended = true
+			index := *record.StepIndex
+			if record.Type == "USER_INPUT" && !injected[index] {
+				// The transcript can get ahead of stdout. Leave this record
+				// unread until stdout recognizes it as an in-turn injection.
 				return
 			}
-			index := *record.StepIndex
 			if record.Type == "PLANNER_RESPONSE" && record.Source == "MODEL" && record.Status == "DONE" &&
 				!p.seen[index] && strings.TrimSpace(record.Thinking) != "" {
 				if !p.send(Message{Type: MessageThinking, Content: record.Thinking}) {

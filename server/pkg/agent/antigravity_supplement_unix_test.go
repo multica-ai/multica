@@ -48,6 +48,7 @@ printf '%s\n' '{"type":"USER_INPUT","step_index":0,"content":"original goal"}' >
 printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"conv-steer","step_index":0,"state":"DONE","step_type":"user_input"}}'
 while [ ! -f injected ]; do sleep 0.02; done
 printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"conv-steer","step_index":3,"state":"DONE","step_type":"user_input"}}'
+printf '%s\n' '{"type":"PLANNER_RESPONSE","source":"MODEL","status":"DONE","step_index":4,"thinking":"Reconsidering the fix."}' >> '` + transcript + `'
 while [ ! -f answer ]; do sleep 0.02; done
 printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"conv-steer","step_index":4,"state":"DONE","step_type":"agent_response","text_delta":"Done, with the smaller fix."}}'
 printf '%s\n' '{"event":"result","result":{"conversation_id":"conv-steer","status":"ERROR","response":"Done, with the smaller fix.","error":"There was a network issue connecting to the server, please try again."}}'
@@ -67,10 +68,6 @@ printf '%s\n' '{"event":"result","result":{"conversation_id":"conv-steer","statu
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	go func() {
-		for range session.Messages {
-		}
-	}()
 	if session.Supplement == nil || session.SupplementReady == nil {
 		t.Fatal("negotiated antigravity session exposes no supplement hooks")
 	}
@@ -147,6 +144,16 @@ printf '%s\n' '{"event":"result","result":{"conversation_id":"conv-steer","statu
 		if err := <-done; !errors.Is(err, context.Canceled) {
 			t.Fatalf("Supplement = %v, want canceled at turn end so the daemon falls back", err)
 		}
+	}
+
+	var thinking []string
+	for msg := range session.Messages {
+		if msg.Type == MessageThinking {
+			thinking = append(thinking, msg.Content)
+		}
+	}
+	if len(thinking) != 1 || thinking[0] != "Reconsidering the fix." {
+		t.Fatalf("thinking after injected input = %q, want one settled thought", thinking)
 	}
 
 	// The injected user_input step belongs to the turn, so a trailing transport

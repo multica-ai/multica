@@ -31,6 +31,8 @@ func TestAntigravityThinkingCurrentTurn(t *testing.T) {
 {"type":"PLANNER_RESPONSE","source":"SYSTEM","status":"DONE","step_index":13,"thinking":"system text"}
 {"type":"GENERIC","source":"MODEL","status":"DONE","step_index":14,"thinking":"tool text"}
 {"type":"PLANNER_RESPONSE","source":"MODEL","status":"DONE","thinking":"missing index"}
+{"type":"USER_INPUT","step_index":15,"content":"Prefer the smaller fix."}
+{"type":"PLANNER_RESPONSE","source":"MODEL","status":"DONE","step_index":16,"thinking":"Reconsidering the fix."}
 {"type":"USER_INPUT","step_index":20}
 {"type":"PLANNER_RESPONSE","source":"MODEL","status":"DONE","step_index":21,"thinking":"later turn"}
 `
@@ -45,7 +47,7 @@ func TestAntigravityThinkingCurrentTurn(t *testing.T) {
 		t.Fatal("thinking emitted without a current-turn boundary")
 	}
 	start := 10
-	progress.setScope(cid, &start)
+	progress.setScope(cid, &start, nil)
 	progress.poll()
 	progress.poll()
 	if len(messages) != 2 {
@@ -56,6 +58,18 @@ func TestAntigravityThinkingCurrentTurn(t *testing.T) {
 		if msg.Type != MessageThinking || msg.Content != want {
 			t.Fatalf("got %#v, want thinking %q", msg, want)
 		}
+	}
+
+	// Stdout now identifies the first boundary as an in-turn injection.
+	progress.setScope(cid, &start, map[int]bool{15: true})
+	progress.poll()
+	progress.poll()
+	if len(messages) != 1 {
+		t.Fatalf("got %d messages, want only the thought after injected input", len(messages))
+	}
+	msg := <-messages
+	if msg.Type != MessageThinking || msg.Content != "\n\nReconsidering the fix." {
+		t.Fatalf("got %#v, want thinking after injected input", msg)
 	}
 }
 
@@ -75,7 +89,7 @@ func TestAntigravityThinkingPartialLineAndBackpressure(t *testing.T) {
 	writer := &antigravityMessages{messages: messages}
 	progress := &antigravityThinkingProgress{logPath: logPath, send: func(msg Message) bool { return writer.send(t.Context(), msg, false) }}
 	start := 0
-	progress.setScope(cid, &start)
+	progress.setScope(cid, &start, nil)
 	progress.poll() // The transcript can appear after init/user_input.
 	line := `{"type":"PLANNER_RESPONSE","source":"MODEL","status":"DONE","step_index":1,"thinking":"Live progress."}`
 	if err := os.WriteFile(path, []byte(line[:50]), 0o600); err != nil {
