@@ -129,22 +129,17 @@ export function InboxSettledMoreMenu({ issueId }: { issueId: string }) {
   const leaveSubtree = useUnsubscribeFromIssueSubtree(issueId);
   if (!offered || !userId) return null;
 
+  // On the request's promise: moving on to the next notification unmounts the
+  // menu before the request settles, and React Query skips per-call callbacks then.
   const unsubscribe = () =>
-    leave.mutate(
-      { userId, userType: "member", subscribed: true },
-      {
-        onSuccess: () =>
-          toast.success(t(($) => $.kept.unsubscribed), { description: t(($) => $.toasts.unsubscribed_hint) }),
-        onError: () => toast.error(tIssues(($) => $.detail.subscription_update_failed)),
-      },
+    void leave.mutateAsync({ userId, userType: "member", subscribed: true }).then(
+      () => toast.success(t(($) => $.kept.unsubscribed), { description: t(($) => $.toasts.unsubscribed_hint) }),
+      () => toast.error(tIssues(($) => $.detail.subscription_update_failed)),
     );
   const unsubscribeSubtree = () =>
-    leaveSubtree.mutate(
-      { userId, userType: "member" },
-      {
-        onSuccess: () => toast.success(tIssues(($) => $.detail.unsubscribe_subtree_succeeded)),
-        onError: () => toast.error(tIssues(($) => $.detail.unsubscribe_subtree_failed)),
-      },
+    void leaveSubtree.mutateAsync({ userId, userType: "member" }).then(
+      () => toast.success(tIssues(($) => $.detail.unsubscribe_subtree_succeeded)),
+      () => toast.error(tIssues(($) => $.detail.unsubscribe_subtree_failed)),
     );
 
   return (
