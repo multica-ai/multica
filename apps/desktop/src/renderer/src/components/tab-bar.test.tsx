@@ -631,6 +631,48 @@ describe("TabBar click activation", () => {
   });
 });
 
+describe("TabBar drag reorder", () => {
+  it("moves a tab dragged onto its neighbour", () => {
+    const rect = (left: number, width: number) =>
+      ({
+        left,
+        right: left + width,
+        width,
+        top: 0,
+        bottom: 32,
+        height: 32,
+        x: left,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    const rectSpy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        const tabId = this.closest<HTMLElement>("[data-tab-id]")?.dataset.tabId;
+        if (tabId === "tA") return rect(0, 224);
+        if (tabId === "tB") return rect(230, 224);
+        return rect(0, 600);
+      });
+
+    const { getByRole } = render(<TabBar />);
+    const tab = getByRole("button", { name: "Issues" });
+
+    fireEvent.pointerDown(tab, {
+      button: 0,
+      isPrimary: true,
+      clientX: 100,
+      clientY: 16,
+    });
+    for (const clientX of [104, 108, 200, 300, 360]) {
+      fireEvent.pointerMove(document, { clientX, clientY: 16 });
+    }
+    fireEvent.pointerUp(document, { clientX: 360, clientY: 16 });
+
+    expect(state.moveTab).toHaveBeenCalledWith(0, 1);
+    rectSpy.mockRestore();
+  });
+});
+
 describe("TabBar context menu", () => {
   it("opens an issue-detail tab as a dedicated window", async () => {
     state.byWorkspace.acme.tabs = [

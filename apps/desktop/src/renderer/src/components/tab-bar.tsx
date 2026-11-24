@@ -27,7 +27,7 @@ import {
 } from "@dnd-kit/sortable";
 import {
   restrictToHorizontalAxis,
-  restrictToParentElement,
+  restrictToFirstScrollableAncestor,
 } from "@dnd-kit/modifiers";
 import { CSS } from "@dnd-kit/utilities";
 import {
@@ -738,7 +738,7 @@ export function TabBar() {
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
-          modifiers={[restrictToHorizontalAxis, restrictToParentElement]}
+          modifiers={[restrictToHorizontalAxis, restrictToFirstScrollableAncestor]}
           onDragEnd={handleDragEnd}
         >
           {/* px-px keeps the active pill's ring inside the scroller's clip. */}
