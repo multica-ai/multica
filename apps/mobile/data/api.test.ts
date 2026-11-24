@@ -11,6 +11,21 @@ vi.hoisted(() => {
 // The real store pulls in expo-secure-store; the client only needs the slug.
 vi.mock("@/data/workspace-store", () => ({ getCurrentSlug: () => null }));
 
+describe("client OS metadata", () => {
+  afterEach(() => {
+    api.setOptions({ clientOS: undefined });
+    vi.unstubAllGlobals();
+  });
+
+  it.each(["android", "ios"])("reports %s on API requests", async (clientOS) => {
+    api.setOptions({ clientOS });
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json([]));
+    vi.stubGlobal("fetch", fetchMock);
+    await api.listAgents();
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({ "X-Client-OS": clientOS });
+  });
+});
+
 describe("api.listAgents", () => {
   afterEach(() => vi.unstubAllGlobals());
 

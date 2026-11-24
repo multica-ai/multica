@@ -1,7 +1,7 @@
 import "../global.css";
 
 import { useEffect, useRef } from "react";
-import { AppState, type AppStateStatus } from "react-native";
+import { AppState, Platform, type AppStateStatus } from "react-native";
 import { Stack, ThemeProvider, router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { ActionSheetProvider } from "@expo/react-native-action-sheet";
@@ -39,6 +39,7 @@ function AuthInitializer({ children }: { children: React.ReactNode }) {
     // before any request fires — initialize() below kicks off the first
     // getMe() call, so do this synchronously first.
     api.setOptions({
+      clientOS: Platform.OS,
       onUnauthorized: () => {
         if (signingOutRef.current) return;
         signingOutRef.current = true;

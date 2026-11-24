@@ -188,6 +188,7 @@ export class ApiError extends Error {
 }
 
 export interface ApiClientOptions {
+  clientOS?: string;
   /** Called once when the server returns 401. The platform layer wires this
    *  to clear the token + navigate to /login so a stale token doesn't keep
    *  every subsequent request looping on 401. */
@@ -224,7 +225,7 @@ class ApiClient {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       "X-Client-Platform": "mobile",
-      "X-Client-OS": "ios",
+      "X-Client-OS": this.options.clientOS ?? "ios",
       "X-Client-Version": "0.1.0",
       "X-Request-ID": rid,
       ...((init.headers as Record<string, string>) ?? {}),
@@ -1338,7 +1339,7 @@ class ApiClient {
     const headers: Record<string, string> = {
       // No Content-Type — let fetch set the multipart boundary.
       "X-Client-Platform": "mobile",
-      "X-Client-OS": "ios",
+      "X-Client-OS": this.options.clientOS ?? "ios",
       "X-Client-Version": "0.1.0",
       "X-Request-ID": rid,
     };

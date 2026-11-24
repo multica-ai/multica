@@ -65,6 +65,18 @@ describe("WSClient application heartbeat", () => {
     vi.restoreAllMocks();
   });
 
+  it.each(["android", "ios"])("reports %s on the socket URL", (clientOS) => {
+    const client = new WSClient({
+      url: "wss://example.test/ws",
+      token: "token",
+      workspaceSlug: "workspace",
+      clientOS,
+    });
+    client.connect();
+    expect(new URL(MockWebSocket.instances[0].url).searchParams.get("client_os")).toBe(clientOS);
+    client.disconnect();
+  });
+
   it("reconnects a stale OPEN socket through the jittered backoff path", () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     const { client, socket } = connectAuthenticatedClient();
