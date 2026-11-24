@@ -306,9 +306,7 @@ jobs:
   e2e:
     needs: changes
     if: ${{ needs.changes.outputs.e2e == 'true' }}
-    # Playwright 1.58 installs Chromium only up to Ubuntu 24.04; ubuntu-latest
-    # is past that.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 25
     services:
       postgres:
@@ -365,8 +363,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Install Chromium
-        run: pnpm exec playwright install --with-deps chromium
+      # Chromium and the system fonts the locale specs measure text with come
+      # from Playwright's image, tagged with the installed @playwright/test so
+      # the two never drift. `playwright install --with-deps` fetched the same
+      # fonts through the runner's Ubuntu apt mirror, which mostly took 5 to 9
+      # minutes (MUL-10057).
+      - name: Pull the Playwright image
+        id: playwright
+        run: |
+          image="mcr.microsoft.com/playwright:v$(node -p 'require("@playwright/test/package.json").version')-noble"
+          docker pull --quiet "$image"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
 
       - name: Build and migrate the API
         working-directory: server
@@ -394,8 +401,18 @@ jobs:
             curl -sf -o /dev/null "$url" || { echo "$url did not answer within 60s"; exit 1; }
           done
 
+      # Only the specs run in the image. Host networking reaches the API, the
+      # web app and Postgres on localhost, and the checkout is mounted at its
+      # own path because pnpm's bin shims hold absolute paths.
       - name: Run the guest, Inbox header and rail labels specs
-        run: pnpm exec playwright test e2e/guest.spec.ts e2e/inbox-section-header-locales.spec.ts e2e/app-rail-labels-locales.spec.ts
+        env:
+          IMAGE: ${{ steps.playwright.outputs.image }}
+        run: >-
+          docker run --rm --network host --ipc host
+          -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE"
+          -e CI -e DATABASE_URL -e PORT -e FRONTEND_ORIGIN -e PLAYWRIGHT_BASE_URL
+          "$IMAGE"
+          node_modules/.bin/playwright test e2e/guest.spec.ts e2e/inbox-section-header-locales.spec.ts e2e/app-rail-labels-locales.spec.ts
 
       - name: Upload logs and Playwright results
         if: ${{ failure() }}
