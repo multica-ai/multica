@@ -117,6 +117,8 @@ QwenPaw, MiniMax Code, ZeroClaw는 예외입니다. Multica에서 고른 모델�
 
 Antigravity의 추론 변형이 `agy models`에 있으면 각각 별도 모델로 표시됩니다. 모델 선택기에서 접미사를 포함해 원하는 변형을 선택하세요. Multica에는 Antigravity의 별도 추론 설정이 없습니다. 사용자 지정 인수로 `--effort`를 전달하면 Antigravity가 선택한 모델과 함께 사용할 수 있는지 검사합니다.
 
+macOS에서 Antigravity가 단일 프롬프트 실행의 성공을 보고하고 추적 중인 도구와 하위 에이전트가 모두 작업을 끝내면, Multica는 CLI가 종료될 때까지 10초간 기다립니다. CLI가 계속 실행 중이면 해당 실행의 프로세스 그룹에 남은 프로세스를 종료하고 응답을 보존합니다.
+
 DeepSeek Harness의 모델 카탈로그는 런타임 자체가 제공합니다(`dsh --profile multica --list-models`). 모델 ID는 `provider/model` 형식(예: `deepseek-official/deepseek-chat`)이므로 목록에서 전체 ID를 선택하세요.
 
 <Callout type="info">

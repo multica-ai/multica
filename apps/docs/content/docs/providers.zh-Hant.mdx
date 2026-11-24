@@ -119,6 +119,8 @@ QwenPaw、MiniMax Code 和 ZeroClaw 例外：它們不接受在 Multica 側選�
 
 Antigravity 會把 `agy models` 中的推理變體顯示為獨立模型。在模型選擇框中選用完整的變體名稱，包括後綴。Multica 不為 Antigravity 提供單獨的**思考**設定。如果在自定義參數中傳入 `--effort`，Antigravity 會檢查它能否與所選模型同時使用。
 
+在 macOS 上，Antigravity 確認單次提示執行成功，且已追蹤的工具和子代理都已結束後，Multica 會等待 CLI 結束，最多 10 秒。如果仍未結束，Multica 會停止該次執行的行程群組中剩餘的行程，並保留回應。
+
 DeepSeek Harness 的模型目錄由執行時自身提供（`dsh --profile multica --list-models`）。它的模型 id 採用 `provider/model` 形式（例如 `deepseek-official/deepseek-chat`），請從列表中選擇完整 id。
 
 <Callout type="info">

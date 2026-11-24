@@ -117,6 +117,8 @@ QwenPaw、MiniMax Code、ZeroClaw は例外です。Multica 側で選んだモ�
 
 Antigravity の推論バリアントが `agy models` にある場合、それぞれが別のモデルとして表示されます。モデル選択欄で、接尾辞を含む正確なバリアントを選んでください。Multica には Antigravity 専用の 推論設定はありません。カスタム引数で `--effort` を渡す場合、選択したモデルと併用できるかどうかは Antigravity が判定します。
 
+macOS では、Antigravity が単一プロンプトの実行に成功したと報告し、追跡対象のツールとサブエージェントがすべて終了すると、Multica は CLI の終了を 10 秒待ちます。終了しない場合は、その実行のプロセスグループに残っているプロセスを停止し、応答を保持します。
+
 DeepSeek Harness のモデルカタログはランタイム自身が提供します（`dsh --profile multica --list-models`）。モデル ID は `provider/model` 形式（例: `deepseek-official/deepseek-chat`）なので、一覧から完全な ID を選択してください。
 
 <Callout type="info">

@@ -45,7 +45,8 @@ import (
 // through a PreInvocation workspace hook instead (see
 // antigravitySupplementSession).
 type antigravityBackend struct {
-	cfg Config
+	cfg               Config
+	terminalExitGrace time.Duration
 }
 
 type antigravityStreamUsage struct {
@@ -269,6 +270,30 @@ func (t *antigravityTurn) completed(response string) bool {
 		latest > *t.start && t.steps[latest].state == "DONE" && t.steps[latest].hasText
 }
 
+func (t *antigravityTurn) canCleanUp(result *antigravityStreamResult) bool {
+	if t.invalid || result.Status != "SUCCESS" || result.Error != "" || strings.TrimSpace(result.Response) == "" {
+		return false
+	}
+	for _, step := range t.steps {
+		if (step.kind == "tool" || step.kind == "subagent") && step.state != "DONE" {
+			return false
+		}
+	}
+	return true
+}
+
+func antigravityUsesSinglePrompt(opts ExecOptions) bool {
+	for _, args := range [][]string{opts.ExtraArgs, opts.CustomArgs} {
+		for _, arg := range args {
+			name, _, _ := strings.Cut(arg, "=")
+			if name == "--input-format" {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // antigravityNetworkIssueError is the provider sentence some agy releases
 // report when a trailing round trip fails. It carries no Go error text, so it
 // has to stay a literal match alongside the transport patterns below.
@@ -447,13 +472,6 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 	}
 	cmd.Env = buildEnv(b.cfg.Env)
 
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		cancel()
-		_ = os.Remove(logPath)
-		return nil, fmt.Errorf("agy stdout pipe: %w", err)
-	}
-
 	var supplements *antigravitySupplementSession
 	var supplementErr error
 	if opts.EnableTaskSupplement {
@@ -466,9 +484,13 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		}
 	}
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[agy:stderr] "), agentStderrTailBytes)
-	cmd.Stderr = stderrBuf
+	exitGrace := b.terminalExitGrace
+	if exitGrace <= 0 {
+		exitGrace = 10 * time.Second
+	}
 
-	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
+	process, err := startAntigravityProcess(runCtx, cmd, stderrBuf, b.cfg.Logger, exitGrace, antigravityUsesSinglePrompt(opts))
+	if err != nil {
 		supplements.close()
 		cancel()
 		_ = os.Remove(logPath)
@@ -479,11 +501,6 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
-
-	go func() {
-		<-runCtx.Done()
-		_ = stdout.Close()
-	}()
 
 	go func() {
 		defer cancel()
@@ -507,7 +524,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		finalStatus := "completed"
 		var finalError string
 
-		scanner := newAgentStreamScanner(stdout)
+		scanner := newAgentStreamScanner(process.stdout)
 
 		trySend(msgCh, Message{Type: MessageStatus, Status: "running"})
 		// Announce the conversation id the moment agy names it so the daemon
@@ -592,6 +609,12 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 					if event.Result.Usage != nil && event.Result.Usage.hasTokens() {
 						streamResultUsage = event.Result.Usage
 					}
+					// In print mode agy emits result once, at the end of
+					// the whole prompt. A DONE response alone can be a
+					// subturn that is still waiting for background work.
+					if process.completed != nil && turn.canCleanUp(event.Result) {
+						process.observeSuccess(runCtx)
+					}
 				}
 				continue
 			}
@@ -619,8 +642,8 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 
 		turn.confirmInjected(supplements, transcript, streamSessionID)
 		supplements.end()
-		waitErr := cmd.Wait()
-		releaseProcessGroup(cmd)
+		exit := process.finish()
+		waitErr := exit.err
 		// Remove the managed hooks before the result is reported, so a
 		// follow-up run never observes them.
 		supplements.close()
@@ -631,10 +654,13 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 			sessionID = readAntigravityConversationID(logPath)
 		}
 
-		if runCtx.Err() == context.DeadlineExceeded {
+		if exit.cleanupErr != nil {
+			finalStatus = "cleanup_unconfirmed"
+			finalError = fmt.Sprintf("Antigravity cleanup could not be confirmed. Background processes may still be running: %v", exit.cleanupErr)
+		} else if runCtx.Err() == context.DeadlineExceeded && !process.terminal.Load() {
 			finalStatus = "timeout"
 			finalError = fmt.Sprintf("agy timed out after %s", timeout)
-		} else if runCtx.Err() == context.Canceled {
+		} else if runCtx.Err() == context.Canceled && !process.terminal.Load() {
 			finalStatus = "aborted"
 			finalError = "execution cancelled"
 		} else if status := antigravityResultStatus(streamResultStatus); finalStatus == "completed" && status != "completed" {
@@ -683,8 +709,17 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 			// result.response is agy's canonical complete reply. Deltas normally
 			// reconstruct it exactly; if none arrived, emit the response now so
 			// the task transcript and final result both receive the answer.
-			if finalOutput == "" {
+			switch {
+			case finalOutput == "":
 				trySend(msgCh, Message{Type: MessageText, Content: streamResponse})
+			case finalStatus == "cleanup_unconfirmed" && finalOutput != streamResponse:
+				// Blocked runs use the transcript to retain the answer
+				// alongside the cleanup warning.
+				missing, ok := strings.CutPrefix(streamResponse, finalOutput)
+				if !ok {
+					missing = "\n\n" + streamResponse
+				}
+				trySend(msgCh, Message{Type: MessageText, Content: missing})
 			}
 			finalOutput = streamResponse
 		}
@@ -732,6 +767,10 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 	}()
 
 	session := &Session{Messages: msgCh, Result: resCh}
+	if process.completed != nil {
+		session.CleanupRequired = true
+		session.TerminalObserved = process.terminal.Load
+	}
 	switch {
 	case supplements != nil:
 		session.Supplement = supplements.supplement

@@ -119,6 +119,8 @@ QwenPaw, MiniMax Code, and ZeroClaw are exceptions: they do not accept a model c
 
 For Antigravity, use the model picker to select the exact reasoning variant shown by `agy models`, including any suffix. Multica has no separate **Thinking** setting for Antigravity. If you pass `--effort` in custom arguments, Antigravity checks whether it can be combined with the selected model.
 
+On macOS, after Antigravity reports that a single-prompt run completed successfully and its tracked tools and subagents have finished, Multica gives the CLI 10 seconds to exit. If it stays open, Multica stops remaining processes in that run's process group and preserves the response.
+
 DeepSeek Harness advertises its model catalog from the runtime itself (`dsh --profile multica --list-models`). Its model ids use the `provider/model` form (for example `deepseek-official/deepseek-chat`), so select the full id from the list.
 
 <Callout type="info">

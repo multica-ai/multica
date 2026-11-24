@@ -173,7 +173,7 @@ func signalCursorDarwinIdentity(pid int, version uint32, sig syscall.Signal) err
 
 // Darwin's proc state constants are defined in <sys/proc.h>; x/sys/unix does
 // not export SZOMB on all supported Darwin architectures.
-const cursorDarwinZombieState = 5
+const darwinProcessStateZombie = 5
 
 func readCursorUnixProcessInfo(pid int) (cursorUnixProcessInfo, error) {
 	proc, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
@@ -185,7 +185,7 @@ func readCursorUnixProcessInfo(pid int) (cursorUnixProcessInfo, error) {
 		ppid:   int(proc.Eproc.Ppid),
 		pgid:   int(proc.Eproc.Pgid),
 		start:  uint64(proc.Proc.P_starttime.Sec)*1_000_000 + uint64(proc.Proc.P_starttime.Usec),
-		zombie: proc.Proc.P_stat == cursorDarwinZombieState,
+		zombie: proc.Proc.P_stat == darwinProcessStateZombie,
 	}, nil
 }
 
@@ -201,7 +201,7 @@ func listCursorUnixProcessInfos() ([]cursorUnixProcessInfo, error) {
 			ppid:   int(proc.Eproc.Ppid),
 			pgid:   int(proc.Eproc.Pgid),
 			start:  uint64(proc.Proc.P_starttime.Sec)*1_000_000 + uint64(proc.Proc.P_starttime.Usec),
-			zombie: proc.Proc.P_stat == cursorDarwinZombieState,
+			zombie: proc.Proc.P_stat == darwinProcessStateZombie,
 		})
 	}
 	return infos, nil
