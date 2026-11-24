@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -381,6 +382,43 @@ func fetchURLBytes(url string, timeout time.Duration) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
+// wrapUnwritableUpdateDir annotates permission errors that occur while
+// replacing the running binary. Self-update writes a sibling temp file in the
+// install directory, so a root-owned path such as /usr/local/bin fails for a
+// regular user and otherwise retries with an opaque "permission denied".
+func wrapUnwritableUpdateDir(dir string, err error, op string) error {
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, os.ErrPermission) {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+	return fmt.Errorf("%s: %w; %s", op, err, unwritableUpdateDirHint(dir))
+}
+
+func unwritableUpdateDirHint(dir string) string {
+	return fmt.Sprintf("the CLI is installed in %s, which is not writable by the current user, so self-update cannot replace it. Move the binary to a user-writable directory such as ~/.local/bin, then run `multica daemon autostart enable` again if the daemon uses user-level autostart", dir)
+}
+
+// checkUpdateDirWritable probes the install directory before downloading a
+// release, so a permission failure does not waste bandwidth on every
+// auto-update retry.
+func checkUpdateDirWritable(dir string) error {
+	tmpFile, err := os.CreateTemp(dir, "multica-update-*")
+	if err != nil {
+		return wrapUnwritableUpdateDir(dir, err, "create temp file")
+	}
+	tmpPath := tmpFile.Name()
+	if err := tmpFile.Close(); err != nil {
+		os.Remove(tmpPath)
+		return wrapUnwritableUpdateDir(dir, err, "create temp file")
+	}
+	if err := os.Remove(tmpPath); err != nil {
+		return wrapUnwritableUpdateDir(dir, err, "create temp file")
+	}
+	return nil
+}
+
 // UpdateViaDownload downloads the latest release binary from GitHub and replaces
 // the current executable in-place. Returns the combined output message and any error.
 func UpdateViaDownload(targetVersion string) (string, error) {
@@ -397,6 +435,11 @@ func UpdateViaDownloadWithTimeout(targetVersion string, downloadTimeout time.Dur
 	exePath, err = filepath.EvalSymlinks(exePath)
 	if err != nil {
 		return "", fmt.Errorf("resolve symlink: %w", err)
+	}
+
+	dir := filepath.Dir(exePath)
+	if err := checkUpdateDirWritable(dir); err != nil {
+		return "", err
 	}
 
 	tag := normalizeReleaseTag(targetVersion)
@@ -464,10 +507,9 @@ func UpdateViaDownloadWithTimeout(targetVersion string, downloadTimeout time.Dur
 	}
 
 	// Atomic replace: write to temp file, then rename over the original.
-	dir := filepath.Dir(exePath)
 	tmpFile, err := os.CreateTemp(dir, "multica-update-*")
 	if err != nil {
-		return "", fmt.Errorf("create temp file: %w", err)
+		return "", wrapUnwritableUpdateDir(dir, err, "create temp file")
 	}
 	tmpPath := tmpFile.Name()
 
