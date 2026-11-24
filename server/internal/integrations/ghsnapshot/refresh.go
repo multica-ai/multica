@@ -48,7 +48,11 @@ var (
 	// at first, so watched PRs are fetched after each of these delays.
 	defaultMergeWatchDelays = []time.Duration{30 * time.Second, 3 * time.Minute}
 	maxChaseAttempts        = 12
-	queueBuffer             = 2048
+	// A refresh GitHub rate limits is retried after the installation's pause,
+	// doubling the wait each time, and given up after this many consecutive
+	// 403s. The TTL sweep and later events recover what it gives up.
+	maxRateLimitRetries = 3
+	queueBuffer         = 2048
 )
 
 // Manager owns the outbound GitHub API refresh pipeline. A Manager whose client
@@ -84,6 +88,9 @@ type Manager struct {
 	inFlight map[address]bool
 	trailing map[address]bool // one event that arrived while active; replay once after the current fetch
 	attempts map[address]int  // chase attempts for the current undecided window
+	// Consecutive rate-limited fetches of an address, cleared when it finishes
+	// or is released.
+	rateRetries map[address]int
 	// Last address returned by the bounded TTL sweep. The query starts after
 	// this cursor and wraps, preventing a fixed first page from starving later
 	// installations when early addresses repeatedly fail.
@@ -124,6 +131,7 @@ func NewManager(client *Client, queries *db.Queries, pool TxBeginner, onApplied 
 		inFlight:      map[address]bool{},
 		trailing:      map[address]bool{},
 		attempts:      map[address]int{},
+		rateRetries:   map[address]int{},
 		rateUntil:     map[int64]time.Time{},
 	}
 }
@@ -220,15 +228,24 @@ func (m *Manager) worker(ctx context.Context) {
 			// A rate-limited installation waits outside the worker pool. Keep
 			// the address active while a timer owns it, so events continue to
 			// coalesce without letting one tenant occupy every global worker.
-			if pause := m.rateLimitPause(addr.InstallationID); pause > 0 {
-				m.deferActive(ctx, addr, pause)
+			if m.deferIfPaused(ctx, addr) {
+				continue
+			}
+			// Per-request jitter smooths bursts, such as every address of an
+			// installation leaving its pause at once.
+			if j := m.jitter(); j > 0 && !sleepCtx(ctx, j) {
+				m.release(addr)
+				return
+			}
+			// Another worker's request may have been rate limited meanwhile.
+			if m.deferIfPaused(ctx, addr) {
 				continue
 			}
 			m.mu.Lock()
 			m.inFlight[addr] = true
 			m.mu.Unlock()
-			if m.process(ctx, addr) {
-				m.retryAfterPause(ctx, addr)
+			if retryAfter := m.process(ctx, addr); retryAfter > 0 {
+				m.retryAfterPause(ctx, addr, retryAfter)
 				continue
 			}
 			m.finish(addr)
@@ -236,31 +253,23 @@ func (m *Manager) worker(ctx context.Context) {
 	}
 }
 
-// process fetches and applies one snapshot. It reports whether GitHub rate
-// limited the fetch; the worker then keeps the address for the end of the
-// installation's pause instead of releasing it.
-func (m *Manager) process(ctx context.Context, addr address) (rateLimited bool) {
-	// Per-request jitter smooths bursts. Installation-scoped rate-limit waits
-	// are handled before this point so they never consume a worker slot.
-	if j := m.jitter(); j > 0 {
-		if !sleepCtx(ctx, j) {
-			return false
-		}
-	}
-
+// process fetches and applies one snapshot. When GitHub rate limits the fetch
+// it returns the wait GitHub asked for, and the worker keeps the address for a
+// retry instead of releasing it.
+func (m *Manager) process(ctx context.Context, addr address) (retryAfter time.Duration) {
 	snap, err := m.fetch(ctx, m.client, addr.InstallationID, addr.Owner, addr.Repo, addr.Number)
 	if err != nil {
 		var rl *RateLimitError
 		if asRateLimit(err, &rl) {
 			m.extendRateLimit(addr.InstallationID, rl.RetryAfter)
 			slog.Warn("ghsnapshot: rate limited", "installation_id", addr.InstallationID, "owner", addr.Owner, "repo", addr.Repo, "number", addr.Number, "retry_after", rl.RetryAfter.String())
-			return true
+			return rl.RetryAfter
 		}
 		// Transient/GitHub failure: keep the last-known snapshot (the row is
 		// untouched, so the card shows stale data, never wrong data). No secret
 		// is ever logged. The next trigger or the TTL sweep retries.
 		slog.Warn("ghsnapshot: fetch failed", "owner", addr.Owner, "repo", addr.Repo, "number", addr.Number, "err", err.Error())
-		return false
+		return 0
 	}
 
 	rows, err := m.listGitHubPRRowsByAddress(ctx, db.ListGitHubPRRowsByAddressParams{
@@ -271,7 +280,7 @@ func (m *Manager) process(ctx context.Context, addr address) (rateLimited bool) 
 	})
 	if err != nil {
 		slog.Warn("ghsnapshot: list rows failed", "err", err.Error())
-		return false
+		return 0
 	}
 
 	anyApplied := false
@@ -308,7 +317,7 @@ func (m *Manager) process(ctx context.Context, addr address) (rateLimited bool) 
 		delete(m.attempts, addr)
 		m.mu.Unlock()
 	}
-	return false
+	return 0
 }
 
 // listGitHubPRRowsByAddress is eventual-consistency safe because the returned
@@ -370,17 +379,36 @@ func (m *Manager) deferActive(ctx context.Context, addr address, delay time.Dura
 	})
 }
 
-// retryAfterPause keeps a rate-limited address for the end of its
-// installation's pause. Dropping it would lose a refresh that no later event
-// asks for again, such as the one for a PR whose checks finished while GitHub
-// was limiting us. The retry costs one request per address per pause, and a
-// pending trailing refresh is folded into it.
-func (m *Manager) retryAfterPause(ctx context.Context, addr address) {
+// deferIfPaused hands addr to the pause timer while its installation is rate
+// limited, without sending a request.
+func (m *Manager) deferIfPaused(ctx context.Context, addr address) bool {
+	pause := m.rateLimitPause(addr.InstallationID)
+	if pause <= 0 {
+		return false
+	}
+	m.deferActive(ctx, addr, pause)
+	return true
+}
+
+// retryAfterPause keeps a rate-limited address for a retry. Dropping it would
+// lose a refresh that no later event asks for again, such as the one for a PR
+// whose checks finished while GitHub was limiting us. The retry waits at least
+// for the installation's pause and for GitHub's Retry-After, doubled for each
+// earlier consecutive 403; the address is released after maxRateLimitRetries
+// of them. A pending trailing refresh is folded into the retry.
+func (m *Manager) retryAfterPause(ctx context.Context, addr address, retryAfter time.Duration) {
 	m.mu.Lock()
 	delete(m.inFlight, addr)
 	delete(m.trailing, addr)
+	m.rateRetries[addr]++
+	retry := m.rateRetries[addr]
 	m.mu.Unlock()
-	m.deferActive(ctx, addr, m.rateLimitPause(addr.InstallationID))
+	if retry > maxRateLimitRetries {
+		slog.Warn("ghsnapshot: giving up rate-limited refresh", "installation_id", addr.InstallationID, "owner", addr.Owner, "repo", addr.Repo, "number", addr.Number)
+		m.release(addr)
+		return
+	}
+	m.deferActive(ctx, addr, max(m.rateLimitPause(addr.InstallationID), retryAfter<<(retry-1)))
 }
 
 func (m *Manager) release(addr address) {
@@ -388,6 +416,7 @@ func (m *Manager) release(addr address) {
 	delete(m.active, addr)
 	delete(m.inFlight, addr)
 	delete(m.trailing, addr)
+	delete(m.rateRetries, addr)
 	m.mu.Unlock()
 }
 
@@ -396,6 +425,7 @@ func (m *Manager) release(addr address) {
 // two workers to own the same address concurrently.
 func (m *Manager) finish(addr address) {
 	m.mu.Lock()
+	delete(m.rateRetries, addr)
 	if !m.trailing[addr] {
 		delete(m.active, addr)
 		delete(m.inFlight, addr)

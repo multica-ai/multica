@@ -276,6 +276,95 @@ func TestRateLimitedRefreshRetriesAfterPause(t *testing.T) {
 	}
 }
 
+// TestPersistentRateLimitBacksOffAndStops keeps GitHub answering 403: each
+// retry waits at least Retry-After, doubled per consecutive 403, and the
+// address is given up after maxRateLimitRetries retries.
+func TestPersistentRateLimitBacksOffAndStops(t *testing.T) {
+	m := NewManager(enabledClient(t), nil, nil, nil)
+	m.concurrency = 1
+	m.sweepInterval = time.Hour
+	m.jitter = func() time.Duration { return 0 }
+
+	const retryAfter = 40 * time.Millisecond
+	fetches := make(chan time.Time, 16)
+	m.fetch = func(context.Context, *Client, int64, string, string, int32) (*PRSnapshot, error) {
+		fetches <- time.Now()
+		return nil, &RateLimitError{RetryAfter: retryAfter}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	m.Start(ctx)
+	addr := address{InstallationID: 1, Owner: "o", Repo: "r", Number: 1}
+	m.Enqueue(addr.InstallationID, addr.Owner, addr.Repo, addr.Number)
+
+	last := <-fetches
+	for retry := 1; retry <= maxRateLimitRetries; retry++ {
+		want := retryAfter << (retry - 1)
+		select {
+		case at := <-fetches:
+			if gap := at.Sub(last); gap < want-10*time.Millisecond {
+				t.Fatalf("retry %d after %v, want at least %v", retry, gap, want)
+			}
+			last = at
+		case <-time.After(2 * time.Second):
+			t.Fatalf("retry %d never ran", retry)
+		}
+	}
+	select {
+	case <-fetches:
+		t.Fatalf("retried past %d consecutive 403s", maxRateLimitRetries)
+	case <-time.After(8 * retryAfter):
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.active[addr] || m.rateRetries[addr] != 0 {
+		t.Fatalf("given-up address still tracked: active=%v retries=%d", m.active[addr], m.rateRetries[addr])
+	}
+}
+
+// TestPauseDuringJitterDefersFetch: a worker that dequeued an address before
+// another worker's 403 must not send its request until the pause ends.
+func TestPauseDuringJitterDefersFetch(t *testing.T) {
+	m := NewManager(enabledClient(t), nil, nil, nil)
+	m.concurrency = 2
+	m.sweepInterval = time.Hour
+	var jitters atomic.Int32
+	m.jitter = func() time.Duration {
+		if jitters.Add(1) == 2 {
+			return 100 * time.Millisecond
+		}
+		return 0
+	}
+
+	const retryAfter = 400 * time.Millisecond
+	fetches := make(chan time.Time, 8)
+	var calls atomic.Int32
+	m.fetch = func(context.Context, *Client, int64, string, string, int32) (*PRSnapshot, error) {
+		fetches <- time.Now()
+		if calls.Add(1) == 1 {
+			return nil, &RateLimitError{RetryAfter: retryAfter}
+		}
+		return nil, errors.New("stop after fetch")
+	}
+
+	m.Enqueue(1, "o", "r", 1)
+	m.Enqueue(1, "o", "r", 2)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	m.Start(ctx)
+
+	limited := <-fetches
+	select {
+	case at := <-fetches:
+		if gap := at.Sub(limited); gap < retryAfter-20*time.Millisecond {
+			t.Fatalf("second worker fetched %v after the 403, inside the %v pause", gap, retryAfter)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no fetch after the pause")
+	}
+}
+
 // TestScheduleChaseBounded proves the chase window terminates (acceptance
 // criterion 7): after maxChaseAttempts the address stops being rescheduled.
 func TestScheduleChaseBounded(t *testing.T) {

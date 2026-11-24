@@ -283,7 +283,9 @@ func isRateLimited(resp *http.Response, body []byte) bool {
 
 // rateLimitFromResponse builds a RateLimitError from GitHub's throttling
 // headers. Retry-After (seconds) wins; then X-RateLimit-Reset (unix seconds);
-// otherwise a conservative 60s. The wait is clamped to [1s, 5m].
+// otherwise a conservative 60s. The wait is clamped to [1s, 1h]: GitHub's
+// primary limit resets within the hour, and retrying before the wait it asked
+// for only prolongs the limit.
 func rateLimitFromResponse(resp *http.Response, now time.Time) *RateLimitError {
 	wait := time.Minute
 	if v := resp.Header.Get("Retry-After"); v != "" {
@@ -300,8 +302,8 @@ func rateLimitFromResponse(resp *http.Response, now time.Time) *RateLimitError {
 	if wait < time.Second {
 		wait = time.Second
 	}
-	if wait > 5*time.Minute {
-		wait = 5 * time.Minute
+	if wait > time.Hour {
+		wait = time.Hour
 	}
 	return &RateLimitError{RetryAfter: wait}
 }
