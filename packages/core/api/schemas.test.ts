@@ -1590,6 +1590,24 @@ describe("SnoozedInboxListSchema", () => {
     );
     expect(parsed.map((item) => item.issue_identifier)).toEqual([undefined, null, "MUL-3"]);
   });
+
+  it("keeps a row whose issue title or status is missing or unusable", () => {
+    const parsed = parseWithFallback(
+      [
+        row(),
+        row({ issue_id: "issue-2", issue_title: 7, issue_status: "" }),
+        row({ issue_id: "issue-3", issue_title: "Fix login", issue_status: "in_review" }),
+      ],
+      SnoozedInboxListSchema,
+      EMPTY_SNOOZED_INBOX,
+      ENDPOINT,
+    );
+    expect(parsed.map((item) => [item.issue_title, item.issue_status])).toEqual([
+      [undefined, undefined],
+      [null, null],
+      ["Fix login", "in_review"],
+    ]);
+  });
 });
 
 describe("InboxItemListSchema", () => {
