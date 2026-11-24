@@ -446,9 +446,10 @@ func TestSquadInheritanceAndDaemonClaimSafety(t *testing.T) {
 		t.Fatalf("sub-issue task must have is_leader_task=false")
 	}
 
-	// Case D: A member directly @mentioning an agent outside the squad on the
-	// squad-created sub-issue is a standalone run; the same mention of a squad
-	// member stays the squad's (MUL-10072).
+	// Case D: On a squad-created sub-issue, a member directly @mentioning an
+	// agent outside the squad starts a standalone run, and so does that agent
+	// handing on to another outside agent; the same mention of a squad member
+	// stays the squad's (MUL-10072).
 	dbfx.Exec(t, `DELETE FROM agent_task_queue WHERE id = $1`, uuidToString(childTask.ID))
 	outsiderRuntimeID := createClaimReclaimRuntime(t, ctx, "inherit-outsider-rt")
 	outsiderID, _ := createClaimReclaimAgentAndIssue(t, ctx, outsiderRuntimeID, "inherit-outsider")
@@ -470,9 +471,32 @@ func TestSquadInheritanceAndDaemonClaimSafety(t *testing.T) {
 		t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, uuidToString(task.ID)) })
 		return task
 	}
-	if task := mentionByMember(outsiderID); task.UsageSquadID.Valid || task.SquadID.Valid {
+	outsiderTask := mentionByMember(outsiderID)
+	if outsiderTask.UsageSquadID.Valid || outsiderTask.SquadID.Valid {
 		t.Fatalf("member mention of an outside agent on a squad sub-issue must be standalone, got usage_squad=%q squad=%q",
-			uuidToString(task.UsageSquadID), uuidToString(task.SquadID))
+			uuidToString(outsiderTask.UsageSquadID), uuidToString(outsiderTask.SquadID))
+	}
+	// That outside agent handing on to another outside agent is not the
+	// squad's either, though the hop is a delegation.
+	secondRuntimeID := createClaimReclaimRuntime(t, ctx, "inherit-outsider2-rt")
+	secondOutsiderID, _ := createClaimReclaimAgentAndIssue(t, ctx, secondRuntimeID, "inherit-outsider2")
+	var handoffID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content, source_task_id)
+		VALUES ($1, $2, 'agent', $3, 'please review', $4)
+		RETURNING id
+	`, testWorkspaceID, childIssueID, outsiderID, uuidToString(outsiderTask.ID)).Scan(&handoffID); err != nil {
+		t.Fatalf("create outside agent handoff comment: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM comment WHERE id = $1`, handoffID) })
+	handoffTask, err := testHandler.TaskService.EnqueueTaskForMention(ctx, childIssue, parseUUID(secondOutsiderID), parseUUID(handoffID), service.OriginNamed)
+	if err != nil {
+		t.Fatalf("EnqueueTaskForMention(second outsider): %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, uuidToString(handoffTask.ID)) })
+	if handoffTask.UsageSquadID.Valid {
+		t.Fatalf("outside agent handing on to another outside agent usage_squad_id = %q, want NULL (source %q)",
+			uuidToString(handoffTask.UsageSquadID), handoffTask.OriginatorSource.String)
 	}
 	dbfx.Exec(t, `INSERT INTO squad_member (squad_id, member_type, member_id, role) VALUES ($1, 'agent', $2, '')`, squadID, memberID)
 	if task := mentionByMember(memberID); uuidToString(task.UsageSquadID) != squadID {
