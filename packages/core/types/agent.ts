@@ -1269,6 +1269,101 @@ export interface DashboardFailureByAgent {
   task_count: number;
 }
 
+// Contribution dashboard. Every count is of distinct issues within its
+// bucket. Status groups and event kinds stay open strings so an installed
+// client keeps rows a newer backend introduces; the UI shows the ones it knows.
+export interface ContributionKpis {
+  /** Stock: issues in scope that are neither done nor cancelled now. */
+  total: number;
+  /** Issues with activity in the window that it did not leave closed. */
+  active: number;
+  /** Every issue with activity in the window. */
+  touched: number;
+  created: number;
+  created_by_member: number;
+  created_by_agent: number;
+  completed: number;
+  open: number;
+  open_in_progress: number;
+  open_in_review: number;
+}
+
+export interface ContributionBucket {
+  date: string;
+  active: number;
+  collaborated: number;
+  delivered: number;
+}
+
+export interface ContributionActorStats {
+  actor_type: string;
+  actor_id: string;
+  created: number;
+  commented: number;
+  status_changed: number;
+  completed: number;
+  participated: number;
+}
+
+export interface ContributionActorBucket {
+  week: string;
+  actor_type: string;
+  actor_id: string;
+  participated: number;
+  collaborated: number;
+  delivered: number;
+}
+
+export interface ContributionSummary {
+  kpis: ContributionKpis;
+  daily: ContributionBucket[];
+  weekly: ContributionBucket[];
+  actors: ContributionActorStats[];
+  actor_weekly: ContributionActorBucket[];
+  system_completed: number;
+}
+
+export interface ContributionEvent {
+  at: string;
+  kind: string;
+  actor_type: string;
+  actor_id: string;
+  issue_id: string;
+  identifier: string;
+  title: string;
+  project_id: string;
+  status: string;
+  status_group: string;
+  to_status: string;
+}
+
+export interface ContributionEventsPage {
+  events: ContributionEvent[];
+  total: number;
+}
+
+export interface ContributionIssue {
+  issue_id: string;
+  identifier: string;
+  title: string;
+  status: string;
+  status_group: string;
+  project_id: string;
+  participants: number;
+  comments: number;
+  /** Comments plus status changes in the window. */
+  interactions: number;
+  /** Creation to latest completion in the window; null when not done in it. */
+  completion_seconds: number | null;
+}
+
+export interface ContributionIssuesPage {
+  issues: ContributionIssue[];
+  total: number;
+}
+
+export type ContributionIssueSort = "interactions" | "participants" | "completion" | "recent";
+
 export type RuntimeUpdateStatus =
   | "pending"
   // The daemon is busy and installs once its last agent task finishes.

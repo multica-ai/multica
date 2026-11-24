@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { normalizeIssueStatusCategory } from "../issues/config/status";
 import type {
+  ContributionSummary,
   BatchIssueOutcome,
   BatchIssueResult,
   BatchUpdateIssuesResponse,
@@ -2348,6 +2349,116 @@ const DashboardFailureBySquadSchema = DashboardFailureByAgentSchema.extend({
 export const DashboardFailureBySquadListSchema = z.array(
   DashboardFailureBySquadSchema,
 );
+
+// Contribution dashboard. Same leniency as the rollups above: numbers default
+// to 0, arrays to [], and status groups and event kinds stay open strings so a
+// value a newer backend adds never drops the row.
+const contributionNum = () => z.number().catch(0).default(0);
+const contributionStr = () => z.string().catch("").default("");
+const contributionList = <T extends z.ZodTypeAny>(item: T) => z.array(item).catch([]).default([]);
+
+const ContributionBucketSchema = z.object({
+  date: contributionStr(),
+  active: contributionNum(),
+  collaborated: contributionNum(),
+  delivered: contributionNum(),
+}).loose();
+
+const ContributionActorStatsSchema = z.object({
+  actor_type: contributionStr(),
+  actor_id: contributionStr(),
+  created: contributionNum(),
+  commented: contributionNum(),
+  status_changed: contributionNum(),
+  completed: contributionNum(),
+  participated: contributionNum(),
+}).loose();
+
+const ContributionActorBucketSchema = z.object({
+  week: contributionStr(),
+  actor_type: contributionStr(),
+  actor_id: contributionStr(),
+  participated: contributionNum(),
+  collaborated: contributionNum(),
+  delivered: contributionNum(),
+}).loose();
+
+export const ContributionSummarySchema = z.object({
+  kpis: z.object({
+    total: contributionNum(),
+    active: contributionNum(),
+    touched: contributionNum(),
+    created: contributionNum(),
+    created_by_member: contributionNum(),
+    created_by_agent: contributionNum(),
+    completed: contributionNum(),
+    open: contributionNum(),
+    open_in_progress: contributionNum(),
+    open_in_review: contributionNum(),
+  }).loose(),
+  daily: contributionList(ContributionBucketSchema),
+  weekly: contributionList(ContributionBucketSchema),
+  actors: contributionList(ContributionActorStatsSchema),
+  actor_weekly: contributionList(ContributionActorBucketSchema),
+  system_completed: contributionNum(),
+}).loose();
+
+const ContributionEventSchema = z.object({
+  at: contributionStr(),
+  kind: contributionStr(),
+  actor_type: contributionStr(),
+  actor_id: contributionStr(),
+  issue_id: contributionStr(),
+  identifier: contributionStr(),
+  title: contributionStr(),
+  project_id: contributionStr(),
+  status: contributionStr(),
+  status_group: contributionStr(),
+  to_status: contributionStr(),
+}).loose();
+
+export const ContributionEventsPageSchema = z.object({
+  events: contributionList(ContributionEventSchema),
+  total: contributionNum(),
+}).loose();
+
+const ContributionIssueSchema = z.object({
+  issue_id: contributionStr(),
+  identifier: contributionStr(),
+  title: contributionStr(),
+  status: contributionStr(),
+  status_group: contributionStr(),
+  project_id: contributionStr(),
+  participants: contributionNum(),
+  comments: contributionNum(),
+  interactions: contributionNum(),
+  completion_seconds: z.number().nullable().catch(null).default(null),
+}).loose();
+
+export const ContributionIssuesPageSchema = z.object({
+  issues: contributionList(ContributionIssueSchema),
+  total: contributionNum(),
+}).loose();
+
+export const EMPTY_CONTRIBUTION_SUMMARY: ContributionSummary = {
+  kpis: {
+    total: 0,
+    active: 0,
+    touched: 0,
+    created: 0,
+    created_by_member: 0,
+    created_by_agent: 0,
+    completed: 0,
+    open: 0,
+    open_in_progress: 0,
+    open_in_review: 0,
+  },
+  daily: [],
+  weekly: [],
+  actors: [],
+  actor_weekly: [],
+  system_completed: 0,
+};
 
 // Runtime usage schemas — the runtime-detail page's four usage endpoints
 // (`/api/runtimes/:id/usage*`). Same leniency rules as the dashboard
