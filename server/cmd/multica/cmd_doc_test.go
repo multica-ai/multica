@@ -61,6 +61,53 @@ func TestDocConflictErrorExplainsRecovery(t *testing.T) {
 	}
 }
 
+func TestDocMergeConflictErrorForbidsResendingTheBody(t *testing.T) {
+	err := docWriteError("update doc", 3, &cli.HTTPError{StatusCode: http.StatusConflict, Body: `{"code":"doc_merge_conflict"}`})
+	for _, want := range []string{"nothing was written", "redo your change", "Do not resend the same body"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("merge conflict error missing %q: %v", want, err)
+		}
+	}
+}
+
+// renderHelp renders cmd's --help the way the CLI prints it. Group commands
+// use subHelpTemplate, which prints only Short, so rules agents need must
+// live on the leaf commands the brief points at.
+func renderHelp(t *testing.T, cmd *cobra.Command) string {
+	t.Helper()
+	var out strings.Builder
+	cmd.SetOut(&out)
+	defer cmd.SetOut(nil)
+	if err := cmd.Help(); err != nil {
+		t.Fatalf("render %s help: %v", cmd.CommandPath(), err)
+	}
+	return out.String()
+}
+
+func TestDocHelpRendersWriteRules(t *testing.T) {
+	tests := []struct {
+		cmd  *cobra.Command
+		want []string
+	}{
+		{docUpdateCmd, []string{"--base-revision", "refused, with nothing written", "never resend the same body"}},
+		{docEditCmd, []string{"without --replace-all, appears more than once", "this or --old-file is required", "this or --new-file is required"}},
+		{docCommentListCmd, []string{"reserved for people"}},
+		{docMoveCmd, []string{`--folder string`, `or "root" for the top level`}},
+		{docFolderCreateCmd, []string{`--parent string`, `or "root" for the top level`}},
+		{docFolderMoveCmd, []string{`--parent string`, `or "root" for the top level`}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.cmd.CommandPath(), func(t *testing.T) {
+			help := renderHelp(t, tt.cmd)
+			for _, want := range tt.want {
+				if !strings.Contains(help, want) {
+					t.Fatalf("%s --help missing %q; rendered:\n%s", tt.cmd.CommandPath(), want, help)
+				}
+			}
+		})
+	}
+}
+
 func TestRunDocSearchQueriesServerSearch(t *testing.T) {
 	var gotPath string
 	var gotQuery url.Values
