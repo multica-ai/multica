@@ -39,12 +39,14 @@ const archiveAppRequestInbox = `-- name: ArchiveAppRequestInbox :many
 UPDATE inbox_item SET archived = true, snoozed_until = NULL, snoozed_at = NULL, returned_at = NULL
 WHERE workspace_id = $1 AND type = 'app_connect_requested' AND archived = false
   AND details->>'request_id' = $2::text
+  AND recipient_id IS DISTINCT FROM $3::uuid
 RETURNING recipient_type, recipient_id
 `
 
 type ArchiveAppRequestInboxParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	RequestID   string      `json:"request_id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	RequestID       string      `json:"request_id"`
+	KeepRecipientID pgtype.UUID `json:"keep_recipient_id"`
 }
 
 type ArchiveAppRequestInboxRow struct {
@@ -52,9 +54,11 @@ type ArchiveAppRequestInboxRow struct {
 	RecipientID   pgtype.UUID `json:"recipient_id"`
 }
 
-// A withdrawn ask leaves the admins nothing to answer.
+// A withdrawn or decided team account request leaves the admins nothing to
+// answer. keep_recipient_id, when set, is the admin who decided it: their
+// item stays where they acted on it.
 func (q *Queries) ArchiveAppRequestInbox(ctx context.Context, arg ArchiveAppRequestInboxParams) ([]ArchiveAppRequestInboxRow, error) {
-	rows, err := q.db.Query(ctx, archiveAppRequestInbox, arg.WorkspaceID, arg.RequestID)
+	rows, err := q.db.Query(ctx, archiveAppRequestInbox, arg.WorkspaceID, arg.RequestID, arg.KeepRecipientID)
 	if err != nil {
 		return nil, err
 	}
@@ -1825,6 +1829,44 @@ func (q *Queries) ListTeamAppToolCalls(ctx context.Context, arg ListTeamAppToolC
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTeamConnectNotifiedRecipients = `-- name: ListTeamConnectNotifiedRecipients :many
+SELECT DISTINCT i.recipient_id FROM inbox_item i
+JOIN app_action_request r ON r.id = (i.details->>'request_id')::uuid
+WHERE i.workspace_id = $1 AND i.recipient_type = 'member'
+  AND i.recipient_id = ANY($3::uuid[])
+  AND i.type = 'app_connect_requested' AND NOT i.archived
+  AND r.workspace_id = $1 AND r.toolkit_slug = $2 AND r.kind = 'connect'
+  AND r.account_scope = 'team' AND r.status = 'pending'
+`
+
+type ListTeamConnectNotifiedRecipientsParams struct {
+	WorkspaceID  pgtype.UUID   `json:"workspace_id"`
+	ToolkitSlug  string        `json:"toolkit_slug"`
+	RecipientIds []pgtype.UUID `json:"recipient_ids"`
+}
+
+// Of recipient_ids, the members who already hold an open notification for a
+// pending request for this app's team account, so are not told again.
+func (q *Queries) ListTeamConnectNotifiedRecipients(ctx context.Context, arg ListTeamConnectNotifiedRecipientsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listTeamConnectNotifiedRecipients, arg.WorkspaceID, arg.ToolkitSlug, arg.RecipientIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var recipient_id pgtype.UUID
+		if err := rows.Scan(&recipient_id); err != nil {
+			return nil, err
+		}
+		items = append(items, recipient_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

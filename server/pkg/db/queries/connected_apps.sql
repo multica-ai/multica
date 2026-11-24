@@ -368,11 +368,25 @@ WHERE workspace_id = $1 AND toolkit_slug = $2 AND approver_user_id = $3
 LIMIT 1;
 
 -- name: ArchiveAppRequestInbox :many
--- A withdrawn ask leaves the admins nothing to answer.
+-- A withdrawn or decided team account request leaves the admins nothing to
+-- answer. keep_recipient_id, when set, is the admin who decided it: their
+-- item stays where they acted on it.
 UPDATE inbox_item SET archived = true, snoozed_until = NULL, snoozed_at = NULL, returned_at = NULL
 WHERE workspace_id = $1 AND type = 'app_connect_requested' AND archived = false
   AND details->>'request_id' = sqlc.arg('request_id')::text
+  AND recipient_id IS DISTINCT FROM sqlc.narg('keep_recipient_id')::uuid
 RETURNING recipient_type, recipient_id;
+
+-- name: ListTeamConnectNotifiedRecipients :many
+-- Of recipient_ids, the members who already hold an open notification for a
+-- pending request for this app's team account, so are not told again.
+SELECT DISTINCT i.recipient_id FROM inbox_item i
+JOIN app_action_request r ON r.id = (i.details->>'request_id')::uuid
+WHERE i.workspace_id = $1 AND i.recipient_type = 'member'
+  AND i.recipient_id = ANY(sqlc.arg('recipient_ids')::uuid[])
+  AND i.type = 'app_connect_requested' AND NOT i.archived
+  AND r.workspace_id = $1 AND r.toolkit_slug = $2 AND r.kind = 'connect'
+  AND r.account_scope = 'team' AND r.status = 'pending';
 
 -- name: ListTeamAccountRequestSummaries :many
 -- One row per app with open requests for a team account: who is waiting and
