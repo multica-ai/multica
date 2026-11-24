@@ -62,8 +62,10 @@ jobs:
     container:
       image: ${{ needs.playwright-image.outputs.image }}
       # The runner's user, who owns the checkout: as root, git refuses it as
-      # dubious ownership. Host IPC gives Chromium the runner's shared memory.
-      options: --user 1001 --ipc=host
+      # dubious ownership. An init reaps the stopped web servers' processes,
+      # which perf-compare waits on before measuring the other side. Host IPC
+      # gives Chromium the runner's shared memory.
+      options: --user 1001 --init --ipc=host
     # Measured on CI: ~340s for the comparison itself, of which ~292s is the
     # two builds and ~26s the two measurements, plus setup. Fifteen minutes
     # leaves room for build variance and still stops a run that has hung.
