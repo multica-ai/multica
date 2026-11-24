@@ -127,13 +127,13 @@ export const homeCopy = {
   },
 } as const satisfies Record<Lang, unknown>;
 
-// Chrome around the interactive demos embedded in docs pages. Each demo keeps
+// Chrome around the editorial demos embedded in docs pages. Each demo keeps
 // its own scenario copy next to its component.
 export const demoChromeCopy = {
-  en: { label: "Try it", replay: "Replay", click: "Click" },
-  zh: { label: "动手试试", replay: "重新演示", click: "点击" },
-  "zh-Hant": { label: "動手試試", replay: "重新播放", click: "點擊" },
-  ko: { label: "직접 해보기", replay: "다시 보기", click: "클릭" },
-  ja: { label: "試してみる", replay: "もう一度", click: "クリック" },
-  fr: { label: "Essayez", replay: "Rejouer", click: "Cliquez" },
+  en: { play: "Play", pause: "Pause", replay: "Replay", reset: "Reset" },
+  zh: { play: "播放", pause: "暂停", replay: "重播", reset: "重置" },
+  "zh-Hant": { play: "播放", pause: "暫停", replay: "重播", reset: "重設" },
+  ko: { play: "재생", pause: "일시정지", replay: "다시 보기", reset: "초기화" },
+  ja: { play: "再生", pause: "一時停止", replay: "もう一度", reset: "リセット" },
+  fr: { play: "Lire", pause: "Pause", replay: "Rejouer", reset: "Réinitialiser" },
 } as const satisfies Record<Lang, unknown>;
