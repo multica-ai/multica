@@ -748,7 +748,7 @@ func writeWorkflowIssue(b *strings.Builder, ctx TaskContextForEnv) {
 // writeIssueStatusCommand (MUL-7379); the duplicate mark's full command is
 // duplicateOfCommandLine in the command list.
 const (
-	issueStatusClosedRule  = "- The work won't be done — out of scope, not reproducible, a duplicate → a status in the closed category that fits; comment why first, and mark a duplicate with `--duplicate-of` (see the command list).\n"
+	issueStatusClosedRule  = "- The work won't be done — out of scope, not reproducible, a duplicate → a status in the closed category that fits (`cancelled` when there are no custom statuses); comment why first, and mark a duplicate with `--duplicate-of` (see `## Available Commands`).\n"
 	issueStatusNoWriteRule = "- Your turn produced none of the issue's own deliverable — you answered a question or consulted on work owned elsewhere → write nothing, at any point; questions, discussion, and acknowledgements never touch status. This no-write default is what keeps concurrent runs from flapping the board.\n\n"
 )
 
