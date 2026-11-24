@@ -24,7 +24,6 @@ import {
   OFFENDER_METRIC,
   sortAgentFailures,
   sortSquadFailures,
-  STANDALONE_SQUAD_ROW_ID,
   type AgentFailureRow,
   type FailureClassRow,
   type FailureReasonRow,
@@ -429,14 +428,11 @@ function OffendersCard({
         >
           {effectiveGroupBy === "squad"
             ? visibleSquads.map((row) => {
-                const isStandalone = row.squadId === STANDALONE_SQUAD_ROW_ID;
                 const isDeleted = row.squadId === DELETED_SQUADS_ROW_ID;
                 const squad = squads.find((s) => s.id === row.squadId);
-                const labelText = isStandalone
-                  ? t(($) => $.leaderboard.standalone_agents)
-                  : isDeleted
-                    ? t(($) => $.leaderboard.deleted_squads)
-                    : squad?.name ?? null;
+                const labelText = isDeleted
+                  ? t(($) => $.leaderboard.deleted_squads)
+                  : squad?.name ?? null;
                 return (
                   <AgentFailureItem
                     key={row.squadId}
@@ -449,7 +445,7 @@ function OffendersCard({
                     }}
                     name={labelText}
                     href={squad ? wsPaths.squadDetail(squad.id) : null}
-                    italic={isStandalone || isDeleted || !labelText}
+                    italic={isDeleted || !labelText}
                     maxValue={maxValue}
                     sortBy={sortBy}
                     classLabel={classLabel}
