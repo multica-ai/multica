@@ -196,7 +196,7 @@ func TestNativeChatForkTerminalReportsSettleReservation(t *testing.T) {
 					t.Fatalf("fork added an assistant outcome: %v", err)
 				}
 			case "failed":
-				_, transitioned, err := testHandler.TaskService.FailTaskWithTransition(ctx, task.ID, "fork failed", "", "", "", "", false, "", "")
+				_, transitioned, err := testHandler.TaskService.FailTaskWithTransition(ctx, task.ID, protocol.TaskFailRequest{Error: "fork failed"})
 				if err != nil || !transitioned {
 					t.Fatalf("fail transitioned=%v error=%v", transitioned, err)
 				}
