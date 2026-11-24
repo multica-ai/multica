@@ -43,11 +43,15 @@ export function useDocCommentHighlights(
       if (!root) return;
       const ranges = new Map<string, Range>();
       const gone = new Set<string>();
-      const index = indexCommentText(root, true);
-      for (const thread of threadsRef.current) {
-        const range = docAnchorRange(root, thread, index);
-        if (range) ranges.set(thread.id, range);
-        else gone.add(thread.id);
+      // A doc without discussions has nothing to find: skip the walk over its
+      // text, which otherwise runs on every batch of edits.
+      if (threadsRef.current.length > 0) {
+        const index = indexCommentText(root, true);
+        for (const thread of threadsRef.current) {
+          const range = docAnchorRange(root, thread, index);
+          if (range) ranges.set(thread.id, range);
+          else gone.add(thread.id);
+        }
       }
       rangesRef.current = ranges;
       setMissing((prev) =>

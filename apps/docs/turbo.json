@@ -7,9 +7,19 @@
         "$TURBO_ROOT$/server/internal/daemon/agents_probe.go",
         "$TURBO_ROOT$/server/internal/daemon/config.go",
         "$TURBO_ROOT$/server/pkg/agent/builtin_runtimes.go",
+        "$TURBO_ROOT$/server/pkg/agent/agent.go",
+        "$TURBO_ROOT$/server/pkg/agent/version.go",
         "$TURBO_ROOT$/server/internal/featureflags/keys.go",
         "$TURBO_ROOT$/packages/core/ai-traffic/**",
-        "$TURBO_ROOT$/SELF_HOSTING_AI.md"
+        "$TURBO_ROOT$/SELF_HOSTING_AI.md",
+        "$TURBO_ROOT$/README.md",
+        "$TURBO_ROOT$/README.zh.md",
+        "$TURBO_ROOT$/README.ja.md",
+        "$TURBO_ROOT$/apps/web/features/landing/i18n/{en,zh,ja,ko}.ts",
+        "$TURBO_ROOT$/apps/web/features/landing/i18n/site-*.ts",
+        "$TURBO_ROOT$/apps/web/features/landing/site/cloud-page.tsx",
+        // lib/vercel-upload-coverage.test.ts hands it to `git ls-files`.
+        "$TURBO_ROOT$/.vercelignore"
       ]
     }
   }

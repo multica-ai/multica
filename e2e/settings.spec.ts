@@ -55,6 +55,47 @@ test.describe("Settings", () => {
   // Connected accounts, report the result once and refresh the list.
   async function mockConnectedApps(page: Page) {
     let connected = false;
+    // The Apps page only counts agents the viewer may run, so the mocked
+    // agent_apps entry needs a live agent behind it in the agent list.
+    await page.route(
+      (url) => url.pathname === "/api/agents",
+      async (route) => {
+        if (route.request().method() !== "GET") return route.fallback();
+        const response = await route.fetch();
+        const agents = await response.json();
+        await route.fulfill({
+          response,
+          json: [
+            ...agents,
+            {
+              id: "agent-1",
+              workspace_id: new URL(route.request().url()).searchParams.get("workspace_id") ?? "",
+              runtime_id: "runtime-1",
+              name: "Notion Agent",
+              description: "",
+              instructions: "",
+              avatar_url: null,
+              runtime_mode: "local",
+              runtime_config: {},
+              custom_args: [],
+              visibility: "workspace",
+              permission_mode: "public_to",
+              invocation_targets: [{ target_type: "workspace", target_id: null }],
+              status: "idle",
+              max_concurrent_tasks: 1,
+              model: "",
+              owner_id: null,
+              skills: [],
+              created_at: "2026-06-30T00:00:00Z",
+              updated_at: "2026-06-30T00:00:00Z",
+              archived_at: null,
+              archived_by: null,
+              composio_toolkit_allowlist: [],
+            },
+          ],
+        });
+      },
+    );
     await page.route(
       (url) => url.pathname === "/api/config",
       async (route) => {

@@ -49,6 +49,11 @@ export function getInboxNoticeBody(item: InboxItem): string | null {
       name: item.details.joined_by,
     });
   }
+  if (item.type === "app_tool_calls_quota_exceeded") {
+    const resetAt = formatResetAt(item.details?.reset_at);
+    if (!item.details?.limit || !resetAt) return item.body;
+    return i18n.t("inbox:body.app_tool_calls_limit", { limit: item.details.limit, resetAt });
+  }
   return getAutopilotQuotaBody(item);
 }
 
@@ -84,6 +89,8 @@ export function getInboxDisplayTitle(item: InboxItem): string {
   switch (item.type) {
     case "autopilot_quota_exceeded":
       return i18n.t("inbox:type.autopilot_quota_exceeded");
+    case "app_tool_calls_quota_exceeded":
+      return i18n.t("inbox:type.app_tool_calls_quota_exceeded");
   }
   if (item.type === "quick_create_done") {
     const cleanedTitle = stripQuickCreatePrefix(item.title, details.identifier);
@@ -105,6 +112,7 @@ export function getInboxDisplayTitle(item: InboxItem): string {
 export function isInboxNotice(type: InboxItem["type"]): boolean {
   return (
     type === "autopilot_quota_exceeded" ||
+    type === "app_tool_calls_quota_exceeded" ||
     type === "autopilot_paused" ||
     type === "project_owner_joined"
   );

@@ -81,7 +81,8 @@ import {
   runOrdinals,
 } from "./environment-model";
 import { EnvironmentStartMenu, type DeclaredState } from "./environment-start-menu";
-import { IssueSidebarSectionHeader } from "./issue-sidebar-section";
+import { IssueSidebarCollapsible, IssueSidebarSectionHeader } from "./issue-sidebar-section";
+import { useSidebarRevealMotion } from "./use-sidebar-reveal-motion";
 
 type IssuesT = ReturnType<typeof useT<"issues">>["t"];
 
@@ -110,6 +111,8 @@ interface RowAccess {
   /** Why this machine cannot switch to an app's window; null when it can. */
   appHint: string | null;
   originLabel: string | null;
+  /** Names the machine on the row when no machine heading above does. */
+  machineInline: string | null;
 }
 
 /**
@@ -126,10 +129,15 @@ export function IssueEnvironmentsSection({
   issueId,
   assigneeType = null,
   assigneeId = null,
+  reveal = false,
+  onRevealEnd,
 }: {
   issueId: string;
   assigneeType?: IssueAssigneeType | null;
   assigneeId?: string | null;
+  /** Shows the section while empty with the start menu open, until it closes. */
+  reveal?: boolean;
+  onRevealEnd?: () => void;
 }) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
@@ -282,6 +290,19 @@ export function IssueEnvironmentsSection({
       Number(b.machine?.isCurrent ?? false) - Number(a.machine?.isCurrent ?? false));
   };
 
+  type MainItem = { kind: "env"; env: IssueEnvironment } | { kind: "start" | "failed"; start: IssueEnvironmentActionRecord };
+  const mainItems: MainItem[] = [
+    ...[...live, ...pinned].map((env) => ({ kind: "env" as const, env })),
+    ...shownStarts.map((start) => ({ kind: "start" as const, start })),
+    ...shownFailures.map((start) => ({ kind: "failed" as const, start })),
+  ];
+  const mainGroups = groupBy(mainItems, (item) => (item.kind === "env" ? item.env.runtime_id : item.start.runtime_id));
+  const endedGroups = groupBy(ended, (env) => env.runtime_id);
+  // One reachable machine needs no heading; its name moves onto the rows.
+  const machineKeys = new Set([...mainGroups, ...endedGroups].map((group) => group.key));
+  const onlyGroup = mainGroups[0] ?? endedGroups[0];
+  const singleMachine = machineKeys.size === 1 && !!onlyGroup && !onlyGroup.offline;
+
   const access = (env: IssueEnvironment, group: MachineGroup<unknown>): RowAccess => {
     const hint = knowsLocal && group.machine?.isCurrent
       ? null
@@ -302,17 +323,11 @@ export function IssueEnvironmentsSection({
       localhostHint: hint,
       appHint,
       originLabel: originLabel(env),
+      machineInline: singleMachine ? (group.machine?.title ?? t(($) => $.environments.unknown_machine)) : null,
     };
   };
 
-  type MainItem = { kind: "env"; env: IssueEnvironment } | { kind: "start" | "failed"; start: IssueEnvironmentActionRecord };
-  const mainItems: MainItem[] = [
-    ...[...live, ...pinned].map((env) => ({ kind: "env" as const, env })),
-    ...shownStarts.map((start) => ({ kind: "start" as const, start })),
-    ...shownFailures.map((start) => ({ kind: "failed" as const, start })),
-  ];
-
-  const renderGroupHeader = (group: MachineGroup<unknown>) => (
+  const renderGroupHeader = (group: MachineGroup<unknown>) => singleMachine ? null : (
     <div className="flex min-h-7 items-center gap-1.5 px-2 text-micro text-muted-foreground">
       <Laptop className="size-3 shrink-0" />
       <span className="min-w-0 truncate">{group.machine?.title ?? t(($) => $.environments.unknown_machine)}</span>
@@ -385,14 +400,21 @@ export function IssueEnvironmentsSection({
     );
   };
 
+  // A start in flight counts: it settles only once the refetched list carries it.
+  const starting = control.isPending && control.variables?.action === "start";
+  const hasContent = envs.length > 0 || shownStarts.length > 0 || shownFailures.length > 0 || !!preparingShown || justRequested !== null || starting;
+  const motion = useSidebarRevealMotion<HTMLDivElement>(reveal, hasContent, onRevealEnd);
+  // An empty section is offered by the sidebar's add row instead.
+  if (!motion.shown) return null;
+
   return (
-    <div>
+    <div ref={motion.ref}>
       <IssueSidebarSectionHeader
         title={t(($) => $.environments.section_title)}
         open={open}
         onOpenChange={setOpen}
         count={live.length + pinned.length}
-        status={running > 0 ? (
+        status={!open && running > 0 ? (
           <span className="inline-flex shrink-0 items-center gap-1 text-caption text-success tabular-nums">
             <span aria-hidden="true" className="size-1.5 rounded-full bg-success" />
             {t(($) => $.environments.running_count, { count: running })}
@@ -411,10 +433,12 @@ export function IssueEnvironmentsSection({
             agentChoices={activeAgents}
             preparing={!!preparing || justRequested !== null}
             onAskAgent={askAgent}
+            defaultOpen={reveal}
+            onOpenChange={(next) => !next && reveal && motion.end()}
           />
         }
       />
-      {open && (
+      <IssueSidebarCollapsible open={open}>
         <div className="px-2">
           {(preparingShown || justRequested) && preparingAgentName && (
             <StatusRow
@@ -424,7 +448,7 @@ export function IssueEnvironmentsSection({
               meta={t(($) => $.environments.preparing_hint)}
             />
           )}
-          {groupBy(mainItems, (item) => (item.kind === "env" ? item.env.runtime_id : item.start.runtime_id)).map((group) => (
+          {mainGroups.map((group) => (
             <div key={group.key}>
               {renderGroupHeader(group)}
               {group.items.map((item) =>
@@ -441,18 +465,20 @@ export function IssueEnvironmentsSection({
                 className="flex w-full items-center gap-1 rounded-md px-2 py-1 text-left text-micro text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
               >
                 {t(($) => $.environments.ended_count, { count: ended.length })}
-                <ChevronRight aria-hidden="true" className={cn("size-3 text-faint-foreground transition-transform motion-reduce:transition-none", showEnded && "rotate-90")} />
+                <ChevronRight aria-hidden="true" className={cn("size-3 text-faint-foreground transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none", showEnded && "rotate-90")} />
               </button>
-              {showEnded && groupBy(ended, (env) => env.runtime_id).map((group) => (
-                <div key={group.key}>
-                  {renderGroupHeader(group)}
-                  {group.items.map((env) => renderEnv(env, group))}
-                </div>
-              ))}
+              <IssueSidebarCollapsible open={showEnded}>
+                {endedGroups.map((group) => (
+                  <div key={group.key}>
+                    {renderGroupHeader(group)}
+                    {group.items.map((env) => renderEnv(env, group))}
+                  </div>
+                ))}
+              </IssueSidebarCollapsible>
             </>
           )}
         </div>
-      )}
+      </IssueSidebarCollapsible>
     </div>
   );
 }
@@ -468,7 +494,7 @@ function PendingState({ label }: { label: string }) {
 
 function StatusRow({ icon, title, state, meta }: { icon: ReactNode; title: string; state: ReactNode; meta: string }) {
   return (
-    <div data-testid="environment-pending-row" className="flex items-start gap-2 rounded-md px-2 py-2">
+    <div data-testid="environment-pending-row" className="flex items-start gap-2.5 rounded-md px-2 py-2">
       {icon}
       <div className="min-w-0 flex-1">
         <p className="flex min-w-0 items-center gap-2">
@@ -501,7 +527,7 @@ function FailedStartRow({
   const { t } = useT("issues");
   return (
     <div data-testid="environment-failed-start" className="group/env relative rounded-md px-2 py-2" title={error || undefined}>
-      <div className="flex items-start gap-2">
+      <div className="flex items-start gap-2.5">
         <Server className="mt-px size-3.5 shrink-0 text-destructive" />
         <div className="min-w-0 flex-1">
           <p className="flex min-w-0 items-center gap-2">
@@ -563,7 +589,9 @@ function EnvironmentRow({
   const title = environmentTitle(env);
   const primary = declared ? host : app ? null : env.name;
   const meta = environmentMeta(env, pending, t, timeAgo, actorName);
+  const expiry = live && !pending ? environmentExpiry(env, t) : null;
   const tooltip = [
+    expiry && !expiry.soon ? expiry.label : null,
     env.source === "detected" ? t(($) => $.environments.detected_hint) : null,
     failure?.error || null,
     env.detail || null,
@@ -607,9 +635,14 @@ function EnvironmentRow({
           </span>
         </p>
         <p className="mt-1 flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap text-caption text-muted-foreground tabular-nums">
-          {primary && <span className="max-w-[60%] shrink-0 truncate">{primary}</span>}
-          {primary && meta && <span aria-hidden="true" className="text-faint-foreground">·</span>}
-          {meta && <span className="min-w-0 truncate">{meta}</span>}
+          {[
+            primary && <span key="primary" className="max-w-[60%] shrink-0 truncate">{primary}</span>,
+            meta && <span key="meta" className="min-w-0 truncate">{meta}</span>,
+            expiry?.soon && <span key="expiry" className="shrink-0 text-warning">{expiry.label}</span>,
+            access.machineInline && <span key="machine" className="min-w-0 truncate">{access.machineInline}</span>,
+          ]
+            .filter(Boolean)
+            .flatMap((part, index) => (index === 0 ? [part] : [<span key={`dot-${index}`} aria-hidden="true" className="text-faint-foreground">·</span>, part]))}
           {failure && (
             <>
               <span aria-hidden="true" className="text-faint-foreground">·</span>
@@ -629,18 +662,18 @@ function EnvironmentRow({
   return (
     <div data-testid="environment-row" className="group/env relative rounded-md transition-colors hover:bg-accent/50" title={tooltip || undefined}>
       {openable ? (
-        <a href={env.url} target="_blank" rel="noreferrer noopener" className="flex items-start gap-2 rounded-md px-2 py-2">
+        <a href={env.url} target="_blank" rel="noreferrer noopener" className="flex items-start gap-2.5 rounded-md px-2 py-2">
           {body}
         </a>
       ) : focusable ? (
-        <button type="button" onClick={focus} className="flex w-full items-start gap-2 rounded-md px-2 py-2 text-left">
+        <button type="button" onClick={focus} className="flex w-full items-start gap-2.5 rounded-md px-2 py-2 text-left">
           {body}
         </button>
       ) : (
-        <div className="flex items-start gap-2 px-2 py-2">{body}</div>
+        <div className="flex items-start gap-2.5 px-2 py-2">{body}</div>
       )}
       {pinned && (
-        <div className="px-2 pb-2 pl-7.5">
+        <div className="px-2 pb-2 pl-8">
           {env.excerpt && (
             <pre className="mb-2 overflow-hidden rounded-sm bg-destructive/10 px-2 py-1 font-mono text-micro leading-4 text-destructive">
               {env.excerpt.split("\n").slice(-2).map((line, index) => (
@@ -827,12 +860,17 @@ function environmentMeta(
       : t(($) => $.environments.started_by, { name: actorName(env.origin) });
     return `${by} · ${t(($) => $.environments.waiting_ready)}`;
   }
-  if (env.expires_at) {
-    const minutes = Math.max(1, Math.round((new Date(env.expires_at).getTime() - Date.now()) / 60_000));
-    if (minutes < 60) return t(($) => $.environments.expires_in_minutes, { count: minutes });
-    const hours = Math.round(minutes / 60);
-    if (hours < 48) return t(($) => $.environments.expires_in_hours, { count: hours });
-    return t(($) => $.environments.expires_in_days, { count: Math.round(hours / 24) });
-  }
+  // Expiry speaks for a live environment that has one; see environmentExpiry.
+  if (env.expires_at) return null;
   return t(($) => $.environments.started_ago, { time: timeAgo(env.started_at) });
+}
+
+/** When a live environment stops on its own; `soon` within the hour, when the row says it. */
+function environmentExpiry(env: IssueEnvironment, t: IssuesT): { label: string; soon: boolean } | null {
+  if (!env.expires_at) return null;
+  const minutes = Math.max(1, Math.round((new Date(env.expires_at).getTime() - Date.now()) / 60_000));
+  if (minutes < 60) return { label: t(($) => $.environments.expires_in_minutes, { count: minutes }), soon: true };
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return { label: t(($) => $.environments.expires_in_hours, { count: hours }), soon: false };
+  return { label: t(($) => $.environments.expires_in_days, { count: Math.round(hours / 24) }), soon: false };
 }

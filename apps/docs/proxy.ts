@@ -98,7 +98,7 @@ export const config = {
   // such as `icon.svg` are not under `[lang]/` and must bypass locale routing
   // so browsers and crawlers can fetch the original resources.
   matcher: [
-    "/((?!api|_next/static|_next/image|images|favicon.ico|icon\\.svg$|sitemap.xml|robots.txt).*)",
+    "/((?!api|_next/static|_next/image|images|videos|favicon.ico|icon\\.svg$|sitemap.xml|robots.txt).*)",
     "/",
   ],
 };

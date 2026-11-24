@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -96,6 +97,52 @@ func TestIssueWakeupTimeoutWakesOnceAndEnds(t *testing.T) {
 	}
 	if !again.Enabled || again.TimedOutAt.Valid || !again.ExpiresAt.Time.After(time.Now().Add(59*time.Minute)) {
 		t.Fatalf("rearm kept the old deadline: %+v", again)
+	}
+}
+
+func TestIssueWakeupSelfCommentLeavesOnceRuleWaitingForTimeout(t *testing.T) {
+	f, s, issue, agent := wakeFixture(t)
+	ctx := context.Background()
+	w := wakeCreate(t, f, s, issue, WakeupInput{
+		AgentID: agent, Kind: "event", Mode: "once", EventTypes: []string{"comment.created"},
+		Instruction: "follow up", ExpiresInSeconds: 3600, OnTimeout: "wake",
+	})
+	f.Comment(t, util.UUIDToString(issue), "still waiting", testutil.Cols{"author_type": "agent", "author_id": agent})
+
+	drainTick(t, s, w.WorkspaceID)
+	got, err := f.q.GetIssueWakeup(ctx, db.GetIssueWakeupParams{ID: w.ID, WorkspaceID: w.WorkspaceID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Enabled || got.FireCount != 0 || got.LastTaskID.Valid || !got.ExpiresAt.Time.Equal(w.ExpiresAt.Time) {
+		t.Errorf("self-comment changed the wait: enabled=%t fires=%d last_task=%v expires_at=%v", got.Enabled, got.FireCount, got.LastTaskID, got.ExpiresAt)
+	}
+	if n := wakeRuns(t, f, w.ID); n != 0 {
+		t.Fatalf("self-comment queued %d runs, want 0", n)
+	}
+	if n := f.Count(t, "SELECT count(*) FROM activity_log WHERE issue_id=$1 AND action='wakeup_triggered' AND details->>'outcome'='acknowledged'", issue); n != 1 {
+		t.Fatalf("self-comment acknowledgements = %d, want 1", n)
+	}
+
+	f.Exec(t, "UPDATE issue_wakeup SET expires_at=now()-interval '1 second' WHERE id=$1", w.ID)
+	drainTick(t, s, w.WorkspaceID)
+	drainTick(t, s, w.WorkspaceID)
+	if n := wakeRuns(t, f, w.ID); n != 1 {
+		t.Fatalf("timeout queued %d runs, want 1", n)
+	}
+	got, err = f.q.GetIssueWakeup(ctx, db.GetIssueWakeupParams{ID: w.ID, WorkspaceID: w.WorkspaceID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Enabled || !got.TimedOutAt.Valid || got.FireCount != 1 {
+		t.Fatalf("rule did not end after its timeout run: enabled=%t timed_out_at=%v fires=%d", got.Enabled, got.TimedOutAt, got.FireCount)
+	}
+	task, err := f.q.GetAgentTask(ctx, got.LastTaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(task.HandoffNote.String, "wakeup.timeout") {
+		t.Fatalf("timeout fact missing from the prompt: %s", task.HandoffNote.String)
 	}
 }
 

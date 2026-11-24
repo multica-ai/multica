@@ -64,6 +64,9 @@ func (h *Handler) CreateAgentBuilderSession(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
+	if !h.requireChatOwnerAccess(w, r, userID, workspaceID) {
+		return
+	}
 
 	var req CreateAgentBuilderSessionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -208,6 +211,9 @@ func (h *Handler) ListAgentBuilderSessions(w http.ResponseWriter, r *http.Reques
 	workspaceID := h.resolveWorkspaceID(r)
 	userID, ok := requireUserID(w, r)
 	if !ok {
+		return
+	}
+	if !h.requireChatOwnerAccess(w, r, userID, workspaceID) {
 		return
 	}
 	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")

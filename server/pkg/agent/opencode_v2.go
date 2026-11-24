@@ -56,17 +56,16 @@ const opencodeInterruptTimeout = 5 * time.Second
 // trade-off the reasoning check already makes, and strictly better than
 // regressing working 1.x profiles on a guess.
 func opencodeUsesV2Contract(cfg Config) bool {
-	if !cfg.BuiltinRuntime {
-		return false
-	}
-	// parseSemver scans for a semver token anywhere in the string, which is what
-	// this needs: 2.x reports `opencode v2.0.10` where 1.x reports a bare
-	// `1.18.31`, and extractVersionLine keeps whichever whole line it matched.
-	version, err := parseSemver(strings.TrimSpace(cfg.CLIVersion))
-	if err != nil {
-		return false
-	}
-	return version.Major >= 2
+	return cfg.BuiltinRuntime && OpenCodeVersionIsV2OrLater(cfg.CLIVersion)
+}
+
+// OpenCodeVersionIsV2OrLater reports whether the detected OpenCode CLI
+// version is 2.x or later. An unrecognized version returns false.
+func OpenCodeVersionIsV2OrLater(cliVersion string) bool {
+	// OpenCode 2.x reports "opencode v2.0.10" while 1.x reports a bare
+	// "1.18.31". parseSemver accepts both forms.
+	version, err := parseSemver(cliVersion)
+	return err == nil && version.Major >= 2
 }
 
 // opencodeModelArg folds a thinking level into the model string for the 2.x

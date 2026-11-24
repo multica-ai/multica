@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, User } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import { NumberFlow } from "@multica/ui/components/ui/number-flow";
 import { Tabs, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { cn } from "@multica/ui/lib/utils";
 import type {
@@ -119,7 +120,7 @@ function ProgressSummary({ progress }: { progress: ProjectProgress }) {
   return (
     <div className="space-y-2">
       <div className="flex items-baseline gap-2">
-        <span className="text-title font-semibold tabular-nums">{progress.percent}%</span>
+        <NumberFlow value={progress.percent} suffix="%" className="text-title font-semibold tabular-nums" />
         <span className="text-caption text-muted-foreground">
           {t(($) => $.detail.progress_panel.summary, { count: progress.scope, completed: progress.completed })}
         </span>
@@ -129,8 +130,8 @@ function ProgressSummary({ progress }: { progress: ProjectProgress }) {
         role="img"
         aria-label={legend.map((item) => `${item.label} ${item.count}`).join(", ")}
       >
-        <div className="h-full bg-info transition-all" style={{ width: share(progress.completed) }} />
-        <div className="h-full bg-warning transition-all" style={{ width: share(progress.started) }} />
+        <div className="h-full bg-info transition-[width] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none" style={{ width: share(progress.completed) }} />
+        <div className="h-full bg-warning transition-[width] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none" style={{ width: share(progress.started) }} />
       </div>
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-caption text-muted-foreground">
         {legend.map((item) => (
@@ -341,7 +342,7 @@ function BreakdownRow({
       </span>
       <span className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-muted">
         <span
-          className="block h-full rounded-full bg-info"
+          className="block h-full rounded-full bg-info transition-[width] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none"
           style={{ width: `${scope > 0 ? (completed / scope) * 100 : 0}%` }}
         />
       </span>

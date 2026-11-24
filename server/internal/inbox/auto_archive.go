@@ -38,10 +38,39 @@ var autoArchiveOnByDefault = map[string]bool{
 
 // Why the actor's notifications were archived, sent as `reason` on
 // inbox:batch-archived so the client can tell its user's own action apart.
+// Older clients (v0.12.0 and earlier) only recognize `issue_status_terminal`
+// and `actor_acted`, so agent-triggered archives keep `reason: "actor_acted"`
+// and pass ArchiveTriggerAgent in the optional `trigger` field for newer clients.
 const (
 	ArchiveReasonCompleted = "issue_status_terminal"
 	ArchiveReasonActed     = "actor_acted"
+
+	ArchiveTriggerAgent = "agent_triggered"
 )
+
+func autoArchiveEventDetails(archivedOn []string) (reason, trigger string) {
+	reason = ArchiveReasonActed
+	switch {
+	case slices.Contains(archivedOn, AutoArchiveCompletedPref):
+		reason = ArchiveReasonCompleted
+	case slices.Contains(archivedOn, AutoArchiveAgentTriggerPref):
+		trigger = ArchiveTriggerAgent
+	}
+	return reason, trigger
+}
+
+func buildAutoArchivePayload(actorID, issueID string, count int64, reason, trigger string) map[string]any {
+	payload := map[string]any{
+		"recipient_id": actorID,
+		"count":        count,
+		"issue_id":     issueID,
+		"reason":       reason,
+	}
+	if trigger != "" {
+		payload["trigger"] = trigger
+	}
+	return payload
+}
 
 // AutoArchivesOn reports whether prefs archive the actor's notifications when
 // they take action. nil prefs, a member without a stored row, applies the
@@ -112,10 +141,7 @@ func ArchiveActorIssueInbox(
 	if len(archivedOn) == 0 {
 		return
 	}
-	reason := ArchiveReasonActed
-	if slices.Contains(archivedOn, AutoArchiveCompletedPref) {
-		reason = ArchiveReasonCompleted
-	}
+	reason, trigger := autoArchiveEventDetails(archivedOn)
 
 	count, err := queries.ArchiveInboxByIssue(ctx, db.ArchiveInboxByIssueParams{
 		WorkspaceID:   wsUUID,
@@ -125,7 +151,7 @@ func ArchiveActorIssueInbox(
 	})
 	if err != nil {
 		slog.Error("auto-archive actor issue inbox: query failed",
-			"workspace_id", workspaceID, "issue_id", issueID, "reason", reason, "error", err)
+			"workspace_id", workspaceID, "issue_id", issueID, "reason", reason, "trigger", trigger, "error", err)
 		return
 	}
 	if count == 0 {
@@ -134,14 +160,9 @@ func ArchiveActorIssueInbox(
 	publish(pub, events.Event{
 		Type:        protocol.EventInboxBatchArchived,
 		WorkspaceID: workspaceID,
-		Payload: map[string]any{
-			"recipient_id": actorID,
-			"count":        count,
-			"issue_id":     issueID,
-			"reason":       reason,
-		},
+		Payload:     buildAutoArchivePayload(actorID, issueID, count, reason, trigger),
 	})
 
 	slog.Info("auto-archive actor issue inbox: archived rows",
-		"workspace_id", workspaceID, "issue_id", issueID, "reason", reason, "row_count", count)
+		"workspace_id", workspaceID, "issue_id", issueID, "reason", reason, "trigger", trigger, "row_count", count)
 }

@@ -1,6 +1,7 @@
 "use client";
 
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion, useIsPresent } from "motion/react";
 import { useReducedMotion } from "@multica/core/appearance";
 import { ChevronDown, ChevronUp, Maximize2, X } from "@multica/ui/icons";
@@ -17,6 +18,8 @@ import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueRouteRef } from "@multica/core/issues/canonical-id";
+import { prefetchIssuePage } from "@multica/core/issues/queries";
+import { useIsGuest } from "@multica/core/permissions";
 import {
   createShortcutChord,
   isEditableShortcutTarget,
@@ -34,11 +37,13 @@ import {
   IssuePeekIdContext,
   IssuePeekPositionContext,
   PEEK_TARGET_ATTR,
+  hasIssueInColumns,
   locateInColumns,
   useIssuePeekActions,
   useIssuePeekPosition,
   type IssuePeekActions,
   type IssuePeekColumns,
+  type IssuePeekPosition,
 } from "../surface/peek-context";
 
 const NEXT_KEY = createShortcutChord("J");
@@ -84,6 +89,49 @@ export function IssuePeekHost({ children }: { children: ReactNode }) {
   const openId = peekId;
   const position = useMemo(() => locateInColumns(columns, openId), [columns, openId]);
 
+  // Keep the latest columns and last known neighbours for the open issue so
+  // deleting it can land on the next (or previous) surviving item even when
+  // the list/board cache prunes the deleted row before `onDelete` fires.
+  const columnsRef = useRef(columns);
+  columnsRef.current = columns;
+  const lastNeighboursRef = useRef<{
+    issueId: string;
+    nextId: string | null;
+    prevId: string | null;
+  } | null>(null);
+  if (!openId) {
+    lastNeighboursRef.current = null;
+  } else if (position) {
+    lastNeighboursRef.current = {
+      issueId: openId,
+      nextId: position.nextId,
+      prevId: position.prevId,
+    };
+  }
+
+  const handleDelete = useCallback((deletedId: string) => {
+    setPeekId((current) => {
+      if (current !== deletedId) return current;
+      const cols = columnsRef.current;
+      const pos = locateInColumns(cols, deletedId);
+      const fallback =
+        lastNeighboursRef.current?.issueId === deletedId
+          ? lastNeighboursRef.current
+          : null;
+      for (const candidate of [
+        pos?.nextId,
+        pos?.prevId,
+        fallback?.nextId,
+        fallback?.prevId,
+      ]) {
+        if (candidate && candidate !== deletedId && hasIssueInColumns(cols, candidate)) {
+          return candidate;
+        }
+      }
+      return null;
+    });
+  }, []);
+
   // Tracked from pointer events rather than queried with `:hover`, so the
   // card under a stationary pointer is known without a layout read.
   const hoveredCardRef = useRef<string | null>(null);
@@ -125,7 +173,9 @@ export function IssuePeekHost({ children }: { children: ReactNode }) {
                 (J / K is keyboard navigation — it must not animate); only
                 opening and closing the panel does. */}
             <AnimatePresence initial={false}>
-              {openId && <IssuePeekPanel key="issue-peek" issueId={openId} />}
+              {openId && (
+                <IssuePeekPanel key="issue-peek" issueId={openId} onDelete={handleDelete} />
+              )}
             </AnimatePresence>
           </div>
         </IssuePeekPositionContext.Provider>
@@ -137,14 +187,20 @@ export function IssuePeekHost({ children }: { children: ReactNode }) {
 // Memoized, and blind to the column order: the host re-renders on every board
 // reorder (a drag publishes columns on each hover), and none of that may reach
 // IssueDetail. What does follow the order lives in IssuePeekFollow.
-const IssuePeekPanel = memo(function IssuePeekPanel({ issueId }: { issueId: string }) {
+const IssuePeekPanel = memo(function IssuePeekPanel({
+  issueId,
+  onDelete,
+}: {
+  issueId: string;
+  onDelete: (issueId: string) => void;
+}) {
   const { t } = useT("issues");
-  const actions = useIssuePeekActions()!;
   const panelRef = useRef<HTMLElement>(null);
   // False while the exit animation plays: the closing panel no longer takes
   // clicks or keys, so the board is usable the moment the peek is dismissed.
   const isPresent = useIsPresent();
   const reduceMotion = useReducedMotion();
+  const handleDelete = useCallback(() => onDelete(issueId), [onDelete, issueId]);
 
   return (
     <motion.aside
@@ -201,7 +257,7 @@ const IssuePeekPanel = memo(function IssuePeekPanel({ issueId }: { issueId: stri
             defaultSidebarOpen={false}
             leadingAction={<IssuePeekNav />}
             trailingActions={<IssuePeekTrailingActions issueId={issueId} />}
-            onDelete={actions.close}
+            onDelete={handleDelete}
           />
         </ErrorBoundary>
       </WindowTitleBarProvider>
@@ -209,7 +265,7 @@ const IssuePeekPanel = memo(function IssuePeekPanel({ issueId }: { issueId: stri
   );
 });
 
-/** The panel's keyboard (Esc, J / K / H / L, arrows) and keeping the peeked issue in view. */
+/** The panel's keyboard (Esc, J / K / H / L, arrows), neighbour prefetch, and keeping the peeked issue in view. */
 function IssuePeekFollow({
   issueId,
   panelRef,
@@ -220,6 +276,8 @@ function IssuePeekFollow({
   const actions = useIssuePeekActions()!;
   const position = useIssuePeekPosition();
   const reduceMotion = useReducedMotion();
+
+  useIssuePeekPrefetch(issueId, position);
 
   // Read through a ref so the listener is bound once, not on every step.
   const positionRef = useRef(position);
@@ -297,6 +355,57 @@ function IssuePeekFollow({
   }, [issueId, position, panelRef, reduceMotion]);
 
   return null;
+}
+
+/**
+ * Warms the adjacent issues in the current column (`nextId`, then `prevId`)
+ * once the browser is idle, so stepping with J / K (or the prev/next arrows)
+ * renders from cache instead of flashing IssueDetailSkeleton.
+ */
+function useIssuePeekPrefetch(issueId: string, position: IssuePeekPosition | null) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  // A guest's issue page shows no runs, and the server refuses them.
+  const guest = useIsGuest(wsId);
+  const nextId = position?.nextId ?? null;
+  const prevId = position?.prevId ?? null;
+  const targets = useMemo(() => {
+    const picked: string[] = [];
+    for (const candidate of [nextId, prevId]) {
+      if (candidate && candidate !== issueId && !picked.includes(candidate)) {
+        picked.push(candidate);
+      }
+    }
+    return picked;
+  }, [issueId, nextId, prevId]);
+  const targetKey = targets.join(",");
+
+  useEffect(() => {
+    if (!wsId || !targetKey) return;
+    let cancelled = false;
+    const run = async () => {
+      // One issue at a time: each fans out into up to four requests.
+      for (const targetId of targets) {
+        if (cancelled) return;
+        await prefetchIssuePage(qc, wsId, targetId, undefined, { runs: !guest }).catch(() => {
+          // A failed warm-up is retried when the user steps to that issue.
+        });
+      }
+    };
+    if (typeof window.requestIdleCallback === "function") {
+      const id = window.requestIdleCallback(() => void run(), { timeout: 150 });
+      return () => {
+        cancelled = true;
+        window.cancelIdleCallback(id);
+      };
+    }
+    const timer = window.setTimeout(() => void run(), 100);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by target ids and viewer role
+  }, [qc, wsId, targetKey, guest]);
 }
 
 function isArrowWidgetTarget(target: EventTarget | null) {

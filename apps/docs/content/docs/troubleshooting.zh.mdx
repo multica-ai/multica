@@ -166,6 +166,15 @@ multica issue runs <issue-id>
 先在执行电脑的终端中直接运行同一款工具。工具自身也无法开始时，先修复工具登录或配置，再从执行日志重试运行。
 
 </Accordion>
+<Accordion title="AI 编程工具在 macOS 代理网络中超时" id="ai-coding-tool-times-out-behind-a-macos-proxy" value="ai-coding-tool-times-out-behind-a-macos-proxy">
+
+如果 Grok 等 AI 编程工具在终端中运行正常，在 Multica 桌面端却超时，请检查终端是否导出了代理环境变量。在 macOS 上，本地守护进程和它启动的工具会继承启动它们的进程的环境变量。从程序坞启动桌面端时，应用不会读取 shell 导出的变量，也不会将 macOS「网络」中的代理设置转换成环境变量。
+
+如果只有一个智能体需要代理，请在该智能体的[环境变量](/agents-create#环境变量与凭据)中添加它的工具所需的代理变量。例如，本地 HTTP 代理可设置为 `HTTPS_PROXY=http://127.0.0.1:7897`，请换成实际的代理地址。如果 Multica 部署在本机，可将需要直连的主机加入 `NO_PROXY`，例如 `localhost,127.0.0.1,::1`。开始一次新的运行，使修改生效。
+
+这些设置只作用于该智能体的工具进程，不作用于守护进程。如果守护进程需要通过代理连接 Multica 服务器，或需要获取最新的模型列表（守护进程用自己的环境获取模型列表），请单独配置它的启动环境。开机自启的守护进程见[开机自启](/daemon-runtimes#autostart)。
+
+</Accordion>
 <Accordion title="升级 CLI 后 macOS 上的运行卡住" id="runs-hang-on-macos-after-a-cli-upgrade" value="runs-hang-on-macos-after-a-cli-upgrade">
 
 通过 Homebrew 安装的 `multica` CLI 升级后（无论是 `brew upgrade`、`multica update`、**运行时**页面上的**更新**，还是守护进程自动更新），读取 `~/Desktop`、`~/Documents`、`~/Downloads`、iCloud 云盘或其他受保护文件夹的运行可能停滞：智能体进程不占用 CPU，运行既不结束也不失败。

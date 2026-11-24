@@ -101,6 +101,7 @@ type AppConfig struct {
 	// Older handlers silently ignore unknown fields, so clients with values must
 	// fail closed when this declaration is absent.
 	IssueCreatePropertiesSupported bool `json:"issue_create_properties_supported"`
+	IssueBlockersSupported         bool `json:"issue_blockers_supported"`
 
 	// CommentDeleteKeepRepliesSupported tells clients that deleting a comment
 	// removes only that comment and keeps its replies (#8296), and that
@@ -135,6 +136,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		AgentConversationStartersSupported: true,
 		WebhookPayloadConditionsSupported:  true,
 		IssueCreatePropertiesSupported:     true,
+		IssueBlockersSupported:             true,
 		CommentDeleteKeepRepliesSupported:  true,
 		IssueBatchOpsSupported:             true,
 		AllowSignup:                        os.Getenv("ALLOW_SIGNUP") != "false",

@@ -277,6 +277,7 @@ func TestMembershipRemovalClosesResourceOnlySubscriber(t *testing.T) {
 	mc.revoked.Store(true)
 	hub.BroadcastToWorkspace(testWorkspaceID, removalFrame(testWorkspaceID, testUserID))
 	wantMembershipClosed(t, conn)
+	waitFor(t, "membership removal to finish", func() bool { return hub.memberRemovalPending.Load() == 0 })
 	if hub.HasLocalSubscribers(ScopeTask, "resource") {
 		t.Fatal("revocation skipped the resource-only connection")
 	}

@@ -18,9 +18,12 @@ type SnoozedInboxResponse struct {
 	IssueID string `json:"issue_id"`
 	// The identifier (MUL-123) the row links to; see InboxItemResponse.
 	IssueIdentifier *string `json:"issue_identifier"`
-	ItemID          string  `json:"item_id"`
-	SnoozedUntil string `json:"snoozed_until"`
-	SnoozedAt    string `json:"snoozed_at"`
+	// The issue's title and status, so the row renders without fetching it.
+	IssueTitle   *string `json:"issue_title"`
+	IssueStatus  *string `json:"issue_status"`
+	ItemID       string  `json:"item_id"`
+	SnoozedUntil string  `json:"snoozed_until"`
+	SnoozedAt    string  `json:"snoozed_at"`
 	// Rows that arrived on the issue while it was snoozed.
 	Updates int64 `json:"updates"`
 }
@@ -64,6 +67,8 @@ func (h *Handler) ListSnoozedInbox(w http.ResponseWriter, r *http.Request) {
 		resp[i] = SnoozedInboxResponse{
 			IssueID:         uuidToString(row.IssueID),
 			IssueIdentifier: inboxIssueIdentifier(issuePrefix, row.IssueNumber),
+			IssueTitle:      textToPtr(row.IssueTitle),
+			IssueStatus:     textToPtr(row.IssueStatus),
 			ItemID:          uuidToString(row.ItemID),
 			SnoozedUntil:    timestampToString(row.SnoozedUntil),
 			SnoozedAt:       timestampToString(row.SnoozedAt),

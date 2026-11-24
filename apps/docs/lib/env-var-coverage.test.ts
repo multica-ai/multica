@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { i18n, type Lang } from "./i18n";
+import { type RuntimeExemption, undocumentedRuntimes } from "./undocumented-runtimes";
 
 // The per-tool tables on the environment variables page are hand-written in
 // every locale, so a new built-in runtime used to land without its
@@ -21,21 +22,12 @@ const sources = {
   flags: "server/internal/featureflags/keys.go",
 } as const;
 
-type Exemption = {
-  reason: string;
-  // A key in server/internal/featureflags/keys.go that defaults to off.
-  // AGENTS.md keeps features behind such a flag out of the public docs.
-  flag?: string;
-};
-
-// Runtimes the daemon registers that the docs deliberately leave out.
-// Remove an entry once the runtime is documented in every locale.
-const undocumentedPrefixes: Record<string, Exemption> = {
-  MULTICA_MUSEAPP: {
-    reason:
-      "Muse app remote receptionist (#9155). Whether it is publicly documented awaits a product decision.",
-  },
-};
+const undocumentedPrefixes: Record<string, RuntimeExemption> = Object.fromEntries(
+  Object.entries(undocumentedRuntimes).map(([id, exemption]) => [
+    `MULTICA_${id.toUpperCase()}`,
+    exemption,
+  ]),
+);
 
 type Variable = { name: string; source: string };
 
@@ -203,7 +195,7 @@ describe("environment variables docs", () => {
     }
     expect(
       missing,
-      `Add these to apps/docs/content/docs/environment-variables*.mdx in the same PR, or list the prefix in undocumentedPrefixes in ${path.relative(repoRoot, __filename)} with a reason.`,
+      `Add these to apps/docs/content/docs/environment-variables*.mdx in the same PR, or list the runtime in undocumentedRuntimes in apps/docs/lib/undocumented-runtimes.ts with a reason.`,
     ).toEqual([]);
   });
 

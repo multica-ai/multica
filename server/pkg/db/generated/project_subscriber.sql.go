@@ -85,10 +85,10 @@ func (q *Queries) IsProjectSubscriber(ctx context.Context, arg IsProjectSubscrib
 }
 
 const listProjectSubscribersForIssue = `-- name: ListProjectSubscribersForIssue :many
-WITH RECURSIVE ancestors(node_id, parent_id, depth) AS (
-    SELECT root.id, root.parent_issue_id, 0 FROM issue root WHERE root.id = $1
-    UNION ALL
-    SELECT i.id, i.parent_issue_id, a.depth + 1 FROM issue i JOIN ancestors a ON i.id = a.parent_id
+WITH RECURSIVE ancestors(node_id, parent_id, is_root) AS (
+    SELECT root.id, root.parent_issue_id, true FROM issue root WHERE root.id = $1
+    UNION
+    SELECT i.id, i.parent_issue_id, false FROM issue i JOIN ancestors a ON i.id = a.parent_id
 )
 SELECT ps.user_id, ps.created_at
 FROM issue target
@@ -110,7 +110,7 @@ WHERE target.id = $1
       JOIN ancestors a ON a.node_id = s.issue_id
       WHERE s.user_type = 'member' AND s.user_id = ps.user_id
         AND s.unsubscribed_at IS NOT NULL
-        AND (a.depth = 0 OR s.opt_out_scope = 'subtree')
+        AND (a.is_root OR s.opt_out_scope = 'subtree')
   )
 ORDER BY ps.created_at, ps.user_id
 `
@@ -126,6 +126,8 @@ type ListProjectSubscribersForIssueRow struct {
 // issue is the narrower, more recent intent, so the project never brings the
 // member back. Both notification fanout and the issue's effective subscriber
 // list read this, so the two cannot disagree.
+// UNION drops repeated rows, so a parent loop an older server stored still
+// ends the walk.
 func (q *Queries) ListProjectSubscribersForIssue(ctx context.Context, issueID pgtype.UUID) ([]ListProjectSubscribersForIssueRow, error) {
 	rows, err := q.db.Query(ctx, listProjectSubscribersForIssue, issueID)
 	if err != nil {

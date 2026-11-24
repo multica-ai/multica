@@ -1,21 +1,28 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useReducedMotion } from "@multica/core/appearance";
 import { AlertTriangle, Check, MessageSquare, RotateCcw, Trash2, X } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import { UI_EASE_OUT } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { useAuthStore } from "@multica/core/auth";
 import {
+  docTaskRunsOptions,
   useCreateDocComment,
   useDeleteDocComment,
   useSetDocCommentResolved,
 } from "@multica/core/docs";
-import type { DocComment } from "@multica/core/types";
+import { useWorkspaceId } from "@multica/core/hooks";
+import type { DocComment, DocTaskRun } from "@multica/core/types";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { ContentEditor, ReadonlyContent, type ContentEditorRef } from "../../editor";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT, useTimeAgo } from "../../i18n";
 import type { DocAnchor } from "./doc-comment-anchors";
+import { DocThreadRun, docThreadRuns } from "./doc-thread-runs";
 
 export interface DocThread {
   root: DocComment;
@@ -73,6 +80,7 @@ function Composer({
         defaultValue=""
         placeholder={placeholder}
         mentionHideGuests
+        mentionHideSquads
         onUpdate={(md) => setEmpty(!md.trim())}
         onSubmit={submit}
         debounceMs={0}
@@ -110,7 +118,7 @@ function Message({ comment, onDelete }: { comment: DocComment; onDelete?: () => 
               type="button"
               aria-label={t(($) => $.comments.delete)}
               title={t(($) => $.comments.delete)}
-              className="ml-auto rounded-sm p-0.5 text-muted-foreground opacity-0 hover:text-destructive focus-visible:opacity-100 group-hover/message:opacity-100"
+              className="ml-auto rounded-sm p-0.5 text-muted-foreground opacity-0 transition-opacity duration-100 hover:text-destructive focus-visible:opacity-100 group-hover/message:opacity-100 motion-reduce:transition-none"
               onClick={(e) => {
                 e.stopPropagation();
                 onDelete();
@@ -153,6 +161,7 @@ function Quote({ text, missing }: { text: string; missing?: boolean }) {
 function ThreadCard({
   docId,
   thread,
+  runs,
   active,
   missing,
   onActivate,
@@ -160,12 +169,15 @@ function ThreadCard({
 }: {
   docId: string;
   thread: DocThread;
+  /** Agent runs to show on this discussion; see docThreadRuns. */
+  runs: DocTaskRun[];
   active: boolean;
   missing: boolean;
   onActivate: () => void;
   onResolvedChange: (resolved: boolean) => void;
 }) {
   const { t } = useT("docs");
+  const reduceMotion = useReducedMotion();
   const { getActorName } = useActorName();
   const userId = useAuthStore((s) => s.user?.id);
   const reply = useCreateDocComment(docId);
@@ -206,6 +218,9 @@ function ThreadCard({
       {[thread.root, ...thread.replies].map((c) => (
         <Message key={c.id} comment={c} onDelete={own(c) ? () => void del(c) : undefined} />
       ))}
+      {runs.map((run) => (
+        <DocThreadRun key={run.id} docId={docId} run={run} />
+      ))}
       {resolved ? (
         <div className="mt-2 flex items-center gap-2 border-t pt-2 text-caption text-muted-foreground">
           {t(($) => $.comments.resolved_by, {
@@ -226,29 +241,41 @@ function ThreadCard({
           </Button>
         </div>
       ) : (
-        active && (
-          <>
-            <Composer
-              placeholder={t(($) => $.comments.reply_placeholder)}
-              submitLabel={t(($) => $.comments.reply)}
-              onSubmit={(content) => reply.mutateAsync({ content, parentId: thread.root.id })}
-            />
-            <div className="mt-2 flex justify-end">
-              <Button
-                size="xs"
-                variant="outline"
-                disabled={resolve.isPending}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void setResolved(true);
-                }}
-              >
-                <Check />
-                {t(($) => $.comments.resolve)}
-              </Button>
-            </div>
-          </>
-        )
+        <AnimatePresence initial={false}>
+          {active && (
+            <motion.div
+              key="thread-reply-box"
+              initial={reduceMotion ? false : { opacity: 0, height: 0, overflow: "hidden" }}
+              animate={{
+                opacity: 1,
+                height: "auto",
+                transitionEnd: { overflow: "visible" },
+              }}
+              exit={{ opacity: 0, height: 0, overflow: "hidden" }}
+              transition={{ duration: reduceMotion ? 0 : 0.18, ease: UI_EASE_OUT }}
+            >
+              <Composer
+                placeholder={t(($) => $.comments.reply_placeholder)}
+                submitLabel={t(($) => $.comments.reply)}
+                onSubmit={(content) => reply.mutateAsync({ content, parentId: thread.root.id })}
+              />
+              <div className="mt-2 flex justify-end">
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={resolve.isPending}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void setResolved(true);
+                  }}
+                >
+                  <Check />
+                  {t(($) => $.comments.resolve)}
+                </Button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       )}
       {!resolved && !active && thread.replies.length > 0 && (
         <div className="mt-2 text-caption text-muted-foreground">
@@ -258,6 +285,8 @@ function ThreadCard({
     </div>
   );
 }
+
+const NO_RUNS: DocTaskRun[] = [];
 
 /**
  * The doc's discussions, beside the text. Open and resolved discussions sit
@@ -287,6 +316,8 @@ export function DocCommentsPanel({
 }) {
   const { t } = useT("docs");
   const create = useCreateDocComment(docId);
+  const wsId = useWorkspaceId();
+  const { data: runs = NO_RUNS } = useQuery(docTaskRunsOptions(wsId, docId));
   const [tab, setTab] = useState<"open" | "resolved">("open");
   const open = threads.filter((th) => !th.root.resolvedAt);
   const resolved = threads.filter((th) => th.root.resolvedAt);
@@ -315,7 +346,7 @@ export function DocCommentsPanel({
               aria-selected={tab === key}
               onClick={() => setTab(key)}
               className={cn(
-                "rounded-md px-2 py-1",
+                "rounded-md px-2 py-1 transition-colors",
                 tab === key ? "bg-surface-selected text-foreground" : "text-muted-foreground hover:text-foreground",
               )}
             >
@@ -356,6 +387,7 @@ export function DocCommentsPanel({
             key={thread.root.id}
             docId={docId}
             thread={thread}
+            runs={docThreadRuns(runs, thread.root.id)}
             active={thread.root.id === activeId}
             missing={missing.has(thread.root.id)}
             onActivate={() => onActivate(thread.root.id)}

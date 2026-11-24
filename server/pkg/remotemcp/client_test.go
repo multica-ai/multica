@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"net/url"
 	"strings"
@@ -146,5 +147,126 @@ func TestToolSetDigestIgnoresInputSchemaObjectKeyOrder(t *testing.T) {
 	}
 	if first != second {
 		t.Fatalf("digest depends on input schema object key order: %s != %s", first, second)
+	}
+}
+
+func TestDiscoverHandlesMultiLineAndNotificationPrefixedSSE(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		switch req.Method {
+		case "initialize":
+			w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+			w.Header().Set("Mcp-Session-Id", "sess-1")
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, ": keepalive\n\n"+
+				"id: 0\ndata:\n\n"+
+				"event: ping\ndata: ok\n\n"+
+				"event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\",\"params\":{\"level\":\"info\"}}\n\n"+
+				"data: {\"jsonrpc\":\"2.0\",\"id\":\"srv-1\",\"method\":\"ping\",\"params\":{}}\n\n"+
+				"event: message\n"+
+				"data: {\"jsonrpc\":\"2.0\",\"id\":1,\n"+
+				"data: \"result\":{\"protocolVersion\":\"2025-03-26\"}}\n\n")
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			select {
+			case <-r.Context().Done():
+			case <-time.After(3 * time.Second):
+			}
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+		case "tools/list":
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w,
+				"event: message\r\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{\"progress\":1}}\r\n\r\n"+
+					"data: {\"jsonrpc\":\"2.0\",\"id\":99,\"result\":{\"tools\":[]}}\r\n\r\n"+
+					"data: {\"jsonrpc\":\"2.0\",\"id\":2,\r\n"+
+					"data: \"result\":{\"tools\":[{\"name\":\"search\",\"description\":\"Search docs\",\"inputSchema\":{\"type\":\"object\"}}]}}")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	t.Setenv(DevOriginsEnv, server.URL)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	tools, digest, err := Discover(ctx, server.URL, []string{"127.0.0.1"}, nil, nil)
+	if err != nil {
+		t.Fatalf("Discover failed on SSE stream: %v", err)
+	}
+	if len(tools) != 1 || tools[0].Name != "search" || digest == "" {
+		t.Fatalf("Discover = %+v, digest=%q", tools, digest)
+	}
+}
+
+func TestCallSurfacesNullIDJSONRPCErrorInSSE(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w,
+			"data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\",\"params\":{}}\n\n"+
+				"data: {\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32600,\"message\":\"Invalid Request\"}}\n\n")
+	}))
+	defer server.Close()
+	t.Setenv(DevOriginsEnv, server.URL)
+	endpoint, _ := url.Parse(server.URL)
+
+	_, _, err := call(context.Background(), NewSecureHTTPClient(endpoint), endpoint, nil, "", map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+	})
+	if err == nil || !strings.Contains(err.Error(), "Invalid Request") {
+		t.Fatalf("call error = %v, want JSON-RPC Invalid Request", err)
+	}
+}
+
+func TestReadResponseRejectsOversizedSSEStream(t *testing.T) {
+	padding := strings.Repeat("a", MaxResponseBytes+128)
+	resp := &http.Response{
+		Header: http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:   io.NopCloser(strings.NewReader(": " + padding + "\n\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n")),
+	}
+	_, err := ReadResponse(resp, nil)
+	if !errors.Is(err, ErrResponseTooLarge) {
+		t.Fatalf("ReadResponse error = %v, want ErrResponseTooLarge", err)
+	}
+}
+
+func TestReadSSEResponseAcceptsLoneCRLineEndingsOnOpenStream(t *testing.T) {
+	reader, writer := io.Pipe()
+	defer writer.Close()
+	go func() {
+		// The stream stays open after the event, so the trailing CR must end
+		// the event without waiting to see whether a LF follows.
+		_, _ = io.WriteString(writer, "event: message\rdata: {\"jsonrpc\":\"2.0\",\r\ndata: \"id\":7,\"result\":{}}\r\r")
+	}()
+	done := make(chan struct{})
+	var raw []byte
+	var err error
+	go func() {
+		raw, err = readSSEResponse(reader, json.RawMessage("7"))
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("readSSEResponse waited for more data after a complete event")
+	}
+	if err != nil || string(raw) != "{\"jsonrpc\":\"2.0\",\n\"id\":7,\"result\":{}}" {
+		t.Fatalf("readSSEResponse = %q, %v", raw, err)
+	}
+}
+
+func TestReadSSEResponseReportsMissingMatchingResponse(t *testing.T) {
+	_, err := readSSEResponse(strings.NewReader("data: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{}}\n\n"), json.RawMessage("1"))
+	if err == nil || !strings.Contains(err.Error(), "no matching JSON-RPC response") {
+		t.Fatalf("readSSEResponse error = %v, want no matching response", err)
 	}
 }

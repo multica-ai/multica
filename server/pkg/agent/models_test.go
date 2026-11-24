@@ -2,7 +2,9 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -820,15 +822,67 @@ exit 1
 `
 	writeTestExecutable(t, fake, []byte(script))
 
-	models, err := discoverOpenCodeModels(context.Background(), Command{Path: fake})
+	catalog, err := ListModels(t.Context(), "opencode", Command{Path: fake})
 	if err != nil {
-		t.Fatalf("discoverOpenCodeModels: %v", err)
+		t.Fatalf("ListModels: %v", err)
+	}
+	models := catalog.Models
+	if !catalog.Verified() {
+		t.Fatalf("plain listing after a non-timeout verbose failure should remain verified: %+v", catalog)
 	}
 	if len(models) != 1 {
 		t.Fatalf("expected fallback non-verbose model, got %d: %+v", len(models), models)
 	}
 	if models[0].ID != "openai/gpt-4o" || models[0].Thinking != nil {
 		t.Fatalf("unexpected fallback model: %+v", models[0])
+	}
+}
+
+func TestDiscoverOpenCodeModelsFallsBackAfterMetadataTimeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+
+	for _, tc := range []struct {
+		version string
+		probe   string
+	}{
+		{version: "1.18.31", probe: "models --verbose"},
+		{version: "2.0.26", probe: "api GET"},
+	} {
+		t.Run(tc.version, func(t *testing.T) {
+			dir := t.TempDir()
+			marker := filepath.Join(dir, "metadata-called")
+			t.Setenv("MULTICA_TEST_OPENCODE_METADATA_MARKER", marker)
+			fake := filepath.Join(dir, "opencode")
+			writeTestExecutable(t, fake, []byte(fmt.Sprintf(`#!/bin/sh
+case "$1 ${2:-}" in
+  '--version ') echo '%s' ;;
+  '%s') : > "$MULTICA_TEST_OPENCODE_METADATA_MARKER"; exec sleep 60 ;;
+  'models ') echo 'openai/gpt-4o' ;;
+  *) exit 2 ;;
+esac
+`, tc.version, tc.probe)))
+			catalog, err := discoverOpenCodeModelsWithin(t.Context(), Command{Path: fake}, 2*time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(marker); err != nil {
+				t.Fatalf("metadata probe was not invoked: %v", err)
+			}
+			if models := catalog.Models; len(models) != 1 || models[0].ID != "openai/gpt-4o" || models[0].Thinking != nil {
+				t.Fatalf("plain fallback after a timed-out metadata probe: got %+v", models)
+			}
+			if !catalog.Fallback {
+				t.Fatalf("catalog without capability metadata must be a fallback: %+v", catalog)
+			}
+			check, err := CheckThinkingLevelWith(func() (Catalog, error) {
+				return catalog, nil
+			}, "opencode", "openai/gpt-4o", "high")
+			if !errors.Is(err, errUnverifiedCatalog) {
+				t.Fatalf("saved variant should be left for the CLI to validate: check=%+v, err=%v", check, err)
+			}
+		})
 	}
 }
 
@@ -1225,10 +1279,11 @@ func TestDiscoverOpenCodeModelsFallsBackOnVerboseNoise(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "opencode")
 	writeTestExecutable(t, fakePath, []byte(script))
 
-	models, err := discoverOpenCodeModels(context.Background(), Command{Path: fakePath})
+	catalog, err := ListModels(t.Context(), "opencode", Command{Path: fakePath})
 	if err != nil {
-		t.Fatalf("discoverOpenCodeModels: %v", err)
+		t.Fatalf("ListModels: %v", err)
 	}
+	models := catalog.Models
 	if len(models) != 1 || models[0].ID != "openai/gpt-4o" {
 		t.Fatalf("expected fallback to plain `opencode models` to yield [openai/gpt-4o], got %+v", models)
 	}

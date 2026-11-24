@@ -115,6 +115,9 @@ func TestSnoozeInboxTakesTheWholeIssueOutUntilItsTime(t *testing.T) {
 	if len(rows) != 1 || rows[0].IssueID != f.issueID || rows[0].ItemID != newest || rows[0].Updates != 0 {
 		t.Fatalf("snoozed = %+v, want the issue with its newest row and no updates", rows)
 	}
+	if rows[0].IssueTitle == nil || *rows[0].IssueTitle != "Snoozed issue" || rows[0].IssueStatus == nil || *rows[0].IssueStatus != "todo" {
+		t.Fatalf("snoozed issue title/status = %v/%v, want the issue's own", rows[0].IssueTitle, rows[0].IssueStatus)
+	}
 	if got, err := time.Parse(time.RFC3339, rows[0].SnoozedUntil); err != nil || !got.Equal(until) {
 		t.Fatalf("snoozed_until = %q, want %s", rows[0].SnoozedUntil, until)
 	}

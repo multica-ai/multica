@@ -1,0 +1,61 @@
+---
+title: Multica와 OpenHands, Devin, Factory 비교
+description: OpenHands, Devin, Factory는 코딩 에이전트를 만듭니다. Multica는 Devin CLI와 Factory Droid를 포함한 여러 에이전트에게 팀이 작업을 할당하고, 실행하고, 리뷰하는 워크스페이스입니다.
+---
+
+OpenHands, Devin, Factory는 각각 코딩 에이전트와 그 주변 플랫폼을 만듭니다. Multica는 에이전트를 만들지 않습니다. 팀에 하나의 워크스페이스를 제공해 [31가지 AI 코딩 도구](/providers) 기반 에이전트에게 태스크를 할당하고, 팀이 연결한 컴퓨터에서 그 에이전트를 실행하며, 모든 실행을 태스크에 기록합니다. Devin CLI와 Factory Droid도 그 도구에 포함되므로, 반드시 둘 중 하나를 골라야 하는 것은 아닙니다.
+
+이 페이지의 OpenHands, Devin, Factory에 관한 내용은 2026년 11월 기준 공개 문서와 가격 페이지를 바탕으로 합니다: [OpenHands](https://docs.openhands.dev/enterprise), [Devin](https://docs.devin.ai/admin/billing/self-serve), [Factory](https://docs.factory.com/remote-control). 최신 내용은 각 문서를 확인하세요.
+
+## 짧은 답
+
+- **Devin이나 Factory를 고르세요**: 한 벤더의 에이전트와 관리형 클라우드 환경을 원하고, 그 벤더로 통일해도 괜찮다면.
+- **OpenHands를 고르세요**: 수정하고, 자체 호스팅하고, SDK로 확장할 수 있는 MIT 라이선스 에이전트를 원한다면.
+- **Multica를 고르세요**: 팀이 Claude Code, Codex, Cursor Agent, Copilot CLI, Devin CLI, Factory Droid 등 여러 코딩 도구를 쓰고 있고, 이들을 동료처럼 하나의 보드에서 관리하며, 자기 머신에서 실행하고, 에이전트별 접근 제어와 리뷰 단계를 두고 싶다면. Multica는 자체 호스팅할 수 있습니다.
+
+## 비교
+
+| | Multica | OpenHands | Devin | Factory |
+|---|---|---|---|---|
+| 무엇인가 | 코딩 에이전트에게 작업을 할당하고 실행하고 추적하는 워크스페이스 | 오픈 소스 코딩 에이전트와 SDK. Cloud와 Enterprise 에디션도 있음 | Cognition의 AI 소프트웨어 엔지니어. 클라우드 세션, CLI, 데스크톱 앱 제공 | Droid 에이전트를 위한 플랫폼. CLI, 데스크톱, 웹 제공 |
+| 자체 코딩 에이전트 | 없음. 에이전트는 여러분이 고른 도구로 실행 | 있음 | 있음 | 있음 |
+| 한 워크스페이스에서 쓰는 도구 | 31가지. Devin CLI와 Factory Droid 포함, 에이전트마다 다른 도구 사용 가능 | 자체 에이전트. 가격 페이지에는 Codex, Claude 등 다른 에이전트 실행도 명시 | Devin | Droid |
+| 에이전트가 실행되는 곳 | 여러분이 연결한 컴퓨터: 노트북, 서버, VM | 로컬, Docker 또는 Kubernetes, OpenHands Cloud, 자체 호스팅 Enterprise | Devin의 클라우드 VM, 또는 Devin CLI를 통한 여러분의 컴퓨터 | Remote Control을 통한 여러분의 머신, 또는 Factory가 관리하는 Droid Computers |
+| 작업이 들어오는 경로 | 자체 태스크, 댓글, 채팅, 오토파일럿, Slack·Feishu 같은 채팅 연동 | Git 호스팅, Jira, Slack 연동 | Slack, Linear 등 연동. Enterprise에서 Jira | Factory 앱, CLI, 연동 |
+| 팀 접근 제어 | 에이전트별 Access, 워크스페이스 역할, 게스트, 비공개 프로젝트 | Teams와 Enterprise에서 다중 사용자 RBAC | Team 플랜에서 SSO와 비용 관리 | Business와 Enterprise에서 관리 기능 |
+| 자체 호스팅 | 가능. Docker Compose 또는 Helm | 가능 | 호스팅 서비스. Devin CLI는 로컬에서 실행 | Enterprise에서 온프레미스 옵션 |
+| 라이선스 | 소스 공개(source-available), 조직 내부 사용은 무료 | MIT | 독점 | 독점 |
+| 비용 지불 방식 | 내부용 자체 호스팅은 무료. 각 도구는 자체 구독이나 API 키로 과금 | 오픈 소스는 무료. Teams와 Enterprise는 유료 | 사용량 한도가 있는 구독 플랜. Enterprise는 ACU 단위 과금 | 좌석당 플랜. Enterprise는 별도 협의 |
+
+## Multica는 Devin의 오픈 소스 대안인가요?
+
+부분적으로는 그렇지만, 차이가 중요합니다.
+
+- **Multica는 소스 공개이며 OSI 정의의 오픈 소스가 아닙니다.** [Multica License](https://github.com/multica-ai/multica/blob/main/LICENSE), 즉 추가 조건이 붙은 Apache License 2.0으로 공개됩니다. 조직 내부 사용은 팀 전체를 위한 자체 호스팅을 포함해 무료입니다. 다른 사람에게 호스팅 서비스로 제공하거나 판매하는 제품에 넣으려면 상용 라이선스가 필요합니다. OSI 라이선스 에이전트가 필요하다면 OpenHands는 MIT입니다.
+- **Multica 자체는 자율 에이전트가 아닙니다.** 작업 할당, 진행 상황 확인, 리뷰, 반복 작업 실행처럼 Devin의 팀 쪽 기능을 다루고, 코딩 자체는 Claude Code나 Codex처럼 이미 가진 에이전트가 합니다.
+
+## OpenHands, Devin, Factory가 더 맞는 경우
+
+- 태스크마다 관리형 클라우드 환경을 원하고, 에이전트를 위해 머신을 켜 두고 싶지 않습니다.
+- 한 벤더의 에이전트, 모델, 지원 계약으로 통일하고 싶습니다.
+- SDK를 바탕으로 자체 에이전트 제품을 만들고 싶습니다. OpenHands Software Agent SDK가 그 용도입니다.
+- 엔지니어가 주로 한 에이전트의 앱에서 한 번에 한 에이전트와 일합니다.
+
+## Multica가 더 맞는 경우
+
+- **팀이 여러 도구를 섞어 씁니다.** Claude Code를 선호하는 사람도 있고 Codex, Cursor, Copilot을 쓰는 사람도 있습니다. Multica에서는 각 에이전트가 도구와 모델을 고르고, 모두가 하나의 보드, 하나의 [인박스](/inbox), 하나의 [분석](/analytics) 화면을 함께 씁니다.
+- **이미 내고 있는 구독을 쓰고 싶습니다.** Multica는 각 도구의 자체 로그인으로 도구를 구동하며, 모델을 재판매하거나 에이전트 연산량에 과금하지 않습니다.
+- **코드와 비밀 정보가 있는 곳에서 에이전트를 실행해야 합니다.** 런타임은 여러분의 노트북, 빌드 서버, VM입니다. Multica를 자체 호스팅하면 워크스페이스 데이터도 여러분의 서버에 남습니다.
+- **여러 사람이 에이전트를 함께 씁니다.** [Access](/agents#권한과-access)가 각 에이전트를 실행할 수 있는 사람을 정하고, [스쿼드](/squads)가 알맞은 에이전트에게 작업을 보내며, [워크플로](/workflows)가 리뷰 단계를 더합니다. [팀에서 에이전트 풀 공유하기](/team-agent-pool)를 참고하세요.
+- **작업이 반복됩니다.** [오토파일럿](/autopilots)이 일정이나 webhook으로 태스크를 만들고 할당합니다.
+
+## Multica에서 Devin이나 Factory 쓰기
+
+Devin CLI(`devin`)와 Factory Droid(`droid`)는 Multica 기본 지원 도구입니다. Multica에 연결된 컴퓨터에 CLI를 설치하고 로그인한 뒤, 그 런타임에서 에이전트를 만드세요. 그 에이전트는 다른 에이전트처럼 태스크, 댓글, 리뷰를 맡고, 사용량은 도구 자체 플랜으로 처리됩니다. Devin의 모델 별칭, Droid의 스킬 경로 같은 세부 사항은 [AI 코딩 도구 비교](/providers)에 있습니다. OpenHands는 현재 기본 지원 도구가 아닙니다.
+
+## 관련 문서
+
+- [Multica와 Linear, Jira 비교](/compare/linear-jira)
+- [Multica와 로컬 worktree 관리 도구 비교](/compare/worktree-managers)
+- [팀에서 에이전트 풀 공유하기](/team-agent-pool)
+- [보안 모델](/security-model): 런타임에서 에이전트가 접근할 수 있는 것.

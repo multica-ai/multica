@@ -753,7 +753,7 @@ and dark differ, both defaults are given.
 | `--switch-unchecked-thumb` | `var(--background)` / `var(--foreground)` | Thumb of a switch that is off. |
 | `--switch-border-color` | `transparent` | Outline of a switch, on or off. |
 | `--popover-radius` | `var(--radius)` | Popovers. |
-| `--floating-border-color` | `color-mix(in oklab, var(--surface-border), var(--foreground) 6%)` | Hairline around layers that float over the page without a backdrop: menus, popovers, select lists and floating panels. |
+| `--floating-border-color` | `color-mix(in oklab, var(--surface-border), var(--foreground) 6%)` | Hairline around layers that float over the page: menus, popovers, select lists, floating panels, dialogs and alert dialogs. |
 | `--dialog-radius` | `calc(var(--radius) * 1.5)` | Dialogs and alert dialogs. |
 | `--tooltip-radius` | `var(--radius)` | Tooltips. |
 | `--avatar-radius` | `calc(infinity * 1px)` | Avatars. Set a length for square avatars. |

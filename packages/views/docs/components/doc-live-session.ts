@@ -192,6 +192,13 @@ export function warmSocket(url: string) {
 
 // ---- Sessions ------------------------------------------------------------------
 
+/** The collaboration server closes a connection with this reason when it did
+ *  not show a fresh ticket in time (apps/collab REAUTHENTICATE_REASON). */
+const REAUTHENTICATE_REASON = "reauthenticate";
+/** Backoff for joining again after such a close. */
+const REJOIN_BASE_MS = 1_000;
+const REJOIN_MAX_MS = 30_000;
+
 /** How long a session stays connected after its page closes. */
 const SESSION_KEEP_MS = 60_000;
 /** Sessions kept for pages that are closed; the oldest goes first. */
@@ -224,6 +231,8 @@ export class DocSession {
   private keep: ReturnType<typeof setTimeout> | null = null;
   private ticket: LiveTicket | null;
   private destroyed = false;
+  private rejoins = 0;
+  private rejoinTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     readonly key: string,
@@ -265,11 +274,19 @@ export class DocSession {
         return JSON.stringify({ ticket: ticket.token, epoch: typeof epoch === "string" ? epoch : undefined });
       },
       onSynced: ({ state }) => {
-        if (state) this.update({ synced: true, ready: true });
+        if (!state) return;
+        this.rejoins = 0;
+        this.update({ synced: true, ready: true });
       },
       onStatus: ({ status }) => this.update({ connected: status === WebSocketStatus.Connected }),
       onClose: ({ event }) => {
         if (event.reason === "document-reset") this.update({ reset: true });
+        else if (event.reason === REAUTHENTICATE_REASON) {
+          // Unsynced until it is back in: a page that waits too long carries
+          // what was typed into solo editing (useDocCollab).
+          this.update({ synced: false });
+          this.rejoin();
+        }
       },
     });
     this.provider.attach();
@@ -280,6 +297,29 @@ export class DocSession {
   }
 
   getState = (): DocSessionState => this.state;
+
+  /** Joins again over the open socket, as on a reconnect, keeping what was
+   *  typed meanwhile. The API refuses a ticket to someone who lost access, so
+   *  they stay out until the page gives up on the session. */
+  private rejoin() {
+    if (this.destroyed || this.rejoinTimer) return;
+    const delay = Math.min(REJOIN_MAX_MS, REJOIN_BASE_MS * 2 ** this.rejoins);
+    this.rejoins++;
+    this.rejoinTimer = setTimeout(async () => {
+      this.rejoinTimer = null;
+      let ticket: DocCollabTicket;
+      try {
+        ticket = await requestTicket(this.kind, this.docId);
+      } catch {
+        this.rejoin();
+        return;
+      }
+      if (this.destroyed || !ticket.enabled) return;
+      this.ticket = ticket;
+      await this.provider.sendToken();
+      if (!this.destroyed) this.provider.startSync();
+    }, delay);
+  }
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -366,6 +406,7 @@ export class DocSession {
     if (this.destroyed) return;
     this.destroyed = true;
     if (this.keep) clearTimeout(this.keep);
+    if (this.rejoinTimer) clearTimeout(this.rejoinTimer);
     this.provider.awareness?.off("change", this.updateCollaborators);
     this.provider.destroy();
     this.ydoc.destroy();

@@ -166,6 +166,15 @@ An online daemon does not mean the tool itself works. Open the run's detailed re
 Run the same tool directly in a terminal on the executing computer first. If the tool cannot start on its own, fix its sign-in or configuration, then retry the run from the execution log.
 
 </Accordion>
+<Accordion title="AI coding tool times out behind a macOS proxy" id="ai-coding-tool-times-out-behind-a-macos-proxy" value="ai-coding-tool-times-out-behind-a-macos-proxy">
+
+If an AI coding tool such as Grok works in a terminal but times out in Multica Desktop, check whether the terminal exports proxy variables. On macOS, the local daemon and the tools it starts inherit environment variables from their launcher. Starting Desktop from the Dock does not load your shell exports or turn macOS Network proxy settings into environment variables.
+
+For a single agent, add the proxy variables its tool needs under [Environment variables](/agents-create#environment-variables-and-credentials), for example `HTTPS_PROXY=http://127.0.0.1:7897` for a local HTTP proxy. Use your actual proxy address. If you host Multica locally, add the local hosts that should connect directly to `NO_PROXY`, for example `localhost,127.0.0.1,::1`. Start a new run to apply the changes.
+
+These settings apply only to that agent's tool process, not to the daemon. If the daemon needs the proxy to reach the Multica server, or to fetch up-to-date model lists (it fetches them with its own environment), configure the daemon's launch environment separately. For a daemon that starts at login, see [Start at login](/daemon-runtimes#autostart).
+
+</Accordion>
 <Accordion title="Runs hang on macOS after a CLI upgrade" id="runs-hang-on-macos-after-a-cli-upgrade" value="runs-hang-on-macos-after-a-cli-upgrade">
 
 After the Homebrew `multica` CLI is upgraded, by `brew upgrade`, `multica update`, **Update** on the Runtimes page, or the daemon's auto-update, a run that reads `~/Desktop`, `~/Documents`, `~/Downloads`, iCloud Drive, or another protected folder can stop making progress: the agent's process uses no CPU, and the run neither finishes nor fails.

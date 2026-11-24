@@ -246,7 +246,7 @@ export function RunTimeline({
                 aria-hidden
                 // Ends on the lanes, not below them: the track clips its own
                 // vertical overflow now, so an overhang would only be cropped.
-                className="pointer-events-none absolute bottom-0 top-2.5 w-0.5 rounded-full bg-brand"
+                className="pointer-events-none absolute bottom-0 top-2.5 w-0.5 rounded-full bg-brand transition-[left] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none"
                 style={{
                   left: `${
                     (Math.min(Math.max(selectedOffsetMs, 0), lanes.totalMs) / lanes.totalMs) * 100
