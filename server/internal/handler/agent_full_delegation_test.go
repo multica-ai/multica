@@ -19,7 +19,7 @@ import (
 )
 
 type fullDelegationFixture struct {
-	home, target, agent, task, chat, runtimeOwner, targetRuntime, targetChat, foreignChat, token string
+	home, target, agent, task, chat, runtimeOwner, targetRuntime, targetChat, foreignAgent, foreignChat, token string
 }
 
 func seedFullDelegation(t *testing.T) fullDelegationFixture {
@@ -51,7 +51,7 @@ func seedFullDelegation(t *testing.T) fullDelegationFixture {
 		"token_hash": auth.HashToken(token), "task_id": task, "agent_id": agent,
 		"workspace_id": home, "user_id": runtimeOwner, "expires_at": testutil.Raw("now() + interval '1 hour'"),
 	})
-	return fullDelegationFixture{home, target, agent, task, chat, runtimeOwner, targetRuntime, targetChat, foreignChat, token}
+	return fullDelegationFixture{home, target, agent, task, chat, runtimeOwner, targetRuntime, targetChat, foreignAgent, foreignChat, token}
 }
 
 func TestFullDelegationRequiresOwnerChatAndLiveMembership(t *testing.T) {
@@ -111,6 +111,7 @@ func TestFullDelegationTaskUsesGrantorPermissionsAndAgentAttribution(t *testing.
 	router.Get("/api/chat/sessions", testHandler.ListChatSessions)
 	router.Get("/api/chat/sessions/{sessionId}/messages", testHandler.ListChatMessages)
 	router.Get("/api/agents", testHandler.ListAgents)
+	router.Get("/api/agents/{id}", testHandler.GetAgent)
 	router.Get("/api/runtimes", testHandler.ListAgentRuntimes)
 	router.Post("/api/agents", testHandler.CreateAgent)
 	router.With(RequireHumanActor).Get("/api/nondelegable", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -179,6 +180,9 @@ func TestFullDelegationTaskUsesGrantorPermissionsAndAgentAttribution(t *testing.
 	agents := call(http.MethodGet, "/api/agents", "")
 	if agents.Code != http.StatusOK || bytes.Contains(agents.Body.Bytes(), []byte("foreign private agent")) {
 		t.Fatalf("foreign agent visible: %d %s", agents.Code, agents.Body.String())
+	}
+	if got := call(http.MethodGet, "/api/agents/"+f.foreignAgent, ""); got.Code != http.StatusForbidden {
+		t.Fatalf("foreign private agent detail visible: %d %s", got.Code, got.Body.String())
 	}
 	runtimes := call(http.MethodGet, "/api/runtimes", "")
 	if runtimes.Code != http.StatusOK || !bytes.Contains(runtimes.Body.Bytes(), []byte(f.targetRuntime)) {
