@@ -31,7 +31,18 @@ func TestRepoCheckoutUsesTrustedInitiatorAuthor(t *testing.T) {
 		InitiatorName:  "Human",
 		InitiatorEmail: "human@example.com",
 	})
-	body := `{"url":"` + repoURL + `","workspace_id":"` + workspaceID + `","workdir":"` + workDir + `","task_id":"task-1","initiator_name":"Untrusted","initiator_email":"untrusted@example.com"}`
+	payload, err := json.Marshal(map[string]string{
+		"url":             repoURL,
+		"workspace_id":    workspaceID,
+		"workdir":         workDir,
+		"task_id":         "task-1",
+		"initiator_name":  "Untrusted",
+		"initiator_email": "untrusted@example.com",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(payload)
 	rec := httptest.NewRecorder()
 	d.repoCheckoutHandler().ServeHTTP(rec, authorizedRepoCheckoutRequest(strings.NewReader(body)))
 	if rec.Code != http.StatusOK {
