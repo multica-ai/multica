@@ -131,6 +131,7 @@ func TestGuestRoutesAreDenyByDefault(t *testing.T) {
 		{http.MethodPost, "/api/projects", http.StatusForbidden},
 		{http.MethodGet, "/api/autopilots", http.StatusForbidden},
 		{http.MethodGet, "/api/runtimes/" + f.sharedIssue, http.StatusForbidden},
+		{http.MethodGet, "/api/chat/sessions/" + f.sharedIssue, http.StatusForbidden},
 		{http.MethodPost, "/api/chat/sessions", http.StatusForbidden},
 	} {
 		rec := guestRequest(t, ok, f.guest, tc.method, tc.path, nil)
@@ -144,8 +145,10 @@ func TestGuestRoutesAreDenyByDefault(t *testing.T) {
 	for path, want := range map[string]string{
 		"/api/runtimes":           `[]`,
 		"/api/chat/pending-tasks": `{"tasks":[]}`,
-		"/api/issue-views":        `[]`,
-		"/api/project-folders":    `{"folders":[],"filed":[]}`,
+		"/api/chat/sessions/page?status=archived&limit=1": `{"sessions":[],"next_cursor":null,"has_more":false}`,
+		"/api/chat/sessions/summary":                      `{"active_count":0,"archived_count":0,"unread_by_session":{}}`,
+		"/api/issue-views":                                `[]`,
+		"/api/project-folders":                            `{"folders":[],"filed":[]}`,
 	} {
 		rec := guestRequest(t, ok, f.guest, http.MethodGet, path, nil)
 		if rec.Code != http.StatusOK || rec.Body.String() != want {

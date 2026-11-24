@@ -127,6 +127,8 @@ var guestEmptyReads = []struct {
 	{compileGuestRoutes([]string{"GET /api/agent-task-snapshot"})[0], `[]`},
 	{compileGuestRoutes([]string{"GET /api/assignee-frequency"})[0], `[]`},
 	{compileGuestRoutes([]string{"GET /api/chat/sessions"})[0], `[]`},
+	{compileGuestRoutes([]string{"GET /api/chat/sessions/page"})[0], `{"sessions":[],"next_cursor":null,"has_more":false}`},
+	{compileGuestRoutes([]string{"GET /api/chat/sessions/summary"})[0], `{"active_count":0,"archived_count":0,"unread_by_session":{}}`},
 	{compileGuestRoutes([]string{"GET /api/chat/pending-tasks"})[0], `{"tasks":[]}`},
 	{compileGuestRoutes([]string{"GET /api/chat/pending-tasks/has-any"})[0], `{"has_pending":false}`},
 	{compileGuestRoutes([]string{"GET /api/runtimes"})[0], `[]`},
