@@ -88,13 +88,19 @@ func (m *Manager) Restart(id string, resolve func(dir string) (Task, bool)) (Env
 	}
 	if e != nil {
 		m.mu.Lock()
+		if m.worktreeBusyLocked(rec.RepoRoot) {
+			m.mu.Unlock()
+			return Environment{}, fmt.Errorf("checkout finalization or release in progress")
+		}
 		e.restartPins++
 		m.mu.Unlock()
 		defer func() {
 			m.mu.Lock()
-			defer m.mu.Unlock()
 			e.restartPins--
 			m.releaseWorktreesLocked()
+			pending := m.cleanupDoneLocked(rec.RepoRoot)
+			m.mu.Unlock()
+			waitWorktrees(pending)
 		}()
 		m.stop(e, "")
 	}

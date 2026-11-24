@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -282,9 +284,10 @@ func TestDeclaredEnvironmentReleasesWorktreeAtRealTTL(t *testing.T) {
 			if list[0].Detail != "expired" {
 				t.Fatalf("TTL detail=%q", list[0].Detail)
 			}
-			// Waiter and stop goroutines both finish their cleanup under the Manager lock.
+			// Stop records process exit before the lock-free cleanup finishes.
+			// Collect the real filesystem/registration completion separately.
 			f.m.Tick()
-			f.removed()
+			f.eventuallyRemoved()
 			t.Logf("TTL STOP owned=%d state=%s detail=%s", e.pgid, list[0].State, list[0].Detail)
 			return
 		}
@@ -447,9 +450,8 @@ func TestFailedEnvironmentStartConcurrentWithWorktreeCompletion(t *testing.T) {
 		r := <-done
 		t.Fatalf("production finalizer never reached lock barrier: %+v", r)
 	}
-	// Finalize now holds the Manager lock while the real Git lock is held here.
-	// A concurrent Start must either observe the removed directory or fail its
-	// actual cmd.Start, never publish a lease on the disposed checkout.
+	// The production finalizer is waiting at the real Git lock. A concurrent
+	// Start must not publish a lease on the checkout being disposed.
 	startDone := make(chan error, 1)
 	go func() { _, err := f.m.Start(f.task, f.wt.Path, "web", os.Getenv("PATH")); startDone <- err }()
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
@@ -470,14 +472,14 @@ func TestFailedEnvironmentStartConcurrentWithWorktreeCompletion(t *testing.T) {
 	t.Logf("ordered failed Start: %v", startErr)
 }
 
-func TestSharedEnvironmentRealTTLsReleaseOnlyTheLastCheckoutUser(t *testing.T) {
+func TestSharedEnvironmentClockTTLsReleaseOnlyTheLastCheckoutUser(t *testing.T) {
 	f := newWorktreeFixture(t, "1m")
+	advance := fixtureClock(f)
 	data, err := os.ReadFile(filepath.Join(f.wt.Path, ConfigPath))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Keep the second real expiry far enough apart to inspect the first release
-	// without relying on scheduler timing or changing the Manager's clock.
+	// Advance past the first expiry while remaining strictly before the second.
 	config := strings.SplitN(string(data), "[environments.api]", 2)
 	if len(config) != 2 {
 		t.Fatal("fixture has no API declaration")
@@ -493,10 +495,8 @@ func TestSharedEnvironmentRealTTLsReleaseOnlyTheLastCheckoutUser(t *testing.T) {
 		if e.ExpiresAt == nil {
 			t.Fatal("missing real expiry")
 		}
-		t.Logf("waiting for %s real TTL: %s", e.Name, e.ExpiresAt)
-		for time.Now().Before(*e.ExpiresAt) {
-			time.Sleep(250 * time.Millisecond)
-		}
+		t.Logf("advancing past %s TTL: %s", e.Name, e.ExpiresAt)
+		advance(e.ExpiresAt.Add(time.Nanosecond))
 		f.auditProcess(e)
 		f.m.Tick()
 		deadline := time.Now().Add(15 * time.Second)
@@ -514,10 +514,16 @@ func TestSharedEnvironmentRealTTLsReleaseOnlyTheLastCheckoutUser(t *testing.T) {
 		}
 		t.Fatalf("%s real TTL did not finish stopping", e.Name)
 	}
+	if web.ExpiresAt == nil || api.ExpiresAt == nil || !web.ExpiresAt.Before(*api.ExpiresAt) {
+		t.Fatal("shared TTLs are not ordered")
+	}
 	expire(web)
+	if !f.m.now().Before(*api.ExpiresAt) {
+		t.Fatal("first clock advance crossed API expiry")
+	}
 	f.present(api)
 	expire(api)
-	f.removed()
+	f.eventuallyRemoved()
 }
 
 func TestRestartKeepsTheFinalizedEnvironmentCheckout(t *testing.T) {
@@ -588,4 +594,334 @@ func TestEnvironmentStopKeepsTheUserOwnedSourceDirectory(t *testing.T) {
 		t.Fatalf("user source removed: %q %v", b, err)
 	}
 	fixtureGit(t, f.repo, "rev-parse", "main")
+}
+
+// worktreeEvents observes supported production log messages, leaving Git,
+// finalization, process startup and cleanup unchanged.
+type worktreeEvents struct {
+	mu       sync.Mutex
+	waits    chan struct{}
+	warnings int
+}
+
+func (w *worktreeEvents) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if strings.Contains(string(p), "waiting for another task's git section") {
+		select {
+		case w.waits <- struct{}{}:
+		default:
+		}
+	}
+	if strings.Contains(string(p), "release environment worktree failed") {
+		w.warnings++
+	}
+	return len(p), nil
+}
+func (w *worktreeEvents) warningCount() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.warnings
+}
+
+func fixtureClock(f *worktreeFixture) func(time.Time) {
+	var nanos atomic.Int64
+	nanos.Store(time.Now().UnixNano())
+	f.m.now = func() time.Time { return time.Unix(0, nanos.Load()) }
+	return func(now time.Time) { nanos.Store(now.UnixNano()) }
+}
+
+func holdWorktreeGit(t *testing.T, f *worktreeFixture) func() {
+	t.Helper()
+	lock, err := os.OpenFile(filepath.Join(f.repo, ".git", "multica-worktree.lock"), os.O_RDWR|os.O_CREATE, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		lock.Close()
+		t.Fatal(err)
+	}
+	var once sync.Once
+	unlock := func() {
+		once.Do(func() {
+			if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
+				t.Error(err)
+			}
+			lock.Close()
+		})
+	}
+	t.Cleanup(unlock)
+	return unlock
+}
+
+func TestWorktreeGitWaitDoesNotBlockOtherRepositories(t *testing.T) {
+	for _, mode := range []string{"finalize-empty", "finalize-live", "release"} {
+		t.Run(mode, func(t *testing.T) {
+			a := newWorktreeFixture(t, "24h")
+			b := newWorktreeFixture(t, "1m")
+			b.m = a.m
+			advance := fixtureClock(b) // Installed before any probes exist.
+			fixtureWrite(t, filepath.Join(a.wt.Path, "delivered.txt"), "task delivery\n")
+			events := &worktreeEvents{waits: make(chan struct{}, 10)}
+			a.m.logger = slog.New(slog.NewTextHandler(events, nil))
+			var env Environment
+			if mode != "finalize-empty" {
+				env = a.start("web")
+			}
+			if mode == "release" {
+				if _, err := a.m.FinalizeWorktree(a.wt); err != nil {
+					t.Fatal(err)
+				}
+				a.auditProcess(env)
+			}
+			unlock := holdWorktreeGit(t, a)
+			done := make(chan error, 1)
+			go func() {
+				if mode == "release" {
+					_, err := a.m.Stop(a.task, "web")
+					done <- err
+				} else {
+					_, err := a.m.FinalizeWorktree(a.wt)
+					done <- err
+				}
+			}()
+			select {
+			case <-events.waits:
+			case <-time.After(10 * time.Second):
+				unlock()
+				<-done
+				t.Fatal("real Git lock wait was not observed")
+			}
+			// Completion is required WHILE the real lock is still held.
+			otherDone := make(chan error, 1)
+			go func() {
+				b.m.Snapshot()
+				e, err := b.m.Start(b.task, b.wt.Path, "web", os.Getenv("PATH"))
+				if err != nil {
+					otherDone <- err
+					return
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				e = b.m.WaitReady(ctx, e.Key)
+				cancel()
+				if e.State != StateRunning {
+					otherDone <- fmt.Errorf("B not ready: %+v", e)
+					return
+				}
+				b.auditProcess(e)
+				if _, err := b.m.Stop(b.task, "web"); err != nil {
+					otherDone <- err
+					return
+				}
+				api, err := b.m.Start(b.task, b.wt.Path, "api", os.Getenv("PATH"))
+				if err != nil {
+					otherDone <- err
+					return
+				}
+				b.auditProcess(api)
+				advance(api.ExpiresAt.Add(time.Nanosecond))
+				b.m.Tick()
+				deadline := time.Now().Add(3 * time.Second)
+				for time.Now().Before(deadline) {
+					for _, state := range b.m.List(b.task) {
+						if state.Key == api.Key && state.State == StateStopped && !groupAlive(api.pgid) {
+							otherDone <- nil
+							return
+						}
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+				otherDone <- fmt.Errorf("B TTL did not finish while A was blocked")
+			}()
+			var otherErr error
+			blocked := false
+			select {
+			case otherErr = <-otherDone:
+			case <-time.After(5 * time.Second):
+				blocked = true
+			}
+			unlock()
+			if err := <-done; err != nil {
+				t.Error(err)
+			}
+			if blocked {
+				otherErr = <-otherDone
+				t.Error("unrelated Snapshot/Start/Stop/Tick blocked behind repo A Git lock")
+			}
+			if otherErr != nil {
+				t.Error(otherErr)
+			}
+			advance(time.Now())
+		})
+	}
+}
+
+func (f *worktreeFixture) eventuallyRemoved() {
+	f.t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Lstat(f.wt.Path); os.IsNotExist(err) && !f.m.RetainsWorktree(f.wt.Path) {
+			f.removed()
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	f.t.Fatal("checkout cleanup did not complete")
+}
+
+func TestWorktreeReservationExcludesStartsAndRestart(t *testing.T) {
+	for _, mode := range []string{"finalize-empty", "finalize-live", "release"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newWorktreeFixture(t, "24h")
+			fixtureWrite(t, filepath.Join(f.wt.Path, "delivered.txt"), "delivery\n")
+			nested := filepath.Join(f.wt.Path, ".dependencies", "nested")
+			if err := os.MkdirAll(nested, 0700); err != nil {
+				t.Fatal(err)
+			}
+			var e Environment
+			if mode != "finalize-empty" {
+				e = f.start("web")
+			}
+			if mode == "release" {
+				if _, err := f.m.FinalizeWorktree(f.wt); err != nil {
+					t.Fatal(err)
+				}
+				f.auditProcess(e)
+			}
+			events := &worktreeEvents{waits: make(chan struct{}, 10)}
+			f.m.logger = slog.New(slog.NewTextHandler(events, nil))
+			unlock := holdWorktreeGit(t, f)
+			done := make(chan error, 1)
+			go func() {
+				if mode == "release" {
+					_, err := f.m.Stop(f.task, "web")
+					done <- err
+				} else {
+					_, err := f.m.FinalizeWorktree(f.wt)
+					done <- err
+				}
+			}()
+			select {
+			case <-events.waits:
+			case <-time.After(10 * time.Second):
+				unlock()
+				<-done
+				t.Fatal("real lock barrier not reached")
+			}
+			if !f.m.RetainsWorktree(f.root) {
+				t.Error("in-flight checkout is not protected from GC")
+			}
+			for _, dir := range []string{f.wt.Path, nested} {
+				if got, err := f.m.Start(f.task, dir, "api", os.Getenv("PATH")); err == nil {
+					t.Errorf("Start crossed the deletion reservation: %+v", got)
+				}
+			}
+			if mode == "release" {
+				id, _ := IDFromKey(e.Key)
+				if _, err := f.m.Restart(id, func(string) (Task, bool) { return f.task, true }); err == nil {
+					t.Error("Restart pinned an already releasing checkout")
+				}
+			}
+			if len(f.m.List(f.task)) > 1 {
+				t.Error("rejected starts published a record")
+			}
+			unlock()
+			if err := <-done; err != nil {
+				t.Error(err)
+			}
+			if mode == "finalize-live" {
+				f.stop("web")
+			}
+			f.eventuallyRemoved()
+		})
+	}
+}
+
+func TestStopDuringFinalizeKeepsCleanupObligation(t *testing.T) {
+	f := newWorktreeFixture(t, "24h")
+	advance := fixtureClock(f)
+	fixtureWrite(t, filepath.Join(f.wt.Path, "delivered.txt"), "delivery\n")
+	e := f.start("web")
+	events := &worktreeEvents{waits: make(chan struct{}, 10)}
+	f.m.logger = slog.New(slog.NewTextHandler(events, nil))
+	unlock := holdWorktreeGit(t, f)
+	done := make(chan error, 1)
+	go func() { _, err := f.m.FinalizeWorktree(f.wt); done <- err }()
+	select {
+	case <-events.waits:
+	case <-time.After(10 * time.Second):
+		unlock()
+		<-done
+		t.Fatal("real lock barrier not reached")
+	}
+	f.auditProcess(e)
+	f.stop("web")
+	advance(f.m.now().Add(24 * time.Hour))
+	f.m.Tick()
+	views := f.m.Snapshot()
+	if len(views) != 1 || views[0].RetainedWorktree != f.wt.Path {
+		t.Errorf("pending delivery lost ended record/GC protection: %+v", views)
+	}
+	unlock()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	f.eventuallyRemoved()
+}
+
+func TestStartRechecksConfigReadBeforeCheckoutRemoval(t *testing.T) {
+	f := newWorktreeFixture(t, "24h")
+	fixtureWrite(t, filepath.Join(f.wt.Path, "delivered.txt"), "delivery\n")
+	// The ignored directory avoids changing finalization's saved tree. A real
+	// FIFO holds FindConfig's original ReadFile before EOF, without a hook.
+	dir := filepath.Join(f.wt.Path, ".dependencies", "config-read")
+	config := filepath.Join(dir, ConfigPath)
+	if err := os.MkdirAll(filepath.Dir(config), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(config, 0600); err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan error, 1)
+	go func() { _, err := f.m.Start(f.task, dir, "web", os.Getenv("PATH")); started <- err }()
+	writer, err := os.OpenFile(config, os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(writer, fmt.Sprintf("[environments.web]\nstart = %q\n", helperCommand("serve"))); err != nil {
+		writer.Close()
+		t.Fatal(err)
+	}
+	// Writer open proves the original reader has the FIFO open. EOF remains
+	// withheld while the real finalizer removes the checkout.
+	if _, err := f.m.FinalizeWorktree(f.wt); err != nil {
+		writer.Close()
+		<-started
+		t.Fatal(err)
+	}
+	f.removed()
+	writer.Close()
+	if err := <-started; err == nil {
+		t.Fatal("stale config published an environment after removal")
+	}
+	if got := f.m.List(f.task); len(got) != 0 {
+		t.Fatalf("stale config left records: %+v", got)
+	}
+}
+
+func TestFinalizeFailureReleasesReservation(t *testing.T) {
+	f := newWorktreeFixture(t, "24h")
+	f.wt.AbortWithReason(errors.New("synthetic task abort"))
+	if _, err := f.m.FinalizeWorktree(f.wt); err == nil {
+		t.Fatal("aborted finalization succeeded")
+	}
+	if f.m.RetainsWorktree(f.root) {
+		t.Fatal("failed finalization stranded its reservation")
+	}
+	e := f.start("web")
+	f.present(e)
+	f.stop("web")
+	if _, err := os.Stat(f.wt.Path); err != nil {
+		t.Fatalf("failed delivery was cleaned: %v", err)
+	}
 }

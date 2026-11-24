@@ -146,6 +146,9 @@ func (s *environmentService) servesFrom(dir string) bool {
 	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
 		dir = resolved
 	}
+	if s.manager.RetainsWorktree(dir) {
+		return true
+	}
 	for _, env := range s.manager.Snapshot() {
 		if env.RetainedWorktree != "" && pathWithin(env.RetainedWorktree, dir) {
 			return true

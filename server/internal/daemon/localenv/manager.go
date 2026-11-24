@@ -135,14 +135,16 @@ type record struct {
 	Adopted []int `json:"adopted,omitempty"`
 	// Worktree is set only after successful task branch delivery. It survives
 	// daemon restarts until the last environment using that checkout ends.
-	Worktree *execenv.FinalizedLocalWorktree `json:"worktree,omitempty"`
+	Worktree        *execenv.FinalizedLocalWorktree `json:"worktree,omitempty"`
+	WorktreeRetryAt time.Time                       `json:"worktree_retry_at,omitempty"`
 }
 
 type entry struct {
 	rec      record
 	stopping bool
 	// Restart keeps the checkout pinned between stopping and replacing a process.
-	restartPins int
+	restartPins  int
+	finalizePins int
 	// leaderDone is closed once the start command's own process has exited.
 	// It is nil for an environment adopted after a daemon restart, whose
 	// liveness is checked on its process group instead.
@@ -160,16 +162,18 @@ type Manager struct {
 
 	mu          sync.Mutex
 	envs        map[string]*entry
+	worktrees   map[string]*worktreeOperation
 	lastLogSwep time.Time
 }
 
 func NewManager(dir string, logger *slog.Logger) *Manager {
 	return &Manager{
-		dir:    dir,
-		logger: logger,
-		now:    time.Now,
-		client: &http.Client{Timeout: 2 * time.Second},
-		envs:   make(map[string]*entry),
+		dir:       dir,
+		logger:    logger,
+		now:       time.Now,
+		client:    &http.Client{Timeout: 2 * time.Second},
+		envs:      make(map[string]*entry),
+		worktrees: make(map[string]*worktreeOperation),
 	}
 }
 
@@ -249,6 +253,15 @@ func (m *Manager) Start(task Task, dir, name, pathEnv string) (Environment, erro
 		if e.live() && !e.stopping && sameOwner(e.rec, task) && e.rec.Name == name && e.rec.RepoRoot == cfg.RepoRoot {
 			return m.viewLocked(e), nil
 		}
+	}
+	if m.worktreeBusyLocked(dir) || m.worktreeBusyLocked(cfg.RepoRoot) {
+		return Environment{}, fmt.Errorf("checkout finalization or release in progress")
+	}
+	// Config lookup precedes admission. Recheck the directory after taking the
+	// reservation mutex so a completed removal cannot publish a stale lease.
+	resolved, resolveErr := filepath.EvalSymlinks(dir)
+	if resolveErr != nil || resolved != dir {
+		return Environment{}, ErrGone
 	}
 	port, err := m.allocatePortLocked()
 	if err != nil {
@@ -380,7 +393,7 @@ func (m *Manager) Tick() {
 			expired = append(expired, e)
 		case e.live() && e.leaderGone() && !groupAlive(e.rec.PID):
 			m.endLocked(e, StateExited, "")
-		case !e.live() && e.restartPins == 0 && e.rec.Worktree == nil && now.Sub(*e.rec.EndedAt) > endedRetention:
+		case !e.live() && e.restartPins == 0 && e.finalizePins == 0 && e.rec.Worktree == nil && now.Sub(*e.rec.EndedAt) > endedRetention:
 			delete(m.envs, id)
 		}
 	}
@@ -508,7 +521,10 @@ func (m *Manager) setRunning(e *entry) {
 func (m *Manager) stop(e *entry, detail string) {
 	m.mu.Lock()
 	if !e.live() {
+		m.releaseWorktreesLocked()
+		pending := m.cleanupDoneLocked(e.rec.RepoRoot)
 		m.mu.Unlock()
+		waitWorktrees(pending)
 		return
 	}
 	e.stopping = true
@@ -546,11 +562,13 @@ func (m *Manager) stop(e *entry, detail string) {
 		}
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if e.live() {
 		m.endLocked(e, StateStopped, e.rec.Detail)
 	}
 	m.releaseWorktreesLocked()
+	pending := m.cleanupDoneLocked(rec.RepoRoot)
+	m.mu.Unlock()
+	waitWorktrees(pending)
 	m.logger.Info("environment stopped", "name", rec.Name, "id", rec.ID)
 }
 
@@ -613,6 +631,12 @@ func (m *Manager) viewLocked(e *entry) Environment {
 	}
 	if rec.Worktree != nil {
 		view.RetainedWorktree = rec.Worktree.Path
+	}
+	for path := range m.worktrees {
+		if within(rec.RepoRoot, path) {
+			view.RetainedWorktree = path
+			break
+		}
 	}
 	if e.live() {
 		expires := rec.ExpiresAt
