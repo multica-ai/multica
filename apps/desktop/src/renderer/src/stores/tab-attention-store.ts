@@ -41,6 +41,8 @@ export function useTabAttention(tabId: string): boolean {
 interface TabGroupLike {
   tabs: { id: string; url: string }[];
   activeTabId: string;
+  /** uuid → identifier for issue tabs, as the tab store records it. */
+  issueAliases?: Record<string, string>;
 }
 
 /** A `task:completed` / `task:failed` payload — one finished run. */
@@ -69,13 +71,18 @@ export function attentionTargetTabIds(
     const visibleTabId = slug === activeWorkspaceSlug ? group.activeTabId : null;
     for (const tab of group.tabs) {
       if (tab.id === visibleTabId) continue;
-      if (tabMatchesEvent(slug, tab.url, event)) targets.push(tab.id);
+      if (tabMatchesEvent(slug, tab.url, event, group.issueAliases)) targets.push(tab.id);
     }
   }
   return targets;
 }
 
-function tabMatchesEvent(slug: string, url: string, event: TaskFinishedEvent): boolean {
+function tabMatchesEvent(
+  slug: string,
+  url: string,
+  event: TaskFinishedEvent,
+  issueAliases: Record<string, string> | undefined,
+): boolean {
   const { pathname, suffix } = splitTabUrl(url);
   const segments = pathname.split("/").filter(Boolean);
   if (segments[0] !== slug) return false;
@@ -89,9 +96,16 @@ function tabMatchesEvent(slug: string, url: string, event: TaskFinishedEvent): b
     );
   }
 
-  // An issue detail tab: `/slug/issues/<id>`. List routes (`/slug/issues`,
+  // An issue detail tab: `/slug/issues/<segment>`. List routes (`/slug/issues`,
   // `/slug/issues/new`) never have a third segment and cannot match.
-  return segments.length === 3 && segments[1] === "issues" && segments[2] === event.issue_id;
+  if (segments.length !== 3 || segments[1] !== "issues") return false;
+  // The app links an issue by identifier (`MUL-123`) and only falls back to
+  // its uuid, while a task event carries the uuid alone — so an identifier
+  // link is matched through the tab store's uuid → identifier aliases.
+  const segment = segments[2]?.toLowerCase();
+  if (segment === event.issue_id.toLowerCase()) return true;
+  const identifier = issueAliases?.[event.issue_id]?.toLowerCase();
+  return identifier !== undefined && segment === identifier;
 }
 
 function searchParamsOfSuffix(suffix: string): URLSearchParams {

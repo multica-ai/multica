@@ -58,6 +58,38 @@ describe("attentionTargetTabIds", () => {
     expect(attentionTargetTabIds(byWorkspace, "acme", ISSUE_EVENT)).toEqual(["detail"]);
   });
 
+  it("dots an issue tab linked by identifier through the group's uuid → identifier alias", () => {
+    const byWorkspace = {
+      acme: {
+        ...group(
+          [
+            { id: "detail", url: "/acme/issues/ACM-1" },
+            { id: "list", url: "/acme/issues" },
+          ],
+          "list",
+        ),
+        issueAliases: { "issue-1": "ACM-1" },
+      },
+    };
+    expect(attentionTargetTabIds(byWorkspace, "acme", ISSUE_EVENT)).toEqual(["detail"]);
+  });
+
+  it("ignores an identifier link with no alias for the finished issue", () => {
+    const byWorkspace = {
+      acme: {
+        ...group(
+          [
+            { id: "detail", url: "/acme/issues/ACM-1" },
+            { id: "list", url: "/acme/issues" },
+          ],
+          "list",
+        ),
+        issueAliases: { "issue-2": "ACM-1" },
+      },
+    };
+    expect(attentionTargetTabIds(byWorkspace, "acme", ISSUE_EVENT)).toEqual([]);
+  });
+
   it("never dots the visible tab — active tab of the active workspace", () => {
     const byWorkspace = {
       acme: group([{ id: "chat", url: "/acme/chat?session=sess-1" }], "chat"),

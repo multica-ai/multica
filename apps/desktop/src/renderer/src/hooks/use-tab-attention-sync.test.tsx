@@ -28,6 +28,8 @@ function dottedTabIds() {
   return Object.keys(useTabAttentionStore.getState().attention);
 }
 
+const ISSUE_UUID = "01a1ae41-a86a-7cc1-9737-2acb8a445fe6";
+
 /** url of the workspace's tab with this resourceKey, by title for lookup. */
 function tabIdFor(url: string) {
   const group = useTabStore.getState().byWorkspace.acme!;
@@ -61,6 +63,27 @@ describe("useTabAttentionSync", () => {
     fireTaskCompleted({ issue_id: "issue-9" });
 
     expect(dottedTabIds()).toEqual([tabIdFor("/acme/issues/issue-9")]);
+  });
+
+  it("dots an issue tab whose link is the identifier, not the uuid", () => {
+    // The app links issues by identifier (MUL-9810); a task event carries
+    // only the uuid. The tab bar records uuid → identifier for every issue
+    // tab once it resolves, background tabs included.
+    const tabId = useTabStore.getState().openTab("/acme/issues/ACM-9", "ACM-9");
+    useTabStore.getState().rememberIssueIdentity(tabId, ISSUE_UUID, "ACM-9");
+
+    fireTaskCompleted({ issue_id: ISSUE_UUID });
+
+    expect(dottedTabIds()).toEqual([tabId]);
+  });
+
+  it("leaves an identifier link alone when it is some other issue", () => {
+    const tabId = useTabStore.getState().openTab("/acme/issues/ACM-9", "ACM-9");
+    useTabStore.getState().rememberIssueIdentity(tabId, ISSUE_UUID, "ACM-9");
+
+    fireTaskCompleted({ issue_id: "01a1ae41-0000-7cc1-9737-2acb8a445fe6" });
+
+    expect(dottedTabIds()).toEqual([]);
   });
 
   it("does not dot the chat tab the user is currently looking at", () => {
