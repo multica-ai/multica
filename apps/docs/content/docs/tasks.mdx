@@ -42,7 +42,7 @@ A run typically moves through these states:
 | `deferred` | Scheduled to fire later; enters the queue at the appointed time |
 | `queued` | Waiting for a runtime to claim it |
 | `dispatched` | A runtime has claimed it and is starting the AI coding tool |
-| `waiting_local_directory` | The target local directory is held by another run; waiting for the directory lock to release |
+| `waiting_local_directory` | Waiting for the target local directory or a daemon execution slot before startup |
 | `running` | The AI coding tool is executing |
 | `completed` | The run finished normally |
 | `failed` | The run errored or was interrupted |
@@ -70,7 +70,7 @@ In the execution log you can:
 - Stop runs that are queued, starting, waiting for a local directory, or working.
 - Retry a failed or cancelled run.
 
-The demo below walks through a full cycle: a run queues, starts, and fails; you retry it and the new run completes. Once the new run starts, you can also try stopping it midway.
+The diagram below maps every state transition in a run's lifecycle, including the retry path after failure and cancellation while queued or running. Select any state to inspect its transitions.
 
 <RunLifecycleDemo />
 
@@ -80,7 +80,7 @@ The demo below walks through a full cycle: a run queues, starts, and fails; you 
 Changing an issue's assignee or status does not stop a run that has already started; to interrupt one, stop it in the execution log. Deleting an issue cancels its active runs.
 </Callout>
 
-The execution log also totals the issue's **Spent**, **Tokens**, and **Agent time**, with one cost bar per run. Clicking the total, a bar, or **Open timeline** opens the **Runs** dialog, which charts cost per run or cumulatively, splits it by agent and by model, and counts failed and cancelled runs. Costs are estimates; see [Analytics](/analytics#issue-cost) for how they are calculated and for workspace-wide usage.
+The execution log's header shows what the issue has spent so far. **Open timeline** opens the **Runs** dialog, which totals **Spent**, **Tokens**, and **Agent time**, charts cost per run or cumulatively, splits it by agent and by model, and counts failed and cancelled runs. Costs are estimates; see [Analytics](/analytics#issue-cost) for how they are calculated and for workspace-wide usage.
 
 ## Failures and automatic retries
 
@@ -105,6 +105,7 @@ The failure reasons shown in the execution log and [Analytics](/analytics#errors
 | `queued_expired` | The runtime stopped heartbeating for longer than the reconnect grace, and the run had also been queued that long | Confirm the runtime is online, then retry |
 | `runtime_recovery` | The daemon reclaimed an interrupted run after restarting | Retry directly |
 | `environment_prepare_failed` | The daemon could not set up the execution environment for this run — its working directory, or the local runtime config written into it | Read the raw error to see which step failed, then check that machine: disk space, permissions, a directory still in use, or the AI coding tool's local config |
+| `local_directory_missing` | The local folder linked to the project no longer exists on the computer running the agent — it was deleted or moved after it was linked | Restore the folder at the same path, then retry. To use a new location, remove the old folder from **Resources** (its **⋯** menu → **Remove**) and link the new one from Desktop on that computer — browsers cannot pick folders; see [Project resources](/project-resources) |
 | `cancelled` | Stopped manually, or cancelled along with an archive or delete | Nothing to do |
 | `timeout` | Exceeded the daemon's configured execution time limit | Narrow the issue scope, or adjust the daemon's `agent_timeout` |
 | `iteration_limit` | Hit the iteration cap for a run | Narrow the issue scope |
@@ -120,8 +121,8 @@ The `agent_error.` prefix is omitted in this table.
 | Reason | Meaning | What to do |
 | --- | --- | --- |
 | `provider_auth_or_access` | Model provider authentication failed or access denied (401/403) | Sign in again in that AI coding tool, or check the API key |
-| `provider_quota_limit` | Quota or balance exhausted (402) | Top up or switch accounts |
-| `provider_capacity_or_rate_limit` | Rate limited or out of capacity (429/529) | Retry later |
+| `provider_quota_limit` | Quota or balance exhausted | Top up or switch accounts |
+| `provider_capacity_or_rate_limit` | Rate limited or out of capacity | Retry later |
 | `provider_server_error` | Model provider server error (5xx) | Retry later |
 | `provider_network` | Network failure reaching the model provider | Retries automatically; check the executing machine's network if it persists |
 | `model_not_found_or_unavailable` | The model does not exist or is currently unavailable | Pick an available model in the agent settings |
@@ -167,8 +168,10 @@ The numbers below are the server's defaults.
 | `deferred` | Scheduled to fire later | Enters `queued` at the scheduled time, then the rules below apply |
 | `queued` | Waiting for a runtime to claim it | Waits as long as its runtime keeps heartbeating, and in every case for at least one reconnect grace after being queued; fails only when both windows have passed, and is not retried automatically |
 | `dispatched` | Claimed; the tool is starting | Treated as failed after more than **5 minutes** in this state |
-| `waiting_local_directory` | Waiting for the local directory lock to release | No timeout of its own; returns to the startup flow once the directory is released |
+| `waiting_local_directory` | Waiting for the local directory and execution capacity | No timeout of its own; resumes startup once the directory and a daemon execution slot are available |
 | `running` | The AI coding tool is executing | No fixed duration cap; liveness follows the runtime heartbeat — one every 15 seconds; a runtime that loses its heartbeat is marked offline within about 3 minutes at the latest. Its runs fail only once the heartbeat has been missing longer than the reconnect grace (`MULTICA_RUNTIME_RECONNECT_GRACE`, 3 hours by default); a daemon restart reclaims them directly |
+
+For a confirmed Trae CLI `llm response empty stream` disconnect, automatic retry also requires the daemon to verify that no tool call started in the turn. If a tool started or the execution history is unavailable, check the execution log before retrying manually.
 
 Automatic retry covers only the transient faults below, and only applies to runs attached to an issue or a chat (excluding the Autopilot **run only** mode):
 

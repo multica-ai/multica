@@ -13,7 +13,21 @@ const selection = vi.hoisted(() => ({
 
 const deletionPolicy = vi.hoisted(() => ({ allowed: true }));
 vi.mock("@multica/core/issues/use-issue-deletion", () => ({
-  useIssueDeletion: () => ({ canDelete: () => deletionPolicy.allowed }),
+  useIssueDeletion: () => ({ canDelete: () => deletionPolicy.allowed, offersDelete: true }),
+}));
+
+const viewer = vi.hoisted(() => ({ guest: false }));
+vi.mock("@multica/core/permissions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/permissions")>()),
+  useIsGuest: () => viewer.guest,
+}));
+
+vi.mock("../../navigation", () => ({
+  useNavigation: () => ({ getShareableUrl: (path: string) => `https://app.example${path}` }),
+}));
+vi.mock("@multica/core/paths", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/paths")>()),
+  useWorkspacePaths: () => ({ issueDetail: (id: string) => `/acme/issues/${id}` }),
 }));
 
 vi.mock("@multica/core/issues/stores/selection-store", () => ({
@@ -141,7 +155,26 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
 
 beforeEach(() => {
   deletionPolicy.allowed = true;
+  viewer.guest = false;
   selection.selectedIds = new Set();
+});
+
+describe("BatchActionToolbar for a guest (MUL-9883)", () => {
+  it("offers only Copy links in place of the field pickers and the More menu", () => {
+    viewer.guest = true;
+    const issues = [makeIssue({ id: "a" }), makeIssue({ id: "b" })];
+    selection.selectedIds = new Set(["a", "b"]);
+
+    render(<BatchActionToolbar issues={issues} />);
+
+    for (const picker of ["status-picker", "priority-picker", "assignee-picker", "label-picker", "project-picker", "due-date-picker"]) {
+      expect(screen.queryByTestId(picker)).not.toBeInTheDocument();
+    }
+    // No More menu: its trigger is the bar's only menu button.
+    expect(document.querySelector('button[aria-haspopup="menu"]')).toBeNull();
+    // Clear selection, then Copy links.
+    expect(screen.getAllByRole("button")).toHaveLength(2);
+  });
 });
 
 describe("BatchActionToolbar picker wiring", () => {

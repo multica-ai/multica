@@ -25,10 +25,15 @@ const ctx = vi.hoisted(() => ({
 }));
 
 vi.mock("electron-updater", () => {
+  let channel: string | undefined;
   const autoUpdater = {
     autoDownload: false,
     autoInstallOnAppQuit: false,
-    channel: undefined as string | undefined,
+    get channel() { return channel; },
+    set channel(value: string | undefined) {
+      channel = value;
+      this.allowDowngrade = true;
+    },
     allowDowngrade: false,
     on: vi.fn((event: string, handler: Handler) => {
       const handlers = ctx.handlers.get(event) ?? [];
@@ -68,6 +73,19 @@ import {
   type UpdaterDaemonGate,
 } from "./updater";
 import { updaterPreferencesPath } from "./updater-preferences";
+
+it("disables downgrades after selecting the Windows arm64 channel", async () => {
+  vi.stubGlobal("process", { ...process, platform: "win32", arch: "arm64" });
+  vi.resetModules();
+  try {
+    await import("./updater");
+    expect(autoUpdater.channel).toBe("latest-arm64");
+    expect(autoUpdater.allowDowngrade).toBe(false);
+  } finally {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  }
+});
 
 describe("macOS x64 update channel", () => {
   it("does not touch established architecture paths", () => {
@@ -256,6 +274,71 @@ describe("setupAutoUpdater", () => {
     });
   });
 
+  it("returns a safe reason instead of the raw check failure", async () => {
+    const { win, send } = makeWindow();
+    setupAutoUpdater(() => [win]);
+    const error = Object.assign(new Error("private headers and stack"), { code: "ERR_UPDATER_CHANNEL_FILE_NOT_FOUND" });
+    ctx.checkForUpdates.mockRejectedValueOnce(error);
+    await expect(invokeIpc("updater:check")).resolves.toEqual({
+      ok: false,
+      reason: "unavailable",
+      error: "Unable to check for updates. Please try again later.",
+    });
+    emitUpdater("error", error);
+    expect(send).not.toHaveBeenCalled();
+    await invokeIpc("updater:get-preferences");
+  });
+
+  it("broadcasts a download failure once and exposes a recoverable state", async () => {
+    const { win, send } = makeWindow();
+    setupAutoUpdater(() => [win]);
+    let rejectDownload!: (error: Error) => void;
+    const downloadPromise = new Promise<unknown>((_resolve, reject) => { rejectDownload = reject; });
+    ctx.checkForUpdates.mockImplementationOnce(async () => {
+      emitUpdater("update-available", { version: "0.3.18" });
+      return { updateInfo: { version: "0.3.18" }, isUpdateAvailable: true, downloadPromise };
+    });
+    await invokeIpc("updater:check");
+    const error = Object.assign(new Error("secret download response"), { code: "ECONNRESET" });
+    emitUpdater("error", error);
+    rejectDownload(error);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(send.mock.calls.filter(([channel, state]) => channel === "updater:download-state" && state.status === "error")).toEqual([
+      ["updater:download-state", { status: "error", reason: "network" }],
+    ]);
+    await expect(invokeIpc("updater:get-download-state")).resolves.toEqual({ status: "error", reason: "network" });
+    emitUpdater("update-available", { version: "0.3.18" });
+    emitUpdater("update-downloaded", { version: "0.3.18" });
+    await expect(invokeIpc("updater:get-download-state")).resolves.toEqual({ status: "downloaded", version: "0.3.18" });
+  });
+
+  it("handles a rejected download promise even without an updater error event", async () => {
+    const { win, send } = makeWindow();
+    setupAutoUpdater(() => [win]);
+    ctx.checkForUpdates.mockImplementationOnce(async () => {
+      emitUpdater("update-available", { version: "0.3.18" });
+      return {
+        updateInfo: { version: "0.3.18" }, isUpdateAvailable: true,
+        downloadPromise: Promise.reject(new Error("download failed")),
+      };
+    });
+    await invokeIpc("updater:check");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(send).toHaveBeenCalledWith("updater:download-state", { status: "error", reason: "unknown" });
+  });
+
+  it("coalesces concurrent manual checks", async () => {
+    setupAutoUpdater(() => []);
+    let resolve!: (value: { updateInfo: { version: string }; isUpdateAvailable: boolean }) => void;
+    ctx.checkForUpdates.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    const first = invokeIpc("updater:check");
+    const second = invokeIpc("updater:check");
+    expect(ctx.checkForUpdates).toHaveBeenCalledTimes(1);
+    resolve({ updateInfo: { version: "0.3.18" }, isUpdateAvailable: false });
+    await Promise.all([first, second]);
+    await invokeIpc("updater:get-preferences");
+  });
+
   it("skips update progress when the BrowserWindow has already been destroyed", () => {
     setupAutoUpdater(() => [makeDestroyedWindow()]);
 
@@ -420,7 +503,19 @@ describe("createElectronBusyInstallPrompt", () => {
       buttons: ["Install now", "Cancel"],
       defaultId: 1,
       cancelId: 1,
-      message: "2 agent tasks are running on this computer.",
+      message: "2 runs are active on this device.",
+    }));
+  });
+
+  it("localizes the busy-install dialog for non-English OS locales", async () => {
+    const showMessageBox = vi.fn(async () => ({ response: 1 }));
+    await expect(
+      createElectronBusyInstallPrompt(showMessageBox, () => "zh-CN")(2),
+    ).resolves.toBe(false);
+    expect(showMessageBox).toHaveBeenCalledWith(expect.objectContaining({
+      title: "安装更新",
+      buttons: ["立即安装", "取消"],
+      message: "此设备上有 2 次运行尚未结束。",
     }));
   });
 });

@@ -1,0 +1,89 @@
+---
+title: Partager un pool d'agents dans une équipe
+description: Comment plusieurs développeurs partagent un même pool d'agents de codage IA, contrôlent qui peut exécuter chacun, se passent le travail entre personnes et agents, et voient ce que fait chaque agent.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Ce guide s'adresse à une équipe de plusieurs développeurs qui veulent partager des agents de codage IA plutôt que de faire tourner chacun les siens dans un terminal. Il relie des fonctionnalités décrites sur des pages séparées : les [rôles](/members-roles), l'[accès](/agents#permissions-et-accès) aux agents, le [partage des runtimes](/daemon-runtimes#runtimes-privés-et-publics), les [squads](/squads) et les [workflows](/workflows).
+
+Dans un espace de travail Multica, membres et agents travaillent sur les mêmes tâches. Toute tâche peut être assignée à une personne, à un agent ou à une squad ; les agents publient leur avancement en commentaires, passent la tâche en `in_review` quand ils livrent, et chaque exécution est enregistrée sur la tâche.
+
+## À quoi sert chaque élément
+
+| Votre équipe doit | Utiliser | Où le régler |
+|---|---|---|
+| Voir tout le travail, humain et agent, au même endroit | Un seul espace de travail, avec les dispositions Liste, Tableau, Grille, Gantt et Couloirs | [Tâches](/issues) |
+| Décider qui appartient à l'espace de travail et ce qu'il peut gérer | Les rôles : `owner`, `admin`, `member`, et des invités limités à certains projets | [Membres et rôles](/members-roles) |
+| Décider qui peut exécuter un agent donné | L'accès de l'agent : **Moi uniquement**, **Tout l'espace de travail** ou **Personnes précises** | [Agents](/agents#permissions-et-accès) |
+| Partager les ordinateurs sur lesquels tournent les agents | Des runtimes privés, publics ou partagés avec certains membres | [Partage des runtimes](/daemon-runtimes#runtimes-privés-et-publics) |
+| Envoyer le travail au bon agent sans le choisir à chaque fois | Une squad, dont l'agent leader répartit chaque tâche | [Squads](/squads) |
+| Passer le travail d'un agent à un relecteur, puis le renvoyer | Le statut de revue, les commentaires et les passages de relais du workflow | [Workflows](/workflows) |
+| Réutiliser les méthodes de l'équipe entre agents | Des skills attachés aux agents | [Skills](/skills) |
+| Lancer un travail récurrent sans que personne ne le démarre | Des automatisations planifiées ou déclenchées par webhook | [Automatisations](/autopilots) |
+| Surveiller les coûts et les échecs | Rapports d'usage et d'erreurs par agent | [Statistiques](/analytics) |
+
+## Exemple : une équipe de 10 ingénieurs
+
+Les étapes ci-dessous mettent en place une équipe de dix développeurs qui partagent trois agents. Adaptez les noms et les nombres à votre équipe.
+
+1. **Créez l'espace de travail et invitez l'équipe.** Un `owner` ou un `admin` invite les développeurs comme `member` et un ou deux responsables comme `admin`. Un prestataire qui ne doit suivre qu'un projet rejoint l'espace comme [invité](/members-roles#invités), avec ce projet partagé.
+2. **Connectez les ordinateurs.** Chaque développeur qui veut des agents sur sa propre machine ouvre [Multica Desktop](/desktop-app), qui l'enregistre comme runtime. Pour les agents dont toute l'équipe dépend, connectez une machine partagée, comme une VM cloud, avec `multica setup`, et demandez à son propriétaire de rendre le runtime public ou de le partager avec certains membres. Partager un runtime permet à d'autres d'y exécuter des agents ; cela ne partage pas la connexion à l'outil de codage IA.
+3. **Créez les agents partagés.** Par exemple un agent **Frontend** sur Claude Code, un agent **Backend** sur Codex et un agent **Reviewer** sur un autre outil, tous sur le runtime partagé. Donnez-leur des instructions et les [skills](/skills) de l'équipe. Réglez l'accès sur **Tout l'espace de travail** pour les agents que tout le monde peut utiliser, et sur **Personnes précises** pour un agent qui détient des identifiants sensibles.
+4. **Ajoutez une squad.** Placez les trois agents dans une squad avec un agent leader. Les membres assignent une tâche à la squad, et le leader choisit qui s'en charge.
+5. **Mettez en place la revue.** Dans un projet, choisissez un [workflow](/workflows) comme **Livraison** : le développement est confié à un agent d'ingénierie, la revue à l'agent Reviewer et la QA à un membre.
+6. **Commencez à assigner.** Les développeurs créent des tâches et les assignent à un agent, à la squad ou à un collègue. Les agents travaillent sur le runtime partagé et laissent leurs résultats sur chaque tâche.
+
+Les essais personnels ne gênent personne : un agent qu'un développeur garde en **Moi uniquement** sur son propre portable n'apparaît dans les sélecteurs de personne d'autre.
+
+## Comment contrôler quels membres peuvent utiliser quel agent ?
+
+Chaque agent a un propriétaire et un réglage d'accès. L'accès décide qui peut l'exécuter, c'est-à-dire lui assigner des tâches, le @mentionner ou discuter avec lui :
+
+| Accès | Qui peut l'exécuter |
+|---|---|
+| **Moi uniquement** (par défaut) | Uniquement le propriétaire de l'agent. |
+| **Tout l'espace de travail** | Les membres ayant le rôle `owner`, `admin` ou `member`. |
+| **Personnes précises** | Le propriétaire de l'agent et les membres sélectionnés. |
+
+Quelques règles importantes pour une équipe :
+
+- Les `owner` et `admin` de l'espace de travail voient et gèrent tous les agents, mais leur rôle ne leur permet pas d'exécuter un agent auquel ils n'ont pas accès. Seul le propriétaire de l'agent peut modifier son accès.
+- Les invités ne peuvent ni exécuter ni @mentionner d'agents.
+- Le sélecteur d'assigné et le menu des @mentions ne listent que les agents que la personne peut exécuter.
+- Une squad n'élargit pas l'accès : pour assigner ou @mentionner une squad, il faut pouvoir exécuter son leader.
+- Retirer un membre efface les autorisations qu'il avait dans l'accès des autres agents.
+- Les identifiants placés dans les variables d'environnement d'un agent ne peuvent être affichés que par les `owner` et `admin` de l'espace de travail, et chaque lecture est journalisée. Voir [Variables d'environnement et identifiants](/agents-create#variables-denvironnement-et-identifiants).
+
+Les projets privés ajoutent une seconde limite. Un projet privé n'est visible que par les personnes de sa liste de membres, et une exécution d'agent ne le voit que si la personne qui l'a lancée et le propriétaire de l'agent figurent tous deux sur cette liste. Voir [Projets privés](/projects#private-projects).
+
+## Comment personnes et agents se passent-ils le travail ?
+
+L'assignation et les commentaires portent le passage de relais, et la tâche garde le contexte entre les étapes :
+
+1. **L'agent écrit le code.** Assignez la tâche à un agent. Il passe en `in_progress` au démarrage, commente au fil de l'eau et passe en `in_review` quand il livre, généralement avec une pull request.
+2. **Un collègue relit.** Le relecteur consulte sur la tâche le journal d'exécution et la PR liée. Avec l'[intégration GitHub](/github-integration), la tâche affiche l'état de la PR, les résultats de CI et les conflits.
+3. **Un agent corrige les remarques.** Le relecteur répond sur la tâche et @mentionne l'agent, ou un autre agent, en précisant quoi changer. L'agent mentionné reprend la même tâche avec toute la discussion. S'il travaille encore, la réponse peut [rejoindre son exécution en cours](/mentioning-agents#réorienter-un-agent-en-cours-dexécution).
+4. **Le travail se clôt.** Par défaut, les agents s'arrêtent à `in_review` ; `done` revient à une personne, ou à l'intégration GitHub, qui par défaut passe la tâche en `done` une fois toutes les PR liées fusionnées.
+
+Pour figer ces étapes plutôt que de les improviser, utilisez un [workflow](/workflows). Chaque statut peut confier la tâche à un agent ou à un membre, avec des instructions pour cette étape, ainsi que **Une fois terminé, passer à** et **En cas de rejet, renvoyer à**. Faire entrer une tâche en Revue la confie alors à l'agent de revue, et un rejet la renvoie en Développement.
+
+## Comment tout le monde voit-il ce que fait chaque agent ?
+
+- La vue **En cours d'exécution** de la barre latérale liste les tâches sur lesquelles un agent travaille en ce moment, dans tout l'espace de travail.
+- La liste des agents indique la disponibilité de chaque agent, issue de son runtime, et sa charge : en cours, en file d'attente ou inactif.
+- Chaque tâche conserve le journal de chaque exécution : appels d'outils, commandes et erreurs, horodatés. Voir [Exécutions](/tasks).
+- La [boîte de réception](/inbox) prévient chacun quand du travail lui est assigné, quand un agent le @mentionne ou commente une tâche qu'il suit, et quand une exécution échoue, sans lister chaque étape.
+- Les [statistiques](/analytics) montrent le coût, les tokens, la durée d'exécution et les exécutions en échec de l'espace de travail, avec un classement par agent et les raisons des échecs.
+
+<Callout type="info">
+Un membre ordinaire ne voit pas les agents **Moi uniquement** des autres. Leur consommation apparaît dans les statistiques sous **Autres agents**, sans nom.
+</Callout>
+
+## Voir aussi
+
+- [Multica face à Linear et Jira](/compare/linear-jira) : quand une équipe doit garder son outil de suivi et quand déplacer le travail des agents dans Multica.
+- [Membres et rôles](/members-roles) : invitations, invités et changements de rôle.
+- [Agents](/agents) : configuration des agents et règles d'accès complètes.
+- [Squads](/squads) : comment le leader répartit le travail et quand il est réveillé.
+- [Workflows](/workflows) : définir des étapes et des passages de relais fixes pour un projet.

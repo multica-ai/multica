@@ -46,7 +46,6 @@
   "list": {
     "loading_selection": "正在載入通知…",
     "empty": "暫無通知",
-    "mark_done_tooltip": "標為已完成",
     "archive_tooltip": "歸檔",
     "time": {
       "just_now": "剛剛",
@@ -55,6 +54,7 @@
       "days": "{{count}} 天"
     },
     "archived_title": "已歸檔",
+    "snoozed_title": "已延後",
     "archived_empty": "暫無已歸檔通知",
     "unarchive_tooltip": "取消歸檔",
     "actions_aria": "通知操作",
@@ -64,16 +64,27 @@
   },
   "detail": {
     "select_prompt": "選擇一條通知檢視詳情",
-    "empty": "收件箱為空",
+    "restore": "移回收件箱",
+    "more_actions": "更多通知操作",
     "original_input": "原始輸入",
     "retry_with_context": "保留上下文重試",
-    "edit_advanced": "在完整表單中編輯",
-    "autopilot_quota_exceeded_body": "當前週期的 {{limit}} 次自動化執行額度已用完。在 {{resetAt}} 重置前，後續自動化執行將不會啟動。",
+    "edit_advanced": "開啟完整表單",
+    "autopilot_quota_exceeded_body": "目前週期的 {{limit}} 次自動化執行額度已用完。在 {{resetAt}} 重置、升級方案或加購之前，後續自動化執行將不會啟動。",
+    "app_tool_calls_quota_exceeded_body": "本工作區本月的 {{limit}} 次應用呼叫已用完。在 {{resetAt}} 重置、升級方案或增加席位之前，AI 代理無法呼叫應用工具。",
+    "app_tool_calls_quota_action": "管理帳單",
     "project_owner_joined_body": "{{name}} 是工作區所有者，已把自己加入這個私有專案，現在可以看到其中的任務、評論和附件。",
     "open_project": "開啟專案",
-    "autopilot_quota_upgrade": "檢視升級方案",
+    "open_app": "開啟應用程式",
+    "autopilot_quota_upgrade": "查看選項",
     "archive": "歸檔",
-    "unarchive": "取消歸檔"
+    "unarchive": "取消歸檔",
+    "open_doc": "開啟文件",
+    "autopilot_quota_upgrade_action": "升級",
+    "autopilot_quota_addon_action": "加購執行次數",
+    "autopilot_quota_portal_action": "管理帳單",
+    "autopilot_quota_contact_upgrade": "請聯絡工作區所有者或管理員升級方案。",
+    "autopilot_quota_contact_addon": "請聯絡工作區所有者或管理員加購執行次數。",
+    "autopilot_quota_contact_addon_or_upgrade": "請聯絡工作區所有者或管理員加購執行次數或升級方案。"
   },
   "types": {
     "issue_assigned": "已分配",
@@ -100,10 +111,14 @@
     "children_done": "子任務已全部結束",
     "project_owner_joined": "所有者加入了專案",
     "autopilot_quota_exceeded": "自動化執行次數已用完",
+    "app_tool_calls_quota_exceeded": "應用呼叫次數已用完",
     "app_action_requested": "等待你確認",
     "app_action_reminder": "確認即將過期",
     "app_connect_requested": "請連線應用",
-    "app_action_result": "應用操作結果"
+    "app_action_result": "應用操作結果",
+    "doc_comment": "文件有新評論",
+    "doc_mentioned": "在文件中提到了你",
+    "blockers_done": "等待的任務已結束"
   },
   "labels": {
     "set_status_to": "狀態設為",
@@ -115,9 +130,11 @@
     "set_due_date_to": "截止日期設為 {{date}}",
     "removed_due_date": "移除了截止日期",
     "reacted_to_comment": "用 {{emoji}} 回應了你的評論",
+    "commented": "評論了",
     "created_with_agent": "透過 AI 代理建立：{{identifier}}",
     "failed_with_detail": "失敗：{{detail}}",
     "autopilot_quota_blocked": "執行已被阻止：額度已用完",
+    "app_tool_calls_quota_blocked": "本月 AI 代理無法再呼叫應用工具",
     "children_done_stage": "第 {{stage}} 階段的子任務已全部結束"
   },
   "toasts": {
@@ -133,26 +150,33 @@
   },
   "kept": {
     "archived": "已歸檔",
+    "undo_archive": "復原歸檔",
+    "unsubscribed": "已取消訂閱",
     "leaves": "離開後移出收件箱",
     "filtered": "不再符合篩選",
-    "notification_archived": "通知已歸檔",
+    "changed_status": "已改為{{status}}",
+    "reassigned": "已改派給 {{name}}",
+    "unassigned": "已取消分配",
+    "ran_quick_action": "已執行 {{name}}",
+    "agent_triggered": "已觸發 AI 代理",
+    "returns_on_activity": "有新動態時會回到收件箱",
     "next": "下一條",
     "next_tooltip": "開啟下一條：{{title}}"
   },
   "errors": {
     "archived_lookup_failed": "無法載入連結指向的通知",
     "source_context_retry_failed": "無法使用原始上下文重試",
-    "source_context_retry_unavailable": "該上下文已無法重試，請從派生起點重新發起。",
+    "source_context_retry_unavailable": "此請求已無法重試。請從原始訊息或任務重新發起。",
     "mark_read_failed": "標為已讀失敗",
     "mark_unread_failed": "標為未讀失敗",
     "archive_failed": "歸檔失敗",
-    "mark_done_failed": "標為已完成失敗",
     "mark_all_read_failed": "全部標為已讀失敗",
     "archive_all_failed": "歸檔全部失敗",
     "archive_all_read_failed": "歸檔已讀失敗",
     "archive_completed_failed": "歸檔已完成失敗",
     "unarchive_failed": "取消歸檔失敗",
     "archived_load_failed": "無法載入已歸檔通知",
+    "load_failed": "無法載入通知",
     "filters_load_failed": "無法載入篩選項",
     "delete_failed": "無法刪除通知，請重試。",
     "unsubscribe_archive_failed": "取消訂閱失敗",
@@ -163,7 +187,14 @@
     "description": "此通知將被永久刪除，相關任務和執行記錄不受影響。",
     "issue_description": "目前檢視中此任務的通知將被永久刪除，任務和執行記錄不受影響。",
     "cancel": "取消",
-    "active_issue_description": "此任務在收件箱中的通知將被永久刪除。先前歸檔的通知會保留，並重新顯示在已歸檔檢視中。任務和執行記錄不受影響。"
+    "active_issue_description": "這將永久刪除此任務在收件匣中的待處理通知。先前歸檔的通知、任務本身及其執行記錄都會保留。"
+  },
+  "archive_all_dialog": {
+    "title": "歸檔全部通知？",
+    "description": "收件匣中的所有活躍通知都會移至已歸檔。已延後的任務會保持延後，你隨時可以恢復通知。",
+    "description_count_other": "收件匣中的全部 {{count}} 則活躍通知都會移至已歸檔。已延後的任務會保持延後，你隨時可以恢復它們。",
+    "cancel": "取消",
+    "confirm": "歸檔全部"
   },
   "unsubscribe": {
     "title": "取消訂閱並歸檔：不再收到它的訂閱通知，@你時仍會通知",
@@ -188,7 +219,7 @@
     "picker_hour": "時",
     "picker_minute": "分",
     "picker_submit": "延後到 {{time}}",
-    "hint": "被點名 @、被指派或執行失敗時會提前回來。",
+    "hint": "若被 @ 提及、被指派或執行失敗，將提前回到收件匣。",
     "custom_invalid": "請選擇一年內的未來時間。",
     "back_at": "{{time}} 回來",
     "returned": "延後到期",
@@ -199,8 +230,29 @@
     "failed": "延後失敗",
     "unsnooze_failed": "恢復失敗",
     "view_empty": "沒有延後的項目",
-    "view_empty_description": "在收件箱裡延後一個任務，它會在這裡等到時間再回來。",
-    "col_updates": "延後期間",
-    "col_back": "回來時間"
+    "view_empty_description": "在收件箱裡延後一個任務，它會在這裡等到時間再回來。"
+  },
+  "auto_archive_prompt": {
+    "title": "處理完的通知，可以自動歸檔",
+    "description": "收件箱新增了自動歸檔：你處理完一個任務，它的通知就會移出收件箱。只算你自己的操作，有新動態會重新進收件箱。",
+    "options": {
+      "handled": "完成任務或觸發 AI 代理執行時自動歸檔；只整理欄位或不觸發 AI 代理的留言留在原地",
+      "completed": "只有完成或取消任務才歸檔",
+      "never": "自己手動歸檔"
+    },
+    "hint": "之後可以在 設定 › 通知 裡修改",
+    "confirm": "確定"
+  },
+  "zero": {
+    "cleared_title": "收件箱已清空",
+    "just_archived": "剛歸檔了 {{label}}",
+    "just_snoozed": "已將 {{label}} 延後至 {{time}}",
+    "just_unsubscribed": "已取消訂閱並歸檔 {{label}}",
+    "just_archived_many_other": "已歸檔 {{count}} 則通知",
+    "snoozed_summary_other": "{{count}} 則延後通知 · 最早 {{time}} 回來",
+    "filtered_title": "目前篩選下的通知已處理完",
+    "filtered_remaining_other": "收件箱裡還有 {{count}} 則其他通知待處理",
+    "clear_and_continue": "清除篩選，繼續處理",
+    "undo_item": "復原 {{label}}"
   }
 }

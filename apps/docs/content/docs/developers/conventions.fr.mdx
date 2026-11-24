@@ -198,18 +198,19 @@ Les autres noms de produit suivent le même critère, « traduire ce qui a un mo
 | Empty / Failed / Success | 空 / 失败 / 成功 |
 | Error / Warning | 错误 / 警告 |
 
-### Rôles et enums de statut (anglais minuscule, non traduits)
+### Noms de rôles et de statuts : traduits dans l'UI, anglais minuscule dans le schéma et le CLI
 
-Ce sont des identifiants de niveau schéma ; écrivez-les en anglais minuscule, même dans un contexte chinois.
+Traduisez naturellement les libellés visibles dans l'UI (sélecteurs de statut, sélecteurs de rôle, filtres, descriptions de notifications) dans chaque langue :
 
-- Rôles : `owner` / `admin` / `member`
+- Noms d'affichage des rôles (`zh-Hans`) : 所有者 / 管理员 / 成员 / 访客
+- Noms d'affichage des statuts de tâche (`zh-Hans`) : 待规划 / 待办 / 进行中 / 审核中 / 已完成 / 已阻塞 / 已取消
+- Catégories de statut (`zh-Hans`) : 未开始 / 已开始 / 已完成 / 已关闭
+
+Conservez les identifiants de schéma en anglais minuscule uniquement dans les charges utiles d'API, les colonnes de base de données, les options du CLI et les références de code :
+
+- Rôles : `owner` / `admin` / `member` / `guest`
 - Statut de tâche : `backlog` / `todo` / `in_progress` / `in_review` / `done` / `blocked` / `cancelled`
 - Catégorie de statut de tâche : `unstarted` / `started` / `done` / `closed`
-
-Dans l'UI, affichez-les en anglais (éventuellement entourés en `code-style`) :
-
-- "你需要 owner 权限"
-- "已切换到 in_progress"
 
 ### Règles de combinaison des mots
 

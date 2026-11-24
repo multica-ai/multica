@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 // TestCreateAgent_ThinkingLevel_ValidationConsistency exercises the
@@ -772,13 +774,13 @@ func TestAcpThinkingDecision(t *testing.T) {
 	withoutEffort := []ModelEntry{{ID: "hermes-4"}}
 
 	t.Run("jcode-shaped catalog keeps the level accepted", func(t *testing.T) {
-		if got := withCatalog(t, withEffort).acpThinkingDecision(ctx, "hermes", runtimeID); got != acpEffortPresent {
+		if got := withCatalog(t, withEffort).acpThinkingDecision(ctx, "hermes", runtimeID, "", ""); got != acpEffortPresent {
 			t.Errorf("decision = %v, want acpEffortPresent", got)
 		}
 	})
 
 	t.Run("Hermes-Agent-shaped catalog restores the capability answer", func(t *testing.T) {
-		if got := withCatalog(t, withoutEffort).acpThinkingDecision(ctx, "hermes", runtimeID); got != acpEffortAbsent {
+		if got := withCatalog(t, withoutEffort).acpThinkingDecision(ctx, "hermes", runtimeID, "", ""); got != acpEffortAbsent {
 			t.Errorf("decision = %v, want acpEffortAbsent", got)
 		}
 	})
@@ -787,13 +789,13 @@ func TestAcpThinkingDecision(t *testing.T) {
 	// The catalog is only written once a client asks for a model list, so this
 	// state persists indefinitely for CLI-only callers.
 	t.Run("no cache is unknown for hermes", func(t *testing.T) {
-		if got := (&Handler{}).acpThinkingDecision(ctx, "hermes", runtimeID); got != acpEffortUnknown {
+		if got := (&Handler{}).acpThinkingDecision(ctx, "hermes", runtimeID, "", ""); got != acpEffortUnknown {
 			t.Errorf("decision = %v, want acpEffortUnknown", got)
 		}
 	})
 
 	t.Run("empty catalog is unknown for hermes", func(t *testing.T) {
-		if got := withCatalog(t, nil).acpThinkingDecision(ctx, "hermes", runtimeID); got != acpEffortUnknown {
+		if got := withCatalog(t, nil).acpThinkingDecision(ctx, "hermes", runtimeID, "", ""); got != acpEffortUnknown {
 			t.Errorf("decision = %v, want acpEffortUnknown", got)
 		}
 	})
@@ -802,7 +804,7 @@ func TestAcpThinkingDecision(t *testing.T) {
 	// an undiscovered reasonix runtime is allowed rather than blocked before its
 	// first discovery. Tightening hermes must not tighten this.
 	t.Run("no cache still allows reasonix", func(t *testing.T) {
-		if got := (&Handler{}).acpThinkingDecision(ctx, "reasonix", runtimeID); got != acpEffortPresent {
+		if got := (&Handler{}).acpThinkingDecision(ctx, "reasonix", runtimeID, "", ""); got != acpEffortPresent {
 			t.Errorf("decision = %v, want acpEffortPresent — reasonix is unambiguous", got)
 		}
 	})
@@ -810,7 +812,7 @@ func TestAcpThinkingDecision(t *testing.T) {
 	// Providers outside the ACP-catalog set are answered by name alone; this
 	// check must not start second-guessing them from a catalog.
 	t.Run("non-ACP provider is not consulted", func(t *testing.T) {
-		if got := withCatalog(t, withoutEffort).acpThinkingDecision(ctx, "claude", runtimeID); got != acpEffortPresent {
+		if got := withCatalog(t, withoutEffort).acpThinkingDecision(ctx, "claude", runtimeID, "", ""); got != acpEffortPresent {
 			t.Errorf("decision = %v, want acpEffortPresent — claude is decided by provider", got)
 		}
 	})
@@ -1139,4 +1141,89 @@ func TestAgent_OmpThinkingLevelRequiresExplicitModel(t *testing.T) {
 			t.Fatalf("codex empty-model create: expected 201, got %d: %s", w.Code, w.Body.String())
 		}
 	})
+}
+
+func TestAgentSaveWithPartialHermesEffortCatalog(t *testing.T) {
+	ctx := context.Background()
+	cache := withModelListStores(t)
+	runtimeID := dbfx.Runtime(t, "Hermes with partial effort discovery", testutil.Cols{"provider": "hermes"})
+	if err := cache.Put(ctx, runtimeID, []ModelEntry{
+		{ID: "confirmed", Thinking: &ModelThinking{SupportedLevels: []ThinkingLevel{{Value: "low"}}}},
+		{ID: "previously-confirmed", Thinking: &ModelThinking{SupportedLevels: []ThinkingLevel{{Value: "high"}}}},
+		{ID: "older"},
+	}, nil, true); err != nil {
+		t.Fatal(err)
+	}
+
+	modelsPath := "/api/runtimes/" + runtimeID + "/models"
+	request := testutil.Decode[ModelListRequest](t, testHandler.InitiateListModels, withURLParam(
+		newRequest(http.MethodPost, modelsPath+"?force=true", nil), "runtimeId", runtimeID,
+	), http.StatusOK)
+	report := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/models/"+request.ID+"/result", map[string]any{
+		"status":                      "completed",
+		"supported":                   true,
+		"fallback":                    true,
+		"effort_discovery_incomplete": true,
+		"models": []ModelEntry{
+			{ID: "confirmed", Default: true, Thinking: &ModelThinking{
+				SupportedLevels: []ThinkingLevel{{Value: "high"}, {Value: "medium"}},
+			}},
+			{ID: "previously-confirmed"},
+			{ID: "unprobed"},
+		},
+	})
+	testutil.Call(t, testHandler.ReportModelListResult, testutil.WithURLParams(
+		report, "runtimeId", runtimeID, "requestId", request.ID,
+	)).Want(http.StatusOK)
+
+	created := httptest.NewRecorder()
+	testHandler.CreateAgent(created, newRequest(http.MethodPost, "/api/agents", map[string]any{
+		"name": "partial-hermes-thinking", "runtime_id": runtimeID, "visibility": "private",
+		"max_concurrent_tasks": 1, "model": "confirmed", "thinking_level": "high",
+	}))
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create with advertised level: got %d: %s", created.Code, created.Body.String())
+	}
+	var result struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(created.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, "DELETE FROM agent WHERE id = $1", result.ID) })
+
+	for _, tc := range []struct {
+		model, level string
+		status       int
+	}{
+		{"unprobed", "medium", http.StatusBadRequest},
+		{"confirmed", "low", http.StatusBadRequest},
+		{"confirmed", "medium", http.StatusOK},
+		{"previously-confirmed", "high", http.StatusOK},
+	} {
+		w := httptest.NewRecorder()
+		req := newRequest(http.MethodPatch, "/api/agents/"+result.ID, map[string]any{
+			"model": tc.model, "thinking_level": tc.level,
+		})
+		testHandler.UpdateAgent(w, withURLParam(req, "id", result.ID))
+		if w.Code != tc.status {
+			t.Fatalf("%s/%s: got %d, want %d: %s", tc.model, tc.level, w.Code, tc.status, w.Body.String())
+		}
+	}
+
+	refreshed := testutil.Decode[ModelListRequest](t, testHandler.GetModelListRequest, testutil.WithURLParams(
+		newRequest(http.MethodGet, modelsPath+"/"+request.ID, nil), "runtimeId", runtimeID, "requestId", request.ID,
+	), http.StatusOK)
+	cached := testutil.Decode[ModelListRequest](t, testHandler.InitiateListModels, withURLParam(
+		newRequest(http.MethodPost, modelsPath, nil), "runtimeId", runtimeID,
+	), http.StatusOK)
+	for _, result := range []ModelListRequest{refreshed, cached} {
+		if len(result.Models) != 3 || result.Models[0].ID != "confirmed" || result.Models[1].ID != "previously-confirmed" || result.Models[2].ID != "unprobed" {
+			t.Fatalf("picker must preserve the latest model list, got %+v", result.Models)
+		}
+		thinking := result.Models[1].Thinking
+		if thinking == nil || len(thinking.SupportedLevels) != 1 || thinking.SupportedLevels[0].Value != "high" {
+			t.Fatalf("picker must retain previously confirmed effort, got %+v", thinking)
+		}
+	}
 }

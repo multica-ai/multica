@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Bot, Globe, Lock, Shield, UserPlus, X } from "@multica/ui/icons";
 import type { MemberWithUser, Project, ProjectVisibility } from "@multica/core/types";
@@ -9,6 +9,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { projectMembersOptions } from "@multica/core/projects/queries";
 import { canManageProjectAccess, useProjectAccessMutation } from "@multica/core/projects/access";
+import { usePaidFeatureAccess } from "@multica/core/billing";
 import { Button } from "@multica/ui/components/ui/button";
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@multica/ui/components/ui/dialog";
@@ -17,11 +18,12 @@ import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@multica/ui/components/ui/alert-dialog";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PillButton } from "../../common/pill-button";
+import { PaidFeatureNotice, usePaidFeatureErrorMessage } from "../../billing";
 import { useT } from "../../i18n";
 
 const EMPTY_IDS: string[] = [];
 
-function AccessFields({ visibility, onVisibilityChange, members, selected, leadId, managerId, userId, disabled, canChangeScope, canUsePrivate, canAdd, canRemove, onAdd, onRemove }: {
+function AccessFields({ visibility, onVisibilityChange, members, selected, leadId, managerId, userId, disabled, canChangeScope, canUsePrivate, canAdd, canRemove, onAdd, onRemove, notice }: {
   visibility: ProjectVisibility;
   onVisibilityChange: (value: ProjectVisibility) => void;
   members: MemberWithUser[];
@@ -37,6 +39,8 @@ function AccessFields({ visibility, onVisibilityChange, members, selected, leadI
   canRemove: (id: string) => boolean;
   onAdd: (id: string) => Promise<boolean | void> | void;
   onRemove: (id: string) => Promise<void> | void;
+  // Shown under the visibility choice, e.g. the paid-feature notice.
+  notice?: ReactNode;
 }) {
   const { t } = useT("projects");
   const groupId = useId();
@@ -59,6 +63,7 @@ function AccessFields({ visibility, onVisibilityChange, members, selected, leadI
           );
         })}
       </fieldset>
+      {notice}
       {visibility === "private" ? (
         <div className="space-y-3">
           <p className="text-caption font-medium">{t(($) => $.access.members_count, { count: recipients.length })}</p>
@@ -127,7 +132,7 @@ export function ProjectAccessControl({ project }: { project: Project }) {
   const Icon = project.visibility === "private" ? Lock : Globe;
   return (
     <Dialog open={open} onOpenChange={(value) => { if (!changeAccess.isPending) setOpen(value); }}>
-      <DialogTrigger render={<Button type="button" variant="ghost" size="sm" className="h-auto min-h-7 max-w-full justify-start px-0" aria-label={t(($) => $.access.label)}><Icon /><span className="truncate">{project.visibility === "private" ? t(($) => $.access.private) : t(($) => $.access.workspace)}</span></Button>} />
+      <DialogTrigger render={<Button type="button" variant="ghost" size="sm" className="h-auto min-h-7 max-w-full justify-start gap-1.5 px-0 text-caption font-normal hover:bg-transparent dark:hover:bg-transparent" aria-label={t(($) => $.access.label)}><Icon className="size-3.5 text-muted-foreground" /><span className="truncate">{project.visibility === "private" ? t(($) => $.access.private) : t(($) => $.access.workspace)}</span></Button>} />
       <DialogContent className="flex max-h-[90%] flex-col sm:max-w-lg">
         <DialogHeader><DialogTitle>{t(($) => $.access.title, { title: project.title })}</DialogTitle><DialogDescription>{t(($) => $.access.description)}</DialogDescription></DialogHeader>
         {open ? <ProjectAccessEditor project={project} onClose={() => setOpen(false)} changeAccess={changeAccess} /> : null}
@@ -147,9 +152,14 @@ function ProjectAccessEditor({ project, onClose, changeAccess }: { project: Proj
   const [draftIds, setDraftIds] = useState<string[] | null>(null);
   const [error, setError] = useState("");
   const [confirmPublic, setConfirmPublic] = useState(false);
+  const paidFeatureError = usePaidFeatureErrorMessage();
   const members = workspaceMembers.data ?? [];
   const role = members.find((member) => member.user_id === userId)?.role;
   const isPrivate = project.visibility === "private";
+  // Without the private_projects feature an existing private project keeps
+  // its members and access: people can still be removed and the project made
+  // public, but nobody can be added and a public one cannot be made private.
+  const privateProjects = usePaidFeatureAccess(wsId, "private_projects", { hasExistingConfig: isPrivate });
   const projectLeadId = project.lead_type === "member" ? project.lead_id : null;
   // A person who leads the project joins it when it turns private, unless
   // they have left the workspace: the draft list cannot name them then.
@@ -165,7 +175,7 @@ function ProjectAccessEditor({ project, onClose, changeAccess }: { project: Proj
   const run = async (change: Parameters<typeof changeAccess.mutateAsync>[0]) => {
     setError("");
     try { await changeAccess.mutateAsync(change); return true; }
-    catch (err) { setError(err instanceof Error ? err.message : t(($) => $.access.failed)); return false; }
+    catch (err) { setError(paidFeatureError(err, err instanceof Error ? err.message : t(($) => $.access.failed))); return false; }
   };
   const saveScope = async () => {
     if (await run({ type: "visibility", visibility, memberIds: selected })) { setConfirmPublic(false); onClose(); }
@@ -177,8 +187,10 @@ function ProjectAccessEditor({ project, onClose, changeAccess }: { project: Proj
           <div role="alert" className="space-y-2 text-body"><p>{t(($) => $.access.load_failed)}</p><Button variant="outline" size="sm" onClick={() => { void workspaceMembers.refetch(); void projectMembers.refetch(); }}>{t(($) => $.access.retry)}</Button></div>
         ) : (
           <AccessFields visibility={visibility} onVisibilityChange={setVisibility} members={members} selected={selected} userId={userId} leadId={leadId} managerId={managerId}
-            disabled={pending} canChangeScope={canManage} canUsePrivate
-            canAdd={canManage}
+            disabled={pending} canChangeScope={canManage} canUsePrivate={isPrivate || privateProjects.canAdd}
+            canAdd={canManage && privateProjects.canAdd}
+            notice={privateProjects.state === "read_only" || privateProjects.state === "unavailable"
+              ? <PaidFeatureNotice state={privateProjects.state} /> : null}
             canRemove={(id) => canManage && id !== leadId && (isPrivate || id !== userId)}
             onAdd={async (id) => { if (isPrivate) return run({ type: "add", userId: id }); setDraftIds([...selected, id]); return true; }}
             onRemove={async (id) => {
@@ -214,7 +226,11 @@ export function ProjectAccessDraftPicker({ visibility, memberIds, leadId, member
   onChange: (visibility: ProjectVisibility, ids: string[]) => void;
 }) {
   const { t } = useT("projects");
+  const wsId = useWorkspaceId();
   const userId = useAuthStore((s) => s.user?.id);
+  // A project being created has no configuration yet, so a locked feature is
+  // unavailable here rather than read-only.
+  const privateProjects = usePaidFeatureAccess(wsId, "private_projects", { hasExistingConfig: false });
   const fixed = [userId, leadId].filter((id): id is string => !!id);
   const selected = Array.from(new Set([...memberIds, ...fixed]));
   // A person named as lead manages the new project's access; with an agent
@@ -231,7 +247,8 @@ export function ProjectAccessDraftPicker({ visibility, memberIds, leadId, member
       } />
       <PopoverContent side="top" align="end" className="max-h-[70dvh] w-96 max-w-[calc(100vw-2rem)] overflow-y-auto">
         <AccessFields visibility={visibility} onVisibilityChange={(value) => onChange(value, selected)} members={members} selected={selected} leadId={leadId} managerId={managerId} userId={userId}
-          disabled={false} canChangeScope canUsePrivate canAdd
+          disabled={false} canChangeScope canUsePrivate={privateProjects.canAdd} canAdd={privateProjects.canAdd}
+          notice={privateProjects.state === "unavailable" ? <PaidFeatureNotice state="unavailable" /> : null}
           canRemove={(id) => !fixed.includes(id)}
           onAdd={(id) => onChange(visibility, [...selected, id])}
           onRemove={(id) => onChange(visibility, selected.filter((value) => value !== id))} />

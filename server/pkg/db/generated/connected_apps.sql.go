@@ -35,6 +35,48 @@ func (q *Queries) AppendQueuedTaskHandoffNote(ctx context.Context, arg AppendQue
 	return result.RowsAffected(), nil
 }
 
+const archiveAppRequestInbox = `-- name: ArchiveAppRequestInbox :many
+UPDATE inbox_item SET archived = true, snoozed_until = NULL, snoozed_at = NULL, returned_at = NULL
+WHERE workspace_id = $1 AND type = 'app_connect_requested' AND archived = false
+  AND details->>'request_id' = $2::text
+  AND recipient_id IS DISTINCT FROM $3::uuid
+RETURNING recipient_type, recipient_id
+`
+
+type ArchiveAppRequestInboxParams struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	RequestID       string      `json:"request_id"`
+	KeepRecipientID pgtype.UUID `json:"keep_recipient_id"`
+}
+
+type ArchiveAppRequestInboxRow struct {
+	RecipientType string      `json:"recipient_type"`
+	RecipientID   pgtype.UUID `json:"recipient_id"`
+}
+
+// A withdrawn or decided team account request leaves the admins nothing to
+// answer. keep_recipient_id, when set, is the admin who decided it: their
+// item stays where they acted on it.
+func (q *Queries) ArchiveAppRequestInbox(ctx context.Context, arg ArchiveAppRequestInboxParams) ([]ArchiveAppRequestInboxRow, error) {
+	rows, err := q.db.Query(ctx, archiveAppRequestInbox, arg.WorkspaceID, arg.RequestID, arg.KeepRecipientID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ArchiveAppRequestInboxRow{}
+	for rows.Next() {
+		var i ArchiveAppRequestInboxRow
+		if err := rows.Scan(&i.RecipientType, &i.RecipientID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const cancelAppActionRequest = `-- name: CancelAppActionRequest :one
 UPDATE app_action_request
 SET status = 'cancelled', updated_at = now()
@@ -205,6 +247,7 @@ SET reminded_at = now(), updated_at = now()
 WHERE id IN (
     SELECT r.id FROM app_action_request r
     WHERE r.status = 'pending' AND r.reminded_at IS NULL
+      AND NOT (r.kind = 'connect' AND r.account_scope = 'team')
       AND r.expires_at <= now() + interval '2 hours'
       AND r.expires_at > now()
     ORDER BY r.expires_at
@@ -425,7 +468,8 @@ SET status = $3,
     decided_by = $4,
     decided_at = now(),
     updated_at = now()
-WHERE id = $1 AND workspace_id = $2 AND status = 'pending' AND approver_user_id = $4
+WHERE id = $1 AND workspace_id = $2 AND status = 'pending'
+  AND (approver_user_id = $4 OR ($7::bool AND kind = 'connect' AND account_scope = 'team'))
 RETURNING id, workspace_id, kind, status, task_id, agent_id, issue_id, chat_session_id, approver_user_id, account_scope, toolkit_slug, tool_slug, action_class, arguments, summary, approved_arguments, result, error, reason, expires_at, reminded_at, decided_by, decided_at, created_at, updated_at
 `
 
@@ -436,6 +480,7 @@ type DecideAppActionRequestParams struct {
 	DecidedBy         pgtype.UUID `json:"decided_by"`
 	ApprovedArguments []byte      `json:"approved_arguments"`
 	Reason            pgtype.Text `json:"reason"`
+	AsAdmin           bool        `json:"as_admin"`
 }
 
 // Compare-and-set from pending: a second click, another device, or the expiry
@@ -448,6 +493,7 @@ func (q *Queries) DecideAppActionRequest(ctx context.Context, arg DecideAppActio
 		arg.DecidedBy,
 		arg.ApprovedArguments,
 		arg.Reason,
+		arg.AsAdmin,
 	)
 	var i AppActionRequest
 	err := row.Scan(
@@ -627,6 +673,53 @@ func (q *Queries) FindPendingAppActionRequest(ctx context.Context, arg FindPendi
 	return i, err
 }
 
+const findPendingTeamAsk = `-- name: FindPendingTeamAsk :one
+SELECT id, workspace_id, kind, status, task_id, agent_id, issue_id, chat_session_id, approver_user_id, account_scope, toolkit_slug, tool_slug, action_class, arguments, summary, approved_arguments, result, error, reason, expires_at, reminded_at, decided_by, decided_at, created_at, updated_at FROM app_action_request
+WHERE workspace_id = $1 AND toolkit_slug = $2 AND approver_user_id = $3
+  AND task_id IS NULL AND kind = 'connect' AND account_scope = 'team' AND status = 'pending'
+LIMIT 1
+`
+
+type FindPendingTeamAskParams struct {
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	ToolkitSlug    string      `json:"toolkit_slug"`
+	ApproverUserID pgtype.UUID `json:"approver_user_id"`
+}
+
+// A member's own open ask for a team account, made outside any run.
+func (q *Queries) FindPendingTeamAsk(ctx context.Context, arg FindPendingTeamAskParams) (AppActionRequest, error) {
+	row := q.db.QueryRow(ctx, findPendingTeamAsk, arg.WorkspaceID, arg.ToolkitSlug, arg.ApproverUserID)
+	var i AppActionRequest
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Kind,
+		&i.Status,
+		&i.TaskID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.ChatSessionID,
+		&i.ApproverUserID,
+		&i.AccountScope,
+		&i.ToolkitSlug,
+		&i.ToolSlug,
+		&i.ActionClass,
+		&i.Arguments,
+		&i.Summary,
+		&i.ApprovedArguments,
+		&i.Result,
+		&i.Error,
+		&i.Reason,
+		&i.ExpiresAt,
+		&i.RemindedAt,
+		&i.DecidedBy,
+		&i.DecidedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getAppActionRequest = `-- name: GetAppActionRequest :one
 SELECT id, workspace_id, kind, status, task_id, agent_id, issue_id, chat_session_id, approver_user_id, account_scope, toolkit_slug, tool_slug, action_class, arguments, summary, approved_arguments, result, error, reason, expires_at, reminded_at, decided_by, decided_at, created_at, updated_at FROM app_action_request
 WHERE id = $1 AND workspace_id = $2
@@ -770,27 +863,28 @@ const insertAppToolCall = `-- name: InsertAppToolCall :exec
 INSERT INTO app_tool_call (
     workspace_id, task_id, agent_id, issue_id, chat_session_id, triggered_by,
     account_scope, account_owner_user_id, toolkit_slug, tool_slug, action_class,
-    outcome, request_id, error
+    outcome, request_id, error, metered_period_start
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
 )
 `
 
 type InsertAppToolCallParams struct {
-	WorkspaceID        pgtype.UUID `json:"workspace_id"`
-	TaskID             pgtype.UUID `json:"task_id"`
-	AgentID            pgtype.UUID `json:"agent_id"`
-	IssueID            pgtype.UUID `json:"issue_id"`
-	ChatSessionID      pgtype.UUID `json:"chat_session_id"`
-	TriggeredBy        pgtype.UUID `json:"triggered_by"`
-	AccountScope       string      `json:"account_scope"`
-	AccountOwnerUserID pgtype.UUID `json:"account_owner_user_id"`
-	ToolkitSlug        string      `json:"toolkit_slug"`
-	ToolSlug           string      `json:"tool_slug"`
-	ActionClass        string      `json:"action_class"`
-	Outcome            string      `json:"outcome"`
-	RequestID          pgtype.UUID `json:"request_id"`
-	Error              pgtype.Text `json:"error"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	TaskID             pgtype.UUID        `json:"task_id"`
+	AgentID            pgtype.UUID        `json:"agent_id"`
+	IssueID            pgtype.UUID        `json:"issue_id"`
+	ChatSessionID      pgtype.UUID        `json:"chat_session_id"`
+	TriggeredBy        pgtype.UUID        `json:"triggered_by"`
+	AccountScope       string             `json:"account_scope"`
+	AccountOwnerUserID pgtype.UUID        `json:"account_owner_user_id"`
+	ToolkitSlug        string             `json:"toolkit_slug"`
+	ToolSlug           string             `json:"tool_slug"`
+	ActionClass        string             `json:"action_class"`
+	Outcome            string             `json:"outcome"`
+	RequestID          pgtype.UUID        `json:"request_id"`
+	Error              pgtype.Text        `json:"error"`
+	MeteredPeriodStart pgtype.Timestamptz `json:"metered_period_start"`
 }
 
 func (q *Queries) InsertAppToolCall(ctx context.Context, arg InsertAppToolCallParams) error {
@@ -809,6 +903,7 @@ func (q *Queries) InsertAppToolCall(ctx context.Context, arg InsertAppToolCallPa
 		arg.Outcome,
 		arg.RequestID,
 		arg.Error,
+		arg.MeteredPeriodStart,
 	)
 	return err
 }
@@ -878,6 +973,38 @@ func (q *Queries) ListAgentAppsInWorkspace(ctx context.Context, workspaceID pgty
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentsWithActiveTasksForOriginator = `-- name: ListAgentsWithActiveTasksForOriginator :many
+SELECT DISTINCT agent_id FROM agent_task_queue
+WHERE agent_id = ANY($1::uuid[])
+  AND originator_user_id = $2
+  AND status IN ('queued', 'dispatched', 'running')
+`
+
+type ListAgentsWithActiveTasksForOriginatorParams struct {
+	AgentIds         []pgtype.UUID `json:"agent_ids"`
+	OriginatorUserID pgtype.UUID   `json:"originator_user_id"`
+}
+
+func (q *Queries) ListAgentsWithActiveTasksForOriginator(ctx context.Context, arg ListAgentsWithActiveTasksForOriginatorParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listAgentsWithActiveTasksForOriginator, arg.AgentIds, arg.OriginatorUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var agent_id pgtype.UUID
+		if err := rows.Scan(&agent_id); err != nil {
+			return nil, err
+		}
+		items = append(items, agent_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -1143,7 +1270,7 @@ func (q *Queries) ListDecidedAppActionRequestsForIssue(ctx context.Context, arg 
 }
 
 const listIssueAppToolCalls = `-- name: ListIssueAppToolCalls :many
-SELECT id, workspace_id, task_id, agent_id, issue_id, chat_session_id, triggered_by, account_scope, account_owner_user_id, toolkit_slug, tool_slug, action_class, outcome, request_id, error, created_at FROM app_tool_call
+SELECT id, workspace_id, task_id, agent_id, issue_id, chat_session_id, triggered_by, account_scope, account_owner_user_id, toolkit_slug, tool_slug, action_class, outcome, request_id, error, created_at, metered_period_start FROM app_tool_call
 WHERE workspace_id = $1 AND issue_id = $2
 ORDER BY created_at DESC
 LIMIT 500
@@ -1182,6 +1309,7 @@ func (q *Queries) ListIssueAppToolCalls(ctx context.Context, arg ListIssueAppToo
 			&i.RequestID,
 			&i.Error,
 			&i.CreatedAt,
+			&i.MeteredPeriodStart,
 		); err != nil {
 			return nil, err
 		}
@@ -1195,7 +1323,8 @@ func (q *Queries) ListIssueAppToolCalls(ctx context.Context, arg ListIssueAppToo
 
 const listPendingAppActionRequestsForApprover = `-- name: ListPendingAppActionRequestsForApprover :many
 SELECT id, workspace_id, kind, status, task_id, agent_id, issue_id, chat_session_id, approver_user_id, account_scope, toolkit_slug, tool_slug, action_class, arguments, summary, approved_arguments, result, error, reason, expires_at, reminded_at, decided_by, decided_at, created_at, updated_at FROM app_action_request
-WHERE workspace_id = $1 AND approver_user_id = $2 AND status = 'pending'
+WHERE workspace_id = $1 AND status = 'pending'
+  AND (approver_user_id = $2 OR ($3::bool AND kind = 'connect' AND account_scope = 'team'))
 ORDER BY created_at
 LIMIT 200
 `
@@ -1203,10 +1332,13 @@ LIMIT 200
 type ListPendingAppActionRequestsForApproverParams struct {
 	WorkspaceID    pgtype.UUID `json:"workspace_id"`
 	ApproverUserID pgtype.UUID `json:"approver_user_id"`
+	AsAdmin        bool        `json:"as_admin"`
 }
 
+// Requests waiting on the person, and for an admin also every request for a
+// team account, which any admin answers.
 func (q *Queries) ListPendingAppActionRequestsForApprover(ctx context.Context, arg ListPendingAppActionRequestsForApproverParams) ([]AppActionRequest, error) {
-	rows, err := q.db.Query(ctx, listPendingAppActionRequestsForApprover, arg.WorkspaceID, arg.ApproverUserID)
+	rows, err := q.db.Query(ctx, listPendingAppActionRequestsForApprover, arg.WorkspaceID, arg.ApproverUserID, arg.AsAdmin)
 	if err != nil {
 		return nil, err
 	}
@@ -1371,11 +1503,12 @@ func (q *Queries) ListPendingAppActionRequestsForIssue(ctx context.Context, arg 
 
 const listPendingConnectRequestsForUser = `-- name: ListPendingConnectRequestsForUser :many
 SELECT id, workspace_id, kind, status, task_id, agent_id, issue_id, chat_session_id, approver_user_id, account_scope, toolkit_slug, tool_slug, action_class, arguments, summary, approved_arguments, result, error, reason, expires_at, reminded_at, decided_by, decided_at, created_at, updated_at FROM app_action_request
-WHERE approver_user_id = $1 AND toolkit_slug = $2 AND kind = 'connect'
+WHERE workspace_id = $1 AND approver_user_id = $2 AND toolkit_slug = $3 AND kind = 'connect'
   AND status = 'pending' AND account_scope = 'personal'
 `
 
 type ListPendingConnectRequestsForUserParams struct {
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
 	ApproverUserID pgtype.UUID `json:"approver_user_id"`
 	ToolkitSlug    string      `json:"toolkit_slug"`
 }
@@ -1383,7 +1516,7 @@ type ListPendingConnectRequestsForUserParams struct {
 // Connection requests a member is asked to answer for one app; resolved when
 // they finish connecting it.
 func (q *Queries) ListPendingConnectRequestsForUser(ctx context.Context, arg ListPendingConnectRequestsForUserParams) ([]AppActionRequest, error) {
-	rows, err := q.db.Query(ctx, listPendingConnectRequestsForUser, arg.ApproverUserID, arg.ToolkitSlug)
+	rows, err := q.db.Query(ctx, listPendingConnectRequestsForUser, arg.WorkspaceID, arg.ApproverUserID, arg.ToolkitSlug)
 	if err != nil {
 		return nil, err
 	}
@@ -1428,8 +1561,123 @@ func (q *Queries) ListPendingConnectRequestsForUser(ctx context.Context, arg Lis
 	return items, nil
 }
 
+const listPendingTeamConnectRequests = `-- name: ListPendingTeamConnectRequests :many
+SELECT id, workspace_id, kind, status, task_id, agent_id, issue_id, chat_session_id, approver_user_id, account_scope, toolkit_slug, tool_slug, action_class, arguments, summary, approved_arguments, result, error, reason, expires_at, reminded_at, decided_by, decided_at, created_at, updated_at FROM app_action_request
+WHERE workspace_id = $1 AND toolkit_slug = $2 AND kind = 'connect'
+  AND account_scope = 'team' AND status = 'pending'
+ORDER BY created_at
+LIMIT 500
+`
+
+type ListPendingTeamConnectRequestsParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ToolkitSlug string      `json:"toolkit_slug"`
+}
+
+// Everything waiting for the workspace's team account for one app: agents'
+// requests and members' asks. Connecting the account answers them all.
+func (q *Queries) ListPendingTeamConnectRequests(ctx context.Context, arg ListPendingTeamConnectRequestsParams) ([]AppActionRequest, error) {
+	rows, err := q.db.Query(ctx, listPendingTeamConnectRequests, arg.WorkspaceID, arg.ToolkitSlug)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AppActionRequest{}
+	for rows.Next() {
+		var i AppActionRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Kind,
+			&i.Status,
+			&i.TaskID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.ChatSessionID,
+			&i.ApproverUserID,
+			&i.AccountScope,
+			&i.ToolkitSlug,
+			&i.ToolSlug,
+			&i.ActionClass,
+			&i.Arguments,
+			&i.Summary,
+			&i.ApprovedArguments,
+			&i.Result,
+			&i.Error,
+			&i.Reason,
+			&i.ExpiresAt,
+			&i.RemindedAt,
+			&i.DecidedBy,
+			&i.DecidedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPersonalAppAgentsForUser = `-- name: ListPersonalAppAgentsForUser :many
+SELECT a.id, a.name, a.workspace_id, w.name AS workspace_name
+FROM agent_app aa
+JOIN agent a ON a.id = aa.agent_id AND a.workspace_id = aa.workspace_id
+JOIN member m ON m.workspace_id = aa.workspace_id AND m.user_id = $1
+JOIN workspace w ON w.id = aa.workspace_id
+WHERE aa.toolkit_slug = $2
+  AND aa.account_scope = 'personal'
+  AND a.archived_at IS NULL
+  AND a.kind = 'user'
+ORDER BY w.name, a.name, a.id
+LIMIT 200
+`
+
+type ListPersonalAppAgentsForUserParams struct {
+	UserID      pgtype.UUID `json:"user_id"`
+	ToolkitSlug string      `json:"toolkit_slug"`
+}
+
+type ListPersonalAppAgentsForUserRow struct {
+	ID            pgtype.UUID `json:"id"`
+	Name          string      `json:"name"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	WorkspaceName string      `json:"workspace_name"`
+}
+
+// Agents in every workspace the user belongs to that act through the
+// personal account of whoever triggers them for one app. The caller still
+// filters by who may run each agent.
+func (q *Queries) ListPersonalAppAgentsForUser(ctx context.Context, arg ListPersonalAppAgentsForUserParams) ([]ListPersonalAppAgentsForUserRow, error) {
+	rows, err := q.db.Query(ctx, listPersonalAppAgentsForUser, arg.UserID, arg.ToolkitSlug)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPersonalAppAgentsForUserRow{}
+	for rows.Next() {
+		var i ListPersonalAppAgentsForUserRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.WorkspaceID,
+			&i.WorkspaceName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPersonalAppToolCalls = `-- name: ListPersonalAppToolCalls :many
-SELECT id, workspace_id, task_id, agent_id, issue_id, chat_session_id, triggered_by, account_scope, account_owner_user_id, toolkit_slug, tool_slug, action_class, outcome, request_id, error, created_at FROM app_tool_call
+SELECT id, workspace_id, task_id, agent_id, issue_id, chat_session_id, triggered_by, account_scope, account_owner_user_id, toolkit_slug, tool_slug, action_class, outcome, request_id, error, created_at, metered_period_start FROM app_tool_call
 WHERE workspace_id = $1 AND toolkit_slug = $2 AND account_scope = 'personal'
   AND account_owner_user_id = $3
 ORDER BY created_at DESC
@@ -1475,6 +1723,57 @@ func (q *Queries) ListPersonalAppToolCalls(ctx context.Context, arg ListPersonal
 			&i.RequestID,
 			&i.Error,
 			&i.CreatedAt,
+			&i.MeteredPeriodStart,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTeamAccountRequestSummaries = `-- name: ListTeamAccountRequestSummaries :many
+SELECT toolkit_slug,
+       array_agg(approver_user_id ORDER BY created_at)::uuid[] AS requested_by,
+       COALESCE(array_agg(approver_user_id ORDER BY created_at) FILTER (WHERE task_id IS NULL), '{}')::uuid[] AS asked_by,
+       COALESCE(array_agg(agent_id ORDER BY created_at) FILTER (WHERE agent_id IS NOT NULL), '{}')::uuid[] AS agent_ids,
+       max(created_at)::timestamptz AS last_requested_at
+FROM app_action_request
+WHERE workspace_id = $1 AND kind = 'connect' AND account_scope = 'team' AND status = 'pending'
+GROUP BY toolkit_slug
+ORDER BY max(created_at) DESC
+LIMIT 500
+`
+
+type ListTeamAccountRequestSummariesRow struct {
+	ToolkitSlug     string             `json:"toolkit_slug"`
+	RequestedBy     []pgtype.UUID      `json:"requested_by"`
+	AskedBy         []pgtype.UUID      `json:"asked_by"`
+	AgentIds        []pgtype.UUID      `json:"agent_ids"`
+	LastRequestedAt pgtype.Timestamptz `json:"last_requested_at"`
+}
+
+// One row per app with open requests for a team account: who is waiting and
+// which agents, oldest first. A person or agent waiting on several requests
+// repeats; callers drop the repeats.
+func (q *Queries) ListTeamAccountRequestSummaries(ctx context.Context, workspaceID pgtype.UUID) ([]ListTeamAccountRequestSummariesRow, error) {
+	rows, err := q.db.Query(ctx, listTeamAccountRequestSummaries, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTeamAccountRequestSummariesRow{}
+	for rows.Next() {
+		var i ListTeamAccountRequestSummariesRow
+		if err := rows.Scan(
+			&i.ToolkitSlug,
+			&i.RequestedBy,
+			&i.AskedBy,
+			&i.AgentIds,
+			&i.LastRequestedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1487,7 +1786,7 @@ func (q *Queries) ListPersonalAppToolCalls(ctx context.Context, arg ListPersonal
 }
 
 const listTeamAppToolCalls = `-- name: ListTeamAppToolCalls :many
-SELECT id, workspace_id, task_id, agent_id, issue_id, chat_session_id, triggered_by, account_scope, account_owner_user_id, toolkit_slug, tool_slug, action_class, outcome, request_id, error, created_at FROM app_tool_call
+SELECT id, workspace_id, task_id, agent_id, issue_id, chat_session_id, triggered_by, account_scope, account_owner_user_id, toolkit_slug, tool_slug, action_class, outcome, request_id, error, created_at, metered_period_start FROM app_tool_call
 WHERE workspace_id = $1 AND toolkit_slug = $2 AND account_scope = 'team'
 ORDER BY created_at DESC
 LIMIT $3
@@ -1525,6 +1824,7 @@ func (q *Queries) ListTeamAppToolCalls(ctx context.Context, arg ListTeamAppToolC
 			&i.RequestID,
 			&i.Error,
 			&i.CreatedAt,
+			&i.MeteredPeriodStart,
 		); err != nil {
 			return nil, err
 		}
@@ -1536,15 +1836,60 @@ func (q *Queries) ListTeamAppToolCalls(ctx context.Context, arg ListTeamAppToolC
 	return items, nil
 }
 
-const listUserComposioConnectionsAnyStatus = `-- name: ListUserComposioConnectionsAnyStatus :many
-SELECT id, user_id, toolkit_slug, auth_config_id, connected_account_id, composio_user_id, status, connected_at, last_used_at, created_at, updated_at FROM user_composio_connection
-WHERE user_id = $1 AND status <> 'revoked'
-ORDER BY connected_at DESC
+const listTeamConnectNotifiedRecipients = `-- name: ListTeamConnectNotifiedRecipients :many
+SELECT DISTINCT i.recipient_id FROM inbox_item i
+JOIN app_action_request r ON r.id = (i.details->>'request_id')::uuid
+WHERE i.workspace_id = $1 AND i.recipient_type = 'member'
+  AND i.recipient_id = ANY($3::uuid[])
+  AND i.type = 'app_connect_requested' AND NOT i.archived
+  AND r.workspace_id = $1 AND r.toolkit_slug = $2 AND r.kind = 'connect'
+  AND r.account_scope = 'team' AND r.status = 'pending'
 `
 
-// A member's personal accounts for the app list: active and expired.
-func (q *Queries) ListUserComposioConnectionsAnyStatus(ctx context.Context, userID pgtype.UUID) ([]UserComposioConnection, error) {
-	rows, err := q.db.Query(ctx, listUserComposioConnectionsAnyStatus, userID)
+type ListTeamConnectNotifiedRecipientsParams struct {
+	WorkspaceID  pgtype.UUID   `json:"workspace_id"`
+	ToolkitSlug  string        `json:"toolkit_slug"`
+	RecipientIds []pgtype.UUID `json:"recipient_ids"`
+}
+
+// Of recipient_ids, the members who already hold an open notification for a
+// pending request for this app's team account, so are not told again.
+func (q *Queries) ListTeamConnectNotifiedRecipients(ctx context.Context, arg ListTeamConnectNotifiedRecipientsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listTeamConnectNotifiedRecipients, arg.WorkspaceID, arg.ToolkitSlug, arg.RecipientIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var recipient_id pgtype.UUID
+		if err := rows.Scan(&recipient_id); err != nil {
+			return nil, err
+		}
+		items = append(items, recipient_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUserComposioConnectionsAnyStatus = `-- name: ListUserComposioConnectionsAnyStatus :many
+SELECT id, user_id, toolkit_slug, auth_config_id, connected_account_id, composio_user_id, status, connected_at, last_used_at, created_at, updated_at, workspace_id FROM user_composio_connection
+WHERE user_id = $1 AND status <> 'revoked'
+  AND (workspace_id = $2::uuid OR workspace_id IS NULL)
+ORDER BY (workspace_id IS NULL), connected_at DESC
+`
+
+type ListUserComposioConnectionsAnyStatusParams struct {
+	UserID      pgtype.UUID `json:"user_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// A member's personal accounts in one workspace for the app list: active and
+// expired.
+func (q *Queries) ListUserComposioConnectionsAnyStatus(ctx context.Context, arg ListUserComposioConnectionsAnyStatusParams) ([]UserComposioConnection, error) {
+	rows, err := q.db.Query(ctx, listUserComposioConnectionsAnyStatus, arg.UserID, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -1564,6 +1909,7 @@ func (q *Queries) ListUserComposioConnectionsAnyStatus(ctx context.Context, user
 			&i.LastUsedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.WorkspaceID,
 		); err != nil {
 			return nil, err
 		}

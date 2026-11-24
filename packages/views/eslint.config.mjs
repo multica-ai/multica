@@ -2,6 +2,7 @@ import reactConfig from "@multica/eslint-config/react";
 import { ICON_LIBRARY_IMPORT_PATTERNS, REDUCED_MOTION_IMPORT } from "@multica/eslint-config/base";
 import { NO_ROUND_CONTROLS } from "@multica/eslint-config/control-shape";
 import { NO_FULL_PAGE_NAVIGATION } from "@multica/eslint-config/full-page-navigation";
+import { NO_SYSTEM_ONLY_REDUCED_MOTION } from "@multica/eslint-config/reduced-motion";
 import i18next from "eslint-plugin-i18next";
 import {
   NO_UNTRANSLATED_ATTRIBUTES,
@@ -48,6 +49,7 @@ export default [
         NO_UNTRANSLATED_TOAST,
         NO_ROUND_CONTROLS,
         NO_FULL_PAGE_NAVIGATION,
+        NO_SYSTEM_ONLY_REDUCED_MOTION,
       ],
       "no-restricted-imports": [
         "error",
@@ -65,7 +67,7 @@ export default [
     files: ["dev-toolbar/**/*.{ts,tsx}", "**/dev-actions.ts"],
     rules: {
       "i18next/no-literal-string": "off",
-      "no-restricted-syntax": ["error", NO_ROUND_CONTROLS, NO_FULL_PAGE_NAVIGATION],
+      "no-restricted-syntax": ["error", NO_ROUND_CONTROLS, NO_FULL_PAGE_NAVIGATION, NO_SYSTEM_ONLY_REDUCED_MOTION],
     },
   },
 ];

@@ -994,7 +994,7 @@ describe("ChatInput project context", () => {
     expect(onProjectChange).toHaveBeenCalledWith(null);
   });
 
-  it("offers default Send and an explicit queue action while replying", async () => {
+  it("offers a single Send action while replying and restores Stop after sending", async () => {
     const onSend = vi.fn<ChatInputOnSend>(async () => true);
     const onStop = vi.fn();
     renderInput({ isRunning: true, allowSubmitWhileRunning: true, onSend, onStop });
@@ -1008,12 +1008,11 @@ describe("ChatInput project context", () => {
 
     expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Send" })).not.toBeDisabled();
-    const queueButton = screen.getByRole("button", { name: "Queue message" });
-    expect(queueButton).not.toBeDisabled();
-    fireEvent.click(queueButton);
+    expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
-    expect(onSend.mock.calls[0]?.[4]).toEqual({ queue: true });
+    expect(onSend).toHaveBeenCalledWith("follow-up", undefined, expect.any(Function), []);
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
     });
@@ -1026,21 +1025,53 @@ describe("ChatInput project context", () => {
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "use the new location" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
-    expect(onSend.mock.calls[0]?.[4]).toBeUndefined();
+    expect(onSend).toHaveBeenCalledWith("use the new location", undefined, expect.any(Function), []);
   });
 
-  it("keeps Stop available while queued content is uploading", async () => {
+  it("shows whether a draft will join the current run", () => {
+    const props = { isRunning: true, allowSubmitWhileRunning: true, canSteerWhileRunning: true };
+    const { rerender } = renderInput(props);
+    expect(screen.queryByText("Add to current run")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "also check this" } });
+    expect(screen.getByRole("status")).toHaveTextContent("Add to current run");
+    rerender(element({ ...props, canSteerWhileRunning: false }));
+    expect(screen.getByRole("status")).toHaveTextContent("Start after this run");
+    rerender(element({ ...props, canSteerWhileRunning: undefined }));
+    expect(screen.queryByText("Add to current run")).not.toBeInTheDocument();
+    expect(screen.queryByText("Start after this run")).not.toBeInTheDocument();
+  });
+
+  it("shows queuing for a selected skill and restores steering when it is removed", async () => {
+    const onSend = vi.fn<ChatInputOnSend>(async () => true);
+    const props = { isRunning: true, allowSubmitWhileRunning: true, canSteerWhileRunning: true, onSend };
+    const { rerender } = renderInput(props);
+    const editor = screen.getByTestId("editor");
+    const content = "[/release-notes](slash://skill/550e8400-e29b-41d4-a716-446655440000) Write release notes";
+
+    fireEvent.change(editor, { target: { value: content } });
+    expect(screen.getByRole("status")).toHaveTextContent("Start after this run");
+    expect(screen.queryByText("Add to current run")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(content, undefined, expect.any(Function), []));
+
+    fireEvent.change(editor, { target: { value: "Write release notes" } });
+    rerender(element(props));
+    expect(screen.getByRole("status")).toHaveTextContent("Add to current run");
+  });
+
+  it("keeps Stop available and explains queuing while content is uploading", async () => {
     let resolveUpload!: (value: UploadResult) => void;
     mockApiUploadFile.mockImplementation(
       () => new Promise<UploadResult>((resolve) => (resolveUpload = resolve)),
     );
     const onStop = vi.fn();
-    renderInput({ isRunning: true, allowSubmitWhileRunning: true, onStop });
+    renderInput({ isRunning: true, allowSubmitWhileRunning: true, canSteerWhileRunning: true, onStop });
 
     fireEvent.change(screen.getByTestId("editor"), {
       target: { value: "follow-up with attachment" },
     });
-    expect(screen.getByRole("button", { name: "Queue message" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send" })).not.toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("Add to current run");
 
     await act(async () => {
       dropHandlers.onDrop?.([
@@ -1050,6 +1081,7 @@ describe("ChatInput project context", () => {
     });
 
     const stopButton = await screen.findByRole("button", { name: "Stop" });
+    expect(screen.getByRole("status")).toHaveTextContent("Start after this run");
     expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
     fireEvent.click(stopButton);
     expect(onStop).toHaveBeenCalledTimes(1);
@@ -1065,7 +1097,7 @@ describe("ChatInput project context", () => {
       await Promise.resolve();
     });
 
-    expect(await screen.findByRole("button", { name: "Queue message" })).not.toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Send" })).not.toBeDisabled();
   });
 
   it("shows only Stop while an older server is running", () => {
@@ -1807,7 +1839,7 @@ describe("ChatInput commit handoff", () => {
     // Editor untouched — it now shows the session the user navigated to.
     expect(editorState.cleared).toBe(0);
     expect(editorState.blurred).toBe(0);
-    // …but the sent session's persisted draft is cleared regardless.
+    // ...but the sent session's persisted draft is cleared regardless.
     expect(useChatStore.getState().clearInputDraft).toHaveBeenCalledWith("__draft_new__");
     // And the caret must NOT be pulled into an editor that is showing someone
     // else's draft: refocus is bound to having actually scrubbed the document.
@@ -1908,7 +1940,7 @@ describe("ChatInput revoked-access placeholder", () => {
   it("leaves the normal placeholder alone when access is intact", () => {
     renderInput({ agentName: "Multica" });
 
-    expect(editorProps.last?.placeholder).toBe("Message Multica…");
+    expect(editorProps.last?.placeholder).toBe("Message Multica...");
   });
 });
 

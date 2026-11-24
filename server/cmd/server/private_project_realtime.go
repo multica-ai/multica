@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/extension"
 	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -31,6 +32,10 @@ type privateProjectAudience interface {
 	// user ids that may receive it. err means the decision could not be made;
 	// the caller drops the event rather than widen it.
 	Audience(ctx context.Context, e events.Event) (userIDs []string, private bool, err error)
+	// IssueRefReaders and Members narrow what an event says about issues other
+	// than its own; see issue_ref_realtime.go.
+	IssueRefReaders(ctx context.Context, e events.Event) (map[string]map[string]bool, error)
+	Members(ctx context.Context, workspaceID string) ([]string, error)
 }
 
 type audienceQuerier interface {
@@ -39,6 +44,7 @@ type audienceQuerier interface {
 	GetCommentIssueProjectID(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
 	GetAutopilot(ctx context.Context, id pgtype.UUID) (db.Autopilot, error)
+	ListMembers(ctx context.Context, workspaceID pgtype.UUID) ([]db.Member, error)
 	projectaccess.TaskQuerier
 }
 
@@ -359,8 +365,9 @@ func extractEventRefs(eventType string, payload any) eventRefs {
 			}
 		}
 	}
-	// A deleted issue states its project, since its row is gone by now.
-	if id, ok := str(top, "project_id"); ok && id != "" && (isProjectEvent || eventType == protocol.EventProjectMembersChanged || eventType == protocol.EventIssueDeleted) {
+	// A deleted issue states its project, since its row is gone by now, and
+	// commercial packages declare their own project events.
+	if id, ok := str(top, "project_id"); ok && id != "" && (isProjectEvent || eventType == protocol.EventProjectMembersChanged || eventType == protocol.EventIssueDeleted || extension.IsProjectEvent(eventType)) {
 		return eventRefs{projectKnown: true, projectID: id}
 	}
 	// An autopilot bound to a private project carries its prompt and runs.

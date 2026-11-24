@@ -95,9 +95,58 @@ export async function copyText(text: string): Promise<boolean> {
 }
 
 /**
- * Copy the image at `url` to the clipboard as a PNG.
+ * Copy text in two clipboard channels: a plain-text rendering and an HTML one.
  *
- * Reads the bytes with `fetch`, so the URL has to be readable from script:
+ * Used by "Copy link with title", where rich targets (docs, email, chat) should
+ * paste the anchor while plain-text targets get the Markdown link. Targets
+ * that only understand plain text, and browsers without the async Clipboard
+ * API or `ClipboardItem`, receive the plain-text channel through `copyText`.
+ *
+ * @returns `true` on success, `false` on failure.
+ */
+export async function copyTextAndHtml(
+  text: string,
+  html: string,
+): Promise<boolean> {
+  if (
+    typeof navigator !== "undefined" &&
+    navigator.clipboard?.write &&
+    typeof ClipboardItem !== "undefined"
+  ) {
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/plain": new Blob([text], { type: "text/plain" }),
+          "text/html": new Blob([html], { type: "text/html" }),
+        }),
+      ]);
+      return true;
+    } catch {
+      // Permission denied / document not focused / item rejected — fall back
+      // to plain text so the link still lands on the clipboard.
+    }
+  }
+  return copyText(text);
+}
+
+/**
+ * Whether `copyImage` can work here. Images need the async Clipboard API,
+ * which has no legacy fallback and exists only in a secure context, so a
+ * self-hosted deployment on plain http:// (not localhost) has none.
+ */
+export function canCopyImage(): boolean {
+  return (
+    typeof navigator !== "undefined" &&
+    !!navigator.clipboard?.write &&
+    typeof ClipboardItem !== "undefined"
+  );
+}
+
+/**
+ * Copy an image to the clipboard as a PNG: the one at a URL, or the bytes a
+ * loader returns.
+ *
+ * A URL is read with `fetch`, so it has to be readable from script:
  * same-origin, `blob:` / `data:`, or a CORS-enabled host (the desktop shell
  * reads any origin). The async Clipboard API only takes `image/png` for
  * images, so anything else — JPEG, WebP, GIF (first frame) — is re-encoded
@@ -106,20 +155,14 @@ export async function copyText(text: string): Promise<boolean> {
  * @returns `true` on success, `false` on failure (unreadable URL, bytes that
  * don't decode as an image, no async Clipboard API, permission denied).
  */
-export async function copyImage(url: string): Promise<boolean> {
-  if (
-    typeof navigator === "undefined" ||
-    !navigator.clipboard?.write ||
-    typeof ClipboardItem === "undefined"
-  ) {
-    return false;
-  }
+export async function copyImage(source: string | (() => Promise<Blob>)): Promise<boolean> {
+  if (!canCopyImage()) return false;
   try {
     // The item takes the pending PNG rather than the finished one so the
     // write starts inside the click that asked for it; Safari rejects a
     // clipboard write that happens after an await.
     await navigator.clipboard.write([
-      new ClipboardItem({ "image/png": fetchAsPng(url) }),
+      new ClipboardItem({ "image/png": loadAsPng(source) }),
     ]);
     return true;
   } catch {
@@ -127,10 +170,8 @@ export async function copyImage(url: string): Promise<boolean> {
   }
 }
 
-async function fetchAsPng(url: string): Promise<Blob> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`image fetch failed: ${res.status}`);
-  const blob = await res.blob();
+async function loadAsPng(source: string | (() => Promise<Blob>)): Promise<Blob> {
+  const blob = typeof source === "string" ? await fetchBlob(source) : await source();
   if (blob.type === "image/png") return blob;
 
   // Decoded through <img> rather than createImageBitmap so SVG works too, and
@@ -158,4 +199,10 @@ async function fetchAsPng(url: string): Promise<Blob> {
   } finally {
     URL.revokeObjectURL(objectUrl);
   }
+}
+
+async function fetchBlob(url: string): Promise<Blob> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`image fetch failed: ${res.status}`);
+  return res.blob();
 }

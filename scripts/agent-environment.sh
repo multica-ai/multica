@@ -173,7 +173,7 @@ cmd_start() {
   trap "finish_start $component \$?" EXIT
   [ -f "$BORROWED" ] || flags+=(--ttl "$DEV_ENV_TTL_HOURS")
 
-  bash "$DEV_ENV" up --components "api,$component" ${flags[@]+"${flags[@]}"}
+  bash "$DEV_ENV" up --components "api,collab,$component" ${flags[@]+"${flags[@]}"}
   status="$(bash "$DEV_ENV" status --json)"
 
   node -e '

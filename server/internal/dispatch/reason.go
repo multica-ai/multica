@@ -96,9 +96,10 @@ const (
 	// ReasonQuotaExceeded is a policy-neutral refusal for an exhausted
 	// Cloud-provided autopilot interval.
 	ReasonQuotaExceeded ReasonCode = "quota_exceeded"
-	// ReasonIssueLimitReached means a create_issue Autopilot was admitted for a
-	// run, but Cloud's effective workspace issue-count limit blocked the issue.
-	ReasonIssueLimitReached ReasonCode = "issue_limit_reached"
+	// ReasonHandedToLeader: a squad member handed the issue to another member,
+	// but the squad's handoff guard (round or daily limit) sent it to the squad
+	// leader instead. The leader's run covers the comment.
+	ReasonHandedToLeader ReasonCode = "handed_to_leader"
 	// ReasonInternalError: an unexpected server error prevented a clean decision.
 	ReasonInternalError ReasonCode = "internal_error"
 )

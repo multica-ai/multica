@@ -42,7 +42,7 @@ Une exécution passe généralement par ces états :
 | `deferred` | Programmée pour plus tard ; entre dans la file d'attente à l'heure prévue |
 | `queued` | En attente de prise en charge par un runtime |
 | `dispatched` | Un runtime l'a prise en charge et démarre l'outil de codage IA |
-| `waiting_local_directory` | Le répertoire local cible est occupé par une autre exécution ; attente de la libération du verrou du répertoire |
+| `waiting_local_directory` | En attente du répertoire local cible ou d'un slot d'exécution du daemon avant le démarrage |
 | `running` | L'outil de codage IA est en cours d'exécution |
 | `completed` | L'exécution s'est terminée normalement |
 | `failed` | L'exécution a rencontré une erreur ou a été interrompue |
@@ -70,7 +70,7 @@ Dans le journal d'exécution, vous pouvez :
 - Arrêter les exécutions en file d'attente, en démarrage, en attente d'un répertoire local ou au travail.
 - Relancer une exécution en échec ou annulée.
 
-La démo ci-dessous parcourt un cycle complet : une exécution entre en file, démarre et échoue ; vous la relancez et la nouvelle exécution se termine. Une fois la nouvelle exécution lancée, vous pouvez aussi essayer de l'arrêter en cours de route.
+Le schéma ci-dessous présente chaque transition du cycle de vie d'une exécution, y compris la relance après échec et l'annulation en file ou en cours. Cliquez sur un état pour inspecter ses transitions.
 
 <RunLifecycleDemo />
 
@@ -80,7 +80,7 @@ La démo ci-dessous parcourt un cycle complet : une exécution entre en file, d�
 Changer l'assigné ou le statut d'une tâche n'arrête pas une exécution déjà démarrée. Pour en interrompre une, arrêtez-la dans le journal d'exécution. Supprimer une tâche annule ses exécutions actives.
 </Callout>
 
-Le journal d'exécution totalise aussi le **Dépensé**, les **Tokens** et le **Travail d'agent** de la tâche, avec une barre de coût par exécution. Cliquer sur le total, sur une barre ou sur **Ouvrir la chronologie** ouvre la boîte de dialogue **Exécutions**, qui montre le coût par exécution ou en cumul, le répartit par agent et par modèle, et compte les exécutions en échec et annulées. Les coûts sont des estimations ; leur calcul et la consommation de tout l'espace de travail sont décrits dans [Statistiques](/analytics#coût-dune-tâche).
+L'en-tête du journal d'exécution indique ce que la tâche a déjà dépensé. **Ouvrir la chronologie** ouvre la boîte de dialogue **Exécutions**, qui totalise le **Dépensé**, les **Tokens** et le **Travail d'agent**, montre le coût par exécution ou en cumul, le répartit par agent et par modèle, et compte les exécutions en échec et annulées. Les coûts sont des estimations ; leur calcul et la consommation de tout l'espace de travail sont décrits dans [Statistiques](/analytics#coût-dune-tâche).
 
 ## Échecs et relances automatiques
 
@@ -105,6 +105,7 @@ Les motifs d'échec affichés dans le journal d'exécution et dans les [Statisti
 | `queued_expired` | Le runtime a cessé d'envoyer des signaux de vie pendant plus longtemps que le délai de grâce de reconnexion, et l'exécution était aussi en file d'attente depuis aussi longtemps | Vérifiez que le runtime est en ligne, puis relancez |
 | `runtime_recovery` | Le daemon a récupéré une exécution interrompue après son redémarrage | Relancez directement |
 | `environment_prepare_failed` | Le daemon n'a pas pu préparer l'environnement d'exécution — son répertoire de travail, ou la configuration locale du runtime qui y est écrite | Lisez l'erreur brute pour savoir quelle étape a échoué, puis vérifiez cette machine : espace disque, permissions, répertoire encore utilisé, ou configuration locale de l'outil de codage IA |
+| `local_directory_missing` | Le dossier local lié au projet n'existe plus sur l'ordinateur qui exécute l'agent — il a été supprimé ou déplacé après avoir été lié | Restaurez le dossier au même chemin, puis réessayez. Pour utiliser un nouvel emplacement, retirez l'ancien dossier dans **Ressources** (menu **⋯** de sa ligne → **Retirer**) et liez le nouveau depuis l'application de bureau sur cet ordinateur — les navigateurs ne peuvent pas sélectionner de dossiers ; voir [Ressources du projet](/project-resources) |
 | `cancelled` | Arrêtée manuellement, ou annulée avec un archivage ou une suppression | Rien à faire |
 | `timeout` | Dépassement de la limite de durée d'exécution configurée pour le daemon | Réduisez le périmètre de la tâche, ou ajustez `agent_timeout` du daemon |
 | `iteration_limit` | Plafond d'itérations d'une exécution atteint | Réduisez le périmètre de la tâche |
@@ -120,8 +121,8 @@ Le préfixe `agent_error.` est omis dans ce tableau.
 | Motif | Signification | Que faire |
 | --- | --- | --- |
 | `provider_auth_or_access` | Échec d'authentification ou accès refusé par le fournisseur du modèle (401/403) | Reconnectez-vous dans cet outil de codage IA, ou vérifiez la clé API |
-| `provider_quota_limit` | Quota ou solde épuisé (402) | Rechargez le compte ou changez de compte |
-| `provider_capacity_or_rate_limit` | Limite de débit atteinte ou capacité insuffisante (429/529) | Réessayez plus tard |
+| `provider_quota_limit` | Quota ou solde épuisé | Rechargez le compte ou changez de compte |
+| `provider_capacity_or_rate_limit` | Limite de débit atteinte ou capacité insuffisante | Réessayez plus tard |
 | `provider_server_error` | Erreur serveur du fournisseur du modèle (5xx) | Réessayez plus tard |
 | `provider_network` | Échec réseau lors de la connexion au fournisseur du modèle | Relance automatique ; vérifiez le réseau de la machine d'exécution si le problème persiste |
 | `model_not_found_or_unavailable` | Le modèle n'existe pas ou est actuellement indisponible | Choisissez un modèle disponible dans les paramètres de l'agent |
@@ -167,8 +168,10 @@ Les valeurs ci-dessous sont celles de la configuration par défaut du serveur.
 | `deferred` | Programmée pour plus tard | Passe à `queued` à l'heure prévue, puis les règles ci-dessous s'appliquent |
 | `queued` | En attente de prise en charge par un runtime | Attend tant que son runtime continue d'envoyer des signaux de vie, et dans tous les cas au moins un délai de grâce de reconnexion après la mise en file d'attente ; n'échoue que lorsque les deux fenêtres sont écoulées, et n'est pas relancée automatiquement |
 | `dispatched` | Prise en charge ; l'outil démarre | Considérée comme en échec après plus de **5 minutes** dans cet état |
-| `waiting_local_directory` | En attente de la libération du verrou du répertoire local | Pas de délai propre ; reprend le processus de démarrage une fois le répertoire libéré |
+| `waiting_local_directory` | En attente du répertoire local et de la capacité d'exécution | Pas de délai propre ; reprend le démarrage lorsque le répertoire et un slot d'exécution du daemon sont disponibles |
 | `running` | L'outil de codage IA est en cours d'exécution | Pas de durée maximale fixe ; la vivacité suit le signal de vie du runtime — un toutes les 15 secondes ; un runtime qui perd son signal de vie est marqué hors ligne au plus tard en 3 minutes environ. Ses exécutions n'échouent qu'une fois le signal de vie absent au-delà du délai de grâce de reconnexion (`MULTICA_RUNTIME_RECONNECT_GRACE`, 3 heures par défaut) ; un redémarrage du daemon les récupère directement |
+
+En cas de coupure confirmée du flux Trae CLI avec l’erreur `llm response empty stream`, le daemon doit aussi vérifier qu’aucun appel d’outil n’a démarré pendant ce tour avant de relancer automatiquement l’exécution. Si un appel a démarré ou si l’historique est indisponible, consultez le journal d’exécution avant de relancer manuellement.
 
 La relance automatique ne couvre que les défaillances transitoires ci-dessous, et ne s'applique qu'aux exécutions rattachées à une tâche ou à une discussion (hors mode **Exécution seule** des automatisations) :
 

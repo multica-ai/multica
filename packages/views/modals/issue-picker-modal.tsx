@@ -28,10 +28,14 @@ export interface IssuePickerSuggestionGroup {
 interface IssuePickerModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onOpenChangeComplete?: (open: boolean) => void;
   title: string;
   description: string;
   excludeIds: string[];
   onSelect: (issue: Issue) => void;
+  closeOnSelect?: boolean;
+  error?: string;
+  pending?: boolean;
   /** Shown while the query is empty; groups without issues are skipped. */
   suggestions?: IssuePickerSuggestionGroup[];
   /** Drops issues from results and suggestions alike; excludeIds always applies. */
@@ -41,11 +45,15 @@ interface IssuePickerModalProps {
 export function IssuePickerModal({
   open,
   onOpenChange,
+  onOpenChangeComplete,
   title,
   description,
   excludeIds,
   onSelect,
   suggestions,
+  closeOnSelect = true,
+  error,
+  pending = false,
   isSelectable,
 }: IssuePickerModalProps) {
   const { t } = useT("modals");
@@ -65,9 +73,8 @@ export function IssuePickerModal({
 
   useEffect(() => {
     if (!open) {
-      setQuery("");
-      setResults([]);
-      setIsLoading(false);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (abortRef.current) abortRef.current.abort();
     }
   }, [open]);
 
@@ -112,8 +119,9 @@ export function IssuePickerModal({
       key={issue.id}
       value={issue.id}
       onSelect={() => {
+        if (pending) return;
         onSelect(issue);
-        onOpenChange(false);
+        if (closeOnSelect) onOpenChange(false);
       }}
     >
       <StatusIcon
@@ -132,6 +140,14 @@ export function IssuePickerModal({
     <CommandDialog
       open={open}
       onOpenChange={onOpenChange}
+      onOpenChangeComplete={(nextOpen) => {
+        if (!nextOpen) {
+          setQuery("");
+          setResults([]);
+          setIsLoading(false);
+        }
+        onOpenChangeComplete?.(nextOpen);
+      }}
       title={title}
       description={description}
     >
@@ -144,6 +160,7 @@ export function IssuePickerModal({
             search(v);
           }}
         />
+        {error && <p role="alert" className="px-3 py-2 text-caption text-destructive">{error}</p>}
         <CommandList>
           {isLoading && (
             <div className="py-6 text-center text-body text-muted-foreground">

@@ -11,7 +11,7 @@
     "description": "ワークスペースは、チームがプロジェクトやタスクに取り組む共有環境です。"
   },
   "delete_issue": {
-    "title": "タスクを削除",
+    "title": "タスクを削除しますか？",
     "description": "このタスクとすべてのコメントが完全に削除されます。この操作は元に戻せません。",
     "cancel": "キャンセル",
     "confirm": "削除",
@@ -168,7 +168,7 @@
   },
   "create_issue": {
     "sr_manual": "新規タスク",
-    "sr_agent": "タスクをクイック作成",
+    "sr_agent": "エージェントでタスクを作成",
     "manual_breadcrumb": "手動で作成",
     "agent_breadcrumb": "エージェントで作成",
     "title_placeholder": "タスクのタイトル",
@@ -182,31 +182,23 @@
     "toast_failed": "タスクを作成できませんでした",
     "toast_duplicate_title": "重複タスク",
     "toast_duplicate_view": "既存のタスクを表示",
-    "issue_limit": {
-      "title": "このワークスペースはタスク数の上限に達しました",
-      "checking_description": "このワークスペースで利用可能な請求操作を確認しています…",
-      "upgrade_description": "Pro にアップグレードすると、引き続きタスクを作成できます。",
-      "portal_description": "請求ポータルを開いてワークスペースのサブスクリプションを管理し、タスク作成を再開してください。",
-      "contact_description": "ワークスペースの所有者または管理者に Pro へのアップグレードを依頼してください。",
-      "billing_description": "請求設定を開いて、このワークスペースで利用可能なアップグレードオプションを確認してください。",
-      "billing_unavailable_description": "請求操作を読み込めませんでした。請求設定を開いて再試行してください。",
-      "billing_disabled_description": "既存のタスクを削除して空きを作るか、ワークスペースの管理者に連絡してください。",
-      "upgrade_action": "Pro にアップグレード",
-      "portal_action": "請求ポータルを開く",
-      "billing_action": "請求設定を表示"
-    },
     "autopilot_quota_limit": {
       "title": "このワークスペースはオートパイロット実行数の上限に達しました",
       "checking_description": "このワークスペースで利用可能な請求操作を確認しています…",
-      "upgrade_description": "Pro にアップグレードすると、オートパイロット実行を再開できます。",
+      "upgrade_description": "Pro にアップグレードすると月間上限が増え、オートパイロット実行を再開できます。実行枠のリセットを待つこともできます。",
       "portal_description": "請求ポータルを開いてワークスペースのサブスクリプションを管理し、オートパイロット実行を再開してください。",
-      "contact_description": "ワークスペースの所有者または管理者に Pro へのアップグレードを依頼してください。",
+      "contact_description": "ワークスペースの所有者または管理者にプランのアップグレードを依頼するか、実行枠のリセットを待ってください。",
       "billing_description": "請求設定を開いて、このワークスペースで利用可能なアップグレードオプションを確認してください。",
       "billing_unavailable_description": "請求操作を読み込めませんでした。請求設定を開いて再試行してください。",
       "billing_disabled_description": "現在の実行枠がリセットされるまで待つか、ワークスペースの管理者に連絡してください。",
       "upgrade_action": "Pro にアップグレード",
       "portal_action": "請求ポータルを開く",
-      "billing_action": "請求設定を表示"
+      "billing_action": "請求設定を表示",
+      "addon_description": "実行回数を追加購入すると今月中にオートパイロット実行を再開できます。実行枠のリセットを待つこともできます。",
+      "contact_addon_description": "ワークスペースの所有者または管理者に実行回数の追加購入を依頼するか、実行枠のリセットを待ってください。",
+      "contact_addon_or_upgrade_description": "ワークスペースの所有者または管理者に実行回数の追加購入かプランのアップグレードを依頼するか、実行枠のリセットを待ってください。",
+      "addon_action": "実行回数を追加購入",
+      "upgrade_business_action": "Business にアップグレード"
     },
     "toast_link_subissues_all_failed": "サブタスクをリンクできませんでした",
     "toast_link_subissues_partial": "サブタスク {{total}} 件中 {{failed}} 件をリンクできませんでした",
@@ -247,13 +239,15 @@
       "created_by": "作成者",
       "select_agent_aria": "エージェントを選択",
       "pick_an_agent": "エージェントを選択…",
+      "all_actors": "すべてのエージェントとスクワッド",
+      "frequent_actors_aria": "よく使う",
       "no_agents": "利用可能なエージェントまたはスクワッドがありません。",
       "search_placeholder": "エージェントとスクワッドを検索…",
       "agents_group": "エージェント",
       "squads_group": "スクワッド",
-      "version_missing": "このエージェントのデーモンは CLI バージョンを報告していません。エージェントで作成には multica CLI {{min}} 以上が必要です。デーモンをアップグレードして再接続するか、手動作成に切り替えてください。",
+      "version_missing": "このエージェントのデーモンは CLI バージョンを報告していません。エージェントでの作成には multica CLI ≥ {{min}} が必要です。デーモンをアップグレードして再接続するか、手動作成に切り替えてください。",
       "version_below": "このエージェントのデーモン CLI は {{current}} です。エージェントで作成には {{min}} 以上が必要です。デーモンをアップグレードするか、手動作成に切り替えてください。",
-      "prompt_placeholder": "エージェントにやってほしいことを伝えてください。例: 「Bohan に Web プロジェクトのインボックス読み込みの遅さを直してもらう」",
+      "prompt_placeholder": "エージェントにやってほしいことを伝えてください。例: 「Mika に Web プロジェクトのインボックス読み込みの遅さを直してもらう」",
       "source_context_prompt_placeholder": "このコンテキストを使って何をしてほしいか伝えてください。例: 「ここで説明されている問題を引き続き調査して修正する」",
       "more_fields_aria": "その他のフィールド",
       "set_project": "プロジェクトを設定...",
@@ -286,8 +280,8 @@
     "trigger": "親タスクのフィールドをコピー",
     "title": "親タスクのフィールドをコピー",
     "description": "{{identifier}} から選択した値を一度だけ上書きします。以降の変更は同期されません。",
-    "apply": "{{count}} 項目をコピー",
     "no_labels": "ラベルなし",
-    "manual_only": "ラベル、開始日、カスタムプロパティは手動作成にのみ適用されます。"
+    "manual_only": "ラベル、開始日、カスタムプロパティは手動作成にのみ適用されます。",
+    "apply_other": "{{count}} 項目をコピー"
   }
 }

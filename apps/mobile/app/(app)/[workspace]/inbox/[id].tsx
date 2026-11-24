@@ -45,6 +45,20 @@ function BillingRecovery({
           {t("detail.contact_admin")}
         </Text>
       );
+    case "autopilot_addon":
+      // Buying runs is a card payment; the app opens web Billing for it.
+      return billingUrl ? (
+        <Button
+          onPress={() => void Linking.openURL(billingUrl)}
+          accessibilityLabel={t("detail.buy_runs")}
+        >
+          <Text>{t("detail.buy_runs")}</Text>
+        </Button>
+      ) : (
+        <Text className="text-sm leading-5 text-muted-foreground">
+          {t("detail.buy_runs_web")}
+        </Text>
+      );
     case "checkout":
     case "portal":
     case "billing":
@@ -91,6 +105,7 @@ export default function InboxNoticeDetail() {
   const checkingConfig =
     isQuotaNotice && !configQuery.data && configQuery.isFetching;
   const recovery = resolveBillingRecovery({
+    autopilotAddon: true,
     actions: summaryQuery.data?.availableActions,
     billingEnabled: checkingConfig || billingEnabled,
     loading:

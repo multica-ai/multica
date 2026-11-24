@@ -21,6 +21,8 @@ describe("project deletion permissions", () => {
     ["member", null, "me", false],
     ["admin", null, null, true],
     ["owner", undefined, undefined, true],
+    ["guest", "member", "me", false],
+    ["guest", "agent", "owned", false],
   ] as const)("role=%s creator=%s:%s allows=%s", (role, type, id, expected) => {
     expect(canDeleteProject({ creator_type: type as Project["creator_type"], creator_id: id }, "me", role, agents)).toBe(expected);
   });

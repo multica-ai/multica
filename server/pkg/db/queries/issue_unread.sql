@@ -44,7 +44,7 @@ WHERE u.workspace_id = sqlc.arg(workspace_id)
   AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR NOT EXISTS (
     SELECT 1 FROM issue hidden_issue
     WHERE hidden_issue.id = u.issue_id
-      AND hidden_issue.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])
+      AND COALESCE(hidden_issue.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY(sqlc.narg('hidden_project_ids')::uuid[])
   ))
   AND (
     sqlc.narg(before_created_at)::timestamptz IS NULL

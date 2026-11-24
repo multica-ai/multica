@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/pkg/httptransport"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // requestError is returned by postJSON/getJSON when the server responds with an error status.
@@ -214,7 +215,9 @@ func daemonCommonCapabilities() []string {
 		protocol.DaemonCapabilityCheckoutKeepsWorkV1,
 		protocol.DaemonCapabilityJoinedWakeupsV1,
 		protocol.DaemonCapabilityWorkflowStatusRulesV1,
+		protocol.DaemonCapabilityWorkflowStatusMapV1,
 		protocol.DaemonCapabilityCLICommentSteerV1,
+		protocol.DaemonCapabilityDocCommentV1,
 	}
 }
 
@@ -760,6 +763,15 @@ func (c *Client) ReportTaskContextReceipt(ctx context.Context, taskID string, re
 	}, nil)
 }
 
+// ReportTaskRateLimits posts the subscription rate-limit snapshot the agent
+// CLI reported while running the task; the server keeps the newest one as the
+// state of the task's runtime.
+func (c *Client) ReportTaskRateLimits(ctx context.Context, taskID string, snapshot agent.RateLimitSnapshot) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/rate-limits", taskID), map[string]any{
+		"rate_limits": snapshot,
+	}, nil)
+}
+
 // EnvironmentCommand is a stop, restart, start or log read a member asked
 // for from the issue sidebar.
 type EnvironmentCommand struct {
@@ -806,36 +818,30 @@ func (c *Client) ReportTaskUsageSnapshot(ctx context.Context, taskID string, usa
 }
 
 func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) error {
-	return c.failTaskWithRetrySchedule(ctx, taskID, errMsg, sessionID, workDir, branchName, failureReason, sessionRolloutMissing, retiredSessionID, durableWorkDir, defaultTerminalRetrySchedule)
+	return c.failTaskWithRetrySchedule(ctx, terminalTaskReport{
+		taskID: taskID, errorMessage: errMsg, sessionID: sessionID, workDir: workDir, branchName: branchName,
+		failureReason: failureReason, sessionRolloutMissing: sessionRolloutMissing, retiredSessionID: retiredSessionID, durableWorkDir: durableWorkDir,
+	}, defaultTerminalRetrySchedule)
 }
 
-func (c *Client) failTaskWithRetrySchedule(ctx context.Context, taskID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, schedule []time.Duration) error {
-	body := map[string]any{"error": errMsg}
-	if sessionID != "" {
-		body["session_id"] = sessionID
+func (c *Client) failTaskWithRetrySchedule(ctx context.Context, report terminalTaskReport, schedule []time.Duration) error {
+	body := protocol.TaskFailRequest{
+		Error:                 report.errorMessage,
+		SessionID:             report.sessionID,
+		WorkDir:               report.workDir,
+		DurableWorkDir:        report.durableWorkDir,
+		BranchName:            report.branchName,
+		FailureReason:         report.failureReason,
+		SessionRolloutMissing: report.sessionRolloutMissing,
+		RetiredSessionID:      report.retiredSessionID,
+		NoToolCallsStarted:    report.noToolCallsStarted,
 	}
-	if workDir != "" {
-		body["work_dir"] = workDir
+	// Older servers automatically replay a provider_network failure. Keep the
+	// original server-error label on the wire when the turn cannot be verified.
+	if !body.NoToolCallsStarted && body.FailureReason == taskfailure.ReasonAgentProviderNetwork.String() && taskfailure.IsTraePromptStreamDisconnect(body.Error) {
+		body.FailureReason = taskfailure.ReasonAgentProviderServerError.String()
 	}
-	if durableWorkDir != "" {
-		body["durable_work_dir"] = durableWorkDir
-	}
-	// A failed run can still have delivered a branch: worktree mode commits
-	// whatever the agent left before removing the worktree, so partial work
-	// survives — but only if its name travels with the failure report.
-	if branchName != "" {
-		body["branch_name"] = branchName
-	}
-	if failureReason != "" {
-		body["failure_reason"] = failureReason
-	}
-	if sessionRolloutMissing {
-		body["session_rollout_missing"] = true
-	}
-	if retiredSessionID != "" {
-		body["retired_session_id"] = retiredSessionID
-	}
-	return c.postJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/fail", taskID), body, nil, schedule)
+	return c.postJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/fail", report.taskID), body, nil, schedule)
 }
 
 // PinTaskSession persists the agent's session_id and work_dir on the task
@@ -888,8 +894,9 @@ type (
 func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
 	var resp HeartbeatResponse
 	if err := c.postJSON(ctx, "/api/daemon/heartbeat", map[string]any{
-		"runtime_id":            runtimeID,
-		"supports_batch_import": true,
+		"runtime_id":             runtimeID,
+		"supports_batch_import":  true,
+		"supports_queued_update": true,
 	}, &resp); err != nil {
 		return nil, err
 	}
@@ -1190,10 +1197,9 @@ const RuntimeOfflineCodeNotExecutable = "not_executable"
 // queued forever. The exception is an install the daemon is running right now,
 // which Installing states explicitly.
 //
-// Only an ABSENT profile reaches this code. A profile that is present but
-// answers with a protocol this daemon does not drive never takes a live runtime
-// offline at all: the daemon can be the stale side of that skew, so it reports
-// the incompatibility and leaves the runtime alone.
+// Missing profiles and confirmed manual-repair configurations reach this code.
+// A profile that answers with a protocol this daemon does not drive remains
+// non-demotable: the daemon can be the stale side of that separate skew.
 const RuntimeOfflineCodeDshProfile = "dsh_profile"
 
 // RuntimeOfflineReason is why a runtime went offline, in the form clients can
@@ -1266,6 +1272,7 @@ func (c *Client) GetWorkspaceRepos(ctx context.Context, workspaceID string) (*Wo
 type RuntimeProfile struct {
 	ID             string   `json:"id"`
 	WorkspaceID    string   `json:"workspace_id"`
+	DaemonID       *string  `json:"daemon_id"`
 	DisplayName    string   `json:"display_name"`
 	ProtocolFamily string   `json:"protocol_family"`
 	RuntimeType    string   `json:"runtime_type"`
@@ -1288,9 +1295,9 @@ type RuntimeProfilesResponse struct {
 // Mirrors GetWorkspaceRepos. Callers must treat this as best-effort: an older
 // server with no profiles route returns 404, which the daemon swallows and
 // continues with built-in runtimes only.
-func (c *Client) GetRuntimeProfiles(ctx context.Context, workspaceID string) (*RuntimeProfilesResponse, error) {
+func (c *Client) GetRuntimeProfiles(ctx context.Context, workspaceID, daemonID string) (*RuntimeProfilesResponse, error) {
 	var resp RuntimeProfilesResponse
-	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/workspaces/%s/runtime-profiles", workspaceID), &resp); err != nil {
+	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/workspaces/%s/runtime-profiles?daemon_id=%s", workspaceID, url.QueryEscape(daemonID)), &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil

@@ -23,7 +23,7 @@ When the scope is clear, assign directly to the matching [agent](/agents).
 | **Leader** | Must be an agent. Receives work assigned to the squad and decides how to handle it. |
 | **Members** | Can be agents or human members. The same member can join multiple squads. |
 | **Role descriptions** | Tell the leader what work each member is suited for. Context only — they grant no permissions and never trigger members automatically. |
-| **Squad instructions** | Hold routing rules, collaboration norms, and squad-wide background. Provided to the leader only. |
+| **Squad instructions** | Hold routing rules, collaboration norms, and squad-wide background. Provided to the leader and to every agent member working on the squad's issues. |
 
 Creating a squad requires a name and a leader. The squad leader automatically becomes a member; you can then add more members and fill in role descriptions and squad instructions.
 
@@ -36,11 +36,11 @@ When a non-Backlog issue is assigned to a squad, Multica immediately enqueues a 
 3. **Leader posts one delegation comment.** The comment `@`-mentions the chosen member(s) using the exact mention markdown from the roster. Each mentioned agent gets a new run, and each mentioned human member gets a notification.
 4. **Leader records its evaluation** via `multica squad activity <issue-id> action --reason "..."`. This writes an entry to the issue's activity timeline so humans can see the leader actually evaluated the trigger.
 5. **The dispatch turn leaves the parent `in_progress`.** Same agent-managed status contract as a direct agent assignment — coordinating the squad is working the parent's ask, so the parent moves from `todo` to `in_progress`, and dispatching members is not delivery, so it stays there while the squad works.
-6. **Leader stops.** The leader does not do the implementation itself. When the delegated member posts back — or when a sub-issue / stage barrier closes — the leader is re-triggered to read the update and either delegate the next step, escalate, move the parent to `in_review` once the overall goal is met, or stay silent. `done` is left to a human reviewer or existing integrations (for example a PR with close intent that merges).
+6. **Leader stops.** The leader does not do the implementation itself. When the delegated member posts back — or when a sub-issue / stage barrier closes — the leader is re-triggered (unless the squad lets [members hand off directly](#collaboration-mode)) to read the update and either delegate the next step, escalate, move the parent to `in_review` once the overall goal is met, or stay silent. `done` is left to a human reviewer or existing integrations (for example a PR with close intent that merges).
 
 If the issue is in **Backlog**, the leader is not triggered: Backlog is a parking lot, same rule as for direct agent assignment.
 
-The demo below hands an event-prep issue to the Events squad. Ops helper is the leader; the members are Writing helper and you.
+The clip below opens **Platform Team** (leader: Engineer; members: Reviewer and Docs) and assigns an issue to the squad so the leader plans and coordinates the handoff.
 
 <SquadDemo />
 
@@ -54,6 +54,28 @@ On each squad-leader run, three blocks are appended to the leader's instructions
 - **Squad Roster** — the leader's self-row plus one row per non-archived member. Each row carries the exact mention markdown (`[@Name](mention://agent/<uuid>)` or `[@Name](mention://member/<uuid>)`) the leader should paste — typing a plain `@name` won't trigger anyone.
 - **Squad Instructions** — your custom guidance for this squad (set on the squad detail page or via `multica squad update --instructions`). Use this for routing rules ("send DB work to Alice, frontend to Bob"), escalation policies, or anything else the leader needs to know that isn't already in the issue.
 
+### What members see
+
+When an agent member claims a run on an issue assigned to its squad, a **Squad Member Brief** is appended to its instructions: its role, the other members with their exact mention markdown, the squad instructions, and how to hand off under the squad's collaboration mode. People who can manage the squad can preview what each agent receives under **What members receive** on the squad detail page.
+
+## Collaboration mode
+
+The **Collaboration** setting on the squad detail page decides who picks the next step after a member finishes. Only people who can manage the squad can change it.
+
+| Mode | What happens |
+|---|---|
+| **Leader assigns** (default) | Every member reply returns to the leader, who picks the next step. Existing squads keep this mode. |
+| **Members hand off directly** | The leader assigns the first step and handles exceptions. A member `@`-mentions the next member, who runs without waking the leader. A member that `@`-mentions a person waits for that person instead of the leader. |
+
+With **Members hand off directly**, the issue goes back to the leader when:
+
+- the same two members have already passed it back and forth 3 rounds;
+- the issue has taken 20 member handoffs in the past 24 hours;
+- a member's run fails;
+- a member's reply names no next owner.
+
+These limits are fixed. Each handoff appears on the issue timeline, with its round and, when the issue went back to the leader, the reason.
+
 ## Leader re-trigger rules
 
 After the first dispatch, the leader is woken up automatically by **most subsequent comments** on the issue. The exact rules:
@@ -62,14 +84,17 @@ After the first dispatch, the leader is woken up automatically by **most subsequ
 |---|---|---|
 | A non-member (human reporter, external agent) posts a comment | Yes | |
 | A squad member posts a progress update with no `@mention` | Yes | The leader re-evaluates whether a next step is needed |
-| Anyone posts a comment that explicitly `@`-mentions another agent / member / squad / `@all` | No | The explicit `@` is the routing signal, so the leader stays out of the way |
+| A member or worker explicitly mentions the assigned squad’s leader as an agent | Yes | Runs as the squad leader, so `multica squad activity` can record its decision |
+| A human member mentions only other members or `@all` | No | People receive notifications; implicit agent routing is suppressed |
+| A non-leader agent mentions only members or `@all` | Yes | The worker result still reaches the leader; people receive notifications as usual. With **Members hand off directly**, a squad member that mentions a person does not wake the leader |
+| Anyone explicitly mentions an agent or squad | Only if named | Only the named agents or squad leaders run; there is no additional leader fallback |
 | The leader's own comment | No | Guarded so the leader can't trigger itself |
 | A comment containing only an issue cross-reference (`[MUL-123](mention://issue/...)`) | Yes | Issue references aren't routing |
 
 Dedup applies on top of these rules: if the leader already has a `queued` or `dispatched` run on this issue, a new trigger won't enqueue a duplicate.
 
 <Callout type="info">
-**Why the leader doesn't trigger when a member posts an `@`-mention.** Once a squad member directly `@`s someone, that comment is a deliberate hand-off — having the leader wake up to "observe" the routing would just produce a no-op turn and clutter the timeline. Agent-authored comments are the exception: when an agent posts a result that `@`s another agent, the leader still wakes up so it can coordinate the thread.
+A human member's `@member` / `@all` comment only notifies people. A worker agent's result with the same mentions still returns to the assigned squad leader, or to the guest squad leader in its delegation thread. An explicit `@agent` / `@squad` routes only to the named targets, regardless of who wrote the comment.
 </Callout>
 
 ## Assigning vs. @-mentioning a squad
@@ -111,6 +136,8 @@ multica squad member add <squad-id> \
   --member-id <agent-or-member-id> \
   --type agent \
   --role "Owns frontend implementation"
+multica squad update <squad-id> --handoff-mode direct
+multica squad briefs <squad-id> --agent <agent-name-or-id>
 ```
 
 Full commands in [Using the CLI](/cli).
@@ -120,3 +147,4 @@ Full commands in [Using the CLI](/cli).
 - [Assign issues to agents](/assigning-issues) — compare member, agent, and squad assignees.
 - [@-mention agents in comments](/mentioning-agents) — trigger and routing rules for @-mentions.
 - [Runs](/tasks) — how each agent run is queued and recorded.
+- [Share an agent pool across a team](/team-agent-pool) — a squad as part of a team's shared agents, with Access and review.

@@ -65,9 +65,14 @@ func TestTriggerAutopilot_InternalFailureDoesNotEchoError(t *testing.T) {
 		"state":                "consumed",
 	})
 
+	// Only a metered run reaches the quota tables, so the press comes from an
+	// agent acting for testUserID; a member's own press is never metered.
 	req := testutil.WithHeaders(
 		newRequest("POST", "/api/autopilots/"+autopilotID+"/trigger", nil),
 		"Idempotency-Key", idempotencyKey,
+		"X-Actor-Source", "task_token",
+		"X-Agent-ID", agentID,
+		"X-Task-ID", callerTask(t, agentID, testUserID),
 	)
 	res := testutil.Call(t, testHandler.TriggerAutopilot, withURLParam(req, "id", autopilotID)).
 		Want(http.StatusInternalServerError)

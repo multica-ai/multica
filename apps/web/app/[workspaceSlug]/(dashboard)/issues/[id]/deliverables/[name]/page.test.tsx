@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getRouteRegex } from "next/dist/shared/lib/router/utils/route-regex";
 import { getRouteMatcher } from "next/dist/shared/lib/router/utils/route-matcher";
 import { getDynamicParam } from "next/dist/shared/lib/router/utils/get-dynamic-param";
-import { paths } from "@multica/core/paths";
+import { paths, type IssueRouteRef } from "@multica/core/paths";
 
 const routeProps = vi.hoisted(() => ({
   last: null as { routeId: string; deliverable?: string } | null,
@@ -32,7 +32,7 @@ function pageParam(matched: Parameters<typeof getDynamicParam>[0], key: string):
 }
 
 async function renderLink(filename: string) {
-  const href = paths.workspace("acme").issueDeliverable("MUL-1", filename);
+  const href = paths.workspace("acme").issueDeliverable("MUL-1" as IssueRouteRef, filename);
   const matched = matchRoute(href);
   if (!matched) throw new Error(`route did not match ${href}`);
   const params = { id: pageParam(matched, "id"), name: pageParam(matched, "name") };

@@ -15,8 +15,11 @@ const MaxSnooze = 366 * 24 * time.Hour
 // the recipient.
 const (
 	MentionViaMember = "member"
-	MentionViaSquad  = "squad"
-	MentionViaAll    = "all"
+	// MentionViaSquad is no longer written: an @squad mention only triggers
+	// the squad leader and does not notify squad members. It is kept because
+	// existing inbox rows still carry this value.
+	MentionViaSquad = "squad"
+	MentionViaAll   = "all"
 )
 
 // wakingTypes are the notifications that end a snooze early: each one asks
@@ -28,6 +31,7 @@ var wakingTypes = map[string]bool{
 	"app_action_requested": true,
 	"app_action_reminder":  true,
 	"children_done":        true,
+	"blockers_done":        true,
 }
 
 // WakesSnooze reports whether a row of this type ends a snooze on its issue.

@@ -336,6 +336,7 @@ export function WorkspaceTab() {
                 name={workspace.name}
                 size={64}
                 disabled={!canManageWorkspace}
+                textIconEnabled
                 ariaLabel={t(($) => $.workspace.change_logo_aria)}
                 onUploaded={async (url) => {
                   try {

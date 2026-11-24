@@ -11,10 +11,14 @@ import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
 
 export function SetParentIssueModal({
+  open = true,
   onClose,
+  onOpenChangeComplete,
   data,
 }: {
+  open?: boolean;
   onClose: () => void;
+  onOpenChangeComplete?: (open: boolean) => void;
   data: Record<string, unknown> | null;
 }) {
   const { t } = useT("modals");
@@ -34,10 +38,11 @@ export function SetParentIssueModal({
 
   return (
     <IssuePickerModal
-      open
+      open={open}
       onOpenChange={(v) => {
         if (!v) onClose();
       }}
+      onOpenChangeComplete={onOpenChangeComplete}
       title={t(($) => $.set_parent.title)}
       description={t(($) => $.set_parent.description)}
       excludeIds={excludeIds}

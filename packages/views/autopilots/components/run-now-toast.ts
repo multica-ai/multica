@@ -38,7 +38,6 @@ export type RunNowBlockedKey =
   | "run_blocked_attribution"
   | "run_blocked_already_active"
   | "run_blocked_quota_exceeded"
-  | "run_blocked_issue_limit_reached"
   | "run_blocked_generic";
 
 export function runNowBlockedKey(reasonCode: string | undefined): RunNowBlockedKey {
@@ -63,8 +62,6 @@ export function runNowBlockedKey(reasonCode: string | undefined): RunNowBlockedK
       return "run_blocked_already_active";
     case "quota_exceeded":
       return "run_blocked_quota_exceeded";
-    case "issue_limit_reached":
-      return "run_blocked_issue_limit_reached";
     default:
       return "run_blocked_generic";
   }

@@ -137,8 +137,8 @@ func (p LocalWorktreeParams) owner() branchOwner {
 // tail. The id is what the branch BELONGS to, and only it decides whether a
 // later task may continue that branch: identifiers are per-workspace and
 // human-chosen, so two workspaces can mint the same one for different issues.
-// Tasks with neither an issue nor a chat session have no conversation to
-// continue and get "", "".
+// Doc discussion runs continue per doc. Tasks with none of these have no
+// conversation to continue and get "", "".
 func localWorktreeConversation(params PrepareParams) (key, id string) {
 	if params.Task.IssueID != "" {
 		if params.IssueIdentifier != "" {
@@ -148,6 +148,9 @@ func localWorktreeConversation(params PrepareParams) (key, id string) {
 	}
 	if params.Task.ChatSessionID != "" {
 		return "chat-" + taskKey(params.Task.ChatSessionID), params.Task.ChatSessionID
+	}
+	if params.Task.DocID != "" {
+		return "doc-" + taskKey(params.Task.DocID), params.Task.DocID
 	}
 	return "", ""
 }
@@ -162,6 +165,10 @@ type LocalWorktree struct {
 	// WorkDir is the agent's cwd: Path, plus the offset of LocalPath inside
 	// the repo when the user pointed the resource at a subdirectory.
 	WorkDir string
+	// RuntimeConfigSkipWorktree is the tracked instruction file hidden from
+	// agent commits in this worktree's private index. Exported so it survives
+	// environment serialization and can always be restored during teardown.
+	RuntimeConfigSkipWorktree string `json:"runtime_config_skip_worktree,omitempty"`
 	// Branch is the branch created for this task, in the user's repo.
 	Branch string
 	// BaseCommit is the commit the worktree started from — this turn's baseline
@@ -516,8 +523,8 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 	// status` shows in the user's checkout, which is theirs, not ours. Instead
 	// the daemon runs the existing CleanupRuntimeConfig + CleanupSidecars pass
 	// over the worktree before Finalize, so the sidecars are simply gone by the
-	// time anything is committed. That also preserves a genuine agent edit to a
-	// tracked CLAUDE.md, which a blanket exclude would have swallowed.
+	// time the daemon commits. ProtectRuntimeConfig separately hides tracked
+	// instruction files from commits the agent makes while the brief is present.
 
 	if logger != nil {
 		logger.Info("execenv: local worktree ready",
@@ -565,6 +572,12 @@ func (w *LocalWorktree) Finalize(logger *slog.Logger) (LocalWorktreeOutcome, err
 		return LocalWorktreeOutcome{}, nil
 	}
 	outcome := LocalWorktreeOutcome{Branch: w.Branch}
+	if err := w.RestoreRuntimeConfigTracking(); err != nil {
+		outcome.Branch = ""
+		outcome.PreservedPath = w.Path
+		return outcome, fmt.Errorf("%w; the work is preserved in the worktree at %s (listed by `git worktree list` in %s)",
+			err, w.Path, w.GitRoot)
+	}
 
 	unlock, err := lockGitRoot(w.GitRoot, logger)
 	if err != nil {
@@ -772,6 +785,12 @@ func (w *LocalWorktree) Finalize(logger *slog.Logger) (LocalWorktreeOutcome, err
 // be sure nothing has run in the worktree yet.
 func (w *LocalWorktree) Discard(logger *slog.Logger) {
 	if w == nil {
+		return
+	}
+	if err := w.RestoreRuntimeConfigTracking(); err != nil {
+		if logger != nil {
+			logger.Warn("execenv: could not restore runtime config tracking before discarding worktree", "error", err)
+		}
 		return
 	}
 	unlock, err := lockGitRoot(w.GitRoot, logger)

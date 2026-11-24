@@ -19,3 +19,9 @@ services:
       dockerfile: Dockerfile.web
       args:
         NEXT_PUBLIC_APP_VERSION: dev
+
+  collab:
+    image: multica-collab:dev
+    build:
+      context: .
+      dockerfile: Dockerfile.collab

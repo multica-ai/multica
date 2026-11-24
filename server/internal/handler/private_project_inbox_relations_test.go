@@ -178,6 +178,62 @@ func TestPrivateProjectLabelUsageCountHidden(t *testing.T) {
 	}
 }
 
+func TestPrivateProjectPropertyUsageCountHidden(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	// Two definitions so both usage query shapes (one key, many keys) run.
+	propA := createTestProperty(t, map[string]any{"name": f.marker + " prop A", "type": "text"})
+	propB := createTestProperty(t, map[string]any{"name": f.marker + " prop B", "type": "text"})
+	for _, issueID := range []string{f.secretIssue, f.publicIssue} {
+		for _, propID := range []string{propA.ID, propB.ID} {
+			if w := setIssuePropertyRaw(t, issueID, propID, "v"); w.Code != http.StatusOK {
+				t.Fatalf("SetIssueProperty: expected 200, got %d: %s", w.Code, w.Body.String())
+			}
+		}
+	}
+
+	usage := func(userID, query string) map[string]int64 {
+		t.Helper()
+		var out struct {
+			Properties []PropertyResponse `json:"properties"`
+		}
+		req := asUser(newRequest(http.MethodGet, "/api/properties"+query, nil), userID)
+		testutil.Call(t, testHandler.ListProperties, req).Want(http.StatusOK).JSON(&out)
+		counts := make(map[string]int64)
+		for _, p := range out.Properties {
+			counts[p.ID] = p.UsageCount
+		}
+		return counts
+	}
+	for _, tc := range []struct {
+		name   string
+		userID string
+		want   int64
+	}{
+		{"workspace owner in the member list", testUserID, 2},
+		{"project member", f.insider, 2},
+		{"workspace member outside the project", f.outsider, 1},
+		{"workspace admin outside the project", f.outsideAdmin, 1},
+	} {
+		counts := usage(tc.userID, "")
+		for _, id := range []string{propA.ID, propB.ID} {
+			if counts[id] != tc.want {
+				t.Errorf("%s: usage_count for %s = %d, want %d", tc.name, id, counts[id], tc.want)
+			}
+		}
+	}
+
+	// A single definition takes the one-key query shape.
+	dbfx.Exec(t, `UPDATE issue_property SET archived_at = now() WHERE id = $1`, propB.ID)
+	if got := usage(f.outsider, "")[propA.ID]; got != 1 {
+		t.Errorf("one definition, member outside the project: usage_count = %d, want 1", got)
+	}
+
+	removeProjectMemberAsOwner(t, f, f.insider)
+	if got := usage(f.insider, "?include_archived=true")[propA.ID]; got != 1 {
+		t.Errorf("revoked project member: usage_count = %d, want 1", got)
+	}
+}
+
 // A project-scoped view preference on a project the caller cannot see answers
 // exactly like one on a project that does not exist, for reads and writes.
 func TestPrivateProjectViewPreferenceScopeHidden(t *testing.T) {

@@ -38,6 +38,7 @@ import type { ProjectStatus, ProjectPriority, ProjectVisibility } from "@multica
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
+import { Collapsible, CollapsibleContent } from "@multica/ui/components/ui/collapsible";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -62,6 +63,7 @@ import {
 import { ProjectStartDatePicker } from "../projects/components/project-start-date-picker";
 import { ProjectDueDatePicker } from "../projects/components/project-due-date-picker";
 import { ProjectAccessDraftPicker } from "../projects/components/project-access";
+import { usePaidFeatureErrorMessage } from "../billing";
 import { PillButton } from "../common/pill-button";
 import { WorkflowPill } from "../workflows/workflow-pill";
 import { githubShortLabel } from "../common/github-url";
@@ -82,6 +84,7 @@ import {
 import { useConfigStore } from "@multica/core/config";
 import type { LocalDirectoryExecutionMode } from "@multica/core/types";
 import { LocalDirectoryModeOptions } from "../projects/components/local-directory-mode-options";
+import { getProjectFoldersExtension, useProjectFolders } from "../extensions";
 
 /**
  * Builds the resource_ref for a local directory attached during project
@@ -142,7 +145,17 @@ function RepoUrlText({
   );
 }
 
-export function CreateProjectModal({ onClose }: { onClose: () => void }) {
+export function CreateProjectModal({
+  open = true,
+  onClose,
+  onOpenChangeComplete,
+  data,
+}: {
+  open?: boolean;
+  onClose: () => void;
+  onOpenChangeComplete?: (open: boolean) => void;
+  data?: Record<string, unknown> | null;
+}) {
   const { t } = useT("modals");
   // The execution-mode copy lives in the projects namespace alongside the
   // resource panel's, so both entry points describe the choice identically.
@@ -316,6 +329,11 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   };
 
   const [workflowId, setWorkflowId] = useState<string | null>(null);
+  const folders = useProjectFolders(wsId);
+  const FolderField = getProjectFoldersExtension()?.CreateProjectField;
+  const [folderId, setFolderId] = useState<string | null>(
+    typeof data?.folderId === "string" ? data.folderId : null,
+  );
 
   // Sync field changes to draft store
   const updateTitle = (v: string) => { setTitle(v); setDraft({ title: v }); };
@@ -345,6 +363,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const hasSource = sourceMode === "local" ? !!selectedLocalPath : selectedRepos.length > 0;
 
   const createProject = useCreateProject();
+  const paidFeatureError = usePaidFeatureErrorMessage();
 
   // Every selected repo's branch, not just the one in the add field. A branch
   // edited on an already-selected row goes through setRepoRef and used to
@@ -409,15 +428,19 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         resources,
         ...(visibility === "private" ? { visibility, member_ids: memberIds } : {}),
       });
+      if (folderId && folders.canFile) folders.moveProject(project.id, folderId);
       clearDraft();
       onClose();
       toast.success(t(($) => $.create_project.toast_created));
       router.push(wsPaths.projectDetail(project.id));
     } catch (err) {
       toast.error(
-        err instanceof Error && err.message
-          ? err.message
-          : t(($) => $.create_project.toast_failed),
+        paidFeatureError(
+          err,
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.create_project.toast_failed),
+        ),
       );
     } finally {
       setSubmitting(false);
@@ -476,13 +499,17 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => { if (!v) onClose(); }}
+      onOpenChangeComplete={onOpenChangeComplete}
+    >
       <DialogContent
         showCloseButton={false}
         className={cn(
           "p-0 gap-0 flex flex-col overflow-hidden",
           "!top-1/2 !left-1/2 !-translate-x-1/2",
-          "!transition-all !duration-300 !ease-out",
+          "[transition-property:width,max-width,height] [transition-duration:200ms] [transition-timing-function:cubic-bezier(0.23,1,0.32,1)] motion-reduce:[transition-duration:0ms]",
           isExpanded
             ? "!max-w-4xl !w-full !h-5/6 !-translate-y-1/2"
             : "!max-w-2xl !w-full !h-96 !-translate-y-1/2",
@@ -627,6 +654,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
           </DropdownMenu>
 
           <WorkflowPill value={workflowId} onChange={setWorkflowId} />
+          {FolderField && <FolderField value={folderId} onChange={setFolderId} />}
           {<ProjectAccessDraftPicker visibility={visibility} memberIds={memberIds} members={members}
             leadId={leadType === "member" ? leadId : undefined}
             onChange={(value, ids) => { setVisibility(value); setMemberIds(ids); setDraft({ visibility: value, memberIds: ids }); }} />}
@@ -905,13 +933,15 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                         read as one field, and the default branch is the right
                         answer often enough that this must not look like a
                         second required step. */}
-                    {customRepoUrl.trim() && (
-                      <GithubRefField
-                        id="create-project-repo-ref"
-                        value={customRepoRef}
-                        onChange={setCustomRepoRef}
-                      />
-                    )}
+                    <Collapsible open={Boolean(customRepoUrl.trim())}>
+                      <CollapsibleContent>
+                        <GithubRefField
+                          id="create-project-repo-ref"
+                          value={customRepoRef}
+                          onChange={setCustomRepoRef}
+                        />
+                      </CollapsibleContent>
+                    </Collapsible>
                   </form>
                   {selectedRepos.length > 0 && (
                     <div className="space-y-1 pt-1 border-t">

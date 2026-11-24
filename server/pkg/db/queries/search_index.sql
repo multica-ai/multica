@@ -13,7 +13,7 @@ WITH ws AS (SELECT @workspace_id::uuid AS id, sqlc.narg('hidden_project_ids')::u
 visible_issue AS (
     SELECT i.id, i.title, i.description FROM issue i, ws
     WHERE i.workspace_id = ws.id
-      AND (ws.hidden IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY(ws.hidden)))
+      AND (ws.hidden IS NULL OR NOT (COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY(ws.hidden)))
 ),
 visible_comment AS (
     SELECT c.content FROM comment c
@@ -125,3 +125,26 @@ SELECT count(*)::bigint AS deleted_count FROM deleted;
 
 -- name: DeleteWorkspaceSearchIndexChanges :exec
 DELETE FROM search_index_change WHERE workspace_id = $1;
+
+-- name: MarkSearchAccessChanged :exec
+-- Records that this transaction changed what the user can see in the
+-- workspace without rewriting the content (MUL-9420), so local search copies
+-- built before it are rebuilt.
+INSERT INTO member_search_access (workspace_id, user_id, changed_xid, changed_at)
+VALUES (@workspace_id, @user_id, pg_current_xact_id(), now())
+ON CONFLICT (workspace_id, user_id) DO UPDATE
+    SET changed_xid = EXCLUDED.changed_xid,
+        changed_at = EXCLUDED.changed_at;
+
+-- name: SearchAccessChangedAfter :one
+-- Whether the user's access in the workspace was changed by a transaction the
+-- since snapshot does not include.
+SELECT EXISTS (
+    SELECT 1 FROM member_search_access
+    WHERE workspace_id = @workspace_id
+      AND user_id = @user_id
+      AND NOT pg_visible_in_snapshot(changed_xid, (@since_snapshot::text)::pg_snapshot)
+)::bool AS changed;
+
+-- name: DeleteWorkspaceMemberSearchAccess :exec
+DELETE FROM member_search_access WHERE workspace_id = $1;

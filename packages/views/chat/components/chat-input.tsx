@@ -2,7 +2,10 @@
 
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ListEnd, Scan, TriangleAlert, X } from "@multica/ui/icons";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
+import { UI_EASE_IN, UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
+import { Scan, TriangleAlert, X } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
@@ -32,6 +35,7 @@ import { escapeMarkdownLabel } from "../../editor/utils/escape-markdown-label";
 import type { Attachment, Project } from "@multica/core/types";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { ClearablePillButton } from "../../common/pill-button";
+import { StorageLimitNotice } from "../../billing/storage-limit-notice";
 import { useT } from "../../i18n";
 import {
   useComposerVoice,
@@ -40,6 +44,7 @@ import {
   VoiceMicButton,
   VoiceSetupDialog,
   VoiceStrip,
+  type ComposerVoice,
 } from "../../voice";
 import { useCommentDraftStore } from "@multica/core/issues/stores";
 import { composeAnnotatedReply, EMPTY_REPLY_ANNOTATIONS, hasReplyIntent } from "@multica/core/drafts/reply-annotation";
@@ -76,7 +81,6 @@ interface ChatInputProps {
     attachmentIds: string[] | undefined,
     commitInput: (options?: { extraDraftKeys?: string[]; clearEditor?: boolean }) => void,
     draftAttachments: Attachment[],
-    options?: { queue?: boolean },
   ) => void | boolean | Promise<void | boolean>;
   restoreDraftRequest?: {
     id: string;
@@ -116,6 +120,8 @@ interface ChatInputProps {
   isRunning?: boolean;
   /** Enabled only after the server explicitly advertises follow-up queues. */
   allowSubmitWhileRunning?: boolean;
+  /** Server-confirmed permission and capability for this exact running turn. */
+  canSteerWhileRunning?: boolean;
   disabled?: boolean;
   /** True when the user has no agent available — disables the editor and
    *  surfaces a distinct placeholder. Kept separate from `disabled` so
@@ -185,6 +191,7 @@ export function ChatInput({
   onStop,
   isRunning,
   allowSubmitWhileRunning,
+  canSteerWhileRunning,
   disabled,
   noAgent,
   agentArchived,
@@ -207,6 +214,7 @@ export function ChatInput({
 }: ChatInputProps) {
   const { t } = useT("chat");
   const { t: tEditor } = useT("editor");
+  const { t: tIssues } = useT("issues");
   const sendShortcut = useShortcut("send");
   const editorRef = useRef<ContentEditorRef>(null);
   const editorAreaRef = useRef<HTMLDivElement>(null);
@@ -363,6 +371,8 @@ export function ChatInput({
     attachments: draftAttachments,
     handleUpload,
     gate,
+    storageRefusal,
+    dismissStorageRefusal,
   } = useCoordinatedUploads(uploadBinding, storeUploads, {}, uploadGate, editorRef, {
     resolveUploadTarget: () => makeUploadBinding(editorDraftKeyRef.current),
     liveRegistryKey: `chat:${loadedDraftKey}`,
@@ -494,7 +504,6 @@ export function ChatInput({
   // stale `true` behind for the next one.
   const editorScrubbedRef = useRef(false);
 
-  const queueNextSendRef = useRef(false);
   const { submitting, submit } = useComposerSubmit({
     editorRef,
     uploadGate: gate,
@@ -510,8 +519,6 @@ export function ChatInput({
       return hasReplyIntent(raw, current) ? composeAnnotatedReply(raw, current) : "";
     },
     onSubmit: async (content: string): Promise<boolean> => {
-      const queue = queueNextSendRef.current;
-      queueNextSendRef.current = false;
       editorScrubbedRef.current = false;
       // Same tick as `normalize`, so this is exactly what `content` quotes.
       const annotationKeyAtSend = annotationDraftKey;
@@ -626,9 +633,7 @@ export function ChatInput({
         commitInput,
         draftAttachments.filter((attachment) => uniqueActiveIds.includes(attachment.id)),
       ] as const;
-      const accepted = queue
-        ? await onSend(...sendArgs, { queue: true })
-        : await onSend(...sendArgs);
+      const accepted = await onSend(...sendArgs);
       // Owner rejected the send (or threw, which useComposerSubmit also treats
       // as a rejection): the draft was never committed, so it stays put for
       // retry. Only a commit — here or by the owner — clears it.
@@ -714,6 +719,10 @@ export function ChatInput({
     !isProjectUpdating;
   const selectedProject = projects.find((project) => project.id === projectId);
   const canSubmitNow = !disabled && !noAgent && (!isRunning || !!allowSubmitWhileRunning);
+  const showRunHint = isRunning && allowSubmitWhileRunning && canSteerWhileRunning !== undefined
+    && !hasNothingToSend && !disabled && !noAgent;
+  const willSteer = canSteerWhileRunning && draftUploads.length === 0
+    && !inputDraft.includes("](slash://skill/");
   const voice = useComposerVoice({
     insert: (text) => editorRef.current?.insertText(text) ?? false,
     submit: canSubmitNow ? () => void submit() : undefined,
@@ -790,6 +799,13 @@ export function ChatInput({
           togglePageContext();
         }}
       >
+        {showRunHint && (
+          <p role="status" className={cn("px-3 pt-2 text-caption", willSteer ? "text-brand" : "text-muted-foreground")}>
+            {willSteer
+              ? tIssues(($) => $.comment.recipient_steer)
+              : tIssues(($) => $.comment.recipient_after_run)}
+          </p>
+        )}
         {annotationDraftKey && annotations.length > 0 && (
           <div className="px-3 pt-2">
             <ReplyAnnotations draftKey={annotationDraftKey} annotations={annotations} disabled={submitting}
@@ -811,7 +827,7 @@ export function ChatInput({
                 type="button"
                 onClick={() => setAttachedPageKey(null)}
                 aria-label={t(($) => $.input.page_context_remove)}
-                className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground outline-none hover:bg-surface-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground outline-none hover:bg-surface-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring"
               >
                 <X aria-hidden className="size-3" />
               </button>
@@ -886,13 +902,23 @@ export function ChatInput({
         <VoiceHud voice={voice} />
         <VoiceSetupDialog voice={voice} />
         <VoiceErrorRow voice={voice} className="mx-2 mb-1" />
-        {voice.showStrip && (
-          <div className="absolute inset-x-1.5 bottom-1 flex items-center">
-            <VoiceStrip voice={voice} />
-          </div>
+        {storageRefusal && (
+          <StorageLimitNotice
+            refusal={storageRefusal}
+            onDismiss={dismissStorageRefusal}
+            className="mx-2 mb-1"
+          />
         )}
-        {!voice.showStrip && (uploadEnabled || projectSelectionEnabled || leftAdornment) && (
-          <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1">
+        <ChatInputVoiceOverlay voice={voice} />
+        {(uploadEnabled || projectSelectionEnabled || leftAdornment) && (
+          <div
+            aria-hidden={voice.showStrip || undefined}
+            inert={voice.showStrip}
+            className={cn(
+              "absolute bottom-1.5 left-1.5 flex items-center gap-1 transition-opacity duration-150 motion-reduce:transition-none",
+              voice.showStrip && "pointer-events-none opacity-0",
+            )}
+          >
             {(uploadEnabled || projectSelectionEnabled) && (
               <ChatAddMenu
                 onSelectFile={uploadEnabled
@@ -907,7 +933,14 @@ export function ChatInput({
             {leftAdornment}
           </div>
         )}
-        <div className={cn("absolute bottom-1 right-1.5 flex items-center gap-1", voice.showStrip && "hidden")}>
+        <div
+          aria-hidden={voice.showStrip || undefined}
+          inert={voice.showStrip}
+          className={cn(
+            "absolute bottom-1 right-1.5 flex items-center gap-1 transition-opacity duration-150 motion-reduce:transition-none",
+            voice.showStrip && "pointer-events-none opacity-0",
+          )}
+        >
           <VoiceMicButton voice={voice} />
           {pageContext && (
             <IconButton
@@ -919,19 +952,6 @@ export function ChatInput({
               className="text-muted-foreground aria-pressed:bg-accent aria-pressed:text-foreground"
             >
               <Scan />
-            </IconButton>
-          )}
-          {isRunning && allowSubmitWhileRunning && !hasNothingToSend && !gate.uploading && (
-            <IconButton
-              type="button"
-              label={t(($) => $.input.queue_send_tooltip)}
-              disabled={submitting || gate.uploading || !!disabled || !!noAgent}
-              onClick={() => {
-                queueNextSendRef.current = true;
-                void submit().finally(() => { queueNextSendRef.current = false; });
-              }}
-            >
-              <ListEnd />
             </IconButton>
           )}
           <SubmitButton
@@ -977,5 +997,30 @@ export function ChatInput({
       </div>
     </div>
     </>
+  );
+}
+
+function ChatInputVoiceOverlay({ voice }: { voice: ComposerVoice }) {
+  const reduceMotion = useReducedMotion();
+  return (
+    <AnimatePresence initial={false}>
+      {voice.showStrip && (
+        <motion.div
+          key="voice-strip"
+          initial={reduceMotion ? false : { opacity: 0 }}
+          animate={{
+            opacity: 1,
+            transition: { duration: reduceMotion ? 0 : UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
+          }}
+          exit={{
+            opacity: 0,
+            transition: { duration: reduceMotion ? 0 : UI_MOTION_DURATION.micro, ease: UI_EASE_IN },
+          }}
+          className="absolute inset-x-1.5 bottom-1 flex items-center"
+        >
+          <VoiceStrip voice={voice} />
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }

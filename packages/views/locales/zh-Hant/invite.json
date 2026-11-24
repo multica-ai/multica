@@ -20,7 +20,7 @@
     "title": "沒有待處理的邀請",
     "hint": "繼續建立你自己的工作區。",
     "continue": "繼續建立",
-    "go_to_dashboard": "前往主頁"
+    "go_to_dashboard": "前往工作區"
   },
   "linked": {
     "not_found": "此邀請可能已過期、已被撤銷，或不屬於你的帳號。",
@@ -30,6 +30,31 @@
   },
   "errors": {
     "accept_failed": "接受邀請失敗",
-    "decline_failed": "拒絕邀請失敗"
+    "decline_failed": "拒絕邀請失敗",
+    "member_limit_reached": "{{workspace}} 的成員已滿。請聯絡邀請你的人，工作區升級後就能加入。"
+  },
+  "join": {
+    "no_code": "找不到邀請碼，請使用有效的分享連結。",
+    "invalid": "這個邀請連結無效或已過期。",
+    "joined_title": "已加入",
+    "redirecting": "正在進入工作區...",
+    "error_title": "無法開啟邀請",
+    "go_home": "返回首頁",
+    "loading": "正在載入邀請資訊...",
+    "title": "你被邀請加入 {{workspace}}",
+    "invited_by": "邀請人：{{name}}",
+    "join_as": "加入後的角色",
+    "role_admin": "管理員",
+    "role_member": "成員",
+    "login_required": "需要先登入才能加入這個工作區。",
+    "join": "加入工作區",
+    "joining": "加入中...",
+    "log_in_to_join": "登入後加入",
+    "join_failed": "加入工作區失敗，連結可能已過期。",
+    "seats_full": "已購買的成員席位都已用完。請聯絡工作區管理員增加席位後再試。",
+    "seats_unavailable": "暫時無法核驗成員席位，請稍後重試。",
+    "full_title": "{{workspace}} 的成員已滿",
+    "full_description": "請聯絡邀請你的人。工作區升級後，這個連結會恢復可用。",
+    "retry": "重試"
   }
 }

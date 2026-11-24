@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -14,10 +15,15 @@ import (
 
 // SnoozedInboxResponse is one snoozed issue in the caller's inbox.
 type SnoozedInboxResponse struct {
-	IssueID      string `json:"issue_id"`
-	ItemID       string `json:"item_id"`
-	SnoozedUntil string `json:"snoozed_until"`
-	SnoozedAt    string `json:"snoozed_at"`
+	IssueID string `json:"issue_id"`
+	// The identifier (MUL-123) the row links to; see InboxItemResponse.
+	IssueIdentifier *string `json:"issue_identifier"`
+	// The issue's title and status, so the row renders without fetching it.
+	IssueTitle   *string `json:"issue_title"`
+	IssueStatus  *string `json:"issue_status"`
+	ItemID       string  `json:"item_id"`
+	SnoozedUntil string  `json:"snoozed_until"`
+	SnoozedAt    string  `json:"snoozed_at"`
 	// Rows that arrived on the issue while it was snoozed.
 	Updates int64 `json:"updates"`
 }
@@ -26,6 +32,8 @@ type SnoozedInboxResponse struct {
 // for the Snoozed view (MUL-9333). An issue whose time has passed is back in
 // the main list and no longer here.
 func (h *Handler) ListSnoozedInbox(w http.ResponseWriter, r *http.Request) {
+	r, cancel := h.inboxReadRequest(r)
+	defer cancel()
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
@@ -35,27 +43,36 @@ func (h *Handler) ListSnoozedInbox(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !h.requireInboxOwnerAccess(w, r, userID, wsUUID) {
+		return
+	}
+	hidden, ok := h.requestInboxHiddenProjects(w, r, workspaceID)
 	if !ok {
 		return
 	}
-	rows, err := h.Queries.ListSnoozedInbox(r.Context(), db.ListSnoozedInboxParams{
-		WorkspaceID:      wsUUID,
-		RecipientID:      parseUUID(userID),
-		HiddenProjectIds: hidden.Param(),
+	rows, err := runInboxRead(r.Context(), h, "snoozed", func(ctx context.Context, q *db.Queries) ([]db.ListSnoozedInboxRow, error) {
+		return q.ListSnoozedInbox(ctx, db.ListSnoozedInboxParams{
+			WorkspaceID:      wsUUID,
+			RecipientID:      parseUUID(userID),
+			HiddenProjectIds: hidden.Param(),
+		})
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list snoozed inbox")
+		writeInboxReadError(w, err, "failed to list snoozed inbox")
 		return
 	}
+	issuePrefix := h.getIssuePrefix(r.Context(), wsUUID)
 	resp := make([]SnoozedInboxResponse, len(rows))
 	for i, row := range rows {
 		resp[i] = SnoozedInboxResponse{
-			IssueID:      uuidToString(row.IssueID),
-			ItemID:       uuidToString(row.ItemID),
-			SnoozedUntil: timestampToString(row.SnoozedUntil),
-			SnoozedAt:    timestampToString(row.SnoozedAt),
-			Updates:      row.Updates,
+			IssueID:         uuidToString(row.IssueID),
+			IssueIdentifier: inboxIssueIdentifier(issuePrefix, row.IssueNumber),
+			IssueTitle:      textToPtr(row.IssueTitle),
+			IssueStatus:     textToPtr(row.IssueStatus),
+			ItemID:          uuidToString(row.ItemID),
+			SnoozedUntil:    timestampToString(row.SnoozedUntil),
+			SnoozedAt:       timestampToString(row.SnoozedAt),
+			Updates:         row.Updates,
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -110,6 +127,7 @@ func (h *Handler) SnoozeInboxItem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to snooze")
 		return
 	}
+	logAgentInboxWrite(r, "snooze", "item_id", uuidToString(prev.ID), "issue_id", uuidToPtr(prev.IssueID), "snoozed_until", until.UTC().Format(time.RFC3339), "count", len(rows))
 
 	h.publish(protocol.EventInboxSnoozed, uuidToString(prev.WorkspaceID), "member", requestUserID(r), map[string]any{
 		"item_id":       uuidToString(prev.ID),
@@ -166,6 +184,7 @@ func (h *Handler) UnsnoozeInboxItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	logAgentInboxWrite(r, "unsnooze", "item_id", uuidToString(prev.ID), "issue_id", uuidToPtr(prev.IssueID), "count", len(rows))
 
 	h.publish(protocol.EventInboxUnsnoozed, uuidToString(prev.WorkspaceID), "member", requestUserID(r), map[string]any{
 		"item_id":      uuidToString(prev.ID),

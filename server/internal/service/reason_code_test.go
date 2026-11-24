@@ -249,6 +249,8 @@ func TestRuntimeProfileNoticeIncludesManualMigrationPath(t *testing.T) {
 		"replace `dsh-profile-multica` with `@multica-ai/dsh-runtime`",
 		"back up",
 		"will not migrate",
+		"core packages",
+		"independent plugins",
 	} {
 		if !strings.Contains(notice, required) {
 			t.Errorf("blocked-trigger notice lacks migration instruction %q:\n%s", required, notice)

@@ -1,0 +1,64 @@
+---
+title: Multica 与 Linear、Jira 对比：人和智能体协作的团队怎么选
+description: 使用 AI 编程智能体的团队，什么时候继续用 Linear 或 Jira，什么时候把智能体的工作搬进 Multica，什么时候两者一起用。
+---
+
+Linear 和 Jira 都可以把任务分配给 AI 智能体，所以已经在用其中一个的团队自然会问：为什么还要加上 Multica？简单说，两者的区别在于**智能体从哪里来、在哪里运行**。Linear 和 Jira 是项目管理工具，带有自己的内置智能体，也可以接入第三方智能体服务。Multica 是一个工作区，它运行团队已经在用的 AI 编程工具，运行在你连接的电脑上，并把每次运行都记录在任务上。
+
+本页关于 Linear 和 Jira 的描述来自它们截至 2026 年 11 月的公开文档；最新情况请查看 [Linear 的智能体文档](https://linear.app/docs/agents-in-linear)和 [Atlassian 的发布文章](https://www.atlassian.com/blog/ai-at-work/your-jira-board-just-got-a-new-kind-of-teammate)。
+
+## 简短回答
+
+- **继续用 Linear 或 Jira**：如果规划是流程的核心（周期或冲刺、路线图、跨团队报表），并且你想用的智能体是已经接入这些工具的托管服务。
+- **用 Multica**：如果你想要一组共用的智能体，基于 Claude Code、Codex、Cursor Agent 或 Copilot 等命令行工具，运行在自己的电脑或服务器上，按智能体控制访问，保留完整运行日志，并且可以整套自托管。
+- **两者一起用**：规划放在 Linear 或 Jira，执行交给智能体。Multica 的智能体可以通过 MCP Server 读取和更新 Linear；两者之间没有自动同步。
+
+## 对比
+
+| | Multica | Linear | Jira |
+|---|---|---|---|
+| 是什么 | 人和智能体一起处理任务的工作区，智能体运行在你的运行时上 | 带智能体平台的任务跟踪与规划工具 | 带 Rovo 智能体和第三方智能体的任务与项目跟踪工具 |
+| 谁来做智能体的工作 | 你在 [31 种 AI 编程工具](/providers)上配置的智能体，由 Multica 守护进程在你连接的电脑上执行 | Linear Agent，以及从 Linear 集成目录安装的第三方智能体 | Rovo 智能体，以及接入的第三方智能体，例如 GitHub Copilot 和 Cursor |
+| 智能体的代码在哪里运行 | 你的笔记本、服务器或虚拟机，使用你自己的工具账号 | 由各个智能体集成决定，通常在供应商的云上 | 由各个智能体决定，通常在供应商的云上 |
+| 分配任务或 @智能体 | 可以；智能体成为负责人 | 可以；智能体是受托方（delegate），负责人可以仍是一个人 | 可以 |
+| 按智能体选择工具和模型 | 可以，任何支持的工具都行，不同智能体可以用不同工具 | 取决于安装的智能体 | 取决于智能体 |
+| 控制谁能运行每个智能体 | 按智能体设置：**仅自己**、**整个工作区**或**指定成员** | 管理员选择已安装的智能体能访问哪些团队 | 在 Rovo Studio 中设置智能体范围，受 Jira 权限约束 |
+| 任务上能看到运行的什么内容 | 完整执行日志：工具调用、命令、错误，带时间戳 | 任务上的智能体活动；详细程度取决于智能体 | 工作项上记录的智能体操作 |
+| 在智能体之间分派工作 | [小队](/squads)：由队长智能体选择成员；[工作流](/workflows)把每个状态交给一个智能体或一个人 | 分诊规则（Triage rules）可以把新任务委托给智能体 | 自动化规则和看板列可以触发智能体 |
+| 重复性的智能体工作 | [自动化](/autopilots)按计划或 webhook 运行你的任何智能体 | Loops 按计划或事件运行 Linear Agent | Jira Automation 可以按计划或事件运行智能体 |
+| 团队方法复用 | 挂到智能体上的 [Skills](/skills) | 工作区和团队级的智能体指引 | Rovo Studio 中的智能体指令和知识 |
+| 自托管 | 支持，使用 Docker Compose 或 Helm | 不支持 | Jira Data Center |
+| 规划功能 | 项目、分阶段的子任务、[工作流](/workflows)、自定义属性，列表、看板、表格、甘特图和泳道视图 | 周期（Cycles）、项目、Initiatives、Insights | 冲刺、看板、时间线、JQL、报表 |
+| 许可证 | 源码可用（source-available）：在你的组织内部免费使用，包括自托管 | 专有 SaaS | 专有 |
+
+## 什么时候 Linear 或 Jira 更合适
+
+- 你的流程依赖周期或冲刺、路线图或组合报表。Multica 有项目、工作流和甘特图，但没有周期、冲刺或路线图规划。
+- 包括产品、设计和支持在内的大部分人都在项目管理工具里工作，只有部分任务交给智能体。
+- 你更想用托管的智能体，例如 GitHub Copilot 的 coding agent 或 Cursor 的云端智能体，不想在自己的电脑上运行智能体。
+- 你依赖这些工具的集成生态，或已有的企业级管理配置。
+
+## 什么时候 Multica 更合适
+
+- **你已经在为编程命令行工具付费。** Multica 驱动开发者已有的 Claude Code、Codex、Cursor Agent、Copilot CLI、Kimi 等订阅，而不是每个供应商再单独买一套智能体服务。
+- **代码和凭据应该留在自己的机器上。** 智能体运行在你连接的运行时上；自托管 Multica 时，工作区数据也留在你的服务器上。见[安全模型](/security-model)。
+- **多名开发者共用同一组智能体。** 智能体、运行时和 Skills 属于工作区，Access 决定谁能运行每个智能体，看板上能看到哪个智能体在做什么。见[团队共享智能体池](/team-agent-pool)。
+- **你想确切看到智能体做了什么。** 每次运行的工具调用和命令都留在任务上，运行过程中还可以[插话](/mentioning-agents#给正在运行的智能体插话)调整方向。
+- **审查是固定环节，而不是事后补救。** 智能体交付到 `in_review`；[工作流](/workflows)可以把结果交给审查智能体或同事，被打回时退回修改。
+
+## 和 Linear 或 Jira 一起使用
+
+很多团队保留原来的工具做规划，在 Multica 里让智能体执行：
+
+1. 路线图和跨团队规划继续放在 Linear 或 Jira。
+2. 在 Multica 项目里创建要交给智能体的工程任务，并把仓库和文档添加为[项目资源](/project-resources)。
+3. 想让智能体在工作时读取或更新 Linear，由工作区 `owner` 或 `admin` 在**设置 → MCP 服务器**里添加 Linear 的 MCP Server，并分配给这些智能体。见[工作区共享的 MCP Server](/agents-create#工作区共享的-mcp-server)。
+
+Multica 不会从 Linear 或 Jira 导入，也不会与它们同步，所以要明确每个任务由哪个系统负责。
+
+## 相关页面
+
+- [团队共享智能体池](/team-agent-pool)：角色、Access、小队和审查交接如何配合。
+- [Multica 与 OpenHands、Devin、Factory 对比](/compare/openhands-devin-factory)
+- [Multica 与本地 worktree 管理工具对比](/compare/worktree-managers)
+- [支持的 AI 编程工具](/providers)

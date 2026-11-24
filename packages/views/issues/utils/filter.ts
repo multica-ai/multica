@@ -16,6 +16,7 @@ import {
 import { PROPERTY_FILTER_NONE_VALUE } from "@multica/core/issues/stores/filter-operators";
 import { todayDateOnly } from "@multica/core/issues/date";
 import type { IssueActivityState } from "../surface/activity";
+import { isIssueWaiting } from "./waiting";
 
 export interface IssueFilters {
   statusFilters: IssueStatus[];
@@ -121,7 +122,7 @@ export interface IssueRelationContext {
   /** Agents the viewer owns. Loaded only while a filter tests "my_agents";
    *  without it that relation is left to the server for agent rows. */
   myAgentIds?: ReadonlySet<string>;
-  /** Squads the viewer or one of their agents is in, the other half of
+  /** Squads led by an agent the viewer owns, the other half of
    *  "my_agents"; without it that relation is left to the server for squad
    *  rows. */
   mySquadIds?: ReadonlySet<string>;
@@ -404,6 +405,8 @@ function issueMatchesRelation(
   context: IssueRelationContext,
 ): boolean | undefined {
   switch (relation) {
+    case "blocked":
+      return isIssueWaiting(issue);
     case "subscribed":
       return context.subscribedIssueIds?.has(issue.id);
     case "assigned":
