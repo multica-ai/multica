@@ -319,6 +319,7 @@ func Classify(rawError string) Reason {
 	case isPiProviderNetworkError(lower), isCursorProviderNetworkError(lower),
 		containsAny(lower,
 			"stream disconnected",
+			claudeStalledResponse,
 			opencodeStreamEndedPrefix,
 			codeartsStreamEndedPrefix,
 			"connection closed",
@@ -402,6 +403,9 @@ func Classify(rawError string) Reason {
 
 	return ReasonAgentUnknown
 }
+
+// Claude Code emits this API diagnostic when a response stream stalls mid-turn.
+const claudeStalledResponse = "api error: the response stopped arriving."
 
 // providerUnconfiguredPhrase is the runtime's wording for "I resolved no LLM
 // provider at all" — structurally a configuration gap, not a rejected
@@ -770,6 +774,12 @@ func NormalizeDaemonReason(reason, rawError string) Reason {
 	// flaky provider. Upgrading here makes the retry work the moment the server
 	// deploys, without waiting on the daemon fleet.
 	lowerError := strings.ToLower(strings.TrimSpace(rawError))
+	// Older daemons reported this Claude stream cut as unknown or as the
+	// process exit that wrapped it. Preserve more specific failure reasons.
+	if (reason == string(ReasonAgentUnknown) || reason == string(ReasonAgentProcessFailure)) &&
+		strings.Contains(lowerError, claudeStalledResponse) && Classify(rawError) == ReasonAgentProviderNetwork {
+		return ReasonAgentProviderNetwork
+	}
 	// Normalize before retry eligibility is evaluated so installed daemons
 	// receive the same bounded, resume-safe recovery as current ones. Retain
 	// Classify's precedence if a more specific provider failure is present.
