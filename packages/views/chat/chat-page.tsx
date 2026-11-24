@@ -416,7 +416,6 @@ export function ChatPage() {
           {null}
         </PageHeader>
       ) : null}
-      {c.currentSession && <ChatExecutionSelection session={c.currentSession} agent={c.activeAgent} />}
       {c.showSkeleton ? (
         <ChatMessageSkeleton />
       ) : c.hasMessages ? (
@@ -489,6 +488,9 @@ export function ChatPage() {
       />
 
       <ChatInput
+        executionSelection={c.currentSession
+          ? <ChatExecutionSelection session={c.currentSession} agent={c.activeAgent} />
+          : undefined}
         onSend={c.handleSend}
         restoreDraftRequest={c.restoreDraftRequest}
         conversationStarterRequest={c.conversationStarterRequest}

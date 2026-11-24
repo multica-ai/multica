@@ -143,6 +143,8 @@ interface ChatInputProps {
   agentName?: string;
   /** Rendered at the bottom-left of the input bar — typically the agent picker. */
   leftAdornment?: ReactNode;
+  /** Per-session execution controls, rendered inside the composer below the editor. */
+  executionSelection?: ReactNode;
   /** Chat @ suggestions: current/recent issue/project entries. */
   contextItems?: MentionItem[];
   /** The issue or project the page behind the composer shows. When set, the
@@ -199,6 +201,7 @@ export function ChatInput({
   agentRuntimeRequired,
   agentName,
   leftAdornment,
+  executionSelection,
   contextItems,
   pageContext,
   projects = [],
@@ -899,6 +902,7 @@ export function ChatInput({
             showBubbleMenu
           />
         </div>
+        {executionSelection}
         <VoiceHud voice={voice} />
         <VoiceSetupDialog voice={voice} />
         <VoiceErrorRow voice={voice} className="mx-2 mb-1" />

@@ -69,12 +69,12 @@ export function ChatExecutionSelection({
   };
 
   return (
-    <div className="flex min-w-0 items-center gap-2 overflow-x-auto px-4 py-1.5 text-caption text-muted-foreground">
-      <label className="flex shrink-0 items-center gap-1">
+    <div data-slot="chat-execution-selection" className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-2 pb-1 text-caption text-muted-foreground">
+      <label className="flex min-w-0 items-center gap-1">
         <span>{t(($) => $.execution.model)}</span>
         <select
           aria-label={t(($) => $.execution.model)}
-          className="w-56 max-w-56 rounded-md border border-input bg-background px-1 py-0.5 text-foreground"
+          className="w-40 max-w-[calc(100vw-9rem)] min-w-0 rounded-md border border-input bg-background px-1 py-0.5 text-foreground"
           title={effectiveModel || t(($) => $.execution.runtime_default)}
           disabled={mutation.isPending || session.status === "archived" || !catalogReady}
           value={model ?? INHERIT}
@@ -88,11 +88,11 @@ export function ChatExecutionSelection({
           {models.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
         </select>
       </label>
-      <label className="flex shrink-0 items-center gap-1">
+      <label className="flex min-w-0 items-center gap-1">
         <span>{t(($) => $.execution.reasoning)}</span>
         <select
           aria-label={t(($) => $.execution.reasoning)}
-          className="w-48 max-w-48 rounded-md border border-input bg-background px-1 py-0.5 text-foreground"
+          className="w-32 max-w-[calc(100vw-10rem)] min-w-0 rounded-md border border-input bg-background px-1 py-0.5 text-foreground"
           title={effectiveLevel || t(($) => $.execution.runtime_default)}
           disabled={mutation.isPending || session.status === "archived" || !catalogReady || !selectedModel}
           value={thinkingLevel ?? INHERIT}
@@ -103,7 +103,7 @@ export function ChatExecutionSelection({
         >
           <option value={INHERIT}>{t(($) => $.execution.inherit_reasoning, { level: agent.thinking_level || t(($) => $.execution.runtime_default) })}</option>
           {runtime?.provider !== "zcode" && <option value="">{t(($) => $.execution.runtime_default)}</option>}
-          {thinkingLevel !== null && !!effectiveLevel && !levels.some((entry) => entry.value === effectiveLevel) && <option value={thinkingLevel}>{effectiveLevel} ({t(($) => $.execution.unavailable)})</option>}
+          {thinkingLevel !== null && !!effectiveLevel && !levels.some((entry) => entry.value === effectiveLevel) && <option value={thinkingLevel}>{effectiveLevel}{staleLevel ? ` (${t(($) => $.execution.unavailable)})` : ""}</option>}
           {levels.map((entry) => <option key={entry.value} value={entry.value}>{entry.label}</option>)}
         </select>
       </label>

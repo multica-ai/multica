@@ -371,7 +371,6 @@ export function ChatWindow() {
       </div>
 
       {/* Messages / skeleton / empty state */}
-      {currentSession && <ChatExecutionSelection session={currentSession} agent={activeAgent} />}
       <AnimatePresence initial={false}>
         {isOpen && (
           <ChatWindowMessages
@@ -437,6 +436,9 @@ export function ChatWindow() {
        *  agent has been archived (read-only); locked out entirely when there's
        *  no agent (the EmptyState above carries the CTA). */}
       <ChatInput
+        executionSelection={currentSession
+          ? <ChatExecutionSelection session={currentSession} agent={activeAgent} />
+          : undefined}
         hidden={!isOpen}
         onSend={c.handleSend}
         restoreDraftRequest={c.restoreDraftRequest}
