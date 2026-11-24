@@ -1362,6 +1362,7 @@
       "cancel": "Cancelar",
       "error": "No se ha podido crear la activación. Revisa los ajustes e inténtalo de nuevo.",
       "capacity_error": "Esta tarea o este espacio de trabajo ya tiene el máximo número de activaciones habilitadas.",
+      "permission_error": "No se puede ejecutar el agente seleccionado. Contacta con el propietario del agente para revisar los permisos de acceso o elige otro agente que puedas ejecutar.",
       "missing_condition": "Elige una condición.",
       "missing_agent": "Elige un agente para activar.",
       "missing_events": "Elige al menos un evento.",

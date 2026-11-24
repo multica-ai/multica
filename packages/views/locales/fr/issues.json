@@ -1448,6 +1448,7 @@
       "cancel": "Annuler",
       "error": "Impossible de créer le réveil. Vérifiez les réglages et réessayez.",
       "capacity_error": "Cette tâche ou cet espace a atteint le nombre maximal de réveils actifs.",
+      "permission_error": "Impossible d’exécuter l’agent sélectionné. Contactez son propriétaire pour vérifier les autorisations d’accès, ou choisissez un autre agent que vous pouvez exécuter.",
       "missing_condition": "Choisissez une condition.",
       "missing_agent": "Choisissez l’agent à réveiller.",
       "missing_events": "Choisissez au moins un événement.",

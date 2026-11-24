@@ -155,6 +155,20 @@ describe("WakeupCreateForm", () => {
     expect(screen.getByRole("form", { name: "新建唤醒" })).toBeVisible();
   });
 
+  it("directs an agent run permission refusal to the agent owner and keeps the draft", async () => {
+    create.mockRejectedValue(new ApiError("wakeup permission denied", 403, "Forbidden"));
+    await renderForm();
+    await chooseCondition("在某个时间");
+    fireEvent.change(screen.getByLabelText("唤醒后要做什么"), { target: { value: "看一下 CI" } });
+    fireEvent.click(screen.getByRole("button", { name: /创建/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "无法运行所选智能体。请联系智能体所有者检查访问权限，或选择其他可运行的智能体。",
+    );
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ agent_id: "emacs", kind: "at" }));
+    expect(screen.getByLabelText("唤醒后要做什么")).toHaveValue("看一下 CI");
+    expect(screen.getByRole("form", { name: "新建唤醒" })).toBeVisible();
+  });
+
   it("submits with Cmd+Enter", async () => {
     await renderForm();
     await chooseCondition("在某个时间");

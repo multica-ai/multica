@@ -207,7 +207,9 @@ export function WakeupCreateForm({
       setError(
         code === "wakeup_capacity_exceeded"
           ? t(($) => $.wakeups.create.capacity_error)
-          : text.error(err, t(($) => $.wakeups.create.error)),
+          : err instanceof ApiError && err.status === 403
+            ? t(($) => $.wakeups.create.permission_error)
+            : text.error(err, t(($) => $.wakeups.create.error)),
       );
     } finally {
       onBusy?.(false);
