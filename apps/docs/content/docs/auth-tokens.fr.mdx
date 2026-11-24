@@ -79,6 +79,8 @@ Si un jeton a pu fuiter, révoquez-le immédiatement dans **Paramètres → Jeto
 
 Lorsque le daemon prend en charge une exécution, le serveur crée pour celle-ci un jeton temporaire préfixé par `mat_`. Il est lié à l'utilisateur, à l'espace de travail, à l'agent et à l'exécution en cours, reste valide 24 heures au maximum et est supprimé à la fin de l'exécution.
 
+Le propriétaire de l'agent peut autoriser des espaces de travail supplémentaires dans **Paramètres de l'agent → Access**, ou avec `multica agent workspace-grant add <agent-id> <target-workspace-id>` depuis l'espace de travail d'origine. Lors d'une exécution lancée directement par une personne, `multica --workspace-id <target-workspace-id> issue list`, `issue get` et `issue create` utilisent le même jeton temporaire. Le serveur vérifie à chaque requête l'autorisation et l'appartenance actuelle de l'initiateur et du propriétaire de l'agent. La révocation prend effet immédiatement. Les autres opérations entre espaces de travail, dont l'assignation de cet agent à un ticket cible, restent indisponibles.
+
 Le daemon injecte ce jeton temporaire dans l'outil de codage IA au lieu de transmettre le PAT de l'utilisateur à l'agent. Les requêtes effectuées par l'agent sont donc enregistrées comme des actions de l'agent, et le jeton ne permet pas d'accéder aux opérations sensibles réservées aux utilisateurs ou aux propriétaires.
 
 Ces jetons sont créés automatiquement par le serveur ; les utilisateurs n'ont jamais besoin de les enregistrer ni de les gérer.

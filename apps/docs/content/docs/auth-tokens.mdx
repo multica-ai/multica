@@ -79,6 +79,8 @@ If a token may have leaked, revoke it immediately under **Settings → API Token
 
 When the daemon claims a run, the server creates a temporary token for that run, prefixed with `mat_`. It is bound to the current user, workspace, agent, and run, is valid for at most 24 hours, and is cleaned up when the run ends.
 
+The agent's owner can grant access to specific additional workspaces under **Agent settings → Access**, or with `multica agent workspace-grant add <agent-id> <target-workspace-id>` while selecting the agent's home workspace. During a directly human-initiated run, `multica --workspace-id <target-workspace-id> issue list`, `issue get`, and `issue create` use the same temporary token. The server checks the grant and current membership of both the initiating person and agent owner on every request. Removing the grant takes effect immediately. Other cross-workspace operations, including assigning this agent to a target issue, remain unavailable.
+
 The daemon injects this temporary token into the AI coding tool instead of handing the user's PAT to the agent. Requests made by the agent are therefore recorded as agent actions, and the token can't be used to reach sensitive operations restricted to users or owners.
 
 These tokens are created automatically by the server; users never need to save or manage them.

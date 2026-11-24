@@ -28,7 +28,7 @@ import type {
   UpdateDocRequest,
   CreateDocFolderRequest,
 } from "../types/doc";
-import type { ZodType } from "zod";
+import { z, type ZodType } from "zod";
 import { AgentRuntimeSchema, EMPTY_RUNTIME } from "../runtimes/schema";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
@@ -2310,6 +2310,21 @@ export class ApiClient {
 
   async getAgent(id: string): Promise<Agent> {
     return this.fetch(`/api/agents/${id}`);
+  }
+
+  async listAgentWorkspaceGrants(id: string): Promise<string[]> {
+    const raw = await this.fetch<unknown>(`/api/agents/${id}/workspace-grants`);
+    return parseWithFallback(raw, z.object({ workspace_ids: z.array(z.string()).default([]) }), { workspace_ids: [] as string[] }, {
+      endpoint: "GET /api/agents/{id}/workspace-grants",
+    }).workspace_ids;
+  }
+
+  async addAgentWorkspaceGrant(id: string, workspaceId: string): Promise<void> {
+    await this.fetch(`/api/agents/${id}/workspace-grants/${workspaceId}`, { method: "PUT" });
+  }
+
+  async removeAgentWorkspaceGrant(id: string, workspaceId: string): Promise<void> {
+    await this.fetch(`/api/agents/${id}/workspace-grants/${workspaceId}`, { method: "DELETE" });
   }
 
   async createAgent(data: CreateAgentRequest): Promise<Agent> {

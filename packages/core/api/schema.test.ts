@@ -26,6 +26,13 @@ afterEach(() => {
 // app in past incidents. The contract is: a malformed response degrades to
 // an empty/safe shape, never throws into React.
 describe("ApiClient schema fallback", () => {
+  it("parses workspace grants and fails closed on malformed grant lists", async () => {
+    const client = new ApiClient("https://api.example.test");
+    stubFetchJson({ workspace_ids: ["ws-2"] });
+    await expect(client.listAgentWorkspaceGrants("agent-1")).resolves.toEqual(["ws-2"]);
+    stubFetchJson({ workspace_ids: "ws-2" });
+    await expect(client.listAgentWorkspaceGrants("agent-1")).resolves.toEqual([]);
+  });
   describe("workspace pin responses", () => {
     it("defaults missing or malformed pinned_at to null and falls back on malformed lists", async () => {
       const ws = { id: "ws-1", name: "One", slug: "one", description: null, context: null, settings: {}, repos: [], issue_prefix: "ONE", avatar_url: null, created_at: "2026-01-01", updated_at: "2026-01-01" };

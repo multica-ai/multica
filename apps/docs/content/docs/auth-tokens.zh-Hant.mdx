@@ -79,6 +79,8 @@ curl https://api.multica.ai/api/issues \
 
 守護程序領取執行後，伺服器會為這次執行建立一個以 `mat_` 開頭的臨時令牌。它繫結當前使用者、工作區、AI 代理和執行，最長有效 24 小時，並在執行結束時清理。
 
+AI 代理擁有者可以在 **AI 代理設定 → Access** 中，或選取代理所屬工作區後執行 `multica agent workspace-grant add <agent-id> <target-workspace-id>`，授權特定的其他工作區。對於由使用者直接發起的執行，`multica --workspace-id <target-workspace-id> issue list`、`issue get` 和 `issue create` 會使用同一個臨時令牌。伺服器會在每次請求時檢查授權，以及發起人與代理擁有者目前的成員身分。撤銷授權會立即生效。其他跨工作區操作（包括將此代理指派給目標議題）仍不可用。
+
 守護程序把這個臨時令牌注入 AI 程式設計工具，不會把使用者 PAT 交給 AI 代理。所以 AI 代理發出的請求會記錄為 AI 代理行為，也不能借此呼叫只允許使用者或 owner 執行的敏感操作。
 
 這類令牌由伺服器自動建立，使用者不需要儲存或管理。

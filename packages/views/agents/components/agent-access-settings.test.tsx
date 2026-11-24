@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
@@ -27,6 +27,7 @@ const MEMBERS = [
 ] as unknown as MemberWithUser[];
 
 let feature: WorkspaceFeatureState;
+const addGrant = vi.fn(async () => {});
 
 function agent(overrides: Partial<Agent>): Agent {
   return {
@@ -52,8 +53,16 @@ function renderSettings(value: Agent) {
 describe("AgentAccessSettings plan access", () => {
   beforeEach(() => {
     feature = "available";
+    addGrant.mockClear();
     setApiInstance({
       getWorkspaceFeatures: vi.fn(async () => ({ features: { agent_invocation_members: feature } })),
+      listWorkspaces: vi.fn(async () => [
+        { id: "ws-1", name: "Home" },
+        { id: "ws-2", name: "Target" },
+      ]),
+      listAgentWorkspaceGrants: vi.fn(async () => []),
+      addAgentWorkspaceGrant: addGrant,
+      removeAgentWorkspaceGrant: vi.fn(async () => {}),
     } as unknown as ApiClient);
   });
   afterEach(cleanup);
@@ -77,5 +86,13 @@ describe("AgentAccessSettings plan access", () => {
     expect(await screen.findByText("Read-only. Upgrade to edit.")).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: /Alice/i })).toBeChecked();
     expect(screen.queryByRole("checkbox", { name: /Bob/i })).not.toBeInTheDocument();
+  });
+
+  it("lets the agent owner grant a target workspace separately from invocation access", async () => {
+    renderSettings(agent({}));
+    const checkbox = await screen.findByRole("checkbox", { name: "Target" });
+    expect(checkbox).not.toBeChecked();
+    fireEvent.click(checkbox);
+    await waitFor(() => expect(addGrant).toHaveBeenCalledWith("a1", "ws-2"));
   });
 });
