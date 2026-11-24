@@ -100,7 +100,7 @@ type appsFixture struct {
 	member  string
 }
 
-func newAppsFixture(t *testing.T) *appsFixture {
+func newAppsFixture(t *testing.T, opts ...func(*connectedapps.Config)) *appsFixture {
 	t.Helper()
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -116,13 +116,17 @@ func newAppsFixture(t *testing.T) *appsFixture {
 	}
 	h := *testHandler
 	h.Composio = svc
-	apps, err := connectedapps.New(connectedapps.Config{
+	cfg := connectedapps.Config{
 		Queries:       h.Queries,
 		TxStarter:     testPool,
 		Composio:      svc,
 		TokenSecret:   connectedapps.DeriveTokenSecret([]byte("apps-test-secret")),
 		PublicBaseURL: "https://api.multica.test",
-	})
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	apps, err := connectedapps.New(cfg)
 	if err != nil {
 		t.Fatalf("connectedapps.New: %v", err)
 	}

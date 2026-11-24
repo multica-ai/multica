@@ -59,6 +59,14 @@ export function isAutopilotQuotaNotice(type: InboxItem["type"]): boolean {
   return type === "autopilot_quota_exceeded";
 }
 
+/**
+ * Limit notices whose stored title is English fallback copy; the reader's
+ * locale titles them from the type instead.
+ */
+export function isQuotaNotice(type: InboxItem["type"]): boolean {
+  return type === "autopilot_quota_exceeded" || type === "app_tool_calls_quota_exceeded";
+}
+
 export function getQuickCreateOutcomeDetail(item: InboxItem): string {
   const details = item.details ?? {};
   return singleLine(details.error) || singleLine(item.body);

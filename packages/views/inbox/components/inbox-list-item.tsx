@@ -17,7 +17,7 @@ import { InboxDetailLabel, useTypeLabels } from "./inbox-detail-label";
 import {
   getInboxDisplayTitle,
   inboxIssueRef,
-  isAutopilotQuotaNotice,
+  isQuotaNotice,
 } from "./inbox-display";
 import { useInboxContextMenu } from "./inbox-context-menu";
 import { useStatusLabel } from "../../issues/utils/status-label";
@@ -78,7 +78,7 @@ export function InboxListItem({
       ? paths.workspace(slug).issueDetail(inboxIssueRef(item, item.issue_id))
       : null;
   const intentNavigate = useIntentNavigate();
-  const displayTitle = isAutopilotQuotaNotice(item.type)
+  const displayTitle = isQuotaNotice(item.type)
     ? typeLabels[item.type]
     : getInboxDisplayTitle(item);
   const isArchivedView = view === "archived";
