@@ -132,7 +132,7 @@ func (f *teamConnectSDK) ListConnectedAccounts(_ context.Context, req sdk.ListCo
 		id = req.ConnectedAccountIDs[0]
 	}
 	return &sdk.ListConnectedAccountsResponse{Items: []sdk.ConnectedAccount{{
-		ID: id, UserID: composio.TeamComposioUserID(parseUUID(testWorkspaceID)), AuthConfigID: "ac_notion",
+		ID: id, UserID: composio.TeamComposioUserID(parseUUID(testWorkspaceID)), AuthConfig: sdk.AuthConfigRef{ID: "ac_notion"},
 	}}}, nil
 }
 

@@ -22,6 +22,10 @@ const (
 	// GateDashboardHistoryDays caps how many calendar days back the workspace
 	// dashboard can read. Limit is a day count with no period.
 	GateDashboardHistoryDays GateName = "dashboard_history_days"
+	// GateAppToolCalls caps the app tool calls a workspace sends to the
+	// provider in a period. Like autopilot_runs it is a budget with a
+	// Cloud-defined period that resets.
+	GateAppToolCalls GateName = "app_tool_calls"
 )
 
 // MaxDashboardHistoryDays is the largest dashboard_history_days limit Cloud
@@ -30,7 +34,7 @@ const MaxDashboardHistoryDays = 365
 
 func (n GateName) valid() bool {
 	switch n {
-	case GateAutopilotRuns, GateMembers, GateStorageBytes, GateDashboardHistoryDays:
+	case GateAutopilotRuns, GateMembers, GateStorageBytes, GateDashboardHistoryDays, GateAppToolCalls:
 		return true
 	default:
 		return false

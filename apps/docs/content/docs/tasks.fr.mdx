@@ -70,7 +70,7 @@ Dans le journal d'exécution, vous pouvez :
 - Arrêter les exécutions en file d'attente, en démarrage, en attente d'un répertoire local ou au travail.
 - Relancer une exécution en échec ou annulée.
 
-La démo ci-dessous parcourt un cycle complet : une exécution entre en file, démarre et échoue ; vous la relancez et la nouvelle exécution se termine. Une fois la nouvelle exécution lancée, vous pouvez aussi essayer de l'arrêter en cours de route.
+Le schéma ci-dessous présente chaque transition du cycle de vie d'une exécution, y compris la relance après échec et l'annulation en file ou en cours. Cliquez sur un état pour inspecter ses transitions.
 
 <RunLifecycleDemo />
 
@@ -80,7 +80,7 @@ La démo ci-dessous parcourt un cycle complet : une exécution entre en file, d�
 Changer l'assigné ou le statut d'une tâche n'arrête pas une exécution déjà démarrée. Pour en interrompre une, arrêtez-la dans le journal d'exécution. Supprimer une tâche annule ses exécutions actives.
 </Callout>
 
-Le journal d'exécution totalise aussi le **Dépensé**, les **Tokens** et le **Travail d'agent** de la tâche, avec une barre de coût par exécution. Cliquer sur le total, sur une barre ou sur **Ouvrir la chronologie** ouvre la boîte de dialogue **Exécutions**, qui montre le coût par exécution ou en cumul, le répartit par agent et par modèle, et compte les exécutions en échec et annulées. Les coûts sont des estimations ; leur calcul et la consommation de tout l'espace de travail sont décrits dans [Statistiques](/analytics#coût-dune-tâche).
+L'en-tête du journal d'exécution indique ce que la tâche a déjà dépensé. **Ouvrir la chronologie** ouvre la boîte de dialogue **Exécutions**, qui totalise le **Dépensé**, les **Tokens** et le **Travail d'agent**, montre le coût par exécution ou en cumul, le répartit par agent et par modèle, et compte les exécutions en échec et annulées. Les coûts sont des estimations ; leur calcul et la consommation de tout l'espace de travail sont décrits dans [Statistiques](/analytics#coût-dune-tâche).
 
 ## Échecs et relances automatiques
 
@@ -170,6 +170,8 @@ Les valeurs ci-dessous sont celles de la configuration par défaut du serveur.
 | `dispatched` | Prise en charge ; l'outil démarre | Considérée comme en échec après plus de **5 minutes** dans cet état |
 | `waiting_local_directory` | En attente du répertoire local et de la capacité d'exécution | Pas de délai propre ; reprend le démarrage lorsque le répertoire et un slot d'exécution du daemon sont disponibles |
 | `running` | L'outil de codage IA est en cours d'exécution | Pas de durée maximale fixe ; la vivacité suit le signal de vie du runtime — un toutes les 15 secondes ; un runtime qui perd son signal de vie est marqué hors ligne au plus tard en 3 minutes environ. Ses exécutions n'échouent qu'une fois le signal de vie absent au-delà du délai de grâce de reconnexion (`MULTICA_RUNTIME_RECONNECT_GRACE`, 3 heures par défaut) ; un redémarrage du daemon les récupère directement |
+
+En cas de coupure confirmée du flux Trae CLI avec l’erreur `llm response empty stream`, le daemon doit aussi vérifier qu’aucun appel d’outil n’a démarré pendant ce tour avant de relancer automatiquement l’exécution. Si un appel a démarré ou si l’historique est indisponible, consultez le journal d’exécution avant de relancer manuellement.
 
 La relance automatique ne couvre que les défaillances transitoires ci-dessous, et ne s'applique qu'aux exécutions rattachées à une tâche ou à une discussion (hors mode **Exécution seule** des automatisations) :
 

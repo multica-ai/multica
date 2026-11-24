@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef } from "react";
 import { useCanonicalIssue } from "@multica/core/issues/canonical-id";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
-import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { useNavigation } from "../../navigation";
 import { IssueDetail, IssueDetailSkeleton, IssueNotFound, IssueLoadError } from "./issue-detail";
 import { IssuePeekHost } from "./issue-peek";
@@ -92,12 +91,6 @@ export function IssueDetailRoute({ routeId, onDelete, deliverable }: IssueDetail
     canonicalId, issue, isResolving, notFound, loadFailed, isRetrying, retry, hasLoaded,
   } = useCanonicalIssue(wsId, routeId);
   const highlight = useHighlightHash();
-  const landing = useInboxSelectionStore((s) =>
-    s.landing && s.landing.issueId === canonicalId ? s.landing : null,
-  );
-  const completeLanding = useInboxSelectionStore((s) => s.completeLanding);
-  const landingToken = landing?.token ?? 0;
-  const onHighlightLanded = useCallback(() => completeLanding(landingToken), [completeLanding, landingToken]);
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
 
@@ -122,7 +115,11 @@ export function IssueDetailRoute({ routeId, onDelete, deliverable }: IssueDetail
     return <IssueLoadError showBackLink={!onDelete} onRetry={retry} isRetrying={isRetrying} />;
   }
 
-  if (isResolving || (!issue && !notFound)) return <IssueDetailSkeleton />;
+  if (isResolving || (!issue && !notFound)) {
+    return (
+      <IssueDetailSkeleton />
+    );
+  }
 
   // Render not-found here rather than handing the unresolved segment down.
   // `IssueDetail` would mount a second observer on the query that just failed,
@@ -141,9 +138,6 @@ export function IssueDetailRoute({ routeId, onDelete, deliverable }: IssueDetail
         onDelete={onDelete}
         highlightCommentId={landsHere ? highlight.commentId : undefined}
         highlightAppRequestId={landsHere ? highlight.appRequestId : undefined}
-        highlightRequestToken={landingToken}
-        highlightRequestPending={!!landing && !landing.landed}
-        onHighlightLanded={onHighlightLanded}
         openDeliverable={deliverable}
         onDeliverableLinkDone={deliverable ? onDeliverableLinkDone : undefined}
       />

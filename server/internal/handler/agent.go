@@ -375,6 +375,9 @@ type TaskIssueStatusData struct {
 // in the per-turn prompt, never in the cached runtime brief.
 type TaskProjectWorkflowData struct {
 	Brief string `json:"brief"`
+	// StatusMap marks a status-map brief, which the daemon pairs with the
+	// status-map rules; without it the brief lists per-step commands.
+	StatusMap bool `json:"status_map,omitempty"`
 	// stepMoved selects the server-side leader briefing without changing the wire.
 	stepMoved bool
 }
@@ -576,6 +579,13 @@ type AgentTaskResponse struct {
 	AutopilotDescription     string               `json:"autopilot_description,omitempty"`       // autopilot description used as task prompt
 	AutopilotSource          string               `json:"autopilot_source,omitempty"`            // manual, schedule, webhook, or api
 	AutopilotTriggerPayload  json.RawMessage      `json:"autopilot_trigger_payload,omitempty"`   // optional trigger payload for webhook/api runs
+	DocID                    string               `json:"doc_id,omitempty"`                      // doc discussion runs (MUL-9933): the doc
+	DocThreadID              string               `json:"doc_thread_id,omitempty"`               // the discussion's first comment
+	DocCommentID             string               `json:"doc_comment_id,omitempty"`              // the comment that triggered the run
+	DocTitle                 string               `json:"doc_title,omitempty"`                   // claim only: the doc's title
+	DocThreadQuote           string               `json:"doc_thread_quote,omitempty"`            // claim only: the text the discussion is about
+	DocCommentContent        string               `json:"doc_comment_content,omitempty"`         // claim only: the triggering comment
+	DocCommentAuthorName     string               `json:"doc_comment_author_name,omitempty"`     // claim only: who wrote it
 	QuickCreatePrompt        string               `json:"quick_create_prompt,omitempty"`         // user's natural-language input for quick-create tasks
 	QuickCreatePriority      string               `json:"quick_create_priority,omitempty"`       // explicit priority selected in quick-create
 	QuickCreateDueDate       string               `json:"quick_create_due_date,omitempty"`       // explicit calendar due date selected in quick-create
@@ -613,7 +623,7 @@ type AgentTaskResponse struct {
 	InitiatorID    string `json:"initiator_id,omitempty"`    // originator user UUID
 	InitiatorName  string `json:"initiator_name,omitempty"`  // originator display name
 	InitiatorEmail string `json:"initiator_email,omitempty"` // originator email
-	Kind           string `json:"kind"`                      // source discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — quick-create remains stable after its result issue is linked
+	Kind           string `json:"kind"`                      // source discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "doc_comment" | "direct" — quick-create remains stable after its result issue is linked
 	// Attribution is the resolved accountable-human provenance for this run
 	// (MUL-4302 §9): the source label + precise flag, the initiator (accountable)
 	// and originator refs, the evidence pointer, and lineage. Always present (the
@@ -888,6 +898,13 @@ func visibleTaskHistory(tasks []db.AgentTaskQueue) []db.AgentTaskQueue {
 // down. It populates WorkspaceID and powers the privacy-safe RelativeWorkDir
 // derivation; pass "" only on daemon-facing paths that genuinely don't have
 // it, in which case RelativeWorkDir falls back to the existing WorkDir.
+func effectiveTaskSquadID(t db.AgentTaskQueue) pgtype.UUID {
+	if t.UsageSquadID.Valid {
+		return t.UsageSquadID
+	}
+	return t.SquadID
+}
+
 func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	var cancellation struct {
 		TaskID string `json:"comment_change_cancelled_task_id"`
@@ -945,6 +962,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		MaxAttempts:            t.MaxAttempts,
 		ParentTaskID:           uuidToPtr(t.ParentTaskID),
 		IsLeaderTask:           t.IsLeaderTask,
+		SquadID:                uuidToString(effectiveTaskSquadID(t)),
 		CreatedAt:              timestampToString(t.CreatedAt),
 		TriggerCommentID:       uuidToPtr(t.TriggerCommentID),
 		CoalescedCommentIDs:    uuidsToStrings(t.CoalescedCommentIds),
@@ -962,6 +980,9 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		// issue link for navigation but retains its quick_create kind.
 		ChatSessionID:  uuidToString(t.ChatSessionID),
 		AutopilotRunID: uuidToString(t.AutopilotRunID),
+		DocID:          uuidToString(t.DocID),
+		DocThreadID:    uuidToString(t.DocThreadID),
+		DocCommentID:   uuidToString(t.DocCommentID),
 		Kind:           computeTaskKind(t),
 		// Attribution labels + evidence + lineage + raw user ids (pure). Names are
 		// hydrated separately on user-facing surfaces (MUL-4302 §9).
@@ -1130,6 +1151,9 @@ func computeTaskKind(t db.AgentTaskQueue) string {
 	}
 	if uuidToString(t.AutopilotRunID) != "" {
 		return "autopilot"
+	}
+	if uuidToString(t.DocID) != "" {
+		return "doc_comment"
 	}
 	var contextKind struct {
 		Type string `json:"type"`
@@ -3201,7 +3225,8 @@ type WorkspaceWorkingAgent struct {
 // the workspace, independent of issue filters or Table pagination. The
 // optional type query selects issue, autopilot, or chat work; omitting it keeps
 // the all-sources projection. scope=mine narrows issue work to the authenticated
-// member's selected My Issues relation. Access filtering mirrors the other
+// member's selected My Issues relation; parent and project narrow it to one
+// issue's children or one project's issues. Access filtering mirrors the other
 // workspace-wide agent aggregations so a private/non-allow-listed agent is
 // never exposed by its name, avatar, count, or even presence.
 func (h *Handler) ListWorkspaceWorkingAgents(w http.ResponseWriter, r *http.Request) {
@@ -3279,6 +3304,35 @@ func (h *Handler) ListWorkspaceWorkingAgents(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	// Narrows the projection to one project's issues, for the project page.
+	// Like parent, absent means workspace-wide.
+	var projectID pgtype.UUID
+	if raw := strings.TrimSpace(r.URL.Query().Get("project")); raw != "" {
+		if workType != "issue" {
+			writeError(w, http.StatusBadRequest, "project requires type=issue")
+			return
+		}
+		if scope != "" || parentIssueID.Valid {
+			writeError(w, http.StatusBadRequest, "project cannot be combined with scope or parent")
+			return
+		}
+		var ok bool
+		projectID, ok = parseUUIDOrBadRequest(w, raw, "project")
+		if !ok {
+			return
+		}
+		// A private project the caller cannot see (MUL-8472) is answered like
+		// one with nobody working, so its agents and run count stay hidden.
+		hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+		if !ok {
+			return
+		}
+		if !hidden.CanSeeProject(projectID) {
+			writeJSON(w, http.StatusOK, []WorkspaceWorkingAgent{})
+			return
+		}
+	}
+
 	rows, err := h.Queries.ListWorkspaceWorkingAgents(
 		r.Context(),
 		db.ListWorkspaceWorkingAgentsParams{
@@ -3287,6 +3341,7 @@ func (h *Handler) ListWorkspaceWorkingAgents(w http.ResponseWriter, r *http.Requ
 			MineRelation:  mineRelation,
 			MemberID:      memberID,
 			ParentIssueID: parentIssueID,
+			ProjectID:     projectID,
 		},
 	)
 	if err != nil {

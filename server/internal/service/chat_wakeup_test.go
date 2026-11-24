@@ -582,3 +582,95 @@ func TestChatWakeupFinishedCheckWhoseReportFailedCanRetry(t *testing.T) {
 		t.Fatalf("retry of a finished check must ask for the report, not another check:\n%s", input.Content)
 	}
 }
+
+func TestChatWakeupRescheduleCheckKeepsWhatItDoesNotChange(t *testing.T) {
+	f := newChatWakeupFixture(t)
+	ctx := t.Context()
+	w := f.create(t, ChatWakeupInput{IntervalSeconds: 1800, ExpiresInSeconds: 6 * 3600})
+	f.fx.Exec(t, "UPDATE chat_wakeup SET check_count = 6, last_check_note = 'Still building' WHERE id = $1", w.ID)
+	// Postgres keeps microseconds; Linux clocks carry nanoseconds.
+	f.at(f.clock.Add(321 * time.Nanosecond))
+	near := func(got, want time.Time) bool { return got.Sub(want).Abs() < time.Millisecond }
+
+	// Interval only: the deadline stays, the next check restarts from now.
+	f.at(f.clock.Add(5 * time.Minute))
+	updated, err := f.svc.Reschedule(ctx, w.ChatSessionID, w.ID, ChatWakeupTiming{IntervalSeconds: 600})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.IntervalSeconds.Int64 != 600 || !near(updated.ExpiresAt.Time, w.ExpiresAt.Time) ||
+		!near(updated.NextEvalAt.Time, f.clock.Add(10*time.Minute)) ||
+		updated.CheckCount != 6 || updated.LastCheckNote.String != "Still building" || updated.Title != w.Title {
+		t.Fatalf("interval change: %+v", updated)
+	}
+
+	// Deadline only: the next check stays where it was.
+	deadline := f.clock.Add(2 * time.Hour)
+	updated, err = f.svc.Reschedule(ctx, w.ChatSessionID, w.ID, ChatWakeupTiming{ExpiresAt: &deadline})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.IntervalSeconds.Int64 != 600 || !near(updated.ExpiresAt.Time, deadline) || !near(updated.NextEvalAt.Time, f.clock.Add(10*time.Minute)) {
+		t.Fatalf("deadline change: %+v", updated)
+	}
+
+	// The agent's limits apply: 10-minute checks for a day is 144 checks.
+	far := f.clock.Add(24 * time.Hour)
+	if _, err := f.svc.Reschedule(ctx, w.ChatSessionID, w.ID, ChatWakeupTiming{ExpiresAt: &far}); !errors.Is(err, ErrChatWakeupInput) {
+		t.Fatalf("schedule over the check limit: %v", err)
+	}
+	if _, err := f.svc.Reschedule(ctx, w.ChatSessionID, w.ID, ChatWakeupTiming{IntervalSeconds: 60}); !errors.Is(err, ErrChatWakeupInput) {
+		t.Fatalf("interval under the minimum: %v", err)
+	}
+	reminder := f.clock.Add(time.Hour)
+	if _, err := f.svc.Reschedule(ctx, w.ChatSessionID, w.ID, ChatWakeupTiming{At: &reminder}); !errors.Is(err, ErrChatWakeupInput) {
+		t.Fatalf("reminder time on a check: %v", err)
+	}
+	if len(f.events) == 0 || f.events[len(f.events)-1].WakeupID != util.UUIDToString(w.ID) {
+		t.Fatalf("reschedule was not published: %+v", f.events)
+	}
+}
+
+func TestChatWakeupRescheduleReminderAndCondition(t *testing.T) {
+	f := newChatWakeupFixture(t)
+	ctx := t.Context()
+	// Postgres keeps microseconds; Linux clocks carry nanoseconds.
+	f.at(f.clock.Add(321 * time.Nanosecond))
+	near := func(got, want time.Time) bool { return got.Sub(want).Abs() < time.Millisecond }
+
+	at := f.clock.Add(2 * time.Hour)
+	reminder := f.create(t, ChatWakeupInput{At: &at})
+	later := f.clock.Add(20 * time.Hour)
+	updated, err := f.svc.Reschedule(ctx, reminder.ChatSessionID, reminder.ID, ChatWakeupTiming{At: &later})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !near(updated.FireAt.Time, later) || !near(updated.NextEvalAt.Time, later) || !near(updated.ExpiresAt.Time, later) {
+		t.Fatalf("moved reminder: %+v", updated)
+	}
+	past := f.clock.Add(-time.Minute)
+	if _, err := f.svc.Reschedule(ctx, reminder.ChatSessionID, reminder.ID, ChatWakeupTiming{At: &past}); !errors.Is(err, ErrChatWakeupInput) {
+		t.Fatalf("reminder in the past: %v", err)
+	}
+
+	issue := f.fx.Issue(t, "Watch the release")
+	cond, _ := json.Marshal(map[string]any{"type": "issue", "issue_id": issue, "state": "done"})
+	watch := f.create(t, ChatWakeupInput{Condition: cond})
+	f.fx.Exec(t, "UPDATE chat_wakeup SET condition_state = 'baseline' WHERE id = $1", watch.ID)
+	deadline := f.clock.Add(3 * 24 * time.Hour)
+	updated, err = f.svc.Reschedule(ctx, watch.ChatSessionID, watch.ID, ChatWakeupTiming{ExpiresAt: &deadline})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(updated.Condition) != string(watch.Condition) || updated.ConditionState != "baseline" ||
+		!updated.NextEvalAt.Time.Equal(watch.NextEvalAt.Time) || !near(updated.ExpiresAt.Time, deadline) {
+		t.Fatalf("condition deadline change: %+v", updated)
+	}
+	tooFar := f.clock.Add(8 * 24 * time.Hour)
+	if _, err := f.svc.Reschedule(ctx, watch.ChatSessionID, watch.ID, ChatWakeupTiming{ExpiresAt: &tooFar}); !errors.Is(err, ErrChatWakeupInput) {
+		t.Fatalf("wait past 7 days: %v", err)
+	}
+	if _, err := f.svc.Reschedule(ctx, watch.ChatSessionID, watch.ID, ChatWakeupTiming{IntervalSeconds: 900}); !errors.Is(err, ErrChatWakeupInput) {
+		t.Fatalf("interval on a condition: %v", err)
+	}
+}

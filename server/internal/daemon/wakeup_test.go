@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -193,6 +194,31 @@ func TestWSHeartbeatFreshnessSuppressesHTTP(t *testing.T) {
 	d.clearWSHeartbeatAcks()
 	if d.wsHeartbeatRecentlyAcked("runtime-2") {
 		t.Fatalf("expected clearWSHeartbeatAcks to drop all entries")
+	}
+}
+
+// TestHeartbeatSkipIsSilent pins that the WS-satisfied branch of the per-runtime
+// heartbeat writes nothing to the log. It is the steady state of a healthy
+// daemon, taken once per runtime per interval, so a line here grows daemon.log
+// without bound and keeps an idle daemon writing to disk around the clock.
+func TestHeartbeatSkipIsSilent(t *testing.T) {
+	var logs bytes.Buffer
+	d := New(Config{HeartbeatInterval: 15 * time.Second},
+		slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+
+	d.recordWSHeartbeatAck("runtime-1")
+	if !d.wsHeartbeatRecentlyAcked("runtime-1") {
+		t.Fatalf("expected just-acked runtime to be fresh")
+	}
+
+	// The client is nil on purpose: a logging regression on this path is
+	// caught by the assertion below, while a behavioural regression (the
+	// branch letting the tick fall through to the HTTP call) panics here
+	// instead of quietly passing.
+	d.runHeartbeatTick(context.Background(), "runtime-1")
+
+	if logs.Len() != 0 {
+		t.Fatalf("WS-satisfied heartbeat tick must not log, got: %q", logs.String())
 	}
 }
 

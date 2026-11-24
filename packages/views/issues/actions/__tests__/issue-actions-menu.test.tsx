@@ -14,9 +14,9 @@ const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 // Mocks — same pattern as the issue-detail test suite.
 // ---------------------------------------------------------------------------
 
-const deletionPolicy = vi.hoisted(() => ({ allowed: true }));
+const deletionPolicy = vi.hoisted(() => ({ allowed: true, offered: true }));
 vi.mock("@multica/core/issues/use-issue-deletion", () => ({
-  useIssueDeletion: () => ({ canDelete: () => deletionPolicy.allowed }),
+  useIssueDeletion: () => ({ canDelete: () => deletionPolicy.allowed, offersDelete: deletionPolicy.offered }),
 }));
 
 vi.mock("@multica/core/hooks", () => ({
@@ -43,12 +43,13 @@ vi.mock("@multica/core/auth", () => ({
   registerAuthStore: vi.fn(),
 }));
 
+const viewer = vi.hoisted(() => ({ role: "admin" }));
 vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({
     queryKey: ["workspaces", "ws-1", "members"],
     queryFn: () =>
       Promise.resolve([
-        { user_id: "user-1", name: "Test User", email: "t@t.com", role: "admin" },
+        { user_id: "user-1", name: "Test User", email: "t@t.com", role: viewer.role },
       ]),
   }),
   agentListOptions: () => ({
@@ -168,6 +169,7 @@ vi.mock("../../../platform/local-directory", async (importOriginal) => ({
 }));
 
 // Import after mocks.
+import { memberListOptions } from "@multica/core/workspace/queries";
 import { IssueActionsDropdown, useIssuePageMenu } from "../issue-actions-dropdown";
 import {
   IssueActionsContextMenu,
@@ -213,6 +215,8 @@ beforeEach(() => {
   useAssigneePicksStore.setState({ byScope: {} });
   platform.desktop = false;
   deletionPolicy.allowed = true;
+  deletionPolicy.offered = true;
+  viewer.role = "admin";
   mockOpenModal.mockReset();
   openInNewTabMock.mockReset();
   openInDesktopMock.mockReset();
@@ -389,6 +393,49 @@ describe("IssueActionsDropdown", () => {
     expect(item.closest('[role="menuitem"]')).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(item);
     expect(mockOpenModal).not.toHaveBeenCalled();
+  });
+
+  it("leaves Delete issue out for a viewer who can delete nothing (a guest)", async () => {
+    deletionPolicy.allowed = false;
+    deletionPolicy.offered = false;
+    render(wrap(<IssueActionsDropdown issue={mockIssue} trigger={<button data-testid="trigger">Menu</button>} />));
+    fireEvent.click(screen.getByTestId("trigger"));
+    expect(await screen.findByText("Copy link")).toBeInTheDocument();
+    expect(screen.queryByText("Delete issue")).not.toBeInTheDocument();
+  });
+
+  it("offers a guest only the entries the server lets it use, without asking for runs or quick actions (MUL-9883)", async () => {
+    viewer.role = "guest";
+    deletionPolicy.allowed = false;
+    deletionPolicy.offered = false;
+    apiMocks.listQuickActions.mockResolvedValue({
+      quick_actions: [{ id: "qa-1", name: "Triage", status: "active" }],
+    });
+    listTasksByIssueMock.mockResolvedValue([
+      { id: "task-1", status: "completed", work_dir: "/tmp/work", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // The shell has the member list cached before any menu opens.
+    await queryClient.fetchQuery(memberListOptions("ws-1"));
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={queryClient}>
+          <IssueActionsDropdown issue={mockIssue} trigger={<button data-testid="trigger">Menu</button>} />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+    fireEvent.click(screen.getByTestId("trigger"));
+    await screen.findByText("Copy link");
+
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent?.trim())).toEqual([
+      "Open in new tab",
+      "Pin to sidebar",
+      "Copy link",
+      "Copy link with title",
+      "Copy issue ID",
+    ]);
+    expect(listTasksByIssueMock).not.toHaveBeenCalled();
+    expect(apiMocks.listQuickActions).not.toHaveBeenCalled();
   });
 
   it("clicking Delete issue opens the delete-confirm modal", async () => {

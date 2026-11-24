@@ -239,6 +239,8 @@
       "created_by": "创建者",
       "select_agent_aria": "选择智能体",
       "pick_an_agent": "选一个智能体...",
+      "all_actors": "全部智能体和小队",
+      "frequent_actors_aria": "常用",
       "no_agents": "暂无可用智能体或小队。",
       "search_placeholder": "搜索智能体或小队...",
       "agents_group": "智能体",

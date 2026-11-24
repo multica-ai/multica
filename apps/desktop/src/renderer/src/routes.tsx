@@ -7,6 +7,7 @@ import { IssueDetailPage } from "./pages/issue-detail-page";
 import { ProjectDetailPage } from "./pages/project-detail-page";
 import { AutopilotDetailPage } from "./pages/autopilot-detail-page";
 import { SkillDetailPage } from "./pages/skill-detail-page";
+import { AppDetailPage } from "./pages/app-detail-page";
 import { AgentDetailPage } from "./pages/agent-detail-page";
 import { AiBuilderSessionPage } from "./pages/ai-builder-session-page";
 import { MemberDetailPage } from "./pages/member-detail-page";
@@ -21,6 +22,7 @@ import { DashboardPage } from "@multica/views/dashboard";
 import { AutopilotsPage } from "@multica/views/autopilots/components";
 import { MyIssuesPage } from "@multica/views/my-issues";
 import { SkillsPage } from "@multica/views/skills";
+import { AppsPage } from "@multica/views/apps";
 import { DesktopRuntimesPage } from "./components/desktop-runtimes-page";
 import { DesktopAgentsPage } from "./components/desktop-agents-page";
 import { ManualCreateAgentPage } from "@multica/views/agents";
@@ -167,6 +169,8 @@ export const appRoutes: RouteObject[] = [
           { path: "docs/:id/history", element: <DocHistoryRoute /> },
           { path: "skills", element: <SkillsPage /> },
           { path: "skills/:id", element: <SkillDetailPage /> },
+          { path: "apps", element: <AppsPage /> },
+          { path: "apps/:slug", element: <AppDetailPage /> },
           { path: "agents", element: <DesktopAgentsPage /> },
           { path: "agents/new", element: <DesktopChooseRuntimePage /> },
           { path: "agents/new/done/:agentId", element: <AgentCreatedPage /> },

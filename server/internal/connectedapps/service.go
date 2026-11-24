@@ -36,6 +36,10 @@ const RequestTTL = 24 * time.Hour
 // waits longer than a confirmation.
 const ConnectRequestTTL = 7 * 24 * time.Hour
 
+// TeamAskTTL is how long a member's ask for a team account stays open. No
+// run waits on it, so it lasts until an admin gets to it.
+const TeamAskTTL = 30 * 24 * time.Hour
+
 // DefaultCallsPerMinute caps the calls one account runs per minute.
 const DefaultCallsPerMinute = 30
 
@@ -62,6 +66,10 @@ var (
 	// ErrRateLimited: the account used its per-minute budget. The request
 	// stays pending, so approving again a minute later runs it.
 	ErrRateLimited = errors.New("connectedapps: the account is over its per-minute call budget")
+	// ErrCannotAddApp: approving a request for an app the agent does not
+	// have adds the app, and the approver may not edit the agent or the
+	// catalog no longer allows the app. The request is withdrawn.
+	ErrCannotAddApp = errors.New("connectedapps: the approver cannot add apps to this agent")
 )
 
 // Resumer continues the agent's work after a person decides on a request: a
@@ -72,12 +80,18 @@ type Resumer interface {
 	// workspace, by the same rule that admits a new run. An invalid userID
 	// checks a system principal with no human originator.
 	CanActFor(ctx context.Context, workspaceID, agentID, userID pgtype.UUID) bool
+	// CanManageAgent reports whether userID may edit agentID, and so add
+	// apps to it, by the same rule as the agent settings.
+	CanManageAgent(ctx context.Context, workspaceID, agentID, userID pgtype.UUID) bool
 }
 
 // Config wires a Service.
 type Config struct {
-	Queries  *db.Queries
-	Composio *composiointeg.Service
+	Queries *db.Queries
+	// TxStarter writes an app an approval adds to an agent together with
+	// the agent's legacy allowlist. Without it, such approvals fail.
+	TxStarter TxStarter
+	Composio  *composiointeg.Service
 	// TokenSecret signs gateway tokens. Derive it with DeriveTokenSecret.
 	TokenSecret []byte
 	// PublicBaseURL is the API's public origin, e.g. "https://api.multica.ai".
@@ -91,6 +105,9 @@ type Config struct {
 	// Remote MCP apps are off unless both are set.
 	SecretBox Sealer
 	DB        TxStarter
+	// CallQuota meters the calls sent to Composio against the workspace's
+	// monthly allowance. Nil, as without Multica Cloud, meters nothing.
+	CallQuota CallQuota
 	// RemoteApps overrides BuiltinRemoteApps; RemoteUpstream overrides the
 	// network client. Both are for tests.
 	RemoteApps     []RemoteApp
@@ -100,6 +117,7 @@ type Config struct {
 // Service is the connected-apps runtime: overlay, gateway, and confirmations.
 type Service struct {
 	q          *db.Queries
+	tx         TxStarter
 	composio   *composiointeg.Service
 	secret     []byte
 	gatewayURL string
@@ -107,6 +125,7 @@ type Service struct {
 	now        func() time.Time
 	resumer    Resumer
 	perMinute  int
+	quota      CallQuota
 	remote     *remoteSupport
 }
 
@@ -132,12 +151,14 @@ func New(cfg Config) (*Service, error) {
 	}
 	return &Service{
 		q:          cfg.Queries,
+		tx:         cfg.TxStarter,
 		composio:   cfg.Composio,
 		secret:     cfg.TokenSecret,
 		gatewayURL: base + GatewayPath,
 		bus:        cfg.Bus,
 		now:        now,
 		perMinute:  perMinute,
+		quota:      cfg.CallQuota,
 		remote:     newRemoteSupport(cfg, base),
 	}, nil
 }
@@ -225,13 +246,15 @@ type gatewayOverlay struct {
 // BuildTaskOverlay is the enqueue-time overlay for a run of agent. It carries
 // no credential: only the gateway address and which apps the agent has. The
 // claim handler adds the run's token (AuthorizeOverlay) once the task id is
-// final. A zero result means the agent has no apps.
+// final. A run a person started gets the gateway even when the agent has no
+// apps, so it can ask that person for its first one. A zero result means
+// there is nothing to mount.
 func (s *Service) BuildTaskOverlay(ctx context.Context, originatorUserID pgtype.UUID, agent db.Agent) (runtimeapps.MCPOverlayResult, error) {
 	apps, err := s.q.ListAgentApps(ctx, agent.ID)
 	if err != nil {
 		return runtimeapps.MCPOverlayResult{}, fmt.Errorf("connectedapps: list agent apps: %w", err)
 	}
-	if len(apps) == 0 {
+	if len(apps) == 0 && !originatorUserID.Valid {
 		return runtimeapps.MCPOverlayResult{}, nil
 	}
 	catalog := s.Catalog(ctx, agent.WorkspaceID)
@@ -241,7 +264,7 @@ func (s *Service) BuildTaskOverlay(ctx context.Context, originatorUserID pgtype.
 	}
 	personal := map[string]db.UserComposioConnection{}
 	if originatorUserID.Valid {
-		if personal, err = s.activePersonalAccounts(ctx, originatorUserID); err != nil {
+		if personal, err = s.activePersonalAccounts(ctx, agent.WorkspaceID, originatorUserID); err != nil {
 			return runtimeapps.MCPOverlayResult{}, err
 		}
 	}
@@ -285,7 +308,7 @@ func (s *Service) BuildTaskOverlay(ctx context.Context, originatorUserID pgtype.
 			AccountStatus: status,
 		})
 	}
-	if len(meta) == 0 {
+	if len(meta) == 0 && !originatorUserID.Valid {
 		return runtimeapps.MCPOverlayResult{}, nil
 	}
 	raw, err := json.Marshal(gatewayOverlay{MCPServers: servers})
@@ -354,8 +377,8 @@ func (s *Service) activeTeamAccounts(ctx context.Context, workspaceID pgtype.UUI
 	return out, nil
 }
 
-func (s *Service) activePersonalAccounts(ctx context.Context, userID pgtype.UUID) (map[string]db.UserComposioConnection, error) {
-	rows, err := s.q.ListActiveUserComposioConnections(ctx, userID)
+func (s *Service) activePersonalAccounts(ctx context.Context, workspaceID, userID pgtype.UUID) (map[string]db.UserComposioConnection, error) {
+	rows, err := s.q.ListActiveUserComposioConnections(ctx, db.ListActiveUserComposioConnectionsParams{UserID: userID, WorkspaceID: workspaceID})
 	if err != nil {
 		return nil, fmt.Errorf("connectedapps: list personal accounts: %w", err)
 	}
@@ -402,7 +425,7 @@ func (s *Service) resolveAccount(ctx context.Context, workspaceID, triggeredBy p
 	if !triggeredBy.Valid {
 		return account{}, ErrAccountMissing
 	}
-	personal, err := s.activePersonalAccounts(ctx, triggeredBy)
+	personal, err := s.activePersonalAccounts(ctx, workspaceID, triggeredBy)
 	if err != nil {
 		return account{}, err
 	}
@@ -449,6 +472,9 @@ type toolCall struct {
 	toolkit, tool, class, outcome                                     string
 	requestID                                                         pgtype.UUID
 	err                                                               string
+	// meteredPeriod is the start of the period the monthly app call allowance
+	// counted the call in; zero when it was not counted.
+	meteredPeriod time.Time
 }
 
 // Upstream errors can contain tool arguments or private app data. Log only
@@ -482,6 +508,7 @@ func (s *Service) recordCall(ctx context.Context, c toolCall) {
 		Outcome:            c.outcome,
 		RequestID:          c.requestID,
 		Error:              pgtype.Text{String: c.err, Valid: c.err != ""},
+		MeteredPeriodStart: pgtype.Timestamptz{Time: c.meteredPeriod, Valid: !c.meteredPeriod.IsZero()},
 	})
 	if s.bus != nil && c.issueID.Valid {
 		s.bus.Publish(events.Event{

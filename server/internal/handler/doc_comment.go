@@ -1,9 +1,7 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -12,9 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/multica-ai/multica/server/internal/inbox"
-	"github.com/multica-ai/multica/server/internal/projectaccess"
-	"github.com/multica-ai/multica/server/internal/util"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -23,16 +19,14 @@ import (
 // Doc comments are discussions on a doc's text (MUL-8370). A root comment
 // carries the anchor — the quoted text and a little context on each side,
 // which clients re-locate by text after every save — and replies hang off the
-// root, one level deep. Writing is human-only for now; agents join in a later
-// change.
+// root, one level deep. Agents take part by replying (MUL-9933): an agent can
+// answer in an existing discussion but cannot start one, and resolving,
+// reopening and deleting stay with people.
 
 const (
 	docCommentMaxContent = 20000
 	docCommentMaxQuote   = 4000
 	docCommentMaxContext = 64
-
-	inboxTypeDocComment   = "doc_comment"
-	inboxTypeDocMentioned = "doc_mentioned"
 )
 
 type DocCommentResponse struct {
@@ -121,10 +115,16 @@ func (h *Handler) CreateDocComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	if actorType != "member" && req.ParentID == nil {
+		writeError(w, http.StatusForbidden, "agents can only reply in an existing discussion")
+		return
+	}
 	params := db.CreateDocCommentParams{
 		ID: dbid.NewV7(), WorkspaceID: wsUUID, DocID: doc.ID, Content: content,
 	}
 	var root db.DocComment
+	var replyTo *db.DocComment
 	if req.ParentID != nil {
 		parentUUID, ok := parseUUIDOrBadRequest(w, *req.ParentID, "parent_id")
 		if !ok {
@@ -139,7 +139,10 @@ func (h *Handler) CreateDocComment(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		// One level of replies: answering a reply joins its discussion.
+		// One level of replies: answering a reply joins its discussion. The
+		// comment answered still decides which agent a plain reply is for.
+		answered := parent
+		replyTo = &answered
 		if parent.ParentID.Valid {
 			parent, err = h.Queries.GetDocComment(r.Context(), db.GetDocCommentParams{ID: parent.ParentID, DocID: doc.ID, WorkspaceID: wsUUID})
 			if err != nil {
@@ -160,9 +163,9 @@ func (h *Handler) CreateDocComment(w http.ResponseWriter, r *http.Request) {
 		params.AnchorSuffix = firstRunes(strings.ReplaceAll(req.AnchorSuffix, "\x00", ""), docCommentMaxContext)
 	}
 
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	params.AuthorType = actorType
 	params.AuthorID = parseUUID(actorID)
+	params.SourceTaskID, _ = h.docTaskContext(r, actorType)
 	comment, err := h.Queries.CreateDocComment(r.Context(), params)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create comment")
@@ -174,73 +177,9 @@ func (h *Handler) CreateDocComment(w http.ResponseWriter, r *http.Request) {
 	h.publish(protocol.EventDocCommentChanged, workspaceID, actorType, actorID, map[string]any{
 		"doc_id": uuidToString(doc.ID), "comment_id": uuidToString(comment.ID),
 	})
-	h.notifyDocComment(r.Context(), doc, root, comment, actorType, actorID)
+	service.NotifyDocComment(r.Context(), h.Queries, h.Bus, doc, root, comment, actorType, actorID)
+	h.triggerDocCommentAgents(r, doc, root, replyTo, comment, actorType, actorID)
 	writeJSON(w, http.StatusCreated, docCommentToResponse(comment))
-}
-
-// notifyDocComment tells the members a new comment is for: everyone it
-// @mentions, and everyone who already wrote in the discussion. The author and
-// guests are never notified, and a member gets one item even when both apply.
-func (h *Handler) notifyDocComment(ctx context.Context, doc db.Doc, root, comment db.DocComment, actorType, actorID string) {
-	author := uuidToString(comment.AuthorID)
-	mentioned := map[string]bool{}
-	for _, m := range util.ParseMentions(comment.Content) {
-		if m.Type == "member" && m.ID != author {
-			mentioned[m.ID] = true
-		}
-	}
-	participants := map[string]bool{}
-	if ids, err := h.Queries.ListDocThreadParticipants(ctx, db.ListDocThreadParticipantsParams{
-		WorkspaceID: doc.WorkspaceID, DocID: doc.ID, RootID: root.ID,
-	}); err == nil {
-		for _, id := range ids {
-			if s := uuidToString(id); s != author && !mentioned[s] {
-				participants[s] = true
-			}
-		}
-	}
-	details, _ := json.Marshal(map[string]string{
-		"doc_id":     uuidToString(doc.ID),
-		"thread_id":  uuidToString(root.ID),
-		"comment_id": uuidToString(comment.ID),
-		"quote":      firstRunes(root.AnchorQuote, 200),
-	})
-	body := firstRunes(comment.Content, 500)
-	deliver := func(recipient, kind string) {
-		recipientUUID, err := util.ParseUUID(recipient)
-		if err != nil {
-			return
-		}
-		// Docs are closed to guests (and to anyone outside the workspace), so
-		// a notification carrying the doc's title and text must not reach them.
-		member, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
-			UserID: recipientUUID, WorkspaceID: doc.WorkspaceID,
-		})
-		if err != nil || projectaccess.IsGuestRole(member.Role) {
-			return
-		}
-		if _, _, err := inbox.Deliver(ctx, h.Queries, h.Bus, inbox.Notification{Params: db.CreateInboxItemParams{
-			ID:            dbid.NewV7(),
-			WorkspaceID:   doc.WorkspaceID,
-			RecipientType: "member",
-			RecipientID:   recipientUUID,
-			Type:          kind,
-			Severity:      "info",
-			Title:         doc.Title,
-			Body:          pgtype.Text{String: body, Valid: true},
-			ActorType:     pgtype.Text{String: actorType, Valid: true},
-			ActorID:       parseUUID(actorID),
-			Details:       details,
-		}}); err != nil {
-			slog.Warn("doc comment notification failed", "doc_id", uuidToString(doc.ID), "recipient_id", recipient, "error", err)
-		}
-	}
-	for id := range mentioned {
-		deliver(id, inboxTypeDocMentioned)
-	}
-	for id := range participants {
-		deliver(id, inboxTypeDocComment)
-	}
 }
 
 func (h *Handler) loadDocComment(w http.ResponseWriter, r *http.Request, doc db.Doc) (db.DocComment, bool) {

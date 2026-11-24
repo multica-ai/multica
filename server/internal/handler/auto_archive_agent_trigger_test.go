@@ -47,13 +47,13 @@ func TestAutoArchiveOnAgentTrigger_UpdateIssue(t *testing.T) {
 	})
 
 	var mu sync.Mutex
-	archivedReasons := map[string][]any{}
+	archivedPayloads := map[string][]map[string]any{}
 	testHandler.Bus.Subscribe(protocol.EventInboxBatchArchived, func(e events.Event) {
 		payload, _ := e.Payload.(map[string]any)
 		if payload["recipient_id"] == testUserID {
 			if id, ok := payload["issue_id"].(string); ok {
 				mu.Lock()
-				archivedReasons[id] = append(archivedReasons[id], payload["reason"])
+				archivedPayloads[id] = append(archivedPayloads[id], payload)
 				mu.Unlock()
 			}
 		}
@@ -77,10 +77,10 @@ func TestAutoArchiveOnAgentTrigger_UpdateIssue(t *testing.T) {
 			t.Fatalf("active inbox = %d, want 0", got)
 		}
 		mu.Lock()
-		reasons := archivedReasons[issue.ID]
+		payloads := archivedPayloads[issue.ID]
 		mu.Unlock()
-		if len(reasons) != 1 || reasons[0] != "actor_acted" {
-			t.Fatalf("reasons = %v, want [actor_acted]", reasons)
+		if len(payloads) != 1 || payloads[0]["reason"] != "actor_acted" || payloads[0]["trigger"] != "agent_triggered" {
+			t.Fatalf("payloads = %v, want 1 payload with reason=actor_acted and trigger=agent_triggered", payloads)
 		}
 	})
 

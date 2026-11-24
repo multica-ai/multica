@@ -156,7 +156,7 @@ func (h *Handler) flushDocCollab(ctx context.Context, docID pgtype.UUID) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, docCollabFlushTimeout)
 	defer cancel()
-	if err := h.Collab.Flush(ctx, uuidToString(docID)); err != nil {
+	if _, err := h.Collab.Flush(ctx, collab.DocumentName(uuidToString(docID))); err != nil {
 		slog.Warn("doc collab flush failed", "doc_id", uuidToString(docID), "error", err)
 	}
 }
@@ -304,7 +304,9 @@ func (h *Handler) updateDocViaCollab(w http.ResponseWriter, r *http.Request, wsU
 			}
 			return true
 		}
-		write.Title, write.Content = &source.Title, &source.Content
+		// The service checks it against the live session, so a restore
+		// never replaces edits the caller had not seen.
+		write.BaseRevision, write.Title, write.Content = req.BaseRevision, &source.Title, &source.Content
 	case req.Content != nil:
 		// The content the writer started from is the merge base.
 		var base string
@@ -330,13 +332,17 @@ func (h *Handler) updateDocViaCollab(w http.ResponseWriter, r *http.Request, wsU
 		write.Title = req.Title
 	}
 
-	result, err := h.Collab.Write(ctx, uuidToString(doc.ID), write)
+	result, err := h.Collab.Write(ctx, collab.DocumentName(uuidToString(doc.ID)), write)
 	if err != nil {
 		if errors.Is(err, collab.ErrUnavailable) {
 			slog.Warn("doc collab write failed; writing directly", "doc_id", uuidToString(doc.ID), "error", err)
 			return false
 		}
 		writeError(w, http.StatusInternalServerError, "failed to update doc")
+		return true
+	}
+	if result.Status == collab.StatusStale {
+		writeRevisionConflict(w, "doc", doc.ID, req.BaseRevision, result.Revision)
 		return true
 	}
 	h.writeCollabResult(w, r, wsUUID, doc.ID, result)
@@ -428,7 +434,7 @@ func (h *Handler) EditDoc(w http.ResponseWriter, r *http.Request) {
 		if taskID.Valid {
 			edit.TaskID = uuidToString(taskID)
 		}
-		result, err := h.Collab.Edit(ctx, uuidToString(docUUID), edit)
+		result, err := h.Collab.Edit(ctx, collab.DocumentName(uuidToString(docUUID)), edit)
 		if err == nil {
 			h.writeCollabResult(w, r, wsUUID, docUUID, result)
 			return

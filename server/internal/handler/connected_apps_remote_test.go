@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/connectedapps"
+	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
@@ -501,5 +502,69 @@ func TestRemoteApps_OffWithoutKey(t *testing.T) {
 	f.h.AppsRemoteGateway(w, withURLParam(req, "app", "mobbin"))
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("remote gateway without remote apps: %d, want 404", w.Code)
+	}
+}
+
+// connectTeam runs the team connect handshake as an admin.
+func (f *remoteAppsFixture) connectTeam(t *testing.T) {
+	t.Helper()
+	w := httptest.NewRecorder()
+	f.h.ConnectTeamApp(w, appsReqAs(t, testUserID, http.MethodPost, "/api/apps/team/connect", map[string]string{"toolkit_slug": "mobbin"}))
+	if w.Code != http.StatusOK {
+		t.Fatalf("team connect: %d %s", w.Code, w.Body.String())
+	}
+	var init ComposioConnectInitResponse
+	json.Unmarshal(w.Body.Bytes(), &init)
+	authorize, err := url.Parse(init.RedirectURL)
+	if err != nil {
+		t.Fatalf("redirect_url = %q", init.RedirectURL)
+	}
+	f.callback(t, "state="+url.QueryEscape(authorize.Query().Get("state"))+"&code=auth-code")
+}
+
+// A connected remote team account is the workspace's account for the app:
+// reconnecting it is a reauthorization a plan without team accounts allows,
+// and members cannot ask an admin for it again.
+func TestRemoteApps_TeamAccountIsTheWorkspaces(t *testing.T) {
+	f := newRemoteAppsFixture(t)
+	f.connectTeam(t)
+
+	usePaidFeatureOn(t, f.h, entitlement.FeatureTeamAppAccounts, enforced())
+	w := httptest.NewRecorder()
+	f.h.ConnectTeamApp(w, appsReqAs(t, testUserID, http.MethodPost, "/api/apps/team/connect", map[string]string{"toolkit_slug": "mobbin"}))
+	if w.Code != http.StatusOK {
+		t.Fatalf("reconnecting the team account under enforcement: %d %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	f.h.RequestTeamApp(w, appsReqAs(t, f.member, http.MethodPost, "/api/apps/team/requests", map[string]string{"toolkit_slug": "mobbin"}))
+	if w.Code != http.StatusConflict {
+		t.Fatalf("asking for a connected team account: %d %s, want 409", w.Code, w.Body.String())
+	}
+}
+
+// Disconnecting a personal remote account first lists the agents that lose it.
+func TestRemoteApps_PersonalDisconnectImpact(t *testing.T) {
+	f := newRemoteAppsFixture(t)
+	f.connect(t, testUserID)
+	f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "mobbin", "account_scope": "personal", "level": "write"}})
+	var id string
+	testPool.QueryRow(context.Background(), `SELECT id FROM remote_app_connection WHERE owner_id = $1 AND app_slug = 'mobbin'`, testUserID).Scan(&id)
+	impact := func(userID string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		f.h.GetComposioConnectionImpact(w, withURLParam(appsReqAs(t, userID, http.MethodGet, "/api/integrations/composio/connections/"+id+"/impact", nil), "id", id))
+		return w
+	}
+
+	w := impact(testUserID)
+	var resp struct {
+		Agents []ComposioImpactAgent `json:"agents"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if w.Code != http.StatusOK || len(resp.Agents) != 1 || resp.Agents[0].ID != f.agentID || resp.Agents[0].WorkspaceID != testWorkspaceID {
+		t.Fatalf("impact: %d %s", w.Code, w.Body.String())
+	}
+	if w := impact(f.member); w.Code != http.StatusNotFound {
+		t.Fatalf("another member's impact check: %d, want 404", w.Code)
 	}
 }

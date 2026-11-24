@@ -104,6 +104,28 @@ describe("ObjectPage", () => {
   });
 });
 
+describe("ObjectSection collapsible", () => {
+  it("folds its content and action away from the title, keeping the content mounted", async () => {
+    renderWithI18n(
+      <ObjectSection collapsible title="Description" action={<button type="button">Hint</button>}>
+        <p>Agent context</p>
+      </ObjectSection>,
+    );
+    const toggle = screen.getByRole("button", { name: "Description" });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Agent context")).toBeVisible();
+
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByText("Agent context")).not.toBeVisible();
+    expect(screen.queryByRole("button", { name: "Hint" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Description" })).toBeInTheDocument();
+
+    await userEvent.click(toggle);
+    expect(screen.getByText("Agent context")).toBeVisible();
+  });
+});
+
 describe("ObjectProperty label", () => {
   afterEach(() => {
     vi.useRealTimers();

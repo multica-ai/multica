@@ -1647,7 +1647,7 @@ func (h *Handler) attachmentOwnerLockAttempt(ctx context.Context, att db.Attachm
 	if att.IssueID.Valid {
 		// A missing issue is not an error here: its cascade took the attachment
 		// with it, which the re-read below reports as pgx.ErrNoRows.
-		if _, err := qtx.LockIssueForAttachmentWrite(ctx, db.LockIssueForAttachmentWriteParams{
+		if _, err := qtx.LockIssueForWrite(ctx, db.LockIssueForWriteParams{
 			ID:          att.IssueID,
 			WorkspaceID: att.WorkspaceID,
 		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {

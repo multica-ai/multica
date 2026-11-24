@@ -22,9 +22,14 @@ interface FakeDoc {
   revision: number;
   ystate: string | null;
   ystateRevision: number | null;
-  stores: { contributors: string[]; content: string; message?: string }[];
+  stores: { contributors: string[]; content: string; message?: string; live?: boolean; seen?: string[] }[];
 }
 let fake: FakeDoc;
+const ISSUE_ID = "0193a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5c";
+const ISSUE_NAME = `issue:${ISSUE_ID}`;
+let fakeIssue: FakeDoc;
+const mentionsIn = (content: string) =>
+  [...content.matchAll(/mention:\/\/(member|agent)\/([0-9a-f-]{36})/g)].map((m) => `${m[1]}:${m[2]}`);
 /** When set, stores wait for it before answering. */
 let storeGate: { requested: number; release: Promise<void> } | null = null;
 let apiServer: HttpServer;
@@ -48,40 +53,49 @@ beforeAll(async () => {
       res.writeHead(status, { "Content-Type": "application/json" });
       res.end(JSON.stringify(body));
     };
-    if (req.method === "GET" && req.url === `/internal/collab/docs/${DOC_ID}`) {
+    const route = /^\/internal\/collab\/(docs|issues)\/([^/]+)(\/store)?$/.exec(req.url ?? "");
+    const issue = route?.[1] === "issues";
+    const target = route && route[2] === (issue ? ISSUE_ID : DOC_ID) ? (issue ? fakeIssue : fake) : null;
+    if (!route || !target) return send(404, {});
+    // Issues have no title; their stores answer with the mentions stored.
+    const stored = () =>
+      issue ? { revision: target.revision, mentions: mentionsIn(target.content) } : { revision: target.revision, title: "T" };
+    if (req.method === "GET" && !route[3]) {
       return send(200, {
         workspace_id: "ws",
-        title: "T",
-        content: fake.content,
-        revision: fake.revision,
-        ystate: fake.ystate,
-        ystate_revision: fake.ystateRevision,
+        title: issue ? "" : "T",
+        content: target.content,
+        revision: target.revision,
+        ystate: target.ystate,
+        ystate_revision: target.ystateRevision,
       });
     }
-    if (req.method === "POST" && req.url === `/internal/collab/docs/${DOC_ID}/store`) {
+    if (req.method === "POST" && route[3]) {
       const body = JSON.parse(Buffer.concat(chunks).toString());
       if (storeGate && !body.state_only) {
         storeGate.requested += 1;
         await storeGate.release;
       }
-      if (body.base_revision !== fake.revision) {
-        return send(409, { revision: fake.revision, content: fake.content });
+      if (body.base_revision !== target.revision) {
+        return send(409, { revision: target.revision, content: target.content });
       }
       if (body.state_only) {
-        fake.ystate = body.ystate;
-        fake.ystateRevision = fake.revision;
-        return send(200, { revision: fake.revision, title: "T" });
+        target.ystate = body.ystate;
+        target.ystateRevision = target.revision;
+        return send(200, stored());
       }
-      fake.revision += 1;
-      fake.content = body.content;
-      fake.ystate = body.ystate;
-      fake.ystateRevision = fake.revision;
-      fake.stores.push({
+      target.revision += 1;
+      target.content = body.content;
+      target.ystate = body.ystate;
+      target.ystateRevision = target.revision;
+      target.stores.push({
         contributors: body.contributors.map((c: Actor) => c.id),
         content: body.content,
         message: body.message,
+        live: body.live,
+        seen: body.seen_mentions,
       });
-      return send(200, { revision: fake.revision, title: "T" });
+      return send(200, stored());
     }
     send(404, {});
   });
@@ -113,20 +127,26 @@ function resetDoc(content: string) {
   storeGate = null;
 }
 
-function ticket(actor: Actor) {
+function resetIssue(content: string) {
+  fakeIssue = { content, revision: 7, ystate: null, ystateRevision: null, stores: [] };
+  storeGate = null;
+}
+
+function ticket(actor: Actor, name = NAME) {
   return signTicket(
-    { document: NAME, workspaceId: "ws", actor, readOnly: false, expiresAt: Math.floor(Date.now() / 1000) + 60 },
+    { document: name, workspaceId: "ws", actor, readOnly: false, expiresAt: Math.floor(Date.now() / 1000) + 60 },
     SECRET,
   );
 }
 
-async function connect(actor: Actor, opts: { document?: Y.Doc; epoch?: string } = {}) {
+async function connect(actor: Actor, opts: { document?: Y.Doc; epoch?: string; name?: string } = {}) {
   const document = opts.document ?? new Y.Doc();
+  const name = opts.name ?? NAME;
   const provider = new HocuspocusProvider({
     url: collabUrl,
-    name: NAME,
+    name,
     document,
-    token: () => JSON.stringify({ ticket: ticket(actor), epoch: opts.epoch }),
+    token: () => JSON.stringify({ ticket: ticket(actor, name), epoch: opts.epoch }),
   });
   providers.push(provider);
   await waitFor(() => provider.isSynced, 3000);
@@ -148,8 +168,8 @@ function typeInto(doc: Y.Doc, block: number, offset: number, text: string) {
   (element.get(0) as Y.XmlText).insert(offset, text);
 }
 
-async function internal(path: "write" | "edit" | "flush", body: unknown) {
-  const res = await fetch(`http://127.0.0.1:${collab.server.address.port}/internal/documents/${NAME}/${path}`, {
+async function internal(path: "write" | "edit" | "flush", body: unknown, name = NAME) {
+  const res = await fetch(`http://127.0.0.1:${collab.server.address.port}/internal/documents/${name}/${path}`, {
     method: "POST",
     headers: { "X-Collab-Secret": SECRET, "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -293,6 +313,39 @@ describe("collaboration server", () => {
     expect(result.body.error).toBe("merge_conflict");
     expect(result.body.conflicts).toEqual([{ current: "Two (Ada)", incoming: "Two (agent)" }]);
     expect(markdown(a.document)).toBe("One\n\nTwo (Ada)");
+  });
+
+  it("refuses a restore from a revision someone has since saved over, keeping their text", async () => {
+    resetDoc("Old body");
+    const a = await connect(ada);
+    typeInto(a.document, 0, 8, " (Ada)");
+    await waitFor(() => markdown(a.document).includes("Ada"));
+    // The caller read revision 1; Ada's pending edit is saved as revision 2
+    // before the restore is checked.
+    const stale = await internal("write", {
+      actor: agent,
+      base_revision: 1,
+      content: "Restored body",
+      action: "restore",
+      action_ref: 1,
+    });
+    expect(stale.status).toBe(409);
+    expect(stale.body.error).toBe("revision_conflict");
+    expect(stale.body.revision).toBe(2);
+    expect(stale.body.content).toBe("Old body (Ada)");
+    expect(fake.content).toBe("Old body (Ada)");
+    expect(markdown(a.document)).toBe("Old body (Ada)");
+
+    const fresh = await internal("write", {
+      actor: agent,
+      base_revision: 2,
+      content: "Restored body",
+      action: "restore",
+      action_ref: 1,
+    });
+    expect(fresh.status).toBe(200);
+    await waitFor(() => markdown(a.document) === "Restored body");
+    expect(fake.content).toBe("Restored body");
   });
 
   describe("keeps what Markdown cannot express", () => {
@@ -509,5 +562,154 @@ describe("collaboration server", () => {
     expect(markdown(a.document)).toBe("Small doc");
     expect(a.document.getMap("meta").get("epoch")).not.toBe("old-epoch");
     expect(Buffer.from(fake.ystate!, "base64").byteLength).toBeLessThan(10_000);
+  });
+});
+
+describe("issue descriptions", () => {
+  it("saves what editors type to the issue as live, passing on the mentions already stored", async () => {
+    resetIssue(`Hi [@Bob](mention://member/${bob.id})\n\nSecond`);
+    const a = await connect(ada, { name: ISSUE_NAME });
+    const b = await connect(bob, { name: ISSUE_NAME });
+    typeInto(a.document, 1, 6, " line");
+    await waitFor(() => fakeIssue.stores.length === 1, 2000);
+    expect(fakeIssue.stores[0]).toMatchObject({ contributors: [ada.id], live: true, seen: [] });
+    expect(fakeIssue.content).toContain("Second line");
+
+    typeInto(b.document, 1, 11, "!");
+    await waitFor(() => fakeIssue.stores.length === 2, 2000);
+    expect(fakeIssue.stores[1]).toMatchObject({ contributors: [bob.id], live: true, seen: [`member:${bob.id}`] });
+  });
+
+  it("saves an agent's edit to an issue as an explicit write of its own", async () => {
+    resetIssue("Status: draft");
+    const a = await connect(ada, { name: ISSUE_NAME });
+    const result = await internal(
+      "edit",
+      { actor: agent, edits: [{ old_text: "draft", new_text: "approved" }] },
+      ISSUE_NAME,
+    );
+    expect(result.status).toBe(200);
+    expect(result.body.revision).toBe(8);
+    await waitFor(() => markdown(a.document) === "Status: approved");
+    expect(fakeIssue.stores).toEqual([
+      { contributors: [agent.id], content: "Status: approved", message: undefined, live: false, seen: [] },
+    ]);
+  });
+
+  it("reports an issue that no longer exists as gone", async () => {
+    resetIssue("Anything");
+    const result = await internal(
+      "write",
+      { actor: agent, content: "x" },
+      "issue:0193a1b2-c3d4-7e5f-8a9b-000000000000",
+    );
+    expect(result.status).toBe(404);
+  });
+});
+
+describe("access after joining", () => {
+  let access: ReturnType<typeof createCollabServer>;
+  let accessUrl = "";
+
+  beforeAll(async () => {
+    access = createCollabServer(
+      { port: 0, secret: SECRET, apiUrl, cdnDomain: "", storeDebounceMs: 100, storeMaxDebounceMs: 400 },
+      codec,
+      silent,
+      { refreshLeadMs: 1500, revalidateGraceMs: 300, sweepMs: 50 },
+    );
+    await access.server.listen(0);
+    accessUrl = `ws://127.0.0.1:${access.server.address.port}`;
+  });
+
+  afterAll(async () => {
+    await access.server.destroy();
+  });
+
+  /** Joins with a ticket expiring in `ttl` seconds; later tickets come from
+   *  `next`, which may refuse by throwing. */
+  async function join(actor: Actor, ttl: number, next: () => string) {
+    let calls = 0;
+    const reasons: string[] = [];
+    const provider = new HocuspocusProvider({
+      url: accessUrl,
+      name: NAME,
+      document: new Y.Doc(),
+      token: () => {
+        calls += 1;
+        if (calls > 1) return next();
+        return signTicket(
+          { document: NAME, workspaceId: "ws", actor, readOnly: false, expiresAt: Math.floor(Date.now() / 1000) + ttl },
+          SECRET,
+        );
+      },
+      onClose: ({ event }) => reasons.push(event.reason),
+    });
+    providers.push(provider);
+    await waitFor(() => provider.isSynced);
+    return { provider, reasons, calls: () => calls };
+  }
+
+  const connections = () => access.server.hocuspocus.documents.get(NAME)?.getConnectionsCount() ?? 0;
+
+  it("renews a connection's ticket before it expires", async () => {
+    resetDoc("Hello");
+    const a = await join(ada, 2, () => ticket(ada));
+    await waitFor(() => a.calls() >= 2);
+    // Past the first ticket's expiry, the connection is still in.
+    await new Promise((resolve) => setTimeout(resolve, 2200));
+    expect(a.reasons).toEqual([]);
+    expect(connections()).toBe(1);
+  });
+
+  it("closes a connection that shows no fresh ticket by the time its ticket expires", async () => {
+    resetDoc("Hello");
+    const a = await join(ada, 2, () => {
+      throw new Error("access revoked");
+    });
+    await waitFor(() => a.reasons.includes("reauthenticate"), 4000);
+    expect(connections()).toBe(0);
+  });
+
+  it("refuses a fresh ticket issued to someone else", async () => {
+    resetDoc("Hello");
+    const a = await join(ada, 2, () => ticket(bob));
+    await waitFor(() => a.reasons.includes("reauthenticate"));
+    expect(connections()).toBe(0);
+  });
+
+  it("revalidates only the connections a revocation names", async () => {
+    resetDoc("Hello");
+    let allowed = true;
+    const a = await join(ada, 60, () => {
+      if (!allowed) throw new Error("access revoked");
+      return ticket(ada);
+    });
+    const b = await join(bob, 60, () => ticket(bob));
+    const revalidate = (body: unknown) =>
+      fetch(`http://127.0.0.1:${access.server.address.port}/internal/revalidate`, {
+        method: "POST",
+        headers: { "X-Collab-Secret": SECRET, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    // Still allowed in: a fresh ticket keeps the connection.
+    const kept = await revalidate({ workspace_id: "ws", actor: { type: "member", id: ada.id } });
+    expect(await kept.json()).toEqual({ asked: 1 });
+    await waitFor(() => a.calls() >= 2);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(a.reasons).toEqual([]);
+
+    // Revoked: no ticket comes, and the connection is closed after the grace
+    // period. Others in the doc are untouched.
+    allowed = false;
+    await revalidate({ workspace_id: "ws", actor: { type: "member", id: ada.id } });
+    await waitFor(() => a.reasons.includes("reauthenticate"));
+    expect(b.reasons).toEqual([]);
+    expect(b.calls()).toBe(1);
+    expect(connections()).toBe(1);
+
+    expect((await revalidate({ workspace_id: "other" })).status).toBe(200);
+    expect((await revalidate({})).status).toBe(400);
   });
 });

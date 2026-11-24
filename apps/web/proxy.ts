@@ -1,4 +1,5 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server";
+import { buildAiVisitRecord, reportAiVisit, type AiVisitFormat } from "@multica/core/ai-traffic";
 import { LOCALE_COOKIE, type SupportedLocale } from "@multica/core/i18n";
 import {
   isSupportedLocale,
@@ -10,6 +11,7 @@ import {
   landingPathLocale,
   localizeHref,
   splitLandingLocale,
+  stripLandingLocale,
 } from "./lib/landing-locale-path";
 import { runtimeRewriteDestination } from "./config/runtime-urls";
 import { isOfficialMarketingHost } from "./lib/public-host";
@@ -85,11 +87,40 @@ function routeLandingLocale(
   return nextWithLocale(req, landingPathLocale(resolved) === "en" ? resolved : "en");
 }
 
+/** Root files AI crawlers read; they pass through untouched and are only observed. */
+const CRAWLER_FILES: Readonly<Record<string, AiVisitFormat>> = {
+  "/llms.txt": "markdown",
+  "/robots.txt": "text",
+};
+
+// AI visits to the public site, recorded on the official host only so
+// self-hosted instances stay quiet; retained in PostHog when configured. `/docs` is logged by the docs app.
+// `next start` reports its own bind address as `nextUrl.hostname`, so the
+// Host header decides; a spoofed one can only add a log line.
+function recordAiVisit(req: NextRequest, response: NextResponse, event?: NextFetchEvent) {
+  const { pathname } = req.nextUrl;
+  const host = req.headers.get("host")?.replace(/:\d+$/, "") ?? req.nextUrl.hostname;
+  if (!isOfficialMarketingHost(host)) return;
+  const format = CRAWLER_FILES[pathname] ?? (isLandingPath(stripLandingLocale(pathname)) ? "html" : null);
+  if (!format) return;
+  reportAiVisit(
+    buildAiVisitRecord({
+      app: "web",
+      method: req.method,
+      pathname,
+      headers: req.headers,
+      format,
+      status: response.headers.has("location") ? response.status : null,
+    }),
+    { env: process.env, waitUntil: event && ((promise) => event.waitUntil(promise)) },
+  );
+}
+
 // Next.js 16 renamed `middleware` → `proxy`. API surface (NextRequest /
 // NextResponse / cookies / matcher) is identical; the only behavioral
 // change is the runtime — proxy is forced to nodejs and cannot opt into
 // edge.
-export function proxy(req: NextRequest) {
+export function proxy(req: NextRequest, event?: NextFetchEvent) {
   const { pathname } = req.nextUrl;
   const runtimeDestination = runtimeRewriteDestination(pathname, process.env);
   if (runtimeDestination) {
@@ -98,6 +129,13 @@ export function proxy(req: NextRequest) {
     return NextResponse.rewrite(url);
   }
 
+  const response = CRAWLER_FILES[pathname] ? NextResponse.next() : routeRequest(req);
+  recordAiVisit(req, response, event);
+  return response;
+}
+
+function routeRequest(req: NextRequest): NextResponse {
+  const { pathname } = req.nextUrl;
   const hasSession = req.cookies.has("multica_logged_in");
   const lastSlug = req.cookies.get("last_workspace_slug")?.value;
 
@@ -171,6 +209,8 @@ export const config = {
     "/docs/:path*",
     "/ws",
     "/collab",
+    "/llms.txt",
+    "/robots.txt",
     "/((?!api|v1|_next/static|_next/image|favicon.ico|.*\\.).*)",
   ],
 };

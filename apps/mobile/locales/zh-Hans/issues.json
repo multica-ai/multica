@@ -110,6 +110,13 @@
     "squad_failed_with_reason": "评估失败：{{reason}}",
     "squad_failed": "评估失败",
     "squad_evaluated": "评估了小队触发器",
+    "squad_handoff_to": "交给了 {{name}}",
+    "squad_handoff_human": "请 {{name}} 决定",
+    "squad_handoff_leader": "交回 {{name}}",
+    "squad_handoff_round": "第 {{round}} 轮",
+    "squad_handoff_reason_round_limit": "已来回 {{limit}} 轮",
+    "squad_handoff_reason_daily_limit": "今日交接已达上限",
+    "squad_handoff_reason_run_failed": "运行失败",
     "commented": "发表了评论"
   },
   "errors": {

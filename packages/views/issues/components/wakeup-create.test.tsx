@@ -52,6 +52,31 @@ beforeEach(() => {
 });
 afterEach(() => configureShortcutPlatform(null));
 
+describe("WakeupCreate", () => {
+  it("opens on mount when asked and reports closing", async () => {
+    const onOpenChange = vi.fn();
+    renderWithI18n(
+      <WakeupCreate workspaceId="ws" issueId="issue" defaultAgentId="emacs" defaultOpen onOpenChange={onOpenChange} />,
+      { locale: "zh-Hans" },
+    );
+    const form = await screen.findByRole("form", { name: "新建唤醒" });
+    fireEvent.keyDown(form, { key: "Escape" });
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+  });
+
+  it("opens again when revealed again before it unmounts", async () => {
+    const view = (defaultOpen: boolean) => (
+      <WakeupCreate workspaceId="ws" issueId="issue" defaultAgentId="emacs" defaultOpen={defaultOpen} />
+    );
+    const { rerender } = renderWithI18n(view(true), { locale: "zh-Hans" });
+    fireEvent.keyDown(await screen.findByRole("form", { name: "新建唤醒" }), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("form", { name: "新建唤醒" })).not.toBeInTheDocument());
+    rerender(view(false));
+    rerender(view(true));
+    expect(await screen.findByRole("form", { name: "新建唤醒" })).toBeInTheDocument();
+  });
+});
+
 describe("WakeupCreateForm", () => {
   it("says a reply wait for the assignee joins the run a comment already starts", async () => {
     await renderForm();

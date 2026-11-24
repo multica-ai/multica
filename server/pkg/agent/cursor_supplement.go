@@ -3,9 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,13 +12,11 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
-	"time"
 	"unicode/utf16"
 )
 
@@ -36,9 +32,7 @@ const (
 	// 10,000 JavaScript string units.
 	cursorHookContextLimit    = 10000
 	cursorHookTimeoutSeconds  = 10
-	cursorHookRelayTimeout    = 5 * time.Second
 	cursorHookRequestLimit    = 64 << 10
-	cursorHookResponseLimit   = 256 << 10
 	cursorHookStdinLimit      = 64 << 20
 	cursorGuidanceTagPrefix   = "[MULTICA-GUIDANCE nonce="
 	cursorHookRelayEmptyReply = "{}"
@@ -113,7 +107,7 @@ func startCursorSupplementSession(ctx context.Context, cwd string, hookCommand [
 	if err != nil {
 		return nil, err
 	}
-	hooksData, err := cursorHooksFileData(cursorHookShellCommand(hookCommand))
+	hooksData, err := cursorHooksFileData(hookShellCommand(hookCommand))
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +128,7 @@ func startCursorSupplementSession(ctx context.Context, cwd string, hookCommand [
 		return nil, fmt.Errorf("listen for cursor hooks: %w", err)
 	}
 	s.url = "http://" + listener.Addr().String() + "/hook"
-	s.server = &http.Server{Handler: s, ReadHeaderTimeout: cursorHookRelayTimeout}
+	s.server = &http.Server{Handler: s, ReadHeaderTimeout: hookRelayTimeout}
 	go func() { _ = s.server.Serve(listener) }()
 	return s, nil
 }
@@ -431,16 +425,6 @@ func cursorHooksFileData(command string) ([]byte, error) {
 	return append(data, '\n'), nil
 }
 
-// cursorHookShellCommand quotes argv for the POSIX shell Cursor runs command
-// hooks through.
-func cursorHookShellCommand(argv []string) string {
-	quoted := make([]string, len(argv))
-	for i, arg := range argv {
-		quoted[i] = "'" + strings.ReplaceAll(arg, "'", `'\''`) + "'"
-	}
-	return strings.Join(quoted, " ")
-}
-
 // RunCursorHookRelay is the body of the Cursor hook command. It always prints
 // one JSON object and never fails the hook: a run without steering, a stale
 // hooks.json or an unreachable endpoint all answer "{}" so the tool call
@@ -451,61 +435,14 @@ func RunCursorHookRelay(stdin io.Reader, stdout io.Writer, getenv func(string) s
 }
 
 func cursorHookRelay(stdin io.Reader, getenv func(string) string) string {
-	endpoint, token := getenv(cursorHookURLEnv), getenv(cursorHookTokenEnv)
-	if endpoint == "" || token == "" || !loopbackHTTPURL(endpoint) {
-		return cursorHookRelayEmptyReply
-	}
 	var req cursorHookRequest
 	if err := json.NewDecoder(io.LimitReader(stdin, cursorHookStdinLimit)).Decode(&req); err != nil {
 		return cursorHookRelayEmptyReply
 	}
-	body, err := json.Marshal(req)
-	if err != nil {
-		return cursorHookRelayEmptyReply
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), cursorHookRelayTimeout)
-	defer cancel()
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return cursorHookRelayEmptyReply
-	}
-	httpReq.Header.Set("Authorization", "Bearer "+token)
-	httpReq.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		return cursorHookRelayEmptyReply
-	}
-	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, cursorHookResponseLimit))
-	if err != nil || resp.StatusCode != http.StatusOK {
-		return cursorHookRelayEmptyReply
-	}
-	var output map[string]any
-	if json.Unmarshal(data, &output) != nil || output == nil {
-		return cursorHookRelayEmptyReply
-	}
-	return string(bytes.TrimSpace(data))
-}
-
-func loopbackHTTPURL(raw string) bool {
-	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "http" {
-		return false
-	}
-	ip := net.ParseIP(u.Hostname())
-	return ip != nil && ip.IsLoopback()
+	return forwardHookRequest(getenv(cursorHookURLEnv), getenv(cursorHookTokenEnv), req, cursorHookRelayEmptyReply)
 }
 
 // jsStringLength counts UTF-16 code units, the unit of Cursor's length cap.
 func jsStringLength(s string) int {
 	return len(utf16.Encode([]rune(s)))
-}
-
-func randomHex(n int) (string, error) {
-	buf := make([]byte, n)
-	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("generate random token: %w", err)
-	}
-	return hex.EncodeToString(buf), nil
 }

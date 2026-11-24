@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Lock, UserMinus } from "@multica/ui/icons";
-import type { Agent, IssueAssigneeType, MemberWithUser, Squad, UpdateIssueRequest } from "@multica/core/types";
+import type { Agent, IssueAssigneeType, MemberRole, MemberWithUser, Squad, UpdateIssueRequest } from "@multica/core/types";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { isAgentRuntimeBound } from "@multica/core/agents";
@@ -36,10 +36,14 @@ export function canAssignAgent(
 ): boolean {
   return canAssignAgentToIssue(agent, {
     userId: userId ?? null,
-    role: memberRole === "owner" || memberRole === "admin" || memberRole === "member"
-      ? memberRole
-      : null,
+    role: toMemberRole(memberRole),
   }).allowed;
+}
+
+// Keeps "guest": the rules refuse a guest outright, while an unknown role
+// would fall through to the owner and member-grant checks.
+function toMemberRole(role: string | undefined): MemberRole | null {
+  return role === "owner" || role === "admin" || role === "member" || role === "guest" ? role : null;
 }
 
 interface AssigneePickerProps {
@@ -60,6 +64,7 @@ interface AssigneePickerProps {
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   align?: "start" | "center" | "end";
+  side?: React.ComponentProps<typeof PropertyPicker>["side"];
   /**
    * Whether a pick feeds the local ranking right away. The create-issue
    * dialog turns this off and records only the assignee it submits.
@@ -110,6 +115,7 @@ function AssigneePickerImpl({
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   align,
+  side,
   recordPicks = true,
 }: AssigneePickerProps) {
   const { t } = useT("issues");
@@ -134,6 +140,7 @@ function AssigneePickerImpl({
       }}
       width="w-64"
       align={align}
+      side={side}
       searchable
       searchPlaceholder={t(($) => $.pickers.assignee.search_placeholder)}
       onSearchChange={setFilter}
@@ -245,10 +252,7 @@ function useAssigneeChoices(filter: string) {
   // have a runtime, and squads whose leader is such an agent (the server
   // checks the leader's invoke permission). Anything else would be a row
   // that can't be clicked, or a pick the server rejects.
-  const role =
-    memberRole === "owner" || memberRole === "admin" || memberRole === "member"
-      ? memberRole
-      : null;
+  const role = toMemberRole(memberRole);
   const assignableAgents = agents.filter(
     (a) =>
       !a.archived_at &&

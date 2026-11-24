@@ -40,15 +40,17 @@ UPDATE skill SET
     description = COALESCE(sqlc.narg('description'), description),
     content = COALESCE(sqlc.narg('content'), content),
     config = COALESCE(sqlc.narg('config'), config),
+    revision = revision + 1,
     updated_at = now()
 WHERE id = $1
 RETURNING *;
 
 -- name: TouchSkill :one
 -- Supporting-file writes change the skill as a whole, so they bump the parent's
--- updated_at in the same transaction. Updating the row also takes its lock,
--- which serializes concurrent file writes on one skill with UpdateSkill.
-UPDATE skill SET updated_at = now()
+-- updated_at and revision in the same transaction. Updating the row also takes
+-- its lock, which serializes concurrent file writes on one skill with
+-- UpdateSkill.
+UPDATE skill SET updated_at = now(), revision = revision + 1
 WHERE id = $1 AND workspace_id = $2
 RETURNING *;
 
@@ -188,7 +190,8 @@ ORDER BY s.name ASC;
 -- name: LockSkillForVersioning :one
 -- Serializes version-number allocation for one skill. Every content write
 -- takes this row lock inside its transaction before reading the latest
--- version, so concurrent writers cannot allocate the same number.
+-- version, so concurrent writers cannot allocate the same number. The same
+-- lock makes the base_revision check and the write that follows atomic.
 SELECT * FROM skill WHERE id = $1 FOR UPDATE;
 
 -- name: GetLatestSkillVersion :one
