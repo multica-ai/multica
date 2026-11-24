@@ -22,6 +22,7 @@ import {
 import {
   issuePullRequestsOptions,
   derivePullRequestVerdict,
+  formatPullRequestDiffCount,
   shouldShowPullRequestStats,
   stripIssueKeyFromTitle,
   useLinkIssuePullRequest,
@@ -450,12 +451,27 @@ function PullRequestRow({
               {stripIssueKeyFromTitle(pr.title, identifier)}
             </p>
             <div className="mt-1 flex items-center gap-2">
-              {/* The number and the pill never yield. Everything after the dot
-                  is one unit: short of room, it wraps whole onto the clipped
-                  second line instead of being cut mid-word. */}
+              {/* The number, the diff and the pill never yield; short of room,
+                  only the repo name truncates. The trailing meta is one unit:
+                  it wraps whole onto the clipped second line instead of being
+                  cut mid-word. */}
               <p className="flex h-lh min-w-0 flex-1 flex-wrap items-center gap-x-1.5 overflow-hidden whitespace-nowrap text-caption text-muted-foreground tabular-nums">
-                <span className="min-w-0 truncate">
-                  {showRepo ? pr.repo_name : null}#{pr.number}
+                <span className="inline-flex min-w-0 items-center gap-1.5">
+                  <span className="inline-flex min-w-0 items-center">
+                    {showRepo ? <span className="min-w-0 truncate">{pr.repo_name}</span> : null}
+                    <span className="shrink-0">#{pr.number}</span>
+                  </span>
+                  {showStats ? (
+                    <span data-testid="pull-request-diff" className="inline-flex shrink-0 items-center gap-1.5">
+                      <span aria-hidden="true" className="text-faint-foreground">
+                        ·
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <span className="text-success">+{formatPullRequestDiffCount(pr.additions ?? 0)}</span>
+                        <span className="text-destructive">−{formatPullRequestDiffCount(pr.deletions ?? 0)}</span>
+                      </span>
+                    </span>
+                  ) : null}
                 </span>
                 {meta ? (
                   <span className="inline-flex min-w-0 items-center gap-1.5">
