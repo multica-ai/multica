@@ -19,7 +19,7 @@ vi.mock("@multica/core/issue-statuses/hooks", () => ({
   useIssueStatuses: () => buildIssueStatusCatalog(catalogEntries),
 }));
 
-vi.mock("../../issues/components", () => ({
+vi.mock("../../issues/components/status-icon", () => ({
   StatusIcon: ({
     status,
     category,
@@ -235,7 +235,7 @@ describe("InboxListItem keyboard semantics", () => {
     const actionButton = container.querySelector("button")!;
 
     expect(actionButton.className).toContain(
-      "[@media(hover:hover)]:group-hover:inline-flex",
+      "[@media(hover:hover)]:group-hover:opacity-100",
     );
     expect(actionButton.className).not.toMatch(/(^|\s)(sm|md|lg|xl|2xl):group-/);
   });

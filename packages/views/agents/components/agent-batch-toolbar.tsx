@@ -1,11 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { MemberWithUser } from "@multica/core/types";
 import { api } from "@multica/core/api";
+import { usesInvocationMembers } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
+import {
+  isFeatureLockedError,
+  refreshFeaturesOnLockedError,
+  usePaidFeatureAccess,
+} from "@multica/core/billing";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -18,6 +24,7 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { Archive, ArchiveRestore, Loader2 } from "@multica/ui/icons";
 import { useT } from "../../i18n";
+import { usePaidFeatureErrorMessage } from "../../billing";
 import { CollectionBatchBar } from "../../layout/collection-list";
 import { AccessPicker, type AccessChange } from "./inspector/access-picker";
 import type { AgentListRow } from "./agents-page";
@@ -50,6 +57,20 @@ export function AgentBatchToolbar({
   const [confirmAccess, setConfirmAccess] = useState(false);
   const [accessChange, setAccessChange] = useState<AccessChange | null>(null);
   const [busy, setBusy] = useState(false);
+  const paidFeatureError = usePaidFeatureErrorMessage();
+  const ownedRows = rows.filter((r) => r.isOwnedByMe);
+  // A locked plan still lets every owned agent shrink its own member list. In
+  // bulk that means picking only people all of them already have: any
+  // non-empty subset of that intersection is a reduction for each agent.
+  // Without a common person, a bulk member list would be new configuration
+  // for some agent, so the option stays disabled.
+  const sharedMembers = useMemo(
+    () => sharedInvocationMembers(rows.filter((r) => r.isOwnedByMe)),
+    [rows],
+  );
+  const membersAccess = usePaidFeatureAccess(wsId, "agent_invocation_members", {
+    hasExistingConfig: sharedMembers.length > 0,
+  });
 
   // Must be stable: AccessPicker lists this in the effect that notifies us, so
   // an inline callback would re-notify on every render we cause by storing the
@@ -69,7 +90,6 @@ export function AgentBatchToolbar({
   }, []);
 
   const allManageable = rows.every((r) => r.canManage);
-  const ownedRows = rows.filter((r) => r.isOwnedByMe);
   const anyOwned = ownedRows.length > 0;
   const anyActive = rows.some((r) => !r.agent.archived_at);
   const anyArchived = rows.some((r) => !!r.agent.archived_at);
@@ -119,12 +139,17 @@ export function AgentBatchToolbar({
     onClear();
     setBusy(false);
     if (failed > 0) {
-      const first = settled.find((s) => s.status === "rejected") as
-        | PromiseRejectedResult
-        | undefined;
-      if (first) {
-        toast.error(first.reason instanceof Error ? first.reason.message : String(first.reason));
-      }
+      const reasons = settled.flatMap((s) =>
+        s.status === "rejected" ? [s.reason as unknown] : [],
+      );
+      // A plan refusal explains the failure better than whichever error came
+      // first, and means this client's view of the plan is stale.
+      const locked = reasons.find(isFeatureLockedError);
+      if (locked) refreshFeaturesOnLockedError(qc, wsId, locked);
+      const first = locked ?? reasons[0];
+      toast.error(
+        paidFeatureError(first, first instanceof Error ? first.message : String(first)),
+      );
     }
     return { succeeded, failed };
   };
@@ -252,6 +277,8 @@ export function AgentBatchToolbar({
             ownerId={currentUserId}
             canEdit
             hideFooter
+            membersAccess={membersAccess}
+            lockedMemberPool={sharedMembers}
             onReadyChange={handleAccessReadyChange}
           />
           <DialogFooter>
@@ -285,4 +312,21 @@ export function AgentBatchToolbar({
       </Dialog>}
     </>
   );
+}
+
+/** The member targets every given agent already uses; empty when any of them
+ *  has no specific-people list. */
+function sharedInvocationMembers(rows: AgentListRow[]): string[] {
+  let shared: string[] | null = null;
+  for (const { agent } of rows) {
+    if (!usesInvocationMembers(agent.permission_mode, agent.invocation_targets)) return [];
+    const ids = new Set(
+      (agent.invocation_targets ?? []).flatMap((target) =>
+        target.target_type === "member" && target.target_id ? [target.target_id] : [],
+      ),
+    );
+    shared = (shared ?? Array.from(ids)).filter((id) => ids.has(id));
+    if (shared.length === 0) return [];
+  }
+  return shared ?? [];
 }

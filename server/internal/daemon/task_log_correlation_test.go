@@ -88,7 +88,7 @@ func TestHandleTask_LogsFullTaskIDSoConcurrentRunsStayDistinct(t *testing.T) {
 			RuntimeID: "rt-1",
 			IssueID:   "issue-log-correlation",
 			Agent:     &AgentData{Name: "test-agent"},
-		}, 0)
+		}, newTestTaskSlot(0))
 	}
 
 	out := logs.String()
@@ -148,7 +148,7 @@ func TestHandleTask_LogsFullChatSessionID(t *testing.T) {
 		RuntimeID:     "rt-1",
 		ChatSessionID: chatSessionID,
 		Agent:         &AgentData{Name: "test-agent"},
-	}, 0)
+	}, newTestTaskSlot(0))
 
 	out := logs.String()
 	if !strings.Contains(out, "chat_session="+chatSessionID) {
@@ -174,7 +174,7 @@ func TestHandleTask_UntrackedRuntimeLogsFullTaskID(t *testing.T) {
 		cancelPollInterval: time.Hour,
 	}
 
-	d.handleTask(context.Background(), Task{ID: collidingTaskIDB, RuntimeID: "rt-demoted"}, 0)
+	d.handleTask(context.Background(), Task{ID: collidingTaskIDB, RuntimeID: "rt-demoted"}, newTestTaskSlot(0))
 
 	if out := logs.String(); !strings.Contains(out, "task="+collidingTaskIDB) {
 		t.Errorf("runtime-offline warning did not carry the full task id; logs:\n%s", out)

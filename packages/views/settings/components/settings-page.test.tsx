@@ -8,6 +8,7 @@ import {
   PLUGINS_V1_FLAG,
 } from "@multica/core/feature-flags";
 import { renderWithI18n } from "../../test/i18n";
+import { ScrollRestorationProvider } from "../../platform";
 
 // This file tests the settings SHELL — the chrome around the tabs — so every
 // tab panel is stubbed out. Their contents have their own test files. Profile
@@ -60,19 +61,23 @@ vi.mock("./keyboard-shortcuts-tab", stub("KeyboardShortcutsTab"));
 vi.mock("./plugins-tab", stub("PluginsTab"));
 vi.mock("./mcp-tab", stub("McpTab"));
 vi.mock("./billing-tab", stub("BillingTab"));
+// The search index reads cached notification preferences; the shell has none.
+vi.mock("@tanstack/react-query", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tanstack/react-query")>()),
+  useQuery: () => ({ data: undefined }),
+}));
 
 const shell = vi.hoisted(() => ({
   appsAvailable: false,
   role: "owner" as "owner" | "admin" | "member",
 }));
-vi.mock("./connected-apps-tab", () => ({
-  ConnectedAppsTab: () => <div>ConnectedAppsTab</div>,
+vi.mock("../../common/use-composio-available", () => ({
   useComposioAvailable: () => shell.appsAvailable,
 }));
 
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ id: "ws-1", name: "Acme" }),
-  useWorkspacePaths: () => ({ autopilots: () => "/acme/autopilots" }),
+  useWorkspacePaths: () => ({ autopilots: () => "/acme/autopilots", apps: () => "/acme/apps" }),
 }));
 vi.mock("@multica/core/workspace/avatar-url", () => ({
   resolvePublicFileUrl: (url: string | null | undefined) => url ?? null,
@@ -227,6 +232,36 @@ describe("SettingsPage header", () => {
   });
 });
 
+describe("SettingsPage scroll restoration", () => {
+  // Every settings page shares the route, so one page's offset must not land
+  // on another when the content remounts.
+  it("gives each page its own saved offset", () => {
+    const get = vi.fn((key: string) =>
+      key === "settings:members:" ? { top: 360, height: 1400 } : undefined,
+    );
+    navigationState.search = "tab=members";
+    const { rerender } = renderWithI18n(
+      <ScrollRestorationProvider adapter={{ get }}>
+        <SettingsPage />
+      </ScrollRestorationProvider>,
+    );
+
+    const members = screen.getByText("MembersTab").closest<HTMLElement>("[data-tab-scroll-root]")!;
+    expect(members.getAttribute("data-tab-scroll-root")).toBe("settings:members:");
+    expect(members.scrollTop).toBe(360);
+
+    navigationState.search = "tab=labels";
+    rerender(
+      <ScrollRestorationProvider adapter={{ get }}>
+        <SettingsPage />
+      </ScrollRestorationProvider>,
+    );
+    const labels = screen.getByText("LabelsTab").closest<HTMLElement>("[data-tab-scroll-root]")!;
+    expect(labels.getAttribute("data-tab-scroll-root")).toBe("settings:labels:");
+    expect(labels.scrollTop).toBe(0);
+  });
+});
+
 describe("SettingsPage Plugin feature flag", () => {
   it("hides Plugins and falls back from a direct tab URL when disabled", () => {
     navigationState.search = "tab=plugins";
@@ -259,7 +294,7 @@ describe("SettingsPage workflows", () => {
 
     expect(screen.getByText("WorkflowsTab")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Workflows" })).toHaveAttribute("aria-current", "page");
-    expect(screen.queryByRole("link", { name: "Issue Statuses" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Issue statuses" })).not.toBeInTheDocument();
   });
 
   it("opens old status catalog links in workflows", () => {
@@ -318,7 +353,7 @@ describe("SettingsPage information architecture", () => {
     ]);
     const personal = within(nav()).getByRole("region", { name: "Personal" });
     expect(within(personal).getByRole("link", { name: "Preferences" })).toBeInTheDocument();
-    expect(within(personal).getByRole("link", { name: "API Tokens" })).toBeInTheDocument();
+    expect(within(personal).getByRole("link", { name: "API tokens" })).toBeInTheDocument();
 
     const workspace = within(nav()).getByRole("region", { name: "Workspace" });
     expect(within(workspace).getByRole("link", { name: "Members" })).toBeInTheDocument();
@@ -359,20 +394,38 @@ describe("SettingsPage information architecture", () => {
     );
   });
 
-  it("lists Connected apps with the workspace connections only when Composio is available", () => {
+  it("keeps accounts out of settings, sending old links to the Apps page's Accounts", () => {
+    shell.appsAvailable = true;
     const first = renderWithI18n(<SettingsPage />);
-    expect(screen.queryByRole("link", { name: "Connected apps" })).toBeNull();
+    expect(within(nav()).queryByRole("link", { name: /Accounts|Connected apps/ })).toBeNull();
     first.unmount();
 
-    shell.appsAvailable = true;
-    navigationState.search = "tab=integrations&connected=notion";
+    navigationState.search = "tab=accounts";
+    const second = renderWithI18n(<SettingsPage />);
+    expect(replace).toHaveBeenLastCalledWith("/acme/apps?tab=accounts");
+    second.unmount();
+
+    navigationState.search = "tab=connected-accounts";
     renderWithI18n(<SettingsPage />);
-    const personal = within(nav()).getByRole("region", { name: /Personal/ });
-    expect(within(personal).queryByRole("link", { name: "Connected apps" })).toBeNull();
-    expect(
-      within(nav()).getByRole("link", { name: "Connected apps" }),
-    ).toHaveAttribute("aria-current", "page");
-    expect(screen.getByText("ConnectedAppsTab")).toBeInTheDocument();
+    expect(replace).toHaveBeenLastCalledWith("/acme/apps?tab=accounts");
+  });
+
+  it("sends the retired Apps tab and team connect returns to the Apps page", () => {
+    shell.appsAvailable = true;
+    navigationState.search = "tab=apps";
+    const first = renderWithI18n(<SettingsPage />);
+    expect(replace).toHaveBeenLastCalledWith("/acme/apps");
+    first.unmount();
+
+    navigationState.search = "tab=apps&connected=notion&scope=team";
+    renderWithI18n(<SettingsPage />);
+    expect(replace).toHaveBeenLastCalledWith("/acme/apps?connected=notion");
+  });
+
+  it("sends a personal connect return to the Apps page's Accounts", () => {
+    navigationState.search = "tab=apps&connected=notion";
+    renderWithI18n(<SettingsPage />);
+    expect(replace).toHaveBeenLastCalledWith("/acme/apps?tab=accounts&connected=notion");
   });
 
   it("marks pages a member can only view", () => {

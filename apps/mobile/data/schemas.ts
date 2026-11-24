@@ -282,7 +282,7 @@ export const ChatMessageSchema: z.ZodType<ChatMessage> = z.object({
   attachments: z.array(AttachmentSchema).optional(),
   failure_reason: z.string().nullable().optional(),
   elapsed_ms: z.number().nullable().optional(),
-  message_kind: z.enum(["message", "no_response"]).catch("message").optional(),
+  message_kind: z.enum(["message", "no_response", "wakeup"]).catch("message").optional(),
   // One malformed optional suggestion must not erase an otherwise valid
   // conversation. The server validates these too; this is mixed-version and
   // corrupted-cache defense at the mobile boundary.
@@ -325,11 +325,16 @@ export const ChatPendingTaskSchema: z.ZodType<ChatPendingTask> = z.object({
 
 export const EMPTY_CHAT_PENDING_TASK: ChatPendingTask = {};
 
+// Steering fields are additive: servers before #10715 omit them and a
+// malformed value degrades to the legacy queued reading, never a failed send.
 export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> = z.object({
   message_id: z.string(),
   task_id: z.string(),
   supports_queue: z.boolean().optional(),
   queued: z.boolean().optional().catch(undefined),
+  steered: z.boolean().optional().catch(undefined),
+  message_task_id: z.string().min(1).optional().catch(undefined),
+  message_created_at: z.string().min(1).optional().catch(undefined),
   created_at: z.string().default(""),
 }).loose();
 
@@ -587,8 +592,28 @@ const InboxItemSchema: z.ZodType<InboxItem> = z.object({
   read: z.boolean().default(false),
   archived: z.boolean().default(false),
   created_at: z.string().default(""),
-  details: z.record(z.string(), z.string()).nullable().default(null),
+  // `details` is free-form JSON on the server, and some producers write
+  // numbers (children_done records `total` and `stage` as ints). Renderers read
+  // strings, so scalars are stringified; any other value is dropped so one
+  // unexpected field cannot fail the array parse and blank the whole Inbox.
+  details: z.preprocess(
+    normalizeInboxDetails,
+    z.record(z.string(), z.string()).nullable().default(null),
+  ),
 }).loose();
+
+function normalizeInboxDetails(value: unknown): unknown {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const out: Record<string, string> = {};
+  for (const [key, v] of Object.entries(value)) {
+    if (typeof v === "string") out[key] = v;
+    else if (typeof v === "number" && Number.isFinite(v)) out[key] = String(v);
+    else if (typeof v === "boolean") out[key] = String(v);
+  }
+  return out;
+}
 
 export const InboxListSchema = z.array(InboxItemSchema).default([]);
 export const EMPTY_INBOX_LIST: InboxItem[] = [];
@@ -615,7 +640,9 @@ export const MemberWithUserSchema: z.ZodType<MemberWithUser> = z.object({
   id: z.string(),
   workspace_id: z.string().default(""),
   user_id: z.string().default(""),
-  role: z.enum(["owner", "admin", "member"]).catch("member"),
+  // `guest` (MUL-9420) must survive parsing: folded into `member`, a guest
+  // would be offered every member control the server then refuses.
+  role: z.enum(["owner", "admin", "member", "guest"]).catch("member"),
   created_at: z.string().default(""),
   name: z.string().default(""),
   email: z.string().default(""),

@@ -27,6 +27,7 @@ import {
 } from "@multica/core/issues/stores/sidebar-tree-store";
 import { notificationPreferenceOptions } from "@multica/core/notification-preferences/queries";
 import { useUpdateNotificationPreferences } from "@multica/core/notification-preferences/mutations";
+import { notificationPreferenceValue } from "@multica/core/notification-preferences/patch";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { PROJECT_STATUS_CONFIG, PROJECT_STATUS_ORDER } from "@multica/core/projects/config";
 import type { NotificationGroupKey, NotificationPreferences, ProjectStatus } from "@multica/core/types";
@@ -401,8 +402,6 @@ function InboxNotificationTypes() {
   const preferences = data?.preferences ?? {};
   const toggleGroup = (key: NotificationGroupKey, enabled: boolean) => {
     const next: NotificationPreferences = { ...preferences, [key]: enabled ? "all" : "muted" };
-    // "all" is the default; the stored object keeps only muted kinds.
-    if (enabled) delete next[key];
     updatePreferences.mutate(next, {
       onError: (err) =>
         toast.error(err instanceof Error && err.message ? err.message : ts(($) => $.notifications.toast_failed)),
@@ -419,7 +418,7 @@ function InboxNotificationTypes() {
         <SwitchField
           key={key}
           label={ts(($) => $.notifications.groups[key].label)}
-          checked={preferences[key] !== "muted"}
+          checked={notificationPreferenceValue(preferences, key) !== "muted"}
           onChange={(enabled) => toggleGroup(key, enabled)}
         />
       ))}

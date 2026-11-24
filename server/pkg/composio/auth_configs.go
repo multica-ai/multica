@@ -96,6 +96,47 @@ func (c *Client) CreateManagedAuthConfig(ctx context.Context, toolkitSlug string
 	return out.AuthConfig.ID, nil
 }
 
+type createCustomAuthConfigRequest struct {
+	Toolkit    createAuthConfigToolkit `json:"toolkit"`
+	AuthConfig customAuthConfigBody    `json:"auth_config"`
+}
+
+type customAuthConfigBody struct {
+	Type        string         `json:"type"`
+	AuthScheme  string         `json:"authScheme"`
+	Name        string         `json:"name,omitempty"`
+	Credentials map[string]any `json:"credentials"`
+}
+
+// CreateCustomAuthConfig registers an auth config with the given scheme
+// (API_KEY, BEARER_TOKEN, BASIC) and no project credentials, so each user
+// enters their own on the hosted Connect Link page. It returns the new
+// auth_config_id.
+//
+// Spec: https://docs.composio.dev/reference/v3/api-reference/auth-configs/postAuthConfigs
+func (c *Client) CreateCustomAuthConfig(ctx context.Context, toolkitSlug, authScheme, name string) (string, error) {
+	if toolkitSlug == "" || authScheme == "" {
+		return "", errors.New("composio: CreateCustomAuthConfig: toolkitSlug and authScheme are required")
+	}
+	var out createAuthConfigResponse
+	body := createCustomAuthConfigRequest{
+		Toolkit: createAuthConfigToolkit{Slug: toolkitSlug},
+		AuthConfig: customAuthConfigBody{
+			Type:        "use_custom_auth",
+			AuthScheme:  strings.ToUpper(authScheme),
+			Name:        name,
+			Credentials: map[string]any{},
+		},
+	}
+	if err := c.do(c.newRequest(ctx).SetBody(body), http.MethodPost, "/auth_configs", &out); err != nil {
+		return "", err
+	}
+	if out.AuthConfig.ID == "" {
+		return "", errors.New("composio: CreateCustomAuthConfig: response has no auth config id")
+	}
+	return out.AuthConfig.ID, nil
+}
+
 // ListAuthConfigs returns the auth configs registered in the project, with
 // optional filters. The project is resolved from the x-api-key (a project API
 // key authenticates to exactly one project), so no project id is passed.

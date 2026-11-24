@@ -1,6 +1,6 @@
 "use client";
 
-import { IssueSidebarSectionHeader } from "../issue-sidebar-section";
+import { IssueSidebarCollapsible, IssueSidebarSectionHeader } from "../issue-sidebar-section";
 
 import { useMemo, useState } from "react";
 import { LayoutGrid, Link2 } from "@multica/ui/icons";
@@ -56,10 +56,11 @@ export function DeliverablesSection({
 
   return (
     <div>
-      <IssueSidebarSectionHeader title={t(($) => $.deliverables.section_title)} open={open} onOpenChange={setOpen} count={files.length} actions={
+      <IssueSidebarSectionHeader title={t(($) => $.deliverables.section_title)} open={open} onOpenChange={setOpen} count={files.length}
+        countWhenOpen={images.length + others.length < files.length} actions={
         <IconButton size="icon-xs" label={t(($) => $.deliverables.view_all, { count: files.length })} onClick={onOpenOverview}><LayoutGrid /></IconButton>
       } />
-      {open && (
+      <IssueSidebarCollapsible open={open}>
         <div className="px-2">
           {images.length > 0 && (
             <div className="mx-2 mb-1.5 grid grid-cols-3 gap-1.5">
@@ -91,7 +92,7 @@ export function DeliverablesSection({
           ))}
 
         </div>
-      )}
+      </IssueSidebarCollapsible>
       {modal}
     </div>
   );

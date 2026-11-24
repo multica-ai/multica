@@ -1,12 +1,22 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { useRestoredScrollOffset } from "@multica/views/platform";
+import {
+  useRestoredScrollEntry,
+  useRestoredScrollOffset,
+} from "@multica/views/platform";
 import { WebScrollRestorationProvider } from "./scroll-restoration";
 
 function ScrollProbe({ containerKey }: { containerKey: string }) {
   const restored = useRestoredScrollOffset(containerKey);
   return <output data-testid="restored">{restored ?? "none"}</output>;
+}
+
+function EntryProbe({ containerKey }: { containerKey: string }) {
+  const entry = useRestoredScrollEntry(containerKey);
+  return (
+    <output data-testid="entry">{entry ? JSON.stringify(entry) : "none"}</output>
+  );
 }
 
 /** Dispatch a real scroll event from a marked container element. */
@@ -86,6 +96,26 @@ describe("WebScrollRestorationProvider", () => {
       </WebScrollRestorationProvider>,
     );
     expect(screen.getByTestId("restored").textContent).toBe("480");
+  });
+
+  it("keeps a container scrolled only sideways", () => {
+    const view = render(
+      <WebScrollRestorationProvider>
+        <div data-tab-scroll-root="board" data-testid="container" />
+      </WebScrollRestorationProvider>,
+    );
+    const container = screen.getByTestId("container");
+    container.scrollLeft = 640;
+    scrollContainer(container, 0);
+
+    view.rerender(
+      <WebScrollRestorationProvider>
+        <EntryProbe containerKey="board" />
+      </WebScrollRestorationProvider>,
+    );
+    expect(screen.getByTestId("entry").textContent).toBe(
+      JSON.stringify({ top: 0, height: 2000, left: 640 }),
+    );
   });
 
   it("ignores scrolls from unmarked elements", () => {

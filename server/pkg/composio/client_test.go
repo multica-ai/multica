@@ -7,12 +7,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/multica-ai/multica/server/pkg/composio"
+	"github.com/multica-ai/multica/server/pkg/composio/composiotest"
 )
 
 // newTestServer wires up a httptest.Server with the provided handler and
@@ -159,12 +161,12 @@ func TestCreateLink_Success(t *testing.T) {
 		if body.AuthConfigID != "ac_abc" || body.UserID != "u_1" {
 			t.Errorf("unexpected body: %+v", body)
 		}
-		writeJSON(t, w, http.StatusCreated, map[string]any{
+		writeJSON(t, w, http.StatusCreated, composiotest.Example(t, "POST /connected_accounts/link", map[string]any{
 			"link_token":           "ltok_xyz",
 			"redirect_url":         "https://connect.composio.dev/ln_xyz",
 			"expires_at":           "2026-12-31T00:00:00Z",
 			"connected_account_id": "ca_pending",
-		})
+		}))
 	})
 	resp, err := c.CreateLink(context.Background(), composio.CreateLinkRequest{
 		AuthConfigID: "ac_abc",
@@ -193,14 +195,15 @@ func TestCreateLink_ValidatesInputs(t *testing.T) {
 
 func TestCreateLink_APIError(t *testing.T) {
 	c, _ := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(t, w, http.StatusBadRequest, map[string]any{
+		writeJSON(t, w, http.StatusBadRequest, composiotest.Response(t, "POST /connected_accounts/link", http.StatusBadRequest, map[string]any{
 			"error": map[string]any{
 				"message":    "bad input",
 				"code":       400,
 				"slug":       "INVALID_INPUT",
+				"status":     400,
 				"request_id": "req_1",
 			},
-		})
+		}))
 	})
 	_, err := c.CreateLink(context.Background(), composio.CreateLinkRequest{
 		AuthConfigID: "ac", UserID: "u",
@@ -225,13 +228,13 @@ func TestListConnectedAccounts_QueryString(t *testing.T) {
 	var seen *http.Request
 	c, _ := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		seen = r
-		writeJSON(t, w, http.StatusOK, map[string]any{
-			"items": []map[string]any{
-				{"id": "ca_1", "user_id": "u_1", "status": "ACTIVE",
+		writeJSON(t, w, http.StatusOK, composiotest.Example(t, "GET /connected_accounts", map[string]any{
+			"items": []any{
+				map[string]any{"id": "ca_1", "user_id": "u_1", "status": "ACTIVE",
 					"toolkit": map[string]any{"slug": "notion"}},
 			},
 			"next_cursor": "cur_2",
-		})
+		}))
 	})
 	resp, err := c.ListConnectedAccounts(context.Background(), composio.ListConnectedAccountsRequest{
 		UserIDs:             []string{"u_1", "u_2"},
@@ -288,45 +291,33 @@ func TestListConnectedAccounts_QueryString(t *testing.T) {
 	}
 }
 
-func TestListConnectedAccounts_ParsesNestedAuthConfig(t *testing.T) {
+func TestListConnectedAccounts_ParsesAuthConfig(t *testing.T) {
 	c, _ := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(t, w, http.StatusOK, map[string]any{
-			"items": []map[string]any{
-				{
-					"id":      "ca_nested",
-					"user_id": "u_1",
-					"auth_config": map[string]any{
-						"id":                  "ac_nested",
-						"auth_scheme":         "OAUTH2",
-						"is_composio_managed": true,
-					},
-					"toolkit": map[string]any{"slug": "notion"},
-					"status":  "ACTIVE",
+		writeJSON(t, w, http.StatusOK, composiotest.Example(t, "GET /connected_accounts", map[string]any{
+			"items": []any{map[string]any{
+				"id":      "ca_1",
+				"user_id": "u_1",
+				"auth_config": map[string]any{
+					"id":                  "ac_1",
+					"auth_scheme":         "OAUTH2",
+					"is_composio_managed": true,
 				},
-				{
-					"id":             "ca_top_level",
-					"user_id":        "u_1",
-					"auth_config_id": "ac_top_level",
-					"auth_config":    map[string]any{"id": "ac_nested_ignored"},
-					"toolkit":        map[string]any{"slug": "gmail"},
-					"status":         "ACTIVE",
-				},
-			},
-		})
+				"toolkit": map[string]any{"slug": "notion"},
+				"status":  "ACTIVE",
+			}},
+		}))
 	})
 
 	resp, err := c.ListConnectedAccounts(context.Background(), composio.ListConnectedAccountsRequest{})
 	if err != nil {
 		t.Fatalf("ListConnectedAccounts: %v", err)
 	}
-	if got := resp.Items[0].AuthConfig.ID; got != "ac_nested" {
-		t.Errorf("nested auth config id = %q, want ac_nested", got)
+	got := resp.Items[0]
+	if got.AuthConfig.ID != "ac_1" || got.AuthConfig.AuthScheme != "OAUTH2" || !got.AuthConfig.IsComposioManaged {
+		t.Errorf("auth config = %+v", got.AuthConfig)
 	}
-	if got := resp.Items[0].AuthConfig.AuthScheme; got != "OAUTH2" {
-		t.Errorf("nested auth scheme = %q, want OAUTH2", got)
-	}
-	if got := resp.Items[1].AuthConfigID; got != "ac_top_level" {
-		t.Errorf("top-level auth config id = %q, want ac_top_level", got)
+	if got.ID != "ca_1" || got.UserID != "u_1" || got.Toolkit.Slug != "notion" || got.Status != "ACTIVE" {
+		t.Errorf("account = %+v", got)
 	}
 }
 
@@ -335,7 +326,7 @@ func TestRevokeConnection_Success(t *testing.T) {
 		if r.Method != http.MethodPost || r.URL.Path != "/connected_accounts/ca_42/revoke" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
-		w.WriteHeader(http.StatusNoContent)
+		writeJSON(t, w, http.StatusOK, composiotest.Example(t, "POST /connected_accounts/{nanoid}/revoke", nil))
 	})
 	if err := c.RevokeConnection(context.Background(), "ca_42"); err != nil {
 		t.Errorf("RevokeConnection: %v", err)
@@ -356,9 +347,9 @@ func TestDeleteConnectedAccount_IdempotentOn404(t *testing.T) {
 		if r.Method != http.MethodDelete {
 			t.Errorf("method = %s", r.Method)
 		}
-		writeJSON(t, w, http.StatusNotFound, map[string]any{
-			"error": map[string]any{"message": "not found", "status": 404, "slug": "NOT_FOUND"},
-		})
+		writeJSON(t, w, http.StatusNotFound, composiotest.Response(t, "DELETE /connected_accounts/{nanoid}", http.StatusNotFound, map[string]any{
+			"error": map[string]any{"message": "not found", "code": 404, "status": 404, "slug": "NOT_FOUND"},
+		}))
 	})
 	if err := c.DeleteConnectedAccount(context.Background(), "ca_gone"); err != nil {
 		t.Errorf("expected nil on 404, got %v", err)
@@ -367,9 +358,9 @@ func TestDeleteConnectedAccount_IdempotentOn404(t *testing.T) {
 
 func TestDeleteConnectedAccount_PropagatesOtherErrors(t *testing.T) {
 	c, _ := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(t, w, http.StatusInternalServerError, map[string]any{
-			"error": map[string]any{"message": "boom", "status": 500, "slug": "INTERNAL"},
-		})
+		writeJSON(t, w, http.StatusInternalServerError, composiotest.Response(t, "DELETE /connected_accounts/{nanoid}", http.StatusInternalServerError, map[string]any{
+			"error": map[string]any{"message": "boom", "code": 500, "status": 500, "slug": "INTERNAL"},
+		}))
 	})
 	err := c.DeleteConnectedAccount(context.Background(), "ca_1")
 	if err == nil {
@@ -398,10 +389,10 @@ func TestCreateSession_Success(t *testing.T) {
 		if body.ManageConnections == nil || body.ManageConnections.CallbackURL != "https://cb" {
 			t.Errorf("manage_connections = %+v", body.ManageConnections)
 		}
-		writeJSON(t, w, http.StatusCreated, map[string]any{
+		writeJSON(t, w, http.StatusCreated, composiotest.Example(t, "POST /tool_router/session", map[string]any{
 			"session_id": "trs_1",
 			"mcp":        map[string]any{"type": "http", "url": "https://mcp.example/trs_1"},
-		})
+		}))
 	})
 	enable := true
 	resp, err := c.CreateSession(context.Background(), composio.CreateSessionRequest{
@@ -441,12 +432,12 @@ func TestListToolkits_Success(t *testing.T) {
 		if r.URL.Path != "/toolkits" || r.URL.Query().Get("category") != "productivity" {
 			t.Errorf("unexpected request: %s ?%s", r.URL.Path, r.URL.RawQuery)
 		}
-		writeJSON(t, w, http.StatusOK, map[string]any{
-			"items": []map[string]any{
-				{"slug": "notion", "name": "Notion"},
-				{"slug": "slack", "name": "Slack"},
+		writeJSON(t, w, http.StatusOK, composiotest.Example(t, "GET /toolkits", map[string]any{
+			"items": []any{
+				map[string]any{"slug": "notion", "name": "Notion"},
+				map[string]any{"slug": "slack", "name": "Slack"},
 			},
-		})
+		}))
 	})
 	resp, err := c.ListToolkits(context.Background(), composio.ListToolkitsRequest{Category: "productivity"})
 	if err != nil {
@@ -457,12 +448,135 @@ func TestListToolkits_Success(t *testing.T) {
 	}
 }
 
+// decode round-trips a response body through JSON into out, the way the
+// client reads it.
+func decode(t *testing.T, body map[string]any, out any) {
+	t.Helper()
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+}
+
+func TestToolkitPrimaryCategoryAndLogo(t *testing.T) {
+	var listed composio.ListToolkitsResponse
+	decode(t, composiotest.Example(t, "GET /toolkits", map[string]any{"items": []any{
+		map[string]any{"slug": "github", "meta": map[string]any{
+			"logo": "https://logos.composio.dev/api/github",
+			"categories": []any{
+				map[string]any{"id": "developer-tools", "name": "Developer Tools"},
+				map[string]any{"id": "productivity", "name": "Productivity"},
+			},
+		}},
+		map[string]any{"slug": "bare", "meta": map[string]any{"categories": []any{}}},
+	}}), &listed)
+	want := []composio.ToolkitCategory{{ID: "developer-tools", Name: "Developer Tools"}, {}}
+	for i, tk := range listed.Items {
+		if got := tk.PrimaryCategory(); got != want[i] {
+			t.Errorf("%s: PrimaryCategory = %+v, want %+v", tk.Slug, got, want[i])
+		}
+	}
+	if got := listed.Items[0].Logo(); got != "https://logos.composio.dev/api/github" {
+		t.Errorf("Logo = %q, want the meta logo", got)
+	}
+
+	var configs composio.ListAuthConfigsResponse
+	decode(t, composiotest.Example(t, "GET /auth_configs", map[string]any{"items": []any{
+		map[string]any{"toolkit": map[string]any{"slug": "github", "logo": "https://logo/gh"}},
+	}}), &configs)
+	if got := configs.Items[0].Toolkit.Logo(); got != "https://logo/gh" {
+		t.Errorf("nested toolkit Logo = %q", got)
+	}
+}
+
+// GET /toolkits/{slug} reports auth schemes only as auth_config_details.
+func TestGetToolkit_AuthModesFromDetails(t *testing.T) {
+	c, _ := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/toolkits/openai" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		noFields := map[string]any{"required": []any{}, "optional": []any{}}
+		writeJSON(t, w, http.StatusOK, composiotest.Example(t, "GET /toolkits/{slug}", map[string]any{
+			"slug": "openai", "name": "OpenAI", "composio_managed_auth_schemes": []any{},
+			"auth_config_details": []any{
+				map[string]any{"mode": "API_KEY", "fields": map[string]any{
+					"auth_config_creation": noFields,
+					"connected_account_initiation": map[string]any{
+						"required": []any{map[string]any{"name": "generic_api_key", "default": nil}},
+						"optional": []any{},
+					},
+				}},
+				map[string]any{"mode": "BASIC", "fields": map[string]any{
+					"auth_config_creation": map[string]any{
+						"required": []any{map[string]any{"name": "subdomain", "default": nil}},
+						"optional": []any{},
+					},
+				}},
+				map[string]any{"mode": "BEARER_TOKEN", "fields": map[string]any{
+					"auth_config_creation": map[string]any{
+						"required": []any{map[string]any{"name": "region", "default": "us"}},
+						"optional": []any{},
+					},
+				}},
+			},
+		}))
+	})
+	tk, err := c.GetToolkit(context.Background(), "openai")
+	if err != nil {
+		t.Fatalf("GetToolkit: %v", err)
+	}
+	if got, want := tk.AuthModes(), []string{"API_KEY", "BASIC", "BEARER_TOKEN"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("AuthModes = %v, want %v", got, want)
+	}
+	for mode, want := range map[string]bool{"api_key": false, "BASIC": true, "BEARER_TOKEN": false, "OAUTH2": false} {
+		if got := tk.NeedsProjectCredentials(mode); got != want {
+			t.Errorf("NeedsProjectCredentials(%s) = %v, want %v", mode, got, want)
+		}
+	}
+	listed := composio.Toolkit{AuthSchemes: []string{"oauth2"}, AuthConfigDetails: tk.AuthConfigDetails}
+	if got := listed.AuthModes(); !reflect.DeepEqual(got, []string{"oauth2"}) {
+		t.Errorf("AuthModes prefers auth_schemes, got %v", got)
+	}
+}
+
+func TestCreateCustomAuthConfig_Body(t *testing.T) {
+	c, _ := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/auth_configs" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		var body map[string]any
+		readJSON(t, r, &body)
+		want := map[string]any{
+			"toolkit": map[string]any{"slug": "tavily"},
+			"auth_config": map[string]any{
+				"type":        "use_custom_auth",
+				"authScheme":  "API_KEY",
+				"name":        "Tavily",
+				"credentials": map[string]any{},
+			},
+		}
+		if !reflect.DeepEqual(body, want) {
+			t.Errorf("body = %#v, want %#v", body, want)
+		}
+		writeJSON(t, w, http.StatusCreated, composiotest.Example(t, "POST /auth_configs", map[string]any{
+			"auth_config": map[string]any{"id": "ac_tavily", "auth_scheme": "API_KEY", "is_composio_managed": false},
+		}))
+	})
+	id, err := c.CreateCustomAuthConfig(context.Background(), "tavily", "api_key", "Tavily")
+	if err != nil || id != "ac_tavily" {
+		t.Fatalf("CreateCustomAuthConfig = %q, %v", id, err)
+	}
+}
+
 func TestGetToolkit_Success(t *testing.T) {
 	c, _ := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/toolkits/notion" {
 			t.Errorf("path = %s", r.URL.Path)
 		}
-		writeJSON(t, w, http.StatusOK, map[string]any{"slug": "notion", "name": "Notion"})
+		writeJSON(t, w, http.StatusOK, composiotest.Example(t, "GET /toolkits/{slug}", map[string]any{"slug": "notion", "name": "Notion"}))
 	})
 	tk, err := c.GetToolkit(context.Background(), "notion")
 	if err != nil {
@@ -470,6 +584,60 @@ func TestGetToolkit_Success(t *testing.T) {
 	}
 	if tk.Slug != "notion" {
 		t.Errorf("slug = %q", tk.Slug)
+	}
+}
+
+func TestListAuthConfigs_Parses(t *testing.T) {
+	c, _ := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/auth_configs" || r.URL.Query().Get("toolkit_slug") != "notion,slack" {
+			t.Errorf("unexpected request: %s ?%s", r.URL.Path, r.URL.RawQuery)
+		}
+		writeJSON(t, w, http.StatusOK, composiotest.Example(t, "GET /auth_configs", map[string]any{"items": []any{
+			map[string]any{"id": "ac_1", "toolkit": map[string]any{"slug": "notion"}, "auth_scheme": "API_KEY", "is_composio_managed": false, "status": "ENABLED"},
+		}}))
+	})
+	resp, err := c.ListAuthConfigs(context.Background(), composio.ListAuthConfigsRequest{ToolkitSlugs: []string{"notion", "slack"}})
+	if err != nil {
+		t.Fatalf("ListAuthConfigs: %v", err)
+	}
+	got := resp.Items[0]
+	if got.ID != "ac_1" || got.Toolkit.Slug != "notion" || got.AuthScheme != "API_KEY" || got.IsComposioManaged || got.Status != "ENABLED" {
+		t.Errorf("auth config = %+v", got)
+	}
+}
+
+func TestListToolsAndGetTool_Parse(t *testing.T) {
+	tool := map[string]any{
+		"slug": "GMAIL_SEND_EMAIL", "name": "Send email", "version": "20250905_00", "tags": []any{"send"},
+		"toolkit":          map[string]any{"slug": "gmail", "name": "Gmail"},
+		"input_parameters": map[string]any{"type": "object"},
+	}
+	c, _ := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("toolkit_versions") != "latest" {
+			t.Errorf("toolkit_versions = %q", r.URL.Query().Get("toolkit_versions"))
+		}
+		switch r.URL.Path {
+		case "/tools":
+			writeJSON(t, w, http.StatusOK, composiotest.Example(t, "GET /tools", map[string]any{"items": []any{tool}}))
+		case "/tools/GMAIL_SEND_EMAIL":
+			writeJSON(t, w, http.StatusOK, composiotest.Example(t, "GET /tools/{tool_slug}", tool))
+		default:
+			t.Errorf("unexpected request: %s", r.URL.Path)
+		}
+	})
+	listed, err := c.ListTools(context.Background(), composio.ListToolsRequest{ToolkitSlug: "gmail"})
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	single, err := c.GetTool(context.Background(), "GMAIL_SEND_EMAIL")
+	if err != nil {
+		t.Fatalf("GetTool: %v", err)
+	}
+	for _, got := range []composio.Tool{listed.Items[0], *single} {
+		if got.Slug != "GMAIL_SEND_EMAIL" || got.Toolkit.Slug != "gmail" || got.Version != "20250905_00" ||
+			!reflect.DeepEqual(got.Tags, []string{"send"}) || got.InputParameters["type"] != "object" || got.IsDeprecated {
+			t.Errorf("tool = %+v", got)
+		}
 	}
 }
 
@@ -510,11 +678,11 @@ func TestExecuteTool_Success(t *testing.T) {
 		if args["title"] != "hi" {
 			t.Errorf("arguments.title = %v", args["title"])
 		}
-		writeJSON(t, w, http.StatusOK, map[string]any{
+		writeJSON(t, w, http.StatusOK, composiotest.Example(t, "POST /tools/execute/{tool_slug}", map[string]any{
 			"successful": true,
 			"data":       map[string]any{"issue_number": float64(42)},
 			"log_id":     "log_1",
-		})
+		}))
 	})
 	resp, err := c.ExecuteTool(context.Background(), "GITHUB_CREATE_ISSUE", composio.ExecuteToolRequest{
 		UserID:    "u_1",
@@ -526,6 +694,44 @@ func TestExecuteTool_Success(t *testing.T) {
 	}
 	if !resp.Successful || resp.Data["issue_number"].(float64) != 42 || resp.LogID != "log_1" {
 		t.Errorf("unexpected response: %+v", resp)
+	}
+}
+
+func TestExecuteTool_ArgumentsOnWire(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{name: "empty", args: map[string]any{}, want: `{}`},
+		{name: "nil", want: `{}`},
+		{name: "nonempty", args: map[string]any{"pageSize": 1}, want: `{"pageSize":1}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost || r.URL.Path != "/tools/execute/GOOGLE_ANALYTICS_LIST_ACCOUNT_SUMMARIES" {
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				}
+				var wire map[string]json.RawMessage
+				readJSON(t, r, &wire)
+				if got := string(wire["arguments"]); got != tt.want {
+					t.Errorf("arguments on wire = %q, want %s; body = %s", got, tt.want, wire)
+				}
+				writeJSON(t, w, http.StatusOK, composiotest.Example(t, "POST /tools/execute/{tool_slug}", map[string]any{"successful": true}))
+			})
+			resp, err := c.ExecuteTool(context.Background(), "GOOGLE_ANALYTICS_LIST_ACCOUNT_SUMMARIES", composio.ExecuteToolRequest{
+				Arguments:          tt.args,
+				ConnectedAccountID: "ca_selected",
+				UserID:             "ws_team",
+				Version:            "20261027_00",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !resp.Successful {
+				t.Errorf("unexpected response: %+v", resp)
+			}
+		})
 	}
 }
 

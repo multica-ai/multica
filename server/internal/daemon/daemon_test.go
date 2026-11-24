@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -2379,6 +2380,33 @@ func TestGatePiResumeToSessionFile(t *testing.T) {
 	}
 }
 
+// Antigravity stores conversations under its global app data directory, so a
+// follow-up that lands in a new workdir must keep the prior conversation
+// (#11316).
+func TestGateAntigravityResumeAcrossWorkdirs(t *testing.T) {
+	t.Parallel()
+
+	base := t.TempDir()
+	priorDir := filepath.Join(base, "prior-workdir")
+	envDir := filepath.Join(base, "fresh-workdir")
+	for _, dir := range []string{priorDir, envDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("create %s: %v", dir, err)
+		}
+	}
+	const conversationID = "27a6d8f2-8523-46fc-8fc9-87e630cbe295"
+	task := Task{PriorSessionID: conversationID, PriorWorkDir: priorDir}
+	taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
+
+	if !gateResumeToReachableSession(&task, &taskCtx, "antigravity", envDir, true, false, false, false, slog.Default()) {
+		t.Fatal("antigravity conversation should stay reachable from a new workdir")
+	}
+	if task.PriorSessionID != conversationID || !taskCtx.PriorSessionResumed || taskCtx.PriorSessionResumeUnavailable {
+		t.Fatalf("resume state changed: session=%q resumed=%v unavailable=%v",
+			task.PriorSessionID, taskCtx.PriorSessionResumed, taskCtx.PriorSessionResumeUnavailable)
+	}
+}
+
 func TestGatePiResumeDropsUnusableSessionFile(t *testing.T) {
 	t.Parallel()
 
@@ -4733,6 +4761,45 @@ func TestExecuteAndDrain_IdleWatchdog_HappyPathDoesNotFire(t *testing.T) {
 	}
 }
 
+func TestExecuteAndDrain_LogsEffectiveIdleWatchdog(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name     string
+		global   time.Duration
+		override time.Duration
+		want     string
+	}{
+		{name: "global window", global: 15 * time.Minute, want: "window=15m0s"},
+		{name: "shorter override", global: 15 * time.Minute, override: 5 * time.Minute, want: "window=5m0s"},
+		{name: "longer override", global: 5 * time.Minute, override: 15 * time.Minute, want: "window=5m0s"},
+		{name: "globally disabled", override: 5 * time.Minute},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			d := newTestDaemon(t)
+			d.cfg.AgentIdleWatchdog = tt.global
+			backend := &fakeBackend{results: []agent.Result{{Status: "completed"}}}
+			var logs bytes.Buffer
+			log := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+			_, _, err := d.executeAndDrain(context.Background(), backend, "p",
+				agent.ExecOptions{IdleWatchdogTimeout: tt.override}, log, "t-idle-log", "", new(atomic.Int32))
+			if err != nil {
+				t.Fatalf("run backend: %v", err)
+			}
+
+			line := "msg=\"idle watchdog armed\""
+			if tt.want == "" {
+				if strings.Contains(logs.String(), line) {
+					t.Fatalf("disabled watchdog logged as armed: %s", &logs)
+				}
+			} else if !strings.Contains(logs.String(), line+" "+tt.want) {
+				t.Fatalf("missing armed watchdog with %s: %s", tt.want, &logs)
+			}
+		})
+	}
+}
+
 // longToolCallBackend simulates a legitimate long-running tool call (e.g.
 // `npm install`, `docker build`, full test suite). The backend emits a
 // tool_use, stays silent past the idle window while the tool runs, then emits
@@ -5776,7 +5843,7 @@ func TestHandleTask_BareErrorReportsFailureWithCancelledParent(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	d.handleTask(ctx, Task{ID: "task-bare-error", RuntimeID: "rt-1"}, 0)
+	d.handleTask(ctx, Task{ID: "task-bare-error", RuntimeID: "rt-1"}, newTestTaskSlot(0))
 
 	if got := failCalls.Load(); got != 1 {
 		t.Fatalf("fail callback calls = %d, want 1", got)
@@ -5818,7 +5885,7 @@ func TestHandleTask_UntrackedRuntimeFailsBackForRetry(t *testing.T) {
 		return TaskResult{}, nil
 	})
 
-	d.handleTask(context.Background(), Task{ID: "task-gone-runtime", RuntimeID: "rt-demoted"}, 0)
+	d.handleTask(context.Background(), Task{ID: "task-gone-runtime", RuntimeID: "rt-demoted"}, newTestTaskSlot(0))
 
 	body, _ := failBody.Load().(map[string]any)
 	if body == nil {
@@ -5891,7 +5958,7 @@ func TestHandleTask_ReportsUsageBeforeCancel(t *testing.T) {
 		Agent:     &AgentData{Name: "test-agent"},
 	}
 
-	d.handleTask(context.Background(), task, 0)
+	d.handleTask(context.Background(), task, newTestTaskSlot(0))
 
 	mu.Lock()
 	order := make([]string, len(callOrder))
@@ -5994,7 +6061,7 @@ func TestHandleTask_ReportsUsageWhenCancelledByPoll(t *testing.T) {
 		Agent:     &AgentData{Name: "test-agent"},
 	}
 
-	d.handleTask(context.Background(), task, 0)
+	d.handleTask(context.Background(), task, newTestTaskSlot(0))
 
 	mu.Lock()
 	order := make([]string, len(callOrder))
@@ -6652,7 +6719,7 @@ func TestHandleTask_AcksCancelAfterPollCancelled(t *testing.T) {
 		Agent:     &AgentData{Name: "test-agent"},
 	}
 
-	d.handleTask(context.Background(), task, 0)
+	d.handleTask(context.Background(), task, newTestTaskSlot(0))
 
 	mu.Lock()
 	order := make([]string, len(callOrder))
@@ -6721,7 +6788,7 @@ func TestHandleTask_AcksCancelOnPostRunStatusCheck(t *testing.T) {
 		Agent:     &AgentData{Name: "test-agent"},
 	}
 
-	d.handleTask(context.Background(), task, 0)
+	d.handleTask(context.Background(), task, newTestTaskSlot(0))
 
 	if got := ackCalls.Load(); got != 1 {
 		t.Fatalf("cancel-ack calls = %d, want 1", got)

@@ -42,6 +42,31 @@ vi.mock("./avatar-crop-dialog", () => ({
   },
 }));
 
+// Stands in for the text icon dialog the same way: one click hands over a
+// generated PNG. The drawing itself is covered by text-avatar.test.ts.
+vi.mock("./text-avatar-dialog", () => ({
+  TextAvatarDialog: ({
+    open,
+    onGenerated,
+  }: {
+    open: boolean;
+    onGenerated: (file: File) => void;
+  }) =>
+    open ? (
+      <button
+        type="button"
+        onClick={() =>
+          onGenerated(new File(["x"], "workspace-icon.png", { type: "image/png" }))
+        }
+      >
+        generate
+      </button>
+    ) : null,
+}));
+
+// The storage-limit toast has its own tests; here every failure is ordinary.
+vi.mock("../billing/storage-limit-notice", () => ({ useStorageLimitToast: () => () => false }));
+
 import { AvatarUploadControl } from "./avatar-upload-control";
 
 afterEach(() => {
@@ -294,5 +319,58 @@ describe("AvatarUploadControl", () => {
     expect(trigger).toBeDisabled();
     fireEvent.click(trigger);
     expect(screen.queryByText("Upload image")).not.toBeInTheDocument();
+  });
+
+  it("offers a text icon only where it is enabled", async () => {
+    const { container, unmount } = renderWithI18n(
+      <AvatarUploadControl variant="user" value={null} onUploaded={vi.fn()} />,
+    );
+    const openDialog = spyOnFileDialog(container);
+    fireEvent.click(screen.getByRole("button", { name: "Change avatar" }));
+    expect(openDialog).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Text icon")).not.toBeInTheDocument();
+    unmount();
+
+    renderWithI18n(
+      <AvatarUploadControl
+        variant="workspace"
+        value={null}
+        onUploaded={vi.fn()}
+        textIconEnabled
+      />,
+    );
+    openPicker();
+    expect(
+      await screen.findByRole("button", { name: "Upload image" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Text icon" })).toBeInTheDocument();
+    // Emoji stays off unless its own handler is passed.
+    expect(screen.queryByText("Emoji")).not.toBeInTheDocument();
+  });
+
+  it("saves a text icon through the same upload path as an image", async () => {
+    uploadMock.mockResolvedValueOnce({ link: "https://cdn.test/icon.png" });
+    const onUploaded = vi.fn();
+    renderWithI18n(
+      <AvatarUploadControl
+        variant="workspace"
+        name="acme-a"
+        value="https://cdn.test/old.png"
+        onUploaded={onUploaded}
+        textIconEnabled
+      />,
+    );
+
+    openPicker();
+    fireEvent.click(await screen.findByRole("button", { name: "Text icon" }));
+    fireEvent.click(screen.getByRole("button", { name: "generate" }));
+
+    await waitFor(() =>
+      expect(onUploaded).toHaveBeenCalledWith("https://cdn.test/icon.png"),
+    );
+    const uploaded = uploadMock.mock.calls[0]![0] as File;
+    expect(uploaded.type).toBe("image/png");
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("Avatar updated"));
+    expect(screen.queryByRole("button", { name: "generate" })).not.toBeInTheDocument();
   });
 });

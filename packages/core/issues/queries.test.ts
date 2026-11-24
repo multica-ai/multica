@@ -20,11 +20,13 @@ import {
   PROJECT_GANTT_PAGE_LIMIT,
   childrenByParentsOptions,
   childIssuesOptions,
+  fetchIssueByRef,
   flattenIssueBuckets,
   issueIdentifierOptions,
   issueKeys,
   issueListOptions,
   issueTableRowPageOptions,
+  prefetchIssuePage,
   projectGanttIssuesOptions,
   sidebarIssuesOptions,
   sourceContextPreviewOptions,
@@ -749,5 +751,29 @@ describe("sidebarIssuesOptions", () => {
       { limit: 100, cursor: null },
       { limit: 20, cursor: "100" },
     ]);
+  });
+});
+
+describe("prefetchIssuePage", () => {
+  it("shares one issue request with a link warming the same issue by its identifier", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    const issue = makeIssue(7);
+    const getIssue = vi.fn().mockResolvedValue(issue);
+    setApiInstance({
+      getIssue,
+      listTimeline: vi.fn().mockResolvedValue([]),
+      listTasksByIssue: vi.fn().mockResolvedValue([]),
+      listChildIssues: vi.fn().mockResolvedValue({ issues: [] }),
+    } as unknown as ApiClient);
+
+    await Promise.all([
+      prefetchIssuePage(qc, WS_ID, issue.id, issue.identifier),
+      fetchIssueByRef(qc, WS_ID, issue.identifier),
+    ]);
+
+    expect(getIssue).toHaveBeenCalledTimes(1);
+    expect(getIssue.mock.calls[0]?.[0]).toBe("MUL-7");
+    expect(qc.getQueryData(issueKeys.detail(WS_ID, "MUL-7"))).toBe(issue);
+    expect(qc.getQueryData(issueKeys.detail(WS_ID, issue.id))).toBe(issue);
   });
 });

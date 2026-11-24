@@ -8,3 +8,4 @@ out
 resources/bin/
 # Speech engine staged at build time (scripts/bundle-voice-engine.mjs)
 resources/voice-engine/
+/.perf-builds

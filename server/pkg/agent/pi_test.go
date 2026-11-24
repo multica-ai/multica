@@ -589,24 +589,69 @@ func TestPiExecuteTurnErrorActivityAndRetryRecoveryCancelTimer(t *testing.T) {
 	}
 }
 
-func TestPiExecuteTurnErrorGraceWaitsForInFlightTool(t *testing.T) {
+// The guard's expiry is driven directly rather than through a short real
+// grace: stdout handling takes a synchronous process-table snapshot after each
+// tool event, so any millisecond-scale window races the host's process count.
+func TestPiTurnErrorGuardExpireWaitsForInFlightTool(t *testing.T) {
+	t.Parallel()
+
+	expired := 0
+	guard := newPiTurnErrorGuard(time.Hour, func() { expired++ })
+	t.Cleanup(func() { guard.finish() })
+
+	guard.observeEvent("tool_execution_start")
+	guard.record("temporary provider error")
+	guard.expire(guard.generation)
+	if expired != 0 || guard.graceExpired {
+		t.Fatalf("expire with a tool in flight stopped the run (calls=%d, graceExpired=%v)", expired, guard.graceExpired)
+	}
+
+	staleGeneration := guard.generation
+	guard.observeEvent("tool_execution_end")
+	guard.expire(staleGeneration)
+	if expired != 0 || guard.graceExpired {
+		t.Fatalf("expire with a stale generation stopped the run (calls=%d, graceExpired=%v)", expired, guard.graceExpired)
+	}
+
+	guard.expire(guard.generation)
+	if expired != 1 || !guard.graceExpired {
+		t.Fatalf("expire after the tool ended: calls=%d, graceExpired=%v; want one stop", expired, guard.graceExpired)
+	}
+}
+
+func TestPiTurnErrorGuardExpireIgnoresRecoveredTurn(t *testing.T) {
+	t.Parallel()
+
+	expired := 0
+	guard := newPiTurnErrorGuard(time.Hour, func() { expired++ })
+	t.Cleanup(func() { guard.finish() })
+
+	guard.record("temporary provider error")
+	guard.observeEvent("turn_start")
+	guard.expire(guard.generation)
+	if expired != 0 || guard.graceExpired {
+		t.Fatalf("expire after recovery stopped the run (calls=%d, graceExpired=%v)", expired, guard.graceExpired)
+	}
+}
+
+// Uses the default grace so the timer never fires; the expiry decision itself
+// is covered by TestPiTurnErrorGuardExpireWaitsForInFlightTool.
+func TestPiExecuteRecoversFromTurnErrorDuringInFlightTool(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fixture is POSIX-only")
 	}
 
-	const grace = 60 * time.Millisecond
 	script := "#!/bin/sh\n" +
 		"cat > /dev/null\n" +
 		`printf '%s\n' '{"type":"turn_start"}'` + "\n" +
 		`printf '%s\n' '{"type":"tool_execution_start","toolCallId":"call-1","toolName":"bash","args":{}}'` + "\n" +
 		`printf '%s\n' '{"type":"turn_end","message":{"role":"assistant","model":"test","stopReason":"error","errorMessage":"temporary provider error"}}'` + "\n" +
-		"sleep 0.15\n" +
 		`printf '%s\n' '{"type":"tool_execution_end","toolCallId":"call-1","toolName":"bash","result":"ok"}'` + "\n" +
 		`printf '%s\n' '{"type":"turn_start"}'` + "\n" +
 		`printf '%s\n' '{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"done"}}'` + "\n" +
 		`printf '%s\n' '{"type":"turn_end","message":{"role":"assistant","model":"test"}}'` + "\n"
-	backend := newPiTestBackend(t, script, grace)
+	backend := newPiTestBackend(t, script, 0)
 
 	session, err := backend.Execute(context.Background(), "prompt-ignored", ExecOptions{
 		Timeout:         15 * time.Second,
@@ -616,7 +661,7 @@ func TestPiExecuteTurnErrorGraceWaitsForInFlightTool(t *testing.T) {
 		t.Fatalf("execute: %v", err)
 	}
 	result := waitPiResult(t, session, 20*time.Second)
-	if result.Status != "completed" || result.Output != "done" {
+	if result.Status != "completed" || result.Output != "done" || result.Error != "" {
 		t.Fatalf("result = %+v, want tool completion and recovered turn", result)
 	}
 }

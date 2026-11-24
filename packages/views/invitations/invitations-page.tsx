@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
+import { isMemberLimitReachedError } from "@multica/core/billing";
 import {
   myInvitationListOptions,
   workspaceListOptions,
@@ -93,7 +94,16 @@ export function InvitationsPage({ invitationId, onBack }: InvitationsPageProps) 
   const handleAccept = (invitation: Invitation) => {
     setError(null);
     accept.mutate(invitation, {
-      onError: (e) => setError(e instanceof Error ? e.message : t(($) => $.errors.accept_failed)),
+      onError: (e) =>
+        setError(
+          isMemberLimitReachedError(e)
+            ? t(($) => $.errors.member_limit_reached, {
+                workspace: invitation.workspace_name || t(($) => $.list.workspace_fallback),
+              })
+            : e instanceof Error
+              ? e.message
+              : t(($) => $.errors.accept_failed),
+        ),
     });
   };
   const handleDecline = (invitation: Invitation) => {

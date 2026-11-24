@@ -1,10 +1,13 @@
 import type {
   DashboardUsageDaily,
   DashboardUsageByAgent,
+  DashboardUsageBySquad,
   DashboardAgentRunTime,
+  DashboardSquadRunTime,
   DashboardRunTimeDaily,
   DashboardFailureDaily,
   DashboardFailureByAgent,
+  DashboardFailureBySquad,
 } from "@multica/core/types";
 import {
   FAILURE_CLASSES,
@@ -377,7 +380,18 @@ interface WeekShell {
 // carries the labels and partial-week metadata the chart components consume;
 // downstream aggregators fold their own per-week values onto the matching
 // shell.
-function buildWeekShells(tz: string, weekCount: number): WeekShell[] {
+//
+// `earliestDay` is the first day the plan lets the page read (MUL-9490). The
+// leftmost week it cuts into is partial like the current week: it covers only
+// the days from `earliestDay` on, and the tooltip says how many. The weekly
+// aggregators also drop rows dated before it: a replica still on the old
+// policy can answer the over-fetched weekly request with days the plan no
+// longer covers.
+function buildWeekShells(
+  tz: string,
+  weekCount: number,
+  earliestDay: string | null = null,
+): WeekShell[] {
   const count = Math.max(1, Math.floor(weekCount));
   const today = todayIso(tz);
   const currentWeekStart = weekStartIso(today);
@@ -386,22 +400,31 @@ function buildWeekShells(tz: string, weekCount: number): WeekShell[] {
   for (let i = 0; i < count; i++) {
     const weekStart = addDaysIso(firstWeekStart, i * 7);
     const weekEnd = addDaysIso(weekStart, 6);
-    const partial = today < weekEnd;
-    // Inclusive count of how many days of this week have actually elapsed.
-    // Closed weeks sit at 7; the current week reports 1..6.
-    const clampedToday =
-      today < weekStart ? weekStart : today < weekEnd ? today : weekEnd;
-    const elapsed = Math.min(7, Math.max(1, diffDaysIso(weekStart, clampedToday) + 1));
+    const daysCovered = coveredDaysInWeek(weekStart, weekEnd, today, earliestDay);
     shells.push({
       weekStart,
       weekEnd,
       label: formatShortDate(weekStart),
       rangeLabel: `${formatShortDate(weekStart)} – ${formatShortDate(weekEnd)}`,
-      partial,
-      daysCovered: partial ? elapsed : 7,
+      partial: daysCovered < 7,
+      daysCovered,
     });
   }
   return shells;
+}
+
+// Inclusive count of the week's days that have elapsed and that the plan
+// covers: 7 for a whole week, fewer for the current week or for the leftmost
+// week the plan cuts into.
+export function coveredDaysInWeek(
+  weekStart: string,
+  weekEnd: string,
+  today: string,
+  earliestDay: string | null,
+): number {
+  const from = earliestDay && earliestDay > weekStart ? earliestDay : weekStart;
+  const to = today < weekEnd ? today : weekEnd;
+  return Math.min(7, Math.max(1, diffDaysIso(from, to) + 1));
 }
 
 function diffDaysIso(from: string, to: string): number {
@@ -416,11 +439,13 @@ export function aggregateWeeklyTime(
   rows: DashboardRunTimeDaily[],
   tz: string,
   weekCount: number,
+  earliestDay: string | null = null,
 ): WeeklyTimeData[] {
-  const shells = buildWeekShells(tz, weekCount);
+  const shells = buildWeekShells(tz, weekCount, earliestDay);
   const totals = new Map<string, number>();
   for (const shell of shells) totals.set(shell.weekStart, 0);
   for (const r of rows) {
+    if (earliestDay && r.date < earliestDay) continue;
     const wkStart = weekStartIso(r.date);
     if (!totals.has(wkStart)) continue;
     totals.set(wkStart, (totals.get(wkStart) ?? 0) + r.total_seconds);
@@ -432,8 +457,9 @@ export function aggregateWeeklyTasks(
   rows: DashboardRunTimeDaily[],
   tz: string,
   weekCount: number,
+  earliestDay: string | null = null,
 ): WeeklyTasksData[] {
-  const shells = buildWeekShells(tz, weekCount);
+  const shells = buildWeekShells(tz, weekCount, earliestDay);
   const buckets = new Map<
     string,
     { completed: number; failed: number; cancelled: number }
@@ -441,6 +467,7 @@ export function aggregateWeeklyTasks(
   for (const shell of shells)
     buckets.set(shell.weekStart, { completed: 0, failed: 0, cancelled: 0 });
   for (const r of rows) {
+    if (earliestDay && r.date < earliestDay) continue;
     const wkStart = weekStartIso(r.date);
     const bucket = buckets.get(wkStart);
     if (!bucket) continue;
@@ -585,13 +612,15 @@ export function aggregateWeeklyErrors(
   rows: DashboardFailureDaily[],
   tz: string,
   weekCount: number,
+  earliestDay: string | null = null,
 ): WeeklyErrorsData[] {
-  const shells = buildWeekShells(tz, weekCount);
+  const shells = buildWeekShells(tz, weekCount, earliestDay);
   const buckets = new Map<string, FailureClassCounts & FailureBucketTotals>();
   for (const shell of shells) {
     buckets.set(shell.weekStart, { ...emptyClassCounts(), failed: 0, total: 0 });
   }
   for (const r of rows) {
+    if (earliestDay && r.date < earliestDay) continue;
     const bucket = buckets.get(weekStartIso(r.date));
     if (!bucket) continue;
     foldFailureRow(bucket, r.failure_reason, r.task_count);
@@ -809,5 +838,193 @@ export function anonymizeUnresolvedAgentRows(
     knownAgentIds?.has(r.agent_id)
       ? r
       : { ...r, agent_id: UNRESOLVED_AGENTS_ROW_ID },
+  );
+}
+
+// Synthetic squadId sentinel for the Squad-grouped leaderboard & Errors tab.
+export const DELETED_SQUADS_ROW_ID = "__deleted_squads__";
+
+export function isSyntheticSquadRow(squadId: string): boolean {
+  return squadId === DELETED_SQUADS_ROW_ID;
+}
+
+export interface SquadDashboardRow {
+  squadId: string;
+  tokens: number;
+  cost: number;
+  seconds: number;
+  taskCount: number;
+  unreportedTaskCount: number;
+  hasReportedUsage: boolean;
+  hasUsageTotals: boolean;
+  members: AgentDashboardRow[];
+}
+
+// Returns null for standalone (non-squad-triggered) runs: the Squad grouping
+// ranks squads only, and the Agent grouping already covers those runs.
+function normalizeSquadBucketId(
+  rawSquadId: string,
+  knownSquadIds: ReadonlySet<string> | null,
+): string | null {
+  if (!rawSquadId) return null;
+  if (knownSquadIds && !knownSquadIds.has(rawSquadId)) {
+    return DELETED_SQUADS_ROW_ID;
+  }
+  return rawSquadId;
+}
+
+/**
+ * Aggregate per-(squad, agent, model) usage and per-(squad, agent) runtime
+ * rows into squad-overall rows, each carrying its per-member breakdown so the
+ * Leaderboard can expand any squad inline without an extra fetch.
+ *
+ * Non-squad-triggered runs (`squad_id === ""`) are left out, so the rows sum
+ * to squad-attributed usage rather than to the workspace KPIs.
+ */
+export function aggregateSquadDashboardRows(
+  usageRows: DashboardUsageBySquad[],
+  runTimeRows: DashboardSquadRunTime[],
+  knownAgentIds: ReadonlySet<string> | null,
+  knownSquadIds: ReadonlySet<string> | null,
+): SquadDashboardRow[] {
+  const usageBySquad = new Map<string, DashboardUsageByAgent[]>();
+  for (const r of usageRows) {
+    const key = normalizeSquadBucketId(r.squad_id, knownSquadIds);
+    if (key === null) continue;
+    const list = usageBySquad.get(key) ?? [];
+    list.push(r);
+    usageBySquad.set(key, list);
+  }
+
+  const runTimeBySquad = new Map<string, Map<string, DashboardAgentRunTime>>();
+  for (const r of runTimeRows) {
+    const key = normalizeSquadBucketId(r.squad_id, knownSquadIds);
+    if (key === null) continue;
+    let agentMap = runTimeBySquad.get(key);
+    if (!agentMap) {
+      agentMap = new Map();
+      runTimeBySquad.set(key, agentMap);
+    }
+    const existing = agentMap.get(r.agent_id);
+    if (existing) {
+      existing.total_seconds += r.total_seconds;
+      existing.task_count += r.task_count;
+      existing.failed_count += r.failed_count;
+      existing.cancelled_count += r.cancelled_count;
+      if (existing.metered_task_count !== undefined || r.metered_task_count !== undefined) {
+        existing.metered_task_count =
+          (existing.metered_task_count ?? 0) + (r.metered_task_count ?? 0);
+      }
+    } else {
+      agentMap.set(r.agent_id, {
+        agent_id: r.agent_id,
+        total_seconds: r.total_seconds,
+        task_count: r.task_count,
+        metered_task_count: r.metered_task_count,
+        failed_count: r.failed_count,
+        cancelled_count: r.cancelled_count,
+      });
+    }
+  }
+
+  const allSquadKeys = new Set<string>([
+    ...usageBySquad.keys(),
+    ...runTimeBySquad.keys(),
+  ]);
+
+  const rows: SquadDashboardRow[] = [];
+  for (const squadId of allSquadKeys) {
+    const tokenRows = aggregateAgentTokens(usageBySquad.get(squadId) ?? []);
+    const rtRows = Array.from(runTimeBySquad.get(squadId)?.values() ?? []);
+    const mergedMembers = mergeAgentDashboardRows(tokenRows, rtRows);
+    const members = bucketUnknownAgentRows(mergedMembers, knownAgentIds);
+
+    let tokens = 0;
+    let cost = 0;
+    let seconds = 0;
+    let taskCount = 0;
+    let unreportedTaskCount = 0;
+    let hasReportedUsage = false;
+    let hasUsageTotals = false;
+    for (const m of members) {
+      tokens += m.tokens;
+      cost += m.cost;
+      seconds += m.seconds;
+      taskCount += m.taskCount;
+      unreportedTaskCount += m.unreportedTaskCount;
+      hasReportedUsage ||= m.hasReportedUsage;
+      hasUsageTotals ||= m.hasUsageTotals;
+    }
+
+    rows.push({
+      squadId,
+      tokens,
+      cost,
+      seconds,
+      taskCount,
+      unreportedTaskCount,
+      hasReportedUsage,
+      hasUsageTotals,
+      members,
+    });
+  }
+
+  return rows.toSorted((a, b) => {
+    if (b.cost !== a.cost) return b.cost - a.cost;
+    return b.seconds - a.seconds;
+  });
+}
+
+export interface SquadFailureRow {
+  squadId: string;
+  failed: number;
+  total: number;
+  rate: number;
+  classes: FailureClassCounts;
+}
+
+export function aggregateSquadFailures(
+  rows: DashboardFailureBySquad[],
+  knownSquadIds: ReadonlySet<string> | null,
+): SquadFailureRow[] {
+  const map = new Map<
+    string,
+    { failed: number; total: number; classes: FailureClassCounts }
+  >();
+  for (const r of rows) {
+    const key = normalizeSquadBucketId(r.squad_id, knownSquadIds);
+    if (key === null) continue;
+    let entry = map.get(key);
+    if (!entry) {
+      entry = { failed: 0, total: 0, classes: emptyClassCounts() };
+      map.set(key, entry);
+    }
+    entry.total += r.task_count;
+    if (r.failure_reason === "") continue;
+    entry.failed += r.task_count;
+    entry.classes[failureClassOf(r.failure_reason)] += r.task_count;
+  }
+  return Array.from(map.entries())
+    .filter(([, v]) => v.failed > 0)
+    .map(([squadId, v]) => ({
+      squadId,
+      failed: v.failed,
+      total: v.total,
+      rate: v.total > 0 ? v.failed / v.total : 0,
+      classes: v.classes,
+    }))
+    .toSorted((a, b) => b.failed - a.failed || b.rate - a.rate);
+}
+
+export function sortSquadFailures(
+  rows: SquadFailureRow[],
+  sortBy: OffenderSort,
+): SquadFailureRow[] {
+  if (sortBy === "failed") {
+    return rows.toSorted((a, b) => b.failed - a.failed || b.rate - a.rate);
+  }
+  const sample = (r: SquadFailureRow) => (r.total >= MIN_RATE_SAMPLE ? 0 : 1);
+  return rows.toSorted(
+    (a, b) => sample(a) - sample(b) || b.rate - a.rate || b.failed - a.failed,
   );
 }

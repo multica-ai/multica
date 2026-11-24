@@ -2,7 +2,8 @@
 
 import { createContext, useCallback, useContext, useMemo } from "react";
 import { useIssueOpeningStore, type IssueOpenMode } from "@multica/core/issues/stores/issue-opening-store";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
+import type { Issue } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
 
 /**
@@ -97,6 +98,15 @@ export function locateInColumns(
   return null;
 }
 
+/** Whether `issueId` currently exists in any published column. */
+export function hasIssueInColumns(
+  columns: IssuePeekColumns | null,
+  issueId: string | null,
+): boolean {
+  if (!columns || !issueId) return false;
+  return columns.some((column) => column.includes(issueId));
+}
+
 /**
  * What a click on an issue card or row opens: a plain click opens the preferred
  * target (Settings → Preferences), Shift+Click the other one, so either is one
@@ -139,6 +149,8 @@ export function useIssuePeekPosition() {
   return useContext(IssuePeekPositionContext);
 }
 
+type PeekIssue = Pick<Issue, "id" | "identifier">;
+
 /**
  * Shared by card/row links and the table's non-link click targets. Returns
  * whether it handled the click; when it did not, the caller's own navigation
@@ -149,22 +161,22 @@ export function useIssuePeekClick() {
   const openMode = useIssueOpeningStore((s) => s.openMode);
   const { push } = useNavigation();
   const paths = useWorkspacePaths();
-  return useCallback((issueId: string, event?: React.MouseEvent) => {
+  return useCallback((issue: PeekIssue, event?: React.MouseEvent) => {
     if (!peek || event?.defaultPrevented) return false;
     const target = event ? resolveIssueClick(event, openMode) : openMode;
     if (target === "peek") {
       event?.preventDefault();
       // A plain click opens (or keeps open) the issue. Shift+Click is the
       // explicit preview gesture and toggles it closed again, like Space.
-      if (event?.shiftKey) peek.toggle(issueId);
-      else peek.open(issueId);
+      if (event?.shiftKey) peek.toggle(issue.id);
+      else peek.open(issue.id);
       return true;
     }
     if (target === "page" && event?.shiftKey) {
       // Shift+Click in preview mode opens the full page in place. Left alone,
       // a link would hand Shift to the browser — a new window on web.
       event.preventDefault();
-      push(paths.issueDetail(issueId));
+      push(paths.issueDetail(issueRouteRef(issue)));
       return true;
     }
     return false;
@@ -172,9 +184,10 @@ export function useIssuePeekClick() {
 }
 
 /** Empty outside a peek host, so other issue links retain normal navigation. */
-export function useIssuePeekLinkProps(issueId: string) {
+export function useIssuePeekLinkProps(issue: PeekIssue) {
   const peek = useIssuePeekActions();
   const handlePeekClick = useIssuePeekClick();
+  const { id, identifier } = issue;
   return useMemo(
     () =>
       peek
@@ -184,10 +197,10 @@ export function useIssuePeekLinkProps(issueId: string) {
               if (event.shiftKey) event.preventDefault();
             },
             onClick: (event: React.MouseEvent) => {
-              handlePeekClick(issueId, event);
+              handlePeekClick({ id, identifier }, event);
             },
           }
         : {},
-    [peek, handlePeekClick, issueId],
+    [peek, handlePeekClick, id, identifier],
   );
 }

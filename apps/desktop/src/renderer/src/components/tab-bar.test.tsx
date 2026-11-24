@@ -8,6 +8,7 @@ import {
   within,
   type RenderResult,
 } from "@testing-library/react";
+import { DEFAULT_APPEARANCE, useAppearanceStore } from "@multica/core/appearance";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { RESOURCES } from "@multica/views/locales";
@@ -233,6 +234,19 @@ describe("TabBar hover action buttons", () => {
     expect(queryAllByLabelText("Close tab")).toHaveLength(1);
   });
 
+  it("keeps Pin and Close shown while the tab is pressed, not only on hover", () => {
+    // In full screen on a secondary display, Electron fires an offset
+    // pointermove right after pointerdown (electron/electron#55100), which
+    // drops :hover before mouseup. :active survives it.
+    const { getAllByLabelText } = render(<TabBar />);
+    for (const button of [
+      ...getAllByLabelText("Pin tab"),
+      ...getAllByLabelText("Close tab"),
+    ]) {
+      expect(button).toHaveClass("opacity-0", "group-hover:opacity-100", "group-active:opacity-100");
+    }
+  });
+
   it("keeps the full title visible on a pinned tab (no icon-only collapse)", () => {
     state.byWorkspace.acme.tabs = [
       { id: "tA", url: "/acme/issues", title: "Issues", pinned: true },
@@ -342,6 +356,25 @@ describe("TabBar background open of an open tab", () => {
     await waitFor(() => expect(state.clearTabAttention).toHaveBeenCalledWith(3), {
       timeout: 3000,
     });
+  });
+
+  it("shows a static highlight without fading under reduced motion and clears after a short hold", async () => {
+    useAppearanceStore.getState().set({ reduceMotion: true });
+    try {
+      state.tabAttention = { tabId: "tB", sequence: 4 };
+      const { container } = render(<TabBar />);
+
+      const attention = container.querySelector<HTMLElement>("[data-tab-attention]");
+      expect(attention).not.toBeNull();
+      // Static span: no inline animated opacity style.
+      expect(attention?.style.opacity).toBe("");
+
+      await waitFor(() => expect(state.clearTabAttention).toHaveBeenCalledWith(4), {
+        timeout: 1500,
+      });
+    } finally {
+      useAppearanceStore.setState({ ...DEFAULT_APPEARANCE });
+    }
   });
 });
 

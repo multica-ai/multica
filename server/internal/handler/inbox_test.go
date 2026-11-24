@@ -382,3 +382,93 @@ func truncateForLog(s string) string {
 	}
 	return s
 }
+
+// Inbox rows carry the issue identifier so clients link to the canonical issue
+// URL; opening `/issues/<uuid>` rewrites the address and remounts the page
+// (MUL-9538). Every read that hands a client a row carries it.
+func TestInboxItemsCarryIssueIdentifier(t *testing.T) {
+	workspaceID := dbfx.Workspace(t, "Inbox identifiers", "inbox-identifier-"+uuid.NewString(),
+		testutil.Cols{"issue_prefix": "IDN"})
+	dbfx.Member(t, workspaceID, testUserID, "owner")
+	issueID := dbfx.Issue(t, "Identified issue", testutil.Cols{"workspace_id": workspaceID, "number": 42})
+	insertItem := func(title string, archived bool) string {
+		return dbfx.Insert(t, "inbox_item", testutil.Cols{
+			"workspace_id":   workspaceID,
+			"recipient_type": "member",
+			"recipient_id":   testUserID,
+			"type":           "new_comment",
+			"severity":       "info",
+			"issue_id":       issueID,
+			"title":          title,
+			"archived":       archived,
+		})
+	}
+	activeID := insertItem("Active", false)
+	dbfx.Insert(t, "inbox_item", testutil.Cols{
+		"workspace_id":   workspaceID,
+		"recipient_type": "member",
+		"recipient_id":   testUserID,
+		"type":           "system",
+		"severity":       "info",
+		"title":          "Issue-less",
+	})
+	const want = "IDN-42"
+	identifier := func(item InboxItemResponse) string {
+		if item.IssueIdentifier == nil {
+			return "<nil>"
+		}
+		return *item.IssueIdentifier
+	}
+
+	var active []InboxItemResponse
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.ListInbox),
+		inboxRequest(http.MethodGet, "/api/inbox", workspaceID)).Want(http.StatusOK).JSON(&active)
+	for _, item := range active {
+		got, expected := identifier(item), want
+		if item.IssueID == nil {
+			expected = "<nil>"
+		}
+		if got != expected {
+			t.Errorf("list %q issue_identifier = %s, want %s", item.Title, got, expected)
+		}
+	}
+
+	var read InboxItemResponse
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.MarkInboxRead),
+		withURLParam(inboxRequest(http.MethodPost, "/api/inbox/"+activeID+"/read", workspaceID), "id", activeID)).
+		Want(http.StatusOK).JSON(&read)
+	if got := identifier(read); got != want {
+		t.Errorf("mark read issue_identifier = %s, want %s", got, want)
+	}
+
+	dbfx.Exec(t, `UPDATE inbox_item SET snoozed_until = now() + interval '1 day', snoozed_at = now() WHERE id = $1`, activeID)
+	var snoozed []SnoozedInboxResponse
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.ListSnoozedInbox),
+		inboxRequest(http.MethodGet, "/api/inbox/snoozed", workspaceID)).Want(http.StatusOK).JSON(&snoozed)
+	if len(snoozed) != 1 || snoozed[0].IssueIdentifier == nil || *snoozed[0].IssueIdentifier != want {
+		t.Errorf("snoozed = %+v, want the issue with issue_identifier %s", snoozed, want)
+	}
+
+	// The archived views list an issue only while it has no active row.
+	dbfx.Exec(t, `UPDATE inbox_item SET archived = true WHERE workspace_id = $1`, workspaceID)
+	var archived []InboxItemResponse
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.ListArchivedInbox),
+		inboxRequest(http.MethodGet, "/api/inbox/archived", workspaceID)).Want(http.StatusOK).JSON(&archived)
+	var page archivedInboxPageResponse
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.ListArchivedInboxPage),
+		inboxRequest(http.MethodGet, "/api/inbox/archived/page", workspaceID)).Want(http.StatusOK).JSON(&page)
+	for name, items := range map[string][]InboxItemResponse{"archived": archived, "archived page": page.Items} {
+		found := false
+		for _, item := range items {
+			if item.IssueID != nil && *item.IssueID == issueID {
+				found = true
+				if got := identifier(item); got != want {
+					t.Errorf("%s issue_identifier = %s, want %s", name, got, want)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s did not list the issue's row: %+v", name, items)
+		}
+	}
+}

@@ -390,6 +390,8 @@ func (d *Daemon) applyGCActionWithChatMeta(ctx context.Context, taskDir string, 
 				attrs = append(attrs, "autopilot_run", checkedMeta.AutopilotRunID)
 			case execenv.GCKindQuickCreate:
 				attrs = append(attrs, "task", checkedMeta.TaskID)
+			case execenv.GCKindDoc:
+				attrs = append(attrs, "doc", checkedMeta.DocID)
 			}
 		}
 		d.logger.Info("gc: removed", attrs...)
@@ -588,6 +590,8 @@ func (d *Daemon) shouldCleanTaskDirForKind(ctx context.Context, taskDir string, 
 		return d.gcDecisionAutopilotRun(ctx, taskDir, meta)
 	case execenv.GCKindQuickCreate:
 		return d.gcDecisionQuickCreate(ctx, taskDir, meta)
+	case execenv.GCKindDoc:
+		return d.gcDecisionDoc(taskDir, meta)
 	default:
 		// Unknown kind: fall back to mtime-based orphan cleanup so a future
 		// daemon writing a kind we don't recognize doesn't get insta-wiped.
@@ -780,6 +784,23 @@ func (d *Daemon) gcDecisionChat(ctx context.Context, taskDir string, meta *exece
 	return gcActionSkip, gcRemovalDetails{}
 }
 
+// gcDecisionDoc keeps a doc discussion env for the agent's next run on the
+// doc. A doc has no end state, so the env goes once no run has used it for
+// GCTTL; every run rewrites the meta, which restarts that clock.
+func (d *Daemon) gcDecisionDoc(taskDir string, meta *execenv.GCMeta) (gcAction, gcRemovalDetails) {
+	if strings.TrimSpace(meta.DocID) == "" || meta.CompletedAt.IsZero() {
+		return d.orphanByMTime(taskDir, "incomplete doc meta")
+	}
+	idle := time.Since(meta.CompletedAt)
+	if idle > d.cfg.GCTTL {
+		return gcActionClean, gcRemovalDetails{reason: "idle doc env retention expired", retention: d.cfg.GCTTL}
+	}
+	if d.cfg.GCArtifactTTL > 0 && idle > d.cfg.GCArtifactTTL {
+		return gcActionCleanArtifacts, gcRemovalDetails{}
+	}
+	return gcActionSkip, gcRemovalDetails{}
+}
+
 func (d *Daemon) gcDecisionAutopilotRun(ctx context.Context, taskDir string, meta *execenv.GCMeta) (gcAction, gcRemovalDetails) {
 	if strings.TrimSpace(meta.AutopilotRunID) == "" {
 		return d.orphanByMTime(taskDir, "empty autopilot run id")
@@ -919,6 +940,9 @@ func (d *Daemon) cleanTaskDir(taskDir string) (bytes int64, removed bool) {
 	if ownerErr != nil {
 		d.logger.Warn("gc: refusing to remove unowned task directory", "dir", taskDir, "error", ownerErr)
 		return 0, false
+	}
+	if err := execenv.RemoveCursorMcpAuthLink(taskDir, d.cfg.Profile); err != nil {
+		d.logger.Warn("gc: remove cursor mcp auth link failed", "dir", taskDir, "error", err)
 	}
 	if err := os.RemoveAll(taskDir); err != nil {
 		d.logger.Warn("gc: remove task dir failed", "dir", taskDir, "error", err)
@@ -1641,11 +1665,11 @@ func (d *Daemon) pruneWorktreeLocked(ctx context.Context, barePath string) {
 		if ctx.Err() != nil || d.activeTasks.Load() > 0 {
 			return
 		}
-		before := snapshotRepoMaintenanceLocks(barePath)
+		before := snapshotRepoMaintenanceArtifacts(barePath)
 		if out, err := runGitCommandContext(ctx, barePath, step.timeout, step.args...); err != nil {
 			completed = false
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, repocache.ErrMaintenancePreempted) {
-				d.cleanupNewRepoMaintenanceLocks(barePath, before)
+				d.cleanupNewRepoMaintenanceArtifacts(barePath, before)
 			}
 			if errors.Is(context.Cause(ctx), repocache.ErrMaintenancePreempted) {
 				d.logger.Info("gc: git maintenance preempted for foreground work",
@@ -1683,34 +1707,34 @@ func runGitCommandContext(parent context.Context, barePath string, timeout time.
 	return strings.TrimSpace(string(out)), err
 }
 
-type repoMaintenanceLockSnapshot map[string]struct{}
+type repoMaintenanceArtifactSnapshot map[string]struct{}
 
-// snapshotRepoMaintenanceLocks records only lock paths known to be produced by
-// the maintenance commands below. Cleanup later removes a path only if it did
-// not exist in this snapshot and the process tree is confirmed gone. Checkout
-// waits on the same repo gate, and task dispatch waits for CancelMaintenance's
-// barrier, so no agent Git work can create a competing lock before cleanup.
-func snapshotRepoMaintenanceLocks(barePath string) repoMaintenanceLockSnapshot {
-	locks := make(repoMaintenanceLockSnapshot)
-	for _, path := range repoMaintenanceLockPaths(barePath) {
-		locks[path] = struct{}{}
+// snapshotRepoMaintenanceArtifacts records locks and temporary packs Git
+// maintenance can leave behind. Cleanup only removes new paths after the
+// process tree has exited. Checkout waits on the same repo gate, and task
+// dispatch waits for CancelMaintenance's barrier.
+func snapshotRepoMaintenanceArtifacts(barePath string) repoMaintenanceArtifactSnapshot {
+	artifacts := make(repoMaintenanceArtifactSnapshot)
+	for _, path := range repoMaintenanceArtifactPaths(barePath) {
+		artifacts[path] = struct{}{}
 	}
-	return locks
+	return artifacts
 }
 
-func repoMaintenanceLockPaths(barePath string) []string {
-	var locks []string
+func repoMaintenanceArtifactPaths(barePath string) []string {
+	var artifacts []string
+	packDir := filepath.Join(barePath, "objects", "pack")
 	for _, name := range []string{"gc.pid", "packed-refs.lock"} {
 		path := filepath.Join(barePath, name)
 		if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() {
-			locks = append(locks, path)
+			artifacts = append(artifacts, path)
 		}
 	}
 	for _, root := range []string{
 		filepath.Join(barePath, "refs"),
 		filepath.Join(barePath, "logs", "refs"),
 		filepath.Join(barePath, "objects", "info"),
-		filepath.Join(barePath, "objects", "pack"),
+		packDir,
 	} {
 		_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 			if err != nil {
@@ -1722,30 +1746,31 @@ func repoMaintenanceLockPaths(barePath string) []string {
 				}
 				return nil
 			}
-			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".lock") {
-				locks = append(locks, path)
+			isTempPack := filepath.Dir(path) == packDir && entry.Type().IsRegular() && strings.HasPrefix(entry.Name(), "tmp_pack_")
+			if isTempPack || (!entry.IsDir() && strings.HasSuffix(entry.Name(), ".lock")) {
+				artifacts = append(artifacts, path)
 			}
 			return nil
 		})
 	}
-	return locks
+	return artifacts
 }
 
-func (d *Daemon) cleanupNewRepoMaintenanceLocks(barePath string, before repoMaintenanceLockSnapshot) {
-	for _, path := range repoMaintenanceLockPaths(barePath) {
+func (d *Daemon) cleanupNewRepoMaintenanceArtifacts(barePath string, before repoMaintenanceArtifactSnapshot) {
+	for _, path := range repoMaintenanceArtifactPaths(barePath) {
 		if _, existed := before[path]; existed {
 			continue
 		}
 		rel, err := filepath.Rel(barePath, path)
 		if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) {
-			d.logger.Warn("gc: refused maintenance lock cleanup outside repo", "repo", barePath, "path", path)
+			d.logger.Warn("gc: refused maintenance artifact cleanup outside repo", "repo", barePath, "path", path)
 			continue
 		}
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			d.logger.Warn("gc: maintenance lock cleanup failed", "repo", barePath, "lock", rel, "error", err)
+			d.logger.Warn("gc: maintenance artifact cleanup failed", "repo", barePath, "artifact", rel, "error", err)
 			continue
 		}
-		d.logger.Info("gc: removed lock left by interrupted maintenance", "repo", barePath, "lock", rel)
+		d.logger.Info("gc: removed artifact left by interrupted maintenance", "repo", barePath, "artifact", rel)
 	}
 }
 

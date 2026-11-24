@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence } from "motion/react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { Virtuoso, type Components, type VirtuosoHandle } from "react-virtuoso";
@@ -19,15 +20,15 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import {
   ChevronRight,
-  ChevronDown,
   Brain,
   AlertCircle,
   AlertTriangle,
   ArrowUpRight,
-  Copy,
   RotateCw,
 } from "@multica/ui/icons";
+import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
+import { useReducedMotion } from "@multica/core/appearance";
 import { isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
 import { RichContent } from "../../rich-content";
 import { RichContentScrollRootProvider } from "../../rich-content/scroll-root";
@@ -40,6 +41,7 @@ import type {
   ChatMessage,
   ChatPendingTask,
   ChatQuickAction,
+  ChatWakeup,
   TaskMessagePayload,
 } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
@@ -51,17 +53,20 @@ import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 import { FOLLOW_EDGE_THRESHOLD } from "../../common/task-transcript/transcript-follow";
 import { LIVE_END_ROW_ATTR, useStickToBottom } from "./stick-to-bottom";
 import { JumpToLiveEndButton, useJumpToLiveEnd } from "./jump-to-live-end";
-import { formatElapsedMs } from "../lib/format";
+import { formatElapsedMs, formatMessageTime } from "../lib/format";
 import {
   canonicalAnswerText,
   extractCopyText,
   splitTimeline,
 } from "../lib/copy-text";
 import { stripChatQuickActionsProtocol } from "../lib/quick-actions";
-import { useT } from "../../i18n";
+import { useLocale, useT } from "../../i18n";
 import { isAnnotatableChatMessage, type ChatAnnotations } from "./use-chat-annotations";
+import { ChatWakeupCards, ChatWakeupDivider, useWakeupsBySourceTask } from "./chat-wakeups";
 
 // ─── Public component ────────────────────────────────────────────────────
+
+export type ChatMessageEnterTransition = "next" | "prev" | "fade";
 
 interface ChatMessageListProps {
   /** Pause bottom-stick effects while a closing floating window fades out. */
@@ -72,6 +77,13 @@ interface ChatMessageListProps {
    * (stick-to-bottom.ts). Omit to pay the settle on every mount.
    */
   revealKey?: string | null;
+  /**
+   * Subtle reveal transition played once the list has landed at the live end
+   * (`hasReachedLiveEnd`): directional glide for archive-advance (`"next"` /
+   * `"prev"`), or gentle opacity fade for direct session switches (`"fade"`).
+   * Skipped entirely under reduced motion (Appearance switch or system setting).
+   */
+  enterTransition?: ChatMessageEnterTransition | null;
   /** The list became visible to the reader — on reveal, and on each reactivation after it. */
   onRevealed?: () => void;
   messages: ChatMessage[];
@@ -106,6 +118,8 @@ interface ChatMessageListProps {
   quickActionsPendingMessageId?: string | null;
   /** Lets the reader annotate settled assistant replies into the next message. */
   annotations?: Pick<ChatAnnotations, "cardRef" | "captureProps" | "popup" | "revealSourceRef">;
+  /** The conversation's wakeups: dividers for wakeup turns, cards under the replies that made them. */
+  wakeups?: ChatWakeup[];
 }
 
 // ─── Virtuoso chrome ─────────────────────────────────────────────────────
@@ -192,6 +206,7 @@ const LIST_COMPONENTS: Components<ChatRenderItem, ChatListContext> = {
 export function ChatMessageList({
   active = true,
   revealKey = null,
+  enterTransition = null,
   onRevealed,
   messages,
   pendingTask,
@@ -206,6 +221,7 @@ export function ChatMessageList({
   onRegenerateQuickActions,
   quickActionsPendingMessageId = null,
   annotations,
+  wakeups,
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
@@ -232,8 +248,20 @@ export function ChatMessageList({
   // Soft edge fade hinting more content above/below. Kept small so it barely
   // grazes full-bleed previews (image / HTML) at the edges.
   const fadeStyle = useScrollFade(scrollRef, 16);
+  const reduceMotion = useReducedMotion();
+  const playedTransition = hasReachedLiveEnd && !reduceMotion ? enterTransition : null;
+  const enterClass =
+    playedTransition === "next"
+      ? "animate-chat-enter-next"
+      : playedTransition === "prev"
+        ? "animate-chat-enter-prev"
+        : playedTransition === "fade"
+          ? "animate-chat-enter-fade"
+          : undefined;
 
   const pendingTaskId = pendingTask?.task_id ?? null;
+  const wakeupsBySourceTask = useWakeupsBySourceTask(wakeups);
+  const wakeupById = useMemo(() => new Map((wakeups ?? []).map((w) => [w.id, w])), [wakeups]);
 
   // The session's newest assistant turn — the only one whose quick actions can
   // be refreshed (regeneration resumes the newest provider state). Computed off
@@ -359,9 +387,11 @@ export function ChatMessageList({
      *  pinned above the composer instead of scrolling with the rows. */}
     <div ref={annotations?.cardRef} {...annotations?.captureProps} className="relative flex min-h-0 flex-1 flex-col">
     {annotations?.popup}
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
     <div
       ref={setScrollContainerRef}
       data-tab-scroll-root
+      data-chat-enter-transition={playedTransition ?? undefined}
       style={fadeStyle}
       // The gutter lives on the scroll container, so it applies once to the
       // whole list — rows, header, footer — and the scrollbar still rides the
@@ -370,7 +400,7 @@ export function ChatMessageList({
       // container paints nothing for that whole window anyway — the rows are
       // not measured yet — so this costs no visible time and spares the
       // reader a frame of the wrong messages (see stick-to-bottom.ts).
-      className={cn("flex-1 overflow-y-auto", CHAT_GUTTER, !hasReachedLiveEnd && "invisible")}
+      className={cn("flex-1 overflow-y-auto", CHAT_GUTTER, !hasReachedLiveEnd && "invisible", enterClass)}
     >
       {/* Already inside the gutter + column, so this pre-mount frame renders the
        *  skeleton BODY rather than <ChatMessageSkeleton>, which brings its own
@@ -440,6 +470,10 @@ export function ChatMessageList({
               quickActionsPendingMessageId={quickActionsPendingMessageId}
               starterCardsMessageId={starterCardsMessageId}
               annotatable={!!annotations}
+              wakeup={item.kind === "message" && item.message.wakeup_id
+                ? wakeupById.get(item.message.wakeup_id)
+                : undefined}
+              createdWakeups={item.taskId ? wakeupsBySourceTask.get(item.taskId) : undefined}
             />
           </div>
         )}
@@ -447,13 +481,18 @@ export function ChatMessageList({
       </RichContentScrollRootProvider>
       )}
     </div>
-    {jumpToLiveEnd.visible && (
-      <JumpToLiveEndButton
-        hasNewReply={jumpToLiveEnd.hasNewReply}
-        onClick={jumpToLiveEnd.jump}
-        className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2"
-      />
-    )}
+    </div>
+    <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center">
+      <AnimatePresence initial={false}>
+        {jumpToLiveEnd.visible && (
+          <JumpToLiveEndButton
+            key="jump-to-live-end"
+            hasNewReply={jumpToLiveEnd.hasNewReply}
+            onClick={jumpToLiveEnd.jump}
+          />
+        )}
+      </AnimatePresence>
+    </div>
     </div>
     </PreviewSequenceProvider>
   );
@@ -514,6 +553,8 @@ const MessageBubble = memo(function MessageBubble({
   quickActionsPendingMessageId,
   starterCardsMessageId,
   annotatable,
+  wakeup,
+  createdWakeups,
 }: {
   item: ChatRenderItem;
   isPending: boolean;
@@ -525,23 +566,36 @@ const MessageBubble = memo(function MessageBubble({
   quickActionsPendingMessageId: string | null;
   starterCardsMessageId: string | null;
   annotatable: boolean;
+  /** The wakeup behind a wakeup turn's input row. */
+  wakeup?: ChatWakeup;
+  /** Wakeups this row's turn created. */
+  createdWakeups?: ChatWakeup[];
 }) {
   // The live row and the persisted assistant row both land here under one key,
   // and both render <AssistantMessage> — same component type, same position —
-  // so React reconciles rather than remounts at task completion.
+  // so React reconciles rather than remounts at task completion. The wakeup
+  // cards follow it as a sibling in both forms for the same reason.
   if (item.kind === "live") {
     return (
-      <AssistantMessage
-        taskId={item.taskId}
-        isPending={isPending}
-        transformContent={transformContent}
-        onQuickAction={onQuickAction}
-        quickActionsDisabled={quickActionsDisabled}
-      />
+      <>
+        <AssistantMessage
+          taskId={item.taskId}
+          isPending={isPending}
+          transformContent={transformContent}
+          onQuickAction={onQuickAction}
+          quickActionsDisabled={quickActionsDisabled}
+        />
+        {createdWakeups && <ChatWakeupCards wakeups={createdWakeups} />}
+      </>
     );
   }
 
   const { message } = item;
+
+  // A wakeup turn's input is the runtime's, not something the person wrote.
+  if (message.message_kind === "wakeup") {
+    return <ChatWakeupDivider message={message} wakeup={wakeup} />;
+  }
 
   if (message.role === "user") {
     return (
@@ -572,19 +626,22 @@ const MessageBubble = memo(function MessageBubble({
   }
 
   return (
-    <AssistantMessage
-      taskId={message.task_id ?? null}
-      message={message}
-      isPending={isPending}
-      transformContent={transformContent}
-      onQuickAction={onQuickAction}
-      quickActionsDisabled={quickActionsDisabled}
-      onRegenerateQuickActions={onRegenerateQuickActions}
-      canRegenerateQuickActions={message.id === latestAssistantMessageId}
-      quickActionsPending={quickActionsPendingMessageId === message.id}
-      showStarterCards={message.id === starterCardsMessageId}
-      sourceId={annotatable && isAnnotatableChatMessage(message) ? message.id : undefined}
-    />
+    <>
+      <AssistantMessage
+        taskId={message.task_id ?? null}
+        message={message}
+        isPending={isPending}
+        transformContent={transformContent}
+        onQuickAction={onQuickAction}
+        quickActionsDisabled={quickActionsDisabled}
+        onRegenerateQuickActions={onRegenerateQuickActions}
+        canRegenerateQuickActions={message.id === latestAssistantMessageId}
+        quickActionsPending={quickActionsPendingMessageId === message.id}
+        showStarterCards={message.id === starterCardsMessageId}
+        sourceId={annotatable && isAnnotatableChatMessage(message) ? message.id : undefined}
+      />
+      {createdWakeups && <ChatWakeupCards wakeups={createdWakeups} />}
+    </>
   );
 });
 
@@ -665,6 +722,7 @@ function AssistantMessage({
         rawError={message.content}
         timeline={timeline}
         elapsedMs={message.elapsed_ms}
+        createdAt={message.created_at}
       />
     );
   }
@@ -885,7 +943,7 @@ function QuickActions({
 }
 
 // Light inline prefix label for the follow-up pill row — the row sits below
-// the reply footer ("Replied in Xs · Copy") behind a faint top border, so
+// the reply footer ("Replied in Xs · time · Copy") behind a faint top border, so
 // the pills read as a labelled next-steps strip, not part of the reply body.
 // shrink-0 keeps the label whole at the row start when narrow widths wrap
 // the pills.
@@ -931,8 +989,8 @@ function NoResponseNotice() {
   );
 }
 
-// Inline footer row beneath the assistant reply: "Replied in 38s · [Copy]".
-// Action icons live here (not as a hover-floating overlay) so they're
+// Inline footer row beneath the assistant reply: "Replied in 38s · 2:32 PM ·
+// [Copy]". Action icons live here (not as a hover-floating overlay) so they're
 // discoverable on first read and don't shift content. Buttons stay quiet
 // (muted) until hover. Copy is suppressed during streaming because the
 // final text is still being appended.
@@ -947,20 +1005,25 @@ function MessageFooter({
   isPending: boolean;
   transformContent?: (content: string) => string;
 }) {
+  const locale = useLocale();
   // A no_response turn has nothing to copy, and its caption uses a neutral
   // "Finished in Xs" instead of "Replied in Xs" (MUL-4351).
   const isNoResponse = message.message_kind === "no_response";
   const copyContent = extractCopyText(message, timeline, transformContent);
   const showCopy = !isPending && !isNoResponse && copyContent.trim().length > 0;
-  if (message.elapsed_ms == null && !showCopy) return null;
+  const timeLabel = formatMessageTime(message.created_at, locale);
+  if (message.elapsed_ms == null && !showCopy && !timeLabel) return null;
   return (
     <div className="flex items-center gap-1.5">
-      {message.elapsed_ms != null && (
+      {message.elapsed_ms != null ? (
         <ElapsedCaption
           variant={isNoResponse ? "finished" : "replied"}
           elapsedMs={message.elapsed_ms}
+          timeLabel={timeLabel || undefined}
         />
-      )}
+      ) : timeLabel ? (
+        <div className="text-caption text-muted-foreground">{timeLabel}</div>
+      ) : null}
       {showCopy && (
         <MessageCopyButton content={copyContent} />
       )}
@@ -974,8 +1037,20 @@ function MessageCopyButton({
   content: string;
 }) {
   const { t } = useT("chat");
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
   const handleCopy = async () => {
     if (await copyText(content)) {
+      setCopied(true);
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => setCopied(false), 2000);
       toast.success(t(($) => $.message_list.copied_toast));
     } else {
       toast.error(t(($) => $.message_list.copy_failed_toast));
@@ -994,7 +1069,7 @@ function MessageCopyButton({
           />
         }
       >
-        <Copy />
+        <CopyCheckIcon copied={copied} />
       </TooltipTrigger>
       <TooltipContent side="top">
         {t(($) => $.message_list.copy_action)}
@@ -1003,18 +1078,21 @@ function MessageCopyButton({
   );
 }
 
-// Persisted "Replied in 38s" / "Failed after 12s" line under the assistant
-// bubble. Reads `elapsed_ms` straight off the chat_message — server computes
-// it once at task completion, so this caption is identical across reloads
-// and devices. Skipped silently when null (legacy messages predating
-// migration 063 + user messages).
+// Persisted "Replied in 38s · 2:32 PM" / "Failed after 12s · 2:32 PM" line
+// under the assistant bubble. Reads `elapsed_ms` straight off the chat_message
+// — server computes it once at task completion, so this caption is identical
+// across reloads and devices; `timeLabel` is the pre-formatted wall-clock time
+// derived from `created_at`. Skipped silently when null (legacy messages
+// predating migration 063 + user messages).
 function ElapsedCaption({
   variant,
   elapsedMs,
+  timeLabel,
   className,
 }: {
   variant: "replied" | "failed" | "finished";
   elapsedMs: number;
+  timeLabel?: string;
   className?: string;
 }) {
   const { t } = useT("chat");
@@ -1027,7 +1105,7 @@ function ElapsedCaption({
         : t(($) => $.message_list.failed_after, { elapsed });
   return (
     <div className={cn("text-caption text-muted-foreground", className)}>
-      {text}
+      {timeLabel ? `${text} · ${timeLabel}` : text}
     </div>
   );
 }
@@ -1037,13 +1115,17 @@ function FailureBubble({
   rawError,
   timeline,
   elapsedMs,
+  createdAt,
 }: {
   reason: string;
   rawError: string;
   timeline: ChatTimelineItem[];
   elapsedMs?: number | null;
+  createdAt?: string;
 }) {
   const { t } = useT("chat");
+  const locale = useLocale();
+  const timeLabel = createdAt ? formatMessageTime(createdAt, locale) : "";
   const [open, setOpen] = useState(false);
   // Chat gets its own friendly, reassuring copy per failure reason — plain
   // language + a "try again" nudge — instead of the terse developer labels
@@ -1076,6 +1158,7 @@ function FailureBubble({
     skill_bundle_unavailable: t(($) => $.message_list.failure.skill_bundle_unavailable),
     runtime_cli_timeout: t(($) => $.message_list.failure.runtime_cli_timeout),
     environment_prepare_failed: t(($) => $.message_list.failure.environment_prepare_failed),
+    local_directory_missing: t(($) => $.message_list.failure.local_directory_missing),
     "agent_error.provider_network": t(($) => $.message_list.failure.provider_network),
     "agent_error.provider_auth_or_access": t(($) => $.message_list.failure.provider_auth_or_access),
     "agent_error.provider_quota_limit": t(($) => $.message_list.failure.provider_quota_limit),
@@ -1109,11 +1192,12 @@ function FailureBubble({
           {rawError.trim() && (
             <Collapsible open={open} onOpenChange={setOpen}>
               <CollapsibleTrigger className="mt-0.5 flex items-center gap-1 text-caption text-muted-foreground hover:text-foreground transition-colors">
-                {open ? (
-                  <ChevronDown className="size-3" />
-                ) : (
-                  <ChevronRight className="size-3" />
-                )}
+                <ChevronRight
+                  className={cn(
+                    "size-3 shrink-0 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+                    open && "rotate-90",
+                  )}
+                />
                 <span>{t(($) => $.message_list.show_details)}</span>
               </CollapsibleTrigger>
               <CollapsibleContent>
@@ -1126,9 +1210,13 @@ function FailureBubble({
         </div>
       </div>
       {timeline.length > 0 && <TimelineView items={timeline} />}
-      {elapsedMs != null && (
-        <ElapsedCaption variant="failed" elapsedMs={elapsedMs} />
-      )}
+      {elapsedMs != null || timeLabel ? (
+        elapsedMs != null ? (
+          <ElapsedCaption variant="failed" elapsedMs={elapsedMs} timeLabel={timeLabel || undefined} />
+        ) : (
+          <div className="text-caption text-muted-foreground">{timeLabel}</div>
+        )
+      ) : null}
     </div>
   );
 }
@@ -1258,7 +1346,12 @@ function OuterProcessFold({
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="flex items-center gap-1 text-caption text-muted-foreground hover:text-foreground transition-colors">
-        {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+        <ChevronRight
+          className={cn(
+            "size-3 shrink-0 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+            open && "rotate-90",
+          )}
+        />
         <span>{t(($) => $.message_list.process_steps, { count: displayedStepCount })}</span>
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -1340,7 +1433,7 @@ function ToolCallRow({ item }: { item: ChatTimelineItem }) {
       <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded-xs px-1 -mx-1 py-0.5 text-caption hover:bg-accent/30 transition-colors">
         <ChevronRight
           className={cn(
-            "h-3 w-3 shrink-0 text-muted-foreground transition-transform",
+            "h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
             open && "rotate-90",
             !hasInput && "invisible",
           )}
@@ -1384,7 +1477,10 @@ function ToolResultRow({ item }: { item: ChatTimelineItem }) {
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="flex w-full items-start gap-1.5 rounded-xs px-1 -mx-1 py-0.5 text-caption hover:bg-accent/30 transition-colors">
         <ChevronRight
-          className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform mt-0.5", open && "rotate-90")}
+          className={cn(
+            "h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none mt-0.5",
+            open && "rotate-90",
+          )}
         />
         <span className="text-muted-foreground truncate">
           {labelPrefix}{preview}

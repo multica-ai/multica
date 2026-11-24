@@ -18,10 +18,18 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
+import { Button } from "@multica/ui/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { IssueSidebarSectionHeader } from "./issue-sidebar-section";
+import { IssueSidebarCollapsible, IssueSidebarSectionHeader } from "./issue-sidebar-section";
 import { useT } from "../../i18n";
 
 // Quick Actions sidebar section (MUL-5465).
@@ -70,8 +78,8 @@ export function QuickActionsSection({ issueId }: { issueId: string }) {
 
   return (
     <div>
-      <IssueSidebarSectionHeader title={t(($) => $.detail.section_quick_actions)} count={actions.length} open={open} onOpenChange={setOpen} />
-      {open ? (
+      <IssueSidebarSectionHeader title={t(($) => $.detail.section_quick_actions)} count={actions.length} countWhenOpen={hiddenCount > 0} open={open} onOpenChange={setOpen} />
+      <IssueSidebarCollapsible open={open}>
         <div className="space-y-0.5 px-2">
           {isError && <button type="button" className="flex min-h-8 w-full items-center rounded-md px-2 py-1.5 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" onClick={() => void refetch()}>
             {t(($) => $.detail.section_load_failed_retry)}
@@ -81,7 +89,7 @@ export function QuickActionsSection({ issueId }: { issueId: string }) {
               key={action.id}
               action={action}
               issueId={issueId}
-              onBlocked={() => setBlocked(action)}
+              onBlocked={setBlocked}
             />
           ))}
           {hiddenCount > 0 && (
@@ -94,25 +102,9 @@ export function QuickActionsSection({ issueId }: { issueId: string }) {
             </button>
           )}
         </div>
-      ) : null}
+      </IssueSidebarCollapsible>
 
-      {/* One message for every refusal. The person reading this dialog and the
-          person who can fix the binding are different people — the clicker's
-          next step is the same either way, and the diagnostic detail lives in
-          settings where the owner will act on it. */}
-      <AlertDialog open={blocked !== null} onOpenChange={(v) => !v && setBlocked(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t(($) => $.detail.quick_action_blocked_title)}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t(($) => $.detail.quick_action_blocked_body, { name: blocked?.name ?? "" })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction>{t(($) => $.detail.quick_action_blocked_ok)}</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <QuickActionBlockedDialog action={blocked} onClose={() => setBlocked(null)} />
     </div>
   );
 }
@@ -150,6 +142,64 @@ export function outcomeMessage(
   }
 }
 
+/**
+ * Runs a quick action on the issue and says what came of it. A refusal goes
+ * to `onBlocked`, which explains it.
+ */
+function useQuickActionRun(issueId: string, onBlocked: (action: QuickAction) => void) {
+  const { t } = useT("issues");
+  const runMutation = useRunQuickAction(issueId);
+
+  /** Resolves to whether the action's comment was posted. */
+  const run = async (action: QuickAction): Promise<boolean> => {
+    const targetName = action.target_name || t(($) => $.detail.quick_action_target_fallback);
+    try {
+      const comment: Comment = await runMutation.mutateAsync({ quickActionId: action.id });
+      const { message, kind } = outcomeMessage(comment.trigger_outcomes?.[0], targetName, t);
+      if (kind === "success") toast.success(message);
+      else if (kind === "error") toast.error(message);
+      else toast.info(message);
+      return true;
+    } catch (error) {
+      // A permission refusal is a structured 403 the user needs explained, not
+      // a transient failure they should retry — it gets the dialog. Everything
+      // else stays a toast.
+      if (dispatchReasonCode(error) === "invocation_not_allowed") {
+        onBlocked(action);
+        return false;
+      }
+      toast.error(error instanceof Error ? error.message : String(error));
+      return false;
+    }
+  };
+  return { run, running: runMutation.isPending };
+}
+
+/*
+ * One message for every refusal. The person reading this dialog and the
+ * person who can fix the binding are different people — the clicker's next
+ * step is the same either way, and the diagnostic detail lives in settings
+ * where the owner will act on it.
+ */
+function QuickActionBlockedDialog({ action, onClose }: { action: QuickAction | null; onClose: () => void }) {
+  const { t } = useT("issues");
+  return (
+    <AlertDialog open={action !== null} onOpenChange={(v) => !v && onClose()}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t(($) => $.detail.quick_action_blocked_title)}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t(($) => $.detail.quick_action_blocked_body, { name: action?.name ?? "" })}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogAction>{t(($) => $.detail.quick_action_blocked_ok)}</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 function QuickActionRow({
   action,
   issueId,
@@ -157,39 +207,18 @@ function QuickActionRow({
 }: {
   action: QuickAction;
   issueId: string;
-  onBlocked: () => void;
+  onBlocked: (action: QuickAction) => void;
 }) {
   const { t } = useT("issues");
-  const runMutation = useRunQuickAction(issueId);
-  const running = runMutation.isPending;
-
+  const { run, running } = useQuickActionRun(issueId, onBlocked);
   const targetName = action.target_name || t(($) => $.detail.quick_action_target_fallback);
-
-  const handleRun = async () => {
-    try {
-      const comment: Comment = await runMutation.mutateAsync({ quickActionId: action.id });
-      const { message, kind } = outcomeMessage(comment.trigger_outcomes?.[0], targetName, t);
-      if (kind === "success") toast.success(message);
-      else if (kind === "error") toast.error(message);
-      else toast.info(message);
-    } catch (error) {
-      // A permission refusal is a structured 403 the user needs explained, not
-      // a transient failure they should retry — it gets the dialog. Everything
-      // else stays a toast.
-      if (dispatchReasonCode(error) === "invocation_not_allowed") {
-        onBlocked();
-        return;
-      }
-      toast.error(error instanceof Error ? error.message : String(error));
-    }
-  };
 
   const row = (
     <div>
       <button
         type="button"
         disabled={running}
-        onClick={() => void handleRun()}
+        onClick={() => void run(action)}
         className={cn(
           "group flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-caption transition-colors",
           "hover:bg-accent/50 disabled:cursor-default disabled:opacity-60",
@@ -229,5 +258,71 @@ function QuickActionRow({
         </div>
       </TooltipContent>
     </Tooltip>
+  );
+}
+
+/**
+ * The quick actions behind one icon button, for the Inbox's floating group and
+ * the issue page header. Nothing configured renders nothing.
+ */
+export function QuickActionsMenu({
+  issueId,
+  onRun,
+  side,
+}: {
+  issueId: string;
+  /** Called as an action starts, with whether its comment was posted. */
+  onRun?: (action: QuickAction, ran: Promise<boolean>) => void;
+  /** Where the menu and its tooltip open: up from the Inbox's floating group, down from the header. */
+  side: "top" | "bottom";
+}) {
+  const { t } = useT("issues");
+  const wsId = useCurrentWorkspace()?.id ?? "";
+  const [blocked, setBlocked] = useState<QuickAction | null>(null);
+  const { run, running } = useQuickActionRun(issueId, setBlocked);
+  const { data = [] } = useQuery({
+    ...quickActionListOptions(wsId),
+    enabled: wsId !== "",
+  });
+  const actions = useMemo(() => data.filter((a) => a.status === "active"), [data]);
+  if (actions.length === 0) return null;
+
+  const label = t(($) => $.detail.section_quick_actions);
+  return (
+    <>
+      <DropdownMenu>
+        <TooltipHint label={label} side={side}>
+          <DropdownMenuTrigger
+            render={<Button variant="ghost" size="icon-sm" aria-label={label} className="shrink-0" disabled={running} />}
+          >
+            {running ? <Loader2 className="animate-spin text-muted-foreground" /> : <Zap className="text-muted-foreground" />}
+          </DropdownMenuTrigger>
+        </TooltipHint>
+        <DropdownMenuContent side={side} align="start" className="w-auto min-w-56 max-w-80">
+          {actions.map((action) => (
+            <DropdownMenuItem
+              key={action.id}
+              onClick={() => {
+                const ran = run(action);
+                onRun?.(action, ran);
+              }}
+            >
+              <Zap className="h-4 w-4" />
+              <span className="min-w-0 flex-1 truncate">{action.name}</span>
+              {action.target_name ? (
+                <ActorAvatar
+                  actorType={action.assignee_type === "squad" ? "squad" : "agent"}
+                  actorId={action.assignee_id}
+                  size="xs"
+                  className="ml-4 shrink-0"
+                  showStatusDot={action.assignee_type === "agent"}
+                />
+              ) : null}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <QuickActionBlockedDialog action={blocked} onClose={() => setBlocked(null)} />
+    </>
   );
 }

@@ -156,7 +156,10 @@ export function PickerPanel({
   const placeholder = searchPlaceholder ?? t(($) => $.filters.placeholder);
   const filterAria = t(($) => $.pickers.filter_options_aria);
   const [query, setQuery] = useState("");
-  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  // The highlighted row itself, not its position: rows that load late (the
+  // assignee picker's Recent group) can insert above it, and Enter must still
+  // commit the row the user sees highlighted.
+  const [highlighted, setHighlighted] = useState<HTMLButtonElement | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   const getItems = useCallback(() => {
@@ -166,7 +169,7 @@ export function PickerPanel({
     );
   }, []);
 
-  // Typing re-highlights the first *real* match. The index can't be computed
+  // Typing re-highlights the first *real* match. The row can't be resolved
   // in the input's onChange handler — the filtered list hasn't rendered yet —
   // so the keystroke raises a flag and this effect resolves it against the
   // fresh DOM. Guarding on the flag keeps arrow keys free to walk back onto
@@ -175,22 +178,18 @@ export function PickerPanel({
   useEffect(() => {
     if (!pendingSearchHighlight.current) return;
     pendingSearchHighlight.current = false;
-    const items = getItems();
-    // -1 when the query matches nothing (only the empty row is left), which
+    // None when the query matches nothing (only the empty row is left), which
     // leaves Enter inert instead of clearing the field.
-    setHighlightedIndex(items.findIndex((item) => !isEmptyItem(item)));
+    setHighlighted(getItems().find((item) => !isEmptyItem(item)) ?? null);
   }, [children, getItems]);
 
-  // Apply/remove highlight class via DOM when index changes
+  // Apply/remove highlight class via DOM. A highlighted row that left the list
+  // simply stops matching, so it is neither painted nor committed.
   useEffect(() => {
-    const items = getItems();
-    for (const item of items) {
-      item.classList.remove(HIGHLIGHT_CLASS);
+    for (const item of getItems()) {
+      item.classList.toggle(HIGHLIGHT_CLASS, item === highlighted);
     }
-    if (highlightedIndex >= 0 && highlightedIndex < items.length) {
-      items[highlightedIndex]?.classList.add(HIGHLIGHT_CLASS);
-    }
-  }, [highlightedIndex, getItems, children]); // re-run when children change (filtered list updates)
+  }, [highlighted, getItems, children]); // re-run when children change (filtered list updates)
 
   // Reset the search state on the open -> closed transition rather than inside
   // an open-change handler. Every picker closes itself after a selection by
@@ -201,7 +200,7 @@ export function PickerPanel({
   useEffect(() => {
     if (wasOpen.current && !open) {
       setQuery("");
-      setHighlightedIndex(-1);
+      setHighlighted(null);
       onSearchChange?.("");
     }
     wasOpen.current = open;
@@ -215,24 +214,19 @@ export function PickerPanel({
       const items = getItems();
       if (items.length === 0) return;
 
-      if (e.key === "ArrowDown") {
+      const current = highlighted ? items.indexOf(highlighted) : -1;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
-        setHighlightedIndex((prev) => {
-          const next = prev < items.length - 1 ? prev + 1 : 0;
-          items[next]?.scrollIntoView({ block: "nearest" });
-          return next;
-        });
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setHighlightedIndex((prev) => {
-          const next = prev > 0 ? prev - 1 : items.length - 1;
-          items[next]?.scrollIntoView({ block: "nearest" });
-          return next;
-        });
+        const next =
+          e.key === "ArrowDown"
+            ? current < items.length - 1 ? current + 1 : 0
+            : current > 0 ? current - 1 : items.length - 1;
+        items[next]?.scrollIntoView({ block: "nearest" });
+        setHighlighted(items[next] ?? null);
       } else if (e.key === "Enter") {
         e.preventDefault();
-        if (highlightedIndex >= 0 && highlightedIndex < items.length) {
-          items[highlightedIndex]?.click();
+        if (current >= 0) {
+          items[current]?.click();
         } else if (items.length === 1 && !isEmptyItem(items[0])) {
           // Auto-select when only one result. The empty row is excluded: a
           // query with no matches leaves it as the sole item, and Enter there
@@ -241,7 +235,7 @@ export function PickerPanel({
         }
       }
     },
-    [getItems, highlightedIndex],
+    [getItems, highlighted],
   );
 
   return (

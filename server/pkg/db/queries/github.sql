@@ -7,6 +7,15 @@ SELECT * FROM github_installation
 WHERE workspace_id = $1
 ORDER BY created_at ASC;
 
+-- name: ListGitHubInstallationsWithConnectedBy :many
+-- Only disclose the connector's display name while they belong to this workspace.
+SELECT sqlc.embed(gi), COALESCE(u.name, '')::text AS connected_by
+FROM github_installation gi
+LEFT JOIN member m ON m.user_id = gi.connected_by_id AND m.workspace_id = gi.workspace_id
+LEFT JOIN "user" u ON u.id = m.user_id
+WHERE gi.workspace_id = $1
+ORDER BY gi.created_at ASC;
+
 -- name: ListGitHubInstallationsByInstallationID :many
 -- One installation_id can be bound to several workspaces; webhook routing lists
 -- every binding and fans the event out to each bound workspace. Ordered oldest
@@ -209,7 +218,7 @@ JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
 JOIN issue i ON i.id = ipr.issue_id
 WHERE pr.workspace_id = sqlc.arg('workspace_id')
   AND i.workspace_id = sqlc.arg('workspace_id')
-  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])))
+  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR NOT (COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY(sqlc.narg('hidden_project_ids')::uuid[])))
 UNION ALL
 SELECT
     ipr.issue_id,
@@ -220,7 +229,7 @@ JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
 JOIN issue i ON i.id = ipr.issue_id
 WHERE pr.workspace_id = sqlc.arg('workspace_id')
   AND i.workspace_id = sqlc.arg('workspace_id')
-  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])))
+  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR NOT (COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY(sqlc.narg('hidden_project_ids')::uuid[])))
 ORDER BY pr_created_at DESC;
 
 -- name: GetIssueReviewHeadSha :one

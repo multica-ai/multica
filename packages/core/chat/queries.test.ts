@@ -1,12 +1,17 @@
 // @vitest-environment node
-import { describe, expect, it } from "vitest";
+import { QueryClient } from "@tanstack/react-query";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { setApiInstance } from "../api";
+import type { ApiClient } from "../api/client";
 import type { TaskMessagePayload } from "../types/events";
-import type { ChatSession } from "../types/chat";
+import type { ChatMessage, ChatSession } from "../types/chat";
 import {
+  chatKeys,
   countUnreadChatSessions,
   isTaskMessageTaskId,
   mergeTaskMessagesBySeq,
+  prefetchChatSession,
   sortChatSessions,
   taskMessagesOptions,
   unionTaskMessagesBySeq,
@@ -198,5 +203,74 @@ describe("countUnreadChatSessions", () => {
     ];
 
     expect(countUnreadChatSessions(sessions)).toBe(0);
+  });
+});
+
+describe("prefetchChatSession", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const makeMessage = (over: Partial<ChatMessage> & Pick<ChatMessage, "id">): ChatMessage => ({
+    chat_session_id: "s-1",
+    role: "assistant",
+    content: "reply",
+    task_id: null,
+    created_at: "2026-01-01T00:00:00Z",
+    ...over,
+  });
+
+  it("warms messages, pending task, wakeups, and up to two tail assistant timelines", async () => {
+    const t1 = "11111111-1111-4111-8111-111111111111";
+    const t2 = "22222222-2222-4222-8222-222222222222";
+    const t3 = "33333333-3333-4333-8333-333333333333";
+
+    const listMessages = vi.fn(async () => ({
+      messages: [
+        makeMessage({ id: "m1", role: "assistant", task_id: t1 }),
+        makeMessage({ id: "m2", role: "user", task_id: t1 }),
+        makeMessage({ id: "m3", role: "assistant", task_id: t2 }),
+        makeMessage({ id: "m4", role: "assistant", task_id: "optimistic-1" }),
+        makeMessage({ id: "m5", role: "assistant", task_id: t3 }),
+      ],
+      limit: 50,
+      has_more: false,
+      next_cursor: null,
+    }));
+    const getPending = vi.fn(async (_sessionId: string) => ({}));
+    const listWakeups = vi.fn(async (_sessionId: string) => []);
+    const listTaskMessages = vi.fn(async (_taskId: string) => []);
+    setApiInstance({
+      listChatMessagesPage: listMessages,
+      getPendingChatTask: getPending,
+      listChatSessionWakeups: listWakeups,
+      listTaskMessages,
+    } as unknown as ApiClient);
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await prefetchChatSession(qc, "s-1");
+
+    expect(listMessages).toHaveBeenCalledTimes(1);
+    expect(getPending).toHaveBeenCalledWith("s-1");
+    expect(listWakeups).toHaveBeenCalledWith("s-1");
+    // Only the newest two valid UUID assistant task timelines are warmed.
+    expect(listTaskMessages.mock.calls.map(([id]) => id)).toEqual([t3, t2]);
+    expect(qc.getQueryData(chatKeys.pendingTask("s-1"))).toEqual({});
+    expect(qc.getQueryData(chatKeys.wakeups("s-1"))).toEqual([]);
+
+    // Second call hits the Infinity-staleTime cache without refetching.
+    await prefetchChatSession(qc, "s-1");
+    expect(listMessages).toHaveBeenCalledTimes(1);
+    expect(getPending).toHaveBeenCalledTimes(1);
+    expect(listWakeups).toHaveBeenCalledTimes(1);
+    expect(listTaskMessages).toHaveBeenCalledTimes(2);
+  });
+
+  it("is a no-op for an empty session id", async () => {
+    const listMessages = vi.fn();
+    setApiInstance({ listChatMessagesPage: listMessages } as unknown as ApiClient);
+    const qc = new QueryClient();
+    await prefetchChatSession(qc, "");
+    expect(listMessages).not.toHaveBeenCalled();
   });
 });

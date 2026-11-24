@@ -1,7 +1,10 @@
--- name: LockWorkflowSquadHandoff :exec
+-- name: LockWorkflowSquadHandoff :one
 -- Serialize admission for one issue without taking its owner-row locks out of
 -- the order lock_task_owner_rows uses to fence workspace teardown.
-SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg('issue_id')::uuid::text || ':workflow_squad_handoff', 0));
+-- Returns the database clock: the handoff row's fire_at must be due by the same
+-- clock the promoter compares it against (fire_at <= now()).
+SELECT now()::timestamptz AS locked_at
+FROM (SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg('issue_id')::uuid::text || ':workflow_squad_handoff', 0))) AS handoff_lock;
 
 -- name: GetWorkflowSquadHandoffTask :one
 -- A replay of the same status write is already covered, including after claim

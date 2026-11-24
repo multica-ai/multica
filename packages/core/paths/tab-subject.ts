@@ -33,6 +33,10 @@ export type TabSubject =
   | { kind: "actor"; actorType: TabActorType; id: string }
   /** A single skill detail. */
   | { kind: "skill"; id: string }
+  | { kind: "doc"; id: string }
+  | { kind: "docFolder"; id: string }
+  /** One app's page, addressed by its toolkit slug. */
+  | { kind: "app"; slug: string }
   /** A runtime machine detail. */
   | { kind: "machine"; machineId: string }
   /** A runtime nested under a machine. */
@@ -41,9 +45,10 @@ export type TabSubject =
   | { kind: "attachment"; id: string; filename: string | null }
   /**
    * The Inbox container; `selectedKey` is the `?issue=` selection or null,
-   * `archived` is the `?view=archived` sub-list (its own list/cache).
+   * `view` the `?view=` tab: the live Inbox, Snoozed, or Archived (each its
+   * own list/cache).
    */
-  | { kind: "inbox"; selectedKey: string | null; archived: boolean }
+  | { kind: "inbox"; selectedKey: string | null; view: "inbox" | "snoozed" | "archived" }
   /** The Chat container; `sessionId` is the `?session=` selection or null. */
   | { kind: "chat"; sessionId: string | null }
   /** A creation flow that has not produced a resource yet. */
@@ -107,7 +112,7 @@ export function parseTabSubject(url: string): TabSubject {
       return {
         kind: "inbox",
         selectedKey: query.get("issue") || null,
-        archived: query.get("view") === "archived",
+        view: query.get("view") === "archived" ? "archived" : query.get("view") === "snoozed" ? "snoozed" : "inbox",
       };
     case "chat":
       return { kind: "chat", sessionId: query.get("session") || null };
@@ -118,8 +123,15 @@ export function parseTabSubject(url: string): TabSubject {
         return { kind: "runtime", machineId: id, runtimeId: segments[4] };
       }
       return { kind: "machine", machineId: id };
+    case "docs":
+      if (id === "folders") {
+        return segments[3] ? { kind: "docFolder", id: segments[3] } : { kind: "unknown" };
+      }
+      return id ? { kind: "doc", id } : { kind: "page", page: "docs" };
     case "skills":
       return id ? { kind: "skill", id } : { kind: "page", page: "skills" };
+    case "apps":
+      return id ? { kind: "app", slug: id } : { kind: "page", page: "apps" };
     case "settings":
       return { kind: "page", page: "settings" };
     case "attachments":
@@ -158,6 +170,12 @@ export function tabSubjectKey(subject: TabSubject): string {
       return `actor:${subject.actorType}:${subject.id}`;
     case "skill":
       return `skill:${subject.id}`;
+    case "doc":
+      return `doc:${subject.id}`;
+    case "docFolder":
+      return `docFolder:${subject.id}`;
+    case "app":
+      return `app:${subject.slug}`;
     case "machine":
       return `machine:${subject.machineId}`;
     case "runtime":
@@ -165,7 +183,7 @@ export function tabSubjectKey(subject: TabSubject): string {
     case "attachment":
       return `attachment:${subject.id}:${subject.filename ?? ""}`;
     case "inbox":
-      return `inbox:${subject.archived ? "archived" : "inbox"}:${subject.selectedKey ?? ""}`;
+      return `inbox:${subject.view}:${subject.selectedKey ?? ""}`;
     case "chat":
       return `chat:${subject.sessionId ?? ""}`;
     case "flow":

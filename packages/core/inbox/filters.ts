@@ -35,7 +35,9 @@ export const INBOX_TYPE_GROUPS: readonly InboxTypeGroup[] = [
 
 const TYPE_GROUP: Partial<Record<InboxItemType, InboxTypeGroup>> = {
   mentioned: "mention",
+  doc_mentioned: "mention",
   new_comment: "comment",
+  doc_comment: "comment",
   reaction_added: "comment",
   issue_assigned: "assign",
   unassigned: "assign",
@@ -48,6 +50,7 @@ const TYPE_GROUP: Partial<Record<InboxItemType, InboxTypeGroup>> = {
   start_date_changed: "change",
   due_date_changed: "change",
   children_done: "change",
+  blockers_done: "change",
   task_completed: "run",
   task_failed: "run",
   agent_blocked: "run",

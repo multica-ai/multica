@@ -24,6 +24,7 @@ import (
 )
 
 func TestCaptureCursorBackgroundLateDescendant(t *testing.T) {
+	requireCursorBackgroundOwnership(t)
 	dir := t.TempDir()
 	gate := filepath.Join(dir, "fork")
 	root := exec.Command(os.Args[0])

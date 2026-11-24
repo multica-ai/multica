@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/multica-ai/multica/server/internal/testutil"
@@ -45,15 +46,31 @@ func TestIssueWakeupRegistrationRunDoesNotTriggerItself(t *testing.T) {
 func TestIssueWakeupOversizedPendingEvidenceStillConsumesInputs(t *testing.T) {
 	f, s, issue, agent := wakeFixture(t)
 	w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", Mode: "continuous", EventTypes: []string{"comment.created"}, Instruction: "Keep this instruction"})
+	// The scheduler retries contended rules on its next pass. Keep checking
+	// the evidence invariants after a transient lock in the shared test DB.
+	dispatch := func() {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+		defer cancel()
+		for {
+			err := s.dispatch(ctx, w)
+			if err == nil {
+				return
+			}
+			if !isLockTimeout(err) || ctx.Err() != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	f.Comment(t, util.UUIDToString(issue), "first")
-	wakeDispatch(t, s, w)
+	dispatch()
 	task, err := f.q.FindPendingWakeupTask(context.Background(), util.UUIDToString(w.ID))
 	if err != nil {
 		t.Fatal(err)
 	}
 	f.Exec(t, "UPDATE agent_task_queue SET handoff_note=$2 WHERE id=$1", task.ID, strings.Repeat("旧", 20000))
 	latest := f.Comment(t, util.UUIDToString(issue), "latest")
-	wakeDispatch(t, s, w)
+	dispatch()
 	got, err := f.q.GetAgentTask(context.Background(), task.ID)
 	if err != nil {
 		t.Fatal(err)

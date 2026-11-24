@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -197,10 +198,10 @@ func remoteMCPServerName(connection remotemcp.Connection) string {
 		}
 		return '-'
 	}, strings.ToLower(connection.ContributionKey))
-	suffix := strings.ReplaceAll(connection.ContributionID, "-", "")
-	if len(suffix) > 8 {
-		suffix = suffix[:8]
-	}
+	// Plugin contribution IDs share a colon-delimited prefix. Hash the complete
+	// identity so the provider name is safe and different installations stay distinct.
+	digest := sha256.Sum256([]byte(connection.ContributionID))
+	suffix := hex.EncodeToString(digest[:8])
 	return "plugin-" + name + "-" + suffix
 }
 
@@ -312,24 +313,32 @@ func (proxy *remoteMCPProxy) ServeHTTP(w http.ResponseWriter, request *http.Requ
 		return
 	}
 	defer response.Body.Close()
-	responseBody, err := io.ReadAll(io.LimitReader(response.Body, remotemcp.MaxResponseBytes+1))
-	if err != nil || len(responseBody) > remotemcp.MaxResponseBytes {
-		resultClass = "remote_error"
-		writeRemoteMCPError(w, rpcRequest.ID, -32001, "Remote MCP response exceeded the allowed limit")
-		return
-	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		resultClass = "remote_error"
 		writeRemoteMCPError(w, rpcRequest.ID, -32000, "Remote MCP service returned an error")
 		return
 	}
+	var responseBody []byte
 	if rpcRequest.Method == "tools/list" {
-		responseBody, err = decodeRemoteMCPSSEData(response.Header.Get("Content-Type"), responseBody)
-		if err != nil {
-			resultClass = "remote_error"
-			writeRemoteMCPError(w, rpcRequest.ID, -32000, "Remote MCP service returned an invalid response")
-			return
+		// Decode while reading: an SSE stream may stay open after the response.
+		responseBody, err = remotemcp.ReadResponse(response, rpcRequest.ID)
+	} else {
+		responseBody, err = io.ReadAll(io.LimitReader(response.Body, remotemcp.MaxResponseBytes+1))
+		if err == nil && len(responseBody) > remotemcp.MaxResponseBytes {
+			err = remotemcp.ErrResponseTooLarge
 		}
+	}
+	if errors.Is(err, remotemcp.ErrResponseTooLarge) {
+		resultClass = "remote_error"
+		writeRemoteMCPError(w, rpcRequest.ID, -32001, "Remote MCP response exceeded the allowed limit")
+		return
+	}
+	if err != nil {
+		resultClass = "remote_error"
+		writeRemoteMCPError(w, rpcRequest.ID, -32000, "Remote MCP service returned an invalid response")
+		return
+	}
+	if rpcRequest.Method == "tools/list" {
 		responseBody, err = proxy.filterToolsListResponse(responseBody)
 		if err != nil {
 			resultClass = "schema_drift"
@@ -348,21 +357,6 @@ func (proxy *remoteMCPProxy) ServeHTTP(w http.ResponseWriter, request *http.Requ
 	w.WriteHeader(response.StatusCode)
 	_, _ = w.Write(responseBody)
 	resultClass = "success"
-}
-
-func decodeRemoteMCPSSEData(contentType string, raw []byte) ([]byte, error) {
-	if !strings.HasPrefix(strings.ToLower(contentType), "text/event-stream") {
-		return raw, nil
-	}
-	for _, line := range bytes.Split(raw, []byte("\n")) {
-		if bytes.HasPrefix(line, []byte("data:")) {
-			data := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
-			if len(data) > 0 {
-				return data, nil
-			}
-		}
-	}
-	return nil, errors.New("Remote MCP SSE response contained no data")
 }
 
 func allowedRemoteMCPMethod(method string) bool {

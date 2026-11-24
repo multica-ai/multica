@@ -12,6 +12,7 @@ import type {
   NotificationGroupKey,
   NotificationPreferences,
 } from "@multica/core/types";
+import { notificationPreferenceValue } from "@multica/core/notification-preferences/patch";
 import { Text } from "@/components/ui/text";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
@@ -21,7 +22,7 @@ import { useUpdateNotificationPreferences } from "@/data/mutations/notification-
 import { useT } from "@/lib/i18n";
 
 const INBOX_GROUPS: {
-  key: Exclude<NotificationGroupKey, "system_notifications" | "chat_replies">;
+  key: Exclude<NotificationGroupKey, "system_notifications" | "chat_replies" | "squad_handoffs">;
   labelKey: string;
   descriptionKey?: string;
 }[] = [
@@ -77,13 +78,10 @@ export default function NotificationsSettingsScreen() {
   const preferences: NotificationPreferences = data?.preferences ?? {};
 
   const onToggle = (key: NotificationGroupKey, enabled: boolean) => {
-    const next: NotificationPreferences = { ...preferences };
-    if (enabled) {
-      // Default is "all" — omitting the key keeps the object clean.
-      delete next[key];
-    } else {
-      next[key] = "muted";
-    }
+    const next: NotificationPreferences = {
+      ...preferences,
+      [key]: enabled ? "all" : "muted",
+    };
     mutation.mutate(next);
   };
 
@@ -116,7 +114,8 @@ export default function NotificationsSettingsScreen() {
         title={t("groups.inbox_notifications")}
       >
         {INBOX_GROUPS.map((group, idx) => {
-          const enabled = preferences[group.key] !== "muted";
+          const enabled =
+            notificationPreferenceValue(preferences, group.key) !== "muted";
           const isLast = idx === INBOX_GROUPS.length - 1;
           return (
             <View key={group.key}>
@@ -136,6 +135,27 @@ export default function NotificationsSettingsScreen() {
                   onCheckedChange={(checked) => onToggle(group.key, checked)}
                 />
               </View>
+              {group.key === "comments" && enabled && (
+                <>
+                  <Separator />
+                  <View className="flex-row items-center pl-8 pr-4 py-3 gap-3">
+                    <View className="flex-1">
+                      <Text className="text-base font-medium text-foreground">
+                        {t("groups.squad_handoffs")}
+                      </Text>
+                      <Text className="text-xs text-muted-foreground mt-0.5">
+                        {t("groups.squad_handoffs_description")}
+                      </Text>
+                    </View>
+                    <Switch
+                      checked={
+                        notificationPreferenceValue(preferences, "squad_handoffs") !== "muted"
+                      }
+                      onCheckedChange={(checked) => onToggle("squad_handoffs", checked)}
+                    />
+                  </View>
+                </>
+              )}
               {!isLast ? <Separator /> : null}
             </View>
           );

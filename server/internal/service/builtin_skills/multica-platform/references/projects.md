@@ -26,6 +26,13 @@ multica project get <project-id> --output json
 multica project resource list <project-id> --output json
 ```
 
+Project progress counts issues: `scope` leaves out cancelled issues, `completed`
+is the done category, and `started` issues are tracked separately without adding
+to `percent`. Read it from `progress` on the project, or from
+`multica project progress` for the weekly history, forecast and the
+per-assignee or per-label breakdown. `multica project activity` lists what
+changed on the project's issues, newest first.
+
 Project resources are mutated through project resource commands/endpoints. Issue
 comments do not create durable project resources.
 
@@ -34,6 +41,10 @@ quick-create task) is bound to a project, the project description is injected
 into the agent's brief under `## Project Context` and written to
 `.multica/project/resources.json` as `project_description`. Use it for
 project-wide rules/context that should apply to every task in the project.
+Point at docs, issues and projects with mention links
+(`[Doc Title](mention://doc/<doc-id>)`, `[MUL-123](mention://issue/<uuid>)`),
+not bare IDs: the project page renders them as links, and agents read the same
+ID out of the link.
 
 Common resource types:
 
@@ -48,6 +59,10 @@ Common resource types:
 ```bash
 multica project list --output json
 multica project get <project-id> --output json
+multica project overview <project-id>                 # project + progress + resources + working agents + recent activity
+multica project progress <project-id> --output json   # scope/completed/started, weekly history, forecast, by assignee and label
+multica project progress <project-id> --by label      # per-label breakdown table
+multica project activity <project-id> --output json   # issue changes in the project, newest first; page with --before <next_cursor>
 multica project create --title "<title>" --repo <github-url> --output json
 multica project create --title "<title>" --start-date 2026-03-01 --due-date 2026-03-31 --output json
 multica project update <project-id> --title "<title>" --output json
@@ -190,8 +205,8 @@ add/update/remove mutate durable workspace state and affect future tasks. Ask be
 A project can use a workflow: its ordered status columns, where a column may
 hand the issue off to a handler — a fixed agent, squad or member, the project
 lead, or the issue's creator. When the issue's project uses one, the per-turn
-prompt carries a `[Project workflow]` block. Its statuses and commands are
-the whole status contract for this issue: the built-in moves in the issues
+prompt carries a `[Project workflow]` block. Its statuses are the whole
+status contract for this issue: the built-in moves in the issues
 reference (`in_progress` on start, `in_review` on delivery) do not apply.
 
 - **The step's scope is its instructions.** A step that hands off carries the
@@ -207,9 +222,12 @@ reference (`in_progress` on start, `in_review` on delivery) do not apply.
 - **Changing the status is the handoff.** Entering a column that hands off
   reassigns the issue to that column's handler and starts their run; a member
   handler is assigned and runs nothing. Nothing advances the status when a run
-  ends: finishing a step means moving the issue to the next status yourself,
-  with the command the block names. A column can also name a "needs changes"
-  status that sends the issue back.
+  ends: finishing a step means moving the issue to the next status yourself.
+  The block is a status map — each status's category, meaning, handler and
+  where its author routes finished work ("Routes") — and you set the
+  status that matches where the issue stands; an older runtime gets the
+  commands to run instead. A column can also name a "needs changes" status
+  that sends the issue back.
 - **Entering a step you handle starts your run.** Even when your own run makes
   the move, a run for the new step queues behind the current one, and the
   write skips your own event wakeups so one change starts one run. Do not add
@@ -224,7 +242,7 @@ reference (`in_progress` on start, `in_review` on delivery) do not apply.
   `workflow_step_moved`, naming who moved it. Do not retry; comment if
   something still needs attention.
 - **The assignee owns the step.** Only the issue's assignee gets the step's
-  instructions and commands. Any other agent on the issue — mentioned in a
+  instructions and is told to move it. Any other agent on the issue — mentioned in a
   comment, say — sees the statuses and leaves them to the assignee unless
   explicitly asked to change them.
 - **No `blocked` column.** When the workflow has none, comment why you cannot

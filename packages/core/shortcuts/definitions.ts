@@ -16,6 +16,10 @@ export type ShortcutActionId =
   | "archiveInboxItem"
   | "unsubscribeArchiveInboxItem"
   | "snoozeInboxItem"
+  | "markInboxUnread"
+  | "nextInboxItem"
+  | "prevInboxItem"
+  | "undoInboxAction"
   | "send"
   | "voiceInput"
   | "goBack"
@@ -123,6 +127,30 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
     id: "snoozeInboxItem",
     category: "general",
     defaultShortcut: createShortcutChord("H"),
+    allowInEditable: false,
+  },
+  {
+    id: "markInboxUnread",
+    category: "general",
+    defaultShortcut: createShortcutChord("U"),
+    allowInEditable: false,
+  },
+  {
+    id: "nextInboxItem",
+    category: "general",
+    defaultShortcut: createShortcutChord("J"),
+    allowInEditable: false,
+  },
+  {
+    id: "prevInboxItem",
+    category: "general",
+    defaultShortcut: createShortcutChord("K"),
+    allowInEditable: false,
+  },
+  {
+    id: "undoInboxAction",
+    category: "general",
+    defaultShortcut: createShortcutChord("Z"),
     allowInEditable: false,
   },
   { id: "send", category: "general", defaultShortcut: primary("Enter"), allowInEditable: true },
@@ -339,10 +367,10 @@ export function formatShortcut(
 
   if (platform === "macos") {
     return [
-      modifiers.primary ? "⌘" : "",
       modifiers.control ? "⌃" : "",
       modifiers.alt ? "⌥" : "",
       modifiers.shift ? "⇧" : "",
+      modifiers.primary ? "⌘" : "",
       modifiers.meta ? "Meta" : "",
       key,
     ].join("");

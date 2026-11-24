@@ -55,10 +55,11 @@ func TestScanDiskUsage_AggregatesAndCategorizes(t *testing.T) {
 	taskA2 := filepath.Join(root, wsA, "bbbbbbbb")
 	writeFile(t, filepath.Join(taskA2, "workdir/notes.md"), 500)
 	mustWriteMeta(t, taskA2, execenv.GCMeta{
-		Kind:          execenv.GCKindChat,
-		ChatSessionID: "chat-1",
-		WorkspaceID:   wsA,
-		CompletedAt:   time.Now().Add(-1 * time.Hour),
+		Kind:           execenv.GCKindChat,
+		ChatSessionID:  "chat-1",
+		WorkspaceID:    wsA,
+		CompletedAt:    time.Now().Add(-1 * time.Hour),
+		LocalDirectory: true,
 	})
 
 	taskB1 := filepath.Join(root, wsB, "cccccccc")
@@ -189,6 +190,9 @@ func TestScanDiskUsage_AggregatesAndCategorizes(t *testing.T) {
 	raw, err := json.Marshal(report)
 	if err != nil {
 		t.Fatalf("marshal report: %v", err)
+	}
+	if got := strings.Count(string(raw), `"local_directory":true`); got != 1 {
+		t.Fatalf("expected exactly one in-place run, got %d: %s", got, raw)
 	}
 	for _, want := range []string{
 		`"kind"`,
