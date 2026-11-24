@@ -7,7 +7,8 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { setApiInstance } from "@multica/core/api";
@@ -60,6 +61,26 @@ afterEach(() => {
 });
 
 describe("Display columns", () => {
+  it("switches axes only for project swimlanes", async () => {
+    const store = renderDisplay(["todo"], (s) => {
+      s.getState().setViewMode("swimlane");
+      s.getState().setSwimlaneGrouping("project");
+    });
+    await userEvent.click(await screen.findByRole("combobox", { name: "Axes" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Project columns / Status rows" }));
+    await waitFor(() => expect(store.getState().swimlaneProjectAxis).toBe("project-columns"));
+  });
+
+  it("omits axes for other swimlane groupings", async () => {
+    renderDisplay(["todo"], (s) => {
+      s.getState().setViewMode("swimlane");
+      s.getState().setSwimlaneGrouping("assignee");
+      s.getState().setSwimlaneProjectAxis("project-columns");
+    });
+    await screen.findByText("Grouping");
+    expect(screen.queryByRole("combobox", { name: "Axes" })).not.toBeInTheDocument();
+  });
+
   it("lists the surface's columns in order and reflects hidden ones", async () => {
     renderDisplay(["todo", "in_progress", "done", "cancelled"], (store) =>
       store.getState().setViewMode("board"),
