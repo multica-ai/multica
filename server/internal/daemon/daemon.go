@@ -7052,6 +7052,11 @@ func providerNeedsInlineSystemPrompt(provider string) bool {
 // Requiring the prior cwd as well would discard reachable history whenever a
 // local_directory task gets a new worktree (#9062). An empty or unavailable
 // store must still drop the resume, even when the cwd matches (#6806).
+// Antigravity keeps every conversation under its global app data directory
+// (<app data dir>/brain/<conversation id>), not under the cwd, so a follow-up
+// in a new workdir can still pass `--conversation` (#11316). If agy cannot load
+// the id after all, the run reports no session and the fresh-session retry
+// covers it.
 // Codex also has a conversation-scoped store for local_directory tasks. A
 // continued worktree may use a new cwd while retaining its branch and rollout.
 // Managed Codex tasks still require the same existing directory.
@@ -7165,7 +7170,7 @@ func gateResumeToReachableSession(task *Task, taskCtx *execenv.TaskContextForEnv
 	var reachable bool
 	if providerUsesPiSessionFile(provider) {
 		reachable = piSessionResumable(task.PriorSessionID, refusesMissingSessionCwd)
-	} else if provider == "hermes" {
+	} else if provider == "hermes" || provider == "antigravity" {
 		reachable = sessionHomeReachable
 	} else if provider == "codex" && codexWorktreeResumeEligible {
 		reachable = sessionHomeReachable
