@@ -5580,14 +5580,24 @@ func TestReportTaskResult_CancelledParentStillReportsTerminalState(t *testing.T)
 // actually do anything (e.g. provider 429 / out-of-credit).
 func TestReportTaskResult_NonCompletedHitsFailEndpoint(t *testing.T) {
 	t.Parallel()
+	const disconnect = `traecli session/prompt failed: session/prompt: Internal error (code=-32603, data={"message":"stream disconnected before completion: llm response empty stream","trae_stream_errors":[{"trae_error_info":{"response_stream_disconnected":{"http_status_code":null}}}]})`
 
 	cases := []struct {
-		name              string
-		status            string
-		comment           string
-		failureReasonIn   string
-		wantFailureReason string
+		name               string
+		status             string
+		comment            string
+		failureReasonIn    string
+		wantFailureReason  string
+		noToolCallsStarted bool
 	}{
+		{
+			name:   "Trae disconnect without proof is safe for an older server",
+			status: "blocked", comment: disconnect, failureReasonIn: "agent_error.provider_network", wantFailureReason: "agent_error.provider_server_error",
+		},
+		{
+			name:   "Trae disconnect with verified history",
+			status: "blocked", comment: disconnect, failureReasonIn: "agent_error.provider_network", wantFailureReason: "agent_error.provider_network", noToolCallsStarted: true,
+		},
 		{
 			name:              "blocked with explicit reason preserves it",
 			status:            "blocked",
@@ -5638,11 +5648,12 @@ func TestReportTaskResult_NonCompletedHitsFailEndpoint(t *testing.T) {
 
 			d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
 			d.reportTaskResult(context.Background(), "task-x", TaskResult{
-				Status:        tc.status,
-				Comment:       tc.comment,
-				SessionID:     "ses-x",
-				WorkDir:       "/tmp/x",
-				FailureReason: tc.failureReasonIn,
+				Status:             tc.status,
+				Comment:            tc.comment,
+				SessionID:          "ses-x",
+				WorkDir:            "/tmp/x",
+				FailureReason:      tc.failureReasonIn,
+				NoToolCallsStarted: tc.noToolCallsStarted,
 			}, slog.Default())
 
 			rec.mu.Lock()
@@ -5655,6 +5666,9 @@ func TestReportTaskResult_NonCompletedHitsFailEndpoint(t *testing.T) {
 			}
 			if got := rec.payload["failure_reason"]; got != tc.wantFailureReason {
 				t.Errorf("failure_reason: got %v, want %q", got, tc.wantFailureReason)
+			}
+			if got, present := rec.payload["no_tool_calls_started"]; present != tc.noToolCallsStarted || (present && got != true) {
+				t.Errorf("no_tool_calls_started = %v, present %t, want present only for a verified turn", got, present)
 			}
 			if rec.payload["session_id"] != "ses-x" {
 				t.Errorf("session_id should be forwarded on failure paths so chat resume keeps working, got %v", rec.payload["session_id"])

@@ -171,6 +171,8 @@ Les valeurs ci-dessous sont celles de la configuration par défaut du serveur.
 | `waiting_local_directory` | En attente du répertoire local et de la capacité d'exécution | Pas de délai propre ; reprend le démarrage lorsque le répertoire et un slot d'exécution du daemon sont disponibles |
 | `running` | L'outil de codage IA est en cours d'exécution | Pas de durée maximale fixe ; la vivacité suit le signal de vie du runtime — un toutes les 15 secondes ; un runtime qui perd son signal de vie est marqué hors ligne au plus tard en 3 minutes environ. Ses exécutions n'échouent qu'une fois le signal de vie absent au-delà du délai de grâce de reconnexion (`MULTICA_RUNTIME_RECONNECT_GRACE`, 3 heures par défaut) ; un redémarrage du daemon les récupère directement |
 
+En cas de coupure confirmée du flux Trae CLI avec l’erreur `llm response empty stream`, le daemon doit aussi vérifier qu’aucun appel d’outil n’a démarré pendant ce tour avant de relancer automatiquement l’exécution. Si un appel a démarré ou si l’historique est indisponible, consultez le journal d’exécution avant de relancer manuellement.
+
 La relance automatique ne couvre que les défaillances transitoires ci-dessous, et ne s'applique qu'aux exécutions rattachées à une tâche ou à une discussion (hors mode **Exécution seule** des automatisations) :
 
 | Motif d'échec relancé automatiquement | Nombre maximal de tentatives |

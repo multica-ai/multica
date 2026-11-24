@@ -171,6 +171,8 @@ The numbers below are the server's defaults.
 | `waiting_local_directory` | Waiting for the local directory and execution capacity | No timeout of its own; resumes startup once the directory and a daemon execution slot are available |
 | `running` | The AI coding tool is executing | No fixed duration cap; liveness follows the runtime heartbeat — one every 15 seconds; a runtime that loses its heartbeat is marked offline within about 3 minutes at the latest. Its runs fail only once the heartbeat has been missing longer than the reconnect grace (`MULTICA_RUNTIME_RECONNECT_GRACE`, 3 hours by default); a daemon restart reclaims them directly |
 
+For a confirmed Trae CLI `llm response empty stream` disconnect, automatic retry also requires the daemon to verify that no tool call started in the turn. If a tool started or the execution history is unavailable, check the execution log before retrying manually.
+
 Automatic retry covers only the transient faults below, and only applies to runs attached to an issue or a chat (excluding the Autopilot **run only** mode):
 
 | Auto-retryable failure reason | Attempt ceiling |
