@@ -1239,6 +1239,7 @@
     "remove_parent_issue": "Убрать родительскую задачу",
     "remove_parent_issue_success": "Родительская задача убрана",
     "add_sub_issue": "Добавить подзадачу...",
+    "add_blocker": "Добавить зависимость...",
     "delete_issue": "Удалить задачу",
     "mark_duplicate": "Отметить как дубликат...",
     "locate_in_sidebar": "Показать на боковой панели",

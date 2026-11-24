@@ -1068,6 +1068,7 @@
     "remove_parent_issue": "상위 태스크 제거",
     "remove_parent_issue_success": "상위 태스크를 제거했습니다",
     "add_sub_issue": "하위 태스크 추가...",
+    "add_blocker": "선행 작업 추가...",
     "delete_issue": "태스크 삭제",
     "mark_duplicate": "중복으로 표시...",
     "open_in_new_window": "새 창에서 열기"

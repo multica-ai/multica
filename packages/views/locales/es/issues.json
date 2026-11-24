@@ -1033,6 +1033,7 @@
     "remove_parent_issue": "Quitar tarea principal",
     "remove_parent_issue_success": "Tarea principal quitada",
     "add_sub_issue": "Añadir subtarea...",
+    "add_blocker": "Añadir requisito...",
     "delete_issue": "Eliminar tarea",
     "mark_duplicate": "Marcar como duplicada...",
     "rename_issue": "Renombrar tarea",

@@ -1068,6 +1068,7 @@
     "remove_parent_issue": "移除父任务",
     "remove_parent_issue_success": "已移除父任务",
     "add_sub_issue": "添加子任务...",
+    "add_blocker": "添加前置任务...",
     "delete_issue": "删除任务",
     "mark_duplicate": "标记为重复...",
     "open_in_new_window": "在新窗口中打开"
