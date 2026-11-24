@@ -923,6 +923,15 @@ func (s *TaskService) captureTaskFailed(ctx context.Context, task db.AgentTaskQu
 		s.Metrics.RecordTaskTerminal(util.UUIDToString(task.ID), source, runtimeMode, task.Status, taskRunSeconds(task), taskTotalSeconds(task), task.Attempt)
 		s.Metrics.RecordTaskFailed(source, runtimeMode, failureReason)
 	}
+	// Revoke the task's mat_ tokens, as captureTaskCancelled does. The daemon
+	// fail handler revokes too, but sweeper, orphan-recovery and other
+	// server-side failures never reach it, and their tokens kept working until
+	// the 24h expiry (GitHub #11378). Failure is non-fatal; expiry stays the
+	// durable guard.
+	if err := s.Queries.DeleteTaskTokensByTask(ctx, task.ID); err != nil {
+		slog.Warn("fail task: failed to revoke task tokens",
+			"task_id", util.UUIDToString(task.ID), "error", err)
+	}
 }
 
 func (s *TaskService) captureTaskCancelled(ctx context.Context, task db.AgentTaskQueue) {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -719,6 +720,53 @@ func TestOfflineRuntimeTasksRespectReconnectGrace(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("task was not failed after reconnect grace elapsed")
+	}
+}
+
+// A task the sweeper fails never reaches the daemon's complete/fail handlers,
+// so its mat_ token must stop authenticating because the task is terminal,
+// not hours later when the token expires (GitHub #11378).
+func TestOfflineRuntimeFailureEndsTaskToken(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	ctx := context.Background()
+	issueID, agentID, taskID := setupSweeperTestFixture(t, "running")
+	t.Cleanup(func() { cleanupSweeperFixture(t, issueID, agentID) })
+	token := mintAgentTaskToken(t, agentID, taskID, testUserID)
+
+	getIssue := func() int {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, testServer.URL+"/api/issues/"+issueID, nil)
+		if err != nil {
+			t.Fatalf("build request: %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := getIssue(); code != http.StatusOK {
+		t.Fatalf("running task's token: HTTP %d, want 200", code)
+	}
+
+	setAgentRuntimeOffline(t, agentID, defaultRuntimeReconnectGrace+time.Hour)
+	queries := db.New(testPool)
+	sweepOfflineRuntimeTasks(ctx, queries, service.NewTaskService(queries, testPool, nil, events.New()), defaultRuntimeReconnectGrace)
+	var status string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status); err != nil {
+		t.Fatalf("load task status: %v", err)
+	}
+	if status != "failed" {
+		t.Fatalf("task status after sweep = %q, want failed", status)
+	}
+
+	if code := getIssue(); code != http.StatusUnauthorized {
+		t.Fatalf("failed task's token: HTTP %d, want 401", code)
 	}
 }
 
