@@ -133,5 +133,128 @@
   },
   "duration": {
     "less_than_minute": "<1分钟"
+  },
+  "contribution": {
+    "tab": "贡献",
+    "views": {
+      "label": "贡献视图",
+      "overview": "总览",
+      "members": "成员"
+    },
+    "status": {
+      "todo": "待办",
+      "in_progress": "进行中",
+      "in_review": "待审核",
+      "done": "已完成",
+      "cancelled": "已取消"
+    },
+    "kind": {
+      "created": "创建",
+      "commented": "评论",
+      "status_changed": "状态变更"
+    },
+    "kpi": {
+      "total": "存量 Issue",
+      "total_hint": "当前未完成且未取消，不限创建时间",
+      "active": "活跃 Issue",
+      "active_hint": "期间有活动、且期末未完成或取消",
+      "created": "创建 Issue",
+      "created_hint": "人 {{member}} · Agent {{agent}}",
+      "completed": "完成 Issue",
+      "completed_hint": "重开后再完成不重复计",
+      "open": "未完成 Issue",
+      "open_hint": "进行中 {{progress}} · 待审核 {{review}}"
+    },
+    "trend": {
+      "title": "团队活跃趋势",
+      "active": "活跃",
+      "collaborated": "协作",
+      "delivered": "交付"
+    },
+    "heatmap": {
+      "title": "团队活跃日历",
+      "caption": "近 26 周",
+      "less": "少",
+      "more": "多",
+      "cell": "{{date}} · {{count}} 个活跃 Issue"
+    },
+    "board": {
+      "title": "排行榜",
+      "actor_type_label": "成员类型",
+      "people": "人",
+      "agents": "Agent",
+      "participation": "参与榜",
+      "collaboration": "协作榜",
+      "delivery": "交付榜",
+      "unit": "个 Issue",
+      "caption_people": "{{count}} 位成员 · 与 Agent 榜分开统计",
+      "caption_agents": "{{count}} 个 Agent · 与人榜分开统计",
+      "system_completed": "系统自动完成 {{count}} 个 Issue，单列不进排名",
+      "empty": "所选范围内暂无活动。",
+      "restricted": "受限的智能体",
+      "unknown": "已移除"
+    },
+    "members": {
+      "title": "成员贡献",
+      "member": "成员",
+      "composition": "贡献构成",
+      "created": "创建",
+      "commented": "评论",
+      "status_changed": "状态变更",
+      "completed": "交付",
+      "participated": "参与 Issue",
+      "people_group": "人 · {{count}}",
+      "agents_group": "Agent · {{count}}",
+      "note": "参与 Issue 按成员去重；同一 Issue 可同时出现在人和 Agent 两组，两组合计不等于团队总量。",
+      "trend_title": "成员贡献趋势",
+      "add_member": "添加成员",
+      "remove": "移除 {{name}}",
+      "metric_label": "贡献类型",
+      "pick_hint": "添加成员，对比每周贡献。",
+      "metric_participated": "参与",
+      "metric_collaborated": "协作",
+      "metric_delivered": "交付"
+    },
+    "activity": {
+      "title": "活动明细",
+      "caption": "{{count}} 条事件",
+      "export": "导出 CSV",
+      "date": "日期",
+      "actor": "成员",
+      "event": "事件",
+      "issue": "Issue",
+      "issue_title": "标题",
+      "project": "项目",
+      "status": "当前状态",
+      "no_project": "无项目",
+      "empty": "所选范围内暂无事件。",
+      "prev": "上一页",
+      "next": "下一页",
+      "range": "{{from}}–{{to}} / {{total}}"
+    },
+    "empty": {
+      "title": "暂无 Issue 活动",
+      "body": "创建 Issue、评论和状态变更后，这里会显示团队贡献。"
+    },
+    "issues": {
+      "title": "Issue 明细",
+      "sort_label": "Issue 排序",
+      "sort": {
+        "interactions": "交互次数",
+        "participants": "参与人数",
+        "completion": "完成时长",
+        "recent": "最近活动"
+      },
+      "caption": "{{count}} 个有活动的 Issue",
+      "empty": "所选范围内没有有活动的 Issue。",
+      "hint": "交互次数 = 评论 + 状态变更。",
+      "issue": "Issue",
+      "issue_title": "标题",
+      "status": "当前状态",
+      "participants": "参与人数",
+      "comments": "评论数",
+      "completion_time": "完成时长",
+      "interactions": "交互次数"
+    }
   }
 }

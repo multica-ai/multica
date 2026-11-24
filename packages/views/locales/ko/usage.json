@@ -133,5 +133,128 @@
   },
   "duration": {
     "less_than_minute": "1분 미만"
+  },
+  "contribution": {
+    "tab": "기여",
+    "views": {
+      "label": "Contribution view",
+      "overview": "개요",
+      "members": "멤버"
+    },
+    "status": {
+      "todo": "할 일",
+      "in_progress": "진행 중",
+      "in_review": "검토 중",
+      "done": "완료",
+      "cancelled": "취소됨"
+    },
+    "kind": {
+      "created": "Created",
+      "commented": "Commented",
+      "status_changed": "Status changed"
+    },
+    "kpi": {
+      "total": "잔여 Issue",
+      "total_hint": "완료·취소되지 않은 Issue(생성일 무관)",
+      "active": "활성 Issue",
+      "active_hint": "기간 내 활동이 있고 기간 말에 완료·취소되지 않음",
+      "created": "생성된 Issue",
+      "created_hint": "People {{member}} · Agents {{agent}}",
+      "completed": "완료된 Issue",
+      "completed_hint": "Reopened and completed again counts once",
+      "open": "미완료 Issue",
+      "open_hint": "In progress {{progress}} · In review {{review}}"
+    },
+    "trend": {
+      "title": "팀 활동",
+      "active": "Active",
+      "collaborated": "Collaborated",
+      "delivered": "Delivered"
+    },
+    "heatmap": {
+      "title": "Activity calendar",
+      "caption": "Last 26 weeks",
+      "less": "Less",
+      "more": "More",
+      "cell": "{{date}} · {{count}} active issues"
+    },
+    "board": {
+      "title": "순위표",
+      "actor_type_label": "Actor type",
+      "people": "사람",
+      "agents": "에이전트",
+      "participation": "Participation",
+      "collaboration": "Collaboration",
+      "delivery": "Delivery",
+      "unit": "issues",
+      "caption_people": "{{count}} people · ranked apart from agents",
+      "caption_agents": "{{count}} agents · ranked apart from people",
+      "system_completed": "{{count}} issues completed by the system are not ranked",
+      "empty": "No activity in this range.",
+      "restricted": "Restricted agents",
+      "unknown": "Removed"
+    },
+    "members": {
+      "title": "멤버 기여",
+      "member": "Member",
+      "composition": "Breakdown",
+      "created": "Created",
+      "commented": "Commented",
+      "status_changed": "Status changes",
+      "completed": "Delivered",
+      "participated": "Issues",
+      "people_group": "People · {{count}}",
+      "agents_group": "Agents · {{count}}",
+      "note": "Issues are counted once per member. One issue can appear under both people and agents, so the groups do not add up to the team total.",
+      "trend_title": "Member trend",
+      "add_member": "Add member",
+      "remove": "Remove {{name}}",
+      "metric_label": "Contribution type",
+      "pick_hint": "Add members to compare their weekly contribution.",
+      "metric_participated": "참여",
+      "metric_collaborated": "협업",
+      "metric_delivered": "완료"
+    },
+    "activity": {
+      "title": "활동",
+      "caption": "{{count}} events",
+      "export": "Export CSV",
+      "date": "Date",
+      "actor": "Member",
+      "event": "Event",
+      "issue": "Issue",
+      "issue_title": "Title",
+      "project": "Project",
+      "status": "Status",
+      "no_project": "No project",
+      "empty": "No events in this range.",
+      "prev": "Previous page",
+      "next": "Next page",
+      "range": "{{from}}–{{to}} of {{total}}"
+    },
+    "empty": {
+      "title": "아직 Issue 활동이 없습니다",
+      "body": "Created issues, comments and status changes will show up here."
+    },
+    "issues": {
+      "title": "Issue 목록",
+      "sort_label": "Issue 정렬",
+      "sort": {
+        "interactions": "상호작용 수",
+        "participants": "참여 인원",
+        "completion": "완료 소요 시간",
+        "recent": "최근 활동"
+      },
+      "caption": "활동이 있는 Issue {{count}}개",
+      "empty": "이 기간에 활동이 있는 Issue가 없습니다.",
+      "hint": "상호작용 수 = 댓글 + 상태 변경.",
+      "issue": "Issue",
+      "issue_title": "Title",
+      "status": "Status",
+      "participants": "Participants",
+      "comments": "Comments",
+      "completion_time": "Time to done",
+      "interactions": "상호작용 수"
+    }
   }
 }

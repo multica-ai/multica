@@ -135,5 +135,128 @@
   },
   "duration": {
     "less_than_minute": "<1m"
+  },
+  "contribution": {
+    "tab": "Contribution",
+    "views": {
+      "label": "Contribution view",
+      "overview": "Overview",
+      "members": "Members"
+    },
+    "status": {
+      "todo": "Todo",
+      "in_progress": "In progress",
+      "in_review": "In review",
+      "done": "Done",
+      "cancelled": "Cancelled"
+    },
+    "kind": {
+      "created": "Created",
+      "commented": "Commented",
+      "status_changed": "Status changed"
+    },
+    "kpi": {
+      "total": "Issue stock",
+      "total_hint": "Not done or cancelled, whenever created",
+      "active": "Active issues",
+      "active_hint": "Activity in range, not closed by its end",
+      "created": "Created issues",
+      "created_hint": "People {{member}} · Agents {{agent}}",
+      "completed": "Completed issues",
+      "completed_hint": "Reopened and completed again counts once",
+      "open": "Unfinished issues",
+      "open_hint": "In progress {{progress}} · In review {{review}}"
+    },
+    "trend": {
+      "title": "Team activity",
+      "active": "Active",
+      "collaborated": "Collaborated",
+      "delivered": "Delivered"
+    },
+    "heatmap": {
+      "title": "Activity calendar",
+      "caption": "Last 26 weeks",
+      "less": "Less",
+      "more": "More",
+      "cell": "{{date}} · {{count}} active issues"
+    },
+    "board": {
+      "title": "Leaderboard",
+      "actor_type_label": "Actor type",
+      "people": "People",
+      "agents": "Agents",
+      "participation": "Participation",
+      "collaboration": "Collaboration",
+      "delivery": "Delivery",
+      "unit": "issues",
+      "caption_people": "{{count}} people · ranked apart from agents",
+      "caption_agents": "{{count}} agents · ranked apart from people",
+      "system_completed": "{{count}} issues completed by the system are not ranked",
+      "empty": "No activity in this range.",
+      "restricted": "Restricted agents",
+      "unknown": "Removed"
+    },
+    "members": {
+      "title": "Member contribution",
+      "member": "Member",
+      "composition": "Breakdown",
+      "created": "Created",
+      "commented": "Commented",
+      "status_changed": "Status changes",
+      "completed": "Delivered",
+      "participated": "Issues",
+      "people_group": "People · {{count}}",
+      "agents_group": "Agents · {{count}}",
+      "note": "Issues are counted once per member. One issue can appear under both people and agents, so the groups do not add up to the team total.",
+      "trend_title": "Member trend",
+      "add_member": "Add member",
+      "remove": "Remove {{name}}",
+      "metric_label": "Contribution type",
+      "pick_hint": "Add members to compare their weekly contribution.",
+      "metric_participated": "Participated",
+      "metric_collaborated": "Collaborated",
+      "metric_delivered": "Delivered"
+    },
+    "activity": {
+      "title": "Activity",
+      "caption": "{{count}} events",
+      "export": "Export CSV",
+      "date": "Date",
+      "actor": "Member",
+      "event": "Event",
+      "issue": "Issue",
+      "issue_title": "Title",
+      "project": "Project",
+      "status": "Status",
+      "no_project": "No project",
+      "empty": "No events in this range.",
+      "prev": "Previous page",
+      "next": "Next page",
+      "range": "{{from}}–{{to}} of {{total}}"
+    },
+    "empty": {
+      "title": "No issue activity yet",
+      "body": "Created issues, comments and status changes will show up here."
+    },
+    "issues": {
+      "title": "Issues",
+      "sort_label": "Sort issues by",
+      "sort": {
+        "interactions": "Interactions",
+        "participants": "Participants",
+        "completion": "Time to done",
+        "recent": "Latest activity"
+      },
+      "caption": "{{count}} issues with activity",
+      "empty": "No issues with activity in this range.",
+      "hint": "Interactions are comments plus status changes.",
+      "issue": "Issue",
+      "issue_title": "Title",
+      "status": "Status",
+      "participants": "Participants",
+      "comments": "Comments",
+      "completion_time": "Time to done",
+      "interactions": "Interactions"
+    }
   }
 }
