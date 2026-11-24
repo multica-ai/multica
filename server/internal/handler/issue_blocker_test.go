@@ -358,3 +358,39 @@ func TestIssueBlockerGuestSeesOnlyItsProjectsReferences(t *testing.T) {
 		t.Fatalf("member lost blockers: %+v", got)
 	}
 }
+
+// A release names the blockers to the agent it starts. The timeline and the
+// inbox are read by people with different access, so neither names them.
+func TestIssueBlockerReleaseHidesReferencesFromGuest(t *testing.T) {
+	f := newGuestFixture(t)
+	ctx := context.Background()
+	for _, blocker := range []string{f.otherIssue, f.looseIssue} {
+		if err := service.AddIssueBlocker(ctx, testHandler.Queries, parseUUID(testWorkspaceID), parseUUID(f.sharedIssue), parseUUID(blocker), "member", parseUUID(testUserID)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		dbfx.Exec(t, "DELETE FROM issue_blocker WHERE issue_id=$1", f.sharedIssue)
+		dbfx.Exec(t, "DELETE FROM inbox_item WHERE issue_id=$1", f.sharedIssue)
+		cleanupChildDoneIssue(f.sharedIssue)
+	})
+	dbfx.Exec(t, "UPDATE issue SET status='todo',assignee_type='member',assignee_id=$2 WHERE id=$1", f.sharedIssue, f.guest)
+	dbfx.Exec(t, "UPDATE issue SET status='done' WHERE id = ANY($1::uuid[])", []string{f.otherIssue, f.looseIssue})
+	svc := service.IssueWakeupService{Tasks: testHandler.TaskService}
+	if err := svc.TickWorkspaces(ctx, parseUUID(testWorkspaceID)); err != nil {
+		t.Fatal(err)
+	}
+	var inbox string
+	dbfx.QueryRow(t, "SELECT details::text FROM inbox_item WHERE issue_id=$1 AND type='blockers_done'", f.sharedIssue).Scan(&inbox)
+	timeline := guestRequest(t, testHandler.ListTimeline, f.guest, http.MethodGet, "/api/issues/"+f.sharedIssue+"/timeline", nil, "id", f.sharedIssue).Want(http.StatusOK).Body.String()
+	if !strings.Contains(timeline, "wakeup_triggered") {
+		t.Fatalf("release left no timeline entry: %s", timeline)
+	}
+	for name, got := range map[string]string{"timeline": timeline, "inbox": inbox} {
+		for _, secret := range []string{f.otherIssue, f.looseIssue, f.marker + " other issue", f.marker + " loose issue"} {
+			if strings.Contains(got, secret) {
+				t.Errorf("guest %s names a blocker it can't open (%s): %s", name, secret, got)
+			}
+		}
+	}
+}
