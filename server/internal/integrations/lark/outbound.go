@@ -241,6 +241,10 @@ type Patcher struct {
 	mediaBudget time.Duration
 	spawn       func(func())
 	cfg         PatcherConfig
+
+	// docComments answers cloud-document comment sessions; nil when the
+	// transport has no comment methods (stubs, fakes).
+	docComments docCommentAPIClient
 }
 
 // NewPatcher constructs a Patcher bound to its dependencies. The
@@ -264,6 +268,7 @@ func NewPatcher(queries PatcherQueries, credentials CredentialsResolver, client 
 	if m, ok := client.(mediaAPIClient); ok {
 		p.media = m
 	}
+	p.docComments, _ = client.(docCommentAPIClient)
 	return p
 }
 
@@ -384,6 +389,10 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 		agentName = agent.Name
 	}
 
+	if route, ok := docCommentRouteFromConfig(binding.Config); ok {
+		return p.answerDocComment(ctx, creds, route, binding, inst.WorkspaceID, agentName, e)
+	}
+
 	switch e.Type {
 	case protocol.EventChatDone:
 		return p.sendChatReply(ctx, creds, binding, mentionOpenID(binding), inst.WorkspaceID, e.Payload)
@@ -420,6 +429,10 @@ func (p *Patcher) sweepTypingForTask(ctx context.Context, taskID pgtype.UUID, ta
 	if delivery.ChannelType != channelTypeFeishu || !delivery.ChannelMessageID.Valid || delivery.ChannelMessageID.String == "" {
 		return
 	}
+	if _, ok := docCommentRouteFromConfig(delivery.Config); ok {
+		// Comment triggers never get an IM reaction to clear.
+		return
+	}
 	if covered[uuidString(delivery.InstallationID)+"/"+delivery.ChannelMessageID.String] {
 		return
 	}
@@ -440,6 +453,33 @@ func (p *Patcher) sweepTypingForTask(ctx context.Context, taskID pgtype.UUID, ta
 		return
 	}
 	p.typingIndicator.SweepMessage(ctx, creds, delivery.ChannelMessageID.String)
+}
+
+// answerDocComment posts a comment session's answer, or its failure notice,
+// as comment text in the originating thread. Comments render neither cards
+// nor Markdown, and agent files have no comment equivalent: they stay on the
+// Multica reply.
+func (p *Patcher) answerDocComment(ctx context.Context, creds InstallationCredentials, route docCommentRoute, binding ChatSessionBinding, workspaceID pgtype.UUID, agentName string, e events.Event) error {
+	var text string
+	switch e.Type {
+	case protocol.EventChatDone:
+		text = chatDoneContent(e.Payload)
+		if text == "" {
+			return nil
+		}
+		text = p.linkReplyReferences(ctx, workspaceID, text)
+	case protocol.EventTaskFailed:
+		text = "Run failed."
+		if msg := errorMessageFromPayload(e.Payload); msg != "" {
+			text = "Run failed: " + msg
+		}
+		if agentName != "" {
+			text = agentName + ": " + text
+		}
+	default:
+		return nil
+	}
+	return postDocCommentText(ctx, p.docComments, creds, route, mentionOpenID(binding), text)
 }
 
 // mentionOpenID returns the Feishu open_id to @-mention on this reply, or ""

@@ -189,7 +189,10 @@ type feishuSessionBinder struct{ session chatSession }
 // binding's config when the binding key is a composite (Lark topic): the real
 // chat id lives here so the outbound path can post back.
 type larkBindingConfig struct {
-	ChatID string `json:"chat_id"`
+	ChatID string `json:"chat_id,omitempty"`
+	// DocComment routes a cloud-document comment session's answers back to
+	// the comment thread (doc_comment.go).
+	DocComment *docCommentRoute `json:"doc_comment,omitempty"`
 }
 
 // larkSessionRouting derives the session-isolation key (stored as
@@ -198,10 +201,17 @@ type larkBindingConfig struct {
 // the chat id and the key alone routes outbound (no config). A message inside
 // a Lark topic (话题, thread_id present) is isolated by topic — key =
 // "chat:thread" — so two @bot topics in one group are two sessions (the same
-// model as Slack's channel:threadRoot; see engine.EnsureSessionInput). Pure
+// model as Slack's channel:threadRoot; see engine.EnsureSessionInput). A
+// cloud-document comment already carries its comment-session key as the chat
+// id; its config holds the route the answer is posted back to. Pure
 // function so the isolation contract is unit-tested without a DB.
 func larkSessionRouting(msg channel.InboundMessage) (bindingKey string, config []byte) {
 	chatID := msg.Source.ChatID
+	if lm, err := larkMsgFromRaw(msg); err == nil && lm.DocComment != nil {
+		route := lm.DocComment.route()
+		cfg, _ := json.Marshal(larkBindingConfig{DocComment: &route})
+		return chatID, cfg
+	}
 	if msg.Source.ChatType != channel.ChatTypeGroup || msg.Source.ThreadID == "" {
 		return chatID, nil
 	}
@@ -326,6 +336,10 @@ func (r *feishuTypingNotifier) OnIngested(ctx context.Context, inst engine.Resol
 		return
 	}
 	lm, _ := larkMsgFromRaw(msg)
+	if lm.DocComment != nil {
+		r.mgr.AckDocComment(ctx, larkInst, *lm.DocComment)
+		return
+	}
 	r.mgr.Add(ctx, larkInst, sessionID, msg.MessageID, lm.CreateTime, chatMessageID)
 }
 

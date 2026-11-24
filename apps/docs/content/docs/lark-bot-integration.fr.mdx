@@ -67,6 +67,10 @@ En message direct comme en groupe, le prompt de chaque exécution indique aussi 
 
 Lorsque plusieurs messages sont regroupés dans une seule exécution, `message_id` désigne le dernier message de ce lot et `sender_open_id` son expéditeur. Lors de la récupération d'une ancienne exécution dans un sujet, `thread_id` peut être présent sans `message_id`.
 
+### Commentaires de documents
+
+Dans un document cloud Feishu (Docs, Sheets, Slides, etc.), mentionnez `@Bot` dans un commentaire et décrivez votre besoin. Chaque fil de commentaires sur une sélection de texte est une conversation distincte ; une fois que le bot a répondu dans un fil, les réponses suivantes de ce fil lui parviennent sans nouvelle mention `@Bot`. Les commentaires sur l'ensemble du document partagent une même conversation par fichier ; comme Feishu n'autorise pas les réponses à ces commentaires, le bot répond par un nouveau commentaire qui vous mentionne. Chaque exécution inclut le titre et le lien du document, le texte sélectionné et les réponses précédentes du fil ; l'agent ne lit le document lui-même que s'il dispose de son propre accès à Feishu. Les réponses sont en texte brut, et les fichiers produits par l'agent restent dans Multica.
+
 ### Créer une tâche
 
 Envoyez :
@@ -113,6 +117,7 @@ Redémarrez le serveur API, puis connectez le bot depuis la page **Messagerie** 
 - **Le bot demande d'associer le compte** : ouvrez le lien d'association et connectez-vous avec le compte Multica de cet espace de travail.
 - **Le bot ne s'exécute pas** : vérifiez si l'agent est archivé et si le [runtime](/daemon-runtimes) qu'il utilise est en ligne.
 - **Le bot ne répond jamais** : l'application doit transmettre les événements via une connexion longue ; Multica n'a pas de point de terminaison webhook. Dans la console développeur Feishu/Lark, ouvrez **Events & Callbacks → Event Configuration** et vérifiez que la méthode d'abonnement est la connexion longue et non une URL de requête, que `im.message.receive_v1` est bien souscrit, et que la version de l'application qui porte cette configuration est publiée (et approuvée, si le tenant fait valider les publications). Une application configurée avec une URL de requête s'associe quand même, affiche **En attente du premier message**, mais ne reçoit silencieusement rien.
+- **Le bot ignore les commentaires de documents** : dans la console développeur, vérifiez que `drive.notice.comment_add_v1` est souscrit et que l'application peut lire et ajouter des commentaires (`docs:document.comment:read`, `docs:document.comment:create`), puis publiez la version. Le bot doit aussi pouvoir consulter et commenter le document ; partagez le document avec le bot si ce n'est pas le cas.
 
 ## Étapes suivantes
 

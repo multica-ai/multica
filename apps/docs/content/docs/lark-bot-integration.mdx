@@ -67,6 +67,10 @@ In both direct messages and group chats, each run's prompt also lists the Feishu
 
 When several messages are combined into one run, `message_id` identifies the last message in that batch and `sender_open_id` identifies that message's sender. A recovered older topic run may include `thread_id` without `message_id`.
 
+### Document comments
+
+In a Feishu cloud document (Docs, Sheets, Slides and so on), `@Bot` in a comment and describe what you need. Each comment thread on a text selection is its own conversation; once the Bot has answered in a thread, further replies there reach it without another `@Bot`. Whole-document comments on one file share a conversation, and because Feishu does not allow replies to them, the Bot answers with a new comment that @-mentions you. Each run includes the document's title and link, the selected text, and the earlier replies in the thread; the agent reads the document itself only if it has its own Feishu access. Answers are plain text, and files the agent produces stay in Multica.
+
 ### Create an issue
 
 Send:
@@ -113,6 +117,7 @@ Restart the API server, then connect the Bot from the agent's **Messaging** sect
 - **The Bot asks for account binding**: open the binding link and sign in with the Multica account for that workspace.
 - **The Bot doesn't run**: check whether the agent is archived and whether the [runtime](/daemon-runtimes) it uses is online.
 - **The Bot never replies at all**: the app must push events over a long connection; Multica has no webhook endpoint. In the Feishu/Lark developer console, open **Events & Callbacks → Event Configuration** and confirm that the subscription method is the long connection rather than a request URL, that `im.message.receive_v1` is subscribed, and that the app version carrying that configuration is published (and approved, where the tenant reviews releases). An app set to a request URL still binds, shows **Waiting for first message**, and silently receives nothing.
+- **The Bot ignores document comments**: in the developer console, confirm that `drive.notice.comment_add_v1` is subscribed and that the app may read and add comments (`docs:document.comment:read`, `docs:document.comment:create`), then publish the version. The Bot must also be able to view and comment on the document; share the document with the Bot if it cannot.
 
 ## Next steps
 

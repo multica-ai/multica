@@ -255,7 +255,11 @@ func (r *LarkOutcomeReplier) sendBindingPrompt(ctx context.Context, inst Install
 		BindURL:        bindURL,
 	}); err != nil {
 		if msg.ChatType == ChatTypeGroup && isBindingPromptUnavailable(err) {
-			if fallbackErr := r.sendChatNotice(ctx, inst, msg, bindingPromptUnavailableCopy); fallbackErr != nil {
+			copy := bindingPromptUnavailableCopy
+			if msg.DocComment != nil {
+				copy = bindingPromptUnavailableDocCommentCopy
+			}
+			if fallbackErr := r.sendChatNotice(ctx, inst, msg, copy); fallbackErr != nil {
 				return fmt.Errorf("send binding prompt fallback failed after private prompt unavailable: %v: %w", err, fallbackErr)
 			}
 			return nil
@@ -282,6 +286,9 @@ func (r *LarkOutcomeReplier) sendIssueOutcome(ctx context.Context, inst Installa
 	text := issueCreatedText(res, r.appURL)
 	if res.IssueDuplicate {
 		text = issueDuplicateText(res, r.appURL)
+	}
+	if msg.DocComment != nil {
+		return r.replyDocComment(ctx, creds, msg, text)
 	}
 	// Share the Patcher's classified fallback: a thread reply that
 	// fails because the topic cannot receive it (recalled trigger,
@@ -372,6 +379,9 @@ func (r *LarkOutcomeReplier) sendChatNotice(ctx context.Context, inst Installati
 	if err != nil {
 		return err
 	}
+	if msg.DocComment != nil {
+		return r.replyDocComment(ctx, creds, msg, body)
+	}
 	header := r.noticeHeader
 	if agent, aerr := r.queries.GetAgent(ctx, inst.AgentID); aerr == nil && agent.Name != "" {
 		header = agent.Name
@@ -392,6 +402,13 @@ func (r *LarkOutcomeReplier) sendChatNotice(ctx context.Context, inst Installati
 		})
 		return err
 	})
+}
+
+// replyDocComment answers a cloud-document comment in its own thread; a
+// comment cannot show the IM card or quote-reply.
+func (r *LarkOutcomeReplier) replyDocComment(ctx context.Context, creds InstallationCredentials, msg InboundMessage, text string) error {
+	api, _ := r.client.(docCommentAPIClient)
+	return postDocCommentText(ctx, api, creds, msg.DocComment.route(), string(msg.SenderOpenID), text)
 }
 
 func (r *LarkOutcomeReplier) installationCredentials(inst Installation) (InstallationCredentials, error) {
@@ -452,4 +469,7 @@ const (
 	issueUsageCopy               = "请填写任务标题，格式如下：\n\n`/issue <标题>`\n`[描述]`（可选）"
 	issueUsageWithMediaCopy      = "请添加标题，并与图片或视频一起重新发送（*图片或视频可以位于命令之前或之后*）：\n\n`/issue <标题>`\n`[描述]`（可选）"
 	bindingPromptUnavailableCopy = "你还未绑定 Multica 账户，绑定卡片未能发送到你的私聊。\n请先打开机器人对话并发送一条消息，再回到群里重试；仍失败请联系管理员检查应用可用范围。"
+	// bindingPromptUnavailableDocCommentCopy is the same fallback posted
+	// in a document comment thread.
+	bindingPromptUnavailableDocCommentCopy = "你还未绑定 Multica 账户，绑定卡片未能发送到你的私聊。\n请先打开机器人对话并发送一条消息，再回到这条评论重新 @ 我；仍失败请联系管理员检查应用可用范围。"
 )
