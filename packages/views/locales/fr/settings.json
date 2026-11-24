@@ -1923,7 +1923,8 @@
       "pending": "En attente",
       "approved": "Approuvé",
       "rejected": "Refusé",
-      "rate_limited": "Limite atteinte"
+      "rate_limited": "Limite atteinte",
+      "quota_exceeded": "Limite mensuelle atteinte"
     },
     "scopes": {
       "team": "Compte d'équipe",

@@ -49,6 +49,7 @@ export function outcomeLabel(outcome: string, t: IssuesT): string {
     case "approved":
     case "rejected":
     case "rate_limited":
+    case "quota_exceeded":
       return t(($) => $.app_calls.outcome[outcome]);
     default:
       return outcome;
@@ -66,6 +67,8 @@ export function OutcomeIcon({ outcome, className }: { outcome: string; className
       return <Clock className={cn(cls, "text-warning")} />;
     case "blocked":
       return <Ban className={cn(cls, "text-muted-foreground")} />;
+    case "quota_exceeded":
+      return <Ban className={cn(cls, "text-warning")} />;
     default:
       return <XCircle className={cn(cls, "text-destructive")} />;
   }

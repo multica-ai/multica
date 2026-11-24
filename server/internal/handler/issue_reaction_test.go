@@ -49,7 +49,7 @@ func TestAddIssueReactionQueuedBehindSameReactionReturnsIt(t *testing.T) {
 			"emoji": "👍",
 		}), "id", issueID))
 	}()
-	waitForBackendBlockedBy(t, firstPID, done)
+	waitForIssueReactionBackendBlockedBy(t, firstPID, done)
 
 	if err := first.Commit(ctx); err != nil {
 		t.Fatalf("commit first: %v", err)
@@ -71,7 +71,7 @@ func TestAddIssueReactionQueuedBehindSameReactionReturnsIt(t *testing.T) {
 	}
 }
 
-func waitForBackendBlockedBy(t *testing.T, holderPID int, done <-chan struct{}) {
+func waitForIssueReactionBackendBlockedBy(t *testing.T, holderPID int, done <-chan struct{}) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {

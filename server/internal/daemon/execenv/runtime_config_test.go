@@ -2461,6 +2461,7 @@ func TestBriefCarriesTheWhenToSplitRule(t *testing.T) {
 func TestBriefBatchesTheOpeningReads(t *testing.T) {
 	t.Parallel()
 
+	const lead = "The reads that steps 1–2 still require do not depend on each other — the per-turn message names the issue id and any triggering thread — "
 	const rule = "so issue them together in ONE turn, not one read per turn: prefer parallel tool calls, which keep each output whole, and chain them in one shell command only when parallel calls are unavailable. Never cut these reads short with `head -c` or similar"
 	for _, provider := range []string{"claude", "codex"} {
 		out := buildMetaSkillContent(provider, TaskContextForEnv{IssueID: "issue-1", TriggerCommentID: "comment-1"})
@@ -2470,6 +2471,11 @@ func TestBriefBatchesTheOpeningReads(t *testing.T) {
 		if at < 0 {
 			t.Errorf("%s brief lost the batched-read rule:\n%s", provider, out)
 			continue
+		}
+		// MUL-10028: assignment runs carry no triggering thread, so the rule
+		// must not promise one.
+		if !strings.Contains(out, lead+rule) {
+			t.Errorf("%s brief: batched-read rule lost its lead-in:\n%s", provider, out)
 		}
 		if step2 < 0 || step3 < 0 || at < step2 || at > step3 {
 			t.Errorf("%s brief: batched-read rule must sit between step 2 and step 3:\n%s", provider, out)

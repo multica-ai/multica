@@ -37,9 +37,12 @@ export type InboxItemType =
   // same Inbox model so read/archive/realtime behavior remains consistent.
   | "autopilot_paused"
   | "autopilot_quota_exceeded"
+  // The workspace used its monthly app tool calls; sent to owners and admins.
+  | "app_tool_calls_quota_exceeded"
   // Sub-issues of an issue assigned to the recipient closed (the child_done
   // system rule notifies a member assignee instead of waking an agent).
   | "children_done"
+  | "blockers_done"
   // A workspace owner added themselves to a private project the recipient is
   // a member of. Issue-less: details carry project_id, project_title and
   // joined_by (the owner's name).

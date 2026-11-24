@@ -3403,6 +3403,18 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					"agent_id", uuidToString(task.AgentID),
 				)
 			}
+		} else if resp.Agent != nil {
+			// A member's run on its squad's issue carries the squad context the
+			// leader already gets: roster, rules, its role, and how to hand off.
+			if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
+				if brief := squadMemberBriefingForClaim(r.Context(), h.Queries, issue, agent); brief != "" {
+					if strings.TrimSpace(resp.Agent.Instructions) == "" {
+						resp.Agent.Instructions = brief
+					} else {
+						resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + brief
+					}
+				}
+			}
 		}
 
 		projectCtx, projectErr := h.resolveClaimProjectContext(r.Context(), issue.ProjectID, issue.WorkspaceID)

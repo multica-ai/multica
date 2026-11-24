@@ -70,6 +70,8 @@
     "retry_with_context": "保留上下文重試",
     "edit_advanced": "開啟完整表單",
     "autopilot_quota_exceeded_body": "目前週期的 {{limit}} 次自動化執行額度已用完。在 {{resetAt}} 重置、升級方案或加購之前，後續自動化執行將不會啟動。",
+    "app_tool_calls_quota_exceeded_body": "本工作區本月的 {{limit}} 次應用呼叫已用完。在 {{resetAt}} 重置、升級方案或增加席位之前，AI 代理無法呼叫應用工具。",
+    "app_tool_calls_quota_action": "管理帳單",
     "project_owner_joined_body": "{{name}} 是工作區所有者，已把自己加入這個私有專案，現在可以看到其中的任務、評論和附件。",
     "open_project": "開啟專案",
     "open_app": "開啟應用程式",
@@ -109,12 +111,14 @@
     "children_done": "子任務已全部結束",
     "project_owner_joined": "所有者加入了專案",
     "autopilot_quota_exceeded": "自動化執行次數已用完",
+    "app_tool_calls_quota_exceeded": "應用呼叫次數已用完",
     "app_action_requested": "等待你確認",
     "app_action_reminder": "確認即將過期",
     "app_connect_requested": "請連線應用",
     "app_action_result": "應用操作結果",
     "doc_comment": "文件有新評論",
-    "doc_mentioned": "在文件中提到了你"
+    "doc_mentioned": "在文件中提到了你",
+    "blockers_done": "等待的任務已結束"
   },
   "labels": {
     "set_status_to": "狀態設為",
@@ -130,6 +134,7 @@
     "created_with_agent": "透過 AI 代理建立：{{identifier}}",
     "failed_with_detail": "失敗：{{detail}}",
     "autopilot_quota_blocked": "執行已被阻止：額度已用完",
+    "app_tool_calls_quota_blocked": "本月 AI 代理無法再呼叫應用工具",
     "children_done_stage": "第 {{stage}} 階段的子任務已全部結束"
   },
   "toasts": {

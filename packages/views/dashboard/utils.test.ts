@@ -27,7 +27,6 @@ import {
   RESTRICTED_AGENTS_ROW_ID,
   sortAgentFailures,
   sortSquadFailures,
-  STANDALONE_SQUAD_ROW_ID,
 } from "./utils";
 
 describe("aggregateDailyCost", () => {
@@ -922,7 +921,7 @@ describe("anonymizeUnresolvedAgentRows", () => {
 });
 
 describe("aggregateSquadDashboardRows", () => {
-  it("groups leader + delegated member usage under each squad and preserves standalone reconciliation row", () => {
+  it("groups leader + delegated member usage under each squad and leaves standalone runs out", () => {
     const rows = aggregateSquadDashboardRows(
       [
         {
@@ -968,19 +967,38 @@ describe("aggregateSquadDashboardRows", () => {
       new Set(["squad-jsquad"]),
     );
 
-    expect(rows.map((r) => r.squadId)).toEqual(["squad-jsquad", STANDALONE_SQUAD_ROW_ID]);
+    expect(rows.map((r) => r.squadId)).toEqual(["squad-jsquad"]);
     const jsquad = rows[0]!;
     expect(jsquad.tokens).toBe(3_000_000);
     expect(jsquad.cost).toBeCloseTo(9, 2);
     expect(jsquad.seconds).toBe(420);
     expect(jsquad.taskCount).toBe(5);
     expect(jsquad.members.map((m) => m.agentId)).toEqual(["emacs", "xeon"]);
+  });
 
-    const standalone = rows[1]!;
-    expect(isSyntheticSquadRow(standalone.squadId)).toBe(true);
-    expect(standalone.tokens).toBe(500_000);
-    expect(standalone.taskCount).toBe(1);
-    expect(standalone.members.map((m) => m.agentId)).toEqual(["emacs"]);
+  it("returns no rows when every run is standalone", () => {
+    const rows = aggregateSquadDashboardRows(
+      [
+        {
+          squad_id: "",
+          agent_id: "emacs",
+          provider: "claude",
+          model: "claude-sonnet-4-6",
+          input_tokens: 500_000,
+          output_tokens: 0,
+          cache_read_tokens: 0,
+          cache_write_tokens: 0,
+          task_count: 1,
+        },
+      ],
+      [
+        { squad_id: "", agent_id: "emacs", total_seconds: 60, task_count: 1, failed_count: 0, cancelled_count: 0 },
+      ],
+      new Set(["emacs"]),
+      new Set(["squad-jsquad"]),
+    );
+
+    expect(rows).toEqual([]);
   });
 
   it("buckets unknown/deleted squad IDs and unknown agents cleanly", () => {
@@ -1013,14 +1031,13 @@ describe("aggregateSquadFailures & sortSquadFailures", () => {
       new Set(["squad-a", "squad-b"]),
     );
 
+    // Standalone runs (squad_id "") are not a squad and stay out of the list.
     expect(sortSquadFailures(rows, "failed").map((r) => r.squadId)).toEqual([
-      STANDALONE_SQUAD_ROW_ID,
       "squad-a",
       "squad-b",
     ]);
-    // squad-b is 100% failed but only 2 runs (< MIN_RATE_SAMPLE=10), so demoted below squad-a (20%) & standalone (33.3%).
+    // squad-b is 100% failed but only 2 runs (< MIN_RATE_SAMPLE=10), so demoted below squad-a (20%).
     expect(sortSquadFailures(rows, "rate").map((r) => r.squadId)).toEqual([
-      STANDALONE_SQUAD_ROW_ID,
       "squad-a",
       "squad-b",
     ]);

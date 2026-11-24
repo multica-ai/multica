@@ -8,6 +8,7 @@ import type {
   AutopilotQuotaUsage,
   MemberLimit,
   StorageUsage,
+  AppCallUsage,
   WorkspaceSubscriptionEntitlements,
   WorkspaceSubscriptionPrices,
   WorkspaceSubscriptionSummary,
@@ -39,6 +40,8 @@ const mocks = vi.hoisted(() => ({
   memberLimit: { action: "off", limit: null, members: null, pendingInvitations: null } as MemberLimit,
   storageUsage: { action: "off", usedBytes: null, limitBytes: null, reached: null } as StorageUsage,
   refetchStorage: vi.fn(),
+  appCallUsage: { action: "off", used: null, limit: null, reached: null, resetAt: null, members: [] } as AppCallUsage,
+  members: [] as { user_id: string; name: string }[],
   prices: null as WorkspaceSubscriptionPrices | null,
   pricesLoading: false,
   pricesFetching: false,
@@ -349,10 +352,18 @@ describe("BillingTab", () => {
     localStorage.clear();
     mocks.memberLimit = { action: "off", limit: null, members: null, pendingInvitations: null };
     mocks.storageUsage = { action: "off", usedBytes: null, limitBytes: null, reached: null };
+    mocks.appCallUsage = { action: "off", used: null, limit: null, reached: null, resetAt: null, members: [] };
+    mocks.members = [];
     mocks.useQuery.mockImplementation((options: unknown) => {
       const queryKey = (options as { queryKey?: readonly unknown[] }).queryKey;
       if (queryKey?.[0] === "workspace-storage-usage") {
         return { data: mocks.storageUsage, isPending: false, isError: false, refetch: mocks.refetchStorage };
+      }
+      if (queryKey?.[0] === "workspace-app-call-usage") {
+        return { data: mocks.appCallUsage, isPending: false, isError: false, isFetching: false, refetch: vi.fn() };
+      }
+      if (queryKey?.length === 3 && queryKey[0] === "workspaces" && queryKey[2] === "members") {
+        return { data: mocks.members, isPending: false, isError: false };
       }
       if (queryKey?.[queryKey.length - 1] === "limit") {
         return { data: mocks.memberLimit, isPending: false, isError: false };
@@ -935,6 +946,42 @@ describe("BillingTab", () => {
 
       expect(screen.getByText("12 GB / 300 GB")).toBeInTheDocument();
       expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["workspace-storage-usage", expect.any(String)] });
+    });
+
+    it("shows this month's app calls against the plan's limit, for every person (MUL-10047)", () => {
+      const names = ["Ada", "Ben", "Cy", "Di", "Ed", "Flo"];
+      mocks.members = names.map((name) => ({ user_id: `user-${name}`, name }));
+      mocks.appCallUsage = {
+        action: "observe",
+        used: 230,
+        limit: 1500,
+        reached: null,
+        resetAt: "2030-02-01T00:00:00Z",
+        members: [
+          ...names.map((name, i) => ({ userId: `user-${name}`, calls: 60 - i * 10 })),
+          { userId: null, calls: 20 },
+        ],
+      };
+      renderWithI18n(<BillingTab />);
+
+      expect(screen.getByText("App calls")).toBeInTheDocument();
+      expect(screen.getByText("230 / 1,500")).toBeInTheDocument();
+      const byPerson = screen.getByRole("list", { name: "App calls by person" });
+      expect(within(byPerson).getAllByRole("listitem")).toHaveLength(7);
+      for (const name of names) expect(within(byPerson).getByText(name)).toBeInTheDocument();
+      expect(within(byPerson).getByText("Automated runs")).toBeInTheDocument();
+    });
+
+    it("reports enforced app calls as reached, and hides them without a limit", () => {
+      mocks.appCallUsage = { action: "enforce", used: 100, limit: 100, reached: true, resetAt: null, members: [] };
+      const { unmount } = renderWithI18n(<BillingTab />);
+      expect(screen.getByText("100 / 100")).toBeInTheDocument();
+      expect(screen.getAllByText("Limit reached").length).toBeGreaterThan(0);
+      unmount();
+
+      mocks.appCallUsage = { action: "off", used: null, limit: null, reached: null, resetAt: null, members: [] };
+      renderWithI18n(<BillingTab />);
+      expect(screen.queryByText("App calls")).not.toBeInTheDocument();
     });
 
     it("shows members and pending invitations against the plan's limit", () => {

@@ -83,7 +83,6 @@ func TestQuickActionTaskTokenPrivateAccess(t *testing.T) {
 		{"runtime owner started the run", testUserID, "running", true},
 		{"another member started the run", other, "running", false},
 		{"no human started the run", nil, "running", false},
-		{"finished run with a lingering token", testUserID, "completed", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runtimeID := dbfx.Runtime(t, "Quick action runtime")
@@ -129,6 +128,27 @@ func TestQuickActionTaskTokenPrivateAccess(t *testing.T) {
 			}
 		})
 	}
+
+	// A finished run's token is refused at auth (GitHub #11378), so it reaches
+	// neither public nor private actions and posts nothing.
+	t.Run("finished run with a lingering token", func(t *testing.T) {
+		runtimeID := dbfx.Runtime(t, "Quick action runtime")
+		agentID := dbfx.Agent(t, "Quick action agent", runtimeID)
+		taskID := dbfx.Task(t, agentID, testutil.Cols{
+			"runtime_id": runtimeID, "issue_id": issueID, "status": "completed",
+			"originator_user_id": testUserID, "accountable_user_id": testUserID,
+		})
+		token := inboxTaskCredential(t, taskID, agentID, testWorkspaceID, testUserID)
+
+		testutil.Call(t, serve((*Handler).ListQuickActions), request(token, http.MethodGet, "/api/quick-actions")).
+			Want(http.StatusUnauthorized)
+		render(t, token, publicID).Want(http.StatusUnauthorized)
+		before := secretComments(t)
+		run(t, token, privateID).Want(http.StatusUnauthorized)
+		if got := secretComments(t); got != before {
+			t.Fatalf("refused run still posted the private prompt: %d comments, want %d", got, before)
+		}
+	})
 
 	// A human credential still reaches the creator's own private action.
 	t.Run("human session", func(t *testing.T) {

@@ -1392,37 +1392,37 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		// from a later request against a new HEAD (TEN-356).
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
 	}
-	var task db.AgentTaskQueue
-	if fireAt.Valid {
-		task, err = s.Queries.CreateDeferredChannelIssueTask(ctx, db.CreateDeferredChannelIssueTaskParams{
-			ID:                   dbid.NewV7(),
-			AgentID:              createParams.AgentID,
-			RuntimeID:            createParams.RuntimeID,
-			IssueID:              createParams.IssueID,
-			Priority:             createParams.Priority,
-			TriggerCommentID:     createParams.TriggerCommentID,
-			CoalescedCommentIds:  createParams.CoalescedCommentIds,
-			TriggerSummary:       createParams.TriggerSummary,
-			ForceFreshSession:    createParams.ForceFreshSession,
-			IsLeaderTask:         createParams.IsLeaderTask,
-			HandoffNote:          createParams.HandoffNote,
-			SquadID:              createParams.SquadID,
-			HeadSha:              createParams.HeadSha,
-			OriginatorUserID:     createParams.OriginatorUserID,
-			AccountableUserID:    createParams.AccountableUserID,
-			RuntimeMcpOverlay:    createParams.RuntimeMcpOverlay,
-			RuntimeConnectedApps: createParams.RuntimeConnectedApps,
-			OriginatorSource:     createParams.OriginatorSource,
-			DelegatedFromTaskID:  createParams.DelegatedFromTaskID,
-			RuleVersionID:        createParams.RuleVersionID,
-			RerunOfTaskID:        createParams.RerunOfTaskID,
-			TriggerEvidenceKind:  createParams.TriggerEvidenceKind,
-			TriggerEvidenceRefID: createParams.TriggerEvidenceRefID,
-			FireAt:               fireAt,
-		})
-	} else {
-		task, err = s.Queries.CreateAgentTask(ctx, createParams)
-	}
+	task, err := s.createIssueTaskWithBlockerRelease(ctx, origin, func(q *db.Queries) (db.AgentTaskQueue, error) {
+		if fireAt.Valid {
+			return q.CreateDeferredChannelIssueTask(ctx, db.CreateDeferredChannelIssueTaskParams{
+				ID:                   dbid.NewV7(),
+				AgentID:              createParams.AgentID,
+				RuntimeID:            createParams.RuntimeID,
+				IssueID:              createParams.IssueID,
+				Priority:             createParams.Priority,
+				TriggerCommentID:     createParams.TriggerCommentID,
+				CoalescedCommentIds:  createParams.CoalescedCommentIds,
+				TriggerSummary:       createParams.TriggerSummary,
+				ForceFreshSession:    createParams.ForceFreshSession,
+				IsLeaderTask:         createParams.IsLeaderTask,
+				HandoffNote:          createParams.HandoffNote,
+				SquadID:              createParams.SquadID,
+				HeadSha:              createParams.HeadSha,
+				OriginatorUserID:     createParams.OriginatorUserID,
+				AccountableUserID:    createParams.AccountableUserID,
+				RuntimeMcpOverlay:    createParams.RuntimeMcpOverlay,
+				RuntimeConnectedApps: createParams.RuntimeConnectedApps,
+				OriginatorSource:     createParams.OriginatorSource,
+				DelegatedFromTaskID:  createParams.DelegatedFromTaskID,
+				RuleVersionID:        createParams.RuleVersionID,
+				RerunOfTaskID:        createParams.RerunOfTaskID,
+				TriggerEvidenceKind:  createParams.TriggerEvidenceKind,
+				TriggerEvidenceRefID: createParams.TriggerEvidenceRefID,
+				FireAt:               fireAt,
+			})
+		}
+		return q.CreateAgentTask(ctx, createParams)
+	})
 	if err != nil {
 		// A concurrent enqueue for the same (issue, agent) won the race and the
 		// unique index rejected this insert. That is benign — a sibling run
@@ -1576,7 +1576,9 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	if workflowHandoff {
 		task, err = s.createWorkflowSquadHandoffTask(ctx, issue, params)
 	} else {
-		task, err = s.Queries.CreateAgentTask(ctx, params)
+		task, err = s.createIssueTaskWithBlockerRelease(ctx, origin, func(q *db.Queries) (db.AgentTaskQueue, error) {
+			return q.CreateAgentTask(ctx, params)
+		})
 	}
 	if err != nil {
 		// A concurrent enqueue for the same (issue, agent) won the race and the
@@ -6828,6 +6830,10 @@ type delegatedFailureRecoveryTarget struct {
 	issue   db.Issue
 	agent   db.Agent
 	comment db.Comment
+	// leaderSquad is set when the failure goes to a direct-handoff squad's
+	// leader instead of the member that handed the work over; agent is then
+	// that leader and the recovery run carries its leader role.
+	leaderSquad *db.Squad
 }
 
 // IsDelegatedFailureRecoveryComment identifies the durable platform signal
@@ -6896,17 +6902,22 @@ func loadDelegatedFailureRecoveryTarget(ctx context.Context, q *db.Queries, fail
 		}
 		return nil, fmt.Errorf("load source issue: %w", err)
 	}
-	agent, err := q.GetAgent(ctx, source.AgentID)
+	coordinatorID := source.AgentID
+	leaderSquad := squadDirectHandoffLeader(ctx, q, issue, failed, source)
+	if leaderSquad != nil {
+		coordinatorID = leaderSquad.LeaderID
+	}
+	agent, err := q.GetAgent(ctx, coordinatorID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("load source agent: %w", err)
 	}
-	if agent.ArchivedAt.Valid || !agent.RuntimeID.Valid || agent.WorkspaceID != issue.WorkspaceID {
+	if agent.ArchivedAt.Valid || !agent.RuntimeID.Valid || agent.WorkspaceID != issue.WorkspaceID || agent.ID == failed.AgentID {
 		return nil, nil
 	}
-	return &delegatedFailureRecoveryTarget{failed: failed, source: source, issue: issue, agent: agent}, nil
+	return &delegatedFailureRecoveryTarget{failed: failed, source: source, issue: issue, agent: agent, leaderSquad: leaderSquad}, nil
 }
 
 // canDispatchDelegatedFailureRecovery matches the lifecycle predicate in
@@ -6932,6 +6943,7 @@ func canDispatchDelegatedFailureRecovery(ctx context.Context, q *db.Queries, iss
 // mention-notification side effects.
 func (s *TaskService) ensureDelegatedFailureRecoveryComment(ctx context.Context, failedID pgtype.UUID) (*delegatedFailureRecoveryTarget, bool, error) {
 	var target *delegatedFailureRecoveryTarget
+	var handoff db.ActivityLog
 	created := false
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		failed, err := qtx.GetAgentTaskForDelegatedFailureUpdate(ctx, failedID)
@@ -6970,12 +6982,21 @@ func (s *TaskService) ensureDelegatedFailureRecoveryComment(ctx context.Context,
 		}
 		target.comment = createdComment.Comment()
 		created = true
+		if target.leaderSquad != nil {
+			handoff, err = createSquadFailureHandoff(ctx, qtx, target)
+			if err != nil {
+				return err
+			}
+		}
 		return nil
 	}); err != nil {
 		return nil, false, err
 	}
 	if target == nil {
 		return nil, false, nil
+	}
+	if handoff.ID.Valid {
+		s.publishSquadHandoffActivity(handoff)
 	}
 	if created && s.Bus != nil {
 		s.Bus.Publish(events.Event{
@@ -7241,6 +7262,10 @@ func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, targ
 			return delegatedFailureRecoveryCovered, err
 		}
 		overlay := s.buildRuntimeMCPOverlay(ctx, originator, target.agent)
+		isLeader, squadID := target.source.IsLeaderTask, target.source.SquadID
+		if target.leaderSquad != nil {
+			isLeader, squadID = true, target.leaderSquad.ID
+		}
 		task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 			ID:                   dbid.NewV7(),
 			AgentID:              target.agent.ID,
@@ -7249,8 +7274,8 @@ func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, targ
 			Priority:             priorityToInt(target.issue.Priority),
 			TriggerCommentID:     target.comment.ID,
 			TriggerSummary:       s.buildCommentTriggerSummary(ctx, target.issue.WorkspaceID, target.comment.ID),
-			IsLeaderTask:         pgtype.Bool{Bool: target.source.IsLeaderTask, Valid: target.source.IsLeaderTask},
-			SquadID:              target.source.SquadID,
+			IsLeaderTask:         pgtype.Bool{Bool: isLeader, Valid: isLeader},
+			SquadID:              squadID,
 			OriginatorUserID:     originator,
 			AccountableUserID:    accountable,
 			RuntimeMcpOverlay:    overlay.Overlay,
@@ -8272,6 +8297,7 @@ func builtInStatusCategory(status string) string {
 type IssueMapQuerier interface {
 	issuestatus.Querier
 	GetIssueRefInWorkspace(ctx context.Context, arg db.GetIssueRefInWorkspaceParams) (db.GetIssueRefInWorkspaceRow, error)
+	ListIssueBlockers(ctx context.Context, arg db.ListIssueBlockersParams) ([]db.ListIssueBlockersRow, error)
 }
 
 // IssueToMapResolved is IssueToMap with an AUTHORITATIVE status_category and
@@ -8291,6 +8317,21 @@ func IssueToMapResolved(ctx context.Context, q IssueMapQuerier, issue db.Issue, 
 	category, name := issuestatus.CategoryAndName(ctx, q, issue.WorkspaceID, issue.Status)
 	m["status_category"] = issuestatus.WireCategory(issue.Status, category)
 	m["status_name"] = name
+
+	if blockers, err := q.ListIssueBlockers(ctx, db.ListIssueBlockersParams{WorkspaceID: issue.WorkspaceID, IssueIds: []pgtype.UUID{issue.ID}}); err == nil {
+		refs := make([]map[string]any, 0, len(blockers))
+		count := 0
+		for _, b := range blockers {
+			if !b.Closed.Bool {
+				count++
+			}
+			if b.Private && b.ProjectID != issue.ProjectID {
+				continue
+			}
+			refs = append(refs, map[string]any{"id": util.UUIDToString(b.ID), "identifier": IssueIdentifier(issuePrefix, b.Number), "title": b.Title, "status": b.Status, "via": b.Via, "closed": b.Closed.Bool})
+		}
+		m["blocked_by"], m["blocked_count"] = refs, count
+	}
 	if ref := resolveDuplicateOf(ctx, q, issue, issuePrefix); ref != nil {
 		m["duplicate_of"] = ref
 	}
@@ -8350,6 +8391,8 @@ func IssueToMap(issue db.Issue, issuePrefix string) map[string]any {
 		"parent_issue_id": util.UUIDToPtr(issue.ParentIssueID),
 		// Mirrors handler.IssueResponse.DuplicateOf. Null is only true for a
 		// row with no live mark; IssueToMapResolved resolves it for the rest.
+		"blocked_by":           []any{},
+		"blocked_count":        0,
 		"duplicate_of":         nil,
 		"project_id":           util.UUIDToPtr(issue.ProjectID),
 		"position":             issue.Position,

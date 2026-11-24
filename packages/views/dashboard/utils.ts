@@ -841,12 +841,11 @@ export function anonymizeUnresolvedAgentRows(
   );
 }
 
-// Synthetic squadId sentinels for the Squad-grouped leaderboard & Errors tab.
-export const STANDALONE_SQUAD_ROW_ID = "__standalone_squad__";
+// Synthetic squadId sentinel for the Squad-grouped leaderboard & Errors tab.
 export const DELETED_SQUADS_ROW_ID = "__deleted_squads__";
 
 export function isSyntheticSquadRow(squadId: string): boolean {
-  return squadId === STANDALONE_SQUAD_ROW_ID || squadId === DELETED_SQUADS_ROW_ID;
+  return squadId === DELETED_SQUADS_ROW_ID;
 }
 
 export interface SquadDashboardRow {
@@ -861,11 +860,13 @@ export interface SquadDashboardRow {
   members: AgentDashboardRow[];
 }
 
+// Returns null for standalone (non-squad-triggered) runs: the Squad grouping
+// ranks squads only, and the Agent grouping already covers those runs.
 function normalizeSquadBucketId(
   rawSquadId: string,
   knownSquadIds: ReadonlySet<string> | null,
-): string {
-  if (!rawSquadId) return STANDALONE_SQUAD_ROW_ID;
+): string | null {
+  if (!rawSquadId) return null;
   if (knownSquadIds && !knownSquadIds.has(rawSquadId)) {
     return DELETED_SQUADS_ROW_ID;
   }
@@ -877,8 +878,8 @@ function normalizeSquadBucketId(
  * rows into squad-overall rows, each carrying its per-member breakdown so the
  * Leaderboard can expand any squad inline without an extra fetch.
  *
- * Non-squad-triggered runs (`squad_id === ""`) collect under
- * STANDALONE_SQUAD_ROW_ID so every metric reconciles 100% with the top KPIs.
+ * Non-squad-triggered runs (`squad_id === ""`) are left out, so the rows sum
+ * to squad-attributed usage rather than to the workspace KPIs.
  */
 export function aggregateSquadDashboardRows(
   usageRows: DashboardUsageBySquad[],
@@ -889,6 +890,7 @@ export function aggregateSquadDashboardRows(
   const usageBySquad = new Map<string, DashboardUsageByAgent[]>();
   for (const r of usageRows) {
     const key = normalizeSquadBucketId(r.squad_id, knownSquadIds);
+    if (key === null) continue;
     const list = usageBySquad.get(key) ?? [];
     list.push(r);
     usageBySquad.set(key, list);
@@ -897,6 +899,7 @@ export function aggregateSquadDashboardRows(
   const runTimeBySquad = new Map<string, Map<string, DashboardAgentRunTime>>();
   for (const r of runTimeRows) {
     const key = normalizeSquadBucketId(r.squad_id, knownSquadIds);
+    if (key === null) continue;
     let agentMap = runTimeBySquad.get(key);
     if (!agentMap) {
       agentMap = new Map();
@@ -990,6 +993,7 @@ export function aggregateSquadFailures(
   >();
   for (const r of rows) {
     const key = normalizeSquadBucketId(r.squad_id, knownSquadIds);
+    if (key === null) continue;
     let entry = map.get(key);
     if (!entry) {
       entry = { failed: 0, total: 0, classes: emptyClassCounts() };

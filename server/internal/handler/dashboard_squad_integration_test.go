@@ -47,7 +47,10 @@ func TestDashboardSquadAttributionAndEndpoints(t *testing.T) {
 	})
 
 	now := time.Now().UTC()
-	hourBucket := now.Truncate(time.Hour)
+	// The legacy bucket must share the hour of the leader's usage row, which
+	// is not now's hour in the first minutes after the hour.
+	leaderUsageAt := now.Add(-4 * time.Minute)
+	hourBucket := leaderUsageAt.Truncate(time.Hour)
 	started := now.Add(-15 * time.Minute)
 	completed := now.Add(-5 * time.Minute) // 600s each
 
@@ -80,8 +83,8 @@ func TestDashboardSquadAttributionAndEndpoints(t *testing.T) {
 		"model":         model,
 		"input_tokens":  1000,
 		"output_tokens": 200,
-		"created_at":    now.Add(-4 * time.Minute),
-		"updated_at":    now.Add(-4 * time.Minute),
+		"created_at":    leaderUsageAt,
+		"updated_at":    leaderUsageAt,
 	})
 
 	// 2. Delegated member task (usage_squad_id = squadID, squad_id = NULL, is_leader_task = false, failed, 2000 input tokens)

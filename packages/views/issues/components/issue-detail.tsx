@@ -9,7 +9,7 @@ import {
 import { IssueFlowCard } from "../../workflows/issue-flow-card";
 import { IssueAppRequests } from "../../common/app-requests";
 import { useStatusLabel } from "../utils/status-label";
-import { formatActivity, type ActivityT } from "./activity-text";
+import { formatActivity, latestSquadHandoffRound, squadHandoffNote, type ActivityT } from "./activity-text";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, useId, Fragment, type ComponentProps, type ReactNode } from "react";
 import { AnimatePresence } from "motion/react";
@@ -17,6 +17,7 @@ import { UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { Virtuoso, type ListRange, type VirtuosoHandle } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink, useBackOrReplace } from "../../navigation";
+import { IssueBlockersSection } from "./issue-blockers";
 import { IssueDuplicateBanner, IssueDuplicatesSection, isDuplicateIssue } from "./issue-duplicates";
 import {
   AlertTriangle,
@@ -702,7 +703,11 @@ function ActivityBlock({
         const isDueDateChange = entry.action === "due_date_changed";
 
         const isWakeup = WAKEUP_ACTIVITY_ACTIONS.has(entry.action ?? "");
-        const chip = isWakeup ? wakeupActivityChip(entry, t, wakeupText, getActorName) : null;
+        const chip = isWakeup
+          ? wakeupActivityChip(entry, t, wakeupText, getActorName)
+          : entry.action === "squad_handoff"
+            ? squadHandoffNote(entry, t)
+            : null;
         let leadIcon: React.ReactNode;
         if (isWakeup) {
           leadIcon = <WakeupActivityIcon entry={entry} />;
@@ -1824,6 +1829,7 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
   } = useIssueTimeline(id, user?.id, activeDeliverableJump?.commentId);
 
   const { data: commentTasks, isLoading: commentTasksLoading } = useQuery({ ...issueTasksOptions(id), enabled: !guest });
+  const handoffRound = useMemo(() => latestSquadHandoffRound(timeline), [timeline]);
   // Only a landing on data already in hand is worth holding the chrome for;
   // while the timeline is still on its way, the chrome renders in the wait.
   useEffect(() => {
@@ -1933,6 +1939,7 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
     // Duplicate marks name a different issue on every row.
     const NEVER_COALESCE_ACTIONS = new Set([
       "squad_leader_evaluated",
+      "squad_handoff",
       "wakeup_created",
       "wakeup_triggered",
       "wakeup_timed_out",
@@ -2041,6 +2048,15 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
       if (g.type === "activities") return g.entries[0]!.id;
     }
     return null;
+  }, [timelineView.groups]);
+  // Squad handoffs say who holds the issue between comments, so their blocks
+  // open by default like the trailing one.
+  const handoffActivityGroupIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const g of timelineView.groups) {
+      if (g.type === "activities" && g.entries.some((e) => e.action === "squad_handoff")) ids.add(g.entries[0]!.id);
+    }
+    return ids;
   }, [timelineView.groups]);
 
   // Map of reply-comment id → root-comment id, so a deep-link to a reply
@@ -2152,7 +2168,7 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
         // Mirrors renderItem: only the trailing block opens by default, and it
         // shows its latest entries until the reader asks for older ones.
         activityLines: (itemId) => {
-          const expanded = expandedActivityIds.has(itemId) || (!collapsedActivityIds.has(itemId) && itemId === lastActivityGroupId);
+          const expanded = expandedActivityIds.has(itemId) || (!collapsedActivityIds.has(itemId) && (itemId === lastActivityGroupId || handoffActivityGroupIds.has(itemId)));
           if (!expanded) return 0;
           const count = activityCounts.get(itemId) ?? 0;
           return itemId === lastActivityGroupId && !showOlderActivityIds.has(itemId)
@@ -2161,7 +2177,7 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
       },
     );
   }, [timelineMeasured, scrollContainerWidth, items, timelineView.threadReplies, commentRuns, expandedResolved,
-    collapsedThreadIds, expandedActivityIds, collapsedActivityIds, showOlderActivityIds, lastActivityGroupId]);
+    collapsedThreadIds, expandedActivityIds, collapsedActivityIds, showOlderActivityIds, lastActivityGroupId, handoffActivityGroupIds]);
   // Whether Virtuoso can place a row by index. Without estimates it needs one
   // measured row first: the timeline is scrolled into view to get it. With
   // estimates it already can, and that detour would mount the top of the
@@ -3555,6 +3571,7 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
           </div></IssueSidebarCollapsible>
         </div>
     ),
+    waiting: <IssueBlockersSection issue={issue} />,
     duplicates: <IssueDuplicatesSection issueId={issue.id} />,
     // Pull requests — unavailable when the workspace disables the PR sidebar
     // (or the GitHub master switch is off). Backend data is kept either
@@ -3684,7 +3701,7 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
       ? true
       : collapsedActivityIds.has(item.id)
         ? false
-        : item.id === lastActivityGroupId;
+        : item.id === lastActivityGroupId || handoffActivityGroupIds.has(item.id);
     const truncateOlder = item.id === lastActivityGroupId;
     const showOlder = showOlderActivityIds.has(item.id);
     return (
@@ -3820,7 +3837,7 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
                     onJump={jumpToCollaborator}
                   />
                 )}
-                <IssueAgentHeaderChip issueId={id} onJumpToRun={jumpToRun} />
+                <IssueAgentHeaderChip issueId={id} onJumpToRun={jumpToRun} handoffRound={handoffRound} />
               </div>
             )}
             {inbox && (

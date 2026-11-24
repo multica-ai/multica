@@ -2,24 +2,16 @@ import { describe, expect, it } from "vitest";
 import { InboxListSchema, InboxUnreadSummarySchema } from "./schemas";
 
 /**
- * Tests for mobile's CLIENT-SIDE parsing of GET /api/inbox.
+ * Tests for mobile's CLIENT-SIDE parsing of GET /api/inbox. These are
+ * hand-written fixtures run against `InboxListSchema`; they pin how this client
+ * reacts to a payload and cannot fail when the Go server starts sending
+ * something new.
  *
- * Scope, stated precisely because the name of this file used to overclaim:
- * these are hand-written fixtures run against `InboxListSchema`. They pin how
- * this client REACTS to a given payload. They cannot fail when the Go server
- * starts sending something new — nothing here executes server code.
- *
- * The matching server-side guarantee is structural rather than a test: every
- * `details` map in server/cmd/server/notification_listeners.go is typed
- * `map[string]string`, so a non-string value is a compile error there.
- *
- * Why both halves exist: during MUL-5483 a new inbox type was added and the
- * mobile label map was updated so `tsc` passed — but a NUMBER went into
- * `details.child_count`, and `details` is `z.record(z.string(), z.string())`.
- * Because the endpoint parses an ARRAY, one bad row fails the whole parse and
- * `listInbox` falls back to `EMPTY_INBOX_LIST`: the entire mobile inbox
- * renders empty, not just that row. The blast radius is what these tests
- * document; the compile-time type is what prevents it.
+ * `details` is free-form JSON on the server and some producers write numbers
+ * (children_done stores `total` and `stage` as ints). The endpoint parses an
+ * ARRAY and `listInbox` falls back to `EMPTY_INBOX_LIST` on failure, so a
+ * strict per-value type would blank the entire Inbox for one row. The schema
+ * therefore normalizes values instead of rejecting them.
  */
 describe("inbox list schema", () => {
   it("parses a row shaped like the documented server payload", () => {
@@ -38,7 +30,6 @@ describe("inbox list schema", () => {
       read: false,
       archived: false,
       created_at: "2026-07-30T00:00:00Z",
-      // Every value is a string. A number here drops the whole list.
       details: { from: "in_progress", to: "in_review" },
     };
 
@@ -48,35 +39,64 @@ describe("inbox list schema", () => {
     expect(parsed.success && parsed.data[0]?.details?.to).toBe("in_review");
   });
 
-  it("rejects a numeric details value", () => {
-    const badRow = {
+  it("stringifies numeric and boolean details values", () => {
+    const row = {
       id: "inbox-2",
       recipient_type: "member",
-      type: "status_changed",
-      details: { child_count: 3 },
+      type: "children_done",
+      details: { total: 3, stage: 0, all: true, rule: "child_done" },
     };
 
-    expect(InboxListSchema.safeParse([badRow]).success).toBe(false);
+    const parsed = InboxListSchema.parse([row]);
+    expect(parsed[0]?.details).toEqual({
+      total: "3",
+      stage: "0",
+      all: "true",
+      rule: "child_done",
+    });
   });
 
-  it("keeps one malformed row from emptying the entire list observable", () => {
-    // Documents the blast radius that made this a P1 rather than a cosmetic bug:
-    // the schema is an array, so a single bad row invalidates every good one.
-    const good = {
+  it("drops non-scalar details values instead of failing the row", () => {
+    const row = {
       id: "inbox-3",
+      recipient_type: "member",
+      type: "children_done",
+      details: { total: 2, stages: [{ stage: 1 }], extra: null, nested: { a: "b" } },
+    };
+
+    const parsed = InboxListSchema.parse([row]);
+    expect(parsed[0]?.details).toEqual({ total: "2" });
+  });
+
+  it("reads a non-object details value as null", () => {
+    const parsed = InboxListSchema.parse([
+      { id: "inbox-4", recipient_type: "member", type: "status_changed", details: "oops" },
+      { id: "inbox-5", recipient_type: "member", type: "status_changed" },
+    ]);
+    expect(parsed[0]?.details).toBeNull();
+    expect(parsed[1]?.details).toBeNull();
+  });
+
+  it("keeps every row when one notification has numeric details", () => {
+    // Regression for #11331: a children_done row with a numeric total used to
+    // fail the array parse, and the whole Inbox rendered empty.
+    const good = {
+      id: "inbox-6",
       recipient_type: "member",
       type: "status_changed",
       details: { from: "todo", to: "in_review" },
     };
-    const bad = {
-      id: "inbox-4",
+    const numeric = {
+      id: "inbox-7",
       recipient_type: "member",
-      type: "status_changed",
-      details: { child_count: 3 },
+      type: "children_done",
+      details: { total: 3 },
     };
 
-    expect(InboxListSchema.safeParse([good]).success).toBe(true);
-    expect(InboxListSchema.safeParse([good, bad]).success).toBe(false);
+    const parsed = InboxListSchema.parse([good, numeric]);
+    expect(parsed.map((item) => item.id)).toEqual(["inbox-6", "inbox-7"]);
+    expect(parsed[0]?.details?.to).toBe("in_review");
+    expect(parsed[1]?.details?.total).toBe("3");
   });
 
   it("renders an unknown server type instead of dropping the row", () => {
@@ -84,7 +104,7 @@ describe("inbox list schema", () => {
     // "render every inbox type, never silently drop a category" parity rule: a
     // type this build has never heard of must still parse.
     const future = {
-      id: "inbox-5",
+      id: "inbox-8",
       recipient_type: "member",
       type: "some_future_type",
       details: { anything: "still a string" },

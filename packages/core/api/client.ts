@@ -288,6 +288,8 @@ import type {
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
+  SquadBriefsResponse,
+  SquadHandoffMode,
   BillingBalance,
   BillingTransactionsPage,
   BillingBatchesPage,
@@ -305,6 +307,7 @@ import type {
   WorkspaceFeatures,
   MemberLimit,
   StorageUsage,
+  AppCallUsage,
   CreateWorkspaceSubscriptionCheckoutRequest,
   CreateWorkspaceSubscriptionCheckoutResponse,
   WorkspaceSubscriptionSeatReconcileResult,
@@ -454,6 +457,8 @@ import {
   SquadSchema,
   SquadListSchema,
   SquadMemberStatusListResponseSchema,
+  SquadBriefsResponseSchema,
+  EMPTY_SQUAD_BRIEFS,
   SubscribersListSchema,
   TaskMessageListSchema,
   TaskContextReceiptResponseSchema,
@@ -477,6 +482,7 @@ import {
   WorkspaceFeaturesSchema,
   MemberLimitSchema,
   StorageUsageSchema,
+  AppCallUsageSchema,
   CreateWorkspaceSubscriptionCheckoutResponseSchema,
   WorkspaceSubscriptionSeatReconcileResultSchema,
   WorkspaceSeatPurchasePreviewSchema,
@@ -1559,6 +1565,7 @@ export class ApiClient {
   // Issues
   async listIssues(params?: ListIssuesParams): Promise<ListIssuesResponse> {
     const search = new URLSearchParams();
+    if (params?.blocked) search.set("blocked", "true");
     if (params?.limit) search.set("limit", String(params.limit));
     if (params?.offset) search.set("offset", String(params.offset));
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
@@ -2808,6 +2815,18 @@ export class ApiClient {
       StorageUsageSchema,
       { action: "off", usedBytes: null, limitBytes: null, reached: null },
       { endpoint: "GET /api/workspaces/:id/storage-usage" },
+    );
+  }
+
+  // The plan's monthly app call limit (MUL-10047). A response that cannot be
+  // read falls back to no limit: the gateway still checks every call.
+  async getAppCallUsage(workspaceId: string): Promise<AppCallUsage> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/app-call-usage`);
+    return parseWithFallback<AppCallUsage>(
+      raw,
+      AppCallUsageSchema,
+      { action: "off", used: null, limit: null, reached: null, resetAt: null, members: [] },
+      { endpoint: "GET /api/workspaces/:id/app-call-usage" },
     );
   }
 
@@ -5700,7 +5719,7 @@ export class ApiClient {
     }) as Squad;
   }
 
-  async updateSquad(id: string, data: { name?: string; description?: string; instructions?: string; leader_id?: string; avatar_url?: string }): Promise<Squad> {
+  async updateSquad(id: string, data: { name?: string; description?: string; instructions?: string; leader_id?: string; avatar_url?: string; handoff_mode?: SquadHandoffMode }): Promise<Squad> {
     const raw = await this.fetch<unknown>(`/api/squads/${id}`, { method: "PUT", body: JSON.stringify(data) });
     return parseWithFallback(raw, SquadSchema, EMPTY_SQUAD, {
       endpoint: "PUT /api/squads/:id",
@@ -5736,6 +5755,15 @@ export class ApiClient {
     return parseWithFallback(raw, SquadMemberStatusListResponseSchema, EMPTY_SQUAD_MEMBER_STATUS_LIST, {
       endpoint: "GET /api/squads/:id/members/status",
     }) as SquadMemberStatusListResponse;
+  }
+
+  // What each agent of the squad receives as squad context on its runs.
+  // Restricted server-side to the people who can edit the squad.
+  async getSquadBriefs(squadId: string): Promise<SquadBriefsResponse> {
+    const raw = await this.fetch<unknown>(`/api/squads/${squadId}/briefs`);
+    return parseWithFallback(raw, SquadBriefsResponseSchema, EMPTY_SQUAD_BRIEFS, {
+      endpoint: "GET /api/squads/:id/briefs",
+    }) as SquadBriefsResponse;
   }
 
   // Autopilots

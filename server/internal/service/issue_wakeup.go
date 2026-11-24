@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -103,7 +104,10 @@ func (s *IssueWakeupService) Expiry(in *WakeupInput, now time.Time) (pgtype.Time
 	return pgtype.Timestamptz{Time: at, Valid: true}, pgtype.Int8{}, nil
 }
 
-type IssueWakeupService struct{ Tasks *TaskService }
+type IssueWakeupService struct {
+	Tasks              *TaskService
+	blockersBackfilled atomic.Bool
+}
 
 func (s *IssueWakeupService) Validate(in *WakeupInput, now time.Time) (pgtype.Timestamptz, error) {
 	bad := func(msg string) (pgtype.Timestamptz, error) {
@@ -662,6 +666,9 @@ func (s *IssueWakeupService) authorizeRun(ctx context.Context, q *db.Queries, is
 // Tick uses the existing scheduler lease. Each config has a row lock as well,
 // so a manual retry or a second server cannot dispatch the same receipt twice.
 func (s *IssueWakeupService) Tick(ctx context.Context) error {
+	if err := s.backfillBlockerRules(ctx); err != nil {
+		return err
+	}
 	return s.tick(ctx, nil)
 }
 
@@ -1260,6 +1267,11 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 			return err
 		}
 		if self {
+			// An acknowledged event leaves the rule waiting for its first run.
+			// An acknowledged condition has already been satisfied.
+			if w.Kind == "event" && w.Mode == "once" && len(w.Condition) == 0 && !timedOut {
+				enabled = w.Enabled
+			}
 			if err = q.ConsumeWakeupReceipts(ctx, db.ConsumeWakeupReceiptsParams{Ids: ids}); err != nil {
 				return err
 			}

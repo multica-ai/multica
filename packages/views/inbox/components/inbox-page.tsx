@@ -109,10 +109,12 @@ import {
   getInboxDisplayTitle,
   inboxRowHref,
   isAutopilotQuotaNotice,
+  isQuotaNotice,
   isQuickCreateOutcome,
   resolveDetailItem,
 } from "./inbox-display";
 import { AutopilotQuotaNotice } from "./autopilot-quota-notice";
+import { AppCallQuotaNotice } from "./app-call-quota-notice";
 import { InboxEmptyState } from "./inbox-empty-state";
 import { InboxKeptActions, useKeptInboxRowText } from "./inbox-kept-actions";
 import { inboxListLoad, useFilteredInboxRows } from "./use-filtered-inbox-rows";
@@ -1162,7 +1164,7 @@ export function InboxPage() {
     {keptNotice}
     <div key={detailItem.id} className="animate-inbox-enter-fade p-6">
       <h2 className="text-title font-semibold">
-        {isAutopilotQuotaNotice(detailItem.type)
+        {isQuotaNotice(detailItem.type)
           ? typeLabels[detailItem.type]
           : getInboxDisplayTitle(detailItem)}
       </h2>
@@ -1174,6 +1176,8 @@ export function InboxPage() {
           item={detailItem}
           onOpenRecovery={showAutopilotQuotaRecoveryPrompt}
         />
+      ) : detailItem.type === "app_tool_calls_quota_exceeded" ? (
+        <AppCallQuotaNotice item={detailItem} />
       ) : detailItem.type === "project_owner_joined" && detailItem.details?.joined_by ? (
         <div className="mt-4 text-body leading-relaxed text-foreground">
           {t(($) => $.detail.project_owner_joined_body, { name: detailItem.details.joined_by })}

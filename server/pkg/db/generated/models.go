@@ -259,6 +259,18 @@ type AppToolCall struct {
 	RequestID          pgtype.UUID        `json:"request_id"`
 	Error              pgtype.Text        `json:"error"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	MeteredPeriodStart pgtype.Timestamptz `json:"metered_period_start"`
+}
+
+type AppToolCallQuotaPeriod struct {
+	WorkspaceID             pgtype.UUID        `json:"workspace_id"`
+	PeriodStart             pgtype.Timestamptz `json:"period_start"`
+	PeriodEnd               pgtype.Timestamptz `json:"period_end"`
+	UsedCount               int64              `json:"used_count"`
+	RejectionNotifiedAt     pgtype.Timestamptz `json:"rejection_notified_at"`
+	RejectionNotifiedLimits []int64            `json:"rejection_notified_limits"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
 }
 
 type AppToolClassOverride struct {
@@ -954,6 +966,13 @@ type DocVersion struct {
 	Contributors []byte             `json:"contributors"`
 }
 
+type EffectiveIssueBlocker struct {
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	IssueID        pgtype.UUID `json:"issue_id"`
+	BlockerIssueID pgtype.UUID `json:"blocker_issue_id"`
+	Via            string      `json:"via"`
+}
+
 type EntitlementFeatureAttempt struct {
 	WorkspaceID             pgtype.UUID        `json:"workspace_id"`
 	Feature                 string             `json:"feature"`
@@ -1150,6 +1169,15 @@ type Issue struct {
 	DuplicateOfIssueID  pgtype.UUID        `json:"duplicate_of_issue_id"`
 	RequesterUserID     pgtype.UUID        `json:"requester_user_id"`
 	DescriptionRevision int64              `json:"description_revision"`
+}
+
+type IssueBlocker struct {
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	BlockerIssueID pgtype.UUID        `json:"blocker_issue_id"`
+	CreatedByType  string             `json:"created_by_type"`
+	CreatedByID    pgtype.UUID        `json:"created_by_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
 type IssueChildEvent struct {
@@ -1973,6 +2001,7 @@ type Squad struct {
 	ArchivedBy   pgtype.UUID        `json:"archived_by"`
 	AvatarUrl    pgtype.Text        `json:"avatar_url"`
 	Instructions string             `json:"instructions"`
+	HandoffMode  string             `json:"handoff_mode"`
 }
 
 type SquadMember struct {

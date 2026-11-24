@@ -55,8 +55,11 @@ var typeGroups = map[string]string{
 	"quick_create_unconfirmed": "",
 	"autopilot_paused":         "",
 	"autopilot_quota_exceeded": "",
-	"children_done":            "",
-	"project_owner_joined":     "",
+	// The workspace used its monthly app calls (MUL-10047); owners and admins.
+	"app_tool_calls_quota_exceeded": "",
+	"children_done":                 "",
+	"blockers_done":                 "",
+	"project_owner_joined":          "",
 	// The agent is stopped until the person answers these.
 	"app_action_requested":  "",
 	"app_action_reminder":   "",

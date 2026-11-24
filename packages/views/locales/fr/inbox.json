@@ -72,6 +72,8 @@
     "retry_with_context": "Réessayer avec le contexte",
     "edit_advanced": "Ouvrir le formulaire complet",
     "autopilot_quota_exceeded_body": "Cet espace de travail a atteint sa limite de {{limit}} exécutions d'autopilot pour la période en cours. Les exécutions suivantes ne démarreront pas avant la réinitialisation de l'allocation {{resetAt}}, ou avant que l'espace de travail change de forfait ou achète des exécutions.",
+    "app_tool_calls_quota_exceeded_body": "Cet espace de travail a utilisé ses {{limit}} appels d'apps de ce mois. Les agents ne peuvent plus utiliser les outils d'apps avant la réinitialisation {{resetAt}}, ou tant que l'espace de travail n'est pas passé à un plan supérieur ou n'a pas ajouté de places.",
+    "app_tool_calls_quota_action": "Gérer la facturation",
     "project_owner_joined_body": "{{name}}, propriétaire de l’espace de travail, s’est ajouté à ce projet privé et peut désormais voir ses tâches, commentaires et pièces jointes.",
     "open_project": "Ouvrir le projet",
     "open_app": "Ouvrir l'app",
@@ -111,12 +113,14 @@
     "children_done": "Sous-tâches terminées",
     "project_owner_joined": "Le propriétaire a rejoint le projet",
     "autopilot_quota_exceeded": "Limite d'exécutions d'automatisation atteinte",
+    "app_tool_calls_quota_exceeded": "Limite d'appels d'apps atteinte",
     "app_action_requested": "Confirmation requise",
     "app_action_reminder": "Confirmation bientôt expirée",
     "app_connect_requested": "Connecter une app",
     "app_action_result": "Résultat d'action d'app",
     "doc_comment": "Nouveau commentaire sur un document",
-    "doc_mentioned": "Mentionné dans un document"
+    "doc_mentioned": "Mentionné dans un document",
+    "blockers_done": "Les tâches attendues sont terminées"
   },
   "labels": {
     "set_status_to": "Statut défini sur",
@@ -132,6 +136,7 @@
     "created_with_agent": "Créé avec un agent : {{identifier}}",
     "failed_with_detail": "Échec : {{detail}}",
     "autopilot_quota_blocked": "Exécution bloquée car la limite a été atteinte",
+    "app_tool_calls_quota_blocked": "Les agents ne peuvent plus utiliser les outils d'apps ce mois-ci",
     "children_done_stage": "Sous-tâches de l’étape {{stage}} terminées"
   },
   "toasts": {

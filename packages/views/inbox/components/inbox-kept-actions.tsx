@@ -14,7 +14,7 @@ import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import type { IssueAgentState } from "../../issues/surface/use-issue-agent-state";
 import { useStatusLabel } from "../../issues/utils/status-label";
 import { formatSnoozeTime } from "./inbox-snooze-time";
-import { getInboxDisplayTitle, isAutopilotQuotaNotice } from "./inbox-display";
+import { getInboxDisplayTitle, isQuotaNotice } from "./inbox-display";
 import { InboxBar, InboxBarKeycaps, InboxBarSeparator, InboxBarStatus } from "./inbox-bar";
 import { useInboxUndoShortcut } from "./use-inbox-shortcut";
 
@@ -151,7 +151,7 @@ export function InboxKeptActions({
 /** Opens the next notification, named in its tooltip; E does the same. */
 export function InboxNextButton({ next, onNext }: { next: InboxItem; onNext: () => void }) {
   const { t } = useT("inbox");
-  const title = isAutopilotQuotaNotice(next.type) ? t(($) => $.types[next.type]) : getInboxDisplayTitle(next);
+  const title = isQuotaNotice(next.type) ? t(($) => $.types[next.type]) : getInboxDisplayTitle(next);
   return (
     <TooltipHint
       label={t(($) => $.kept.next_tooltip, { title })}

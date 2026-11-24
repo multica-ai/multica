@@ -17,7 +17,7 @@ The client reads:
 
 - `schema_version`: only version 1 is accepted.
 - `policy_revision`: the effective-instruction generation, currently fixed at
-  `9` by Cloud and not deployment configuration. Cloud advances it when the
+  `10` by Cloud and not deployment configuration. Cloud advances it when the
   meaning or set of actionable instructions changes, including additive
   instructions; `schema_version` changes only for incompatible wire parsing.
 - `subscription_version`: the workspace's monotonic subscription revision. A
@@ -78,6 +78,11 @@ one as that feature `off` with reason `feature_missing`.
 missing or malformed gate, including a `limit` outside 1–365 or one carrying a
 period, is `off` with reason `gate_missing` or `gate_invalid` for that gate
 alone. See [Dashboard history limit](#dashboard-history-limit).
+
+`gates.app_tool_calls` (revision 10) is optional like `members`: a missing or
+malformed gate, including one without its period, is `off` with reason
+`gate_missing` or `gate_invalid` for that gate alone. See
+[Monthly app call limit](#monthly-app-call-limit).
 
 Responses tolerate unknown JSON fields and gates for additive compatibility.
 Unknown schema/action, malformed fields, a missing `autopilot_runs` gate, HTTP
@@ -221,6 +226,54 @@ calendar month.
 Clients read `GET /api/workspaces/{id}/storage-usage` (member-readable), which
 returns `action` and, while a limit applies, `used_bytes` and `limit_bytes`;
 `reached` is present only under `enforce`.
+
+## Monthly app call limit
+
+`app_tool_calls` caps the Connected Apps tool calls a workspace sends to
+Composio in a Cloud-defined period (a UTC calendar month). Like
+`autopilot_runs` it carries a `limit`, the period, and under `enforce` a
+`first_rejection_per_limit` notification policy. `service.AppToolCallQuota`
+(`server/internal/service/app_tool_call_quota.go`) checks it; the gateway
+calls it through `connectedapps.CallQuota`.
+
+Usage is a counter, `app_tool_call_quota_period.used_count` per workspace and
+period, never a `COUNT` over `app_tool_call`. One conditional upsert counts a
+call right before it is sent to Composio: under `enforce` it only increments
+below the limit, so concurrent calls cannot take a workspace past it; under
+`observe` it always increments. A call that then fails upstream still counts,
+as Composio bills it.
+
+| Counted | Not counted |
+| --- | --- |
+| `apps_run_tool` calls the gateway sends to Composio (`toolRun`) | blocked calls, per-minute rate-limited calls, refused calls themselves |
+| Confirmed calls when the approval executes them (`executeApproved`) | pending confirmations, meta tools (list, search, get tool, connection requests), Remote MCP apps |
+
+Team and personal accounts both count toward the workspace that started the
+run. `enforce` refuses past the limit only after re-reading the policy with
+`RefreshGateNow`, so a workspace that upgraded or added seats moments ago is
+admitted. A cached policy whose period has already ended (the first minute of
+a month) is re-read the same way before counting a call or answering Billing;
+if Cloud still sends the old period, the call is admitted without counting and
+Billing shows no limit for that moment. The agent gets a tool error with the count, the limit and the reset
+time; the call is logged in `app_tool_call` as `quota_exceeded`, and a refused
+confirmed call fails its request. Owners and admins get one
+`app_tool_calls_quota_exceeded` Inbox item per limit and period, also when
+the limit returns to one already notified; a delivery with no recipient leaves
+the marker unset for the next refusal. Attempts past
+the limit are recorded in `entitlement_limit_overage` under gate
+`app_tool_calls`. `off`, and every self-hosted deployment, touches no table;
+the per-account per-minute limit applies regardless.
+
+Clients read `GET /api/workspaces/{id}/app-call-usage` (member-readable),
+which returns `action` and, while a limit applies, `used`, `limit`,
+`period_start` and `reset_at`; `reached` only under `enforce`. Owners and
+admins also get `members`: the period's calls per person who started the run
+or approved the call (`user_id` null for runs no person started), read from
+the `app_tool_call` rows whose `metered_period_start` is the period. The
+quota returns the period it counted a call in and the gateway records it, so
+the breakdown matches the counter even for a call that finishes after the
+month turned. Refused calls, an approved call that fails its checks before
+running, Remote MCP calls and every call while the gate is off have none.
 
 ## Paid features
 

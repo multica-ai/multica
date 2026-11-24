@@ -16,7 +16,7 @@ type AppGroup = {
 };
 
 /** Outcomes worth calling out next to an app; plain successes are not. */
-const NOTABLE = ["pending", "blocked", "rejected", "error", "rate_limited"] as const;
+const NOTABLE = ["pending", "blocked", "rejected", "error", "rate_limited", "quota_exceeded"] as const;
 
 /**
  * "Apps" in the issue sidebar: which apps, through which account, this

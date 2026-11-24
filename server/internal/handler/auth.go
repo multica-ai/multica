@@ -561,11 +561,15 @@ func writeGoogleLoginActionableError(w http.ResponseWriter, err error) bool {
 	return true
 }
 
+// googleOAuthClient bounds each Google OAuth call. The API server sets no
+// WriteTimeout, so an unanswered call would otherwise hold the handler open.
+var googleOAuthClient = &http.Client{Timeout: 15 * time.Second}
+
 func (h *Handler) googleHTTPClient() *http.Client {
 	if h.googleOAuthHTTPClient != nil {
 		return h.googleOAuthHTTPClient
 	}
-	return http.DefaultClient
+	return googleOAuthClient
 }
 
 func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
@@ -593,13 +597,21 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Exchange authorization code for tokens.
-	tokenResp, err := h.googleHTTPClient().PostForm("https://oauth2.googleapis.com/token", url.Values{
+	tokenForm := url.Values{
 		"code":          {req.Code},
 		"client_id":     {clientID},
 		"client_secret": {clientSecret},
 		"redirect_uri":  {redirectURI},
 		"grant_type":    {"authorization_code"},
-	})
+	}
+	tokenReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, "https://oauth2.googleapis.com/token", strings.NewReader(tokenForm.Encode()))
+	if err != nil {
+		slog.Error("failed to create google token request", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	tokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	tokenResp, err := h.googleHTTPClient().Do(tokenReq)
 	if err != nil {
 		slog.Error("google oauth token exchange failed", "error", err)
 		writeError(w, http.StatusBadGateway, "failed to exchange code with Google")

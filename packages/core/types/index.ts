@@ -397,7 +397,11 @@ export type {
   SquadActiveIssueBrief,
   SquadMemberStatus,
   SquadMemberStatusListResponse,
+  SquadHandoffMode,
+  SquadBrief,
+  SquadBriefsResponse,
 } from "./squad";
+export { SQUAD_HANDOFF_ROUND_LIMIT, SQUAD_HANDOFF_DAILY_LIMIT } from "./squad";
 export type {
   BillingBalance,
   BillingTransaction,
@@ -456,6 +460,8 @@ export type {
   WorkspaceFeatureLimits,
   MemberLimit,
   StorageUsage,
+  AppCallUsage,
+  AppCallMemberUsage,
 } from "./billing";
 export type { IssueWakeup, IssueWakeupInput, SystemWakeup, WorkspaceSystemWakeup, WakeupPreview, IssueWakeupSummaryRow, WakeupCondition, WakeupPausedReason, WakeupRun, PausedWakeup, WakeupSource } from "./issue-wakeup";
 
