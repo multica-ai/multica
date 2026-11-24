@@ -6,14 +6,14 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useReducedMotion } from "@multica/core/appearance";
-import { AlarmClock, Archive, ArchiveRestore, BellOff, BookCheck, CheckCheck, CircleDot, Filter, ListChecks, MoreHorizontal } from "@multica/ui/icons";
+import { AlarmClock, Archive, ArchiveRestore, BellOff, BookCheck, Check, CheckCheck, CircleDot, Filter, ListChecks, MoreHorizontal } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { UI_EASE_IN, UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { useIsCompact } from "@multica/ui/hooks/use-mobile";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
-import { Button, buttonVariants } from "@multica/ui/components/ui/button";
+import { buttonVariants } from "@multica/ui/components/ui/button";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@multica/ui/components/ui/hover-card";
 import {
   DropdownMenu,
@@ -1689,6 +1689,8 @@ function InboxRowCard({
   // A comment gets its own block, so the line above names only the kind.
   const comment = item.type === "new_comment" && item.body ? item.body : null;
   const status = item.issue_status;
+  const onToggleRead = unread ? onMarkRead : onMarkUnread;
+  const hasIconActions = !!(onToggleRead || onSnooze || onArchive || onUnsubscribe);
 
   return (
     <div data-inbox-card className="flex flex-col gap-2">
@@ -1729,30 +1731,26 @@ function InboxRowCard({
         >
           {t(($) => $.panels.work.inbox_open)}
         </AppLink>
-        {unread && onMarkRead && (
-          <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={onMarkRead}>
-            {tInbox(($) => $.context_menu.mark_read)}
-          </Button>
-        )}
-        {onSnooze && (
-          <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={onSnooze}>
-            {tInbox(($) => $.snooze.action)}
-          </Button>
-        )}
-        {onArchive && (
-          <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={onArchive}>
-            {tInbox(($) => $.context_menu.archive)}
-          </Button>
-        )}
-        {((!unread && onMarkUnread) || onUnsubscribe) && (
+        {/* The card is a fixed w-72: labelled actions past Open overflow it in most locales. */}
+        {hasIconActions && (
           <div className="ml-auto flex items-center gap-0.5">
-            {!unread && onMarkUnread && (
+            {onToggleRead && (
               <IconButton
-                label={tInbox(($) => $.context_menu.mark_unread)}
+                label={tInbox(($) => (unread ? $.context_menu.mark_read : $.context_menu.mark_unread))}
                 className="text-muted-foreground"
-                onClick={onMarkUnread}
+                onClick={onToggleRead}
               >
-                <CircleDot />
+                {unread ? <Check /> : <CircleDot />}
+              </IconButton>
+            )}
+            {onSnooze && (
+              <IconButton label={tInbox(($) => $.snooze.action)} className="text-muted-foreground" onClick={onSnooze}>
+                <AlarmClock />
+              </IconButton>
+            )}
+            {onArchive && (
+              <IconButton label={tInbox(($) => $.context_menu.archive)} className="text-muted-foreground" onClick={onArchive}>
+                <Archive />
               </IconButton>
             )}
             {onUnsubscribe && (
