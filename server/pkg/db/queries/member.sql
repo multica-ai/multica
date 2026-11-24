@@ -21,6 +21,14 @@ SELECT * FROM member
 WHERE user_id = $1 AND workspace_id = $2
   AND role IN ('owner', 'admin', 'member', 'guest');
 
+-- name: HasActiveWorkspaceSuperuserGrant :one
+SELECT EXISTS (
+    SELECT 1 FROM workspace_superuser_grant g
+    JOIN workspace_superuser_policy p ON p.workspace_id = g.workspace_id
+    JOIN member m ON m.id = g.member_id AND m.workspace_id = g.workspace_id AND m.user_id = g.user_id
+    WHERE g.workspace_id = $1 AND g.user_id = $2 AND m.role IN ('owner', 'admin', 'member')
+);
+
 -- name: GetRealtimeMemberships :many
 SELECT m.user_id, m.workspace_id
 FROM member m
@@ -48,6 +56,15 @@ RETURNING *;
 -- Locks a member row for a role change, so concurrent changes to the same
 -- member apply one after the other and each re-checks the role it starts from.
 SELECT * FROM member WHERE id = $1 FOR UPDATE;
+
+-- name: LockWorkspaceOwners :many
+-- Locks a workspace's owner rows in id order, so changes that could take away
+-- its last owner apply one after the other and each counts the owners the
+-- previous one left.
+SELECT id FROM member
+WHERE workspace_id = $1 AND role = 'owner'
+ORDER BY id
+FOR UPDATE;
 
 -- name: DeleteMember :exec
 DELETE FROM member WHERE id = $1;

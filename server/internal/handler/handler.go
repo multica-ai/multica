@@ -800,6 +800,12 @@ func (h *Handler) channelDeliversFiles(channelType string) bool {
 
 // publish sends a domain event through the event bus.
 func (h *Handler) publish(eventType, workspaceID, actorType, actorID string, payload any) {
+	if fields, ok := payload.(map[string]any); ok {
+		if issue, ok := fields["issue"].(IssueResponse); ok {
+			fields["issue"] = publicBlockerResponse(issue)
+		}
+	}
+
 	h.Bus.Publish(events.Event{
 		Type:        eventType,
 		WorkspaceID: workspaceID,
@@ -948,6 +954,16 @@ func (h *Handler) resolveActor(r *http.Request, userID, workspaceID string) (act
 	return "agent", agentID
 }
 
+// permissionActor is deliberately separate from resolveActor: a fully
+// delegated run is still authored by its source agent, but must never gain
+// visibility or management rights beyond its verified grantor's live rights.
+func (h *Handler) permissionActor(r *http.Request, userID, workspaceID string) (string, string) {
+	if p, ok := middleware.FullDelegationFromContext(r.Context()); ok {
+		return "member", p.GrantorUserID
+	}
+	return h.resolveActor(r, userID, workspaceID)
+}
+
 func requireUserID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	userID := requestUserID(r)
 	if userID == "" {
@@ -1034,10 +1050,19 @@ func (h *Handler) getWorkspaceMember(ctx context.Context, userID, workspaceID st
 	if err != nil {
 		return db.Member{}, err
 	}
-	return h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+	member, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
 		UserID:      userUUID,
 		WorkspaceID: wsUUID,
 	})
+	if err != nil {
+		return db.Member{}, err
+	}
+	if middleware.SuperuserFromContext(ctx) {
+		if effective, ok := ctxMember(ctx); ok && effective.UserID == member.UserID && effective.WorkspaceID == member.WorkspaceID {
+			member.Role = "owner"
+		}
+	}
+	return member, nil
 }
 
 func (h *Handler) requireWorkspaceMember(w http.ResponseWriter, r *http.Request, workspaceID, notFoundMsg string) (db.Member, bool) {
@@ -1058,6 +1083,21 @@ func (h *Handler) requireWorkspaceMember(w http.ResponseWriter, r *http.Request,
 		}
 		writeError(w, http.StatusNotFound, notFoundMsg)
 		return db.Member{}, false
+	}
+	if effective, ok := ctxMember(r.Context()); ok && uuidToString(effective.WorkspaceID) == workspaceID && uuidToString(effective.UserID) == userID {
+		member = effective
+	} else if member.Role != projectaccess.RoleGuest {
+		granted, err := h.humanSuperuser(r.Context(), r, workspaceID, userID)
+		if err != nil {
+			if writeQueryCancellation(w, r, err) {
+				return db.Member{}, false
+			}
+			writeError(w, http.StatusInternalServerError, "failed to check superuser grant")
+			return db.Member{}, false
+		}
+		if granted {
+			member.Role = "owner"
+		}
 	}
 	if projectaccess.IsGuestRole(member.Role) && !middleware.GuestMayRequest(r) {
 		middleware.RefuseGuest(w, r)

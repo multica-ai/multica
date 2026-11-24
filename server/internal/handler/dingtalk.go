@@ -255,8 +255,7 @@ func (h *Handler) ListDingTalkGroupsForAgent(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	workspaceID := uuidToString(agent.WorkspaceID)
-	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
-	if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
+	if !h.canAccessPrivateAgentForRequest(r, agent, workspaceID) {
 		writeError(w, http.StatusForbidden, "you do not have access to this agent")
 		return
 	}

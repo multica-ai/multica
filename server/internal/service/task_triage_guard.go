@@ -58,6 +58,9 @@ const (
 	OriginNamed
 )
 
+// ErrIssueHasBlockers refuses derived runs until all prerequisites end.
+var ErrIssueHasBlockers = errors.New("the issue is waiting for unfinished blockers")
+
 // ErrIssueInTriage is returned by a derived enqueue path when the issue is
 // waiting in Triage. Handlers render it as 403 issue_in_triage; background
 // callers log it and drop the trigger.
@@ -85,16 +88,20 @@ func guardIssueNotInTriage(ctx context.Context, q *db.Queries, issueID pgtype.UU
 	if origin == OriginNamed || !issueID.Valid {
 		return nil
 	}
-	state, err := q.GetIssueTriageState(ctx, issueID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
-		}
-		return fmt.Errorf("triage guard: load issue triage state: %w", err)
+	admission, err := q.GetIssueRunAdmission(ctx, issueID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
 	}
-	if state.Valid {
+	if err != nil {
+		return fmt.Errorf("issue admission: %w", err)
+	}
+	if admission.TriageState.Valid {
 		return ErrIssueInTriage
 	}
+	if admission.Blocked {
+		return ErrIssueHasBlockers
+	}
+
 	return nil
 }
 

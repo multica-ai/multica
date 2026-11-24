@@ -15,7 +15,7 @@
     "decline": "Refuser",
     "declining": "Refus...",
     "skip": "Ignorer et configurer mon propre espace de travail",
-    "superuser_policy": "Les superutilisateurs désignés de cet espace de travail peuvent rechercher et lire tous les chats des membres, y compris les anciens."
+    "superuser_policy": "Les superutilisateurs désignés peuvent gérer cet espace, y compris ses ressources privées et sa suppression, et lire tous les chats, même anciens."
   },
   "empty": {
     "title": "Aucune invitation en attente",
@@ -35,7 +35,7 @@
     "member_limit_reached": "{{workspace}} est complet. Contactez la personne qui vous a invité ; vous pourrez le rejoindre une fois son forfait mis à niveau."
   },
   "join": {
-    "superuser_policy": "Les superutilisateurs désignés de cet espace de travail peuvent rechercher et lire tous les chats des membres, y compris les anciens.",
+    "superuser_policy": "Les superutilisateurs désignés peuvent gérer cet espace, y compris ses ressources privées et sa suppression, et lire tous les chats, même anciens.",
     "no_code": "Aucun code d'invitation trouvé. Utilisez un lien de partage valide.",
     "invalid": "Ce lien d'invitation n'est pas valide ou a expiré.",
     "joined_title": "C'est fait !",

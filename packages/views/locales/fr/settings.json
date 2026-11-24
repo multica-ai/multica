@@ -852,7 +852,12 @@
     "save": "Mettre à jour le profil",
     "saving": "Mise à jour...",
     "toast_avatar_failed": "Échec de l'envoi de l'avatar",
-    "toast_profile_failed": "Échec de la mise à jour du profil"
+    "toast_profile_failed": "Échec de la mise à jour du profil",
+    "full_delegation_title": "Agents avec délégation complète",
+    "full_delegation_description": "Ces agents peuvent utiliser vos autorisations actuelles dans les discussions que vous lancez directement. Révoquez l’accès ici à tout moment.",
+    "full_delegation_revoke": "Révoquer",
+    "full_delegation_empty": "Aucun agent ne dispose d’une délégation complète.",
+    "full_delegation_error": "Impossible de révoquer la délégation."
   },
   "notifications": {
     "title": "Boîte de réception",
@@ -1632,10 +1637,10 @@
   "members": {
     "superusers": {
       "title": "Superutilisateurs",
-      "description": "Les superutilisateurs désignés peuvent rechercher et lire tous les chats des membres, y compris les anciens. Seuls les propriétaires peuvent accorder ou révoquer cet accès.",
+      "description": "Un propriétaire peut accorder explicitement l’accès complet à un membre désigné. Les superutilisateurs peuvent gérer les ressources, y compris les projets et agents privés, lire tous les chats et supprimer l’espace de travail.",
       "loading": "Chargement des superutilisateurs...",
       "error": "Impossible de modifier cet accès.",
-      "enabled": "Cet espace autorise des superutilisateurs désignés à consulter les chats.",
+      "enabled": "Cet espace autorise des superutilisateurs désignés à gérer les ressources et consulter tous les chats.",
       "disabled": "L’accès superutilisateur n’est pas activé.",
       "none": "Aucun superutilisateur n’a accès.",
       "choose": "Choisir un membre",
@@ -1646,7 +1651,13 @@
       "search_button": "Rechercher",
       "chats_error": "Impossible de charger les discussions.",
       "chats_empty": "Aucune discussion trouvée.",
-      "untitled": "Discussion sans titre"
+      "untitled": "Discussion sans titre",
+      "confirm_title": "Accorder l’accès complet à cet espace ?",
+      "confirm_description": "{{name}} pourra gérer les ressources privées, lire tous les chats et supprimer cet espace. Les membres présents seront informés.",
+      "confirm_cancel": "Annuler",
+      "confirm_grant": "Accorder l’accès complet",
+      "previous": "Précédent",
+      "next": "Suivant"
     },
     "invite_title": "Inviter un membre",
     "invite_email_placeholder": "utilisateur@entreprise.com",

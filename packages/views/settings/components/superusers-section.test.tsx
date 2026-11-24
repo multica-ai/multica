@@ -54,6 +54,8 @@ describe("SuperusersSection", () => {
     expect(await screen.findByText("Superuser access has not been enabled.")).toBeInTheDocument();
     fireEvent.change(screen.getByRole("combobox", { name: "Choose a member" }), { target: { value: "m-grace" } });
     fireEvent.click(screen.getByRole("button", { name: "Grant access" }));
+    expect(state.set).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Grant full access" }));
     await waitFor(() => expect(state.set).toHaveBeenCalledWith("ws", "m-grace", true));
     expect(await screen.findByText(/grace@example.test/)).toBeInTheDocument();
   });

@@ -158,6 +158,27 @@ func (q *Queries) GetRealtimeMemberships(ctx context.Context, arg GetRealtimeMem
 	return items, nil
 }
 
+const hasActiveWorkspaceSuperuserGrant = `-- name: HasActiveWorkspaceSuperuserGrant :one
+SELECT EXISTS (
+    SELECT 1 FROM workspace_superuser_grant g
+    JOIN workspace_superuser_policy p ON p.workspace_id = g.workspace_id
+    JOIN member m ON m.id = g.member_id AND m.workspace_id = g.workspace_id AND m.user_id = g.user_id
+    WHERE g.workspace_id = $1 AND g.user_id = $2 AND m.role IN ('owner', 'admin', 'member')
+)
+`
+
+type HasActiveWorkspaceSuperuserGrantParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) HasActiveWorkspaceSuperuserGrant(ctx context.Context, arg HasActiveWorkspaceSuperuserGrantParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasActiveWorkspaceSuperuserGrant, arg.WorkspaceID, arg.UserID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const listMembers = `-- name: ListMembers :many
 SELECT id, workspace_id, user_id, role, created_at, pinned_at FROM member
 WHERE workspace_id = $1
@@ -259,6 +280,36 @@ func (q *Queries) ListWorkspaceManagerUserIDs(ctx context.Context, workspaceID p
 			return nil, err
 		}
 		items = append(items, user_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockWorkspaceOwners = `-- name: LockWorkspaceOwners :many
+SELECT id FROM member
+WHERE workspace_id = $1 AND role = 'owner'
+ORDER BY id
+FOR UPDATE
+`
+
+// Locks a workspace's owner rows in id order, so changes that could take away
+// its last owner apply one after the other and each counts the owners the
+// previous one left.
+func (q *Queries) LockWorkspaceOwners(ctx context.Context, workspaceID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, lockWorkspaceOwners, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

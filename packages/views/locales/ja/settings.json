@@ -842,7 +842,12 @@
     "save": "プロフィールを更新",
     "saving": "更新中...",
     "toast_avatar_failed": "アバターをアップロードできませんでした",
-    "toast_profile_failed": "プロフィールを更新できませんでした"
+    "toast_profile_failed": "プロフィールを更新できませんでした",
+    "full_delegation_title": "完全委任されたエージェント",
+    "full_delegation_description": "自分が直接開始したチャットで、これらのエージェントは現在の権限を使用できます。ここからいつでも取り消せます。",
+    "full_delegation_revoke": "取り消す",
+    "full_delegation_empty": "完全委任されたエージェントはありません。",
+    "full_delegation_error": "完全委任を取り消せませんでした。"
   },
   "notifications": {
     "title": "インボックス",
@@ -1616,10 +1621,10 @@
   "members": {
     "superusers": {
       "title": "特権ユーザー",
-      "description": "指定された特権ユーザーは、権限付与前のものを含むすべてのメンバーのチャットを検索・閲覧できます。この権限を付与・取り消せるのはワークスペースの所有者だけです。",
+      "description": "所有者は指定したメンバーにワークスペース全体へのアクセス権を明示的に付与できます。特権ユーザーは非公開のプロジェクトやエージェントを含むリソースの管理、過去と今後の全メンバーのチャットの閲覧、ワークスペースの削除ができます。",
       "loading": "読み込み中...",
       "error": "権限を更新できませんでした。",
-      "enabled": "このワークスペースでは、指定された特権ユーザーがメンバーのチャットを閲覧できます。",
+      "enabled": "このワークスペースでは指定された特権ユーザーがリソースを管理し、すべてのチャットを閲覧できます。",
       "disabled": "特権ユーザー権限は有効になっていません。",
       "none": "権限を持つ特権ユーザーはいません。",
       "choose": "メンバーを選択",
@@ -1630,7 +1635,13 @@
       "search_button": "検索",
       "chats_error": "チャットを読み込めませんでした。",
       "chats_empty": "チャットが見つかりません。",
-      "untitled": "無題のチャット"
+      "untitled": "無題のチャット",
+      "confirm_title": "ワークスペース全体への権限を付与しますか？",
+      "confirm_description": "{{name}} は非公開リソースの管理、全メンバーのチャットの閲覧、ワークスペースの削除ができるようになります。既存メンバーに通知されます。",
+      "confirm_cancel": "キャンセル",
+      "confirm_grant": "全権限を付与",
+      "previous": "前へ",
+      "next": "次へ"
     },
     "invite_title": "メンバーを招待",
     "invite_email_placeholder": "user@company.com",

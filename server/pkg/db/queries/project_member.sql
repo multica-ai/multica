@@ -11,6 +11,12 @@ SELECT p.id FROM project p
 WHERE p.workspace_id = sqlc.arg('workspace_id')
   AND p.visibility = 'private'
   AND NOT EXISTS (
+      SELECT 1 FROM workspace_superuser_grant g
+      JOIN workspace_superuser_policy policy ON policy.workspace_id = g.workspace_id
+      JOIN member m ON m.id = g.member_id AND m.workspace_id = g.workspace_id AND m.user_id = g.user_id
+      WHERE g.workspace_id = p.workspace_id AND g.user_id = sqlc.arg('user_id') AND m.role IN ('owner', 'admin', 'member')
+  )
+  AND NOT EXISTS (
       SELECT 1 FROM project_member pm
       WHERE pm.project_id = p.id AND pm.user_id = sqlc.arg('user_id')
   );

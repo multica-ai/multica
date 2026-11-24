@@ -377,6 +377,9 @@ deleted_activity AS (
 deleted_inbox AS (
     DELETE FROM inbox_item WHERE workspace_id = $1
 ),
+deleted_issue_blockers AS (
+ DELETE FROM issue_blocker WHERE workspace_id=$1
+),
 deleted_issue_dependencies AS (
     DELETE FROM issue_dependency
     WHERE issue_id IN (SELECT id FROM ws_issues)
@@ -764,6 +767,10 @@ deleted_packages AS (
 DELETE FROM plugin_installation WHERE id IN (SELECT id FROM installations);
 
 -- name: DeleteWorkspaceAgents :exec
+WITH deleted_delegations AS (
+    DELETE FROM agent_full_delegation
+    WHERE agent_id IN (SELECT id FROM agent WHERE workspace_id = $1)
+)
 DELETE FROM agent WHERE agent.workspace_id = $1;
 
 -- name: DeleteWorkspaceRuntimesAndProjects :exec
@@ -792,6 +799,15 @@ DELETE FROM project WHERE project.workspace_id = $1;
 WITH
 deleted_members AS (
     DELETE FROM member WHERE member.workspace_id = $1
+),
+deleted_superuser_audit AS (
+    DELETE FROM workspace_superuser_audit WHERE workspace_id = $1
+),
+deleted_superuser_grants AS (
+    DELETE FROM workspace_superuser_grant WHERE workspace_id = $1
+),
+deleted_superuser_policy AS (
+    DELETE FROM workspace_superuser_policy WHERE workspace_id = $1
 ),
 deleted_notification_preferences AS (
     DELETE FROM notification_preference

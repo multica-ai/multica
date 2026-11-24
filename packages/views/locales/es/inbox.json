@@ -116,7 +116,8 @@
     "app_connect_requested": "Conectar una aplicación",
     "app_action_result": "Resultado de la acción de la aplicación",
     "doc_comment": "Nuevo comentario en un documento",
-    "doc_mentioned": "Te mencionaron en un documento"
+    "doc_mentioned": "Te mencionaron en un documento",
+    "blockers_done": "Las tareas en espera terminaron"
   },
   "labels": {
     "set_status_to": "Establecer estado en",

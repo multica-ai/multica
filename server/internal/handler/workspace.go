@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/projectaccess"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -277,6 +278,9 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 	member, ok := h.workspaceMember(w, r, id)
 	if !ok {
 		return
+	}
+	if actual, ok := middleware.ActualMemberFromContext(r.Context()); ok {
+		member = actual
 	}
 
 	ws, err := h.Queries.GetWorkspace(r.Context(), idUUID)
@@ -869,6 +873,11 @@ func (h *Handler) updateMemberRoleFrom(ctx context.Context, target db.Member, ro
 	}
 	defer tx.Rollback(ctx)
 	qtx := h.Queries.WithTx(tx)
+	if target.Role == "owner" && role != "owner" {
+		if err := lockOtherOwner(ctx, qtx, target.WorkspaceID, target.ID); err != nil {
+			return db.Member{}, err
+		}
+	}
 	if _, err := lockMemberRole(ctx, qtx, target.ID, target.Role); err != nil {
 		return db.Member{}, err
 	}
@@ -919,6 +928,10 @@ func (h *Handler) DeleteMember(w http.ResponseWriter, r *http.Request) {
 
 	requesterUserID := requestUserID(r)
 	result, err := h.revokeAndRemoveMember(r.Context(), target.WorkspaceID, target.UserID, target.ID, parseUUID(requesterUserID))
+	if errors.Is(err, errLastOwner) {
+		writeError(w, http.StatusBadRequest, errLastOwner.Error())
+		return
+	}
 	if err != nil {
 		slog.Warn("delete member failed", append(logger.RequestAttrs(r), "error", err, "member_id", memberID, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to delete member")
@@ -964,6 +977,10 @@ func (h *Handler) LeaveWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := h.revokeAndRemoveMember(r.Context(), member.WorkspaceID, member.UserID, member.ID, member.UserID)
+	if errors.Is(err, errLastOwner) {
+		writeError(w, http.StatusBadRequest, errLastOwner.Error())
+		return
+	}
 	if err != nil {
 		slog.Warn("leave workspace failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to leave workspace")
@@ -1602,6 +1619,14 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		{
 			name: "delete plugin data",
 			run:  func() error { return qtx.DeleteWorkspacePluginData(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete agent workspace grants",
+			run:  func() error { return qtx.DeleteAgentWorkspaceGrantsForWorkspace(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete full agent delegations",
+			run:  func() error { return qtx.DeleteAgentFullDelegationsForWorkspace(ctx, requester.WorkspaceID) },
 		},
 		{
 			name: "delete agents",

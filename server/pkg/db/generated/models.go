@@ -75,6 +75,12 @@ type AgentBuilderDraft struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
+type AgentFullDelegation struct {
+	AgentID       pgtype.UUID        `json:"agent_id"`
+	GrantorUserID pgtype.UUID        `json:"grantor_user_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 // Allow-list of who may invoke a public_to agent (MUL-3963). One row per (agent, target_type, target); targets stack and canInvokeAgent OR-matches. workspace rows store the agent workspace_id in target_id; member rows store the user id; team rows are reserved and inert in V1. Rows only matter when agent.permission_mode = public_to. No DB foreign keys: agent_id / created_by / member target_id relationships are maintained in the application layer (see migration comment).
 type AgentInvocationTarget struct {
 	ID         pgtype.UUID        `json:"id"`
@@ -201,6 +207,14 @@ type AgentToLabel struct {
 	AgentID   pgtype.UUID        `json:"agent_id"`
 	LabelID   pgtype.UUID        `json:"label_id"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type AgentWorkspaceGrant struct {
+	AgentID         pgtype.UUID        `json:"agent_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	CreatedBy       pgtype.UUID        `json:"created_by"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	CanCreateAgents bool               `json:"can_create_agents"`
 }
 
 type AppActionRequest struct {
@@ -954,6 +968,13 @@ type DocVersion struct {
 	Contributors []byte             `json:"contributors"`
 }
 
+type EffectiveIssueBlocker struct {
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	IssueID        pgtype.UUID `json:"issue_id"`
+	BlockerIssueID pgtype.UUID `json:"blocker_issue_id"`
+	Via            string      `json:"via"`
+}
+
 type EntitlementFeatureAttempt struct {
 	WorkspaceID             pgtype.UUID        `json:"workspace_id"`
 	Feature                 string             `json:"feature"`
@@ -1150,6 +1171,15 @@ type Issue struct {
 	DuplicateOfIssueID  pgtype.UUID        `json:"duplicate_of_issue_id"`
 	RequesterUserID     pgtype.UUID        `json:"requester_user_id"`
 	DescriptionRevision int64              `json:"description_revision"`
+}
+
+type IssueBlocker struct {
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	BlockerIssueID pgtype.UUID        `json:"blocker_issue_id"`
+	CreatedByType  string             `json:"created_by_type"`
+	CreatedByID    pgtype.UUID        `json:"created_by_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
 type IssueChildEvent struct {
@@ -2379,6 +2409,8 @@ type WorkspaceSuperuserAudit struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
 	ActorUserID   pgtype.UUID        `json:"actor_user_id"`
+	ActorAgentID  pgtype.UUID        `json:"actor_agent_id"`
+	ActorTaskID   pgtype.UUID        `json:"actor_task_id"`
 	TargetUserID  pgtype.UUID        `json:"target_user_id"`
 	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
 	Action        string             `json:"action"`

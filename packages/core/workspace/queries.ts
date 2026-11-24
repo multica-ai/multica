@@ -12,6 +12,8 @@ export const workspaceKeys = {
   agents: (wsId: string) => ["workspaces", wsId, "agents"] as const,
   agent: (wsId: string, agentId: string) =>
     ["workspaces", wsId, "agents", "detail", agentId] as const,
+  agentWorkspaceGrants: (wsId: string, agentId: string) =>
+    ["workspaces", wsId, "agents", "workspace-grants", agentId] as const,
   squads: (wsId: string) => ["workspaces", wsId, "squads"] as const,
   /** Under `squads` so membership changes refetch it. */
   involvedSquads: (wsId: string) => ["workspaces", wsId, "squads", "involved"] as const,
@@ -69,6 +71,15 @@ export function agentDetailOptions(wsId: string, agentId: string) {
   return queryOptions({
     queryKey: workspaceKeys.agent(wsId, agentId),
     queryFn: () => api.getAgent(agentId),
+    enabled: !!wsId && !!agentId,
+    retry: false,
+  });
+}
+
+export function agentWorkspaceGrantsOptions(wsId: string, agentId: string) {
+  return queryOptions({
+    queryKey: workspaceKeys.agentWorkspaceGrants(wsId, agentId),
+    queryFn: () => api.listAgentWorkspaceGrants(agentId),
     enabled: !!wsId && !!agentId,
     retry: false,
   });

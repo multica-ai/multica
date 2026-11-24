@@ -15,7 +15,7 @@
     "decline": "Decline",
     "declining": "Declining...",
     "skip": "Skip and set up my own workspace",
-    "superuser_policy": "Named workspace superusers can search and read all member chats, including chats from before they received access."
+    "superuser_policy": "Named superusers can manage this workspace, including private resources and deletion, and read all member chats, including earlier chats."
   },
   "empty": {
     "title": "No pending invitations",
@@ -35,7 +35,7 @@
     "member_limit_reached": "{{workspace}} is full. Ask the person who invited you; you can join once the workspace upgrades."
   },
   "join": {
-    "superuser_policy": "Named workspace superusers can search and read all member chats, including chats from before they received access.",
+    "superuser_policy": "Named superusers can manage this workspace, including private resources and deletion, and read all member chats, including earlier chats.",
     "no_code": "No invite code found. Please use a valid share link.",
     "invalid": "This invite link is invalid or has expired.",
     "joined_title": "Joined!",

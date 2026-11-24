@@ -81,13 +81,15 @@ The lead can be a member or an agent; a member who is the lead can also switch t
 
 ## Private projects
 
-A project's **Access** is either **Entire workspace** or **Project members only**. A private project, with its issues, comments, and attachments, is visible only to the people on its member list. For everyone else it does not appear in lists or search, and a link to it opens as not found.
+A project's **Access** is either **Entire workspace** or **Project members only**. A private project, with its issues, comments, and attachments, is normally visible to the people on its member list. Without a superuser grant, for everyone else it does not appear in lists or search, and a link to it opens as not found.
 
 ### Who can see a private project
 
-- **People on the member list, and nobody else.** A workspace role opens nothing: an `owner` or `admin` who is not on the list cannot see the project. They are added to the list like anyone else, and can be removed from it.
-- **Agents** follow the people they work for. An agent run sees a private project only when both the person who triggered the run and the agent's owner are on the list. An issue in a private project can only be assigned to an agent whose owner is on the list.
+- **People on the member list by default.** A workspace role opens nothing: an `owner` or `admin` who is not on the list cannot see the project. They are added to the list like anyone else, and can be removed from it.
+- **Agents** follow the people they work for. An agent run normally sees a private project only when both the person who triggered the run and the agent's owner are on the list. An issue in a private project can only be assigned to an agent whose owner is on the list.
 - A member who leaves the workspace leaves every private project in it.
+
+Exception: a named workspace superuser can access private projects without appearing on their member lists. An agent inherits that exception only during an active, directly owner-started full-delegation run.
 
 <Callout type="info">
 If you are an `owner` or `admin` and a private project no longer shows up for you, you are not on its member list. Ask the member who manages its access to add you; the workspace owner can also join it from settings (see [Workspace owner recovery](#workspace-owner-recovery)).

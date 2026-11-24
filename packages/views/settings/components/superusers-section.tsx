@@ -6,6 +6,7 @@ import { api } from "@multica/core/api";
 import type { MemberWithUser } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { Button } from "@multica/ui/components/ui/button";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@multica/ui/components/ui/alert-dialog";
 import { useT } from "../../i18n";
 
 export function SuperusersSection({ wsId, members, isOwner }: {
@@ -17,6 +18,7 @@ export function SuperusersSection({ wsId, members, isOwner }: {
   const qc = useQueryClient();
   const currentUser = useAuthStore((state) => state.user);
   const [selected, setSelected] = useState("");
+  const [pendingGrant, setPendingGrant] = useState<string | null>(null);
   const policy = useQuery({
     queryKey: ["workspace-superusers", wsId],
     queryFn: () => api.listWorkspaceSuperusers(wsId),
@@ -74,7 +76,7 @@ export function SuperusersSection({ wsId, members, isOwner }: {
                 {available.map((member) => <option key={member.id} value={member.id}>{member.name} ({member.email})</option>)}
               </select>
               <Button size="sm" disabled={!selected || change.isPending}
-                onClick={() => change.mutate({ memberId: selected, granted: true })}>
+                onClick={() => setPendingGrant(selected)}>
                 {t(($) => $.members.superusers.grant)}
               </Button>
             </div>
@@ -83,6 +85,25 @@ export function SuperusersSection({ wsId, members, isOwner }: {
         </>
       )}
       {canInspectChats && <SuperuserChatBrowser wsId={wsId} members={members} />}
+      <AlertDialog open={pendingGrant !== null} onOpenChange={(open) => { if (!open) setPendingGrant(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t(($) => $.members.superusers.confirm_title)}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t(($) => $.members.superusers.confirm_description, {
+                name: members.find((member) => member.id === pendingGrant)?.name ?? "",
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t(($) => $.members.superusers.confirm_cancel)}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => {
+              if (pendingGrant) change.mutate({ memberId: pendingGrant, granted: true });
+              setPendingGrant(null);
+            }}>{t(($) => $.members.superusers.confirm_grant)}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }
@@ -91,10 +112,11 @@ function SuperuserChatBrowser({ wsId, members }: { wsId: string; members: Member
   const { t } = useT("settings");
   const [input, setInput] = useState("");
   const [query, setQuery] = useState("");
+  const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const chats = useQuery({
-    queryKey: ["superuser-chats", wsId, query],
-    queryFn: () => api.listSuperuserChats(query),
+    queryKey: ["superuser-chats", wsId, query, offset],
+    queryFn: () => api.listSuperuserChats(query, offset),
   });
   const messages = useQuery({
     queryKey: ["superuser-chat-messages", wsId, selected],
@@ -105,7 +127,7 @@ function SuperuserChatBrowser({ wsId, members }: { wsId: string; members: Member
   return (
     <div className="space-y-3 border-t border-border pt-4">
       <h4 className="text-body font-medium">{t(($) => $.members.superusers.chats_title)}</h4>
-      <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); setQuery(input); setSelected(null); }}>
+      <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); setQuery(input); setOffset(0); setSelected(null); }}>
         <input type="search" className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-body"
           aria-label={t(($) => $.members.superusers.search)} placeholder={t(($) => $.members.superusers.search)}
           maxLength={200} value={input} onChange={(event) => setInput(event.target.value)} />
@@ -127,6 +149,14 @@ function SuperuserChatBrowser({ wsId, members }: { wsId: string; members: Member
           ))}
         </ul>
       )}
+      {(offset > 0 || chats.data?.length === 100) && <div className="flex justify-end gap-2">
+        {offset > 0 && <Button variant="outline" size="sm" onClick={() => { setOffset(Math.max(0, offset - 100)); setSelected(null); }}>
+          {t(($) => $.members.superusers.previous)}
+        </Button>}
+        {chats.data?.length === 100 && <Button variant="outline" size="sm" onClick={() => { setOffset(offset + 100); setSelected(null); }}>
+          {t(($) => $.members.superusers.next)}
+        </Button>}
+      </div>}
       {selected && <div className="max-h-80 space-y-3 overflow-auto rounded-md border border-border p-3">
         {messages.isLoading && <p className="text-caption text-muted-foreground">{t(($) => $.members.superusers.loading)}</p>}
         {messages.isError && <p role="alert" className="text-caption text-destructive">{t(($) => $.members.superusers.chats_error)}</p>}

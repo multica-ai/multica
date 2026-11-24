@@ -379,7 +379,10 @@ Daemon behavior is configured via flags or environment variables:
 | Poll interval | `--poll-interval` | `MULTICA_DAEMON_POLL_INTERVAL` | `30s` (catch-up fallback; WebSocket wake signals deliver work sooner) |
 | Healthy WebSocket claim poll upper bound | `--ws-claim-poll-interval` | `MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL` | `3m` (configured independently of `--poll-interval`; downward jitter makes the normal interval `2m30s`–`2m45s`, while old servers and uncertain claims retain the ordinary poll interval) |
 | Heartbeat interval | `--heartbeat-interval` | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` |
-| Daemon log level | — | `LOG_LEVEL` | `debug` |
+| Daemon log level | — | `LOG_LEVEL` | `debug` (or persist per profile with `multica config set log_level <level>`; `LOG_LEVEL` takes precedence) |
+| Daemon log max size (MB) | — | `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `20` (or persist per profile with `daemon_log_max_size_mb`) |
+| Daemon log max backups | — | `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `5` (or persist per profile with `daemon_log_max_backups`) |
+| Daemon log max age (days) | — | `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `30` (or persist per profile with `daemon_log_max_age_days`) |
 | Agent timeout | `--agent-timeout` | `MULTICA_AGENT_TIMEOUT` | `0` (no cap; bounded by the watchdogs) |
 | Agent idle watchdog | — | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` (`0` disables the whole watchdog suite) |
 | Agent tool watchdog | — | `MULTICA_AGENT_TOOL_WATCHDOG` | same as the idle watchdog (`0` = never force-stop during a tool call) |
@@ -725,7 +728,7 @@ multica issue edit-description <id> --old "Status: draft" --new "Status: ready"
 ```
 
 `--position` sets the raw ordering value within the board column (lower sorts first). For relative moves, `issue reorder` is easier because it works out the value for you.
-`--attachment` uploads a local file and appends its Markdown reference to the end of the issue description. Repeat the flag to attach multiple files. To replace an existing image, also use `--description-file` to remove the old reference from the description.
+`--attachment` uploads a local file and appends its Markdown reference to the end of the issue description. Repeat the flag to attach multiple files. To replace an existing image, also remove the old reference with `multica issue edit-description <id> --old <old reference> --new ""`.
 `--description-base-revision` takes the `description_revision` from `multica issue get` and refuses stale description overwrites with HTTP 409 if the description changed since that revision.
 To change part of a description without rewriting the whole body, use `multica issue edit-description <id>` with `--old` / `--old-file` and `--new` / `--new-file` (add `--replace-all` to replace every occurrence; otherwise `--old` must match exactly once).
 
@@ -844,6 +847,12 @@ multica issue comment add <issue-id> --parent <comment-id> --content "Thanks!"
 # start it; an agent never steers itself and adds at most 3 messages to one
 # run. Prints per run whether it was steered.
 multica issue comment add <issue-id> --content-file note.md --steer <run-id>
+
+# Supply an explicit idempotency key so retrying after a timeout or lost
+# connection returns the already-saved comment instead of posting twice.
+# Inside an agent run, the CLI derives this key automatically from the run,
+# issue, parent, content, steer flags, and attachments.
+multica issue comment add <issue-id> --content-file note.md --idempotency-key <key>
 
 # Delete a comment
 multica issue comment delete <comment-id>
@@ -1119,9 +1128,17 @@ Shows config file path, server URL, app URL, and default workspace.
 multica config set server_url https://api.example.com
 multica config set app_url https://app.example.com
 multica config set workspace_id <workspace-id>
+
+# Persist daemon log level and rotation settings per profile
+multica config set log_level info
+multica config set daemon_log_max_size_mb 50
+multica config set daemon_log_max_backups 10
+multica config set daemon_log_max_age_days 14
 ```
 
 `config set workspace_id <id>` is the low-level interface — it writes the value verbatim without checking that the workspace exists or that you have access. Prefer `multica workspace switch <id|slug>` for day-to-day workspace changes; it does both checks before saving.
+
+Daemon profile keys (`device_name`, `runtime_name`, `workspaces_root`, `max_concurrent_tasks`, `poll_interval`, `ws_claim_poll_interval`, `heartbeat_interval`, `log_level`, `daemon_log_max_size_mb`, `daemon_log_max_backups`, `daemon_log_max_age_days`, `agent_timeout`, `agent_idle_watchdog`, `agent_tool_watchdog`, `codex_semantic_inactivity_timeout`, `codex_handshake_timeout`, `disable_auto_update`, `auto_update_check_interval`, `disable_auto_reload`) are read when the daemon starts. Pass `""` to clear a saved setting. Precedence is `--flag` > environment variable (`MULTICA_*` or `LOG_LEVEL`) > `config.json` > built-in default.
 
 ## Autopilot Commands
 
@@ -1257,6 +1274,36 @@ multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filte
 `--clear-event-filters` cannot be combined with `--event-filters-file`. Creation
 without a filter file accepts all events. These flags configure existing event
 and action matching; they do not add payload-field conditions.
+
+## Quick Actions
+
+Manage and run saved quick actions (reusable prompts with an optional agent or squad target) from the CLI:
+
+```bash
+# List active quick actions (add --include-archived to include archived ones)
+multica quick-action list
+multica quick-action list --include-archived --full-id --output json
+
+# Inspect one action by UUID, unique UUID prefix, or exact name (case-insensitive)
+multica quick-action get "Code Review"
+
+# Create a quick action (--visibility defaults to private; omit --agent/--squad for targetless)
+multica quick-action create --name "Code Review" --agent Reviewer --prompt-file ./review.md
+multica quick-action create --name "Handoff" --squad "Backend Squad" --visibility public --prompt "Take over from here."
+
+# Update, archive, restore (alias: unarchive), or permanently delete
+multica quick-action update "Code Review" --squad "Review Squad"
+multica quick-action update "Code Review" --clear-target
+multica quick-action archive "Code Review"
+multica quick-action restore "Code Review"
+multica quick-action delete "Code Review"
+
+# Run a quick action on an issue (or preview without posting)
+multica quick-action run "Code Review" MUL-123 --dry-run
+multica quick-action run "Code Review" MUL-123
+```
+
+Creating, updating, archiving, restoring, and deleting quick actions require a human member (`--visibility public` requires workspace `owner` or `admin` and a publicly invocable target). During an agent run, private quick actions are reachable only when the run was started by their creator on a runtime that member still owns; runs started by another member see only public actions.
 
 ## Other Commands
 

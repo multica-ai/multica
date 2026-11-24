@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -24,18 +26,14 @@ type workspaceSuperuserGrant struct {
 // current membership in the database so removal and guest demotion take effect
 // without waiting for a cache to expire.
 func (h *Handler) humanSuperuser(ctx context.Context, r *http.Request, workspaceID, userID string) (bool, error) {
-	actorType, _ := h.resolveActor(r, userID, workspaceID)
-	if actorType != "member" {
+	source := r.Header.Get("X-Actor-Source")
+	principal, delegated := middleware.FullDelegationFromContext(r.Context())
+	if source != "" && !(source == "task_token" && delegated && principal.GrantorUserID == userID) {
 		return false, nil
 	}
-	var allowed bool
-	err := h.DB.QueryRow(ctx, `SELECT EXISTS (
-		SELECT 1 FROM workspace_superuser_grant g
-		JOIN member m ON m.id = g.member_id AND m.workspace_id = g.workspace_id AND m.user_id = g.user_id
-		JOIN workspace_superuser_policy p ON p.workspace_id = g.workspace_id
-		WHERE g.workspace_id = $1 AND g.user_id = $2 AND m.role <> 'guest'
-	)`, parseUUID(workspaceID), parseUUID(userID)).Scan(&allowed)
-	return allowed, err
+	return h.Queries.HasActiveWorkspaceSuperuserGrant(ctx, db.HasActiveWorkspaceSuperuserGrantParams{
+		WorkspaceID: parseUUID(workspaceID), UserID: parseUUID(userID),
+	})
 }
 
 func (h *Handler) ListWorkspaceSuperusers(w http.ResponseWriter, r *http.Request) {
@@ -148,7 +146,7 @@ func (h *Handler) ChangeWorkspaceSuperuser(w http.ResponseWriter, r *http.Reques
 	if policyEnabled {
 		_, err = tx.Exec(r.Context(), `INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title, body)
 			SELECT m.workspace_id, 'member', m.user_id, 'workspace_superuser_policy', 'Workspace superuser access enabled',
-			'Trusted superusers may search and read every member chat in this workspace, including past chats.'
+			'Trusted superusers may manage workspace resources, including private projects and agents, inspect past and future member chats, and delete the workspace.'
 			FROM member m WHERE m.workspace_id = $1`, requester.WorkspaceID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to notify members")
@@ -158,7 +156,7 @@ func (h *Handler) ChangeWorkspaceSuperuser(w http.ResponseWriter, r *http.Reques
 	if changed && action == "grant" {
 		_, err = tx.Exec(r.Context(), `INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title, body)
 			SELECT m.workspace_id, 'member', m.user_id, 'workspace_superuser_grant', 'Workspace superuser granted',
-			(SELECT name FROM "user" WHERE id = $2) || ' can now search and read every member chat in this workspace, including past chats.'
+			(SELECT name FROM "user" WHERE id = $2) || ' can now manage workspace resources, inspect all member chats, and delete the workspace.'
 			FROM member m WHERE m.workspace_id = $1`, requester.WorkspaceID, userID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to notify members")
@@ -175,6 +173,21 @@ func (h *Handler) ChangeWorkspaceSuperuser(w http.ResponseWriter, r *http.Reques
 func (h *Handler) resolveActorType(r *http.Request, userID, workspaceID string) string {
 	actorType, _ := h.resolveActor(r, userID, workspaceID)
 	return actorType
+}
+
+func (h *Handler) auditSuperuserChatRead(r *http.Request, workspaceID, actorUserID, targetUserID, sessionID string) error {
+	if actorUserID == targetUserID {
+		return nil
+	}
+	var agentID, taskID any
+	if principal, ok := middleware.FullDelegationFromContext(r.Context()); ok {
+		agentID, taskID = parseUUID(principal.AgentID), parseUUID(principal.TaskID)
+	}
+	_, err := h.DB.Exec(r.Context(), `INSERT INTO workspace_superuser_audit
+		(workspace_id, actor_user_id, actor_agent_id, actor_task_id, target_user_id, chat_session_id, action)
+		VALUES ($1, $2, $3, $4, $5, $6, 'read_chat')`,
+		parseUUID(workspaceID), parseUUID(actorUserID), agentID, taskID, parseUUID(targetUserID), parseUUID(sessionID))
+	return err
 }
 
 // Superuser chat endpoints are read-only. Ordinary chat update, send, archive,
@@ -204,13 +217,32 @@ func (h *Handler) superuserChat(w http.ResponseWriter, r *http.Request) (db.Chat
 		return db.ChatSession{}, false
 	}
 	if session.CreatorID != parseUUID(userID) {
-		if _, err := h.DB.Exec(r.Context(), `INSERT INTO workspace_superuser_audit (workspace_id, actor_user_id, target_user_id, chat_session_id, action)
-			VALUES ($1, $2, $3, $4, 'read_chat')`, session.WorkspaceID, parseUUID(userID), session.CreatorID, session.ID); err != nil {
+		if err := h.auditSuperuserChatRead(r, workspaceID, userID, uuidToString(session.CreatorID), uuidToString(session.ID)); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to audit chat read")
 			return db.ChatSession{}, false
 		}
 	}
 	return session, true
+}
+
+// readableChatSession preserves the creator's existing private-agent gate.
+// Only a foreign session uses the explicit, audited superuser read path.
+func (h *Handler) readableChatSession(w http.ResponseWriter, r *http.Request, userID, workspaceID, sessionID string) (db.ChatSession, bool) {
+	id, ok := parseUUIDOrBadRequest(w, sessionID, "chat session id")
+	if !ok {
+		return db.ChatSession{}, false
+	}
+	session, err := h.Queries.GetChatSessionInWorkspace(r.Context(), db.GetChatSessionInWorkspaceParams{
+		ID: id, WorkspaceID: parseUUID(workspaceID),
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "chat session not found")
+		return db.ChatSession{}, false
+	}
+	if uuidToString(session.CreatorID) == userID {
+		return h.gatePublicChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	}
+	return h.superuserChat(w, r)
 }
 
 func (h *Handler) GetSuperuserChat(w http.ResponseWriter, r *http.Request) {
@@ -273,13 +305,22 @@ func (h *Handler) ListSuperuserChats(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "search query too long")
 		return
 	}
+	offset := 0
+	if raw := r.URL.Query().Get("offset"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 || parsed > 1_000_000 {
+			writeError(w, http.StatusBadRequest, "invalid offset")
+			return
+		}
+		offset = parsed
+	}
 	rows, err := h.DB.Query(r.Context(), `SELECT cs.id, cs.creator_id, cs.agent_id, cs.title, cs.status, cs.updated_at
 		FROM chat_session cs WHERE cs.workspace_id = $1
 		AND (cs.explicitly_created_at IS NOT NULL OR EXISTS (
 			SELECT 1 FROM chat_message public_message WHERE public_message.chat_session_id = cs.id AND public_message.message_kind != 'channel_command'))
 		AND ($2 = '' OR cs.title ILIKE '%' || $2 || '%' OR EXISTS (
 			SELECT 1 FROM chat_message m WHERE m.chat_session_id = cs.id AND m.message_kind != 'channel_command' AND m.content ILIKE '%' || $2 || '%'))
-		ORDER BY cs.updated_at DESC LIMIT 100`, parseUUID(workspaceID), query)
+		ORDER BY cs.updated_at DESC, cs.id DESC LIMIT 100 OFFSET $3`, parseUUID(workspaceID), query, offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list chats")
 		return
@@ -306,8 +347,7 @@ func (h *Handler) ListSuperuserChats(w http.ResponseWriter, r *http.Request) {
 		if item.CreatorID == userID {
 			continue
 		}
-		if _, err := h.DB.Exec(r.Context(), `INSERT INTO workspace_superuser_audit (workspace_id, actor_user_id, target_user_id, chat_session_id, action)
-			VALUES ($1, $2, $3, $4, 'read_chat')`, parseUUID(workspaceID), parseUUID(userID), parseUUID(item.CreatorID), parseUUID(item.ID)); err != nil {
+		if err := h.auditSuperuserChatRead(r, workspaceID, userID, item.CreatorID, item.ID); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to audit chat list")
 			return
 		}

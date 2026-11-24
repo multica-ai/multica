@@ -17,8 +17,9 @@ import (
 // the doc, so a script or CLI holding a PAT cannot wipe docs and their history.
 func (h *Handler) requireDocDeletion(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID, creatorType string, creatorID pgtype.UUID, noun string) bool {
 	wsID := uuidToString(workspaceID)
-	actorType, actorID := h.resolveActor(r, requestUserID(r), wsID)
-	if isMachineCredentialActor(r) || middleware.IsPersonalAccessToken(r.Context()) || actorType != "member" || r.Header.Get("X-Agent-ID") != "" {
+	actorType, actorID := h.permissionActor(r, requestUserID(r), wsID)
+	_, delegated := middleware.FullDelegationFromContext(r.Context())
+	if (isMachineCredentialActor(r) && !delegated) || middleware.IsPersonalAccessToken(r.Context()) || actorType != "member" || (r.Header.Get("X-Agent-ID") != "" && !delegated) {
 		writeError(w, http.StatusForbidden, "only humans can delete "+noun+"s")
 		return false
 	}

@@ -81,13 +81,15 @@ Le responsable peut être un membre ou un agent ; un membre responsable peut aus
 
 ## Projets privés [#private-projects]
 
-L'**Accès** d'un projet est soit **Tout l’espace de travail**, soit **Membres du projet uniquement**. Un projet privé, avec ses tâches, commentaires et pièces jointes, n'est visible que des personnes inscrites sur sa liste de membres. Pour les autres, il n'apparaît ni dans les listes ni dans la recherche, et un lien vers lui s'ouvre comme introuvable.
+L'**Accès** d'un projet est soit **Tout l’espace de travail**, soit **Membres du projet uniquement**. Un projet privé, avec ses tâches, commentaires et pièces jointes, est normalement visible aux personnes inscrites sur sa liste de membres. Sans autorisation de superutilisateur, pour les autres, il n'apparaît ni dans les listes ni dans la recherche, et un lien vers lui s'ouvre comme introuvable.
 
 ### Qui voit un projet privé
 
-- **Les personnes de la liste des membres, et personne d'autre.** Un rôle dans l'espace de travail n'ouvre rien : un `owner` ou un `admin` absent de la liste ne voit pas le projet. Il y est ajouté comme n'importe qui, et peut en être retiré.
-- **Les agents** suivent les personnes pour qui ils travaillent. Une exécution d'agent ne voit un projet privé que si la personne qui l'a déclenchée et le propriétaire de l'agent sont tous deux sur la liste. Une tâche d'un projet privé ne peut être assignée qu'à un agent dont le propriétaire est sur la liste.
+- **Les personnes de la liste des membres, normalement.** Un rôle dans l'espace de travail n'ouvre rien : un `owner` ou un `admin` absent de la liste ne voit pas le projet. Il y est ajouté comme n'importe qui, et peut en être retiré.
+- **Les agents** suivent les personnes pour qui ils travaillent. Une exécution d'agent ne voit normalement un projet privé que si la personne qui l'a déclenchée et le propriétaire de l'agent sont tous deux sur la liste. Une tâche d'un projet privé ne peut être assignée qu'à un agent dont le propriétaire est sur la liste.
 - Un membre qui quitte l'espace de travail quitte aussi tous ses projets privés.
+
+Exception : un superutilisateur désigné peut accéder aux projets privés sans figurer dans leurs listes de membres. Un agent hérite de cette exception uniquement pendant une exécution avec délégation complète lancée directement par son propriétaire.
 
 <Callout type="info">
 Si vous êtes `owner` ou `admin` et qu'un projet privé n'apparaît plus, vous n'êtes pas sur sa liste de membres. Demandez au membre qui gère son accès de vous ajouter ; le propriétaire de l'espace de travail peut aussi le rejoindre depuis les paramètres (voir [Reprise par le propriétaire de l'espace de travail](#workspace-owner-recovery)).

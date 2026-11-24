@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -111,5 +112,68 @@ func TestPiCleanupSuccessfulBackgroundServiceSurvives(t *testing.T) {
 				t.Fatalf("successful background service stopped at Result: %d -> %d", len(before), len(after))
 			}
 		})
+	}
+}
+
+func TestPiCleanupInProcessToolCancelIsConfirmed(t *testing.T) {
+	for _, provider := range []string{"pi", "omp"} {
+		t.Run(provider, func(t *testing.T) {
+			t.Parallel()
+			fake, dir, env := testutil.PiCleanupExecutable(t, "inprocess")
+			backend, err := ResolveBackend(provider, Config{ExecutablePath: fake, Env: env, Logger: slog.Default()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			backend.(*piBackend).terminateGrace = 100 * time.Millisecond
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if err := os.WriteFile(filepath.Join(dir, "session.jsonl"), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			session, err := backend.Execute(ctx, "test", ExecOptions{Cwd: dir, ResumeSessionID: filepath.Join(dir, "session.jsonl")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for msg := range session.Messages {
+				if msg.Type == MessageToolUse {
+					break
+				}
+			}
+			cancel()
+			result := waitPiResult(t, session, 4*time.Second)
+			if result.Status == "cleanup_unconfirmed" {
+				t.Fatalf("in-process tool cancel reported unconfirmed cleanup: %s", result.Error)
+			}
+			if result.Status != "aborted" {
+				t.Fatalf("status = %s: %s", result.Status, result.Error)
+			}
+		})
+	}
+}
+
+func TestPiCleanupRuntimeExitBeforeToolOwnershipConfirmed(t *testing.T) {
+	cmd := exec.Command("/bin/sh", "-c", "exit 0")
+	configureProcessGroup(cmd)
+	if err := startOwnedProcessTree(cmd, slog.Default()); err != nil {
+		t.Fatal(err)
+	}
+	defer cmd.Wait()
+
+	cleanup := newPiRunCleanup(cmd)
+	closeNothing := func() {}
+	defer cleanup.complete(closeNothing, closeNothing)
+	cleanup.observe("tool_execution_start")
+
+	// Wait for the runtime to exit without reaping it, as Execute does.
+	select {
+	case <-cleanup.exited:
+	case <-time.After(3 * time.Second):
+		t.Fatal("runtime exit was not observed")
+	}
+	if err := cleanup.finish(cmd, closeNothing, closeNothing, 0); err != nil {
+		t.Fatalf("final cleanup checks failed: %v", err)
+	}
+	if err := cleanup.toolOwnershipError(); err == nil {
+		t.Fatal("unfinished tool ownership was reported as confirmed after runtime exit")
 	}
 }
