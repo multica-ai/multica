@@ -67,7 +67,7 @@ import {
   invalidateLastActivitySortedIssueLists,
   invalidateUpdatedAtSortedIssueLists,
 } from "../issues/cache-coordinator";
-import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted, onInboxSummaryInvalidate } from "../inbox/ws-updaters";
+import { onInboxNew, onInboxNewSummaryInvalidate, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted, onInboxSummaryInvalidate } from "../inbox/ws-updaters";
 import { noteInboxAutoArchive } from "../inbox/auto-archive";
 import {
   notificationPreferenceOptions,
@@ -582,13 +582,13 @@ export async function resolveInboxSourceSlug(
 }
 
 /**
- * Handles an `inbox:new` event end-to-end: inbox cache invalidation, the
+ * Handles an `inbox:new` event end-to-end: the inbox cache update, the
  * focus / mute checks, and the native OS banner. Exported so the handler
  * behavior (not just slug resolution) is testable.
  *
  * Every workspace-scoped read here keys on the ITEM's workspace
  * (`item.workspace_id`), never the currently active one (#3766): the cache
- * invalidation must refresh the source workspace's inbox list / unread
+ * update must reach the source workspace's inbox list / unread
  * count / dock badge, the mute check must honor the source workspace's
  * preference, and the deep link must carry the source workspace's slug.
  */
@@ -600,7 +600,7 @@ export async function handleInboxNew(
   if (sourceWsId) void onInboxNew(qc, sourceWsId, item);
   // A new item in ANY workspace can light the workspace-switcher dot, so
   // refresh the cross-workspace summary regardless of the active workspace.
-  void onInboxSummaryInvalidate(qc);
+  void onInboxNewSummaryInvalidate(qc);
   // Moving to in_progress is routine progress (an agent picking the issue
   // up), the same exception the server's delegated-handoff rule makes. The
   // row still lands in the inbox; it just doesn't interrupt with a banner.

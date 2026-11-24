@@ -32,7 +32,13 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it("refreshes an inactive Inbox after inbox:new then issue:updated (MUL-7286)", async () => {
+// A notification on an issue the list holds is written into it; one on any
+// other issue leaves the list owing a re-read, which a later issue event's
+// patch must not settle (MUL-7286).
+it.each([
+  ["a new issue", "issue-2", { written: false, requests: 2 }],
+  ["an issue it lists", "issue-1", { written: true, requests: 1 }],
+] as const)("brings an inactive Inbox up to date after inbox:new on %s, then issue:updated", async (_label, issueId, expected) => {
   const qc = createQueryClient();
   const oldItem: InboxItem = {
     id: "n1",
@@ -101,6 +107,7 @@ it("refreshes an inactive Inbox after inbox:new then issue:updated (MUL-7286)", 
     const newItem = {
       ...oldItem,
       id: "n2",
+      issue_id: issueId,
       read: false,
       created_at: "2026-09-11T00:01:00Z",
     };
@@ -109,19 +116,22 @@ it("refreshes an inactive Inbox after inbox:new then issue:updated (MUL-7286)", 
       handlers["inbox:new"]!({ item: newItem });
     });
     await waitFor(() => expect(shell.result.current).toBe(1));
-    expect(qc.getQueryState(inboxKeys.list("ws-1"))?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(inboxKeys.list("ws-1"))?.isInvalidated).toBe(!expected.written);
+    expect(qc.getQueryData<InboxItem[]>(inboxKeys.list("ws-1"))?.map((item) => item.id)).toEqual(
+      expected.written ? ["n2", "n1"] : ["n1"],
+    );
     expect(listInbox).toHaveBeenCalledTimes(1);
 
     // Any later issue update patches status, without re-reading notifications.
-    rows = rows.map((item) => ({ ...item, issue_status: "in_progress" }));
+    rows = rows.map((item) => (item.issue_id === "issue-1" ? { ...item, issue_status: "in_progress" } : item));
     act(() => {
       handlers["issue:updated"]!({
         issue: { id: "issue-1", status: "in_progress", revision: 2 },
       });
     });
     page = mountInbox();
-    await waitFor(() => expect(listInbox).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(page.result.current.data).toEqual(rows));
+    expect(listInbox).toHaveBeenCalledTimes(expected.requests);
     expect(
       deduplicateInboxItems(page.result.current.data!).filter((item) => !item.read),
     ).toHaveLength(1);

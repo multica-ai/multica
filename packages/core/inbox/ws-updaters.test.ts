@@ -1,18 +1,29 @@
 // @vitest-environment node
-import { describe, it, expect, vi } from "vitest";
-import { QueryClient, QueryObserver } from "@tanstack/react-query";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
+import { InfiniteQueryObserver, QueryClient, QueryObserver, type InfiniteData } from "@tanstack/react-query";
 import {
   cancelInboxLists,
   onInboxInvalidate,
   onInboxIssueDeleted,
   onInboxIssuesDeleted,
   onInboxNew,
+  onInboxNewSummaryInvalidate,
   onInboxIssueStatusChanged,
   onInboxSummaryInvalidate,
   patchInboxIssueProjection,
 } from "./ws-updaters";
-import { inboxKeys } from "./queries";
-import type { InboxItem } from "../types";
+import { setApiInstance } from "../api";
+import type { ApiClient } from "../api/client";
+import { inboxIssueFieldsSupport, inboxPriorityFilterSupport } from "./filters";
+import { INBOX_REFRESH_INTERVAL_MS } from "./incremental";
+import {
+  deduplicateInboxItems,
+  inboxKeys,
+  inboxListOptions,
+  inboxUnreadSummaryOptions,
+  snoozedInboxOptions,
+} from "./queries";
+import type { ArchivedInboxPage, InboxItem, SnoozedInboxIssue } from "../types";
 
 const wsId = "ws-1";
 
@@ -498,5 +509,302 @@ describe("onInboxIssuesDeleted", () => {
       unsubscribe();
       qc.clear();
     }
+  });
+});
+
+// What a listed row of an issue mirrors, and the inbox:new push does not carry.
+const issueFields = {
+  issue_identifier: "MUL-1",
+  issue_status: "in_progress",
+  issue_priority: "high",
+  issue_project_id: "project-1",
+  issue_assignee_type: "member",
+  issue_assignee_id: "user-2",
+  issue_due_date: null,
+  issue_label_ids: ["label-1"],
+} as const satisfies Partial<InboxItem>;
+
+function listed(id: string, issueId: string | null, overrides: Partial<InboxItem> = {}): InboxItem {
+  return makeItem(id, issueId, { ...issueFields, ...overrides });
+}
+
+function push(id: string, issueId: string | null, overrides: Partial<InboxItem> = {}): InboxItem {
+  const { issue_status: _status, ...item } = makeItem(id, issueId, {
+    created_at: "2026-11-24T10:00:00Z",
+    ...overrides,
+  });
+  return item as InboxItem;
+}
+
+function inboxClient() {
+  return new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
+}
+
+describe("onInboxNew", () => {
+  it("writes the row into the loaded list, with its issue's fields, without a request", async () => {
+    const qc = inboxClient();
+    const older = listed("n1", "issue-a", { read: true, created_at: "2026-11-24T09:00:00Z" });
+    const other = listed("n0", "issue-b", { issue_identifier: "MUL-2", created_at: "2026-11-24T09:30:00Z" });
+    const queryFn = vi.fn(async () => [older, other]);
+    await qc.fetchQuery({ queryKey: inboxKeys.list(wsId), queryFn });
+    const observer = new QueryObserver(qc, { queryKey: inboxKeys.list(wsId), queryFn });
+    const unsubscribe = observer.subscribe(() => {});
+
+    try {
+      await onInboxNew(qc, wsId, push("n2", "issue-a"));
+
+      expect(queryFn).toHaveBeenCalledTimes(1);
+      const list = observer.getCurrentResult().data!;
+      expect(list[0]).toEqual({ ...push("n2", "issue-a"), ...issueFields });
+      // One row per issue, the newest notification on top.
+      expect(deduplicateInboxItems(list).map((row) => [row.id, row.read])).toEqual([
+        ["n2", false],
+        ["n0", false],
+      ]);
+      // The filters still see a server that has the issue fields.
+      expect(inboxIssueFieldsSupport(list)).toBe("supported");
+      expect(inboxPriorityFilterSupport(list)).toBe("supported");
+    } finally {
+      unsubscribe();
+      qc.clear();
+    }
+  });
+
+  it("writes a row it already holds only once", async () => {
+    const qc = inboxClient();
+    qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), [listed("n1", "issue-a")]);
+
+    await onInboxNew(qc, wsId, push("n2", "issue-a"));
+    const once = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
+    await onInboxNew(qc, wsId, push("n2", "issue-a"));
+
+    expect(qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))).toBe(once);
+    expect(once?.map((row) => row.id)).toEqual(["n2", "n1"]);
+  });
+
+  it("brings an archived issue back: its archived rows go, the archive is marked stale but not re-read", async () => {
+    const qc = inboxClient();
+    qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), [listed("n1", "issue-b")]);
+    const pagesKey = [...inboxKeys.pages(wsId), {}];
+    const pagesFn = vi.fn(async (): Promise<ArchivedInboxPage> => ({ items: [], nextCursor: null, hasMore: false }));
+    qc.setQueryData<InfiniteData<ArchivedInboxPage>>(pagesKey, {
+      pages: [{
+        items: [
+          listed("a1", "issue-a", { archived: true, issue_identifier: "MUL-9" }),
+          listed("a2", "issue-c", { archived: true }),
+        ],
+        nextCursor: null,
+        hasMore: false,
+      }],
+      pageParams: [null],
+    });
+    const lookupKey = [...inboxKeys.lookup(wsId), "issue-a", {}];
+    qc.setQueryData<ArchivedInboxPage>(lookupKey, {
+      items: [listed("a1", "issue-a", { archived: true })],
+      nextCursor: null,
+      hasMore: false,
+    });
+    const facetsKey = [...inboxKeys.facets(wsId), {}];
+    qc.setQueryData(facetsKey, { unreadCount: 0 });
+    qc.setQueryData<SnoozedInboxIssue[]>(inboxKeys.snoozed(wsId), [
+      { issue_id: "issue-z", item_id: "z1", snoozed_until: "2099-01-01T00:00:00Z", snoozed_at: "2026-11-24T00:00:00Z", updates: 0 },
+    ]);
+    // The Archived tab is open.
+    const archive = new InfiniteQueryObserver(qc, {
+      queryKey: pagesKey,
+      queryFn: pagesFn,
+      initialPageParam: null,
+      getNextPageParam: () => undefined,
+    });
+    const unsubscribe = archive.subscribe(() => {});
+
+    try {
+      await onInboxNew(qc, wsId, push("n2", "issue-a"));
+
+      // The issue fields come from the archived row of the same issue.
+      expect(qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))?.[0]).toMatchObject({
+        id: "n2",
+        issue_identifier: "MUL-9",
+      });
+      expect(archive.getCurrentResult().data?.pages[0]?.items.map((row) => row.id)).toEqual(["a2"]);
+      expect(qc.getQueryData<ArchivedInboxPage>(lookupKey)?.items).toEqual([]);
+      expect(pagesFn).not.toHaveBeenCalled();
+      for (const key of [pagesKey, lookupKey, facetsKey]) {
+        expect(qc.getQueryState(key)?.isInvalidated).toBe(true);
+      }
+      // A notification that joins a snooze arrives as inbox:snoozed.
+      expect(qc.getQueryState(inboxKeys.snoozed(wsId))?.isInvalidated).toBe(false);
+    } finally {
+      unsubscribe();
+      qc.clear();
+    }
+  });
+
+  it("re-reads the lists for an issue it holds no row of", async () => {
+    const qc = inboxClient();
+    const server = [listed("n2", "issue-new"), listed("n1", "issue-a")];
+    const queryFn = vi.fn().mockResolvedValueOnce([listed("n1", "issue-a")]).mockResolvedValue(server);
+    await qc.fetchQuery({ queryKey: inboxKeys.list(wsId), queryFn });
+    const observer = new QueryObserver(qc, { queryKey: inboxKeys.list(wsId), queryFn });
+    const unsubscribe = observer.subscribe(() => {});
+
+    try {
+      await onInboxNew(qc, wsId, push("n2", "issue-new"));
+
+      expect(queryFn).toHaveBeenCalledTimes(2);
+      expect(observer.getCurrentResult().data).toEqual(server);
+    } finally {
+      unsubscribe();
+      qc.clear();
+    }
+  });
+
+  it("re-reads the lists for a notification that ended a snooze", async () => {
+    const qc = inboxClient();
+    // The issue came back with its earlier rows, which the list never held.
+    const server = [listed("n2", "issue-a"), listed("s1", "issue-a"), listed("n1", "issue-b")];
+    const queryFn = vi.fn().mockResolvedValueOnce([listed("n1", "issue-b"), listed("old", "issue-a")]).mockResolvedValue(server);
+    await qc.fetchQuery({ queryKey: inboxKeys.list(wsId), queryFn });
+    qc.setQueryData<SnoozedInboxIssue[]>(inboxKeys.snoozed(wsId), [
+      { issue_id: "issue-a", item_id: "s1", snoozed_until: "2099-01-01T00:00:00Z", snoozed_at: "2026-11-24T00:00:00Z", updates: 1 },
+    ]);
+    const observer = new QueryObserver(qc, { queryKey: inboxKeys.list(wsId), queryFn });
+    const unsubscribe = observer.subscribe(() => {});
+
+    try {
+      await onInboxNew(qc, wsId, push("n2", "issue-a"));
+
+      expect(queryFn).toHaveBeenCalledTimes(2);
+      expect(observer.getCurrentResult().data).toEqual(server);
+      expect(qc.getQueryState(inboxKeys.snoozed(wsId))?.isInvalidated).toBe(true);
+    } finally {
+      unsubscribe();
+      qc.clear();
+    }
+  });
+
+  it.each([
+    ["a reconnect's re-read", (qc: QueryClient) => void onInboxInvalidate(qc, wsId)],
+    ["a retry", (qc: QueryClient) => void qc.refetchQueries({ queryKey: inboxKeys.list(wsId) })],
+  ])("is not answered by %s already on the wire", async (_label, startRead) => {
+    // Written locally while that read is out, the row would be overwritten by
+    // the read's older answer, and nothing would ask again.
+    const qc = inboxClient();
+    let server = [listed("n1", "issue-a")];
+    let releaseStale!: () => void;
+    const queryFn = vi
+      .fn<() => Promise<InboxItem[]>>()
+      .mockImplementationOnce(async () => server)
+      .mockImplementationOnce(() => {
+        const answer = server;
+        return new Promise((resolve) => (releaseStale = () => resolve(answer)));
+      })
+      .mockImplementation(async () => server);
+    await qc.fetchQuery({ queryKey: inboxKeys.list(wsId), queryFn });
+    const observer = new QueryObserver(qc, { queryKey: inboxKeys.list(wsId), queryFn });
+    const unsubscribe = observer.subscribe(() => {});
+
+    try {
+      startRead(qc);
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2));
+      server = [listed("n2", "issue-a"), ...server];
+      await onInboxNew(qc, wsId, push("n2", "issue-a"));
+      releaseStale();
+
+      await vi.waitFor(() =>
+        expect(observer.getCurrentResult().data?.map((row) => row.id)).toEqual(["n2", "n1"]),
+      );
+      expect(observer.getCurrentResult().fetchStatus).toBe("idle");
+    } finally {
+      releaseStale?.();
+      unsubscribe();
+      qc.clear();
+    }
+  });
+
+  it("leaves a list that owes a re-read to that re-read (MUL-7286)", async () => {
+    const qc = inboxClient();
+    const server = [listed("n2", "issue-a"), listed("n1", "issue-a"), listed("x", "issue-x")];
+    const queryFn = vi.fn().mockResolvedValueOnce([listed("n1", "issue-a")]).mockResolvedValue(server);
+    await qc.fetchQuery({ queryKey: inboxKeys.list(wsId), queryFn });
+    // Marked by an event while nothing on screen reads the list.
+    await qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+
+    await onInboxNew(qc, wsId, push("n2", "issue-a"));
+
+    expect(qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))?.map((row) => row.id)).toEqual(["n1"]);
+    expect(qc.getQueryState(inboxKeys.list(wsId))?.isInvalidated).toBe(true);
+    const observer = new QueryObserver(qc, { queryKey: inboxKeys.list(wsId), queryFn });
+    const unsubscribe = observer.subscribe(() => {});
+    try {
+      await vi.waitFor(() => expect(observer.getCurrentResult().data).toEqual(server));
+    } finally {
+      unsubscribe();
+      qc.clear();
+    }
+  });
+});
+
+// The cost this exists for: every open client re-read every inbox list and
+// the unread summary on each inbox:new.
+describe("inbox requests for a burst of inbox:new", () => {
+  const N = 20;
+  const LATENCY_MS = 50;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function burst(events: InboxItem[], spacingMs: number) {
+    const respond = <T,>(value: T) => new Promise<T>((resolve) => setTimeout(() => resolve(value), LATENCY_MS));
+    const api = {
+      listInbox: vi.fn(() => respond([listed("n1", "issue-a"), listed("n0", "issue-b")])),
+      listSnoozedInbox: vi.fn(() => respond([] as SnoozedInboxIssue[])),
+      getInboxUnreadSummary: vi.fn(() => respond([{ workspace_id: wsId, count: 2 }])),
+    };
+    setApiInstance(api as unknown as ApiClient);
+    const qc = inboxClient();
+    // The Inbox page: the list, the snoozed issues its open row is checked
+    // against, and the badge.
+    const observers = [
+      new QueryObserver(qc, inboxListOptions(wsId)),
+      new QueryObserver(qc, snoozedInboxOptions(wsId)),
+      new QueryObserver(qc, inboxUnreadSummaryOptions()),
+    ];
+    const unsubscribes = observers.map((observer) => observer.subscribe(() => {}));
+    await vi.advanceTimersByTimeAsync(LATENCY_MS);
+    for (const fn of Object.values(api)) fn.mockClear();
+
+    for (const item of events) {
+      // What handleInboxNew does with each.
+      void onInboxNew(qc, wsId, item);
+      void onInboxNewSummaryInvalidate(qc);
+      await vi.advanceTimersByTimeAsync(spacingMs);
+    }
+    await vi.advanceTimersByTimeAsync(INBOX_REFRESH_INTERVAL_MS * 3);
+    const requests = {
+      list: api.listInbox.mock.calls.length,
+      snoozed: api.listSnoozedInbox.mock.calls.length,
+      summary: api.getInboxUnreadSummary.mock.calls.length,
+    };
+    for (const unsubscribe of unsubscribes) unsubscribe();
+    qc.clear();
+    return requests;
+  }
+
+  const onKnownIssues = Array.from({ length: N }, (_, i) => push(`k${i}`, i % 2 ? "issue-a" : "issue-b"));
+  const onNewIssues = Array.from({ length: N }, (_, i) => push(`u${i}`, `issue-new-${i}`));
+
+  it.each([
+    // An agent at work: a notification every 100ms for 2s.
+    ["on issues in the list, 100ms apart", onKnownIssues, 100, { list: 0, snoozed: 0, summary: 3 }],
+    ["on issues in the list, all at once", onKnownIssues, 0, { list: 0, snoozed: 0, summary: 2 }],
+    ["each on a new issue, 100ms apart", onNewIssues, 100, { list: 3, snoozed: 3, summary: 3 }],
+    ["each on a new issue, all at once", onNewIssues, 0, { list: 2, snoozed: 2, summary: 2 }],
+  ])("%s", async (_label, events, spacingMs, expected) => {
+    expect(await burst(events, spacingMs)).toEqual(expected);
   });
 });

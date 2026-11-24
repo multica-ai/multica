@@ -16,6 +16,7 @@
  */
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import type { InboxItem, IssueStatus } from "@multica/core/types";
+import { coalescedRefresh, inboxRowFromPush } from "@multica/core/inbox/incremental";
 import { inboxKeys } from "@/data/queries/inbox";
 
 export function patchInboxIssueStatus(
@@ -71,6 +72,34 @@ export async function refreshInboxList(qc: QueryClient, wsId: string) {
  */
 export async function refreshInboxUnreadSummary(qc: QueryClient) {
   await refreshInboxQuery(qc, inboxKeys.unreadSummary());
+}
+
+/**
+ * `inbox:new`: write the pushed row into the loaded list instead of re-reading
+ * it, as web does (`onInboxNew` in packages/core/inbox/ws-updaters.ts). The
+ * list is re-read instead, through a coalescing gate, while it is not loaded,
+ * owes a re-read or has a request out (a response already on the wire can
+ * predate the row and land on top of it), or when no row of the issue
+ * supplies the issue fields a listed row mirrors. An item from another
+ * workspace leaves this list alone. The badge count is the server's, so the
+ * summary is re-read, one request at a time.
+ */
+export function onInboxNew(qc: QueryClient, wsId: string, item: InboxItem) {
+  void coalescedRefresh(qc, "unread-summary", () => refreshInboxUnreadSummary(qc));
+  if (item.workspace_id && item.workspace_id !== wsId) return;
+  const key = inboxKeys.list(wsId);
+  const list = qc.getQueryState<InboxItem[]>(key);
+  const row =
+    list?.data && !list.isInvalidated && list.fetchStatus === "idle"
+      ? inboxRowFromPush(item, list.data)
+      : null;
+  if (!row) {
+    void coalescedRefresh(qc, `list:${wsId}`, () => refreshInboxList(qc, wsId));
+    return;
+  }
+  qc.setQueryData<InboxItem[]>(key, (old) =>
+    !old || old.some((i) => i.id === item.id) ? old : [row, ...old],
+  );
 }
 
 // Dropping unread rows changes the tab badge, which reads the server-side

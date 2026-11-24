@@ -111,6 +111,11 @@ export function mapArchivedInboxCache(data: ArchivedInboxCache, patch: (items: I
   return { ...data, items: patch(data.items) };
 }
 
+export function archivedInboxCacheItems(data: ArchivedInboxCache): InboxItem[] {
+  if (Array.isArray(data)) return data;
+  return "pages" in data ? data.pages.flatMap((page) => page.items) : data.items;
+}
+
 export function patchArchivedInboxCaches(qc: QueryClient, wsId: string, patch: (items: InboxItem[]) => InboxItem[]) {
   const snapshot = qc.getQueriesData<ArchivedInboxCache>({ queryKey: inboxKeys.archived(wsId) });
   for (const [key, data] of snapshot) {

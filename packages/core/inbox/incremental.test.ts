@@ -1,0 +1,143 @@
+// @vitest-environment node
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { InboxItem } from "../types";
+import { INBOX_REFRESH_INTERVAL_MS, coalescedRefresh, inboxRowFromPush } from "./incremental";
+
+function pushed(overrides: Partial<InboxItem> = {}): InboxItem {
+  // What inbox:new carries: the notification, without the issue's fields.
+  return {
+    id: "n2",
+    workspace_id: "ws-1",
+    recipient_type: "member",
+    recipient_id: "user-1",
+    actor_type: "agent",
+    actor_id: "agent-1",
+    type: "new_comment",
+    severity: "info",
+    issue_id: "issue-a",
+    title: "Comment",
+    body: "hello",
+    read: false,
+    archived: false,
+    created_at: "2026-11-24T10:00:00Z",
+    details: { comment_id: "c2" },
+    ...overrides,
+  } as InboxItem;
+}
+
+const listed: InboxItem = {
+  ...pushed({ id: "n1", created_at: "2026-11-24T09:00:00Z", details: null }),
+  issue_identifier: "MUL-1",
+  issue_status: "in_progress",
+  issue_priority: "high",
+  issue_project_id: "project-1",
+  issue_assignee_type: "member",
+  issue_assignee_id: "user-2",
+  issue_due_date: null,
+  issue_label_ids: ["label-1"],
+  snoozed_until: null,
+  snoozed_at: null,
+};
+
+describe("inboxRowFromPush", () => {
+  it("takes the issue fields from another row of the issue", () => {
+    expect(inboxRowFromPush(pushed(), [listed])).toEqual({
+      ...pushed(),
+      issue_identifier: "MUL-1",
+      issue_status: "in_progress",
+      issue_priority: "high",
+      issue_project_id: "project-1",
+      issue_assignee_type: "member",
+      issue_assignee_id: "user-2",
+      issue_due_date: null,
+      issue_label_ids: ["label-1"],
+    });
+  });
+
+  it("keeps the status the push carries", () => {
+    expect(inboxRowFromPush(pushed({ issue_status: "done" }), [listed])?.issue_status).toBe("done");
+  });
+
+  it("knows nothing about an issue without another row", () => {
+    expect(inboxRowFromPush(pushed(), [{ ...listed, issue_id: "issue-b" }])).toBeNull();
+  });
+
+  it("lists an issue-less notice the way the server does", () => {
+    expect(inboxRowFromPush(pushed({ issue_id: null, type: "autopilot_paused" }), [])).toMatchObject({
+      issue_identifier: null,
+      issue_status: null,
+      issue_priority: null,
+      issue_label_ids: [],
+    });
+  });
+});
+
+describe("coalescedRefresh", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("starts at once, keeps one run out, and merges what arrives meanwhile into one", async () => {
+    const client = {};
+    const releases: Array<() => void> = [];
+    let running = 0;
+    let maxRunning = 0;
+    const refresh = vi.fn(() => {
+      running += 1;
+      maxRunning = Math.max(maxRunning, running);
+      return new Promise<void>((resolve) =>
+        releases.push(() => {
+          running -= 1;
+          resolve();
+        }),
+      );
+    });
+
+    void coalescedRefresh(client, "k", refresh);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    for (let i = 0; i < 10; i++) void coalescedRefresh(client, "k", refresh);
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    releases.shift()!();
+    await vi.advanceTimersByTimeAsync(INBOX_REFRESH_INTERVAL_MS);
+    expect(refresh).toHaveBeenCalledTimes(2);
+    releases.shift()!();
+    await vi.advanceTimersByTimeAsync(INBOX_REFRESH_INTERVAL_MS * 5);
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(maxRunning).toBe(1);
+  });
+
+  it("waits out the interval after a run that finished quickly", async () => {
+    const client = {};
+    const refresh = vi.fn(async () => {});
+    await coalescedRefresh(client, "k", refresh);
+    const second = coalescedRefresh(client, "k", refresh);
+    await vi.advanceTimersByTimeAsync(INBOX_REFRESH_INTERVAL_MS - 1);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await second;
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps clients and keys apart", () => {
+    const refresh = vi.fn(async () => {});
+    const client = {};
+    void coalescedRefresh(client, "a", refresh);
+    void coalescedRefresh(client, "b", refresh);
+    void coalescedRefresh({}, "a", refresh);
+    expect(refresh).toHaveBeenCalledTimes(3);
+  });
+
+  it("runs again after a refresh that failed", async () => {
+    const client = {};
+    const refresh = vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValue(undefined);
+    await expect(coalescedRefresh(client, "k", refresh)).resolves.toBeUndefined();
+    const again = coalescedRefresh(client, "k", refresh);
+    await vi.advanceTimersByTimeAsync(INBOX_REFRESH_INTERVAL_MS);
+    await again;
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+});

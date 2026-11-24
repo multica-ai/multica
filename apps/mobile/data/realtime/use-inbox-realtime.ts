@@ -6,8 +6,9 @@
  * 1. `inbox:*` events → invalidate the inbox list AND the cross-workspace
  *    unread summary that backs the tab badge (the summary lives under its
  *    own account-level key, so the list invalidation does not reach it).
- *    inbox payloads are small and (apart from inbox:new) rare, so refetching
- *    is cheaper than maintaining per-event patchers. Multi-device parity:
+ *    Apart from inbox:new, which writes its row into the list (`onInboxNew`),
+ *    they are rare, so refetching is cheaper than per-event patchers.
+ *    Multi-device parity:
  *    subscribing to inbox:read / inbox:archived means a read/archive on web
  *    reaches mobile within the next WS frame (web's use-realtime-sync
  *    deliberately DOESN'T subscribe to those, but mobile's stricter freshness
@@ -28,6 +29,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useWSSubscriptions } from "@/lib/use-ws-subscriptions";
 import {
   dropInboxItemsByIssue,
+  onInboxNew,
   patchInboxIssueStatus,
   refreshInboxList,
   refreshInboxUnreadSummary,
@@ -47,8 +49,12 @@ export function useInboxRealtime() {
       };
 
       return [
-        // Inbox-domain events: refetch the inbox list and the badge count.
-        ws.on("inbox:new", invalidate),
+        // A new notification lands in the loaded list; the rest refetch the
+        // inbox list and the badge count.
+        ws.on("inbox:new", (payload) => {
+          if (payload?.item) onInboxNew(qc, wsId, payload.item);
+          else invalidate();
+        }),
         ws.on("inbox:read", invalidate),
         // Mobile has no mark-unread affordance yet (web/desktop right-click
         // only), but a mark-unread there must un-read the row here too —

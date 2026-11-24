@@ -1,7 +1,8 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
-import { inboxKeys, mapArchivedInboxCache, type ArchivedInboxCache } from "./queries";
+import { coalescedRefresh, inboxRowFromPush } from "./incremental";
+import { archivedInboxCacheItems, inboxKeys, mapArchivedInboxCache, type ArchivedInboxCache } from "./queries";
 import { useInboxSelectionStore } from "./selection-store";
-import type { InboxItem, IssueAssigneeType, IssuePriority, IssueStatus } from "../types";
+import type { InboxItem, IssueAssigneeType, IssuePriority, IssueStatus, SnoozedInboxIssue } from "../types";
 
 // Re-read a query because the server changed — in a way that is never answered
 // by a request that was already on the wire before the change.
@@ -31,18 +32,65 @@ async function refreshInboxQuery(qc: QueryClient, queryKey: QueryKey) {
   await qc.invalidateQueries({ queryKey });
 }
 
+// A new notification is written into the loaded main list rather than
+// re-reading every inbox list: each one used to re-download the whole inbox in
+// every open client. It is written only when the result is certain, and
+// otherwise the lists are re-read through a coalescing gate:
+// - The main list is loaded, owes no re-read, and no inbox request is out. A
+//   response already on the wire can predate the row and would land on top of
+//   it (see refreshInboxQuery).
+// - The issue fields the row mirrors are known (`inboxRowFromPush`).
+// - The issue is not snoozed. A notification that ends a snooze brings the
+//   issue's earlier rows back too, and only the server has them. One that
+//   joins a snooze arrives as inbox:snoozed instead, so Snoozed is untouched.
+//
+// A notification on an archived issue puts the issue back in the inbox, and
+// the archive excludes an issue with an active row (ListArchivedInboxItems),
+// so its loaded archived rows go. Which archived groups and facet counts match
+// is the server's call: those are marked stale and re-read when they are next
+// mounted, not now.
 export async function onInboxNew(
   qc: QueryClient,
   wsId: string,
-  _item: InboxItem,
+  item: InboxItem,
 ) {
-  // Refetch instead of setQueryData, so every observer is notified.
-  //
-  // Both lists: a new notification on an ARCHIVED issue puts that issue back in
-  // the main inbox, which means it must also leave the archived list. The
-  // server owns that split (ListArchivedInboxItems excludes issues with an
-  // active row), so refetching both is what keeps them mutually exclusive.
-  await onInboxInvalidate(qc, wsId);
+  const listKey = inboxKeys.list(wsId);
+  const list = qc.getQueryState<InboxItem[]>(listKey);
+  const issueId = item.issue_id;
+  const snoozed = issueId
+    ? qc.getQueryData<SnoozedInboxIssue[]>(inboxKeys.snoozed(wsId))?.some((entry) => entry.issue_id === issueId)
+    : false;
+  if (!list?.data || list.isInvalidated || snoozed || isInboxListRequestInFlight(qc, wsId)) {
+    return refreshInboxListsCoalesced(qc, wsId);
+  }
+  if (list.data.some((row) => row.id === item.id)) return;
+  const archived = qc
+    .getQueriesData<ArchivedInboxCache>({ queryKey: inboxKeys.archived(wsId) })
+    .map(([queryKey, data]) => ({ queryKey, items: data ? archivedInboxCacheItems(data) : [] }));
+  const row =
+    inboxRowFromPush(item, list.data) ??
+    inboxRowFromPush(item, archived.flatMap((cache) => cache.items));
+  if (!row) return refreshInboxListsCoalesced(qc, wsId);
+  qc.setQueryData<InboxItem[]>(listKey, (old) => (old ? [row, ...old] : old));
+  if (!issueId) return;
+  const revived = archived.filter((cache) => cache.items.some((i) => i.issue_id === issueId));
+  patchInboxQueries(qc, revived.map((cache) => cache.queryKey), (items) =>
+    items.filter((i) => i.issue_id !== issueId),
+  );
+  for (const queryKey of [inboxKeys.archived(wsId), inboxKeys.facets(wsId)]) {
+    void qc.invalidateQueries({ queryKey, refetchType: "none" });
+  }
+}
+
+// The fallback for an `inbox:new` that cannot be written locally. A burst of
+// them must not stack one full re-read each: the client cancels the
+// request it replaces, but the server finishes the query regardless.
+function refreshInboxListsCoalesced(qc: QueryClient, wsId: string) {
+  return coalescedRefresh(qc, `lists:${wsId}`, () => onInboxInvalidate(qc, wsId));
+}
+
+function archivedInboxQueryKeys(qc: QueryClient, wsId: string): QueryKey[] {
+  return qc.getQueryCache().findAll({ queryKey: inboxKeys.archived(wsId) }).map((query) => query.queryKey);
 }
 
 // An issue event only patches known rows; it cannot fulfill a pending inbox
@@ -54,7 +102,15 @@ function patchInboxLists(
   wsId: string,
   patch: (items: InboxItem[]) => InboxItem[],
 ) {
-  for (const queryKey of [inboxKeys.list(wsId), ...qc.getQueryCache().findAll({ queryKey: inboxKeys.archived(wsId) }).map((query) => query.queryKey)]) {
+  patchInboxQueries(qc, [inboxKeys.list(wsId), ...archivedInboxQueryKeys(qc, wsId)], patch);
+}
+
+function patchInboxQueries(
+  qc: QueryClient,
+  queryKeys: readonly QueryKey[],
+  patch: (items: InboxItem[]) => InboxItem[],
+) {
+  for (const queryKey of queryKeys) {
     const invalidated = qc.getQueryState(queryKey)?.isInvalidated === true;
     qc.setQueryData<ArchivedInboxCache>(queryKey, (old) => {
       if (!old) return undefined;
@@ -267,4 +323,12 @@ export async function onInboxInvalidate(qc: QueryClient, wsId: string) {
 // scoped list refresh cannot reach. Cancels first; see `refreshInboxQuery`.
 export async function onInboxSummaryInvalidate(qc: QueryClient) {
   await refreshInboxQuery(qc, inboxKeys.unreadSummary());
+}
+
+// The summary refresh for `inbox:new`, which arrives in bursts (an agent at
+// work notifies on every step). One request at a time, and the events that
+// arrive meanwhile share one follow-up. The server computes the summary over
+// the whole inbox, so the count is not adjusted locally.
+export function onInboxNewSummaryInvalidate(qc: QueryClient) {
+  return coalescedRefresh(qc, "unread-summary", () => onInboxSummaryInvalidate(qc));
 }
