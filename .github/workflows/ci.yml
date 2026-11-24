@@ -293,18 +293,20 @@ jobs:
       - name: Test docs
         run: pnpm --filter @multica/docs test
 
-  # Playwright against a real API and a production web build. Only the guest
-  # spec runs here so far: a guest passes an API allowlist that no member-side
-  # test exercises, so a member component reused on a guest page can fail with
-  # 403 unnoticed (MUL-9873). The rest of e2e/ runs locally through `make check`.
+  # Playwright against a real API and a production web build. Three specs run
+  # here so far. The guest spec: a guest passes an API allowlist that no
+  # member-side test exercises, so a member component reused on a guest page
+  # can fail with 403 unnoticed (MUL-9873). The Inbox header spec: the Work
+  # panel's Inbox tabs shipped cut to their first letter in every language
+  # once already (MUL-9930). The rail labels spec: the Autopilots rail tile
+  # was cut to "Autop…" in most languages (MUL-9942). The rest of e2e/ runs
+  # locally through `make check`.
   # The web app is served the way scripts/web-prod.mjs serves it: same-origin,
   # with `next start` proxying /api and /ws to the API.
   e2e:
     needs: changes
     if: ${{ needs.changes.outputs.e2e == 'true' }}
-    # Playwright 1.58 installs Chromium only up to Ubuntu 24.04; ubuntu-latest
-    # is past that.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 25
     services:
       postgres:
@@ -328,6 +330,9 @@ jobs:
       MULTICA_APP_URL: http://localhost:3000
       PLAYWRIGHT_BASE_URL: http://localhost:3000
       NEXT_TELEMETRY_DISABLED: "1"
+      # With Docs off the palette never searches docs, so a guest's refused
+      # doc search would go unnoticed.
+      FF_DOCS_V1: "true"
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -358,8 +363,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Install Chromium
-        run: pnpm exec playwright install --with-deps chromium
+      # Chromium and the system fonts the locale specs measure text with come
+      # from Playwright's image, tagged with the installed @playwright/test so
+      # the two never drift. `playwright install --with-deps` fetched the same
+      # fonts through the runner's Ubuntu apt mirror, which mostly took 5 to 9
+      # minutes (MUL-10057).
+      - name: Pull the Playwright image
+        id: playwright
+        run: |
+          image="mcr.microsoft.com/playwright:v$(node -p 'require("@playwright/test/package.json").version')-noble"
+          docker pull --quiet "$image"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
 
       - name: Build and migrate the API
         working-directory: server
@@ -387,8 +401,18 @@ jobs:
             curl -sf -o /dev/null "$url" || { echo "$url did not answer within 60s"; exit 1; }
           done
 
-      - name: Run the guest spec
-        run: pnpm exec playwright test e2e/guest.spec.ts
+      # Only the specs run in the image. Host networking reaches the API, the
+      # web app and Postgres on localhost, and the checkout is mounted at its
+      # own path because pnpm's bin shims hold absolute paths.
+      - name: Run the guest, Inbox header and rail labels specs
+        env:
+          IMAGE: ${{ steps.playwright.outputs.image }}
+        run: >-
+          docker run --rm --network host --ipc host
+          -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE"
+          -e CI -e DATABASE_URL -e PORT -e FRONTEND_ORIGIN -e PLAYWRIGHT_BASE_URL
+          "$IMAGE"
+          node_modules/.bin/playwright test e2e/guest.spec.ts e2e/inbox-section-header-locales.spec.ts e2e/app-rail-labels-locales.spec.ts
 
       - name: Upload logs and Playwright results
         if: ${{ failure() }}
@@ -794,7 +818,7 @@ jobs:
         # still reports cleanup as unconfirmed, and that a descendant holding
         # inherited stdout neither keeps Result blocked nor survives cleanup.
         # -v makes RUN/PASS evidence explicit in CI logs.
-        run: go test ./pkg/agent -v -run '^(TestStartOwnedProcessTreeCapturesImmediateDescendants|TestStartOwnedProcessTreeLeavesNoSuspendedChild|TestWaitProcessGroupGoneWithoutOwnershipReportsUnconfirmed|TestCodexInitializeRetrySupportedWithOwnedProcessTree|TestCodexWindowsDescendantsDieWithTheOwnedProcessTree|TestCodeArtsWindowsCancellationTerminatesDescendants)$' -count=1 -timeout=5m
+        run: go test ./pkg/agent -v -run '^(TestStartOwnedProcessTreeCapturesImmediateDescendants|TestStartOwnedProcessTreeLeavesNoSuspendedChild|TestWaitProcessGroupGoneWithoutOwnershipReportsUnconfirmed|TestCodexInitializeRetrySupportedWithOwnedProcessTree|TestCodexWindowsDescendantsDieWithTheOwnedProcessTree|TestCodeArtsWindowsCancellationTerminatesDescendants|TestDiscoverCodeArtsModelsRetriesAfterVerboseTimeout)$' -count=1 -timeout=5m
 
       - name: Test Windows Hermes gateway ownership and reservation
         working-directory: server
@@ -847,7 +871,7 @@ jobs:
         # silently as "ok".
         run: go test ./internal/daemon/execenv -v -run '^TestWindowsOpenclawShim' -count=1 -timeout=5m
 
-      - name: Test Windows workdir containment guard in the CLI
+      - name: Test Windows CLI workdir guard and attachment rewriting
         if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
         # The CLI's --content-file / --attachment guard decides whether a path is
@@ -866,9 +890,10 @@ jobs:
         # tests run nowhere else. It matters twice over on a non-admin host,
         # where the package's cross-platform cases skip for want of the symlink
         # privilege; the ubuntu backend job covers those shapes instead.
+        # The attachment regression covers both bare names and drive-letter file URLs.
         # -v so a silent skip (or a -run pattern that stops matching) is visible
         # in the log instead of passing as "ok".
-        run: go test ./cmd/multica -v -run '^TestFileWithinWorkingDirWindows' -count=1 -timeout=5m
+        run: go test ./cmd/multica -v -run '^Test(FileWithinWorkingDirWindows|RewriteAttachmentLinksCaseInsensitiveOnWindows$)' -count=1 -timeout=5m
 
       - name: Test Windows link-target classification in internal/util
         if: ${{ needs.changes.outputs.backend == 'true' }}
@@ -1151,6 +1176,11 @@ jobs:
 
       - name: Test UI performance comparison runner
         run: bash scripts/perf-compare.test.sh
+
+      - name: Test fake Composio against the OpenAPI snapshot
+        # Every endpoint the Go client calls must answer in the shape the
+        # checked-in Composio v3.1 spec defines; fields it lacks fail here.
+        run: node --test scripts/fake-composio.test.mjs
 
       - name: Verify reserved-slugs.ts is up to date
         # Re-runs the generator and fails on any drift from the

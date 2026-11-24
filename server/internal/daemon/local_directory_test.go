@@ -802,6 +802,93 @@ func TestAcquireLocalDirectoryLock_EarlyFailureReportsWithCancelledParent(t *tes
 // run as local_directory_missing — the generic local_directory_error gave the
 // user no hint that the folder itself was gone. Every other validation failure
 // keeps the generic reason.
+func TestAcquireLocalDirectoryLock_ReportsDirectoryMovedDuringWait(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "project")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	realDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	locker := NewLocalPathLocker()
+	releaseHolder, err := locker.Acquire(ctx, realDir, "holder", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var finishHolder sync.Once
+	defer finishHolder.Do(releaseHolder)
+
+	failures := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/wait-local-directory"):
+			if err := os.Rename(dir, filepath.Join(parent, "moved")); err != nil {
+				t.Errorf("move linked directory while task waits: %v", err)
+			}
+			finishHolder.Do(releaseHolder)
+		case strings.HasSuffix(req.URL.Path, "/fail"):
+			var report struct {
+				FailureReason string `json:"failure_reason"`
+			}
+			if err := json.NewDecoder(req.Body).Decode(&report); err != nil {
+				t.Errorf("decode terminal report: %v", err)
+			}
+			failures <- report.FailureReason
+		default:
+			t.Errorf("unexpected daemon call: %s %s", req.Method, req.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	const daemonID = "d-test"
+	d := &Daemon{
+		client:         NewClient(srv.URL),
+		logger:         slog.Default(),
+		localPathLocks: locker,
+		cfg:            Config{DaemonID: daemonID},
+	}
+	ref, err := json.Marshal(localDirectoryRef{LocalPath: dir, DaemonID: daemonID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := Task{
+		ID: "waiter",
+		ProjectResources: []ProjectResourceData{
+			{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: ref},
+		},
+	}
+
+	release, abort := d.acquireLocalDirectoryLockIfNeeded(ctx, task, slog.Default(), newTestTaskSlot(0))
+	if release != nil {
+		release()
+		t.Error("waiter returned a usable lock for the moved directory")
+	}
+	if !abort {
+		t.Fatal("waiter continued after its linked directory moved")
+	}
+	select {
+	case reason := <-failures:
+		if reason != "local_directory_missing" {
+			t.Errorf("failure_reason = %q, want local_directory_missing", reason)
+		}
+	default:
+		t.Error("missing terminal failure report")
+	}
+	if released, err := locker.Acquire(ctx, realDir, "next", nil); err != nil {
+		t.Errorf("waiter did not release path lock: %v", err)
+	} else {
+		released()
+	}
+}
+
 func TestAcquireLocalDirectoryLock_ReportsDeletedDirectoryAsMissing(t *testing.T) {
 	t.Parallel()
 

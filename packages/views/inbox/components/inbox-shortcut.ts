@@ -18,5 +18,7 @@ export function isInboxShortcut(event: KeyboardEvent, action: ShortcutActionId):
   if (isEditableShortcutTarget(event.target)) return false;
   if (isPortalLayerShortcutTarget(event.target)) return false;
   if (useModalStore.getState().modal) return false;
+  // A floating Issue Peek owns J / K and hides the Inbox detail behind it.
+  if (typeof document !== "undefined" && document.querySelector("[data-issue-peek]")) return false;
   return shortcutMatchesEvent(getShortcut(action), event);
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Copy } from "@multica/ui/icons";
+import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
 import { CliInstallCommand } from "@multica/views/common/cli-install-command";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { cn } from "@multica/ui/lib/utils";
@@ -15,9 +15,9 @@ const SETUP_CMD = "multica setup";
  * switch takes its list and trigger colours from here.
  */
 const PLATFORM_TABS = {
-  list: "border border-white/10 bg-white/5",
+  list: "border border-white/10 bg-white/5 *:data-[slot=tabs-indicator]:bg-white/10 *:data-[slot=tabs-indicator]:shadow-none",
   trigger:
-    "text-site-inverse-muted hover:text-site-inverse-ink data-active:bg-white/10 data-active:text-site-inverse-ink",
+    "text-site-inverse-muted hover:text-site-inverse-ink data-active:text-site-inverse-ink",
 };
 
 /**
@@ -80,7 +80,7 @@ function CommandRow({ label, cmd }: { label: string; cmd: string }) {
             "focus-visible:outline-site-inverse-ink",
           )}
         >
-          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+          <CopyCheckIcon copied={copied} checkClassName="text-current" />
         </button>
       </div>
     </div>

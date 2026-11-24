@@ -239,6 +239,8 @@
       "created_by": "생성자",
       "select_agent_aria": "에이전트 선택",
       "pick_an_agent": "에이전트 선택...",
+      "all_actors": "모든 에이전트와 스쿼드",
+      "frequent_actors_aria": "자주 사용",
       "no_agents": "사용 가능한 에이전트나 스쿼드가 없습니다.",
       "search_placeholder": "에이전트와 스쿼드 검색...",
       "agents_group": "에이전트",

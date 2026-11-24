@@ -16,6 +16,7 @@ import (
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/util"
 	sdk "github.com/multica-ai/multica/server/pkg/composio"
+	"github.com/multica-ai/multica/server/pkg/composio/composiotest"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -47,9 +48,9 @@ func (f *composioFakeSDK) ListConnectedAccounts(_ context.Context, req sdk.ListC
 		id = req.ConnectedAccountIDs[0]
 	}
 	return &sdk.ListConnectedAccountsResponse{Items: []sdk.ConnectedAccount{{
-		ID:           id,
-		UserID:       composioTestUserID,
-		AuthConfigID: "ac_notion",
+		ID:         id,
+		UserID:     composioTestUserID,
+		AuthConfig: sdk.AuthConfigRef{ID: "ac_notion"},
 	}}}, nil
 }
 func (f *composioFakeSDK) RevokeConnection(_ context.Context, _ string) error       { return f.revokeErr }
@@ -79,6 +80,63 @@ func (f *composioFakeSDK) CreateSession(_ context.Context, _ sdk.CreateSessionRe
 }
 func (f *composioFakeSDK) MCPAuthHeaders() map[string]string {
 	return map[string]string{"x-api-key": "k"}
+}
+
+// The handler fakes answer with fixed data; every field they set must be one
+// Composio's spec defines for that endpoint.
+func TestComposioFakesMatchSpec(t *testing.T) {
+	ctx := context.Background()
+	accounts := sdk.ListConnectedAccountsRequest{ConnectedAccountIDs: []string{"ca_1"}}
+	apps := &appsFakeSDK{}
+	team := &teamConnectSDK{}
+	responses := map[string][]func() (any, error){
+		"POST /connected_accounts/link": {
+			func() (any, error) { return (&composioFakeSDK{}).CreateLink(ctx, sdk.CreateLinkRequest{}) },
+			func() (any, error) { return (&composioCapturingSDK{}).CreateLink(ctx, sdk.CreateLinkRequest{}) },
+			func() (any, error) { return team.CreateLink(ctx, sdk.CreateLinkRequest{}) },
+		},
+		"GET /connected_accounts": {
+			func() (any, error) { return (&composioFakeSDK{}).ListConnectedAccounts(ctx, accounts) },
+			func() (any, error) { return team.ListConnectedAccounts(ctx, accounts) },
+		},
+		"GET /auth_configs": {
+			func() (any, error) { return (&composioFakeSDK{}).ListAuthConfigs(ctx, sdk.ListAuthConfigsRequest{}) },
+		},
+		"GET /toolkits": {
+			func() (any, error) { return (&composioFakeSDK{}).ListToolkits(ctx, sdk.ListToolkitsRequest{}) },
+		},
+		"GET /toolkits/{slug}": {
+			func() (any, error) { return apps.GetToolkit(ctx, "gmail") },
+		},
+		"GET /tools": {
+			func() (any, error) { return apps.ListTools(ctx, sdk.ListToolsRequest{ToolkitSlug: "gmail"}) },
+		},
+		"GET /tools/{tool_slug}": {
+			func() (any, error) { return apps.GetTool(ctx, "GMAIL_SEND_EMAIL") },
+		},
+		"POST /tools/execute/{tool_slug}": {
+			func() (any, error) {
+				return apps.ExecuteTool(ctx, "GMAIL_SEND_EMAIL", sdk.ExecuteToolRequest{UserID: "u", ConnectedAccountID: "ca_1"})
+			},
+			func() (any, error) {
+				return (&appsFakeSDK{toolError: "boom"}).ExecuteTool(ctx, "GMAIL_SEND_EMAIL", sdk.ExecuteToolRequest{UserID: "u", ConnectedAccountID: "ca_1"})
+			},
+		},
+		"POST /tool_router/session": {
+			func() (any, error) { return (&composioFakeSDK{}).CreateSession(ctx, sdk.CreateSessionRequest{}) },
+		},
+	}
+	for op, calls := range responses {
+		for i, call := range calls {
+			resp, err := call()
+			if err != nil {
+				t.Fatalf("%s #%d: %v", op, i, err)
+			}
+			if err := composiotest.CheckFields(op, resp); err != nil {
+				t.Errorf("fake #%d: %v", i, err)
+			}
+		}
+	}
 }
 
 type composioFakeStore struct {

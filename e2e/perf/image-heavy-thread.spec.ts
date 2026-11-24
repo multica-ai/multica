@@ -68,7 +68,11 @@ function responseFor(pathname: string): unknown | undefined {
     case "/api/workspaces": return [workspace];
     case "/api/client-usage": return {};
     case "/api/issue-view-preferences": return { prefs: { hidden: [], order: [] } };
-    case "/api/issue-views": case "/api/agent-run-counts": case "/api/agent-activity-30d": return [];
+    case "/api/issue-views": case "/api/agent-run-counts": case "/api/agent-activity-30d":
+    case "/api/working-agents": case "/api/inbox/snoozed":
+      return [];
+    case "/api/project-folders": return { folders: [], filed: [] };
+    case "/api/notification-preferences": return { workspace_id: fx.WORKSPACE_ID, preferences: {} };
     case "/api/skills": return { skills: [], total: 0 };
     case "/api/autopilots": return { autopilots: [], total: 0 };
     case "/api/issues/unread": return { items: [], next_cursor: null };
@@ -90,6 +94,10 @@ function responseFor(pathname: string): unknown | undefined {
     case "/api/issue-workflows": return { workflows: [], total: 0 };
     case `/api/issues/${fx.ISSUE_ID}/system-wakeups`: return [];
     case `/api/issues/${fx.ISSUE_ID}/duplicates`: return { duplicate_of: null, duplicates: [] };
+    case `/api/issues/${fx.ISSUE_ID}/environments`:
+      return { environments: [], configs: [], pending_starts: [], failed_starts: [] };
+    // No live session: the description edits locally, as with no collab server.
+    case `/api/issues/${fx.ISSUE_ID}/collab-ticket`: return { enabled: false };
     case `/api/issues/${fx.ISSUE_ID}/comments/trigger-preview`:
       return { agents: [], blocked: [] };
     case "/api/issues/child-progress": return { progress: [] };

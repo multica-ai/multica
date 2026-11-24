@@ -4,21 +4,17 @@ import { useQuery } from "@tanstack/react-query";
 import { Eye } from "@multica/ui/icons";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
-import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
-import { isIssueUuid } from "@multica/core/issues/canonical-id";
-import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { projectListOptions } from "@multica/core/projects/queries";
 import type { Project } from "@multica/core/types";
-import { resolveClickIntent, useNavigation } from "../../navigation";
+import { useNavigation } from "../../navigation";
 import { AutoArchivePromptDialog } from "../../inbox/components/auto-archive-prompt-dialog";
-import { useSidebarInboxIssue } from "../../inbox/components/use-sidebar-inbox-issue";
+import { inboxTabFromParam } from "../../inbox/components/inbox-view";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { useT } from "../../i18n";
 import { PanelBody, PanelCount, PanelHeader, PanelLink, PanelList, PanelSection, isPathWithin } from "../panel-nav";
 import { routeIconForPath } from "../route-icon-components";
-import { INBOX_LIST, InboxSection, useInboxSectionRows } from "./inbox-section";
-import { routeSegment } from "./work-panel";
+import { InboxSection, useInboxSectionRows } from "./inbox-section";
 
 const EMPTY_PROJECTS: Project[] = [];
 
@@ -33,7 +29,7 @@ const EMPTY_PROJECTS: Project[] = [];
 export function GuestWorkPanel() {
   const { t } = useT("layout");
   const p = useWorkspacePaths();
-  const { pathname, searchParams, openInNewTab } = useNavigation();
+  const { pathname, searchParams } = useNavigation();
   const workspace = useCurrentWorkspace();
   const wsId = workspace?.id;
   const { data: projects = EMPTY_PROJECTS } = useQuery({
@@ -43,46 +39,12 @@ export function GuestWorkPanel() {
   const shared = projects.filter((project) => !project.archived_at);
   const InvolvedIcon = routeIconForPath(p.myIssues());
 
-  // Cache read only: the detail page owns resolving the route's issue.
-  const issueSegment = routeSegment(pathname, p.issues());
-  const { data: currentIssue } = useQuery({
-    ...issueDetailOptions(wsId ?? "", issueSegment ?? ""),
-    enabled: false,
-  });
-  const currentIssueId = issueSegment
-    ? (currentIssue?.id ?? (isIssueUuid(issueSegment) ? issueSegment : null))
-    : null;
-  const inbox = useSidebarInboxIssue(wsId, currentIssueId);
+  // The live notification open on the Inbox page beside the section.
   const inboxOpenKey =
-    pathname === p.inbox()
+    pathname === p.inbox() && inboxTabFromParam(searchParams.get("view")) === "inbox"
       ? searchParams.get("issue")
-      : currentIssueId && inbox.fromInbox
-        ? currentIssueId
-        : null;
+      : null;
   const inboxRows = useInboxSectionRows(wsId, inboxOpenKey);
-  const inboxClaimsIssue = !!currentIssueId && inbox.fromInbox && !inboxRows.collapsed;
-  const rememberSidebarIssue = useInboxSelectionStore((s) => s.rememberSidebarIssue);
-  const rememberSidebarTabIssue = useInboxSelectionStore((s) => s.rememberSidebarTabIssue);
-  const forgetSidebarTabIssue = useInboxSelectionStore((s) => s.forgetSidebarTabIssue);
-  // An issue opened from an Inbox row belongs to the Inbox, as in the member
-  // panel: its row stays lit and the issue header moves on to the next one.
-  const rememberInboxIssue = (event: React.MouseEvent) => {
-    // A middle click opens a tab; other buttons open nothing.
-    if (event.type === "auxclick" && event.button !== 1) return;
-    const link = (event.target as HTMLElement).closest("a[href]");
-    const segment = link?.getAttribute("data-issue-id");
-    if (!link || !segment || !wsId) return;
-    // An Inbox row's hover card renders in a portal, outside the row's list.
-    const fromInbox =
-      !!link.closest("[data-inbox-card]") || link.closest("[data-sidebar-list]")?.getAttribute("data-sidebar-list") === INBOX_LIST;
-    if (!fromInbox) return;
-    if (resolveClickIntent(event) !== "push" || (event.shiftKey && !openInNewTab)) {
-      if (openInNewTab) rememberSidebarTabIssue(wsId, segment);
-      return;
-    }
-    rememberSidebarIssue(wsId, segment);
-    forgetSidebarTabIssue(wsId, segment);
-  };
 
   return (
     <>
@@ -94,7 +56,7 @@ export function GuestWorkPanel() {
           </Badge>
         </TooltipHint>
       </PanelHeader>
-      <PanelBody onClickCapture={rememberInboxIssue} onAuxClickCapture={rememberInboxIssue}>
+      <PanelBody>
         <PanelList>
           <PanelLink
             href={p.myIssues()}
@@ -108,7 +70,6 @@ export function GuestWorkPanel() {
             wsId={wsId}
             rows={inboxRows}
             pathname={pathname}
-            activeIssueId={inboxClaimsIssue ? currentIssueId : null}
           />
         )}
         {wsId && <AutoArchivePromptDialog wsId={wsId} active={!!inboxOpenKey} />}

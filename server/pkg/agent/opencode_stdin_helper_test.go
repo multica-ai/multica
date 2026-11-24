@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 )
 
 // Env contract between the OpenCode stdin tests and the helper process they
@@ -19,8 +20,9 @@ const (
 )
 
 const (
-	codeartsModelHelperEnv      = "CODEARTS_MODEL_TEST_HELPER"
-	codeartsModelHelperArgvFile = "CODEARTS_MODEL_TEST_HELPER_ARGV_FILE"
+	codeartsModelHelperEnv         = "CODEARTS_MODEL_TEST_HELPER"
+	codeartsModelHelperArgvFile    = "CODEARTS_MODEL_TEST_HELPER_ARGV_FILE"
+	codeartsModelHelperHangVerbose = "CODEARTS_MODEL_TEST_HELPER_HANG_VERBOSE"
 )
 
 func runFakeCodeArtsModelHelper() {
@@ -32,6 +34,9 @@ func runFakeCodeArtsModelHelper() {
 		}
 	}
 	for _, arg := range args {
+		if arg == "--verbose" && os.Getenv(codeartsModelHelperHangVerbose) == "1" {
+			time.Sleep(time.Minute)
+		}
 		if arg == "--version" {
 			fmt.Println("CodeArts Agent 1.2.3")
 			return

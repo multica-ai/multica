@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { toast } from "sonner";
 import { useBatchDeleteIssues, useCancelIssueRun } from "@multica/core/issues/mutations";
 import {
@@ -30,31 +31,85 @@ export function PaletteHostDialogs({
   dialog: PaletteHostDialog | null;
   onClose: () => void;
 }) {
-  if (!dialog) return null;
-  switch (dialog.type) {
+  const [retained, setRetained] = useState<{
+    dialog: PaletteHostDialog;
+    sessionKey: number;
+  } | null>(null);
+
+  if (dialog !== null && retained?.dialog !== dialog) {
+    setRetained((prev) => ({
+      dialog,
+      sessionKey: (prev?.sessionKey ?? 0) + 1,
+    }));
+  }
+
+  const active = dialog !== null
+    ? { dialog, sessionKey: retained?.dialog === dialog ? retained.sessionKey : (retained?.sessionKey ?? 0) + 1 }
+    : retained;
+
+  if (!active) return null;
+
+  const isOpen = dialog !== null;
+  const { dialog: current, sessionKey } = active;
+  const handleOpenChangeComplete = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      setRetained((prev) => (prev?.sessionKey === sessionKey ? null : prev));
+    }
+  };
+
+  switch (current.type) {
     case "cancel-run":
-      return <CancelRunDialog dialog={dialog} onClose={onClose} />;
+      return (
+        <CancelRunDialog
+          key={sessionKey}
+          open={isOpen}
+          dialog={current}
+          onClose={onClose}
+          onOpenChangeComplete={handleOpenChangeComplete}
+        />
+      );
     case "batch-delete":
-      return <BatchDeleteDialog dialog={dialog} onClose={onClose} />;
+      return (
+        <BatchDeleteDialog
+          key={sessionKey}
+          open={isOpen}
+          dialog={current}
+          onClose={onClose}
+          onOpenChangeComplete={handleOpenChangeComplete}
+        />
+      );
     case "new-autopilot":
-      return <AutopilotDialog mode="create" open onOpenChange={(open) => !open && onClose()} />;
+      return (
+        <AutopilotDialog
+          key={sessionKey}
+          mode="create"
+          open={isOpen}
+          onOpenChange={(open) => !open && onClose()}
+          onOpenChangeComplete={handleOpenChangeComplete}
+        />
+      );
   }
 }
 
 function CancelRunDialog({
+  open,
   dialog,
   onClose,
+  onOpenChangeComplete,
 }: {
+  open: boolean;
   dialog: Extract<PaletteHostDialog, { type: "cancel-run" }>;
   onClose: () => void;
+  onOpenChangeComplete?: (open: boolean) => void;
 }) {
   const { t } = useT("issues");
   const { t: tSearch } = useT("search");
   const cancelRun = useCancelIssueRun(dialog.issueId);
   return (
     <TerminateTaskConfirmDialog
-      open
-      onOpenChange={(open) => !open && onClose()}
+      open={open}
+      onOpenChange={(nextOpen) => !nextOpen && onClose()}
+      onOpenChangeComplete={onOpenChangeComplete}
       showRunningNote={dialog.running}
       onConfirm={() => {
         onClose();
@@ -69,11 +124,15 @@ function CancelRunDialog({
 }
 
 function BatchDeleteDialog({
+  open,
   dialog,
   onClose,
+  onOpenChangeComplete,
 }: {
+  open: boolean;
   dialog: Extract<PaletteHostDialog, { type: "batch-delete" }>;
   onClose: () => void;
+  onOpenChangeComplete?: (open: boolean) => void;
 }) {
   const { t } = useT("issues");
   const batchDelete = useBatchDeleteIssues();
@@ -90,7 +149,11 @@ function BatchDeleteDialog({
     }
   };
   return (
-    <AlertDialog open onOpenChange={(open) => !open && onClose()}>
+    <AlertDialog
+      open={open}
+      onOpenChange={(nextOpen) => !nextOpen && onClose()}
+      onOpenChangeComplete={onOpenChangeComplete}
+    >
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{t(($) => $.batch.delete_dialog_title, { count })}</AlertDialogTitle>

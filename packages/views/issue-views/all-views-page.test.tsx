@@ -128,8 +128,8 @@ describe("AllViewsPage", () => {
 
     expect(screen.getByRole("heading", { level: 1, name: "All views" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "All views" }));
-    expect(await screen.findByRole("menuitemradio", { name: /^All views/ })).toHaveTextContent("7");
-    expect(screen.getByRole("menuitemradio", { name: /^Built-in/ })).toHaveTextContent("5");
+    expect(await screen.findByRole("menuitemradio", { name: /^All views/ })).toHaveTextContent("6");
+    expect(screen.getByRole("menuitemradio", { name: /^Built-in/ })).toHaveTextContent("4");
     expect(screen.getByRole("menuitemradio", { name: /^Created by me/ })).toHaveTextContent("1");
     await user.click(screen.getByRole("menuitemradio", { name: /^Shared/ }));
 

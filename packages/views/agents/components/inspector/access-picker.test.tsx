@@ -87,6 +87,30 @@ describe("AccessPicker owner-only editing (MUL-3963)", () => {
     ).toBeInTheDocument();
   });
 
+  it("describes a private agent as owner-only to a non-owner", () => {
+    const { onChange } = renderPicker({ canEdit: false });
+
+    expect(screen.getByText("Owner only")).toBeInTheDocument();
+    expect(screen.queryByText("Only me")).not.toBeInTheDocument();
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("preserves the selected-member count in the read-only summary", () => {
+    renderPicker({
+      canEdit: false,
+      permissionMode: "public_to",
+      invocationTargets: [
+        { target_type: "member", target_id: "u1" },
+        { target_type: "member", target_id: "u2" },
+      ],
+    });
+
+    expect(screen.getByText("2 people")).toBeInTheDocument();
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+  });
+
   it("renders mutually exclusive access scopes for the owner", () => {
     renderPicker({ canEdit: true });
     expect(

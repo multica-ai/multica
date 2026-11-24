@@ -1,12 +1,12 @@
 ---
-title: AI 编程工具对照
-description: 比较 Multica 支持的 AI 编程工具，以及模型、MCP、会话和 Skill 的差异。
+title: 支持的 AI 编程工具
+description: Multica 支持的 31 款 AI 编程工具，包括 Claude Code、Codex、Cursor 和 Copilot，以及检测、模型、MCP、会话、插话和 Skill 的差异。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { ProviderPickerDemo } from "@/components/demos/provider-picker-demo";
 
-Multica 不替代你在用的 AI 编程工具：运行时调用电脑上已经安装并登录的工具，再把执行进度和结果写回任务。已经在用其中一款的，通常直接沿用就行。还没定的话，看四件事：
+Multica 支持 31 款 AI 编程工具。它不替代你在用的工具：运行时调用电脑上已经安装并登录的工具，再把执行进度和结果写回任务。已经在用其中一款的，通常直接沿用就行。还没定的话，看四件事：
 
 - 电脑上是否已经安装；
 - 账号可以使用哪些模型；
@@ -53,6 +53,10 @@ Multica 不替代你在用的 AI 编程工具：运行时调用电脑上已经�
 | ZeroClaw | `zeroclaw` | ✓ | — | — | — |
 | ZCode | `zcode` / ZCode Desktop | ✓ | ✓ | ✓ | `.zcode/skills/` |
 
+<Callout type="info">
+不支持 Gemini CLI。它已从内置工具中移除，把 Gemini 列为 Multica 可运行工具的页面信息已经过时。
+</Callout>
+
 对于 Claude Code，如果守护进程环境中的 `CLAUDE_CONFIG_DIR` 是绝对路径，Multica 会从该目录列出和导入用户及插件技能。扫描器无法读取仅在启动包装脚本中设置的路径。
 
 Amp 的模型字段用于选择 Amp **模式**（如 `high`），而不是底层模型 ID。留空则使用 Amp 的默认模式。
@@ -62,6 +66,40 @@ Amp 还需要在守护进程或智能体环境中设置 `AMP_API_KEY`，仅有�
 "Multica 管理 MCP"指可以在智能体配置中填写 MCP server，由 Multica 在执行前传给对应工具。这一列只说明 Multica 能否代为配置，不说明工具自身有没有别的 MCP 配置方式。
 
 "在 Multica 选模型"为 — 的工具，模型要在工具自己的配置里选，见[模型来源](#模型来源)。
+
+## 接入工具
+
+表中每款工具的接入方式都一样：电脑上的 Multica 守护进程在 `PATH` 中查找各工具的命令，每找到一款就注册一个运行时。运行在这台电脑上执行，使用工具自己的登录和订阅；Multica 不附带这些工具，也不代理它们的模型调用。
+
+1. 按工具自己的文档安装并登录。
+2. 在同一台电脑上打开 [Multica 桌面端](/desktop-app)，它会自动接入这台电脑；或者安装 CLI 并启动守护进程：
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+   multica setup
+   ```
+
+   Windows 上第一行换成 `irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex`。自托管实例使用[自托管快速上手](/self-host-quickstart)里的命令。
+3. 在 **运行时** 页面这台电脑下确认工具已经出现，也可以运行 `multica runtime list`。之后再装新工具，运行 `multica daemon restart` 或重新打开桌面端。
+4. 在这个运行时上[创建智能体](/agents-create)，再给它分配任务。
+
+工具装在守护进程 `PATH` 找不到的位置时，用 `MULTICA_<PREFIX>_PATH` 指向它，见[环境变量](/environment-variables#守护进程配置)。一台电脑可以挂多款工具，一个工作区也可以接入多台电脑，所以团队可以在同一个看板上让一台机器跑 Claude Code，另一台跑 Codex 或 Kimi。
+
+## 插话支持
+
+你可以[给仍在工作的运行插话](/mentioning-agents#给正在运行的智能体插话)，不必等下一轮。这需要 AI 编程工具支持，且版本不低于下表：
+
+| 工具 | 最低版本 |
+|---|---|
+| Antigravity | 1.4.8 |
+| Claude Code | 2.1.110 |
+| Codex | 0.100.0 |
+| Cursor Agent | 2026.10.14 |
+| Grok | 1.0.14 |
+| Kiro CLI | 2.33.0 |
+| Pi | 1.4.0 |
+
+其他工具或更低版本不会出现"插话到当前运行"：回复会在当前运行结束后作为新一轮处理，或者你停止当前运行、从头开始。
 
 ## 模型来源
 

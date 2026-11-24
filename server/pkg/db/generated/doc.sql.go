@@ -81,12 +81,12 @@ func (q *Queries) CreateDoc(ctx context.Context, arg CreateDocParams) (Doc, erro
 const createDocComment = `-- name: CreateDocComment :one
 INSERT INTO doc_comment (
     id, workspace_id, doc_id, parent_id, author_type, author_id, content,
-    anchor_quote, anchor_prefix, anchor_suffix
+    anchor_quote, anchor_prefix, anchor_suffix, source_task_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
-    $8, $9, $10
+    $8, $9, $10, $11
 )
-RETURNING id, workspace_id, doc_id, parent_id, author_type, author_id, content, anchor_quote, anchor_prefix, anchor_suffix, resolved_at, resolved_by_type, resolved_by_id, created_at, updated_at
+RETURNING id, workspace_id, doc_id, parent_id, author_type, author_id, content, anchor_quote, anchor_prefix, anchor_suffix, resolved_at, resolved_by_type, resolved_by_id, created_at, updated_at, source_task_id
 `
 
 type CreateDocCommentParams struct {
@@ -100,6 +100,7 @@ type CreateDocCommentParams struct {
 	AnchorQuote  string      `json:"anchor_quote"`
 	AnchorPrefix string      `json:"anchor_prefix"`
 	AnchorSuffix string      `json:"anchor_suffix"`
+	SourceTaskID pgtype.UUID `json:"source_task_id"`
 }
 
 func (q *Queries) CreateDocComment(ctx context.Context, arg CreateDocCommentParams) (DocComment, error) {
@@ -114,6 +115,7 @@ func (q *Queries) CreateDocComment(ctx context.Context, arg CreateDocCommentPara
 		arg.AnchorQuote,
 		arg.AnchorPrefix,
 		arg.AnchorSuffix,
+		arg.SourceTaskID,
 	)
 	var i DocComment
 	err := row.Scan(
@@ -132,6 +134,7 @@ func (q *Queries) CreateDocComment(ctx context.Context, arg CreateDocCommentPara
 		&i.ResolvedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SourceTaskID,
 	)
 	return i, err
 }
@@ -293,7 +296,7 @@ func (q *Queries) GetDocByIDForUpdate(ctx context.Context, id pgtype.UUID) (Doc,
 }
 
 const getDocComment = `-- name: GetDocComment :one
-SELECT id, workspace_id, doc_id, parent_id, author_type, author_id, content, anchor_quote, anchor_prefix, anchor_suffix, resolved_at, resolved_by_type, resolved_by_id, created_at, updated_at FROM doc_comment
+SELECT id, workspace_id, doc_id, parent_id, author_type, author_id, content, anchor_quote, anchor_prefix, anchor_suffix, resolved_at, resolved_by_type, resolved_by_id, created_at, updated_at, source_task_id FROM doc_comment
 WHERE id = $1 AND doc_id = $2 AND workspace_id = $3
 `
 
@@ -322,6 +325,7 @@ func (q *Queries) GetDocComment(ctx context.Context, arg GetDocCommentParams) (D
 		&i.ResolvedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SourceTaskID,
 	)
 	return i, err
 }
@@ -550,7 +554,7 @@ func (q *Queries) InsertDocVersion(ctx context.Context, arg InsertDocVersionPara
 }
 
 const listDocComments = `-- name: ListDocComments :many
-SELECT id, workspace_id, doc_id, parent_id, author_type, author_id, content, anchor_quote, anchor_prefix, anchor_suffix, resolved_at, resolved_by_type, resolved_by_id, created_at, updated_at FROM doc_comment
+SELECT id, workspace_id, doc_id, parent_id, author_type, author_id, content, anchor_quote, anchor_prefix, anchor_suffix, resolved_at, resolved_by_type, resolved_by_id, created_at, updated_at, source_task_id FROM doc_comment
 WHERE doc_id = $1 AND workspace_id = $2
 ORDER BY created_at, id
 `
@@ -585,6 +589,7 @@ func (q *Queries) ListDocComments(ctx context.Context, arg ListDocCommentsParams
 			&i.ResolvedByID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SourceTaskID,
 		); err != nil {
 			return nil, err
 		}
@@ -667,11 +672,14 @@ func (q *Queries) ListDocThreadParticipants(ctx context.Context, arg ListDocThre
 
 const listDocVersions = `-- name: ListDocVersions :many
 SELECT
-    doc_id, workspace_id, number, title, author_type, author_id, message, action,
-    action_ref, task_id, issue_id, contributors, created_at, updated_at
-FROM doc_version
-WHERE doc_id = $1
-ORDER BY number DESC
+    v.doc_id, v.workspace_id, v.number, v.title, v.author_type, v.author_id, v.message, v.action,
+    v.action_ref, v.task_id, v.issue_id, v.contributors, v.created_at, v.updated_at,
+    c.id AS doc_thread_id, COALESCE(c.anchor_quote, '')::text AS doc_thread_quote
+FROM doc_version v
+LEFT JOIN agent_task_queue t ON t.id = v.task_id
+LEFT JOIN doc_comment c ON c.id = t.doc_thread_id AND c.doc_id = v.doc_id AND c.parent_id IS NULL
+WHERE v.doc_id = $1
+ORDER BY v.number DESC
 LIMIT $2
 `
 
@@ -681,22 +689,26 @@ type ListDocVersionsParams struct {
 }
 
 type ListDocVersionsRow struct {
-	DocID        pgtype.UUID        `json:"doc_id"`
-	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
-	Number       int32              `json:"number"`
-	Title        string             `json:"title"`
-	AuthorType   string             `json:"author_type"`
-	AuthorID     pgtype.UUID        `json:"author_id"`
-	Message      string             `json:"message"`
-	Action       string             `json:"action"`
-	ActionRef    pgtype.Int4        `json:"action_ref"`
-	TaskID       pgtype.UUID        `json:"task_id"`
-	IssueID      pgtype.UUID        `json:"issue_id"`
-	Contributors []byte             `json:"contributors"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	DocID          pgtype.UUID        `json:"doc_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Number         int32              `json:"number"`
+	Title          string             `json:"title"`
+	AuthorType     string             `json:"author_type"`
+	AuthorID       pgtype.UUID        `json:"author_id"`
+	Message        string             `json:"message"`
+	Action         string             `json:"action"`
+	ActionRef      pgtype.Int4        `json:"action_ref"`
+	TaskID         pgtype.UUID        `json:"task_id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	Contributors   []byte             `json:"contributors"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	DocThreadID    pgtype.UUID        `json:"doc_thread_id"`
+	DocThreadQuote string             `json:"doc_thread_quote"`
 }
 
+// An edit an agent made while answering a discussion names that discussion
+// (through the run that made it), so history can link back to it.
 func (q *Queries) ListDocVersions(ctx context.Context, arg ListDocVersionsParams) ([]ListDocVersionsRow, error) {
 	rows, err := q.db.Query(ctx, listDocVersions, arg.DocID, arg.Limit)
 	if err != nil {
@@ -721,6 +733,8 @@ func (q *Queries) ListDocVersions(ctx context.Context, arg ListDocVersionsParams
 			&i.Contributors,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.DocThreadID,
+			&i.DocThreadQuote,
 		); err != nil {
 			return nil, err
 		}
@@ -999,7 +1013,7 @@ UPDATE doc_comment SET
     resolved_by_id = $3,
     updated_at = now()
 WHERE id = $4 AND doc_id = $5 AND workspace_id = $6 AND parent_id IS NULL
-RETURNING id, workspace_id, doc_id, parent_id, author_type, author_id, content, anchor_quote, anchor_prefix, anchor_suffix, resolved_at, resolved_by_type, resolved_by_id, created_at, updated_at
+RETURNING id, workspace_id, doc_id, parent_id, author_type, author_id, content, anchor_quote, anchor_prefix, anchor_suffix, resolved_at, resolved_by_type, resolved_by_id, created_at, updated_at, source_task_id
 `
 
 type SetDocCommentResolutionParams struct {
@@ -1038,6 +1052,7 @@ func (q *Queries) SetDocCommentResolution(ctx context.Context, arg SetDocComment
 		&i.ResolvedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SourceTaskID,
 	)
 	return i, err
 }

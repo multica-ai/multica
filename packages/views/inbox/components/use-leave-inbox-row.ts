@@ -35,36 +35,32 @@ export function collectBatchArchiveIds(
 
 /**
  * Leave the open notification for `next`, as every Inbox action on it does:
- * archiving, snoozing or unsubscribing it from the issue Inbox bar, its
- * sidebar row or that row's card, or a batch archive that takes it. The row
- * leaves its lists for good rather than staying in place (`keepOpenInboxRow`).
- * When nothing is left to open, navigates to the Inbox page to show the
- * Inbox Zero (or filtered-empty) state, carrying the cleared entry for inline
- * undo.
+ * archiving, snoozing or unsubscribing it from the Inbox bar, its sidebar row
+ * or that row's card, or a batch archive that takes it. The row leaves its
+ * lists for good rather than staying in place (`keepOpenInboxRow`). When
+ * nothing is left to open, the Inbox page shows the Inbox Zero (or
+ * filtered-empty) state, carrying the cleared entry for inline undo.
  */
 export function useLeaveInboxRow() {
   const wsId = useWorkspaceId();
   const p = useWorkspacePaths();
   const { push } = useNavigation();
   const leaveRow = useInboxSelectionStore((s) => s.leaveRow);
-  const rememberSidebarIssue = useInboxSelectionStore((s) => s.rememberSidebarIssue);
   const recordLastCleared = useInboxSelectionStore((s) => s.recordLastCleared);
   const recordTransition = useInboxSelectionStore((s) => s.recordTransition);
   return useCallback(
     (key: string, next: InboxItem | null, cleared?: LastInboxCleared) => {
       leaveRow(wsId, key);
       if (!next) {
-        rememberSidebarIssue(wsId, null);
         recordTransition(wsId, "", "next");
         if (cleared) recordLastCleared(wsId, cleared);
         push(p.inbox());
         return;
       }
-      rememberSidebarIssue(wsId, next.issue_id ?? null);
       recordTransition(wsId, inboxRowKey(next), "next");
       push(inboxRowHref(p, next));
     },
-    [wsId, p, push, leaveRow, rememberSidebarIssue, recordLastCleared, recordTransition],
+    [wsId, p, push, leaveRow, recordLastCleared, recordTransition],
   );
 }
 

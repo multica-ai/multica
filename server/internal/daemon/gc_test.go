@@ -2021,7 +2021,7 @@ func TestCleanupNewRepoMaintenanceLocksPreservesPreexistingFiles(t *testing.T) {
 	if err := os.WriteFile(preexisting, []byte("existing"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	before := snapshotRepoMaintenanceLocks(barePath)
+	before := snapshotRepoMaintenanceArtifacts(barePath)
 
 	created := []string{
 		filepath.Join(barePath, "refs", "remotes", "origin", "main.lock"),
@@ -2045,7 +2045,7 @@ func TestCleanupNewRepoMaintenanceLocksPreservesPreexistingFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	d.cleanupNewRepoMaintenanceLocks(barePath, before)
+	d.cleanupNewRepoMaintenanceArtifacts(barePath, before)
 	for _, path := range created {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Errorf("new maintenance lock %s survived, stat error = %v", path, err)
@@ -2058,7 +2058,7 @@ func TestCleanupNewRepoMaintenanceLocksPreservesPreexistingFiles(t *testing.T) {
 	}
 }
 
-func TestPruneWorktreePreemptionCleansLocksBeforeTaskStarts(t *testing.T) {
+func TestPruneWorktreePreemptionCleansGitArtifactsBeforeTaskStarts(t *testing.T) {
 	if _, err := os.Stat("/bin/sh"); err != nil {
 		t.Skipf("requires a POSIX shell: %v", err)
 	}
@@ -2081,14 +2081,21 @@ func TestPruneWorktreePreemptionCleansLocksBeforeTaskStarts(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	packDir := filepath.Join(barePath, "objects", "pack")
+	newPack := filepath.Join(packDir, "tmp_pack_new")
+	existingPack := filepath.Join(packDir, "tmp_pack_existing")
+	if err := os.WriteFile(existingPack, []byte("existing"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	startedPath := filepath.Join(t.TempDir(), "maintenance-started")
 	binDir := t.TempDir()
 	fakeGit := filepath.Join(binDir, "git")
 	script := `#!/bin/sh
-if [ "$3" = "reflog" ] && [ "$4" = "expire" ]; then
+if [ "$3" = "gc" ]; then
   : > "$2/refs/remotes/origin/main.lock"
-  : > "$MULTICA_TEST_MAINTENANCE_STARTED"
+  : > "$2/objects/pack/tmp_pack_new"
   trap 'exit 143' TERM INT
+  : > "$MULTICA_TEST_MAINTENANCE_STARTED"
   while :; do sleep 1; done
 fi
 exec "$MULTICA_TEST_REAL_GIT" "$@"
@@ -2128,6 +2135,12 @@ exec "$MULTICA_TEST_REAL_GIT" "$@"
 	}
 	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
 		t.Fatalf("maintenance lock survived real task preemption, stat error = %v", err)
+	}
+	if _, err := os.Stat(newPack); !os.IsNotExist(err) {
+		t.Fatalf("new temporary pack survived task preemption, stat error = %v", err)
+	}
+	if contents, err := os.ReadFile(existingPack); err != nil || string(contents) != "existing" {
+		t.Fatalf("pre-existing temporary pack was changed: contents = %q, error = %v", contents, err)
 	}
 	if err := cache.Fetch(barePath); err != nil {
 		t.Fatalf("fetch did not recover after preempted maintenance cleanup: %v", err)
@@ -2592,6 +2605,12 @@ func TestGCMetaForTask(t *testing.T) {
 			task: Task{ID: "t4", WorkspaceID: "ws", QuickCreatePrompt: "do the thing"},
 			want: execenv.GCKindQuickCreate,
 			idOK: func(m execenv.GCMeta) bool { return m.TaskID == "t4" },
+		},
+		{
+			name: "doc discussion task",
+			task: Task{ID: "t6", WorkspaceID: "ws", DocID: "d1"},
+			want: execenv.GCKindDoc,
+			idOK: func(m execenv.GCMeta) bool { return m.DocID == "d1" },
 		},
 		{
 			name: "chat wins over issue when both set (defensive ordering)",

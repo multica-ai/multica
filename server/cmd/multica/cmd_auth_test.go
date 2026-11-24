@@ -482,6 +482,12 @@ func TestRunAuthStatusTaskContextRequiresTaskToken(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "task-scoped mat_ token") {
 				t.Fatalf("runAuthStatus error = %v, want task token requirement", err)
 			}
+			if wantHint := tc.token != ""; strings.Contains(err.Error(), "--preserve-env=MULTICA_TOKEN") != wantHint {
+				t.Fatalf("runAuthStatus error = %v, want secrets manager hint = %v", err, wantHint)
+			}
+			if tc.token != "" && strings.Contains(err.Error(), tc.token) {
+				t.Fatalf("runAuthStatus error leaked the token: %v", err)
+			}
 			if requestCount != 0 {
 				t.Fatalf("auth status made %d request(s) without a task token", requestCount)
 			}

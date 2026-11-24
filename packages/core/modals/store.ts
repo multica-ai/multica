@@ -11,6 +11,7 @@ type ModalType =
   | "issue-set-parent"
   | "issue-mark-duplicate"
   | "issue-add-child"
+  | "issue-add-blocker"
   | "project-add-issue"
   | "project-rename"
   | "issue-rename"

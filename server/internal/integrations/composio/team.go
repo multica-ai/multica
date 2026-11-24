@@ -229,10 +229,18 @@ func (s *Service) revokeUpstream(ctx context.Context, connectedAccountID string)
 	_ = s.sdk.DeleteConnectedAccount(ctx, connectedAccountID)
 }
 
-// ensureAuthConfig returns the toolkit's auth config, creating one with
-// Composio's managed app when the project has none and the toolkit offers
-// managed auth. This is what lets every catalog app connect without a
-// dashboard step.
+// customAuthCreator is the part of *sdk.Client that registers an auth config
+// whose credentials each member enters on the Connect Link page. It is
+// separate from ToolSDK so fakes written before it keep working.
+type customAuthCreator interface {
+	CreateCustomAuthConfig(ctx context.Context, toolkitSlug, authScheme, name string) (string, error)
+}
+
+// ensureAuthConfig returns the toolkit's auth config, creating one when the
+// project has none: with Composio's managed app when the toolkit offers one,
+// else with no credentials for a toolkit members connect with their own API
+// key, token, or Basic login. This is what lets every catalog app connect
+// without a dashboard step.
 func (s *Service) ensureAuthConfig(ctx context.Context, slug string) (string, error) {
 	id, err := s.authConfigForToolkit(ctx, slug)
 	if err != nil || id != "" {
@@ -249,7 +257,10 @@ func (s *Service) ensureAuthConfig(ctx context.Context, slug string) (string, er
 		}
 		return "", fmt.Errorf("composio: get toolkit: %w", err)
 	}
-	if len(tk.ComposioManagedAuthSchemes) == 0 {
+	managed := len(tk.ComposioManagedAuthSchemes) > 0
+	keyScheme := userKeyScheme(*tk)
+	creator, canCreateKeyConfigs := s.sdk.(customAuthCreator)
+	if !managed && (keyScheme == "" || !canCreateKeyConfigs) {
 		return "", ErrToolkitNotSupported
 	}
 	s.authCreateMu.Lock()
@@ -259,9 +270,20 @@ func (s *Service) ensureAuthConfig(ctx context.Context, slug string) (string, er
 	if id, err := s.authConfigForToolkit(ctx, slug); err != nil || id != "" {
 		return id, err
 	}
-	id, err = tools.CreateManagedAuthConfig(ctx, slug)
-	if err != nil {
-		return "", fmt.Errorf("composio: create managed auth config: %w", err)
+	if managed {
+		id, err = tools.CreateManagedAuthConfig(ctx, slug)
+		if err != nil {
+			return "", fmt.Errorf("composio: create managed auth config: %w", err)
+		}
+	} else {
+		name := tk.Name
+		if name == "" {
+			name = slug
+		}
+		id, err = creator.CreateCustomAuthConfig(ctx, slug, keyScheme, name)
+		if err != nil {
+			return "", fmt.Errorf("composio: create %s auth config: %w", keyScheme, err)
+		}
 	}
 	s.invalidateAuthConfigs()
 	return id, nil

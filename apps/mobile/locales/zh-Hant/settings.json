@@ -71,6 +71,8 @@
     "status_changes": "狀態變更",
     "comments": "評論",
     "comments_description": "你訂閱的任務有新評論時。",
+    "squad_handoffs": "包含小隊內部交接",
+    "squad_handoffs_description": "小隊隊長指派工作給成員、成員向隊長回報的評論。@ 提及、AI 代理執行失敗和需要關注的狀態照常通知。",
     "mentions": "提及",
     "mentions_description": "有人用 @ 提到你時，包括 @all 和 @squad。",
     "reactions": "表情回應",

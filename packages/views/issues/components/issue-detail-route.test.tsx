@@ -6,7 +6,6 @@ import { setApiInstance } from "@multica/core/api";
 import { ApiError } from "@multica/core/api/client";
 import type { ApiClient } from "@multica/core/api/client";
 import { inboxKeys } from "@multica/core/inbox/queries";
-import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import type { InboxItem } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider } from "../../navigation";
@@ -274,8 +273,7 @@ describe("IssueDetailSkeleton embedded layouts", () => {
     localStorage.removeItem(storageKey);
   });
 
-  it("reserves the 40px InboxBar slot with cached notification metadata while resolving from Inbox", () => {
-    useInboxSelectionStore.setState({ sidebarIssueByWorkspace: { "ws-1": "issue-42" } });
+  it("reserves no Inbox bar on the issue page, even for an issue in the Inbox", () => {
     const getIssue = vi.fn(() => new Promise<never>(() => {}));
     setApiInstance({ getIssue, getBaseUrl: () => "" } as unknown as ApiClient);
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
@@ -308,12 +306,9 @@ describe("IssueDetailSkeleton embedded layouts", () => {
       </QueryClientProvider>,
     );
 
-    expect(view.container.querySelector("[data-inbox-bar]")).not.toBeNull();
-    expect(view.getByText("MUL-42")).toBeInTheDocument();
-    expect(view.getByText("Keep Inbox chrome steady")).toHaveClass("text-display-sm", "font-semibold");
+    expect(view.container.querySelector("[data-inbox-bar]")).toBeNull();
 
     view.unmount();
     qc.clear();
-    useInboxSelectionStore.setState({ sidebarIssueByWorkspace: {} });
   });
 });

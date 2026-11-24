@@ -176,8 +176,8 @@ function CreateRunHint({
   return (
     <div
       className={cn(
-        "grid shrink-0 transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none",
-        ready ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+        "grid shrink-0 transition-[grid-template-rows,opacity] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+        ready ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
       )}
       aria-hidden={!ready}
     >
@@ -214,12 +214,34 @@ function WorkflowHandoffHint({ projectId, status }: { projectId?: string; status
   const handlerLabel = useStepHandlerLabel(project);
   const step = workflowStep(workflow, status);
   const label = handlerLabel(step);
-  if (!label) return null;
   const actor = stepHandlerActor(step, project);
+  const ready = Boolean(label);
+  const [shown, setShown] = useState<{ label: string; actor: ReturnType<typeof stepHandlerActor> } | null>(
+    label ? { label, actor } : null,
+  );
+  if (
+    label &&
+    (shown?.label !== label ||
+      shown.actor?.id !== actor?.id ||
+      shown.actor?.type !== actor?.type)
+  ) {
+    setShown({ label, actor });
+  }
+  if (!shown) return null;
   return (
-    <div aria-live="polite" className="flex items-center gap-1.5 px-4 pb-1 pt-0.5 text-micro text-muted-foreground">
-      {actor && <ActorAvatar actorType={actor.type} actorId={actor.id} size="sm" profileLink={false} />}
-      <span className="truncate">{t(($) => $.workflows.create_handoff_hint, { name: label })}</span>
+    <div
+      className={cn(
+        "grid shrink-0 transition-[grid-template-rows,opacity] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+        ready ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+      )}
+      aria-hidden={!ready}
+    >
+      <div className="overflow-hidden">
+        <div aria-live="polite" className="flex items-center gap-1.5 px-4 pb-1 pt-0.5 text-micro text-muted-foreground">
+          {shown.actor && <ActorAvatar actorType={shown.actor.type} actorId={shown.actor.id} size="sm" profileLink={false} />}
+          <span className="truncate">{t(($) => $.workflows.create_handoff_hint, { name: shown.label })}</span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1608,7 +1630,7 @@ export function manualDialogContentClass(isExpanded: boolean) {
   return cn(
     "p-0 gap-0 flex flex-col overflow-hidden",
     "!top-1/2 !left-1/2 !-translate-x-1/2",
-    "!transition-all !duration-300 !ease-out",
+    "[interpolate-size:allow-keywords] [transition-property:width,max-width,height] [transition-duration:200ms] [transition-timing-function:cubic-bezier(0.23,1,0.32,1)] motion-reduce:[transition-duration:0ms]",
     // Phone gutter — see the matching note in create-issue-dialog.tsx: the
     // `!important` widths below also override DialogContent's
     // `max-w-[calc(100%-2rem)]`, leaving the card edge to edge on a phone

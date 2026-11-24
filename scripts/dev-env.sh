@@ -1787,7 +1787,13 @@ cmd_up() {
 
   # No resident cleanup service is required: every future environment start is
   # a safe opportunity to collect expired or directory-less environments.
-  cmd_gc --auto
+  # An explicit lifecycle change applies to this checkout's existing
+  # environment, including an expired one. Keep it for the renewal below.
+  local gc_args=(--auto)
+  if [ "$lifecycle_requested" = 1 ]; then
+    gc_args+=(--keep-current-checkout)
+  fi
+  cmd_gc "${gc_args[@]}"
 
   step "Prerequisites"
   local missing=() tool needed="node go curl"
@@ -2159,11 +2165,12 @@ EOF
 # in psql: an environment whose directory is gone, or whose TTL has passed, has
 # no owner left to stop it.
 cmd_gc() {
-  local dry_run=0 automatic=0 name age_hours created_epoch expiry_epoch reason
+  local dry_run=0 automatic=0 keep_current_checkout=0 name age_hours created_epoch expiry_epoch reason
   while [ $# -gt 0 ]; do
     case "$1" in
       --dry-run) dry_run=1 ;;
       --auto) automatic=1 ;;
+      --keep-current-checkout) keep_current_checkout=1 ;;
       *) die "Unknown flag for gc: $1" ;;
     esac
     shift
@@ -2173,6 +2180,9 @@ cmd_gc() {
     [ -n "$name" ] || continue
     (
       load_manifest "$name"
+      if [ "$keep_current_checkout" = 1 ] && [ "$DIR" = "$REPO_ROOT" ]; then
+        exit 0
+      fi
       reason=""
       [ -d "$DIR" ] || reason="its checkout directory is gone"
       if [ -z "$reason" ] && [ "${TTL_HOURS:-0}" != 0 ]; then
