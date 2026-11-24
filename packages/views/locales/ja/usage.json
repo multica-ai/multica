@@ -133,5 +133,13 @@
   },
   "duration": {
     "less_than_minute": "1分未満"
+  },
+  "source": {
+    "title": "手動とオートパイロット",
+    "manual": "手動",
+    "autopilot": "オートパイロット",
+    "share": "オートパイロットの割合",
+    "autopilot_col": "オートパイロット",
+    "deleted_autopilot": "削除されたオートパイロット"
   }
 }

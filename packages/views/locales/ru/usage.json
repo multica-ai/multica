@@ -139,5 +139,13 @@
   },
   "duration": {
     "less_than_minute": "<1 мин"
+  },
+  "source": {
+    "title": "Вручную и автопилоты",
+    "manual": "Вручную",
+    "autopilot": "Автопилоты",
+    "share": "Доля автопилотов",
+    "autopilot_col": "Автопилот",
+    "deleted_autopilot": "Удалённый автопилот"
   }
 }

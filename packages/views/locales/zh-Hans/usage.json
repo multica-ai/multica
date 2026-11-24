@@ -133,5 +133,13 @@
   },
   "duration": {
     "less_than_minute": "<1分钟"
+  },
+  "source": {
+    "title": "手动与自动化",
+    "manual": "手动",
+    "autopilot": "自动化",
+    "share": "自动化占比",
+    "autopilot_col": "自动化",
+    "deleted_autopilot": "已删除的自动化"
   }
 }

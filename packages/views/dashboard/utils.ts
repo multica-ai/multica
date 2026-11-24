@@ -57,7 +57,7 @@ export interface DailyCostStack {
   total: number;
 }
 
-function formatDateLabel(d: string): string {
+export function formatDateLabel(d: string): string {
   // Anchor to local midnight so the formatted label matches the bucket the
   // server picked (which is already in workspace time). Pasting the raw
   // date as the body of `new Date()` would interpret it as UTC and shift

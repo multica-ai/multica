@@ -135,5 +135,13 @@
   },
   "duration": {
     "less_than_minute": "<1 min"
+  },
+  "source": {
+    "title": "Manual frente a automatización",
+    "manual": "Manual",
+    "autopilot": "Automatización",
+    "share": "Parte de automatizaciones",
+    "autopilot_col": "Automatización",
+    "deleted_autopilot": "Automatización eliminada"
   }
 }
