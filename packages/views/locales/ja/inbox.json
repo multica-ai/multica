@@ -65,6 +65,7 @@
   "detail": {
     "select_prompt": "詳細を表示する通知を選択してください",
     "restore": "インボックスに戻す",
+    "more_actions": "その他の通知操作",
     "original_input": "元の入力",
     "retry_with_context": "コンテキストを保持して再試行",
     "edit_advanced": "詳細フォームを開く",
@@ -146,11 +147,12 @@
     "archived": "アーカイブ済み",
     "leaves": "移動するとインボックスから外れます",
     "filtered": "フィルターに一致しなくなりました",
-    "notification_archived": "通知をアーカイブしました",
     "changed_status": "{{status}} に変更",
     "reassigned": "{{name}} に再割り当て",
     "unassigned": "割り当て解除",
     "ran_quick_action": "{{name}} を実行",
+    "agent_triggered": "エージェントを起動しました",
+    "returns_on_activity": "新しい動きがあるとインボックスに戻ります",
     "next": "次へ",
     "next_tooltip": "次を開く：{{title}}"
   },
@@ -179,6 +181,13 @@
     "issue_description": "このビューにあるこのタスクの通知は完全に削除されます。タスクと実行記録は残ります。",
     "cancel": "キャンセル",
     "active_issue_description": "このタスクに対する受信トレイのアクティブな通知を完全に削除します。これまでにアーカイブされた通知、タスク本体、および実行履歴は保持されます。"
+  },
+  "archive_all_dialog": {
+    "title": "すべての通知をアーカイブしますか？",
+    "description": "インボックスのアクティブな通知がすべてアーカイブに移動します。スヌーズ中の課題はそのまま維持され、いつでも復元できます。",
+    "description_count_other": "インボックスのアクティブな通知 {{count}} 件がすべてアーカイブに移動します。スヌーズ中の課題はそのまま維持され、いつでも復元できます。",
+    "cancel": "キャンセル",
+    "confirm": "すべてアーカイブ"
   },
   "unsubscribe": {
     "title": "購読を解除してアーカイブします。このタスクの更新は届かなくなりますが、@メンションは引き続き通知されます。",
@@ -234,8 +243,6 @@
     "just_unsubscribed": "{{label}} の購読を解除してアーカイブしました",
     "just_archived_many_other": "{{count}} 件の通知をアーカイブしました",
     "snoozed_summary_other": "スヌーズ中 {{count}} 件 · 最短 {{time}} に復帰",
-    "bar_snoozed_other": "スヌーズ中 {{count}} 件",
-    "go_to_my_work": "自分の作業へ",
     "filtered_title": "このフィルターの通知はすべて処理済みです",
     "filtered_remaining_other": "インボックスに他の通知が {{count}} 件あります",
     "clear_and_continue": "フィルターを解除して続ける",

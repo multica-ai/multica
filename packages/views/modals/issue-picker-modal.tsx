@@ -28,6 +28,7 @@ export interface IssuePickerSuggestionGroup {
 interface IssuePickerModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onOpenChangeComplete?: (open: boolean) => void;
   title: string;
   description: string;
   excludeIds: string[];
@@ -41,6 +42,7 @@ interface IssuePickerModalProps {
 export function IssuePickerModal({
   open,
   onOpenChange,
+  onOpenChangeComplete,
   title,
   description,
   excludeIds,
@@ -65,9 +67,8 @@ export function IssuePickerModal({
 
   useEffect(() => {
     if (!open) {
-      setQuery("");
-      setResults([]);
-      setIsLoading(false);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (abortRef.current) abortRef.current.abort();
     }
   }, [open]);
 
@@ -132,6 +133,14 @@ export function IssuePickerModal({
     <CommandDialog
       open={open}
       onOpenChange={onOpenChange}
+      onOpenChangeComplete={(nextOpen) => {
+        if (!nextOpen) {
+          setQuery("");
+          setResults([]);
+          setIsLoading(false);
+        }
+        onOpenChangeComplete?.(nextOpen);
+      }}
       title={title}
       description={description}
     >

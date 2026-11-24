@@ -114,10 +114,13 @@ import type {
   RuntimeUsageByHour,
   DashboardUsageDaily,
   DashboardUsageByAgent,
+  DashboardUsageBySquad,
   DashboardAgentRunTime,
+  DashboardSquadRunTime,
   DashboardRunTimeDaily,
   DashboardFailureDaily,
   DashboardFailureByAgent,
+  DashboardFailureBySquad,
   RuntimeUpdate,
   RuntimeModelListRequest,
   RuntimeLocalSkillListRequest,
@@ -364,10 +367,13 @@ import {
   EMPTY_AGENT_BUILDER_SESSION_LIST,
   agentBuilderRuntimeSwitchFallback,
   DashboardAgentRunTimeListSchema,
+  DashboardSquadRunTimeListSchema,
   DashboardRunTimeDailyListSchema,
   DashboardFailureDailyListSchema,
   DashboardFailureByAgentListSchema,
+  DashboardFailureBySquadListSchema,
   DashboardUsageByAgentListSchema,
+  DashboardUsageBySquadListSchema,
   DashboardUsageDailyListSchema,
   EMPTY_APP_CONFIG,
   EMPTY_ATTACHMENT,
@@ -706,6 +712,7 @@ export function parseDashboardHistoryLimit(value: string | null): number | null 
 export interface DashboardRequestParams {
   days?: number;
   project_id?: string | null;
+  squad_id?: string | null;
   tz?: string;
   onHistoryLimit?: (limitDays: number | null) => void;
 }
@@ -3164,6 +3171,7 @@ export class ApiClient {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
+    if (params.squad_id) search.set("squad_id", params.squad_id);
     if (params.tz) search.set("tz", params.tz);
     const res = await this.fetchRaw(`${path}?${search}`, {
       extraHeaders: { "Content-Type": "application/json" },
@@ -3226,6 +3234,33 @@ export class ApiClient {
       params,
       DashboardFailureByAgentListSchema,
       "GET /api/dashboard/failures/by-agent",
+    );
+  }
+
+  async getDashboardUsageBySquad(params: DashboardRequestParams): Promise<DashboardUsageBySquad[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/usage/by-squad",
+      params,
+      DashboardUsageBySquadListSchema,
+      "GET /api/dashboard/usage/by-squad",
+    );
+  }
+
+  async getDashboardSquadRunTime(params: DashboardRequestParams): Promise<DashboardSquadRunTime[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/squad-runtime",
+      params,
+      DashboardSquadRunTimeListSchema,
+      "GET /api/dashboard/squad-runtime",
+    );
+  }
+
+  async getDashboardFailuresBySquad(params: DashboardRequestParams): Promise<DashboardFailureBySquad[]> {
+    return this.fetchDashboardRows(
+      "/api/dashboard/failures/by-squad",
+      params,
+      DashboardFailureBySquadListSchema,
+      "GET /api/dashboard/failures/by-squad",
     );
   }
 

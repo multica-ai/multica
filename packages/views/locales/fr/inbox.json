@@ -67,6 +67,7 @@
   "detail": {
     "select_prompt": "Sélectionnez une notification pour afficher les détails",
     "restore": "Remettre dans la boîte de réception",
+    "more_actions": "Autres actions sur la notification",
     "original_input": "Saisie d'origine",
     "retry_with_context": "Réessayer avec le contexte",
     "edit_advanced": "Ouvrir le formulaire complet",
@@ -149,11 +150,12 @@
     "archived": "Archivée",
     "leaves": "Quitte la boîte de réception quand vous passez à la suite",
     "filtered": "Ne correspond plus à vos filtres",
-    "notification_archived": "Notification archivée",
     "changed_status": "Statut passé à {{status}}",
     "reassigned": "Réassigné à {{name}}",
     "unassigned": "Désassigné",
     "ran_quick_action": "Action lancée : {{name}}",
+    "agent_triggered": "Agent déclenché",
+    "returns_on_activity": "Revient dans la boîte de réception en cas de nouvelle activité",
     "next": "Suivante",
     "next_tooltip": "Ouvrir la suivante : {{title}}"
   },
@@ -182,6 +184,14 @@
     "issue_description": "Les notifications de cette tâche dans cette vue seront supprimées définitivement. La tâche et ses exécutions seront conservées.",
     "cancel": "Annuler",
     "active_issue_description": "Cette action supprime définitivement les notifications actives de la boîte de réception pour cette tâche. Les notifications précédemment archivées, la tâche et ses exécutions sont conservées."
+  },
+  "archive_all_dialog": {
+    "title": "Tout archiver ?",
+    "description": "Toutes les notifications actives de votre boîte de réception seront déplacées dans Archivées. Les tickets reportés restent reportés et vous pouvez restaurer les notifications à tout moment.",
+    "description_count_one": "{{count}} notification active de votre boîte de réception sera déplacée dans Archivées. Les tickets reportés restent reportés et vous pouvez la restaurer à tout moment.",
+    "description_count_other": "Les {{count}} notifications actives de votre boîte de réception seront déplacées dans Archivées. Les tickets reportés restent reportés et vous pouvez les restaurer à tout moment.",
+    "cancel": "Annuler",
+    "confirm": "Tout archiver"
   },
   "unsubscribe": {
     "title": "Se désabonner et archiver. Ses mises à jour ne vous parviendront plus ; les @mentions, si.",
@@ -241,9 +251,6 @@
     "just_archived_many_other": "{{count}} notifications archivées",
     "snoozed_summary_one": "{{count}} reportée · retour {{time}}",
     "snoozed_summary_other": "{{count}} reportées · prochain retour {{time}}",
-    "bar_snoozed_one": "{{count}} reportée",
-    "bar_snoozed_other": "{{count}} reportées",
-    "go_to_my_work": "Aller à Mon travail",
     "filtered_title": "Tout est traité pour ce filtre",
     "filtered_remaining_one": "{{count}} autre notification dans votre boîte de réception",
     "filtered_remaining_other": "{{count}} autres notifications dans votre boîte de réception",

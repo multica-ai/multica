@@ -439,6 +439,18 @@
         "label": "Snooze notification",
         "description": "Snooze the open inbox issue, or bring it back now if it is snoozed."
       },
+      "markInboxUnread": {
+        "label": "Mark notification unread",
+        "description": "Toggle read or unread on the open inbox notification without leaving it."
+      },
+      "nextInboxItem": {
+        "label": "Next notification",
+        "description": "Open the next notification in the active inbox list."
+      },
+      "prevInboxItem": {
+        "label": "Previous notification",
+        "description": "Open the previous notification in the active inbox list."
+      },
       "undoInboxAction": {
         "label": "Undo inbox action",
         "description": "Undo the last archive, snooze or unsubscribe while its toast shows; after that, put back the open notification once it is archived, or what Inbox cleared names."
@@ -888,10 +900,6 @@
         "dates": "Change dates",
         "labels": "Change labels"
       },
-      "after_label": "After archiving",
-      "after_description": "When the notification you're reading is archived this way. Archiving by hand (E) still opens the next one.",
-      "after_stay": "Stay on the issue",
-      "after_next": "Open the next one",
       "archived_label": "Archived notifications",
       "archived_description": "Find them again and unarchive them",
       "archived_action": "View archived"
@@ -909,6 +917,10 @@
       "comments": {
         "label": "Comments",
         "description": "New comments on issues you follow"
+      },
+      "squad_handoffs": {
+        "label": "Include squad handoffs",
+        "description": "Comments a squad's leader and agents pass work to each other with. @mentions of you, failed agent runs and statuses that need attention still arrive."
       },
       "mentions": {
         "label": "Mentions",

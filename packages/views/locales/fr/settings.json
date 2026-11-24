@@ -439,6 +439,18 @@
         "label": "Reporter la notification",
         "description": "Reporte la tâche ouverte depuis la boîte de réception, ou la fait revenir si elle est reportée."
       },
+      "markInboxUnread": {
+        "label": "Marquer la notification comme non lue",
+        "description": "Bascule l'état lu ou non lu de la notification ouverte sans la quitter."
+      },
+      "nextInboxItem": {
+        "label": "Notification suivante",
+        "description": "Ouvre la notification suivante dans la liste active de la boîte de réception."
+      },
+      "prevInboxItem": {
+        "label": "Notification précédente",
+        "description": "Ouvre la notification précédente dans la liste active de la boîte de réception."
+      },
       "undoInboxAction": {
         "label": "Annuler l'action de la boîte de réception",
         "description": "Annule le dernier archivage, report ou désabonnement tant que son message s'affiche ; ensuite, restaure la notification ouverte une fois archivée ou ce qu'indique Boîte de réception vide."
@@ -888,10 +900,6 @@
         "dates": "Changer les dates",
         "labels": "Changer les libellés"
       },
-      "after_label": "Après l'archivage",
-      "after_description": "Quand la notification que vous lisez est archivée ainsi. Archiver à la main (E) ouvre toujours la suivante.",
-      "after_stay": "Rester sur la tâche",
-      "after_next": "Ouvrir la suivante",
       "archived_label": "Notifications archivées",
       "archived_description": "Retrouvez-les et désarchivez-les",
       "archived_action": "Voir les archivées"
@@ -909,6 +917,10 @@
       "comments": {
         "label": "Commentaires",
         "description": "Nouveaux commentaires sur les tâches que vous suivez"
+      },
+      "squad_handoffs": {
+        "label": "Inclure les passations de squad",
+        "description": "Commentaires par lesquels le chef et les agents d'un squad se transmettent le travail. Les @mentions, les exécutions d'agent échouées et les statuts qui nécessitent votre attention vous parviennent toujours."
       },
       "mentions": {
         "label": "Mentions",

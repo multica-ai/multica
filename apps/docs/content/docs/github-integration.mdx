@@ -82,7 +82,7 @@ Resolves MUL-123
 
 A bare mention in the body, such as `Related to MUL-123`, doesn't link the PR at all. Commit messages and PR comments don't trigger linking either.
 
-You can also link a PR by hand: in the issue's **Pull requests** block, click **+** and paste the PR URL. To take a PR off an issue, open the **⋯** menu on its row and choose **Remove from issue**; Multica won't link it again from its title or branch.
+You can also link a PR by hand: in the issue's **Pull requests** block, click **+** and paste the PR URL. While the issue has no PRs, the block is hidden: use the **Add …** row at the bottom of the sidebar instead, such as **Add pull request** or **Add wakeup or pull request**. To take a PR off an issue, open the **⋯** menu on its row and choose **Remove from issue**; Multica won't link it again from its title or branch.
 
 ## View PRs on an issue
 
@@ -90,13 +90,13 @@ Once linked, PRs appear in the **Pull requests** block of issue detail. Each ent
 
 - repository, number, title, and author;
 - `Open`, `Draft`, `Merged`, or `Closed` state;
-- added and deleted lines and the number of changed files;
+- added and deleted lines and the number of changed files, when you hover the row;
 - CI status: all passed (with a count), some failed (naming the failing checks), or some in progress; PRs with no checks configured don't show this item, and "no checks" is never treated as passing;
 - mergeability: mergeable (only when GitHub reports a clean merge state), conflicting, blocked, or behind.
 
 CI status and mergeability come from snapshots Multica pulls from the GitHub API, and the two are independent; merged or closed PRs no longer show either. When GitHub is temporarily unavailable, the card keeps the last snapshot and marks it stale.
 
-Under the list, one line says what happens next: for example *Moves to Done when #19 merges*, or which PR closed without merging. There's no line when the workspace leaves status alone or the issue already has the target status.
+Under the list, one line says what happens next: for example *Moves to Done when #19 merges*, or which PR closed without merging. When a single PR is waiting to merge, its row says it instead: *On merge → Done*. There's no line when the workspace leaves status alone or the issue already has the target status.
 
 Click an entry to open the PR on GitHub. Turning off the **PR sidebar** only hides this block; it doesn't disconnect anything.
 

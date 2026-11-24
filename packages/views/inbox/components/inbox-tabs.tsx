@@ -105,7 +105,7 @@ export function InboxTabs({
             tabIndex={active ? 0 : -1}
             onClick={() => onSelect(id)}
             className={cn(
-              "flex items-center rounded-md outline-none transition-colors focus-visible:outline-2 focus-visible:outline-ring",
+              "flex items-center rounded-md outline-none transition-colors focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring",
               section ? "relative h-5 px-1" : "h-7 gap-1 px-2",
               // The open tab gives up width before the icons do; a label
               // still too long for the panel (Spanish, French) truncates.

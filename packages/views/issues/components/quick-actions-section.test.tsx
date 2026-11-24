@@ -126,7 +126,7 @@ describe("QuickActionsSection", () => {
 
   it("keeps the header free of create and settings buttons", () => {
     renderWithI18n(<QuickActionsSection issueId="i-1" />);
-    expect(screen.getByRole("button", { name: "Quick actions 1" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Quick actions" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "New quick action" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Quick actions options" })).not.toBeInTheDocument();
   });

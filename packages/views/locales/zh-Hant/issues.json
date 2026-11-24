@@ -488,7 +488,6 @@
     "section_parent_issue": "父任務",
     "section_pull_requests": "Pull Request",
     "section_metadata": "後設資料",
-    "section_details": "詳情",
     "sidebar_settings": {
       "open": "自訂側邊欄",
       "title": "側邊欄",
@@ -543,9 +542,6 @@
     "prop_project": "專案",
     "prop_labels": "標籤",
     "add_property_action": "新增欄位",
-    "prop_created_by": "建立者",
-    "prop_created": "建立時間",
-    "prop_updated": "更新時間",
     "activity_section": "動態",
     "subscribe": "訂閱",
     "unsubscribe": "取消訂閱",
@@ -570,8 +566,6 @@
     "quick_jump_label": "快捷跳轉",
     "description_nav_label": "任務描述",
     "sub_issues_nav_progress": "已完成 {{done}}/{{total}}",
-    "sub_issues_show_more_other": "再顯示 {{count}} 筆",
-    "sub_issues_show_less": "收合",
     "thread_nav_label": "快速跳轉到討論",
     "thread_nav_resolved_label": "{{title}}（已解決）",
     "thread_nav_reply_label": "{{author}}：{{title}}",
@@ -599,7 +593,27 @@
     "subscription_update_failed": "無法更新訂閱狀態，請重試。",
     "pull_requests_empty_title": "暫無關聯 PR。",
     "guest_readonly_note": "訪客可以查看和評論，不能修改任務屬性。",
-    "open_issue_page": "在任務頁開啟"
+    "open_issue_page": "在任務頁開啟",
+    "add_row": {
+      "wakeups": "新增喚醒",
+      "pull_requests": "新增 Pull Request",
+      "environments": "新增環境",
+      "wakeups_pull_requests": "新增喚醒或 Pull Request",
+      "wakeups_environments": "新增喚醒或環境",
+      "pull_requests_environments": "新增 Pull Request 或環境",
+      "all": "新增喚醒、Pull Request 或環境",
+      "menu": {
+        "wakeups": "喚醒",
+        "pull_requests": "Pull Request",
+        "environments": "環境"
+      }
+    },
+    "footer": {
+      "created": "{{creator}} 建立於 {{date}}",
+      "created_for": "{{creator}} 代表 {{requester}} 建立於 {{date}}",
+      "created_at": "建立於 {{time}}",
+      "updated_at": "更新於 {{time}}"
+    }
   },
   "timeline": {
     "loading": "載入中…",
@@ -891,8 +905,6 @@
     "summary_runs_other": "{{count}} 次執行",
     "open_timeline": "開啟時間線",
     "more_runs_other": "顯示其餘 {{count}} 次執行",
-    "strip_aria": "每次執行的費用——開啟執行時間線",
-    "strip_no_usage": "沒有用量記錄",
     "queued_count_other": "{{count}} 個排隊中"
   },
   "runs_timeline": {
@@ -1410,12 +1422,6 @@
       "badge": "系統",
       "title_stage": "當第 {{stage}} 階段的子任務全部結束時",
       "title_all": "當子任務全部結束時",
-      "wake_assignee": "喚醒負責人 {{name}}",
-      "remaining_other": "還差 {{count}} 個",
-      "blocked_backlog": "任務在待規劃中，暫不喚醒",
-      "blocked_member": "負責人是成員，會收到收件箱通知",
-      "blocked_none": "沒有 AI 代理負責人，不會喚醒",
-      "turned_off": "已在此任務上關閉",
       "target_title": "喚醒",
       "target_current": "負責人（當前 {{name}}）",
       "target_none": "負責人：AI 代理或小隊會被喚醒，成員會收到通知",
@@ -1430,14 +1436,19 @@
       "save_error": "無法儲存系統規則。",
       "default_on": "工作區預設開啟。",
       "default_off": "工作區預設關閉。",
-      "notify_member": "透過收件箱通知 {{name}}",
       "instruction": "喚醒後要做什麼",
       "instruction_edit": "編輯指令",
       "instruction_default": "此任務未設定，使用預設指令：",
       "instruction_placeholder": "留空則使用預設指令",
       "instruction_invalid": "指令長度不得超過 4,000 位元組。",
       "paused": "已暫停：{{reason}}",
-      "default_change": "修改預設值"
+      "default_change": "修改預設值",
+      "chip_wake": "結束後喚醒 {{name}}",
+      "chip_notify": "結束後通知 {{name}}",
+      "chip_assignee": "結束後喚醒負責人",
+      "chip_off": "結束後喚醒已關閉",
+      "blocked_backlog": "任務在待規劃中，暫不喚醒",
+      "blocked_none": "沒有 AI 代理負責人，不會喚醒"
     },
     "cond": {
       "status": "當狀態變為{{status}}時",
@@ -1510,7 +1521,14 @@
       "loop": "與其他喚醒規則互相觸發",
       "rate": "1 小時內觸發超過 12 次"
     },
-    "upcoming_other": "已開啟 {{count}} 條喚醒規則"
+    "upcoming_other": "已開啟 {{count}} 條喚醒規則",
+    "short": {
+      "at_time": "{{time}}",
+      "scheduled_time": "指定時間",
+      "hourly": "每小時",
+      "every_hours": "每 {{hours}} 小時",
+      "every_seconds": "每 {{seconds}} 秒"
+    }
   },
   "duplicates": {
     "banner_prefix": "重複於",
@@ -1545,7 +1563,8 @@
     "not_merged_action": "移除",
     "all_merged_to": "PR 均已合併。之後有新 PR 合併時會改為 {{status}}。",
     "issue_disabled": "此任務合併後不改狀態",
-    "issue_disabled_action": "恢復"
+    "issue_disabled_action": "恢復",
+    "on_merge_to": "合併後 → {{status}}"
   },
   "deliverables": {
     "section_title": "產物",

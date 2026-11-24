@@ -433,6 +433,18 @@
         "label": "延后通知",
         "description": "延后从收件箱打开的任务；已延后时让它现在回来。"
       },
+      "markInboxUnread": {
+        "label": "切换通知未读状态",
+        "description": "在当前打开的收件箱通知上切换已读或未读，不离开当前页面。"
+      },
+      "nextInboxItem": {
+        "label": "下一条通知",
+        "description": "打开当前收件箱列表中的下一条通知。"
+      },
+      "prevInboxItem": {
+        "label": "上一条通知",
+        "description": "打开当前收件箱列表中的上一条通知。"
+      },
       "undoInboxAction": {
         "label": "撤销收件箱操作",
         "description": "提示还在时，撤销上一次归档、延后或取消订阅；提示消失后，打开的通知已归档时把它放回收件箱，在\"收件箱已清空\"页撤销页面上写明的操作。"
@@ -878,10 +890,6 @@
         "dates": "改日期",
         "labels": "改标签"
       },
-      "after_label": "归档后",
-      "after_description": "正在看的通知被自动归档时。手动归档（E）照旧打开下一条。",
-      "after_stay": "停在当前任务",
-      "after_next": "打开下一条",
       "archived_label": "已归档的通知",
       "archived_description": "可以在这里找回并取消归档",
       "archived_action": "查看已归档"
@@ -899,6 +907,10 @@
       "comments": {
         "label": "评论",
         "description": "你订阅的任务有新评论时"
+      },
+      "squad_handoffs": {
+        "label": "包含小队内部交接",
+        "description": "小队队长给成员派活、成员向队长回报的评论。@你、智能体运行失败和需要人工关注的状态照常通知。"
       },
       "mentions": {
         "label": "提及",

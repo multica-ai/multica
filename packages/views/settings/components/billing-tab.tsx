@@ -16,6 +16,7 @@ import {
   RefreshCw,
 } from "@multica/ui/icons";
 import { ApiError, errorCode } from "@multica/core/api";
+import { prefersReducedMotion } from "@multica/core/appearance";
 import { autopilotQuotaUsageOptions } from "@multica/core/autopilots";
 import {
   useChangeWorkspacePlan,
@@ -133,10 +134,7 @@ function scrollToUpgrade() {
   const target = document.querySelector<HTMLElement>(
     `[${SETTINGS_ANCHOR_ATTR}="${UPGRADE_SECTION_ANCHOR}"]`,
   );
-  const reduceMotion =
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  target?.scrollIntoView?.({ block: "start", behavior: reduceMotion ? "auto" : "smooth" });
+  target?.scrollIntoView?.({ block: "start", behavior: prefersReducedMotion() ? "auto" : "smooth" });
 }
 const SEAT_PURCHASE_POLL_TIMEOUT_MS = 2 * 60_000;
 const SEAT_PURCHASE_PREVIEW_DEBOUNCE_MS = 800;

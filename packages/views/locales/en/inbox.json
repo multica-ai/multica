@@ -67,6 +67,7 @@
   "detail": {
     "select_prompt": "Select a notification to view details",
     "restore": "Move back to Inbox",
+    "more_actions": "More notification actions",
     "original_input": "Original input",
     "retry_with_context": "Retry with context",
     "edit_advanced": "Open full form",
@@ -149,11 +150,12 @@
     "archived": "Archived",
     "leaves": "Leaves the Inbox when you move on",
     "filtered": "No longer matches your filters",
-    "notification_archived": "Notification archived",
     "changed_status": "Changed to {{status}}",
     "reassigned": "Reassigned to {{name}}",
     "unassigned": "Unassigned",
     "ran_quick_action": "Ran {{name}}",
+    "agent_triggered": "Agent triggered",
+    "returns_on_activity": "Returns to Inbox on new activity",
     "next": "Next",
     "next_tooltip": "Open next: {{title}}"
   },
@@ -182,6 +184,14 @@
     "issue_description": "This permanently deletes the notifications for this issue in this view. The issue and its runs are kept.",
     "cancel": "Cancel",
     "active_issue_description": "This permanently deletes active inbox notifications for this issue. Previously archived notifications, the issue, and its runs are kept."
+  },
+  "archive_all_dialog": {
+    "title": "Archive all notifications?",
+    "description": "Every active notification in your inbox will move to Archived. Snoozed issues stay snoozed, and you can restore notifications anytime.",
+    "description_count_one": "{{count}} active notification in your inbox will move to Archived. Snoozed issues stay snoozed, and you can restore it anytime.",
+    "description_count_other": "All {{count}} active notifications in your inbox will move to Archived. Snoozed issues stay snoozed, and you can restore them anytime.",
+    "cancel": "Cancel",
+    "confirm": "Archive all"
   },
   "unsubscribe": {
     "title": "Unsubscribe and archive. Its updates stop reaching you; an @mention still does.",
@@ -241,9 +251,6 @@
     "just_archived_many_other": "Archived {{count}} notifications",
     "snoozed_summary_one": "{{count}} snoozed · returns {{time}}",
     "snoozed_summary_other": "{{count}} snoozed · next returns {{time}}",
-    "bar_snoozed_one": "{{count}} snoozed",
-    "bar_snoozed_other": "{{count}} snoozed",
-    "go_to_my_work": "Go to My work",
     "filtered_title": "All caught up for this filter",
     "filtered_remaining_one": "{{count}} other notification in your inbox",
     "filtered_remaining_other": "{{count}} other notifications in your inbox",

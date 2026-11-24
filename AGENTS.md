@@ -119,6 +119,7 @@ Workspace-scoped queries filter by `workspace_id`; membership gates access and `
 ## Web/Desktop UI Rules
 
 - For Button and Dialog usage, read `packages/ui/docs/button.md` and `packages/ui/docs/dialog.md`.
+- Before building or reviewing an interaction that changes layout (overlays, expand/collapse, list rows, drag and drop, content switches, selection indicators, value feedback), read `packages/ui/docs/motion.md`: tokens, reduced motion, where not to animate, and the shared primitives. Such a PR attaches a GIF and the frame-sampling results from `scripts/motion/capture.mjs`.
 - Prefer existing shadcn/Base UI primitives. Add components with `pnpm ui:add <component>`.
 - For `pnpm ui:add @reui/<name>`, decline overwrite prompts. Keep `REUI_LICENSE_KEY` in the environment, never in repo files. Adapt vendored primitives into `packages/ui/components/ui/` and compositions into `packages/views/`.
 - Import icons from `@multica/ui/icons`; no icon library is installed. If the icon you need is missing, draw it by following `.agents/skills/multica-icons/SKILL.md`. Do not substitute an inline SVG or an emoji. Rewrite icon imports in `ui:add` output before committing. Exception: proportional-width optical keycap glyphs live exclusively in `KBD_GLYPHS` inside `packages/ui/components/ui/kbd.tsx` and are only for `<Kbd>`.
@@ -132,6 +133,7 @@ Workspace-scoped queries filter by `workspace_id`; membership gates access and `
 - Give each behavior one canonical test layer: helper tests own parsing/state matrices; component tests cover wiring, accessibility, happy paths, and named regressions. Prefer a failing regression test before behavioral fixes.
 - DOM-free `.test.ts` files start with `// @vitest-environment node`; do not use it if it would silently switch the code under test to an SSR path.
 - Every workspace with jsdom suites loads `@multica/vitest-setup/web-storage` in its Vitest setup; do not add per-package `localStorage` shims.
+- A test that reads files outside its package and that package's workspace dependencies declares them as `$TURBO_ROOT$/...` in the package's `turbo.json` `tasks.test.inputs`, and in the CI path group that runs it (`.github/ci-paths.json`); otherwise CI replays a cached pass when only those files change. `scripts/check-test-cache-inputs.mjs` enforces this.
 - Views tests must not mock `next/*` or `react-router-dom`. Mock stores with their Zustand callable shape plus `getState`; mock API calls at `@multica/core/api`.
 - E2E setup/teardown uses `TestApiClient`.
 - DB-backed Go tests use `server/internal/testutil` fixtures (`dbfx.Issue`, `dbfx.Task`, `dbfx.Insert`) and `testutil.Call(h, req).Want(status).JSON(&out)`. Keep product assertions and case-specific diagnostics in the test, not fixture helpers.

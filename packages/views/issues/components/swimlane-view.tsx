@@ -54,6 +54,7 @@ import {
 import { sortIssues } from "../utils/sort";
 import { BUILT_IN_STATUS_ORDER, STATUS_CONFIG } from "@multica/core/issues/config";
 import { DraggableBoardCard, BoardCardContent } from "./board-card";
+import { createIssueDropAnimation, ISSUE_DRAG_OVERLAY_CLASS } from "./drag-drop-animation";
 import { StatusIcon } from "./status-icon";
 import { Button } from "@multica/ui/components/ui/button";
 import { StatusHeading } from "./status-heading";
@@ -990,6 +991,8 @@ function SwimLaneViewImpl({
   );
 
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
+  const skipDropAnimationRef = useRef(false);
+  const dropAnimation = useMemo(() => createIssueDropAnimation(skipDropAnimationRef), []);
   // The outer scroll box is the customScrollParent for the lane Virtuoso.
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
   const laneListRef = useRef<HTMLDivElement>(null);
@@ -1081,11 +1084,13 @@ function SwimLaneViewImpl({
   );
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
+    skipDropAnimationRef.current = false;
     isDraggingRef.current = true;
     const activeId = event.active.id as string;
     // Lane drags don't carry an Issue payload — clear the card overlay so
     // we don't show a stale card during a lane reorder.
     if (parseLaneId(activeId) !== null) {
+      skipDropAnimationRef.current = true;
       setActiveIssue(null);
       return;
     }
@@ -1189,7 +1194,10 @@ function SwimLaneViewImpl({
       isDraggingRef.current = false;
       setActiveIssue(null);
 
-      const reset = () => setLocalCells(cells);
+      const reset = () => {
+        skipDropAnimationRef.current = true;
+        setLocalCells(cells);
+      };
 
       if (!over) {
         reset();
@@ -1410,6 +1418,7 @@ function SwimLaneViewImpl({
   // localCells resyncing with the cache afterwards — see the same handler in
   // list-view for the touch path that makes this routine (MUL-6240).
   const handleDragCancel = useCallback(() => {
+    skipDropAnimationRef.current = true;
     isDraggingRef.current = false;
     setActiveIssue(null);
     setLocalCells(cells);
@@ -1577,9 +1586,9 @@ function SwimLaneViewImpl({
         </div>
       </div>
 
-      <DragOverlay dropAnimation={null}>
+      <DragOverlay dropAnimation={dropAnimation}>
         {activeIssue ? (
-          <div className="w-[280px] rotate-2 scale-105 cursor-grabbing opacity-90 shadow-lg shadow-black/10">
+          <div className={`w-[280px] ${ISSUE_DRAG_OVERLAY_CLASS}`}>
             <BoardCardContent
               issue={activeIssue}
               childProgress={childProgressMap.get(activeIssue.id)}
@@ -1665,7 +1674,7 @@ function DraggableSwimLane({
   }, 0);
 
   return (
-    <div ref={setNodeRef} style={style} className={`flex flex-col ${isDragging ? "opacity-50" : ""}`}>
+    <div ref={setNodeRef} style={style} className={`flex flex-col transition-opacity duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none ${isDragging ? "opacity-50" : ""}`}>
       {/* Non-interactive container — the inner collapse button and any
           ancillary links (e.g. open-parent) are independent controls so we
           don't nest an <a> inside a <button>. The drag listeners attach

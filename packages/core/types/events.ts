@@ -278,10 +278,18 @@ export interface InboxBatchArchivedPayload {
   issue_id?: string;
   /**
    * Why the server archived them on its own: "issue_status_terminal" when the
-   * recipient completed the issue, "actor_acted" when they commented on it,
-   * changed its status or reassigned it. Other values may appear; absent for user-requested batches.
+   * recipient completed the issue, or "actor_acted" when they triggered an
+   * agent, commented on it, changed its status, or reassigned it. Older clients
+   * (v0.12.0 and earlier) only recognize these two values, so agent-triggered
+   * auto-archives keep `reason: "actor_acted"` and pass `trigger: "agent_triggered"`.
+   * Other values may appear; absent for user-requested batches.
    */
   reason?: string;
+  /**
+   * Optional finer-grained trigger for newer clients when `reason` remains
+   * `"actor_acted"` for backward compatibility (e.g. `"agent_triggered"`).
+   */
+  trigger?: string;
 }
 
 export interface CommentCreatedPayload {

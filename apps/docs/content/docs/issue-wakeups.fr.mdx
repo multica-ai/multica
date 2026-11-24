@@ -15,7 +15,7 @@ La règle est enregistrée sur la tâche : rien ne tourne pendant l'attente. Les
 <Steps>
 <Step>
 
-Ouvrez la tâche et cliquez sur **+** à côté de **Réveils** dans la barre latérale.
+Ouvrez la tâche et cliquez sur **+** à côté de **Réveils** dans la barre latérale. Tant que la tâche n'a aucun réveil, la section est masquée : utilisez plutôt la ligne **Ajouter …** en bas de la barre latérale, par exemple **Ajouter un réveil** ou **Ajouter un réveil ou une pull request**.
 
 </Step>
 <Step>
@@ -99,7 +99,7 @@ La section Réveils de la barre latérale liste les règles de la tâche : la co
 
 | Action | Effet |
 |---|---|
-| Désactiver l'interrupteur | Arrête les réveils suivants et retire les exécutions pas encore démarrées. Une exécution déjà lancée continue ; arrêtez-la depuis le journal d'exécution si besoin. |
+| Désactiver l'interrupteur dans ses détails | Arrête les réveils suivants et retire les exécutions pas encore démarrées. Une exécution déjà lancée continue ; arrêtez-la depuis le journal d'exécution si besoin. |
 | **Réveiller maintenant** | Réveille l'agent une fois tout de suite, sans attendre la condition. |
 | Modifier l'instruction | Ne vaut que pour les réveils suivants ; une exécution en cours ne change pas. |
 | **Supprimer** | La règle ne réveille plus personne. Les exécutions pas encore démarrées sont retirées, celles qui ont démarré continuent. |
@@ -118,7 +118,7 @@ Pour voir tous les réveils de l'espace de travail, ouvrez **Auto** dans la barr
 
 ## Réveiller le parent quand les sous-tâches se terminent [#child-done]
 
-Quand une tâche a des sous-tâches, sa section Réveils affiche une règle marquée **Système**. Personne n'a besoin de la créer :
+Quand une tâche a des sous-tâches, une puce à côté de l'en-tête **Sous-tâches** affiche une règle marquée **Système**, par exemple « Réveille Lambda à la fin ». Cliquez dessus pour voir sa progression, son instruction et l'interrupteur qui la désactive pour cette tâche. Personne n'a besoin de la créer :
 
 - Quand toutes les sous-tâches d'une étape sont closes alors qu'une étape suivante attend, elle réveille l'assigné du parent, puis une fois encore quand toutes les sous-tâches sont closes. Des sous-tâches sans étape réveillent le parent une fois, à la clôture de la dernière.
 - Ajouter ou rouvrir une sous-tâche ne réveille personne, y compris une étape ajoutée après la clôture de toutes les autres : sortez-la de `backlog` pour la lancer, ou mentionnez l'assigné pour qu'il l'organise.

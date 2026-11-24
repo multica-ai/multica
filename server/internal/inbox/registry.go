@@ -117,6 +117,29 @@ func WithLegacyDefaults(prefs map[string]string) map[string]string {
 	return result
 }
 
+// SquadHandoffsPref narrows the comments group: "muted" drops the new_comment
+// rows the comment listener marked with SquadHandoffDetail, the agents of an
+// issue's squad handing work to each other (MUL-10008). Absent means "all".
+const SquadHandoffsPref = "squad_handoffs"
+
+// SquadHandoffDetail is the new_comment details key, set to "true", that
+// marks a squad handoff. Details values stay strings: clients parse them as
+// a string map and reject the whole Inbox list otherwise.
+const SquadHandoffDetail = "squad_handoff"
+
+// MutedSquadHandoff reports whether a member's parsed preferences drop this
+// new_comment row as a squad handoff.
+func MutedSquadHandoff(prefs map[string]string, notifType string, details []byte) bool {
+	if notifType != "new_comment" || prefs[SquadHandoffsPref] != "muted" || len(details) == 0 {
+		return false
+	}
+	var d map[string]any
+	if err := json.Unmarshal(details, &d); err != nil {
+		return false
+	}
+	return d[SquadHandoffDetail] == "true"
+}
+
 // Muted reports whether a member's parsed preferences mute notifType. nil
 // prefs, a member without a stored row, applies every group's default.
 func Muted(prefs map[string]string, notifType string) bool {

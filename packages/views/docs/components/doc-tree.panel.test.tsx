@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -57,4 +57,20 @@ it("renders the shared panel title and lights the open doc's nav row", () => {
     expect(link.getAttribute("aria-current")).toBeNull();
     expect(link.closest('[data-mc="nav-item"]')?.getAttribute("data-active")).toBe("false");
   }
+});
+
+it("folder row actions are siblings of the disclosure and never fold the folder", () => {
+  render(<QueryClientProvider client={qc}><I18nProvider locale="en" resources={{ en: { docs: enDocs } }}><DocTree /></I18nProvider></QueryClientProvider>);
+
+  const toggle = screen.getByRole("button", { name: "Specs" });
+  const more = screen.getByRole("button", { name: "More actions for Specs" });
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(toggle.contains(more)).toBe(false);
+
+  fireEvent.click(more);
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(screen.getByRole("link", { name: "Inside" })).toBeTruthy();
+
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
 });

@@ -65,6 +65,7 @@
   "detail": {
     "select_prompt": "选择一条通知查看详情",
     "restore": "移回收件箱",
+    "more_actions": "更多通知操作",
     "original_input": "原始输入",
     "retry_with_context": "保留上下文重试",
     "edit_advanced": "在完整表单中编辑",
@@ -146,11 +147,12 @@
     "archived": "已归档",
     "leaves": "离开后移出收件箱",
     "filtered": "不再符合筛选",
-    "notification_archived": "通知已归档",
     "changed_status": "已改为{{status}}",
     "reassigned": "已改派给 {{name}}",
     "unassigned": "已取消分配",
     "ran_quick_action": "已运行 {{name}}",
+    "agent_triggered": "已触发智能体",
+    "returns_on_activity": "有新动态时会回到收件箱",
     "next": "下一条",
     "next_tooltip": "打开下一条：{{title}}"
   },
@@ -179,6 +181,13 @@
     "issue_description": "当前视图中此任务的通知将被永久删除，任务和运行记录不受影响。",
     "cancel": "取消",
     "active_issue_description": "此任务在收件箱中的通知将被永久删除，此前归档的通知、任务本身及运行记录均不受影响。"
+  },
+  "archive_all_dialog": {
+    "title": "归档全部通知？",
+    "description": "收件箱中的所有活跃通知都会移至已归档。已延后的任务会保持延后，你随时可以恢复通知。",
+    "description_count_other": "收件箱中的全部 {{count}} 条活跃通知都会移至已归档。已延后的任务会保持延后，你随时可以恢复它们。",
+    "cancel": "取消",
+    "confirm": "归档全部"
   },
   "unsubscribe": {
     "title": "取消订阅并归档：不再收到它的订阅通知，@你时仍会通知",
@@ -234,8 +243,6 @@
     "just_unsubscribed": "已取消订阅并归档 {{label}}",
     "just_archived_many_other": "已归档 {{count}} 条通知",
     "snoozed_summary_other": "{{count}} 条延后通知 · 最早 {{time}} 回来",
-    "bar_snoozed_other": "{{count}} 条已延后",
-    "go_to_my_work": "前往我的工作",
     "filtered_title": "当前筛选下的通知已处理完",
     "filtered_remaining_other": "收件箱里还有 {{count}} 条其他通知待处理",
     "clear_and_continue": "清除筛选，继续处理",

@@ -8,7 +8,11 @@
   "filter": {
     "project_label": "プロジェクト",
     "all_projects": "すべてのプロジェクト",
-    "period_label": "期間"
+    "period_label": "期間",
+    "attribution_label": "帰属",
+    "all_attribution": "すべての帰属",
+    "standalone_only": "単独エージェントのみ",
+    "squads_group": "Squad"
   },
   "history_limit": {
     "note": "現在のプランでは直近 {{days}} 日を表示できます。アップグレードするとそれ以前のデータも表示できます。データは削除されません。",
@@ -27,7 +31,9 @@
     "run_time_label": "実行時間 · {{days}}日",
     "run_time_hint": "{{tasks}} 件の実行全体",
     "tasks_label": "実行 · {{days}}日",
-    "tasks_hint": "{{failed}} 件失敗"
+    "tasks_hint": "{{failed}} 件失敗",
+    "cost_squad_hint": "{{name}} 全体（委任メンバー含む）",
+    "cost_squad_share_hint": "Squad 経由 {{cost}}（{{pct}}%）"
   },
   "dim": {
     "label": "間隔",
@@ -90,7 +96,8 @@
     "show_reasons": "エラーコードを表示",
     "hide_reasons": "エラーコードを隠す",
     "show_all": "全 {{count}} 件を表示",
-    "show_less": "上位 {{count}} 件のみ"
+    "show_less": "上位 {{count}} 件のみ",
+    "by_squad": "Squad 別エラー"
   },
   "leaderboard": {
     "title": "リーダーボード",
@@ -109,7 +116,19 @@
     "usage_totals_pending": "使用量を集計しています",
     "show_all": "すべて表示",
     "show_less": "上位 {{count}} 件のみ",
-    "no_data": "この期間にエージェントの活動はありません。"
+    "no_data": "この期間にエージェントの活動はありません。",
+    "group_label": "ランキングのグループ化",
+    "group_agent": "エージェント",
+    "group_squad": "Squad",
+    "header_squad": "Squad / 帰属",
+    "squad_caption": "{{count}} Squad",
+    "squad_caption_with_standalone": "{{count}} Squad・単独含む",
+    "squad_members_title": "{{name}} のメンバー内訳",
+    "squad_members_count": "{{count}} メンバー参加",
+    "standalone_agents": "単独エージェント（Squad 外）",
+    "standalone_agents_hint": "直接メンションまたは割当・{{count}} エージェント",
+    "deleted_squads": "削除済み Squad",
+    "toggle_squad_members": "{{name}} のメンバー内訳を切り替え"
   },
   "empty": {
     "title": "まだ使用量はありません",

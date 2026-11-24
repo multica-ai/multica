@@ -488,7 +488,6 @@
     "section_parent_issue": "상위 태스크",
     "section_pull_requests": "Pull requests",
     "section_metadata": "메타데이터",
-    "section_details": "세부 정보",
     "sidebar_settings": {
       "open": "사이드바 사용자 지정",
       "title": "사이드바",
@@ -543,9 +542,6 @@
     "prop_project": "프로젝트",
     "prop_labels": "라벨",
     "add_property_action": "속성 추가",
-    "prop_created_by": "생성자",
-    "prop_created": "생성일",
-    "prop_updated": "수정일",
     "activity_section": "활동",
     "subscribe": "구독",
     "unsubscribe": "구독 해제",
@@ -572,8 +568,6 @@
     "quick_jump_label": "빠른 탐색",
     "description_nav_label": "태스크 설명",
     "sub_issues_nav_progress": "{{done}}/{{total}} 완료",
-    "sub_issues_show_more_other": "{{count}}개 더 보기",
-    "sub_issues_show_less": "접기",
     "thread_nav_label": "스레드로 이동",
     "thread_nav_resolved_label": "{{title}} (해결됨)",
     "thread_nav_reply_label": "{{author}}: {{title}}",
@@ -599,7 +593,27 @@
     "workdir_path_unavailable": "아직 로컬 작업 디렉터리가 없습니다 — 이 태스크는 아직 로컬 에이전트에서 실행되지 않았습니다",
     "pull_requests_empty_title": "연결된 PR이 없습니다.",
     "guest_readonly_note": "게스트는 보고 댓글을 남길 수 있지만 작업 속성은 바꿀 수 없습니다.",
-    "open_issue_page": "태스크 페이지에서 열기"
+    "open_issue_page": "태스크 페이지에서 열기",
+    "add_row": {
+      "wakeups": "깨우기 추가",
+      "pull_requests": "Pull request 추가",
+      "environments": "환경 추가",
+      "wakeups_pull_requests": "깨우기 또는 Pull request 추가",
+      "wakeups_environments": "깨우기 또는 환경 추가",
+      "pull_requests_environments": "Pull request 또는 환경 추가",
+      "all": "깨우기, Pull request 또는 환경 추가",
+      "menu": {
+        "wakeups": "깨우기",
+        "pull_requests": "Pull request",
+        "environments": "환경"
+      }
+    },
+    "footer": {
+      "created": "{{creator}} 님이 {{date}}에 생성",
+      "created_for": "{{creator}} 님이 {{requester}} 님을 대신해 {{date}}에 생성",
+      "created_at": "생성: {{time}}",
+      "updated_at": "업데이트: {{time}}"
+    }
   },
   "timeline": {
     "loading": "불러오는 중...",
@@ -891,8 +905,6 @@
     "summary_runs_other": "실행 {{count}}회",
     "open_timeline": "타임라인 열기",
     "more_runs_other": "{{count}}개 더 보기",
-    "strip_aria": "실행별 비용 — 실행 타임라인 열기",
-    "strip_no_usage": "사용량 기록 없음",
     "queued_count_other": "{{count}}개 대기 중"
   },
   "runs_timeline": {
@@ -1410,12 +1422,6 @@
       "badge": "시스템",
       "title_stage": "{{stage}}단계 하위 태스크가 모두 끝나면",
       "title_all": "하위 태스크가 모두 끝나면",
-      "wake_assignee": "담당자 {{name}} 깨우기",
-      "remaining_other": "{{count}}개 남음",
-      "blocked_backlog": "백로그 상태라 지금은 깨우지 않음",
-      "blocked_member": "담당자가 멤버라 받은편지함으로 알립니다",
-      "blocked_none": "에이전트 담당자가 없어 깨우지 않음",
-      "turned_off": "이 태스크에서 꺼짐",
       "target_title": "깨울 대상",
       "target_current": "담당자 (현재 {{name}})",
       "target_none": "담당자: 에이전트나 스쿼드는 깨우고, 멤버에게는 알립니다",
@@ -1430,14 +1436,19 @@
       "save_error": "시스템 규칙을 저장할 수 없습니다.",
       "default_on": "워크스페이스 기본값은 켜짐입니다.",
       "default_off": "워크스페이스 기본값은 꺼짐입니다.",
-      "notify_member": "받은편지함으로 {{name}}에게 알림",
       "instruction": "깨운 뒤 할 일",
       "instruction_edit": "지시 편집",
       "instruction_default": "이 태스크에는 설정되지 않아 기본 지시를 사용합니다:",
       "instruction_placeholder": "비워 두면 기본 지시를 사용합니다",
       "instruction_invalid": "지침은 4,000바이트 미만이어야 합니다.",
       "paused": "일시 중지됨: {{reason}}",
-      "default_change": "기본값 변경"
+      "default_change": "기본값 변경",
+      "chip_wake": "모두 끝나면 {{name}} 깨우기",
+      "chip_notify": "모두 끝나면 {{name}}에게 알림",
+      "chip_assignee": "모두 끝나면 담당자 깨우기",
+      "chip_off": "완료 후 깨우기 꺼짐",
+      "blocked_backlog": "백로그 상태라 지금은 깨우지 않음",
+      "blocked_none": "에이전트 담당자가 없어 깨우지 않음"
     },
     "cond": {
       "status": "상태가 {{status}}(으)로 바뀌면",
@@ -1510,7 +1521,14 @@
       "loop": "다른 규칙과 서로 깨우고 있었습니다",
       "rate": "1시간에 12회 넘게 실행됨"
     },
-    "upcoming_other": "활성 깨우기 규칙 {{count}}개"
+    "upcoming_other": "활성 깨우기 규칙 {{count}}개",
+    "short": {
+      "at_time": "{{time}}",
+      "scheduled_time": "지정 시간",
+      "hourly": "매시간",
+      "every_hours": "{{hours}}시간마다",
+      "every_seconds": "{{seconds}}초마다"
+    }
   },
   "duplicates": {
     "banner_prefix": "중복 원본:",
@@ -1545,7 +1563,8 @@
     "not_merged_action": "제거",
     "all_merged_to": "PR이 모두 병합되었습니다. 다음 PR이 병합되면 {{status}}(으)로 변경합니다.",
     "issue_disabled": "이 태스크는 PR 병합 시 상태를 바꾸지 않음",
-    "issue_disabled_action": "다시 켜기"
+    "issue_disabled_action": "다시 켜기",
+    "on_merge_to": "병합 후 → {{status}}"
   },
   "deliverables": {
     "section_title": "산출물",

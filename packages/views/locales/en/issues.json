@@ -496,7 +496,6 @@
     "section_parent_issue": "Parent issue",
     "section_pull_requests": "Pull requests",
     "section_metadata": "Metadata",
-    "section_details": "Details",
     "sidebar_settings": {
       "open": "Customize sidebar",
       "title": "Sidebar",
@@ -553,9 +552,6 @@
     "prop_project": "Project",
     "prop_labels": "Labels",
     "add_property_action": "Add property",
-    "prop_created_by": "Created by",
-    "prop_created": "Created",
-    "prop_updated": "Updated",
     "activity_section": "Activity",
     "subscribe": "Subscribe",
     "unsubscribe": "Unsubscribe",
@@ -582,9 +578,6 @@
     "quick_jump_label": "Quick navigation",
     "description_nav_label": "Issue description",
     "sub_issues_nav_progress": "{{done}}/{{total}} completed",
-    "sub_issues_show_more_one": "Show {{count}} more",
-    "sub_issues_show_more_other": "Show {{count}} more",
-    "sub_issues_show_less": "Collapse",
     "thread_nav_label": "Jump to comment thread",
     "thread_nav_resolved_label": "{{title}} (resolved)",
     "thread_nav_reply_label": "{{author}}: {{title}}",
@@ -611,7 +604,27 @@
     "workdir_path_unavailable": "No local working directory yet — this issue hasn't been run by a local agent",
     "pull_requests_empty_title": "No linked pull requests.",
     "guest_readonly_note": "Guests can view and comment, but cannot change issue properties.",
-    "open_issue_page": "Open issue page"
+    "open_issue_page": "Open issue page",
+    "add_row": {
+      "wakeups": "Add wakeup",
+      "pull_requests": "Add pull request",
+      "environments": "Add environment",
+      "wakeups_pull_requests": "Add wakeup or pull request",
+      "wakeups_environments": "Add wakeup or environment",
+      "pull_requests_environments": "Add pull request or environment",
+      "all": "Add wakeup, pull request, or environment",
+      "menu": {
+        "wakeups": "Wakeup",
+        "pull_requests": "Pull request",
+        "environments": "Environment"
+      }
+    },
+    "footer": {
+      "created": "Created by {{creator}} · {{date}}",
+      "created_for": "Created by {{creator}} for {{requester}} · {{date}}",
+      "created_at": "Created {{time}}",
+      "updated_at": "Updated {{time}}"
+    }
   },
   "timeline": {
     "loading": "Loading...",
@@ -931,8 +944,6 @@
     "open_timeline": "Open timeline",
     "more_runs_one": "Show {{count}} more",
     "more_runs_other": "Show {{count}} more",
-    "strip_aria": "Cost per run — open the run timeline",
-    "strip_no_usage": "No usage recorded",
     "queued_count_one": "{{count}} queued",
     "queued_count_other": "{{count}} queued"
   },
@@ -1472,13 +1483,6 @@
       "badge": "System",
       "title_stage": "When stage {{stage}}'s sub-issues all finish",
       "title_all": "When all sub-issues finish",
-      "wake_assignee": "Wake assignee {{name}}",
-      "remaining_one": "{{count}} to go",
-      "remaining_other": "{{count}} to go",
-      "blocked_backlog": "Issue is in backlog; no wakeup for now",
-      "blocked_member": "Assignee is a member; they get an inbox notification",
-      "blocked_none": "No agent assignee; nobody is woken",
-      "turned_off": "Turned off for this issue",
       "target_title": "Wakes",
       "target_current": "Assignee (currently {{name}})",
       "target_none": "The assignee: an agent or squad is woken, a member is notified",
@@ -1493,14 +1497,19 @@
       "save_error": "Could not save the system rule.",
       "default_on": "On by default in this workspace.",
       "default_off": "Off by default in this workspace.",
-      "notify_member": "Notify {{name}} in their inbox",
       "instruction": "What to do when woken",
       "instruction_edit": "Edit instruction",
       "instruction_default": "Not set on this issue; uses the default:",
       "instruction_placeholder": "Leave empty to use the default",
       "instruction_invalid": "Instructions must be under 4,000 bytes.",
       "paused": "Paused: {{reason}}",
-      "default_change": "Change the default"
+      "default_change": "Change the default",
+      "chip_wake": "Wakes {{name}} when all finish",
+      "chip_notify": "Notifies {{name}} when all finish",
+      "chip_assignee": "Wakes the assignee when all finish",
+      "chip_off": "Sub-issue wakeup off",
+      "blocked_backlog": "Issue is in backlog; no wakeup for now",
+      "blocked_none": "No agent assignee; nobody is woken"
     },
     "cond": {
       "status": "When this issue moves to {{status}}",
@@ -1575,7 +1584,14 @@
       "rate": "more than 12 runs in an hour"
     },
     "upcoming_one": "{{count}} enabled wakeup rule",
-    "upcoming_other": "{{count}} enabled wakeup rules"
+    "upcoming_other": "{{count}} enabled wakeup rules",
+    "short": {
+      "at_time": "{{time}}",
+      "scheduled_time": "At the scheduled time",
+      "hourly": "Every hour",
+      "every_hours": "Every {{hours}} hours",
+      "every_seconds": "Every {{seconds}} seconds"
+    }
   },
   "duplicates": {
     "banner_prefix": "Duplicate of",
@@ -1611,7 +1627,8 @@
     "not_merged_action": "Remove",
     "all_merged_to": "All PRs merged. The next merged PR moves this issue to {{status}}.",
     "issue_disabled": "PR merges won’t change this issue",
-    "issue_disabled_action": "Turn on"
+    "issue_disabled_action": "Turn on",
+    "on_merge_to": "On merge → {{status}}"
   },
   "deliverables": {
     "section_title": "Deliverables",

@@ -468,7 +468,6 @@
     "section_parent_issue": "Tarea principal",
     "section_pull_requests": "Pull requests",
     "section_metadata": "Metadatos",
-    "section_details": "Detalles",
     "sidebar_settings": {
       "open": "Personalizar barra lateral",
       "title": "Barra lateral",
@@ -522,9 +521,6 @@
     "prop_project": "Proyecto",
     "prop_labels": "Etiquetas",
     "add_property_action": "Añadir propiedad",
-    "prop_created_by": "Creada por",
-    "prop_created": "Creada",
-    "prop_updated": "Actualizada",
     "activity_section": "Actividad",
     "subscribe": "Suscribirse",
     "unsubscribe": "Darse de baja",
@@ -584,9 +580,6 @@
     "quick_jump_label": "Navegación rápida",
     "description_nav_label": "Descripción de la tarea",
     "sub_issues_nav_progress": "{{done}}/{{total}} completadas",
-    "sub_issues_show_more_one": "Mostrar {{count}} más",
-    "sub_issues_show_more_other": "Mostrar {{count}} más",
-    "sub_issues_show_less": "Contraer",
     "thread_nav_show_replies_one": "Mostrar {{count}} respuesta",
     "thread_nav_show_replies_other": "Mostrar {{count}} respuestas",
     "thread_nav_hide_replies": "Ocultar respuestas",
@@ -594,7 +587,27 @@
     "load_retry": "Reintentar",
     "not_found_title": "Tarea no encontrada",
     "guest_readonly_note": "Los invitados pueden ver y comentar, pero no cambiar las propiedades de la tarea.",
-    "open_issue_page": "Abrir la página de la tarea"
+    "open_issue_page": "Abrir la página de la tarea",
+    "add_row": {
+      "wakeups": "Añadir activación",
+      "pull_requests": "Añadir pull request",
+      "environments": "Añadir entorno",
+      "wakeups_pull_requests": "Añadir activación o pull request",
+      "wakeups_environments": "Añadir activación o entorno",
+      "pull_requests_environments": "Añadir pull request o entorno",
+      "all": "Añadir activación, pull request o entorno",
+      "menu": {
+        "wakeups": "Activación",
+        "pull_requests": "Pull request",
+        "environments": "Entorno"
+      }
+    },
+    "footer": {
+      "created": "Creada por {{creator}} · {{date}}",
+      "created_for": "Creada por {{creator}} en nombre de {{requester}} · {{date}}",
+      "created_at": "Creada: {{time}}",
+      "updated_at": "Actualizada: {{time}}"
+    }
   },
   "timeline": {
     "loading": "Cargando...",
@@ -913,8 +926,6 @@
     "open_timeline": "Abrir línea temporal",
     "more_runs_one": "{{count}} más",
     "more_runs_other": "{{count}} más",
-    "strip_aria": "Coste acumulado a lo largo del tiempo; abre la línea temporal de ejecuciones",
-    "strip_no_usage": "Sin uso registrado",
     "jump_to_run": "Ir a la ejecución",
     "queued_count_one": "{{count}} en cola",
     "queued_count_other": "{{count}} en cola"
@@ -1386,13 +1397,6 @@
       "badge": "Sistema",
       "title_stage": "Cuando terminan todas las subtareas de la etapa {{stage}}",
       "title_all": "Cuando terminan todas las subtareas",
-      "wake_assignee": "Activar al asignado {{name}}",
-      "remaining_one": "{{count}} pendientes",
-      "remaining_other": "{{count}} pendientes",
-      "blocked_backlog": "La tarea está en backlog; sin activación por ahora",
-      "blocked_member": "El asignado es un miembro; recibe una notificación en la bandeja de entrada",
-      "blocked_none": "No hay agente asignado; nadie se activa",
-      "turned_off": "Desactivada para esta tarea",
       "target_title": "Activa a",
       "target_current": "Asignado (actualmente {{name}})",
       "target_none": "El asignado: se activa a un agente o squad, o se notifica a un miembro",
@@ -1407,14 +1411,19 @@
       "save_error": "No se ha podido guardar la regla del sistema.",
       "default_on": "Activada por defecto en este espacio de trabajo.",
       "default_off": "Desactivada por defecto en este espacio de trabajo.",
-      "notify_member": "Notificar a {{name}} en su bandeja de entrada",
       "instruction": "Qué hacer al activarse",
       "instruction_edit": "Editar instrucción",
       "instruction_default": "Sin definir en esta tarea; usa el valor por defecto:",
       "instruction_placeholder": "Déjalo vacío para usar el valor por defecto",
       "instruction_invalid": "Las instrucciones deben ocupar menos de 4000 bytes.",
       "paused": "Pausada: {{reason}}",
-      "default_change": "Cambiar el valor por defecto"
+      "default_change": "Cambiar el valor por defecto",
+      "chip_wake": "Activa a {{name}} al terminar",
+      "chip_notify": "Avisa a {{name}} al terminar",
+      "chip_assignee": "Activa al responsable al terminar",
+      "chip_off": "Activación al terminar desactivada",
+      "blocked_backlog": "La tarea está en backlog; sin activación por ahora",
+      "blocked_none": "No hay agente asignado; nadie se activa"
     },
     "cond": {
       "status": "Cuando esta tarea pasa a {{status}}",
@@ -1489,7 +1498,14 @@
       "rate": "más de 12 ejecuciones en una hora"
     },
     "upcoming_one": "{{count}} regla de activación activa",
-    "upcoming_other": "{{count}} reglas de activación activadas"
+    "upcoming_other": "{{count}} reglas de activación activadas",
+    "short": {
+      "at_time": "{{time}}",
+      "scheduled_time": "A la hora programada",
+      "hourly": "Cada hora",
+      "every_hours": "Cada {{hours}} horas",
+      "every_seconds": "Cada {{seconds}} segundos"
+    }
   },
   "duplicates": {
     "banner_prefix": "Duplicada de",
@@ -1525,7 +1541,8 @@
     "unlinked_moved": "{{pr}} eliminado. Todos los PR restantes están fusionados, así que la tarea pasó a {{status}}.",
     "waiting_to_one": "Pasa a {{status}} cuando {{prs}} se fusione",
     "waiting_to_other": "Pasa a {{status}} cuando {{prs}} se fusionen",
-    "all_merged_to": "Todos los PR fusionados. El próximo PR fusionado mueve esta tarea a {{status}}."
+    "all_merged_to": "Todos los PR fusionados. El próximo PR fusionado mueve esta tarea a {{status}}.",
+    "on_merge_to": "Al fusionar → {{status}}"
   },
   "working_filter_error": {
     "title": "No se han podido cargar las tareas con agentes trabajando"

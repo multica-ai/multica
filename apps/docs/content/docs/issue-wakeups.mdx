@@ -15,7 +15,7 @@ The rule is stored on the issue, so nothing runs while it waits. Members create 
 <Steps>
 <Step>
 
-Open the issue and click **+** next to **Wakeups** in the issue sidebar.
+Open the issue and click **+** next to **Wakeups** in the issue sidebar. While the issue has no wakeups, the section is hidden: use the **Add …** row at the bottom of the sidebar instead, such as **Add wakeup** or **Add wakeup or pull request**.
 
 </Step>
 <Step>
@@ -99,7 +99,7 @@ The Wakeups section of the issue sidebar lists the issue's rules: the condition,
 
 | Action | Result |
 |---|---|
-| Turn the switch off | Stops later wakeups and withdraws runs that have not started. A run that already started keeps going; stop it from the execution log if needed. |
+| Turn the switch in its details off | Stops later wakeups and withdraws runs that have not started. A run that already started keeps going; stop it from the execution log if needed. |
 | **Wake now** | Wakes the agent once right away, without waiting for the condition. |
 | Edit the instruction | Affects later wakeups only; a run in progress is unchanged. |
 | **Delete** | The rule no longer wakes anyone. Runs that have not started are withdrawn; started ones continue. |
@@ -118,7 +118,7 @@ To see every wakeup in the workspace, open **Auto** in the app rail and switch t
 
 ## Wake the parent when sub-issues finish [#child-done]
 
-When an issue has sub-issues, its Wakeups section shows a rule marked **System**. Nobody needs to create it:
+When an issue has sub-issues, a chip next to its **Sub-issues** heading shows a rule marked **System**, such as "Wakes Lambda when all finish". Click it for the rule's progress, its instruction, and the switch that turns it off for this issue. Nobody needs to create it:
 
 - When every sub-issue in a stage is closed and a later stage is still waiting, it wakes the parent's assignee, and it wakes them once more when every sub-issue is closed. Sub-issues without stages wake the parent once, when the last one closes.
 - Adding or reopening a sub-issue does not wake anyone, including a stage added after every sub-issue closed: move it out of `backlog` to start it, or mention the assignee to organize it.

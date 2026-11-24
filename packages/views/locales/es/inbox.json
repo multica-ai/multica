@@ -67,6 +67,7 @@
   "detail": {
     "select_prompt": "Selecciona una notificación para ver los detalles",
     "restore": "Devolver a la bandeja de entrada",
+    "more_actions": "Más acciones de la notificación",
     "original_input": "Entrada original",
     "retry_with_context": "Reintentar con contexto",
     "edit_advanced": "Abrir formulario completo",
@@ -149,11 +150,12 @@
     "archived": "Archivado",
     "leaves": "Sale de la bandeja al continuar",
     "filtered": "Ya no coincide con tus filtros",
-    "notification_archived": "Notificación archivada",
     "changed_status": "Estado cambiado a {{status}}",
     "reassigned": "Reasignada a {{name}}",
     "unassigned": "Desasignada",
     "ran_quick_action": "Se ejecutó {{name}}",
+    "agent_triggered": "Agente activado",
+    "returns_on_activity": "Vuelve a la bandeja con nueva actividad",
     "next": "Siguiente",
     "next_tooltip": "Abrir la siguiente: {{title}}"
   },
@@ -182,6 +184,14 @@
     "issue_description": "Las notificaciones de esta tarea en esta vista se eliminarán permanentemente. La tarea y sus ejecuciones se conservarán.",
     "cancel": "Cancelar",
     "active_issue_description": "Esto elimina permanentemente las notificaciones activas de la bandeja de entrada para esta tarea. Las notificaciones archivadas anteriormente, la tarea y sus ejecuciones se conservan."
+  },
+  "archive_all_dialog": {
+    "title": "¿Archivar todas las notificaciones?",
+    "description": "Todas las notificaciones activas de tu bandeja de entrada pasarán a Archivadas. Las incidencias pospuestas seguirán pospuestas y podrás restaurar las notificaciones en cualquier momento.",
+    "description_count_one": "{{count}} notificación activa de tu bandeja de entrada pasará a Archivadas. Las incidencias pospuestas seguirán pospuestas y podrás restaurarla en cualquier momento.",
+    "description_count_other": "Las {{count}} notificaciones activas de tu bandeja de entrada pasarán a Archivadas. Las incidencias pospuestas seguirán pospuestas y podrás restaurarlas en cualquier momento.",
+    "cancel": "Cancelar",
+    "confirm": "Archivar todo"
   },
   "unsubscribe": {
     "title": "Darse de baja y archivar. Dejarás de recibir sus actualizaciones; las @menciones te seguirán llegando.",
@@ -241,9 +251,6 @@
     "just_archived_many_other": "Se archivaron {{count}} notificaciones",
     "snoozed_summary_one": "{{count}} pospuesta · vuelve {{time}}",
     "snoozed_summary_other": "{{count}} pospuestas · la próxima vuelve {{time}}",
-    "bar_snoozed_one": "{{count}} pospuesta",
-    "bar_snoozed_other": "{{count}} pospuestas",
-    "go_to_my_work": "Ir a Mi trabajo",
     "filtered_title": "Todo al día para este filtro",
     "filtered_remaining_one": "Hay {{count}} otra notificación en tu bandeja",
     "filtered_remaining_other": "Hay {{count}} otras notificaciones en tu bandeja",

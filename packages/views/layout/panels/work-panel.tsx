@@ -15,6 +15,7 @@ import { projectListOptions } from "@multica/core/projects/queries";
 import type { Project } from "@multica/core/types";
 import { resolveClickIntent, useHeldUntilArrival, useNavigation } from "../../navigation";
 import { AutoArchivePromptDialog } from "../../inbox/components/auto-archive-prompt-dialog";
+import { inboxTabFromParam } from "../../inbox/components/inbox-view";
 import { IssueContextMenuProvider } from "../../issues/actions";
 import { useIssueViewActions } from "../../issue-views/use-view-actions";
 import { useT } from "../../i18n";
@@ -65,11 +66,15 @@ export function KeptRowsRelease() {
   // `undefined` while an identifier route waits for the page to load its issue.
   const issueId = issueSegment ? (issue?.id ?? (isIssueUuid(issueSegment) ? issueSegment : undefined)) : null;
   const projectId = routeSegment(pathname, p.projects());
-  // The notification the Inbox page has open, as its rows are keyed.
+  // The notification the Inbox page has open, as its rows are keyed. Only the
+  // live Inbox tab keeps open rows in place; archived/snoozed selections must
+  // not hold or ghost rows in the live Inbox list.
   const onInbox = pathname === p.inbox();
-  const inboxKey = onInbox ? searchParams.get("issue") : null;
+  const pageKey = onInbox ? searchParams.get("issue") : null;
+  const inboxKey = onInbox && inboxTabFromParam(searchParams.get("view")) === "inbox" ? pageKey : null;
   const wasOnInbox = useRef(false);
   useLayoutEffect(() => {
+    if (wsId && !onInbox) useInboxSelectionStore.getState().clearSectionTabSync(wsId);
     if (issueId === undefined) return;
     useSidebarKeptStore.getState().release([issueId, projectId].filter((id) => id !== null));
     if (wsId) {
@@ -83,7 +88,7 @@ export function KeptRowsRelease() {
       }
     }
     wasOnInbox.current = onInbox;
-  }, [wsId, issueId, projectId, inboxKey, onInbox]);
+  }, [wsId, issueId, projectId, inboxKey, onInbox, pageKey]);
   return null;
 }
 
@@ -127,9 +132,13 @@ export function WorkPanel() {
   );
   const clickedIssue = clicked.value;
   const clickedList = clickedIssue && isOpenIssue(clickedIssue.segment) ? clickedIssue.list : undefined;
-  // The notification open on the Inbox page beside the section. Every Inbox
-  // row opens there, so an issue page is never the Inbox's.
-  const inboxOpenKey = pathname === p.inbox() ? searchParams.get("issue") : null;
+  // The live notification open on the Inbox page beside the section. Every
+  // Inbox row opens there, so an issue page — or an archived/snoozed item — is
+  // never a live Inbox row.
+  const inboxOpenKey =
+    pathname === p.inbox() && inboxTabFromParam(searchParams.get("view")) === "inbox"
+      ? searchParams.get("issue")
+      : null;
   const inboxRows = useInboxSectionRows(wsId, inboxOpenKey);
   const treeClaimsIssue = clickedList !== undefined && clickedList !== PINS_LIST;
   const pins = usePanelPins(wsId, userId, pathname, treeClaimsIssue ? null : currentIssueId);
