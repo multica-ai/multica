@@ -309,6 +309,45 @@ func TestAuth_TaskTokenGrantedWorkspace(t *testing.T) {
 	}
 }
 
+func TestAuth_FullDelegationBindsGrantorAndRejectsSelectorForgery(t *testing.T) {
+	const grantor = "66666666-0000-4000-8000-000000000006"
+	for _, tc := range []struct {
+		name, path string
+		want       int
+	}{
+		{"target selected", "/api/issues/", http.StatusOK},
+		{"conflicting query selector", "/api/issues/?workspace_id=" + ttWorkspaceA, http.StatusForbidden},
+		{"malformed query selector", "/api/issues/?workspace_id=not-a-uuid", http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			h := Auth(db.New(&fakeTaskTokenDB{t: t, fullDelegation: true}), nil, nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called = true
+				principal, ok := FullDelegationFromContext(r.Context())
+				if !ok || principal.GrantorUserID != grantor || principal.AgentID != ttAgentID || principal.TaskID != ttTaskID || principal.HomeWorkspaceID != ttWorkspaceA || principal.RuntimeOwnerUserID != ttUserID {
+					t.Fatalf("wrong delegation principal: %+v, present=%v", principal, ok)
+				}
+				if r.Header.Get("X-User-ID") != grantor || r.Header.Get("X-Full-Delegation-User-ID") != grantor || r.Header.Get("X-Agent-ID") != ttAgentID || r.Header.Get("X-Task-ID") != ttTaskID {
+					t.Fatalf("forged identity survived: %+v", r.Header)
+				}
+				w.WriteHeader(http.StatusOK)
+			}))
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			req.Header.Set("Authorization", "Bearer "+ttTestToken)
+			req.Header.Set("X-Workspace-ID", ttWorkspaceB)
+			req.Header.Set("X-User-ID", ttUserID)
+			req.Header.Set("X-Full-Delegation-User-ID", ttUserID)
+			req.Header.Set("X-Agent-ID", ttUserID)
+			req.Header.Set("X-Task-ID", ttUserID)
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			if w.Code != tc.want || called != (tc.want == http.StatusOK) {
+				t.Fatalf("status %d, want %d, called=%v: %s", w.Code, tc.want, called, w.Body.String())
+			}
+		})
+	}
+}
+
 // TestAuth_JWTWorkspaceSelectorUntouched is the control for the task-token
 // check: human JWT sessions keep choosing their workspace through headers,
 // and Auth must neither validate nor rewrite that choice.
