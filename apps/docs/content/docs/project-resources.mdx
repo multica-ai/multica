@@ -30,13 +30,17 @@ A local directory only applies to the daemon it is bound to. When the daemon exe
 
 Open the project and click **Add repository** in **Resources → Repositories**. Search for a repository already linked to the workspace, or paste a Git URL. Workspace repositories are managed in **Settings → Code**; once GitHub is connected, the same page offers **Pick from GitHub** to import repositories the App is authorized for.
 
-Pasting a GitHub branch URL (`https://github.com/owner/repo/tree/branch`) fills in the repository URL and starting branch separately. URL-encoded branch names are decoded; query parameters and page anchors are excluded. Check the starting branch before adding the repository.
+Pasting a GitHub branch URL (`https://github.com/owner/repo/tree/branch`) fills in the repository URL and starting branch separately. URL-encoded branch names are decoded; query parameters and page anchors are excluded. Check the starting branch before adding the repository. Changing the repository URL clears the previous starting branch unless the new URL specifies one.
 
 Repositories are not limited to GitHub: any Git URL the runtime can reach works as a repository resource. Self-hosted Multica can also connect self-hosted Forgejo, Gitea, or GitLab under **Settings → Code**; see [Self-hosted Git hosting](/vcs-integration).
 
 When creating a project, you can also pick repositories directly under **Repos**. One project can link multiple GitHub repositories.
 
 A resource's `ref` sets the branch, tag, or commit that later checkouts use by default. `default_branch_hint` only gives the agent a default-branch hint and does not force a branch switch.
+
+For a managed repository, the agent starts in the task working directory. `multica repo checkout` normally creates a subdirectory for the repository and prints its path. Run commands that need the repository root from that path. If the agent process itself must start at the root and you control the runtime computer, attach an existing checkout as a local directory. Both `in_place` and `worktree` start the agent at a repository root; prefer `worktree` for git repositories to keep runs isolated and parallel. See [How runs share the directory](#how-runs-share-the-directory).
+
+If the repository's target subdirectory already contains another repository or leftover files and checkout reports a path conflict, run `multica repo checkout` from a different directory inside the same task working directory. Keep the original directory until you've checked whether it contains work you need.
 
 ## Add a local directory
 
@@ -93,6 +97,8 @@ A local directory has two execution modes, set per resource with `execution_mode
 <Tab value="in_place (Direct, default)" id="in-place">
 
 The agent works directly in your directory, and runs execute one at a time. When two runs use the same real directory, the later one enters `waiting_local_directory` and continues after the earlier one releases the directory. Two paths that reach the same directory through different symlinks serialize the same way.
+
+If the linked path is missing when a waiting run is about to start, the run reports that the project folder no longer exists. Restore the folder or update the resource path before retrying.
 
 Waiting does not modify the directory or consume a daemon execution slot. A waiting run can be cancelled; otherwise it resumes startup once both the directory and execution capacity are available.
 

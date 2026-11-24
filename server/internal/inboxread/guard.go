@@ -79,6 +79,7 @@ type summaryGeneration struct {
 	ctx     context.Context
 	query   func(context.Context) (any, error)
 	started bool // protected by summaryMu
+	callers int  // callers joined to this generation; protected by summaryMu
 	done    chan struct{}
 	value   any
 	err     error
@@ -247,6 +248,7 @@ func (g *Guard) Summary(ctx context.Context, userID string, query func(context.C
 		}
 		generation = queue.next
 	}
+	generation.callers++
 	g.summaryMu.Unlock()
 	select {
 	case <-generation.done:
@@ -256,6 +258,25 @@ func (g *Guard) Summary(ctx context.Context, userID string, query func(context.C
 		go func() { <-generation.done; <-g.summaryWaiters }()
 		return nil, ctx.Err()
 	}
+}
+
+// PendingSummaryCallers reports how many callers have joined the user's
+// generation that has not started yet, all of which will share its one query.
+// It reads under the same lock that admits callers, so a count of n means n
+// callers are already in that generation, not merely admitted to Summary.
+func (g *Guard) PendingSummaryCallers(userID string) int {
+	g.summaryMu.Lock()
+	defer g.summaryMu.Unlock()
+	queue := g.summaryCalls[userID]
+	switch {
+	case queue == nil:
+		return 0
+	case !queue.current.started:
+		return queue.current.callers
+	case queue.next != nil:
+		return queue.next.callers
+	}
+	return 0
 }
 
 func newSummaryGeneration(ctx context.Context, query func(context.Context) (any, error)) *summaryGeneration {

@@ -17,6 +17,10 @@ const h = vi.hoisted(() => ({
   team: { working: [], stuck: [], byAgent: new Map() } as TeamStatus,
 }));
 
+vi.mock("@multica/core/permissions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/permissions")>()),
+  useIsGuest: () => false,
+}));
 vi.mock("@multica/core/chat", () => ({
   useChatStore: Object.assign(
     (selector: (state: typeof h.chat) => unknown) => selector(h.chat),
@@ -31,6 +35,7 @@ vi.mock("@multica/ui/hooks/use-mobile", () => ({ useIsMobile: () => h.isMobile }
 vi.mock("./panels/team-status", () => ({ useTeamAgentStatus: () => h.team }));
 vi.mock("./app-shell-context", () => ({ useAppShell: () => null }));
 vi.mock("../chat/components/chat-bar", () => ({ ChatBar: () => <div data-testid="chat-bar" /> }));
+vi.mock("../billing/trial-status", () => ({ TrialStatus: () => null }));
 
 function renderBar(pathname = "/acme/issues") {
   const adapter: NavigationAdapter = {
@@ -83,7 +88,7 @@ describe("AppBottomBar", () => {
     renderBar();
 
     expect(
-      screen.getByRole("link", { name: "3 tasks waiting on an offline runtime" }),
+      screen.getByRole("link", { name: "3 runs waiting on an offline runtime" }),
     ).toHaveAttribute("href", "/acme/agents");
   });
 

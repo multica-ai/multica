@@ -185,7 +185,7 @@ describe("LocalDirectoryHint", () => {
     expect(screen.queryByText(/in-place/i)).not.toBeInTheDocument();
     // The mode's whole point is that results arrive as a branch; a user who
     // only reads this banner still has to know where to find them.
-    expect(screen.getByText(/agent\/….*branch/i)).toBeInTheDocument();
+    expect(screen.getByText(/agent\/....*branch/i)).toBeInTheDocument();
     // The path stays: it identifies the repository the branch lands in.
     expect(screen.getByText(/Users\/foo\/work/)).toBeInTheDocument();
   });

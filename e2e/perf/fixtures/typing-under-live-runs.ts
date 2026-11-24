@@ -75,8 +75,8 @@ export function buildTimelineEntries() {
     created_at: at(index),
     updated_at: at(index),
     issue_id: ISSUE_ID,
-    // Replies nest inside the root's card, which is the thread shape that
-    // mounts every body at once.
+    // Replies nest inside the root's card: one long thread, which the page
+    // mounts on demand (MUL-9409).
     parent_id: index === 0 ? null : rootCommentId,
     content: commentBody(index),
     resolved_at: null,

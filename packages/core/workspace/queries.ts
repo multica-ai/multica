@@ -20,8 +20,9 @@ export const workspaceKeys = {
   // `["workspaces", wsId, "squads"]` invalidation covers it.
   squadMemberStatus: (wsId: string, squadId: string) =>
     ["workspaces", wsId, "squads", squadId, "members-status"] as const,
+  squadBriefs: (wsId: string, squadId: string) =>
+    ["workspaces", wsId, "squads", squadId, "briefs"] as const,
   skills: (wsId: string) => ["workspaces", wsId, "skills"] as const,
-  assigneeFrequency: (wsId: string) => ["workspaces", wsId, "assignee-frequency"] as const,
   mcpServers: (wsId: string) => ["workspaces", wsId, "mcp-servers"] as const,
 };
 
@@ -133,6 +134,14 @@ export function squadMemberStatusOptions(wsId: string, squadId: string) {
   });
 }
 
+export function squadBriefsOptions(wsId: string, squadId: string) {
+  return queryOptions({
+    queryKey: workspaceKeys.squadBriefs(wsId, squadId),
+    queryFn: () => api.getSquadBriefs(squadId),
+    enabled: !!wsId && !!squadId,
+  });
+}
+
 export function skillListOptions(wsId: string) {
   return queryOptions({
     queryKey: workspaceKeys.skills(wsId),
@@ -222,13 +231,6 @@ export function myInvitationListOptions() {
     // Recover missed realtime events without refetching on every tab switch.
     staleTime: 30 * 1000,
     refetchOnWindowFocus: true,
-  });
-}
-
-export function assigneeFrequencyOptions(wsId: string) {
-  return queryOptions({
-    queryKey: workspaceKeys.assigneeFrequency(wsId),
-    queryFn: () => api.getAssigneeFrequency(),
   });
 }
 

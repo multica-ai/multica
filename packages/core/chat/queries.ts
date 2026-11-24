@@ -1,8 +1,15 @@
-import { infiniteQueryOptions, queryOptions, useQuery, type QueryClient } from "@tanstack/react-query";
+import {
+  infiniteQueryOptions,
+  queryOptions,
+  useQuery,
+  type InfiniteData,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { api } from "../api";
 import type { TaskMessagePayload } from "../types/events";
 import type {
+  ChatMessagesPage,
   ChatQuickActionsFailureState,
   ChatQuickActionsPendingState,
   ChatSession,
@@ -206,6 +213,50 @@ export function chatWakeupsOptions(sessionId: string) {
     enabled: !!sessionId,
     staleTime: Infinity,
   });
+}
+
+/**
+ * How many trailing assistant turns' task timelines to warm after prefetching
+ * a session's newest message page. Keeps the visible tail from expanding
+ * asynchronously when `AssistantMessage` upgrades from plain text to its
+ * collapsible `TimelineView`, while capping cache entries for MUL-6396.
+ */
+const PREFETCH_TAIL_TASK_LIMIT = 2;
+
+/**
+ * Warms a chat session's conversation queries in parallel so archiving and
+ * advancing to the next thread — or clicking an adjacent row — renders from
+ * cache without flashing the skeleton or asynchronously popping in bottom
+ * strips (wakeups). All warmed queries use `staleTime: Infinity`, so an
+ * already-warm session costs nothing.
+ */
+export async function prefetchChatSession(
+  qc: QueryClient,
+  sessionId: string,
+): Promise<void> {
+  if (!sessionId) return;
+  await Promise.all([
+    qc.prefetchInfiniteQuery(chatMessagesPageOptions(sessionId)),
+    qc.prefetchQuery(pendingChatTaskOptions(sessionId)),
+    qc.prefetchQuery(chatWakeupsOptions(sessionId)),
+  ]);
+
+  const newestMessages =
+    qc.getQueryData<InfiniteData<ChatMessagesPage>>(chatKeys.messagesPage(sessionId))
+      ?.pages?.[0]?.messages ?? [];
+  const tailTaskIds: string[] = [];
+  const seen = new Set<string>();
+  for (let i = newestMessages.length - 1; i >= 0 && tailTaskIds.length < PREFETCH_TAIL_TASK_LIMIT; i--) {
+    const m = newestMessages[i];
+    if (!m || m.role !== "assistant" || !isTaskMessageTaskId(m.task_id) || seen.has(m.task_id)) {
+      continue;
+    }
+    seen.add(m.task_id);
+    tailTaskIds.push(m.task_id);
+  }
+  if (tailTaskIds.length > 0) {
+    await Promise.all(tailTaskIds.map((taskId) => qc.prefetchQuery(taskMessagesOptions(taskId))));
+  }
 }
 
 export function myChatWakeupsOptions(wsId: string) {

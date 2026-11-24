@@ -2,7 +2,7 @@
   "list": {
     "title": "專案",
     "empty": "還沒有專案",
-    "search_placeholder": "搜尋專案..."
+    "search_placeholder": "搜尋專案…"
   },
   "status": {
     "planned": "計劃中",
@@ -24,7 +24,9 @@
     "resources": "資源",
     "lead": "負責人",
     "no_resources": "尚未新增資源。",
-    "add_resource": "新增資源"
+    "add_resource": "新增資源",
+    "add_description": "新增描述",
+    "progress": "進度"
   },
   "form": {
     "icon_emoji": "圖示（emoji）",
@@ -42,8 +44,8 @@
     "load_failed": "專案載入失敗：{{message}}"
   },
   "actions": {
-    "creating": "建立中...",
-    "saving": "儲存中..."
+    "creating": "建立中…",
+    "saving": "儲存中…"
   },
   "menu": {
     "pin": "固定",
@@ -72,7 +74,5 @@
   "runs": {
     "working": "處理中",
     "count": "執行 · {{count}}"
-  },
-  "status.planned": "計劃中",
-  "form.description_placeholder": "這個專案是做什麼的？"
+  }
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -144,8 +143,6 @@ printf '%s\n' '{"v":1,"type":"models","models":[{"id":"deepseek-official/deepsee
 func writeDshFixture(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "dsh")
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nset -eu\n"+body), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeTestExecutable(t, path, []byte("#!/bin/sh\nset -eu\n"+body))
 	return path
 }

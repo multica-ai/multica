@@ -58,23 +58,8 @@ describe("useSidebarViews writes", () => {
     expect(putIssueViewPreference.mock.calls[0]![0].prefs.order).toEqual([
       "builtin:my_work",
       "view:a",
-      "builtin:snoozed",
       "view:b",
     ]);
-  });
-
-  it("remembers a removed Snoozed so it is not added back", async () => {
-    const { result } = setup(preference(["builtin:subscribed", "view:a"]));
-    await waitFor(() => expect(result.current.isStarred("view:a")).toBe(true));
-    expect(result.current.isStarred("builtin:snoozed")).toBe(true);
-
-    act(() => result.current.unstar("builtin:snoozed"));
-
-    await waitFor(() => expect(putIssueViewPreference).toHaveBeenCalledTimes(1));
-    expect(putIssueViewPreference.mock.calls[0]![0].prefs).toEqual({
-      hidden: ["builtin:snoozed"],
-      order: ["builtin:subscribed", "view:a"],
-    });
   });
 
   it("does not write a default order before the views behind it have loaded", async () => {

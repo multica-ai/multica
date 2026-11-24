@@ -195,4 +195,29 @@ describe("useInPageFind with virtual content", () => {
     expect(result.current.activeIndex).toBe(2);
     expect(reveal).toHaveBeenCalledTimes(1);
   });
+
+  it("mounts an unmounted first match once typing pauses, not per keystroke", async () => {
+    const units = [{ key: "unmounted", text: "only here: needle" }];
+    const getUnits = () => units;
+    const reveal = vi.fn(() => () => {});
+    const { result } = renderHook(() =>
+      useInPageFind({
+        container,
+        contentKey: 0,
+        virtual: { root: () => virtualRoot, units: getUnits, reveal },
+      }),
+    );
+
+    act(() => result.current.openFind());
+    for (const query of ["ne", "nee", "need", "needl", "needle"]) {
+      act(() => result.current.setQuery(query));
+      await flushFrames(1);
+    }
+    await flushFrames();
+    expect(result.current.matchCount).toBe(1);
+    expect(reveal).not.toHaveBeenCalled();
+
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 200)));
+    expect(reveal).toHaveBeenCalledTimes(1);
+  });
 });

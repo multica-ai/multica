@@ -79,7 +79,7 @@ describe("LabelPicker on a skill", () => {
 
     expect(spies.listTypes).toContain("skill");
     expect(spies.listTypes).not.toContain("issue");
-    await user.type(screen.getByPlaceholderText("Find or create a label…"), "Docs{Enter}");
+    await user.type(screen.getByPlaceholderText("Find or create a label..."), "Docs{Enter}");
 
     expect(spies.create).toHaveBeenCalledWith(
       expect.objectContaining({ name: "Docs", resource_type: "skill" }),
@@ -93,7 +93,7 @@ describe("LabelPicker on a skill", () => {
     const user = userEvent.setup();
     renderWithI18n(<LabelPicker skillId="skill-1" open onOpenChange={() => {}} />);
 
-    await user.click(screen.getByRole("button", { name: "Manage labels…" }));
+    await user.click(screen.getByRole("button", { name: "Manage labels..." }));
     expect(spies.push).toHaveBeenCalledWith("/settings?tab=labels&scope=skill");
   });
 });

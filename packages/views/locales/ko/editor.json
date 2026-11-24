@@ -17,14 +17,14 @@
     },
     "heading_dropdown": {
       "text": "텍스트",
-      "normal_text": "일반 텍스트",
+      "normal_text": "텍스트",
       "heading_1": "제목 1",
       "heading_2": "제목 2",
       "heading_3": "제목 3"
     },
     "list_dropdown": {
       "bullet_list": "글머리 기호 목록",
-      "ordered_list": "번호 목록",
+      "ordered_list": "번호 매기기 목록",
       "task_list": "체크리스트"
     },
     "sub_issue": {
@@ -44,7 +44,7 @@
     "image_copied": "이미지를 복사했습니다",
     "copy_image_failed": "이미지를 복사하지 못했습니다",
     "canvas_label": "이미지 캔버스. 드래그하여 이동, 스크롤하여 확대/축소, 두 번 클릭하여 실제 크기로 전환할 수 있습니다.",
-    "unavailable": "이 이미지를 불러올 수 없어 건너뛰었습니다."
+    "unavailable": "이 이미지를 더 이상 사용할 수 없어 건너뛰었습니다."
   },
   "canvas": {
     "zoom_in": "확대",
@@ -100,9 +100,10 @@
     "copy_failed": "복사하지 못했습니다"
   },
   "mention": {
-    "group_users": "사용자",
+    "group_users": "멤버",
     "group_issues": "태스크",
     "group_projects": "프로젝트",
+    "group_docs": "문서",
     "all_members": "모든 멤버",
     "agent_badge": "에이전트",
     "squad_badge": "스쿼드",
@@ -117,8 +118,6 @@
     "html_preview": "HTML 미리보기",
     "close_preview": "닫기",
     "copy_code": "코드 복사",
-    "show_preview": "미리보기 표시",
-    "show_source": "소스 표시",
     "fullscreen": "전체 화면"
   },
   "dynamic_block": {
@@ -132,7 +131,10 @@
     "error_mermaid": "이 다이어그램을 그릴 수 없습니다",
     "error_at_line": "{{message}} ({{line}}행)",
     "view_source": "소스 보기",
-    "copy_error": "오류 복사"
+    "copy_error": "오류 복사",
+    "title": "제목",
+    "rename": "이름 바꾸기",
+    "add_title": "제목 추가"
   },
   "file_card": {
     "uploading": "{{filename}} 업로드 중"
@@ -227,5 +229,31 @@
       "later": "나중에",
       "start": "받아쓰기 시작"
     }
+  },
+  "block_menu": {
+    "label": "블록 삽입",
+    "blocks": {
+      "paragraph": "텍스트",
+      "heading1": "제목 1",
+      "heading2": "제목 2",
+      "heading3": "제목 3",
+      "bulletList": "글머리 기호 목록",
+      "orderedList": "번호 매기기 목록",
+      "taskList": "체크리스트",
+      "blockquote": "인용",
+      "codeBlock": "코드 블록",
+      "mermaid": "Mermaid 다이어그램",
+      "table": "표",
+      "divider": "구분선",
+      "image": "이미지",
+      "file": "파일"
+    }
+  },
+  "block_handle": {
+    "add": "아래에 추가",
+    "options": "드래그하여 이동, 클릭하여 메뉴 열기",
+    "turn_into": "변환",
+    "duplicate": "복제",
+    "delete": "삭제"
   }
 }

@@ -287,3 +287,32 @@ func frontendTypeMismatches(frontend []string) []string {
 	}
 	return problems
 }
+
+// TestMutedSquadHandoff pins that squad_handoffs only ever drops a marked
+// new_comment row, and only for a member who muted it (MUL-10008).
+func TestMutedSquadHandoff(t *testing.T) {
+	marked := []byte(`{"comment_id":"c","squad_handoff":"true"}`)
+	plain := []byte(`{"comment_id":"c"}`)
+	muted := map[string]string{SquadHandoffsPref: "muted"}
+	cases := []struct {
+		name      string
+		prefs     map[string]string
+		notifType string
+		details   []byte
+		want      bool
+	}{
+		{"muted drops a marked comment", muted, "new_comment", marked, true},
+		{"muted keeps an unmarked comment", muted, "new_comment", plain, false},
+		{"muted keeps a marked mention", muted, "mentioned", marked, false},
+		{"default keeps a marked comment", map[string]string{}, "new_comment", marked, false},
+		{"explicit all keeps a marked comment", map[string]string{SquadHandoffsPref: "all"}, "new_comment", marked, false},
+		{"unreadable details are delivered", muted, "new_comment", []byte(`not json`), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := MutedSquadHandoff(tc.prefs, tc.notifType, tc.details); got != tc.want {
+				t.Fatalf("MutedSquadHandoff = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

@@ -30,6 +30,18 @@ Ouvrez **Tous les projets** et choisissez **Grille** ou **Tableau** dans le menu
 
 La grille peut afficher les dates de début et d'échéance, la progression et la dernière activité. Triez par ces champs, par nom, statut, priorité ou date de création. La disposition, le regroupement, le tri, les colonnes visibles et les filtres sont enregistrés par utilisateur et espace de travail, et synchronisés entre appareils. Le texte de recherche n'est pas enregistré.
 
+## Page de projet
+
+L'ouverture d'un projet propose trois onglets :
+
+- **Aperçu** — le nom, l'icône, la description repliable (partagée comme contexte avec les agents) et les ressources rattachées.
+- **Tâches** — les tâches du projet dans la disposition de votre choix : Liste, Tableau, Grille, Gantt ou Couloirs.
+- **Activité** — un flux, du plus récent au plus ancien, de la création des tâches et des changements de statut, d'assigné, de priorité, de dates, de titre et de doublon dans le projet.
+
+Votre dernier onglet ouvert est mémorisé par projet sur cet appareil ; un projet sans tâche s'ouvre sur **Aperçu**.
+
+La barre latérale droite reste affichée sur chaque onglet : **Propriétés**, **Avancement** (tâches terminées par rapport au périmètre, barre segmentée terminé/en cours, courbe hebdomadaire et prévision de fin d'après le rythme des 4 dernières semaines dès qu'il y a assez d'historique), **Répartition** (bascule entre **Assigné** et **Étiquette** ; cliquer sur une ligne ouvre **Tâches** filtré sur cette tranche) et **Activité récente** avec **Tout voir** vers l'onglet **Activité**.
+
 ## Projets et tâches
 
 Un projet peut contenir un nombre quelconque de tâches ; une tâche appartient à un projet au plus. Créez des tâches directement dans le projet, ou choisissez ou changez le projet depuis les propriétés de la tâche.
@@ -37,10 +49,10 @@ Un projet peut contenir un nombre quelconque de tâches ; une tâche appartient 
 L'avancement du projet est calculé automatiquement à partir des tâches liées :
 
 ```text
-avancement = tâches dont le statut appartient à la catégorie done ou closed ÷ toutes les tâches du projet
+avancement = tâches de la catégorie done ÷ (toutes les tâches du projet − tâches de la catégorie closed)
 ```
 
-Parmi les statuts intégrés, ce sont `done` et `cancelled` ; les statuts personnalisés rangés dans ces deux catégories comptent de la même façon. `cancelled` signifie que ce travail a été retiré du périmètre du projet, il compte donc dans l'avancement.
+Parmi les statuts intégrés, `done` compte comme terminé et `cancelled` appartient à closed. Une tâche closed est sortie du périmètre du projet : elle ne compte ni comme terminée ni dans le total, et le projet affiche à part le nombre de tâches annulées à côté de l'avancement. Les statuts personnalisés suivent leur catégorie. Le pourcentage est arrondi à l'inférieur, donc 100 % signifie que toutes les tâches du périmètre sont terminées. Un projet sans tâche dans son périmètre affiche 0 %.
 
 Le statut du projet et celui des tâches sont indépendants : terminer toutes les tâches ne fait pas passer le projet à `completed`, et modifier le statut du projet ne touche pas à ses tâches.
 
@@ -102,7 +114,7 @@ multica project update <project-id> --visibility private --member alice@example.
 multica project member add <project-id> carol@example.com
 ```
 
-Rendre un projet privé à **Tout l’espace de travail** permet à tous les membres de l'espace de travail de voir le projet, ses tâches, ses commentaires et ses pièces jointes. L'application demande une confirmation avant d'enregistrer ; `multica project update --visibility workspace` applique le changement immédiatement.
+Rendre un projet privé à **Tout l’espace de travail** permet à toute personne ayant le rôle `owner`, `admin` ou `member` de voir le projet, ses tâches, ses commentaires et ses pièces jointes. Les invités ne voient le projet que s’il est partagé avec eux. L'application demande une confirmation avant d'enregistrer ; `multica project update --visibility workspace` applique le changement immédiatement.
 
 ### Reprise par le propriétaire de l'espace de travail [#workspace-owner-recovery]
 
@@ -112,7 +124,7 @@ Cliquez sur **Rejoindre** et confirmez pour vous ajouter à la liste des membres
 
 ## Dossiers [#folders]
 
-Les dossiers regroupent des projets liés, par exemple tout ce qui concerne un lancement ou une équipe, pour que la section Projets de la barre latérale reste courte. Les dossiers sont partagés : tous les membres voient les mêmes dossiers, et n'importe quel membre peut en créer, en renommer, en supprimer, et y ajouter ou en retirer des projets. Un projet est dans un dossier au plus, et les dossiers ne s'imbriquent pas. Un dossier sert uniquement à organiser : il ne change pas qui peut voir les projets.
+Les dossiers regroupent des projets liés, par exemple tout ce qui concerne un lancement ou une équipe, pour que la section Projets de la barre latérale reste courte. Les rôles `owner`, `admin` et `member` voient les mêmes dossiers et peuvent en créer, en renommer, en supprimer, et y ajouter ou en retirer des projets. Un projet est dans un dossier au plus, et les dossiers ne s'imbriquent pas. Un dossier sert uniquement à organiser : il ne change pas qui peut voir les projets.
 
 - **Créer un dossier** : cliquez sur **+** dans la section Projets de la barre latérale et choisissez **Nouveau dossier**, ou choisissez **Déplacer vers un dossier → Nouveau dossier…** dans le menu d'un projet pour le créer avec ce projet dedans.
 - **Déplacer un projet** : choisissez **Déplacer vers un dossier** dans le menu du projet, ou faites glisser le projet sur un dossier de la barre latérale, ou hors de celui-ci. À la création d'un projet, choisissez son dossier dans la boîte de dialogue ; **+** sur la ligne d'un dossier crée un projet dans ce dossier.
@@ -134,7 +146,7 @@ Les automatisations actives qui créent des tâches dans ce projet sont mises en
 
 ## Créer, modifier et supprimer
 
-Tout membre de l'espace de travail peut créer et modifier des projets. Les membres peuvent supprimer les projets qu'ils ont créés ou créés par un agent dont ils sont actuellement propriétaires ; les agents ne peuvent supprimer que leurs propres projets. Les membres humains `owner` et `admin` peuvent supprimer tout projet, y compris les anciens projets dont le créateur est inconnu. Seules les personnes inscrites sur la liste des membres d'un projet privé peuvent le modifier ou le supprimer : un `owner` ou un `admin` doit donc d'abord y figurer.
+Les rôles `owner`, `admin` et `member` peuvent créer et modifier des projets. Les membres peuvent supprimer les projets qu'ils ont créés ou créés par un agent dont ils sont actuellement propriétaires ; les agents ne peuvent supprimer que leurs propres projets. Les membres humains `owner` et `admin` peuvent supprimer tout projet, y compris les anciens projets dont le créateur est inconnu. Seules les personnes inscrites sur la liste des membres d'un projet privé peuvent le modifier ou le supprimer : un `owner` ou un `admin` doit donc d'abord y figurer.
 
 <Callout type="warning">
 Supprimer un projet ne supprime pas ses tâches : elles sont détachées et restent dans l'espace de travail. La description, le statut et les ressources du projet sont définitivement supprimés.

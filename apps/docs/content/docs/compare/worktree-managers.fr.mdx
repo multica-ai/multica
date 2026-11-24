@@ -1,0 +1,65 @@
+---
+title: Multica face aux gestionnaires de worktrees locaux
+description: Comment Multica se compare à Conductor, Claude Squad, Orca et Beads pour faire tourner plusieurs agents de codage en parallèle, et quand un poste de travail personnel suffit.
+---
+
+Conductor, Claude Squad et Orca aident un développeur à faire tourner plusieurs agents de codage en parallèle, chacun dans son propre git worktree, puis à relire ce qu'ils produisent. Beads donne aux agents un outil de suivi des tâches qui vit avec le dépôt. Multica résout un problème voisin : une **équipe** qui partage agents, tâches, runtimes et skills dans un même espace de travail. Le bon choix dépend surtout du nombre de personnes concernées.
+
+Les informations sur les autres outils de cette page proviennent de leur documentation publique en novembre 2026 : [Conductor](https://www.conductor.build/docs/concepts/git-worktrees), [Claude Squad](https://github.com/smtg-ai/claude-squad), [Orca](https://orca.dev/docs/model/worktrees) et [Beads](https://github.com/gastownhall/beads). Consultez-les pour les détails à jour.
+
+## Réponse courte
+
+- **Un développeur, des agents sur sa propre machine, une relecture manuelle de chaque diff :** un gestionnaire de worktrees comme Conductor, Claude Squad ou Orca convient bien, et il est souvent plus rapide à prendre en main.
+- **Des agents qui doivent tenir un plan et un graphe de dépendances dans le dépôt :** Beads.
+- **Plusieurs personnes partagent les agents,** des agents tournent sur d'autres machines que votre portable, le travail s'assigne comme n'importe quelle tâche, avec contrôle d'accès et travail récurrent : Multica.
+
+Ces outils ne s'excluent pas. Un développeur peut garder un gestionnaire de worktrees pour le travail qu'il suit de près et confier les tâches longues ou routinières aux agents partagés dans Multica.
+
+## Comparaison
+
+| | Multica | Conductor | Claude Squad | Orca | Beads |
+|---|---|---|---|---|---|
+| Ce que c'est | Un espace de travail d'équipe où les tâches sont assignées à des agents | Une application Mac pour des agents de codage en parallèle dans des espaces isolés | Une application de terminal qui gère des agents dans des sessions tmux | Une application de bureau, mobile et distante pour faire tourner des flottes d'agents | Un outil de suivi de tâches en graphe pour agents de codage, utilisé en CLI |
+| Utilisateur principal | Une équipe de personnes et d'agents | Un développeur | Un développeur | Un développeur, plus des bots que d'autres peuvent solliciter | Des agents qui travaillent dans un dépôt |
+| Unité de travail | Une tâche sur un tableau partagé | Un espace de travail (worktree et branche) | Une session (tmux et worktree) | Un worktree | Un bead (tâche) avec ses dépendances |
+| Travail parallèle sans conflit | Chaque exécution a son propre répertoire avec une copie du dépôt ; les agents peuvent aussi utiliser des worktrees isolés d'un répertoire local | Un git worktree par espace de travail | Un git worktree par session | Un git worktree par tâche | Ne lance rien ; les tâches sont réservées de façon atomique |
+| Où tournent les agents | Tout ordinateur que vous connectez ; les collègues peuvent partager des runtimes | Votre Mac ; aussi des espaces de travail cloud | Votre terminal | Votre machine, des hôtes SSH, un serveur Orca distant ou des VM cloud | Là où tourne votre agent |
+| Outils | [31 outils de codage IA](/providers) | Claude Code, Codex, Cursor Agent, OpenCode | Claude Code, Codex, OpenCode, Amp et d'autres agents de terminal | Vos propres Claude Code, Codex, Grok, Antigravity et autres CLI | Tout agent capable d'appeler sa CLI |
+| Partagé par une équipe | Oui : tâches, agents, runtimes, skills, rôles et accès par agent partagés | — | — | Des bots reçoivent des demandes depuis Slack, Linear ou GitHub et tournent sur les agents de leur propriétaire | Synchronisé via des remotes Dolt |
+| Revue de diff dans l'application | Non ; la revue se fait sur la pull request, avec le journal de l'exécution sur la tâche | Oui | Oui | Oui | — |
+| Travail récurrent et déclenché | [Automatisations](/autopilots) sur planning ou webhook | — | — | Plannings et déclencheurs de bots (pull requests, checks en échec, webhooks) et automatisations planifiées | — |
+| Licence | Source-available, gratuit au sein de votre organisation | Code source non public | AGPL-3.0 | MIT | MIT |
+
+## Quand un gestionnaire de worktrees convient mieux
+
+- Vous êtes seul et voulez observer plusieurs agents côte à côte, avec un terminal et une visionneuse de diff pour chacun.
+- Vous relisez et fusionnez vous-même chaque changement, de façon interactive, avant qu'il quitte votre machine.
+- Personne d'autre n'a besoin de voir, d'assigner ou de réutiliser vos agents.
+
+Multica n'a pas de visionneuse de diff intégrée ni de terminal par tâche. La revue se fait sur la pull request, et la tâche conserve le journal de l'exécution.
+
+## Quand Multica convient mieux
+
+- **Plus d'une personne utilise les agents.** Agents, runtimes et [skills](/skills) appartiennent à l'espace de travail ; l'[accès](/agents#permissions-et-accès) décide qui peut exécuter chaque agent ; tout le monde voit quel agent travaille sur quoi. Voir [Partager un pool d'agents dans une équipe](/team-agent-pool).
+- **Les agents doivent continuer quand votre portable est fermé.** Connectez un serveur ou une VM comme [runtime](/daemon-runtimes) et faites-y tourner les agents ; vos collègues peuvent le partager.
+- **Le travail doit être suivi sous forme de tâches.** Assignation, statut, commentaires, sous-tâches, [workflows](/workflows) avec étapes de revue et liens de PR sont réunis sur une tâche plutôt que dans une session locale.
+- **Une partie du travail se répète.** Les [automatisations](/autopilots) lancent des agents sur planning ou depuis un webhook, chaque exécution étant enregistrée.
+- **Vous devez recevoir du travail depuis le chat.** Les agents peuvent être déclenchés depuis Slack, Feishu et d'autres [intégrations de messagerie](/channels).
+
+## Comment faire tourner plusieurs Claude Code sans conflit dans Multica ?
+
+Assignez des tâches distinctes à un ou plusieurs agents sur le même runtime. Chaque exécution a son propre répertoire de travail sous `~/multica_workspaces`, et les dépôts sont extraits d'un cache partagé, généralement sous forme de git worktrees séparés, si bien que les exécutions parallèles ne modifient pas la même copie. Par défaut, un ordinateur mène jusqu'à 20 exécutions à la fois, et chaque agent jusqu'à 6 ; voir [Limites de parallélisme](/daemon-runtimes#limites-de-parallélisme). Les exécutions parallèles partagent toujours la capacité de la machine et les limites d'usage du compte Claude Code.
+
+Pour travailler directement dans un dossier existant de votre machine, ajoutez-le comme [ressource de projet](/project-resources) et choisissez si l'agent le modifie sur place ou dans un worktree isolé.
+
+## Multica est-il un outil de suivi de tâches pour agents de codage IA ?
+
+Oui, mais partagé. Les tâches de Multica sont conçues pour que des agents les prennent en charge : un agent peut être l'assigné, il rend compte de son avancement en commentaires, passe le statut à `in_review` quand il livre, et découpe les gros travaux en sous-tâches par étapes. Les agents utilisent la [CLI Multica](/cli) pour lire et mettre à jour les tâches.
+
+Beads adopte une autre approche : les tâches vivent dans une base Dolt à côté du code, et les agents les lisent et les réservent avec `bd`. Il convient aux agents qui ont besoin d'une mémoire structurée et d'un suivi des dépendances dans un dépôt. Multica convient à une équipe qui veut personnes et agents sur le même tableau, avec contrôle d'accès et historique des exécutions.
+
+## Voir aussi
+
+- [Multica face à Linear et Jira](/compare/linear-jira)
+- [Multica face à OpenHands, Devin et Factory](/compare/openhands-devin-factory)
+- [Daemon et runtimes](/daemon-runtimes) : où ont lieu les exécutions et comment les répertoires sont isolés.

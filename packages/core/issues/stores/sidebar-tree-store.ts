@@ -45,7 +45,7 @@ export const DEFAULT_SIDEBAR_PROJECT_SETTINGS: SidebarProjectSettings = {
   ordering: "manual",
   statuses: ["planned", "in_progress", "paused"],
   onlyMine: false,
-  showCount: true,
+  showCount: false,
   showNoProject: true,
   minimalIcons: false,
 };
@@ -68,7 +68,7 @@ export const DEFAULT_SIDEBAR_INBOX_SETTINGS: SidebarInboxSettings = {
   limit: 5,
   showCount: true,
   railBadge: true,
-  compact: false,
+  compact: true,
 };
 
 export interface SidebarLocateRequest {
@@ -144,7 +144,7 @@ const INITIAL: PersistedSidebarTree = {
   projectOrder: [],
   inboxSettings: DEFAULT_SIDEBAR_INBOX_SETTINGS,
   pinnedLimit: 5,
-  viewsShowCount: true,
+  viewsShowCount: false,
   inboxCollapsed: false,
   projectsCollapsed: false,
   viewsCollapsed: false,
@@ -177,6 +177,20 @@ export const useSidebarTreeStore = create<SidebarTreeState>()(
     {
       name: "multica_sidebar_tree",
       storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
+      // 1: the Inbox section briefly became compact by default, and turned
+      // compact on once for every stored copy.
+      // 2: compact is off by default again. A version-1 copy holds that forced
+      // value rather than a choice, so it goes back to off once; an older copy
+      // never ran version 1 and keeps what the user picked.
+      // 3: compact is on by default, for devices with nothing stored yet. A
+      // stored copy belongs to someone who already used the Inbox section, so
+      // it keeps its value, and one without a value keeps the two-line rows.
+      version: 3,
+      migrate: (persisted, version) => {
+        const p = (persisted ?? {}) as Partial<PersistedSidebarTree>;
+        const compact = version === 1 ? false : (p.inboxSettings?.compact ?? false);
+        return { ...p, inboxSettings: { ...DEFAULT_SIDEBAR_INBOX_SETTINGS, ...p.inboxSettings, compact } };
+      },
       partialize: (state): PersistedSidebarTree => ({
         expanded: state.expanded,
         issueSettings: state.issueSettings,

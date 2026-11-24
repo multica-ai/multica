@@ -20,7 +20,7 @@ export function ChatPage() {
         <Commands />
         <Platforms />
         <Access />
-        <CtaBand title="Bring an agent into your team chat" lead="Bind an agent to a Bot and say hello from Slack, Feishu, DingTalk, WeCom, or Telegram." />
+        <CtaBand title="Bring an agent into your team chat" lead="Connect an agent to a bot and say hello from Slack, Lark, DingTalk, WeCom, Telegram, or WeChat." />
       </div>
     </SitePage>
   );
@@ -40,7 +40,7 @@ function Hero() {
       eyebrow="Chat integrations"
       title="Your agents, in your team chat."
       subtitle="No need to open Multica."
-      lead="Bind an agent to a Bot in Slack, Feishu, DingTalk, WeCom, or Telegram. Message it directly, mention it in a group, or turn a message into an issue."
+      lead="Connect an agent to a bot in Slack, Lark, DingTalk, WeCom, Telegram, or WeChat. Message it directly, mention it in a group, or turn a message into an issue."
       actions={
         <>
           <ActionLink href={ctaHref} size="lg">
@@ -53,7 +53,7 @@ function Hero() {
         </>
       }
       frost="chat-page"
-      label="A team channel, eng-support: Mia mentions @Multica to ask why last night’s export job failed, and the Bot answers in the thread. Beside it, the Messaging settings show Bots for Backend Agent on Slack, Lead Agent on Feishu, and Triage Agent on Telegram."
+      label="A team channel, eng-support: Mia mentions @Multica to ask why last night’s export job failed, and the bot answers in the thread. Beside it, the Messaging settings show bots for Backend Agent on Slack, Lead Agent on Lark, and Triage Agent on Telegram."
     >
       <ChatScene />
     </SurfaceHero>
@@ -68,7 +68,7 @@ const WAYS: Walkthrough[] = [
   },
   {
     title: "Mention it in a group",
-    body: "@-mention the Bot in a group or channel. It answers in the thread and only sees messages addressed to it.",
+    body: "@-mention the bot in a group or channel. It answers in the thread and only sees messages addressed to it.",
     visual: MentionVisual,
   },
   {

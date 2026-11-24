@@ -46,6 +46,79 @@ export interface ListPrivateProjectsResponse {
   total: number;
 }
 
+/**
+ * Issue-count progress of a project. Scope leaves out cancelled issues (the
+ * closed category); started issues are counted but add nothing to percent.
+ */
+export interface ProjectProgress {
+  unit: "issues";
+  scope: number;
+  completed: number;
+  started: number;
+  unstarted: number;
+  cancelled: number;
+  /** completed / scope, rounded down; 0 when scope is 0. */
+  percent: number;
+}
+
+export interface ProjectProgressAssignee {
+  assignee_type: "member" | "agent" | "squad" | null;
+  assignee_id: string | null;
+  scope: number;
+  completed: number;
+  started: number;
+}
+
+/** Issues carrying one label; an issue with several labels counts under each. */
+export interface ProjectProgressLabel {
+  /** Null for the issues with no label. */
+  label_id: string | null;
+  scope: number;
+  completed: number;
+  started: number;
+}
+
+/** One weekly sample; `date` is a calendar day ("YYYY-MM-DD"), the last one is today. */
+export interface ProjectProgressPoint {
+  date: string;
+  scope: number;
+  started: number;
+  completed: number;
+}
+
+export interface ProjectProgressForecast {
+  completion_date: string;
+  weekly_velocity: number;
+}
+
+export interface ProjectProgressDetail {
+  progress: ProjectProgress;
+  by_assignee: ProjectProgressAssignee[];
+  by_label: ProjectProgressLabel[];
+  history: ProjectProgressPoint[];
+  forecast: ProjectProgressForecast | null;
+}
+
+/** One activity on an issue in the project, with the issue it happened on. */
+export interface ProjectActivityEntry {
+  id: string;
+  issue_id: string;
+  issue_identifier: string;
+  issue_title: string;
+  issue_status: string;
+  actor_type: string;
+  actor_id: string;
+  action: string;
+  details: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ProjectActivityPage {
+  entries: ProjectActivityEntry[];
+  /** Reads the next older page; null on the last one. */
+  next_cursor: string | null;
+}
+
 export interface Project {
   id: string;
   workspace_id: string;
@@ -72,7 +145,10 @@ export interface Project {
    */
   last_activity_at?: string;
   issue_count: number;
+  /** Done and cancelled issues together; prefer `progress` for completion. */
   done_count: number;
+  /** Optional because older servers do not send it. */
+  progress?: ProjectProgress;
   resource_count: number;
   /**
    * The workflow this project uses; null for the workspace Default workflow.

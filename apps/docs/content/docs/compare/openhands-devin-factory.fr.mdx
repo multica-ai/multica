@@ -1,0 +1,61 @@
+---
+title: Multica face à OpenHands, Devin et Factory
+description: OpenHands, Devin et Factory construisent des agents de codage. Multica est l'espace de travail où une équipe assigne, exécute et relit le travail de nombreux agents, dont Devin CLI et Factory Droid.
+---
+
+OpenHands, Devin et Factory construisent chacun un agent de codage et une plateforme autour. Multica ne construit pas d'agent. Il donne à une équipe un espace de travail où les tâches sont assignées à des agents basés sur [31 outils de codage IA](/providers), exécutés sur les ordinateurs que l'équipe connecte, chaque exécution étant enregistrée sur la tâche. Devin CLI et Factory Droid font partie de ces outils : le choix n'est donc pas toujours exclusif.
+
+Les informations sur OpenHands, Devin et Factory de cette page proviennent de leur documentation publique et de leurs pages de tarifs en novembre 2026 : [OpenHands](https://docs.openhands.dev/enterprise), [Devin](https://docs.devin.ai/admin/billing/self-serve) et [Factory](https://docs.factory.com/remote-control). Consultez-les pour les détails à jour.
+
+## Réponse courte
+
+- **Choisissez Devin ou Factory** si vous voulez l'agent d'un seul fournisseur avec des environnements cloud gérés, et que standardiser sur ce fournisseur vous convient.
+- **Choisissez OpenHands** si vous voulez un agent sous licence MIT que vous pouvez modifier, auto-héberger ou étendre avec son SDK.
+- **Choisissez Multica** si votre équipe utilise plusieurs outils de codage, comme Claude Code, Codex, Cursor Agent, Copilot CLI, Devin CLI ou Factory Droid, et veut les gérer comme des coéquipiers sur un même tableau, sur vos propres machines, avec un accès par agent et une étape de revue. Multica peut être auto-hébergé.
+
+## Comparaison
+
+| | Multica | OpenHands | Devin | Factory |
+|---|---|---|---|---|
+| Ce que c'est | Un espace de travail qui assigne, exécute et suit le travail d'agents de codage | Un agent de codage open source et un SDK, avec des éditions Cloud et Enterprise | L'ingénieur logiciel IA de Cognition, avec sessions cloud, CLI et application de bureau | Une plateforme pour ses agents Droid, en CLI, sur bureau et sur le web |
+| Possède son propre agent de codage | Non ; les agents tournent sur les outils que vous choisissez | Oui | Oui | Oui |
+| Outils dans un même espace | 31, dont Devin CLI et Factory Droid ; des agents différents peuvent utiliser des outils différents | Son propre agent ; sa page de tarifs mentionne aussi l'exécution d'autres agents comme Codex et Claude | Devin | Droid |
+| Où tourne l'agent | Les ordinateurs que vous connectez : portables, serveurs, VM | En local, dans Docker ou Kubernetes, dans OpenHands Cloud ou en Enterprise auto-hébergé | Les VM cloud de Devin, ou votre machine via Devin CLI | Vos machines via Remote Control, ou des Droid Computers gérés par Factory |
+| D'où vient le travail | Ses propres tâches, commentaires, chat, automatisations et intégrations de messagerie comme Slack et Feishu | Intégrations avec les hébergeurs Git, Jira et Slack | Intégrations comme Slack et Linear ; Jira en Enterprise | L'application Factory, la CLI et les intégrations |
+| Contrôle d'accès d'équipe | Accès par agent, rôles de l'espace de travail, invités, projets privés | RBAC multi-utilisateur dans Teams et Enterprise | Offres d'équipe avec SSO et contrôle des coûts | Contrôles d'administration en Business et Enterprise |
+| Auto-hébergement | Oui, avec Docker Compose ou Helm | Oui | Service hébergé ; Devin CLI tourne en local | Options sur site en Enterprise |
+| Licence | Source-available, gratuit au sein de votre organisation | MIT | Propriétaire | Propriétaire |
+| Mode de paiement | Gratuit en auto-hébergement pour un usage interne ; chaque outil facture via son propre abonnement ou sa clé API | Open source gratuit ; Teams et Enterprise payants | Abonnements avec quotas d'usage ; Enterprise facturé en ACU | Offres par siège ; Enterprise sur mesure |
+
+## Multica est-il une alternative open source à Devin ?
+
+En partie, et la différence compte :
+
+- **Multica est source-available, pas open source au sens de l'OSI.** Il est publié sous la [Multica License](https://github.com/multica-ai/multica/blob/main/LICENSE), la licence Apache 2.0 assortie de conditions supplémentaires. L'utiliser au sein de votre organisation est gratuit, y compris l'auto-héberger pour toute l'équipe ; le proposer comme service hébergé à des tiers ou l'intégrer à un produit que vous vendez nécessite une licence commerciale. S'il vous faut un agent sous licence OSI, OpenHands est sous MIT.
+- **Multica n'est pas un agent autonome en soi.** Il couvre le volet équipe de ce que propose Devin, comme assigner le travail, suivre l'avancement, relire et lancer le travail récurrent, et s'appuie sur des agents que vous avez déjà, comme Claude Code ou Codex, pour le codage lui-même.
+
+## Quand OpenHands, Devin ou Factory convient mieux
+
+- Vous voulez un environnement cloud géré par tâche et ne voulez pas garder de machines en ligne pour les agents.
+- Vous voulez standardiser sur l'agent, les modèles et le contrat de support d'un seul fournisseur.
+- Vous voulez construire votre propre produit d'agent sur un SDK ; c'est le rôle de l'OpenHands Software Agent SDK.
+- Vos ingénieurs travaillent surtout avec un agent à la fois, depuis l'application de cet agent.
+
+## Quand Multica convient mieux
+
+- **Votre équipe mélange les outils.** Certains développeurs préfèrent Claude Code, d'autres Codex, Cursor ou Copilot. Dans Multica, chaque agent choisit son outil et son modèle, et tous partagent un même tableau, une même [boîte de réception](/inbox) et une même vue [Statistiques](/analytics).
+- **Vous voulez utiliser les abonnements que vous avez déjà.** Multica pilote les outils avec leurs propres connexions ; il ne revend pas de modèles et ne facture pas le calcul des agents.
+- **Les agents doivent tourner là où se trouvent déjà votre code et vos secrets.** Les runtimes sont vos portables, serveurs de build ou VM, et un Multica auto-hébergé garde aussi les données de l'espace de travail sur vos serveurs.
+- **Plusieurs personnes partagent les agents.** L'[accès](/agents#permissions-et-accès) décide qui peut exécuter chaque agent, les [squads](/squads) envoient le travail au bon agent, et les [workflows](/workflows) ajoutent une étape de revue. Voir [Partager un pool d'agents dans une équipe](/team-agent-pool).
+- **Le travail se répète.** Les [automatisations](/autopilots) créent et assignent des tâches sur planning ou depuis un webhook.
+
+## Utiliser Devin ou Factory dans Multica
+
+Devin CLI (`devin`) et Factory Droid (`droid`) sont des outils intégrés à Multica. Installez la CLI et connectez-vous sur un ordinateur relié à Multica, puis créez un agent sur ce runtime : il prend des tâches, des commentaires et des revues comme n'importe quel autre agent, tandis que l'offre de l'outil couvre l'usage. Les détails, comme les alias de modèles de Devin et le chemin des skills de Droid, figurent dans le [Comparatif des outils de codage IA](/providers). OpenHands n'est pas un outil intégré aujourd'hui.
+
+## Voir aussi
+
+- [Multica face à Linear et Jira](/compare/linear-jira)
+- [Multica face aux gestionnaires de worktrees locaux](/compare/worktree-managers)
+- [Partager un pool d'agents dans une équipe](/team-agent-pool)
+- [Modèle de sécurité](/security-model) : ce à quoi les agents ont accès sur un runtime.

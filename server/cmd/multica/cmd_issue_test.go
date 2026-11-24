@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -563,8 +564,215 @@ func newIssueCommentAddTestCmd() *cobra.Command {
 	cmd.Flags().String("parent", "", "")
 	cmd.Flags().StringSlice("steer", nil, "")
 	cmd.Flags().Bool("steer-active", false, "")
+	cmd.Flags().String("idempotency-key", "", "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
+}
+
+// GH #8221: an agent that reruns `comment add` after a lost response must send
+// the same Idempotency-Key, so the server returns the saved comment instead of
+// posting a duplicate.
+func TestRunIssueCommentAddIdempotencyKey(t *testing.T) {
+	const (
+		issueID = "11111111-1111-4111-8111-111111111111"
+		taskID  = "22222222-2222-4222-8222-222222222222"
+	)
+	t.Chdir(t.TempDir())
+	if err := os.WriteFile("shot.png", []byte("png-v1"), 0o644); err != nil {
+		t.Fatalf("write attachment: %v", err)
+	}
+
+	var keys []string
+	replay := false
+	uploads, lookups := 0, 0
+	var lookupKey, lookupParent string
+	last := func() string {
+		if len(keys) == 0 {
+			return ""
+		}
+		return keys[len(keys)-1]
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/"+issueID:
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": issueID, "identifier": "TST-1"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/upload-file":
+			uploads++
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": fmt.Sprintf("attachment-%d", uploads), "url": fmt.Sprintf("https://files.test/%d.png", uploads)})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/"+issueID+"/comments/idempotent":
+			lookups++
+			lookupKey, lookupParent = r.Header.Get("Idempotency-Key"), r.URL.Query().Get("parent_id")
+			if !replay {
+				http.Error(w, `{"error":"no comment"}`, http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Idempotent-Replayed", "true")
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "comment-1"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/"+issueID+"/comments":
+			keys = append(keys, r.Header.Get("Idempotency-Key"))
+			if replay {
+				w.Header().Set("Idempotent-Replayed", "true")
+				w.WriteHeader(http.StatusOK)
+			} else {
+				w.WriteHeader(http.StatusCreated)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "comment-1"})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	run := func(flags map[string]string, attachments ...string) string {
+		t.Helper()
+		cmd := newIssueCommentAddTestCmd()
+		_ = cmd.Flags().Set("output", "table")
+		for name, value := range flags {
+			_ = cmd.Flags().Set(name, value)
+		}
+		for _, path := range attachments {
+			_ = cmd.Flags().Set("attachment", path)
+		}
+		stderr := captureStderr(t)
+		defer stderr.restore()
+		if err := runIssueCommentAdd(cmd, []string{issueID}); err != nil {
+			t.Fatalf("runIssueCommentAdd: %v", err)
+		}
+		return stderr.read()
+	}
+
+	// Outside an agent run, no key unless one is passed.
+	run(map[string]string{"content": "verdict"})
+	if last() != "" {
+		t.Fatalf("key outside an agent run = %q, want none", last())
+	}
+	run(map[string]string{"content": "verdict", "idempotency-key": "my-key"})
+	if last() != "my-key" {
+		t.Fatalf("explicit key = %q, want my-key", last())
+	}
+
+	t.Setenv("MULTICA_TASK_ID", taskID)
+	body := map[string]string{"content": "verdict ![shot](shot.png)", "parent": "33333333-3333-4333-8333-333333333333"}
+	run(body, "shot.png")
+	first := last()
+	if !strings.HasPrefix(first, "cli-task-v1:") {
+		t.Fatalf("derived key = %q", first)
+	}
+	if lookups != 1 || uploads != 1 {
+		t.Fatalf("first attempt lookups = %d, uploads = %d, want 1 and 1", lookups, uploads)
+	}
+	// The rerun finds the saved comment before uploading anything, so it
+	// neither re-uploads the file nor posts again.
+	replay = true
+	posts := len(keys)
+	report := run(body, "shot.png")
+	if lookups != 2 || uploads != 1 || len(keys) != posts {
+		t.Fatalf("rerun lookups = %d, uploads = %d, posts = %d, want 2, 1, %d", lookups, uploads, len(keys), posts)
+	}
+	if lookupKey != first || lookupParent != body["parent"] {
+		t.Fatalf("lookup key %q parent %q, want %q %q", lookupKey, lookupParent, first, body["parent"])
+	}
+	if !strings.Contains(report, "already posted") || strings.Contains(report, "Comment added") {
+		t.Fatalf("replay stderr = %q, want the already-posted notice", report)
+	}
+	// Without attachments there is nothing to save by asking first: the POST
+	// itself replays.
+	run(map[string]string{"content": "no files", "parent": body["parent"]})
+	run(map[string]string{"content": "no files", "parent": body["parent"]})
+	if lookups != 2 || keys[len(keys)-1] != keys[len(keys)-2] {
+		t.Fatalf("attachment-free rerun lookups = %d, keys %q / %q", lookups, keys[len(keys)-2], keys[len(keys)-1])
+	}
+	replay = false
+
+	for name, change := range map[string]func(){
+		"content":    func() { run(map[string]string{"content": "other", "parent": body["parent"]}, "shot.png") },
+		"parent":     func() { run(map[string]string{"content": body["content"]}, "shot.png") },
+		"attachment": func() { _ = os.WriteFile("shot.png", []byte("png-v2"), 0o644); run(body, "shot.png") },
+	} {
+		change()
+		if last() == first {
+			t.Fatalf("changing %s kept the key %q", name, first)
+		}
+	}
+	t.Setenv("MULTICA_TASK_ID", "44444444-4444-4444-8444-444444444444")
+	_ = os.WriteFile("shot.png", []byte("png-v1"), 0o644)
+	run(body, "shot.png")
+	if last() == first {
+		t.Fatalf("another run reused the key %q", first)
+	}
+}
+
+// When a keyed POST ends without a response, stderr must say that rerunning
+// is safe; otherwise an agent falls back to checking the thread and drops the
+// comment when that check also times out (GH #8221).
+func TestRunIssueCommentAddTimeoutSaysRerunIsSafe(t *testing.T) {
+	const issueID = "11111111-1111-4111-8111-111111111111"
+	const hint = "is safe: the server returns the comment already posted"
+	var responseStatus atomic.Int32
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/"+issueID:
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": issueID, "identifier": "TST-1"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/"+issueID+"/comments":
+			status := int(responseStatus.Load())
+			_, _ = io.ReadAll(r.Body)
+			if status != 0 {
+				http.Error(w, `{"error":"rejected"}`, status)
+				return
+			}
+			// The server got the comment; the response never arrives.
+			select {
+			case <-release:
+			case <-r.Context().Done():
+			}
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	defer close(release)
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+	t.Setenv("MULTICA_HTTP_TIMEOUT", "300ms")
+
+	run := func(flags map[string]string) string {
+		t.Helper()
+		cmd := newIssueCommentAddTestCmd()
+		_ = cmd.Flags().Set("content", "verdict")
+		for name, value := range flags {
+			_ = cmd.Flags().Set(name, value)
+		}
+		stderr := captureStderr(t)
+		defer stderr.restore()
+		if err := runIssueCommentAdd(cmd, []string{issueID}); err == nil {
+			t.Fatalf("runIssueCommentAdd succeeded, want an error")
+		}
+		return stderr.read()
+	}
+
+	if report := run(nil); strings.Contains(report, hint) {
+		t.Fatalf("unkeyed timeout stderr = %q, want no rerun hint", report)
+	}
+	if report := run(map[string]string{"idempotency-key": "k1"}); !strings.Contains(report, "Rerunning with the same --idempotency-key "+hint) {
+		t.Fatalf("explicit-key timeout stderr = %q", report)
+	}
+	t.Setenv("MULTICA_TASK_ID", "22222222-2222-4222-8222-222222222222")
+	if report := run(nil); !strings.Contains(report, "Rerunning this exact command "+hint) {
+		t.Fatalf("agent timeout stderr = %q", report)
+	}
+	responseStatus.Store(http.StatusBadGateway)
+	if report := run(nil); !strings.Contains(report, hint) {
+		t.Fatalf("5xx stderr = %q, want the rerun hint", report)
+	}
+	responseStatus.Store(http.StatusUnprocessableEntity)
+	if report := run(nil); strings.Contains(report, hint) {
+		t.Fatalf("422 stderr = %q, want no rerun hint", report)
+	}
 }
 
 func TestRunIssueCommentAddUploadsAttachmentWithoutIssueID(t *testing.T) {
@@ -3863,6 +4071,7 @@ func newIssueUpdateTestCmd() *cobra.Command {
 	cmd.Flags().String("description", "", "")
 	cmd.Flags().Bool("description-stdin", false, "")
 	cmd.Flags().String("description-file", "", "")
+	cmd.Flags().Int64("description-base-revision", 0, "")
 	cmd.Flags().Bool("allow-external-file", false, "")
 	cmd.Flags().StringArray("attachment", nil, "")
 	cmd.Flags().String("status", "", "")
@@ -4056,6 +4265,125 @@ func TestRunIssueUpdateSendsPosition(t *testing.T) {
 	}
 	if got := body["position"]; got != float64(7.5) {
 		t.Fatalf("position = %#v, want 7.5 in request body", got)
+	}
+}
+
+func TestRunIssueUpdateSendsDescriptionBaseRevision(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1":
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "todo"})
+		case r.Method == http.MethodPut && r.URL.Path == "/api/issues/issue-1":
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode body: %v", err)
+			}
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]any{"code": "issue_description_merge_conflict", "conflicts": []any{}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueUpdateTestCmd()
+	_ = cmd.Flags().Set("description", "new text")
+	_ = cmd.Flags().Set("description-base-revision", "4")
+	err := runIssueUpdate(cmd, []string{"MUL-1"})
+	if got := body["description_base_revision"]; got != float64(4) {
+		t.Fatalf("description_base_revision = %#v, want 4", got)
+	}
+	if err == nil || !strings.Contains(err.Error(), "issue edit-description") {
+		t.Fatalf("err = %v, want a merge conflict pointing at issue edit-description", err)
+	}
+}
+
+func TestRunIssueUpdateRejectsDescriptionBaseRevisionWithoutDescription(t *testing.T) {
+	cmd := newIssueUpdateTestCmd()
+	_ = cmd.Flags().Set("description-base-revision", "4")
+	_ = cmd.Flags().Set("title", "x")
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:1")
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	if err := runIssueUpdate(cmd, []string{"MUL-1"}); err == nil || !strings.Contains(err.Error(), "needs a new description") {
+		t.Fatalf("err = %v, want a refusal before any request", err)
+	}
+}
+
+func newIssueEditDescriptionTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "edit-description"}
+	cmd.Flags().String("old", "", "")
+	cmd.Flags().String("old-file", "", "")
+	cmd.Flags().String("new", "", "")
+	cmd.Flags().String("new-file", "", "")
+	cmd.Flags().Bool("replace-all", false, "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func TestRunIssueEditDescriptionPostsEdit(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1":
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "todo"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/issue-1/description/edits":
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode body: %v", err)
+			}
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "description_revision": 3})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueEditDescriptionTestCmd()
+	_ = cmd.Flags().Set("old", "Status: draft")
+	_ = cmd.Flags().Set("new", "Status: ready")
+	_ = cmd.Flags().Set("replace-all", "true")
+	if err := runIssueEditDescription(cmd, []string{"MUL-1"}); err != nil {
+		t.Fatalf("runIssueEditDescription: %v", err)
+	}
+	edits, _ := body["edits"].([]any)
+	if len(edits) != 1 {
+		t.Fatalf("edits = %#v, want one edit", body["edits"])
+	}
+	edit := edits[0].(map[string]any)
+	if edit["old_text"] != "Status: draft" || edit["new_text"] != "Status: ready" || edit["replace_all"] != true {
+		t.Fatalf("edit = %#v", edit)
+	}
+}
+
+func TestRunIssueEditDescriptionExplainsAMissingQuote(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1":
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "todo"})
+		case r.Method == http.MethodPost:
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]any{"code": "issue_description_edit_failed", "failure": map[string]any{"reason": "not_found"}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueEditDescriptionTestCmd()
+	_ = cmd.Flags().Set("old", "gone")
+	_ = cmd.Flags().Set("new", "x")
+	err := runIssueEditDescription(cmd, []string{"MUL-1"})
+	if err == nil || !strings.Contains(err.Error(), "does not match the description exactly once") {
+		t.Fatalf("err = %v", err)
 	}
 }
 

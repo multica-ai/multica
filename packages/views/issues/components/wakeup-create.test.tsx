@@ -52,6 +52,31 @@ beforeEach(() => {
 });
 afterEach(() => configureShortcutPlatform(null));
 
+describe("WakeupCreate", () => {
+  it("opens on mount when asked and reports closing", async () => {
+    const onOpenChange = vi.fn();
+    renderWithI18n(
+      <WakeupCreate workspaceId="ws" issueId="issue" defaultAgentId="emacs" defaultOpen onOpenChange={onOpenChange} />,
+      { locale: "zh-Hans" },
+    );
+    const form = await screen.findByRole("form", { name: "新建唤醒" });
+    fireEvent.keyDown(form, { key: "Escape" });
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+  });
+
+  it("opens again when revealed again before it unmounts", async () => {
+    const view = (defaultOpen: boolean) => (
+      <WakeupCreate workspaceId="ws" issueId="issue" defaultAgentId="emacs" defaultOpen={defaultOpen} />
+    );
+    const { rerender } = renderWithI18n(view(true), { locale: "zh-Hans" });
+    fireEvent.keyDown(await screen.findByRole("form", { name: "新建唤醒" }), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("form", { name: "新建唤醒" })).not.toBeInTheDocument());
+    rerender(view(false));
+    rerender(view(true));
+    expect(await screen.findByRole("form", { name: "新建唤醒" })).toBeInTheDocument();
+  });
+});
+
 describe("WakeupCreateForm", () => {
   it("says a reply wait for the assignee joins the run a comment already starts", async () => {
     await renderForm();
@@ -144,7 +169,7 @@ describe("platform conditions in the form", () => {
   it("groups conditions by what they wait for", async () => {
     await renderForm();
     fireEvent.click(screen.getByRole("button", { name: /选择条件/ }));
-    for (const label of ["字段变为某个值", "子任务完成", "关联 PR 的 CI 结束", "其他任务的状态变化"]) {
+    for (const label of ["字段变为某个值", "子任务完成", "关联 PR 状态变化", "其他任务的状态变化"]) {
       expect(await screen.findByRole("menuitem", { name: new RegExp(label) })).toBeVisible();
     }
     for (const group of ["协作", "运行与子任务", "关联"]) expect(screen.getByText(group)).toBeVisible();
@@ -166,8 +191,8 @@ describe("platform conditions in the form", () => {
 
   it("waits for a linked PR's CI by default and can wait for the merge instead", async () => {
     await renderForm();
-    await chooseCondition("关联 PR 的 CI 结束");
-    fireEvent.click(screen.getByRole("button", { name: /关联 PR 的 CI 结束: CI 结束/ }));
+    await chooseCondition("关联 PR 状态变化");
+    fireEvent.click(screen.getByRole("button", { name: /关联 PR 状态变化: CI 结束/ }));
     fireEvent.click(await screen.findByRole("menuitemradio", { name: "合并" }));
     fireEvent.change(screen.getByLabelText("唤醒后要做什么"), { target: { value: "发布" } });
     fireEvent.click(screen.getByRole("button", { name: /创建/ }));

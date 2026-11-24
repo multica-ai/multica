@@ -58,6 +58,26 @@ func (q *Queries) CountAssigneeChangesByActor(ctx context.Context, arg CountAssi
 	return items, nil
 }
 
+const countSquadMemberHandoffsSince = `-- name: CountSquadMemberHandoffsSince :one
+SELECT count(*) FROM activity_log
+WHERE issue_id = $1
+  AND action = 'squad_handoff'
+  AND details->>'kind' = 'member'
+  AND created_at > $2
+`
+
+type CountSquadMemberHandoffsSinceParams struct {
+	IssueID pgtype.UUID        `json:"issue_id"`
+	Since   pgtype.Timestamptz `json:"since"`
+}
+
+func (q *Queries) CountSquadMemberHandoffsSince(ctx context.Context, arg CountSquadMemberHandoffsSinceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countSquadMemberHandoffsSince, arg.IssueID, arg.Since)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createActivity = `-- name: CreateActivity :one
 INSERT INTO activity_log (
     workspace_id, issue_id, actor_type, actor_id, action, details, id
@@ -199,6 +219,50 @@ type ListActivitiesForIssueParams struct {
 // normal use, not only on pathological issues (MUL-5492).
 func (q *Queries) ListActivitiesForIssue(ctx context.Context, arg ListActivitiesForIssueParams) ([]ActivityLog, error) {
 	rows, err := q.db.Query(ctx, listActivitiesForIssue, arg.IssueID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ActivityLog{}
+	for rows.Next() {
+		var i ActivityLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.IssueID,
+			&i.ActorType,
+			&i.ActorID,
+			&i.Action,
+			&i.Details,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecentSquadHandoffs = `-- name: ListRecentSquadHandoffs :many
+SELECT id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at FROM activity_log
+WHERE issue_id = $1
+  AND action = 'squad_handoff'
+ORDER BY created_at DESC, id DESC
+LIMIT $2
+`
+
+type ListRecentSquadHandoffsParams struct {
+	IssueID  pgtype.UUID `json:"issue_id"`
+	RowLimit int32       `json:"row_limit"`
+}
+
+// The newest squad handoff records on one issue, newest first. Served by
+// idx_activity_log_issue_keyset; the action filter is applied to that window.
+func (q *Queries) ListRecentSquadHandoffs(ctx context.Context, arg ListRecentSquadHandoffsParams) ([]ActivityLog, error) {
+	rows, err := q.db.Query(ctx, listRecentSquadHandoffs, arg.IssueID, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}

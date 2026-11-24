@@ -11,6 +11,7 @@ import (
 	"time"
 
 	sdk "github.com/multica-ai/multica/server/pkg/composio"
+	"github.com/multica-ai/multica/server/pkg/composio/composiotest"
 )
 
 func TestExecuteTool_ConnectedAccountIdentityOnWire(t *testing.T) {
@@ -46,7 +47,11 @@ func TestExecuteTool_ConnectedAccountIdentityOnWire(t *testing.T) {
 						t.Errorf("tool inputs changed: %+v", wire)
 					}
 					w.Header().Set("Content-Type", "application/json")
-					_, _ = w.Write([]byte(`{"successful":true,"data":{"messages":[]}}`))
+					if err := json.NewEncoder(w).Encode(composiotest.Example(t, "POST /tools/execute/{tool_slug}", map[string]any{
+						"successful": true, "data": map[string]any{"messages": []any{}},
+					})); err != nil {
+						t.Error(err)
+					}
 				}))
 				defer srv.Close()
 				client, err := sdk.NewClient(sdk.Options{APIKey: "test-key", BaseURL: srv.URL, Timeout: time.Second})

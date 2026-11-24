@@ -281,6 +281,9 @@ func (r *Router) Handle(ctx context.Context, msg channel.InboundMessage) error {
 		"event_id", msg.EventID,
 		"outcome", string(res.Outcome),
 		"drop_reason", string(res.DropReason),
+		"installation_id", util.UUIDToString(res.InstallationID),
+		"chat_session_id", util.UUIDToString(res.ChatSessionID),
+		"route_revision", res.ChannelRouteRevision,
 	)
 
 	// Typing indicator on ingest, detached so the reaction HTTP call never
@@ -1165,6 +1168,7 @@ func (r *Router) drop(ctx context.Context, set ResolverSet, msg channel.InboundM
 }
 
 func (r *Router) createIssue(ctx context.Context, inst ResolvedInstallation, originType string, creatorUserID, sessionID pgtype.UUID, cmd IssueCommand, issuePrefix string, assignedRunFireAt time.Time) (service.IssueCreateResult, error) {
+	cmd.Title = strings.TrimSpace(util.SanitizeTextForPostgres(cmd.Title))
 	if cmd.Title == "" {
 		return service.IssueCreateResult{}, ErrEmptyIssueTitle
 	}

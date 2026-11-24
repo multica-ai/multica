@@ -45,6 +45,8 @@ const (
 	// post-quantum key share makes it ~1.5 KB) while curl on the same machine
 	// gets through (GH #8654).
 	KindNetworkTLSHandshakeTimeout
+	// The HTTP response started but its body ended before decoding completed.
+	KindNetworkIncompleteResponse
 
 	// HTTP status layer.
 	KindAuthRequired // 401
@@ -77,7 +79,7 @@ const (
 // IsNetwork reports whether the kind is a transport-layer failure.
 func (k ErrorKind) IsNetwork() bool {
 	switch k {
-	case KindNetworkTimeout, KindNetworkDNS, KindNetworkRefused, KindNetworkTLS, KindNetworkOffline, KindNetworkStalled, KindNetworkTLSHandshakeTimeout:
+	case KindNetworkTimeout, KindNetworkDNS, KindNetworkRefused, KindNetworkTLS, KindNetworkOffline, KindNetworkStalled, KindNetworkTLSHandshakeTimeout, KindNetworkIncompleteResponse:
 		return true
 	default:
 		return false
@@ -103,6 +105,8 @@ func (k ErrorKind) String() string {
 		return "network_stalled"
 	case KindNetworkTLSHandshakeTimeout:
 		return "network_tls_handshake_timeout"
+	case KindNetworkIncompleteResponse:
+		return "network_incomplete_response"
 	case KindAuthRequired:
 		return "auth_required"
 	case KindTaskTokenRejected:
@@ -326,11 +330,15 @@ func wrapTransport(req *http.Request, err error) error {
 	if err == nil {
 		return nil
 	}
+	return networkError(req, err, classifyNetworkError(err))
+}
+
+func networkError(req *http.Request, err error, kind ErrorKind) *NetworkError {
 	op := ""
 	if req != nil && req.URL != nil {
 		op = req.Method + " " + req.URL.Path
 	}
-	return &NetworkError{Kind: classifyNetworkError(err), Op: op, Err: err}
+	return &NetworkError{Kind: kind, Op: op, Err: err}
 }
 
 // wrapBodyRead classifies an error raised while reading or decoding a
@@ -358,11 +366,13 @@ func wrapBodyRead(req *http.Request, err error) error {
 	if errors.As(err, &stalled) {
 		return wrapTransport(req, err)
 	}
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		return networkError(req, err, KindNetworkIncompleteResponse)
+	}
 	var netErr net.Error
 	if errors.As(err, &netErr) ||
 		errors.Is(err, context.DeadlineExceeded) ||
-		errors.Is(err, context.Canceled) ||
-		errors.Is(err, io.ErrUnexpectedEOF) {
+		errors.Is(err, context.Canceled) {
 		return wrapTransport(req, err)
 	}
 	return err
@@ -420,6 +430,10 @@ var kindMessages = map[ErrorKind][2]string{
 	KindNetworkTLS: {
 		"Could not establish a secure connection to the Multica server (TLS/certificate error). Check your system clock and CA certificates.",
 		"无法与 Multica 服务器建立安全连接（TLS/证书错误）。请检查系统时间和 CA 证书。",
+	},
+	KindNetworkIncompleteResponse: {
+		"The response ended before it was complete. If this keeps happening, check the Multica server or proxy logs.",
+		"响应在完整接收前已结束。如果问题持续发生，请检查 Multica 服务器或代理日志。",
 	},
 	KindNetworkOffline: {
 		"Could not reach the Multica server. Check your network connection.",

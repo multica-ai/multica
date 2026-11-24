@@ -25,8 +25,7 @@
  */
 
 import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
-import { toHtml } from "hast-util-to-html";
-import { Check, Copy } from "@multica/ui/icons";
+import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useT } from "../i18n";
@@ -41,7 +40,7 @@ import {
   HTML_BLOCK_DEFAULT_RESERVED_PX,
   reservedHtmlBlockHeightPx,
 } from "../editor/html-block-preview";
-import { highlightCode } from "../editor/syntax-highlight";
+import { highlightCodeHtml } from "../editor/syntax-highlight";
 import { LazyRichBlock } from "./lazy-rich-block";
 
 /**
@@ -90,8 +89,7 @@ export function StaticCodeBody({
   const html = useMemo(() => {
     const code = body.replace(/\n$/, "");
     try {
-      const tree = highlightCode(code, language);
-      return toHtml(tree);
+      return highlightCodeHtml(code, language);
     } catch {
       return null;
     }
@@ -154,11 +152,7 @@ export function CodeBlockShell({
               className="flex h-6 w-6 items-center justify-center rounded-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
               aria-label={copyLabel}
             >
-              {copied ? (
-                <Check className="h-3.5 w-3.5" />
-              ) : (
-                <Copy className="h-3.5 w-3.5" />
-              )}
+              <CopyCheckIcon copied={copied} />
             </button>
           }
         />

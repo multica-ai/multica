@@ -4,6 +4,7 @@ import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
 import { Markdown } from "@tiptap/markdown";
 import type { RefObject } from "react";
+import { ySyncPluginKey } from "@tiptap/y-tiptap";
 import { BaseMentionExtension } from "./mention-extension";
 import { createMarkdownPasteExtension } from "./markdown-paste";
 import {
@@ -149,6 +150,19 @@ describe("createIssueIdentifierAutolinkExtension", () => {
 
     expect(resolveMock).not.toHaveBeenCalled();
     expect(editor.getMarkdown()).toContain("MUL-3");
+    expect(editor.getMarkdown()).not.toContain("mention://issue");
+  });
+
+  it("does not convert an identifier a collaborator typed", async () => {
+    resolveMock.mockResolvedValue({ id: "uuid-3", identifier: "MUL-3" });
+    editor = makeEditor();
+
+    editor.view.dispatch(
+      editor.state.tr.insertText("MUL-3 ", 1).setMeta(ySyncPluginKey, { isChangeOrigin: true }),
+    );
+    await flush();
+
+    expect(resolveMock).not.toHaveBeenCalled();
     expect(editor.getMarkdown()).not.toContain("mention://issue");
   });
 

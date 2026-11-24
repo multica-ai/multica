@@ -82,7 +82,7 @@ Resolves MUL-123
 
 Une simple mention dans la description, comme `Related to MUL-123`, n'associe pas du tout la PR à cette tâche. Les messages de commit et les commentaires de PR ne déclenchent pas non plus l'association.
 
-Vous pouvez aussi associer une PR à la main : dans le bloc **Pull requests** de la tâche, cliquez sur **+** et collez l'URL de la PR. Pour retirer une PR d'une tâche, ouvrez le menu **⋯** de sa ligne et choisissez **Retirer de la tâche** ; Multica ne la réassociera plus à partir de son titre ou de sa branche.
+Vous pouvez aussi associer une PR à la main : dans le bloc **Pull requests** de la tâche, cliquez sur **+** et collez l'URL de la PR. Tant que la tâche n'a aucune PR, le bloc est masqué : utilisez plutôt la ligne **Ajouter …** en bas de la barre latérale, par exemple **Ajouter une pull request** ou **Ajouter un réveil ou une pull request**. Pour retirer une PR d'une tâche, ouvrez le menu **⋯** de sa ligne et choisissez **Retirer de la tâche** ; Multica ne la réassociera plus à partir de son titre ou de sa branche.
 
 ## Voir les PR d'une tâche
 
@@ -90,13 +90,13 @@ Une fois associées, les PR apparaissent dans le bloc **Pull requests** du déta
 
 - le dépôt, le numéro, le titre et l'auteur ;
 - l'état `Ouverte`, `Brouillon`, `Fusionnée` ou `Fermée` ;
-- le nombre de lignes ajoutées et supprimées, et le nombre de fichiers modifiés ;
+- le nombre de lignes ajoutées et supprimées, juste après le numéro, par exemple `#19 · +48 −12` ; le nombre de fichiers modifiés s'affiche au survol de la ligne ;
 - le statut CI : toutes les vérifications ont réussi (avec leur nombre), certaines sont en échec (avec le nom des vérifications concernées) ou certaines sont en cours ; les PR sans vérification configurée n'affichent pas cet élément, et « aucune vérification » n'est jamais considéré comme une réussite ;
 - la possibilité de fusion : « Prête à fusionner » (uniquement lorsque GitHub signale un état de fusion propre), « Conflits de fusion », « Bloquée » ou « En retard sur la base ».
 
 Le statut CI et la possibilité de fusion proviennent d'instantanés que Multica récupère depuis l'API GitHub, et les deux sont indépendants ; les PR fusionnées ou fermées n'affichent plus ni l'un ni l'autre. Lorsque GitHub est momentanément indisponible, la carte conserve le dernier instantané et le signale comme périmé.
 
-Sous la liste, une ligne indique ce qui va se passer : par exemple *Passe à Terminé quand #19 est fusionnée*, ou quelle PR a été fermée sans fusion. Cette ligne n'apparaît pas lorsque l'espace de travail ne change pas le statut ou que la tâche a déjà le statut cible.
+Sous la liste, une ligne indique ce qui va se passer : par exemple *Passe à Terminé quand #19 est fusionnée*, ou quelle PR a été fermée sans fusion. Quand une seule PR attend sa fusion, sa ligne l'indique directement : *À la fusion → Terminé*. Cette ligne n'apparaît pas lorsque l'espace de travail ne change pas le statut ou que la tâche a déjà le statut cible.
 
 Cliquez sur une entrée pour ouvrir la PR sur GitHub. Désactiver la **Barre latérale des pull requests** masque seulement ce bloc ; cela ne déconnecte rien.
 
@@ -107,7 +107,7 @@ Une PR fusionnée ne signifie pas forcément que la tâche est terminée : c'est
 Une tâche passe au statut choisi lorsque toutes les conditions suivantes sont réunies :
 
 1. toutes les PR associées sont `Merged` : une PR `Open` ou `Draft` fait attendre la tâche, tout comme une PR fermée sans fusion tant que vous ne l'avez pas retirée de la tâche ;
-2. la tâche n'est pas `done` ou `cancelled`, n'est pas en Triage, n'a pas déjà le statut cible et n'a pas été exclue pour elle seule (**Pull requests → ⋯ → Garder le statut à la fusion des PR**).
+2. la tâche n'est pas `done` ou `cancelled`, n'a pas déjà le statut cible et n'a pas été exclue pour elle seule (**Pull requests → ⋯ → Garder le statut à la fusion des PR**).
 
 <PrLinkDemo />
 

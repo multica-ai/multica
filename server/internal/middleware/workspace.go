@@ -245,6 +245,10 @@ func buildMiddleware(queries *db.Queries, resolve workspaceResolver, roles []str
 				writeError(w, http.StatusNotFound, "workspace not found")
 				return
 			}
+			if member.Role == "guest" && !GuestMayRequest(r) {
+				RefuseGuest(w, r)
+				return
+			}
 
 			if len(roles) > 0 {
 				allowed := false

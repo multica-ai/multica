@@ -20,9 +20,11 @@ import (
 //   GET /api/dashboard/failures/daily     per-(date, failure_reason) counts
 //   GET /api/dashboard/failures/by-agent  per-(agent, failure_reason) counts
 //
-// All of them accept ?days=N (defaults to 30, capped at 365) and an optional
-// ?project_id=<uuid> to scope the rollup to a single project. With no
-// project_id the data spans the whole workspace.
+// All of them accept ?days=N (defaults to 30, at most 371 so a 365-day weekly
+// chart can round up to whole weeks) and an optional ?project_id=<uuid> to
+// scope the rollup to a single project. With no project_id the data spans the
+// whole workspace. The workspace's plan may cut the window shorter; see
+// dashboard_history.go.
 //
 // Cutoff convention: the three date-bucketed series use parseSinceParamInTZ
 // (N+1 calendar days, the surplus day trimmed client-side with `-(days-1)`),
@@ -147,6 +149,29 @@ func parseProjectIDParam(w http.ResponseWriter, r *http.Request) (pgtype.UUID, b
 	return u, true
 }
 
+// standaloneSquadFilterSentinel selects runs with squad_id IS NULL (direct
+// standalone agent runs, not triggered via any squad).
+const standaloneSquadFilterSentinel = "__standalone__"
+
+// parseSquadScopeParam reads optional ?squad_id=<uuid | __standalone__>.
+// Returns ("", invalidUUID, true) when absent, ("standalone", invalidUUID, true)
+// for standalone-only filtering, or ("squad", uuid, true) for a single squad.
+func parseSquadScopeParam(w http.ResponseWriter, r *http.Request) (string, pgtype.UUID, bool) {
+	raw := r.URL.Query().Get("squad_id")
+	if raw == "" {
+		return "", pgtype.UUID{}, true
+	}
+	if raw == standaloneSquadFilterSentinel {
+		return "standalone", pgtype.UUID{}, true
+	}
+	u, err := util.ParseUUID(raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid squad_id")
+		return "", pgtype.UUID{}, false
+	}
+	return "squad", u, true
+}
+
 // dashboardProjectVisible guards the project_id filter: a private project
 // (MUL-8472) the request may not see is answered like one that does not exist,
 // with an empty rollup, and false.
@@ -199,13 +224,18 @@ func (h *Handler) GetDashboardUsageDaily(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
+	squadScope, squadID, ok := parseSquadScopeParam(w, r)
+	if !ok {
+		return
+	}
 	if !h.dashboardProjectVisible(w, r, workspaceID, projectID) {
 		return
 	}
 	tz := h.resolveViewingTZ(r)
-	since := parseSinceParamInTZ(r, 30, tz)
+	window := h.dashboardCutoff(w, r, workspaceID, tz, 0)
+	since := window.since
 
-	resp, err := h.listDashboardUsageDaily(r.Context(), parseUUID(workspaceID), tz, since, projectID)
+	resp, err := h.listDashboardUsageDaily(r.Context(), parseUUID(workspaceID), tz, since, projectID, squadScope, squadID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list usage")
 		return
@@ -219,12 +249,16 @@ func (h *Handler) listDashboardUsageDaily(
 	tz string,
 	since pgtype.Timestamptz,
 	projectID pgtype.UUID,
+	squadScope string,
+	squadID pgtype.UUID,
 ) ([]DashboardUsageDailyResponse, error) {
 	rows, err := h.Queries.ListDashboardUsageDaily(ctx, db.ListDashboardUsageDailyParams{
 		WorkspaceID: workspaceID,
 		Tz:          tz,
 		Since:       since,
 		ProjectID:   projectID,
+		SquadScope:  squadScope,
+		SquadID:     squadID,
 	})
 	if err != nil {
 		return nil, err
@@ -287,6 +321,10 @@ func (h *Handler) GetDashboardUsageByAgent(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+	squadScope, squadID, ok := parseSquadScopeParam(w, r)
+	if !ok {
+		return
+	}
 	if !h.dashboardProjectVisible(w, r, workspaceID, projectID) {
 		return
 	}
@@ -303,13 +341,18 @@ func (h *Handler) GetDashboardUsageByAgent(w http.ResponseWriter, r *http.Reques
 	// the chart directly above it, so at 1D a single agent's row could read
 	// higher than the workspace total (MUL-5551).
 	tz := h.resolveViewingTZ(r)
-	since := parseExactSinceParamInTZ(r, 30, tz)
+	window := h.dashboardCutoff(w, r, workspaceID, tz, 1)
+	since := window.since
 
-	resp, err := h.listDashboardUsageByAgent(r.Context(), parseUUID(workspaceID), since, projectID)
+	resp, err := h.listDashboardUsageByAgent(r.Context(), parseUUID(workspaceID), since, projectID, squadScope, squadID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list usage by agent")
 		return
 	}
+	// The one dashboard read recorded per page load or range change: this
+	// endpoint is fetched once per (range, project) and receives the range
+	// the viewer picked, where the date series receive it rounded to weeks.
+	h.recordDashboardRangeView(r.Context(), parseUUID(workspaceID), window)
 	writeJSON(w, http.StatusOK, foldRestrictedUsageByAgent(resp, restricted))
 }
 
@@ -353,11 +396,15 @@ func (h *Handler) listDashboardUsageByAgent(
 	workspaceID pgtype.UUID,
 	since pgtype.Timestamptz,
 	projectID pgtype.UUID,
+	squadScope string,
+	squadID pgtype.UUID,
 ) ([]DashboardUsageByAgentResponse, error) {
 	rows, err := h.Queries.ListDashboardUsageByAgent(ctx, db.ListDashboardUsageByAgentParams{
 		WorkspaceID: workspaceID,
 		Since:       since,
 		ProjectID:   projectID,
+		SquadScope:  squadScope,
+		SquadID:     squadID,
 	})
 	if err != nil {
 		return nil, err
@@ -381,6 +428,118 @@ func (h *Handler) listDashboardUsageByAgent(
 		}
 	}
 	return resp, nil
+}
+
+// DashboardUsageBySquadResponse is one (squad, agent, provider, model) row.
+// SquadID is "" for standalone (non-squad-triggered) runs. Keeping agent_id
+// lets the client aggregate squad totals and render inline member breakdowns
+// from one response while preserving per-model client pricing.
+type DashboardUsageBySquadResponse struct {
+	SquadID                  string `json:"squad_id"`
+	AgentID                  string `json:"agent_id"`
+	Provider                 string `json:"provider"`
+	Model                    string `json:"model"`
+	InputTokens              int64  `json:"input_tokens"`
+	OutputTokens             int64  `json:"output_tokens"`
+	CacheReadTokens          int64  `json:"cache_read_tokens"`
+	CacheWriteTokens         int64  `json:"cache_write_tokens"`
+	CostUSDTicks             int64  `json:"cost_usd_ticks"`
+	UncostedInputTokens      int64  `json:"uncosted_input_tokens"`
+	UncostedOutputTokens     int64  `json:"uncosted_output_tokens"`
+	UncostedCacheReadTokens  int64  `json:"uncosted_cache_read_tokens"`
+	UncostedCacheWriteTokens int64  `json:"uncosted_cache_write_tokens"`
+	TaskCount                int32  `json:"task_count"`
+}
+
+// GetDashboardUsageBySquad returns per-(squad, agent, provider, model) token
+// aggregates for the workspace, optionally scoped to a project and/or squad.
+func (h *Handler) GetDashboardUsageBySquad(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	projectID, ok := parseProjectIDParam(w, r)
+	if !ok {
+		return
+	}
+	squadScope, squadID, ok := parseSquadScopeParam(w, r)
+	if !ok {
+		return
+	}
+	if !h.dashboardProjectVisible(w, r, workspaceID, projectID) {
+		return
+	}
+	restricted, ok := h.dashboardRestrictedAgents(w, r, workspaceID, member.Role)
+	if !ok {
+		return
+	}
+	tz := h.resolveViewingTZ(r)
+	window := h.dashboardCutoff(w, r, workspaceID, tz, 1)
+	since := window.since
+
+	rows, err := h.Queries.ListDashboardUsageBySquad(r.Context(), db.ListDashboardUsageBySquadParams{
+		WorkspaceID: parseUUID(workspaceID),
+		Since:       since,
+		ProjectID:   projectID,
+		SquadScope:  squadScope,
+		SquadID:     squadID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list usage by squad")
+		return
+	}
+	resp := make([]DashboardUsageBySquadResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = DashboardUsageBySquadResponse{
+			SquadID:                  uuidToString(row.SquadID),
+			AgentID:                  uuidToString(row.AgentID),
+			Provider:                 row.Provider,
+			Model:                    row.Model,
+			InputTokens:              row.InputTokens,
+			OutputTokens:             row.OutputTokens,
+			CacheReadTokens:          row.CacheReadTokens,
+			CacheWriteTokens:         row.CacheWriteTokens,
+			CostUSDTicks:             row.CostUsdTicks,
+			UncostedInputTokens:      row.UncostedInputTokens,
+			UncostedOutputTokens:     row.UncostedOutputTokens,
+			UncostedCacheReadTokens:  row.UncostedCacheReadTokens,
+			UncostedCacheWriteTokens: row.UncostedCacheWriteTokens,
+			TaskCount:                row.TaskCount,
+		}
+	}
+	writeJSON(w, http.StatusOK, foldRestrictedUsageBySquad(resp, restricted))
+}
+
+type squadProviderModelKey struct{ squadID, provider, model string }
+
+func foldRestrictedUsageBySquad(
+	rows []DashboardUsageBySquadResponse,
+	restricted map[string]struct{},
+) []DashboardUsageBySquadResponse {
+	return foldRestrictedAgents(
+		rows,
+		restricted,
+		func(row DashboardUsageBySquadResponse) string { return row.AgentID },
+		func(row DashboardUsageBySquadResponse) (DashboardUsageBySquadResponse, squadProviderModelKey) {
+			key := squadProviderModelKey{squadID: row.SquadID, provider: row.Provider, model: row.Model}
+			row.AgentID = restrictedAgentsRowID
+			return row, key
+		},
+		func(dst, src DashboardUsageBySquadResponse) DashboardUsageBySquadResponse {
+			dst.InputTokens += src.InputTokens
+			dst.OutputTokens += src.OutputTokens
+			dst.CacheReadTokens += src.CacheReadTokens
+			dst.CacheWriteTokens += src.CacheWriteTokens
+			dst.CostUSDTicks += src.CostUSDTicks
+			dst.UncostedInputTokens += src.UncostedInputTokens
+			dst.UncostedOutputTokens += src.UncostedOutputTokens
+			dst.UncostedCacheReadTokens += src.UncostedCacheReadTokens
+			dst.UncostedCacheWriteTokens += src.UncostedCacheWriteTokens
+			dst.TaskCount += src.TaskCount
+			return dst
+		},
+	)
 }
 
 // DashboardAgentRunTimeResponse is one agent's total terminal-task run time
@@ -412,6 +571,10 @@ func (h *Handler) GetDashboardAgentRunTime(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+	squadScope, squadID, ok := parseSquadScopeParam(w, r)
+	if !ok {
+		return
+	}
 	if !h.dashboardProjectVisible(w, r, workspaceID, projectID) {
 		return
 	}
@@ -427,12 +590,15 @@ func (h *Handler) GetDashboardAgentRunTime(w http.ResponseWriter, r *http.Reques
 	// Tasks KPI tiles, so the N+1 cutoff put those two tiles on a wider
 	// window than the Cost / Tokens tiles beside them (MUL-5551).
 	tz := h.resolveViewingTZ(r)
-	since := parseExactSinceParamInTZ(r, 30, tz)
+	window := h.dashboardCutoff(w, r, workspaceID, tz, 1)
+	since := window.since
 
 	rows, err := h.Queries.ListDashboardAgentRunTime(r.Context(), db.ListDashboardAgentRunTimeParams{
 		WorkspaceID: parseUUID(workspaceID),
 		Since:       since,
 		ProjectID:   projectID,
+		SquadScope:  squadScope,
+		SquadID:     squadID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list agent runtime")
@@ -478,6 +644,95 @@ func foldRestrictedAgentRunTime(
 	)
 }
 
+// DashboardSquadRunTimeResponse is one (squad, agent) terminal-task run-time
+// bucket. SquadID is "" for standalone (non-squad-triggered) runs.
+type DashboardSquadRunTimeResponse struct {
+	SquadID          string `json:"squad_id"`
+	AgentID          string `json:"agent_id"`
+	TotalSeconds     int64  `json:"total_seconds"`
+	TaskCount        int32  `json:"task_count"`
+	MeteredTaskCount int32  `json:"metered_task_count"`
+	FailedCount      int32  `json:"failed_count"`
+	CancelledCount   int32  `json:"cancelled_count"`
+}
+
+// GetDashboardSquadRunTime returns per-(squad, agent) terminal task run time
+// and task counts for the workspace.
+func (h *Handler) GetDashboardSquadRunTime(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	projectID, ok := parseProjectIDParam(w, r)
+	if !ok {
+		return
+	}
+	squadScope, squadID, ok := parseSquadScopeParam(w, r)
+	if !ok {
+		return
+	}
+	if !h.dashboardProjectVisible(w, r, workspaceID, projectID) {
+		return
+	}
+	restricted, ok := h.dashboardRestrictedAgents(w, r, workspaceID, member.Role)
+	if !ok {
+		return
+	}
+	tz := h.resolveViewingTZ(r)
+	window := h.dashboardCutoff(w, r, workspaceID, tz, 1)
+	since := window.since
+
+	rows, err := h.Queries.ListDashboardSquadRunTime(r.Context(), db.ListDashboardSquadRunTimeParams{
+		WorkspaceID: parseUUID(workspaceID),
+		Since:       since,
+		ProjectID:   projectID,
+		SquadScope:  squadScope,
+		SquadID:     squadID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list squad runtime")
+		return
+	}
+	resp := make([]DashboardSquadRunTimeResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = DashboardSquadRunTimeResponse{
+			SquadID:          uuidToString(row.SquadID),
+			AgentID:          uuidToString(row.AgentID),
+			TotalSeconds:     row.TotalSeconds,
+			TaskCount:        row.TaskCount,
+			MeteredTaskCount: row.MeteredTaskCount,
+			FailedCount:      row.FailedCount,
+			CancelledCount:   row.CancelledCount,
+		}
+	}
+	writeJSON(w, http.StatusOK, foldRestrictedSquadRunTime(resp, restricted))
+}
+
+func foldRestrictedSquadRunTime(
+	rows []DashboardSquadRunTimeResponse,
+	restricted map[string]struct{},
+) []DashboardSquadRunTimeResponse {
+	return foldRestrictedAgents(
+		rows,
+		restricted,
+		func(row DashboardSquadRunTimeResponse) string { return row.AgentID },
+		func(row DashboardSquadRunTimeResponse) (DashboardSquadRunTimeResponse, string) {
+			squadID := row.SquadID
+			row.AgentID = restrictedAgentsRowID
+			return row, squadID
+		},
+		func(dst, src DashboardSquadRunTimeResponse) DashboardSquadRunTimeResponse {
+			dst.TotalSeconds += src.TotalSeconds
+			dst.TaskCount += src.TaskCount
+			dst.MeteredTaskCount += src.MeteredTaskCount
+			dst.FailedCount += src.FailedCount
+			dst.CancelledCount += src.CancelledCount
+			return dst
+		},
+	)
+}
+
 // DashboardRunTimeDailyResponse is one (date) bucket of terminal-task run
 // time and counts. Powers the workspace dashboard's daily Time and Tasks
 // charts — same toggle as Tokens / Cost, different metric. FailedCount and
@@ -504,19 +759,26 @@ func (h *Handler) GetDashboardRunTimeDaily(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+	squadScope, squadID, ok := parseSquadScopeParam(w, r)
+	if !ok {
+		return
+	}
 	if !h.dashboardProjectVisible(w, r, workspaceID, projectID) {
 		return
 	}
 	// Slice day buckets in the viewer's tz so the Time / Tasks charts cut
 	// their calendar day identically to the Cost / Tokens charts.
 	tz := h.resolveViewingTZ(r)
-	since := parseSinceParamInTZ(r, 30, tz)
+	window := h.dashboardCutoff(w, r, workspaceID, tz, 0)
+	since := window.since
 
 	rows, err := h.Queries.ListDashboardRunTimeDaily(r.Context(), db.ListDashboardRunTimeDailyParams{
 		WorkspaceID: parseUUID(workspaceID),
 		Tz:          tz,
 		Since:       since,
 		ProjectID:   projectID,
+		SquadScope:  squadScope,
+		SquadID:     squadID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list daily runtime")
@@ -572,19 +834,26 @@ func (h *Handler) GetDashboardFailuresDaily(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
+	squadScope, squadID, ok := parseSquadScopeParam(w, r)
+	if !ok {
+		return
+	}
 	if !h.dashboardProjectVisible(w, r, workspaceID, projectID) {
 		return
 	}
 	// Same viewer-tz day boundary as every other daily series so the Errors
 	// tab lines up with Cost / Tokens / Time / Tasks.
 	tz := h.resolveViewingTZ(r)
-	since := parseSinceParamInTZ(r, 30, tz)
+	window := h.dashboardCutoff(w, r, workspaceID, tz, 0)
+	since := window.since
 
 	rows, err := h.Queries.ListDashboardFailuresDaily(r.Context(), db.ListDashboardFailuresDailyParams{
 		WorkspaceID: parseUUID(workspaceID),
 		Tz:          tz,
 		Since:       since,
 		ProjectID:   projectID,
+		SquadScope:  squadScope,
+		SquadID:     squadID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list daily failures")
@@ -623,6 +892,10 @@ func (h *Handler) GetDashboardFailuresByAgent(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
+	squadScope, squadID, ok := parseSquadScopeParam(w, r)
+	if !ok {
+		return
+	}
 	if !h.dashboardProjectVisible(w, r, workspaceID, projectID) {
 		return
 	}
@@ -637,12 +910,15 @@ func (h *Handler) GetDashboardFailuresByAgent(w http.ResponseWriter, r *http.Req
 	// covered one extra day, so at days=1 the card could report yesterday's
 	// failures next to a chart showing none.
 	tz := h.resolveViewingTZ(r)
-	since := parseExactSinceParamInTZ(r, 30, tz)
+	window := h.dashboardCutoff(w, r, workspaceID, tz, 1)
+	since := window.since
 
 	rows, err := h.Queries.ListDashboardFailuresByAgent(r.Context(), db.ListDashboardFailuresByAgentParams{
 		WorkspaceID: parseUUID(workspaceID),
 		Since:       since,
 		ProjectID:   projectID,
+		SquadScope:  squadScope,
+		SquadID:     squadID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list failures by agent")
@@ -658,6 +934,87 @@ func (h *Handler) GetDashboardFailuresByAgent(w http.ResponseWriter, r *http.Req
 		}
 	}
 	writeJSON(w, http.StatusOK, foldRestrictedFailuresByAgent(resp, restricted))
+}
+
+// DashboardFailureBySquadResponse is one (squad, agent, failure_reason) bucket.
+// SquadID is "" for standalone runs; FailureReason == "" is the succeeded bucket.
+type DashboardFailureBySquadResponse struct {
+	SquadID       string `json:"squad_id"`
+	AgentID       string `json:"agent_id"`
+	FailureReason string `json:"failure_reason"`
+	TaskCount     int32  `json:"task_count"`
+}
+
+// GetDashboardFailuresBySquad returns per-(squad, agent, failure_reason)
+// terminal-task counts for the Errors tab's Squad view.
+func (h *Handler) GetDashboardFailuresBySquad(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	projectID, ok := parseProjectIDParam(w, r)
+	if !ok {
+		return
+	}
+	squadScope, squadID, ok := parseSquadScopeParam(w, r)
+	if !ok {
+		return
+	}
+	if !h.dashboardProjectVisible(w, r, workspaceID, projectID) {
+		return
+	}
+	restricted, ok := h.dashboardRestrictedAgents(w, r, workspaceID, member.Role)
+	if !ok {
+		return
+	}
+	tz := h.resolveViewingTZ(r)
+	window := h.dashboardCutoff(w, r, workspaceID, tz, 1)
+	since := window.since
+
+	rows, err := h.Queries.ListDashboardFailuresBySquad(r.Context(), db.ListDashboardFailuresBySquadParams{
+		WorkspaceID: parseUUID(workspaceID),
+		Since:       since,
+		ProjectID:   projectID,
+		SquadScope:  squadScope,
+		SquadID:     squadID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list failures by squad")
+		return
+	}
+	resp := make([]DashboardFailureBySquadResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = DashboardFailureBySquadResponse{
+			SquadID:       uuidToString(row.SquadID),
+			AgentID:       uuidToString(row.AgentID),
+			FailureReason: row.FailureReason,
+			TaskCount:     row.TaskCount,
+		}
+	}
+	writeJSON(w, http.StatusOK, foldRestrictedFailuresBySquad(resp, restricted))
+}
+
+type squadFailureReasonKey struct{ squadID, reason string }
+
+func foldRestrictedFailuresBySquad(
+	rows []DashboardFailureBySquadResponse,
+	restricted map[string]struct{},
+) []DashboardFailureBySquadResponse {
+	return foldRestrictedAgents(
+		rows,
+		restricted,
+		func(row DashboardFailureBySquadResponse) string { return row.AgentID },
+		func(row DashboardFailureBySquadResponse) (DashboardFailureBySquadResponse, squadFailureReasonKey) {
+			key := squadFailureReasonKey{squadID: row.SquadID, reason: row.FailureReason}
+			row.AgentID = restrictedAgentsRowID
+			return row, key
+		},
+		func(dst, src DashboardFailureBySquadResponse) DashboardFailureBySquadResponse {
+			dst.TaskCount += src.TaskCount
+			return dst
+		},
+	)
 }
 
 // The restricted bucket keeps its failure_reason split: the client derives the

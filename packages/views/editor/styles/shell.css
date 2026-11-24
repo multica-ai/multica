@@ -51,6 +51,37 @@
 }
 
 /* Bubble menu — floating toolbar pill */
+[data-mc="editor-toolbar"] {
+  transform-origin: bottom center;
+  transition:
+    opacity 130ms cubic-bezier(0.23, 1, 0.32, 1),
+    transform 130ms cubic-bezier(0.23, 1, 0.32, 1),
+    visibility 0ms linear;
+}
+
+[data-mc="editor-toolbar"][data-state="closed"] {
+  opacity: 0;
+  transform: translateY(4px) scale(0.97);
+  pointer-events: none;
+  transition:
+    opacity 90ms cubic-bezier(0.4, 0, 1, 1),
+    transform 90ms cubic-bezier(0.4, 0, 1, 1),
+    visibility 0ms linear 90ms;
+}
+
+[data-mc="editor-toolbar"][data-state="open"] {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-mc="editor-toolbar"],
+  [data-mc="editor-toolbar"][data-state="closed"] {
+    transition: none;
+    transform: none;
+  }
+}
+
 .bubble-menu {
   display: flex;
   align-items: center;
@@ -93,4 +124,30 @@
     0 0 0 1px color-mix(in srgb, black 4%, transparent);
   max-width: min(360px, calc(100vw - 2rem));
   white-space: nowrap;
+}
+
+/* Collaborators' carets (CollaborationCaret). The colour comes inline from
+   each collaborator's awareness state. */
+.rich-text-editor .collaboration-carets__caret {
+  position: relative;
+  margin-left: -1px;
+  margin-right: -1px;
+  border-left: 1px solid;
+  border-right: 1px solid;
+  word-break: normal;
+  pointer-events: none;
+}
+
+.rich-text-editor .collaboration-carets__label {
+  position: absolute;
+  top: -1.4em;
+  left: -1px;
+  border-radius: 3px 3px 3px 0;
+  padding: 0.1rem 0.3rem;
+  color: white;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: normal;
+  white-space: nowrap;
+  user-select: none;
 }

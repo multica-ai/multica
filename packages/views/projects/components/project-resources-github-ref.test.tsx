@@ -155,6 +155,15 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
     }
   });
 
+  it("lists the repositories read-only, with nothing to add, remove or change", () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" readOnly />);
+    expect(screen.getByText("Release line")).toBeTruthy();
+    expect(screen.getByText("release/2026-09")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /add repository/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /remove/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /release\/2026-09/ })).toBeNull();
+  });
+
   it("shows the ref beside a repo that has a custom label", () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
     expect(screen.getByText("Release line")).toBeTruthy();
@@ -345,6 +354,31 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
     expect(createMock.mock.calls[0]?.[0]).toEqual({
       resource_type: "github_repo",
       resource_ref: { url: "https://github.com/multica-ai/two", ref: "main" },
+    });
+  });
+
+  it.each([
+    "https://github.com/multica-ai/one.git",
+    "https://github.com/multica-ai/two",
+    "git@github.com:multica-ai/two.git",
+  ])("clears the previous branch when replacing a browse URL with %s", async (url) => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /add repository/i }));
+    const input = screen.getByLabelText(/paste a github url/i);
+    fireEvent.change(input, {
+      target: { value: "https://github.com/multica-ai/one/tree/release/2026-09" },
+    });
+    expect((screen.getByLabelText(/starting branch/i) as HTMLInputElement).value).toBe("release/2026-09");
+
+    fireEvent.change(input, { target: { value: url } });
+    expect((screen.getByLabelText(/starting branch/i) as HTMLInputElement).value).toBe("");
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
+    expect(createMock.mock.calls[0]?.[0]).toEqual({
+      resource_type: "github_repo",
+      resource_ref: { url },
     });
   });
 

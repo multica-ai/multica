@@ -16,7 +16,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
-import { useCurrentWorkspace } from "@multica/core/paths";
+import { paths, useCurrentWorkspace } from "@multica/core/paths";
 import { useCurrentMember } from "@multica/core/permissions";
 import { useFeatureEnabled } from "@multica/core/config";
 import { PLUGINS_V1_FLAG } from "@multica/core/feature-flags";
@@ -39,7 +39,7 @@ import {
   SettingsTab,
 } from "./settings-layout";
 import { AppLink, useOptionalNavigation } from "../../navigation";
-import { useComposioAvailable } from "./connected-apps-tab";
+import { useComposioAvailable } from "../../common/use-composio-available";
 import { settingsHref } from "./settings-navigation";
 
 /**
@@ -361,6 +361,8 @@ export function McpTab() {
  */
 function ToolSourcesOverview() {
   const { t } = useT("settings");
+  const { t: tl } = useT("layout");
+  const workspaceSlug = useCurrentWorkspace()?.slug;
   const navigation = useOptionalNavigation();
   const appsAvailable = useComposioAvailable();
   const tabHref = (tab: string) =>
@@ -376,14 +378,14 @@ function ToolSourcesOverview() {
       description: t(($) => $.mcp_sources.mcp),
       href: null,
     },
-    ...(appsAvailable
+    ...(appsAvailable && workspaceSlug
       ? [
           {
             key: "apps",
             icon: Plug,
-            title: t(($) => $.page.tabs.apps),
+            title: tl(($) => $.nav.apps),
             description: t(($) => $.mcp_sources.apps),
-            href: tabHref("apps"),
+            href: paths.workspace(workspaceSlug).apps(),
           },
         ]
       : []),

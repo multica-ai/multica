@@ -21,6 +21,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/projectaccess"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -296,6 +297,7 @@ func (h *Handler) writeSearchIndexError(w http.ResponseWriter, r *http.Request, 
 // GetSearchIndexManifest returns the snapshot a new local copy starts from and
 // the size of the text it would hold.
 func (h *Handler) GetSearchIndexManifest(w http.ResponseWriter, r *http.Request) {
+	r = h.withBlockerViewer(r)
 	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace_id")
 	if !ok {
 		return
@@ -341,6 +343,7 @@ func (h *Handler) GetSearchIndexManifest(w http.ResponseWriter, r *http.Request)
 // GetSearchIndexSnapshot returns one page of issues ordered by number, every
 // live comment on those issues, and (on the first page) every project.
 func (h *Handler) GetSearchIndexSnapshot(w http.ResponseWriter, r *http.Request) {
+	r = h.withBlockerViewer(r)
 	ctx := r.Context()
 	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace_id")
 	if !ok {
@@ -453,6 +456,7 @@ func (h *Handler) GetSearchIndexSnapshot(w http.ResponseWriter, r *http.Request)
 // cursor has not seen, or when the copy predates the current access rules and
 // the caller cannot see every project; the client must then rebuild its copy.
 func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request) {
+	r = h.withBlockerViewer(r)
 	ctx := r.Context()
 	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace_id")
 	if !ok {
@@ -479,18 +483,28 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 		limit = min(req.Limit, searchIndexChangesMaxLimit)
 	}
 
+	// Agents and other non-user callers have no per-user marker to check.
+	viewer, _ := util.ParseUUID(requestUserID(r))
 	var (
-		pruned   bool
-		target   = cur.Target
-		changes  []db.ListSearchIndexChangesRow
-		issues   []db.Issue
-		comments []db.ListSearchIndexCommentsByIDsRow
-		projects []db.Project
+		pruned        bool
+		accessChanged bool
+		target        = cur.Target
+		changes       []db.ListSearchIndexChangesRow
+		issues        []db.Issue
+		comments      []db.ListSearchIndexCommentsByIDsRow
+		projects      []db.Project
 	)
 	err = h.runSearchIndexRead(ctx, func(q *db.Queries) error {
 		var err error
 		if pruned, err = q.SearchIndexSinceIsPruned(ctx, cur.Since); err != nil || pruned {
 			return err
+		}
+		if viewer.Valid {
+			if accessChanged, err = q.SearchAccessChangedAfter(ctx, db.SearchAccessChangedAfterParams{
+				WorkspaceID: wsUUID, UserID: viewer, SinceSnapshot: cur.Since,
+			}); err != nil || accessChanged {
+				return err
+			}
 		}
 		if target == "" {
 			if target, err = q.GetSearchIndexCurrentSnapshot(ctx); err != nil {
@@ -558,6 +572,14 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 	}
 	if pruned {
 		writeError(w, http.StatusGone, "search index cursor expired; rebuild the local index")
+		return
+	}
+	if accessChanged {
+		// The caller's access changed after this copy's snapshot (made a
+		// guest or a member, or a guest gained or lost a project). The
+		// content it gained or lost was not rewritten, so no change would
+		// deliver or remove it; only a rebuild does.
+		writeError(w, http.StatusGone, "search index access changed; rebuild the local index")
 		return
 	}
 	// Entities in a project the caller cannot see are reported as deleted, so
@@ -667,10 +689,12 @@ func (h *Handler) searchIndexIssues(ctx context.Context, wsUUID pgtype.UUID, hid
 	}
 	prefix := h.getIssuePrefix(ctx, wsUUID)
 	var originals []pgtype.UUID
+	var blockerPageIDs []pgtype.UUID
 	for _, is := range issues {
 		originals = appendDuplicateOriginal(originals, is.Status, is.DuplicateOfIssueID)
+		blockerPageIDs = append(blockerPageIDs, is.ID)
 	}
-	fill := h.newStatusCategoryFiller(ctx, wsUUID, hidden, originals...)
+	fill := h.newStatusCategoryFiller(ctx, wsUUID, hidden, originals, blockerPageIDs...)
 	for _, is := range issues {
 		resp := issueToResponse(is, prefix)
 		fill(&resp)

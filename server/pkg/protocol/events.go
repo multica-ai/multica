@@ -152,6 +152,16 @@ const (
 	// member: it exists so their other devices follow along.
 	EventIssueViewPreferenceChanged = "issue_view_preference:changed"
 
+	EventDocCreated = "doc:created"
+	EventDocUpdated = "doc:updated"
+	EventDocDeleted = "doc:deleted"
+	// A doc comment was added, resolved, reopened or deleted. Payload:
+	// doc_id, comment_id; clients refetch the doc's comments.
+	EventDocCommentChanged = "doc_comment:changed"
+	EventDocFolderCreated  = "doc_folder:created"
+	EventDocFolderUpdated  = "doc_folder:updated"
+	EventDocFolderDeleted  = "doc_folder:deleted"
+
 	// Pin events
 	EventPinCreated   = "pin:created"
 	EventPinDeleted   = "pin:deleted"

@@ -29,6 +29,9 @@ const WORKSPACE_SCOPED_KEYS = [
   "multica:chat:activeSessionId",
   "multica:chat:expanded",
   "multica_navigation",
+  // An invitation held back by the member limit while its workspace upgrades
+  // (billing/member-limit.ts). It carries the invitee's email.
+  "multica:upgrade_invite",
 ];
 
 /** Remove all workspace-scoped storage entries for the given workspace slug. */

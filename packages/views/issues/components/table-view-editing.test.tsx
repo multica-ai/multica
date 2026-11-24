@@ -208,10 +208,12 @@ function Harness({
   childProgressMap,
   surfaceKey,
   onCreateIssue = () => {},
+  canCreate = true,
 }: {
   childProgressMap: Map<string, ChildProgress>;
   surfaceKey: string;
   onCreateIssue?: (defaults: IssueCreateDefaults) => void;
+  canCreate?: boolean;
 }) {
   return (
     <ViewStoreProvider store={getIssueSurfaceViewStore(surfaceKey)}>
@@ -222,7 +224,7 @@ function Harness({
           search=""
           onSearchChange={() => {}}
           onLoadedIssuesChange={() => {}}
-          onCreateIssue={onCreateIssue}
+          onCreateIssue={canCreate ? onCreateIssue : undefined}
           exportIssues={() => Promise.resolve(serverIssues)}
           resolveExportLookups={() =>
             Promise.resolve({
@@ -299,7 +301,6 @@ describe("TableView cell editors under data refresh", () => {
       listMembers: async () => [],
       listAgents: async () => [],
       listSquads: async () => [],
-      getAssigneeFrequency: async () => [],
       listIssueStatuses: async () => ({ statuses: [] }),
       listIssueTableRows: async () => ({
         query_fingerprint: "test",
@@ -435,6 +436,25 @@ describe("TableView cell editors under data refresh", () => {
     });
   });
 
+  it("offers no sub-issue creation when the viewer cannot create issues (guest, MUL-9420)", async () => {
+    serverIssues = [makeIssue("a", "Alpha task", "todo")];
+
+    renderWithI18n(
+      <QueryClientProvider client={queryClient}>
+        <Harness
+          childProgressMap={new Map()}
+          surfaceKey={`test-no-sub-issue-${Math.floor(Math.random() * 1e9)}`}
+          canCreate={false}
+        />
+      </QueryClientProvider>,
+    );
+
+    const row = (await screen.findByText("MUL-a")).closest("tr")!;
+    expect(within(row).queryByRole("button", { name: "Create sub-issue" })).toBeNull();
+    // The row's other title action stays.
+    expect(within(row).getByRole("button", { name: "Rename issue" })).toBeInTheDocument();
+  });
+
   it("uses the preferred peek for both titles and row space; Shift opens the full page instead", async () => {
     useIssueOpeningStore.getState().setOpenMode("peek");
     serverIssues = [makeIssue("a", "Alpha task", "todo")];
@@ -455,10 +475,10 @@ describe("TableView cell editors under data refresh", () => {
     expect(navigationMocks.push).not.toHaveBeenCalled();
     // In preview mode Shift+Click opens the other target: the full page, in place.
     fireEvent.click(title, { shiftKey: true });
-    expect(navigationMocks.push).toHaveBeenCalledWith("/test/issues/a");
+    expect(navigationMocks.push).toHaveBeenCalledWith("/test/issues/MUL-a");
     expect(peek.toggle).not.toHaveBeenCalled();
     fireEvent.click(row, { metaKey: true });
-    expect(navigationMocks.openInNewTab).toHaveBeenCalledWith("/test/issues/a", "MUL-a");
+    expect(navigationMocks.openInNewTab).toHaveBeenCalledWith("/test/issues/MUL-a", "MUL-a");
     expect(peek.open).toHaveBeenCalledTimes(2);
   });
 
@@ -479,25 +499,25 @@ describe("TableView cell editors under data refresh", () => {
     const title = within(row).getByRole("button", { name: "Alpha task" });
 
     await user.click(title);
-    expect(navigationMocks.push).toHaveBeenCalledWith("/test/issues/a");
+    expect(navigationMocks.push).toHaveBeenCalledWith("/test/issues/MUL-a");
     expect(navigationMocks.openInNewTab).not.toHaveBeenCalled();
 
     navigationMocks.push.mockClear();
     await user.click(row);
-    expect(navigationMocks.push).toHaveBeenCalledWith("/test/issues/a");
+    expect(navigationMocks.push).toHaveBeenCalledWith("/test/issues/MUL-a");
     expect(navigationMocks.openInNewTab).not.toHaveBeenCalled();
 
     navigationMocks.push.mockClear();
     fireEvent.click(title, { metaKey: true });
     expect(navigationMocks.openInNewTab).toHaveBeenCalledWith(
-      "/test/issues/a",
+      "/test/issues/MUL-a",
       "MUL-a",
     );
 
     navigationMocks.openInNewTab.mockClear();
     fireEvent.click(row, { metaKey: true, shiftKey: true });
     expect(navigationMocks.openInNewTab).toHaveBeenCalledWith(
-      "/test/issues/a",
+      "/test/issues/MUL-a",
       "MUL-a",
       { activate: true },
     );
@@ -534,7 +554,7 @@ describe("TableView cell editors under data refresh", () => {
     // Dead space on the row still opens a background tab on middle click.
     auxClick(row);
     expect(navigationMocks.openInNewTab).toHaveBeenCalledWith(
-      "/test/issues/a",
+      "/test/issues/MUL-a",
       "MUL-a",
     );
   });
@@ -559,15 +579,15 @@ describe("TableView cell editors under data refresh", () => {
     const title = within(row).getByRole("button", { name: "Alpha task" });
 
     await user.click(title);
-    expect(navigationMocks.push).toHaveBeenCalledWith("/test/issues/a");
+    expect(navigationMocks.push).toHaveBeenCalledWith("/test/issues/MUL-a");
     expect(windowOpen).not.toHaveBeenCalled();
 
     fireEvent.click(title, { metaKey: true });
     expect(navigationMocks.getShareableUrl).toHaveBeenCalledWith(
-      "/test/issues/a",
+      "/test/issues/MUL-a",
     );
     expect(windowOpen).toHaveBeenCalledWith(
-      "https://app.example/test/issues/a",
+      "https://app.example/test/issues/MUL-a",
       "_blank",
       "noopener,noreferrer",
     );

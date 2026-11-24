@@ -15,6 +15,10 @@ export type InboxItemType =
   | "due_date_changed"
   | "new_comment"
   | "mentioned"
+  // A new comment in a doc discussion the recipient wrote in, or one that
+  // mentions them. Details carry doc_id, thread_id and the quoted text.
+  | "doc_comment"
+  | "doc_mentioned"
   | "task_failed"
   | "reaction_added"
   // No longer written, but older servers wrote them and those rows remain;
@@ -33,9 +37,12 @@ export type InboxItemType =
   // same Inbox model so read/archive/realtime behavior remains consistent.
   | "autopilot_paused"
   | "autopilot_quota_exceeded"
+  // The workspace used its monthly app tool calls; sent to owners and admins.
+  | "app_tool_calls_quota_exceeded"
   // Sub-issues of an issue assigned to the recipient closed (the child_done
   // system rule notifies a member assignee instead of waking an agent).
   | "children_done"
+  | "blockers_done"
   // A workspace owner added themselves to a private project the recipient is
   // a member of. Issue-less: details carry project_id, project_title and
   // joined_by (the owner's name).
@@ -110,6 +117,11 @@ export interface InboxItem {
 /** One snoozed issue in the viewer's inbox (`GET /api/inbox/snoozed`). */
 export interface SnoozedInboxIssue {
   issue_id: string;
+  /** The issue's identifier (MUL-123) to link to; absent from older servers. */
+  issue_identifier?: string | null;
+  /** The issue's title and status; absent from older servers, which leave the row to fetch the issue. */
+  issue_title?: string | null;
+  issue_status?: IssueStatus | null;
   /** The issue's newest notification: the id the snooze endpoints take. */
   item_id: string;
   snoozed_until: string;

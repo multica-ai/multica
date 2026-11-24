@@ -8,9 +8,14 @@
  * people actually report as slow (MUL-9538 and friends); `p99` is the 99th
  * percentile issue.
  *
- * Everything is synthetic and deterministic: the same DATASET_VERSION gives
- * the same text, structure and image bytes, and the manifest's digest proves
- * it, so two refs measured against one seeded database see identical data.
+ * Everything is synthetic and deterministic: the same generator gives the same
+ * text, structure and image bytes, so two refs measured against one seeded
+ * database see identical data. The digest covers this file's own source and
+ * the image bytes, so any change to how the data is generated (run output
+ * length, thread shape, where images land, the background Inbox) gives a new
+ * digest, and reports from before and after it are never compared as if they
+ * measured the same work. Bump DATASET_VERSION as well when the data itself
+ * changes, so the reports say so in words.
  * Rows go straight into the isolated local database (no agent ever runs);
  * images go through the real upload endpoint so their URLs, dimensions and
  * bytes are what the app normally serves.
@@ -19,6 +24,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { TestApiClient } from "../../fixtures";
 import { mediaBytes } from "../fixtures/image-heavy-thread";
@@ -137,13 +143,18 @@ function description(title: string): string {
   ].join("\n\n");
 }
 
-/** The structure and text of the dataset; its hash identifies what was measured. */
+/**
+ * Identifies what was measured. Every size, text and seeding rule lives in
+ * this file, so hashing its source covers them all, including the ones no list
+ * of parameters would remember to name. An edit that changes nothing (a
+ * comment) also changes the digest; the cost is one reseed, about a minute.
+ * Not covered: the shared helpers seeding goes through (`TestApiClient`, the
+ * upload endpoint) and server-side defaults; the report's counts show those.
+ */
 export function datasetDigest(): string {
-  const spec = datasetSpec();
-  const rand = rng(9539);
-  const bodies = spec.issues.map((issue) => Array.from({ length: issue.comments }, (_, i) => commentBody(rand, i)));
   return createHash("sha256")
-    .update(JSON.stringify({ version: DATASET_VERSION, spec, bodies }))
+    .update(DATASET_VERSION)
+    .update(readFileSync(fileURLToPath(import.meta.url)))
     .update(mediaBytes().original)
     .digest("hex")
     .slice(0, 16);

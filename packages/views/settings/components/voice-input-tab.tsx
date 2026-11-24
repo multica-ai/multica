@@ -138,7 +138,7 @@ function ShortcutRow() {
     >
       <div className="flex items-center gap-3">
         {shortcut ? (
-          <ShortcutKeycaps shortcut={shortcut} size="md" />
+          <ShortcutKeycaps shortcut={shortcut} size="md" layout="split" />
         ) : (
           <span className="text-caption text-muted-foreground">
             {t(($) => $.voice_input.shortcut.unassigned)}

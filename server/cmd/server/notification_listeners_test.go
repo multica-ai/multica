@@ -8,6 +8,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -58,6 +59,7 @@ func inboxItemsForRecipient(t *testing.T, queries *db.Queries, recipientID strin
 		WorkspaceID:   util.MustParseUUID(testWorkspaceID),
 		RecipientType: "member",
 		RecipientID:   util.MustParseUUID(recipientID),
+		RowLimit:      inbox.ActiveLimit,
 	})
 	if err != nil {
 		t.Fatalf("ListInboxItems: %v", err)
@@ -1319,6 +1321,10 @@ func TestNotification_StatusChange_ArchivesStaleTaskFailed(t *testing.T) {
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
 
+	// The actor's own status change would archive every row it has on the
+	// issue; this test is about which rows the change retires for everyone.
+	setNotificationPref(t, testUserID, "auto_archive_on_status", "muted")
+
 	subEmail := "notif-archive-task-failed-sub@multica.ai"
 	subID := createNotificationMember(t, subEmail)
 	t.Cleanup(func() { cleanupTestUser(t, subEmail) })
@@ -1550,8 +1556,10 @@ func TestNotification_StatusChange_DoneKeepsInboxWhenNotArchivedByActor(t *testi
 
 // TestNotification_StatusChange_TerminalArchivesIssueInbox verifies that a
 // closed status (cancelled) clears the inbox like done does, while a status
-// that is not done or closed keeps the issue's notifications.
+// that is not done or closed keeps the issue's notifications for a member who
+// turned off archiving on other status changes.
 func TestNotification_StatusChange_TerminalArchivesIssueInbox(t *testing.T) {
+	setNotificationPref(t, testUserID, "auto_archive_on_status", "muted")
 	for _, tc := range []struct {
 		status     string
 		wantActive int
@@ -1586,12 +1594,238 @@ func TestNotification_StatusChange_TerminalArchivesIssueInbox(t *testing.T) {
 	}
 }
 
+func seedInboxRow(t *testing.T, recipientID, issueID string) {
+	t.Helper()
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, details)
+		VALUES ($1, 'member', $2, 'new_comment', 'info', $3, 'acted archive test', '{}')
+	`, testWorkspaceID, recipientID, issueID); err != nil {
+		t.Fatalf("seed notification: %v", err)
+	}
+}
+
+func publishCommentBy(bus *events.Bus, issueID, actorType, actorID string) {
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   actorType,
+		ActorID:     actorID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         "00000000-0000-0000-0000-000000000000",
+				IssueID:    issueID,
+				AuthorType: actorType,
+				AuthorID:   actorID,
+				Content:    "looks good, merging",
+				Type:       "comment",
+			},
+			"issue_title":  "acted archive test",
+			"issue_status": "in_review",
+		},
+	})
+}
+
+func publishIssueFieldsBy(bus *events.Bus, issueID, actorID string, changed ...string) {
+	payload := map[string]any{
+		"issue": handler.IssueResponse{
+			ID:          issueID,
+			WorkspaceID: testWorkspaceID,
+			Title:       "acted archive test",
+			Status:      "in_review",
+			Priority:    "high",
+			CreatorType: "member",
+			CreatorID:   testUserID,
+		},
+		"prev_status":   "in_review",
+		"prev_priority": "medium",
+	}
+	for _, key := range changed {
+		payload[key] = true
+	}
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     actorID,
+		Payload:     payload,
+	})
+}
+
+func publishLabelsChangedBy(bus *events.Bus, issueID, actorID string) {
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueLabelsChanged,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     actorID,
+		Payload:     map[string]any{"issue_id": issueID},
+	})
+}
+
+// TestNotification_HandlingArchivesIssueInbox verifies that commenting on an
+// issue, advancing its status, reassigning it, or tidying it archives the
+// actor's own notifications once enabled in preferences, and that other
+// recipients keep theirs.
+func TestNotification_HandlingArchivesIssueInbox(t *testing.T) {
+	queries := db.New(testPool)
+
+	customEmail := "notif-handled-archive-custom@multica.ai"
+	customID := createNotificationMember(t, customEmail)
+	t.Cleanup(func() { cleanupTestUser(t, customEmail) })
+	for _, key := range []string{
+		"auto_archive_on_comment",
+		"auto_archive_on_status",
+		"auto_archive_on_assignee",
+		"auto_archive_on_priority",
+		"auto_archive_on_project",
+		"auto_archive_on_dates",
+		"auto_archive_on_labels",
+	} {
+		setNotificationPref(t, customID, key, "all")
+	}
+
+	for _, tc := range []struct {
+		name  string
+		actor string
+		act   func(bus *events.Bus, issueID, actorID string)
+	}{
+		{"comment", customID, func(bus *events.Bus, issueID, actorID string) { publishCommentBy(bus, issueID, "member", actorID) }},
+		{"status", customID, func(bus *events.Bus, issueID, actorID string) {
+			publishIssueFieldsBy(bus, issueID, actorID, "status_changed")
+		}},
+		{"assignee", customID, func(bus *events.Bus, issueID, actorID string) {
+			publishIssueFieldsBy(bus, issueID, actorID, "assignee_changed")
+		}},
+		{"priority", customID, func(bus *events.Bus, issueID, actorID string) {
+			publishIssueFieldsBy(bus, issueID, actorID, "priority_changed")
+		}},
+		{"project", customID, func(bus *events.Bus, issueID, actorID string) {
+			publishIssueFieldsBy(bus, issueID, actorID, "project_changed")
+		}},
+		{"due date", customID, func(bus *events.Bus, issueID, actorID string) {
+			publishIssueFieldsBy(bus, issueID, actorID, "due_date_changed")
+		}},
+		{"labels", customID, publishLabelsChangedBy},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bus := newNotificationBus(t, queries)
+			issueID := createTestIssue(t, testWorkspaceID, testUserID)
+			t.Cleanup(func() {
+				cleanupInboxForIssue(t, issueID)
+				cleanupTestIssue(t, issueID)
+			})
+			seedInboxRow(t, tc.actor, issueID)
+			seedInboxRow(t, testUserID, issueID)
+
+			var reasons []any
+			bus.Subscribe(protocol.EventInboxBatchArchived, func(e events.Event) {
+				payload, _ := e.Payload.(map[string]any)
+				if payload["issue_id"] == issueID && payload["recipient_id"] == tc.actor {
+					reasons = append(reasons, payload["reason"])
+				}
+			})
+
+			tc.act(bus, issueID, tc.actor)
+
+			if active := countActiveInboxForIssue(t, tc.actor, issueID); active != 0 {
+				t.Fatalf("actor: expected no active inbox rows after acting, got %d", active)
+			}
+			if active := countActiveInboxForIssue(t, testUserID, issueID); active != 1 {
+				t.Fatalf("other recipient: expected 1 active inbox row, got %d", active)
+			}
+			if len(reasons) != 1 || reasons[0] != "actor_acted" {
+				t.Fatalf("expected one inbox:batch-archived with reason actor_acted, got %v", reasons)
+			}
+		})
+	}
+}
+
+// TestNotification_HandlingKeepsInbox verifies that the inbox stays by default
+// for field edits and plain comments that do not trigger an agent, for an
+// action the member turned off, and for an agent actor. Moving to an unstarted
+// status never archives even when status-advance auto-archive is turned on.
+func TestNotification_HandlingKeepsInbox(t *testing.T) {
+	queries := db.New(testPool)
+
+	defaultEmail := "notif-handled-keep-default@multica.ai"
+	defaultID := createNotificationMember(t, defaultEmail)
+	t.Cleanup(func() { cleanupTestUser(t, defaultEmail) })
+
+	statusOnEmail := "notif-handled-keep-status-on@multica.ai"
+	statusOnID := createNotificationMember(t, statusOnEmail)
+	t.Cleanup(func() { cleanupTestUser(t, statusOnEmail) })
+	setNotificationPref(t, statusOnID, "auto_archive_on_status", "all")
+
+	mutedEmail := "notif-handled-keep-muted@multica.ai"
+	mutedID := createNotificationMember(t, mutedEmail)
+	t.Cleanup(func() { cleanupTestUser(t, mutedEmail) })
+	for _, key := range []string{"auto_archive_completed", "auto_archive_on_agent_trigger", "auto_archive_on_comment", "auto_archive_on_assignee"} {
+		setNotificationPref(t, mutedID, key, "muted")
+	}
+
+	for _, tc := range []struct {
+		name      string
+		recipient string
+		act       func(bus *events.Bus, issueID string)
+	}{
+		{"comment without agent trigger by default", defaultID, func(bus *events.Bus, issueID string) {
+			publishCommentBy(bus, issueID, "member", defaultID)
+		}},
+		{"status advance without agent trigger by default", defaultID, func(bus *events.Bus, issueID string) {
+			publishIssueFieldsBy(bus, issueID, defaultID, "status_changed")
+		}},
+		{"assignee change without agent trigger by default", defaultID, func(bus *events.Bus, issueID string) {
+			publishIssueFieldsBy(bus, issueID, defaultID, "assignee_changed")
+		}},
+		{"tidying edits by default", defaultID, func(bus *events.Bus, issueID string) {
+			publishIssueFieldsBy(bus, issueID, defaultID,
+				"title_changed", "priority_changed", "project_changed", "start_date_changed", "due_date_changed")
+		}},
+		{"labels by default", defaultID, func(bus *events.Bus, issueID string) { publishLabelsChangedBy(bus, issueID, defaultID) }},
+		{"agent actor", defaultID, func(bus *events.Bus, issueID string) {
+			publishCommentBy(bus, issueID, "agent", "00000000-0000-0000-0000-aaaaaaaaaaaa")
+		}},
+		{"comment turned off", mutedID, func(bus *events.Bus, issueID string) { publishCommentBy(bus, issueID, "member", mutedID) }},
+		{"assignee turned off", mutedID, func(bus *events.Bus, issueID string) {
+			publishIssueFieldsBy(bus, issueID, mutedID, "assignee_changed")
+		}},
+		{"completing turned off", mutedID, func(bus *events.Bus, issueID string) {
+			publishStatusChangeBy(bus, issueID, "done", "in_review", "member", mutedID)
+		}},
+		{"triage from backlog to todo even with status enabled", statusOnID, func(bus *events.Bus, issueID string) {
+			publishStatusChangeBy(bus, issueID, "todo", "backlog", "member", statusOnID)
+		}},
+		{"reopening to todo even with status enabled", statusOnID, func(bus *events.Bus, issueID string) {
+			publishStatusChangeBy(bus, issueID, "todo", "done", "member", statusOnID)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bus := newNotificationBus(t, queries)
+			issueID := createTestIssue(t, testWorkspaceID, testUserID)
+			t.Cleanup(func() {
+				cleanupInboxForIssue(t, issueID)
+				cleanupTestIssue(t, issueID)
+			})
+			seedInboxRow(t, tc.recipient, issueID)
+
+			tc.act(bus, issueID)
+
+			if active := countActiveInboxForIssue(t, tc.recipient, issueID); active != 1 {
+				t.Fatalf("expected the notification to stay in the inbox, got %d active", active)
+			}
+		})
+	}
+}
+
 // TestNotification_StatusChange_NonTerminalKeepsTaskFailed verifies that a
 // transition to a non-terminal status (e.g. in_progress) does NOT archive
 // existing task_failed inbox rows.
 func TestNotification_StatusChange_NonTerminalKeepsTaskFailed(t *testing.T) {
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
+
+	// The actor's own status change would archive every row it has on the
+	// issue; this test is about which rows the change retires for everyone.
+	setNotificationPref(t, testUserID, "auto_archive_on_status", "muted")
 
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)
 	t.Cleanup(func() {

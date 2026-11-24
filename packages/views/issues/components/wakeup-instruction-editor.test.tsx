@@ -27,7 +27,7 @@ function mount() {
   return client;
 }
 async function open() {
-  fireEvent.click(screen.getByRole("button", { name: "Edit prompt" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit instructions" }));
   return screen.findByRole("textbox", { name: "What to do when woken" });
 }
 it("loads instructions only on demand and saves only prompt fields with its editing snapshot", async () => {

@@ -16,6 +16,7 @@
     "autopilots": "Autopilots",
     "chats": "Chats",
     "skills": "Skills",
+    "docs": "Docs",
     "cancelled": "Cancelled",
     "recent": "Recent",
     "workspaces": "Workspaces",
@@ -137,7 +138,7 @@
   },
   "delegate": {
     "row": "Hand to agent: “{{prompt}}”",
-    "hint": "Quick create"
+    "hint": "Create with agent"
   },
   "best": {
     "assign": "Assign {{subject}} to {{name}}",
@@ -163,5 +164,6 @@
   },
   "trigger": {
     "label": "Search..."
-  }
+  },
+  "untitled_doc": "Untitled"
 }

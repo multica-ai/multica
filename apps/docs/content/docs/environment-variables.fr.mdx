@@ -47,6 +47,8 @@ Vous devez aussi choisir un service d'e-mail ; sinon, les codes de vérification
 | `LOG_LEVEL` | valeur par défaut de l'application | Niveau de journalisation |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | Délai d'attente, après un signal d'arrêt, avant le début de l'arrêt propre |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | Durée pendant laquelle un runtime hors ligne peut se reconnecter avant que ses exécutions en cours n'échouent ; les valeurs inférieures à `150s` sont relevées à ce plancher |
+| `FF_LOCAL_SEARCH_INDEX` | `on` | Le Web et le Desktop maintiennent un index de recherche local par espace de travail ; définissez `off` pour renvoyer les recherches vers le serveur |
+| `FF_DASHBOARD_HISTORY_365D` | `on` | Active la plage de 365 jours sur la page Statistiques ; définissez `off` si les requêtes annuelles sont trop lentes pour votre base de données |
 
 Lorsque vous définissez un délai de maintien avant arrêt sur Kubernetes, `terminationGracePeriodSeconds` doit dépasser ce délai plus le temps nécessaire à l'arrêt proprement dit.
 
@@ -194,15 +196,8 @@ Les limites de débit d'authentification nécessitent `REDIS_URL` ; sans cette v
 | Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | Clé de chiffrement du jeton du bot de 32 octets, encodée en Base64 |
 | WeChat | `MULTICA_WEIXIN_SECRET_KEY` | Clé de 32 octets encodée en Base64 pour chiffrer les identifiants WeChat et l’état du QR code |
 | Telegram | `MULTICA_TELEGRAM_TOOL_PROGRESS` | Étapes d'outils affichées dans la réponse diffusée : `auto` (par défaut : détails en conversation privée, type de travail dans les groupes), `off`, `summary` ou `detail` |
-| Composio | `COMPOSIO_API_KEY` | Active les connexions d'outils Composio |
-| Composio | `COMPOSIO_CALLBACK_BASE_URL` | URL de l'API de rappel ; peut se rabattre sur `MULTICA_PUBLIC_URL` |
-| Composio | `COMPOSIO_STATE_SECRET` | Secret de signature de l'état OAuth ; peut être dérivé de `JWT_SECRET` |
 | Git auto-hébergé | `MULTICA_VCS_INTEGRATION_ENABLED` | Interrupteur de l'intégration Forgejo/Gitea/GitLab ; activé par défaut dans compose |
 | Git auto-hébergé | `MULTICA_VCS_SECRET_KEY` | Clé de chiffrement de 32 octets, encodée en Base64 (`openssl rand -base64 32`) ; sans elle, la fonctionnalité est entièrement indisponible |
-| Plugins | `MULTICA_PLUGIN_SECRET_KEY` | Clé de 32 octets, encodée en Base64, pour les secrets stockés et les URL de lancement de surface chiffrées |
-| Plugins | `MULTICA_PLUGIN_SURFACE_ORIGIN` | Origine navigateur dédiée, sans cookies, routée vers ce backend ; doit différer des origines de l'application et de l'API, et préserver `Host` |
-| Plugins | `MULTICA_PLUGIN_API_URL` | URL de base complète et versionnée de la Plugin Public API, comme `https://plugin-api.example.com/v1` ; se rabat sur `MULTICA_PUBLIC_URL` + `/v1` |
-| Plugins | `MULTICA_PLUGIN_DIR` | Répertoire absolu facultatif utilisé pour publier des bundles de plugins locaux pendant le développement |
 | Boutique de thèmes | `MULTICA_THEME_REGISTRY_URL` | L'`index.json` d'un autre registre, par exemple un fork de l'officiel ; voir [Thèmes et apparence](/themes#auto-hébergement) |
 
 Sans `GITHUB_APP_ID` et la clé privée, les PR sont toujours liées, reflétées et changent normalement le statut de la tâche lors du merge, mais les cartes n'affichent ni statut CI ni possibilité de fusion, et l'entrée de dépôt « Choisir depuis GitHub » est désactivée.
@@ -250,7 +245,7 @@ Les variables ci-dessous sont lues sur l'ordinateur qui exécute vos agents, et 
 | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | Durée maximale de silence, sans sortie ni exécution d'outil ; `0` désactive entièrement le watchdog |
 | `MULTICA_AGENT_TOOL_WATCHDOG` | identique à `MULTICA_AGENT_IDLE_WATCHDOG` | Durée maximale de silence pour un seul appel d'outil ; ne la définissez que pour laisser aux outils plus de marge qu'au modèle, `0` n'arrête jamais de force un appel d'outil. Les shells d'arrière-plan de Cursor restent en cours tant que les processus qui leur appartiennent ne se sont pas terminés ; à cette limite, le daemon arrête ces processus et accorde à Cursor un nouveau budget de watchdog pour produire son résultat final. Si l'appartenance des processus ou leur nettoyage ne peut pas être vérifié, la politique ordinaire d'annulation des exécutions s'applique |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | Seuil de silence propre à OpenCode |
-| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | identique à `MULTICA_AGENT_IDLE_WATCHDOG` | Seuil de silence sémantique de Codex. Le minuteur propre à Codex ne peut pas voir qu'un outil est en cours d'exécution ; il suit donc le plus grand des budgets d'inactivité et d'outil au lieu de maintenir un plafond distinct et plus court |
+| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | le plus grand des budgets d’inactivité et d’outil ; `10m` si le watchdog du daemon est désactivé | Seuil d’inactivité sémantique de Codex. Le minuteur de Codex ne sait pas si un outil est en cours d’exécution. Lorsque `MULTICA_AGENT_IDLE_WATCHDOG` vaut `0`, Codex conserve sa valeur par défaut de `10m` si cette variable n’est pas définie. |
 | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | Surcharge explicite du plafond d'absence de progression du premier tour de Codex ; `0` conserve la valeur par défaut. L'attente effective du premier tour reste bornée par `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` et par le délai d'exécution global — définissez `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` strictement au-dessus de cette valeur (avec une certaine marge), sinon l'attente est tronquée à cette valeur et la nouvelle tentative de démarrage du catalogue de modèles est ignorée. Des valeurs égales ne suffisent pas : le minuteur sémantique est armé en premier, donc à durées égales la nouvelle tentative peut quand même être perdue |
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` ; `thread/start`, `thread/resume` : `60s` | Plafonds de la poignée de main au démarrage du Codex app-server. Une valeur explicite remplace globalement les deux budgets |
 | `MULTICA_CODEX_MEMORY` | désactivé | `1`, `true`, `yes` ou `on` conserve la mémoire native de Codex dans les exécutions Codex gérées par le daemon ; par défaut, elle est désactivée pour chaque exécution. Voir [Mémoire native et sous-agents de Codex](/daemon-runtimes#codex-memory) |
@@ -288,15 +283,17 @@ Le daemon nettoie régulièrement les répertoires des exécutions, les caches d
 
 ### Journaux du daemon [#daemon-logs]
 
+Le daemon journalise au niveau `debug` par défaut. Définissez `LOG_LEVEL` (`debug`, `info`, `warn` ou `error`) pour le changer, ou enregistrez une valeur par défaut pour le profil avec `multica config set log_level info`. La variable d’environnement est prioritaire sur le profil.
+
 Quand le daemon tourne en arrière-plan (sans terminal attaché), il écrit ses journaux dans `~/.multica/daemon.log`, ou `~/.multica/profiles/<name>/daemon.log` pour un profil nommé, avec une rotation par taille ; les fichiers issus de la rotation sont compressés en gzip.
 
-| Variable | Valeur par défaut | Description |
-|---|---|---|
-| `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `20` | Taille en Mo à partir de laquelle `daemon.log` tourne |
-| `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `5` | Nombre maximal de fichiers tournés conservés |
-| `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `30` | Nombre de jours de conservation des fichiers tournés |
+| Variable | Clé du profil | Valeur par défaut | Description |
+|---|---|---|---|
+| `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `daemon_log_max_size_mb` | `20` | Taille en Mo à partir de laquelle `daemon.log` tourne |
+| `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `daemon_log_max_backups` | `5` | Nombre maximal de fichiers tournés conservés |
+| `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `daemon_log_max_age_days` | `30` | Nombre de jours de conservation des fichiers tournés |
 
-Les trois attendent un entier positif ; `0`, une valeur négative ou illisible reprend la valeur par défaut au lieu de signifier « illimité ». Un fichier tourné est supprimé dès que la limite de nombre ou d'âge est atteinte. La sortie des plantages va dans `daemon.err.log`, dans le même répertoire, renommé en `daemon.err.log.1` au démarrage s'il dépasse 5 Mo.
+Les trois valeurs doivent être des entiers positifs. Enregistrez les clés avec `multica --profile dev config set <key> <value>` ; `config show` affiche les valeurs enregistrées. Passez `""` pour effacer une clé. Les changements prennent effet au prochain démarrage ou redémarrage du daemon. Les variables d’environnement valides priment sur le profil. Une valeur absente, vide, nulle, négative, mal formée ou trop grande utilise la valeur valide du profil, puis la valeur par défaut du tableau. La taille et le nombre de jours doivent aussi permettre une conversion sans dépassement en octets et en durée ; `config set` refuse les valeurs invalides. Zéro ne désactive pas la rétention. Un fichier tourné est supprimé dès que la limite de nombre ou d’âge est atteinte. La sortie des plantages va dans `daemon.err.log`, dans le même répertoire, renommé en `daemon.err.log.1` au démarrage s’il dépasse 5 Mo.
 
 ### Chemins, modèles et arguments par outil
 
@@ -307,6 +304,7 @@ Chaque outil intégré a une variable de chemin, `MULTICA_<PREFIX>_PATH`. Quand 
 
 | Outil | Préfixe | Variable de modèle |
 |---|---|---|
+| Amp | `MULTICA_AMP` | ✓ (sélectionne un mode Amp, par exemple `high`) |
 | Antigravity | `MULTICA_ANTIGRAVITY` | ✓ (le nom exact affiché par `agy models`) |
 | Claude Code | `MULTICA_CLAUDE` | ✓ |
 | CodeArts | `MULTICA_CODEARTS` | ✓ |
@@ -315,7 +313,9 @@ Chaque outil intégré a une variable de chemin, `MULTICA_<PREFIX>_PATH`. Quand 
 | Cursor Agent | `MULTICA_CURSOR` | ✓ |
 | DeepSeek Harness | `MULTICA_DSH` | ✓ (un ID du catalogue dsh, par exemple `deepseek-official/deepseek-chat`) |
 | DevEco Code | `MULTICA_DEVECO` | ✓ |
+| Devin CLI | `MULTICA_DEVIN` | ✓ |
 | Dim | `MULTICA_DIM` | ✓ (un ID du catalogue dim) |
+| Factory Droid | `MULTICA_DROID` | ✓ |
 | GitHub Copilot CLI | `MULTICA_COPILOT` | ✓ |
 | Grok | `MULTICA_GROK` | ✓ |
 | Hermes | `MULTICA_HERMES` | ✓ |
@@ -333,6 +333,7 @@ Chaque outil intégré a une variable de chemin, `MULTICA_<PREFIX>_PATH`. Quand 
 | QwenPaw | `MULTICA_QWENPAW` | — |
 | Reasonix | `MULTICA_REASONIX` | ✓ |
 | Trae CLI | `MULTICA_TRAECLI` | ✓ |
+| ZCode | `MULTICA_ZCODE` | ✓ |
 | ZeroClaw | `MULTICA_ZEROCLAW` | — (le modèle est géré par le profil d'agent ZeroClaw) |
 
 </Accordion>
@@ -340,7 +341,7 @@ Chaque outil intégré a une variable de chemin, `MULTICA_<PREFIX>_PATH`. Quand 
 
 QwenPaw et MiniMax Code n'ont pas de variable de modèle, car Multica ne leur envoie jamais de modèle ; consultez [Comparaison des outils de codage IA](/providers#sources-des-modèles). DeepSeek Harness a aussi `MULTICA_DSH_PROFILE_BUNDLE` et `MULTICA_DSH_PLUGIN_PATH`, décrits dans la section suivante.
 
-Les arguments par défaut à l'échelle de la machine via `MULTICA_<PREFIX>_ARGS` sont actuellement pris en charge pour cinq outils : Claude Code, Codex, CodeBuddy, Qwen Code et QwenPaw. Les variables sont `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS` et `MULTICA_QWENPAW_ARGS`. Par exemple :
+Les arguments par défaut à l'échelle de la machine via `MULTICA_<PREFIX>_ARGS` sont actuellement pris en charge pour sept outils : Claude Code, Codex, CodeBuddy, Qwen Code, Amp, Factory Droid et QwenPaw. Les variables sont `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, `MULTICA_AMP_ARGS`, `MULTICA_DROID_ARGS` et `MULTICA_QWENPAW_ARGS`. Par exemple :
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude
@@ -386,6 +387,7 @@ Clés prises en charge :
 | `poll_interval` | `30s` | Intervalle d'interrogation des exécutions |
 | `ws_claim_poll_interval` | `3m` | Borne supérieure des interrogations de sécurité de la prise en charge via WebSocket lorsque celle-ci est saine, indépendante de `poll_interval` ; le daemon applique une gigue uniquement à la baisse |
 | `heartbeat_interval` | `15s` | Intervalle des signaux de vie (heartbeat) |
+| `log_level` | `debug` | Niveau des journaux du daemon : `debug`, `info`, `warn` ou `error`. `LOG_LEVEL` est prioritaire |
 | `agent_timeout` | illimité | Durée maximale absolue par exécution |
 | `agent_idle_watchdog` | `2h` | Durée maximale de silence lorsqu'aucun appel d'outil n'est en cours ; `0s` désactive entièrement le watchdog du daemon, y compris `agent_tool_watchdog` |
 | `agent_tool_watchdog` | identique à `agent_idle_watchdog` | Durée maximale de silence pendant un appel d'outil ; avec `0s`, le watchdog du daemon n'arrête jamais une exécution à cause d'un appel d'outil silencieux, et l'exécution n'est plus bornée que par `agent_timeout`, illimité par défaut |
@@ -394,6 +396,9 @@ Clés prises en charge :
 | `disable_auto_update` | suit l'environnement | `true` désactive la mise à jour automatique ; `false` efface la surcharge locale et revient à la variable d'environnement ou à la valeur par défaut |
 | `auto_update_check_interval` | `6h` | Intervalle de vérification des mises à jour |
 | `disable_auto_reload` | suit l'environnement | `true` empêche le daemon de suivre un binaire remplacé sur disque ; `false` efface la surcharge locale. Résolu indépendamment de `disable_auto_update` |
+| `daemon_log_max_size_mb` | `20` | Taille en Mo à partir de laquelle `daemon.log` tourne ; voir [Journaux du daemon](#daemon-logs) |
+| `daemon_log_max_backups` | `5` | Nombre maximal de fichiers de journaux tournés conservés |
+| `daemon_log_max_age_days` | `30` | Nombre de jours de conservation des fichiers tournés |
 
 Quelques règles concernant les valeurs :
 

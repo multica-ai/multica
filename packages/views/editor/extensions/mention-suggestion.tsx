@@ -17,6 +17,9 @@ import { issueStatusCategory } from "@multica/core/issues";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { projectKeys } from "@multica/core/projects/queries";
+import { configStore, featureFlagEnabled } from "@multica/core/config";
+import { docKeys, docTreeOptions } from "@multica/core/docs";
+import { DOCS_V1_FLAG } from "@multica/core/feature-flags";
 import { useAuthStore } from "@multica/core/auth";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { isAgentRuntimeBound } from "@multica/core/agents";
@@ -34,8 +37,10 @@ import type {
   MemberWithUser,
   Agent,
   Squad,
+  DocSummary,
+  DocTree,
 } from "@multica/core/types";
-import { ListTodo } from "@multica/ui/icons";
+import { FileText, ListTodo } from "@multica/ui/icons";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { StatusIcon } from "../../issues/components/status-icon";
 import { ProjectIcon } from "../../projects/components/project-icon";
@@ -68,13 +73,14 @@ import {
 } from "../../common/picker-keys";
 import { isTriggerArmedAt } from "./suggestion-trigger-arming";
 import { blockedReasonLabel } from "../../issues/blocked-trigger-copy";
+import { stripMentionMarkdown } from "../../issues/utils/strip-mention-markdown";
 
 // Types
 
 export interface MentionItem {
   id: string;
   label: string;
-  type: "member" | "agent" | "squad" | "issue" | "project" | "all";
+  type: "member" | "agent" | "squad" | "issue" | "project" | "doc" | "all";
   /** Optional grouping hint for injected context items. */
   group?: "current" | "recent" | "search";
   /** Secondary text shown beside the label (e.g. issue title) */
@@ -124,6 +130,7 @@ function groupItems(items: MentionItem[], query: string): MentionGroup[] {
   const users: MentionItem[] = [];
   const issues: MentionItem[] = [];
   const projects: MentionItem[] = [];
+  const docs: MentionItem[] = [];
   const cancelled: MentionItem[] = [];
 
   for (const item of items) {
@@ -139,6 +146,8 @@ function groupItems(items: MentionItem[], query: string): MentionGroup[] {
       issues.push(item);
     } else if (item.type === "project") {
       projects.push(item);
+    } else if (item.type === "doc") {
+      docs.push(item);
     } else {
       users.push(item);
     }
@@ -151,6 +160,7 @@ function groupItems(items: MentionItem[], query: string): MentionGroup[] {
   if (users.length > 0) groups.push({ label: "Users", items: users });
   if (issues.length > 0) groups.push({ label: "Issues", items: issues });
   if (projects.length > 0) groups.push({ label: "Projects", items: projects });
+  if (docs.length > 0) groups.push({ label: "Docs", items: docs });
   // Always last: no cancelled row of any type may precede a live one.
   if (cancelled.length > 0) groups.push({ label: "Cancelled", items: cancelled });
   return groups;
@@ -160,6 +170,10 @@ function groupItems(items: MentionItem[], query: string): MentionGroup[] {
 
 const MAX_ITEMS = 20;
 const RESERVED_PROJECT_SLOTS = 5;
+const RESERVED_DOC_SLOTS = 3;
+/** Docs offered before anything is typed: the most recently updated. */
+const RECENT_DOC_ITEMS = 5;
+const MATCHED_DOC_ITEMS = 8;
 const SERVER_ISSUE_SEARCH_LIMIT = 20;
 const SERVER_CONTEXT_SEARCH_LIMIT = 8;
 const SERVER_PROJECT_SEARCH_LIMIT = 8;
@@ -283,11 +297,12 @@ function truncateMentionItems(
   selectedKey: string | null,
 ): MentionItem[] {
   if (items.length <= MAX_ITEMS) return items;
-  const kept = new Set(
-    items
+  const kept = new Set([
+    ...items
       .filter((item) => item.type === "project" && !isDemotedCancelled(item, query))
       .slice(0, RESERVED_PROJECT_SLOTS),
-  );
+    ...items.filter((item) => item.type === "doc").slice(0, RESERVED_DOC_SLOTS),
+  ]);
   const selected = items.find((item) => mentionItemKey(item) === selectedKey);
   if (selected) kept.add(selected);
   let remaining = MAX_ITEMS - kept.size;
@@ -506,6 +521,7 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
       if (label === "Users") return t(($) => $.mention.group_users);
       if (label === "Issues") return t(($) => $.mention.group_issues);
       if (label === "Projects") return t(($) => $.mention.group_projects);
+      if (label === "Docs") return t(($) => $.mention.group_docs);
       if (label === "Cancelled") return t(($) => $.mention.group_cancelled);
       return label;
     };
@@ -650,7 +666,7 @@ function MentionRow({
           <span className="block truncate font-medium text-foreground">{item.label}</span>
           {item.description && (
             <span className="block truncate text-muted-foreground">
-              {item.description}
+              {stripMentionMarkdown(item.description)}
             </span>
           )}
         </span>
@@ -658,6 +674,26 @@ function MentionRow({
         {projectStatusCfg && (
           <span className={`${projectStatusCfg.dotColor} ml-auto size-1.5 shrink-0 rounded-full`} />
         )}
+      </button>
+    );
+  }
+
+  if (item.type === "doc") {
+    return (
+      <button
+        type="button"
+        ref={buttonRef}
+        className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-caption transition-colors ${
+          selected ? "bg-accent" : "hover:bg-accent/50"
+        }`}
+        onClick={onSelect}
+      >
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center">
+          <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+        </span>
+        <span className="min-w-0 flex-1 truncate font-medium text-foreground">
+          {item.label}
+        </span>
       </button>
     );
   }
@@ -746,6 +782,32 @@ function projectToMention(p: {
   };
 }
 
+/** Whether the `@` menu offers docs: the server's docs_v1 flag. */
+function docsEnabled(): boolean {
+  return featureFlagEnabled(configStore.getState().featureFlags, DOCS_V1_FLAG);
+}
+
+/**
+ * Docs a mention query offers: title matches (substring or pinyin), or the most
+ * recently updated docs before anything is typed. Untitled docs are skipped —
+ * there is nothing to type to find them, and nothing to show in the chip.
+ */
+export function matchDocMentions(
+  docs: readonly Pick<DocSummary, "id" | "title" | "updatedAt">[],
+  query: string,
+): MentionItem[] {
+  const q = query.trim().toLowerCase();
+  const titled = docs.filter((d) => d.title.trim() !== "");
+  const picked = q
+    ? titled
+        .filter((d) => d.title.toLowerCase().includes(q) || matchesPinyin(d.title, q))
+        .slice(0, MATCHED_DOC_ITEMS)
+    : [...titled]
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+        .slice(0, RECENT_DOC_ITEMS);
+  return picked.map((d) => ({ id: d.id, label: d.title, type: "doc" as const }));
+}
+
 /**
  * True when the `@` at `pos` starts a token instead of continuing one.
  *
@@ -775,6 +837,10 @@ function matchesMentionQuery(item: MentionItem, query: string): boolean {
 interface MentionSuggestionOptions {
   mode?: "default" | "context";
   getContextItems?: () => MentionItem[];
+  /** Leave guests out of the member list, where the mention leads somewhere they cannot open. */
+  hideGuests?: boolean;
+  /** Leave squads out, where a squad cannot be asked (doc discussions). */
+  hideSquads?: boolean;
 }
 
 export function createMentionSuggestion(
@@ -810,15 +876,19 @@ export function createMentionSuggestion(
     const userId = useAuthStore.getState().user?.id ?? null;
     const myRole =
       members.find((m) => m.user_id === userId)?.role ?? null;
+    // A guest (MUL-9420) mentions people only: the server refuses agent and
+    // squad mentions from it, and it does not page the whole workspace.
+    const guest = myRole === "guest";
 
     const q = query.toLowerCase();
 
     const allItem: MentionItem[] =
-      "all members".includes(q) || "all".includes(q)
+      !guest && ("all members".includes(q) || "all".includes(q))
         ? [{ id: "all", label: "All members", type: "all" as const }]
         : [];
 
     const memberItems: MentionItem[] = members
+      .filter((m) => !(options.hideGuests && m.role === "guest"))
       .filter((m) => m.name.toLowerCase().includes(q) || matchesPinyin(m.name, q))
       .map((m) => ({
         id: m.user_id,
@@ -829,6 +899,7 @@ export function createMentionSuggestion(
     const agentItems: MentionItem[] = agents
       .filter(
         (a) =>
+          !guest &&
           !a.archived_at &&
           (a.name.toLowerCase().includes(q) || matchesPinyin(a.name, q)) &&
           canAssignAgentToIssue(a, { userId, role: myRole }).allowed,
@@ -850,6 +921,8 @@ export function createMentionSuggestion(
     const squadItems: MentionItem[] = squads
       .filter(
         (s) =>
+          !guest &&
+          !options.hideSquads &&
           !s.archived_at &&
           (s.name.toLowerCase().includes(q) || matchesPinyin(s.name, q)),
       )
@@ -893,7 +966,28 @@ export function createMentionSuggestion(
       )
       .map(projectToMention);
 
-    return [...allItem, ...userItems, ...issueItems, ...projectItems];
+    // Docs come from the workspace doc tree. A session that has not opened
+    // Docs yet loads it on this first `@`; docs join from the next keystroke.
+    // None while docs_v1 is off.
+    let docItems: MentionItem[] = [];
+    if (docsEnabled()) {
+      const docTree = qc.getQueryData<DocTree>(docKeys.tree(wsId));
+      if (!docTree) void qc.prefetchQuery(docTreeOptions(wsId));
+      docItems = matchDocMentions(docTree?.docs ?? [], query);
+    }
+
+    return [...allItem, ...userItems, ...issueItems, ...projectItems, ...docItems];
+  }
+
+  // Adds the cached docs matching `query` that `items` (computed at the last
+  // keystroke) predates. Selection survives: MentionList pins it by identity.
+  function withCachedDocs(items: MentionItem[], query: string): MentionItem[] {
+    const wsId = getCurrentWsId();
+    const docTree = wsId && docsEnabled() ? qc.getQueryData<DocTree>(docKeys.tree(wsId)) : undefined;
+    if (!docTree) return items;
+    const listed = new Set(items.filter((item) => item.type === "doc").map((item) => item.id));
+    const fresh = matchDocMentions(docTree.docs, query).filter((doc) => !listed.has(doc.id));
+    return fresh.length > 0 ? [...items, ...fresh] : items;
   }
 
   return {
@@ -921,8 +1015,20 @@ export function createMentionSuggestion(
     render: createSuggestionPopupRender<MentionItem, MentionItem, MentionListRef, MentionListProps>({
       pluginKey,
       component: MentionList,
+      // The doc tree may still be loading when `@` opens the menu (see
+      // buildSyncItems); re-render the open menu once it lands so the docs
+      // appear without another keystroke.
+      subscribe: (refresh) => {
+        const wsId = getCurrentWsId();
+        const cache = qc.getQueryCache?.();
+        if (!wsId || !cache) return () => {};
+        const treeKey = JSON.stringify(docKeys.tree(wsId));
+        return cache.subscribe((event) => {
+          if (event.type === "updated" && JSON.stringify(event.query.queryKey) === treeKey) refresh();
+        });
+      },
       getProps: (props) => ({
-        items: props.items,
+        items: withCachedDocs(props.items, props.query),
         query: props.query,
         command: props.command,
         contextSearch: options.mode === "context",

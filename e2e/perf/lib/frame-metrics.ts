@@ -61,42 +61,57 @@ export async function installFrameMetrics(page: Page, token: string): Promise<vo
   await page.addInitScript((authToken) => {
     localStorage.setItem("multica_token", authToken);
     localStorage.setItem("multica:chat:isOpen", "false");
-    const state: Window["__corePerf"] = { frames: [], clicks: [], inputs: [], interactions: new Map(), marks: {} };
-    window.__corePerf = state;
-    document.addEventListener("click", (event) => {
-      state.clicks.push(event.timeStamp);
-      state.inputs.push(event.timeStamp);
-    }, { capture: true });
-    document.addEventListener("keydown", (event) => state.inputs.push(event.timeStamp), { capture: true });
-    new PerformanceObserver((list) => {
-      for (const entry of list.getEntries() as unknown as {
-        startTime: number; duration: number; blockingDuration: number;
-        scripts: { duration: number; sourceURL: string; sourceFunctionName: string; invoker: string }[];
-      }[]) {
-        const heaviest = [...(entry.scripts ?? [])].sort((a, b) => b.duration - a.duration)[0];
-        const file = heaviest?.sourceURL?.split("/").pop() ?? "";
-        state.frames.push({
-          start: entry.startTime,
-          duration: entry.duration,
-          blocking: entry.blockingDuration,
-          source: heaviest
-            ? `${heaviest.invoker || "script"} ${heaviest.sourceFunctionName || "(anonymous)"} @ ${file}`
-            : "rendering (style/layout/paint)",
-        });
-      }
-    }).observe({ type: "long-animation-frame", buffered: true });
-    new PerformanceObserver((list) => {
-      for (const entry of list.getEntries() as unknown as { interactionId: number; startTime: number; duration: number }[]) {
-        if (!entry.interactionId) continue;
-        // One interaction (pointerdown, pointerup, click) reports several entries.
-        const prior = state.interactions.get(entry.interactionId);
-        state.interactions.set(entry.interactionId, {
-          start: Math.min(prior?.start ?? Infinity, entry.startTime),
-          duration: Math.max(prior?.duration ?? 0, entry.duration),
-        });
-      }
-    }).observe({ type: "event", buffered: true, durationThreshold: 16 } as PerformanceObserverInit);
   }, token);
+  await page.addInitScript(observeFrames);
+}
+
+/**
+ * Installs the observers into a page that has already loaded, such as an
+ * Electron window. Long Animation Frames are buffered, so the frames from
+ * before the call are kept too.
+ */
+export async function attachFrameMetrics(page: Page): Promise<void> {
+  await page.evaluate(observeFrames);
+}
+
+/** Runs in the page: records clicks, key presses, Long Animation Frames and Event Timing. */
+function observeFrames() {
+  if (window.__corePerf) return;
+  const state: Window["__corePerf"] = { frames: [], clicks: [], inputs: [], interactions: new Map(), marks: {} };
+  window.__corePerf = state;
+  document.addEventListener("click", (event) => {
+    state.clicks.push(event.timeStamp);
+    state.inputs.push(event.timeStamp);
+  }, { capture: true });
+  document.addEventListener("keydown", (event) => state.inputs.push(event.timeStamp), { capture: true });
+  new PerformanceObserver((list) => {
+    for (const entry of list.getEntries() as unknown as {
+      startTime: number; duration: number; blockingDuration: number;
+      scripts: { duration: number; sourceURL: string; sourceFunctionName: string; invoker: string }[];
+    }[]) {
+      const heaviest = [...(entry.scripts ?? [])].sort((a, b) => b.duration - a.duration)[0];
+      const file = heaviest?.sourceURL?.split("/").pop() ?? "";
+      state.frames.push({
+        start: entry.startTime,
+        duration: entry.duration,
+        blocking: entry.blockingDuration,
+        source: heaviest
+          ? `${heaviest.invoker || "script"} ${heaviest.sourceFunctionName || "(anonymous)"} @ ${file}`
+          : "rendering (style/layout/paint)",
+      });
+    }
+  }).observe({ type: "long-animation-frame", buffered: true });
+  new PerformanceObserver((list) => {
+    for (const entry of list.getEntries() as unknown as { interactionId: number; startTime: number; duration: number }[]) {
+      if (!entry.interactionId) continue;
+      // One interaction (pointerdown, pointerup, click) reports several entries.
+      const prior = state.interactions.get(entry.interactionId);
+      state.interactions.set(entry.interactionId, {
+        start: Math.min(prior?.start ?? Infinity, entry.startTime),
+        duration: Math.max(prior?.duration ?? 0, entry.duration),
+      });
+    }
+  }).observe({ type: "event", buffered: true, durationThreshold: 16 } as PerformanceObserverInit);
 }
 
 /** The page clock, for bracketing a measured window. */

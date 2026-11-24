@@ -592,8 +592,28 @@ const InboxItemSchema: z.ZodType<InboxItem> = z.object({
   read: z.boolean().default(false),
   archived: z.boolean().default(false),
   created_at: z.string().default(""),
-  details: z.record(z.string(), z.string()).nullable().default(null),
+  // `details` is free-form JSON on the server, and some producers write
+  // numbers (children_done records `total` and `stage` as ints). Renderers read
+  // strings, so scalars are stringified; any other value is dropped so one
+  // unexpected field cannot fail the array parse and blank the whole Inbox.
+  details: z.preprocess(
+    normalizeInboxDetails,
+    z.record(z.string(), z.string()).nullable().default(null),
+  ),
 }).loose();
+
+function normalizeInboxDetails(value: unknown): unknown {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const out: Record<string, string> = {};
+  for (const [key, v] of Object.entries(value)) {
+    if (typeof v === "string") out[key] = v;
+    else if (typeof v === "number" && Number.isFinite(v)) out[key] = String(v);
+    else if (typeof v === "boolean") out[key] = String(v);
+  }
+  return out;
+}
 
 export const InboxListSchema = z.array(InboxItemSchema).default([]);
 export const EMPTY_INBOX_LIST: InboxItem[] = [];
@@ -620,7 +640,9 @@ export const MemberWithUserSchema: z.ZodType<MemberWithUser> = z.object({
   id: z.string(),
   workspace_id: z.string().default(""),
   user_id: z.string().default(""),
-  role: z.enum(["owner", "admin", "member"]).catch("member"),
+  // `guest` (MUL-9420) must survive parsing: folded into `member`, a guest
+  // would be offered every member control the server then refuses.
+  role: z.enum(["owner", "admin", "member", "guest"]).catch("member"),
   created_at: z.string().default(""),
   name: z.string().default(""),
   email: z.string().default(""),

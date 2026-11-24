@@ -41,6 +41,7 @@ Décrivez le travail, choisissez un agent ou un squad dans **Créé par** et cli
 - Si la demande nomme un assigné (« confie-la à Lei Li »), l'agent l'assigne. Sinon, l'assigné est ce que vous avez choisi dans **Créé par** : l'agent lui-même, ou le squad. Les nouvelles tâches démarrent en `todo` ; quand l'assigné est un agent, il commence donc à la traiter dès qu'elle existe.
 - Le projet, la priorité et la date d'échéance choisis dans la fenêtre sont repris tels quels ; l'agent n'en déduit pas d'autres du texte. Le projet est visible par défaut, la priorité et l'échéance sont dans le menu **⋯**. Les champs toujours affichés se règlent dans **Paramètres → Préférences → Champs affichés à la création de tâches**.
 - Avec **En créer un autre** activé, la fenêtre reste ouverte après chaque envoi pour enchaîner la demande suivante.
+- Jusqu’à trois agents ou squads apparaissent en raccourcis à côté de **Créé par**, classés selon la fréquence à laquelle vous créez des tâches avec eux ; cliquez dessus ou appuyez sur `⌥1`–`⌥3` (`Alt+1`–`Alt+3` sous Windows et Linux) pour changer rapidement.
 - **Créé par** ne liste que les agents et squads que vous avez le droit d'assigner. Si la CLI multica du runtime de l'agent est trop ancienne, la fenêtre propose de mettre à jour le daemon ou de passer en création manuelle.
 
 ## Choisir l'assigné
@@ -140,7 +141,7 @@ Une tâche appartient à un [projet](/projects) au plus ; le projet fournit des 
 
 Un travail plus important peut être découpé en sous-tâches : la tâche parente conserve l'objectif global tandis que les sous-tâches avancent indépendamment. Les statuts de la tâche parente et des sous-tâches ne s'influencent pas.
 
-Ouvrez une sous-tâche directe depuis **Sous-tâches** dans la barre latérale droite de la tâche. Jusqu'à 10 sous-tâches, l'ordre correspond à la liste principale. Au-delà, les 10 premières s'affichent en donnant la priorité aux sous-tâches non terminées, tout en conservant l'ordre des étapes dans chaque groupe. **Afficher N de plus** déplie toute la liste dans la barre latérale ; **Réduire** revient aux 10 premières. Votre position de lecture est conservée et la barre latérale reste ouverte sur écran étroit. La progression compte toutes les sous-tâches. **Personnaliser la barre latérale** permet de masquer ou de réordonner cette section.
+Les sous-tâches directes d'une tâche sont listées sous **Sous-tâches**, sous sa description, avec une progression qui compte toutes les sous-tâches. Ouvrez-en une depuis cette liste.
 
 Les sous-tâches peuvent recevoir une **Étape** pour avancer par lots — 1, 2, 3. Lorsque toutes les sous-tâches de la première étape non terminée atteignent `done` ou `cancelled`, la tâche parente reçoit une notification « sous-tâches terminées » ; si l'assigné de la tâche parente est un agent, celui-ci se réveille et décide s'il lance l'étape suivante. Les sous-tâches sans étape forment un seul lot et ne déclenchent qu'une notification, lorsqu'elles sont toutes terminées. Ce réveil est déclenché par le système ; ses règles et les autres types de réveil sont décrits dans [Réveils de tâches](/issue-wakeups).
 
@@ -157,13 +158,13 @@ Une combinaison de filtres et d'affichage que vous utilisez souvent peut devenir
 | Visibilité | Qui la voit | Qui peut la modifier et la supprimer |
 |---|---|---|
 | **Visible par moi seul** | Vous seul | Vous |
-| **Visible par les membres de l'espace de travail** | Tous les membres | Vous, ainsi que les `owner` et `admin` de l'espace de travail |
+| **Visible par les membres de l'espace de travail** | Les membres ayant le rôle `owner`, `admin` ou `member` | Vous, ainsi que les `owner` et `admin` de l'espace de travail |
 
 Les réglages d'affichage enregistrés dans une vue sont son **Affichage par défaut** : les membres la voient ainsi à la première ouverture, puis l'ajustent chacun pour soi sans gêner les autres. Une vue appartient à la page où elle a été créée : celle créée dans un projet reste dans ce projet, et celles créées sur la page **Mes tâches** sont toujours privées.
 
 Faites glisser les vues dans la barre pour les réordonner ; l'ordre et la visibilité réglés dans **Gérer les vues** ne concernent que vous. Un clic droit sur une vue permet de la modifier, de la supprimer ou de l'**Ajouter à la barre latérale**, ce qui la place dans la section **Vues** du panneau Travail.
 
-La section Vues propose aussi cinq vues intégrées : **Toutes les tâches** ; **Mon travail**, les tâches assignées à vous ou à vos agents ; **En cours d'exécution**, les tâches sur lesquelles un agent travaille ; et **Abonnements**, toutes les tâches que vous suivez. **Reportés** affiche les tâches que vous avez [reportées dans la boîte de réception](/inbox#reporter-une-tâche). Mon travail, En cours d'exécution et Abonnements sont Toutes les tâches sous une condition fixe : d'autres filtres peuvent les restreindre, mais cette condition ne peut être ni retirée ni élargie. Le bouton de réglages dans l'en-tête de la section Vues active ou désactive chaque vue intégrée.
+La section Vues propose aussi quatre vues intégrées : **Toutes les tâches** ; **Mon travail**, les tâches assignées à vous ou à vos agents ; **En cours d'exécution**, les tâches sur lesquelles un agent travaille ; et **Abonnements**, toutes les tâches que vous suivez. Les tâches que vous avez [reportées dans la boîte de réception](/inbox#reporter-une-tâche) se trouvent dans son onglet **Reportés**. Mon travail, En cours d'exécution et Abonnements sont Toutes les tâches sous une condition fixe : d'autres filtres peuvent les restreindre, mais cette condition ne peut être ni retirée ni élargie. Le bouton de réglages dans l'en-tête de la section Vues active ou désactive chaque vue intégrée.
 
 ### Aperçu latéral
 
@@ -215,3 +216,4 @@ La suppression est irréversible : la tâche, avec ses commentaires, ses pièces
 - [Commentaires](/comments) — discutez, répondez et utilisez les @mentions autour d'une tâche.
 - [Assigner des tâches aux agents](/assigning-issues) — confiez du travail à un agent et lancez la première exécution.
 - [Exécutions](/tasks) — découvrez la mise en file d'attente, le déroulement, les relances et l'annulation.
+- [Partager un pool d'agents dans une équipe](/team-agent-pool) — comment personnes et agents se passent les tâches et relisent le travail.

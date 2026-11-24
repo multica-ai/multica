@@ -478,7 +478,8 @@ func (h *Handler) CreateCommentSubIssue(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
 		return
 	}
 	userID, ok := requireUserID(w, r)
@@ -493,21 +494,23 @@ func (h *Handler) CreateCommentSubIssue(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	// MUL-8472: a comment in a private project the caller cannot see reads as
-	// a missing one, here as on every other comment route.
-	if hiddenComment, err := h.commentInHiddenProject(r, workspaceID, anchorCommentID); err != nil || hiddenComment {
-		if err == nil {
-			err = service.ErrAnchorCommentDeleted
-		}
-		h.writeSourceContextError(w, err, service.SourceContextLimitUsage{})
-		return
-	}
 	wantDigest, tokenIssueID, validToken := service.ParseSourceContextToken(strings.TrimSpace(req.CaptureToken))
 	if !validToken {
 		writeJSON(w, http.StatusConflict, map[string]any{"code": "source_context_changed", "error": "source context preview is invalid; refresh and try again"})
 		return
 	}
-	build, err := service.BuildSourceContext(r.Context(), h.Queries, wsUUID, anchorCommentID)
+	// MUL-8472: a comment in a private project the caller cannot see reads as
+	// a missing one, here as on every other comment route, so it takes the
+	// deleted-anchor path below.
+	var build service.SourceContextBuild
+	hiddenComment, err := h.commentInHiddenProject(r, workspaceID, anchorCommentID)
+	if err == nil {
+		if hiddenComment {
+			err = service.ErrAnchorCommentDeleted
+		} else {
+			build, err = service.BuildSourceContext(r.Context(), h.Queries, wsUUID, anchorCommentID)
+		}
+	}
 	if errors.Is(err, service.ErrAnchorCommentDeleted) {
 		// The token's issue id comes from the client; one in a project the
 		// caller cannot see answers like a deleted one.
@@ -538,6 +541,7 @@ func (h *Handler) CreateCommentSubIssue(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusBadRequest, "issue is required for manual mode")
 			return
 		}
+		req.Issue.Title = sanitizeNullBytes(req.Issue.Title)
 		if strings.TrimSpace(req.Issue.Title) == "" {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"code": "invalid_request", "error": "title is required"})
 			return
@@ -561,6 +565,20 @@ func (h *Handler) CreateCommentSubIssue(w http.ResponseWriter, r *http.Request) 
 	default:
 		writeError(w, http.StatusBadRequest, "mode must be manual or agent")
 		return
+	}
+	// Copying the source attachments stores new bytes, so it is checked like
+	// an upload, before the sub-issue or any copy exists.
+	var copyBytes int64
+	for _, row := range build.Rows {
+		copyBytes += row.SizeBytes
+	}
+	if copyBytes > 0 {
+		if err := h.storageQuota().Admit(r.Context(), wsUUID, copyBytes, service.StorageSourceSubIssue); err != nil {
+			if !writeStorageLimitReached(w, err, !projectaccess.IsGuestRole(member.Role)) {
+				writeError(w, http.StatusInternalServerError, "failed to check attachment storage")
+			}
+			return
+		}
 	}
 	contextID := dbid.NewV7()
 	capture, objectKeys, err := h.cloneSourceContext(r.Context(), wsUUID, userUUID, contextID, build)
@@ -678,7 +696,7 @@ func (h *Handler) cloneSourceContext(ctx context.Context, workspaceID, userID, c
 }
 
 func (h *Handler) createManualCommentSubIssue(w http.ResponseWriter, r *http.Request, workspaceID, userID pgtype.UUID, input CreateIssueRequest, capture service.SourceContextCapture, limits service.SourceContextLimitUsage) error {
-	title := strings.TrimSpace(input.Title)
+	title := strings.TrimSpace(sanitizeNullBytes(input.Title))
 	if title == "" {
 		return sourceContextBadRequest("title is required")
 	}

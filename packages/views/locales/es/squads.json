@@ -78,6 +78,21 @@
     "visibility": "Visibilidad",
     "visibility_workspace": "Espacio de trabajo"
   },
+  "handoff": {
+    "section_title": "Colaboración",
+    "mode_leader_title": "El líder asigna",
+    "mode_leader_description": "Cada paso vuelve al líder, {{leader}}, que elige el siguiente. Es lo predeterminado en los squads existentes.",
+    "mode_direct_title": "Los miembros se pasan el trabajo",
+    "mode_direct_description": "El líder asigna el primer paso y atiende las excepciones. Cada miembro elige el siguiente paso; pasar a revisión o consultar a una persona ya no despierta al líder.",
+    "guard_rounds": "Idas y vueltas: hasta {{limit}} rondas",
+    "guard_daily": "Hasta {{limit}} traspasos por tarea al día",
+    "guard_failed": "Ejecución fallida → vuelve al líder",
+    "guard_no_next": "Sin siguiente paso → vuelve al líder",
+    "saved": "Modo de colaboración actualizado",
+    "brief_title": "Lo que reciben los miembros",
+    "brief_hint": "Se añade a cada ejecución en una tarea asignada a este squad",
+    "brief_empty": "Aún no hay agentes miembros"
+  },
   "toasts": {
     "member_added": "Miembro añadido",
     "member_add_failed": "No se ha podido añadir el miembro",
@@ -93,7 +108,7 @@
   },
   "profile_card": {
     "unavailable": "Squad no disponible",
-    "detail_link": "Detalle →",
+    "detail_link": "Ver detalles →",
     "archived": "Archivado",
     "member_count_one": "{{count}} miembro",
     "member_count_other": "{{count}} miembros",
@@ -102,7 +117,7 @@
     "more_members_other": "+{{count}} más"
   },
   "instructions_tab": {
-    "description": "El líder lee estas instrucciones cada vez que trabaja en una tarea asignada a este squad.",
+    "description": "El líder y cada agente miembro leen estas instrucciones cada vez que trabajan en una tarea asignada a este squad.",
     "unsaved_changes": "Cambios sin guardar",
     "save_button": "Guardar",
     "placeholder": "p. ej., Empieza siempre escribiendo un test que falle. Prefiere commits pequeños y atómicos."
@@ -111,7 +126,6 @@
     "mine": "Mis squads",
     "all": "Todos los squads"
   },
-  "toolbar": {},
   "detail": {
     "assign_work": "Asignar trabajo",
     "copy_link": "Copiar enlace",

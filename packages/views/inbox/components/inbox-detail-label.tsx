@@ -3,7 +3,8 @@
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { formatDateOnly } from "@multica/core/issues/date";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { StatusIcon, PriorityIcon } from "../../issues/components";
+import { StatusIcon } from "../../issues/components/status-icon";
+import { PriorityIcon } from "../../issues/components/priority-icon";
 import type { InboxItem, InboxItemType, IssueStatus, IssuePriority } from "@multica/core/types";
 import { getQuickCreateOutcomeDetail } from "./inbox-display";
 import { useLocale, useT } from "../../i18n";
@@ -27,6 +28,8 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     due_date_changed: t(($) => $.types.due_date_changed),
     new_comment: t(($) => $.types.new_comment),
     mentioned: t(($) => $.types.mentioned),
+    doc_comment: t(($) => $.types.doc_comment),
+    doc_mentioned: t(($) => $.types.doc_mentioned),
     review_requested: t(($) => $.types.review_requested),
     task_completed: t(($) => $.types.task_completed),
     task_failed: t(($) => $.types.task_failed),
@@ -38,7 +41,9 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     quick_create_unconfirmed: t(($) => $.types.quick_create_unconfirmed),
     autopilot_paused: t(($) => $.types.autopilot_paused),
     autopilot_quota_exceeded: t(($) => $.types.autopilot_quota_exceeded),
+    app_tool_calls_quota_exceeded: t(($) => $.types.app_tool_calls_quota_exceeded),
     children_done: t(($) => $.types.children_done),
+    blockers_done: t(($) => $.types.blockers_done),
     project_owner_joined: t(($) => $.types.project_owner_joined),
     app_action_requested: t(($) => $.types.app_action_requested),
     app_action_reminder: t(($) => $.types.app_action_reminder),
@@ -149,6 +154,8 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
     }
     case "autopilot_quota_exceeded":
       return <span>{t(($) => $.labels.autopilot_quota_blocked)}</span>;
+    case "app_tool_calls_quota_exceeded":
+      return <span>{t(($) => $.labels.app_tool_calls_quota_blocked)}</span>;
     case "children_done": {
       // The stage arrives as a JSON number; details are typed as strings.
       const stage = details.stage != null ? String(details.stage) : "";

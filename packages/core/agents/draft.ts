@@ -125,6 +125,7 @@ export function buildInvocationTargets(
 
 export function deriveDuplicateAccess(
   agent: Pick<Agent, "permission_mode" | "invocation_targets">,
+  canAddInvocationMembers = true,
 ): Pick<AgentDraft, "permissionScope" | "memberIds" | "teamIds"> {
   if (agent.permission_mode !== "public_to") {
     return {
@@ -149,7 +150,7 @@ export function deriveDuplicateAccess(
   const teamIds = targets
     .filter((target) => target.target_type === "team" && target.target_id)
     .map((target) => target.target_id as string);
-  if (memberIds.length === 0 && teamIds.length === 0) {
+  if ((memberIds.length === 0 && teamIds.length === 0) || !canAddInvocationMembers) {
     return {
       permissionScope: "private",
       memberIds: new Set(),
@@ -181,6 +182,12 @@ export function buildDuplicateDraft(
     currentUserId: string | null;
     fallbackRuntimeId: string;
     nameSuffix: string;
+    /**
+     * False when the plan lacks `agent_invocation_members`: a member list on
+     * the new agent would be refused, so the copy starts as "Only me".
+     * Defaults to true.
+     */
+    canAddInvocationMembers?: boolean;
   },
 ): AgentDraft {
   const keepsRuntime =
@@ -205,7 +212,7 @@ export function buildDuplicateDraft(
     thinkingLevel: keepsRuntime ? source.thinking_level ?? "" : "",
     serviceTier: keepsRuntime ? source.service_tier ?? "" : "",
     skillIds: new Set(source.skills.map((skill) => skill.id)),
-    ...deriveDuplicateAccess(source),
+    ...deriveDuplicateAccess(source, options.canAddInvocationMembers ?? true),
   };
 }
 

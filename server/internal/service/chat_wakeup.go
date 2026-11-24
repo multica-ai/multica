@@ -416,6 +416,105 @@ func (s *ChatWakeupService) Update(ctx context.Context, task db.AgentTaskQueue, 
 	return updated, nil
 }
 
+// ChatWakeupTiming is a member's change to when an active wakeup runs. A
+// reminder takes At; a check IntervalSeconds and/or ExpiresAt; a condition
+// ExpiresAt. A field left out keeps its current value.
+type ChatWakeupTiming struct {
+	At              *time.Time `json:"at,omitempty"`
+	IntervalSeconds int64      `json:"interval_seconds,omitempty"`
+	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
+}
+
+// input merges the change into the wakeup's current timing, so the agent's
+// limits in plan apply to the result unchanged.
+func (t ChatWakeupTiming) input(current db.ChatWakeup) (ChatWakeupInput, error) {
+	in := ChatWakeupInput{ExpiresAt: t.ExpiresAt}
+	switch current.Kind {
+	case "at":
+		if t.At == nil || t.IntervalSeconds != 0 || t.ExpiresAt != nil {
+			return in, chatWakeupInputError("a reminder takes a new time and nothing else")
+		}
+		in.At = t.At
+	case "check":
+		if t.At != nil || (t.IntervalSeconds == 0 && t.ExpiresAt == nil) {
+			return in, chatWakeupInputError("a check takes a new interval, a new deadline, or both")
+		}
+		in.IntervalSeconds = t.IntervalSeconds
+		if in.IntervalSeconds == 0 {
+			in.IntervalSeconds = current.IntervalSeconds.Int64
+		}
+	case "condition":
+		if t.At != nil || t.IntervalSeconds != 0 || t.ExpiresAt == nil {
+			return in, chatWakeupInputError("a condition takes a new deadline and nothing else")
+		}
+		in.Condition = current.Condition
+	default:
+		return in, chatWakeupInputError("this wakeup's timing cannot be changed")
+	}
+	if current.Kind != "at" && in.ExpiresAt == nil {
+		deadline := current.ExpiresAt.Time
+		in.ExpiresAt = &deadline
+	}
+	return in, nil
+}
+
+// Reschedule changes when an active wakeup runs without a turn of the agent.
+// The title, instruction, condition, its baseline and the check history stay
+// as they are.
+func (s *ChatWakeupService) Reschedule(ctx context.Context, sessionID, id pgtype.UUID, timing ChatWakeupTiming) (db.ChatWakeup, error) {
+	now := s.clock()
+	var updated db.ChatWakeup
+	err := s.inTx(ctx, func(_ pgx.Tx, qtx *db.Queries) error {
+		current, err := qtx.LockChatWakeupInSession(ctx, db.LockChatWakeupInSessionParams{ID: id, ChatSessionID: sessionID})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrChatWakeupNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if current.Status != "active" {
+			return ErrChatWakeupEnded
+		}
+		in, err := timing.input(current)
+		if err != nil {
+			return err
+		}
+		plan, err := in.plan(now)
+		if err != nil {
+			return err
+		}
+		next := plan.nextEval
+		if current.Kind == "condition" || (current.Kind == "check" && timing.IntervalSeconds == 0) {
+			// Only the deadline moved: the next evaluation stays where it was,
+			// unless the new deadline comes first.
+			next = current.NextEvalAt.Time
+			if next.After(plan.expiresAt) {
+				next = plan.expiresAt
+			}
+		}
+		updated, err = qtx.UpdateChatWakeupConfig(ctx, db.UpdateChatWakeupConfigParams{
+			ID:              id,
+			Title:           current.Title,
+			Instruction:     current.Instruction,
+			Condition:       current.Condition,
+			ConditionState:  current.ConditionState,
+			IntervalSeconds: plan.interval,
+			FireAt:          plan.fireAt,
+			NextEvalAt:      pgtype.Timestamptz{Time: next, Valid: true},
+			ExpiresAt:       pgtype.Timestamptz{Time: plan.expiresAt, Valid: true},
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrChatWakeupEnded
+		}
+		return err
+	})
+	if err != nil {
+		return db.ChatWakeup{}, err
+	}
+	s.publish(ctx, updated, pgtype.UUID{})
+	return updated, nil
+}
+
 // Cancel ends an active wakeup. by is "user" or "agent".
 func (s *ChatWakeupService) Cancel(ctx context.Context, sessionID, id pgtype.UUID, by string) (db.ChatWakeup, error) {
 	return s.end(ctx, sessionID, id, "cancelled", "cancelled_by_"+by)

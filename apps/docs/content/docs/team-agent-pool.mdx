@@ -1,0 +1,89 @@
+---
+title: Share an agent pool across a team
+description: How several developers share one pool of AI coding agents, control who can run each one, hand work between people and agents, and see what every agent is doing.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+This guide is for a team of several developers who want to share AI coding agents instead of each person running their own in a terminal. It strings together features documented on separate pages: [roles](/members-roles), agent [Access](/agents#permissions-and-access), [runtime sharing](/daemon-runtimes#private-and-public-runtimes), [squads](/squads), and [workflows](/workflows).
+
+In a Multica workspace, members and agents work from the same issues. Any issue can be assigned to a person, an agent, or a squad; agents post progress as comments, move the issue to `in_review` when they deliver, and every run is recorded on the issue.
+
+## What each part does
+
+| Your team needs to | Use | Where it is set |
+|---|---|---|
+| See all work, human and agent, in one place | One workspace, with list, board, table, Gantt, and swimlane layouts | [Issues](/issues) |
+| Decide who belongs to the workspace and what they can manage | Roles: `owner`, `admin`, `member`, and project-scoped guests | [Members and roles](/members-roles) |
+| Decide who can run a given agent | The agent's Access: **Only me**, **Entire workspace**, or **Specific people** | [Agents](/agents#permissions-and-access) |
+| Share the computers agents run on | Private, public, or member-shared runtimes | [Runtime sharing](/daemon-runtimes#private-and-public-runtimes) |
+| Send work to the right agent without picking one each time | A squad, whose leader agent routes each issue | [Squads](/squads) |
+| Pass work from an agent to a reviewer and back | Review status, comments, and workflow handoffs | [Workflows](/workflows) |
+| Reuse the team's methods across agents | Skills attached to agents | [Skills](/skills) |
+| Run recurring work without anyone starting it | Autopilots on a schedule or webhook | [Autopilots](/autopilots) |
+| Keep an eye on cost and failures | Per-agent usage and error reports | [Analytics](/analytics) |
+
+## Example: a 10-person engineering team
+
+The steps below set up a team of ten developers sharing three agents. Adjust the names and numbers to your team.
+
+1. **Create the workspace and invite people.** An `owner` or `admin` invites the developers as `member`s and one or two leads as `admin`s. A contractor who should only follow one project joins as a [guest](/members-roles#guests) with that project shared.
+2. **Connect the computers.** Each developer who wants agents on their own machine opens [Multica Desktop](/desktop-app), which registers it as a runtime. For agents the whole team relies on, connect a shared machine, such as a cloud VM, with `multica setup`, and have its owner make the runtime public or share it with specific members. Sharing a runtime lets others run agents there; it does not share the AI coding tool's login.
+3. **Create the shared agents.** For example, a **Frontend** agent on Claude Code, a **Backend** agent on Codex, and a **Reviewer** agent on another tool, all on the shared runtime. Give them instructions and the team's [skills](/skills). Set Access to **Entire workspace** for agents anyone may use, and to **Specific people** for an agent that holds sensitive credentials.
+4. **Add a squad.** Put the three agents in a squad with a leader agent. People assign an issue to the squad, and the leader picks who works on it.
+5. **Set up review.** In a project, choose a [workflow](/workflows) such as **Delivery**: Development is handled by an engineering agent, Review by the Reviewer agent, and QA by a member.
+6. **Start assigning.** Developers file issues and assign them to an agent, the squad, or a teammate. Agents work on the shared runtime and leave their results on each issue.
+
+Personal experiments stay out of the way: an agent a developer keeps at **Only me** on their own laptop does not appear in anyone else's pickers.
+
+## How do we control which members can use which agent?
+
+Every agent has an owner and an Access setting. Access decides who can run it, meaning assign issues to it, @-mention it, or chat with it:
+
+| Access | Who can run it |
+|---|---|
+| **Only me** (default) | Only the agent owner. |
+| **Entire workspace** | Members with the `owner`, `admin`, or `member` role. |
+| **Specific people** | The agent owner and the selected members. |
+
+Some rules that matter for teams:
+
+- Workspace `owner`s and `admin`s can see and manage every agent, but cannot use their role to run an agent they were not granted. Only the agent's owner can change its Access.
+- Guests cannot run or @-mention agents.
+- The assignee picker and the @-mention menu only list agents the person can run.
+- A squad does not widen access: to assign or @-mention a squad, a person must be allowed to run its leader.
+- Removing a member clears the grants they had on other agents' Access lists.
+- Credentials in an agent's environment variables can be unlocked only by workspace `owner`s and `admin`s, and each read is audited. See [Environment variables and credentials](/agents-create#environment-variables-and-credentials).
+
+Private projects add a second boundary. A private project is visible only to people on its member list, and an agent run sees it only when both the person who started the run and the agent's owner are on that list. See [Private projects](/projects#private-projects).
+
+## How do people and agents hand work to each other?
+
+Assignment and comments carry the handoff, and the issue keeps the context between steps:
+
+1. **Agent writes the code.** Assign the issue to an agent. It sets `in_progress` when it starts, comments as it goes, and sets `in_review` when it delivers, usually with a pull request.
+2. **A teammate reviews it.** The reviewer reads the run's execution log and the linked PR on the issue. With the [GitHub integration](/github-integration), the issue shows PR state, CI results, and conflicts.
+3. **An agent fixes the review comments.** The reviewer replies on the issue and @-mentions the agent, or another agent, with what to change. The mentioned agent picks up the same issue with the whole discussion. If it is still working, the reply can [join its current run](/mentioning-agents#steer-a-running-agent).
+4. **The work closes.** By default, agents stop at `in_review`; `done` is left to a person, or to the GitHub integration, which by default moves the issue to `done` once every linked PR is merged.
+
+To make the steps fixed instead of ad hoc, use a [workflow](/workflows). Each status can hand the issue to an agent or a member, with instructions for that step, plus **When done, move to** and **If rejected, send back to**. Moving an issue into Review then hands it to the review agent, and a rejection sends it back to Development.
+
+## How does everyone see what each agent is working on?
+
+- The **Working** view in the sidebar lists the issues an agent is running on right now, across the workspace.
+- The agent list shows each agent's availability, from its runtime, and its workload: working, queued, or idle.
+- Each issue keeps every run's execution log: tool calls, commands, and errors, with timestamps. See [Runs](/tasks).
+- The [inbox](/inbox) tells people when work is assigned to them, when an agent @-mentions them or comments on an issue they follow, and when a run fails, without listing every step.
+- [Analytics](/analytics) shows cost, tokens, run time, and failed runs for the workspace, with a leaderboard per agent and the reasons runs failed.
+
+<Callout type="info">
+A regular member does not see other people's **Only me** agents. Their usage appears in Analytics under **Other agents**, without names.
+</Callout>
+
+## Related
+
+- [Multica vs Linear and Jira](/compare/linear-jira) — when a team should keep its tracker and when to move agent work into Multica.
+- [Members and roles](/members-roles) — invitations, guests, and role changes.
+- [Agents](/agents) — agent configuration and the full Access rules.
+- [Squads](/squads) — how the leader routes work and when it is woken up.
+- [Workflows](/workflows) — set fixed steps and handoffs for a project.

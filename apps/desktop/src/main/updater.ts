@@ -13,6 +13,7 @@ import {
 } from "./updater-preferences";
 import type { DaemonInstallPrep } from "./update-install-gate";
 import { classifyUpdaterError } from "./updater-errors";
+import { type DialogLocale, resolveDialogLocale } from "./dialog-locale";
 
 // Silent background updates: electron-updater downloads on its own as soon
 // as `update-available` fires; we only surface UI when the package is fully
@@ -76,21 +77,97 @@ export interface SetupAutoUpdaterOptions {
   platform?: NodeJS.Platform;
 }
 
+const BUSY_INSTALL_COPY: Record<
+  DialogLocale,
+  {
+    title: string;
+    installNow: string;
+    cancel: string;
+    message: (count: number) => string;
+    detail: string;
+  }
+> = {
+  en: {
+    title: "Install update",
+    installNow: "Install now",
+    cancel: "Cancel",
+    message: (count) =>
+      `${count} ${count === 1 ? "run is" : "runs are"} active on this device.`,
+    detail: "Installing now stops the daemon and interrupts active runs.",
+  },
+  "zh-Hans": {
+    title: "安装更新",
+    installNow: "立即安装",
+    cancel: "取消",
+    message: (count) => `此设备上有 ${count} 次运行尚未结束。`,
+    detail: "立即安装会停止守护进程并中断这些运行。",
+  },
+  "zh-Hant": {
+    title: "安裝更新",
+    installNow: "立即安裝",
+    cancel: "取消",
+    message: (count) => `此裝置上有 ${count} 次執行尚未結束。`,
+    detail: "立即安裝會停止守護進程並中斷這些執行。",
+  },
+  ja: {
+    title: "アップデートをインストール",
+    installNow: "今すぐインストール",
+    cancel: "キャンセル",
+    message: (count) => `このデバイスで ${count} 件の実行が進行中です。`,
+    detail: "今すぐインストールするとデーモンが停止し、実行中の処理が中断されます。",
+  },
+  ko: {
+    title: "업데이트 설치",
+    installNow: "지금 설치",
+    cancel: "취소",
+    message: (count) => `이 기기에서 ${count}개의 실행이 진행 중입니다.`,
+    detail: "지금 설치하면 데몬이 중지되고 진행 중인 실행이 중단됩니다.",
+  },
+  fr: {
+    title: "Installer la mise à jour",
+    installNow: "Installer maintenant",
+    cancel: "Annuler",
+    message: (count) =>
+      count === 1
+        ? "1 exécution est en cours sur cet appareil."
+        : `${count} exécutions sont en cours sur cet appareil.`,
+    detail: "L'installation immédiate arrête le démon et interrompt les exécutions en cours.",
+  },
+  es: {
+    title: "Instalar actualización",
+    installNow: "Instalar ahora",
+    cancel: "Cancelar",
+    message: (count) =>
+      count === 1
+        ? "Hay 1 ejecución activa en este dispositivo."
+        : `Hay ${count} ejecuciones activas en este dispositivo.`,
+    detail: "Instalar ahora detiene el daemon e interrumpe las ejecuciones activas.",
+  },
+  ru: {
+    title: "Установить обновление",
+    installNow: "Установить сейчас",
+    cancel: "Отмена",
+    message: (count) => `На этом устройстве активно запусков: ${count}.`,
+    detail: "Установка сейчас остановит демон и прервёт активные запуски.",
+  },
+};
+
 export function createElectronBusyInstallPrompt(
   showMessageBox: (
     options: MessageBoxOptions,
   ) => Promise<{ response: number }>,
+  getPreferredLanguage: () => string = () => "en",
 ): (activeTasks: number) => Promise<boolean> {
   return async (activeTasks) => {
-    const tasks = activeTasks === 1 ? "1 agent task is" : `${activeTasks} agent tasks are`;
+    const copy = BUSY_INSTALL_COPY[resolveDialogLocale(getPreferredLanguage())];
     const { response } = await showMessageBox({
       type: "question",
-      buttons: ["Install now", "Cancel"],
+      buttons: [copy.installNow, copy.cancel],
       defaultId: 1,
       cancelId: 1,
-      title: "Install update",
-      message: `${tasks} running on this computer.`,
-      detail: "Installing now stops the local runtime and interrupts these tasks.",
+      title: copy.title,
+      message: copy.message(activeTasks),
+      detail: copy.detail,
     });
     return response === 0;
   };

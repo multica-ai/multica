@@ -25,6 +25,15 @@ vi.mock("../../agents/components/agent-avatar-stack", () => ({
 }));
 
 vi.mock("./workspace-agent-working-chip", () => ({
+  useWorkingExecutionUnits: (
+    agents: readonly WorkspaceWorkingAgent[] | undefined,
+  ) =>
+    agents?.map((agent) => ({
+      type: "agent" as const,
+      id: agent.id,
+      runningTaskCount: agent.running_task_count,
+      memberAgentIds: [agent.id],
+    })),
   WorkingAgentsHoverContent: ({
     agents,
   }: {
