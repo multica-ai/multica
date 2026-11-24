@@ -11,11 +11,12 @@ import type { Issue } from "@multica/core/types";
 import { AppLink } from "../../navigation";
 import { useT } from "../../i18n";
 import { IssueSidebarSectionHeader } from "./issue-sidebar-section";
+import { isIssueWaiting } from "../utils/waiting";
 
 export function IssueBlockedMarker({ issue }: { issue: Issue }) {
   const { t } = useT("issues");
+  if (!isIssueWaiting(issue)) return null;
   const count = issue.blocked_count ?? 0;
-  if (!count) return null;
   const label = t(($) => $.waiting.count, { count });
   return <span className="inline-flex shrink-0 items-center gap-1 text-destructive text-caption" title={label} aria-label={label}>
     <Flag className="size-3.5" aria-hidden="true" />{count}

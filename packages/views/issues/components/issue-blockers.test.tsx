@@ -17,7 +17,7 @@ vi.mock("../../navigation", () => ({
   AppLink: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a>,
 }));
 
-import { IssueBlockersSection } from "./issue-blockers";
+import { IssueBlockedMarker, IssueBlockersSection } from "./issue-blockers";
 
 afterEach(cleanup);
 
@@ -42,5 +42,14 @@ describe("IssueBlockersSection hint", () => {
     renderWithI18n(<IssueBlockersSection issue={waitingIssue("backlog")} />);
     expect(screen.getByText(/is in Backlog, so it won't start automatically/)).toBeInTheDocument();
     expect(screen.queryByText(/starts automatically or receives a notification/)).not.toBeInTheDocument();
+  });
+});
+
+describe("IssueBlockedMarker", () => {
+  it("flags a waiting issue and stays hidden once the issue is finished", () => {
+    const { rerender } = renderWithI18n(<IssueBlockedMarker issue={waitingIssue("todo")} />);
+    expect(screen.getByLabelText(/Waiting for 1 task/i)).toBeInTheDocument();
+    rerender(<IssueBlockedMarker issue={waitingIssue("done")} />);
+    expect(screen.queryByLabelText(/Waiting for/i)).not.toBeInTheDocument();
   });
 });
