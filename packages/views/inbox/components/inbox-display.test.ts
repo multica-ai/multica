@@ -8,6 +8,7 @@ import {
   inboxRowHref,
   isAutopilotQuotaNotice,
   isQuickCreateOutcome,
+  isQuotaNotice,
   resolveDetailItem,
   stripQuickCreatePrefix,
 } from "./inbox-display";
@@ -110,6 +111,15 @@ describe("inbox display helpers", () => {
   it("keeps paused autopilot title and body on the same server fallback path", () => {
     expect(isAutopilotQuotaNotice("autopilot_paused")).toBe(false);
     expect(isAutopilotQuotaNotice("autopilot_quota_exceeded")).toBe(true);
+    expect(isAutopilotQuotaNotice("app_tool_calls_quota_exceeded")).toBe(false);
+  });
+
+  // Both limit notices are titled in the reader's locale, not by the stored
+  // English fallback.
+  it("titles both limit notices from their type", () => {
+    expect(isQuotaNotice("autopilot_quota_exceeded")).toBe(true);
+    expect(isQuotaNotice("app_tool_calls_quota_exceeded")).toBe(true);
+    expect(isQuotaNotice("autopilot_paused")).toBe(false);
   });
 });
 

@@ -18,7 +18,7 @@ function Checkbox({ className, indeterminate, ...props }: CheckboxPrimitive.Root
     >
       <CheckboxPrimitive.Indicator
         data-slot="checkbox-indicator"
-        className="grid place-content-center text-current transition-none [&>svg]:size-3.5"
+        className="grid place-content-center text-current transition-[scale,opacity] duration-100 ease-[cubic-bezier(0.23,1,0.32,1)] data-[starting-style]:scale-75 data-[starting-style]:opacity-0 data-[ending-style]:scale-75 data-[ending-style]:opacity-0 motion-reduce:transition-none [&>svg]:size-3.5"
       >
         {indeterminate ? <MinusIcon /> : <CheckIcon />}
       </CheckboxPrimitive.Indicator>

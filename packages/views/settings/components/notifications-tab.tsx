@@ -18,7 +18,6 @@ import {
   type AutoArchivePreset,
 } from "@multica/core/notification-preferences/auto-archive-presets";
 import type {
-  AfterAutoArchiveValue,
   AutoArchiveKey,
   NotificationGroupKey,
   NotificationPreferences,
@@ -150,10 +149,6 @@ export function NotificationsTab() {
     setAutoArchiveCustom(true);
     saveAutoArchive(on ? [...autoArchiveOn, key] : autoArchiveOn.filter((k) => k !== key));
   };
-  const afterAutoArchiveItems: { value: AfterAutoArchiveValue; label: string }[] = [
-    { value: "stay", label: t(($) => $.notifications.leaving.after_stay) },
-    { value: "next", label: t(($) => $.notifications.leaving.after_next) },
-  ];
 
   const systemEnabled = preferences.system_notifications !== "muted";
 
@@ -203,20 +198,38 @@ export function NotificationsTab() {
                   </Select>
                 </SettingsRow>
               )}
-              {category.groups.map((key) => (
-                <SettingsRow
-                  key={key}
-                  anchor={key}
-                  label={t(($) => $.notifications.groups[key].label)}
-                  description={t(($) => $.notifications.groups[key].description)}
-                >
-                  <Switch
-                    checked={notificationPreferenceValue(preferences, key) !== "muted"}
-                    aria-label={t(($) => $.notifications.groups[key].label)}
-                    onCheckedChange={(checked) => handleToggle(key, checked)}
-                  />
-                </SettingsRow>
-              ))}
+              {category.groups.map((key) => {
+                const enabled = notificationPreferenceValue(preferences, key) !== "muted";
+                return (
+                  <Fragment key={key}>
+                    <SettingsRow
+                      anchor={key}
+                      label={t(($) => $.notifications.groups[key].label)}
+                      description={t(($) => $.notifications.groups[key].description)}
+                    >
+                      <Switch
+                        checked={enabled}
+                        aria-label={t(($) => $.notifications.groups[key].label)}
+                        onCheckedChange={(checked) => handleToggle(key, checked)}
+                      />
+                    </SettingsRow>
+                    {key === "comments" && enabled && (
+                      <SettingsRow
+                        anchor="squad_handoffs"
+                        className="pl-8"
+                        label={t(($) => $.notifications.groups.squad_handoffs.label)}
+                        description={t(($) => $.notifications.groups.squad_handoffs.description)}
+                      >
+                        <Switch
+                          checked={notificationPreferenceValue(preferences, "squad_handoffs") !== "muted"}
+                          aria-label={t(($) => $.notifications.groups.squad_handoffs.label)}
+                          onCheckedChange={(checked) => handleToggle("squad_handoffs", checked)}
+                        />
+                      </SettingsRow>
+                    )}
+                  </Fragment>
+                );
+              })}
             </Fragment>
           ))}
         </SettingsCard>
@@ -305,37 +318,6 @@ export function NotificationsTab() {
               </div>
             )}
           </div>
-          {autoArchiveOn.length > 0 && (
-            <SettingsRow
-              anchor="after_auto_archive"
-              className="pl-8"
-              label={t(($) => $.notifications.leaving.after_label)}
-              description={t(($) => $.notifications.leaving.after_description)}
-            >
-              <Select
-                items={afterAutoArchiveItems}
-                value={notificationPreferenceValue(preferences, "after_auto_archive")}
-                onValueChange={(next) =>
-                  next && save({ ...preferences, after_auto_archive: next as AfterAutoArchiveValue })
-                }
-              >
-                <SelectTrigger
-                  size="sm"
-                  className="w-56"
-                  aria-label={t(($) => $.notifications.leaving.after_label)}
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent align="end">
-                  {afterAutoArchiveItems.map((item) => (
-                    <SelectItem key={item.value} value={item.value}>
-                      {item.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </SettingsRow>
-          )}
           <SettingsRow
             anchor="archived"
             label={t(($) => $.notifications.leaving.archived_label)}

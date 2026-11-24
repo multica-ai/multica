@@ -23,7 +23,7 @@ type mul9393EnqueueGate struct {
 	resume  chan struct{}
 }
 
-func (g *mul9393EnqueueGate) QueryRow(ctx context.Context, query string, args ...any) pgx.Row {
+func (g *mul9393EnqueueGate) hold(ctx context.Context, query string) {
 	if strings.HasPrefix(query, "-- name: CreateAgentTask :one") {
 		close(g.entered)
 		select {
@@ -31,7 +31,31 @@ func (g *mul9393EnqueueGate) QueryRow(ctx context.Context, query string, args ..
 		case <-ctx.Done():
 		}
 	}
+}
+
+func (g *mul9393EnqueueGate) QueryRow(ctx context.Context, query string, args ...any) pgx.Row {
+	g.hold(ctx, query)
 	return g.DBTX.QueryRow(ctx, query, args...)
+}
+
+// Begin gates inserts that run inside the service's own transaction too, such
+// as an ordinary enqueue that consumes a blocker release with its insert.
+func (g *mul9393EnqueueGate) Begin(ctx context.Context) (pgx.Tx, error) {
+	tx, err := testPool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &mul9393GatedTx{Tx: tx, gate: g}, nil
+}
+
+type mul9393GatedTx struct {
+	pgx.Tx
+	gate *mul9393EnqueueGate
+}
+
+func (t *mul9393GatedTx) QueryRow(ctx context.Context, query string, args ...any) pgx.Row {
+	t.gate.hold(ctx, query)
+	return t.Tx.QueryRow(ctx, query, args...)
 }
 
 func TestEnqueueAfterRuntimeSwitchUsesCurrentBinding(t *testing.T) {
@@ -49,7 +73,7 @@ func TestEnqueueAfterRuntimeSwitchUsesCurrentBinding(t *testing.T) {
 			}
 			dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE agent_id=$1`, agentID)
 			gate := &mul9393EnqueueGate{DBTX: testPool, entered: make(chan struct{}), resume: make(chan struct{})}
-			svc := service.NewTaskService(db.New(gate), testPool, nil, events.New())
+			svc := service.NewTaskService(db.New(gate), gate, nil, events.New())
 			type outcome struct {
 				task db.AgentTaskQueue
 				err  error

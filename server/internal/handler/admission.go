@@ -69,6 +69,7 @@ const (
 	ReasonSelfTriggerSuppressed         = dispatch.ReasonSelfTriggerSuppressed
 	ReasonIssueInTriage                 = dispatch.ReasonIssueInTriage
 	ReasonProjectAccessBlocked          = dispatch.ReasonProjectAccessBlocked
+	ReasonHandedToLeader                = dispatch.ReasonHandedToLeader
 	ReasonIssueAgentConsecutiveFailures = dispatch.ReasonIssueAgentConsecutiveFailures
 	ReasonInternalError                 = dispatch.ReasonInternalError
 )

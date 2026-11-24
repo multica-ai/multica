@@ -135,6 +135,14 @@ describe("useInboxShortcut", () => {
     expect(press(E)).toBe(true);
     expect(handler).not.toHaveBeenCalled();
   });
+
+  it("ignores keys while a floating Issue Peek panel is open", () => {
+    const handler = vi.fn();
+    renderHook(() => useInboxShortcut("nextInboxItem", handler));
+    mountTarget("<aside data-issue-peek></aside>");
+    expect(press({ key: "j", code: "KeyJ" })).toBe(true);
+    expect(handler).not.toHaveBeenCalled();
+  });
 });
 
 describe("useInboxUndoShortcut", () => {

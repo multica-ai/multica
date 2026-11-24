@@ -9,6 +9,7 @@ import { projectListOptions } from "@multica/core/projects/queries";
 import type { Project } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
 import { AutoArchivePromptDialog } from "../../inbox/components/auto-archive-prompt-dialog";
+import { inboxTabFromParam } from "../../inbox/components/inbox-view";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { useT } from "../../i18n";
 import { PanelBody, PanelCount, PanelHeader, PanelLink, PanelList, PanelSection, isPathWithin } from "../panel-nav";
@@ -38,8 +39,11 @@ export function GuestWorkPanel() {
   const shared = projects.filter((project) => !project.archived_at);
   const InvolvedIcon = routeIconForPath(p.myIssues());
 
-  // The notification open on the Inbox page beside the section.
-  const inboxOpenKey = pathname === p.inbox() ? searchParams.get("issue") : null;
+  // The live notification open on the Inbox page beside the section.
+  const inboxOpenKey =
+    pathname === p.inbox() && inboxTabFromParam(searchParams.get("view")) === "inbox"
+      ? searchParams.get("issue")
+      : null;
   const inboxRows = useInboxSectionRows(wsId, inboxOpenKey);
 
   return (

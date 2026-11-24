@@ -1,13 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Bot, MessageSquare, Plus } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { useIsCompact } from "@multica/ui/hooks/use-mobile";
-import { UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { useReducedMotion } from "@multica/core/appearance";
 import { useRequiredWorkspaceSlug, useWorkspacePaths } from "@multica/core/paths";
@@ -48,47 +46,7 @@ import { AgentAccessRevokedBanner } from "./components/agent-access-revoked-bann
 import { RuntimeRequiredBanner } from "./components/runtime-required-banner";
 import { ChatAppRequests } from "../common/app-requests";
 import { useRegisterCommandBarContext } from "../search/register-context";
-
-/**
- * Smoothly expands/collapses an optional status strip above the composer so
- * async or session-dependent banners do not snap the message viewport.
- * Keying on `slotKey` keeps height steady when two consecutive sessions both
- * show a banner in the same slot.
- */
-function CollapsibleSlot({
-  slotKey,
-  visible,
-  children,
-}: {
-  slotKey: string;
-  visible: boolean;
-  children: ReactNode;
-}) {
-  const reduceMotion = useReducedMotion();
-  const duration = reduceMotion ? 0 : UI_MOTION_DURATION.fast;
-
-  return (
-    <AnimatePresence initial={false}>
-      {visible && (
-        <motion.div
-          key={slotKey}
-          data-slot={slotKey}
-          initial={{ opacity: 0, height: 0, overflow: "hidden" }}
-          animate={{
-            opacity: 1,
-            height: "auto",
-            transitionEnd: { overflow: "visible" },
-          }}
-          exit={{ opacity: 0, height: 0, overflow: "hidden" }}
-          transition={{ duration, ease: UI_EASE_OUT }}
-          className="shrink-0"
-        >
-          {children}
-        </motion.div>
-      )}
-    </AnimatePresence>
-  );
-}
+import { CollapsibleSlot } from "./components/collapsible-slot";
 
 /**
  * Chat tab — the first-class two-pane surface (thread list on the left,
@@ -418,15 +376,14 @@ export function ChatPage() {
   ) : null;
   const hasActiveWakeup =
     !!c.activeSessionId && wakeups.some((w) => w.status === "active");
-  const emptyEnterClass = activeTransition
-    ? reduceMotion
-      ? "animate-chat-enter-fade"
-      : activeTransition === "next"
+  const emptyEnterClass =
+    activeTransition && !reduceMotion
+      ? activeTransition === "next"
         ? "animate-chat-enter-next"
         : activeTransition === "prev"
           ? "animate-chat-enter-prev"
           : "animate-chat-enter-fade"
-    : undefined;
+      : undefined;
   const conversation = (
     <div className="flex flex-1 flex-col min-h-0 @container">
       {c.currentSession ? (
@@ -619,7 +576,7 @@ export function ChatPage() {
           <div
             className={cn(
               "flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-muted-foreground",
-              activeTransition && "animate-chat-enter-fade",
+              activeTransition && !reduceMotion && "animate-chat-enter-fade",
             )}
           >
             <MessageSquare className="h-10 w-10 text-faint-foreground" />

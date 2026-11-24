@@ -2380,6 +2380,33 @@ func TestGatePiResumeToSessionFile(t *testing.T) {
 	}
 }
 
+// Antigravity stores conversations under its global app data directory, so a
+// follow-up that lands in a new workdir must keep the prior conversation
+// (#11316).
+func TestGateAntigravityResumeAcrossWorkdirs(t *testing.T) {
+	t.Parallel()
+
+	base := t.TempDir()
+	priorDir := filepath.Join(base, "prior-workdir")
+	envDir := filepath.Join(base, "fresh-workdir")
+	for _, dir := range []string{priorDir, envDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("create %s: %v", dir, err)
+		}
+	}
+	const conversationID = "27a6d8f2-8523-46fc-8fc9-87e630cbe295"
+	task := Task{PriorSessionID: conversationID, PriorWorkDir: priorDir}
+	taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
+
+	if !gateResumeToReachableSession(&task, &taskCtx, "antigravity", envDir, true, false, false, false, slog.Default()) {
+		t.Fatal("antigravity conversation should stay reachable from a new workdir")
+	}
+	if task.PriorSessionID != conversationID || !taskCtx.PriorSessionResumed || taskCtx.PriorSessionResumeUnavailable {
+		t.Fatalf("resume state changed: session=%q resumed=%v unavailable=%v",
+			task.PriorSessionID, taskCtx.PriorSessionResumed, taskCtx.PriorSessionResumeUnavailable)
+	}
+}
+
 func TestGatePiResumeDropsUnusableSessionFile(t *testing.T) {
 	t.Parallel()
 

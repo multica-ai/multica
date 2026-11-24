@@ -41,7 +41,9 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     quick_create_unconfirmed: t(($) => $.types.quick_create_unconfirmed),
     autopilot_paused: t(($) => $.types.autopilot_paused),
     autopilot_quota_exceeded: t(($) => $.types.autopilot_quota_exceeded),
+    app_tool_calls_quota_exceeded: t(($) => $.types.app_tool_calls_quota_exceeded),
     children_done: t(($) => $.types.children_done),
+    blockers_done: t(($) => $.types.blockers_done),
     project_owner_joined: t(($) => $.types.project_owner_joined),
     app_action_requested: t(($) => $.types.app_action_requested),
     app_action_reminder: t(($) => $.types.app_action_reminder),
@@ -152,6 +154,8 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
     }
     case "autopilot_quota_exceeded":
       return <span>{t(($) => $.labels.autopilot_quota_blocked)}</span>;
+    case "app_tool_calls_quota_exceeded":
+      return <span>{t(($) => $.labels.app_tool_calls_quota_blocked)}</span>;
     case "children_done": {
       // The stage arrives as a JSON number; details are typed as strings.
       const stage = details.stage != null ? String(details.stage) : "";

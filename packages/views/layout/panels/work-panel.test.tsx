@@ -220,6 +220,9 @@ function renderPanel(
         <button type="button" onClick={() => setPathname(`/acme/issues/${ISSUE.id}`)}>
           Return to issue
         </button>
+        <button type="button" onClick={() => setPathname(`/acme/inbox?view=archived&issue=${ISSUE.id}`)}>
+          Open archived issue
+        </button>
         <button type="button" onClick={() => loading && setPathname(loading)}>
           Finish loading
         </button>
@@ -263,6 +266,8 @@ beforeEach(() => {
   useInboxSelectionStore.setState({
     heldRows: {},
     leftRowKeyByWorkspace: {},
+    sectionTabByWorkspace: {},
+    sectionTabSyncedUrlByWorkspace: {},
   });
   apiMock.listIssueTableRows.mockResolvedValue({
     rows: [ISSUE, OTHER].map((issue) => ({ issue })),
@@ -806,5 +811,35 @@ describe("KeptRowsRelease Inbox Zero undo", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Return to issue" }));
     expect(cleared()).toBeUndefined();
+  });
+
+  it("releases a held live Inbox row when opening the same issue in Archived, so switching back to Inbox does not ghost it", () => {
+    const qc = renderPanel(`/acme/inbox?issue=${ISSUE.id}`, [], [], [], [inboxItem(ISSUE)]);
+    expect(screen.getByRole("link", { name: INBOX_ROW_NAME })).toHaveAttribute("aria-current", "page");
+    expect(useInboxSelectionStore.getState().heldRows["ws-1:section"]?.key).toBe(ISSUE.id);
+
+    // Archive removes it from the live list, then opening it from Archived must release the live held row.
+    act(() => {
+      qc.setQueryData(inboxListOptions("ws-1").queryKey, []);
+    });
+    expect(screen.getByRole("link", { name: INBOX_ROW_NAME })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open archived issue" }));
+    expect(useInboxSelectionStore.getState().heldRows["ws-1:section"]).toBeUndefined();
+
+    fireEvent.click(screen.getByRole("tab", { name: /^Inbox/ }));
+    expect(screen.queryByRole("link", { name: INBOX_ROW_NAME })).toBeNull();
+  });
+
+  it("preserves a manual sidebar tab switch across hover-peek mounts while an archived issue stays open", () => {
+    renderPanel(`/acme/inbox?view=archived&issue=${ISSUE.id}`, [], [], [], [inboxItem(OTHER)]);
+    expect(screen.getByRole("tab", { name: /^Archived/ })).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.click(screen.getByRole("tab", { name: /^Inbox/ }));
+    expect(screen.getByRole("tab", { name: /^Inbox/ })).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: "Open peek" }));
+    const peek = screen.getByTestId("peek");
+    expect(within(peek).getByRole("tab", { name: /^Inbox/ })).toHaveAttribute("aria-selected", "true");
   });
 });

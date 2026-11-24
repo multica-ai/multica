@@ -9,6 +9,8 @@ it does not run work by itself.
 - [Squad fields](#squad-fields)
 - [Creation and leader membership](#creation-and-leader-membership)
 - [Leader briefing](#leader-briefing)
+- [Member brief](#member-brief)
+- [Handoff mode](#handoff-mode)
 - [Issue assignment behavior](#issue-assignment-behavior)
 - [Comment and mention behavior](#comment-and-mention-behavior)
 - [Autopilot behavior](#autopilot-behavior)
@@ -38,7 +40,10 @@ Squad-routed work runs through the squad's `leader_id` agent. Consequences:
 - mentioning a squad routes to the leader;
 - squad-assigned autopilot resolves to the leader;
 - squad members are not automatically fanned out;
-- squad `instructions` are leader briefing content, not member prompts.
+- squad `instructions` go into the leader briefing and into every agent
+  member's member brief on the squad's issues;
+- `handoff_mode` decides whether a member's reply goes back to the leader
+  (`leader`, default) or members hand off to each other (`direct`).
 
 ## CLI
 
@@ -48,9 +53,15 @@ Squad commands:
 multica squad list --output json
 multica squad get <squad-id> --output json
 multica squad create --name <name> --leader <agent-name-or-id> --output json
-multica squad update <squad-id> --instructions "<leader coordination policy>" --output json
+multica squad update <squad-id> --instructions "<squad coordination policy>" --output json
+multica squad update <squad-id> --handoff-mode leader|direct --output json
+multica squad briefs <squad-id> [--agent <agent-name-or-id>] [--output json]
 multica squad delete <squad-id>
 ```
+
+`squad briefs` prints the exact squad section each agent receives (leader
+briefing or member brief). Both `--handoff-mode` and `briefs` require
+permission to manage the squad (its creator, or a workspace owner/admin).
 
 Member commands:
 
@@ -103,8 +114,10 @@ unbounded pull.
 - `name` — display name; unique per workspace.
 - `description` — human-facing metadata/display text. Do not assume runtime
   prompt impact.
-- `instructions` — squad-level instructions added to the squad leader briefing.
-  They are not directly injected into every squad member.
+- `instructions` — squad-level instructions added to the squad leader briefing
+  and to the member brief of every agent member.
+- `handoff_mode` — `leader` (default) or `direct`. See
+  [Handoff mode](#handoff-mode).
 - `avatar_url` — optional squad avatar URL.
 - `leader_id` — agent ID of the squad leader; the runtime target for
   squad-routed work.
@@ -114,9 +127,9 @@ unbounded pull.
 - `member_count` — list response count of squad members.
 - `member_preview` — list response preview of squad members.
 
-Use `instructions` for leader-facing coordination policy: squad responsibility,
-delegation expectations, when to ask humans, and review/handoff rules. Do not
-write it as if every member automatically receives it.
+Use `instructions` for squad coordination policy: squad responsibility,
+delegation expectations, when to ask humans, and review/handoff rules. The
+leader and every agent member read it, so write it for both.
 
 ## Squad member fields
 
@@ -153,6 +166,38 @@ can delegate by capability instead of guessing from the role label; human
 members carry no skills segment. Built-in `multica-*` skills are not listed —
 only the workspace skills explicitly attached to the agent. Archived agent
 members are skipped from the briefing roster.
+
+In `direct` handoff mode the briefing adds a "Handoff Mode: Direct" section:
+the leader assigns the first step and handles what comes back to it.
+
+## Member brief
+
+When a non-leader agent member claims a run on an issue assigned to its squad,
+Multica appends a "Squad Member Brief": the member's role, the rest of the
+roster with mention markdown, the squad instructions, and how to hand off under
+the squad's handoff mode. It never contains the leader's Squad Operating
+Protocol.
+
+## Handoff mode
+
+`leader` (default): every member reply wakes the leader, as described under
+[Comment and mention behavior](#comment-and-mention-behavior).
+
+`direct`, for a comment written by a member's run on the squad's own issue:
+
+- mentioning another squad member runs only that member; the leader is not
+  woken;
+- mentioning a person (and no agent) wakes nobody; the person replies;
+- a reply that names no next owner goes back to the leader;
+- the issue goes back to the leader instead of the named member when the same
+  two members have already passed it back and forth 3 rounds, or the issue has
+  taken 20 member handoffs in 24 hours;
+- a failed member run is recovered by the leader, not by the member that
+  handed the work over.
+
+Each routed handoff is recorded as a `squad_handoff` activity on the issue
+(`kind` dispatch / member / human / leader, the target, `round` when above 1,
+and `reason` when a guard sent it back). These limits are fixed.
 
 ## Issue assignment behavior
 
@@ -236,6 +281,7 @@ These actions can trigger agent work or mutate durable state:
 - creating a squad;
 - updating squad fields;
 - changing `leader_id`;
+- changing `handoff_mode` (changes who later comments wake);
 - adding/removing members;
 - changing member roles;
 - assigning an issue to a squad;
@@ -253,7 +299,9 @@ These actions can trigger agent work or mutate durable state:
 - Squad mention routes to the leader, not every member.
 - Squad assignment routes to the leader, not every member.
 - Squad autopilot resolves to the leader as executable agent.
-- `instructions` are leader briefing content, not automatic member prompts.
+- `instructions` are not leader-only: agent members receive them too.
+- A member's reply does not always wake the leader: in `direct` handoff mode a
+  member-to-member or member-to-person handoff skips it.
 - `description` has no proven runtime prompt effect.
 - `role` is roster context, not automatic scheduling.
 - Backlog assignment does not immediately start work.

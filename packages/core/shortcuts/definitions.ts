@@ -16,6 +16,9 @@ export type ShortcutActionId =
   | "archiveInboxItem"
   | "unsubscribeArchiveInboxItem"
   | "snoozeInboxItem"
+  | "markInboxUnread"
+  | "nextInboxItem"
+  | "prevInboxItem"
   | "undoInboxAction"
   | "send"
   | "voiceInput"
@@ -124,6 +127,24 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
     id: "snoozeInboxItem",
     category: "general",
     defaultShortcut: createShortcutChord("H"),
+    allowInEditable: false,
+  },
+  {
+    id: "markInboxUnread",
+    category: "general",
+    defaultShortcut: createShortcutChord("U"),
+    allowInEditable: false,
+  },
+  {
+    id: "nextInboxItem",
+    category: "general",
+    defaultShortcut: createShortcutChord("J"),
+    allowInEditable: false,
+  },
+  {
+    id: "prevInboxItem",
+    category: "general",
+    defaultShortcut: createShortcutChord("K"),
     allowInEditable: false,
   },
   {

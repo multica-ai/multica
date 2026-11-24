@@ -131,7 +131,7 @@ func init() {
 	// create
 	autopilotCreateCmd.Flags().String("title", "", "Autopilot title (required)")
 	autopilotCreateCmd.Flags().String("description", "", "Autopilot description (used as the run prompt)")
-	autopilotCreateCmd.Flags().String("agent", "", "Assignee agent (name or ID)")
+	autopilotCreateCmd.Flags().String("agent", "", "Assignee agent (name or ID); one of --agent, --squad, --squad-id is required")
 	autopilotCreateCmd.Flags().String("squad", "", "Assignee squad (name or ID)")
 	autopilotCreateCmd.Flags().String("squad-id", "", "Assignee squad ID (canonical UUID)")
 	autopilotCreateCmd.Flags().String("mode", "", "Execution mode: create_issue or run_only (required)")
@@ -170,7 +170,7 @@ func init() {
 	autopilotTriggerAddCmd.Flags().String("cron", "", "Cron expression (required for --kind schedule)")
 	autopilotTriggerAddCmd.Flags().String("timezone", "", "IANA timezone (default UTC; schedule only)")
 	autopilotTriggerAddCmd.Flags().String("label", "", "Optional human-readable label")
-	autopilotTriggerAddCmd.Flags().String("event-filters-file", "", "Read webhook event/action filters from a JSON array file (webhook only)")
+	autopilotTriggerAddCmd.Flags().String("event-filters-file", "", "Read webhook event/action filters, each with optional payload conditions, from a JSON array file (webhook only)")
 	autopilotTriggerAddCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// trigger-list
@@ -186,7 +186,7 @@ func init() {
 	autopilotTriggerUpdateCmd.Flags().String("cron", "", "New cron expression")
 	autopilotTriggerUpdateCmd.Flags().String("timezone", "", "New IANA timezone")
 	autopilotTriggerUpdateCmd.Flags().String("label", "", "New label")
-	autopilotTriggerUpdateCmd.Flags().String("event-filters-file", "", "Replace webhook event/action filters from a JSON array file (webhook only)")
+	autopilotTriggerUpdateCmd.Flags().String("event-filters-file", "", "Replace webhook event/action filters, each with optional payload conditions, from a JSON array file (webhook only)")
 	autopilotTriggerUpdateCmd.Flags().Bool("clear-event-filters", false, "Remove webhook filters and accept all events (webhook only)")
 	autopilotTriggerUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 }

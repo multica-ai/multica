@@ -25,7 +25,7 @@ import (
 //     delta is: an affirmative server report about the whole record.
 //   - resumed && known && something changed → the changed field NAMES plus the
 //     read, so the agent knows what to look for rather than diffing blind.
-//   - anything else → the pre-existing instruction, byte for byte. A cold
+//   - anything else → the unconditional read instruction. A cold
 //     start, a dropped resume, an unknown delta and an old server all land
 //     here, and none of them may be softened: the agent has no prior context
 //     to continue from, or nothing looked.
@@ -44,10 +44,11 @@ import (
 // resumed session (MUL-5377).
 func BuildIssueStateHint(issueID, issueStatus, assigneeType, assigneeID string, changedFields []string, deltaKnown, resumed bool) string {
 	readCommand := fmt.Sprintf("`multica issue get %s --output json`", issueID)
-	// The cold instruction is a byte-for-byte literal, not a format of the
-	// other two: it is what every non-resumed run has always been handed, and
-	// the tests that pin the cold path pin these exact bytes.
-	cold := fmt.Sprintf("Start by running %s to understand your task, then decide how to proceed.\n\n", readCommand)
+	// The cold instruction is a literal, not a format of the other two: it is
+	// what every non-resumed run is handed, and the tests that pin the cold
+	// path pin these exact bytes. It asks for the issue read in the same turn
+	// as the comment reads, since neither depends on the other (MUL-10028).
+	cold := fmt.Sprintf("Read the issue with %s in the same turn as any comment reads below (workflow step 2).\n\n", readCommand)
 	// issueStatus empty means the server sent no issue state at all, which can
 	// only happen on a server predating these fields. Treat it as unknown even
 	// if deltaKnown somehow arrived set: reporting a status we do not have

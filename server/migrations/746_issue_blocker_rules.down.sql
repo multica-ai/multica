@@ -1,0 +1,18 @@
+DROP TRIGGER IF EXISTS issue_child_event_delete ON issue;
+DROP FUNCTION IF EXISTS record_deleted_child_event();
+DROP TRIGGER IF EXISTS issue_stage_blockers ON issue;
+DROP FUNCTION IF EXISTS record_issue_stage_blockers();
+DROP TRIGGER IF EXISTS issue_blocker_change ON issue_blocker;
+DROP FUNCTION IF EXISTS record_issue_blocker_change();
+DROP TRIGGER IF EXISTS issue_stage_graph_insert ON issue;
+DROP TRIGGER IF EXISTS issue_stage_graph_update ON issue;
+DROP TRIGGER IF EXISTS issue_blocker_graph_lock ON issue_blocker;
+DROP FUNCTION IF EXISTS lock_issue_blocker_graph();
+DROP FUNCTION IF EXISTS check_issue_blocker_graph(uuid,uuid);
+DROP FUNCTION IF EXISTS arm_issue_blocker_wakeup(uuid,uuid);
+DROP FUNCTION IF EXISTS issue_has_open_blockers(uuid,uuid);
+DROP VIEW IF EXISTS effective_issue_blocker;
+DELETE FROM issue_wakeup_receipt WHERE wakeup_id IN (SELECT id FROM issue_wakeup WHERE system_rule='blockers_done');
+DELETE FROM issue_wakeup WHERE system_rule='blockers_done';
+ALTER TABLE issue_wakeup DROP CONSTRAINT IF EXISTS issue_wakeup_system_rule_check;
+ALTER TABLE issue_wakeup ADD CONSTRAINT issue_wakeup_system_rule_check CHECK (system_rule='child_done');

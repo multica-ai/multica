@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -14,7 +15,7 @@ const rewriteURL = "https://cdn.example/a"
 
 func TestRewriteAttachmentLinks(t *testing.T) {
 	workdir := withWorkdir(t)
-	for _, name := range []string{"a.png", "b.png", "my shot.png", "shots/a.png"} {
+	for _, name := range []string{"a.png", "b.png", "a&b.png", "my shot.png", "shots/a.png"} {
 		if err := os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -148,6 +149,54 @@ func TestRewriteAttachmentLinks(t *testing.T) {
 			paths: []string{"a.png"},
 			body:  "![shot][s]\n\n[s]: ./a.png\n",
 			want:  "![shot][s]\n\n[s]: ./a.png\n",
+		},
+		{
+			name:  "escaped closing bracket in label does not hijack destination rewrite",
+			paths: []string{"a.png"},
+			body:  `![click \](./a.png) to view](./a.png)`,
+			want:  `![click \](./a.png) to view](` + rewriteURL + `)`,
+		},
+		{
+			name:  "inline HTML in label does not hijack destination rewrite",
+			paths: []string{"a.png"},
+			body:  `[<span title="](./a.png)">open</span>](./a.png)`,
+			want:  `[<span title="](./a.png)">open</span>](` + rewriteURL + `)`,
+		},
+		{
+			name:  "HTML comment in label does not hijack destination rewrite",
+			paths: []string{"a.png"},
+			body:  `[<!-- ](./a.png) -->open](./a.png)`,
+			want:  `[<!-- ](./a.png) -->open](` + rewriteURL + `)`,
+		},
+		{
+			name:  "blockquote continuation line before destination",
+			paths: []string{"a.png"},
+			body:  "> [click](\n> ./a.png)",
+			want:  "> [click](\n> " + rewriteURL + ")",
+		},
+		{
+			name:  "blockquote continuation line before angle-bracket destination",
+			paths: []string{"my shot.png"},
+			body:  "> [open](\n> <./my shot.png> \"title\")",
+			want:  "> [open](\n> <" + rewriteURL + "> \"title\")",
+		},
+		{
+			name:  "named HTML character reference in destination",
+			paths: []string{"a&b.png"},
+			body:  "![chart](./a&amp;b.png)",
+			want:  "![chart](" + rewriteURL + ")",
+		},
+		{
+			name:  "numeric HTML character reference in destination",
+			paths: []string{"my shot.png"},
+			body:  "![shot](./my&#x20;shot.png)",
+			want:  "![shot](" + rewriteURL + ")",
+		},
+		{
+			name:  "backslash-escaped ampersand is not decoded as an HTML entity",
+			paths: []string{"a&b.png"},
+			body:  `![chart](./a\&amp;b.png)`,
+			want:  `![chart](./a\&amp;b.png)`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -304,5 +353,28 @@ func TestRunIssueCreateKeepsInlineAttachmentInPlace(t *testing.T) {
 	want := "Before\n\n![shot](/api/attachments/att-1/download)\n\nAfter"
 	if posted["description"] != want {
 		t.Errorf("description =\n%q\nwant\n%q", posted["description"], want)
+	}
+}
+
+func TestRewriteAttachmentLinksCaseInsensitiveOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("case-insensitive filesystem paths apply on Windows")
+	}
+	workdir := withWorkdir(t)
+	if err := os.MkdirAll("shots", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join("shots", "Shot.PNG"), []byte("png"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fileURL := "file:///" + strings.ToLower(filepath.ToSlash(filepath.Join(workdir, "shots", "shot.png")))
+	got, _ := rewriteAttachmentLinks(
+		"![bare](shot.png) and ![url]("+fileURL+")",
+		[]string{filepath.Join("shots", "Shot.PNG")},
+		[]string{rewriteURL},
+	)
+	want := "![bare](" + rewriteURL + ") and ![url](" + rewriteURL + ")"
+	if got != want {
+		t.Fatalf("rewrite =\n%q\nwant\n%q", got, want)
 	}
 }

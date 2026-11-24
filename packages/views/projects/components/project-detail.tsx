@@ -82,7 +82,148 @@ import {
   useOfferArchiveOnComplete,
   useRestoreProjects,
 } from "./project-archive";
-import { PAGE_GUTTER } from "../../layout/page-header";
+import { PageHeader, PAGE_GUTTER } from "../../layout/page-header";
+import { OBJECT_PAGE_BODY } from "../../layout/object-page";
+
+export const PROJECT_DETAIL_LAYOUT_ID = "multica_project_detail_layout";
+
+const PROJECT_SIDEBAR_PROPERTY_ROWS = 7;
+const PROJECT_SIDEBAR_ACTIVITY_ROWS = 3;
+
+/**
+ * Loading frame for ProjectDetail: mirrors the 48px header, tab slots, reading
+ * column, and saved desktop right-sidebar state so data landing causes no
+ * horizontal or vertical layout jump.
+ */
+export function ProjectDetailSkeleton({
+  sidebar = true,
+  layoutId = PROJECT_DETAIL_LAYOUT_ID,
+}: {
+  sidebar?: boolean;
+  layoutId?: string;
+} = {}) {
+  const isMobile = useIsMobile();
+  const { defaultLayout } = useDefaultLayout({ id: layoutId });
+  const sidebarOpen =
+    sidebar && !isMobile && getAnimatedRightSidebarInitialOpen(true, defaultLayout);
+  const restoredSidebarPercent =
+    typeof defaultLayout?.sidebar === "number" && defaultLayout.sidebar > 0
+      ? defaultLayout.sidebar
+      : undefined;
+
+  return (
+    <div
+      data-mc="object-page"
+      data-type="project"
+      data-testid="project-detail-skeleton"
+      aria-busy="true"
+      className="flex min-h-0 flex-1"
+    >
+      <div className="flex min-w-0 flex-1 flex-col">
+        <PageHeader>
+          <div className="flex min-w-0 flex-1 items-center gap-1 self-stretch">
+            <div className="flex h-7 items-center gap-2 px-2">
+              <Skeleton className="size-4 shrink-0 rounded-sm" />
+              <Skeleton className="h-4 w-28" />
+            </div>
+            <div
+              data-testid="project-detail-skeleton-tabs"
+              className="flex shrink-0 items-center self-stretch"
+            >
+              <div className="flex h-full items-center px-2.5">
+                <Skeleton className="h-3.5 w-14" />
+              </div>
+              <div className="flex h-full items-center px-2.5">
+                <Skeleton className="h-3.5 w-14" />
+              </div>
+              <div className="flex h-full items-center px-2.5">
+                <Skeleton className="h-3.5 w-12" />
+              </div>
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <Skeleton className="size-7 rounded-md" />
+          </div>
+        </PageHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className={cn(OBJECT_PAGE_BODY, "space-y-8")}>
+            <div className="flex items-center gap-3">
+              <Skeleton className="size-12 shrink-0 rounded-xl" />
+              <Skeleton className="h-7 w-56" />
+            </div>
+            <div className="space-y-2">
+              <div className="flex h-7 items-center">
+                <Skeleton className="h-4 w-24" />
+              </div>
+              <div className="space-y-2">
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-5/6" />
+                <Skeleton className="h-4 w-2/3" />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="flex h-7 items-center">
+                <Skeleton className="h-4 w-24" />
+              </div>
+              <Skeleton className="h-14 w-full rounded-lg" />
+            </div>
+          </div>
+        </div>
+      </div>
+      {sidebarOpen && (
+        <div
+          data-testid="project-detail-skeleton-sidebar"
+          className={cn(
+            "hidden shrink-0 overflow-hidden border-l p-4 [scrollbar-gutter:stable] md:block",
+            restoredSidebarPercent === undefined
+              ? "w-80"
+              : "min-w-[260px] max-w-[420px]",
+          )}
+          style={
+            restoredSidebarPercent !== undefined
+              ? { width: `${restoredSidebarPercent}%` }
+              : undefined
+          }
+        >
+          <div className="space-y-5">
+            <div>
+              <div className="mb-2 flex items-center px-2 py-1">
+                <Skeleton className="h-3.5 w-20" />
+              </div>
+              <div className="space-y-0.5 pl-2">
+                {Array.from({ length: PROJECT_SIDEBAR_PROPERTY_ROWS }, (_, i) => (
+                  <div key={i} className="flex min-h-8 items-center gap-2">
+                    <Skeleton className="h-3 w-16 shrink-0" />
+                    <Skeleton className="h-4 w-24" />
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className="mb-2 flex items-center px-2 py-1">
+                <Skeleton className="h-3.5 w-16" />
+              </div>
+              <div className="space-y-2 pl-2">
+                <Skeleton className="h-6 w-28" />
+                <Skeleton className="h-2 w-full rounded-full" />
+              </div>
+            </div>
+            <div>
+              <div className="mb-2 flex items-center px-2 py-1">
+                <Skeleton className="h-3.5 w-16" />
+              </div>
+              <div className="space-y-2.5 pl-2">
+                {Array.from({ length: PROJECT_SIDEBAR_ACTIVITY_ROWS }, (_, i) => (
+                  <Skeleton key={i} className="h-8 w-full" />
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ProjectDetail
 
@@ -181,7 +322,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
   // Sidebar panel
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
-    id: "multica_project_detail_layout",
+    id: PROJECT_DETAIL_LAYOUT_ID,
   });
   const sidebarRef = usePanelRef();
   const rightSidebarShortcutTargetRef = useRef<HTMLDivElement | null>(null);
@@ -295,14 +436,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   }, [project, deleteProject, router, wsPaths, t]);
 
   if (isLoading || deleted) {
-    return (
-      <div className="mx-auto w-full max-w-4xl px-8 py-10 space-y-4">
-        <Skeleton className="h-5 w-32" />
-        <Skeleton className="h-8 w-64" />
-        <Skeleton className="h-4 w-96" />
-        <Skeleton className="h-40 w-full mt-8" />
-      </div>
-    );
+    return <ProjectDetailSkeleton sidebar={!isMobile && desktopSidebarOpen} />;
   }
 
   if (!project) {

@@ -603,12 +603,16 @@ require_contains "$out" "make down C=daemon"
 # Commands launched through env-exec must not inherit the daemon-task identity
 # hints that make human/profile CLI commands reject --profile.
 write_manifest "clean-env-903" "$root_dir" 903
+# MULTICA_TASK_ENV_FILE counts as identity: the CLI reloads the task's
+# production token from it, replacing the local one.
 MULTICA_TASK_CONFIG_ROOT=/task/config \
 MULTICA_TASK_WORKSPACES_ROOT=/task/workspaces \
 MULTICA_WORKSPACES_ROOT=/owner/workspaces \
+MULTICA_TASK_ENV_FILE=/task/task-env.json \
   dev_env exec clean-env-903 -- sh -c '
     test -z "${MULTICA_TASK_CONFIG_ROOT:-}" &&
     test -z "${MULTICA_TASK_WORKSPACES_ROOT:-}" &&
+    test -z "${MULTICA_TASK_ENV_FILE:-}" &&
     test "$MULTICA_WORKSPACES_ROOT" = "$1" &&
     test "$MULTICA_DEV_ENV" = clean-env-903
   ' _ "$MULTICA_DEV_WORKSPACES_PARENT/multica_workspaces_dev-dev-env-test-903" \

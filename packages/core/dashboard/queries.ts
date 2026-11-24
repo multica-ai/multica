@@ -19,10 +19,13 @@ export type DashboardHistoryLimitParam = number | null | undefined;
 type DashboardKeyPart =
   | "daily"
   | "by-agent"
+  | "by-squad"
   | "agent-runtime"
+  | "squad-runtime"
   | "runtime-daily"
   | "failures-daily"
-  | "failures-by-agent";
+  | "failures-by-agent"
+  | "failures-by-squad";
 
 const dashboardKey = (
   wsId: string,
@@ -31,7 +34,11 @@ const dashboardKey = (
   projectId: string | null,
   tz: string,
   historyLimit: DashboardHistoryLimitParam = null,
-) => ["dashboard", wsId, part, days, projectId, tz, historyLimit ?? null] as const;
+  squadId: string | null = null,
+) =>
+  squadId === null
+    ? (["dashboard", wsId, part, days, projectId, tz, historyLimit ?? null] as const)
+    : (["dashboard", wsId, part, days, projectId, tz, historyLimit ?? null, squadId] as const);
 
 export const dashboardKeys = {
   all: (wsId: string) => ["dashboard", wsId] as const,
@@ -41,42 +48,72 @@ export const dashboardKeys = {
     projectId: string | null,
     tz: string,
     historyLimit?: DashboardHistoryLimitParam,
-  ) => dashboardKey(wsId, "daily", days, projectId, tz, historyLimit),
+    squadId: string | null = null,
+  ) => dashboardKey(wsId, "daily", days, projectId, tz, historyLimit, squadId),
   byAgent: (
     wsId: string,
     days: number,
     projectId: string | null,
     tz: string,
     historyLimit?: DashboardHistoryLimitParam,
-  ) => dashboardKey(wsId, "by-agent", days, projectId, tz, historyLimit),
+    squadId: string | null = null,
+  ) => dashboardKey(wsId, "by-agent", days, projectId, tz, historyLimit, squadId),
+  bySquad: (
+    wsId: string,
+    days: number,
+    projectId: string | null,
+    tz: string,
+    historyLimit?: DashboardHistoryLimitParam,
+    squadId: string | null = null,
+  ) => dashboardKey(wsId, "by-squad", days, projectId, tz, historyLimit, squadId),
   agentRuntime: (
     wsId: string,
     days: number,
     projectId: string | null,
     tz: string,
     historyLimit?: DashboardHistoryLimitParam,
-  ) => dashboardKey(wsId, "agent-runtime", days, projectId, tz, historyLimit),
+    squadId: string | null = null,
+  ) => dashboardKey(wsId, "agent-runtime", days, projectId, tz, historyLimit, squadId),
+  squadRuntime: (
+    wsId: string,
+    days: number,
+    projectId: string | null,
+    tz: string,
+    historyLimit?: DashboardHistoryLimitParam,
+    squadId: string | null = null,
+  ) => dashboardKey(wsId, "squad-runtime", days, projectId, tz, historyLimit, squadId),
   runTimeDaily: (
     wsId: string,
     days: number,
     projectId: string | null,
     tz: string,
     historyLimit?: DashboardHistoryLimitParam,
-  ) => dashboardKey(wsId, "runtime-daily", days, projectId, tz, historyLimit),
+    squadId: string | null = null,
+  ) => dashboardKey(wsId, "runtime-daily", days, projectId, tz, historyLimit, squadId),
   failuresDaily: (
     wsId: string,
     days: number,
     projectId: string | null,
     tz: string,
     historyLimit?: DashboardHistoryLimitParam,
-  ) => dashboardKey(wsId, "failures-daily", days, projectId, tz, historyLimit),
+    squadId: string | null = null,
+  ) => dashboardKey(wsId, "failures-daily", days, projectId, tz, historyLimit, squadId),
   failuresByAgent: (
     wsId: string,
     days: number,
     projectId: string | null,
     tz: string,
     historyLimit?: DashboardHistoryLimitParam,
-  ) => dashboardKey(wsId, "failures-by-agent", days, projectId, tz, historyLimit),
+    squadId: string | null = null,
+  ) => dashboardKey(wsId, "failures-by-agent", days, projectId, tz, historyLimit, squadId),
+  failuresBySquad: (
+    wsId: string,
+    days: number,
+    projectId: string | null,
+    tz: string,
+    historyLimit?: DashboardHistoryLimitParam,
+    squadId: string | null = null,
+  ) => dashboardKey(wsId, "failures-by-squad", days, projectId, tz, historyLimit, squadId),
 };
 
 // The server materializes these rollups on a 5-minute cadence, so a mounted
@@ -124,8 +161,9 @@ function dashboardOptions<T>(
   projectId: string | null,
   tz: string,
   historyLimit: DashboardHistoryLimitParam,
+  squadId: string | null = null,
 ) {
-  const queryKey = dashboardKey(wsId, part, days, projectId, tz, historyLimit);
+  const queryKey = dashboardKey(wsId, part, days, projectId, tz, historyLimit, squadId);
   return queryOptions({
     queryKey,
     queryFn: async ({ client }: { client: QueryClient }) => {
@@ -134,6 +172,7 @@ function dashboardOptions<T>(
       const rows = await fetcher({
         days,
         project_id: projectId ?? undefined,
+        squad_id: squadId ?? undefined,
         tz,
         onHistoryLimit: (limit) => {
           served = limit;
@@ -169,6 +208,7 @@ export function dashboardUsageDailyOptions(
   projectId: string | null,
   tz: string,
   historyLimit: DashboardHistoryLimitParam,
+  squadId: string | null = null,
 ) {
   return dashboardOptions(
     "daily",
@@ -178,6 +218,7 @@ export function dashboardUsageDailyOptions(
     projectId,
     tz,
     historyLimit,
+    squadId,
   );
 }
 
@@ -187,6 +228,7 @@ export function dashboardUsageByAgentOptions(
   projectId: string | null,
   tz: string,
   historyLimit: DashboardHistoryLimitParam,
+  squadId: string | null = null,
 ) {
   return dashboardOptions(
     "by-agent",
@@ -196,6 +238,27 @@ export function dashboardUsageByAgentOptions(
     projectId,
     tz,
     historyLimit,
+    squadId,
+  );
+}
+
+export function dashboardUsageBySquadOptions(
+  wsId: string,
+  days: number,
+  projectId: string | null,
+  tz: string,
+  historyLimit: DashboardHistoryLimitParam,
+  squadId: string | null = null,
+) {
+  return dashboardOptions(
+    "by-squad",
+    (params) => api.getDashboardUsageBySquad(params),
+    wsId,
+    days,
+    projectId,
+    tz,
+    historyLimit,
+    squadId,
   );
 }
 
@@ -205,6 +268,7 @@ export function dashboardAgentRunTimeOptions(
   projectId: string | null,
   tz: string,
   historyLimit: DashboardHistoryLimitParam,
+  squadId: string | null = null,
 ) {
   return dashboardOptions(
     "agent-runtime",
@@ -214,6 +278,27 @@ export function dashboardAgentRunTimeOptions(
     projectId,
     tz,
     historyLimit,
+    squadId,
+  );
+}
+
+export function dashboardSquadRunTimeOptions(
+  wsId: string,
+  days: number,
+  projectId: string | null,
+  tz: string,
+  historyLimit: DashboardHistoryLimitParam,
+  squadId: string | null = null,
+) {
+  return dashboardOptions(
+    "squad-runtime",
+    (params) => api.getDashboardSquadRunTime(params),
+    wsId,
+    days,
+    projectId,
+    tz,
+    historyLimit,
+    squadId,
   );
 }
 
@@ -223,6 +308,7 @@ export function dashboardRunTimeDailyOptions(
   projectId: string | null,
   tz: string,
   historyLimit: DashboardHistoryLimitParam,
+  squadId: string | null = null,
 ) {
   return dashboardOptions(
     "runtime-daily",
@@ -232,6 +318,7 @@ export function dashboardRunTimeDailyOptions(
     projectId,
     tz,
     historyLimit,
+    squadId,
   );
 }
 
@@ -241,6 +328,7 @@ export function dashboardFailuresDailyOptions(
   projectId: string | null,
   tz: string,
   historyLimit: DashboardHistoryLimitParam,
+  squadId: string | null = null,
 ) {
   return dashboardOptions(
     "failures-daily",
@@ -250,6 +338,7 @@ export function dashboardFailuresDailyOptions(
     projectId,
     tz,
     historyLimit,
+    squadId,
   );
 }
 
@@ -259,6 +348,7 @@ export function dashboardFailuresByAgentOptions(
   projectId: string | null,
   tz: string,
   historyLimit: DashboardHistoryLimitParam,
+  squadId: string | null = null,
 ) {
   return dashboardOptions(
     "failures-by-agent",
@@ -268,5 +358,26 @@ export function dashboardFailuresByAgentOptions(
     projectId,
     tz,
     historyLimit,
+    squadId,
+  );
+}
+
+export function dashboardFailuresBySquadOptions(
+  wsId: string,
+  days: number,
+  projectId: string | null,
+  tz: string,
+  historyLimit: DashboardHistoryLimitParam,
+  squadId: string | null = null,
+) {
+  return dashboardOptions(
+    "failures-by-squad",
+    (params) => api.getDashboardFailuresBySquad(params),
+    wsId,
+    days,
+    projectId,
+    tz,
+    historyLimit,
+    squadId,
   );
 }

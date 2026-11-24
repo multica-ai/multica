@@ -31,7 +31,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { ExtraProps } from "react-markdown";
-import { Check, Copy, Maximize2, RotateCcw } from "@multica/ui/icons";
+import { Maximize2, RotateCcw } from "@multica/ui/icons";
+import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../i18n";
@@ -439,7 +440,7 @@ export function RichTableFrame({ model, getMarkdown, tableRef: onTable, children
               className={cn(toolbarButton, "w-6")}
               aria-label={t(($) => $.table.copy_markdown)}
             >
-              {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+              <CopyCheckIcon copied={copied} />
             </button>
           }
         />
@@ -484,20 +485,24 @@ export function RichTableFrame({ model, getMarkdown, tableRef: onTable, children
         </div>
         {/* Columns continue past the edge: a shadow, not a fade to a background
             colour, because the same table renders on cards, pages and chat. */}
-        {overflow.start && (
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-y-px left-px w-3 rounded-l-[var(--radius)]"
-            style={{ background: `linear-gradient(to right, ${SCROLL_SHADOW}, transparent)` }}
-          />
-        )}
-        {overflow.end && (
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-y-px right-px w-3 rounded-r-[var(--radius)]"
-            style={{ background: `linear-gradient(to left, ${SCROLL_SHADOW}, transparent)` }}
-          />
-        )}
+        <div
+          aria-hidden
+          data-overflow-shadow={overflow.start ? "start" : undefined}
+          className={cn(
+            "pointer-events-none absolute inset-y-px left-px w-3 rounded-l-[var(--radius)] transition-opacity duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+            overflow.start ? "opacity-100" : "opacity-0",
+          )}
+          style={{ background: `linear-gradient(to right, ${SCROLL_SHADOW}, transparent)` }}
+        />
+        <div
+          aria-hidden
+          data-overflow-shadow={overflow.end ? "end" : undefined}
+          className={cn(
+            "pointer-events-none absolute inset-y-px right-px w-3 rounded-r-[var(--radius)] transition-opacity duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+            overflow.end ? "opacity-100" : "opacity-0",
+          )}
+          style={{ background: `linear-gradient(to left, ${SCROLL_SHADOW}, transparent)` }}
+        />
       </div>
       {expanded && (
         <RichTableDialog model={model} open={expanded} onOpenChange={setExpanded} getMarkdown={getMarkdown} />

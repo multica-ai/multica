@@ -1,7 +1,10 @@
 "use client";
 
 import { createContext, useContext, useId, useRef, type RefObject } from "react";
+import { AnimatePresence, motion, useIsPresent } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
 import { ChevronDown } from "@multica/ui/icons";
+import { UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { AppLink } from "../navigation";
@@ -102,6 +105,77 @@ export function PanelBody({
   );
 }
 
+function PanelDisclosureInner({
+  id,
+  className,
+  children,
+}: {
+  id?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const isPresent = useIsPresent();
+  return (
+    <motion.div
+      id={id}
+      inert={!isPresent}
+      // Clip only while the height moves, so rows' focus outlines aren't cut
+      // off once the section rests open.
+      initial={{ height: 0, opacity: 0, overflow: "hidden" }}
+      animate={{
+        height: "auto",
+        opacity: 1,
+        transition: { duration: UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
+        transitionEnd: { overflow: "visible" },
+      }}
+      exit={{
+        height: 0,
+        opacity: 0,
+        overflow: "hidden",
+        transition: { duration: UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
+      }}
+      className={cn(!isPresent && "pointer-events-none", className)}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+/**
+ * Smooth 150ms height + opacity disclosure matched to sidebar and section
+ * chevron rotation. Unmounts children after exit (and immediately under
+ * reduced motion) so collapsed lists release their subscriptions.
+ */
+export function PanelDisclosure({
+  open,
+  id,
+  className,
+  children,
+}: {
+  open: boolean;
+  id?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const reduceMotion = useReducedMotion();
+  if (reduceMotion) {
+    return open ? (
+      <div id={id} className={className}>
+        {children}
+      </div>
+    ) : null;
+  }
+  return (
+    <AnimatePresence initial={false}>
+      {open && (
+        <PanelDisclosureInner key="disclosure" id={id} className={className}>
+          {children}
+        </PanelDisclosureInner>
+      )}
+    </AnimatePresence>
+  );
+}
+
 export function PanelSection({
   label,
   heading,
@@ -133,7 +207,7 @@ export function PanelSection({
     <ChevronDown
       aria-hidden
       className={cn(
-        "size-3.5 shrink-0 transition-[transform,opacity] duration-150 ease-out motion-reduce:transition-none",
+        "size-3.5 shrink-0 transition-[rotate,opacity] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
         collapsed
           ? "-rotate-90"
           : "opacity-0 group-hover/section:opacity-100 group-focus-within/section:opacity-100",
@@ -158,7 +232,7 @@ export function PanelSection({
                   aria-controls={collapsed ? undefined : contentId}
                   onClick={() => onCollapsedChange(!collapsed)}
                   className={cn(
-                    "flex size-5 shrink-0 items-center justify-center rounded-md outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring",
+                    "flex size-5 shrink-0 items-center justify-center rounded-md outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring",
                     // An open section leaves the row to its heading; the
                     // heading itself collapses it (the Inbox's open tab).
                     !collapsed && "sr-only focus-visible:not-sr-only",
@@ -177,7 +251,7 @@ export function PanelSection({
                 aria-expanded={!collapsed}
                 aria-controls={collapsed ? undefined : contentId}
                 onClick={() => onCollapsedChange(!collapsed)}
-                className="-mx-1 flex max-w-full items-center gap-0.5 rounded-md px-1 outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                className="-mx-1 flex max-w-full items-center gap-0.5 rounded-md px-1 outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring"
               >
                 <span className="truncate">{label}</span>
                 {chevron}
@@ -189,7 +263,9 @@ export function PanelSection({
         )}
         {action}
       </div>
-      {!collapsed && <div id={contentId}>{children}</div>}
+      <PanelDisclosure open={!collapsed} id={contentId}>
+        {children}
+      </PanelDisclosure>
     </section>
   );
 }
@@ -207,7 +283,7 @@ export function PanelList({
 }
 
 export const PANEL_ROW_CLASS =
-  "flex min-h-[var(--nav-item-height,2rem)] w-full items-center gap-2.5 rounded-nav-item px-3 py-[var(--nav-item-padding-y,0.375rem)] text-left text-body transition-colors outline-none focus-visible:outline-2 focus-visible:outline-ring";
+  "flex min-h-[var(--nav-item-height,2rem)] w-full items-center gap-2.5 rounded-nav-item px-3 py-[var(--nav-item-padding-y,0.375rem)] text-left text-body transition-colors outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring";
 
 /** The `nav-item` theme anchor; every row with an active state carries it. */
 export function panelRowAnchor(active: boolean) {

@@ -68,7 +68,7 @@ export const DEFAULT_SIDEBAR_INBOX_SETTINGS: SidebarInboxSettings = {
   limit: 5,
   showCount: true,
   railBadge: true,
-  compact: false,
+  compact: true,
 };
 
 export interface SidebarLocateRequest {
@@ -182,11 +182,14 @@ export const useSidebarTreeStore = create<SidebarTreeState>()(
       // 2: compact is off by default again. A version-1 copy holds that forced
       // value rather than a choice, so it goes back to off once; an older copy
       // never ran version 1 and keeps what the user picked.
-      version: 2,
+      // 3: compact is on by default, for devices with nothing stored yet. A
+      // stored copy belongs to someone who already used the Inbox section, so
+      // it keeps its value, and one without a value keeps the two-line rows.
+      version: 3,
       migrate: (persisted, version) => {
         const p = (persisted ?? {}) as Partial<PersistedSidebarTree>;
-        if (version === 1 && p.inboxSettings) return { ...p, inboxSettings: { ...p.inboxSettings, compact: false } };
-        return p;
+        const compact = version === 1 ? false : (p.inboxSettings?.compact ?? false);
+        return { ...p, inboxSettings: { ...DEFAULT_SIDEBAR_INBOX_SETTINGS, ...p.inboxSettings, compact } };
       },
       partialize: (state): PersistedSidebarTree => ({
         expanded: state.expanded,

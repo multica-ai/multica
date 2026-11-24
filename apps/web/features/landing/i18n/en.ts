@@ -302,6 +302,54 @@ export function createEnDict(): LandingDict {
     },
     entries: [
       {
+        version: "0.12.2",
+        date: "2026-11-24",
+        title: "Quick-switch agents when creating Issues, see usage by squad, and leave squad handoffs out of your Inbox",
+        changes: [],
+        features: [
+          "Create with agent shows your three most-used agents and squads; click one or press Alt/Option + 1–3 to switch.",
+          "Turn off Include squad handoffs in Settings → Notifications to keep squad agents' handoff comments out of your Inbox.",
+          "On Analytics, filter usage by squad or group the leaderboard and errors by squad, with a breakdown per member.",
+        ],
+        improvements: [
+          "Inbox actions sit above the reply box, and after you archive the last notification, it still shows Archived with Undo.",
+          "A squad working on an Issue shows as one squad avatar in headers, sidebars, and Working now.",
+          "The Issue sidebar hides empty sections behind one Add row, and sub-issues move to the main column.",
+          "Jump to latest moves to the right and counts new comments, in the Inbox and on Issue pages.",
+        ],
+        fixes: [
+          "Tooltips no longer cover the next row in dense lists such as the Inbox and sidebar.",
+          "With reduced motion on, dialogs and menus close right away, and select dropdowns no longer lag when closing.",
+        ],
+      },
+      {
+        version: "0.12.1",
+        date: "2026-11-24",
+        title: "Triage the Inbox with J, K, and U, follow agent runs in place, and smoother animations",
+        changes: [],
+        features: [
+          "Trigger an agent from the Inbox and the Issue stays open, with the agent's live status in the bar and sidebar.",
+          "On the Inbox page, press J and K to move between notifications and U to mark one unread.",
+          "Right-click a notification in the Work panel to mark it unread, archive, or delete it.",
+          "New in the CLI: multica quick-action to manage quick actions and run one on an Issue.",
+        ],
+        improvements: [
+          "Dialogs, collapsible sections, tabs, drag and drop, desktop tab closing, and ⌘K drill-down animate more smoothly.",
+          "With reduced motion on, the Inbox, chat sessions, and run comments switch instantly, and image uploads stop pulsing.",
+          "Automatic archiving keeps you on the Issue you're reading, so the After archiving setting is gone.",
+          "Agents follow project workflows more reliably and no longer move finished Issues into closed statuses like Won't Fix.",
+          "Archive all asks for confirmation first, and snoozed Issues stay snoozed.",
+          "On a new device, the Work panel's Inbox starts with compact one-line rows; existing settings are kept.",
+        ],
+        fixes: [
+          "Follow-up instructions sent to a running Antigravity agent now reach it instead of starting a new run.",
+          "Desktop Issue tabs return to where you were reading, even in the middle of a comment.",
+          "Switching Inbox tabs keeps the open Issue, and notifications from other tabs no longer linger in the Inbox.",
+          "Duplicate marks no longer reveal private Issues in live updates or after the original Issue is deleted.",
+          "Fixed jumps when dropping dragged items, clipped focus rings, lingering tooltips, and closing panels that still took clicks.",
+        ],
+      },
+      {
         version: "0.12.0",
         date: "2026-11-23",
         title: "A unified Inbox, project overviews with progress forecasts, and faster Codex and Claude Code runs",

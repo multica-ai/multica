@@ -178,7 +178,7 @@ describe("TeamPanel agent previews", () => {
     expect(working.getAllByRole("link")).toHaveLength(5);
   });
 
-  it("previews and collapses each status independently, retaining collapse state on remount", () => {
+  it("previews and collapses each status independently, retaining collapse state on remount", async () => {
     seedAgents(7);
     seedAgents(8, "queued");
     const runtimes = [runtime(), runtime({ id: "rt-offline", status: "offline" })];
@@ -193,7 +193,7 @@ describe("TeamPanel agent previews", () => {
     expect(working.getAllByRole("link")).toHaveLength(5);
 
     fireEvent.click(working.getByRole("button", { name: "Working now" }));
-    expect(working.queryAllByRole("link")).toHaveLength(0);
+    await waitFor(() => expect(working.queryAllByRole("link")).toHaveLength(0));
     expect(working.getByText("7")).toBeInTheDocument();
     expect(attention.getAllByRole("link")).toHaveLength(8);
     fireEvent.click(attention.getByRole("button", { name: "Needs attention" }));
@@ -213,6 +213,43 @@ describe("TeamPanel agent previews", () => {
     expect(screen.queryByRole("region", { name: "Needs attention" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Show/ })).not.toBeInTheDocument();
     expect(within(screen.getByRole("region", { name: "Working now" })).getAllByRole("link")).toHaveLength(5);
+  });
+
+  it("folds multiple running tasks belonging to the same squad into a single squad row alongside standalone agents", () => {
+    seedAgents(3);
+    qc.setQueryData(squadListOptions(WS).queryKey, [
+      {
+        id: "squad-jsquad",
+        workspace_id: WS,
+        name: "JSquad",
+        description: "",
+        instructions: "",
+        avatar_url: null,
+        leader_id: "running-0",
+        creator_id: "user-1",
+        member_count: 2,
+        created_at: new Date(NOW).toISOString(),
+        updated_at: new Date(NOW).toISOString(),
+        archived_at: null,
+        archived_by: null,
+      },
+    ]);
+    qc.setQueryData<AgentTask[]>(agentTaskSnapshotOptions(WS).queryKey, (current = []) =>
+      current.map((task) =>
+        task.agent_id === "running-0" || task.agent_id === "running-1"
+          ? { ...task, squad_id: "squad-jsquad" }
+          : task,
+      ),
+    );
+    renderPanel([runtime()]);
+
+    const working = within(screen.getByRole("region", { name: "Working now" }));
+    // 2 squad tasks collapse into 1 JSquad row + 1 standalone agent row = 2 rows.
+    expect(working.getByText("2")).toBeInTheDocument();
+    expect(working.getAllByRole("link")).toHaveLength(2);
+    expect(working.getByText("JSquad")).toBeInTheDocument();
+    expect(working.getByText("running agent 3")).toBeInTheDocument();
+    expect(working.getByText(/running agent 1.*running agent 2/)).toBeInTheDocument();
   });
 });
 
