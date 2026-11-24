@@ -147,7 +147,7 @@ func TestDaemonIdentityMismatch(t *testing.T) {
 		{"we asked for default, a named daemon answered", map[string]any{"profile": "dev"}, "", true},
 		// A daemon that predates the field cannot prove anything; refusing
 		// would break lifecycle commands against a merely older daemon.
-		{"older daemon omits the field", map[string]any{"pid": 1.0}, "dev", false},
+		{"older daemon omits the field", map[string]any{"pid": float64(os.Getpid())}, "dev", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

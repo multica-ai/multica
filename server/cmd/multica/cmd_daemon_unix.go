@@ -55,3 +55,19 @@ func tailLogFile(logPath string, lines int, follow bool) error {
 	tail.Stderr = os.Stderr
 	return tail.Run()
 }
+
+// processOwnedByOtherUser reports whether pid is a live process that belongs
+// to a different OS user. Every user's default profile hashes to the same
+// health port, so on a shared machine another user's daemon can answer ours;
+// its process owner, not the profile name, tells them apart.
+func processOwnedByOtherUser(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	info, err := os.Stat("/proc/" + strconv.Itoa(pid))
+	if err != nil {
+		return false
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	return ok && int(stat.Uid) != os.Getuid()
+}

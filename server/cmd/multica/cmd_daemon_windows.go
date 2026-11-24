@@ -192,3 +192,7 @@ func tailLogFile(logPath string, lines int, follow bool) error {
 		}
 	}
 }
+
+// processOwnedByOtherUser is always false on Windows, where the health port
+// belongs to the session that bound it.
+func processOwnedByOtherUser(_ int) bool { return false }

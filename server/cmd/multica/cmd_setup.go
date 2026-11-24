@@ -299,7 +299,8 @@ func dispatchDaemonAfterSetup(
 	start setupDaemonRunner,
 	restart setupDaemonRunner,
 ) error {
-	if daemonAlive(health) {
+	profile := resolveProfile(cmd)
+	if daemonAlive(health) && daemonIdentityMismatch(health, profile, resolveHealthPort(profile)) == nil {
 		if activeTasks := daemonActiveTaskCount(health); activeTasks > 0 {
 			taskLabel := "tasks"
 			if activeTasks == 1 {

@@ -765,3 +765,12 @@ func TestSetupUnreadableProfileIsNotOverwritten(t *testing.T) {
 		}
 	}
 }
+
+func TestSetupStartsOwnDaemonWhenPreferredPortBelongsToAnotherProfile(t *testing.T) {
+	redirectTestHome(t, t.TempDir())
+	called := ""
+	err := dispatchDaemonAfterSetup(testCmd(), nil, map[string]any{"status": "running", "profile": "another-user-profile", "active_task_count": float64(4)}, func(*cobra.Command, []string) error { called = "start"; return nil }, func(*cobra.Command, []string) error { called = "restart"; return nil })
+	if err != nil || called != "start" {
+		t.Fatalf("must start using fallback port without restarting another daemon: call=%s err=%v", called, err)
+	}
+}
