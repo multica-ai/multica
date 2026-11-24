@@ -1221,7 +1221,7 @@ func (c *Cache) createOrUpdateIsolatedCheckoutContext(ctx context.Context, bareP
 			return nil, err
 		}
 	}
-	if _, err := os.Stat(checkoutPath); err == nil {
+	if _, err := os.Lstat(checkoutPath); err == nil {
 		return nil, fmt.Errorf("%w: %s is not a Multica isolated checkout", ErrCheckoutPathTaken, checkoutPath)
 	} else if !os.IsNotExist(err) {
 		return nil, fmt.Errorf("stat checkout path: %w", err)
@@ -1599,7 +1599,7 @@ func createWorktreeContext(ctx context.Context, gitRoot, worktreePath, branchNam
 	// misclassified as a branch collision, causing the retry to leak branches
 	// into the bare repo. Fail cleanly here instead. The caller is expected
 	// to route reused workdirs through updateExistingWorktreeContext via isGitWorktree.
-	if _, err := os.Stat(worktreePath); err == nil {
+	if _, err := os.Lstat(worktreePath); err == nil {
 		return "", fmt.Errorf("%w: %s is not a valid git worktree", ErrCheckoutPathTaken, worktreePath)
 	}
 

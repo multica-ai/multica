@@ -942,6 +942,36 @@ func TestRepoCheckoutOccupiedPathReportsConflict(t *testing.T) {
 	}
 }
 
+func TestRepoCheckoutDanglingSymlinkReportsConflict(t *testing.T) {
+	t.Parallel()
+	for _, mode := range repoCheckoutModes {
+		t.Run(mode.name, func(t *testing.T) {
+			t.Parallel()
+			sourceRepo := createNamedDaemonTestRepo(t, "source")
+			h := newRepoCheckoutHarness(t, mode.isolated, sourceRepo)
+			destination := filepath.Join(h.root, "repo")
+			missingTarget := filepath.Join(h.root, "missing")
+			if err := os.Symlink(missingTarget, destination); err != nil {
+				if runtime.GOOS == "windows" {
+					t.Skipf("symlink unavailable: %v", err)
+				}
+				t.Fatal(err)
+			}
+
+			status, _, body := h.checkout(t, sourceRepo, h.root, true)
+			if status != http.StatusConflict || !strings.Contains(body, "run the checkout from a different directory") {
+				t.Errorf("dangling checkout link: got %d %s, want 409 with recovery instructions", status, body)
+			}
+			if got, err := os.Readlink(destination); err != nil || got != missingTarget {
+				t.Fatalf("checkout changed the destination link: got %q (%v), want %q", got, err, missingTarget)
+			}
+			if _, err := os.Stat(missingTarget); !os.IsNotExist(err) {
+				t.Fatalf("checkout should leave the target absent, got %v", err)
+			}
+		})
+	}
+}
+
 func TestRepoCheckoutExplicitRefOverridesProjectDefault(t *testing.T) {
 	t.Parallel()
 
