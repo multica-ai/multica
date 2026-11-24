@@ -377,6 +377,9 @@ func buildPromptBodyWithOptions(task Task, provider string, opts promptOpts) str
 	if task.ChatSessionID != "" {
 		return buildChatPromptWithOptions(task, opts)
 	}
+	if task.DocID != "" {
+		return buildDocCommentPrompt(task)
+	}
 	if task.TriggerCommentID != "" {
 		return buildCommentPromptWithOptions(task, provider, opts)
 	}

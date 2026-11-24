@@ -2452,12 +2452,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/move", h.MoveDoc)
 					r.Get("/versions", h.ListDocVersions)
 					r.Get("/versions/{number}", h.GetDocVersion)
+					r.Get("/task-runs", h.ListDocTaskRuns)
 					r.Route("/comments", func(r chi.Router) {
 						r.Get("/", h.ListDocComments)
-						// Writing in discussions is human-only until agents can take part.
+						// Agents reply in discussions; the rest stays with people.
+						r.Post("/", h.CreateDocComment)
 						r.Group(func(r chi.Router) {
 							r.Use(handler.RequireHumanActor)
-							r.Post("/", h.CreateDocComment)
 							r.Post("/{docCommentId}/resolve", h.ResolveDocComment)
 							r.Post("/{docCommentId}/reopen", h.ReopenDocComment)
 							r.Delete("/{docCommentId}", h.DeleteDocComment)

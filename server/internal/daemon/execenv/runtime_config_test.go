@@ -2326,6 +2326,7 @@ func TestBriefByteIdenticalAcrossRunsForEveryKind(t *testing.T) {
 		"chat":         {ChatSessionID: "chat-1", ChatChannelType: ChannelTypeSlack, AgentID: "a-1", AgentName: "Eve"},
 		"quick-create": {QuickCreatePrompt: "make an issue", AgentID: "a-1", AgentName: "Eve"},
 		"autopilot":    {AutopilotRunID: "run-1", AutopilotID: "ap-1", AgentID: "a-1", AgentName: "Eve"},
+		"doc-comment":  {DocID: "doc-1", AgentID: "a-1", AgentName: "Eve"},
 		// WeCom is the channel a real deployment flips the file-delivery
 		// verdict on. The Slack row above catches the same leak today, but only
 		// because the brief's copy is channel-agnostic; scope that copy to
@@ -2678,6 +2679,24 @@ func TestEveryBriefThatTeachesJSONOutputAlsoWarnsAgainstMergingStderr(t *testing
 		}
 		if !strings.Contains(brief, wantWhy) {
 			t.Errorf("%s brief states %q without %q; a rule with no reason is the first one dropped under pressure", name, wantRule, wantWhy)
+		}
+	}
+}
+
+// A doc discussion run delivers into the discussion, not onto an issue
+// (MUL-9933): its brief must not send the agent to `multica issue comment add`.
+func TestDocCommentBriefDeliversIntoDiscussion(t *testing.T) {
+	t.Parallel()
+
+	brief := buildMetaSkillContentSlim("claude", TaskContextForEnv{DocID: "doc-1", AgentID: "a-1", AgentName: "Eve", DocsEnabled: true})
+	for _, want := range []string{"discussion on a Multica doc", "`multica doc comment add`", "## Mentions"} {
+		if !strings.Contains(brief, want) {
+			t.Fatalf("doc brief missing %q:\n%s", want, brief)
+		}
+	}
+	for _, unwanted := range []string{"Final results MUST be delivered via `multica issue comment add`", "## Sub-issue Creation", "## Comment Formatting"} {
+		if strings.Contains(brief, unwanted) {
+			t.Fatalf("doc brief must not contain %q", unwanted)
 		}
 	}
 }

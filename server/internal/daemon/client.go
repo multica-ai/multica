@@ -216,6 +216,7 @@ func daemonCommonCapabilities() []string {
 		protocol.DaemonCapabilityWorkflowStatusRulesV1,
 		protocol.DaemonCapabilityWorkflowStatusMapV1,
 		protocol.DaemonCapabilityCLICommentSteerV1,
+		protocol.DaemonCapabilityDocCommentV1,
 	}
 }
 

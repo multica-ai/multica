@@ -2540,6 +2540,8 @@ export const AgentTaskSchema = z.object({
   autopilot_run_id: z.string().optional(),
   squad_id: z.string().optional().catch(undefined),
   is_leader_task: z.boolean().optional().catch(undefined),
+  doc_id: z.string().optional().catch(undefined),
+  doc_thread_id: z.string().optional().catch(undefined),
   parent_task_id: z.string().optional(),
   attempt: z.number().optional(),
   trigger_comment_id: z.string().optional(),

@@ -141,9 +141,25 @@ function useDocCommentsInvalidate() {
 
 export function useCreateDocComment(docId: string) {
   const invalidate = useDocCommentsInvalidate();
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: (data: CreateDocCommentRequest) => api.createDocComment(docId, data),
-    onSettled: () => invalidate(docId),
+    onSettled: () => {
+      invalidate(docId);
+      // A comment can start, or fold into, an agent's run.
+      qc.invalidateQueries({ queryKey: docKeys.tasks(wsId, docId) });
+    },
+  });
+}
+
+/** Stops an agent's run on one of the doc's discussions. */
+export function useCancelDocTaskRun(docId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (taskId: string) => api.cancelTaskById(taskId),
+    onSettled: () => qc.invalidateQueries({ queryKey: docKeys.tasks(wsId, docId) }),
   });
 }
 

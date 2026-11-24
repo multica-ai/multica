@@ -100,6 +100,37 @@ describe("knowledge base client", () => {
     expect(await client.listDocVersions("d1")).toEqual([]);
   });
 
+  it("reads which discussion an agent's version came from, and tolerates a bad link", async () => {
+    const client = new ApiClient("https://api.example.test");
+    const version = {
+      doc_id: "d1", number: 2, title: "Runbook", author_type: "agent", author_id: "a1",
+      created_at: "2026-11-23T00:00:00Z", updated_at: "2026-11-23T00:00:00Z",
+    };
+    respond({ versions: [
+      { ...version, doc_thread_id: "c1", doc_thread_quote: "ship on Friday" },
+      { ...version, number: 1, doc_thread_id: 7 },
+    ] });
+    const [fromDiscussion, malformed] = await client.listDocVersions("d1");
+    expect(fromDiscussion).toMatchObject({ docThreadId: "c1", docThreadQuote: "ship on Friday" });
+    expect(malformed).toMatchObject({ number: 1, docThreadId: null, docThreadQuote: null });
+  });
+
+  it("lists a doc's discussion runs and falls back to none on a malformed response", async () => {
+    const client = new ApiClient("https://api.example.test");
+    const fetchMock = respond({ tasks: [
+      { id: "t1", agent_id: "a1", status: "running", doc_thread_id: "c1", error: null, can_cancel: true },
+      { id: "t2", status: 3 },
+      { id: "t3", agent_id: "a2", status: "failed", doc_thread_id: "c1", can_cancel: "yes" },
+    ] });
+    expect(await client.listDocTaskRuns("d1")).toMatchObject([
+      { id: "t1", agentId: "a1", docThreadId: "c1", canCancel: true },
+      { id: "t3", canCancel: false, error: null },
+    ]);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/api/docs/d1/task-runs");
+    respond({ tasks: "nope" });
+    expect(await client.listDocTaskRuns("d1")).toEqual([]);
+  });
+
   it("sends the base revision and surfaces a stale write as a revision conflict", async () => {
     const fetchMock = respond(
       {

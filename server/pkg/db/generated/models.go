@@ -195,6 +195,9 @@ type AgentTaskQueue struct {
 	WorkflowStep              pgtype.Text `json:"workflow_step"`
 	// Squad UUID for usage attribution and unified execution avatar grouping. Separate from squad_id (which carries leader/worker routing authority). NULL for standalone non-squad runs.
 	UsageSquadID pgtype.UUID `json:"usage_squad_id"`
+	DocID        pgtype.UUID `json:"doc_id"`
+	DocThreadID  pgtype.UUID `json:"doc_thread_id"`
+	DocCommentID pgtype.UUID `json:"doc_comment_id"`
 }
 
 type AgentToLabel struct {
@@ -928,6 +931,7 @@ type DocComment struct {
 	ResolvedByID   pgtype.UUID        `json:"resolved_by_id"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	SourceTaskID   pgtype.UUID        `json:"source_task_id"`
 }
 
 type DocFolder struct {

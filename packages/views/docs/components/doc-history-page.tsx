@@ -18,7 +18,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { ReadonlyContent } from "../../editor";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
-import { useNavigation } from "../../navigation";
+import { AppLink, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { DocNotFound } from "./doc-not-found";
 import { DocsGate } from "./docs-gate";
@@ -42,6 +42,7 @@ function DocHistoryPageContent({ docId }: { docId: string }) {
   const versions = useQuery(docVersionsOptions(wsId, docId));
   const [selected, setSelected] = useState<number | null>(null);
   const number = selected ?? versions.data?.[0]?.number ?? 1;
+  const selectedVersion = versions.data?.find((v) => v.number === number);
   const version = useQuery({
     ...docVersionOptions(wsId, docId, number),
     enabled: !!versions.data?.length,
@@ -114,6 +115,11 @@ function DocHistoryPageContent({ docId }: { docId: string }) {
                     {v.message}
                   </span>
                 )}
+                {v.docThreadId && (
+                  <span className="block truncate text-caption text-muted-foreground">
+                    {t(($) => $.history.from_discussion, { quote: v.docThreadQuote ?? "" })}
+                  </span>
+                )}
                 <span className="block text-caption text-muted-foreground">
                   {new Date(v.updatedAt).toLocaleString()}
                 </span>
@@ -153,6 +159,14 @@ function DocHistoryPageContent({ docId }: { docId: string }) {
                     {t(($) => $.history.restore)}
                   </Button>
                 </div>
+                {selectedVersion?.docThreadId && (
+                  <AppLink
+                    href={`${p.docDetail(docId)}?thread=${encodeURIComponent(selectedVersion.docThreadId)}`}
+                    className="-mt-4 mb-6 block truncate text-caption text-muted-foreground hover:text-foreground hover:underline"
+                  >
+                    {t(($) => $.history.from_discussion, { quote: selectedVersion.docThreadQuote ?? "" })}
+                  </AppLink>
+                )}
                 <ReadonlyContent content={version.data.content ?? ""} />
               </motion.div>
             ) : (

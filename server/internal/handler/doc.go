@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -87,6 +88,11 @@ type DocVersionResponse struct {
 	ActionRef  *int32  `json:"action_ref"`
 	TaskID     *string `json:"task_id"`
 	IssueID    *string `json:"issue_id"`
+	// DocThreadID and DocThreadQuote name the discussion an agent was
+	// answering when it made this edit; null when it was not, or when that
+	// discussion has since been deleted.
+	DocThreadID    *string `json:"doc_thread_id"`
+	DocThreadQuote *string `json:"doc_thread_quote"`
 	// Contributors lists everyone whose edits the version carries. Versions
 	// saved before live co-editing have none; their author is the one.
 	Contributors []DocContributor `json:"contributors"`
@@ -166,20 +172,26 @@ func docVersionToResponse(v db.DocVersion, withContent bool) DocVersionResponse 
 }
 
 func docVersionRowToResponse(v db.ListDocVersionsRow) DocVersionResponse {
+	var threadQuote *string
+	if v.DocThreadID.Valid {
+		threadQuote = &v.DocThreadQuote
+	}
 	return DocVersionResponse{
-		DocID:        uuidToString(v.DocID),
-		Number:       v.Number,
-		Title:        v.Title,
-		AuthorType:   v.AuthorType,
-		AuthorID:     uuidToString(v.AuthorID),
-		Message:      v.Message,
-		Action:       v.Action,
-		ActionRef:    int4ToPtr(v.ActionRef),
-		TaskID:       uuidToPtr(v.TaskID),
-		IssueID:      uuidToPtr(v.IssueID),
-		Contributors: parseDocContributors(v.Contributors),
-		CreatedAt:    timestampToString(v.CreatedAt),
-		UpdatedAt:    timestampToString(v.UpdatedAt),
+		DocThreadID:    uuidToPtr(v.DocThreadID),
+		DocThreadQuote: threadQuote,
+		DocID:          uuidToString(v.DocID),
+		Number:         v.Number,
+		Title:          v.Title,
+		AuthorType:     v.AuthorType,
+		AuthorID:       uuidToString(v.AuthorID),
+		Message:        v.Message,
+		Action:         v.Action,
+		ActionRef:      int4ToPtr(v.ActionRef),
+		TaskID:         uuidToPtr(v.TaskID),
+		IssueID:        uuidToPtr(v.IssueID),
+		Contributors:   parseDocContributors(v.Contributors),
+		CreatedAt:      timestampToString(v.CreatedAt),
+		UpdatedAt:      timestampToString(v.UpdatedAt),
 	}
 }
 
@@ -646,6 +658,10 @@ func (h *Handler) DeleteDoc(w http.ResponseWriter, r *http.Request) {
 	if err = tx.Commit(ctx); err != nil {
 		writeError(w, 500, "failed to delete doc")
 		return
+	}
+	// Runs answering the doc's discussions have nothing left to answer.
+	if err := h.TaskService.CancelTasksForDoc(ctx, id); err != nil {
+		slog.Warn("delete doc: cancel doc runs failed", "doc_id", uuidToString(id), "error", err)
 	}
 	h.publish(protocol.EventDocDeleted, workspaceID, actorType, actorID, map[string]any{"doc_id": uuidToString(id)})
 	w.WriteHeader(http.StatusNoContent)
