@@ -222,6 +222,53 @@ func TestHealthHandlerReportsTerminalReportQueueCountsAndBytes(t *testing.T) {
 	}
 }
 
+func TestHealthHandlerRespondsWhileTerminalReportWriteHoldsQueue(t *testing.T) {
+	d := New(Config{
+		WorkspacesRoot: t.TempDir(),
+		ServerBaseURL:  "https://api.example.test",
+		DaemonID:       "health-terminal-report-lock",
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	d.ready.Store(true)
+	if err := d.terminalReports.enqueue(terminalTaskReport{
+		kind: terminalTaskReportComplete, taskID: "pending",
+	}); err != nil {
+		t.Fatalf("enqueue pending report: %v", err)
+	}
+
+	handler := d.healthHandler(time.Now())
+	probe := func() *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+		return rec
+	}
+	want := probe()
+
+	// Queue writes hold this lock across file and directory syncs.
+	d.terminalReports.mu.Lock()
+	result := make(chan *httptest.ResponseRecorder, 1)
+	go func() { result <- probe() }()
+	select {
+	case rec := <-result:
+		d.terminalReports.mu.Unlock()
+		var resp, previous HealthResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode health response: %v", err)
+		}
+		if err := json.Unmarshal(want.Body.Bytes(), &previous); err != nil {
+			t.Fatalf("decode previous health response: %v", err)
+		}
+		if rec.Code != http.StatusOK || resp.Status != "running" ||
+			resp.PendingTerminalReportCount != 1 || resp.PendingTerminalReportBytes != previous.PendingTerminalReportBytes {
+			t.Fatalf("health during queue write = HTTP %d %s, pending %d/%d",
+				rec.Code, resp.Status, resp.PendingTerminalReportCount, resp.PendingTerminalReportBytes)
+		}
+	case <-time.After(time.Second):
+		d.terminalReports.mu.Unlock()
+		<-result
+		t.Fatal("health waited for the terminal report queue write")
+	}
+}
+
 // TestHealthHandlerReportsDeferredReload covers the "while waiting to restart,
 // the reason and state are visible" criterion. When trySelfReload has confirmed
 // a multica version change but the daemon was busy at the barrier check, the

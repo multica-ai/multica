@@ -1267,6 +1267,11 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 			return err
 		}
 		if self {
+			// An acknowledged event leaves the rule waiting for its first run.
+			// An acknowledged condition has already been satisfied.
+			if w.Kind == "event" && w.Mode == "once" && len(w.Condition) == 0 && !timedOut {
+				enabled = w.Enabled
+			}
 			if err = q.ConsumeWakeupReceipts(ctx, db.ConsumeWakeupReceiptsParams{Ids: ids}); err != nil {
 				return err
 			}

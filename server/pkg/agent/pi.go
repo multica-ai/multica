@@ -832,8 +832,8 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
 		lastTurnError, turnErrorGraceExpired := turnErrors.finish()
-		if cleanupErr == nil && cleanup.tools.Load() > 0 && cleanup.unobserved {
-			cleanupErr = fmt.Errorf("runtime exited before tool process ownership could be recorded")
+		if cleanupErr == nil {
+			cleanupErr = cleanup.toolOwnershipError()
 		}
 
 		// Wait closes the process pipes, so a prompt write still blocked when the
