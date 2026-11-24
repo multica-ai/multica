@@ -60,6 +60,23 @@ func TestClassifyPoisonedOutput(t *testing.T) {
 			wantReason: FailureReasonAgentFallbackMsg,
 		},
 		{
+			// The client's model-mismatch banner arrived as the run's
+			// successful answer and the server posted it as the result comment.
+			// The session cannot be resumed under a model it was not created
+			// with, so the run is a failure, not a completion.
+			name:       "model cannot continue this conversation",
+			output:     "The selected model cannot continue this conversation. Please select a different model, or start a new conversation, or rewind the current conversation to an earlier point and try a different approach.",
+			wantOK:     true,
+			wantReason: FailureReasonAgentFallbackMsg,
+		},
+		{
+			// The same length cap as the other markers: a real answer that
+			// quotes the banner is not the banner.
+			name:   "long answer quoting the model-switch banner is not poisoned",
+			output: strings.Repeat("All tests pass and the branch is pushed. ", 6) + "The log shows the banner reading the selected model cannot continue this conversation, which is why the previous session was retired.",
+			wantOK: false,
+		},
+		{
 			name:   "real conclusion is not poisoned",
 			output: "Fixed the bug in auth.go and pushed PR #42.",
 			wantOK: false,
