@@ -284,7 +284,7 @@ func TestChatSubmissionActorAndSessionNamespaces(t *testing.T) {
 	path := "/api/chat/sessions/" + sessionID + "/messages"
 	body := map[string]any{"content": "scoped identity", "submission_id": uuid.NewString()}
 	member := submissionSend(t, sessionID, body)
-	tokenA := mintAgentTaskToken(t, agentID, member["task_id"].(string), testUserID)
+	tokenA := mintSubmissionTaskToken(t, agentID, member["task_id"].(string))
 	agent := submissionStatus(t, testServer.URL, tokenA, testWorkspaceID, "POST", path, body, http.StatusCreated)
 	if member["task_id"] == agent["task_id"] {
 		t.Fatal("member and agent shared an acceptance namespace")
@@ -294,14 +294,14 @@ func TestChatSubmissionActorAndSessionNamespaces(t *testing.T) {
 	var runtimeID string
 	fx.QueryRow(t, `SELECT runtime_id::text FROM agent WHERE id=$1`, agentID).Scan(&runtimeID)
 	taskID := fx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "originator_user_id": testUserID, "accountable_user_id": testUserID})
-	tokenB := mintAgentTaskToken(t, agentID, taskID, testUserID)
+	tokenB := mintSubmissionTaskToken(t, agentID, taskID)
 	replay := submissionStatus(t, testServer.URL, tokenB, testWorkspaceID, "POST", path, body, http.StatusCreated)
 	if !reflect.DeepEqual(agent, replay) {
 		t.Fatalf("token rotation changed logical caller agent=%v replay=%v", agent, replay)
 	}
 	otherAgent := fx.Agent(t, "Other submission actor", runtimeID)
 	otherTask := fx.Task(t, otherAgent, testutil.Cols{"runtime_id": runtimeID, "originator_user_id": testUserID, "accountable_user_id": testUserID})
-	otherToken := mintAgentTaskToken(t, otherAgent, otherTask, testUserID)
+	otherToken := mintSubmissionTaskToken(t, otherAgent, otherTask)
 	other := submissionStatus(t, testServer.URL, otherToken, testWorkspaceID, "POST", path, body, http.StatusCreated)
 	if other["task_id"] == agent["task_id"] || other["task_id"] == member["task_id"] {
 		t.Fatal("different logical agent reused an acceptance")
@@ -320,7 +320,7 @@ func TestChatSubmissionCurrentAuthorizationBeforeReplay(t *testing.T) {
 	fx := workspaceFixture(t)
 	body := map[string]any{"content": "private acceptance", "submission_id": uuid.NewString()}
 	first := submissionSend(t, sessionID, body)
-	agentToken := mintAgentTaskToken(t, agentID, first["task_id"].(string), testUserID)
+	agentToken := mintSubmissionTaskToken(t, agentID, first["task_id"].(string))
 	submissionStatus(t, testServer.URL, agentToken, testWorkspaceID, "POST", "/api/chat/sessions/"+sessionID+"/messages", body, http.StatusCreated)
 	path := "/api/chat/sessions/" + sessionID + "/messages"
 	otherID := fx.User(t, "Other submission user", uuid.NewString()+"@example.test")
@@ -339,7 +339,7 @@ func TestChatSubmissionCurrentAuthorizationBeforeReplay(t *testing.T) {
 	})
 	// Workspace owners retain view access but cannot invoke another owner's private agent.
 	submissionStatus(t, testServer.URL, testToken, testWorkspaceID, "POST", path, body, http.StatusForbidden)
-	submissionStatus(t, testServer.URL, agentToken, testWorkspaceID, "POST", path, body, http.StatusForbidden)
+	submissionStatus(t, testServer.URL, agentToken, testWorkspaceID, "POST", path, body, http.StatusUnauthorized)
 	fx.Exec(t, `UPDATE member SET role='member' WHERE workspace_id=$1 AND user_id=$2`, testWorkspaceID, testUserID)
 	t.Cleanup(func() {
 		fx.Exec(t, `UPDATE member SET role='owner' WHERE workspace_id=$1 AND user_id=$2`, testWorkspaceID, testUserID)
@@ -351,7 +351,7 @@ func TestChatSubmissionCurrentAuthorizationBeforeReplay(t *testing.T) {
 		fx.Exec(t, `INSERT INTO member (workspace_id,user_id,role) VALUES ($1,$2,'owner') ON CONFLICT DO NOTHING`, testWorkspaceID, testUserID)
 	})
 	submissionStatus(t, testServer.URL, testToken, testWorkspaceID, "POST", path, body, http.StatusNotFound)
-	submissionStatus(t, testServer.URL, agentToken, testWorkspaceID, "POST", path, body, http.StatusNotFound)
+	submissionStatus(t, testServer.URL, agentToken, testWorkspaceID, "POST", path, body, http.StatusUnauthorized)
 	fx.Exec(t, `INSERT INTO member (workspace_id,user_id,role) VALUES ($1,$2,'owner')`, testWorkspaceID, testUserID)
 	if replay := submissionSend(t, sessionID, body); !reflect.DeepEqual(first, replay) {
 		t.Fatalf("restored authorization changed acceptance=%v", replay)
@@ -482,7 +482,7 @@ func TestChatSubmissionAttachmentOwnershipPerActor(t *testing.T) {
 	if bound, ok := member["attachment_ids"].([]any); !ok || len(bound) != 0 {
 		t.Fatalf("member bound another actor's attachment=%v", member)
 	}
-	token := mintAgentTaskToken(t, agentID, member["task_id"].(string), testUserID)
+	token := mintSubmissionTaskToken(t, agentID, member["task_id"].(string))
 	agent := submissionStatus(t, testServer.URL, token, testWorkspaceID, "POST", "/api/chat/sessions/"+sessionID+"/messages", body, http.StatusCreated)
 	if bound, ok := agent["attachment_ids"].([]any); !ok || len(bound) != 1 || bound[0] != attachment {
 		t.Fatalf("agent failed to bind its own attachment=%v", agent)

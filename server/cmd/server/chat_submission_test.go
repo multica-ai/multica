@@ -33,6 +33,15 @@ func submissionSession(t *testing.T) (string, string) {
 	return session.ID, agentID
 }
 
+// Task credentials are issued at dispatch. Keep the original route on the task
+// so replay also exercises revocation of its captured execution identity.
+func mintSubmissionTaskToken(t *testing.T, agentID, taskID string) string {
+	t.Helper()
+	f := workspaceFixture(t)
+	f.Exec(t, `UPDATE agent_task_queue SET status='dispatched', dispatched_at=now() WHERE id=$1 AND status='queued'`, taskID)
+	return mintAgentTaskToken(t, agentID, taskID, testUserID)
+}
+
 func submissionSend(t *testing.T, sessionID string, body any) map[string]any {
 	t.Helper()
 	resp := authRequest(t, "POST", "/api/chat/sessions/"+sessionID+"/messages", body)
@@ -62,7 +71,7 @@ func TestChatSubmissionNormalControl(t *testing.T) {
 	if len(history) != 1 {
 		t.Fatalf("visible history count=%d", len(history))
 	}
-	agentToken := mintAgentTaskToken(t, agentID, first["task_id"].(string), testUserID)
+	agentToken := mintSubmissionTaskToken(t, agentID, first["task_id"].(string))
 	submissionStatus(t, testServer.URL, agentToken, testWorkspaceID, "POST", "/api/chat/sessions/"+sessionID+"/messages", map[string]any{"content": "task token turn"}, http.StatusCreated)
 	fx := workspaceFixture(t)
 	attachmentID := fx.Insert(t, "attachment", testutil.Cols{

@@ -354,6 +354,7 @@ WITH enqueue_agent AS MATERIALIZED (
     SELECT a.id, CASE WHEN sqlc.narg(runtime_routing)::jsonb IS NULL THEN COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid) ELSE sqlc.narg(runtime_id)::uuid END AS runtime_id
     FROM agent a
     WHERE a.id = sqlc.arg(agent_id)
+      AND (sqlc.narg(expected_default_runtime_id)::uuid IS NULL OR a.runtime_id = sqlc.narg(expected_default_runtime_id)::uuid)
       AND lock_task_owner_rows(a.id, sqlc.narg(issue_id), CASE WHEN sqlc.narg(runtime_routing)::jsonb IS NULL THEN COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid) ELSE sqlc.narg(runtime_id)::uuid END)
     FOR KEY SHARE OF a
 )
@@ -418,6 +419,7 @@ WITH enqueue_agent AS MATERIALIZED (
     SELECT a.id, CASE WHEN sqlc.narg(runtime_routing)::jsonb IS NULL THEN COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid) ELSE sqlc.narg(runtime_id)::uuid END AS runtime_id
     FROM agent a
     WHERE a.id = sqlc.arg(agent_id)
+      AND (sqlc.narg(expected_default_runtime_id)::uuid IS NULL OR a.runtime_id = sqlc.narg(expected_default_runtime_id)::uuid)
       AND lock_task_owner_rows(a.id, sqlc.narg(issue_id), CASE WHEN sqlc.narg(runtime_routing)::jsonb IS NULL THEN COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid) ELSE sqlc.narg(runtime_id)::uuid END)
     FOR KEY SHARE OF a
 )

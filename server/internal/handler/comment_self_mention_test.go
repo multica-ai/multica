@@ -56,14 +56,14 @@ func TestCommentSelfMention_SourceIssueAndThread(t *testing.T) {
 				"token_hash": auth.HashToken(token), "task_id": taskID, "agent_id": agentID,
 				"workspace_id": testWorkspaceID, "user_id": testUserID, "expires_at": time.Now().Add(time.Hour),
 			})
-			call := func(handle http.HandlerFunc, method, path, param, id string, body map[string]any) *testutil.Response {
+			call := func(handle http.HandlerFunc, method, path, param, id string, body map[string]any, forged bool) *testutil.Response {
 				t.Helper()
 				req := withURLParam(newRequest(method, path, body), param, id)
 				req.Header.Set("Authorization", "Bearer "+token)
-				// The authenticated token, not these client-supplied identities,
-				// must determine whose run authored the comment.
-				req.Header.Set("X-Agent-ID", "forged-agent")
-				req.Header.Set("X-Task-ID", "forged-task")
+				if forged {
+					req.Header.Set("X-Agent-ID", "forged-agent")
+					req.Header.Set("X-Task-ID", "forged-task")
+				}
 				protected := middleware.Auth(testHandler.Queries, nil, nil, nil)(
 					middleware.RequireWorkspaceMember(testHandler.Queries)(handle),
 				)
@@ -71,8 +71,10 @@ func TestCommentSelfMention_SourceIssueAndThread(t *testing.T) {
 			}
 			content := mention(agentID) + " " + mention(otherAgentID)
 			body := map[string]any{"content": content, "parent_id": parentID}
+			call(testHandler.CreateComment, http.MethodPost, "/api/issues/"+targetIssue+"/comments", "id", targetIssue, body, true).
+				Want(http.StatusForbidden)
 			var preview CommentTriggerPreviewResponse
-			call(testHandler.PreviewCommentTriggers, http.MethodPost, "/api/issues/"+targetIssue+"/comments/trigger-preview", "id", targetIssue, body).
+			call(testHandler.PreviewCommentTriggers, http.MethodPost, "/api/issues/"+targetIssue+"/comments/trigger-preview", "id", targetIssue, body, false).
 				Want(http.StatusOK).JSON(&preview)
 			wantQueued := 0
 			if mode == "different issue" {
@@ -84,7 +86,7 @@ func TestCommentSelfMention_SourceIssueAndThread(t *testing.T) {
 				requirePreviewAgents(t, preview, otherAgentID)
 			}
 			var comment CommentResponse
-			call(testHandler.CreateComment, http.MethodPost, "/api/issues/"+targetIssue+"/comments", "id", targetIssue, body).
+			call(testHandler.CreateComment, http.MethodPost, "/api/issues/"+targetIssue+"/comments", "id", targetIssue, body, false).
 				Want(http.StatusCreated).JSON(&comment)
 			if comment.AuthorType != "agent" || comment.AuthorID != agentID || comment.SourceTaskID == nil || *comment.SourceTaskID != taskID {
 				t.Fatalf("comment lost its token-bound author/source task: %+v", comment)
@@ -107,14 +109,14 @@ func TestCommentSelfMention_SourceIssueAndThread(t *testing.T) {
 			}
 			body["content"] = content + " Updated evidence."
 			body["editing_comment_id"] = comment.ID
-			call(testHandler.PreviewCommentTriggers, http.MethodPost, "/api/issues/"+targetIssue+"/comments/trigger-preview", "id", targetIssue, body).
+			call(testHandler.PreviewCommentTriggers, http.MethodPost, "/api/issues/"+targetIssue+"/comments/trigger-preview", "id", targetIssue, body, false).
 				Want(http.StatusOK).JSON(&preview)
 			if mode == "different issue" {
 				requirePreviewAgents(t, preview, agentID, otherAgentID)
 			} else {
 				requirePreviewAgents(t, preview, otherAgentID)
 			}
-			call(testHandler.UpdateComment, http.MethodPatch, "/api/comments/"+comment.ID, "commentId", comment.ID, body).
+			call(testHandler.UpdateComment, http.MethodPatch, "/api/comments/"+comment.ID, "commentId", comment.ID, body, false).
 				Want(http.StatusOK).JSON(&comment)
 			if comment.SourceTaskID == nil || *comment.SourceTaskID != taskID {
 				t.Fatal("edit lost its token-bound source task")

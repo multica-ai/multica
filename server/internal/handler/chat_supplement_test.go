@@ -21,7 +21,7 @@ func newChatSupplementFixture(t *testing.T, negotiated bool) (string, string, st
 	}
 	runtimeID := dbfx.Runtime(t, "chat-steering", testutil.Cols{"provider": "codex"})
 	agentID := dbfx.Agent(t, "Chat steering "+uuid.NewString(), runtimeID)
-	sessionID := dbfx.ChatSession(t, agentID)
+	sessionID := dbfx.ChatSession(t, agentID, testutil.Cols{"explicitly_created_at": testutil.Raw("now()")})
 	turn := sendChatGuidance(t, sessionID, map[string]any{"content": "original objective"})
 	taskID := turn.TaskID
 	dbfx.Cleanup(t, `DELETE FROM chat_message WHERE chat_session_id=$1`, sessionID)

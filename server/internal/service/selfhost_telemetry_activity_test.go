@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/testutil"
@@ -147,17 +149,22 @@ func TestSelfHostTelemetryCoalescedHumanActionsMustRetainUsersAndDates(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The same steps handler.mergeCommentIntoPendingTask runs.
+	// A different execution user keeps a separate, durable delegation.
 	attr, err := s.Tasks.AttributionForMergedComment(ctx, issue.WorkspaceID, parseTestUUID(t, commentB), false, agentRow)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.q.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
 		IssueID: issueID, AgentID: agentRow.ID, NewTriggerCommentID: parseTestUUID(t, commentB),
-		NewOriginatorUserID: attr.UserID, NewAccountableUserID: attr.AccountableUserID,
+		NewExecutionUserID: attr.UserID, NewOriginatorUserID: attr.UserID, NewAccountableUserID: attr.AccountableUserID,
 		NewOriginatorSource:     pgtype.Text{String: attr.Source.String(), Valid: true},
 		NewTriggerEvidenceKind:  pgtype.Text{String: string(attr.EvidenceKind), Valid: true},
 		NewTriggerEvidenceRefID: attr.EvidenceRefID,
+	}); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("cross-user merge returned %v", err)
+	}
+	if _, err := f.q.RegisterRoutedCommentReconciliation(ctx, db.RegisterRoutedCommentReconciliationParams{
+		IssueID: issueID, AgentID: agentRow.ID, CommentID: parseTestUUID(t, commentB),
 	}); err != nil {
 		t.Fatal(err)
 	}

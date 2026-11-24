@@ -2384,6 +2384,7 @@ WITH enqueue_agent AS MATERIALIZED (
     SELECT a.id, CASE WHEN $27::jsonb IS NULL THEN COALESCE(a.runtime_id, $29::uuid) ELSE $29::uuid END AS runtime_id
     FROM agent a
     WHERE a.id = $1
+      AND ($30::uuid IS NULL OR a.runtime_id = $30::uuid)
       AND lock_task_owner_rows(a.id, $2, CASE WHEN $27::jsonb IS NULL THEN COALESCE(a.runtime_id, $29::uuid) ELSE $29::uuid END)
     FOR KEY SHARE OF a
 )
@@ -2438,35 +2439,36 @@ RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, c
 `
 
 type CreateAgentTaskParams struct {
-	AgentID                 pgtype.UUID        `json:"agent_id"`
-	IssueID                 pgtype.UUID        `json:"issue_id"`
-	FireAt                  pgtype.Timestamptz `json:"fire_at"`
-	Priority                int32              `json:"priority"`
-	TriggerCommentID        pgtype.UUID        `json:"trigger_comment_id"`
-	CoalescedCommentIds     []pgtype.UUID      `json:"coalesced_comment_ids"`
-	TriggerSummary          pgtype.Text        `json:"trigger_summary"`
-	ForceFreshSession       pgtype.Bool        `json:"force_fresh_session"`
-	IsLeaderTask            pgtype.Bool        `json:"is_leader_task"`
-	HandoffNote             pgtype.Text        `json:"handoff_note"`
-	SquadID                 pgtype.UUID        `json:"squad_id"`
-	UsageSquadID            pgtype.UUID        `json:"usage_squad_id"`
-	HeadSha                 pgtype.Text        `json:"head_sha"`
-	FreshRerun              pgtype.Bool        `json:"fresh_rerun"`
-	WorkflowHandoffRevision pgtype.Int8        `json:"workflow_handoff_revision"`
-	OriginatorUserID        pgtype.UUID        `json:"originator_user_id"`
-	AccountableUserID       pgtype.UUID        `json:"accountable_user_id"`
-	RuntimeMcpOverlay       []byte             `json:"runtime_mcp_overlay"`
-	RuntimeConnectedApps    []byte             `json:"runtime_connected_apps"`
-	OriginatorSource        pgtype.Text        `json:"originator_source"`
-	DelegatedFromTaskID     pgtype.UUID        `json:"delegated_from_task_id"`
-	RuleVersionID           pgtype.UUID        `json:"rule_version_id"`
-	RerunOfTaskID           pgtype.UUID        `json:"rerun_of_task_id"`
-	TriggerEvidenceKind     pgtype.Text        `json:"trigger_evidence_kind"`
-	TriggerEvidenceRefID    pgtype.UUID        `json:"trigger_evidence_ref_id"`
-	WorkflowStep            pgtype.Text        `json:"workflow_step"`
-	RuntimeRouting          []byte             `json:"runtime_routing"`
-	ID                      pgtype.UUID        `json:"id"`
-	RuntimeID               pgtype.UUID        `json:"runtime_id"`
+	AgentID                  pgtype.UUID        `json:"agent_id"`
+	IssueID                  pgtype.UUID        `json:"issue_id"`
+	FireAt                   pgtype.Timestamptz `json:"fire_at"`
+	Priority                 int32              `json:"priority"`
+	TriggerCommentID         pgtype.UUID        `json:"trigger_comment_id"`
+	CoalescedCommentIds      []pgtype.UUID      `json:"coalesced_comment_ids"`
+	TriggerSummary           pgtype.Text        `json:"trigger_summary"`
+	ForceFreshSession        pgtype.Bool        `json:"force_fresh_session"`
+	IsLeaderTask             pgtype.Bool        `json:"is_leader_task"`
+	HandoffNote              pgtype.Text        `json:"handoff_note"`
+	SquadID                  pgtype.UUID        `json:"squad_id"`
+	UsageSquadID             pgtype.UUID        `json:"usage_squad_id"`
+	HeadSha                  pgtype.Text        `json:"head_sha"`
+	FreshRerun               pgtype.Bool        `json:"fresh_rerun"`
+	WorkflowHandoffRevision  pgtype.Int8        `json:"workflow_handoff_revision"`
+	OriginatorUserID         pgtype.UUID        `json:"originator_user_id"`
+	AccountableUserID        pgtype.UUID        `json:"accountable_user_id"`
+	RuntimeMcpOverlay        []byte             `json:"runtime_mcp_overlay"`
+	RuntimeConnectedApps     []byte             `json:"runtime_connected_apps"`
+	OriginatorSource         pgtype.Text        `json:"originator_source"`
+	DelegatedFromTaskID      pgtype.UUID        `json:"delegated_from_task_id"`
+	RuleVersionID            pgtype.UUID        `json:"rule_version_id"`
+	RerunOfTaskID            pgtype.UUID        `json:"rerun_of_task_id"`
+	TriggerEvidenceKind      pgtype.Text        `json:"trigger_evidence_kind"`
+	TriggerEvidenceRefID     pgtype.UUID        `json:"trigger_evidence_ref_id"`
+	WorkflowStep             pgtype.Text        `json:"workflow_step"`
+	RuntimeRouting           []byte             `json:"runtime_routing"`
+	ID                       pgtype.UUID        `json:"id"`
+	RuntimeID                pgtype.UUID        `json:"runtime_id"`
+	ExpectedDefaultRuntimeID pgtype.UUID        `json:"expected_default_runtime_id"`
 }
 
 // Fenced against workspace teardown: lock_task_owner_rows (migration 284)
@@ -2524,6 +2526,7 @@ func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams
 		arg.RuntimeRouting,
 		arg.ID,
 		arg.RuntimeID,
+		arg.ExpectedDefaultRuntimeID,
 	)
 	var i AgentTaskQueue
 	err := row.Scan(
@@ -2602,6 +2605,7 @@ WITH enqueue_agent AS MATERIALIZED (
     SELECT a.id, CASE WHEN $24::jsonb IS NULL THEN COALESCE(a.runtime_id, $26::uuid) ELSE $26::uuid END AS runtime_id
     FROM agent a
     WHERE a.id = $1
+      AND ($27::uuid IS NULL OR a.runtime_id = $27::uuid)
       AND lock_task_owner_rows(a.id, $2, CASE WHEN $24::jsonb IS NULL THEN COALESCE(a.runtime_id, $26::uuid) ELSE $26::uuid END)
     FOR KEY SHARE OF a
 )
@@ -2646,32 +2650,33 @@ RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, c
 `
 
 type CreateDeferredChannelIssueTaskParams struct {
-	AgentID              pgtype.UUID        `json:"agent_id"`
-	IssueID              pgtype.UUID        `json:"issue_id"`
-	Priority             int32              `json:"priority"`
-	TriggerCommentID     pgtype.UUID        `json:"trigger_comment_id"`
-	CoalescedCommentIds  []pgtype.UUID      `json:"coalesced_comment_ids"`
-	TriggerSummary       pgtype.Text        `json:"trigger_summary"`
-	ForceFreshSession    pgtype.Bool        `json:"force_fresh_session"`
-	IsLeaderTask         pgtype.Bool        `json:"is_leader_task"`
-	HandoffNote          pgtype.Text        `json:"handoff_note"`
-	SquadID              pgtype.UUID        `json:"squad_id"`
-	UsageSquadID         pgtype.UUID        `json:"usage_squad_id"`
-	HeadSha              pgtype.Text        `json:"head_sha"`
-	OriginatorUserID     pgtype.UUID        `json:"originator_user_id"`
-	AccountableUserID    pgtype.UUID        `json:"accountable_user_id"`
-	RuntimeMcpOverlay    []byte             `json:"runtime_mcp_overlay"`
-	RuntimeConnectedApps []byte             `json:"runtime_connected_apps"`
-	OriginatorSource     pgtype.Text        `json:"originator_source"`
-	DelegatedFromTaskID  pgtype.UUID        `json:"delegated_from_task_id"`
-	RuleVersionID        pgtype.UUID        `json:"rule_version_id"`
-	RerunOfTaskID        pgtype.UUID        `json:"rerun_of_task_id"`
-	TriggerEvidenceKind  pgtype.Text        `json:"trigger_evidence_kind"`
-	TriggerEvidenceRefID pgtype.UUID        `json:"trigger_evidence_ref_id"`
-	FireAt               pgtype.Timestamptz `json:"fire_at"`
-	RuntimeRouting       []byte             `json:"runtime_routing"`
-	ID                   pgtype.UUID        `json:"id"`
-	RuntimeID            pgtype.UUID        `json:"runtime_id"`
+	AgentID                  pgtype.UUID        `json:"agent_id"`
+	IssueID                  pgtype.UUID        `json:"issue_id"`
+	Priority                 int32              `json:"priority"`
+	TriggerCommentID         pgtype.UUID        `json:"trigger_comment_id"`
+	CoalescedCommentIds      []pgtype.UUID      `json:"coalesced_comment_ids"`
+	TriggerSummary           pgtype.Text        `json:"trigger_summary"`
+	ForceFreshSession        pgtype.Bool        `json:"force_fresh_session"`
+	IsLeaderTask             pgtype.Bool        `json:"is_leader_task"`
+	HandoffNote              pgtype.Text        `json:"handoff_note"`
+	SquadID                  pgtype.UUID        `json:"squad_id"`
+	UsageSquadID             pgtype.UUID        `json:"usage_squad_id"`
+	HeadSha                  pgtype.Text        `json:"head_sha"`
+	OriginatorUserID         pgtype.UUID        `json:"originator_user_id"`
+	AccountableUserID        pgtype.UUID        `json:"accountable_user_id"`
+	RuntimeMcpOverlay        []byte             `json:"runtime_mcp_overlay"`
+	RuntimeConnectedApps     []byte             `json:"runtime_connected_apps"`
+	OriginatorSource         pgtype.Text        `json:"originator_source"`
+	DelegatedFromTaskID      pgtype.UUID        `json:"delegated_from_task_id"`
+	RuleVersionID            pgtype.UUID        `json:"rule_version_id"`
+	RerunOfTaskID            pgtype.UUID        `json:"rerun_of_task_id"`
+	TriggerEvidenceKind      pgtype.Text        `json:"trigger_evidence_kind"`
+	TriggerEvidenceRefID     pgtype.UUID        `json:"trigger_evidence_ref_id"`
+	FireAt                   pgtype.Timestamptz `json:"fire_at"`
+	RuntimeRouting           []byte             `json:"runtime_routing"`
+	ID                       pgtype.UUID        `json:"id"`
+	RuntimeID                pgtype.UUID        `json:"runtime_id"`
+	ExpectedDefaultRuntimeID pgtype.UUID        `json:"expected_default_runtime_id"`
 }
 
 // Fenced against workspace teardown: lock_task_owner_rows (migration 284)
@@ -2709,6 +2714,7 @@ func (q *Queries) CreateDeferredChannelIssueTask(ctx context.Context, arg Create
 		arg.RuntimeRouting,
 		arg.ID,
 		arg.RuntimeID,
+		arg.ExpectedDefaultRuntimeID,
 	)
 	var i AgentTaskQueue
 	err := row.Scan(

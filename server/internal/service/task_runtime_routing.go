@@ -91,6 +91,7 @@ func (r *RuntimeRouting) Route(agentID string) (RuntimeRoute, error) {
 }
 
 type taskRuntimeSelection struct {
+	FreshDefault    bool
 	RuntimeID       pgtype.UUID
 	RuntimeOwnerID  pgtype.UUID
 	Routing         []byte
@@ -178,7 +179,40 @@ func (s *TaskService) resolveTaskRuntime(ctx context.Context, q *db.Queries, age
 	if err != nil {
 		return taskRuntimeSelection{}, err
 	}
-	return taskRuntimeSelection{RuntimeID: runtimeID, RuntimeOwnerID: runtimeOwnerID, Routing: raw, ExecutionUserID: executionUserID, Source: route.Source}, nil
+	return taskRuntimeSelection{RuntimeID: runtimeID, RuntimeOwnerID: runtimeOwnerID, Routing: raw, ExecutionUserID: executionUserID, Source: route.Source, FreshDefault: !parentTaskID.Valid && route.Source == "default"}, nil
+}
+
+// A root resolved against a shared default must enter the queue on the binding
+// current at insertion. A concurrent rebind returns no row from the guarded
+// INSERT. Rebuild the snapshot and credential overlay before retrying once.
+func (s *TaskService) createOnCurrentIssueRuntime(ctx context.Context, selection taskRuntimeSelection, params db.CreateAgentTaskParams, create func(db.CreateAgentTaskParams) (db.AgentTaskQueue, error)) (db.AgentTaskQueue, error) {
+	if !selection.FreshDefault {
+		return create(params)
+	}
+	params.ExpectedDefaultRuntimeID = selection.RuntimeID
+	task, err := create(params)
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return task, err
+	}
+	agent, err := s.Queries.GetAgent(ctx, params.AgentID)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
+	if agent.RuntimeID == selection.RuntimeID {
+		return db.AgentTaskQueue{}, pgx.ErrNoRows
+	}
+	current, err := s.resolveTaskRuntime(ctx, s.Queries, agent, selection.ExecutionUserID, pgtype.UUID{})
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
+	overlay := s.buildRoutedRuntimeMCPOverlay(ctx, params.OriginatorUserID, agent, current)
+	params.RuntimeID, params.RuntimeRouting = current.RuntimeID, current.Routing
+	params.RuntimeMcpOverlay, params.RuntimeConnectedApps = overlay.Overlay, overlay.ConnectedApps
+	params.ExpectedDefaultRuntimeID = pgtype.UUID{}
+	if current.FreshDefault {
+		params.ExpectedDefaultRuntimeID = current.RuntimeID
+	}
+	return create(params)
 }
 
 func (s *TaskService) captureRuntimeRouting(ctx context.Context, q *db.Queries, workspaceID, userID pgtype.UUID) ([]byte, error) {

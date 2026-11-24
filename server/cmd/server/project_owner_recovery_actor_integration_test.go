@@ -36,7 +36,7 @@ func TestPrivateProjectOwnerRecoveryRejectsMachineCredentials(t *testing.T) {
 
 	runtimeID := f.Runtime(t, "Private project recovery")
 	agentID := f.Agent(t, "Private project recovery", runtimeID)
-	taskID := f.Task(t, agentID, dbfx.Cols{"runtime_id": runtimeID})
+	taskID := f.Task(t, agentID, dbfx.Cols{"runtime_id": runtimeID, "status": "running"})
 	task := "mat_" + uuid.NewString()
 	f.InsertNoID(t, "task_token", dbfx.Cols{
 		"token_hash": auth.HashToken(task), "task_id": taskID, "agent_id": agentID,

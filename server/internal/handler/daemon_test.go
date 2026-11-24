@@ -3417,8 +3417,7 @@ func TestClaimTask_ChatAutoRetryFreshSessionReusesParentWorkdir(t *testing.T) {
 // TestClaimTask_AutoRetryAfterRuntimeMoveStartsNewSession: the agent moved to
 // another runtime while the parent ran there, so the retry is created on the
 // agent's new runtime (#10717). Its claim there must not resume the session the
-// old runtime recorded; the workdir is still offered best-effort, as for any
-// cross-runtime prior (TestClaimTask_IssuePriorSessionRuntimeGuard).
+// old runtime recorded or offer a machine-local path from that runtime.
 func TestClaimTask_AutoRetryAfterRuntimeMoveStartsNewSession(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -3446,8 +3445,8 @@ func TestClaimTask_AutoRetryAfterRuntimeMoveStartsNewSession(t *testing.T) {
 	if task.PriorSessionID != "" {
 		t.Fatalf("PriorSessionID = %q, want empty (the old runtime's session cannot resume here)", task.PriorSessionID)
 	}
-	if task.PriorWorkDir != "/tmp/old-runtime-workdir" {
-		t.Fatalf("PriorWorkDir = %q, want the parent's /tmp/old-runtime-workdir offered best-effort", task.PriorWorkDir)
+	if task.PriorWorkDir != "" {
+		t.Fatalf("PriorWorkDir = %q, want empty after a runtime change", task.PriorWorkDir)
 	}
 }
 

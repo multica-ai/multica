@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/multica-ai/multica/server/internal/auth"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -77,10 +79,9 @@ func TestTaskTokenRejectedAfterOfflineSweepFailsTask(t *testing.T) {
 	}
 }
 
-// TestTaskTokenLiveOnlyWhileTaskIsLive pins the status rule in
-// GetTaskTokenByHash: every live status authenticates, every terminal one
-// does not, whatever path put the task there.
-func TestTaskTokenLiveOnlyWhileTaskIsLive(t *testing.T) {
+// An issued credential belongs to an active dispatch. Returning the task to
+// the queue or moving it to a terminal state invalidates a leftover token.
+func TestTaskTokenLiveOnlyWhileTaskIsDispatchedOrRunning(t *testing.T) {
 	if testPool == nil {
 		t.Skip("no database connection")
 	}
@@ -92,14 +93,14 @@ func TestTaskTokenLiveOnlyWhileTaskIsLive(t *testing.T) {
 	queries := db.New(testPool)
 
 	for _, tc := range []struct {
-		status string
-		live   bool
+		status     string
+		authorized bool
 	}{
-		{"queued", true},
+		{"queued", false},
 		{"dispatched", true},
 		{"running", true},
 		{"waiting_local_directory", true},
-		{"deferred", true},
+		{"deferred", false},
 		{"completed", false},
 		{"failed", false},
 		{"cancelled", false},
@@ -111,11 +112,11 @@ func TestTaskTokenLiveOnlyWhileTaskIsLive(t *testing.T) {
 				t.Fatalf("set task status: %v", err)
 			}
 			_, err := queries.GetTaskTokenByHash(ctx, auth.HashToken(token))
-			if tc.live && err != nil {
+			if tc.authorized && err != nil {
 				t.Fatalf("live task: GetTaskTokenByHash error = %v, want the token", err)
 			}
-			if !tc.live && err == nil {
-				t.Fatal("terminal task: GetTaskTokenByHash returned the token, want no row")
+			if !tc.authorized && !errors.Is(err, pgx.ErrNoRows) {
+				t.Fatalf("inactive dispatch: lookup error = %v, want no row", err)
 			}
 		})
 	}

@@ -2525,6 +2525,7 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 			if _, obligationErr := h.Queries.RegisterRoutedCommentReconciliation(ctx, db.RegisterRoutedCommentReconciliationParams{
 				IssueID: issue.ID, AgentID: trigger.Agent.ID, CommentID: newTriggerCommentID,
 			}); obligationErr == nil {
+				h.TaskService.RecordHumanDelegation(ctx, attr)
 				return commentMergeDeferred
 			} else if !isNotFound(obligationErr) {
 				slog.Warn("register routed comment obligation failed", "issue_id", uuidToString(issue.ID), "error", obligationErr)

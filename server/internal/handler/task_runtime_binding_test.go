@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,13 +20,14 @@ import (
 // The database must resolve and lock the current binding when the write lands.
 type mul9393EnqueueGate struct {
 	db.DBTX
+	once    sync.Once
 	entered chan struct{}
 	resume  chan struct{}
 }
 
 func (g *mul9393EnqueueGate) hold(ctx context.Context, query string) {
 	if strings.HasPrefix(query, "-- name: CreateAgentTask :one") {
-		close(g.entered)
+		g.once.Do(func() { close(g.entered) })
 		select {
 		case <-g.resume:
 		case <-ctx.Done():

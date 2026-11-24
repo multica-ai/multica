@@ -56,7 +56,7 @@ func newPluginConsentFixture(t *testing.T) *pluginConsentFixture {
 	f.Member(t, f.WorkspaceID, f.UserID, "owner")
 	runtimeID := f.Runtime(t, "Plugin consent")
 	agentID := f.Agent(t, "Plugin consent", runtimeID)
-	taskID := f.Task(t, agentID, dbfx.Cols{"runtime_id": runtimeID})
+	taskID := f.Task(t, agentID, dbfx.Cols{"runtime_id": runtimeID, "status": "running"})
 	task := "mat_" + uuid.NewString()
 	f.InsertNoID(t, "task_token", dbfx.Cols{
 		"token_hash": auth.HashToken(task), "task_id": taskID, "agent_id": agentID,
