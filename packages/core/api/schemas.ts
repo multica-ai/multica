@@ -2285,6 +2285,15 @@ const DashboardUsageBySquadSchema = DashboardUsageByAgentSchema.extend({
 
 export const DashboardUsageBySquadListSchema = z.array(DashboardUsageBySquadSchema);
 
+// A malformed autopilot id reads as a manual run rather than dropping the row,
+// so the manual + autopilot split still adds up to the total.
+const DashboardUsageBySourceSchema = DashboardUsageByAgentSchema.extend({
+  date: z.string().default(""),
+  autopilot_id: z.string().nullable().catch(null).default(null),
+}).loose();
+
+export const DashboardUsageBySourceListSchema = z.array(DashboardUsageBySourceSchema);
+
 // `cancelled_count` defaults to 0 so an installed client pointed at a
 // backend that predates it still renders: those rows simply carry no
 // cancelled segment, which is exactly what that backend measured.
