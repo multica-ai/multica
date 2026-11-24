@@ -165,6 +165,10 @@ func (h *Handler) CreateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "runtime_type 'museapp' is a builtin backend and cannot be used for custom profiles; create a builtin museapp agent instead")
 		return
 	}
+	if req.RuntimeType == "command" {
+		writeError(w, http.StatusBadRequest, "runtime_type 'command' is a builtin backend and cannot be used for custom profiles; configure runtime_config.command on the agent instead")
+		return
+	}
 	family, supported := agent.RuntimeProtocolFamily(req.RuntimeType)
 	if !supported {
 		writeError(w, http.StatusBadRequest, "unsupported runtime_type: "+req.RuntimeType)

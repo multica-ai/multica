@@ -6,6 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import {
   agentBuilderSessionKeys,
+  COMMAND_PROVIDER,
   toStoredAgentDraft,
 } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -148,7 +149,10 @@ export function ManualCreateAgentPage() {
   const [aiError, setAiError] = useState<string | null>(null);
   const runtime = form.selectedRuntime;
   const canAskAi =
-    !!runtime && runtime.runtime_mode !== "cloud" && runtime.status === "online";
+    !!runtime &&
+    runtime.runtime_mode !== "cloud" &&
+    runtime.provider !== COMMAND_PROVIDER &&
+    runtime.status === "online";
   const askAi = async () => {
     if (!runtime) return;
     setStartingAi(true);

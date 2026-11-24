@@ -10,6 +10,7 @@ import {
   Trash2,
 } from "@multica/ui/icons";
 import type { Agent, RuntimeDevice } from "@multica/core/types";
+import { COMMAND_PROVIDER, commandExecutable } from "@multica/core/agents";
 import { createSafeId } from "@multica/core/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
@@ -166,7 +167,10 @@ export function CustomArgsTab({
     </form>
   );
 
-  const launchHeader = runtimeDevice?.launch_header;
+  const launchHeader =
+    runtimeDevice?.provider === COMMAND_PROVIDER
+      ? commandExecutable(agent.runtime_config) || runtimeDevice?.launch_header
+      : runtimeDevice?.launch_header;
   const launchCommand = launchHeader
     ? [launchHeader, ...currentArgs.map(formatArgForPreview)].join(" ")
     : null;

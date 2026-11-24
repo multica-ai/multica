@@ -73,7 +73,12 @@ type ProjectWorkflowData struct {
 	Brief string `json:"brief"`
 	// StatusMap marks a status-map brief (MUL-9913); an older server sends
 	// the per-step command brief and leaves it false.
-	StatusMap bool `json:"status_map,omitempty"`
+	StatusMap     bool   `json:"status_map,omitempty"`
+	StatusKey     string `json:"status_key,omitempty"`
+	NextStatusKey string `json:"next_status_key,omitempty"`
+	BackStatusKey string `json:"back_status_key,omitempty"`
+	IsAssignee    bool   `json:"is_assignee,omitempty"`
+	StepMoved     bool   `json:"step_moved,omitempty"`
 }
 
 // Task represents a claimed task from the server.
@@ -125,6 +130,9 @@ type Task struct {
 	DocsEnabled                   bool                   `json:"docs_enabled,omitempty"`                     // the server's docs_v1 flag. Absent on servers predating it, which reads as false: the brief leaves out the `multica doc` and mention://doc lines
 	PriorSessionID                string                 `json:"prior_session_id,omitempty"`                 // Claude session ID from a previous task on this issue
 	PriorWorkDir                  string                 `json:"prior_work_dir,omitempty"`                   // work_dir from a previous task on this issue
+	IssueBranchName               string                 `json:"issue_branch_name,omitempty"`                // latest delivered git branch on this issue (from prior task runs or linked PRs)
+	IssueRepoURL                  string                 `json:"issue_repo_url,omitempty"`                   // repository URL associated with the issue's linked PR, when present
+	IssueWorkDir                  string                 `json:"issue_work_dir,omitempty"`                   // latest durable/task work_dir from prior runs on this issue
 	PriorSessionResumeUnavailable bool                   `json:"prior_session_resume_unavailable,omitempty"` // MUL-5305: server signals a more recent Codex session was withheld (rollout missing) and PriorSessionID (if any) is an older fallback; the run must disclose the continuity gap even if that older session resumes cleanly. Absent/false on old servers.
 	TriggerCommentID              string                 `json:"trigger_comment_id,omitempty"`               // comment that triggered this task
 	CoalescedCommentIDs           []string               `json:"coalesced_comment_ids,omitempty"`            // MUL-4195: earlier comments folded into this run while it was still queued; the agent must address these in addition to the (newest) triggering comment. Empty for old servers / non-merged runs

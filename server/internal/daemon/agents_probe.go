@@ -375,6 +375,16 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 			}
 		}
 	}
+	// Command Agents run deterministic scripts or binaries configured on the
+	// agent itself (agent.runtime_config), so the host needs no external AI CLI
+	// installed to register or run them (GH #6202). Operators can disable the
+	// built-in command runtime on a host by setting MULTICA_COMMAND_DISABLED=true
+	// (or `multica config set disable_command true` / `--no-command`).
+	if !agent.CommandAgentsDisabled() {
+		agents["command"] = AgentEntry{
+			Command: "command",
+		}
+	}
 	return agents
 }
 

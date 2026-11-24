@@ -159,6 +159,13 @@ type CLIConfig struct {
 	// field, default (enabled).
 	DisableAutoReload bool `json:"disable_auto_reload,omitempty"`
 
+	// DisableCommand, when true, disables the built-in non-LLM "command"
+	// runtime on this daemon host so it neither registers the command runtime
+	// nor executes command-agent tasks. Resolution precedence:
+	// --no-command flag, MULTICA_COMMAND_DISABLED env, this field, default
+	// (enabled).
+	DisableCommand bool `json:"disable_command,omitempty"`
+
 	// Backends contains per-backend overrides for users who want to point
 	// the daemon at non-default tool installations (e.g. an OpenClaw bundled
 	// inside another desktop app, or multiple isolated profiles on the same

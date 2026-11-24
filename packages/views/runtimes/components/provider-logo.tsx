@@ -1,5 +1,5 @@
 import { useId } from "react";
-import { Monitor } from "@multica/ui/icons";
+import { Monitor, Terminal } from "@multica/ui/icons";
 import codeartsLogo from "./codearts-logo.svg";
 import qwenLogo from "./qwen-logo.svg";
 import reasonixLogo from "./reasonix-logo.svg";
@@ -489,6 +489,8 @@ export function ProviderLogo({
       return <ZeroClawLogo className={className} />;
     case "zcode":
       return <ZCodeLogo className={className} />;
+    case "command":
+      return <Terminal className={className} />;
     default:
       return <Monitor className={className} />;
   }

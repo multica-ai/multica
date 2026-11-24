@@ -779,6 +779,27 @@ type BriefInput struct {
 	StepCommands bool
 }
 
+// StepMoves returns the target status keys for completing the active step
+// (nextStatusKey) or reporting failure/changes requested (backStatusKey)
+// when a run executes as the issue's assignee at statusKey.
+func (d Definition) StepMoves(statusKey string) (nextStatusKey, backStatusKey string) {
+	step, ok := d.Step(statusKey)
+	if !ok {
+		return "", ""
+	}
+	if span := d.handlerlessSpan(statusKey, nil); span.ok {
+		nextStatusKey = span.deliver
+	} else {
+		nextStatusKey = d.NextStatus(statusKey)
+	}
+	if step.BackStatusKey != "" {
+		backStatusKey = step.BackStatusKey
+	} else if d.Has(issuestatus.Blocked) {
+		backStatusKey = issuestatus.Blocked
+	}
+	return nextStatusKey, backStatusKey
+}
+
 // Brief renders what an agent reads about the issue's project workflow: the
 // workflow's statuses, who each step hands off to, and — for the assignee —
 // the current step's instructions. A current daemon gets the status map

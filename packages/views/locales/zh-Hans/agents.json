@@ -1030,6 +1030,8 @@
       "agent_error_runtime_version_unsupported": "智能体 CLI 版本不受支持",
       "agent_error_runtime_missing_executable": "运行时未安装对应的 CLI",
       "agent_error_unknown": "智能体执行出错",
+      "command_check_failed": "检查未通过",
+      "command_tool_error": "命令执行出错",
       "agent_fallback_message": "智能体未能生成有效回复",
       "codex_resume_oversized": "会话过大，无法恢复",
       "idle_watchdog": "智能体长时间无活动，运行已停止",

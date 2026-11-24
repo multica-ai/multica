@@ -1030,6 +1030,8 @@
       "agent_error_runtime_version_unsupported": "AI 代理 CLI 版本不受支援",
       "agent_error_runtime_missing_executable": "未安裝 AI 代理 CLI",
       "agent_error_unknown": "AI 代理執行出錯",
+      "command_check_failed": "檢查未通過",
+      "command_tool_error": "命令執行出錯",
       "agent_fallback_message": "AI 代理未能產生有效回覆",
       "codex_resume_oversized": "會話過大，無法恢復",
       "idle_watchdog": "AI 代理長時間無活動，執行已停止",

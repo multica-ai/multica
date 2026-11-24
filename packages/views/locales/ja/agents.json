@@ -889,6 +889,8 @@
       "agent_error_runtime_version_unsupported": "エージェント CLI のバージョンが非対応です",
       "agent_error_runtime_missing_executable": "エージェント CLI がインストールされていません",
       "agent_error_unknown": "エージェント実行エラー",
+      "command_check_failed": "チェックに失敗しました",
+      "command_tool_error": "コマンド実行エラー",
       "agent_fallback_message": "エージェントが有効な返信を生成できませんでした",
       "codex_resume_oversized": "セッションが大きすぎて再開できません",
       "idle_watchdog": "エージェントが長時間応答しなかったため停止しました",

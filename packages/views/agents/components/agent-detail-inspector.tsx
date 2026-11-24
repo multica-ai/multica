@@ -12,7 +12,15 @@ import {
   AGENT_MAX_CONCURRENT_TASKS_MAX,
   AGENT_MAX_CONCURRENT_TASKS_MIN,
   agentDescriptionLength,
+  COMMAND_ENV_PLACEHOLDERS,
+  COMMAND_PROVIDER,
+  commandExecutable,
+  formatCommandArgsInput,
   isAgentDescriptionWithinLimit,
+  isValidCommandToken,
+  parseCommandArgsInput,
+  parseCommandRuntimeConfig,
+  serializeCommandRuntimeConfig,
 } from "@multica/core/agents";
 import { useConfigStore } from "@multica/core/config";
 import { isImeComposing } from "@multica/core/utils";
@@ -153,10 +161,15 @@ export function AgentDetailInspector({
     changeModel,
     changeRuntime,
   } = useExecutionControls({ agent, runtime, runtimes, currentUserId, update });
+  const commandRuntime = runtime?.provider === COMMAND_PROVIDER;
+  const commandConfig = useMemo(
+    () => parseCommandRuntimeConfig(agent.runtime_config),
+    [agent.runtime_config],
+  );
   const conversationStartersEnabled = useConfigStore(
     (state) => state.agentConversationStartersSupported,
   );
-  const showStarters = conversationStartersEnabled;
+  const showStarters = conversationStartersEnabled && !commandRuntime;
   const startersComplete = starters.every(
     (item) => item.label.trim() && item.prompt.trim(),
   );
@@ -315,7 +328,71 @@ export function AgentDetailInspector({
                   onChange={changeRuntime}
                 />
               </SettingsRow>
-              {qoderRuntime ? null : (
+              {qoderRuntime ? null : commandRuntime ? (
+                <>
+                  <SettingsRow
+                    label={t(($) => $.tab_body.mcp_config.dialog_command_label)}
+                    size="select-wide"
+                  >
+                    <CommandField
+                      value={commandExecutable(agent.runtime_config)}
+                      canEdit={canEdit}
+                      onSave={(next) =>
+                        update({
+                          runtime_config: serializeCommandRuntimeConfig({
+                            ...commandConfig,
+                            command: next,
+                          }),
+                        })
+                      }
+                    />
+                  </SettingsRow>
+                  <SettingsRow
+                    label={t(($) => $.tab_body.mcp_config.dialog_args_label)}
+                    description={`Variables: ${COMMAND_ENV_PLACEHOLDERS.join(", ")}`}
+                    size="text"
+                    align="start"
+                  >
+                    <CommandArgsField
+                      value={formatCommandArgsInput(commandConfig.args)}
+                      canEdit={canEdit}
+                      onSave={(nextArgs) =>
+                        update({
+                          runtime_config: serializeCommandRuntimeConfig({
+                            ...commandConfig,
+                            command:
+                              commandConfig.command ??
+                              commandExecutable(agent.runtime_config),
+                            args: nextArgs,
+                          }),
+                        })
+                      }
+                    />
+                  </SettingsRow>
+                  <SettingsRow
+                    label="Working directory"
+                    size="select-wide"
+                  >
+                    <CommandTextField
+                      id="agent-command-working-dir"
+                      value={commandConfig.workingDir ?? ""}
+                      placeholder="${MULTICA_WORK_DIR}"
+                      canEdit={canEdit}
+                      onSave={(nextDir) =>
+                        update({
+                          runtime_config: serializeCommandRuntimeConfig({
+                            ...commandConfig,
+                            command:
+                              commandConfig.command ??
+                              commandExecutable(agent.runtime_config),
+                            workingDir: nextDir || undefined,
+                          }),
+                        })
+                      }
+                    />
+                  </SettingsRow>
+                </>
+              ) : (
                 <>
                   <SettingsRow
                     label={t(($) => $.inspector.prop_model)}
@@ -371,19 +448,166 @@ export function AgentDetailInspector({
           </SettingsSection>
         </div>
 
-        <SettingsSection
-          title={t(($) => $.conversation_starters.preview_label)}
-          className="hidden @4xl:sticky @4xl:top-0 @4xl:block"
-        >
-          <NewChatPreview
-            name={name.trim() || agent.name}
-            description={description}
-            avatarUrl={agent.avatar_url ?? null}
-            starters={showStarters ? starters : []}
-          />
-        </SettingsSection>
+        {!commandRuntime && (
+          <SettingsSection
+            title={t(($) => $.conversation_starters.preview_label)}
+            className="hidden @4xl:sticky @4xl:top-0 @4xl:block"
+          >
+            <NewChatPreview
+              name={name.trim() || agent.name}
+              description={description}
+              avatarUrl={agent.avatar_url ?? null}
+              starters={showStarters ? starters : []}
+            />
+          </SettingsSection>
+        )}
       </div>
     </div>
+  );
+}
+
+function CommandField({
+  value,
+  canEdit,
+  onSave,
+}: {
+  value: string;
+  canEdit: boolean;
+  onSave: (next: string) => Promise<void>;
+}) {
+  const { t } = useT("agents");
+  const [draft, setDraft] = useState(value);
+
+  useEffect(() => setDraft(value), [value]);
+
+  const commit = () => {
+    const next = draft.trim();
+    if (!isValidCommandToken(next)) {
+      setDraft(value);
+      return;
+    }
+    if (next !== value) void onSave(next);
+  };
+
+  return (
+    <Input
+      id="agent-command"
+      type="text"
+      name="agent-command"
+      autoComplete="off"
+      spellCheck={false}
+      value={draft}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (isImeComposing(event)) return;
+        if (event.key === "Enter") {
+          event.preventDefault();
+          commit();
+        }
+      }}
+      disabled={!canEdit}
+      placeholder="ocr"
+      aria-label={t(($) => $.tab_body.mcp_config.dialog_command_label)}
+      className="font-mono"
+    />
+  );
+}
+
+function CommandArgsField({
+  value,
+  canEdit,
+  onSave,
+}: {
+  value: string;
+  canEdit: boolean;
+  onSave: (nextArgs: string[]) => Promise<void>;
+}) {
+  const { t } = useT("agents");
+  const [draft, setDraft] = useState(value);
+
+  useEffect(() => setDraft(value), [value]);
+
+  const commit = () => {
+    const parsed = parseCommandArgsInput(draft);
+    const normalized = formatCommandArgsInput(parsed);
+    setDraft(normalized);
+    if (normalized !== value) {
+      void onSave(parsed);
+    }
+  };
+
+  return (
+    <Input
+      id="agent-command-args"
+      type="text"
+      name="agent-command-args"
+      autoComplete="off"
+      spellCheck={false}
+      value={draft}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (isImeComposing(event)) return;
+        if (event.key === "Enter") {
+          event.preventDefault();
+          commit();
+        }
+      }}
+      disabled={!canEdit}
+      placeholder="review --from ${MULTICA_BASE_BRANCH} --to ${MULTICA_WORK_BRANCH}"
+      aria-label={t(($) => $.tab_body.mcp_config.dialog_args_label)}
+      className="font-mono"
+    />
+  );
+}
+
+function CommandTextField({
+  id,
+  value,
+  placeholder,
+  canEdit,
+  onSave,
+}: {
+  id: string;
+  value: string;
+  placeholder?: string;
+  canEdit: boolean;
+  onSave: (next: string) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState(value);
+
+  useEffect(() => setDraft(value), [value]);
+
+  const commit = () => {
+    const next = draft.trim();
+    setDraft(next);
+    if (next !== value) {
+      void onSave(next);
+    }
+  };
+
+  return (
+    <Input
+      id={id}
+      type="text"
+      name={id}
+      autoComplete="off"
+      spellCheck={false}
+      value={draft}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (isImeComposing(event)) return;
+        if (event.key === "Enter") {
+          event.preventDefault();
+          commit();
+        }
+      }}
+      disabled={!canEdit}
+      placeholder={placeholder}
+      className="font-mono"
+    />
   );
 }
 

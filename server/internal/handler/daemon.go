@@ -27,6 +27,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -790,6 +791,11 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		provider := normalizeProvider(runtime.Type)
 		if provider == "" {
 			provider = "unknown"
+		}
+		if provider == "command" && agent.CommandAgentsDisabled() {
+			slog.Debug("register: skipping command runtime because command agents are disabled",
+				"workspace_id", req.WorkspaceID, "daemon_id", req.DaemonID)
+			continue
 		}
 		name := strings.TrimSpace(runtime.Name)
 		if name == "" {
@@ -3687,6 +3693,58 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			applyFreshSessionRetryWorkdir(*task, &resp, requestHasClientCapability(r, protocol.DaemonCapabilityCheckoutKeepsWorkV1))
 		}
 
+		// Resolve the issue's latest delivered git branch and repository working
+		// directory across prior runs and linked pull requests so deterministic
+		// Command Agents (e.g. code review and CI tools) can inspect the active
+		// work branch automatically when invoked via @mention or a workflow lane.
+		if issueTasks, err := h.Queries.ListTasksByIssue(r.Context(), issue.ID); err == nil {
+			var fallbackWorkDir string
+			for _, t := range issueTasks {
+				if t.ID == task.ID {
+					continue
+				}
+				if resp.IssueBranchName == "" && t.BranchName.Valid && strings.TrimSpace(t.BranchName.String) != "" {
+					resp.IssueBranchName = strings.TrimSpace(t.BranchName.String)
+				}
+				if resp.IssueWorkDir == "" && t.DurableWorkDir.Valid && strings.TrimSpace(t.DurableWorkDir.String) != "" {
+					resp.IssueWorkDir = strings.TrimSpace(t.DurableWorkDir.String)
+				}
+				if fallbackWorkDir == "" && t.WorkDir.Valid && strings.TrimSpace(t.WorkDir.String) != "" && t.AgentID != task.AgentID {
+					fallbackWorkDir = strings.TrimSpace(t.WorkDir.String)
+				}
+			}
+			if resp.IssueWorkDir == "" {
+				resp.IssueWorkDir = fallbackWorkDir
+			}
+		}
+		if resp.IssueBranchName == "" || resp.IssueRepoURL == "" {
+			if prs, err := h.Queries.ListPullRequestsByIssue(r.Context(), issue.ID); err == nil {
+				for _, pr := range prs {
+					if resp.IssueBranchName == "" && pr.Branch.Valid && strings.TrimSpace(pr.Branch.String) != "" {
+						resp.IssueBranchName = strings.TrimSpace(pr.Branch.String)
+					}
+					if resp.IssueRepoURL == "" && pr.RepoOwner != "" && pr.RepoName != "" {
+						resp.IssueRepoURL = fmt.Sprintf("https://github.com/%s/%s", pr.RepoOwner, pr.RepoName)
+					}
+					if resp.IssueBranchName != "" && resp.IssueRepoURL != "" {
+						break
+					}
+				}
+			}
+		}
+		if resp.IssueBranchName == "" || resp.IssueRepoURL == "" {
+			if vcsPRs, err := h.Queries.ListVCSPullRequestsByIssue(r.Context(), issue.ID); err == nil {
+				for _, pr := range vcsPRs {
+					if resp.IssueBranchName == "" && pr.Branch.Valid && strings.TrimSpace(pr.Branch.String) != "" {
+						resp.IssueBranchName = strings.TrimSpace(pr.Branch.String)
+					}
+					if resp.IssueBranchName != "" {
+						break
+					}
+				}
+			}
+		}
+
 		// MUL-8218: a comment edit cancels the affected run and retriggers from
 		// the edited comment, but the new run resumes that run's session, whose
 		// history still quotes the pre-edit text. Tell the agent which version
@@ -5155,6 +5213,7 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.emitIssueExecutedOnFirstCompletion(r, task)
+	h.applyCommandAgentWorkflowTransition(r, workspaceID, task, "pass")
 
 	// MUL-4195: guarantee at-least-once processing. If a member posted a
 	// deliberate comment while this run was executing (or one was merged into
@@ -5180,6 +5239,114 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	slog.Info("task completed", "task_id", taskID, "agent_id", uuidToString(task.AgentID))
 	writeJSON(w, http.StatusOK, taskToResponse(*task, workspaceID))
 }
+
+// applyCommandAgentWorkflowTransition advances or returns the issue's project
+// workflow lane when a non-LLM Command Agent finishes executing as the active
+// lane assignee:
+//   - "pass"  (exit code 0)                  -> NextStatusKey
+//   - "fail"  (check/review non-zero exit)   -> BackStatusKey
+//   - "error" (tool/infrastructure failure)  -> "blocked" (if present in workflow) or BackStatusKey
+//
+// Runs on the server inside CompleteTask / failTask right after the agent's
+// output comment is committed, so the comment is guaranteed to exist on the
+// issue before the status transition triggers any downstream lane handoff.
+func (h *Handler) applyCommandAgentWorkflowTransition(r *http.Request, workspaceID string, task *db.AgentTaskQueue, outcome string) {
+	if task == nil || !task.IssueID.Valid || !task.RuntimeID.Valid {
+		return
+	}
+	ctx := r.Context()
+	rt, err := h.Queries.GetAgentRuntime(ctx, task.RuntimeID)
+	if err != nil || rt.Provider != "command" {
+		return
+	}
+	wsUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		return
+	}
+	issue, err := h.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+		ID:          task.IssueID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		return
+	}
+	def, _, err := issueworkflow.ForProject(ctx, h.Queries, issue.WorkspaceID, issue.ProjectID)
+	if err != nil || def == nil {
+		return
+	}
+	if workflowStepMoved(def, issue.Status, task) || !taskRunsForAssignee(issue, task) {
+		return
+	}
+	nextStatusKey, backStatusKey := def.StepMoves(issue.Status)
+	var targetStatus string
+	switch outcome {
+	case "fail":
+		targetStatus = strings.TrimSpace(backStatusKey)
+	case "error":
+		if def.Has(issuestatus.Blocked) {
+			targetStatus = issuestatus.Blocked
+		} else {
+			targetStatus = strings.TrimSpace(backStatusKey)
+		}
+	default:
+		targetStatus = strings.TrimSpace(nextStatusKey)
+	}
+	if targetStatus == "" || targetStatus == issue.Status {
+		return
+	}
+
+	userID := requestUserID(r)
+	if task.OriginatorUserID.Valid {
+		userID = uuidToString(task.OriginatorUserID)
+	} else if userID == "" && rt.OwnerID.Valid {
+		userID = uuidToString(rt.OwnerID)
+	} else if userID == "" && issue.CreatorType == "member" && issue.CreatorID.Valid {
+		userID = uuidToString(issue.CreatorID)
+	}
+	if userID == "" {
+		return
+	}
+
+	body, err := json.Marshal(map[string]any{"status": targetStatus})
+	if err != nil {
+		return
+	}
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", uuidToString(issue.ID))
+	subCtx := context.WithValue(ctx, chi.RouteCtxKey, rctx)
+	subReq, err := http.NewRequestWithContext(subCtx, http.MethodPut, "/api/issues/"+uuidToString(issue.ID), bytes.NewReader(body))
+	if err != nil {
+		return
+	}
+	subReq.Header.Set("Content-Type", "application/json")
+	subReq.Header.Set("X-Workspace-ID", workspaceID)
+	subReq.Header.Set("X-User-ID", userID)
+	subReq.Header.Set("X-Actor-Source", "task_token")
+	subReq.Header.Set("X-Agent-ID", uuidToString(task.AgentID))
+	subReq.Header.Set("X-Task-ID", uuidToString(task.ID))
+
+	rec := &internalDiscardResponseWriter{header: make(http.Header), status: http.StatusOK}
+	h.UpdateIssue(rec, subReq)
+	if rec.status >= 400 {
+		slog.Warn("command agent workflow transition refused",
+			"task_id", uuidToString(task.ID),
+			"issue_id", uuidToString(issue.ID),
+			"from_status", issue.Status,
+			"to_status", targetStatus,
+			"outcome", outcome,
+			"http_status", rec.status,
+		)
+	}
+}
+
+type internalDiscardResponseWriter struct {
+	header http.Header
+	status int
+}
+
+func (w *internalDiscardResponseWriter) Header() http.Header         { return w.header }
+func (w *internalDiscardResponseWriter) Write(b []byte) (int, error) { return len(b), nil }
+func (w *internalDiscardResponseWriter) WriteHeader(statusCode int)  { w.status = statusCode }
 
 // emitIssueExecutedOnFirstCompletion atomically flips issue.first_executed_at
 // and fires the issue_executed analytics event iff this is the first task on
@@ -5892,6 +6059,11 @@ func (h *Handler) failTask(w http.ResponseWriter, r *http.Request, taskID, works
 		writeJSON(w, http.StatusOK, taskToResponse(*task, workspaceID))
 		return
 	}
+	commandOutcome := "error"
+	if req.FailureReason == "command_check_failed" {
+		commandOutcome = "fail"
+	}
+	h.applyCommandAgentWorkflowTransition(r, workspaceID, task, commandOutcome)
 	h.TaskService.NotifyTaskFinished(*task)
 
 	// Best-effort revoke of the mat_ task token minted at claim. Same

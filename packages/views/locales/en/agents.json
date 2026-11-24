@@ -1060,6 +1060,8 @@
       "agent_error_runtime_version_unsupported": "Agent CLI version unsupported",
       "agent_error_runtime_missing_executable": "Agent CLI not installed",
       "agent_error_unknown": "Agent execution error",
+      "command_check_failed": "Check failed",
+      "command_tool_error": "Command execution error",
       "agent_fallback_message": "Agent couldn't produce a valid reply",
       "codex_resume_oversized": "Session too large to resume",
       "idle_watchdog": "Agent stopped after inactivity",

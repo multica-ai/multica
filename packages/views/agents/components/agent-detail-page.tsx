@@ -23,7 +23,11 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Agent, UpdateAgentRequest } from "@multica/core/types";
 import {
   type AgentPresenceDetail,
+  COMMAND_PROVIDER,
+  commandExecutable,
+  formatCommandArgsInput,
   isAgentRuntimeBound,
+  parseCommandRuntimeConfig,
   useWorkspacePresenceMap,
 } from "@multica/core/agents";
 import { api, ApiError } from "@multica/core/api";
@@ -491,9 +495,12 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     });
   };
 
+  const commandRuntime = runtime?.provider === COMMAND_PROVIDER;
+  const commandConfig = parseCommandRuntimeConfig(agent.runtime_config);
+
   const actions = (
     <>
-      {!isArchived && (
+      {!isArchived && !commandRuntime && (
         <IconButton
           label={t(($) => $.detail.dm)}
           tooltipSide="bottom"
@@ -694,7 +701,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
                 ) : null
               }
             />
-            <AgentChannelLinks agent={agent} />
+            {!commandRuntime && <AgentChannelLinks agent={agent} />}
             {notices.length > 0 && <div className="space-y-2">{notices}</div>}
           </div>
 
@@ -705,29 +712,72 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
             onViewAll={() => openWork(true)}
           />
 
-          <AgentChannelsSection agent={agent} />
-
-          <AgentInstructionsSection
-            agent={agent}
-            canEdit={canEdit.allowed}
-            onUpdate={handleUpdate}
-          />
-
-          {/* Qoder agents take their skills and apps from Qoder Cloud Agents. */}
-          {runtime?.provider === "qoder_cloud" ? null : (
+          {commandRuntime ? (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <h2 className="text-label font-medium text-foreground">
+                  {t(($) => $.tab_body.mcp_config.dialog_command_label)}
+                </h2>
+                {canEdit.allowed && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => openAdvanced("general")}
+                  >
+                    {t(($) => $.detail.settings)}
+                  </Button>
+                )}
+              </div>
+              <div className="rounded-lg border bg-muted/20 p-4 font-mono text-caption">
+                <div className="break-all text-foreground">
+                  {[
+                    commandExecutable(agent.runtime_config) || "—",
+                    formatCommandArgsInput(commandConfig.args),
+                    formatCommandArgsInput(agent.custom_args),
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                </div>
+                {commandConfig.workingDir ? (
+                  <div className="mt-2 text-muted-foreground">
+                    cwd: {commandConfig.workingDir}
+                  </div>
+                ) : null}
+                {commandConfig.timeoutSeconds ? (
+                  <div className="mt-1 text-muted-foreground">
+                    timeout: {commandConfig.timeoutSeconds}s
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ) : (
             <>
-              {composioAppsEnabled && (
-                <AgentAppsSection
-                  agent={agent}
-                  canEdit={canEdit.allowed}
-                  onManage={() => openAdvanced("composio_mcp")}
-                />
-              )}
-              <AgentSkillsSection
+              <AgentChannelsSection agent={agent} />
+
+              <AgentInstructionsSection
                 agent={agent}
                 canEdit={canEdit.allowed}
-                onManage={() => openAdvanced("skills")}
+                onUpdate={handleUpdate}
               />
+
+              {/* Qoder agents take their skills and apps from Qoder Cloud Agents. */}
+              {runtime?.provider === "qoder_cloud" ? null : (
+                <>
+                  {composioAppsEnabled && (
+                    <AgentAppsSection
+                      agent={agent}
+                      canEdit={canEdit.allowed}
+                      onManage={() => openAdvanced("composio_mcp")}
+                    />
+                  )}
+                  <AgentSkillsSection
+                    agent={agent}
+                    canEdit={canEdit.allowed}
+                    onManage={() => openAdvanced("skills")}
+                  />
+                </>
+              )}
             </>
           )}
         </div>

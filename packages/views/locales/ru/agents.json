@@ -1120,6 +1120,8 @@
       "agent_error_runtime_version_unsupported": "Версия CLI агента не поддерживается",
       "agent_error_runtime_missing_executable": "CLI агента не установлен",
       "agent_error_unknown": "Ошибка выполнения агента",
+      "command_check_failed": "Проверка не пройдена",
+      "command_tool_error": "Ошибка выполнения команды",
       "agent_fallback_message": "Агент не смог сформировать корректный ответ",
       "codex_resume_oversized": "Сессия слишком велика для возобновления",
       "idle_watchdog": "Агент остановлен после простоя",

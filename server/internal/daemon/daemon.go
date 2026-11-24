@@ -2610,6 +2610,14 @@ func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry Age
 		version, reason, verdict := d.probeMuseAppReceptionist(ctx)
 		return builtinProbeResult{version: version, reason: reason, verdict: verdict}
 	}
+	// command is the daemon's built-in non-LLM script runner (GH #6202). Each
+	// agent carries its own executable in runtime_config.command, so there is
+	// no host-wide AI CLI binary to probe at registration time.
+	if name == "command" {
+		version := strings.TrimSpace(d.cfg.CLIVersion)
+		d.setAgentVersion("command", version)
+		return builtinProbeResult{version: version, reason: "", verdict: builtinProbeOK}
+	}
 	var (
 		lastErr  error
 		attempts int
@@ -6260,6 +6268,10 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot *taskSlotLease)
 		// classifier so the failure_reason column reflects the actual
 		// shape of the failure (provider 5xx, network, process crash,
 		// …) rather than the coarse legacy "agent_error" bucket.
+		failureReason := taskRunFailureReason(err)
+		if provider == "command" && failureReason == taskfailure.ReasonAgentProcessFailure.String() {
+			failureReason = "command_tool_error"
+		}
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
 			kind:             terminalTaskReportFail,
 			taskID:           task.ID,
@@ -6267,7 +6279,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot *taskSlotLease)
 			branchName:       result.BranchName,
 			workDir:          result.WorkDir,
 			durableWorkDir:   result.DurableWorkDir,
-			failureReason:    taskRunFailureReason(err),
+			failureReason:    failureReason,
 			retiredSessionID: result.RetiredSessionID,
 		}); failErr != nil {
 			taskLog.Error("fail task callback failed", "error", failErr)
@@ -8363,7 +8375,25 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// for compatibility exceptions verified against a specific vendor's CLI,
 	// which must not extend to arbitrary commands sharing a protocol family.
 	var usesCustomProfileCommand bool
-	if customSpec, isCustom := d.customProfileLaunchForRuntime(task.RuntimeID); isCustom {
+	var commandRuntimeCfg agent.CommandRuntimeConfig
+	if provider == "command" {
+		if d.cfg.DisableCommand || agent.CommandAgentsDisabled() {
+			return TaskResult{}, fmt.Errorf("%w on this daemon host", agent.ErrCommandAgentsDisabled)
+		}
+		var rawCfg []byte
+		if task.Agent != nil {
+			rawCfg = task.Agent.RuntimeConfig
+		}
+		parsedCfg, err := agent.ParseCommandRuntimeConfig(rawCfg)
+		if err != nil {
+			return TaskResult{}, fmt.Errorf("invalid command agent configuration: %w", err)
+		}
+		commandRuntimeCfg = parsedCfg
+		entry = AgentEntry{Path: parsedCfg.Command, Command: parsedCfg.Command}
+		profileFixedArgs = append([]string(nil), parsedCfg.Args...)
+		resolvedVersion = d.cfg.CLIVersion
+		ok = true
+	} else if customSpec, isCustom := d.customProfileLaunchForRuntime(task.RuntimeID); isCustom {
 		usesCustomProfileCommand = true
 		entry.Path = customSpec.path
 		resolvedVersion = customSpec.version
@@ -8843,7 +8873,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			CodexCustomArgs:       codexSandboxArgs,
 			Task:                  taskCtx,
 		}
-		if localAssignment.UsesWorktree() {
+		// Non-LLM Command Agents prepare their own detached worktree at the
+		// issue's target branch in resolveCommandGitContext so they never mint
+		// an `agent/<command-agent>/<issue>` branch or auto-commit tool caches
+		// via LocalWorktree.Finalize.
+		if provider != "command" && localAssignment.UsesWorktree() {
 			prepParams.LocalWorktree = &execenv.LocalWorktreeParams{LocalPath: localAssignment.AbsPath}
 			// Take the per-path mutex for the snapshot alone, then hand it
 			// straight back — long enough to read a consistent tree, short
@@ -8911,7 +8945,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("prepare execution environment: %w", err))
 			}
 		} else {
-			if localAssignment != nil {
+			if localAssignment != nil && (provider != "command" || !localAssignment.UsesWorktree()) {
 				prepParams.LocalWorkDir = localAssignment.AbsPath
 			}
 			env, err = d.prepareExecutionEnvironment(prepareCtx, prepParams)
@@ -9206,7 +9240,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			promptOptions = append(promptOptions, WithWorktreeCommitsAllLeftovers())
 		}
 	}
-	prompt, skillInvocation := buildRuntimePrompt(task, provider, env.SkillDirectories, promptOptions...)
+	var prompt string
+	var skillInvocation *agent.SkillInvocation
+	commandExecCwd := env.WorkDir
+	if provider != "command" {
+		prompt, skillInvocation = buildRuntimePrompt(task, provider, env.SkillDirectories, promptOptions...)
+	}
 
 	// Pass task-scoped auth credentials and context so the spawned agent CLI
 	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
@@ -9230,6 +9269,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	if task.AutopilotID != "" {
 		agentEnv["MULTICA_AUTOPILOT_ID"] = task.AutopilotID
+	}
+	if task.IssueID != "" {
+		agentEnv["MULTICA_ISSUE_ID"] = task.IssueID
+	}
+	if task.IssueIdentifier != "" {
+		agentEnv["MULTICA_ISSUE_IDENTIFIER"] = task.IssueIdentifier
+	}
+	if task.TriggerCommentID != "" {
+		agentEnv["MULTICA_TRIGGER_COMMENT_ID"] = task.TriggerCommentID
 	}
 	// Quick-create marker — when set, the multica CLI's `issue create`
 	// command stamps the new issue with origin_type=quick_create +
@@ -9294,6 +9342,70 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentCustomEnv = task.Agent.CustomEnv
 	}
 	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
+	if provider == "command" {
+		if task.IssueStatus != "" {
+			agentEnv["MULTICA_ISSUE_STATUS"] = task.IssueStatus
+		}
+		if task.TriggerCommentContent != "" {
+			agentEnv["MULTICA_TRIGGER_CONTENT"] = task.TriggerCommentContent
+		} else if task.ChatMessage != "" {
+			agentEnv["MULTICA_TRIGGER_CONTENT"] = task.ChatMessage
+		} else if task.AutopilotDescription != "" {
+			agentEnv["MULTICA_TRIGGER_CONTENT"] = task.AutopilotDescription
+		}
+		if task.ProjectWorkflow != nil {
+			if task.ProjectWorkflow.StatusKey != "" {
+				agentEnv["MULTICA_WORKFLOW_STATUS"] = task.ProjectWorkflow.StatusKey
+			}
+			if task.ProjectWorkflow.NextStatusKey != "" {
+				agentEnv["MULTICA_WORKFLOW_NEXT_STATUS"] = task.ProjectWorkflow.NextStatusKey
+			}
+			if task.ProjectWorkflow.BackStatusKey != "" {
+				agentEnv["MULTICA_WORKFLOW_BACK_STATUS"] = task.ProjectWorkflow.BackStatusKey
+			}
+			if task.ProjectWorkflow.IsAssignee {
+				agentEnv["MULTICA_WORKFLOW_IS_ASSIGNEE"] = "true"
+			} else {
+				agentEnv["MULTICA_WORKFLOW_IS_ASSIGNEE"] = "false"
+			}
+		}
+		expandedWorkDir := expandCommandString(commandRuntimeCfg.WorkingDir, agentEnv)
+		resolvedCwd, gitInfo, gitCleanup, gitErr := resolveCommandGitContext(ctx, d, task, env, localAssignment, expandedWorkDir, taskLog)
+		if gitCleanup != nil {
+			defer gitCleanup()
+		}
+		if gitErr != nil {
+			return TaskResult{
+				Status:        "blocked",
+				Comment:       fmt.Sprintf("command agent repository setup failed: %v", gitErr),
+				WorkDir:       env.WorkDir,
+				EnvRoot:       env.RootDir,
+				FailureReason: "command_tool_error",
+			}, nil
+		}
+		commandExecCwd = resolvedCwd
+		agentEnv["MULTICA_WORK_DIR"] = commandExecCwd
+		if gitInfo != nil {
+			if gitInfo.RepoDir != "" {
+				agentEnv["MULTICA_REPO_DIR"] = gitInfo.RepoDir
+			}
+			if gitInfo.WorkBranch != "" {
+				agentEnv["MULTICA_WORK_BRANCH"] = gitInfo.WorkBranch
+			}
+			if gitInfo.BaseBranch != "" {
+				agentEnv["MULTICA_BASE_BRANCH"] = gitInfo.BaseBranch
+			}
+			if gitInfo.BaseCommit != "" {
+				agentEnv["MULTICA_BASE_COMMIT"] = gitInfo.BaseCommit
+			}
+		}
+		profileFixedArgs = expandCommandArgs(profileFixedArgs, agentEnv)
+		inputJSON, err := buildCommandTaskInputJSON(task, commandExecCwd, gitInfo)
+		if err != nil {
+			return TaskResult{}, fmt.Errorf("build command task input: %w", err)
+		}
+		prompt = inputJSON
+	}
 	if provider == "reasonix" {
 		reasonixStateHome, err := prepareReasonixTaskStateHome(d.cfg.Profile, task.RuntimeID, task.AgentID)
 		if err != nil {
@@ -9443,6 +9555,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var mcpConfig json.RawMessage
 	if task.Agent != nil {
 		customArgs = task.Agent.CustomArgs
+		if provider == "command" {
+			customArgs = expandCommandArgs(customArgs, agentEnv)
+		}
 		mcpConfig = effectiveMcpConfig
 	}
 	if hermesOverlayActive {
@@ -9456,23 +9571,30 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		thinkingLevel = task.Agent.ThinkingLevel
 		serviceTier = task.Agent.ServiceTier
 	}
-	selection := resolveTaskModelSelection(ctx, provider, agent.NewCommand(entry.Path, profileFixedArgs),
-		taskModelSelection{Model: model, ThinkingLevel: thinkingLevel, ServiceTier: serviceTier}, taskLog)
-	model, thinkingLevel, serviceTier = selection.Model, selection.ThinkingLevel, selection.ServiceTier
+	var selection taskModelSelection
+	if provider != "command" {
+		selection = resolveTaskModelSelection(ctx, provider, agent.NewCommand(entry.Path, profileFixedArgs),
+			taskModelSelection{Model: model, ThinkingLevel: thinkingLevel, ServiceTier: serviceTier}, taskLog)
+		model, thinkingLevel, serviceTier = selection.Model, selection.ThinkingLevel, selection.ServiceTier
+	}
 
 	var idleWatchdogTimeout time.Duration
 	if provider == "opencode" || provider == "codearts" {
 		idleWatchdogTimeout = d.cfg.OpenCodeIdleWatchdog
 	}
+	execTimeout := d.cfg.AgentTimeout
+	if provider == "command" && commandRuntimeCfg.TimeoutSeconds > 0 {
+		execTimeout = time.Duration(commandRuntimeCfg.TimeoutSeconds) * time.Second
+	}
 	execOpts := agent.ExecOptions{
 		SkillInvocation:            skillInvocation,
 		EnableTaskSupplement:       taskSupplementNegotiated,
 		SupplementHookCommand:      supplementHookCommand,
-		Cwd:                        env.WorkDir,
+		Cwd:                        commandExecCwd,
 		PiSkillPaths:               env.PiSkillPaths,
 		Model:                      model,
 		ThreadName:                 deriveTaskThreadName(task),
-		Timeout:                    d.cfg.AgentTimeout,
+		Timeout:                    execTimeout,
 		SemanticInactivityTimeout:  d.cfg.CodexSemanticInactivityTimeout,
 		FirstTurnNoProgressTimeout: d.cfg.CodexFirstTurnNoProgressTimeout,
 		IdleWatchdogTimeout:        idleWatchdogTimeout,
@@ -9940,10 +10062,39 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			EnvRoot:   env.RootDir,
 			Usage:     usageEntries,
 		}, nil
+	case "check_failed":
+		// Non-LLM Command Agent check/review failure (e.g. a code review or test
+		// suite exiting with 1..125 and emitting its report on stdout). Routed
+		// with "command_check_failed" so the server posts the output as a normal
+		// Markdown agent comment and moves the workflow lane to BackStatusKey.
+		comment := result.Output
+		if comment == "" {
+			comment = result.Error
+		}
+		return TaskResult{
+			Status:        "blocked",
+			Comment:       comment,
+			SessionID:     result.SessionID,
+			WorkDir:       env.WorkDir,
+			EnvRoot:       env.RootDir,
+			FailureReason: "command_check_failed",
+			Usage:         usageEntries,
+		}, nil
 	default:
 		errMsg := result.Error
 		if errMsg == "" {
 			errMsg = fmt.Sprintf("%s execution %s", provider, result.Status)
+		}
+		if provider == "command" {
+			return TaskResult{
+				Status:        "blocked",
+				Comment:       errMsg,
+				SessionID:     result.SessionID,
+				WorkDir:       env.WorkDir,
+				EnvRoot:       env.RootDir,
+				FailureReason: "command_tool_error",
+				Usage:         usageEntries,
+			}, nil
 		}
 		// Forward SessionID/WorkDir on the blocked path: backends commonly
 		// emit a real session_id before failing (rate-limit, tool error,

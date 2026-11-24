@@ -50,6 +50,8 @@ export const FAILURE_REASON_I18N_KEYS = {
   "agent_error.unknown": "agent_error_unknown",
 
   // Daemon operational reasons, outside the canonical taxonomy.
+  command_check_failed: "command_check_failed",
+  command_tool_error: "command_tool_error",
   agent_fallback_message: "agent_fallback_message",
   codex_semantic_inactivity: "codex_semantic_inactivity",
   codex_resume_oversized: "codex_resume_oversized",

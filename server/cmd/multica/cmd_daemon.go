@@ -116,6 +116,7 @@ func init() {
 	f.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	f.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
 	f.Bool("no-auto-reload", false, "Disable restarting when the multica binary on disk changes version (env: MULTICA_DAEMON_AUTO_RELOAD=false)")
+	f.Bool("no-command", false, "Disable the built-in non-LLM command runtime on this host (env: MULTICA_COMMAND_DISABLED=true)")
 	daemonStopCmd.Flags().Bool("force", false, "Wait for graceful shutdown, then force termination if needed")
 
 	daemonLogsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
@@ -142,6 +143,7 @@ func init() {
 	rf.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	rf.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
 	rf.Bool("no-auto-reload", false, "Disable restarting when the multica binary on disk changes version (env: MULTICA_DAEMON_AUTO_RELOAD=false)")
+	rf.Bool("no-command", false, "Disable the built-in non-LLM command runtime on this host (env: MULTICA_COMMAND_DISABLED=true)")
 
 	df := daemonDiskUsageCmd.Flags()
 	df.Bool("by-workspace", false, "Aggregate output by workspace instead of by run")
@@ -957,6 +959,9 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 	if b, _ := cmd.Flags().GetBool("no-auto-reload"); b {
 		args = append(args, "--no-auto-reload")
 	}
+	if b, _ := cmd.Flags().GetBool("no-command"); b {
+		args = append(args, "--no-command")
+	}
 
 	// Forward global persistent flags.
 	if v, _ := cmd.Flags().GetString("server-url"); v != "" {
@@ -1135,6 +1140,9 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	noAutoReloadFlag, _ := cmd.Flags().GetBool("no-auto-reload")
 	if resolveDaemonDisableSignal(noAutoReloadFlag, "MULTICA_DAEMON_AUTO_RELOAD", fileCfg.DisableAutoReload) {
 		overrides.DisableAutoReload = true
+	}
+	if noCommandFlag, _ := cmd.Flags().GetBool("no-command"); noCommandFlag {
+		overrides.DisableCommand = true
 	}
 	autoUpdateFlag, _ := cmd.Flags().GetDuration("auto-update-interval")
 	autoUpdateOverride, err := resolveDaemonDurationOverride(autoUpdateFlag, "MULTICA_DAEMON_AUTO_UPDATE_INTERVAL", fileCfg.AutoUpdateCheckInterval)

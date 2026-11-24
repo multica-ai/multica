@@ -130,6 +130,7 @@ type Config struct {
 	AutoUpdateEnabled              bool                  // periodically check for a newer CLI release and self-update when idle (default: true on Multica Cloud, false on self-host)
 	AutoUpdateCheckInterval        time.Duration         // how often the auto-update loop polls for a new release (default: 6h)
 	AutoReloadEnabled              bool                  // restart when the multica binary on disk no longer matches the running version (default: true for CLI-launched daemons)
+	DisableCommand                 bool                  // disable the built-in non-LLM "command" runtime on this host (default: false)
 	PollInterval                   time.Duration
 	WSClaimPollInterval            time.Duration // upper bound for healthy WS batch-claim safety polls; actual sleeps use downward-only jitter
 	HeartbeatInterval              time.Duration
@@ -201,6 +202,9 @@ type Overrides struct {
 	// Single-direction for the same reason as DisableAutoUpdate: the
 	// env/default already resolves to enabled.
 	DisableAutoReload bool
+	// DisableCommand, when true, disables the built-in non-LLM "command"
+	// runtime on this host (--no-command).
+	DisableCommand bool
 }
 
 // LoadConfig builds the daemon configuration from environment variables
@@ -243,10 +247,12 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// purely from env-var configuration. We log a warning and proceed with
 	// no overrides.
 	var profileCommandOverrides map[string]string
+	var cliDisableCommand bool
 	if cliCfg, err := cli.LoadCLIConfigForProfile(overrides.Profile); err != nil {
 		slog.Warn("could not load CLI config for backend overrides; proceeding without",
 			"profile", overrides.Profile, "err", err)
 	} else {
+		cliDisableCommand = cliCfg.DisableCommand
 		if oc := openclawOverrideFrom(cliCfg); oc != nil {
 			applyOpenclawOverride(oc)
 		}
@@ -264,9 +270,22 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		}
 	}
 
+	// Command runtime disable precedence:
+	//   --no-command flag > MULTICA_COMMAND_DISABLED env > config.json disable_command > default (false)
+	disableCommand := cliDisableCommand
+	if raw, ok := os.LookupEnv(agent.CommandDisabledEnv); ok && strings.TrimSpace(raw) != "" {
+		disableCommand = agent.CommandAgentsDisabled()
+	}
+	if overrides.DisableCommand {
+		disableCommand = true
+	}
+
 	// Discover installed agent CLIs. Extracted so the periodic workspace sync
 	// can re-run the same discovery on a live daemon (MUL-5439).
 	agents := probeAgentCLIs()
+	if disableCommand {
+		delete(agents, "command")
+	}
 	if len(agents) == 0 && !overrides.AllowNoAgents {
 		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codearts, codex, copilot, opencode, deveco, openclaw, hermes, pi, omp, cursor-agent, kimi, reasonix, dsh, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, qwen, qwenpaw, droid, amp, mcode, muse, devin, dim, zeroclaw, or zcode and ensure it is on PATH")
 	}
@@ -669,6 +688,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		AutoUpdateEnabled:               autoUpdateEnabled,
 		AutoUpdateCheckInterval:         autoUpdateInterval,
 		AutoReloadEnabled:               autoReloadEnabled,
+		DisableCommand:                  disableCommand,
 		HealthPort:                      healthPort,
 		MaxConcurrentTasks:              maxConcurrentTasks,
 		PollInterval:                    pollInterval,

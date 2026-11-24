@@ -324,6 +324,9 @@ func (d *Daemon) skippedAgentsSnapshot() map[string]string {
 func (d *Daemon) refreshAgentAvailability() []string {
 	current := d.agents()
 	probed := probeAgentCLIs()
+	if d.cfg.DisableCommand {
+		delete(probed, "command")
+	}
 
 	var gained []string
 	for name := range probed {

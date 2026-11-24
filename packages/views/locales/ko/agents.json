@@ -889,6 +889,8 @@
       "agent_error_runtime_version_unsupported": "지원되지 않는 에이전트 CLI 버전",
       "agent_error_runtime_missing_executable": "에이전트 CLI가 설치되지 않음",
       "agent_error_unknown": "에이전트 실행 오류",
+      "command_check_failed": "검사 실패",
+      "command_tool_error": "명령 실행 오류",
       "agent_fallback_message": "에이전트가 유효한 응답을 생성하지 못함",
       "codex_resume_oversized": "세션이 너무 커서 재개할 수 없음",
       "idle_watchdog": "에이전트가 장시간 응답하지 않아 중지됨",

@@ -389,10 +389,20 @@ func (h *Handler) claimProjectWorkflow(ctx context.Context, issue db.Issue, task
 			in.AssigneeName = h.actorDisplayName(ctx, issue.WorkspaceID, issue.AssigneeType.String, issue.AssigneeID)
 		}
 	}
+	var nextStatusKey, backStatusKey string
+	isAssignee := !stepMoved && !in.Observer
+	if isAssignee {
+		nextStatusKey, backStatusKey = def.StepMoves(issue.Status)
+	}
 	return &TaskProjectWorkflowData{
-		Brief:     issueworkflow.Brief(in),
-		StatusMap: !legacyRuntimeRules && !stepCommands,
-		stepMoved: stepMoved,
+		Brief:         issueworkflow.Brief(in),
+		StatusMap:     !legacyRuntimeRules && !stepCommands,
+		StatusKey:     issue.Status,
+		NextStatusKey: nextStatusKey,
+		BackStatusKey: backStatusKey,
+		IsAssignee:    isAssignee,
+		StepMoved:     stepMoved,
+		stepMoved:     stepMoved,
 	}
 }
 

@@ -1060,6 +1060,8 @@
       "agent_error_runtime_version_unsupported": "Version du CLI de l'agent non prise en charge",
       "agent_error_runtime_missing_executable": "CLI de l'agent non installé",
       "agent_error_unknown": "Erreur d'exécution de l'agent",
+      "command_check_failed": "Échec de la vérification",
+      "command_tool_error": "Erreur d'exécution de la commande",
       "agent_fallback_message": "L'agent n'a pas pu produire de réponse valide",
       "codex_resume_oversized": "Session trop volumineuse pour être reprise",
       "idle_watchdog": "Agent arrêté après une période d'inactivité",

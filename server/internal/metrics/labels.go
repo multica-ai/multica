@@ -169,6 +169,7 @@ var (
 		"zeroclaw":      "zeroclaw",
 		"museapp":       "museapp",
 		"zcode":         "zcode",
+		"command":       "command",
 		"multica_agent": "multica_agent",
 		"openclaw":      "openclaw",
 		"opencode":      "opencode",

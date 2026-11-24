@@ -377,7 +377,12 @@ type TaskProjectWorkflowData struct {
 	Brief string `json:"brief"`
 	// StatusMap marks a status-map brief, which the daemon pairs with the
 	// status-map rules; without it the brief lists per-step commands.
-	StatusMap bool `json:"status_map,omitempty"`
+	StatusMap     bool   `json:"status_map,omitempty"`
+	StatusKey     string `json:"status_key,omitempty"`
+	NextStatusKey string `json:"next_status_key,omitempty"`
+	BackStatusKey string `json:"back_status_key,omitempty"`
+	IsAssignee    bool   `json:"is_assignee,omitempty"`
+	StepMoved     bool   `json:"step_moved,omitempty"`
 	// stepMoved selects the server-side leader briefing without changing the wire.
 	stepMoved bool
 }
@@ -476,6 +481,9 @@ type AgentTaskResponse struct {
 	CreatedAt          string                   `json:"created_at"`
 	PriorSessionID     string                   `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
 	PriorWorkDir       string                   `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
+	IssueBranchName    string                   `json:"issue_branch_name,omitempty"`
+	IssueRepoURL       string                   `json:"issue_repo_url,omitempty"`
+	IssueWorkDir       string                   `json:"issue_work_dir,omitempty"`
 	// ModelOverride snapshots the agent's persistent OpenClaw model override at
 	// claim time. Later config edits affect subsequent claims, not this payload.
 	// Mirrors internal/daemon/types.go with the same JSON name; empty for other
@@ -1608,6 +1616,17 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if runtime.Provider == "command" {
+		if agent.CommandAgentsDisabled() {
+			writeError(w, http.StatusForbidden, "command agents are disabled on this server")
+			return
+		}
+		raw, _ := json.Marshal(req.RuntimeConfig)
+		if err := agent.ValidateCommandRuntimeConfig(raw); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	// thinking_level validation: fixed-enum providers reject unknown literals;
 	// dynamic-catalog providers (Codex/OpenCode) reject malformed tokens here.
 	// Pi has a fixed token universe and a daemon-discovered per-model subset.
@@ -2255,6 +2274,20 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			}
 			if err := overrides.validate(); err != nil {
 				writeError(w, 400, err.Error())
+				return
+			}
+		}
+		if provider == "command" && runtimeChange {
+			if agent.CommandAgentsDisabled() {
+				writeError(w, http.StatusForbidden, "command agents are disabled on this server")
+				return
+			}
+			raw := existing.RuntimeConfig
+			if req.RuntimeConfig != nil {
+				raw, _ = json.Marshal(req.RuntimeConfig)
+			}
+			if err := agent.ValidateCommandRuntimeConfig(raw); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}
 		}

@@ -9,8 +9,10 @@ import {
 } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  COMMAND_PROVIDER,
   EMPTY_AGENT_DRAFT,
   isDraftDescriptionWithinLimit,
+  isValidCommandToken,
   AGENT_CONVERSATION_STARTER_LABEL_MAX_LENGTH,
   AGENT_CONVERSATION_STARTER_MAX_LENGTH,
   type AgentDraft,
@@ -170,6 +172,8 @@ export function useCreateAgentForm(options?: {
       selectedRuntime != null &&
       isRuntimeUsableForUser(selectedRuntime, currentUserId) &&
       (selectedRuntime.provider !== "qoder_cloud" || !!draft.qoderAgentId) &&
+      (selectedRuntime.provider !== COMMAND_PROVIDER ||
+        isValidCommandToken(draft.command)) &&
       isDraftDescriptionWithinLimit(draft.description) &&
       !accessInvalid &&
       !conversationStartersInvalid,

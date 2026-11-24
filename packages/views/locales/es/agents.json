@@ -1035,6 +1035,8 @@
       "agent_error_runtime_version_unsupported": "Versión de la CLI del agente no compatible",
       "agent_error_runtime_missing_executable": "CLI del agente no instalada",
       "agent_error_unknown": "Error de ejecución del agente",
+      "command_check_failed": "Verificación fallida",
+      "command_tool_error": "Error de ejecución del comando",
       "agent_fallback_message": "El agente no pudo generar una respuesta válida",
       "codex_resume_oversized": "Sesión demasiado grande para reanudar",
       "idle_watchdog": "El agente se detuvo por inactividad",
