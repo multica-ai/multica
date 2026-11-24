@@ -1172,6 +1172,18 @@
     "row_todo_label": "待辦",
     "row_todo_hint": "啟動 AI 代理"
   },
+  "ask_user_question": {
+    "prompt": "請就以下問題做出選擇：",
+    "submit": "確認",
+    "ignore": "忽略",
+    "submitted": "已選擇",
+    "ignored": "已忽略",
+    "submit_failed": "提交選擇失敗",
+    "ignore_failed": "忽略失敗",
+    "other": "其他",
+    "custom_placeholder": "請輸入…",
+    "multi_hint": "(可多選)"
+  },
   "save_view": {
     "scope_label_workspace": "負責人型別",
     "scope_label_my": "與我的關係",

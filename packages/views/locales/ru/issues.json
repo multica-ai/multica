@@ -1345,6 +1345,18 @@
     "row_todo_label": "К выполнению",
     "row_todo_hint": "запускает агента"
   },
+  "ask_user_question": {
+    "prompt": "Выберите вариант для вопроса ниже:",
+    "submit": "Подтвердить",
+    "ignore": "Игнорировать",
+    "submitted": "Выбрано",
+    "ignored": "Проигнорировано",
+    "submit_failed": "Не удалось отправить выбор",
+    "ignore_failed": "Не удалось проигнорировать",
+    "other": "Другое",
+    "custom_placeholder": "Введите ответ…",
+    "multi_hint": "(множественный выбор)"
+  },
   "save_view": {
     "scope_label_workspace": "Тип исполнителя",
     "scope_label_my": "Отношение ко мне",

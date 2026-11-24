@@ -1239,7 +1239,7 @@
     "submit_failed": "Failed to submit selection",
     "ignore_failed": "Failed to ignore",
     "other": "Other",
-    "custom_placeholder": "Enter your answer…",
+    "custom_placeholder": "Enter your answer...",
     "multi_hint": "(multiple choice)"
   },
   "save_view": {

@@ -1181,7 +1181,7 @@
     "submit_failed": "提交选择失败",
     "ignore_failed": "忽略失败",
     "other": "其他",
-    "custom_placeholder": "请输入…",
+    "custom_placeholder": "请输入...",
     "multi_hint": "(可多选)"
   },
   "save_view": {
