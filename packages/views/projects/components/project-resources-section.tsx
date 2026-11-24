@@ -606,15 +606,14 @@ function ResourceRow({
       )}
     >
       <Icon className="size-4 shrink-0 text-muted-foreground" />
-      <div className="flex min-w-0 flex-1 items-center gap-2">
+      <div className="flex min-w-0 items-center gap-2">
         {name}
         {chip}
       </div>
-      {aside && (
-        <div className="flex min-w-0 max-w-[45%] shrink items-center gap-1 text-caption text-muted-foreground">
-          {aside}
-        </div>
-      )}
+      {/* Zero basis: takes only what the name leaves, so the name never truncates first. */}
+      <div className="flex min-w-0 flex-1 items-center justify-end gap-1 text-caption text-muted-foreground">
+        {aside}
+      </div>
       {menu ?? <span aria-hidden="true" className="size-6 shrink-0" />}
     </div>
   );
