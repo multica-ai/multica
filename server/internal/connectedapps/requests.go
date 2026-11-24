@@ -138,6 +138,7 @@ func (s *Service) WithdrawTeamAsk(ctx context.Context, workspaceID, memberID pgt
 	}
 	s.withdraw(ctx, req)
 	s.archiveAdminNotifications(ctx, req, pgtype.UUID{}, "app_request_withdrawn")
+	s.notifyAdminsOfWaiting(ctx, req.WorkspaceID, req.ToolkitSlug)
 	return nil
 }
 
@@ -308,7 +309,7 @@ func (s *Service) DeclineTeamConnectRequests(ctx context.Context, workspaceID, a
 		return err
 	}
 	for _, r := range rows {
-		if _, err := s.Reject(ctx, workspaceID, adminID, r.ID, ""); err != nil && !errors.Is(err, ErrNotPending) {
+		if _, err := s.reject(ctx, workspaceID, adminID, r.ID, ""); err != nil && !errors.Is(err, ErrNotPending) {
 			return err
 		}
 	}
@@ -317,6 +318,14 @@ func (s *Service) DeclineTeamConnectRequests(ctx context.Context, workspaceID, a
 
 // Reject declines a request and resumes the agent so it can adapt.
 func (s *Service) Reject(ctx context.Context, workspaceID, actorID, requestID pgtype.UUID, reason string) (db.AppActionRequest, error) {
+	decided, err := s.reject(ctx, workspaceID, actorID, requestID, reason)
+	if err == nil && isTeamConnect(decided) {
+		s.notifyAdminsOfWaiting(ctx, decided.WorkspaceID, decided.ToolkitSlug)
+	}
+	return decided, err
+}
+
+func (s *Service) reject(ctx context.Context, workspaceID, actorID, requestID pgtype.UUID, reason string) (db.AppActionRequest, error) {
 	_, asAdmin, err := s.pendingForDecider(ctx, workspaceID, actorID, requestID)
 	if err != nil {
 		return db.AppActionRequest{}, err
@@ -616,6 +625,9 @@ func (s *Service) Sweep(ctx context.Context) {
 	for _, r := range expired {
 		s.publishChange(r)
 		s.notify(ctx, r, NotifActionResult)
+		if isTeamConnect(r) {
+			s.notifyAdminsOfWaiting(ctx, r.WorkspaceID, r.ToolkitSlug)
+		}
 	}
 	due, err := s.q.ClaimAppActionRequestReminders(ctx)
 	if err != nil {
@@ -689,6 +701,22 @@ func (s *Service) notifyAdmins(ctx context.Context, req db.AppActionRequest) {
 		if !told[admin] {
 			s.deliver(ctx, req, NotifConnectRequested, admin)
 		}
+	}
+}
+
+// notifyAdminsOfWaiting tells the admins about the requests for slug's team
+// account that are still open after one ended: the notification that stood
+// for all of them named the one that ended.
+func (s *Service) notifyAdminsOfWaiting(ctx context.Context, workspaceID pgtype.UUID, slug string) {
+	rows, err := s.q.ListPendingTeamConnectRequests(ctx, db.ListPendingTeamConnectRequestsParams{
+		WorkspaceID: workspaceID, ToolkitSlug: slug,
+	})
+	if err != nil {
+		slog.Warn("connectedapps: list team connect requests failed", "toolkit", slug, "error", err)
+		return
+	}
+	for _, r := range rows {
+		s.notifyAdmins(ctx, r)
 	}
 }
 

@@ -282,6 +282,64 @@ func TestConnectedApps_TeamConnectRequestRecipients(t *testing.T) {
 	}
 }
 
+// One notification stands for every open request for an app, so when the
+// request it names ends, the admins hear about the ones still waiting.
+func TestConnectedApps_TeamConnectRequestEndsWhileAnotherWaits(t *testing.T) {
+	ctx := context.Background()
+	for name, tc := range map[string]struct {
+		// end finishes the first of the two requests.
+		end func(t *testing.T, f *appsFixture, first, asker, admin string)
+		// openForAdmin counts the deciding admin's kept item and the new one.
+		openForAdmin int
+	}{
+		"withdrawn by the person waiting": {func(t *testing.T, f *appsFixture, first, asker, _ string) {
+			if _, err := f.h.ConnectedApps.Reject(ctx, parseUUID(testWorkspaceID), parseUUID(asker), parseUUID(first), ""); err != nil {
+				t.Fatalf("withdraw: %v", err)
+			}
+		}, 1},
+		"ask withdrawn from the Apps page": {func(t *testing.T, f *appsFixture, _, asker, _ string) {
+			if code := f.dismissTeamRequests(t, asker, "notion"); code != http.StatusNoContent {
+				t.Fatalf("withdraw ask: %d", code)
+			}
+		}, 1},
+		"declined alone by an admin": {func(t *testing.T, f *appsFixture, first, _, admin string) {
+			if _, err := f.h.ConnectedApps.Reject(ctx, parseUUID(testWorkspaceID), parseUUID(admin), parseUUID(first), ""); err != nil {
+				t.Fatalf("decline: %v", err)
+			}
+		}, 2},
+		"expired": {func(t *testing.T, f *appsFixture, first, _, _ string) {
+			dbfx.Exec(t, `UPDATE app_action_request SET expires_at = now() - interval '1 minute' WHERE id=$1`, first)
+			f.h.ConnectedApps.Sweep(ctx)
+		}, 2},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newAppsFixture(t)
+			second := createTestUserAndMember(t, "member")
+			for _, asker := range []string{f.member, second} {
+				if code := f.requestTeamApp(t, asker, map[string]any{"toolkit_slug": "notion"}); code != http.StatusNoContent {
+					t.Fatalf("ask: %d", code)
+				}
+			}
+			if n := teamNotices(t, testUserID, "notion", false); n != 1 {
+				t.Fatalf("open notifications before = %d, want 1", n)
+			}
+			var first string
+			dbfx.QueryRow(t, `SELECT id FROM app_action_request WHERE workspace_id=$1 AND approver_user_id=$2 AND status='pending'`, testWorkspaceID, f.member).Scan(&first)
+
+			tc.end(t, f, first, f.member, testUserID)
+
+			if n := teamNotices(t, testUserID, "notion", false); n != tc.openForAdmin {
+				t.Fatalf("open notifications after = %d, want %d", n, tc.openForAdmin)
+			}
+			if n := dbfx.Count(t, `SELECT count(*) FROM inbox_item i JOIN app_action_request r ON r.id = (i.details->>'request_id')::uuid
+				WHERE i.recipient_id=$1 AND i.type=$2 AND NOT i.archived AND r.approver_user_id=$3 AND r.status='pending'`,
+				testUserID, connectedapps.NotifConnectRequested, second); n != 1 {
+				t.Fatalf("open notifications for the request still waiting = %d, want 1", n)
+			}
+		})
+	}
+}
+
 func TestConnectedApps_PersonalConnectionImpact(t *testing.T) {
 	f := newAppsFixture(t)
 	if w := f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "gmail", "account_scope": "personal"}}); w.Code != http.StatusOK {
