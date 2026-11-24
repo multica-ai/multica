@@ -296,7 +296,9 @@ multica agent update <agent-id> --mcp-config-file ./mcp.json
 - `--custom-args` is a JSON array placed at the end of the launch arguments. Choose the model with `--model`; some tools reject `--model` inside custom arguments.
 - `--permission-mode` controls who can invoke the agent: `private` for the owner only, or `public_to` with `--public-to-workspace` or `--public-to-member <user-id>`. `--visibility private|workspace` is the older form and maps onto `--permission-mode`; when both are given, `--permission-mode` wins.
 
-Set `"issue_session_policy": "fresh"` in an agent’s `--runtime-config` JSON to start each issue run without the previous run’s session or work directory. This also applies to issue retries. Keep the other runtime configuration keys when updating an existing agent. Remove the key to restore the default session reuse.
+Set `"issue_session_policy": "fresh"` in an agent’s `--runtime-config` JSON to start each issue run without resuming the previous session or reusing its managed work directory. This also applies to issue retries. Keep the other runtime configuration keys when updating an existing agent. Remove the key to restore the default session reuse.
+
+For a linked local directory, `in_place` still uses the configured folder, and `worktree` can continue an existing branch for the same issue and agent.
 
 ### Agent run history
 
