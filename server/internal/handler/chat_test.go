@@ -326,6 +326,44 @@ func TestSendChatMessage_InvalidAttachmentIDs(t *testing.T) {
 	}
 }
 
+func TestSendChatMessage_RejectsBlankContentWithoutAttachments(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "ChatBlankContentAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+
+	for _, tt := range []struct {
+		name    string
+		content string
+	}{
+		{name: "empty"},
+		{name: "ASCII whitespace", content: " \t\r\n"},
+		{name: "Unicode whitespace", content: "\u00a0\u3000"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			req := newRequest("POST", "/api/chat/sessions/"+sessionID+"/messages", map[string]string{
+				"content": tt.content,
+			})
+			req = withChatTestWorkspaceCtx(t, withURLParam(req, "sessionId", sessionID))
+			w := httptest.NewRecorder()
+			testHandler.SendChatMessage(w, req)
+			if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "content is required") {
+				t.Errorf("expected 400 content is required, got %d: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+
+	var messageCount, taskCount int
+	err := testPool.QueryRow(context.Background(), `
+		SELECT (SELECT count(*) FROM chat_message WHERE chat_session_id = $1),
+		       (SELECT count(*) FROM agent_task_queue WHERE chat_session_id = $1)
+	`, sessionID).Scan(&messageCount, &taskCount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if messageCount != 0 || taskCount != 0 {
+		t.Fatalf("blank sends persisted %d messages and %d tasks", messageCount, taskCount)
+	}
+}
+
 func TestSendChatMessage_ContentLength(t *testing.T) {
 	tests := []struct {
 		name       string

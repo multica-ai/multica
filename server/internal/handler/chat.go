@@ -447,7 +447,7 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.Content == "" {
+	if req.Content == "" || (len(req.AttachmentIDs) == 0 && strings.TrimSpace(req.Content) == "") {
 		writeError(w, http.StatusBadRequest, "content is required")
 		return
 	}
