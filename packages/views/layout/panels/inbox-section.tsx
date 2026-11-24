@@ -1720,7 +1720,7 @@ function InboxRowCard({
           </span>
         </div>
       )}
-      <div className="-mx-1 mt-1 flex items-center gap-1 border-t border-border pt-2">
+      <div className="-mx-1 mt-1 flex flex-wrap items-center gap-1 border-t border-border pt-2">
         <AppLink
           href={href}
           data-issue-id={item.issue_id ?? undefined}
