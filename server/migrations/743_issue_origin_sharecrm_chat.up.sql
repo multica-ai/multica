@@ -3,7 +3,7 @@
 -- Older releases used these full ledger keys for the same logical change.
 -- The runner does not delete them, and the files must not come back: a
 -- database that never recorded that exact string would execute them again,
--- and 649/657/661/665/673/674/681/682/683/684/685/686/695/696/697/698/703/704/711/712/732/733
+-- and 649/657/661/665/673/674/681/682/683/684/685/686/695/696/697/698/703/704/711/712/732/733/735/736
 -- are now different migrations.
 --   649_issue_origin_sharecrm_chat / 650_issue_origin_sharecrm_chat_validate
 --   657_issue_origin_sharecrm_chat / 658_issue_origin_sharecrm_chat_validate
@@ -18,6 +18,7 @@
 --   703_issue_origin_sharecrm_chat / 704_issue_origin_sharecrm_chat_validate
 --   711_issue_origin_sharecrm_chat / 712_issue_origin_sharecrm_chat_validate
 --   732_issue_origin_sharecrm_chat / 733_issue_origin_sharecrm_chat_validate
+--   735_issue_origin_sharecrm_chat / 736_issue_origin_sharecrm_chat_validate
 --
 -- 681/682 on upstream are project_folder and its name index. 683/684 are
 -- entitlement_feature_attempt and its scope index. 685-694 are the docs
@@ -36,15 +37,18 @@
 -- account requests. 729/730 move the remote app connection index to
 -- workspace scope. 731 is skill_revision. 732-734 are
 -- comment_idempotency_receipt, uq_comment_idempotency_receipt_key, and
--- idx_comment_idempotency_receipt_created. Those filenames are not the
--- previous ShareCRM pair 732_issue_origin_sharecrm_chat /
--- 733_issue_origin_sharecrm_chat_validate.
+-- idx_comment_idempotency_receipt_created. 735-742 add squad attribution on
+-- task_usage_hourly: squad_id columns, the squad unique indexes, the
+-- workspace/time index, the rollup pipeline, the legacy key drops, and the
+-- rollback merge. Those filenames are not the previous ShareCRM pairs
+-- 732_issue_origin_sharecrm_chat / 733_issue_origin_sharecrm_chat_validate
+-- or 735_issue_origin_sharecrm_chat / 736_issue_origin_sharecrm_chat_validate.
 -- A database that already recorded the ShareCRM filenames above still runs
--- this file, and it still runs 732-734: the ledger key is the whole
+-- this file, and it still runs 732-742: the ledger key is the whole
 -- filename, not the numeric prefix.
 -- When weixin_chat and sharecrm_chat are already allowed, including when a
 -- retired widen left the check NOT VALID, this file returns without another
--- catalog swap. Migration 736 validates.
+-- catalog swap. Migration 744 validates.
 --
 -- 667/668 on this fork already union sharecrm_chat in, including on a
 -- database whose 667 committed before that repair existed (668 reads the
