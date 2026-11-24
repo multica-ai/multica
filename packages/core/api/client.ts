@@ -280,6 +280,8 @@ import type {
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
+  SquadBriefsResponse,
+  SquadHandoffMode,
   BillingBalance,
   BillingTransactionsPage,
   BillingBatchesPage,
@@ -446,6 +448,8 @@ import {
   SquadSchema,
   SquadListSchema,
   SquadMemberStatusListResponseSchema,
+  SquadBriefsResponseSchema,
+  EMPTY_SQUAD_BRIEFS,
   SubscribersListSchema,
   TaskMessageListSchema,
   TaskContextReceiptResponseSchema,
@@ -1551,6 +1555,7 @@ export class ApiClient {
   // Issues
   async listIssues(params?: ListIssuesParams): Promise<ListIssuesResponse> {
     const search = new URLSearchParams();
+    if (params?.blocked) search.set("blocked", "true");
     if (params?.limit) search.set("limit", String(params.limit));
     if (params?.offset) search.set("offset", String(params.offset));
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
@@ -5620,7 +5625,7 @@ export class ApiClient {
     }) as Squad;
   }
 
-  async updateSquad(id: string, data: { name?: string; description?: string; instructions?: string; leader_id?: string; avatar_url?: string }): Promise<Squad> {
+  async updateSquad(id: string, data: { name?: string; description?: string; instructions?: string; leader_id?: string; avatar_url?: string; handoff_mode?: SquadHandoffMode }): Promise<Squad> {
     const raw = await this.fetch<unknown>(`/api/squads/${id}`, { method: "PUT", body: JSON.stringify(data) });
     return parseWithFallback(raw, SquadSchema, EMPTY_SQUAD, {
       endpoint: "PUT /api/squads/:id",
@@ -5656,6 +5661,15 @@ export class ApiClient {
     return parseWithFallback(raw, SquadMemberStatusListResponseSchema, EMPTY_SQUAD_MEMBER_STATUS_LIST, {
       endpoint: "GET /api/squads/:id/members/status",
     }) as SquadMemberStatusListResponse;
+  }
+
+  // What each agent of the squad receives as squad context on its runs.
+  // Restricted server-side to the people who can edit the squad.
+  async getSquadBriefs(squadId: string): Promise<SquadBriefsResponse> {
+    const raw = await this.fetch<unknown>(`/api/squads/${squadId}/briefs`);
+    return parseWithFallback(raw, SquadBriefsResponseSchema, EMPTY_SQUAD_BRIEFS, {
+      endpoint: "GET /api/squads/:id/briefs",
+    }) as SquadBriefsResponse;
   }
 
   // Autopilots

@@ -334,7 +334,11 @@ func (h *Handler) ListMyChatWakeups(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	workspaceID, ok := parseUUIDOrBadRequest(w, ctxWorkspaceID(r.Context()), "workspace id")
+	workspaceID := ctxWorkspaceID(r.Context())
+	if !h.requireChatOwnerAccess(w, r, userID, workspaceID) {
+		return
+	}
+	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
 	if !ok {
 		return
 	}
@@ -342,7 +346,7 @@ func (h *Handler) ListMyChatWakeups(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := h.Queries.ListChatWakeupsForSessionOwner(r.Context(), db.ListChatWakeupsForSessionOwnerParams{WorkspaceID: workspaceID, OwnerID: owner})
+	rows, err := h.Queries.ListChatWakeupsForSessionOwner(r.Context(), db.ListChatWakeupsForSessionOwnerParams{WorkspaceID: workspaceUUID, OwnerID: owner})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list chat wakeups")
 		return

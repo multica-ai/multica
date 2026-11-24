@@ -1698,6 +1698,11 @@ export const CommentSubIssueTaskResponseSchema = z.object({
 }).loose();
 
 export const IssueSchema = z.object({
+  blocked_count: z.number().int().nonnegative().optional().catch(undefined),
+  blocked_by: z.array(z.object({
+    id: z.string(), identifier: z.string(), title: z.string(), status: z.string(),
+    via: z.string(), closed: z.boolean(),
+  })).optional().catch(undefined),
   id: z.string(),
   workspace_id: z.string(),
   number: z.number(),
@@ -2973,6 +2978,8 @@ export const SquadSchema = z.object({
   archived_by: z.string().nullable().optional().transform((v) => v ?? null),
   member_count: z.number().default(0),
   member_preview: z.array(SquadMemberPreviewSchema).default([]),
+  // Older backends predate handoff modes; they always routed through the leader.
+  handoff_mode: z.enum(["leader", "direct"]).catch("leader").default("leader"),
 }).loose();
 
 export const SquadListSchema = z.array(SquadSchema);
@@ -2992,6 +2999,7 @@ export const EMPTY_SQUAD: Squad = {
   archived_by: null,
   member_count: 0,
   member_preview: [],
+  handoff_mode: "leader",
 };
 
 // Squad member status — backs the Squad detail page's Members tab. status
@@ -3018,6 +3026,18 @@ export const SquadMemberStatusListResponseSchema = z.object({
 }).loose();
 
 export const EMPTY_SQUAD_MEMBER_STATUS_LIST = { members: [] };
+
+export const SquadBriefsResponseSchema = z.object({
+  handoff_mode: z.enum(["leader", "direct"]).catch("leader").default("leader"),
+  briefs: z.array(z.object({
+    member_type: z.string(),
+    member_id: z.string(),
+    is_leader: z.boolean().default(false),
+    brief: z.string().default(""),
+  }).loose()).default([]),
+}).loose();
+
+export const EMPTY_SQUAD_BRIEFS = { handoff_mode: "leader" as const, briefs: [] };
 
 // Structured error body — POST /api/workspaces/:wsId/issues 409 conflict.
 //

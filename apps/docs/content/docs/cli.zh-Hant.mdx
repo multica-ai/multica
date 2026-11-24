@@ -539,7 +539,8 @@ CLI 配置檔案包含可代表你訪問 Multica 的令牌。不要提交到倉�
 | | `search <query>` | 搜尋 skill | |
 | | `files list/upsert/delete <skill-id>` | 管理 skill 內的檔案 | `list`：`--with-content`；`upsert` / `delete`：`--base-revision`（內容已變更時回傳 HTTP 409 拒絕覆寫） |
 | | `label list/add/remove <skill-id>` | 管理 skill 上的標籤 | `add` / `remove`：`<label-id>` 可使用完整 UUID 或短字首 |
-| `squad` | `list/get/create/update/delete` | 管理小隊（`delete` 為歸檔） | |
+| `squad` | `list/get/create/update/delete` | 管理小隊（`delete` 為歸檔） | `update`：`--name`、`--description`、`--instructions`、`--leader`、`--avatar-url`、`--handoff-mode`（`leader` 或 `direct`，見[協作方式](/squads#協作方式)） |
+| | `briefs <squad>` | 查看每個 AI 代理成員實際收到的小隊內容；需要有管理該小隊的權限 | `--agent`（名稱或 ID） |
 | | `member list/add/set-role/remove` | 管理小隊成員 | |
 | | `activity <issue-id> <outcome>` | 記錄隊長評價 | |
 | `chat` | `history`、`thread [id]` | 讀取 AI 代理當前正在處理的外部聊天會話 | `--limit`、`--before` |

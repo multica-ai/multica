@@ -1442,6 +1442,40 @@ func TestAntigravityBackendSumsCompletedStepsWhenCancelled(t *testing.T) {
 	}
 }
 
+// A cancelled run never reaches the terminal Result the daemon reads the
+// session from, so the conversation id must be announced as soon as agy names
+// it (#11316).
+func TestAntigravityBackendAnnouncesConversationBeforeCancel(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "agy")
+	writeTestExecutable(t, fakePath, []byte(fakeAgyCancelledStreamJSONScript()))
+	backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
+	if err != nil {
+		t.Fatalf("new antigravity backend: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var announced []string
+	for msg := range session.Messages {
+		if msg.Type == MessageStatus && msg.SessionID != "" {
+			announced = append(announced, msg.SessionID)
+		}
+		if msg.Type == MessageText && msg.Content == "working" {
+			cancel()
+		}
+	}
+	<-session.Result
+	want := []string{"27a6d8f2-8523-46fc-8fc9-87e630cbe295"}
+	if !slices.Equal(announced, want) {
+		t.Fatalf("announced session ids = %q, want %q (once, before the cancel)", announced, want)
+	}
+}
+
 func TestAntigravityCurrentTurnRecovery(t *testing.T) {
 	t.Parallel()
 	step := func(index int, kind, state, text string) string {

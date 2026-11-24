@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useMemo, useState, type CSSProperties } from "react";
-import { Bot, ChevronDown, ChevronRight, EyeOff, Trash2 } from "@multica/ui/icons";
+import { ChevronDown, ChevronRight, EyeOff, Trash2 } from "@multica/ui/icons";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -14,7 +14,6 @@ import {
   isSyntheticAgentRow,
   isSyntheticSquadRow,
   RESTRICTED_AGENTS_ROW_ID,
-  STANDALONE_SQUAD_ROW_ID,
   type AgentDashboardRow,
   type SquadDashboardRow,
 } from "../utils";
@@ -113,17 +112,9 @@ export function Leaderboard({
     return rows.toSorted((a, b) => metric(b) - metric(a));
   }, [rows, sortBy]);
 
-  // Keep real squads ranked at the top by the active metric and pin the
-  // standalone (non-squad) reconciliation bucket at the bottom so the reader
-  // compares squads cleanly while all rows still sum to 100% of top KPIs.
   const sortedSquadRows = useMemo(() => {
     const metric = SORT_METRIC[sortBy];
-    return squadRows.toSorted((a, b) => {
-      const aStandalone = a.squadId === STANDALONE_SQUAD_ROW_ID ? 1 : 0;
-      const bStandalone = b.squadId === STANDALONE_SQUAD_ROW_ID ? 1 : 0;
-      if (aStandalone !== bStandalone) return aStandalone - bStandalone;
-      return metric(b) - metric(a);
-    });
+    return squadRows.toSorted((a, b) => metric(b) - metric(a));
   }, [squadRows, sortBy]);
 
   const activeRows = effectiveGroupBy === "squad" ? sortedSquadRows : sortedRows;
@@ -148,11 +139,6 @@ export function Leaderboard({
 
   const namedSquadCount = useMemo(
     () => squadRows.filter((r) => !isSyntheticSquadRow(r.squadId)).length,
-    [squadRows],
-  );
-
-  const hasStandaloneSquadRow = useMemo(
-    () => squadRows.some((r) => r.squadId === STANDALONE_SQUAD_ROW_ID),
     [squadRows],
   );
 
@@ -352,13 +338,9 @@ export function Leaderboard({
           />
           <span className="text-caption text-muted-foreground">
             {effectiveGroupBy === "squad"
-              ? hasStandaloneSquadRow
-                ? t(($) => $.leaderboard.squad_caption_with_standalone, {
-                    count: namedSquadCount,
-                  })
-                : t(($) => $.leaderboard.squad_caption, {
-                    count: namedSquadCount,
-                  })
+              ? t(($) => $.leaderboard.squad_caption, {
+                  count: namedSquadCount,
+                })
               : deletedAgentCount > 0
                 ? t(($) => $.leaderboard.caption_with_deleted, {
                     count: namedAgentCount,
@@ -422,10 +404,11 @@ export function Leaderboard({
                     }),
                   )
                 : visibleSquadRows.map((row) => {
-                    const isStandalone = row.squadId === STANDALONE_SQUAD_ROW_ID;
                     const isDeleted = row.squadId === DELETED_SQUADS_ROW_ID;
-                    const isSynthetic = isStandalone || isDeleted;
                     const squad = squads.find((s) => s.id === row.squadId);
+                    const squadName = isDeleted
+                      ? t(($) => $.leaderboard.deleted_squads)
+                      : squad?.name ?? row.squadId;
                     const value = SORT_METRIC[sortBy](row);
                     const pct = maxValue > 0 ? (value / maxValue) * 100 : 0;
                     const usageUnavailable = !row.hasUsageTotals;
@@ -452,6 +435,11 @@ export function Leaderboard({
                     const namedMembersCount = row.members.filter(
                       (m) => !isSyntheticAgentRow(m.agentId),
                     ).length;
+                    const subtitleText =
+                      coverageText ??
+                      t(($) => $.leaderboard.squad_members_count, {
+                        count: namedMembersCount,
+                      });
 
                     return (
                       <Fragment key={row.squadId}>
@@ -466,11 +454,7 @@ export function Leaderboard({
                                 onClick={() => toggleSquad(row.squadId)}
                                 aria-expanded={expanded}
                                 aria-label={t(($) => $.leaderboard.toggle_squad_members, {
-                                  name: isStandalone
-                                    ? t(($) => $.leaderboard.standalone_agents)
-                                    : isDeleted
-                                      ? t(($) => $.leaderboard.deleted_squads)
-                                      : squad?.name ?? row.squadId,
+                                  name: squadName,
                                 })}
                                 className="flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                               >
@@ -483,13 +467,9 @@ export function Leaderboard({
                             ) : (
                               <span className="size-5 shrink-0" aria-hidden="true" />
                             )}
-                            {isSynthetic ? (
+                            {isDeleted ? (
                               <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                                {isStandalone ? (
-                                  <Bot className="h-3 w-3" />
-                                ) : (
-                                  <Trash2 className="h-3 w-3" />
-                                )}
+                                <Trash2 className="h-3 w-3" />
                               </span>
                             ) : (
                               <ActorAvatar
@@ -504,34 +484,23 @@ export function Leaderboard({
                                 type="button"
                                 onClick={() => canExpand && toggleSquad(row.squadId)}
                                 className={`block max-w-full truncate text-left text-body font-medium ${
-                                  isSynthetic
+                                  isDeleted
                                     ? "italic text-muted-foreground"
                                     : "text-foreground"
                                 } ${canExpand ? "cursor-pointer hover:underline" : "cursor-default"}`}
                               >
-                                {isStandalone
-                                  ? t(($) => $.leaderboard.standalone_agents)
-                                  : isDeleted
-                                    ? t(($) => $.leaderboard.deleted_squads)
-                                    : squad?.name ?? row.squadId}
+                                {squadName}
                               </button>
-                              <span className="block truncate text-caption text-muted-foreground">
-                                {coverageText ??
-                                  (isStandalone
-                                    ? t(($) => $.leaderboard.standalone_agents_hint, {
-                                        count: namedMembersCount,
-                                      })
-                                    : t(($) => $.leaderboard.squad_members_count, {
-                                        count: namedMembersCount,
-                                      }))}
-                              </span>
+                              <TruncatedTooltip content={subtitleText}>
+                                <span className="block truncate text-caption text-muted-foreground">
+                                  {subtitleText}
+                                </span>
+                              </TruncatedTooltip>
                             </span>
                           </div>
                           <div className="relative h-2 overflow-hidden rounded-full bg-muted">
                             <div
-                              className={`h-full rounded-full transition-[width] duration-300 ease-out ${
-                                isStandalone ? "bg-chart-4" : "bg-chart-1"
-                              }`}
+                              className="h-full rounded-full bg-chart-1 transition-[width] duration-300 ease-out"
                               style={{ width: `${pct}%` }}
                             />
                           </div>

@@ -565,7 +565,8 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | | `search <query>` | Search skills | |
 | | `files list/upsert/delete <skill-id>` | Manage the files inside a skill | `list`: `--with-content`; `upsert` / `delete`: `--base-revision` (rejects stale overwrites with HTTP 409) |
 | | `label list/add/remove <skill-id>` | Manage labels on a skill | `add` / `remove`: `<label-id>` accepts a full UUID or short prefix |
-| `squad` | `list/get/create/update/delete` | Manage squads (`delete` archives) | |
+| `squad` | `list/get/create/update/delete` | Manage squads (`delete` archives) | `update`: `--name`, `--description`, `--instructions`, `--leader`, `--avatar-url`, `--handoff-mode` (`leader` or `direct`; see [Collaboration mode](/squads#collaboration-mode)) |
+| | `briefs <squad>` | Show the squad context each agent member receives; requires permission to manage the squad | `--agent` (name or ID) |
 | | `member list/add/set-role/remove` | Manage squad members | |
 | | `activity <issue-id> <outcome>` | Record a leader evaluation | |
 | `chat` | `history`, `thread [id]` | Read the external chat session an agent is currently handling | `--limit`, `--before` |
