@@ -1,5 +1,4 @@
 import { createEnDict } from "./en";
-import { createIdDict } from "./id";
 import { createJaDict } from "./ja";
 import { createKoDict } from "./ko";
 import { createZhDict } from "./zh";
@@ -18,7 +17,6 @@ const dictionaryFactories: Record<
   ja: createJaDict,
   ko: createKoDict,
   zh: createZhDict,
-  id: createIdDict,
 };
 
 // Locales without their own landing copy (e.g. French) reuse another dictionary.
