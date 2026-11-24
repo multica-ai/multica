@@ -1001,6 +1001,43 @@ func TestBuildPromptDefaultScansRootsFirst(t *testing.T) {
 	}
 }
 
+// TestBuildPromptOpeningReadsShareATurn pins MUL-10028: the per-turn issue
+// read on the assignment, comment and wakeup paths asks for the issue read in
+// the same turn as the comment reads instead of ordering it before them, which
+// is what the brief's batched-read rule requires (MUL-9919).
+func TestBuildPromptOpeningReadsShareATurn(t *testing.T) {
+	cases := map[string]struct {
+		task Task
+		want string
+	}{
+		"assignment": {
+			task: Task{IssueID: "issue-1"},
+			want: "Read the issue with `multica issue get issue-1 --output json` in the same turn as the comment scan below (workflow step 2), then complete the task.",
+		},
+		"comment": {
+			task: Task{IssueID: "issue-1", TriggerCommentID: "c1", TriggerCommentContent: "please look"},
+			want: "Read the issue with `multica issue get issue-1 --output json` in the same turn as any comment reads below (workflow step 2).",
+		},
+		"wakeup": {
+			task: Task{IssueID: "issue-1", WakeupID: "w1", HandoffNote: "check CI"},
+			want: "Read the issue (`multica issue get issue-1 --output json`) and current run/comment state together in one turn.",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			out := BuildPrompt(tc.task, "claude")
+			if !strings.Contains(out, tc.want) {
+				t.Errorf("prompt missing %q\n--- output ---\n%s", tc.want, out)
+			}
+			for _, stale := range []string{"Start by running `multica issue get", "then complete it", "then decide how to proceed"} {
+				if strings.Contains(out, stale) {
+					t.Errorf("prompt still orders the issue read before the comment reads (%q)\n--- output ---\n%s", stale, out)
+				}
+			}
+		})
+	}
+}
+
 // TestBuildPromptNonSquadLeaderNoRule verifies that non-squad-leader agents
 // do NOT get the squad leader no_action rule injected.
 func TestBuildPromptNonSquadLeaderNoRule(t *testing.T) {
@@ -1116,6 +1153,9 @@ func TestBuildPromptColdStartThreadRead(t *testing.T) {
 	// command restating the UUID (MUL-5721 OPT-1).
 	if !strings.Contains(out, "`--roots-only --summary` in place of `--thread ... --tail 30`") {
 		t.Errorf("cold start must hand over the roots scan as the wide read, got:\n%s", out)
+	}
+	if !strings.Contains(out, "The scan that workflow step 2 requires is the same command") {
+		t.Errorf("cold hint lost its scan lead-in (MUL-10028), got:\n%s", out)
 	}
 	if strings.Contains(out, "Need cross-thread background") {
 		t.Errorf("cold hint must not make the scan optional (MUL-6984), got:\n%s", out)
@@ -2107,7 +2147,7 @@ func TestBuildPromptIssueUnchangedDropsTheIssueRead(t *testing.T) {
 	task.IssueAssigneeID = "agent-7"
 	out := BuildPrompt(task, "claude")
 
-	if strings.Contains(out, "Start by running `multica issue get") {
+	if strings.Contains(out, "Read the issue with `multica issue get") {
 		t.Errorf("an unchanged issue must not carry the unconditional read imperative, got:\n%s", out)
 	}
 	for _, want := range []string{
@@ -2181,7 +2221,7 @@ func TestBuildPromptIssueStateFallsBackToTheRead(t *testing.T) {
 			task.IssueStatus = "todo"
 			mutate(&task)
 			out := BuildPrompt(task, "claude")
-			if !strings.Contains(out, "Start by running `multica issue get "+issueID+" --output json` to understand your task, then decide how to proceed.") {
+			if !strings.Contains(out, "Read the issue with `multica issue get "+issueID+" --output json` in the same turn as any comment reads below (workflow step 2).") {
 				t.Errorf("expected the unconditional issue read, got:\n%s", out)
 			}
 			if strings.Contains(out, "The issue is unchanged") {
@@ -2231,8 +2271,8 @@ func TestPromptPointsSubIssueRunsAtTheirParent(t *testing.T) {
 	}
 	full := []string{
 		"this issue's description is only the part handed to you",
-		"Before starting work, read the parent",
-		"`multica issue children parent-uuid --output json`",
+		"Read the parent in the same turn as the reads above: `multica issue get parent-uuid --output json`, `multica issue comment list parent-uuid --roots-only --summary --compact --output json`, and `multica issue children parent-uuid --output json`",
+		"Then expand the parent threads that shaped this sub-issue.",
 		"If they conflict, ask on this issue instead of picking one.",
 	}
 
@@ -2250,19 +2290,25 @@ func TestPromptPointsSubIssueRunsAtTheirParent(t *testing.T) {
 	}
 
 	resumed := BuildPrompt(Task{IssueID: "issue-1", PriorSessionID: "s1", ParentIssue: parent}, "claude")
-	for _, want := range append([]string{header, "If you have not read the parent in this session"}, readCmds...) {
+	for _, want := range append([]string{header, "If you have not read the parent in this session, read it in the same turn as the reads above"}, readCmds...) {
 		if !strings.Contains(resumed, want) {
 			t.Errorf("resumed prompt lacks %q:\n%s", want, resumed)
 		}
 	}
-	if strings.Contains(resumed, "Before starting work, read the parent") {
+	// MUL-10028: neither form may order the parent reads one after another.
+	for name, out := range map[string]string{"full": BuildPrompt(decoded, "claude"), "resumed": resumed} {
+		if strings.Contains(out, "then scan its threads") || strings.Contains(out, "--output json`, then `multica issue comment list parent-uuid") {
+			t.Errorf("%s parent block orders the parent reads:\n%s", name, out)
+		}
+	}
+	if strings.Contains(resumed, "Read the parent in the same turn") {
 		t.Errorf("resumed prompt repeats the full parent instruction:\n%s", resumed)
 	}
 
 	// A resume the server could only serve from an older session reconstructs,
 	// so it gets the full instruction.
 	fallback := BuildPrompt(Task{IssueID: "issue-1", PriorSessionID: "s0", PriorSessionResumeUnavailable: true, ParentIssue: parent}, "claude")
-	if !strings.Contains(fallback, "Before starting work, read the parent") {
+	if !strings.Contains(fallback, "Read the parent in the same turn") {
 		t.Errorf("fallback-session prompt lacks the full parent instruction:\n%s", fallback)
 	}
 

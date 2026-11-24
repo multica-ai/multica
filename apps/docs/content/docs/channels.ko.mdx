@@ -18,6 +18,7 @@ import { ChannelChatDemo } from "@/components/demos/channel-chat-demo";
 | 에이전트와 DM | 지원 | 지원 | 지원 | 지원 | 지원 | QR 코드를 스캔한 계정만 지원 |
 | 그룹 채팅 또는 채널 | Bot을 @멘션하면 트리거 | Bot을 @멘션하면 트리거 | Bot을 @멘션하면 트리거 | Bot을 @멘션하면 트리거 | Bot을 @멘션하거나 Bot에 답장하면 트리거 | 지원하지 않음 |
 | 태스크 만들기 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` slash 명령으로 에이전트가 설명을 정리한 뒤 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 |
+| 명령 확인 | `/help` | `@Multica /help` | `/help` | `/help` | `/help` | `/help` |
 | 새 Chat 시작 | `/new [메시지]` | DM: `/new [메시지]`, 채널/thread: `@Multica /new [메시지]` | `/new [메시지]` | `/new [메시지]` | `/new [메시지]` | `/new [메시지]` |
 | 현재 Chat 컨텍스트 지우기 | `/clear [메시지]` | DM: `/clear [메시지]`, 채널/thread: `@Multica /clear [메시지]` | `/clear [메시지]` | `/clear [메시지]` | `/clear [메시지]` | `/clear [메시지]` |
 | 연결 방식 | 플랫폼 장기 연결 | Socket Mode | Stream 모드 | 플랫폼 장기 연결 | `getUpdates` long polling | iLink 롱 폴링 |
@@ -55,6 +56,8 @@ Bot을 @멘션하지 않은 채널 메시지는 에이전트를 트리거하지 
 <ChannelChatDemo />
 
 ## 대화 컨텍스트 제어
+
+DM에서 `/help`(Slack에서는 `@Multica /help`)를 보내거나 그룹 또는 채널에서 Bot을 @멘션하고 `/help`를 보내면 사용 가능한 명령을 확인할 수 있습니다. `/help`, `/new [메시지]`, `/clear [메시지]`, `/issue <제목>`(다음 줄부터는 설명)입니다. WeCom과 WeChat(DM만)에서도 지원합니다. Multica는 Chat이나 실행을 만들거나 현재 Chat을 변경하지 않고 직접 답합니다. Slack의 `@Multica /help`에는 메시지 명령이 표시됩니다. 네이티브 `/issue <설명>`은 에이전트가 설명으로 태스크를 만드는 별도 흐름입니다.
 
 `/new`은 새 Multica Chat을 만들고 해당 외부 대화의 후속 메시지를 새 Chat으로 라우팅합니다. `/new <메시지>`를 보내면 해당 메시지가 첫 번째 대화가 됩니다. 이전 Chat은 Multica에 저장된 상태로 계속 사용할 수 있습니다.
 

@@ -96,7 +96,7 @@ exit 1
 	d.setAgentVersion("opencode", "1.18.31")
 	task := Task{ID: "task-shutdown", WorkspaceID: "ws-shutdown", RuntimeID: "rt-shutdown", IssueID: "issue-shutdown", AgentID: "agent-shutdown", AuthToken: "mat_test_shutdown", Agent: &AgentData{ID: "agent-shutdown", Name: "shutdown fixture", CustomEnv: map[string]string{"SHUTDOWN_GATE": gate}}}
 	done := make(chan struct{})
-	go func() { defer close(done); d.handleTask(ctx, task, 0) }()
+	go func() { defer close(done); d.handleTask(ctx, task, newTestTaskSlot(0)) }()
 	select {
 	case <-ready:
 	case <-time.After(10 * time.Second):

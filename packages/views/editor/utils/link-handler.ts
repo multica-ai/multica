@@ -25,6 +25,7 @@ import type { LinkClickIntent } from "../../navigation/click-intent";
  * as intentional. Only "/issues/..." style paths get auto-prefixed.
  */
 const WORKSPACE_ROUTE_SEGMENTS = new Set([
+  "docs",
   "usage",
   "issues",
   "projects",
@@ -35,6 +36,7 @@ const WORKSPACE_ROUTE_SEGMENTS = new Set([
   "my-issues",
   "runtimes",
   "skills",
+  "apps",
   "settings",
 ]);
 
@@ -72,9 +74,9 @@ export function toInternalAppPath(
   return `${target.pathname}${target.search}${target.hash}`;
 }
 
-/** An in-app entity page addressed by a link — the two kinds that have a chip. */
+/** An in-app entity page addressed by a link — the kinds that have a chip. */
 export interface WorkspaceEntityRef {
-  kind: "issue" | "project";
+  kind: "issue" | "project" | "doc";
   /**
    * Entity id, decoded from the path. A UUID for either kind, or — for an
    * issue only — a bare identifier (`MUL-123`). Callers dispatch on the shape
@@ -95,6 +97,7 @@ export interface WorkspaceEntityRef {
 const ENTITY_ROUTE_SEGMENTS: Record<string, WorkspaceEntityRef["kind"]> = {
   issues: "issue",
   projects: "project",
+  docs: "doc",
 };
 
 const UUID_RE =

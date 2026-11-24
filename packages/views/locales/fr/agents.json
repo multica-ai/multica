@@ -106,7 +106,6 @@
     "archive": "Archiver",
     "set_access": "Définir la portée d'accès",
     "set_access_dialog_title": "Définir la portée d'accès",
-    "set_access_applies_to": "S'applique à {{count}} agents.",
     "set_access_skipped": "{{count}} ignorés (dont vous n'êtes pas propriétaire).",
     "set_access_dialog_confirm": "Appliquer",
     "set_access_bulk_partial": "Appliqué à {{succeeded}} ; {{failed}} en échec (conservés dans leur état actuel).",
@@ -133,7 +132,9 @@
     "archive_dialog_title": "Archiver « {{name}} » ?",
     "archive_dialog_description": "L'agent ne pourra plus être assigné ni mentionné, et ses exécutions actives seront annulées. Tout l'historique sera conservé et vous pourrez le restaurer plus tard.",
     "archive_dialog_cancel": "Annuler",
-    "archive_dialog_confirm": "Archiver"
+    "archive_dialog_confirm": "Archiver",
+    "set_access_applies_to_one": "S'applique à {{count}} agent.",
+    "set_access_applies_to_other": "S'applique à {{count}} agents."
   },
   "detail": {
     "back_to_agents_full": "Retour aux agents",
@@ -149,7 +150,7 @@
     "bind_runtime": "Associer un runtime",
     "restore": "Restaurer",
     "archive_dialog_title": "Archiver l'agent ?",
-    "archive_dialog_description": "« {{name}} » sera archivé. Il ne pourra plus être assigné ni mentionné, mais tout l'historique est conservé. Vous pourrez le restaurer plus tard.",
+    "archive_dialog_description": "« {{name}} » sera archivé et ne pourra plus être assigné ni mentionné. Les exécutions en cours seront annulées, mais tout l'historique est conservé. Vous pourrez le restaurer plus tard.",
     "archive_dialog_cancel": "Annuler",
     "archive_dialog_confirm": "Archiver",
     "more_archive": "Archiver l'agent",
@@ -222,7 +223,14 @@
     "status": "Statut",
     "runs_7d": "Exécutions (7 j)",
     "edit_access_aria": "Accès : {{value}}. Modifier l'accès",
-    "all_settings": "Tous les paramètres"
+    "all_settings": "Tous les paramètres",
+    "apps": "Apps",
+    "apps_needs_account_one": "{{count}} requiert votre compte",
+    "apps_needs_account_other": "{{count}} requièrent votre compte",
+    "apps_count_one": "{{count}} app",
+    "apps_count_other": "{{count}} apps",
+    "apps_none": "Aucune",
+    "apps_aria": "Apps : {{value}}. Afficher les apps"
   },
   "pickers": {
     "concurrency_range": "Exécutions simultanées maximales ({{min}}–{{max}})",
@@ -253,7 +261,7 @@
     "thinking_default": "Suivre la configuration du CLI",
     "thinking_tooltip": "Réflexion · {{value}}",
     "thinking_clear": "Suivre la configuration du CLI",
-    "thinking_clear_title": "Effacer la surcharge et laisser la configuration locale du CLI (claude/codex) décider du niveau de raisonnement",
+    "thinking_clear_title": "Effacer le remplacement et utiliser le paramètre de raisonnement par défaut du runtime",
     "service_tier_default": "Valeur par défaut du runtime",
     "service_tier_standard": "Standard",
     "service_tier_standard_description": "Vitesse et consommation standard",
@@ -341,7 +349,7 @@
       "runtime_online": "Runtime en ligne",
       "runtime_offline": "Runtime hors ligne",
       "empty_title": "Que doit faire cet agent ?",
-      "empty_description": "Décrivez ce que cet agent doit faire.",
+      "empty_description": "Décrivez son rôle, son flux de travail ou ses outils — je préparerai une ébauche de configuration pour vous.",
       "prompt_review": "Relire les pull requests du frontend",
       "prompt_research": "Étudier les concurrents et résumer les constats",
       "prompt_assistant": "Aider notre équipe à planifier et rédiger des projets",
@@ -365,8 +373,9 @@
       "discard_confirm": "La conversation et sa configuration sont définitivement supprimées.",
       "discard_title": "Abandonner ce brouillon ?",
       "discard_cancel": "Continuer à modifier",
-      "banner": "Vous avez {{count}} brouillon(s) inachevé(s)",
-      "pick_hint": "Choisissez-en un pour continuer."
+      "pick_hint": "Choisissez-en un pour continuer.",
+      "banner_one": "Vous avez {{count}} brouillon non terminé",
+      "banner_other": "Vous avez {{count}} brouillon(s) inachevé(s)"
     },
     "close": "Fermer",
     "steps": {
@@ -398,7 +407,7 @@
     },
     "runtime_step": {
       "title": "Où cet agent doit-il s'exécuter ?",
-      "search_placeholder": "Rechercher un harness ou une machine",
+      "search_placeholder": "Rechercher des runtimes ou des machines",
       "groups": {
         "machines": "Machines",
         "cloud": "Services cloud"
@@ -406,12 +415,12 @@
       "this_machine": "Cette machine",
       "owner_you": "Vous",
       "custom_badge": "Personnalisé",
-      "web_local_title": "Utilisez les harness de cet ordinateur avec l'application de bureau",
+      "web_local_title": "Utilisez les runtimes de cet ordinateur avec l'application de bureau",
       "download_desktop": "Télécharger l'application de bureau",
-      "harness_count_one": "{{count}} harness",
-      "harness_count_other": "{{count}} harness",
+      "harness_count_one": "{{count}} runtime",
+      "harness_count_other": "{{count}} runtimes",
       "local_starting": "Démarrage du démon local…",
-      "local_empty_title": "Aucun harness trouvé sur cette machine",
+      "local_empty_title": "Aucun CLI d'agent trouvé sur cette machine",
       "local_empty_hint": "Installez une CLI comme Claude Code ou Codex et elle apparaîtra ici.",
       "more_harnesses_one": "{{count}} de plus : {{names}}",
       "more_harnesses_other": "{{count}} de plus : {{names}}",
@@ -444,9 +453,9 @@
     "description_label": "Description",
     "description_placeholder": "Que fait cet agent ?",
     "access": {
-      "private_title": "Privé",
+      "private_title": "Moi uniquement",
       "private_desc": "Vous seul pouvez exécuter cet agent",
-      "public_title": "Public",
+      "public_title": "Partagé",
       "public_desc": "Choisissez qui peut exécuter cet agent",
       "public_workspace_option": "Tout le monde dans cet espace de travail",
       "public_members_group": "Personnes précises",
@@ -519,8 +528,8 @@
       "discard": "Annuler les modifications"
     },
     "instructions": {
-      "intro": "Définissez le prompt système utilisé à chaque exécution. Markdown est pris en charge.",
-      "system_prompt_label": "Invite système",
+      "intro": "Indiquez à cet agent comment travailler à chaque exécution. Markdown est pris en charge.",
+      "system_prompt_label": "Instructions",
       "placeholder": "Définissez le rôle, l'expertise et la façon de travailler de cet agent.\n\n# Exemple\nVous êtes ingénieur frontend spécialisé en React et TypeScript.\n\n## Façon de travailler\n- Rédiger des PR courtes et ciblées — un commit par changement logique\n- Préférer la composition à l'héritage\n- Toujours ajouter des tests unitaires pour les nouveaux composants\n\n## Contraintes\n- Ne pas modifier les types de shared/ sans accord explicite\n- Suivre les motifs de composants existants dans features/",
       "system_layer_label": "Maintenu par Multica",
       "system_layer_hint": "Mis à jour à chaque version de Multica. Vous ne pouvez pas le modifier, et vos notes ci-dessous ne sont jamais écrasées.",
@@ -604,7 +613,7 @@
       "workspace_none_assigned": "Aucun serveur MCP de l'espace de travail n'est encore assigné à cet agent.",
       "workspace_add_action": "Ajouter depuis l'espace de travail",
       "workspace_loading": "Chargement des serveurs assignés…",
-      "dialog_name_locked": "Le nom ne peut pas être modifié ici — le renommer ajouterait un second serveur et laisserait celui-ci en place. Retirez-le et rajoutez-le plutôt.",
+      "dialog_name_locked": "Le nom du serveur ne peut pas être modifié ici. Utilisez plutôt Renommer depuis le menu du serveur, ou supprimez l'entrée et ajoutez-la à nouveau.",
       "workspace_overridden_badge": "Remplacé",
       "workspace_disabled_badge": "Désactivé",
       "runtime_title": "Hérité du runtime",
@@ -694,7 +703,7 @@
       "model_override_hint": "S'applique à toutes les exécutions prises en charge par cet agent jusqu'à modification ou effacement. Videz ce champ pour utiliser le modèle lié à l'agent OpenClaw sélectionné, sans changer son identité.",
       "model_override_placeholder": "openrouter/@preset/agent-reasoning",
       "mode_local_hint": "Exécuter sur cet ordinateur.",
-      "mode_gateway_hint": "Le daemon compose vers une passerelle OpenClaw. Laissez les champs de point d'accès vides pour les hériter du `~/.openclaw/openclaw.json` de l'hôte du daemon.",
+      "mode_gateway_hint": "Se connecter à une passerelle OpenClaw. Laissez les champs de point de terminaison vides pour les hériter de `~/.openclaw/openclaw.json` sur la machine.",
       "gateway_legend": "Point d'accès de la passerelle",
       "host_label": "Hôte",
       "host_placeholder": "gw.internal",
@@ -704,7 +713,7 @@
       "token_placeholder": "Jeton Bearer émis par la passerelle",
       "token_masked_placeholder": "Enregistré — saisissez une nouvelle valeur pour le renouveler, ou laissez vide pour le conserver",
       "tls_label": "Utiliser TLS",
-      "tls_hint": "Composer en https:// plutôt qu'en http://",
+      "tls_hint": "Se connecter en https:// plutôt qu'en http://",
       "saved_toast": "Configuration de routage enregistrée",
       "save_failed_toast": "Échec de l'enregistrement de la configuration de routage"
     },
@@ -758,7 +767,7 @@
       "status": {
         "queued": "En file d'attente",
         "dispatched": "Envoyée",
-        "waiting_local_directory": "En attente du répertoire",
+        "waiting_local_directory": "En attente du dossier local",
         "running": "En cours",
         "completed": "Réussie",
         "failed": "En échec",
@@ -783,11 +792,13 @@
       "source_issue": "Tâche",
       "source_chat": "Discussion",
       "source_autopilot": "Automatisation",
+      "source_doc": "Document",
       "source_untracked": "Non suivi",
       "source_quick_create": "Création rapide",
       "source_creating_issue": "Création de la tâche",
       "source_chat_session": "Session de discussion",
       "source_autopilot_run": "Exécution d'automatisation",
+      "source_doc_comment": "Commentaire de document",
       "issue_short_fallback": "Tâche {{prefix}}…",
       "triggered_by": "Déclenché par",
       "open_issue_aria": "Ouvrir la tâche",
@@ -805,14 +816,10 @@
       "loading": "Chargement des apps…",
       "load_failed": "Impossible de charger les apps de cet agent.",
       "empty": "Aucune app connectée disponible.",
-      "level": "Niveau",
-      "team_connected": "Compte d'équipe connecté",
-      "team_missing": "Compte d'équipe non connecté",
-      "personal_connected": "Votre compte est connecté",
-      "personal_missing": "Vous n'avez pas connecté cette app",
+      "level": "Portée du compte",
       "team_admin_only": "Seuls les admins de l'espace peuvent donner un compte d'équipe à un agent.",
       "team_shared_warning": "Toute personne pouvant exécuter cet agent peut utiliser ce compte d’équipe par son intermédiaire.",
-      "manage_link": "Gérer les comptes dans Paramètres → Applications connectées",
+      "manage_link": "Gérer les comptes dans Apps → Comptes",
       "save_failed_toast": "Échec de l'enregistrement, veuillez réessayer",
       "team_help": "Compte partagé de l’espace de travail, connecté par les administrateurs.",
       "personal_help": "Chaque exécution utilise le compte de la personne qui la déclenche. Chacun doit connecter son compte.",
@@ -831,11 +838,11 @@
   },
   "visibility": {
     "private": {
-      "label": "Personnel",
-      "tooltip": "Personnel · vous seul et les administrateurs de l'espace de travail pouvez utiliser cet agent"
+      "label": "Moi uniquement",
+      "tooltip": "Privé · seuls le propriétaire et les personnes qu'il autorise peuvent exécuter cet agent"
     },
     "workspace": {
-      "label": "Espace de travail",
+      "label": "Tout l'espace de travail",
       "tooltip": "Espace de travail · tout le monde dans cet espace de travail peut utiliser cet agent"
     }
   },
@@ -849,7 +856,6 @@
       "specific_people": "Personnes précises",
       "owner_only": "Propriétaire uniquement"
     },
-    "trigger_members_count": "{{count}} personnes",
     "trigger_members_empty": "Personnes précises",
     "trigger_team": "Équipe",
     "private_title": "Moi uniquement",
@@ -860,7 +866,7 @@
     "workspace_title": "Tout l'espace de travail",
     "workspace_desc": "Tous les membres de l'espace de travail peuvent exécuter cet agent",
     "members_title": "Personnes précises",
-    "members_desc": "Seules les personnes que vous choisissez peuvent exécuter cet agent",
+    "members_desc": "Vous et les personnes que vous choisissez pouvez exécuter cet agent",
     "team_title": "Public pour l'équipe",
     "team_desc": "Accorder l'accès à toute une équipe",
     "team_coming_soon": "Bientôt disponible",
@@ -868,11 +874,13 @@
     "public_group": "Accès public",
     "owner_only_readonly": "Seul le propriétaire de l'agent peut modifier qui peut l'exécuter.",
     "members_empty": "Aucun membre de l'espace de travail à choisir",
-    "composio_switch_hint": "Attention — cet agent a des applications Composio activées. Le partager permet à toute personne y ayant accès d'utiliser ces applications via cet agent."
+    "composio_switch_hint": "Attention : cet agent dispose d'applications connectées activées. Le partager permet à toute personne y ayant accès d'utiliser ces applications via cet agent.",
+    "trigger_members_count_one": "{{count}} personne",
+    "trigger_members_count_other": "{{count}} personnes"
   },
   "profile_card": {
     "unavailable": "Agent indisponible",
-    "detail_link": "Détail →",
+    "detail_link": "Voir les détails →",
     "runtime_label": "Runtime",
     "skills_label": "Skills",
     "owner_label": "Propriétaire",
@@ -919,6 +927,7 @@
     "trigger_retry": "Relance",
     "trigger_chat": "Depuis une discussion",
     "trigger_quick_create": "Création rapide",
+    "trigger_doc_comment": "Depuis un commentaire de document",
     "trigger_direct": "Assignation directe",
     "run_info": "Détails de l'exécution",
     "details_runtime": "Runtime",
@@ -1046,16 +1055,17 @@
       "agent_error_context_overflow": "Fenêtre de contexte dépassée",
       "agent_error_missing_config": "Clé API ou configuration manquante",
       "agent_error_model_not_found_or_unavailable": "Modèle indisponible",
-      "agent_error_runtime_version_unsupported": "Version du CLI d'exécution non prise en charge",
-      "agent_error_runtime_missing_executable": "CLI d'exécution non installé",
+      "agent_error_runtime_version_unsupported": "Version du CLI de l'agent non prise en charge",
+      "agent_error_runtime_missing_executable": "CLI de l'agent non installé",
       "agent_error_unknown": "Erreur d'exécution de l'agent",
-      "agent_fallback_message": "L'agent a renvoyé un message de repli",
+      "agent_fallback_message": "L'agent n'a pas pu produire de réponse valide",
       "codex_resume_oversized": "Session trop volumineuse pour être reprise",
       "idle_watchdog": "Agent arrêté après une période d'inactivité",
       "local_directory_error": "Erreur de répertoire local",
+      "local_directory_missing": "Le dossier local du projet n'existe plus",
       "cancelled": "Annulée par le système",
       "agent_error": "Erreur d'exécution de l'agent",
-      "codex_semantic_inactivity": "Délai d'inactivité sémantique de Codex dépassé",
+      "codex_semantic_inactivity": "Codex a cessé de progresser",
       "manual": "Annulée par l'utilisateur",
       "user_cancelled": "Annulée par l'utilisateur"
     }
@@ -1073,7 +1083,6 @@
     "section_owner": "Propriétaire",
     "section_model": "Modèle"
   },
-  "actions": {},
   "intro": {
     "title": "Recrutez votre premier coéquipier IA",
     "description": "Les agents prennent des tâches comme un membre de l'équipe : ils travaillent sur votre runtime avec Claude Code, Codex et d'autres outils, puis livrent dans les commentaires.",
@@ -1097,5 +1106,36 @@
       "comment": "Corrigé : sous 375px, les cartes tarifs passent sur une colonne. PR ouverte, tests au vert.",
       "step_read": "Lecture de {{file}}"
     }
+  },
+  "apps_section": {
+    "title": "Apps",
+    "empty": "Cet agent n'utilise encore aucune app.",
+    "connect_yours": "Connecter le vôtre",
+    "reconnect": "Reconnecter",
+    "connect_team": "Connecter un compte d'équipe",
+    "acts_as_team": "Agit avec le compte d'équipe",
+    "acts_as_starter": "Agit avec le compte de la personne qui lance l'exécution"
+  },
+  "add_app_dialog": {
+    "title": "Ajouter une app à {{agent}}",
+    "description": "Une app avec compte personnel utilise le compte de la personne qui lance l'agent : vous pouvez donc l'ajouter sans avoir votre propre compte.",
+    "search_one": "Rechercher parmi {{count}} app",
+    "search_other": "Rechercher parmi {{count}} apps",
+    "search_label": "Rechercher une app",
+    "curated": "Sélection",
+    "recommended_team": "Souvent un compte d'équipe",
+    "recommended_personal": "Souvent un compte personnel",
+    "team_connected": "Compte d'équipe connecté",
+    "add": "Ajouter",
+    "add_aria": "Ajouter {{app}}",
+    "empty": "Aucune app ne correspond.",
+    "load_failed": "Impossible de charger les apps.",
+    "added_toast": "{{app}} ajoutée à {{agent}}."
+  },
+  "app_requests": {
+    "title_adds_app": "{{agent}} veut utiliser {{app}}",
+    "new_app": "Nouvelle app pour cet agent",
+    "adds_app_note": "Répondre ajoute {{app}} à {{agent}} pour les prochaines exécutions.",
+    "add_to_agent": "Ajouter {{app}} à {{agent}}"
   }
 }

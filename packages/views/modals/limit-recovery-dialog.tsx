@@ -7,7 +7,12 @@ import {
   useCreateWorkspaceSubscriptionPortal,
   workspaceSubscriptionSummaryOptions,
 } from "@multica/core/billing";
-import { resolveBillingRecovery } from "@multica/core/billing/recovery";
+import {
+  autopilotQuotaAdminAsk,
+  canUpgradeToBusinessFromAddon,
+  resolveBillingRecovery,
+  type AutopilotQuotaAdminAsk,
+} from "@multica/core/billing/recovery";
 import { useFeatureEnabled } from "@multica/core/config";
 import { BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG } from "@multica/core/feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -26,6 +31,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
+import { AutopilotAddonDialog } from "../billing/autopilot-addon-dialog";
 import { useT } from "../i18n";
 import { useNavigation } from "../navigation";
 import { openExternal } from "../platform";
@@ -75,6 +81,7 @@ export function LimitRecoveryDialog() {
   const portalIntentKeyRef = useRef<string | null>(null);
   const [openingPortal, setOpeningPortal] = useState(false);
   const [portalFailed, setPortalFailed] = useState(false);
+  const [addonOpen, setAddonOpen] = useState(false);
 
   useEffect(() => {
     if (recoveryWorkspaceId !== null && recoveryWorkspaceId !== wsId) {
@@ -113,19 +120,30 @@ export function LimitRecoveryDialog() {
     }
   };
 
-  const actions = summaryQuery.data?.availableActions;
+  const openAddon = () => {
+    dismiss();
+    setAddonOpen(true);
+  };
+
+  const summary = summaryQuery.data;
+  const actions = summary?.availableActions;
   const copy = getRecoveryCopy(t, recoveryReason);
   const recovery = resolveRecoveryPresentation({
     actions,
     billingEnabled,
     loading: billingEnabled && !actions && summaryQuery.isFetching,
     portalFailed,
+    autopilotAddon: recoveryReason === "autopilot_quota",
+    adminAsk: autopilotQuotaAdminAsk(summary),
+    upgradeToBusiness: canUpgradeToBusinessFromAddon(summary),
     copy,
     openBilling,
     openPortal,
+    openAddon,
   });
 
   return (
+    <>
     <Dialog
       open={visible}
       modal
@@ -166,6 +184,16 @@ export function LimitRecoveryDialog() {
           >
             {t(($) => $.common.close)}
           </Button>
+          {recovery.secondaryAction && (
+            <Button
+              variant="outline"
+              size="lg"
+              className="sm:min-w-28"
+              onClick={recovery.secondaryAction.onClick}
+            >
+              {recovery.secondaryAction.label}
+            </Button>
+          )}
           {recovery.action && (
             <Button
               size="lg"
@@ -180,12 +208,20 @@ export function LimitRecoveryDialog() {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {addonOpen ? (
+      <AutopilotAddonDialog wsId={wsId} open={addonOpen} onOpenChange={setAddonOpen} />
+    ) : null}
+    </>
   );
 }
 
 interface RecoveryPresentation {
   description: string;
   action?: {
+    label: string;
+    onClick: () => void;
+  };
+  secondaryAction?: {
     label: string;
     onClick: () => void;
   };
@@ -197,12 +233,17 @@ interface RecoveryCopy {
   upgradeDescription: string;
   portalDescription: string;
   contactDescription: string;
+  contactAddonDescription: string;
+  contactAddonOrUpgradeDescription: string;
+  addonDescription: string;
   billingDescription: string;
   billingUnavailableDescription: string;
   checkingDescription: string;
   upgradeAction: string;
   portalAction: string;
   billingAction: string;
+  addonAction: string;
+  upgradeBusinessAction: string;
 }
 
 function getRecoveryCopy(
@@ -226,6 +267,17 @@ function getRecoveryCopy(
         contactDescription: t(
           ($) => $.create_issue.autopilot_quota_limit.contact_description,
         ),
+        contactAddonDescription: t(
+          ($) => $.create_issue.autopilot_quota_limit.contact_addon_description,
+        ),
+        contactAddonOrUpgradeDescription: t(
+          ($) =>
+            $.create_issue.autopilot_quota_limit
+              .contact_addon_or_upgrade_description,
+        ),
+        addonDescription: t(
+          ($) => $.create_issue.autopilot_quota_limit.addon_description,
+        ),
         billingDescription: t(
           ($) => $.create_issue.autopilot_quota_limit.billing_description,
         ),
@@ -245,6 +297,12 @@ function getRecoveryCopy(
         billingAction: t(
           ($) => $.create_issue.autopilot_quota_limit.billing_action,
         ),
+        addonAction: t(
+          ($) => $.create_issue.autopilot_quota_limit.addon_action,
+        ),
+        upgradeBusinessAction: t(
+          ($) => $.create_issue.autopilot_quota_limit.upgrade_business_action,
+        ),
       };
   }
 }
@@ -254,23 +312,32 @@ function resolveRecoveryPresentation({
   billingEnabled,
   loading,
   portalFailed,
+  autopilotAddon,
+  adminAsk,
+  upgradeToBusiness,
   copy,
   openBilling,
   openPortal,
+  openAddon,
 }: {
   actions: BillingActions | undefined;
   billingEnabled: boolean;
   loading: boolean;
   portalFailed: boolean;
+  autopilotAddon: boolean;
+  adminAsk: AutopilotQuotaAdminAsk;
+  upgradeToBusiness: boolean;
   copy: RecoveryCopy;
   openBilling: () => void;
   openPortal: () => Promise<void>;
+  openAddon: () => void;
 }): RecoveryPresentation {
   const recovery = resolveBillingRecovery({
     actions,
     billingEnabled,
     loading,
     portalFailed,
+    autopilotAddon,
   });
 
   switch (recovery) {
@@ -285,6 +352,22 @@ function resolveRecoveryPresentation({
           label: copy.upgradeAction,
           onClick: openBilling,
         },
+      };
+    case "autopilot_addon":
+      return {
+        description: copy.addonDescription,
+        action: {
+          label: copy.addonAction,
+          onClick: openAddon,
+        },
+        ...(upgradeToBusiness
+          ? {
+              secondaryAction: {
+                label: copy.upgradeBusinessAction,
+                onClick: openBilling,
+              },
+            }
+          : {}),
       };
     case "portal":
       return {
@@ -306,7 +389,12 @@ function resolveRecoveryPresentation({
       };
     case "contact_admin":
       return {
-        description: copy.contactDescription,
+        description:
+          adminAsk === "addon"
+            ? copy.contactAddonDescription
+            : adminAsk === "addon_or_upgrade"
+              ? copy.contactAddonOrUpgradeDescription
+              : copy.contactDescription,
       };
     case "checking":
       return {

@@ -217,7 +217,7 @@ describe("InboxFilterMenu", () => {
   it("finds a value by search and adds it in one click", async () => {
     renderMenu();
     openMenu();
-    fireEvent.change(await screen.findByRole("textbox", { name: "Filter by field or value…" }), {
+    fireEvent.change(await screen.findByRole("textbox", { name: "Filter by field or value..." }), {
       target: { value: "last 7" },
     });
 

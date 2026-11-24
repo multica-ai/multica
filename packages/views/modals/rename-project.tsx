@@ -27,10 +27,14 @@ import { useT } from "../i18n";
  * one code path.
  */
 export function RenameProjectModal({
+  open = true,
   onClose,
+  onOpenChangeComplete,
   data,
 }: {
+  open?: boolean;
   onClose: () => void;
+  onOpenChangeComplete?: (open: boolean) => void;
   data: Record<string, unknown> | null;
 }) {
   const { t } = useT("modals");
@@ -87,11 +91,12 @@ export function RenameProjectModal({
 
   return (
     <Dialog
-      open
+      open={open}
       onOpenChange={(v) => {
         // The write is already in flight; closing now would drop its outcome.
         if (!v && !pending) onClose();
       }}
+      onOpenChangeComplete={onOpenChangeComplete}
     >
       <DialogContent className="sm:max-w-md" initialFocus={focusNameInput}>
         <DialogHeader>

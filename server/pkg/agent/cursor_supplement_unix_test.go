@@ -47,11 +47,11 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"d
 		t.Fatalf("New(cursor): %v", err)
 	}
 	session, err := backend.Execute(t.Context(), "original goal", ExecOptions{
-		Model:                model,
-		Cwd:                  cwd,
-		Timeout:              30 * time.Second,
-		EnableTaskSupplement: true,
-		CursorHookCommand:    testCursorHookCommand,
+		Model:                 model,
+		Cwd:                   cwd,
+		Timeout:               30 * time.Second,
+		EnableTaskSupplement:  true,
+		SupplementHookCommand: testCursorHookCommand,
 	})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -178,7 +178,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"d
 		t.Fatalf("New(cursor): %v", err)
 	}
 	session, err := backend.Execute(t.Context(), "original goal", ExecOptions{
-		Cwd: cwd, Timeout: 30 * time.Second, CursorHookCommand: testCursorHookCommand,
+		Cwd: cwd, Timeout: 30 * time.Second, SupplementHookCommand: testCursorHookCommand,
 	})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -227,10 +227,10 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"d
 		t.Fatalf("New(cursor): %v", err)
 	}
 	session, err := backend.Execute(t.Context(), "original goal", ExecOptions{
-		Cwd:                  cwd,
-		Timeout:              30 * time.Second,
-		EnableTaskSupplement: true,
-		CursorHookCommand:    testCursorHookCommand,
+		Cwd:                   cwd,
+		Timeout:               30 * time.Second,
+		EnableTaskSupplement:  true,
+		SupplementHookCommand: testCursorHookCommand,
 	})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)

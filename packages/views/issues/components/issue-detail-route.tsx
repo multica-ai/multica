@@ -3,8 +3,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useCanonicalIssue } from "@multica/core/issues/canonical-id";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useWorkspacePaths } from "@multica/core/paths";
-import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { useNavigation } from "../../navigation";
 import { IssueDetail, IssueDetailSkeleton, IssueNotFound, IssueLoadError } from "./issue-detail";
 import { IssuePeekHost } from "./issue-peek";
@@ -41,8 +40,9 @@ export function useCanonicalIssueUrl(
   const navigation = useNavigation();
   // A deliverable link keeps its `/deliverables/{name}` tail: dropping it
   // would turn the address into a plain issue link while the file is open.
-  const canonicalHref = identifier
-    ? `${deliverable ? paths.issueDeliverable(identifier, deliverable) : paths.issueDetail(identifier)}${hash}`
+  const canonicalRef = identifier ? issueRouteRef({ id: routeId, identifier }) : null;
+  const canonicalHref = canonicalRef
+    ? `${deliverable ? paths.issueDeliverable(canonicalRef, deliverable) : paths.issueDetail(canonicalRef)}${hash}`
     : null;
   // `useWorkspacePaths()` and the navigation adapter are both rebuilt on
   // render, so this ref — not the dependency array — is what guarantees the
@@ -91,9 +91,6 @@ export function IssueDetailRoute({ routeId, onDelete, deliverable }: IssueDetail
     canonicalId, issue, isResolving, notFound, loadFailed, isRetrying, retry, hasLoaded,
   } = useCanonicalIssue(wsId, routeId);
   const highlight = useHighlightHash();
-  const landingToken = useInboxSelectionStore((s) =>
-    s.landing && s.landing.issueId === canonicalId ? s.landing.token : 0,
-  );
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
 
@@ -106,7 +103,7 @@ export function IssueDetailRoute({ routeId, onDelete, deliverable }: IssueDetail
   // Once the link has opened its file and the viewer has closed (or the file
   // is missing), the address becomes the plain issue page. A replace: Back
   // should leave the issue, not re-open the file.
-  const issueRef = issue?.identifier ?? routeId;
+  const issueRef = issueRouteRef({ id: routeId, identifier: issue?.identifier });
   const latestNav = useRef({ paths, navigation });
   latestNav.current = { paths, navigation };
   const onDeliverableLinkDone = useCallback(() => {
@@ -118,7 +115,11 @@ export function IssueDetailRoute({ routeId, onDelete, deliverable }: IssueDetail
     return <IssueLoadError showBackLink={!onDelete} onRetry={retry} isRetrying={isRetrying} />;
   }
 
-  if (isResolving || (!issue && !notFound)) return <IssueDetailSkeleton />;
+  if (isResolving || (!issue && !notFound)) {
+    return (
+      <IssueDetailSkeleton />
+    );
+  }
 
   // Render not-found here rather than handing the unresolved segment down.
   // `IssueDetail` would mount a second observer on the query that just failed,
@@ -137,7 +138,6 @@ export function IssueDetailRoute({ routeId, onDelete, deliverable }: IssueDetail
         onDelete={onDelete}
         highlightCommentId={landsHere ? highlight.commentId : undefined}
         highlightAppRequestId={landsHere ? highlight.appRequestId : undefined}
-        highlightRequestToken={landingToken}
         openDeliverable={deliverable}
         onDeliverableLinkDone={deliverable ? onDeliverableLinkDone : undefined}
       />

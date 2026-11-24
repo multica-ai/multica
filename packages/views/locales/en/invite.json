@@ -1,7 +1,7 @@
 {
   "header": {
     "back": "Back",
-    "log_out": "Log out"
+    "log_out": "Sign out"
   },
   "list": {
     "title": "You've been invited",
@@ -20,7 +20,7 @@
     "title": "No pending invitations",
     "hint": "Continue to set up your own workspace.",
     "continue": "Continue to setup",
-    "go_to_dashboard": "Go to dashboard"
+    "go_to_dashboard": "Go to workspace"
   },
   "linked": {
     "not_found": "This invitation may have expired, been revoked, or doesn't belong to your account.",
@@ -30,6 +30,31 @@
   },
   "errors": {
     "accept_failed": "Failed to accept invitation",
-    "decline_failed": "Failed to decline invitation"
+    "decline_failed": "Failed to decline invitation",
+    "member_limit_reached": "{{workspace}} is full. Ask the person who invited you; you can join once the workspace upgrades."
+  },
+  "join": {
+    "no_code": "No invite code found. Please use a valid share link.",
+    "invalid": "This invite link is invalid or has expired.",
+    "joined_title": "Joined!",
+    "redirecting": "Redirecting to your workspace...",
+    "error_title": "Couldn't open invitation",
+    "go_home": "Go home",
+    "loading": "Loading invite details...",
+    "title": "You're invited to {{workspace}}",
+    "invited_by": "Invited by {{name}}",
+    "join_as": "You'll join this workspace as",
+    "role_admin": "Admin",
+    "role_member": "Member",
+    "login_required": "You'll need to sign in to join this workspace.",
+    "join": "Join workspace",
+    "joining": "Joining...",
+    "log_in_to_join": "Sign in to join",
+    "join_failed": "Failed to join the workspace. The link may have expired.",
+    "seats_full": "All purchased member seats are in use. Ask a workspace admin to add a seat before trying again.",
+    "seats_unavailable": "Member capacity could not be verified. Please try again.",
+    "full_title": "{{workspace}} is full",
+    "full_description": "Contact the person who invited you. This link works again once the workspace upgrades.",
+    "retry": "Try again"
   }
 }

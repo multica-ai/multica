@@ -355,6 +355,7 @@ func newSkillUpdateTestCmd() *cobra.Command {
 	cmd.Flags().Bool("content-stdin", false, "")
 	cmd.Flags().String("content-file", "", "")
 	cmd.Flags().String("config", "", "")
+	cmd.Flags().Int64("base-revision", 0, "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
 }
@@ -368,6 +369,7 @@ func newSkillFilesUpsertTestCmd() *cobra.Command {
 	cmd.Flags().String("content", "", "")
 	cmd.Flags().Bool("content-stdin", false, "")
 	cmd.Flags().String("content-file", "", "")
+	cmd.Flags().Int64("base-revision", 0, "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
 }
@@ -905,5 +907,97 @@ func TestRunSkillLabelCommands(t *testing.T) {
 	}
 	if lastMethod != http.MethodGet || lastPath != "/api/skills/skill-1/labels" {
 		t.Fatalf("remove follow-up request: method=%s, path=%s", lastMethod, lastPath)
+	}
+}
+
+func TestRunSkillUpdateSendsBaseRevisionOnlyWhenSet(t *testing.T) {
+	var body map[string]any
+	srv := newSkillBodyCaptureServer(t, http.MethodPut, "/api/skills/skill-123", &body)
+	defer srv.Close()
+	setSkillServerEnv(t, srv.URL)
+
+	cmd := newSkillUpdateTestCmd()
+	_ = cmd.Flags().Set("content", "new body")
+	_ = cmd.Flags().Set("base-revision", "7")
+	if _, err := captureStdout(t, func() error { return runSkillUpdate(cmd, []string{"skill-123"}) }); err != nil {
+		t.Fatalf("runSkillUpdate: %v", err)
+	}
+	if body["base_revision"] != float64(7) {
+		t.Fatalf("base_revision = %v, want 7", body["base_revision"])
+	}
+
+	body = nil
+	cmd = newSkillUpdateTestCmd()
+	_ = cmd.Flags().Set("content", "new body")
+	if _, err := captureStdout(t, func() error { return runSkillUpdate(cmd, []string{"skill-123"}) }); err != nil {
+		t.Fatalf("runSkillUpdate without base revision: %v", err)
+	}
+	if _, sent := body["base_revision"]; sent {
+		t.Fatalf("base_revision must be omitted when --base-revision is unset, body: %v", body)
+	}
+}
+
+func TestRunSkillUpdateRejectsNonPositiveBaseRevision(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("no request expected, got %s %s", r.Method, r.URL.Path)
+	}))
+	defer srv.Close()
+	setSkillServerEnv(t, srv.URL)
+
+	cmd := newSkillUpdateTestCmd()
+	_ = cmd.Flags().Set("content", "new body")
+	_ = cmd.Flags().Set("base-revision", "0")
+	err := runSkillUpdate(cmd, []string{"skill-123"})
+	if err == nil || !strings.Contains(err.Error(), "--base-revision must be a positive revision") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestSkillWritesExplainRevisionConflict(t *testing.T) {
+	var gotPath, gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotQuery = r.URL.Path, r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": "resource changed since it was loaded", "code": "revision_conflict",
+			"resource_type": "skill", "expected_revision": 3, "actual_revision": 4,
+		})
+	}))
+	defer srv.Close()
+	setSkillServerEnv(t, srv.URL)
+
+	wantGuidance := func(t *testing.T, err error) {
+		t.Helper()
+		if err == nil {
+			t.Fatal("expected a conflict error")
+		}
+		for _, want := range []string{"changed since revision 3", "nothing was written", "multica skill get", "--base-revision"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("error %q missing %q", err.Error(), want)
+			}
+		}
+	}
+
+	update := newSkillUpdateTestCmd()
+	_ = update.Flags().Set("content", "new body")
+	_ = update.Flags().Set("base-revision", "3")
+	wantGuidance(t, runSkillUpdate(update, []string{"skill-123"}))
+
+	upsert := newSkillFilesUpsertTestCmd()
+	_ = upsert.Flags().Set("path", "notes.md")
+	_ = upsert.Flags().Set("content", "notes")
+	_ = upsert.Flags().Set("base-revision", "3")
+	wantGuidance(t, runSkillFilesUpsert(upsert, []string{"skill-123"}))
+
+	del := &cobra.Command{Use: "delete"}
+	del.Flags().String("server-url", "", "")
+	del.Flags().String("workspace-id", "", "")
+	del.Flags().String("profile", "", "")
+	del.Flags().Int64("base-revision", 0, "")
+	_ = del.Flags().Set("base-revision", "3")
+	wantGuidance(t, runSkillFilesDelete(del, []string{"skill-123", "file-1"}))
+	if gotPath != "/api/skills/skill-123/files/file-1" || gotQuery != "base_revision=3" {
+		t.Fatalf("delete request: path=%q query=%q", gotPath, gotQuery)
 	}
 }

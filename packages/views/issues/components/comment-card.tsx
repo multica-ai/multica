@@ -1,6 +1,8 @@
 "use client";
 
-import { Fragment, memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { UI_MOTION_DURATION } from "@multica/ui/lib/motion";
+import { revealElement } from "./use-run-comment-motion";
 import { CheckCircle2, ChevronRight, CornerUpLeft, ListChevronsDownUp, Copy, Link2, Loader2, MessageSquare, MessageSquarePlus, MoreHorizontal, Pencil, Plus, RotateCcw, SmilePlus, Trash2 } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
@@ -33,6 +35,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useLocale, useTimeAgo } from "../../i18n";
+import { StorageLimitNotice } from "../../billing/storage-limit-notice";
 import { ContentEditor, type ContentEditorRef, ReadonlyContent, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider, useUploadGate, useComposerSubmit } from "../../editor";
 import { useCommentUploads } from "./use-comment-uploads";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
@@ -60,7 +63,7 @@ import { CommentsFoldBar } from "./resolved-thread-bar";
 import { deriveThreadResolution } from "./thread-utils";
 import { RevisionConflictCompare } from "./revision-conflict-compare";
 import { InlineCommentRun, PlacedInlineCommentRun, useInlineCommentRunState, type InlineCommentRunState } from "./inline-comment-run";
-import { EMPTY_COMMENT_RUNS, isRunFailureNotice, orderThreadWithRuns, type CommentRun, type ThreadRunSlot } from "./comment-runs";
+import { EMPTY_COMMENT_RUNS, isRunFailureNotice, orderVisibleThreadRows, type CommentRun, type ThreadRunSlot } from "./comment-runs";
 import { descriptionPreview } from "./description-preview";
 import { useCommentAnnotations } from "./use-comment-annotations";
 import { useAttachmentVersions } from "./deliverables/attachment-versions";
@@ -387,7 +390,7 @@ function useEditAttachmentState(
   const draftKey = `edit:${issueId}:${entry.id}` as const;
   // `gate` widens the editor gate with coordinator-owned placeholders — see
   // CommentInput.
-  const { uploads, attachments: pendingAttachments, handleUpload, removeUpload, gate } =
+  const { uploads, attachments: pendingAttachments, handleUpload, removeUpload, gate, storageRefusal, dismissStorageRefusal } =
     useCommentUploads(draftKey, { issueId }, uploadGate, editorRef);
   const [retainedStandaloneIds, setRetainedStandaloneIds] = useState<Set<string> | null>(null);
   const triggerPreview = useCommentTriggerPreview({
@@ -558,6 +561,8 @@ function useEditAttachmentState(
     handleUpload,
     uploads,
     removeUpload,
+    storageRefusal,
+    dismissStorageRefusal,
     isDragOver,
     dropZoneProps,
     triggerPreview,
@@ -958,6 +963,9 @@ function CommentRow({
               attachments={edit.editorAttachments}
             />
           </div>
+          {edit.storageRefusal && (
+            <StorageLimitNotice refusal={edit.storageRefusal} onDismiss={edit.dismissStorageRefusal} className="mt-2" />
+          )}
           {edit.revisionConflict ? (
             <CommentRevisionConflict
               serverContent={entry.content ?? ""}
@@ -1016,7 +1024,7 @@ function CommentRow({
         <>
           <div tabIndex={currentUserId ? 0 : undefined} role="group"
             aria-label={t(($) => $.reply.annotations.source_label, { name: entry.actor_name || getActorName(entry.actor_type, entry.actor_id) })}
-            data-comment-content={entry.id} className="pl-12 pr-4 max-md:pl-3 max-md:pr-3 text-body leading-relaxed text-foreground">
+            data-comment-content={entry.id} data-find-unit={entry.id} className="pl-12 pr-4 max-md:pl-3 max-md:pr-3 text-body leading-relaxed text-foreground">
             <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4 max-md:pl-3 max-md:pr-3" />
@@ -1202,10 +1210,23 @@ function CommentCardImpl({
   const isCollapsed = useCommentCollapseStore((s) => s.isCollapsed(issueId, entry.id));
   const toggleCollapse = useCommentCollapseStore((s) => s.toggle);
   const open = !isCollapsed;
-  const handleToggle = useCallback(
-    () => toggleCollapse(issueId, entry.id),
-    [toggleCollapse, issueId, entry.id],
-  );
+  // One-shot WAAPI reveal on explicit user toggles only — Virtuoso scroll
+  // remounts stay completely still.
+  const bodyRevealRef = useRef<HTMLDivElement>(null);
+  const cardElRef = useRef<HTMLDivElement | null>(null);
+  const userToggledOpenRef = useRef(false);
+  const userExpandedRepliesRef = useRef(false);
+  const handleToggle = useCallback(() => {
+    userToggledOpenRef.current = true;
+    toggleCollapse(issueId, entry.id);
+  }, [toggleCollapse, issueId, entry.id]);
+  useLayoutEffect(() => {
+    if (!userToggledOpenRef.current) return;
+    userToggledOpenRef.current = false;
+    if (!open) return;
+    const anim = revealElement(bodyRevealRef.current, UI_MOTION_DURATION.fast * 1000, -3);
+    return () => { anim?.cancel(); };
+  }, [open]);
 
   const edit = useEditAttachmentState(issueId, entry, onEdit);
 
@@ -1255,6 +1276,7 @@ function CommentCardImpl({
   } : null);
   const annotationCardRef = annotation.cardRef;
   const cardRef = useCallback((node: HTMLDivElement | null) => {
+    cardElRef.current = node;
     annotationCardRef(node);
     threadScopeRef(node);
   }, [annotationCardRef, threadScopeRef]);
@@ -1339,18 +1361,25 @@ function CommentCardImpl({
   const replyResolutionId = resolution.kind === "reply" ? resolution.resolutionId : null;
   const threadExpanded = !!expandedResolvedIds?.has(entry.id);
   const replyFolded = replyResolutionId != null && !threadExpanded;
+  useLayoutEffect(() => {
+    if (!userExpandedRepliesRef.current) return;
+    userExpandedRepliesRef.current = false;
+    if (replyFolded) return;
+    const replies = cardElRef.current?.querySelectorAll<HTMLElement>('[data-mc="comment-reply"]');
+    if (!replies || replies.length === 0) return;
+    const anims: Animation[] = [];
+    for (const el of replies) {
+      const anim = revealElement(el, UI_MOTION_DURATION.fast * 1000, -3);
+      if (anim) anims.push(anim);
+    }
+    return () => { for (const anim of anims) anim.cancel(); };
+  }, [replyFolded]);
   const foldedReplies = replyResolutionId
     ? visibleReplies.filter((r) => r.id !== replyResolutionId)
     : visibleReplies;
-  const resolutionReply = replyResolutionId
-    ? allNestedReplies.find((r) => r.id === replyResolutionId) ?? null
-    : null;
   // Replies and run slots in the order they happened (MUL-7628). Folded, the
   // resolution stays visible along with any run that has not replied yet.
-  const threadRows = replyFolded
-    ? orderThreadWithRuns(entry, resolutionReply ? [resolutionReply] : [], runs.filter((run) => !run.hasReply
-      && (run.anchorCommentId === entry.id || run.anchorCommentId === replyResolutionId)))
-    : orderThreadWithRuns(entry, allNestedReplies, runs);
+  const threadRows = orderVisibleThreadRows(entry, allNestedReplies, runs, replyFolded ? replyResolutionId : null);
 
   // Long threads mount replies on demand: many rows, or few rows carrying a
   // lot of Markdown (MUL-9409). Short threads render inline, but through the
@@ -1365,10 +1394,14 @@ function CommentCardImpl({
     const anchorId = "run" in row
       ? (row.reply && !isDeletedComment(row.reply) ? row.reply.id : row.run.task.id)
       : row.id;
+    const rowCommentId = "run" in row
+      ? (row.reply && !isDeletedComment(row.reply) ? row.reply.id : undefined)
+      : row.id;
+    const rowEngaged = !!rowCommentId && annotation.activeSourceCommentId === rowCommentId;
     // Keyed like the inline rows: a run slot keeps its task key when its reply
     // arrives, so the slot (and its open activity panel) stays mounted.
     return <VirtualThreadRow key={"run" in row ? row.run.task.id : row.id} id={`comment-${anchorId}`} virtualize={virtualizeRows}
-      taskId={"run" in row ? row.run.task.id : undefined} scrollParent={replyScrollParent}>
+      engaged={rowEngaged} taskId={"run" in row ? row.run.task.id : undefined} scrollParent={replyScrollParent}>
       {() => renderThreadRow(row, virtualizeRows)}
     </VirtualThreadRow>;
   });
@@ -1533,7 +1566,7 @@ function CommentCardImpl({
                       size="icon-sm"
                       aria-label={toggleLabel}
                       aria-expanded={open}
-                      aria-controls={open ? `comment-body-${entry.id}` : undefined}
+                      aria-controls={open ? `root-comment-body-${entry.id}` : undefined}
                       onClick={handleToggle}
                       className={commentActionClassName}
                     >
@@ -1547,9 +1580,12 @@ function CommentCardImpl({
 
         {/* Root comment body. Avoid Base UI's Panel here: every mounted panel
             probes computed styles to detect animations, forcing a style
-            recalculation across long issue-detail documents. */}
+            recalculation across long issue-detail documents. Its id must not
+            start with "comment-": timeline lookups resolve the nearest
+            `[id^="comment-"]` ancestor to a comment id, so a reading anchor
+            taken inside the body would name a comment that does not exist. */}
         {open && !deleted && (
-          <div id={`comment-body-${entry.id}`} className="px-4 max-md:px-3 pb-3">
+          <div ref={bodyRevealRef} id={`root-comment-body-${entry.id}`} className="px-4 max-md:px-3 pb-3">
             {edit.editing ? (
               <div
                 {...edit.dropZoneProps}
@@ -1574,6 +1610,9 @@ function CommentCardImpl({
                     attachments={edit.editorAttachments}
                   />
                 </div>
+                {edit.storageRefusal && (
+                  <StorageLimitNotice refusal={edit.storageRefusal} onDismiss={edit.dismissStorageRefusal} className="mt-2" />
+                )}
                 {edit.revisionConflict ? (
                   <CommentRevisionConflict
                     serverContent={entry.content ?? ""}
@@ -1632,7 +1671,7 @@ function CommentCardImpl({
               <>
                 <div tabIndex={currentUserId ? 0 : undefined} role="group"
             aria-label={t(($) => $.reply.annotations.source_label, { name: entry.actor_name || getActorName(entry.actor_type, entry.actor_id) })}
-            data-comment-content={entry.id} className="pl-8 max-md:pl-0 text-body leading-relaxed text-foreground">
+            data-comment-content={entry.id} data-find-unit={entry.id} className="pl-8 max-md:pl-0 text-body leading-relaxed text-foreground">
                   <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
                 </div>
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8 max-md:pl-0" />
@@ -1676,7 +1715,10 @@ function CommentCardImpl({
                 <div className="border-t border-border/50 px-4 max-md:px-3 py-2.5">
                   <CommentsFoldBar
                     replies={foldedReplies}
-                    onExpand={() => onResolvedExpandChange?.(entry.id, true)}
+                    onExpand={() => {
+                      userExpandedRepliesRef.current = true;
+                      onResolvedExpandChange?.(entry.id, true);
+                    }}
                   />
                 </div>
               )}

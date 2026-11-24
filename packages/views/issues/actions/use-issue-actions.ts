@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import type { Issue, UpdateIssueRequest } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
@@ -40,6 +40,8 @@ export interface UseIssueActionsResult {
   removeParent: () => void;
   openAddChild: () => void;
   openMarkDuplicate: () => void;
+  openAddBlocker: () => void;
+  openAddBlocking: () => void;
   openDeleteConfirm: (opts?: { onDeletedFallbackPath?: string }) => void;
 }
 
@@ -106,23 +108,25 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
           ...options,
         });
       } else {
-        updateIssue.mutate(
-          { id: issueId, ...updates },
-          {
-            onSuccess: options?.onSuccess,
-            onError: (err) => {
-              toast.error(
-                errorCode(err) === "revision_conflict"
-                  ? t(($) => $.revision.conflict)
-                  : err instanceof Error && err.message
-                  ? err.message
-                  : t(($) => $.detail.update_failed),
-              );
-              options?.onError?.(err);
+        // Keep UI callbacks observer-scoped; error feedback belongs to the request.
+        void updateIssue
+          .mutateAsync(
+            { id: issueId, ...updates },
+            {
+              onSuccess: (issue) => options?.onSuccess?.(issue),
+              onError: (err) => options?.onError?.(err),
+              onSettled: () => options?.onSettled?.(),
             },
-            onSettled: () => options?.onSettled?.(),
-          },
-        );
+          )
+          .catch((err: unknown) => {
+            toast.error(
+              errorCode(err) === "revision_conflict"
+                ? t(($) => $.revision.conflict)
+                : err instanceof Error && err.message
+                ? err.message
+                : t(($) => $.detail.update_failed),
+            );
+          });
       }
     },
     [issue, issueId, entryOf, surfaceActions, updateIssue, openModal, t],
@@ -141,7 +145,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     // tab at the shareable URL, so it is a link the user sees and may copy out
     // of the address bar. Opening on the UUID would also make the route
     // immediately rewrite the fresh tab's URL.
-    const path = paths.issueDetail(issueIdentifier || issueId);
+    const path = paths.issueDetail(issueRouteRef({ id: issueId, identifier: issueIdentifier }));
     if (navigation.openInNewTab) {
       navigation.openInNewTab(path, issueIdentifier ?? undefined, {
         activate: true,
@@ -158,17 +162,17 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   const openInNewWindow = useCallback(() => {
     if (!issueId) return;
     navigation.openIssueInNewWindow?.(
-      paths.issueDetail(issueIdentifier || issueId),
+      paths.issueDetail(issueRouteRef({ id: issueId, identifier: issueIdentifier })),
       issueIdentifier ? `${issueIdentifier} ${issueTitle}` : issueTitle,
     );
   }, [issueId, issueIdentifier, issueTitle, navigation, paths]);
 
   const openInDesktop = useCallback(() => {
     if (!issueId) return;
-    const path = paths.issueDetail(issueIdentifier || issueId);
+    const path = paths.issueDetail(issueRouteRef({ id: issueId, identifier: issueIdentifier }));
     const isCurrentIssue =
       navigation.pathname === path ||
-      navigation.pathname === paths.issueDetail(issueId);
+      navigation.pathname === paths.issueDetail(issueRouteRef({ id: issueId, identifier: null }));
     navigation.openInDesktop?.(path + (isCurrentIssue ? navigation.hash : ""));
   }, [issueId, issueIdentifier, navigation, paths]);
 
@@ -186,7 +190,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     // Share the identifier form (`/{ws}/issues/MUL-123`): a pasted link should
     // say which issue it points at. The UUID form stays valid, so links copied
     // before this still resolve.
-    const url = navigation.getShareableUrl(paths.issueDetail(issueIdentifier || issueId));
+    const url = navigation.getShareableUrl(paths.issueDetail(issueRouteRef({ id: issueId, identifier: issueIdentifier })));
     if (await copyText(url)) {
       toast.success(t(($) => $.detail.link_copied));
     } else {
@@ -196,7 +200,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
 
   const copyTitleAsLink = useCallback(async () => {
     if (!issueId) return;
-    const url = navigation.getShareableUrl(paths.issueDetail(issueIdentifier || issueId));
+    const url = navigation.getShareableUrl(paths.issueDetail(issueRouteRef({ id: issueId, identifier: issueIdentifier })));
     // Keep the identifier in front of the title, matching how the issue reads
     // in lists and activity feeds, so the pasted link stays recognizable.
     const label = [issueIdentifier, issueTitle].filter(Boolean).join(" ");
@@ -213,7 +217,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   // memoized comment card, so depending on it would re-render all of them on
   // any unrelated page update. Identifier form for the same reason as `copyLink`.
   const issueShareUrl = issueId
-    ? navigation.getShareableUrl(paths.issueDetail(issueIdentifier || issueId))
+    ? navigation.getShareableUrl(paths.issueDetail(issueRouteRef({ id: issueId, identifier: issueIdentifier })))
     : null;
   const copyCommentLink = useCallback(async (commentId: string) => {
     if (!issueShareUrl) return;
@@ -318,6 +322,16 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     openModal("issue-add-child", { issueId });
   }, [openModal, issueId]);
 
+  const openAddBlocker = useCallback(() => {
+    if (!issueId) return;
+    openModal("issue-add-blocker", { issueId });
+  }, [openModal, issueId]);
+
+  const openAddBlocking = useCallback(() => {
+    if (!issueId) return;
+    openModal("issue-add-blocking", { issueId });
+  }, [openModal, issueId]);
+
   const openDeleteConfirm = useCallback(
     (opts?: { onDeletedFallbackPath?: string }) => {
       if (!issueId) return;
@@ -346,6 +360,8 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     removeParent,
     openAddChild,
     openMarkDuplicate,
+    openAddBlocker,
+    openAddBlocking,
     openDeleteConfirm,
   };
 }

@@ -8,7 +8,21 @@
   "filter": {
     "project_label": "프로젝트",
     "all_projects": "모든 프로젝트",
-    "period_label": "기간"
+    "period_label": "기간",
+    "attribution_label": "귀속",
+    "all_attribution": "전체 귀속",
+    "standalone_only": "단독 에이전트만",
+    "squads_group": "Squad"
+  },
+  "history_limit": {
+    "note": "현재 요금제에서는 최근 {{days}}일을 볼 수 있습니다. 업그레이드하면 이전 데이터도 볼 수 있으며, 데이터는 삭제되지 않습니다.",
+    "fell_back": "최근 {{days}}일 표시 중 — 현재 요금제의 조회 한도입니다.",
+    "view_plans": "요금제 보기",
+    "locked": "현재 요금제에 포함되지 않음",
+    "plan": {
+      "pro": "Pro",
+      "business": "Business"
+    }
   },
   "kpi": {
     "cost_label": "비용 · {{days}}일",
@@ -17,10 +31,12 @@
     "run_time_label": "실행 시간 · {{days}}일",
     "run_time_hint": "실행 {{tasks}}개 기준",
     "tasks_label": "실행 · {{days}}일",
-    "tasks_hint": "실패 {{failed}}개"
+    "tasks_hint": "실패 {{failed}}개",
+    "cost_squad_hint": "{{name}} 전체(위임 멤버 포함)",
+    "cost_squad_share_hint": "Squad 트리거 {{cost}}({{pct}}%)"
   },
   "dim": {
-    "label": "단위",
+    "label": "간격",
     "daily": "일별",
     "weekly": "주별"
   },
@@ -50,8 +66,8 @@
     "kpi_failed_hint": "실행 {{total}}회 중",
     "kpi_rate_label": "실패율 · {{days}}일",
     "kpi_agents_label": "영향받은 에이전트 · {{days}}일",
-    "kpi_agents_hint": "최다 {{name}} · {{count}}회",
-    "tooltip_rate": "오류율",
+    "kpi_agents_hint": "최다: {{name}}({{count}}건 실패)",
+    "tooltip_rate": "실패율",
     "class": {
       "auth": "인증",
       "rate_limit": "속도 제한",
@@ -66,8 +82,8 @@
     "mix_title": "실패 구성 · {{failed}}",
     "mix_label": "실패 구성",
     "codes_label": "오류 코드",
-    "by_agent": "실패가 많은 에이전트",
-    "sort_label": "오류 순위 기준",
+    "by_agent": "에이전트별 오류",
+    "sort_label": "에이전트 정렬 기준",
     "sort_failed": "실패 수",
     "sort_rate": "실패율",
     "header_agent": "에이전트",
@@ -80,7 +96,8 @@
     "show_reasons": "오류 코드 표시",
     "hide_reasons": "오류 코드 숨기기",
     "show_all": "전체 {{count}}개 보기",
-    "show_less": "상위 {{count}}개만"
+    "show_less": "상위 {{count}}개만",
+    "by_squad": "Squad별 오류"
   },
   "leaderboard": {
     "title": "리더보드",
@@ -99,7 +116,16 @@
     "usage_totals_pending": "사용량을 집계하는 중",
     "show_all": "전체 보기",
     "show_less": "상위 {{count}}개만",
-    "no_data": "이 기간에는 에이전트 활동이 없습니다."
+    "no_data": "이 기간에는 에이전트 활동이 없습니다.",
+    "group_label": "리더보드 그룹 기준",
+    "group_agent": "에이전트",
+    "group_squad": "Squad",
+    "header_squad": "Squad",
+    "squad_caption": "{{count}}개 Squad",
+    "squad_members_title": "{{name}} 멤버별 사용량",
+    "squad_members_count": "{{count}}명 멤버 참여",
+    "deleted_squads": "삭제된 Squad",
+    "toggle_squad_members": "{{name}} 멤버 세부 정보 전환"
   },
   "empty": {
     "title": "아직 사용량이 없습니다",

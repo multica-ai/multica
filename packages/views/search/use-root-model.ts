@@ -2,9 +2,14 @@
 
 import { useMemo } from "react";
 import type { CommandBarContext } from "@multica/core/command-bar";
+import { useFeatureEnabled } from "@multica/core/config";
+import { DOCS_V1_FLAG } from "@multica/core/feature-flags";
+import { useWorkspaceId } from "@multica/core/hooks";
 import { WORKSPACE_PAGES, type WorkspacePageKey } from "@multica/core/paths";
+import { useIsGuest } from "@multica/core/permissions";
 import { partitionAggregatedSearchResults } from "@multica/core/search/cancelled-rank";
-import type { SearchIssueResult, SearchProjectResult } from "@multica/core/types";
+import type { SearchDocResult, SearchIssueResult, SearchProjectResult } from "@multica/core/types";
+import { useComposioAvailable } from "../common/use-composio-available";
 import { useT } from "../i18n";
 import { useAgentCommandGroup, useAutopilotCommandGroup, useChatCommandGroup, useInboxCommandGroup, useProjectCommandGroup } from "./commands/context-commands";
 import { useGlobalCommands } from "./commands/global-commands";
@@ -12,9 +17,10 @@ import { useIssueCommandGroup } from "./commands/issue-commands";
 import { parseScope, scoreRow, scoreText, type SearchScope } from "./matching";
 import type { IssueTarget, PaletteCommand, PaletteCommandGroup } from "./types";
 import type { AgentEntry } from "./use-actor-directory";
-import { useObjectSearch, type ObjectHits, type Scored } from "./use-object-search";
+import { useObjectSearch, type ObjectHits, type PaletteDoc, type Scored } from "./use-object-search";
 import { useRecentItems, type RecentItem } from "./use-recent-items";
 import { useServerSearch, type SearchResults } from "./use-server-search";
+import { useDocSearch } from "./use-doc-search";
 
 // The palette's Pages group is generated from WORKSPACE_PAGES, the same
 // registry the sidebar nav and the desktop tab bar read. It used to be a
@@ -42,7 +48,9 @@ const PAGE_KEYWORDS: Record<WorkspacePageKey, string[]> = {
   squads: ["squads", "teams", "小队", "团队"],
   usage: ["usage", "analytics", "stats", "metrics", "统计", "分析", "用量"],
   runtimes: ["runtimes", "environments", "machines", "运行时"],
+  docs: ["docs", "knowledge", "知识库"],
   skills: ["skills", "library", "技能"],
+  apps: ["apps", "integrations", "connected", "accounts", "composio", "应用", "集成"],
   settings: ["settings", "config", "preferences", "设置", "配置"],
 };
 
@@ -103,6 +111,42 @@ export function issueScore(issue: SearchIssueResult, q: string): number {
   return Math.max(scoreText(issue.title, q), SERVER_ONLY_SCORE);
 }
 
+/**
+ * Title hits from the cached doc tree answer on every keystroke; the server
+ * adds what only it can find, content matches with an excerpt. A doc found
+ * both ways keeps its instant row, picking up the server's excerpt if any.
+ * While the server is still answering an earlier query (`stale`), its rows
+ * stay painted but disabled, the way stale issue rows are, and lend no
+ * excerpts to the fresh title hits.
+ */
+export function mergeDocHits(
+  local: Scored<PaletteDoc>[],
+  server: SearchDocResult[],
+  folders: ReadonlyMap<string, string>,
+  q: string,
+  stale = false,
+): Scored<PaletteDoc>[] {
+  const fromServer = new Map(server.map((doc) => [doc.id, doc]));
+  const merged = local.map((hit) => {
+    const snippet = stale ? null : fromServer.get(hit.item.doc.id)?.matchedSnippet;
+    return snippet ? { ...hit, item: { ...hit.item, snippet } } : hit;
+  });
+  const listed = new Set(local.map((hit) => hit.item.doc.id));
+  for (const doc of server) {
+    if (listed.has(doc.id)) continue;
+    merged.push({
+      item: {
+        doc,
+        folder: doc.folderId ? (folders.get(doc.folderId) ?? null) : null,
+        ...(doc.matchedSnippet ? { snippet: doc.matchedSnippet } : {}),
+        ...(stale ? { stale: true } : {}),
+      },
+      score: Math.max(scoreText(doc.title, q), SERVER_ONLY_SCORE),
+    });
+  }
+  return merged;
+}
+
 export function projectScore(project: SearchProjectResult, q: string): number {
   return Math.max(scoreText(project.title, q), SERVER_ONLY_SCORE);
 }
@@ -150,17 +194,22 @@ export function useRootModel(
 
   const searching = active && scope !== "commands" && scope !== "people" ? text : "";
   const server = useServerSearch(searching, { projects: scope === "all" });
+  const docsEnabled = useFeatureEnabled(DOCS_V1_FLAG, false);
+  // A guest (MUL-9420) has no docs; the server refuses doc search.
+  const guest = useIsGuest(useWorkspaceId());
+  const docSearch = useDocSearch(searching, scope === "all" && docsEnabled && !guest);
   const objects = useObjectSearch(scope === "issues" || scope === "commands" ? "" : q, active);
   const recent = useRecentItems(active && !rawQuery.trim());
 
+  const appsAvailable = useComposioAvailable();
   const navPages = useMemo<NavPage[]>(
     () =>
-      NAV_PAGE_KEYS.map((key) => ({
+      NAV_PAGE_KEYS.filter((key) => (key !== "docs" || docsEnabled) && (key !== "apps" || appsAvailable)).map((key) => ({
         key,
         label: tNav(($) => $.nav[WORKSPACE_PAGES[key].navKey]),
         keywords: PAGE_KEYWORDS[key],
       })),
-    [tNav],
+    [docsEnabled, tNav, appsAvailable],
   );
 
   return useMemo<RootModel>(() => {
@@ -233,6 +282,16 @@ export function useRootModel(
       autopilots: scope === "all" ? objects.autopilots : [],
       chats: scope === "all" ? objects.chats : [],
       skills: scope === "all" ? objects.skills : [],
+      docs:
+        scope === "all"
+          ? mergeDocHits(
+              objects.docs,
+              docSearch.docs,
+              objects.docFolders,
+              q,
+              docSearch.query !== searching.trim(),
+            )
+          : [],
       workspaces: scope === "all" ? objects.workspaces : [],
     };
 
@@ -264,6 +323,7 @@ export function useRootModel(
       visibleObjects.autopilots.length +
       visibleObjects.chats.length +
       visibleObjects.skills.length +
+      visibleObjects.docs.length +
       visibleObjects.workspaces.length;
     const hasResults =
       objectCount > 0 ||
@@ -315,6 +375,7 @@ export function useRootModel(
     batchTarget,
     chatGroup,
     contexts,
+    docSearch,
     globalCommands,
     inboxGroup,
     issueContext,
@@ -325,6 +386,7 @@ export function useRootModel(
     q,
     recent,
     scope,
+    searching,
     server,
     singleGroup,
     singleTarget,

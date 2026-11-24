@@ -1,6 +1,6 @@
 {
   "new_folder": "新建文件夹",
-  "new_folder_ellipsis": "新建文件夹…",
+  "new_folder_ellipsis": "新建文件夹...",
   "new_project": "新建项目",
   "new_project_in_folder": "在 {{name}} 中新建项目",
   "folder_actions": "{{name}} 的操作",
@@ -22,7 +22,7 @@
   "toast_moved": "已移动到 {{name}}",
   "toast_failed": "文件夹保存失败",
   "toast_move_failed": "项目移动失败",
-  "delete_title": "删除文件夹“{{name}}”？",
+  "delete_title": "删除文件夹\"{{name}}\"？",
   "delete_description": "其中的项目会回到顶层，其他内容不受影响。",
   "delete_confirm": "删除文件夹",
   "toast_delete_failed": "文件夹删除失败"

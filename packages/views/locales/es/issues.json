@@ -22,7 +22,6 @@
     "load_failed": "No se ha podido cargar la actividad.",
     "try_again": "Reintentar",
     "empty": "Aún no hay actividad registrada.",
-    "show_earlier": "Mostrar {{count}} pasos anteriores",
     "full_log": "Abrir registro completo",
     "message": "Mensaje del agente",
     "error": "Error",
@@ -40,8 +39,10 @@
     "steer_not_received": "{{name}} no lo recibió · {{reason}}",
     "steer_resend": "Enviar como una ejecución nueva",
     "steer_resend_failed": "No se ha podido enviar como una ejecución nueva.",
-    "steer_step": "{{name}} añadido",
-    "steer_step_read": "Leído"
+    "steer_step": "Mensaje añadido por {{name}}",
+    "steer_step_read": "Leído",
+    "show_earlier_one": "Mostrar {{count}} paso anterior",
+    "show_earlier_other": "Mostrar {{count}} pasos anteriores"
   },
   "status_catalog_error": {
     "title": "No se ha podido cargar la lista de estados",
@@ -102,7 +103,7 @@
     "author_deleted_agent": "agente eliminado",
     "author_left_workspace": "ya no está en el espacio de trabajo",
     "error_source_changed": "La fuente cambió. Revisa la vista previa actualizada y vuelve a enviar.",
-    "error_agent_unsupported": "Este runtime de agente debe actualizarse para usar contexto capturado. Cambia a Manual o actualiza el runtime.",
+    "error_agent_unsupported": "Actualiza el runtime de este agente para usar el contexto capturado o cambia a la creación manual.",
     "error_server_unsupported": "Este servidor debe actualizarse antes de poder crear una subtarea con contexto capturado.",
     "error_too_large": "El contexto capturado supera un límite del servidor.",
     "error_comment_limit": "El historial de la conversación de origen tiene al menos {{count}} comentarios; el límite es 256.",
@@ -207,7 +208,7 @@
     "chip_edit": "Editar",
     "chip_save_as": "Guardar como",
     "active_section": "Activos",
-    "section_relation": "Relación conmigo",
+    "section_relation": "Relaciones",
     "relation_assigned": "Asignadas a mí",
     "relation_created": "Creadas por mí",
     "relation_my_agents": "Trabajo de mis agentes",
@@ -269,7 +270,8 @@
     "advanced_group_match_trailing": "de estas condiciones",
     "advanced_group_hint": "Las condiciones de este grupo se unen con «{{word}}»",
     "advanced_add_to_group": "Añadir al grupo",
-    "advanced_turn_into_group": "Convertir en grupo"
+    "advanced_turn_into_group": "Convertir en grupo",
+    "relation_blocked": "Bloqueado"
   },
   "display": {
     "tooltip": "Opciones de visualización",
@@ -361,7 +363,6 @@
     "export": "Exportar",
     "export_all": "Exportar todo",
     "export_selected": "Exportar seleccionadas ({{count}})",
-    "export_success": "{{count}} tareas exportadas",
     "export_failed": "No se han podido exportar las tareas",
     "columns": {
       "section": "Columnas",
@@ -373,7 +374,7 @@
       "hide": "Ocultar columna",
       "reorder": "Reordenar la columna {{column}}",
       "title": "Tarea",
-      "identifier": "Identificador",
+      "identifier": "ID de tarea",
       "status": "Estado",
       "priority": "Prioridad",
       "assignee": "Asignado",
@@ -394,7 +395,9 @@
       "sum": "Suma",
       "average": "Media",
       "count": "Recuento"
-    }
+    },
+    "export_success_one": "{{count}} tarea exportada",
+    "export_success_other": "{{count}} tareas exportadas"
   },
   "gantt": {
     "header_issue": "Tarea",
@@ -466,7 +469,6 @@
     "section_parent_issue": "Tarea principal",
     "section_pull_requests": "Pull requests",
     "section_metadata": "Metadatos",
-    "section_details": "Detalles",
     "sidebar_settings": {
       "open": "Personalizar barra lateral",
       "title": "Barra lateral",
@@ -520,16 +522,13 @@
     "prop_project": "Proyecto",
     "prop_labels": "Etiquetas",
     "add_property_action": "Añadir propiedad",
-    "prop_created_by": "Creada por",
-    "prop_created": "Creada",
-    "prop_updated": "Actualizada",
     "activity_section": "Actividad",
     "subscribe": "Suscribirse",
     "unsubscribe": "Darse de baja",
     "delegated_subscription_badge": "Observando a través de un agente",
     "delegated_subscription_hint": "Tu agente creó esta tarea en tu nombre, así que estás suscrito. Con Cambios de estado activado, recibirás una notificación cuando necesite revisión, termine o se quede atascada.",
     "key_updates_subscription_badge": "Solo actualizaciones clave",
-    "key_updates_subscription_hint": "Esta tarea es de otra persona y la sigues porque la creaste, la comentaste o te mencionaron. Recibirás las @menciones, las respuestas en tus hilos y, con Cambios de estado activado, los avisos cuando necesite revisión, se bloquee o termine.",
+    "key_updates_subscription_hint": "Esta tarea es de otra persona y la sigues porque la creaste, comentaste en ella o te mencionaron. Recibirás avisos sobre @menciones, respuestas en tus hilos y, con Cambios de estado activado, cuando necesite revisión, se bloquee o termine.",
     "key_updates_follow_all": "Recibir toda la actividad",
     "key_updates_follow_all_done": "Recibirás toda la actividad de esta tarea",
     "key_updates_settings": "Cambiar el valor predeterminado",
@@ -545,10 +544,7 @@
     "change_subscribers_placeholder": "Cambiar suscriptores...",
     "members_group": "Miembros",
     "agents_group": "Agentes",
-    "mark_done_tooltip": "Marcar como hecho",
     "archive_tooltip": "Archivar",
-    "pin_tooltip": "Fijar en la barra lateral",
-    "unpin_tooltip": "Dejar de fijar de la barra lateral",
     "thread_nav_label": "Ir a la conversación de comentarios",
     "thread_nav_resolved_label": "{{title}} (resuelto)",
     "thread_nav_reply_label": "{{author}}: {{title}}",
@@ -568,8 +564,8 @@
     "workdir_path_copied": "Ruta del directorio de trabajo copiada",
     "project_directory_path_copied": "Ruta del directorio del proyecto copiada",
     "project_directory_path_copied_with_branch": "Ruta del directorio del proyecto copiada; el trabajo está en {{branch}}",
-    "workdir_path_copy_failed": "No se ha podido copiar la ruta del directorio de trabajo",
-    "workdir_path_unavailable": "Aún no hay directorio de trabajo local; ningún agente local ha ejecutado esta tarea",
+    "workdir_path_copy_failed": "No se pudo copiar la ruta del directorio de trabajo",
+    "workdir_path_unavailable": "Aún no hay directorio de trabajo local: esta tarea no ha sido ejecutada por un agente local",
     "pull_requests_empty_title": "Sin pull requests enlazados.",
     "pull_request_verdict_conflicting": "Conflictos",
     "pull_request_verdict_ready": "Listo",
@@ -585,15 +581,40 @@
     "quick_jump_label": "Navegación rápida",
     "description_nav_label": "Descripción de la tarea",
     "sub_issues_nav_progress": "{{done}}/{{total}} completadas",
-    "sub_issues_show_more_one": "Mostrar {{count}} más",
-    "sub_issues_show_more_other": "Mostrar {{count}} más",
-    "sub_issues_show_less": "Contraer",
     "thread_nav_show_replies_one": "Mostrar {{count}} respuesta",
     "thread_nav_show_replies_other": "Mostrar {{count}} respuestas",
     "thread_nav_hide_replies": "Ocultar respuestas",
     "load_failed": "No se pudo cargar la tarea.",
     "load_retry": "Reintentar",
-    "not_found_title": "Tarea no encontrada"
+    "not_found_title": "Tarea no encontrada",
+    "guest_readonly_note": "Los invitados pueden ver y comentar, pero no cambiar las propiedades de la tarea.",
+    "open_issue_page": "Abrir la página de la tarea",
+    "add_row": {
+      "wakeups": "Añadir activación",
+      "pull_requests": "Añadir pull request",
+      "environments": "Añadir entorno",
+      "relations": "Añadir relación",
+      "pair": "Añadir {{first}} o {{second}}",
+      "many": "Añadir...",
+      "noun": {
+        "wakeups": "activación",
+        "pull_requests": "pull request",
+        "environments": "entorno",
+        "relations": "relación"
+      },
+      "menu": {
+        "wakeups": "Activación",
+        "pull_requests": "Pull request",
+        "environments": "Entorno",
+        "relations": "Relaciones"
+      }
+    },
+    "footer": {
+      "created": "Creada por {{creator}} · {{date}}",
+      "created_for": "Creada por {{creator}} en nombre de {{requester}} · {{date}}",
+      "created_at": "Creada: {{time}}",
+      "updated_at": "Actualizada: {{time}}"
+    }
   },
   "timeline": {
     "loading": "Cargando...",
@@ -627,6 +648,13 @@
     "squad_leader_no_action_reason": "evaluó: no hacía falta actuar ({{reason}})",
     "squad_leader_failed": "la evaluación falló",
     "squad_leader_failed_reason": "la evaluación falló: {{reason}}",
+    "squad_handoff_to": "se lo pasó a {{name}}",
+    "squad_handoff_human": "pidió a {{name}} que decida",
+    "squad_handoff_leader": "se lo devolvió a {{name}}",
+    "squad_handoff_round": "ronda {{round}}",
+    "squad_handoff_reason_round_limit": "límite de {{limit}} rondas",
+    "squad_handoff_reason_daily_limit": "límite diario de traspasos",
+    "squad_handoff_reason_run_failed": "ejecución fallida",
     "coalesced_badge": "×{{count}}",
     "activity_count_one": "{{count}} actividad",
     "activity_count_other": "{{count}} actividades",
@@ -635,7 +663,7 @@
     "duplicate_marked": "marcó esta tarea como duplicada de {{identifier}}",
     "duplicate_unmarked": "desmarcó esta tarea como duplicada de {{identifier}}",
     "duplicate_unmarked_to": "desmarcó esta tarea como duplicada de {{identifier}} y la movió a {{status}}",
-    "duplicate_unmarked_original_deleted": "quitó la marca de duplicada porque se eliminó {{identifier}}",
+    "duplicate_unmarked_original_deleted": "quitó la marca de duplicado ({{identifier}} se eliminó)",
     "duplicate_added": "marcó {{identifier}} como duplicada de esta tarea",
     "duplicate_removed": "desmarcó {{identifier}} como duplicada de esta tarea",
     "status_changed_pr": "cambió el estado de {{from}} a {{to}} después de que todos los PR enlazados se fusionaran ({{prs}})",
@@ -665,7 +693,11 @@
     "wakeup_created_scheduled": "añadió una activación para {{agent}}: {{condition}}",
     "environment_stopped": "detuvo el entorno {{name}}",
     "environment_restarted": "reinició el entorno {{name}}",
-    "environment_started": "inició el entorno {{name}}"
+    "environment_started": "inició el entorno {{name}}",
+    "task_completed_single": "completó una ejecución",
+    "task_failed_single": "la ejecución falló",
+    "wakeup_child_done_all_single": "La subincidencia finalizó",
+    "wakeup_child_done_stage_single": "La subincidencia de la etapa {{stage}} finalizó"
   },
   "comment": {
     "add_reaction": "Añadir reacción",
@@ -695,12 +727,12 @@
     "posted_partial_trigger_named": "Comentario publicado, pero {{name}} no se activó ({{reason}})",
     "trigger_blocked_chip_aria": "{{name}} no se activará: {{reason}}",
     "trigger_blocked_invocation_not_allowed": "No se encuentra este destino o no tienes permiso para usarlo",
-    "trigger_blocked_target_unavailable": "Este destino no está disponible",
+    "trigger_blocked_target_unavailable": "No se encuentra este agente o squad: actualiza la página e inténtalo de nuevo.",
     "trigger_blocked_runtime_offline": "El runtime de este destino está desconectado",
     "trigger_blocked_runtime_unusable": "La CLI del agente de este destino no puede ejecutarse en su máquina; reinstálala allí",
-    "trigger_blocked_runtime_profile_missing": "A la CLI del agente de este destino le falta un perfil de runtime en su máquina; instálalo allí",
+    "trigger_blocked_runtime_profile_missing": "A la CLI de este agente le falta una configuración de runtime en su máquina: instálala allí.",
     "trigger_blocked_agent_runtime_required": "Este destino no tiene runtime; vincula uno para ejecutarlo",
-    "trigger_blocked_runtime_access_denied": "El agente de este destino no puede ejecutarse en su runtime privado; haz el runtime público o reenlaza o copia el agente a uno que su propietario pueda usar",
+    "trigger_blocked_runtime_access_denied": "No se puede acceder al runtime privado de este agente: haz que el runtime sea público o vincula el agente a un runtime accesible.",
     "trigger_blocked_generic": "Este destino no se activará",
     "trigger_blocked_short_invocation_not_allowed": "No encontrado o sin permiso",
     "trigger_blocked_short_target_unavailable": "No disponible",
@@ -739,7 +771,7 @@
     "trigger_chip_aria": "Activador de {{name}}: {{state}}",
     "resolve": {
       "resolve_thread_action": "Resolver conversación",
-      "unresolve_thread_action": "Reabrir conversación",
+      "unresolve_thread_action": "Reabrir hilo",
       "resolve_with_comment_action": "Resolver conversación con un comentario",
       "unresolve_action": "Reabrir",
       "resolution_badge": "Resolución",
@@ -767,12 +799,14 @@
     "recipient_state_queued": "En cola",
     "recipient_count_one": "{{count}} agente recibirá esto",
     "recipient_count_other": "{{count}} agentes recibirán esto",
-    "steer_attachment_notice": "Solo el texto puede unirse a una ejecución en marcha, así que un mensaje con archivos se procesa después.",
+    "steer_attachment_notice": "Solo se puede añadir texto a una ejecución activa; los mensajes con archivos se atienden cuando termine.",
     "restart_send": "Detener y enviar",
     "restart_failed": "No se ha podido detener la ejecución actual. Tu mensaje no se envió.",
     "reply_action": "Responder",
     "actions_label": "Acciones del comentario",
-    "create_issue_from_selection": "Crear subtarea a partir de la selección"
+    "create_issue_from_selection": "Crear subtarea a partir de la selección",
+    "guest_placeholder": "Responder… puedes mencionar a miembros con @",
+    "guest_hint": "Los invitados no pueden mencionar agentes ni asignarles tareas"
   },
   "reply": {
     "recipients_changed": "El destino de la respuesta ha cambiado. Revisa los destinatarios antes de volver a enviar.",
@@ -831,8 +865,20 @@
     "clear_button": "Limpiar filtros",
     "unread_title": "No hay tareas sin leer"
   },
+  "presence": {
+    "viewing_one": "{{count}} viendo",
+    "viewing_other": "{{count}} viendo",
+    "editing": "Editando",
+    "watching": "Viendo",
+    "where": "En «{{section}}»",
+    "more_one": "{{count}} más: {{names}}",
+    "more_other": "{{count}} más: {{names}}",
+    "name_separator": ", ",
+    "jump_hint": "Haz clic en un nombre para ir a su cursor"
+  },
   "agent_live": {
     "is_working": "{{name}} está trabajando",
+    "is_working_round": "{{label}} · ronda {{round}}",
     "is_queued": "{{name}} está en cola",
     "is_waiting_local_directory": "{{name}} está esperando el directorio local",
     "queued_elapsed_prefix": "en cola desde hace {{elapsed}}",
@@ -842,7 +888,7 @@
     "transcript_button": "Ver transcripción",
     "stop_button": "Detener",
     "stop_tooltip": "Detener agente",
-    "cancel_failed": "No se ha podido cancelar la ejecución"
+    "cancel_failed": "No se pudo detener la ejecución"
   },
   "execution_log": {
     "latest": "Recientes",
@@ -883,9 +929,9 @@
       "source_comment_source": "Desde una conversación de comentarios",
       "source_trigger_owner": "Creador del disparador de la automatización",
       "source_rule_owner": "Publicador de la regla de la automatización",
-      "source_owner_fallback": "Sin responsable concreto; atribuido al propietario del agente",
-      "source_backfill": "Atribución rellenada a posteriori",
-      "source_unattributed": "No se determinó un miembro responsable"
+      "source_owner_fallback": "Atribuido al propietario del agente (predeterminado)",
+      "source_backfill": "Atribución histórica",
+      "source_unattributed": "No se encontró ningún miembro responsable"
     },
     "usage_total_tooltip": "Abrir la cronología de ejecuciones",
     "trigger_wakeup": "Activación · {{condition}}",
@@ -895,8 +941,6 @@
     "open_timeline": "Abrir línea temporal",
     "more_runs_one": "{{count}} más",
     "more_runs_other": "{{count}} más",
-    "strip_aria": "Coste acumulado a lo largo del tiempo; abre la línea temporal de ejecuciones",
-    "strip_no_usage": "Sin uso registrado",
     "jump_to_run": "Ir a la ejecución",
     "queued_count_one": "{{count}} en cola",
     "queued_count_other": "{{count}} en cola"
@@ -1003,13 +1047,15 @@
     "remove_parent_issue": "Quitar tarea principal",
     "remove_parent_issue_success": "Tarea principal quitada",
     "add_sub_issue": "Añadir subtarea...",
+    "add_blocker": "Esperar a otra tarea...",
+    "add_blocking": "Bloquear otra tarea...",
     "delete_issue": "Eliminar tarea",
     "mark_duplicate": "Marcar como duplicada...",
     "rename_issue": "Renombrar tarea",
     "restore_to_inbox": "Restaurar en la bandeja de entrada",
     "mark_read": "Marcar como leído",
     "mark_unread": "Marcar como no leído",
-    "copy_identifier": "Copiar identificador",
+    "copy_identifier": "Copiar ID de tarea",
     "identifier_copied": "{{identifier}} copiado",
     "stop_agent_run": "Detener la ejecución de {{name}}",
     "open_in_new_window": "Abrir en una ventana nueva"
@@ -1041,11 +1087,10 @@
     "assignee": {
       "trigger_unassigned": "Sin asignar",
       "search_placeholder": "Asignar a...",
+      "recent_group": "Recientes",
       "members_group": "Miembros",
       "agents_group": "Agentes",
-      "squads_group": "Squads",
-      "agent_runtime_required": "Vincula un runtime antes de asignar trabajo a este agente",
-      "squad_runtime_required": "Vincula un runtime al líder de este squad antes de asignar trabajo"
+      "squads_group": "Squads"
     },
     "start_date": {
       "trigger_label": "Fecha de inicio",
@@ -1166,7 +1211,6 @@
     "ended": "Historial de activaciones {{count}}",
     "waiting_event": "Esperando el disparador",
     "triggered_by_wakeup": "Activada por una activación",
-    "upcoming": "{{count}} reglas de activación activadas",
     "more": "{{count}} más",
     "toggle": "Activación de {{agent}}",
     "enable_error": "No se ha podido activar la activación. Inténtalo de nuevo.",
@@ -1175,7 +1219,7 @@
     "reschedule": "Establecer una hora nueva",
     "future_time": "Elige una hora futura.",
     "local_time": "Hora ({{timezone}})",
-    "closed_hint": "Las activaciones no se pueden activar mientras esta tarea esté completada o cancelada.",
+    "closed_hint": "No se pueden habilitar activaciones mientras esta tarea esté completada o cancelada.",
     "completed": "Completada",
     "expired": "Caducada",
     "disabled_state": "Desactivada",
@@ -1189,11 +1233,11 @@
     "scheduled_time": "Activar a la hora programada",
     "every_hours": "Activar cada {{hours}} horas",
     "every_seconds": "Activar cada {{seconds}} segundos",
-    "edit_instruction": "Editar instrucción",
+    "edit_instruction": "Editar instrucciones",
     "instruction_effect": "Las activaciones futuras usarán estas instrucciones. Las ejecuciones ya en curso no se ven afectadas.",
-    "instruction_loading": "Cargando instrucción...",
-    "instruction_invalid": "Introduce instrucciones de como máximo 12.000 bytes UTF-8.",
-    "instruction_save_error": "No se ha podido guardar la instrucción.",
+    "instruction_loading": "Cargando instrucciones...",
+    "instruction_invalid": "Las instrucciones deben ocupar menos de 12 000 bytes.",
+    "instruction_save_error": "No se pudieron guardar las instrucciones.",
     "instruction_cancel": "Cancelar",
     "instruction_save": "Guardar",
     "instruction_saving": "Guardando...",
@@ -1201,9 +1245,9 @@
     "scope_title": "Ámbito supervisado",
     "scope_current": "Esta tarea",
     "any_event": "Cuando ocurra cualquiera de estos eventos",
-    "execution_summary": "Esta ejecución: {{state}}",
+    "execution_summary": "Ejecución actual: {{state}}",
     "recent_execution": "Última ejecución: {{state}}",
-    "stopped_running": "Activaciones futuras desactivadas · Hay una ejecución sin terminar",
+    "stopped_running": "Activaciones futuras desactivadas · Hay una ejecución aún en curso",
     "next_at": "Siguiente: {{time}}",
     "no_run": "Aún no se ha ejecutado",
     "permission_error": "No puedes gestionar esta activación. Contacta con su creador o con un administrador del espacio de trabajo.",
@@ -1303,7 +1347,6 @@
       "members": "Miembros",
       "agents": "Agentes",
       "any_agent": "Cualquier agente",
-      "events_selected": "{{count}} eventos",
       "instruction_placeholder": "Por ejemplo: comprueba el resultado y continúa si parece correcto",
       "trigger_count": "Disparadores",
       "max_wait": "Esperar hasta",
@@ -1329,8 +1372,8 @@
       "cond_field_hint": "Estado, asignado, etiqueta, propiedad",
       "cond_children": "Terminan las subtareas",
       "cond_children_hint": "Todas, o una etapa",
-      "cond_pr": "Termina la CI de un PR enlazado",
-      "cond_pr_hint": "O se fusiona",
+      "cond_pr": "Se actualiza un PR enlazado",
+      "cond_pr_hint": "Termina la CI, se fusiona o tiene conflictos",
       "cond_issue": "El estado de otra tarea",
       "cond_issue_hint": "p. ej. cuando esté hecha",
       "field_status": "Estado",
@@ -1363,19 +1406,14 @@
       "unchecked": "Sin marcar",
       "assignee_comment_hint": "{{name}} es el asignado y ya se ejecuta cuando un miembro comenta. Esta regla se une a esa ejecución en lugar de iniciar otra; añádela solo para darle una instrucción extra a esa ejecución.",
       "pr_conflicts": "Tiene conflictos de fusión",
-      "other_blocked": "pasa a Bloqueado"
+      "other_blocked": "pasa a Bloqueado",
+      "events_selected_one": "{{count}} evento",
+      "events_selected_other": "{{count}} eventos"
     },
     "system": {
       "badge": "Sistema",
       "title_stage": "Cuando terminan todas las subtareas de la etapa {{stage}}",
       "title_all": "Cuando terminan todas las subtareas",
-      "wake_assignee": "Activar al asignado {{name}}",
-      "remaining_one": "{{count}} pendientes",
-      "remaining_other": "{{count}} pendientes",
-      "blocked_backlog": "La tarea está en backlog; sin activación por ahora",
-      "blocked_member": "El asignado es un miembro; recibe una notificación en la bandeja de entrada",
-      "blocked_none": "No hay agente asignado; nadie se activa",
-      "turned_off": "Desactivada para esta tarea",
       "target_title": "Activa a",
       "target_current": "Asignado (actualmente {{name}})",
       "target_none": "El asignado: se activa a un agente o squad, o se notifica a un miembro",
@@ -1390,14 +1428,19 @@
       "save_error": "No se ha podido guardar la regla del sistema.",
       "default_on": "Activada por defecto en este espacio de trabajo.",
       "default_off": "Desactivada por defecto en este espacio de trabajo.",
-      "notify_member": "Notificar a {{name}} en su bandeja de entrada",
       "instruction": "Qué hacer al activarse",
       "instruction_edit": "Editar instrucción",
       "instruction_default": "Sin definir en esta tarea; usa el valor por defecto:",
       "instruction_placeholder": "Déjalo vacío para usar el valor por defecto",
-      "instruction_invalid": "Mantén la instrucción dentro de 4.000 bytes.",
+      "instruction_invalid": "Las instrucciones deben ocupar menos de 4000 bytes.",
       "paused": "Pausada: {{reason}}",
-      "default_change": "Cambiar el valor por defecto"
+      "default_change": "Cambiar el valor por defecto",
+      "chip_wake": "Activa a {{name}} al terminar",
+      "chip_notify": "Avisa a {{name}} al terminar",
+      "chip_assignee": "Activa al responsable al terminar",
+      "chip_off": "Activación al terminar desactivada",
+      "blocked_backlog": "La tarea está en backlog; sin activación por ahora",
+      "blocked_none": "No hay agente asignado; nadie se activa"
     },
     "cond": {
       "status": "Cuando esta tarea pasa a {{status}}",
@@ -1470,6 +1513,15 @@
       "max_fires": "alcanzó su límite de {{count}} ejecuciones",
       "loop": "seguía activando reglas que la volvían a activar",
       "rate": "más de 12 ejecuciones en una hora"
+    },
+    "upcoming_one": "{{count}} regla de activación activa",
+    "upcoming_other": "{{count}} reglas de activación activadas",
+    "short": {
+      "at_time": "{{time}}",
+      "scheduled_time": "A la hora programada",
+      "hourly": "Cada hora",
+      "every_hours": "Cada {{hours}} horas",
+      "every_seconds": "Cada {{seconds}} segundos"
     }
   },
   "duplicates": {
@@ -1506,7 +1558,8 @@
     "unlinked_moved": "{{pr}} eliminado. Todos los PR restantes están fusionados, así que la tarea pasó a {{status}}.",
     "waiting_to_one": "Pasa a {{status}} cuando {{prs}} se fusione",
     "waiting_to_other": "Pasa a {{status}} cuando {{prs}} se fusionen",
-    "all_merged_to": "Todos los PR fusionados. El próximo PR fusionado mueve esta tarea a {{status}}."
+    "all_merged_to": "Todos los PR fusionados. El próximo PR fusionado mueve esta tarea a {{status}}.",
+    "on_merge_to": "Al fusionar → {{status}}"
   },
   "working_filter_error": {
     "title": "No se han podido cargar las tareas con agentes trabajando"
@@ -1716,7 +1769,6 @@
       "target_squad": "Squad · el líder reparte",
       "target_member": "Miembro",
       "instructions_hint": "Se envía al responsable con esta ejecución, junto con la descripción y los comentarios de la tarea.",
-      "next_hint": "El responsable mueve la tarea por su cuenta y solo la devuelve para rehacer trabajo, no por bloqueos. Que una ejecución termine nunca cambia el estado.",
       "preview_brief": "Ver el encargo del agente",
       "preview_title": "Encargo del paso “{{status}}”",
       "preview_description": "Lo que recibe la ejecución del responsable cuando una tarea entra en este paso. No hace falta guardar los cambios para verlo.",
@@ -1822,7 +1874,7 @@
       "next_default": "Siguiente columna ({{status}})",
       "saved": "Traspaso guardado",
       "error": "No se ha podido guardar el traspaso",
-      "read_only": "Los traspasos pertenecen al flujo de trabajo; los cambian su propietario y los administradores del espacio de trabajo.",
+      "read_only": "Los traspasos pertenecen al flujo de trabajo; solo su propietario y los administradores del espacio de trabajo pueden cambiarlos.",
       "to": "Traspasar a",
       "members": "Miembros",
       "mode_none": "Sin traspaso",
@@ -1905,8 +1957,7 @@
       "all_issues": "Todas las tareas",
       "my_work": "Mi trabajo",
       "working": "En ejecución",
-      "subscribed": "Suscritas",
-      "snoozed": "Pospuestos"
+      "subscribed": "Suscritas"
     },
     "untitled": "Vista sin título",
     "copy_name": "{{name}} (copia)",
@@ -1986,7 +2037,8 @@
       "pending": "En espera",
       "approved": "Aprobada",
       "rejected": "Rechazada",
-      "rate_limited": "Límite de llamadas alcanzado"
+      "rate_limited": "Límite de llamadas alcanzado",
+      "quota_exceeded": "Límite mensual alcanzado"
     }
   },
   "environments": {
@@ -2098,10 +2150,46 @@
     "app_remote_hint": "Se ejecuta en {{machine}}. Cambia a su ventana desde Multica Desktop en esa máquina.",
     "focus": "Ir a la ventana",
     "focus_gone": "{{name}} ya no se está ejecutando",
-    "focus_unsupported": "El daemon de esta máquina aún no puede cambiar a ventanas de apps. Actualiza Multica e inténtalo de nuevo.",
-    "focus_unavailable": "El daemon local no se está ejecutando",
+    "focus_unsupported": "Multica en esta máquina aún no puede cambiar a ventanas de aplicaciones. Actualiza Multica e inténtalo de nuevo.",
+    "focus_unavailable": "El servicio local de Multica no está en ejecución",
     "focus_failed": "No se pudo cambiar a {{name}}",
     "retry": "Reintentar",
     "dismiss": "Descartar"
+  },
+  "relations": {
+    "title": "Relaciones",
+    "add": "Añadir relación",
+    "wait_title": "Esperar a otra tarea",
+    "block_title": "Bloquear otra tarea",
+    "blocked_by": "Bloqueada por",
+    "blocking": "Bloqueando",
+    "stage_tag": "Etapa",
+    "stage_tag_hint": "Lo fijan las etapas de la tarea principal",
+    "add_blocker_hint": "Esta tarea empieza cuando termine",
+    "add_blocking_hint": "Empieza cuando termine esta tarea",
+    "mark_duplicate_hint": "Cancela esta tarea",
+    "blocking_picker_hint": "Selecciona una tarea que no pueda empezar hasta que termine esta."
+  },
+  "waiting": {
+    "remove": "Quitar {{identifier}}",
+    "count": "Esperando {{count}} tareas",
+    "count_one": "Esperando {{count}} tarea",
+    "count_other": "Esperando {{count}} tareas",
+    "hint": "Al terminar estas tareas, el responsable comienza automáticamente o recibe una notificación.",
+    "hint_backlog": "Esta tarea está en Backlog, así que no comenzará automáticamente cuando terminen estas tareas. Comenzará cuando salga de Backlog.",
+    "picker_hint": "Selecciona una tarea que deba terminar antes que esta.",
+    "restricted": "{{count}} requisitos restringidos",
+    "ended": "Las tareas en espera terminaron",
+    "marker_title": "Bloqueada por {{count}} tareas",
+    "marker_title_one": "Bloqueada por {{count}} tarea",
+    "marker_title_other": "Bloqueada por {{count}} tareas",
+    "marker_ended": "{{finished}}/{{total}} terminadas",
+    "marker_more": "{{count}} más",
+    "marker_more_one": "{{count}} más",
+    "marker_more_other": "{{count}} más",
+    "marker_auto_start": "{{name}} comenzará automáticamente cuando terminen.",
+    "marker_notify": "{{name}} recibirá una notificación cuando terminen.",
+    "marker_unavailable": "{{name}} no puede ejecutarse ahora, así que nada comenzará cuando terminen.",
+    "marker_unassigned": "Sin responsable: nada comenzará cuando terminen."
   }
 }

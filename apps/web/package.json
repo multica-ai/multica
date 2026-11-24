@@ -1,6 +1,6 @@
 {
   "name": "@multica/web",
-  "version": "0.10.0",
+  "version": "0.12.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
+    "typegen": "next typegen",
     "lint": "eslint .",
     "test": "vitest run",
     "mdx": "fumadocs-mdx",

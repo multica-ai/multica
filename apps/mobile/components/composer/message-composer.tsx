@@ -70,6 +70,7 @@ import {
   type MentionChip,
 } from "@/components/issue/composer-attachment-row";
 import { useT } from "@/lib/i18n";
+import { isStorageLimitReached } from "@/lib/upload-error";
 
 export interface MessageComposerReplyTarget {
   actorName: string;
@@ -353,8 +354,11 @@ export function MessageComposer({
           ),
         );
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : t("common:states.error");
+        const message = isStorageLimitReached(err)
+          ? t("editor:upload.storage_full_title")
+          : err instanceof Error
+            ? err.message
+            : t("common:states.error");
         setAttachments((prev) =>
           prev.map((it) =>
             it.localId === localId

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
@@ -14,7 +14,8 @@ import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-st
 import { projectListOptions } from "@multica/core/projects/queries";
 import type { Project } from "@multica/core/types";
 import { resolveClickIntent, useHeldUntilArrival, useNavigation } from "../../navigation";
-import { useSidebarInboxIssue } from "../../inbox/components/use-sidebar-inbox-issue";
+import { AutoArchivePromptDialog } from "../../inbox/components/auto-archive-prompt-dialog";
+import { inboxTabFromParam } from "../../inbox/components/inbox-view";
 import { IssueContextMenuProvider } from "../../issues/actions";
 import { useIssueViewActions } from "../../issue-views/use-view-actions";
 import { useT } from "../../i18n";
@@ -40,7 +41,7 @@ interface ClickedIssue {
  * The `{id}` of a `{base}/{id}` route — for `/issues/{id}`, a UUID or an
  * identifier like `MUL-123`.
  */
-function routeSegment(pathname: string, base: string): string | null {
+export function routeSegment(pathname: string, base: string): string | null {
   if (!pathname.startsWith(base + "/")) return null;
   const segment = pathname.slice(base.length + 1).split("/")[0];
   return segment ? decodeURIComponent(segment) : null;
@@ -65,13 +66,29 @@ export function KeptRowsRelease() {
   // `undefined` while an identifier route waits for the page to load its issue.
   const issueId = issueSegment ? (issue?.id ?? (isIssueUuid(issueSegment) ? issueSegment : undefined)) : null;
   const projectId = routeSegment(pathname, p.projects());
-  // The notification the Inbox page has open, as its rows are keyed.
-  const inboxKey = pathname === p.inbox() ? searchParams.get("issue") : null;
+  // The notification the Inbox page has open, as its rows are keyed. Only the
+  // live Inbox tab keeps open rows in place; archived/snoozed selections must
+  // not hold or ghost rows in the live Inbox list.
+  const onInbox = pathname === p.inbox();
+  const pageKey = onInbox ? searchParams.get("issue") : null;
+  const inboxKey = onInbox && inboxTabFromParam(searchParams.get("view")) === "inbox" ? pageKey : null;
+  const wasOnInbox = useRef(false);
   useLayoutEffect(() => {
+    if (wsId && !onInbox) useInboxSelectionStore.getState().clearSectionTabSync(wsId);
     if (issueId === undefined) return;
     useSidebarKeptStore.getState().release([issueId, projectId].filter((id) => id !== null));
-    if (wsId) useInboxSelectionStore.getState().releaseRows(wsId, [issueId, inboxKey].filter((id) => id !== null));
-  }, [wsId, issueId, projectId, inboxKey]);
+    if (wsId) {
+      const store = useInboxSelectionStore.getState();
+      store.releaseRows(wsId, [issueId, inboxKey].filter((id) => id !== null));
+      // Keep the Inbox Zero undo context only while on /inbox, or while the
+      // just-cleared issue is still handing off its navigation to /inbox.
+      const lastCleared = store.lastClearedByWorkspace[wsId];
+      if (lastCleared && !onInbox && (wasOnInbox.current || issueId !== lastCleared.key)) {
+        store.clearLastCleared(wsId);
+      }
+    }
+    wasOnInbox.current = onInbox;
+  }, [wsId, issueId, projectId, inboxKey, onInbox, pageKey]);
   return null;
 }
 
@@ -113,28 +130,17 @@ export function WorkPanel() {
     liveClickedIssue,
     !!liveClickedIssue && !isOpenIssue(liveClickedIssue.segment),
   );
-  // An issue opened from the Inbox, by a row or by the issue header moving on
-  // to the next notification, belongs to the Inbox until another list is
-  // clicked. Its row stays in place while it is open (`keepOpenInboxRow`),
-  // and when an Inbox action took it with nothing left to open it lights
-  // nowhere: never in another list the user did not open it from.
-  const inbox = useSidebarInboxIssue(wsId, currentIssueId, clicked.movingOn);
   const clickedIssue = clicked.value;
   const clickedList = clickedIssue && isOpenIssue(clickedIssue.segment) ? clickedIssue.list : undefined;
-  // The notification open beside the section: an issue opened from it, or an
-  // issue-less one on the Inbox page.
+  // The live notification open on the Inbox page beside the section. Every
+  // Inbox row opens there, so an issue page — or an archived/snoozed item — is
+  // never a live Inbox row.
   const inboxOpenKey =
-    pathname === p.inbox()
+    pathname === p.inbox() && inboxTabFromParam(searchParams.get("view")) === "inbox"
       ? searchParams.get("issue")
-      : currentIssueId && inbox.fromInbox
-        ? currentIssueId
-        : null;
+      : null;
   const inboxRows = useInboxSectionRows(wsId, inboxOpenKey);
-  const rememberSidebarIssue = useInboxSelectionStore((s) => s.rememberSidebarIssue);
-  const rememberSidebarTabIssue = useInboxSelectionStore((s) => s.rememberSidebarTabIssue);
-  const forgetSidebarTabIssue = useInboxSelectionStore((s) => s.forgetSidebarTabIssue);
-  const inboxClaimsIssue = !!currentIssueId && inbox.fromInbox && !inboxRows.collapsed;
-  const treeClaimsIssue = inboxClaimsIssue || (clickedList !== undefined && clickedList !== PINS_LIST);
+  const treeClaimsIssue = clickedList !== undefined && clickedList !== PINS_LIST;
   const pins = usePanelPins(wsId, userId, pathname, treeClaimsIssue ? null : currentIssueId);
   const requestLocate = useSidebarTreeStore((s) => s.requestLocate);
   const rememberClickedIssue = (event: React.MouseEvent) => {
@@ -143,27 +149,21 @@ export function WorkPanel() {
     const link = (event.target as HTMLElement).closest("a[href]");
     if (!link) return;
     const path = new URL(link.getAttribute("href") ?? "", window.location.href).pathname;
-    const segment = routeSegment(path, p.issues());
     // An Inbox row's hover card renders in a portal, outside the row's list.
     const list = link.closest("[data-pinned-section]")
       ? PINS_LIST
       : link.closest("[data-inbox-card]")
         ? INBOX_LIST
         : (link.closest("[data-sidebar-list]")?.getAttribute("data-sidebar-list") ?? null);
+    // Inbox and tree links open the issue at its identifier; the lists
+    // record, and the issue header compares, the issue's id.
+    const segment = link.getAttribute("data-issue-id") || routeSegment(path, p.issues());
     // A click that opens a tab or window, as AppLink resolves it, leaves this
-    // page and its records where they are. A desktop tab shares this page's
-    // store, so an issue the Inbox opens there is recorded beside them.
-    if (resolveClickIntent(event) !== "push" || (event.shiftKey && !openInNewTab)) {
-      if (openInNewTab && segment && wsId && list === INBOX_LIST) rememberSidebarTabIssue(wsId, segment);
-      return;
-    }
+    // page and its records where they are.
+    if (resolveClickIntent(event) !== "push" || (event.shiftKey && !openInNewTab)) return;
     requestLocate(null);
-    setClickedIssue(segment ? { segment, list } : null);
-    // Inbox rows link by issue id, which is what the issue header compares.
-    if (segment && wsId) {
-      rememberSidebarIssue(wsId, list === INBOX_LIST ? segment : null);
-      forgetSidebarTabIssue(wsId, segment);
-    }
+    // An Inbox row opens the Inbox page, not an issue page.
+    setClickedIssue(segment && list !== INBOX_LIST ? { segment, list } : null);
   };
 
   const { projectSettings, projectOrder } = useSidebarProjectPrefs(wsId ?? "");
@@ -200,19 +200,18 @@ export function WorkPanel() {
     ...(showNoProject ? [NO_PROJECT_SIDEBAR_SOURCE] : []),
   ];
   const litSource =
-    !plainRowsLit || !currentIssueId || inboxClaimsIssue
+    !plainRowsLit || !currentIssueId
       ? null
       : clickedList && listing.includes(clickedList)
         ? clickedList
         : issueHomeExpanded
           ? issueHomeSource
           : (listOrder.find((source) => listing.includes(source)) ?? null);
-  const locatedSource = plainRowsLit && !inboxClaimsIssue && !litSource ? issueHomeSource : null;
+  const locatedSource = plainRowsLit && !litSource ? issueHomeSource : null;
   // An issue in a project the panel hides, or under the collapsed Projects
   // section, stays unmarked rather than lighting a list that may not show it.
   const issueInAllIssues =
     plainRowsLit &&
-    !inboxClaimsIssue &&
     !!currentIssue &&
     !currentIssue.project_id &&
     litSource === null &&
@@ -235,20 +234,16 @@ export function WorkPanel() {
           through the React tree, and must not reach rememberClickedIssue. */}
       <IssueContextMenuProvider variant="sidebar">
         <PanelBody onClickCapture={rememberClickedIssue} onAuxClickCapture={rememberClickedIssue}>
+          {wsId && <PinnedSection pins={pins} wsId={wsId} />}
+
           {wsId && (
             <InboxSection
               wsId={wsId}
               rows={inboxRows}
               pathname={pathname}
-              activeIssueId={inboxClaimsIssue ? currentIssueId : null}
             />
           )}
-
-          {wsId && (
-            <div data-pinned-section className="contents">
-              <PinnedSection pins={pins} wsId={wsId} />
-            </div>
-          )}
+          {wsId && <AutoArchivePromptDialog wsId={wsId} active={!!inboxOpenKey} />}
 
           {wsId && (
             <ViewsSection

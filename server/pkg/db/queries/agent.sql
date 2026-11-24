@@ -360,7 +360,7 @@ WITH enqueue_agent AS MATERIALIZED (
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
     coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
-    squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    squad_id, usage_squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id, trigger_evidence_kind, trigger_evidence_ref_id,
     workflow_step, fire_at, id
 )
@@ -374,6 +374,7 @@ SELECT
     COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE),
     sqlc.narg(handoff_note),
     sqlc.narg(squad_id),
+    sqlc.narg(usage_squad_id),
     NULLIF(CASE
         WHEN COALESCE(sqlc.narg('head_sha')::text, '') <> ''
         THEN jsonb_build_object('head_sha', sqlc.narg('head_sha')::text)
@@ -422,7 +423,7 @@ WITH enqueue_agent AS MATERIALIZED (
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
     coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
-    squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    squad_id, usage_squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id,
     trigger_evidence_kind, trigger_evidence_ref_id, fire_at,
     workflow_step, id
@@ -435,6 +436,7 @@ SELECT
     COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE),
     sqlc.narg(handoff_note),
     sqlc.narg(squad_id),
+    sqlc.narg(usage_squad_id),
     jsonb_strip_nulls(jsonb_build_object(
         'head_sha', NULLIF(COALESCE(sqlc.narg('head_sha')::text, ''), ''),
         'channel_issue_media_pending', TRUE
@@ -496,13 +498,14 @@ WITH enqueue_agent AS MATERIALIZED (
     FOR KEY SHARE OF a
 )
 INSERT INTO agent_task_queue (
-    agent_id, runtime_id, issue_id, status, priority, context, originator_user_id,
+    agent_id, runtime_id, issue_id, status, priority, context, usage_squad_id, originator_user_id,
     accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
     id
 )
 SELECT
     sqlc.arg(agent_id), enqueue_agent.runtime_id, NULL, 'queued', sqlc.arg(priority), sqlc.narg(context),
+    sqlc.narg(usage_squad_id),
     sqlc.narg(originator_user_id),
     sqlc.narg(accountable_user_id),
     sqlc.narg(runtime_mcp_overlay),
@@ -539,8 +542,10 @@ WHERE id = $1 AND issue_id IS NULL
 -- Claims fence on agent.runtime_id = task.runtime_id, so a retry stamped with a
 -- runtime the agent moved off while the parent ran would be claimable by neither
 -- daemon (#10717); UpdateAgent re-stamps only rows queued at switch time. An
--- unbound agent keeps the parent's runtime. Resume needs no change here: claim
--- resumes a session only on the runtime that recorded it.
+-- unbound agent keeps the parent's runtime. A retry that moves leaves the
+-- parent's session behind: it belongs to the runtime that recorded it, and an
+-- attempt that ends before reporting its own would file it under the new one,
+-- where the next claim would be told to resume it.
 --
 -- Keep work_dir for every retry, but clear resume context for unsafe sessions.
 -- Keep failure predicates aligned with resumeUnsafeFailureReason and resume lookups.
@@ -555,10 +560,11 @@ WHERE id = $1 AND issue_id IS NULL
 -- ceiling; it does not re-enable tasks whose retry budget was disabled.
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
+    doc_id, doc_thread_id, doc_comment_id,
     status, priority, trigger_comment_id, coalesced_comment_ids, trigger_summary, context,
     session_id, work_dir,
     attempt, max_attempts, parent_task_id, force_fresh_session, is_leader_task,
-    squad_id, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    squad_id, usage_squad_id, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     originator_source, delegated_from_task_id, rule_version_id,
     trigger_evidence_kind, trigger_evidence_ref_id, retry_of_task_id,
     chat_input_task_id, fire_at,
@@ -566,15 +572,19 @@ INSERT INTO agent_task_queue (
 )
 SELECT
     p.agent_id, COALESCE(a.runtime_id, p.runtime_id), p.issue_id, p.chat_session_id, p.autopilot_run_id,
+    p.doc_id, p.doc_thread_id, p.doc_comment_id,
     CASE WHEN sqlc.narg(fire_at)::timestamptz IS NOT NULL THEN 'deferred' ELSE 'queued' END,
     CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
     p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context,
-    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.session_id END,
+    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity'
+              OR COALESCE(a.runtime_id, p.runtime_id) IS DISTINCT FROM p.runtime_id THEN NULL
+         ELSE p.session_id END,
     p.work_dir,
     p.attempt + 1, COALESCE(sqlc.narg(max_attempts)::int, p.max_attempts), p.id,
     p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
     p.is_leader_task,
     p.squad_id,
+    p.usage_squad_id,
     p.originator_user_id,
     p.accountable_user_id,
     sqlc.narg(runtime_mcp_overlay),
@@ -617,14 +627,14 @@ UPDATE agent_task_queue SET workflow_step = @workflow_step WHERE id = @id;
 -- CreateRetryTask, the run is stamped with the agent's current runtime (#10717).
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, status, priority, context,
-    force_fresh_session, is_leader_task, squad_id,
+    force_fresh_session, is_leader_task, squad_id, usage_squad_id,
     originator_user_id, accountable_user_id,
     runtime_mcp_overlay, runtime_connected_apps,
     originator_source, rerun_of_task_id, id
 )
 SELECT
     p.agent_id, COALESCE(a.runtime_id, p.runtime_id), 'queued', p.priority, p.context,
-    TRUE, p.is_leader_task, p.squad_id,
+    TRUE, p.is_leader_task, p.squad_id, p.usage_squad_id,
     sqlc.arg(actor_user_id), sqlc.arg(actor_user_id),
     sqlc.narg(runtime_mcp_overlay), sqlc.narg(runtime_connected_apps),
     'direct_human', p.id, sqlc.arg(new_task_id)
@@ -816,6 +826,7 @@ WHERE atq.id = $1 AND a.workspace_id = $2;
 -- already dispatched or running. This allows different agents to work on the same
 -- issue in parallel while preventing a single agent from running duplicate tasks.
 -- Chat tasks (issue_id IS NULL) use chat_session_id for serialization instead.
+-- Doc discussion tasks serialize per (doc, agent), the scope of their session.
 -- Quick-create tasks have no issue / chat / autopilot link, so they serialize on
 -- "any other quick-create-shaped task" (all four FKs NULL) for the same agent —
 -- otherwise a user mashing the create button could fire concurrent quick-creates
@@ -856,13 +867,16 @@ WHERE id = (
             AND (
               (atq.issue_id IS NOT NULL AND active.issue_id = atq.issue_id)
               OR (atq.chat_session_id IS NOT NULL AND active.chat_session_id = atq.chat_session_id)
+              OR (atq.doc_id IS NOT NULL AND active.doc_id = atq.doc_id)
               OR (
                 atq.issue_id IS NULL
                 AND atq.chat_session_id IS NULL
                 AND atq.autopilot_run_id IS NULL
+                AND atq.doc_id IS NULL
                 AND active.issue_id IS NULL
                 AND active.chat_session_id IS NULL
                 AND active.autopilot_run_id IS NULL
+                AND active.doc_id IS NULL
               )
             )
       )
@@ -1879,6 +1893,9 @@ SET coalesced_comment_ids = (
         FROM unnest(array_append(coalesced_comment_ids, trigger_comment_id)) AS e
         WHERE e IS NOT NULL AND e <> @new_trigger_comment_id::uuid
     ),
+    is_leader_task = CASE WHEN sqlc.narg('new_leader_squad_id')::uuid IS NOT NULL
+        THEN TRUE ELSE is_leader_task END,
+    squad_id = COALESCE(sqlc.narg('new_leader_squad_id')::uuid, squad_id),
     trigger_comment_id = @new_trigger_comment_id::uuid,
     trigger_summary = COALESCE(sqlc.narg('new_trigger_summary'), trigger_summary),
     -- Re-attribution is ATOMIC (MUL-4302): folding a newly-arrived comment moves the
@@ -1901,6 +1918,13 @@ WHERE id = (
     SELECT t.id FROM agent_task_queue t
     WHERE t.context->>'wakeup_id' IS NULL AND t.issue_id = @issue_id
       AND t.agent_id = @agent_id
+      -- An unclaimed generic turn can become a leader turn. Never overwrite
+      -- a worker obligation or a different squad's leader context.
+      AND (
+          sqlc.narg('new_leader_squad_id')::uuid IS NULL
+          OR (t.is_leader_task AND t.squad_id = sqlc.narg('new_leader_squad_id')::uuid)
+          OR (NOT t.is_leader_task AND t.squad_id IS NULL)
+      )
       AND t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id(@new_trigger_comment_id::uuid)
       AND (
           t.status = 'queued'
@@ -1917,6 +1941,7 @@ WHERE id = (
       )
     ORDER BY t.created_at DESC
     LIMIT 1
+    FOR UPDATE OF t
 )
 RETURNING *;
 
@@ -2126,7 +2151,26 @@ FROM comment recovery
 JOIN agent_task_queue failed ON failed.id = recovery.source_task_id
 JOIN agent_task_queue source ON source.id = failed.delegated_from_task_id
 JOIN issue source_issue ON source_issue.id = source.issue_id
-JOIN agent source_agent ON source_agent.id = source.agent_id
+-- A member turn on a direct-handoff squad's own issue recovers to the squad
+-- leader, not to the member that handed the work over. Must match
+-- squadDirectHandoffLeader, which picks the same target at dispatch.
+LEFT JOIN squad direct_squad
+  ON NOT source.is_leader_task
+ AND failed.issue_id = source_issue.id
+ AND source_issue.assignee_type = 'squad'
+ AND direct_squad.id = source_issue.assignee_id
+ AND direct_squad.workspace_id = source_issue.workspace_id
+ AND direct_squad.archived_at IS NULL
+ AND direct_squad.handoff_mode = 'direct'
+ AND direct_squad.leader_id <> source.agent_id
+ AND EXISTS (
+     SELECT 1
+     FROM squad_member direct_member
+     WHERE direct_member.squad_id = direct_squad.id
+       AND direct_member.member_type = 'agent'
+       AND direct_member.member_id = source.agent_id
+ )
+JOIN agent source_agent ON source_agent.id = COALESCE(direct_squad.leader_id, source.agent_id)
 LEFT JOIN issue_status source_status
   ON source_status.workspace_id = source_issue.workspace_id
  AND source_status.key = source_issue.status
@@ -2145,6 +2189,7 @@ WHERE recovery.author_type = 'system'
   AND source.autopilot_run_id IS NULL
   AND source.issue_id IS NOT NULL
   AND source.agent_id <> failed.agent_id
+  AND source_agent.id <> failed.agent_id
   -- Match canDispatchDelegatedFailureRecovery: lifecycle permits recovery only
   -- for open work; parking belongs exclusively to the fixed Backlog status.
   -- Built-ins resolve without catalog rows; unknown custom states stay pending.
@@ -2173,7 +2218,7 @@ WHERE recovery.author_type = 'system'
       SELECT 1
       FROM agent_task_queue covering
       WHERE covering.issue_id = source_issue.id
-        AND covering.agent_id = source.agent_id
+        AND covering.agent_id = source_agent.id
         AND (
             recovery.id = ANY(covering.delivered_comment_ids)
             OR (
@@ -2628,6 +2673,8 @@ WHERE a.workspace_id = $1;
 -- (NULL = workspace); when set it narrows issue work to the direct children
 -- of that issue, so an issue detail's sub-issue header reads the same
 -- projection as the Issues list header instead of deriving its own count.
+-- project_id is optional (NULL = workspace); when set it narrows issue work to
+-- that project's issues, for the project page's working-agents section.
 SELECT
   a.id,
   a.name,
@@ -2695,33 +2742,11 @@ WHERE a.workspace_id = $1
                 AND EXISTS (
                   SELECT 1
                   FROM squad s
+                  JOIN agent leader ON leader.id = s.leader_id
                   WHERE s.id = i.assignee_id
                     AND s.workspace_id = a.workspace_id
-                    AND (
-                      EXISTS (
-                        SELECT 1
-                        FROM squad_member sm
-                        WHERE sm.squad_id = s.id
-                          AND sm.member_type = 'member'
-                          AND sm.member_id = @member_id::uuid
-                      )
-                      OR EXISTS (
-                        SELECT 1
-                        FROM agent leader
-                        WHERE leader.id = s.leader_id
-                          AND leader.workspace_id = a.workspace_id
-                          AND leader.owner_id = @member_id::uuid
-                      )
-                      OR EXISTS (
-                        SELECT 1
-                        FROM squad_member sm
-                        JOIN agent owned_member ON owned_member.id = sm.member_id
-                        WHERE sm.squad_id = s.id
-                          AND sm.member_type = 'agent'
-                          AND owned_member.workspace_id = a.workspace_id
-                          AND owned_member.owner_id = @member_id::uuid
-                      )
-                    )
+                    AND leader.workspace_id = a.workspace_id
+                    AND leader.owner_id = @member_id::uuid
                 )
               )
             )
@@ -2737,6 +2762,16 @@ WHERE a.workspace_id = $1
       WHERE child.id = atq.issue_id
         AND child.workspace_id = a.workspace_id
         AND child.parent_issue_id = @parent_issue_id::uuid
+    )
+  )
+  AND (
+    sqlc.narg('project_id')::uuid IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM issue pi
+      WHERE pi.id = atq.issue_id
+        AND pi.workspace_id = a.workspace_id
+        AND pi.project_id = sqlc.narg('project_id')::uuid
     )
   )
 GROUP BY a.id, a.name, a.avatar_url, a.created_at
@@ -2826,3 +2861,20 @@ RETURNING *;
 
 -- name: GetCommentThreadRootID :one
 SELECT comment_thread_root_id(@comment_id::uuid)::uuid AS id;
+
+-- name: TaskPassedWorkOn :one
+-- Whether a run posted a comment on its issue, started another agent run
+-- there, or left an enabled wakeup waiting on it: a squad leader run that did
+-- none of these ended its squad's chain of handoffs.
+SELECT (
+    EXISTS (
+        SELECT 1 FROM comment c
+        WHERE c.issue_id = @issue_id::uuid AND c.source_task_id = @task_id::uuid
+    ) OR EXISTS (
+        SELECT 1 FROM agent_task_queue t
+        WHERE t.issue_id = @issue_id::uuid AND t.delegated_from_task_id = @task_id::uuid
+    ) OR EXISTS (
+        SELECT 1 FROM issue_wakeup w
+        WHERE w.issue_id = @issue_id::uuid AND w.source_task_id = @task_id::uuid AND w.enabled
+    )
+)::boolean AS passed_on;

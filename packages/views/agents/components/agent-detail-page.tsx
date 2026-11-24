@@ -28,7 +28,10 @@ import {
 } from "@multica/core/agents";
 import { api, ApiError } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
+import { useFeatureEnabled } from "@multica/core/config";
+import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { refreshFeaturesOnLockedError } from "@multica/core/billing";
 import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
@@ -80,12 +83,14 @@ import {
 } from "../../layout/object-page";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
+import { usePaidFeatureErrorMessage } from "../../billing";
 import { availabilityConfig } from "../presence";
 import {
   AgentAdvancedSettings,
   isAdvancedSection,
   type AdvancedSection,
 } from "./agent-advanced-settings";
+import { AgentAppsSection } from "./agent-apps-section";
 import { AgentInstructionsSection } from "./agent-instructions-section";
 import { AgentPropertiesPanel } from "./agent-properties-panel";
 import { describeCancelImpact } from "./agent-row-actions";
@@ -121,7 +126,9 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
   const qc = useQueryClient();
+  const paidFeatureError = usePaidFeatureErrorMessage();
   const currentUser = useAuthStore((s) => s.user);
+  const composioAppsEnabled = useFeatureEnabled(COMPOSIO_MCP_APPS_FLAG, false);
 
   const {
     data: agents = [],
@@ -289,11 +296,12 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           );
         }
         void qc.invalidateQueries({ queryKey });
-        toast.error(e instanceof Error ? e.message : t(($) => $.detail.update_failed_toast));
+        refreshFeaturesOnLockedError(qc, wsId, e);
+        toast.error(paidFeatureError(e, e instanceof Error ? e.message : t(($) => $.detail.update_failed_toast)));
         throw e;
       }
     },
-    [qc, t, wsId],
+    [paidFeatureError, qc, t, wsId],
   );
 
   const handleArchive = async (id: string) => {
@@ -705,13 +713,22 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
             onUpdate={handleUpdate}
           />
 
-          {/* Qoder agents take their skills from Qoder Cloud Agents. */}
+          {/* Qoder agents take their skills and apps from Qoder Cloud Agents. */}
           {runtime?.provider === "qoder_cloud" ? null : (
-            <AgentSkillsSection
-              agent={agent}
-              canEdit={canEdit.allowed}
-              onManage={() => openAdvanced("skills")}
-            />
+            <>
+              {composioAppsEnabled && (
+                <AgentAppsSection
+                  agent={agent}
+                  canEdit={canEdit.allowed}
+                  onManage={() => openAdvanced("composio_mcp")}
+                />
+              )}
+              <AgentSkillsSection
+                agent={agent}
+                canEdit={canEdit.allowed}
+                onManage={() => openAdvanced("skills")}
+              />
+            </>
           )}
         </div>
       </ObjectPage>

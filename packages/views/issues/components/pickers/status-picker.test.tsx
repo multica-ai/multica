@@ -234,7 +234,7 @@ describe("StatusPicker in a project that uses a workflow", () => {
 describe("StatusPicker on an issue outside any project (MUL-8121)", () => {
   const TODO = entry({ id: "todo", key: "todo", name: "Todo", category: "unstarted", is_system: true, position: 0 });
   const DONE = entry({ id: "done", key: "done", name: "Done", category: "done", is_system: true, position: 0 });
-  const MERGED = entry({ id: "merged", key: "merged", name: "Merged", position: 2 });
+  const MERGED = entry({ id: "merged", key: "merged", name: "已合并", position: 2 });
 
   const DEFAULT: IssueWorkflow = {
     id: "wf-default",
@@ -275,10 +275,10 @@ describe("StatusPicker on an issue outside any project (MUL-8121)", () => {
     renderWithI18n(
       <StatusPicker status="merged" projectId={null} onUpdate={() => {}} open onOpenChange={() => {}} />,
     );
-    expect(rows()).toEqual(["Todo", "In Review", "Merged", "Done"]);
+    expect(rows()).toEqual(["Todo", "In Review", "已合并", "Done"]);
     // The check mark is the last svg in a row; it is hidden on the others.
     const checkOf = (label: string) => Array.from(optionRow(label).querySelectorAll("svg")).at(-1);
-    expect(checkOf("Merged")?.getAttribute("class")).not.toContain("invisible");
+    expect(checkOf("已合并")?.getAttribute("class")).not.toContain("invisible");
     expect(checkOf("Todo")?.getAttribute("class")).toContain("invisible");
   });
 
@@ -303,7 +303,7 @@ describe("StatusPicker on an issue outside any project (MUL-8121)", () => {
     workspaceDefault = DEFAULT;
     renderWithI18n(<StatusPicker status="todo" onUpdate={() => {}} open onOpenChange={() => {}} />);
     // Cancelled is the built-in stand-in for a category the fixture omits.
-    expect(rows()).toEqual(["Todo", "In Review", "QA", "Merged", "Done", "Cancelled"]);
+    expect(rows()).toEqual(["Todo", "In Review", "QA", "已合并", "Done", "Cancelled"]);
   });
 
   it("offers the whole catalog while Default is unknown", () => {
@@ -312,6 +312,6 @@ describe("StatusPicker on an issue outside any project (MUL-8121)", () => {
       <StatusPicker status="todo" projectId={null} onUpdate={() => {}} open onOpenChange={() => {}} />,
     );
     // Cancelled is the built-in stand-in for a category the fixture omits.
-    expect(rows()).toEqual(["Todo", "In Review", "QA", "Merged", "Done", "Cancelled"]);
+    expect(rows()).toEqual(["Todo", "In Review", "QA", "已合并", "Done", "Cancelled"]);
   });
 });

@@ -114,7 +114,7 @@ func TestHandleTask_LocalDirectoryWaitCancellation(t *testing.T) {
 			}
 			task := Task{ID: "waiter", RuntimeID: "rt", ProjectResources: []ProjectResourceData{{ID: "resource", ResourceType: localDirectoryResourceType, ResourceRef: ref}}}
 			done := make(chan struct{})
-			go func() { defer close(done); d.handleTask(parent, task, 0) }()
+			go func() { defer close(done); d.handleTask(parent, task, newTestTaskSlot(0)) }()
 			wait := func(ch <-chan struct{}, what string) {
 				t.Helper()
 				select {

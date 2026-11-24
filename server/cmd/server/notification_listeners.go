@@ -3,10 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -35,6 +33,26 @@ func parseMentions(content string) []mention {
 		result[i] = mention{Type: m.Type, ID: m.ID}
 	}
 	return result
+}
+
+// previousDescriptionMentions keys the mentions an issue:updated description
+// change does not newly introduce: those of the previous description, plus
+// those a live editing session already stored. A mention typed live is saved
+// by autosave while half written, and an editor may delete and retype it;
+// either way it notifies once per session.
+func previousDescriptionMentions(payload map[string]any) map[string]bool {
+	prev := map[string]bool{}
+	if prevDescription, _ := payload["prev_description"].(*string); prevDescription != nil {
+		for _, m := range parseMentions(*prevDescription) {
+			prev[m.Type+":"+m.ID] = true
+		}
+	}
+	if seen, _ := payload["description_seen_mentions"].([]string); seen != nil {
+		for _, key := range seen {
+			prev[key] = true
+		}
+	}
+	return prev
 }
 
 // parentBubbleNotifTypes is the allowlist of inbox notification types that
@@ -331,78 +349,23 @@ func archiveStaleTaskFailedInbox(
 		"row_count", len(rows), "recipient_count", count)
 }
 
-// autoArchiveCompletedPref is the preference key for archiving your own
-// notifications when you move an issue to a done or closed status. It is on
-// unless set to "muted".
-const autoArchiveCompletedPref = "auto_archive_completed"
-
-// archiveTerminalIssueInbox archives the actor's own notifications for an
-// issue they moved to a done or closed status, read or not, the same set
-// "Archive completed" clears by hand. Other recipients keep theirs: someone
-// else finishing an issue is news they have not seen yet.
-func archiveTerminalIssueInbox(
-	ctx context.Context,
-	queries *db.Queries,
-	bus *events.Bus,
-	workspaceID string,
-	issueID string,
-	actorType string,
-	actorID string,
-) {
-	if actorType != "member" || actorID == "" {
-		return
-	}
-
-	// FAIL CLOSED: archiving on a guess hides notifications the user wanted.
-	pref, err := queries.GetNotificationPreference(ctx, db.GetNotificationPreferenceParams{
-		WorkspaceID: parseUUID(workspaceID),
-		UserID:      parseUUID(actorID),
-	})
-	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-	case err != nil:
-		slog.Warn("auto-archive terminal issue inbox: load preference failed; keeping rows",
-			"workspace_id", workspaceID, "issue_id", issueID, "error", err)
-		return
-	default:
-		var prefs map[string]string
-		if err := json.Unmarshal(pref.Preferences, &prefs); err != nil {
-			slog.Warn("auto-archive terminal issue inbox: bad preference JSON; keeping rows",
-				"workspace_id", workspaceID, "issue_id", issueID, "error", err)
-			return
-		}
-		if prefs[autoArchiveCompletedPref] == "muted" {
-			return
+// issueFieldActions lists the auto-archive actions an issue:updated payload
+// took on fields other than status, which depends on the status category.
+// Title, description and parent edits archive nothing.
+func issueFieldActions(payload map[string]any) []string {
+	var actions []string
+	for _, field := range []struct{ changed, action string }{
+		{"assignee_changed", inbox.AutoArchiveAssigneePref},
+		{"priority_changed", inbox.AutoArchivePriorityPref},
+		{"project_changed", inbox.AutoArchiveProjectPref},
+		{"start_date_changed", inbox.AutoArchiveDatesPref},
+		{"due_date_changed", inbox.AutoArchiveDatesPref},
+	} {
+		if changed, _ := payload[field.changed].(bool); changed {
+			actions = append(actions, field.action)
 		}
 	}
-
-	count, err := queries.ArchiveInboxByIssue(ctx, db.ArchiveInboxByIssueParams{
-		WorkspaceID:   parseUUID(workspaceID),
-		RecipientType: "member",
-		RecipientID:   parseUUID(actorID),
-		IssueID:       parseUUID(issueID),
-	})
-	if err != nil {
-		slog.Error("auto-archive terminal issue inbox: query failed",
-			"workspace_id", workspaceID, "issue_id", issueID, "error", err)
-		return
-	}
-	if count == 0 {
-		return
-	}
-	bus.Publish(events.Event{
-		Type:        protocol.EventInboxBatchArchived,
-		WorkspaceID: workspaceID,
-		Payload: map[string]any{
-			"recipient_id": actorID,
-			"count":        count,
-			"issue_id":     issueID,
-			"reason":       "issue_status_terminal",
-		},
-	})
-
-	slog.Info("auto-archive terminal issue inbox: archived rows",
-		"workspace_id", workspaceID, "issue_id", issueID, "row_count", count)
+	return actions
 }
 
 type inboxArchivedRecipient struct {
@@ -969,7 +932,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		descriptionChanged, _ := payload["description_changed"].(bool)
 		prevAssigneeType, _ := payload["prev_assignee_type"].(*string)
 		prevAssigneeID, _ := payload["prev_assignee_id"].(*string)
-		prevDescription, _ := payload["prev_description"].(*string)
+		archiveActions := issueFieldActions(payload)
 
 		if assigneeChanged {
 			// Build structured details for assignee change.
@@ -1070,16 +1033,18 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				archiveStaleTaskFailedInbox(ctx, queries, bus, e.WorkspaceID, issue.ID)
 			}
 
-			// After the status_changed rows above, so "moved to Done" leaves
-			// the actor's inbox together with the rest of the issue's
-			// notifications.
+			// Archived at the end of this listener, after the status_changed
+			// rows above, so "moved to Done" leaves the actor's inbox together
+			// with the rest of the issue's notifications.
 			category, categoryErr := issuestatus.CategoryWithError(ctx, queries, parseUUID(e.WorkspaceID), issue.Status)
 			switch {
 			case categoryErr != nil:
-				slog.Warn("resolve issue status category for terminal-issue inbox archive; keeping rows",
+				slog.Warn("resolve issue status category for actor issue inbox archive; keeping rows",
 					"issue_id", issue.ID, "status", issue.Status, "error", categoryErr)
 			case category == issuestatus.CategoryDone, category == issuestatus.CategoryClosed:
-				archiveTerminalIssueInbox(ctx, queries, bus, e.WorkspaceID, issue.ID, e.ActorType, e.ActorID)
+				archiveActions = append(archiveActions, inbox.AutoArchiveCompletedPref)
+			case category == issuestatus.CategoryStarted:
+				archiveActions = append(archiveActions, inbox.AutoArchiveStatusPref)
 			}
 		}
 
@@ -1137,12 +1102,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		if descriptionChanged && issue.Description != nil {
 			newMentions := parseMentions(*issue.Description)
 			if len(newMentions) > 0 {
-				prevMentioned := map[string]bool{}
-				if prevDescription != nil {
-					for _, m := range parseMentions(*prevDescription) {
-						prevMentioned[m.Type+":"+m.ID] = true
-					}
-				}
+				prevMentioned := previousDescriptionMentions(payload)
 				var added []mention
 				for _, m := range newMentions {
 					if !prevMentioned[m.Type+":"+m.ID] {
@@ -1150,10 +1110,26 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 					}
 				}
 				skip := map[string]bool{e.ActorID: true}
+				if editors, ok := payload["description_live_editors"].([]handler.DocContributor); ok {
+					for _, editor := range editors {
+						skip[editor.ID] = true
+					}
+				}
 				notifyMentionedMembers(bus, queries, e, added, issue.ID, issue.Title, issue.Status,
 					issue.Title, "", skip, emptyDetails)
 			}
 		}
+
+		inbox.ArchiveActorIssueInbox(ctx, queries, bus, e.WorkspaceID, issue.ID, e.ActorType, e.ActorID, archiveActions...)
+	})
+
+	bus.Subscribe(protocol.EventIssueLabelsChanged, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		issueID, _ := payload["issue_id"].(string)
+		inbox.ArchiveActorIssueInbox(ctx, queries, bus, e.WorkspaceID, issueID, e.ActorType, e.ActorID, inbox.AutoArchiveLabelsPref)
 	})
 
 	// comment:created — notify all subscribers except the commenter
@@ -1207,17 +1183,29 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		// Mentions first: a member who gets a `mentioned` row for this comment
 		// does not also get its `new_comment`, so one comment is one
 		// notification. A member who muted mentions still gets the comment.
+		mentions := parseMentions(commentContent)
 		mentioned := map[string]bool{}
-		if mentions := parseMentions(commentContent); len(mentions) > 0 {
+		if len(mentions) > 0 {
 			skip := map[string]bool{e.ActorID: true}
 			mentioned = notifyMentionedMembers(bus, queries, e, mentions, issueID, issueTitle, issueStatus,
 				issueTitle, commentContent, skip, commentDetails)
 		}
 
+		newCommentDetails := commentDetails
+		if authorType == "agent" && isSquadHandoff(ctx, queries, e.WorkspaceID, commentID, mentions) {
+			newCommentDetails = withDetail(commentDetails, inbox.SquadHandoffDetail, "true")
+		}
+
 		notifySubscribers(ctx, queries, bus, issueID, issueStatus, e.WorkspaceID, e,
 			mentioned, "new_comment", "info",
 			issueTitle, commentContent,
-			commentDetails)
+			newCommentDetails)
+
+		// A quick action posts its prompt as the member's own comment, so
+		// running one counts the same as replying.
+		if authorType == "member" {
+			inbox.ArchiveActorIssueInbox(ctx, queries, bus, e.WorkspaceID, issueID, e.ActorType, e.ActorID, inbox.AutoArchiveCommentPref)
+		}
 	})
 
 	// issue_reaction:added — notify the issue creator
@@ -1295,7 +1283,11 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		)
 	})
 
-	// task:completed — no inbox notification (completion is visible from status change)
+	// task:completed — no notification of its own; a squad leader run that
+	// ends its squad's chain delivers the handoff that woke it
+	bus.Subscribe(protocol.EventTaskCompleted, func(e events.Event) {
+		deliverSquadResult(ctx, queries, bus, e)
+	})
 
 	// task:failed — notify all subscribers except the agent
 	bus.Subscribe(protocol.EventTaskFailed, func(e events.Event) {

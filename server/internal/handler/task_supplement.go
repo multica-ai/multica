@@ -221,8 +221,13 @@ func (h *Handler) steerCommentAgentTriggers(ctx context.Context, issue db.Issue,
 			continue
 		}
 		// The comment is its own request id: it binds to a turn at most once.
+		var leaderSquadID pgtype.UUID
+		if trigger.Squad != nil {
+			leaderSquadID = trigger.Squad.ID
+		}
 		bound, err := h.bindCommentSteer(ctx, db.BindCommentTaskSupplementParams{
-			TaskID: taskID, IssueID: issue.ID, AgentID: trigger.Agent.ID, WorkspaceID: issue.WorkspaceID,
+			RequiredLeaderSquadID: leaderSquadID,
+			TaskID:                taskID, IssueID: issue.ID, AgentID: trigger.Agent.ID, WorkspaceID: issue.WorkspaceID,
 			AuthorType: comment.AuthorType, MaxAgentBindings: maxAgentSteersPerTurn, MaxBindingsPerAgent: maxAgentSteersPerAgentPerTurn,
 			CommentID: comment.ID, AuthorID: comment.AuthorID, ClientRequestID: comment.ID,
 		})
@@ -404,6 +409,7 @@ func (h *Handler) CreateTaskSupplement(w http.ResponseWriter, r *http.Request) {
 		"comment": resp, "issue_title": issue.Title, "issue_revision": created.IssueRevision,
 	})
 	h.notifyTaskSupplementAvailable(task)
+	h.archiveActorInboxOnAgentTrigger(r.Context(), uuidToString(issue.WorkspaceID), uuidToString(issue.ID), "member", uuidToString(authorID))
 	writeJSON(w, http.StatusCreated, resp)
 }
 

@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -15,9 +14,7 @@ func TestMuseAppTaskPromptRunsCLIWithTaskContext(t *testing.T) {
 	}
 	cliPath := filepath.Join(t.TempDir(), "task cli's binary")
 	script := "#!/bin/sh\nprintf '%s\\n' \"$MULTICA_DAEMON_PORT\" \"$MULTICA_TASK_ID\" \"$MULTICA_AGENT_NAME\" \"$MULTICA_TASK_CONFIG_ROOT\" \"$MULTICA_SERVER_URL\" \"$MULTICA_WORKSPACE_ID\" \"$MULTICA_TOKEN\" \"$*\"\n"
-	if err := os.WriteFile(cliPath, []byte(script), 0700); err != nil {
-		t.Fatal(err)
-	}
+	writeTestExecutable(t, cliPath, []byte(script))
 	env := map[string]string{
 		"MULTICA_CLI_PATH": cliPath, "MULTICA_DAEMON_PORT": "12345",
 		"MULTICA_TASK_ID": "task-current", "MULTICA_AGENT_NAME": "Muse's agent $(exit 99); literal",

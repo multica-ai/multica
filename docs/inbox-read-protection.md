@@ -29,11 +29,15 @@ bounded to execution concurrency plus twenty per process.
 
 Capacity exhaustion, connection acquisition deadlines and database statement
 timeouts return `503` with `Retry-After: 1`. Other database errors remain `500`.
-Web, desktop and mobile forward cancellation and skip automatic inbox retries
-on 503. They retain cached data on a failed refresh; a subsequent inbox event
-or explicit refresh can fetch again. Existing archive queries already disable
-retries. Older clients may still retry, but
-server execution and waiting remain bounded.
+Web, desktop and mobile forward cancellation and retain cached data on a
+failed refresh. Web and desktop retry a live inbox read that fails with 503
+(or 408, 429, 502, 504, or a network error) up to three times, waiting at least
+`Retry-After` and backing off exponentially from one second with up to 25%
+jitter (`packages/core/inbox/retry.ts`), so one read sends at most four
+requests. When every attempt fails before anything loaded, the Inbox shows a
+load error with a retry button instead of an empty list. Mobile skips
+automatic retries on 503 and shows its load error. Archive queries disable
+retries. Server execution and waiting remain bounded whatever the client does.
 
 ## Configuration and monitoring
 

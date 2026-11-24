@@ -1,6 +1,6 @@
 "use client";
 
-import { IssueSidebarSectionHeader } from "./issue-sidebar-section";
+import { IssueSidebarCollapsible, IssueSidebarSectionHeader } from "./issue-sidebar-section";
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -28,6 +28,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { PullRequestList } from "./pull-request-list";
+import { useReopenOnReveal, useSidebarRevealMotion } from "./use-sidebar-reveal-motion";
 
 /**
  * The issue sidebar's Pull requests section: the linked PRs, what merging them
@@ -40,35 +41,51 @@ export function PullRequestsSection({
   identifier,
   open,
   onOpenChange,
+  reveal = false,
+  onRevealEnd,
 }: {
   issueId: string;
   identifier: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Shows the section while empty with the link form open, until it closes. */
+  reveal?: boolean;
+  onRevealEnd?: () => void;
 }) {
   const { t } = useT("issues");
-  const { data, isLoading, isError } = useQuery(issuePullRequestsOptions(issueId));
+  const { data, isError: lastFetchFailed, errorUpdateCount } = useQuery(issuePullRequestsOptions(issueId));
+  // A retry starts pending again; holding on to the failure keeps the retry
+  // entry mounted instead of the section blinking out mid-retry.
+  const isError = lastFetchFailed || (data === undefined && errorUpdateCount > 0);
   // Older backends have no link / auto-complete endpoints; keep the header
   // actions hidden until the server says it supports them.
   const supported = !!data?.auto_complete;
   const count = data?.pull_requests.length ?? 0;
+  const motion = useSidebarRevealMotion<HTMLDivElement>(reveal && supported, count > 0 || isError, onRevealEnd);
 
-  if (!isLoading && !isError && count === 0 && !supported) return null;
+  // An empty section is offered by the sidebar's add row instead.
+  if (!motion.shown) return null;
 
   return (
-    <div>
+    <div ref={motion.ref}>
       <IssueSidebarSectionHeader
-        title={t(($) => $.detail.section_pull_requests)} open={open} onOpenChange={onOpenChange} count={count} collapsible={count > 0 || isLoading || isError}
+        title={t(($) => $.detail.section_pull_requests)} open={open} onOpenChange={onOpenChange} count={count} collapsible={count > 0 || isError}
         actions={supported ? <>
-          <LinkPullRequestPopover issueId={issueId} identifier={identifier} onLinked={() => onOpenChange(true)} />
+          <LinkPullRequestPopover
+            issueId={issueId}
+            identifier={identifier}
+            defaultOpen={reveal}
+            onLinked={() => onOpenChange(true)}
+            onClosed={() => reveal && motion.end()}
+          />
           <AutoCompleteMenu issueId={issueId} disabled={data?.auto_complete?.issue_disabled ?? false} workspaceEnabled={data?.auto_complete?.workspace_enabled ?? true} />
         </> : undefined}
       />
-      {open && (count > 0 || isLoading || isError) && (
+      <IssueSidebarCollapsible open={open && (count > 0 || isError)}>
         <div className="px-2">
           <PullRequestList issueId={issueId} identifier={identifier} />
         </div>
-      )}
+      </IssueSidebarCollapsible>
     </div>
   );
 }
@@ -76,15 +93,24 @@ export function PullRequestsSection({
 function LinkPullRequestPopover({
   issueId,
   identifier,
+  defaultOpen = false,
   onLinked,
+  onClosed,
 }: {
   issueId: string;
   identifier: string;
+  defaultOpen?: boolean;
   onLinked: () => void;
+  onClosed?: () => void;
 }) {
   const { t } = useT("issues");
   const { autoLinkPRs } = useGitHubSettings();
-  const [open, setOpen] = useState(false);
+  const [open, setOpenState] = useState(defaultOpen);
+  useReopenOnReveal(defaultOpen, () => setOpenState(true));
+  const setOpen = (next: boolean) => {
+    setOpenState(next);
+    if (!next) onClosed?.();
+  };
   const [url, setUrl] = useState("");
   const link = useLinkIssuePullRequest(issueId);
   const error = link.error

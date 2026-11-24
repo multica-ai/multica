@@ -22,7 +22,6 @@
     "load_failed": "Impossible de charger l'activité.",
     "try_again": "Réessayer",
     "empty": "Aucune activité enregistrée pour l'instant.",
-    "show_earlier": "Afficher {{count}} étapes précédentes",
     "full_log": "Ouvrir le journal complet",
     "message": "Message de l'agent",
     "error": "Erreur",
@@ -40,8 +39,10 @@
     "steer_not_received": "{{name}} ne l'a pas reçu · {{reason}}",
     "steer_resend": "Envoyer comme nouvelle exécution",
     "steer_resend_failed": "Impossible de l'envoyer comme nouvelle exécution.",
-    "steer_step": "{{name}} a ajouté",
-    "steer_step_read": "Lu"
+    "steer_step": "Message ajouté par {{name}}",
+    "steer_step_read": "Lu",
+    "show_earlier_one": "Afficher {{count}} étape précédente",
+    "show_earlier_other": "Afficher {{count}} étapes précédentes"
   },
   "working_filter_error": {
     "title": "Impossible de charger les tâches en cours de traitement par les agents"
@@ -112,7 +113,7 @@
     "author_deleted_agent": "agent supprimé",
     "author_left_workspace": "n'est plus dans l'espace de travail",
     "error_source_changed": "La source a changé. Vérifiez l'aperçu actualisé, puis soumettez à nouveau.",
-    "error_agent_unsupported": "Ce runtime d'agent doit être mis à jour pour utiliser le contexte capturé. Passez en mode Manuel ou mettez le runtime à jour.",
+    "error_agent_unsupported": "Mettez à jour le runtime de cet agent pour utiliser le contexte capturé, ou passez à la création manuelle.",
     "error_server_unsupported": "Ce serveur doit être mis à jour pour créer une sous-tâche avec un contexte capturé.",
     "error_too_large": "Le contexte capturé dépasse une limite du serveur.",
     "error_comment_limit": "L'historique du fil de commentaires source contient au moins {{count}} commentaires ; la limite est de 256.",
@@ -191,7 +192,7 @@
     "section_project": "Projet",
     "section_project_status": "Statut du projet",
     "section_label": "Étiquette",
-    "section_relation": "Lien avec moi",
+    "section_relation": "Relations",
     "relation_assigned": "Qui me sont assignés",
     "relation_created": "Créés par moi",
     "relation_my_agents": "Travail de mes agents",
@@ -279,7 +280,8 @@
     "advanced_group_match_trailing": "de ces conditions",
     "advanced_group_hint": "Les conditions de ce groupe sont reliées par « {{word}} »",
     "advanced_add_to_group": "Ajouter au groupe",
-    "advanced_turn_into_group": "Transformer en groupe"
+    "advanced_turn_into_group": "Transformer en groupe",
+    "relation_blocked": "Bloqué"
   },
   "display": {
     "tooltip": "Paramètres d'affichage",
@@ -371,7 +373,6 @@
     "export": "Exporter",
     "export_all": "Tout exporter",
     "export_selected": "Exporter la sélection ({{count}})",
-    "export_success": "{{count}} tâches exportées",
     "export_failed": "Échec de l'export des tâches",
     "columns": {
       "section": "Colonnes",
@@ -383,7 +384,7 @@
       "hide": "Masquer la colonne",
       "reorder": "Réorganiser la colonne {{column}}",
       "title": "Tâche",
-      "identifier": "Identifiant",
+      "identifier": "ID de tâche",
       "status": "Statut",
       "priority": "Priorité",
       "assignee": "Assigné à",
@@ -404,7 +405,9 @@
       "sum": "Somme",
       "average": "Moyenne",
       "count": "Nombre"
-    }
+    },
+    "export_success_one": "{{count}} tâche exportée",
+    "export_success_other": "{{count}} tâches exportées"
   },
   "gantt": {
     "header_issue": "Tâche",
@@ -494,7 +497,6 @@
     "section_parent_issue": "Tâche parente",
     "section_pull_requests": "Pull requests",
     "section_metadata": "Métadonnées",
-    "section_details": "Détails",
     "sidebar_settings": {
       "open": "Personnaliser la barre latérale",
       "title": "Barre latérale",
@@ -551,16 +553,13 @@
     "prop_project": "Projet",
     "prop_labels": "Étiquettes",
     "add_property_action": "Ajouter une propriété",
-    "prop_created_by": "Créé par",
-    "prop_created": "Création",
-    "prop_updated": "Mise à jour",
     "activity_section": "Activité",
     "subscribe": "S'abonner",
     "unsubscribe": "Se désabonner",
     "delegated_subscription_badge": "Suivi via un agent",
     "delegated_subscription_hint": "Votre agent a créé cette tâche en votre nom : vous y êtes donc abonné. Avec Changements de statut activé, vous serez notifié lorsqu'elle demandera une relecture, se terminera ou se bloquera.",
     "key_updates_subscription_badge": "Mises à jour clés",
-    "key_updates_subscription_hint": "Cette tâche est celle de quelqu'un d'autre, et vous la suivez parce que vous l'avez créée, commentée ou y avez été mentionné. Vous recevrez les @mentions, les réponses dans vos fils et, avec Changements de statut activé, les alertes quand elle demande une relecture, se bloque ou se termine.",
+    "key_updates_subscription_hint": "Cette tâche appartient à quelqu'un d'autre, et vous la suivez parce que vous l'avez créée, commentée ou y avez été mentionné. Vous serez informé des @mentions, des réponses dans vos fils et, si Changements de statut est activé, lorsqu'elle nécessite une relecture, est bloquée ou se termine.",
     "key_updates_follow_all": "Recevoir toute l'activité",
     "key_updates_follow_all_done": "Vous recevrez toute l'activité de cette tâche",
     "key_updates_settings": "Modifier la valeur par défaut",
@@ -576,16 +575,10 @@
     "change_subscribers_placeholder": "Modifier les abonnés...",
     "members_group": "Membres",
     "agents_group": "Agents",
-    "mark_done_tooltip": "Marquer comme terminé",
     "archive_tooltip": "Archiver",
-    "pin_tooltip": "Épingler à la barre latérale",
-    "unpin_tooltip": "Détacher de la barre latérale",
     "quick_jump_label": "Navigation rapide",
     "description_nav_label": "Description de la tâche",
     "sub_issues_nav_progress": "{{done}}/{{total}} terminées",
-    "sub_issues_show_more_one": "Afficher {{count}} de plus",
-    "sub_issues_show_more_other": "Afficher {{count}} de plus",
-    "sub_issues_show_less": "Réduire",
     "thread_nav_label": "Aller au fil de commentaires",
     "thread_nav_resolved_label": "{{title}} (résolu)",
     "thread_nav_reply_label": "{{author}} : {{title}}",
@@ -609,8 +602,36 @@
     "project_directory_path_copied": "Chemin du répertoire du projet copié",
     "project_directory_path_copied_with_branch": "Chemin du répertoire du projet copié — le travail se trouve sur {{branch}}",
     "workdir_path_copy_failed": "Échec de la copie du chemin du répertoire de travail",
-    "workdir_path_unavailable": "Aucun répertoire de travail local — cette tâche n'a pas encore été traitée par un agent local",
-    "pull_requests_empty_title": "Aucune pull request associée."
+    "workdir_path_unavailable": "Aucun répertoire de travail local pour l'instant — cette tâche n'a pas encore été exécutée par un agent local",
+    "pull_requests_empty_title": "Aucune pull request associée.",
+    "guest_readonly_note": "Les invités peuvent consulter et commenter, mais pas modifier les propriétés de la tâche.",
+    "open_issue_page": "Ouvrir la page de la tâche",
+    "add_row": {
+      "wakeups": "Ajouter un réveil",
+      "pull_requests": "Ajouter une pull request",
+      "environments": "Ajouter un environnement",
+      "relations": "Ajouter une relation",
+      "pair": "Ajouter {{first}} ou {{second}}",
+      "many": "Ajouter...",
+      "noun": {
+        "wakeups": "un réveil",
+        "pull_requests": "une pull request",
+        "environments": "un environnement",
+        "relations": "une relation"
+      },
+      "menu": {
+        "wakeups": "Réveil",
+        "pull_requests": "Pull request",
+        "environments": "Environnement",
+        "relations": "Relations"
+      }
+    },
+    "footer": {
+      "created": "Créée par {{creator}} · {{date}}",
+      "created_for": "Créée par {{creator}} au nom de {{requester}} · {{date}}",
+      "created_at": "Créée : {{time}}",
+      "updated_at": "Mise à jour : {{time}}"
+    }
   },
   "timeline": {
     "loading": "Chargement...",
@@ -644,6 +665,13 @@
     "squad_leader_no_action_reason": "a évalué : aucune action nécessaire ({{reason}})",
     "squad_leader_failed": "évaluation en échec",
     "squad_leader_failed_reason": "évaluation en échec : {{reason}}",
+    "squad_handoff_to": "a passé la main à {{name}}",
+    "squad_handoff_human": "a demandé à {{name}} de décider",
+    "squad_handoff_leader": "a rendu la main à {{name}}",
+    "squad_handoff_round": "tour {{round}}",
+    "squad_handoff_reason_round_limit": "limite de {{limit}} tours atteinte",
+    "squad_handoff_reason_daily_limit": "limite quotidienne de passations atteinte",
+    "squad_handoff_reason_run_failed": "exécution échouée",
     "coalesced_badge": "×{{count}}",
     "activity_count_one": "{{count}} activité",
     "activity_count_other": "{{count}} activités",
@@ -652,7 +680,7 @@
     "duplicate_marked": "a marqué cette tâche comme doublon de {{identifier}}",
     "duplicate_unmarked": "a retiré la marque de doublon de {{identifier}} sur cette tâche",
     "duplicate_unmarked_to": "a retiré la marque de doublon de {{identifier}} sur cette tâche et l'a passée en {{status}}",
-    "duplicate_unmarked_original_deleted": "a retiré la marque de doublon, {{identifier}} a été supprimée",
+    "duplicate_unmarked_original_deleted": "a retiré la marque de doublon ({{identifier}} a été supprimée)",
     "duplicate_added": "a marqué {{identifier}} comme doublon de cette tâche",
     "duplicate_removed": "a retiré la marque de doublon de {{identifier}}",
     "status_changed_pr": "a changé le statut de {{from}} à {{to}} après la fusion de toutes les PR liées ({{prs}})",
@@ -682,7 +710,11 @@
     "wakeup_chip_system": "Règle système",
     "environment_stopped": "a arrêté l'environnement {{name}}",
     "environment_restarted": "a redémarré l'environnement {{name}}",
-    "environment_started": "a démarré l'environnement {{name}}"
+    "environment_started": "a démarré l'environnement {{name}}",
+    "task_completed_single": "a terminé une exécution",
+    "task_failed_single": "l'exécution a échoué",
+    "wakeup_child_done_all_single": "La sous-tâche est terminée",
+    "wakeup_child_done_stage_single": "La sous-tâche de l'étape {{stage}} est terminée"
   },
   "comment": {
     "add_reaction": "Ajouter une réaction",
@@ -712,12 +744,12 @@
     "posted_partial_trigger_named": "Commentaire publié, mais {{name}} n'a pas été déclenché ({{reason}})",
     "trigger_blocked_chip_aria": "{{name}} ne sera pas déclenché — {{reason}}",
     "trigger_blocked_invocation_not_allowed": "Cette cible est introuvable, ou vous n'avez pas la permission de l'utiliser",
-    "trigger_blocked_target_unavailable": "Cette cible est indisponible",
+    "trigger_blocked_target_unavailable": "Cet agent ou ce squad est introuvable — actualisez la page et réessayez.",
     "trigger_blocked_runtime_offline": "Le runtime de cette cible est hors ligne",
     "trigger_blocked_runtime_unusable": "Le CLI d'agent de cette cible ne peut pas s'exécuter sur sa machine — réinstallez-le sur place",
-    "trigger_blocked_runtime_profile_missing": "Le CLI de l'agent cible n'a pas de profil de runtime sur sa machine : installez-le sur celle-ci",
+    "trigger_blocked_runtime_profile_missing": "Il manque une configuration de runtime au CLI de cet agent sur sa machine — installez-la dessus.",
     "trigger_blocked_agent_runtime_required": "Cette cible n'a pas de runtime — associez-en un pour l'exécuter",
-    "trigger_blocked_runtime_access_denied": "L'agent de cette cible ne peut pas s'exécuter sur son runtime privé — passez le runtime en public, ou réassociez/copiez l'agent vers un runtime que son propriétaire peut utiliser",
+    "trigger_blocked_runtime_access_denied": "Le runtime privé de cet agent n'est pas accessible — rendez le runtime public ou associez l'agent à un runtime accessible.",
     "trigger_blocked_generic": "Cette cible ne sera pas déclenchée",
     "trigger_blocked_short_invocation_not_allowed": "Introuvable ou sans permission",
     "trigger_blocked_short_target_unavailable": "Indisponible",
@@ -784,12 +816,14 @@
     "recipient_state_queued": "En file",
     "recipient_count_one": "{{count}} agent recevra ce message",
     "recipient_count_other": "{{count}} agents recevront ce message",
-    "steer_attachment_notice": "Seul du texte peut rejoindre une exécution en cours : un message avec des fichiers sera traité après.",
+    "steer_attachment_notice": "Seul du texte peut être ajouté à une exécution active ; les messages contenant des fichiers sont traités après sa fin.",
     "restart_send": "Arrêter et envoyer",
     "restart_failed": "Impossible d'arrêter l'exécution en cours. Votre message n'a pas été envoyé.",
     "reply_action": "Répondre",
     "actions_label": "Actions du commentaire",
-    "create_issue_from_selection": "Créer une sous-tâche à partir de la sélection"
+    "create_issue_from_selection": "Créer une sous-tâche à partir de la sélection",
+    "guest_placeholder": "Répondre… vous pouvez @ mentionner des membres",
+    "guest_hint": "Les invités ne peuvent pas @ mentionner d'agents ni leur assigner de tâches"
   },
   "reply": {
     "recipients_changed": "La cible de la réponse a changé. Vérifiez les destinataires avant de réessayer.",
@@ -848,8 +882,20 @@
     "unread_title": "Aucune tâche non lue",
     "clear_button": "Effacer les filtres"
   },
+  "presence": {
+    "viewing_one": "{{count}} présent",
+    "viewing_other": "{{count}} présents",
+    "editing": "En train de modifier",
+    "watching": "Consultent la page",
+    "where": "Dans « {{section}} »",
+    "more_one": "{{count}} de plus : {{names}}",
+    "more_other": "{{count}} de plus : {{names}}",
+    "name_separator": ", ",
+    "jump_hint": "Cliquez sur un nom pour aller à son curseur"
+  },
   "agent_live": {
     "is_working": "{{name}} travaille",
+    "is_working_round": "{{label}} · tour {{round}}",
     "is_queued": "{{name}} est en file d'attente",
     "is_waiting_local_directory": "{{name}} attend le répertoire local",
     "queued_elapsed_prefix": "en file d'attente depuis {{elapsed}}",
@@ -859,7 +905,7 @@
     "transcript_button": "Voir la transcription",
     "stop_button": "Arrêter",
     "stop_tooltip": "Arrêter l'agent",
-    "cancel_failed": "Échec de l'annulation de l'exécution"
+    "cancel_failed": "Échec de l'arrêt de l'exécution"
   },
   "execution_log": {
     "latest": "Récentes",
@@ -901,9 +947,9 @@
       "source_comment_source": "Depuis un fil de commentaires",
       "source_trigger_owner": "Créateur du déclencheur d'automatisation",
       "source_rule_owner": "Auteur de la règle d'automatisation",
-      "source_owner_fallback": "Aucun responsable précis — attribué au propriétaire de l'agent",
-      "source_backfill": "Attribution reconstituée",
-      "source_unattributed": "Aucun membre responsable identifié"
+      "source_owner_fallback": "Attribuée au propriétaire de l'agent (par défaut)",
+      "source_backfill": "Attribution historique",
+      "source_unattributed": "Aucun membre responsable trouvé"
     },
     "usage_total_tooltip": "Ouvrir la chronologie des exécutions",
     "trigger_wakeup": "Réveil · {{condition}}",
@@ -913,8 +959,6 @@
     "open_timeline": "Ouvrir la chronologie",
     "more_runs_one": "Afficher {{count}} de plus",
     "more_runs_other": "Afficher {{count}} de plus",
-    "strip_aria": "Coût par exécution — ouvrir la chronologie",
-    "strip_no_usage": "Aucune consommation enregistrée",
     "queued_count_one": "{{count}} en attente",
     "queued_count_other": "{{count}} en attente"
   },
@@ -1086,7 +1130,7 @@
     "copy_title_as_link": "Copier le lien avec le titre",
     "copy_workdir_path": "Copier le chemin du répertoire de travail local",
     "copy_project_directory_path": "Copier le chemin du répertoire du projet",
-    "copy_identifier": "Copier l'identifiant",
+    "copy_identifier": "Copier l'ID de la tâche",
     "identifier_copied": "{{identifier}} copié",
     "stop_agent_run": "Arrêter l’exécution de {{name}}",
     "relations": "Relations",
@@ -1096,6 +1140,8 @@
     "remove_parent_issue": "Retirer la tâche parente",
     "remove_parent_issue_success": "Tâche parente retirée",
     "add_sub_issue": "Ajouter une sous-tâche...",
+    "add_blocker": "Attendre une autre tâche...",
+    "add_blocking": "Bloquer une autre tâche...",
     "delete_issue": "Supprimer la tâche",
     "mark_duplicate": "Marquer comme doublon...",
     "open_in_new_window": "Ouvrir dans une nouvelle fenêtre"
@@ -1127,11 +1173,10 @@
     "assignee": {
       "trigger_unassigned": "Non assigné",
       "search_placeholder": "Assigner à...",
+      "recent_group": "Récents",
       "members_group": "Membres",
       "agents_group": "Agents",
-      "squads_group": "Squads",
-      "agent_runtime_required": "Associez un runtime avant d'assigner du travail à cet agent",
-      "squad_runtime_required": "Associez un runtime au chef de ce squad avant d'assigner du travail"
+      "squads_group": "Squads"
     },
     "start_date": {
       "trigger_label": "Date de début",
@@ -1252,7 +1297,6 @@
     "ended": "Historique des réveils · {{count}}",
     "waiting_event": "En attente du déclencheur",
     "triggered_by_wakeup": "Déclenché par un réveil",
-    "upcoming": "{{count}} règles de réveil activées",
     "more": "{{count}} de plus",
     "toggle": "Réveil de {{agent}}",
     "enable_error": "Impossible d’activer le réveil. Réessayez.",
@@ -1261,7 +1305,7 @@
     "reschedule": "Choisir une nouvelle heure",
     "future_time": "Choisissez une date future.",
     "local_time": "Date ({{timezone}})",
-    "closed_hint": "Impossible d’activer les réveils pour une tâche terminée ou annulée.",
+    "closed_hint": "Les réveils ne peuvent pas être activés tant que cette tâche est terminée ou annulée.",
     "completed": "Terminé",
     "expired": "Expiré",
     "disabled_state": "Désactivé",
@@ -1275,11 +1319,11 @@
     "scheduled_time": "Réveil à l’heure prévue",
     "every_hours": "Réveil toutes les {{hours}} heures",
     "every_seconds": "Réveil toutes les {{seconds}} secondes",
-    "edit_instruction": "Modifier le prompt",
+    "edit_instruction": "Modifier les instructions",
     "instruction_effect": "Les prochains réveils utiliseront ces instructions. Les exécutions en cours ne sont pas affectées.",
-    "instruction_loading": "Chargement du prompt...",
-    "instruction_invalid": "Saisissez des instructions de 12 000 octets UTF-8 maximum.",
-    "instruction_save_error": "Impossible d’enregistrer le prompt.",
+    "instruction_loading": "Chargement des instructions...",
+    "instruction_invalid": "Les instructions doivent faire moins de 12 000 octets.",
+    "instruction_save_error": "Impossible d'enregistrer les instructions.",
     "instruction_cancel": "Annuler",
     "instruction_save": "Enregistrer",
     "instruction_saving": "Enregistrement...",
@@ -1287,9 +1331,9 @@
     "scope_title": "Périmètre surveillé",
     "scope_current": "Cette tâche",
     "any_event": "Quand l’un de ces événements se produit",
-    "execution_summary": "Cette exécution : {{state}}",
+    "execution_summary": "Exécution en cours : {{state}}",
     "recent_execution": "Dernière exécution : {{state}}",
-    "stopped_running": "Réveils futurs désactivés · Une exécution n’est pas terminée",
+    "stopped_running": "Les réveils futurs sont désactivés · Une exécution est toujours en cours",
     "next_at": "Prochain : {{time}}",
     "no_run": "Pas encore exécuté",
     "permission_error": "Vous ne pouvez pas gérer ce réveil. Contactez son créateur ou un administrateur.",
@@ -1389,7 +1433,6 @@
       "members": "Membres",
       "agents": "Agents",
       "any_agent": "N’importe quel agent",
-      "events_selected": "{{count}} événements",
       "instruction_placeholder": "Par exemple : vérifier le résultat et continuer s’il est correct",
       "trigger_count": "Déclenchements",
       "max_wait": "Attendre au plus",
@@ -1409,14 +1452,14 @@
       "missing_agent": "Choisissez l’agent à réveiller.",
       "missing_events": "Choisissez au moins un événement.",
       "until_future": "Choisissez une date de fin postérieure à aujourd’hui.",
-      "closed": "Impossible d’en créer sur une tâche terminée ou annulée.",
+      "closed": "Les tâches terminées ou annulées ne peuvent pas recevoir de nouveaux réveils.",
       "group_linked": "Liés",
       "cond_field": "Un champ prend une valeur",
       "cond_field_hint": "Statut, responsable, libellé, propriété",
       "cond_children": "Les sous-tâches se terminent",
       "cond_children_hint": "Tous, ou une étape",
-      "cond_pr": "La CI d’une PR liée se termine",
-      "cond_pr_hint": "Ou sa fusion",
+      "cond_pr": "Une PR liée est mise à jour",
+      "cond_pr_hint": "La CI se termine, la PR est fusionnée ou présente des conflits",
       "cond_issue": "Le statut d’une autre tâche",
       "cond_issue_hint": "p. ex. quand il est terminé",
       "field_status": "Statut",
@@ -1449,19 +1492,14 @@
       "missing_issue": "Choisissez une tâche.",
       "checked": "Cochée",
       "unchecked": "Décochée",
-      "assignee_comment_hint": "{{name}} est le responsable et s’exécute déjà quand un membre commente. Cette règle rejoint cette exécution au lieu d’en lancer une autre ; ajoutez-la seulement pour lui donner une instruction de plus."
+      "assignee_comment_hint": "{{name}} est le responsable et s’exécute déjà quand un membre commente. Cette règle rejoint cette exécution au lieu d’en lancer une autre ; ajoutez-la seulement pour lui donner une instruction de plus.",
+      "events_selected_one": "{{count}} événement",
+      "events_selected_other": "{{count}} événements"
     },
     "system": {
       "badge": "Système",
       "title_stage": "Quand les sous-tâches de l’étape {{stage}} sont toutes terminées",
       "title_all": "Quand toutes les sous-tâches sont terminées",
-      "wake_assignee": "Réveiller le responsable {{name}}",
-      "remaining_one": "encore {{count}}",
-      "remaining_other": "encore {{count}}",
-      "blocked_backlog": "Tâche en backlog ; pas de réveil pour l’instant",
-      "blocked_member": "Responsable humain ; il reçoit une notification",
-      "blocked_none": "Aucun agent responsable ; personne n’est réveillé",
-      "turned_off": "Désactivé pour cette tâche",
       "target_title": "Réveille",
       "target_current": "Responsable (actuellement {{name}})",
       "target_none": "Le responsable : un agent ou une équipe est réveillé, un humain est notifié",
@@ -1476,14 +1514,19 @@
       "save_error": "Impossible d’enregistrer la règle système.",
       "default_on": "Activé par défaut dans cet espace.",
       "default_off": "Désactivé par défaut dans cet espace.",
-      "notify_member": "Notifier {{name}} dans sa boîte de réception",
       "instruction": "Que faire au réveil",
       "instruction_edit": "Modifier l’instruction",
       "instruction_default": "Non définie sur cette tâche ; instruction par défaut :",
       "instruction_placeholder": "Laisser vide pour l’instruction par défaut",
-      "instruction_invalid": "Limitez l’instruction à 4 000 octets.",
+      "instruction_invalid": "Les instructions doivent faire moins de 4 000 octets.",
       "paused": "En pause : {{reason}}",
-      "default_change": "Modifier la valeur par défaut"
+      "default_change": "Modifier la valeur par défaut",
+      "chip_wake": "Réveille {{name}} à la fin",
+      "chip_notify": "Prévient {{name}} à la fin",
+      "chip_assignee": "Réveille le responsable à la fin",
+      "chip_off": "Réveil de fin désactivé",
+      "blocked_backlog": "Tâche en backlog ; pas de réveil pour l’instant",
+      "blocked_none": "Aucun agent responsable ; personne n’est réveillé"
     },
     "cond": {
       "status": "Quand cette tâche passe à {{status}}",
@@ -1556,6 +1599,15 @@
       "max_fires": "limite de {{count}} exécutions atteinte",
       "loop": "il réveillait des règles qui le réveillaient à leur tour",
       "rate": "plus de 12 exécutions en une heure"
+    },
+    "upcoming_one": "{{count}} règle de réveil active",
+    "upcoming_other": "{{count}} règles de réveil activées",
+    "short": {
+      "at_time": "{{time}}",
+      "scheduled_time": "À l’heure prévue",
+      "hourly": "Chaque heure",
+      "every_hours": "Toutes les {{hours}} heures",
+      "every_seconds": "Toutes les {{seconds}} secondes"
     }
   },
   "duplicates": {
@@ -1592,7 +1644,8 @@
     "not_merged_action": "Retirer",
     "all_merged_to": "Toutes les PR sont fusionnées. La prochaine PR fusionnée fera passer la tâche à {{status}}.",
     "issue_disabled": "Les fusions de PR ne changent pas cette tâche",
-    "issue_disabled_action": "Réactiver"
+    "issue_disabled_action": "Réactiver",
+    "on_merge_to": "À la fusion → {{status}}"
   },
   "deliverables": {
     "section_title": "Livrables",
@@ -1723,7 +1776,6 @@
       "target_squad": "Squad · le leader répartit",
       "target_member": "Membre",
       "instructions_hint": "Envoyées au responsable avec cette exécution, avec la description et les commentaires de la tâche.",
-      "next_hint": "C’est le responsable qui déplace le ticket, et il ne le renvoie que pour une reprise, pas pour un blocage. La fin d’une exécution ne change jamais l’état.",
       "preview_brief": "Aperçu des consignes de l’agent",
       "preview_title": "Consignes de l’étape « {{status}} »",
       "preview_description": "Ce que reçoit l’exécution du responsable quand une tâche entre dans cette étape. Pas besoin d’enregistrer pour prévisualiser.",
@@ -1829,7 +1881,7 @@
       "next_default": "Colonne suivante ({{status}})",
       "saved": "Passage de relais enregistré",
       "error": "Impossible d’enregistrer le passage de relais",
-      "read_only": "Les transferts appartiennent au workflow ; son propriétaire et les administrateurs de l’espace les modifient.",
+      "read_only": "Les transferts appartiennent au workflow ; seuls son propriétaire et les administrateurs de l'espace de travail peuvent les modifier.",
       "to": "Confier à",
       "members": "Membres",
       "mode_none": "Pas de relais",
@@ -1905,8 +1957,7 @@
       "all_issues": "Toutes les tâches",
       "my_work": "Mon travail",
       "working": "En cours d'exécution",
-      "subscribed": "Abonnements",
-      "snoozed": "Reportés"
+      "subscribed": "Abonnements"
     },
     "untitled": "Vue sans titre",
     "copy_name": "{{name}} (copie)",
@@ -1986,7 +2037,8 @@
       "pending": "En attente",
       "approved": "Approuvé",
       "rejected": "Refusé",
-      "rate_limited": "Limite atteinte"
+      "rate_limited": "Limite atteinte",
+      "quota_exceeded": "Limite mensuelle atteinte"
     }
   },
   "environments": {
@@ -2098,10 +2150,46 @@
     "app_remote_hint": "S'exécute sur {{machine}}. Basculez vers sa fenêtre depuis Multica Desktop sur cette machine.",
     "focus": "Afficher la fenêtre",
     "focus_gone": "{{name}} ne s'exécute plus",
-    "focus_unsupported": "Le daemon de cette machine ne peut pas encore basculer vers les fenêtres d'apps. Mettez à jour Multica et réessayez.",
-    "focus_unavailable": "Le daemon local n'est pas en cours d'exécution",
+    "focus_unsupported": "Multica sur cette machine ne peut pas encore basculer vers les fenêtres d'application. Mettez à jour Multica et réessayez.",
+    "focus_unavailable": "Le service local de Multica n'est pas en cours d'exécution",
     "focus_failed": "Impossible de basculer vers {{name}}",
     "retry": "Réessayer",
     "dismiss": "Ignorer"
+  },
+  "relations": {
+    "title": "Relations",
+    "add": "Ajouter une relation",
+    "wait_title": "Attendre une autre tâche",
+    "block_title": "Bloquer une autre tâche",
+    "blocked_by": "Bloquée par",
+    "blocking": "Bloque",
+    "stage_tag": "Étape",
+    "stage_tag_hint": "Défini par les étapes de la tâche parente",
+    "add_blocker_hint": "Cette tâche commence quand elle se termine",
+    "add_blocking_hint": "Elle commence quand cette tâche se termine",
+    "mark_duplicate_hint": "Annule cette tâche",
+    "blocking_picker_hint": "Sélectionnez une tâche qui ne peut pas commencer avant la fin de celle-ci."
+  },
+  "waiting": {
+    "remove": "Retirer {{identifier}}",
+    "count": "En attente de {{count}} tâches",
+    "count_one": "En attente de {{count}} tâche",
+    "count_other": "En attente de {{count}} tâches",
+    "hint": "Une fois ces tâches terminées, le responsable démarre automatiquement ou reçoit une notification.",
+    "hint_backlog": "Cette tâche est « À planifier » : elle ne démarrera pas automatiquement à la fin de ces tâches. Elle démarrera une fois sortie de « À planifier ».",
+    "picker_hint": "Sélectionnez une tâche qui doit se terminer avant celle-ci.",
+    "restricted": "{{count}} prérequis à accès restreint",
+    "ended": "Les tâches attendues sont terminées",
+    "marker_title": "Bloquée par {{count}} tâches",
+    "marker_title_one": "Bloquée par {{count}} tâche",
+    "marker_title_other": "Bloquée par {{count}} tâches",
+    "marker_ended": "{{finished}}/{{total}} terminées",
+    "marker_more": "{{count}} de plus",
+    "marker_more_one": "{{count}} de plus",
+    "marker_more_other": "{{count}} de plus",
+    "marker_auto_start": "{{name}} démarrera automatiquement une fois celles-ci terminées.",
+    "marker_notify": "{{name}} sera notifié une fois celles-ci terminées.",
+    "marker_unavailable": "{{name}} ne peut pas s'exécuter pour l'instant : rien ne démarrera une fois celles-ci terminées.",
+    "marker_unassigned": "Aucun responsable : rien ne démarrera une fois celles-ci terminées."
   }
 }

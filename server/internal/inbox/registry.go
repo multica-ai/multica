@@ -39,6 +39,8 @@ var typeGroups = map[string]string{
 	"status_changed":     GroupStatusChanges,
 	"new_comment":        GroupComments,
 	"mentioned":          GroupMentions,
+	"doc_comment":        GroupComments,
+	"doc_mentioned":      GroupMentions,
 	"reaction_added":     GroupReactions,
 	"priority_changed":   GroupUpdates,
 	"start_date_changed": GroupUpdates,
@@ -53,8 +55,11 @@ var typeGroups = map[string]string{
 	"quick_create_unconfirmed": "",
 	"autopilot_paused":         "",
 	"autopilot_quota_exceeded": "",
-	"children_done":            "",
-	"project_owner_joined":     "",
+	// The workspace used its monthly app calls (MUL-10047); owners and admins.
+	"app_tool_calls_quota_exceeded": "",
+	"children_done":                 "",
+	"blockers_done":                 "",
+	"project_owner_joined":          "",
 	// The agent is stopped until the person answers these.
 	"app_action_requested":  "",
 	"app_action_reminder":   "",
@@ -113,6 +118,41 @@ func WithLegacyDefaults(prefs map[string]string) map[string]string {
 		result[k] = v
 	}
 	return result
+}
+
+// SquadHandoffsPref narrows the comments group: "muted" drops the new_comment
+// rows the comment listener marked with SquadHandoffDetail, the agents of an
+// issue's squad handing work to each other (MUL-10008). Absent means "all".
+const SquadHandoffsPref = "squad_handoffs"
+
+// SquadHandoffDetail is the new_comment details key, set to "true", that
+// marks a squad handoff. Details values stay strings: clients parse them as
+// a string map and reject the whole Inbox list otherwise.
+const SquadHandoffDetail = "squad_handoff"
+
+// SquadResultDetail is the new_comment details key, set to "true", on the row
+// that delivers the handoff a squad's chain ended with: its leader's run
+// finished without passing the work on, so that report is the result
+// (MUL-10054). Only members who muted squad handoffs receive it; everyone
+// else already has the report's own row.
+const SquadResultDetail = "squad_result"
+
+// MutedSquadHandoff reports whether a member's parsed preferences drop this
+// new_comment row: a squad handoff for a member who muted them, or a squad
+// result for one who did not.
+func MutedSquadHandoff(prefs map[string]string, notifType string, details []byte) bool {
+	if notifType != "new_comment" || len(details) == 0 {
+		return false
+	}
+	var d map[string]any
+	if err := json.Unmarshal(details, &d); err != nil {
+		return false
+	}
+	muted := prefs[SquadHandoffsPref] == "muted"
+	if d[SquadResultDetail] == "true" {
+		return !muted
+	}
+	return muted && d[SquadHandoffDetail] == "true"
 }
 
 // Muted reports whether a member's parsed preferences mute notifType. nil

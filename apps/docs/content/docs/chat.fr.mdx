@@ -106,6 +106,16 @@ La file apparaît au-dessus du champ de saisie et suit l’ordre des messages. V
 
 Cette fonction concerne les conversations Chat directes sur les clients web, de bureau et mobile à jour. Sur mobile, les messages en file apparaissent à la fin de la conversation ; supprimez-les ou modifiez-les depuis le web ou le bureau. Les anciens clients et les conversations Slack et Lark conservent leur file habituelle.
 
+## Recevoir un suivi plus tard [#follow-up-later]
+
+Demandez à l'agent de revenir avec un résultat, par exemple « Préviens-moi quand cette tâche est prête à être revue » ou « Rappelle-le-moi dans deux heures ». Il peut créer un réveil qui lance une nouvelle exécution dans cette conversation lorsqu'une tâche atteint un statut, que des sous-tâches se terminent, qu'une PR GitHub est fusionnée ou fermée, que ses vérifications se terminent, qu'une exécution se termine ou qu'un membre commente une tâche. Il peut aussi revenir à une heure précise ou vérifier périodiquement.
+
+Sur le web et sur desktop, une carte sous la réponse indique le suivi prévu. Le bandeau au-dessus de la saisie indique ce que l'agent attend et l'échéance. Ouvrez ce bandeau ou le bouton horloge de l'en-tête pour voir les **Réveils**, y compris ceux terminés au cours des 7 derniers jours. **Annuler le réveil** arrête l'attente ; si l'exécution du compte rendu échoue ou est annulée, choisissez **Réessayer**. Pour changer l'horaire d'un réveil actif sans le demander à l'agent, utilisez **Modifier l'horaire** : déplacer un rappel, changer la fréquence d'une vérification ou fixer une nouvelle échéance. Si une vérification plus fréquente dépasse 100 passages, l'échéance est avancée.
+
+Les conditions et les vérifications périodiques attendent 24 heures par défaut, 7 jours au maximum. Si l'échéance arrive d'abord, l'agent dispose d'une dernière exécution pour faire le point. Un rappel ponctuel peut être prévu jusqu'à 30 jours à l'avance. Une conversation peut avoir au maximum 10 réveils actifs. Archiver la conversation les annule ; perdre l'accès à l'agent ou au travail surveillé peut aussi les terminer.
+
+Pour un calendrier durable, comme un rapport quotidien, utilisez une [automatisation](/autopilots). Les agents gèrent le suivi avec [`chat wakeup`](/cli#chat-wakeups).
+
 ## Organiser la liste des conversations
 
 Les conversations peuvent être renommées, épinglées, archivées et supprimées :
@@ -116,6 +126,8 @@ Les conversations peuvent être renommées, épinglées, archivées et supprimé
 - **Supprimer** retire définitivement la conversation et ses messages.
 
 Si une conversation est liée à un canal externe (comme Slack), l'archiver rompt cette liaison ; la désarchiver ne la rétablit pas — liez-la à nouveau.
+
+Le nombre de réponses non lues dans vos conversations apparaît sur le badge **Chat** de la barre d'applications. Dans l'application desktop, faites un clic droit sur **Chat**, puis choisissez **Tout marquer comme lu**.
 
 <Callout type="warning">
 La suppression d'une conversation est irréversible et arrête toutes les exécutions qu'elle contient et qui ne sont pas terminées. Archivez-la plutôt si vous n'en avez simplement plus besoin pour le moment.

@@ -52,7 +52,7 @@ Chaque agent a un propriétaire et un paramètre **Accès**. L'Accès détermine
 | Accès | Qui peut l'exécuter |
 |---|---|
 | **Moi uniquement** | Uniquement le propriétaire de l'agent. |
-| **Tout l'espace de travail** | Tous les membres de l'espace de travail. |
+| **Tout l'espace de travail** | Les membres ayant le rôle `owner`, `admin` ou `member`. |
 | **Personnes précises** | Le propriétaire de l'agent et les membres sélectionnés. |
 
 Les nouveaux agents sont par défaut en **Moi uniquement**. La démo ci-dessous part de Moi uniquement, passe tour à tour aux deux autres options et montre ce que chaque membre obtient alors dans le sélecteur d'assigné et le menu des @mentions.
@@ -98,3 +98,4 @@ Le propriétaire de l'agent ainsi que les `owner` et les `admin` de l'espace de 
 - [Skills](/skills) — ajoutez des méthodes et des documents réutilisables à un agent.
 - [Squads](/squads) — laissez un chef choisir le membre le plus adapté au travail.
 - [Daemon et runtimes](/daemon-runtimes) — là où les agents s'exécutent réellement.
+- [Partager un pool d'agents dans une équipe](/team-agent-pool) — accès, partage des runtimes, squads et passages de relais de revue pour toute une équipe.

@@ -18,7 +18,7 @@ import { CalendarClock, CalendarDays } from "@multica/ui/icons";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { CardControl } from "../../common/card-control";
 import { PropertyIcon } from "../../common/property-icon";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useLocale, useT, useTimeAgo } from "../../i18n";
 import { ProjectIcon } from "../../projects/components/project-icon";
@@ -33,6 +33,7 @@ import { runConfirmIntent } from "../actions/run-confirm-gate";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { CustomStatusChip, useIsCustomStatus } from "./custom-status-chip";
+import { IssueBlockedMarker } from "./issue-blockers";
 import { IssueDuplicateOfMarker } from "./issue-duplicates";
 import { IssuePullRequestChips, useIssuePullRequestSummaries } from "./pull-request-chips";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
@@ -212,7 +213,8 @@ export const BoardCardContent = memo(function BoardCardContent({
         <div className="flex items-center gap-1.5 min-w-0">
           {priorityIconNode}
           <p className="text-caption text-muted-foreground truncate">{issue.identifier}</p>
-          <IssueDuplicateOfMarker issue={issue} insideLink />
+          <IssueBlockedMarker issue={issue} />
+            <IssueDuplicateOfMarker issue={issue} insideLink />
         </div>
         <IssueAgentActivityIndicator issueId={issue.id} />
       </div>
@@ -374,7 +376,7 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
   const p = useWorkspacePaths();
   const peek = useIssuePeekActions();
   const peeked = useIsIssuePeeked(issue.id);
-  const peekLinkProps = useIssuePeekLinkProps(issue.id);
+  const peekLinkProps = useIssuePeekLinkProps(issue);
   const {
     attributes,
     listeners,
@@ -404,7 +406,7 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
         data-peeked={peeked ? "" : undefined}
         {...attributes}
         {...listeners}
-        className={`group/card ${isDragging ? "opacity-30" : ""}`}
+        className={`group/card transition-opacity duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none ${isDragging ? "opacity-30" : ""}`}
         onKeyDown={
           peek
             ? (e) => {
@@ -420,7 +422,7 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
         }
       >
         <AppLink
-          href={p.issueDetail(issue.id)}
+          href={p.issueDetail(issueRouteRef(issue))}
           newTabTitle={issue.identifier}
           className={`group block transition-colors ${isDragging ? "pointer-events-none" : ""}`}
           {...peekLinkProps}

@@ -3,12 +3,13 @@
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useRegisterCommandBarContext } from "../../search/register-context";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { Archive, ArchiveRestore, BellOff, BellRing, Check, ChevronRight, FileQuestion, Link2, PanelRight, Pencil, Pin, PinOff, Trash2, Type } from "@multica/ui/icons";
+import { Archive, ArchiveRestore, BellOff, BellRing, FileQuestion, Link2, PanelRight, Pencil, Pin, PinOff, Trash2, Type } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText, copyTextAndHtml } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
-import type { Project, ProjectStatus, ProjectPriority } from "@multica/core/types";
+import { isFeatureLockedError } from "@multica/core/billing";
+import type { ProjectStatus } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { canDeleteProject } from "@multica/core/projects/deletion-permissions";
 import { projectDetailOptions, projectSubscriptionOptions } from "@multica/core/projects/queries";
@@ -22,45 +23,37 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssuesScope } from "@multica/core/issues/stores";
 import { useRecentContextStore } from "@multica/core/chat";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { useActorName } from "@multica/core/workspace/hooks";
-import { PROJECT_STATUS_ORDER, PROJECT_STATUS_CONFIG, PROJECT_PRIORITY_ORDER } from "@multica/core/projects/config";
-import { getProjectIssueMetrics } from "./project-issue-metrics";
-import { ActorAvatar } from "../../common/actor-avatar";
+import type { BreakdownFilter } from "./project-progress-section";
+import { ProjectInsights } from "./project-insights";
+import { ProjectPropertiesPanel } from "./project-properties";
+import { ProjectActivityPage } from "./project-activity";
+import { getIssueSurfaceViewStore, useIssuesScopeStore } from "@multica/core/issues/stores";
+import { issueScopeKey } from "@multica/core/issues/surface/scope";
+import { ProjectOverviewBody, ProjectOverviewHeader, ProjectTabs } from "./project-overview";
+import {
+  defaultProjectTab,
+  isProjectTab,
+  useProjectTabStore,
+  type ProjectTab,
+} from "@multica/core/projects/tab-store";
 import { AppLink, currentPath, useNavigation } from "../../navigation";
-import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
-import { PriorityIcon } from "../../issues/components/priority-icon";
-import { ProjectResourcesSection } from "./project-resources-section";
-import { ProjectStartDatePicker } from "./project-start-date-picker";
-import { ProjectDueDatePicker } from "./project-due-date-picker";
-import { ProjectAccessControl } from "./project-access";
-import { ProjectLeadPicker } from "./project-lead-picker";
-import { ProjectWorkflowControl } from "../../workflows/project-workflow-row";
+import { usePaidFeatureErrorMessage } from "../../billing";
 import { ProjectWorkflowMenuItem, ProjectWorkflowSheet } from "../../workflows/project-workflow-sheet";
 import { IssueSurface } from "../../issues/surface/issue-surface";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
-import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
-import {
-  Popover,
-  PopoverTrigger,
-  PopoverContent,
-} from "@multica/ui/components/ui/popover";
 import {
   Tooltip,
   TooltipTrigger,
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
-import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
 import { IssueViewHeader } from "../../issue-views/view-header";
 import {
   AnimatedRightSidebar,
@@ -82,7 +75,6 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { useT } from "../../i18n";
 import { titleLinkPayload } from "../../common/title-link";
-import { useProjectStatusLabels, useProjectPriorityLabels, useFormatRelativeDate } from "./labels";
 import {
   ArchivedProjectNotice,
   ArchivedProjectTag,
@@ -90,34 +82,146 @@ import {
   useOfferArchiveOnComplete,
   useRestoreProjects,
 } from "./project-archive";
-import { PAGE_GUTTER } from "../../layout/page-header";
+import { PageHeader, PAGE_GUTTER } from "../../layout/page-header";
+import { OBJECT_PAGE_BODY } from "../../layout/object-page";
 
-// Property row — sidebar property display
+export const PROJECT_DETAIL_LAYOUT_ID = "multica_project_detail_layout";
 
-function PropRow({
-  label,
-  children,
+const PROJECT_SIDEBAR_PROPERTY_ROWS = 7;
+const PROJECT_SIDEBAR_ACTIVITY_ROWS = 3;
+
+/**
+ * Loading frame for ProjectDetail: mirrors the 48px header, tab slots, reading
+ * column, and saved desktop right-sidebar state so data landing causes no
+ * horizontal or vertical layout jump.
+ */
+export function ProjectDetailSkeleton({
+  sidebar = true,
+  layoutId = PROJECT_DETAIL_LAYOUT_ID,
 }: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex min-h-8 items-center gap-2 rounded-md px-2 -mx-2 hover:bg-accent/50 transition-colors">
-      <span className="w-16 shrink-0 text-caption text-muted-foreground">{label}</span>
-      <div className="flex min-w-0 flex-1 items-center gap-1.5 text-caption truncate">
-        {children}
-      </div>
-    </div>
-  );
-}
+  sidebar?: boolean;
+  layoutId?: string;
+} = {}) {
+  const isMobile = useIsMobile();
+  const { defaultLayout } = useDefaultLayout({ id: layoutId });
+  const sidebarOpen =
+    sidebar && !isMobile && getAnimatedRightSidebarInitialOpen(true, defaultLayout);
+  const restoredSidebarPercent =
+    typeof defaultLayout?.sidebar === "number" && defaultLayout.sidebar > 0
+      ? defaultLayout.sidebar
+      : undefined;
 
-// The project's workflow (MUL-7420).
-function ProjectWorkflowPropRow({ project, onOpen }: { project: Project; onOpen: () => void }) {
-  const { t } = useT("issues");
   return (
-    <PropRow label={t(($) => $.workflows.project.label)}>
-      <ProjectWorkflowControl project={project} onOpen={onOpen} />
-    </PropRow>
+    <div
+      data-mc="object-page"
+      data-type="project"
+      data-testid="project-detail-skeleton"
+      aria-busy="true"
+      className="flex min-h-0 flex-1"
+    >
+      <div className="flex min-w-0 flex-1 flex-col">
+        <PageHeader>
+          <div className="flex min-w-0 flex-1 items-center gap-1 self-stretch">
+            <div className="flex h-7 items-center gap-2 px-2">
+              <Skeleton className="size-4 shrink-0 rounded-sm" />
+              <Skeleton className="h-4 w-28" />
+            </div>
+            <div
+              data-testid="project-detail-skeleton-tabs"
+              className="flex shrink-0 items-center self-stretch"
+            >
+              <div className="flex h-full items-center px-2.5">
+                <Skeleton className="h-3.5 w-14" />
+              </div>
+              <div className="flex h-full items-center px-2.5">
+                <Skeleton className="h-3.5 w-14" />
+              </div>
+              <div className="flex h-full items-center px-2.5">
+                <Skeleton className="h-3.5 w-12" />
+              </div>
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <Skeleton className="size-7 rounded-md" />
+          </div>
+        </PageHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className={cn(OBJECT_PAGE_BODY, "space-y-8")}>
+            <div className="flex items-center gap-3">
+              <Skeleton className="size-12 shrink-0 rounded-xl" />
+              <Skeleton className="h-7 w-56" />
+            </div>
+            <div className="space-y-2">
+              <div className="flex h-7 items-center">
+                <Skeleton className="h-4 w-24" />
+              </div>
+              <div className="space-y-2">
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-5/6" />
+                <Skeleton className="h-4 w-2/3" />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="flex h-7 items-center">
+                <Skeleton className="h-4 w-24" />
+              </div>
+              <Skeleton className="h-14 w-full rounded-lg" />
+            </div>
+          </div>
+        </div>
+      </div>
+      {sidebarOpen && (
+        <div
+          data-testid="project-detail-skeleton-sidebar"
+          className={cn(
+            "hidden shrink-0 overflow-hidden border-l p-4 [scrollbar-gutter:stable] md:block",
+            restoredSidebarPercent === undefined
+              ? "w-80"
+              : "min-w-[260px] max-w-[420px]",
+          )}
+          style={
+            restoredSidebarPercent !== undefined
+              ? { width: `${restoredSidebarPercent}%` }
+              : undefined
+          }
+        >
+          <div className="space-y-5">
+            <div>
+              <div className="mb-2 flex items-center px-2 py-1">
+                <Skeleton className="h-3.5 w-20" />
+              </div>
+              <div className="space-y-0.5 pl-2">
+                {Array.from({ length: PROJECT_SIDEBAR_PROPERTY_ROWS }, (_, i) => (
+                  <div key={i} className="flex min-h-8 items-center gap-2">
+                    <Skeleton className="h-3 w-16 shrink-0" />
+                    <Skeleton className="h-4 w-24" />
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className="mb-2 flex items-center px-2 py-1">
+                <Skeleton className="h-3.5 w-16" />
+              </div>
+              <div className="space-y-2 pl-2">
+                <Skeleton className="h-6 w-28" />
+                <Skeleton className="h-2 w-full rounded-full" />
+              </div>
+            </div>
+            <div>
+              <div className="mb-2 flex items-center px-2 py-1">
+                <Skeleton className="h-3.5 w-16" />
+              </div>
+              <div className="space-y-2.5 pl-2">
+                {Array.from({ length: PROJECT_SIDEBAR_ACTIVITY_ROWS }, (_, i) => (
+                  <Skeleton key={i} className="h-8 w-full" />
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -125,8 +229,6 @@ function ProjectWorkflowPropRow({ project, onOpen }: { project: Project; onOpen:
 
 export function ProjectDetail({ projectId }: { projectId: string }) {
   const { t } = useT("projects");
-  const statusLabels = useProjectStatusLabels();
-  const priorityLabels = useProjectPriorityLabels();
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
   const router = useNavigation();
@@ -136,7 +238,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const { requestArchive, dialog: archiveDialog } = useArchiveProjects();
   const restore = useRestoreProjects();
   const offerArchive = useOfferArchiveOnComplete();
-  const formatRelativeDate = useFormatRelativeDate();
   const { data: project, isLoading } = useQuery({
     ...projectDetailOptions(wsId, projectId),
     enabled: !deleted,
@@ -164,8 +265,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   );
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { getActorName } = useActorName();
   const updateProject = useUpdateProject();
+  const paidFeatureError = usePaidFeatureErrorMessage();
   const deleting = deleteProject.isPending;
   const { data: pinnedItems = [] } = useQuery({
     ...pinListOptions(wsId, userId ?? ""),
@@ -173,6 +274,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   });
   const isPinned = pinnedItems.some((p) => p.item_type === "project" && p.item_id === projectId);
   const role = members.find((m) => m.user_id === userId)?.role ?? null;
+  // A guest (MUL-9420) reads the project, follows it and pins it; it changes
+  // nothing about it.
+  const guest = role === "guest";
   const canDelete = !!project && canDeleteProject(project, userId ?? null, role, agents);
   const createPin = useCreatePin();
   const deletePinMut = useDeletePin();
@@ -192,17 +296,33 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       },
     );
   };
-  const descEditorRef = useRef<ContentEditorRef>(null);
   const isMobile = useIsMobile();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [iconPickerOpen, setIconPickerOpen] = useState(false);
-  const [propertiesOpen, setPropertiesOpen] = useState(true);
-  const [progressOpen, setProgressOpen] = useState(true);
-  const [descriptionOpen, setDescriptionOpen] = useState(true);
+
+  // Overview / Issues. An explicit ?tab= wins and is remembered; otherwise the
+  // project opens on the tab this person last left it on.
+  const tabParam = router.searchParams.get("tab");
+  const rememberedTab = useProjectTabStore((s) => s.lastTab[projectId]);
+  const rememberTab = useProjectTabStore((s) => s.remember);
+  const tab: ProjectTab = isProjectTab(tabParam)
+    ? tabParam
+    : defaultProjectTab(rememberedTab, project?.issue_count ?? 0);
+  useEffect(() => {
+    if (isProjectTab(tabParam)) rememberTab(projectId, tabParam);
+  }, [projectId, tabParam, rememberTab]);
+  const handleTabChange = useCallback(
+    (next: ProjectTab) => {
+      rememberTab(projectId, next);
+      const params = new URLSearchParams(router.searchParams);
+      params.set("tab", next);
+      router.replace(`${router.pathname}?${params.toString()}`);
+    },
+    [projectId, rememberTab, router],
+  );
 
   // Sidebar panel
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
-    id: "multica_project_detail_layout",
+    id: PROJECT_DETAIL_LAYOUT_ID,
   });
   const sidebarRef = usePanelRef();
   const rightSidebarShortcutTargetRef = useRef<HTMLDivElement | null>(null);
@@ -259,9 +379,13 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const handleUpdateField = useCallback(
     (data: Parameters<typeof updateProject.mutate>[0] extends { id: string } & infer R ? R : never) => {
       if (!project) return;
-      updateProject.mutate({ id: project.id, ...data });
+      // Field edits roll back silently; a plan refusal (a lead who would join
+      // a private project) needs saying why.
+      updateProject.mutateAsync({ id: project.id, ...data }).catch((err: unknown) => {
+        if (isFeatureLockedError(err)) toast.error(paidFeatureError(err, ""));
+      });
     },
-    [project, updateProject],
+    [project, updateProject, paidFeatureError],
   );
 
   const handleStatusChange = useCallback(
@@ -271,6 +395,27 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       offerArchive(project, status);
     },
     [project, handleUpdateField, offerArchive],
+  );
+
+  // A breakdown row opens the Issues tab showing just that slice.
+  const showFilteredIssues = useCallback(
+    (filter: BreakdownFilter) => {
+      // Any slice lands on the All tab: Members or Agents would hide half of
+      // them, and each tab keeps its own filters.
+      useIssuesScopeStore.getState().setScope(`project:${projectId}`, "all");
+      const store = getIssueSurfaceViewStore(issueScopeKey({ type: "project", projectId, actorKind: "all" }));
+      store.getState().clearFilters();
+      if (filter.kind === "assignee") {
+        store.setState({ assigneeFilters: [{ type: filter.type, id: filter.id }] });
+      } else if (filter.kind === "unassigned") {
+        store.setState({ includeNoAssignee: true });
+      } else {
+        store.setState({ labelFilters: [filter.id] });
+      }
+      setMobileSidebarOpen(false);
+      handleTabChange("issues");
+    },
+    [projectId, handleTabChange],
   );
 
   const handleDelete = useCallback(() => {
@@ -291,14 +436,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   }, [project, deleteProject, router, wsPaths, t]);
 
   if (isLoading || deleted) {
-    return (
-      <div className="mx-auto w-full max-w-4xl px-8 py-10 space-y-4">
-        <Skeleton className="h-5 w-32" />
-        <Skeleton className="h-8 w-64" />
-        <Skeleton className="h-4 w-96" />
-        <Skeleton className="h-40 w-full mt-8" />
-      </div>
-    );
+    return <ProjectDetailSkeleton sidebar={!isMobile && desktopSidebarOpen} />;
   }
 
   if (!project) {
@@ -321,201 +459,136 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     );
   }
 
-  const issueMetrics = getProjectIssueMetrics(project);
   const archived = !!project.archived_at;
-  const statusCfg = PROJECT_STATUS_CONFIG[project.status];
 
   const sidebarContent = (
     <div className="space-y-5">
-      {/* Icon + Title */}
-      <div>
-        <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
-          <TooltipHint label={t(($) => $.detail.icon_tooltip)}>
-            <PopoverTrigger
-              render={
-                <button
-                  type="button"
-                  className="text-display-sm cursor-pointer rounded-lg p-1 -ml-1 hover:bg-accent/60 transition-colors"
-                  aria-label={t(($) => $.detail.icon_tooltip)}
-                >
-                  {project.icon || "📁"}
-                </button>
-              }
-            />
-          </TooltipHint>
-          <PopoverContent align="start" className="w-auto p-0">
-            <EmojiPicker
-              onSelect={(emoji) => {
-                handleUpdateField({ icon: emoji });
-                setIconPickerOpen(false);
-              }}
-            />
-          </PopoverContent>
-        </Popover>
-        <TitleEditor
-          key={`title-${projectId}`}
-          defaultValue={project.title}
-          placeholder={t(($) => $.detail.title_placeholder)}
-          className="mt-2 w-full text-title-sm font-semibold leading-snug tracking-tight"
-          onBlur={(value) => {
-            const trimmed = value.trim();
-            if (trimmed && trimmed !== project.title) handleUpdateField({ title: trimmed });
-          }}
-        />
-      </div>
-
-      {/* Properties */}
-      <div>
-        <button
-          type="button"
-          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${propertiesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
-          onClick={() => setPropertiesOpen(!propertiesOpen)}
-        >
-          {t(($) => $.detail.section_properties)}
-          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`} />
-        </button>
-        {propertiesOpen && <div className="space-y-0.5 pl-2">
-          <PropRow label={t(($) => $.table.status)}>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <button type="button" className="inline-flex items-center gap-1.5 text-caption hover:text-foreground transition-colors">
-                    <span className={cn("size-2 rounded-full", statusCfg.dotColor)} />
-                    <span>{statusLabels[project.status]}</span>
-                  </button>
-                }
-              />
-              <DropdownMenuContent align="start" className="w-44">
-                {PROJECT_STATUS_ORDER.map((s) => (
-                  <DropdownMenuItem key={s} onClick={() => handleStatusChange(s as ProjectStatus)}>
-                    <span className={cn("size-2 rounded-full", PROJECT_STATUS_CONFIG[s].dotColor)} />
-                    <span>{statusLabels[s]}</span>
-                    {s === project.status && <Check className="ml-auto h-3.5 w-3.5" />}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </PropRow>
-          <PropRow label={t(($) => $.table.priority)}>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <button type="button" className="inline-flex items-center gap-1.5 text-caption hover:text-foreground transition-colors">
-                    <PriorityIcon priority={project.priority} />
-                    <span>{priorityLabels[project.priority]}</span>
-                  </button>
-                }
-              />
-              <DropdownMenuContent align="start" className="w-44">
-                {PROJECT_PRIORITY_ORDER.map((p) => (
-                  <DropdownMenuItem key={p} onClick={() => handleUpdateField({ priority: p as ProjectPriority })}>
-                    <PriorityIcon priority={p} />
-                    <span>{priorityLabels[p]}</span>
-                    {p === project.priority && <Check className="ml-auto h-3.5 w-3.5" />}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </PropRow>
-          {<PropRow label={t(($) => $.access.label)}>
-            <ProjectAccessControl project={project} />
-          </PropRow>}
-          <PropRow label={t(($) => $.table.lead)}>
-            <ProjectLeadPicker
-              project={project}
-              handleUpdate={handleUpdateField}
-              renderTrigger={(leadName) => (
-                <button type="button" className="inline-flex items-center gap-1.5 text-caption hover:text-foreground transition-colors">
-                  {project.lead_type && project.lead_id ? (
-                    <>
-                      <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size="sm" enableHoverCard showStatusDot />
-                      <span className="cursor-pointer">{leadName}</span>
-                    </>
-                  ) : (
-                    <span className="text-muted-foreground">{t(($) => $.lead.no_lead)}</span>
-                  )}
-                </button>
-              )}
-            />
-          </PropRow>
-          <PropRow label={t(($) => $.detail.prop_start_date)}>
-            <ProjectStartDatePicker startDate={project.start_date} onUpdate={handleUpdateField} />
-          </PropRow>
-          <PropRow label={t(($) => $.detail.prop_due_date)}>
-            <ProjectDueDatePicker dueDate={project.due_date} onUpdate={handleUpdateField} />
-          </PropRow>
-          <ProjectWorkflowPropRow project={project} onOpen={openWorkflowSheet} />
-          {archived && (
-            <PropRow label={t(($) => $.archive.prop_label)}>
-              <span className="tabular-nums">{formatRelativeDate(project.archived_at!)}</span>
-              {project.archived_by_type && project.archived_by_id && (
-                <>
-                  <span className="text-muted-foreground">·</span>
-                  <ActorAvatar actorType={project.archived_by_type} actorId={project.archived_by_id} size="sm" enableHoverCard />
-                  <span className="truncate">{getActorName(project.archived_by_type, project.archived_by_id)}</span>
-                </>
-              )}
-            </PropRow>
-          )}
-        </div>}
-      </div>
-
-      {/* Progress */}
-      {issueMetrics.totalCount > 0 && (() => {
-        const pct = Math.round((issueMetrics.completedCount / issueMetrics.totalCount) * 100);
-        return (
-          <div>
-            <button
-              type="button"
-              className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${progressOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
-              onClick={() => setProgressOpen(!progressOpen)}
-            >
-              {t(($) => $.detail.section_progress)}
-              <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${progressOpen ? "rotate-90" : ""}`} />
-            </button>
-            {progressOpen && <div className="pl-2 flex items-center gap-3">
-              <div className="relative h-2 flex-1 rounded-full bg-muted overflow-hidden">
-                <div
-                  className="absolute inset-y-0 left-0 rounded-full bg-emerald-500 transition-all"
-                  style={{ width: `${pct}%` }}
-                />
-              </div>
-              <span className="text-caption text-muted-foreground tabular-nums shrink-0">
-                {issueMetrics.completedCount}/{issueMetrics.totalCount}
-              </span>
-            </div>}
-          </div>
-        );
-      })()}
-
-      {/* Description */}
-      <div>
-        <button
-          type="button"
-          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${descriptionOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
-          onClick={() => setDescriptionOpen(!descriptionOpen)}
-        >
-          {t(($) => $.detail.section_description)}
-          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${descriptionOpen ? "rotate-90" : ""}`} />
-        </button>
-        {descriptionOpen && <div className="pl-2">
-          <ContentEditor
-            ref={descEditorRef}
-            key={projectId}
-            value={project.description || ""}
-            placeholder={t(($) => $.detail.description_placeholder)}
-            onUpdate={(md) => handleUpdateField({ description: md || null })}
-            debounceMs={1500}
-          />
-          <p className="mt-1 px-2 text-caption text-muted-foreground">
-            {t(($) => $.detail.description_hint)}
-          </p>
-        </div>}
-      </div>
-
-      {/* Resources */}
-      <ProjectResourcesSection projectId={projectId} />
+      <ProjectPropertiesPanel
+        project={project}
+        onUpdate={handleUpdateField}
+        onStatusChange={handleStatusChange}
+        onOpenWorkflow={openWorkflowSheet}
+        readOnly={guest}
+      />
+      <ProjectInsights
+        project={project}
+        readOnly={guest}
+        onFilter={showFilteredIssues}
+        onShowActivity={() => {
+          setMobileSidebarOpen(false);
+          handleTabChange("activity");
+        }}
+      />
     </div>
+  );
+
+  const projectMenu = (
+    <>
+      {!guest && (
+        <DropdownMenuItem
+          onClick={() =>
+            useModalStore
+              .getState()
+              .open("project-rename", { projectId: project.id, title: project.title })
+          }
+        >
+          <Pencil className="h-3.5 w-3.5" />
+          {t(($) => $.detail.rename_action)}
+        </DropdownMenuItem>
+      )}
+      <DropdownMenuItem onClick={() => {
+        void copyText(router.getShareableUrl(currentPath(router))).then((ok) => {
+          if (ok) toast.success(t(($) => $.detail.toast_link_copied));
+        });
+      }}>
+        <Link2 className="h-3.5 w-3.5" />
+        {t(($) => $.detail.copy_link)}
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={() => {
+        const { text, html } = titleLinkPayload(
+          project.title,
+          router.getShareableUrl(currentPath(router)),
+        );
+        void copyTextAndHtml(text, html).then((ok) => {
+          if (ok) {
+            toast.success(t(($) => $.detail.toast_title_link_copied));
+          } else {
+            toast.error(t(($) => $.detail.toast_title_link_copy_failed));
+          }
+        });
+      }}>
+        <Type className="h-3.5 w-3.5" />
+        {t(($) => $.detail.copy_title_as_link)}
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={() => {
+        if (isPinned) {
+          deletePinMut.mutate({ itemType: "project", itemId: projectId });
+        } else {
+          createPin.mutate({ item_type: "project", item_id: projectId });
+        }
+      }}>
+        {isPinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+        {isPinned ? t(($) => $.detail.unpin_tooltip) : t(($) => $.detail.pin_tooltip)}
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        disabled={setSubscription.isPending}
+        onClick={handleToggleSubscription}
+      >
+        {isSubscribed ? <BellOff className="h-3.5 w-3.5" /> : <BellRing className="h-3.5 w-3.5" />}
+        {isSubscribed ? t(($) => $.detail.unsubscribe_action) : t(($) => $.detail.subscribe_action)}
+      </DropdownMenuItem>
+      {!guest && (
+        <>
+          <ProjectWorkflowMenuItem project={project} onOpen={() => setWorkflowSheetOpen(true)} />
+          <DropdownMenuSeparator />
+          {archived ? (
+            <DropdownMenuItem onClick={() => restore(project)}>
+              <ArchiveRestore className="h-3.5 w-3.5" />
+              {t(($) => $.detail.restore_action)}
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem onClick={() => requestArchive([project])}>
+              <Archive className="h-3.5 w-3.5" />
+              {t(($) => $.detail.archive_action)}
+            </DropdownMenuItem>
+          )}
+        </>
+      )}
+      {canDelete && (
+        <DropdownMenuItem
+          variant="destructive"
+          disabled={deleting}
+          aria-busy={deleting}
+          onClick={() => setDeleteDialogOpen(true)}
+        >
+          {deleting ? <Spinner className="size-3.5" aria-hidden="true" /> : <Trash2 className="h-3.5 w-3.5" />}
+          {t(($) => $.detail.delete_action)}
+        </DropdownMenuItem>
+      )}
+    </>
+  );
+
+  const sidebarToggle = (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            variant={sidebarOpen ? "secondary" : "ghost"}
+            size="icon-sm"
+            className={sidebarOpen ? "" : "text-muted-foreground"}
+            aria-label={t(($) => $.detail.sidebar_tooltip)}
+            onClick={handleToggleSidebar}
+          >
+            <PanelRight />
+          </Button>
+        }
+      />
+      <TooltipContent side="bottom">{t(($) => $.detail.sidebar_tooltip)}</TooltipContent>
+    </Tooltip>
+  );
+
+  const projectTabs = (
+    <ProjectTabs tab={tab} onTabChange={handleTabChange} issueCount={project.issue_count} />
   );
 
   return (
@@ -530,123 +603,51 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     >
       <ResizablePanel id="content" minSize="50%">
         <div ref={rightSidebarShortcutTargetRef} className="flex h-full flex-col">
-          <IssueSurface
-            scope={issueScope}
-            modes={["board", "list", "table", "swimlane", "gantt"]}
-            allowCreate={!archived}
-            renderHeader={({ controller }) => (
-              <>
-              <IssueViewHeader
-                controller={controller}
-                base={{ kind: "project", project }}
-                baseBadge={archived ? <ArchivedProjectTag /> : undefined}
-                hideCreate={archived}
-                baseMenu={
-                  <>
-                    <DropdownMenuItem
-                      onClick={() =>
-                        useModalStore
-                          .getState()
-                          .open("project-rename", { projectId: project.id, title: project.title })
-                      }
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                      {t(($) => $.detail.rename_action)}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => {
-                      void copyText(router.getShareableUrl(currentPath(router))).then((ok) => {
-                        if (ok) toast.success(t(($) => $.detail.toast_link_copied));
-                      });
-                    }}>
-                      <Link2 className="h-3.5 w-3.5" />
-                      {t(($) => $.detail.copy_link)}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => {
-                      const { text, html } = titleLinkPayload(
-                        project.title,
-                        router.getShareableUrl(currentPath(router)),
-                      );
-                      void copyTextAndHtml(text, html).then((ok) => {
-                        if (ok) {
-                          toast.success(t(($) => $.detail.toast_title_link_copied));
-                        } else {
-                          toast.error(t(($) => $.detail.toast_title_link_copy_failed));
-                        }
-                      });
-                    }}>
-                      <Type className="h-3.5 w-3.5" />
-                      {t(($) => $.detail.copy_title_as_link)}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => {
-                      if (isPinned) {
-                        deletePinMut.mutate({ itemType: "project", itemId: projectId });
-                      } else {
-                        createPin.mutate({ item_type: "project", item_id: projectId });
-                      }
-                    }}>
-                      {isPinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
-                      {isPinned ? t(($) => $.detail.unpin_tooltip) : t(($) => $.detail.pin_tooltip)}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      disabled={setSubscription.isPending}
-                      onClick={handleToggleSubscription}
-                    >
-                      {isSubscribed ? <BellOff className="h-3.5 w-3.5" /> : <BellRing className="h-3.5 w-3.5" />}
-                      {isSubscribed ? t(($) => $.detail.unsubscribe_action) : t(($) => $.detail.subscribe_action)}
-                    </DropdownMenuItem>
-                    <ProjectWorkflowMenuItem project={project} onOpen={() => setWorkflowSheetOpen(true)} />
-                    <DropdownMenuSeparator />
-                    {archived ? (
-                      <DropdownMenuItem onClick={() => restore(project)}>
-                        <ArchiveRestore className="h-3.5 w-3.5" />
-                        {t(($) => $.detail.restore_action)}
-                      </DropdownMenuItem>
-                    ) : (
-                      <DropdownMenuItem onClick={() => requestArchive([project])}>
-                        <Archive className="h-3.5 w-3.5" />
-                        {t(($) => $.detail.archive_action)}
-                      </DropdownMenuItem>
-                    )}
-                    {canDelete && (
-                      <DropdownMenuItem
-                        variant="destructive"
-                        disabled={deleting}
-                        aria-busy={deleting}
-                        onClick={() => setDeleteDialogOpen(true)}
-                      >
-                        {deleting ? <Spinner className="size-3.5" aria-hidden="true" /> : <Trash2 className="h-3.5 w-3.5" />}
-                        {t(($) => $.detail.delete_action)}
-                      </DropdownMenuItem>
-                    )}
-                  </>
-                }
-                trailing={
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <Button
-                          variant={sidebarOpen ? "secondary" : "ghost"}
-                          size="icon-sm"
-                          className={sidebarOpen ? "" : "text-muted-foreground"}
-                          aria-label={t(($) => $.detail.sidebar_tooltip)}
-                          onClick={handleToggleSidebar}
-                        >
-                          <PanelRight />
-                        </Button>
-                      }
-                    />
-                    <TooltipContent side="bottom">{t(($) => $.detail.sidebar_tooltip)}</TooltipContent>
-                  </Tooltip>
-                }
+          {tab !== "issues" ? (
+            <>
+              <ProjectOverviewHeader
+                project={project}
+                tabs={projectTabs}
+                menu={projectMenu}
+                badge={archived ? <ArchivedProjectTag /> : undefined}
+                trailing={sidebarToggle}
               />
               {archived && (
                 <div className={cn("shrink-0 pt-2", PAGE_GUTTER)}>
-                  <ArchivedProjectNotice project={project} />
+                  <ArchivedProjectNotice project={project} readOnly={guest} />
                 </div>
               )}
-              </>
-            )}
-          />
+              {tab === "overview" ? (
+                <ProjectOverviewBody project={project} onUpdate={handleUpdateField} readOnly={guest} />
+              ) : (
+                <ProjectActivityPage projectId={project.id} />
+              )}
+            </>
+          ) : (
+            <IssueSurface
+              scope={issueScope}
+              modes={["board", "list", "table", "swimlane", "gantt"]}
+              allowCreate={!archived}
+              renderHeader={({ controller }) => (
+                <>
+                  <IssueViewHeader
+                    controller={controller}
+                    base={{ kind: "project", project }}
+                    baseBadge={archived ? <ArchivedProjectTag /> : undefined}
+                    hideCreate={archived}
+                    afterTitle={projectTabs}
+                    baseMenu={projectMenu}
+                    trailing={sidebarToggle}
+                  />
+                  {archived && (
+                    <div className={cn("shrink-0 pt-2", PAGE_GUTTER)}>
+                      <ArchivedProjectNotice project={project} readOnly={guest} />
+                    </div>
+                  )}
+                </>
+              )}
+            />
+          )}
           </div>
         </ResizablePanel>
         {!isMobile && <ResizableHandle />}

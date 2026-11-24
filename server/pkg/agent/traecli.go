@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os/exec"
@@ -9,6 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // traecliBlockedArgs are flags hardcoded by the daemon that must not be
@@ -211,6 +214,8 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		},
 	}
 
+	var history traePromptHistory
+	var readerErr error
 	readerDone := make(chan struct{})
 	go func() {
 		defer close(readerDone)
@@ -220,18 +225,30 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 			if line == "" {
 				continue
 			}
-			c.handleLine(line)
+			var frame map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(line), &frame); err != nil {
+				if streamingCurrentTurn.Load() {
+					history.uncertain = true
+				}
+				continue
+			}
+			if streamingCurrentTurn.Load() {
+				history.observe(c.sessionID, frame)
+			}
+			c.handleEnvelope(frame)
 		}
+		readerErr = scanner.Err()
 		c.closeAllPending(fmt.Errorf("traecli process exited"))
 	}()
 
 	go func() {
+		wait := sync.OnceValue(cmd.Wait)
 		defer cancel()
 		defer msgStream.close()
 		defer close(resCh)
 		defer func() {
 			stdin.Close()
-			_ = cmd.Wait()
+			_ = wait()
 			releaseProcessGroup(cmd)
 		}()
 
@@ -404,7 +421,10 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		b.cfg.Logger.Info("traecli finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		stdin.Close()
-		cancel()
+		checkHistory := taskfailure.IsTraePromptStreamDisconnect(finalError)
+		if !checkHistory {
+			cancel()
+		}
 
 		// traecli ACP may keep the process — and the stdout/stderr pipes — open
 		// briefly after session/prompt returns. The prompt response is already
@@ -413,15 +433,26 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		// cancellation tears the process down). Draining stderr is what makes
 		// the provider-error promotion below see a terminal marker.
 		drainCtx, drainCancel := context.WithTimeout(context.Background(), traecliReaderDrainGrace)
+		stopDrain := context.AfterFunc(drainCtx, cancel)
+		var noToolCallsStarted bool
 		select {
 		case <-readerDone:
+			// Closing stdin lets Trae flush late notifications. A forced stop or
+			// incomplete stdout cannot certify the absence of a tool call.
+			noToolCallsStarted = checkHistory && runCtx.Err() == nil && readerErr == nil && history.sawTurn && !history.uncertain
 		case <-drainCtx.Done():
 		}
 		select {
 		case <-stderrDone:
+			if noToolCallsStarted {
+				noToolCallsStarted = wait() == nil && runCtx.Err() == nil && drainCtx.Err() == nil
+			}
 		case <-drainCtx.Done():
+			noToolCallsStarted = false
 		}
+		stopDrain()
 		drainCancel()
+		cancel()
 		// Flip the gate before the defer closes msgStream; a late reader that
 		// already passed the gate is serialized by traecliMessageStream so the
 		// late send is dropped instead of panicking.
@@ -447,15 +478,69 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		}
 
 		resCh <- Result{
-			Status:         finalStatus,
-			Output:         finalOutput,
-			Error:          finalError,
-			DurationMs:     duration.Milliseconds(),
-			SessionID:      sessionID,
-			ResumeRejected: resumeRejected,
-			Usage:          usageMap,
+			Status:             finalStatus,
+			NoToolCallsStarted: noToolCallsStarted,
+			Output:             finalOutput,
+			Error:              finalError,
+			DurationMs:         duration.Milliseconds(),
+			SessionID:          sessionID,
+			ResumeRejected:     resumeRejected,
+			Usage:              usageMap,
 		}
 	}()
 
 	return &Session{Messages: msgStream.ch, Result: resCh}, nil
+}
+
+// The ACP reader owns this state. Observe frames before the lossy display stream,
+// from session/prompt through EOF, so an orphan update or a late tool start counts.
+type traePromptHistory struct {
+	sawTurn   bool
+	uncertain bool
+}
+
+func (h *traePromptHistory) observe(sessionID string, frame map[string]json.RawMessage) {
+	if h.uncertain {
+		return
+	}
+	if frame["id"] != nil {
+		// Agent requests (permission, terminal or filesystem access) can start
+		// work even if no matching tool notification reaches the client.
+		if frame["method"] != nil || (frame["result"] == nil && frame["error"] == nil) {
+			h.uncertain = true
+		}
+		return
+	}
+	var method string
+	_ = json.Unmarshal(frame["method"], &method)
+	var params struct {
+		SessionID string          `json:"sessionId"`
+		Update    json.RawMessage `json:"update"`
+	}
+	if method != "session/update" && method != "session/notification" {
+		h.uncertain = true
+		return
+	}
+	if json.Unmarshal(frame["params"], &params) != nil || params.SessionID != sessionID {
+		h.uncertain = true
+		return
+	}
+	kind, _ := normalizeACPUpdate(params.Update)
+	switch kind {
+	case "agent_message_chunk", "agent_thought_chunk", "usage_update", "turn_end":
+		h.sawTurn = true
+	case "":
+		// These session-level updates carry no evidence about turn execution.
+		var meta struct {
+			Kind string `json:"sessionUpdate"`
+		}
+		_ = json.Unmarshal(params.Update, &meta)
+		if meta.Kind == "available_commands_update" || meta.Kind == "session_info_update" {
+			return
+		}
+		h.uncertain = true
+	default:
+		// Includes tool_call and tool_call_update, even without a start.
+		h.uncertain = true
+	}
 }

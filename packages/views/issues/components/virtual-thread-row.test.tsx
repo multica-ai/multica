@@ -41,6 +41,21 @@ describe("VirtualThreadRow", () => {
     expect(screen.getByText("Unsaved draft")).toBeInTheDocument();
   });
 
+  it("keeps a row mounted when an external portaled control marks it engaged", () => {
+    const { rerender } = render(<VirtualThreadRow id="comment-annotated" scrollParent={document.body} engaged>
+      {() => <p>Quoted reply body</p>}
+    </VirtualThreadRow>);
+    expect(screen.getByText("Quoted reply body")).toBeInTheDocument();
+    intersect(false);
+    expect(screen.getByText("Quoted reply body")).toBeInTheDocument();
+
+    rerender(<VirtualThreadRow id="comment-annotated" scrollParent={document.body} engaged={false}>
+      {() => <p>Quoted reply body</p>}
+    </VirtualThreadRow>);
+    intersect(false);
+    expect(screen.queryByText("Quoted reply body")).toBeNull();
+  });
+
   it("renders all content without a scroll parent for in-page find", () => {
     render(<VirtualThreadRow id="comment-find">{() => <p>Findable history</p>}</VirtualThreadRow>);
     expect(screen.getByText("Findable history")).toBeInTheDocument();

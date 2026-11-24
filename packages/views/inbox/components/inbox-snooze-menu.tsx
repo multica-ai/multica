@@ -66,12 +66,9 @@ export function InboxSnoozeMenu({
   snoozed?: boolean;
   onSnooze: (until: Date) => void;
   onUnsnooze?: () => void;
-  side?: "bottom" | "right";
+  side?: "top" | "bottom" | "right";
   align?: "start" | "end";
 }) {
-  const { t } = useT("inbox");
-  const locale = useLocale();
-  const presetLabel = useSnoozePresetLabel();
   const [picking, setPicking] = useState(false);
   // Read whenever the menu opens, from its trigger or from the parent (`H`, a
   // hover card), so the times it lists are the ones it snoozes to.
@@ -99,42 +96,68 @@ export function InboxSnoozeMenu({
             }}
           />
         ) : (
-          <>
-            {snoozed && onUnsnooze && (
-              <>
-                <DropdownMenuItem onClick={onUnsnooze}>
-                  <Undo2 className="size-4" />
-                  {t(($) => $.snooze.unsnooze)}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-              </>
-            )}
-            <DropdownMenuGroup>
-              <DropdownMenuLabel>
-                {snoozed ? t(($) => $.snooze.change_time) : t(($) => $.snooze.menu_title)}
-              </DropdownMenuLabel>
-              {inboxSnoozeOptions(now).map((option) => (
-                <DropdownMenuItem key={option.preset} onClick={() => onSnooze(option.until)}>
-                  <Clock className="size-4" />
-                  {presetLabel(option.preset)}
-                  <DropdownMenuShortcut className="tracking-normal tabular-nums">
-                    {formatSnoozeTime(option.until, now, locale)}
-                  </DropdownMenuShortcut>
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem closeOnClick={false} onClick={() => setPicking(true)}>
-              <CalendarDays className="size-4" />
-              {t(($) => $.snooze.pick_time)}
-              <ChevronRight className="ml-auto size-4 text-muted-foreground" />
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <p className="px-2 py-1 text-caption text-muted-foreground">{t(($) => $.snooze.hint)}</p>
-          </>
+          <SnoozeChoices now={now} snoozed={snoozed} onSnooze={onSnooze} onUnsnooze={onUnsnooze} onPick={() => setPicking(true)} />
         )}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/**
+ * The menu's choices, a component of their own so their times are formatted
+ * only while the menu is open: every Inbox row and issue header carries a
+ * closed menu, and re-renders with the page.
+ */
+function SnoozeChoices({
+  now,
+  snoozed,
+  onSnooze,
+  onUnsnooze,
+  onPick,
+}: {
+  now: Date;
+  snoozed: boolean;
+  onSnooze: (until: Date) => void;
+  onUnsnooze?: () => void;
+  onPick: () => void;
+}) {
+  const { t } = useT("inbox");
+  const locale = useLocale();
+  const presetLabel = useSnoozePresetLabel();
+  return (
+    <>
+      {snoozed && onUnsnooze && (
+        <>
+          <DropdownMenuItem onClick={onUnsnooze}>
+            <Undo2 className="size-4" />
+            {t(($) => $.snooze.unsnooze)}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+        </>
+      )}
+      <DropdownMenuGroup>
+        <DropdownMenuLabel>
+          {snoozed ? t(($) => $.snooze.change_time) : t(($) => $.snooze.menu_title)}
+        </DropdownMenuLabel>
+        {inboxSnoozeOptions(now).map((option) => (
+          <DropdownMenuItem key={option.preset} onClick={() => onSnooze(option.until)}>
+            <Clock className="size-4" />
+            {presetLabel(option.preset)}
+            <DropdownMenuShortcut className="tracking-normal tabular-nums">
+              {formatSnoozeTime(option.until, now, locale)}
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuGroup>
+      <DropdownMenuSeparator />
+      <DropdownMenuItem closeOnClick={false} onClick={onPick}>
+        <CalendarDays className="size-4" />
+        {t(($) => $.snooze.pick_time)}
+        <ChevronRight className="ml-auto size-4 text-muted-foreground" />
+      </DropdownMenuItem>
+      <DropdownMenuSeparator />
+      <p className="px-2 py-1 text-caption text-muted-foreground">{t(($) => $.snooze.hint)}</p>
+    </>
   );
 }
 

@@ -589,7 +589,7 @@ JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
 JOIN issue i ON i.id = ipr.issue_id
 WHERE pr.workspace_id = $1
   AND i.workspace_id = $1
-  AND ($2::uuid[] IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY($2::uuid[])))
+  AND ($2::uuid[] IS NULL OR NOT (COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY($2::uuid[])))
 UNION ALL
 SELECT
     ipr.issue_id,
@@ -600,7 +600,7 @@ JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
 JOIN issue i ON i.id = ipr.issue_id
 WHERE pr.workspace_id = $1
   AND i.workspace_id = $1
-  AND ($2::uuid[] IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY($2::uuid[])))
+  AND ($2::uuid[] IS NULL OR NOT (COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY($2::uuid[])))
 ORDER BY pr_created_at DESC
 `
 

@@ -72,7 +72,7 @@ func TestHandleTaskReportsWindowsCodexProcessStartFailure(t *testing.T) {
 			ID:   "agent-windows-launch-failure",
 			Name: "Windows launch failure agent",
 		},
-	}, 0)
+	}, newTestTaskSlot(0))
 
 	body, _ := failBody.Load().(map[string]any)
 	if body == nil {

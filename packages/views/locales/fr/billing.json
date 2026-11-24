@@ -6,6 +6,7 @@
     "plan": {
       "free": "Gratuit",
       "pro": "Pro",
+      "business": "Business",
       "unknown": "Forfait inconnu"
     },
     "status": {
@@ -27,18 +28,22 @@
     "actions": {
       "retry": "Réessayer",
       "retry_autopilots": "Réessayer le chargement de la consommation des automatisations",
-      "upgrade": "Passer à Pro",
+      "retry_storage": "Réessayer l'utilisation du stockage des pièces jointes",
+      "retry_app_calls": "Réessayer la consommation d'appels d'apps",
+      "upgrade_to": "Passer à {{plan}}",
+      "switch_to": "Basculer vers {{plan}}",
       "manage": "Gérer la facturation",
       "add_seats": "Ajouter des sièges",
       "cancel": "Annuler",
-      "continue_to_stripe": "Continuer vers Stripe"
+      "continue_to_stripe": "Continuer vers Stripe",
+      "check_status": "Vérifier l'état"
     },
     "errors": {
       "action_title": "Échec de l'action de facturation",
       "temporarily_unavailable": "La facturation est temporairement indisponible. Réessayez dans un instant.",
       "not_enabled": "Les abonnements d’espace de travail ne sont pas activés pour ce déploiement. Contactez votre administrateur.",
       "permission_changed": "Votre rôle dans l'espace de travail n'autorise plus cette action. Actualisez la page pour voir vos droits actuels.",
-      "checkout_response": "Le paiement n'a pas pu s'ouvrir car la réponse du serveur était illisible. Réessayez sans changer l'intervalle sélectionné.",
+      "checkout_response": "Impossible d'ouvrir la page de paiement en raison d'une réponse inattendue. Veuillez réessayer.",
       "already_subscribed": "Cet espace de travail a déjà un abonnement. Le forfait actuel a été actualisé.",
       "checkout_failed": "Le paiement n'a pas pu être créé. Réessayez dans un instant.",
       "portal_response": "Le portail de facturation n'a pas pu s'ouvrir car la réponse du serveur était illisible.",
@@ -52,13 +57,13 @@
       "syncing_title": "Activation de votre abonnement",
       "syncing_description": "Le paiement est terminé. Nous attendons que Stripe confirme le changement de forfait.",
       "timeout_description": "Le paiement a été reçu, mais l'abonnement est encore en cours de synchronisation. Actualisez cette page dans un instant.",
-      "active_title": "Pro est actif",
-      "active_description": "Cet espace de travail a désormais accès à Pro."
+      "active_title": "{{plan}} est actif",
+      "active_description": "Cet espace de travail a désormais accès à {{plan}}."
     },
     "past_due": {
       "title": "Le paiement demande votre attention",
       "description": "Mettez à jour votre moyen de paiement dans la gestion de la facturation.",
-      "grace_description": "Mettez à jour votre moyen de paiement avant le {{date}} pour conserver l'accès Pro."
+      "grace_description": "Mettez à jour votre moyen de paiement avant le {{date}} pour conserver votre forfait payant."
     },
     "subscription_notice": {
       "canceling_title": "Résiliation programmée",
@@ -67,7 +72,7 @@
       "incomplete_title": "La configuration de l'abonnement est incomplète",
       "incomplete_description": "Ouvrez la gestion de la facturation pour terminer ou vérifier la configuration du paiement.",
       "incomplete_expired_title": "La configuration de l'abonnement a expiré",
-      "incomplete_expired_description": "La configuration du paiement précédente a expiré sans activer Pro. Lancez une nouvelle mise à niveau lorsque vous serez prêt.",
+      "incomplete_expired_description": "La configuration du paiement précédente a expiré avant le début de l'abonnement. Lancez une nouvelle mise à niveau lorsque vous serez prêt.",
       "paused_title": "L'abonnement est en pause",
       "paused_description": "Ouvrez la gestion de la facturation pour vérifier la pause et les options de rétablissement disponibles.",
       "unpaid_title": "L'abonnement est impayé",
@@ -78,23 +83,41 @@
       "title": "Forfait actuel",
       "plan": "Forfait de l'espace de travail",
       "members": "Membres humains",
-      "members_description": "Les agents et les invitations en attente ne comptent pas comme des sièges.",
+      "members_description": "Membres humains actifs dans cet espace de travail. Les agents n'utilisent jamais de siège.",
       "member_count_one": "{{count}} membre",
       "member_count_other": "{{count}} membres",
       "billing_interval": "Intervalle de facturation",
-      "period_end": "Fin de la période en cours"
+      "period_end": "Fin de la période en cours",
+      "change_plan": "Changer de forfait",
+      "business_adds": "Business ajoute les projets privés, l'accès par membre, les comptes d'applications d'équipe et des limites d'automatisation plus élevées.",
+      "plan_change_hold": "Changement de forfait",
+      "plan_change_confirming": "Passage à {{plan}} en cours. En attente de la confirmation de Stripe ; les sièges et le forfait ne peuvent pas être modifiés d'ici là.",
+      "plan_change_unresolved": "Le passage à {{plan}} n'a pas pu être confirmé. Contactez l'assistance pour le régler ; les sièges et le forfait ne peuvent pas être modifiés d'ici là.",
+      "plan_change_state_confirming": "Confirmation en cours",
+      "plan_change_state_unresolved": "Assistance requise"
     },
     "upgrade": {
-      "title": "Passer à Pro",
-      "description": "Choisissez un intervalle de facturation, puis confirmez le nombre de sièges et le montant final dans Stripe Checkout.",
+      "title": "Mettre à niveau",
       "interval_label": "Intervalle de facturation",
       "monthly": "Mensuel",
       "yearly": "Annuel",
-      "pro_for_team_one": "Pro pour {{count}} siège humain",
-      "pro_for_team_other": "Pro pour {{count}} sièges humains",
       "price_loading": "Chargement des tarifs d'abonnement",
-      "unit_price": "{{price}} par siège humain",
-      "price_at_checkout": "Le serveur recompte les membres humains avant l'achat. Stripe Checkout affiche le tarif par siège et le total faisant foi avant le paiement."
+      "unit_price_month": "{{price}} par siège humain / mois",
+      "unit_price_year_monthly": "{{price}} par siège humain / mois, facturé annuellement",
+      "unit_price_year": "{{price}} par siège humain / an",
+      "price_at_checkout": "Les membres humains actifs sont comptés au moment du paiement. Stripe affiche le prix final par siège et le total avant que vous ne payiez.",
+      "recommended": "Recommandé",
+      "features": {
+        "pro_members": "Membres illimités",
+        "pro_autopilots": "1 000 exécutions d'automatisation par membre et par mois",
+        "pro_storage": "10 Go de stockage de pièces jointes par membre",
+        "pro_dashboard": "90 jours d'historique d'analyses",
+        "business_everything": "Tout ce qui est inclus dans Pro",
+        "business_access": "Projets privés et accès par membre",
+        "business_apps": "Comptes d'applications d'équipe et règles d'approbation",
+        "business_autopilots": "3 000 exécutions d'automatisation par membre et par mois",
+        "business_reports": "Rapports d'utilisation et de coût par membre"
+      }
     },
     "management": {
       "title": "Gestion de l'abonnement",
@@ -114,7 +137,28 @@
       "usage_total": "{{total}} / {{limit}}",
       "usage_breakdown": "{{used}} terminées · {{reserved}} en cours",
       "resets_at": "Réinitialisation {{date}}",
-      "usage_unavailable": "La consommation est temporairement indisponible"
+      "usage_unavailable": "La consommation est temporairement indisponible",
+      "members": "Membres",
+      "members_pending": "Invitations en attente : {{pending}}",
+      "metering": "Les exécutions lancées par une planification, un webhook ou un agent sont comptées. Celles qu'un membre lance avec Exécuter maintenant ne le sont pas.",
+      "storage": "Stockage des pièces jointes",
+      "storage_description": "Pièces jointes des tickets, commentaires et discussions.",
+      "storage_label": "Utilisation du stockage des pièces jointes",
+      "app_calls": "Appels d'apps",
+      "app_calls_description": "Appels que les agents exécutent dans les apps connectées. La recherche d'outils n'est pas comptée.",
+      "app_calls_label": "Consommation d'appels d'apps",
+      "app_calls_by_member": "Appels d'apps par personne",
+      "app_calls_no_person": "Exécutions automatiques",
+      "app_calls_former_member": "Ancien membre",
+      "addon": "Exécutions supplémentaires",
+      "addon_description": "Une fois l'allocation épuisée, les automatisations sont suspendues jusqu'au mois prochain ou jusqu'à l'achat d'exécutions supplémentaires.",
+      "addon_included": "Dont {{runs}} exécutions supplémentaires",
+      "addon_none": "Aucune ce mois-ci",
+      "addon_purchased": "{{runs}} achetées ce mois-ci",
+      "addon_buy": "Acheter · {{price}} / {{runs}} exécutions",
+      "addon_buy_fallback": "Acheter des exécutions",
+      "dashboard_history": "Historique des statistiques",
+      "dashboard_history_days": "{{days}} derniers jours"
     },
     "seats": {
       "title": "Sièges",
@@ -152,8 +196,9 @@
       "preview_unreadable": "Impossible de lire l'estimation. Modifiez le nombre de sièges ou réessayez.",
       "preview_failed": "L'estimation est temporairement indisponible. Réessayez dans un instant.",
       "capacity_out_of_sync": "Le nombre de sièges dans Stripe ne correspond pas au relevé de facturation. Contactez l'assistance avant de réessayer cet achat.",
-      "in_progress": "Un autre achat de sièges est en cours de traitement. Attendez qu'il se termine ; contactez l'assistance si cet état persiste.",
-      "purchase_unreadable": "Impossible de lire la réponse à l'achat. Réessayez avec ce devis : la même demande d'achat sera réutilisée.",
+      "in_progress": "Un autre achat de sièges est en cours de traitement. Attendez un instant qu'il se termine, ou contactez l'assistance s'il reste bloqué.",
+      "plan_change_in_progress": "Un changement de forfait est encore en cours de traitement. Réessayez dans quelques minutes.",
+      "purchase_unreadable": "Nous n'avons pas pu confirmer la réponse de l'achat. Réessayez en toute sécurité — vous ne serez pas facturé deux fois.",
       "purchase_failed": "Impossible d'ajouter les sièges. Réessayez avec le même devis ou actualisez s'il a expiré.",
       "payment_failed": "Le paiement n'a pas pu être effectué. Mettez à jour le moyen de paiement dans Stripe, puis demandez un nouveau devis.",
       "quote_changed": "Le nombre de sièges ou l'estimation a changé. Vérifiez le devis actualisé avant de confirmer à nouveau.",
@@ -171,11 +216,47 @@
       "delayed_description_with_expiry": "La vérification automatique s'est arrêtée. Si la tentative est encore en attente après {{date}}, rechargez cette page avant de demander un autre devis ; contactez l'assistance si l'attente persiste.",
       "submitted_one": "Un achat de {{count}} siège a été soumis. La nouvelle capacité apparaîtra après confirmation par Stripe.",
       "submitted_other": "Un achat de {{count}} sièges a été soumis. La nouvelle capacité apparaîtra après confirmation par Stripe.",
-      "error_title": "Impossible de mettre à jour l'estimation"
+      "error_title": "Impossible de mettre à jour l'estimation",
+      "plan_change_unresolved": "Un changement de forfait n'a pas pu être confirmé. Contactez l'assistance avant d'ajouter des sièges."
+    },
+    "plan_change": {
+      "upgrade_description": "Prend effet immédiatement. La différence pour le reste de la période de facturation est facturée maintenant.",
+      "downgrade_description": "Prend effet immédiatement. La différence non utilisée est créditée sur votre prochaine facture. Les paramètres Business déjà configurés continuent de fonctionner, mais passent en lecture seule.",
+      "seats": "Sièges",
+      "charge_today": "Montant facturé aujourd'hui",
+      "credit": "Crédit sur la prochaine facture",
+      "next_invoice": "Prochain renouvellement",
+      "tax_notice": "Stripe détermine les taxes, les crédits et les détails définitifs de la facture.",
+      "preview_loading": "Chargement du devis...",
+      "preview_failed": "Le devis est temporairement indisponible. Réessayez dans un instant.",
+      "rate_limited": "Trop de demandes de devis. Patientez un instant, puis réessayez.",
+      "in_progress": "Un achat de sièges est en cours de traitement. Réessayez une fois qu'il sera terminé.",
+      "change_in_progress": "Un changement de forfait est encore en cours de traitement. Réessayez dans quelques minutes.",
+      "not_active": "Cet abonnement ne peut pas changer de forfait pour le moment. Le forfait actuel a été actualisé.",
+      "quote_changed": "L'abonnement ou le tarif a changé. Consultez le devis actualisé avant de confirmer à nouveau.",
+      "payment_failed": "Le paiement n'a pas pu être effectué. Mettez à jour le moyen de paiement dans la gestion de la facturation, puis réessayez.",
+      "failed": "Le forfait n'a pas pu être changé. Réessayez avec le même devis.",
+      "unreadable": "La réponse est illisible. Réessayez ; la même demande sera réutilisée.",
+      "error_title": "Impossible de changer de forfait",
+      "success_title": "Forfait changé",
+      "success_description": "Cet espace de travail utilise désormais {{plan}}.",
+      "unresolved": "Le changement de forfait précédent n'a pas pu être confirmé. Contactez l'assistance avant de changer de forfait.",
+      "check_failed": "Impossible de vérifier le changement de forfait. Réessayez.",
+      "addon_downgrade_notice": "Après le changement, la limite de ce mois sera de {{limit}} exécutions, achats compris. {{used}} exécutions ont été utilisées ce mois-ci.",
+      "addon_downgrade_notice_limit_only": "Après le changement, la limite de ce mois sera de {{limit}} exécutions, achats compris."
     },
     "confirm": {
       "title": "Continuer vers Stripe Checkout ?",
-      "description": "Intervalle de facturation : {{interval}}. Membres humains actuels : {{count}}. Stripe recomptera les sièges et affichera le montant final avant le paiement."
+      "description": "Forfait : {{plan}}. Intervalle de facturation : {{interval}}. Membres humains actuels : {{count}}. Stripe recomptera les sièges et affichera le montant final avant le paiement.",
+      "held_invite": "Un siège payant supplémentaire est inclus pour l'invitation à {{email}}. Une fois le paiement effectué, envoyez-la depuis Facturation."
+    },
+    "held_invite": {
+      "title": "L'espace de travail est maintenant en {{plan}}",
+      "description": "Vous avez mis de côté une invitation pour {{email}} en tant que {{role}} jusqu'à la mise à niveau. L'envoyer maintenant ?",
+      "role_admin": "administrateur",
+      "role_member": "membre",
+      "send": "Envoyer l'invitation",
+      "discard": "Abandonner"
     }
   },
   "return_page": {
@@ -186,5 +267,125 @@
     "workspace_missing_description": "Vous revenez de Stripe, mais cet espace de travail ne vous est plus accessible — il a peut-être été supprimé, ou vos droits ont changé. Ouvrez Facturation dans l'espace de travail attendu pour vérifier l'état actuel.",
     "retry": "Réessayer",
     "go_to_app": "Aller sur Multica"
+  },
+  "paid_feature": {
+    "read_only": "Lecture seule. Passez à un forfait supérieur pour modifier.",
+    "unavailable": "Non inclus dans le forfait de cet espace de travail.",
+    "view_plans": "Voir les forfaits",
+    "locked_error": "Non inclus dans le forfait de l'espace de travail. Les réglages existants restent actifs ; changez de forfait pour en ajouter.",
+    "upgrade_to_add": "Changer de forfait",
+    "business": "Business",
+    "badge_label": "Fonctionnalité Business. Voir les détails",
+    "upgrade_to_business": "Passer à Business",
+    "ask_admin": "Demandez à un administrateur de l'espace de travail de passer au forfait Business.",
+    "upgrade_card": {
+      "agent_invocation_members": {
+        "title": "Autoriser des personnes précises à exécuter un agent est une fonctionnalité Business",
+        "description": "\"Moi uniquement\" et \"Tout l'espace de travail\" restent disponibles dans tous les forfaits."
+      },
+      "runtime_member_sharing": {
+        "title": "Partager un environnement avec des membres précis est une fonctionnalité Business",
+        "description": "\"Privé\" et \"Public\" restent disponibles dans tous les forfaits."
+      }
+    }
+  },
+  "trial": {
+    "status": {
+      "active": "Essai Business",
+      "days_left_one": "{{count}} jour restant",
+      "days_left_other": "{{count}} jours restants",
+      "active_label_one": "Essai Business, {{count}} jour restant. Ouvrir la facturation.",
+      "active_label_other": "Essai Business, {{count}} jours restants. Ouvrir la facturation.",
+      "free": "Free",
+      "upgrade": "Mettre à niveau",
+      "ended_label": "L'essai Business est terminé et cet espace de travail est sur Free. Ouvrez la facturation pour mettre à niveau.",
+      "ending": "se termine",
+      "ending_label": "L'essai Business se termine. Ouvrir la facturation."
+    },
+    "reminder": {
+      "halfway_title_one": "Votre essai Business est à mi-parcours : {{count}} jour restant.",
+      "halfway_title_other": "Votre essai Business est à mi-parcours : {{count}} jours restants.",
+      "days_left_title_one": "Il reste {{count}} jour à votre essai Business.",
+      "days_left_title_other": "Il reste {{count}} jours à votre essai Business.",
+      "last_day_title": "Votre essai Business se termine dans moins d’un jour.",
+      "body": "Le {{date}}, cet espace de travail passe sur Free. Choisissez un forfait pour garder Business.",
+      "later": "Plus tard",
+      "choose_plan": "Choisir un forfait"
+    },
+    "welcome": {
+      "title_one": "Bienvenue ! Cet espace de travail bénéficie d’un essai gratuit de Business de {{count}} jour",
+      "title_other": "Bienvenue ! Cet espace de travail bénéficie d’un essai gratuit de Business de {{count}} jours",
+      "body": "Les projets privés et les autres fonctionnalités Business sont activés. Aucune carte n'est requise ; à la fin de l'essai, l'espace de travail passe sur Free.",
+      "action": "Voir ce qui est inclus",
+      "close": "Fermer"
+    },
+    "ended": {
+      "title": "Votre essai Business est terminé",
+      "description": "{{workspace}} est maintenant sur Free. Rien n'a été supprimé.",
+      "description_without_name": "Cet espace de travail est maintenant sur Free. Rien n'a été supprimé.",
+      "kept": "Les membres, projets et paramètres existants restent tels quels.",
+      "private_projects": "Les projets privés restent privés. Leurs listes d'accès sont en lecture seule jusqu'à la mise à niveau.",
+      "autopilot": "Les automatisations ont {{limit}} exécutions par mois ; {{used}} utilisées ce mois-ci.",
+      "autopilot_paused": "Les automatisations ont {{limit}} exécutions par mois et {{used}} ont été utilisées ce mois-ci : elles sont en pause jusqu'au {{date}}.",
+      "keep_free": "Rester sur Free",
+      "upgrade": "Passer à Business",
+      "member_title": "Cet espace de travail est maintenant sur Free",
+      "member_description": "Les paramètres existants continuent de fonctionner. Si vous avez besoin de plus, contactez un administrateur de l'espace de travail."
+    },
+    "card": {
+      "title": "Essai Business",
+      "badge_one": "Essai · {{count}} jour restant",
+      "badge_other": "Essai · {{count}} jours restants",
+      "description": "Essai jusqu'au {{date}}. Aucun moyen de paiement n'est enregistré : l'espace de travail passe ensuite sur Free sans être facturé.",
+      "started": "Commencé le {{date}}",
+      "progress": "Jour {{day}} sur {{total}}",
+      "ends": "Se termine le {{date}}",
+      "ended_title": "L'essai Business est terminé",
+      "ended_description": "L'essai s'est terminé le {{date}}. Choisissez un forfait ci-dessous pour retrouver les fonctionnalités Business.",
+      "choose_plan": "Choisir un forfait",
+      "ended_description_member": "L'essai s'est terminé le {{date}}. Demandez à un administrateur de l'espace de travail de mettre à niveau pour retrouver les fonctionnalités Business."
+    },
+    "features": {
+      "title": "Fonctionnalités Business de votre essai",
+      "description": "À la fin de l'essai, rien n'est supprimé ni désactivé — les paramètres existants restent actifs en lecture seule, et vous ne pouvez pas en ajouter de nouveaux.",
+      "private_projects": {
+        "name": "Projets privés",
+        "after": "Restent privés après l'essai. Leurs listes d'accès passent en lecture seule."
+      },
+      "guests": {
+        "name": "Invités",
+        "after": "Les invités existants gardent leur accès après l'essai. Inviter de nouveaux invités nécessite Pro ou Business."
+      }
+    }
+  },
+  "storage_limit": {
+    "title": "{{filename}} n'a pas été importé",
+    "copy_title": "Le sous-ticket n'a pas été créé : ses pièces jointes sources n'ont pas pu être copiées",
+    "admin_body": "Le stockage des pièces jointes est plein ({{used}} / {{limit}}). Les pièces jointes existantes ne sont pas affectées.",
+    "admin_body_no_figures": "Le stockage des pièces jointes est plein. Les pièces jointes existantes ne sont pas affectées.",
+    "member_body": "Le stockage des pièces jointes est plein. Demandez à un administrateur de changer de forfait, ou supprimez les pièces jointes dont vous n'avez plus besoin.",
+    "dismiss": "Fermer"
+  },
+  "autopilot_addon": {
+    "title": "Acheter des exécutions d'automatisation",
+    "description": "Les exécutions supplémentaires sont valables ce mois-ci et partagées par tout l'espace de travail. L'allocation du forfait est utilisée en premier.",
+    "options_label": "Nombre d'exécutions",
+    "option": "{{runs}} exécutions",
+    "usage_summary": "{{used}} / {{limit}} utilisées ce mois-ci, réinitialisation le {{date}}.",
+    "pay": "Continuer pour payer {{amount}}",
+    "pay_fallback": "Continuer vers le paiement",
+    "cancel": "Annuler",
+    "loading": "Chargement du prix du complément…",
+    "unavailable": "Cet espace de travail ne peut pas acheter d'exécutions pour le moment.",
+    "conflict": "Impossible d'acheter des exécutions pour le moment, ou le prix a changé. Vérifiez les options et réessayez.",
+    "error": "La page de paiement n'a pas pu s'ouvrir. Réessayez.",
+    "success_title": "Exécutions ajoutées",
+    "success_description": "{{runs}} exécutions ont été ajoutées pour ce mois. Les automatisations reprennent à leur prochaine exécution.",
+    "confirming_title": "Confirmation du paiement",
+    "confirming_description": "Les exécutions sont ajoutées dès que Stripe confirme le paiement. Consultez l'utilisation ci-dessous dans un instant.",
+    "not_paid_title": "Paiement non finalisé",
+    "not_paid_description": "Rien n'a été débité et aucune exécution n'a été ajoutée.",
+    "cancel_title": "Paiement annulé",
+    "cancel_description": "Rien n'a été débité."
   }
 }
