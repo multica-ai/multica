@@ -149,7 +149,6 @@
       "app_calls_by_member": "メンバー別のアプリ呼び出し",
       "app_calls_no_person": "自動実行",
       "app_calls_former_member": "退出したメンバー",
-      "app_calls_others": "その他",
       "addon": "追加の実行回数",
       "addon_description": "実行枠を使い切ると、翌月のリセットまたは追加購入まで自動化は停止します。",
       "addon_included": "うち追加分 {{runs}} 回",

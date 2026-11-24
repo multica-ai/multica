@@ -948,25 +948,27 @@ describe("BillingTab", () => {
       expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["workspace-storage-usage", expect.any(String)] });
     });
 
-    it("shows this month's app calls against the plan's limit, by person (MUL-10047)", () => {
+    it("shows this month's app calls against the plan's limit, for every person (MUL-10047)", () => {
+      const names = ["Ada", "Ben", "Cy", "Di", "Ed", "Flo"];
+      mocks.members = names.map((name) => ({ user_id: `user-${name}`, name }));
       mocks.appCallUsage = {
         action: "observe",
-        used: 120,
+        used: 230,
         limit: 1500,
         reached: null,
         resetAt: "2030-02-01T00:00:00Z",
         members: [
-          { userId: "user-ada", calls: 100 },
+          ...names.map((name, i) => ({ userId: `user-${name}`, calls: 60 - i * 10 })),
           { userId: null, calls: 20 },
         ],
       };
-      mocks.members = [{ user_id: "user-ada", name: "Ada" }];
       renderWithI18n(<BillingTab />);
 
       expect(screen.getByText("App calls")).toBeInTheDocument();
-      expect(screen.getByText("120 / 1,500")).toBeInTheDocument();
+      expect(screen.getByText("230 / 1,500")).toBeInTheDocument();
       const byPerson = screen.getByRole("list", { name: "App calls by person" });
-      expect(within(byPerson).getByText("Ada")).toBeInTheDocument();
+      expect(within(byPerson).getAllByRole("listitem")).toHaveLength(7);
+      for (const name of names) expect(within(byPerson).getByText(name)).toBeInTheDocument();
       expect(within(byPerson).getByText("Automated runs")).toBeInTheDocument();
     });
 

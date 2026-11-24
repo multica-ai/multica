@@ -1,3 +1,5 @@
+ALTER TABLE app_tool_call DROP COLUMN IF EXISTS metered;
+
 -- 'quota_exceeded' rows must be removed before rolling back; the restored
 -- constraint rejects them on the next write.
 ALTER TABLE app_tool_call

@@ -40,7 +40,10 @@ func newAppToolCallQuotaFixture(t *testing.T) *appToolCallQuotaFixture {
 		pool: pool, stub: stub,
 		workspace: uuid.UUID(workspaceID.Bytes), workspaceID: workspaceID, ownerID: util.MustParseUUID(ownerID),
 		periodStart: start, periodEnd: start.AddDate(0, 1, 0),
-		quota: AppToolCallQuota{Queries: db.New(pool), Entitlements: stub, TxStarter: pool, Bus: events.New()},
+		quota: AppToolCallQuota{
+			Queries: db.New(pool), Entitlements: stub, TxStarter: pool, Bus: events.New(),
+			now: func() time.Time { return start.Add(12 * time.Hour) },
+		},
 	}
 	t.Cleanup(func() {
 		ctx := context.Background()
@@ -70,10 +73,15 @@ func (f *appToolCallQuotaFixture) setPolicy(action entitlement.Action, limit int
 
 func (f *appToolCallQuotaFixture) used(t *testing.T) int64 {
 	t.Helper()
+	return f.usedIn(t, f.periodStart)
+}
+
+func (f *appToolCallQuotaFixture) usedIn(t *testing.T, periodStart time.Time) int64 {
+	t.Helper()
 	var used int64
 	err := f.pool.QueryRow(context.Background(),
 		`SELECT COALESCE(SUM(used_count), 0) FROM app_tool_call_quota_period WHERE workspace_id = $1 AND period_start = $2`,
-		f.workspaceID, f.periodStart).Scan(&used)
+		f.workspaceID, periodStart).Scan(&used)
 	if err != nil {
 		t.Fatalf("read used: %v", err)
 	}
@@ -238,6 +246,94 @@ func TestAppToolCallQuotaResetsWithThePeriod(t *testing.T) {
 	}
 }
 
+// Right after the month turns, the cached policy still names the month that
+// is over. The call counts in the new month, not the old one; a Cloud that
+// still sends the old month admits without counting.
+func TestAppToolCallQuotaRereadsAPolicyWhosePeriodEnded(t *testing.T) {
+	f := newAppToolCallQuotaFixture(t)
+	ctx := context.Background()
+	previous := f.periodStart.AddDate(0, -1, 0)
+	f.stub.Set(f.workspace, entitlement.GateAppToolCalls, f.decision(entitlement.ActionEnforce, 1, previous))
+	f.quota.now = func() time.Time { return f.periodStart.Add(30 * time.Second) }
+
+	if got := f.quota.Admit(ctx, f.workspaceID); got != nil {
+		t.Fatalf("stale policy, nothing newer: admit = %+v", got)
+	}
+	if f.usedIn(t, previous) != 0 || f.used(t) != 0 {
+		t.Fatalf("stale policy counted: previous %d, current %d; want none", f.usedIn(t, previous), f.used(t))
+	}
+
+	f.stub.SetRefreshed(f.workspace, entitlement.GateAppToolCalls, f.decision(entitlement.ActionEnforce, 1, f.periodStart))
+	if got := f.quota.Admit(ctx, f.workspaceID); got != nil {
+		t.Fatalf("first call of the month refused: %+v", got)
+	}
+	if f.usedIn(t, previous) != 0 || f.used(t) != 1 {
+		t.Fatalf("used previous %d, current %d; want 0 and 1", f.usedIn(t, previous), f.used(t))
+	}
+}
+
+// staleRefreshProvider answers RefreshGate from a policy fetched moments ago,
+// as the Cloud client does inside its reuse window; only RefreshGateNow sees
+// a seat bought since.
+type staleRefreshProvider struct {
+	cached, current entitlement.Decision
+}
+
+func (p staleRefreshProvider) Gate(context.Context, uuid.UUID, entitlement.GateName) entitlement.Decision {
+	return p.cached
+}
+
+func (p staleRefreshProvider) RefreshGate(context.Context, uuid.UUID, entitlement.GateName) entitlement.Decision {
+	return p.cached
+}
+
+func (p staleRefreshProvider) RefreshGateNow(context.Context, uuid.UUID, entitlement.GateName) entitlement.Decision {
+	return p.current
+}
+
+// A seat bought moments ago admits the call even when the policy was
+// refreshed just before the purchase.
+func TestAppToolCallQuotaRefreshSkipsTheReuseWindow(t *testing.T) {
+	f := newAppToolCallQuotaFixture(t)
+	ctx := context.Background()
+	f.quota.Entitlements = staleRefreshProvider{
+		cached:  f.decision(entitlement.ActionEnforce, 1, f.periodStart),
+		current: f.decision(entitlement.ActionEnforce, 2, f.periodStart),
+	}
+	for i := range 2 {
+		if got := f.quota.Admit(ctx, f.workspaceID); got != nil {
+			t.Fatalf("call %d after the seat purchase refused: %+v", i, got)
+		}
+	}
+	if f.used(t) != 2 {
+		t.Fatalf("used = %d, want 2", f.used(t))
+	}
+}
+
+// Managers hear once per limit in a period, also when the limit goes back to
+// one they were already told about (seats removed, then added back).
+func TestAppToolCallQuotaNotifiesEachLimitOncePerPeriod(t *testing.T) {
+	f := newAppToolCallQuotaFixture(t)
+	ctx := context.Background()
+	f.setPolicy(entitlement.ActionEnforce, 1)
+	f.quota.Admit(ctx, f.workspaceID)
+	if got := f.quota.Admit(ctx, f.workspaceID); got == nil {
+		t.Fatal("call past limit 1 admitted")
+	}
+	f.stub.SetRefreshed(f.workspace, entitlement.GateAppToolCalls, f.decision(entitlement.ActionEnforce, 2, f.periodStart))
+	f.quota.Admit(ctx, f.workspaceID)
+	if got := f.quota.Admit(ctx, f.workspaceID); got == nil || got.Limit != 2 {
+		t.Fatalf("call past limit 2 = %+v, want refused", got)
+	}
+	f.setPolicy(entitlement.ActionEnforce, 1)
+	if got := f.quota.Admit(ctx, f.workspaceID); got == nil || got.Limit != 1 {
+		t.Fatalf("call back at limit 1 = %+v, want refused", got)
+	}
+	if n := f.notices(t, f.ownerID); n != 2 {
+		t.Fatalf("owner notices = %d, want one each for limits 1 and 2", n)
+	}
+}
+
 func TestAppToolCallQuotaMemberUsage(t *testing.T) {
 	f := newAppToolCallQuotaFixture(t)
 	ctx := context.Background()
@@ -245,25 +341,30 @@ func TestAppToolCallQuotaMemberUsage(t *testing.T) {
 	if err := f.pool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, f.workspaceID).Scan(&agentID); err != nil {
 		t.Fatalf("load agent: %v", err)
 	}
-	t.Cleanup(func() { f.pool.Exec(context.Background(), `DELETE FROM app_tool_call WHERE workspace_id = $1`, f.workspaceID) })
+	t.Cleanup(func() {
+		f.pool.Exec(context.Background(), `DELETE FROM app_tool_call WHERE workspace_id = $1`, f.workspaceID)
+	})
 	inPeriod := f.periodStart.Add(time.Hour)
 	for _, c := range []struct {
 		by      pgtype.UUID
 		outcome string
+		metered bool
 		at      time.Time
 	}{
-		{f.ownerID, "ok", inPeriod},
-		{f.ownerID, "error", inPeriod},
-		{f.ownerID, "approved", inPeriod},
-		{f.ownerID, "blocked", inPeriod},
-		{f.ownerID, "quota_exceeded", inPeriod},
-		{pgtype.UUID{}, "ok", inPeriod},
-		{f.ownerID, "ok", f.periodEnd.Add(time.Hour)},
+		{f.ownerID, "ok", true, inPeriod},
+		{f.ownerID, "error", true, inPeriod},
+		{f.ownerID, "approved", true, inPeriod},
+		{f.ownerID, "error", false, inPeriod}, // an approved call that failed its checks before running
+		{f.ownerID, "ok", false, inPeriod},    // a Remote MCP call
+		{f.ownerID, "blocked", false, inPeriod},
+		{f.ownerID, "quota_exceeded", false, inPeriod},
+		{pgtype.UUID{}, "ok", true, inPeriod},
+		{f.ownerID, "ok", true, f.periodEnd.Add(time.Hour)},
 	} {
 		if _, err := f.pool.Exec(ctx, `
-			INSERT INTO app_tool_call (workspace_id, agent_id, triggered_by, account_scope, toolkit_slug, tool_slug, action_class, outcome, created_at)
-			VALUES ($1, $2, $3, 'personal', 'gmail', 'GMAIL_SEND_EMAIL', 'send', $4, $5)`,
-			f.workspaceID, agentID, c.by, c.outcome, c.at); err != nil {
+			INSERT INTO app_tool_call (workspace_id, agent_id, triggered_by, account_scope, toolkit_slug, tool_slug, action_class, outcome, metered, created_at)
+			VALUES ($1, $2, $3, 'personal', 'gmail', 'GMAIL_SEND_EMAIL', 'send', $4, $5, $6)`,
+			f.workspaceID, agentID, c.by, c.outcome, c.metered, c.at); err != nil {
 			t.Fatalf("insert call: %v", err)
 		}
 	}

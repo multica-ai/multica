@@ -43,6 +43,7 @@ type AppToolCallQuota struct {
 	// TxStarter writes the limit notice; without it no notice is sent.
 	TxStarter TxStarter
 	Bus       *events.Bus
+	now       func() time.Time
 }
 
 var _ connectedapps.CallQuota = AppToolCallQuota{}
@@ -87,6 +88,31 @@ func (q AppToolCallQuota) policy(ctx context.Context, workspaceID pgtype.UUID) (
 	return appToolCallPolicyFrom(q.Entitlements.Gate(ctx, uuid.UUID(workspaceID.Bytes), entitlement.GateAppToolCalls))
 }
 
+// refreshedPolicy reads Cloud's current policy, skipping the reuse window
+// where the provider has one, as the autopilot quota does before a refusal:
+// a seat bought or a month started moments ago must not be judged on a policy
+// fetched just before.
+func (q AppToolCallQuota) refreshedPolicy(ctx context.Context, workspaceID pgtype.UUID) (appToolCallPolicy, bool) {
+	workspace := uuid.UUID(workspaceID.Bytes)
+	var decision entitlement.Decision
+	switch provider := q.Entitlements.(type) {
+	case entitlement.FreshRefresher:
+		decision = provider.RefreshGateNow(ctx, workspace, entitlement.GateAppToolCalls)
+	case entitlement.Refresher:
+		decision = provider.RefreshGate(ctx, workspace, entitlement.GateAppToolCalls)
+	default:
+		decision = q.Entitlements.Gate(ctx, workspace, entitlement.GateAppToolCalls)
+	}
+	return appToolCallPolicyFrom(decision)
+}
+
+func (q AppToolCallQuota) clock() time.Time {
+	if q.now != nil {
+		return q.now()
+	}
+	return time.Now()
+}
+
 // Admit counts one call that is about to be sent to the provider. Under
 // enforce it refuses a call past the limit, after re-reading Cloud's policy so
 // a workspace that has just upgraded or added seats is not refused on a
@@ -97,22 +123,27 @@ func (q AppToolCallQuota) Admit(ctx context.Context, workspaceID pgtype.UUID) *c
 	if !ok {
 		return nil
 	}
+	// A policy cached before its period ended would count this call in the
+	// month that is over. Read the current one; if Cloud still sends the old
+	// period, admit without counting.
+	if !q.clock().Before(policy.periodEnd) {
+		if policy, ok = q.refreshedPolicy(ctx, workspaceID); !ok || !q.clock().Before(policy.periodEnd) {
+			return nil
+		}
+	}
 	used, admitted, err := q.increment(ctx, workspaceID, policy)
 	if err != nil {
 		return nil
 	}
 	if !admitted {
-		refresher, isRefresher := q.Entitlements.(entitlement.Refresher)
-		if isRefresher {
-			fresh, active := appToolCallPolicyFrom(refresher.RefreshGate(ctx, uuid.UUID(workspaceID.Bytes), entitlement.GateAppToolCalls))
-			if !active {
+		fresh, active := q.refreshedPolicy(ctx, workspaceID)
+		if !active {
+			return nil
+		}
+		if !fresh.sameBudget(policy) {
+			policy = fresh
+			if used, admitted, err = q.increment(ctx, workspaceID, policy); err != nil {
 				return nil
-			}
-			if !fresh.sameBudget(policy) {
-				policy = fresh
-				if used, admitted, err = q.increment(ctx, workspaceID, policy); err != nil {
-					return nil
-				}
 			}
 		}
 	}

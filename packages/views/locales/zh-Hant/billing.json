@@ -149,7 +149,6 @@
       "app_calls_by_member": "各成員的應用呼叫",
       "app_calls_no_person": "自動執行",
       "app_calls_former_member": "已離開的成員",
-      "app_calls_others": "其他",
       "addon": "加購執行次數",
       "addon_description": "額度用完後自動化會暫停，直到下月重置或加購。",
       "addon_included": "其中加購 {{runs}} 次",

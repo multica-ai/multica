@@ -150,7 +150,6 @@
       "app_calls_by_member": "Appels d'apps par personne",
       "app_calls_no_person": "Exécutions automatiques",
       "app_calls_former_member": "Ancien membre",
-      "app_calls_others": "Autres",
       "addon": "Exécutions supplémentaires",
       "addon_description": "Une fois l'allocation épuisée, les automatisations sont suspendues jusqu'au mois prochain ou jusqu'à l'achat d'exécutions supplémentaires.",
       "addon_included": "Dont {{runs}} exécutions supplémentaires",

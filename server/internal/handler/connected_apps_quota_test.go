@@ -107,10 +107,20 @@ func TestConnectedApps_MonthlyQuotaRefusesApprovedCalls(t *testing.T) {
 }
 
 // Billing reads the period's count and, for owners and admins, who made it.
+// An approved call that fails its checks before running never reached
+// Composio, so it is not in the breakdown either.
 func TestGetAppCallUsage(t *testing.T) {
 	f, _ := newAppsQuotaFixture(t, 5)
 	f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "gmail", "account_scope": "personal", "level": "write"}})
 	f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": "GMAIL_FETCH_EMAILS", "arguments": map[string]any{}})
+	request := f.legacyRequest(t, "personal", "gmail", "GMAIL_SEND_EMAIL", "send", map[string]any{"to": "x"}, "")
+	testPool.Exec(context.Background(), `DELETE FROM user_composio_connection WHERE user_id = $1 AND toolkit_slug = 'gmail'`, testUserID)
+	if out := f.approve(t, request.ID, nil); out.Status != "failed" {
+		t.Fatalf("approved call without an account = %+v, want failed", out)
+	}
+	if got := f.callOutcomes(t); len(got) != 2 || got[1] != "error" {
+		t.Fatalf("call log = %v, want the run and the failed approval", got)
+	}
 
 	path := "/api/workspaces/" + testWorkspaceID + "/app-call-usage"
 	var owner AppCallUsageResponse

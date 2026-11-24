@@ -13,15 +13,15 @@ import (
 
 const claimAppToolCallQuotaRejectionNotice = `-- name: ClaimAppToolCallQuotaRejectionNotice :one
 INSERT INTO app_tool_call_quota_period (
-    workspace_id, period_start, period_end, rejection_notified_at, rejection_notified_limit
-) VALUES ($1, $2, $3, now(), $4::bigint)
+    workspace_id, period_start, period_end, rejection_notified_at, rejection_notified_limits
+) VALUES ($1, $2, $3, now(), ARRAY[$4::bigint])
 ON CONFLICT (workspace_id, period_start, period_end) DO UPDATE
 SET rejection_notified_at = now(),
-    rejection_notified_limit = EXCLUDED.rejection_notified_limit,
+    rejection_notified_limits = array_append(app_tool_call_quota_period.rejection_notified_limits, $4::bigint),
     updated_at = now()
 WHERE app_tool_call_quota_period.rejection_notified_at IS NULL
    OR ($5::bool
-       AND app_tool_call_quota_period.rejection_notified_limit IS DISTINCT FROM EXCLUDED.rejection_notified_limit)
+       AND NOT ($4::bigint = ANY (app_tool_call_quota_period.rejection_notified_limits)))
 RETURNING used_count
 `
 
@@ -35,8 +35,8 @@ type ClaimAppToolCallQuotaRejectionNoticeParams struct {
 
 // Marks the period's limit notice as sent and returns a row only to the one
 // caller that should send it: the first rejection of the period, or with
-// per_limit the first at a limit different from the last notice's. Run it in
-// the transaction that writes the Inbox items, so a failed delivery leaves the
+// per_limit the first at a limit not yet notified in the period. Run it in the
+// transaction that writes the Inbox items, so a failed delivery leaves the
 // marker unset for the next rejection.
 func (q *Queries) ClaimAppToolCallQuotaRejectionNotice(ctx context.Context, arg ClaimAppToolCallQuotaRejectionNoticeParams) (int64, error) {
 	row := q.db.QueryRow(ctx, claimAppToolCallQuotaRejectionNotice,
@@ -109,9 +109,9 @@ const listAppToolCallUsageByMember = `-- name: ListAppToolCallUsageByMember :man
 SELECT triggered_by, count(*)::bigint AS calls
 FROM app_tool_call
 WHERE workspace_id = $1
+  AND metered
   AND created_at >= $2::timestamptz
   AND created_at < $3::timestamptz
-  AND outcome IN ('ok', 'error', 'approved')
 GROUP BY triggered_by
 ORDER BY calls DESC
 `
@@ -127,8 +127,8 @@ type ListAppToolCallUsageByMemberRow struct {
 	Calls       int64       `json:"calls"`
 }
 
-// Calls that reached the app in a period, per person who started the run or
-// approved the call. A NULL triggered_by is a run no person started.
+// Metered calls in a period, per person who started the run or approved the
+// call. A NULL triggered_by is a run no person started.
 func (q *Queries) ListAppToolCallUsageByMember(ctx context.Context, arg ListAppToolCallUsageByMemberParams) ([]ListAppToolCallUsageByMemberRow, error) {
 	rows, err := q.db.Query(ctx, listAppToolCallUsageByMember, arg.WorkspaceID, arg.PeriodStart, arg.PeriodEnd)
 	if err != nil {

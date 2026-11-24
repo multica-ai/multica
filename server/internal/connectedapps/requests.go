@@ -450,6 +450,7 @@ func (s *Service) executeApproved(ctx context.Context, req db.AppActionRequest) 
 		}
 	}
 	resp, err := s.composio.ExecuteTool(ctx, acct.connectedAccountID, acct.composioUserID, *tool, args)
+	call.metered = true
 	s.touch(ctx, req.WorkspaceID, acct)
 	if err != nil {
 		logExecutionFailure(ctx, call, "request_failed")

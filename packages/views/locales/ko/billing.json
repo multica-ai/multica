@@ -149,7 +149,6 @@
       "app_calls_by_member": "멤버별 앱 호출",
       "app_calls_no_person": "자동 실행",
       "app_calls_former_member": "나간 멤버",
-      "app_calls_others": "기타",
       "addon": "추가 실행 횟수",
       "addon_description": "한도를 다 쓰면 다음 달 초기화되거나 추가 구매할 때까지 자동화가 일시 중지됩니다.",
       "addon_included": "추가 구매 {{runs}}회 포함",

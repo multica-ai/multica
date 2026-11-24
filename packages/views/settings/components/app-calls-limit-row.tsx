@@ -13,9 +13,6 @@ import {
 import { useLocale, useT } from "../../i18n";
 import { SettingsRow } from "./settings-layout";
 
-/** People listed under the bar; the rest are summed into one line. */
-const MAX_LISTED_MEMBERS = 5;
-
 function formatResetAt(value: string | null, locale: string): string | null {
   if (!value) return null;
   const date = new Date(value);
@@ -82,8 +79,6 @@ export function AppCallsLimitRow({
   }
 
   const resetAt = formatResetAt(row.resetAt, locale);
-  const listed = members.slice(0, MAX_LISTED_MEMBERS);
-  const rest = members.slice(MAX_LISTED_MEMBERS).reduce((sum, m) => sum + m.calls, 0);
   return (
     <SettingsRow
       label={t(($) => $.workspace.limits.app_calls)}
@@ -113,23 +108,17 @@ export function AppCallsLimitRow({
             {t(($) => $.workspace.limits.resets_at, { date: resetAt })}
           </p>
         ) : null}
-        {listed.length > 0 ? (
+        {members.length > 0 ? (
           <ul
             className="space-y-1 pt-1 text-caption text-muted-foreground"
             aria-label={t(($) => $.workspace.limits.app_calls_by_member)}
           >
-            {listed.map((m) => (
+            {members.map((m) => (
               <li key={m.userId ?? "none"} className="flex justify-between gap-3">
                 <span className="truncate">{nameOf(m.userId)}</span>
                 <span className="shrink-0 tabular-nums">{numberFormatter.format(m.calls)}</span>
               </li>
             ))}
-            {rest > 0 ? (
-              <li className="flex justify-between gap-3">
-                <span className="truncate">{t(($) => $.workspace.limits.app_calls_others)}</span>
-                <span className="shrink-0 tabular-nums">{numberFormatter.format(rest)}</span>
-              </li>
-            ) : null}
           </ul>
         ) : null}
       </div>

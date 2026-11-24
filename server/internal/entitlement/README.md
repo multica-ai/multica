@@ -249,13 +249,16 @@ as Composio bills it.
 | Confirmed calls when the approval executes them (`executeApproved`) | pending confirmations, meta tools (list, search, get tool, connection requests), Remote MCP apps |
 
 Team and personal accounts both count toward the workspace that started the
-run. `enforce` refuses past the limit after re-reading the policy with
-`RefreshGate`, so a workspace that upgraded or added seats moments ago is
-admitted. The agent gets a tool error with the count, the limit and the reset
+run. `enforce` refuses past the limit only after re-reading the policy with
+`RefreshGateNow`, so a workspace that upgraded or added seats moments ago is
+admitted. A cached policy whose period has already ended (the first minute of
+a month) is re-read the same way before counting; if Cloud still sends the
+old period, the call is admitted without counting. The agent gets a tool error with the count, the limit and the reset
 time; the call is logged in `app_tool_call` as `quota_exceeded`, and a refused
 confirmed call fails its request. Owners and admins get one
-`app_tool_calls_quota_exceeded` Inbox item per limit and period; a delivery
-with no recipient leaves the marker unset for the next refusal. Attempts past
+`app_tool_calls_quota_exceeded` Inbox item per limit and period, also when
+the limit returns to one already notified; a delivery with no recipient leaves
+the marker unset for the next refusal. Attempts past
 the limit are recorded in `entitlement_limit_overage` under gate
 `app_tool_calls`. `off`, and every self-hosted deployment, touches no table;
 the per-account per-minute limit applies regardless.
@@ -265,7 +268,9 @@ which returns `action` and, while a limit applies, `used`, `limit`,
 `period_start` and `reset_at`; `reached` only under `enforce`. Owners and
 admins also get `members`: the period's calls per person who started the run
 or approved the call (`user_id` null for runs no person started), read from
-`app_tool_call`.
+the `app_tool_call` rows marked `metered` (sent to Composio). An approved call
+that fails its checks before running and Remote MCP calls are logged but not
+metered.
 
 ## Paid features
 
