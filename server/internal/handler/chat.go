@@ -178,8 +178,7 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	allowed, ok := h.accessibleAgentIDsForRequest(r, workspaceID, member.Role)
 	if !ok {
 		writeError(w, http.StatusInternalServerError, "failed to resolve agent access")
 		return
@@ -323,8 +322,7 @@ func (h *Handler) gateChatSessionForUser(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusNotFound, "agent not found")
 		return db.ChatSession{}, false
 	}
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
+	if !h.canAccessPrivateAgentForRequest(r, agent, workspaceID) {
 		writeError(w, http.StatusForbidden, "you do not have access to this agent")
 		return db.ChatSession{}, false
 	}
@@ -1612,8 +1610,7 @@ func (h *Handler) ListPendingChatTasks(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	allowed, ok := h.accessibleAgentIDsForRequest(r, workspaceID, member.Role)
 	if !ok {
 		writeError(w, http.StatusInternalServerError, "failed to resolve agent access")
 		return
@@ -1685,8 +1682,7 @@ func (h *Handler) HasPendingChatTasks(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	allowed, ok := h.accessibleAgentIDsForRequest(r, workspaceID, member.Role)
 	if !ok {
 		writeError(w, http.StatusInternalServerError, "failed to resolve agent access")
 		return
@@ -2003,7 +1999,7 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "task not found")
 			return
 		}
-		if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
+		if !h.canAccessPrivateAgentForRequest(r, agent, workspaceID) {
 			writeError(w, http.StatusForbidden, "you do not have access to this agent")
 			return
 		}

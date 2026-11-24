@@ -131,6 +131,15 @@ func TestFullDelegationTaskUsesGrantorPermissionsAndAgentAttribution(t *testing.
 	if got := call(http.MethodGet, "/api/issues", ""); got.Code != http.StatusOK {
 		t.Fatalf("issues: %d %s", got.Code, got.Body.String())
 	}
+	privateProject := dbfx.Project(t, "delegated private project", testutil.Cols{"workspace_id": f.target, "visibility": "private"})
+	privateIssue := dbfx.Issue(t, "delegated private issue", testutil.Cols{"workspace_id": f.target, "project_id": privateProject})
+	if got := call(http.MethodGet, "/api/issues", ""); bytes.Contains(got.Body.Bytes(), []byte(privateIssue)) {
+		t.Fatalf("private issue visible without grantor access: %d %s", got.Code, got.Body.String())
+	}
+	dbfx.InsertNoID(t, "project_member", testutil.Cols{"workspace_id": f.target, "project_id": privateProject, "user_id": testUserID}, "project_id=$1 AND user_id=$2", privateProject, testUserID)
+	if got := call(http.MethodGet, "/api/issues", ""); got.Code != http.StatusOK || !bytes.Contains(got.Body.Bytes(), []byte(privateIssue)) {
+		t.Fatalf("new grantor project access ignored: %d %s", got.Code, got.Body.String())
+	}
 	issue := call(http.MethodPost, "/api/issues", `{"title":"Full delegated issue"}`)
 	if issue.Code != http.StatusCreated {
 		t.Fatalf("create issue: %d %s", issue.Code, issue.Body.String())
