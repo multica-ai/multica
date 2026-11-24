@@ -11,6 +11,7 @@ import {
   DocCommentSchema,
   DocCommentListSchema,
   DocCollabTicketSchema,
+  DocTaskRunListSchema,
 } from "../docs/schemas";
 import type {
   Doc,
@@ -22,6 +23,7 @@ import type {
   DocTree,
   DocVersion,
   DocCollabTicket,
+  DocTaskRun,
   CreateDocRequest,
   UpdateDocRequest,
   CreateDocFolderRequest,
@@ -1099,6 +1101,14 @@ export class ApiClient {
   }
   async deleteDocComment(docId: string, commentId: string): Promise<void> {
     await this.fetch(`/api/docs/${docId}/comments/${commentId}`, { method: "DELETE" });
+  }
+  async listDocTaskRuns(docId: string): Promise<DocTaskRun[]> {
+    return parseWithFallback(
+      await this.fetch<unknown>(`/api/docs/${docId}/task-runs`),
+      DocTaskRunListSchema,
+      { tasks: [] },
+      { endpoint: "GET /api/docs/{id}/task-runs" },
+    ).tasks;
   }
   async listDocVersions(id: string): Promise<DocVersion[]> {
     return parseWithFallback(
