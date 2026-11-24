@@ -141,6 +141,14 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 	// import all still apply — same as every protocol-family provider.
 	if desc, ok := agent.BuiltinRuntimeByID(provider); ok {
 		providerRoot = filepath.Join(home, desc.UserSkillsDir)
+		// A claude-family fork's CLI still resolves CLAUDE_CONFIG_DIR first.
+		// Relative overrides depend on the task working directory, which the
+		// runtime-level list and import requests do not have.
+		if agent.ProtocolFamilyFor(provider) == "claude" {
+			if configured := os.Getenv("CLAUDE_CONFIG_DIR"); filepath.IsAbs(configured) {
+				providerRoot = filepath.Join(configured, "skills")
+			}
+		}
 	} else {
 		switch provider {
 		case "claude":
@@ -283,8 +291,8 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 		roots = append(roots, localSkillRoot{path: path, kind: localSkillRootProvider})
 	}
 	roots = append(roots, localSkillRoot{path: filepath.Join(home, ".agents", "skills"), kind: localSkillRootUniversal})
-	if provider == "claude" {
-		for _, plugin := range listEnabledClaudePlugins(claudeConfigDir) {
+	if configDir, ok := claudeFamilyConfigDir(home, provider); ok {
+		for _, plugin := range listEnabledClaudePlugins(configDir) {
 			manifest, _ := readClaudePluginManifest(plugin.InstallPath)
 			for _, path := range claudePluginComponentPaths(
 				plugin.InstallPath,
@@ -662,7 +670,7 @@ func enumerateLocalSkills(
 				Provider:    provider,
 				Root:        root.kind,
 				Plugin:      root.plugin,
-				CanDisable:  provider == "codex" || provider == "claude",
+				CanDisable:  provider == "codex" || agent.ProtocolFamilyFor(provider) == "claude",
 				// `files` is the supporting bundle (collectLocalSkillFiles
 				// intentionally excludes SKILL.md so the bundle's `Content`
 				// field can carry it without duplication on import). For the

@@ -69,7 +69,7 @@ func TestClaudeTerminalReasonFailure(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := claudeTerminalReasonFailure(tc.terminalReason, tc.resultText)
+			got := claudeTerminalReasonFailure("claude", tc.terminalReason, tc.resultText)
 			if (got != "") != tc.wantFailure {
 				t.Fatalf("claudeTerminalReasonFailure(%q, %q) = %q, wantFailure=%v",
 					tc.terminalReason, tc.resultText, got, tc.wantFailure)

@@ -27,6 +27,16 @@ describe("model capability lookup", () => {
     ).toBe("claude-opus-5");
   });
 
+  it("treats langcli as a claude-family provider", () => {
+    expect(modelIdForCapabilityLookup("langcli", "claude-opus-5[1m]")).toBe(
+      "claude-opus-5",
+    );
+    expect(
+      findModelCapabilityEntry(CLAUDE_MODELS, "claude-opus-5[1m]", "langcli")
+        ?.id,
+    ).toBe("claude-opus-5");
+  });
+
   it("keeps malformed Claude tags and other providers exact", () => {
     expect(
       modelIdForCapabilityLookup("claude", "claude-opus-5[weird]"),

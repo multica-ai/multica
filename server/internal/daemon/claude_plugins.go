@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 type claudePluginInstall struct {
@@ -31,10 +33,33 @@ type claudePluginManifest struct {
 	MCPServers json.RawMessage `json:"mcpServers"`
 }
 
+// claudeFamilyConfigDir returns the config directory a claude-family runtime
+// keys plugins and settings under, or false when the provider is not in that
+// family. A built-in fork declares its home in the descriptor (langcli:
+// ~/.langcli); the family default is ~/.claude.
+func claudeFamilyConfigDir(home, provider string) (string, bool) {
+	if agent.ProtocolFamilyFor(provider) != "claude" {
+		return "", false
+	}
+	// The CLI resolves CLAUDE_CONFIG_DIR before its own default home, so an
+	// absolute override names the directory a fork's plugins live in too.
+	if configured := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); filepath.IsAbs(configured) {
+		return configured, true
+	}
+	dir := ".claude"
+	if desc, ok := agent.BuiltinRuntimeByID(provider); ok {
+		if declared := strings.TrimSpace(desc.ConfigHomeDir); declared != "" {
+			dir = declared
+		}
+	}
+	return filepath.Join(home, dir), true
+}
+
 // listEnabledClaudePlugins resolves the current user-scope plugin installs
-// that Claude Code itself has enabled. Reading the install registry is
-// deliberate: recursively scanning ~/.claude/plugins would surface both the
-// marketplace checkout and every cached version of the same plugin.
+// that the CLI itself has enabled, under its config directory. Reading the
+// install registry is deliberate: recursively scanning <configDir>/plugins
+// would surface both the marketplace checkout and every cached version of the
+// same plugin.
 func listEnabledClaudePlugins(configDir string) []claudePluginInstall {
 	settingsRaw, err := os.ReadFile(filepath.Join(configDir, "settings.json"))
 	if err != nil {

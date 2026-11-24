@@ -1593,3 +1593,22 @@ func TestValidateThinkingLevel_ClaudeFallbackPassesSavedLevelThrough(t *testing.
 		}
 	}
 }
+
+// TestBuiltinRuntimeThinkingMatchesFamily pins the server-side gate to the
+// protocol family a runtime dispatches to. A fork must accept exactly what its
+// family accepts: a per-identity copy is how langcli's enum drifted from its
+// CLI's actual --effort vocabulary.
+func TestBuiltinRuntimeThinkingMatchesFamily(t *testing.T) {
+	t.Parallel()
+	values := []string{"", "minimal", "low", "medium", "high", "xhigh", "max", "ultra", "none", "bogus"}
+	for _, desc := range BuiltinRuntimes {
+		if got, want := ThinkingControlSupported(desc.ID), ThinkingControlSupported(desc.ProtocolFamily); got != want {
+			t.Errorf("ThinkingControlSupported(%q) = %v, want %v (family %q)", desc.ID, got, want, desc.ProtocolFamily)
+		}
+		for _, value := range values {
+			if got, want := IsKnownThinkingValue(desc.ID, value), IsKnownThinkingValue(desc.ProtocolFamily, value); got != want {
+				t.Errorf("IsKnownThinkingValue(%q, %q) = %v, want %v (family %q)", desc.ID, value, got, want, desc.ProtocolFamily)
+			}
+		}
+	}
+}

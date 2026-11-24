@@ -25,6 +25,7 @@ import (
 // A one-shot process inherits the task env directly and exits with its turn.
 type claudeProcess struct {
 	pooled                   bool
+	label                    string
 	fingerprint              string
 	sessionID                string
 	cmd                      *exec.Cmd
@@ -148,7 +149,7 @@ func (p *claudeProcess) stopAfterErrorResult() {
 		return
 	case <-time.After(claudeErrorResultGrace()):
 	}
-	p.logger.Warn("claude still running after an error result; terminating process group", "pid", p.cmd.Process.Pid)
+	p.logger.Warn(p.label+" still running after an error result; terminating process group", "pid", p.cmd.Process.Pid)
 	p.signalProcessTree()
 }
 
@@ -174,19 +175,19 @@ func (b *claudeBackend) spawnClaudeProcess(ctx context.Context, execPath string,
 	childEnv := b.cfg.Env
 	if pooled {
 		var err error
-		sessionDir, err = os.MkdirTemp("", "multica-claude-warm-*")
+		sessionDir, err = os.MkdirTemp("", "multica-"+b.label()+"-warm-*")
 		if err != nil {
-			return nil, nil, fmt.Errorf("create warm claude session dir: %w", err)
+			return nil, nil, fmt.Errorf("create warm %s session dir: %w", b.label(), err)
 		}
 		sessionTempDir := filepath.Join(sessionDir, "tmp")
 		if err := os.MkdirAll(sessionTempDir, 0o700); err != nil {
 			_ = os.RemoveAll(sessionDir)
-			return nil, nil, fmt.Errorf("create warm claude temp dir: %w", err)
+			return nil, nil, fmt.Errorf("create warm %s temp dir: %w", b.label(), err)
 		}
 		taskEnvFile = filepath.Join(sessionDir, "task-env.json")
 		if err := WriteTaskEnvFile(taskEnvFile, b.cfg.Env); err != nil {
 			_ = os.RemoveAll(sessionDir)
-			return nil, nil, fmt.Errorf("write warm claude task env overlay: %w", err)
+			return nil, nil, fmt.Errorf("write warm %s task env overlay: %w", b.label(), err)
 		}
 		childEnv = PreparePooledChildEnv(b.cfg.Env, taskEnvFile, sessionTempDir)
 	}
@@ -239,9 +240,9 @@ func (b *claudeBackend) spawnClaudeProcess(ctx context.Context, execPath string,
 
 	var usageSnapshot *claudeUsageSnapshot
 	if opts.ResumeSessionID != "" {
-		snapshot, snapshotErr := captureClaudeUsageSnapshot(cmd.Env, cmd.Dir, opts.ResumeSessionID)
+		snapshot, snapshotErr := captureClaudeUsageSnapshot(cmd.Env, cmd.Dir, opts.ResumeSessionID, b.configHomeDir)
 		if snapshotErr != nil {
-			b.cfg.Logger.Warn("claude usage baseline unavailable; ignoring reported session totals, keeping per-run stream usage", "error", snapshotErr)
+			b.cfg.Logger.Warn(b.label()+" usage baseline unavailable; ignoring reported session totals, keeping per-run stream usage", "error", snapshotErr)
 		} else {
 			usageSnapshot = snapshot
 		}
@@ -250,31 +251,32 @@ func (b *claudeBackend) spawnClaudeProcess(ctx context.Context, execPath string,
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cleanupOnErr()
-		return nil, nil, fmt.Errorf("claude stdout pipe: %w", err)
+		return nil, nil, fmt.Errorf("%s stdout pipe: %w", b.label(), err)
 	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		cleanupOnErr()
-		return nil, nil, fmt.Errorf("claude stdin pipe: %w", err)
+		return nil, nil, fmt.Errorf("%s stdin pipe: %w", b.label(), err)
 	}
 	// Capture stderr into both the daemon log and a bounded tail buffer so we
 	// can include the last few KB in Result.Error when claude exits
 	// unexpectedly. Without the tail, an exit-code-only failure looks like
 	// "claude exited with error: exit status 3" — which is useless for
 	// root-causing V8 aborts, Bun panics, or any other CLI-side crash.
-	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[claude:stderr] "), agentStderrTailBytes)
+	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "["+b.label()+":stderr] "), agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
 	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		_ = stdin.Close()
 		cleanupOnErr()
-		return nil, nil, fmt.Errorf("start claude: %w", err)
+		return nil, nil, fmt.Errorf("start %s: %w", b.label(), err)
 	}
 
-	b.cfg.Logger.Info("claude started", "warm_pool", pooled, "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+	b.cfg.Logger.Info(b.label()+" started", "warm_pool", pooled, "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
 	proc := &claudeProcess{
 		pooled:        pooled,
+		label:         b.label(),
 		fingerprint:   fingerprint,
 		cmd:           cmd,
 		stdin:         stdin,
@@ -338,7 +340,7 @@ func (b *claudeBackend) warmFingerprint(execPath string, opts ExecOptions) strin
 		configFiles = append(configFiles, opts.ClaudeSettingsPath)
 	}
 	return computeWarmSessionFingerprint(WarmSessionFingerprintInput{
-		Provider:      "claude",
+		Provider:      b.label(),
 		Executable:    execPath,
 		LaunchPrefix:  b.cfg.LaunchPrefix,
 		Args:          buildClaudeArgs(optsForFP, b.cfg.Logger),
@@ -359,7 +361,7 @@ func (b *claudeBackend) acquireWarmProcess(sessionID, fingerprint string) *claud
 	if sessionID == "" {
 		return nil
 	}
-	acquired := b.cfg.WarmPool.Acquire("claude", sessionID, fingerprint)
+	acquired := b.cfg.WarmPool.Acquire(b.label(), sessionID, fingerprint)
 	if acquired == nil {
 		return nil
 	}
@@ -369,7 +371,7 @@ func (b *claudeBackend) acquireWarmProcess(sessionID, fingerprint string) *claud
 		return nil
 	}
 	if err := WriteTaskEnvFile(proc.taskEnvFile, b.cfg.Env); err != nil {
-		b.cfg.Logger.Warn("warm claude: failed to refresh task env overlay; evicting", "error", err)
+		b.cfg.Logger.Warn("warm "+b.label()+": failed to refresh task env overlay; evicting", "error", err)
 		proc.Close()
 		return nil
 	}

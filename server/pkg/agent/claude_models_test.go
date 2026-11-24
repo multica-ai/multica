@@ -165,6 +165,97 @@ func TestClaudeModelsFromInfos_CurrentCLI(t *testing.T) {
 	}
 }
 
+// TestClaudeModelsFromInfos_UsesRowProvider guards langcli's multi-vendor
+// catalog: a row that names its vendor keeps it, while rows without the field
+// (the real Claude catalog) stay Anthropic.
+func TestClaudeModelsFromInfos_UsesRowProvider(t *testing.T) {
+	t.Parallel()
+	models, unavailable := claudeModelsFromInfos([]claudeModelInfo{
+		{
+			Value:         "deepseek-flash",
+			ResolvedModel: "deepseek-flash",
+			DisplayName:   "DeepSeek V4.1 flash",
+			Provider:      "deepseek",
+		},
+		{
+			Value:         "glm-5.2",
+			ResolvedModel: "glm-5.2",
+			DisplayName:   "GLM 5.2",
+		},
+	})
+	if len(unavailable) != 0 {
+		t.Fatalf("unexpected unavailable rows: %+v", unavailable)
+	}
+	if len(models) != 2 {
+		t.Fatalf("models = %+v, want 2 rows", models)
+	}
+	if models[0].Provider != "deepseek" {
+		t.Errorf("row provider = %q, want deepseek", models[0].Provider)
+	}
+	if models[1].Provider != "anthropic" {
+		t.Errorf("row without provider = %q, want the anthropic default", models[1].Provider)
+	}
+}
+
+// TestDiscoverLangcliCatalog_DoesNotServeClaudeFallback pins the fork's
+// discovery contract: when the binary cannot answer list_models, the Claude
+// static catalog must not leak through as if langcli ran those Anthropic IDs.
+// TestDiscoverLangcliCatalogAttachesCLIEffortVocabulary guards the fork's
+// flag/row mismatch: model rows advertise the shared EFFORT_LEVELS superset,
+// but this binary's --effort parser only accepts four tokens. The help-derived
+// vocabulary must ride on a successful catalog too, or the daemon injects
+// `--effort xhigh` and the CLI refuses to start.
+func TestDiscoverLangcliCatalogAttachesCLIEffortVocabulary(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+	t.Parallel()
+
+	reply := `{"type":"control_response","response":{"subtype":"success","request_id":"multica-list-models","response":{"models":[{"value":"deepseek-flash","resolvedModel":"deepseek-flash","displayName":"DeepSeek V4.1 flash","provider":"deepseek","supportsEffort":true,"supportedEffortLevels":["low","medium","high","xhigh","max"]}]}}}`
+	script := "#!/bin/sh\n" +
+		"case \"$1\" in\n" +
+		"  --version) printf '%s\\n' '0.1.51 (Langcli)'; exit 0;;\n" +
+		"  --help) printf '%s\\n' '  --effort <level>  Effort level for the current session (low, medium, high, max)'; exit 0;;\n" +
+		"esac\n" +
+		"while read -r _line; do :; done\n" +
+		"printf '%s\\n' '" + reply + "'\n"
+	fake := filepath.Join(t.TempDir(), "langcli")
+	writeTestExecutable(t, fake, []byte(script))
+
+	catalog, err := discoverLangcliCatalog(context.Background(), Command{Path: fake})
+	if err != nil {
+		t.Fatalf("discoverLangcliCatalog: %v", err)
+	}
+	if len(catalog.Models) != 1 {
+		t.Fatalf("models = %+v, want one row", catalog.Models)
+	}
+	want := []string{"low", "medium", "high", "max"}
+	if !reflect.DeepEqual(catalog.CLIThinkingLevels, want) {
+		t.Fatalf("CLIThinkingLevels = %v, want %v", catalog.CLIThinkingLevels, want)
+	}
+}
+
+func TestDiscoverLangcliCatalog_DoesNotServeClaudeFallback(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+	t.Parallel()
+
+	fake := filepath.Join(t.TempDir(), "langcli")
+	writeTestExecutable(t, fake, []byte("#!/bin/sh\nexit 0\n"))
+
+	catalog, err := discoverLangcliCatalog(context.Background(), Command{Path: fake})
+	if err != nil {
+		t.Fatalf("discoverLangcliCatalog: %v", err)
+	}
+	if len(catalog.Models) != 0 {
+		t.Fatalf("models = %+v, want none (no Claude fallback)", catalog.Models)
+	}
+	if catalog.Fallback {
+		t.Error("an empty catalog must not be flagged as a static fallback")
+	}
+}
+
 func TestValidateThinkingLevel_ClaudeModelMissingFromLiveCatalog(t *testing.T) {
 	t.Parallel()
 	infos, err := parseClaudeModelCatalog(loadClaudeListModelsFixture(t, "2.1.258"))

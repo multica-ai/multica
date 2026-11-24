@@ -182,8 +182,12 @@ var errACPEffortDiscoveryIncomplete = errors.New("ACP per-model effort discovery
 type modelCacheEntry struct {
 	models      []Model
 	unavailable []UnavailableModel
-	freshUntil  time.Time
-	staleUntil  time.Time
+	// cliThinkingLevels rides along so a cache hit still carries the installed
+	// binary's effort vocabulary (Catalog.CLIThinkingLevels); dropping it made
+	// a fork's descriptor discovery lose the annotation on every repeat load.
+	cliThinkingLevels []string
+	freshUntil        time.Time
+	staleUntil        time.Time
 }
 
 var (
@@ -224,8 +228,16 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 	// degrading to manual entry.
 	if desc, ok := BuiltinRuntimeByID(providerType); ok {
 		if desc.ModelDiscovery != nil {
+			// A caller that passes no path means "the runtime's own binary on
+			// PATH". Resolve it from the descriptor here: family discovery
+			// defaults to the family's command (claude), which would enumerate
+			// the wrong binary for a fork.
+			discoveryCmd := runtimeCmd
+			if discoveryCmd.Path == "" {
+				discoveryCmd.Path = desc.DefaultCommand
+			}
 			return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
-				return discovered(desc.ModelDiscovery(callCtx, runtimeCmd))
+				return desc.ModelDiscovery(callCtx, discoveryCmd)
 			})
 		}
 		return Catalog{Models: []Model{}}, nil
@@ -409,10 +421,7 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 // Built-in runtime identities resolve through their protocol family, so a fork
 // inherits the contract from its descriptor entry rather than a name here.
 func ModelSelectorMustBeProviderQualified(providerType string) bool {
-	if desc, ok := BuiltinRuntimeByID(providerType); ok {
-		providerType = desc.ProtocolFamily
-	}
-	switch providerType {
+	switch ProtocolFamilyFor(providerType) {
 	case "opencode", "deveco":
 		return true
 	default:
@@ -513,12 +522,19 @@ func ModelSelectionSupported(providerType string) bool {
 }
 
 // ModelKnownIncompatibleWithProvider reports whether a saved model is a known
-// mismatch for a target runtime provider. Only Claude and Codex are judged, and
-// only by model-family prefix: they gain same-family model IDs through live
-// discovery without a Multica release, so no static list could be an
-// allow-list here. Unknown/custom model strings still return false because the
-// UI and CLI allow manual entries and the server should not erase values it
-// cannot confidently classify.
+// mismatch for a target runtime provider. Only the claude and codex protocol
+// families are judged, and only by model-family prefix: they gain same-family
+// model IDs through live discovery without a Multica release, so no static
+// list could be an allow-list here. Unknown/custom model strings still return
+// false because the UI and CLI allow manual entries and the server should not
+// erase values it cannot confidently classify.
+//
+// Built-in runtime identities are matched by identity, not by protocol family,
+// and fall through to that unknown branch on purpose. A Claude Code fork such
+// as langcli is a router that also runs models from other families (for
+// example OpenAI-protocol and DeepSeek models), so applying the claude
+// family's judgement would erase IDs the fork accepts. Clearing an unfamiliar
+// model is only safe for a family whose CLI runs one vendor's models.
 func ModelKnownIncompatibleWithProvider(providerType, model string) bool {
 	model = strings.TrimSpace(model)
 	if model == "" {
@@ -553,7 +569,7 @@ var claudeContextWindowTagRe = regexp.MustCompile(`\[[1-9][0-9]*[km]\]$`)
 // capabilities; every other provider and malformed/unknown modifier retains
 // exact-match behavior.
 func modelIDForCapabilityLookup(providerType, model string) string {
-	if providerType != "claude" {
+	if ProtocolFamilyFor(providerType) != "claude" {
 		return model
 	}
 	return claudeContextWindowTagRe.ReplaceAllString(model, "")
@@ -592,12 +608,12 @@ func cachedDiscoveryWithContext(ctx context.Context, key string, fn func(context
 	modelCacheMu.Lock()
 	if entry, ok := modelCache[key]; ok {
 		if now.Before(entry.freshUntil) {
-			out, unavailable := entry.models, entry.unavailable
+			out, unavailable, levels := entry.models, entry.unavailable, entry.cliThinkingLevels
 			modelCacheMu.Unlock()
-			return Catalog{Models: out, Unavailable: unavailable}, nil
+			return Catalog{Models: out, Unavailable: unavailable, CLIThinkingLevels: levels}, nil
 		}
 		if now.Before(entry.staleUntil) {
-			out, unavailable := entry.models, entry.unavailable
+			out, unavailable, levels := entry.models, entry.unavailable, entry.cliThinkingLevels
 			shouldRefresh := !modelCacheInflight[key]
 			if shouldRefresh {
 				modelCacheInflight[key] = true
@@ -619,7 +635,7 @@ func cachedDiscoveryWithContext(ctx context.Context, key string, fn func(context
 					storeModelCacheEntry(key, catalog)
 				}()
 			}
-			return Catalog{Models: out, Unavailable: unavailable}, nil
+			return Catalog{Models: out, Unavailable: unavailable, CLIThinkingLevels: levels}, nil
 		}
 	}
 	modelCacheMu.Unlock()
@@ -656,10 +672,11 @@ func storeModelCacheEntry(key string, catalog Catalog) {
 	}
 	modelCacheMu.Lock()
 	modelCache[key] = modelCacheEntry{
-		models:      catalog.Models,
-		unavailable: catalog.Unavailable,
-		freshUntil:  now.Add(modelCacheTTL),
-		staleUntil:  now.Add(staleTTL),
+		models:            catalog.Models,
+		unavailable:       catalog.Unavailable,
+		cliThinkingLevels: catalog.CLIThinkingLevels,
+		freshUntil:        now.Add(modelCacheTTL),
+		staleUntil:        now.Add(staleTTL),
 	}
 	modelCacheMu.Unlock()
 }
