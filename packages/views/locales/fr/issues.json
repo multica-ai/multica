@@ -2161,6 +2161,16 @@
     "empty": "Aucune tâche à attendre",
     "picker_hint": "Sélectionnez une tâche qui doit se terminer avant celle-ci.",
     "restricted": "{{count}} prérequis à accès restreint",
-    "ended": "Les tâches attendues sont terminées"
+    "ended": "Les tâches attendues sont terminées",
+    "marker_title": "Bloquée par {{count}} tâches",
+    "marker_title_one": "Bloquée par {{count}} tâche",
+    "marker_title_other": "Bloquée par {{count}} tâches",
+    "marker_ended": "{{finished}}/{{total}} terminées",
+    "marker_more": "{{count}} de plus",
+    "marker_more_one": "{{count}} de plus",
+    "marker_more_other": "{{count}} de plus",
+    "marker_auto_start": "{{name}} démarrera automatiquement une fois celles-ci terminées.",
+    "marker_notify": "{{name}} sera notifié une fois celles-ci terminées.",
+    "marker_unassigned": "Aucun responsable : rien ne démarrera une fois celles-ci terminées."
   }
 }
