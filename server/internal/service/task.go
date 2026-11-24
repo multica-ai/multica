@@ -831,10 +831,15 @@ func effectiveTaskSquadID(task db.AgentTaskQueue) pgtype.UUID {
 // squad-created sub-issues) while leaving direct standalone human triggers
 // unattributed.
 //
+// An issue a squad run created stays the squad's work only for runs the squad
+// drives: a member directly asking an agent outside the squad to work on it
+// is a standalone run. Without that, every later run on the issue, and every
+// issue those runs create, would count as the squad's (MUL-10072).
+//
 // Callers write the result to usage_squad_id — NEVER to squad_id — so existing
 // leader/worker routing semantics keyed off squad_id (workflow step ownership,
 // self-trigger suppression, conversation root ownership) remain untouched.
-func (s *TaskService) resolveInheritedSquadID(ctx context.Context, issue db.Issue, explicitSquadID, delegatedFromTaskID pgtype.UUID) pgtype.UUID {
+func (s *TaskService) resolveInheritedSquadID(ctx context.Context, issue db.Issue, agentID pgtype.UUID, source attribution.Source, explicitSquadID, delegatedFromTaskID pgtype.UUID) pgtype.UUID {
 	if explicitSquadID.Valid {
 		return explicitSquadID
 	}
@@ -852,12 +857,22 @@ func (s *TaskService) resolveInheritedSquadID(ctx context.Context, issue db.Issu
 		(issue.OriginType.String == "agent_create" || issue.OriginType.String == "quick_create") &&
 		issue.OriginID.Valid {
 		if originTask, err := s.Queries.GetAgentTask(ctx, issue.OriginID); err == nil {
-			if sid := effectiveTaskSquadID(originTask); sid.Valid {
+			if sid := effectiveTaskSquadID(originTask); sid.Valid &&
+				(source != attribution.SourceDirectHuman || s.agentInSquad(ctx, sid, agentID)) {
 				return sid
 			}
 		}
 	}
 	return pgtype.UUID{}
+}
+
+// agentInSquad reports whether agentID leads or belongs to squadID.
+func (s *TaskService) agentInSquad(ctx context.Context, squadID, agentID pgtype.UUID) bool {
+	if squad, err := s.Queries.GetSquad(ctx, squadID); err == nil && squad.LeaderID == agentID {
+		return true
+	}
+	isMember, err := s.Queries.IsSquadMember(ctx, db.IsSquadMemberParams{SquadID: squadID, MemberType: "agent", MemberID: agentID})
+	return err == nil && isMember
 }
 
 // RecordHumanDelegation notes that attr's member personally started an agent
@@ -1366,7 +1381,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
-	inheritedSquadID := s.resolveInheritedSquadID(ctx, issue, pgtype.UUID{}, attrDelegatedFrom)
+	inheritedSquadID := s.resolveInheritedSquadID(ctx, issue, issue.AssigneeID, attr.Source, pgtype.UUID{}, attrDelegatedFrom)
 	createParams := db.CreateAgentTaskParams{
 		ID:                   dbid.NewV7(),
 		AgentID:              issue.AssigneeID,
@@ -1544,7 +1559,7 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
-	resolvedSquadID := s.resolveInheritedSquadID(ctx, issue, squadID, attrDelegatedFrom)
+	resolvedSquadID := s.resolveInheritedSquadID(ctx, issue, agentID, attr.Source, squadID, attrDelegatedFrom)
 	params := db.CreateAgentTaskParams{
 		ID:                   dbid.NewV7(),
 		AgentID:              agentID,
