@@ -1054,3 +1054,55 @@ func TestPrintDaemonStatusShowsSkippedAgents(t *testing.T) {
 		t.Fatalf("daemon status output = %q, want it to contain %q", got, want)
 	}
 }
+
+func TestPrintDaemonStatusRendersLargePIDPlainly(t *testing.T) {
+	t.Parallel()
+
+	// A pid arrives from the health response as a float64. Above 999999,
+	// fmt's %v switches to exponent notation, so a long-running daemon used
+	// to print "pid 1.531839e+06" — unreadable, and unsearchable in ps.
+	// 1531839 is a real pid from a daemon that had been up for 31 hours.
+	health := map[string]any{
+		"status": "running",
+		"pid":    float64(1531839),
+		"uptime": "31h0m0s",
+	}
+
+	var out bytes.Buffer
+	printDaemonStatusReport(&out, "Daemon", health)
+
+	got := out.String()
+	if !strings.Contains(got, "running (pid 1531839, uptime 31h0m0s)") {
+		t.Fatalf("daemon status output = %q, want the pid printed as decimal digits", got)
+	}
+	if strings.Contains(got, "e+06") {
+		t.Fatalf("daemon status output = %q, must not use exponent notation for the pid", got)
+	}
+}
+
+func TestFormatHealthPID(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		in   any
+		want string
+	}{
+		{"float64 below exponent threshold", float64(4242), "4242"},
+		{"float64 at exponent threshold", float64(1000000), "1000000"},
+		{"float64 well above threshold", float64(1531839), "1531839"},
+		{"float32", float32(4242), "4242"},
+		{"int", 4242, "4242"},
+		{"int64", int64(4242), "4242"},
+		{"string passthrough", "4242", "4242"},
+		{"missing pid", nil, "?"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := formatHealthPID(tc.in); got != tc.want {
+				t.Fatalf("formatHealthPID(%#v) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
