@@ -450,12 +450,17 @@ RETURNING item.*;
 -- name: ListSnoozedInbox :many
 -- The recipient's snoozed issues, soonest back first (MUL-9333). `updates` is
 -- how many rows arrived while snoozed; `item_id` is the issue's newest row,
--- the one the snooze endpoints take.
+-- the one the snooze endpoints take. `issue_number` builds the identifier the
+-- row links to; `issue_title` and `issue_status` let the row render without
+-- fetching each issue (MUL-10056).
 SELECT g.issue_id::uuid AS issue_id,
        newest.id AS item_id,
        g.snoozed_until::timestamptz AS snoozed_until,
        g.snoozed_at::timestamptz AS snoozed_at,
-       g.updates::bigint AS updates
+       g.updates::bigint AS updates,
+       iss.number AS issue_number,
+       iss.title AS issue_title,
+       iss.status AS issue_status
 FROM (
     SELECT i.issue_id,
            max(i.snoozed_until) AS snoozed_until,
@@ -487,6 +492,7 @@ JOIN LATERAL (
     ORDER BY n.created_at DESC, n.id DESC
     LIMIT 1
 ) newest ON true
+LEFT JOIN issue iss ON iss.id = g.issue_id
 ORDER BY g.snoozed_until ASC, g.issue_id;
 
 -- name: InboxOverflows :one

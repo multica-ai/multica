@@ -22,7 +22,7 @@ vi.mock("@multica/core/issue-statuses/hooks", () => ({
   }),
 }));
 
-vi.mock("../../issues/components", () => ({ StatusIcon: () => null }));
+vi.mock("../../issues/components/status-icon", () => ({ StatusIcon: () => null }));
 vi.mock("../../issues/components/issue-agent-activity-indicator", () => ({
   IssueAgentActivityIndicator: () => null,
 }));

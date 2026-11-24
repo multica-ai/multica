@@ -150,9 +150,10 @@ func TestListInboxTaskCredentialAccess(t *testing.T) {
 		{"self-triggered", testUserID, "running", "", http.StatusOK},
 		{"another human", other, "running", "", http.StatusForbidden},
 		{"unattributed despite accountable owner", nil, "running", "", http.StatusForbidden},
-		{"completed task with lingering token", testUserID, "completed", "", http.StatusForbidden},
-		{"failed task with lingering token", testUserID, "failed", "", http.StatusForbidden},
-		{"cancelled task with lingering token", testUserID, "cancelled", "", http.StatusForbidden},
+		// Auth itself refuses a token whose task has ended (GitHub #11378).
+		{"completed task with lingering token", testUserID, "completed", "", http.StatusUnauthorized},
+		{"failed task with lingering token", testUserID, "failed", "", http.StatusUnauthorized},
+		{"cancelled task with lingering token", testUserID, "cancelled", "", http.StatusUnauthorized},
 		{"runtime ownership changed", testUserID, "running", "owner", http.StatusForbidden},
 		{"missing runtime owner", testUserID, "running", "no-owner", http.StatusForbidden},
 		{"runtime in another workspace", testUserID, "running", "workspace", http.StatusForbidden},

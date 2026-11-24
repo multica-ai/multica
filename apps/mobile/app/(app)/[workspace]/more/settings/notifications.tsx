@@ -22,7 +22,7 @@ import { useUpdateNotificationPreferences } from "@/data/mutations/notification-
 import { useT } from "@/lib/i18n";
 
 const INBOX_GROUPS: {
-  key: Exclude<NotificationGroupKey, "system_notifications" | "chat_replies">;
+  key: Exclude<NotificationGroupKey, "system_notifications" | "chat_replies" | "squad_handoffs">;
   labelKey: string;
   descriptionKey?: string;
 }[] = [
@@ -135,6 +135,27 @@ export default function NotificationsSettingsScreen() {
                   onCheckedChange={(checked) => onToggle(group.key, checked)}
                 />
               </View>
+              {group.key === "comments" && enabled && (
+                <>
+                  <Separator />
+                  <View className="flex-row items-center pl-8 pr-4 py-3 gap-3">
+                    <View className="flex-1">
+                      <Text className="text-base font-medium text-foreground">
+                        {t("groups.squad_handoffs")}
+                      </Text>
+                      <Text className="text-xs text-muted-foreground mt-0.5">
+                        {t("groups.squad_handoffs_description")}
+                      </Text>
+                    </View>
+                    <Switch
+                      checked={
+                        notificationPreferenceValue(preferences, "squad_handoffs") !== "muted"
+                      }
+                      onCheckedChange={(checked) => onToggle("squad_handoffs", checked)}
+                    />
+                  </View>
+                </>
+              )}
               {!isLast ? <Separator /> : null}
             </View>
           );

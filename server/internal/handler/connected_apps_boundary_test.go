@@ -116,7 +116,7 @@ func TestConnectedApps_DepartedMemberCannotResumeOnConnect(t *testing.T) {
 	t.Cleanup(func() {
 		testPool.Exec(ctx, `DELETE FROM user_composio_connection WHERE connected_account_id=$1`, accountID)
 	})
-	f.h.ConnectedApps.ResolveConnectRequests(ctx, member.UserID, "gmail")
+	f.h.ConnectedApps.ResolveConnectRequests(ctx, member.WorkspaceID, member.UserID, "gmail")
 	var queued int
 	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE issue_id=$1 AND status='queued' AND originator_user_id=$2`, f.issueID, f.member).Scan(&queued); err != nil {
 		t.Fatal(err)

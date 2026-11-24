@@ -1,5 +1,7 @@
-import type { WorkspacePaths } from "@multica/core/paths";
+import { inboxRowKey } from "@multica/core/inbox/open-row";
+import { issueRouteRef, type IssueRouteRef, type WorkspacePaths } from "@multica/core/paths";
 import type { InboxItem } from "@multica/core/types";
+import { inboxTabHref, type InboxTab } from "./inbox-view";
 
 function singleLine(value: string | null | undefined): string {
   return (value ?? "").replace(/\s+/g, " ").trim();
@@ -57,6 +59,14 @@ export function isAutopilotQuotaNotice(type: InboxItem["type"]): boolean {
   return type === "autopilot_quota_exceeded";
 }
 
+/**
+ * Limit notices whose stored title is English fallback copy; the reader's
+ * locale titles them from the type instead.
+ */
+export function isQuotaNotice(type: InboxItem["type"]): boolean {
+  return type === "autopilot_quota_exceeded" || type === "app_tool_calls_quota_exceeded";
+}
+
 export function getQuickCreateOutcomeDetail(item: InboxItem): string {
   const details = item.details ?? {};
   return singleLine(details.error) || singleLine(item.body);
@@ -97,20 +107,15 @@ export function resolveDetailItem(
  * server sent one, so the issue route opens without rewriting its URL (a
  * rewrite mounts the whole issue page again on web), else the UUID.
  */
-export function inboxIssueRef(item: Pick<InboxItem, "issue_identifier">, issueId: string): string {
-  return item.issue_identifier || issueId;
+export function inboxIssueRef(item: Pick<InboxItem, "issue_identifier">, issueId: string): IssueRouteRef {
+  return issueRouteRef({ id: issueId, identifier: item.issue_identifier });
 }
 
 /**
- * Where a notification row leads: its issue, at the comment or app request it
- * is about when it names one. An issue-less notification opens on the Inbox
- * page, which shows the detail of the row picked there.
+ * Where a notification row leads: the Inbox page with it open, on `tab`. The
+ * page lands on the comment or app request the notification is about, and
+ * the issue's own page is one click away from there.
  */
-export function inboxRowHref(p: WorkspacePaths, item: InboxItem): string {
-  if (!item.issue_id) return `${p.inbox()}?${new URLSearchParams({ issue: item.id }).toString()}`;
-  const issueHref = p.issueDetail(inboxIssueRef(item, item.issue_id));
-  const requestId = item.type.startsWith("app_") ? item.details?.request_id : undefined;
-  if (requestId) return `${issueHref}#app-request-${requestId}`;
-  const commentId = item.details?.comment_id;
-  return commentId ? `${issueHref}#comment-${commentId}` : issueHref;
+export function inboxRowHref(p: WorkspacePaths, item: InboxItem, tab: InboxTab = "inbox"): string {
+  return inboxTabHref(p, tab, inboxRowKey(item));
 }

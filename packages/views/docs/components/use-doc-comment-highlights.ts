@@ -20,12 +20,14 @@ function canHighlight() {
  * Paints each open discussion's quoted text in the doc and keeps the ranges
  * current while the doc is edited. Returns which discussions could not be
  * found (their text was edited away) and a lookup from a DOM point to the
- * discussion it sits in, for clicking a highlight.
+ * discussion it sits in, for clicking a highlight. A new `bodyKey` paints
+ * again at once, for a host that swaps what the root shows.
  */
 export function useDocCommentHighlights(
   rootRef: RefObject<HTMLElement | null>,
   threads: AnchoredThread[],
   activeId: string | null,
+  bodyKey?: string | number,
 ) {
   const rangesRef = useRef(new Map<string, Range>());
   const [missing, setMissing] = useState<ReadonlySet<string>>(new Set());
@@ -41,11 +43,15 @@ export function useDocCommentHighlights(
       if (!root) return;
       const ranges = new Map<string, Range>();
       const gone = new Set<string>();
-      const index = indexCommentText(root, true);
-      for (const thread of threadsRef.current) {
-        const range = docAnchorRange(root, thread, index);
-        if (range) ranges.set(thread.id, range);
-        else gone.add(thread.id);
+      // A doc without discussions has nothing to find: skip the walk over its
+      // text, which otherwise runs on every batch of edits.
+      if (threadsRef.current.length > 0) {
+        const index = indexCommentText(root, true);
+        for (const thread of threadsRef.current) {
+          const range = docAnchorRange(root, thread, index);
+          if (range) ranges.set(thread.id, range);
+          else gone.add(thread.id);
+        }
       }
       rangesRef.current = ranges;
       setMissing((prev) =>
@@ -66,7 +72,7 @@ export function useDocCommentHighlights(
         CSS.highlights.delete(ACTIVE_HIGHLIGHT);
       }
     };
-  }, [rootRef, threadsKey, activeId]);
+  }, [rootRef, threadsKey, activeId, bodyKey]);
 
   /** The discussion whose quoted text contains this point, if any. */
   const threadAt = (node: Node, offset: number): string | null => {

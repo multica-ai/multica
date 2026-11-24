@@ -93,6 +93,21 @@
     "visibility": "Visibilité",
     "visibility_workspace": "Espace de travail"
   },
+  "handoff": {
+    "section_title": "Collaboration",
+    "mode_leader_title": "Le chef attribue",
+    "mode_leader_description": "Chaque étape revient au chef, {{leader}}, qui choisit la suivante. C’est le comportement par défaut des squads existants.",
+    "mode_direct_title": "Les membres se passent la main",
+    "mode_direct_description": "Le chef attribue la première étape et gère les exceptions. Chaque membre choisit l’étape suivante ; passer en revue ou consulter une personne ne réveille plus le chef.",
+    "guard_rounds": "Allers-retours : {{limit}} tours max.",
+    "guard_daily": "{{limit}} passations max. par tâche et par jour",
+    "guard_failed": "Exécution échouée → retour au chef",
+    "guard_no_next": "Pas d’étape suivante → retour au chef",
+    "saved": "Mode de collaboration mis à jour",
+    "brief_title": "Ce que reçoivent les membres",
+    "brief_hint": "Ajouté à chaque exécution sur une tâche assignée à ce squad",
+    "brief_empty": "Aucun agent membre pour l’instant"
+  },
   "toasts": {
     "member_added": "Membre ajouté",
     "member_add_failed": "Échec de l'ajout du membre",
@@ -117,7 +132,7 @@
     "more_members_other": "+{{count}} de plus"
   },
   "instructions_tab": {
-    "description": "Le chef lit ces instructions chaque fois qu’il travaille sur une tâche assignée à ce squad.",
+    "description": "Le chef et chaque agent membre lisent ces instructions chaque fois qu’ils travaillent sur une tâche assignée à ce squad.",
     "unsaved_changes": "Modifications non enregistrées",
     "save_button": "Enregistrer",
     "placeholder": "Par exemple : commencez toujours par écrire un test qui échoue. Privilégiez des commits petits et atomiques."

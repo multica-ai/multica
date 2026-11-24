@@ -9,6 +9,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
 import { useIsGuest } from "@multica/core/permissions";
 import { useQuery } from "@tanstack/react-query";
@@ -46,6 +47,7 @@ import { SwimLaneView } from "../components/swimlane-view";
 import { TableView } from "../components/table-view";
 import { useT } from "../../i18n";
 import { CollectionPageState } from "../../layout/collection-page";
+import { useWarmRoute } from "../../navigation";
 import { IssueContextMenuProvider } from "../actions";
 import { IssueSurfaceActionsProvider } from "./actions-context";
 import { IssuePeekHost } from "../components/issue-peek";
@@ -252,6 +254,7 @@ function IssueSurfaceContent({
   // One polling owner for the whole surface; individual cards only select cache data.
   useQuery({ ...workspaceWakeupSummariesOptions(workspaceId), refetchInterval: 10_000 });
   const { t } = useT("projects");
+  const paths = useWorkspacePaths();
   const controller = useIssueSurfaceController({
     scope,
     modes,
@@ -277,6 +280,8 @@ function IssueSurfaceContent({
         : controller.issues,
     [clientFilter, controller.issues],
   );
+  const firstIssue = issues[0] ?? tableLoadedIssues[0];
+  useWarmRoute("issue", firstIssue ? paths.issueDetail(issueRouteRef(firstIssue)) : null);
   const swimlaneIssues = useMemo(
     () =>
       clientFilter

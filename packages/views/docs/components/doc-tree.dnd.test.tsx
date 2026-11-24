@@ -34,6 +34,7 @@ vi.mock("../../navigation", () => ({
   useNavigation: () => ({ pathname: "/review/docs", push: vi.fn() }),
   AppLink: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a>,
 }));
+vi.mock("./use-prefetch-doc", () => ({ usePrefetchDoc: () => () => ({}), useWarmDocPage: () => undefined }));
 vi.mock("@multica/core/issue-statuses/hooks", () => ({
   useIssueStatuses: () => ({ iconOf: () => null, colorOf: () => null }),
 }));
@@ -63,7 +64,7 @@ afterEach(() => { cleanup(); qc.clear(); });
 function mount(children: React.ReactNode) {
   return render(<QueryClientProvider client={qc}><I18nProvider locale="en" resources={{ en: { docs: enDocs, editor: enEditor, issues: enIssues } }}>{children}</I18nProvider></QueryClientProvider>);
 }
-function folder(title: string) { return screen.getByText(title, { exact: true }).closest("summary")!; }
+function folder(title: string) { return screen.getByText(title, { exact: true }).closest("[data-doc-folder]")!; }
 function dragDrop(source: Element, target: Element) {
   const dataTransfer = { setData: vi.fn(), effectAllowed: "", dropEffect: "" };
   fireEvent.dragStart(source, { dataTransfer });

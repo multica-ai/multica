@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_task_usage_hourly_workspace_squad_time;

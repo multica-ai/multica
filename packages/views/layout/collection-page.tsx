@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
+import { UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import {
   ChevronDown,
   Filter,
@@ -247,11 +250,18 @@ export function CollectionSearch({
   label,
 }: CollectionSearchProps) {
   const { t } = useT("layout");
+  const reduceMotion = useReducedMotion();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const focusTriggerOnCloseRef = useRef(false);
   const expanded = open || value !== "";
+  const mountedExpandedRef = useRef(expanded);
+  const animateExpand = !reduceMotion && !mountedExpandedRef.current;
+
+  useEffect(() => {
+    mountedExpandedRef.current = false;
+  }, []);
 
   // Only opening focuses the field: a query restored on return must not take
   // focus from the list, whose j/k keys need it on the page.
@@ -306,54 +316,61 @@ export function CollectionSearch({
       )}
     >
       {expanded ? (
-        <InputGroup
-          className="h-7 w-full"
-          onFocus={() => setOpen(true)}
-          onBlur={(event) => {
-            if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-            // Switching windows blurs too but keeps the element active; the
-            // field should still be open on return.
-            if (document.activeElement === event.target) return;
-            setOpen(false);
-          }}
+        <motion.div
+          className="w-full min-w-0"
+          initial={animateExpand ? { opacity: 0.4, width: 28 } : false}
+          animate={{ opacity: 1, width: "100%" }}
+          transition={{ duration: animateExpand ? UI_MOTION_DURATION.fast : 0, ease: UI_EASE_OUT }}
         >
-          <InputGroupAddon>
-            <Search aria-hidden="true" className="size-3.5" />
-          </InputGroupAddon>
-          <InputGroupInput
-            ref={inputRef}
-            value={value}
-            onChange={(event) => onChange(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key !== "Escape" || isImeComposing(event)) return;
-              event.preventDefault();
-              close();
-              event.currentTarget.blur();
+          <InputGroup
+            className="h-7 w-full"
+            onFocus={() => setOpen(true)}
+            onBlur={(event) => {
+              if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+              // Switching windows blurs too but keeps the element active; the
+              // field should still be open on return.
+              if (document.activeElement === event.target) return;
+              setOpen(false);
             }}
-            aria-label={label}
-            aria-keyshortcuts="/"
-            placeholder={label}
-            autoComplete="off"
-            spellCheck={false}
-            className="h-full"
-          />
-          {value ? (
-            <InputGroupAddon align="inline-end">
-              <IconButton
-                size="icon-xs"
-                tooltipSide="bottom"
-                label={t(($) => $.collection.clear_search)}
-                className="text-muted-foreground"
-                onClick={() => {
-                  focusTriggerOnCloseRef.current = true;
-                  close();
-                }}
-              >
-                <X />
-              </IconButton>
+          >
+            <InputGroupAddon>
+              <Search aria-hidden="true" className="size-3.5" />
             </InputGroupAddon>
-          ) : null}
-        </InputGroup>
+            <InputGroupInput
+              ref={inputRef}
+              value={value}
+              onChange={(event) => onChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "Escape" || isImeComposing(event)) return;
+                event.preventDefault();
+                close();
+                event.currentTarget.blur();
+              }}
+              aria-label={label}
+              aria-keyshortcuts="/"
+              placeholder={label}
+              autoComplete="off"
+              spellCheck={false}
+              className="h-full"
+            />
+            {value ? (
+              <InputGroupAddon align="inline-end">
+                <IconButton
+                  size="icon-xs"
+                  tooltipSide="bottom"
+                  label={t(($) => $.collection.clear_search)}
+                  className="text-muted-foreground"
+                  onClick={() => {
+                    focusTriggerOnCloseRef.current = true;
+                    close();
+                  }}
+                >
+                  <X />
+                </IconButton>
+              </InputGroupAddon>
+            ) : null}
+          </InputGroup>
+        </motion.div>
       ) : (
         <IconButton
           label={label}

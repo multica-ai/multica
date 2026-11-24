@@ -6,7 +6,7 @@ import { createTestApi, loginAsDefault, openAccountMenu } from "./helpers";
 // (MUL-7754): results match server search, follow writes made elsewhere, and
 // no server search request is sent while typing.
 
-const SEARCH_PLACEHOLDER = "Type a command or search...";
+const SEARCH_PLACEHOLDER = "Search, or type what needs doing...";
 
 function isSearchIndexChanges(res: Response): boolean {
   return res.url().includes("/api/search-index/changes") && res.ok();
@@ -103,7 +103,7 @@ test.describe("Local search index", () => {
     await expect.poll(() => searchIndexDatabases(page)).toHaveLength(1);
 
     await openAccountMenu(page);
-    await page.getByRole("menuitem", { name: "Log out" }).click();
+    await page.getByRole("menuitem", { name: "Sign out" }).click();
     await page.waitForURL("**/login", { timeout: 10_000, waitUntil: "domcontentloaded" });
 
     await expect.poll(() => searchIndexDatabases(page)).toEqual([]);
@@ -120,11 +120,21 @@ test.describe("Local search index", () => {
       const memberId = await owner.addMemberByEmail(api.getEmail());
       await loginAsDefault(page);
 
+      const wsConnected = page.waitForEvent("websocket", (ws) => {
+        const url = new URL(ws.url());
+        return url.pathname === "/ws" && url.searchParams.get("workspace_slug") === shared.slug;
+      });
       const synced = page.waitForResponse(isSearchIndexChanges, { timeout: 45_000 });
       await page.goto(`/${shared.slug}/issues`, { waitUntil: "domcontentloaded" });
-      await synced;
+      await Promise.all([wsConnected, synced]);
+      await expect(page.getByText(`shared ${run} issue`)).toBeVisible({ timeout: 15_000 });
       const sharedCopy = (names: string[]) => names.some((name) => name.endsWith(`:${shared.id}`));
       await expect.poll(async () => sharedCopy(await searchIndexDatabases(page))).toBe(true);
+
+      // Confirm the active socket (after any dev StrictMode reconnect) is
+      // registered on the server and delivering realtime events before removal.
+      await owner.createIssue(`shared ${run} ws-ready`);
+      await expect(page.getByText(`shared ${run} ws-ready`)).toBeVisible({ timeout: 15_000 });
 
       await owner.removeMember(memberId);
 

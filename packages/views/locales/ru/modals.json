@@ -239,6 +239,8 @@
       "created_by": "Создано",
       "select_agent_aria": "Выбрать агента",
       "pick_an_agent": "Выберите агента…",
+      "all_actors": "Все агенты и команды",
+      "frequent_actors_aria": "Часто используемые",
       "no_agents": "Нет доступных агентов или команд.",
       "search_placeholder": "Поиск агентов и команд…",
       "agents_group": "Агенты",

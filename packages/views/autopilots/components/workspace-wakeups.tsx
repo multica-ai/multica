@@ -5,7 +5,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { AlarmClock, Bell, Clock3, AlertCircle, ListChecks, TriangleAlert } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import {
   workspaceWakeupsInfiniteOptions,
   useDisableWorkspaceWakeups,
@@ -523,7 +523,7 @@ export function WorkspaceWakeups() {
         columns={columns}
         rows={rows}
         getRowId={rowId}
-        getRowHref={(row) => paths.issueDetail(row.issue_id)}
+        getRowHref={(row) => paths.issueDetail(issueRouteRef({ id: row.issue_id, identifier: row.issue_identifier }))}
         getRowTitle={(row) => `${row.issue_identifier} ${row.issue_title}`}
         selection={{
           selectedIds: selected,

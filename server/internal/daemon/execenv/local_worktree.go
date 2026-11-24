@@ -137,8 +137,8 @@ func (p LocalWorktreeParams) owner() branchOwner {
 // tail. The id is what the branch BELONGS to, and only it decides whether a
 // later task may continue that branch: identifiers are per-workspace and
 // human-chosen, so two workspaces can mint the same one for different issues.
-// Tasks with neither an issue nor a chat session have no conversation to
-// continue and get "", "".
+// Doc discussion runs continue per doc. Tasks with none of these have no
+// conversation to continue and get "", "".
 func localWorktreeConversation(params PrepareParams) (key, id string) {
 	if params.Task.IssueID != "" {
 		if params.IssueIdentifier != "" {
@@ -148,6 +148,9 @@ func localWorktreeConversation(params PrepareParams) (key, id string) {
 	}
 	if params.Task.ChatSessionID != "" {
 		return "chat-" + taskKey(params.Task.ChatSessionID), params.Task.ChatSessionID
+	}
+	if params.Task.DocID != "" {
+		return "doc-" + taskKey(params.Task.DocID), params.Task.DocID
 	}
 	return "", ""
 }

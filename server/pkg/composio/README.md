@@ -129,6 +129,29 @@ go test ./server/pkg/composio/...
 
 Current coverage: **82.2 %**.
 
+Test servers and fake SDKs never hand-write Composio responses. `composiotest`
+embeds the response schemas of every endpoint this package calls, snapshotted
+from Composio's v3.1 OpenAPI spec into `composiotest/openapi-v3.1.json`:
+
+- `composiotest.Example(t, op, overlay)` builds a response body from the
+  spec's own example with the test's values merged in, and fails if the result
+  leaves the spec.
+- `composiotest.CheckFields(op, v)` fails when a value a fake SDK returns sets a
+  field that endpoint does not have.
+
+`scripts/fake-composio.test.mjs` holds `scripts/fake-composio.mjs` to the same
+snapshot. When a new endpoint is called, add it to `OPERATIONS` in
+`scripts/composio-spec.mjs`; to pick up Composio's latest spec, run
+`node scripts/composio-spec.mjs update` and review the diff.
+
+The snapshot is frozen, so the fakes keep passing when Composio changes the
+live API. `.github/workflows/composio-spec-drift.yml` (daily, or run it by hand
+from the Actions tab) regenerates the snapshot from the live spec. When it
+differs, the job fails with the snapshot diff and the results of the Node and
+Go tests above, run against the new snapshot, in its summary; the regenerated
+`openapi-v3.1.json` is attached as an artifact. A failed fetch only warns, so
+a Composio outage does not raise a false alarm. It is not part of PR CI.
+
 ## Design notes
 
 - **Standalone.** Zero coupling to Multica internals — depend on this package

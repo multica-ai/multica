@@ -13,6 +13,7 @@ import {
   CircleDot,
   CircleEqual,
   ExternalLink,
+  Flag,
   FolderOpen,
   Hash,
   Link2,
@@ -31,6 +32,7 @@ import {
   Zap,
 } from "@multica/ui/icons";
 import { useIssueDeletion } from "@multica/core/issues/use-issue-deletion";
+import { useIsGuest } from "@multica/core/permissions";
 import type { AgentTask, Issue } from "@multica/core/types";
 import { quickActionListOptions } from "@multica/core/quick-actions";
 import { resolveWorkdirCopyTarget } from "@multica/core/issues";
@@ -107,7 +109,10 @@ export function IssueActionsMenuItems({
   const locale = useLocale();
   const formatDate = (date: string) => formatDateOnly(date, { month: "short", day: "numeric" }, locale);
   const wsId = useWorkspaceId();
-  const { canDelete } = useIssueDeletion(wsId);
+  const { canDelete, offersDelete } = useIssueDeletion(wsId);
+  // A guest (MUL-9420) changes nothing about an issue: the menu keeps only
+  // what the server lets it do — open, pin, copy, mark read.
+  const guest = useIsGuest(wsId);
   const sidebar = variant === "sidebar";
   const statusLabel = useStatusLabel(wsId);
   // Only the statuses the issue's workflow allows; entering a step that hands
@@ -140,6 +145,8 @@ export function IssueActionsMenuItems({
     removeParent,
     openAddChild,
     openMarkDuplicate,
+    openAddBlocker,
+    openAddBlocking,
     openDeleteConfirm,
   } = actions;
 
@@ -153,7 +160,7 @@ export function IssueActionsMenuItems({
   // the issue detail page is a free cache hit.
   const { data: tasks } = useQuery({
     ...issueTasksOptions(issue.id),
-    enabled: !sidebar,
+    enabled: !sidebar && !guest,
   });
   const workdirCopyTarget = useMemo(
     () => resolveWorkdirCopyTarget(tasks),
@@ -209,7 +216,7 @@ export function IssueActionsMenuItems({
           </div>
           <P.Separator />
         </>
-      ) : (
+      ) : guest ? null : (
         <>
           {/* Rename leads the menu: it is the only entry that changes what the
               issue *is* rather than a property of it, and on list/board rows
@@ -231,161 +238,165 @@ export function IssueActionsMenuItems({
         </>
       )}
 
-      {/* Status */}
-      <P.Sub>
-        <P.SubTrigger>
-          <StatusIcon
-            status={issue.status}
-            category={categoryOf(issue.status)}
-            color={colorOf(issue.status)}
-            icon={iconOf(issue.status)}
-            className="h-3.5 w-3.5"
-          />
-          <ItemLabel
-            label={t(($) => $.actions.status)}
-            value={statusLabel(issue.status)}
-          />
-        </P.SubTrigger>
-        <P.SubContent>
-          {/* The same set as the status picker: every entry point that can
-              change a status must offer it, or a custom status is unreachable
-              from the board's right-click menu. (MUL-6243) */}
-          {statusOptions.map((option) => (
-            <P.Item
-              key={option.key}
-              onClick={() => setStatus(option.key)}
-            >
+      {!guest && (
+        <>
+          {/* Status */}
+          <P.Sub>
+            <P.SubTrigger>
               <StatusIcon
-                status={option.key}
-                category={option.category}
-                color={option.color}
-                icon={option.icon}
+                status={issue.status}
+                category={categoryOf(issue.status)}
+                color={colorOf(issue.status)}
+                icon={iconOf(issue.status)}
                 className="h-3.5 w-3.5"
               />
-              {option.label}
-              {issue.status === option.key && (
-                <Check className="ml-auto size-3.5 text-muted-foreground" />
-              )}
-            </P.Item>
-          ))}
-        </P.SubContent>
-      </P.Sub>
-
-      {/* Priority */}
-      <P.Sub>
-        <P.SubTrigger>
-          <PriorityIcon priority={issue.priority} />
-          <ItemLabel
-            label={t(($) => $.actions.priority)}
-            value={t(($) => $.priority[issue.priority])}
-          />
-        </P.SubTrigger>
-        <P.SubContent>
-          {PRIORITY_DISPLAY_ORDER.map((p) => (
-            <P.Item key={p} onClick={() => updateField({ priority: p })}>
-              <span
-                className={`inline-flex items-center gap-1 rounded-xs px-1.5 py-0.5 text-caption font-medium ${PRIORITY_CONFIG[p].badgeBg} ${PRIORITY_CONFIG[p].badgeText}`}
-              >
-                <PriorityIcon priority={p} className="h-3 w-3" inheritColor />
-                {t(($) => $.priority[p])}
-              </span>
-              {issue.priority === p && (
-                <Check className="ml-auto size-3.5 text-muted-foreground" />
-              )}
-            </P.Item>
-          ))}
-        </P.SubContent>
-      </P.Sub>
-
-      {/* Assignee — a submenu like Status and Priority, filled with the
-          shared assignee picker's own list (members + agents + squads, with
-          search and permission checks) rather than menu items of its own, so
-          every entry point offers the same choices. (MUL-2157) */}
-      <P.Sub>
-        <P.SubTrigger>
-          <UserMinus className="h-3.5 w-3.5" />
-          <ItemLabel
-            label={t(($) => $.actions.assignee)}
-            value={<AssigneeName issue={issue} />}
-          />
-        </P.SubTrigger>
-        <P.SubContent className="w-64 p-0">
-          <SubmenuPanel>
-            <AssigneePickerPanel
-              assigneeType={issue.assignee_type}
-              assigneeId={issue.assignee_id}
-              onUpdate={updateField}
-              onPicked={onClose}
-            />
-          </SubmenuPanel>
-        </P.SubContent>
-      </P.Sub>
-
-      {!sidebar && (
-        <>
-          {/* Start date */}
-          <P.Sub>
-            <P.SubTrigger>
-              <CalendarClock className="h-3.5 w-3.5" />
               <ItemLabel
-                label={t(($) => $.actions.start_date)}
-                value={issue.start_date ? formatDate(issue.start_date) : undefined}
+                label={t(($) => $.actions.status)}
+                value={statusLabel(issue.status)}
               />
             </P.SubTrigger>
             <P.SubContent>
-              <P.Item onClick={() => updateField({ start_date: todayDateOnly() })}>
-                {t(($) => $.actions.start_today)}
-              </P.Item>
-              <P.Item onClick={() => updateField({ start_date: addDaysDateOnly(1) })}>
-                {t(($) => $.actions.start_tomorrow)}
-              </P.Item>
-              <P.Item onClick={() => updateField({ start_date: addDaysDateOnly(7) })}>
-                {t(($) => $.actions.start_next_week)}
-              </P.Item>
-              {issue.start_date && (
-                <>
-                  <P.Separator />
-                  <P.Item onClick={() => updateField({ start_date: null })}>
-                    {t(($) => $.actions.start_clear)}
-                  </P.Item>
-                </>
-              )}
+              {/* The same set as the status picker: every entry point that can
+                  change a status must offer it, or a custom status is unreachable
+                  from the board's right-click menu. (MUL-6243) */}
+              {statusOptions.map((option) => (
+                <P.Item
+                  key={option.key}
+                  onClick={() => setStatus(option.key)}
+                >
+                  <StatusIcon
+                    status={option.key}
+                    category={option.category}
+                    color={option.color}
+                    icon={option.icon}
+                    className="h-3.5 w-3.5"
+                  />
+                  {option.label}
+                  {issue.status === option.key && (
+                    <Check className="ml-auto size-3.5 text-muted-foreground" />
+                  )}
+                </P.Item>
+              ))}
             </P.SubContent>
           </P.Sub>
 
-          {/* Due date */}
+          {/* Priority */}
           <P.Sub>
             <P.SubTrigger>
-              <Calendar className="h-3.5 w-3.5" />
+              <PriorityIcon priority={issue.priority} />
               <ItemLabel
-                label={t(($) => $.actions.due_date)}
-                value={issue.due_date ? formatDate(issue.due_date) : undefined}
+                label={t(($) => $.actions.priority)}
+                value={t(($) => $.priority[issue.priority])}
               />
             </P.SubTrigger>
             <P.SubContent>
-              <P.Item onClick={() => updateField({ due_date: todayDateOnly() })}>
-                {t(($) => $.actions.due_today)}
-              </P.Item>
-              <P.Item onClick={() => updateField({ due_date: addDaysDateOnly(1) })}>
-                {t(($) => $.actions.due_tomorrow)}
-              </P.Item>
-              <P.Item onClick={() => updateField({ due_date: addDaysDateOnly(7) })}>
-                {t(($) => $.actions.due_next_week)}
-              </P.Item>
-              {issue.due_date && (
-                <>
-                  <P.Separator />
-                  <P.Item onClick={() => updateField({ due_date: null })}>
-                    {t(($) => $.actions.due_clear)}
-                  </P.Item>
-                </>
-              )}
+              {PRIORITY_DISPLAY_ORDER.map((p) => (
+                <P.Item key={p} onClick={() => updateField({ priority: p })}>
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-xs px-1.5 py-0.5 text-caption font-medium ${PRIORITY_CONFIG[p].badgeBg} ${PRIORITY_CONFIG[p].badgeText}`}
+                  >
+                    <PriorityIcon priority={p} className="h-3 w-3" inheritColor />
+                    {t(($) => $.priority[p])}
+                  </span>
+                  {issue.priority === p && (
+                    <Check className="ml-auto size-3.5 text-muted-foreground" />
+                  )}
+                </P.Item>
+              ))}
             </P.SubContent>
           </P.Sub>
+
+          {/* Assignee — a submenu like Status and Priority, filled with the
+              shared assignee picker's own list (members + agents + squads, with
+              search and permission checks) rather than menu items of its own, so
+              every entry point offers the same choices. (MUL-2157) */}
+          <P.Sub>
+            <P.SubTrigger>
+              <UserMinus className="h-3.5 w-3.5" />
+              <ItemLabel
+                label={t(($) => $.actions.assignee)}
+                value={<AssigneeName issue={issue} />}
+              />
+            </P.SubTrigger>
+            <P.SubContent className="w-64 p-0">
+              <SubmenuPanel>
+                <AssigneePickerPanel
+                  assigneeType={issue.assignee_type}
+                  assigneeId={issue.assignee_id}
+                  onUpdate={updateField}
+                  onPicked={onClose}
+                />
+              </SubmenuPanel>
+            </P.SubContent>
+          </P.Sub>
+
+          {!sidebar && (
+            <>
+              {/* Start date */}
+              <P.Sub>
+                <P.SubTrigger>
+                  <CalendarClock className="h-3.5 w-3.5" />
+                  <ItemLabel
+                    label={t(($) => $.actions.start_date)}
+                    value={issue.start_date ? formatDate(issue.start_date) : undefined}
+                  />
+                </P.SubTrigger>
+                <P.SubContent>
+                  <P.Item onClick={() => updateField({ start_date: todayDateOnly() })}>
+                    {t(($) => $.actions.start_today)}
+                  </P.Item>
+                  <P.Item onClick={() => updateField({ start_date: addDaysDateOnly(1) })}>
+                    {t(($) => $.actions.start_tomorrow)}
+                  </P.Item>
+                  <P.Item onClick={() => updateField({ start_date: addDaysDateOnly(7) })}>
+                    {t(($) => $.actions.start_next_week)}
+                  </P.Item>
+                  {issue.start_date && (
+                    <>
+                      <P.Separator />
+                      <P.Item onClick={() => updateField({ start_date: null })}>
+                        {t(($) => $.actions.start_clear)}
+                      </P.Item>
+                    </>
+                  )}
+                </P.SubContent>
+              </P.Sub>
+
+              {/* Due date */}
+              <P.Sub>
+                <P.SubTrigger>
+                  <Calendar className="h-3.5 w-3.5" />
+                  <ItemLabel
+                    label={t(($) => $.actions.due_date)}
+                    value={issue.due_date ? formatDate(issue.due_date) : undefined}
+                  />
+                </P.SubTrigger>
+                <P.SubContent>
+                  <P.Item onClick={() => updateField({ due_date: todayDateOnly() })}>
+                    {t(($) => $.actions.due_today)}
+                  </P.Item>
+                  <P.Item onClick={() => updateField({ due_date: addDaysDateOnly(1) })}>
+                    {t(($) => $.actions.due_tomorrow)}
+                  </P.Item>
+                  <P.Item onClick={() => updateField({ due_date: addDaysDateOnly(7) })}>
+                    {t(($) => $.actions.due_next_week)}
+                  </P.Item>
+                  {issue.due_date && (
+                    <>
+                      <P.Separator />
+                      <P.Item onClick={() => updateField({ due_date: null })}>
+                        {t(($) => $.actions.due_clear)}
+                      </P.Item>
+                    </>
+                  )}
+                </P.SubContent>
+              </P.Sub>
+            </>
+          )}
+
+          <P.Separator />
         </>
       )}
-
-      <P.Separator />
 
       {/* Leads the "do something with this issue itself" group: the only
           discoverable way to open an issue elsewhere for users who don't know
@@ -441,7 +452,8 @@ export function IssueActionsMenuItems({
         <Type className="h-3.5 w-3.5" />
         {t(($) => $.actions.copy_title_as_link)}
       </P.Item>
-      {sidebar ? (
+      {/* A guest cannot read an issue's runs, so it has no workdir to copy. */}
+      {sidebar || guest ? (
         <P.Item onClick={copyIdentifier}>
           <Hash className="h-3.5 w-3.5" />
           {t(($) => $.actions.copy_identifier)}
@@ -455,7 +467,7 @@ export function IssueActionsMenuItems({
         </P.Item>
       )}
 
-      {sidebar ? (
+      {guest ? null : sidebar ? (
         onStopRun && <StopRunItems issueId={issue.id} primitives={P} onStopRun={onStopRun} />
       ) : (
         <>
@@ -464,7 +476,7 @@ export function IssueActionsMenuItems({
           {/* Relationship actions live under "Relations" — a semantically
               explicit label (unlike the old "More") so the first level tells
               you what the submenu does. Holds parent/sub-issue links today,
-              and will grow (blocks, duplicates, related) as we add more
+              blockers and duplicates, and will grow (related) as we add more
               relation types. */}
           <P.Sub>
             <P.SubTrigger>
@@ -485,6 +497,14 @@ export function IssueActionsMenuItems({
               <P.Item onClick={openAddChild}>
                 <ArrowDown className="h-3.5 w-3.5" />
                 {t(($) => $.actions.add_sub_issue)}
+              </P.Item>
+              <P.Item onClick={openAddBlocker}>
+                <Flag className="h-3.5 w-3.5" />
+                {t(($) => $.actions.add_blocker)}
+              </P.Item>
+              <P.Item onClick={openAddBlocking}>
+                <Flag className="h-3.5 w-3.5" />
+                {t(($) => $.actions.add_blocking)}
               </P.Item>
               {/* Marking a duplicate cancels the issue. (MUL-7420) */}
               {workflowAllowsStatus(workflow, "cancelled") && (
@@ -507,17 +527,21 @@ export function IssueActionsMenuItems({
               person chose it, never on the plugin's own initiative. */}
           <PluginModalMenuItems issueId={issue.id} Item={P.Item} />
 
-          <P.Separator />
+          {offersDelete && (
+            <>
+              <P.Separator />
 
-          <P.Item
-            disabled={!canDelete(issue)}
-            title={!canDelete(issue) ? t(($) => $.batch.delete_restricted) : undefined}
-            variant="destructive"
-            onClick={() => openDeleteConfirm({ onDeletedFallbackPath })}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            {t(($) => $.actions.delete_issue)}
-          </P.Item>
+              <P.Item
+                disabled={!canDelete(issue)}
+                title={!canDelete(issue) ? t(($) => $.batch.delete_restricted) : undefined}
+                variant="destructive"
+                onClick={() => openDeleteConfirm({ onDeletedFallbackPath })}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {t(($) => $.actions.delete_issue)}
+              </P.Item>
+            </>
+          )}
         </>
       )}
     </>

@@ -125,6 +125,22 @@ describe("useCanonicalIssue", () => {
     expect(getIssue).toHaveBeenCalledTimes(1);
   });
 
+  // In-app links carry the identifier, often to an issue a list, peek or
+  // create already cached by UUID.
+  it("opens an identifier URL from the issue cached by UUID without a request", async () => {
+    qc.setQueryData(issueKeys.detail("ws-1", ISSUE_UUID), issue);
+
+    const { result } = renderHook(() => useCanonicalIssue("ws-1", "TRS-134"), {
+      wrapper: createWrapper(qc),
+    });
+
+    expect(result.current.canonicalId).toBe(ISSUE_UUID);
+    expect(result.current.isResolving).toBe(false);
+    expect(result.current.issue).toEqual(issue);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(getIssue).not.toHaveBeenCalled();
+  });
+
   // The realtime updaters patch `issueKeys.detail(wsId, issue.id)` with the
   // UUID from the websocket payload; the resolution response is older and must
   // never overwrite it.

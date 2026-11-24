@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentTask } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
@@ -101,19 +101,17 @@ describe("subtree execution log", () => {
     renderParent([own], [own, child, grandchild]);
     const toggle = screen.getByRole("checkbox", { name: "Include sub-issues" });
     expect(toggle).not.toBeChecked();
-    expect(screen.getByRole("button", { name: "Execution log 1" })).toBeInTheDocument();
-    expect(screen.getAllByText("$1.00").length).toBeGreaterThan(0);
+    expect(screen.getByTestId("execution-log-spend")).toHaveTextContent("$1.00");
     expect(screen.queryByText("Child run")).not.toBeInTheDocument();
     fireEvent.click(toggle);
     expect(toggle).toBeChecked();
-    expect(screen.getByRole("button", { name: "Execution log 3" })).toBeInTheDocument();
-    expect(screen.getAllByText("$3.00").length).toBeGreaterThan(0);
+    expect(screen.getByTestId("execution-log-spend")).toHaveTextContent("$3.00");
     expect(screen.getByText("Child run")).toBeInTheDocument();
     expect(screen.getByText("Grandchild run")).toBeInTheDocument();
     expect(screen.getByText("MUL-2")).toHaveAttribute("title", "Child");
     expect(screen.getByText("MUL-3")).toBeInTheDocument();
     const header = screen.getByText("Execution log").closest("div")!;
-    expect(within(header).getByText("1 active")).toBeInTheDocument();
+    expect(within(header).queryByText("1 active")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open timeline" }));
     const dialog = screen.getByRole("dialog");
     const dialogToggle = within(dialog).getByRole("checkbox", { name: "Include sub-issues" });
@@ -137,8 +135,12 @@ describe("subtree execution log", () => {
     expect(within(screen.getByRole("dialog")).getByRole("checkbox", { name: "Include sub-issues" })).toBeChecked();
     expect(within(screen.getByRole("dialog")).getByText("Grandchild run")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
-    fireEvent.click(toggle);
-    expect(screen.getByRole("button", { name: "Execution log 1" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Execution log" }));
+    expect(within(header).getByText("1 active")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Execution log 3" })).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(screen.getByRole("button", { name: "Execution log 3" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Include sub-issues" }));
+    expect(screen.getByTestId("execution-log-spend")).toHaveTextContent("$1.00");
     expect(screen.queryByText("Grandchild run")).not.toBeInTheDocument();
   });
 
@@ -156,9 +158,10 @@ describe("subtree execution log", () => {
     expect(within(active).getAllByText(/^Descendant /)).toHaveLength(8);
     expect(within(active).getByText("MUL-9")).toBeInTheDocument();
     expect(active).toHaveClass("max-h-48", "overflow-y-auto");
-    const disclosure = screen.getByRole("button", { name: "Execution log 9" });
+    const disclosure = screen.getByRole("button", { name: "Execution log" });
     fireEvent.click(disclosure);
     expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    expect(disclosure).toHaveAccessibleName("Execution log 9");
     expect(screen.queryByRole("checkbox", { name: "Include sub-issues" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open timeline" }));
     const dialog = screen.getByRole("dialog");
@@ -276,13 +279,13 @@ describe("subtree execution log", () => {
     );
     fireEvent.click(screen.getByRole("checkbox", { name: "Include sub-issues" }));
     expect(screen.getByRole("status", { name: "Loading runs..." })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Execution log 1" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("execution-log-spend")).not.toBeInTheDocument();
     expect(list).toHaveBeenCalledWith("issue-1", true, { view: "timeline" });
     await act(async () => { rejectRequest(new Error("unavailable")); });
     const retry = await screen.findByRole("button", { name: "Could not load runs. Retry" });
-    list.mockResolvedValue([makeTask({ id: "deep", issue_id: "deep-issue" })]);
+    list.mockResolvedValue([makeTask({ id: "deep", issue_id: "deep-issue", issue_identifier: "MUL-9" })]);
     fireEvent.click(retry);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Execution log 1" })).toBeInTheDocument());
+    expect(await screen.findByText("MUL-9")).toBeInTheDocument();
     expect(list).toHaveBeenCalledTimes(2);
     queryClient.clear();
   });
@@ -626,21 +629,29 @@ describe("execution log header geometry", () => {
         expect(cls).not.toMatch(/^(sm|md|lg|xl|2xl):/);
       }
     }
-    expect(screen.getByRole("button", { name: "Execution log 1" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "Execution log" })).toHaveAttribute("aria-expanded", "true");
   });
 
-  it("keeps complete cost figures in the summary rather than crowding the header", () => {
+  it("puts the spend in the header, open or collapsed, and the count only once collapsed", () => {
     renderSection([completed]);
-    expect(within(headerOf()).queryByText("$2.00")).not.toBeInTheDocument();
-    const spent = screen.getByText("Spent", { selector: "dt" }).parentElement!;
-    expect(spent).toHaveTextContent("$2.00");
-    fireEvent.click(screen.getByRole("button", { name: "Execution log 1" }));
-    expect(screen.getByRole("button", { name: "Execution log 1" })).toHaveAttribute("aria-expanded", "false");
+    expect(within(headerOf()).getByTestId("execution-log-spend")).toHaveTextContent("$2.00");
+    expect(within(headerOf()).getByTestId("execution-log-spend")).toHaveAttribute("title", "Spent");
     expect(screen.queryByText("Spent", { selector: "dt" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Execution log" }));
+    expect(screen.getByRole("button", { name: "Execution log 1" })).toHaveAttribute("aria-expanded", "false");
+    expect(within(headerOf()).getByTestId("execution-log-spend")).toHaveTextContent("$2.00");
+  });
+
+  it("says a run is active in the header only while collapsed", () => {
+    renderSection([makeTask({ status: "running", trigger_summary: "Live run" })]);
+    expect(within(headerOf()).queryByText("1 active")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Execution log" }));
+    expect(within(headerOf()).getByText("1 active")).toBeInTheDocument();
   });
 
   it("keeps the count without inventing zero cost when no usage was reported", () => {
     renderSection([makeTask({ status: "completed", completed_at: "2026-06-08T08:04:00Z" })]);
+    fireEvent.click(screen.getByRole("button", { name: "Execution log" }));
     expect(within(headerOf()).getByText("1")).toBeVisible();
     expect(screen.queryByText("$0.00")).not.toBeInTheDocument();
   });
@@ -729,33 +740,24 @@ describe("execution log past runs", () => {
     expect(row).not.toHaveTextContent("10m");
   });
 
-  it("totals the spend, tokens and agent time", () => {
+  it("totals the spend in the header and leaves tokens and agent time to the dialog", () => {
     renderSection([past(1), past(2), past(3, { status: "failed", usage: [] })]);
 
-    const term = (label: string) => screen.getByText(label, { selector: "dt" }).parentElement!;
-    expect(term("Spent")).toHaveTextContent("$4.00");
-    expect(term("Tokens")).toHaveTextContent("1.8M");
-    expect(term("Agent time")).toHaveTextContent("30m");
+    expect(screen.getByTestId("execution-log-spend")).toHaveTextContent("$4.00");
+    expect(screen.queryByText("Tokens", { selector: "dt" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Agent time", { selector: "dt" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Cost per run/ })).not.toBeInTheDocument();
   });
 
-  it("opens the full history from the compact cost chart", () => {
-    renderSection([past(1), past(2), past(3, { status: "failed", usage: [] })]);
-    fireEvent.click(screen.getByRole("button", { name: /Cost per run/ }));
-    expect(screen.getByRole("heading", { name: "Runs" })).toBeInTheDocument();
-  });
-
-  it("bounds the chart and recent list while keeping all-run totals and a visible history entry", () => {
+  it("bounds the recent list while keeping the all-run spend, count and a visible history entry", () => {
     const tasks = Array.from({ length: 35 }, (_, i) => past(i + 1, {
       started_at: new Date(Date.UTC(2026, 5, i + 1, 8)).toISOString(),
       completed_at: new Date(Date.UTC(2026, 5, i + 1, 8, 10)).toISOString(),
       usage: [usageSlice({ cost_usd_ticks: 20_000_000_000 })],
     }));
     renderSection(tasks);
-    const chart = screen.getByRole("button", { name: /Cost per run/ });
-    expect(chart.querySelectorAll("[data-run]")).toHaveLength(30);
-    expect(chart.querySelector("[data-run]")).toHaveAttribute("data-run", "past-6");
-    expect(chart.querySelectorAll("[data-run]")[29]).toHaveAttribute("data-run", "past-35");
-    expect(screen.getByText("Spent", { selector: "dt" }).parentElement).toHaveTextContent("$70.00");
+    expect(screen.getByTestId("execution-log-spend")).toHaveTextContent("$70.00");
+    expect(screen.getByRole("button", { name: "Execution log 35" })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getAllByText(/^Past run \d+$/)).toHaveLength(3);
     expect(screen.queryByText("Latest")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open timeline · Show 32 more" }));
@@ -770,56 +772,12 @@ describe("execution log past runs", () => {
     expect(active).toHaveAttribute("tabindex", "0");
   });
 
-  it("scales sidebar bars by cost to match the default run history", () => {
-    renderSection([
-      past(1, { usage: [usageSlice({ input_tokens: 100, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, cost_usd_ticks: 100_000_000_000 })] }),
-      past(2, { usage: [usageSlice({ input_tokens: 1000, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, cost_usd_ticks: 10_000_000_000 })] }),
-    ]);
-    const bars = screen.getByRole("button", { name: /Cost per run/ }).querySelectorAll("[data-run]");
-    expect((bars[0] as HTMLElement).style.height).toBe("24px");
-    expect(parseFloat((bars[1] as HTMLElement).style.height)).toBeCloseTo(2.4);
-  });
-
-  it.each([1, 8, 15, 30])("preserves upstream slots for %i runs", (count) => {
-    renderSection(Array.from({ length: count }, (_, i) => past(i + 1, {
-      started_at: new Date(Date.UTC(2026, 5, i + 1, 8)).toISOString(),
-      completed_at: new Date(Date.UTC(2026, 5, i + 1, 8, 10)).toISOString(),
-    })));
-    const chart = screen.getByRole("button", { name: /Cost per run/ });
-    const plot = chart.querySelector("[aria-hidden]") as HTMLElement;
-    expect(plot.style.height).toBe("24px");
-    expect(plot.children).toHaveLength(Math.max(20, count));
-    expect(chart.querySelectorAll("[data-run]")).toHaveLength(count);
-    expect(plot.children[plot.children.length - count]).toHaveAttribute("data-run");
-    expect(chart).not.toHaveTextContent("Latest");
-    expect(chart).not.toHaveTextContent("Cost per run");
-    expect(chart).not.toHaveTextContent("#1");
-  });
-
-  it("preserves run status colors and marks missing usage", () => {
-    renderSection([
-      past(1, { status: "failed" }),
-      past(2, { status: "cancelled" }),
-      past(3, { usage: [] }),
-      makeTask({ id: "active", status: "running", usage: [] }),
-    ]);
-    const chart = screen.getByRole("button", { name: /Cost per run/ });
-    expect(chart.querySelector('[data-run="past-1"]')).toHaveClass("bg-destructive");
-    expect(chart.querySelector('[data-run="past-2"]')).toHaveClass("bg-faint-foreground");
-    expect(chart.querySelector('[data-run="past-3"]')).toHaveClass("border-dashed");
-    expect(chart.querySelector('[data-run="active"]')).toHaveClass("bg-info");
-  });
-
   it("makes full details reachable from the first priced run", () => {
     renderSection([past(1)]);
     fireEvent.click(screen.getByRole("button", { name: /Open timeline/ }));
     expect(screen.getByRole("heading", { name: "Runs" })).toBeInTheDocument();
   });
 
-  it("skips the bars when no run recorded usage — there are no costs to compare", () => {
-    renderSection([past(1, { usage: [] }), past(2, { usage: [] })]);
-    expect(screen.queryByRole("button", { name: /Cost per run/ })).not.toBeInTheDocument();
-  });
 });
 
 describe("IssueRunsTotal pricing", () => {

@@ -8,6 +8,7 @@ import { cachedInboxSnoozedUntil, useSnoozeInbox, useUnsnoozeInbox } from "@mult
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { useLocale, useT } from "../../i18n";
 import { formatSnoozeTime } from "./inbox-snooze-time";
+import { toastInboxUndo } from "./inbox-undo-toast";
 
 /**
  * Snooze and bring back, with the toasts every surface shows alike. A snooze
@@ -31,7 +32,11 @@ export function useInboxSnooze() {
   const { mutateAsync: unsnoozeAsync } = useUnsnoozeInbox();
 
   const returnRow = useCallback(
-    (key: string) => useInboxSelectionStore.getState().returnRow(wsId, key),
+    (key: string) => {
+      const store = useInboxSelectionStore.getState();
+      store.returnRow(wsId, key);
+      store.clearLastCleared(wsId, key);
+    },
     [wsId],
   );
 
@@ -57,8 +62,9 @@ export function useInboxSnooze() {
       };
       snoozeAsync({ id: item.id, until }).then(
         () =>
-          toast.success(t(($) => $.snooze.toast_snoozed, { time: formatSnoozeTime(until, new Date(), locale) }), {
-            action: { label: t(($) => $.snooze.undo), onClick: undo },
+          toastInboxUndo(t(($) => $.snooze.toast_snoozed, { time: formatSnoozeTime(until, new Date(), locale) }), {
+            label: t(($) => $.snooze.undo),
+            undo,
           }),
         (err: unknown) => {
           returnRow(key);

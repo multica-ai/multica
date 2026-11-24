@@ -437,7 +437,7 @@ func parseIssueTableActor(w http.ResponseWriter, actor issueTableActorRef, field
 }
 
 // issueTableRelations are the viewer relations `filters.relations` accepts.
-var issueTableRelations = []string{"assigned", "created", "my_agents", "subscribed"}
+var issueTableRelations = []string{"assigned", "created", "my_agents", "subscribed", "blocked"}
 
 // issueTableNegatableFilters are the `filters` fields `filters.negate` may name.
 var issueTableNegatableFilters = []string{
@@ -456,6 +456,8 @@ func issueTableRelationPredicate(relation string, userRef string) string {
 		return fmt.Sprintf("(i.assignee_type = 'member' AND i.assignee_id = %s::uuid)", userRef)
 	case "created":
 		return issueCreatedByUserPredicate(userRef)
+	case "blocked":
+		return blockedIssuePredicate
 	case "subscribed":
 		return fmt.Sprintf(`EXISTS (
     SELECT 1 FROM issue_subscriber isub
@@ -474,8 +476,7 @@ func appendIssueTableInvolvedPredicate(where []string, addArg func(any) string, 
 }
 
 // issueTableInvolvedPredicate matches issues assigned to an agent the user
-// owns, or to a squad the user belongs to or one of their agents leads or
-// belongs to.
+// owns, or to a squad led by an agent the user owns.
 func issueTableInvolvedPredicate(userRef string) string {
 	return fmt.Sprintf(`(
     (i.assignee_type = 'agent' AND i.assignee_id IN (
@@ -484,26 +485,10 @@ func issueTableInvolvedPredicate(userRef string) string {
           AND a.owner_id     = %[1]s::uuid
     ))
     OR (i.assignee_type = 'squad' AND i.assignee_id IN (
-       SELECT sm.squad_id
-         FROM squad_member sm
-         JOIN squad s ON s.id = sm.squad_id
-        WHERE s.workspace_id = $1
-          AND sm.member_type = 'member'
-          AND sm.member_id   = %[1]s::uuid
-       UNION
        SELECT s.id
          FROM squad s
          JOIN agent a ON a.id = s.leader_id
         WHERE s.workspace_id = $1
-          AND a.workspace_id = $1
-          AND a.owner_id     = %[1]s::uuid
-       UNION
-       SELECT sm.squad_id
-         FROM squad_member sm
-         JOIN squad s ON s.id = sm.squad_id
-         JOIN agent a ON a.id = sm.member_id
-        WHERE s.workspace_id = $1
-          AND sm.member_type = 'agent'
           AND a.workspace_id = $1
           AND a.owner_id     = %[1]s::uuid
     ))
@@ -716,7 +701,13 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 			writeError(w, http.StatusUnauthorized, "user not authenticated")
 			return issueTableSQL{}, false
 		}
-		userRef := addArg(userUUID)
+		userRef := ""
+		for _, relation := range relations {
+			if relation != "blocked" {
+				userRef = addArg(userUUID)
+				break
+			}
+		}
 		ors := make([]string, 0, len(relations))
 		for _, relation := range relations {
 			ors = append(ors, issueTableRelationPredicate(relation, userRef))

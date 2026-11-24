@@ -239,6 +239,8 @@
       "created_by": "建立者",
       "select_agent_aria": "選擇 AI 代理",
       "pick_an_agent": "選一個 AI 代理...",
+      "all_actors": "全部 AI 代理和小隊",
+      "frequent_actors_aria": "常用",
       "no_agents": "暫無可用 AI 代理或小隊。",
       "search_placeholder": "搜尋 AI 代理或小隊...",
       "agents_group": "AI 代理",

@@ -7,6 +7,9 @@ import {
   type DragEvent as ReactDragEvent,
   type RefObject,
 } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
+import { UI_EASE_IN, UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import type { Editor } from "@tiptap/core";
 import type { EditorView } from "@tiptap/pm/view";
 import { NodeSelection } from "@tiptap/pm/state";
@@ -143,9 +146,13 @@ export function BlockHandle({
   containerRef: RefObject<HTMLDivElement | null>;
 }) {
   const { t } = useT("editor");
+  const reduceMotion = useReducedMotion();
   const [position, setPosition] = useState<HandlePosition | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const gripRef = useRef<HTMLButtonElement>(null);
+  const hadPositionRef = useRef(false);
+  const shouldGlide = hadPositionRef.current && position !== null;
+  hadPositionRef.current = position !== null;
   // While the menu is open or a drag is in flight the handle must stay on its
   // block; the listeners read these without re-subscribing.
   const pinnedRef = useRef(false);
@@ -201,10 +208,6 @@ export function BlockHandle({
     };
   }, [editor, containerRef]);
 
-  if (!position) return null;
-  const { target } = position;
-  const current = targetKind(editor, target);
-
   const run = (action: () => void) => {
     action();
     setMenuOpen(false);
@@ -212,6 +215,8 @@ export function BlockHandle({
   };
 
   const onDragStart = (event: ReactDragEvent<HTMLButtonElement>) => {
+    if (!position) return;
+    const { target } = position;
     const { view } = editor;
     // Not dispatched as the editor selection: a selected block would raise the
     // formatting toolbar over the drop targets for the whole drag.
@@ -236,99 +241,124 @@ export function BlockHandle({
     setPosition(null);
   };
 
+  const target = position?.target ?? null;
+  const current = target ? targetKind(editor, target) : null;
+
   return (
-    <div
-      data-block-handle=""
-      className="absolute z-10"
-      style={{
-        top: position.top,
-        left: position.left,
-        width: position.width,
-        height: position.height,
-      }}
-    >
-      <div
-        className="absolute left-0 flex items-center gap-0.5"
-        style={{ top: position.buttonTop, height: HANDLE_HEIGHT }}
-      >
-        <button
-          type="button"
-          aria-label={t(($) => $.block_handle.add)}
-          title={t(($) => $.block_handle.add)}
-          className="flex size-6 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          // Keep the caret in the editor; the click places it on the new line.
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => run(() => openInsertMenuBelow(editor, target))}
-        >
-          <Plus className="size-4" />
-        </button>
-        <button
-          ref={gripRef}
-          type="button"
-          draggable
-          aria-label={t(($) => $.block_handle.options)}
-          title={t(($) => $.block_handle.options)}
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          className="flex h-6 w-4 cursor-grab items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground active:cursor-grabbing"
-          onClick={() => setMenuOpen(true)}
-          onDragStart={onDragStart}
-          onDragEnd={onDragEnd}
-        >
-          <GripVertical className="size-4" />
-        </button>
-      </div>
-      <DropdownMenu
-        open={menuOpen}
-        onOpenChange={(open) => {
-          setMenuOpen(open);
-          if (!open) setPosition(null);
-        }}
-      >
-        <DropdownMenuContent anchor={gripRef} align="start" className="min-w-44">
-          {canTurnInto(target.node) && (
-            <>
-              <DropdownMenuGroup>
-                <DropdownMenuLabel>{t(($) => $.block_handle.turn_into)}</DropdownMenuLabel>
-                {/* A submenu would be closed as a "sibling" of this anchored,
-                    trigger-less menu, so the block types sit inline as icons. */}
-                <div className="grid grid-cols-5 gap-0.5 px-1 pb-1">
-                  {TEXT_BLOCK_KINDS.map((kind) => {
-                    const Icon = KIND_ICONS.get(kind);
-                    const label = t(($) => $.block_menu.blocks[kind]);
-                    return (
-                      <DropdownMenuItem
-                        key={kind}
-                        aria-label={label}
-                        title={label}
-                        className={cn(
-                          "size-8 justify-center p-0",
-                          current === kind && "bg-accent text-accent-foreground",
-                        )}
-                        onClick={() => run(() => turnBlockInto(editor, target, kind))}
-                      >
-                        {Icon && <Icon />}
-                      </DropdownMenuItem>
-                    );
-                  })}
-                </div>
-              </DropdownMenuGroup>
-              <DropdownMenuSeparator />
-            </>
+    <AnimatePresence>
+      {position && target && (
+        <motion.div
+          key="block-handle"
+          data-block-handle=""
+          initial={reduceMotion ? false : { opacity: 0 }}
+          animate={{
+            opacity: 1,
+            transition: { duration: reduceMotion ? 0 : 0.12, ease: UI_EASE_OUT },
+          }}
+          exit={{
+            opacity: 0,
+            transition: { duration: reduceMotion ? 0 : UI_MOTION_DURATION.micro, ease: UI_EASE_IN },
+          }}
+          className={cn(
+            "absolute z-10",
+            shouldGlide &&
+              "transition-[top,left] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
           )}
-          <DropdownMenuItem onClick={() => run(() => duplicateBlock(editor, target))}>
-            <Copy />
-            {t(($) => $.block_handle.duplicate)}
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            variant="destructive"
-            onClick={() => run(() => deleteBlock(editor, target))}
+          style={{
+            top: position.top,
+            left: position.left,
+            width: position.width,
+            height: position.height,
+          }}
+        >
+          <div
+            className={cn(
+              "absolute left-0 flex items-center gap-0.5",
+              shouldGlide &&
+                "transition-[top] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+            )}
+            style={{ top: position.buttonTop, height: HANDLE_HEIGHT }}
           >
-            <Trash2 />
-            {t(($) => $.block_handle.delete)}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
+            <button
+              type="button"
+              aria-label={t(($) => $.block_handle.add)}
+              title={t(($) => $.block_handle.add)}
+              className="flex size-6 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              // Keep the caret in the editor; the click places it on the new line.
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => run(() => openInsertMenuBelow(editor, target))}
+            >
+              <Plus className="size-4" />
+            </button>
+            <button
+              ref={gripRef}
+              type="button"
+              draggable
+              aria-label={t(($) => $.block_handle.options)}
+              title={t(($) => $.block_handle.options)}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              className="flex h-6 w-4 cursor-grab items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground active:cursor-grabbing"
+              onClick={() => setMenuOpen(true)}
+              onDragStart={onDragStart}
+              onDragEnd={onDragEnd}
+            >
+              <GripVertical className="size-4" />
+            </button>
+          </div>
+          <DropdownMenu
+            open={menuOpen}
+            onOpenChange={(open) => {
+              setMenuOpen(open);
+              if (!open) setPosition(null);
+            }}
+          >
+            <DropdownMenuContent anchor={gripRef} align="start" className="min-w-44">
+              {canTurnInto(target.node) && (
+                <>
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>{t(($) => $.block_handle.turn_into)}</DropdownMenuLabel>
+                    {/* A submenu would be closed as a "sibling" of this anchored,
+                        trigger-less menu, so the block types sit inline as icons. */}
+                    <div className="grid grid-cols-5 gap-0.5 px-1 pb-1">
+                      {TEXT_BLOCK_KINDS.map((kind) => {
+                        const Icon = KIND_ICONS.get(kind);
+                        const label = t(($) => $.block_menu.blocks[kind]);
+                        return (
+                          <DropdownMenuItem
+                            key={kind}
+                            aria-label={label}
+                            title={label}
+                            className={cn(
+                              "size-8 justify-center p-0",
+                              current === kind && "bg-accent text-accent-foreground",
+                            )}
+                            onClick={() => run(() => turnBlockInto(editor, target, kind))}
+                          >
+                            {Icon && <Icon />}
+                          </DropdownMenuItem>
+                        );
+                      })}
+                    </div>
+                  </DropdownMenuGroup>
+                  <DropdownMenuSeparator />
+                </>
+              )}
+              <DropdownMenuItem onClick={() => run(() => duplicateBlock(editor, target))}>
+                <Copy />
+                {t(($) => $.block_handle.duplicate)}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                variant="destructive"
+                onClick={() => run(() => deleteBlock(editor, target))}
+              >
+                <Trash2 />
+                {t(($) => $.block_handle.delete)}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
