@@ -93,6 +93,21 @@
     "visibility": "Visibility",
     "visibility_workspace": "Workspace"
   },
+  "handoff": {
+    "section_title": "Collaboration",
+    "mode_leader_title": "Leader assigns",
+    "mode_leader_description": "Every step returns to the leader, {{leader}}, who picks the next one. The default for existing squads.",
+    "mode_direct_title": "Members hand off directly",
+    "mode_direct_description": "The leader assigns the first step and handles exceptions. Members pick the next step themselves; handing off for review or asking a person no longer wakes the leader.",
+    "guard_rounds": "Back-and-forth: up to {{limit}} rounds",
+    "guard_daily": "Up to {{limit}} handoffs per issue per day",
+    "guard_failed": "Run failed → back to leader",
+    "guard_no_next": "No next step → back to leader",
+    "saved": "Collaboration mode updated",
+    "brief_title": "What members receive",
+    "brief_hint": "Added to every run on an issue assigned to this squad",
+    "brief_empty": "No agent members yet"
+  },
   "toasts": {
     "member_added": "Member added",
     "member_add_failed": "Failed to add member",
@@ -117,7 +132,7 @@
     "more_members_other": "+{{count}} more"
   },
   "instructions_tab": {
-    "description": "The leader reads these instructions whenever it works on an issue assigned to this squad.",
+    "description": "The leader and every agent member read these instructions whenever they work on an issue assigned to this squad.",
     "unsaved_changes": "Unsaved changes",
     "save_button": "Save",
     "placeholder": "e.g. Always start by writing a failing test. Prefer small, atomic commits."

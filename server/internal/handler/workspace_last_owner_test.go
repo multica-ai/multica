@@ -88,7 +88,7 @@ func TestLastOwnerCheckHoldsAgainstAConcurrentDemotion(t *testing.T) {
 				tc.run(w, tc.call(workspaceID, ownerA, memberA, ownerB))
 				done <- w
 			}()
-			waitForWorkspaceBackendBlockedBy(t, holderPID, done)
+			waitForDemotionBlockedBy(t, holderPID, done)
 
 			if err := holder.Commit(ctx); err != nil {
 				t.Fatalf("commit holder: %v", err)
@@ -107,9 +107,9 @@ func TestLastOwnerCheckHoldsAgainstAConcurrentDemotion(t *testing.T) {
 	}
 }
 
-// waitForWorkspaceBackendBlockedBy returns once some backend waits on a lock held by
+// waitForDemotionBlockedBy returns once some backend waits on a lock held by
 // holderPID, failing if the request finished without waiting.
-func waitForWorkspaceBackendBlockedBy(t *testing.T, holderPID int, done <-chan *httptest.ResponseRecorder) {
+func waitForDemotionBlockedBy(t *testing.T, holderPID int, done <-chan *httptest.ResponseRecorder) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {

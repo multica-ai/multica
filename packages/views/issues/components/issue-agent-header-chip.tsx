@@ -47,11 +47,14 @@ import { groupExecutionTasksByActor } from "../surface/execution-actors";
 interface IssueAgentHeaderChipProps {
   issueId: string;
   onJumpToRun?: (taskId: string) => void;
+  /** Squad handoff round of the agent the issue was last handed to. */
+  handoffRound?: { agentId: string; round: number } | null;
 }
 
 export const IssueAgentHeaderChip = memo(function IssueAgentHeaderChip({
   issueId,
   onJumpToRun,
+  handoffRound,
 }: IssueAgentHeaderChipProps) {
   const { t } = useT("issues");
   // Same query options as ExecutionLogSection so both observe one cache entry.
@@ -99,6 +102,7 @@ export const IssueAgentHeaderChip = memo(function IssueAgentHeaderChip({
           running={running}
           queued={queued}
           onJumpToRun={onJumpToRun}
+          handoffRound={handoffRound}
           onTranscriptOpenChange={(task, open, fromKeyboard) => {
             setOpenedTranscript(open ? { task, fromKeyboard } : null);
           }}
@@ -127,6 +131,7 @@ interface ActiveChipProps {
   running: AgentTask[];
   queued: AgentTask[];
   onJumpToRun?: (taskId: string) => void;
+  handoffRound?: { agentId: string; round: number } | null;
   onTranscriptOpenChange: (
     task: AgentTask,
     open: boolean,
@@ -139,6 +144,7 @@ function ActiveChip({
   running,
   queued,
   onJumpToRun,
+  handoffRound,
   onTranscriptOpenChange,
 }: ActiveChipProps) {
   const { t } = useT("issues");
@@ -166,12 +172,22 @@ function ActiveChip({
   // truly running. With nothing running (queued / dispatched / parked on a
   // path lock) the chip reads "is queued" so a not-yet-started agent or squad
   // isn't mislabelled as working.
-  const label = isSingle && singleActor
+  const singleLabel = isSingle && singleActor
     ? t(
         ($) =>
           anyRunning ? $.agent_live.is_working : $.agent_live.is_queued,
         { name: getActorName(singleActor.type, singleActor.id) },
       )
+    : null;
+  // A member re-handed the issue by its squad shows which round it is on.
+  const round =
+    isSingle && anyRunning && handoffRound && agentIds.length === 1 && handoffRound.agentId === agentIds[0]
+      ? handoffRound.round
+      : null;
+  const label = singleLabel !== null
+    ? round !== null
+      ? t(($) => $.agent_live.is_working_round, { label: singleLabel, round })
+      : singleLabel
     : t(
         ($) =>
           anyRunning
@@ -210,7 +226,8 @@ function ActiveChip({
             type="button"
             aria-label={label}
             className={cn(
-              "flex h-9 min-w-9 max-w-[11rem] items-center justify-center gap-1.5 rounded-md px-2 text-muted-foreground outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring md:h-7 md:min-w-0 md:justify-start md:px-1.5",
+              "flex h-9 min-w-9 items-center justify-center gap-1.5 rounded-md px-2 text-muted-foreground outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring md:h-7 md:min-w-0 md:justify-start md:px-1.5",
+              round !== null ? "max-w-[14rem]" : "max-w-[11rem]",
               anyRunning && "relative bg-brand/5",
             )}
           />
