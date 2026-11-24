@@ -588,6 +588,8 @@ func TestChatWakeupRescheduleCheckKeepsWhatItDoesNotChange(t *testing.T) {
 	ctx := t.Context()
 	w := f.create(t, ChatWakeupInput{IntervalSeconds: 1800, ExpiresInSeconds: 6 * 3600})
 	f.fx.Exec(t, "UPDATE chat_wakeup SET check_count = 6, last_check_note = 'Still building' WHERE id = $1", w.ID)
+	// Postgres keeps microseconds; Linux clocks carry nanoseconds.
+	f.at(f.clock.Add(321 * time.Nanosecond))
 	near := func(got, want time.Time) bool { return got.Sub(want).Abs() < time.Millisecond }
 
 	// Interval only: the deadline stays, the next check restarts from now.
@@ -632,6 +634,9 @@ func TestChatWakeupRescheduleCheckKeepsWhatItDoesNotChange(t *testing.T) {
 func TestChatWakeupRescheduleReminderAndCondition(t *testing.T) {
 	f := newChatWakeupFixture(t)
 	ctx := t.Context()
+	// Postgres keeps microseconds; Linux clocks carry nanoseconds.
+	f.at(f.clock.Add(321 * time.Nanosecond))
+	near := func(got, want time.Time) bool { return got.Sub(want).Abs() < time.Millisecond }
 
 	at := f.clock.Add(2 * time.Hour)
 	reminder := f.create(t, ChatWakeupInput{At: &at})
@@ -640,7 +645,7 @@ func TestChatWakeupRescheduleReminderAndCondition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !updated.FireAt.Time.Equal(later) || !updated.NextEvalAt.Time.Equal(later) || !updated.ExpiresAt.Time.Equal(later) {
+	if !near(updated.FireAt.Time, later) || !near(updated.NextEvalAt.Time, later) || !near(updated.ExpiresAt.Time, later) {
 		t.Fatalf("moved reminder: %+v", updated)
 	}
 	past := f.clock.Add(-time.Minute)
@@ -658,7 +663,7 @@ func TestChatWakeupRescheduleReminderAndCondition(t *testing.T) {
 		t.Fatal(err)
 	}
 	if string(updated.Condition) != string(watch.Condition) || updated.ConditionState != "baseline" ||
-		!updated.NextEvalAt.Time.Equal(watch.NextEvalAt.Time) || !updated.ExpiresAt.Time.Equal(deadline) {
+		!updated.NextEvalAt.Time.Equal(watch.NextEvalAt.Time) || !near(updated.ExpiresAt.Time, deadline) {
 		t.Fatalf("condition deadline change: %+v", updated)
 	}
 	tooFar := f.clock.Add(8 * 24 * time.Hour)
