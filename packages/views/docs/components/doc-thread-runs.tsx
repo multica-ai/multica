@@ -14,8 +14,9 @@ import { useStatusLabel } from "../../issues/components/task-run-labels";
 import { TerminateTaskConfirmDialog } from "../../issues/components/terminate-task-confirm-dialog";
 import { useT } from "../../i18n";
 
-// Deferred is a retry waiting for the agent's runtime to reconnect: it has
-// not run yet and can still be stopped.
+// Deferred is an automatic retry that has not started yet (waiting for the
+// runtime to reconnect, or a short backoff after a provider network error):
+// it can still be stopped.
 const ACTIVE_STATUSES = new Set(["queued", "dispatched", "waiting_local_directory", "running", "deferred"]);
 
 export function isActiveDocRun(run: DocTaskRun): boolean {
@@ -52,7 +53,7 @@ export function DocThreadRun({ docId, run }: { docId: string; run: DocTaskRun })
   const active = isActiveDocRun(run);
   const outcome = { status: run.status, error: run.error, failure_reason: run.failureReason, cancelled_by: run.cancelledBy };
   const label = run.status === "deferred"
-    ? tDocs(($) => $.comments.run_waiting_runtime)
+    ? tDocs(($) => $.comments.run_waiting_retry)
     : active ? status : (runOutcomeLabel(outcome, tAgents) ?? status);
   const error = !active && run.error?.trim() ? redactSecrets(run.error.trim()) : "";
   const stopping = cancel.isPending || cancel.isSuccess;

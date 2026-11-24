@@ -61,8 +61,8 @@ it("shows how a failed run ended, with no way to stop it", () => {
   expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
 });
 
-it("shows a retry waiting for the runtime as stoppable", () => {
+it("shows a pending retry as stoppable", () => {
   mount(run("deferred"));
-  expect(screen.getByText("Waiting for the runtime to come back online")).toBeTruthy();
+  expect(screen.getByText("Waiting to retry")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
 });

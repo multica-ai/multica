@@ -99,6 +99,6 @@
       "delete": "Impossible de supprimer le commentaire",
       "resolve": "Impossible de mettre à jour le commentaire"
     },
-    "run_waiting_runtime": "En attente du retour en ligne du runtime"
+    "run_waiting_retry": "En attente d'une nouvelle tentative"
   }
 }
