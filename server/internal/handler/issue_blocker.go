@@ -103,7 +103,8 @@ func (h *Handler) newIssueBlockerFiller(ctx context.Context, ws pgtype.UUID, ids
 			}
 			// A guest's hidden set also holds ordinary projects and NoProject,
 			// so visibility is checked for every row, not only private ones.
-			if (row.Private && accessErr != nil) || !hidden.CanSeeProject(row.ProjectID) {
+			// Without a resolved hidden set nothing is listed; the count stays.
+			if accessErr != nil || !hidden.CanSeeProject(row.ProjectID) {
 				continue
 			}
 			cache[key].refs = append(cache[key].refs, IssueBlockerResponse{private: row.Private, projectID: row.ProjectID, IssueRefResponse: IssueRefResponse{ID: uuidToString(row.ID), Identifier: fmt.Sprintf("%s-%d", prefix, row.Number), Title: row.Title, Status: row.Status}, Via: row.Via, Closed: row.Closed.Bool})
