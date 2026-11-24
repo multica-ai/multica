@@ -1,4 +1,16 @@
 {
+  "execution": {
+    "model": "Modèle",
+    "reasoning": "Raisonnement",
+    "inherit_model": "Par défaut de l’agent ({{model}})",
+    "inherit_reasoning": "Par défaut de l’agent ({{level}})",
+    "runtime_default": "Par défaut de l’environnement",
+    "inherited": "Hérité",
+    "overridden": "Personnalisé",
+    "unavailable": "Indisponible",
+    "stale": "Cette sélection n’est plus prise en charge. Choisissez une option actuelle.",
+    "save_failed": "Impossible d’enregistrer les paramètres du chat."
+  },
   "page": {
     "title": "Discussion",
     "no_agent_title": "Aucun agent avec qui discuter pour l'instant",

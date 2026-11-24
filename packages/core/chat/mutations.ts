@@ -316,6 +316,31 @@ export function useUpdateChatSession() {
  * session. The optimistic patch keeps the context chip in place while the
  * server validates the soft project reference; failures restore the old row.
  */
+export function useSetChatExecutionSelection() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (data: {
+      sessionId: string;
+      model: string | null;
+      thinkingLevel: string | null;
+    }) =>
+      api.updateChatSession(data.sessionId, {
+        model_override: data.model,
+        thinking_level_override: data.thinkingLevel,
+      }),
+    onSuccess: (session) => {
+      qc.setQueryData<ChatSession[]>(chatKeys.sessions(wsId), (old) =>
+        old?.map((row) => row.id === session.id ? { ...row, ...session } : row),
+      );
+      qc.setQueryData(chatKeys.session(wsId, session.id), session);
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+    },
+  });
+}
+
 export function useSetChatSessionProject() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();

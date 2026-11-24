@@ -52,6 +52,7 @@ import { useChatInputFocus } from "./use-chat-input-focus";
 import { useChatOpenReveal } from "./use-chat-open-reveal";
 import { ChatWindowMessages } from "./chat-window-messages";
 import { ChatInput } from "./chat-input";
+import { ChatExecutionSelection } from "./chat-execution-selection";
 import { useChatAnnotations } from "./use-chat-annotations";
 import { ChatQueue } from "./chat-queue";
 import { ChatWakeupStrip, useChatWakeups } from "./chat-wakeups";
@@ -370,6 +371,7 @@ export function ChatWindow() {
       </div>
 
       {/* Messages / skeleton / empty state */}
+      {currentSession && <ChatExecutionSelection session={currentSession} agent={activeAgent} />}
       <AnimatePresence initial={false}>
         {isOpen && (
           <ChatWindowMessages

@@ -1,4 +1,16 @@
 {
+  "execution": {
+    "model": "Modelo",
+    "reasoning": "Razonamiento",
+    "inherit_model": "Predeterminado del agente ({{model}})",
+    "inherit_reasoning": "Predeterminado del agente ({{level}})",
+    "runtime_default": "Predeterminado del entorno",
+    "inherited": "Heredado",
+    "overridden": "Personalizado",
+    "unavailable": "No disponible",
+    "stale": "Esta selección ya no es compatible. Elige una opción actual.",
+    "save_failed": "No se pudo guardar la configuración del chat."
+  },
   "page": {
     "title": "Chat",
     "select_prompt": "Elige una conversación, o empieza una nueva con +",

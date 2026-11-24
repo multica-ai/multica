@@ -2703,6 +2703,8 @@ export const ChatSessionSchema: z.ZodType<ChatSession> = z.object({
   agent_id: z.string().default(""),
   creator_id: z.string().default(""),
   project_id: z.string().nullable().optional(),
+  model_override: z.string().nullable().optional().catch(null),
+  thinking_level_override: z.string().nullable().optional().catch(null),
   title: z.string().default(""),
   status: z.enum(["active", "archived"]).catch("active"),
   has_unread: z.boolean().default(false),

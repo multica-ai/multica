@@ -155,6 +155,16 @@ describe("ChatSessionSchema", () => {
     updated_at: "2026-08-18T00:00:00Z",
   };
 
+  it("preserves execution overrides and falls back from malformed values", () => {
+    expect(ChatSessionSchema.parse({
+      ...baseSession, model_override: "model-b", thinking_level_override: "high",
+    })).toMatchObject({ model_override: "model-b", thinking_level_override: "high" });
+    expect(ChatSessionSchema.parse({
+      ...baseSession, model_override: 42, thinking_level_override: { effort: "high" },
+    })).toMatchObject({ model_override: null, thinking_level_override: null });
+    expect(ChatSessionSchema.parse(baseSession).model_override).toBeUndefined();
+  });
+
   it("accepts channel route metadata and leaves it absent for first-party Chats", () => {
     expect(ChatSessionSchema.parse(baseSession).channel_source).toBeUndefined();
 

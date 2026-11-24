@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
+	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -205,19 +206,21 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			resp = append(resp, ChatSessionResponse{
-				ID:          uuidToString(s.ID),
-				WorkspaceID: uuidToString(s.WorkspaceID),
-				AgentID:     uuidToString(s.AgentID),
-				CreatorID:   uuidToString(s.CreatorID),
-				ProjectID:   uuidToPtr(s.ProjectID),
-				Title:       s.Title,
-				Status:      s.Status,
-				HasUnread:   s.UnreadCount > 0,
-				UnreadCount: int(s.UnreadCount),
-				LastMessage: buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind),
-				Pinned:      s.PinnedAt.Valid,
-				CreatedAt:   timestampToString(s.CreatedAt),
-				UpdatedAt:   timestampToString(s.UpdatedAt),
+				ID:                    uuidToString(s.ID),
+				WorkspaceID:           uuidToString(s.WorkspaceID),
+				AgentID:               uuidToString(s.AgentID),
+				CreatorID:             uuidToString(s.CreatorID),
+				ProjectID:             uuidToPtr(s.ProjectID),
+				ModelOverride:         textToPtr(s.ModelOverride),
+				ThinkingLevelOverride: textToPtr(s.ThinkingLevelOverride),
+				Title:                 s.Title,
+				Status:                s.Status,
+				HasUnread:             s.UnreadCount > 0,
+				UnreadCount:           int(s.UnreadCount),
+				LastMessage:           buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind),
+				Pinned:                s.PinnedAt.Valid,
+				CreatedAt:             timestampToString(s.CreatedAt),
+				UpdatedAt:             timestampToString(s.UpdatedAt),
 			})
 		}
 	} else {
@@ -235,19 +238,21 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			resp = append(resp, ChatSessionResponse{
-				ID:          uuidToString(s.ID),
-				WorkspaceID: uuidToString(s.WorkspaceID),
-				AgentID:     uuidToString(s.AgentID),
-				CreatorID:   uuidToString(s.CreatorID),
-				ProjectID:   uuidToPtr(s.ProjectID),
-				Title:       s.Title,
-				Status:      s.Status,
-				HasUnread:   s.UnreadCount > 0,
-				UnreadCount: int(s.UnreadCount),
-				LastMessage: buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind),
-				Pinned:      s.PinnedAt.Valid,
-				CreatedAt:   timestampToString(s.CreatedAt),
-				UpdatedAt:   timestampToString(s.UpdatedAt),
+				ID:                    uuidToString(s.ID),
+				WorkspaceID:           uuidToString(s.WorkspaceID),
+				AgentID:               uuidToString(s.AgentID),
+				CreatorID:             uuidToString(s.CreatorID),
+				ProjectID:             uuidToPtr(s.ProjectID),
+				ModelOverride:         textToPtr(s.ModelOverride),
+				ThinkingLevelOverride: textToPtr(s.ThinkingLevelOverride),
+				Title:                 s.Title,
+				Status:                s.Status,
+				HasUnread:             s.UnreadCount > 0,
+				UnreadCount:           int(s.UnreadCount),
+				LastMessage:           buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind),
+				Pinned:                s.PinnedAt.Valid,
+				CreatedAt:             timestampToString(s.CreatedAt),
+				UpdatedAt:             timestampToString(s.UpdatedAt),
 			})
 		}
 	}
@@ -378,8 +383,10 @@ func (h *Handler) GetChatSession(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateChatSessionRequest struct {
-	Title     *string         `json:"title"`
-	ProjectID json.RawMessage `json:"project_id"`
+	Title                 *string         `json:"title"`
+	ProjectID             json.RawMessage `json:"project_id"`
+	ModelOverride         json.RawMessage `json:"model_override"`
+	ThinkingLevelOverride json.RawMessage `json:"thinking_level_override"`
 }
 
 // UpdateChatSession updates one user-editable field on a chat session. Title
@@ -387,6 +394,101 @@ type UpdateChatSessionRequest struct {
 // by subsequent turns. Status and pinned keep their dedicated endpoints,
 // agent/creator/workspace are immutable, and the resume pointers
 // (session_id / work_dir / runtime_id) remain daemon-owned.
+func boolCount(values ...bool) int {
+	n := 0
+	for _, value := range values {
+		if value {
+			n++
+		}
+	}
+	return n
+}
+
+func parseChatSelectionField(raw json.RawMessage) (pgtype.Text, bool) {
+	if string(raw) == "null" {
+		return pgtype.Text{}, true
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil || value != strings.TrimSpace(value) {
+		return pgtype.Text{}, false
+	}
+	return pgtype.Text{String: value, Valid: true}, true
+}
+
+// A selection is checked against the runtime's last advertised catalog. An
+// unavailable catalog cannot establish that a new override will run.
+func (h *Handler) validateChatExecutionSelection(w http.ResponseWriter, r *http.Request, session db.ChatSession, model, level pgtype.Text) bool {
+	if !model.Valid && !level.Valid {
+		return true
+	}
+	agentRow, err := h.Queries.GetAgent(r.Context(), session.AgentID)
+	if err != nil || !agentRow.RuntimeID.Valid {
+		writeError(w, http.StatusBadRequest, "agent has no runtime")
+		return false
+	}
+	runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
+		ID: agentRow.RuntimeID, WorkspaceID: session.WorkspaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "agent runtime is unavailable")
+		return false
+	}
+	if h.ModelCatalogCache == nil {
+		writeError(w, http.StatusServiceUnavailable, "model catalog is unavailable; refresh the runtime's models")
+		return false
+	}
+	snapshot, err := h.ModelCatalogCache.Get(r.Context(), uuidToString(runtime.ID))
+	if err != nil || snapshot == nil || !snapshot.Supported || len(snapshot.Models) == 0 {
+		writeError(w, http.StatusServiceUnavailable, "model catalog is unavailable; refresh the runtime's models")
+		return false
+	}
+	effectiveModel := agentRow.Model.String
+	if model.Valid {
+		effectiveModel = model.String
+	}
+	effectiveLevel := agentRow.ThinkingLevel.String
+	if level.Valid {
+		effectiveLevel = level.String
+	}
+	var selected *ModelEntry
+	for i := range snapshot.Models {
+		if snapshot.Models[i].ID == effectiveModel || (effectiveModel == "" && snapshot.Models[i].Default) {
+			selected = &snapshot.Models[i]
+			break
+		}
+	}
+	if selected == nil && (effectiveModel != "" || effectiveLevel != "") {
+		writeError(w, http.StatusBadRequest, "selected model is no longer supported by this runtime")
+		return false
+	}
+	if runtime.Provider == "zcode" && selected != nil && selected.Thinking != nil &&
+		len(selected.Thinking.SupportedLevels) > 0 && effectiveLevel == "" {
+		writeError(w, http.StatusBadRequest, "this model requires a reasoning level")
+		return false
+	}
+	if effectiveLevel != "" {
+		if !agent.IsKnownThinkingValue(runtime.Provider, effectiveLevel) ||
+			(agent.ThinkingLevelRejectedWithoutModel(runtime.Provider) && effectiveModel == "") {
+			writeError(w, http.StatusBadRequest, "selected reasoning level requires a supported explicit model")
+			return false
+		}
+		valid := false
+		if selected.Thinking != nil {
+			for _, option := range selected.Thinking.SupportedLevels {
+				if option.Value == effectiveLevel {
+					valid = true
+					break
+				}
+			}
+		}
+		if !valid {
+			writeError(w, http.StatusBadRequest, "selected reasoning level is not supported by this model")
+			return false
+		}
+	}
+	return true
+}
+
 func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -402,8 +504,9 @@ func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 	}
 	hasTitle := req.Title != nil
 	hasProjectID := req.ProjectID != nil
-	if hasTitle == hasProjectID {
-		writeError(w, http.StatusBadRequest, "exactly one of title or project_id is required")
+	hasSelection := req.ModelOverride != nil || req.ThinkingLevelOverride != nil
+	if boolCount(hasTitle, hasProjectID, hasSelection) != 1 {
+		writeError(w, http.StatusBadRequest, "exactly one of title, project_id, or execution selection is required")
 		return
 	}
 
@@ -431,7 +534,7 @@ func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 			ID:    session.ID,
 			Title: title,
 		})
-	} else {
+	} else if hasProjectID {
 		projectID := pgtype.UUID{Valid: false}
 		if string(req.ProjectID) != "null" {
 			var rawProjectID string
@@ -484,6 +587,28 @@ func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 			err = tx.Commit(r.Context())
 		}
 		projectIDChanged = true
+	} else {
+		if req.ModelOverride == nil || req.ThinkingLevelOverride == nil {
+			writeError(w, http.StatusBadRequest, "model_override and thinking_level_override must be sent together")
+			return
+		}
+		model, valid := parseChatSelectionField(req.ModelOverride)
+		if !valid {
+			writeError(w, http.StatusBadRequest, "model_override must be a model ID, empty string, or null")
+			return
+		}
+		level, valid := parseChatSelectionField(req.ThinkingLevelOverride)
+		if !valid {
+			writeError(w, http.StatusBadRequest, "thinking_level_override must be a reasoning level, empty string, or null")
+			return
+		}
+		if !h.validateChatExecutionSelection(w, r, session, model, level) {
+			return
+		}
+		updated, err = h.Queries.UpdateChatSessionExecutionSelection(r.Context(), db.UpdateChatSessionExecutionSelectionParams{
+			ID: session.ID, WorkspaceID: session.WorkspaceID,
+			ModelOverride: model, ThinkingLevelOverride: level,
+		})
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update chat session")
@@ -499,6 +624,12 @@ func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 	if projectIDChanged {
 		projectID := uuidToPtr(updated.ProjectID)
 		payload.ProjectID = &projectID
+	}
+	if hasSelection {
+		model := textToPtr(updated.ModelOverride)
+		level := textToPtr(updated.ThinkingLevelOverride)
+		payload.ModelOverride = &model
+		payload.ThinkingLevelOverride = &level
 	}
 	h.publishChat(protocol.EventChatSessionUpdated, workspaceID, "member", userID, resolvedSessionID, payload)
 
@@ -2051,13 +2182,15 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 // Response types & helpers
 
 type ChatSessionResponse struct {
-	ID          string  `json:"id"`
-	WorkspaceID string  `json:"workspace_id"`
-	AgentID     string  `json:"agent_id"`
-	CreatorID   string  `json:"creator_id"`
-	ProjectID   *string `json:"project_id"`
-	Title       string  `json:"title"`
-	Status      string  `json:"status"`
+	ID                    string  `json:"id"`
+	WorkspaceID           string  `json:"workspace_id"`
+	AgentID               string  `json:"agent_id"`
+	CreatorID             string  `json:"creator_id"`
+	ProjectID             *string `json:"project_id"`
+	ModelOverride         *string `json:"model_override"`
+	ThinkingLevelOverride *string `json:"thinking_level_override"`
+	Title                 string  `json:"title"`
+	Status                string  `json:"status"`
 	// Only populated by list endpoints — single-session fetches return 0/false/nil.
 	// HasUnread is kept as a convenience (== UnreadCount > 0) for existing consumers.
 	HasUnread   bool             `json:"has_unread"`
@@ -2175,16 +2308,18 @@ type ChatMessageResponse struct {
 
 func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
 	return ChatSessionResponse{
-		ID:          uuidToString(s.ID),
-		WorkspaceID: uuidToString(s.WorkspaceID),
-		AgentID:     uuidToString(s.AgentID),
-		CreatorID:   uuidToString(s.CreatorID),
-		ProjectID:   uuidToPtr(s.ProjectID),
-		Title:       s.Title,
-		Status:      s.Status,
-		Pinned:      s.PinnedAt.Valid,
-		CreatedAt:   timestampToString(s.CreatedAt),
-		UpdatedAt:   timestampToString(s.UpdatedAt),
+		ID:                    uuidToString(s.ID),
+		WorkspaceID:           uuidToString(s.WorkspaceID),
+		AgentID:               uuidToString(s.AgentID),
+		CreatorID:             uuidToString(s.CreatorID),
+		ProjectID:             uuidToPtr(s.ProjectID),
+		ModelOverride:         textToPtr(s.ModelOverride),
+		ThinkingLevelOverride: textToPtr(s.ThinkingLevelOverride),
+		Title:                 s.Title,
+		Status:                s.Status,
+		Pinned:                s.PinnedAt.Valid,
+		CreatedAt:             timestampToString(s.CreatedAt),
+		UpdatedAt:             timestampToString(s.UpdatedAt),
 	}
 }
 

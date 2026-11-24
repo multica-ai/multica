@@ -1,4 +1,16 @@
 {
+  "execution": {
+    "model": "模型",
+    "reasoning": "推理",
+    "inherit_model": "智能体默认值 ({{model}})",
+    "inherit_reasoning": "智能体默认值 ({{level}})",
+    "runtime_default": "运行时默认值",
+    "inherited": "已继承",
+    "overridden": "已覆盖",
+    "unavailable": "不可用",
+    "stale": "此选择已不受支持。请选择当前可用的选项。",
+    "save_failed": "无法保存聊天设置。"
+  },
   "page": {
     "title": "聊天",
     "no_agent_title": "还没有可以对话的智能体",
