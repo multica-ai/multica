@@ -1,5 +1,5 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
-import { coalescedRefresh, inboxQueriesIdle, inboxRowFromPush } from "./incremental";
+import { coalescedRefresh, inboxRowFromPush } from "./incremental";
 import { archivedInboxCacheItems, inboxKeys, mapArchivedInboxCache, type ArchivedInboxCache } from "./queries";
 import { useInboxSelectionStore } from "./selection-store";
 import type { InboxItem, IssueAssigneeType, IssuePriority, IssueStatus, SnoozedInboxIssue } from "../types";
@@ -84,13 +84,9 @@ export async function onInboxNew(
 // The re-read for an `inbox:new` that cannot be written locally, or that
 // arrived without the item. A burst of them must not stack one full re-read
 // each: the client cancels the request it replaces, but the server finishes
-// the query regardless. So it waits for a read already out (one that may
-// predate the notification), then reads once more.
+// the query regardless (see coalescedRefresh).
 export function onInboxNewInvalidate(qc: QueryClient, wsId: string) {
-  return coalescedRefresh(qc, `lists:${wsId}`, async () => {
-    await inboxQueriesIdle(qc, inboxKeys.all(wsId));
-    await onInboxInvalidate(qc, wsId);
-  });
+  return coalescedRefresh(qc, inboxKeys.all(wsId), () => onInboxInvalidate(qc, wsId));
 }
 
 function archivedInboxQueryKeys(qc: QueryClient, wsId: string): QueryKey[] {
@@ -335,8 +331,5 @@ export async function onInboxSummaryInvalidate(qc: QueryClient) {
 // server computes the summary over the whole inbox, so the count is not
 // adjusted locally.
 export function onInboxNewSummaryInvalidate(qc: QueryClient) {
-  return coalescedRefresh(qc, "unread-summary", async () => {
-    await inboxQueriesIdle(qc, inboxKeys.unreadSummary());
-    await onInboxSummaryInvalidate(qc);
-  });
+  return coalescedRefresh(qc, inboxKeys.unreadSummary(), () => onInboxSummaryInvalidate(qc));
 }

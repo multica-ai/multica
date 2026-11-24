@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
-import { InfiniteQueryObserver, QueryClient, QueryObserver, type InfiniteData } from "@tanstack/react-query";
+import { focusManager, InfiniteQueryObserver, QueryClient, QueryObserver, type InfiniteData } from "@tanstack/react-query";
 import {
   cancelInboxLists,
   onInboxInvalidate,
@@ -796,43 +796,77 @@ describe("onInboxNew", () => {
 });
 
 describe("onInboxNewSummaryInvalidate", () => {
-  it("waits for a summary read already out, then reads once more, one read at a time", async () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    focusManager.setFocused(undefined);
+    vi.useRealTimers();
+  });
+
+  it("follows a summary first load with one read, one at a time, whatever arrives meanwhile", async () => {
     // The client's cancel does not stop the query the server started, so
     // cancelling the first load would put two reads on the server.
     const qc = inboxClient();
-    const releases: Array<() => void> = [];
     let reading = 0;
     let peak = 0;
-    const queryFn = vi.fn(
-      () =>
-        new Promise<{ workspace_id: string; count: number }[]>((resolve) => {
-          reading += 1;
-          peak = Math.max(peak, reading);
-          releases.push(() => {
-            reading -= 1;
-            resolve([{ workspace_id: wsId, count: queryFn.mock.calls.length }]);
-          });
-        }),
-    );
+    const queryFn = vi.fn(() => {
+      reading += 1;
+      peak = Math.max(peak, reading);
+      const calls = queryFn.mock.calls.length;
+      return new Promise<{ workspace_id: string; count: number }[]>((resolve) =>
+        setTimeout(() => {
+          reading -= 1;
+          resolve([{ workspace_id: wsId, count: calls }]);
+        }, 250),
+      );
+    });
     const observer = new QueryObserver(qc, { queryKey: inboxKeys.unreadSummary(), queryFn });
     const unsubscribe = observer.subscribe(() => {});
 
     try {
-      expect(queryFn).toHaveBeenCalledTimes(1);
-      const refreshed = onInboxNewSummaryInvalidate(qc);
+      await vi.advanceTimersByTimeAsync(10);
       void onInboxNewSummaryInvalidate(qc);
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      expect(queryFn).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(10);
+      void onInboxNewSummaryInvalidate(qc);
+      await vi.advanceTimersByTimeAsync(INBOX_REFRESH_INTERVAL_MS * 5);
 
-      releases.shift()!();
-      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2));
-      releases.shift()!();
-      await refreshed;
-
-      expect(observer.getCurrentResult().data).toEqual([{ workspace_id: wsId, count: 2 }]);
+      expect(queryFn).toHaveBeenCalledTimes(2);
       expect(peak).toBe(1);
+      expect(observer.getCurrentResult().data).toEqual([{ workspace_id: wsId, count: 2 }]);
     } finally {
-      for (const release of releases) release();
+      unsubscribe();
+      qc.clear();
+    }
+  });
+
+  it("does not wait on a retry paused while the window is hidden", async () => {
+    // The desktop dock badge keeps the summary enabled while the window is
+    // minimized, where TanStack holds a retry until focus returns.
+    const qc = inboxClient();
+    const queryFn = vi
+      .fn<() => Promise<{ workspace_id: string; count: number }[]>>()
+      .mockRejectedValueOnce(new Error("503"))
+      .mockResolvedValue([{ workspace_id: wsId, count: 1 }]);
+    const observer = new QueryObserver(qc, {
+      queryKey: inboxKeys.unreadSummary(),
+      queryFn,
+      retry: 1,
+      retryDelay: 0,
+    });
+    focusManager.setFocused(false);
+    const unsubscribe = observer.subscribe(() => {});
+
+    try {
+      await vi.advanceTimersByTimeAsync(10);
+      expect(qc.getQueryState(inboxKeys.unreadSummary())?.fetchStatus).toBe("paused");
+
+      void onInboxNewSummaryInvalidate(qc);
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(queryFn).toHaveBeenCalledTimes(2);
+      expect(observer.getCurrentResult().data).toEqual([{ workspace_id: wsId, count: 1 }]);
+    } finally {
       unsubscribe();
       qc.clear();
     }

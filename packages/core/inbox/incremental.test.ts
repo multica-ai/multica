@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { InboxItem } from "../types";
 import { INBOX_REFRESH_INTERVAL_MS, coalescedRefresh, inboxRowFromPush } from "./incremental";
@@ -80,9 +81,19 @@ describe("inboxRowFromPush", () => {
     expect(inboxRowFromPush(pushed({ created_at: "2026-11-24T10:00:00Z" }), [listed], [sameSecond])).not.toBeNull();
   });
 
-  it("does not write an item missing what the list sorts and keys on", () => {
-    expect(inboxRowFromPush(pushed({ id: "" }), [listed])).toBeNull();
-    expect(inboxRowFromPush(pushed({ created_at: "" }), [listed])).toBeNull();
+  it.each([
+    ["id", { id: "" }],
+    ["created_at", { created_at: "" }],
+    ["type", { type: undefined }],
+    ["title", { title: undefined }],
+    ["read", { read: undefined }],
+    ["archived", { archived: undefined }],
+  ])("does not write an item without a usable %s, which the list reads on every row", (_field, missing) => {
+    expect(inboxRowFromPush(pushed(missing as Partial<InboxItem>), [listed])).toBeNull();
+  });
+
+  it("does not write an archived row into the active list", () => {
+    expect(inboxRowFromPush(pushed({ archived: true }), [listed])).toBeNull();
   });
 });
 
@@ -94,8 +105,10 @@ describe("coalescedRefresh", () => {
     vi.useRealTimers();
   });
 
+  const key = ["inbox", "ws-1"] as const;
+
   it("starts at once, keeps one run out, and merges what arrives meanwhile into one", async () => {
-    const client = {};
+    const qc = new QueryClient();
     const releases: Array<() => void> = [];
     let running = 0;
     let maxRunning = 0;
@@ -110,9 +123,9 @@ describe("coalescedRefresh", () => {
       );
     });
 
-    void coalescedRefresh(client, "k", refresh);
+    void coalescedRefresh(qc, key, refresh);
     expect(refresh).toHaveBeenCalledTimes(1);
-    for (let i = 0; i < 10; i++) void coalescedRefresh(client, "k", refresh);
+    for (let i = 0; i < 10; i++) void coalescedRefresh(qc, key, refresh);
     expect(refresh).toHaveBeenCalledTimes(1);
 
     releases.shift()!();
@@ -125,10 +138,10 @@ describe("coalescedRefresh", () => {
   });
 
   it("waits out the interval after a run that finished quickly", async () => {
-    const client = {};
+    const qc = new QueryClient();
     const refresh = vi.fn(async () => {});
-    await coalescedRefresh(client, "k", refresh);
-    const second = coalescedRefresh(client, "k", refresh);
+    await coalescedRefresh(qc, key, refresh);
+    const second = coalescedRefresh(qc, key, refresh);
     await vi.advanceTimersByTimeAsync(INBOX_REFRESH_INTERVAL_MS - 1);
     expect(refresh).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
@@ -138,20 +151,53 @@ describe("coalescedRefresh", () => {
 
   it("keeps clients and keys apart", () => {
     const refresh = vi.fn(async () => {});
-    const client = {};
-    void coalescedRefresh(client, "a", refresh);
-    void coalescedRefresh(client, "b", refresh);
-    void coalescedRefresh({}, "a", refresh);
+    const qc = new QueryClient();
+    void coalescedRefresh(qc, key, refresh);
+    void coalescedRefresh(qc, ["inbox", "unread-summary"], refresh);
+    void coalescedRefresh(new QueryClient(), key, refresh);
     expect(refresh).toHaveBeenCalledTimes(3);
   });
 
   it("runs again after a refresh that failed", async () => {
-    const client = {};
+    const qc = new QueryClient();
     const refresh = vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValue(undefined);
-    await expect(coalescedRefresh(client, "k", refresh)).resolves.toBeUndefined();
-    const again = coalescedRefresh(client, "k", refresh);
+    await expect(coalescedRefresh(qc, key, refresh)).resolves.toBeUndefined();
+    const again = coalescedRefresh(qc, key, refresh);
     await vi.advanceTimersByTimeAsync(INBOX_REFRESH_INTERVAL_MS);
     await again;
     expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it("follows a read already on the wire with one refresh that every call meanwhile shares", async () => {
+    // A first load takes 250ms; notifications arrive at 10ms and 20ms.
+    const qc = new QueryClient();
+    void qc.fetchQuery({
+      queryKey: [...key, "list"],
+      queryFn: () => new Promise((resolve) => setTimeout(() => resolve([]), 250)),
+    });
+    const refresh = vi.fn(async () => {});
+
+    await vi.advanceTimersByTimeAsync(10);
+    const first = coalescedRefresh(qc, key, refresh);
+    await vi.advanceTimersByTimeAsync(10);
+    const second = coalescedRefresh(qc, key, refresh);
+    expect(second).toBe(first);
+    expect(refresh).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(INBOX_REFRESH_INTERVAL_MS * 5);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not wait on a read paused until the window is focused again", async () => {
+    // The desktop dock badge reads the summary while the window is hidden; a
+    // retry there pauses until focus.
+    const qc = new QueryClient();
+    const query = qc.getQueryCache().build(qc, { queryKey: [...key, "list"] });
+    query.setState({ fetchStatus: "paused" });
+    const refresh = vi.fn(async () => {});
+
+    void coalescedRefresh(qc, key, refresh);
+
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 });

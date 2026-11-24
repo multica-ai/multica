@@ -25,7 +25,7 @@ export function inboxRowFromPush(
 ): InboxItem | null {
   const issueId = item.issue_id;
   const at = Date.parse(item.created_at);
-  if (!item.id || !issueId || Number.isNaN(at)) return null;
+  if (!issueId || Number.isNaN(at) || !isListableItem(item)) return null;
   const sameIssue = (row: InboxItem) => row.issue_id === issueId;
   if (listed.some((row) => sameIssue(row) && Date.parse(row.created_at) === at)) return null;
   const row = listed.find(sameIssue) ?? elsewhere.find(sameIssue);
@@ -45,18 +45,29 @@ export function inboxRowFromPush(
   };
 }
 
-/**
- * Resolves once no query under `queryKey` has a request out. A refresh that
- * waits for it instead of cancelling it keeps one read on the server at a
- * time: the client's cancel does not stop the query the server started.
- */
-export function inboxQueriesIdle(qc: QueryClient, queryKey: QueryKey): Promise<void> {
-  const cache = qc.getQueryCache();
-  const busy = () => cache.findAll({ queryKey }).some((query) => query.state.fetchStatus !== "idle");
-  if (!busy()) return Promise.resolve();
+// What the list and its grouping read on every row. The push is not parsed
+// like a list response, so a row missing any of it is not written.
+function isListableItem(item: InboxItem): boolean {
+  return (
+    typeof item.id === "string" && item.id !== "" &&
+    typeof item.type === "string" &&
+    typeof item.title === "string" &&
+    typeof item.read === "boolean" &&
+    item.archived === false
+  );
+}
+
+// Whether a query under `queryKey` has a read on the wire. A paused read is
+// not: it waits for focus or the network, which a refresh must not wait on
+// (the desktop dock badge reads the summary while the window is hidden).
+function readingOut(qc: QueryClient, queryKey: QueryKey): boolean {
+  return qc.getQueryCache().findAll({ queryKey }).some((query) => query.state.fetchStatus === "fetching");
+}
+
+function readsSettled(qc: QueryClient, queryKey: QueryKey): Promise<void> {
   return new Promise((resolve) => {
-    const unsubscribe = cache.subscribe(() => {
-      if (busy()) return;
+    const unsubscribe = qc.getQueryCache().subscribe(() => {
+      if (readingOut(qc, queryKey)) return;
       unsubscribe();
       resolve();
     });
@@ -67,52 +78,72 @@ export function inboxQueriesIdle(qc: QueryClient, queryKey: QueryKey): Promise<v
 export const INBOX_REFRESH_INTERVAL_MS = 1000;
 
 interface RefreshGate {
-  running: Promise<void> | null;
+  run: Promise<void> | null;
+  // Whether the current run has started its read. Until it has, a call is
+  // answered by that read.
+  reading: boolean;
   startedAt: number;
   next: Promise<void> | null;
 }
 
-const gates = new WeakMap<object, Map<string, RefreshGate>>();
+const gates = new WeakMap<QueryClient, Map<string, RefreshGate>>();
 
 /**
- * Runs `refresh` at most once at a time per client and key, and starts it at
- * most once per `INBOX_REFRESH_INTERVAL_MS`. A call while a run is out or
- * the interval has not passed joins one follow-up run, which starts once both
- * have passed: a burst of events costs a leading and a trailing request
- * instead of one each. The returned promise settles with a run that started
+ * Runs `refresh`, which re-reads the queries under `queryKey`, so that the
+ * server sees one read at a time and a burst of calls a leading and a
+ * trailing one instead of one each.
+ *
+ * A read already on the wire is waited for, not cancelled: the client's
+ * cancel does not stop the query the server started, and that read may
+ * predate the call, so `refresh` follows it. Calls that arrive before the
+ * refresh starts its read share it; later ones share one follow-up, started
+ * once the run is done and `INBOX_REFRESH_INTERVAL_MS` has passed since the
+ * last read began. The returned promise settles with a read that started
  * after the call.
  */
 export function coalescedRefresh(
-  client: object,
-  key: string,
+  qc: QueryClient,
+  queryKey: QueryKey,
   refresh: () => Promise<unknown>,
 ): Promise<void> {
-  let byKey = gates.get(client);
-  if (!byKey) gates.set(client, (byKey = new Map()));
+  let byKey = gates.get(qc);
+  if (!byKey) gates.set(qc, (byKey = new Map()));
+  const key = JSON.stringify(queryKey);
   let gate = byKey.get(key);
-  if (!gate) byKey.set(key, (gate = { running: null, startedAt: -Infinity, next: null }));
-  if (gate.next) return gate.next;
+  if (!gate) byKey.set(key, (gate = { run: null, reading: false, startedAt: -Infinity, next: null }));
   const g = gate;
-  if (!g.running && Date.now() - g.startedAt >= INBOX_REFRESH_INTERVAL_MS) {
-    return startRefresh(g, refresh);
+  if (g.next) return g.next;
+  if (g.run && !g.reading) return g.run;
+  if (!g.run && Date.now() - g.startedAt >= INBOX_REFRESH_INTERVAL_MS) {
+    return startRefresh(qc, queryKey, g, refresh);
   }
   g.next = (async () => {
-    await g.running;
+    await g.run;
     const wait = g.startedAt + INBOX_REFRESH_INTERVAL_MS - Date.now();
     if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
     g.next = null;
-    await startRefresh(g, refresh);
+    await startRefresh(qc, queryKey, g, refresh);
   })();
   return g.next;
 }
 
-function startRefresh(gate: RefreshGate, refresh: () => Promise<unknown>): Promise<void> {
-  gate.startedAt = Date.now();
-  const run: Promise<void> = refresh()
+function startRefresh(
+  qc: QueryClient,
+  queryKey: QueryKey,
+  gate: RefreshGate,
+  refresh: () => Promise<unknown>,
+): Promise<void> {
+  gate.reading = false;
+  const read = () => {
+    gate.reading = true;
+    gate.startedAt = Date.now();
+    return refresh();
+  };
+  const run: Promise<void> = (readingOut(qc, queryKey) ? readsSettled(qc, queryKey).then(read) : read())
     .then(() => undefined, () => undefined)
     .finally(() => {
-      if (gate.running === run) gate.running = null;
+      if (gate.run === run) gate.run = null;
     });
-  gate.running = run;
+  gate.run = run;
   return run;
 }

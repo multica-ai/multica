@@ -16,7 +16,7 @@
  */
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import type { InboxItem, IssueStatus } from "@multica/core/types";
-import { coalescedRefresh, inboxQueriesIdle, inboxRowFromPush } from "@multica/core/inbox/incremental";
+import { coalescedRefresh, inboxRowFromPush } from "@multica/core/inbox/incremental";
 import { inboxKeys } from "@/data/queries/inbox";
 
 export function patchInboxIssueStatus(
@@ -86,10 +86,7 @@ export async function refreshInboxUnreadSummary(qc: QueryClient) {
  * through a coalescing gate, so a burst keeps one read at a time.
  */
 export function onInboxNew(qc: QueryClient, wsId: string, item: InboxItem | undefined) {
-  void coalescedRefresh(qc, "unread-summary", async () => {
-    await inboxQueriesIdle(qc, inboxKeys.unreadSummary());
-    await refreshInboxUnreadSummary(qc);
-  });
+  void coalescedRefresh(qc, inboxKeys.unreadSummary(), () => refreshInboxUnreadSummary(qc));
   if (item?.workspace_id && item.workspace_id !== wsId) return;
   const key = inboxKeys.list(wsId);
   const list = qc.getQueryState<InboxItem[]>(key);
@@ -99,10 +96,7 @@ export function onInboxNew(qc: QueryClient, wsId: string, item: InboxItem | unde
       ? inboxRowFromPush(item, list.data)
       : null;
   if (!row) {
-    void coalescedRefresh(qc, `list:${wsId}`, async () => {
-      await inboxQueriesIdle(qc, key);
-      await refreshInboxList(qc, wsId);
-    });
+    void coalescedRefresh(qc, key, () => refreshInboxList(qc, wsId));
     return;
   }
   qc.setQueryData<InboxItem[]>(key, (old) => (old ? [row, ...old] : old));
