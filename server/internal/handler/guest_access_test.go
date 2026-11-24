@@ -15,6 +15,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -191,7 +192,7 @@ func TestDemotedGuestCannotReadProjectlessNotifications(t *testing.T) {
 	notify := func(issueID, title string, archived, read bool) string {
 		cols := testutil.Cols{
 			"workspace_id": testWorkspaceID, "recipient_type": "member", "recipient_id": user,
-			"type": inboxTypeDocComment, "severity": "info", "title": title, "body": "quoted doc text",
+			"type": service.InboxTypeDocComment, "severity": "info", "title": title, "body": "quoted doc text",
 			"archived": archived, "read": read,
 		}
 		if issueID != "" {

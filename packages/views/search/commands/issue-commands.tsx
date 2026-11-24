@@ -36,6 +36,7 @@ import {
 import { useRetryIssueRun, useToggleIssueSubscriber } from "@multica/core/issues/mutations";
 import { useIssueDeletion } from "@multica/core/issues/use-issue-deletion";
 import { useCommentCollapseStore, useResolvedExpandStore } from "@multica/core/issues/stores";
+import { useIsGuest } from "@multica/core/permissions";
 import { quickActionListOptions } from "@multica/core/quick-actions";
 import type { AgentTask, Issue } from "@multica/core/types";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -55,6 +56,17 @@ const ACTIVE_TASK_STATUSES = new Set<AgentTask["status"]>([
   "running",
 ]);
 
+// What a guest may do to an issue, mirroring the server's guest allowlist:
+// copy, pin, subscribe and fold comments. Anything else is left out.
+const GUEST_COMMAND_IDS = new Set([
+  "issue-copy-link",
+  "issue-copy-identifier",
+  "issue-pin",
+  "issue-subscribe",
+  "issue-fold-comments",
+  "issue-unfold-comments",
+]);
+
 /** Commands for the issue on screen (`issue`) or a list selection (`issues`). */
 export function useIssueCommandGroup(
   target: IssueTarget | null,
@@ -70,16 +82,19 @@ export function useIssueCommandGroup(
   const single: Issue | null = target?.kind === "single" ? target.issue : null;
   const singleId = single?.id ?? "";
   const actions = useIssueActions(single);
+  // A guest (MUL-9420) changes nothing about an issue and cannot read its
+  // runs or the workspace's quick actions.
+  const guest = useIsGuest(wsId);
 
   const { data: quickActions = [] } = useQuery({
     ...quickActionListOptions(wsId),
-    enabled: !!single,
+    enabled: !!single && !guest,
   });
   const activeQuickActions = useMemo(
     () => quickActions.filter((action) => action.status === "active"),
     [quickActions],
   );
-  const { data: tasks = [] } = useQuery({ ...issueTasksOptions(singleId), enabled: !!single });
+  const { data: tasks = [] } = useQuery({ ...issueTasksOptions(singleId), enabled: !!single && !guest });
   const { data: subscribers = [] } = useQuery({
     ...issueSubscribersOptions(singleId),
     enabled: !!single,
@@ -350,6 +365,9 @@ export function useIssueCommandGroup(
       }
     }
 
+    const visible = guest ? commands.filter((command) => GUEST_COMMAND_IDS.has(command.id)) : commands;
+    if (visible.length === 0) return null;
+
     return {
       id: isSingle ? "context-issue" : "context-issues",
       heading: isSingle ? (
@@ -361,12 +379,13 @@ export function useIssueCommandGroup(
       ) : (
         <ContextHeading label={crumb} />
       ),
-      commands,
+      commands: visible,
     };
   }, [
     actions,
     activeQuickActions.length,
     deletable,
+    guest,
     onDeletedFallbackPath,
     palette,
     queryClient,

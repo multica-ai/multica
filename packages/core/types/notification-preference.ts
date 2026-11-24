@@ -2,6 +2,7 @@ export type NotificationGroupKey =
   | "assignments"
   | "status_changes"
   | "comments"
+  | "squad_handoffs"
   | "chat_replies"
   | "mentions"
   | "reactions"
@@ -39,15 +40,8 @@ export type NotificationGroupValue = "all" | "muted";
  */
 export type OthersIssuesValue = "all" | "key_updates";
 
-/**
- * Where the Inbox goes when the notification you are reading is archived
- * because you handled its issue. Missing means "stay".
- */
-export type AfterAutoArchiveValue = "stay" | "next";
-
 export type NotificationPreferences = Partial<Record<NotificationGroupKey, NotificationGroupValue>> & {
   others_issues?: OthersIssuesValue;
-  after_auto_archive?: AfterAutoArchiveValue;
 };
 
 export interface NotificationPreferenceResponse {

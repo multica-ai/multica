@@ -93,12 +93,17 @@ SELECT * FROM doc_version
 WHERE doc_id = $1 AND number = $2;
 
 -- name: ListDocVersions :many
+-- An edit an agent made while answering a discussion names that discussion
+-- (through the run that made it), so history can link back to it.
 SELECT
-    doc_id, workspace_id, number, title, author_type, author_id, message, action,
-    action_ref, task_id, issue_id, contributors, created_at, updated_at
-FROM doc_version
-WHERE doc_id = $1
-ORDER BY number DESC
+    v.doc_id, v.workspace_id, v.number, v.title, v.author_type, v.author_id, v.message, v.action,
+    v.action_ref, v.task_id, v.issue_id, v.contributors, v.created_at, v.updated_at,
+    c.id AS doc_thread_id, COALESCE(c.anchor_quote, '')::text AS doc_thread_quote
+FROM doc_version v
+LEFT JOIN agent_task_queue t ON t.id = v.task_id
+LEFT JOIN doc_comment c ON c.id = t.doc_thread_id AND c.doc_id = v.doc_id AND c.parent_id IS NULL
+WHERE v.doc_id = $1
+ORDER BY v.number DESC
 LIMIT $2;
 
 -- name: MergeDocEditIntoVersion :execrows
@@ -149,10 +154,10 @@ WHERE id = @id AND doc_id = @doc_id AND workspace_id = @workspace_id;
 -- name: CreateDocComment :one
 INSERT INTO doc_comment (
     id, workspace_id, doc_id, parent_id, author_type, author_id, content,
-    anchor_quote, anchor_prefix, anchor_suffix
+    anchor_quote, anchor_prefix, anchor_suffix, source_task_id
 ) VALUES (
     @id, @workspace_id, @doc_id, sqlc.narg('parent_id'), @author_type, @author_id, @content,
-    @anchor_quote, @anchor_prefix, @anchor_suffix
+    @anchor_quote, @anchor_prefix, @anchor_suffix, sqlc.narg('source_task_id')
 )
 RETURNING *;
 

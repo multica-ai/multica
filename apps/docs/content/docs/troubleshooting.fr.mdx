@@ -166,6 +166,15 @@ Un daemon en ligne ne signifie pas que l'outil lui-même fonctionne. Ouvrez l'en
 Exécutez d'abord ce même outil directement dans un terminal sur l'ordinateur d'exécution. Si l'outil ne démarre pas seul, corrigez sa connexion ou sa configuration, puis relancez l'exécution depuis le journal d'exécution.
 
 </Accordion>
+<Accordion title="L'outil de codage IA expire derrière un proxy sous macOS" id="ai-coding-tool-times-out-behind-a-macos-proxy" value="ai-coding-tool-times-out-behind-a-macos-proxy">
+
+Si un outil de codage IA comme Grok fonctionne dans un terminal mais expire dans Multica Desktop, vérifiez si le terminal exporte des variables de proxy. Sous macOS, le daemon local et les outils qu’il lance héritent des variables d’environnement du processus qui les lance. Un lancement depuis le Dock ne charge pas les variables exportées par votre shell et ne convertit pas les réglages de proxy réseau de macOS en variables d’environnement.
+
+Pour un seul agent, ajoutez les variables de proxy requises par son outil dans [Variables d’environnement](/agents-create#variables-denvironnement-et-identifiants). Par exemple, pour un proxy HTTP local, utilisez `HTTPS_PROXY=http://127.0.0.1:7897` en remplaçant cette valeur par l’adresse réelle du proxy. Si Multica est hébergé sur votre machine, ajoutez à `NO_PROXY` les hôtes à joindre directement, par exemple `localhost,127.0.0.1,::1`. Lancez une nouvelle exécution pour appliquer les changements.
+
+Ces réglages s’appliquent uniquement au processus de l’outil de cet agent, pas au daemon. Si le daemon a besoin du proxy pour joindre le serveur Multica ou pour récupérer la liste à jour des modèles (il la récupère avec son propre environnement), configurez son environnement de lancement séparément. Pour un daemon lancé à l’ouverture de session, voir [Démarrage à l’ouverture de session](/daemon-runtimes#autostart).
+
+</Accordion>
 <Accordion title="Les exécutions se bloquent sur macOS après une mise à jour du CLI" id="runs-hang-on-macos-after-a-cli-upgrade" value="runs-hang-on-macos-after-a-cli-upgrade">
 
 Après la mise à jour du CLI `multica` installé avec Homebrew, par `brew upgrade`, `multica update`, **Mettre à jour** sur la page **Runtimes** ou la mise à jour automatique du daemon, une exécution qui lit `~/Desktop`, `~/Documents`, `~/Downloads`, iCloud Drive ou un autre dossier protégé peut cesser de progresser : le processus de l'agent n'utilise plus de CPU, et l'exécution ne se termine ni n'échoue.

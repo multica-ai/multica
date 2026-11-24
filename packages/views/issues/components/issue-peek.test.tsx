@@ -1,7 +1,8 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { useEffect, type ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
 import type { Issue } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
@@ -13,11 +14,25 @@ import {
 } from "../surface/peek-context";
 import { IssuePeekHost } from "./issue-peek";
 
+const viewer = vi.hoisted(() => ({ guest: false }));
+
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({ issueDetail: (id: string) => `/acme/issues/${id}` }),
 }));
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
+
+vi.mock("@multica/core/permissions", () => ({ useIsGuest: () => viewer.guest }));
+
+vi.mock("@multica/core/api", () => ({
+  api: {
+    getIssue: vi.fn(async (id: string) => ({ id, identifier: `MUL-${id}` })),
+    listTimeline: vi.fn(async () => []),
+    listTasksByIssue: vi.fn(async () => []),
+    listChildIssues: vi.fn(async () => ({ issues: [] })),
+  },
+  ApiError: class extends Error {},
+}));
 
 // The panel's job is hosting; IssueDetail itself is covered by its own suite.
 vi.mock("./issue-detail", () => ({
@@ -120,7 +135,10 @@ const openCard = (id: string) => fireEvent.click(screen.getByText(`card ${id}`))
 describe("IssuePeekHost", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    qc = new QueryClient();
+    viewer.guest = false;
+    qc = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
   });
 
   it("opens the peeked issue as a peek-variant detail and marks its card", () => {
@@ -204,13 +222,37 @@ describe("IssuePeekHost", () => {
     editor.remove();
   });
 
-  it("closes from the close button and when the issue is deleted", async () => {
-    renderHost();
+  it("closes from the close button, and advances or closes when the issue is deleted", async () => {
+    const { setColumns } = renderHost();
     openCard("i-1");
     fireEvent.click(screen.getByRole("button", { name: "Close preview" }));
     await waitForClosed();
 
+    // Deleting an issue with a next neighbour lands on nextId.
     openCard("i-1");
+    fireEvent.click(screen.getByRole("button", { name: "delete" }));
+    expect(screen.getByTestId("detail")).toHaveTextContent("i-2");
+
+    // Deleting the last issue in a column falls back to prevId.
+    openCard("i-3");
+    fireEvent.click(screen.getByRole("button", { name: "delete" }));
+    expect(screen.getByTestId("detail")).toHaveTextContent("i-2");
+
+    // Deleting the sole issue in a column closes the preview panel.
+    openCard("i-4");
+    fireEvent.click(screen.getByRole("button", { name: "delete" }));
+    await waitForClosed();
+
+    // Even if the list/board cache prunes the deleted row before onDelete fires,
+    // deletion still lands on the surviving nextId (or prevId if nextId is also gone).
+    openCard("i-2");
+    act(() => setColumns([["i-1", "i-3"], ["i-4"]]));
+    fireEvent.click(screen.getByRole("button", { name: "delete" }));
+    expect(screen.getByTestId("detail")).toHaveTextContent("i-3");
+
+    // When all previously known neighbours were also removed, the panel closes
+    // instead of opening a stale/deleted id.
+    act(() => setColumns([[], ["i-4"]]));
     fireEvent.click(screen.getByRole("button", { name: "delete" }));
     await waitForClosed();
   });
@@ -347,5 +389,99 @@ describe("IssuePeekHost", () => {
     fireEvent.pointerLeave(screen.getByText("card i-3").parentElement!);
     fireEvent.keyDown(document.body, { key: " " });
     expect(panel()).toBeNull();
+  });
+});
+
+describe("IssuePeekHost adjacent prefetch", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    viewer.guest = false;
+    qc = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    viewer.guest = false;
+  });
+
+  it("warms nextId then prevId once idle, and skips already-cached neighbours on J/K step", async () => {
+    renderHost([["i-1", "i-2", "i-3", "i-4"], ["i-5"]]);
+    openCard("i-2");
+    expect(api.getIssue).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+
+    expect(vi.mocked(api.getIssue).mock.calls.map(([id]) => id)).toEqual(["i-3", "i-1"]);
+    expect(vi.mocked(api.listTimeline).mock.calls.map(([id]) => id)).toEqual(["i-3", "i-1"]);
+    expect(vi.mocked(api.listTasksByIssue).mock.calls.map(([id]) => id)).toEqual(["i-3", "i-1"]);
+    expect(vi.mocked(api.listChildIssues).mock.calls.map(([id]) => id)).toEqual(["i-3", "i-1"]);
+
+    // Step to i-3: its prevId (i-2) is not yet cached, and its nextId (i-4) warms first.
+    // Pre-seed i-2 as already warm (as if IssueDetail loaded it) to verify no duplicate fetch.
+    qc.setQueryData(issueKeys.detail("ws-1", "i-2"), { id: "i-2", identifier: "MUL-i-2" } as Issue);
+    qc.setQueryData(issueKeys.timeline("i-2"), []);
+    qc.setQueryData(issueKeys.tasks("i-2"), []);
+    qc.setQueryData(issueKeys.children("ws-1", "i-2"), []);
+
+    vi.clearAllMocks();
+    fireEvent.keyDown(document.body, { key: "j" });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+
+    expect(vi.mocked(api.getIssue).mock.calls.map(([id]) => id)).toEqual(["i-4"]);
+    expect(vi.mocked(api.listTimeline).mock.calls.map(([id]) => id)).toEqual(["i-4"]);
+  });
+
+  it("cancels pending prefetch when stepping quickly before idle", async () => {
+    renderHost([["i-1", "i-2", "i-3", "i-4"]]);
+    openCard("i-1");
+    fireEvent.keyDown(document.body, { key: "j" });
+    fireEvent.keyDown(document.body, { key: "j" });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+
+    // Ended on i-3: warms i-4 (next) and i-2 (prev), never i-1.
+    expect(vi.mocked(api.getIssue).mock.calls.map(([id]) => id)).toEqual(["i-4", "i-2"]);
+  });
+
+  it("omits runs prefetch for guests", async () => {
+    viewer.guest = true;
+    renderHost([["i-1", "i-2", "i-3"]]);
+    openCard("i-2");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+
+    expect(vi.mocked(api.getIssue).mock.calls.map(([id]) => id)).toEqual(["i-3", "i-1"]);
+    expect(vi.mocked(api.listTimeline).mock.calls.map(([id]) => id)).toEqual(["i-3", "i-1"]);
+    expect(vi.mocked(api.listChildIssues).mock.calls.map(([id]) => id)).toEqual(["i-3", "i-1"]);
+    expect(api.listTasksByIssue).not.toHaveBeenCalled();
+  });
+
+  it("does not re-run prefetch on unrelated column reorders that preserve neighbours", async () => {
+    const { setColumns } = renderHost([["i-1", "i-2", "i-3"], ["i-4", "i-5"]]);
+    openCard("i-2");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+    expect(api.getIssue).toHaveBeenCalledTimes(2);
+
+    vi.clearAllMocks();
+    act(() => setColumns([["i-1", "i-2", "i-3"], ["i-5", "i-4"]]));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+
+    expect(api.getIssue).not.toHaveBeenCalled();
   });
 });

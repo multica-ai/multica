@@ -36,8 +36,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  compare:
+  # The comparison runs in Playwright's image, which ships Chromium and its
+  # system packages. `playwright install --with-deps` fetched those through the
+  # runner's Ubuntu apt mirror, which mostly took 5 to 9 minutes (MUL-10057).
+  # A job's image is fixed before its steps run, so this one reads the tag off
+  # the @playwright/test the lockfile pins, and the two never drift.
+  playwright-image:
     runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: pnpm-lock.yaml
+          sparse-checkout-cone-mode: false
+
+      - id: image
+        run: |
+          version=$(grep -m1 -oP "^  '@playwright/test@\K[^']+" pnpm-lock.yaml)
+          echo "image=mcr.microsoft.com/playwright:v$version-noble" >> "$GITHUB_OUTPUT"
+
+  compare:
+    needs: playwright-image
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.playwright-image.outputs.image }}
+      # The runner's user, who owns the checkout: as root, git refuses it as
+      # dubious ownership. An init reaps the stopped web servers' processes,
+      # which perf-compare waits on before measuring the other side. Host IPC
+      # gives Chromium the runner's shared memory.
+      options: --user 1001 --init --ipc=host
     # Measured on CI: ~340s for the comparison itself, of which ~292s is the
     # two builds and ~26s the two measurements, plus setup. Fifteen minutes
     # leaves room for build variance and still stops a run that has hung.
@@ -56,11 +84,8 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      - name: Install (runner tree — supplies the spec and the browser)
+      - name: Install (runner tree — supplies the spec and Playwright)
         run: pnpm install --frozen-lockfile
-
-      - name: Install Chromium
-        run: pnpm exec playwright install --with-deps chromium
 
       - name: Compare
         run: node scripts/perf-compare.mjs --base "${{ inputs.base }}" --head "${{ inputs.head }}" --out perf-report --scenario "${{ inputs.scenario }}"

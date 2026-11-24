@@ -23,12 +23,15 @@ import (
 // says whether one action you take on an issue archives your notifications on
 // it. Completing and triggering an agent archive unless "muted"; commenting,
 // status changes, reassigning, priority, project, date and label edits archive
-// only with "all". `after_auto_archive` is where the client goes when the
-// notification you are reading is archived that way.
+// only with "all". `squad_handoffs` narrows `comments` to leave out the
+// comments a squad's agents hand work to each other with (MUL-10008).
+// `after_auto_archive` is a legacy preference kept accepted for older
+// clients; current clients always stay on an auto-archived issue.
 var validNotifGroups = map[string]bool{
 	"assignments":                   true,
 	"status_changes":                true,
 	"comments":                      true,
+	"squad_handoffs":                true,
 	"chat_replies":                  true,
 	"mentions":                      true,
 	"reactions":                     true,

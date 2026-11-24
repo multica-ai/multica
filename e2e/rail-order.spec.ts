@@ -24,7 +24,7 @@ test("rail spaces reorder by drag and keep their order", async ({ page }) => {
   await page.evaluate(() => localStorage.removeItem("multica_rail_order"));
   await reloadAppPage(page);
 
-  expect(await railOrder(page)).toEqual(["inbox", "work", "team", "chat", "autopilots"]);
+  expect(await railOrder(page)).toEqual(["work", "team", "chat", "autopilots"]);
 
   // A drag that starts but moves nothing must not open Chat on release.
   const chat = await page.locator("[data-slot='app-rail'] [data-rail-item='chat']").boundingBox();
@@ -34,19 +34,19 @@ test("rail spaces reorder by drag and keep their order", async ({ page }) => {
   await page.mouse.move(chat.x + chat.width / 2, chat.y + chat.height / 2 + 10, { steps: 5 });
   await page.mouse.up();
   await page.waitForTimeout(300);
-  expect(await railOrder(page)).toEqual(["inbox", "work", "team", "chat", "autopilots"]);
+  expect(await railOrder(page)).toEqual(["work", "team", "chat", "autopilots"]);
   await expect(page).toHaveURL(new RegExp(`/${slug}/issues`));
 
-  // Dropping Chat on Inbox must not also open Chat.
-  await dragOnto(page, "chat", "inbox");
-  expect(await railOrder(page)).toEqual(["chat", "inbox", "work", "team", "autopilots"]);
+  // Dropping Chat on Work must not also open Chat.
+  await dragOnto(page, "chat", "work");
+  expect(await railOrder(page)).toEqual(["chat", "work", "team", "autopilots"]);
   await expect(page).toHaveURL(new RegExp(`/${slug}/issues`));
 
-  await dragOnto(page, "inbox", "autopilots");
-  expect(await railOrder(page)).toEqual(["chat", "work", "team", "autopilots", "inbox"]);
+  await dragOnto(page, "work", "autopilots");
+  expect(await railOrder(page)).toEqual(["chat", "team", "autopilots", "work"]);
 
   await reloadAppPage(page);
-  expect(await railOrder(page)).toEqual(["chat", "work", "team", "autopilots", "inbox"]);
+  expect(await railOrder(page)).toEqual(["chat", "team", "autopilots", "work"]);
 
   // A plain click after a drag still works.
   await page.locator("[data-rail-item='chat'] a").click();

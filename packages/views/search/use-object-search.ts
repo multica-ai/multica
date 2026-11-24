@@ -10,6 +10,7 @@ import { DOCS_V1_FLAG } from "@multica/core/feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueViewEverywhereOptions } from "@multica/core/issue-views/queries";
 import { BUILTIN_VIEW_KEYS, type BuiltinViewKey } from "@multica/core/issue-views/sidebar-views";
+import { useIsGuest } from "@multica/core/permissions";
 import { skillListOptions, workspaceListOptions } from "@multica/core/workspace/queries";
 import type { IssueView } from "@multica/core/api/schemas";
 import type {
@@ -109,15 +110,17 @@ export function useObjectSearch(
   const wsId = useWorkspaceId();
   const directory = useActorDirectory(open);
   const typing = open && query.length > 0;
+  // A guest (MUL-9420) has no autopilots, skills or docs; the server refuses the lists.
+  const guest = useIsGuest(wsId);
   const builtinLabel = useBuiltinViewLabel();
   const { data: savedViews = EMPTY_VIEWS } = useQuery({ ...issueViewEverywhereOptions(wsId), enabled: typing && !!wsId });
-  const { data: autopilots = EMPTY_AUTOPILOTS } = useQuery({ ...autopilotListOptions(wsId), enabled: typing });
+  const { data: autopilots = EMPTY_AUTOPILOTS } = useQuery({ ...autopilotListOptions(wsId), enabled: typing && !guest });
   const { data: chats = EMPTY_CHATS } = useQuery({ ...chatSessionsOptions(wsId), enabled: typing });
-  const { data: skills = EMPTY_SKILLS } = useQuery({ ...skillListOptions(wsId), enabled: typing });
+  const { data: skills = EMPTY_SKILLS } = useQuery({ ...skillListOptions(wsId), enabled: typing && !guest });
   const docsEnabled = useFeatureEnabled(DOCS_V1_FLAG, false);
   const { data: cachedDocTree = EMPTY_DOC_TREE } = useQuery({
     ...docTreeOptions(wsId),
-    enabled: typing && !!wsId && docsEnabled,
+    enabled: typing && !!wsId && docsEnabled && !guest,
   });
   const docTree = docsEnabled ? cachedDocTree : EMPTY_DOC_TREE;
   const docFolders = useMemo(() => new Map(docTree.folders.map((f) => [f.id, f.title])), [docTree]);

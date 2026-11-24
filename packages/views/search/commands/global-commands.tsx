@@ -26,6 +26,8 @@ import { useT } from "../../i18n";
 import { usePalette } from "../palette-context";
 import type { PaletteCommand } from "../types";
 
+const MEMBER_ONLY_COMMAND_IDS = new Set(["new-issue", "chat-with-agent", "new-project", "new-autopilot"]);
+
 /**
  * Commands that exist everywhere. `primary` ones form the empty state's New
  * group; the rest surface once the user types.
@@ -40,7 +42,7 @@ export function useGlobalCommands(contexts: readonly CommandBarContext[]): Palet
   const toggleChatShortcut = useShortcut("toggleChat");
   const markAllRead = useMarkAllInboxRead();
   const archiveAllRead = useArchiveAllReadInbox();
-  // A guest (MUL-9420) cannot create issues.
+  // A guest (MUL-9420) creates nothing and never chats with agents.
   const guest = useIsGuest(useCurrentWorkspace()?.id);
 
   const projectContext = contexts.find((c) => c.kind === "project");
@@ -51,21 +53,16 @@ export function useGlobalCommands(contexts: readonly CommandBarContext[]): Palet
 
   return useMemo<PaletteCommand[]>(() => {
     const chatPath = p.chat();
-    const newIssue: PaletteCommand[] = guest
-      ? []
-      : [
-          {
-            id: "new-issue",
-            label: t(($) => $.commands.new_issue),
-            icon: SquarePen,
-            keywords: ["new", "issue", "create", "add", "新建", "任务"],
-            shortcut: createIssueShortcut,
-            run: () => openCreateIssueWithPreference(projectId ? { project_id: projectId } : undefined),
-            primary: true,
-          },
-        ];
-    return [
-      ...newIssue,
+    const commands: PaletteCommand[] = [
+      {
+        id: "new-issue",
+        label: t(($) => $.commands.new_issue),
+        icon: SquarePen,
+        keywords: ["new", "issue", "create", "add", "新建", "任务"],
+        shortcut: createIssueShortcut,
+        run: () => openCreateIssueWithPreference(projectId ? { project_id: projectId } : undefined),
+        primary: true,
+      },
       {
         id: "chat-with-agent",
         label: t(($) => $.commands.chat_with_agent),
@@ -151,6 +148,7 @@ export function useGlobalCommands(contexts: readonly CommandBarContext[]): Palet
         run: () => useModalStore.getState().open("feedback"),
       },
     ];
+    return guest ? commands.filter((command) => !MEMBER_ONLY_COMMAND_IDS.has(command.id)) : commands;
   }, [
     archiveAllRead,
     createIssueShortcut,

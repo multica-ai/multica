@@ -12,11 +12,16 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/testutil"
+	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/spf13/cobra"
 )
 
 func TestMain(m *testing.M) {
-	for _, key := range []string{
+	// A task shell exports the daemon's identity, and a warm pooled session
+	// also exports MULTICA_TASK_ENV_FILE. main() re-applies that file before
+	// every command, so a fixture token set by a test would be replaced by the
+	// live task token. Strip both, plus every key the file can deliver.
+	for _, key := range append([]string{
 		"MULTICA_AGENT_ID",
 		"MULTICA_TASK_ID",
 		"MULTICA_TOKEN",
@@ -26,9 +31,10 @@ func TestMain(m *testing.M) {
 		"MULTICA_TASK_CONFIG_ROOT",
 		"MULTICA_TASK_WORKSPACES_ROOT",
 		"MULTICA_AGENT_NAME",
+		agent.TaskEnvFileEnv,
 		devEnvHomeEnv,
 		devEnvNameEnv,
-	} {
+	}, agent.TaskEnvVolatileKeys...) {
 		os.Unsetenv(key)
 	}
 
@@ -481,6 +487,12 @@ func TestRunAuthStatusTaskContextRequiresTaskToken(t *testing.T) {
 			out := stderr.read()
 			if err == nil || !strings.Contains(err.Error(), "task-scoped mat_ token") {
 				t.Fatalf("runAuthStatus error = %v, want task token requirement", err)
+			}
+			if wantHint := tc.token != ""; strings.Contains(err.Error(), "--preserve-env=MULTICA_TOKEN") != wantHint {
+				t.Fatalf("runAuthStatus error = %v, want secrets manager hint = %v", err, wantHint)
+			}
+			if tc.token != "" && strings.Contains(err.Error(), tc.token) {
+				t.Fatalf("runAuthStatus error leaked the token: %v", err)
 			}
 			if requestCount != 0 {
 				t.Fatalf("auth status made %d request(s) without a task token", requestCount)

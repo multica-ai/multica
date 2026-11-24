@@ -1,7 +1,10 @@
 "use client";
 
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { motion } from "motion/react";
 import { useQuery } from "@tanstack/react-query";
+import { useReducedMotion } from "@multica/core/appearance";
+import { UI_EASE_OUT } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { Dialog, DialogContent } from "@multica/ui/components/ui/dialog";
 import {
@@ -40,11 +43,15 @@ import type { IssueCreateDraft } from "@multica/core/issues/stores/draft-store";
  * create-mode store, so the dialog reopens at the size it was last left at.
  */
 export function CreateIssueDialog({
+  open = true,
   onClose,
+  onOpenChangeComplete,
   initialMode,
   data,
 }: {
+  open?: boolean;
   onClose: () => void;
+  onOpenChangeComplete?: (open: boolean) => void;
   initialMode: CreateMode;
   data?: Record<string, unknown> | null;
 }) {
@@ -54,7 +61,9 @@ export function CreateIssueDialog({
   if (anchorCommentId) {
     return (
       <SourceContextCreateIssueDialog
+        open={open}
         onClose={onClose}
+        onOpenChangeComplete={onOpenChangeComplete}
         initialMode={initialMode}
         data={data}
         anchorCommentId={anchorCommentId}
@@ -63,9 +72,25 @@ export function CreateIssueDialog({
   }
   const recovery = data?.quick_create_recovery;
   if (isQuickCreateRecovery(recovery)) {
-    return <QuickCreateRecoveryDialog key={recovery.workspaceId + ":" + recovery.notificationId} onClose={onClose} recovery={recovery} />;
+    return (
+      <QuickCreateRecoveryDialog
+        key={recovery.workspaceId + ":" + recovery.notificationId}
+        open={open}
+        onClose={onClose}
+        onOpenChangeComplete={onOpenChangeComplete}
+        recovery={recovery}
+      />
+    );
   }
-  return <CreateIssueDialogBody onClose={onClose} initialMode={initialMode} data={data} />;
+  return (
+    <CreateIssueDialogBody
+      open={open}
+      onClose={onClose}
+      onOpenChangeComplete={onOpenChangeComplete}
+      initialMode={initialMode}
+      data={data}
+    />
+  );
 }
 
 interface QuickCreateRecovery {
@@ -85,8 +110,10 @@ function isQuickCreateRecovery(value: unknown): value is QuickCreateRecovery {
     && (!("agentId" in value) || value.agentId === undefined || typeof value.agentId === "string");
 }
 
-function QuickCreateRecoveryDialog({ onClose, recovery }: {
+function QuickCreateRecoveryDialog({ open, onClose, onOpenChangeComplete, recovery }: {
+  open: boolean;
   onClose: () => void;
+  onOpenChangeComplete?: (open: boolean) => void;
   recovery: QuickCreateRecovery;
 }) {
   const wsId = useWorkspaceId();
@@ -101,7 +128,7 @@ function QuickCreateRecoveryDialog({ onClose, recovery }: {
 
   useLayoutEffect(() => { close.current = onClose; }, [onClose]);
   useLayoutEffect(() => {
-    if (wsId !== recovery.workspaceId) { close.current(); return; }
+    if (wsId !== recovery.workspaceId) return;
     useIssueDraftStore.getState().beginIsolatedDraft();
     backup.current = useIssueDraftStore.getState().isolatedDraftBackup;
     useIssueDraftStore.getState().setShared({ projectId: recovery.projectId });
@@ -119,23 +146,38 @@ function QuickCreateRecoveryDialog({ onClose, recovery }: {
       }
     };
   }, [recovery, wsId]);
+  const sameWorkspace = wsId === recovery.workspaceId;
+  const ownsDraft = ready && sameWorkspace && storedBackup === backup.current;
   useLayoutEffect(() => {
-    if (ready && (wsId !== recovery.workspaceId || storedBackup !== backup.current)) close.current();
-  }, [ready, recovery.workspaceId, storedBackup, wsId]);
+    if (ownsDraft || (!ready && sameWorkspace)) return;
+    if (open) close.current();
+    // There is no safe popup to animate after losing draft ownership.
+    else onOpenChangeComplete?.(false);
+  }, [open, onOpenChangeComplete, ownsDraft, ready, sameWorkspace]);
 
-  if (!ready || wsId !== recovery.workspaceId || storedBackup !== backup.current) return null;
-  return <CreateIssueDialogBody onClose={onClose} initialMode="manual" recoveryProjects={{
-    activeIds, failed: projects.isError, retry: () => { void projects.refetch(); },
-  }} />;
+  if (!ownsDraft) return null;
+  return (
+    <CreateIssueDialogBody
+      open={open}
+      onClose={onClose}
+      onOpenChangeComplete={onOpenChangeComplete}
+      initialMode="manual"
+      recoveryProjects={{ activeIds, failed: projects.isError, retry: () => { void projects.refetch(); } }}
+    />
+  );
 }
 
 function SourceContextCreateIssueDialog({
+  open,
   onClose,
+  onOpenChangeComplete,
   initialMode,
   data,
   anchorCommentId,
 }: {
+  open: boolean;
   onClose: () => void;
+  onOpenChangeComplete?: (open: boolean) => void;
   initialMode: CreateMode;
   data?: Record<string, unknown> | null;
   anchorCommentId: string;
@@ -155,7 +197,9 @@ function SourceContextCreateIssueDialog({
 
   return (
     <CreateIssueDialogBody
+      open={open}
       onClose={onClose}
+      onOpenChangeComplete={onOpenChangeComplete}
       initialMode={initialMode}
       data={data}
       sourceContextExpanded={sourceContextExpanded}
@@ -176,22 +220,28 @@ function SourceContextCreateIssueDialog({
 }
 
 function CreateIssueDialogBody({
+  open,
   onClose,
+  onOpenChangeComplete,
   initialMode,
   data,
   sourceContextData,
   sourceContextExpanded = false,
   recoveryProjects,
 }: {
+  open: boolean;
   onClose: () => void;
+  onOpenChangeComplete?: (open: boolean) => void;
   initialMode: CreateMode;
   data?: Record<string, unknown> | null;
   sourceContextData?: Record<string, unknown>;
   sourceContextExpanded?: boolean;
   recoveryProjects?: RecoveryProjectAvailability;
 }) {
+  const prefersReducedMotion = useReducedMotion();
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
   const [mode, setMode] = useState<CreateMode>(initialMode);
+  const [modeSwitchCount, setModeSwitchCount] = useState(0);
   const [manualOpened, setManualOpened] = useState(initialMode === "manual");
   const [panelData, setPanelData] = useState(data ?? null);
   // Remembered across opens: the dialog reopens at the size it was left at.
@@ -216,6 +266,7 @@ function CreateIssueDialogBody({
       assignee_id: data.assignee_id,
     } : carry ?? null);
     if (next === "manual") setManualOpened(true);
+    setModeSwitchCount((count) => count + 1);
     setMode(next);
   };
 
@@ -224,9 +275,9 @@ function CreateIssueDialogBody({
       ? cn(
           "p-0 gap-0 flex flex-col overflow-hidden",
           "!top-1/2 !left-1/2 !-translate-x-1/2 !-translate-y-1/2",
-          // Smooth size transition when switching modes — the manual mode
-          // uses the same easing.
-          "!transition-all !duration-300 !ease-out",
+          // Geometry-only transition so DialogContent's enter/exit animation
+          // keeps its own duration & easing without being overridden.
+          "[interpolate-size:allow-keywords] [transition-property:width,max-width,height] [transition-duration:200ms] [transition-timing-function:cubic-bezier(0.23,1,0.32,1)] motion-reduce:[transition-duration:0ms]",
           // Phone gutter. The widths below are `!important` so they beat
           // DialogContent's own sizing — which also made them beat its
           // `max-w-[calc(100%-2rem)]` safety margin, leaving the card flush
@@ -251,31 +302,43 @@ function CreateIssueDialogBody({
         );
 
   return (
-    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => { if (!v) onClose(); }}
+      onOpenChangeComplete={onOpenChangeComplete}
+    >
       <DialogContent
         finalFocus={false}
         showCloseButton={false}
         className={className}
       >
-        {mode === "agent" ? (
-          <AgentCreatePanel
-            recoveryProjects={recoveryProjects}
-            onClose={onClose}
-            onSwitchMode={switchTo("manual")}
-            data={effectiveData}
-            isExpanded={isExpanded}
-            setIsExpanded={setIsExpanded}
-          />
-        ) : (
-          <ManualCreatePanel
-            recoveryProjects={recoveryProjects}
-            onClose={onClose}
-            onSwitchMode={switchTo("agent")}
-            data={effectiveData}
-            isExpanded={isExpanded}
-            setIsExpanded={setIsExpanded}
-          />
-        )}
+        <motion.div
+          key={mode}
+          initial={modeSwitchCount > 0 && !prefersReducedMotion ? { opacity: 0 } : false}
+          animate={{ opacity: 1 }}
+          transition={{ duration: prefersReducedMotion ? 0 : 0.13, ease: UI_EASE_OUT }}
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          {mode === "agent" ? (
+            <AgentCreatePanel
+              recoveryProjects={recoveryProjects}
+              onClose={onClose}
+              onSwitchMode={switchTo("manual")}
+              data={effectiveData}
+              isExpanded={isExpanded}
+              setIsExpanded={setIsExpanded}
+            />
+          ) : (
+            <ManualCreatePanel
+              recoveryProjects={recoveryProjects}
+              onClose={onClose}
+              onSwitchMode={switchTo("agent")}
+              data={effectiveData}
+              isExpanded={isExpanded}
+              setIsExpanded={setIsExpanded}
+            />
+          )}
+        </motion.div>
       </DialogContent>
     </Dialog>
   );

@@ -18,12 +18,17 @@ func TestNewWriterLoggerDefault(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
 	var buf bytes.Buffer
-	log := NewWriterLoggerDefault("daemon", &buf)
+	log := NewWriterLoggerDefault("daemon", &buf, "info", true)
 
+	log.Debug("component-debug")
+	slog.Debug("global-debug")
 	log.Error("boom", "code", 42)
 	slog.Warn("global-line")
 
 	out := buf.String()
+	if strings.Contains(out, "-debug") {
+		t.Errorf("debug messages reached an info-level writer: %q", out)
+	}
 	if !strings.Contains(out, "boom") {
 		t.Errorf("component logger output missing message: %q", out)
 	}

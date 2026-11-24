@@ -123,6 +123,41 @@ export const DocCommentListSchema = z.object({
     }),
   ),
 });
+const cancelledBy = z.object({ type: z.string(), id: z.string().optional(), name: z.string().optional() });
+export const DocTaskRunSchema = z
+  .object({
+    id: z.string().min(1),
+    agent_id: z.string(),
+    doc_thread_id: z.string(),
+    status: z.string(),
+    failure_reason: z.string().default(""),
+    error: z.string().nullable().catch(null).default(null),
+    cancelled_by: cancelledBy.optional().catch(undefined),
+    created_at: z.string().default(""),
+    completed_at: z.string().nullable().catch(null).default(null),
+    can_cancel: z.boolean().catch(false).default(false),
+  })
+  .transform((r) => ({
+    id: r.id,
+    agentId: r.agent_id,
+    docThreadId: r.doc_thread_id,
+    status: r.status,
+    failureReason: r.failure_reason,
+    error: r.error,
+    cancelledBy: r.cancelled_by,
+    createdAt: r.created_at,
+    completedAt: r.completed_at,
+    canCancel: r.can_cancel,
+  }));
+// One unreadable run is dropped instead of hiding every discussion's status.
+export const DocTaskRunListSchema = z.object({
+  tasks: z.array(z.unknown()).transform((rows) =>
+    rows.flatMap((row) => {
+      const run = DocTaskRunSchema.safeParse(row);
+      return run.success ? [run.data] : [];
+    }),
+  ),
+});
 export const DocVersionSchema = z
   .object({
     doc_id: z.string(),
@@ -135,6 +170,8 @@ export const DocVersionSchema = z
     action_ref: z.number().nullable().default(null),
     task_id: z.string().nullable().default(null),
     issue_id: z.string().nullable().default(null),
+    doc_thread_id: z.string().nullable().catch(null).default(null),
+    doc_thread_quote: z.string().nullable().catch(null).default(null),
     contributors: z
       .array(z.object({ type: actor, id: z.string() }))
       .catch([])
@@ -154,6 +191,8 @@ export const DocVersionSchema = z
     actionRef: d.action_ref,
     taskId: d.task_id,
     issueId: d.issue_id,
+    docThreadId: d.doc_thread_id,
+    docThreadQuote: d.doc_thread_quote,
     contributors: d.contributors,
     createdAt: d.created_at,
     updatedAt: d.updated_at,

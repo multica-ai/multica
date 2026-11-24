@@ -25,17 +25,17 @@ type piProcessTracker interface {
 // Process groups alone do not own Pi's detached Unix tools. This is bounded,
 // best-effort discovery, not containment of arbitrary double-forking programs.
 type piRunCleanup struct {
-	mu         sync.Mutex
-	tracker    piProcessTracker
-	err        error
-	tools      atomic.Int32
-	once       sync.Once
-	done       chan struct{}
-	stop       chan struct{}
-	observed   chan struct{}
-	exited     chan struct{}
-	finished   bool
-	unobserved bool
+	mu               sync.Mutex
+	tracker          piProcessTracker
+	err              error
+	tools            atomic.Int32
+	once             sync.Once
+	done             chan struct{}
+	stop             chan struct{}
+	observed         chan struct{}
+	exited           chan struct{}
+	finished         bool
+	lostToolAncestry bool
 }
 
 func newPiRunCleanup(cmd *exec.Cmd) *piRunCleanup {
@@ -101,6 +101,14 @@ func (c *piRunCleanup) complete(closeStdin, closePipes func()) error {
 	return c.finalize(nil, closeStdin, closePipes, 0, false)
 }
 
+// Call after finalization and after draining the tool events still in the pipe.
+func (c *piRunCleanup) toolOwnershipError() error {
+	if c.tools.Load() > 0 && c.lostToolAncestry {
+		return errors.New("runtime exited before tool process ownership could be recorded")
+	}
+	return nil
+}
+
 func (c *piRunCleanup) finalize(cmd *exec.Cmd, closeStdin, closePipes func(), grace time.Duration, terminate bool) error {
 	c.once.Do(func() {
 		defer close(c.done)
@@ -111,14 +119,19 @@ func (c *piRunCleanup) finalize(cmd *exec.Cmd, closeStdin, closePipes func(), gr
 		c.finished = true
 		defer c.tracker.close()
 		defer closePipes()
-		closeStdin()
 		if !terminate {
+			closeStdin()
 			return
 		}
 		deadline := time.Now().Add(piCleanupBudget)
 		if err := c.tracker.snapshot(c.tools.Load() > 0); err != nil {
 			slog.Warn("Pi process observation failed before termination", "error", err)
 		}
+		// If the runtime exited before this scan finished, its untracked tools
+		// may already have been reparented. Check before EOF or signals can
+		// cause the runtime to exit as part of our own cancellation.
+		runtimeExited := cmd.Process != nil && piRuntimeExited(cmd)
+		closeStdin()
 		// cmd.Wait has not run yet: the unreaped leader still reserves this
 		// process-group ID. Detached descendants use retained identities below.
 		signalProcessGroup(cmd, syscall.SIGTERM)
@@ -136,7 +149,7 @@ func (c *piRunCleanup) finalize(cmd *exec.Cmd, closeStdin, closePipes func(), gr
 		// Re-scan before killing the parent, then stop every retained identity.
 		// Never signal a detached numeric PGID after its leader has exited.
 		c.err = errors.Join(c.err, c.tracker.snapshot(c.tools.Load() > 0))
-		c.unobserved = c.tracker.unobservedTools()
+		c.lostToolAncestry = runtimeExited && c.tracker.unobservedTools()
 		signalProcessGroup(cmd, syscall.SIGKILL)
 		signalErr := c.tracker.signal(syscall.SIGKILL)
 		for {

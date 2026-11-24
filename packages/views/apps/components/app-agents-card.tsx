@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -13,7 +12,7 @@ import {
 import { Switch } from "@multica/ui/components/ui/switch";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { canEditAgent, useCurrentMember } from "@multica/core/permissions";
-import { connectedAppsKeys, useUpdateAgentApps } from "@multica/core/connected-apps";
+import { useUpdateAgentApps } from "@multica/core/connected-apps";
 import { refreshFeaturesOnLockedError } from "@multica/core/billing";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import type { Agent, AppAccountScope, AppCatalogEntry, AppsOverview } from "@multica/core/types";
@@ -94,10 +93,9 @@ function AgentAppRow({
   const update = useUpdateAgentApps(agent.id);
   const teamAccess = useTeamAppAccess(overview);
   const paidFeatureError = usePaidFeatureErrorMessage();
-  const [saving, setSaving] = useState(false);
   const current = overview.agent_apps.find((a) => a.agent_id === agent.id && a.toolkit_slug === slug);
   const teamLocked = current?.account_scope === "team" && !overview.can_manage;
-  const disabled = !canEdit || saving || teamLocked;
+  const disabled = !canEdit || update.isPending || teamLocked;
   const status = current ? appAccountStatus(overview, current.account_scope, slug) : null;
   const readiness = !current || !status
     ? undefined
@@ -113,18 +111,16 @@ function AgentAppRow({
     personal: t(($) => $.connected_apps.app_page.source_personal),
   };
 
-  // The row reads the overview, so it stays busy until the refetch lands
-  // instead of flicking back to the old value in between.
+  // The switch and source show the new value at once (the mutation writes it
+  // into the overview); the row stays disabled until the save lands so two
+  // saves of the same agent's list cannot race.
   const save = (scope: AppAccountScope | null) => {
-    setSaving(true);
-    update
-      .mutateAsync(agentAppsWith(overview, agent.id, slug, scope))
-      .then(() => qc.invalidateQueries({ queryKey: connectedAppsKeys.overview(wsId) }))
-      .catch((e: unknown) => {
+    update.mutate(agentAppsWith(overview, agent.id, slug, scope), {
+      onError: (e: unknown) => {
         refreshFeaturesOnLockedError(qc, wsId, e);
         toast.error(paidFeatureError(e, e instanceof Error && e.message ? e.message : t(($) => $.connected_apps.app_page.save_failed)));
-      })
-      .finally(() => setSaving(false));
+      },
+    });
   };
 
   return (

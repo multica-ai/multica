@@ -105,6 +105,14 @@ func TestIssueViewTableQueryKeepsEveryViewCondition(t *testing.T) {
 		}}, `{"properties": {"p1": ["opt", {"op": "gte", "value": "3"}]}, "include_sub_issues": true}`},
 		{"agent running", map[string]any{"agentRunningFilter": true},
 			`{"working_only": true, "include_sub_issues": true}`},
+		{"agent idle off", map[string]any{"agentIdleFilter": false},
+			`{"include_sub_issues": true}`},
+		{"agent idle", map[string]any{"agentIdleFilter": true, "agentRunningFilter": false},
+			`{"idle_only": true, "include_sub_issues": true}`},
+		{"agent running with idle off", map[string]any{"agentRunningFilter": true, "agentIdleFilter": false},
+			`{"working_only": true, "include_sub_issues": true}`},
+		{"agent running takes precedence over idle", map[string]any{"agentRunningFilter": true, "agentIdleFilter": true},
+			`{"working_only": true, "include_sub_issues": true}`},
 		{"advanced tree", map[string]any{"advancedFilter": map[string]any{
 			"type": "group", "id": "root", "match": "any",
 			"children": []any{
@@ -388,4 +396,66 @@ func TestListIssueViewIssuesHidesOtherMembersPrivateViews(t *testing.T) {
 	other := createSecondWorkspaceMember(t)
 	listIssueViewIssuesForTest(t, other, view.ID, "").Want(http.StatusNotFound)
 	listIssueViewIssuesForTest(t, testUserID, view.ID, "limit=1").Want(http.StatusOK)
+}
+
+func TestListIssueViewIssuesActivityFilters(t *testing.T) {
+	project := dbfx.Project(t, "saved view activity")
+	agent := dbfx.Agent(t, "saved view activity", testRuntimeID)
+	for _, row := range []struct{ title, status string }{
+		{"a untouched", ""},
+		{"b completed", "completed"},
+		{"c running", "running"},
+		{"d queued", "queued"},
+	} {
+		issue := dbfx.Issue(t, row.title, testutil.Cols{"project_id": project, "priority": "urgent"})
+		if row.status != "" {
+			dbfx.Task(t, agent, testutil.Cols{"runtime_id": testRuntimeID, "issue_id": issue, "status": row.status})
+		}
+	}
+	dbfx.Issue(t, "outside priority", testutil.Cols{"project_id": project, "priority": "low"})
+	otherProject := dbfx.Project(t, "outside saved view activity")
+	dbfx.Issue(t, "outside project", testutil.Cols{"project_id": otherProject, "priority": "urgent"})
+
+	all := []string{"a untouched", "b completed", "c running", "d queued"}
+	for _, scope := range []string{"workspace", "project"} {
+		t.Run(scope, func(t *testing.T) {
+			for _, tc := range []struct {
+				name  string
+				query map[string]any
+				want  []string
+			}{
+				{"omitted", map[string]any{}, all},
+				{"off", map[string]any{"agentIdleFilter": false, "agentRunningFilter": false}, all},
+				{"idle", map[string]any{"agentIdleFilter": true, "agentRunningFilter": false}, []string{"a untouched", "b completed"}},
+				{"running", map[string]any{"agentIdleFilter": false, "agentRunningFilter": true}, []string{"c running"}},
+				{"running takes precedence", map[string]any{"agentIdleFilter": true, "agentRunningFilter": true}, []string{"c running"}},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					query := map[string]any{"priorityFilters": []string{"urgent"}, "projectFilters": []string{project}}
+					for key, value := range tc.query {
+						query[key] = value
+					}
+					input := map[string]any{
+						"name": t.Name(), "scope_type": scope, "query": query,
+						"display": map[string]any{"sortBy": "title", "sortDirection": "asc"},
+					}
+					if scope == "project" {
+						input["scope_id"] = project
+					}
+					view, code, body := createIssueViewForTest(t, input)
+					if code != http.StatusCreated {
+						t.Fatalf("create view: %d %s", code, body)
+					}
+					var response issueViewIssuesResponse
+					listIssueViewIssuesForTest(t, testUserID, view.ID, "").Want(http.StatusOK).JSON(&response)
+					if got := issueViewIssueTitles(response); !reflect.DeepEqual(got, tc.want) {
+						t.Fatalf("saved view issues = %v, want %v", got, tc.want)
+					}
+					if response.Total == nil || *response.Total != int64(len(tc.want)) || response.HasMore {
+						t.Fatalf("page metadata: total=%v has_more=%v, want %d issues", response.Total, response.HasMore, len(tc.want))
+					}
+				})
+			}
+		})
+	}
 }

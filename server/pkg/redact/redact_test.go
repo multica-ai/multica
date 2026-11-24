@@ -222,6 +222,83 @@ func TestRedactGitLabToken(t *testing.T) {
 	}
 }
 
+// TestRedactMulticaTokens guards the mat_/mul_/mdt_/mcn_ credentials minted
+// by auth.GeneratePATToken and siblings (prefix + 40 hex characters). The
+// generic TOKEN=/Bearer rules only cover some surrounding syntax, so a bare
+// token in a CLI flag, error string, or JSON field used to reach the
+// database and WebSocket broadcast unredacted.
+func TestRedactMulticaTokens(t *testing.T) {
+	t.Parallel()
+	const hex40 = "0123456789abcdef0123456789abcdef01234567"
+	prefixes := []string{"mat_", "mul_", "mdt_", "mcn_"}
+	for _, prefix := range prefixes {
+		token := asm(prefix, hex40)
+		got := Text("retrying with --token " + token + " and moving on")
+		if strings.Contains(got, token) || strings.Contains(got, hex40) {
+			t.Fatalf("%s token not redacted: %s", prefix, got)
+		}
+		if got != "retrying with --token [REDACTED_MULTICA_TOKEN] and moving on" {
+			t.Fatalf("%s: surrounding text not preserved: %s", prefix, got)
+		}
+	}
+
+	// Nested JSON values are walked by InputMap through Text; a bare
+	// auth_token field must be masked the same way as a CLI flag.
+	token := asm("mat_", hex40)
+	got := InputMap(map[string]any{
+		"auth_token": token,
+		"args":       []any{"--token", token},
+	})
+	if got["auth_token"] != "[REDACTED_MULTICA_TOKEN]" {
+		t.Fatalf("InputMap auth_token = %#v, want the Multica placeholder", got["auth_token"])
+	}
+	args, ok := got["args"].([]any)
+	if !ok || len(args) != 2 || args[1] != "[REDACTED_MULTICA_TOKEN]" {
+		t.Fatalf("InputMap args = %#v, want the flag value redacted", got["args"])
+	}
+
+	// Wrong length, leftover test-style prefixes, and ordinary words that
+	// only share a letter prefix must stay untouched.
+	untouched := []string{
+		asm("mat_", "0123456789abcdef0123456789abcdef0123456"),   // 39 hex
+		asm("mat_", "0123456789abcdef0123456789abcdef012345678"), // 41 hex
+		"mat_self_mention_not_a_real_token",
+		"the matrix_0123456789abcdef0123456789abcdef01234567 id",
+	}
+	for _, input := range untouched {
+		if got := Text(input); got != input {
+			t.Fatalf("false positive redaction:\n  input:  %s\n  output: %s", input, got)
+		}
+	}
+}
+
+func TestRedactMulticaTokenContext(t *testing.T) {
+	t.Parallel()
+
+	const hex40 = "0123456789abcdef0123456789abcdef01234567"
+	token := asm("mat_", hex40)
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"environment assignment", "MULTICA_TOKEN=" + token, "MULTICA_[REDACTED CREDENTIAL]"},
+		{
+			name:  "escaped JSON",
+			input: `{"value":"line1\n` + token + `\t` + token + `"}`,
+			want:  `{"value":"line1\n[REDACTED_MULTICA_TOKEN]\t[REDACTED_MULTICA_TOKEN]"}`,
+		},
+		{"embedded in an identifier", "prefix_" + token, "prefix_" + token},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Text(tt.input); got != tt.want {
+				t.Errorf("Text() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRedactJWT(t *testing.T) {
 	t.Parallel()
 	input := "token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"

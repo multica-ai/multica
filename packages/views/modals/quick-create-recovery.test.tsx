@@ -11,7 +11,14 @@ vi.mock("@tanstack/react-query", () => ({ queryOptions: (options: unknown) => op
   data: [{ id: "project-a", archived_at: null }, { id: "archived-a", archived_at: "2026-01-01T00:00:00Z" }], isSuccess: true, isFetching: state.projectFetching, isError: false, refetch: vi.fn(),
 }) }));
 vi.mock("@multica/ui/components/ui/dialog", () => ({
-  Dialog: ({ children }: {children: ReactNode}) => <div>{children}</div>,
+  Dialog: ({ children, open, onOpenChangeComplete }: {
+    children: ReactNode;
+    open?: boolean;
+    onOpenChangeComplete?: (open: boolean) => void;
+  }) => <div>
+    {children}
+    {open === false && <button onClick={() => onOpenChangeComplete?.(false)}>finish exit</button>}
+  </div>,
   DialogContent: ({ children }: {children: ReactNode}) => <div>{children}</div>,
 }));
 vi.mock("./quick-create-issue", () => ({ AgentCreatePanel: () => <div>agent panel</div> }));
@@ -36,6 +43,19 @@ const recovery = { notificationId: "failure-a", workspaceId: "ws-recovery", proj
 function Host({ seed = recovery }: {seed?: typeof recovery}) {
   const [open, setOpen] = useState(true);
   return open ? <CreateIssueDialog initialMode="manual" onClose={() => setOpen(false)} data={{ quick_create_recovery: seed }} /> : null;
+}
+function RetainedHost() {
+  const [open, setOpen] = useState(true);
+  const [mounted, setMounted] = useState(true);
+  return mounted ? (
+    <CreateIssueDialog
+      open={open}
+      initialMode="manual"
+      onClose={() => setOpen(false)}
+      onOpenChangeComplete={(nextOpen) => { if (!nextOpen) setMounted(false); }}
+      data={{ quick_create_recovery: recovery }}
+    />
+  ) : <output data-testid="released-recovery" />;
 }
 const flush = () => new Promise<void>((resolve) => queueMicrotask(resolve));
 beforeEach(async () => {
@@ -69,6 +89,33 @@ describe("quick-create recovery isolation", () => {
     expect(persisted).not.toContain("Original request A");
     fireEvent.click(screen.getByRole("button", {name: action}));
     expect(useIssueDraftStore.getState().draft).toEqual(ordinary);
+  });
+
+  it("keeps the isolated draft until the dialog exit completes", () => {
+    const ordinary = useIssueDraftStore.getState().draft;
+    render(<RetainedHost />);
+    fireEvent.click(screen.getByRole("button", { name: "cancel recovery" }));
+
+    expect(screen.getByTestId("recovery-draft")).toHaveTextContent("Original request A");
+    expect(useIssueDraftStore.getState().isolatedDraftBackup).toEqual(ordinary);
+    fireEvent.click(screen.getByRole("button", { name: "finish exit" }));
+
+    expect(screen.getByTestId("released-recovery")).toBeInTheDocument();
+    expect(useIssueDraftStore.getState().draft).toEqual(ordinary);
+  });
+
+  it("releases the retained dialog when workspace changes remove its draft", async () => {
+    const view = render(<RetainedHost />);
+    await act(async () => {
+      state.workspaceId = "ws-other";
+      setCurrentWorkspace("recovery-other-test", state.workspaceId);
+      await flush();
+      useIssueDraftStore.getState().setManual({ title: "Other workspace C" });
+    });
+    view.rerender(<RetainedHost />);
+
+    expect(screen.getByTestId("released-recovery")).toBeInTheDocument();
+    expect(useIssueDraftStore.getState().draft.manual.title).toBe("Other workspace C");
   });
 
   it("does not classify a cached catalog while its refetch is pending", () => {

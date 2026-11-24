@@ -286,15 +286,17 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 
 ### デーモンのログ [#daemon-logs]
 
+デーモンの既定のログレベルは `debug` です。変更するには `LOG_LEVEL`（`debug`、`info`、`warn`、`error`）を設定するか、`multica config set log_level info` でプロファイルの既定値を保存します。環境変数がプロファイルより優先されます。
+
 デーモンがバックグラウンドで（ターミナルにつながずに）動いているとき、ログは `~/.multica/daemon.log`（名前付きプロファイルでは `~/.multica/profiles/<name>/daemon.log`）に書かれ、サイズでローテーションされます。ローテーション後のファイルは gzip で圧縮されます。
 
-| 変数 | デフォルト | 説明 |
-|---|---|---|
-| `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `20` | `daemon.log` をローテーションするサイズ（MB） |
-| `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `5` | 残すローテーション済みファイルの最大数 |
-| `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `30` | ローテーション済みファイルを残す日数 |
+| 変数 | プロファイル設定キー | デフォルト | 説明 |
+|---|---|---|---|
+| `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `daemon_log_max_size_mb` | `20` | `daemon.log` をローテーションするサイズ（MB） |
+| `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `daemon_log_max_backups` | `5` | 残すローテーション済みファイルの最大数 |
+| `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `daemon_log_max_age_days` | `30` | ローテーション済みファイルを残す日数 |
 
-3 つとも正の整数を取ります。`0`、負の数、解釈できない値はデフォルトとして扱われ、「無制限」にはなりません。ローテーション済みファイルは、個数と日数のどちらかの上限に先に達した時点で削除されます。クラッシュ時の出力は同じディレクトリの `daemon.err.log` に書かれ、起動時に 5 MB を超えていれば `daemon.err.log.1` に名前が変わります。
+3 つとも正の整数を取ります。`multica --profile dev config set <key> <value>` で保存し、`config show` で保存値を確認します。`""` を渡すと設定を解除できます。変更は次回のデーモン起動または再起動時に反映されます。有効な環境変数はプロファイルより優先されます。未設定、空白、ゼロ、負数、不正な形式、オーバーフローの場合は有効なプロファイル値、それもなければ表のデフォルト値を使います。サイズと日数はバイト数や時間への変換でもオーバーフローしてはならず、`config set` は不正な値を拒否します。ゼロで保持制限を無効にはできません。ローテーション済みファイルは、個数と日数のどちらかの上限に先に達した時点で削除されます。クラッシュ時の出力は同じディレクトリの `daemon.err.log` に書かれ、起動時に 5 MB を超えていれば `daemon.err.log.1` に名前が変わります。
 
 ### ツールごとのパス、モデル、引数
 
@@ -388,6 +390,7 @@ multica config show
 | `poll_interval` | `30s` | 実行のポーリング間隔 |
 | `ws_claim_poll_interval` | `3m` | 正常な WebSocket での claim 安全ポーリング上限。`poll_interval` とは独立して設定され、Daemon は下方向のジッターを適用します |
 | `heartbeat_interval` | `15s` | ハートビート間隔 |
+| `log_level` | `debug` | デーモンのログレベル（`debug`、`info`、`warn`、`error`）。`LOG_LEVEL` が優先されます |
 | `agent_timeout` | 無制限 | 1 回の実行の絶対時間上限 |
 | `agent_idle_watchdog` | `2h` | ツール実行中でないときの静穏上限。`0s` でデーモンの watchdog 全体を無効化し、`agent_tool_watchdog` も効かなくなります |
 | `agent_tool_watchdog` | `agent_idle_watchdog` と同じ | ツール実行中の静穏上限。`0s` にするとデーモンの watchdog は静穏なツール呼び出しを理由に実行を停止しなくなり、実行の上限は `agent_timeout`（デフォルトは無制限）だけになります |
@@ -396,6 +399,9 @@ multica config show
 | `disable_auto_update` | 環境に従う | `true` で自動更新を無効化。`false` はローカルの上書きをクリアし、環境変数またはデフォルトに戻します |
 | `auto_update_check_interval` | `6h` | 更新チェックの間隔 |
 | `disable_auto_reload` | 環境に従う | `true` でディスク上の置き換えへの追従を停止。`false` はローカルの上書きをクリア。`disable_auto_update` とは別に解決されます |
+| `daemon_log_max_size_mb` | `20` | `daemon.log` をローテーションするサイズ（MB）。[デーモンのログ](#daemon-logs)を参照 |
+| `daemon_log_max_backups` | `5` | 残すローテーション済みファイルの最大数 |
+| `daemon_log_max_age_days` | `30` | ローテーション済みファイルを残す日数 |
 
 値のルール:
 
