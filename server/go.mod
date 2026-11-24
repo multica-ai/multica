@@ -80,3 +80,5 @@ require (
 )
 
 tool golang.org/x/vuln/cmd/govulncheck
+
+replace github.com/tdewolff/parse/v2 v2.8.16 => ./third_party/tdewolff-parse
