@@ -5,7 +5,7 @@
     "add": "Tambah status",
     "show_archived": "Tampilkan yang diarsipkan ({{count}})",
     "archived_badge": "Diarsipkan",
-    "archived_hint": "Dipensiunkan dari penugasan baru. Tugas yang sudah menggunakannya tetap mempertahankannya.",
+    "archived_hint": "Dihapus dari board dan pemilih status.",
     "reorder_failed": "Tidak dapat menyimpan urutan baru.",
     "actions": {
       "move_up": "Pindah ke atas",
@@ -16,7 +16,6 @@
       "reorder": "Urutkan ulang {{name}}"
     },
     "reorder_hint": "Seret di dalam kategori untuk mengurutkan ulang board, daftar, dan menu.",
-    "built_in_dialog": {},
     "editor": {
       "create_title": "Status baru",
       "edit_title": "Edit status",
@@ -48,7 +47,7 @@
     "archive_dialog": {
       "retry": "Coba lagi arsipkan",
       "title": "Arsipkan status ini?",
-      "description": "Pindahkan semua tugas dari \"{{name}}\" sebelum mengarsipkannya. Setelah kosong, status ini akan dihapus dari board dan pemilih status.",
+      "description": "\"{{name}}\" akan dihapus dari board dan pemilih status. Anda dapat melihat status yang diarsipkan nanti.",
       "in_use_title": "Pindahkan tugas sebelum mengarsipkan",
       "in_use": "Tugas yang masih menggunakan status ini: {{count}}. Pindahkan ke status lain, termasuk tugas yang selesai dan dibatalkan, lalu coba lagi.",
       "view_issues": "Lihat tugas",
@@ -79,24 +78,10 @@
       "cancelled": "Diputuskan untuk tidak dikerjakan."
     },
     "pr_auto_complete_badge": "Diset saat PR digabungkan",
-    "built_in_locked": "Status bawaan menggerakkan perilaku sistem, sehingga tidak dapat diedit atau diarsipkan. Anda tetap dapat mengurutkan ulang urutannya."
-  },
-  "wakeups": {
-    "description": "Aturan platform yang berlaku untuk setiap tugas. Setiap tugas dapat mengubahnya di bagian Wakeups-nya.",
-    "child_done_title": "Saat sub-tugas selesai",
-    "child_done_description": "Membangunkan penerima tugas induk saat satu tahap selesai dan tahap berikutnya menunggu, dan sekali lagi saat semua sub-tugas ditutup. Penerima tugas berupa member akan menerima notifikasi inbox sebagai gantinya.",
-    "enabled": "Aktif secara default",
-    "instruction": "Instruksi default",
-    "instruction_hint": "Dikirim ke agent yang dibangunkan. Biarkan kosong untuk menggunakan instruksi bawaan di bawah.",
-    "instruction_placeholder": "Biarkan kosong untuk menggunakan instruksi bawaan",
-    "builtin": "Instruksi bawaan",
-    "instruction_invalid": "Jaga instruksi dalam batas 4.000 byte.",
-    "save": "Simpan",
-    "saving": "Menyimpan…",
-    "save_error": "Tidak dapat menyimpan default.",
-    "customized_other": "{{count}} tugas terbuka memiliki pengaturan sendiri dan mengabaikan default ini.",
-    "admin_only": "Hanya owner dan admin yang dapat mengubah default ini.",
-    "load_error": "Tidak dapat memuat default wakeup."
+    "built_in_locked": "Status bawaan menggerakkan perilaku sistem, sehingga tidak dapat diedit atau diarsipkan. Anda tetap dapat mengurutkan ulang urutannya.",
+    "builtin_badge": "Bawaan",
+    "workflow_usage_other": "Digunakan oleh {{count}} workflow",
+    "workflow_usage_none": "Tidak ada di workflow mana pun"
   },
   "quick_actions": {
     "title": "Quick Actions",
@@ -123,7 +108,7 @@
     "field_visibility": "Siapa yang dapat menggunakannya",
     "public_target_hint": "Harus berupa agent yang dapat dijalankan oleh siapa saja.",
     "target_private": "private",
-    "target_missing": "Target tidak tersedia",
+    "target_missing": "Agent tidak tersedia",
     "archive": "Arsipkan",
     "unarchive": "Pulihkan",
     "edit": "Edit",
@@ -138,6 +123,8 @@
     "field_name": "Nama",
     "field_name_placeholder": "Code Review",
     "field_target": "Berjalan sebagai",
+    "no_target": "Tanpa agent (hanya komentar)",
+    "no_target_hint": "Mengirim pesan tanpa menyebut siapa pun.",
     "field_prompt": "Prompt",
     "field_prompt_placeholder": "Tinjau kode yang terkait dengan tugas ini. Fokus pada kebenaran dan edge case.",
     "prompt_hint": "Dikirim sesuai yang ditulis. Agent sudah melihat tugas ini.",
@@ -152,19 +139,16 @@
     "toast_saved": "Perubahan disimpan"
   },
   "preferences": {
-    "theme": {
-      "title": "Tema",
-      "light": "Terang",
-      "dark": "Gelap",
-      "system": "Sistem"
-    },
     "language": {
       "title": "Bahasa",
       "english": "English",
-      "chinese": "中文",
+      "chinese": "简体中文",
+      "chinese_traditional": "繁體中文",
       "korean": "한국어",
       "japanese": "日本語",
       "french": "Français",
+      "spanish": "Español",
+      "russian": "Русский",
       "indonesian": "Bahasa Indonesia",
       "sync_failed": "Bahasa disimpan di perangkat ini, tetapi gagal disinkronkan ke akun Anda. Perangkat lain mungkin masih menampilkan bahasa sebelumnya."
     },
@@ -185,15 +169,198 @@
       "after_run": "Mulai setelah proses ini selesai",
       "hint": "Hanya mengatur default. Anda tetap dapat mengubahnya untuk setiap pesan sebelum mengirim."
     },
+    "comment_images": {
+      "title": "Gambar di komentar",
+      "thumbnails": "Thumbnail",
+      "full": "Ukuran penuh",
+      "hint": "Thumbnail menjaga thread panjang tetap ringkas; klik gambar untuk melihat ukuran penuh."
+    },
     "comments_title": "Komentar & chat",
     "region_title": "Bahasa & wilayah",
-    "appearance_title": "Tampilan",
     "issue_fields_title": "Kolom yang ditampilkan saat membuat tugas",
     "issue_fields": {
       "field": "Kolom",
       "quick": "Buat dengan agent",
       "manual": "Buat manual",
       "unsupported": "Tidak tersedia saat membuat dengan agent"
+    }
+  },
+  "appearance": {
+    "reset": "Atur ulang ke default",
+    "color": {
+      "title": "Warna"
+    },
+    "mode": {
+      "title": "Mode",
+      "light": "Terang",
+      "dark": "Gelap",
+      "system": "Sistem"
+    },
+    "theme": {
+      "title": "Tema",
+      "description": "Warna, border, bayangan, dan sudut di seluruh aplikasi.",
+      "default": "Default",
+      "pop": "Pop",
+      "built_in": "Bawaan",
+      "installed": "Terpasang",
+      "remove": "Hapus {{name}}",
+      "safe_mode": "Mode aman: tema Anda dijeda hingga jendela ini ditutup.",
+      "safe_mode_exit": "Gunakan tema saya",
+      "folder": "Folder tema",
+      "folder_problems": "Beberapa tema di folder tema tidak lolos pemeriksaan. Perbaiki lalu simpan; versi terakhir yang lolos tetap digunakan."
+    },
+    "import": {
+      "button": "Impor tema",
+      "from_zip": "File tema (.zip)",
+      "from_folder": "Folder tema",
+      "storage_full": "Ruang di perangkat ini tidak cukup untuk menyimpan tema. Hapus tema lain lalu coba lagi.",
+      "confirm_title": "Pasang “{{name}}”?",
+      "warning": "Tema dapat mengubah tampilan setiap halaman, termasuk dialog dan peringatan. Pasang tema hanya dari orang yang Anda percaya.",
+      "author": "Pembuat",
+      "version": "Versi",
+      "replaces": "{{to}} (menggantikan {{from}})",
+      "includes": "Termasuk",
+      "cancel": "Batal",
+      "confirm": "Pasang dan gunakan",
+      "error_title": "Tidak dapat memasang tema ini",
+      "error_description": "Tidak ada yang diubah. File tema memiliki masalah berikut:",
+      "close": "Tutup",
+      "has_options_other": "{{count}} opsi",
+      "has_assets_other": "{{count}} font dan gambar",
+      "beta": "Beta",
+      "beta_note": "Tema kustom masih dalam beta. Variabel dan manifest yang digunakan tema dapat berubah, dan tema mungkin perlu diperbarui."
+    },
+    "store": {
+      "manage": "Kelola",
+      "title": "Tema",
+      "description": "Tema yang Anda pasang, dan tema buatan komunitas.",
+      "description_local": "Tema yang Anda pasang.",
+      "search": "Cari tema",
+      "installed_only": "Tampilkan yang terpasang saja",
+      "showing_other": "Menampilkan {{count}} tema",
+      "installed": "Terpasang",
+      "loading": "Memuat tema",
+      "error": "Tidak dapat memuat toko tema. Coba lagi sebentar lagi.",
+      "retry": "Coba lagi",
+      "none_installed": "Belum ada tema yang terpasang.",
+      "no_results": "Tidak ada tema yang cocok dengan “{{query}}”.",
+      "by": "oleh {{author}}",
+      "downloads_other": "{{downloads}} unduhan",
+      "source": "{{repo}} di GitHub",
+      "no_preview": "Tidak ada pratinjau",
+      "screenshot_alt": "{{name}} dalam mode {{mode}}",
+      "install": "Pasang",
+      "installing": "Memasang...",
+      "use": "Gunakan",
+      "in_use": "Sedang digunakan",
+      "update": "Perbarui ke {{version}}",
+      "remove": "Hapus",
+      "taken": "Tema dengan id ini sudah terpasang",
+      "installed_toast": "“{{name}}” terpasang.",
+      "updated": "“{{name}}” diperbarui ke {{version}}.",
+      "install_failed": "Tidak dapat memasang “{{name}}”",
+      "warning": "Tema dapat mengubah tampilan setiap halaman, termasuk dialog dan peringatan. Tema di toko diperiksa secara otomatis, tetapi dibuat oleh komunitas."
+    },
+    "updates": {
+      "title": "Tema dari toko",
+      "description_other": "Anda memiliki {{count}} tema dari toko.",
+      "check": "Periksa pembaruan",
+      "checking": "Memeriksa...",
+      "up_to_date": "Tema toko Anda sudah yang terbaru.",
+      "update_all": "Perbarui semua ({{count}})"
+    },
+    "own": {
+      "title": "Buat sendiri",
+      "description": "Minta agent mana pun untuk membuatnya di chat atau tugas, impor tema sebagai .zip atau folder, atau mulai dari salinan tema saat ini."
+    },
+    "tools": {
+      "duplicate": "Duplikat “{{name}}” sebagai tema baru",
+      "open_folder": "Buka folder tema",
+      "guide": "Cara membuat tema",
+      "duplicated_web": "{{file}} diunduh. Ekstrak, edit theme.css, lalu impor foldernya.",
+      "duplicated_desktop": "“{{name}}” dibuat di folder tema. Perubahan pada theme.css diterapkan saat Anda menyimpan.",
+      "duplicate_failed": "Tidak dapat membuat salinan: {{error}}"
+    },
+    "theme_options": {
+      "title": "Opsi tema",
+      "description": "Disediakan oleh {{name}}.",
+      "reset": "Atur ulang opsi"
+    },
+    "ui_text": {
+      "title": "Teks antarmuka",
+      "description": "Menu, tombol, daftar, sidebar, dan judul."
+    },
+    "latin_font": {
+      "title": "Font Latin"
+    },
+    "ui_font": {
+      "inter": "Default",
+      "system": "Sistem",
+      "serif": "Serif",
+      "mono": "Monospace"
+    },
+    "cjk_font": {
+      "title": "Font CJK",
+      "description": "Aksara Tionghoa; aksara Jepang dan Korea menggunakan jenis huruf yang sama.",
+      "sans": "Sans",
+      "serif": "Serif",
+      "kai": "Kai",
+      "built_in": "Bawaan",
+      "local": "Di perangkat ini",
+      "load_local": "Tampilkan font di perangkat ini...",
+      "loading": "Mencari font...",
+      "none": "Tidak ada font beraksara Tionghoa di perangkat ini.",
+      "load_failed": "Tidak dapat membaca font di perangkat ini.",
+      "sample": "永和九年 汉字"
+    },
+    "follow_ui": "Sama dengan antarmuka",
+    "theme_font": "Font tema",
+    "font_size": {
+      "title": "Ukuran font",
+      "description": "Hanya mengubah skala teks. Jarak dan tata letak tetap sama.",
+      "value": "{{size}} px",
+      "default": "{{size}} px · Default"
+    },
+    "content_text": {
+      "title": "Teks konten",
+      "description": "Deskripsi tugas, komentar, chat, dan dokumen.",
+      "sample": "Deskripsi dan komentar dibaca secara utuh, sehingga dapat memakai font yang dirancang untuk dibaca sementara daftar dan tombol tetap ringkas."
+    },
+    "code_font": {
+      "title": "Font kode",
+      "description": "Blok kode, kode inline, dan log.",
+      "geist": "Default",
+      "jetbrains": "Ligatur",
+      "system": "Monospace sistem"
+    },
+    "content_size": {
+      "title": "Ukuran font",
+      "description": "Hanya teks konten. Secara default mengikuti antarmuka.",
+      "follow": "Sesuaikan ukuran antarmuka"
+    },
+    "content_leading": {
+      "title": "Tinggi baris",
+      "compact": "Ringkas",
+      "default": "Default",
+      "relaxed": "Longgar"
+    },
+    "layout": {
+      "title": "Tata letak dan aksesibilitas"
+    },
+    "density": {
+      "title": "Kepadatan",
+      "description": "Tinggi baris di daftar tugas, pencarian, dan sidebar, serta jarak di board.",
+      "compact": "Ringkas",
+      "default": "Default",
+      "comfortable": "Nyaman"
+    },
+    "reduce_motion": {
+      "title": "Kurangi gerakan",
+      "description": "Matikan animasi dan transisi. Saat nonaktif, pengaturan sistem Anda tetap berlaku."
+    },
+    "high_contrast": {
+      "title": "Tingkatkan kontras",
+      "description": "Teks sekunder lebih gelap dan border lebih tegas."
     }
   },
   "shortcuts": {
@@ -218,8 +385,9 @@
     "no_results": "Tidak ada tindakan pintasan yang cocok.",
     "conflict_error": "Sudah digunakan oleh {{action}}.",
     "reserved_error": "Dicadangkan oleh browser atau jendela desktop.",
-    "send_error": "Send hanya dapat menggunakan Enter atau Mod+Enter.",
+    "send_error": "Kirim hanya dapat menggunakan Enter atau Cmd/Ctrl+Enter.",
     "unsafe_error": "Tombol ini akan mengganggu pengetikan atau navigasi keyboard dasar.",
+    "unrecognized_error": "Kombinasi tombol ini tidak dapat direkam. Coba yang lain.",
     "send_enter_hint": "Shift+Enter menyisipkan paragraf, melanjutkan daftar, atau menambahkan baris baru dalam code block.",
     "categories": {
       "general": "Umum",
@@ -246,6 +414,10 @@
         "label": "Alihkan jendela chat",
         "description": "Buka atau tutup jendela chat mengambang. Membukanya akan memfokuskan input pesan."
       },
+      "newChat": {
+        "label": "Tanya Multica",
+        "description": "Mulai chat baru di jendela chat mengambang."
+      },
       "findInIssue": {
         "label": "Cari dalam tugas",
         "description": "Cari di dalam detail tugas yang terbuka."
@@ -253,6 +425,30 @@
       "archiveInboxItem": {
         "label": "Arsipkan notifikasi",
         "description": "Arsipkan notifikasi inbox yang terbuka, atau pulihkan saat membaca arsip."
+      },
+      "unsubscribeArchiveInboxItem": {
+        "label": "Berhenti berlangganan & arsipkan",
+        "description": "Keluar dari tugas pada notifikasi yang terbuka dan arsipkan. Tersedia untuk tugas yang bukan milik Anda atau agent Anda."
+      },
+      "snoozeInboxItem": {
+        "label": "Tunda notifikasi",
+        "description": "Tunda tugas di kotak masuk yang terbuka, atau munculkan kembali sekarang jika sedang ditunda."
+      },
+      "markInboxUnread": {
+        "label": "Tandai notifikasi belum dibaca",
+        "description": "Ubah status dibaca atau belum dibaca pada notifikasi kotak masuk yang terbuka tanpa meninggalkannya."
+      },
+      "nextInboxItem": {
+        "label": "Notifikasi berikutnya",
+        "description": "Buka notifikasi berikutnya di daftar kotak masuk aktif."
+      },
+      "prevInboxItem": {
+        "label": "Notifikasi sebelumnya",
+        "description": "Buka notifikasi sebelumnya di daftar kotak masuk aktif."
+      },
+      "undoInboxAction": {
+        "label": "Urungkan aksi kotak masuk",
+        "description": "Urungkan tindakan arsip, tunda, atau berhenti berlangganan terakhir selama toast masih ditampilkan. Setelah toast hilang, pulihkan notifikasi yang terbuka jika sudah diarsipkan, atau item yang disebutkan dalam pemberitahuan bahwa Kotak Masuk telah dibersihkan."
       },
       "send": {
         "label": "Kirim",
@@ -313,6 +509,10 @@
       "goSettings": {
         "label": "Buka Pengaturan",
         "description": "Buka pengaturan ruang kerja."
+      },
+      "voiceInput": {
+        "label": "Input suara",
+        "description": "Dikte ke composer yang terakhir Anda gunakan. Tahan untuk berbicara."
       }
     },
     "fixed": {
@@ -330,7 +530,10 @@
   },
   "chat": {
     "floating_label": "Jendela chat mengambang",
-    "floating_hint": "Tampilkan tombol chat mengambang di setiap halaman."
+    "floating_hint": "Tampilkan tombol chat mengambang di setiap halaman.",
+    "ask_agent_label": "Tanya agent Multica",
+    "ask_agent_hint": "Agent yang dipakai saat chat baru dimulai dari bilah bawah, di ruang kerja ini.",
+    "ask_agent_last_used": "Terakhir digunakan"
   },
   "issue": {
     "opening": {
@@ -387,6 +590,7 @@
     "tabs": {
       "profile": "Profil",
       "preferences": "Preferensi",
+      "appearance": "Tampilan",
       "shortcuts": "Pintasan",
       "issue": "Tugas",
       "notifications": "Notifikasi",
@@ -397,7 +601,6 @@
       "members": "Anggota",
       "labels": "Label",
       "issue_statuses": "Status Tugas",
-      "wakeups": "Wakeups",
       "properties": "Properti",
       "quick_actions": "Quick Actions",
       "plugins": "Plugin",
@@ -405,7 +608,8 @@
       "billing": "Penagihan",
       "code": "Kode",
       "channels": "Perpesanan",
-      "apps": "Aplikasi terhubung"
+      "workflows": "Workflow",
+      "voice_input": "Input suara"
     },
     "groups": {
       "personal": "Pribadi",
@@ -532,6 +736,7 @@
     "save_failed": "Tidak dapat menyimpan properti",
     "limit_hint": "{{count}}/{{max}} properti aktif",
     "archived_badge": "Diarsipkan",
+    "options_preview": "Tampilkan semua opsi untuk {{name}}",
     "types": {
       "text": "Teks",
       "number": "Angka",
@@ -620,10 +825,10 @@
     },
     "delete_dialog": {
       "title": "Hapus label?",
-      "description": "Hapus \"{{name}}\"? Label ini akan dihapus dari {{count}} resource. Tindakan ini tidak dapat dibatalkan.",
       "cancel": "Batal",
       "confirm": "Hapus label",
-      "failed": "Tidak dapat menghapus label"
+      "failed": "Tidak dapat menghapus label",
+      "description_other": "Hapus \"{{name}}\"? Label ini akan dilepas dari {{count}} item. Tindakan ini tidak dapat dibatalkan."
     }
   },
   "account": {
@@ -634,15 +839,62 @@
     "profile_description_label": "Tentang Anda",
     "profile_description_hint": "Disertakan dalam setiap proses yang dijalankan atas nama Anda.",
     "profile_description_placeholder": "misalnya Backend engineer (Go + Postgres). Lebih suka PR yang singkat dan test yang menyertai perubahan.",
-    "profile_description_too_long": "Profil terlalu panjang (maksimal {{max}} karakter; saat ini {{count}}).",
+    "profile_description_too_long": "Tentang Anda terlalu panjang (maksimal {{max}} karakter; saat ini {{count}}).",
     "save": "Perbarui Profil",
     "saving": "Memperbarui...",
     "toast_avatar_failed": "Gagal mengunggah avatar",
     "toast_profile_failed": "Gagal memperbarui profil"
   },
   "notifications": {
-    "title": "Notifikasi Inbox",
-    "description": "Peristiwa yang dibisukan tetap terlihat pada tugas.",
+    "title": "Inbox",
+    "description": "Pilih peristiwa yang masuk ke Inbox di sidebar Work. Peristiwa yang dimatikan tidak membuat notifikasi, dan menyalakannya kembali tidak memunculkan yang terlewat.",
+    "categories": {
+      "direct": "Tentang Anda",
+      "issues": "Tugas yang Anda ikuti",
+      "projects": "Proyek yang Anda ikuti",
+      "agents": "Agent"
+    },
+    "others_issues": {
+      "label": "Tugas milik orang lain",
+      "description": "Tugas yang ditugaskan kepada orang lain atau agent mereka dan Anda ikuti karena pernah membuat atau mengomentarinya, atau karena Anda disebut di dalamnya. Pembaruan penting mencakup @mention, balasan di thread yang Anda ikuti, serta—jika notifikasi perubahan status diaktifkan—status yang memerlukan perhatian (Dalam Peninjauan, Terhambat, Selesai).",
+      "key_updates": "Hanya pembaruan penting",
+      "all": "Semua aktivitas"
+    },
+    "leaving": {
+      "title": "Keluar dari Kotak Masuk",
+      "description": "Membaca notifikasi tidak mengeluarkannya dari Kotak Masuk.",
+      "manual_label": "Arsipkan manual",
+      "manual_description": "Dari barisnya di sidebar, atau bagian atas notifikasi",
+      "manual_value": "Kapan saja",
+      "auto_label": "Arsipkan tugas yang Anda tangani",
+      "auto_description": "Hanya tindakan Anda sendiri yang dihitung. Notifikasi berikutnya akan memunculkan kembali tugas.",
+      "auto_presets": {
+        "never": "Jangan pernah",
+        "completed": "Saat Anda menyelesaikannya",
+        "handled": "Saat Anda menyelesaikannya atau memicu agent",
+        "custom": "Kustom",
+        "custom_item": "Kustom..."
+      },
+      "auto_recommended": "Direkomendasikan",
+      "auto_groups": {
+        "settle": "Menanganinya",
+        "tidy": "Merapikannya"
+      },
+      "auto_actions": {
+        "completed": "Selesaikan",
+        "agent_trigger": "Picu agent",
+        "comment": "Balas",
+        "status": "Lanjutkan ke langkah berikutnya",
+        "assignee": "Tugaskan ulang",
+        "priority": "Ubah prioritas",
+        "project": "Ubah proyek",
+        "dates": "Ubah tanggal",
+        "labels": "Ubah label"
+      },
+      "archived_label": "Notifikasi yang diarsipkan",
+      "archived_description": "Temukan kembali dan keluarkan dari arsip",
+      "archived_action": "Lihat arsip"
+    },
     "toast_failed": "Gagal memperbarui pengaturan notifikasi",
     "groups": {
       "assignments": {
@@ -657,27 +909,41 @@
         "label": "Komentar",
         "description": "Komentar baru pada tugas yang Anda ikuti"
       },
+      "squad_handoffs": {
+        "label": "Sertakan serah terima squad",
+        "description": "Komentar yang digunakan leader squad dan agent untuk saling menyerahkan pekerjaan. @mention untuk Anda, eksekusi agent yang gagal, dan status yang perlu perhatian tetap diterima."
+      },
       "mentions": {
         "label": "Mention",
         "description": "Saat seseorang men-@mention Anda, termasuk @all dan @squad"
+      },
+      "reactions": {
+        "label": "Reaksi",
+        "description": "Saat seseorang bereaksi pada tugas yang Anda buat atau komentar yang Anda tulis"
       },
       "updates": {
         "label": "Prioritas & Tanggal jatuh tempo",
         "description": "Saat prioritas atau tanggal jatuh tempo berubah pada tugas yang Anda ikuti"
       },
+      "new_issues": {
+        "label": "Tugas baru",
+        "description": "Saat tugas dibuat di proyek yang Anda ikuti"
+      },
       "agent_activity": {
         "label": "Aktivitas agent",
-        "description": "Saat proses agent gagal"
+        "description": "Saat eksekusi agent gagal, atau tindakan aplikasi yang diminta agent diblokir atau kedaluwarsa"
+      },
+      "chat_replies": {
+        "label": "Sertakan balasan chat"
       }
     },
     "system": {
       "title": "Notifikasi Sistem",
-      "description": "Tampilkan notifikasi sistem saat Multica berjalan di latar belakang.",
-      "label": "Tampilkan notifikasi sistem"
+      "label": "Tampilkan notifikasi sistem saat Multica berjalan di latar belakang"
     },
     "browser": {
       "label": "Notifikasi browser",
-      "hint": "Izinkan browser ini menampilkan banner notifikasi untuk item inbox baru.",
+      "hint": "Izinkan browser ini menampilkan banner untuk notifikasi Inbox dan balasan chat.",
       "enable": "Aktifkan",
       "granted": "Browser ini dapat menampilkan banner notifikasi.",
       "denied": "Diblokir oleh browser Anda. Aktifkan notifikasi untuk situs ini di pengaturan browser Anda.",
@@ -710,7 +976,7 @@
     "revoke_aria": "Cabut {{name}}",
     "revoke_tooltip": "Cabut",
     "revoke_dialog": {
-      "title": "Cabut token",
+      "title": "Cabut API token?",
       "description": "Token ini akan dicabut secara permanen dan tidak dapat digunakan lagi. Tindakan ini tidak dapat dibatalkan.",
       "cancel": "Batal",
       "confirm": "Cabut"
@@ -733,7 +999,7 @@
     "section_general": "Detail ruang kerja",
     "logo_label": "Logo ruang kerja",
     "change_logo_aria": "Ubah logo ruang kerja",
-    "click_logo_hint": "Klik logo untuk mengunggah gambar baru",
+    "click_logo_hint": "Klik logo untuk mengunggah gambar atau membuat ikon teks",
     "toast_logo_failed": "Gagal mengunggah logo ruang kerja",
     "name_label": "Nama",
     "description_label": "Deskripsi",
@@ -753,7 +1019,7 @@
     "leave_default": "Keluarkan diri Anda dari ruang kerja ini.",
     "leave_button": "Keluar dari ruang kerja",
     "leaving": "Keluar...",
-    "leave_confirm_title": "Keluar dari ruang kerja",
+    "leave_confirm_title": "Keluar dari ruang kerja ini?",
     "leave_confirm_description": "Keluar dari {{name}}? Anda akan kehilangan akses hingga diundang kembali.",
     "toast_leave_failed": "Gagal keluar dari ruang kerja",
     "delete_title": "Hapus ruang kerja",
@@ -762,7 +1028,7 @@
     "deleting": "Menghapus...",
     "toast_delete_failed": "Gagal menghapus ruang kerja",
     "confirm_cancel": "Batal",
-    "confirm_action": "Konfirmasi",
+    "confirm_action": "Keluar dari ruang kerja",
     "context_hint": "Diberikan ke setiap agent di ruang kerja ini pada setiap proses.",
     "slug_hint": "Bagian dari setiap URL ruang kerja. Tidak dapat diubah.",
     "copy_slug": "Salin slug",
@@ -776,7 +1042,7 @@
     "prefix_external_warning": "Key lama seperti {{oldExample}} pada judul PR, nama branch, dokumen, dan chat tidak diperbarui, sehingga tautan tersebut akan berhenti berfungsi."
   },
   "delete_workspace_dialog": {
-    "title": "Hapus ruang kerja",
+    "title": "Hapus ruang kerja ini?",
     "description": "Tindakan ini tidak dapat dibatalkan. Semua tugas, agent, chat, dan riwayat proses akan dihapus secara permanen.",
     "type_to_confirm_prefix": "Untuk konfirmasi, ketik",
     "type_to_confirm_suffix": " di bawah.",
@@ -786,7 +1052,7 @@
   },
   "labs": {
     "section_placeholder_title": "Belum ada eksperimen",
-    "section_placeholder_description": "Pengaturan eksperimental akan muncul di sini saat dirilis. Saat ini tab ini memang kosong.",
+    "section_placeholder_description": "Fitur eksperimental akan muncul di sini saat tersedia.",
     "toast_failed": "Gagal memperbarui pengaturan"
   },
   "github": {
@@ -796,8 +1062,8 @@
     "connect_opening": "Membuka…",
     "disconnect": "Putuskan koneksi",
     "disconnecting": "Memutuskan koneksi…",
-    "disconnect_confirm_title": "Putuskan koneksi GitHub App",
-    "disconnect_confirm_description": "Multica akan berhenti menerima webhook untuk pemasangan ini. Mirror PR dan tautan yang ada tetap disimpan; hubungkan kembali kapan saja untuk melanjutkan pembaruan.",
+    "disconnect_confirm_title": "Putuskan koneksi akun GitHub?",
+    "disconnect_confirm_description": "Putuskan koneksi {{login}} dari ruang kerja ini? Pembaruan untuk akun ini akan berhenti. Catatan dan tautan PR yang ada tetap disimpan; koneksi lain tidak terpengaruh.",
     "disconnect_confirm_cancel": "Batal",
     "disconnect_confirm_action": "Putuskan koneksi",
     "not_configured": "Integrasi GitHub tidak dikonfigurasi untuk deployment ini. Operator harus mengatur",
@@ -815,10 +1081,21 @@
     "feature_co_author_description_suffix": "ke commit yang dibuat oleh agent.",
     "feature_auto_link_label": "Tautkan otomatis tugas dan PR",
     "toast_failed": "Gagal memperbarui pengaturan GitHub",
-    "feature_auto_link_description": "Menautkan PR ke tugas yang ID-nya, misalnya {{example}}, ada di judul atau nama branch-nya, atau mengikuti kata “Closes” pada deskripsinya.",
+    "feature_auto_link_description": "Menautkan pull request secara otomatis saat ID tugas muncul di nama branch atau judulnya, atau mengikuti “Closes {{example}}” pada deskripsinya.",
     "status_paused": "Dihentikan sementara",
     "pause": "Hentikan sementara fitur GitHub",
-    "resume": "Lanjutkan fitur GitHub"
+    "resume": "Lanjutkan fitur GitHub",
+    "add_account": "Tambah akun atau organisasi",
+    "disconnect_account": "Putuskan {{login}}",
+    "errors": {
+      "missing_authorization": "GitHub tidak mengembalikan otorisasi pengguna. Coba hubungkan lagi dan selesaikan otorisasi. Jika berulang untuk instalasi yang sudah ada, hubungi operator Multica Anda.",
+      "installation_not_authorized": "Gunakan akun GitHub pemilik untuk instalasi pribadi, atau akun dengan akses admin ke semua repositori yang diotorisasi untuk organisasi. Pilih setidaknya satu repositori.",
+      "invalid_state": "Permintaan koneksi GitHub ini kedaluwarsa atau tidak valid. Mulai koneksi lagi dari Pengaturan → Code.",
+      "incomplete_callback": "GitHub mengembalikan respons koneksi yang tidak lengkap. Mulai koneksi lagi dari Pengaturan → Code.",
+      "bad_workspace": "Ruang kerja untuk koneksi ini tidak ditemukan. Buka ruang kerja yang dimaksud dan coba lagi dari Pengaturan → Code.",
+      "verification_failed": "Tidak dapat memverifikasi akses instalasi GitHub Anda. Coba hubungkan lagi; jika berulang, minta operator Multica Anda memeriksa konfigurasi GitHub App.",
+      "persist_failed": "Tidak dapat menyimpan koneksi GitHub. Coba lagi dari Pengaturan → Code; jika berulang, hubungi operator Multica Anda."
+    }
   },
   "vcs": {
     "section_title": "Git mandiri (self-hosted)",
@@ -876,7 +1153,7 @@
     "loading": "Memuat…",
     "empty_title": "Belum ada bot yang terhubung",
     "empty_description_prefix": "Buka sebuah Agent di ruang kerja ini dan klik",
-    "empty_description_cta": "Hubungkan ke Lark",
+    "empty_description_cta": "Hubungkan ke Feishu / Lark",
     "empty_description_suffix": "untuk memasang Bot untuknya.",
     "revoked_badge": "dicabut",
     "region_feishu": "Feishu",
@@ -889,12 +1166,12 @@
     "disconnect_confirm_cancel": "Batal",
     "toast_disconnected": "Bot Lark diputuskan",
     "toast_disconnect_failed": "Pemutusan koneksi gagal",
-    "bind_button": "Hubungkan ke Lark",
+    "bind_button": "Hubungkan ke Feishu / Lark",
     "bind_button_title": "Hubungkan {{agent}} ke Bot Lark",
-    "bind_button_feishu": "Hubungkan ke Feishu",
-    "bind_button_lark": "Hubungkan ke Lark",
-    "bind_button_feishu_title": "Hubungkan {{agent}} ke Bot Feishu (mainland)",
-    "bind_button_lark_title": "Hubungkan {{agent}} ke Bot Lark (internasional)",
+    "bind_button_feishu": "Hubungkan Feishu",
+    "bind_button_lark": "Hubungkan Lark",
+    "bind_button_feishu_title": "Hubungkan {{agent}} ke bot Feishu (Tiongkok)",
+    "bind_button_lark_title": "Hubungkan {{agent}} ke bot Lark (Internasional)",
     "agent_bot_connected_label": "Terhubung ke Lark",
     "agent_bot_manage_link": "Kelola di Lark",
     "agent_bot_manage_tooltip": "Buka halaman aplikasi Bot ini di Lark — kelola scope, edit nama tampilan, minta izin tambahan.",
@@ -907,19 +1184,19 @@
     "agent_bot_manage_tooltip_feishu": "Buka halaman aplikasi Bot ini di Feishu — kelola scope, edit nama tampilan, minta izin tambahan.",
     "agent_bot_manage_tooltip_lark": "Buka halaman aplikasi Bot ini di Lark — kelola scope, edit nama tampilan, minta izin tambahan.",
     "agent_bot_disconnect_tooltip": "Lepaskan Bot Lark ini dari Agent. Bot akan berhenti menerima pesan Lark.",
-    "install_dialog_title": "Hubungkan ke Lark",
-    "install_dialog_description": "Buka Lark di ponsel Anda dan pindai kode di bawah untuk membuat Bot PersonalAgent.",
-    "install_dialog_description_for_agent": "Buka Lark di ponsel Anda dan pindai kode di bawah untuk membuat Bot untuk {{agent}}.",
+    "install_dialog_title": "Hubungkan ke Feishu / Lark",
+    "install_dialog_description": "Pindai kode QR dengan Feishu atau Lark untuk membuat bot.",
+    "install_dialog_description_for_agent": "Pindai kode QR dengan Feishu atau Lark untuk membuat bot untuk {{agent}}.",
     "install_dialog_title_feishu": "Hubungkan ke Feishu",
     "install_dialog_title_lark": "Hubungkan ke Lark",
-    "install_dialog_description_feishu": "Buka Feishu di ponsel Anda dan pindai kode di bawah untuk membuat Bot PersonalAgent.",
-    "install_dialog_description_lark": "Buka Lark di ponsel Anda dan pindai kode di bawah untuk membuat Bot PersonalAgent.",
-    "install_dialog_description_for_agent_feishu": "Buka Feishu di ponsel Anda dan pindai kode di bawah untuk membuat Bot untuk {{agent}}.",
-    "install_dialog_description_for_agent_lark": "Buka Lark di ponsel Anda dan pindai kode di bawah untuk membuat Bot untuk {{agent}}.",
+    "install_dialog_description_feishu": "Pindai kode QR dengan Feishu untuk membuat bot.",
+    "install_dialog_description_lark": "Pindai kode QR dengan Lark untuk membuat bot.",
+    "install_dialog_description_for_agent_feishu": "Pindai kode QR dengan Feishu untuk membuat bot untuk {{agent}}.",
+    "install_dialog_description_for_agent_lark": "Pindai kode QR dengan Lark untuk membuat bot untuk {{agent}}.",
     "install_starting": "Menyiapkan kode QR…",
-    "install_scan_hint": "Lark → Pindai → otorisasi PersonalAgent baru.",
+    "install_scan_hint": "Feishu / Lark → Pindai → otorisasi bot baru.",
     "install_open_link_fallback": "Atau ketuk di sini untuk membuka di Lark",
-    "install_success": "Pemasangan selesai — Bot Anda sudah online.",
+    "install_success": "Bot terhubung. Kirim pesan ke bot di Feishu/Lark untuk memastikan pesan diterima.",
     "install_success_toast": "Bot Lark terpasang",
     "install_open_link_fallback_feishu": "Atau ketuk di sini untuk membuka di Feishu",
     "install_open_link_fallback_lark": "Atau ketuk di sini untuk membuka di Lark",
@@ -936,36 +1213,12 @@
     "install_error_installer_bind": "Bot terpasang, tetapi tidak dapat menghubungkan identitas Lark Anda. Coba lagi atau hubungi dukungan.",
     "install_error_session_lost": "Sesi pemasangan kedaluwarsa atau hilang. Pindai lagi untuk memulai ulang.",
     "install_error_forbidden": "Anda tidak lagi memiliki izin untuk memasang Bot Lark di ruang kerja ini. Minta admin ruang kerja untuk melanjutkan.",
-    "install_error_generic": "Pemasangan gagal. Coba lagi."
-  },
-  "composio": {
-    "page_description": "Hubungkan aplikasi yang dapat digunakan oleh agent Anda.",
-    "not_enabled_title": "Integrasi Composio belum diaktifkan",
-    "not_enabled_description_prefix": "Atur",
-    "not_enabled_description_suffix": "pada server untuk mengaktifkan koneksi toolkit Composio.",
-    "loading": "Memuat toolkit…",
-    "load_failed": "Gagal memuat toolkit Composio.",
-    "empty_title": "Belum ada aplikasi yang dapat dihubungkan",
-    "empty_description": "Belum ada toolkit dengan auth config yang diaktifkan di proyek Composio Anda. Aktifkan salah satu di dashboard Composio agar tersedia di sini.",
-    "search_placeholder": "Cari toolkit…",
-    "connect": "Hubungkan",
-    "connecting": "Menghubungkan…",
-    "connected": "Terhubung",
-    "disconnect": "Putuskan koneksi",
-    "disconnecting": "Memutuskan koneksi…",
-    "connect_failed": "Tidak dapat memulai koneksi. Coba lagi.",
-    "disconnect_failed": "Tidak dapat memutuskan koneksi. Coba lagi.",
-    "toast_disconnected": "Terputus",
-    "disconnect_confirm_title": "Putuskan koneksi aplikasi ini?",
-    "disconnect_confirm_description": "Akun terhubung Anda akan dicabut di Composio dan agent Anda akan kehilangan akses ke toolkit ini. Anda dapat menghubungkan kembali nanti.",
-    "disconnect_confirm_cancel": "Batal",
-    "connections_load_failed": "Tidak dapat memuat koneksi Anda yang sudah ada, sehingga status terhubung mungkin tidak lengkap.",
-    "toast_connected": "Terhubung",
-    "toast_connect_failed": "Tidak dapat menyelesaikan koneksi. Coba lagi.",
-    "last_used": "Terakhir digunakan {{when}}",
-    "last_used_never": "Belum pernah digunakan",
-    "expired": "Token kedaluwarsa",
-    "reconnect": "Hubungkan kembali"
+    "install_error_generic": "Pemasangan gagal. Coba lagi.",
+    "bound_label": "Terikat",
+    "inbound_pending": "Terikat — menunggu verifikasi pesan",
+    "inbound_verified": "Penerimaan pesan terverifikasi",
+    "inbound_pending_hint": "Kirim pesan ke bot ini di Feishu/Lark untuk memverifikasi penerimaan. Jika tidak masuk, periksa mode long connection, langganan im.message.receive_v1, dan publikasi/persetujuan aplikasi. Binding yang sudah ada mungkin belum memiliki verifikasi yang tercatat.",
+    "inbound_verified_hint": "Binding ini menerima pesan yang valid. Ini tidak memastikan konektivitas berkelanjutan, eksekusi agent, atau balasan."
   },
   "slack": {
     "section_title": "Slack",
@@ -1017,7 +1270,7 @@
     "groups_title": "Grup terbaru",
     "groups_description": "Sebuah grup muncul setelah anggota ruang kerja menautkan akun DingTalk mereka dan men-@mention bot ini di sana. Grup yang aktif dalam 90 hari terakhir ditampilkan secara default.",
     "groups_loading": "Memuat grup…",
-    "groups_empty": "Belum ada pesan grup yang teramati.",
+    "groups_empty": "Belum ada aktivitas grup.",
     "groups_no_recent": "Tidak ada grup yang aktif dalam 90 hari terakhir.",
     "groups_inactive": "Lama tidak aktif ({{count}})",
     "groups_load_more": "Muat lebih banyak",
@@ -1030,7 +1283,7 @@
     "group_mentions_other": "{{count}} mention",
     "group_forget": "Lupakan",
     "group_forget_title": "Lupakan grup ini?",
-    "group_forget_description": "Ini menghapus grup dari inventaris Multica tanpa menghapus percakapan atau pesan. Grup akan muncul kembali setelah seseorang men-@mention bot lagi.",
+    "group_forget_description": "Menghapus grup ini dari daftar Multica tanpa menghapus pesan apa pun di DingTalk.",
     "group_forget_cancel": "Batal",
     "group_forget_confirm": "Lupakan grup",
     "group_forget_success": "Grup dihapus dari inventaris",
@@ -1040,28 +1293,28 @@
     "bot_permission_tooltip_suffix": "pada aplikasi bot ini, lalu men-@mention bot lagi di grup DingTalk tempat bot ditambahkan.",
     "not_enabled_title": "Integrasi DingTalk belum diaktifkan",
     "not_enabled_description_prefix": "Atur",
-    "not_enabled_description_suffix": "pada server untuk mengaktifkan pemasangan robot DingTalk.",
+    "not_enabled_description_suffix": "untuk mengaktifkan bot DingTalk.",
     "not_enabled_self_host_hint": "Self-hoster: lihat README proyek untuk detailnya.",
-    "connections_title": "Koneksi",
+    "connections_title": "Bot terhubung",
     "deleted_agent": "Agent Dihapus",
     "loading": "Memuat…",
     "empty_title": "Belum ada bot yang terhubung",
     "empty_description_prefix": "Buka sebuah Agent di ruang kerja ini dan klik",
     "empty_description_cta": "Hubungkan DingTalk",
-    "empty_description_suffix": "untuk memasang robot untuknya.",
+    "empty_description_suffix": "untuk memasang bot untuknya.",
     "revoked_badge": "dicabut",
     "installed_at_label": "Dipasang {{when}}",
     "identity_label": "Staff ID tertaut: {{identity}}",
     "disconnect": "Putuskan koneksi",
     "disconnecting": "Memutuskan koneksi…",
     "disconnect_confirm_title": "Putuskan koneksi bot DingTalk ini?",
-    "disconnect_confirm_description": "Bot akan berhenti menerima pesan DingTalk untuk ruang kerja ini. Baris pemasangan tetap disimpan untuk audit; Anda dapat menghubungkan kembali bot nanti.",
+    "disconnect_confirm_description": "Bot akan berhenti menerima pesan DingTalk untuk ruang kerja ini. Catatan pemasangan tetap disimpan untuk audit; Anda dapat menghubungkan kembali nanti dari agent yang sama.",
     "disconnect_confirm_cancel": "Batal",
     "toast_disconnected": "Bot DingTalk diputuskan",
     "toast_disconnect_failed": "Pemutusan koneksi gagal",
     "bind_button": "Hubungkan DingTalk",
     "bind_button_title": "Hubungkan {{agent}} ke bot DingTalk",
-    "agent_bot_connected_label": "Bot terhubung:",
+    "agent_bot_connected_label": "Terhubung ke DingTalk",
     "agent_bot_disconnect_tooltip": "Lepaskan bot DingTalk ini dari Agent. Bot akan berhenti menerima pesan DingTalk.",
     "byo_dialog_title": "Hubungkan bot DingTalk",
     "byo_docs_link": "Langkah demi langkah: hubungkan agent Multica Anda ke DingTalk",
@@ -1078,7 +1331,7 @@
     "page_description": "Chat dengan agent di WeCom atau buat tugas dengan /issue. Tidak memerlukan URL callback publik.",
     "not_enabled_title": "Integrasi WeCom belum diaktifkan",
     "not_enabled_description_prefix": "Atur",
-    "not_enabled_description_suffix": "pada server untuk mengaktifkan pemasangan smart-bot WeCom.",
+    "not_enabled_description_suffix": "untuk mengaktifkan smart bot WeCom.",
     "not_enabled_self_host_hint": "Self-hoster: lihat README proyek untuk detailnya.",
     "preview_title": "Pemasangan WeCom segera hadir",
     "preview_description": "Koneksi WeCom belum diaktifkan pada deployment ini. Hubungi administrator Anda.",
@@ -1121,6 +1374,27 @@
     "byo_credentials_rejected": "WeCom menolak Bot ID dan secret ini. Periksa keduanya di konsol admin WeCom, serta pastikan ini adalah smart bot dengan koneksi panjang yang diaktifkan.",
     "byo_credentials_unverifiable": "Tidak dapat menjangkau WeCom untuk memverifikasi bot ini. Kredensial Anda tidak diubah — coba lagi dalam beberapa saat.",
     "byo_install_failed": "Tidak dapat menyimpan bot ini — terjadi kesalahan di sisi kami. Kredensial Anda tidak diubah; coba lagi, dan hubungi dukungan jika terus gagal.",
+    "scan_option_title": "Buat bot baru",
+    "scan_option_description": "Pindai kode QR di WeCom untuk membuat smart bot baru dan menghubungkannya.",
+    "byo_option_title": "Hubungkan bot yang sudah ada",
+    "byo_option_description": "Tempel Bot ID dan secret dari smart bot yang sudah Anda buat.",
+    "scan_dialog_title": "Pindai untuk membuat bot WeCom",
+    "scan_starting": "Menyiapkan kode QR...",
+    "scan_hint": "Buka WeCom di ponsel Anda dan pindai kode ini untuk membuat bot.",
+    "scan_expires_in": "Kedaluwarsa dalam {{seconds}} dtk",
+    "scan_success_toast": "Bot WeCom dibuat dan terhubung",
+    "scan_again": "Dapatkan kode baru",
+    "scan_close": "Tutup",
+    "scan_error_expired": "Kode QR kedaluwarsa sebelum dipindai.",
+    "scan_error_generate_failed": "Tidak dapat mengambil kode QR dari WeCom. Coba lagi sebentar lagi.",
+    "scan_error_integration_unconfigured": "Pemasangan lewat pindai tidak diaktifkan di server ini.",
+    "scan_error_installation_conflict": "Bot ini sudah terhubung di tempat lain. Putuskan di sana, lalu pindai lagi.",
+    "scan_error_bind_failed": "Bot dibuat di WeCom tetapi tidak dapat dihubungkan ke agent ini. Hapus di WeCom, lalu pindai lagi.",
+    "scan_error_wecom_protocol_error": "WeCom mengembalikan respons yang tidak terduga.",
+    "scan_error_internal_error": "Terjadi kesalahan. Coba lagi.",
+    "scan_error_session_lost": "Sesi pemasangan ini sudah tidak tersedia. Dapatkan kode baru.",
+    "scan_error_already_connected": "Agent ini sudah memiliki bot WeCom yang terhubung. Putuskan terlebih dahulu.",
+    "scan_error_rate_limited": "Terlalu banyak percobaan. Tunggu beberapa menit lalu coba lagi.",
     "byo_failed_toast": "Tidak dapat menghubungkan bot WeCom"
   },
   "telegram": {
@@ -1189,7 +1463,8 @@
     "github_load_more": "Muat lebih banyak",
     "github_selected_count": "{{count}} dipilih",
     "github_cancel": "Batal",
-    "github_import": "Tambah repository",
+    "github_import": "Tambah {{count}} repository",
+    "github_import_other": "Tambah {{count}} repositori",
     "save": "Simpan",
     "saving": "Menyimpan...",
     "saved_hint": "Semua perubahan tersimpan",
@@ -1215,6 +1490,18 @@
     "tabs": {
       "updates": "Pembaruan"
     },
+    "tab_bar": {
+      "pin": "Sematkan tab",
+      "unpin": "Lepas sematan tab",
+      "close": "Tutup tab",
+      "close_others": "Tutup tab lainnya",
+      "open_window": "Buka sebagai jendela baru",
+      "new": "Tab baru",
+      "pinned_name": "{{title}} (disematkan)",
+      "copy_link": "Salin tautan",
+      "link_copied": "Tautan disalin",
+      "close_right": "Tutup tab di sebelah kanan"
+    },
     "updates": {
       "title": "Pembaruan",
       "current_version": "Versi saat ini",
@@ -1226,7 +1513,18 @@
       "up_to_date": "Anda menggunakan versi terbaru.",
       "downloading": "v{{version}} sedang diunduh di latar belakang — Anda akan diberi tahu saat siap dipasang.",
       "check_now": "Periksa sekarang",
-      "checking": "Memeriksa…"
+      "checking": "Memeriksa…",
+      "check_unavailable": "Tidak dapat memeriksa pembaruan saat ini. Silakan coba lagi nanti.",
+      "check_network": "Tidak dapat terhubung ke layanan pembaruan. Periksa koneksi Anda lalu coba lagi.",
+      "check_failed": "Tidak dapat memeriksa pembaruan. Silakan coba lagi.",
+      "download_failed": "Unduhan pembaruan gagal. Anda tetap dapat menggunakan versi saat ini dan mencoba lagi.",
+      "download_ready": "v{{version}} siap dipasang.",
+      "retry": "Coba lagi",
+      "banner_dismiss": "Tutup",
+      "banner_title": "Pembaruan siap",
+      "banner_body": "v{{version}} akan diterapkan saat aplikasi dibuka berikutnya.",
+      "banner_changelog": "Lihat changelog",
+      "banner_restart": "Mulai ulang sekarang"
     },
     "daemon": {
       "title": "Daemon",
@@ -1238,7 +1536,7 @@
       "external_description_before": "Daemon perangkat ini berjalan di luar aplikasi — misalnya di dalam WSL2 — sehingga aplikasi tidak dapat memulai atau menghentikannya. Mulai atau hentikan dari environment tersebut dengan",
       "external_description_after": ".",
       "auto_start_title": "Mulai otomatis saat dibuka",
-      "auto_start_description": "Mulai secara otomatis saat Anda masuk.",
+      "auto_start_description": "Jalankan daemon secara otomatis saat Desktop dibuka.",
       "auto_stop_title": "Berhenti otomatis saat keluar",
       "auto_stop_description": "Hentikan daemon saat Desktop ditutup.",
       "cli_status": "Status CLI",
@@ -1298,6 +1596,22 @@
       "reconnect_failed": "Tidak dapat menghubungkan ulang daemon",
       "try_again_moment": "Coba lagi dalam beberapa saat.",
       "try_again": "Coba lagi."
+    },
+    "errors": {
+      "not_found_title": "Halaman ini tidak ada",
+      "not_found_description": "Alamat ini tidak tersedia. Periksa tautan atau kembali.",
+      "tab_error_title": "Terjadi kesalahan di tab ini",
+      "tab_error_description": "Tab ini tidak dapat dimuat. Muat ulang, atau kirim laporan jika masalah berlanjut.",
+      "go_to_issues": "Buka tugas",
+      "reload_tab": "Muat ulang tab",
+      "close_tab": "Tutup tab",
+      "report_error": "Laporkan kesalahan",
+      "issue_unavailable_title": "Tugas tidak tersedia",
+      "issue_unavailable_description": "Ruang kerja ini tidak lagi tersedia di akun Anda.",
+      "something_went_wrong": "Terjadi kesalahan",
+      "reload": "Muat ulang",
+      "close_window": "Tutup jendela",
+      "unknown_route_error": "Kesalahan rute tidak dikenal"
     }
   },
   "members": {
@@ -1308,7 +1622,7 @@
     "toast_invitation_sent": "Undangan terkirim",
     "toast_invitation_failed": "Gagal mengirim undangan",
     "toast_seat_capacity_unavailable": "Kapasitas anggota tidak dapat diverifikasi. Coba lagi.",
-    "toast_seat_capacity_rate_limited": "Kapasitas seat sedang sibuk. Coba lagi sebentar.",
+    "toast_seat_capacity_rate_limited": "Terlalu banyak perubahan seat sekaligus. Coba lagi sebentar lagi.",
     "seat_purchase_title": "Tambahkan seat untuk mengirim undangan ini?",
     "seat_purchase_description": "Tidak ada seat yang dibeli tersedia untuk {{email}}. Tinjau estimasi Stripe, lalu setujui pembelian dan undangan bersamaan.",
     "purchase_seat_and_invite": "Beli 1 seat dan undang",
@@ -1317,7 +1631,7 @@
     "seat_purchase_timeout": "Pembelian seat telah dikirim, tetapi konfirmasi membutuhkan waktu lebih lama dari yang diharapkan. Tidak ada undangan yang terkirim. Coba undangan lagi setelah Billing menunjukkan seat yang tersedia.",
     "seat_purchase_capacity_taken": "Seat yang dibeli tidak lagi tersedia, sehingga undangan tidak terkirim. Tinjau seat saat ini sebelum mencoba lagi.",
     "no_members": "Tidak ada anggota ditemukan.",
-    "revoke_invitation_title": "Cabut undangan",
+    "revoke_invitation_title": "Cabut undangan?",
     "revoke_invitation_description": "Cabut undangan untuk {{email}}? Mereka tidak akan lagi dapat bergabung dengan ruang kerja ini.",
     "toast_invitation_revoked": "Undangan dicabut",
     "toast_invitation_revoke_failed": "Gagal mencabut undangan",
@@ -1325,7 +1639,7 @@
     "toast_role_failed": "Gagal memperbarui anggota",
     "toast_member_removed": "Anggota dihapus",
     "toast_member_remove_failed": "Gagal menghapus anggota",
-    "remove_member_title": "Hapus {{name}}",
+    "remove_member_title": "Hapus {{name}}?",
     "remove_member_description": "Hapus {{name}} dari {{workspace}}? Mereka akan kehilangan akses ke ruang kerja ini.",
     "confirm_cancel": "Batal",
     "confirm_action": "Konfirmasi",
@@ -1345,6 +1659,10 @@
       "member": {
         "label": "Member",
         "description": "Buat dan kerjakan tugas"
+      },
+      "guest": {
+        "label": "Tamu",
+        "description": "Melihat dan mengomentari proyek yang dibagikan kepada mereka. Tidak dapat menjalankan agent."
       }
     },
     "share_links_create_title": "Buat tautan berbagi",
@@ -1381,7 +1699,47 @@
     "invitation_meta": "Dikirim {{sent}} · Kedaluwarsa {{expires}}",
     "revoke_invitation_aria": "Cabut undangan untuk {{email}}",
     "seats_used": "{{used}} dari {{purchased}} seat digunakan",
-    "manage_seats": "Kelola seat"
+    "manage_seats": "Kelola seat",
+    "member_limit_full_title": "Paket ini mengizinkan hingga {{limit}} anggota. Ruang kerja sudah penuh.",
+    "member_limit_full_description": "Upgrade ke Pro untuk anggota tanpa batas. Setiap anggota adalah seat berbayar, dan upgrade sudah mencakup satu seat untuk undangan ini. Atau hapus anggota terlebih dahulu.",
+    "member_limit_full_description_pending": "Undangan yang tertunda juga memakai slot ({{pending}} saat ini). Upgrade ke Pro untuk anggota tanpa batas (setiap anggota adalah seat berbayar, dan upgrade sudah mencakup satu seat untuk undangan ini), atau cabut undangan atau hapus anggota terlebih dahulu.",
+    "member_limit_usage": "{{used}} / {{limit}} anggota",
+    "upgrade_and_invite": "Upgrade dan undang",
+    "toast_member_limit_reached": "Ruang kerja sudah penuh. Upgrade untuk mengundang lebih banyak anggota.",
+    "member_limit_full_description_no_upgrade": "Cabut undangan yang tertunda atau hapus anggota untuk mengosongkan slot.",
+    "toast_invalid_email": "Masukkan alamat email yang valid.",
+    "toast_already_member": "{{email}} sudah menjadi anggota ruang kerja ini.",
+    "toast_invitation_pending": "Undangan untuk {{email}} sudah tertunda.",
+    "toast_invite_check_unavailable": "Tidak dapat memeriksa anggota dan undangan yang ada. Coba lagi sebentar lagi.",
+    "member_limit_full_description_billing": "Langganan ruang kerja perlu diperhatikan. Pulihkan di Penagihan untuk menambah anggota, atau hapus anggota terlebih dahulu.",
+    "open_billing": "Buka Penagihan",
+    "guest_free_tag": "Gratis · tanpa seat",
+    "guest_projects_label": "Proyek yang dapat mereka akses",
+    "guest_projects_add": "Tambah proyek...",
+    "guest_projects_remove": "Hapus {{project}}",
+    "guest_projects_hint": "Tamu tidak dapat melihat proyek, agent, autopilot, atau pengaturan lainnya.",
+    "invite_guest_button": "Undang tamu",
+    "all_label": "Semua",
+    "guests_label": "Tamu",
+    "guest_count": "Tamu: {{count}}",
+    "list_separator": ", ",
+    "takes_seat": "Memakai 1 seat",
+    "frees_seat": "Membebaskan 1 seat",
+    "make_member": "Jadikan anggota",
+    "make_member_title": "Jadikan {{name}} anggota?",
+    "make_member_description": "{{name}} akan melihat seluruh ruang kerja dan dapat menjalankan agent. Ini memakai 1 seat.",
+    "make_member_seat_description": "{{name}} akan melihat seluruh ruang kerja dan dapat menjalankan agent. Semua seat yang dibeli sudah terpakai, jadi ini akan membeli 1 seat lagi.",
+    "purchase_seat_and_make_member": "Beli seat dan jadikan anggota",
+    "making_member": "Menjadikan anggota...",
+    "make_guest_title": "Jadikan {{name}} tamu?",
+    "make_guest_description": "{{name}} hanya akan dapat melihat proyek di bawah ini sehingga satu seat dapat digunakan kembali. Akses {{name}} ke agent, autopilot, dan runtime akan dicabut.",
+    "make_guest_button": "Jadikan tamu",
+    "manage_projects": "Kelola proyek yang dapat diakses",
+    "manage_projects_title": "Proyek yang dapat diakses {{name}}",
+    "save_projects": "Simpan",
+    "toast_projects_updated": "Proyek diperbarui",
+    "revoke_invitation_confirm": "Cabut undangan",
+    "remove_member_confirm": "Hapus anggota"
   },
   "integrations": {
     "status_connected": "Terhubung",
@@ -1397,6 +1755,7 @@
   "layout": {
     "scope": {
       "account": "Akun · tersinkron",
+      "all_workspaces": "Semua ruang kerja Anda",
       "device": "Hanya perangkat ini",
       "device_workspace": "Perangkat ini · {{name}}",
       "workspace": "Ruang kerja {{name}}",
@@ -1415,7 +1774,40 @@
     "github_actions": "GitHub actions"
   },
   "channels": {
-    "breadcrumb": "Breadcrumb"
+    "breadcrumb": "Breadcrumb",
+    "add": "Tambah kanal pesan",
+    "connect": "Hubungkan",
+    "disconnect": "Putuskan koneksi",
+    "open": "Buka",
+    "normal": "Terhubung",
+    "waiting_message": "Menunggu pesan pertama",
+    "disconnected": "Terputus",
+    "find_me": "Temukan saya di {{platform}}",
+    "manage": "Kelola {{platform}}",
+    "last_message": "Pesan terakhir {{time}}",
+    "ask_admin": "Tanya admin",
+    "unavailable": "Koneksi tidak tersedia",
+    "permissions_title": "Siapa yang dapat menghubungkan",
+    "owner_or_admin": "Pemilik agent atau admin ruang kerja",
+    "admin_only": "Hanya admin ruang kerja",
+    "connect_title": "Hubungkan kanal pesan",
+    "choose_description": "Pilih agent dan platform.",
+    "authorize_description": "Hubungkan {{agent}} ke {{platform}}.",
+    "agent_label": "Agent",
+    "choose_agent": "Pilih agent",
+    "platform_label": "Platform",
+    "region_label": "Wilayah",
+    "method_label": "Metode koneksi",
+    "feishu": "Feishu (Tiongkok)",
+    "lark": "Lark (Internasional)",
+    "setup_guide": "Panduan penyiapan",
+    "connection_changed": "Koneksi ini tidak lagi tersedia. Tutup dialog ini lalu coba lagi.",
+    "connect_failed": "Tidak dapat menghubungkan bot.",
+    "connect_success": "Kanal pesan terhubung.",
+    "disconnect_failed": "Tidak dapat memutuskan bot.",
+    "disconnect_title": "Putuskan kanal pesan?",
+    "disconnect_description": "Agent ini tidak akan lagi menerima pesan dari {{platform}}.",
+    "agent_unavailable": "Agent tidak tersedia"
   },
   "mcp_usage": {
     "agent_count_other": "Digunakan oleh {{count}} agent",
@@ -1425,7 +1817,482 @@
     "title": "Cara memberikan tools kepada agent",
     "current": "Halaman ini",
     "mcp": "Ditambahkan oleh admin dan dibagikan ke seluruh ruang kerja, lalu ditugaskan per agent.",
-    "apps": "Diotorisasi dengan akun Anda sendiri melalui Composio dan diaktifkan pada agent yang Anda miliki.",
+    "apps": "Akun tim atau pribadi yang terhubung melalui Multica dan ditambahkan ke setiap agent.",
     "plugins": "Paket terpasang yang dapat menambahkan tools, hook terjadwal, dan penyimpanan, masing-masing dengan izinnya sendiri."
+  },
+  "weixin": {
+    "section_title": "WeChat",
+    "page_description": "Pesan pribadi dengan akun yang memindai kode QR koneksi.",
+    "loading": "Menghubungkan...",
+    "empty": "Hubungkan WeChat dari tab Integrasi milik agent.",
+    "close": "Tutup",
+    "action_failed": "Tidak dapat menyelesaikan tindakan ini. Coba lagi.",
+    "privacy_hint": "Pesan akan dijalankan sebagai Anda di ruang kerja ini. Jangan bagikan kode QR ini.",
+    "qr_label": "Kode QR koneksi WeChat",
+    "scan_hint": "Pindai dengan WeChat dan konfirmasi di ponsel Anda.",
+    "scanned": "Terpindai. Konfirmasi koneksi di WeChat.",
+    "verify_hint": "WeChat meminta kode verifikasi. Masukkan kode yang tampil di ponsel Anda.",
+    "verify_label": "Kode verifikasi",
+    "verify": "Verifikasi",
+    "success": "Terhubung. Kirim pesan baru ke bot di WeChat untuk memulai.",
+    "expired": "Kode QR ini sudah kedaluwarsa. Buat yang baru.",
+    "blocked": "WeChat memblokir percobaan verifikasi berikutnya. Coba lagi nanti.",
+    "already_bound": "Bot ini sudah terikat di WeChat. Putuskan klien sebelumnya lalu coba lagi.",
+    "refresh": "Kode QR baru",
+    "retry": "Coba lagi",
+    "already_connected": "Akun WeChat ini terhubung ke {{agent}}. Putuskan koneksinya di sana terlebih dahulu.",
+    "connected_elsewhere": "Akun WeChat ini terhubung di tempat lain. Putuskan koneksi yang ada terlebih dahulu.",
+    "authorization_expired": "Otorisasi WeChat kedaluwarsa. Pindai lagi untuk menghubungkan kembali."
+  },
+  "connected_apps": {
+    "loading": "Memuat aplikasi...",
+    "load_failed": "Tidak dapat memuat aplikasi.",
+    "reconnect": "Hubungkan kembali",
+    "rules": "Aturan",
+    "activity": "Aktivitas",
+    "disconnect": "Putuskan koneksi",
+    "catalog_title": "Aplikasi tersedia",
+    "catalog_label": "Aplikasi yang dapat ditambahkan anggota",
+    "catalog_description": "Aplikasi pilihan hadir dengan aturan bawaan yang sudah ditinjau. Semua aplikasi mencakup setiap aplikasi yang didukung Multica; tindakan yang tidak dapat diklasifikasikan otomatis oleh Multica selalu meminta konfirmasi terlebih dahulu. Daftar kustom hanya mengizinkan aplikasi yang Anda pilih.",
+    "catalog_all": "Semua aplikasi",
+    "catalog_curated": "Hanya pilihan",
+    "catalog_custom": "Daftar kustom",
+    "toast_connected": "Akun terhubung",
+    "toast_connect_failed": "Tidak dapat menyelesaikan koneksi. Coba lagi.",
+    "toast_disconnected": "Terputus",
+    "toast_failed": "Terjadi kesalahan. Silakan coba lagi.",
+    "add": {
+      "empty": "Tidak ada aplikasi yang cocok."
+    },
+    "detail": {
+      "team_title": "{{app}} · akun tim",
+      "personal_title": "{{app}} · akun saya",
+      "rules_description": "Apa yang boleh dilakukan agent melalui akun ini. Level agent hanya dapat membuatnya lebih ketat.",
+      "rules_read_only": "Hanya admin ruang kerja yang dapat mengubah aturan akun tim.",
+      "default": "Default: {{policy}}",
+      "activity_empty": "Belum ada panggilan.",
+      "activity_failed": "Tidak dapat memuat aktivitas."
+    },
+    "classes": {
+      "read": {
+        "label": "Baca",
+        "description": "Cari, daftar, dan ambil"
+      },
+      "write": {
+        "label": "Tulis",
+        "description": "Buat dan perbarui konten"
+      },
+      "send": {
+        "label": "Kirim",
+        "description": "Kirim email atau pesan, posting, undang"
+      },
+      "delete": {
+        "label": "Hapus",
+        "description": "Hapus atau arsipkan"
+      },
+      "share": {
+        "label": "Bagikan",
+        "description": "Ubah izin atau bagikan ke luar"
+      }
+    },
+    "policies": {
+      "allow": "Izinkan",
+      "confirm": "Tanya dulu",
+      "block": "Blokir"
+    },
+    "outcomes": {
+      "ok": "Dijalankan",
+      "error": "Gagal",
+      "blocked": "Diblokir",
+      "pending": "Menunggu",
+      "approved": "Disetujui",
+      "rejected": "Ditolak",
+      "rate_limited": "Terkena batas laju"
+    },
+    "scopes": {
+      "team": "Akun tim",
+      "personal": "Akun Starter"
+    },
+    "levels": {
+      "read": "Hanya baca",
+      "confirm_writes": "Tanya sebelum menulis",
+      "write": "Dapat menulis"
+    },
+    "request": {
+      "title_action": "{{agent}} ingin menjalankan {{tool}}",
+      "title_connect": "{{agent}} meminta Anda menghubungkan {{app}}",
+      "pending_count_other": "{{count}} tindakan aplikasi menunggu konfirmasi",
+      "waiting_for": "Menunggu {{name}}",
+      "expires": "Kedaluwarsa {{when}}",
+      "redacted": "Hanya {{name}} yang dapat melihat detailnya.",
+      "arguments": "Argumen",
+      "edit": "Edit",
+      "invalid_json": "Argumen harus berupa objek JSON.",
+      "approve": "Setujui dan jalankan",
+      "approve_all": "Setujui semua",
+      "reject": "Tolak",
+      "reject_reason": "Alasan (opsional, akan dilihat oleh agent)",
+      "connect": "Hubungkan {{app}}",
+      "connected_continue": "Sudah saya hubungkan",
+      "status": {
+        "approved": "Disetujui",
+        "rejected": "Ditolak",
+        "failed": "Gagal",
+        "expired": "Kedaluwarsa",
+        "cancelled": "Dibatalkan"
+      },
+      "toast_approved": "Disetujui. Agent akan melanjutkan.",
+      "toast_rejected": "Ditolak. Agent akan menyesuaikan.",
+      "toast_failed": "Tidak dapat mencatat keputusan Anda.",
+      "not_connected": "Hubungkan akun terlebih dahulu.",
+      "connected_resumed": "{{app}} terhubung. Agent melanjutkan dari tempat terakhir ia berhenti.",
+      "rate_limited": "Akun ini mencapai batas panggilan per menit. Setujui lagi dalam semenit.",
+      "rate_limited_some_other": "{{count}} permintaan mencapai batas per menit. Setujui lagi dalam semenit.",
+      "withdrawn": "Anda tidak lagi dapat menggunakan agent ini, sehingga permintaan ditarik.",
+      "title_connect_team": "{{agent}} membutuhkan akun {{app}}",
+      "title_member_ask": "{{name}} meminta akun {{app}} tim",
+      "waiting_for_admin": "Menunggu admin",
+      "team_note": "Setiap agent yang bertindak sebagai akun tim dapat menggunakannya.",
+      "admins_notified": "Admin ruang kerja telah diberi tahu di Kotak Masuk.",
+      "connect_team": "Hubungkan untuk tim"
+    },
+    "tools": {
+      "tab": "Tool",
+      "description": "Kelas sebuah tool menentukan aturan mana yang berlaku. Koreksi tool yang salah diklasifikasikan secara otomatis; perubahan berlaku untuk setiap akun aplikasi ini di ruang kerja.",
+      "read_only": "Hanya admin ruang kerja yang dapat mengubah klasifikasi tool.",
+      "search": "Cari tool",
+      "empty": "Tidak ada tool yang cocok.",
+      "auto": "Otomatis ({{class}})",
+      "truncated": "Menampilkan {{shown}} dari {{total}}. Cari untuk mempersempit daftar."
+    },
+    "custom": {
+      "title": "Daftar aplikasi kustom",
+      "description": "Agent hanya melihat aplikasi yang Anda pilih, dan tidak ada yang dapat menghubungkan akun untuk aplikasi lain.",
+      "selected_other": "{{count}} aplikasi dipilih",
+      "cancel": "Batal",
+      "save": "Simpan daftar",
+      "saved": "Daftar aplikasi disimpan",
+      "edit": "Edit daftar",
+      "row_label": "Aplikasi yang diizinkan",
+      "row_description_other": "{{count}} aplikasi diizinkan"
+    },
+    "saved_access": {
+      "account": "Pembatasan tindakan sebelumnya masih membatasi akun ini.",
+      "agent": "Aplikasi ini masih memiliki akses hanya baca dari penyiapan sebelumnya.",
+      "catalog": "Daftar aplikasi sebelumnya menyembunyikan aplikasi lain.",
+      "allow_actions": "Izinkan semua tindakan",
+      "open_catalog": "Tampilkan semua aplikasi",
+      "account_confirm": "Agent yang ditugaskan akun ini akan dapat membaca, menulis, mengirim, menghapus, dan membagikan melaluinya. Pembatasan tindakan yang tersimpan akan diganti.",
+      "agent_confirm": "Agent ini akan dapat membaca, menulis, mengirim, menghapus, dan membagikan melalui aplikasi ini, dalam batas tindakan yang diizinkan akun.",
+      "catalog_confirm": "Semua aplikasi yang dapat dihubungkan akan tersedia untuk ruang kerja. Koneksi dan penugasan agent yang ada tidak berubah.",
+      "cancel": "Batal",
+      "admin_required": "Admin ruang kerja dapat memulihkan akses.",
+      "account_link": "Akun ini memiliki pembatasan tindakan yang tersimpan. Pulihkan akses di Aplikasi terhubung."
+    },
+    "status": {
+      "connected": "Terhubung",
+      "not_connected": "Belum terhubung",
+      "needs_reconnecting": "Perlu dihubungkan kembali",
+      "requested": "Diminta"
+    },
+    "owner": {
+      "team": "Akun tim",
+      "personal": "Akun Anda"
+    },
+    "account_row": {
+      "admins_notified": "admin telah diberi tahu",
+      "withdraw": "Tarik kembali",
+      "decline": "Tolak",
+      "toast_declined": "Permintaan ditolak. Agent yang menunggu melanjutkan tanpanya.",
+      "toast_withdrawn": "Permintaan ditarik kembali"
+    },
+    "disclosure": {
+      "title": "Hubungkan {{app}}",
+      "personal_subtitle": "Akun Anda sendiri. Anda akan masuk ke aplikasi di layar berikutnya.",
+      "team_subtitle": "Akun tim yang dipakai bersama seluruh ruang kerja. Anda akan masuk ke aplikasi di layar berikutnya.",
+      "without_asking": "Agent dapat melakukan ini tanpa bertanya setiap kali",
+      "logged": "Setiap panggilan yang dibuat agent dicatat pada tugas atau chat tempat agent berjalan.",
+      "used_by": "Agent yang memakai {{app}}: {{agents}}. Mereka akan bertindak sebagai akun ini.",
+      "used_by_none": "Belum ada agent yang memakai aplikasi ini. Tambahkan ke agent dari halaman agent.",
+      "visibility_personal": "Hanya run yang Anda mulai yang memakainya. Juga berlaku di ruang kerja Anda yang lain.",
+      "visibility_team": "Agent yang diberi akun tim bertindak sebagai akun tersebut, siapa pun yang memulai run.",
+      "cancel": "Batal",
+      "continue": "Lanjutkan"
+    },
+    "hub": {
+      "description": "Semua yang dapat dikerjakan agent di {{workspace}}, dan akun siapa yang mereka pakai.",
+      "tabs": {
+        "in_use": "Digunakan",
+        "attention": "Perlu perhatian",
+        "accounts": "Akun",
+        "all": "Semua aplikasi"
+      },
+      "search": "Cari aplikasi",
+      "popular": "Populer di {{workspace}}",
+      "scope_team": "Akun tim",
+      "scope_personal": "Akun pribadi",
+      "scope_both": "Akun tim dan pribadi",
+      "used_by": "Digunakan oleh {{agents}}",
+      "wanted_by": "Diinginkan oleh {{agents}}",
+      "members_asked_other": "{{count}} anggota meminta",
+      "connect": "Hubungkan",
+      "reconnect": "Hubungkan kembali",
+      "ask_admin": "Minta admin",
+      "toast_requested": "Admin ruang kerja telah diminta untuk menghubungkan {{app}}.",
+      "empty_in_use": "Belum ada aplikasi yang digunakan. Siapkan satu agar agent dapat bekerja di dalamnya.",
+      "empty_attention": "Tidak ada yang perlu diperhatikan.",
+      "no_matches": "Tidak ada aplikasi yang cocok dengan pencarian Anda.",
+      "unavailable": "Aplikasi tidak tersedia di server ini.",
+      "retry": "Coba lagi",
+      "category_all": "Semua",
+      "category_curated": "Pilihan unggulan",
+      "categories_label": "Kategori",
+      "categories_nav": "Kategori aplikasi",
+      "connect_oauth": "Masuk dengan OAuth",
+      "connect_key": "Menggunakan API key",
+      "show_more": "Tampilkan lebih banyak",
+      "categories": {
+        "ai_ml": "AI & pembelajaran mesin",
+        "developer_tools": "Alat pengembang & DevOps",
+        "data_analytics": "Data & analitik",
+        "productivity": "Produktivitas & manajemen proyek",
+        "collaboration": "Kolaborasi & komunikasi",
+        "marketing_social": "Pemasaran & media sosial",
+        "documents": "Dokumen & file",
+        "sales_support": "Penjualan & dukungan pelanggan",
+        "crm": "CRM",
+        "finance": "Keuangan & akuntansi",
+        "workflow_automation": "Otomatisasi alur kerja",
+        "design": "Desain & alat kreatif",
+        "ecommerce": "E-commerce",
+        "advertising": "Periklanan",
+        "scheduling": "Penjadwalan & pemesanan",
+        "entertainment": "Hiburan & media",
+        "hr_recruiting": "SDM & rekrutmen",
+        "education": "Pendidikan",
+        "model_context_protocol": "Server MCP",
+        "marketing_automation": "Otomatisasi pemasaran",
+        "email": "Email",
+        "security_identity_tools": "Keamanan & identitas",
+        "forms_surveys": "Formulir & survei",
+        "databases": "Basis data",
+        "web_scraping_browser": "Pengambilan data web & browser",
+        "email_newsletters": "Buletin email",
+        "business_intelligence": "Intelijen bisnis",
+        "ai_web_scraping": "Pengambilan data web berbasis AI",
+        "ai_agents": "Agent AI",
+        "web_search_research": "Pencarian web & riset",
+        "ai_sales_tools": "Alat penjualan berbasis AI",
+        "ai_content_generation": "Pembuatan konten AI",
+        "payment_processing": "Pemrosesan pembayaran",
+        "server_monitoring": "Pemantauan server",
+        "video_audio": "Video & audio",
+        "signatures": "Tanda tangan elektronik",
+        "phone_sms": "Telepon & SMS",
+        "audio_speech": "Audio & ucapan",
+        "ai_chatbots": "Chatbot AI",
+        "ai_document_extraction": "Ekstraksi dokumen dengan AI",
+        "url_shortener": "Pemendek URL",
+        "people_contact_data": "Data individu & kontak",
+        "notifications": "Notifikasi",
+        "event_management": "Manajemen acara",
+        "places_weather": "Tempat & cuaca",
+        "market_data": "Data pasar",
+        "it_operations": "Operasional TI",
+        "internet_of_things": "Internet untuk Segala (IoT)",
+        "spreadsheets": "Spreadsheet",
+        "fundraising": "Penggalangan dana",
+        "website_builders": "Pembuat situs web & aplikasi",
+        "reviews": "Ulasan",
+        "company_data": "Data perusahaan",
+        "ai_meeting_assistants": "Asisten rapat AI",
+        "bookmark_managers": "Pengelola bookmark",
+        "social_creator_data": "Data sosial & kreator",
+        "seo_ai_visibility": "SEO & visibilitas AI",
+        "legal_public_records": "Hukum & arsip publik",
+        "ai_safety": "Keamanan dan kepatuhan AI",
+        "other": "Lainnya"
+      }
+    },
+    "app_page": {
+      "agents_title": "Agent",
+      "agents_empty": "Ruang kerja ini belum memiliki agent.",
+      "source_label": "Akun yang dipakai {{agent}} untuk {{app}}",
+      "source_team": "Akun tim",
+      "source_personal": "Siapa pun yang memulai run",
+      "not_using": "Tidak memakai {{app}}",
+      "enable": "Izinkan {{agent}} memakai {{app}}",
+      "team_admin_only": "Hanya admin ruang kerja yang dapat mengubah akses akun tim.",
+      "save_failed": "Tidak dapat memperbarui agent.",
+      "activity_title": "Aktivitas terbaru",
+      "activity_empty": "Belum ada agent yang memakai {{app}}.",
+      "as_team": "sebagai akun tim",
+      "as_you": "sebagai Anda",
+      "in_chat": "chat",
+      "accounts_title": "Akun",
+      "account_actions": "Tindakan {{account}}",
+      "capabilities_title": "Yang dapat dilakukan agent",
+      "capabilities_note": "Tanpa bertanya setiap kali.",
+      "accounts_description": "Login {{app}} mana yang dapat dipakai agent di {{workspace}}.",
+      "team_account_hint": "Dipakai bersama semua orang di {{workspace}} · dihubungkan oleh admin",
+      "your_account_hint": "Hanya dipakai pada run yang Anda mulai",
+      "agents_description": "Setiap agent memilih akun siapa yang dipakainya.",
+      "ready_team": "Siap dengan akun tim",
+      "needs_team": "Membutuhkan akun tim",
+      "ready_yours": "Siap dengan akun Anda",
+      "needs_yours": "Membutuhkan akun Anda"
+    },
+    "accounts_page": {
+      "empty": "Anda belum menghubungkan akun apa pun di ruang kerja ini.",
+      "used_by": "digunakan oleh {{agents}}",
+      "team_title": "Akun tim",
+      "team_description_admin": "Dipakai bersama semua orang di ruang kerja. Hanya admin yang dapat menghubungkannya.",
+      "team_description_member": "Admin yang menghubungkannya. Anda dapat melihatnya dan memintanya.",
+      "team_empty": "Belum ada akun tim.",
+      "yours_title": "Akun Anda",
+      "yours_description": "Hanya Anda yang dapat memakainya; agent memakainya pada run yang Anda mulai.",
+      "needed_by": "{{agents}} membutuhkannya"
+    },
+    "disconnect_dialog": {
+      "title": "Putuskan koneksi {{app}}?",
+      "team_body": "Agent ini bertindak sebagai akun ini. Langkah {{app}} berikutnya akan meminta admin, bukan berjalan.",
+      "personal_body": "Agent ini memakainya pada run yang Anda mulai. Run berikutnya yang Anda mulai akan meminta Anda menghubungkannya lagi.",
+      "agents": "Agent yang memakainya",
+      "no_agents": "Tidak ada agent yang memakainya.",
+      "running": "Run sedang berjalan — akan dihentikan",
+      "active_runs_other": "{{count}} run yang sedang berjalan dihentikan sekarang.",
+      "impact_failed": "Tidak dapat memeriksa agent mana yang memakainya.",
+      "cancel": "Batal",
+      "confirm": "Putuskan koneksi"
+    },
+    "team_requests": {
+      "title": "Akun tim {{app}} dibutuhkan",
+      "run_waiting": "Run menunggu",
+      "asked": "Diminta",
+      "summary": " · “{{summary}}”",
+      "resumes": "Menghubungkannya sekali akan menjawab semua permintaan di sini, dan run yang menunggu dilanjutkan dari tempat berhentinya.",
+      "decline_all": "Tolak semua",
+      "open_app": "Buka aplikasi"
+    }
+  },
+  "voice_input": {
+    "description": "Dikte ke chat, komentar, dan balasan. Suara ditranskripsi di komputer ini dan tidak pernah keluar darinya.",
+    "model_title": "Model suara",
+    "model_hint": "Model berjalan di komputer ini. Unduh satu, atau beralih di antara yang Anda miliki.",
+    "engine_unavailable": "Transkripsi di perangkat tidak tersedia untuk komputer ini.",
+    "enabled": {
+      "title": "Input suara",
+      "hint": "Tampilkan mikrofon di chat, komentar, dan balasan, serta aktifkan pintasan suara."
+    },
+    "input_title": "Input",
+    "shortcut": {
+      "title": "Pintasan",
+      "hint": "Berfungsi setiap kali kolom penulisan (composer) tampil di layar, meskipun kolom tersebut tidak sedang aktif.",
+      "change": "Ubah",
+      "unassigned": "Belum diatur"
+    },
+    "activation": {
+      "title": "Aktivasi",
+      "auto": "Ketuk atau tahan",
+      "toggle": "Ketuk",
+      "hold": "Tahan",
+      "hints": {
+        "auto": "Ketuk untuk mulai dan ketuk lagi untuk menyisipkan. Tahan untuk berbicara dan lepas untuk menyisipkan.",
+        "toggle": "Ketuk untuk mulai, ketuk lagi untuk menyisipkan.",
+        "hold": "Tahan untuk berbicara, lepas untuk menyisipkan."
+      }
+    },
+    "recognition_title": "Pengenalan",
+    "language": {
+      "title": "Bahasa ucapan",
+      "hint": "Deteksi otomatis menangani sebagian besar ucapan. Pilih bahasa jika frasa pendek terdeteksi dalam bahasa yang salah.",
+      "auto": "Deteksi otomatis"
+    },
+    "fillers": {
+      "title": "Hapus kata pengisi",
+      "hint": "Hilangkan “um”, “uh”, dan keraguan serupa."
+    },
+    "vocabulary": {
+      "title": "Kosakata",
+      "hint": "Nama dan istilah yang ingin dieja sesuai keinginan Anda, seperti nama produk atau rekan tim. Maksimal {{max}}.",
+      "placeholder": "Tambah kata",
+      "remove": "Hapus {{word}}"
+    },
+    "microphone_title": "Mikrofon",
+    "device": {
+      "title": "Perangkat input",
+      "default": "Default sistem",
+      "unnamed": "Mikrofon {{index}}",
+      "permission_hint": "Uji mikrofon sekali untuk melihat nama perangkat."
+    },
+    "test": {
+      "title": "Uji mikrofon",
+      "hint": "Berbicaralah untuk memeriksa level suara. Tidak ada yang direkam.",
+      "blocked": "Akses mikrofon diblokir. Izinkan di pengaturan browser atau sistem Anda.",
+      "start": "Uji",
+      "stop": "Berhenti"
+    },
+    "history": {
+      "title": "Riwayat",
+      "description": "Rekaman dan teksnya tetap berada di komputer ini dan tidak pernah diunggah. Rekaman yang gagal atau terputus dapat ditranskripsi ulang dari audionya.",
+      "keep": {
+        "title": "Simpan riwayat",
+        "hint": "Berapa lama rekaman disimpan di komputer ini.",
+        "options": {
+          "off": "Jangan simpan",
+          "1d": "1 hari",
+          "7d": "7 hari",
+          "30d": "30 hari",
+          "forever": "Selamanya"
+        }
+      },
+      "clear": "Hapus semua",
+      "clear_dialog": {
+        "title": "Hapus riwayat suara?",
+        "description": "Semua rekaman dan transkrip yang disimpan di komputer ini akan dihapus.",
+        "cancel": "Batal"
+      },
+      "empty": "Dikte Anda akan muncul di sini.",
+      "off": "Riwayat nonaktif. Rekaman baru tidak disimpan.",
+      "today": "Hari ini",
+      "yesterday": "Kemarin",
+      "status": {
+        "transcribing": "Mentranskripsi...",
+        "failed": "Transkripsi gagal",
+        "interrupted": "Terputus sebelum ditranskripsi"
+      },
+      "actions": {
+        "play": "Putar rekaman",
+        "pause": "Jeda",
+        "retranscribe": "Transkripsi ulang",
+        "copy": "Salin teks",
+        "delete": "Hapus"
+      },
+      "copied": "Disalin",
+      "copy_failed": "Tidak dapat menyalin",
+      "retry_failed": "Tidak dapat mentranskripsi rekaman ini",
+      "show_more": "Tampilkan lebih banyak"
+    }
+  },
+  "private_projects": {
+    "title": "Proyek privat",
+    "description": "Hanya anggota proyek privat yang dapat membukanya. Sebagai pemilik ruang kerja, Anda dapat melihat siapa saja anggota masing-masing, dan menambahkan diri sendiri saat perlu turun tangan.",
+    "empty": "Ruang kerja ini tidak memiliki proyek privat.",
+    "load_failed": "Tidak dapat memuat proyek privat.",
+    "retry": "Coba lagi",
+    "no_members": "Tidak ada anggota",
+    "lead_name": "{{name}} (lead)",
+    "more_members": "+{{count}} lainnya",
+    "archived": "Diarsipkan",
+    "member": "Anda adalah anggota",
+    "open": "Buka",
+    "join": "Gabung",
+    "join_title": "Gabung ke “{{title}}”?",
+    "join_description": "Anda akan ditambahkan ke daftar anggota proyek ini dan dapat melihat tugas, komentar, dan lampirannya. Anggotanya saat ini akan diberi tahu.",
+    "join_description_empty": "Proyek ini tidak memiliki anggota. Anda akan menjadi satu-satunya anggota, dan dapat melihat tugas, komentar, dan lampirannya.",
+    "join_confirm": "Gabung ke proyek",
+    "cancel": "Batal",
+    "toast_joined": "Anda bergabung ke {{title}}",
+    "toast_failed": "Tidak dapat bergabung ke proyek."
   }
 }

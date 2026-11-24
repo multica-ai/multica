@@ -8,7 +8,21 @@
   "filter": {
     "project_label": "Proyek",
     "all_projects": "Semua proyek",
-    "period_label": "Periode"
+    "period_label": "Periode",
+    "attribution_label": "Atribusi",
+    "all_attribution": "Semua atribusi",
+    "standalone_only": "Hanya agent mandiri",
+    "squads_group": "Squad"
+  },
+  "history_limit": {
+    "note": "Paket Anda mencakup {{days}} hari terakhir. Upgrade untuk melihat data yang lebih lama. Tidak ada yang dihapus.",
+    "fell_back": "Menampilkan {{days}} hari terakhir — batas untuk paket Anda saat ini.",
+    "view_plans": "Lihat paket",
+    "locked": "Tidak termasuk dalam paket Anda",
+    "plan": {
+      "pro": "Pro",
+      "business": "Business"
+    }
   },
   "kpi": {
     "cost_label": "Biaya · {{days}}H",
@@ -17,10 +31,12 @@
     "run_time_label": "Waktu eksekusi · {{days}}H",
     "run_time_hint": "Dari {{tasks}} eksekusi",
     "tasks_label": "Eksekusi · {{days}}H",
-    "tasks_hint": "{{failed}} gagal"
+    "tasks_hint": "{{failed}} gagal",
+    "cost_squad_hint": "{{name}} secara keseluruhan (termasuk anggota yang didelegasikan)",
+    "cost_squad_share_hint": "Dipicu squad {{cost}} ({{pct}}%)"
   },
   "dim": {
-    "label": "Dimensi",
+    "label": "Interval",
     "daily": "Harian",
     "weekly": "Mingguan"
   },
@@ -50,8 +66,8 @@
     "kpi_failed_hint": "Dari {{total}} eksekusi",
     "kpi_rate_label": "Tingkat kegagalan · {{days}}H",
     "kpi_agents_label": "Agent terdampak · {{days}}H",
-    "kpi_agents_hint": "Terburuk {{name}} · {{count}}",
-    "tooltip_rate": "Tingkat error",
+    "kpi_agents_hint": "Terbanyak: {{name}} ({{count}} gagal)",
+    "tooltip_rate": "Tingkat kegagalan",
     "class": {
       "auth": "Auth",
       "rate_limit": "Rate limit",
@@ -66,8 +82,8 @@
     "mix_title": "Komposisi kegagalan · {{failed}}",
     "mix_label": "Komposisi kegagalan",
     "codes_label": "Kode error",
-    "by_agent": "Pelaku teratas",
-    "sort_label": "Urutkan pelaku berdasarkan",
+    "by_agent": "Error per agent",
+    "sort_label": "Urutkan agent berdasarkan",
     "sort_failed": "Kegagalan",
     "sort_rate": "Tingkat",
     "header_agent": "Agent",
@@ -76,11 +92,12 @@
     "header_rate": "Tingkat",
     "other_agents": "Agent lainnya",
     "low_sample": "Kurang dari {{count}} eksekusi dalam periode ini — tingkat ini tidak bermakna.",
-    "no_data": "Tidak ada eksekusi gagal dalam periode ini.",
+    "no_data": "Tidak ada eksekusi gagal dalam periode ini",
     "show_reasons": "Tampilkan kode error",
     "hide_reasons": "Sembunyikan kode error",
     "show_all": "Tampilkan semua {{count}}",
-    "show_less": "Tampilkan {{count}} teratas"
+    "show_less": "Tampilkan {{count}} teratas",
+    "by_squad": "Error per squad"
   },
   "leaderboard": {
     "title": "Peringkat",
@@ -99,11 +116,23 @@
     "usage_totals_pending": "Total penggunaan masih diproses",
     "show_all": "Tampilkan semua",
     "show_less": "Tampilkan {{count}} teratas",
-    "no_data": "Tidak ada aktivitas agent dalam periode ini."
+    "no_data": "Tidak ada aktivitas agent dalam periode ini.",
+    "group_label": "Kelompokkan papan peringkat berdasarkan",
+    "group_agent": "Agent",
+    "group_squad": "Squad",
+    "header_squad": "Squad / Atribusi",
+    "squad_caption": "{{count}} squad",
+    "squad_caption_with_standalone": "{{count}} squad · termasuk mandiri",
+    "squad_members_title": "Rincian anggota {{name}}",
+    "squad_members_count": "{{count}} anggota terlibat",
+    "standalone_agents": "Agent mandiri (non-Squad)",
+    "standalone_agents_hint": "@mention atau penugasan langsung · {{count}} agent",
+    "deleted_squads": "Squad yang dihapus",
+    "toggle_squad_members": "Tampilkan/sembunyikan anggota {{name}}"
   },
   "empty": {
     "title": "Belum ada penggunaan",
-    "body": "Jalankan agent untuk melihat penggunaan token dan waktu eksekusi."
+    "body": "Setelah agent mulai berjalan, penggunaan token, biaya, dan tingkat kegagalan akan muncul di sini."
   },
   "duration": {
     "less_than_minute": "<1m"

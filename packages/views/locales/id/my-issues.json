@@ -2,8 +2,8 @@
   "page": {
     "breadcrumb": "Tugas Saya",
     "workspace_fallback": "Ruang Kerja",
-    "empty_title": "Tidak ada tugas yang diberikan kepada Anda",
-    "empty_description": "Tugas yang Anda buat atau yang diberikan kepada Anda akan muncul di sini."
+    "empty_title": "Belum ada tugas",
+    "empty_description": "Tugas yang diberikan kepada Anda, dibuat oleh Anda, atau melibatkan agent dan squad Anda akan muncul di sini."
   },
   "header": {
     "scope": {
@@ -14,7 +14,7 @@
       "created_label": "Dibuat",
       "created_description": "Tugas yang saya buat",
       "agents_label": "Agent dan Squad Saya",
-      "agents_description": "Tugas yang diberikan kepada agent saya"
+      "agents_description": "Tugas yang diberikan kepada agent dan squad saya"
     },
     "filter_button": "Filter",
     "filter_status": "Status",

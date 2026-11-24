@@ -1,37 +1,166 @@
 {
-  "title": "Cari",
-  "description": "Cari halaman, tugas, proyek, dan anggota",
-  "placeholder": "Ketik perintah atau cari...",
+  "title": "Command bar",
+  "description": "Cari, jalankan perintah, atau serahkan pekerjaan ke agent",
+  "placeholder": "Cari, atau ketik apa yang perlu dikerjakan...",
+  "page_placeholder": "Filter...",
+  "breadcrumb_aria": "Menu saat ini",
   "groups": {
     "pages": "Halaman",
+    "views": "Tampilan",
     "commands": "Perintah",
     "members": "Anggota",
+    "agents": "Agent",
+    "squads": "Squad",
     "projects": "Proyek",
     "issues": "Tugas",
+    "autopilots": "Autopilot",
+    "chats": "Chat",
+    "skills": "Skill",
+    "docs": "Dokumen",
     "cancelled": "Dibatalkan",
-    "recent": "Terbaru"
+    "recent": "Terbaru",
+    "workspaces": "Ruang Kerja",
+    "new": "Baru",
+    "best_match": "Paling cocok",
+    "actions": "Tindakan"
+  },
+  "context": {
+    "current_issue": "Tugas saat ini",
+    "selected_issues_other": "{{count}} tugas dipilih",
+    "current_project": "Proyek saat ini",
+    "current_agent": "Agent saat ini",
+    "current_autopilot": "Autopilot saat ini",
+    "inbox": "Kotak Masuk",
+    "current_chat": "Chat saat ini"
   },
   "commands": {
     "current_theme_aria": "Tema saat ini",
+    "current_mode_aria": "Mode saat ini",
     "new_issue": "Tugas Baru",
     "new_project": "Proyek Baru",
+    "new_autopilot": "Autopilot baru",
+    "chat_with_agent": "Chat dengan agent",
+    "change_theme": "Ubah tema...",
+    "send_feedback": "Kirim masukan",
     "copy_issue_link": "Salin Tautan Tugas",
     "copy_identifier": "Salin Pengidentifikasi ({{identifier}})",
     "fold_all_comments": "Lipat Semua Komentar",
-    "unfold_all_comments": "Buka Semua Komentar",
-    "switch_to_light": "Beralih ke Tema Terang",
-    "switch_to_dark": "Beralih ke Tema Gelap",
-    "use_system_theme": "Gunakan Tema Sistem"
+    "unfold_all_comments": "Buka Semua Komentar"
+  },
+  "issue": {
+    "change_status": "Ubah status...",
+    "assign_to": "Tugaskan ke...",
+    "set_priority": "Atur prioritas...",
+    "run_quick_action": "Jalankan tindakan cepat...",
+    "quick_actions_available_other": "{{count}} tersedia",
+    "add_label": "Tambah label...",
+    "set_due_date": "Atur tanggal tenggat...",
+    "move_to_project": "Pindahkan ke proyek...",
+    "set_parent": "Atur tugas induk...",
+    "cancel_run": "Batalkan run saat ini",
+    "retry_run": "Ulangi run terakhir",
+    "create_sub_issue": "Sub-tugas baru",
+    "subscribe": "Berlangganan",
+    "unsubscribe": "Berhenti berlangganan",
+    "delete": "Hapus tugas",
+    "delete_selected_other": "Hapus {{count}} tugas"
+  },
+  "project": {
+    "change_status": "Ubah status proyek...",
+    "new_issue": "Tugas baru di proyek ini",
+    "pin": "Sematkan ke sidebar",
+    "unpin": "Lepas sematan dari sidebar",
+    "copy_link": "Salin tautan proyek"
+  },
+  "agent": {
+    "chat": "Chat dengan {{name}}",
+    "assign_issue": "Tugaskan tugas ke {{name}}...",
+    "new_issue": "Tugas baru untuk {{name}}",
+    "pin_in_chat": "Sematkan di chat",
+    "unpin_in_chat": "Lepas sematan dari chat",
+    "settings": "Buka pengaturan agent"
+  },
+  "autopilot": {
+    "run_now": "Jalankan sekali sekarang",
+    "pause": "Jeda",
+    "resume": "Lanjutkan"
+  },
+  "inbox": {
+    "archive": "Arsipkan",
+    "mark_unread": "Tandai belum dibaca",
+    "mark_all_read": "Tandai semua item kotak masuk sebagai sudah dibaca",
+    "archive_all_read": "Arsipkan semua item kotak masuk yang sudah dibaca"
+  },
+  "chat": {
+    "link_project": "Tautkan ke proyek...",
+    "pin": "Sematkan chat",
+    "unpin": "Lepas sematan chat",
+    "archive": "Arsipkan chat"
+  },
+  "pages": {
+    "status": "Status",
+    "priority": "Prioritas",
+    "assignee": "Penerima tugas",
+    "labels": "Label",
+    "due_date": "Tanggal tenggat",
+    "project": "Proyek",
+    "parent": "Tugas induk",
+    "quick_actions": "Tindakan cepat",
+    "project_status": "Status proyek",
+    "no_project": "Tanpa proyek",
+    "current": "Saat ini"
+  },
+  "theme": {
+    "light": "Terang",
+    "dark": "Gelap",
+    "system": "Sistem"
   },
   "toast": {
     "link_copied": "Tautan disalin",
-    "copied_identifier": "{{identifier}} disalin"
+    "copied_identifier": "{{identifier}} disalin",
+    "run_retried": "Run dimulai ulang",
+    "run_cancelled": "Run dibatalkan",
+    "subscribed": "Berlangganan",
+    "unsubscribed": "Berhenti berlangganan",
+    "label_added": "Label {{name}} ditambahkan",
+    "label_removed": "Label {{name}} dihapus",
+    "update_failed": "Pembaruan gagal",
+    "assigned": "{{identifier}} ditugaskan ke {{name}}"
   },
   "empty": {
     "no_results": "Tidak ada hasil ditemukan.",
-    "type_to_search": "Ketik untuk mencari tugas dan proyek"
+    "no_labels": "Tidak ada label",
+    "type_to_find_issue": "Ketik untuk mencari tugas",
+    "type_to_find_people": "Ketik untuk mencari orang dan agent"
+  },
+  "delegate": {
+    "row": "Serahkan ke agent: “{{prompt}}”",
+    "hint": "Buat dengan agent"
+  },
+  "best": {
+    "assign": "Tugaskan {{subject}} ke {{name}}",
+    "chat": "Chat dengan {{name}}",
+    "new_issue_in": "Tugas baru di {{name}}"
+  },
+  "types": {
+    "issue": "Tugas",
+    "project": "Proyek",
+    "agent": "Agent",
+    "autopilot": "Autopilot",
+    "squad": "Squad",
+    "member": "Anggota"
+  },
+  "footer": {
+    "navigate": "Navigasi",
+    "select": "Pilih",
+    "open_in_new_tab": "Buka di tab baru",
+    "back": "Kembali",
+    "prefix_commands": "Perintah",
+    "prefix_issues": "Tugas",
+    "prefix_people": "Orang & agent"
   },
   "trigger": {
     "label": "Cari..."
-  }
+  },
+  "untitled_doc": "Tanpa judul"
 }

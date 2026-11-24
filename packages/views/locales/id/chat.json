@@ -1,6 +1,9 @@
 {
   "page": {
     "title": "Obrolan",
+    "no_agent_title": "Belum ada agent untuk diajak chat",
+    "no_agent_description": "Buat agent, lalu sampaikan permintaan di sini dan biarkan agent mengubahnya menjadi tugas.",
+    "no_agent_action": "Agent baru",
     "select_prompt": "Pilih percakapan, atau mulai yang baru dengan +",
     "agent_link_no_access": "Anda tidak memiliki akses untuk mengobrol dengan agent ini."
   },
@@ -9,9 +12,22 @@
     "unread_other": "{{count}} obrolan belum dibaca",
     "default": "Tanya Multica"
   },
+  "bar": {
+    "history": "Riwayat chat",
+    "history_group": {
+      "today": "Hari ini",
+      "week": "7 hari terakhir",
+      "older": "Lebih lama"
+    },
+    "close_chip": "Tutup {{title}}",
+    "all_chats": "Semua chat",
+    "more_other": "{{count}} chat lainnya"
+  },
   "input": {
+    "page_context_add": "Tambahkan halaman ini sebagai konteks",
+    "page_context_remove": "Hapus konteks halaman",
     "placeholder_no_agent": "Buat agent untuk mulai mengobrol",
-    "placeholder_archived": "Sesi ini diarsipkan",
+    "placeholder_archived": "Obrolan ini diarsipkan",
     "placeholder_archived_agent": "Agent ini telah diarsipkan",
     "placeholder_runtime_required": "Hubungkan runtime untuk melanjutkan",
     "placeholder_access_revoked": "Anda tidak lagi memiliki izin untuk menjalankan agent ini",
@@ -23,7 +39,7 @@
     "send_failed_toast": "Gagal mengirim pesan",
     "send_blocked_toast": "Pesan tidak terkirim — Anda tidak lagi memiliki izin untuk menggunakan agent ini",
     "runtime_required_toast": "Pesan tidak terkirim — hubungkan runtime ke agent ini dahulu",
-    "runtime_access_denied_toast": "Pesan tidak terkirim — agent ini tidak dapat berjalan pada runtime privatnya. Jadikan runtime publik, atau hubungkan ulang/salin agent ke runtime yang dapat digunakan pemiliknya",
+    "runtime_access_denied_toast": "Runtime pribadi agent ini tidak dapat diakses. Jadikan runtime publik, atau kaitkan agent ke runtime yang dapat diakses.",
     "attachment_bind_failed_toast": "Pesan terkirim, tetapi file tidak terlampir. Silakan coba lagi sesaat lagi.",
     "add_tooltip": "Tambah",
     "upload_file": "Gambar atau file",
@@ -36,10 +52,10 @@
   "queue": {
     "title_other": "{{count}} pesan dalam antrean",
     "clear": "Hapus semua",
-    "steer": "Arahkan",
-    "steer_unavailable": "Arahkan tersedia setelah balasan saat ini dimulai",
+    "steer": "Kirim sekarang (menghentikan balasan saat ini)",
+    "steer_unavailable": "Tersedia setelah balasan saat ini dimulai",
     "steer_no_permission": "Anda tidak lagi memiliki izin untuk menjalankan agent ini",
-    "steer_unavailable_toast": "Arahkan tidak tersedia. Memuat ulang antrean.",
+    "steer_unavailable_toast": "Kirim sekarang tidak tersedia. Memuat ulang antrean.",
     "edit": "Edit pesan dalam antrean",
     "remove": "Hapus pesan dalam antrean",
     "more": "Tindakan antrean lainnya",
@@ -47,6 +63,8 @@
     "action_failed_toast": "Tidak dapat memperbarui pesan dalam antrean"
   },
   "message_list": {
+    "jump_to_latest": "Ke yang terbaru",
+    "new_reply": "Balasan baru",
     "show_details": "Tampilkan detail",
     "replied_in": "Membalas dalam {{elapsed}}",
     "failed_after": "Gagal setelah {{elapsed}}",
@@ -57,17 +75,19 @@
       "timeout": "Agent membutuhkan waktu terlalu lama dan berhenti sebelum selesai. Coba lagi, atau pecah permintaan Anda menjadi langkah yang lebih kecil.",
       "codex_semantic_inactivity": "Agent menjadi idle dan berhenti sebelum selesai. Silakan coba lagi.",
       "runtime_offline": "Agent sedang offline, sehingga tidak dapat membalas. Silakan coba lagi setelah kembali online.",
-      "runtime_access_denied": "Agent ini tidak dapat berjalan pada runtime privatnya, sehingga tidak dapat membalas. Jadikan runtime publik, atau hubungkan ulang/salin agent ke runtime yang dapat digunakan pemiliknya.",
+      "runtime_access_denied": "Runtime pribadi agent ini tidak dapat diakses. Jadikan runtime publik, atau kaitkan agent ke runtime yang dapat diakses.",
       "runtime_recovery": "Agent dimulai ulang sebelum dapat menyelesaikan. Silakan coba lagi.",
+      "runtime_access_revoked": "Akses runtime dicabut. Hubungkan agent ke runtime yang dapat diakses sebelum memulai eksekusi lain.",
       "manual": "Balasan ini dibatalkan.",
       "skill_bundle_unavailable": "Skill agent tidak dapat diunduh, sehingga tidak pernah dimulai. Ini biasanya masalah koneksi — silakan coba lagi.",
-      "runtime_cli_timeout": "CLI OpenClaw lokal tidak merespons tepat waktu, sehingga eksekusi ini tidak pernah dimulai. Ini adalah timeout startup lokal, bukan masalah jaringan — mencoba lagi tidak akan membantu sampai CLI menjadi lebih cepat atau timeout dinaikkan (MULTICA_OPENCLAW_CLI_TIMEOUT).",
+      "runtime_cli_timeout": "CLI OpenClaw lokal habis waktu sebelum menjawab. Periksa pengaturan CLI OpenClaw lokal Anda atau naikkan MULTICA_OPENCLAW_CLI_TIMEOUT sebelum mencoba lagi.",
       "environment_prepare_failed": "Mesin yang menjalankan agent tidak dapat menyiapkan eksekusi ini, sehingga tidak pernah dimulai. Error di bawah menunjukkan apa yang gagal di sana — biasanya ruang disk, izin, folder yang masih digunakan, atau konfigurasi lokal yang tidak dapat dibaca. Ini bukan kesalahan agent atau penyedia model.",
+      "local_directory_missing": "Folder lokal yang ditautkan ke proyek ini sudah tidak ada di mesin yang menjalankan agent, sehingga eksekusi tidak pernah dimulai. Pulihkan foldernya, lalu coba lagi. Untuk memakai folder lain, buka Resources → Local folders di proyek dengan aplikasi desktop di mesin tersebut dan tautkan di sana — browser tidak dapat memilih folder.",
       "provider_network": "Koneksi ke penyedia model terputus sebelum balasan selesai. Periksa jaringan Anda dan coba lagi.",
-      "provider_auth_or_access": "Akun model agent tidak lagi masuk. Masuk lagi, lalu coba ulang.",
+      "provider_auth_or_access": "Provider menolak kredensial atau akses agent ini. Periksa API key atau akunnya — mungkin sudah kedaluwarsa atau tidak lagi memiliki akses.",
       "provider_quota_limit": "Akun model agent telah kehabisan kredit. Isi ulang atau ganti akun, lalu coba ulang.",
       "provider_capacity_or_rate_limit": "Penyedia model sedang sibuk atau membatasi laju akun ini. Silakan coba lagi sesaat lagi.",
-      "context_overflow": "Percakapan ini terlalu panjang untuk model. Mulai sesi baru, atau pecah permintaan Anda menjadi langkah yang lebih kecil.",
+      "context_overflow": "Obrolan ini terlalu panjang untuk model. Mulai obrolan baru untuk melanjutkan.",
       "runtime_missing_executable": "CLI agent tidak dapat dijalankan di mesin ini. Pastikan sudah terinstal dengan benar dan ada di PATH, lalu coba ulang.",
       "runtime_version_unsupported": "CLI agent terlalu lama untuk runtime ini. Perbarui, lalu coba ulang.",
       "fallback": "Terjadi kesalahan dan agent tidak dapat menyelesaikan balasan. Silakan coba lagi."
@@ -111,7 +131,7 @@
       "confirming": "Menghentikan..."
     },
     "delete_dialog": {
-      "title": "Hapus sesi obrolan",
+      "title": "Hapus obrolan",
       "description_with_title": "\"{{title}}\" dan pesan-pesannya akan dihapus secara permanen. Tindakan ini tidak dapat dibatalkan.",
       "description_default": "Sesi obrolan ini dan pesan-pesannya akan dihapus secara permanen. Tindakan ini tidak dapat dibatalkan.",
       "cancel": "Batal",
@@ -125,6 +145,7 @@
     "restore_tooltip": "Kembalikan",
     "expand_tooltip": "Perluas",
     "minimize_tooltip": "Perkecil",
+    "close_tooltip": "Tutup",
     "another_running": "Obrolan lain sedang berjalan",
     "another_unread": "Obrolan lain memiliki balasan belum dibaca",
     "running": "Berjalan",
@@ -164,7 +185,8 @@
       "label": "Rekomendasikan tindakan",
       "prompt": "Tinjau apa yang kamu ketahui tentang ruang kerja saya dan rekomendasikan tindakan pertama yang berguna."
     },
-    "customize": "Sesuaikan pembuka"
+    "uploading": "Tunggu unggahan selesai sebelum memakai starter.",
+    "draft_in_progress": "Kirim atau hapus draf Anda sebelum memakai starter."
   },
   "onboarding_cards": {
     "aria_label": "Cara untuk mulai",
@@ -182,12 +204,12 @@
     "digest": {
       "title": "Biarkan ringkasan harian menulis sendiri",
       "desc": "Ringkasan pagi tentang progres ruang kerja, langsung ke kotak masuk Anda.",
-      "prompt": "Siapkan otomatisasi harian yang mengirim ringkasan pagi progres ruang kerja"
+      "prompt": "Siapkan autopilot harian yang merangkum aktivitas ruang kerja kemarin setiap pagi."
     },
     "digest_badge": "Setiap hari 9:00"
   },
   "no_agent_banner": "Anda memerlukan agent untuk mulai mengobrol.",
-  "archived_agent_banner": "{{name}} telah diarsipkan — percakapan ini bersifat hanya-baca.",
+  "archived_agent_banner": "{{name}} diarsipkan, sehingga obrolan ini hanya-baca.",
   "agent_access_revoked_banner": "Anda tidak lagi memiliki izin untuk menjalankan {{name}} — percakapan ini bersifat hanya-baca.",
   "runtime_required_banner": {
     "fallback_name": "Agent",
@@ -195,7 +217,7 @@
     "action": "Hubungkan runtime"
   },
   "offline_banner": {
-    "fallback_name": "agent",
+    "fallback_name": "Agent",
     "unstable": "Koneksi {{name}} tidak stabil — balasan mungkin tertunda.",
     "offline": "{{name}} sedang offline — pesan Anda akan terkirim saat mereka kembali."
   },
@@ -228,8 +250,6 @@
     "no_response_preview": "Tidak ada balasan teks",
     "quick_agents": "Agent yang sering digunakan",
     "add": "Tambah",
-    "add_agent": "Tambah agent favorit",
-    "unpin_agent": "Hapus dari favorit",
     "waiting": "Menunggu balasan",
     "pin": "Sematkan",
     "unpin": "Lepas sematan",
@@ -237,13 +257,62 @@
     "archive": "Arsipkan",
     "unarchive": "Batalkan arsip",
     "archived_title": "Diarsipkan",
-    "row_actions_aria": "Tindakan obrolan"
+    "row_actions_aria": "Tindakan obrolan",
+    "wakeup_preview": "Kembali untuk melapor",
+    "wakeup_active": "Menunggu untuk melapor kembali"
   },
   "header": {
-    "view_profile": "Lihat profil agent",
+    "agent_settings": "Pengaturan agent",
     "rename": "Ganti nama obrolan",
     "archive": "Arsipkan obrolan",
     "unarchive": "Batalkan arsip obrolan",
     "delete": "Hapus obrolan"
+  },
+  "wakeup": {
+    "panel_title": "Wakeup",
+    "panel_empty": "Tidak ada wakeup di percakapan ini",
+    "panel_ended": "Baru saja berakhir",
+    "limits_hint": "Setiap wakeup berakhir: waktu tunggu default 24 jam dan maksimal 7 hari. Jika tenggat tiba lebih dulu, agent kembali sekali untuk memberi tahu perkembangannya.",
+    "strip_waiting": "Menunggu: {{title}}",
+    "card": "Akan melapor kembali: {{title}}",
+    "ends": "berakhir {{relative}}",
+    "reminder_at": "pengingat {{relative}}",
+    "next_check": "pemeriksaan berikutnya {{relative}}",
+    "last_check": "Pemeriksaan terakhir: {{note}}",
+    "cancel": "Batalkan wakeup",
+    "cancel_failed": "Tidak dapat membatalkan wakeup",
+    "retry": "Coba lagi",
+    "retry_failed": "Tidak dapat mencoba ulang wakeup",
+    "status": {
+      "active": "Menunggu",
+      "fired": "Sudah melapor",
+      "expired": "Tenggat tercapai",
+      "cancelled": "Dibatalkan",
+      "failed": "Tidak dapat dijalankan"
+    },
+    "report": {
+      "waiting": "Menunggu untuk melapor",
+      "running": "Melapor...",
+      "failed": "Tidak dapat melapor"
+    },
+    "failure": {
+      "permission_revoked": "Orang yang meminta tidak lagi dapat menjalankan agent ini",
+      "access_lost": "Yang dipantau dipindahkan ke proyek privat",
+      "dispatch_failed": "Agent tidak dapat dijalankan"
+    },
+    "kind": {
+      "condition": "Saat terjadi",
+      "at": "Pengingat",
+      "check": "Pemeriksaan berkala"
+    },
+    "divider": {
+      "condition": "Kembali melapor · sudah terjadi",
+      "at": "Kembali melapor · pengingat",
+      "check": "Kembali melapor · pemeriksaan",
+      "expired": "Kembali melapor · tenggat tercapai",
+      "generic": "Kembali melapor"
+    },
+    "queue_label": "Wakeup: {{title}}",
+    "queue_fallback": "Wakeup"
   }
 }

@@ -11,8 +11,11 @@
     "more_agents_other": "dan {{count}} agent lainnya"
   },
   "detail": {
-    "workspace_fallback": "Ruang Kerja",
     "members_breadcrumb": "Anggota",
+    "role": "Peran",
+    "email": "Email",
+    "joined": "Bergabung",
+    "relation": "Hubungan",
     "breadcrumb_fallback": "Anggota",
     "not_found_title": "Anggota tidak ditemukan",
     "not_found_description": "Anggota ini mungkin telah keluar dari ruang kerja."

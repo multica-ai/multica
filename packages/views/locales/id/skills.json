@@ -1,13 +1,11 @@
 {
   "page": {
     "title": "Skills",
-    "tagline": "Instruksi yang dapat digunakan oleh semua agent di ruang kerja ini.",
-    "learn_more": "Pelajari lebih lanjut →",
+    "search": "Cari skill",
     "new_skill": "Skill baru",
-    "search_placeholder": "Cari skill…",
     "scopes": {
       "all": {
-        "label": "Semua",
+        "label": "Semua skill",
         "description": "Semua skill di ruang kerja ini"
       },
       "used": {
@@ -19,13 +17,9 @@
         "description": "Skill yang tidak ditugaskan ke agent mana pun"
       },
       "mine": {
-        "label": "Dibuat oleh saya",
+        "label": "Skill saya",
         "description": "Skill yang Anda buat"
       }
-    },
-    "empty": {
-      "title": "Belum ada skill",
-      "description": "Buat atau impor sebuah skill."
     },
     "no_matches": {
       "title": "Tidak ada yang cocok",
@@ -33,11 +27,6 @@
       "with_query_filter_suffix": " dalam filter ini",
       "filter_only": "Tidak ada skill yang cocok dengan filter ini.",
       "try_different": " Coba kata kunci lain."
-    },
-    "intro_banner": {
-      "title": "Dibagikan dengan ruang kerja Anda.",
-      "body": "Siapa pun dapat membuat skill, mengimpornya dari URL atau folder lokal, atau menyalinnya dari runtime lokal mereka — dan setiap agent dapat menggunakannya.",
-      "highlight": "Skill runtime lokal tetap privat sampai Anda menyalinnya ke sini."
     },
     "list_error": {
       "title": "Tidak dapat memuat skill",
@@ -77,8 +66,6 @@
     "added_toast": "Ditambahkan ke {{name}}",
     "add_failed_toast": "Gagal menambahkan skill",
     "delete": "Hapus",
-    "selected": "{{count}} dipilih",
-    "clear_selection": "Hapus pilihan",
     "delete_no_permission": "Pilihan mencakup skill yang hanya dapat dihapus oleh pembuatnya atau admin",
     "delete_dialog_title_other": "Hapus {{count}} skill?",
     "delete_dialog_desc_other": "Ini akan menghapus permanen {{count}} skill yang dipilih dan menghapusnya dari semua agent.",
@@ -99,28 +86,14 @@
     "added_multi_toast_other": "Ditambahkan ke {{count}} agent"
   },
   "toolbar": {
-    "result_count_title": "Skill yang cocok / semua skill",
-    "filter_label": "Filter",
-    "filter_active_count_other": "{{count}} filter",
-    "clear_filters": "Hapus filter",
     "section_usage": "Penggunaan",
     "section_labels": "Label",
     "filter_search_placeholder": "Filter...",
     "no_labels": "Belum ada label",
-    "no_results": "Tidak ada hasil",
-    "display": "Tampilan",
-    "sort_by": "Urutkan berdasarkan",
-    "direction_asc": "Menaik",
-    "direction_desc": "Menurun",
-    "section_columns": "Kolom",
-    "manage_labels": "Kelola label...",
-    "manage_labels_title": "Label skill"
+    "no_results": "Tidak ada hasil"
   },
   "detail": {
-    "all_skills": "Semua skill",
     "read_only": "Hanya-baca",
-    "delete_aria": "Hapus skill",
-    "delete_tooltip": "Hapus skill",
     "supporting_data_warning": "Beberapa data ruang kerja gagal dimuat. Atribusi pembuat, nama runtime, atau izin edit mungkin tampak tidak lengkap sampai penyegaran berikutnya.",
     "delete_file": "Hapus file",
     "name_placeholder": "nama-skill",
@@ -152,11 +125,11 @@
     },
     "toast_saved": "Skill disimpan",
     "toast_save_failed": "Gagal menyimpan skill",
+    "toast_saved_version": "Disimpan sebagai v{{version}}",
+    "toast_view_history": "Lihat riwayat",
     "toast_deleted": "Skill dihapus",
     "toast_delete_failed": "Gagal menghapus skill",
     "refresh": {
-      "button": "Perbarui",
-      "tooltip": "Unduh ulang skill ini dari sumbernya",
       "source_github": "GitHub",
       "source_skills_sh": "Skills.sh",
       "source_clawhub": "ClawHub",
@@ -195,30 +168,19 @@
       }
     },
     "header": {
-      "files_other": "{{count}} file",
-      "used_by_other": "{{count}} agent",
-      "updated": "Diperbarui {{when}}",
-      "updated_by": "Diperbarui {{when}} oleh {{name}}"
-    },
-    "tabs": {
-      "aria": "Bagian skill",
-      "overview": "Ringkasan",
-      "files_other": "File {{count}}"
+      "files_other": "{{count}} file"
     },
     "overview": {
       "properties": "Properti",
-      "properties_hint": "Kolom ini tetap sinkron dengan frontmatter SKILL.md.",
       "name": "Nama",
       "description": "Deskripsi",
       "description_hint": "Agent menggunakan ini untuk menentukan kapan harus memuat skill.",
       "labels": "Label",
-      "used_by_other": "Digunakan oleh {{count}} agent",
       "used_by_empty": "Belum ditugaskan ke agent mana pun. Buka tab Skills milik sebuah agent untuk menugaskannya.",
       "permissions_owner": "Anda dapat mengedit dan menghapus skill ini. Perubahan berlaku pada eksekusi agent berikutnya.",
       "permissions_locked_creator": "Hanya pembuat ({{name}}) atau admin ruang kerja yang dapat mengedit skill ini.",
       "permissions_locked": "Hanya pembuat atau admin ruang kerja yang dapat mengedit skill ini.",
-      "properties_help": "Tentang properti skill",
-      "character_count": "{{count}} karakter"
+      "character_count_other": "{{count}} karakter"
     },
     "files": {
       "list_aria": "File skill",
@@ -230,18 +192,58 @@
       "mode_preview": "Pratinjau",
       "mode_edit": "Edit",
       "mode_raw": "Teks biasa"
+    },
+    "versions": {
+      "list_aria": "Versi skill",
+      "version_label": "v{{version}}",
+      "current": "Saat ini",
+      "unknown_author": "Tidak diketahui",
+      "empty": "Belum ada versi. Perubahan berikutnya pada skill ini akan mencatat konten saat ini sebagai versi pertama.",
+      "load_failed": "Gagal memuat versi.",
+      "restore": "Pulihkan",
+      "toast_restored": "v{{version}} dipulihkan",
+      "toast_restore_failed": "Gagal memulihkan versi",
+      "source": {
+        "baseline": "Konten sebelumnya",
+        "create": "Dibuat",
+        "update": "Diedit",
+        "import": "Diimpor",
+        "refresh": "Diperbarui dari sumber",
+        "restore": "Dipulihkan dari v{{version}}"
+      },
+      "dialog": {
+        "title": "Pulihkan v{{version}}?",
+        "description": "Konten v{{version}} menjadi versi baru. Agent menggunakannya mulai eksekusi berikutnya. Versi yang lebih baru tetap ada di riwayat.",
+        "unsaved_warning": "Perubahan Anda yang belum disimpan akan dibuang.",
+        "cancel": "Batal",
+        "confirm": "Pulihkan",
+        "restoring": "Memulihkan..."
+      }
+    },
+    "sections": {
+      "content": "Konten",
+      "files": "File",
+      "edit": "Edit",
+      "open": "Buka",
+      "add": "Tambah",
+      "history": "Riwayat"
+    },
+    "menu": {
+      "copy_link": "Salin tautan",
+      "link_copied": "Tautan disalin",
+      "delete": "Hapus skill",
+      "version_history": "Riwayat versi"
+    },
+    "panel": {
+      "add_description": "Tambah deskripsi",
+      "version": "Versi",
+      "no_versions": "Belum ada versi"
     }
   },
   "create": {
-    "back": "Kembali",
-    "back_aria": "Kembali ke pemilih metode",
     "close": "Tutup",
     "close_aria": "Tutup",
     "method": {
-      "chooser": {
-        "title": "Skill baru",
-        "desc": "Pilih cara menambahkan skill ke ruang kerja ini."
-      },
       "manual": {
         "title": "Buat secara manual",
         "desc": "Mulai dari SKILL.md kosong."
@@ -287,7 +289,19 @@
       "cancel": "Batal",
       "import": "Impor",
       "importing": "Mengimpor…",
-      "toast_imported": "Skill diimpor"
+      "toast_imported": "Skill diimpor",
+      "select_all": "Pilih semua",
+      "import_count": "Impor {{count}}",
+      "done": "Selesai",
+      "stop": "Berhenti setelah yang sekarang",
+      "unreadable": "Tidak dapat membaca skill ini. Pilih folder lagi.",
+      "uncertain": "Hasilnya belum pasti. Periksa daftar skill yang diperbarui sebelum mencoba lagi. Nama yang sudah ada tetap terkunci; tinjau di daftar.",
+      "check_results": "Periksa hasil",
+      "retry_ready": "Tidak ditemukan di daftar yang diperbarui. Anda dapat mencoba lagi item ini.",
+      "uncertain_manual": "Hasilnya belum pasti dan nama skill dalam arsip tidak diketahui. Periksa daftar skill secara manual sebelum mengimpor arsip ini lagi.",
+      "check_failed": "Tidak dapat memverifikasi daftar skill. Impor dengan hasil yang belum pasti tetap terkunci. Coba periksa lagi atau tinjau daftar secara manual.",
+      "workspace_changed": "Ruang kerja berubah. Impor yang tersisa dihentikan. Tutup dialog ini lalu buka kembali di ruang kerja yang dituju.",
+      "summary": "Diimpor: {{success}} · Gagal atau belum pasti: {{failed}}"
     },
     "url": {
       "url_label": "URL Skill",
@@ -328,8 +342,6 @@
     "toast_imported": "Skill diimpor",
     "toast_import_failed": "Gagal mengimpor skill",
     "select_all": "Pilih semua ({{count}})",
-    "bulk_ready": "{{count}} skill dipilih",
-    "bulk_import_button": "Impor {{count}} Skill",
     "bulk_progress": "Mengimpor {{completed}} / {{total}}…",
     "bulk_cancel_button": "Batal",
     "bulk_complete_hint": "Impor selesai.",
@@ -341,7 +353,6 @@
     "bulk_summary_skipped": "Dilewati",
     "bulk_summary_failed": "Gagal",
     "conflict_single_title": "Skill dengan nama ini sudah ada",
-    "conflict_bulk_title": "{{count}} skill memerlukan keputusan",
     "conflict_hint": "Pilih apakah akan menimpa skill ruang kerja yang sudah ada, mengimpor dengan nama baru, atau melewatinya.",
     "conflict_locked_creator": "Skill ini dibuat oleh {{creator}}. Hanya pembuatnya yang dapat menimpanya melalui impor lokal; edit dari halaman detail Skill jika Anda perlu mengubahnya.",
     "conflict_locked": "Hanya pembuat yang dapat menimpa skill ini melalui impor lokal; edit dari halaman detail Skill jika Anda perlu mengubahnya.",
@@ -352,10 +363,13 @@
     "conflict_overwrite_all": "Timpa semua",
     "conflict_skip_all": "Lewati semua",
     "conflict_rename_label": "Nama skill baru",
-    "conflict_footer": "{{count}} keputusan konflik tertunda.",
     "conflict_apply_button": "Terapkan keputusan",
     "conflict_missing_resolution": "Pilih cara menyelesaikan konflik ini.",
-    "conflict_name_still_exists": "Nama itu sudah ada. Pilih nama lain atau lewati."
+    "conflict_name_still_exists": "Nama itu sudah ada. Pilih nama lain atau lewati.",
+    "bulk_ready_other": "{{count}} skill dipilih",
+    "bulk_import_button_other": "Impor {{count}} skill",
+    "conflict_bulk_title_other": "{{count}} skill memerlukan keputusan",
+    "conflict_footer_other": "{{count}} keputusan konflik tertunda."
   },
   "file_tree": {
     "no_files": "Tidak ada file",
@@ -371,5 +385,34 @@
     "markdown_placeholder": "Tulis konten markdown...",
     "raw_placeholder": "Konten file...",
     "raw_aria": "Konten teks biasa dari {{path}}"
+  },
+  "intro": {
+    "title": "Ubah cara kerja tim Anda menjadi skill",
+    "description": "Skill adalah kumpulan instruksi yang dapat dipakai ulang (SKILL.md). Tambahkan sekali ke ruang kerja, berikan ke agent, dan agent akan mengikutinya.",
+    "slides": {
+      "methods": {
+        "title": "Empat cara menambahkannya",
+        "description": "Mulai dari SKILL.md kosong, atau bawa skill yang sudah ada dari folder lokal, URL, atau runtime."
+      },
+      "assign": {
+        "title": "Berikan ke agent",
+        "description": "Satu skill dapat melayani banyak agent. Edit di satu tempat dan setiap agent yang menggunakannya mendapat perubahannya."
+      },
+      "share": {
+        "title": "Dibagikan di seluruh ruang kerja",
+        "description": "Skill di runtime lokal tetap pribadi sampai Anda menyalinnya ke sini. Setelah itu, agent mana pun dapat menggunakannya."
+      }
+    },
+    "art": {
+      "skill_summary": "Jalankan pengujian terlebih dahulu, lalu periksa aksesibilitas dan performa.",
+      "add_to_agent": "Tambah ke agent",
+      "local_skills": "Skill lokal",
+      "private": "Pribadi",
+      "workspace_shared": "Ruang kerja",
+      "all_agents": "Agent mana pun dapat menggunakannya",
+      "role_reviewer": "Reviewer",
+      "role_fullstack": "Full stack",
+      "copy_to_workspace": "Salin ke ruang kerja"
+    }
   }
 }

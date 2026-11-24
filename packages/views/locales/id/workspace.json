@@ -1,6 +1,6 @@
 {
   "create_form": {
-    "name_label": "Nama Ruang Kerja",
+    "name_label": "Nama ruang kerja",
     "name_placeholder": "Ruang Kerja Saya",
     "url_label": "URL Ruang Kerja",
     "url_placeholder": "ruang-kerja-saya",
