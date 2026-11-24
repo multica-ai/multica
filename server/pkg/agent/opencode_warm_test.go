@@ -38,6 +38,14 @@ fi
 printf '%s\n' "$$" >> '` + spawnLog + `'
 turn=0
 while IFS= read -r line; do
+  if [ -n "$OC_REQUESTS_FILE" ]; then
+    case "$line" in
+      *'"method":"initialize"'*) printf 'initialize\n' >> "$OC_REQUESTS_FILE";;
+      *'"method":"session/new"'*) printf 'session/new\n' >> "$OC_REQUESTS_FILE";;
+      *'"method":"session/load"'*) printf 'session/load\n' >> "$OC_REQUESTS_FILE";;
+      *'"method":"session/prompt"'*) printf 'session/prompt\n' >> "$OC_REQUESTS_FILE";;
+    esac
+  fi
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
   case "$line" in
     *'"method":"initialize"'*)
@@ -47,7 +55,13 @@ while IFS= read -r line; do
       printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses-warm-1"}}\n' "$id"
       ;;
     *'"method":"session/load"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses-warm-1"}}\n' "$id"
+      if [ -n "$OC_LOAD_FAIL" ]; then
+        # A real runtime refuses to restore a session it no longer has; the
+        # daemon must stop instead of opening a look-alike continuation.
+        printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32002,"message":"ACP session not found","data":{"sessionId":"ses-warm-1"}}}\n' "$id"
+      else
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses-warm-1"}}\n' "$id"
+      fi
       ;;
     *'"method":"session/set_model"'*)
       printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
@@ -422,5 +436,120 @@ done
 	}
 	if res.Status != "timeout" && res.Status != "failed" && res.Status != "aborted" {
 		t.Fatalf("cancelled setup result = %+v", res)
+	}
+}
+
+// A good turn gets evicted from the pool, and the cold fallback cannot
+// restore the conversation: the turn must stop before sending a prompt —
+// never open a fresh session that only looks like a continuation. Kept
+// separate from TestOpencodeWarmFailedTurnNotParked, whose process is
+// discarded after a prompt was already answered by the runtime; here nothing
+// is ever prompted, and the daemon receives ResumeRejected so it can drop the
+// pointer and retry as an explicitly fresh session.
+func TestOpencodeWarmEvictedSessionColdFallbackStopsBeforePrompt(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+
+	dir := t.TempDir()
+	spawnLog := filepath.Join(dir, "spawns.log")
+	turnFile := filepath.Join(dir, "turns.txt")
+	requestsFile := filepath.Join(dir, "requests.log")
+	os.Setenv("NOW_MS", "170000000000")
+	t.Cleanup(func() { os.Unsetenv("NOW_MS") })
+
+	fakeOpencode := filepath.Join(dir, "opencode")
+	writeTestExecutable(t, fakeOpencode, []byte(fakeOpencodeWarmScript(spawnLog, turnFile)))
+
+	pool := NewWarmSessionPool(WarmSessionPoolConfig{
+		IdleTTL: 30 * time.Second,
+		MaxIdle: 4,
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	t.Cleanup(func() { pool.Close() })
+
+	newBackend := func(extraEnv map[string]string) *opencodeBackend {
+		t.Helper()
+		env := map[string]string{
+			"MULTICA_TOKEN":        "mat_x",
+			"MULTICA_TASK_ID":      "task-1",
+			"MULTICA_AGENT_ID":     "agent-1",
+			"MULTICA_WORKSPACE_ID": "ws-1",
+		}
+		for k, v := range extraEnv {
+			env[k] = v
+		}
+		b, err := New("opencode", Config{
+			ExecutablePath: fakeOpencode,
+			Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+			TaskID:         "task-1",
+			BuiltinRuntime: true,
+			CLIVersion:     "1.19.4",
+			WarmPool:       pool,
+			Env:            env,
+		})
+		if err != nil {
+			t.Fatalf("New(opencode): %v", err)
+		}
+		return b.(*opencodeBackend)
+	}
+	run := func(b *opencodeBackend, resumeID string) Result {
+		t.Helper()
+		sess, err := b.Execute(context.Background(), "hello", ExecOptions{
+			Cwd:             dir,
+			ResumeSessionID: resumeID,
+			Timeout:         10 * time.Second,
+		})
+		if err != nil {
+			t.Fatalf("Execute(resume=%q): %v", resumeID, err)
+		}
+		for range sess.Messages {
+		}
+		return <-sess.Result
+	}
+
+	// Turn 1: a good turn, parked.
+	r1 := run(newBackend(nil), "")
+	if r1.Status != "completed" || r1.SessionID != "ses-warm-1" || pool.Len() != 1 {
+		t.Fatalf("Turn 1 = %+v, pool.Len=%d", r1, pool.Len())
+	}
+
+	// The eviction a full pool or an idle TTL performs: the parked process is
+	// closed and the entry is gone.
+	pool.Evict("opencode", "ses-warm-1")
+	if pool.Len() != 0 {
+		t.Fatalf("pool.Len() after evict = %d, want 0", pool.Len())
+	}
+
+	// Turn 2: resume the evicted session, but the runtime can no longer
+	// restore it (OC_LOAD_FAIL).
+	r2 := run(newBackend(map[string]string{"OC_LOAD_FAIL": "1", "OC_REQUESTS_FILE": requestsFile}), "ses-warm-1")
+	if r2.Status != "failed" {
+		t.Fatalf("cold-fallback turn = %+v, want failed before prompting", r2)
+	}
+	if !r2.ResumeRejected {
+		t.Fatalf("cold-fallback turn must report ResumeRejected so the daemon drops the pointer: %+v", r2)
+	}
+	if r2.SessionID != "" {
+		t.Fatalf("cold-fallback turn leaked a session id %q; it must not present a new session as a continuation", r2.SessionID)
+	}
+	if pool.Len() != 0 {
+		t.Fatalf("pool.Len() after the rejected resume = %d, want 0", pool.Len())
+	}
+
+	// The fake saw initialize + session/load, and NOTHING after: no prompt,
+	// no second session/new — the turn stopped before any conversation was
+	// opened.
+	data, err := os.ReadFile(requestsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(got) != 2 || got[0] != "initialize" || got[1] != "session/load" {
+		t.Fatalf("requests after the rejected resume = %v; want [initialize session/load] only (no prompt, no fresh session)", got)
+	}
+	spawns, _ := os.ReadFile(spawnLog)
+	if n := strings.Count(strings.TrimSpace(string(spawns)), "\n") + 1; n != 2 {
+		t.Fatalf("expected 2 spawns (turn 1 + cold fallback), got %d", n)
 	}
 }
