@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useReducedMotion } from "@multica/core/appearance";
 import { AlertTriangle, Check, MessageSquare, RotateCcw, Trash2, X } from "@multica/ui/icons";
@@ -9,16 +10,19 @@ import { UI_EASE_OUT } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { useAuthStore } from "@multica/core/auth";
 import {
+  docTaskRunsOptions,
   useCreateDocComment,
   useDeleteDocComment,
   useSetDocCommentResolved,
 } from "@multica/core/docs";
-import type { DocComment } from "@multica/core/types";
+import { useWorkspaceId } from "@multica/core/hooks";
+import type { DocComment, DocTaskRun } from "@multica/core/types";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { ContentEditor, ReadonlyContent, type ContentEditorRef } from "../../editor";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT, useTimeAgo } from "../../i18n";
 import type { DocAnchor } from "./doc-comment-anchors";
+import { DocThreadRun, docThreadRuns } from "./doc-thread-runs";
 
 export interface DocThread {
   root: DocComment;
@@ -76,6 +80,7 @@ function Composer({
         defaultValue=""
         placeholder={placeholder}
         mentionHideGuests
+        mentionHideSquads
         onUpdate={(md) => setEmpty(!md.trim())}
         onSubmit={submit}
         debounceMs={0}
@@ -156,6 +161,7 @@ function Quote({ text, missing }: { text: string; missing?: boolean }) {
 function ThreadCard({
   docId,
   thread,
+  runs,
   active,
   missing,
   onActivate,
@@ -163,6 +169,8 @@ function ThreadCard({
 }: {
   docId: string;
   thread: DocThread;
+  /** Agent runs to show on this discussion; see docThreadRuns. */
+  runs: DocTaskRun[];
   active: boolean;
   missing: boolean;
   onActivate: () => void;
@@ -209,6 +217,9 @@ function ThreadCard({
       <Quote text={thread.root.anchorQuote} missing={missing} />
       {[thread.root, ...thread.replies].map((c) => (
         <Message key={c.id} comment={c} onDelete={own(c) ? () => void del(c) : undefined} />
+      ))}
+      {runs.map((run) => (
+        <DocThreadRun key={run.id} docId={docId} run={run} />
       ))}
       {resolved ? (
         <div className="mt-2 flex items-center gap-2 border-t pt-2 text-caption text-muted-foreground">
@@ -275,6 +286,8 @@ function ThreadCard({
   );
 }
 
+const NO_RUNS: DocTaskRun[] = [];
+
 /**
  * The doc's discussions, beside the text. Open and resolved discussions sit
  * on separate tabs; a discussion being started from a selection appears on
@@ -303,6 +316,8 @@ export function DocCommentsPanel({
 }) {
   const { t } = useT("docs");
   const create = useCreateDocComment(docId);
+  const wsId = useWorkspaceId();
+  const { data: runs = NO_RUNS } = useQuery(docTaskRunsOptions(wsId, docId));
   const [tab, setTab] = useState<"open" | "resolved">("open");
   const open = threads.filter((th) => !th.root.resolvedAt);
   const resolved = threads.filter((th) => th.root.resolvedAt);
@@ -372,6 +387,7 @@ export function DocCommentsPanel({
             key={thread.root.id}
             docId={docId}
             thread={thread}
+            runs={docThreadRuns(runs, thread.root.id)}
             active={thread.root.id === activeId}
             missing={missing.has(thread.root.id)}
             onActivate={() => onActivate(thread.root.id)}

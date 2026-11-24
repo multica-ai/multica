@@ -1946,7 +1946,8 @@
       "pending": "대기 중",
       "approved": "승인됨",
       "rejected": "거절됨",
-      "rate_limited": "속도 제한"
+      "rate_limited": "속도 제한",
+      "quota_exceeded": "월 한도 도달"
     }
   },
   "environments": {

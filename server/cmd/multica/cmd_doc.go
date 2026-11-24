@@ -123,7 +123,22 @@ var docRestoreCmd = &cobra.Command{
 
 var docCommentCmd = &cobra.Command{
 	Use:   "comment",
-	Short: "Read the discussion on a doc",
+	Short: "Read and reply to the discussion on a doc",
+	Long: "Read the comment threads people left on a doc, and reply in them. " +
+		"Starting a discussion, resolving one and deleting comments are reserved for people.",
+}
+
+var docCommentAddCmd = &cobra.Command{
+	Use:   "add <doc-id>",
+	Short: "Reply in a doc discussion",
+	Long: "Reply in an existing discussion on a doc. --parent is the discussion's first comment, " +
+		"or any reply in it (the reply joins the same discussion).\n\n" +
+		"Pass the reply with --content, --content-file or --content-stdin; prefer --content-file for anything " +
+		"longer than a line. @mentions use the mention links from the doc's discussion, e.g. " +
+		"`[@Name](mention://member/<user-id>)`.\n\n" +
+		"Starting a discussion, resolving one and deleting comments are reserved for people.",
+	Args: exactArgs(1),
+	RunE: runDocCommentAdd,
 }
 
 var docCommentListCmd = &cobra.Command{
@@ -131,9 +146,11 @@ var docCommentListCmd = &cobra.Command{
 	Short: "List the comment threads on a doc",
 	Long: "List the comment threads on a doc, each root comment followed by its replies. " +
 		"A root comment's QUOTE (anchor_quote in --output json) is the doc text it was left on.\n\n" +
-		"Resolved threads are hidden unless you pass --include-resolved. " +
+		"Pass --thread <comment-id> to list one discussion only. " +
+		"Resolved threads are hidden unless you pass --include-resolved or --thread. " +
 		"The table shortens long comments; --output json has the full text.\n\n" +
-		"Writing in doc discussions (commenting, replying, resolving) is reserved for people, so there are no write commands.",
+		"Reply in a thread with `multica doc comment add`. Starting a discussion, resolving one and " +
+		"deleting comments are reserved for people.",
 	Args: exactArgs(1),
 	RunE: runDocCommentList,
 }
@@ -179,7 +196,13 @@ func init() {
 	docCmd.AddCommand(docListCmd, docSearchCmd, docGetCmd, docCreateCmd, docUpdateCmd, docEditCmd, docMoveCmd,
 		docHistoryCmd, docRestoreCmd, docCommentCmd, docFolderCmd)
 	docFolderCmd.AddCommand(docFolderListCmd, docFolderCreateCmd, docFolderUpdateCmd, docFolderMoveCmd)
-	docCommentCmd.AddCommand(docCommentListCmd)
+	docCommentCmd.AddCommand(docCommentListCmd, docCommentAddCmd)
+	docCommentAddCmd.Flags().String("parent", "", "Comment id in the discussion to reply in (required)")
+	docCommentAddCmd.Flags().String("content", "", "Reply in Markdown")
+	docCommentAddCmd.Flags().String("content-file", "", "Read the reply from a UTF-8 file")
+	docCommentAddCmd.Flags().Bool("content-stdin", false, "Read the reply from stdin")
+	docCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
+	docCommentListCmd.Flags().String("thread", "", "Only this discussion: its first comment's id")
 	docHistoryCmd.Flags().Int("version", 0, "Show this version with its content instead of listing versions")
 	docHistoryCmd.Flags().String("output", "", "Output format: table or json for the list (default table); json or content with --version (default json)")
 	docRestoreCmd.Flags().Int("version", 0, "Version number from doc history to restore (required)")
@@ -739,6 +762,7 @@ func runDocCommentList(cmd *cobra.Command, args []string) error {
 
 	// Group replies under their root, keeping the server's chronological order.
 	includeResolved, _ := cmd.Flags().GetBool("include-resolved")
+	thread, _ := cmd.Flags().GetString("thread")
 	var roots []map[string]any
 	replies := map[string][]map[string]any{}
 	for _, c := range result.Comments {
@@ -746,9 +770,16 @@ func runDocCommentList(cmd *cobra.Command, args []string) error {
 			replies[parent] = append(replies[parent], c)
 			continue
 		}
-		if includeResolved || strVal(c, "resolved_at") == "" {
+		if thread != "" {
+			if strVal(c, "id") == thread {
+				roots = append(roots, c)
+			}
+		} else if includeResolved || strVal(c, "resolved_at") == "" {
 			roots = append(roots, c)
 		}
+	}
+	if thread != "" && len(roots) == 0 {
+		return fmt.Errorf("discussion %s not found on this doc", thread)
 	}
 	threads := make([]map[string]any, 0, len(result.Comments))
 	for _, root := range roots {
@@ -775,6 +806,44 @@ func runDocCommentList(cmd *cobra.Command, args []string) error {
 	}
 	cli.PrintTable(os.Stdout, []string{"ID", "REPLY TO", "AUTHOR", "STATUS", "QUOTE", "COMMENT"}, rows)
 	return nil
+}
+
+func runDocCommentAdd(cmd *cobra.Command, args []string) error {
+	parent, _ := cmd.Flags().GetString("parent")
+	if strings.TrimSpace(parent) == "" {
+		return fmt.Errorf("--parent is required: replies go in an existing discussion")
+	}
+	content, hasContent, err := resolveSkillContentFlag(cmd)
+	if err != nil {
+		return err
+	}
+	if !hasContent || strings.TrimSpace(content) == "" {
+		return fmt.Errorf("reply is empty: pass --content, --content-file or --content-stdin")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	id, err := resolveDocRef(ctx, client, args[0], false)
+	if err != nil {
+		return err
+	}
+	var comment map[string]any
+	body := map[string]any{"content": content, "parent_id": parent}
+	if err := client.PostJSON(ctx, "/api/docs/"+id+"/comments", body, &comment); err != nil {
+		return fmt.Errorf("reply in doc discussion: %w", err)
+	}
+	if output, _ := cmd.Flags().GetString("output"); output == "table" {
+		cli.PrintTable(os.Stdout, []string{"ID", "REPLY TO", "COMMENT"}, [][]string{{
+			strVal(comment, "id"), strVal(comment, "parent_id"), oneLine(strVal(comment, "content"), 80),
+		}})
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, comment)
 }
 
 func printDocFolderSummary(folder map[string]any, output string) error {

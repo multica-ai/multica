@@ -96,7 +96,8 @@ export type AppCallOutcome =
   | "pending"
   | "approved"
   | "rejected"
-  | "rate_limited";
+  | "rate_limited"
+  | "quota_exceeded";
 
 /** One call an issue's runs made through an app. */
 export interface IssueAppCall {

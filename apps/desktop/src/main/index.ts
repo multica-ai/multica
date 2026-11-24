@@ -341,7 +341,11 @@ function handleDeepLink(url: string): void {
       return;
     }
 
-    if (parsed.hostname === "open" && parsed.pathname === "/issue") {
+    // multica://open/issue?url=… and multica://open/chat?url=…
+    if (
+      parsed.hostname === "open" &&
+      (parsed.pathname === "/issue" || parsed.pathname === "/chat")
+    ) {
       // Keep the source instance in the payload. The authenticated renderer
       // validates it against runtime config before opening a workspace tab.
       dispatchToMainRenderer("issue:open", url);
