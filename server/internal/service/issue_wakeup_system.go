@@ -743,7 +743,9 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	if err = guardIssueNotInTriage(ctx, q, issue.ID, OriginDerived); err != nil {
 		return err
 	}
-	selection, err := s.Tasks.resolveTaskRuntime(ctx, q, agent, origin.UserID, origin.DelegatedFromTaskID)
+	// An automatic status transition has no human requester. Only a verified parent
+	// can carry a personal route into this system wakeup.
+	selection, err := s.Tasks.resolveTaskRuntime(ctx, q, agent, pgtype.UUID{}, origin.DelegatedFromTaskID)
 	if err != nil {
 		return err
 	}

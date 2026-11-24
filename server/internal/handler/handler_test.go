@@ -2997,6 +2997,7 @@ func TestBacklogToTodoByAgentSameIssueOtherAssigneeEnqueues(t *testing.T) {
 	req = withURLParam(req, "id", created.ID)
 	req.Header.Set("X-Agent-ID", coordinator)
 	req.Header.Set("X-Task-ID", coordinatorTask)
+	req.Header.Set("X-Actor-Source", "task_token")
 	testutil.Call(t, testHandler.UpdateIssue, req).Want(http.StatusOK)
 
 	var workerTasks int

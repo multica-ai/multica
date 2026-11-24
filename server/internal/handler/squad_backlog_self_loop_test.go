@@ -44,6 +44,7 @@ func TestBacklogToTodoSquadSameIssueMatchesPreview(t *testing.T) {
 				})
 				previewReq.Header.Set("X-Agent-ID", actorID)
 				previewReq.Header.Set("X-Task-ID", actorTaskID)
+				previewReq.Header.Set("X-Actor-Source", "task_token")
 				var preview IssueTriggerPreviewResponse
 				testutil.Call(t, testHandler.PreviewIssueTrigger, previewReq).Want(http.StatusOK).JSON(&preview)
 				if preview.TotalCount != tc.wantQueued || len(preview.Triggers) != tc.wantQueued {
@@ -70,6 +71,7 @@ func TestBacklogToTodoSquadSameIssueMatchesPreview(t *testing.T) {
 				}
 				req.Header.Set("X-Agent-ID", actorID)
 				req.Header.Set("X-Task-ID", actorTaskID)
+				req.Header.Set("X-Actor-Source", "task_token")
 				testutil.Call(t, update, req).Want(http.StatusOK)
 				if got := queuedTaskCountFor(t, issueID, leaderID); got != tc.wantQueued {
 					t.Errorf("expected %d queued squad leader tasks, got %d", tc.wantQueued, got)

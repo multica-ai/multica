@@ -341,6 +341,7 @@ func TestChatWakeupAnswersTheSenderNotTheSessionOwner(t *testing.T) {
 	f.source.InitiatorUserID = util.MustParseUUID(sender)
 	f.source.OriginatorUserID = f.source.InitiatorUserID
 	f.fx.Exec(t, "UPDATE agent SET owner_id = $1 WHERE id = $2", sender, util.UUIDToString(f.source.AgentID))
+	f.fx.Exec(t, "UPDATE agent_runtime SET shared_with = array_append(shared_with, $1::uuid) WHERE id = $2", sender, util.UUIDToString(f.source.RuntimeID))
 
 	w := f.create(t, ChatWakeupInput{AfterSeconds: 60})
 	if w.RequesterID != f.source.InitiatorUserID {
@@ -518,6 +519,7 @@ func TestChatWakeupClaimRechecksTheRequester(t *testing.T) {
 	f.fx.Exec(t, "UPDATE agent_task_queue SET initiator_user_id = $1 WHERE id = $2", member, util.UUIDToString(f.source.ID))
 	f.source.InitiatorUserID = util.MustParseUUID(member)
 	f.fx.Exec(t, "UPDATE agent SET owner_id = $1 WHERE id = $2", member, util.UUIDToString(f.source.AgentID))
+	f.fx.Exec(t, "UPDATE agent_runtime SET shared_with = array_append(shared_with, $1::uuid) WHERE id = $2", member, util.UUIDToString(f.source.RuntimeID))
 
 	reminder := f.create(t, ChatWakeupInput{AfterSeconds: 60})
 	project := f.fx.Project(t, "Open for now")

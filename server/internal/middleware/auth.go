@@ -82,7 +82,6 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			// fixed in #4313.
 			suppliedTaskID := r.Header.Get("X-Task-ID")
 			suppliedAgentID := r.Header.Get("X-Agent-ID")
-			suppliedWorkspaceID := r.Header.Get("X-Workspace-ID")
 			r.Header.Del("X-Agent-ID")
 			r.Header.Del("X-Task-ID")
 
@@ -123,8 +122,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 					return
 				}
 				if (suppliedTaskID != "" && suppliedTaskID != uuidToString(tt.TaskID)) ||
-					(suppliedAgentID != "" && suppliedAgentID != uuidToString(tt.AgentID)) ||
-					(suppliedWorkspaceID != "" && suppliedWorkspaceID != uuidToString(tt.WorkspaceID)) {
+					(suppliedAgentID != "" && suppliedAgentID != uuidToString(tt.AgentID)) {
 					http.Error(w, `{"error":"task token does not match execution context"}`, http.StatusForbidden)
 					return
 				}

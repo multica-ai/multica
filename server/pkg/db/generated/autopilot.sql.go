@@ -293,10 +293,10 @@ func (q *Queries) CreateAutopilotRun(ctx context.Context, arg CreateAutopilotRun
 const createAutopilotTask = `-- name: CreateAutopilotTask :one
 
 WITH enqueue_agent AS MATERIALIZED (
-    SELECT a.id, COALESCE(a.runtime_id, $15::uuid) AS runtime_id
+    SELECT a.id, CASE WHEN $11::jsonb IS NULL THEN COALESCE(a.runtime_id, $15::uuid) ELSE $15::uuid END AS runtime_id
     FROM agent a
     WHERE a.id = $1
-      AND lock_task_owner_rows(a.id, NULL, COALESCE(a.runtime_id, $15::uuid))
+      AND lock_task_owner_rows(a.id, NULL, CASE WHEN $11::jsonb IS NULL THEN COALESCE(a.runtime_id, $15::uuid) ELSE $15::uuid END)
     FOR KEY SHARE OF a
 )
 INSERT INTO agent_task_queue (

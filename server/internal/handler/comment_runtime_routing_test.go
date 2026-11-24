@@ -163,7 +163,10 @@ func TestClaimTaskTokenUsesFrozenExecutionUser(t *testing.T) {
 				var response struct {
 					Tasks []AgentTaskResponse `json:"tasks"`
 				}
-				testutil.Call(t, testHandler.ClaimTasksByRuntime, batchClaimRequest(testWorkspaceID, []string{runtimeID}, 1, "")).Want(http.StatusOK).JSON(&response)
+				req := newRequestAs(ownerID, http.MethodPost, "/api/daemon/tasks/claim", map[string]any{
+					"daemon_id": batchClaimTestDaemonID, "runtime_ids": []string{runtimeID}, "max_tasks": 1,
+				})
+				testutil.Call(t, testHandler.ClaimTasksByRuntime, req).Want(http.StatusOK).JSON(&response)
 				if len(response.Tasks) != 1 {
 					t.Fatalf("claimed tasks=%d", len(response.Tasks))
 				}
@@ -172,7 +175,7 @@ func TestClaimTaskTokenUsesFrozenExecutionUser(t *testing.T) {
 				var response struct {
 					Task *AgentTaskResponse `json:"task"`
 				}
-				req := withURLParam(newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil, testWorkspaceID, batchClaimTestDaemonID), "runtimeId", runtimeID)
+				req := withURLParam(newRequestAs(ownerID, http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/claim", nil), "runtimeId", runtimeID)
 				testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK).JSON(&response)
 				if response.Task == nil {
 					t.Fatal("no claimed task")

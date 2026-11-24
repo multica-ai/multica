@@ -154,10 +154,11 @@ func TestListInboxTaskCredentialAccess(t *testing.T) {
 		{"completed task with lingering token", testUserID, "completed", "", http.StatusUnauthorized},
 		{"failed task with lingering token", testUserID, "failed", "", http.StatusUnauthorized},
 		{"cancelled task with lingering token", testUserID, "cancelled", "", http.StatusUnauthorized},
-		{"runtime ownership changed", testUserID, "running", "owner", http.StatusForbidden},
-		{"missing runtime owner", testUserID, "running", "no-owner", http.StatusForbidden},
-		{"runtime in another workspace", testUserID, "running", "workspace", http.StatusForbidden},
-		{"task agent differs from token", testUserID, "running", "agent", http.StatusForbidden},
+		// The token lookup rejects a stale execution binding before the inbox handler.
+		{"runtime ownership changed", testUserID, "running", "owner", http.StatusUnauthorized},
+		{"missing runtime owner", testUserID, "running", "no-owner", http.StatusUnauthorized},
+		{"runtime in another workspace", testUserID, "running", "workspace", http.StatusUnauthorized},
+		{"task agent differs from token", testUserID, "running", "agent", http.StatusUnauthorized},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runtimeID := dbfx.Runtime(t, "Inbox runtime")

@@ -7,9 +7,31 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// A persisted routed turn carries the execution identity needed to resume its local session.
+func defaultRoutingForTest(t *testing.T, agentID string) []byte {
+	t.Helper()
+	agent, err := testHandler.Queries.GetAgent(t.Context(), parseUUID(agentID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := testHandler.Queries.GetAgentRuntime(t.Context(), agent.RuntimeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := service.RuntimeRouting{Version: 1, ExecutionUserID: testUserID, Routes: map[string]service.RuntimeRoute{
+		agentID: {RuntimeID: uuidToString(runtime.ID), RuntimeOwnerID: uuidToString(runtime.OwnerID), Provider: runtime.Provider, Source: "default", Model: &agent.Model.String},
+	}}
+	raw, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
 
 func TestFinalizeClaimDeliveryPreservesFrozenExecution(t *testing.T) {
 	for _, source := range []string{"personal", "default"} {

@@ -622,10 +622,10 @@ ORDER BY t.id;
 -- accountable + originator_source='unattributed' so the row is still not a
 -- NULL-source bypass (MUL-4302 §2).
 WITH enqueue_agent AS MATERIALIZED (
-    SELECT a.id, COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid) AS runtime_id
+    SELECT a.id, CASE WHEN sqlc.narg(runtime_routing)::jsonb IS NULL THEN COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid) ELSE sqlc.narg(runtime_id)::uuid END AS runtime_id
     FROM agent a
     WHERE a.id = sqlc.arg(agent_id)
-      AND lock_task_owner_rows(a.id, NULL, COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid))
+      AND lock_task_owner_rows(a.id, NULL, CASE WHEN sqlc.narg(runtime_routing)::jsonb IS NULL THEN COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid) ELSE sqlc.narg(runtime_id)::uuid END)
     FOR KEY SHARE OF a
 )
 INSERT INTO agent_task_queue (
