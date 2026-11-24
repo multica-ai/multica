@@ -73,6 +73,7 @@
     "blockers_done": "Tugas yang ditunggu selesai",
     "project_owner_joined": "Pemilik bergabung ke proyek",
     "autopilot_quota_exceeded": "Batas eksekusi autopilot tercapai",
+    "app_tool_calls_quota_exceeded": "Batas panggilan aplikasi tercapai",
     "set_status": "Setel status ke",
     "set_priority": "Setel prioritas ke",
     "assigned_to": "Ditugaskan ke {{name}}",
@@ -83,6 +84,7 @@
     "created_with_agent": "Dibuat dengan agent: {{identifier}}",
     "failed_with_detail": "Gagal: {{detail}}",
     "run_limit_blocked": "Eksekusi diblokir karena batas telah tercapai",
+    "app_tool_calls_limit_blocked": "Agent tidak dapat lagi menjalankan alat aplikasi bulan ini",
     "app_action_requested": "Perlu konfirmasi Anda",
     "app_action_reminder": "Konfirmasi segera kedaluwarsa",
     "app_connect_requested": "Hubungkan aplikasi",
@@ -91,6 +93,7 @@
   "body": {
     "autopilot_title_limit": "Autopilot \"{{title}}\" tidak dimulai karena ruang kerja ini telah mencapai batas {{limit}} eksekusi untuk periode saat ini. Kuota diatur ulang {{resetAt}}; owner atau admin ruang kerja juga dapat meningkatkan paket atau membeli eksekusi tambahan.",
     "autopilot_limit": "Ruang kerja ini telah mencapai batas {{limit}} eksekusi autopilot untuk periode saat ini. Eksekusi ini tidak dimulai. Kuota diatur ulang {{resetAt}}; owner atau admin ruang kerja juga dapat meningkatkan paket atau membeli eksekusi tambahan.",
+    "app_tool_calls_limit": "Workspace ini telah menggunakan {{limit}} panggilan aplikasi untuk bulan ini. Agent tidak dapat menjalankan alat aplikasi sampai kuota direset {{resetAt}}, atau sampai workspace diupgrade atau menambah seat.",
     "project_owner_joined": "{{name}} adalah pemilik ruang kerja dan menambahkan dirinya ke proyek privat ini. Mereka kini dapat melihat tugas, komentar, dan lampirannya."
   }
 }

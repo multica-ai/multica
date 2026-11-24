@@ -59,7 +59,8 @@
     "title": "Riwayat",
     "current": "Saat ini",
     "restore": "Pulihkan versi ini",
-    "loading": "Memuat..."
+    "loading": "Memuat...",
+    "from_discussion": "Dari komentar: {{quote}}"
   },
   "not_found": {
     "title": "Dokumen tidak ditemukan",
@@ -96,6 +97,7 @@
       "save": "Tidak dapat mengirim komentar",
       "delete": "Tidak dapat menghapus komentar",
       "resolve": "Tidak dapat memperbarui komentar"
-    }
+    },
+    "run_waiting_runtime": "Menunggu runtime kembali online"
   }
 }

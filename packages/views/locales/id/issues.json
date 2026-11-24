@@ -1946,7 +1946,8 @@
       "pending": "Menunggu",
       "approved": "Disetujui",
       "rejected": "Ditolak",
-      "rate_limited": "Terkena batas laju"
+      "rate_limited": "Terkena batas laju",
+      "quota_exceeded": "Batas bulanan tercapai"
     }
   },
   "environments": {

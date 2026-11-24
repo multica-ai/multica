@@ -70,6 +70,8 @@
     "retry_with_context": "Coba lagi dengan konteks",
     "edit_advanced": "Buka formulir lengkap",
     "autopilot_quota_exceeded_body": "Ruang kerja ini telah mencapai batas {{limit}} eksekusi autopilot untuk periode saat ini. Eksekusi autopilot selanjutnya tidak akan dimulai sampai kuota diatur ulang {{resetAt}}, atau sampai ruang kerja meningkatkan paket atau membeli eksekusi tambahan.",
+    "app_tool_calls_quota_exceeded_body": "Workspace ini telah menggunakan {{limit}} panggilan aplikasi untuk bulan ini. Agent tidak dapat menjalankan alat aplikasi sampai kuota direset {{resetAt}}, atau sampai workspace diupgrade atau menambah seat.",
+    "app_tool_calls_quota_action": "Kelola penagihan",
     "project_owner_joined_body": "{{name}} adalah pemilik workspace dan menambahkan dirinya ke proyek privat ini. Mereka kini dapat melihat tugas, komentar, dan lampirannya.",
     "open_project": "Buka proyek",
     "open_app": "Buka aplikasi",
@@ -109,6 +111,7 @@
     "children_done": "Sub-tugas selesai",
     "project_owner_joined": "Pemilik bergabung ke proyek",
     "autopilot_quota_exceeded": "Batas eksekusi autopilot tercapai",
+    "app_tool_calls_quota_exceeded": "Batas panggilan aplikasi tercapai",
     "app_action_requested": "Memerlukan konfirmasi Anda",
     "app_action_reminder": "Konfirmasi segera kedaluwarsa",
     "app_connect_requested": "Hubungkan aplikasi",
@@ -131,6 +134,7 @@
     "created_with_agent": "Dibuat dengan agent: {{identifier}}",
     "failed_with_detail": "Gagal: {{detail}}",
     "autopilot_quota_blocked": "Eksekusi diblokir karena batas telah tercapai",
+    "app_tool_calls_quota_blocked": "Agent tidak dapat lagi menjalankan alat aplikasi bulan ini",
     "children_done_stage": "Sub-tugas tahap {{stage}} selesai"
   },
   "toasts": {
