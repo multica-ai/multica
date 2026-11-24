@@ -772,6 +772,15 @@ describe("TabBar locale", () => {
       newTab: "Новая вкладка",
       pinned: "Issues (закреплено)",
     },
+    id: {
+      pin: "Sematkan tab",
+      unpin: "Lepas sematan tab",
+      close: "Tutup tab",
+      closeOthers: "Tutup tab lainnya",
+      openWindow: "Buka sebagai jendela baru",
+      newTab: "Tab baru",
+      pinned: "Issues (disematkan)",
+    },
   } as const satisfies Record<
     Exclude<SupportedLocale, "en">,
     {
