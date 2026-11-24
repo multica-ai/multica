@@ -1,4 +1,5 @@
 import {
+  PointerSensor,
   pointerWithin,
   closestCenter,
   type CollisionDetection,
@@ -17,6 +18,23 @@ export type DragMoveUpdates = DragMoveTargetUpdates & {
   before_id: string | null;
   after_id: string | null;
 };
+
+/**
+ * PointerSensor for issue rows and cards. A press inside a popup portaled out
+ * of the card (a hover card, a menu) still bubbles through React's tree to the
+ * card's drag listeners; the stock sensor would then drag the card when the
+ * user only meant to select text in the popup. Only presses that land inside
+ * the card's own DOM start a drag.
+ */
+export class IssueCardPointerSensor extends PointerSensor {
+  static activators = PointerSensor.activators.map((activator) => ({
+    ...activator,
+    handler: (...args: Parameters<typeof activator.handler>) => {
+      const [event] = args as [React.PointerEvent];
+      return event.currentTarget.contains(event.target as Node) && activator.handler(...args);
+    },
+  }));
+}
 
 const UNASSIGNED_GROUP_ID = "assignee:unassigned";
 

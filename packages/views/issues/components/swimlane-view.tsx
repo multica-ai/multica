@@ -10,7 +10,6 @@ import { useIssuePeekActions } from "../surface/peek-context";
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
   useSensor,
   useSensors,
   useDroppable,
@@ -37,7 +36,7 @@ import type {
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import { useViewBaseline } from "../surface/view-baseline-context";
 import { filterIssues, type IssueFilters } from "../utils/filter";
-import { getMoveAnchors } from "../utils/drag-utils";
+import { getMoveAnchors, IssueCardPointerSensor } from "../utils/drag-utils";
 import type { SwimlaneGrouping } from "@multica/core/issues/stores/view-store";
 import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -1078,7 +1077,7 @@ function SwimLaneViewImpl({
   );
 
   const sensors = useSensors(
-    useSensor(PointerSensor, {
+    useSensor(IssueCardPointerSensor, {
       activationConstraint: { distance: 5 },
     }),
   );
