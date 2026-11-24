@@ -954,6 +954,13 @@ type DocVersion struct {
 	Contributors []byte             `json:"contributors"`
 }
 
+type EffectiveIssueBlocker struct {
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	IssueID        pgtype.UUID `json:"issue_id"`
+	BlockerIssueID pgtype.UUID `json:"blocker_issue_id"`
+	Via            string      `json:"via"`
+}
+
 type EntitlementFeatureAttempt struct {
 	WorkspaceID             pgtype.UUID        `json:"workspace_id"`
 	Feature                 string             `json:"feature"`
@@ -1150,6 +1157,15 @@ type Issue struct {
 	DuplicateOfIssueID  pgtype.UUID        `json:"duplicate_of_issue_id"`
 	RequesterUserID     pgtype.UUID        `json:"requester_user_id"`
 	DescriptionRevision int64              `json:"description_revision"`
+}
+
+type IssueBlocker struct {
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	BlockerIssueID pgtype.UUID        `json:"blocker_issue_id"`
+	CreatedByType  string             `json:"created_by_type"`
+	CreatedByID    pgtype.UUID        `json:"created_by_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
 type IssueChildEvent struct {

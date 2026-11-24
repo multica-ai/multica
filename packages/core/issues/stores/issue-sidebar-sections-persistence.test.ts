@@ -38,7 +38,8 @@ describe("issue sidebar persisted preferences", () => {
     await useIssueSidebarSectionsStore.persist.rehydrate();
     const state = useIssueSidebarSectionsStore.getState();
     const order = [...selectIssueSidebarOrder(state)];
-    expect(order).toEqual(savedOrder.filter((id) => !RETIRED.has(id)));
+    expect(order.filter((id) => id !== "waiting")).toEqual(savedOrder.filter((id) => !RETIRED.has(id)));
+    expect(order.indexOf("waiting")).toBe(order.indexOf("parent") + 1);
     expect(state.hidden).toEqual(["parent", "apps"]);
     await reloadPreferences();
     expect(selectIssueSidebarOrder(useIssueSidebarSectionsStore.getState())).toEqual(order);
