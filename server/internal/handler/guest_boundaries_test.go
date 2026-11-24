@@ -319,23 +319,29 @@ func TestGuestDraftUploadBindsOnlyWithItsComment(t *testing.T) {
 	}
 }
 
-// waitForLockWaiters blocks until at least n other backends of this database
-// wait on a lock.
-func waitForLockWaiters(t *testing.T, n int) {
+// waitForLockWaiters blocks until at least n backends wait on a lock held,
+// directly or through another waiter, by the backend blocker. Waiters on
+// unrelated locks, such as tests in other packages sharing the database, do
+// not count.
+func waitForLockWaiters(t *testing.T, blocker uint32, n int) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		var waiting int
 		if err := testPool.QueryRow(context.Background(), `
-			SELECT count(*) FROM pg_stat_activity
-			WHERE datname = current_database() AND wait_event_type = 'Lock' AND pid <> pg_backend_pid()`).Scan(&waiting); err != nil {
+			WITH RECURSIVE waiter(pid) AS (
+				SELECT pid FROM pg_stat_activity WHERE $1::int = ANY(pg_blocking_pids(pid))
+				UNION
+				SELECT a.pid FROM pg_stat_activity a JOIN waiter w ON w.pid = ANY(pg_blocking_pids(a.pid))
+			)
+			SELECT count(*) FROM waiter`, blocker).Scan(&waiting); err != nil {
 			t.Fatal(err)
 		}
 		if waiting >= n {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("%d backends waiting on a lock, want %d", waiting, n)
+			t.Fatalf("%d backends waiting behind %d, want %d", waiting, blocker, n)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -366,6 +372,7 @@ func TestCommentEditAndCreateWithSameDraftDoNotDeadlock(t *testing.T) {
 	if _, err := tx.Exec(ctx, `SELECT 1 FROM issue WHERE id = $1 FOR UPDATE`, f.sharedIssue); err != nil {
 		t.Fatal(err)
 	}
+	blocker := tx.Conn().PgConn().PID()
 
 	var wg sync.WaitGroup
 	var edit, create *testutil.Response
@@ -375,13 +382,13 @@ func TestCommentEditAndCreateWithSameDraftDoNotDeadlock(t *testing.T) {
 		edit = guestRequest(t, testHandler.UpdateComment, f.guest, http.MethodPut, "/api/comments/"+existing.ID,
 			map[string]any{"content": "edited with the draft", "attachment_ids": []string{draft.ID}}, "commentId", existing.ID)
 	}()
-	waitForLockWaiters(t, 1)
+	waitForLockWaiters(t, blocker, 1)
 	go func() {
 		defer wg.Done()
 		create = guestRequest(t, testHandler.CreateComment, f.guest, http.MethodPost, "/api/issues/"+f.sharedIssue+"/comments",
 			CreateCommentRequest{Content: "published with the draft", AttachmentIDs: []string{draft.ID}}, "id", f.sharedIssue)
 	}()
-	waitForLockWaiters(t, 2)
+	waitForLockWaiters(t, blocker, 2)
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -932,6 +939,7 @@ func TestCommentEditLosingDraftToPublishIsRefused(t *testing.T) {
 	if _, err := tx.Exec(ctx, `SELECT 1 FROM issue WHERE id = $1 FOR UPDATE`, f.sharedIssue); err != nil {
 		t.Fatal(err)
 	}
+	blocker := tx.Conn().PgConn().PID()
 
 	var wg sync.WaitGroup
 	var create, edit *testutil.Response
@@ -941,13 +949,13 @@ func TestCommentEditLosingDraftToPublishIsRefused(t *testing.T) {
 		create = guestRequest(t, testHandler.CreateComment, f.guest, http.MethodPost, "/api/issues/"+f.sharedIssue+"/comments",
 			CreateCommentRequest{Content: "published with the draft", AttachmentIDs: []string{draft.ID}}, "id", f.sharedIssue)
 	}()
-	waitForLockWaiters(t, 1) // the publish holds the draft and waits for the issue
+	waitForLockWaiters(t, blocker, 1) // the publish holds the draft and waits for the issue
 	go func() {
 		defer wg.Done()
 		edit = guestRequest(t, testHandler.UpdateComment, f.guest, http.MethodPut, "/api/comments/"+existing.ID,
 			map[string]any{"content": "edited with the draft", "attachment_ids": []string{draft.ID}}, "commentId", existing.ID)
 	}()
-	waitForLockWaiters(t, 2) // the edit waits for the draft
+	waitForLockWaiters(t, blocker, 2) // the edit waits for the draft
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}

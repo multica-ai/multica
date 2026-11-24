@@ -460,6 +460,24 @@ describe("useRealtimeSync — ws instance change", () => {
     expect(qc.getQueryState(issueKeys.tasks("parent"))?.isInvalidated).toBe(false);
   });
 
+  it("refreshes the other end of a blocker edge: its detail lists this issue under blocking", () => {
+    const emit = subtreeEvents();
+    qc.setQueryData(issueKeys.detail("ws-1", "blocker"), { id: "blocker", blocking: [] });
+    emit("issue:updated", { title_changed: true, issue: { id: "child" } });
+    expect(qc.getQueryState(issueKeys.detail("ws-1", "blocker"))?.isInvalidated).toBe(false);
+    emit("issue:updated", { blockers_changed: true, issue: { id: "child" } });
+    expect(qc.getQueryState(issueKeys.detail("ws-1", "blocker"))?.isInvalidated).toBe(true);
+  });
+
+  it("refreshes blockers' details when an issue is created waiting on them", () => {
+    const emit = subtreeEvents();
+    qc.setQueryData(issueKeys.detail("ws-1", "blocker"), { id: "blocker", blocking: [] });
+    emit("issue:created", { issue: { id: "child", blocked_by: [] } });
+    expect(qc.getQueryState(issueKeys.detail("ws-1", "blocker"))?.isInvalidated).toBe(false);
+    emit("issue:created", { issue: { id: "child", blocked_by: [{ id: "blocker", via: "manual" }] } });
+    expect(qc.getQueryState(issueKeys.detail("ws-1", "blocker"))?.isInvalidated).toBe(true);
+  });
+
   it("does not invalidate subtree history when an issue is created", () => {
     const emit = subtreeEvents();
     emit("issue:created", { issue: { id: "child", parent_issue_id: "parent" } });

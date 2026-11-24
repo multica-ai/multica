@@ -16,6 +16,10 @@ vi.mock("@multica/core/issues/stores/selection-store", () => ({
 vi.mock("@multica/core/issues/use-issue-deletion", () => ({
   useIssueDeletion: () => ({ canDelete: () => true, offersDelete: true }),
 }));
+vi.mock("@multica/core/permissions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/permissions")>()),
+  useIsGuest: () => false,
+}));
 vi.mock("@multica/core/issues/mutations", () => ({
   useBatchUpdateIssues: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useBatchDeleteIssues: () => ({ mutateAsync: vi.fn(), isPending: false }),

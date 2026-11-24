@@ -529,7 +529,8 @@ func (s *Service) toolRun(ctx context.Context, rn *run, toolSlug string, args ma
 }
 
 // refuseCall applies what stands between an allowed policy and executing a
-// call: a blocking rule, the run losing access, and the account's rate limit.
+// call: a blocking rule, the run losing access, the account's rate limit, and
+// the workspace's monthly app call allowance.
 // It records and returns the refusal, or nil when the call may run.
 func (s *Service) refuseCall(ctx context.Context, rn *run, app db.AgentApp, call *toolCall, policy string) map[string]any {
 	if policy == PolicyBlock {
@@ -555,6 +556,10 @@ func (s *Service) refuseCall(ctx context.Context, rn *run, app db.AgentApp, call
 		call.outcome = "rate_limited"
 		s.recordCall(ctx, *call)
 		return textResult(fmt.Sprintf("rate limited: this %s account already ran %d calls in the last minute. Wait a minute before the next call, and batch work where the app allows it.", call.toolkit, s.perMinute), true)
+	}
+	// Last: it counts the call, which runs as soon as this returns nil.
+	if exceeded := s.overQuota(ctx, call); exceeded != nil {
+		return textResult(exceeded.Message(), true)
 	}
 	return nil
 }

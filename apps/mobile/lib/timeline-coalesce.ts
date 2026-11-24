@@ -24,7 +24,7 @@ import type { TimelineEntry } from "@multica/core/types";
 
 const COALESCE_MS = 2 * 60 * 1000;
 const NO_TIME_LIMIT_ACTIONS = new Set(["task_completed", "task_failed"]);
-const NEVER_COALESCE_ACTIONS = new Set(["squad_leader_evaluated"]);
+const NEVER_COALESCE_ACTIONS = new Set(["squad_leader_evaluated", "squad_handoff"]);
 
 export function coalesceTimeline(
   entries: TimelineEntry[],

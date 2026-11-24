@@ -396,7 +396,7 @@ func TestCreateCommentWithAttachmentFollowsOwnerFirstLockOrder(t *testing.T) {
 			// issue, then the row. Taking the lock here by hand would let a
 			// production mode too weak to serialize issue writers pass.
 			qtx := testHandler.Queries.WithTx(holder)
-			if _, err := qtx.LockIssueForAttachmentWrite(ctx, db.LockIssueForAttachmentWriteParams{
+			if _, err := qtx.LockIssueForWrite(ctx, db.LockIssueForWriteParams{
 				ID:          parseUUID(issueID),
 				WorkspaceID: parseUUID(testWorkspaceID),
 			}); err != nil {
@@ -531,7 +531,7 @@ func TestDeleteAttachmentTakesTheIssueBeforeTheRow(t *testing.T) {
 				got = testutil.Call(t, testHandler.DeleteAttachment, withURLParam(req, "id", attachmentID))
 				done <- nil
 			}()
-			waitForCommentMutationLock(t, "LockIssueForAttachmentWrite", done)
+			waitForCommentMutationLock(t, "LockIssueForWrite", done)
 
 			if err := holder.Commit(ctx); err != nil {
 				t.Fatalf("release issue: %v", err)

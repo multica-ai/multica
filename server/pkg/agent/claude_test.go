@@ -397,6 +397,7 @@ func TestBuildClaudeArgsInheritsMCPByDefault(t *testing.T) {
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
 		"--verbose",
+		"--include-partial-messages",
 		"--permission-mode", "bypassPermissions",
 		"--disallowedTools", "AskUserQuestion",
 	}

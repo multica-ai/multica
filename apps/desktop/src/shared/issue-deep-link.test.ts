@@ -48,3 +48,43 @@ describe("parseIssueDeepLink", () => {
     expect(parseIssueDeepLink(url, "https://tasks.example")).toBeNull();
   });
 });
+
+const chatLink = (url: string) => `multica://open/chat?url=${encodeURIComponent(url)}`;
+
+describe("parseIssueDeepLink for chats", () => {
+  it("opens the chat session named in the link", () => {
+    expect(parseIssueDeepLink(chatLink("https://tasks.example/acme/chat?session=01a1f1b6-b59b-7a48-beae-5a459ff72200"), "https://tasks.example")).toEqual({
+      kind: "chat",
+      workspaceSlug: "acme",
+      path: "/acme/chat?session=01a1f1b6-b59b-7a48-beae-5a459ff72200",
+    });
+  });
+
+  it("opens the chat page without a session, behind a base path", () => {
+    expect(parseIssueDeepLink(chatLink("http://localhost:3000/multica/acme/chat"), "http://localhost:3000/multica/")).toEqual({
+      kind: "chat", workspaceSlug: "acme", path: "/acme/chat",
+    });
+  });
+
+  it("keeps only the session from the chat address", () => {
+    expect(parseIssueDeepLink(chatLink("https://tasks.example/acme/chat?session=s-1&agent=a-1#x"), "https://tasks.example")).toEqual({
+      kind: "chat", workspaceSlug: "acme", path: "/acme/chat?session=s-1",
+    });
+  });
+
+  it("rejects a chat on a different instance", () => {
+    expect(parseIssueDeepLink(chatLink("https://other.example/acme/chat?session=s-1"), "https://tasks.example")).toEqual({ kind: "other-instance" });
+  });
+
+  it.each([
+    chatLink("https://tasks.example/acme/issues/ACM-42"),
+    link("https://tasks.example/acme/chat?session=s-1"),
+    chatLink("https://tasks.example/acme/chat/extra"),
+    chatLink("https://tasks.example/acme%2Fevil/chat"),
+    chatLink("https://tasks.example/acme/chat?session=../settings"),
+    chatLink("https://tasks.example/acme/chat?session="),
+    "multica://open/settings?url=https%3A%2F%2Ftasks.example%2Facme%2Fchat",
+  ])("ignores a link whose kind and address do not match: %s", (url) => {
+    expect(parseIssueDeepLink(url, "https://tasks.example")).toBeNull();
+  });
+});

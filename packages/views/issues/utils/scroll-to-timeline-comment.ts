@@ -92,6 +92,7 @@ export function scrollToTimelineComment({
   let rafId = 0;
   let mountFrames = 0;
   let frames = 0;
+  let settledFrames = 0;
   let last = -1;
   let cancelled = false;
   let mounted = false;
@@ -160,10 +161,14 @@ export function scrollToTimelineComment({
         return;
       }
       const target = alignTarget(current);
-      if (Math.abs(target - last) > 1 && ++frames < 30) {
-        last = target;
-        rafId = requestAnimationFrame(align);
-      } else finish();
+      if (Math.abs(target - last) <= 1) {
+        if (++settledFrames >= 3 || ++frames >= 30) { finish(); return; }
+      } else {
+        settledFrames = 0;
+        if (++frames >= 30) { finish(); return; }
+      }
+      last = target;
+      rafId = requestAnimationFrame(align);
     };
     rafId = requestAnimationFrame(align);
   };

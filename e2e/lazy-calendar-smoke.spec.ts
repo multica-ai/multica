@@ -9,7 +9,7 @@ test("calendar lazy loading in issue details, custom properties and date-range f
     await api.createProperty("Review date", "date");
     const issue = await api.createIssue("Calendar loading verification", { due_date: "2026-11-05" });
     const slug = await loginAsDefault(page);
-    await page.goto(`/${slug}/issues/${issue.id}`);
+    await page.goto(`/${slug}/issues/${issue.identifier}`);
     const sidebar = page.locator("[data-right-sidebar-panel]");
     const date = sidebar.getByRole("button", { name: "Nov 5", exact: true });
     await date.click();

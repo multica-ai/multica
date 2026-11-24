@@ -144,10 +144,12 @@ describe("IssueDuplicatesSection", () => {
 
     const row = await screen.findByRole("link", { name: /MUL-7412/ });
     expect(row.getAttribute("href")).toBe("/acme/issues/MUL-7412");
-    expect(screen.getByRole("button", { name: "Duplicates 2" })).toBeTruthy();
     // Every duplicate is cancelled, so the row shows who reported it instead
     // of a status icon that would be identical on each line.
     expect(screen.getAllByTestId("avatar").map((el) => el.textContent)).toEqual(["user-2", "user-3"]);
+    // Open, the rows are the count; collapsed, the header says it.
+    fireEvent.click(screen.getByRole("button", { name: "Duplicates" }));
+    expect(screen.getByRole("button", { name: "Duplicates 2" })).toBeTruthy();
   });
 
   it("renders nothing when there are no duplicates", async () => {

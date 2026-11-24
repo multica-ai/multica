@@ -15,6 +15,7 @@ import (
 )
 
 func TestCaptureCursorBackgroundProcessReapsLeaderExitedGroup(t *testing.T) {
+	requireCursorBackgroundOwnership(t)
 	dir := t.TempDir()
 	root := exec.Command(os.Args[0])
 	root.Env = append(os.Environ(), cursorFakeModeEnv+"=budget", "CURSOR_FAKE_DIR="+dir, "CURSOR_FAKE_DURATION=30s")
@@ -78,6 +79,7 @@ func TestCaptureCursorBackgroundProcessRejectsUnrelatedPID(t *testing.T) {
 }
 
 func TestCaptureCursorBackgroundSurvivesRootExitDuringCapture(t *testing.T) {
+	requireCursorBackgroundOwnership(t)
 	dir := t.TempDir()
 	root := exec.Command(os.Args[0])
 	root.Env = append(os.Environ(), cursorFakeModeEnv+"=budget", "CURSOR_FAKE_DIR="+dir, "CURSOR_FAKE_DURATION=30s")

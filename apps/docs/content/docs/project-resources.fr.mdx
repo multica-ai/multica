@@ -98,6 +98,8 @@ Un répertoire local dispose de deux modes d'exécution, définis par ressource 
 
 L'agent travaille directement dans votre répertoire, et les exécutions ont lieu une à la fois. Lorsque deux exécutions utilisent le même répertoire réel, la seconde passe en `waiting_local_directory` et reprend une fois que la première a libéré le répertoire. Deux chemins qui mènent au même répertoire via des liens symboliques différents sont sérialisés de la même manière.
 
+Si le chemin lié est introuvable au démarrage d’une exécution en attente, celle-ci signale que le dossier du projet n’existe plus. Restaurez le dossier ou mettez à jour le chemin de la ressource avant de réessayer.
+
 L'attente ne modifie pas le répertoire et n'occupe pas de slot d'exécution du daemon. Une exécution en attente peut être annulée ; sinon, elle reprend le démarrage lorsque le répertoire et la capacité d'exécution sont disponibles.
 
 Un simple répertoire non git ne peut utiliser que ce mode : le mode worktree est réservé aux dépôts git.

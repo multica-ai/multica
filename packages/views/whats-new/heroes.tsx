@@ -3,6 +3,7 @@
 import { useState, type CSSProperties, type ReactNode } from "react";
 import { QRCode } from "react-qr-code";
 import { inboxSnoozeOptions, type InboxSnoozePreset } from "@multica/core/inbox/snooze";
+import { createShortcutChord } from "@multica/core/shortcuts";
 import {
   AlarmClock,
   AppWindow,
@@ -11,6 +12,7 @@ import {
   Bot,
   Check,
   ChevronDown,
+  CircleDot,
   Clock,
   Ellipsis,
   Folder,
@@ -25,9 +27,13 @@ import {
   Search,
   Server,
   Square,
+  Trash2,
+  Users,
   WeChat,
 } from "@multica/ui/icons";
+import { Kbd } from "@multica/ui/components/ui/kbd";
 import { cn } from "@multica/ui/lib/utils";
+import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { useLocale, useT } from "../i18n";
 import { formatSnoozeTime } from "../inbox/components/inbox-snooze-time";
 
@@ -93,12 +99,23 @@ function Menu({ className, children }: { className?: string; children: ReactNode
   );
 }
 
-function MenuItem({ icon, active, children }: { icon: ReactNode; active?: boolean; children: ReactNode }) {
+function MenuItem({
+  icon,
+  active,
+  danger,
+  children,
+}: {
+  icon: ReactNode;
+  active?: boolean;
+  danger?: boolean;
+  children: ReactNode;
+}) {
   return (
     <div
       className={cn(
         "flex h-7 items-center gap-2 rounded-md px-2 text-label whitespace-nowrap [&_svg]:size-3.5 [&_svg]:text-muted-foreground",
         active && "bg-accent",
+        danger && "text-destructive [&_svg]:text-destructive",
       )}
     >
       {icon}
@@ -613,6 +630,179 @@ function ProjectFoldersArt() {
   );
 }
 
+/* ── Inbox page: the Inbox · Snoozed · Archived tabs over the list ──── */
+
+function InboxTabsArt() {
+  const { t } = useT("inbox");
+  const tabs = [
+    { id: "inbox", label: t(($) => $.page.title), count: 3 },
+    { id: "snoozed", label: t(($) => $.list.snoozed_title), icon: <AlarmClock className="size-3" /> },
+    { id: "archived", label: t(($) => $.list.archived_title), icon: <Archive className="size-3" /> },
+  ];
+  return (
+    <Surface className="top-4 left-6 w-[19rem]">
+      <div className="flex h-9 items-center gap-0.5 px-2">
+        {tabs.map((tab, i) => (
+          <span
+            key={tab.id}
+            className={cn(
+              "flex h-6 items-center gap-1 rounded-md px-2 text-label whitespace-nowrap",
+              i === 0 ? "bg-surface-selected font-medium text-foreground" : "text-muted-foreground",
+            )}
+          >
+            {tab.icon}
+            {tab.label}
+            {tab.count !== undefined && <span className="text-brand tabular-nums">{tab.count}</span>}
+          </span>
+        ))}
+      </div>
+      <div className="px-1 pb-8">
+        <InboxRowArt title={128} detail={92} agent active />
+        <InboxRowArt title={104} detail={136} />
+        <InboxRowArt title={140} detail={76} agent />
+      </div>
+    </Surface>
+  );
+}
+
+/* ── Project overview: the tabs and the progress panel with its trend ── */
+
+/** Done issues at the end of each recent week, rising toward the scope. */
+const PROJECT_TREND = [1, 2, 2, 4, 5, 7, 8];
+const PROJECT_SCOPE = 12;
+
+function ProjectOverviewArt() {
+  const { t } = useT("projects");
+  const done = PROJECT_TREND[PROJECT_TREND.length - 1]!;
+  const points = PROJECT_TREND.map((value, i) => `${(i / (PROJECT_TREND.length - 1)) * 100},${32 - (value / PROJECT_SCOPE) * 30}`).join(" ");
+  return (
+    <Surface className="top-4 left-6 w-[19.5rem]">
+      <div className="flex h-9 items-center gap-4 border-b border-surface-border px-4 text-label whitespace-nowrap">
+        <span className="flex h-full items-center border-b-2 border-foreground font-medium">{t(($) => $.detail.tab_overview)}</span>
+        <span className="flex items-center gap-1 text-muted-foreground">
+          {t(($) => $.detail.tab_issues)}
+          <span className="tabular-nums">{PROJECT_SCOPE}</span>
+        </span>
+        <span className="text-muted-foreground">{t(($) => $.detail.tab_activity)}</span>
+      </div>
+      <div className="flex">
+        <div className="min-w-0 flex-1 px-3 pt-3 pb-8">
+          <TextLine words={[34, 46, 22]} />
+          <TextLine words={[40, 28, 30]} />
+          <TextLine words={[30, 44]} />
+        </div>
+        <div className="w-[9.5rem] shrink-0 border-l border-surface-border px-3 pt-2.5 pb-4">
+          <div className="text-caption font-medium text-muted-foreground">{t(($) => $.detail.section_progress)}</div>
+          <div className="mt-0.5 truncate text-label font-medium tabular-nums">
+            {t(($) => $.detail.progress_panel.summary, { count: PROJECT_SCOPE, completed: done })}
+          </div>
+          <div className="mt-2 flex h-1.5 overflow-hidden rounded-full bg-muted">
+            <span className="bg-info" style={{ width: `${(done / PROJECT_SCOPE) * 100}%` }} />
+            <span className="bg-warning" style={{ width: `${(2 / PROJECT_SCOPE) * 100}%` }} />
+          </div>
+          <svg viewBox="0 0 100 32" preserveAspectRatio="none" className="mt-2.5 h-8 w-full overflow-visible text-info">
+            <polyline points={points} fill="none" stroke="currentColor" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+          </svg>
+        </div>
+      </div>
+    </Surface>
+  );
+}
+
+/* ── Inbox triage: J/K/U keycaps and a Work panel row's right-click menu ── */
+
+function InboxTriageArt() {
+  const { t } = useT("inbox");
+  const { t: tLayout } = useT("layout");
+  return (
+    <>
+      <Surface className="top-4 left-6 w-[13.5rem]">
+        <div className="flex h-8 items-center gap-1 px-3">
+          <span className="text-label font-medium">{tLayout(($) => $.nav.inbox)}</span>
+          <ChevronDown className="size-3 text-muted-foreground" />
+          <span className="ml-auto text-caption text-muted-foreground tabular-nums">3</span>
+        </div>
+        <div className="px-1 pb-2">
+          <InboxRowArt title={120} detail={88} agent />
+          <InboxRowArt title={96} detail={128} active />
+          <InboxRowArt title={136} detail={72} agent />
+        </div>
+      </Surface>
+      <Menu className="top-[4.75rem] left-[9.75rem] w-44">
+        <MenuItem icon={<CircleDot />} active>
+          {t(($) => $.context_menu.mark_unread)}
+        </MenuItem>
+        <MenuItem icon={<Archive />}>{t(($) => $.context_menu.archive)}</MenuItem>
+        <div className="mx-1 my-1 h-px bg-border" />
+        <MenuItem icon={<Trash2 />} danger>
+          {t(($) => $.context_menu.delete)}
+        </MenuItem>
+      </Menu>
+      <div className="absolute top-5 right-5 flex gap-1.5">
+        {["J", "K", "U"].map((key) => (
+          <Kbd key={key} size="md" compact className="text-foreground">
+            {key}
+          </Kbd>
+        ))}
+      </div>
+    </>
+  );
+}
+
+/* ── Create with agent: frequent agent and squad chips, ⌥1–⌥3 ──────── */
+
+const QUICK_SWITCH_ACTORS = [
+  { name: SAMPLE.agent, squad: false },
+  { name: "Scout", squad: false },
+  { name: "Atlas", squad: true },
+];
+
+function ActorChipArt({ name, squad, selected }: { name: string; squad: boolean; selected?: boolean }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex h-6 items-center gap-1.5 rounded-md pr-2 pl-1",
+        selected ? "bg-surface-selected font-medium text-surface-selected-foreground" : "text-muted-foreground",
+      )}
+    >
+      <span className="grid size-4 place-items-center rounded-full bg-brand/10 text-brand">
+        {squad ? <Users className="size-2.5" /> : <Bot className="size-2.5" />}
+      </span>
+      {name}
+    </span>
+  );
+}
+
+function QuickSwitchArt() {
+  const { t } = useT("modals");
+  return (
+    <>
+      <Surface className="top-6 left-6 w-[24rem]">
+        <div className="px-4 pt-3 text-caption text-muted-foreground">{t(($) => $.create_issue.agent_breadcrumb)}</div>
+        <div className="px-3 pt-2 pb-3">
+          <TextLine words={[44, 30, 58, 36, 48]} />
+          <TextLine words={[52, 34]} />
+        </div>
+        <div className="flex items-center gap-2 px-4 pb-12 text-caption whitespace-nowrap">
+          <span className="text-muted-foreground">{t(($) => $.create_issue.agent.created_by)}</span>
+          <span className="flex items-center gap-0.5">
+            {QUICK_SWITCH_ACTORS.map((actor, i) => (
+              <ActorChipArt key={actor.name} name={actor.name} squad={actor.squad} selected={i === 1} />
+            ))}
+          </span>
+          <span className="grid size-6 place-items-center text-muted-foreground">
+            <ChevronDown className="size-3.5" />
+          </span>
+        </div>
+      </Surface>
+      <div className="dark absolute top-[5.1rem] left-[10.5rem] z-10 inline-flex items-center gap-1.5 rounded-tooltip bg-(--tooltip) py-1 pr-1.5 pl-2.5 text-caption whitespace-nowrap text-tooltip-foreground shadow-(--tooltip-shadow)">
+        {QUICK_SWITCH_ACTORS[1]!.name}
+        <ShortcutKeycaps shortcut={createShortcutChord("2", { alt: true })} decorative />
+      </div>
+    </>
+  );
+}
+
 export const THEMES_HERO: WhatsNewHero = { ground: "orange", Art: ThemesArt };
 export const ENVIRONMENTS_HERO: WhatsNewHero = { ground: "ice", Art: EnvironmentsArt };
 export const ANNOTATIONS_HERO: WhatsNewHero = { ground: "lime", Art: AnnotationsArt };
@@ -622,3 +812,7 @@ export const CHAT_WAKEUP_HERO: WhatsNewHero = { ground: "lime", Art: ChatWakeupA
 export const CHAT_STEERING_HERO: WhatsNewHero = { ground: "orange", Art: ChatSteeringArt };
 export const WEIXIN_HERO: WhatsNewHero = { ground: "ice", Art: WeixinArt };
 export const PROJECT_FOLDERS_HERO: WhatsNewHero = { ground: "brand", Art: ProjectFoldersArt };
+export const INBOX_TABS_HERO: WhatsNewHero = { ground: "lime", Art: InboxTabsArt };
+export const PROJECT_OVERVIEW_HERO: WhatsNewHero = { ground: "ice", Art: ProjectOverviewArt };
+export const INBOX_TRIAGE_HERO: WhatsNewHero = { ground: "orange", Art: InboxTriageArt };
+export const QUICK_SWITCH_HERO: WhatsNewHero = { ground: "lime", Art: QuickSwitchArt };

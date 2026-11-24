@@ -92,11 +92,11 @@ function renderPanel(initialPath: string, inbox: InboxItem[]) {
   function Harness() {
     const [pathname, setPathname] = useState(initialPath);
     const adapter: NavigationAdapter = {
-      push: (path) => setPathname(new URL(path, "http://x").pathname),
+      push: setPathname,
       replace: setPathname,
       back: vi.fn(),
-      pathname,
-      searchParams: new URLSearchParams(),
+      pathname: pathname.split("?")[0]!,
+      searchParams: new URLSearchParams(pathname.split("?")[1]),
       hash: "",
       getShareableUrl: (path) => path,
     };
@@ -120,8 +120,6 @@ const inInbox = () => document.querySelector('[data-sidebar-list="inbox"]') as H
 beforeEach(() => {
   useSidebarTreeStore.setState({ inboxCollapsed: false });
   useInboxSelectionStore.setState({
-    sidebarIssueByWorkspace: {},
-    sidebarTabIssuesByWorkspace: {},
     heldRows: {},
     leftRowKeyByWorkspace: {},
   });
@@ -137,11 +135,10 @@ describe("GuestWorkPanel", () => {
     expect(await within(inInbox()).findByRole("link", { name: INBOX_ROW_NAME })).toBeInTheDocument();
   });
 
-  it("opens a notification's issue and keeps its row lit", async () => {
+  it("opens a notification on the Inbox page and keeps its row lit", async () => {
     renderPanel("/acme/inbox", [NOTIFICATION]);
     fireEvent.click(await within(inInbox()).findByRole("link", { name: INBOX_ROW_NAME }));
-    expect(screen.getByTestId("pathname")).toHaveTextContent(`/acme/issues/${ISSUE.id}`);
-    expect(useInboxSelectionStore.getState().sidebarIssueByWorkspace["ws-1"]).toBe(ISSUE.id);
+    expect(screen.getByTestId("pathname")).toHaveTextContent(`/acme/inbox?issue=${ISSUE.id}`);
     await waitFor(() =>
       expect(within(inInbox()).getByRole("link", { name: INBOX_ROW_NAME })).toHaveAttribute("aria-current", "page"),
     );

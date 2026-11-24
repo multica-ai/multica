@@ -59,7 +59,8 @@
     "title": "History",
     "current": "Current",
     "restore": "Restore this version",
-    "loading": "Loading..."
+    "loading": "Loading...",
+    "from_discussion": "From comment: {{quote}}"
   },
   "not_found": {
     "title": "Doc not found",
@@ -97,6 +98,7 @@
       "save": "Could not post the comment",
       "delete": "Could not delete the comment",
       "resolve": "Could not update the comment"
-    }
+    },
+    "run_waiting_retry": "Waiting to retry"
   }
 }

@@ -80,20 +80,13 @@ export interface AppCatalogEntry {
   name: string;
   logo?: string;
   category?: string;
+  category_id?: string;
   curated: boolean;
   recommended_scope?: AppAccountScope;
   /** False only in the admin's full view for apps the catalog leaves out. */
   allowed?: boolean;
-}
-
-/** One tool of an app and how this workspace classifies it. */
-export interface AppTool {
-  slug: string;
-  name: string;
-  description: string;
-  auto_class: AppActionClass;
-  class: AppActionClass;
-  overridden: boolean;
+  /** "key" when connecting asks the member for an API key or token. */
+  connect_method?: "oauth" | "key";
 }
 
 export type AppCallOutcome =
@@ -103,7 +96,8 @@ export type AppCallOutcome =
   | "pending"
   | "approved"
   | "rejected"
-  | "rate_limited";
+  | "rate_limited"
+  | "quota_exceeded";
 
 /** One call an issue's runs made through an app. */
 export interface IssueAppCall {

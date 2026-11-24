@@ -46,10 +46,18 @@ describe("DocOutline", () => {
     const headings = readOutline(
       renderedDoc("<h2>Goals</h2><h3>Scope</h3><h2>Plan</h2>"),
     );
-    const onSelect = vi.fn();
-    render(<DocOutline headings={headings} activeIndex={1} onSelect={onSelect} />, {
-      wrapper: I18nWrapper,
+    // The second heading is the last one above the active line.
+    headings.forEach((heading, i) => {
+      vi.spyOn(heading.element, "getBoundingClientRect").mockReturnValue({
+        top: [0, 50, 500][i],
+      } as DOMRect);
     });
+    const scroller = document.createElement("div");
+    const onSelect = vi.fn();
+    render(
+      <DocOutline headings={headings} scrollRef={{ current: scroller }} onSelect={onSelect} />,
+      { wrapper: I18nWrapper },
+    );
     expect(screen.getByRole("navigation", { name: "Outline" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Scope" })).toHaveAttribute(
       "aria-current",

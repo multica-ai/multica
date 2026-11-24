@@ -46,9 +46,9 @@ Dialog 用于需要模态界面的独立操作。上下文选项使用 Popover�
 
 ## 动效
 
-弹窗和遮罩读取 `packages/ui/styles/tokens.css` 中的 `--dialog-enter-duration`、`--dialog-exit-duration`、`--dialog-enter-easing` 和 `--dialog-exit-easing`。默认保持现有的 100ms/ease 动画，弹窗同时淡入淡出并在 95% 和 100% 之间缩放。
+弹窗和遮罩读取 `packages/ui/styles/tokens.css` 中的 `--dialog-enter-duration`、`--dialog-exit-duration`、`--dialog-enter-easing` 和 `--dialog-exit-easing`。默认采用 100ms 与共享的 ease-out 进场曲线（`cubic-bezier(0.23, 1, 0.32, 1)`），弹窗同时淡入淡出并在 95% 和 100% 之间缩放。
 
-参数影响网页端和桌面端的共享 Dialog，以及使用 DialogContent 的组合；调用方自行覆盖动画时除外。不影响 Popover、Tooltip、AlertDialog 和 JavaScript 动效常量。
+参数影响网页端和桌面端的共享 Dialog 与 AlertDialog，以及使用 DialogContent 的组合；调用方自行覆盖动画时除外。不影响 Popover、Tooltip 和 JavaScript 动效常量。
 
 遵循系统减少动态效果设置，禁用弹窗和遮罩动画。打开、关闭和重播真实组件，也要快速交替打开与关闭，检查中断效果。
 

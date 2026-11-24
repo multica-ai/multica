@@ -283,15 +283,17 @@ Le daemon nettoie régulièrement les répertoires des exécutions, les caches d
 
 ### Journaux du daemon [#daemon-logs]
 
+Le daemon journalise au niveau `debug` par défaut. Définissez `LOG_LEVEL` (`debug`, `info`, `warn` ou `error`) pour le changer, ou enregistrez une valeur par défaut pour le profil avec `multica config set log_level info`. La variable d’environnement est prioritaire sur le profil.
+
 Quand le daemon tourne en arrière-plan (sans terminal attaché), il écrit ses journaux dans `~/.multica/daemon.log`, ou `~/.multica/profiles/<name>/daemon.log` pour un profil nommé, avec une rotation par taille ; les fichiers issus de la rotation sont compressés en gzip.
 
-| Variable | Valeur par défaut | Description |
-|---|---|---|
-| `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `20` | Taille en Mo à partir de laquelle `daemon.log` tourne |
-| `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `5` | Nombre maximal de fichiers tournés conservés |
-| `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `30` | Nombre de jours de conservation des fichiers tournés |
+| Variable | Clé du profil | Valeur par défaut | Description |
+|---|---|---|---|
+| `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `daemon_log_max_size_mb` | `20` | Taille en Mo à partir de laquelle `daemon.log` tourne |
+| `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `daemon_log_max_backups` | `5` | Nombre maximal de fichiers tournés conservés |
+| `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `daemon_log_max_age_days` | `30` | Nombre de jours de conservation des fichiers tournés |
 
-Les trois attendent un entier positif ; `0`, une valeur négative ou illisible reprend la valeur par défaut au lieu de signifier « illimité ». Un fichier tourné est supprimé dès que la limite de nombre ou d'âge est atteinte. La sortie des plantages va dans `daemon.err.log`, dans le même répertoire, renommé en `daemon.err.log.1` au démarrage s'il dépasse 5 Mo.
+Les trois valeurs doivent être des entiers positifs. Enregistrez les clés avec `multica --profile dev config set <key> <value>` ; `config show` affiche les valeurs enregistrées. Passez `""` pour effacer une clé. Les changements prennent effet au prochain démarrage ou redémarrage du daemon. Les variables d’environnement valides priment sur le profil. Une valeur absente, vide, nulle, négative, mal formée ou trop grande utilise la valeur valide du profil, puis la valeur par défaut du tableau. La taille et le nombre de jours doivent aussi permettre une conversion sans dépassement en octets et en durée ; `config set` refuse les valeurs invalides. Zéro ne désactive pas la rétention. Un fichier tourné est supprimé dès que la limite de nombre ou d’âge est atteinte. La sortie des plantages va dans `daemon.err.log`, dans le même répertoire, renommé en `daemon.err.log.1` au démarrage s’il dépasse 5 Mo.
 
 ### Chemins, modèles et arguments par outil
 
@@ -385,6 +387,7 @@ Clés prises en charge :
 | `poll_interval` | `30s` | Intervalle d'interrogation des exécutions |
 | `ws_claim_poll_interval` | `3m` | Borne supérieure des interrogations de sécurité de la prise en charge via WebSocket lorsque celle-ci est saine, indépendante de `poll_interval` ; le daemon applique une gigue uniquement à la baisse |
 | `heartbeat_interval` | `15s` | Intervalle des signaux de vie (heartbeat) |
+| `log_level` | `debug` | Niveau des journaux du daemon : `debug`, `info`, `warn` ou `error`. `LOG_LEVEL` est prioritaire |
 | `agent_timeout` | illimité | Durée maximale absolue par exécution |
 | `agent_idle_watchdog` | `2h` | Durée maximale de silence lorsqu'aucun appel d'outil n'est en cours ; `0s` désactive entièrement le watchdog du daemon, y compris `agent_tool_watchdog` |
 | `agent_tool_watchdog` | identique à `agent_idle_watchdog` | Durée maximale de silence pendant un appel d'outil ; avec `0s`, le watchdog du daemon n'arrête jamais une exécution à cause d'un appel d'outil silencieux, et l'exécution n'est plus bornée que par `agent_timeout`, illimité par défaut |
@@ -393,6 +396,9 @@ Clés prises en charge :
 | `disable_auto_update` | suit l'environnement | `true` désactive la mise à jour automatique ; `false` efface la surcharge locale et revient à la variable d'environnement ou à la valeur par défaut |
 | `auto_update_check_interval` | `6h` | Intervalle de vérification des mises à jour |
 | `disable_auto_reload` | suit l'environnement | `true` empêche le daemon de suivre un binaire remplacé sur disque ; `false` efface la surcharge locale. Résolu indépendamment de `disable_auto_update` |
+| `daemon_log_max_size_mb` | `20` | Taille en Mo à partir de laquelle `daemon.log` tourne ; voir [Journaux du daemon](#daemon-logs) |
+| `daemon_log_max_backups` | `5` | Nombre maximal de fichiers de journaux tournés conservés |
+| `daemon_log_max_age_days` | `30` | Nombre de jours de conservation des fichiers tournés |
 
 Quelques règles concernant les valeurs :
 

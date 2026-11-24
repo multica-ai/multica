@@ -1,0 +1,65 @@
+---
+title: Multica vs local worktree managers
+description: How Multica compares with Conductor, Claude Squad, Orca, and Beads for running several coding agents in parallel, and when a personal workbench is enough.
+---
+
+Conductor, Claude Squad, and Orca help one developer run several coding agents in parallel, each in its own git worktree, and review what they produce. Beads gives agents a task tracker that lives with the repository. Multica solves a neighboring problem: a **team** sharing agents, issues, runtimes, and skills in one workspace. Which one you need depends mostly on how many people are involved.
+
+Statements about other tools on this page come from their public documentation as of November 2026: [Conductor](https://www.conductor.build/docs/concepts/git-worktrees), [Claude Squad](https://github.com/smtg-ai/claude-squad), [Orca](https://orca.dev/docs/model/worktrees), and [Beads](https://github.com/gastownhall/beads). Check them for current details.
+
+## Short answer
+
+- **One developer, agents on their own machine, hands-on review of each diff:** a worktree manager such as Conductor, Claude Squad, or Orca fits well, and is often quicker to start with.
+- **Agents that should keep a plan and dependency graph in the repository:** Beads.
+- **Several people sharing agents,** agents running on machines other than your laptop, work assigned like any other issue, access control, and recurring work: Multica.
+
+These are not exclusive. A developer can keep a worktree manager for hands-on work and hand longer or routine tasks to shared agents in Multica.
+
+## Comparison
+
+| | Multica | Conductor | Claude Squad | Orca | Beads |
+|---|---|---|---|---|---|
+| What it is | A team workspace where issues are assigned to agents | A Mac app for parallel coding agents in isolated workspaces | A terminal app that manages agents in tmux sessions | A desktop, mobile, and remote app for running fleets of agents | A graph issue tracker for coding agents, used from the CLI |
+| Primary user | A team of people and agents | One developer | One developer | One developer, plus bots others can call | Agents working in a repository |
+| Unit of work | An issue on a shared board | A workspace (worktree and branch) | A session (tmux and worktree) | A worktree | A bead (task) with dependencies |
+| Parallel work without conflicts | Each run gets its own directory with a checkout of the repository; agents can also use isolated worktrees of a local directory | A git worktree per workspace | A git worktree per session | A git worktree per task | Not a runner; tasks are claimed atomically |
+| Where agents run | Any computer you connect; teammates can share runtimes | Your Mac; also cloud workspaces | Your terminal | Your machine, SSH hosts, a remote Orca server, or cloud VMs | Wherever your agent runs |
+| Tools | [31 AI coding tools](/providers) | Claude Code, Codex, Cursor Agent, OpenCode | Claude Code, Codex, OpenCode, Amp, and other terminal agents | Your own Claude Code, Codex, Grok, Antigravity, and other CLIs | Any agent that can call its CLI |
+| Shared by a team | Yes: shared issues, agents, runtimes, skills, roles, and per-agent Access | — | — | Bots take requests from Slack, Linear, or GitHub and run on the owner's agents | Synced through Dolt remotes |
+| Diff review in the app | No; review happens on the pull request, with the run's log on the issue | Yes | Yes | Yes | — |
+| Recurring and triggered work | [Autopilots](/autopilots) on a schedule or webhook | — | — | Bot schedules and triggers (pull requests, failed checks, webhooks) and scheduled automations | — |
+| License | Source-available, free inside your organization | Source not public | AGPL-3.0 | MIT | MIT |
+
+## When a worktree manager is the better fit
+
+- You are one developer and want to watch several agents side by side, with a terminal and diff viewer for each.
+- You review and merge every change yourself, interactively, before it leaves your machine.
+- You do not need anyone else to see, assign, or reuse your agents.
+
+Multica has no in-app diff viewer or terminal per task. Review happens on the pull request, and the issue keeps the run's execution log.
+
+## When Multica is the better fit
+
+- **More than one person uses the agents.** Agents, runtimes, and [skills](/skills) belong to the workspace; [Access](/agents#permissions-and-access) decides who can run each agent; everyone sees which agent is working on what. See [Share an agent pool across a team](/team-agent-pool).
+- **Agents should run while your laptop is closed.** Connect a server or VM as a [runtime](/daemon-runtimes) and route agents there; teammates can share it.
+- **Work should be tracked as issues.** Assignment, status, comments, sub-issues, [workflows](/workflows) with review steps, and PR links live on one issue instead of in a local session.
+- **Some work repeats.** [Autopilots](/autopilots) start agents on a schedule or from a webhook, with each run recorded.
+- **You need to bring work in from chat.** Agents can be triggered from Slack, Feishu, and other [channels](/channels).
+
+## How do I run several Claude Code instances without conflicts in Multica?
+
+Assign separate issues to one or more agents on the same runtime. Each run gets its own working directory under `~/multica_workspaces`, and repositories are checked out from a shared cache, usually as separate git worktrees, so parallel runs do not edit the same checkout. By default a computer runs up to 20 runs at once and each agent up to 6; see [Concurrency limits](/daemon-runtimes#concurrency-limits). Parallel runs still share the machine's capacity and the Claude Code account's usage limits.
+
+To work directly in an existing folder on your machine instead, add it as a [project resource](/project-resources) and choose whether the agent edits it in place or in an isolated worktree.
+
+## Is Multica an issue tracker for AI coding agents?
+
+Yes, but a shared one. Multica's issues are designed so agents can take them: an agent can be the assignee, it reports progress in comments, moves the status to `in_review` when it delivers, and creates sub-issues with stages for larger work. Agents use the [Multica CLI](/cli) to read and update issues.
+
+Beads takes a different approach: tasks live in a Dolt database next to the code, and agents read and claim them through `bd`. It suits agents that need structured memory and dependency tracking inside a repository. Multica suits a team that wants people and agents on the same board, with access control and run history.
+
+## Related
+
+- [Multica vs Linear and Jira](/compare/linear-jira)
+- [Multica vs OpenHands, Devin, and Factory](/compare/openhands-devin-factory)
+- [Daemon and runtimes](/daemon-runtimes) — where runs execute and how directories are isolated.

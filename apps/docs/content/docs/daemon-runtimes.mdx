@@ -148,7 +148,7 @@ Once an agent has an MCP configuration (even an empty one), Multica generates a 
 | Claude Code | `mcpServers` in `~/.claude.json`, plus MCP servers from enabled plugins |
 | Codex | `mcp_servers` in `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`) |
 | Cursor Agent | `mcpServers` in `~/.cursor/mcp.json` |
-| OpenCode | `mcp` in `$XDG_CONFIG_HOME/opencode/opencode.json` (default `~/.config/opencode/opencode.json`) |
+| OpenCode | `mcp` in `$XDG_CONFIG_HOME/opencode/opencode.json` and `opencode.jsonc` in the same directory (default `~/.config/opencode/`). The JSONC file takes precedence. |
 | OpenClaw | `mcp.servers` in `$CLAWDBOT_CONFIG_PATH`, or in `$OPENCLAW_STATE_DIR/openclaw.json` (default `~/.openclaw/openclaw.json`) |
 | CodeArts | `mcp` in `~/.codeartsdoer/codearts_cli.json` or `codearts_cli.jsonc` |
 
@@ -280,9 +280,24 @@ The table lists the variables that custom runtimes can use today. It is intentio
 
 The server determines authorship for requests made with `MULTICA_TOKEN`; writes such as issue comments are attributed to the assigned agent and active task. For the token's complete binding, permissions, attribution, 24-hour maximum lifetime, and cleanup behavior, see [Temporary tokens for agent runs](/auth-tokens#temporary-tokens-for-agent-runs).
 
-<Callout type="warning">
-These values live in the runtime process's real environment. Any child process the runtime starts inherits all of them by default, including `MULTICA_TOKEN`. If a child should not hold the credential, strip it explicitly; do not rely on process isolation that is not there. The exception runs the other way: tools that filter their own subprocess environment may require an explicit allow rule. For example, Codex's shell tool drops names containing `TOKEN`, `KEY`, or `SECRET`, so the daemon installs a managed shell policy that allows the required task variables. Keep the token in process environments only—never in a prompt, log, repository file, or persistent configuration. A child shares the parent task's identity and permissions; it does not receive a new, independently scoped identity.
+<Callout type="info">
+Built-in **Codex** and **Claude Code** runtimes reuse warm provider processes across follow-up turns by default. During warm-pooled runs, per-task variables that change every turn (`MULTICA_TOKEN`, `MULTICA_TASK_ID`, `MULTICA_TASK_CONFIG_ROOT`, `MULTICA_TASK_SLOT`) are provided to the daemon's `multica` CLI through a private per-turn overlay file rather than set in the long-lived provider process's static environment, so they are not guaranteed to appear in the provider process environment or arbitrary child scripts. Custom runtime profile commands do not use the warm pool and continue receiving all variables directly in the process environment. Set `MULTICA_WARM_POOL=0` on the daemon if a built-in Codex or Claude Code workflow needs the legacy direct environment variables.
 </Callout>
+
+<Callout type="warning">
+When injected directly into the process environment (including custom runtime profiles and runs with `MULTICA_WARM_POOL=0`), these values live in the runtime process's real environment. Any child process the runtime starts inherits all of them by default, including `MULTICA_TOKEN`. If a child should not hold the credential, strip it explicitly; do not rely on process isolation that is not there. The exception runs the other way: tools that filter their own subprocess environment may require an explicit allow rule. For example, Codex's shell tool drops names containing `TOKEN`, `KEY`, or `SECRET`, so the daemon installs a managed shell policy that allows the required task variables. Keep the token in process environments only—never in a prompt, log, repository file, or persistent configuration. A child shares the parent task's identity and permissions; it does not receive a new, independently scoped identity.
+</Callout>
+
+### Secrets managers in the launch command [#secrets-managers]
+
+Some teams start the agent through a secrets manager, with a command such as `doppler run -- claude`. The secrets manager starts after the daemon and rebuilds the agent's environment from your secrets project. If that project also stores a `MULTICA_TOKEN`, often a personal `mul_` token kept for scripts, it replaces the task token, and every Multica CLI call inside the task fails with `agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token`. When the CLI sees a `mul_` token next to `MULTICA_TASK_ID`, the error points to this section.
+
+Let the daemon's values win:
+
+- **Doppler**: add `--preserve-env=MULTICA_TOKEN` before `--`, for example `doppler run --preserve-env=MULTICA_TOKEN -- claude`. If the project defines other `MULTICA_` variables, list them separated by commas: `--preserve-env=MULTICA_TOKEN,MULTICA_SERVER_URL`. Doppler only accepts the `=` form; `--preserve-env MULTICA_TOKEN` with a space does not work. The option has no effect together with `--mount`.
+- **Other tools**: use the tool's option that lets existing environment variables take precedence, or remove `MULTICA_` variables from the secrets project used for agent runs.
+
+A shell profile such as `~/.zshrc` that exports `MULTICA_TOKEN` replaces the task token the same way when the agent's shell loads it. Remove that export, or set it only when `MULTICA_TASK_ID` is empty.
 
 ### Creating a profile
 
@@ -330,7 +345,10 @@ Remove the path override:
 multica runtime profile unset-path <profile-id>
 ```
 
-Editing a profile only affects runs claimed afterwards. Before deleting a profile, deal with the active agents still bound to its runtimes. Deleting only the runtime instance on one computer does not delete the profile — a running daemon will re-register it.
+Editing a profile only affects runs claimed afterwards.
+
+- **Retire one machine.** You cannot delete a runtime instance directly while its custom profile exists. Stop the daemon on the retired machine so it cannot re-register the instance. An offline instance is eligible for automatic cleanup after 7 days, once it has no active agents or unfinished tasks. If a legacy profile still keeps a copy on its creator’s machine, edit the profile and select the machine that should keep it.
+- **Retire the profile.** Deleting a profile removes its runtimes on every registered machine. First move active agents to runtimes outside the profile, or archive agents that can be retired. If you cannot manage a blocking agent, ask its owner to move or archive it.
 
 ## Qoder Cloud Agents remote runtime
 

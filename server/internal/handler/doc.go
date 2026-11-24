@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -87,6 +88,11 @@ type DocVersionResponse struct {
 	ActionRef  *int32  `json:"action_ref"`
 	TaskID     *string `json:"task_id"`
 	IssueID    *string `json:"issue_id"`
+	// DocThreadID and DocThreadQuote name the discussion an agent was
+	// answering when it made this edit; null when it was not, or when that
+	// discussion has since been deleted.
+	DocThreadID    *string `json:"doc_thread_id"`
+	DocThreadQuote *string `json:"doc_thread_quote"`
 	// Contributors lists everyone whose edits the version carries. Versions
 	// saved before live co-editing have none; their author is the one.
 	Contributors []DocContributor `json:"contributors"`
@@ -166,20 +172,26 @@ func docVersionToResponse(v db.DocVersion, withContent bool) DocVersionResponse 
 }
 
 func docVersionRowToResponse(v db.ListDocVersionsRow) DocVersionResponse {
+	var threadQuote *string
+	if v.DocThreadID.Valid {
+		threadQuote = &v.DocThreadQuote
+	}
 	return DocVersionResponse{
-		DocID:        uuidToString(v.DocID),
-		Number:       v.Number,
-		Title:        v.Title,
-		AuthorType:   v.AuthorType,
-		AuthorID:     uuidToString(v.AuthorID),
-		Message:      v.Message,
-		Action:       v.Action,
-		ActionRef:    int4ToPtr(v.ActionRef),
-		TaskID:       uuidToPtr(v.TaskID),
-		IssueID:      uuidToPtr(v.IssueID),
-		Contributors: parseDocContributors(v.Contributors),
-		CreatedAt:    timestampToString(v.CreatedAt),
-		UpdatedAt:    timestampToString(v.UpdatedAt),
+		DocThreadID:    uuidToPtr(v.DocThreadID),
+		DocThreadQuote: threadQuote,
+		DocID:          uuidToString(v.DocID),
+		Number:         v.Number,
+		Title:          v.Title,
+		AuthorType:     v.AuthorType,
+		AuthorID:       uuidToString(v.AuthorID),
+		Message:        v.Message,
+		Action:         v.Action,
+		ActionRef:      int4ToPtr(v.ActionRef),
+		TaskID:         uuidToPtr(v.TaskID),
+		IssueID:        uuidToPtr(v.IssueID),
+		Contributors:   parseDocContributors(v.Contributors),
+		CreatedAt:      timestampToString(v.CreatedAt),
+		UpdatedAt:      timestampToString(v.UpdatedAt),
 	}
 }
 
@@ -647,12 +659,16 @@ func (h *Handler) DeleteDoc(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "failed to delete doc")
 		return
 	}
+	// Runs answering the doc's discussions have nothing left to answer.
+	if err := h.TaskService.CancelTasksForDoc(ctx, id); err != nil {
+		slog.Warn("delete doc: cancel doc runs failed", "doc_id", uuidToString(id), "error", err)
+	}
 	h.publish(protocol.EventDocDeleted, workspaceID, actorType, actorID, map[string]any{"doc_id": uuidToString(id)})
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) ListDocVersions(w http.ResponseWriter, r *http.Request) {
-	_, wsUUID, _, ok := h.docWorkspace(w, r)
+	_, wsUUID, workspaceID, ok := h.docWorkspace(w, r)
 	if !ok {
 		return
 	}
@@ -666,14 +682,19 @@ func (h *Handler) ListDocVersions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	versions := make([]DocVersionResponse, len(rows))
+	issueIDs := make([]pgtype.UUID, len(rows))
 	for i, v := range rows {
 		versions[i] = docVersionRowToResponse(v)
+		issueIDs[i] = v.IssueID
+	}
+	if !h.hideDocVersionIssues(w, r, workspaceID, versions, issueIDs) {
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"versions": versions})
 }
 
 func (h *Handler) GetDocVersion(w http.ResponseWriter, r *http.Request) {
-	_, wsUUID, _, ok := h.docWorkspace(w, r)
+	_, wsUUID, workspaceID, ok := h.docWorkspace(w, r)
 	if !ok {
 		return
 	}
@@ -695,7 +716,40 @@ func (h *Handler) GetDocVersion(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, docVersionToResponse(v, true))
+	versions := []DocVersionResponse{docVersionToResponse(v, true)}
+	if !h.hideDocVersionIssues(w, r, workspaceID, versions, []pgtype.UUID{v.IssueID}) {
+		return
+	}
+	writeJSON(w, http.StatusOK, versions[0])
+}
+
+// hideDocVersionIssues clears issue_id on the versions whose issue sits in a
+// private project the caller cannot see (MUL-8472). The edit and its task_id
+// stay, as a restricted run does in an agent's history. versions and issueIDs
+// are parallel slices. It writes a 500 and returns false when access cannot
+// be resolved.
+func (h *Handler) hideDocVersionIssues(w http.ResponseWriter, r *http.Request, workspaceID string, versions []DocVersionResponse, issueIDs []pgtype.UUID) bool {
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return false
+	}
+	named := make([]pgtype.UUID, 0, len(issueIDs))
+	for _, id := range issueIDs {
+		if id.Valid {
+			named = append(named, id)
+		}
+	}
+	hiddenIssues, err := h.hiddenIssueIDs(r, hidden, named)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve project access")
+		return false
+	}
+	for i, id := range issueIDs {
+		if _, hide := hiddenIssues[id]; hide {
+			versions[i].IssueID = nil
+		}
+	}
+	return true
 }
 
 // --- Folders ---

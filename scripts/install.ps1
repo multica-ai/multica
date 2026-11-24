@@ -159,6 +159,52 @@ function Assert-SelfHostPortsAvailable {
     }
 }
 
+# Fail early, with a fix the user can act on, when this machine's Docker Compose
+# cannot run the self-host stack. Without this, a missing Compose v2 plugin or a
+# Compose release too old for the file's top-level `name:` only surfaces once
+# `pull` / `up` runs, as a bare "(root) Additional property name is not allowed"
+# (#1401). `config --quiet` validates the file and .env the same way `up` would,
+# without contacting the Docker daemon. Must be called from the installation
+# directory.
+function Assert-ComposeSupportsSelfHost {
+    $previousPreference = $ErrorActionPreference
+    # Native stderr must be captured, not turned into a terminating error.
+    $ErrorActionPreference = "Continue"
+    try {
+        $version = $null
+        try {
+            $version = docker compose version 2>$null
+        } catch {
+            $version = $null
+        }
+        if ($LASTEXITCODE -ne 0 -or -not $version) {
+            Write-Fail "Docker Compose v2 is required, but 'docker compose' is not available.`n  The legacy standalone 'docker-compose' (v1) is not supported.`n  Install or update Docker Desktop:`n    https://docs.docker.com/desktop/install/windows-install/`n  Then re-run the installer."
+        }
+        $version = (@($version) | Where-Object { $_ } | Select-Object -First 1)
+
+        $failed = $false
+        $output = @()
+        try {
+            $output = @(docker compose -f docker-compose.selfhost.yml config --quiet 2>&1 | ForEach-Object { "$_" })
+            $failed = ($LASTEXITCODE -ne 0)
+        } catch {
+            $output = @("$_")
+            $failed = $true
+        }
+        if (-not $failed) {
+            return
+        }
+
+        $message = ($output | Where-Object { $_ }) -join "`n  "
+        if ($message -match "Additional property") {
+            Write-Fail "Your Docker Compose is too old for Multica's docker-compose.selfhost.yml.`n  Found: $version`n  Compose said: $message`n  Update Docker Desktop to the latest release:`n    https://docs.docker.com/desktop/install/windows-install/`n  Then re-run the installer."
+        }
+        Write-Fail "Docker Compose could not load $InstallDir\docker-compose.selfhost.yml:`n  $message`n  Fix the problem above (for example a malformed line in $InstallDir\.env) and re-run the installer."
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
+}
+
 function Get-LatestVersion {
     try {
         $release = Invoke-RestMethod -Uri "https://api.github.com/repos/multica-ai/multica/releases/latest" -ErrorAction Stop
@@ -514,6 +560,7 @@ function Install-Server {
         Write-Ok "Using existing .env"
     }
 
+    Assert-ComposeSupportsSelfHost
     Assert-SelfHostPortsAvailable
 
     Write-Info "Pulling official Multica images..."
