@@ -117,6 +117,7 @@ import { AutopilotQuotaNotice } from "./autopilot-quota-notice";
 import { AppCallQuotaNotice } from "./app-call-quota-notice";
 import { InboxEmptyState } from "./inbox-empty-state";
 import { InboxKeptActions, useKeptInboxRowText } from "./inbox-kept-actions";
+import { InboxSettledMoreMenu } from "./inbox-more-menu";
 import { inboxListLoad, useFilteredInboxRows } from "./use-filtered-inbox-rows";
 import { useKeptOpenInboxRow } from "./use-kept-open-inbox-row";
 import { useAutoArchiveCause } from "./use-auto-archive-cause";
@@ -1088,6 +1089,7 @@ export function InboxPage() {
         <InboxKeptActions
           label={keptStatus.label}
           hint={keptStatus.hint}
+          undoLabel={keptStatus.undo}
           onUndo={() => void restoreInbox(settledNotice.item.id, { quiet: true })}
           next={nextInboxRow(listedItems, settledNotice.key)}
           onNext={() => advanceSelectionPast(settledNotice.item.id, listedItems)}
@@ -1102,7 +1104,10 @@ export function InboxPage() {
     item: tab === "inbox" ? (detailItem ?? undefined) : undefined,
     bar: (issueActions) =>
       isArchivedView && detailItem ? (
-        <InboxArchivedBar onRestore={() => handleUnarchive(detailItem.id)} />
+        <InboxArchivedBar
+          onRestore={() => handleUnarchive(detailItem.id)}
+          more={<InboxSettledMoreMenu issueId={issueId} />}
+        />
       ) : (
         <IssueInboxBar issueId={issueId} issueActions={issueActions} movingOn={detailSwapping} isSnoozedView={isSnoozedView} />
       ),
