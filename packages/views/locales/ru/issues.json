@@ -2204,7 +2204,8 @@
       "pending": "Ожидание",
       "approved": "Одобрено",
       "rejected": "Отклонено",
-      "rate_limited": "Лимит вызовов достигнут"
+      "rate_limited": "Лимит вызовов достигнут",
+      "quota_exceeded": "Месячный лимит исчерпан"
     }
   },
   "environments": {

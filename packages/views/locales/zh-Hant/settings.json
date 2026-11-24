@@ -1906,7 +1906,8 @@
       "pending": "等待確認",
       "approved": "已核准",
       "rejected": "已拒絕",
-      "rate_limited": "已限流"
+      "rate_limited": "已限流",
+      "quota_exceeded": "已達每月上限"
     },
     "scopes": {
       "team": "團隊帳號",

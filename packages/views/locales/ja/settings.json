@@ -1906,7 +1906,8 @@
       "pending": "確認待ち",
       "approved": "承認済み",
       "rejected": "却下",
-      "rate_limited": "レート制限"
+      "rate_limited": "レート制限",
+      "quota_exceeded": "月間上限に到達"
     },
     "scopes": {
       "team": "チームアカウント",
