@@ -6,9 +6,11 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -2124,6 +2126,26 @@ type ChatLastMessage struct {
 	MessageKind string `json:"message_kind"`
 }
 
+// chatLastMessagePreviewMaxRunes caps ChatLastMessage.Content. The list only
+// renders a one-line snippet, but shipping each session's full last reply made
+// the list payload grow with every long agent answer (#9954).
+const chatLastMessagePreviewMaxRunes = 256
+
+var chatPreviewCodeFenceRE = regexp.MustCompile("(?s)```.*?```")
+
+// chatLastMessagePreview reduces a message to the snippet the list renders.
+// Complete code fences are dropped before truncating, mirroring the client's
+// toPreview: cutting first could leave an unclosed fence that the client no
+// longer strips, so a reply that opens with code would preview as raw code.
+func chatLastMessagePreview(content string) string {
+	content = chatPreviewCodeFenceRE.ReplaceAllString(content, " ")
+	content = strings.Join(strings.Fields(content), " ")
+	if utf8.RuneCountInString(content) <= chatLastMessagePreviewMaxRunes {
+		return content
+	}
+	return string([]rune(content)[:chatLastMessagePreviewMaxRunes])
+}
+
 // buildChatLastMessage assembles the preview from list-row columns; returns nil
 // when there is no last message (the LEFT JOIN produced a NULL timestamp).
 func buildChatLastMessage(at pgtype.Timestamptz, content, role string, failure pgtype.Text, kind string) *ChatLastMessage {
@@ -2134,7 +2156,7 @@ func buildChatLastMessage(at pgtype.Timestamptz, content, role string, failure p
 		content = ""
 	}
 	return &ChatLastMessage{
-		Content:       content,
+		Content:       chatLastMessagePreview(content),
 		Role:          role,
 		CreatedAt:     timestampToString(at),
 		FailureReason: textToPtr(failure),
