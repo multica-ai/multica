@@ -61,10 +61,19 @@ Resolved threads are hidden unless you pass `--include-resolved`; each root
 comment's `anchor_quote` is the text it was left on, and `--output json` has
 the full comment text.
 
-Writing in doc discussions is reserved for people: commenting, replying,
-resolving and reopening all answer `403` to agent credentials, and the CLI has
-no command for them. Report which threads you addressed in your issue
-comment, so the reviewer can resolve them.
+You can reply in an existing thread:
+
+```bash
+multica doc comment list <doc-id> --thread <comment-id> --output json   # one thread
+multica doc comment add <doc-id> --parent <comment-id> --content-file ./reply.md
+```
+
+Starting a thread, resolving, reopening and deleting are reserved for people:
+they answer `403` to agent credentials. A reply that @mentions an agent starts
+a run for it, as an issue comment does. When someone @mentions you in a
+thread, the run's prompt names the doc and the thread, and your reply goes
+there. When you addressed threads while working on an issue, say which in
+your issue comment, so the reviewer can resolve them.
 
 ## History and restore
 

@@ -14,7 +14,7 @@ import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import type { Agent, AgentTask, InboxItem, SnoozedInboxIssue } from "@multica/core/types";
 import { agentListOptions } from "@multica/core/workspace/queries";
-import { snoozedInboxOptions } from "@multica/core/inbox/queries";
+import { inboxKeys, snoozedInboxOptions } from "@multica/core/inbox/queries";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { PanelBody } from "../panel-nav";
@@ -37,7 +37,7 @@ const state = vi.hoisted(() => ({
   unsnooze: vi.fn(() => Promise.resolve()),
 }));
 
-const apiMock = vi.hoisted(() => ({ listInbox: vi.fn(), listArchivedInboxPage: vi.fn() }));
+const apiMock = vi.hoisted(() => ({ listInbox: vi.fn(), listArchivedInboxPage: vi.fn(), getIssue: vi.fn() }));
 vi.mock("@multica/core/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/api")>()),
   api: apiMock,
@@ -192,6 +192,10 @@ beforeEach(() => {
   ]) {
     spy.mockReset();
   }
+  // The section warms the archive while it is closed.
+  apiMock.listArchivedInboxPage.mockReset();
+  apiMock.listArchivedInboxPage.mockResolvedValue({ items: [], nextCursor: null, hasMore: false });
+  apiMock.getIssue.mockReset();
   // Rows with the actor line; the compact default has tests of its own.
   useSidebarTreeStore.setState({ inboxCollapsed: false, inboxSettings: { ...DEFAULT_SIDEBAR_INBOX_SETTINGS, compact: false } });
   useInboxFilterStore.getState().clearFilters("ws-1");
@@ -797,6 +801,72 @@ describe("InboxSection", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Bring back now" }));
     expect(state.unsnooze).toHaveBeenCalledWith(expect.objectContaining({ id: "z1" }));
+  });
+
+  it("shows a snoozed issue's title and status from the list without fetching the issue", async () => {
+    renderSection([item({ id: "n1", issue_id: "issue-a" })], null, "/acme/issues", [], [
+      {
+        issue_id: "issue-z",
+        issue_identifier: "MUL-26",
+        issue_title: "Ship the release notes",
+        issue_status: "todo",
+        item_id: "z1",
+        snoozed_until: "2099-01-01T09:00:00Z",
+        snoozed_at: "2026-11-10T09:00:00Z",
+        updates: 0,
+      },
+    ]);
+
+    fireEvent.click(screen.getByRole("tab", { name: /^Snoozed/ }));
+    expect(await screen.findByRole("link", { name: /^Ship the release notes/ })).toBeInTheDocument();
+    expect(document.querySelector('[data-inbox-snoozed-row] [data-mc="status-icon"]')).not.toBeNull();
+    expect(apiMock.getIssue).not.toHaveBeenCalled();
+  });
+
+  it("loads the archive when its tab is pointed at, so the click renders from cache", async () => {
+    apiMock.listArchivedInboxPage.mockResolvedValue({
+      items: [item({ id: "a1", issue_id: "issue-x", title: "Done with this", archived: true })],
+      nextCursor: null,
+      hasMore: false,
+    });
+    renderSection([item({ id: "n1", issue_id: "issue-a" })]);
+
+    const tab = screen.getByRole("tab", { name: /^Archived/ });
+    fireEvent.pointerEnter(tab);
+    await waitFor(() => expect(apiMock.listArchivedInboxPage).toHaveBeenCalledOnce());
+    // Settled before the click: the tab opens on its rows with no request of its own.
+    await act(() => Promise.resolve());
+    fireEvent.click(tab);
+    expect(await screen.findByRole("link", { name: /^Done with this/ })).toBeInTheDocument();
+    expect(apiMock.listArchivedInboxPage).toHaveBeenCalledOnce();
+  });
+
+  it("warms the archive once idle, and an inbox event only marks it stale until it opens", async () => {
+    apiMock.listArchivedInboxPage.mockResolvedValueOnce({
+      items: [item({ id: "a1", issue_id: "issue-x", title: "Done with this", archived: true })],
+      nextCursor: null,
+      hasMore: false,
+    });
+    apiMock.listArchivedInboxPage.mockReturnValue(new Promise(() => {}));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let client: QueryClient;
+    try {
+      ({ client } = renderSection([item({ id: "n1", issue_id: "issue-a" })]));
+      expect(apiMock.listArchivedInboxPage).not.toHaveBeenCalled();
+      await act(async () => {
+        vi.advanceTimersByTime(1500);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    await waitFor(() => expect(apiMock.listArchivedInboxPage).toHaveBeenCalledOnce());
+    await act(() => client.invalidateQueries({ queryKey: inboxKeys.archived("ws-1") }));
+    expect(apiMock.listArchivedInboxPage).toHaveBeenCalledOnce();
+
+    // Opening it shows the warmed rows while the refresh is still out.
+    fireEvent.click(screen.getByRole("tab", { name: /^Archived/ }));
+    expect(await screen.findByRole("link", { name: /^Done with this/ })).toBeInTheDocument();
+    expect(apiMock.listArchivedInboxPage).toHaveBeenCalledTimes(2);
   });
 
   it("swaps the lists at once with reduced motion", () => {

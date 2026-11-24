@@ -152,7 +152,14 @@ func systemWakeupFacts(w db.IssueWakeup, receipts []db.IssueWakeupReceipt) map[s
 
 var ErrIssueBlockerNotFound = errors.New("blocker issue not found in this workspace")
 
+// ErrIssueBlockerSelf is checked before the write so callers get a readable
+// error instead of the table's CHECK constraint text.
+var ErrIssueBlockerSelf = errors.New("an issue cannot block itself")
+
 func AddIssueBlocker(ctx context.Context, q *db.Queries, workspace, issue, blocker pgtype.UUID, actorType string, actorID pgtype.UUID) error {
+	if issue == blocker {
+		return ErrIssueBlockerSelf
+	}
 	if _, err := q.LockIssueBlockerTarget(ctx, db.LockIssueBlockerTargetParams{IssueID: blocker, WorkspaceID: workspace}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrIssueBlockerNotFound

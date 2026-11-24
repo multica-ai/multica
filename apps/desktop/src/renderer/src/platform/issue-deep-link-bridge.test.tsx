@@ -118,6 +118,24 @@ describe("IssueDeepLinkBridge", () => {
     expect(useTabStore.getState().byWorkspace[slug]!.tabs).toHaveLength(tabCount);
   });
 
+  it("opens a chat session by link, reusing the open chat tab without adding another", () => {
+    const chatLink = (path: string) =>
+      `multica://open/chat?url=${encodeURIComponent(`https://tasks.example${path}`)}`;
+    useTabStore.getState().openTab("/acme/chat?session=s-old", "", { activate: true });
+    const chatTab = getActiveTab(useTabStore.getState())!;
+    useTabStore.getState().openTab("/acme/issues/ACM-1", "", { activate: true });
+    const tabCount = useTabStore.getState().byWorkspace.acme!.tabs.length;
+    render(ui());
+
+    act(() => receive!(chatLink("/acme/chat?session=s-new")));
+    act(() => receive!(chatLink("/acme/chat?session=s-new")));
+
+    const current = getActiveTab(useTabStore.getState())!;
+    expect(current.id).toBe(chatTab.id);
+    expect(current.url).toBe("/acme/chat?session=s-new");
+    expect(useTabStore.getState().byWorkspace.acme!.tabs).toHaveLength(tabCount);
+  });
+
   it("applies the new comment in the workspace's existing window without moving the source", () => {
     const oldPath = "/other/issues/OTH-2#comment-old";
     const newPath = "/other/issues/OTH-2#comment-new";

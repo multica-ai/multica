@@ -184,3 +184,52 @@ func TestIssueBlockerDeletingStagePredecessorReleasesWaitingIssue(t *testing.T) 
 		t.Fatalf("release changed status or left a blocker: %+v", current)
 	}
 }
+
+func TestIssueBlockerRejectsSelfWithReadableError(t *testing.T) {
+	a := blockerTestIssue(t, map[string]any{"status": "todo"})
+	req := withURLParam(newRequest("PUT", "/api/issues/"+a.ID, map[string]any{"title": "renamed " + uuid.NewString(), "blocked_by": []string{a.ID}}), "id", a.ID)
+	body := testutil.Call(t, testHandler.UpdateIssue, req).Want(http.StatusBadRequest).Text()
+	if !strings.Contains(body, "an issue cannot block itself") || strings.Contains(body, "constraint") {
+		t.Fatalf("self blocker error = %s", body)
+	}
+	var title string
+	dbfx.QueryRow(t, "SELECT title FROM issue WHERE id=$1", a.ID).Scan(&title)
+	if title != a.Title {
+		t.Fatalf("rejected self blocker saved title %q", title)
+	}
+}
+
+func TestIssueBlockerFilterSkipsFinishedIssues(t *testing.T) {
+	open := blockerTestIssue(t, map[string]any{"status": "todo"})
+	waiting := blockerTestIssue(t, map[string]any{"status": "todo", "blocked_by": []string{open.ID}})
+	finished := map[string]string{}
+	for _, status := range []string{"done", "cancelled"} {
+		issue := blockerTestIssue(t, map[string]any{"status": "todo", "blocked_by": []string{open.ID}})
+		updateIssueForTest(t, issue.ID, map[string]any{"status": status}).Want(200)
+		finished[issue.ID] = status
+	}
+	var list struct {
+		Issues []IssueResponse `json:"issues"`
+	}
+	testutil.Call(t, testHandler.ListIssues, newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID+"&blocked=true&limit=100", nil)).Want(200).JSON(&list)
+	var grouped GroupedIssuesResponse
+	testutil.Call(t, testHandler.ListGroupedIssues, newRequest("GET", "/api/issues/grouped?workspace_id="+testWorkspaceID+"&group_by=assignee&blocked=true", nil)).Want(200).JSON(&grouped)
+	rows := map[string][]IssueResponse{"list": list.Issues}
+	for _, group := range grouped.Groups {
+		rows["grouped"] = append(rows["grouped"], group.Issues...)
+	}
+	for surface, issues := range rows {
+		found := false
+		for _, row := range issues {
+			if row.ID == waiting.ID {
+				found = true
+			}
+			if status, ok := finished[row.ID]; ok {
+				t.Fatalf("%s blocked filter listed a %s issue", surface, status)
+			}
+		}
+		if !found {
+			t.Fatalf("%s blocked filter omitted the waiting issue", surface)
+		}
+	}
+}

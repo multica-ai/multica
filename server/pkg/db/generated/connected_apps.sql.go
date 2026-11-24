@@ -859,27 +859,28 @@ const insertAppToolCall = `-- name: InsertAppToolCall :exec
 INSERT INTO app_tool_call (
     workspace_id, task_id, agent_id, issue_id, chat_session_id, triggered_by,
     account_scope, account_owner_user_id, toolkit_slug, tool_slug, action_class,
-    outcome, request_id, error
+    outcome, request_id, error, metered_period_start
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
 )
 `
 
 type InsertAppToolCallParams struct {
-	WorkspaceID        pgtype.UUID `json:"workspace_id"`
-	TaskID             pgtype.UUID `json:"task_id"`
-	AgentID            pgtype.UUID `json:"agent_id"`
-	IssueID            pgtype.UUID `json:"issue_id"`
-	ChatSessionID      pgtype.UUID `json:"chat_session_id"`
-	TriggeredBy        pgtype.UUID `json:"triggered_by"`
-	AccountScope       string      `json:"account_scope"`
-	AccountOwnerUserID pgtype.UUID `json:"account_owner_user_id"`
-	ToolkitSlug        string      `json:"toolkit_slug"`
-	ToolSlug           string      `json:"tool_slug"`
-	ActionClass        string      `json:"action_class"`
-	Outcome            string      `json:"outcome"`
-	RequestID          pgtype.UUID `json:"request_id"`
-	Error              pgtype.Text `json:"error"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	TaskID             pgtype.UUID        `json:"task_id"`
+	AgentID            pgtype.UUID        `json:"agent_id"`
+	IssueID            pgtype.UUID        `json:"issue_id"`
+	ChatSessionID      pgtype.UUID        `json:"chat_session_id"`
+	TriggeredBy        pgtype.UUID        `json:"triggered_by"`
+	AccountScope       string             `json:"account_scope"`
+	AccountOwnerUserID pgtype.UUID        `json:"account_owner_user_id"`
+	ToolkitSlug        string             `json:"toolkit_slug"`
+	ToolSlug           string             `json:"tool_slug"`
+	ActionClass        string             `json:"action_class"`
+	Outcome            string             `json:"outcome"`
+	RequestID          pgtype.UUID        `json:"request_id"`
+	Error              pgtype.Text        `json:"error"`
+	MeteredPeriodStart pgtype.Timestamptz `json:"metered_period_start"`
 }
 
 func (q *Queries) InsertAppToolCall(ctx context.Context, arg InsertAppToolCallParams) error {
@@ -898,6 +899,7 @@ func (q *Queries) InsertAppToolCall(ctx context.Context, arg InsertAppToolCallPa
 		arg.Outcome,
 		arg.RequestID,
 		arg.Error,
+		arg.MeteredPeriodStart,
 	)
 	return err
 }
@@ -1264,7 +1266,7 @@ func (q *Queries) ListDecidedAppActionRequestsForIssue(ctx context.Context, arg 
 }
 
 const listIssueAppToolCalls = `-- name: ListIssueAppToolCalls :many
-SELECT id, workspace_id, task_id, agent_id, issue_id, chat_session_id, triggered_by, account_scope, account_owner_user_id, toolkit_slug, tool_slug, action_class, outcome, request_id, error, created_at FROM app_tool_call
+SELECT id, workspace_id, task_id, agent_id, issue_id, chat_session_id, triggered_by, account_scope, account_owner_user_id, toolkit_slug, tool_slug, action_class, outcome, request_id, error, created_at, metered_period_start FROM app_tool_call
 WHERE workspace_id = $1 AND issue_id = $2
 ORDER BY created_at DESC
 LIMIT 500
@@ -1303,6 +1305,7 @@ func (q *Queries) ListIssueAppToolCalls(ctx context.Context, arg ListIssueAppToo
 			&i.RequestID,
 			&i.Error,
 			&i.CreatedAt,
+			&i.MeteredPeriodStart,
 		); err != nil {
 			return nil, err
 		}
@@ -1670,7 +1673,7 @@ func (q *Queries) ListPersonalAppAgentsForUser(ctx context.Context, arg ListPers
 }
 
 const listPersonalAppToolCalls = `-- name: ListPersonalAppToolCalls :many
-SELECT id, workspace_id, task_id, agent_id, issue_id, chat_session_id, triggered_by, account_scope, account_owner_user_id, toolkit_slug, tool_slug, action_class, outcome, request_id, error, created_at FROM app_tool_call
+SELECT id, workspace_id, task_id, agent_id, issue_id, chat_session_id, triggered_by, account_scope, account_owner_user_id, toolkit_slug, tool_slug, action_class, outcome, request_id, error, created_at, metered_period_start FROM app_tool_call
 WHERE workspace_id = $1 AND toolkit_slug = $2 AND account_scope = 'personal'
   AND account_owner_user_id = $3
 ORDER BY created_at DESC
@@ -1716,6 +1719,7 @@ func (q *Queries) ListPersonalAppToolCalls(ctx context.Context, arg ListPersonal
 			&i.RequestID,
 			&i.Error,
 			&i.CreatedAt,
+			&i.MeteredPeriodStart,
 		); err != nil {
 			return nil, err
 		}
@@ -1778,7 +1782,7 @@ func (q *Queries) ListTeamAccountRequestSummaries(ctx context.Context, workspace
 }
 
 const listTeamAppToolCalls = `-- name: ListTeamAppToolCalls :many
-SELECT id, workspace_id, task_id, agent_id, issue_id, chat_session_id, triggered_by, account_scope, account_owner_user_id, toolkit_slug, tool_slug, action_class, outcome, request_id, error, created_at FROM app_tool_call
+SELECT id, workspace_id, task_id, agent_id, issue_id, chat_session_id, triggered_by, account_scope, account_owner_user_id, toolkit_slug, tool_slug, action_class, outcome, request_id, error, created_at, metered_period_start FROM app_tool_call
 WHERE workspace_id = $1 AND toolkit_slug = $2 AND account_scope = 'team'
 ORDER BY created_at DESC
 LIMIT $3
@@ -1816,6 +1820,7 @@ func (q *Queries) ListTeamAppToolCalls(ctx context.Context, arg ListTeamAppToolC
 			&i.RequestID,
 			&i.Error,
 			&i.CreatedAt,
+			&i.MeteredPeriodStart,
 		); err != nil {
 			return nil, err
 		}

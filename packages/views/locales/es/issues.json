@@ -2030,7 +2030,8 @@
       "pending": "En espera",
       "approved": "Aprobada",
       "rejected": "Rechazada",
-      "rate_limited": "Límite de llamadas alcanzado"
+      "rate_limited": "Límite de llamadas alcanzado",
+      "quota_exceeded": "Límite mensual alcanzado"
     }
   },
   "environments": {
@@ -2161,6 +2162,17 @@
     "empty": "Sin tareas pendientes",
     "picker_hint": "Selecciona una tarea que deba terminar antes que esta.",
     "restricted": "{{count}} requisitos restringidos",
-    "ended": "Las tareas en espera terminaron"
+    "ended": "Las tareas en espera terminaron",
+    "marker_title": "Bloqueada por {{count}} tareas",
+    "marker_title_one": "Bloqueada por {{count}} tarea",
+    "marker_title_other": "Bloqueada por {{count}} tareas",
+    "marker_ended": "{{finished}}/{{total}} terminadas",
+    "marker_more": "{{count}} más",
+    "marker_more_one": "{{count}} más",
+    "marker_more_other": "{{count}} más",
+    "marker_auto_start": "{{name}} comenzará automáticamente cuando terminen.",
+    "marker_notify": "{{name}} recibirá una notificación cuando terminen.",
+    "marker_unavailable": "{{name}} no puede ejecutarse ahora, así que nada comenzará cuando terminen.",
+    "marker_unassigned": "Sin responsable: nada comenzará cuando terminen."
   }
 }

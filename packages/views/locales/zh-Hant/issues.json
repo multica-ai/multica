@@ -1946,7 +1946,8 @@
       "pending": "等待確認",
       "approved": "已核准",
       "rejected": "已拒絕",
-      "rate_limited": "已限流"
+      "rate_limited": "已限流",
+      "quota_exceeded": "已達每月上限"
     }
   },
   "environments": {
@@ -2069,6 +2070,15 @@
     "empty": "沒有等待的任務",
     "picker_hint": "選擇一個必須先結束的任務。",
     "restricted": "{{count}} 個無權查看的前置任務",
-    "ended": "等待的任務已結束"
+    "ended": "等待的任務已結束",
+    "marker_title": "被 {{count}} 個任務阻塞",
+    "marker_title_other": "被 {{count}} 個任務阻塞",
+    "marker_ended": "已結束 {{finished}}/{{total}}",
+    "marker_more": "還有 {{count}} 個",
+    "marker_more_other": "還有 {{count}} 個",
+    "marker_auto_start": "阻塞結束後 {{name}} 自動開始。",
+    "marker_notify": "阻塞結束後通知 {{name}}。",
+    "marker_unavailable": "{{name}} 目前無法執行，阻塞結束後不會自動開始。",
+    "marker_unassigned": "未指派負責人，阻塞結束後不會自動開始。"
   }
 }

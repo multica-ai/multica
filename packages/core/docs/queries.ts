@@ -12,7 +12,17 @@ export const docKeys = {
     [...docKeys.all(wsId), "version", id, number] as const,
   comments: (wsId: string, id: string) =>
     [...docKeys.all(wsId), "comments", id] as const,
+  tasks: (wsId: string, id: string) =>
+    [...docKeys.all(wsId), "tasks", id] as const,
 };
+
+/** Agent runs started from the doc's discussions, newest first. */
+export function docTaskRunsOptions(wsId: string, docId: string) {
+  return queryOptions({
+    queryKey: docKeys.tasks(wsId, docId),
+    queryFn: () => api.listDocTaskRuns(docId),
+  });
+}
 
 export function docCommentsOptions(wsId: string, docId: string) {
   return queryOptions({

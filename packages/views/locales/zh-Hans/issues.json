@@ -1946,7 +1946,8 @@
       "pending": "等待确认",
       "approved": "已批准",
       "rejected": "已拒绝",
-      "rate_limited": "已限流"
+      "rate_limited": "已限流",
+      "quota_exceeded": "已达月度上限"
     }
   },
   "environments": {
@@ -2069,6 +2070,15 @@
     "empty": "没有等待的任务",
     "picker_hint": "选择一个必须先结束的任务。",
     "restricted": "{{count}} 个无权查看的前置任务",
-    "ended": "等待的任务已结束"
+    "ended": "等待的任务已结束",
+    "marker_title": "被 {{count}} 个任务阻塞",
+    "marker_title_other": "被 {{count}} 个任务阻塞",
+    "marker_ended": "已结束 {{finished}}/{{total}}",
+    "marker_more": "还有 {{count}} 个",
+    "marker_more_other": "还有 {{count}} 个",
+    "marker_auto_start": "阻塞结束后 {{name}} 自动开始。",
+    "marker_notify": "阻塞结束后通知 {{name}}。",
+    "marker_unavailable": "{{name}} 当前无法运行，阻塞结束后不会自动开始。",
+    "marker_unassigned": "未指派负责人，阻塞结束后不会自动开始。"
   }
 }

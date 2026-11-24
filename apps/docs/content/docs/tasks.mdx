@@ -70,7 +70,7 @@ In the execution log you can:
 - Stop runs that are queued, starting, waiting for a local directory, or working.
 - Retry a failed or cancelled run.
 
-The demo below walks through a full cycle: a run queues, starts, and fails; you retry it and the new run completes. Once the new run starts, you can also try stopping it midway.
+The diagram below maps every state transition in a run's lifecycle, including the retry path after failure and cancellation while queued or running. Select any state to inspect its transitions.
 
 <RunLifecycleDemo />
 

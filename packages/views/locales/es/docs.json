@@ -59,7 +59,8 @@
     "title": "Historial",
     "current": "Actual",
     "restore": "Restaurar esta versión",
-    "loading": "Cargando..."
+    "loading": "Cargando...",
+    "from_discussion": "Desde el comentario: {{quote}}"
   },
   "not_found": {
     "title": "Documento no encontrado",
@@ -97,6 +98,7 @@
       "save": "No se pudo publicar el comentario",
       "delete": "No se pudo eliminar el comentario",
       "resolve": "No se pudo actualizar el comentario"
-    }
+    },
+    "run_waiting_retry": "Esperando para reintentar"
   }
 }

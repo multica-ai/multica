@@ -11,6 +11,7 @@ import {
   DocCommentSchema,
   DocCommentListSchema,
   DocCollabTicketSchema,
+  DocTaskRunListSchema,
 } from "../docs/schemas";
 import type {
   Doc,
@@ -22,6 +23,7 @@ import type {
   DocTree,
   DocVersion,
   DocCollabTicket,
+  DocTaskRun,
   CreateDocRequest,
   UpdateDocRequest,
   CreateDocFolderRequest,
@@ -302,6 +304,7 @@ import type {
   WorkspaceFeatures,
   MemberLimit,
   StorageUsage,
+  AppCallUsage,
   CreateWorkspaceSubscriptionCheckoutRequest,
   CreateWorkspaceSubscriptionCheckoutResponse,
   WorkspaceSubscriptionSeatReconcileResult,
@@ -476,6 +479,7 @@ import {
   WorkspaceFeaturesSchema,
   MemberLimitSchema,
   StorageUsageSchema,
+  AppCallUsageSchema,
   CreateWorkspaceSubscriptionCheckoutResponseSchema,
   WorkspaceSubscriptionSeatReconcileResultSchema,
   WorkspaceSeatPurchasePreviewSchema,
@@ -1103,6 +1107,14 @@ export class ApiClient {
   }
   async deleteDocComment(docId: string, commentId: string): Promise<void> {
     await this.fetch(`/api/docs/${docId}/comments/${commentId}`, { method: "DELETE" });
+  }
+  async listDocTaskRuns(docId: string): Promise<DocTaskRun[]> {
+    return parseWithFallback(
+      await this.fetch<unknown>(`/api/docs/${docId}/task-runs`),
+      DocTaskRunListSchema,
+      { tasks: [] },
+      { endpoint: "GET /api/docs/{id}/task-runs" },
+    ).tasks;
   }
   async listDocVersions(id: string): Promise<DocVersion[]> {
     return parseWithFallback(
@@ -2787,6 +2799,18 @@ export class ApiClient {
       StorageUsageSchema,
       { action: "off", usedBytes: null, limitBytes: null, reached: null },
       { endpoint: "GET /api/workspaces/:id/storage-usage" },
+    );
+  }
+
+  // The plan's monthly app call limit (MUL-10047). A response that cannot be
+  // read falls back to no limit: the gateway still checks every call.
+  async getAppCallUsage(workspaceId: string): Promise<AppCallUsage> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/app-call-usage`);
+    return parseWithFallback<AppCallUsage>(
+      raw,
+      AppCallUsageSchema,
+      { action: "off", used: null, limit: null, reached: null, resetAt: null, members: [] },
+      { endpoint: "GET /api/workspaces/:id/app-call-usage" },
     );
   }
 

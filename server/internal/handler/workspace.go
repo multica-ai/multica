@@ -1520,6 +1520,10 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			run:  func() error { return qtx.DeleteWorkspaceAutopilotQuotaPeriods(ctx, requester.WorkspaceID) },
 		},
 		{
+			name: "delete app tool call quota periods",
+			run:  func() error { return qtx.DeleteWorkspaceAppToolCallQuotaPeriods(ctx, requester.WorkspaceID) },
+		},
+		{
 			name: "delete entitlement limit overages",
 			run:  func() error { return qtx.DeleteWorkspaceEntitlementLimitOverages(ctx, requester.WorkspaceID) },
 		},

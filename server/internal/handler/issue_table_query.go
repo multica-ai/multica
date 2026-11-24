@@ -457,7 +457,7 @@ func issueTableRelationPredicate(relation string, userRef string) string {
 	case "created":
 		return issueCreatedByUserPredicate(userRef)
 	case "blocked":
-		return "issue_has_open_blockers(i.workspace_id,i.id)"
+		return blockedIssuePredicate
 	case "subscribed":
 		return fmt.Sprintf(`EXISTS (
     SELECT 1 FROM issue_subscriber isub

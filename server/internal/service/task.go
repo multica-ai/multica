@@ -1038,6 +1038,8 @@ func (s *TaskService) taskMetricsContext(ctx context.Context, task db.AgentTaskQ
 		}
 	case task.AutopilotRunID.Valid:
 		source = "autopilot"
+	case task.DocID.Valid:
+		source = "doc_comment"
 	default:
 		if _, ok := s.parseQuickCreateContext(task); ok {
 			source = "quick_create"
@@ -5063,6 +5065,10 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 		}
 	}
 
+	if task.DocID.Valid {
+		s.ensureDocReply(ctx, task, result)
+	}
+
 	// Quick-create tasks: locate the issue the agent just created and push
 	// an inbox confirmation to the requester. The agent has no issue / chat
 	// link, so the regular completion paths above don't apply. We find the
@@ -5901,8 +5907,8 @@ func ResumeUnsafeFailure(failureReason, errorText string) bool {
 
 // retryEligible reports whether a failed task qualifies for an automatic retry
 // attempt: an infrastructure-shaped failure_reason, remaining attempt budget,
-// not an autopilot run, not a Triage run, and linked to an issue or chat
-// session. Shared by FailTask's in-transaction retry and the orphan sweeper's
+// not an autopilot run, not a Triage run, and linked to an issue, chat
+// session or doc discussion. Shared by FailTask's in-transaction retry and the orphan sweeper's
 // MaybeRetryFailedTask so both agree on which failures re-run.
 //
 // A Triage run is excluded for the reason autopilot runs are (MUL-7189 §5.6):
@@ -5914,7 +5920,7 @@ func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
 		t.Attempt < retryAttemptCeiling(failureReason, t.MaxAttempts) &&
 		!t.AutopilotRunID.Valid &&
 		!IsTriageTask(t) &&
-		(t.IssueID.Valid || t.ChatSessionID.Valid || isSourceContextQuickCreateTask(t))
+		(t.IssueID.Valid || t.ChatSessionID.Valid || t.DocID.Valid || isSourceContextQuickCreateTask(t))
 }
 
 func isSourceContextQuickCreateTask(task db.AgentTaskQueue) bool {
@@ -7892,6 +7898,10 @@ func taskEvent(eventType, workspaceID string, task db.AgentTaskQueue, extra ...m
 		payload["chat_session_id"] = chatSessionID
 		e.ChatSessionID = chatSessionID
 	}
+	// doc_id lets an open doc refresh its discussions' run status.
+	if task.DocID.Valid {
+		payload["doc_id"] = util.UUIDToString(task.DocID)
+	}
 	for _, fields := range extra {
 		for key, value := range fields {
 			payload[key] = value
@@ -8038,6 +8048,11 @@ func (s *TaskService) ResolveTaskScopeChecked(ctx context.Context, task db.Agent
 	// broadcasts, which is why quick-create tasks appeared stuck queued.
 	if qc, ok := s.parseQuickCreateContext(task); ok {
 		return TaskScope{WorkspaceID: qc.WorkspaceID}, nil
+	}
+	// Doc discussion runs carry their workspace in the context too, so a run
+	// cancelled by its doc's deletion still resolves.
+	if dc, ok := ParseDocCommentContext(task); ok {
+		return TaskScope{WorkspaceID: dc.WorkspaceID}, nil
 	}
 	if lookupErr != nil {
 		return TaskScope{}, fmt.Errorf("resolve task workspace: %w", lookupErr)
