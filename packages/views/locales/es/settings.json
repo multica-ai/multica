@@ -920,7 +920,7 @@
       },
       "squad_handoffs": {
         "label": "Incluir traspasos del squad",
-        "description": "Comentarios con los que el líder y los agentes de un squad se pasan el trabajo. Las @menciones, las ejecuciones de agente fallidas y los estados que requieren atención te siguen llegando."
+        "description": "Comentarios con los que el líder y los agentes de un squad se pasan el trabajo. Las @menciones, las ejecuciones de agente fallidas y el informe final del squad te siguen llegando."
       },
       "mentions": {
         "label": "Menciones",

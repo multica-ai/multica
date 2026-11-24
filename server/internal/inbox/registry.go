@@ -130,17 +130,29 @@ const SquadHandoffsPref = "squad_handoffs"
 // a string map and reject the whole Inbox list otherwise.
 const SquadHandoffDetail = "squad_handoff"
 
+// SquadResultDetail is the new_comment details key, set to "true", on the row
+// that delivers the handoff a squad's chain ended with: its leader's run
+// finished without passing the work on, so that report is the result
+// (MUL-10054). Only members who muted squad handoffs receive it; everyone
+// else already has the report's own row.
+const SquadResultDetail = "squad_result"
+
 // MutedSquadHandoff reports whether a member's parsed preferences drop this
-// new_comment row as a squad handoff.
+// new_comment row: a squad handoff for a member who muted them, or a squad
+// result for one who did not.
 func MutedSquadHandoff(prefs map[string]string, notifType string, details []byte) bool {
-	if notifType != "new_comment" || prefs[SquadHandoffsPref] != "muted" || len(details) == 0 {
+	if notifType != "new_comment" || len(details) == 0 {
 		return false
 	}
 	var d map[string]any
 	if err := json.Unmarshal(details, &d); err != nil {
 		return false
 	}
-	return d[SquadHandoffDetail] == "true"
+	muted := prefs[SquadHandoffsPref] == "muted"
+	if d[SquadResultDetail] == "true" {
+		return !muted
+	}
+	return muted && d[SquadHandoffDetail] == "true"
 }
 
 // Muted reports whether a member's parsed preferences mute notifType. nil
