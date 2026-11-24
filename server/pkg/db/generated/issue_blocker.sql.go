@@ -149,6 +149,61 @@ func (q *Queries) ListIssueBlockers(ctx context.Context, arg ListIssueBlockersPa
 	return items, nil
 }
 
+const listIssueDependents = `-- name: ListIssueDependents :many
+SELECT i.id,i.number,i.title,i.status,i.project_id,COALESCE(p.visibility='private',false)::boolean AS private,b.via,
+ (i.status IN ('done','cancelled') OR EXISTS(SELECT 1 FROM issue_status s WHERE s.workspace_id=i.workspace_id AND s.key=i.status AND s.category IN ('done','closed'))) AS closed
+FROM effective_issue_blocker b JOIN issue i ON i.id=b.issue_id AND i.workspace_id=b.workspace_id
+LEFT JOIN project p ON p.id=i.project_id AND p.workspace_id=i.workspace_id
+WHERE b.workspace_id = $1 AND b.blocker_issue_id = $2
+ORDER BY b.via,i.number
+`
+
+type ListIssueDependentsParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+}
+
+type ListIssueDependentsRow struct {
+	ID        pgtype.UUID `json:"id"`
+	Number    int32       `json:"number"`
+	Title     string      `json:"title"`
+	Status    string      `json:"status"`
+	ProjectID pgtype.UUID `json:"project_id"`
+	Private   bool        `json:"private"`
+	Via       string      `json:"via"`
+	Closed    pgtype.Bool `json:"closed"`
+}
+
+// The reverse of ListIssueBlockers: the issues that wait on one issue.
+func (q *Queries) ListIssueDependents(ctx context.Context, arg ListIssueDependentsParams) ([]ListIssueDependentsRow, error) {
+	rows, err := q.db.Query(ctx, listIssueDependents, arg.WorkspaceID, arg.IssueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIssueDependentsRow{}
+	for rows.Next() {
+		var i ListIssueDependentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Number,
+			&i.Title,
+			&i.Status,
+			&i.ProjectID,
+			&i.Private,
+			&i.Via,
+			&i.Closed,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockIssueBlockerGraph = `-- name: LockIssueBlockerGraph :exec
 SELECT pg_advisory_xact_lock(hashtextextended('issue-blockers:' || $1::uuid::text,0))
 `

@@ -51,7 +51,11 @@ import { InboxContextMenuProvider, useInboxContextMenu } from "../../inbox/compo
 import type { InboxRowActions } from "../../inbox/components/inbox-item-actions";
 import { InboxDeleteDialog } from "../../inbox/components/inbox-delete-dialog";
 import { formatSnoozeTime } from "../../inbox/components/inbox-snooze-time";
-import { useArchivedInboxRows, useSnoozedInboxRows } from "../../inbox/components/use-inbox-tab-rows";
+import {
+  useArchivedInboxRows,
+  useInboxTabPrefetch,
+  useSnoozedInboxRows,
+} from "../../inbox/components/use-inbox-tab-rows";
 import { useTypeLabels } from "../../inbox/components/inbox-detail-label";
 import { InboxActorAvatar, InboxActorLine } from "../../inbox/components/inbox-actor";
 import { InboxFilterMenu } from "../../inbox/components/inbox-filter-menu";
@@ -212,6 +216,7 @@ export function InboxSection({
   const openRowKey = pageTab === "inbox" ? pageKey : null;
   const snoozed = useSnoozedInboxRows(wsId);
   const archived = useArchivedInboxRows(wsId, tab === "archived" && !collapsed);
+  const prefetchTab = useInboxTabPrefetch(wsId, archived);
   const leaveIfOpen = (item: InboxItem, cleared: LastInboxCleared) => {
     const key = inboxRowKey(item);
     if (key === openRowKey) leave(key, nextInboxRow(all, key), cleared);
@@ -415,6 +420,7 @@ export function InboxSection({
         <InboxTabs
           tab={tab}
           onSelect={selectTab}
+          onPrefetch={prefetchTab}
           unread={showCount ? unread : undefined}
           snoozed={snoozed.rows.length}
           expanded={!collapsed}
@@ -1365,10 +1371,12 @@ function SnoozedSectionRow({
   const { t } = useT("inbox");
   const locale = useLocale();
   const p = useWorkspacePaths();
-  const { data: issue } = useQuery(issueDetailOptions(wsId, entry.issue_id));
+  // The list carries the title and status; only an older server's leaves the row to fetch the issue.
+  const { data: issue } = useQuery({ ...issueDetailOptions(wsId, entry.issue_id), enabled: !entry.issue_title });
   const { categoryOf, colorOf, iconOf } = useIssueStatuses(wsId);
   const backAt = formatSnoozeTime(new Date(entry.snoozed_until), new Date(), locale);
-  const title = issue?.title ?? entry.issue_identifier ?? "";
+  const title = issue?.title ?? entry.issue_title ?? entry.issue_identifier ?? "";
+  const status = issue?.status ?? entry.issue_status;
   const unsnoozeLabel = t(($) => $.snooze.unsnooze);
   const isPresent = useIsPresent();
   const reduceMotion = useReducedMotion();
@@ -1389,12 +1397,12 @@ function SnoozedSectionRow({
     >
       <div {...panelRowAnchor(active)} className={cn(PANEL_ROW_CLASS, panelRowStateClass(active), "relative")}>
         <span aria-hidden className="flex size-3.5 shrink-0">
-          {issue && (
+          {status && (
             <StatusIcon
-              status={issue.status}
-              category={categoryOf(issue.status)}
-              color={colorOf(issue.status)}
-              icon={iconOf(issue.status)}
+              status={status}
+              category={categoryOf(status)}
+              color={colorOf(status)}
+              icon={iconOf(status)}
               className="size-3.5"
             />
           )}

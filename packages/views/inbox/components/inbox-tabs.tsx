@@ -33,6 +33,7 @@ const TAB_ICONS: Record<InboxTab, typeof Inbox> = {
 export function InboxTabs({
   tab,
   onSelect,
+  onPrefetch,
   unread,
   snoozed,
   expanded,
@@ -41,6 +42,8 @@ export function InboxTabs({
 }: {
   tab: InboxTab;
   onSelect: (tab: InboxTab) => void;
+  /** Called when a tab is pointed at or focused, so its list can load before the click. */
+  onPrefetch?: (tab: InboxTab) => void;
   /** Left out (or 0) to show no count. */
   unread?: number;
   snoozed?: number;
@@ -104,6 +107,8 @@ export function InboxTabs({
             aria-expanded={active ? expanded : undefined}
             tabIndex={active ? 0 : -1}
             onClick={() => onSelect(id)}
+            onPointerEnter={onPrefetch && !active ? () => onPrefetch(id) : undefined}
+            onFocus={onPrefetch && !active ? () => onPrefetch(id) : undefined}
             className={cn(
               "flex items-center rounded-md outline-none transition-colors focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring",
               section ? "relative h-5 px-1" : "h-7 gap-1 px-2",

@@ -593,14 +593,20 @@
       "wakeups": "Añadir activación",
       "pull_requests": "Añadir pull request",
       "environments": "Añadir entorno",
-      "wakeups_pull_requests": "Añadir activación o pull request",
-      "wakeups_environments": "Añadir activación o entorno",
-      "pull_requests_environments": "Añadir pull request o entorno",
-      "all": "Añadir activación, pull request o entorno",
+      "relations": "Añadir relación",
+      "pair": "Añadir {{first}} o {{second}}",
+      "many": "Añadir...",
+      "noun": {
+        "wakeups": "activación",
+        "pull_requests": "pull request",
+        "environments": "entorno",
+        "relations": "relación"
+      },
       "menu": {
         "wakeups": "Activación",
         "pull_requests": "Pull request",
-        "environments": "Entorno"
+        "environments": "Entorno",
+        "relations": "Relaciones"
       }
     },
     "footer": {
@@ -1041,7 +1047,8 @@
     "remove_parent_issue": "Quitar tarea principal",
     "remove_parent_issue_success": "Tarea principal quitada",
     "add_sub_issue": "Añadir subtarea...",
-    "add_blocker": "Añadir requisito...",
+    "add_blocker": "Esperar a otra tarea...",
+    "add_blocking": "Bloquear otra tarea...",
     "delete_issue": "Eliminar tarea",
     "mark_duplicate": "Marcar como duplicada...",
     "rename_issue": "Renombrar tarea",
@@ -2149,17 +2156,27 @@
     "retry": "Reintentar",
     "dismiss": "Descartar"
   },
+  "relations": {
+    "title": "Relaciones",
+    "add": "Añadir relación",
+    "wait_title": "Esperar a otra tarea",
+    "block_title": "Bloquear otra tarea",
+    "blocked_by": "Bloqueada por",
+    "blocking": "Bloqueando",
+    "stage_tag": "Etapa",
+    "stage_tag_hint": "Lo fijan las etapas de la tarea principal",
+    "add_blocker_hint": "Esta tarea empieza cuando termine",
+    "add_blocking_hint": "Empieza cuando termine esta tarea",
+    "mark_duplicate_hint": "Cancela esta tarea",
+    "blocking_picker_hint": "Selecciona una tarea que no pueda empezar hasta que termine esta."
+  },
   "waiting": {
-    "title": "En espera",
-    "add": "Añadir requisito",
     "remove": "Quitar {{identifier}}",
     "count": "Esperando {{count}} tareas",
     "count_one": "Esperando {{count}} tarea",
     "count_other": "Esperando {{count}} tareas",
-    "stage": "Etapas anteriores · {{finished}}/{{total}} terminadas",
     "hint": "Al terminar estas tareas, el responsable comienza automáticamente o recibe una notificación.",
     "hint_backlog": "Esta tarea está en Backlog, así que no comenzará automáticamente cuando terminen estas tareas. Comenzará cuando salga de Backlog.",
-    "empty": "Sin tareas pendientes",
     "picker_hint": "Selecciona una tarea que deba terminar antes que esta.",
     "restricted": "{{count}} requisitos restringidos",
     "ended": "Las tareas en espera terminaron",

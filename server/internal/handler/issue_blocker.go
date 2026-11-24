@@ -101,7 +101,10 @@ func (h *Handler) newIssueBlockerFiller(ctx context.Context, ws pgtype.UUID, ids
 			if !row.Closed.Bool {
 				cache[key].count++
 			}
-			if row.Private && (accessErr != nil || !hidden.CanSeeProject(row.ProjectID)) {
+			// A guest's hidden set also holds ordinary projects and NoProject,
+			// so visibility is checked for every row, not only private ones.
+			// Without a resolved hidden set nothing is listed; the count stays.
+			if accessErr != nil || !hidden.CanSeeProject(row.ProjectID) {
 				continue
 			}
 			cache[key].refs = append(cache[key].refs, IssueBlockerResponse{private: row.Private, projectID: row.ProjectID, IssueRefResponse: IssueRefResponse{ID: uuidToString(row.ID), Identifier: fmt.Sprintf("%s-%d", prefix, row.Number), Title: row.Title, Status: row.Status}, Via: row.Via, Closed: row.Closed.Bool})
@@ -117,6 +120,23 @@ func (h *Handler) newIssueBlockerFiller(ctx context.Context, ws pgtype.UUID, ids
 		resp.BlockedBy = cache[resp.ID].refs
 		resp.BlockedCount = cache[resp.ID].count
 	}
+}
+
+// issueDependents lists the issues waiting on issue, hiding the ones the
+// reader cannot see the same way the blocked_by projection does.
+func (h *Handler) issueDependents(ctx context.Context, issue db.Issue, prefix string, hidden projectaccess.Hidden) ([]IssueBlockerResponse, error) {
+	rows, err := h.Queries.ListIssueDependents(ctx, db.ListIssueDependentsParams{WorkspaceID: issue.WorkspaceID, IssueID: issue.ID})
+	if err != nil {
+		return nil, err
+	}
+	refs := make([]IssueBlockerResponse, 0, len(rows))
+	for _, row := range rows {
+		if !hidden.CanSeeProject(row.ProjectID) {
+			continue
+		}
+		refs = append(refs, IssueBlockerResponse{private: row.Private, projectID: row.ProjectID, IssueRefResponse: IssueRefResponse{ID: uuidToString(row.ID), Identifier: fmt.Sprintf("%s-%d", prefix, row.Number), Title: row.Title, Status: row.Status}, Via: row.Via, Closed: row.Closed.Bool})
+	}
+	return refs, nil
 }
 
 type blockerViewerKey struct{}

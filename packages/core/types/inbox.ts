@@ -119,6 +119,9 @@ export interface SnoozedInboxIssue {
   issue_id: string;
   /** The issue's identifier (MUL-123) to link to; absent from older servers. */
   issue_identifier?: string | null;
+  /** The issue's title and status; absent from older servers, which leave the row to fetch the issue. */
+  issue_title?: string | null;
+  issue_status?: IssueStatus | null;
   /** The issue's newest notification: the id the snooze endpoints take. */
   item_id: string;
   snoozed_until: string;

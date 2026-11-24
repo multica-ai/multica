@@ -329,7 +329,7 @@ describe("PullRequestList sidebar rows", () => {
     await waitForRender();
     expect(screen.getByText("#42")).toBeInTheDocument();
     expect(screen.getByText("#43")).toBeInTheDocument();
-    expect(screen.queryByText("widget#42")).not.toBeInTheDocument();
+    expect(screen.queryByText("widget")).not.toBeInTheDocument();
   });
 
   it("shows the repo and number without the owner when the PRs span repos", async () => {
@@ -339,23 +339,51 @@ describe("PullRequestList sidebar rows", () => {
     ];
     renderList();
     await waitForRender();
-    expect(screen.getByText("widget#42")).toBeInTheDocument();
-    expect(screen.getByText("gadget#7")).toBeInTheDocument();
+    const [a, b] = screen.getAllByTestId("pull-request-row");
+    expect(a).toHaveTextContent("widget#42");
+    expect(b).toHaveTextContent("gadget#7");
+    expect(screen.queryByText(/acme\//)).not.toBeInTheDocument();
+  });
+
+  it("truncates only the repo name, never the number", async () => {
+    mockPRs = [
+      makePR({ id: "a", number: 42 }),
+      makePR({ id: "b", number: 7, repo_name: "gadget" }),
+    ];
+    renderList();
+    await waitForRender();
+    expect(screen.getByText("widget")).toHaveClass("truncate");
+    expect(screen.getByText("#42")).toHaveClass("shrink-0");
   });
 
   it("hides the diff size when all stats are 0 (legacy backend)", async () => {
     mockPRs = [makePR()];
     renderList();
     await waitForRender();
+    expect(screen.queryByTestId("pull-request-diff")).not.toBeInTheDocument();
     expect(screen.queryByText(/^\+0/)).not.toBeInTheDocument();
   });
 
-  it("leaves the diff size to the tooltip", async () => {
+  it("shows the diff size after the number, compacted and coloured", async () => {
     mockPRs = [makePR({ additions: 6743, deletions: 6, changed_files: 119 })];
     renderList();
     await waitForRender();
-    expect(screen.getByTestId("pull-request-row")).not.toHaveTextContent("+6.7k");
-    expect(screen.queryByText("−6")).not.toBeInTheDocument();
+    const diff = screen.getByTestId("pull-request-diff");
+    expect(diff).toHaveClass("shrink-0");
+    expect(within(diff).getByText("+6.7k")).toHaveClass("text-success");
+    expect(within(diff).getByText("−6")).toHaveClass("text-destructive");
+    expect(screen.getByTestId("pull-request-row")).not.toHaveTextContent("119 files");
+  });
+
+  it.each([
+    ["checks are running", { checks_rollup: "pending" as const, checks_total: 4, checks_running: 2 }],
+    ["the snapshot is stale", { snapshot_stale: true, snapshot_fetched_at: new Date(Date.now() - 3_600_000).toISOString() }],
+    ["the PR is merged", { state: "merged" as const, merged_at: new Date(Date.now() - 3_600_000).toISOString() }],
+  ])("keeps the diff size while %s", async (_, overrides) => {
+    mockPRs = [makePR({ additions: 48, deletions: 12, ...overrides })];
+    renderList();
+    await waitForRender();
+    expect(within(screen.getByTestId("pull-request-diff")).getByText("+48")).toBeInTheDocument();
   });
 
   // --- Collapse behaviour --------------------------------------------------

@@ -599,14 +599,20 @@
       "wakeups": "新增喚醒",
       "pull_requests": "新增 Pull Request",
       "environments": "新增環境",
-      "wakeups_pull_requests": "新增喚醒或 Pull Request",
-      "wakeups_environments": "新增喚醒或環境",
-      "pull_requests_environments": "新增 Pull Request 或環境",
-      "all": "新增喚醒、Pull Request 或環境",
+      "relations": "新增關係",
+      "pair": "新增{{first}}或{{second}}",
+      "many": "新增...",
+      "noun": {
+        "wakeups": "喚醒",
+        "pull_requests": "Pull Request",
+        "environments": "環境",
+        "relations": "關係"
+      },
       "menu": {
         "wakeups": "喚醒",
         "pull_requests": "Pull Request",
-        "environments": "環境"
+        "environments": "環境",
+        "relations": "關係"
       }
     },
     "footer": {
@@ -1076,7 +1082,8 @@
     "remove_parent_issue": "移除父任務",
     "remove_parent_issue_success": "已移除父任務",
     "add_sub_issue": "新增子任務...",
-    "add_blocker": "新增前置任務...",
+    "add_blocker": "等待其他任務...",
+    "add_blocking": "阻塞其他任務...",
     "delete_issue": "刪除任務",
     "mark_duplicate": "標記為重複...",
     "open_in_new_window": "在新視窗中開啟"
@@ -2058,16 +2065,26 @@
     "retry": "重試",
     "dismiss": "忽略"
   },
+  "relations": {
+    "title": "關係",
+    "add": "新增關係",
+    "wait_title": "等待其他任務",
+    "block_title": "阻塞其他任務",
+    "blocked_by": "被阻塞",
+    "blocking": "正在阻塞",
+    "stage_tag": "階段",
+    "stage_tag_hint": "由父任務的階段決定",
+    "add_blocker_hint": "它們結束後，本任務才開工",
+    "add_blocking_hint": "本任務結束後，它們才開工",
+    "mark_duplicate_hint": "本任務會被取消",
+    "blocking_picker_hint": "選擇一個要等本任務結束才能開工的任務。"
+  },
   "waiting": {
-    "title": "等待",
-    "add": "新增前置任務",
     "remove": "移除 {{identifier}}",
     "count": "等待 {{count}} 個任務",
     "count_other": "等待 {{count}} 個任務",
-    "stage": "更早階段 · {{finished}}/{{total}} 已結束",
     "hint": "全部結束後，負責人將自動開始或收到通知。",
     "hint_backlog": "任務在待規劃中，全部結束後不會自動開始，移出待規劃後才會開始。",
-    "empty": "沒有等待的任務",
     "picker_hint": "選擇一個必須先結束的任務。",
     "restricted": "{{count}} 個無權查看的前置任務",
     "ended": "等待的任務已結束",

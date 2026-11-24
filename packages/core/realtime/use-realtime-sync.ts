@@ -1282,7 +1282,7 @@ export function useRealtimeSync(
     const unsubIssueUpdated = ws.on("issue:updated", (p) => {
       const payload = p as IssueUpdatedPayload;
       const { issue } = payload;
-      if (payload.status_changed || payload.parent_changed || payload.stage_changed) {
+      if (payload.status_changed || payload.parent_changed || payload.stage_changed || payload.blockers_changed) {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({queryKey: issueKeys.all(wsId)});
       }
@@ -1329,7 +1329,8 @@ export function useRealtimeSync(
       const wsId = getCurrentWsId();
       if (wsId) {
         onIssueCreated(qc, wsId, issue);
-        if (issue.parent_issue_id && issue.stage != null) qc.invalidateQueries({queryKey:issueKeys.all(wsId)});
+        // A new issue created waiting on others shows up under their `blocking`.
+        if ((issue.parent_issue_id && issue.stage != null) || issue.blocked_by?.some((b) => b.via === "manual")) qc.invalidateQueries({queryKey:issueKeys.all(wsId)});
       }
     });
 
