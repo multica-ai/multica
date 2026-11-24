@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -233,21 +234,45 @@ func TestRateLimitIsolatedByInstallation(t *testing.T) {
 	}
 }
 
-func TestPersistentRateLimitReturnsToTTLSweep(t *testing.T) {
+// TestRateLimitedRefreshRetriesAfterPause covers a PR whose checks finished
+// while GitHub was rate limiting the installation: no later event asks for it
+// again, so the refresh must survive the 403 and run once the pause ends.
+func TestRateLimitedRefreshRetriesAfterPause(t *testing.T) {
 	m := NewManager(enabledClient(t), nil, nil, nil)
+	m.concurrency = 1
+	m.sweepInterval = time.Hour
 	m.jitter = func() time.Duration { return 0 }
-	m.ctx = context.Background()
+
+	const retryAfter = 200 * time.Millisecond
+	fetches := make(chan time.Time, 4)
+	var calls atomic.Int32
 	m.fetch = func(context.Context, *Client, int64, string, string, int32) (*PRSnapshot, error) {
-		return nil, &RateLimitError{RetryAfter: time.Millisecond}
+		fetches <- time.Now()
+		if calls.Add(1) == 1 {
+			return nil, &RateLimitError{RetryAfter: retryAfter}
+		}
+		return nil, errors.New("stop after fetch")
 	}
 
-	m.process(context.Background(), address{InstallationID: 1, Owner: "o", Repo: "r", Number: 1})
-	// The old implementation scheduled an unbounded direct retry here. The
-	// manager now records Retry-After and returns ownership to the bounded
-	// open/draft TTL sweep or a later external event.
-	time.Sleep(10 * time.Millisecond)
-	if len(m.queue) != 0 {
-		t.Fatalf("rate-limited fetch scheduled %d direct retries, want 0", len(m.queue))
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	m.Start(ctx)
+	addr := address{InstallationID: 1, Owner: "o", Repo: "r", Number: 1}
+	m.Enqueue(addr.InstallationID, addr.Owner, addr.Repo, addr.Number)
+
+	limited := <-fetches
+	select {
+	case retried := <-fetches:
+		if wait := retried.Sub(limited); wait < retryAfter-20*time.Millisecond {
+			t.Fatalf("retried after %v, before Retry-After %v", wait, retryAfter)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("rate-limited refresh was dropped instead of retried after the pause")
+	}
+	select {
+	case <-fetches:
+		t.Fatal("a failed retry was retried again")
+	case <-time.After(3 * retryAfter):
 	}
 }
 

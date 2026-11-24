@@ -227,18 +227,24 @@ func (m *Manager) worker(ctx context.Context) {
 			m.mu.Lock()
 			m.inFlight[addr] = true
 			m.mu.Unlock()
-			m.process(ctx, addr)
+			if m.process(ctx, addr) {
+				m.retryAfterPause(ctx, addr)
+				continue
+			}
 			m.finish(addr)
 		}
 	}
 }
 
-func (m *Manager) process(ctx context.Context, addr address) {
+// process fetches and applies one snapshot. It reports whether GitHub rate
+// limited the fetch; the worker then keeps the address for the end of the
+// installation's pause instead of releasing it.
+func (m *Manager) process(ctx context.Context, addr address) (rateLimited bool) {
 	// Per-request jitter smooths bursts. Installation-scoped rate-limit waits
 	// are handled before this point so they never consume a worker slot.
 	if j := m.jitter(); j > 0 {
 		if !sleepCtx(ctx, j) {
-			return
+			return false
 		}
 	}
 
@@ -247,16 +253,14 @@ func (m *Manager) process(ctx context.Context, addr address) {
 		var rl *RateLimitError
 		if asRateLimit(err, &rl) {
 			m.extendRateLimit(addr.InstallationID, rl.RetryAfter)
-			// Do not create an unbounded retry loop for a persistently limited
-			// installation. The bounded TTL sweep (open/draft PRs only) or the
-			// next webhook/view event hands the address back after Retry-After.
-			return
+			slog.Warn("ghsnapshot: rate limited", "installation_id", addr.InstallationID, "owner", addr.Owner, "repo", addr.Repo, "number", addr.Number, "retry_after", rl.RetryAfter.String())
+			return true
 		}
 		// Transient/GitHub failure: keep the last-known snapshot (the row is
 		// untouched, so the card shows stale data, never wrong data). No secret
 		// is ever logged. The next trigger or the TTL sweep retries.
 		slog.Warn("ghsnapshot: fetch failed", "owner", addr.Owner, "repo", addr.Repo, "number", addr.Number, "err", err.Error())
-		return
+		return false
 	}
 
 	rows, err := m.listGitHubPRRowsByAddress(ctx, db.ListGitHubPRRowsByAddressParams{
@@ -267,7 +271,7 @@ func (m *Manager) process(ctx context.Context, addr address) {
 	})
 	if err != nil {
 		slog.Warn("ghsnapshot: list rows failed", "err", err.Error())
-		return
+		return false
 	}
 
 	anyApplied := false
@@ -304,6 +308,7 @@ func (m *Manager) process(ctx context.Context, addr address) {
 		delete(m.attempts, addr)
 		m.mu.Unlock()
 	}
+	return false
 }
 
 // listGitHubPRRowsByAddress is eventual-consistency safe because the returned
@@ -363,6 +368,19 @@ func (m *Manager) deferActive(ctx context.Context, addr address, delay time.Dura
 			slog.Warn("ghsnapshot: refresh queue full, dropping rate-limited enqueue")
 		}
 	})
+}
+
+// retryAfterPause keeps a rate-limited address for the end of its
+// installation's pause. Dropping it would lose a refresh that no later event
+// asks for again, such as the one for a PR whose checks finished while GitHub
+// was limiting us. The retry costs one request per address per pause, and a
+// pending trailing refresh is folded into it.
+func (m *Manager) retryAfterPause(ctx context.Context, addr address) {
+	m.mu.Lock()
+	delete(m.inFlight, addr)
+	delete(m.trailing, addr)
+	m.mu.Unlock()
+	m.deferActive(ctx, addr, m.rateLimitPause(addr.InstallationID))
 }
 
 func (m *Manager) release(addr address) {
