@@ -429,11 +429,8 @@ func (p *Patcher) sweepTypingForTask(ctx context.Context, taskID pgtype.UUID, ta
 	if delivery.ChannelType != channelTypeFeishu || !delivery.ChannelMessageID.Valid || delivery.ChannelMessageID.String == "" {
 		return
 	}
-	if _, ok := docCommentRouteFromConfig(delivery.Config); ok {
-		// Comment triggers never get an IM reaction to clear.
-		return
-	}
-	if covered[uuidString(delivery.InstallationID)+"/"+delivery.ChannelMessageID.String] {
+	route, isDocComment := docCommentRouteFromConfig(delivery.Config)
+	if !isDocComment && covered[uuidString(delivery.InstallationID)+"/"+delivery.ChannelMessageID.String] {
 		return
 	}
 	inst, err := p.queries.GetLarkInstallation(ctx, delivery.InstallationID)
@@ -450,6 +447,10 @@ func (p *Patcher) sweepTypingForTask(ctx context.Context, taskID pgtype.UUID, ta
 			"task_id", uuidString(taskID),
 			"error", err,
 		)
+		return
+	}
+	if isDocComment {
+		p.clearDocCommentReaction(ctx, creds, route, delivery.ChannelMessageID.String)
 		return
 	}
 	p.typingIndicator.SweepMessage(ctx, creds, delivery.ChannelMessageID.String)

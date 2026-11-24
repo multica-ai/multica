@@ -35,6 +35,7 @@ type docCommentFake struct {
 	replies    []docCommentPost
 	comments   []docCommentPost
 	reactions  []string
+	removed    []string
 }
 
 type docCommentPost struct {
@@ -87,6 +88,13 @@ func (f *docCommentFake) AddDocCommentReaction(_ context.Context, _ Installation
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.reactions = append(f.reactions, replyID+":"+reactionType)
+	return nil
+}
+
+func (f *docCommentFake) RemoveDocCommentReaction(_ context.Context, _ InstallationCredentials, _, _, replyID, reactionType string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.removed = append(f.removed, replyID+":"+reactionType)
 	return nil
 }
 
@@ -376,6 +384,32 @@ func TestPatcherDocCommentFailureNotice(t *testing.T) {
 	}
 }
 
+// The working-on-it reaction goes on when the run is scheduled and comes off
+// when the run ends, whether it answered or was cancelled.
+func TestDocCommentReactionLifecycle(t *testing.T) {
+	for _, eventType := range []string{protocol.EventChatDone, protocol.EventTaskCancelled} {
+		t.Run(eventType, func(t *testing.T) {
+			p, q, fake := newDocCommentPatcher(t, docCommentRoute{FileToken: "doxTok", FileType: "docx", CommentID: "c1"})
+			typing := NewTypingIndicatorManager(fake, fakeTypingCreds{secret: "shh"},
+				&fakeTypingQueries{binding: q.binding, installation: q.installation}, newDiscardLogger())
+			p.SetTypingIndicatorManager(typing)
+
+			typing.AckDocComment(context.Background(), q.installation, DocCommentRef{FileToken: "doxTok", FileType: "docx", CommentID: "c1", ReplyID: "r3"})
+			if len(fake.reactions) != 1 || fake.reactions[0] != "r3:Typing" {
+				t.Fatalf("reaction added = %v", fake.reactions)
+			}
+			taskID := "ee333333-ee33-ee33-ee33-eeeeeeeeeeee"
+			p.handleEvent(events.Event{
+				Type: eventType, TaskID: taskID, ChatSessionID: uuidString(q.binding.ChatSessionID),
+				Payload: protocol.ChatDonePayload{TaskID: taskID, ChatSessionID: uuidString(q.binding.ChatSessionID), Content: "done"},
+			})
+			if len(fake.removed) != 1 || fake.removed[0] != "r3:Typing" {
+				t.Fatalf("reaction removed = %v", fake.removed)
+			}
+		})
+	}
+}
+
 func TestDocCommentReplyChunks(t *testing.T) {
 	line := strings.Repeat("a", 99) + "\n"
 	chunks := docCommentReplyChunks("ou_alice", strings.Repeat(line, 100)) // 10,000 runes
@@ -487,6 +521,9 @@ func TestHTTPClientDocCommentRequests(t *testing.T) {
 	if err := c.AddDocCommentReaction(ctx, creds, "doxTok", "docx", "r1", "Typing"); err != nil {
 		t.Fatalf("AddDocCommentReaction: %v", err)
 	}
+	if err := c.RemoveDocCommentReaction(ctx, creds, "doxTok", "docx", "r1", "Typing"); err != nil {
+		t.Fatalf("RemoveDocCommentReaction: %v", err)
+	}
 
 	want := []struct{ method, path, query, body string }{
 		{"POST", "/open-apis/drive/v1/files/doxTok/comments/batch_query", "file_type=docx&user_id_type=open_id", `{"comment_ids":["c1"]}`},
@@ -495,6 +532,7 @@ func TestHTTPClientDocCommentRequests(t *testing.T) {
 		{"POST", "/open-apis/drive/v1/files/doxTok/comments/c1/replies", "file_type=docx&user_id_type=open_id", `{"content":{"elements":[{"text_run":{"text":"ok"},"type":"text_run"}]}}`},
 		{"POST", "/open-apis/drive/v1/files/doxTok/comments", "file_type=docx&user_id_type=open_id", `{"reply_list":{"replies":[{"content":{"elements":[{"text_run":{"text":"ok"},"type":"text_run"}]}}]}}`},
 		{"POST", "/open-apis/drive/v2/files/doxTok/comments/reaction", "file_type=docx", `{"action":"add","reaction_type":"Typing","reply_id":"r1"}`},
+		{"POST", "/open-apis/drive/v2/files/doxTok/comments/reaction", "file_type=docx", `{"action":"delete","reaction_type":"Typing","reply_id":"r1"}`},
 	}
 	if len(calls) != len(want) {
 		t.Fatalf("calls = %+v", calls)

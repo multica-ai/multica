@@ -137,9 +137,18 @@ func (c *httpAPIClient) CreateDocComment(ctx context.Context, creds Installation
 
 // AddDocCommentReaction adds an emoji reaction to a comment reply.
 func (c *httpAPIClient) AddDocCommentReaction(ctx context.Context, creds InstallationCredentials, fileToken, fileType, replyID, reactionType string) error {
+	return c.updateDocCommentReaction(ctx, creds, fileToken, fileType, replyID, reactionType, "add")
+}
+
+// RemoveDocCommentReaction removes the bot's emoji reaction from a reply.
+func (c *httpAPIClient) RemoveDocCommentReaction(ctx context.Context, creds InstallationCredentials, fileToken, fileType, replyID, reactionType string) error {
+	return c.updateDocCommentReaction(ctx, creds, fileToken, fileType, replyID, reactionType, "delete")
+}
+
+func (c *httpAPIClient) updateDocCommentReaction(ctx context.Context, creds InstallationCredentials, fileToken, fileType, replyID, reactionType, action string) error {
 	q := url.Values{}
 	q.Set("file_type", fileType)
 	path := "/open-apis/drive/v2/files/" + url.PathEscape(fileToken) + "/comments/reaction?" + q.Encode()
-	body := map[string]string{"action": "add", "reply_id": replyID, "reaction_type": reactionType}
-	return c.callDocAPI(ctx, creds, "add doc comment reaction", http.MethodPost, path, body, nil)
+	body := map[string]string{"action": action, "reply_id": replyID, "reaction_type": reactionType}
+	return c.callDocAPI(ctx, creds, action+" doc comment reaction", http.MethodPost, path, body, nil)
 }

@@ -247,11 +247,12 @@ type docCommentAPIClient interface {
 	CreateDocCommentReply(ctx context.Context, creds InstallationCredentials, fileToken, fileType, commentID string, elements []DocCommentElement) (string, error)
 	CreateDocComment(ctx context.Context, creds InstallationCredentials, fileToken, fileType string, elements []DocCommentElement) (string, error)
 	AddDocCommentReaction(ctx context.Context, creds InstallationCredentials, fileToken, fileType, replyID, reactionType string) error
+	RemoveDocCommentReaction(ctx context.Context, creds InstallationCredentials, fileToken, fileType, replyID, reactionType string) error
 }
 
-// docCommentReceivedReaction marks a comment the bot has taken on. It stays
-// after the answer: a comment has no transient "processing" state to return
-// to, and the reply itself shows the outcome.
+// docCommentReceivedReaction marks a comment the bot is working on, the
+// comment counterpart of the IM typing indicator. It is removed when the run
+// ends (answered, failed or cancelled).
 const docCommentReceivedReaction = "Typing"
 
 const (
@@ -618,8 +619,9 @@ func supportsWholeDocComment(fileType string) bool {
 	return fileType == "doc" || fileType == "docx"
 }
 
-// AckDocComment marks an ingested comment trigger as taken on. Unlike the IM
-// indicator it is never cleared, so it needs no cleanup anchor. Best-effort.
+// AckDocComment marks an ingested comment trigger as being worked on. The
+// patcher's end-of-task sweep removes it from the task's trigger reply (the
+// delivery row is the anchor, so no IM cleanup registration). Best-effort.
 func (m *TypingIndicatorManager) AckDocComment(ctx context.Context, inst Installation, ref DocCommentRef) {
 	api, ok := m.client.(docCommentAPIClient)
 	if !ok {
@@ -632,5 +634,16 @@ func (m *TypingIndicatorManager) AckDocComment(ctx context.Context, inst Install
 	}
 	if err := api.AddDocCommentReaction(ctx, creds, ref.FileToken, ref.FileType, ref.ReplyID, docCommentReceivedReaction); err != nil {
 		m.log.Info("lark: doc comment reaction failed", "comment_id", ref.CommentID, "err", err)
+	}
+}
+
+// clearDocCommentReaction removes the working-on-it reaction from a comment
+// trigger once its run has ended. Best-effort, like adding it.
+func (p *Patcher) clearDocCommentReaction(ctx context.Context, creds InstallationCredentials, route docCommentRoute, replyID string) {
+	if p.docComments == nil {
+		return
+	}
+	if err := p.docComments.RemoveDocCommentReaction(ctx, creds, route.FileToken, route.FileType, replyID, docCommentReceivedReaction); err != nil {
+		p.cfg.Logger.Info("lark: doc comment reaction removal failed", "reply_id", replyID, "err", err)
 	}
 }
