@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   unstar: vi.fn(),
   open: vi.fn(),
   create: vi.fn(),
+  canManage: vi.fn(() => true),
+  setVisibility: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-query", () => ({
@@ -52,7 +54,8 @@ vi.mock("./use-view-actions", () => ({
       star: mocks.star,
       unstar: mocks.unstar,
     },
-    canManage: () => true,
+    canManage: mocks.canManage,
+    setVisibility: mocks.setVisibility,
     open: mocks.open,
     create: mocks.create,
     duplicate: vi.fn(),
@@ -110,6 +113,8 @@ beforeEach(() => {
   mocks.unstar.mockReset();
   mocks.open.mockReset();
   mocks.create.mockReset();
+  mocks.canManage.mockReturnValue(true);
+  mocks.setVisibility.mockReset();
   useActiveIssueViewStore.setState({ active: {} });
 });
 
@@ -154,6 +159,34 @@ describe("AllViewsPage", () => {
     expect(mocks.create).toHaveBeenCalledWith(
       expect.objectContaining({ scope: { scope_type: "workspace" }, renameIn: "header" }),
     );
+  });
+
+  it("shares a project view from its row menu without opening it", async () => {
+    const projectView = view("project-view", "Project review", {
+      scope_type: "project",
+      scope_id: "project-1",
+    });
+    mocks.views = [projectView];
+    const user = userEvent.setup();
+    const { push } = renderPage();
+
+    await user.click(screen.getByRole("button", { name: "Actions for Project review" }));
+    expect(await screen.findByRole("menuitemradio", { name: "Only me" })).toHaveAttribute("aria-checked", "true");
+    await user.click(screen.getByRole("menuitemradio", { name: "Workspace members" }));
+
+    expect(mocks.setVisibility).toHaveBeenCalledWith(projectView, "workspace");
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it.each(["my", "unmanaged"])("hides sharing for %s views", async (kind) => {
+    mocks.views = [view("v1", "Needs review", { scope_type: kind === "my" ? "my" : "workspace" })];
+    mocks.canManage.mockReturnValue(kind !== "unmanaged");
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "Actions for Needs review" }));
+    expect(await screen.findByRole("menuitem", { name: "Duplicate" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitemradio", { name: "Workspace members" })).not.toBeInTheDocument();
   });
 
   it("stars and unstars without opening the view", async () => {
