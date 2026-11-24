@@ -6,10 +6,10 @@ import { Button } from "@multica/ui/components/ui/button";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueRouteRef, useWorkspacePaths } from "@multica/core/paths";
 import { useUpdateIssueBlockers } from "@multica/core/issues/blockers";
+import { useModalStore } from "@multica/core/modals";
 import type { Issue } from "@multica/core/types";
 import { AppLink } from "../../navigation";
 import { useT } from "../../i18n";
-import { IssuePickerModal } from "../../modals/issue-picker-modal";
 import { IssueSidebarSectionHeader } from "./issue-sidebar-section";
 
 export function IssueBlockedMarker({ issue }: { issue: Issue }) {
@@ -27,7 +27,7 @@ export function IssueBlockersSection({ issue }: { issue: Issue }) {
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
   const [open, setOpen] = useState(true);
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const openModal = useModalStore((s) => s.open);
   const mutation = useUpdateIssueBlockers(wsId, issue.id);
   if (issue.blocked_by === undefined) return null;
   const blockers = issue.blocked_by;
@@ -38,7 +38,7 @@ export function IssueBlockersSection({ issue }: { issue: Issue }) {
   const restrictedCount = Math.max(0, (issue.blocked_count ?? 0) - blockers.filter((b) => !b.closed).length);
   return <div>
     <IssueSidebarSectionHeader title={t(($) => $.waiting.title)} open={open} onOpenChange={setOpen} count={issue.blocked_count}
-      actions={<Button variant="ghost" size="icon-xs" aria-label={t(($) => $.waiting.add)} onClick={() => { mutation.reset(); setPickerOpen(true); }}><Plus /></Button>} />
+      actions={<Button variant="ghost" size="icon-xs" aria-label={t(($) => $.waiting.add)} onClick={() => openModal("issue-add-blocker", { issueId: issue.id })}><Plus /></Button>} />
     {open && <div className="px-4 space-y-2 text-caption">
       {manual.map((blocker) => <div key={blocker.id} className="flex min-w-0 items-center gap-1">
         <Flag className={blocker.closed ? "size-3.5 shrink-0 text-muted-foreground" : "size-3.5 shrink-0 text-destructive"} aria-hidden="true" />
@@ -62,9 +62,5 @@ export function IssueBlockersSection({ issue }: { issue: Issue }) {
       {blockers.length === 0 && !restrictedCount && <p className="text-muted-foreground">{t(($) => $.waiting.empty)}</p>}
       {mutation.isError && <p role="alert" className="text-destructive">{mutation.error.message}</p>}
     </div>}
-    <IssuePickerModal error={mutation.isError ? mutation.error.message : undefined} pending={mutation.isPending} closeOnSelect={false} open={pickerOpen} onOpenChange={setPickerOpen} title={t(($) => $.waiting.add)} description={t(($) => $.waiting.picker_hint)}
-      excludeIds={[issue.id, ...(issue.parent_issue_id ? [issue.parent_issue_id] : []), ...manual.map((b) => b.id)]}
-      isSelectable={(candidate) => candidate.parent_issue_id !== issue.id}
-      onSelect={(candidate) => mutation.mutate({ blocked_by: [candidate.id] }, { onSuccess: () => setPickerOpen(false) })} />
   </div>;
 }

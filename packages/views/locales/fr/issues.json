@@ -1134,6 +1134,7 @@
     "remove_parent_issue": "Retirer la tâche parente",
     "remove_parent_issue_success": "Tâche parente retirée",
     "add_sub_issue": "Ajouter une sous-tâche...",
+    "add_blocker": "Ajouter un prérequis...",
     "delete_issue": "Supprimer la tâche",
     "mark_duplicate": "Marquer comme doublon...",
     "open_in_new_window": "Ouvrir dans une nouvelle fenêtre"

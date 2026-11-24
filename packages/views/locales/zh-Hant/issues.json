@@ -1076,6 +1076,7 @@
     "remove_parent_issue": "移除父任務",
     "remove_parent_issue_success": "已移除父任務",
     "add_sub_issue": "新增子任務...",
+    "add_blocker": "新增前置任務...",
     "delete_issue": "刪除任務",
     "mark_duplicate": "標記為重複...",
     "open_in_new_window": "在新視窗中開啟"

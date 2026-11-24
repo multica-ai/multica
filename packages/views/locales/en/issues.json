@@ -1134,6 +1134,7 @@
     "remove_parent_issue": "Remove parent issue",
     "remove_parent_issue_success": "Removed parent issue",
     "add_sub_issue": "Add sub-issue...",
+    "add_blocker": "Add blocker...",
     "delete_issue": "Delete issue",
     "mark_duplicate": "Mark as duplicate...",
     "open_in_new_window": "Open in new window"
