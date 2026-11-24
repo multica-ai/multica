@@ -10,12 +10,13 @@ import (
 
 // CallQuota meters the calls a workspace sends to Composio each period (the
 // app_tool_calls entitlement gate, MUL-10047). Admit runs right before a call
-// is sent and counts it, so a call that then fails upstream still counts; a
-// non-nil result refuses the call. Every failure to decide admits. Remote MCP
-// apps and meta tools (listing, searching, connection requests) never reach
-// it: they do not run through Composio.
+// is sent and counts it, so a call that then fails upstream still counts. It
+// returns the start of the period the call was counted in (zero when it was
+// not counted) and, when the call must not run, the refusal. Every failure to
+// decide admits. Remote MCP apps and meta tools (listing, searching,
+// connection requests) never reach it: they do not run through Composio.
 type CallQuota interface {
-	Admit(ctx context.Context, workspaceID pgtype.UUID) *CallQuotaExceeded
+	Admit(ctx context.Context, workspaceID pgtype.UUID) (countedIn time.Time, refused *CallQuotaExceeded)
 }
 
 // CallQuotaExceeded is a refusal: the workspace used its allowance.
@@ -38,8 +39,9 @@ func (s *Service) overQuota(ctx context.Context, call *toolCall) *CallQuotaExcee
 	if s.quota == nil {
 		return nil
 	}
-	exceeded := s.quota.Admit(ctx, call.workspaceID)
+	countedIn, exceeded := s.quota.Admit(ctx, call.workspaceID)
 	if exceeded == nil {
+		call.meteredPeriod = countedIn
 		return nil
 	}
 	call.outcome, call.err = "quota_exceeded", ""

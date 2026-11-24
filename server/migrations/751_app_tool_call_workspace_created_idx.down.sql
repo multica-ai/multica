@@ -1,1 +1,0 @@
-DROP INDEX CONCURRENTLY IF EXISTS idx_app_tool_call_workspace_created;

@@ -252,8 +252,9 @@ Team and personal accounts both count toward the workspace that started the
 run. `enforce` refuses past the limit only after re-reading the policy with
 `RefreshGateNow`, so a workspace that upgraded or added seats moments ago is
 admitted. A cached policy whose period has already ended (the first minute of
-a month) is re-read the same way before counting; if Cloud still sends the
-old period, the call is admitted without counting. The agent gets a tool error with the count, the limit and the reset
+a month) is re-read the same way before counting a call or answering Billing;
+if Cloud still sends the old period, the call is admitted without counting and
+Billing shows no limit for that moment. The agent gets a tool error with the count, the limit and the reset
 time; the call is logged in `app_tool_call` as `quota_exceeded`, and a refused
 confirmed call fails its request. Owners and admins get one
 `app_tool_calls_quota_exceeded` Inbox item per limit and period, also when
@@ -268,9 +269,11 @@ which returns `action` and, while a limit applies, `used`, `limit`,
 `period_start` and `reset_at`; `reached` only under `enforce`. Owners and
 admins also get `members`: the period's calls per person who started the run
 or approved the call (`user_id` null for runs no person started), read from
-the `app_tool_call` rows marked `metered` (sent to Composio). An approved call
-that fails its checks before running and Remote MCP calls are logged but not
-metered.
+the `app_tool_call` rows whose `metered_period_start` is the period. The
+quota returns the period it counted a call in and the gateway records it, so
+the breakdown matches the counter even for a call that finishes after the
+month turned. Refused calls, an approved call that fails its checks before
+running, Remote MCP calls and every call while the gate is off have none.
 
 ## Paid features
 

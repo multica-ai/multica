@@ -266,7 +266,7 @@ WHERE workspace_id = $1
 INSERT INTO app_tool_call (
     workspace_id, task_id, agent_id, issue_id, chat_session_id, triggered_by,
     account_scope, account_owner_user_id, toolkit_slug, tool_slug, action_class,
-    outcome, request_id, error, metered
+    outcome, request_id, error, metered_period_start
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
 );

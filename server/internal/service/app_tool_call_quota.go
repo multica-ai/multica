@@ -81,11 +81,21 @@ func (p appToolCallPolicy) sameBudget(other appToolCallPolicy) bool {
 		p.periodStart.Equal(other.periodStart) && p.periodEnd.Equal(other.periodEnd)
 }
 
+// policy is the workspace's current app call policy. One cached before its
+// period ended (the first minute of a month) is re-read, so neither a call
+// nor Billing lands on the month that is over; if Cloud still sends the old
+// period, no limit applies for now.
 func (q AppToolCallQuota) policy(ctx context.Context, workspaceID pgtype.UUID) (appToolCallPolicy, bool) {
 	if q.Entitlements == nil || q.Queries == nil || !workspaceID.Valid {
 		return appToolCallPolicy{}, false
 	}
-	return appToolCallPolicyFrom(q.Entitlements.Gate(ctx, uuid.UUID(workspaceID.Bytes), entitlement.GateAppToolCalls))
+	policy, ok := appToolCallPolicyFrom(q.Entitlements.Gate(ctx, uuid.UUID(workspaceID.Bytes), entitlement.GateAppToolCalls))
+	if ok && !q.clock().Before(policy.periodEnd) {
+		if policy, ok = q.refreshedPolicy(ctx, workspaceID); ok && !q.clock().Before(policy.periodEnd) {
+			return appToolCallPolicy{}, false
+		}
+	}
+	return policy, ok
 }
 
 // refreshedPolicy reads Cloud's current policy, skipping the reuse window
@@ -113,37 +123,30 @@ func (q AppToolCallQuota) clock() time.Time {
 	return time.Now()
 }
 
-// Admit counts one call that is about to be sent to the provider. Under
-// enforce it refuses a call past the limit, after re-reading Cloud's policy so
-// a workspace that has just upgraded or added seats is not refused on a
-// cached one. Under observe it admits and records the overage. Every failure
-// to decide admits.
-func (q AppToolCallQuota) Admit(ctx context.Context, workspaceID pgtype.UUID) *connectedapps.CallQuotaExceeded {
+// Admit counts one call that is about to be sent to the provider and returns
+// the start of the period it was counted in; zero when it was not counted.
+// Under enforce it refuses a call past the limit, after re-reading Cloud's
+// policy so a workspace that has just upgraded or added seats is not refused
+// on a cached one. Under observe it admits and records the overage. Every
+// failure to decide admits without counting.
+func (q AppToolCallQuota) Admit(ctx context.Context, workspaceID pgtype.UUID) (time.Time, *connectedapps.CallQuotaExceeded) {
 	policy, ok := q.policy(ctx, workspaceID)
 	if !ok {
-		return nil
-	}
-	// A policy cached before its period ended would count this call in the
-	// month that is over. Read the current one; if Cloud still sends the old
-	// period, admit without counting.
-	if !q.clock().Before(policy.periodEnd) {
-		if policy, ok = q.refreshedPolicy(ctx, workspaceID); !ok || !q.clock().Before(policy.periodEnd) {
-			return nil
-		}
+		return time.Time{}, nil
 	}
 	used, admitted, err := q.increment(ctx, workspaceID, policy)
 	if err != nil {
-		return nil
+		return time.Time{}, nil
 	}
 	if !admitted {
 		fresh, active := q.refreshedPolicy(ctx, workspaceID)
 		if !active {
-			return nil
+			return time.Time{}, nil
 		}
 		if !fresh.sameBudget(policy) {
 			policy = fresh
 			if used, admitted, err = q.increment(ctx, workspaceID, policy); err != nil {
-				return nil
+				return time.Time{}, nil
 			}
 		}
 	}
@@ -155,12 +158,12 @@ func (q AppToolCallQuota) Admit(ctx context.Context, workspaceID pgtype.UUID) *c
 				ctx, workspaceID, entitlement.GateAppToolCalls, policy.periodStart, policy.periodEnd, policy.limit,
 			)
 		}
-		return nil
+		return policy.periodStart, nil
 	}
 	used = q.used(ctx, workspaceID, policy)
 	q.recordOverage(ctx, workspaceID, policy, used+1)
 	q.deliverRejectionNotice(ctx, workspaceID, policy, used)
-	return &connectedapps.CallQuotaExceeded{Used: used, Limit: policy.limit, ResetAt: policy.resetAt}
+	return time.Time{}, &connectedapps.CallQuotaExceeded{Used: used, Limit: policy.limit, ResetAt: policy.resetAt}
 }
 
 // increment counts the call. admitted=false is a refusal under enforce; an
@@ -340,13 +343,12 @@ type AppToolCallMemberUsage struct {
 	Calls  int64
 }
 
-// MemberUsage breaks the period's calls down by person, from the call log.
-// It reads app_tool_call rather than the counter, so it is only for display.
-func (q AppToolCallQuota) MemberUsage(ctx context.Context, workspaceID pgtype.UUID, periodStart, periodEnd time.Time) ([]AppToolCallMemberUsage, error) {
+// MemberUsage breaks the period's counted calls down by person, from the
+// call log rows Admit counted in the period.
+func (q AppToolCallQuota) MemberUsage(ctx context.Context, workspaceID pgtype.UUID, periodStart time.Time) ([]AppToolCallMemberUsage, error) {
 	rows, err := q.Queries.ListAppToolCallUsageByMember(ctx, db.ListAppToolCallUsageByMemberParams{
-		WorkspaceID: workspaceID,
-		PeriodStart: pgtype.Timestamptz{Time: periodStart.UTC(), Valid: true},
-		PeriodEnd:   pgtype.Timestamptz{Time: periodEnd.UTC(), Valid: true},
+		WorkspaceID:        workspaceID,
+		MeteredPeriodStart: pgtype.Timestamptz{Time: periodStart.UTC(), Valid: true},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list app tool call usage by member: %w", err)

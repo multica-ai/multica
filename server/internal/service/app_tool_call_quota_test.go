@@ -71,6 +71,13 @@ func (f *appToolCallQuotaFixture) setPolicy(action entitlement.Action, limit int
 	f.stub.Set(f.workspace, entitlement.GateAppToolCalls, f.decision(action, limit, f.periodStart))
 }
 
+// admit is Admit's refusal; the period a call was counted in is checked where
+// it matters.
+func (f *appToolCallQuotaFixture) admit(ctx context.Context) *connectedapps.CallQuotaExceeded {
+	_, refused := f.quota.Admit(ctx, f.workspaceID)
+	return refused
+}
+
 func (f *appToolCallQuotaFixture) used(t *testing.T) int64 {
 	t.Helper()
 	return f.usedIn(t, f.periodStart)
@@ -116,12 +123,12 @@ func (f *appToolCallQuotaFixture) notices(t *testing.T, recipient pgtype.UUID) i
 func TestAppToolCallQuotaOffTouchesNothing(t *testing.T) {
 	f := newAppToolCallQuotaFixture(t)
 	ctx := context.Background()
-	if got := (AppToolCallQuota{Queries: f.quota.Queries}).Admit(ctx, f.workspaceID); got != nil {
-		t.Fatalf("no entitlements: admit = %+v", got)
+	if countedIn, got := (AppToolCallQuota{Queries: f.quota.Queries}).Admit(ctx, f.workspaceID); got != nil || !countedIn.IsZero() {
+		t.Fatalf("no entitlements: admit = %v, %+v", countedIn, got)
 	}
 	f.setPolicy(entitlement.ActionOff, 0)
 	for range 3 {
-		if got := f.quota.Admit(ctx, f.workspaceID); got != nil {
+		if got := f.admit(ctx); got != nil {
 			t.Fatalf("off: admit = %+v", got)
 		}
 	}
@@ -152,7 +159,7 @@ func TestAppToolCallQuotaEnforceNeverExceedsLimit(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if got := f.quota.Admit(ctx, f.workspaceID); got != nil {
+			if got := f.admit(ctx); got != nil {
 				mu.Lock()
 				refused = append(refused, got)
 				mu.Unlock()
@@ -186,8 +193,9 @@ func TestAppToolCallQuotaObserveCountsPastLimit(t *testing.T) {
 	f.setPolicy(entitlement.ActionObserve, 2)
 	ctx := context.Background()
 	for i := range 4 {
-		if got := f.quota.Admit(ctx, f.workspaceID); got != nil {
-			t.Fatalf("observe call %d refused: %+v", i, got)
+		countedIn, got := f.quota.Admit(ctx, f.workspaceID)
+		if got != nil || !countedIn.Equal(f.periodStart) {
+			t.Fatalf("observe call %d = counted in %v, refused %+v; want counted in %v", i, countedIn, got, f.periodStart)
 		}
 	}
 	if f.used(t) != 4 {
@@ -211,19 +219,19 @@ func TestAppToolCallQuotaRefreshesBeforeRefusing(t *testing.T) {
 	f := newAppToolCallQuotaFixture(t)
 	f.setPolicy(entitlement.ActionEnforce, 1)
 	ctx := context.Background()
-	if got := f.quota.Admit(ctx, f.workspaceID); got != nil {
+	if got := f.admit(ctx); got != nil {
 		t.Fatalf("first call refused: %+v", got)
 	}
-	if got := f.quota.Admit(ctx, f.workspaceID); got == nil {
+	if got := f.admit(ctx); got == nil {
 		t.Fatal("second call admitted past limit 1")
 	}
 	f.stub.SetRefreshed(f.workspace, entitlement.GateAppToolCalls, f.decision(entitlement.ActionEnforce, 3, f.periodStart))
 	for i := range 2 {
-		if got := f.quota.Admit(ctx, f.workspaceID); got != nil {
+		if got := f.admit(ctx); got != nil {
 			t.Fatalf("call %d after upgrade refused: %+v", i, got)
 		}
 	}
-	if got := f.quota.Admit(ctx, f.workspaceID); got == nil || got.Limit != 3 {
+	if got := f.admit(ctx); got == nil || got.Limit != 3 {
 		t.Fatalf("call past the new limit = %+v, want refused at 3", got)
 	}
 	if f.used(t) != 3 || f.notices(t, f.ownerID) != 2 {
@@ -236,12 +244,12 @@ func TestAppToolCallQuotaResetsWithThePeriod(t *testing.T) {
 	f := newAppToolCallQuotaFixture(t)
 	f.setPolicy(entitlement.ActionEnforce, 1)
 	ctx := context.Background()
-	f.quota.Admit(ctx, f.workspaceID)
-	if got := f.quota.Admit(ctx, f.workspaceID); got == nil {
+	f.admit(ctx)
+	if got := f.admit(ctx); got == nil {
 		t.Fatal("call past limit admitted")
 	}
 	f.stub.Set(f.workspace, entitlement.GateAppToolCalls, f.decision(entitlement.ActionEnforce, 1, f.periodEnd))
-	if got := f.quota.Admit(ctx, f.workspaceID); got != nil {
+	if got := f.admit(ctx); got != nil {
 		t.Fatalf("first call of the next period refused: %+v", got)
 	}
 }
@@ -256,19 +264,38 @@ func TestAppToolCallQuotaRereadsAPolicyWhosePeriodEnded(t *testing.T) {
 	f.stub.Set(f.workspace, entitlement.GateAppToolCalls, f.decision(entitlement.ActionEnforce, 1, previous))
 	f.quota.now = func() time.Time { return f.periodStart.Add(30 * time.Second) }
 
-	if got := f.quota.Admit(ctx, f.workspaceID); got != nil {
-		t.Fatalf("stale policy, nothing newer: admit = %+v", got)
+	if countedIn, got := f.quota.Admit(ctx, f.workspaceID); got != nil || !countedIn.IsZero() {
+		t.Fatalf("stale policy, nothing newer: admit = %v, %+v; want uncounted", countedIn, got)
 	}
 	if f.usedIn(t, previous) != 0 || f.used(t) != 0 {
 		t.Fatalf("stale policy counted: previous %d, current %d; want none", f.usedIn(t, previous), f.used(t))
 	}
 
 	f.stub.SetRefreshed(f.workspace, entitlement.GateAppToolCalls, f.decision(entitlement.ActionEnforce, 1, f.periodStart))
-	if got := f.quota.Admit(ctx, f.workspaceID); got != nil {
-		t.Fatalf("first call of the month refused: %+v", got)
+	if countedIn, got := f.quota.Admit(ctx, f.workspaceID); got != nil || !countedIn.Equal(f.periodStart) {
+		t.Fatalf("first call of the month = counted in %v, refused %+v", countedIn, got)
 	}
 	if f.usedIn(t, previous) != 0 || f.used(t) != 1 {
 		t.Fatalf("used previous %d, current %d; want 0 and 1", f.usedIn(t, previous), f.used(t))
+	}
+}
+
+// Billing opened in the first minute of a month, before any call refreshed the
+// cached policy, shows the new month, not the one that is over.
+func TestAppToolCallQuotaUsageRereadsAPolicyWhosePeriodEnded(t *testing.T) {
+	f := newAppToolCallQuotaFixture(t)
+	ctx := context.Background()
+	previous := f.periodStart.AddDate(0, -1, 0)
+	f.stub.Set(f.workspace, entitlement.GateAppToolCalls, f.decision(entitlement.ActionEnforce, 5, previous))
+	f.quota.now = func() time.Time { return previous.Add(time.Hour) }
+	f.admit(ctx)
+	f.admit(ctx)
+
+	f.quota.now = func() time.Time { return f.periodStart.Add(30 * time.Second) }
+	f.stub.SetRefreshed(f.workspace, entitlement.GateAppToolCalls, f.decision(entitlement.ActionEnforce, 5, f.periodStart))
+	usage, err := f.quota.Usage(ctx, f.workspaceID)
+	if err != nil || usage.Used == nil || *usage.Used != 0 || usage.ResetAt == nil || !usage.ResetAt.Equal(f.periodEnd) {
+		t.Fatalf("usage at the start of the month = %+v, err = %v; want 0 used, resetting %v", usage, err, f.periodEnd)
 	}
 }
 
@@ -301,7 +328,7 @@ func TestAppToolCallQuotaRefreshSkipsTheReuseWindow(t *testing.T) {
 		current: f.decision(entitlement.ActionEnforce, 2, f.periodStart),
 	}
 	for i := range 2 {
-		if got := f.quota.Admit(ctx, f.workspaceID); got != nil {
+		if got := f.admit(ctx); got != nil {
 			t.Fatalf("call %d after the seat purchase refused: %+v", i, got)
 		}
 	}
@@ -316,17 +343,17 @@ func TestAppToolCallQuotaNotifiesEachLimitOncePerPeriod(t *testing.T) {
 	f := newAppToolCallQuotaFixture(t)
 	ctx := context.Background()
 	f.setPolicy(entitlement.ActionEnforce, 1)
-	f.quota.Admit(ctx, f.workspaceID)
-	if got := f.quota.Admit(ctx, f.workspaceID); got == nil {
+	f.admit(ctx)
+	if got := f.admit(ctx); got == nil {
 		t.Fatal("call past limit 1 admitted")
 	}
 	f.stub.SetRefreshed(f.workspace, entitlement.GateAppToolCalls, f.decision(entitlement.ActionEnforce, 2, f.periodStart))
-	f.quota.Admit(ctx, f.workspaceID)
-	if got := f.quota.Admit(ctx, f.workspaceID); got == nil || got.Limit != 2 {
+	f.admit(ctx)
+	if got := f.admit(ctx); got == nil || got.Limit != 2 {
 		t.Fatalf("call past limit 2 = %+v, want refused", got)
 	}
 	f.setPolicy(entitlement.ActionEnforce, 1)
-	if got := f.quota.Admit(ctx, f.workspaceID); got == nil || got.Limit != 1 {
+	if got := f.admit(ctx); got == nil || got.Limit != 1 {
 		t.Fatalf("call back at limit 1 = %+v, want refused", got)
 	}
 	if n := f.notices(t, f.ownerID); n != 2 {
@@ -345,30 +372,32 @@ func TestAppToolCallQuotaMemberUsage(t *testing.T) {
 		f.pool.Exec(context.Background(), `DELETE FROM app_tool_call WHERE workspace_id = $1`, f.workspaceID)
 	})
 	inPeriod := f.periodStart.Add(time.Hour)
+	next := f.periodEnd
 	for _, c := range []struct {
-		by      pgtype.UUID
-		outcome string
-		metered bool
-		at      time.Time
+		by        pgtype.UUID
+		outcome   string
+		countedIn *time.Time
+		at        time.Time
 	}{
-		{f.ownerID, "ok", true, inPeriod},
-		{f.ownerID, "error", true, inPeriod},
-		{f.ownerID, "approved", true, inPeriod},
-		{f.ownerID, "error", false, inPeriod}, // an approved call that failed its checks before running
-		{f.ownerID, "ok", false, inPeriod},    // a Remote MCP call
-		{f.ownerID, "blocked", false, inPeriod},
-		{f.ownerID, "quota_exceeded", false, inPeriod},
-		{pgtype.UUID{}, "ok", true, inPeriod},
-		{f.ownerID, "ok", true, f.periodEnd.Add(time.Hour)},
+		{f.ownerID, "ok", &f.periodStart, inPeriod},
+		{f.ownerID, "error", &f.periodStart, inPeriod},
+		{f.ownerID, "approved", &f.periodStart, inPeriod},
+		{f.ownerID, "ok", &f.periodStart, f.periodEnd.Add(time.Second)}, // counted at the end of the month, finished after it
+		{f.ownerID, "error", nil, inPeriod},                             // an approved call that failed its checks before running
+		{f.ownerID, "ok", nil, inPeriod},                                // a Remote MCP call
+		{f.ownerID, "blocked", nil, inPeriod},
+		{f.ownerID, "quota_exceeded", nil, inPeriod},
+		{pgtype.UUID{}, "ok", &f.periodStart, inPeriod},
+		{f.ownerID, "ok", &next, f.periodEnd.Add(time.Hour)},
 	} {
 		if _, err := f.pool.Exec(ctx, `
-			INSERT INTO app_tool_call (workspace_id, agent_id, triggered_by, account_scope, toolkit_slug, tool_slug, action_class, outcome, metered, created_at)
+			INSERT INTO app_tool_call (workspace_id, agent_id, triggered_by, account_scope, toolkit_slug, tool_slug, action_class, outcome, metered_period_start, created_at)
 			VALUES ($1, $2, $3, 'personal', 'gmail', 'GMAIL_SEND_EMAIL', 'send', $4, $5, $6)`,
-			f.workspaceID, agentID, c.by, c.outcome, c.metered, c.at); err != nil {
+			f.workspaceID, agentID, c.by, c.outcome, c.countedIn, c.at); err != nil {
 			t.Fatalf("insert call: %v", err)
 		}
 	}
-	got, err := f.quota.MemberUsage(ctx, f.workspaceID, f.periodStart, f.periodEnd)
+	got, err := f.quota.MemberUsage(ctx, f.workspaceID, f.periodStart)
 	if err != nil {
 		t.Fatalf("member usage: %v", err)
 	}
@@ -376,8 +405,8 @@ func TestAppToolCallQuotaMemberUsage(t *testing.T) {
 	for _, m := range got {
 		byUser[util.UUIDToString(m.UserID)] = m.Calls
 	}
-	if len(got) != 2 || byUser[util.UUIDToString(f.ownerID)] != 3 || byUser[""] != 1 {
-		t.Fatalf("member usage = %+v, want owner 3 and no-person 1", got)
+	if len(got) != 2 || byUser[util.UUIDToString(f.ownerID)] != 4 || byUser[""] != 1 {
+		t.Fatalf("member usage = %+v, want owner 4 and no-person 1", got)
 	}
 }
 

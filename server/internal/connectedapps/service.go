@@ -472,9 +472,9 @@ type toolCall struct {
 	toolkit, tool, class, outcome                                     string
 	requestID                                                         pgtype.UUID
 	err                                                               string
-	// metered is set once the call was sent to Composio: the calls the
-	// monthly app call allowance counts, whatever happened upstream.
-	metered bool
+	// meteredPeriod is the start of the period the monthly app call allowance
+	// counted the call in; zero when it was not counted.
+	meteredPeriod time.Time
 }
 
 // Upstream errors can contain tool arguments or private app data. Log only
@@ -508,7 +508,7 @@ func (s *Service) recordCall(ctx context.Context, c toolCall) {
 		Outcome:            c.outcome,
 		RequestID:          c.requestID,
 		Error:              pgtype.Text{String: c.err, Valid: c.err != ""},
-		Metered:            c.metered,
+		MeteredPeriodStart: pgtype.Timestamptz{Time: c.meteredPeriod, Valid: !c.meteredPeriod.IsZero()},
 	})
 	if s.bus != nil && c.issueID.Valid {
 		s.bus.Publish(events.Event{

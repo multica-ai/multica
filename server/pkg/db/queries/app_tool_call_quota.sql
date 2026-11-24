@@ -35,13 +35,11 @@ WHERE app_tool_call_quota_period.rejection_notified_at IS NULL
 RETURNING used_count;
 
 -- name: ListAppToolCallUsageByMember :many
--- Metered calls in a period, per person who started the run or approved the
+-- Calls counted in a period, per person who started the run or approved the
 -- call. A NULL triggered_by is a run no person started.
 SELECT triggered_by, count(*)::bigint AS calls
 FROM app_tool_call
 WHERE workspace_id = $1
-  AND metered
-  AND created_at >= sqlc.arg('period_start')::timestamptz
-  AND created_at < sqlc.arg('period_end')::timestamptz
+  AND metered_period_start = sqlc.arg('metered_period_start')::timestamptz
 GROUP BY triggered_by
 ORDER BY calls DESC;

@@ -259,7 +259,7 @@ type AppToolCall struct {
 	RequestID          pgtype.UUID        `json:"request_id"`
 	Error              pgtype.Text        `json:"error"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	Metered            bool               `json:"metered"`
+	MeteredPeriodStart pgtype.Timestamptz `json:"metered_period_start"`
 }
 
 type AppToolCallQuotaPeriod struct {

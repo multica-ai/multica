@@ -109,17 +109,14 @@ const listAppToolCallUsageByMember = `-- name: ListAppToolCallUsageByMember :man
 SELECT triggered_by, count(*)::bigint AS calls
 FROM app_tool_call
 WHERE workspace_id = $1
-  AND metered
-  AND created_at >= $2::timestamptz
-  AND created_at < $3::timestamptz
+  AND metered_period_start = $2::timestamptz
 GROUP BY triggered_by
 ORDER BY calls DESC
 `
 
 type ListAppToolCallUsageByMemberParams struct {
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	PeriodStart pgtype.Timestamptz `json:"period_start"`
-	PeriodEnd   pgtype.Timestamptz `json:"period_end"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	MeteredPeriodStart pgtype.Timestamptz `json:"metered_period_start"`
 }
 
 type ListAppToolCallUsageByMemberRow struct {
@@ -127,10 +124,10 @@ type ListAppToolCallUsageByMemberRow struct {
 	Calls       int64       `json:"calls"`
 }
 
-// Metered calls in a period, per person who started the run or approved the
+// Calls counted in a period, per person who started the run or approved the
 // call. A NULL triggered_by is a run no person started.
 func (q *Queries) ListAppToolCallUsageByMember(ctx context.Context, arg ListAppToolCallUsageByMemberParams) ([]ListAppToolCallUsageByMemberRow, error) {
-	rows, err := q.db.Query(ctx, listAppToolCallUsageByMember, arg.WorkspaceID, arg.PeriodStart, arg.PeriodEnd)
+	rows, err := q.db.Query(ctx, listAppToolCallUsageByMember, arg.WorkspaceID, arg.MeteredPeriodStart)
 	if err != nil {
 		return nil, err
 	}

@@ -82,6 +82,16 @@ func TestConnectedApps_MonthlyQuotaRefusesGatewayCalls(t *testing.T) {
 	if got := f.callOutcomes(t); len(got) != 2 || got[0] != "ok" || got[1] != "quota_exceeded" {
 		t.Fatalf("call log = %v, want [ok quota_exceeded]", got)
 	}
+	// The executed call carries the period the counter charged; the refused
+	// one none.
+	var counted, uncounted int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*) FILTER (WHERE p.period_start IS NOT NULL), count(*) FILTER (WHERE c.metered_period_start IS NULL)
+		FROM app_tool_call c
+		LEFT JOIN app_tool_call_quota_period p ON p.workspace_id = c.workspace_id AND p.period_start = c.metered_period_start
+		WHERE c.task_id = $1`, f.taskID).Scan(&counted, &uncounted); err != nil || counted != 1 || uncounted != 1 {
+		t.Fatalf("metered periods: %d counted, %d uncounted (err %v); want 1 and 1", counted, uncounted, err)
+	}
 	if n := f.inboxCount(t, testUserID, service.AppToolCallQuotaNoticeType); n != 1 {
 		t.Fatalf("owner notices = %d, want 1", n)
 	}

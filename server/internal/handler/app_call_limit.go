@@ -66,8 +66,8 @@ func (h *Handler) GetAppCallUsage(w http.ResponseWriter, r *http.Request) {
 		v := usage.ResetAt.UTC().Format(time.RFC3339)
 		resp.ResetAt = &v
 	}
-	if usage.PeriodStart != nil && usage.PeriodEnd != nil && (member.Role == "owner" || member.Role == "admin") {
-		members, err := quota.MemberUsage(r.Context(), workspaceID, *usage.PeriodStart, *usage.PeriodEnd)
+	if usage.PeriodStart != nil && (member.Role == "owner" || member.Role == "admin") {
+		members, err := quota.MemberUsage(r.Context(), workspaceID, *usage.PeriodStart)
 		if err != nil {
 			// The breakdown is secondary; the total still renders.
 			slog.WarnContext(r.Context(), "app call usage by member failed", "workspace_id", wsID, "error", err)

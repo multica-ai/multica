@@ -445,12 +445,13 @@ func (s *Service) executeApproved(ctx context.Context, req db.AppActionRequest) 
 	}
 	// Last: it counts the call, which runs right after.
 	if s.quota != nil {
-		if exceeded := s.quota.Admit(ctx, req.WorkspaceID); exceeded != nil {
+		countedIn, exceeded := s.quota.Admit(ctx, req.WorkspaceID)
+		if exceeded != nil {
 			return failAs("quota_exceeded", exceeded.Message())
 		}
+		call.meteredPeriod = countedIn
 	}
 	resp, err := s.composio.ExecuteTool(ctx, acct.connectedAccountID, acct.composioUserID, *tool, args)
-	call.metered = true
 	s.touch(ctx, req.WorkspaceID, acct)
 	if err != nil {
 		logExecutionFailure(ctx, call, "request_failed")

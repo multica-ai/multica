@@ -510,7 +510,6 @@ func (s *Service) toolRun(ctx context.Context, rn *run, toolSlug string, args ma
 		return refusal
 	}
 	resp, err := s.composio.ExecuteTool(ctx, acct.connectedAccountID, acct.composioUserID, *tool, args)
-	call.metered = true
 	s.touch(ctx, rn.workspaceID, acct)
 	if err != nil {
 		call.outcome, call.err = "error", truncate(err.Error(), 500)
