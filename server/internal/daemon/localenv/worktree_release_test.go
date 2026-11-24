@@ -144,6 +144,7 @@ func TestEnvironmentClockTTLPreservesPostDeliveryEdits(t *testing.T) {
 				t.Fatalf("TTL detail=%q", list[0].Detail)
 			}
 			f.m.Tick()
+			f.collectWorktreeReleases()
 			if snapshot := f.m.Snapshot(); len(snapshot) != 1 || snapshot[0].RetainedWorktree != f.wt.Path {
 				t.Fatalf("TTL lost local GC protection: %+v", snapshot)
 			}

@@ -86,6 +86,9 @@ func newWorktreeFixture(t *testing.T, ttl string) *worktreeFixture {
 	f := &worktreeFixture{t: t, repo: repo, root: root, wt: wt, m: NewManager(t.TempDir(), logger), task: Task{TaskID: params.TaskID, IssueID: params.ConversationID, WorkspaceID: params.WorkspaceID, RootDir: root}, params: params}
 	// Stand in for dependencies installed inside the actual checkout.
 	fixtureWrite(t, filepath.Join(wt.Path, ".dependencies/package/file"), "installed dependency\n")
+	// Cleanup runs in reverse registration order: stop live environments first,
+	// then collect releases even for already-stopped records before TempDir removal.
+	t.Cleanup(f.collectWorktreeReleases)
 	t.Cleanup(func() {
 		for _, e := range f.m.List(f.task) {
 			if e.State == StateRunning || e.State == StateStarting {
@@ -94,6 +97,17 @@ func newWorktreeFixture(t *testing.T, ttl string) *worktreeFixture {
 		}
 	})
 	return f
+}
+
+// Collect only release attempts already reserved for this checkout. A stopped
+// environment can still be writing Git objects, and retention also covers those
+// in-flight operations; neither state is a completion notification.
+func (f *worktreeFixture) collectWorktreeReleases() {
+	f.t.Helper()
+	f.m.mu.Lock()
+	pending := f.m.cleanupDoneLocked(checkoutPath(f.wt.Path))
+	f.m.mu.Unlock()
+	waitWorktrees(pending)
 }
 
 func (f *worktreeFixture) start(name string) Environment {
