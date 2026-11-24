@@ -4,40 +4,50 @@ description: Hubungkan sebuah komputer, buat Agent pertama Anda, dan biarkan Age
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 
 <Callout type="info">
 Sebelum Agent dapat mengeksekusi, komputer yang menjalankannya memerlukan setidaknya satu [alat coding AI yang didukung](/providers) yang sudah terinstal dan masuk (sign in) — misalnya Claude Code, Codex, atau Cursor. Multica tidak menyediakan alat-alat ini.
 </Callout>
 
-## 1. Masuk dan buka Ruang Kerja Anda
+<Steps>
+<Step>
 
-Masuk melalui web ([multica.ai](https://multica.ai)) atau dengan [Multica Desktop](https://multica.ai/download). Kode verifikasi email dan Google keduanya didukung.
+## Masuk dan buka Ruang Kerja Anda [#1-sign-in-and-open-your-workspace]
 
-- **Desktop**: dapat menghubungkan komputer ini secara otomatis.
-- **Web**: hubungkan dari command line pada langkah berikutnya.
+Masuk melalui web ([multica.ai](https://multica.ai)) atau dengan [Multica Desktop](https://multica.ai/download). Kode verifikasi email dan Google keduanya didukung. Jika Anda masuk dengan Desktop, langkah berikutnya dapat menghubungkan komputer ini secara otomatis; di web, Anda menghubungkannya dari command line.
 
-## 2. Hubungkan sebuah komputer
+</Step>
+<Step>
 
-Agent mengeksekusi pekerjaan di komputer yang Anda hubungkan. Buka **Configure → Runtimes** di bagian bawah sidebar:
+## Hubungkan sebuah komputer [#2-connect-a-computer]
+
+Agent mengeksekusi pekerjaan di komputer yang Anda hubungkan. Buka **Runtimes** di bawah **AI Team** pada sidebar:
 
 - **Dengan Desktop**: Desktop secara otomatis mendaftarkan komputer ini sebagai runtime dan mendeteksi alat coding AI yang terinstal. Untuk alat yang baru saja Anda instal, klik **Refresh** untuk mendeteksinya lagi.
-- **Dengan Web, atau untuk menambahkan komputer lain**: klik **Add a computer** di kanan atas, lalu jalankan dua perintah dari dialog tersebut di terminal pada komputer target:
+- **Dengan Web, atau untuk menambahkan komputer lain**: klik **Add** di kanan atas, pilih **Other machine or server**, lalu jalankan dua perintah dari dialog tersebut di terminal pada komputer target:
 
-  **macOS / Linux**
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
 
-  ```bash
-  curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
-  multica setup
-  ```
+```bash
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+multica setup
+```
 
-  **Windows PowerShell**
+</Tab>
+<Tab value="Windows">
 
-  ```powershell
-  irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
-  multica setup
-  ```
+```powershell
+irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+multica setup
+```
 
-  `multica setup` membuka browser untuk menyelesaikan proses masuk, lalu membiarkan daemon berjalan di latar belakang. Setelah daemon online, dialog biasanya mendeteksi komputer tersebut dalam waktu satu menit.
+</Tab>
+</Tabs>
+
+`multica setup` membuka browser untuk menyelesaikan proses masuk, lalu membiarkan daemon berjalan di latar belakang. Setelah daemon online, dialog biasanya mendeteksi komputer tersebut dalam waktu satu menit.
 
 **Pemeriksaan keberhasilan**: sebuah komputer online muncul di daftar runtime.
 
@@ -47,20 +57,21 @@ Agent mengeksekusi pekerjaan di komputer yang Anda hubungkan. Buka **Configure �
 Perintah koneksi sedikit berbeda pada instance self-hosted — lihat [Mulai cepat self-host](/self-host-quickstart).
 </Callout>
 
-## 3. Buat sebuah Agent
+</Step>
+<Step>
 
-Buka **Workspace → Agents** di sidebar, klik **New agent**, dan pilih salah satu jalur:
+## Buat sebuah Agent [#3-create-an-agent]
 
-- **Start blank**: isi sendiri semua field. Hanya nama yang benar-benar wajib diisi — konfirmasi runtime dan alat coding AI, lalu buat.
-- **Build with AI**: jelaskan apa yang Anda inginkan, dan Agent Builder akan mengajukan pertanyaan dan membuat konfigurasinya. Jalur ini memerlukan runtime yang online.
+Buka **Agents** di bawah **AI Team** pada sidebar dan klik **New agent**. Pilih alat coding AI di komputer yang baru saja Anda hubungkan, masukkan nama, lalu klik **Create agent**. Runtime dan nama adalah satu-satunya field yang wajib diisi.
 
-Semua hal lainnya dapat disempurnakan nanti — lihat [Buat dan konfigurasikan Agent](/agents-create).
+Jika Anda tidak ingin menulis konfigurasinya sendiri, klik **Let AI write it** di halaman konfigurasi: Agent Builder mengajukan beberapa pertanyaan dan mengisinya. Ini memerlukan runtime yang dipilih dalam keadaan online. Semua hal lainnya dapat disempurnakan nanti — lihat [Buat dan konfigurasikan Agent](/agents-create).
 
 **Pemeriksaan keberhasilan**: Agent Anda muncul di daftar Agent dan ditampilkan sebagai online.
 
-![Pemilih titik awal pembuatan Agent: Start blank dan Build with AI](/images/docs/quickstart-new-agent.webp)
+</Step>
+<Step>
 
-## 4. Serahkan Tugas pertama Anda
+## Serahkan Tugas pertama Anda [#4-hand-it-your-first-issue]
 
 Klik **New Issue** di bagian atas sidebar (atau tekan `C`). Dalam mode Agent default:
 
@@ -70,13 +81,19 @@ Klik **New Issue** di bagian atas sidebar (atau tekan `C`). Dalam mode Agent def
 
 ![Dialog New issue dalam mode Agent: Created by diatur ke Multica Assistant](/images/docs/quickstart-new-issue.webp)
 
-## 5. Pantau progres dan hasil
+</Step>
+<Step>
+
+## Pantau progres dan hasil [#5-watch-progress-and-results]
 
 Setelah mengirim, buka Tugas tersebut: log eksekusi menunjukkan status eksekusi, dan progres serta balasan Agent muncul di timeline.
 
 **Pemeriksaan keberhasilan**: status log eksekusi berubah menjadi Completed dan balasan Agent muncul di timeline. Untuk melihat transkrip lengkap, klik **View transcript**.
 
 ![Balasan Agent dalam Tugas dan log eksekusi yang telah selesai](/images/docs/quickstart-run-result.webp)
+
+</Step>
+</Steps>
 
 ## Masalah umum
 
@@ -92,4 +109,4 @@ Untuk kasus lainnya, lihat [Pemecahan masalah](/troubleshooting).
 
 - [Konsep inti](/concepts) — kenali semua objek inti Multica dalam tiga menit.
 - [Cara kerja Multica](/how-multica-works) — bagaimana Tugas, Agent, runtime, dan setiap Eksekusi saling berhubungan.
-- [Libatkan Agent untuk bekerja](/triggering-agents) — selain penugasan: @-mention, Obrolan, dan Otomatisasi.
+- [Libatkan Agent untuk bekerja](/triggering-agents) — selain penugasan, Anda dapat memulai Agent dengan @-mention, Obrolan, atau Otomatisasi.

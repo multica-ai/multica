@@ -1,25 +1,26 @@
 ---
 title: Memulai pekerjaan agent
-description: Empat cara memicu agent, dan di mana memeriksa progresnya setelahnya.
+description: Pilih cara memulai pekerjaan, menyerahkannya, atau meminta bantuan.
 ---
 
-Di Multica, agent tidak memulai pekerjaan dengan sendirinya. Setiap eksekusi dipicu oleh tindakan yang eksplisit. Ada empat cara:
+import { TriggerChooserDemo } from "@/components/demos/trigger-chooser-demo";
 
-| Metode | Paling cocok untuk | Caranya |
-| --- | --- | --- |
-| **Tugaskan tugas** | Agent memiliki pekerjaan ini dari awal sampai akhir | [Tugaskan tugas ke agent](/assigning-issues); dimulai langsung saat tugas berstatus `todo` atau status setelahnya |
-| **@mention di komentar** | Meminta agent menangani satu permintaan spesifik tanpa mengubah assignee tugas | [@mention di komentar](/mentioning-agents), atau balas komentar agent untuk melanjutkan percakapan |
-| **Obrolan langsung** | Pertanyaan atau percobaan cepat yang tidak memerlukan tugas | [Mulai obrolan dengan agent](/chat); setiap pesan memicu satu eksekusi |
-| **Autopilot** | Pekerjaan berulang yang harus berjalan terjadwal atau dari peristiwa eksternal | [Buat autopilot](/autopilots), dipicu oleh jadwal, webhook, atau manual |
+Mulailah dari apa yang Anda inginkan dilakukan agent. Anda dapat memberinya kepemilikan atas sebuah tugas, meminta bantuan untuk satu permintaan, atau mengatur pekerjaan yang berulang.
 
-Keempat metode ini mengikuti aturan yang sama:
+<TriggerChooserDemo />
 
-- Anda hanya dapat memicu agent yang **Anda miliki izin untuk menjalankannya**, ditentukan oleh pengaturan Access agent — bukan oleh peran Anda di ruang kerja.
-- Sebelum Anda memicu dari sebuah tugas, **pratinjau pemicu** di bawah kolom input menunjukkan dengan tepat siapa yang akan dibangkitkan oleh konten ini; gunakan `/note` untuk meninggalkan pesan tanpa memicu agent apa pun.
-- Tugas dengan status `backlog` tidak memicu eksekusi; pindahkan tugas ke `todo` dan agent yang ditugaskan akan mulai.
+| Yang Anda butuhkan | Yang digunakan |
+|---|---|
+| Menjadikan agent pemilik sebuah tugas | [Tugaskan tugas](/assigning-issues) ke agent atau squad. |
+| Meminta bantuan tanpa mengubah penerima tugas | [@mention agent](/mentioning-agents) di komentar, atau balas komentarnya untuk melanjutkan. |
+| Sering mengirim jenis permintaan yang sama | Simpan sebuah [quick action](/quick-actions), seperti Code Review, dan gunakan dari tugas. |
+| Meneruskan pekerjaan melalui rangkaian langkah yang berulang | Pilih [workflow](/workflows) proyek dan siapa yang mengambil alih di setiap langkah. |
+| Mengajukan pertanyaan tanpa membuat tugas | Mulai [obrolan](/chat) dengan agent. |
+| Memulai pekerjaan berulang berdasarkan waktu atau peristiwa eksternal | Buat [autopilot](/autopilots). |
+| Membuat agent kembali ke sebuah tugas nanti | Tambahkan [wakeup](/issue-wakeups) ke tugas dengan waktu atau peristiwa yang ditunggu. |
+
+Anda hanya dapat meminta agent yang Anda miliki izin untuk menjalankannya. Untuk komentar, periksa pratinjau pemicu sebelum mengirim; gunakan `/note` saat Anda ingin meninggalkan pesan tanpa membangkitkan agent. Tugas dengan status `backlog` menunggu sampai Anda siap memulainya.
 
 ## Memantau progres
 
-Setiap pemicu membuat satu [eksekusi](/tasks). Progres mengalir balik ke tempat Anda memicunya — linimasa tugas atau jendela obrolan; log eksekusi menunjukkan eksekusi secara lengkap dan memungkinkan Anda menghentikan atau mencoba ulang.
-
-Saat eksekusi butuh waktu lama untuk dimulai, biasanya runtime sedang offline — periksa bagian tentang eksekusi yang tidak dimulai di [Pemecahan masalah](/troubleshooting).
+Ikuti balasan di tempat Anda memulai pekerjaan: di tugas atau di obrolan. Buka [log eksekusi](/tasks) untuk melihat progres agent, menghentikannya, atau mencoba ulang. Jika pekerjaan belum dimulai, periksa apakah komputer agent online; [Pemecahan masalah](/troubleshooting) memuat langkah berikutnya.

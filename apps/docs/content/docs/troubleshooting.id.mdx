@@ -4,8 +4,13 @@ description: Diagnosis masalah umum pada koneksi, eksekusi, update realtime, ema
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+import { Accordion, Accordions } from "fumadocs-ui/components/accordion";
 
 Pertama, cari tahu di layer mana masalahnya berada: service Multica, daemon, runtime, atau alat coding AI. Command berikut biasanya cukup untuk memunculkan error pertama yang berarti:
+
+<Tabs items={["Instalasi apa pun", "Service yang dihosting mandiri"]}>
+<Tab value="Instalasi apa pun">
 
 ```bash
 multica version
@@ -14,16 +19,23 @@ multica daemon status --output json
 multica daemon logs --lines 100
 ```
 
-Instance yang dihosting mandiri juga dapat memeriksa service secara langsung:
+</Tab>
+<Tab value="Service yang dihosting mandiri">
 
 ```bash
 curl -i https://api.example.com/health
 curl -i https://api.example.com/readyz
 ```
 
+</Tab>
+</Tabs>
+
 `/health` hanya menyatakan bahwa proses API merespons; `/readyz` juga memeriksa database dan migration. Sertakan error, log yang relevan, versi CLI, dan sistem operasi saat melaporkan masalah; hapus token, alamat email, dan detail sensitif lain sebelum mengirimkannya.
 
-## Daemon gagal terhubung
+## Koneksi dan sign-in
+
+<Accordions>
+<Accordion title="Daemon gagal terhubung" id="daemon-fails-to-connect" value="daemon-fails-to-connect">
 
 Jalankan ini dulu:
 
@@ -32,6 +44,8 @@ multica auth status
 multica daemon status --output json
 multica daemon logs --lines 100
 ```
+
+Jika CLI tidak dapat memverifikasi token, periksa error yang dilaporkan sebelum sign in kembali.
 
 Penyebab umumnya meliputi:
 
@@ -54,11 +68,60 @@ Deployment yang dihosting mandiri juga sebaiknya meminta `/health` milik API dar
 multica config show
 ```
 
-## Tugas tidak mulai dieksekusi
+Di macOS, jika log daemon menyebut `connect: no route to host` sementara `curl -fsS <server-url>/health` berhasil dari terminal di Mac yang sama, kumpulkan kedua hasil tersebut dari rentang waktu yang sama. Sertakan cara daemon diluncurkan (Desktop, login service, atau terminal) serta versi macOS dan daemon. Hasil dari shell hanya mengonfirmasi konektivitas untuk proses shell tersebut.
+
+</Accordion>
+<Accordion title={<><code>multica setup</code> melaporkan server tidak dapat dijangkau</>} id="multica-setup-reports-the-server-is-not-reachable" value="multica-setup-reports-the-server-is-not-reachable">
+
+Probe reachability milik CLI melakukan GET ke `<server-url>/health` dan membutuhkan 200. Backend menyediakan path ini. Rilis web saat ini meneruskan `/health` ke backend, tetapi rilis lama tidak — reverse proxy yang meneruskan semuanya ke frontend lama semacam itu mengembalikan 404, dan CLI menyimpulkan server down padahal stack-nya sehat.
+
+Mengarahkan `/health` secara eksplisit ke backend (port 8080) di proxy Anda berfungsi di semua rilis — kedua contoh Caddy di [panduan cepat hosting mandiri](/self-host-quickstart#remote-access) melakukan ini. Konfirmasi dengan:
+
+```bash
+curl -fsS <server-url>/health
+```
+
+</Accordion>
+<Accordion title={<><code>multica login</code> gagal dengan TLS handshake timeout</>} id="multica-login-fails-with-a-tls-handshake-timeout" value="multica-login-fails-with-a-tls-handshake-timeout">
+
+`multica login` membuka browser dan sign in web berhasil selesai, tetapi CLI tetap gagal dengan "Sign-in did not complete" atau "TLS handshake timed out". `multica --debug login` menampilkan `net/http: TLS handshake timeout` pada `POST /api/tokens`, sementara `curl.exe -I https://api.multica.ai` atau browser di mesin yang sama terhubung dengan baik.
+
+Koneksi TCP terbuka, tetapi TLS handshake tidak pernah selesai. Client Go, termasuk Multica CLI dan daemon, mengirim post-quantum key share pada TLS ClientHello secara default, yang membuat ukurannya sekitar 1.5 KB dan membaginya menjadi dua paket. Beberapa software security, VPN, router, dan firewall men-drop handshake semacam ini; curl mengirim ClientHello yang jauh lebih kecil sehingga lolos.
+
+Konfirmasi penyebabnya dengan mencoba ulang setelah menonaktifkan post-quantum key share:
+
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
+
+```bash
+GODEBUG=tlsmlkem=0 multica --debug login
+```
+
+</Tab>
+<Tab value="Windows">
+
+```powershell
+$env:GODEBUG = 'tlsmlkem=0'
+multica --debug login
+```
+
+</Tab>
+</Tabs>
+
+Jika itu berhasil, atur `GODEBUG=tlsmlkem=0` secara permanen untuk user yang menjalankan CLI dan daemon — di Windows, jalankan `[Environment]::SetEnvironmentVariable('GODEBUG', 'tlsmlkem=0', 'User')` lalu buka terminal baru — kemudian restart daemon atau desktop app. Menaikkan `MULTICA_HTTP_TIMEOUT` tidak membantu: itu tidak mengatur handshake. Perbaikan permanennya ada di sisi network: update atau konfigurasi ulang device atau software yang men-drop TLS handshake yang terpecah.
+
+</Accordion>
+</Accordions>
+
+## Eksekusi dan alat coding AI
+
+<Accordions>
+<Accordion title="Tugas tidak mulai dieksekusi" id="issue-does-not-start-executing" value="issue-does-not-start-executing">
 
 Buka **log eksekusi** Tugas tersebut dan periksa status eksekusi saat ini serta apa yang sedang ditunggunya.
 
-### Status `queued`
+<Tabs items={["queued", "waiting_local_directory"]}>
+<Tab value="queued">
 
 `queued` berarti eksekusi masih menunggu untuk diklaim oleh sebuah runtime. Periksa secara berurutan:
 
@@ -77,15 +140,20 @@ multica issue runs <issue-id>
 
 Jika daftar runtime tidak menampilkan alat yang diharapkan, pastikan dulu alat tersebut dapat berjalan dan sudah sign in di bawah akun sistem dan `PATH` yang sama, lalu jalankan `multica daemon restart`.
 
-### Status `waiting_local_directory`
+</Tab>
+<Tab value="waiting_local_directory">
 
-Ini berarti eksekusi lain yang sedang berjalan menggunakan direktori lokal yang sama. Multica menunggu lock direktori tersebut dilepaskan agar dua agent tidak pernah memodifikasi file yang sama secara bersamaan.
+Sebelum startup, eksekusi ini menunggu direktori lokalnya atau slot eksekusi daemon yang bebas. Petunjuk `held by task ...` menunjukkan pemegang yang terlihat saat penantian direktori dimulai; ini tidak melacak kepemilikan saat ini.
 
-Penantian ini hanya ada pada mode `in_place` ("Direct") dari direktori tersebut. Jika direktori itu adalah repository git, mengalihkan resource ke `worktree` ("Parallel") menghilangkan queue itu sepenuhnya: setiap eksekusi mendapatkan worktree-nya sendiri dan mengembalikan hasil kerjanya sebagai branch, sehingga tidak ada yang menunggu apa pun. Lihat [Project resources](/project-resources#bagaimana-eksekusi-membagikan-direktori).
+Eksekusi Direct (`in_place`) menserialisasi penulisan ke direktori yang sama. Eksekusi Parallel (`worktree`) menggunakan checkout terpisah, tetapi penyiapan source snapshot tetap dapat menunggu ketika path source tersebut dibagi dengan eksekusi Direct. Lihat [Project resources](/project-resources#how-runs-share-the-directory).
 
-Jika bukan itu, Anda cukup menunggu eksekusi sebelumnya selesai. Jika eksekusi itu macet, hentikan dari log eksekusinya, atau pilih direktori lokal lain untuk agent saat ini. Mutex direktori ini disimpan di memori daemon — tidak ada lock file yang ditulis ke disk. Jika Anda mencurigai state lock yang basi (stale), `multica daemon restart` akan melepaskannya; tidak ada yang perlu dihapus secara manual.
+Periksa apakah pemegang yang ditunjukkan masih berjalan sebelum menghentikannya. Jika memang benar-benar macet, hentikan dari log eksekusinya atau pilih direktori lokal lain. Jika direktori bebas tetapi daemon sedang menjalankan pekerjaan lain, tunggu hingga ada kapasitas. Mutex direktori disimpan di memori daemon; tidak ada lock file yang perlu dihapus. Gunakan `multica daemon restart` untuk lock di memori yang terkonfirmasi basi (stale).
 
-## Alat coding AI gagal start
+</Tab>
+</Tabs>
+
+</Accordion>
+<Accordion title="Alat coding AI gagal start" id="ai-coding-tool-fails-to-start" value="ai-coding-tool-fails-to-start">
 
 Daemon yang online tidak berarti alatnya sendiri berfungsi. Buka record detail eksekusi tersebut dan fokus pada:
 
@@ -97,7 +165,17 @@ Daemon yang online tidak berarti alatnya sendiri berfungsi. Buka record detail e
 
 Jalankan dulu alat yang sama secara langsung di terminal pada komputer yang menjalankan eksekusi. Jika alat tersebut tidak dapat start sendiri, perbaiki sign in atau konfigurasinya, lalu coba ulang eksekusi dari log eksekusi.
 
-## Eksekusi hang di macOS setelah upgrade CLI
+</Accordion>
+<Accordion title="Alat coding AI timeout di balik proxy macOS" id="ai-coding-tool-times-out-behind-a-macos-proxy" value="ai-coding-tool-times-out-behind-a-macos-proxy">
+
+Jika alat coding AI seperti Grok berfungsi di terminal tetapi timeout di Multica Desktop, periksa apakah terminal meng-export variabel proxy. Di macOS, daemon lokal dan alat yang dijalankannya mewarisi environment variable dari peluncurnya. Menjalankan Desktop dari Dock tidak memuat export shell Anda dan tidak mengubah pengaturan Network proxy macOS menjadi environment variable.
+
+Untuk satu agent, tambahkan variabel proxy yang dibutuhkan alatnya di bawah [Environment variables](/agents-create#variabel-environment-dan-kredensial), misalnya `HTTPS_PROXY=http://127.0.0.1:7897` untuk proxy HTTP lokal. Gunakan alamat proxy Anda yang sebenarnya. Jika Anda meng-host Multica secara lokal, tambahkan host lokal yang harus terhubung langsung ke `NO_PROXY`, misalnya `localhost,127.0.0.1,::1`. Mulai eksekusi baru agar perubahan berlaku.
+
+Pengaturan ini hanya berlaku untuk proses alat milik agent tersebut, bukan untuk daemon. Jika daemon memerlukan proxy untuk menjangkau server Multica, atau untuk mengambil daftar model terbaru (daemon mengambilnya dengan environment-nya sendiri), konfigurasikan environment peluncuran daemon secara terpisah. Untuk daemon yang start saat login, lihat [Start at login](/daemon-runtimes#autostart).
+
+</Accordion>
+<Accordion title="Eksekusi hang di macOS setelah upgrade CLI" id="runs-hang-on-macos-after-a-cli-upgrade" value="runs-hang-on-macos-after-a-cli-upgrade">
 
 Setelah CLI `multica` dari Homebrew di-upgrade — baik melalui `brew upgrade`, `multica update`, **Update** di halaman Runtimes, atau auto-update daemon — sebuah eksekusi yang membaca `~/Desktop`, `~/Documents`, `~/Downloads`, iCloud Drive, atau folder terlindungi lain dapat berhenti membuat progres: proses agent tidak menggunakan CPU, dan eksekusi tidak pernah selesai maupun gagal.
 
@@ -111,7 +189,24 @@ Untuk memulihkan akses:
 
 Ulangi langkah ini setelah setiap upgrade CLI. Auto-update aktif secara default hanya untuk daemon yang terhubung ke Multica Cloud; mulai daemon dengan `--no-auto-update` agar upgrade hanya terjadi saat Anda menjalankannya sendiri. CLI yang dibundel dengan [Multica Desktop](/desktop-app) ditandatangani dengan Developer ID, sehingga izinnya tetap bertahan setelah upgrade.
 
-## Update realtime berhenti bekerja
+</Accordion>
+<Accordion title="Eksekusi Hermes menginstal ulang dependency setelah Anda menggunakan Hermes CLI" id="hermes-runs-reinstall-dependencies-after-you-use-the-hermes-cli" value="hermes-runs-reinstall-dependencies-after-you-use-the-hermes-cli">
+
+Jika Anda bergantian antara Hermes CLI (atau aplikasi desktop Hermes) dan eksekusi Hermes di Multica, setiap pergantian dapat menambah 30–60 detik pada startup selagi Hermes membangun ulang environment dependency Python bersamanya. Setiap pembangunan ulang juga meninggalkan satu generasi environment baru di disk sampai Hermes membersihkannya.
+
+Ini terjadi ketika Hermes home Anda sendiri mengatur `memory.provider` ke plugin yang memiliki dependency Python. Setiap eksekusi Multica menggunakan Hermes home-nya sendiri, berbagi dependency terinstal Anda, dan mematikan memory provider eksternal agar memori tidak dibagikan antar eksekusi. Hermes menentukan dependency yang dibutuhkan dari plugin pada home yang aktif, sehingga home Anda dan home eksekusi tidak sepakat, dan masing-masing menganggap instalasi pihak lain sudah usang. Perilaku mendasarnya dilacak di upstream pada [NousResearch/hermes-agent#137726](https://github.com/NousResearch/hermes-agent/issues/137726).
+
+Untuk mengonfirmasi, cari di [log daemon](#lokasi-log) entri `hermes is reinstalling its dependency environment before this task starts`. Entri lanjutan `hermes dependency reinstall finished` melaporkan, dalam `startup_delay_ms`, berapa lama Hermes bekerja dari peluncuran hingga siap, termasuk instalasi ulang.
+
+Sampai Hermes memperbaikinya di upstream, Anda dapat menghindari pembangunan ulang dengan mengatur `memory.provider: ""` di `config.yaml` Hermes Anda sendiri, yang juga mematikan plugin memori tersebut untuk CLI. Jika tidak, harapkan jeda satu kali setelah setiap pergantian.
+
+</Accordion>
+</Accordions>
+
+## Web app dan service yang dihosting mandiri
+
+<Accordions>
+<Accordion title="Update realtime berhenti bekerja" id="realtime-updates-stop-working" value="realtime-updates-stop-working">
 
 Jika eksekusi masih berjalan tetapi comment dan perubahan status tidak lagi muncul secara live, biasanya WebSocket tidak terhubung.
 
@@ -132,38 +227,10 @@ Container hanya membaca `.env` saat dibuat; buat ulang setelah ada perubahan:
 docker compose -f docker-compose.selfhost.yml up -d
 ```
 
-Untuk contoh reverse-proxy yang lengkap, lihat [panduan cepat hosting mandiri](/self-host-quickstart#3-pilih-cara-mengakses).
+Untuk contoh reverse-proxy yang lengkap, lihat [panduan cepat hosting mandiri](/self-host-quickstart#remote-access).
 
-## `multica setup` melaporkan server tidak dapat dijangkau
-
-Probe reachability milik CLI melakukan GET ke `<server-url>/health` dan membutuhkan 200. Backend menyediakan path ini. Rilis web saat ini meneruskan `/health` ke backend, tetapi rilis lama tidak — reverse proxy yang meneruskan semuanya ke frontend lama semacam itu mengembalikan 404, dan CLI menyimpulkan server down padahal stack-nya sehat.
-
-Mengarahkan `/health` secara eksplisit ke backend (port 8080) di proxy Anda berfungsi di semua rilis — kedua contoh Caddy di [panduan cepat hosting mandiri](/self-host-quickstart#3-pilih-cara-mengakses) melakukan ini. Konfirmasi dengan:
-
-```bash
-curl -fsS <server-url>/health
-```
-
-## `multica login` gagal dengan TLS handshake timeout
-
-`multica login` membuka browser dan sign in web berhasil selesai, tetapi CLI tetap gagal dengan "Sign-in did not complete" atau "TLS handshake timed out". `multica --debug login` menampilkan `net/http: TLS handshake timeout` pada `POST /api/tokens`, sementara `curl.exe -I https://api.multica.ai` atau browser di mesin yang sama terhubung dengan baik.
-
-Koneksi TCP terbuka, tetapi TLS handshake tidak pernah selesai. Client Go, termasuk Multica CLI dan daemon, mengirim post-quantum key share pada TLS ClientHello secara default, yang membuat ukurannya sekitar 1.5 KB dan membaginya menjadi dua paket. Beberapa software security, VPN, router, dan firewall men-drop handshake semacam ini; curl mengirim ClientHello yang jauh lebih kecil sehingga lolos.
-
-Konfirmasi penyebabnya dengan mencoba ulang setelah menonaktifkan post-quantum key share:
-
-```powershell
-$env:GODEBUG = 'tlsmlkem=0'
-multica --debug login
-```
-
-```bash
-GODEBUG=tlsmlkem=0 multica --debug login
-```
-
-Jika itu berhasil, atur `GODEBUG=tlsmlkem=0` secara permanen untuk user yang menjalankan CLI dan daemon — di Windows, jalankan `[Environment]::SetEnvironmentVariable('GODEBUG', 'tlsmlkem=0', 'User')` lalu buka terminal baru — kemudian restart daemon atau desktop app. Menaikkan `MULTICA_HTTP_TIMEOUT` tidak membantu: itu tidak mengatur handshake. Perbaikan permanennya ada di sisi network: update atau konfigurasi ulang device atau software yang men-drop TLS handshake yang terpecah.
-
-## Email kode verifikasi dan undangan tidak terkirim
+</Accordion>
+<Accordion title="Email kode verifikasi dan undangan tidak terkirim" id="verification-code-and-invitation-emails-not-delivered" value="verification-code-and-invitation-emails-not-delivered">
 
 Periksa dulu log startup backend. Log tersebut menyatakan apakah server menggunakan `SMTP relay`, `Resend API`, atau `DEV mode`:
 
@@ -182,7 +249,8 @@ Saat `SMTP_HOST` dan Resend sama-sama dikonfigurasi, Multica memprioritaskan SMT
 Jangan mengandalkan kode di log pada produksi, dan jangan mengaktifkan kode test lokal yang fixed.
 </Callout>
 
-## Upload atau download attachment gagal
+</Accordion>
+<Accordion title="Upload atau download attachment gagal" id="attachment-uploads-or-downloads-fail" value="attachment-uploads-or-downloads-fail">
 
 Periksa dulu log backend dan status code respons. Penyebab umumnya:
 
@@ -193,7 +261,8 @@ Periksa dulu log backend dan status code respons. Penyebab umumnya:
 
 Dengan Docker Compose, volume default `backend_uploads` menyimpan attachment lokal. Membuat ulang container tidak menghapusnya, tetapi `docker compose down -v` menghapus volume data tersebut. Untuk konfigurasi S3, lihat [Variabel lingkungan](/environment-variables#penyimpanan-lampiran).
 
-## Usage menampilkan nol
+</Accordion>
+<Accordion title="Usage menampilkan nol" id="usage-shows-zero" value="usage-shows-zero">
 
 Halaman Usage membaca rollup per jam, bukan usage mentah dari setiap eksekusi. Periksa dulu data mentah dan tabel rollup-nya:
 
@@ -208,7 +277,7 @@ ORDER BY plan_time DESC
 LIMIT 20;
 ```
 
-Jika `task_usage` memiliki baris data, tabel rollup-nya kosong, dan record scheduler menunjukkan kegagalan, pastikan dulu semua migration sudah diterapkan; jika migration 103 menolak upgrade, lihat bagian berikutnya. Anda juga dapat menjalankan satu rollup secara manual untuk memisahkan masalah SQL dari masalah scheduling:
+Jika `task_usage` memiliki baris data, tabel rollup-nya kosong, dan record scheduler menunjukkan kegagalan, pastikan dulu semua migration sudah diterapkan; jika migration 103 menolak upgrade, lihat [Migration 103 memblokir upgrade](#migration-103-blocks-an-upgrade). Anda juga dapat menjalankan satu rollup secara manual untuk memisahkan masalah SQL dari masalah scheduling:
 
 ```sql
 SELECT rollup_task_usage_hourly();
@@ -216,7 +285,8 @@ SELECT rollup_task_usage_hourly();
 
 Jika angkanya terlihat benar setelah dijalankan manual, berarti fungsi rollup-nya berfungsi dan masalahnya ada pada scheduling bawaan backend; SQL manual hanya mengisi satu rollup dan tidak mengembalikan scheduling. Rollup per jam dijalankan oleh scheduler bawaan backend — Anda tidak perlu mengonfigurasi pg_cron sendiri.
 
-## Migration 103 memblokir upgrade
+</Accordion>
+<Accordion title="Migration 103 memblokir upgrade" id="migration-103-blocks-an-upgrade" value="migration-103-blocks-an-upgrade">
 
 Upgrade normal tidak membutuhkan tindakan apa pun untuk 103: `migrate up` secara otomatis melakukan backfill data usage historis sebelum menerapkannya — database yang kosong langsung lolos, dan instance dengan riwayat data di-backfill per bulan sebelum melanjutkan.
 
@@ -229,16 +299,32 @@ DATABASE_URL='postgres://...' go run ./cmd/backfill_task_usage_hourly
 
 Flag yang bermanfaat: `--dry-run` melakukan preview tanpa menulis; `--sleep-between-slices` menambahkan jeda antar-slice untuk mengurangi tekanan baca pada instance yang sibuk. Command ini bekerja dalam slice bulanan dan idempotent — jalankan ulang langsung setelah terputus. Command ini memegang advisory lock dan saling eksklusif dengan rollup terjadwal milik server, sehingga tidak dapat menghasilkan data rollup yang duplikat atau tidak konsisten. Setelah selesai, restart backend dan konfirmasi `migrations` berstatus `ok` pada `/readyz`.
 
-## Port sudah digunakan
+</Accordion>
+<Accordion title="Port sudah digunakan" id="port-already-in-use" value="port-already-in-use">
 
 Port lokal yang umum adalah `8080` untuk API, `3000` untuk web app, dan port health-check daemon. Temukan dulu proses yang memegang port tersebut:
 
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
+
 ```bash
-lsof -nP -iTCP:8080 -sTCP:LISTEN   # macOS / Linux
-netstat -ano | findstr :8080       # Windows
+lsof -nP -iTCP:8080 -sTCP:LISTEN
 ```
 
+</Tab>
+<Tab value="Windows">
+
+```bash
+netstat -ano | findstr :8080
+```
+
+</Tab>
+</Tabs>
+
 Jika itu adalah checkout Multica lain, jalankan `make stop` di direktori tersebut terlebih dulu. Jika bukan, hentikan program yang bermasalah secara normal, atau ubah port service saat ini. Port publik 80/443 didengarkan oleh reverse proxy seperti Caddy atau Nginx.
+
+</Accordion>
+</Accordions>
 
 ## Lokasi log
 
@@ -268,4 +354,3 @@ Jika Anda masih belum dapat menemukannya, cari issue yang sudah ada atau buat ya
 - [Daemon dan runtime](/daemon-runtimes) — cara runtime mendaftar dan melaporkan status online.
 - [Eksekusi](/tasks) — referensi status, timeout, dan kegagalan.
 - [Variabel lingkungan](/environment-variables) — referensi konfigurasi hosting mandiri yang lengkap.
-</content>

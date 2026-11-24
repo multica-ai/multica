@@ -1,0 +1,78 @@
+---
+title: Quick Actions
+description: Simpan permintaan yang sering Anda gunakan dan pakai dari sebuah tugas tanpa menulisnya lagi.
+---
+
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { QuickActionDemo } from "@/components/demos/quick-action-demo";
+
+Quick Actions mengubah permintaan yang sering Anda gunakan menjadi tombol pada sebuah tugas. Simpan sekali siapa yang diminta dan apa yang disampaikan, lalu gunakan kembali di tugas lain dengan satu klik.
+
+Misalnya, buat **Code Review** untuk agent peninjau Anda dengan prompt berikut:
+
+> Review the changes linked to this issue. Check for mistakes and missing tests, and post your findings here.
+
+Agent sudah memiliki konteks tugas tersebut, jadi Anda tidak perlu menyalin deskripsinya ke dalam permintaan.
+
+## Menggunakan quick action
+
+Di aplikasi web atau desktop, ada dua cara untuk menggunakan sebuah action:
+
+| Di mana | Apa yang terjadi |
+|---|---|
+| **Quick Actions** di sidebar tugas | Klik sebuah action untuk langsung memposting permintaan yang tersimpan. Jika action tersebut memiliki agent atau squad, action akan meminta mereka mengerjakan tugas ini. |
+| Ketik `/` di kotak komentar | Pilih sebuah action untuk menyisipkan permintaannya sebagai draf. Edit untuk tugas ini, lalu kirim saat sudah siap. Tidak ada yang diposting hanya dengan memilihnya. |
+
+<QuickActionDemo />
+
+Menggunakan quick action tidak mengubah assignee atau status tugas. Ikuti balasan di diskusi tugas dan periksa [execution log](/tasks) untuk melihat progres agent.
+
+Action dengan **No target** memposting pesan yang tersimpan tanpa @-mention siapa pun. Gunakan untuk checklist atau respons yang sering Anda tulis.
+
+## Membuat quick action
+
+<Steps>
+<Step>
+
+Buka **Settings → Quick Actions** dan pilih **New quick action**.
+
+</Step>
+<Step>
+
+Beri nama singkat yang menjelaskan permintaan tersebut, seperti **Code Review** atau **Summarize progress**.
+
+</Step>
+<Step>
+
+Pilih **Just me** untuk penggunaan pribadi, atau **Team** untuk membagikannya ke ruang kerja. Membuat dan mengelola action Team memerlukan izin `owner` atau `admin`; anggota sebaiknya memilih **Just me**.
+
+</Step>
+<Step>
+
+Pilih agent atau squad di bawah **Runs as**, atau pilih **No target** untuk menyimpan pesan tanpa mention.
+
+</Step>
+<Step>
+
+Tulis **Prompt** persis seperti yang ingin dikirim, lalu simpan. Prompt dikirim apa adanya; variabel tidak didukung.
+
+</Step>
+</Steps>
+
+Action Team yang memanggil agent harus menggunakan agent yang dapat dijalankan oleh semua orang di ruang kerja. Untuk squad, ini berlaku pada leader-nya. Action pribadi dapat menggunakan agent yang Anda punya izin untuk menjalankannya.
+
+“Just me” mengatur siapa yang dapat melihat dan menggunakan action yang tersimpan. Setelah Anda menggunakannya pada sebuah tugas, komentar yang diposting dapat dilihat oleh orang-orang yang dapat melihat tugas tersebut.
+
+## Mengelola action yang tersimpan
+
+Di **Settings → Quick Actions** Anda dapat mengedit sebuah action, mengarsipkannya, atau memulihkan action yang diarsipkan. Arsipkan action yang tidak Anda perlukan sekarang tetapi mungkin dibutuhkan nanti. Menghapusnya akan menghapus action yang tersimpan; komentar dan catatan eksekusi sebelumnya tetap ada.
+
+Jika tidak ada action pribadi atau Team yang dapat Anda lihat, sidebar tugas tidak menampilkan bagian Quick Actions. Daftar di sidebar tidak difilter menurut siapa yang dapat menjalankan tiap action; izin diperiksa saat Anda mengklik salah satunya.
+
+Jika mengklik sebuah action memberi tahu bahwa action tidak dapat dijalankan, minta admin memeriksa agent milik action tersebut dan siapa yang dapat menjalankannya. Jika komputer agent sedang offline, pekerjaan dimulai begitu komputer kembali online; lihat [Pemecahan masalah](/troubleshooting).
+
+## Panduan terkait
+
+- [Komentar](/comments) — mendiskusikan pekerjaan dan mengikuti balasan pada sebuah tugas.
+- [@-mention agent](/mentioning-agents) — menulis sendiri permintaan sekali pakai.
+- [Workflows](/workflows) — mengatur siapa yang mengambil alih pada setiap langkah sebuah proyek.

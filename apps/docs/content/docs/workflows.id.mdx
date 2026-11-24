@@ -1,0 +1,97 @@
+---
+title: Workflows
+description: Tentukan langkah-langkah yang dilalui tugas dalam sebuah proyek dan siapa yang mengambil alih di setiap langkah.
+---
+
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { WorkflowDemo } from "@/components/demos/workflow-demo";
+
+Workflow menentukan langkah-langkah yang dilalui tugas dalam sebuah proyek, siapa yang menangani setiap langkah, dan apa yang harus mereka lakukan.
+
+Misalnya, workflow pengiriman (delivery) bisa terlihat seperti ini:
+
+| Langkah | Siapa yang menangani | Yang dikerjakan |
+|---|---|---|
+| Development | Agent engineering | Mengimplementasikan perubahan dan menyiapkannya untuk ditinjau. |
+| Review | Agent peninjau | Memeriksa hasilnya, lalu meneruskannya ke QA atau mengembalikannya untuk diperbaiki. |
+| QA | Anggota tim | Mencoba hasilnya dan memutuskan apakah sudah siap diselesaikan. |
+
+Memindahkan tugas ke Review akan menyerahkannya kepada agent peninjau. Deskripsi, diskusi, dan hasil sebelumnya tetap berada di tugas yang sama, sehingga orang atau agent berikutnya dapat melanjutkan dari titik terakhir.
+
+Template **Delivery** memiliki bentuk ini. Proyek yang tidak memilih workflow menggunakan **Default**: semua status tersedia dan tidak ada serah terima otomatis, sama seperti sebelumnya.
+
+## Membuat workflow
+
+Di aplikasi web atau desktop, `owner` atau `admin` ruang kerja dapat membuat workflow:
+
+<Steps>
+<Step>
+
+Buka **Settings → Workflows** dan pilih **New workflow**. Mulai dari kosong atau gunakan template **Delivery**, **Content**, atau **Community**.
+
+</Step>
+<Step>
+
+Beri nama workflow dan pilih kolom statusnya. Seret kolom di bagian tengah ke urutan yang digunakan tim Anda.
+
+</Step>
+<Step>
+
+Pilih sebuah kolom dan tentukan apa yang terjadi saat tugas masuk ke kolom tersebut: **No handoff**, **Hand to an agent**, atau **Hand to a member**. Anda juga dapat memilih **Project lead** dari pemilih anggota.
+
+</Step>
+<Step>
+
+Untuk langkah agent, tuliskan apa yang harus dikerjakannya. Lalu atur **When done, move to** (jika dibiarkan kosong, kolom berikutnya yang dipakai, dengan melewati kolom tertutup seperti Won't Fix; kolom Done atau Closed secara default tidak memindahkan ke mana pun) dan **If rejected, send back to** (digunakan saat langkah ini menilai pekerjaan yang diterimanya tidak dapat diterima dan perlu dikerjakan ulang). Gunakan **Blocked**, bukan send-back, jika langkah tidak dapat dilanjutkan karena alasan dari luar; langkah hanya akan mengembalikan tugas jika workflow tidak memiliki kolom Blocked, atau pada kolom Done atau Closed.
+
+</Step>
+<Step>
+
+Pratinjau brief untuk agent, lalu simpan.
+
+</Step>
+</Steps>
+
+Jika Anda menambahkan status baru, simpan workflow terlebih dahulu sebelum mengatur serah terima untuk status tersebut.
+
+**No handoff** mempertahankan assignee saat ini. Menyerahkan ke anggota akan menugaskan pekerjaan tanpa menjalankan agent. Menyerahkan ke agent akan meminta agent memulai langkah ini; agent tersebut tetap harus tersedia bagi Anda, dan komputernya harus online agar dapat berjalan.
+
+## Menggunakannya dalam proyek
+
+Buka sebuah proyek dan pilih **Workflow**-nya. Owner dan admin ruang kerja, serta lead proyek jika lead tersebut adalah anggota, dapat mengubah pilihan ini.
+
+Dialog konfirmasi menunjukkan tugas mana yang tetap mempertahankan statusnya. Jika workflow baru tidak memiliki status yang sedang dipakai sebagian tugas, pilih ke mana tugas-tugas tersebut harus dipindahkan. Berpindah workflow tidak menyerahkan tugas dan tidak menjalankan agent.
+
+Board proyek kini mengikuti kolom-kolom workflow. Pemilih status pada setiap tugas menawarkan langkah-langkah dalam workflow tersebut dan menampilkan siapa yang akan mengambil alih. Proyek yang belum memilih workflow menggunakan **Default**; Anda dapat beralih kembali ke sana nanti.
+
+## Memindahkan pekerjaan ke langkah berikutnya
+
+Ubah status tugas atau seret kartunya ke kolom lain. Jika langkah tersebut memiliki serah terima, periksa siapa yang akan menerimanya dan, untuk agent, instruksi yang akan diterimanya.
+
+<WorkflowDemo />
+
+Saat Anda membuat tugas dalam proyek tanpa memilih assignee, dan statusnya memiliki serah terima, tugas langsung diserahkan ke penangan langkah tersebut; agent langsung mulai bekerja. Dialog pembuatan menunjukkan kepada siapa tugas akan diserahkan. Untuk membuatnya tanpa menjalankan apa pun terlebih dahulu, letakkan di Backlog.
+
+Jika assignee sebelumnya adalah agent yang eksekusinya sedang berjalan atau menunggu untuk dimulai, konfirmasi menambahkan opsi untuk menghentikan atau membatalkannya, dan opsi ini dipilih secara default. Biarkan tetap terpilih kecuali Anda ingin kedua agent bekerja bersamaan; komentar dan pekerjaan yang sudah disimpannya tetap dipertahankan.
+
+**When done, move to** dan **If rejected, send back to** memberi tahu agent ke mana tugas harus dipindahkan berikutnya. Eksekusi yang selesai tidak memindahkan tugas dengan sendirinya: anggota atau agent yang menangani langkah tersebut yang memperbarui statusnya. Saat agent memindahkan tugas ke langkah berikutnya, serah terima langkah itu berjalan sama seperti jika dilakukan oleh anggota.
+
+Anda dapat melihat serah terima beserta instruksinya di timeline tugas. Buka menu workflow pada board proyek untuk melihat alur lengkapnya.
+
+## Menyesuaikan workflow
+
+Satu workflow dapat dipakai bersama oleh beberapa proyek. Perubahan yang disimpan di **Settings → Workflows** berlaku untuk setiap proyek yang menggunakannya. Untuk memberi satu proyek proses yang berbeda, duplikasi workflow dan pilih salinannya di proyek tersebut.
+
+Admin juga dapat mengatur serah terima dari board proyek: arahkan kursor ke header kolom lalu klik **Hand to…**, atau klik penangan yang sudah ditampilkan. Jika proyek lain berbagi workflow tersebut, Anda akan ditanya **Where should this change apply?** Memilih hanya proyek saat ini akan membuat salinan workflow untuknya dan membiarkan proyek lain tidak berubah.
+
+Menghapus kolom dapat meminta Anda memilih status baru untuk tugas yang sudah berada di dalamnya. Tugas lainnya tetap di tempatnya, dan pemindahan ini tidak menjalankan agent. Pustaka status di bawah daftar workflow adalah tempat Anda mengganti nama atau warna status; perubahan tersebut berlaku di mana pun status itu digunakan.
+
+Untuk menghapus workflow, pindahkan dulu proyek yang menggunakannya ke workflow lain. Tugas tetap mempertahankan status saat ini.
+
+Jika **Settings** tidak menyertakan **Workflows**, fitur ini belum tersedia di ruang kerja tersebut, dan status tetap dikelola di **Settings → Issue Statuses**.
+
+## Panduan terkait
+
+- [Proyek](/projects) — atur tugas yang mengikuti sebuah workflow.
+- [Quick Actions](/quick-actions) — simpan permintaan yang sering dipakai sebagai tombol pada tugas.
+- [Autopilot](/autopilots) — mulai pekerjaan berulang berdasarkan schedule atau event dari luar.

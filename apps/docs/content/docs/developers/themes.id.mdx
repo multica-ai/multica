@@ -1,0 +1,263 @@
+---
+title: Membuat tema
+description: Format tema Multica — manifest, variabel CSS, opsi, dan anchor — cara menulis dan memeriksa tema, serta cara mempublikasikannya ke theme store.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+Tema Multica adalah sebuah folder berisi `manifest.json` dan `theme.css`, ditambah font dan gambar yang digunakan oleh CSS. CSS menetapkan variabel publik untuk mode terang dan gelap, dan dapat menata ulang sekumpulan anchor yang stabil; manifest memberi nama pada tema dan dapat mendeklarasikan opsi yang diatur pengguna di **Settings → Appearance**. Tema tidak pernah menjalankan JavaScript.
+
+<Callout type="warn">
+  Format tema masih berupa API beta. Variabel, anchor, dan manifest dapat berubah sampai format ini dinyatakan stabil. Daftar lengkap variabel dan anchor yang dihasilkan otomatis ada di [`docs/theming.md`](https://github.com/multica-ai/multica/blob/main/docs/theming.md); halaman ini membahas bagaimana semuanya saling berkaitan.
+</Callout>
+
+## Mulai cepat
+
+<Steps>
+<Step>
+
+### Mulai dari salinan
+
+Di **Settings → Appearance**, pilih tema yang paling mendekati keinginan Anda, lalu pilih **Make your own → Import theme → Duplicate "…" as a new theme**. Salinan tersebut mendapat id sendiri (`pop-copy`, `pop-copy-2`, …), opsi dari tema aslinya, dan `theme.css` dengan satu deklarasi per baris. Tanpa perubahan, tampilannya persis sama dengan aslinya.
+
+</Step>
+<Step>
+
+### Edit
+
+- **Desktop** menulis salinan ke folder tema miliknya dan membukanya. Edit `theme.css` di editor mana pun: setiap jendela yang terbuka akan menerapkan perubahan yang disimpan dalam sekitar satu detik.
+- **Web** mengunduh salinan sebagai `.zip`. Ekstrak, edit, lalu impor folder tersebut kembali dengan **Import theme → Theme folder**. `id` yang sama menggantikan salinan yang terpasang dan mempertahankan nilai opsinya.
+
+</Step>
+<Step>
+
+### Periksa
+
+Jalankan pemeriksaan dari checkout [repositori Multica](https://github.com/multica-ai/multica) sebelum Anda membagikannya (lihat [Periksa dan pratinjau](#periksa-dan-pratinjau)).
+
+</Step>
+</Steps>
+
+## Folder
+
+```text
+paper/
+├── manifest.json
+├── theme.css
+└── fonts/
+    └── serif.woff2
+```
+
+Folder dapat berada di bagian paling atas sebuah `.zip` atau menjadi satu-satunya folder di dalamnya. File selain font (`woff2`, `woff`, `ttf`, `otf`) dan gambar (`png`, `jpg`, `webp`, `gif`, `avif`, `svg`) diabaikan. Ukuran tema maksimal 1 MB.
+
+### manifest.json
+
+```json
+{
+  "apiVersion": 1,
+  "id": "paper",
+  "name": "Paper",
+  "author": "Someone",
+  "version": "1.2.0",
+  "description": "Warm paper, serif reading text.",
+  "options": [
+    { "id": "page", "type": "heading", "label": "Page" },
+    { "id": "paper-color", "type": "color", "label": "Paper", "default": { "light": "#f6efdf", "dark": "#1d1b16" } },
+    { "id": "hyphens", "type": "toggle", "label": "Hyphenate", "default": true }
+  ]
+}
+```
+
+| Field | Aturan |
+|---|---|
+| `apiVersion` | Harus `1`. |
+| `id` | 1–40 karakter berupa `a-z`, `0-9`, dan `-`. Id bawaan (`default`, `pop`, `github`, `blueprint`, `notion`) dicadangkan. Mengimpor tema dengan id yang sudah terpasang akan menggantikannya. |
+| `name` | Wajib, maksimal 40 karakter. |
+| `author`, `version`, `description` | Opsional; ditampilkan saat instalasi. Theme store mewajibkan `version`. |
+| `options` | Maksimal 24; lihat [Opsi](#opsi). |
+
+### theme.css
+
+```css
+@font-face {
+  font-family: "Paper Serif";
+  src: url(fonts/serif.woff2);
+}
+
+.theme-light {
+  --page-canvas: var(--paper-color);
+  --brand: #8b4513;
+  --font-content-latin: "Paper Serif", Georgia;
+  --h1-style: italic;
+}
+
+.theme-dark {
+  --page-canvas: var(--paper-color);
+}
+
+:root[data-theme-option-hyphens] [data-mc="content"] p {
+  hyphens: auto;
+}
+```
+
+Tetapkan variabel pada `.theme-light` dan `.theme-dark`, yang berada pada `<html>`. CSS tema dimuat setelah style bawaan aplikasi, sehingga pada specificity yang sama tema yang menang: jaga agar selector tetap sederhana dan hindari `!important`.
+
+Pilihan Appearance milik pengguna sendiri tetap mengalahkan tema: Increase contrast menggantikan warna muted dan border, dan font apa pun selain default menggantikan variabel font. Warna sepenuhnya milik tema; agar pengguna dapat memilihnya, deklarasikan sebuah opsi.
+
+## Variabel
+
+Variabel tersusun dalam beberapa lapisan:
+
+- **Foundations** — warna, surface, bayangan, `--radius`, skala teks, dan font — adalah dasar dari semua yang lain. Mengubah `--surface` atau `--radius` akan menggeser setiap komponen yang memakainya.
+- **Komponen dan produk** — menu, tombol, baris navigasi, baris issue, board, warna status — secara default mengikuti sebuah foundation. Tetapkan salah satunya untuk mengubah komponen itu saja: `--menu-radius: 0` membuat menu bersudut tajam dan tidak mengubah yang lain.
+- **Konten editor** — heading, daftar, tabel, kutipan, tautan, kode, dan warna sintaks — menata deskripsi tugas, komentar, chat, dan dokumen.
+
+Aplikasi tidak pernah mendeklarasikan variabel komponen; komponen membacanya dengan nilai default sebagai fallback. Jadi variabel tersebut dapat ditetapkan pada ancestor mana pun, tidak hanya pada `.theme-light`:
+
+```css
+.theme-light [data-mc="chat-window"] {
+  --code-block-background: transparent;
+}
+```
+
+[Referensi variabel](https://github.com/multica-ai/multica/blob/main/docs/theming.md#variable-reference) mencantumkan setiap variabel beserta default terang dan gelapnya.
+
+## Opsi
+
+Opsi ditampilkan di bawah **Theme options** pada halaman Appearance selama tema digunakan. `toggle` dan `select` menetapkan atribut pada `<html>`; tipe lainnya selalu menetapkan variabel `--<id>` pada `<html>` — berupa nilai yang dipilih atau nilai default — sehingga `theme.css` dapat membacanya dengan `var(--<id>)` biasa.
+
+| Tipe | Field | Hasil |
+|---|---|---|
+| `heading` | — | Memulai sebuah grup; `description`-nya ditampilkan di bawahnya. |
+| `toggle` | `default`: `true` atau `false` | `data-theme-option-<id>="on"` saat aktif, tidak ada saat nonaktif. |
+| `select` | `choices`: `[{ "value", "label", "swatch"? }]`, `default` | `data-theme-option-<id>="<value>"`. Jika setiap pilihan memiliki `swatch`, pilihan ditampilkan sebagai titik warna. |
+| `color` | `default`: warna hex, atau `{ "light", "dark" }` | `--<id>`: warna hex untuk tiap mode. |
+| `number` | `default`, opsional `min`, `max`, `step`, `unit` | `--<id>`: angka dengan `unit` di belakangnya (`px`, `rem`, `%`, …). |
+| `slider` | sama seperti `number`, dengan `min` dan `max` wajib | sama seperti `number`. |
+| `text` | `default`: nilai CSS | `--<id>`: teks yang diketik, jika nilainya aman. |
+| `font` | `default`: font stack | `--<id>`: font stack. |
+| `variable-select` | `choices`: `[{ "value", "label" }]` dengan nilai CSS, `default` | `--<id>`: nilai yang dipilih. |
+
+Id opsi terdiri dari 1–48 karakter `a-z`, `0-9`, dan `-`, dan diawali huruf. `label`, `description`, dan label pilihan berupa string atau objek dengan kunci locale (`en`, `zh-Hans`, `zh-Hant`, `ja`, `ko`, `es`, `fr`); bahasa Inggris menjadi fallback.
+
+```json
+{ "id": "page-width", "type": "slider", "label": "Page width", "default": 46, "min": 30, "max": 60, "step": 2, "unit": "rem" }
+```
+
+```css
+[data-mc="content"] { max-width: var(--page-width); }
+```
+
+## Backdrop dan glass
+
+Tema dapat menaruh gambar di belakang aplikasi — gradien, gambar, atau SVG beranimasi — dan mengubah frame serta halaman menjadi kaca di atasnya. Tetapkan ini untuk tiap mode:
+
+```css
+.theme-dark {
+  --backdrop: url(night.svg) center / cover no-repeat;
+  --backdrop-color: #1e1e4a;
+  --glass-opacity: 72%;
+  --glass-blur: 18px;
+  --frame-glass-opacity: 0%;
+  --frame-glass-blur: 0px;
+}
+```
+
+- `--backdrop` adalah nilai CSS `background` yang digambar di bawah seluruh jendela, pada desktop maupun web. Gambar harus berada di folder tema; animasi bawaan SVG tetap berjalan.
+- `--backdrop-color` wajib ada bersama backdrop: warna solid yang ditampilkan saat backdrop dimuat, dan warna yang dipakai `theme:check` untuk mengukur glass.
+- `--glass-opacity` dan `--glass-blur` mengatur seberapa banyak warna halaman itu sendiri menutupi backdrop dan seberapa besar backdrop diburamkan di belakangnya. `--frame-glass-opacity` dan `--frame-glass-blur` melakukan hal yang sama untuk rail, toolbar jendela, tab bar, dan bottom bar.
+
+Gunakan variabel ini sebagai pengganti `--app-shell` yang transparan atau `background` pada `body`: dengan begitu aplikasi dapat berganti backdrop tanpa jendela berkedip. [`examples/themes/night-sky`](https://github.com/multica-ai/multica/tree/main/examples/themes/night-sky) adalah contoh yang lengkap.
+
+## Selector
+
+Targetkan anchor, slot, dan state hook — bukan nama class atau struktur DOM, yang dapat berubah tanpa pemberitahuan. Anchor, slot, dan hook tetap ada sampai `apiVersion` berikutnya.
+
+- **Anchor** adalah atribut `data-mc` pada bagian-bagian utama aplikasi: `app-rail`, `sidebar`, `nav-item`, `page`, `issue-row`, `board-card`, `content` (rich text), `comment`, `chat-window`, `inbox-item`, dan lainnya. Banyak di antaranya membawa state, seperti `data-status` dan `data-priority` pada baris issue.
+- **Slot** adalah atribut `data-slot` dari primitif UI: `button` (dengan `data-variant` dan `data-size`), `input`, `dialog-content`, `dropdown-menu-item`, dan lainnya.
+- **State pada `<html>`**: `.theme-light` / `.theme-dark`, `.is-desktop` / `.is-web`, `.mod-macos` / `.mod-windows` / `.mod-linux`, `.is-focused`, `.is-sidebar-collapsed`, `[data-theme="<id>"]`, dan `[data-theme-option-<id>]` milik tema itu sendiri.
+
+```css
+.mod-macos.is-desktop:not(.is-focused) [data-mc="app-rail"] { opacity: 0.7; }
+.theme-dark [data-mc="issue-row"][data-priority="urgent"] { box-shadow: inset 2px 0 var(--priority-urgent); }
+```
+
+[Referensi selector](https://github.com/multica-ai/multica/blob/main/docs/theming.md#selectors) mencantumkan setiap anchor beserta atributnya, dan setiap slot.
+
+## Yang tidak boleh dilakukan CSS
+
+Apa pun yang memuat resource akan ditolak, karena CSS dapat membaca konten halaman melalui selector atribut dan mengirimkannya keluar lewat request:
+
+- `url()` hanya boleh menunjuk file di folder tema (`url(fonts/serif.woff2)`) atau sebuah fragment (`url(#filter)`). Nilainya ditulis ulang menjadi URL `data:` dari file tersebut.
+- `@import`, `image()`, `image-set()`, `cross-fade()`, `element()`, `src()`, dan `expression()` ditolak, begitu juga `behavior` dan `-moz-binding`.
+
+Escape, huruf besar/kecil, dan komentar tidak dapat mengakali pemeriksaan ini; pemeriksa membaca CSS seperti yang dilakukan browser. Ketika sebuah tema gagal, tidak ada yang dipasang dan setiap masalah dicantumkan beserta barisnya di `theme.css`.
+
+`pnpm theme:check` juga menggagalkan tema yang:
+
+- memakai variabel yang tidak publik, kecuali variabel itu adalah id opsi atau dibaca sendiri oleh tema dengan `var()`;
+- menetapkan variabel di tempat selain `.theme-light` dan `.theme-dark` tanpa descendant selector, sehingga theme picker tidak dapat membaca kembali warna tema;
+- menyebut generic family (`sans-serif`, `serif`, …) atau keyword `ui-*` dalam font stack, yang akan menimpa font CJK milik pengguna;
+- tidak memenuhi kontras WCAG AA di salah satu mode: `--foreground` dan `--muted-foreground` memerlukan 4,5:1 pada setiap surface, `--brand` 4,5:1 pada surface bacaan, label tombol primary 4,5:1 pada tombolnya, dan `--faint-foreground` 3:1. Teks tooltip memerlukan 4,5:1 pada `--tooltip`, dan teks display chip yang ditekan 4,5:1 pada isiannya. Tooltip selalu memakai teks mode gelap, jadi tetapkan `--tooltip-foreground` untuk mengubahnya; chip yang ditekan terisi dengan `--input` kecuali Anda menetapkan `--display-chip-pressed-background`. Dengan backdrop, frame dan halaman diukur sebagai glass di atas `--backdrop-color`.
+
+## Periksa dan pratinjau
+
+Dari checkout [repositori Multica](https://github.com/multica-ai/multica):
+
+```bash
+pnpm theme:check path/to/paper          # a folder
+pnpm theme:check paper.zip --json       # a zip, as JSON for CI
+pnpm theme:preview path/to/paper --out preview   # preview/light.png and preview/dark.png
+```
+
+`theme:check` melaporkan error manifest, CSS yang diblokir, variabel non-publik, generic font family, dan kontras di kedua mode, masing-masing beserta barisnya di `theme.css`, dan keluar dengan status 1 jika ada error. Peringatan, seperti warna yang tidak dapat diselesaikan, tidak membuatnya gagal.
+
+`theme:preview` merender screenshot yang ditampilkan theme store: daftar issue di samping sebuah issue yang terbuka, dibangun dari style bawaan aplikasi, dengan tema pada nilai default opsinya.
+
+Jika sebuah tema menyembunyikan atau merusak bagian antarmuka saat Anda mengerjakannya, buka aplikasi dengan `?theme=default`, atau tahan **Shift** tepat setelah aplikasi dimuat; lihat [When a theme breaks something](/themes#saat-tema-merusak-sesuatu).
+
+Pemeriksa juga dapat dijalankan tanpa menginstal repositori, dari sparse clone dan Node 22.18 atau lebih baru. Agent mendapatkan command yang sama dari skill Multica bawaan mereka:
+
+```bash
+git clone --depth 1 --filter=blob:none --sparse https://github.com/multica-ai/multica.git multica-themes
+git -C multica-themes sparse-checkout set docs scripts packages/core packages/ui
+node multica-themes/scripts/theme-check.mjs path/to/paper
+```
+
+## Publikasikan ke theme store
+
+Theme store menampilkan tema dari registry [multica-ai/multica-themes](https://github.com/multica-ai/multica-themes). [Panduan kontribusinya](https://github.com/multica-ai/multica-themes/blob/main/CONTRIBUTING.md) memuat detailnya; singkatnya:
+
+<Steps>
+<Step>
+
+### Beri tema repositorinya sendiri
+
+Simpan tema di repositori GitHub publik. [multica-ai/multica-theme-sample](https://github.com/multica-ai/multica-theme-sample) adalah template dengan workflow rilis.
+
+</Step>
+<Step>
+
+### Publikasikan rilis
+
+Beri tag rilis dengan `version` dari manifest (`1.0.0` atau `v1.0.0`) dan lampirkan tema yang sudah di-zip sebagai `theme.zip`.
+
+</Step>
+<Step>
+
+### Tambahkan ke registry
+
+Buka pull request yang menambahkan file `themes/<id>.json`, dinamai sesuai `id` manifest, ke registry. Setiap tema memiliki file sendiri, sehingga pull request untuk tema yang berbeda tidak saling konflik. Pull request tersebut menjalankan `theme:check` dan `theme:preview` pada rilis, lalu mengomentari hasilnya; maintainer akan melakukan merge setelah lolos.
+
+</Step>
+</Steps>
+
+Rilis baru sampai ke store dalam sekitar satu jam, setelah lolos pemeriksaan yang sama; pengguna yang sudah memasang tema tersebut kemudian melihat pembaruan. Rilis yang gagal membuat rilis sebelumnya tetap ditampilkan. Aplikasi hanya memasang `theme.zip` persis yang telah lolos, dan membacanya dengan parser dan pemeriksaan CSS yang sama seperti tema yang diimpor.
+
+Setiap kartu di store menampilkan berapa kali tema tersebut telah diunduh dari server Multica itu. Setiap instalasi dan setiap pembaruan dihitung satu kali, dan tema yang belum dipasang pengguna ditampilkan dengan yang paling banyak diunduh di urutan teratas.
+
+## Langkah selanjutnya
+
+- [Tema dan tampilan](/themes) — memasang, memperbarui, dan menghapus tema.
+- [`docs/theming.md`](https://github.com/multica-ai/multica/blob/main/docs/theming.md) — referensi variabel dan selector yang dihasilkan otomatis.

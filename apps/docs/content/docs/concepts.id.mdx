@@ -3,7 +3,9 @@ title: Konsep inti
 description: Semua objek inti Multica dan bagaimana hubungannya, dalam satu halaman.
 ---
 
-![Diagram objek inti Multica: di dalam sebuah Ruang Kerja, sebuah Tugas memicu Agent melalui penugasan atau mention, Agent membuat Eksekusi, Eksekusi berjalan pada runtime, dan hasilnya ditulis kembali ke Tugas; Obrolan dan Otomatisasi adalah dua sumber pemicu lainnya, skill dan squad terpasang pada Agent, Proyek mengorganisasi Tugas, dan notifikasi masuk ke Kotak Masuk](/images/docs/concepts-core-objects.webp)
+import { ConceptMapDemo } from "@/components/demos/concept-map-demo";
+
+<ConceptMapDemo />
 
 ## Objek dasar
 
@@ -49,7 +51,7 @@ Cara berbicara yang tidak terikat pada sebuah Tugas — cocok untuk pertanyaan d
 
 ### Kotak Masuk
 
-Pusat notifikasi seorang Anggota: aktivitas pada Tugas yang diikuti, mention, dan penugasan semuanya masuk ke sini. Agent tidak menggunakan Kotak Masuk. Lihat [Kotak Masuk dan langganan](/inbox).
+Pusat notifikasi seorang Anggota: aktivitas pada Tugas yang diikuti, mention, dan penugasan semuanya masuk ke sini. Agent menerima Eksekusi secara langsung; membaca notifikasi aktif atau terarsip milik owner runtime memerlukan Eksekusi yang dipicu oleh owner tersebut. Lihat [Kotak Masuk dan langganan](/inbox).
 
 ### Otomatisasi
 
@@ -61,10 +63,10 @@ Memicu Eksekusi Agent secara otomatis berdasarkan jadwal atau dari event ekstern
 - Sebuah **Tugas** mencatat sebuah pekerjaan; Tugas-Tugas yang terkait diorganisasi dengan **Proyek**.
 - Penugasan, @-mention, **Obrolan**, atau **Otomatisasi** memicu Agent, menghasilkan sebuah **Eksekusi**.
 - Eksekusi selesai pada sebuah **runtime**, dan hasilnya ditulis kembali ke tempat ia dipicu.
-- **Skill** memungkinkan cara kerja yang berhasil digunakan ulang di berbagai Agent; **squad** memungkinkan beberapa Agent bekerja bersama.
+- **Skill** dipasang pada Agent, sehingga cara kerja yang berhasil digunakan ulang di berbagai Agent; **squad** memungkinkan beberapa Agent bekerja bersama.
 - Setiap notifikasi untuk manusia di sepanjang proses masuk ke **Kotak Masuk**.
 
 ## Langkah selanjutnya
 
-- [Libatkan Agent untuk bekerja](/triggering-agents) — titik masuk untuk empat metode pemicu.
+- [Libatkan Agent untuk bekerja](/triggering-agents) — pilih cara memulai Agent sesuai kebutuhan Anda.
 - [Cara kerja Multica](/how-multica-works) — alur lengkap sebuah Eksekusi.

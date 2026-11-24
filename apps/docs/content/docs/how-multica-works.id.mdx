@@ -4,12 +4,13 @@ description: Multica mencatat dan mengoordinasikan pekerjaan; komputer yang terh
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { RunPathDemo } from "@/components/demos/run-path-demo";
 
 Ketika Anda menugaskan sebuah Tugas ke seorang Agent, Multica membuat sebuah Eksekusi yang akan diklaim oleh runtime pada komputer yang terhubung. Runtime tersebut memanggil alat coding AI lokal dan menulis progres serta hasil kembali ke Tugas aslinya.
 
 ## Alur lengkap sebuah Eksekusi
 
-![Diagram sebuah Eksekusi: di sebelah kiri, area Multica mencatat dan menjadwalkan — sebuah Tugas memicu pembuatan Eksekusi; di sebelah kanan, pada area "komputer Anda", daemon mengklaim Eksekusi, menjalankan alat coding AI, serta membaca dan menulis working directory; pesan progres mengalir kembali secara real time ke log eksekusi, dan daemon menulis hasil akhir kembali ke Tugas](/images/docs/how-a-run-works.webp)
+<RunPathDemo />
 
 1. **Tugas menyediakan konteks.** Tugas menyimpan deskripsi pekerjaan, diskusi, dan Penerima Tugas. Saat ditugaskan ke seorang Agent, sistem menggunakan instructions, model, skill, dan konfigurasi runtime Agent tersebut.
 2. **Multica membuat Eksekusi.** Eksekusi tersebut masuk ke antrean; jika tidak ada runtime yang online, ia akan menunggu di sana.
@@ -35,11 +36,11 @@ Satu pengecualian: apa pun yang disimpan ke `custom_env` milik Agent disimpan di
 
 ## Bagaimana Agent dipicu
 
-Agent tidak pernah memulai pekerjaan dengan sendirinya — setiap Eksekusi dipicu oleh sebuah aksi eksplisit: menugaskan sebuah Tugas, me-mention Agent dengan @ dalam sebuah Komentar, mengajaknya Obrolan langsung, atau Otomatisasi. Untuk cara memilih di antara keempatnya dan aturan yang mereka bagi, lihat [Libatkan Agent untuk bekerja](/triggering-agents).
+Agent tidak pernah memulai pekerjaan dengan sendirinya — setiap Eksekusi dipicu oleh sebuah aksi eksplisit: menugaskan sebuah Tugas, me-mention Agent dengan @ dalam sebuah Komentar, mengajaknya Obrolan langsung, atau Otomatisasi. Untuk cara memilih di antaranya dan aturan yang mereka bagi, lihat [Libatkan Agent untuk bekerja](/triggering-agents).
 
 ## Penyelesaian Eksekusi dan penyelesaian Tugas
 
-Ketika log eksekusi menunjukkan Completed, itu hanya berarti satu Eksekusi telah berakhir. Tugas tersebut masih dapat menerima diskusi lebih lanjut, penambahan requirement, atau pemicu Agent lainnya. Apakah Tugas tersebut sudah selesai bergantung pada progres aktual pekerjaan dan statusnya.
+Ketika log eksekusi menunjukkan Completed, itu hanya berarti satu Eksekusi telah berakhir. Tugas tersebut masih dapat menerima diskusi lebih lanjut, penambahan requirement, atau pemicu Agent lainnya; apakah Tugas tersebut sudah selesai bergantung pada progres aktual pekerjaan dan statusnya.
 
 ## Langkah selanjutnya
 

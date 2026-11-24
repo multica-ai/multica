@@ -1,13 +1,12 @@
 ---
-title: Perbandingan alat pengkodean AI
-description: Bandingkan alat pengkodean AI yang didukung Multica, dan bagaimana model, MCP, sesi, dan skill berbeda satu sama lain.
+title: Alat pengkodean AI yang didukung
+description: 31 alat pengkodean AI yang bekerja dengan Multica, termasuk Claude Code, Codex, Cursor, dan Copilot, serta perbedaan deteksi, model, MCP, sesi, steering, dan skill antar-tool.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { ProviderPickerDemo } from "@/components/demos/provider-picker-demo";
 
-Multica tidak menggantikan alat pengkodean AI yang Anda gunakan. Sebuah runtime menjalankan tool yang sudah terinstal dan sudah masuk di komputer tersebut, lalu menulis progres dan hasil kembali ke tugas.
-
-Jika Anda sudah menggunakan salah satu tool ini, Anda biasanya dapat tetap memakainya seperti sekarang. Empat hal yang perlu dipertimbangkan saat memilih:
+Multica bekerja dengan 31 alat pengkodean AI. Multica tidak menggantikan alat yang Anda gunakan: sebuah runtime menjalankan tool yang sudah terinstal dan sudah masuk di komputer tersebut, lalu menulis progres dan hasil kembali ke issue. Jika Anda sudah menggunakan salah satu tool ini, Anda biasanya dapat tetap memakainya, dan agent yang berbeda dalam satu workspace dapat menggunakan tool yang berbeda. Jika Anda belum memilih, pertimbangkan empat hal:
 
 - apakah sudah terinstal di komputer tersebut;
 - model mana yang dapat digunakan akun Anda;
@@ -18,35 +17,91 @@ Langkah instalasi ada di [Instal alat pengkodean AI](/install-agent-runtime).
 
 ## Tool yang didukung
 
-| Tool | Perintah yang dideteksi | Resumpsi sesi | MCP terkelola Multica | Jalur injeksi skill |
-|---|---|---:|---:|---|
-| Antigravity | `agy` | ✓ | — | `.agents/skills/` |
-| Claude Code | `claude` | ✓ | ✓ | `.claude/skills/` |
-| CodeBuddy | `codebuddy` | ✓ | ✓ | `.codebuddy/skills/` |
-| CodeArts | `codearts` | ✓ | ✓ | `.codeartsdoer/skills/` |
-| Codex | `codex` | ✓ | ✓ | `$CODEX_HOME/skills/` |
-| GitHub Copilot CLI | `copilot` | ✓ | — | `.github/skills/` |
-| Cursor Agent | `cursor-agent` | ✓ | ✓ | `.cursor/skills/` |
-| DeepSeek Harness | `dsh` | ✓ | ✓ | `.dsh/skills/` |
-| DevEco Code | `deveco` | ✓ | — | `.deveco/skills/` |
-| Grok | `grok` | ✓ | ✓ | `.grok/skills/` |
-| Hermes | `hermes` | ✓ | ✓ | per-run `HERMES_HOME/skills/` |
-| Kimi CLI | `kimi` | ✓ | ✓ | `.kimi/skills/` |
-| Kiro CLI | `kiro-cli` | ✓ | ✓ | `.kiro/skills/` |
-| MiniMax Code | `mcode` | — | ✓ | `.minimax/skills/` |
-| OpenClaw | `openclaw` | ✓ | ✓ | `skills/` |
-| OpenCode | `opencode` | ✓ | ✓ | `.opencode/skills/` |
-| Pi | `pi` | ✓ | — | `.pi/skills/` |
-| Oh-My-Pi | `omp` | ✓ | ✓ | `.omp/skills/` |
-| Qoder CLI | `qodercli` | ✓ | ✓ | `.qoder/skills/` |
-| Qoder CN CLI | `qoderclicn` | ✓ | ✓ | `.qoder/skills/` |
-| Qwen Code | `qwen` | ✓ | ✓ | `.qwen/skills/` |
-| QwenPaw | `qwenpaw` | ✓ | ✓ | per-run workspace `skills/` |
-| Reasonix | `reasonix` | ✓ | ✓ | `.reasonix/skills/` |
-| Trae CLI | `traecli` | ✓ | ✓ | `.traecli/skills/` |
-| Dim | `dim` | ✓ | ✓ | — |
+<ProviderPickerDemo />
 
-"MCP terkelola Multica" berarti Anda dapat mendefinisikan server MCP di konfigurasi agent dan Multica meneruskannya ke tool tersebut sebelum sebuah eksekusi berjalan. Ini tidak berarti tool tersebut tidak memiliki cara lain untuk mengonfigurasi MCP.
+| Tool | Perintah yang dideteksi | Resumpsi sesi | MCP terkelola Multica | Model dipilih di Multica | Jalur injeksi skill |
+|---|---|---:|---:|---:|---|
+| Antigravity | `agy` | ✓ | — | ✓ | `.agents/skills/` |
+| Claude Code | `claude` | ✓ | ✓ | ✓ | `.claude/skills/` |
+| CodeBuddy | `codebuddy` | ✓ | ✓ | ✓ | `.codebuddy/skills/` |
+| CodeArts | `codearts` | ✓ | ✓ | ✓ | `.codeartsdoer/skills/` |
+| Codex | `codex` | ✓ | ✓ | ✓ | `$CODEX_HOME/skills/` |
+| GitHub Copilot CLI | `copilot` | ✓ | — | ✓ | `.github/skills/` |
+| Cursor Agent | `cursor-agent` | ✓ | ✓ | ✓ | `.cursor/skills/` |
+| DeepSeek Harness | `dsh` | ✓ | ✓ | ✓ | `.dsh/skills/` |
+| DevEco Code | `deveco` | ✓ | — | ✓ | `.deveco/skills/` |
+| Grok | `grok` | ✓ | ✓ | ✓ | `.grok/skills/` |
+| Hermes | `hermes` | ✓ | ✓ | ✓ | per-run `HERMES_HOME/skills/` |
+| Kimi CLI | `kimi` | ✓ | ✓ | ✓ | `.kimi/skills/` |
+| Kiro CLI | `kiro-cli` | ✓ | ✓ | ✓ | `.kiro/skills/` |
+| MiniMax Code | `mcode` | — | ✓ | — | `.minimax/skills/` |
+| Muse Code | `muse` | ✓ | — | ✓ | `.agents/skills/` |
+| Devin CLI | `devin` | ✓ | ✓ | ✓ | `.devin/skills/` |
+| OpenClaw | `openclaw` | ✓ | ✓ | ✓ | `skills/` |
+| OpenCode | `opencode` | ✓ | ✓ | ✓ | `.opencode/skills/` |
+| Pi | `pi` | ✓ | ✓ | ✓ | `.pi/skills/` |
+| Oh-My-Pi | `omp` | ✓ | ✓ | ✓ | `.omp/skills/` |
+| Qoder CLI | `qodercli` | ✓ | ✓ | ✓ | `.qoder/skills/` |
+| Qoder CN CLI | `qoderclicn` | ✓ | ✓ | ✓ | `.qoder/skills/` |
+| Qwen Code | `qwen` | ✓ | ✓ | ✓ | `.qwen/skills/` |
+| QwenPaw | `qwenpaw` | ✓ | ✓ | — | per-run workspace `skills/` |
+| Amp | `amp` | ✓ | — | Mode | `.agents/skills/` |
+| Factory Droid | `droid` | ✓ | — | ✓ | `.factory/skills/` |
+| Reasonix | `reasonix` | ✓ | ✓ | ✓ | `.reasonix/skills/` |
+| Trae CLI | `traecli` | ✓ | ✓ | ✓ | `.traecli/skills/` |
+| Dim | `dim` | ✓ | ✓ | ✓ | — |
+| ZeroClaw | `zeroclaw` | ✓ | — | — | — |
+| ZCode | `zcode` / ZCode Desktop | ✓ | ✓ | ✓ | `.zcode/skills/` |
+
+<Callout type="info">
+Gemini CLI tidak didukung. Gemini CLI sudah dihapus dari tool bawaan, jadi halaman yang mencantumkan Gemini di antara tool yang dijalankan Multica sudah usang.
+</Callout>
+
+Untuk Claude Code, Multica mendaftar dan mengimpor skill pengguna dan plugin dari `CLAUDE_CONFIG_DIR` absolut yang diatur di environment daemon. Path yang hanya diatur di dalam launch wrapper tidak terlihat oleh scanner.
+
+Untuk Amp, field model memilih **mode** Amp, seperti `high`, bukan ID model dasarnya. Biarkan kosong untuk memakai default Amp.
+
+Amp juga membutuhkan `AMP_API_KEY` di environment daemon atau agent; login interaktif yang tersimpan saja tidak cukup.
+
+"MCP terkelola Multica" berarti Anda dapat mendefinisikan server MCP di konfigurasi agent dan Multica meneruskannya ke tool tersebut sebelum sebuah eksekusi berjalan. Kolom ini hanya menyatakan apakah Multica dapat mengonfigurasinya untuk Anda, bukan apakah tool tersebut memiliki cara lain untuk mengonfigurasi MCP.
+
+Tool dengan — pada kolom "Model dipilih di Multica" mengambil modelnya dari konfigurasinya sendiri; lihat [Sumber model](#sumber-model).
+
+Devin mendukung server MCP stdio; entri HTTP/SSE hanya diteruskan jika CLI mengiklankan dukungannya. Skill Devin diimpor dari `$XDG_CONFIG_HOME/devin/skills` (default `~/.config/devin/skills`) atau `%APPDATA%\devin\skills` di Windows, lalu root lama `cognition/skills`, lalu `~/.codeium/<channel>/skills` (`windsurf`, `windsurf-next`, `windsurf-insiders`, dengan urutan tersebut), dan terakhir `~/.agents/skills`. Pada key skill yang duplikat, root pertama yang menang untuk listing maupun impor.
+
+## Menghubungkan sebuah tool
+
+Setiap tool pada tabel terhubung dengan cara yang sama: daemon Multica di sebuah komputer mencari command setiap tool di `PATH` dan mendaftarkan satu runtime untuk setiap tool yang ditemukan. Eksekusi berjalan di komputer itu, dengan login dan subscription milik tool itu sendiri; Multica tidak menyertakan tool tersebut maupun memproksi panggilan modelnya.
+
+1. Instal tool dan masuk ke dalamnya, sesuai yang dijelaskan dokumentasinya sendiri.
+2. Di komputer yang sama, buka [Multica Desktop](/desktop-app), yang menghubungkan komputer secara otomatis, atau instal CLI dan jalankan daemon:
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+   multica setup
+   ```
+
+   Di Windows, gunakan `irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex` untuk baris pertama. Instance hosting mandiri menggunakan command di [Panduan cepat hosting mandiri](/self-host-quickstart).
+3. Pastikan tool tersebut muncul sebagai runtime di bawah komputer itu pada halaman **Runtimes**, atau dengan `multica runtime list`. Setelah menginstal tool lain, jalankan `multica daemon restart` atau buka ulang Desktop.
+4. [Buat agent](/agents-create) pada runtime tersebut dan tugaskan sebuah issue kepadanya.
+
+Jika tool terinstal di lokasi yang tidak dijangkau `PATH` daemon, arahkan `MULTICA_<PREFIX>_PATH` ke sana; lihat [Variabel lingkungan](/environment-variables#konfigurasi-daemon). Satu komputer dapat menjalankan beberapa tool, dan sebuah workspace dapat memadukan beberapa komputer, sehingga tim dapat menjalankan Claude Code di satu mesin dan Codex atau Kimi di mesin lain dari board yang sama.
+
+## Mengarahkan eksekusi yang sedang berjalan
+
+Anda dapat [menambahkan pesan ke eksekusi yang masih berjalan](/mentioning-agents#mengarahkan-agent-yang-sedang-berjalan) alih-alih menunggu eksekusi berikutnya. Ini membutuhkan dukungan dari alat pengkodean AI-nya, dan dari versi berikut ke atas:
+
+| Tool | Versi minimum |
+|---|---|
+| Antigravity | 1.4.8 |
+| Claude Code | 2.1.110 |
+| Codex | 0.100.0 |
+| Cursor Agent | 2026.10.14 |
+| Grok | 1.0.14 |
+| Kiro CLI | 2.33.0 |
+| Pi | 1.4.0 |
+
+Dengan tool lain atau versi yang lebih lama, **Add to current run** tidak ditawarkan: balasan ditangani dalam eksekusi baru setelah eksekusi saat ini, atau Anda menghentikan eksekusi saat ini dan memulai dari awal.
 
 ## Sumber model
 
@@ -54,29 +109,41 @@ Saat Anda membuat sebuah agent, daftar model berasal dari runtime yang bersangku
 
 Jika Anda tidak memilih sebuah model, Multica menggunakan default milik tool itu sendiri. Jika daftarnya kosong, pastikan runtime-nya online dan tool-nya sudah masuk, lalu segarkan daftar model.
 
-QwenPaw dan MiniMax Code adalah pengecualian: keduanya tidak menerima model yang dipilih dari Multica, sehingga pemilihnya tidak aktif dan menampilkan "Managed by runtime". Pilih model di konfigurasi tool itu sendiri. Daftar model yang kosong di sana memang wajar dan bukan tanda bahwa runtime-nya offline.
+Untuk Kiro CLI, pemilih **Thinking** pada pembuatan agent dan pengaturan menampilkan level effort yang diiklankan untuk model yang dipilih. Pilihan ini berlaku untuk sesi baru dan sesi yang dilanjutkan. Biarkan tidak diatur untuk memakai pengaturan effort milik Kiro sendiri. Model atau versi CLI yang tidak mengembalikan opsi effort membuat pemilih tetap tersembunyi.
+
+Pemilih Devin menampilkan pilihan model yang diiklankan oleh sesi ACP-nya. Pilih ID model kanonis, nama model sesi yang tidak ambigu atau slug/alias family katalog (seperti `opus`), atau biarkan model kosong untuk default CLI. Alias family yang membutuhkan `devin models list` masih bisa memerlukan login CLI yang tersimpan; jika resolusi alias gagal, pilih ID model dari pemilih. Multica mengonfirmasi model sesi yang sebenarnya sebelum mengirim prompt; fallback ke family lain ditolak. Nama yang ambigu, nama parsial sembarang, atau varian yang tidak tersedia memerlukan ID kanonis, bukan tebakan. Penggunaan diatribusikan ke model yang dilaporkan, bukan ke flag peluncuran. Penggunaan Adaptive tetap berada di bawah ID Adaptive routing yang dilaporkan, bukan model dasar hasil inferensi.
+
+Devin membaca `WINDSURF_API_KEY` bila diatur, jika tidak maka login yang disimpan oleh `devin auth login`; metode auth ACP yang tidak dikenal tidak memblokir login tersimpan tersebut. Penemuan model menggunakan kredensial pengguna daemon: key yang hanya diatur di environment kustom agent tidak tersedia bagi pemilih model runtime. Daftar model sesi yang kosong akan meminta Anda memeriksa kredensial tersebut dan allowlist model tim Anda. Multica mempertahankan mode sesi Devin yang dikonfigurasi alih-alih menaikkan izin. Jika defaultnya `plan`, beralihlah ke mode pengeditan di Devin sebelum mengirim pekerjaan yang harus mengubah file.
+
+QwenPaw, MiniMax Code, dan ZeroClaw adalah pengecualian: ketiganya tidak menerima model yang dipilih dari Multica, sehingga pemilihnya tidak aktif dan menampilkan "Managed by runtime". Pilih model di konfigurasi tool itu sendiri. Daftar model yang kosong untuk tool ini memang wajar dan bukan tanda bahwa runtime-nya offline.
+
+Untuk Antigravity, gunakan pemilih model untuk memilih varian reasoning persis yang ditampilkan oleh `agy models`, termasuk sufiks apa pun. Multica tidak memiliki pengaturan **Thinking** terpisah untuk Antigravity. Jika Anda meneruskan `--effort` di argumen kustom, Antigravity memeriksa apakah itu dapat dikombinasikan dengan model yang dipilih.
 
 DeepSeek Harness menampilkan katalog modelnya dari runtime itu sendiri (`dsh --profile multica --list-models`). ID model-nya menggunakan bentuk `provider/model` (misalnya `deepseek-official/deepseek-chat`), jadi pilih id lengkapnya dari daftar tersebut.
 
 <Callout type="info">
-Tool yang berbeda dapat menggunakan nama model yang berbeda. Setelah beralih alat pengkodean AI, nilai model sebelumnya tidak valid di tool yang baru dan perlu dipilih ulang.
+Nama model tidak dibagikan antar-tool. Setelah beralih alat pengkodean AI, nilai model sebelumnya tidak valid di tool yang baru dan perlu dipilih ulang.
 </Callout>
 
 ## Resumpsi sesi
 
-Semua tool yang ditandai ✓ mendukung melanjutkan sesi yang sudah ada pada eksekusi selanjutnya. Prasyaratnya adalah sesi aslinya masih ada dan eksekusi tersebut dijalankan oleh sebuah runtime yang dapat menjangkaunya. MiniMax Code 0.1.2 tidak mengiklankan kemampuan memuat sesi lewat ACP, sehingga Multica memulai sesi MCode baru untuk eksekusi selanjutnya.
+Tool yang ditandai ✓ dapat melanjutkan sesi yang sudah ada pada eksekusi selanjutnya, dengan syarat sesi aslinya masih ada dan eksekusi tersebut dijalankan oleh sebuah runtime yang dapat menjangkaunya. MiniMax Code 0.1.2 tidak mengiklankan kemampuan memuat sesi lewat ACP, sehingga Multica memulai sesi MCode baru untuk eksekusi selanjutnya.
 
-Multica menyimpan identifier sesi yang dikembalikan tool tersebut. Saat pekerjaan berikutnya berlanjut pada tugas yang sama, runtime mencoba melanjutkan sesi itu; jika tidak dapat, runtime membuat sesi baru dan melanjutkan. Pi menyimpan path file sesi lokal, sehingga lebih bergantung pada komputer dan file aslinya.
+Multica menyimpan identifier sesi yang dikembalikan tool tersebut. Saat pekerjaan berikutnya berlanjut pada issue yang sama, runtime mencoba melanjutkan sesi itu; jika tidak dapat, runtime membuat sesi baru dan melanjutkan. Pi menyimpan path file sesi lokal, sehingga lebih bergantung pada komputer dan file aslinya.
 
 Aturan percobaan ulang dan resumpsi sesi ada di [Eksekusi](/tasks#percobaan-ulang-manual).
 
 ## Konfigurasi MCP
 
-Antigravity, GitHub Copilot CLI, DevEco Code, dan Pi belum membaca konfigurasi MCP pada sebuah agent, sehingga field tersebut tidak ditampilkan saat membuat agent untuk tool-tool itu.
+Amp, Factory Droid, Antigravity, GitHub Copilot CLI, DevEco Code, Muse Code, dan ZeroClaw belum membaca konfigurasi MCP pada sebuah agent, sehingga field tersebut tidak ditampilkan saat membuat agent untuk tool-tool itu.
+
+Pengiriman MCP terkelola untuk Pi membutuhkan Pi 0.99.0 atau lebih baru. Versi Pi yang lebih lama tetap menjalankan agent yang tidak memiliki konfigurasi MCP.
 
 <Callout type="warning">
 Perintah, argumen, dan environment variable server MCP disimpan di server bersama konfigurasi agent. Jangan menuliskan kredensial lokal yang tidak perlu Anda bagikan ke dalam konfigurasi tersebut.
 </Callout>
+
+Server yang sudah dikonfigurasi di mesin runtime digabungkan dengan konfigurasi agent di mesin tersebut; lihat [Konfigurasi MCP lokal](/daemon-runtimes#local-mcp).
 
 ## Injeksi skill
 
@@ -97,3 +164,9 @@ Untuk membuat dan mengikat skill, lihat [Skills](/skills).
 - [Buat dan konfigurasikan agent](/agents-create) — pengaturan model dan thinking-effort.
 - [Instal alat pengkodean AI](/install-agent-runtime) — langkah instalasi dan deteksi.
 - [Daemon dan runtime](/daemon-runtimes) — registrasi runtime dan konkurensi.
+
+## ZCode
+
+ZCode menggunakan protokol `app-server` NDJSON native miliknya untuk pembuatan sesi, resumpsi, pembatalan, penemuan model, level thinking, dan MCP. Task berjalan dalam mode yolo tanpa persetujuan tool interaktif. Pilihan reasoning berasal dari katalog model runtime; membuat agent mempertahankan level default model yang dipilih.
+
+Di macOS, daemon juga menemukan CLI bawaan ZCode Desktop; Node.js harus terinstal. Di Linux, daemon menemukan ZCode Desktop dan menjalankan CLI bawaannya tanpa membuka jendela desktop; tidak diperlukan instalasi Node.js terpisah maupun konfigurasi environment manual. Koneksi API-key/Coding Plan desktop yang diaktifkan diimpor ke konfigurasi provider sementara yang privat bagi proses, yang dihapus saat keluar tanpa mengubah file aslinya. Token identitas Start Plan bukan API key dan jalur autentikasi akun ini tidak didukung. Konfigurasikan koneksi API yang berfungsi di ZCode Desktop jika penemuan tidak mengembalikan model.

@@ -4,6 +4,7 @@ description: Kemas instruksi, langkah-langkah, dan materi referensi yang berulan
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { SkillDemo } from "@/components/demos/skill-demo";
 
 Skill adalah kumpulan metode kerja yang dapat digunakan kembali di dalam sebuah ruang kerja. File utamanya adalah `SKILL.md`, yang secara opsional dapat disertai dengan script, template, dan materi referensi.
 
@@ -48,10 +49,10 @@ multica skill refresh <skill-id>
 
 Skill tersebut diunduh ulang dari sumbernya dan diganti di tempat:
 
-- **Dipertahankan**: identitas skill tersebut — penugasan ke agent, label, pembuat, dan tanggal pembuatan. Agent tetap memiliki skill tersebut tanpa perlu menambahkannya kembali.
+- **Dipertahankan**: identitas skill tersebut, termasuk penugasan ke agent, label, pembuat, dan tanggal pembuatan. Agent tetap memiliki skill tersebut tanpa perlu menambahkannya kembali.
 - **Diganti**: nama (jika sumbernya mengganti namanya), deskripsi, `SKILL.md`, dan semua file pendukung. Edit lokal pada skill tersebut akan ditimpa.
 
-Pembuat skill dan `owner` / `admin` ruang kerja dapat memperbarui dari sumbernya. Skill yang dibuat secara manual, diimpor dari file arsip, atau disalin dari sebuah runtime tidak memiliki sumber yang di-hosting dan tidak dapat diperbarui dengan cara ini — impor ulang sebagai gantinya.
+Pembuat skill dan `owner` / `admin` ruang kerja dapat memperbarui dari sumbernya. Skill yang dibuat secara manual, diimpor dari file arsip, atau disalin dari sebuah runtime tidak memiliki sumber yang di-hosting dan tidak dapat diperbarui dengan cara ini; impor ulang sebagai gantinya.
 
 Untuk memperbarui beberapa skill sekaligus, pilih skill-skill tersebut di daftar skill dan pilih **Update** pada toolbar pemilihan. Setiap skill yang dipilih dan memiliki sumber yang di-hosting akan diunduh ulang dari sumbernya; skill yang tidak memilikinya akan dilewati.
 
@@ -76,9 +77,13 @@ scripts/check.sh
 
 `SKILL.md` adalah path yang dicadangkan; file pendukung tidak dapat menggunakan nama tersebut. File pendukung diserahkan ke agent bersama dengan file utamanya.
 
+Saat membuat atau mengedit skill, setiap file, termasuk `SKILL.md`, maksimal 1 MiB teks UTF-8. Sebuah skill dapat berisi hingga 512 file pendukung dengan total maksimal 8 MiB; `SKILL.md` dibatasi secara terpisah dan tidak dihitung dalam total tersebut. Penyimpanan yang melebihi batas ditolak dan versi yang ada dipertahankan. Pecah file yang besar atau kurangi ukurannya sebelum menyimpan.
+
 ## Melampirkan ke agent
 
-Setelah membuat atau mengimpor sebuah skill, skill tersebut masih perlu ditambahkan ke agent tertentu. Pilih agent pada halaman skill, atau kelola binding-nya dari tab **Skills** milik agent.
+Setelah membuat atau mengimpor sebuah skill, Anda masih perlu menambahkannya ke agent tertentu: pilih **Add to agent** pada halaman skill, atau buka tab **Skills** milik agent dan klik **Add skill**. Agent memutuskan kapan memuat sebuah skill berdasarkan deskripsinya.
+
+<SkillDemo />
 
 - Satu agent dapat menggunakan beberapa skill;
 - satu skill dapat melayani beberapa agent;
@@ -93,7 +98,15 @@ Skill ruang kerja disimpan di Multica — cocok untuk skill yang dikelola bersam
 
 Beberapa AI coding tool juga membaca skill tingkat proyek langsung dari repositori kode, seperti `.claude/skills/` atau `.agents/skills/`. File-file tersebut tetap dikelola oleh repositori; Multica tidak secara otomatis mendaftarkannya sebagai skill ruang kerja. Dukungannya bergantung pada tool yang digunakan — lihat [Perbandingan AI coding tool](/providers).
 
-Skill lokal-runtime yang sudah terpasang pada komputer yang terhubung (Claude Code dan Codex) muncul di tab **Skills** milik agent dan dapat dinonaktifkan per agent. Menonaktifkannya juga membutuhkan izin untuk mengubah agent tersebut.
+Tab **Skills** milik agent dapat menampilkan skill lokal-runtime yang terpasang pada komputer yang terhubung. Di Multica, penonaktifan per agent tersedia untuk Claude Code dan Codex dan membutuhkan izin untuk mengubah agent tersebut.
+
+Untuk Oh-My-Pi, daftar yang diwarisi dan salinan runtime mengikuti profil yang dipilih oleh command runtime dan filter skill efektifnya. Penemuan (discovery) berjalan di direktori kosong dan mencakup konfigurasi tingkat pengguna; pengaturan proyek dan skill Multica yang ditugaskan secara eksplisit bersifat terpisah. Jika OMP tidak dapat mengembalikan roster skill-nya, refresh melaporkan error.
+
+### Memeriksa pengiriman skill dan pemanggilan tool [#skill-execution]
+
+Di log eksekusi tugas, buka eksekusinya dan pilih ikon **Context received**. Tanda terima mencantumkan skill ruang kerja untuk eksekusi tersebut. Skill yang ditandai **Not verified** dengan path file berarti Multica telah menulis paket skill lengkap ke lokasi itu. Apakah runtime membaca atau menjalankan skill tersebut masih belum terverifikasi. **Not delivered** berarti pengiriman gagal.
+
+Baris tool menampilkan pemanggilan yang dilaporkan runtime. Jika OpenCode menjalankan script skill secara langsung, log mungkin hanya menampilkan shell command-nya. Periksa output tool untuk melihat apa yang dijalankan.
 
 ## Izin edit
 

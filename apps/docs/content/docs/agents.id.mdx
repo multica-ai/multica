@@ -4,10 +4,11 @@ description: Agent adalah kumpulan identitas, kapabilitas, dan konfigurasi eksek
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { AgentAccessDemo } from "@/components/demos/agent-access-demo";
 
 Agent adalah kolaborator di dalam [ruang kerja Multica](/workspaces). Anda dapat menugaskan tugas kepadanya, @-mention di dalam komentar, atau mengobrol langsung dengannya. Agent menjalankan AI coding tool melalui runtime yang terikat padanya dan menuliskan progres serta hasilnya kembali ke ruang kerja.
 
-Agent bukanlah proses yang berjalan secara terus-menerus. Agent adalah identitas dan konfigurasi yang dapat digunakan kembali; ia hanya menghasilkan [eksekusi](/tasks) konkret saat pekerjaan tiba.
+Agent tidak terus berjalan di latar belakang. Agent menyimpan identitas dan konfigurasi yang dapat digunakan kembali, dan menghasilkan [eksekusi](/tasks) konkret hanya saat pekerjaan tiba.
 
 ## Konfigurasi agent
 
@@ -46,23 +47,31 @@ Agent dapat membuat tugas, memposting komentar, dan mengubah status pekerjaan, t
 
 ## Izin dan Akses
 
-Setiap agent memiliki satu owner dan sebuah pengaturan Akses:
+Setiap agent memiliki satu owner dan sebuah pengaturan Akses. Akses menentukan siapa yang dapat menjalankan agent, yaitu menugaskan tugas kepadanya, @-mention di komentar, atau mengobrol dengannya:
 
 | Akses | Siapa yang dapat menjalankannya |
 |---|---|
 | **Hanya saya** | Hanya owner agent. |
-| **Seluruh ruang kerja** | Setiap anggota ruang kerja. |
+| **Seluruh ruang kerja** | Anggota dengan role `owner`, `admin`, atau `member`. |
 | **Orang tertentu** | Owner agent dan anggota yang dipilih. |
 
-Agent baru secara default menggunakan **Hanya saya**.
+Agent baru secara default menggunakan **Hanya saya**. Demo di bawah ini dimulai dari Hanya saya, beralih ke dua opsi lainnya secara bergantian, dan menunjukkan apa yang kemudian didapat setiap anggota di pemilih penerima tugas dan menu @-mention.
+
+<AgentAccessDemo />
 
 <Callout type="info">
-`owner` dan `admin` ruang kerja dapat melihat dan mengelola semua agent, tetapi tidak dapat melewati Akses untuk menjalankan agent "Hanya saya" milik orang lain. Anggota biasa hanya dapat melihat agent yang mereka miliki atau yang diizinkan untuk mereka jalankan.
+`owner` dan `admin` ruang kerja dapat melihat dan mengelola semua agent, tetapi tidak dapat melewati Akses untuk menjalankan agent "Hanya saya" milik orang lain.
 </Callout>
 
-**Melihat** sebuah agent ditentukan oleh kepemilikan, peran admin ruang kerja, dan Akses secara bersamaan; **mengubah** terbuka untuk owner agent dan owner/admin ruang kerja, kecuali Akses itu sendiri, yang hanya dapat diubah oleh owner agent.
+Semua hal selain menjalankannya dibagi seperti ini:
 
-Konfigurasi yang mungkin berisi kredensial, seperti variabel environment dan MCP, memiliki aturan baca yang lebih ketat — lihat [Membuat dan mengonfigurasi agent](/agents-create#variabel-environment-dan-kredensial).
+| Tindakan | Siapa yang dapat |
+|---|---|
+| Melihatnya di daftar agent dan pemilih | Owner agent, `owner` dan `admin` ruang kerja, dan anggota yang diberi Akses |
+| Mengedit konfigurasinya | Owner agent serta `owner` dan `admin` ruang kerja |
+| Mengubah Akses | Hanya owner agent |
+
+Konfigurasi yang mungkin berisi kredensial, seperti variabel environment dan MCP, memiliki aturan baca yang lebih ketat. Lihat [Membuat dan mengonfigurasi agent](/agents-create#variabel-environment-dan-kredensial).
 
 ## Status online, offline, dan beban kerja
 
@@ -85,7 +94,8 @@ Owner agent serta `owner` dan `admin` ruang kerja dapat mengarsipkan atau memuli
 
 ## Langkah selanjutnya
 
-- [Membuat dan mengonfigurasi agent](/agents-create) — mulai dari kosong, atau bangun dengan AI.
+- [Membuat dan mengonfigurasi agent](/agents-create) — isi konfigurasinya sendiri, atau biarkan AI menyusun drafnya.
 - [Skills](/skills) — menambahkan metode dan materi yang dapat digunakan kembali ke sebuah agent.
 - [Squads](/squads) — biarkan leader memilih anggota yang tepat untuk pekerjaan tersebut.
 - [Daemon dan runtime](/daemon-runtimes) — tempat agent benar-benar dieksekusi.
+- [Berbagi kumpulan agent untuk tim](/team-agent-pool) — Akses, berbagi runtime, squad, dan serah-terima review untuk seluruh tim.

@@ -14,7 +14,7 @@ Ruang kerja adalah batas tingkat tertinggi di Multica. Anggota, Tugas, proyek, a
 | **Pekerjaan** | Tugas, proyek, komentar, attachment, riwayat Eksekusi |
 | **Tim** | Anggota, role, undangan |
 | **Agent** | Konfigurasi agent, skill, runtime, otomasi |
-| **Pengaturan bersama** | Context, label, custom properties, integrasi |
+| **Pengaturan bersama** | Context, label, [custom properties](/issues#properti-khusus), integrasi |
 
 **Context** diberikan ke setiap agent di ruang kerja — tempat untuk latar belakang tim, konvensi produk, dan requirement yang bersifat jangka panjang. Requirement yang hanya berlaku untuk satu Eksekusi sebaiknya diletakkan di Tugas yang bersangkutan.
 
@@ -48,7 +48,7 @@ Setelah keluar dari ruang kerja, Anda membutuhkan undangan baru untuk kembali. K
 
 ## Menghapus ruang kerja
 
-Hanya `owner` yang dapat menghapus ruang kerja. Penghapusan menghapus secara permanen semua pekerjaan, anggota, konfigurasi agent, dan riwayat Eksekusi di dalamnya, dan tidak dapat dibatalkan. Jika Anda hanya ingin pergi untuk sementara waktu, keluar saja daripada menghapus.
+Hanya `owner` yang dapat menghapus ruang kerja. Owner harus melakukannya secara langsung. API menolak task token dan cloud node PAT untuk operasi ini. Penghapusan menghapus secara permanen semua pekerjaan, anggota, konfigurasi agent, dan riwayat Eksekusi di dalamnya, dan tidak dapat dibatalkan. Jika Anda hanya ingin pergi untuk sementara waktu, keluar saja daripada menghapus.
 
 ## Langkah selanjutnya
 

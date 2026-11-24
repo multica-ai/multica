@@ -11,7 +11,7 @@ Multica adalah backend Go dan monorepo pnpm. Cara paling sederhana untuk memulai
 
 - Node.js 22
 - pnpm 10.28.2
-- Go 1.26.6
+- Go 1.26.9
 - Docker Engine atau Docker Desktop
 - Git dan Make
 
@@ -70,10 +70,11 @@ Worktree yang berbeda berbagi container PostgreSQL, bukan database-nya. Jangan m
 ### Workflow lengkap
 
 ```bash
-make up               # Start this checkout's environment (C=api,web,daemon,desktop)
+make up               # Start this checkout's environment (C=api,collab,web,daemon,desktop)
 make status           # Show what is running and prove it is this environment
 make list             # List every environment on this machine
 make down             # Stop the processes, keep the database
+make down C=daemon    # Stop only the listed components
 make destroy          # Stop, then drop the database and free the slot
 make gc               # Collect expired or directory-less environments
 make dev              # Prepare and start the current checkout in the foreground
@@ -116,12 +117,21 @@ make migrate-down
 make sqlc
 ```
 
+`make test` menyiapkan dan memigrasikan database sebelum menjalankan Go test. Di worktree tanpa `.env`, `make` otomatis memilih `.env.worktree`; Anda juga dapat memilihnya secara eksplisit dengan `make test ENV_FILE=.env.worktree`.
+
+Sebelum `make test`, `make check`, atau `make check-worktree`, hentikan API development apa pun yang menggunakan database yang sama agar background worker-nya tidak mengambil job test. Gunakan perintah penghentian yang sesuai dengan cara Anda memulainya:
+
+- `make up` → `make down C=api`.
+- `make start` / `make dev` → `make stop`; `make start-worktree` → `make stop-worktree`.
+- `make server` → tekan Ctrl-C di terminalnya.
+
 Untuk menjalankan perintah CLI dari source:
 
 ```bash
 make cli ARGS="issue list"
 ```
 
+Untuk memperbarui environment yang masih terdaftar, termasuk yang sudah kedaluwarsa, jalankan `make up ARGS="--ttl 48"` dari checkout-nya. Ini mempertahankan datanya dan menetapkan TTL baru selama 48 jam.
 ## Mengubah fitur frontend
 
 Tempatkan fitur yang dibutuhkan oleh Web dan Desktop sesuai dengan tanggung jawabnya:
@@ -198,6 +208,13 @@ make start
 
 `make db-reset` menghapus dan membuat ulang `POSTGRES_DB` saat ini, dan menolak untuk terhubung ke database remote. Sebelum menjalankannya, periksa `.env` atau `.env.worktree` dan pastikan database tujuannya.
 
+## Membuka issue
+
+- **[Feature request](https://github.com/multica-ai/multica/blob/main/.github/ISSUE_TEMPLATE/feature_request.yml):** Jelaskan **Problem** dan **Goal**. **Proposal** tingkat tinggi, **Alternatives**, dan **Screenshots** bersifat opsional; Anda dapat mengangkat sebuah masalah tanpa merancang solusinya.
+- **[Bug report](https://github.com/multica-ai/multica/blob/main/.github/ISSUE_TEMPLATE/bug_report.yml):** Jelaskan **Problem**, **Expected behavior**, dan **Steps to reproduce**. Jika terjadinya tidak konsisten, jelaskan apa yang sudah Anda coba dan seberapa sering terjadi. Screenshot, log, dan detail environment bersifat opsional.
+
+Pilih area yang terdampak agar kami dapat merutekan laporan. Bug report juga menanyakan tipe deployment. Screenshot bersifat opsional untuk issue; aturan wajib screenshot untuk PR UI atau interaksi tidak berlaku untuk laporan issue.
+
 ## Sebelum submit
 
 - Baca `AGENTS.md` di root dan instruksi nested yang relevan.
@@ -205,7 +222,18 @@ make start
 - Tulis komentar kode dalam bahasa Inggris.
 - Jangan commit `.env`, token, build artifact, atau path lokal.
 - Gunakan conventional commit seperti `feat(scope)`, `fix(scope)`, atau `docs`.
-- Jelaskan perubahan behavior dan perintah verifikasi yang benar-benar dijalankan di PR.
+
+### Persyaratan pull request
+
+Gunakan [template PR](https://github.com/multica-ai/multica/blob/main/.github/PULL_REQUEST_TEMPLATE.md) dan ikuti [persyaratan kontribusi](https://github.com/multica-ai/multica/blob/main/CONTRIBUTING.md#pull-request-requirements):
+
+1. **Problem:** Jelaskan masalah konkretnya, siapa yang terdampak, dan mengapa itu penting.
+2. **Goal:** Nyatakan hasil yang dituju dari perubahan ini.
+3. **Proposal:** Jelaskan desain tingkat tinggi dan mengapa desain itu mencapai tujuan. Buat agar dapat dipahami pembaca yang tidak banyak memiliki latar belakang proyek. Minimalkan detail implementasi.
+4. **Alternatives (opsional):** Jika berguna, jelaskan singkat pendekatan lain dan alasan Anda tidak memilihnya.
+5. **Screenshots:** Untuk perubahan UI atau interaksi, lampirkan screenshot atau rekaman layar dari aplikasi yang berjalan yang menunjukkan layar dan kondisi yang terdampak. Perbandingan sebelum/sesudah sangat disarankan; untuk layar baru, tunjukkan kondisi sesudahnya. Jika tidak ada dampak pada UI atau interaksi, tulis "N/A" dan jelaskan alasannya.
+
+**PR UI atau interaksi tanpa screenshot atau rekaman ditolak secara default.** Reviewer sebaiknya meminta perubahan atau menutup PR sampai screenshot atau rekaman disediakan. Pernyataan problem, goal, atau proposal tingkat tinggi yang hilang juga membuat PR belum siap direview.
 
 ## Langkah selanjutnya
 

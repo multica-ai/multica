@@ -4,6 +4,7 @@ description: Konfigurasikan kode verifikasi email, sign-in Google, dan siapa yan
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
 
 Multica membuat pengguna masuk dengan kode verifikasi email secara default; OAuth Google dapat ditambahkan di atasnya. Pengguna yang sudah ada selalu dapat masuk kembali — pembatasan pendaftaran hanya menentukan apakah akun baru dapat dibuat.
 
@@ -15,15 +16,28 @@ Email dapat dikirim melalui Resend atau SMTP. Saat kedua layanan dikonfigurasi, 
 
 ### Menggunakan Resend
 
-1. Verifikasi domain pengirim dan buat API key di [Resend](https://resend.com/).
-2. Atur:
+<Steps>
+<Step>
 
-   ```dotenv
-   RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
-   RESEND_FROM_EMAIL=noreply@example.com
-   ```
+Verifikasi domain pengirim dan buat API key di [Resend](https://resend.com/).
 
-3. Restart service API.
+</Step>
+<Step>
+
+Atur:
+
+```dotenv
+RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
+RESEND_FROM_EMAIL=noreply@example.com
+```
+
+</Step>
+<Step>
+
+Restart service API.
+
+</Step>
+</Steps>
 
 `RESEND_FROM_EMAIL` harus milik domain yang sudah diverifikasi di Resend.
 
@@ -57,7 +71,7 @@ SMTP_EHLO_NAME=mail.example.com
 
 ### Perilaku tanpa layanan email
 
-Server tetap berjalan, tetapi kode verifikasi dan tautan undangan hanya dituliskan ke log; tidak ada email yang dikirim. Ini cocok untuk development lokal, bukan produksi.
+Server tetap berjalan, tetapi kode verifikasi dan tautan undangan hanya dituliskan ke log; tidak ada email yang dikirim. Mode ini hanya cocok untuk development lokal.
 
 Log startup menyatakan apakah mode saat ini adalah `Resend API`, `SMTP relay`, atau `DEV mode`.
 
@@ -78,22 +92,38 @@ Jangan mengaktifkan kode fixed pada instance yang dapat diakses publik. Kombinas
 
 ## Sign-in Google
 
-1. Buat client OAuth 2.0 di [Google Cloud Console](https://console.cloud.google.com/).
-2. Tambahkan callback URL frontend Multica ke **Authorized redirect URIs**:
+<Steps>
+<Step>
 
-   ```text
-   https://multica.example.com/auth/callback
-   ```
+Buat client OAuth 2.0 di [Google Cloud Console](https://console.cloud.google.com/).
 
-3. Atur:
+</Step>
+<Step>
 
-   ```dotenv
-   GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
-   GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxx
-   GOOGLE_REDIRECT_URI=https://multica.example.com/auth/callback
-   ```
+Tambahkan callback URL frontend Multica ke **Authorized redirect URIs**:
 
-4. Restart service API.
+```text
+https://multica.example.com/auth/callback
+```
+
+</Step>
+<Step>
+
+Atur:
+
+```dotenv
+GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxx
+GOOGLE_REDIRECT_URI=https://multica.example.com/auth/callback
+```
+
+</Step>
+<Step>
+
+Restart service API.
+
+</Step>
+</Steps>
 
 URL di Google Console dan di `GOOGLE_REDIRECT_URI` harus sama persis, termasuk protokol, port, dan trailing slash. Setelah dikonfigurasi, halaman sign-in menampilkan tombol sign-in Google; image frontend tidak perlu dibangun ulang (rebuild).
 
@@ -144,7 +174,7 @@ Mencabut sebuah undangan tidak menghapus akun yang sudah dibuat menggunakan unda
 
 Session bersifat sliding. Masa berlaku di bawah ini adalah batas **idle**, bukan hitungan mundur dari saat sign-in: begitu sebuah session turun di bawah setengah dari masa berlakunya, request berikutnya akan menerbitkan ulang session itu dengan masa berlaku penuh kembali, sehingga akun yang digunakan secara terus-menerus tidak pernah di-sign-out sesuai jadwal. Tidak ada batas absolut.
 
-Batas ini bersifat satu arah. Sebuah session hanya diterbitkan ulang setelah melewati titik tengahnya, sehingga session yang terakhir digunakan saat sisa masa berlakunya masih lebih dari setengah tidak akan diperpanjang — jeda idle yang selalu dapat dilalui adalah setengah dari nilai di bawah, bukan seluruhnya.
+Batas ini bersifat satu arah. Sebuah session hanya diterbitkan ulang setelah melewati titik tengahnya, sehingga session yang terakhir digunakan saat sisa masa berlakunya masih lebih dari setengah tidak akan diperpanjang. Jeda idle yang dijamin dapat dilalui session hanya setengah dari nilai di bawah.
 
 Sesuaikan dengan `AUTH_TOKEN_TTL`, yang menerima Go duration atau bilangan bulat positif dalam detik:
 
@@ -154,11 +184,10 @@ AUTH_TOKEN_TTL=720h
 
 Nilai minimumnya adalah `60s`; nilai yang lebih singkat akan dibatasi (clamped) naik ke nilai itu dan mencatat warning saat startup. Di bawah nilai itu, kadens pembaruan (renewal) yang diturunkan server akan jatuh di bawah batas yang diterapkan client padanya, dan client akan memeriksa pembaruan lebih jarang daripada waktu session tersebut dapat bertahan.
 
-Restart service API setelah mengubahnya. Nilai ini berlaku untuk session yang diterbitkan atau diterbitkan ulang setelahnya — karena session bersifat sliding, session yang sudah ada akan mengikuti masa berlaku baru pada saat berikutnya session itu diterbitkan ulang.
+Restart service API setelah mengubahnya. Nilai ini berlaku untuk session yang diterbitkan atau diterbitkan ulang setelahnya. Karena session bersifat sliding, session yang sudah ada akan mengikuti masa berlaku baru pada saat berikutnya session itu diterbitkan ulang.
 
 ## Langkah selanjutnya
 
 - [Variabel lingkungan](/environment-variables) — referensi variabel lengkap.
 - [Autentikasi dan token](/auth-tokens) — sign-in session dan jenis token.
 - [Anggota dan role](/members-roles) — undangan dan role.
-</content>

@@ -4,30 +4,91 @@ description: Tambahkan informasi, balas diskusi, dan @-mention anggota atau agen
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Accordion, Accordions } from "fumadocs-ui/components/accordion";
+import { ResolveThreadDemo } from "@/components/demos/resolve-thread-demo";
 
-Komentar adalah tempat kolaborasi berkelanjutan pada sebuah [tugas](/issues) berlangsung. Anggota dan agent menambahkan latar belakang, mengajukan pertanyaan, dan memposting hasil di sini, dan konteks lengkapnya tetap ada saat tugas itu dibuka lagi lain kali.
+Anggota dan agent menambahkan latar belakang, mengajukan pertanyaan, dan memposting hasil di komentar pada sebuah [tugas](/issues). Catatannya tetap berada di tugas, sehingga siapa pun yang membukanya nanti dapat melihat bagaimana semuanya sampai ke kondisi saat ini.
 
 ## Memposting komentar dan balasan
 
-Ketik di area aktivitas tugas dan kirim untuk membuat komentar. Komentar mendukung pemformatan, blok kode, tautan, dan lampiran.
+Ketik di area aktivitas tugas dan kirim, maka sebuah komentar dibuat. Komentar mendukung pemformatan, blok kode, tautan, dan lampiran.
 
 Blok kode `html` atau `mermaid` dirender di tempat sebagai grafik atau diagram, dengan tombol untuk beralih ke sumbernya. File yang dilampirkan ditampilkan sebagai kartu yang terbuka di viewer; termasuk file HTML.
 
-Membalas sebuah komentar membentuk thread diskusi. Balasan dapat bersarang lebih lanjut, tetapi semuanya tetap berada di bawah diskusi tingkat atas yang sama.
+Membalas sebuah komentar memulai sebuah thread. Balasan dapat bersarang lebih lanjut, tetapi semuanya tetap berada di bawah thread tingkat atas yang sama.
+
+Setelah sebuah tugas memiliki dua thread atau lebih, halaman tugas di Web dan Desktop menampilkan kolom tanda di sebelah kanan: satu tanda panjang per thread dan satu tanda pendek per balasan. Arahkan kursor ke sana untuk membuka outline semua thread, lalu klik entri mana pun untuk melompat ke komentar tersebut, termasuk komentar di dalam thread yang terlipat dan sudah selesai.
 
 ## Menganotasi komentar dan deskripsi
 
-Di Web dan Desktop, pilih teks pada komentar yang sudah diposting mana pun, termasuk komentar Anda sendiri, lalu pilih **Tambahkan ke balasan** pada toolbar seleksi. Tulis catatan di samping teks yang dipilih, lalu klik **Tambahkan anotasi** untuk menambahkannya ke draf balasan. Hanya catatan yang sudah dikonfirmasi dan tidak kosong yang mendapat nomor urut dan penanda sumber. Saat mengedit, klik **Simpan anotasi** untuk menerapkan perubahan. Enter untuk mengonfirmasi; Shift + Enter untuk menyisipkan baris baru. Escape atau klik di luar membatalkan perubahan yang belum dikonfirmasi. Klik penanda sumber bernomor untuk mengeditnya lagi. Tombol tempat sampah di samping catatan menghapus anotasi itu langsung di sumbernya, termasuk highlight dan entri drafnya. Arahkan kursor ke jumlah anotasi untuk memeriksa atau menghapus kutipan di panel melayang, atau klik sebuah kutipan untuk mengedit catatannya di sumber. Anda juga dapat membuka panel ini dengan klik atau keyboard. Kirim semuanya sebagai satu balasan dengan tombol kirim yang sudah ada, dengan satu baris kosong di antara anotasi. Anotasi muncul lebih dulu, diikuti balasan keseluruhan Anda, dengan pembatas di antara kedua bagian ketika keduanya ada. Untuk deskripsi tugas, pilih **Tambahkan ke komentar** pada toolbar seleksinya. Anotasi deskripsi bergabung ke draf komentar baru dan dikirim sebagai thread baru; anotasi komentar tetap berada di thread aslinya.
+Di Web dan Desktop, Anda dapat memilih teks pada komentar yang sudah diposting mana pun, termasuk komentar Anda sendiri, dan menulis catatan pada bagian tersebut:
 
-Untuk anotasi komentar, anotasi pertama yang disimpan menetapkan target balasan, termasuk balasan bersarang. Kutipan dari pesan lain dalam diskusi itu bergabung ke draf yang sama. Gunakan tombol kirim yang sudah ada untuk mempublikasikan semuanya sebagai satu komentar. Mention dalam kutipan tidak memberi notifikasi atau memicu siapa pun; mention yang Anda tulis sendiri mengikuti aturan normal.
+<Steps>
+<Step>
 
-Draf bersifat privat untuk perangkat dan ruang kerja ini, tetap ada setelah dimuat ulang, dan berakhir setelah 30 hari. Setiap balasan mendukung hingga 20 anotasi, dengan hingga 4.000 karakter per kutipan. Jika sumbernya berubah, kutipan yang tersimpan tetap sama; jika target balasan dihapus, pengiriman akan diblokir. Obrolan, input anotasi di seluler, dan sinkronisasi draf antarperangkat belum termasuk.
+Pilih teksnya dan pilih **Tambahkan ke balasan** pada toolbar seleksi.
+
+</Step>
+<Step>
+
+Tulis catatan Anda di samping teks yang dipilih dan klik **Tambahkan**. Hanya catatan yang sudah dikonfirmasi yang bergabung ke draf balasan thread dan mendapat nomor; catatan kosong tidak dapat dikonfirmasi.
+
+</Step>
+<Step>
+
+Gunakan tombol kirim yang biasa untuk memposting semua anotasi sebagai satu balasan, dengan satu baris kosong di antaranya. Balasan yang diposting menampilkan anotasi lebih dulu, lalu apa pun yang Anda tulis di composer, dengan pembatas di antara keduanya ketika keduanya ada.
+
+</Step>
+</Steps>
+
+Toolbar seleksi pada deskripsi tugas menawarkan **Tambahkan ke komentar** sebagai gantinya: anotasi masuk ke draf komentar baru, dan mengirimkannya memulai thread baru. Anotasi pada sebuah komentar tetap masuk ke draf balasan thread tersebut.
+
+Untuk anotasi komentar, anotasi pertama yang Anda simpan menetapkan target balasan, termasuk balasan bersarang. Kutipan dari pesan lain dalam thread yang sama bergabung ke draf itu, dan semuanya diposting sebagai satu komentar. Mention dalam kutipan tidak memberi notifikasi atau memicu siapa pun; mention yang Anda tulis sendiri mengikuti aturan normal.
+
+<Accordions>
+<Accordion title="Mengedit, menghapus, dan pintasan" id="annotation-editing">
+
+- Setelah mengedit anotasi yang sudah ada, klik **Simpan** untuk menerapkan perubahan.
+- Di editor anotasi, Enter menambahkan atau menyimpan anotasi; Shift + Enter menyisipkan baris baru. Cmd + Enter (macOS) atau Ctrl + Enter (Windows/Linux) menyimpan anotasi saat ini dan mengirim seluruh draf, termasuk anotasi yang tersimpan, teks isi, dan lampiran. Tombol-tombol ini tidak mengikuti preferensi pintasan Kirim Anda. Escape atau klik di luar membatalkan perubahan yang belum dikonfirmasi.
+- Klik penanda bernomor pada teks sumber untuk mengedit catatannya lagi. Tombol tempat sampah di samping catatan menghapus anotasi beserta penanda dan entri drafnya.
+- Mengarahkan kursor ke jumlah anotasi membuka panel tempat Anda dapat meninjau atau menghapus kutipan, atau klik sebuah kutipan untuk kembali dan mengedit catatannya. Klik atau penggunaan keyboard juga membuka panel ini.
+
+</Accordion>
+<Accordion title="Draf dan batas" id="annotation-limits">
+
+Draf hanya disimpan di perangkat ini dan di ruang kerja ini. Draf tetap ada setelah dimuat ulang dan berakhir setelah 30 hari. Setiap balasan menampung hingga 20 anotasi, dan setiap kutipan hingga 4.000 karakter. Jika teks sumber berubah kemudian, kutipan yang tersimpan tetap seperti semula; jika target balasan dihapus, draf tidak dapat dikirim.
+
+Menganotasi di Obrolan, memasukkan anotasi di seluler, dan sinkronisasi draf antarperangkat belum didukung.
+
+</Accordion>
+</Accordions>
 
 ## Menyelesaikan diskusi
 
-Ketika sebuah pertanyaan mencapai kesimpulan, tandai seluruh diskusi sebagai selesai, atau jadikan satu balasan sebagai kesimpulan; sebuah diskusi hanya menyimpan satu kesimpulan pada satu waktu. Diskusi yang sudah selesai akan terlipat, tetapi masih dapat dibuka kembali.
+Ketika sebuah pertanyaan sudah terjawab, tandai seluruh thread sebagai selesai, atau jadikan satu balasan sebagai penyelesaiannya. Keduanya ada di menu **Aksi komentar** di kanan atas sebuah komentar: menu komentar pertama memiliki **Selesaikan thread**, dan menu sebuah balasan memiliki **Selesaikan thread dengan komentar**.
+
+<ResolveThreadDemo />
+
+Thread yang sudah selesai terlipat menjadi satu baris, dan mengkliknya menampilkan semuanya lagi. Ketika sebuah balasan menjadi penyelesaian, komentar pertama dan balasan itu tetap terlihat sementara balasan di antaranya terlipat. Sebuah thread hanya menyimpan satu penyelesaian pada satu waktu; menetapkan yang baru menggantikan yang lama.
 
 Membalas pada diskusi yang sudah selesai akan membukanya kembali secara otomatis.
+
+## Membuat sub-tugas dari komentar
+
+Ketika sebuah diskusi memunculkan sesuatu yang membutuhkan tindak lanjut tersendiri, pisahkan dari komentar tersebut: pilih **Buat sub-tugas dari sini** di menu **Aksi komentar**.
+
+Dialog pembuatan membawa konteks: judul, deskripsi, dan lampiran tugas saat ini, ditambah setiap komentar di thread tersebut hingga dan termasuk komentar yang Anda pilih, beserta lampirannya. Perluas kartu konteks di dialog untuk memeriksanya lebih dulu. Pembuatan manual maupun Create with agent dapat digunakan, dan tugas baru menjadi sub-tugas dari tugas saat ini. Dengan agent, Anda hanya menulis apa yang harus dikerjakannya, dan konteksnya ikut terbawa. Agent memperlakukan konten itu sebagai latar belakang historis dan tidak menjalankan perintah atau permintaan yang muncul di dalamnya.
+
+Sub-tugas baru menampilkan **Dibuat dari**, yang membuka **Cuplikan konteks** yang diambil saat pembuatan. Cuplikan tidak mengikuti sumbernya: jika tugas atau thread asli diedit atau dihapus kemudian, cuplikan mempertahankan apa yang ditangkapnya dan ditandai **Sumber diperbarui**, beserta bagian yang berubah.
+
+Konteks yang terlalu besar tidak dapat ditangkap: hingga 256 komentar dari thread, 1 MiB teks, dan 100 lampiran dengan total 500 MiB. Untuk Create with agent, runtime agent harus berada pada versi yang mendukung ini; jika tidak, dialog meminta Anda beralih ke manual atau memperbarui runtime. Jika agent gagal membuat tugas, notifikasi kegagalan di kotak masuk Anda menawarkan **Retry with context**.
+
+## Menggunakan kembali permintaan yang sering
+
+Gunakan [Quick Actions](/quick-actions) untuk menyimpan siapa yang diminta dan apa yang disampaikan. Klik salah satunya di sidebar tugas untuk langsung mengirimnya, atau ketik `/` di kotak komentar untuk menyisipkannya sebagai draf yang dapat Anda edit sebelum dikirim.
+
+Untuk meminta sebuah [skill](/skills) di komentar atau balasan tugas, ketik `/` diikuti sebagian nama atau deskripsinya. Menu menampilkan skill yang cocok dan diaktifkan untuk agent yang akan dijangkau draf Anda. Pilih sebuah skill untuk menyisipkan tautannya, lalu kirim komentar saat siap.
 
 ## @-mention
 
@@ -37,9 +98,10 @@ Ketik `@` dan pilih target dari daftar:
 |---|---|
 | **Anggota** | Mendapat notifikasi mention di kotak masuk; `@` dalam komentar tidak membuat subscription. |
 | **Agent** | Membuat satu eksekusi untuk agent tersebut; agent tidak memiliki kotak masuk. |
-| **Squad** | Memberi notifikasi kepada anggota Squad dan memicu leader Squad. |
+| **Squad** | Memicu leader Squad; anggota Squad tidak diberi notifikasi. |
 | **Tugas** | Menyisipkan tautan ke tugas lain — tanpa notifikasi, tanpa memicu agent. |
-| **@all** | Memberi notifikasi ke setiap anggota ruang kerja dan tidak memicu agent apa pun. |
+| **Proyek** | Menyisipkan tautan ke proyek — tanpa notifikasi, tanpa memicu agent. |
+| **@all** | Memberi notifikasi ke setiap anggota ruang kerja; mention itu sendiri tidak memulai agent apa pun. Komentar agent pekerja tetap kembali ke leader Squad yang ditugaskan, atau leader Squad tamu di thread delegasinya, kecuali sebuah agent atau Squad disebut secara eksplisit. |
 
 Mengetik teks biasa `@nama` tidak membuat mention; pilih dari daftar saran editor. Mengetik kunci tugas yang valid otomatis mengubahnya menjadi tautan tugas.
 
@@ -53,13 +115,15 @@ Anggota yang berkomentar otomatis berlangganan tugas tersebut, dan aktivitas ser
 
 ## Reaksi
 
-Tambahkan reaksi emoji pada sebuah komentar untuk mengonfirmasi, menyetujui, atau memberi masukan cepat. Reaksi tidak memicu agent dan tidak mengubah status tugas.
+Tambahkan reaksi emoji pada sebuah komentar untuk menunjukkan bahwa Anda sudah membacanya, menyetujui, atau memberi masukan cepat. Reaksi tidak memicu agent dan tidak mengubah status tugas.
 
 ## Edit dan hapus
 
 Penulis komentar dapat mengedit atau menghapus komentarnya sendiri; `owner` dan `admin` ruang kerja juga dapat mengedit dan menghapus komentar siapa pun. Untuk komentar yang diposting oleh agent, UI hanya menyediakan opsi hapus, bukan edit.
 
 Setelah sebuah komentar diedit, Multica menghitung ulang pemicu dari konten yang baru. @-mention yang ditambahkan saat mengedit juga membuat eksekusi; pratinjau pemicu muncul di bawah kolom input sebelum Anda menyimpan.
+
+Jika orang lain menyimpan komentar itu saat Anda sedang mengeditnya, penyimpanan Anda dihentikan dan editor menampilkan **Versi server terbaru** dan **Versi lokal Anda** berdampingan, dengan baris yang berbeda ditandai. **Simpan versi saya** menyimpan teks Anda; **Gunakan versi terbaru** mengganti isi editor dengan versi mereka sehingga Anda dapat melanjutkan mengedit dari sana. Judul tugas mendapat perbandingan yang sama ketika dua orang mengubahnya bersamaan.
 
 <Callout type="warning">
 Menghapus komentar tidak dapat dibatalkan. Hanya komentar itu yang dihapus: jika memiliki balasan, balasan tersebut tetap ada di thread dan komentar yang dihapus tidak menyisakan bekas. Pengecualiannya adalah komentar yang memulai sebuah thread — komentar itu menyisakan placeholder "Komentar ini telah dihapus", karena balasannya masih bergantung padanya. Jika isinya salah, edit saja sebagai gantinya.

@@ -1,0 +1,124 @@
+---
+title: Pencarian, pintasan, dan preferensi
+description: Cari dan jalankan perintah dengan ⌘K, tinjau dan ubah pintasan keyboard, temukan teks di dalam issue, dan atur preferensi pribadi seperti tema, bahasa, dan zona waktu.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+Tombol di bawah ini ditulis untuk macOS. Di Windows dan Linux, `⌘` menjadi `Ctrl`; tabel mencantumkan keduanya.
+
+## Pencarian
+
+Tekan `⌘K`, atau klik **Search...** di app rail. Saat belum ada yang diketik, kotak pencarian menawarkan **New Issue** dan issue yang baru saja Anda buka. Setelah Anda mengetik, hasil dikelompokkan:
+
+| Grup | Yang ditemukan |
+|---|---|
+| **Pages** | Halaman workspace seperti Inbox, Chat, Issues, Projects, Agents, dan Settings. |
+| **Views** | View issue bawaan dan saved view yang dapat Anda akses, dicocokkan berdasarkan nama. |
+| **Commands** | New Issue, New Project, dan beralih ke tema terang, gelap, atau sistem. Di halaman issue, Anda juga mendapatkan Copy Issue Link, Copy Identifier, Fold All Comments, dan Unfold All Comments. |
+| **Members** | Cocok berdasarkan nama atau email. |
+| **Workspaces** | Workspace lain tempat Anda menjadi anggota; memilih salah satunya akan beralih ke workspace tersebut. |
+| **Projects**, **Issues** | Mencocokkan judul serta deskripsi proyek, deskripsi issue, dan komentar. Cuplikan yang cocok tampil di bawah hasil, dan issue yang sudah selesai (done) ikut disertakan. |
+| **Cancelled** | Proyek dan issue yang dibatalkan dikelompokkan di bagian akhir, tidak bercampur dengan yang lain. |
+| **Hand to agent** | Selalu menjadi baris terakhir saat Anda mengetik. Membuka **Create with agent** dengan teks yang Anda ketik, proyek saat ini, dan issue yang sedang dibuka sebagai parent; tidak ada yang dibuat sampai Anda mengonfirmasinya di sana. |
+
+Memilih sebuah hasil akan membukanya. Tahan `⌘` (`Ctrl` di Windows dan Linux) sambil mengklik atau menekan Enter untuk membukanya di tab baru. `Esc` menutup kotak pencarian.
+
+## Pintasan keyboard
+
+| Aksi | macOS | Windows / Linux | Catatan |
+|---|---|---|---|
+| Buka pencarian | `⌘K` | `Ctrl+K` | |
+| Buat issue | `C` | `C` | Membuka alur pembuatan yang Anda pilih. Di halaman proyek, issue baru otomatis terisi dengan proyek tersebut. |
+| Tampilkan/sembunyikan sidebar kiri | `⌘B` | `Ctrl+B` | |
+| Tampilkan/sembunyikan sidebar kanan | `⌘/` | `Ctrl+/` | Hanya di halaman yang memiliki sidebar kanan, seperti issue. |
+| Tampilkan/sembunyikan jendela chat | `⌘J` | `Ctrl+J` | Saat dibuka, kursor langsung berada di kolom pesan. Lihat [Chat dari halaman mana pun](/chat#obrolan-dari-halaman-mana-pun). |
+| Ask Multica | `⇧⌘J` | `Ctrl+Shift+J` | Memulai chat baru di jendela mengambang. |
+| Cari di issue | `⌘F` | `Ctrl+F` | Lihat di bawah. |
+| Arsipkan notifikasi | `E` | `E` | Di halaman Inbox, mengarsipkan notifikasi yang terbuka dan membuka berikutnya. Di tab Archived, mengembalikan notifikasi yang terbuka ke inbox. Lihat [Inbox](/inbox#menangani-notifikasi). |
+| Snooze notifikasi | `H` | `H` | Di halaman Inbox, men-snooze issue yang terbuka dan membuka berikutnya. Pada issue yang di-snooze, mengembalikannya sekarang juga. Lihat [Inbox](/inbox#menunda-sebuah-issue). |
+| Tandai notifikasi belum dibaca / sudah dibaca | `U` | `U` | Di halaman Inbox, mengalihkan status belum dibaca/sudah dibaca pada notifikasi aktif yang terbuka tanpa meninggalkannya. |
+| Notifikasi berikutnya | `J` | `J` | Di halaman Inbox, pindah ke notifikasi berikutnya di tab saat ini tanpa mengarsipkan. |
+| Notifikasi sebelumnya | `K` | `K` | Di halaman Inbox, pindah ke notifikasi sebelumnya di tab saat ini tanpa mengarsipkan. |
+| Urungkan aksi inbox | `Z` | `Z` | Saat konfirmasi arsip, snooze, atau berhenti berlangganan sedang tampil, mengurungkan aksi tersebut. Tanpa konfirmasi, mengembalikan notifikasi yang terbuka setelah diarsipkan, atau mengurungkan hal yang disebut oleh **Inbox cleared**. Lihat [Inbox](/inbox#saat-sebuah-notifikasi-keluar-dari-kotak-masuk). |
+| Kirim | `⌘↵` | `Ctrl+Enter` | Mengirim komentar dan pesan chat, serta mengirim issue baru. |
+| Input suara | Belum ditetapkan | Belum ditetapkan | Hanya Desktop; aktifkan terlebih dahulu di Settings → Voice input. Lihat [Input suara](/desktop-app#input-suara). |
+| Kembali | `⌘[` | `Ctrl+[` | |
+| Maju | `⌘]` | `Ctrl+]` | |
+
+Pintasan satu tombol (`C`, `E`, `H`, `U`, `J`, `K`, `Z`) serta Kembali / Maju tidak aktif saat Anda sedang mengetik di sebuah input.
+
+Grup **Navigation** juga memiliki Go to Inbox, Chat, My Issues, Issues, Projects, Autopilot, Agents, Squads, Usage, Runtimes, Skills, dan Settings. Secara default tidak ada yang memiliki tombol; tetapkan tombol untuk yang sering Anda gunakan. Go to Inbox membuka halaman Inbox; daftar notifikasinya sendiri adalah bagian dari panel Work, tepat di bawah Pinned. Go to My Issues membuka halaman My Issues, yang tidak sama dengan view **My work** di panel Work.
+
+### Pintasan sistem tetap
+
+Pintasan ini tidak dapat diubah. Kecuali `Esc`, semuanya hanya berfungsi di [aplikasi desktop](/desktop-app); di browser, tombol-tombol ini ditangani oleh browser.
+
+| Aksi | macOS | Windows / Linux |
+|---|---|---|
+| Buka Settings | `⌘,` | `Ctrl+,` |
+| Tutup tab aktif | `⌘W` | `Ctrl+W` |
+| Pilih tab 1–8 | `⌘1`–`⌘8` | `Ctrl+1`–`Ctrl+8` |
+| Pilih tab terakhir | `⌘9` | `Ctrl+9` |
+| Zoom in / Zoom out / Reset zoom | `⌘+` / `⌘−` / `⌘0` | `Ctrl++` / `Ctrl+-` / `Ctrl+0` |
+| Tutup dialog atau menu | `Esc` | `Esc` |
+
+## Mengubah pintasan
+
+<Steps>
+<Step>
+
+Buka **Settings → Shortcuts**. Gunakan kotak pencarian di bagian atas untuk menemukan aksi berdasarkan namanya.
+
+</Step>
+<Step>
+
+Klik tombol di sebelah kanan sebuah aksi. Saat tertulis "Press keys", tekan kombinasi baru. `Esc` membatalkan; `Delete` menghapus pintasan aksi tersebut.
+
+</Step>
+<Step>
+
+Dua tombol di akhir setiap baris mengembalikan aksi itu ke default dan menonaktifkannya. **Restore defaults** di bagian atas membatalkan semua kustomisasi sekaligus.
+
+</Step>
+</Steps>
+
+Pintasan hanya disimpan di perangkat saat ini. Di komputer lain, atau saat Anda berpindah antara browser dan aplikasi desktop, atur ulang pintasan tersebut.
+
+Perekaman menolak beberapa jenis kombinasi dan menjelaskan alasannya di bawah tombol:
+
+- Kombinasi yang sudah ditetapkan ke aksi lain.
+- Kombinasi yang dimiliki oleh browser, jendela desktop, atau sistem operasi, seperti `⌘W`, `⌘R`, `⌘Q`, `⌘,`, tombol pengeditan seperti salin dan tempel, `⌘0`–`⌘9`, dan tombol zoom. Di browser, `⌘P`, `⌘L`, `⌘T`, `⌘N`, `⌘D`, dan `⌘U` juga tidak boleh dipakai; aplikasi desktop mengizinkannya. Di Windows dan Linux, kombinasi apa pun dengan tombol Win / Super ditolak.
+- Aksi yang juga berfungsi di dalam input, seperti Open search, Toggle chat window, dan Find in issue, memerlukan `⌘`, `Ctrl`, atau `Control`, sehingga tidak pernah terpicu saat Anda mengetik. Input suara juga menerima `Option` / `Alt` dengan tombol non-cetak, seperti `Space`, kecuali kombinasinya sudah dicadangkan.
+- **Send** hanya bisa berupa `↵` atau `⌘↵`.
+
+<Callout>
+Jika Anda mengatur **Send** ke `↵`, gunakan `Shift+Enter` untuk baris baru: ini menyisipkan paragraf, melanjutkan daftar, atau menambahkan pemisah baris di code block.
+</Callout>
+
+## Cari di issue
+
+Di halaman issue, `⌘F` membuka find bar milik Multica sendiri, bukan milik browser. Pencarian browser hanya melihat komentar yang sedang dirender di layar; find bar ini mencari di seluruh timeline, termasuk judul, deskripsi, dan setiap komentar.
+
+Pencocokan tidak membedakan huruf besar/kecil. Bar menampilkan "saat ini/total", atau "No matches". Tekan `↵` untuk kecocokan berikutnya, `Shift+Enter` untuk sebelumnya, dan `Esc` untuk menutup. Teks yang melintasi perubahan format (misalnya separuhnya tebal) tidak ditemukan.
+
+Di aplikasi desktop, hanya tab yang terlihat yang merespons `⌘F`.
+
+## Preferensi
+
+Preferensi pribadi ada di **Settings → Preferences** dan langsung berlaku. Setiap grup disimpan di tempat yang berbeda:
+
+| Grup | Pengaturan | Disimpan di |
+|---|---|---|
+| **Language & region** | Bahasa: English, 中文, 한국어, 日本語, Français. Halaman dimuat ulang setelah perubahan.<br />Zona waktu: mengikuti browser secara default; digunakan untuk tanggal dan grafik di semua workspace Anda. Daftarnya mencakup semua zona waktu dan dapat dicari. | Akun Anda, disinkronkan ke perangkat lain |
+| **Appearance** | Memiliki halamannya sendiri, **Settings → Appearance**: mode (Light, Dark, atau System), tema, font, dan tata letak. Anda juga bisa mengetik "theme" di kotak pencarian untuk mengganti mode. Lihat [Tema dan tampilan](/themes). | Perangkat ini |
+| **Comments & chat** | **Pin comment bar to bottom**: menjaga kotak komentar tetap terlihat saat Anda membaca timeline yang panjang.<br />**When replying to a running agent**: apakah balasan secara default berupa "Add to current run" atau "Start after this run". Anda tetap dapat mengubahnya per pesan; lihat [Mengarahkan agent yang sedang berjalan](/mentioning-agents#mengarahkan-agent-yang-sedang-berjalan).<br />**Floating chat window**: saat dimatikan, chat cepat meninggalkan status bar (dan tombol chat bulat tidak lagi muncul di jendela yang sempit). | Perangkat ini |
+| **Opening issues** | Apakah mengklik kartu atau baris membuka halaman penuh atau pratinjau samping. Shift+Click membuka yang satunya. | Perangkat ini |
+| **Fields shown when creating issues** | Field mana yang tetap ada di toolbar untuk "Create with agent" dan "Manual create". Field yang disembunyikan tetap ada di menu ⋯ dan muncul kembali selama berisi nilai. | Perangkat ini, untuk workspace saat ini |
+
+## Langkah selanjutnya
+
+- [Chat dengan agent](/chat) — jendela chat mengambang, pesan dalam antrean, dan Steer.
+- [Issues](/issues) — isi sebuah issue, status, dan view.
+- [Komentar](/comments) — komentar, anotasi, dan @mention.

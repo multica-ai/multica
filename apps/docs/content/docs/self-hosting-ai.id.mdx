@@ -1,0 +1,85 @@
+---
+title: Setup self-hosting untuk agent AI
+description: Command persis yang dapat dijalankan agent AI untuk men-deploy Multica secara lokal dan menghubungkan CLI.
+---
+
+# Setup Self-Hosting (untuk Agent AI)
+
+Dokumen ini dirancang agar dieksekusi oleh agent AI. Ikuti langkah-langkah berikut persis seperti tertulis untuk men-deploy instance Multica lokal dan terhubung ke instance tersebut.
+
+## Prasyarat
+
+- Docker dan Docker Compose terinstal
+- Homebrew terinstal (untuk CLI)
+- Setidaknya satu CLI agent AI di PATH: `claude` atau `codex`
+
+## Instalasi
+
+```bash
+# Install CLI + provision self-host server
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --with-server
+
+# Configure CLI for localhost, authenticate, and start daemon
+multica setup self-host
+```
+
+Tunggu output server `✓ Multica server is running and CLI is ready!` sebelum menjalankan `multica setup self-host`.
+
+**Hasil yang diharapkan:**
+- Frontend di http://localhost:3000
+- Backend di http://localhost:8080
+- CLI `multica` terinstal dan dikonfigurasi untuk localhost
+
+## Alternatif: setup manual
+
+```bash
+git clone https://github.com/multica-ai/multica.git
+cd multica
+make selfhost
+brew install multica-ai/tap/multica
+multica setup self-host
+```
+
+Command `multica setup self-host` akan:
+1. Mengonfigurasi CLI untuk terhubung ke localhost:8080 / localhost:3000
+2. Membuka browser untuk login — gunakan kode yang dikirim lewat email, atau kode yang dihasilkan dan dicetak di log backend ketika Resend tidak diatur
+3. Menemukan ruang kerja secara otomatis
+4. Menjalankan daemon di latar belakang
+
+## Verifikasi
+
+```bash
+multica daemon status
+```
+
+Harus menampilkan `running` beserta agent yang terdeteksi.
+
+## Menghentikan
+
+```bash
+# Stop the daemon
+multica daemon stop
+
+# Stop all Docker services
+cd multica
+make selfhost-stop
+```
+
+## Port kustom
+
+Jika port default (8080/3000) sedang digunakan:
+
+1. Edit `.env` dan ubah `PORT` dan `FRONTEND_PORT`. Keduanya adalah port host; container tetap mendengarkan di 8080/3000 secara internal, sehingga tidak perlu rebuild.
+2. Jalankan `make selfhost`
+3. Jalankan `multica setup self-host --port <PORT> --frontend-port <FRONTEND_PORT>`
+
+Edit file tersebut daripada mengandalkan environment variable: `make` melakukan `include` terhadap `.env`, sehingga nilai di file mengalahkan variabel yang sama dari shell Anda (`PORT=9100 make selfhost` diabaikan ketika `.env` menetapkan `PORT`). Penetapan lewat command line berlaku (`make selfhost PORT=9100`), dan Docker Compose yang dipanggil langsung justru kebalikannya — di sana environment mengalahkan `.env`.
+
+`BACKEND_PORT` adalah alias opsional yang menimpa `PORT` untuk backend; `API_PORT` dan `SERVER_PORT` mengikuti dalam urutan tersebut. Rute mana pun yang Anda gunakan, output startup dibaca kembali dari Docker Compose, sehingga alamat yang dicetak adalah alamat tempat stack benar-benar dipublikasikan.
+
+## Pemecahan masalah
+
+- **Backend belum siap:** `docker compose -f docker-compose.selfhost.yml logs backend`
+- **Frontend belum siap:** `docker compose -f docker-compose.selfhost.yml logs frontend`
+- **Masalah daemon:** `multica daemon logs`
+- **Health check:** `curl http://localhost:8080/health` untuk liveness, `curl http://localhost:8080/readyz` untuk readiness yang memperhitungkan dependency

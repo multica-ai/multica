@@ -1,0 +1,64 @@
+---
+title: Multica vs Linear dan Jira untuk tim manusia + agent
+description: Kapan tim yang bekerja dengan AI coding agent sebaiknya tetap memakai Linear atau Jira, memindahkan pekerjaan agent ke Multica, atau memakai keduanya.
+---
+
+Linear dan Jira sama-sama dapat menugaskan tugas ke AI agent, sehingga tim yang sudah memakai salah satunya wajar bertanya: mengapa menambahkan Multica? Jawaban singkatnya, keduanya berbeda dalam **dari mana agent berasal dan di mana agent berjalan**. Linear dan Jira adalah tracker dengan agent bawaan sendiri, tempat layanan agent pihak ketiga dapat dihubungkan. Multica adalah ruang kerja yang menjalankan AI coding tool yang sudah dipakai tim Anda, di komputer yang Anda hubungkan, dan mencatat setiap eksekusi pada tugas.
+
+Pernyataan tentang Linear dan Jira di halaman ini bersumber dari dokumentasi publik mereka per November 2026; periksa [dokumentasi agent Linear](https://linear.app/docs/agents-in-linear) dan [pengumuman Atlassian](https://www.atlassian.com/blog/ai-at-work/your-jira-board-just-got-a-new-kind-of-teammate) untuk detail terbaru.
+
+## Jawaban singkat
+
+- **Tetap pakai Linear atau Jira** jika perencanaan adalah pusat proses Anda (cycle atau sprint, roadmap, pelaporan lintas tim) dan agent yang Anda inginkan adalah layanan hosted yang sudah terintegrasi dengan tracker Anda.
+- **Pakai Multica** jika Anda menginginkan pool agent bersama yang dibangun di atas CLI seperti Claude Code, Codex, Cursor Agent, atau Copilot, berjalan di mesin atau server Anda sendiri, dengan kontrol akses per agent, log eksekusi lengkap, dan opsi untuk hosting mandiri sepenuhnya.
+- **Pakai keduanya** jika perencanaan berada di Linear atau Jira dan Anda ingin agent yang menjalankan pekerjaannya. Agent Multica dapat membaca dan memperbarui Linear melalui server MCP; tidak ada sinkronisasi otomatis di antara keduanya.
+
+## Perbandingan
+
+| | Multica | Linear | Jira |
+|---|---|---|---|
+| Apa itu | Ruang kerja tempat manusia dan agent mengambil tugas, dengan agent berjalan di runtime Anda | Issue tracker dan alat perencanaan dengan platform agent | Issue dan project tracker dengan agent Rovo dan agent pihak ketiga |
+| Siapa yang mengerjakan pekerjaan agent | Agent yang Anda konfigurasi di [31 AI coding tool](/providers), dieksekusi oleh daemon Multica di komputer yang Anda hubungkan | Linear Agent, ditambah agent pihak ketiga yang dipasang dari direktori integrasi Linear | Agent Rovo, ditambah agent pihak ketiga yang terhubung seperti GitHub Copilot dan Cursor |
+| Tempat kode agent berjalan | Laptop, server, atau VM Anda, dengan login tool Anda sendiri | Ditentukan oleh masing-masing integrasi agent, biasanya cloud vendor | Ditentukan oleh masing-masing agent, biasanya cloud vendor |
+| Menugaskan tugas atau @-mention agent | Ya; agent menjadi assignee | Ya; agent menjadi delegate, dan seseorang tetap dapat menjadi assignee | Ya |
+| Memilih tool dan model per agent | Ya, tool apa pun yang didukung, dan agent berbeda dapat memakai tool berbeda | Tergantung agent yang dipasang | Tergantung agent |
+| Mengontrol siapa yang dapat menjalankan setiap agent | Per agent: **Only me**, **Entire workspace**, atau **Specific people** | Admin memilih tim mana yang dapat mengakses agent yang dipasang | Cakupan agent diatur di Rovo Studio, dalam batas izin Jira |
+| Yang ditampilkan tugas tentang sebuah eksekusi | Log eksekusi lengkap: tool call, perintah, error, dengan timestamp | Aktivitas agent pada tugas; detailnya tergantung agent | Aksi agent dicatat pada work item |
+| Merutekan pekerjaan antar agent | [Squads](/squads): agent leader memilih anggota; [workflows](/workflows) menyerahkan setiap status ke agent atau orang | Aturan triage dapat mendelegasikan tugas masuk ke agent | Aturan otomatisasi dan kolom board dapat memicu agent |
+| Pekerjaan agent yang berulang | [Autopilot](/autopilots) menjalankan agent Anda mana pun berdasarkan schedule atau webhook | Loop menjalankan Linear Agent berdasarkan schedule atau event | Jira Automation dapat menjalankan agent berdasarkan schedule atau event |
+| Metode tim yang dapat digunakan kembali untuk agent | [Skills](/skills) yang dilampirkan ke agent | Panduan agent tingkat ruang kerja dan tim | Instruksi dan pengetahuan agent di Rovo Studio |
+| Hosting mandiri | Ya, dengan Docker Compose atau Helm | Tidak | Jira Data Center |
+| Fitur perencanaan | Proyek, sub-tugas dengan tahapan, [workflows](/workflows), properti khusus, tampilan list, board, tabel, Gantt, dan swimlane | Cycle, proyek, initiative, insight | Sprint, board, timeline, JQL, pelaporan |
+| Lisensi | Source-available: gratis di dalam organisasi Anda, termasuk hosting mandiri | SaaS proprietary | Proprietary |
+
+## Kapan Linear atau Jira lebih cocok
+
+- Proses Anda bergantung pada cycle atau sprint, roadmap, atau pelaporan portofolio. Multica memiliki proyek, workflow, dan tampilan Gantt, tetapi tidak memiliki cycle, sprint, atau perencanaan roadmap.
+- Sebagian besar tim, termasuk product, desain, dan support, bekerja di tracker, dan hanya sebagian tugas yang diberikan ke agent.
+- Anda lebih menyukai agent hosted, seperti coding agent GitHub Copilot atau cloud agent Cursor, dan tidak ingin menjalankan agent di komputer sendiri.
+- Anda mengandalkan ekosistem integrasi tracker atau administrasi enterprise yang sudah Anda miliki.
+
+## Kapan Multica lebih cocok
+
+- **Anda sudah membayar CLI coding.** Multica menjalankan langganan Claude Code, Codex, Cursor Agent, Copilot CLI, Kimi, atau lainnya yang dimiliki developer Anda, alih-alih layanan agent terpisah per vendor.
+- **Kode dan kredensial harus tetap berada di mesin Anda.** Agent berjalan di runtime yang Anda hubungkan; dengan Multica yang di-hosting sendiri, data ruang kerja juga tetap berada di server Anda. Lihat [Model keamanan](/security-model).
+- **Beberapa developer berbagi agent yang sama.** Agent, runtime, dan skill dimiliki ruang kerja, Access menentukan siapa yang dapat menjalankan setiap agent, dan board menunjukkan agent mana yang sedang mengerjakan apa. Lihat [Berbagi pool agent dalam tim](/team-agent-pool).
+- **Anda ingin melihat persis apa yang dilakukan agent.** Tool call dan perintah dari setiap eksekusi tetap berada pada tugas, dan Anda dapat [mengarahkan eksekusi](/mentioning-agents) saat sedang berjalan.
+- **Review adalah sebuah langkah, bukan hal tambahan.** Agent mengirim hasil ke `in_review`; sebuah [workflow](/workflows) dapat menyerahkan hasilnya ke agent peninjau atau rekan tim dan mengembalikannya jika ditolak.
+
+## Menggunakan Multica berdampingan dengan Linear atau Jira
+
+Banyak tim mempertahankan tracker untuk perencanaan dan memakai Multica di tempat agent mengerjakan pekerjaan:
+
+1. Simpan roadmap dan perencanaan lintas tim di Linear atau Jira.
+2. Buat tugas engineering yang ditujukan untuk agent di proyek Multica, dengan repositori dan dokumen terlampir sebagai [sumber daya proyek](/project-resources).
+3. Agar agent dapat membaca atau memperbarui Linear saat bekerja, `owner` atau `admin` ruang kerja menambahkan server MCP Linear di **Settings → MCP servers** dan menetapkannya ke agent tersebut. Lihat [Server MCP ruang kerja bersama](/agents-create#argumen-khusus-dan-mcp).
+
+Multica tidak mengimpor dari atau menyinkronkan dengan Linear maupun Jira, jadi tentukan sistem mana yang memiliki setiap tugas.
+
+## Terkait
+
+- [Berbagi pool agent dalam tim](/team-agent-pool) — role, Access, squad, dan serah terima review sekaligus.
+- [Multica vs OpenHands, Devin, dan Factory](/compare/openhands-devin-factory)
+- [Multica vs worktree manager lokal](/compare/worktree-managers)
+- [AI coding tool yang didukung](/providers)

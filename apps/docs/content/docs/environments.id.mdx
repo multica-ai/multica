@@ -1,0 +1,248 @@
+---
+title: Environment
+description: Lihat dev server dan aplikasi yang dijalankan oleh eksekusi sebuah tugas, lalu deklarasikan di .multica/environments.toml agar anggota dapat memulai, menghentikan, dan membaca lognya dari sidebar tugas.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+
+Ketika agent mengerjakan sebuah aplikasi web, hasilnya sering berupa sesuatu yang perlu dibuka: dev server, preview, atau aplikasi desktop. Bagian **Environment** di sidebar tugas menampilkan apa saja yang sedang berjalan dari eksekusi tugas tersebut, dikelompokkan berdasarkan mesin tempatnya berjalan, lengkap dengan tautan untuk membuka masing-masing.
+
+Sebuah environment bisa muncul di sana dengan dua cara:
+
+| | Terdeteksi | Dideklarasikan |
+|---|---|---|
+| Asalnya | Daemon menemukan server yang listen di dalam direktori sebuah eksekusi | Repository mendeskripsikannya di `.multica/environments.toml`, lalu agent memulainya dengan `multica env start` |
+| Setup | Tidak ada | Tambahkan file ke repository |
+| Setelah eksekusi berakhir | Tetap berjalan selama prosesnya hidup | Diawasi oleh daemon sampai dihentikan atau TTL-nya habis |
+| Dari sidebar | Buka, salin URL, hentikan | Buka, salin URL, mulai, hentikan, mulai ulang, lihat log |
+
+Deteksi membuat bagian ini berguna tanpa setup apa pun. Mendeklarasikan membuat environment dapat diulang: setiap eksekusi memulainya dengan cara yang sama, di port-nya sendiri, dengan log yang dapat dibaca dari sidebar.
+
+## Server yang terdeteksi
+
+Di macOS dan Linux, daemon mencari proses yang listen di port TCP sekitar setiap 30 detik. Sebuah proses muncul di sidebar jika:
+
+- direktori kerjanya berada di dalam direktori salah satu eksekusi tugas tersebut, dan
+- proses itu ditemukan pada dua pemindaian berturut-turut, sehingga server uji yang hanya hidup sesaat tidak ikut tampil.
+
+Yang dikecualikan:
+
+- tool coding AI itu sendiri dan CLI `multica`;
+- server yang berjalan dari [direktori lokal](/project-resources) proyek, karena itu milik Anda dan bukan milik sebuah eksekusi;
+- server yang sudah menjadi bagian dari environment yang dideklarasikan, yang hanya ditampilkan sekali di bawah environment tersebut;
+- server dari eksekusi yang tidak terkait dengan tugas, seperti sesi chat.
+
+Aplikasi desktop (misalnya aplikasi Electron) ditampilkan satu kali sebagai aplikasi, bukan sebagai daftar port. Aplikasi ini tidak memiliki URL; dari Multica Desktop di mesin yang sama, **Beralih ke jendela** akan memunculkannya ke depan. Port remote-debugging-nya tidak ditawarkan sebagai tautan.
+
+Server yang terdeteksi tetap tampil setelah eksekusinya berakhir, selama masih listen. Anggota dapat menghentikannya dari sidebar, tetapi daemon tidak tahu bagaimana server itu dimulai, sehingga tidak ada log dan tidak dapat dimulai ulang. Untuk mendapatkan keduanya, deklarasikan server tersebut.
+
+## Mendeklarasikan environment
+
+Tambahkan `.multica/environments.toml` di root repository dan commit pada branch yang di-checkout oleh eksekusi Anda. Sidebar hanya menemukan file ini di root checkout, atau satu direktori di bawahnya, dan mengabaikan file yang mengandung error; `multica env start` melaporkan apa yang salah. Setiap tabel `[environments.<name>]` adalah satu environment:
+
+```toml
+[environments.web]
+label = "Web app"
+start = "npm ci && npx vite --port $MULTICA_PORT --strictPort"
+ttl = "24h"
+```
+
+Agent lalu memulainya dari dalam checkout-nya:
+
+```bash
+multica env start web
+```
+
+Command ini menunggu sampai environment merespons, lalu mencetak URL-nya. Environment tampil di sidebar, tetap berjalan setelah eksekusi berakhir, dan berhenti ketika TTL-nya habis.
+
+### Field
+
+| Field | Wajib | Default | Arti |
+|---|---|---|---|
+| `start` | Ya | | Command shell yang memulai environment. Dijalankan dengan `/bin/sh -c` dari direktori yang berisi `.multica/`. |
+| `label` | Tidak | Namanya | Nama yang ditampilkan di sidebar. |
+| `url` | Tidak | `http://localhost:$MULTICA_PORT` | Alamat tempat anggota membukanya. Atur `url = ""` untuk sesuatu yang tidak memiliki halaman, seperti worker atau aplikasi desktop. |
+| `ready` | Tidak | Sama dengan `url` | Alamat yang diperiksa terus sampai merespons dengan status apa pun di bawah 500 (404 dihitung). Tanpa `ready` dan tanpa `url`, environment dianggap berjalan segera setelah `start` diluncurkan. |
+| `stop` | Tidak | | Command yang dijalankan sebelum daemon mengirim sinyal ke proses. Gunakan ketika `start` membuat sesuatu yang bukan milik prosesnya, seperti container. |
+| `ttl` | Tidak | `24h` | Berapa lama environment berjalan sebelum dihentikan, dari `1m` hingga `168h`. Gunakan `s`, `m`, atau `h`; `7d` tidak diterima. |
+
+Nama environment adalah bagian setelah `environments.`: huruf kecil, angka, `-`, dan `_`, maksimal 40 karakter, diawali huruf atau angka.
+
+### Port dan variabel
+
+Setiap environment mendapat sepuluh port kosong miliknya sendiri, `MULTICA_PORT` sampai `MULTICA_PORT+9`. Dua eksekusi di mesin yang sama, atau dua tugas, tidak pernah bertabrakan, jadi jangan menulis port secara permanen di kode.
+
+`start` dan `stop` melihat variabel berikut:
+
+| Variabel | Nilai |
+|---|---|
+| `MULTICA_PORT` | Port pertama dari blok, misalnya `41000` |
+| `MULTICA_ENVIRONMENT` | Nama environment |
+| `PATH` | `PATH` milik agent yang menjalankan `multica env start`, sehingga toolchain repository dapat ditemukan. Start dari sidebar memakai ulang `PATH` terakhir yang digunakan agent untuk environment tersebut pada tugas itu. |
+
+Environment juga mewarisi environment milik daemon, kecuali variabel `MULTICA_*`-nya, termasuk kredensial: sebuah environment tidak dapat bertindak sebagai eksekusi. Pada `url` dan `ready`, hanya `$MULTICA_PORT` (atau `${MULTICA_PORT}`) yang disubstitusi. Untuk memakai port kedua, hitung di shell, misalnya `API_PORT=$((MULTICA_PORT + 1))`.
+
+### Biarkan `start` berjalan di foreground
+
+`start` berjalan sebagai pemimpin process group baru. Environment hidup selama ada proses di grup tersebut, dan menghentikannya berarti mengirim sinyal ke seluruh grup. Jadi:
+
+- Biarkan server utama berjalan di foreground. Helper latar belakang yang dimulai dengan `&` tidak masalah; mereka tetap berada di grup.
+- Jangan memindahkan pekerjaan ke sesuatu di luar grup, seperti `docker compose up -d`, service sistem, atau `setsid`. Environment akan langsung berakhir sebagai **Keluar**, dan menghentikannya tidak akan menjangkau pekerjaan tersebut. Jalankan tool seperti itu di foreground dan tambahkan command `stop`.
+- Checkout sebuah eksekusi dimulai tanpa dependency yang terinstal. Instal di `start`; sepuluh menit yang ditunggu daemon untuk kesiapan sudah termasuk waktu tersebut.
+
+## Contoh
+
+Setiap contoh adalah `.multica/environments.toml` yang lengkap. Ganti `npm ci` dengan command instalasi package manager Anda (`pnpm install --frozen-lockfile`, `yarn install --immutable`) sesuai repository.
+
+<Tabs items={["Next.js", "Vite", "Go API", "Web + API", "docker compose"]}>
+<Tab value="Next.js">
+
+```toml
+[environments.web]
+label = "Web app"
+start = "npm ci && npx next dev --port $MULTICA_PORT"
+ttl = "24h"
+```
+
+</Tab>
+<Tab value="Vite">
+
+```toml
+[environments.web]
+label = "Web app"
+start = "npm ci && npx vite --port $MULTICA_PORT --strictPort"
+ttl = "24h"
+```
+
+`--strictPort` membuat Vite gagal alih-alih diam-diam pindah ke port lain, yang akan membuat tautan di sidebar mengarah ke tempat kosong.
+
+</Tab>
+<Tab value="Go API">
+
+```toml
+[environments.api]
+label = "API"
+start = "PORT=$MULTICA_PORT go run ./cmd/server"
+ready = "http://localhost:$MULTICA_PORT/healthz"
+ttl = "8h"
+```
+
+Ini mengasumsikan server membaca port dari `PORT` dan menyediakan health check di `/healthz`; sesuaikan keduanya dengan kode Anda.
+
+</Tab>
+<Tab value="Web + API">
+
+```toml
+[environments.app]
+label = "Web + API"
+start = """
+API_PORT=$((MULTICA_PORT + 1))
+(cd api && PORT=$API_PORT go run .) &
+cd web && npm ci && VITE_API_URL=http://localhost:$API_PORT npx vite --port $MULTICA_PORT --strictPort
+"""
+ttl = "24h"
+```
+
+API berjalan di latar belakang pada port kedua dari blok dan aplikasi web di foreground pada port pertama. Menghentikan environment menghentikan keduanya.
+
+</Tab>
+<Tab value="docker compose">
+
+```toml
+[environments.stack]
+label = "Full stack"
+start = "docker compose -p env-$MULTICA_PORT up --build"
+stop = "docker compose -p env-$MULTICA_PORT down"
+ttl = "8h"
+```
+
+Di `compose.yaml`, publikasikan service web pada port environment:
+
+```yaml
+services:
+  web:
+    build: .
+    ports:
+      - "${MULTICA_PORT:-3000}:3000"
+```
+
+`up` tetap berjalan di foreground tanpa `-d`. Container milik Docker, bukan milik proses environment, sehingga `stop` yang menurunkannya. `-p env-$MULTICA_PORT` memberi setiap environment project Compose-nya sendiri, sehingga eksekusi paralel tidak berbagi container.
+
+</Tab>
+</Tabs>
+
+Untuk mendeklarasikan lebih dari satu environment, tambahkan tabel lain di file yang sama. Proses setiap environment berhenti bersamanya, meskipun environment lain dari checkout yang sama berkomunikasi dengannya. Server yang harus tetap berjalan bersama, seperti aplikasi web dan API-nya, sebaiknya berada dalam satu environment, seperti pada contoh Web + API.
+
+## Memulai dan menghentikan dari CLI
+
+| Command | Fungsinya |
+|---|---|
+| `multica env start <name>` | Memulai environment dari `.multica/environments.toml` yang ditemukan di direktori saat ini atau direktori induk. Menunggu sampai siap, lalu mencetak URL-nya. Jika tugas ini sudah memiliki environment dengan nama itu yang berjalan dari checkout yang sama, mengembalikannya tanpa perubahan. |
+| `multica env start <name> --wait=false` | Kembali segera setelah dimulai. |
+| `multica env list` | Menampilkan environment tugas ini di mesin ini, beserta status, URL, dan path lognya. |
+| `multica env stop <name>` | Menghentikan environment tugas ini yang sedang berjalan dengan nama tersebut di mesin ini: menjalankan command `stop` jika ada, lalu mengirim `SIGTERM` ke proses yang tersisa, dan `SIGKILL` setelah 10 detik. Jika beberapa berjalan dengan nama yang sama, salah satunya dihentikan; untuk menghentikan yang tertentu, gunakan sidebar. |
+
+Ketiganya menerima `--output json`. `multica environment` adalah bentuk panjang dari `multica env`.
+
+<Callout type="info">
+Command ini menggunakan kredensial eksekusi yang sedang berjalan, sehingga **hanya berfungsi di dalam eksekusi agent**. Menjalankannya di terminal Anda sendiri gagal dengan `MULTICA_DAEMON_PORT not set`. Untuk memulai atau menghentikan environment sendiri, gunakan sidebar.
+</Callout>
+
+Jika command start berakhir sebelum siap, `multica env start` gagal dan mencetak baris terakhir lognya. Jika masih belum merespons setelah 10 menit, command kembali, environment tetap **Memulai**, dan alasannya (seperti "not answering at http://localhost:41000") ditampilkan bersamanya.
+
+Environment adalah milik tugas, bukan satu eksekusi: eksekusi berikutnya pada tugas yang sama dapat menampilkan dan menghentikan apa yang dimulai oleh eksekusi sebelumnya. Memulai nama yang sama lagi hanya memakai ulang environment yang sedang berjalan jika berjalan dari checkout yang sama di mesin ini. Eksekusi dengan checkout berbeda memulai instance kedua dengan nama yang sama, di port-nya sendiri, jadi periksa `multica env list` sebelum memulainya.
+
+## Mengelola environment di sidebar
+
+Setiap environment menampilkan statusnya, kapan dimulai atau berakhir, dan siapa yang memulainya. Waktu kedaluwarsa tampil di barisnya begitu tinggal kurang dari satu jam, dan di tooltip baris sebelum itu. **Buka** membuka URL-nya dan **Salin URL** menyalinnya. Environment yang sudah berakhir dilipat di bawah "N berakhir".
+
+- **Mulai**: klik **+** di samping **Environment**. Menu menampilkan environment yang dideklarasikan oleh eksekusi terbaru di setiap mesin, dan memulai yang Anda pilih dengan kode dari eksekusi tersebut. Menu juga menawarkan untuk meminta agent sebagai gantinya, misalnya ketika kode itu sudah dibersihkan: agent menyiapkan kodenya dan menjalankan `multica env start`, atau mencari tahu cara memulai proyek jika tidak ada yang dideklarasikan. Selama tugas belum memiliki environment, bagian ini disembunyikan; setelah sebuah eksekusi mendeklarasikannya, gunakan baris **Tambah …** di bagian bawah sidebar, seperti **Tambah environment** atau **Tambah wakeup atau environment**. Agar agent memulai environment pada tugas yang eksekusinya tidak mendeklarasikan apa pun, mention agent tersebut di komentar.
+- **Hentikan, mulai ulang, lihat log**: buka menu **Tindakan lainnya** pada sebuah environment. **Mulai ulang** membaca ulang deklarasi di checkout, sehingga checkout dan `.multica/environments.toml`-nya harus masih ada. Server yang terdeteksi hanya menawarkan **Hentikan**, setelah konfirmasi.
+
+Memulai, menghentikan, dan memulai ulang memerlukan anggota ruang kerja yang dapat mengakses tugas tersebut dan menggunakan runtime di mesin itu (lihat [Daemon dan runtime](/daemon-runtimes)). Mesin harus online, dan Multica-nya harus cukup baru untuk mendukung kontrol environment; jika tidak, tombolnya menjelaskan apa yang kurang. Membaca log hanya memerlukan akses ke tugas.
+
+### Log
+
+**Lihat log** menampilkan 500 baris terakhir output environment yang dideklarasikan, hingga 256 KiB. Selama environment berjalan, tampilan mengikuti output baru sekitar setiap lima detik; Anda dapat menjeda pengikutan, menyegarkan, memfilter, membungkus baris, dan menyalin.
+
+Ketika sebuah environment crash, dua baris terakhir outputnya disimpan bersamanya, sehingga sidebar dapat menampilkan alasannya keluar bahkan setelah mesin offline. Pembacaan terbaru memerlukan mesin online.
+
+Log lengkap tetap berada di mesin, di bawah `<workspaces root>/.environments/v1/`, dan disimpan selama tujuh hari setelah environment berakhir. `multica env start` dan `multica env list` mencetak path-nya.
+
+<Callout type="warning">
+Siapa pun yang memiliki akses ke tugas dapat membaca log environment. Multica menyamarkan rahasia yang dapat dikenali dari baris yang diunggah dan menghapus pembacaan log setelah sepuluh menit, tetapi jangan mengandalkannya: jaga agar kredensial tidak muncul di output server Anda.
+</Callout>
+
+## Status
+
+| Status | Arti |
+|---|---|
+| Memulai | Sudah dimulai; menunggu alamat `ready`-nya merespons. |
+| Berjalan | Siap, atau sedang listen (untuk server yang terdeteksi). |
+| Keluar | Prosesnya berakhir dengan sendirinya, misalnya setelah crash. Kode keluar dan baris terakhir output ditampilkan. |
+| Dihentikan | Dihentikan oleh agent, anggota, atau TTL-nya ("Dihentikan saat kedaluwarsa"). |
+| Tidak merespons | Mesin yang menjalankannya tidak melaporkannya selama tiga menit: daemon berhenti, atau mesin sedang tidur atau offline. Status sebenarnya muncul kembali setelah daemon melapor. |
+
+Saat daemon mati, daemon tidak mengawasi apa pun; environment yang prosesnya masih hidup diambil kembali ketika daemon dimulai ulang. Direktori eksekusi dengan environment yang sedang berjalan tidak dihapus oleh pembersihan workspace daemon sampai environment tersebut berhenti.
+
+## Biarkan agent menulis filenya
+
+Agent mengetahui formatnya: skill platform bawaan Multica, yang diterima setiap agent, mendokumentasikan `.multica/environments.toml` dan cara memverifikasinya. Minta di sebuah tugas, misalnya:
+
+> Tambahkan `.multica/environments.toml` agar aplikasi web repository ini dapat dimulai dengan `multica env start`. Mulai sekali untuk memastikan berfungsi, lalu buka PR.
+
+Agent membaca cara proyek dimulai, menulis file dengan port yang diambil dari `MULTICA_PORT`, memulai environment untuk memastikan ia merespons, dan mengirim file seperti perubahan lainnya. Setelah di-merge, setiap eksekusi berikutnya dapat memulai environment tersebut, begitu juga anggota dari sidebar.
+
+## Batasan yang diketahui
+
+- **Hanya macOS dan Linux.** Di Windows, server tidak terdeteksi dan `multica env start` melaporkan bahwa environment belum didukung.
+- **URL localhost hanya terbuka di mesin yang menjalankannya.** Ketika environment berjalan di mesin lain, seperti build server atau komputer rekan tim, sidebar akan menyatakannya; buka di mesin tersebut, atau teruskan port-nya sendiri.
+- **Restart daemon di bawah systemd.** Di Linux dengan [mulai saat login](/daemon-runtimes), me-restart atau memperbarui daemon juga menghentikan environment yang dideklarasikannya. Mulai ulang setelahnya.
+- **Satu mesin per environment.** Environment berjalan di tempat eksekusi yang memulainya berjalan; ia tidak berpindah bersama tugas.
+
+## Langkah selanjutnya
+
+- [Daemon dan runtime](/daemon-runtimes) — daemon yang mendeteksi dan mengawasi environment.
+- [Menggunakan CLI](/cli) — command `multica env` di antara CLI lainnya.
+- [Eksekusi](/tasks) — asal direktori sebuah eksekusi.

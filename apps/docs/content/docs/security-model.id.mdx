@@ -5,7 +5,7 @@ description: Apa yang dapat dijangkau oleh eksekusi Multica pada mesin yang menj
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Saat sebuah agent mengambil eksekusi, daemon menjalankan alat coding AI (Codex, Claude Code, dan sejenisnya) sebagai child process. Memahami apa yang dapat disentuh oleh proses tersebut adalah keseluruhan model keamanan.
+Saat sebuah agent mengambil eksekusi, daemon menjalankan alat coding AI (Codex, Claude Code, dan sejenisnya) sebagai child process. Model keamanan Multica bermuara pada apa yang dapat disentuh oleh proses tersebut.
 
 ## Batasnya adalah pengguna daemon
 
@@ -17,9 +17,7 @@ Multica tidak memberikan garansi sandbox filesystem. Saat ini hanya ada satu pen
 Multica tidak melakukan sandbox filesystem untuk Anda. Jika daemon berjalan sebagai akun pengguna pribadi Anda, sebuah eksekusi dapat membaca SSH key Anda, mengedit profil shell Anda, dan menghapus dokumen Anda. Isolasi harus datang dari batas yang Anda tempatkan di sekeliling daemon.
 </Callout>
 
-Ini disengaja. Agent diminta untuk menginstal dependency, menjalankan build, menggunakan cloud CLI Anda, dan mengoperasikan tooling yang mengharapkan direktori home yang normal. Sandbox filesystem yang hanya sebagian merusak pekerjaan tersebut dengan cara yang sulit didiagnosis — alatnya melaporkan "not logged in" atau diam-diam menggunakan akun yang salah — sementara tetap tidak melindungi hal yang paling penting, karena sandbox itu tidak dapat mencegah sebuah eksekusi membaca kredensial dan mengirimkannya lewat jaringan.
-
-Jadi Multica tidak berpura-pura menjadi batas itu. Tempatkan satu batas di sekelilingnya.
+Ini disengaja. Agent diminta untuk menginstal dependency, menjalankan build, menggunakan cloud CLI Anda, dan mengoperasikan tooling yang mengharapkan direktori home yang normal. Sandbox filesystem yang hanya sebagian merusak pekerjaan tersebut dengan cara yang sulit didiagnosis — alatnya melaporkan "not logged in" atau diam-diam menggunakan akun yang salah — sementara tetap tidak melindungi hal yang paling penting, karena sandbox itu tidak dapat mencegah sebuah eksekusi membaca kredensial dan mengirimkannya lewat jaringan. Jadi Multica tidak menganggap dirinya sebagai batas; batasnya ditempatkan di sekelilingnya.
 
 ## Konfigurasi yang direkomendasikan
 
@@ -57,4 +55,3 @@ multica daemon logs --lines 200 | grep "codex sandbox"
 ```
 
 Untuk memastikan konfigurasi Codex yang sebenarnya berlaku, baca blok yang dikelola (managed block) di `config.toml` milik eksekusi tersebut, di bawah `CODEX_HOME` eksekusi itu — bagian antara marker `# BEGIN multica-managed` dan `# END multica-managed` ditulis oleh daemon pada setiap eksekusi.
-</content>

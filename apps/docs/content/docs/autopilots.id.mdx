@@ -4,14 +4,19 @@ description: Serahkan pekerjaan yang berulang ke agent secara otomatis, berdasar
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { AutopilotDemo } from "@/components/demos/autopilot-demo";
 
-Otomatisasi menjalankan pekerjaan yang terjadi berulang kali — ringkasan progres harian, pengecekan dependency secara periodik, atau agent yang dipicu oleh sebuah event dari sistem eksternal.
+Ringkasan progres harian, pengecekan dependency secara periodik, agent yang dipicu oleh sebuah event dari sistem eksternal: pekerjaan yang terjadi berulang kali diserahkan ke otomatisasi.
 
-Setiap otomatisasi menyimpan sebuah Runbook, assignee, dan satu atau lebih trigger. Saat terpicu, Multica akan membuat tugas atau langsung menjalankan agent, dan menyimpan catatan untuk setiap eksekusi.
+Setiap otomatisasi menyimpan sebuah Runbook, assignee, dan satu atau lebih trigger. Saat terpicu, Multica akan membuat tugas atau langsung menjalankan agent, dan setiap eksekusi meninggalkan catatan.
+
+## Otomatisasi dan wakeup tugas [#vs-wakeups]
+
+Otomatisasi memulai pekerjaan baru dari schedule atau webhook, dan dapat membuat tugas baru setiap kali. Agar agent kembali ke satu tugas yang sudah ada nanti, pada waktu tertentu atau setelah sesuatu terjadi di tugas tersebut, tambahkan [wakeup](/issue-wakeups) ke tugas itu. Tab **Issue wakeups** di halaman Autopilot mencantumkan semua wakeup di ruang kerja.
 
 ## Membuat otomatisasi
 
-Buka **Autopilot** di sidebar, pilih template atau mulai dari kosong, lalu konfigurasikan:
+Buka **Auto** di app rail, pilih template atau mulai dari kosong, lalu konfigurasikan:
 
 - **Name**: menjelaskan apa yang menjadi tanggung jawab otomatisasi ini;
 - **Runbook**: tujuan, latar belakang, batasan, dan langkah-langkah yang dibaca agent di setiap eksekusi;
@@ -21,7 +26,11 @@ Buka **Autopilot** di sidebar, pilih template atau mulai dari kosong, lalu konfi
 - **Subscribers**: anggota yang akan diberi notifikasi setelah sebuah tugas dibuat secara otomatis;
 - **Triggers**: schedule atau webhook.
 
-Otomatisasi aktif secara default setelah disimpan; **Run now** menjalankan seluruh alur secara manual satu kali kapan saja.
+Otomatisasi aktif secara default setelah disimpan. **Run now** menjalankan seluruh alur satu kali kapan saja, tanpa menunggu schedule.
+
+Di bawah ini adalah otomatisasi dengan mode eksekusi Create issue. Klik **Run now**, atau lompat ke waktu terjadwal berikutnya, lalu lihat otomatisasi membuat tugas, menyerahkannya ke agent, dan menyelesaikan eksekusi.
+
+<AutopilotDemo />
 
 ## Memilih mode eksekusi
 
@@ -30,15 +39,15 @@ Otomatisasi aktif secara default setelah disimpan; **Run now** menjalankan selur
 | **Buat Tugas** | Setiap trigger pertama-tama membuat sebuah tugas, lalu menugaskannya ke assignee; diskusi, status, dan catatan eksekusi semuanya tersimpan di tugas tersebut. | Pekerjaan yang perlu ditinjau, dikonfirmasi, atau ditindaklanjuti oleh tim. |
 | **Hanya Eksekusi** | Langsung membuat eksekusi tanpa tugas; hasilnya hanya terlihat di riwayat eksekusi otomatisasi tersebut. | Eksekusi latar belakang yang tidak memerlukan catatan kolaborasi. |
 
-Mode **Buat Tugas** menggunakan antrean eksekusi yang sama seperti tugas biasa: ketika runtime offline, tugas tetap dibuat dan eksekusi menunggu sampai runtime kembali online.
+Mode **Buat Tugas** menggunakan antrean eksekusi yang sama seperti tugas biasa: ketika runtime offline, tugas tetap dibuat, dan eksekusi dimulai setelah runtime kembali online.
 
 **Hanya Eksekusi** memerlukan runtime yang tersedia pada saat trigger terjadi; jika tidak, eksekusi akan ditampilkan sebagai dilewati (skipped), dan tidak ada tugas yang menunggu yang ditinggalkan.
 
 ## Menjalankan berdasarkan schedule
 
-Editor schedule memungkinkan Anda memilih waktu eksekusi, hari pengulangan, jendela waktu, dan timezone, serta menampilkan preview waktu eksekusi berikutnya. Satu otomatisasi dapat memiliki beberapa schedule; mengaktifkan atau menonaktifkan satu trigger tertentu dilakukan dengan `autopilot trigger-update` pada CLI — lihat [Menggunakan CLI](/cli) untuk parameternya.
+Editor schedule memungkinkan Anda memilih waktu eksekusi, hari pengulangan, jendela waktu, dan timezone, serta menampilkan preview waktu eksekusi berikutnya. Satu otomatisasi dapat memiliki beberapa schedule. Untuk mengubah, mengaktifkan, atau menonaktifkan satu trigger, klik tombol edit pada barisnya di bawah **Triggers**, atau gunakan `autopilot trigger-update` pada CLI — lihat [Menggunakan CLI](/cli) untuk parameternya.
 
-Saat Anda memerlukan aturan yang lebih kompleks, edit langsung cron standar 5 field:
+Untuk aturan yang lebih kompleks, edit langsung cron standar 5 field:
 
 ```text
 minute hour day month weekday
@@ -76,11 +85,45 @@ Batasan pada request webhook:
 - tanpa idempotency key yang stabil, Multica tidak dapat menjamin bahwa request yang berulang hanya berjalan satu kali;
 - ketika trigger dinonaktifkan atau event tidak cocok, delivery akan dicatat sebagai diabaikan (ignored) dan tidak ada eksekusi yang dibuat.
 
-### Memfilter event
+### Memfilter event [#event-filters]
 
-Ketika satu sumber mengirimkan beberapa jenis event, tambahkan filter event pada trigger tersebut. Setiap baris menyimpan satu nama event beserta daftar action opsional; sebuah eksekusi akan terpicu jika ada satu baris yang cocok, dan membiarkan semua baris kosong berarti menerima setiap event.
+Ketika satu sumber mengirimkan beberapa jenis event, tambahkan filter event pada trigger tersebut. Klik **Add rule** lalu masukkan satu nama event beserta daftar action opsional; sebuah eksekusi akan terpicu jika ada satu rule yang cocok, dan trigger tanpa rule menerima setiap event. Untuk mengedit filter sebuah webhook, klik **Edit webhook** pada barisnya di bawah **Triggers**.
 
 Misalnya, dengan `workflow_run` sebagai nama event dan `completed, failed` sebagai action, hanya dua jenis hasil `workflow_run` tersebut yang akan diterima. Multica mengenali event dan action dari header request dan field payload yang umum, termasuk `X-GitHub-Event` dari GitHub dan field `action` di dalam body.
+
+Untuk GitLab, nama event adalah nilai header `X-Gitlab-Event` persis seperti yang dikirim GitLab, misalnya `Merge Request Hook`, `Issue Hook`, atau `Note Hook`, termasuk spasi dan huruf kapital; `object_kind` pada payload (`merge_request`) tidak cocok. Setiap action yang tercantum dibandingkan dengan `object_attributes.action` dan `object_attributes.state`, dan rule cocok jika salah satu nilai tercantum. Rule ini menerima merge request yang baru, diperbarui, dan dibuka kembali, serta mengabaikan merge dan close:
+
+```json
+{ "event": "Merge Request Hook", "actions": ["open", "update", "reopen"] }
+```
+
+Cantumkan kata action (`open`, `update`, `reopen`, `merge`, `close`), bukan kata state (`opened`, `merged`, `closed`). Nilai dibandingkan persis dan tidak pernah diterjemahkan dari satu bentuk ke bentuk lain, dan kata state cocok dengan setiap event yang membuat objek berada pada state tersebut. Mendorong commit ke merge request yang terbuka mengirim `"action": "update"` dengan `"state": "opened"`, dan sebuah approval mengirim `"action": "approval"` dengan state yang sama, sehingga `opened` memulai eksekusi untuk keduanya, selain untuk merge request baru.
+
+- `Issue Hook` dengan `close` menerima tugas yang ditutup.
+- `Note Hook` dengan `create` menerima komentar baru; komentar yang diedit mengirim `update`.
+- Rule GitLab tanpa action menerima setiap event dengan nama event tersebut.
+- Untuk menjalankan hanya saat gagal, atur **Actions** ke `failed` dengan `Pipeline Hook` (`object_kind: "pipeline"`, status dari `object_attributes.status`) atau `Job Hook` (`object_kind: "build"`, status dari `build_status`). Status lain, seperti `success` dan `running`, difilter; membiarkan Actions kosong menerima setiap status untuk event tersebut. Field status CI ini hanya berlaku untuk object kind masing-masing. Lihat [payload event GitLab](https://docs.gitlab.com/user/project/integrations/webhook_events/#pipeline-events).
+
+Setiap rule juga dapat membawa `conditions` pada field payload: klik **Add condition** pada rule tersebut, atau atur melalui API. Setiap condition harus terpenuhi agar rule cocok; event yang terfilter diabaikan sebelum eksekusi apa pun dimulai. `path` menelusuri payload dengan titik, di mana angka mengindeks array dan `*` berarti elemen mana pun (`pull_request.labels.*.name`). `op` adalah `equals`, `not_equals`, `contains`, `in` atau `exists`, dan `ignore_case` berlaku untuk teks. Dengan `*`, `equals`, `contains`, `in` dan `exists` terpenuhi jika ada elemen yang cocok, dan `not_equals` terpenuhi jika tidak ada yang cocok. Field yang tidak ada tidak pernah cocok, dan `exists` mengabaikan `null`. Misalnya, rule ini hanya menerima pull request yang siap, berlabel `needs-review`, menargetkan `main` atau `release`, dan tidak dibuka oleh bot:
+
+```json
+{
+  "event": "pull_request",
+  "actions": ["opened", "synchronize"],
+  "conditions": [
+    { "path": "pull_request.draft", "op": "equals", "value": false },
+    { "path": "pull_request.labels.*.name", "op": "equals", "value": "needs-review" },
+    { "path": "pull_request.base.ref", "op": "in", "values": ["main", "release"] },
+    { "path": "sender.type", "op": "not_equals", "value": "Bot" }
+  ]
+}
+```
+
+Setiap rule mendukung hingga 20 condition. Path field dapat berisi maksimal 256 karakter, dan daftar `in` dapat berisi maksimal 100 nilai. Membuat atau memperbarui trigger dengan condition yang terlalu besar mengembalikan HTTP 400.
+
+Array kosong yang diperluas oleh `*` memenuhi `not_equals`; path yang tidak ada tetap gagal. Ketidakcocokan event/action dicatat sebagai `event_filtered`; event yang cocok tetapi condition payload-nya gagal dicatat sebagai `payload_filtered`. Keduanya mengembalikan HTTP 200 tanpa membuat eksekusi atau tugas. Daftar delivery menampilkan alasan dan field pertama yang gagal; detailnya menampilkan condition yang tersimpan dan nilai aktual saat diterima. Mengubah trigger di kemudian hari tidak mengubah snapshot ini. Preview dibatasi 10 nilai dengan 256 karakter masing-masing; buka raw body untuk nilai lengkapnya.
+
+Anda juga dapat mengonfigurasi filter ini sepenuhnya melalui CLI dengan `--event-filters-file`. Memperbarui tanpa salah satu opsi filter mempertahankan filter yang ada; `--clear-event-filters` menghapusnya secara eksplisit dan menerima semua event. Lihat [contoh CLI](/cli#webhook-event-filters) untuk format JSON dan perintahnya.
 
 ### Melindungi URL webhook
 
@@ -92,7 +135,7 @@ Hanya pembuat otomatisasi, owner/admin ruang kerja, dan kolaborator yang diberi 
 
 ### Referensi response webhook
 
-Saat melakukan debugging pada pengirim, gunakan tabel ini untuk memahami response Multica:
+Saat melakukan debugging pada pengirim, cocokkan response Multica dengan tabel ini:
 
 | Status HTTP | Status response | Arti |
 |---|---|---|
@@ -134,7 +177,7 @@ Menjeda secara manual akan menghentikan schedule, webhook, dan **Run now**. Peng
 
 ## Perizinan
 
-- Anggota ruang kerja mana pun dapat membuat otomatisasi;
+- Anggota dengan role `owner`, `admin`, atau `member` dapat membuat otomatisasi.
 - pembuat dan owner/admin ruang kerja dapat mengedit, menjalankan, menghapus, dan mengelola trigger;
 - pembuat dan owner/admin dapat menambahkan kolaborator ke akses pengelolaan;
 - kolaborator dapat mengedit, menjalankan, dan mengelola trigger, tetapi tidak dapat memberikan akses ke orang lain;
@@ -149,7 +192,7 @@ multica autopilot runs <autopilot-id>
 multica autopilot trigger-rotate-url <autopilot-id> <trigger-id>
 ```
 
-`autopilot get` secara default mengatur `webhook_token`, `webhook_path`, dan `webhook_url` menjadi `null`, dan mengembalikan `has_webhook_token` beserta `webhook_token_hint` sebagai gantinya. Tambahkan `--show-secrets` hanya ketika Anda memang sengaja memerlukan kredensial aktifnya; CLI akan menampilkan peringatan ke stderr agar JSON yang di-pipe tetap valid.
+`autopilot get` secara default mengatur `webhook_token`, `webhook_path`, dan `webhook_url` menjadi `null`, dan mengembalikan `has_webhook_token` beserta `webhook_token_hint` sebagai gantinya. Tambahkan `--show-secrets` hanya ketika Anda memang sengaja memerlukan kredensial aktifnya; CLI menampilkan peringatannya ke stderr, sehingga JSON yang di-pipe tidak terpengaruh.
 
 Lihat [Menggunakan CLI](/cli) untuk parameter lengkapnya.
 
@@ -158,3 +201,4 @@ Lihat [Menggunakan CLI](/cli) untuk parameter lengkapnya.
 - [Menugaskan tugas ke agent](/assigning-issues) — penugasan dan jendela konfirmasi.
 - [Inbox dan subscription](/inbox) — tempat notifikasi eksekusi diterima.
 - [Runs](/tasks) — status eksekusi dan penanganan kegagalan.
+- [Wakeup tugas](/issue-wakeups) — bawa agent kembali ke tugas yang sudah ada nanti.

@@ -1,4 +1,9 @@
 {
   "title": "Pengembangan",
-  "pages": ["contributing", "architecture", "conventions"]
+  "pages": [
+    "contributing",
+    "architecture",
+    "conventions",
+    "themes"
+  ]
 }

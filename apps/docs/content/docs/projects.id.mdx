@@ -4,6 +4,7 @@ description: Atur tugas-tugas yang berkaitan dengan proyek dan berikan tujuan, r
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { ProjectDemo } from "@/components/demos/project-demo";
 
 Proyek mengatur pekerjaan yang membutuhkan beberapa [tugas](/issues) untuk diselesaikan — peluncuran produk, migrasi, atau fitur yang dikirim secara bertahap.
 
@@ -17,11 +18,29 @@ Pekerjaan yang dapat dijelaskan oleh satu tugas saja tidak memerlukan proyek. Pr
 | **Status** | `planned`, `in_progress`, `paused`, `completed`, atau `cancelled`. |
 | **Prioritas** | `urgent`, `high`, `medium`, `low`, atau `none`. |
 | **Lead** | Anggota atau agent — yang mengoordinasikan proyek. |
+| **Akses** | Seluruh ruang kerja, atau hanya anggota proyek. Lihat [Proyek privat](#proyek-privat). |
 | **Tanggal mulai dan target** | Rentang waktu yang direncanakan untuk proyek. |
 | **Tugas dan progres** | Pekerjaan dalam proyek dan seberapa banyak yang telah selesai. |
 | **Resource** | Repositori GitHub atau direktori lokal pada komputer tertentu yang ditautkan. |
+| **Workflow** | Langkah-langkah yang diikuti tugasnya dan siapa yang mengambil alih di setiap langkah. |
 
-![Detail proyek: tugas yang dikelompokkan berdasarkan status, progres, dan deskripsi proyek](/images/docs/project-detail.webp)
+## Menjelajahi proyek
+
+Buka **All projects** dan gunakan menu tampilan untuk memilih **Table** atau **Board**. Kedua tata letak mendukung pencarian dan filter untuk status, prioritas, dan lead. Kelompokkan berdasarkan status, prioritas, lead, atau [folder](#folder); tabel juga dapat tetap tanpa pengelompokan. Di board, menyeret proyek ke kolom lain mengubah kolom tersebut.
+
+Tabel dapat menampilkan tanggal mulai, tenggat, progres, dan aktivitas terakhir. Urutkan berdasarkan kolom-kolom itu, nama, status, prioritas, atau waktu pembuatan. Tata letak, pengelompokan, pengurutan, kolom yang terlihat, dan filter disimpan per pengguna dan ruang kerja di semua perangkat; teks pencarian tidak disimpan.
+
+## Halaman proyek
+
+Membuka sebuah proyek menampilkan tiga tab:
+
+- **Overview** — nama proyek, ikon, deskripsi yang dapat diciutkan (dibagikan ke agent sebagai konteks), dan resource yang terlampir.
+- **Issues** — tugas-tugas proyek dalam tata letak daftar, board, tabel, Gantt, atau swimlane pilihan Anda.
+- **Activity** — feed terbaru-dulu berisi pembuatan tugas serta perubahan status, penerima tugas, prioritas, tanggal, judul, dan duplikat di seluruh proyek.
+
+Tab yang terakhir Anda buka diingat per proyek di perangkat ini; proyek yang belum memiliki tugas terbuka di **Overview**.
+
+Sidebar kanan tetap tersedia di setiap tab: **Properties**, **Progress** (jumlah selesai dibanding yang masuk lingkup, bilah tersegmentasi selesai dan sedang dikerjakan, grafik progres mingguan, dan prakiraan penyelesaian dari laju 4 minggu terakhir setelah riwayat cukup tersedia), **Breakdown** (beralih antara **Assignee** dan **Label**; memilih satu baris membuka **Issues** yang difilter ke irisan tersebut), dan **Recent activity** dengan **View all** yang membuka tab **Activity**.
 
 ## Proyek dan tugas
 
@@ -30,35 +49,104 @@ Sebuah proyek dapat berisi tugas dalam jumlah berapa pun; satu tugas paling bany
 Progres proyek dihitung secara otomatis dari tugas-tugas yang tertaut:
 
 ```text
-progress = issues in done or cancelled ÷ all issues in the project
+progress = issues in the done category ÷ (all issues in the project − issues in the closed category)
 ```
 
-`cancelled` berarti pekerjaan tersebut telah ditutup dari lingkup proyek, sehingga tetap dihitung dalam progres. Status proyek dan status tugas saling independen: menyelesaikan semua tugas tidak otomatis mengubah proyek menjadi `completed`, dan mengubah status proyek tidak mengubah status semua tugasnya secara massal.
+Di antara status bawaan, `done` dihitung selesai dan `cancelled` adalah closed. Tugas yang closed telah keluar dari lingkup proyek, sehingga tidak dihitung sebagai selesai maupun dalam total; proyek menampilkan berapa yang dibatalkan di samping progresnya. Status khusus mengikuti kategorinya. Persentase dibulatkan ke bawah, jadi 100% berarti setiap tugas yang masih dalam lingkup sudah selesai. Proyek tanpa tugas dalam lingkup menampilkan 0%.
+
+Status proyek dan status tugas saling independen: menyelesaikan semua tugas tidak mengubah proyek menjadi `completed`, dan mengubah status proyek tidak mengubah status semua tugasnya secara massal.
+
+<ProjectDemo />
 
 ## Deskripsi proyek dan konteks eksekusi
 
-Saat seorang agent mengeksekusi tugas di dalam sebuah proyek, nama dan deskripsi proyek tersebut ditambahkan ke konteks eksekusi itu. Deskripsi adalah tempat untuk informasi yang dibutuhkan oleh setiap tugas terkait: tujuan, batasan teknis, konvensi pengiriman. Persyaratan yang hanya berlaku untuk satu tugas sebaiknya ditulis pada tugas itu sendiri.
+Saat seorang agent mengeksekusi tugas di dalam sebuah proyek, nama dan deskripsi proyek tersebut ditambahkan ke konteks eksekusi itu. Tulis di deskripsi apa yang perlu diketahui setiap eksekusi terkait — tujuan, batasan teknis, konvensi pengiriman — dan simpan persyaratan untuk satu tugas di tugas itu sendiri.
 
 ## Menambahkan resource
 
 Resource proyek memberi tahu agent kode dan direktori kerja mana yang harus digunakan:
 
 - **Repositori GitHub**: menyediakan repo yang dapat di-checkout oleh runtime, dengan ref opsional.
-- **Direktori lokal**: memungkinkan runtime pada komputer tertentu bekerja di direktori yang sudah ada, yang isinya dimodifikasi langsung oleh agent.
+- **Direktori lokal**: memungkinkan runtime pada komputer tertentu menggunakan direktori yang sudah ada; agent mengeditnya secara langsung atau bekerja di git worktree terisolasi darinya.
 
 Lihat [Resource proyek](/project-resources) untuk cara memilih dan batasan keamanannya.
 
+## Memilih workflow
+
+Pilih **Workflow** proyek untuk menentukan kolom board-nya dan siapa yang mengambil alih di setiap langkah. Misalnya, pengembangan dapat diserahkan ke satu agent, tinjauan ke agent lain, dan penerimaan ke anggota tim. Proyek tanpa pilihan lain memakai **Default**: setiap status tersedia dan tidak ada yang diserahkan secara otomatis. Lihat [Workflow](/workflows) untuk pengaturan dan cara mengganti workflow proyek yang sudah ada.
+
 ## Lead proyek
 
-Lead dapat berupa anggota atau agent, dan menandai siapa yang mengoordinasikan proyek. Ini bukan pengaturan izin: lead tidak otomatis menugaskan tugas-tugas proyek, dan menjadikan seorang agent sebagai lead tidak otomatis menjalankannya. Memulai sebuah eksekusi masih memerlukan penugasan tugas, @mention, atau pemicu otomatisasi.
+Lead dapat berupa anggota atau agent; anggota yang menjadi lead juga dapat mengganti workflow proyek. Menjadikan seseorang lead tidak menugaskan tugas kepadanya atau memulai pekerjaan apa pun. Untuk menyerahkan suatu langkah kepada lead, atur handler langkah itu ke **Project lead** di workflow.
+
+## Proyek privat
+
+**Access** sebuah proyek adalah **Entire workspace** atau **Project members only**. Proyek privat, beserta tugas, komentar, dan lampirannya, hanya terlihat oleh orang di daftar anggotanya. Bagi orang lain proyek itu tidak muncul di daftar atau pencarian, dan tautan ke proyek itu terbuka sebagai tidak ditemukan.
+
+### Siapa yang dapat melihat proyek privat
+
+- **Orang di daftar anggota, dan tidak ada yang lain.** Peran ruang kerja tidak membuka apa pun: `owner` atau `admin` yang tidak ada di daftar tidak dapat melihat proyek. Mereka ditambahkan ke daftar seperti orang lain, dan dapat dikeluarkan darinya.
+- **Agent** mengikuti orang yang mereka layani. Eksekusi agent hanya melihat proyek privat jika orang yang memicu eksekusi dan pemilik agent sama-sama ada di daftar. Tugas di proyek privat hanya dapat ditugaskan ke agent yang pemiliknya ada di daftar.
+- Anggota yang keluar dari ruang kerja keluar dari setiap proyek privat di dalamnya.
+
+<Callout type="info">
+Jika Anda `owner` atau `admin` dan proyek privat tidak lagi muncul untuk Anda, berarti Anda tidak ada di daftar anggotanya. Minta anggota yang mengelola aksesnya untuk menambahkan Anda; owner ruang kerja juga dapat bergabung dari pengaturan (lihat [Pemulihan oleh owner ruang kerja](#pemulihan-oleh-owner-ruang-kerja)).
+</Callout>
+
+### Siapa yang mengelola daftar anggota
+
+Mengelola akses berarti menambah dan mengeluarkan anggota, mengganti lead proyek, dan mengembalikan proyek ke seluruh ruang kerja. Orang-orang berikut dapat melakukannya:
+
+- Anggota `owner` dan `admin` yang ada di daftar.
+- Satu anggota yang ditunjuk proyek sebagai pengelola aksesnya, ditandai **Manages access** di dialog **Access**: lead, jika lead adalah orang di daftar; jika tidak, pembuat, jika ada di daftar; jika tidak, anggota yang paling lama berada di daftar.
+
+Lead proyek privat dapat berupa anggota, agent, atau tidak ada, seperti pada proyek mana pun. Pengelola akses tidak disimpan tetapi dihitung dari lead, pembuat, dan daftar setiap kali, sehingga berpindah saat lead berubah atau seseorang keluar. Menunjuk seseorang sebagai lead menambahkannya ke daftar; untuk mengeluarkan lead saat ini dari daftar, ganti lead terlebih dahulu. Anggota lain dapat melihat daftar tetapi tidak dapat mengubahnya. Agent tidak dapat mengubah akses proyek mana pun.
+
+### Membuat proyek privat atau menjadikan proyek privat
+
+- **Proyek baru**: di dialog pembuatan, buka **Access**, pilih **Project members only**, dan tambahkan anggota. Anda selalu ada di daftar, begitu juga orang yang Anda tunjuk sebagai lead.
+- **Proyek yang sudah ada**: klik **Access** di properti proyek dan pilih **Project members only**. Menjadikan proyek yang terlihat di ruang kerja menjadi privat memerlukan `owner` atau `admin`; mereka ditambahkan ke daftar, begitu juga lead jika lead adalah orang.
+- **CLI**: berikan `--visibility private` ke `project create` atau `project update`, dengan `--member` (nama, email, atau user ID; dapat diulang) untuk daftar awal. Kelola daftar selanjutnya dengan `project member list|add|remove`.
+
+```bash
+multica project create --title "Pricing revamp" --visibility private --member alice@example.com --member Bob
+multica project update <project-id> --visibility private --member alice@example.com
+multica project member add <project-id> carol@example.com
+```
+
+Mengembalikan proyek privat ke **Entire workspace** membuat proyek beserta tugas, komentar, dan lampirannya terlihat oleh anggota dengan peran `owner`, `admin`, atau `member`. Guest hanya melihat proyek jika dibagikan kepada mereka. Aplikasi meminta konfirmasi terlebih dahulu; `multica project update --visibility workspace` langsung menerapkan perubahan.
+
+### Pemulihan oleh owner ruang kerja
+
+Proyek privat mungkin tidak memiliki `owner` atau `admin` di daftarnya, atau tidak memiliki anggota sama sekali. `owner` ruang kerja dapat turun tangan dari **Settings → General → Private projects**, bagian yang hanya terlihat oleh owner (admin tidak). Bagian ini mencantumkan setiap proyek privat dengan nama dan anggotanya, dan tidak lebih: tugas, komentar, dan lampiran tetap tersembunyi sampai Anda bergabung.
+
+Klik **Join** dan konfirmasi untuk menambahkan diri Anda ke daftar anggota. Anda muncul di daftar seperti anggota lain, anggota yang ada menerima notifikasi kotak masuk, dan sebagai owner di daftar Anda dapat mengelola aksesnya. Bergabung tidak mengubah lead. Proyek yang semua anggotanya telah keluar dipulihkan dengan cara yang sama: bergabunglah, lalu kelola atau hapus dari halaman proyek.
+
+## Folder
+
+Folder mengelompokkan proyek yang berkaitan, seperti semua untuk satu peluncuran atau satu tim, agar bagian Projects di sidebar tetap ringkas. Owner, admin, dan member berbagi folder yang sama dan dapat membuat, mengganti nama, atau menghapus folder serta memindahkan proyek masuk dan keluar darinya. Satu proyek berada di paling banyak satu folder, dan folder tidak bersarang. Folder hanya mengatur proyek; tidak mengubah siapa yang dapat melihatnya.
+
+- **Membuat folder**: klik **+** pada bagian Projects di sidebar dan pilih **New folder**, atau pilih **Move to folder → New folder…** di menu proyek untuk membuatnya langsung berisi proyek tersebut.
+- **Memindahkan proyek**: pilih **Move to folder** di menu proyek, atau seret proyek ke folder di sidebar, atau keluar darinya. Saat membuat proyek, pilih foldernya di dialog pembuatan; **+** pada baris folder membuat proyek di folder itu.
+- **Mengganti nama atau menghapus folder**: klik kanan di sidebar. Menghapus folder memindahkan proyeknya kembali ke tingkat teratas; tidak ada hal lain yang berubah.
+
+Folder mana yang terbuka di sidebar Anda, serta urutan folder dan proyek, bersifat pribadi dan tidak memengaruhi anggota lain. Filter pada bagian Projects berlaku di dalam folder: folder yang semua proyeknya terfilter disembunyikan, sedangkan folder kosong tetap terlihat agar dapat Anda isi. Di **All projects**, kelompokkan berdasarkan **Folder** untuk melihat proyek tiap folder bersama; di board, menyeret proyek ke kolom lain memindahkannya ke folder tersebut.
 
 ## Menyematkan ke sidebar
 
 Proyek yang disematkan akan muncul di sidebar Anda. Menyematkan adalah preferensi pribadi dan tidak memengaruhi anggota lain.
 
+Di pengaturan bagian Projects, **Default icons only** mengganti ikon proyek khusus dengan ikon proyek default di bagian tersebut. Pengaturan ini nonaktif secara default dan tidak mengubah proyeknya sendiri.
+
+## Mengarsipkan dan memulihkan
+
+Pilih **Archive project** di menu proyek, atau **Archive** dari daftar proyek. Siapa pun yang dapat mengedit proyek dapat mengarsipkan atau memulihkannya. Pengarsipan menyembunyikannya dari daftar dan pemilih proyek biasa serta mencegah tugas baru dibuat di dalamnya atau dipindahkan ke dalamnya. Tugas, riwayat, dan pengaturan yang ada tetap tersimpan; tugas yang ada masih dapat dibaca dan diedit. Status proyek tidak berubah.
+
+Autopilot aktif yang membuat tugas di proyek tersebut dijeda. Untuk memulihkan proyek, alihkan menu judul daftar proyek ke **Archived projects** dan pilih **Restore**, atau gunakan **Restore project** di halamannya. Pemulihan tidak melanjutkan autopilot tersebut; aktifkan secara terpisah saat siap.
+
 ## Membuat, mengedit, dan menghapus
 
-Setiap anggota ruang kerja dapat membuat dan mengedit proyek; hanya `owner` dan `admin` yang dapat menghapusnya.
+Owner, admin, dan member dapat membuat dan mengedit proyek. Member dapat menghapus proyek yang mereka buat atau yang dibuat oleh agent yang saat ini mereka miliki; agent hanya dapat menghapus proyek mereka sendiri. Anggota `owner` dan `admin` manusia dapat menghapus proyek apa pun, termasuk proyek lama dengan pembuat yang tidak diketahui. Proyek privat hanya dapat diedit atau dihapus oleh orang di daftar anggotanya, jadi `owner` atau `admin` harus ada di daftar terlebih dahulu.
 
 <Callout type="warning">
 Menghapus proyek tidak menghapus tugas-tugasnya: tugas-tugas tersebut akan terlepas dan tetap berada di ruang kerja. Deskripsi, status, dan resource proyek akan dihapus secara permanen.

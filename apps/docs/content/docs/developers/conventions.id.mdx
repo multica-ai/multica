@@ -30,12 +30,14 @@ Monorepo ini menegakkan boundary package yang ketat:
 
 | Package | Boleh bergantung pada | TIDAK BOLEH bergantung pada |
 | --- | --- | --- |
-| `packages/core` | tidak ada yang spesifik app | `react-dom`, `localStorage`, `process.env`, `next/*`, UI libraries |
+| `packages/core` | tidak ada yang spesifik app | `react-dom`, `next/*`, UI libraries, `process.env`, `localStorage` atau `sessionStorage` secara langsung (persistensi melalui `StorageAdapter`; hanya `analytics/exception-dedupe.ts` dan `appearance/safe-mode.ts` yang menggunakan `sessionStorage` dengan cakupan tab) |
 | `packages/ui` | tidak ada | `@multica/core`, logika bisnis |
-| `packages/views` | `core/`, `ui/` | `next/*`, `react-router-dom`, store |
+| `packages/views` | `core/`, `ui/` | `next/*`, `react-router-dom`, definisi store |
 | `apps/web/platform/` | `next/*` | app lain |
 | `apps/desktop/.../platform/` | `react-router-dom`, electron | app lain |
-| `apps/mobile/` | types dan pure functions dari `@multica/core` | Halaman React Web/Desktop, store, dan implementasi platform |
+| `apps/mobile/` | types dan pure functions dari `@multica/core`, melalui subpath masing-masing module | Halaman React Web/Desktop, store, dan implementasi platform, termasuk barrel core yang mengekspor ulang semuanya |
+
+`AGENTS.md` root adalah sumber untuk boundary ini beserta pengecualiannya yang sempit; ubah keduanya bersamaan. Lint menegakkan baris `packages/core` (`packages/core/eslint.config.mjs`) dan import core milik mobile (`apps/mobile/eslint.config.js`).
 
 Jika logika muncul di kedua app, logika itu HARUS diekstrak ke package bersama. Tidak ada pengecualian untuk duplikasi yang "kecil". Mobile memiliki UI, data layer, dan proses rilis yang terpisah; Mobile hanya membagikan types dan pure functions.
 
@@ -120,10 +122,10 @@ Halaman bahasa Tionghoa di bawah `apps/docs/content/docs/*.zh.mdx` menjadi stand
 
 `issue` adalah nama produk dalam bahasa Inggris untuk hal yang diajukan pengguna dan dikerjakan oleh agent. Di setiap locale lain, ini adalah **kata sehari-hari untuk "task"**:
 
-| Entitas | en | zh-Hans | ja | ko | fr |
-| --- | --- | --- | --- | --- | --- |
-| unit pekerjaan yang dilacak (`issue`) | Issue | **任务** | **タスク** | **태스크** | **Tâche** |
-| satu record eksekusi agent (`task` di API / DB) | **Run** | **运行** | **実行** | **실행** | **Exécution** |
+| Entitas | en | zh-Hans | ja | ko | fr | es |
+| --- | --- | --- | --- | --- | --- | --- |
+| unit pekerjaan yang dilacak (`issue`) | Issue | **任务** | **タスク** | **태스크** | **Tâche** | **Tarea** |
+| satu record eksekusi agent (`task` di API / DB) | **Run** | **运行** | **実行** | **실행** | **Exécution** | **Ejecución** |
 
 Kedua konsep ini terlihat oleh pengguna dan **bukan** hal yang sama — satu Tugas dapat memiliki banyak Eksekusi. Jangan pernah membiarkan satu locale menuliskan keduanya dengan kata yang sama. `Task` bukan lagi kata benda produk yang user-facing untuk sebuah Eksekusi agent; kata ini hanya tetap digunakan sebagai pengenal internal yang sudah mapan.
 
@@ -145,8 +147,12 @@ Kata benda produk lainnya mengikuti tes "terjemahkan apa yang memiliki kata loka
 
 | Kategori | Istilah |
 | --- | --- |
-| Brand | **Multica**, GitHub, Slack, Google, Anthropic, OpenAI, Claude, Codex, Cursor, Linear, Jira |
+| Brand | **Multica**, GitHub, Slack, Google, Anthropic, OpenAI, Claude, Codex, Cursor, Linear, Jira, Qoder, Qoder Cloud Agents |
 | Akronim | API, CLI, URL, SDK, OAuth, JWT, SSO, WebSocket, HTTP, JSON, YAML, SQL |
+
+Gunakan **Qoder Cloud Agents** saat menyebut produk ini dalam copy yang terlihat pengguna. Titik masuk dan pesan yang dapat muncul tanpa konteks halaman harus mengidentifikasi layanan tersebut secara mandiri. Setelah layanannya jelas, gunakan istilah generik seperti **Remote agent** untuk sebuah field agar dibedakan dari agent Multica. Jaga konsistensi penulisan brand dan tulis copy di sekitarnya secara natural dalam setiap bahasa. Pertahankan pengenal internal dan nama teknis eksternal, termasuk **QCA Assistant**.
+
+Perkenalkan kredensialnya sebagai **Qoder personal access token (PAT)** dalam copy penjelasan, lalu gunakan **Qoder PAT**. Bedakan dari token repositori GitHub.
 
 ### Terjemahkan penuh — konsep
 
@@ -167,6 +173,7 @@ Kata benda produk lainnya mengikuti tes "terjemahkan apa yang memiliki kata loka
 | Settings | **设置** |
 | Onboarding | **上手引导** |
 
+Untuk Agent, gunakan **智能体** dalam bahasa Tionghoa Sederhana (`zh-Hans`) dan **AI 代理** dalam bahasa Tionghoa Tradisional (`zh-Hant`). Pertahankan satu spasi antara AI dan teks Tionghoa di sebelahnya, misalnya **新建 AI 代理**. Jika sumbernya sudah menyertakan AI, tulis sekali saja: **讓 AI 代理幫我寫程式碼**.
 ### Terjemahkan penuh — kata UI generik
 
 | Bahasa Inggris | Mandarin |
@@ -196,18 +203,19 @@ Kata benda produk lainnya mengikuti tes "terjemahkan apa yang memiliki kata loka
 | Empty / Failed / Success | 空 / 失败 / 成功 |
 | Error / Warning | 错误 / 警告 |
 
-### Role dan status enum (English huruf kecil, tidak diterjemahkan)
+### Nama role dan status: dilokalkan di UI, English huruf kecil di skema/CLI
 
-Ini adalah pengenal level-skema; tuliskan sebagai English huruf kecil bahkan dalam konteks bahasa Tionghoa.
+Terjemahkan label tampilan UI yang terlihat pengguna (status picker, role selector, filter, deskripsi notifikasi) secara natural dalam setiap locale:
 
-- Role: `owner` / `admin` / `member`
+- Nama tampilan role (`zh-Hans`): 所有者 / 管理员 / 成员 / 访客
+- Nama tampilan status Tugas (`zh-Hans`): 待规划 / 待办 / 进行中 / 审核中 / 已完成 / 已阻塞 / 已取消
+- Kategori status Tugas (`zh-Hans`): 未开始 / 已开始 / 已完成 / 已关闭
+
+Pertahankan pengenal level-skema dalam English huruf kecil hanya di payload API, kolom database, flag CLI, dan referensi kode:
+
+- Role: `owner` / `admin` / `member` / `guest`
 - Status Tugas: `backlog` / `todo` / `in_progress` / `in_review` / `done` / `blocked` / `cancelled`
 - Kategori status Tugas: `unstarted` / `started` / `done` / `closed`
-
-Di UI, tampilkan dalam bahasa Inggris (opsional dibungkus `code-style`):
-
-- "你需要 owner 权限"
-- "已切换到 in_progress"
 
 ### Aturan kombinasi kata
 
@@ -295,6 +303,7 @@ Lihat `auth.json` untuk contoh kanonikalnya (section `web` berisi `prefer_deskto
 - Tanda kutip: tanda kutip ganda lurus `"..."` untuk menyesuaikan sumber bahasa Inggris. Jangan gunakan `「」` atau tanda kutip lengkung (curly quotes).
 - Elipsis: tiga titik `...`, bukan karakter tunggal `…`. Sesuaikan dengan sumber bahasa Inggris.
 - Campuran Tionghoa-Inggris: satu spasi di setiap sisi kata bahasa Inggris (lihat Aturan kombinasi kata).
+- Bold di sebelah tanda baca: `**` penutup yang mengikuti tanda baca dan langsung menyambung ke teks tidak menutup, sehingga tanda bintang muncul di halaman. Teks Tionghoa, Jepang, dan Korea sering mengalir dari bold ke kata berikutnya tanpa spasi. Pindahkan tanda baca ke luar bold (`**问题（Problem）**和` → `**问题**（Problem）和`), atau tambahkan spasi jika tanda baca merupakan bagian dari label (`点击 **+**添加` → `点击 **+** 添加`). `apps/docs/lib/unrendered-bold.test.ts` gagal pada setiap `**` yang tidak ter-render di docs.
 
 ### Prinsip gaya
 

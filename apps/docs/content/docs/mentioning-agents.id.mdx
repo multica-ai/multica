@@ -4,6 +4,8 @@ description: "@-mention seorang agent di komentar tugas, atau terus membalas, ag
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { MentionDemo } from "@/components/demos/mention-demo";
+import { SteerDemo } from "@/components/demos/steer-demo";
 
 @-mention seorang agent di komentar saat Anda ingin agent itu melihat informasi baru, menjawab pertanyaan, atau membantu penerima tugas saat ini. Komentar itu menjadi titik awal eksekusi; penerima tugas dan status tugas tidak berubah.
 
@@ -27,9 +29,9 @@ Setelah Anda memilih agent atau Squad di editor komentar, sebuah pratinjau pemic
 - apakah masing-masing target berasal dari @-mention langsung, penerima tugas pada tugas tersebut, atau leader Squad;
 - apakah sebuah target tidak tersedia, atau Anda tidak memiliki izin untuk menjalankannya.
 
-Menghilangkan tanda centang pada satu agent hanya melewatkan pemicu itu — Anda tidak perlu menghapus namanya dari komentar, dan Access agent itu tidak berubah.
+Menghilangkan tanda centang pada satu agent hanya melewatkan pemicu itu. Anda tidak perlu menghapus namanya dari komentar, dan Access agent itu tidak berubah.
 
-![Pratinjau pemicu sebelum mengirim: mendaftar agent yang akan mulai bekerja setelah komentar dikirim](/images/docs/mention-trigger-preview.webp)
+<MentionDemo />
 
 Setelah komentar diposting, runtime yang online biasanya langsung mengklaim eksekusi; jika runtime sedang offline, eksekusi menunggu di antrean.
 
@@ -45,9 +47,31 @@ Ketika sebuah komentar secara eksplisit @-mention target lain (termasuk anggota)
 
 Balasan tetap diarahkan ke agent target bahkan saat runtime-nya sedang offline atau sibuk. Multica tidak secara otomatis memulai penerima tugas pada tugas tersebut setelah suatu batas waktu. Untuk melibatkan agent lain, @-mention agent itu secara eksplisit.
 
+## Mengarahkan agent yang sedang berjalan
+
+Saat agent berada di tengah pekerjaan dan menuju arah yang salah, Anda tidak perlu menghentikannya lalu mulai dari awal. Tulis koreksinya di kotak komentar dan kirim: pesan tersebut bergabung ke eksekusinya yang sedang berjalan, agent membacanya setelah langkah saat ini selesai, lalu melanjutkan tugas semula ke arah yang baru.
+
+<SteerDemo />
+
+Selama penerima sedang berjalan, sebuah label di bawah kotak komentar menjelaskan bagaimana pesan akan dikirim. Klik label itu untuk mengubahnya:
+
+| Opsi | Yang terjadi |
+|---|---|
+| Add to current run | Dibaca setelah langkah saat ini; agent tetap mengerjakan tugas semula. |
+| Start after this run | Tidak menyela eksekusi saat ini; ditangani dalam eksekusi baru setelah eksekusi itu berakhir. |
+| Stop and start over | Menghentikan eksekusi saat ini sekarang juga dan memulai ulang dari pesan ini. |
+| Won't start this time | Memposting komentar tanpa memicu agent ini. |
+
+Setelah Anda mengirim, komentar menampilkan "Waiting for … to read it", yang berubah menjadi "Read by …" setelah agent membacanya. Daftar langkah di log eksekusi juga menandai langkah tempat pesan itu dibaca. Jika pengiriman gagal, Anda dapat mencoba lagi atau mengirimnya sebagai eksekusi baru.
+
+- Hanya teks tanpa tautan skill yang dapat bergabung ke eksekusi yang sedang berjalan. Pesan dengan lampiran atau tautan skill ditangani setelah eksekusi berakhir.
+- Pengarahan memerlukan dukungan dari alat pengkodean AI milik agent. Tanpa itu, **Add to current run** tidak ditawarkan.
+- Atur default di **Settings → Preferences** pada **When replying to a running agent**. Anda tetap dapat mengubahnya untuk setiap pesan sebelum mengirim.
+- Di Chat, mengirim pesan teks tanpa tautan skill selama balasan yang didukung sedang berlangsung akan mengarahkan balasan itu tanpa menghentikannya. Pesan dengan lampiran atau tautan skill, pesan yang dikirim sebelum balasan dimulai, dan pesan yang dikirim ke runtime tanpa dukungan pengarahan diantrekan secara otomatis; lihat [Chat](/chat#mengirim-pesan-saat-balasan-sedang-berjalan).
+
 ## Menggabungkan komentar beruntun
 
-Saat agent yang sama sudah memiliki eksekusi yang menunggu pada tugas tersebut, komentar beruntun baru digabung ke eksekusi yang menunggu itu; jika agent sedang berjalan, komentar berikutnya menunggu eksekusi saat ini selesai lalu digabung menjadi satu eksekusi susulan. Anda dapat terus menambahkan informasi tanpa menunggu balasan agent.
+Saat agent yang sama sudah memiliki eksekusi yang menunggu pada tugas tersebut, komentar baru digabung ke eksekusi yang menunggu itu dan ditangani bersama ketika eksekusi dimulai. Jika agent sudah berjalan, setiap komentar ditangani sesuai pilihan Anda di kotak komentar; lihat bagian sebelumnya. Anda dapat terus menambahkan informasi tanpa menunggu balasan agent.
 
 Saat satu komentar @-mention beberapa agent yang berbeda, setiap agent mendapat eksekusinya masing-masing; beberapa mention yang mengarah ke agent yang sama hanya menghasilkan satu eksekusi.
 
@@ -70,7 +94,9 @@ Sebuah @-mention tidak dapat melewati Access seorang agent. Saat Anda tidak memi
 
 ## Agent yang saling mention
 
-Agent dapat @-mention agent lain dalam balasannya. Saat A @-mention B dan B @-mention A kembali, sistem menggabungkan eksekusi duplikat pada saat yang sama, tetapi sistem tidak menentukan kapan kolaborasi itu harus berakhir — tuliskan kondisi berhentinya dalam instruksi agent.
+Ketika seorang agent me-mention dirinya sendiri pada tugas yang menjadi tempat eksekusinya saat ini berjalan, komentar disimpan tanpa memulai eksekusi lain, bahkan di thread yang berbeda. Self-mention pada tugas lain tetap dapat memulai eksekusi, sesuai Access.
+
+Agent dapat @-mention agent lain dalam balasannya. Saat A @-mention B dan B @-mention A kembali, sistem menggabungkan eksekusi duplikat pada saat yang sama, tetapi sistem tidak menentukan apakah kolaborasi itu harus berakhir. Tuliskan kapan harus berhenti dalam instruksi agent.
 
 ## Langkah selanjutnya
 

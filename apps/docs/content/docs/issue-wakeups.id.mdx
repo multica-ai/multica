@@ -1,0 +1,187 @@
+---
+title: Wakeup tugas
+description: Pasang aturan wakeup pada sebuah tugas agar agent kembali ke tugas itu pada waktu tertentu atau setelah sesuatu terjadi.
+---
+
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { WakeupDemo } from "@/components/demos/wakeup-demo";
+
+Sebagian pekerjaan berhenti di tengah jalan dan menunggu: penawaran dari pemasok, jawaban rekan kerja, atau sub-tugas yang selesai. Sebuah **wakeup** adalah aturan pada tugas yang berbunyi "ketika ini terjadi, bangunkan agent ini dan minta ia melakukan itu". Ketika kondisinya terpenuhi, agent memulai eksekusi biasa pada tugas, membaca kondisi terkini, dan memposting hasilnya sebagai komentar seperti biasa.
+
+Aturan ini disimpan pada tugas, sehingga tidak ada yang berjalan selama menunggu. Anggota membuat wakeup dari sidebar tugas; agent menjadwalkan pengecekan berikutnya sendiri dari sebuah eksekusi dengan [CLI](#membiarkan-agent-menjadwalkan-wakeup-sendiri). Keduanya membuat jenis aturan yang sama.
+
+## Membuat wakeup
+
+<Steps>
+<Step>
+
+Buka tugas dan klik **+** di samping **Wakeup** pada sidebar tugas. Selama tugas belum memiliki wakeup, bagian ini disembunyikan: gunakan baris **Tambah …** di bagian bawah sidebar, seperti **Tambah wakeup** atau **Tambah wakeup atau pull request**.
+
+</Step>
+<Step>
+
+Setelah **Saat**, pilih sebuah kondisi dan isi yang dibutuhkannya, seperti waktu, orang yang ditunggu, atau status yang ditunggu.
+
+</Step>
+<Step>
+
+Setelah **Bangunkan**, pilih agent. Jika penerima tugas adalah agent, agent itu sudah terpilih. Anda hanya dapat memilih agent yang terikat ke sebuah runtime dan yang boleh Anda jalankan; lihat [Izin dan akses](/agents#izin-dan-akses).
+
+</Step>
+<Step>
+
+Pada **Apa yang dilakukan saat dibangunkan**, tulis instruksinya, misalnya "Periksa apakah semua pemasok sudah mengirim penawaran, dan jika sudah, susun dalam tabel perbandingan". Panjangnya maksimal 12.000 byte. Anda dapat mengeditnya nanti; perubahan hanya berlaku untuk wakeup berikutnya.
+
+</Step>
+<Step>
+
+Klik **Buat**.
+
+</Step>
+</Steps>
+
+Eksekusi yang dimulai oleh wakeup bertindak atas nama orang yang membuatnya, dan Multica memeriksa lagi sebelum eksekusi dimulai bahwa orang tersebut masih boleh menjalankan agent.
+
+Pada tugas di bawah ini, Ops helper telah meminta penawaran dari para pemasok dan sedang menunggu balasan mereka. Tambahkan wakeup, lalu maju ke waktu wakeup. Pilih "Periksa secara berkala" untuk melihat juga bagaimana agent mengakhiri pengecekan tanpa berkomentar ketika belum ada yang masuk.
+
+<WakeupDemo />
+
+## Apa yang dapat ditunggu
+
+| Grup | Kondisi | Membangunkan agent ketika |
+|---|---|---|
+| Waktu | Pada waktu tertentu | Dalam 10 menit, dalam 1 jam, besok pukul 09:00, atau waktu yang Anda pilih. Membangunkan sekali. |
+| Waktu | Periksa secara berkala | Setiap jam, setiap hari pukul 09:00, atau hari kerja pukul 09:00, sesuai timezone Anda. Memerlukan tanggal akhir; aturan berhenti setelah hari itu berakhir. |
+| Kolaborasi | Seseorang membalas | Komentar baru muncul pada tugas; dapat dibatasi untuk satu anggota atau agent. |
+| Kolaborasi | Sebuah bidang berubah menjadi nilai tertentu | Status, penerima tugas, label, atau properti kustom pada tugas berubah menjadi nilai yang Anda pilih. |
+| Eksekusi dan sub-tugas | Eksekusi agent berakhir | Sebuah eksekusi pada tugas ini oleh agent tertentu (atau agent mana pun) berhasil, gagal, atau dibatalkan. |
+| Eksekusi dan sub-tugas | Sub-tugas selesai | Semua sub-tugas ditutup (`done` atau `cancelled`), atau semua tahap hingga tahap yang Anda pilih. Tugas tanpa sub-tugas tidak pernah terpicu. |
+| Tertaut | CI PR yang ditautkan selesai | Atau PR digabungkan, atau mengalami konflik merge. Hanya PR yang ditautkan langsung ke tugas ini yang dihitung; jika ada beberapa, satu saja sudah cukup. CI dan konflik hanya berfungsi untuk pull request GitHub. |
+| Tertaut | Status tugas lain | Tugas lain selesai, selesai atau dibatalkan, atau berpindah ke In Review. |
+| | Peristiwa khusus | Pilih dari 25 peristiwa mentah, seperti reaksi, lampiran, komentar yang diedit, atau thread yang diselesaikan. |
+
+Multica memeriksa sendiri kondisi bidang, sub-tugas, PR, dan tugas lain. Jika kondisinya sudah terpenuhi saat Anda membuat aturan, pengecekan berikutnya (dalam sekitar 30 detik) membangunkan agent. CI adalah pengecualian: hanya pengecekan yang selesai setelah aturan dibuat yang dihitung.
+
+Setiap kondisi selain waktu menunggu sesuatu terjadi, dan memiliki tiga pengaturan tambahan:
+
+- **Pemicu**: **Picu sekali** secara default. Dengan **Ulangi wakeup**, atur juga **Hingga** berapa kali (5, 10, 20, atau 50; default 20).
+- **Tunggu hingga**: 1, 3, 7, atau 30 hari; default 7.
+- **Lalu** (apa yang terjadi saat batas waktu tiba): secara default agent dibangunkan untuk menanganinya dan diberi tahu bahwa yang ditunggunya tidak terjadi. **Akhiri tanpa eksekusi** mengakhiri aturan secara diam-diam.
+
+Ketika penerima tugas adalah agent, komentar anggota sudah memicunya. Wakeup "Seseorang membalas" untuk agent yang sama tidak menambah eksekusi; ia bergabung dengan eksekusi yang dimulai oleh komentar tersebut. Tambahkan hanya ketika Anda ingin memberi agent instruksi tambahan.
+
+## Setelah wakeup terpicu
+
+- Agent memulai eksekusi biasa pada tugas, membaca tugas, komentar, dan instruksi wakeup, lalu mengakhiri dengan satu komentar. Komentar tersebut membawa tag "Wakeup" beserta kondisinya, dan [log eksekusi](/tasks) menampilkan pemicu yang sama.
+- Ketika pengecekan berkala tidak menemukan apa pun yang perlu dibalas, agent dapat mengakhiri dengan **pengecekan senyap**: tanpa komentar, hanya catatan di linimasa tugas dan di riwayat pemicu aturan. Pengecekan senyap yang berurutan digabung menjadi satu entri linimasa.
+- Komentar agent sendiri dan perubahannya sendiri pada tugas tidak pernah membangunkannya.
+- Jika agent yang sama sudah memiliki eksekusi yang menunggu dimulai pada tugas, wakeup bergabung dengan eksekusi itu alih-alih memulai yang lain.
+
+## Langkah workflow pada pekerjaan lanjutan
+
+Sebuah eksekusi memiliki pengikatan langkah workflow selain ID eksekusi. ID eksekusi baru atau percakapan agent yang dipakai ulang tidak menentukan langkah mana yang dapat dimajukan.
+
+| Cara pekerjaan dimulai | Pengikatan langkah |
+|---|---|
+| Wakeup yang dibuat agent selama sebuah eksekusi | Mewarisi langkah eksekusi sumber, jika ada. |
+| Wakeup yang dibuat anggota dan memulai eksekusi baru | Status tugas saat ini ketika wakeup terpicu. |
+| Percobaan ulang otomatis | Mempertahankan pengikatan eksekusi induk. |
+| Anggota secara eksplisit menjalankan ulang pekerjaan | Status tugas saat ini ketika eksekusi baru diantrekan. |
+| Wakeup bergabung dengan eksekusi yang sedang menunggu dimulai | Mempertahankan pengikatan eksekusi yang menunggu itu. |
+
+Workflow bernama dan workflow **Default** dengan handoff melindungi dari perubahan status yang usang. Jika aktor lain memindahkan tugas dari langkah yang terikat pada sebuah eksekusi, eksekusi tersebut tidak dapat memajukan tugas. Brief-nya menampilkan kedua langkah dan memintanya membiarkan status saat ini tidak berubah serta berkomentar jika perlu perhatian. Perubahan status yang ditolak mengembalikan `409 workflow_step_moved`; mengulanginya tidak menyegarkan pengikatan.
+
+Untuk melanjutkan dari keadaan baru, anggota sebaiknya meninjau perpindahan eksternal tersebut dan secara eksplisit menjalankan ulang pekerjaan dari log eksekusi. Eksekusi lama tidak diikat ulang secara otomatis.
+
+## Melihat dan mengelola wakeup
+
+Bagian Wakeup pada sidebar tugas menampilkan aturan milik tugas: kondisinya, siapa yang dibangunkan, kapan terpicu berikutnya, dan berapa lama lagi. Klik sebuah aturan untuk melihat detailnya, termasuk sumbernya, batas waktunya, instruksinya, dan **riwayat pemicu** (eksekusi terbaru, apakah masing-masing memposting komentar, dan apa yang ditemukan setiap pengecekan senyap).
+
+| Tindakan | Hasil |
+|---|---|
+| Matikan sakelar di detailnya | Menghentikan wakeup berikutnya dan menarik eksekusi yang belum dimulai. Eksekusi yang sudah dimulai tetap berjalan; hentikan dari log eksekusi jika perlu. |
+| **Bangunkan sekarang** | Membangunkan agent sekali saat itu juga, tanpa menunggu kondisi. |
+| Edit instruksi | Hanya memengaruhi wakeup berikutnya; eksekusi yang sedang berjalan tidak berubah. |
+| **Hapus** | Aturan tidak lagi membangunkan siapa pun. Eksekusi yang belum dimulai ditarik; yang sudah dimulai berlanjut. |
+| **Aktifkan lagi** / **Atur waktu baru** | Mengaktifkan kembali aturan sekali jalan setelah terpicu. Aturan sekali jalan pada waktu tertentu memerlukan waktu baru. |
+
+Aturan yang sudah berakhir pindah ke **Riwayat wakeup**. Hanya pembuat aturan serta owner dan admin ruang kerja yang dapat mengelolanya. Wakeup yang dibuat agent selama eksekusi menjadi milik anggota yang memulai eksekusi tersebut, dan tampil sebagai "Ops helper, atas nama Lei Li".
+
+Untuk melihat semua wakeup di ruang kerja, buka **Auto** di app rail dan beralih ke tab **Wakeup tugas**. Anda dapat memfilter berdasarkan status (Menunggu atau dieksekusi, Dijeda, Dimatikan, Berakhir), jenis pemicu, sumber, dan agent, mematikan beberapa sekaligus, atau membuat wakeup setelah memilih tugasnya.
+
+## Pengakhiran dan penjedaan otomatis
+
+- Ketika sebuah tugas selesai atau dibatalkan, semua wakeup-nya dimatikan dan eksekusi yang belum dimulai ditarik. Membuka kembali tugas tidak mengembalikannya. Anda tidak dapat membuat wakeup pada tugas yang selesai atau dibatalkan.
+- Aturan penunggu yang mencapai batas **Tunggu hingga** melakukan apa yang ditentukan pengaturan **Lalu**; pengecekan berkala berhenti pada tanggal akhirnya.
+- Aturan berulang dijeda begitu mencapai jumlah maksimum pemicunya. Aturan penunggu juga dijeda ketika saling memicu dengan wakeup lain (rantai pemicu melewati aturan yang sama untuk ketiga kalinya tanpa orang di antaranya), atau ketika terpicu lebih dari 12 kali dalam satu jam. Aturan yang dijeda tetap mati sampai seseorang menyalakannya kembali, dan hitungannya dimulai dari awal.
+- Sebuah tugas dapat memiliki paling banyak 32 wakeup yang menyala, dan sebuah ruang kerja paling banyak 1.000.
+
+## Membangunkan induk ketika sub-tugas selesai
+
+Ketika sebuah tugas memiliki sub-tugas, sebuah chip di samping judul **Sub-tugas** menampilkan aturan bertanda **Sistem**, seperti "Membangunkan Lambda saat semuanya selesai". Klik untuk melihat progres aturan, instruksinya, dan sakelar untuk mematikannya pada tugas ini. Tidak ada yang perlu membuatnya:
+
+- Ketika semua sub-tugas dalam satu tahap ditutup dan tahap berikutnya masih menunggu, aturan membangunkan penerima tugas induk, dan membangunkannya sekali lagi ketika semua sub-tugas ditutup. Sub-tugas tanpa tahap membangunkan induk sekali, ketika yang terakhir ditutup.
+- Menambah atau membuka kembali sub-tugas tidak membangunkan siapa pun, termasuk tahap yang ditambahkan setelah semua sub-tugas ditutup: pindahkan keluar dari `backlog` untuk memulainya, atau mention penerima tugas untuk mengaturnya.
+- Penerima tugas berupa agent akan dibangunkan; untuk squad, leader-nya yang dibangunkan; penerima tugas berupa anggota mendapat notifikasi inbox sebagai gantinya. Tanpa penerima tugas, tidak ada yang dibangunkan.
+- Selama induk berada di `backlog`, tidak ada yang dibangunkan; aturan menyusul begitu induk keluar dari `backlog`.
+- Instruksi default memberi tahu agent tahap mana yang selesai dan tahap mana berikutnya: periksa dependensinya, lalu pindahkan sub-tugas tahap berikutnya keluar dari `backlog`. Ketika semua sub-tugas ditutup, agent menggabungkan hasilnya pada induk.
+
+Penerima tugas induk sudah dibangunkan oleh aturan ini, jadi jangan menambahkan wakeup "Sub-tugas selesai" untuk hal yang sama. Untuk mengatur tahap, lihat [Tugas](/issues#proyek-dan-sub-tugas).
+
+Pada satu tugas, anggota ruang kerja mana pun dapat mematikan aturan ini atau menulis ulang instruksinya (hingga 4.000 byte); agent tidak dapat mengubahnya. Setelah diubah, tugas tersebut tidak lagi mengikuti default ruang kerja.
+
+Owner dan admin ruang kerja mengatur default pada kartu di bagian atas tab **Wakeup tugas**: apakah aturan menyala secara default (ya) dan instruksi default-nya. Tanpa instruksi default, instruksi bawaan yang digunakan. Kartu juga menampilkan berapa banyak tugas terbuka yang memakai pengaturannya sendiri; klik untuk menampilkan daftar aturan sistem.
+
+## Membiarkan agent menjadwalkan wakeup sendiri
+
+Selama eksekusi, agent menggunakan `multica issue wakeup` untuk mengatur eksekusi berikutnya pada tugas, lalu menyelesaikan eksekusi saat ini. Tanpa `--agent-id`, wakeup menargetkan agent yang menjalankan command. Anda dapat memakai command yang sama dari terminal Anda sendiri; kemudian berikan `--agent-id` untuk memilih agent.
+
+```bash
+# Look again tomorrow at 09:00 (Shanghai time)
+multica issue wakeup create OPS-56 --kind at --at 2026-10-21T09:00:00+08:00 \
+  --instruction "Check whether every supplier has sent a quote; if so, build a comparison table"
+
+# Check every weekday at 09:00 for a week
+multica issue wakeup create OPS-56 --kind cron --cron "0 9 * * 1-5" --timezone Asia/Shanghai \
+  --expires-in 168h --instruction "Check the quote emails and update the comparison table"
+
+# Wait up to 3 days for Lei Li to reply; wake once anyway on timeout
+multica issue wakeup create OPS-56 --event comment.created \
+  --filter-actor-type member --filter-actor-id <Lei-Li-user-id> \
+  --expires-in 72h --on-timeout wake --instruction "Continue based on Lei Li's answer"
+
+# Wait until the issue is in review
+multica issue wakeup create OPS-56 --until-status in_review --instruction "Check the deliverables and summarize"
+```
+
+- **Waktu**: `--kind at` dengan `--after 10m` atau `--at <RFC3339 time>`; `--kind every --every 1h` untuk interval tetap minimal 1 menit; `--kind cron --cron "<5-field expression>"` dengan `--timezone` (UTC secara default).
+- **Peristiwa**: tulis nama peristiwa setelah `--event`, dipisahkan koma. `multica issue wakeup events` menampilkan semua peristiwa dan filter. `--mode continuous` membuat aturan berulang.
+- **Kondisi**: `--until-status`, `--until-assignee`, `--until-label`, `--until-property`, `--until-children-done [--stage N]`, `--until-pr checks|merged|conflicts`, dan `--until-issue <issue> --until-issue-state done|ended|in_review|blocked`. Gunakan satu `--until-*` per wakeup, dan jangan bersamaan dengan `--event`.
+- **Pengakhiran**: CLI tidak menambahkan batas waktu untuk Anda. Gunakan `--expires-in 72h` atau `--expires-at <RFC3339 time>`; `--on-timeout wake` membuat aturan peristiwa membangunkan agent sekali lagi pada batas waktu. `--max-fires N` (1–1000) membatasi berapa banyak eksekusi yang dimulai oleh aturan berulang.
+- **Ke mana hasil dikirim**: `--parent <comment-id>` menjaga balasan eksekusi yang dibangunkan tetap di thread asli.
+
+Untuk mengelola aturan yang sudah ada:
+
+| Command | Fungsinya |
+|---|---|
+| `multica issue wakeup list <issue>` | Menampilkan wakeup milik tugas |
+| `multica issue wakeup get <issue> <wakeup-id>` | Menampilkan konfigurasi lengkap satu wakeup |
+| `multica issue wakeup runs <issue> <wakeup-id>` | Eksekusi terbaru, apa yang memicunya, catatan pengecekan senyap, dan apakah masing-masing berkomentar |
+| `multica issue wakeup update <issue> <wakeup-id>` | Mengganti seluruh konfigurasi dengan flag yang sama seperti `create`, dan menyalakannya kembali |
+| `multica issue wakeup disable <issue> <wakeup-id>` | Mematikannya dan menarik eksekusi yang belum dimulai |
+| `multica issue wakeup trigger <issue> <wakeup-id>` | Membangunkan agent sekali sekarang |
+| `multica issue wakeup delete <issue> <wakeup-id>` | Menghapus aturan dan menarik eksekusi yang belum dimulai |
+| `multica issue wakeup checkin <issue> <wakeup-id> --note "..."` | Mengakhiri pengecekan berkala secara senyap ketika tidak menemukan apa pun yang perlu dibalas; hanya eksekusi yang dimulai oleh aturan ini yang dapat memanggilnya |
+
+`list`, `get`, dan `runs` mencetak tabel dengan `--output table`. Untuk command lainnya, lihat [Menggunakan CLI](/cli).
+
+## Wakeup dan otomatisasi
+
+Sebuah [otomatisasi](/autopilots) memulai pekerjaan baru berulang kali dari schedule atau webhook, dan dapat membuat tugas baru setiap kali. Sebuah wakeup milik satu tugas yang sudah ada: ia membawa agent kembali ke tugas itu setelah waktu atau peristiwa tertentu, dan berakhir ketika tugasnya berakhir.
+
+## Langkah selanjutnya
+
+- [Memulai pekerjaan agent](/triggering-agents) — cara lain untuk memulai pekerjaan.
+- [Otomatisasi](/autopilots) — memulai pekerjaan berulang dari schedule atau webhook.
+- [Eksekusi](/tasks) — melihat eksekusi yang dimulai oleh wakeup.
+- [Tugas](/issues) — sub-tugas dan tahap.

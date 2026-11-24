@@ -4,10 +4,14 @@ description: Hubungkan agent Multica ke Bot Telegram Anda sendiri untuk obrolan 
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Accordion, Accordions } from "fumadocs-ui/components/accordion";
 
 Multica menggunakan Bot yang Anda buat sendiri dengan [@BotFather](https://t.me/BotFather) resmi milik Telegram. Satu Bot dipetakan ke satu agent Multica. Buat Bot terpisah untuk setiap agent yang memerlukan identitas Telegram sendiri.
 
+<Callout type="info">
 Dukungan Telegram [dipelihara oleh komunitas](/community-maintained): tersedia di setiap rilis, tetapi tidak memiliki SLA dukungan resmi. Laporkan masalah di [GitHub issues](https://github.com/multica-ai/multica/issues).
+</Callout>
 
 ## Sebelum Anda mulai
 
@@ -15,26 +19,37 @@ Dukungan Telegram [dipelihara oleh komunitas](/community-maintained): tersedia d
 - API server harus dapat menjangkau `https://api.telegram.org`.
 - Anda memerlukan token Bot yang diterbitkan oleh @BotFather. Perlakukan sebagai kata sandi.
 
-## 1. Buat Bot
+## Hubungkan Bot
+
+<Steps>
+<Step>
+
+### Buat Bot [#1-create-the-bot]
 
 1. Buka [@BotFather](https://t.me/BotFather) dan kirim `/newbot`.
 2. Pilih nama tampilan dan username yang diakhiri dengan `bot`.
 3. Salin token HTTP API.
-4. Biarkan **Group Privacy** tetap aktif untuk pengaturan default dengan visibilitas minimal: Telegram kemudian hanya mengirimkan perintah, @-mention eksplisit, dan balasan ke Bot dalam grup. Menonaktifkannya bersifat opsional. Ini memungkinkan Bot menyertakan percakapan grup di sekitarnya sebagai konteks, dengan konsekuensi Bot kemudian menerima setiap pesan dalam grup — lihat [Grup dan topik forum](#grup-dan-topik-forum).
+4. Biarkan **Group Privacy** tetap aktif untuk pengaturan default dengan visibilitas minimal: Telegram kemudian hanya mengirimkan perintah, @-mention eksplisit, dan balasan ke Bot dalam grup. Anda dapat menonaktifkannya agar Bot menyertakan percakapan grup di sekitarnya sebagai konteks, dengan konsekuensi Bot kemudian menerima setiap pesan dalam grup; lihat [Group Privacy menentukan apa yang dilihat Bot](#group-privacy).
 
 <Callout type="warning">
 Jangan pernah menempelkan token ke dalam tugas, pesan obrolan, log, atau repositori sumber. Jika token terbuka, gunakan @BotFather untuk mencabutnya, lalu hubungkan ulang Bot dengan token penggantinya.
 </Callout>
 
-## 2. Hubungkan ke agent
+</Step>
+<Step>
 
-1. Di Multica, buka **Agents**, pilih sebuah agent, dan buka **Integrations**.
-2. Klik **Connect Telegram**.
+### Hubungkan ke agent [#2-connect-it-to-an-agent]
+
+1. Di Multica, buka **Agents**, pilih sebuah agent, dan buka **Messaging**.
+2. Klik **Add messaging channel**, lalu pilih **Telegram**.
 3. Tempelkan token Bot dan klik **Connect**.
 
 Multica memanggil Telegram untuk memverifikasi Bot, memeriksa bahwa tidak ada webhook keluar yang berkonflik dengan long polling, mengenkripsi token, dan memulai satu koneksi `getUpdates` yang terawasi. Bot yang sudah terhubung ke agent atau ruang kerja lain harus diputuskan dari sana terlebih dahulu.
 
-## Penggunaan pertama dan pengikatan akun
+</Step>
+</Steps>
+
+## Penggunaan pertama [#first-use-and-account-binding]
 
 Saat pertama kali anggota mengirim pesan ke Bot, Bot mengirim tautan pengikatan akun Multica sekali pakai. Buka tautan tersebut, masuk ke ruang kerja Multica yang sama, lalu kembali ke Telegram dan kirim ulang pesannya. Tautan kedaluwarsa setelah 15 menit; kirim pesan lagi ke Bot untuk mendapatkan tautan baru.
 
@@ -42,7 +57,7 @@ Dalam grup, Bot tidak pernah memposting tautan pembawa tersebut secara publik. B
 
 Hanya anggota ruang kerja saat ini yang dapat menggunakan Bot. Keanggotaan diperiksa ulang untuk setiap pesan.
 
-## Gunakan Bot
+## Serahkan pekerjaan ke agent di Telegram [#use-the-bot]
 
 ### Obrolan privat
 
@@ -50,7 +65,31 @@ Buka Bot dan kirim teks secara langsung. Tidak diperlukan @-mention.
 
 ### Grup dan topik forum
 
-Tambahkan Bot ke grup, lalu @-mention atau balas langsung salah satu pesannya. Pesan yang diterima tetap berada dalam percakapan Multica yang berlanjut. Pesan grup yang tidak menyapa Bot tidak pernah memulai percakapan atau giliran apa pun dengan sendirinya. Namun, pesan tersebut tetap disimpan dalam buffer memori jangka pendek: 10 pesan terakhir per grup (atau per topik forum) yang telah diterima Bot, yang dihapus setiap kali server restart. Ketika seorang anggota kemudian menyapa Bot — dengan @-mention atau membalas salah satu pesannya — pesan-pesan yang tersimpan dalam buffer itu ditambahkan di depan giliran tersebut sebagai konteks baca-saja, dan disimpan bersama giliran itu sebagai bagian dari percakapan. Foto atau file yang tersimpan dalam buffer hanya muncul di sana sebagai penanda seperti `[Image]` diikuti keterangannya; file itu sendiri tidak diambil. `/new` memulai obrolan baru tanpa konteks tersebut. Apa yang masuk ke buffer bergantung pada apa yang dikirim Telegram: dengan Group Privacy aktif, itu hanya perintah, @-mention eksplisit, dan balasan ke Bot, sehingga konteksnya hanya berisi pesan-pesan yang sebelumnya menyapa Bot. Untuk menyertakan obrolan grup biasa, nonaktifkan Group Privacy di @BotFather lalu hapus dan tambahkan ulang Bot ke grup; sejak itu Bot menerima setiap pesan grup. Bot yang menjadi admin grup menerima setiap pesan apa pun pengaturan privasinya, sehingga konteksnya mencakup obrolan biasa tanpa perubahan apa pun di @BotFather. Saat membalas pesan orang lain, @-mention Bot secara eksplisit: hanya dengan begitu pengirim dan teks (atau keterangan) yang dikutip tersebut disertakan bersama instruksi Anda. Ketika balasan yang menyapa Bot mengutip pesan yang membawa foto atau file, file tersebut juga ikut dilampirkan, siapa pun pengirimnya. Membalas pesan seseorang tanpa mention Bot tidak memicunya. Setiap grup biasa memiliki obrolan Multica berlanjutnya sendiri; topik forum diisolasi menjadi obrolan-obrolan terpisah.
+Tambahkan Bot ke grup, lalu @-mention atau balas langsung salah satu pesannya. Pesan yang diterima tetap berada dalam percakapan Multica yang berlanjut: setiap grup biasa memiliki obrolannya sendiri, dan topik forum diisolasi menjadi obrolan-obrolan terpisah.
+
+<Accordions type="multiple">
+<Accordion title="Pesan grup yang tidak menyapa Bot" id="unaddressed-group-messages">
+
+Pesan grup yang tidak menyapa Bot tidak pernah memulai percakapan atau giliran apa pun dengan sendirinya. Namun, pesan tersebut tetap disimpan dalam buffer memori jangka pendek: 10 pesan terakhir per grup (atau per topik forum) yang telah diterima Bot, yang dihapus setiap kali server restart. Ketika seorang anggota kemudian menyapa Bot, dengan @-mention atau membalas salah satu pesannya, pesan-pesan yang tersimpan dalam buffer itu ditambahkan di depan giliran tersebut sebagai konteks baca-saja dan disimpan bersama giliran itu sebagai bagian dari percakapan.
+
+Foto atau file yang tersimpan dalam buffer hanya muncul di sana sebagai penanda seperti `[Image]` diikuti keterangannya; file itu sendiri tidak diambil. `/new` memulai obrolan baru tanpa konteks tersebut.
+
+</Accordion>
+<Accordion title="Group Privacy menentukan apa yang dilihat Bot" id="group-privacy">
+
+Apa yang masuk ke buffer bergantung pada apa yang dikirim Telegram. Dengan Group Privacy aktif, itu hanya perintah, @-mention eksplisit, dan balasan ke Bot, sehingga konteksnya hanya berisi pesan-pesan yang sebelumnya menyapa Bot.
+
+Untuk menyertakan obrolan grup biasa, nonaktifkan Group Privacy di @BotFather, lalu keluarkan Bot dari grup dan tambahkan kembali; sejak itu Bot menerima setiap pesan grup. Bot yang menjadi admin grup menerima setiap pesan apa pun pengaturan privasinya, sehingga konteksnya mencakup obrolan biasa tanpa perubahan apa pun di @BotFather.
+
+</Accordion>
+<Accordion title="Membalas anggota lain" id="replying-to-members">
+
+Saat membalas pesan orang lain, @-mention Bot secara eksplisit: hanya dengan begitu pengirim dan teks (atau keterangan) yang dikutip disertakan bersama instruksi Anda. Membalas pesan seseorang tanpa mention Bot tidak memicunya.
+
+Ketika balasan yang menyapa Bot mengutip pesan yang membawa foto atau file, file tersebut juga ikut dilampirkan, siapa pun pengirimnya.
+
+</Accordion>
+</Accordions>
 
 ### Perintah
 
@@ -61,13 +100,32 @@ Tambahkan Bot ke grup, lalu @-mention atau balas langsung salah satu pesannya. P
 
 ### Balasan dan konten yang didukung
 
-Bot melakukan streaming teks dengan memposting dan mengedit pesan Telegram, mengutip pesan pemicunya, mempertahankan topik forum, dan memecah balasan panjang sesuai batas pesan Telegram. Balasan akhir dikirimkan secara asinkron oleh antrean dalam proses. Secara normal, backoff satu obrolan tidak menyita satu worker; jika tekanan cache memadatkan state backoff yang persis sama, obrolan lain dalam instalasi Bot yang sama dapat tertunda secara konservatif. Antrean terminal memiliki kapasitas tetap: overflow ditolak dan dicatat, dan balasan yang masih dalam antrean tidak dapat dipulihkan setelah layanan restart.
+Bot melakukan streaming teks dengan memposting dan mengedit pesan Telegram, mengutip pesan pemicunya, mempertahankan topik forum, dan memecah balasan panjang sesuai batas pesan Telegram. Selama agent bekerja, pesan yang sama mencantumkan langkah-langkahnya saat ini, seperti menjalankan perintah atau membaca file, beserta waktu yang telah berlalu. Obrolan privat menampilkan apa yang dikerjakan setiap langkah; grup hanya menampilkan jenis pekerjaannya. Atur `MULTICA_TELEGRAM_TOOL_PROGRESS` ke `off`, `summary`, atau `detail` untuk mengubahnya.
 
-Pesan foto, file, video, suara, dan audio sampai ke agent sebagai lampiran pada percakapan yang sama, dengan keterangan sebagai teks pesannya. Membalas pesan yang membawa salah satu jenis ini — dalam obrolan privat, atau saat menyapa Bot, dalam grup, siapa pun pengirimnya — mengutip pesan tersebut di depan instruksi Anda dan melampirkan filenya, sehingga Anda dapat mengarahkan agent ke foto atau video sebelumnya. Telegram mengizinkan Bot mengunduh file hingga 20 MB; ketika file tidak dapat diambil (terlalu besar, atau unduhan gagal) Bot memberi tahu Anda, dan agent hanya melihat placeholder. File yang dihasilkan agent dikirim kembali ke obrolan sebagai pesan terpisah setelah balasannya: foto hingga 10 MB ditampilkan inline, sisanya hingga 50 MB tiba sebagai file; jika pengiriman file tidak dapat dikonfirmasi, Bot akan memberi tahu dan file tersebut tetap terlampir pada balasan di Multica. Kedua arah memerlukan object storage di server (lihat bagian hosting mandiri di bawah); tanpa itu Bot membalas media dengan pemberitahuan tidak didukung, dan agent diberi tahu bahwa ia tidak dapat mengirim file. Stiker, lokasi, polling, dan pesan non-file lainnya menerima pemberitahuan yang sama dalam obrolan privat dan saat disapa dalam grup; pesan grup sejenis yang tidak menyapa Bot tetap tanpa balasan.
+Pesan foto, file, video, suara, dan audio sampai ke agent sebagai lampiran pada percakapan yang sama, dengan keterangan sebagai teks pesannya, dan file yang dihasilkan agent dikirim kembali ke obrolan setelah balasannya. Kedua arah memerlukan object storage di server (lihat bagian hosting mandiri di bawah).
+
+<Accordions type="multiple">
+<Accordion title="Cara balasan akhir dikirim dan diantrekan" id="reply-delivery">
+
+Balasan akhir dikirimkan secara asinkron oleh antrean dalam proses. Secara normal, backoff satu obrolan tidak menyita satu worker; jika tekanan cache memadatkan state backoff yang persis sama, obrolan lain dalam instalasi Bot yang sama dapat tertunda secara konservatif. Antrean terminal memiliki kapasitas tetap: overflow ditolak dan dicatat, dan balasan yang masih dalam antrean tidak dapat dipulihkan setelah layanan restart.
+
+</Accordion>
+<Accordion title="Foto, file, dan media lainnya" id="media">
+
+Membalas pesan yang membawa foto, file, video, pesan suara, atau audio (dalam obrolan privat, atau saat menyapa Bot, dalam grup, siapa pun pengirimnya) mengutip pesan tersebut di depan instruksi Anda dan melampirkan filenya, sehingga Anda dapat mengarahkan agent ke foto atau video sebelumnya.
+
+Telegram mengizinkan Bot mengunduh file hingga 20 MB. Ketika file tidak dapat diambil (terlalu besar, atau unduhan gagal), Bot memberi tahu Anda, dan agent hanya melihat placeholder.
+
+File yang dihasilkan agent dikirim kembali sebagai pesan terpisah: foto hingga 10 MB ditampilkan inline, sisanya hingga 50 MB tiba sebagai file. Jika pengiriman file tidak dapat dikonfirmasi, Bot akan memberi tahu dan file tersebut tetap terlampir pada balasan di Multica.
+
+Tanpa object storage, Bot membalas media dengan pemberitahuan tidak didukung, dan agent diberi tahu bahwa ia tidak dapat mengirim file. Stiker, lokasi, polling, dan pesan non-file lainnya menerima pemberitahuan yang sama dalam obrolan privat dan saat disapa dalam grup; pesan grup sejenis yang tidak menyapa Bot tetap tanpa balasan.
+
+</Accordion>
+</Accordions>
 
 ## Kelola koneksi
 
-Buka **Settings → Messaging → Telegram** untuk melihat Bot yang terhubung. Pemilik dan admin dapat memutuskan satu koneksi. Memutuskan koneksi menghentikan long polling dan balasan keluar tetapi mempertahankan percakapan dan catatan audit Multica.
+Buka **Settings → Messaging** untuk melihat agent yang terhubung, dikelompokkan per platform. Pilih sebuah agent untuk membuka bagian **Messaging**-nya. Pemilik dan admin ruang kerja dapat memutuskan Bot dari menu pengelolaannya di sana. Memutuskan koneksi menghentikan long polling dan balasan keluar tetapi mempertahankan percakapan dan catatan audit Multica.
 
 ## Pengaturan hosting mandiri
 

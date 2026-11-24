@@ -4,8 +4,12 @@ description: Tugas menyimpan konteks, penerima tugas, status, dan riwayat ekseku
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+import { IssueStatusDemo } from "@/components/demos/issue-status-demo";
+import { IssueDraftDemo } from "@/components/demos/issue-draft-demo";
+import { DeliverablesDemo } from "@/components/demos/deliverables-demo";
 
-Tugas adalah unit dasar Multica untuk mengatur pekerjaan: sebuah fitur, bug, atau investigasi — apa pun yang harus dimiliki dan dijalankan oleh anggota atau agent. Diskusi di sekitarnya, perubahan statusnya, dan setiap eksekusi tetap berada di satu tempat, sehingga tidak perlu menyusun ulang konteks dari log obrolan atau output terminal.
+Tugas adalah unit dasar Multica untuk mengatur pekerjaan: sebuah fitur, bug, atau investigasi — apa pun yang harus dimiliki dan dijalankan oleh anggota atau agent. Diskusi, perubahan status, dan setiap eksekusi dicatat pada tugas, sehingga tidak ada yang perlu menggali log obrolan atau output terminal untuk mendapatkan konteks.
 
 ## Bagian-bagian tugas
 
@@ -17,14 +21,27 @@ Tugas adalah unit dasar Multica untuk mengatur pekerjaan: sebuah fitur, bug, ata
 | **Tanggal, label, dan properti khusus** | Perencanaan, kategorisasi, dan kolom milik tim Anda sendiri. |
 | **Proyek dan relasi induk-anak** | Masuk ke dalam pekerjaan yang lebih besar, atau terbagi menjadi sub-tugas. |
 | **Aktivitas dan log eksekusi** | Komentar, perubahan status, eksekusi, dan hasil yang dikembalikan oleh agent. |
+| **Deliverable** | File yang diunggah di komentar; unggahan ulang file yang sama disimpan sebagai versi. |
 
 ![Detail tugas: deskripsi, diskusi, properti di sebelah kanan, dan log eksekusi](/images/docs/quickstart-run-result.webp)
 
 ## Membuat tugas
 
-Buat tugas dari halaman **Tugas** atau di dalam sebuah proyek — judul saja sudah cukup, dan semua properti lainnya dapat diisi belakangan.
+Buat tugas dari halaman **Tugas** atau di dalam sebuah proyek. **New Issue** di sidebar, atau `C`, membuka dialog pembuatan dalam mode yang terakhir Anda gunakan: **Create manually** meminta Anda mengisi judul dan properti sendiri (judul saja sudah cukup, sisanya dapat menyusul), sedangkan **Create with agent** hanya memerlukan deskripsi permintaan. Ganti mode di bagian bawah dialog; isian Anda ikut terbawa.
 
 Setiap tugas memiliki nomor, seperti `MUL-123`. Digitnya bertambah di dalam ruang kerja; setelah seorang admin mengubah prefiks tugas ruang kerja, nomor akan ditampilkan dengan prefiks baru. Lihat [Ruang Kerja](/workspaces#membuat-ruang-kerja).
+
+### Create with agent
+
+Jelaskan pekerjaannya, pilih agent atau squad di **Created by**, lalu klik **Create**. Dialog langsung tertutup. Agent bekerja di latar belakang, mengubah permintaan menjadi judul dan deskripsi, lalu membuat tugasnya; keberhasilan atau kegagalan masuk ke kotak masuk Anda. Notifikasi kegagalan memiliki **Edit as advanced form**, yang memasukkan permintaan asli Anda ke formulir manual.
+
+<IssueDraftDemo />
+
+- Agent menyatakan ulang permintaan Anda dengan setia dan tidak menambahkan persyaratan atau kriteria penerimaan yang tidak Anda berikan.
+- Jika permintaan menyebut penerima tugas ("berikan ini ke Lei Li"), agent menugaskannya. Jika tidak, penerima tugasnya adalah yang Anda pilih di **Created by**: agent itu sendiri, atau squad jika Anda memilih squad. Tugas baru dimulai di `todo`, sehingga jika penerima tugasnya agent, agent langsung mulai mengerjakan begitu tugas dibuat.
+- Proyek, prioritas, dan tenggat yang Anda atur di dialog dipakai apa adanya; agent tidak menyimpulkan yang berbeda dari teks. Proyek tampil secara default, sedangkan prioritas dan tenggat ada di menu **⋯**. Pilih kolom yang selalu tampil di **Settings → Preferences → Fields shown when creating issues**.
+- Dengan **Create another** aktif, dialog tetap terbuka setelah tiap pengiriman sehingga Anda dapat menulis tugas berikutnya.
+- **Created by** hanya mencantumkan agent dan squad yang boleh Anda tugaskan. Jika runtime agent memiliki CLI multica yang terlalu lama, dialog meminta Anda memperbarui daemon atau beralih ke pembuatan manual.
 
 ## Memilih penerima tugas
 
@@ -40,7 +57,10 @@ Penugasan tidak melewati Akses agent; saat menugaskan ke squad, Akses leader-lah
 
 ## Status
 
-Setiap ruang kerja dimulai dengan tujuh status bawaan, yang dikelompokkan ke dalam empat kategori siklus hidup:
+Setiap ruang kerja dimulai dengan tujuh status bawaan, yang dikelompokkan ke dalam empat kategori siklus hidup.
+
+<Tabs items={["By category", "By status"]}>
+<Tab value="By category" id="status-categories">
 
 | Kategori | Status bawaan | Makna |
 |---|---|---|
@@ -49,7 +69,10 @@ Setiap ruang kerja dimulai dengan tujuh status bawaan, yang dikelompokkan ke dal
 | `done` | `done` | Berhasil diselesaikan; final. |
 | `closed` | `cancelled` | Tidak lagi dikerjakan; final, bukan penyelesaian yang berhasil. |
 
-Kategori membuat logika siklus hidup tetap sederhana. Board, daftar, filter, dan pengurutan semuanya bekerja berdasarkan status masing-masing, dan status konkret menjaga perilaku workflow yang lebih spesifik yang diandalkan oleh agent dan otomatisasi.
+Kategori hanya menunjukkan bagian siklus hidup tempat sebuah tugas berada. Board, daftar, filter, dan pengurutan bekerja berdasarkan status masing-masing, dan perilaku khusus yang diandalkan oleh agent dan otomatisasi juga melekat pada status masing-masing.
+
+</Tab>
+<Tab value="By status" id="built-in-statuses">
 
 | Status | Makna |
 |---|---|
@@ -61,9 +84,16 @@ Kategori membuat logika siklus hidup tetap sederhana. Board, daftar, filter, dan
 | `blocked` | Untuk saat ini tidak dapat dilanjutkan. |
 | `cancelled` | Tidak lagi dikerjakan; catatannya tetap ada. |
 
-Tidak ada alur baku antar-status — anggota dan agent dapat mengubahnya secara langsung.
+</Tab>
+</Tabs>
 
-Agent menuliskan status tugas sesuai dengan perubahan yang dibuat oleh pekerjaannya: mulai mengerjakan apa yang diminta tugas tersebut — dalam bentuk apa pun, riset, desain, atau tinjauan yang diminta oleh tugas itu sendiri — langsung memindahkannya ke `in_progress`, sehingga board menampilkan pekerjaan tersebut selagi berjalan; menyerahkan hasil memindahkannya ke `in_review`; pekerjaan yang berlanjut melewati satu giliran tetap berada di `in_progress`; satu giliran yang tidak menghasilkan deliverable milik tugas itu sendiri — menjawab pertanyaan, berkonsultasi tentang pekerjaan yang dimiliki di tempat lain — membiarkan status tidak berubah sepanjang giliran tersebut. Pembaruan ini dituliskan secara eksplisit oleh agent melalui Multica CLI selama eksekusi berlangsung — server tidak mengubah status tugas saat sebuah eksekusi dimulai atau selesai (kecuali dua pengecualian sistem di bawah ini). `done` biasanya merupakan konfirmasi manusia, atau penggabungan PR yang tertaut pada tugas saat ruang kerja memindahkan tugas yang PR-nya telah digabungkan ke `done`.
+Demo di bawah dimulai dari tugas yang sudah ditugaskan ke agent dan diparkir di `backlog`:
+
+<IssueStatusDemo />
+
+Anggota dan agent dapat mengubah status secara langsung. Di proyek yang memiliki [workflow](/workflows), pilih dari langkah-langkah workflow tersebut. Berpindah ke langkah yang memiliki handoff juga dapat mengubah penerima tugas dan meminta agent mulai bekerja.
+
+Agent memperbarui status tugas seiring kemajuan pekerjaan: secara default mereka mengatur `in_progress` saat mulai dan `in_review` saat menyerahkan hasil. Jika proyek memiliki workflow, mereka mengikuti langkah dan instruksi handoff-nya.
 
 <Callout type="info">
 Dua perubahan dilakukan oleh sistem:
@@ -74,31 +104,35 @@ Dua perubahan dilakukan oleh sistem:
 
 ### Status khusus
 
-Owner atau admin ruang kerja dapat menambahkan status di **Settings → Issue Statuses** — `Code Review`, `QA`, `Rework`. Setiap status termasuk dalam salah satu dari empat kategori siklus hidup:
+`owner` atau `admin` ruang kerja dapat menambahkan status seperti **Code Review**, **QA**, atau **Rework**. Jika **Settings** memiliki **Workflows**, kelola di pustaka status di bawahnya. Jika tidak, gunakan **Settings → Issue Statuses**.
 
-| Kategori | Makna siklus hidup |
-|---|---|
-| `unstarted` | Belum dimulai. Termasuk Backlog dan Todo bawaan. |
-| `started` | Sedang berlangsung, termasuk tinjauan dan menunggu. |
-| `done` | Berhasil diselesaikan; final. |
-| `closed` | Dibatalkan atau tidak lagi dikerjakan; final, bukan penyelesaian yang berhasil. |
+Saat membuatnya, pilih kategorinya — **Unstarted**, **Started**, **Done**, atau **Closed**. Kategori tidak dapat diubah kemudian. Status khusus tidak otomatis memperoleh perilaku khusus status bawaan: misalnya, menamai satu status "Waiting" tidak menjeda agent.
 
-Status khusus hanya mewarisi semantik siklus hidup. Status khusus tidak mewarisi parkir Backlog bawaan, penyelesaian otomatisasi pada In Review, kegagalan Blocked, atau pemulihan In Progress. Gunakan status bawaan yang tetap ketika perilaku tersebut diperlukan. Status khusus historis mengikuti aturan yang sama: Awaiting Response adalah pekerjaan yang masih berlangsung, bukan penyelesaian tinjauan otomatis. Penugasan dan pembuatan tetap mengikuti aturan pemicu agent secara umum.
+- Status bawaan tidak dapat diganti namanya, diubah warnanya, atau diarsipkan.
+- Nama status khusus tampil seperti yang Anda masukkan. Mengubah nama atau warna memperbaruinya di mana pun status itu dipakai.
+- Sebelum mengarsipkan status, pindahkan semua tugas yang memakainya ke status lain yang sesuai, termasuk tugas yang sudah selesai atau dibatalkan. Hapus juga dari workflow khusus mana pun. Setelah itu, pengarsipan menghapusnya dari pilihan berikutnya.
 
-Untuk klien yang sudah terpasang, bidang kategori API yang ada tetap mempertahankan enum wire tujuh-nilai. Klien baru menormalkan representasi tersebut menjadi empat kategori; nilai wire tidak pernah memberikan pewarisan perilaku. Basis data hanya menyimpan empat nilai siklus hidup.
+Pustaka status berisi status yang tersedia. Workflow sebuah proyek memilih status mana yang dipakai tugas-tugasnya dan urutannya.
 
-Empat hal mengikuti dari model tersebut:
+## Properti khusus
 
-- **Kategori sebuah status bersifat tetap begitu status itu ada.** Mengubahnya kemudian akan mengubah perilaku siklus hidup setiap tugas yang sudah berada pada status tersebut, sehingga editor membuatnya hanya-baca. Pilih tahap siklus hidup terlebih dahulu, baru beri namanya.
-- **Pengelompokan status menggunakan status masing-masing.** Kolom Board, bagian Daftar, dan kolom status Swimlane masing-masing membedakan status bawaan dan status khusus. `Code Review` dan `QA` memiliki kolom terpisah meskipun keduanya termasuk dalam Started. Kategori adalah klasifikasi siklus hidup internal, bukan pengganti nama kolom.
-- **Status bawaan terkunci.** Nama, warna, dan kategorinya tidak dapat diubah, dan tidak dapat diarsipkan — ruang kerja yang tidak pernah membuka halaman ini akan tetap memiliki board yang sama seperti sebelumnya.
-- **Mengarsipkan menghentikan penggunaan sebuah status, bukan menghapusnya.** Tugas yang sudah menggunakan status tersebut tetap memilikinya, tetap mempertahankan nama dan warnanya, dan tetap berperilaku sama. Status itu hanya tidak lagi ditawarkan saat seseorang mengatur status selanjutnya.
+Kolom khusus tim Anda, seperti tingkat keparahan, pelanggan, atau anggaran, adalah properti khusus. `owner` atau `admin` ruang kerja mengelolanya di **Settings → Properties**; satu ruang kerja dapat memiliki hingga 20 properti aktif.
 
-Status bawaan diterjemahkan ke dalam bahasa antarmuka; status khusus selalu menampilkan nama yang Anda ketik. API dan CLI mengacu padanya melalui key-nya: `multica issue status MUL-42 code_review`. Halaman pengaturan menurunkan key tersebut dari nama yang dimasukkan; API menerima key eksplisit dan hanya menurunkannya sendiri sebagai fallback. Bagaimanapun caranya, key tersebut tetap sama sejak dibuat — mengganti nama status kemudian tidak mengubahnya.
+Tipenya adalah teks, angka, select, multi-select, tanggal, checkbox, URL, anggota, beberapa anggota, daftar teks, dan daftar URL. Tipe tidak dapat diubah setelah dibuat. Properti dapat dipakai di filter; board juga dapat dikelompokkan berdasarkan properti select, dan properti angka serta tanggal dapat dipakai untuk pengurutan.
+
+Arsipkan properti yang tidak lagi dipakai: properti itu hilang dari pemilih dan filter, nilai yang sudah ada di tugas tetap tersimpan, dan Anda dapat memulihkannya nanti.
 
 ## Tugas dan eksekusi
 
-Tugas adalah catatan permanen dari suatu pekerjaan; sebuah [eksekusi](/tasks) adalah satu eksekusi konkret oleh agent. Satu tugas dapat menghasilkan beberapa eksekusi seiring waktu — implementasi pertama, perubahan lanjutan, pemeriksaan lain. Eksekusi yang selesai hanya berarti eksekusi tersebut telah berakhir; apakah tugasnya sudah selesai ditentukan oleh status tugas tersebut.
+Tugas adalah catatan permanen dari suatu pekerjaan; sebuah [eksekusi](/tasks) adalah satu eksekusi konkret oleh agent. Satu tugas dapat menghasilkan beberapa eksekusi seiring waktu — implementasi pertama, perubahan lanjutan, pemeriksaan lain. Eksekusi yang selesai hanya berarti eksekusi tersebut telah berakhir; dan agent yang menjawab pertanyaan tidak berarti pekerjaan tugas itu telah diserahkan; apakah tugasnya sudah selesai ditentukan oleh status tugas tersebut.
+
+## Deliverable
+
+File yang diunggah anggota dan agent di komentar dikumpulkan di bagian **Deliverables** pada sidebar tugas. Bagian ini menampilkan 3 gambar dan 4 file lain terbaru; **View all** membuka semua deliverable yang dikelompokkan berdasarkan komentar yang mengunggahnya, dengan filter untuk gambar, dokumen, video, dan file lain. `G` di penampil file membuka halaman yang sama. Lampiran pada deskripsi tugas adalah input, jadi tidak dihitung.
+
+Mengunggah ulang file dengan nama dan tipe yang sama menambahkan versi baru dari deliverable yang sama. Bagian ini mencantumkannya sekali beserta versinya (misalnya `v2`), dan setiap kartu file di komentar menunjukkan versi yang mana. Di penampil, klik nomor versi untuk beralih ke versi yang lebih lama, dan **Show in comments** untuk melompat ke komentar yang mengunggahnya.
+
+<DeliverablesDemo />
 
 ## Proyek dan sub-tugas
 
@@ -106,15 +140,72 @@ Satu tugas paling banyak termasuk dalam satu [proyek](/projects); proyek tersebu
 
 Pekerjaan yang lebih besar dapat dipecah menjadi sub-tugas: tugas induk mempertahankan tujuan keseluruhan sementara sub-tugas berjalan secara independen. Status induk dan anak tidak saling memengaruhi.
 
-Sub-tugas dapat diberi **tahap** untuk berkembang secara bertahap — 1, 2, 3. Saat setiap sub-tugas dalam tahap paling awal yang belum selesai mencapai `done` atau `cancelled`, tugas induk menerima notifikasi "sub-tugas selesai"; saat penerima tugas dari induk adalah seorang agent, agent tersebut akan terbangun dan memutuskan apakah akan memulai tahap berikutnya. Sub-tugas tanpa tahap dihitung sebagai satu batch dan memberi notifikasi sekali ketika semuanya selesai.
+Anak langsung dari sebuah tugas dicantumkan di bawah **Sub-issues** di bawah deskripsinya, dengan progres yang menghitung semua anak. Buka anak dari sana.
 
-## Beralih tampilan
+Membuat sub-tugas dari induk mengisi otomatis proyeknya dan, jika ada, penerima tugasnya. Pada pembuatan manual, **Copy parent fields** memungkinkan Anda memilih prioritas, label, tanggal, atau properti khusus tertentu untuk disalin. Hanya nilai yang dipilih yang menggantikan isian formulir Anda, sekali saja; perubahan induk berikutnya tidak disinkronkan. Anak tetap memiliki deskripsi dan statusnya sendiri. Label, tanggal mulai, dan properti khusus tetap berada di draf manual saat beralih ke Create with agent.
 
-Halaman Tugas menawarkan lima tampilan — daftar, board, tabel, Gantt, dan swimlane — yang dapat difilter dan diurutkan berdasarkan status, penerima tugas, proyek, dan properti lainnya. Semuanya menampilkan tugas yang sama.
+Sub-tugas dapat diberi **tahap** untuk berkembang secara bertahap — 1, 2, 3. Saat setiap sub-tugas dalam tahap paling awal yang belum selesai mencapai `done` atau `cancelled`, tugas induk menerima notifikasi "sub-tugas selesai"; saat penerima tugas dari induk adalah seorang agent, agent tersebut akan terbangun dan memutuskan apakah akan memulai tahap berikutnya. Sub-tugas tanpa tahap dihitung sebagai satu batch dan memberi notifikasi sekali ketika semuanya selesai. Sistem yang memicu bangunnya agent ini; lihat [Issue wakeups](/issue-wakeups) untuk aturannya dan jenis wakeup lainnya.
+
+## Tampilan dan pengaturan tampilan [#switch-views]
+
+Halaman Tugas menawarkan lima tata letak — daftar, board, tabel, Gantt, dan swimlane — yang dapat difilter berdasarkan status, penerima tugas, proyek, dan properti lainnya. Semuanya menampilkan tugas yang sama.
+
+Menu **Display** menyesuaikan tata letak saat ini. Board dikelompokkan berdasarkan status, penerima tugas, proyek, atau properti select, dan swimlane berdasarkan tugas induk, proyek, atau penerima tugas. Anda juga dapat mengatur urutan, apakah sub-tugas ditampilkan, properti mana yang muncul di kartu, dan kolom board mana yang tampil (kolom terkunci selama filter status aktif).
+
+### Menyimpan tampilan
+
+Simpan kombinasi filter dan pengaturan tampilan yang sering Anda pakai sebagai view: klik tombol **Views** di samping bilah tampilan, pilih **New view**, lalu beri nama dan visibilitas.
+
+| Visibilitas | Siapa yang melihat | Siapa yang dapat mengedit dan menghapus |
+|---|---|---|
+| **Only visible to me** | Hanya Anda | Anda |
+| **Visible to workspace members** | Anggota dengan peran `owner`, `admin`, atau `member` | Anda, ditambah `owner` dan `admin` ruang kerja |
+
+Pengaturan tampilan yang tersimpan dalam sebuah view adalah **Default display**: anggota melihat view dengan cara itu saat pertama membukanya, lalu menyesuaikannya untuk diri sendiri tanpa memengaruhi siapa pun. Sebuah view berada di halaman tempat ia dibuat: view yang dibuat di proyek milik proyek tersebut, dan view yang dibuat di halaman **My Issues** selalu privat.
+
+Seret view di bilah tampilan untuk mengurutkan ulang; urutan dan visibilitas di **Manage views** hanya memengaruhi Anda. Klik kanan sebuah view untuk mengeditnya, menghapusnya, atau **Add to sidebar**, yang mencantumkannya di bagian **Views** pada panel Work.
+
+Bagian Views juga menawarkan empat view bawaan: **All issues**; **My work**, tugas yang ditugaskan kepada Anda atau agent Anda; **Working**, tugas yang sedang dijalankan agent; dan **Subscribed**, setiap tugas yang Anda subscribe. Tugas yang telah [Anda tunda di kotak masuk](/inbox#menunda-sebuah-issue) ada di tab **Snoozed**-nya. My work, Working, dan Subscribed adalah All issues dengan kondisi tetap: filter lain dapat mempersempitnya, tetapi kondisi itu tidak dapat dihapus atau diperlebar. Tombol slider di header bagian Views mengaktifkan atau menonaktifkan tiap view bawaan.
+
+### Pratinjau samping
+
+Mengklik kartu atau baris tugas membuka halaman penuh secara default. Beralih ke **Side preview** di **Settings → Preferences → Opening issues** dan tugas terbuka di panel di sisi kanan halaman, dengan header halaman dan toolbar tetap dapat dipakai. Keduanya, Shift+Click membuka yang lainnya. Pengaturan ini hanya berlaku untuk perangkat saat ini.
+
+Saat pratinjau terbuka, `J` / `K` berpindah ke tugas berikutnya atau sebelumnya, `H` / `L` berpindah antar kolom board yang bersebelahan, dan `Esc` menutupnya. **Open full page** membawa Anda ke halaman tugas.
+
+## Edit massal
+
+Pilih beberapa tugas di daftar, tabel, atau daftar sub-tugas untuk menampilkan toolbar massal. Di tabel, Shift-click memilih rentang. Toolbar mengedit status, prioritas, penerima tugas, label, proyek, dan tenggat. **More actions** menambahkan tanggal mulai, induk, tahap untuk sub-tugas, properti khusus, menyalin tautan, dan penghapusan. Menu klik kanan pada pilihan menawarkan aksi yang sama.
+
+Label menunjukkan apakah ada pada semua, sebagian, atau tidak satu pun tugas yang dipilih. Tambah atau hapus satu label tanpa mengubah label lain, atau hapus semua label. Properti khusus dapat diatur atau dikosongkan; properti multi-nilai mengganti seluruh nilainya.
+
+Jika sebagian tugas tidak dapat menerima perubahan, tugas lainnya tetap diperbarui. Hasilnya menyebut tugas yang dilewati beserta alasannya, dengan aksi untuk memilih hanya tugas-tugas itu agar dapat dikoreksi dan dicoba lagi.
+
+- Saat pilihan mencakup beberapa proyek, menu status hanya menawarkan status yang diizinkan workflow setiap tugas yang dipilih. Tugas yang tidak mendukung suatu perubahan mempertahankan nilainya, dan sisanya diperbarui.
+- Perubahan status massal langsung diterapkan. Tugas yang ditugaskan ke agent dan keluar dari `backlog` mulai berjalan seperti biasa.
+- Menugaskan massal ke agent atau squad terlebih dahulu meminta Anda mengonfirmasi eksekusi yang akan dimulai; jika setiap tugas yang dipilih berada di `backlog`, penugasan langsung diterapkan.
+
+## Menandai sebagai duplikat
+
+Saat hal yang sama diajukan dua kali, buka tugas yang berlebih dan pilih **Mark as duplicate** dari menu status atau dari **Relations** di menu aksi tugas, lalu pilih yang asli. Pemilih menyarankan tugas dengan judul serupa dan tugas yang baru Anda lihat.
+
+Tugas berpindah ke `cancelled` dan mengingat aslinya:
+
+- Banner **Duplicate of** di atas judul menautkan ke yang asli dan menampilkan status terkininya. Di daftar, board, dan tabel, panah dengan nomor tugas asli muncul di samping tugas.
+- Sidebar tugas asli mendapat bagian **Duplicates** yang mencantumkan tugas yang ditandai sebagai duplikatnya dan siapa pembuatnya.
+- Untuk membatalkan kesalahan, klik **Not a duplicate** pada banner; tugas kembali ke `todo`. Mengubah status menjadi selain `cancelled` juga menghapus tandanya.
+
+Relasi ini hanya satu tingkat: tugas yang sudah menjadi duplikat tidak dapat menjadi yang asli, dan tugas yang sudah memiliki duplikat tidak dapat ditandai sebagai duplikat. Jika workflow proyek tidak memiliki `cancelled`, menu aksi tugas tidak menawarkannya.
 
 ## Menghapus tugas
 
-Setiap anggota ruang kerja dapat menghapus tugas.
+Siapa yang dapat menghapus tugas:
+
+- Owner dan admin ruang kerja dapat menghapus tugas apa pun.
+- Anggota dapat menghapus tugas yang mereka buat atau yang dibuat oleh agent yang saat ini mereka miliki.
+- Agent hanya dapat menghapus tugas yang mereka buat; mereka tidak mewarisi hak hapus pemiliknya.
+
+Ini berdasarkan pembuat, bukan penerima tugas saat ini. Untuk agent bersama, pemilik saat ini mengelola tugasnya terlepas dari siapa yang memanggilnya. Jika agent pembuatnya sudah tidak ada, owner atau admin ruang kerja dapat menghapus tugasnya. Jika sebuah batch menyertakan tugas yang tidak dapat Anda hapus, seluruh batch ditolak dan tidak ada yang dihapus.
 
 <Callout type="warning">
 Penghapusan tidak dapat dibatalkan: tugas beserta komentar, lampiran, dan catatan tertautnya dihapus secara permanen, dan eksekusi yang belum selesai dibatalkan. Saat pekerjaan tersebut memang tidak lagi dikerjakan, atur statusnya menjadi `cancelled` — diskusi dan hasilnya tetap tersedia.
@@ -126,3 +217,4 @@ Penghapusan tidak dapat dibatalkan: tugas beserta komentar, lampiran, dan catata
 - [Komentar](/comments) — berdiskusi, membalas, dan @mention di sekitar sebuah tugas.
 - [Menugaskan tugas ke agent](/assigning-issues) — menyerahkan pekerjaan ke agent dan memulai eksekusi pertama.
 - [Eksekusi](/tasks) — pelajari tentang antrean, menjalankan, percobaan ulang, dan pembatalan.
+- [Berbagi kumpulan agent dalam tim](/team-agent-pool) — bagaimana orang dan agent saling menyerahkan tugas dan meninjau pekerjaan.

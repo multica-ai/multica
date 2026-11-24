@@ -1,11 +1,12 @@
 ---
 title: Bot Slack
-description: Buat Bot Slack untuk agent dan gunakan di DM, kanal, serta perintah /issue, /new, dan /clear.
+description: Buat Bot Slack untuk agent dan gunakan di DM, kanal, serta perintah @Multica /help, /issue, /new, dan /clear.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
 
-Multica menggunakan app Slack Anda sendiri. Setelah terhubung, anggota tim dapat mengirim DM ke Bot, @-mention Bot di kanal, menggunakan `/issue` untuk membuat tugas, menggunakan `/new` untuk memulai Obrolan Multica baru, atau menggunakan `/clear` untuk mereset konteks agent pada Obrolan saat ini.
+Multica menggunakan app Slack Anda sendiri. Setelah terhubung, anggota tim dapat mengirim DM ke Bot atau @-mention Bot di kanal, dan menggunakan `@Multica /help` untuk menampilkan daftar perintah, `/issue` untuk membuat tugas, `/new` untuk memulai Obrolan Multica baru, dan `/clear` untuk mereset konteks agent pada Obrolan saat ini.
 
 Satu app Slack dipetakan ke satu agent Multica. Untuk menghubungkan beberapa agent, buat app terpisah untuk masing-masing.
 
@@ -16,7 +17,12 @@ Koneksi harus diselesaikan oleh pemilik atau admin ruang kerja, dan diakhiri den
 - Bot User OAuth Token, dimulai dengan `xoxb-`;
 - App-level Token, dimulai dengan `xapp-`.
 
-## 1. Buat app Slack dari manifest
+## Hubungkan Bot
+
+<Steps>
+<Step>
+
+### Buat app Slack dari manifest [#1-create-the-slack-app-from-a-manifest]
 
 Buka [Slack API Apps](https://api.slack.com/apps), klik **Create New App → From a manifest**, pilih workspace Slack, lalu tempelkan berikut ini di bawah **YAML**:
 
@@ -69,10 +75,10 @@ settings:
   token_rotation_enabled: false
 ```
 
-Sebelum membuatnya, Anda dapat mengganti kedua kemunculan `Multica` dengan nama agent tersebut. Jangan menghapus scope atau event dari manifest, karena DM, mention kanal, balasan, `/issue`, `/new`, atau `/clear` bisa berhenti berfungsi.
+Sebelum membuatnya, Anda dapat mengganti kedua kemunculan `Multica` dengan nama agent tersebut. Jangan menghapus scope atau event dari manifest, karena DM, mention kanal, balasan, `@Multica /help`, `/issue`, `/new`, atau `/clear` bisa berhenti berfungsi.
 
 <Callout type="warning">
-Nama slash command Slack berlaku secara global pada workspace. Jika app lain yang sudah terinstal telah memiliki `/new` atau `/clear`, Slack akan menolak command yang bertabrakan saat Anda membuat atau memperbarui app. Selesaikan konfliknya, atau kirim dalam bentuk pesan — `@Multica /new [message]` atau `@Multica /clear [message]` — untuk melewati intersepsi slash command native.
+Nama slash command Slack berlaku secara global pada workspace. Jika app lain yang sudah terinstal telah memiliki `/new` atau `/clear`, Slack akan menolak command yang bertabrakan saat Anda membuat atau memperbarui app. Selesaikan konfliknya, atau kirim dalam bentuk pesan `@Multica /new [message]` atau `@Multica /clear [message]` untuk melewati intersepsi slash command native.
 </Callout>
 
 <Callout type="warning">
@@ -81,35 +87,42 @@ Jika app Slack ini diinstal sebelum dukungan lampiran tersedia, tambahkan scope 
 
 Bot terhubung ke Slack melalui Socket Mode, sehingga tidak diperlukan Request URL publik atau OAuth Redirect URL.
 
-## 2. Dapatkan dua token
+</Step>
+<Step>
 
-### Token Bot
+### Dapatkan dua token [#2-get-the-two-tokens]
+
+#### Token Bot
 
 1. Di app Slack, buka **Install App**.
 2. Klik **Install to Workspace** dan setujui izinnya.
-3. Salin **Bot User OAuth Token** — dimulai dengan `xoxb-`.
+3. Salin **Bot User OAuth Token**, yang dimulai dengan `xoxb-`.
 
-
-### Token tingkat app
+#### Token tingkat app
 
 1. Buka **Basic Information → App-Level Tokens**.
 2. Klik **Generate Token and Scopes**.
 3. Tambahkan scope `connections:write`.
 4. Buat dan salin token yang dimulai dengan `xapp-`.
 
+</Step>
+<Step>
 
-## 3. Hubungkan ke agent
+### Hubungkan ke agent [#3-connect-it-to-an-agent]
 
 1. Di Multica, buka **Agents** dan pilih agent yang akan dihubungkan ke Slack.
-2. Buka **Integrations** dan klik **Connect Slack**.
+2. Buka **Messaging**, klik **Add messaging channel**, lalu pilih **Slack**.
 3. Tempelkan token Bot dan token tingkat app.
 4. Klik **Connect**.
 
-Multica memverifikasi bahwa kedua token berasal dari app yang sama. Setelah terhubung, halaman menampilkan **Connected to Slack**.
+Multica memverifikasi bahwa kedua token berasal dari app yang sama. Setelah terhubung, halaman menampilkan **Connected**.
 
 <Callout type="warning">
-Kedua token disimpan terenkripsi di server Multica. Token adalah kredensial — jangan menaruhnya di tugas, komentar, atau repositori kode. App yang sudah terhubung ke agent atau ruang kerja lain tidak dapat digunakan ulang secara langsung; putuskan koneksi aslinya terlebih dahulu.
+Kedua token disimpan terenkripsi di server Multica. Token adalah kredensial: jangan menaruhnya di tugas, komentar, atau repositori kode. App yang sudah terhubung ke agent atau ruang kerja lain tidak dapat digunakan ulang secara langsung; putuskan koneksi aslinya terlebih dahulu.
 </Callout>
+
+</Step>
+</Steps>
 
 ## Penggunaan pertama
 
@@ -123,7 +136,7 @@ Hanya anggota ruang kerja Multica saat ini yang dapat menggunakan Bot.
 
 ### Pesan langsung
 
-Buka Bot dari **Apps** di sidebar Slack dan kirim pesan langsung kepadanya — tidak perlu @-mention.
+Buka Bot dari **Apps** di sidebar Slack dan kirim pesan langsung kepadanya. Tidak perlu @-mention.
 
 ### Kanal dan obrolan grup
 
@@ -131,11 +144,21 @@ Jalankan `/invite @your-bot` untuk menambahkan Bot ke kanal terlebih dahulu, lal
 
 Bot hanya merespons pesan kanal yang secara eksplisit @-mention dirinya. Saat berjalan, Bot membaca konteks terkini thread tersebut sesuai batas yang diizinkan oleh izinnya.
 
+Agent dapat menggunakan `multica chat thread [<thread_id>] --output json` untuk membaca thread di kanal saat ini. JSON tersebut menyertakan `channel_id` Slack jika tersedia, serta field opsional `channel_name` dan `permalink`. Thread ID eksplisit memilih sumber thread tersebut, sedangkan prompt setiap eksekusi mengidentifikasi pesan atau thread pemicunya sendiri. DM tanpa thread tidak memiliki `thread_id`; respons riwayatnya menghilangkan permalink jika tidak ada pesan spesifik untuk ditautkan.
+
+Nama kanal memerlukan izin baca percakapan Slack yang sesuai, yang tidak diminta oleh manifest default. Permalink berasal dari Slack dan mungkin tidak tersedia jika akses ditolak, pesan sudah dihapus, atau Slack mengalami timeout atau membatasi laju (rate limit) request. Metadata yang hilang dihilangkan tanpa menghalangi pembacaan riwayat atau eksekusi tugas; tidak diperlukan izin tambahan atau instalasi ulang.
+
 ### Kirim file
 
-Lampirkan file ke DM, atau ke pesan kanal yang @-mention Bot. File tersebut tiba sebagai lampiran pada pekerjaan yang sama, sehingga agent membacanya bersama permintaan Anda.
+Lampirkan file ke DM, atau ke pesan kanal yang @-mention Bot. File tersebut sampai ke agent sebagai lampiran dan ditangani bersama pesannya.
 
-Ini memerlukan scope `files:read` — jika app diinstal sebelum dukungan lampiran ada, lihat catatan di langkah 1. Setiap file harus berukuran 20 MiB atau lebih kecil, dan satu pesan membawa maksimal 10 file. File yang lebih besar, masih diunggah, atau dihosting di luar Slack (misalnya tautan Google Drive atau Dropbox) akan dilewati; teks pesan tetap sampai ke agent.
+Ini memerlukan scope `files:read`; jika app diinstal sebelum dukungan lampiran ada, lihat catatan di langkah 1. Setiap file harus berukuran 20 MiB atau lebih kecil, dan satu pesan membawa maksimal 10 file. File yang lebih besar, masih diunggah, atau dihosting di luar Slack (misalnya tautan Google Drive atau Dropbox) akan dilewati; teks pesan tetap sampai ke agent.
+
+### Tampilkan daftar perintah dengan `@Multica /help`
+
+Kirim `@Multica /help` di DM, kanal, atau thread untuk menampilkan daftar `@Multica /help`, `@Multica /new [message]`, `@Multica /clear [message]`, dan `@Multica /issue <title>` (baris-baris berikutnya menjadi deskripsi). Multica membalas langsung tanpa membuat Obrolan atau eksekusi dan tanpa mengubah Obrolan yang aktif.
+
+Manifest default hanya mendaftarkan `/issue`, `/new`, dan `/clear` sebagai slash command native. `@Multica /help` tidak memerlukan perubahan manifest atau instalasi ulang. `/issue <description>` native meminta agent membuat tugas dari deskripsi Anda.
 
 ### Buat tugas dengan `/issue`
 
@@ -149,7 +172,7 @@ Perintah ini tidak memerlukan @-mention. Multica menyerahkan deskripsi tersebut 
 
 ### Mulai Obrolan baru dengan `/new`
 
-Dalam DM dengan Bot, `/new` langsung membuat Obrolan baru yang kosong dan terlihat. `/new <message>` membuat Obrolan dan menggunakan pesan tersebut sebagai giliran pertamanya. `/new` tanpa pesan ditampilkan sebagai **New chat** sampai pesan pengguna efektif pertama tiba; judulnya kemudian mengikuti perilaku judul pesan-pertama yang sudah ada.
+Dalam DM dengan Bot, `/new` langsung membuat Obrolan baru yang kosong dan terlihat. `/new <message>` membuat Obrolan dan menggunakan pesan tersebut sebagai giliran pertamanya. Obrolan yang dibuat oleh `/new` tanpa pesan ditampilkan sebagai **New chat** sampai pesan efektif pertamanya tiba, lalu diberi judul dari pesan tersebut.
 
 Obrolan sebelumnya tetap tersedia dan dapat ditulis di Multica pada web, desktop, dan mobile. Hanya pesan berikutnya dari percakapan Slack ini yang dirutekan ke Obrolan baru.
 
@@ -163,7 +186,7 @@ Di kanal atau thread, kirim `@Multica /clear [message]` di thread tujuan agar Mu
 
 ## Kelola koneksi
 
-Buka **Settings → Messaging → Slack** untuk melihat semua Bot Slack yang terhubung. Pemilik dan admin ruang kerja dapat memutuskan koneksinya.
+Buka **Settings → Messaging** untuk melihat agent yang terhubung, dikelompokkan per platform. Pilih sebuah agent untuk membuka bagian **Messaging**-nya. Pemilik dan admin ruang kerja dapat memutuskan koneksi Bot dari menu pengelolaannya di sana.
 
 Setelah diputuskan, koneksi Socket Mode berhenti dan Bot tidak lagi menerima pesan baru. Percakapan dan catatan audit yang sudah ada tidak dihapus.
 
@@ -191,6 +214,7 @@ Tautan pengikatan akun menggunakan `MULTICA_APP_URL`, dengan fallback ke `FRONTE
 - **App tidak dapat diverifikasi**: pastikan manifest menyertakan `users:read`, lalu instal ulang app setelah memperbarui izin.
 - **Tidak ada titik masuk DM**: pastikan `app_home.messages_tab_enabled` berisi `true`.
 - **Tidak ada balasan di kanal**: pastikan Bot sudah diundang ke kanal dan pesan @-mention Bot.
+- **`/help` tidak sampai ke Multica**: kirim `@Multica /help`; manifest default tidak mendaftarkan `/help` native.
 - **`/issue`, `/new`, atau `/clear` tidak ada**: pastikan manifest menyertakan ketiga slash command dan scope `commands`, lalu instal ulang app. Jika Slack melaporkan bahwa `/new` atau `/clear` sudah dipakai, gunakan bentuk pesan `@Multica` atau selesaikan dahulu konflik command tingkat workspace.
 - **File tidak sampai ke agent**: pastikan manifest menyertakan `files:read` dan app sudah diinstal ulang setelah scope ditambahkan, serta periksa bahwa file berukuran 20 MiB atau lebih kecil.
 - **Bot tidak berjalan**: periksa apakah agent diarsipkan dan apakah [runtime](/daemon-runtimes) yang digunakannya online.

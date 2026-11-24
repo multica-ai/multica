@@ -1,0 +1,65 @@
+---
+title: Multica vs worktree manager lokal
+description: Perbandingan Multica dengan Conductor, Claude Squad, Orca, dan Beads untuk menjalankan beberapa coding agent secara paralel, dan kapan workbench pribadi sudah cukup.
+---
+
+Conductor, Claude Squad, dan Orca membantu satu developer menjalankan beberapa coding agent secara paralel, masing-masing di git worktree sendiri, dan meninjau hasilnya. Beads memberi agent sebuah task tracker yang tersimpan bersama repositori. Multica menyelesaikan masalah yang bertetangga: sebuah **tim** berbagi agent, tugas, runtime, dan skill dalam satu ruang kerja. Mana yang Anda butuhkan sebagian besar bergantung pada berapa banyak orang yang terlibat.
+
+Pernyataan tentang tool lain di halaman ini bersumber dari dokumentasi publik mereka per November 2026: [Conductor](https://www.conductor.build/docs/concepts/git-worktrees), [Claude Squad](https://github.com/smtg-ai/claude-squad), [Orca](https://orca.dev/docs/model/worktrees), dan [Beads](https://github.com/gastownhall/beads). Periksa sumber tersebut untuk detail terbaru.
+
+## Jawaban singkat
+
+- **Satu developer, agent di mesinnya sendiri, review langsung atas setiap diff:** worktree manager seperti Conductor, Claude Squad, atau Orca cocok, dan sering kali lebih cepat untuk dimulai.
+- **Agent yang perlu menyimpan rencana dan dependency graph di dalam repositori:** Beads.
+- **Beberapa orang berbagi agent,** agent berjalan di mesin selain laptop Anda, pekerjaan ditugaskan seperti tugas biasa, kontrol akses, dan pekerjaan berulang: Multica.
+
+Pilihan ini tidak saling eksklusif. Developer dapat tetap memakai worktree manager untuk pekerjaan langsung dan menyerahkan tugas yang lebih panjang atau rutin ke agent bersama di Multica.
+
+## Perbandingan
+
+| | Multica | Conductor | Claude Squad | Orca | Beads |
+|---|---|---|---|---|---|
+| Apa itu | Ruang kerja tim tempat tugas ditugaskan ke agent | Aplikasi Mac untuk coding agent paralel di workspace terisolasi | Aplikasi terminal yang mengelola agent dalam sesi tmux | Aplikasi desktop, mobile, dan remote untuk menjalankan sekumpulan agent | Graph issue tracker untuk coding agent, digunakan dari CLI |
+| Pengguna utama | Tim berisi manusia dan agent | Satu developer | Satu developer | Satu developer, ditambah bot yang dapat dipanggil orang lain | Agent yang bekerja di sebuah repositori |
+| Unit pekerjaan | Tugas di board bersama | Sebuah workspace (worktree dan branch) | Sebuah sesi (tmux dan worktree) | Sebuah worktree | Sebuah bead (task) dengan dependensi |
+| Pekerjaan paralel tanpa konflik | Setiap eksekusi mendapat direktorinya sendiri dengan checkout repositori; agent juga dapat memakai worktree terisolasi dari direktori lokal | Satu git worktree per workspace | Satu git worktree per sesi | Satu git worktree per task | Bukan runner; task diklaim secara atomik |
+| Tempat agent berjalan | Komputer mana pun yang Anda hubungkan; rekan tim dapat berbagi runtime | Mac Anda; juga workspace cloud | Terminal Anda | Mesin Anda, host SSH, server Orca remote, atau VM cloud | Di mana pun agent Anda berjalan |
+| Tool | [31 AI coding tool](/providers) | Claude Code, Codex, Cursor Agent, OpenCode | Claude Code, Codex, OpenCode, Amp, dan terminal agent lainnya | Claude Code, Codex, Grok, Antigravity, dan CLI lain milik Anda | Agent apa pun yang dapat memanggil CLI-nya |
+| Dibagikan ke tim | Ya: tugas, agent, runtime, skill, role, dan Access per agent yang dibagikan | — | — | Bot menerima permintaan dari Slack, Linear, atau GitHub dan berjalan di agent milik pemiliknya | Disinkronkan melalui remote Dolt |
+| Review diff di dalam aplikasi | Tidak; review dilakukan di pull request, dengan log eksekusi pada tugas | Ya | Ya | Ya | — |
+| Pekerjaan berulang dan terpicu | [Autopilot](/autopilots) berdasarkan schedule atau webhook | — | — | Schedule dan trigger bot (pull request, check yang gagal, webhook) serta otomatisasi terjadwal | — |
+| Lisensi | Source-available, gratis di dalam organisasi Anda | Source tidak publik | AGPL-3.0 | MIT | MIT |
+
+## Kapan worktree manager lebih cocok
+
+- Anda satu developer dan ingin memantau beberapa agent berdampingan, dengan terminal dan diff viewer untuk masing-masing.
+- Anda meninjau dan menggabungkan setiap perubahan sendiri, secara interaktif, sebelum keluar dari mesin Anda.
+- Anda tidak memerlukan orang lain untuk melihat, menugaskan, atau menggunakan kembali agent Anda.
+
+Multica tidak memiliki diff viewer atau terminal per tugas di dalam aplikasi. Review dilakukan di pull request, dan tugas menyimpan log eksekusi dari eksekusi tersebut.
+
+## Kapan Multica lebih cocok
+
+- **Lebih dari satu orang memakai agent.** Agent, runtime, dan [skill](/skills) dimiliki ruang kerja; [Access](/agents#izin-dan-akses) menentukan siapa yang dapat menjalankan setiap agent; semua orang melihat agent mana yang sedang mengerjakan apa. Lihat [Berbagi pool agent dalam tim](/team-agent-pool).
+- **Agent harus berjalan saat laptop Anda tertutup.** Hubungkan server atau VM sebagai [runtime](/daemon-runtimes) dan arahkan agent ke sana; rekan tim dapat berbagi runtime tersebut.
+- **Pekerjaan harus dilacak sebagai tugas.** Penugasan, status, komentar, sub-tugas, [workflow](/workflows) dengan langkah review, dan tautan PR berada di satu tugas, bukan di sesi lokal.
+- **Sebagian pekerjaan berulang.** [Autopilot](/autopilots) menjalankan agent berdasarkan schedule atau dari webhook, dan setiap eksekusi tercatat.
+- **Anda perlu membawa pekerjaan masuk dari chat.** Agent dapat dipicu dari Slack, Feishu, dan [channel](/channels) lainnya.
+
+## Bagaimana menjalankan beberapa instance Claude Code tanpa konflik di Multica?
+
+Tugaskan tugas terpisah ke satu atau beberapa agent pada runtime yang sama. Setiap eksekusi mendapat direktori kerjanya sendiri di bawah `~/multica_workspaces`, dan repositori di-checkout dari cache bersama, biasanya sebagai git worktree terpisah, sehingga eksekusi paralel tidak mengedit checkout yang sama. Secara default sebuah komputer menjalankan hingga 20 eksekusi sekaligus dan setiap agent hingga 6; lihat [Batas konkurensi](/daemon-runtimes#batas-konkurensi). Eksekusi paralel tetap berbagi kapasitas mesin dan batas penggunaan akun Claude Code.
+
+Untuk bekerja langsung di folder yang sudah ada di mesin Anda, tambahkan folder itu sebagai [sumber daya proyek](/project-resources) dan pilih apakah agent mengeditnya langsung di tempat atau di worktree terisolasi.
+
+## Apakah Multica issue tracker untuk AI coding agent?
+
+Ya, tetapi yang bersifat bersama. Tugas di Multica dirancang agar agent dapat mengambilnya: agent dapat menjadi assignee, melaporkan progres di komentar, memindahkan status ke `in_review` saat menyerahkan hasil, dan membuat sub-tugas dengan tahapan untuk pekerjaan yang lebih besar. Agent memakai [Multica CLI](/cli) untuk membaca dan memperbarui tugas.
+
+Beads mengambil pendekatan berbeda: task disimpan di database Dolt di samping kode, dan agent membaca serta mengklaimnya melalui `bd`. Cocok untuk agent yang memerlukan memori terstruktur dan pelacakan dependensi di dalam repositori. Multica cocok untuk tim yang ingin manusia dan agent berada di board yang sama, dengan kontrol akses dan riwayat eksekusi.
+
+## Terkait
+
+- [Multica vs Linear dan Jira](/compare/linear-jira)
+- [Multica vs OpenHands, Devin, dan Factory](/compare/openhands-devin-factory)
+- [Daemon dan runtime](/daemon-runtimes) — tempat eksekusi berjalan dan bagaimana direktori diisolasi.

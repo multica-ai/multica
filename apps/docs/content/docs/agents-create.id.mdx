@@ -1,26 +1,37 @@
 ---
 title: Membuat dan mengonfigurasi agent
-description: Pilih titik awal, lalu tentukan tanggung jawab, kapabilitas, pengaturan eksekusi, dan Akses agent.
+description: Pilih runtime, lalu tentukan tanggung jawab, kapabilitas, pengaturan eksekusi, dan Akses agent.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { CreateAgentDemo } from "@/components/demos/create-agent-demo";
 
 Membuat agent membutuhkan [runtime](/daemon-runtimes) yang berfungsi terlebih dahulu. Runtime menentukan komputer dan AI coding tool mana yang digunakan agent; agent menyimpan identitas, instruksi, dan kapabilitas yang bersifat jangka panjang.
 
-Pada halaman **Agents** ruang kerja, klik **New agent**.
+## Alur pembuatan
 
-## Titik awal
+Pada halaman **Agents** ruang kerja, klik **New agent**, lalu lewati tiga langkah:
 
-Halaman pembuatan menawarkan dua opsi:
+<Steps>
+<Step>
 
-| Opsi | Kapan cocok digunakan |
-|---|---|
-| **Start blank** | Anda sudah tahu tanggung jawab agent dan ingin mengisi setiap kolom sendiri. |
-| **Build with AI** | Jelaskan tujuannya terlebih dahulu dan biarkan Agent Builder mengajukan pertanyaan-pertanyaan kunci dan menghasilkan draf. |
+**Pilih runtime.** Halaman ini menampilkan AI coding tool (harness) di setiap mesin, dan hanya yang online yang memungkinkan Anda melanjutkan. Model yang dapat dipilih nanti, serta ketersediaan skill, bergantung pada pilihan ini.
 
-Build with AI membutuhkan runtime yang online untuk percakapan dengan Builder. Apa pun pilihannya, Anda dapat meninjau dan mengedit konfigurasi akhir sebelum membuatnya.
+</Step>
+<Step>
 
-![Titik awal pembuatan agent: Start blank dan Build with AI](/images/docs/quickstart-new-agent.webp)
+**Konfigurasikan agent.** Isi nama, deskripsi, instruksi, skill, model, dan Akses. Untuk tidak menulis semuanya sendiri, klik **Let AI write it**: draf saat ini dikirim ke Agent Builder, yang menanyakan detail kuncinya dalam percakapan dan melengkapi konfigurasi. Tombol ini hanya muncul saat runtime yang dipilih online dan bukan runtime cloud. Selagi Anda berbicara dengan Builder, Anda dapat mengedit draf di samping percakapan kapan saja.
+
+</Step>
+<Step>
+
+**Klik Create agent.** Halaman selesai menunjukkan di runtime mana agent berjalan dan menautkan ke langkah berikutnya: menugaskan tugas pertamanya, me-mention-nya di sebuah tugas, atau menambahkannya ke squad.
+
+</Step>
+</Steps>
+
+<CreateAgentDemo />
 
 ## Kolom wajib
 
@@ -67,7 +78,7 @@ Skill cocok untuk metode dan materi yang digunakan kembali di berbagai agent; pe
 
 Tambahkan hingga tiga **pembuka percakapan** untuk menunjukkan kepada orang-orang apa keahlian agent ini sebelum mereka mengirim pesan obrolan pertama. Pembuka percakapan muncul saat seseorang membuka obrolan baru dengan agent tersebut, di atas kotak pesan. Setiap pembuka memiliki label singkat dan prompt lengkap. Memilih salah satu akan mengisi kotak pesan sehingga pengguna dapat meninjau atau mengeditnya; pembuka percakapan tidak pernah memulai eksekusi secara otomatis.
 
-Editor menampilkan pratinjau yang sama persis dengan apa yang akan ditunjukkan oleh obrolan baru, dan siapa pun yang dapat mengedit agent akan mendapatkan tautan **Customize starters** pada state kosong tersebut yang mengarah langsung ke sini.
+Saat pembuatan, pembuka percakapan adalah baris opsional di bawah **Identity**. Setelah itu, pembuka berada di **Settings → General**, di samping avatar, nama, dan deskripsi, bersebelahan dengan pratinjau yang sama persis dengan apa yang akan ditunjukkan oleh obrolan baru.
 
 Jika Anda membiarkan daftarnya kosong, Obrolan akan menampilkan default umum yang sudah dilokalkan. Contoh khusus agent biasanya lebih bermanfaat karena dapat mencerminkan peran dan batasan yang ada di dalam instruksi.
 
@@ -90,12 +101,12 @@ Akses menentukan anggota mana yang dapat menjalankan agent ini (menugaskan, @-me
 | Akses | Makna |
 |---|---|
 | **Hanya saya** | Hanya Anda yang dapat menjalankannya. Default. |
-| **Seluruh ruang kerja** | Setiap anggota ruang kerja dapat menjalankannya. |
+| **Seluruh ruang kerja** | Anggota dengan peran `owner`, `admin`, atau `member`. |
 | **Orang tertentu** | Hanya Anda dan anggota yang dipilih yang dapat menjalankannya. |
 
 ![Pengaturan Akses: Hanya saya, Seluruh ruang kerja, Orang tertentu](/images/docs/agent-access-settings.webp)
 
-Hanya owner agent yang dapat mengubah Akses — admin ruang kerja tidak dapat melakukannya. `owner` dan `admin` ruang kerja dapat mengelola konfigurasi lainnya, tetapi tidak dapat menggunakan peran admin mereka untuk menjalankan agent yang tidak diberikan kepada mereka.
+Hanya owner agent yang dapat mengubah Akses; admin ruang kerja tidak dapat melakukannya. `owner` dan `admin` ruang kerja dapat mengelola konfigurasi lainnya, tetapi tidak dapat menggunakan peran admin mereka untuk menjalankan agent yang tidak diberikan kepada mereka.
 
 ## Konfigurasi setelah pembuatan
 
@@ -106,8 +117,8 @@ Pada halaman detail agent, Anda dapat terus menyesuaikan:
 | **Batas konkurensi** | Berapa banyak eksekusi yang dapat dijalankan agent secara bersamaan. Defaultnya adalah 6; eksekusi di atas batas tersebut tetap mengantre. |
 | **Variabel environment** | Menyuntikkan variabel saat AI coding tool dimulai. |
 | **Argumen khusus** | Ditambahkan satu per satu ke argumen CLI milik AI coding tool. |
-| **MCP** | Menyediakan konfigurasi server MCP untuk AI coding tool yang mendukungnya. |
-| **Integrations** | Menghubungkan layanan eksternal yang dapat digunakan oleh agent ini. |
+| **MCP** | Mengonfigurasi server MCP untuk AI coding tool yang mendukungnya: tambahkan satu khusus untuk agent ini, atau pilih dari server MCP bersama milik ruang kerja. |
+| **Messaging** | Menghubungkan agent ini ke platform chat seperti Feishu, Slack, DingTalk, WeCom, atau Telegram. |
 
 Daemon yang menjadi host runtime tersebut juga memiliki batas konkurensi global (default 20); konkurensi efektifnya adalah yang terkecil dari keduanya.
 
@@ -129,17 +140,65 @@ Variabel runtime yang krusial seperti `PATH`, `HOME`, dan `MULTICA_*` tidak dapa
 
 Argumen khusus diteruskan ke AI coding tool sebagai sebuah array, satu per satu, tanpa shell expansion. Apakah sebuah argumen valid atau tidak bergantung pada tool tersebut; konfigurasi model yang sudah memiliki kolom khusus tidak perlu diulang di sini.
 
+Argumen yang dicadangkan oleh adapter runtime ditolak saat membuat agent, mengedit argumen khususnya, atau mengganti runtime-nya. Error menyebutkan argumen yang bentrok. Misalnya, Multica menjalankan Claude Code dengan `--permission-mode bypassPermissions`; mengatur `--permission-mode dontAsk` di argumen khusus akan ditolak. Mengosongkan argumen khusus dengan `[]` memungkinkan penggantian runtime saat argumen tersimpan bentrok dengan runtime tujuan.
+
 <Callout type="warning">
 Jangan menaruh kredensial atau rahasia lainnya di argumen khusus. Nilai tersebut tetap ada di argv proses anak dan dapat terlihat oleh proses lokal lain melalui `ps` atau `/proc`; gunakan variabel environment (`custom_env`) sebagai gantinya. Log daemon menyamarkan (redact) nilai argumen, tetapi itu tidak melindungi daftar proses sistem operasi.
 </Callout>
 
-Konfigurasi MCP mungkin berisi token; aturan penyimpanan dan tampilannya sama dengan variabel environment. Hanya runtime yang mendukung konfigurasi MCP terkelola yang menampilkan bagian ini; tool tanpa dukungan MCP tidak akan mendapatkannya hanya karena sebuah konfigurasi disimpan.
+Konfigurasi MCP mungkin berisi token; aturan penyimpanan dan tampilannya sama dengan variabel environment. Hanya runtime yang mendukung konfigurasi MCP terkelola yang menampilkan bagian ini; tool tanpa dukungan MCP tidak akan mendapatkannya hanya karena sebuah konfigurasi disimpan. Saat sebuah agent memiliki konfigurasi MCP, daemon juga menggabungkan server MCP yang sudah dikonfigurasi di mesin runtime tersebut; lihat [Konfigurasi MCP lokal](/daemon-runtimes#local-mcp).
+
+Tab **MCP** milik agent menampilkan server MCP yang dapat digunakannya dalam tiga grup:
+
+| Grup | Sumber |
+|---|---|
+| **Managed by Multica** | Server yang hanya milik agent ini. Klik **Add MCP** dan isi perintah STDIO atau URL Streamable HTTP, di editor visual atau sebagai JSON. |
+| **From the workspace library** | Server bersama ruang kerja yang ditetapkan ke agent ini; lihat bagian berikutnya. |
+| **Inherited from runtime** | Konfigurasi pengguna milik AI coding tool itu sendiri di mesin runtime, hanya-baca. Hanya dapat dibaca selama runtime lokal online. |
+
+Jika ada nama yang bentrok, entri milik agent sendiri menang atas server ruang kerja yang ditetapkan, dan keduanya menang atas server runtime dengan nama yang sama. Entri yang kalah ditandai **Overridden** atau **Overridden by Multica**.
+
+### Server MCP bersama ruang kerja
+
+Saat beberapa agent membutuhkan server MCP yang sama, Anda tidak perlu memasukkan URL dan token-nya di setiap agent. `owner` atau `admin` ruang kerja menambahkannya sekali di **Settings → MCP servers**, lalu menetapkannya ke agent yang membutuhkannya.
+
+<Steps>
+<Step>
+
+Admin membuka **Settings → MCP servers**, mengklik **Add server**, dan memasukkan nama serta konfigurasi.
+
+</Step>
+<Step>
+
+Server yang baru ditambahkan tidak dimiliki agent mana pun. Buka tab **MCP** pada setiap agent yang harus menggunakannya, klik **Add from workspace** di grup **From the workspace library**, lalu pilih server tersebut.
+
+</Step>
+<Step>
+
+Setiap penetapan memiliki switch sendiri, sehingga Anda dapat mematikan sebuah server untuk satu agent tanpa menghapusnya. Perubahan berlaku mulai eksekusi berikutnya dari agent tersebut.
+
+</Step>
+</Steps>
+
+Di daftar **Settings → MCP servers**, setiap server menampilkan "Used by N agents" atau "Not assigned to any agent". Perlu diingat:
+
+- **Konfigurasi bersifat write-only.** Setelah disimpan, URL, perintah, header, dan nilai environment tidak pernah ditampilkan lagi kepada siapa pun, termasuk owner. Untuk mengubahnya, klik **Replace configuration** dan masukkan konfigurasi baru yang lengkap. Mengganti nama mempertahankan konfigurasi dan semua penetapan.
+- **Menghapus memengaruhi setiap agent.** Menghapus server di Settings juga menghapusnya dari setiap agent yang menggunakannya, mulai eksekusi berikutnya dari tiap agent. Untuk menghentikan satu agent saja dari menggunakannya, matikan atau hapus di tab **MCP** agent tersebut.
+- **Izin.** Anggota dapat melihat daftar tetapi tidak dapat menambah atau mengubah server. Menetapkan atau menghapus server pada sebuah agent membutuhkan owner agent tersebut atau `owner` atau `admin` ruang kerja. Agent tidak dapat menambah server atau mengubah penetapan melalui CLI saat sedang berjalan.
+
+CLI melakukan hal yang sama. Konfigurasi biasanya berisi token, jadi berikan dari file atau stdin, bukan sebagai argumen command-line:
+
+```bash
+multica workspace mcp add linear --server-config-file ./linear.json
+multica workspace mcp list
+multica agent mcp add <agent-id> <server-id>
+```
 
 ## Menduplikasi agent
 
 Menduplikasi membawa sebagian besar konfigurasi yang berfungsi kecuali nama, termasuk instruksi, pembuka percakapan, skill, argumen khusus, avatar, batas konkurensi, dan pengaturan Akses. Model, tingkat pemikiran, dan service tier juga ikut terbawa; jika runtime aslinya tidak tersedia dan duplikatnya dipaksa ke runtime lain, ketiga hal tersebut akan dikosongkan dan harus dipilih ulang.
 
-Nilai variabel environment dan konfigurasi MCP tidak pernah disalin dan harus diatur ulang pada agent baru. Duplikasi mempertahankan binding runtime dan pengaturan Akses milik agent aslinya.
+Nilai variabel environment, konfigurasi MCP, dan penetapan server MCP ruang kerja tidak pernah disalin dan harus diatur ulang pada agent baru.
 
 ## Membuat dengan CLI
 
