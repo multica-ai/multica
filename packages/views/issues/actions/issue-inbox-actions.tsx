@@ -2,7 +2,7 @@
 
 import { useRef, type ReactNode, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlarmClock, Archive, CalendarClock } from "@multica/ui/icons";
+import { AlarmClock, Archive } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
@@ -21,7 +21,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { InboxArchiveButton, InboxBar, InboxBarButton, InboxBarStatus, InboxOpenBar } from "../../inbox/components/inbox-bar";
 import { inboxRowHref } from "../../inbox/components/inbox-display";
 import { InboxKeptActions, InboxNextButton, useKeptInboxRowText } from "../../inbox/components/inbox-kept-actions";
-import { InboxMoreMenu } from "../../inbox/components/inbox-more-menu";
+import { InboxMoreMenu, InboxSettledMoreMenu } from "../../inbox/components/inbox-more-menu";
 import { InboxSnoozeMenu } from "../../inbox/components/inbox-snooze-menu";
 import { formatSnoozeTime } from "../../inbox/components/inbox-snooze-time";
 import { useInboxShortcut } from "../../inbox/components/use-inbox-shortcut";
@@ -46,11 +46,11 @@ import { useLocale, useT } from "../../i18n";
  *
  * Once the notification leaves the Inbox on its own (the issue reached Done,
  * another window archived it, an action from this group archived it), the
- * section keeps the row in place and the group says so instead, with the
+ * section keeps the row in place and the group changes to match, with the
  * issue's actions still there, an undo and the way on to the next one.
  *
- * A snoozed issue's group says when it comes back instead, with the way to
- * bring it back now or change the time.
+ * A snoozed issue's group shows when it comes back instead, with the way to
+ * bring it back now or change the time. In every state `…` comes last.
  *
  * `movingOn`: the page is still handing off to another notification, so a
  * group this issue showed stays up rather than blinking out and back in.
@@ -175,6 +175,7 @@ export function IssueInboxBar({
     if (snoozed) {
       return (
         <SnoozedBar
+          issueId={issueId}
           until={new Date(snoozed.snoozed_until)}
           open={snoozeOpen}
           onOpenChange={setSnoozeOpen}
@@ -201,10 +202,12 @@ export function IssueInboxBar({
       <InboxKeptActions
         label={status.label}
         hint={status.hint}
+        undoLabel={status.undo}
         issueActions={settled.reason === "archived" ? issueActions : undefined}
         onUndo={() => restore(settled.item.id, { quiet: true })}
         next={next}
         onNext={moveOn}
+        more={<InboxSettledMoreMenu issueId={issueId} />}
       />
     );
   }
@@ -239,13 +242,6 @@ export function IssueInboxBar({
 
   return (
     <InboxOpenBar issueActions={issueActions}>
-      <InboxMoreMenu
-        issueId={issueId}
-        userId={item.recipient_id}
-        read={item.read === true}
-        onToggleRead={toggleReadItem}
-        onUnsubscribe={unsubscribeItem}
-      />
       <InboxSnoozeMenu
         open={snoozeOpen}
         onOpenChange={setSnoozeOpen}
@@ -254,12 +250,23 @@ export function IssueInboxBar({
         trigger={<InboxBarButton icon={<AlarmClock />} label={t(($) => $.snooze.action)} shortcut="snoozeInboxItem" />}
       />
       <InboxArchiveButton onClick={archiveItem} />
+      <InboxMoreMenu
+        issueId={issueId}
+        userId={item.recipient_id}
+        read={item.read === true}
+        onToggleRead={toggleReadItem}
+        onUnsubscribe={unsubscribeItem}
+      />
     </InboxOpenBar>
   );
 }
 
-/** When a snoozed issue comes back, with the way to bring it back now or later. */
+/**
+ * A snoozed issue's group: when it comes back, which opens the way to bring it
+ * back now or change the time, then the way on and `…`.
+ */
 function SnoozedBar({
+  issueId,
   until,
   open,
   onOpenChange,
@@ -268,6 +275,7 @@ function SnoozedBar({
   next,
   onNext,
 }: {
+  issueId: string;
   until: Date;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -282,7 +290,6 @@ function SnoozedBar({
   const label = t(($) => $.snooze.back_at, { time: formatSnoozeTime(until, new Date(), locale) });
   return (
     <InboxBar settled>
-      <InboxBarStatus icon={<AlarmClock />} label={label} />
       <InboxSnoozeMenu
         open={open}
         onOpenChange={onOpenChange}
@@ -290,9 +297,10 @@ function SnoozedBar({
         onSnooze={onSnooze}
         onUnsnooze={onUnsnooze}
         side="top"
-        trigger={<InboxBarButton icon={<CalendarClock />} label={t(($) => $.snooze.change_time)} />}
+        trigger={<InboxBarButton icon={<AlarmClock />} label={label} />}
       />
       {next && <InboxNextButton next={next} onNext={onNext} />}
+      <InboxSettledMoreMenu issueId={issueId} />
     </InboxBar>
   );
 }

@@ -150,6 +150,8 @@
   },
   "kept": {
     "archived": "보관됨",
+    "undo_archive": "보관 취소",
+    "unsubscribed": "구독 해제됨",
     "leaves": "다른 곳으로 이동하면 인박스에서 빠집니다",
     "filtered": "더 이상 필터와 일치하지 않음",
     "changed_status": "상태 변경됨: {{status}}",

@@ -31,6 +31,9 @@ const state = vi.hoisted(() => ({
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), dismiss: vi.fn() } }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws" }));
 vi.mock("@multica/core/permissions", () => ({ useIsGuest: () => false }));
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: (selector: (state: { user: { id: string } }) => unknown) => selector({ user: { id: "member-1" } }),
+}));
 vi.mock("@multica/core/paths", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/paths")>();
   return { ...actual, useWorkspacePaths: () => actual.paths.workspace("acme") };
@@ -186,7 +189,7 @@ describe("IssueInboxBar", () => {
     // Still reading the issue (now still in Inbox), a later side-effect archive keeps it.
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, []));
     expect(await screen.findByText("Archived")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Undo archive" })).toBeInTheDocument();
   });
 
   it("keeps the last row on a later side-effect archive after undoing snooze", async () => {
@@ -205,7 +208,7 @@ describe("IssueInboxBar", () => {
 
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, []));
     expect(await screen.findByText("Archived")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Undo archive" })).toBeInTheDocument();
   });
 
   it("stays on the open issue until the next notification's issue arrives", async () => {
@@ -239,10 +242,10 @@ describe("IssueInboxBar", () => {
     expect(archive).toHaveAttribute("data-variant", "default");
     expect(within(archive).getByText("E")).toBeInTheDocument();
     expect(within(screen.getByRole("button", { name: "Snooze" })).getByText("H")).toBeInTheDocument();
-    // Its last button is Archive; the rarer actions wait behind More, first.
+    // Archive ends the named actions; the rarer ones wait behind More, last.
     const buttons = within(bar).getAllByRole("button");
-    expect(buttons.at(-1)).toBe(archive);
-    expect(buttons.at(-3)).toHaveAccessibleName("More notification actions");
+    expect(buttons.at(-2)).toBe(archive);
+    expect(buttons.at(-1)).toHaveAccessibleName("More notification actions");
   });
 
   it("moves on with Next as the settled group's one filled action", async () => {
@@ -250,7 +253,7 @@ describe("IssueInboxBar", () => {
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
     const next = await screen.findByRole("button", { name: "Next" });
     expect(next).toHaveAttribute("data-variant", "default");
-    const undo = screen.getByRole("button", { name: "Undo" });
+    const undo = screen.getByRole("button", { name: "Undo archive" });
     expect(undo).toHaveAttribute("data-variant", "ghost");
     expect(within(next).getByText("E")).toBeInTheDocument();
     expect(within(undo).getByText("Z")).toBeInTheDocument();
@@ -261,7 +264,7 @@ describe("IssueInboxBar", () => {
     act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
     expect(await screen.findByText("Archived")).toBeInTheDocument();
     const issueAction = screen.getByRole("button", { name: "Set status" });
-    const undo = screen.getByRole("button", { name: "Undo" });
+    const undo = screen.getByRole("button", { name: "Undo archive" });
     expect(issueAction.compareDocumentPosition(undo) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
@@ -280,7 +283,7 @@ describe("IssueInboxBar", () => {
       expect(screen.getByRole("button", { name: "Set status" })).toBeInTheDocument();
       expect(nav.push).not.toHaveBeenCalled();
 
-      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Undo" })));
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Undo archive" })));
       expect(state.unarchiveInbox).toHaveBeenCalledWith("n-1");
     });
 
@@ -378,7 +381,7 @@ describe("IssueInboxBar", () => {
     expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
     expect(nav.push).not.toHaveBeenCalled();
 
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Undo" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Undo archive" })));
     expect(state.unarchiveInbox).toHaveBeenCalledWith("n-1");
     expect(toast.success).not.toHaveBeenCalled();
   });
@@ -501,7 +504,7 @@ describe("IssueInboxBar", () => {
     expect(bar).toHaveTextContent("Archived");
     expect(bar).not.toHaveTextContent("Inbox cleared");
     expect(bar).not.toHaveTextContent("snoozed");
-    expect(within(bar).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["Undo"]);
+    expect(within(bar).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["Undo archive"]);
 
     fireEvent.keyDown(document, { key: "e", code: "KeyE" });
     expect(nav.push).toHaveBeenCalledWith("/acme/inbox");
@@ -577,6 +580,63 @@ describe("IssueInboxBar", () => {
     await screen.findByRole("menuitem", { name: /^Mark as unread/ });
     expect(screen.queryByRole("menuitem", { name: /Unsubscribe/ })).toBeNull();
   });
+
+  it("names what its undo takes back, and says why in its tooltip rather than between the buttons", async () => {
+    const nav = setup();
+    noteInboxBarAction("issue-1", { type: "status", status: "in_review" });
+    noteInboxAutoArchive({ issue_id: "issue-1", reason: "actor_acted" });
+    act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
+
+    const undo = await screen.findByRole("button", { name: "Undo archive" });
+    const bar = document.querySelector<HTMLElement>("[data-inbox-bar]")!;
+    const visible = [...bar.querySelectorAll("span")].filter((el) => !el.className.includes("sr-only"));
+    expect(visible.some((el) => el.textContent === "Archived")).toBe(false);
+
+    await act(async () => {
+      fireEvent.pointerEnter(undo, { pointerType: "mouse" });
+      fireEvent.mouseEnter(undo);
+      fireEvent.mouseMove(undo);
+    });
+    await waitFor(() =>
+      expect(document.querySelector("[data-slot=tooltip-content]")).toHaveTextContent(
+        "Undo archiveChanged to In Review · Returns to Inbox on new activity",
+      ),
+    );
+  });
+
+  it("ends a settled group with More, which only unsubscribes, leaving the notification as it is", async () => {
+    const nav = setup({ theirs: true });
+    act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
+    await screen.findByRole("button", { name: "Undo archive" });
+
+    const bar = document.querySelector<HTMLElement>("[data-inbox-bar]")!;
+    const more = within(bar).getAllByRole("button").at(-1)!;
+    expect(more).toHaveAccessibleName("More notification actions");
+    fireEvent.click(more);
+    expect(await screen.findByRole("menuitem", { name: "Unsubscribe from this issue" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /Mark as/ })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: /archive/i })).toBeNull();
+  });
+
+  it("leaves More out of a settled group with nothing behind it", async () => {
+    const nav = setup();
+    act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[1]!]));
+    await screen.findByRole("button", { name: "Undo archive" });
+    expect(screen.queryByRole("button", { name: "More notification actions" })).toBeNull();
+  });
+
+  it("opens the way to bring a snoozed issue back or change its time from when it comes back", async () => {
+    const until = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    setup({
+      rows: [ROWS[1]!],
+      snoozed: [{ issue_id: "issue-1", item_id: "n-1", snoozed_until: until, snoozed_at: SNOOZED_AT, updates: 0 }],
+    });
+    expect(screen.queryByRole("button", { name: "Change time" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^Back / }));
+    expect(await screen.findByText("Change time")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Bring back now/ }));
+    expect(state.unsnooze).toHaveBeenCalledWith({ id: "n-1" });
+  });
 });
 
 describe("IssueInboxBar once an action is undone", () => {
@@ -642,7 +702,7 @@ describe("IssueInboxBar once an action is undone", () => {
     expect(statusBar).toHaveTextContent("Archived");
     expect(statusBar).toHaveTextContent("Agent triggered · Returns to Inbox on new activity");
     expect(statusBar).not.toHaveTextContent("Emacs is working");
-    expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Undo archive" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Next" })).toBeInTheDocument();
     expect(nav.push).not.toHaveBeenCalled();
 
