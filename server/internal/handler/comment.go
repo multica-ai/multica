@@ -2051,7 +2051,7 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 		h.archiveActorInboxOnAgentTrigger(ctx, uuidToString(issue.WorkspaceID), uuidToString(issue.ID), actorType, actorID)
 	}
 	outcomes := commentTriggerOutcomes(targets, enqueued)
-	h.noteCommentInvocationDenied(ctx, issue, comment, outcomes)
+	h.noteCommentTriggerFailures(ctx, issue, comment, outcomes)
 	return outcomes
 }
 

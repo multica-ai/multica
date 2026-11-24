@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -363,4 +364,16 @@ func TestAgentCommentSavesWhenTargetDispatchIsPaused(t *testing.T) {
 	if got := countQueuedCommentTriggerTasks(t, issueID, targetID); got != 0 {
 		t.Fatalf("paused target queued %d comment-triggered runs", got)
 	}
+	var notice string
+	if err := testPool.QueryRow(t.Context(), `
+		SELECT content FROM comment
+		WHERE issue_id = $1 AND parent_id = $2 AND author_type = 'system' AND type = 'system'
+	`, issueID, response.ID).Scan(&notice); err != nil {
+		t.Fatalf("load pause notice: %v", err)
+	}
+	if !strings.Contains(notice, "**Target**: Automatic runs paused after three consecutive failures.") ||
+		!strings.Contains(notice, "Complete a manual run successfully to resume.") {
+		t.Fatalf("pause notice did not explain recovery: %q", notice)
+	}
+
 }
