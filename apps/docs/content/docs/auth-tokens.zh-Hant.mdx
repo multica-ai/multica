@@ -79,7 +79,8 @@ curl https://api.multica.ai/api/issues \
 
 守護程序領取執行後，伺服器會為這次執行建立一個以 `mat_` 開頭的臨時令牌。它繫結當前使用者、工作區、AI 代理和執行，最長有效 24 小時，並在執行結束時清理。
 
-AI 代理擁有者可以在 **AI 代理設定 → Access** 中，或選取代理所屬工作區後執行 `multica agent workspace-grant add <agent-id> <target-workspace-id>`，授權特定的其他工作區。對於由使用者直接發起的執行，`multica --workspace-id <target-workspace-id> issue list`、`issue get` 和 `issue create` 會使用同一個臨時令牌。伺服器會在每次請求時檢查授權，以及發起人與代理擁有者目前的成員身分。撤銷授權會立即生效。其他跨工作區操作（包括將此代理指派給目標議題）仍不可用。
+擁有者可在代理程式的存取設定中啟用**完整使用者權限委託**，並在帳戶設定中檢視或撤銷。對於擁有者直接發起的聊天執行，`mat_` 權杖可在擁有者所屬的任何工作區使用其目前權限。伺服器會在每次請求時檢查授權、執行來源與成員身分；撤銷或權限變更會在下一次請求生效。操作仍記錄為代理程式所為，也不會向代理程式提供擁有者的 PAT。其他人的呼叫、排程執行、重試、委託執行及無法歸屬至擁有者聊天的執行無法使用此授權。身分、憑證、帳單、外部連線、外掛程式、刪除工作區與議題環境控制操作仍只允許人員執行。
+在預設的限定授權模式下，AI 代理擁有者可以在 **AI 代理設定 → Access** 中，或選取代理所屬工作區後執行 `multica agent workspace-grant add <agent-id> <target-workspace-id>`，授權特定的其他工作區。對於由使用者直接發起的執行，`multica --workspace-id <target-workspace-id> issue list`、`issue get` 和 `issue create` 會使用同一個臨時令牌。伺服器會在每次請求時檢查授權，以及發起人與代理擁有者目前的成員身分。撤銷授權會立即生效。其他跨工作區操作（包括將此代理指派給目標議題）仍不可用。
 
 在其他工作區建立代理程式需要個別授權。擁有者可在代理程式的存取設定中啟用，或在來源工作區執行 `multica agent workspace-grant agent-creation <agent-id> <target-workspace-id> allow`。現有的工作區授權不會自動啟用此權限。由使用者直接發起的執行可先用 `multica --workspace-id <target-workspace-id> runtime list` 尋找可用的執行環境，再用 `multica --workspace-id <target-workspace-id> agent create --name <name> --runtime-id <runtime-id>` 建立。新代理程式及後續執行屬於目標工作區，發起使用者是其擁有者。執行環境的擁有權和共用規則仍然適用。使用 `agent-creation ... deny` 撤銷此權限。
 

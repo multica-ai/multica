@@ -4,6 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { agentWorkspaceGrantsOptions, workspaceKeys, workspaceListOptions } from "@multica/core/workspace/queries";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@multica/ui/components/ui/alert-dialog";
+import { useState } from "react";
 import { toast } from "sonner";
 import type { Agent, MemberWithUser } from "@multica/core/types";
 import { usesInvocationMembers } from "@multica/core/agents";
@@ -38,6 +40,14 @@ export function AgentAccessSettings({
   const qc = useQueryClient();
   const workspaces = useQuery({ ...workspaceListOptions(), enabled: owner });
   const grants = useQuery({ ...agentWorkspaceGrantsOptions(wsId, agent.id), enabled: owner });
+  const [confirmFullDelegation, setConfirmFullDelegation] = useState(false);
+  const fullDelegationKey = ["agent-full-delegation", wsId, agent.id];
+  const fullDelegation = useQuery({ queryKey: fullDelegationKey, queryFn: () => api.getAgentFullDelegation(agent.id), enabled: owner });
+  const changeFullDelegation = useMutation({
+    mutationFn: (enabled: boolean) => api.setAgentFullDelegation(agent.id, enabled),
+    onSuccess: () => qc.invalidateQueries({ queryKey: fullDelegationKey }),
+    onError: (error) => toast.error(error instanceof Error ? error.message : t(($) => $.access.full_delegation_error)),
+  });
   const changeGrant = useMutation({
     mutationFn: async ({ workspaceId, grant }: { workspaceId: string; grant: boolean }) => {
       if (grant) await api.addAgentWorkspaceGrant(agent.id, workspaceId);
@@ -76,6 +86,34 @@ export function AgentAccessSettings({
           onChange={(next) => onUpdate(agent.id, next)}
         />
       </SettingsCard>
+      {owner && (
+        <SettingsCard>
+          <div className="p-4 space-y-3">
+            <div className="space-y-1">
+              <h3 className="text-label font-medium">{t(($) => $.access.full_delegation_title)}</h3>
+              <p className="text-caption text-muted-foreground">{t(($) => $.access.full_delegation_description)}</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <Checkbox id={`full-delegation-${agent.id}`} checked={fullDelegation.data?.enabled ?? false}
+                disabled={fullDelegation.isPending || changeFullDelegation.isPending}
+                onCheckedChange={(checked) => checked === true ? setConfirmFullDelegation(true) : changeFullDelegation.mutate(false)} />
+              <label htmlFor={`full-delegation-${agent.id}`} className="text-body cursor-pointer">{t(($) => $.access.full_delegation_label)}</label>
+            </div>
+            <AlertDialog open={confirmFullDelegation} onOpenChange={setConfirmFullDelegation}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>{t(($) => $.access.full_delegation_confirm_title)}</AlertDialogTitle>
+                  <AlertDialogDescription>{t(($) => $.access.full_delegation_confirm_description)}</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>{t(($) => $.access.full_delegation_cancel)}</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => changeFullDelegation.mutate(true)}>{t(($) => $.access.full_delegation_confirm)}</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+        </SettingsCard>
+      )}
       {owner && (
         <SettingsCard>
           <div className="p-4">

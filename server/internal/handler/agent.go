@@ -25,6 +25,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -1305,7 +1306,8 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	// are workspace owner/admin, and a public_to agent only when on its
 	// invocation allow-list. Targets are batch-loaded to avoid an N+1 and
 	// reused to enrich each response's invocation_targets.
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	permissionType, permissionID := h.permissionActor(r, userID, workspaceID)
+	actorType, _ := h.resolveActor(r, userID, workspaceID)
 	targetsByAgent, ok := h.loadInvocationTargetsByAgent(r.Context(), agents)
 	if !ok {
 		writeError(w, http.StatusInternalServerError, "failed to load agent invocation targets")
@@ -1314,8 +1316,8 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	visible := make([]AgentResponse, 0, len(agents))
 	for _, a := range agents {
 		targets := targetsByAgent[uuidToString(a.ID)]
-		if actorType == "member" {
-			if !memberAllowedToViewAgent(a, targets, actorID, member.Role) {
+		if permissionType == "member" {
+			if !memberAllowedToViewAgent(a, targets, permissionID, member.Role) {
 				continue
 			}
 		}
@@ -1528,7 +1530,8 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if r.Header.Get("X-Actor-Source") == "task_token" && r.Header.Get("X-Task-Home-Workspace-ID") != workspaceID {
+	_, delegated := middleware.FullDelegationFromContext(r.Context())
+	if r.Header.Get("X-Actor-Source") == "task_token" && r.Header.Get("X-Task-Home-Workspace-ID") != workspaceID && !delegated {
 		// A task may create a target-owned agent, but cannot supply its own
 		// execution secrets or runtime configuration across workspaces.
 		for _, field := range []string{"custom_env", "mcp_config", "runtime_config", "composio_toolkit_allowlist"} {

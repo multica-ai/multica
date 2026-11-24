@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -152,6 +153,9 @@ func (h *Handler) invokeAgentDecision(ctx context.Context, agent db.Agent, actor
 //   - a regular member passes for a public_to agent only when they hit a
 //     workspace or member target; private agents stay owner+admin only.
 func (h *Handler) canAccessPrivateAgent(ctx context.Context, agent db.Agent, actorType, actorID, workspaceID string) bool {
+	if p, ok := middleware.FullDelegationFromContext(ctx); ok {
+		actorType, actorID = "member", p.GrantorUserID
+	}
 	if actorType == "agent" {
 		return true
 	}
@@ -257,6 +261,9 @@ func (h *Handler) invokeOriginatorFromRequest(r *http.Request, actorType, actorI
 // A missing task or runtime is a plain (false, nil); any other lookup error is
 // returned so the caller can tell an outage from a denial.
 func (h *Handler) requestRepresentsUser(r *http.Request, userID string, workspaceID pgtype.UUID) (bool, error) {
+	if p, ok := middleware.FullDelegationFromContext(r.Context()); ok {
+		return p.GrantorUserID == userID, nil
+	}
 	switch r.Header.Get("X-Actor-Source") {
 	case "":
 		return true, nil
@@ -349,6 +356,9 @@ func (h *Handler) taskFromRequestHeader(r *http.Request) (db.AgentTaskQueue, boo
 // private / non-allow-listed agents the member can't access. Returns nil and
 // false on error.
 func (h *Handler) accessibleAgentIDs(ctx context.Context, workspaceID, actorType, actorID, role string) (map[string]struct{}, bool) {
+	if p, ok := middleware.FullDelegationFromContext(ctx); ok {
+		actorType, actorID = "member", p.GrantorUserID
+	}
 	wsUUID, err := util.ParseUUID(workspaceID)
 	if err != nil {
 		return nil, false
@@ -400,6 +410,9 @@ func (h *Handler) accessibleAgentIDs(ctx context.Context, workspaceID, actorType
 // (agent actors, workspace owner/admin) since nothing there can change their
 // answer.
 func (h *Handler) restrictedAgentIDs(ctx context.Context, workspaceID, actorType, actorID, role string) (map[string]struct{}, bool) {
+	if p, ok := middleware.FullDelegationFromContext(ctx); ok {
+		actorType, actorID = "member", p.GrantorUserID
+	}
 	wsUUID, err := util.ParseUUID(workspaceID)
 	if err != nil {
 		return nil, false

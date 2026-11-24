@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"net/http"
 )
 
@@ -16,6 +17,19 @@ func RequireHumanActor(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isMachineCredentialActor(r) {
 			writeError(w, http.StatusForbidden, "this endpoint is only available to human actors")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// RequireHumanOrDelegatedActor admits ordinary human operations only when Auth
+// has verified the live full grant and bound it to this task and grantor.
+func RequireHumanOrDelegatedActor(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, delegated := middleware.FullDelegationFromContext(r.Context())
+		if isMachineCredentialActor(r) && !delegated {
+			writeError(w, http.StatusForbidden, "this endpoint requires a human or active full delegation")
 			return
 		}
 		next.ServeHTTP(w, r)

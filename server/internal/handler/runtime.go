@@ -18,6 +18,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/agentconfig"
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
@@ -1331,7 +1332,8 @@ func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 
 	// A cross-workspace task may discover only runtimes its initiating person
 	// can actually bind. Do not expose machine metadata or sharing inventory.
-	crossTask := r.Header.Get("X-Actor-Source") == "task_token" && r.Header.Get("X-Task-Home-Workspace-ID") != workspaceID
+	_, delegated := middleware.FullDelegationFromContext(r.Context())
+	crossTask := r.Header.Get("X-Actor-Source") == "task_token" && r.Header.Get("X-Task-Home-Workspace-ID") != workspaceID && !delegated
 	resp := make([]AgentRuntimeResponse, 0, len(runtimes))
 	for _, rt := range runtimes {
 		if crossTask && !canUseRuntimeForAgent(member, rt) {

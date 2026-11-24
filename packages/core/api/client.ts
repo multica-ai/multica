@@ -2338,6 +2338,28 @@ export class ApiClient {
     });
   }
 
+  async getAgentFullDelegation(id: string): Promise<{ enabled: boolean; grantor_user_id: string }> {
+    const raw = await this.fetch<unknown>(`/api/agents/${id}/full-delegation`);
+    return parseWithFallback(raw, z.object({ enabled: z.boolean().default(false), grantor_user_id: z.string().default("") }), { enabled: false, grantor_user_id: "" }, {
+      endpoint: "GET /api/agents/{id}/full-delegation",
+    });
+  }
+
+  async setAgentFullDelegation(id: string, enabled: boolean): Promise<void> {
+    await this.fetch(`/api/agents/${id}/full-delegation`, { method: "PUT", body: JSON.stringify({ enabled }) });
+  }
+
+  async listMyAgentFullDelegations(): Promise<Array<{ agent_id: string; agent_name: string; workspace_id: string; workspace_name: string; created_at: string }>> {
+    const raw = await this.fetch<unknown>("/api/me/agent-delegations");
+    return parseWithFallback(raw, z.array(z.object({ agent_id: z.string(), agent_name: z.string(), workspace_id: z.string(), workspace_name: z.string().default(""), created_at: z.string() })), [], {
+      endpoint: "GET /api/me/agent-delegations",
+    });
+  }
+
+  async revokeMyAgentFullDelegation(id: string): Promise<void> {
+    await this.fetch(`/api/me/agent-delegations/${id}`, { method: "DELETE" });
+  }
+
   async createAgent(data: CreateAgentRequest): Promise<Agent> {
     assertAgentConversationStartersWriteSupported(data);
     return this.fetch("/api/agents", {

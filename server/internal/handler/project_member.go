@@ -57,7 +57,7 @@ type projectAccessUpdate struct {
 func (u projectAccessUpdate) empty() bool { return u.visibility == "" && len(u.addIDs) == 0 }
 
 func (h *Handler) requireHumanProjectAccessActor(w http.ResponseWriter, r *http.Request, workspaceID string) bool {
-	if actorType, _ := h.resolveActor(r, requestUserID(r), workspaceID); actorType == "agent" {
+	if actorType, _ := h.permissionActor(r, requestUserID(r), workspaceID); actorType == "agent" {
 		writeError(w, http.StatusForbidden, "agents cannot change project access")
 		return false
 	}

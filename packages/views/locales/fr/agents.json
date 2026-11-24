@@ -881,7 +881,15 @@
     "workspace_grants_description": "Une exécution peut y lister, lire et créer des tickets si la personne à l'origine et le propriétaire de l'agent y ont toujours accès. L'agent ne peut pas être assigné à ces tickets.",
     "workspace_grants_empty": "Vous n'appartenez à aucun autre espace de travail.",
     "workspace_grants_error": "Impossible de modifier l'accès à l'espace de travail.",
-    "workspace_grants_agent_creation": "Autoriser cet agent à créer des agents dans cet espace de travail"
+    "workspace_grants_agent_creation": "Autoriser cet agent à créer des agents dans cet espace de travail",
+    "full_delegation_title": "Délégation complète du compte",
+    "full_delegation_description": "Dans une discussion que vous lancez, cet agent peut utiliser vos autorisations actuelles dans tous les espaces de travail, y compris vos autres discussions. Les autres utilisateurs ne peuvent pas utiliser cette autorisation. Les identifiants, la facturation et l’identité restent réservés aux personnes.",
+    "full_delegation_label": "Déléguer mes autorisations de compte",
+    "full_delegation_confirm_title": "Autoriser la délégation complète ?",
+    "full_delegation_confirm_description": "Cet agent peut lire et modifier les ressources auxquelles vous avez accès. Les nouvelles autorisations s’appliquent automatiquement. Vous pouvez révoquer cet accès à tout moment.",
+    "full_delegation_cancel": "Annuler",
+    "full_delegation_confirm": "Autoriser la délégation complète",
+    "full_delegation_error": "Impossible de modifier la délégation."
   },
   "profile_card": {
     "unavailable": "Agent indisponible",

@@ -856,7 +856,15 @@
     "workspace_grants_description": "只要發起執行的使用者與 AI 代理擁有者仍有存取權，執行就能在這些工作區列出、檢視和建立議題。此授權不允許將該 AI 代理指派給這些議題。",
     "workspace_grants_empty": "你未加入其他工作區。",
     "workspace_grants_error": "無法更新工作區存取權。",
-    "workspace_grants_agent_creation": "允許此代理程式在此工作區建立代理程式"
+    "workspace_grants_agent_creation": "允許此代理程式在此工作區建立代理程式",
+    "full_delegation_title": "帳戶完全委託",
+    "full_delegation_description": "在你發起的聊天中，此代理程式可在所有工作區使用你目前的權限，包括讀取你的其他聊天。其他人無法使用此授權。憑證、帳單和身分操作仍須由本人執行。",
+    "full_delegation_label": "委託我的帳戶權限",
+    "full_delegation_confirm_title": "允許完全委託？",
+    "full_delegation_confirm_description": "此代理程式可讀取及修改你目前有權存取的資源。新增權限會自動生效，你可隨時撤銷授權。",
+    "full_delegation_cancel": "取消",
+    "full_delegation_confirm": "允許完全委託",
+    "full_delegation_error": "無法更新完全委託。"
   },
   "profile_card": {
     "unavailable": "AI 代理不可用",

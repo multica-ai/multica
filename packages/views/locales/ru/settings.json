@@ -872,7 +872,12 @@
     "save": "Обновить профиль",
     "saving": "Обновление...",
     "toast_avatar_failed": "Не удалось загрузить аватар",
-    "toast_profile_failed": "Не удалось обновить профиль"
+    "toast_profile_failed": "Не удалось обновить профиль",
+    "full_delegation_title": "Агенты с полным делегированием",
+    "full_delegation_description": "Эти агенты могут использовать ваши текущие права в чатах, которые вы запускаете сами. Отзовите доступ здесь в любой момент.",
+    "full_delegation_revoke": "Отозвать",
+    "full_delegation_empty": "Нет агентов с полным делегированием.",
+    "full_delegation_error": "Не удалось отозвать делегирование."
   },
   "notifications": {
     "title": "Входящие",

@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/middleware"
 
 	"github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/logger"
@@ -58,11 +59,12 @@ type PrivateProjectOverview struct {
 // owner's user id. The router also wraps both routes in RequireHumanActor;
 // this check is the handler's own backstop.
 func (h *Handler) requireWorkspaceOwnerRecovery(w http.ResponseWriter, r *http.Request, workspaceID string) (db.Member, bool) {
-	if isMachineCredentialActor(r) {
+	_, delegated := middleware.FullDelegationFromContext(r.Context())
+	if isMachineCredentialActor(r) && !delegated {
 		writeError(w, http.StatusForbidden, "machine credentials cannot use workspace owner access to private projects")
 		return db.Member{}, false
 	}
-	if actorType, _ := h.resolveActor(r, requestUserID(r), workspaceID); actorType == "agent" {
+	if actorType, _ := h.permissionActor(r, requestUserID(r), workspaceID); actorType == "agent" {
 		writeError(w, http.StatusForbidden, "agents cannot use workspace owner access to private projects")
 		return db.Member{}, false
 	}

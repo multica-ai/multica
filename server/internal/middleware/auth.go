@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -83,6 +84,8 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			r.Header.Del("X-Agent-ID")
 			r.Header.Del("X-Task-ID")
 			r.Header.Del("X-Task-Home-Workspace-ID")
+			r.Header.Del("X-Full-Delegation-User-ID")
+			r.Header.Del("X-Task-Runtime-Owner-ID")
 
 			tokenString, fromCookie := extractToken(r)
 			if tokenString == "" {
@@ -133,7 +136,26 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 						selectedWorkspaceID = uuidToString(parsed)
 					}
 				}
-				if selectedWorkspaceID != boundWorkspaceID {
+				selectedUUID, err := util.ParseUUID(selectedWorkspaceID)
+				if err != nil {
+					writeError(w, http.StatusBadRequest, "invalid workspace_id")
+					return
+				}
+				grantor, fullErr := queries.AuthorizeFullAgentDelegation(r.Context(), db.AuthorizeFullAgentDelegationParams{
+					TaskID: tt.TaskID, AgentID: tt.AgentID, HomeWorkspaceID: tt.WorkspaceID, TargetWorkspaceID: selectedUUID,
+				})
+				if fullErr != nil && !errors.Is(fullErr, pgx.ErrNoRows) {
+					slog.Error("auth: full delegation lookup failed", "error", fullErr)
+					writeError(w, http.StatusInternalServerError, "failed to check agent delegation")
+					return
+				}
+				fullDelegation := fullErr == nil && grantor.Valid
+				if fullDelegation {
+					userID = uuidToString(grantor)
+					if rejectTemporarilyDisabledUser(w, r, userID, "", "full_agent_delegation") {
+						return
+					}
+				} else if selectedWorkspaceID != boundWorkspaceID {
 					var ok bool
 					userID, ok = authorizeTaskWorkspaceTarget(w, r, queries, tt, selectedWorkspaceID)
 					if !ok {
@@ -149,6 +171,15 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 					return
 				}
 				r.Header.Set("X-User-ID", userID)
+				r.Header.Set("X-Task-Runtime-Owner-ID", uuidToString(tt.UserID))
+				if fullDelegation {
+					r.Header.Set("X-Full-Delegation-User-ID", userID)
+					r = r.WithContext(withFullDelegation(r.Context(), FullDelegationPrincipal{
+						GrantorUserID: userID, AgentID: uuidToString(tt.AgentID), TaskID: uuidToString(tt.TaskID),
+						HomeWorkspaceID: boundWorkspaceID, RuntimeOwnerUserID: uuidToString(tt.UserID),
+					}))
+					slog.Info("full agent delegation authorized", "agent_id", uuidToString(tt.AgentID), "task_id", uuidToString(tt.TaskID), "home_workspace_id", boundWorkspaceID, "target_workspace_id", selectedWorkspaceID, "grantor_user_id", userID, "runtime_owner_user_id", uuidToString(tt.UserID), "method", r.Method, "path", r.URL.Path)
+				}
 				r.Header.Set("X-Agent-ID", uuidToString(tt.AgentID))
 				r.Header.Set("X-Task-ID", uuidToString(tt.TaskID))
 				r.Header.Set("X-Task-Home-Workspace-ID", boundWorkspaceID)

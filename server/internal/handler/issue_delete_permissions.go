@@ -20,7 +20,7 @@ func (h *Handler) requireIssueDeletion(w http.ResponseWriter, r *http.Request, w
 		return false
 	}
 	wsID := uuidToString(workspaceID)
-	actorType, actorID := h.resolveActor(r, requestUserID(r), wsID)
+	actorType, actorID := h.permissionActor(r, requestUserID(r), wsID)
 	if actorType == "member" {
 		member, ok := h.workspaceMember(w, r, wsID)
 		if !ok {

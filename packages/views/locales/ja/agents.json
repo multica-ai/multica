@@ -715,7 +715,15 @@
     "workspace_grants_description": "実行を開始した人とエージェントの所有者にアクセス権がある場合、そこでイシューの一覧表示、閲覧、作成ができます。このエージェントをそのイシューに割り当てることはできません。",
     "workspace_grants_empty": "所属する他のワークスペースはありません。",
     "workspace_grants_error": "ワークスペースへのアクセスを変更できませんでした。",
-    "workspace_grants_agent_creation": "このエージェントがこのワークスペースでエージェントを作成できるようにする"
+    "workspace_grants_agent_creation": "このエージェントがこのワークスペースでエージェントを作成できるようにする",
+    "full_delegation_title": "アカウントの完全委任",
+    "full_delegation_description": "自分が開始したチャットでは、このエージェントは他のチャットを含むすべてのワークスペースで現在の権限を使用できます。他の人はこの許可を使えません。認証情報、請求、本人確認の操作は人だけが実行できます。",
+    "full_delegation_label": "アカウント権限を委任する",
+    "full_delegation_confirm_title": "完全委任を許可しますか？",
+    "full_delegation_confirm_description": "このエージェントは、現在アクセスできるリソースを読み取り、変更できます。新しい権限は自動的に反映されます。いつでも取り消せます。",
+    "full_delegation_cancel": "キャンセル",
+    "full_delegation_confirm": "完全委任を許可",
+    "full_delegation_error": "完全委任を更新できませんでした。"
   },
   "profile_card": {
     "unavailable": "エージェントを利用できません",

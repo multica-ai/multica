@@ -842,7 +842,12 @@
     "save": "プロフィールを更新",
     "saving": "更新中...",
     "toast_avatar_failed": "アバターをアップロードできませんでした",
-    "toast_profile_failed": "プロフィールを更新できませんでした"
+    "toast_profile_failed": "プロフィールを更新できませんでした",
+    "full_delegation_title": "完全委任されたエージェント",
+    "full_delegation_description": "自分が直接開始したチャットで、これらのエージェントは現在の権限を使用できます。ここからいつでも取り消せます。",
+    "full_delegation_revoke": "取り消す",
+    "full_delegation_empty": "完全委任されたエージェントはありません。",
+    "full_delegation_error": "完全委任を取り消せませんでした。"
   },
   "notifications": {
     "title": "インボックス",

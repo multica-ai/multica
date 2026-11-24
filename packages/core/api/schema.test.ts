@@ -26,6 +26,15 @@ afterEach(() => {
 // app in past incidents. The contract is: a malformed response degrades to
 // an empty/safe shape, never throws into React.
 describe("ApiClient schema fallback", () => {
+  it("fails closed on malformed delegation responses", async () => {
+    const client = new ApiClient("https://api.example.test");
+    stubFetchJson({ enabled: true, grantor_user_id: "user-1" });
+    await expect(client.getAgentFullDelegation("agent-1")).resolves.toEqual({ enabled: true, grantor_user_id: "user-1" });
+    stubFetchJson({ enabled: "yes" });
+    await expect(client.getAgentFullDelegation("agent-1")).resolves.toEqual({ enabled: false, grantor_user_id: "" });
+    stubFetchJson({ invalid: true });
+    await expect(client.listMyAgentFullDelegations()).resolves.toEqual([]);
+  });
   it("parses workspace grants and fails closed on malformed grant lists", async () => {
     const client = new ApiClient("https://api.example.test");
     stubFetchJson({ grants: [{ workspace_id: "ws-2", can_create_agents: true }] });
