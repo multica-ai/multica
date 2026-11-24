@@ -43,6 +43,13 @@ describe("IssueBlockersSection hint", () => {
     expect(screen.getByText(/is in Backlog, so it won't start automatically/)).toBeInTheDocument();
     expect(screen.queryByText(/starts automatically or receives a notification/)).not.toBeInTheDocument();
   });
+
+  it("drops the start hint once the issue itself is finished", () => {
+    renderWithI18n(<IssueBlockersSection issue={waitingIssue("done")} />);
+    expect(screen.getByText("Prerequisite")).toBeInTheDocument();
+    expect(screen.queryByText(/starts automatically or receives a notification/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/is in Backlog/)).not.toBeInTheDocument();
+  });
 });
 
 describe("IssueBlockedMarker", () => {
