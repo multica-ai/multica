@@ -599,7 +599,7 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 			}
 			if errors.Is(err, repocache.ErrCheckoutPathTaken) {
 				d.logger.Warn("repo checkout rejected", "reason", "path_taken", "url", req.URL, "error", err)
-				http.Error(w, err.Error(), http.StatusConflict)
+				http.Error(w, err.Error()+"; run the checkout from a different directory", http.StatusConflict)
 				return
 			}
 			d.logger.Error("repo checkout failed", "url", req.URL, "error", err)
