@@ -35,6 +35,19 @@ export interface ListTelegramInstallationsResponse {
  * @BotFather. The backend validates it live (getMe) before persisting. */
 export interface RegisterTelegramRequest {
   bot_token: string;
+  /** Optional installation-scoped private-chat menu, configured by an admin. */
+  menu?: TelegramMenuConfig;
+}
+
+export interface TelegramMenuConfig {
+  private_chat_ids: number[];
+  root_text: string;
+  back_text: string;
+  pages: {
+    command: string;
+    title: string;
+    actions: { id: string; label: string; request: string }[];
+  }[];
 }
 
 /** Post-redemption echo: the Telegram user id the token carried is now bound
