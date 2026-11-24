@@ -2351,6 +2351,21 @@
     "empty": "Нет ожидаемых задач",
     "picker_hint": "Выберите задачу, которая должна завершиться раньше этой.",
     "restricted": "Ограниченные зависимости: {{count}}",
-    "ended": "Ожидаемые задачи завершены"
+    "ended": "Ожидаемые задачи завершены",
+    "marker_title": "Заблокировано задачами: {{count}}",
+    "marker_title_one": "Заблокировано задачами: {{count}}",
+    "marker_title_few": "Заблокировано задачами: {{count}}",
+    "marker_title_many": "Заблокировано задачами: {{count}}",
+    "marker_title_other": "Заблокировано задачами: {{count}}",
+    "marker_ended": "Завершено {{finished}}/{{total}}",
+    "marker_more": "Ещё {{count}}",
+    "marker_more_one": "Ещё {{count}}",
+    "marker_more_few": "Ещё {{count}}",
+    "marker_more_many": "Ещё {{count}}",
+    "marker_more_other": "Ещё {{count}}",
+    "marker_auto_start": "{{name}} начнёт работу автоматически после их завершения.",
+    "marker_notify": "{{name}} получит уведомление после их завершения.",
+    "marker_unavailable": "{{name}} сейчас не может работать, поэтому после их завершения ничего не начнётся.",
+    "marker_unassigned": "Исполнитель не назначен, поэтому после их завершения ничего не начнётся."
   }
 }

@@ -8,7 +8,6 @@ import { useQuery } from "@tanstack/react-query";
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
   useSensor,
   useSensors,
   type DragStartEvent,
@@ -76,6 +75,7 @@ import {
   getMoveUpdates,
   propertyGroupId,
   projectGroupId,
+  IssueCardPointerSensor,
 } from "../utils/drag-utils";
 import { useStatusLabel } from "../utils/status-label";
 
@@ -577,7 +577,7 @@ function BoardViewImpl({
   }
 
   const sensors = useSensors(
-    useSensor(PointerSensor, {
+    useSensor(IssueCardPointerSensor, {
       activationConstraint: { distance: 5 },
     })
   );

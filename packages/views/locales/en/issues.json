@@ -2161,6 +2161,17 @@
     "restricted": "{{count}} restricted prerequisites",
     "ended": "Waiting tasks ended",
     "count_one": "Waiting for {{count}} task",
-    "count_other": "Waiting for {{count}} tasks"
+    "count_other": "Waiting for {{count}} tasks",
+    "marker_title": "Blocked by {{count}} tasks",
+    "marker_title_one": "Blocked by {{count}} task",
+    "marker_title_other": "Blocked by {{count}} tasks",
+    "marker_ended": "{{finished}}/{{total}} ended",
+    "marker_more": "{{count}} more",
+    "marker_more_one": "{{count}} more",
+    "marker_more_other": "{{count}} more",
+    "marker_auto_start": "{{name}} starts automatically once these end.",
+    "marker_notify": "{{name}} is notified once these end.",
+    "marker_unavailable": "{{name}} can't run right now, so nothing starts when these end.",
+    "marker_unassigned": "No assignee, so nothing starts when these end."
   }
 }
