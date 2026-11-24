@@ -6,10 +6,10 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
@@ -2131,19 +2131,48 @@ type ChatLastMessage struct {
 // the list payload grow with every long agent answer (#9954).
 const chatLastMessagePreviewMaxRunes = 256
 
-var chatPreviewCodeFenceRE = regexp.MustCompile("(?s)```.*?```")
-
-// chatLastMessagePreview reduces a message to the snippet the list renders.
-// Complete code fences are dropped before truncating, mirroring the client's
-// toPreview: cutting first could leave an unclosed fence that the client no
-// longer strips, so a reply that opens with code would preview as raw code.
+// chatLastMessagePreview mirrors the list client's cleanup before applying the
+// cap. Complete fences become whitespace, and Markdown markers are dropped before
+// counting runes so they cannot crowd out visible text.
 func chatLastMessagePreview(content string) string {
-	content = chatPreviewCodeFenceRE.ReplaceAllString(content, " ")
-	content = strings.Join(strings.Fields(content), " ")
-	if utf8.RuneCountInString(content) <= chatLastMessagePreviewMaxRunes {
-		return content
+	const fence = "```"
+	var preview strings.Builder
+	preview.Grow(min(len(content), chatLastMessagePreviewMaxRunes))
+	remaining := chatLastMessagePreviewMaxRunes
+	pendingSpace := false
+
+	for len(content) > 0 && remaining > 0 {
+		if strings.HasPrefix(content, fence) {
+			if end := strings.Index(content[len(fence):], fence); end >= 0 {
+				content = content[end+2*len(fence):]
+				pendingSpace = preview.Len() > 0
+				continue
+			}
+		}
+
+		r, width := utf8.DecodeRuneInString(content)
+		content = content[width:]
+		switch r {
+		case '#', '*', '`', '>', '~':
+			continue
+		}
+		// JavaScript's whitespace includes BOM and excludes NEXT LINE.
+		if r == '\uFEFF' || (r != '\u0085' && unicode.IsSpace(r)) {
+			pendingSpace = preview.Len() > 0
+			continue
+		}
+		if pendingSpace {
+			if remaining == 1 {
+				break
+			}
+			preview.WriteByte(' ')
+			remaining--
+			pendingSpace = false
+		}
+		preview.WriteRune(r)
+		remaining--
 	}
-	return string([]rune(content)[:chatLastMessagePreviewMaxRunes])
+	return preview.String()
 }
 
 // buildChatLastMessage assembles the preview from list-row columns; returns nil

@@ -21,7 +21,14 @@ func TestChatLastMessagePreview(t *testing.T) {
 		{"leading code fence dropped before truncating",
 			"```go\n" + strings.Repeat("x := 1\n", 100) + "```\nThe fix is above.",
 			"The fix is above."},
-		{"unclosed fence kept as text", "```go\nx := 1", "```go x := 1"},
+		{"unclosed fence keeps its text", "```go\nx := 1", "go x := 1"},
+		{"leading Markdown markers do not use the preview budget",
+			strings.Repeat("*", chatLastMessagePreviewMaxRunes) + "\n部署完成", "部署完成"},
+		{"Markdown markers removed before collapsing whitespace", "# **Done** \n> See `logs` ~soon~.", "Done See logs soon."},
+		{"matches client whitespace", "\ufeffDone\u00a0\t today\u0085.", "Done today\u0085."},
+		{"does not end with a truncated separator",
+			strings.Repeat("a", chatLastMessagePreviewMaxRunes-1) + " b",
+			strings.Repeat("a", chatLastMessagePreviewMaxRunes-1)},
 		{"capped by runes, not bytes", long, string([]rune(long)[:chatLastMessagePreviewMaxRunes])},
 	}
 	for _, tc := range cases {
