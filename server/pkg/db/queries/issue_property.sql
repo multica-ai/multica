@@ -19,13 +19,15 @@ WHERE workspace_id = $1 AND archived_at IS NULL;
 
 -- name: CreateIssueProperty :one
 -- New definitions append to the end of the catalog: position = max + 1.
-INSERT INTO issue_property (workspace_id, name, type, description, icon, config, position)
+INSERT INTO issue_property (workspace_id, name, type, description, icon, config, required, always_visible, position)
 SELECT sqlc.arg('workspace_id')::uuid,
        sqlc.arg('name')::text,
        sqlc.arg('type')::text,
        sqlc.arg('description')::text,
        sqlc.arg('icon')::text,
        sqlc.arg('config')::jsonb,
+       sqlc.arg('required')::bool,
+       sqlc.arg('always_visible')::bool,
        COALESCE((SELECT MAX(position) FROM issue_property WHERE workspace_id = sqlc.arg('workspace_id')::uuid), 0) + 1
 RETURNING *;
 
@@ -38,6 +40,8 @@ UPDATE issue_property SET
     description = COALESCE(sqlc.narg('description'), description),
     icon = COALESCE(sqlc.narg('icon'), icon),
     config = COALESCE(sqlc.narg('config'), config),
+    required = COALESCE(sqlc.narg('required')::bool, required),
+    always_visible = COALESCE(sqlc.narg('always_visible')::bool, always_visible),
     archived_at = CASE WHEN sqlc.arg('archived_set')::bool THEN sqlc.narg('archived_at') ELSE archived_at END,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
@@ -83,3 +87,9 @@ LEFT JOIN issue i
  AND (i.properties -> sqlc.arg('property_key')::text) ? opt
 GROUP BY opt
 HAVING COUNT(i.id) > 0;
+
+-- name: ListRequiredIssueProperties :many
+-- Active required definitions of a workspace, checked when an issue is created.
+SELECT * FROM issue_property
+WHERE workspace_id = $1 AND required AND archived_at IS NULL
+ORDER BY position ASC, LOWER(name) ASC;

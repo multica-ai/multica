@@ -3696,9 +3696,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		AllowDuplicate:         req.AllowDuplicate,
 		PRAutoCompleteDisabled: req.PRAutoCompleteDisabled,
 	}, service.IssueCreateOpts{
-		ActorID:          actualCreatorID,
-		AnalyticsAgentID: analyticsAgentID,
-		Platform:         func() string { p, _, _ := middleware.ClientMetadataFromContext(r.Context()); return p }(),
+		EnforceRequiredProperties: true,
+		ActorID:                   actualCreatorID,
+		AnalyticsAgentID:          analyticsAgentID,
+		Platform:                  func() string { p, _, _ := middleware.ClientMetadataFromContext(r.Context()); return p }(),
 		BroadcastPayload: func(issue db.Issue, atts []db.Attachment, labels []db.IssueLabel) map[string]any {
 			payload := issueToResponse(issue, prefix)
 			// The event other tabs receive must carry the category too — filling

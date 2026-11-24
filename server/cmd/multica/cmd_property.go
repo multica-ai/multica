@@ -48,11 +48,14 @@ type propertyDTO struct {
 	Config      struct {
 		Options []propertyOptionDTO `json:"options"`
 	} `json:"config"`
-	Position   float64 `json:"position"`
-	Archived   bool    `json:"archived"`
-	UsageCount int64   `json:"usage_count"`
-	CreatedAt  string  `json:"created_at"`
-	UpdatedAt  string  `json:"updated_at"`
+	// Required: an issue cannot be created without a value (select only).
+	Required      bool    `json:"required"`
+	AlwaysVisible bool    `json:"always_visible"`
+	Position      float64 `json:"position"`
+	Archived      bool    `json:"archived"`
+	UsageCount    int64   `json:"usage_count"`
+	CreatedAt     string  `json:"created_at"`
+	UpdatedAt     string  `json:"updated_at"`
 }
 
 var propertyCmd = &cobra.Command{
@@ -182,11 +185,15 @@ func init() {
 	propertyCreateCmd.Flags().String("description", "", "Property description")
 	propertyCreateCmd.Flags().String("icon", "", "Property icon key from the Web picker (for example, flag, tag, or shield)")
 	propertyCreateCmd.Flags().StringArray("option", nil, `Select option as "Name" or "Name:#rrggbb" (repeatable; select types only)`)
+	propertyCreateCmd.Flags().Bool("required", false, "Require a value when an issue is created (select only)")
+	propertyCreateCmd.Flags().Bool("always-visible", false, "Show the property on every issue, even while empty")
 	propertyUpdateCmd.Flags().String("output", "table", "Output format: table or json")
 	propertyUpdateCmd.Flags().String("name", "", "New property name")
 	propertyUpdateCmd.Flags().String("description", "", "New property description")
 	propertyUpdateCmd.Flags().String("icon", "", "New property icon key from the Web picker; pass an empty value to clear")
 	propertyUpdateCmd.Flags().StringArray("option", nil, `Replacement option list as "Name" or "Name:#rrggbb" (repeatable)`)
+	propertyUpdateCmd.Flags().Bool("required", false, "Require a value when an issue is created (select only); --required=false turns it off")
+	propertyUpdateCmd.Flags().Bool("always-visible", false, "Show the property on every issue, even while empty; --always-visible=false turns it off")
 	propertyArchiveCmd.Flags().String("output", "table", "Output format: table or json")
 	propertyUnarchiveCmd.Flags().String("output", "table", "Output format: table or json")
 
@@ -359,6 +366,12 @@ func runPropertyCreate(cmd *cobra.Command, _ []string) error {
 	optionFlags, _ := cmd.Flags().GetStringArray("option")
 
 	body := map[string]any{"name": name, "type": propType, "description": description, "icon": icon}
+	if required, _ := cmd.Flags().GetBool("required"); required {
+		body["required"] = true
+	}
+	if alwaysVisible, _ := cmd.Flags().GetBool("always-visible"); alwaysVisible {
+		body["always_visible"] = true
+	}
 	if len(optionFlags) > 0 {
 		body["config"] = map[string]any{"options": parseOptionFlags(optionFlags, nil)}
 	}
@@ -413,12 +426,20 @@ func runPropertyUpdate(cmd *cobra.Command, args []string) error {
 		icon, _ := cmd.Flags().GetString("icon")
 		body["icon"] = icon
 	}
+	if cmd.Flags().Changed("required") {
+		required, _ := cmd.Flags().GetBool("required")
+		body["required"] = required
+	}
+	if cmd.Flags().Changed("always-visible") {
+		alwaysVisible, _ := cmd.Flags().GetBool("always-visible")
+		body["always_visible"] = alwaysVisible
+	}
 	if cmd.Flags().Changed("option") {
 		optionFlags, _ := cmd.Flags().GetStringArray("option")
 		body["config"] = map[string]any{"options": parseOptionFlags(optionFlags, property.Config.Options)}
 	}
 	if len(body) == 0 {
-		return fmt.Errorf("nothing to update; pass --name, --description, --icon, or --option")
+		return fmt.Errorf("nothing to update; pass --name, --description, --icon, --option, --required, or --always-visible")
 	}
 
 	var updated propertyDTO

@@ -172,6 +172,12 @@ func optionsHint(config propertyConfig) string {
 	return strings.Join(parts, ", ")
 }
 
+// MissingRequiredMessage is the create-time error for a required property
+// left empty; it lists the legal option ids so agents can self-correct.
+func MissingRequiredMessage(def db.IssueProperty) string {
+	return fmt.Sprintf("property %q is required; set it to one of the option ids: %s", def.Name, optionsHint(parseConfig(def.Config)))
+}
+
 // textItem validates one text value - a single `text` value or one
 // `multi_text` element. Text keeps interior spacing as written.
 func textItem(s string) (string, error) {

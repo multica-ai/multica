@@ -292,6 +292,9 @@ var issueCreateCmd = &cobra.Command{
 	Short: "Create a new issue",
 	Long: `Create a new issue. Use --property "Name=Value" to set a custom property
 atomically with creation (repeatable, one distinct property per flag).
+A workspace can make a select property required: the create then fails until it
+carries a value. "multica property list --output json" marks those with
+"required": true; pass one of their option names, e.g. --property "Type=Feature".
 For multi_text / multi_url, use a JSON array of strings when entries contain
 commas or the value starts with "["; simple entries can use comma-separated values:
   multica issue create --title "Review specs" --property 'Aliases=["Smith, John","[draft] spec"]'

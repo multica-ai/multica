@@ -793,7 +793,8 @@ func (h *Handler) createManualCommentSubIssue(w http.ResponseWriter, r *http.Req
 		AllowDuplicate: input.AllowDuplicate, SourceContext: &capture,
 		PRAutoCompleteDisabled: input.PRAutoCompleteDisabled,
 	}, service.IssueCreateOpts{
-		ActorID: util.UUIDToString(userID),
+		EnforceRequiredProperties: true,
+		ActorID:                   util.UUIDToString(userID),
 		BroadcastPayload: func(issue db.Issue, _ []db.Attachment, labels []db.IssueLabel) map[string]any {
 			response := issueToResponse(issue, prefix)
 			labelResponses := labelsToResponse(labels)

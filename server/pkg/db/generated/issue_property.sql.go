@@ -68,24 +68,28 @@ func (q *Queries) CountIssuesUsingPropertyOptions(ctx context.Context, arg Count
 }
 
 const createIssueProperty = `-- name: CreateIssueProperty :one
-INSERT INTO issue_property (workspace_id, name, type, description, icon, config, position)
+INSERT INTO issue_property (workspace_id, name, type, description, icon, config, required, always_visible, position)
 SELECT $1::uuid,
        $2::text,
        $3::text,
        $4::text,
        $5::text,
        $6::jsonb,
+       $7::bool,
+       $8::bool,
        COALESCE((SELECT MAX(position) FROM issue_property WHERE workspace_id = $1::uuid), 0) + 1
-RETURNING id, workspace_id, name, type, description, config, position, archived_at, created_at, updated_at, icon
+RETURNING id, workspace_id, name, type, description, config, position, archived_at, created_at, updated_at, icon, required, always_visible
 `
 
 type CreateIssuePropertyParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Name        string      `json:"name"`
-	Type        string      `json:"type"`
-	Description string      `json:"description"`
-	Icon        string      `json:"icon"`
-	Config      []byte      `json:"config"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	Name          string      `json:"name"`
+	Type          string      `json:"type"`
+	Description   string      `json:"description"`
+	Icon          string      `json:"icon"`
+	Config        []byte      `json:"config"`
+	Required      bool        `json:"required"`
+	AlwaysVisible bool        `json:"always_visible"`
 }
 
 // New definitions append to the end of the catalog: position = max + 1.
@@ -97,6 +101,8 @@ func (q *Queries) CreateIssueProperty(ctx context.Context, arg CreateIssueProper
 		arg.Description,
 		arg.Icon,
 		arg.Config,
+		arg.Required,
+		arg.AlwaysVisible,
 	)
 	var i IssueProperty
 	err := row.Scan(
@@ -111,6 +117,8 @@ func (q *Queries) CreateIssueProperty(ctx context.Context, arg CreateIssueProper
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Icon,
+		&i.Required,
+		&i.AlwaysVisible,
 	)
 	return i, err
 }
@@ -177,7 +185,7 @@ func (q *Queries) DeleteIssuePropertyValue(ctx context.Context, arg DeleteIssueP
 
 const getIssueProperty = `-- name: GetIssueProperty :one
 
-SELECT id, workspace_id, name, type, description, config, position, archived_at, created_at, updated_at, icon FROM issue_property
+SELECT id, workspace_id, name, type, description, config, position, archived_at, created_at, updated_at, icon, required, always_visible FROM issue_property
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -203,12 +211,14 @@ func (q *Queries) GetIssueProperty(ctx context.Context, arg GetIssuePropertyPara
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Icon,
+		&i.Required,
+		&i.AlwaysVisible,
 	)
 	return i, err
 }
 
 const listIssueProperties = `-- name: ListIssueProperties :many
-SELECT id, workspace_id, name, type, description, config, position, archived_at, created_at, updated_at, icon FROM issue_property
+SELECT id, workspace_id, name, type, description, config, position, archived_at, created_at, updated_at, icon, required, always_visible FROM issue_property
 WHERE workspace_id = $1::uuid
   AND ($2::bool OR archived_at IS NULL)
 ORDER BY position ASC, LOWER(name) ASC
@@ -242,6 +252,49 @@ func (q *Queries) ListIssueProperties(ctx context.Context, arg ListIssueProperti
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Icon,
+			&i.Required,
+			&i.AlwaysVisible,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRequiredIssueProperties = `-- name: ListRequiredIssueProperties :many
+SELECT id, workspace_id, name, type, description, config, position, archived_at, created_at, updated_at, icon, required, always_visible FROM issue_property
+WHERE workspace_id = $1 AND required AND archived_at IS NULL
+ORDER BY position ASC, LOWER(name) ASC
+`
+
+// Active required definitions of a workspace, checked when an issue is created.
+func (q *Queries) ListRequiredIssueProperties(ctx context.Context, workspaceID pgtype.UUID) ([]IssueProperty, error) {
+	rows, err := q.db.Query(ctx, listRequiredIssueProperties, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []IssueProperty{}
+	for rows.Next() {
+		var i IssueProperty
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.Type,
+			&i.Description,
+			&i.Config,
+			&i.Position,
+			&i.ArchivedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Icon,
+			&i.Required,
+			&i.AlwaysVisible,
 		); err != nil {
 			return nil, err
 		}
@@ -328,21 +381,25 @@ UPDATE issue_property SET
     description = COALESCE($4, description),
     icon = COALESCE($5, icon),
     config = COALESCE($6, config),
-    archived_at = CASE WHEN $7::bool THEN $8 ELSE archived_at END,
+    required = COALESCE($7::bool, required),
+    always_visible = COALESCE($8::bool, always_visible),
+    archived_at = CASE WHEN $9::bool THEN $10 ELSE archived_at END,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, name, type, description, config, position, archived_at, created_at, updated_at, icon
+RETURNING id, workspace_id, name, type, description, config, position, archived_at, created_at, updated_at, icon, required, always_visible
 `
 
 type UpdateIssuePropertyParams struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Name        pgtype.Text        `json:"name"`
-	Description pgtype.Text        `json:"description"`
-	Icon        pgtype.Text        `json:"icon"`
-	Config      []byte             `json:"config"`
-	ArchivedSet bool               `json:"archived_set"`
-	ArchivedAt  pgtype.Timestamptz `json:"archived_at"`
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	Name          pgtype.Text        `json:"name"`
+	Description   pgtype.Text        `json:"description"`
+	Icon          pgtype.Text        `json:"icon"`
+	Config        []byte             `json:"config"`
+	Required      pgtype.Bool        `json:"required"`
+	AlwaysVisible pgtype.Bool        `json:"always_visible"`
+	ArchivedSet   bool               `json:"archived_set"`
+	ArchivedAt    pgtype.Timestamptz `json:"archived_at"`
 }
 
 // `type` is deliberately immutable — changing it would silently invalidate
@@ -356,6 +413,8 @@ func (q *Queries) UpdateIssueProperty(ctx context.Context, arg UpdateIssueProper
 		arg.Description,
 		arg.Icon,
 		arg.Config,
+		arg.Required,
+		arg.AlwaysVisible,
 		arg.ArchivedSet,
 		arg.ArchivedAt,
 	)
@@ -372,6 +431,8 @@ func (q *Queries) UpdateIssueProperty(ctx context.Context, arg UpdateIssueProper
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Icon,
+		&i.Required,
+		&i.AlwaysVisible,
 	)
 	return i, err
 }
