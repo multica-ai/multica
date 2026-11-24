@@ -141,6 +141,12 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 	return runAuthLoginBrowser(cmd)
 }
 
+type callbackBinding struct {
+	host              string
+	addr              string
+	sshTunnelFallback bool
+}
+
 // resolveCallbackBinding picks the host that goes into the `cli_callback`
 // URL and the interface the CLI should bind its local HTTP listener to.
 //
@@ -162,14 +168,14 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 //
 // detectOutbound is injected so tests can exercise the routing decisions
 // without real network calls.
-func resolveCallbackBinding(flagHost, serverURL, appURL string, remoteSSH bool, detectOutbound func(string) net.IP) (callbackHost, bindAddr string, err error) {
+func resolveCallbackBinding(flagHost, serverURL, appURL string, remoteSSH bool, detectOutbound func(string) net.IP) (callbackBinding, error) {
 	// Explicit flag always wins. Bind on all interfaces so the browser can
 	// reach us regardless of which interface the host name resolves to.
 	if h := strings.TrimSpace(flagHost); h != "" {
 		if !isSupportedCallbackHost(h) {
-			return "", "", callbackHostError(h)
+			return callbackBinding{}, callbackHostError(h)
 		}
-		return h, "0.0.0.0", nil
+		return callbackBinding{host: h, addr: "0.0.0.0"}, nil
 	}
 
 	appIP := urlPrivateIP(appURL)
@@ -177,7 +183,7 @@ func resolveCallbackBinding(flagHost, serverURL, appURL string, remoteSSH bool, 
 		// Public hostname, FQDN without private-IP mapping, or parse error.
 		// Loopback is the only safe default — on hosted/public setups the
 		// browser and CLI live on the same machine.
-		return "localhost", "127.0.0.1", nil
+		return callbackBinding{host: "localhost", addr: "127.0.0.1"}, nil
 	}
 
 	// app_url is a private LAN IP. Figure out whether the CLI is on that
@@ -188,18 +194,18 @@ func resolveCallbackBinding(flagHost, serverURL, appURL string, remoteSSH bool, 
 	if cliIP == nil {
 		// Detection failed (offline, unreachable server, etc.). Fall back to
 		// the app IP — preserves the pre-existing same-machine behaviour.
-		return appIP.String(), "0.0.0.0", nil
+		return callbackBinding{host: appIP.String(), addr: "0.0.0.0"}, nil
 	}
 	if cliIP.Equal(appIP) {
 		if remoteSSH {
-			return appIP.String(), "0.0.0.0", nil
+			return callbackBinding{host: appIP.String(), addr: "0.0.0.0", sshTunnelFallback: true}, nil
 		}
-		return "localhost", "127.0.0.1", nil
+		return callbackBinding{host: "localhost", addr: "127.0.0.1"}, nil
 	}
 	if !isSupportedCallbackHost(cliIP.String()) {
-		return "", "", callbackHostError(cliIP.String())
+		return callbackBinding{}, callbackHostError(cliIP.String())
 	}
-	return cliIP.String(), "0.0.0.0", nil
+	return callbackBinding{host: cliIP.String(), addr: "0.0.0.0"}, nil
 }
 
 // Keep this host policy aligned with validateCliCallback in packages/views/auth.
@@ -268,7 +274,7 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 
 	flagHost := callbackHostFlagValue(cmd)
 	remoteSSH := runningInSSHSession()
-	callbackHost, bindAddr, err := resolveCallbackBinding(flagHost, serverURL, appURL, remoteSSH, detectOutboundIP)
+	binding, err := resolveCallbackBinding(flagHost, serverURL, appURL, remoteSSH, detectOutboundIP)
 	if err != nil {
 		return err
 	}
@@ -277,14 +283,14 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	// that IPv4 clients (including browsers resolving localhost → 127.0.0.1)
 	// cannot reach. The callback host is always localhost or an IPv4 literal,
 	// so an IPv4 listener is what the browser actually needs.
-	listener, err := net.Listen("tcp4", bindAddr+":0")
+	listener, err := net.Listen("tcp4", binding.addr+":0")
 	if err != nil {
 		return fmt.Errorf("could not start the local login callback server (used to receive the browser sign-in); a firewall or another process may be blocking local ports: %w", err)
 	}
 	defer listener.Close()
 
 	port := listener.Addr().(*net.TCPAddr).Port
-	callbackURL := fmt.Sprintf("http://%s:%d/callback", callbackHost, port)
+	callbackURL := fmt.Sprintf("http://%s:%d/callback", binding.host, port)
 
 	// Generate a random state parameter for CSRF protection.
 	stateBytes := make([]byte, 16)
@@ -329,7 +335,7 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	if err := openBrowser(loginURL); err != nil {
 		fmt.Fprintf(os.Stderr, "Could not open browser automatically.\n")
 	}
-	fmt.Fprint(os.Stderr, browserLoginInstructions(loginURL, callbackHost, port, remoteSSH))
+	fmt.Fprint(os.Stderr, browserLoginInstructions(loginURL, binding, port, remoteSSH))
 
 	// Wait for the JWT from the callback (timeout 5 minutes).
 	var jwtToken string
@@ -431,11 +437,13 @@ func callbackHostIsLoopback(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-func browserLoginInstructions(loginURL, callbackHost string, port int, remoteSSH bool) string {
+func browserLoginInstructions(loginURL string, binding callbackBinding, port int, remoteSSH bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "If the browser didn't open, visit:\n  %s\n", loginURL)
-	if remoteSSH && callbackHostIsLoopback(callbackHost) {
+	if remoteSSH && callbackHostIsLoopback(binding.host) {
 		fmt.Fprintf(&b, "\nRemote SSH session detected. Before opening that URL on your local computer, forward the callback port in another terminal:\n  ssh -L %d:127.0.0.1:%d <user>@<remote-host>\nThen open the URL above in your local browser.\n", port, port)
+	} else if binding.sshTunnelFallback {
+		fmt.Fprintln(&b, "\nIf your browser can't reach the callback address, stop this attempt and rerun the same command with --callback-host 127.0.0.1. Then follow the SSH port-forwarding instructions.")
 	}
 	fmt.Fprintln(&b, "\nWaiting for authentication...")
 	return b.String()

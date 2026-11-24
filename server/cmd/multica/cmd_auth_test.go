@@ -126,6 +126,7 @@ func TestResolveCallbackBinding(t *testing.T) {
 		detect       func(string) net.IP
 		wantCallback string
 		wantBind     string
+		wantFallback bool
 		wantError    bool
 	}
 	cases := []bindingCase{
@@ -169,6 +170,7 @@ func TestResolveCallbackBinding(t *testing.T) {
 			detect:       fixed("192.168.0.10"),
 			wantCallback: "192.168.0.10",
 			wantBind:     "0.0.0.0",
+			wantFallback: true,
 		},
 		{
 			name:         "SSH session on a different LAN box still uses that box's IP",
@@ -235,7 +237,7 @@ func TestResolveCallbackBinding(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			gotCallback, gotBind, err := resolveCallbackBinding(tc.flagHost, tc.serverURL, tc.appURL, tc.remoteSSH, tc.detect)
+			binding, err := resolveCallbackBinding(tc.flagHost, tc.serverURL, tc.appURL, tc.remoteSSH, tc.detect)
 			if tc.wantError {
 				if err == nil || !strings.Contains(err.Error(), "--callback-host") {
 					t.Fatalf("expected actionable callback error, got %v", err)
@@ -245,11 +247,14 @@ func TestResolveCallbackBinding(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if gotCallback != tc.wantCallback {
-				t.Errorf("callback host = %q, want %q", gotCallback, tc.wantCallback)
+			if binding.host != tc.wantCallback {
+				t.Errorf("callback host = %q, want %q", binding.host, tc.wantCallback)
 			}
-			if gotBind != tc.wantBind {
-				t.Errorf("bind addr = %q, want %q", gotBind, tc.wantBind)
+			if binding.addr != tc.wantBind {
+				t.Errorf("bind addr = %q, want %q", binding.addr, tc.wantBind)
+			}
+			if binding.sshTunnelFallback != tc.wantFallback {
+				t.Errorf("SSH tunnel fallback = %v, want %v", binding.sshTunnelFallback, tc.wantFallback)
 			}
 		})
 	}
@@ -258,7 +263,7 @@ func TestResolveCallbackBinding(t *testing.T) {
 func TestBrowserLoginInstructionsSSHRemoteHint(t *testing.T) {
 	const loginURL = "https://multica.ai/login?cli_callback=http%3A%2F%2Flocalhost%3A43689%2Fcallback"
 
-	got := browserLoginInstructions(loginURL, "localhost", 43689, true)
+	got := browserLoginInstructions(loginURL, callbackBinding{host: "localhost"}, 43689, true)
 	if !strings.Contains(got, "ssh -L 43689:127.0.0.1:43689 <user>@<remote-host>") {
 		t.Fatalf("remote SSH instructions missing tunnel command:\n%s", got)
 	}
@@ -266,14 +271,33 @@ func TestBrowserLoginInstructionsSSHRemoteHint(t *testing.T) {
 		t.Fatalf("instructions missing login URL:\n%s", got)
 	}
 
-	got = browserLoginInstructions(loginURL, "localhost", 43689, false)
+	got = browserLoginInstructions(loginURL, callbackBinding{host: "localhost"}, 43689, false)
 	if strings.Contains(got, "ssh -L") {
 		t.Fatalf("local instructions should not include SSH tunnel command:\n%s", got)
 	}
 
-	got = browserLoginInstructions(loginURL, "192.168.1.25", 43689, true)
+	got = browserLoginInstructions(loginURL, callbackBinding{host: "192.168.1.25"}, 43689, true)
 	if strings.Contains(got, "ssh -L") {
 		t.Fatalf("non-loopback callback should not include SSH tunnel command:\n%s", got)
+	}
+}
+
+func TestBrowserLoginInstructionsSSHOnAppServer(t *testing.T) {
+	const appURL = "http://192.168.0.10:3000"
+	const loginURL = appURL + "/login?cli_callback=http%3A%2F%2F192.168.0.10%3A43689%2Fcallback"
+	binding, err := resolveCallbackBinding("", appURL, appURL, true, func(string) net.IP {
+		return net.ParseIP("192.168.0.10")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := browserLoginInstructions(loginURL, binding, 43689, true)
+	if !strings.Contains(got, "--callback-host 127.0.0.1") || !strings.Contains(got, "SSH port-forwarding instructions") {
+		t.Errorf("instructions missing the SSH tunnel fallback:\n%s", got)
+	}
+	if strings.Contains(got, "ssh -L") {
+		t.Errorf("instructions should only show the tunnel command after retrying with a loopback callback:\n%s", got)
 	}
 }
 
