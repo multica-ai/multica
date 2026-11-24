@@ -18,12 +18,26 @@ export type IssueWorkflowHandlerType =
   | "squad"
   | "member"
   | "project_lead"
-  | "creator";
+  | "creator"
+  | "current_assignee"
+  | "previous_step_assignee"
+  | "property_match";
+
+export interface IssueWorkflowPropertyMatchCase {
+  /** Stable select-option identifier, independent of the display name. */
+  value: string;
+  handler: IssueWorkflowHandler;
+}
 
 export interface IssueWorkflowHandler {
   type: IssueWorkflowHandlerType;
   /** Set only for agent, squad and member handlers. */
   id?: string;
+  /** Source stage for previous_step_assignee. */
+  status_key?: string;
+  /** Single-select property and its option mappings for property_match. */
+  property_id?: string;
+  cases?: IssueWorkflowPropertyMatchCase[];
 }
 
 /** A column with its handoff; handler "none" keeps the assignee. */

@@ -14,6 +14,7 @@ export type {
   IssueWorkflow,
   IssueWorkflowHandler,
   IssueWorkflowHandlerType,
+  IssueWorkflowPropertyMatchCase,
   IssueWorkflowStep,
   ListIssueWorkflowsResponse,
   IssueWorkflowWriteRequest,
