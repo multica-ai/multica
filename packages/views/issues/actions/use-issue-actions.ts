@@ -40,6 +40,7 @@ export interface UseIssueActionsResult {
   removeParent: () => void;
   openAddChild: () => void;
   openMarkDuplicate: () => void;
+  openAddBlocker: () => void;
   openDeleteConfirm: (opts?: { onDeletedFallbackPath?: string }) => void;
 }
 
@@ -320,6 +321,11 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     openModal("issue-add-child", { issueId });
   }, [openModal, issueId]);
 
+  const openAddBlocker = useCallback(() => {
+    if (!issueId) return;
+    openModal("issue-add-blocker", { issueId });
+  }, [openModal, issueId]);
+
   const openDeleteConfirm = useCallback(
     (opts?: { onDeletedFallbackPath?: string }) => {
       if (!issueId) return;
@@ -348,6 +354,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     removeParent,
     openAddChild,
     openMarkDuplicate,
+    openAddBlocker,
     openDeleteConfirm,
   };
 }

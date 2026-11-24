@@ -16,7 +16,6 @@ vi.mock("@multica/core/issues/blockers", () => ({
 vi.mock("../../navigation", () => ({
   AppLink: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a>,
 }));
-vi.mock("../../modals/issue-picker-modal", () => ({ IssuePickerModal: () => null }));
 
 import { IssueBlockersSection } from "./issue-blockers";
 

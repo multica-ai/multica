@@ -2,6 +2,17 @@ export type SquadMemberType = "agent" | "member";
 
 export type SquadActivityOutcome = "action" | "no_action" | "failed";
 
+/**
+ * How work moves between squad members. "leader" (the default) routes every
+ * member reply back through the leader; "direct" lets a member hand the issue
+ * to the next member, with fixed guardrails sending it back to the leader.
+ */
+export type SquadHandoffMode = "leader" | "direct";
+
+/** Fixed guardrails of the direct mode; mirrors the server constants. */
+export const SQUAD_HANDOFF_ROUND_LIMIT = 3;
+export const SQUAD_HANDOFF_DAILY_LIMIT = 20;
+
 export interface SquadMemberPreview {
   member_type: SquadMemberType;
   member_id: string;
@@ -23,6 +34,7 @@ export interface Squad {
   archived_by: string | null;
   member_count?: number;
   member_preview?: SquadMemberPreview[];
+  handoff_mode?: SquadHandoffMode;
 }
 
 export interface SquadMember {
@@ -58,6 +70,7 @@ export interface UpdateSquadRequest {
   instructions?: string;
   leader_id?: string;
   avatar_url?: string;
+  handoff_mode?: SquadHandoffMode;
 }
 
 export interface AddSquadMemberRequest {
@@ -117,4 +130,17 @@ export interface SquadMemberStatus {
 
 export interface SquadMemberStatusListResponse {
   members: SquadMemberStatus[];
+}
+
+/** The squad context one agent receives on an issue assigned to the squad. */
+export interface SquadBrief {
+  member_type: SquadMemberType;
+  member_id: string;
+  is_leader: boolean;
+  brief: string;
+}
+
+export interface SquadBriefsResponse {
+  handoff_mode: SquadHandoffMode;
+  briefs: SquadBrief[];
 }
