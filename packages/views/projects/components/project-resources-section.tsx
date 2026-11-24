@@ -540,7 +540,12 @@ function AddResourceMenu({
               >
                 {t(($) => $.resources.mode_cancel)}
               </Button>
-              <Button size="sm" onClick={() => void addFolder()} disabled={saving}>
+              <Button
+                size="sm"
+                onClick={() => void addFolder()}
+                disabled={saving}
+                aria-busy={saving}
+              >
                 {t(($) => $.resources.mode_add)}
               </Button>
             </DialogFooter>
@@ -610,8 +615,9 @@ function ResourceRow({
         {name}
         {chip}
       </div>
-      {/* Zero basis: takes only what the name leaves, so the name never truncates first. */}
-      <div className="flex min-w-0 flex-1 items-center justify-end gap-1 text-caption text-muted-foreground">
+      {/* Zero basis: takes only what the name leaves, so the name never truncates first.
+          Safe alignment clips overflow on the right instead of spilling over the chip. */}
+      <div className="flex min-w-0 flex-1 items-center justify-end-safe gap-1 overflow-hidden text-caption text-muted-foreground">
         {aside}
       </div>
       {menu ?? <span aria-hidden="true" className="size-6 shrink-0" />}

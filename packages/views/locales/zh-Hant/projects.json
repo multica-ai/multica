@@ -149,7 +149,7 @@
     "add_local_hint": "僅本機上的執行使用",
     "add_local_desktop_only": "僅桌面端可用",
     "add_local_exists": "本機已設定資料夾",
-    "empty": "新增一個倉庫或本地資料夾，供智能體工作。",
+    "empty": "新增一個倉庫或本地資料夾，供 AI 代理工作。",
     "empty_read_only": "還沒有倉庫或本地資料夾。",
     "row_menu": "{{name}} 的操作",
     "copy_url": "複製連結",
