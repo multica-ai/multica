@@ -98,6 +98,6 @@
       "delete": "댓글을 삭제하지 못했습니다",
       "resolve": "댓글을 업데이트할 수 없습니다"
     },
-    "run_waiting_runtime": "런타임이 다시 온라인이 되기를 기다리는 중"
+    "run_waiting_retry": "재시도 대기 중"
   }
 }

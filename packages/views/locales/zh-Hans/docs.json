@@ -98,6 +98,6 @@
       "delete": "评论删除失败",
       "resolve": "无法更新评论状态"
     },
-    "run_waiting_runtime": "等待运行环境重新上线"
+    "run_waiting_retry": "等待重试"
   }
 }

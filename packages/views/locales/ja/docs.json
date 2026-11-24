@@ -98,6 +98,6 @@
       "delete": "コメントを削除できませんでした",
       "resolve": "コメントを更新できませんでした"
     },
-    "run_waiting_runtime": "ランタイムのオンライン復帰を待機中"
+    "run_waiting_retry": "再試行を待機中"
   }
 }

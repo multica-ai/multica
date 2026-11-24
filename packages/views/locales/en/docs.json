@@ -99,6 +99,6 @@
       "delete": "Could not delete the comment",
       "resolve": "Could not update the comment"
     },
-    "run_waiting_runtime": "Waiting for the runtime to come back online"
+    "run_waiting_retry": "Waiting to retry"
   }
 }
