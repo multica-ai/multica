@@ -2,12 +2,21 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Flag, Plus, X } from "@multica/ui/icons";
+import { CircleEqual, Flag, Plus, X } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@multica/ui/components/ui/hover-card";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueRouteRef, useWorkspacePaths } from "@multica/core/paths";
-import { useUpdateIssueBlockers } from "@multica/core/issues/blockers";
+import { useUpdateIssueBlockers, useUpdateIssueBlocking } from "@multica/core/issues/blockers";
+import { issueDuplicatesOptions } from "@multica/core/issues/queries";
+import { workflowAllowsStatus } from "@multica/core/issue-workflows";
 import { useModalStore } from "@multica/core/modals";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -15,8 +24,10 @@ import { agentListOptions, squadListOptions } from "@multica/core/workspace/quer
 import type { Issue } from "@multica/core/types";
 import { AppLink } from "../../navigation";
 import { useT } from "../../i18n";
-import { IssueSidebarSectionHeader } from "./issue-sidebar-section";
+import { IssueSidebarCollapsible, IssueSidebarSectionHeader } from "./issue-sidebar-section";
 import { isIssueWaiting } from "../utils/waiting";
+import { issueRelations } from "../utils/relations";
+import { useIssueStatusOptions } from "../utils/status-options";
 import { StatusIcon } from "./status-icon";
 
 const MARKER_MAX_ROWS = 8;
@@ -104,45 +115,122 @@ function IssueBlockedMarkerCard({ issue }: { issue: Issue }) {
   </div>;
 }
 
-export function IssueBlockersSection({ issue }: { issue: Issue }) {
+/**
+ * The relation types a reader can add, for the Relations section's "+" and
+ * the sidebar add row. Each opens the same modal as the Relations submenu of
+ * the issue actions menu.
+ */
+export function IssueRelationTypeItems({ issue }: { issue: Issue }) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
-  const paths = useWorkspacePaths();
-  const [open, setOpen] = useState(true);
   const openModal = useModalStore((s) => s.open);
-  const mutation = useUpdateIssueBlockers(wsId, issue.id);
+  const { workflow } = useIssueStatusOptions(wsId, issue.project_id, issue.status);
+  const item = (icon: React.ReactNode, label: string, hint: string, onClick: () => void) => (
+    <DropdownMenuItem onClick={onClick} className="items-start">
+      {icon}
+      <span className="flex min-w-0 flex-col">
+        <span>{label}</span>
+        <span className="text-caption text-muted-foreground">{hint}</span>
+      </span>
+    </DropdownMenuItem>
+  );
+  return <>
+    {item(<Flag className="mt-0.5 text-destructive" />, t(($) => $.actions.add_blocker), t(($) => $.relations.add_blocker_hint),
+      () => openModal("issue-add-blocker", { issueId: issue.id }))}
+    {item(<Flag className="mt-0.5 text-warning" />, t(($) => $.actions.add_blocking), t(($) => $.relations.add_blocking_hint),
+      () => openModal("issue-add-blocking", { issueId: issue.id }))}
+    {/* Marking a duplicate cancels the issue. (MUL-7420) */}
+    {workflowAllowsStatus(workflow, "cancelled") && <>
+      <DropdownMenuSeparator />
+      {item(<CircleEqual className="mt-0.5" />, t(($) => $.actions.mark_duplicate), t(($) => $.relations.mark_duplicate_hint),
+        () => openModal("issue-mark-duplicate", { issueId: issue.id }))}
+    </>}
+  </>;
+}
+
+/**
+ * Blockers, the issues this one blocks, and its duplicates in one section
+ * (MUL-10050). Only unfinished blockers are listed; the section disappears
+ * when there is nothing to list.
+ */
+export function IssueRelationsSection({ issue }: { issue: Issue }) {
+  const { t } = useT("issues");
+  const wsId = useWorkspaceId();
+  const [open, setOpen] = useState(true);
+  const blockedByMutation = useUpdateIssueBlockers(wsId, issue.id);
+  const blockingMutation = useUpdateIssueBlocking(wsId, issue.id);
+  const { data } = useQuery(issueDuplicatesOptions(wsId, issue.id));
+  const { categoryOf, colorOf, iconOf } = useIssueStatuses(wsId);
   if (issue.blocked_by === undefined) return null;
-  const blockers = issue.blocked_by;
-  const manual = blockers.filter((b) => b.via === "manual");
-  const stages = blockers.filter((b) => b.via === "stage");
-  const activeStages = stages.filter((b) => !b.closed);
-  const stageCount = stages.length - activeStages.length;
-  const restrictedCount = Math.max(0, (issue.blocked_count ?? 0) - blockers.filter((b) => !b.closed).length);
+  const relations = issueRelations(issue, data?.duplicates);
+  if (relations.empty) return null;
+  const { blockedBy, blocking, duplicates, restricted, finished, total } = relations;
+  const pending = blockedByMutation.isPending || blockingMutation.isPending;
+  const error = blockedByMutation.error ?? blockingMutation.error;
+  const statusIcon = (status: string) =>
+    <StatusIcon status={status} category={categoryOf(status)} color={colorOf(status)} icon={iconOf(status)} className="size-3.5 shrink-0" />;
+  const stageTag = <span title={t(($) => $.relations.stage_tag_hint)} className="shrink-0 rounded-xs bg-muted px-1 text-micro text-muted-foreground">
+    {t(($) => $.relations.stage_tag)}
+  </span>;
   return <div>
-    <IssueSidebarSectionHeader title={t(($) => $.waiting.title)} open={open} onOpenChange={setOpen} count={issue.blocked_count}
-      actions={<Button variant="ghost" size="icon-xs" aria-label={t(($) => $.waiting.add)} onClick={() => openModal("issue-add-blocker", { issueId: issue.id })}><Plus /></Button>} />
-    {open && <div className="px-4 space-y-2 text-caption">
-      {manual.map((blocker) => <div key={blocker.id} className="flex min-w-0 items-center gap-1">
-        <Flag className={blocker.closed ? "size-3.5 shrink-0 text-muted-foreground" : "size-3.5 shrink-0 text-destructive"} aria-hidden="true" />
-        <AppLink href={paths.issueDetail(issueRouteRef(blocker))} className="min-w-0 flex-1 truncate hover:underline" title={blocker.title}>
-          <span className="text-muted-foreground">{blocker.identifier}</span>{" "}{blocker.title}
-        </AppLink>
-        <Button variant="ghost" size="icon-xs" disabled={mutation.isPending} aria-label={t(($) => $.waiting.remove, { identifier: blocker.identifier })}
-          onClick={() => mutation.mutate({ remove_blocked_by: [blocker.id] })}><X /></Button>
-      </div>)}
-      {stages.length > 0 && <div>
-        <p className="text-muted-foreground">{t(($) => $.waiting.stage, { finished: stageCount, total: stages.length })}</p>
-        {activeStages.map((blocker) => <AppLink key={blocker.id} href={paths.issueDetail(issueRouteRef(blocker))} className="block truncate py-1 hover:underline" title={blocker.title}>
-          <span className="text-muted-foreground">{blocker.identifier}</span>{" "}{blocker.title}
-        </AppLink>)}
-      </div>}
-      {restrictedCount > 0 && <p className="text-muted-foreground">{t(($) => $.waiting.restricted, {count: restrictedCount})}</p>}
-      {/* Only the fixed backlog key parks work, matching the server's queue admission. */}
-      {isIssueWaiting(issue) && <p className="text-muted-foreground">
-        {issue.status === "backlog" ? t(($) => $.waiting.hint_backlog) : t(($) => $.waiting.hint)}
-      </p>}
-      {blockers.length === 0 && !restrictedCount && <p className="text-muted-foreground">{t(($) => $.waiting.empty)}</p>}
-      {mutation.isError && <p role="alert" className="text-destructive">{mutation.error.message}</p>}
-    </div>}
+    <IssueSidebarSectionHeader title={t(($) => $.relations.title)} open={open} onOpenChange={setOpen}
+      count={blockedBy.length + restricted + blocking.length + duplicates.length}
+      actions={<DropdownMenu>
+        <DropdownMenuTrigger render={<Button variant="ghost" size="icon-xs" aria-label={t(($) => $.relations.add)} />}><Plus /></DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-64"><IssueRelationTypeItems issue={issue} /></DropdownMenuContent>
+      </DropdownMenu>} />
+    <IssueSidebarCollapsible open={open}><div className="px-2">
+      {(blockedBy.length > 0 || restricted > 0) && <>
+        <RelationGroup icon={<Flag className="size-3.5 text-destructive" />} label={t(($) => $.relations.blocked_by)}
+          aside={finished > 0 ? t(($) => $.waiting.marker_ended, { finished, total }) : undefined} />
+        {blockedBy.map((blocker) => <RelationRow key={blocker.id} issue={blocker} icon={statusIcon(blocker.status)}
+          tag={blocker.via === "stage" ? stageTag : undefined} removeLabel={t(($) => $.waiting.remove, { identifier: blocker.identifier })} pending={pending}
+          onRemove={blocker.via === "manual" ? () => blockedByMutation.mutate({ remove_blocked_by: [blocker.id] }) : undefined} />)}
+        {restricted > 0 && <p className="px-2 py-1 text-caption text-muted-foreground">{t(($) => $.waiting.restricted, { count: restricted })}</p>}
+        {/* Only the fixed backlog key parks work, matching the server's queue admission. */}
+        {isIssueWaiting(issue) && <p className="px-2 pt-0.5 pb-1 text-caption text-muted-foreground">
+          {issue.status === "backlog" ? t(($) => $.waiting.hint_backlog) : t(($) => $.waiting.hint)}
+        </p>}
+      </>}
+      {blocking.length > 0 && <>
+        <RelationGroup icon={<Flag className="size-3.5 text-warning" />} label={t(($) => $.relations.blocking)} />
+        {blocking.map((dependent) => <RelationRow key={dependent.id} issue={dependent} icon={statusIcon(dependent.status)}
+          tag={dependent.via === "stage" ? stageTag : undefined} removeLabel={t(($) => $.waiting.remove, { identifier: dependent.identifier })} pending={pending}
+          onRemove={dependent.via === "manual" ? () => blockingMutation.mutate({ dependentId: dependent.id, remove: true }) : undefined} />)}
+      </>}
+      {duplicates.length > 0 && <>
+        <RelationGroup icon={<CircleEqual className="size-3.5" />} label={t(($) => $.duplicates.section_title)} />
+        {duplicates.map((duplicate) => <RelationRow key={duplicate.id} issue={duplicate} icon={statusIcon(duplicate.status)} />)}
+      </>}
+      {error && <p role="alert" className="px-2 py-1 text-caption text-destructive">{error.message}</p>}
+    </div></IssueSidebarCollapsible>
+  </div>;
+}
+
+function RelationGroup({ icon, label, aside }: { icon: React.ReactNode; label: string; aside?: string }) {
+  return <div className="flex min-w-0 items-center gap-1.5 px-2 pt-2 pb-0.5 text-caption font-medium text-muted-foreground first:pt-0">
+    {icon}<span className="truncate">{label}</span>
+    {aside && <span className="ml-auto shrink-0 font-normal tabular-nums">{aside}</span>}
+  </div>;
+}
+
+function RelationRow({ issue, icon, tag, onRemove, removeLabel, pending }: {
+  issue: Pick<Issue, "id" | "identifier" | "title">;
+  icon: React.ReactNode;
+  tag?: React.ReactNode;
+  onRemove?: () => void;
+  removeLabel?: string;
+  pending?: boolean;
+}) {
+  const paths = useWorkspacePaths();
+  return <div className="group/relation flex min-w-0 items-center gap-1 rounded-md px-2 transition-colors hover:bg-accent/50">
+    <AppLink href={paths.issueDetail(issueRouteRef(issue))} title={issue.title} className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-label">
+      {icon}
+      <span className="shrink-0 text-muted-foreground">{issue.identifier}</span>
+      <span className="truncate group-hover/relation:text-foreground">{issue.title}</span>
+    </AppLink>
+    {tag}
+    {onRemove && <Button variant="ghost" size="icon-xs" disabled={pending} aria-label={removeLabel} onClick={onRemove}
+      className="text-muted-foreground opacity-0 group-hover/relation:opacity-100 focus-visible:opacity-100 [@media(pointer:coarse)]:opacity-100"><X /></Button>}
   </div>;
 }

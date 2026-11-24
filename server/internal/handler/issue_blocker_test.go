@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -231,5 +232,129 @@ func TestIssueBlockerFilterSkipsFinishedIssues(t *testing.T) {
 		if !found {
 			t.Fatalf("%s blocked filter omitted the waiting issue", surface)
 		}
+	}
+}
+
+func TestIssueBlockerDetailListsBlocking(t *testing.T) {
+	prerequisite := blockerTestIssue(t, map[string]any{"status": "todo"})
+	waiting := blockerTestIssue(t, map[string]any{"status": "todo", "blocked_by": []string{prerequisite.ID}})
+	parent := blockerTestIssue(t, map[string]any{"status": "todo"})
+	earlier := blockerTestIssue(t, map[string]any{"status": "todo", "parent_issue_id": parent.ID, "stage": 1})
+	later := blockerTestIssue(t, map[string]any{"status": "todo", "parent_issue_id": parent.ID, "stage": 2})
+	detail := func(id string) IssueResponse {
+		t.Helper()
+		var issue IssueResponse
+		req := withURLParam(newRequest("GET", "/api/issues/"+id, nil), "id", id)
+		testutil.Call(t, testHandler.GetIssue, req).Want(200).JSON(&issue)
+		if issue.Blocking == nil {
+			t.Fatalf("detail of %s omitted blocking", id)
+		}
+		return issue
+	}
+	if got := *detail(prerequisite.ID).Blocking; len(got) != 1 || got[0].ID != waiting.ID || got[0].Via != "manual" || got[0].Closed {
+		t.Fatalf("prerequisite blocking = %+v", got)
+	}
+	if got := *detail(earlier.ID).Blocking; len(got) != 1 || got[0].ID != later.ID || got[0].Via != "stage" {
+		t.Fatalf("earlier stage blocking = %+v", got)
+	}
+	if got := *detail(waiting.ID).Blocking; len(got) != 0 {
+		t.Fatalf("waiting issue blocks %+v", got)
+	}
+	updateIssueForTest(t, waiting.ID, map[string]any{"status": "done"}).Want(200)
+	if got := *detail(prerequisite.ID).Blocking; len(got) != 1 || !got[0].Closed {
+		t.Fatalf("finished dependent not marked closed: %+v", got)
+	}
+	// Lists and broadcasts stay as they were: only the detail read pays for it.
+	body := testutil.Call(t, testHandler.ListIssues, newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID+"&limit=100", nil)).Want(200).Text()
+	if strings.Contains(body, `"blocking"`) {
+		t.Fatal("issue list carried blocking")
+	}
+}
+
+func TestIssueBlockerBlockingHidesPrivateDependents(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	if err := service.AddIssueBlocker(context.Background(), testHandler.Queries, parseUUID(testWorkspaceID), parseUUID(f.secretIssue), parseUUID(f.publicIssue), "member", parseUUID(testUserID)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { dbfx.Exec(t, "DELETE FROM issue_blocker WHERE issue_id=$1", f.secretIssue) })
+	get := func(user string) []IssueBlockerResponse {
+		t.Helper()
+		var issue IssueResponse
+		req := withURLParam(asUser(newRequest("GET", "/api/issues/"+f.publicIssue, nil), user), "id", f.publicIssue)
+		testutil.Call(t, testHandler.GetIssue, req).Want(200).JSON(&issue)
+		return *issue.Blocking
+	}
+	if got := get(testUserID); len(got) != 1 || got[0].ID != f.secretIssue {
+		t.Fatalf("authorized owner lost the dependent: %+v", got)
+	}
+	if got := get(f.outsider); len(got) != 0 {
+		t.Fatalf("outsider saw a private dependent: %+v", got)
+	}
+}
+
+func TestIssueBlockerUpdateFlagsBlockersChanged(t *testing.T) {
+	a := blockerTestIssue(t, map[string]any{"status": "todo"})
+	b := blockerTestIssue(t, map[string]any{"status": "todo"})
+	publisher := *testHandler
+	publisher.Bus = events.New()
+	var changed []bool
+	publisher.Bus.Subscribe(protocol.EventIssueUpdated, func(e events.Event) {
+		payload, _ := e.Payload.(map[string]any)
+		flag, _ := payload["blockers_changed"].(bool)
+		changed = append(changed, flag)
+	})
+	for _, body := range []map[string]any{
+		{"blocked_by": []string{a.ID}},
+		{"title": "renamed " + uuid.NewString()},
+		{"remove_blocked_by": []string{a.ID}},
+	} {
+		req := withURLParam(newRequest("PUT", "/api/issues/"+b.ID, body), "id", b.ID)
+		testutil.Call(t, publisher.UpdateIssue, req).Want(200)
+	}
+	batch := newRequest("POST", "/api/issues/batch-update?workspace_id="+testWorkspaceID, map[string]any{"issue_ids": []string{b.ID}, "updates": map[string]any{"blocked_by": []string{a.ID}}})
+	testutil.Call(t, publisher.BatchUpdateIssues, batch).Want(200)
+	if want := []bool{true, false, true, true}; len(changed) != len(want) || changed[0] != want[0] || changed[1] != want[1] || changed[2] != want[2] || changed[3] != want[3] {
+		t.Fatalf("blockers_changed = %v, want %v", changed, want)
+	}
+}
+
+// A guest sees only its own projects, so blocker references to issues in
+// other projects or outside any project are hidden in both directions, not
+// only references into private projects.
+func TestIssueBlockerGuestSeesOnlyItsProjectsReferences(t *testing.T) {
+	f := newGuestFixture(t)
+	ctx := context.Background()
+	ws := parseUUID(testWorkspaceID)
+	waiting := dbfx.Issue(t, f.marker+" waiting shared issue", testutil.Cols{"project_id": f.shared, "number": 790000 + int(time.Now().UnixNano()%9000)})
+	edges := [][2]string{
+		{f.otherIssue, f.sharedIssue}, {f.looseIssue, f.sharedIssue}, // shared blocks two issues the guest can't open
+		{waiting, f.otherIssue}, {waiting, f.looseIssue}, // waiting is blocked by them
+	}
+	for _, e := range edges {
+		if err := service.AddIssueBlocker(ctx, testHandler.Queries, ws, parseUUID(e[0]), parseUUID(e[1]), "member", parseUUID(testUserID)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		dbfx.Exec(t, "DELETE FROM issue_blocker WHERE issue_id = ANY($1::uuid[])", []string{f.otherIssue, f.looseIssue, waiting})
+	})
+	get := func(user, id string) IssueResponse {
+		t.Helper()
+		var issue IssueResponse
+		guestRequest(t, testHandler.GetIssue, user, http.MethodGet, "/api/issues/"+id, nil, "id", id).Want(http.StatusOK).JSON(&issue)
+		return issue
+	}
+	if got := *get(f.guest, f.sharedIssue).Blocking; len(got) != 0 {
+		t.Fatalf("guest saw dependents outside its project: %+v", got)
+	}
+	if got := *get(testUserID, f.sharedIssue).Blocking; len(got) != 2 {
+		t.Fatalf("member lost dependents: %+v", got)
+	}
+	guestView := get(f.guest, waiting)
+	if len(guestView.BlockedBy) != 0 || guestView.BlockedCount != 2 {
+		t.Fatalf("guest blocked_by projection = %+v (count %d)", guestView.BlockedBy, guestView.BlockedCount)
+	}
+	if got := get(testUserID, waiting).BlockedBy; len(got) != 2 {
+		t.Fatalf("member lost blockers: %+v", got)
 	}
 }

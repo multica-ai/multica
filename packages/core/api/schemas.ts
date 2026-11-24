@@ -1698,12 +1698,16 @@ export const CommentSubIssueTaskResponseSchema = z.object({
   task_id: z.string().min(1),
 }).loose();
 
+const IssueBlockerSchema = z.object({
+  id: z.string(), identifier: z.string(), title: z.string(), status: z.string(),
+  via: z.string(), closed: z.boolean(),
+});
+
 export const IssueSchema = z.object({
   blocked_count: z.number().int().nonnegative().optional().catch(undefined),
-  blocked_by: z.array(z.object({
-    id: z.string(), identifier: z.string(), title: z.string(), status: z.string(),
-    via: z.string(), closed: z.boolean(),
-  })).optional().catch(undefined),
+  blocked_by: z.array(IssueBlockerSchema).optional().catch(undefined),
+  // Detail reads only: the issues waiting on this one.
+  blocking: z.array(IssueBlockerSchema).optional().catch(undefined),
   id: z.string(),
   workspace_id: z.string(),
   number: z.number(),

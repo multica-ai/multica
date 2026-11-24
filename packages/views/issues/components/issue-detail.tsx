@@ -17,8 +17,8 @@ import { UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { Virtuoso, type ListRange, type VirtuosoHandle } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink, useBackOrReplace } from "../../navigation";
-import { IssueBlockersSection } from "./issue-blockers";
-import { IssueDuplicateBanner, IssueDuplicatesSection, isDuplicateIssue } from "./issue-duplicates";
+import { IssueRelationsSection } from "./issue-blockers";
+import { IssueDuplicateBanner, isDuplicateIssue } from "./issue-duplicates";
 import {
   AlertTriangle,
   Calendar,
@@ -3571,8 +3571,8 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
           </div></IssueSidebarCollapsible>
         </div>
     ),
-    waiting: <IssueBlockersSection issue={issue} />,
-    duplicates: <IssueDuplicatesSection issueId={issue.id} />,
+    // Blockers, the issues this one blocks, and duplicates (MUL-10050).
+    relations: <IssueRelationsSection issue={issue} />,
     // Pull requests — unavailable when the workspace disables the PR sidebar
     // (or the GitHub master switch is off). Backend data is kept either
     // way so re-enabling restores the section instantly.
@@ -3623,7 +3623,7 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
             ? GUEST_SIDEBAR_SECTIONS.has(section)
             : (section !== "pull_requests" || githubSettings.prSidebar) && (section !== "plugins" || pluginsEnabled),
       )}
-      addRow={<IssueSidebarAddRow items={sidebarAddables.filter((item) => item !== sidebarReveal)} onPick={setSidebarReveal} />}
+      addRow={<IssueSidebarAddRow items={sidebarAddables.filter((item) => item !== sidebarReveal)} onPick={setSidebarReveal} issue={issue} />}
       footer={guest ? undefined : <IssueSidebarFooter issue={issue} />}
     />
   );

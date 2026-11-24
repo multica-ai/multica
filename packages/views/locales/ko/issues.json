@@ -599,14 +599,20 @@
       "wakeups": "깨우기 추가",
       "pull_requests": "Pull request 추가",
       "environments": "환경 추가",
-      "wakeups_pull_requests": "깨우기 또는 Pull request 추가",
-      "wakeups_environments": "깨우기 또는 환경 추가",
-      "pull_requests_environments": "Pull request 또는 환경 추가",
-      "all": "깨우기, Pull request 또는 환경 추가",
+      "relations": "관계 추가",
+      "pair": "{{first}} 또는 {{second}} 추가",
+      "many": "추가...",
+      "noun": {
+        "wakeups": "깨우기",
+        "pull_requests": "Pull request",
+        "environments": "환경",
+        "relations": "관계"
+      },
       "menu": {
         "wakeups": "깨우기",
         "pull_requests": "Pull request",
-        "environments": "환경"
+        "environments": "환경",
+        "relations": "관계"
       }
     },
     "footer": {
@@ -1076,7 +1082,8 @@
     "remove_parent_issue": "상위 태스크 제거",
     "remove_parent_issue_success": "상위 태스크를 제거했습니다",
     "add_sub_issue": "하위 태스크 추가...",
-    "add_blocker": "선행 작업 추가...",
+    "add_blocker": "다른 작업 기다리기...",
+    "add_blocking": "다른 작업 막기...",
     "delete_issue": "태스크 삭제",
     "mark_duplicate": "중복으로 표시...",
     "open_in_new_window": "새 창에서 열기"
@@ -2058,16 +2065,26 @@
     "retry": "다시 시도",
     "dismiss": "닫기"
   },
+  "relations": {
+    "title": "관계",
+    "add": "관계 추가",
+    "wait_title": "다른 작업 기다리기",
+    "block_title": "다른 작업 막기",
+    "blocked_by": "선행 작업",
+    "blocking": "막고 있는 작업",
+    "stage_tag": "단계",
+    "stage_tag_hint": "상위 작업의 단계로 정해짐",
+    "add_blocker_hint": "이 작업은 그 작업이 끝난 뒤 시작됩니다",
+    "add_blocking_hint": "그 작업은 이 작업이 끝난 뒤 시작됩니다",
+    "mark_duplicate_hint": "이 작업이 취소됩니다",
+    "blocking_picker_hint": "이 작업이 끝나야 시작할 수 있는 작업을 선택하세요."
+  },
   "waiting": {
-    "title": "대기",
-    "add": "선행 작업 추가",
     "remove": "{{identifier}} 제거",
     "count": "작업 {{count}}개 대기 중",
     "count_other": "작업 {{count}}개 대기 중",
-    "stage": "이전 단계 · {{finished}}/{{total}}개 종료",
     "hint": "모두 종료되면 담당자가 자동으로 시작하거나 알림을 받습니다.",
     "hint_backlog": "이 작업은 백로그에 있어 모두 종료되어도 자동으로 시작되지 않습니다. 백로그에서 옮기면 시작됩니다.",
-    "empty": "대기할 작업 없음",
     "picker_hint": "이 작업보다 먼저 종료되어야 하는 작업을 선택하세요.",
     "restricted": "볼 수 없는 선행 작업 {{count}}개",
     "ended": "대기 중인 작업 종료",

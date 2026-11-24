@@ -11,3 +11,18 @@ export function useUpdateIssueBlockers(wsId: string, issueId: string) {
     },
   });
 }
+
+/**
+ * Edits the edges where this issue is the blocker. Each edge is stored on the
+ * issue that waits, so the write goes to that issue and its access rules apply.
+ */
+export function useUpdateIssueBlocking(wsId: string, issueId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ dependentId, remove = false }: { dependentId: string; remove?: boolean }) =>
+      api.updateIssue(dependentId, remove ? { remove_blocked_by: [issueId] } : { blocked_by: [issueId] }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+    },
+  });
+}
