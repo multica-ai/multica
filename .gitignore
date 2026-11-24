@@ -4,6 +4,10 @@ dist
 .DS_Store
 .envrc
 
+# Generated from the pinned Excalidraw dependency for web and desktop.
+/apps/web/public/assets/excalidraw/
+/apps/desktop/src/renderer/public/assets/excalidraw/
+
 # build outputs
 .turbo
 .next

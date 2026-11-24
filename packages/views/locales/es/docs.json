@@ -1,4 +1,16 @@
 {
+  "board": {
+    "conflict": "Alguien guardó una versión más reciente. Tus cambios siguen abiertos aquí.",
+    "new": "Nuevo tablero",
+    "title": "Tablero de traspaso",
+    "insert_handoff": "Insertar traspaso",
+    "prepare": "Preparar el informe",
+    "review": "Revisar el informe",
+    "link_issue": "Vincular incidencia",
+    "pick_issue": "Elige una incidencia de este espacio de trabajo",
+    "save": "Guardar tablero",
+    "invalid": "No se pudo abrir este tablero."
+  },
   "untitled": "Sin título",
   "version_number": "v{{number}}",
   "kb": "Documentos",

@@ -1,4 +1,16 @@
 {
+  "board": {
+    "conflict": "다른 사용자가 새 버전을 저장했습니다. 편집 중인 내용은 이 화면에 남아 있습니다.",
+    "new": "새 보드",
+    "title": "인수인계 보드",
+    "insert_handoff": "인수인계 단계 추가",
+    "prepare": "브리프 작성",
+    "review": "브리프 검토",
+    "link_issue": "이슈 연결",
+    "pick_issue": "이 워크스페이스의 이슈 선택",
+    "save": "보드 저장",
+    "invalid": "이 보드를 열 수 없습니다."
+  },
   "untitled": "제목 없음",
   "version_number": "v{{number}}",
   "kb": "문서",

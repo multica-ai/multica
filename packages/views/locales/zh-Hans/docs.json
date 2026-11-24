@@ -1,4 +1,16 @@
 {
+  "board": {
+    "conflict": "有人保存了更新的版本。你编辑的内容仍在此处。",
+    "new": "新建白板",
+    "title": "交接白板",
+    "insert_handoff": "插入交接步骤",
+    "prepare": "准备简报",
+    "review": "审核简报",
+    "link_issue": "关联事项",
+    "pick_issue": "选择此工作区中的事项",
+    "save": "保存白板",
+    "invalid": "无法打开此白板。"
+  },
   "untitled": "未命名",
   "version_number": "v{{number}}",
   "kb": "知识库",

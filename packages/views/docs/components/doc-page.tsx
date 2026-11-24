@@ -33,6 +33,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import {
   docDetailOptions,
+  useUpdateDoc,
   docTreeOptions,
   docCommentsOptions,
   folderAncestry,
@@ -42,7 +43,7 @@ import {
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWS } from "@multica/core/realtime";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useRequiredWorkspaceSlug, useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { isImeComposing } from "@multica/core/utils";
 import type { Doc } from "@multica/core/types";
@@ -64,6 +65,9 @@ import { DeleteDocDialog } from "./doc-tree";
 import { useCanDeleteDoc } from "./use-can-delete-doc";
 import { DocNotFound } from "./doc-not-found";
 import { DocsGate } from "./docs-gate";
+
+import { HandoffBoard } from "./handoff-board";
+import { isHandoffBoard } from "./handoff-board-model";
 
 export function DocPage({ docId }: { docId: string }) {
   return (
@@ -118,6 +122,10 @@ function DocPageContent({ docId }: { docId: string }) {
   const liveSettled = useLiveInfoSettled(docId);
   // Also when it was open: a refetch answered 404 once someone deleted it.
   if (isDocNotFound(query.error)) return <DocNotFound docId={docId} />;
+  if (query.data && query.data.workspaceId !== wsId) return <DocNotFound docId={docId} />;
+  if (query.data && isHandoffBoard(query.data.content)) {
+    return <BoardPage key={`${wsId}:${docId}`} doc={query.data} />;
+  }
   if (!query.data || !liveSettled)
     return (
       <DocPageSkeleton docId={docId}>
@@ -129,6 +137,27 @@ function DocPageContent({ docId }: { docId: string }) {
       </DocPageSkeleton>
     );
   return <DocEditor key={`${wsId}:${docId}`} doc={query.data} />;
+}
+
+function BoardPage({ doc }: { doc: Doc }) {
+  const { t } = useT("docs");
+  const p = useWorkspacePaths();
+  const slug = useRequiredWorkspaceSlug();
+  const update = useUpdateDoc();
+  // The canvas is initialized once. A background refetch must not advance the
+  // base revision of its unsaved edits.
+  const [initial] = useState(doc);
+  const revision = useRef(initial.revision);
+  async function save(content: string) {
+    const saved = await update.mutateAsync({ id: doc.id, baseRevision: revision.current, content });
+    revision.current = saved.revision;
+  }
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <BreadcrumbHeader segments={[{ href: p.docs(), label: t(($) => $.kb) }]} leaf={doc.title} />
+      <HandoffBoard markdown={initial.content} workspaceId={doc.workspaceId} workspaceSlug={slug} onSave={save} />
+    </div>
+  );
 }
 
 const DOC_TITLE_CLASS = "text-display-sm font-semibold leading-snug wrap-anywhere";

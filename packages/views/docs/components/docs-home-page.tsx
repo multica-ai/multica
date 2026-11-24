@@ -2,13 +2,15 @@
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { docTreeOptions } from "@multica/core/docs";
+import { docTreeOptions, useCreateDoc } from "@multica/core/docs";
 import { FileText, Folder } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { PageHeader } from "../../layout/page-header";
-import { AppLink } from "../../navigation";
+import { AppLink, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
+import { toast } from "sonner";
+import { EMPTY_HANDOFF_BOARD } from "./handoff-board-model";
 import { DocsGate } from "./docs-gate";
 import { usePrefetchDoc, useWarmDocPage } from "./use-prefetch-doc";
 export function DocsHomePage({
@@ -28,6 +30,20 @@ function DocsHomePageContent({ folderId }: { folderId: string | null }) {
   const wsId = useWorkspaceId();
   const p = useWorkspacePaths();
   const tree = useQuery(docTreeOptions(wsId));
+  const createDoc = useCreateDoc();
+  const { push } = useNavigation();
+  async function createBoard() {
+    try {
+      const board = await createDoc.mutateAsync({
+        title: t(($) => $.board.title),
+        folderId,
+        content: EMPTY_HANDOFF_BOARD,
+      });
+      push(p.docDetail(board.id));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t(($) => $.errors.save));
+    }
+  }
   const prefetchDoc = usePrefetchDoc();
   const folders =
     tree.data?.folders.filter((f) => f.parentId === folderId) ?? [];
@@ -44,6 +60,9 @@ function DocsHomePageContent({ folderId }: { folderId: string | null }) {
             {headerTitle}
           </h1>
         </TruncatedTooltip>
+        <Button className="ml-auto" size="sm" variant="outline" disabled={createDoc.isPending} onClick={createBoard}>
+          {t(($) => $.board.new)}
+        </Button>
       </PageHeader>
       <div className="min-h-0 flex-1 overflow-auto p-6">
         <div className="mx-auto max-w-3xl">

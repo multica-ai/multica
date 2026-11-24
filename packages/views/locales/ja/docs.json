@@ -1,4 +1,16 @@
 {
+  "board": {
+    "conflict": "新しいバージョンが保存されました。編集中の内容はこの画面に残っています。",
+    "new": "新しいボード",
+    "title": "引き継ぎボード",
+    "insert_handoff": "引き継ぎを挿入",
+    "prepare": "概要を作成",
+    "review": "概要をレビュー",
+    "link_issue": "課題をリンク",
+    "pick_issue": "このワークスペースの課題を選択",
+    "save": "ボードを保存",
+    "invalid": "ボードを開けませんでした。"
+  },
   "untitled": "無題",
   "version_number": "v{{number}}",
   "kb": "ドキュメント",
