@@ -542,7 +542,8 @@ export function AgentDropdown({
       triggerRender={
         <button
           type="button"
-          className="flex items-center gap-1.5 rounded-md px-1.5 py-1 -ml-1 cursor-pointer outline-none transition-colors hover:bg-accent aria-expanded:bg-accent"
+          aria-label={activeAgent.name}
+          className="flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 -ml-1 cursor-pointer outline-none transition-colors hover:bg-accent aria-expanded:bg-accent"
         />
       }
       trigger={
@@ -554,7 +555,7 @@ export function AgentDropdown({
             enableHoverCard
             showStatusDot
           />
-          <span className="text-caption font-medium max-w-28 truncate">{activeAgent.name}</span>
+          <span className="hidden text-caption font-medium max-w-28 truncate @min-[560px]:inline">{activeAgent.name}</span>
           <ChevronDown className="size-3 text-muted-foreground shrink-0" />
         </>
       }

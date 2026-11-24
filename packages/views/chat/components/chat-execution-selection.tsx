@@ -61,6 +61,9 @@ export function ChatExecutionSelection({
   const staleModel = catalogReady && !!effectiveModel && !selectedModel;
   const staleLevel = catalogReady && !!effectiveLevel && !!selectedModel &&
     !levels.some((entry) => entry.value === effectiveLevel);
+  const source = model === null && thinkingLevel === null
+    ? t(($) => $.execution.inherited)
+    : t(($) => $.execution.overridden);
   const save = (next: { model: string | null; thinkingLevel: string | null }) => {
     mutation.mutate(
       { sessionId: session.id, ...next },
@@ -69,13 +72,13 @@ export function ChatExecutionSelection({
   };
 
   return (
-    <div data-slot="chat-execution-selection" className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-2 pb-1 text-caption text-muted-foreground">
-      <label className="flex min-w-0 items-center gap-1">
-        <span>{t(($) => $.execution.model)}</span>
+    <div data-slot="chat-execution-selection" className="flex min-w-0 flex-1 items-center gap-1 text-caption text-muted-foreground" title={source}>
+      <label className="flex min-w-0 flex-[3] items-center gap-1 @min-[560px]:flex-none">
+        <span className="hidden @min-[560px]:inline">{t(($) => $.execution.model)}</span>
         <select
           aria-label={t(($) => $.execution.model)}
-          className="w-40 max-w-[calc(100vw-9rem)] min-w-0 rounded-md border border-input bg-background px-1 py-0.5 text-foreground"
-          title={effectiveModel || t(($) => $.execution.runtime_default)}
+          className="w-full min-w-0 rounded-md border border-input bg-background px-1 py-0.5 text-foreground @min-[560px]:w-40"
+          title={`${source}: ${effectiveModel || t(($) => $.execution.runtime_default)}`}
           disabled={mutation.isPending || session.status === "archived" || !catalogReady}
           value={model ?? INHERIT}
           onChange={(event) => {
@@ -88,12 +91,12 @@ export function ChatExecutionSelection({
           {models.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
         </select>
       </label>
-      <label className="flex min-w-0 items-center gap-1">
-        <span>{t(($) => $.execution.reasoning)}</span>
+      <label className="flex min-w-0 flex-[2] items-center gap-1 @min-[560px]:flex-none">
+        <span className="hidden @min-[560px]:inline">{t(($) => $.execution.reasoning)}</span>
         <select
           aria-label={t(($) => $.execution.reasoning)}
-          className="w-32 max-w-[calc(100vw-10rem)] min-w-0 rounded-md border border-input bg-background px-1 py-0.5 text-foreground"
-          title={effectiveLevel || t(($) => $.execution.runtime_default)}
+          className="w-full min-w-0 rounded-md border border-input bg-background px-1 py-0.5 text-foreground @min-[560px]:w-32"
+          title={`${source}: ${effectiveLevel || t(($) => $.execution.runtime_default)}`}
           disabled={mutation.isPending || session.status === "archived" || !catalogReady || !selectedModel}
           value={thinkingLevel ?? INHERIT}
           onChange={(event) => save({
@@ -107,8 +110,13 @@ export function ChatExecutionSelection({
           {levels.map((entry) => <option key={entry.value} value={entry.value}>{entry.label}</option>)}
         </select>
       </label>
-      <span className="shrink-0">{model === null && thinkingLevel === null ? t(($) => $.execution.inherited) : t(($) => $.execution.overridden)}</span>
-      {(staleModel || staleLevel) && <span role="status" className="shrink-0 text-destructive">{t(($) => $.execution.stale)}</span>}
+      <span className="shrink-0">{source}</span>
+      {(staleModel || staleLevel) && (
+        <span role="status" className="shrink-0 text-destructive" title={t(($) => $.execution.stale)}>
+          <span className="@min-[560px]:hidden" aria-label={t(($) => $.execution.stale)}>!</span>
+          <span className="hidden @min-[560px]:inline">{t(($) => $.execution.stale)}</span>
+        </span>
+      )}
     </div>
   );
 }
