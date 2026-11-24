@@ -65,6 +65,9 @@ vi.mock("./components/chat-message-list", () => ({
 vi.mock("./components/chat-input", () => ({
   ChatInput: () => <div>chat-input</div>,
 }));
+vi.mock("./components/chat-execution-selection", () => ({
+  ChatExecutionSelection: () => null,
+}));
 vi.mock("./components/chat-thread-list", () => ({
   ChatThreadList: ({
     activeSessionId,
