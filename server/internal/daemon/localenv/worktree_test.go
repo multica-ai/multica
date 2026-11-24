@@ -495,41 +495,29 @@ func (h worktreeLockObserver) WithGroup(string) slog.Handler      { return h }
 func TestFailedEnvironmentStartConcurrentWithWorktreeCompletion(t *testing.T) {
 	f := newWorktreeFixture(t, "24h")
 	fixtureWrite(t, filepath.Join(f.wt.Path, "delivered.txt"), "task delivery\n")
-	lock, err := os.OpenFile(filepath.Join(f.repo, ".git", "multica-worktree.lock"), os.O_RDWR, 0600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer lock.Close()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		t.Fatal(err)
-	}
-	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	unlock := holdWorktreeGit(t, f)
 	entered := make(chan struct{}, 1)
 	f.m.logger = slog.New(worktreeLockObserver{entered: entered})
-	type result struct {
-		out execenv.LocalWorktreeOutcome
-		err error
-	}
-	done := make(chan result, 1)
-	go func() { out, err := f.m.FinalizeWorktree(f.wt); done <- result{out, err} }()
+	var out execenv.LocalWorktreeOutcome
+	join := startLockedWorktree(t, unlock, func() error {
+		var err error
+		out, err = f.m.FinalizeWorktree(f.wt)
+		return err
+	})
 	select {
 	case <-entered:
 	case <-time.After(10 * time.Second):
-		syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
-		r := <-done
-		t.Fatalf("production finalizer never reached lock barrier: %+v", r)
+		err := join()
+		t.Fatalf("production finalizer never reached lock barrier: %+v %v", out, err)
 	}
 	// The production finalizer is waiting at the real Git lock. A concurrent
 	// Start must not publish a lease on the checkout being disposed.
 	startDone := make(chan error, 1)
 	go func() { _, err := f.m.Start(f.task, f.wt.Path, "web", os.Getenv("PATH")); startDone <- err }()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
-		t.Fatal(err)
-	}
-	r := <-done
+	err := join()
 	startErr := <-startDone
-	if r.err != nil || r.out.RetainedWorktree != nil {
-		t.Fatalf("completion: %+v %v", r.out, r.err)
+	if err != nil || out.RetainedWorktree != nil {
+		t.Fatalf("completion: %+v %v", out, err)
 	}
 	if startErr == nil {
 		t.Fatal("Start succeeded after completion removed its checkout")
@@ -723,6 +711,25 @@ func holdWorktreeGit(t *testing.T, f *worktreeFixture) func() {
 	return unlock
 }
 
+// Own the unlock and the real producer completion before starting it. Cleanup
+// runs even when the test body calls Fatal/Goexit, before Manager collection and
+// TempDir removal. Normal assertions share the result without receiving twice.
+func startLockedWorktree(t *testing.T, unlock func(), run func() error) func() error {
+	t.Helper()
+	done := make(chan error, 1)
+	join := sync.OnceValue(func() error {
+		unlock()
+		return <-done
+	})
+	t.Cleanup(func() {
+		if err := join(); err != nil {
+			t.Errorf("worktree operation: %v", err)
+		}
+	})
+	go func() { done <- run() }()
+	return join
+}
+
 func TestWorktreeGitWaitDoesNotBlockOtherRepositories(t *testing.T) {
 	for _, mode := range []string{"finalize-empty", "finalize-live", "release"} {
 		t.Run(mode, func(t *testing.T) {
@@ -744,21 +751,18 @@ func TestWorktreeGitWaitDoesNotBlockOtherRepositories(t *testing.T) {
 				a.auditProcess(env)
 			}
 			unlock := holdWorktreeGit(t, a)
-			done := make(chan error, 1)
-			go func() {
+			join := startLockedWorktree(t, unlock, func() error {
 				if mode == "release" {
 					_, err := a.m.Stop(a.task, "web")
-					done <- err
-				} else {
-					_, err := a.m.FinalizeWorktree(a.wt)
-					done <- err
+					return err
 				}
-			}()
+				_, err := a.m.FinalizeWorktree(a.wt)
+				return err
+			})
 			select {
 			case <-events.waits:
 			case <-time.After(10 * time.Second):
-				unlock()
-				<-done
+				join()
 				t.Fatal("real Git lock wait was not observed")
 			}
 			// Completion is required WHILE the real lock is still held.
@@ -809,8 +813,7 @@ func TestWorktreeGitWaitDoesNotBlockOtherRepositories(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				blocked = true
 			}
-			unlock()
-			if err := <-done; err != nil {
+			if err := join(); err != nil {
 				t.Error(err)
 			}
 			if blocked {
@@ -860,21 +863,18 @@ func TestWorktreeReservationExcludesStartsAndRestart(t *testing.T) {
 			events := &worktreeEvents{waits: make(chan struct{}, 10)}
 			f.m.logger = slog.New(slog.NewTextHandler(events, nil))
 			unlock := holdWorktreeGit(t, f)
-			done := make(chan error, 1)
-			go func() {
+			join := startLockedWorktree(t, unlock, func() error {
 				if mode == "release" {
 					_, err := f.m.Stop(f.task, "web")
-					done <- err
-				} else {
-					_, err := f.m.FinalizeWorktree(f.wt)
-					done <- err
+					return err
 				}
-			}()
+				_, err := f.m.FinalizeWorktree(f.wt)
+				return err
+			})
 			select {
 			case <-events.waits:
 			case <-time.After(10 * time.Second):
-				unlock()
-				<-done
+				join()
 				t.Fatal("real lock barrier not reached")
 			}
 			if !f.m.RetainsWorktree(f.root) {
@@ -894,8 +894,7 @@ func TestWorktreeReservationExcludesStartsAndRestart(t *testing.T) {
 			if len(f.m.List(f.task)) > 1 {
 				t.Error("rejected starts published a record")
 			}
-			unlock()
-			if err := <-done; err != nil {
+			if err := join(); err != nil {
 				t.Error(err)
 			}
 			if mode == "finalize-live" {
@@ -914,13 +913,14 @@ func TestStopDuringFinalizeKeepsCleanupObligation(t *testing.T) {
 	events := &worktreeEvents{waits: make(chan struct{}, 10)}
 	f.m.logger = slog.New(slog.NewTextHandler(events, nil))
 	unlock := holdWorktreeGit(t, f)
-	done := make(chan error, 1)
-	go func() { _, err := f.m.FinalizeWorktree(f.wt); done <- err }()
+	join := startLockedWorktree(t, unlock, func() error {
+		_, err := f.m.FinalizeWorktree(f.wt)
+		return err
+	})
 	select {
 	case <-events.waits:
 	case <-time.After(10 * time.Second):
-		unlock()
-		<-done
+		join()
 		t.Fatal("real lock barrier not reached")
 	}
 	f.auditProcess(e)
@@ -931,11 +931,44 @@ func TestStopDuringFinalizeKeepsCleanupObligation(t *testing.T) {
 	if len(views) != 1 || views[0].RetainedWorktree != f.wt.Path {
 		t.Errorf("pending delivery lost ended record/GC protection: %+v", views)
 	}
-	unlock()
-	if err := <-done; err != nil {
+	if err := join(); err != nil {
 		t.Fatal(err)
 	}
 	f.eventuallyRemoved()
+}
+
+// Return without a normal-body unlock/join. The registered cleanup must finish
+// the real finalizer and its subsequent release before fixture destruction.
+func TestWorktreeFinalizerCollectedOnEarlyReturn(t *testing.T) {
+	f := newWorktreeFixture(t, "24h")
+	fixtureWrite(t, filepath.Join(f.wt.Path, "delivered.txt"), "delivery\n")
+	f.start("web")
+	events := &worktreeEvents{waits: make(chan struct{}, 10)}
+	f.m.logger = slog.New(slog.NewTextHandler(events, nil))
+	unlock := holdWorktreeGit(t, f)
+	finished := make(chan struct{})
+	// Registered before the producer owner, hence checked after its Cleanup.
+	t.Cleanup(func() {
+		select {
+		case <-finished:
+		default:
+			t.Fatal("fixture cleanup did not join the real finalizer")
+		}
+		f.removed()
+	})
+	startLockedWorktree(t, unlock, func() error {
+		defer close(finished)
+		_, err := f.m.FinalizeWorktree(f.wt)
+		return err
+	})
+	select {
+	case <-events.waits:
+	case <-time.After(10 * time.Second):
+		t.Fatal("real lock barrier not reached")
+	}
+	// Stop must finish with the Git lock still held; the finalizer then owns
+	// the release. No Tick, future retry, or simulated completion is needed.
+	f.stop("web")
 }
 
 func TestStartRechecksConfigReadBeforeCheckoutRemoval(t *testing.T) {
