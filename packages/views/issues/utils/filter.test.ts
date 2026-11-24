@@ -827,6 +827,19 @@ describe("relation filters", () => {
     expect(ids({ relationFilters: ["created"], negatedFilters: ["relation"] })).toEqual(["2", "3"]);
   });
 
+  it("keeps finished issues out of the blocked filter", () => {
+    const blocked = [
+      makeIssue({ id: "waiting", status: "todo", blocked_count: 1 }),
+      makeIssue({ id: "done", status: "done", blocked_count: 1 }),
+      makeIssue({ id: "cancelled", status: "cancelled", blocked_count: 2 }),
+      makeIssue({ id: "custom-done", status: "shipped", status_category: "done", blocked_count: 1 }),
+      makeIssue({ id: "free", status: "todo", blocked_count: 0 }),
+    ];
+    expect(
+      filterIssues(blocked, { ...NO_FILTER, relationContext, relationFilters: ["blocked"] }).map((i) => i.id),
+    ).toEqual(["waiting"]);
+  });
+
   it("is a no-op until the viewer is known", () => {
     expect(
       filterIssues(issues, { ...NO_FILTER, relationFilters: ["assigned"] }).map((i) => i.id),

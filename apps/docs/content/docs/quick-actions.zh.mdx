@@ -23,6 +23,8 @@ import { QuickActionDemo } from "@/components/demos/quick-action-demo";
 | 任务侧栏的**快捷操作** | 点击后立即发布保存好的请求。如果设置了智能体或小队，就会请它处理这条任务。 |
 | 在评论框输入 `/` | 选择操作，把请求放进草稿。可以按这次的需要修改，确认后再发送；仅选择操作不会发布。 |
 
+收起任务侧栏后，任务顶栏会显示状态、负责人和**快捷操作**菜单，不用重新打开侧栏也能使用快捷操作。
+
 <QuickActionDemo />
 
 使用快捷操作不会改变任务的负责人或状态。在任务讨论中查看回复，在[执行日志](/tasks)中查看智能体的进展。
@@ -61,7 +63,7 @@ import { QuickActionDemo } from "@/components/demos/quick-action-demo";
 
 团队操作使用的智能体必须允许所有工作区成员调用；如果选择小队，则需要其 leader 允许所有成员调用。个人操作可以使用你有权限调用的智能体。
 
-"仅自己"只决定谁能看到和使用这条保存好的操作。用它在任务中发布的评论，仍对能查看该任务的人可见。
+"仅自己"只决定谁能看到和使用这条保存好的操作。用它在任务中发布的评论，仍对能查看该任务的人可见。在智能体运行期间，只有由你本人触发且运行在你名下运行时上的任务，才能访问你的个人操作；其他成员触发的运行只能看到团队操作。
 
 ## 管理已有操作
 
@@ -70,6 +72,19 @@ import { QuickActionDemo } from "@/components/demos/quick-action-demo";
 还没有你能看到的个人或团队操作时，任务侧栏不显示快捷操作区域。侧栏不按调用权限过滤，点击后才检查权限。
 
 点击后提示无法执行时，请管理员检查这条操作的执行者和调用权限。智能体所在的电脑离线时，工作要等它上线才会开始，排查方法见[故障排查](/troubleshooting)。
+
+## 使用 CLI
+
+可以通过 `multica quick-action` 管理和执行快捷操作：
+
+```bash
+multica quick-action list
+multica quick-action create --name "代码审查" --agent Reviewer --prompt-file ./review.md
+multica quick-action run "代码审查" MUL-123 --dry-run
+multica quick-action run "代码审查" MUL-123
+```
+
+快捷操作支持通过 UUID、唯一 UUID 前缀或精确名称（不区分大小写）指定。`--dry-run` 只预览渲染后的评论内容，不会实际发布。创建、更新、归档、恢复和删除操作仅限真人成员执行（`--visibility` 默认为 `private`，设为 `public` 需要工作区 `owner` 或 `admin` 权限）。完整子命令与参数见[使用 CLI](/cli)。
 
 ## 相关指引
 

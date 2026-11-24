@@ -1,6 +1,9 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion, useIsPresent } from "motion/react";
 import { useQuery } from "@tanstack/react-query";
+import { useReducedMotion } from "@multica/core/appearance";
+import { UI_EASE_OUT } from "@multica/ui/lib/motion";
 import {
   History,
   Link as LinkIcon,
@@ -310,6 +313,7 @@ function DocEditor({ doc }: { doc: Doc }) {
   const outline = useDocOutline(bodyRef, scrollRef, bodyKey);
   const showOutline = outline.headings.length >= MIN_OUTLINE_HEADINGS;
 
+  const reduceMotion = useReducedMotion();
   // Discussions. A link from the inbox names one with ?thread=.
   const { data: comments } = useQuery(docCommentsOptions(wsId, doc.id));
   const threads = useMemo(() => groupDocThreads(comments ?? []), [comments]);
@@ -536,7 +540,14 @@ function DocEditor({ doc }: { doc: Doc }) {
                   </TooltipContent>
                 </Tooltip>
               </div>
-              <div ref={bodyRef} onClick={onBodyClick}>
+              <motion.div
+                key={doc.id}
+                ref={bodyRef}
+                onClick={onBodyClick}
+                initial={reduceMotion ? false : { opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: reduceMotion ? 0 : 0.12, ease: UI_EASE_OUT }}
+              >
                 {!solo ? (
                   <>
                     {!showLiveEditor && <ReadonlyContent content={doc.content} className="min-h-80" />}
@@ -572,7 +583,7 @@ function DocEditor({ doc }: { doc: Doc }) {
                   className="min-h-80"
                 />
                 )}
-              </div>
+              </motion.div>
             </div>
           </div>
           {/* The discussions panel takes the right side; the outline yields. */}
@@ -580,32 +591,36 @@ function DocEditor({ doc }: { doc: Doc }) {
             <aside className="hidden w-56 shrink-0 py-8 pr-6 @5xl:block">
               <DocOutline
                 headings={outline.headings}
-                activeIndex={outline.activeIndex}
+                scrollRef={scrollRef}
                 onSelect={outline.scrollTo}
               />
             </aside>
           )}
         </div>
       </div>
-      {commentsOpen && (
-        <DocCommentsPanel
-          docId={doc.id}
-          threads={threads}
-          missing={highlights.missing}
-          activeId={activeThread}
-          draft={newAnchor}
-          onActivate={activateThread}
-          onDeactivate={() => setActiveThread(null)}
-          onDraftDone={(id) => {
-            setNewAnchor(null);
-            if (id) setActiveThread(id);
-          }}
-          onClose={() => {
-            setCommentsOpen(false);
-            setNewAnchor(null);
-          }}
-        />
-      )}
+      <AnimatePresence initial={false}>
+        {commentsOpen && (
+          <DocCommentsDrawer key="doc-comments-panel" reduceMotion={reduceMotion}>
+            <DocCommentsPanel
+              docId={doc.id}
+              threads={threads}
+              missing={highlights.missing}
+              activeId={activeThread}
+              draft={newAnchor}
+              onActivate={activateThread}
+              onDeactivate={() => setActiveThread(null)}
+              onDraftDone={(id) => {
+                setNewAnchor(null);
+                if (id) setActiveThread(id);
+              }}
+              onClose={() => {
+                setCommentsOpen(false);
+                setNewAnchor(null);
+              }}
+            />
+          </DocCommentsDrawer>
+        )}
+      </AnimatePresence>
       </div>
       <MoveDialog
         target={moving ? { kind: "doc", id: doc.id, title: doc.title } : null}
@@ -616,6 +631,31 @@ function DocEditor({ doc }: { doc: Doc }) {
         onOpenChange={setDeleting}
       />
     </div>
+  );
+}
+
+function DocCommentsDrawer({
+  reduceMotion,
+  children,
+}: {
+  reduceMotion: boolean;
+  children: React.ReactNode;
+}) {
+  const isPresent = useIsPresent();
+  return (
+    <motion.div
+      inert={!isPresent}
+      initial={reduceMotion ? false : { width: 0, opacity: 0 }}
+      animate={{ width: 360, opacity: 1 }}
+      exit={{ width: 0, opacity: 0 }}
+      transition={{
+        duration: reduceMotion ? 0 : 0.22,
+        ease: [0.22, 1, 0.36, 1],
+      }}
+      className="flex h-full shrink-0 overflow-hidden"
+    >
+      {children}
+    </motion.div>
   );
 }
 

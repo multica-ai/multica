@@ -1,0 +1,1 @@
+ALTER TABLE squad DROP COLUMN IF EXISTS handoff_mode;

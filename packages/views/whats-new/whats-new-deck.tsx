@@ -253,7 +253,7 @@ function Deck({
       onKeyDown={onKeyDown}
       className={cn(
         "absolute right-[var(--chat-launcher-inset)] z-50 w-[min(23.75rem,calc(100%-2*var(--chat-launcher-inset)))]",
-        "animate-in fade-in-0 slide-in-from-bottom-3 duration-300 motion-reduce:animate-none",
+        "animate-in fade-in-0 slide-in-from-bottom-3 duration-300 motion-reduce:animate-none motion-reduce:!transition-none",
         className,
       )}
       style={{
@@ -292,7 +292,7 @@ function Deck({
                 aria-hidden="true"
                 onClick={offset === 1 ? () => go(i) : undefined}
                 className={cn(
-                  "absolute inset-0 bg-surface-raised transition-opacity duration-300",
+                  "absolute inset-0 bg-surface-raised transition-opacity duration-300 motion-reduce:transition-none",
                   offset === 1 && "cursor-pointer",
                 )}
                 style={{ opacity: Math.min(offset, 2) * 0.28 }}
@@ -387,7 +387,7 @@ function Dots({ count, index, onSelect }: { count: number; index: number; onSele
           onClick={() => onSelect(i)}
           className={cn(
             // eslint-disable-next-line no-restricted-syntax -- page dots
-            "h-1.5 cursor-pointer rounded-full outline-none transition-[width,background-color] duration-200 focus-visible:ring-2 focus-visible:ring-ring/50",
+            "h-1.5 cursor-pointer rounded-full outline-none transition-[width,background-color] duration-200 motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-ring/50",
             i === index ? "w-4 bg-foreground" : "w-1.5 bg-muted-foreground/30 hover:bg-muted-foreground/60",
           )}
         />

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
-import { AlarmClock, Bell, Bot, CircleUser, ListTodo } from "@multica/ui/icons";
+import { Bell, Bot, CircleUser, ListTodo } from "@multica/ui/icons";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { issueViewContainerKey, useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
@@ -17,11 +17,7 @@ export const BUILTIN_VIEW_ICON: Record<BuiltinViewKey, React.ReactNode> = {
   my_work: <CircleUser className="size-4 shrink-0" />,
   working: <Bot className="size-4 shrink-0" />,
   subscribed: <Bell className="size-4 shrink-0" />,
-  snoozed: <AlarmClock className="size-4 shrink-0" />,
 };
-
-/** The `?view=` id of the issues page's Snoozed list, which is not a filter of All issues. */
-export const SNOOZED_VIEW_ID = "snoozed";
 
 export function useBuiltinViewLabel() {
   const { t } = useT("issues");
@@ -31,8 +27,7 @@ export function useBuiltinViewLabel() {
 /**
  * Where a built-in view lives, and the store write that makes its page show
  * it rather than whichever saved view was left open. Every built-in is the
- * workspace issues page; all but All issues open it under their filter, and
- * Snoozed in place of the table.
+ * workspace issues page; all but All issues open it under their filter.
  */
 export function useBuiltinViewNavigation() {
   const wsId = useWorkspaceId();
@@ -41,11 +36,7 @@ export function useBuiltinViewNavigation() {
 
   const hrefFor = useCallback(
     (key: BuiltinViewKey) =>
-      key === "all_issues"
-        ? p.issues()
-        : key === "snoozed"
-          ? `${p.issues()}?view=${SNOOZED_VIEW_ID}`
-          : issueViewTarget(wsId, FILTERED_BUILTIN_VIEWS[key], p).href,
+      key === "all_issues" ? p.issues() : issueViewTarget(wsId, FILTERED_BUILTIN_VIEWS[key], p).href,
     [p, wsId],
   );
 

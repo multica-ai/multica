@@ -146,6 +146,50 @@ func TestUpdateIssueDescriptionBaseRevisionWithoutLiveEditing(t *testing.T) {
 	putIssueForTest(t, id, map[string]any{"description": "Delta"}).Want(http.StatusOK)
 }
 
+func TestUpdateIssueRequiresBothRevisionPreconditions(t *testing.T) {
+	id := dbfx.Issue(t, "Before", testutil.Cols{"description": "Before", "revision": 7, "description_revision": 3})
+	for _, tc := range []struct {
+		resourceType        string
+		issueRevision       int
+		descriptionRevision int
+	}{
+		{"issue", 6, 3},
+		{"issue_description", 7, 2},
+	} {
+		t.Run(tc.resourceType, func(t *testing.T) {
+			var conflict struct {
+				Code         string `json:"code"`
+				ResourceType string `json:"resource_type"`
+			}
+			putIssueForTest(t, id, map[string]any{
+				"title":                     "Stale",
+				"description":               "Stale",
+				"expected_revision":         tc.issueRevision,
+				"description_base_revision": tc.descriptionRevision,
+			}).Want(http.StatusConflict).JSON(&conflict)
+			if conflict.Code != "revision_conflict" || conflict.ResourceType != tc.resourceType {
+				t.Fatalf("conflict = %+v, want revision_conflict for %s", conflict, tc.resourceType)
+			}
+			current := getIssueForTest(t, id)
+			if current.Title != "Before" || current.Description == nil || *current.Description != "Before" {
+				t.Fatalf("stale request changed issue: %+v", current)
+			}
+		})
+	}
+
+	var updated IssueResponse
+	putIssueForTest(t, id, map[string]any{
+		"title":                     "After",
+		"description":               "After",
+		"expected_revision":         7,
+		"description_base_revision": 3,
+	}).Want(http.StatusOK).JSON(&updated)
+	if updated.Title != "After" || updated.Description == nil || *updated.Description != "After" ||
+		updated.Revision != 8 || updated.DescriptionRevision == nil || *updated.DescriptionRevision != 4 {
+		t.Fatalf("matching revisions must apply both fields and advance both revisions: %+v", updated)
+	}
+}
+
 func TestUpdateIssueDescriptionGoesThroughTheLiveSession(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -189,13 +233,13 @@ func TestUpdateIssueDescriptionGoesThroughTheLiveSession(t *testing.T) {
 
 	var updated IssueResponse
 	putIssueForTest(t, id, map[string]any{
-		"description": "Mine", "description_base_revision": *start.DescriptionRevision, "status": "in_progress",
+		"description": "Mine", "description_base_revision": *start.DescriptionRevision,
 	}).Want(http.StatusOK).JSON(&updated)
 	if got.BaseContent == nil || *got.BaseContent != "Base" || got.Actor.ID != testUserID {
 		t.Fatalf("write must carry the description at its base revision: %+v", got)
 	}
-	if updated.Description == nil || *updated.Description != "Mine" || updated.Status != "in_progress" {
-		t.Fatalf("description and status must both land: %+v", updated)
+	if updated.Description == nil || *updated.Description != "Mine" {
+		t.Fatalf("description must land: %+v", updated)
 	}
 
 	mu.Lock()
@@ -219,6 +263,89 @@ func TestUpdateIssueDescriptionGoesThroughTheLiveSession(t *testing.T) {
 		if p == "/internal/documents/issue:"+id+"/write" {
 			t.Fatalf("expected_revision write must not go through the live session: %v", paths[writes:])
 		}
+	}
+}
+
+// An update that changes the description and other fields commits as one
+// transaction, so a field refused there cannot leave the description changed.
+// The live session takes the result afterwards.
+func TestUpdateIssueDescriptionWithOtherFieldsIsOneTransaction(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	withFeatureFlag(t, testHandler, featureflags.IssueDescriptionLive, true)
+	id := dbfx.Issue(t, "mixed", testutil.Cols{"description": "Base"})
+	document := "issue:" + id
+
+	var mu sync.Mutex
+	var calls []string
+	var synced []collab.WriteRequest
+	loaded := false
+	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		calls = append(calls, r.URL.Path)
+		switch r.URL.Path {
+		case "/internal/documents/" + document + "/flush":
+			if loaded {
+				_, _ = w.Write([]byte(`{"loaded":true,"revision":1}`))
+			} else {
+				_, _ = w.Write([]byte(`{"loaded":false}`))
+			}
+		case "/internal/documents/" + document + "/write":
+			var req collab.WriteRequest
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			synced = append(synced, req)
+			_, _ = w.Write([]byte(`{"status":"ok","revision":1,"content":"","title":"","merged":false}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer service.Close()
+	useCollab(t, service.URL)
+	reset := func() {
+		mu.Lock()
+		defer mu.Unlock()
+		calls, synced = nil, nil
+	}
+
+	// An older client renames the issue from a title someone has since
+	// changed: the title conflicts, and the description must stay as it was.
+	putIssueForTest(t, id, map[string]any{"title": "Renamed elsewhere"}).Want(http.StatusOK)
+	reset()
+	putIssueForTest(t, id, map[string]any{
+		"title": "Mine", "title_base": "mixed", "description": "Mine", "description_base": "Base",
+	}).Want(http.StatusConflict)
+	if current := getIssueForTest(t, id); current.Description == nil || *current.Description != "Base" || current.Title != "Renamed elsewhere" {
+		t.Fatalf("a refused update must change nothing: %+v", current)
+	}
+	mu.Lock()
+	if len(calls) != 0 {
+		t.Fatalf("a refused update must not reach the live session: %v", calls)
+	}
+	mu.Unlock()
+
+	// Nobody has the description open: both fields land, nothing to sync.
+	var updated IssueResponse
+	putIssueForTest(t, id, map[string]any{"description": "Second", "status": "in_progress"}).Want(http.StatusOK).JSON(&updated)
+	if updated.Description == nil || *updated.Description != "Second" || updated.Status != "in_progress" {
+		t.Fatalf("description and status must both land: %+v", updated)
+	}
+	mu.Lock()
+	if len(synced) != 0 {
+		t.Fatalf("an unopened description must not be loaded to sync it: %v", calls)
+	}
+	loaded = true
+	mu.Unlock()
+
+	// Someone has it open: the session takes the new description, merged
+	// from the one the transaction replaced.
+	putIssueForTest(t, id, map[string]any{"description": "Third", "priority": "high"}).Want(http.StatusOK)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(synced) != 1 || synced[0].BaseContent == nil || *synced[0].BaseContent != "Second" ||
+		synced[0].Content == nil || *synced[0].Content != "Third" || synced[0].Actor.ID != testUserID {
+		t.Fatalf("the open session must take the committed description: %+v", synced)
 	}
 }
 

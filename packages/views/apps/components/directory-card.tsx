@@ -9,6 +9,7 @@ import type { AppAccountScope } from "@multica/core/types";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { UpgradeToAddLink } from "../../billing";
 import { useT } from "../../i18n";
+import { useAppCategoryLabel } from "../hooks/use-app-category-label";
 import type { DirectoryApp } from "../lib/directory";
 import { AppCard } from "./app-card";
 import { AppStatusLabel } from "./app-status-label";
@@ -23,13 +24,24 @@ export interface DirectoryCardHandlers {
   needsUpgrade: (slug: string) => boolean;
 }
 
+/** What a card for an unused app says under its name. */
+export type SetUpDetail = "category" | "connect";
+
 /** An app in use: where its account stands, whose it is, and what to do or who uses it. */
-export function DirectoryCard({ app, handlers }: { app: DirectoryApp; handlers: DirectoryCardHandlers }) {
+export function DirectoryCard({
+  app,
+  handlers,
+  detail,
+}: {
+  app: DirectoryApp;
+  handlers: DirectoryCardHandlers;
+  detail?: SetUpDetail;
+}) {
   const { t } = useT("settings");
   const paths = useWorkspacePaths();
   const { getActorName } = useActorName();
 
-  if (!app.inUse && !app.request) return <SetUpCard app={app} />;
+  if (!app.inUse && !app.request) return <SetUpCard app={app} detail={detail} />;
 
   const scopeLine =
     app.scopes.length === 2
@@ -85,16 +97,26 @@ export function DirectoryCard({ app, handlers }: { app: DirectoryApp; handlers: 
   );
 }
 
-export function SetUpCard({ app }: { app: DirectoryApp }) {
+export function SetUpCard({ app, detail = "category" }: { app: DirectoryApp; detail?: SetUpDetail }) {
+  const { t } = useT("settings");
   const paths = useWorkspacePaths();
-  const category = app.entry?.category;
+  const categoryLabel = useAppCategoryLabel();
+  const method = app.entry?.connect_method;
+  const connect =
+    method === "key"
+      ? t(($) => $.connected_apps.hub.connect_key)
+      : method === "oauth"
+        ? t(($) => $.connected_apps.hub.connect_oauth)
+        : undefined;
+  const category = categoryLabel.entry(app.entry);
+  const text = detail === "connect" ? (connect ?? category) : (category ?? connect);
   return (
     <AppCard
       slug={app.slug}
       name={app.name}
       logo={app.entry?.logo}
       href={paths.appDetail(app.slug)}
-      meta={category ? <span className="truncate">{category}</span> : undefined}
+      meta={text ? <span className="truncate">{text}</span> : undefined}
     />
   );
 }

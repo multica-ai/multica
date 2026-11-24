@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -89,6 +90,7 @@ type terminalReportStore struct {
 	namespace string
 	dir       string
 	mu        sync.Mutex
+	lastStats atomic.Pointer[terminalReportStoreStats]
 }
 
 func newTerminalReportStore(cfg Config) *terminalReportStore {
@@ -567,7 +569,14 @@ func (s *terminalReportStore) stats() (terminalReportStoreStats, error) {
 	if s == nil {
 		return terminalReportStoreStats{}, nil
 	}
-	s.mu.Lock()
+	// A queue write can hold the lock while it flushes to disk. Health probes
+	// can use the last successful sample while that work is in progress.
+	if !s.mu.TryLock() {
+		if previous := s.lastStats.Load(); previous != nil {
+			return *previous, nil
+		}
+		return terminalReportStoreStats{}, nil
+	}
 	defer s.mu.Unlock()
 	var stats terminalReportStoreStats
 	var errs []error
@@ -581,7 +590,11 @@ func (s *terminalReportStore) stats() (terminalReportStoreStats, error) {
 	} else {
 		stats.FailedCount, stats.FailedBytes = count, bytes
 	}
-	return stats, errors.Join(errs...)
+	if err := errors.Join(errs...); err != nil {
+		return stats, err
+	}
+	s.lastStats.Store(&stats)
+	return stats, nil
 }
 
 // otherNamespaceStats surfaces records owned by a different server/profile/

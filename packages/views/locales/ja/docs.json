@@ -59,7 +59,8 @@
     "title": "履歴",
     "current": "現在",
     "restore": "このバージョンを復元",
-    "loading": "読み込み中..."
+    "loading": "読み込み中...",
+    "from_discussion": "コメントから：{{quote}}"
   },
   "not_found": {
     "title": "ドキュメントが見つかりません",
@@ -96,6 +97,7 @@
       "save": "コメントを投稿できませんでした",
       "delete": "コメントを削除できませんでした",
       "resolve": "コメントを更新できませんでした"
-    }
+    },
+    "run_waiting_retry": "再試行を待機中"
   }
 }

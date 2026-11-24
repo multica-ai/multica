@@ -183,7 +183,16 @@ export interface IssueDuplicateOf {
   status: IssueStatus;
 }
 
+export interface IssueBlocker extends IssueDuplicateOf {
+ via: "manual" | "stage" | string;
+ closed: boolean;
+}
+
 export interface Issue {
+ blocked_by?: IssueBlocker[];
+ blocked_count?: number;
+ /** The issues waiting on this one. Only the detail read carries it. */
+ blocking?: IssueBlocker[];
   id: string;
   workspace_id: string;
   number: number;

@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
+import { UI_EASE_IN, UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { useStore } from "zustand";
 import { toast } from "sonner";
 import {
@@ -147,6 +150,7 @@ export function IssueViewHeader({
   trailing?: ReactNode;
 }) {
   const { t } = useT("issues");
+  const reduceMotion = useReducedMotion();
   const wsId = useWorkspaceId();
   // A guest (MUL-9420) cannot create issues.
   const guest = useIsGuest(wsId);
@@ -542,25 +546,47 @@ export function IssueViewHeader({
             {...filterMenuProps}
           />
 
-          {dirty && !needsSetup && (
-            <span className="flex shrink-0 items-center gap-1">
-              <Button variant="ghost" size="sm" className="h-7 px-2 text-muted-foreground" onClick={reset}>
-                {t(($) => $.views.reset)}
-              </Button>
-              {activeView && canManage ? (
-                <SaveSplitButton
-                  viewName={activeView.name}
-                  shared={activeView.visibility === "workspace"}
-                  onSave={saveActive}
-                  onSaveAsNew={saveAsNew}
-                />
-              ) : (
-                <Button size="sm" className="h-7 px-2.5" onClick={saveAsNew}>
-                  {activeView ? t(($) => $.views.save_as_new) : t(($) => $.views.save_as_view)}
+          <AnimatePresence initial={false}>
+            {dirty && !needsSetup && (
+              <motion.span
+                key="dirty-actions"
+                initial={reduceMotion ? false : { opacity: 0, x: -4, scale: 0.97 }}
+                animate={{
+                  opacity: 1,
+                  x: 0,
+                  scale: 1,
+                  transition: { duration: reduceMotion ? 0 : UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
+                }}
+                exit={
+                  reduceMotion
+                    ? { opacity: 0, transition: { duration: 0 } }
+                    : {
+                        opacity: 0,
+                        x: -4,
+                        scale: 0.97,
+                        transition: { duration: UI_MOTION_DURATION.micro, ease: UI_EASE_IN },
+                      }
+                }
+                className="flex shrink-0 items-center gap-1"
+              >
+                <Button variant="ghost" size="sm" className="h-7 px-2 text-muted-foreground" onClick={reset}>
+                  {t(($) => $.views.reset)}
                 </Button>
-              )}
-            </span>
-          )}
+                {activeView && canManage ? (
+                  <SaveSplitButton
+                    viewName={activeView.name}
+                    shared={activeView.visibility === "workspace"}
+                    onSave={saveActive}
+                    onSaveAsNew={saveAsNew}
+                  />
+                ) : (
+                  <Button size="sm" className="h-7 px-2.5" onClick={saveAsNew}>
+                    {activeView ? t(($) => $.views.save_as_new) : t(($) => $.views.save_as_view)}
+                  </Button>
+                )}
+              </motion.span>
+            )}
+          </AnimatePresence>
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
@@ -606,29 +632,53 @@ export function IssueViewHeader({
           onConfirm={actions.remove}
         />
       </PageHeader>
-      {needsSetup && (
-        <ViewSetupBar
-          filterMenu={
-            <IssueFilterMenu
-              {...filterMenuProps}
-              summaryTitle={undefined}
-              align="start"
-              open={setupFilterOpen}
-              onOpenChange={setSetupFilterOpen}
-              trigger={
-                <Button variant="outline" size="xs" className="bg-background">
-                  <Plus />
-                  {t(($) => $.views.add_filter)}
-                </Button>
+      <AnimatePresence initial={false}>
+        {needsSetup && (
+          <motion.div
+            key="view-setup-bar"
+            initial={reduceMotion ? false : { opacity: 0, height: 0, overflow: "hidden" }}
+            animate={{
+              opacity: 1,
+              height: "auto",
+              transition: { duration: reduceMotion ? 0 : UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
+              transitionEnd: { overflow: "visible" },
+            }}
+            exit={
+              reduceMotion
+                ? { opacity: 0, transition: { duration: 0 } }
+                : {
+                    opacity: 0,
+                    height: 0,
+                    overflow: "hidden",
+                    transition: { duration: UI_MOTION_DURATION.micro, ease: UI_EASE_IN },
+                  }
+            }
+            className="shrink-0"
+          >
+            <ViewSetupBar
+              filterMenu={
+                <IssueFilterMenu
+                  {...filterMenuProps}
+                  summaryTitle={undefined}
+                  align="start"
+                  open={setupFilterOpen}
+                  onOpenChange={setSetupFilterOpen}
+                  trigger={
+                    <Button variant="outline" size="xs" className="bg-background">
+                      <Plus />
+                      {t(($) => $.views.add_filter)}
+                    </Button>
+                  }
+                />
               }
+              chips={filterChips}
+              dirty={dirty}
+              onClear={reset}
+              onSave={saveActive}
             />
-          }
-          chips={filterChips}
-          dirty={dirty}
-          onClear={reset}
-          onSave={saveActive}
-        />
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 }

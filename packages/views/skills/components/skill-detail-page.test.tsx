@@ -695,7 +695,7 @@ describe("SkillDetailPage draft baseline (MUL-5645)", () => {
     renderPage();
     fireEvent.change(await openDescription(), { target: { value: "edited" } });
     fireEvent.click(await screen.findByRole("button", { name: "Discard" }));
-    expect(screen.queryByText(/^Changed:/)).toBeNull();
+    await vi.waitFor(() => expect(screen.queryByText(/^Changed:/)).toBeNull());
   });
 
   it("pulls a remote edit in silently while the draft is untouched", async () => {

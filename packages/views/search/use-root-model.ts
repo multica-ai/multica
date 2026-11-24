@@ -4,7 +4,9 @@ import { useMemo } from "react";
 import type { CommandBarContext } from "@multica/core/command-bar";
 import { useFeatureEnabled } from "@multica/core/config";
 import { DOCS_V1_FLAG } from "@multica/core/feature-flags";
+import { useWorkspaceId } from "@multica/core/hooks";
 import { WORKSPACE_PAGES, type WorkspacePageKey } from "@multica/core/paths";
+import { useIsGuest } from "@multica/core/permissions";
 import { partitionAggregatedSearchResults } from "@multica/core/search/cancelled-rank";
 import type { SearchDocResult, SearchIssueResult, SearchProjectResult } from "@multica/core/types";
 import { useComposioAvailable } from "../common/use-composio-available";
@@ -193,7 +195,9 @@ export function useRootModel(
   const searching = active && scope !== "commands" && scope !== "people" ? text : "";
   const server = useServerSearch(searching, { projects: scope === "all" });
   const docsEnabled = useFeatureEnabled(DOCS_V1_FLAG, false);
-  const docSearch = useDocSearch(searching, scope === "all" && docsEnabled);
+  // A guest (MUL-9420) has no docs; the server refuses doc search.
+  const guest = useIsGuest(useWorkspaceId());
+  const docSearch = useDocSearch(searching, scope === "all" && docsEnabled && !guest);
   const objects = useObjectSearch(scope === "issues" || scope === "commands" ? "" : q, active);
   const recent = useRecentItems(active && !rawQuery.trim());
 

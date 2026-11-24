@@ -1,21 +1,25 @@
 import { useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { create } from "zustand";
+import { useSidebarProjectPrefs } from "@multica/core/issues/sidebar-project-prefs";
+import { sidebarFolderOrder } from "@multica/core/projects/folder-tree";
 import type { ProjectFolders } from "@multica/views/extensions";
 import { projectFolderListOptions, useFileProject, type ProjectFolder } from "./data";
 import { useFoldersT } from "./i18n";
 
 const NOT_FILED: ReadonlyMap<string, string> = new Map();
 
-/** The workspace's folders by name, and where projects are filed. */
+/** The workspace's folders in the sidebar's order, and where projects are filed. */
 export function useProjectFoldersState(wsId: string): ProjectFolders {
   const t = useFoldersT();
   const { data } = useQuery(projectFolderListOptions(wsId));
   const { mutate: file } = useFileProject(wsId);
 
+  const { projectSettings, projectOrder } = useSidebarProjectPrefs(wsId);
+
   const folders = useMemo(
-    () => [...(data?.folders ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
-    [data?.folders],
+    () => sidebarFolderOrder(data?.folders ?? [], projectSettings, projectOrder),
+    [data?.folders, projectSettings, projectOrder],
   );
   const folderOf = useMemo(() => {
     if (!data?.filed.length) return NOT_FILED;

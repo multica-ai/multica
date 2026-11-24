@@ -6,6 +6,7 @@ import { pluginInstallationsOptions } from "@multica/core/plugins";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFeatureEnabled } from "@multica/core/config";
 import { PLUGINS_V1_FLAG } from "@multica/core/feature-flags";
+import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../i18n";
 import { isDesktopShell } from "../platform/local-directory";
 import { IssueSidebarSectionHeader } from "../issues/components/issue-sidebar-section";
@@ -48,16 +49,28 @@ export function PluginPanelSection({ issueId }: { issueId: string }) {
   return (
     <section>
       <IssueSidebarSectionHeader title={t(($) => $.plugins.panels)} open={open} onOpenChange={setOpen} count={panels.length} />
-      <div hidden={!open} className="space-y-2 px-2">
-        {panels.map(({ installation, surface }) => (
-          <PluginSurfaceFrame
-            key={`${installation.id}:${surface.key}`}
-            wsId={wsId}
-            installation={installation}
-            surface={surface}
-            issueId={issueId}
-          />
-        ))}
+      <div
+        inert={!open}
+        aria-hidden={!open}
+        style={{ visibility: open ? "visible" : "hidden" }}
+        className={cn(
+          "grid transition-[grid-template-rows,opacity,visibility] duration-[180ms] ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+          open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+        )}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div className="space-y-2 px-2">
+            {panels.map(({ installation, surface }) => (
+              <PluginSurfaceFrame
+                key={`${installation.id}:${surface.key}`}
+                wsId={wsId}
+                installation={installation}
+                surface={surface}
+                issueId={issueId}
+              />
+            ))}
+          </div>
+        </div>
       </div>
     </section>
   );

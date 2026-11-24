@@ -205,8 +205,8 @@ add/update/remove mutate durable workspace state and affect future tasks. Ask be
 A project can use a workflow: its ordered status columns, where a column may
 hand the issue off to a handler — a fixed agent, squad or member, the project
 lead, or the issue's creator. When the issue's project uses one, the per-turn
-prompt carries a `[Project workflow]` block. Its statuses and commands are
-the whole status contract for this issue: the built-in moves in the issues
+prompt carries a `[Project workflow]` block. Its statuses are the whole
+status contract for this issue: the built-in moves in the issues
 reference (`in_progress` on start, `in_review` on delivery) do not apply.
 
 - **The step's scope is its instructions.** A step that hands off carries the
@@ -222,9 +222,12 @@ reference (`in_progress` on start, `in_review` on delivery) do not apply.
 - **Changing the status is the handoff.** Entering a column that hands off
   reassigns the issue to that column's handler and starts their run; a member
   handler is assigned and runs nothing. Nothing advances the status when a run
-  ends: finishing a step means moving the issue to the next status yourself,
-  with the command the block names. A column can also name a "needs changes"
-  status that sends the issue back.
+  ends: finishing a step means moving the issue to the next status yourself.
+  The block is a status map — each status's category, meaning, handler and
+  where its author routes finished work ("Routes") — and you set the
+  status that matches where the issue stands; an older runtime gets the
+  commands to run instead. A column can also name a "needs changes" status
+  that sends the issue back.
 - **Entering a step you handle starts your run.** Even when your own run makes
   the move, a run for the new step queues behind the current one, and the
   write skips your own event wakeups so one change starts one run. Do not add
@@ -239,7 +242,7 @@ reference (`in_progress` on start, `in_review` on delivery) do not apply.
   `workflow_step_moved`, naming who moved it. Do not retry; comment if
   something still needs attention.
 - **The assignee owns the step.** Only the issue's assignee gets the step's
-  instructions and commands. Any other agent on the issue — mentioned in a
+  instructions and is told to move it. Any other agent on the issue — mentioned in a
   comment, say — sees the statuses and leaves them to the assignee unless
   explicitly asked to change them.
 - **No `blocked` column.** When the workflow has none, comment why you cannot

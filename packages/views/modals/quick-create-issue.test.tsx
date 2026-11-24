@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const mockQuickCreateIssue = vi.hoisted(() => vi.fn());
@@ -26,6 +26,7 @@ vi.mock("../voice", () => ({
 }));
 const mockCreateCommentSubIssue = vi.hoisted(() => vi.fn());
 const mockSetLastActor = vi.hoisted(() => vi.fn());
+const mockCountActorCreate = vi.hoisted(() => vi.fn());
 const mockSetQuickCreateFieldVisible = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockSetLastMode = vi.hoisted(() => vi.fn());
@@ -109,6 +110,8 @@ const mockQuickCreateStore = {
   lastActorType: null as "agent" | "squad" | null,
   lastActorId: null as string | null,
   setLastActor: mockSetLastActor,
+  actorCreateCounts: {} as Record<string, number>,
+  countActorCreate: mockCountActorCreate,
   keepOpen: false,
   setKeepOpen: mockSetKeepOpen,
   // Not part of the store's interface any more (MUL-5862), but an older
@@ -137,6 +140,10 @@ const mockSquadsData = vi.hoisted(
   () => ({ list: [] as Array<{ id: string; name: string; leader_id: string; archived_at: string | null }> }),
 );
 
+const mockAgentsData = vi.hoisted(
+  () => ({ list: [] as Array<{ id: string; name: string; archived_at: string | null; runtime_id: string }> }),
+);
+
 // Per-test override for the runtimes list. Non-admin members receive a
 // filtered list (ListVisibleAgentRuntimes) that omits other members' private
 // machines, so a selected agent can point at a runtime_id that is simply not
@@ -163,9 +170,7 @@ vi.mock("@tanstack/react-query", () => ({
       case "members":
         return { data: [{ user_id: "user-1", role: "admin" }] };
       case "agents":
-        return {
-          data: [{ id: "agent-1", name: "Bohan", archived_at: null, runtime_id: "runtime-1" }],
-        };
+        return { data: mockAgentsData.list };
       case "runtimes":
         return { data: mockRuntimesData.list };
       case "projects":
@@ -230,7 +235,8 @@ vi.mock("@multica/core/projects/queries", () => ({
   projectListOptions: () => ({ queryKey: ["projects"] }),
 }));
 
-vi.mock("@multica/core/issues/stores/quick-create-store", () => ({
+vi.mock("@multica/core/issues/stores/quick-create-store", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/issues/stores/quick-create-store")>()),
   useQuickCreateStore: (selector?: (state: typeof mockQuickCreateStore) => unknown) =>
     (selector ? selector(mockQuickCreateStore) : mockQuickCreateStore),
 }));
@@ -504,6 +510,16 @@ const TEST_RESOURCES = {
   en: { common: enCommon, modals: enModals, editor: enEditor, projects: enProjects, issues: enIssues },
 };
 
+// A row of the actor popover, as opposed to the quick-switch chip that can
+// carry the same name.
+function pickerRow(name: RegExp) {
+  const rows = screen
+    .getAllByRole("button", { name })
+    .filter((el) => el.hasAttribute("data-selected"));
+  expect(rows).toHaveLength(1);
+  return rows[0]!;
+}
+
 function renderPanel(props: React.ComponentProps<typeof AgentCreatePanel>) {
   return render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
@@ -530,7 +546,7 @@ describe("AgentCreatePanel", () => {
     expect(screen.getByRole("button", { name: /^Create$/i })).toBeEnabled();
     expect(screen.queryByText(/daemon.*version/i)).not.toBeInTheDocument();
     expect(screen.getAllByText("Bohan").length).toBeGreaterThan(0);
-    expect(screen.getByText("Cloud Squad")).toBeInTheDocument();
+    expect(pickerRow(/Cloud Squad/)).toBeInTheDocument();
   });
 
   it("blocks Qoder agents when the prompt references an attachment", () => {
@@ -555,6 +571,8 @@ describe("AgentCreatePanel", () => {
     mockQuickCreateStore.lastActorType = null;
     mockQuickCreateStore.lastActorId = null;
     mockQuickCreateStore.lastProjectId = null;
+    mockQuickCreateStore.actorCreateCounts = {};
+    mockAgentsData.list = [{ id: "agent-1", name: "Bohan", archived_at: null, runtime_id: "runtime-1" }];
     mockCreateSettingsStore.quickCreateFields = ["project"];
     mockQuickCreateStore.keepOpen = false;
     mockIssueDraftStore.draft = emptyIssueDraft();
@@ -640,7 +658,7 @@ describe("AgentCreatePanel", () => {
       setIsExpanded: vi.fn(),
     });
 
-    await user.click(screen.getByRole("button", { name: /Frontend Squad/ }));
+    await user.click(pickerRow(/Frontend Squad/));
     await user.click(screen.getByTestId("project-picker"));
     await user.click(screen.getByTestId("priority-picker"));
     await user.click(screen.getByTestId("due-date-picker"));
@@ -659,7 +677,7 @@ describe("AgentCreatePanel", () => {
     firstOpen.unmount();
     renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
 
-    expect(screen.getByRole("button", { name: /Frontend Squad/ })).toHaveAttribute(
+    expect(pickerRow(/Frontend Squad/)).toHaveAttribute(
       "data-selected",
       "true",
     );
@@ -913,7 +931,7 @@ describe("AgentCreatePanel", () => {
 
     // The picker mock renders both sections inline as buttons; click the
     // squad row directly.
-    await user.click(screen.getByRole("button", { name: /Frontend Squad/ }));
+    await user.click(pickerRow(/Frontend Squad/));
 
     const editor = screen.getByPlaceholderText(
       'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
@@ -974,7 +992,7 @@ describe("AgentCreatePanel", () => {
 
       renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
 
-      await user.click(screen.getByRole("button", { name: /Bohan/ }));
+      await user.click(pickerRow(/Bohan/));
       await user.click(screen.getByTestId("project-picker"));
       await user.type(
         screen.getByPlaceholderText(
@@ -1229,7 +1247,7 @@ describe("AgentCreatePanel", () => {
 
       renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
 
-      await user.click(screen.getByRole("button", { name: /Bohan/ }));
+      await user.click(pickerRow(/Bohan/));
 
       // No misleading "daemon has no CLI version" wall...
       expect(
@@ -1257,7 +1275,7 @@ describe("AgentCreatePanel", () => {
 
       renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
 
-      await user.click(screen.getByRole("button", { name: /Bohan/ }));
+      await user.click(pickerRow(/Bohan/));
 
       expect(screen.getByText(/Create with agent needs ≥/i)).toBeInTheDocument();
       await user.type(
@@ -1335,6 +1353,105 @@ describe("AgentCreatePanel", () => {
       expect(keepOpen.parentElement?.parentElement).toBe(footer);
       expect(attach.parentElement?.parentElement).toBe(footer);
       expect(attach).not.toHaveAttribute("data-size");
+    });
+  });
+
+  // MUL-10012 — the three most used actors sit next to "Created by" as chips,
+  // ranked by how many issues each has filed, and ⌥1–⌥3 pick them.
+  describe("quick-switch chips", () => {
+    const agent = (id: string, name: string) => ({ id, name, archived_at: null, runtime_id: "runtime-1" });
+    const PROMPT_PLACEHOLDER =
+      'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"';
+
+    beforeEach(() => {
+      mockAgentsData.list = [
+        agent("agent-1", "Bohan"),
+        agent("agent-2", "Ada"),
+        agent("agent-3", "Cyd"),
+        agent("agent-4", "Dex"),
+      ];
+      mockQuickCreateStore.actorCreateCounts = { "agent:agent-3": 5, "agent:agent-4": 2 };
+    });
+
+    const chips = () =>
+      within(screen.getByRole("group", { name: "Frequently used" })).getAllByRole("button");
+    const chipNames = () => chips().map((el) => el.textContent);
+    const pressedChip = () => chips().find((el) => el.getAttribute("aria-pressed") === "true");
+
+    it("ranks the chips by create count and fills the rest in list order", () => {
+      renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+      expect(chipNames()).toEqual(["Cyd", "Dex", "Bohan"]);
+      // With no draft or last pick, the default actor is the first agent.
+      expect(pressedChip()).toHaveTextContent("Bohan");
+    });
+
+    it("submits with the chip the user clicked", async () => {
+      const user = userEvent.setup();
+      renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+      await user.click(screen.getByRole("button", { name: "Dex", pressed: false }));
+      expect(pressedChip()).toHaveTextContent("Dex");
+
+      await user.type(screen.getByPlaceholderText(PROMPT_PLACEHOLDER), " now");
+      await user.click(screen.getByRole("button", { name: /^Create$/i }));
+
+      await waitFor(() => {
+        expect(mockQuickCreateIssue).toHaveBeenCalledWith(
+          expect.objectContaining({ agent_id: "agent-4" }),
+        );
+      });
+      expect(mockCountActorCreate).toHaveBeenCalledWith("agent", "agent-4");
+    });
+
+    it("picks a chip with ⌥ + its position, even from inside the prompt", () => {
+      renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+      const notPrevented = fireEvent.keyDown(screen.getByPlaceholderText(PROMPT_PLACEHOLDER), {
+        key: "2",
+        code: "Digit2",
+        altKey: true,
+      });
+
+      expect(notPrevented).toBe(false);
+      expect(pressedChip()).toHaveTextContent("Dex");
+      expect(mockIssueDraftStore.draft.agent).toEqual(
+        expect.objectContaining({ actorType: "agent", actorId: "agent-4" }),
+      );
+    });
+
+    it("leaves ⌥ + a digit past the chips to the editor", () => {
+      mockAgentsData.list = [agent("agent-1", "Bohan")];
+      renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+      const notPrevented = fireEvent.keyDown(screen.getByPlaceholderText(PROMPT_PLACEHOLDER), {
+        key: "2",
+        code: "Digit2",
+        altKey: true,
+      });
+
+      expect(notPrevented).toBe(true);
+    });
+
+    it("shows a pick from the full list as its own chip without moving the ranked ones", async () => {
+      const user = userEvent.setup();
+      renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+      await user.click(pickerRow(/Ada/));
+
+      expect(chipNames()).toEqual(["Cyd", "Dex", "Bohan", "Ada"]);
+      expect(pressedChip()).toHaveTextContent("Ada");
+    });
+
+    it("keeps the chip order fixed while the dialog stays open", async () => {
+      const user = userEvent.setup();
+      renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+      mockQuickCreateStore.actorCreateCounts = { "agent:agent-1": 50 };
+      // Any re-render reads the store again; the ranking must not.
+      await user.type(screen.getByPlaceholderText(PROMPT_PLACEHOLDER), "x");
+
+      expect(chipNames()).toEqual(["Cyd", "Dex", "Bohan"]);
     });
   });
 });

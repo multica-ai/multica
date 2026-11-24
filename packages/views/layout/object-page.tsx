@@ -32,6 +32,7 @@ import {
   useRightSidebarShortcut,
 } from "./animated-right-sidebar";
 import { BreadcrumbHeader, type BreadcrumbSegment } from "./breadcrumb-header";
+import { PanelDisclosure } from "./panel-nav";
 
 /** The reading column of an object page; the header above it stays full width. */
 export const OBJECT_PAGE_BODY =
@@ -282,7 +283,7 @@ export function ObjectSection({
   const [stateOpen, setOpen] = useState(defaultOpen);
   const open = !collapsible || stateOpen;
   return (
-    <section className={cn("space-y-2", className)}>
+    <section className={cn(!collapsible && "space-y-2", className)}>
       <div className="flex h-7 items-center gap-2">
         <h2 className="text-body font-medium">
           {collapsible ? (
@@ -299,7 +300,7 @@ export function ObjectSection({
               <ChevronRight
                 aria-hidden="true"
                 className={cn(
-                  "!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform motion-reduce:transition-none",
+                  "!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
                   open && "rotate-90",
                 )}
               />
@@ -314,7 +315,23 @@ export function ObjectSection({
         {open && action ? <div className="ml-auto flex items-center gap-1">{action}</div> : null}
       </div>
       {/* Folded content stays mounted, so an editor's unsaved draft survives. */}
-      {collapsible ? <div hidden={!open}>{children}</div> : children}
+      {collapsible ? (
+        <div
+          aria-hidden={!open}
+          inert={!open}
+          style={{ visibility: open ? "visible" : "hidden" }}
+          className={cn(
+            "grid transition-[grid-template-rows,opacity,visibility] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+            open ? "visible grid-rows-[1fr] opacity-100" : "invisible grid-rows-[0fr] opacity-0",
+          )}
+        >
+          <div className="overflow-hidden">
+            <div className="pt-2">{children}</div>
+          </div>
+        </div>
+      ) : (
+        children
+      )}
     </section>
   );
 }
@@ -414,14 +431,16 @@ export function ObjectPanelSection({
           {title}
           <ChevronRight
             className={cn(
-              "!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform",
+              "!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
               open && "rotate-90",
             )}
           />
         </button>
         {open && action ? <div className="flex shrink-0 items-center">{action}</div> : null}
       </div>
-      {open ? <div className="space-y-0.5 pl-2">{children}</div> : null}
+      <PanelDisclosure open={open}>
+        <div className="space-y-0.5 pl-2">{children}</div>
+      </PanelDisclosure>
     </div>
   );
 }

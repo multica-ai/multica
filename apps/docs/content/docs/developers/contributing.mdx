@@ -131,6 +131,8 @@ To run a CLI command from source:
 make cli ARGS="issue list"
 ```
 
+To renew an environment that is still registered, including one that has expired, run `make up ARGS="--ttl 48"` from its checkout. This preserves its data and sets a new 48-hour TTL.
+
 ## Changing frontend features
 
 Place features needed by both Web and Desktop according to responsibility:

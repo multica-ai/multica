@@ -8,7 +8,7 @@ import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { renderWithI18n } from "../../test/i18n";
 import { AppDetailPage } from "./app-detail-page";
 
-vi.mock("@multica/core/api", () => ({ api: {
+vi.mock("@multica/core/api", () => ({ ApiError: class ApiError extends Error {}, api: {
   getAppsOverview: vi.fn(), listAppCatalog: vi.fn(), listAgents: vi.fn(), updateAgentApps: vi.fn(),
   listAppActivity: vi.fn(), getIssue: vi.fn(), requestTeamApp: vi.fn(), dismissTeamAppRequests: vi.fn(),
   connectApp: vi.fn(),
@@ -77,7 +77,7 @@ beforeEach(() => {
         ...body.apps.map((a) => ({ agent_id: agentId, toolkit_slug: a.toolkit_slug, account_scope: a.account_scope, level: a.level ?? "write" })),
       ],
     };
-    return { apps: [] } as never;
+    return { apps: overview.agent_apps.filter((a) => a.agent_id === agentId) };
   });
 });
 afterEach(() => {
@@ -121,6 +121,35 @@ describe("AppDetailPage", () => {
       apps: [{ toolkit_slug: "gmail", account_scope: "personal", level: "read" }],
     }));
     await waitFor(() => expect(agentSwitch("Mine")).not.toBeChecked());
+  });
+
+  it("shows the new value before the save lands and keeps it after", async () => {
+    let finish!: () => void;
+    const saved = new Promise<void>((resolve) => { finish = resolve; });
+    const save = vi.mocked(api.updateAgentApps).getMockImplementation()!;
+    vi.mocked(api.updateAgentApps).mockImplementation(async (agentId, body) => {
+      await saved;
+      return save(agentId, body);
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(agentSwitch("Mine")).not.toHaveAttribute("aria-disabled", "true"));
+    await user.click(agentSwitch("Mine"));
+    expect(agentSwitch("Mine")).not.toBeChecked();
+    expect(agentSwitch("Mine")).toHaveAttribute("aria-disabled", "true");
+    finish();
+    await waitFor(() => expect(agentSwitch("Mine")).not.toHaveAttribute("aria-disabled", "true"));
+    expect(agentSwitch("Mine")).not.toBeChecked();
+  });
+
+  it("puts the switch back when the save fails", async () => {
+    vi.mocked(api.updateAgentApps).mockRejectedValue(new Error("nope"));
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(agentSwitch("Mine")).not.toHaveAttribute("aria-disabled", "true"));
+    await user.click(agentSwitch("Mine"));
+    await waitFor(() => expect(agentSwitch("Mine")).not.toHaveAttribute("aria-disabled", "true"));
+    expect(agentSwitch("Mine")).toBeChecked();
   });
 
   it("gives a member's agent the triggerer's account when enabled", async () => {

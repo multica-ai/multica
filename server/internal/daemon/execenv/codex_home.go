@@ -413,11 +413,13 @@ func codexSessionStoreNamespace(profile string) string {
 func codexSessionStoreKey(profile string, task TaskContextForEnv) string {
 	storeID := sanitizePathSegment(task.IssueID)
 	if storeID == "" {
-		chatID := sanitizePathSegment(task.ChatSessionID)
-		if chatID == "" {
+		if chatID := sanitizePathSegment(task.ChatSessionID); chatID != "" {
+			storeID = "chat_" + chatID
+		} else if docID := sanitizePathSegment(task.DocID); docID != "" {
+			storeID = "doc_" + docID
+		} else {
 			return ""
 		}
-		storeID = "chat_" + chatID
 	}
 	agent := sanitizePathSegment(task.AgentID)
 	if agent == "" {

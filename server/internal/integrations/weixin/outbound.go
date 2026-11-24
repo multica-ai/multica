@@ -165,7 +165,9 @@ func (o *Outbound) sendSession(ctx context.Context, key string, session *outboun
 		session.queue[0] = outboundReply{}
 		session.queue = session.queue[1:]
 		o.mu.Unlock()
-		call, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		// Each provider call carries its own deadline; this outer bound must
+		// leave room for several attachments at their size-scaled budgets.
+		call, cancel := context.WithTimeout(ctx, 30*time.Minute)
 		if err := o.deliverReply(call, reply); err != nil {
 			o.logger.WarnContext(ctx, "weixin: reply delivery failed", "task_id", reply.event.TaskID, "error", err)
 		}
@@ -293,10 +295,12 @@ func (o *Outbound) deliverReply(ctx context.Context, reply outboundReply) error 
 		if i < len(chunks) {
 			msg = textMessage(creds.UserID, token, msg.ClientID, chunks[i])
 		} else {
-			item, prepErr := o.attachment(ctx, api, creds.UserID, attachments[i-len(chunks)])
+			row := attachments[i-len(chunks)]
+			started := time.Now()
+			item, prepErr := o.attachment(ctx, api, creds.UserID, row)
 			if prepErr != nil {
 				msg = textMessage(creds.UserID, token, msg.ClientID, "This file could not be sent to WeChat. It is still attached to the reply in Multica.")
-				o.logger.WarnContext(ctx, "weixin: attachment unavailable", "error", prepErr)
+				o.logger.WarnContext(ctx, "weixin: attachment unavailable", "error", prepErr, "task_id", util.UUIDToString(taskID), "attachment_id", util.UUIDToString(row.ID), "content_type", row.ContentType, "size_bytes", row.SizeBytes, "elapsed", time.Since(started))
 			} else {
 				msg.Items = []messageItem{item}
 			}

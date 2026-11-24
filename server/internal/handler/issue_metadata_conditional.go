@@ -32,7 +32,7 @@ func (h *Handler) mutateConditionalIssueMetadata(w http.ResponseWriter, r *http.
 	changed := false
 	result, err := wakeupWrite(h, r, func(q *db.Queries) (db.GetIssueMetadataInWorkspaceRow, error) {
 		var zero db.GetIssueMetadataInWorkspaceRow
-		if _, err := q.LockIssueForAttachmentWrite(r.Context(), db.LockIssueForAttachmentWriteParams{ID: issue.ID, WorkspaceID: issue.WorkspaceID}); err != nil {
+		if _, err := q.LockIssueForWrite(r.Context(), db.LockIssueForWriteParams{ID: issue.ID, WorkspaceID: issue.WorkspaceID}); err != nil {
 			return zero, err
 		}
 		current, err := q.GetIssueMetadataInWorkspace(r.Context(), db.GetIssueMetadataInWorkspaceParams{ID: issue.ID, WorkspaceID: issue.WorkspaceID})

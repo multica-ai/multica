@@ -239,6 +239,8 @@
       "created_by": "作成者",
       "select_agent_aria": "エージェントを選択",
       "pick_an_agent": "エージェントを選択…",
+      "all_actors": "すべてのエージェントとスクワッド",
+      "frequent_actors_aria": "よく使う",
       "no_agents": "利用可能なエージェントまたはスクワッドがありません。",
       "search_placeholder": "エージェントとスクワッドを検索…",
       "agents_group": "エージェント",
