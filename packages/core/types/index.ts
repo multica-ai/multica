@@ -206,6 +206,7 @@ export type {
   ChatDraftRestoresResponse,
   ChatWakeup,
   ChatWakeupKind,
+  ChatWakeupTiming,
   ChatWakeupStatus,
 } from "./chat";
 export type { StorageAdapter } from "./storage";
