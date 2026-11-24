@@ -401,8 +401,8 @@ func (s *Service) executeApproved(ctx context.Context, req db.AppActionRequest) 
 		acct:    account{scope: req.AccountScope, owner: personalOwner(req)},
 		toolkit: req.ToolkitSlug, tool: req.ToolSlug, class: req.ActionClass, requestID: req.ID,
 	}
-	fail := func(msg string) (db.AppActionRequest, string) {
-		call.outcome, call.err = "error", truncate(msg, 500)
+	failAs := func(outcome, msg string) (db.AppActionRequest, string) {
+		call.outcome, call.err = outcome, truncate(msg, 500)
 		s.recordCall(ctx, call)
 		row, err := s.q.SetAppActionRequestOutcome(ctx, db.SetAppActionRequestOutcomeParams{
 			ID: req.ID, WorkspaceID: req.WorkspaceID, Status: "failed",
@@ -413,6 +413,7 @@ func (s *Service) executeApproved(ctx context.Context, req db.AppActionRequest) 
 		}
 		return row, fmt.Sprintf("Your %s was approved, but running it failed: %s. Decide how to continue; do not resubmit the same call unless the failure was transient.", label, msg)
 	}
+	fail := func(msg string) (db.AppActionRequest, string) { return failAs("error", msg) }
 
 	app, ok := s.agentApp(ctx, req.AgentID, req.ToolkitSlug)
 	if !ok {
@@ -441,6 +442,14 @@ func (s *Service) executeApproved(ctx context.Context, req db.AppActionRequest) 
 	}
 	if Decide(req.ToolkitSlug, app.Level, class, rule) == PolicyBlock {
 		return fail("a rule now blocks this call")
+	}
+	// Last: it counts the call, which runs right after.
+	if s.quota != nil {
+		countedIn, exceeded := s.quota.Admit(ctx, req.WorkspaceID)
+		if exceeded != nil {
+			return failAs("quota_exceeded", exceeded.Message())
+		}
+		call.meteredPeriod = countedIn
 	}
 	resp, err := s.composio.ExecuteTool(ctx, acct.connectedAccountID, acct.composioUserID, *tool, args)
 	s.touch(ctx, req.WorkspaceID, acct)

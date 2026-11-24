@@ -1923,7 +1923,8 @@
       "pending": "En espera",
       "approved": "Aprobada",
       "rejected": "Rechazada",
-      "rate_limited": "Límite de llamadas alcanzado"
+      "rate_limited": "Límite de llamadas alcanzado",
+      "quota_exceeded": "Límite mensual alcanzado"
     },
     "scopes": {
       "team": "Cuenta del equipo",

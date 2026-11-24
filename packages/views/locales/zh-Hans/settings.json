@@ -1906,7 +1906,8 @@
       "pending": "等待确认",
       "approved": "已批准",
       "rejected": "已拒绝",
-      "rate_limited": "已限流"
+      "rate_limited": "已限流",
+      "quota_exceeded": "已达月度上限"
     },
     "scopes": {
       "team": "团队账号",

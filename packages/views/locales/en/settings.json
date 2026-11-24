@@ -1923,7 +1923,8 @@
       "pending": "Waiting",
       "approved": "Approved",
       "rejected": "Declined",
-      "rate_limited": "Rate limited"
+      "rate_limited": "Rate limited",
+      "quota_exceeded": "Monthly limit reached"
     },
     "scopes": {
       "team": "Team account",
