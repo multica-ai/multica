@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
 	"github.com/multica-ai/multica/server/pkg/remotemcp/remotemcptest"
@@ -189,9 +190,55 @@ func TestRemoteMCPProviderMatrixAndConfigMerge(t *testing.T) {
 	}
 }
 
-func TestDecodeRemoteMCPSSEData(t *testing.T) {
-	raw, err := decodeRemoteMCPSSEData("text/event-stream; charset=utf-8", []byte("event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1}\n\n"))
-	if err != nil || string(raw) != `{"jsonrpc":"2.0","id":1}` {
-		t.Fatalf("decodeRemoteMCPSSEData = %q, %v", raw, err)
+func TestRemoteMCPProxyFiltersMultiLineAndNotificationPrefixedSSEToolsList(t *testing.T) {
+	schema := json.RawMessage(`{"type":"object","properties":{}}`)
+	canonical, err := canonicalRemoteMCPJSON(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+		_, _ = io.WriteString(w,
+			"event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{\"progress\":1}}\n\n"+
+				"event: message\n"+
+				"data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"tools\":[\n"+
+				"data: {\"name\":\"fixture.read\",\"description\":\"Read\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}},\n"+
+				"data: {\"name\":\"fixture.write\",\"description\":\"Write\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}\n"+
+				"data: ]}}\n\n")
+		w.(http.Flusher).Flush()
+		// Keep the stream open, as Streamable HTTP servers may.
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer upstream.Close()
+	defer close(release)
+	endpoint, _ := url.Parse(upstream.URL)
+	proxy := &remoteMCPProxy{
+		taskID: "task", endpoint: endpoint, client: upstream.Client(), path: "/capability",
+		semaphore: make(chan struct{}, remoteMCPMaxConcurrency),
+		logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+		connection: remotemcp.Connection{
+			InstallationID: "installation", ContributionKey: "fixture",
+			ApprovedTools: []remotemcp.Tool{{
+				Name: "fixture.read", Description: "pinned", InputSchema: canonical,
+				SchemaDigest: remotemcp.DigestBytes(canonical), Risk: "read",
+			}},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	request := httptest.NewRequestWithContext(ctx, http.MethodPost, "/capability", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`))
+	response := httptest.NewRecorder()
+	proxy.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	if strings.Contains(body, `"error"`) || strings.Contains(body, "fixture.write") || !strings.Contains(body, "fixture.read") {
+		t.Fatalf("filtered SSE tools/list = %s", body)
 	}
 }

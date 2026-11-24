@@ -494,7 +494,7 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 	taskContext := inDaemonManagedExecutionContext()
 	token := resolveToken(cmd)
 	if taskContext && !strings.HasPrefix(token, "mat_") {
-		return fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token")
+		return fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token%s", replacedTaskTokenHint(token))
 	}
 	serverURL := resolveServerURL(cmd)
 

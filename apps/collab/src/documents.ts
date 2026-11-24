@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import * as Y from "yjs";
 import type { Document, Hocuspocus } from "@hocuspocus/server";
-import type { DocumentCodec } from "@multica/views/editor/schema/codec";
-import type { CollabApi, StoreRequest } from "./api";
+import type { DocumentCodec, JSONContent } from "@multica/views/editor/schema/codec";
+import type { CollabApi, DocumentType, StoreRequest } from "./api";
 import { applyTextEdits, type EditFailure, type TextEdit } from "./edits";
-import { mergeDocuments, type MergeConflict } from "./merge";
+import { keepLiveBlocks, mergeDocuments, type MergeConflict } from "./merge";
 import type { Actor } from "./ticket";
 
 /** Close code telling a client its local copy belongs to a document the
@@ -22,9 +22,10 @@ const META_MAP = "meta";
 export const COMPACT_STATE_MIN_BYTES = 1 << 20;
 export const COMPACT_STATE_RATIO = 4;
 
-export function parseDocumentName(name: string): { type: "doc"; id: string } | null {
-  const match = /^doc:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(name);
-  return match ? { type: "doc", id: match[1]!.toLowerCase() } : null;
+/** `doc:<uuid>` is a doc; `issue:<uuid>` is an issue's description. */
+export function parseDocumentName(name: string): { type: DocumentType; id: string } | null {
+  const match = /^(doc|issue):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(name);
+  return match ? { type: match[1] as DocumentType, id: match[2]!.toLowerCase() } : null;
 }
 
 export function documentEpoch(doc: Y.Doc): string | undefined {
@@ -36,7 +37,11 @@ export function documentEpoch(doc: Y.Doc): string | undefined {
 const serverOrigin = (actor: Actor) => ({ source: "local" as const, skipStoreHooks: true, context: { actor } });
 
 interface DocState {
+  type: DocumentType;
   id: string;
+  /** Issues: mentions stored while this session was loaded. An editor saves
+   *  a mention half typed, or deletes and retypes it; it notifies once. */
+  seenMentions: Set<string>;
   /** Stored revision the live document was last persisted as. */
   revision: number;
   /** Canonical Markdown of that revision. */
@@ -55,7 +60,9 @@ interface DocState {
 
 export interface WriteRequest {
   actor: Actor;
-  /** Stored revision and content the writer based `content` on. */
+  /** Stored revision and content the writer based `content` on. A restore
+   *  replaces the whole document, so it is refused unless `base_revision` is
+   *  still the stored revision once pending edits are saved. */
   base_revision?: number;
   base_content?: string;
   content?: string;
@@ -76,6 +83,7 @@ export interface EditRequest {
 export type WriteResult =
   | { status: "ok"; revision: number; content: string; title: string; merged: boolean }
   | { status: "conflict"; revision: number; content: string; conflicts: MergeConflict[] }
+  | { status: "stale"; revision: number; content: string }
   | { status: "edit_failed"; revision: number; content: string; failure: EditFailure }
   | { status: "too_large"; revision: number }
   | { status: "gone" };
@@ -110,8 +118,8 @@ export class DocumentStore {
   async load(name: string): Promise<Uint8Array> {
     const parsed = parseDocumentName(name);
     if (!parsed) throw new Error(`unknown document ${name}`);
-    const stored = await this.api.loadDoc(parsed.id);
-    if (!stored) throw new GoneError(`doc ${parsed.id} not found`);
+    const stored = await this.api.load(parsed.type, parsed.id);
+    if (!stored) throw new GoneError(`${parsed.type} ${parsed.id} not found`);
 
     let ydoc: Y.Doc | null = null;
     let from = "markdown";
@@ -131,7 +139,7 @@ export class DocumentStore {
         // only risks the round trip changing something.
         const target = stored.ystate_revision < stored.revision ? this.codec.parse(stored.content) : null;
         if (target && this.codec.ydocToMarkdown(candidate) !== this.codec.serialize(target)) {
-          this.codec.applyJSON(candidate, target, serverOrigin({ type: "member", id: "", name: "" }));
+          this.applyParsed(candidate, target, serverOrigin({ type: "member", id: "", name: "" }));
           from = "state+catch-up";
         }
       }
@@ -144,18 +152,20 @@ export class DocumentStore {
       // Save the state now: loading again would otherwise redo the catch-up
       // or rebuild with new Yjs items and duplicate text for clients that
       // already hold this one.
-      const saved = await this.api.storeDoc(parsed.id, {
+      const saved = await this.api.store(parsed.type, parsed.id, {
         base_revision: stored.revision,
         content: stored.content,
         ystate: Buffer.from(Y.encodeStateAsUpdate(ydoc)).toString("base64"),
         contributors: [],
         state_only: true,
       });
-      if (saved.status === "gone") throw new GoneError(`doc ${parsed.id} not found`);
-      if (saved.status === "conflict") throw new Error(`doc ${parsed.id} changed while loading`);
+      if (saved.status === "gone") throw new GoneError(`${parsed.type} ${parsed.id} not found`);
+      if (saved.status === "conflict") throw new Error(`${parsed.type} ${parsed.id} changed while loading`);
     }
     this.states.set(name, {
+      type: parsed.type,
       id: parsed.id,
+      seenMentions: new Set(),
       revision: stored.revision,
       persisted: this.codec.ydocToMarkdown(ydoc),
       loadedRaw: stored.content,
@@ -163,7 +173,12 @@ export class DocumentStore {
       dirty: false,
       queue: Promise.resolve(),
     });
-    this.log.info("loaded", { doc: parsed.id, revision: stored.revision, from, state_bytes: state?.byteLength ?? 0 });
+    this.log.info("loaded", {
+      [parsed.type]: parsed.id,
+      revision: stored.revision,
+      from,
+      state_bytes: state?.byteLength ?? 0,
+    });
     return Y.encodeStateAsUpdate(ydoc);
   }
 
@@ -200,6 +215,9 @@ export class DocumentStore {
   /** Whole-document write: three-way merged into the live document. */
   write(name: string, req: WriteRequest): Promise<WriteResult> {
     return this.withDocument(name, req.actor, async (document, state) => {
+      if (req.action === "restore" && req.base_revision !== undefined && req.base_revision !== state.revision) {
+        return { status: "stale", revision: state.revision, content: this.codec.ydocToMarkdown(document) };
+      }
       let merged = false;
       if (req.content !== undefined) {
         const current = this.codec.ydocToJSON(document);
@@ -222,7 +240,7 @@ export class DocumentStore {
           }
         }
         if (tooLarge(this.codec.serialize(next))) return { status: "too_large", revision: state.revision };
-        this.codec.applyJSON(document, next, serverOrigin(req.actor));
+        this.applyParsed(document, next, serverOrigin(req.actor));
       }
       return this.commit(name, document, state, req, merged);
     });
@@ -245,12 +263,18 @@ export class DocumentStore {
       }
       const next = this.codec.parse(result.text);
       if (tooLarge(this.codec.serialize(next))) return { status: "too_large", revision: state.revision };
-      this.codec.applyJSON(document, next, serverOrigin(req.actor));
+      this.applyParsed(document, next, serverOrigin(req.actor));
       return this.commit(name, document, state, req, false);
     });
   }
 
   // ---- internals -----------------------------------------------------------
+
+  /** Every server-side write of content parsed from Markdown goes through
+   *  here, so it keeps what Markdown cannot express (see keepLiveBlocks). */
+  private applyParsed(ydoc: Y.Doc, next: JSONContent, origin: unknown) {
+    this.codec.applyJSON(ydoc, keepLiveBlocks(this.codec, this.codec.ydocToJSON(ydoc), next), origin);
+  }
 
   private async commit(
     name: string,
@@ -345,10 +369,11 @@ export class DocumentStore {
       ...(req.action ? { action: req.action } : {}),
       ...(req.action_ref ? { action_ref: req.action_ref } : {}),
       ...(req.task_id ? { task_id: req.task_id } : {}),
+      ...(state.type === "issue" ? { seen_mentions: [...state.seenMentions], live: !explicit } : {}),
     };
     let result;
     try {
-      result = await this.api.storeDoc(state.id, body);
+      result = await this.api.store(state.type, state.id, body);
     } catch (error) {
       giveBack();
       state.dirty = true;
@@ -365,34 +390,42 @@ export class DocumentStore {
       giveBack();
       state.dirty = true;
       if (attempt >= 2) throw new Error(`doc ${state.id}: store kept conflicting`);
-      this.reconcile(name, document, state, result.content);
+      const note = this.reconcile(name, document, state, result.content);
       state.revision = result.revision;
-      return this.persist(name, document, req, attempt + 1);
+      return this.persist(name, document, note && !req.message ? { ...req, message: note } : req, attempt + 1);
     }
     state.revision = result.revision;
     state.persisted = content;
     state.loadedRaw = null;
+    for (const mention of result.mentions) state.seenMentions.add(mention);
     this.lastTitle.set(name, result.title);
     this.log.info("stored", {
-      doc: state.id,
+      [state.type]: state.id,
       revision: result.revision,
       contributors: body.contributors.map((c) => `${c.type}:${c.id}`),
     });
     return result.revision;
   }
 
-  private reconcile(name: string, document: Document, state: DocState, storedContent: string) {
+  /** Folds a change stored without this service into the live document.
+   *  Its writer was already told it succeeded, so a block both sides changed
+   *  keeps both copies, live first, and the returned note labels the version
+   *  that saves them. */
+  private reconcile(name: string, document: Document, state: DocState, storedContent: string): string | null {
     const base = this.codec.parse(state.persisted);
     const stored = this.codec.parse(storedContent);
     const live = this.codec.ydocToJSON(document);
     const result = mergeDocuments(this.codec, base, live, stored);
-    if (result.ok) {
-      this.codec.applyJSON(document, result.doc, serverOrigin({ type: "member", id: "", name: "" }));
-    } else {
-      // Keep what people are typing; the next store overwrites the stray write.
-      this.log.warn("stored change conflicts with live edits; keeping live", { doc: state.id, name });
-    }
+    const origin = serverOrigin({ type: "member", id: "", name: "" });
     state.persisted = this.codec.serialize(stored);
+    if (result.ok) {
+      this.applyParsed(document, result.doc, origin);
+      return null;
+    }
+    this.applyParsed(document, result.both, origin);
+    const count = result.conflicts.length;
+    this.log.warn("stored change conflicts with live edits; keeping both", { doc: state.id, name, conflicts: count });
+    return `Kept both sides of ${count} conflicting edit${count === 1 ? "" : "s"}: live text first, then a change saved while live editing was unavailable`;
   }
 
   /** Shows the writing agent in everyone's presence list for a moment. */

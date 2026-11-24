@@ -31,6 +31,7 @@ vi.mock("@multica/core/api", () => ({
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws" }));
 vi.mock("@multica/core/paths", () => ({
+  issueRouteRef: (issue: { id: string; identifier?: string | null }) => issue.identifier || issue.id,
   useWorkspacePaths: () => ({
     issueDetail: (id: string) => `/ws/issues/${id}`,
   }),
@@ -180,7 +181,7 @@ it("shows consumed running work separately from its off state and keeps transcri
   // A rule that is already off is not part of batch selection.
   expect(within(row).queryByRole("checkbox")).toBeNull();
   fireEvent.click(within(row).getByText("Issue a"));
-  expect(rowLinks).toEqual(["/ws/issues/issue-a"]);
+  expect(rowLinks).toEqual(["/ws/issues/DEV-a"]);
 });
 
 it("confirms batch consequences and retains only failed selections for retry", async () => {

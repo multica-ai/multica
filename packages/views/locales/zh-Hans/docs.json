@@ -59,13 +59,15 @@
     "title": "历史",
     "current": "当前",
     "restore": "恢复此版本",
-    "loading": "加载中..."
+    "loading": "加载中...",
+    "from_discussion": "来自评论：{{quote}}"
   },
   "not_found": {
     "title": "未找到该文档",
     "description": "它可能已被删除。"
   },
   "edited": "编辑于 {{time}}",
+  "view_history": "查看历史",
   "outline": "大纲",
   "link_copied": "链接已复制",
   "unavailable": {
@@ -95,6 +97,7 @@
       "save": "评论发送失败",
       "delete": "评论删除失败",
       "resolve": "无法更新评论状态"
-    }
+    },
+    "run_waiting_retry": "等待重试"
   }
 }

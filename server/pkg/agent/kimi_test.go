@@ -1328,7 +1328,7 @@ while IFS= read -r line; do
       printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"session_e2e"}}\n' "$id"
       ;;
     *'"method":"session/prompt"'*)
-      dir="$KIMI_CODE_HOME/sessions/wd_test_abc123/session_e2e/agents/main"
+      dir="${KIMI_CODE_HOME:-$HOME/.kimi-code}/sessions/wd_test_abc123/session_e2e/agents/main"
       mkdir -p "$dir"
       # The scan drops records stamped before the turn began, so the test
       # injects the timestamp. ` + "`date +%s`" + ` would truncate to the start of
@@ -1398,20 +1398,31 @@ func TestKimiBackendPropagatesACPPromptUsage(t *testing.T) {
 // with its real token split, keyed by the model the wire log names.
 func TestKimiBackendReportsUsageFromWireLog(t *testing.T) {
 	t.Parallel()
+	assertKimiBackendReportsWireUsage(t, map[string]string{"KIMI_CODE_HOME": t.TempDir()}, "")
+}
 
-	kimiHome := t.TempDir()
+func TestKimiBackendReportsWireUsageFromRelativeHome(t *testing.T) {
+	t.Parallel()
+	assertKimiBackendReportsWireUsage(t, map[string]string{"KIMI_CODE_HOME": "runtime-data"}, t.TempDir())
+}
+
+func TestKimiBackendReportsWireUsageFromTaskHome(t *testing.T) {
+	// Exercise the backend's HOME fallback. The daemon rejects HOME in custom agent environments.
+	t.Setenv("KIMI_CODE_HOME", "")
+	assertKimiBackendReportsWireUsage(t, map[string]string{"HOME": t.TempDir()}, "")
+}
+
+func assertKimiBackendReportsWireUsage(t *testing.T, env map[string]string, cwd string) {
+	t.Helper()
 	fakePath := filepath.Join(t.TempDir(), "kimi")
 	writeTestExecutable(t, fakePath, []byte(fakeKimiACPNoUsageScript()))
 
+	// Timestamp the record comfortably after the turn starts.
+	env["KIMI_TEST_RECORD_TIME"] = strconv.FormatInt(time.Now().Add(time.Hour).UnixMilli(), 10)
 	backend, err := New("kimi", Config{
 		ExecutablePath: fakePath,
 		Logger:         slog.Default(),
-		Env: map[string]string{
-			"KIMI_CODE_HOME": kimiHome,
-			// Comfortably after the turn's startTime, so the assertion
-			// tests the scan rather than clock granularity.
-			"KIMI_TEST_RECORD_TIME": strconv.FormatInt(time.Now().Add(time.Hour).UnixMilli(), 10),
-		},
+		Env:            env,
 	})
 	if err != nil {
 		t.Fatalf("new kimi backend: %v", err)
@@ -1420,7 +1431,7 @@ func TestKimiBackendReportsUsageFromWireLog(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	session, err := backend.Execute(ctx, "task", ExecOptions{Timeout: 20 * time.Second})
+	session, err := backend.Execute(ctx, "task", ExecOptions{Cwd: cwd, Timeout: 20 * time.Second})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1553,25 +1564,18 @@ func TestScanKimiSessionUsageFallbackModel(t *testing.T) {
 	}
 }
 
-// TestKimiSessionRootPrefersConfiguredThenEnv pins the discovery order.
-// The kimi subprocess inherits os.Environ() via buildEnv, so a KIMI_CODE_HOME
-// exported to the daemon relocates kimi's sessions without ever reaching
-// cfg.Env — reading only cfg.Env would scan the wrong directory.
-func TestKimiSessionRootPrefersConfiguredThenEnv(t *testing.T) {
-	configured := t.TempDir()
-	fromEnv := t.TempDir()
-	for _, dir := range []string{configured, fromEnv} {
-		if err := os.MkdirAll(filepath.Join(dir, "sessions"), 0o755); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
+func TestKimiChildHomeUsesEffectiveEnvironment(t *testing.T) {
+	inherited := t.TempDir()
+	override := t.TempDir()
+	t.Setenv("KIMI_CODE_HOME", inherited)
+	if got := kimiChildHome(buildEnv(nil), ""); got != inherited {
+		t.Errorf("inherited KIMI_CODE_HOME = %q, want %q", got, inherited)
 	}
-	t.Setenv("KIMI_CODE_HOME", fromEnv)
-
-	if got, want := kimiSessionRoot(configured), filepath.Join(configured, "sessions"); got != want {
-		t.Errorf("explicit config should win: got %q, want %q", got, want)
+	if got := kimiChildHome(buildEnv(map[string]string{"KIMI_CODE_HOME": override}), ""); got != override {
+		t.Errorf("overridden KIMI_CODE_HOME = %q, want %q", got, override)
 	}
-	if got, want := kimiSessionRoot(""), filepath.Join(fromEnv, "sessions"); got != want {
-		t.Errorf("ambient KIMI_CODE_HOME should be used: got %q, want %q", got, want)
+	if got, want := kimiChildHome(buildEnv(map[string]string{"KIMI_CODE_HOME": "kimi-data"}), override), filepath.Join(override, "kimi-data"); got != want {
+		t.Errorf("relative KIMI_CODE_HOME = %q, want %q", got, want)
 	}
 }
 
@@ -1812,14 +1816,13 @@ done
 func TestKimiBackendWireTurnFailureFailsCompletedRun(t *testing.T) {
 	t.Parallel()
 
-	home := t.TempDir()
 	fakePath := filepath.Join(t.TempDir(), "kimi")
 	writeTestExecutable(t, fakePath, []byte(fakeKimiWireTurnFailureScript("ses_wirefail")))
 
 	backend, err := New("kimi", Config{
 		ExecutablePath: fakePath,
 		Logger:         slog.Default(),
-		Env:            map[string]string{"KIMI_CODE_HOME": home},
+		Env:            map[string]string{"KIMI_CODE_HOME": "runtime-data"},
 	})
 	if err != nil {
 		t.Fatalf("new kimi backend: %v", err)
@@ -1828,7 +1831,7 @@ func TestKimiBackendWireTurnFailureFailsCompletedRun(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Cwd: t.TempDir(), Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}

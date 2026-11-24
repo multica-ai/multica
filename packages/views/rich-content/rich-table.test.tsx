@@ -74,6 +74,26 @@ describe("RichTable", () => {
     expect(screen.queryByRole("button", { name: "Reset widths" })).toBeNull();
   });
 
+  it("skips max-content measurements when minimum column widths fit", () => {
+    const measurements: string[] = [];
+    const rect = vi
+      .spyOn(HTMLTableCellElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLTableCellElement) {
+        measurements.push(this.closest("table")?.style.width ?? "");
+        return new DOMRect(0, 0, 100, 20);
+      });
+    const clientWidth = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(560);
+    try {
+      const { table } = renderTable();
+      expect(measurements).toContain("min-content");
+      expect(measurements).not.toContain("max-content");
+      expect(table).not.toHaveAttribute("data-column-widths");
+    } finally {
+      rect.mockRestore();
+      clientWidth.mockRestore();
+    }
+  });
+
   it("gives an overflowing table capped content widths without saving them", () => {
     const natural = { "max-content": [500, 260, 90], "min-content": [200, 330, 64] } as const;
     const rect = vi

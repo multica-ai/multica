@@ -13,7 +13,7 @@ for (const scenario of [
     name: "same account language",
     language: "zh-Hans",
     htmlLang: "zh-CN",
-    continueLabel: "在 web 端继续",
+    continueLabel: "在网页端继续",
   },
 ]) {
   test(`Google callback keeps its single-use code while synchronizing ${scenario.name}`, async ({
@@ -25,6 +25,10 @@ for (const scenario of [
       throw new Error("The callback regression requires a configured baseURL");
     }
     const origin = new URL(baseURL).origin;
+    const apiBase =
+      process.env.NEXT_PUBLIC_API_URL || `http://localhost:${process.env.PORT || "8080"}`;
+    const apiOrigin = new URL(apiBase).origin;
+    const allowedOrigins = new Set([origin, apiOrigin]);
     const code = "locale-regression-code";
     const user = {
       id: "66666666-6666-4666-8666-666666666666",
@@ -77,7 +81,7 @@ for (const scenario of [
     await context.route("**/*", async (route) => {
       const request = route.request();
       const url = new URL(request.url());
-      if (url.origin !== origin) {
+      if (!allowedOrigins.has(url.origin)) {
         if (
           /(^|\.)(google\.com|googleapis\.com|googleusercontent\.com)$/.test(url.hostname)
         ) {

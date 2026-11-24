@@ -3,6 +3,11 @@
 import { useState } from "react";
 import { ChevronRight, Loader2, RefreshCw } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@multica/ui/components/ui/collapsible";
 import { cn } from "@multica/ui/lib/utils";
 import type { SourceContextPreview } from "@multica/core/types";
 import { ApiError } from "@multica/core/api";
@@ -81,8 +86,7 @@ export function SourceContextPreviewCard({
   const sourceContextFailureMessage = useSourceContextFailureMessage();
   const [internalExpanded, setInternalExpanded] = useState(false);
   const expanded = controlledExpanded ?? internalExpanded;
-  const toggleExpanded = () => {
-    const next = !expanded;
+  const setExpanded = (next: boolean) => {
     if (controlledExpanded === undefined) setInternalExpanded(next);
     onExpandedChange?.(next);
   };
@@ -112,7 +116,9 @@ export function SourceContextPreviewCard({
 
   const anchor = preview.comment_thread.find((comment) => comment.id === preview.anchor_comment_id);
   return (
-    <div
+    <Collapsible
+      open={expanded}
+      onOpenChange={setExpanded}
       data-slot="source-context-preview"
       className={cn(
         "mx-4 mb-2 shrink-0 overflow-hidden rounded-md border bg-muted/25",
@@ -121,13 +127,11 @@ export function SourceContextPreviewCard({
           : "shrink-0"),
       )}
     >
-      <button
+      <CollapsibleTrigger
         type="button"
         className="flex w-full min-w-0 shrink-0 items-center gap-2 px-3 py-2 text-left text-caption hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-        aria-expanded={expanded}
-        onClick={toggleExpanded}
       >
-        <ChevronRight className={cn("size-3.5 shrink-0 transition-transform motion-reduce:transition-none", expanded && "rotate-90")} aria-hidden />
+        <ChevronRight className={cn("size-3.5 shrink-0 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none", expanded && "rotate-90")} aria-hidden />
         <span className="min-w-0 truncate font-medium">
           {t(($) => $.source_context.preview_summary, {
             identifier: preview.source_issue.identifier,
@@ -137,8 +141,10 @@ export function SourceContextPreviewCard({
         {anchor?.author.name && (
           <span className="truncate text-muted-foreground">· {anchor.author.name}</span>
         )}
-      </button>
-      {expanded && (
+      </CollapsibleTrigger>
+      <CollapsibleContent
+        className={cn(constrainToParent && "flex min-h-0 flex-1 flex-col")}
+      >
         <div
           data-slot="source-context-preview-body"
           className={cn(
@@ -154,7 +160,7 @@ export function SourceContextPreviewCard({
             anchorCommentId={preview.anchor_comment_id}
           />
         </div>
-      )}
-    </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

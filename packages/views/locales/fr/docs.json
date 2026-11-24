@@ -59,13 +59,15 @@
     "title": "Historique",
     "current": "Actuelle",
     "restore": "Restaurer cette version",
-    "loading": "Chargement..."
+    "loading": "Chargement...",
+    "from_discussion": "Depuis le commentaire : {{quote}}"
   },
   "not_found": {
     "title": "Document introuvable",
     "description": "Il a peut-être été supprimé."
   },
   "edited": "Modifié {{time}}",
+  "view_history": "Voir l'historique",
   "outline": "Plan",
   "link_copied": "Lien copié",
   "unavailable": {
@@ -96,6 +98,7 @@
       "save": "Impossible de publier le commentaire",
       "delete": "Impossible de supprimer le commentaire",
       "resolve": "Impossible de mettre à jour le commentaire"
-    }
+    },
+    "run_waiting_retry": "En attente d'une nouvelle tentative"
   }
 }

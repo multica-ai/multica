@@ -9,10 +9,9 @@ import {
   AlertTriangle,
   ShieldOff,
   RotateCw,
-  Copy,
-  Check,
   Webhook,
 } from "@multica/ui/icons";
+import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
 import { useQuery } from "@tanstack/react-query";
 import {
   autopilotDeliveriesOptions,
@@ -540,11 +539,7 @@ function CodeBlock({ label, value }: { label: string; value: string }) {
           onClick={handleCopy}
           className="flex items-center gap-1 rounded-xs px-2 py-0.5 hover:bg-accent transition-colors"
         >
-          {copied ? (
-            <Check className="h-3 w-3 text-emerald-500" />
-          ) : (
-            <Copy className="h-3 w-3" />
-          )}
+          <CopyCheckIcon copied={copied} className="size-3" />
           {copied
             ? t(($) => $.webhook_payload.copied_short)
             : t(($) => $.webhook_payload.copy)}

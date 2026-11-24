@@ -453,7 +453,7 @@ func TestDashboardUsageDailyBucketsByViewerTimezone(t *testing.T) {
 			$1, $2, $3, NULL, 'tz-bucket-test', 'tz-bucket-model',
 			999, 0, 0, 0, 1
 		)
-		ON CONFLICT ON CONSTRAINT uq_task_usage_hourly_key DO UPDATE
+		ON CONFLICT (bucket_hour, workspace_id, runtime_id, agent_id, project_id, squad_id, provider, model) DO UPDATE
 			SET input_tokens = EXCLUDED.input_tokens
 		RETURNING bucket_hour
 	`, testWorkspaceID, runtimeID, agentID).Scan(&bucketHour)
@@ -1746,7 +1746,7 @@ func TestDashboardPerAgentRollupsUseExactWindow(t *testing.T) {
 			$1, $2, $3, NULL, $4, $5,
 			7777, 0, 0, 0, 1
 		)
-		ON CONFLICT ON CONSTRAINT uq_task_usage_hourly_key DO UPDATE
+		ON CONFLICT (bucket_hour, workspace_id, runtime_id, agent_id, project_id, squad_id, provider, model) DO UPDATE
 			SET input_tokens = EXCLUDED.input_tokens
 	`, testWorkspaceID, runtimeID, agentID, windowProvider, windowModel)
 

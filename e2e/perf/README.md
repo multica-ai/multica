@@ -390,6 +390,29 @@ targets are 100, 50, 300 and none. Machine load moves these numbers, and the
 report records it, so compare builds from one alternating run, not across
 runs.
 
+## Navigation timing in a local environment
+
+`scripts/web-nav-timing.mjs` times a hover-then-click navigation under added
+latency, from the click to the target content on screen, with each request
+and each frame's page state relative to the click (MUL-9796). By default it
+opens a doc; `--from`, `--link` and `--until` time any other link.
+`make web-prod` serves the environment's web port from a production build for
+the length of one command, then starts the dev server again:
+
+```bash
+make up ARGS="--ephemeral"    # docs also need FF_DOCS_V1=true in the env file
+make env-exec ARGS="-- node scripts/web-nav-timing.mjs --label dev"
+make web-prod ARGS="-- node scripts/web-nav-timing.mjs --label prod"
+make destroy ARGS="--yes"
+```
+
+Judge navigation on the production build. `next dev` does not prefetch routes
+on hover and serves every module unbundled: MUL-9781 measured "open a doc" at
+0.66 s there, and only the production build showed the doc page's JS chunk
+waiting on the route's RSC payload. The build is same-origin and must use the
+environment's own web port, because the API accepts realtime WebSockets only
+from `FRONTEND_ORIGIN`; the header of `scripts/web-prod.mjs` has the rest.
+
 ## When to run the typing scenarios
 
 Nothing runs this automatically. The routine guard is the component test from

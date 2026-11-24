@@ -173,7 +173,7 @@ for (const [kind, html, links] of [
         contentType: "application/json",
       });
       await expect(page).toHaveURL(previousUrl);
-      await expect(page.getByRole("button", { name: "New Issue", exact: true }).first()).toBeVisible();
+      await expect(page.getByRole("button", { name: "New issue", exact: true }).first()).toBeVisible();
       await expect(page.getByText("HTML fragment navigation regression", { exact: true })).toBeVisible();
       const screenshot = testInfo.outputPath("after-one-back.png");
       await page.screenshot({ path: screenshot });

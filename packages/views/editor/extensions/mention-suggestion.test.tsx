@@ -500,6 +500,17 @@ describe("createMentionSuggestion", () => {
     expect(members(createMentionSuggestion(qc, { hideGuests: true }))).toEqual(["u1"]);
   });
 
+  it("leaves squads out where a squad cannot be asked", () => {
+    const qc = fakeQc({
+      squads: [{ id: "s1", name: "Design squad", leader_id: "a1", archived_at: null }],
+    });
+    const squads = (config: ReturnType<typeof createMentionSuggestion>) =>
+      (config.items!(itemArgs("design")) as MentionItem[]).filter((i) => i.type === "squad").map((i) => i.id);
+
+    expect(squads(createMentionSuggestion(qc))).toEqual(["s1"]);
+    expect(squads(createMentionSuggestion(qc, { hideSquads: true }))).toEqual([]);
+  });
+
   it("matches cached live projects synchronously and leaves archived ones to the server", () => {
     const qc = fakeQc({
       projects: [
@@ -583,6 +594,27 @@ describe("createMentionSuggestion", () => {
     );
     expect(headings).toEqual(["Docs"]);
     expect(screen.getByText("Release runbook")).toBeInTheDocument();
+  });
+
+  it("shows a project's description with its mention links as their labels", () => {
+    render(
+      <I18nWrapper>
+        <MentionList
+          items={[
+            {
+              id: "p-geo",
+              label: "AI Search",
+              type: "project",
+              description: "Key docs: [Baseline report](mention://doc/d-1)",
+            },
+          ]}
+          query=""
+          command={vi.fn()}
+        />
+      </I18nWrapper>,
+    );
+    expect(screen.getByText("Key docs: Baseline report")).toBeInTheDocument();
+    expect(screen.queryByText(/mention:\/\//)).not.toBeInTheDocument();
   });
 
   it("does not call searchIssues for an empty query", () => {

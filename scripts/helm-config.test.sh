@@ -122,6 +122,28 @@ collab_backend_external="$(helm template multica "$CHART_DIR" --set collab.enabl
 require_rendered_value "$collab_backend_external" 'name: COLLAB_INTERNAL_URL'
 reject_rendered_value "$collab_backend_external" 'name: DATABASE_URL'
 
+# Feature flags render nothing by default, so every flag keeps the default the
+# server gives it. Listed flags land in the ConfigMap the backend loads with
+# envFrom, under the FF_<KEY> name the server looks up.
+reject_rendered_value "$default_all" 'FF_'
+flags_config="$(
+  helm template multica "$CHART_DIR" \
+    --show-only templates/configmap.yaml \
+    --set backend.config.featureFlags.docs_v1=true \
+    --set backend.config.featureFlags.local_search_index=false \
+    --set-string 'backend.config.featureFlags.checkout\.algo-v2=25%'
+)"
+require_rendered_value "$flags_config" 'FF_DOCS_V1: "true"'
+require_rendered_value "$flags_config" 'FF_LOCAL_SEARCH_INDEX: "false"'
+require_rendered_value "$flags_config" 'FF_CHECKOUT_ALGO_V2: "25%"'
+# `helm upgrade --reuse-values` from a chart without featureFlags.
+legacy_flags_config="$(
+  helm template multica "$CHART_DIR" \
+    --show-only templates/configmap.yaml \
+    --set backend.config.featureFlags=null
+)"
+reject_rendered_value "$legacy_flags_config" 'FF_'
+
 capacity_config="$(
   helm template multica "$CHART_DIR" \
     --show-only templates/configmap.yaml \

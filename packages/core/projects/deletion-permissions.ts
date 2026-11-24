@@ -7,7 +7,7 @@ export function canDeleteProject(
   role: MemberRole | null,
   agents: readonly Pick<Agent, "id" | "owner_id">[],
 ): boolean {
-  if (!userId || !role) return false;
+  if (!userId || !role || role === "guest") return false;
   if (role === "owner" || role === "admin") return true;
   if (!project.creator_type || !project.creator_id) return false;
   if (project.creator_type === "member") return project.creator_id === userId;

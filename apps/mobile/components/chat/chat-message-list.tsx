@@ -29,7 +29,7 @@ import { Markdown } from "@/lib/markdown";
 import { ImageSequenceProvider } from "@/lib/markdown/image-sequence";
 import { failureReasonKey } from "@/lib/failure-reason-label";
 import type { QueuedChatMessage } from "@/lib/chat-queued-messages";
-import { formatElapsedMs } from "@/lib/format-elapsed";
+import { formatElapsedMs, formatMessageTime } from "@/lib/format-elapsed";
 import { cn } from "@/lib/utils";
 import { useChatSelectStore } from "@/data/chat-select-store";
 import { useChatMessageLongPress } from "./message-long-press";
@@ -45,7 +45,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { useT } from "@/lib/i18n";
+import { useLocale, useT } from "@/lib/i18n";
 
 interface Props {
   messages: ChatMessage[];
@@ -313,6 +313,7 @@ function MessageRow({
         reasonLabel={t(failureReasonKey(message.failure_reason))}
         rawError={message.content}
         elapsedMs={message.elapsed_ms ?? null}
+        createdAt={message.created_at}
         isSelecting={isSelecting}
         longPress={longPress}
       />
@@ -380,7 +381,8 @@ function MessageRow({
  *   - Process-steps fold (from `task-messages` cache; same cache fed by
  *     the live timeline above, so completed runs keep their trace).
  *   - Markdown content (the model's final answer).
- *   - "Replied in Ns" caption when `elapsed_ms` is stamped.
+ *   - "Replied in Ns · 14:32" caption: duration from `elapsed_ms` when
+ *     stamped, plus the wall-clock reply time.
  *
  * Web's equivalent is `AssistantMessage` in packages/views/chat/components/
  * chat-message-list.tsx — same shape, simplified for RN (no inner Tooltip
@@ -439,12 +441,11 @@ function AssistantRow({
         attachments={message.attachments}
         content={message.content}
       />
-      {message.elapsed_ms != null ? (
-        <ElapsedCaption
-          variant={isNoResponse ? "finished" : "replied"}
-          elapsedMs={message.elapsed_ms}
-        />
-      ) : null}
+      <ReplyTimingCaption
+        variant={isNoResponse ? "finished" : "replied"}
+        elapsedMs={message.elapsed_ms ?? null}
+        createdAt={message.created_at}
+      />
     </View>
   );
   const messageBody = isSelecting ? body : (
@@ -532,24 +533,40 @@ function QuickActions({
 }
 
 // Persistent caption rendered under the assistant bubble / failure bubble
-// once the server has written `elapsed_ms`. Server computes once at task
-// completion, so this caption is identical across reloads and clients.
-function ElapsedCaption({
+// once the turn settles: duration from the server-stamped `elapsed_ms` plus
+// the wall-clock reply time, e.g. "Replied in 38s · 14:32". The server
+// computes elapsed once at task completion, so the caption is identical
+// across reloads and clients; legacy rows without `elapsed_ms` still show
+// the time. Mirrors web's MessageFooter caption in packages/views/chat/
+// components/chat-message-list.tsx.
+function ReplyTimingCaption({
   variant,
   elapsedMs,
+  createdAt,
 }: {
   variant: "replied" | "failed" | "finished";
-  elapsedMs: number;
+  elapsedMs: number | null;
+  createdAt: string;
 }) {
   const { t } = useT("chat");
-  const label =
-    variant === "replied"
-      ? t("elapsed.replied", { time: formatElapsedMs(elapsedMs) })
-      : variant === "finished"
-        ? t("elapsed.finished", { time: formatElapsedMs(elapsedMs) })
-        : t("elapsed.failed", { time: formatElapsedMs(elapsedMs) });
+  const locale = useLocale();
+  const timeLabel = formatMessageTime(createdAt, locale);
+  const parts: string[] = [];
+  if (elapsedMs != null) {
+    parts.push(
+      variant === "replied"
+        ? t("elapsed.replied", { time: formatElapsedMs(elapsedMs) })
+        : variant === "finished"
+          ? t("elapsed.finished", { time: formatElapsedMs(elapsedMs) })
+          : t("elapsed.failed", { time: formatElapsedMs(elapsedMs) }),
+    );
+  }
+  if (timeLabel) parts.push(timeLabel);
+  if (parts.length === 0) return null;
   return (
-    <Text className="text-xs text-muted-foreground/80 mt-1">{label}</Text>
+    <Text className="text-xs text-muted-foreground/80 mt-1">
+      {parts.join(" · ")}
+    </Text>
   );
 }
 
@@ -557,12 +574,14 @@ function FailureBubble({
   reasonLabel,
   rawError,
   elapsedMs,
+  createdAt,
   isSelecting,
   longPress,
 }: {
   reasonLabel: string;
   rawError: string;
   elapsedMs: number | null;
+  createdAt: string;
   isSelecting: boolean;
   longPress: ReturnType<typeof useChatMessageLongPress>;
 }) {
@@ -619,9 +638,11 @@ function FailureBubble({
           </Collapsible>
         ) : null}
       </View>
-      {elapsedMs != null ? (
-        <ElapsedCaption variant="failed" elapsedMs={elapsedMs} />
-      ) : null}
+      <ReplyTimingCaption
+        variant="failed"
+        elapsedMs={elapsedMs}
+        createdAt={createdAt}
+      />
     </View>
   );
   if (isSelecting) return body;

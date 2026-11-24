@@ -11,7 +11,7 @@ Multica est composé d'un backend Go et d'un monorepo pnpm. Le moyen le plus sim
 
 - Node.js 22
 - pnpm 10.28.2
-- Go 1.26.6
+- Go 1.26.9
 - Docker Engine ou Docker Desktop
 - Git et Make
 
@@ -130,6 +130,8 @@ Pour exécuter une commande CLI depuis les sources :
 ```bash
 make cli ARGS="issue list"
 ```
+
+Pour renouveler un environnement encore enregistré, même s’il a expiré, lancez `make up ARGS="--ttl 48"` depuis sa copie de travail. Ses données sont conservées et sa durée de vie est prolongée de 48 heures à compter de la commande.
 
 ## Modifier des fonctionnalités frontend
 

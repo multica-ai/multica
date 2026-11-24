@@ -27,7 +27,7 @@ const lookupState = { isLoading: false, isError: false, refetch: vi.fn() };
 // The active list as a read that failed before anything loaded, and is
 // possibly being tried again.
 const activeFailure = { failed: false, retrying: false, refetch: vi.fn() };
-const queryClient = vi.hoisted(() => ({ setQueryData: vi.fn() }));
+const queryClient = vi.hoisted(() => ({ setQueryData: vi.fn(), getQueryData: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({
   queryOptions: (options: unknown) => options,
   useQueryClient: () => queryClient,
@@ -37,6 +37,7 @@ vi.mock("@tanstack/react-query", () => ({
     data: options.queryKey.includes("archived")
       ? { items: listData.lookup ?? listData.archived, hasMore: false, nextCursor: null }
       : options.queryKey.includes("agent-task-snapshot") ? listData.tasks
+      : options.queryKey.includes("working-agents") ? []
       : options.queryKey.includes("snoozed") ? NO_SNOOZED : listData.active,
     isLoading: false,
     isError: false,
@@ -62,9 +63,15 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "workspace-1",
 }));
 
+vi.mock("@multica/core/permissions", () => ({
+  useIsGuest: () => false,
+}));
+
 vi.mock("@multica/core/paths", () => ({
+  issueRouteRef: (issue: { id: string; identifier?: string | null }) => issue.identifier || issue.id,
   useWorkspacePaths: () => ({
     inbox: () => "/acme/inbox",
+    issues: () => "/acme/issues",
     issueDetail: (id: string) => `/acme/issues/${id}`,
   }),
 }));
@@ -89,6 +96,8 @@ vi.mock("@multica/core/inbox/queries", () => ({
   deduplicateInboxItems: (items: InboxItem[]) => items.filter((i) => !i.archived),
   deduplicateArchivedInboxItems: (items: InboxItem[]) => items.filter((i) => i.archived),
   useInboxUnreadCount: () => 2,
+  findSnoozedInboxIssue: (rows: Array<{ issue_id: string }> | undefined, issueId: string | null) =>
+    rows?.find((row) => row.issue_id === issueId),
 }));
 
 // Stable spies: the auto-mark-read effect keys on the mutate identity, so a
@@ -145,10 +154,11 @@ vi.mock("../../issues/components/issue-detail", () => ({
 }));
 
 const replace = vi.fn();
+const push = vi.fn();
 let searchParams = new URLSearchParams();
 
 vi.mock("../../navigation", () => ({
-  useNavigation: () => ({ searchParams, replace }),
+  useNavigation: () => ({ searchParams, replace, push }),
   // Real hook: reports the detail-pane swap to the shell's progress bar.
   // Nothing here renders that bar, and the page reads nothing back from it.
   useReportNavigating: () => {},
@@ -240,6 +250,18 @@ vi.mock("./autopilot-quota-notice", () => ({
     </button>
   ),
 }));
+const archiveAllDialogProps = vi.hoisted(() => ({ count: -1, open: false }));
+vi.mock("./inbox-archive-all-dialog", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./inbox-archive-all-dialog")>();
+  return {
+    ...actual,
+    InboxArchiveAllDialog: (props: React.ComponentProps<typeof actual.InboxArchiveAllDialog>) => {
+      archiveAllDialogProps.count = props.count;
+      archiveAllDialogProps.open = props.open;
+      return actual.InboxArchiveAllDialog(props);
+    },
+  };
+});
 vi.mock("../../i18n", () => ({ useT: () => ({ t: () => "Inbox" }), useLocale: () => "en" }));
 
 function item(overrides: Partial<InboxItem> = {}): InboxItem {
@@ -266,7 +288,15 @@ function item(overrides: Partial<InboxItem> = {}): InboxItem {
 }
 
 function reset() {
-  useInboxSelectionStore.setState({ lastResolvedKeyByWorkspace: {}, heldRows: {}, leftRowKeyByWorkspace: {} });
+  useInboxSelectionStore.setState({
+    lastResolvedKeyByWorkspace: {},
+    heldRows: {},
+    leftRowKeyByWorkspace: {},
+    lastClearedByWorkspace: {},
+    manualUnreadIdByWorkspace: {},
+  });
+  archiveAllDialogProps.count = -1;
+  archiveAllDialogProps.open = false;
   listData.active = [];
   listData.archived = [];
   listData.lookup = undefined;
@@ -343,10 +373,10 @@ describe("InboxPage", () => {
     expect(issueDetailProps.at(-1)?.highlightCommentId).toBe("c1");
   });
 
-  it("picks the landing again when the open row is clicked again", () => {
+  it("picks the landing again when the Work panel's row is clicked again", () => {
     reset();
     layout.width = DESKTOP;
-    searchParams = new URLSearchParams("view=archived");
+    searchParams = new URLSearchParams("view=archived&issue=issue-1");
     listData.archived = [
       item({ id: "n1", archived: true, read: false, created_at: "2026-11-15T08:00:00Z", details: { comment_id: "c1" } }),
       item({ id: "n2", archived: true, read: false, created_at: "2026-11-15T08:02:00Z", details: { comment_id: "c2" } }),
@@ -355,14 +385,27 @@ describe("InboxPage", () => {
       listData.archived = listData.archived.map((current) => ({ ...current, read: true }));
     });
     const { rerender } = render(<InboxPage />);
-    fireEvent.click(screen.getByTestId("row"));
     expect(issueDetailProps.at(-1)?.highlightCommentId).toBe("c1");
     rerender(<InboxPage />);
     expect(issueDetailProps.at(-1)?.highlightCommentId).toBe("c1");
 
     // Everything is read by now, so a fresh click opens at the newest comment.
-    fireEvent.click(screen.getByTestId("row"));
+    act(() => useInboxSelectionStore.getState().requestLanding("issue-1"));
     expect(issueDetailProps.at(-1)?.highlightCommentId).toBe("c2");
+  });
+
+  it("keeps an archived notification open on desktop when filters change in the sidebar", () => {
+    reset();
+    layout.width = DESKTOP;
+    searchParams = new URLSearchParams("view=archived&issue=issue-9");
+    listData.archived = [item({ id: "archived-1", issue_id: "issue-9", type: "new_comment", archived: true })];
+    render(<InboxPage />);
+    expect(screen.getByTestId("issue-detail")).toHaveTextContent("issue-9");
+
+    act(() => useInboxFilterStore.getState().toggleFilterValue("workspace-1", "type", "mention"));
+
+    expect(screen.getByTestId("issue-detail")).toHaveTextContent("issue-9");
+    expect(replace).not.toHaveBeenCalled();
   });
 
   it("opens a notification the Work panel offered despite a type filter", () => {
@@ -376,16 +419,19 @@ describe("InboxPage", () => {
     expect(screen.getByText("Review quick-create failure")).toBeInTheDocument();
   });
 
-  it("replays the comment landing when re-clicking an open archived row", () => {
+  it("replays the comment landing, and holds the detail's memento off, until the issue lands", () => {
     reset();
     layout.width = DESKTOP;
-    searchParams = new URLSearchParams("view=archived");
+    searchParams = new URLSearchParams("view=archived&issue=issue-1");
     listData.archived = [item({ archived: true, details: { comment_id: "comment-1" } })];
     render(<InboxPage />);
-    fireEvent.click(screen.getByTestId("row"));
     const firstToken = issueDetailProps.at(-1)?.highlightRequestToken;
-    fireEvent.click(screen.getByTestId("row"));
+    act(() => useInboxSelectionStore.getState().requestLanding("issue-1"));
     expect(issueDetailProps.at(-1)?.highlightRequestToken).not.toBe(firstToken);
+    expect(issueDetailProps.at(-1)?.highlightRequestPending).toBe(true);
+
+    act(() => (issueDetailProps.at(-1)?.onHighlightLanded as () => void)());
+    expect(issueDetailProps.at(-1)?.highlightRequestPending).toBe(false);
   });
 
   // Only the phone's page lists notifications; on desktop the Work panel does.
@@ -488,8 +534,8 @@ describe("InboxPage", () => {
     expect(replace).not.toHaveBeenCalled();
   });
 
-  // The live Inbox lives in the Work panel; the archive has nowhere else to list.
-  it("lists the archive in its own column on desktop", () => {
+  // Every tab lists in the Work panel's Inbox section.
+  it("shows no list of its own on desktop for the archive either", () => {
     reset();
     layout.width = DESKTOP;
     searchParams = new URLSearchParams("view=archived");
@@ -497,20 +543,29 @@ describe("InboxPage", () => {
 
     const { container } = render(<InboxPage />);
 
-    expect(container.querySelector("[data-slot='list-column']")).not.toBeNull();
-    expect(screen.getByTestId("list").dataset.view).toBe("archived");
-    expect(screen.getByTestId("row").textContent).toBe("archived-1");
+    expect(screen.queryByTestId("list")).toBeNull();
+    expect(container.querySelector("[data-slot='list-column']")).toBeNull();
   });
 
-  it("keeps the title unread count static", () => {
+  it("hands the detail the open notification, and leaves the way back to the list beside it", () => {
     reset();
-    const { container } = render(<InboxPage />);
-    const titleCount = container.querySelector("h1")?.parentElement?.querySelector(
-      "number-flow-react",
-    ) as (HTMLElement & { animated?: boolean }) | null;
+    layout.width = DESKTOP;
+    searchParams = new URLSearchParams("view=archived&issue=issue-9");
+    listData.archived = [item({ id: "archived-1", issue_id: "issue-9", archived: true })];
+    const host = () => issueDetailProps.at(-1)?.inbox as { crumb?: unknown; item?: InboxItem } | undefined;
+    const { unmount } = render(<InboxPage />);
+    expect(host()).toBeDefined();
+    expect(host()?.crumb).toBeUndefined();
+    // Archived, so the issue's own notification actions stay out of it.
+    expect(host()?.item).toBeUndefined();
+    unmount();
 
-    expect(titleCount?.getAttribute("aria-label")).toBe("2");
-    expect(titleCount?.animated).toBe(false);
+    reset();
+    searchParams = new URLSearchParams("issue=issue-1");
+    listData.active = [item()];
+    render(<InboxPage />);
+    expect(host()?.crumb).toBeUndefined();
+    expect(host()?.item?.id).toBe("inbox-1");
   });
 
   it("shows the active list by default", () => {
@@ -762,20 +817,22 @@ describe("InboxPage", () => {
     expect(screen.getByTestId("row").textContent).toBe("archived-1");
   });
 
-  it("switches between the inbox and the archive from the title menu", async () => {
+  it("switches between the tabs from a phone's header", () => {
     reset();
     listData.active = [item({ id: "active-1", issue_id: "issue-1" })];
-    const { container } = render(<InboxPage />);
+    listData.archived = [item({ id: "archived-1", archived: true })];
+    render(<InboxPage />);
 
-    const titleMenu = container.querySelector("h1 [aria-haspopup='menu']") as HTMLElement;
-    fireEvent.click(titleMenu);
-    // The test's `useT` labels every option "Inbox", so they are located by order.
-    const [inboxOption, archivedOption] = await screen.findAllByRole("menuitemradio");
-    expect(inboxOption).toHaveAttribute("aria-checked", "true");
-    fireEvent.click(archivedOption!);
-
+    // The test's `useT` labels every tab "Inbox", so they are located by order.
+    const [inboxTab, snoozedTab, archivedTab] = screen.getAllByRole("tab");
+    expect(inboxTab).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(archivedTab!);
     expect(replace).toHaveBeenLastCalledWith("/acme/inbox?view=archived");
     expect(screen.getByTestId("list").dataset.view).toBe("archived");
+
+    fireEvent.click(snoozedTab!);
+    expect(replace).toHaveBeenLastCalledWith("/acme/inbox?view=snoozed");
+    expect(screen.queryByTestId("list")).toBeNull();
   });
 
   it("hides the batch-actions menu in the archived view", () => {
@@ -783,7 +840,7 @@ describe("InboxPage", () => {
     // archived list would read as "archive all of these" and do the opposite.
     reset();
     listData.archived = [item({ id: "archived-1", archived: true })];
-    const batchMenu = ':not(h1) > [aria-haspopup="menu"]';
+    const batchMenu = '[aria-haspopup="menu"]';
     const { container: mainView } = render(<InboxPage />);
     expect(mainView.querySelector(batchMenu)).not.toBeNull();
 
@@ -990,13 +1047,11 @@ describe("InboxPage", () => {
       item({ id: "inbox-b", issue_id: "issue-b" }),
     ];
     const { rerender } = render(<InboxPage />);
-    expect(issueDetailProps.at(-1)?.notice).toBeFalsy();
 
     listData.active = [item({ id: "inbox-b", issue_id: "issue-b" })];
     rerender(<InboxPage />);
 
     expect(screen.getByTestId("issue-detail")).toHaveTextContent("issue-a");
-    expect(issueDetailProps.at(-1)?.notice).toBeTruthy();
     expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
   });
 
@@ -1080,11 +1135,13 @@ describe("InboxPage", () => {
     return render(<InboxPage />);
   }
 
+  // An issue's own bar takes E for its notification; the page keeps it for a
+  // notification with no issue, and for the archive.
   function renderWithOpenItem() {
     reset();
     layout.width = DESKTOP;
-    searchParams = new URLSearchParams("issue=issue-a");
-    listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
+    searchParams = new URLSearchParams("issue=inbox-a");
+    listData.active = [item({ id: "inbox-a", issue_id: null, type: "quick_create_failed" })];
     return render(<InboxPage />);
   }
 
@@ -1124,9 +1181,9 @@ describe("InboxPage", () => {
     it("leaves the selection on the next notification", () => {
       reset();
       layout.width = DESKTOP;
-      searchParams = new URLSearchParams("issue=issue-a");
+      searchParams = new URLSearchParams("issue=inbox-a");
       listData.active = [
-        item({ id: "inbox-a", issue_id: "issue-a" }),
+        item({ id: "inbox-a", issue_id: null, type: "quick_create_failed" }),
         item({ id: "inbox-b", issue_id: "issue-b" }),
       ];
 
@@ -1207,6 +1264,17 @@ describe("InboxPage", () => {
       expect(archiveMutate).not.toHaveBeenCalled();
     });
 
+    it("leaves an issue's notification to the issue's own bar", () => {
+      reset();
+      layout.width = DESKTOP;
+      searchParams = new URLSearchParams("issue=issue-a");
+      listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
+      render(<InboxPage />);
+      pressArchiveKey();
+
+      expect(archiveMutate).not.toHaveBeenCalled();
+    });
+
     it("does nothing when no notification is open", () => {
       renderWithActiveItem();
       pressArchiveKey();
@@ -1238,7 +1306,10 @@ describe("InboxPage", () => {
       renderWithActiveItem();
       act(() => rowActions?.onAction("inbox-a"));
       await settle(archiveMutate, "success");
-      expect(toast.success).toHaveBeenCalledWith("Inbox", { action: { label: "Inbox", onClick: expect.any(Function) } });
+      expect(toast.success).toHaveBeenCalledWith(
+        "Inbox",
+        expect.objectContaining({ duration: 10_000, action: { label: "Inbox", onClick: expect.any(Function) } }),
+      );
 
       expect(toast.success).toHaveBeenCalledTimes(1);
     });
@@ -1287,5 +1358,98 @@ describe("InboxPage", () => {
 
     expect(replace).toHaveBeenCalledWith("/acme/issues/issue-404");
     expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
+  });
+
+  it("steps through notifications with J and K shortcuts on desktop", () => {
+    reset();
+    layout.width = DESKTOP;
+    listData.active = [
+      item({ id: "inbox-a", issue_id: "issue-a", created_at: "2026-04-03T00:00:00Z" }),
+      item({ id: "inbox-b", issue_id: "issue-b", created_at: "2026-04-02T00:00:00Z" }),
+      item({ id: "inbox-c", issue_id: "issue-c", created_at: "2026-04-01T00:00:00Z" }),
+    ];
+
+    render(<InboxPage />);
+
+    // Nothing selected yet: J opens the first notification.
+    fireEvent.keyDown(document, { key: "j", code: "KeyJ" });
+    expect(replace).toHaveBeenLastCalledWith("/acme/inbox?issue=issue-a");
+
+    // J advances to the next row; K moves back to the previous row.
+    fireEvent.keyDown(document, { key: "j", code: "KeyJ" });
+    expect(replace).toHaveBeenLastCalledWith("/acme/inbox?issue=issue-b");
+    expect(useInboxSelectionStore.getState().transitionByWorkspace["workspace-1"]?.direction).toBe("next");
+
+    fireEvent.keyDown(document, { key: "k", code: "KeyK" });
+    expect(replace).toHaveBeenLastCalledWith("/acme/inbox?issue=issue-a");
+    expect(useInboxSelectionStore.getState().transitionByWorkspace["workspace-1"]?.direction).toBe("prev");
+
+    // Clamps at the start of the list.
+    replace.mockClear();
+    fireEvent.keyDown(document, { key: "k", code: "KeyK" });
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it("toggles unread and read on the open notification with U without auto-read reverting it", () => {
+    reset();
+    layout.width = DESKTOP;
+    searchParams = new URLSearchParams("issue=issue-a");
+    listData.active = [
+      item({ id: "inbox-a", issue_id: "issue-a", read: true }),
+    ];
+
+    const { rerender } = render(<InboxPage />);
+    markReadMutate.mockClear();
+
+    fireEvent.keyDown(document, { key: "u", code: "KeyU" });
+    expect(markUnreadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
+    expect(useInboxSelectionStore.getState().manualUnreadIdByWorkspace["workspace-1"]).toBe("inbox-a");
+
+    listData.active = [item({ id: "inbox-a", issue_id: "issue-a", read: false })];
+    rerender(<InboxPage />);
+    expect(markReadMutate).not.toHaveBeenCalled();
+
+    // Pressing U again marks it back read and releases the guard.
+    fireEvent.keyDown(document, { key: "u", code: "KeyU" });
+    expect(markReadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
+    expect(useInboxSelectionStore.getState().manualUnreadIdByWorkspace["workspace-1"]).toBeUndefined();
+  });
+
+  it("clears the manual-unread guard on unmount so reopening the notification marks it read again", () => {
+    reset();
+    layout.width = DESKTOP;
+    searchParams = new URLSearchParams("issue=issue-a");
+    listData.active = [item({ id: "inbox-a", issue_id: "issue-a", read: true })];
+
+    const first = render(<InboxPage />);
+    markReadMutate.mockClear();
+
+    fireEvent.keyDown(document, { key: "u", code: "KeyU" });
+    expect(useInboxSelectionStore.getState().manualUnreadIdByWorkspace["workspace-1"]).toBe("inbox-a");
+
+    // Navigate away from the Inbox page.
+    first.unmount();
+    expect(useInboxSelectionStore.getState().manualUnreadIdByWorkspace["workspace-1"]).toBeUndefined();
+
+    // Reopening the same unread notification later should auto-mark it read.
+    listData.active = [item({ id: "inbox-a", issue_id: "issue-a", read: false })];
+    render(<InboxPage />);
+    expect(markReadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
+  });
+
+  it("passes the unfiltered active count to the archive-all dialog when compact filters are active", () => {
+    reset();
+    layout.width = PHONE;
+    listData.active = [
+      item({ id: "inbox-a", issue_id: "issue-a", read: false }),
+      item({ id: "inbox-b", issue_id: "issue-b", read: true }),
+      item({ id: "inbox-c", issue_id: "issue-c", read: true }),
+    ];
+    useInboxFilterStore.getState().toggleUnreadOnly("workspace-1");
+
+    render(<InboxPage />);
+    // Only the 1 unread row is listed under the filter, but archive-all affects all 3 active rows.
+    expect(screen.getAllByTestId("row")).toHaveLength(1);
+    expect(archiveAllDialogProps.count).toBe(3);
   });
 });

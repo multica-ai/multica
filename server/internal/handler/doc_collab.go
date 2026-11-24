@@ -156,9 +156,15 @@ func (h *Handler) flushDocCollab(ctx context.Context, docID pgtype.UUID) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, docCollabFlushTimeout)
 	defer cancel()
-	if err := h.Collab.Flush(ctx, uuidToString(docID)); err != nil {
+	if _, err := h.Collab.Flush(ctx, collab.DocumentName(uuidToString(docID))); err != nil {
 		slog.Warn("doc collab flush failed", "doc_id", uuidToString(docID), "error", err)
 	}
+}
+
+type DocCollabTicketRequest struct {
+	// State asks for the Yjs state saved with the doc, so the editor can
+	// show the doc before its live session has synced.
+	State bool `json:"state"`
 }
 
 type DocCollabTicketResponse struct {
@@ -166,7 +172,14 @@ type DocCollabTicketResponse struct {
 	Token     string `json:"token,omitempty"`
 	Document  string `json:"document,omitempty"`
 	ExpiresAt string `json:"expires_at,omitempty"`
+	// State is the base64 Yjs state saved with the doc's current revision.
+	// Omitted when there is none the live session would load as it is.
+	State string `json:"state,omitempty"`
 }
+
+// docCollabStateMaxBytes caps the state sent to an editor; a larger doc
+// waits for its live session instead.
+const docCollabStateMaxBytes = 2 << 20
 
 // CreateDocCollabTicket lets an editor join a doc's live session. Editors ask
 // again on every reconnect, so tickets are short-lived.
@@ -183,6 +196,11 @@ func (h *Handler) CreateDocCollabTicket(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusOK, DocCollabTicketResponse{Enabled: false})
 		return
 	}
+	// The body is optional: older clients send none.
+	var req DocCollabTicketRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&req)
+	}
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	expires := time.Now().Add(docCollabTicketTTL)
 	document := collab.DocumentName(uuidToString(doc.ID))
@@ -192,9 +210,33 @@ func (h *Handler) CreateDocCollabTicket(w http.ResponseWriter, r *http.Request) 
 		Actor:       h.collabActor(r.Context(), actorType, actorID),
 		ExpiresAt:   expires,
 	})
-	writeJSON(w, http.StatusOK, DocCollabTicketResponse{
+	resp := DocCollabTicketResponse{
 		Enabled: true, Token: token, Document: document, ExpiresAt: expires.UTC().Format(time.RFC3339),
-	})
+	}
+	if req.State {
+		resp.State = h.docCollabState(r.Context(), doc)
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// docCollabState returns the saved Yjs state when the collaboration service
+// would load it unchanged: saved with the current revision, and not so far
+// past its Markdown that the service rebuilds it (COMPACT_STATE_* in
+// apps/collab). Any other state would be replaced on load and reset the
+// editor that showed it.
+func (h *Handler) docCollabState(ctx context.Context, doc db.Doc) string {
+	row, err := h.Queries.GetDocForCollab(ctx, doc.ID)
+	if err != nil || row.WorkspaceID != doc.WorkspaceID || row.Ystate == nil || !row.YstateRevision.Valid {
+		return ""
+	}
+	size := len(row.Ystate)
+	if row.YstateRevision.Int64 != row.Revision || size > docCollabStateMaxBytes {
+		return ""
+	}
+	if size > 1<<20 && size > 4*len(row.Content) {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(row.Ystate)
 }
 
 type DocWriteResponse struct {
@@ -262,7 +304,9 @@ func (h *Handler) updateDocViaCollab(w http.ResponseWriter, r *http.Request, wsU
 			}
 			return true
 		}
-		write.Title, write.Content = &source.Title, &source.Content
+		// The service checks it against the live session, so a restore
+		// never replaces edits the caller had not seen.
+		write.BaseRevision, write.Title, write.Content = req.BaseRevision, &source.Title, &source.Content
 	case req.Content != nil:
 		// The content the writer started from is the merge base.
 		var base string
@@ -288,13 +332,17 @@ func (h *Handler) updateDocViaCollab(w http.ResponseWriter, r *http.Request, wsU
 		write.Title = req.Title
 	}
 
-	result, err := h.Collab.Write(ctx, uuidToString(doc.ID), write)
+	result, err := h.Collab.Write(ctx, collab.DocumentName(uuidToString(doc.ID)), write)
 	if err != nil {
 		if errors.Is(err, collab.ErrUnavailable) {
 			slog.Warn("doc collab write failed; writing directly", "doc_id", uuidToString(doc.ID), "error", err)
 			return false
 		}
 		writeError(w, http.StatusInternalServerError, "failed to update doc")
+		return true
+	}
+	if result.Status == collab.StatusStale {
+		writeRevisionConflict(w, "doc", doc.ID, req.BaseRevision, result.Revision)
 		return true
 	}
 	h.writeCollabResult(w, r, wsUUID, doc.ID, result)
@@ -386,7 +434,7 @@ func (h *Handler) EditDoc(w http.ResponseWriter, r *http.Request) {
 		if taskID.Valid {
 			edit.TaskID = uuidToString(taskID)
 		}
-		result, err := h.Collab.Edit(ctx, uuidToString(docUUID), edit)
+		result, err := h.Collab.Edit(ctx, collab.DocumentName(uuidToString(docUUID)), edit)
 		if err == nil {
 			h.writeCollabResult(w, r, wsUUID, docUUID, result)
 			return

@@ -31,6 +31,7 @@ var wakingTypes = map[string]bool{
 	"app_action_requested": true,
 	"app_action_reminder":  true,
 	"children_done":        true,
+	"blockers_done":        true,
 }
 
 // WakesSnooze reports whether a row of this type ends a snooze on its issue.

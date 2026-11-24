@@ -7,6 +7,7 @@ import type {
   ChatSession,
   ChatPinnedAgent,
   ChatWakeup,
+  ChatWakeupTiming,
   ChatDraftRestoresResponse,
   ChatQuickActionsPendingState,
 } from "../types";
@@ -76,6 +77,27 @@ export function useCancelChatWakeup() {
     onError: (err, { sessionId }, ctx) => {
       logger.warn("cancelChatWakeup.error", { sessionId, err });
       if (ctx?.prev) qc.setQueryData(chatKeys.wakeups(sessionId), ctx.prev);
+    },
+    onSettled: (_data, _err, { sessionId }) => {
+      qc.invalidateQueries({ queryKey: chatKeys.wakeups(sessionId) });
+      qc.invalidateQueries({ queryKey: chatKeys.myWakeups(wsId) });
+    },
+  });
+}
+
+/**
+ * Change when an active wakeup runs. Not optimistic: the server applies the
+ * limits, and chat:wakeup_changed plus the refetch bring the new timing.
+ */
+export function useRescheduleChatWakeup() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+
+  return useMutation({
+    mutationFn: ({ sessionId, wakeupId, timing }: { sessionId: string; wakeupId: string; timing: ChatWakeupTiming }) =>
+      api.rescheduleChatWakeup(sessionId, wakeupId, timing),
+    onError: (err, { sessionId }) => {
+      logger.warn("rescheduleChatWakeup.error", { sessionId, err });
     },
     onSettled: (_data, _err, { sessionId }) => {
       qc.invalidateQueries({ queryKey: chatKeys.wakeups(sessionId) });

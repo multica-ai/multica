@@ -30,7 +30,6 @@ vi.mock("@multica/core/auth", () => ({
 const apiUploadFile = vi.hoisted(() => vi.fn());
 const apiListWorkspaces = vi.hoisted(() => vi.fn());
 const apiListQuickActions = vi.hoisted(() => vi.fn());
-const apiRenderQuickAction = vi.hoisted(() => vi.fn());
 const apiGetIssue = vi.hoisted(() => vi.fn());
 const apiListAgents = vi.hoisted(() => vi.fn());
 const apiListSquads = vi.hoisted(() => vi.fn());
@@ -77,7 +76,6 @@ vi.mock("@multica/core/api", () => ({
     uploadFile: apiUploadFile,
     listWorkspaces: apiListWorkspaces,
     listQuickActions: apiListQuickActions,
-    renderQuickAction: apiRenderQuickAction,
     getIssue: apiGetIssue,
     listAgents: apiListAgents,
     listSquads: apiListSquads,
@@ -319,7 +317,6 @@ beforeEach(() => {
   apiUploadFile.mockReset();
   apiListWorkspaces.mockReset();
   apiListQuickActions.mockReset();
-  apiRenderQuickAction.mockReset();
   apiGetIssue.mockReset().mockResolvedValue({ id: "issue-1", assignee_type: null, assignee_id: null });
   apiListAgents.mockReset().mockResolvedValue([]);
   apiListSquads.mockReset().mockResolvedValue([]);
@@ -472,7 +469,6 @@ describe("quick action `/` menu", () => {
       await waitFor(() => {
         expect(editorQuickActionMenu.last?.getQuickActionContent?.("qa-1")).toBe("Review this issue");
       });
-      expect(apiRenderQuickAction).not.toHaveBeenCalled();
     });
 
     it(`resolves Issue assignee skills in the ${composer.name}`, async () => {

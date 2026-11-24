@@ -118,8 +118,6 @@
     "html_preview": "HTML プレビュー",
     "close_preview": "閉じる",
     "copy_code": "コードをコピー",
-    "show_preview": "プレビューを表示",
-    "show_source": "ソースを表示",
     "fullscreen": "全画面"
   },
   "dynamic_block": {
@@ -133,7 +131,10 @@
     "error_mermaid": "この図を描画できませんでした",
     "error_at_line": "{{message}}（{{line}} 行目）",
     "view_source": "ソースを表示",
-    "copy_error": "エラーをコピー"
+    "copy_error": "エラーをコピー",
+    "title": "タイトル",
+    "rename": "名前を変更",
+    "add_title": "タイトルを追加"
   },
   "file_card": {
     "uploading": "{{filename}} をアップロード中"

@@ -116,7 +116,7 @@ export function StepShell({
   const fadeStyle = useScrollFade(mainRef);
 
   return (
-    <div className="animate-onboarding-enter flex h-full min-h-0 flex-col bg-background">
+    <div className="flex h-full min-h-0 flex-col bg-background">
       {/* One strip across the whole window, as the first flex child — the
           shape the desktop shell rule asks for, and the fix for an overlap:
           the rail is a dark inset panel that started at the window's top-left
@@ -147,7 +147,9 @@ export function StepShell({
               backDisabled={backDisabled}
               footer={chromeFooter}
             />
-            {children}
+            <div key={currentStep} className="animate-onboarding-enter flex min-h-0 flex-1 flex-col">
+              {children}
+            </div>
           </div>
         </main>
       </div>

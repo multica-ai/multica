@@ -119,6 +119,9 @@ const (
 	// The dedicated chat_session_id column still exists for its own consumers;
 	// this makes the attribution UI's jump-to-evidence path uniform (MUL-4302 §2).
 	EvidenceChat EvidenceKind = "chat"
+	// EvidenceDocComment points at the doc discussion comment that started
+	// the run (MUL-9933).
+	EvidenceDocComment EvidenceKind = "doc_comment"
 )
 
 // TriggerKind enumerates every path that can enqueue a run. Kept as an explicit
@@ -137,6 +140,7 @@ const (
 	KindStageWakeup       TriggerKind = "stage_wakeup"
 	KindQuickCreate       TriggerKind = "quick_create"
 	KindChat              TriggerKind = "chat"
+	KindDocComment        TriggerKind = "doc_comment"
 	KindAutopilotSchedule TriggerKind = "autopilot_schedule"
 	KindAutopilotWebhook  TriggerKind = "autopilot_webhook"
 	KindAutopilotManual   TriggerKind = "autopilot_manual"

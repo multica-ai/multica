@@ -10,10 +10,11 @@ The **Analytics** page in the sidebar rolls up agent usage across the whole work
 
 ## Page layout
 
-The page has two tabs, **Usage** and **Errors**, which share the two filters at the top right:
+The page has two tabs, **Usage** and **Errors**, which share the filters at the top right:
 
 - **Time range**: `1d`, `7d`, `30d` (default), `90d`, `180d`, `365d`. `1d` means today, starting at midnight in your time zone, not the last 24 hours.
 - **Project**: **All projects** by default. With a project selected, only runs on that project's issues count; runs that belong to no issue, such as chat runs, drop out.
+- **Attribution** (shown once the workspace has squads): **All attribution** by default. Choose **Standalone agents only** to inspect runs not triggered through any squad, or pick a specific squad to scope every chart, KPI, and list on both tabs to that squad — including its leader's runs, delegated member runs, and runs on squad-created sub-issues.
 
 Days are cut in your time zone: the one set under **Settings → Preferences → Time zone**, or the browser's if you have not set one. The header shows that time zone and when the data was last updated. The server rolls the figures up every 5 minutes and an open page refreshes on the same interval, so a run that just finished can take a few minutes to appear; the refresh button pulls the latest figures immediately.
 
@@ -25,7 +26,7 @@ Four figures sit at the top:
 
 | Card | What it shows |
 | --- | --- |
-| **Cost** | Estimated cost in USD; see [How cost is calculated](#how-cost-is-calculated) |
+| **Cost** | Estimated cost in USD; see [How cost is calculated](#how-cost-is-calculated). Under **All attribution**, notes the squad-triggered share when squads have usage; when filtered to a squad, notes that delegated members are included |
 | **Tokens** | Input, output, cache-read and cache-write tokens combined, with input and output broken out underneath |
 | **Run time** | Total execution time of finished runs, from when each started to when it ended |
 | **Runs** | Runs that finished in the range, and how many of them failed |
@@ -34,14 +35,17 @@ Run time and Runs count only runs that actually started executing (completed, fa
 
 The trend card plots Tokens, Cost, Time, or Runs on one time axis, at a **Daily** or **Weekly** grain. `30d` and `90d` offer both; `1d` and `7d` are daily only, `180d` and `365d` weekly only. Weeks start on Monday, and the current, unfinished week is drawn lighter; hovering it marks the bar as partial and says how many of its 7 days have passed.
 
-The **Leaderboard** lists each agent's tokens, cost, run time, and runs, ranked by whichever of the four you pick. It shows the top 10; **Show all** reveals the rest. Two rows can stand for more than one agent:
+The **Leaderboard** lists tokens, cost, run time, and runs, ranked by whichever of the four you pick. It shows the top 10; **Show all** reveals the rest. When the workspace has squads and Attribution is set to **All attribution**, switch between **Agents** and **Squads**:
 
-- **Deleted agents**: usage of agents that have since been deleted, merged into one row so the rows still add up to the totals above.
-- **Other agents**: agents you cannot see, merged into one row. Workspace owners and admins see every agent members created; a regular member does not see other people's private agents, whose usage appears only here, without names.
+- Under **Agents**, two aggregate rows keep the list reconciled with the totals above:
+  - **Deleted agents**: usage of agents that have since been deleted, merged into one row.
+  - **Other agents**: agents you cannot see, merged into one row. Workspace owners and admins see every agent members created; a regular member does not see other people's private agents, whose usage appears only here, without names.
+- Under **Squads**, each squad combines its leader's and delegated members' runs; expand a squad row to see its per-member breakdown (with the leader marked). Two additional rows keep totals reconciled: **Standalone agents (non-Squad)** — pinned at the bottom for direct `@`-mentions and assignments — and **Deleted squads**.
+- When filtered to a single squad in **Attribution**, the leaderboard switches directly to that squad's member breakdown.
 
-When some of an agent's runs did not report tokens, its Tokens and Cost carry a `≥` prefix and a line under its name says how many runs did not report usage.
+When some of an agent's or squad's runs did not report tokens, its Tokens and Cost carry a `≥` prefix and a line under its name says how many runs did not report usage.
 
-In the demo below, an operations team has three agents. Check the cost trend first, then who spends the most, and finally find the reasons for failures on the Errors tab.
+In the clip below, a workspace with three agents (Engineer, Reviewer, and Docs) reviews daily token usage, switches to cost and the leaderboard, then inspects failures on the Errors tab.
 
 <UsageDemo />
 
@@ -53,7 +57,7 @@ Below them:
 
 - **Daily errors** (or Weekly errors): each colour in a bar is one failure class.
 - **Failure mix**: every failure in the range, split by class. **Show error codes** swaps in the raw failure reason codes, which you can search logs for or paste into an issue.
-- **Top offenders**: ranked by failure count by default, with anything past the first 8 behind a toggle. When ranked by **Rate**, agents with fewer than 10 runs sort last, because a rate from that few runs says little. Clicking an agent's name opens its detail page, which lists its recent runs and the reason for each failure.
+- **Errors by agent** (or **Errors by squad**): ranked by failure count by default, with anything past the first 8 behind a toggle. When ranked by **Rate**, entries with fewer than 10 runs sort last, because a rate from that few runs says little. When the workspace has squads and Attribution is set to **All attribution**, switch between **Agents** and **Squads** to view failures per squad alongside **Standalone agents (non-Squad)** and **Deleted squads**. Clicking an agent or squad name opens its detail page.
 
 Failure reason codes fall into seven classes:
 
@@ -103,7 +107,7 @@ Custom prices apply only to models missing from the price table; they cannot ove
 
 ## Issue cost
 
-The **Execution log** in each issue's sidebar shows the issue's **Spent**, **Tokens**, and **Agent time**, plus one cost bar per run. Click the total, a cost bar, or **Open timeline** to open the **Runs** dialog:
+The **Execution log** in each issue's sidebar shows what the issue has spent in its header. Click **Open timeline** to open the **Runs** dialog:
 
 - The summary at the top shows **Spent**, **Tokens** (and how much came from cache), **Output**, **Agent time**, and **Runs**. Agent time is the sum of the runs' durations; the "elapsed" figure next to it is the time from the first run's start to the last run's end. Next to Runs are the failed, cancelled, and active counts.
 - The chart's **Per run** view draws a bar per run for cost, tokens, or agent time; **Cumulative** draws cumulative cost growing over time.

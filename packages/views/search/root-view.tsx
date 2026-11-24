@@ -8,7 +8,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { inboxUnreadSummaryOptions, unreadWorkspaceIds } from "@multica/core/inbox/queries";
 import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
 import { issueViewTarget } from "@multica/core/issue-views/view-target";
-import { paths, useWorkspacePaths } from "@multica/core/paths";
+import { paths, useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { projectListOptions } from "@multica/core/projects/queries";
 import type { InboxWorkspaceUnread } from "@multica/core/types";
 import { openCreateIssueWithPreference } from "@multica/core/issues/stores";
@@ -64,7 +64,7 @@ export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: stri
   const p = useWorkspacePaths();
   const { data: unreadSummary = EMPTY_UNREAD_SUMMARY } = useQuery(inboxUnreadSummaryOptions());
   const unreadWsIds = unreadWorkspaceIds(unreadSummary);
-  // A guest (MUL-9420) can neither create issues nor hand work to an agent.
+  // A guest (MUL-9420) can neither create issues, assign them nor hand work to an agent.
   const guest = useIsGuest(useWorkspaceId());
   const { server, partitioned, objects, text } = model;
   const query = text;
@@ -275,7 +275,7 @@ export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: stri
               issue={issue}
               query={server.results.query}
               disabled={server.stale}
-              onSelect={() => palette.navigate(p.issueDetail(issue.id))}
+              onSelect={() => palette.navigate(p.issueDetail(issueRouteRef(issue)))}
             />
           ))}
         </PaletteGroup>
@@ -412,7 +412,14 @@ export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: stri
 
   return (
     <>
-      {best && <BestMatchGroups best={best} query={query} target={model.primaryIssueTarget} canCreateIssue={!guest} />}
+      {best && (
+        <BestMatchGroups
+          best={best}
+          query={query}
+          target={guest ? null : model.primaryIssueTarget}
+          canCreateIssue={!guest}
+        />
+      )}
       {groups.map((group) => group.node)}
       {partitioned.hasCancelled && (
         <PaletteGroup heading={t(($) => $.groups.cancelled)}>
@@ -431,7 +438,7 @@ export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: stri
               issue={issue}
               query={server.results.query}
               disabled={server.stale}
-              onSelect={() => palette.navigate(p.issueDetail(issue.id))}
+              onSelect={() => palette.navigate(p.issueDetail(issueRouteRef(issue)))}
             />
           ))}
         </PaletteGroup>
@@ -755,11 +762,13 @@ function EmptyState({ model }: { model: RootModel }) {
       {model.contextGroups.map((group) => (
         <CommandGroupView key={group.id} group={group} query="" />
       ))}
-      <PaletteGroup heading={t(($) => $.groups.new)}>
-        {model.newCommands.map((command) => (
-          <CommandRow key={command.id} command={command} query="" />
-        ))}
-      </PaletteGroup>
+      {model.newCommands.length > 0 && (
+        <PaletteGroup heading={t(($) => $.groups.new)}>
+          {model.newCommands.map((command) => (
+            <CommandRow key={command.id} command={command} query="" />
+          ))}
+        </PaletteGroup>
+      )}
       {model.recent.length > 0 && (
         <PaletteGroup
           heading={
@@ -777,7 +786,7 @@ function EmptyState({ model }: { model: RootModel }) {
                     key={`issue:${item.id}`}
                     issue={item.issue}
                     query=""
-                    onSelect={() => palette.navigate(p.issueDetail(item.id))}
+                    onSelect={() => palette.navigate(p.issueDetail(issueRouteRef(item.issue)))}
                     trailing={<RowHint>{t(($) => $.types.issue)}</RowHint>}
                   />
                 );

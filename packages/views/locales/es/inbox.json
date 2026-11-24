@@ -48,7 +48,6 @@
   "list": {
     "loading_selection": "Cargando notificación…",
     "empty": "No hay notificaciones",
-    "mark_done_tooltip": "Marcar como hecho",
     "archive_tooltip": "Archivar",
     "time": {
       "just_now": "ahora mismo",
@@ -57,6 +56,7 @@
       "days": "{{count}} d"
     },
     "archived_title": "Archivado",
+    "snoozed_title": "Pospuestos",
     "archived_empty": "No hay notificaciones archivadas",
     "unarchive_tooltip": "Desarchivar",
     "actions_aria": "Acciones de la notificación",
@@ -66,13 +66,17 @@
   },
   "detail": {
     "select_prompt": "Selecciona una notificación para ver los detalles",
-    "empty": "Tu bandeja de entrada está vacía",
+    "restore": "Devolver a la bandeja de entrada",
+    "more_actions": "Más acciones de la notificación",
     "original_input": "Entrada original",
     "retry_with_context": "Reintentar con contexto",
     "edit_advanced": "Abrir formulario completo",
     "autopilot_quota_exceeded_body": "Este espacio de trabajo alcanzó su límite de {{limit}} ejecuciones de autopilot del periodo actual. Las siguientes ejecuciones no se iniciarán hasta que la asignación se restablezca {{resetAt}}, o hasta que el espacio de trabajo mejore su plan o compre más ejecuciones.",
+    "app_tool_calls_quota_exceeded_body": "Este espacio de trabajo usó sus {{limit}} llamadas a aplicaciones de este mes. Los agentes no pueden usar herramientas de aplicaciones hasta que el límite se restablezca {{resetAt}}, o hasta que el espacio de trabajo mejore su plan o añada puestos.",
+    "app_tool_calls_quota_action": "Gestionar facturación",
     "project_owner_joined_body": "{{name}} es propietario del espacio de trabajo y se ha añadido a este proyecto privado. Ahora puede ver sus tareas, comentarios y archivos adjuntos.",
     "open_project": "Abrir proyecto",
+    "open_app": "Abrir app",
     "autopilot_quota_upgrade": "Ver opciones",
     "archive": "Archivar",
     "unarchive": "Desarchivar",
@@ -109,12 +113,14 @@
     "children_done": "Sub-tareas finalizadas",
     "project_owner_joined": "El propietario se unió al proyecto",
     "autopilot_quota_exceeded": "Límite de ejecuciones de automatizaciones alcanzado",
+    "app_tool_calls_quota_exceeded": "Límite de llamadas a aplicaciones alcanzado",
     "app_action_requested": "Necesita tu confirmación",
     "app_action_reminder": "La confirmación caduca pronto",
     "app_connect_requested": "Conectar una aplicación",
     "app_action_result": "Resultado de la acción de la aplicación",
     "doc_comment": "Nuevo comentario en un documento",
-    "doc_mentioned": "Te mencionaron en un documento"
+    "doc_mentioned": "Te mencionaron en un documento",
+    "blockers_done": "Las tareas en espera terminaron"
   },
   "labels": {
     "set_status_to": "Establecer estado en",
@@ -126,9 +132,11 @@
     "set_due_date_to": "Establecer fecha de entrega en {{date}}",
     "removed_due_date": "Fecha de entrega eliminada",
     "reacted_to_comment": "Reaccionó {{emoji}} a tu comentario",
+    "commented": "Comentó",
     "created_with_agent": "Creada con agente: {{identifier}}",
     "failed_with_detail": "Falló: {{detail}}",
     "autopilot_quota_blocked": "Ejecución bloqueada porque se alcanzó el límite",
+    "app_tool_calls_quota_blocked": "Los agentes ya no pueden usar herramientas de aplicaciones este mes",
     "children_done_stage": "Sub-tareas de la etapa {{stage}} finalizadas"
   },
   "toasts": {
@@ -147,7 +155,12 @@
     "archived": "Archivado",
     "leaves": "Sale de la bandeja al continuar",
     "filtered": "Ya no coincide con tus filtros",
-    "notification_archived": "Notificación archivada",
+    "changed_status": "Estado cambiado a {{status}}",
+    "reassigned": "Reasignada a {{name}}",
+    "unassigned": "Desasignada",
+    "ran_quick_action": "Se ejecutó {{name}}",
+    "agent_triggered": "Agente activado",
+    "returns_on_activity": "Vuelve a la bandeja con nueva actividad",
     "next": "Siguiente",
     "next_tooltip": "Abrir la siguiente: {{title}}"
   },
@@ -158,7 +171,6 @@
     "mark_read_failed": "No se ha podido marcar como leído",
     "mark_unread_failed": "No se ha podido marcar como no leído",
     "archive_failed": "No se ha podido archivar",
-    "mark_done_failed": "No se ha podido marcar como hecho",
     "mark_all_read_failed": "No se ha podido marcar todo como leído",
     "archive_all_failed": "No se ha podido archivar todo",
     "archive_all_read_failed": "No se ha podido archivar los elementos leídos",
@@ -177,6 +189,14 @@
     "issue_description": "Las notificaciones de esta tarea en esta vista se eliminarán permanentemente. La tarea y sus ejecuciones se conservarán.",
     "cancel": "Cancelar",
     "active_issue_description": "Esto elimina permanentemente las notificaciones activas de la bandeja de entrada para esta tarea. Las notificaciones archivadas anteriormente, la tarea y sus ejecuciones se conservan."
+  },
+  "archive_all_dialog": {
+    "title": "¿Archivar todas las notificaciones?",
+    "description": "Todas las notificaciones activas de tu bandeja de entrada pasarán a Archivadas. Las incidencias pospuestas seguirán pospuestas y podrás restaurar las notificaciones en cualquier momento.",
+    "description_count_one": "{{count}} notificación activa de tu bandeja de entrada pasará a Archivadas. Las incidencias pospuestas seguirán pospuestas y podrás restaurarla en cualquier momento.",
+    "description_count_other": "Las {{count}} notificaciones activas de tu bandeja de entrada pasarán a Archivadas. Las incidencias pospuestas seguirán pospuestas y podrás restaurarlas en cualquier momento.",
+    "cancel": "Cancelar",
+    "confirm": "Archivar todo"
   },
   "unsubscribe": {
     "title": "Darse de baja y archivar. Dejarás de recibir sus actualizaciones; las @menciones te seguirán llegando.",
@@ -214,8 +234,32 @@
     "failed": "No se pudo posponer",
     "unsnooze_failed": "No se pudo recuperar",
     "view_empty": "Nada pospuesto",
-    "view_empty_description": "Pospón un issue desde tu bandeja de entrada y esperará aquí hasta que sea hora de volver.",
-    "col_updates": "Mientras estaba pospuesto",
-    "col_back": "Vuelve"
+    "view_empty_description": "Pospón un issue desde tu bandeja de entrada y esperará aquí hasta que sea hora de volver."
+  },
+  "auto_archive_prompt": {
+    "title": "Archiva las notificaciones cuando ya las has gestionado",
+    "description": "La bandeja de entrada ya puede archivar las notificaciones de una tarea cuando actúas sobre ella. Solo cuentan tus propias acciones, y una notificación posterior devuelve la tarea.",
+    "options": {
+      "handled": "Completar una tarea o iniciar un agente la archiva; organizarla o comentar sin activar un agente la deja en su sitio",
+      "completed": "Solo completar o cancelar una tarea la archiva",
+      "never": "Archivas las notificaciones tú mismo"
+    },
+    "hint": "Puedes cambiarlo en Ajustes › Notificaciones",
+    "confirm": "Listo"
+  },
+  "zero": {
+    "cleared_title": "Bandeja de entrada vacía",
+    "just_archived": "Se archivó {{label}}",
+    "just_snoozed": "{{label}} pospuesto hasta {{time}}",
+    "just_unsubscribed": "Suscripción cancelada y archivado: {{label}}",
+    "just_archived_many_one": "Se archivó {{count}} notificación",
+    "just_archived_many_other": "Se archivaron {{count}} notificaciones",
+    "snoozed_summary_one": "{{count}} pospuesta · vuelve {{time}}",
+    "snoozed_summary_other": "{{count}} pospuestas · la próxima vuelve {{time}}",
+    "filtered_title": "Todo al día para este filtro",
+    "filtered_remaining_one": "Hay {{count}} otra notificación en tu bandeja",
+    "filtered_remaining_other": "Hay {{count}} otras notificaciones en tu bandeja",
+    "clear_and_continue": "Limpiar filtros y continuar",
+    "undo_item": "Deshacer {{label}}"
   }
 }

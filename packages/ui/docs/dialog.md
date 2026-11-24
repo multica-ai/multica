@@ -48,9 +48,9 @@ A role alone does not supply an accessible name, focus management or dismissal b
 
 ## Motion
 
-Popup and backdrop consume `--dialog-enter-duration`, `--dialog-exit-duration`, `--dialog-enter-easing` and `--dialog-exit-easing` from `packages/ui/styles/tokens.css`. The defaults preserve the existing 100ms/ease animation. The popup also fades and scales between 95% and 100%.
+Popup and backdrop consume `--dialog-enter-duration`, `--dialog-exit-duration`, `--dialog-enter-easing` and `--dialog-exit-easing` from `packages/ui/styles/tokens.css`. The defaults use 100ms with the shared ease-out enter curve (`cubic-bezier(0.23, 1, 0.32, 1)`). The popup also fades and scales between 95% and 100%.
 
-Changes affect shared Dialog instances on web and desktop, including compositions that use DialogContent, unless callers override the animation. They do not change Popover, Tooltip, AlertDialog or JavaScript motion constants.
+Changes affect shared Dialog and AlertDialog instances on web and desktop, including compositions that use DialogContent, unless callers override the animation. They do not change Popover, Tooltip, or JavaScript motion constants.
 
 Respect `prefers-reduced-motion`: popup and backdrop animations are disabled. Open, close and replay the real component; also interrupt it with rapid open/close actions.
 

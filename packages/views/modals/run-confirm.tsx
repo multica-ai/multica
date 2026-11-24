@@ -92,10 +92,14 @@ interface RunConfirmData {
  * single-issue promotion out of backlog.
  */
 export function RunConfirmModal({
+  open = true,
   onClose,
+  onOpenChangeComplete,
   data,
 }: {
+  open?: boolean;
   onClose: () => void;
+  onOpenChangeComplete?: (open: boolean) => void;
   data: Record<string, unknown> | null;
 }) {
   const { t } = useT("modals");
@@ -225,7 +229,11 @@ export function RunConfirmModal({
   );
 
   return (
-    <Dialog open onOpenChange={(v) => { if (!v && !submitting) onClose(); }}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => { if (!v && !submitting) onClose(); }}
+      onOpenChangeComplete={onOpenChangeComplete}
+    >
       {/* Wider than the primitive's sm:max-w-sm: the two actions are long
           phrases, not "Cancel"/"Save". In French they measure ~435px with the
           send-shortcut keycaps against the 352px the default leaves, so the
@@ -264,7 +272,6 @@ export function RunConfirmModal({
                     shortcut={sendShortcut}
                     decorative
                     className="ml-1"
-                    keyClassName="border-background/30 bg-background/15 text-primary-foreground shadow-none"
                   />
                 ) : null}
               </>

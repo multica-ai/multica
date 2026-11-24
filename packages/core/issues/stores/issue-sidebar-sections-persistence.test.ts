@@ -7,11 +7,13 @@ import {
 } from "@multica/core/issues/stores";
 
 const STORAGE_KEY = "multica_issue_sidebar_sections";
-// The order persisted before the Sub-issues section was introduced.
-const OLD_ORDER = [
-  "properties", "quick_actions", "wakeups", "plugins", "parent", "duplicates",
+// An order saved while the sidebar still had Sub-issues, Details, Waiting and
+// Duplicates sections; the last two are now the Relations section.
+const SAVED_ORDER = [
+  "properties", "quick_actions", "wakeups", "plugins", "parent", "sub_issues", "waiting", "duplicates",
   "pull_requests", "environments", "deliverables", "apps", "execution_log", "details", "metadata",
 ];
+const RETIRED = new Set(["sub_issues", "details", "waiting", "duplicates"]);
 
 async function reloadPreferences() {
   const saved = localStorage.getItem(STORAGE_KEY)!;
@@ -20,54 +22,45 @@ async function reloadPreferences() {
   await useIssueSidebarSectionsStore.persist.rehydrate();
 }
 
-describe("Sub-issues sidebar persisted preferences", () => {
+describe("issue sidebar persisted preferences", () => {
   beforeEach(() => {
     localStorage.clear();
     useIssueSidebarSectionsStore.getState().reset();
   });
 
   it.each([
-    { name: "default", order: OLD_ORDER },
-    { name: "customized", order: [...OLD_ORDER].reverse() },
-  ])("hydrates an older $name order without changing existing relative order", async ({ order: savedOrder }) => {
+    { name: "default", order: SAVED_ORDER },
+    { name: "customized", order: [...SAVED_ORDER].reverse() },
+  ])("drops retired sections from an older $name save and keeps the rest in order", async ({ order: savedOrder }) => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      state: { order: [...savedOrder, "unknown", "parent"], hidden: ["parent", "apps", "properties", "apps", "unknown"] },
+      state: { order: [...savedOrder, "unknown", "parent"], hidden: ["parent", "details", "sub_issues", "apps", "properties", "unknown"] },
       version: 0,
     }));
     await useIssueSidebarSectionsStore.persist.rehydrate();
     const state = useIssueSidebarSectionsStore.getState();
     const order = [...selectIssueSidebarOrder(state)];
-    expect(order.filter((id) => id !== "sub_issues")).toEqual(savedOrder);
-    expect(order.indexOf("sub_issues")).toBe(order.indexOf("parent") + 1);
-    expect(order.filter((id) => id === "sub_issues")).toHaveLength(1);
+    expect(order.filter((id) => id !== "relations")).toEqual(savedOrder.filter((id) => !RETIRED.has(id)));
+    expect(order.indexOf("relations")).toBe(order.indexOf("parent") + 1);
     expect(state.hidden).toEqual(["parent", "apps"]);
     await reloadPreferences();
     expect(selectIssueSidebarOrder(useIssueSidebarSectionsStore.getState())).toEqual(order);
     expect(useIssueSidebarSectionsStore.getState().hidden).toEqual(["parent", "apps"]);
   });
 
-  it("persists hiding and reordering Sub-issues, then restores defaults", async () => {
+  it("persists hiding and reordering, then restores defaults", async () => {
     const store = useIssueSidebarSectionsStore;
-    store.getState().setHidden("sub_issues", true);
-    store.getState().setOrder(["sub_issues", ...ISSUE_SIDEBAR_SECTIONS]);
+    store.getState().setHidden("deliverables", true);
+    store.getState().setOrder(["deliverables", ...ISSUE_SIDEBAR_SECTIONS]);
     await reloadPreferences();
-    expect(selectIssueSidebarOrder(store.getState())[0]).toBe("sub_issues");
-    expect(store.getState().hidden).toEqual(["sub_issues"]);
-    store.getState().setHidden("sub_issues", false);
+    expect(selectIssueSidebarOrder(store.getState())[0]).toBe("deliverables");
+    expect(store.getState().hidden).toEqual(["deliverables"]);
+    store.getState().setHidden("deliverables", false);
     await reloadPreferences();
     expect(store.getState().hidden).toEqual([]);
-    expect(selectIssueSidebarOrder(store.getState())[0]).toBe("sub_issues");
     store.getState().reset();
     await reloadPreferences();
     expect(store.getState().order).toBeNull();
     expect(store.getState().hidden).toEqual([]);
     expect(selectIssueSidebarOrder(store.getState())).toEqual(ISSUE_SIDEBAR_SECTIONS);
-  });
-
-  it("shows a newly added section for an uncustomized older save", async () => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ state: { order: null, hidden: ["metadata"] }, version: 0 }));
-    await useIssueSidebarSectionsStore.persist.rehydrate();
-    expect(selectIssueSidebarOrder(useIssueSidebarSectionsStore.getState())).toContain("sub_issues");
-    expect(useIssueSidebarSectionsStore.getState().hidden).toEqual(["metadata"]);
   });
 });

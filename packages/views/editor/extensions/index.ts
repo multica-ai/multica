@@ -129,6 +129,7 @@ export interface EditorExtensionsOptions {
   mentionMode?: "default" | "context";
   getMentionContextItems?: () => MentionItem[];
   mentionHideGuests?: boolean;
+  mentionHideSquads?: boolean;
   /** When true, attach the `/` picker. Default false. */
   enableSlashCommands?: boolean;
   /**
@@ -227,7 +228,7 @@ export function createEditorExtensions(
       ...(options.disableMentions
         ? { suggestion: { allow: () => false } }
         : options.queryClient
-          ? { suggestion: createMentionSuggestion(options.queryClient, { mode: options.mentionMode, getContextItems: options.getMentionContextItems, hideGuests: options.mentionHideGuests }) }
+          ? { suggestion: createMentionSuggestion(options.queryClient, { mode: options.mentionMode, getContextItems: options.getMentionContextItems, hideGuests: options.mentionHideGuests, hideSquads: options.mentionHideSquads }) }
           : {}),
     }),
     // Linear-style bare identifier → issue mention. Attached only when a
@@ -291,6 +292,7 @@ function renderCaret(user: Record<string, string>): HTMLElement {
   const caret = document.createElement("span");
   caret.classList.add("collaboration-carets__caret");
   caret.setAttribute("aria-hidden", "true");
+  if (user.id) caret.dataset.collaborator = `${user.kind ?? "member"}:${user.id}`;
   caret.style.borderColor = user.color ?? "";
   const label = document.createElement("div");
   label.classList.add("collaboration-carets__label");
