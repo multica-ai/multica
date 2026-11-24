@@ -101,6 +101,8 @@ func TestClassifyRules(t *testing.T) {
 		{"bad gateway", "Bad Gateway: upstream rejected", ReasonAgentProviderServerError},
 
 		// 7. Provider network.
+		{"Claude response stopped arriving", "API Error: The response stopped arriving. The response above may be incomplete.", ReasonAgentProviderNetwork},
+		{"unrelated stalled response", "local tool: the response stopped arriving.", ReasonAgentUnknown},
 		{"stream disconnected", "stream disconnected before completion", ReasonAgentProviderNetwork},
 		{"connection closed mid-response", "API Error: Connection closed mid-response. The response above may be incomplete.", ReasonAgentProviderNetwork},
 		{"connection closed with exit status wins over process failure", "claude exited with error: exit status 1\nAPI Error: Connection closed mid-response.", ReasonAgentProviderNetwork},
@@ -757,5 +759,17 @@ func TestNormalizeDaemonReasonDistinguishesInsufficientBalanceFromRateLimit(t *t
 		if got := NormalizeDaemonReason(legacy, tc.raw); got != tc.want {
 			t.Errorf("NormalizeDaemonReason(%q, %q) = %q, want %q", legacy, tc.raw, got, tc.want)
 		}
+	}
+}
+
+func TestNormalizeClaudeStalledResponse(t *testing.T) {
+	const diagnostic = "claude exited with exit status 1: API Error: The response stopped arriving. The response above may be incomplete."
+	for _, reason := range []Reason{ReasonAgentUnknown, ReasonAgentProcessFailure} {
+		if got := NormalizeDaemonReason(string(reason), diagnostic); got != ReasonAgentProviderNetwork {
+			t.Errorf("NormalizeDaemonReason(%q) = %q, want %q", reason, got, ReasonAgentProviderNetwork)
+		}
+	}
+	if got := NormalizeDaemonReason(string(ReasonAgentProviderAuthOrAccess), diagnostic); got != ReasonAgentProviderAuthOrAccess {
+		t.Errorf("changed a specific daemon diagnosis to %q", got)
 	}
 }
