@@ -63,3 +63,15 @@ describe("iOS scene lifecycle configuration", () => {
     expect(config.scheme).toBe("multica");
   });
 });
+
+describe("Android debug identity", () => {
+  it.each(["development", "staging", "production"])(
+    "uses a separate Android package with APP_ENV=%s",
+    (env) => {
+      vi.stubEnv("APP_ENV", env);
+      const config = createConfig({ config: {} } as ConfigContext);
+      expect(config.android?.package).toBe("ai.multica.mobile.androiddebug");
+      expect(config.android?.softwareKeyboardLayoutMode).toBe("resize");
+    },
+  );
+});
