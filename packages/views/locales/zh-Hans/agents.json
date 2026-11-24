@@ -849,7 +849,11 @@
     "owner_only_readonly": "只有该智能体的所有者可以更改谁能调用它。",
     "members_empty": "没有可选择的工作区成员",
     "composio_switch_hint": "注意：该智能体已启用已连接应用。共享后，所有有权限运行该智能体的成员都可以通过它使用这些应用。",
-    "trigger_members_count_other": "{{count}} 人"
+    "trigger_members_count_other": "{{count}} 人",
+    "workspace_grants_title": "此智能体可使用的其他工作区",
+    "workspace_grants_description": "只要发起运行的用户和智能体所有者仍有访问权限，运行就可以在这些工作区列出、查看和创建议题。此授权不允许将该智能体分配给这些议题。",
+    "workspace_grants_empty": "你未加入其他工作区。",
+    "workspace_grants_error": "无法更新工作区访问权限。"
   },
   "profile_card": {
     "unavailable": "智能体不可用",

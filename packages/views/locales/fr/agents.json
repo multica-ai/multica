@@ -874,7 +874,11 @@
     "members_empty": "Aucun membre de l'espace de travail à choisir",
     "composio_switch_hint": "Attention : cet agent dispose d'applications connectées activées. Le partager permet à toute personne y ayant accès d'utiliser ces applications via cet agent.",
     "trigger_members_count_one": "{{count}} personne",
-    "trigger_members_count_other": "{{count}} personnes"
+    "trigger_members_count_other": "{{count}} personnes",
+    "workspace_grants_title": "Autres espaces de travail accessibles à cet agent",
+    "workspace_grants_description": "Une exécution peut y lister, lire et créer des tickets si la personne à l'origine et le propriétaire de l'agent y ont toujours accès. L'agent ne peut pas être assigné à ces tickets.",
+    "workspace_grants_empty": "Vous n'appartenez à aucun autre espace de travail.",
+    "workspace_grants_error": "Impossible de modifier l'accès à l'espace de travail."
   },
   "profile_card": {
     "unavailable": "Agent indisponible",

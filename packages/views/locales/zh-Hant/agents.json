@@ -849,7 +849,11 @@
     "owner_only_readonly": "只有該 AI 代理的所有者可以更改誰能呼叫它。",
     "members_empty": "沒有可選擇的工作區成員",
     "composio_switch_hint": "提示：該 AI 代理已啟用已連接的應用程式。共享後，有權存取此 AI 代理的人都將可以透過它使用這些應用程式。",
-    "trigger_members_count_other": "{{count}} 人"
+    "trigger_members_count_other": "{{count}} 人",
+    "workspace_grants_title": "此 AI 代理可使用的其他工作區",
+    "workspace_grants_description": "只要發起執行的使用者與 AI 代理擁有者仍有存取權，執行就能在這些工作區列出、檢視和建立議題。此授權不允許將該 AI 代理指派給這些議題。",
+    "workspace_grants_empty": "你未加入其他工作區。",
+    "workspace_grants_error": "無法更新工作區存取權。"
   },
   "profile_card": {
     "unavailable": "AI 代理不可用",

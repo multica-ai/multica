@@ -79,6 +79,8 @@ curl https://api.multica.ai/api/issues \
 
 守护进程领取运行后，服务器会为这次执行创建一个以 `mat_` 开头的临时令牌。它绑定当前用户、工作区、智能体和运行，最长有效 24 小时，并在运行结束时清理。
 
+智能体所有者可以在**智能体设置 → Access** 中，或选中智能体所属工作区后运行 `multica agent workspace-grant add <agent-id> <target-workspace-id>`，授权特定的其他工作区。对于由用户直接发起的运行，`multica --workspace-id <target-workspace-id> issue list`、`issue get` 和 `issue create` 使用同一个临时令牌。服务器会在每次请求时检查授权，以及发起人和智能体所有者当前的成员身份。撤销授权立即生效。其他跨工作区操作（包括将此智能体分配到目标议题）仍不可用。
+
 守护进程把这个临时令牌注入 AI 编程工具，不会把用户 PAT 交给智能体。所以智能体发出的请求会记录为智能体行为，也不能借此调用只允许用户或 owner 执行的敏感操作。
 
 这类令牌由服务器自动创建，用户不需要保存或管理。

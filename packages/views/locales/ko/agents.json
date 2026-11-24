@@ -708,7 +708,11 @@
     "owner_only_readonly": "이 에이전트를 실행할 수 있는 대상은 소유자만 변경할 수 있습니다.",
     "members_empty": "선택할 워크스페이스 구성원이 없습니다",
     "composio_switch_hint": "참고: 이 에이전트에는 연결된 앱이 활성화되어 있습니다. 공유하면 접근 권한이 있는 누구나 이 에이전트를 통해 해당 앱을 사용할 수 있습니다.",
-    "trigger_members_count_other": "{{count}}명"
+    "trigger_members_count_other": "{{count}}명",
+    "workspace_grants_title": "이 에이전트가 사용할 수 있는 다른 작업 공간",
+    "workspace_grants_description": "실행을 시작한 사람과 에이전트 소유자가 계속 접근할 수 있으면 해당 작업 공간의 이슈를 나열하고 읽고 만들 수 있습니다. 이 에이전트를 해당 이슈에 할당할 수는 없습니다.",
+    "workspace_grants_empty": "소속된 다른 작업 공간이 없습니다.",
+    "workspace_grants_error": "작업 공간 접근 권한을 변경하지 못했습니다."
   },
   "profile_card": {
     "unavailable": "에이전트를 사용할 수 없습니다",

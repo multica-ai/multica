@@ -708,7 +708,11 @@
     "owner_only_readonly": "このエージェントを実行できる相手は、オーナーのみが変更できます。",
     "members_empty": "選択できるワークスペースメンバーがいません",
     "composio_switch_hint": "注意: このエージェントでは連携アプリが有効になっています。共有すると、アクセス権を持つメンバーがこのエージェント経由でそれらのアプリを利用できるようになります。",
-    "trigger_members_count_other": "{{count}} 人"
+    "trigger_members_count_other": "{{count}} 人",
+    "workspace_grants_title": "このエージェントが利用できる他のワークスペース",
+    "workspace_grants_description": "実行を開始した人とエージェントの所有者にアクセス権がある場合、そこでイシューの一覧表示、閲覧、作成ができます。このエージェントをそのイシューに割り当てることはできません。",
+    "workspace_grants_empty": "所属する他のワークスペースはありません。",
+    "workspace_grants_error": "ワークスペースへのアクセスを変更できませんでした。"
   },
   "profile_card": {
     "unavailable": "エージェントを利用できません",

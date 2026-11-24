@@ -874,7 +874,11 @@
     "members_empty": "No workspace members to choose from",
     "composio_switch_hint": "Heads up — this agent has connected apps enabled. Sharing it lets anyone with access use those apps through this agent.",
     "trigger_members_count_one": "{{count}} person",
-    "trigger_members_count_other": "{{count}} people"
+    "trigger_members_count_other": "{{count}} people",
+    "workspace_grants_title": "Other workspaces this agent can use",
+    "workspace_grants_description": "A run can list, read, and create issues there when its initiating person and this agent's owner still have access. This does not allow assignment of this agent to those issues.",
+    "workspace_grants_empty": "You do not belong to another workspace.",
+    "workspace_grants_error": "Could not update workspace access."
   },
   "profile_card": {
     "unavailable": "Agent unavailable",

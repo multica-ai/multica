@@ -2604,6 +2604,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetAgent)
 					r.Put("/", h.UpdateAgent)
+					r.With(handler.RequireHumanActor).Get("/workspace-grants", h.ListAgentWorkspaceGrants)
+					r.With(handler.RequireHumanActor).Put("/workspace-grants/{workspaceId}", h.AddAgentWorkspaceGrant)
+					r.With(handler.RequireHumanActor).Delete("/workspace-grants/{workspaceId}", h.RemoveAgentWorkspaceGrant)
 					r.Get("/apps", h.ListAgentApps)
 					r.With(handler.RequireHumanActor).Put("/apps", h.UpdateAgentApps)
 					r.Post("/archive", h.ArchiveAgent)

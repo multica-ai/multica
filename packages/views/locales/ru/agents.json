@@ -924,7 +924,11 @@
     "trigger_members_count_one": "{{count}} участник",
     "trigger_members_count_few": "{{count}} участников",
     "trigger_members_count_many": "{{count}} участников",
-    "trigger_members_count_other": "{{count}} участников"
+    "trigger_members_count_other": "{{count}} участников",
+    "workspace_grants_title": "Другие рабочие пространства, доступные агенту",
+    "workspace_grants_description": "Агент может просматривать и создавать задачи там, пока инициатор запуска и владелец агента сохраняют доступ. Назначать этого агента на такие задачи нельзя.",
+    "workspace_grants_empty": "Вы не состоите в других рабочих пространствах.",
+    "workspace_grants_error": "Не удалось изменить доступ к рабочему пространству."
   },
   "profile_card": {
     "unavailable": "Агент недоступен",

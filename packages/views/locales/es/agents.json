@@ -849,7 +849,11 @@
     "members_empty": "No hay miembros del espacio de trabajo para elegir",
     "composio_switch_hint": "Aviso: este agente tiene aplicaciones conectadas activadas. Al compartirlo, cualquiera con acceso podrá usar esas aplicaciones a través de este agente.",
     "trigger_members_count_one": "{{count}} persona",
-    "trigger_members_count_other": "{{count}} personas"
+    "trigger_members_count_other": "{{count}} personas",
+    "workspace_grants_title": "Otros espacios de trabajo que puede usar este agente",
+    "workspace_grants_description": "Una ejecución puede listar, leer y crear incidencias allí si la persona que la inició y el propietario del agente conservan el acceso. Esto no permite asignar el agente a esas incidencias.",
+    "workspace_grants_empty": "No perteneces a otro espacio de trabajo.",
+    "workspace_grants_error": "No se pudo actualizar el acceso al espacio de trabajo."
   },
   "profile_card": {
     "unavailable": "Agente no disponible",
