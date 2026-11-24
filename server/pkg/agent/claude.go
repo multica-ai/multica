@@ -34,19 +34,16 @@ func claudeTerminateGrace() time.Duration {
 	return 5 * time.Second
 }
 
-// claudeErrorResultGraceNanos optionally overrides, in nanoseconds, how long
-// claude may keep running after it reported an error result. Set via atomic
-// store in tests; zero keeps the default.
-var claudeErrorResultGraceNanos atomic.Int64
+// claudeResultExitGraceNanos lets tests shorten the post-result exit budget.
+var claudeResultExitGraceNanos atomic.Int64
 
-// claudeErrorResultGrace bounds the wait for claude to exit after an error
-// result. With stdin closed the CLI still stays alive while any background
-// task it started is running, then opens a new turn when the task ends. After
-// an error result (a spent session limit, an API failure) that turn cannot
-// change the outcome, so the daemon stops waiting instead of holding the run
-// open for the task's lifetime.
-func claudeErrorResultGrace() time.Duration {
-	if n := claudeErrorResultGraceNanos.Load(); n > 0 {
+// claudeResultExitGrace bounds how long a one-shot claude may keep running
+// after its terminal result. With stdin closed the CLI still stays alive while
+// any background task it started is running, then opens a new turn when the
+// task ends. One Execute owns one foreground prompt, so nothing after the
+// terminal result can change its outcome.
+func claudeResultExitGrace() time.Duration {
+	if n := claudeResultExitGraceNanos.Load(); n > 0 {
 		return time.Duration(n)
 	}
 	return 10 * time.Second
@@ -253,6 +250,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// the prompt write has either succeeded, hit a broken pipe, or been
 		// unblocked by the kill that ended the process.
 		turn.controlWrites.Wait()
+		// Finish post-result escalation before reporting the run: a descendant
+		// can outlive the process-group leader.
+		proc.waitResultStop()
 		writeErr := <-writeDone
 		if writeErr == nil {
 			select {
@@ -269,6 +269,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		proc.clearTaskEnv()
 
 		scanErr, exitErr := proc.getErrors()
+		observedExitErr := exitErr
 		parked := proc.pooled &&
 			sawResult &&
 			!resultIsError &&
@@ -292,6 +293,18 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			// A one-shot process has already exited; this releases its temp files.
 			proc.Close()
 			scanErr, exitErr = proc.getErrors()
+			observedExitErr = exitErr
+		}
+		if proc.stoppedAfterResult.Load() {
+			// This signal is our post-result cleanup, not an agent failure.
+			// Keep unrelated protocol/read failures and context cancellation.
+			var processExit *exec.ExitError
+			if errors.As(exitErr, &processExit) {
+				exitErr = nil
+			}
+			if errors.Is(scanErr, os.ErrClosed) {
+				scanErr = nil
+			}
 		}
 
 		duration := time.Since(startTime)
@@ -340,7 +353,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			provider:                   "claude",
 			cliVersion:                 b.cfg.CLIVersion,
 			model:                      opts.Model,
-			exitCode:                   streamProcessExitCode(exitErr),
+			exitCode:                   streamProcessExitCode(observedExitErr),
 			eventCount:                 eventCount,
 			invalidEventCount:          invalidEventCount,
 			assistantEventCount:        assistantEventCount,
@@ -417,7 +430,7 @@ type claudeTurn struct {
 	controlErrors            chan error
 	resultCh                 chan struct{}
 	resultOnce               sync.Once
-	stopAfterErrorResultOnce sync.Once
+	stopAfterFinalResultOnce sync.Once
 	// commandUUID tags the prompt this turn writes. Claude Code reports each
 	// queued input's progress as command_lifecycle events keyed by that UUID.
 	commandUUID string
@@ -431,7 +444,7 @@ type claudeTurn struct {
 	// re-run that turn as its own command before the queued prompt
 	// (GH #11506). A result that arrives after another command started but
 	// before this turn's own command started is not this turn's answer.
-	// Once the own command starts, every result counts, whatever other
+	// Once the own command starts, the next result counts, whatever other
 	// commands do meanwhile (folded in, cancelled).
 	otherCommandStarted      bool
 	ownCommandStarted        bool
@@ -511,6 +524,12 @@ func (t *claudeTurn) handleMessage(msg claudeSDKMessage) {
 		}
 		t.mu.Unlock()
 	case "result":
+		// A later result (a background task's completion) must not replace the
+		// answer, session or usage already handed in for this managed prompt.
+		if t.sawResult {
+			t.mu.Unlock()
+			return
+		}
 		t.coalescer.flushAll()
 		if t.otherCommandStarted && !t.ownCommandStarted {
 			t.mu.Unlock()
@@ -554,17 +573,18 @@ func (t *claudeTurn) handleMessage(msg claudeSDKMessage) {
 				t.usage = resultUsage
 			}
 		}
-		failed := t.resultIsError || t.terminalReasonError != ""
 		t.mu.Unlock()
 		t.resultOnce.Do(func() { close(t.resultCh) })
 		if !t.proc.pooled {
 			// Keep draining stdout while accepted control replies finish
 			// writing. Once those replies drain, stdin closes; requests
-			// arriving after that cannot be answered.
+			// arriving after that cannot be answered. The terminal result still
+			// bounds the CLI's lifetime (claudeResultExitGrace).
 			t.closeInputAfterControls()
-			if failed {
-				t.stopAfterErrorResultOnce.Do(func() { go t.proc.stopAfterErrorResult() })
-			}
+			t.stopAfterFinalResultOnce.Do(func() {
+				t.proc.resultStopDone = make(chan struct{})
+				go t.proc.stopAfterResult()
+			})
 		}
 	case "log":
 		t.mu.Unlock()
