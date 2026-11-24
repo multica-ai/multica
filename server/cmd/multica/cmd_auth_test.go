@@ -122,6 +122,7 @@ func TestResolveCallbackBinding(t *testing.T) {
 		flagHost     string
 		serverURL    string
 		appURL       string
+		remoteSSH    bool
 		detect       func(string) net.IP
 		wantCallback string
 		wantBind     string
@@ -161,6 +162,43 @@ func TestResolveCallbackBinding(t *testing.T) {
 			wantBind:     "127.0.0.1",
 		},
 		{
+			name:         "SSH session on the server box points callback at the server's LAN IP",
+			appURL:       "http://192.168.0.10:3000",
+			serverURL:    "http://192.168.0.10:3000",
+			remoteSSH:    true,
+			detect:       fixed("192.168.0.10"),
+			wantCallback: "192.168.0.10",
+			wantBind:     "0.0.0.0",
+		},
+		{
+			name:         "SSH session on a different LAN box still uses that box's IP",
+			appURL:       "http://192.168.0.10:3000",
+			serverURL:    "http://192.168.0.10:3000",
+			remoteSSH:    true,
+			detect:       fixed("192.168.0.47"),
+			wantCallback: "192.168.0.47",
+			wantBind:     "0.0.0.0",
+		},
+		{
+			name:         "SSH session with a public app URL stays on loopback (tunnel hint)",
+			appURL:       "https://multica.ai",
+			serverURL:    "https://api.multica.ai",
+			remoteSSH:    true,
+			detect:       failing,
+			wantCallback: "localhost",
+			wantBind:     "127.0.0.1",
+		},
+		{
+			name:         "--callback-host flag wins over the SSH rule",
+			flagHost:     "127.0.0.1",
+			appURL:       "http://192.168.0.10:3000",
+			serverURL:    "http://192.168.0.10:3000",
+			remoteSSH:    true,
+			detect:       fixed("192.168.0.10"),
+			wantCallback: "127.0.0.1",
+			wantBind:     "0.0.0.0",
+		},
+		{
 			name:         "cross-machine self-host points callback at CLI's LAN IP",
 			appURL:       "http://192.168.0.28:3000",
 			serverURL:    "http://192.168.0.28:8080",
@@ -197,7 +235,7 @@ func TestResolveCallbackBinding(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			gotCallback, gotBind, err := resolveCallbackBinding(tc.flagHost, tc.serverURL, tc.appURL, tc.detect)
+			gotCallback, gotBind, err := resolveCallbackBinding(tc.flagHost, tc.serverURL, tc.appURL, tc.remoteSSH, tc.detect)
 			if tc.wantError {
 				if err == nil || !strings.Contains(err.Error(), "--callback-host") {
 					t.Fatalf("expected actionable callback error, got %v", err)

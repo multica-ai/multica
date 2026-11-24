@@ -152,6 +152,9 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 //   - hosted / public app URL: browser and CLI are on the same machine,
 //     localhost works.
 //   - self-host, CLI on server box: same as above.
+//   - self-host, CLI on server box over SSH: the browser is on the user's
+//     own computer, where localhost is not the server. Use the server's LAN
+//     IP, which that browser already reaches to open the app.
 //   - self-host, CLI on a different LAN box: the callback URL must point at
 //     the CLI's own LAN IP, not the server's.
 //   - routes through a virtual adapter: the detected address may not be a
@@ -159,7 +162,7 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 //
 // detectOutbound is injected so tests can exercise the routing decisions
 // without real network calls.
-func resolveCallbackBinding(flagHost, serverURL, appURL string, detectOutbound func(string) net.IP) (callbackHost, bindAddr string, err error) {
+func resolveCallbackBinding(flagHost, serverURL, appURL string, remoteSSH bool, detectOutbound func(string) net.IP) (callbackHost, bindAddr string, err error) {
 	// Explicit flag always wins. Bind on all interfaces so the browser can
 	// reach us regardless of which interface the host name resolves to.
 	if h := strings.TrimSpace(flagHost); h != "" {
@@ -188,6 +191,9 @@ func resolveCallbackBinding(flagHost, serverURL, appURL string, detectOutbound f
 		return appIP.String(), "0.0.0.0", nil
 	}
 	if cliIP.Equal(appIP) {
+		if remoteSSH {
+			return appIP.String(), "0.0.0.0", nil
+		}
 		return "localhost", "127.0.0.1", nil
 	}
 	if !isSupportedCallbackHost(cliIP.String()) {
@@ -261,7 +267,8 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	appURL := resolveAppURL(cmd)
 
 	flagHost := callbackHostFlagValue(cmd)
-	callbackHost, bindAddr, err := resolveCallbackBinding(flagHost, serverURL, appURL, detectOutboundIP)
+	remoteSSH := runningInSSHSession()
+	callbackHost, bindAddr, err := resolveCallbackBinding(flagHost, serverURL, appURL, remoteSSH, detectOutboundIP)
 	if err != nil {
 		return err
 	}
@@ -322,7 +329,7 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	if err := openBrowser(loginURL); err != nil {
 		fmt.Fprintf(os.Stderr, "Could not open browser automatically.\n")
 	}
-	fmt.Fprint(os.Stderr, browserLoginInstructions(loginURL, callbackHost, port, runningInSSHSession()))
+	fmt.Fprint(os.Stderr, browserLoginInstructions(loginURL, callbackHost, port, remoteSSH))
 
 	// Wait for the JWT from the callback (timeout 5 minutes).
 	var jwtToken string
