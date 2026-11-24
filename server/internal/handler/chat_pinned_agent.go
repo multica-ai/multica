@@ -25,8 +25,7 @@ func (h *Handler) resolveChatAgentAccess(w http.ResponseWriter, r *http.Request,
 	if !ok {
 		return nil, false
 	}
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	allowed, ok := h.accessibleAgentIDsForRequest(r, workspaceID, member.Role)
 	if !ok {
 		writeError(w, http.StatusInternalServerError, "failed to resolve agent access")
 		return nil, false

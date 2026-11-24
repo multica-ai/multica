@@ -14,6 +14,18 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+// Visibility checks use the verified grantor in full-delegation mode. Keep
+// resolveActor at the call site when it is also needed for audit or dispatch.
+func (h *Handler) canAccessPrivateAgentForRequest(r *http.Request, agent db.Agent, workspaceID string) bool {
+	actorType, actorID := h.permissionActor(r, requestUserID(r), workspaceID)
+	return h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID)
+}
+
+func (h *Handler) accessibleAgentIDsForRequest(r *http.Request, workspaceID, role string) (map[string]struct{}, bool) {
+	actorType, actorID := h.permissionActor(r, requestUserID(r), workspaceID)
+	return h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, role)
+}
+
 // Agent invocation permission model (MUL-3963).
 //
 // Two distinct questions, previously conflated in canAccessPrivateAgent:
