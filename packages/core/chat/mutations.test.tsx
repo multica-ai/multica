@@ -15,7 +15,7 @@ import {
   useSetChatSessionProject,
 } from "./mutations";
 import { chatKeys, chatSessionsOptions } from "./queries";
-import type { ChatSession } from "../types";
+import type { ChatSession, ChatSessionSummary } from "../types";
 
 vi.mock("../hooks", () => ({
   useWorkspaceId: () => "ws-1",
@@ -92,6 +92,12 @@ describe("useMarkAllChatSessionsRead", () => {
       makeSession({ id: "s2", unread_count: 5 }),
     ]);
 
+    qc.setQueryData<ChatSessionSummary>(chatKeys.sessionSummary(WS_ID), {
+      active_count: 3,
+      archived_count: 0,
+      unread_by_session: { s1: 2, s2: 5, offPage: 1 },
+    });
+
     const { result } = renderHook(() => useMarkAllChatSessionsRead(), {
       wrapper: createWrapper(qc),
     });
@@ -105,6 +111,8 @@ describe("useMarkAllChatSessionsRead", () => {
       ["s1", 2, true],
       ["s2", 0, false],
     ]);
+    expect(qc.getQueryData<ChatSessionSummary>(chatKeys.sessionSummary(WS_ID))?.unread_by_session)
+      .toEqual({ s1: 2, offPage: 1 });
   });
 
   // Offline: the read and the follow-up refetch both fail, so the rollback is

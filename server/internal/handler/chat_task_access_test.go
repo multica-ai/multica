@@ -72,6 +72,10 @@ func TestChatSessionTaskTokenOwnerAccess(t *testing.T) {
 
 			list := testutil.Call(t, serve((*Handler).ListChatSessions),
 				request(token, http.MethodGet, "/api/chat/sessions?status=all", nil))
+			page := testutil.Call(t, serve((*Handler).ListChatSessionsPage),
+				request(token, http.MethodGet, "/api/chat/sessions/page", nil))
+			summary := testutil.Call(t, serve((*Handler).GetChatSessionSummary),
+				request(token, http.MethodGet, "/api/chat/sessions/summary", nil))
 			messages := testutil.Call(t, serve((*Handler).ListChatMessages),
 				request(token, http.MethodGet, sessionPath+"/messages", nil))
 			wakeups := testutil.Call(t, serve((*Handler).ListMyChatWakeups),
@@ -85,6 +89,8 @@ func TestChatSessionTaskTokenOwnerAccess(t *testing.T) {
 				if strings.Contains(messages.Body.String(), secret) {
 					t.Fatalf("messages returned the owner's transcript: %d %s", messages.Code, messages.Body.String())
 				}
+				page.Want(http.StatusForbidden)
+				summary.Want(http.StatusForbidden)
 				wakeups.Want(http.StatusForbidden)
 				testutil.Call(t, serve((*Handler).GetChatSession),
 					request(token, http.MethodGet, sessionPath, nil)).Want(http.StatusForbidden)
@@ -109,6 +115,8 @@ func TestChatSessionTaskTokenOwnerAccess(t *testing.T) {
 			if !strings.Contains(list.Body.String(), sessionID) {
 				t.Fatalf("owner-started run lost the owner's chat session: %s", list.Body.String())
 			}
+			page.Want(http.StatusOK)
+			summary.Want(http.StatusOK)
 			messages.Want(http.StatusOK)
 			wakeups.Want(http.StatusOK)
 			if !strings.Contains(messages.Body.String(), secret) {

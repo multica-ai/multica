@@ -1,8 +1,9 @@
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { chatSessionsOptions } from "@multica/core/chat/queries";
+import { chatSessionSummaryOptions } from "@multica/core/chat/queries";
 import { countUnreadChatMessages } from "@multica/core/chat/unread";
 import { useInboxUnreadCount } from "@multica/core/inbox/queries";
+import { useIsGuest } from "@multica/core/permissions";
 
 type BadgeCapableAPI = {
   setUnreadBadge?: (count: number) => void;
@@ -21,11 +22,15 @@ function getDesktopAPI(): BadgeCapableAPI | undefined {
  */
 export function useDesktopUnreadBadge(wsId: string | null | undefined): void {
   const inboxCount = useInboxUnreadCount(wsId, { whileHidden: true });
-  const { data: sessions } = useQuery({
-    ...chatSessionsOptions(wsId ?? ""),
-    enabled: !!wsId,
+  const memberWsId = useIsGuest(wsId) ? null : wsId;
+  const { data: summary } = useQuery({
+    ...chatSessionSummaryOptions(memberWsId ?? ""),
+    enabled: !!memberWsId,
   });
-  const count = inboxCount + (wsId ? countUnreadChatMessages(sessions) : 0);
+  const chatCount = countUnreadChatMessages(
+    Object.entries(summary?.unread_by_session ?? {}).map(([id, unread_count]) => ({ id, unread_count })),
+  );
+  const count = inboxCount + chatCount;
   useEffect(() => {
     getDesktopAPI()?.setUnreadBadge?.(count);
   }, [count]);

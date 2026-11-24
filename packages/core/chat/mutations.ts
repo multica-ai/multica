@@ -6,6 +6,7 @@ import { chatKeys, sortChatSessions, QUICK_ACTIONS_PENDING_TIMEOUT_MS } from "./
 import { createLogger } from "../logger";
 import type {
   ChatSession,
+  ChatSessionSummary,
   ChatPinnedAgent,
   ChatWakeup,
   ChatDraftRestoresResponse,
@@ -236,6 +237,7 @@ class MarkChatSessionsReadError extends Error {
 export function useMarkAllChatSessionsRead() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
+  const summaryKey = chatKeys.sessionSummary(wsId);
 
   return useMutation({
     mutationFn: async (sessionIds: string[]) => {
@@ -255,7 +257,19 @@ export function useMarkAllChatSessionsRead() {
           return { ...s, has_unread: false, unread_count: 0 };
         }),
       );
-      return { prevUnread };
+      const prevSummaryUnread = new Map<string, number>();
+      qc.setQueryData<ChatSessionSummary>(summaryKey, (old) => {
+        if (!old) return old;
+        const unread = { ...old.unread_by_session };
+        for (const id of ids) {
+          const count = unread[id];
+          if (count === undefined) continue;
+          prevSummaryUnread.set(id, count);
+          delete unread[id];
+        }
+        return { ...old, unread_by_session: unread };
+      });
+      return { prevUnread, prevSummaryUnread };
     },
     onError: (err, sessionIds, ctx) => {
       logger.error("markAllChatSessionsRead.error.rollback", { err });
@@ -267,6 +281,14 @@ export function useMarkAllChatSessionsRead() {
           return prev ? { ...s, ...prev } : s;
         }),
       );
+      qc.setQueryData<ChatSessionSummary>(summaryKey, (old) => {
+        if (!old) return old;
+        const unread = { ...old.unread_by_session };
+        for (const [id, count] of ctx.prevSummaryUnread) {
+          if (failed.has(id)) unread[id] ??= count;
+        }
+        return { ...old, unread_by_session: unread };
+      });
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });

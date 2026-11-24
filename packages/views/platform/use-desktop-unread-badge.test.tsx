@@ -5,8 +5,9 @@ import { afterEach, expect, it, vi } from "vitest";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
 import { chatKeys } from "@multica/core/chat/queries";
-import type { ChatSession } from "@multica/core/types";
 import { useDesktopUnreadBadge } from "./use-desktop-unread-badge";
+
+vi.mock("@multica/core/permissions", () => ({ useIsGuest: () => false }));
 
 afterEach(() => {
   cleanup(); focusManager.setFocused(undefined);
@@ -16,10 +17,16 @@ afterEach(() => {
 
 it("adds Chat messages to Inbox unread while backgrounded and clears read/logout counts", async () => {
   let chatUnread = 0;
-  const listChatSessions = vi.fn(async () => [{ id: "chat-a", unread_count: chatUnread }] as ChatSession[]);
+  const listChatSessions = vi.fn(async () => []);
+  const getChatSessionSummary = vi.fn(async () => ({
+    active_count: 1,
+    archived_count: 0,
+    unread_by_session: chatUnread > 0 ? { "chat-a": chatUnread } : {},
+  }));
   setApiInstance({
     getInboxUnreadSummary: async () => [{ workspace_id: "ws-a", count: 2 }],
     listChatSessions,
+    getChatSessionSummary,
   } as unknown as ApiClient);
   const setUnreadBadge = vi.fn();
   Object.defineProperty(window, "desktopAPI", { configurable: true, value: { setUnreadBadge } });
@@ -30,11 +37,13 @@ it("adds Chat messages to Inbox unread while backgrounded and clears read/logout
     wrapper, initialProps: { wsId: "ws-a" as string | null },
   });
   await waitFor(() => expect(setUnreadBadge).toHaveBeenLastCalledWith(2));
+  expect(getChatSessionSummary).toHaveBeenCalledWith({ workspaceId: "ws-a" });
+  expect(listChatSessions).not.toHaveBeenCalled();
   chatUnread = 3;
-  await act(async () => { await qc.invalidateQueries({ queryKey: chatKeys.sessions("ws-a") }); });
+  await act(async () => { await qc.invalidateQueries({ queryKey: chatKeys.sessionSummary("ws-a") }); });
   await waitFor(() => expect(setUnreadBadge).toHaveBeenLastCalledWith(5));
   chatUnread = 0;
-  await act(async () => { await qc.invalidateQueries({ queryKey: chatKeys.sessions("ws-a") }); });
+  await act(async () => { await qc.invalidateQueries({ queryKey: chatKeys.sessionSummary("ws-a") }); });
   await waitFor(() => expect(setUnreadBadge).toHaveBeenLastCalledWith(2));
   view.rerender({ wsId: null });
   await waitFor(() => expect(setUnreadBadge).toHaveBeenLastCalledWith(0));

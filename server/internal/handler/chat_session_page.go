@@ -90,7 +90,7 @@ func parseChatSessionPage(r *http.Request) (db.ListChatSessionsPageParams, error
 	return p, nil
 }
 
-// Match the legacy list's workspace, creator, and private-agent boundary.
+// Match the legacy list's owner, workspace, and private-agent checks.
 // Filtering before LIMIT prevents inaccessible rows from consuming a page.
 func (h *Handler) chatSessionListScope(w http.ResponseWriter, r *http.Request) (pgtype.UUID, pgtype.UUID, []pgtype.UUID, bool) {
 	userID, ok := requireUserID(w, r)
@@ -98,6 +98,9 @@ func (h *Handler) chatSessionListScope(w http.ResponseWriter, r *http.Request) (
 		return pgtype.UUID{}, pgtype.UUID{}, nil, false
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
+	if !h.requireChatOwnerAccess(w, r, userID, workspaceID) {
+		return pgtype.UUID{}, pgtype.UUID{}, nil, false
+	}
 	member, ok := h.workspaceMember(w, r, workspaceID)
 	if !ok {
 		return pgtype.UUID{}, pgtype.UUID{}, nil, false
