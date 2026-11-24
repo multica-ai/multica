@@ -177,6 +177,7 @@
     "description_placeholder": "Add description...",
     "more_options_aria": "More options",
     "title_required": "Enter a title to create",
+    "property_required": "Choose {{name}} to create",
     "submit": "Create issue",
     "submitting": "Creating...",
     "toast_created": "Issue created",

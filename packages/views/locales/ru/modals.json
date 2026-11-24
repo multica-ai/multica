@@ -175,6 +175,7 @@
     "description_placeholder": "Добавить описание...",
     "more_options_aria": "Дополнительные параметры",
     "title_required": "Введите название, чтобы создать",
+    "property_required": "Выберите «{{name}}», чтобы создать",
     "submit": "Создать задачу",
     "submitting": "Создание...",
     "toast_created": "Задача создана",

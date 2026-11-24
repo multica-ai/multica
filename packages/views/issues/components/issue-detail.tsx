@@ -3271,7 +3271,7 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
   const canAddProperty = OPTIONAL_PROP_KEYS.some(
     (key) => !visibleOptionalProps.has(key) && (key !== "stage" || issue.parent_issue_id != null),
   ) || workspaceProperties.some(
-    (property) => !property.archived && !visibleCustomProps.has(property.id) && issue.properties?.[property.id] === undefined,
+    (property) => !property.archived && !isPinnedProperty(property) && !visibleCustomProps.has(property.id) && issue.properties?.[property.id] === undefined,
   );
   // "+ Add property" — an inline row at the bottom of the Properties grid
   // that opens a Popover listing optional fields not yet displayed. Hidden
@@ -3335,6 +3335,7 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
             const addable = workspaceProperties.filter(
               (p) =>
                 !p.archived &&
+                !isPinnedProperty(p) &&
                 !visibleCustomProps.has(p.id) &&
                 issue.properties?.[p.id] === undefined,
             );
@@ -3445,6 +3446,12 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
           )}
           <IssueWorkflowPropRow projectId={issue.project_id} status={issue.status} label={t(($) => $.workflows.project.label)} />
 
+          {/* Pinned custom properties (always visible or required) sit with
+              the core props and render even while empty. */}
+          {workspaceProperties.filter(isPinnedProperty).map((p) => (
+            <CustomPropertyRow key={p.id} issue={issue} property={p} defaultOpen={autoOpenCustomProp === p.id} />
+          ))}
+
           {/* Optional props — rendered only when set on the issue OR added
               via "+ Add property" in this session. Row order follows the
               order of `OPTIONAL_PROP_KEYS`. */}
@@ -3504,27 +3511,12 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
           {workspaceProperties
             .filter(
               (p) =>
-                issue.properties?.[p.id] !== undefined ||
-                (!p.archived && visibleCustomProps.has(p.id)),
+                !isPinnedProperty(p) &&
+                (issue.properties?.[p.id] !== undefined ||
+                  (!p.archived && visibleCustomProps.has(p.id))),
             )
             .map((p) => (
-              <PropRow
-                key={p.id}
-                label={
-                  <>
-                    <PropertyIcon property={p} className="size-3.5 text-caption" />
-                    <TruncatedTooltip content={p.name} focusable>
-                      <span className="line-clamp-2 min-w-0 break-words [overflow-wrap:anywhere]">{p.name}</span>
-                    </TruncatedTooltip>
-                  </>
-                }
-              >
-                <CustomPropertyValueEditor
-                  issue={issue}
-                  property={p}
-                  defaultOpen={autoOpenCustomProp === p.id}
-                />
-              </PropRow>
+              <CustomPropertyRow key={p.id} issue={issue} property={p} defaultOpen={autoOpenCustomProp === p.id} />
             ))}
 
           {addPropertyRow}
@@ -4758,6 +4750,37 @@ function IssueDetailActionsDropdown({
 }: Omit<ComponentProps<typeof IssueActionsDropdown>, "onShowInSidebar"> & { locateInSidebar: boolean }) {
   const showInSidebar = useShowInSidebar(props.issue);
   return <IssueActionsDropdown {...props} onShowInSidebar={locateInSidebar ? (showInSidebar ?? undefined) : undefined} />;
+}
+
+// Pinned properties render on every issue, empty or not. Archived ones fall
+// back to the ordinary set-value-only disclosure.
+function isPinnedProperty(property: IssueProperty): boolean {
+  return !property.archived && (property.always_visible === true || property.required === true);
+}
+
+function CustomPropertyRow({
+  issue,
+  property,
+  defaultOpen,
+}: {
+  issue: Issue;
+  property: IssueProperty;
+  defaultOpen: boolean;
+}) {
+  return (
+    <PropRow
+      label={
+        <>
+          <PropertyIcon property={property} className="size-3.5 text-caption" />
+          <TruncatedTooltip content={property.name} focusable>
+            <span className="line-clamp-2 min-w-0 break-words [overflow-wrap:anywhere]">{property.name}</span>
+          </TruncatedTooltip>
+        </>
+      }
+    >
+      <CustomPropertyValueEditor issue={issue} property={property} defaultOpen={defaultOpen} />
+    </PropRow>
+  );
 }
 
 /** The workflow the issue follows through its project (MUL-7420). */

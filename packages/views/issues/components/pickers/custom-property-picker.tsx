@@ -229,7 +229,8 @@ export function CustomPropertyValueInput({
           trigger={valueTrigger}
           triggerRender={triggerRender}
         >
-          {emptyRow}
+          {/* A required value can change but not be cleared. */}
+          {property.required !== true && emptyRow}
           {filteredOptions.map((option) => (
             <PickerItem
               key={option.id}

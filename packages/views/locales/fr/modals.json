@@ -177,6 +177,7 @@
     "description_placeholder": "Ajouter une description...",
     "more_options_aria": "Plus d'options",
     "title_required": "Saisissez un titre pour créer",
+    "property_required": "Choisissez {{name}} pour créer",
     "submit": "Créer la tâche",
     "submitting": "Création...",
     "toast_created": "Tâche créée",

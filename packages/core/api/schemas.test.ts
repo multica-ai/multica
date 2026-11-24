@@ -520,6 +520,23 @@ describe("IssuePropertySchema (via ListPropertiesResponseSchema)", () => {
     expect(parsed.properties[0]?.type).toBe("relation");
   });
 
+  it("defaults required and always_visible to off for older or malformed servers", () => {
+    const parsed = ListPropertiesResponseSchema.parse({
+      properties: [baseProperty, { ...baseProperty, required: "yes", always_visible: 1 }],
+      total: 2,
+    });
+    for (const property of parsed.properties) {
+      expect(property.required).toBe(false);
+      expect(property.always_visible).toBe(false);
+    }
+    const flagged = ListPropertiesResponseSchema.parse({
+      properties: [{ ...baseProperty, required: true, always_visible: true }],
+      total: 1,
+    });
+    expect(flagged.properties[0]?.required).toBe(true);
+    expect(flagged.properties[0]?.always_visible).toBe(true);
+  });
+
   it("defaults config when the server sends none", () => {
     const { config: _omit, ...withoutConfig } = baseProperty;
     const parsed = ListPropertiesResponseSchema.parse({ properties: [withoutConfig], total: 1 });

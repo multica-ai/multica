@@ -175,6 +175,7 @@
     "description_placeholder": "説明を追加...",
     "more_options_aria": "その他のオプション",
     "title_required": "作成するにはタイトルを入力してください",
+    "property_required": "作成するには{{name}}を選択してください",
     "submit": "タスクを作成",
     "submitting": "作成中...",
     "toast_created": "タスクを作成しました",

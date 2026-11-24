@@ -1274,6 +1274,46 @@ describe("CreateIssueModal", () => {
     expect(mockClearDraft).toHaveBeenCalled();
   });
 
+  it("shows a required property up front and holds the create until it is chosen", async () => {
+    const user = userEvent.setup();
+    mockListProperties.mockResolvedValue({
+      properties: [
+        {
+          id: "property-type",
+          workspace_id: "ws-test",
+          name: "Work type",
+          type: "select",
+          required: true,
+          config: { options: [{ id: "option-enterprise", name: "Ops", color: "#22c55e" }] },
+          position: 0,
+          archived: false,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+      total: 1,
+    });
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    // Required: on the toolbar without "+ custom property".
+    const pill = await screen.findByRole("button", { name: "Edit Work type" });
+    await user.type(screen.getByPlaceholderText("Issue title"), "Needs a type");
+    const create = screen.getByRole("button", { name: "Create issue" });
+    expect(create).toHaveAttribute("aria-disabled", "true");
+
+    await user.click(create);
+    expect(mockCreateIssue).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-property-error="true"]')).not.toBeNull();
+    expect(pill).toHaveAttribute("data-open", "true");
+
+    // The mocked picker commits its option on click.
+    await user.click(pill);
+    await user.click(screen.getByRole("button", { name: "Create issue" }));
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Needs a type", properties: { "property-type": "option-enterprise" } }),
+    ));
+  });
+
   it("keeps the draft open and highlights the rejected custom property", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();

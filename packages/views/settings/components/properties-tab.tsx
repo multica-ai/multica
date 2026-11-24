@@ -97,6 +97,8 @@ interface PropertyDraft {
   description: string;
   icon: string;
   options: OptionDraft[];
+  required: boolean;
+  alwaysVisible: boolean;
 }
 
 const EMPTY_DRAFT: PropertyDraft = {
@@ -105,6 +107,8 @@ const EMPTY_DRAFT: PropertyDraft = {
   description: "",
   icon: "",
   options: [{ name: "", color: COLOR_PICKER_PRESETS[6] }],
+  required: false,
+  alwaysVisible: false,
 };
 
 function typeHasOptions(type: string): boolean {
@@ -463,12 +467,18 @@ function PropertyEditorDialog({
               name: option.name,
               color: option.color,
             })),
+            required: property.required === true,
+            alwaysVisible: property.always_visible === true,
           }
         : EMPTY_DRAFT,
     );
   }, [property, open]);
 
   const showOptions = typeHasOptions(draft.type);
+  // Only single select can be required: it is the one value picker every
+  // create surface (mobile, autopilots) offers.
+  const canRequire = draft.type === "select";
+  const required = canRequire && draft.required;
   const validOptions = draft.options.filter((option) => option.name.trim());
   const propertyTypeItems = ISSUE_PROPERTY_TYPES.map((type) => ({
     value: type,
@@ -500,6 +510,8 @@ function PropertyEditorDialog({
           description: draft.description.trim(),
           icon: draft.icon,
           ...(config ? { config } : {}),
+          required,
+          always_visible: draft.alwaysVisible,
         },
         { onSuccess: () => onOpenChange(false), onError },
       );
@@ -512,6 +524,8 @@ function PropertyEditorDialog({
         description: draft.description.trim(),
         icon: draft.icon,
         ...(config ? { config } : {}),
+        required,
+        always_visible: draft.alwaysVisible,
       },
       { onSuccess: () => onOpenChange(false), onError },
     );
@@ -649,6 +663,33 @@ function PropertyEditorDialog({
               }
               placeholder={t(($) => $.properties.editor.description_placeholder)}
             />
+          </div>
+          <div className="space-y-3">
+            {canRequire && (
+              <label className="flex items-start justify-between gap-4">
+                <span className="space-y-0.5">
+                  <span className="block text-body">{t(($) => $.properties.editor.required)}</span>
+                  <span className="block text-caption text-muted-foreground">
+                    {t(($) => $.properties.editor.required_hint)}
+                  </span>
+                </span>
+                <Switch
+                  checked={draft.required}
+                  onCheckedChange={(checked) =>
+                    setDraft((current) => ({ ...current, required: checked }))
+                  }
+                />
+              </label>
+            )}
+            <label className="flex items-center justify-between gap-4">
+              <span className="text-body">{t(($) => $.properties.editor.always_visible)}</span>
+              <Switch
+                checked={draft.alwaysVisible}
+                onCheckedChange={(checked) =>
+                  setDraft((current) => ({ ...current, alwaysVisible: checked }))
+                }
+              />
+            </label>
           </div>
           {showOptions && (
             <div className="space-y-2">

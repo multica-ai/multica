@@ -926,6 +926,9 @@ export const IssuePropertySchema = z.object({
       color: z.string().optional().default("#6b7280"),
     }).loose()).optional(),
   }).loose().default({}),
+  // Absent on older servers: off.
+  required: z.boolean().catch(false).default(false),
+  always_visible: z.boolean().catch(false).default(false),
   position: z.number().optional().default(0),
   archived: z.boolean().optional().default(false),
   archived_at: z.string().nullable().optional(),
@@ -942,6 +945,8 @@ export const EMPTY_ISSUE_PROPERTY: IssueProperty = {
   description: "",
   icon: "",
   config: {},
+  required: false,
+  always_visible: false,
   position: 0,
   archived: false,
   usage_count: 0,

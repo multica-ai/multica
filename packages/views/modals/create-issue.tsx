@@ -382,6 +382,12 @@ export function ManualCreatePanel({
   const queryClient = useQueryClient();
   const { categoryOf: draftStatusCategory, colorOf, iconOf } = useIssueStatuses(wsId);
   const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
+  // The server refuses a create that leaves a required property empty; the
+  // dialog points at it before sending.
+  const missingRequiredProperty = workspaceProperties.find(
+    (property) =>
+      property.required === true && !Object.prototype.hasOwnProperty.call(propertyValues, property.id),
+  );
   const { data: parentIssue } = useQuery({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
@@ -805,6 +811,17 @@ export function ManualCreatePanel({
             }
           }
         }
+        if (
+          mountedRef.current &&
+          typeof propertyId === "string" &&
+          !Object.prototype.hasOwnProperty.call(propertyValues, propertyId)
+        ) {
+          // A required property this dialog did not know about yet: point at
+          // it once the refreshed catalog lists it.
+          void queryClient.invalidateQueries({ queryKey: propertyListOptions(wsId).queryKey });
+          setPropertyErrorId(propertyId);
+          setCustomPropertyPickerId(propertyId);
+        }
         toast.error(err.message || t(($) => $.create_issue.toast_failed));
         return false;
       }
@@ -903,6 +920,11 @@ export function ManualCreatePanel({
       titleEditorRef.current?.focus();
       return;
     }
+    if (missingRequiredProperty) {
+      setPropertyErrorId(missingRequiredProperty.id);
+      setCustomPropertyPickerId(missingRequiredProperty.id);
+      return;
+    }
     void composer.submit();
   };
   const submitting = composer.submitting;
@@ -960,7 +982,13 @@ export function ManualCreatePanel({
 
   // One state for the button and the keyboard paths, so a rendered affordance
   // can never disagree with what `handleSubmit` will actually do.
-  const submitState: "submitting" | "uploading" | "missing_title" | "source_unavailable" | "ready" =
+  const submitState:
+    | "submitting"
+    | "uploading"
+    | "missing_title"
+    | "missing_property"
+    | "source_unavailable"
+    | "ready" =
     submitting
       ? "submitting"
       : gate.uploading
@@ -969,7 +997,9 @@ export function ManualCreatePanel({
           ? "source_unavailable"
           : !title.trim()
             ? "missing_title"
-            : "ready";
+            : missingRequiredProperty
+              ? "missing_property"
+              : "ready";
   const submitBusy = submitState === "submitting" || submitState === "uploading";
 
   // Built once and reused by both footer branches: rendering a separate Button
@@ -983,7 +1013,12 @@ export function ManualCreatePanel({
       // keyboard and screen-reader users could never reach the tooltip that
       // explains why nothing happens. `handleSubmit` is the real gate either way.
       disabled={submitBusy}
-      aria-disabled={submitState === "missing_title" || submitState === "source_unavailable" || undefined}
+      aria-disabled={
+        submitState === "missing_title" ||
+        submitState === "missing_property" ||
+        submitState === "source_unavailable" ||
+        undefined
+      }
       aria-busy={submitBusy || undefined}
       // The Button base only dims/blocks on native `disabled`, so aria-disabled
       // would otherwise stay a fully lit, pressable-looking primary button.
@@ -1285,6 +1320,8 @@ export function ManualCreatePanel({
               {workspaceProperties
                 .filter(
                   (property) =>
+                    property.required === true ||
+                    property.always_visible === true ||
                     Object.prototype.hasOwnProperty.call(propertyValues, property.id) ||
                     customPropertyPickerId === property.id,
                 )
@@ -1613,6 +1650,13 @@ export function ManualCreatePanel({
                         tooltip. */}
                     <TooltipTrigger render={createButton} />
                     <TooltipContent side="top">{t(($) => $.create_issue.title_required)}</TooltipContent>
+                  </Tooltip>
+                ) : submitState === "missing_property" && missingRequiredProperty ? (
+                  <Tooltip>
+                    <TooltipTrigger render={createButton} />
+                    <TooltipContent side="top">
+                      {t(($) => $.create_issue.property_required, { name: missingRequiredProperty.name })}
+                    </TooltipContent>
                   </Tooltip>
                 ) : (
                   createButton

@@ -1445,6 +1445,28 @@ describe("IssueDetail (shared)", () => {
     expect(await screen.findByRole("button", { name: "Project" })).toBeInTheDocument();
   });
 
+  it("pins always-visible and required custom properties even while empty", async () => {
+    const property = (id: string, name: string, flags: Record<string, boolean>) => ({
+      id, workspace_id: "ws-1", name, type: "text", config: {}, position: 0, archived: false,
+      created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z", ...flags,
+    });
+    mockApiObj.listProperties.mockResolvedValue({
+      properties: [
+        property("prop-pinned", "Work type", { always_visible: true }),
+        property("prop-required", "Severity", { required: true }),
+        property("prop-plain", "Estimate", {}),
+      ],
+      total: 3,
+    });
+
+    renderIssueDetail();
+
+    expect(await screen.findByText("Work type")).toBeInTheDocument();
+    expect(screen.getByText("Severity")).toBeInTheDocument();
+    // An ordinary property without a value stays behind "+ Add property".
+    expect(screen.queryByText("Estimate")).not.toBeInTheDocument();
+  });
+
   it("keeps the Properties header free of add and settings buttons", async () => {
     renderIssueDetail();
     const disclosure = await screen.findByRole("button", { name: "Properties" });
