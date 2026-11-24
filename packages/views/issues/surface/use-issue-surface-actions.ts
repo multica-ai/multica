@@ -1,6 +1,11 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useRef } from "react";
+import {
+  notifyManager,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { UpdateIssueRequest } from "@multica/core/types";
 import {
@@ -9,6 +14,8 @@ import {
   useUpdateIssue,
 } from "@multica/core/issues/mutations";
 import { errorCode } from "@multica/core/api";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { issueKeys } from "@multica/core/issues/queries";
 import { useModalStore } from "@multica/core/modals";
 import {
   type IssueSurfaceActions,
@@ -41,6 +48,32 @@ export interface IssueSurfaceActionController {
   ) => void;
 }
 
+/**
+ * Resolves once every active table row page that is fetching now has landed a
+ * result or stopped. A realtime echo restarts those fetches, and the fetch it
+ * replaces rejects, so each page is followed until its own data changes.
+ */
+async function tableRefetchLanded(qc: QueryClient, wsId: string) {
+  const fetching = qc.getQueryCache().findAll({
+    queryKey: [...issueKeys.tableAll(wsId), "rows"],
+    type: "active",
+    fetchStatus: "fetching",
+  });
+  await Promise.all(
+    fetching.map(async (query) => {
+      const landed = query.state.dataUpdateCount;
+      while (
+        query.state.fetchStatus === "fetching" &&
+        query.state.dataUpdateCount === landed
+      ) {
+        await query.fetch(undefined, { cancelRefetch: false }).catch(() => {});
+      }
+    }),
+  );
+  // Observers hear about landed rows through this queue; go after them.
+  await new Promise<void>((resolve) => notifyManager.schedule(resolve));
+}
+
 export function useIssueSurfaceActions({
   createDefaults,
 }: {
@@ -48,6 +81,9 @@ export function useIssueSurfaceActions({
 }): IssueSurfaceActionController {
   const { t } = useT("projects");
   const { t: tIssues } = useT("issues");
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  const lastMoveRef = useRef(0);
   const updateIssueMutation = useUpdateIssue();
   const batchUpdateMutation = useBatchUpdateIssues();
   const batchDeleteMutation = useBatchDeleteIssues();
@@ -89,6 +125,7 @@ export function useIssueSurfaceActions({
       onSettled?: () => void,
     ) => {
       const { before_id, after_id, ...optimisticUpdates } = updates;
+      const move = ++lastMoveRef.current;
       updateIssueMutation.mutate(
         {
           id: issueId,
@@ -105,11 +142,18 @@ export function useIssueSurfaceActions({
                 : t(($) => $.detail.toast_move_issue_failed),
             );
           },
-          onSettled,
+          // A moved card has left its old branch's rows as soon as it is
+          // patched, and enters the new branch's only when that one refetches.
+          // Callers hold their local placement until this fires, so it waits
+          // for those rows. A newer move owns the hold from then on.
+          onSettled: async (_issue, err) => {
+            if (!err) await tableRefetchLanded(qc, wsId);
+            if (move === lastMoveRef.current) onSettled?.();
+          },
         },
       );
     },
-    [t, tIssues, updateIssueMutation],
+    [qc, t, tIssues, updateIssueMutation, wsId],
   );
 
   const openCreateIssue = useCallback(

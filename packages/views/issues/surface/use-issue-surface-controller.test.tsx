@@ -601,7 +601,7 @@ describe("useIssueSurfaceController", () => {
     expect(result.current.selection.selectedIds).toEqual(new Set());
   });
 
-  it("delegates drag movement as a server-owned relative intent", () => {
+  it("delegates drag movement as a server-owned relative intent", async () => {
     const { result } = renderHook(
       () =>
         useIssueSurfaceController({
@@ -647,7 +647,7 @@ describe("useIssueSurfaceController", () => {
       | { onSettled?: () => void }
       | undefined;
     options?.onSettled?.();
-    expect(onSettled).toHaveBeenCalled();
+    await waitFor(() => expect(onSettled).toHaveBeenCalled());
   });
 
   it("never reports isEmpty in gantt mode — an empty scheduled subset cannot prove the window is empty", async () => {
