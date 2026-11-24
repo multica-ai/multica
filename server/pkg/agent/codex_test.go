@@ -1858,9 +1858,12 @@ func TestCodexRawAgentMessageAbnormalEOFFlushesCompleteDeltas(t *testing.T) {
 // run shipped its intermediate narration to Slack and Lark along with the answer
 // (GH #6006). Later, an empty final_answer after a `commentary` message promoted
 // that commentary to Result.Output, which the server then posted as the run's
-// result comment. The wiring mirrors executeOnce: onAgentMessage
-// and onFinalAnswer feed a codexOutputSelection and codexDeliverableOutput picks
-// from it.
+// result comment. The remaining hole was the phase-less protocol: a run whose
+// last event was a tool call left its closing narration — "Let me verify the
+// permission facts for the tcpdump output path." — as the only candidate, and
+// the server synthesized a comment from it. The wiring mirrors executeOnce:
+// onAgentMessage, onFinalAnswer and the tool-event branch of onMessage feed a
+// codexOutputSelection and codexDeliverableOutput picks from it.
 func TestCodexDeliverableOutputExcludesNarration(t *testing.T) {
 	t.Parallel()
 
@@ -1872,6 +1875,9 @@ func TestCodexDeliverableOutputExcludesNarration(t *testing.T) {
 		rawBlankFinal  = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"m3","text":" \n\t ","phase":"final_answer"}}}`
 		legacyFirst    = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"agent_message","message":"Let me check the logs."}}}`
 		legacySecond   = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"agent_message","message":"The retry loop is the cause."}}}`
+		rawToolUse     = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"commandExecution","id":"c1","command":"tcpdump -i any -c 5"}}}`
+		rawToolResult  = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"commandExecution","id":"c1","status":"completed","aggregatedOutput":"5 packets captured"}}}`
+		legacyToolUse  = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"exec_command_begin","call_id":"c1","command":"tcpdump -i any -c 5"}}}`
 		narration      = "Let me check the logs."
 		wantDeliverabl = "The retry loop is the cause."
 	)
@@ -1953,6 +1959,42 @@ func TestCodexDeliverableOutputExcludesNarration(t *testing.T) {
 			want:         wantDeliverabl,
 			wantStreamed: []string{narration, wantDeliverabl, wantDeliverabl},
 		},
+		{
+			// The reported shape: phase-less narration, then the last event of
+			// the run is a tool call. The narration must not become the run's
+			// result.
+			name:         "phase-less narration followed by a tool call yields no output",
+			protocol:     "raw",
+			lines:        []string{rawNarration, rawToolUse, rawToolResult},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			name:         "legacy narration followed by a tool call yields no output",
+			protocol:     "legacy",
+			lines:        []string{legacyFirst, legacyToolUse},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			// A real answer after the tool call is still the deliverable: the
+			// clearing only discards text the turn has since moved past.
+			name:         "a message after the tool call is still the deliverable",
+			protocol:     "legacy",
+			lines:        []string{legacyFirst, legacyToolUse, legacySecond},
+			want:         wantDeliverabl,
+			wantStreamed: []string{narration, wantDeliverabl},
+		},
+		{
+			// An explicitly labelled final answer survives later tool use: the
+			// app-server said this is the deliverable, and a post-answer tool
+			// call (e.g. posting the comment itself) does not retract that.
+			name:         "a labelled final answer survives later tool use",
+			protocol:     "raw",
+			lines:        []string{rawNarration, rawFinal, rawToolUse, rawToolResult},
+			want:         wantDeliverabl,
+			wantStreamed: []string{narration, wantDeliverabl},
+		},
 	}
 
 	for _, tc := range cases {
@@ -1965,8 +2007,11 @@ func TestCodexDeliverableOutputExcludesNarration(t *testing.T) {
 			var output codexOutputSelection
 			var streamed []string
 			c.onMessage = func(msg Message) {
-				if msg.Type == MessageText {
+				switch msg.Type {
+				case MessageText:
 					streamed = append(streamed, msg.Content)
+				case MessageToolUse, MessageToolResult:
+					output.observeToolActivity()
 				}
 			}
 			c.onAgentMessage = output.observeAgentMessage
@@ -4302,8 +4347,11 @@ func TestCodexExecuteSemanticInactivityAllowsContinuousMessages(t *testing.T) {
 	if result.Status != "completed" {
 		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
 	}
-	if !strings.Contains(result.Output, "still working") {
-		t.Fatalf("expected streamed text in output, got %q", result.Output)
+	// The message precedes a commandExecution, so it is narration and must not
+	// become the deliverable; the run still counts as progressed (which is what
+	// this test is about).
+	if result.Output != "" {
+		t.Fatalf("narration before a tool call became the output: %q", result.Output)
 	}
 }
 
@@ -4440,6 +4488,54 @@ func TestCodexExecutePhaseLessCompletedMessageRemainsAuthoritative(t *testing.T)
 	}
 	if result.Output != "Hello" {
 		t.Fatalf("phase-less Result.Output = %q, want authoritative Hello", result.Output)
+	}
+}
+
+// TestCodexExecuteTrailingToolCallYieldsNoOutput replays the reported run end to
+// end: the gateway emits agent text with no phase label, the model's last action
+// is a tool call, and the turn then ends without any further message. The run
+// must complete with empty Result.Output so the server synthesizes no comment,
+// while the narration still reaches the transcript.
+func TestCodexExecuteTrailingToolCallYieldsNoOutput(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	const narration = "Let me verify the permission facts for the tcpdump output path."
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-trailing-tool"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-trailing-tool","turn":{"id":"turn-trailing-tool"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-trailing-tool","turnId":"turn-trailing-tool","item":{"type":"agentMessage","id":"msg-1","text":"`+narration+`"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thr-trailing-tool","turnId":"turn-trailing-tool","item":{"type":"commandExecution","id":"cmd-1","command":"tcpdump -i any -c 5"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-trailing-tool","turnId":"turn-trailing-tool","item":{"type":"commandExecution","id":"cmd-1","status":"completed","aggregatedOutput":"5 packets captured"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-trailing-tool","turn":{"id":"turn-trailing-tool","status":"completed"}}}'`+"\n")
+
+	result, messages := executeFakeCodexCollectingMessages(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 5 * time.Second,
+	}, 10*time.Second)
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, want completed (error=%q)", result.Status, result.Error)
+	}
+	if result.Output != "" {
+		t.Fatalf("Result.Output = %q, want empty: text before a tool call is not a deliverable", result.Output)
+	}
+	var transcript []string
+	for _, msg := range messages {
+		if msg.Type == MessageText {
+			transcript = append(transcript, msg.Content)
+		}
+	}
+	if strings.Join(transcript, "") != narration {
+		t.Fatalf("transcript text = %q, want the narration preserved", transcript)
 	}
 }
 

@@ -1200,9 +1200,11 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	// Result.Output is "final user-facing output selected by the backend"
 	// (agent.go), so it holds the deliverable only. output tracks the text the
 	// app-server labelled `phase: "final_answer"` and, for the legacy
-	// `agent_message` protocol which carries no phase, the last agent message.
-	// Every agent message still flows to msgCh, so the transcript is unchanged —
-	// only what the daemon forwards to a chat/channel reply narrows (GH #6006).
+	// `agent_message` protocol which carries no phase, the last agent message —
+	// which a tool call afterwards clears, because unlabelled text followed by
+	// tool use is narration (GH #6006). Every agent message still flows to
+	// msgCh, so the transcript is unchanged — only what the daemon forwards to a
+	// chat/channel reply narrows.
 	var output codexOutputSelection
 	var semanticObserved atomic.Bool
 	turnNotificationGate := &codexTurnNotificationGate{}
@@ -1247,6 +1249,15 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		},
 		onMessage: func(msg Message) {
 			observeMessage(msg)
+			if msg.Type == MessageToolUse || msg.Type == MessageToolResult {
+				// Text emitted before a tool call is narration about the work,
+				// not a deliverable; drop it from the phase-less fallback so a
+				// turn ending in a tool call cannot report that sentence as its
+				// result. Only Result.Output narrows — msgCh still has the text.
+				outputMu.Lock()
+				output.observeToolActivity()
+				outputMu.Unlock()
+			}
 			trySend(msgCh, msg)
 		},
 		onAgentMessageChunk: func(text string) bool {
@@ -2200,6 +2211,22 @@ func (s *codexOutputSelection) observeAgentMessage(text, phase string) {
 	s.lastAgentMessagePhase = phase
 }
 
+// observeToolActivity records that the turn called a tool after whatever text
+// it had produced so far. Unlabelled text followed by tool use is narration —
+// "Let me check the logs." — so it must not outlive the tool call as the
+// phase-less fallback: a turn that ends right after a tool call (or whose
+// final `task_complete` carries no message at all) would otherwise hand that
+// sentence to the server as the run's result, and the server synthesizes a
+// comment from it. Same rule as assistantTurn.resolveFallback for the
+// stream-json backends, which drops its candidate when a turn uses a tool.
+//
+// The transcript is untouched: the text already reached the message channel,
+// and the clearing only affects what Result.Output may still adopt.
+func (s *codexOutputSelection) observeToolActivity() {
+	s.lastAgentMessage = ""
+	s.lastAgentMessagePhase = ""
+}
+
 func (s *codexOutputSelection) observeFinalAnswer(text string) {
 	s.finalAnswerObserved = true
 	if strings.TrimSpace(text) != "" {
@@ -2216,6 +2243,11 @@ func (s *codexOutputSelection) observeFinalAnswer(text string) {
 // example `commentary`) is narration too, so an empty or missing final answer
 // after it yields empty output instead of promoting the narration to the
 // deliverable.
+//
+// A phase-less message stops being the candidate once the turn calls a tool
+// after it (observeToolActivity): "Let me verify the facts." followed by the
+// tool call is narration whatever the protocol labels it, and a run that ends
+// there has no deliverable at all.
 func codexDeliverableOutput(s codexOutputSelection) string {
 	if s.finalAnswer != "" {
 		return s.finalAnswer
