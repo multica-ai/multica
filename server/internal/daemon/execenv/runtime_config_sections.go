@@ -731,20 +731,24 @@ func writeWorkflowIssue(b *strings.Builder, ctx TaskContextForEnv) {
 	if ctx.IsSquadLeader {
 		b.WriteString("- Squad leader: dispatching members is not delivery — a dispatch turn leaves the parent `in_progress`, and it moves to `in_review` only on the later turn (a member update or stage-barrier re-trigger) where you confirm the overall goal is met.\n")
 	}
-	b.WriteString(issueStatusClosedRule)
-	// A custom catalog needs one reminder that workflow updates use exact keys.
+	// A custom catalog needs one reminder that the key rules above use exact
+	// keys. It names them and precedes the closed rule, which does pick by
+	// category, so the reminder cannot read as covering that rule too.
 	if len(ctx.IssueStatuses) > 0 {
-		b.WriteString("- The workflow rules above refer to exact built-in status keys, not categories. Custom statuses share lifecycle semantics only, not built-in automation behavior.\n")
+		b.WriteString("- The `in_progress` / `in_review` / `blocked` rules above refer to exact built-in status keys, not categories. Custom statuses share lifecycle semantics only, not built-in automation behavior.\n")
 	}
+	b.WriteString(issueStatusClosedRule)
 	b.WriteString(issueStatusNoWriteRule)
 }
 
 // issueStatusClosedRule and issueStatusNoWriteRule are the status rules an
 // issue follows with or without a project workflow: a closed-category status
 // is how an agent records that the work will not be done, whichever status
-// list it picks from (MUL-9913).
+// list it picks from (MUL-9913). Category names stay plain text, as in
+// writeIssueStatusCommand (MUL-7379); the duplicate mark's full command is
+// duplicateOfCommandLine in the command list.
 const (
-	issueStatusClosedRule  = "- The work won't be done — out of scope, not reproducible, a duplicate → a `closed`-category status that fits; comment why first, and mark a duplicate with `multica issue status <id> cancelled --duplicate-of <original>`.\n"
+	issueStatusClosedRule  = "- The work won't be done — out of scope, not reproducible, a duplicate → a status in the closed category that fits (`cancelled` when there are no custom statuses); comment why first, and mark a duplicate with `--duplicate-of` (see `## Available Commands`).\n"
 	issueStatusNoWriteRule = "- Your turn produced none of the issue's own deliverable — you answered a question or consulted on work owned elsewhere → write nothing, at any point; questions, discussion, and acknowledgements never touch status. This no-write default is what keeps concurrent runs from flapping the board.\n\n"
 )
 
@@ -779,10 +783,10 @@ func writeIssueStatusRulesForStatusMap(b *strings.Builder, ctx TaskContextForEnv
 	b.WriteString("**Issue status — this issue follows its project workflow** (skip any status call your Agent Identity forbids)\n\n")
 	b.WriteString("`[Project workflow]` is this issue's status map. When your work changes where the issue stands, set the status whose meaning matches.\n\n")
 	b.WriteString("- Entering a status that hands off reassigns the issue and starts its handler's run: go there only once your part is done. A status you handle starts your run by itself — add no wakeup for that. A status without a handler hands nothing off: the work stays yours until it is delivered or reaches one that does.\n")
-	b.WriteString("- At a step you handle, follow its Routes line. Otherwise, delivered work goes to the status meaning delivered; leave `done`-category statuses to a human unless Routes leads there or the map has no delivered status.\n")
+	b.WriteString("- At a step you handle, follow its Routes line. Otherwise, delivered work goes to the status meaning delivered; leave done-category statuses to a human unless Routes leads there or the map has no delivered status.\n")
 	b.WriteString(issueStatusClosedRule)
 	b.WriteString("- Work continues beyond this turn → leave the status.\n")
-	b.WriteString("- You cannot proceed without something you are missing → comment what is missing, then: at a `done`- or `closed`-category status, its send-back route if it has one; elsewhere `blocked` when the map has it, else your step's send-back route when it has one.\n")
+	b.WriteString("- You cannot proceed without something you are missing → comment what is missing, then: at a done- or closed-category status, its send-back route if it has one; elsewhere `blocked` when the map has it, else your step's send-back route when it has one.\n")
 	if ctx.IsSquadLeader {
 		b.WriteString("- Squad leader: dispatching members is not delivery — move the parent on only on a later turn that confirms the current step's goal is met.\n")
 	}
