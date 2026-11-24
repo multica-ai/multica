@@ -35,23 +35,28 @@ interface NewIssueDraftState {
   assignee: AssigneeValue;
   dueDate: string | null;
   project: Project | null;
+  /** Custom property values (select option ids), keyed by property id. */
+  properties: Record<string, string>;
   setStatus: (next: IssueStatus) => void;
   setPriority: (next: IssuePriority) => void;
   setAssignee: (next: AssigneeValue) => void;
   setDueDate: (next: string | null) => void;
   setProject: (next: Project | null) => void;
+  /** null clears the property. */
+  setProperty: (propertyId: string, optionId: string | null) => void;
   reset: () => void;
 }
 
 const INITIAL: Pick<
   NewIssueDraftState,
-  "status" | "priority" | "assignee" | "dueDate" | "project"
+  "status" | "priority" | "assignee" | "dueDate" | "project" | "properties"
 > = {
   status: "todo",
   priority: "none",
   assignee: null,
   dueDate: null,
   project: null,
+  properties: {},
 };
 
 export const useNewIssueDraftStore = create<NewIssueDraftState>((set) => ({
@@ -61,6 +66,13 @@ export const useNewIssueDraftStore = create<NewIssueDraftState>((set) => ({
   setAssignee: (next) => set({ assignee: next }),
   setDueDate: (next) => set({ dueDate: next }),
   setProject: (next) => set({ project: next }),
+  setProperty: (propertyId, optionId) =>
+    set((state) => {
+      const properties = { ...state.properties };
+      if (optionId === null) delete properties[propertyId];
+      else properties[propertyId] = optionId;
+      return { properties };
+    }),
   reset: () => set({ ...INITIAL }),
 }));
 

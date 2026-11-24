@@ -34,6 +34,7 @@ import type {
   ListIssuesParams,
   ListIssuesResponse,
   ListLabelsResponse,
+  ListPropertiesResponse,
   ListProjectResourcesResponse,
   ListProjectsResponse,
   MemberWithUser,
@@ -71,6 +72,8 @@ import {
   IssueSchema,
   ListIssuesResponseSchema,
   ListIssueStatusesResponseSchema,
+  ListPropertiesResponseSchema,
+  EMPTY_LIST_PROPERTIES_RESPONSE,
   TimelineEntriesSchema,
   WorkspaceSubscriptionSummarySchema,
 } from "@multica/core/api/schemas";
@@ -915,6 +918,20 @@ class ApiClient {
   }
 
   // --- Labels ---
+  async listProperties(opts?: {
+    signal?: AbortSignal;
+  }): Promise<ListPropertiesResponse> {
+    const raw = await this.fetch<unknown>("/api/properties", {
+      signal: opts?.signal,
+    });
+    return parseWithFallback(
+      raw,
+      ListPropertiesResponseSchema,
+      EMPTY_LIST_PROPERTIES_RESPONSE,
+      { endpoint: "GET /api/properties" },
+    );
+  }
+
   async listLabels(opts?: {
     signal?: AbortSignal;
   }): Promise<ListLabelsResponse> {
