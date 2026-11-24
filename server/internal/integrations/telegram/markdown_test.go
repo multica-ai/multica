@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 )
 
 func assertValidTelegramHTML(t *testing.T, rendered string) {
@@ -205,6 +206,110 @@ func TestFormatHTMLStrictNestingAndEdgeCases(t *testing.T) {
 			}
 			if got != tc.want {
 				t.Errorf("formatHTML(%q)\n got: %q\nwant: %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func unfinishedMarkdownLine(targetLen int) string {
+	const pattern = "***a [b ~~c `d "
+	n := (targetLen + len(pattern) - 1) / len(pattern)
+	return strings.Repeat(pattern, n)[:targetLen]
+}
+
+func distinctBackticksLine(targetLen int) string {
+	var b strings.Builder
+	for n := 1; b.Len()+n+2 <= targetLen; n++ {
+		b.WriteString(strings.Repeat("`", n))
+		b.WriteString("a ")
+	}
+	return b.String()
+}
+
+func TestFormatHTMLUnfinishedMarkdown(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "mixed unfinished emphasis links strike and code",
+			in:   unfinishedMarkdownLine(3500),
+		},
+		{
+			name: "repeated unclosed single stars",
+			in:   strings.Repeat("*a ", 1167),
+			want: strings.Repeat("*a ", 1167),
+		},
+		{
+			name: "repeated unclosed triple stars with links",
+			in:   strings.Repeat("***a [b ", 438),
+			want: strings.Repeat("***a [b ", 438),
+		},
+		{
+			name: "repeated unclosed strikethrough with links",
+			in:   strings.Repeat("~~a [b ", 500),
+			want: strings.Repeat("~~a [b ", 500),
+		},
+		{
+			name: "repeated unclosed distinct-length backtick runs",
+			in:   distinctBackticksLine(3500),
+			want: distinctBackticksLine(3500),
+		},
+		{
+			name: "repeated unclosed link destinations",
+			in:   strings.Repeat("[a](b", 700),
+			want: strings.Repeat("[a](b", 700),
+		},
+		{
+			name: "repeated unclosed angle-bracket destinations",
+			in:   strings.Repeat("[a](<b", 584),
+			want: strings.Repeat("[a](&lt;b", 584),
+		},
+		{
+			name: "repeated escaped open brackets with single closing bracket",
+			in:   strings.Repeat(`\[`, 1750) + "]",
+			want: strings.Repeat(`\[`, 1750) + "]",
+		},
+		{
+			name: "unclosed bold before many closed italics",
+			in:   strings.Repeat("**a ", 437) + strings.Repeat("*b* ", 438),
+			want: strings.Repeat("**a ", 437) + strings.Repeat("<i>b</i> ", 438),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			start := time.Now()
+			got := formatHTML(tc.in)
+			if elapsed := time.Since(start); elapsed > 2*time.Second {
+				t.Fatalf("formatHTML(%s) took %v, expected bounded linear time", tc.name, elapsed)
+			}
+			assertValidTelegramHTML(t, got)
+			if tc.want != "" && got != tc.want {
+				t.Errorf("formatHTML(%s) mismatch:\n got len=%d\nwant len=%d", tc.name, len(got), len(tc.want))
+			}
+		})
+	}
+}
+
+func BenchmarkFormatHTMLUnfinishedMarkdown(b *testing.B) {
+	cases := []struct {
+		name string
+		in   string
+	}{
+		{name: "mixed_3500", in: unfinishedMarkdownLine(3500)},
+		{name: "stars_links_3500", in: strings.Repeat("*a [b ", 584)[:3500]},
+		{name: "triple_stars_links_3500", in: strings.Repeat("***a [b ", 438)[:3500]},
+		{name: "unclosed_link_dest_3500", in: strings.Repeat("[a](b", 700)},
+		{name: "unclosed_strike_3500", in: strings.Repeat("~~a ", 875)},
+		{name: "bold_before_italics_3500", in: strings.Repeat("**a ", 437) + strings.Repeat("*b* ", 438)},
+	}
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = formatHTML(tc.in)
 			}
 		})
 	}
