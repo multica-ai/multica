@@ -785,6 +785,71 @@ func TestWorkflowOwnerPermissions(t *testing.T) {
 	remove(asOwner).Want(http.StatusNoContent)
 }
 
+func TestProjectCreatorWorkflowPermissions(t *testing.T) {
+	seedTestCatalog(t)
+	creatorID, asCreator := addWorkflowTestMember(t, "project-creator")
+	otherID, asOther := addWorkflowTestMember(t, "unrelated-member")
+
+	var workflow IssueWorkflowResponse
+	testutil.Call(t, testHandler.CreateIssueWorkflow, asCreator(workflowRequest("POST", "/api/issue-workflows", map[string]any{
+		"name": "Creator workflow " + workflowTestSuffix(), "steps": statusSteps("in_progress"),
+	}))).Want(http.StatusCreated).JSON(&workflow)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue_workflow WHERE id = $1`, workflow.ID)
+	})
+	if workflow.OwnerID == nil || *workflow.OwnerID != creatorID {
+		t.Fatalf("workflow owner = %v, want creator %s", workflow.OwnerID, creatorID)
+	}
+	projectID := dbfx.Project(t, "Creator's project", testutil.Cols{
+		"creator_type": "member", "creator_id": creatorID,
+		"lead_type": "member", "lead_id": otherID,
+	})
+	switchWorkflow := func(as func(*http.Request) *http.Request, body map[string]any) *testutil.Response {
+		return testutil.Call(t, testHandler.SetProjectWorkflow,
+			withURLParam(as(workflowRequest("POST", "/api/projects/"+projectID+"/workflow", body)), "id", projectID))
+	}
+	_, asUnrelated := addWorkflowTestMember(t, "not-creator-or-lead")
+	for _, dryRun := range []bool{true, false} {
+		switchWorkflow(asUnrelated, map[string]any{"workflow_id": workflow.ID, "dry_run": dryRun}).Want(http.StatusForbidden)
+	}
+	switchWorkflow(asCreator, map[string]any{"workflow_id": workflow.ID, "dry_run": true}).Want(http.StatusOK)
+	if dbfx.Count(t, `SELECT count(*) FROM project WHERE id = $1 AND workflow_id IS NULL`, projectID) != 1 {
+		t.Fatal("preview changed the project's workflow")
+	}
+	switchWorkflow(asCreator, map[string]any{"workflow_id": workflow.ID}).Want(http.StatusOK)
+	if got := projectWorkflowID(t, projectID); got != workflow.ID {
+		t.Fatalf("project workflow = %s, want %s", got, workflow.ID)
+	}
+
+	body := map[string]any{
+		"handler":             map[string]any{"type": "member", "id": creatorID},
+		"copy_for_project_id": projectID,
+	}
+	copyRequest := func() *http.Request {
+		return withURLParams(asCreator(workflowRequest("PUT", "/api/issue-workflows/"+workflow.ID+"/handoffs/in_progress", body)),
+			"id", workflow.ID, "status", "in_progress")
+	}
+	var copied IssueWorkflowResponse
+	testutil.Call(t, testHandler.SetIssueWorkflowHandoff, copyRequest()).Want(http.StatusCreated).JSON(&copied)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue_workflow WHERE id = $1`, copied.ID)
+	})
+	if copied.ID == workflow.ID || copied.OwnerID == nil || *copied.OwnerID != creatorID || projectWorkflowID(t, projectID) != copied.ID {
+		t.Fatalf("copy = %+v, want a new workflow owned by the project creator and applied to their project", copied)
+	}
+	// The lead retains permission to switch, and the creator can restore Default.
+	switchWorkflow(asOther, map[string]any{"workflow_id": workflow.ID}).Want(http.StatusOK)
+	switchWorkflow(asCreator, map[string]any{"workflow_id": nil}).Want(http.StatusOK)
+	if dbfx.Count(t, `SELECT count(*) FROM project WHERE id = $1 AND workflow_id IS NULL`, projectID) != 1 {
+		t.Fatal("restoring Default left a named workflow")
+	}
+
+	// Creator identity never bypasses private-project membership.
+	dbfx.Exec(t, `UPDATE project SET visibility = 'private', workflow_id = $1 WHERE id = $2`, workflow.ID, projectID)
+	switchWorkflow(asCreator, map[string]any{"workflow_id": nil}).Want(http.StatusNotFound)
+	testutil.Call(t, testHandler.SetIssueWorkflowHandoff, copyRequest()).Want(http.StatusNotFound)
+}
+
 // Backlog and blocked are optional: a workflow without them rejects them, and
 // dropping one maps the issues still on it.
 func TestWorkflowWithoutBacklogOrBlocked(t *testing.T) {

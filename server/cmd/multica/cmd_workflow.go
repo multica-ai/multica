@@ -19,7 +19,8 @@ import (
 // Workflow commands wrap /api/issue-workflows and the project workflow
 // switch. Permission checks stay on the server: edits and deletes are limited
 // to the workflow owner and workspace admins, switching a project's workflow
-// to admins and the project lead. The CLI reports the server's error as is.
+// to admins and the project's member creator or lead. The CLI reports the
+// server's error as is.
 
 var workflowCmd = &cobra.Command{
 	Use:   "workflow",
