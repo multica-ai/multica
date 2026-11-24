@@ -67,7 +67,7 @@ import {
   invalidateLastActivitySortedIssueLists,
   invalidateUpdatedAtSortedIssueLists,
 } from "../issues/cache-coordinator";
-import { onInboxNew, onInboxNewSummaryInvalidate, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted, onInboxSummaryInvalidate } from "../inbox/ws-updaters";
+import { onInboxNew, onInboxNewInvalidate, onInboxNewSummaryInvalidate, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted, onInboxSummaryInvalidate } from "../inbox/ws-updaters";
 import { noteInboxAutoArchive } from "../inbox/auto-archive";
 import {
   notificationPreferenceOptions,
@@ -598,6 +598,7 @@ export async function handleInboxNew(
 ): Promise<void> {
   const sourceWsId = item.workspace_id;
   if (sourceWsId) void onInboxNew(qc, sourceWsId, item);
+  else void onInboxNewWithoutWorkspace(qc);
   // A new item in ANY workspace can light the workspace-switcher dot, so
   // refresh the cross-workspace summary regardless of the active workspace.
   void onInboxNewSummaryInvalidate(qc);
@@ -655,6 +656,14 @@ export async function handleInboxNew(
     body: item.body ?? "",
   };
   showSystemNotification(payload);
+}
+
+// An `inbox:new` that does not name its workspace (or carries no item) is not
+// written anywhere; the active workspace's inbox, the one on screen, is
+// re-read.
+function onInboxNewWithoutWorkspace(qc: QueryClient) {
+  const wsId = getCurrentWsId();
+  return wsId ? onInboxNewInvalidate(qc, wsId) : undefined;
 }
 
 export function createChatReplyNotifier(
@@ -1408,8 +1417,12 @@ export function useRealtimeSync(
     );
 
     const unsubInboxNew = ws.on("inbox:new", async (p) => {
-      const { item } = p as InboxNewPayload;
-      if (!item) return;
+      const { item } = (p ?? {}) as Partial<InboxNewPayload>;
+      if (!item) {
+        void onInboxNewWithoutWorkspace(qc);
+        void onInboxNewSummaryInvalidate(qc);
+        return;
+      }
       await handleInboxNew(qc, item);
     });
 

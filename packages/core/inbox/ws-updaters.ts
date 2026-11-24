@@ -1,5 +1,5 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
-import { coalescedRefresh, inboxRowFromPush } from "./incremental";
+import { coalescedRefresh, inboxQueriesIdle, inboxRowFromPush } from "./incremental";
 import { archivedInboxCacheItems, inboxKeys, mapArchivedInboxCache, type ArchivedInboxCache } from "./queries";
 import { useInboxSelectionStore } from "./selection-store";
 import type { InboxItem, IssueAssigneeType, IssuePriority, IssueStatus, SnoozedInboxIssue } from "../types";
@@ -39,7 +39,8 @@ async function refreshInboxQuery(qc: QueryClient, queryKey: QueryKey) {
 // - The main list is loaded, owes no re-read, and no inbox request is out. A
 //   response already on the wire can predate the row and would land on top of
 //   it (see refreshInboxQuery).
-// - The issue fields the row mirrors are known (`inboxRowFromPush`).
+// - The row is the one the server would list (`inboxRowFromPush`): another
+//   row of the issue supplies its issue fields, and the order is known.
 // - The issue is not snoozed. A notification that ends a snooze brings the
 //   issue's earlier rows back too, and only the server has them. One that
 //   joins a snooze arrives as inbox:snoozed instead, so Snoozed is untouched.
@@ -61,16 +62,14 @@ export async function onInboxNew(
     ? qc.getQueryData<SnoozedInboxIssue[]>(inboxKeys.snoozed(wsId))?.some((entry) => entry.issue_id === issueId)
     : false;
   if (!list?.data || list.isInvalidated || snoozed || isInboxListRequestInFlight(qc, wsId)) {
-    return refreshInboxListsCoalesced(qc, wsId);
+    return onInboxNewInvalidate(qc, wsId);
   }
   if (list.data.some((row) => row.id === item.id)) return;
   const archived = qc
     .getQueriesData<ArchivedInboxCache>({ queryKey: inboxKeys.archived(wsId) })
     .map(([queryKey, data]) => ({ queryKey, items: data ? archivedInboxCacheItems(data) : [] }));
-  const row =
-    inboxRowFromPush(item, list.data) ??
-    inboxRowFromPush(item, archived.flatMap((cache) => cache.items));
-  if (!row) return refreshInboxListsCoalesced(qc, wsId);
+  const row = inboxRowFromPush(item, list.data, archived.flatMap((cache) => cache.items));
+  if (!row) return onInboxNewInvalidate(qc, wsId);
   qc.setQueryData<InboxItem[]>(listKey, (old) => (old ? [row, ...old] : old));
   if (!issueId) return;
   const revived = archived.filter((cache) => cache.items.some((i) => i.issue_id === issueId));
@@ -82,11 +81,16 @@ export async function onInboxNew(
   }
 }
 
-// The fallback for an `inbox:new` that cannot be written locally. A burst of
-// them must not stack one full re-read each: the client cancels the
-// request it replaces, but the server finishes the query regardless.
-function refreshInboxListsCoalesced(qc: QueryClient, wsId: string) {
-  return coalescedRefresh(qc, `lists:${wsId}`, () => onInboxInvalidate(qc, wsId));
+// The re-read for an `inbox:new` that cannot be written locally, or that
+// arrived without the item. A burst of them must not stack one full re-read
+// each: the client cancels the request it replaces, but the server finishes
+// the query regardless. So it waits for a read already out (one that may
+// predate the notification), then reads once more.
+export function onInboxNewInvalidate(qc: QueryClient, wsId: string) {
+  return coalescedRefresh(qc, `lists:${wsId}`, async () => {
+    await inboxQueriesIdle(qc, inboxKeys.all(wsId));
+    await onInboxInvalidate(qc, wsId);
+  });
 }
 
 function archivedInboxQueryKeys(qc: QueryClient, wsId: string): QueryKey[] {
@@ -326,9 +330,13 @@ export async function onInboxSummaryInvalidate(qc: QueryClient) {
 }
 
 // The summary refresh for `inbox:new`, which arrives in bursts (an agent at
-// work notifies on every step). One request at a time, and the events that
-// arrive meanwhile share one follow-up. The server computes the summary over
-// the whole inbox, so the count is not adjusted locally.
+// work notifies on every step). One read at a time, a read already out
+// included, and the events that arrive meanwhile share one follow-up. The
+// server computes the summary over the whole inbox, so the count is not
+// adjusted locally.
 export function onInboxNewSummaryInvalidate(qc: QueryClient) {
-  return coalescedRefresh(qc, "unread-summary", () => onInboxSummaryInvalidate(qc));
+  return coalescedRefresh(qc, "unread-summary", async () => {
+    await inboxQueriesIdle(qc, inboxKeys.unreadSummary());
+    await onInboxSummaryInvalidate(qc);
+  });
 }

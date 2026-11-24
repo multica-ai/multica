@@ -161,7 +161,7 @@ describe("onInboxNew", () => {
   function pushed(id: string, issueId: string | null, workspaceId = wsId): InboxItem {
     // inbox:new carries no issue_status unless the writer knew it.
     const { issue_status: _status, ...rest } = item(id, issueId);
-    return { ...rest, workspace_id: workspaceId } as InboxItem;
+    return { ...rest, workspace_id: workspaceId, created_at: "2026-09-01T09:00:00Z" } as InboxItem;
   }
 
   it("writes the row into the loaded list without re-reading it", async () => {
@@ -191,6 +191,20 @@ describe("onInboxNew", () => {
     qc.setQueryData<InboxItem[]>(listKey, [item("n1", "issue-a")]);
 
     onInboxNew(qc, wsId, pushed("n2", "issue-new"));
+
+    await vi.waitFor(() => expect(qc.getQueryState(listKey)?.isInvalidated).toBe(true));
+    expect(qc.getQueryData<InboxItem[]>(listKey)?.map((row) => row.id)).toEqual(["n1"]);
+  });
+
+  it.each([
+    ["an item that names no workspace", pushed("n2", "issue-a", "")],
+    ["a payload without an item", undefined],
+  ])("re-reads this workspace's list for %s", async (_label, payload) => {
+    const qc = new QueryClient();
+    const listKey = inboxKeys.list(wsId);
+    qc.setQueryData<InboxItem[]>(listKey, [item("n1", "issue-a")]);
+
+    onInboxNew(qc, wsId, payload);
 
     await vi.waitFor(() => expect(qc.getQueryState(listKey)?.isInvalidated).toBe(true));
     expect(qc.getQueryData<InboxItem[]>(listKey)?.map((row) => row.id)).toEqual(["n1"]);

@@ -54,6 +54,11 @@ describe("inboxRowFromPush", () => {
     });
   });
 
+  it("falls back to a row of the issue held elsewhere, such as the archive", () => {
+    expect(inboxRowFromPush(pushed(), [], [{ ...listed, archived: true, issue_identifier: "MUL-9" }]))
+      .toMatchObject({ id: "n2", issue_identifier: "MUL-9" });
+  });
+
   it("keeps the status the push carries", () => {
     expect(inboxRowFromPush(pushed({ issue_status: "done" }), [listed])?.issue_status).toBe("done");
   });
@@ -62,13 +67,22 @@ describe("inboxRowFromPush", () => {
     expect(inboxRowFromPush(pushed(), [{ ...listed, issue_id: "issue-b" }])).toBeNull();
   });
 
-  it("lists an issue-less notice the way the server does", () => {
-    expect(inboxRowFromPush(pushed({ issue_id: null, type: "autopilot_paused" }), [])).toMatchObject({
-      issue_identifier: null,
-      issue_status: null,
-      issue_priority: null,
-      issue_label_ids: [],
-    });
+  it("does not write an issue-less notice, which the list hides from a guest", () => {
+    expect(inboxRowFromPush(pushed({ issue_id: null, type: "project_owner_joined" }), [listed])).toBeNull();
+  });
+
+  it("does not order two rows of one issue from the same second", () => {
+    // Pushes can arrive out of order, and times are to the second: the newer
+    // row cannot be told apart, so the server's order is needed.
+    const sameSecond = { ...listed, id: "n1", created_at: "2026-11-24T10:00:00Z" };
+    expect(inboxRowFromPush(pushed({ created_at: "2026-11-24T10:00:00Z" }), [sameSecond])).toBeNull();
+    // A row of that second held elsewhere is not in the list it would sort in.
+    expect(inboxRowFromPush(pushed({ created_at: "2026-11-24T10:00:00Z" }), [listed], [sameSecond])).not.toBeNull();
+  });
+
+  it("does not write an item missing what the list sorts and keys on", () => {
+    expect(inboxRowFromPush(pushed({ id: "" }), [listed])).toBeNull();
+    expect(inboxRowFromPush(pushed({ created_at: "" }), [listed])).toBeNull();
   });
 });
 

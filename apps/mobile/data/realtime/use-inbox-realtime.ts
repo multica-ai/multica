@@ -51,10 +51,7 @@ export function useInboxRealtime() {
       return [
         // A new notification lands in the loaded list; the rest refetch the
         // inbox list and the badge count.
-        ws.on("inbox:new", (payload) => {
-          if (payload?.item) onInboxNew(qc, wsId, payload.item);
-          else invalidate();
-        }),
+        ws.on("inbox:new", (payload) => onInboxNew(qc, wsId, payload?.item)),
         ws.on("inbox:read", invalidate),
         // Mobile has no mark-unread affordance yet (web/desktop right-click
         // only), but a mark-unread there must un-read the row here too —

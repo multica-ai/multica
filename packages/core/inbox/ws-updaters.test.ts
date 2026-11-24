@@ -387,9 +387,10 @@ describe("inbox list refresh during the first load", () => {
       expect(queryFn).toHaveBeenCalledTimes(1);
       // The server changes while the first read is still on the wire...
       server = [makeItem("n2", "issue-b", { read: false }), ...server];
-      await signal(qc);
+      const signalled = signal(qc);
       // ...and only then does the pre-change response land.
       releaseFirst([makeItem("n1", "issue-a", { read: true })]);
+      await signalled;
 
       await vi.waitFor(() =>
         expect(qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))?.map((i) => i.id)).toEqual([
@@ -708,8 +709,9 @@ describe("onInboxNew", () => {
       startRead(qc);
       await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2));
       server = [listed("n2", "issue-a"), ...server];
-      await onInboxNew(qc, wsId, push("n2", "issue-a"));
+      const handled = onInboxNew(qc, wsId, push("n2", "issue-a"));
       releaseStale();
+      await handled;
 
       await vi.waitFor(() =>
         expect(observer.getCurrentResult().data?.map((row) => row.id)).toEqual(["n2", "n1"]),
@@ -717,6 +719,54 @@ describe("onInboxNew", () => {
       expect(observer.getCurrentResult().fetchStatus).toBe("idle");
     } finally {
       releaseStale?.();
+      unsubscribe();
+      qc.clear();
+    }
+  });
+
+  it("re-reads the lists for an issue-less notice, which the list hides from a guest", async () => {
+    const qc = inboxClient();
+    // A guest's list leaves out everything outside a project.
+    const server = [listed("n1", "issue-a")];
+    const queryFn = vi.fn(async () => server);
+    await qc.fetchQuery({ queryKey: inboxKeys.list(wsId), queryFn });
+    const observer = new QueryObserver(qc, { queryKey: inboxKeys.list(wsId), queryFn });
+    const unsubscribe = observer.subscribe(() => {});
+
+    try {
+      await onInboxNew(qc, wsId, push("joined", null, { type: "project_owner_joined" }));
+
+      expect(queryFn).toHaveBeenCalledTimes(2);
+      expect(observer.getCurrentResult().data?.map((row) => row.id)).toEqual(["n1"]);
+    } finally {
+      unsubscribe();
+      qc.clear();
+    }
+  });
+
+  it("re-reads rather than guess the order of two notifications on one issue from the same second", async () => {
+    const qc = inboxClient();
+    const second = "2026-11-24T10:00:00Z";
+    // The server holds both; the mention is newer within that second.
+    const server = [
+      listed("mention", "issue-a", { type: "mentioned", created_at: second }),
+      listed("comment", "issue-a", { type: "new_comment", created_at: second }),
+      listed("n1", "issue-a"),
+    ];
+    const queryFn = vi.fn().mockResolvedValueOnce([listed("n1", "issue-a")]).mockResolvedValue(server);
+    await qc.fetchQuery({ queryKey: inboxKeys.list(wsId), queryFn });
+    const observer = new QueryObserver(qc, { queryKey: inboxKeys.list(wsId), queryFn });
+    const unsubscribe = observer.subscribe(() => {});
+
+    try {
+      // The pushes arrive newest first.
+      await onInboxNew(qc, wsId, push("mention", "issue-a", { type: "mentioned", created_at: second }));
+      expect(queryFn).toHaveBeenCalledTimes(1);
+      await onInboxNew(qc, wsId, push("comment", "issue-a", { type: "new_comment", created_at: second }));
+
+      expect(queryFn).toHaveBeenCalledTimes(2);
+      expect(deduplicateInboxItems(observer.getCurrentResult().data!).map((row) => row.id)).toEqual(["mention"]);
+    } finally {
       unsubscribe();
       qc.clear();
     }
@@ -739,6 +789,50 @@ describe("onInboxNew", () => {
     try {
       await vi.waitFor(() => expect(observer.getCurrentResult().data).toEqual(server));
     } finally {
+      unsubscribe();
+      qc.clear();
+    }
+  });
+});
+
+describe("onInboxNewSummaryInvalidate", () => {
+  it("waits for a summary read already out, then reads once more, one read at a time", async () => {
+    // The client's cancel does not stop the query the server started, so
+    // cancelling the first load would put two reads on the server.
+    const qc = inboxClient();
+    const releases: Array<() => void> = [];
+    let reading = 0;
+    let peak = 0;
+    const queryFn = vi.fn(
+      () =>
+        new Promise<{ workspace_id: string; count: number }[]>((resolve) => {
+          reading += 1;
+          peak = Math.max(peak, reading);
+          releases.push(() => {
+            reading -= 1;
+            resolve([{ workspace_id: wsId, count: queryFn.mock.calls.length }]);
+          });
+        }),
+    );
+    const observer = new QueryObserver(qc, { queryKey: inboxKeys.unreadSummary(), queryFn });
+    const unsubscribe = observer.subscribe(() => {});
+
+    try {
+      expect(queryFn).toHaveBeenCalledTimes(1);
+      const refreshed = onInboxNewSummaryInvalidate(qc);
+      void onInboxNewSummaryInvalidate(qc);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(queryFn).toHaveBeenCalledTimes(1);
+
+      releases.shift()!();
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2));
+      releases.shift()!();
+      await refreshed;
+
+      expect(observer.getCurrentResult().data).toEqual([{ workspace_id: wsId, count: 2 }]);
+      expect(peak).toBe(1);
+    } finally {
+      for (const release of releases) release();
       unsubscribe();
       qc.clear();
     }
@@ -795,13 +889,22 @@ describe("inbox requests for a burst of inbox:new", () => {
     return requests;
   }
 
-  const onKnownIssues = Array.from({ length: N }, (_, i) => push(`k${i}`, i % 2 ? "issue-a" : "issue-b"));
-  const onNewIssues = Array.from({ length: N }, (_, i) => push(`u${i}`, `issue-new-${i}`));
+  // Server times are to the second; each push here is a second apart unless
+  // the scenario says otherwise.
+  const at = (i: number) => new Date(Date.UTC(2026, 10, 24, 10, 0, i)).toISOString().replace(".000Z", "Z");
+  const onKnownIssues = Array.from({ length: N }, (_, i) =>
+    push(`k${i}`, i % 2 ? "issue-a" : "issue-b", { created_at: at(i) }),
+  );
+  const onKnownIssuesSameSecond = Array.from({ length: N }, (_, i) =>
+    push(`s${i}`, i % 2 ? "issue-a" : "issue-b", { created_at: at(0) }),
+  );
+  const onNewIssues = Array.from({ length: N }, (_, i) => push(`u${i}`, `issue-new-${i}`, { created_at: at(i) }));
 
   it.each([
     // An agent at work: a notification every 100ms for 2s.
     ["on issues in the list, 100ms apart", onKnownIssues, 100, { list: 0, snoozed: 0, summary: 3 }],
     ["on issues in the list, all at once", onKnownIssues, 0, { list: 0, snoozed: 0, summary: 2 }],
+    ["on issues in the list, all in one second", onKnownIssuesSameSecond, 100, { list: 3, snoozed: 3, summary: 3 }],
     ["each on a new issue, 100ms apart", onNewIssues, 100, { list: 3, snoozed: 3, summary: 3 }],
     ["each on a new issue, all at once", onNewIssues, 0, { list: 2, snoozed: 2, summary: 2 }],
   ])("%s", async (_label, events, spacingMs, expected) => {

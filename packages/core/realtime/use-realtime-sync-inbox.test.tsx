@@ -142,3 +142,51 @@ it.each([
     qc.clear();
   }
 });
+
+it("re-reads the active Inbox for an inbox:new that carries no item", async () => {
+  const qc = createQueryClient();
+  const listInbox = vi.fn(async (): Promise<InboxItem[]> => []);
+  const getInboxUnreadSummary = vi.fn(async () => []);
+  setApiInstance({ listInbox, getInboxUnreadSummary } as unknown as ApiClient);
+  const handlers: Record<string, (payload: unknown) => void> = {};
+  const ws = {
+    on: (event: string, handler: (payload: unknown) => void) => {
+      handlers[event] = handler;
+      return () => {
+        delete handlers[event];
+      };
+    },
+    onAny: () => () => {},
+    onReconnect: () => () => {},
+  } as unknown as WSClient;
+  const stores = {
+    authStore: { getState: () => ({ user: { id: "u1" } }) },
+  } as unknown as RealtimeSyncStores;
+  function Wrapper({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+  }
+  vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  const shell = renderHook(
+    () => {
+      useRealtimeSync(ws, stores);
+      return useInboxUnreadCount("ws-1");
+    },
+    { wrapper: Wrapper },
+  );
+  const page = renderHook(() => useQuery(inboxListOptions("ws-1")), { wrapper: Wrapper });
+  try {
+    await waitFor(() => expect(page.result.current.isSuccess).toBe(true));
+    await waitFor(() => expect(getInboxUnreadSummary).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      handlers["inbox:new"]!({});
+    });
+
+    await waitFor(() => expect(listInbox).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(getInboxUnreadSummary).toHaveBeenCalledTimes(2));
+  } finally {
+    page.unmount();
+    shell.unmount();
+    qc.clear();
+  }
+});
