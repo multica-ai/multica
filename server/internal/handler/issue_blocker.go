@@ -119,6 +119,23 @@ func (h *Handler) newIssueBlockerFiller(ctx context.Context, ws pgtype.UUID, ids
 	}
 }
 
+// issueDependents lists the issues waiting on issue, hiding private ones the
+// reader cannot see the same way the blocked_by projection does.
+func (h *Handler) issueDependents(ctx context.Context, issue db.Issue, prefix string, hidden projectaccess.Hidden) ([]IssueBlockerResponse, error) {
+	rows, err := h.Queries.ListIssueDependents(ctx, db.ListIssueDependentsParams{WorkspaceID: issue.WorkspaceID, IssueID: issue.ID})
+	if err != nil {
+		return nil, err
+	}
+	refs := make([]IssueBlockerResponse, 0, len(rows))
+	for _, row := range rows {
+		if row.Private && !hidden.CanSeeProject(row.ProjectID) {
+			continue
+		}
+		refs = append(refs, IssueBlockerResponse{private: row.Private, projectID: row.ProjectID, IssueRefResponse: IssueRefResponse{ID: uuidToString(row.ID), Identifier: fmt.Sprintf("%s-%d", prefix, row.Number), Title: row.Title, Status: row.Status}, Via: row.Via, Closed: row.Closed.Bool})
+	}
+	return refs, nil
+}
+
 type blockerViewerKey struct{}
 
 func (h *Handler) withBlockerViewer(r *http.Request) *http.Request {
