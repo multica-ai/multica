@@ -73,11 +73,10 @@ export function handleAppShortcut(
     };
   }
 
-  // Cmd/Ctrl + "=" (unshifted) or "+" (Shift+=) → zoom in.
-  if (
-    (input.key === "=" && !input.shift) ||
-    (input.key === "+" && input.shift)
-  ) {
+  // Cmd/Ctrl + "=" (unshifted) or "+" → zoom in. "+" is Shift+= on US/UK
+  // but its own unshifted key on DE/ES/PT layouts and the numpad, so accept
+  // it with or without Shift.
+  if ((input.key === "=" && !input.shift) || input.key === "+") {
     const next = Math.min(webContents.getZoomLevel() + ZOOM_STEP, ZOOM_MAX);
     webContents.setZoomLevel(next);
     return true;
