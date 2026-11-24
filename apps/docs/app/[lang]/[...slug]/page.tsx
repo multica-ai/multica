@@ -7,19 +7,13 @@ import {
 } from "fumadocs-ui/page";
 import { notFound } from "next/navigation";
 import defaultMdxComponents from "fumadocs-ui/mdx";
-import { ImageZoom } from "fumadocs-ui/components/image-zoom";
+import { ImageZoom, type ImageZoomProps } from "fumadocs-ui/components/image-zoom";
 import type { Metadata } from "next";
 import { docsAlternates } from "@/lib/site";
-import { i18n, type Lang } from "@/lib/i18n";
+import { asLang } from "@/lib/i18n";
 import { DocsLocaleProvider, LocaleLink } from "@/components/locale-link";
 import { VideoEmbed } from "@/components/video-embed";
 import { docsSlugStaticParams } from "@/lib/static-params";
-
-function asLang(lang: string): Lang {
-  return (i18n.languages as readonly string[]).includes(lang)
-    ? (lang as Lang)
-    : (i18n.defaultLanguage as Lang);
-}
 
 export default async function Page(props: {
   params: Promise<{ lang: string; slug: string[] }>;
@@ -42,7 +36,7 @@ export default async function Page(props: {
               ...defaultMdxComponents,
               // Every markdown image gets the standard Fumadocs lightbox:
               // click to zoom to viewport, scroll/Esc/click to dismiss.
-              img: (props) => <ImageZoom {...props} />,
+              img: (props) => <ImageZoom {...(props as ImageZoomProps)} />,
               a: LocaleLink,
               VideoEmbed,
             }}

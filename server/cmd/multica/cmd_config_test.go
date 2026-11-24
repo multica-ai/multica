@@ -19,7 +19,7 @@ func newConfigTestCmd() *cobra.Command {
 }
 
 func TestRunConfigSetPersistsSupportedKeysInProfile(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	workspacesRoot := filepath.Join(t.TempDir(), "multica-dev")
 
 	cmd := newConfigTestCmd()
@@ -39,19 +39,22 @@ func TestRunConfigSetPersistsSupportedKeysInProfile(t *testing.T) {
 	if err := runConfigSet(cmd, []string{"workspaces_root", workspacesRoot}); err != nil {
 		t.Fatalf("runConfigSet workspaces_root: %v", err)
 	}
+	if err := runConfigSet(cmd, []string{"log_level", "info"}); err != nil {
+		t.Fatalf("runConfigSet log_level: %v", err)
+	}
 	_ = stderr.read()
 
 	cfg, err := cli.LoadCLIConfigForProfile("dev")
 	if err != nil {
 		t.Fatalf("LoadCLIConfigForProfile: %v", err)
 	}
-	if cfg.ServerURL != "http://127.0.0.1:8080" || cfg.AppURL != "http://127.0.0.1:3000" || cfg.WorkspaceID != "ws-123" || cfg.WorkspacesRoot != workspacesRoot {
+	if cfg.ServerURL != "http://127.0.0.1:8080" || cfg.AppURL != "http://127.0.0.1:3000" || cfg.WorkspaceID != "ws-123" || cfg.WorkspacesRoot != workspacesRoot || cfg.LogLevel != "info" {
 		t.Fatalf("config = %#v, want persisted supported keys", cfg)
 	}
 }
 
 func TestRunConfigShowIncludesProfileAndDefaults(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 
 	cmd := newConfigTestCmd()
 	_ = cmd.Flags().Set("profile", "empty")
@@ -98,7 +101,7 @@ func TestRunConfigShowIncludesProfileAndDefaults(t *testing.T) {
 func TestRunConfigCommandsUseTaskLocalConfigWithoutTouchingOwner(t *testing.T) {
 	ownerHome := t.TempDir()
 	taskRoot := filepath.Join(t.TempDir(), "task-multica")
-	t.Setenv("HOME", ownerHome)
+	redirectTestHome(t, ownerHome)
 	t.Setenv("MULTICA_AGENT_ID", "agent-test")
 	t.Setenv("MULTICA_TASK_ID", "task-test")
 	t.Setenv("MULTICA_TASK_CONFIG_ROOT", taskRoot)
@@ -151,7 +154,7 @@ func TestRunConfigCommandsUseTaskLocalConfigWithoutTouchingOwner(t *testing.T) {
 
 func TestRunConfigCommandsFailClosedWithoutTaskRoot(t *testing.T) {
 	ownerHome := t.TempDir()
-	t.Setenv("HOME", ownerHome)
+	redirectTestHome(t, ownerHome)
 	t.Setenv("MULTICA_AGENT_ID", "agent-test")
 	t.Setenv("MULTICA_TASK_ID", "task-test")
 	t.Setenv("MULTICA_TASK_CONFIG_ROOT", "")
@@ -182,7 +185,7 @@ func TestRunConfigCommandsFailClosedWithoutTaskRoot(t *testing.T) {
 }
 
 func TestRunConfigSetRejectsUnknownKey(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 
 	cmd := newConfigTestCmd()
 	err := runConfigSet(cmd, []string{"token", "secret"})
@@ -293,6 +296,30 @@ func TestApplyConfigSetPositiveDurationRoundTripsToDaemonResolver(t *testing.T) 
 	}
 }
 
+func TestApplyConfigSetWatchdogDurationsAllowZero(t *testing.T) {
+	cases := []string{"agent_idle_watchdog", "agent_tool_watchdog"}
+	for _, key := range cases {
+		t.Run(key, func(t *testing.T) {
+			cfg := cli.CLIConfig{}
+			if err := applyConfigSet(&cfg, key, "15m"); err != nil {
+				t.Fatalf("set positive duration: %v", err)
+			}
+			if err := applyConfigSet(&cfg, key, "0s"); err != nil {
+				t.Fatalf("set zero duration: %v", err)
+			}
+			if err := applyConfigSet(&cfg, key, ""); err != nil {
+				t.Fatalf("clear duration: %v", err)
+			}
+			if got := cfg.AgentIdleWatchdog + cfg.AgentToolWatchdog; got != "" {
+				t.Fatalf("cleared config = %q, want empty", got)
+			}
+			if err := applyConfigSet(&cfg, key, "-1s"); err == nil {
+				t.Fatal("expected negative duration to be rejected")
+			}
+		})
+	}
+}
+
 // TestApplyConfigSetAgentTimeoutTriState pins the agent_timeout
 // pointer-based semantics: "" clears, "0s" persists as an explicit
 // "disabled" sentinel, positive durations persist as-is. Negative
@@ -353,6 +380,7 @@ func TestApplyConfigSetRejectsBadValues(t *testing.T) {
 		{"ws claim poll zero", "ws_claim_poll_interval", "0s", "positive"},
 		{"heartbeat bad duration", "heartbeat_interval", "abc", "duration"},
 		{"heartbeat zero", "heartbeat_interval", "0s", "positive"},
+		{"unknown log level", "log_level", "trace", "debug, info, warn, or error"},
 		{"codex semantic zero", "codex_semantic_inactivity_timeout", "0s", "positive"},
 		{"codex handshake bad", "codex_handshake_timeout", "10", "duration"},
 		{"agent_timeout bad duration", "agent_timeout", "abc", "duration"},
@@ -374,6 +402,22 @@ func TestApplyConfigSetRejectsBadValues(t *testing.T) {
 				t.Fatalf("error = %q; want to contain %q", err.Error(), tc.want)
 			}
 		})
+	}
+}
+
+// TestApplyConfigSetNormalizesLogLevel keeps config set in step with the
+// spellings LOG_LEVEL already accepts.
+func TestApplyConfigSetNormalizesLogLevel(t *testing.T) {
+	t.Parallel()
+
+	for value, want := range map[string]string{"INFO": "info", " Debug ": "debug", "warning": "warn", "ERROR": "error", "": ""} {
+		cfg := cli.CLIConfig{LogLevel: "info"}
+		if err := applyConfigSet(&cfg, "log_level", value); err != nil {
+			t.Fatalf("applyConfigSet(log_level, %q): %v", value, err)
+		}
+		if cfg.LogLevel != want {
+			t.Fatalf("applyConfigSet(log_level, %q) stored %q, want %q", value, cfg.LogLevel, want)
+		}
 	}
 }
 

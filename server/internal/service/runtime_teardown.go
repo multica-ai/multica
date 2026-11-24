@@ -98,7 +98,12 @@ func TeardownRuntime(ctx context.Context, qtx *db.Queries, runtimeID pgtype.UUID
 		if err != nil {
 			return out, fmt.Errorf("cancel tasks: %w", err)
 		}
-		if err := SettleDeliveredDelegatedFailureRecoveries(ctx, qtx, cancelled...); err != nil {
+		// Task locks precede receipt locks, as in delivery acknowledgement.
+		// Removing the runtime withdraws guidance rather than starting new work.
+		if err := qtx.WithdrawChatTaskSupplementsByRuntime(ctx, runtimeID); err != nil {
+			return out, err
+		}
+		if err := SettleTerminalTaskState(ctx, qtx, cancelled...); err != nil {
 			return out, err
 		}
 		out.CancelledTasks = cancelled
@@ -171,7 +176,13 @@ func pruneRuntimeSystemAgentChatDraftRestores(ctx context.Context, q *db.Queries
 	if _, err := q.LockChatSessionsBySystemRuntimeAgents(ctx, runtimeID); err != nil {
 		return err
 	}
+	if err := q.DeleteChatSubmissionReceiptsBySystemRuntimeAgents(ctx, runtimeID); err != nil {
+		return err
+	}
 	if err := q.DeleteChatDraftRestoresBySystemRuntimeAgents(ctx, runtimeID); err != nil {
+		return err
+	}
+	if err := q.DeleteChatWakeupsBySystemRuntimeAgents(ctx, runtimeID); err != nil {
 		return err
 	}
 	return q.DeleteAgentBuilderDraftsBySystemRuntimeAgents(ctx, runtimeID)

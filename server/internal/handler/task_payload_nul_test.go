@@ -63,7 +63,7 @@ func seedNULTask(t *testing.T, label string) (agentID, taskID string) {
 // a chi URL param, the way the router does in production.
 func daemonTaskRequest(t *testing.T, path, taskID string, body any) *http.Request {
 	t.Helper()
-	req := newDaemonTokenRequest("POST", path, body, testWorkspaceID, "nul-regression-daemon")
+	req := newOwnerDaemonRequest("POST", path, body)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("taskId", taskID)
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))

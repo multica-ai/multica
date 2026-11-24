@@ -3,7 +3,7 @@
  * and what to say" on an existing issue.
  *
  * Running one is not a separate dispatch path: the server renders the prompt,
- * posts a `quick_action` comment carrying the target's mention markup, and the
+ * posts a comment with quick-action attribution and optional target mention markup, and the
  * normal comment -> mention -> task trigger takes over. That is why the run
  * response is a `Comment` with `trigger_outcomes` rather than a bespoke shape.
  */
@@ -11,8 +11,8 @@
 /**
  * The author's stated intent, chosen at creation.
  *
- * - `public`  — meant for the team. The server requires a target every member
- *   can invoke, so it is runnable by everyone by construction.
+ * - `public`  — meant for the team. If a target is set, every member must
+ *   be able to invoke it.
  * - `private` — meant for its creator only; any target is allowed, and the
  *   list endpoint returns it to nobody else.
  *
@@ -21,7 +21,8 @@
  */
 export type QuickActionVisibility = "private" | "public";
 
-export type QuickActionAssigneeType = "agent" | "squad";
+/** Empty means post the prompt without mentioning a target. */
+export type QuickActionAssigneeType = "agent" | "squad" | "";
 
 export type QuickActionStatus = "active" | "archived";
 
@@ -56,8 +57,8 @@ export interface QuickAction {
 export interface CreateQuickActionRequest {
   name: string;
   description?: string;
-  assignee_type: QuickActionAssigneeType;
-  assignee_id: string;
+  assignee_type?: QuickActionAssigneeType;
+  assignee_id?: string;
   prompt: string;
   visibility?: QuickActionVisibility;
 }

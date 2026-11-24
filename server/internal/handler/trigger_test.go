@@ -34,10 +34,6 @@ func issueWithAgentAssignee() db.Issue {
 	}
 }
 
-func issueNoAssignee() db.Issue {
-	return db.Issue{}
-}
-
 func TestHasAgentOrSquadMention(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -113,5 +109,5 @@ func TestTriggerTasksForComment_NoteShortCircuits(t *testing.T) {
 	}
 
 	// Must not panic — the guard short-circuits before any DB access.
-	h.triggerTasksForComment(context.Background(), issue, comment, nil, "member", memberID, memberID, nil)
+	h.triggerTasksForComment(context.Background(), issue, comment, nil, "member", memberID, memberID, nil, commentSteerRequest{})
 }

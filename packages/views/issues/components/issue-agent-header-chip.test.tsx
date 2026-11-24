@@ -25,17 +25,23 @@ vi.mock("@multica/core/api", () => ({
 
 vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({
-    getActorName: (_type: string, id: string) =>
-      ({
-        "agent-1": "Walt",
-        "agent-2": "Gus",
-      })[id] ?? "Unknown Agent",
-    getActorInitials: (_type: string, id: string) =>
-      ({
-        "agent-1": "WA",
-        "agent-2": "GU",
-      })[id] ?? "UA",
+    getActorName: (type: string, id: string) =>
+      type === "squad"
+        ? ({ "squad-1": "JSquad" }[id] ?? "Unknown Squad")
+        : ({
+            "agent-1": "Walt",
+            "agent-2": "Gus",
+          }[id] ?? "Unknown Agent"),
+    getActorInitials: (type: string, id: string) =>
+      type === "squad"
+        ? ({ "squad-1": "JS" }[id] ?? "US")
+        : ({
+            "agent-1": "WA",
+            "agent-2": "GU",
+          }[id] ?? "UA"),
     getActorAvatarUrl: () => null,
+    hasActor: (type: string, id: string) =>
+      type === "squad" ? id === "squad-1" : true,
   }),
 }));
 
@@ -79,13 +85,20 @@ vi.mock("./execution-log-section", () => ({
   ActiveTaskRow: ({
     task,
     onTranscriptOpenChange,
+    onJump,
   }: {
     task: AgentTask;
     transcriptOpen?: boolean;
     onTranscriptOpenChange?: (open: boolean) => void;
+    onJump?: () => void;
   }) => (
     <div data-testid="active-task-row">
       <span>{task.id}</span>
+      {onJump && (
+        <button type="button" aria-label={`jump to ${task.id}`} onClick={onJump}>
+          Jump
+        </button>
+      )}
       <button
         type="button"
         aria-label={`open transcript ${task.id}`}
@@ -215,6 +228,24 @@ describe("IssueAgentHeaderChip", () => {
     expect(mockState.taskMessagesOptions).not.toHaveBeenCalled();
   });
 
+  it("wears the decorative border beam only while an agent is running", () => {
+    mockState.tasks = [makeTask({})];
+    const { unmount } = renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
+
+    const running = screen.getByRole("button", { name: "Walt is working" });
+    const ring = running.querySelector(".border-beam-ring");
+    expect(running).toHaveClass("relative");
+    expect(ring).toHaveAttribute("aria-hidden", "true");
+    expect(ring?.querySelector(".border-beam-light")).not.toBeNull();
+    unmount();
+
+    mockState.tasks = [makeTask({ status: "queued" })];
+    renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
+
+    const queued = screen.getByRole("button", { name: "Walt is queued" });
+    expect(queued.querySelector(".border-beam-ring")).toBeNull();
+  });
+
   it("keeps the header popover card with active task rows", () => {
     mockState.tasks = [makeTask({ id: "task-running" })];
 
@@ -225,6 +256,24 @@ describe("IssueAgentHeaderChip", () => {
       "task-running",
     );
     expect(mockState.taskMessagesOptions).not.toHaveBeenCalled();
+  });
+
+  it("hands the clicked row's task to the jump handler", () => {
+    mockState.tasks = [makeTask({ id: "task-1" }), makeTask({ id: "task-2", status: "queued" })];
+    const onJumpToRun = vi.fn();
+
+    renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" onJumpToRun={onJumpToRun} />);
+    fireEvent.click(screen.getByRole("button", { name: "jump to task-2" }));
+
+    expect(onJumpToRun).toHaveBeenCalledExactlyOnceWith("task-2");
+  });
+
+  it("leaves rows without a jump target when the host has no timeline", () => {
+    mockState.tasks = [makeTask({ id: "task-1" })];
+
+    renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
+
+    expect(screen.queryByRole("button", { name: "jump to task-1" })).not.toBeInTheDocument();
   });
 
   it("keeps the live transcript open after the clicked task row disappears from the active list", async () => {
@@ -363,5 +412,37 @@ describe("IssueAgentHeaderChip", () => {
     renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
 
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("collapses multiple members of the same squad into one squad chip and groups them in the popover", () => {
+    mockState.tasks = [
+      makeTask({ id: "task-1", agent_id: "agent-1", squad_id: "squad-1", is_leader_task: true }),
+      makeTask({ id: "task-2", agent_id: "agent-2", squad_id: "squad-1", is_leader_task: false }),
+    ];
+
+    renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />, {
+      locale: "zh-Hans",
+    });
+
+    expect(
+      screen.getByRole("button", { name: "JSquad 在工作" }),
+    ).toBeInTheDocument();
+    // Both underlying member tasks remain visible inside the grouped popover.
+    expect(screen.getAllByTestId("active-task-row")).toHaveLength(2);
+    expect(
+      screen.getByTestId("agent-popover-content").textContent,
+    ).toContain("JSquad");
+  });
+
+  it("falls back to the underlying agent when a task references a deleted squad", () => {
+    mockState.tasks = [
+      makeTask({ id: "task-1", agent_id: "agent-1", squad_id: "deleted-squad" }),
+    ];
+
+    renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
+
+    expect(
+      screen.getByRole("button", { name: "Walt is working" }),
+    ).toBeInTheDocument();
   });
 });

@@ -45,6 +45,14 @@
 //     answered capped at 3000 runes (2000 head + 1000 tail) and each older
 //     message at 800.
 //
+// Request shape beyond the prompts is deployment-controlled and lives in
+// Config: MaxRetries (transport budget) and DisableThinking, which appends
+// `chat_template_kwargs: {"enable_thinking": false}` to every request body for
+// gateways that honor it — some GLM/Qwen-style routes spend a thinking pass
+// that dominates the assist calls' latency budget. Standard OpenAI endpoints
+// reject unknown body fields, so the knob is opt-in per deployment and off by
+// default.
+//
 // Both consumers send private chat content, which is why an unconfigured
 // deployment making zero upstream requests is a contract rather than a side
 // effect: New with no API key and no base URL returns a disabled client whose
@@ -89,7 +97,7 @@ import (
 // FallbackModel is the last-resort model used when neither the request nor the
 // configured default supplies one. It is deliberately a small, inexpensive
 // model since this layer backs lightweight utility calls.
-const FallbackModel = "gpt-5.6-luna"
+const FallbackModel = "gpt-6-luna"
 
 // defaultTimeout bounds the full request lifecycle (including SDK retries) when
 // the caller's context has no deadline of its own. Streaming requests are not
@@ -145,6 +153,16 @@ type Config struct {
 	// 6, so a budget larger than the caller's timeout only converts a
 	// recoverable failure into a deadline-exceeded one.
 	MaxRetries *RetryOverride
+	// DisableThinking appends `chat_template_kwargs: {"enable_thinking": false}`
+	// to every request body this client sends. Some OpenAI-compatible gateways
+	// (vLLM/sglang-style deployments, and LiteLLM routes that forward the
+	// field) honor it for GLM/Qwen-style models whose default thinking pass
+	// would otherwise dominate the latency budget of the assist calls above.
+	// Standard OpenAI endpoints reject unknown body fields, so this is opt-in
+	// per deployment rather than automatic. It never touches reasoning_effort:
+	// GPT-5.6-family models and GPT-6 Luna already get ReasoningEffortNone from
+	// GenerateJSON; this knob targets gateways that ignore that field instead.
+	DisableThinking bool
 	// HTTPClient, when set, replaces the SDK's default transport. Primarily a
 	// test seam.
 	HTTPClient option.HTTPClient
@@ -215,10 +233,11 @@ type RetryBudget struct {
 // Client is a configured, reusable LLM caller. It is safe for concurrent use;
 // the underlying SDK client holds no per-request state.
 type Client struct {
-	sdk          openai.Client
-	defaultModel string
-	enabled      bool
-	retry        RetryBudget
+	sdk             openai.Client
+	defaultModel    string
+	enabled         bool
+	disableThinking bool
+	retry           RetryBudget
 }
 
 // New builds a Client from cfg. It never returns an error: an unconfigured
@@ -248,6 +267,14 @@ func New(cfg Config) *Client {
 	// Always set it explicitly, even for the default, so the budget the SDK
 	// enforces and the one RetryBudget reports are the same number.
 	opts = append(opts, option.WithMaxRetries(retry.MaxRetries))
+	if cfg.DisableThinking {
+		// Applied as a body mutation rather than a typed field:
+		// chat_template_kwargs is not part of the Chat Completions schema, and
+		// sjson merging cannot collide with any managed field (model, messages,
+		// response_format, ...). The mutation runs after the typed body is
+		// marshaled, so it survives every GenerateText/GenerateJSON shape.
+		opts = append(opts, option.WithJSONSet("chat_template_kwargs", map[string]any{"enable_thinking": false}))
+	}
 	if cfg.HTTPClient != nil {
 		opts = append(opts, option.WithHTTPClient(cfg.HTTPClient))
 	}
@@ -262,8 +289,9 @@ func New(cfg Config) *Client {
 		defaultModel: defaultModel,
 		// A deployment is "configured" if it gave us either a key or a base
 		// URL. A bare base URL (no key) is valid for keyless local gateways.
-		enabled: strings.TrimSpace(cfg.APIKey) != "" || strings.TrimSpace(cfg.BaseURL) != "",
-		retry:   retry,
+		enabled:         strings.TrimSpace(cfg.APIKey) != "" || strings.TrimSpace(cfg.BaseURL) != "",
+		disableThinking: cfg.DisableThinking,
+		retry:           retry,
 	}
 }
 
@@ -279,6 +307,13 @@ func (c *Client) RetryBudget() RetryBudget {
 // Enabled reports whether the client was given any credentials or base URL.
 // Handlers use this to short-circuit with a 503 before doing any work.
 func (c *Client) Enabled() bool { return c != nil && c.enabled }
+
+// DisableThinking reports whether the client appends the chat_template_kwargs
+// thinking-off hint to every request it sends. It is read for the startup
+// diagnostic line alongside RetryBudget so an operator can confirm the
+// effective request shape from the boot log alone. Safe to log: it carries no
+// credentials or URLs.
+func (c *Client) DisableThinking() bool { return c != nil && c.disableThinking }
 
 // DefaultModel returns the effective default model (never empty).
 func (c *Client) DefaultModel() string { return c.defaultModel }
@@ -366,8 +401,8 @@ func (c *Client) GenerateText(ctx context.Context, model, systemPrompt, userProm
 // word "JSON" has to appear somewhere in the prompt, or OpenAI-compatible
 // endpoints reject the request outright.
 //
-// This helper is for small, latency-sensitive utility work. For the GPT-5.6
-// family it explicitly disables reasoning and leaves sampling controls at the
+// This helper is for small, latency-sensitive utility work. For GPT-6 Luna and
+// the GPT-5.6 family it disables reasoning and leaves sampling controls at the
 // model default. That keeps maxCompletionTokens available to the visible JSON
 // instead of spending it on reasoning, and avoids sampling parameters that
 // those models may reject. Other models keep the caller's temperature so a
@@ -396,8 +431,8 @@ func (c *Client) GenerateJSON(ctx context.Context, model, systemPrompt, userProm
 	if effectiveModel == "" {
 		effectiveModel = c.defaultModel
 	}
-	if isGPT56Family(effectiveModel) {
-		// GPT-5.6 defaults to medium reasoning. This path generates a tiny JSON
+	if strings.EqualFold(effectiveModel, "gpt-6-luna") || isGPT56Family(effectiveModel) {
+		// These models default to medium reasoning. This path generates a tiny JSON
 		// object under a strict wall-clock budget, so reasoning would add latency
 		// and consume the completion-token limit without improving the contract.
 		params.ReasoningEffort = shared.ReasoningEffortNone
@@ -406,7 +441,7 @@ func (c *Client) GenerateJSON(ctx context.Context, model, systemPrompt, userProm
 	}
 	if maxCompletionTokens > 0 {
 		// max_tokens is deprecated and rejected by current reasoning models,
-		// including the GPT-5.6 family. Prefer the replacement field for every
+		// including GPT-6 Luna. Prefer the replacement field for every
 		// upstream; a narrow compatibility retry below covers older gateways
 		// that have not implemented it yet.
 		params.MaxCompletionTokens = openai.Int(maxCompletionTokens)

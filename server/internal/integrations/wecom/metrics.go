@@ -10,10 +10,16 @@ package wecom
 // wrong behaviour for the operator behind it — nothing on a dashboard changes
 // when a bot has been unable to connect for an hour.
 //
+// The same is true one layer up, of the feature that answers a user without
+// the user being able to tell whether it worked: a bubble that refused its
+// closing frame still delivers the answer, as a new message. That reads as a
+// quiet afternoon from outside.
+//
 // The counters here are chosen for what somebody would page on rather than for
 // completeness: the connection is not coming up, and if so whether that needs a
-// person or just time; and the read loop is being made to wait by an ingest
-// worker that cannot keep up.
+// person or just time; the read loop is being made to wait by an ingest worker
+// that cannot keep up; and the bubble has stopped doing the thing it exists to
+// do.
 //
 // No installation id anywhere. It is an unbounded identifier and the metrics
 // package rejects that class of label outright (forbiddenMetricLabels in
@@ -25,7 +31,8 @@ package wecom
 // operator that some bot is behind and not which one.
 
 // Metrics is the sink this adapter reports to. Every method must tolerate being
-// called concurrently, and none of them may block: they run on the read loop.
+// called concurrently, and none of them may block: they run on the read loop
+// and on the event bus.
 type Metrics interface {
 	// RecordConnectFailure — a dial, a handshake write or a handshake read
 	// that did not complete, or a handshake the server answered with a code
@@ -53,6 +60,41 @@ type Metrics interface {
 	// WeCom stops seeing the socket drained and replaces the connection.
 	RecordCallbackQueueBlocked()
 
+	// RecordStreamFinished / FellBack — how the bubble ended. A fall-back is
+	// an ending that arrived as a new message because the bubble could not
+	// take the closing frame; the words are not lost, but the experience is
+	// the one the bubble was built to replace.
+	//
+	// Both are fed from the one line in sendersRegistry.recordEnding, and they
+	// have to stay that way for the ratio to mean anything: every closer goes
+	// through it — the answer, and the failure and cancellation notices the
+	// typing indicator writes — so a ratio read off these two covers the same
+	// population on both sides.
+	RecordStreamFinished()
+	RecordStreamFellBack()
+
+	// RecordStreamOpened — one bubble is on a user's screen and something owes
+	// it an ending. Counted where the handle is KEPT, which is not the same as
+	// where a frame was accepted: an opening frame whose ack never came back
+	// keeps its handle on purpose, because re-sending that stream id later
+	// creates the message if the frame was lost.
+	//
+	// It is here because the ratio above cannot see the failure that matters
+	// most. A bubble nobody ever closes moves neither counter — the relay gap
+	// on a multi-replica deployment, a process restarted mid-run, a closing
+	// frame that never happens — and from the two ending counters alone that
+	// is indistinguishable from a quiet hour. opened minus finished minus
+	// fell_back is that number, and it is the one an operator can act on.
+	//
+	// It does not settle to zero at any instant: bubbles in flight sit in the
+	// difference, and a run can hold one for the length of the window. It is a
+	// gauge of a backlog read over time, not a balance.
+	RecordStreamOpened()
+
+	// RecordMediaFailure — an attachment that never reached the agent.
+	// reason is one of the mediaDrop* constants below.
+	RecordMediaFailure(reason string)
+
 	// RecordOutboundDelivered — one reply reached the user. It is the
 	// denominator: without it a flat drop counter cannot be told apart from a
 	// quiet day, and "the bot went silent" is exactly the report that cannot
@@ -62,14 +104,21 @@ type Metrics interface {
 	// deliver, labelled with why (outbound_outcome.go's closed reason set).
 	// Every reason here leaves somebody in WeCom waiting on an answer that is
 	// not coming, so this IS an error total and the label says which failure it
-	// was. The ordinary outcomes — a question typed in the web UI on a
-	// WeCom-bound session, an installation revoked between trigger and reply —
-	// are not counted here; RecordOutboundSkipped has them.
+	// was — most of them before the frame ever reaches WeCom. The completions
+	// this adapter did not owe, and the ones nothing here can attribute to a
+	// WeCom chat, are counted apart, by RecordOutboundSkipped.
 	RecordOutboundDropped(reason string)
-	// RecordOutboundSkipped — a completion this adapter was never going to
-	// deliver, because it was not owed to a WeCom user in the first place. Kept
-	// apart from dropped on purpose: counting a web-UI question's answer as a
-	// failed WeCom delivery makes ordinary web usage look like an outage.
+	// RecordOutboundSkipped — a completion this adapter did not send because it
+	// was not WeCom's to send, labelled with why (outbound_outcome.go's closed
+	// skip set). Kept apart from dropped on purpose: counting a web-UI
+	// question's answer as a failed WeCom delivery makes ordinary web usage look
+	// like an outage.
+	//
+	// Not every reason here is harmless, so this total is not one to read as a
+	// single number. no_delivery_row is a turn the channel ingested with no row
+	// saying which chat — a reply that may well be owed, with nothing left that
+	// can name the room — and it is the one reason in the set that logs at
+	// WARN. Alert on it by label, not on the sum.
 	RecordOutboundSkipped(reason string)
 
 	// RecordAttachmentDelivered / RecordAttachmentDropped count FILES, one per
@@ -113,6 +162,32 @@ type Metrics interface {
 	RecordRelayShed(kind string)
 }
 
+// Reasons an attachment did not make it. Fixed set: these are label values and
+// the label space has to stay bounded.
+const (
+	// mediaDropBlockedAddress — the media host resolved somewhere the guard
+	// refuses. Either WeCom changed its CDN or somebody is pointing us at an
+	// internal address; both want looking at, and they are the two an
+	// operator can act on.
+	mediaDropBlockedAddress = "blocked_address"
+	// mediaDropTooLarge — past the size ceiling. The sender is told, so a
+	// sustained rate is a conversation about the ceiling rather than a fault.
+	mediaDropTooLarge = "too_large"
+	// mediaDropUnreadable — everything else the resolver ran into on its own:
+	// an expired url, a decrypt that failed, an upload the object store
+	// refused.
+	mediaDropUnreadable = "unreadable"
+	// mediaDropBudgetExpired — the Router's media budget ran out first: the
+	// download never started, was cut off, or finished too late to be bound.
+	// A sustained rate says the budget is short for what people send, or the
+	// media host is slow; the sender is told either way.
+	mediaDropBudgetExpired = "budget_expired"
+	// mediaDropShutdown — the server was draining while the attachment was
+	// queued or in flight. Expected around a deploy, and kept apart so a
+	// deploy does not read as a slow-download incident.
+	mediaDropShutdown = "shutdown"
+)
+
 // nopMetrics is what the constructor falls back to. A nil sink must never be a
 // nil-pointer dereference on the read loop.
 type nopMetrics struct{}
@@ -121,6 +196,10 @@ func (nopMetrics) RecordConnectFailure()              {}
 func (nopMetrics) RecordAuthFailure()                 {}
 func (nopMetrics) RecordCallbackQueued()              {}
 func (nopMetrics) RecordCallbackQueueBlocked()        {}
+func (nopMetrics) RecordStreamOpened()                {}
+func (nopMetrics) RecordStreamFinished()              {}
+func (nopMetrics) RecordStreamFellBack()              {}
+func (nopMetrics) RecordMediaFailure(string)          {}
 func (nopMetrics) RecordOutboundDelivered()           {}
 func (nopMetrics) RecordOutboundDropped(string)       {}
 func (nopMetrics) RecordOutboundSkipped(string)       {}

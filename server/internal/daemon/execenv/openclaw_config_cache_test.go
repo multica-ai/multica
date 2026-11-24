@@ -309,7 +309,7 @@ func TestOpenclawDiscoveryCacheFutureDatedEntry(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newOpenclawCacheFixture(t)
 			readerNow := time.Now()
-			if err := storeOpenclawDiscoveryCache(f.cachePath(), f.bin, f.configPath, []any{map[string]any{"id": "scout"}}, false, readerNow.Add(tc.ahead)); err != nil {
+			if err := storeOpenclawDiscoveryCache(f.cachePath(), f.bin, f.configPath, []any{map[string]any{"id": "scout"}}, openclawAgentsSourceList, readerNow.Add(tc.ahead)); err != nil {
 				t.Fatalf("store: %v", err)
 			}
 			if _, ok := loadOpenclawDiscoveryCache(f.cachePath(), f.bin, readerNow); ok != tc.want {
@@ -345,7 +345,7 @@ func TestOpenclawDiscoveryCacheConcurrentPreparations(t *testing.T) {
 			// Each worker gets its own stub-free path into discovery: the
 			// shared stub is not goroutine-safe, so drive the cache directly
 			// with the same store/load pair preparation uses.
-			if err := storeOpenclawDiscoveryCache(f.cachePath(), f.bin, f.configPath, []any{map[string]any{"id": "scout"}}, false, time.Now()); err != nil {
+			if err := storeOpenclawDiscoveryCache(f.cachePath(), f.bin, f.configPath, []any{map[string]any{"id": "scout"}}, openclawAgentsSourceList, time.Now()); err != nil {
 				mu.Lock()
 				failures = append(failures, err)
 				mu.Unlock()

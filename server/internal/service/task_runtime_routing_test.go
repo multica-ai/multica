@@ -124,7 +124,7 @@ func testPersonalTaskRuntimeRouting(t *testing.T, provider, target string) {
 		t.Fatal("descendant did not inherit complete root snapshot")
 	}
 	// Claim by the task's selected runtime works after a global agent rebind.
-	claimed, err := svc.claimTask(ctx, agentID, personalRuntime)
+	claimed, err := svc.claimTask(ctx, agentID, personalRuntime, claimScope{claimPath: claimPathAgent})
 	if err != nil || claimed == nil || claimed.ID != root.ID {
 		t.Fatalf("personal runtime could not claim root: %v %v", claimed, err)
 	}

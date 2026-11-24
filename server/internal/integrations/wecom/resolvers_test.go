@@ -189,7 +189,7 @@ func TestNewResolverSet_WiresAllResolvers(t *testing.T) {
 	// And a configured one must actually reach the Router — this is the
 	// whole wiring, and a resolver built at boot and dropped here would look
 	// exactly like media ingestion never having been written.
-	media := NewMediaResolver(&fakeMediaStorage{}, newFakeMediaLedger(nil), nil, testLogger())
+	media := NewMediaResolver(&fakeMediaStorage{}, newFakeMediaLedger(nil), nil, nil, testLogger())
 	withMedia := NewResolverSet(&Store{}, &fakeSessionBinder{}, nil, media)
 	if withMedia.Media == nil {
 		t.Fatal("a media resolver was passed and dropped")
@@ -280,7 +280,7 @@ func TestOutbound_RegisterAndHandleEventNoopOnNonWecom(t *testing.T) {
 	// that isn't a wecom binding must be a silent no-op (handleEvent swallows
 	// the processEvent result). Uses pgx.ErrNoRows via the fake.
 	q := &fakeOutboundQueries{sessionErr: pgx.ErrNoRows}
-	o := NewOutbound(q, newSendersRegistry(), slog.Default())
+	o := NewOutbound(q, newSendersRegistry(), nil, slog.Default())
 	bus := events.New()
 	o.Register(bus)
 	// Publishing must not panic; the handler runs synchronously on the bus.

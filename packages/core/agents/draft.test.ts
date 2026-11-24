@@ -12,6 +12,7 @@ import {
 } from "./draft";
 
 const draft = (): AgentDraft => ({
+  qoderAgentId: "",
   name: "Old name",
   description: "Old description",
   instructions: "Old instructions",
@@ -99,6 +100,32 @@ describe("duplicate access", () => {
         permission_mode: "public_to",
         invocation_targets: [{ target_type: "workspace", target_id: null }],
       }).permissionScope,
+    ).toBe("workspace");
+  });
+
+  it("starts the copy as Only me when the plan cannot add a member list", () => {
+    const source = sourceAgent({
+      permission_mode: "public_to",
+      invocation_targets: [
+        { target_type: "member", target_id: "member-1" },
+        { target_type: "team", target_id: "team-1" },
+      ],
+    });
+    const duplicate = buildDuplicateDraft(source, {
+      runtimes: [CODEX_RUNTIME],
+      currentUserId: "user-1",
+      fallbackRuntimeId: "runtime-1",
+      nameSuffix: " copy",
+      canAddInvocationMembers: false,
+    });
+    expect(duplicate).toMatchObject({ permissionScope: "private", memberIds: new Set(), teamIds: new Set() });
+    expect(buildInvocationTargets(duplicate)).toEqual([]);
+    // Workspace-wide access is free, so it is copied either way.
+    expect(
+      deriveDuplicateAccess(
+        { permission_mode: "public_to", invocation_targets: [{ target_type: "workspace", target_id: null }] },
+        false,
+      ).permissionScope,
     ).toBe("workspace");
   });
 });
@@ -313,4 +340,36 @@ describe("agent draft execution overrides", () => {
     expect(isDraftDescriptionWithinLimit("汉".repeat(255))).toBe(true);
     expect(isDraftDescriptionWithinLimit("汉".repeat(256))).toBe(false);
   });
+});
+
+it("persists a per-agent QCA binding and clears it on runtime change", () => {
+  const current = { ...draft(), qoderAgentId: "agent_qca" };
+  expect(buildCreateAgentRequest({ draft: current, runtimeId: current.runtimeId }).runtime_config).toEqual({ qoder_agent_id: "agent_qca" });
+  expect(applyDraftRuntimeChange(current, "another-runtime").qoderAgentId).toBe("");
+});
+
+it("drops settings a Qoder runtime cannot run from a draft started elsewhere", () => {
+  const current: AgentDraft = {
+    ...draft(),
+    qoderAgentId: "agent_qca",
+    thinkingLevel: "high",
+    serviceTier: "priority",
+    conversationStarters: [{ label: "Plan", prompt: "Plan it" }],
+  };
+  const request = buildCreateAgentRequest({
+    draft: current,
+    runtimeId: "rt-qoder",
+    runtimeProvider: "qoder_cloud",
+    duplicateSource: sourceAgent(),
+  });
+  expect(request).toMatchObject({ runtime_config: { qoder_agent_id: "agent_qca" }, skill_ids: [] });
+  expect(request.model).toBeUndefined();
+  expect(request.thinking_level).toBeUndefined();
+  expect(request.service_tier).toBeUndefined();
+  expect(request.conversation_starters).toEqual([{ label: "Plan", prompt: "Plan it" }]);
+  expect(request).not.toHaveProperty("custom_args");
+
+  const local = buildCreateAgentRequest({ draft: current, runtimeId: "runtime-1", runtimeProvider: "codex" });
+  expect(local).not.toHaveProperty("runtime_config");
+  expect(local.skill_ids).toEqual(["skill-1"]);
 });

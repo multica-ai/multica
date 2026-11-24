@@ -97,4 +97,60 @@ func TestParsedLLMMaxRetriesReachesTheClient(t *testing.T) {
 	}
 }
 
+// TestParseLLMDisableThinking pins the MULTICA_LLM_DISABLE_THINKING states.
+// Unset means the knob stays off — the state every existing deployment gets
+// without the variable present — and anything that is not a deliberate
+// true/false must stop the boot rather than be coerced (MUL-6364 contract).
+func TestParseLLMDisableThinking(t *testing.T) {
+	t.Run("accepted", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			raw  string
+			want bool
+		}{
+			{name: "unset", raw: "", want: false},
+			{name: "whitespace is unset", raw: "   ", want: false},
+			{name: "false", raw: "false", want: false},
+			{name: "numeric false", raw: "0", want: false},
+			{name: "true", raw: "true", want: true},
+			{name: "numeric true", raw: "1", want: true},
+			{name: "case-insensitive", raw: "TRUE", want: true},
+			{name: "surrounding whitespace is tolerated", raw: " true ", want: true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				got, err := parseLLMDisableThinking(tc.raw)
+				if err != nil {
+					t.Fatalf("parseLLMDisableThinking(%q) failed: %v", tc.raw, err)
+				}
+				if got != tc.want {
+					t.Fatalf("parseLLMDisableThinking(%q) = %v, want %v", tc.raw, got, tc.want)
+				}
+			})
+		}
+	})
+
+	t.Run("rejected", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			raw  string
+		}{
+			{name: "typo", raw: "ture"},
+			{name: "yes/no style", raw: "yes"},
+			{name: "on/off style", raw: "on"},
+			{name: "numeric non-boolean", raw: "2"},
+			{name: "trailing garbage", raw: "true " + "x"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				got, err := parseLLMDisableThinking(tc.raw)
+				if err == nil {
+					t.Fatalf("parseLLMDisableThinking(%q) accepted the value (= %v), want a validation error", tc.raw, got)
+				}
+				if !strings.Contains(err.Error(), strings.TrimSpace(tc.raw)) {
+					t.Fatalf("parseLLMDisableThinking(%q) error = %q, want it to echo the offending value", tc.raw, err)
+				}
+			})
+		}
+	})
+}
+
 func ptr(n int) *int { return &n }

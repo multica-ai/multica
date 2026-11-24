@@ -10,13 +10,18 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 func withVCSBox(t *testing.T) *secretbox.Box {
@@ -147,7 +152,7 @@ func TestVCSWebhook_ForgejoMirrorsAndCloses(t *testing.T) {
 
 // A bare body mention ("Related MUL-X", no closing keyword, not in title or
 // branch) claims nothing, so it must not link at all: it neither shows as a
-// working PR nor blocks a genuine Closes sibling from advancing the issue.
+// working PR nor blocks a genuine Closes sibling from completing the issue.
 // Mirrors the GitHub claim rule (MUL-3739, MUL-7072).
 func TestVCSWebhook_BareBodyMentionIsNotLinked(t *testing.T) {
 	ctx := context.Background()
@@ -195,7 +200,7 @@ func TestVCSWebhook_BareBodyMentionIsNotLinked(t *testing.T) {
 	}
 
 	// PR #8: MERGED with a title reference + Closes keyword → a real claim with
-	// close_intent. The still-open, unlinked PR #7 must NOT block advance.
+	// close intent. The still-open, unlinked PR #7 must NOT block completion.
 	closeRaw, _ := json.Marshal(map[string]any{
 		"action": "closed",
 		"pull_request": map[string]any{
@@ -223,40 +228,43 @@ func TestVCSWebhook_BareBodyMentionIsNotLinked(t *testing.T) {
 	}
 }
 
-// The close gate must span providers: an issue with an OPEN GitHub PR and a
-// MERGED close-intent VCS PR must report open_count > 0, so neither webhook
-// auto-advances it out from under the still-open GitHub work (and vice versa).
-func TestCombinedCloseAggregateSpansProviders(t *testing.T) {
+// The merge automation must span providers: an issue with an OPEN GitHub PR
+// and a MERGED VCS merge request waits for the GitHub PR, and moves once it
+// merges too.
+func TestAutoCompleteSpansProviders(t *testing.T) {
 	ctx := context.Background()
 	box := withVCSBox(t)
 	connID := seedVCSConnection(t, ctx, box, "gitlab", "https://gitlab.test")
-	issue := newVCSIssue(t, "Cross-provider close gate")
+	issue := newVCSIssue(t, "Cross-provider auto-complete")
 	now := pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
 	t.Cleanup(func() {
 		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, issue.ID)
 		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, issue.ID)
 		cleanupVCS(ctx, issue.ID)
 	})
 
-	// OPEN GitHub PR linked to the issue (installation_id carries no FK).
-	ghPR, err := testHandler.Queries.UpsertGitHubPullRequest(ctx, db.UpsertGitHubPullRequestParams{
-		WorkspaceID: parseUUID(testWorkspaceID), InstallationID: 987654,
-		RepoOwner: "acme", RepoName: "gh", PrNumber: 3,
-		Title: "WIP " + issue.Identifier, State: "open",
-		HtmlUrl:     "https://github.com/acme/gh/pull/3",
-		PrCreatedAt: now, PrUpdatedAt: now, HeadSha: "ghsha",
-	})
-	if err != nil {
-		t.Fatalf("UpsertGitHubPullRequest: %v", err)
+	upsertGH := func(state string) db.GithubPullRequest {
+		t.Helper()
+		pr, err := testHandler.Queries.UpsertGitHubPullRequest(ctx, db.UpsertGitHubPullRequestParams{
+			WorkspaceID: parseUUID(testWorkspaceID), InstallationID: 987654,
+			RepoOwner: "acme", RepoName: "gh", PrNumber: 3,
+			Title: "WIP " + issue.Identifier, State: state,
+			HtmlUrl:     "https://github.com/acme/gh/pull/3",
+			PrCreatedAt: now, PrUpdatedAt: now, HeadSha: "ghsha",
+		})
+		if err != nil {
+			t.Fatalf("UpsertGitHubPullRequest: %v", err)
+		}
+		return pr
 	}
-	if err := testHandler.Queries.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{
-		IssueID: parseUUID(issue.ID), PullRequestID: ghPR.ID, CloseIntent: false,
-		LinkedByType: strToText("system"),
+	ghPR := upsertGH("open")
+	if _, err := testHandler.Queries.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{
+		IssueID: parseUUID(issue.ID), PullRequestID: ghPR.ID,
 	}); err != nil {
 		t.Fatalf("LinkIssueToPullRequest: %v", err)
 	}
 
-	// MERGED close-intent VCS PR linked to the same issue.
 	vcsPR, err := testHandler.Queries.UpsertVCSPullRequest(ctx, db.UpsertVCSPullRequestParams{
 		WorkspaceID: parseUUID(testWorkspaceID), ConnectionID: parseUUID(connID),
 		Provider: "gitlab", RepoOwner: "acme", RepoName: "gl", PrNumber: 4,
@@ -267,22 +275,21 @@ func TestCombinedCloseAggregateSpansProviders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpsertVCSPullRequest: %v", err)
 	}
-	if err := testHandler.Queries.LinkIssueToVCSPullRequest(ctx, db.LinkIssueToVCSPullRequestParams{
-		IssueID: parseUUID(issue.ID), PullRequestID: vcsPR.ID, CloseIntent: true,
-		LinkedByType: strToText("system"),
+	if _, err := testHandler.Queries.LinkIssueToVCSPullRequest(ctx, db.LinkIssueToVCSPullRequestParams{
+		IssueID: parseUUID(issue.ID), PullRequestID: vcsPR.ID,
 	}); err != nil {
 		t.Fatalf("LinkIssueToVCSPullRequest: %v", err)
 	}
 
-	counts, err := testHandler.Queries.GetIssueCombinedPullRequestCloseAggregate(ctx, parseUUID(issue.ID))
-	if err != nil {
-		t.Fatalf("GetIssueCombinedPullRequestCloseAggregate: %v", err)
+	testHandler.maybeAutoCompleteIssue(ctx, parseUUID(testWorkspaceID), parseUUID(issue.ID), nil)
+	if got, _ := testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID)); got.Status == "done" {
+		t.Fatal("the open GitHub PR must hold the issue open")
 	}
-	if counts.OpenCount != 1 {
-		t.Errorf("open_count = %d, want 1 (the open GitHub PR must be seen)", counts.OpenCount)
-	}
-	if counts.MergedWithCloseIntentCount != 1 {
-		t.Errorf("merged_with_close_intent_count = %d, want 1 (the VCS MR)", counts.MergedWithCloseIntentCount)
+
+	upsertGH("merged")
+	testHandler.maybeAutoCompleteIssue(ctx, parseUUID(testWorkspaceID), parseUUID(issue.ID), nil)
+	if got, _ := testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID)); got.Status != "done" {
+		t.Errorf("status = %q, want done once both providers' PRs merged", got.Status)
 	}
 }
 
@@ -345,9 +352,53 @@ func TestDeleteIssue_VCSLinkCleanupIsWorkspaceScoped(t *testing.T) {
 	}
 }
 
+// A PR linked while open stays linked when its merge event no longer names the
+// issue, and that merge moves the issue: the keyword only links (MUL-7726).
+func TestVCSWebhook_MergeMovesIssueLinkedEarlier(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+	connID := seedVCSConnection(t, ctx, box, "forgejo", "https://forgejo.test")
+	issue := newVCSIssue(t, "Keyword removed before merge")
+	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+
+	fire := func(action, state string, merged bool, body, updatedAt string) {
+		raw, _ := json.Marshal(map[string]any{
+			"action": action,
+			"pull_request": map[string]any{
+				"number": 9, "html_url": "https://forgejo.test/acme/widget/pulls/9",
+				"title": "Session refactor", "body": body, "state": state, "merged": merged,
+				"created_at": "2026-05-01T00:00:00Z", "updated_at": updatedAt,
+				"merged_at": "2026-05-02T00:00:00Z",
+				"head":      map[string]any{"ref": "refactor", "sha": "def"},
+				"user":      map[string]any{"username": "octo"},
+			},
+			"repository": map[string]any{"name": "widget", "owner": map[string]any{"username": "acme"}},
+		})
+		w := httptest.NewRecorder()
+		testHandler.HandleVCSWebhook(w, vcsWebhookReq(connID, map[string]string{
+			"X-Gitea-Event": "pull_request", "X-Gitea-Signature": giteaSig(raw),
+		}, raw))
+		if w.Code != http.StatusAccepted {
+			t.Fatalf("%s event: %d %s", action, w.Code, w.Body.String())
+		}
+	}
+
+	fire("opened", "open", false, "Closes "+issue.Identifier, "2026-05-01T00:00:00Z")
+	fire("closed", "closed", true, "Related to "+issue.Identifier, "2026-05-02T00:00:00Z")
+
+	updated, _ := testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID))
+	if updated.Status != "done" {
+		t.Errorf("status = %q, want done", updated.Status)
+	}
+	var links int
+	testPool.QueryRow(ctx, `SELECT count(*) FROM issue_vcs_pull_request WHERE issue_id = $1`, issue.ID).Scan(&links)
+	if links != 1 {
+		t.Errorf("the merged PR must stay linked, got %d links", links)
+	}
+}
+
 // A redelivered older event must not rewrite the link a newer event already
-// set. The PR-upsert monotonic guard protects the PR row; this covers the link
-// (close_intent, and the link's existence at all).
+// set. The PR-upsert monotonic guard protects the PR row; this covers the link.
 func TestVCSWebhook_StaleEventDoesNotRewriteLink(t *testing.T) {
 	ctx := context.Background()
 	box := withVCSBox(t)
@@ -377,25 +428,267 @@ func TestVCSWebhook_StaleEventDoesNotRewriteLink(t *testing.T) {
 		}
 	}
 
-	// Newer terminal event: merged with a real claim (Closes) → close_intent.
+	// Newer terminal event: merged with a real claim (Closes).
 	fire("closed", "closed", true, "Fix "+issue.Identifier, "Closes "+issue.Identifier, "2026-05-02T00:00:00Z")
 	// Older redelivered "opened" event: bare body mention, generic title/branch.
-	// Without the guard this clears close_intent and drops the link entirely.
+	// Without the guard this would drop the link: an open PR that no longer
+	// claims the issue is unlinked.
 	fire("opened", "open", false, "WIP", "touches "+issue.Identifier, "2026-05-01T00:00:00Z")
 
-	var closeIntent bool
-	if err := testPool.QueryRow(ctx,
-		`SELECT close_intent FROM issue_vcs_pull_request WHERE issue_id = $1`,
-		issue.ID).Scan(&closeIntent); err != nil {
-		t.Fatalf("select link: %v", err)
-	}
-	if !closeIntent {
-		t.Errorf("stale event rewrote link: close_intent=%v, want true", closeIntent)
+	var links int
+	testPool.QueryRow(ctx, `SELECT count(*) FROM issue_vcs_pull_request WHERE issue_id = $1`, issue.ID).Scan(&links)
+	if links != 1 {
+		t.Errorf("stale event rewrote the link: %d links, want 1", links)
 	}
 	// The PR row also stayed at the newer merged state.
 	rows, _ := testHandler.Queries.ListVCSPullRequestsByIssue(ctx, parseUUID(issue.ID))
 	if len(rows) != 1 || rows[0].State != "merged" {
 		t.Errorf("PR row regressed: %+v", rows)
+	}
+}
+
+func TestGitLabSystemHookRepoAllowed(t *testing.T) {
+	repos := []byte(`[{"url":"https://gitlab.test/acme/widget.git"},{"url":"git@gitlab.test:group/sub/widget.git"},{"url":"ssh://git@gitlab.test/group/sub/other.git"},{"url":"ssh://git@gitlab.test:2222/group/sub/ported.git"}]`)
+	for _, tc := range []struct {
+		instance, owner, name string
+		want                  bool
+	}{
+		{"https://gitlab.test", "acme", "widget", true},
+		{"https://gitlab.test", "other", "widget", false},
+		{"https://other.test", "acme", "widget", false},
+		{"https://gitlab.test", "acme", "widget-extra", false},
+		{"https://gitlab.test", "group/sub", "widget", true},
+		{"https://gitlab.test", "group/sub", "other", true},
+		{"https://gitlab.test", "group/sub", "ported", true},
+		{"https://gitlab.test:8443", "group/sub", "ported", true},
+		{"https://other.test", "group/sub", "ported", false},
+		{"https://gitlab.test:8443", "acme", "widget", false},
+	} {
+		if got := gitLabSystemHookRepoAllowed(repos, tc.instance, tc.owner, tc.name); got != tc.want {
+			t.Errorf("repo %s/%s on %s: got %v, want %v", tc.owner, tc.name, tc.instance, got, tc.want)
+		}
+	}
+	if gitLabSystemHookRepoAllowed(nil, "https://gitlab.test", "acme", "widget") {
+		t.Error("workspace without configured repos must reject system hook")
+	}
+}
+
+func gitlabSystemHookPayload(t *testing.T, title, repo string) []byte {
+	t.Helper()
+	// Preserve the public GitLab 19.5.3-ee sample's nulls, timestamps and state fields.
+	raw, err := os.ReadFile("../integrations/vcs/testdata/gitlab-system-hook-merge.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	payload["project"].(map[string]any)["path_with_namespace"] = repo
+	attrs := payload["object_attributes"].(map[string]any)
+	attrs["title"] = title
+	attrs["url"] = "https://gitlab.test/" + repo + "/-/merge_requests/10"
+	raw, err = json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func configureGitlabSystemHook(t *testing.T, instance, mergeStatus string) {
+	t.Helper()
+	ws, err := testHandler.Queries.GetWorkspace(context.Background(), parseUUID(testWorkspaceID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		dbfx.Exec(t, `UPDATE workspace SET repos = $1, settings = $2 WHERE id = $3`, ws.Repos, ws.Settings, testWorkspaceID)
+	})
+	repos, err := json.Marshal([]map[string]string{{"url": instance + "/acme/widget.git"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dbfx.Exec(t, `UPDATE workspace SET repos = $1, settings = jsonb_set(settings, '{pr_merge_status}', to_jsonb($2::text)) WHERE id = $3`, repos, mergeStatus, testWorkspaceID)
+}
+
+func TestVCSWebhook_SystemHookAuthorizationFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		status, want int
+		badToken     bool
+	}{
+		{"unauthorized", http.StatusUnauthorized, http.StatusAccepted, false},
+		{"forbidden", http.StatusForbidden, http.StatusAccepted, false},
+		{"not_found", http.StatusNotFound, http.StatusAccepted, false},
+		{"gitlab_unavailable", http.StatusInternalServerError, http.StatusServiceUnavailable, false},
+		{"gitlab_timeout", 0, http.StatusServiceUnavailable, false},
+		{"invalid_access_token", http.StatusOK, http.StatusInternalServerError, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			box := withVCSBox(t)
+			var lookups atomic.Int32
+			gitlab := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				lookups.Add(1)
+				if r.URL.EscapedPath() != "/api/v4/projects/acme%2Fwidget" || r.Header.Get("PRIVATE-TOKEN") != "tok" {
+					t.Error("project lookup must use the connection token and exact repository")
+				}
+				if tc.status == 0 {
+					<-r.Context().Done()
+					return
+				}
+				w.WriteHeader(tc.status)
+			}))
+			defer gitlab.Close()
+			connID := seedVCSConnection(t, ctx, box, "gitlab", gitlab.URL)
+			issueID := dbfx.Issue(t, "Denied system hook", testutil.Cols{"status": "in_progress"})
+			t.Cleanup(func() { cleanupVCS(ctx, "") })
+			issue, err := testHandler.Queries.GetIssue(ctx, parseUUID(issueID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			configureGitlabSystemHook(t, gitlab.URL, "done")
+			if tc.badToken {
+				dbfx.Exec(t, `UPDATE vcs_connection SET access_token_encrypted = 'invalid-ciphertext' WHERE id = $1`, connID)
+			}
+			h := *testHandler
+			h.Bus = events.New()
+			broadcasts := 0
+			h.Bus.SubscribeAll(func(events.Event) { broadcasts++ })
+			identifier := issueToResponse(issue, h.getIssuePrefix(ctx, issue.WorkspaceID)).Identifier
+			raw := gitlabSystemHookPayload(t, "Fix "+identifier, "acme/widget")
+			started := time.Now()
+			testutil.Call(t, h.HandleVCSWebhook, vcsWebhookReq(connID, map[string]string{
+				"X-Gitlab-Event": "System Hook", "X-Gitlab-Token": vcsTestSecret,
+			}, raw)).Want(tc.want)
+			if tc.status == 0 && time.Since(started) > 7*time.Second {
+				t.Fatalf("authorization lookup exceeded its five-second budget: %s", time.Since(started))
+			}
+			if !tc.badToken && lookups.Load() != 1 {
+				t.Fatalf("project lookups = %d, want 1", lookups.Load())
+			}
+			if tc.badToken && lookups.Load() != 0 {
+				t.Fatalf("lookup with invalid token: %d", lookups.Load())
+			}
+			var stored, linked int
+			if err := testPool.QueryRow(ctx, `SELECT count(*) FROM vcs_pull_request WHERE connection_id = $1`, connID).Scan(&stored); err != nil {
+				t.Fatal(err)
+			}
+			if err := testPool.QueryRow(ctx, `SELECT count(*) FROM issue_vcs_pull_request WHERE issue_id = $1`, issueID).Scan(&linked); err != nil {
+				t.Fatal(err)
+			}
+			updated, err := testHandler.Queries.GetIssue(ctx, parseUUID(issueID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored != 0 || linked != 0 || updated.Status != "in_progress" || broadcasts != 0 {
+				t.Fatalf("unauthorized side effects: stored=%d linked=%d status=%s broadcasts=%d", stored, linked, updated.Status, broadcasts)
+			}
+		})
+	}
+}
+
+func TestVCSWebhook_ProjectAndSystemHookDuplicateDelivery(t *testing.T) {
+	for _, order := range [][]string{{"Merge Request Hook", "System Hook"}, {"System Hook", "Merge Request Hook"}} {
+		for _, target := range []string{"done", "none"} {
+			t.Run(order[0]+"/"+target, func(t *testing.T) {
+				ctx := context.Background()
+				box := withVCSBox(t)
+				gitlab := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					_, _ = w.Write([]byte(`{"path_with_namespace":"acme/widget"}`))
+				}))
+				defer gitlab.Close()
+				connID := seedVCSConnection(t, ctx, box, "gitlab", gitlab.URL)
+				issueID := dbfx.Issue(t, "Duplicate hook delivery", testutil.Cols{"status": "in_progress"})
+				t.Cleanup(func() { cleanupVCS(ctx, "") })
+				issue, err := testHandler.Queries.GetIssue(ctx, parseUUID(issueID))
+				if err != nil {
+					t.Fatal(err)
+				}
+				configureGitlabSystemHook(t, gitlab.URL, target)
+				h := *testHandler
+				h.Bus = events.New()
+				transitions := 0
+				h.Bus.Subscribe(protocol.EventIssueUpdated, func(e events.Event) {
+					if payload, ok := e.Payload.(map[string]any); ok && payload["status_changed"] == true {
+						transitions++
+					}
+				})
+				identifier := issueToResponse(issue, h.getIssuePrefix(ctx, issue.WorkspaceID)).Identifier
+				raw := gitlabSystemHookPayload(t, "Fix "+identifier, "acme/widget")
+				for _, event := range order {
+					testutil.Call(t, h.HandleVCSWebhook, vcsWebhookReq(connID, map[string]string{
+						"X-Gitlab-Event": event, "X-Gitlab-Token": vcsTestSecret,
+					}, raw)).Want(http.StatusAccepted)
+				}
+				rows, err := h.Queries.ListVCSPullRequestsByIssue(ctx, parseUUID(issueID))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var stored, linked int
+				if err := testPool.QueryRow(ctx, `SELECT count(*) FROM vcs_pull_request WHERE connection_id = $1`, connID).Scan(&stored); err != nil {
+					t.Fatal(err)
+				}
+				if err := testPool.QueryRow(ctx, `SELECT count(*) FROM issue_vcs_pull_request WHERE issue_id = $1`, issueID).Scan(&linked); err != nil {
+					t.Fatal(err)
+				}
+				updated, err := h.Queries.GetIssue(ctx, parseUUID(issueID))
+				if err != nil {
+					t.Fatal(err)
+				}
+				wantStatus, wantTransitions := "done", 1
+				if target == "none" {
+					wantStatus, wantTransitions = "in_progress", 0
+				}
+				if len(rows) != 1 || stored != 1 || linked != 1 || updated.Status != wantStatus || transitions != wantTransitions {
+					t.Fatalf("rows=%+v stored=%d linked=%d status=%s transitions=%d; want one MR/link, status=%s transitions=%d", rows, stored, linked, updated.Status, transitions, wantStatus, wantTransitions)
+				}
+			})
+		}
+	}
+}
+
+func TestVCSWebhook_SystemHookOnlyMirrorsConfiguredRepos(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+	gitlab := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.EscapedPath() != "/api/v4/projects/acme%2Fwidget" || r.Header.Get("PRIVATE-TOKEN") != "tok" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		_, _ = w.Write([]byte(`{"path_with_namespace":"acme/widget"}`))
+	}))
+	defer gitlab.Close()
+	connID := seedVCSConnection(t, ctx, box, "gitlab", gitlab.URL)
+	issue := newVCSIssue(t, "System hook test")
+	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+	_, err := testPool.Exec(ctx, `UPDATE workspace SET repos = $1 WHERE id = $2`,
+		`[{"url":"`+gitlab.URL+`/acme/widget.git"}]`, testWorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `UPDATE workspace SET repos = '[]' WHERE id = $1`, testWorkspaceID)
+	})
+	for _, repo := range []string{"other/widget", "acme/widget"} {
+		raw := gitlabSystemHookPayload(t, issue.Identifier+" fix", repo)
+		w := httptest.NewRecorder()
+		testHandler.HandleVCSWebhook(w, vcsWebhookReq(connID, map[string]string{
+			"X-Gitlab-Event": "System Hook", "X-Gitlab-Token": vcsTestSecret,
+		}, raw))
+		if w.Code != http.StatusAccepted {
+			t.Fatalf("%s: status %d", repo, w.Code)
+		}
+		rows, err := testHandler.Queries.ListVCSPullRequestsByIssue(ctx, parseUUID(issue.ID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if repo == "other/widget" && len(rows) != 0 {
+			t.Fatalf("unconfigured repo linked: %+v", rows)
+		}
+		if repo == "acme/widget" && (len(rows) != 1 || rows[0].State != "merged") {
+			t.Fatalf("configured repo not linked: %+v", rows)
+		}
 	}
 }
 
@@ -439,6 +732,41 @@ func TestVCSWebhook_GitlabMergeRequest(t *testing.T) {
 	updated, _ := testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID))
 	if updated.Status != "done" {
 		t.Errorf("expected issue done, got %q", updated.Status)
+	}
+}
+
+func TestVCSWebhook_GitlabPipelineWithSystemHook(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+	connID := seedVCSConnection(t, ctx, box, "gitlab", "https://gitlab.test")
+	issueID := dbfx.Issue(t, "GitLab pipeline coexistence")
+	t.Cleanup(func() { cleanupVCS(ctx, "") })
+	issue, err := testHandler.Queries.GetIssue(ctx, parseUUID(issueID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	identifier := issueToResponse(issue, testHandler.getIssuePrefix(ctx, issue.WorkspaceID)).Identifier
+	raw := gitlabSystemHookPayload(t, "Fix "+identifier, "acme/widget")
+	testutil.Call(t, testHandler.HandleVCSWebhook, vcsWebhookReq(connID, map[string]string{
+		"X-Gitlab-Event": "Merge Request Hook", "X-Gitlab-Token": vcsTestSecret,
+	}, raw)).Want(http.StatusAccepted)
+
+	pipeline := []byte(`{"object_kind":"pipeline","object_attributes":{"sha":"2222222222222222222222222222222222222222","status":"success","finished_at":"2026-11-01T09:16:00Z"}}`)
+	for _, event := range []string{"System Hook", "Pipeline Hook"} {
+		testutil.Call(t, testHandler.HandleVCSWebhook, vcsWebhookReq(connID, map[string]string{
+			"X-Gitlab-Event": event, "X-Gitlab-Token": vcsTestSecret,
+		}, pipeline)).Want(http.StatusAccepted)
+		rows, err := testHandler.Queries.ListVCSPullRequestsByIssue(ctx, parseUUID(issueID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantChecks := int64(0)
+		if event == "Pipeline Hook" {
+			wantChecks = 1
+		}
+		if len(rows) != 1 || rows[0].ChecksTotal != wantChecks || rows[0].ChecksPassed != wantChecks {
+			t.Fatalf("%s: want %d passed checks, got %+v", event, wantChecks, rows)
+		}
 	}
 }
 

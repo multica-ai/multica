@@ -20,9 +20,9 @@ func (r *terminalWakeupRecorder) NotifyTaskAvailable(runtimeID, taskID string) {
 func failTaskViaHandler(t *testing.T, taskID string) *httptest.ResponseRecorder {
 	t.Helper()
 	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/fail",
+	req := newOwnerDaemonRequest("POST", "/api/daemon/tasks/"+taskID+"/fail",
 		map[string]any{"error": "agent failed", "failure_reason": "agent_error"},
-		testWorkspaceID, "legit-daemon")
+	)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("taskId", taskID)
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))

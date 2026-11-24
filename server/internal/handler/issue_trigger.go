@@ -3,10 +3,12 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -31,8 +33,8 @@ func (h *Handler) issueTriggerWriteProbe(r *http.Request, actorType, actorID str
 		IsRuntimeReady: func(agent db.Agent) bool {
 			return h.runtimeReadyForRequest(r, agent, actorType, actorID)
 		},
-		IsSelfLoop: func() bool {
-			return h.isAgentRunningOnIssue(r, actorType, issue)
+		IsSelfLoop: func(targetAgentID pgtype.UUID) bool {
+			return h.isAgentRunningOnIssue(r, actorType, issue, targetAgentID)
 		},
 		SuppressActiveSelfAssignment: func(agentID pgtype.UUID) bool {
 			suppress := h.shouldSuppressActiveSelfAssignment(r.Context(), actorType, actorID, issue.ID, agentID)
@@ -64,8 +66,8 @@ func (h *Handler) issueTriggerPreviewProbe(r *http.Request, actorType, actorID, 
 		IsRuntimeReady: func(agent db.Agent) bool {
 			return h.runtimeReadyForRequest(r, agent, actorType, actorID)
 		},
-		IsSelfLoop: func() bool {
-			return h.isAgentRunningOnIssue(r, actorType, issue)
+		IsSelfLoop: func(targetAgentID pgtype.UUID) bool {
+			return h.isAgentRunningOnIssue(r, actorType, issue, targetAgentID)
 		},
 		SuppressActiveSelfAssignment: func(agentID pgtype.UUID) bool {
 			return h.shouldSuppressActiveSelfAssignment(r.Context(), actorType, actorID, issue.ID, agentID)
@@ -90,18 +92,116 @@ func (h *Handler) shouldSuppressActiveSelfAssignment(ctx context.Context, actorT
 	return active || err != nil
 }
 
+// logDeclinedIssueRun records why an issue write that could have started a run
+// did not (#10845). The precise cause goes to server logs, not the write
+// response (see admission.go). Parking an assignment in backlog is routine, so
+// it logs at debug.
+func logDeclinedIssueRun(ctx context.Context, issue db.Issue, trigger service.IssueRunTrigger) {
+	if trigger.DeclineReason == "" {
+		return
+	}
+	level := slog.LevelInfo
+	if trigger.DeclineReason == ReasonDeferred {
+		level = slog.LevelDebug
+	}
+	slog.Log(ctx, level, "issue write did not start a run",
+		"issue_id", uuidToString(issue.ID),
+		"assignee_type", issue.AssigneeType.String,
+		"assignee_id", uuidToString(issue.AssigneeID),
+		"reason", trigger.DeclineReason,
+	)
+}
+
+// IssueRunOutcome tells the caller of an issue write what happened to the run
+// it could have started (#10845). It has the shape of CommentTriggerOutcome:
+// target_id is the assignee the issue names (the squad id for a squad) and
+// reason_code a stable dispatch code. Like trigger_outcomes it goes to the
+// caller only, never into the issue:updated broadcast.
+type IssueRunOutcome struct {
+	TargetType string             `json:"target_type"` // "agent" | "squad"
+	TargetID   string             `json:"target_id"`
+	Status     DispatchStatus     `json:"status"` // queued | coalesced | deferred | blocked
+	ReasonCode DispatchReasonCode `json:"reason_code"`
+}
+
+// resolveIssueRun starts the run an issue write decided on and reports the
+// result. willRun is the predicate's decision before suppress_run; a write
+// that could not have started a run (no reason either) reports nothing.
+//
+// The write probe admits every caller, so a promotion can start a private
+// agent the caller may not invoke. Its outcome would then expose that agent's
+// readiness, so the caller gets no outcome; the server log keeps the cause.
+func (h *Handler) resolveIssueRun(r *http.Request, issue db.Issue, trigger service.IssueRunTrigger, willRun, suppressRun bool, actorType, actorID, workspaceID, handoffNote string) *IssueRunOutcome {
+	if issue.AssigneeType.String != "agent" && issue.AssigneeType.String != "squad" {
+		return nil
+	}
+	var status DispatchStatus
+	var reason DispatchReasonCode
+	switch {
+	case willRun && suppressRun:
+		status, reason = DispatchDeferred, ReasonDeferred
+	case willRun:
+		status, reason = h.dispatchIssueRun(r, issue, trigger, actorType, actorID, handoffNote)
+	case trigger.DeclineReason != "":
+		status, reason = declinedRunStatus(trigger.DeclineReason), trigger.DeclineReason
+	default:
+		return nil
+	}
+	if !h.callerCanInvokeIssueAssignee(r, issue, actorType, actorID, workspaceID) {
+		return nil
+	}
+	return &IssueRunOutcome{
+		TargetType: issue.AssigneeType.String,
+		TargetID:   uuidToString(issue.AssigneeID),
+		Status:     status,
+		ReasonCode: reason,
+	}
+}
+
+// declinedRunStatus maps a decline reason to its status, matching the comment
+// path: a run already pending or active covers the write, backlog parks it,
+// and anything else is blocked.
+func declinedRunStatus(reason DispatchReasonCode) DispatchStatus {
+	switch reason {
+	case ReasonCoalesced:
+		return DispatchCoalesced
+	case ReasonDeferred, ReasonAlreadyActive:
+		return DispatchDeferred
+	}
+	return DispatchBlocked
+}
+
+// callerCanInvokeIssueAssignee applies the preview probe's gate to the agent
+// that runs: the assignee, or a squad's leader. A target that no longer
+// resolves has no readiness to expose.
+func (h *Handler) callerCanInvokeIssueAssignee(r *http.Request, issue db.Issue, actorType, actorID, workspaceID string) bool {
+	agentID := issue.AssigneeID
+	if issue.AssigneeType.String == "squad" {
+		squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{ID: issue.AssigneeID, WorkspaceID: issue.WorkspaceID})
+		if err != nil {
+			return true
+		}
+		agentID = squad.LeaderID
+	}
+	agent, err := h.Queries.GetAgent(r.Context(), agentID)
+	if err != nil {
+		return true
+	}
+	return h.invokeAgentDecision(r.Context(), agent, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID)
+}
+
 // dispatchIssueRun executes the enqueue side effect for a decision produced by
-// WillEnqueueRun. handoffNote is a legacy API input retained for installed
-// clients and travels only with a run that actually starts. The squad path
-// still flows through enqueueSquadLeaderTask so the leader access gate and
-// pending dedup stay in one place.
-func (h *Handler) dispatchIssueRun(r *http.Request, issue db.Issue, trigger service.IssueRunTrigger, actorType, actorID, handoffNote string) {
+// WillEnqueueRun and reports what happened. handoffNote is a legacy API input
+// retained for installed clients and travels only with a run that actually
+// starts. The squad path still flows through enqueueSquadLeaderTask so the
+// leader access gate and pending dedup stay in one place.
+func (h *Handler) dispatchIssueRun(r *http.Request, issue db.Issue, trigger service.IssueRunTrigger, actorType, actorID, handoffNote string) (DispatchStatus, DispatchReasonCode) {
 	ctx := r.Context()
 	var sourceTaskID pgtype.UUID
 	if actorType == "agent" {
 		task, ok := h.taskFromRequestHeader(r)
 		if !ok || r.Header.Get("X-Actor-Source") != "task_token" || uuidToString(task.AgentID) != actorID {
-			return
+			return DispatchBlocked, ReasonInvocationNotAllowed
 		}
 		sourceTaskID = task.ID
 	}
@@ -109,12 +209,38 @@ func (h *Handler) dispatchIssueRun(r *http.Request, issue db.Issue, trigger serv
 	case "agent":
 		// The member who performed this assign/promote is the accountable human
 		// for the run (MUL-4302 §4). An agent actor is not a human, so only a
-		// member actor is threaded. Agent actors also carry their trusted parent
-		// task so an existing issue cannot replace the active execution chain.
-		_, _ = h.TaskService.EnqueueTaskForIssueWithHandoff(ctx, issue, handoffNote, memberActorUserID(actorType, actorID), sourceTaskID)
+		// member actor is threaded; otherwise attribution falls back to the chain.
+		_, err := h.TaskService.EnqueueTaskForIssueWithHandoff(ctx, issue, handoffNote, memberActorUserID(actorType, actorID), sourceTaskID)
+		if err == nil {
+			return DispatchQueued, ReasonQueued
+		}
+		return issueEnqueueFailure(issue, issue.AssigneeID, err)
 	case "squad":
-		h.enqueueSquadLeaderTask(ctx, issue, pgtype.UUID{}, actorType, actorID, handoffNote, sourceTaskID)
+		return h.enqueueSquadLeaderTask(ctx, issue, actorType, actorID, handoffNote, trigger.WorkflowHandoff, sourceTaskID)
 	}
+	return DispatchBlocked, ReasonTargetUnavailable
+}
+
+// issueEnqueueFailure types an enqueue error on the issue write path. A
+// pending task that won the slot already covers the write; the service logs
+// that coalesce at debug. Anything else is logged here.
+func issueEnqueueFailure(issue db.Issue, agentID pgtype.UUID, err error) (DispatchStatus, DispatchReasonCode) {
+	if errors.Is(err, service.ErrDuplicatePendingTask) {
+		return DispatchCoalesced, ReasonCoalesced
+	}
+	log := slog.Default()
+	if issue.AssigneeType.String == "squad" {
+		log = log.With("squad_id", uuidToString(issue.AssigneeID))
+	}
+	log.Warn("issue write: run enqueue failed",
+		"issue_id", uuidToString(issue.ID),
+		"agent_id", uuidToString(agentID),
+		"error", err,
+	)
+	if errors.Is(err, service.ErrIssueInTriage) {
+		return DispatchBlocked, ReasonIssueInTriage
+	}
+	return DispatchBlocked, commentEnqueueFailureReason(err)
 }
 
 // memberActorUserID returns the acting member's user id as a pgtype.UUID when the
@@ -144,6 +270,9 @@ type IssueTriggerPreviewRequest struct {
 	AssigneeType *string `json:"assignee_type"`
 	AssigneeID   *string `json:"assignee_id"`
 	Status       *string `json:"status"`
+	// ProjectID places a create preview in a project, so its workflow's
+	// starting status and starting-step handoff apply. (MUL-7420)
+	ProjectID *string `json:"project_id,omitempty"`
 }
 
 // IssueTriggerPreviewItem is one issue that WILL start a run under the
@@ -185,6 +314,12 @@ func (h *Handler) PreviewIssueTrigger(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(req.IssueIDs) > maxPreviewTriggerIssues {
 		writeError(w, http.StatusBadRequest, "too many issue_ids")
+		return
+	}
+	// MUL-8472: an issue or project the caller cannot see previews like an
+	// unknown one.
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
 		return
 	}
 
@@ -235,6 +370,20 @@ func (h *Handler) PreviewIssueTrigger(w http.ResponseWriter, r *http.Request) {
 			AssigneeType: newAssigneeType,
 			AssigneeID:   newAssigneeID,
 		}
+		// Mirror CreateIssue's workflow handling: the starting column's
+		// handoff when no assignee was picked. (MUL-7420)
+		if req.ProjectID != nil && *req.ProjectID != "" {
+			if projectUUID, err := util.ParseUUID(*req.ProjectID); err == nil && hidden.CanSeeProject(projectUUID) {
+				if def, project, err := issueworkflow.ForProject(r.Context(), h.Queries, wsUUID, projectUUID); err == nil && def != nil {
+					if step, ok := def.Step(candidate.Status); ok && step.HandsOff() && !hasNewAssignee {
+						if t, id, ok := issueworkflow.ResolveHandler(step, project, actorType, parseUUID(actorID)); ok {
+							candidate.AssigneeType = pgtype.Text{String: t, Valid: true}
+							candidate.AssigneeID = id
+						}
+					}
+				}
+			}
+		}
 		appendTrigger(candidate, service.IssueTriggerInput{Issue: candidate, IsCreate: true})
 		resp.TotalCount = len(resp.Triggers)
 		writeJSON(w, http.StatusOK, resp)
@@ -250,8 +399,8 @@ func (h *Handler) PreviewIssueTrigger(w http.ResponseWriter, r *http.Request) {
 			ID:          issueUUID,
 			WorkspaceID: parseUUID(workspaceID),
 		})
-		if err != nil {
-			continue // cross-workspace / unknown id contributes no trigger
+		if err != nil || !hidden.CanSeeProject(loaded.ProjectID) {
+			continue // cross-workspace / unknown / hidden id contributes no trigger
 		}
 
 		post := loaded
@@ -265,6 +414,22 @@ func (h *Handler) PreviewIssueTrigger(w http.ResponseWriter, r *http.Request) {
 		if req.Status != nil && *req.Status != "" {
 			post.Status = *req.Status
 			in.StatusChanged = loaded.Status != *req.Status
+			// A status that enters a workflow handoff step reassigns the
+			// issue, exactly as UpdateIssue will. (MUL-7420)
+			if !hasNewAssignee {
+				params := db.UpdateIssueParams{
+					ProjectID:    loaded.ProjectID,
+					Status:       pgtype.Text{String: *req.Status, Valid: true},
+					AssigneeType: loaded.AssigneeType,
+					AssigneeID:   loaded.AssigneeID,
+				}
+				if hand, err := h.applyIssueWorkflow(r.Context(), loaded, &params, true, false, false, nil); err == nil && hand != nil {
+					post.AssigneeType = params.AssigneeType
+					post.AssigneeID = params.AssigneeID
+					in.AssigneeChanged = true
+					in.EnteredHandoffStep = true
+				}
+			}
 		}
 		in.Issue = post
 		appendTrigger(post, in)

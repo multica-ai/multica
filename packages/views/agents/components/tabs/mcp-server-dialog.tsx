@@ -7,8 +7,9 @@ import {
   useRef,
   useState,
 } from "react";
-import { Globe2, Loader2, Plus, SquareTerminal, Trash2 } from "lucide-react";
+import { Globe2, Loader2, Plus, SquareTerminal, Trash2 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { cn } from "@multica/ui/lib/utils";
 import {
   Dialog,
@@ -374,7 +375,7 @@ export function McpServerDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => !saving && onOpenChange(next)}>
-      <DialogContent className="flex max-h-[88vh] flex-col gap-0 overscroll-contain p-0 sm:max-w-2xl [&_[data-slot=dialog-close]]:top-5 [&_[data-slot=dialog-close]]:right-5">
+      <DialogContent className="flex max-h-[88%] flex-col gap-0 overscroll-contain p-0 sm:max-w-2xl [&_[data-slot=dialog-close]]:top-5 [&_[data-slot=dialog-close]]:right-5">
             <DialogHeader className="shrink-0 border-b border-surface-border px-6 py-6 pr-14 sm:px-8 sm:pr-16">
               <DialogTitle>
                 {replacementMode
@@ -737,18 +738,18 @@ function StringListEditor({
                   ))
                 }
               />
-              <Button
+              <IconButton
                 type="button"
                 variant="ghost"
                 size="icon"
                 className="shrink-0 text-muted-foreground hover:text-destructive"
-                aria-label={`${removeLabel} ${index + 1}`}
+                label={`${removeLabel} ${index + 1}`}
                 onClick={() =>
                   onChange(values.filter((_, itemIndex) => itemIndex !== index))
                 }
               >
                 <Trash2 aria-hidden="true" />
-              </Button>
+              </IconButton>
             </div>
           ))}
         </div>
@@ -831,18 +832,18 @@ function KeyValueEditor({
                   }
                 />
               </div>
-              <Button
+              <IconButton
                 type="button"
                 variant="ghost"
                 size="icon"
                 className="shrink-0 text-muted-foreground hover:text-destructive"
-                aria-label={`${removeLabel} ${index + 1}`}
+                label={`${removeLabel} ${index + 1}`}
                 onClick={() =>
                   onChange(rows.filter((_, itemIndex) => itemIndex !== index))
                 }
               >
                 <Trash2 aria-hidden="true" />
-              </Button>
+              </IconButton>
             </div>
           ))}
         </div>

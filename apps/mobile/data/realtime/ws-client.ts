@@ -136,12 +136,12 @@ export class WSClient {
     this.teardownSocket();
   }
 
-  /** Paused → active. Used by the provider when AppState=active. */
+  /** Return to the foreground with one fresh socket. An active socket may
+   *  also need replacing after iOS silently drops the connection. */
   resume() {
-    if (this.state !== "paused") return;
+    if (this.state === "idle") return;
     this.state = "active";
-    this.reconnectAttempt = 0;
-    this.openSocket();
+    this.forceReconnect();
   }
 
   /** Force a fresh socket without going through paused. Used when NetInfo
@@ -232,7 +232,16 @@ export class WSClient {
         return;
       }
 
-      const type = (msg as { type?: string }).type;
+      // Validate the envelope before transport frames or business dispatch.
+      // JSON primitives (including null) and non-string types are not events.
+      const type = (msg as { type?: unknown } | null)?.type;
+      if (typeof type !== "string" || !type) {
+        // Server-side error frames have shape {error: "..."}; log and drop.
+        // Reconnect loop is bounded by auth-store's 401 handler eventually
+        // tearing this client down via disconnect().
+        this.logger.warn("[ws] frame without a string type", event.data);
+        return;
+      }
       if (type === "auth_ack") {
         this.onAuthenticated();
         return;
@@ -241,14 +250,6 @@ export class WSClient {
         this.onPong();
         return;
       }
-      if (!type) {
-        // Server-side error frames have shape {error: "..."}; log and drop.
-        // Reconnect loop is bounded by auth-store's 401 handler eventually
-        // tearing this client down via disconnect().
-        this.logger.warn("[ws] frame without type", event.data);
-        return;
-      }
-
       this.logger.debug("[ws] event", type);
       const set = this.handlers.get(msg.type);
       if (set) {

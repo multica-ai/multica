@@ -6,8 +6,12 @@ import { join } from "node:path";
 
 import {
   parseWindowState,
+  parseWindowSession,
   loadWindowState,
+  loadWindowSession,
   saveWindowStateToFile,
+  saveWindowSessionToFile,
+  serializeWindowSession,
   isVisibleOnSomeDisplay,
   resolveWindowOptions,
   snapshotWindowState,
@@ -85,6 +89,57 @@ describe("load/save window state file", () => {
     const file = join(tempDir(), "bad.json");
     writeFileSync(file, "{ broken", "utf8");
     expect(loadWindowState(file)).toEqual({});
+  });
+});
+
+describe("window session", () => {
+  it("reads a pre-multi-window file as one window without a workspace", () => {
+    expect(parseWindowSession('{"x":10,"y":20,"width":1000,"height":700}')).toEqual([
+      { x: 10, y: 20, width: 1000, height: 700 },
+    ]);
+  });
+
+  it("round-trips every main window and its workspace through disk", () => {
+    const file = join(tempDir(), WINDOW_STATE_FILENAME);
+    const windows = [
+      { x: 0, y: 0, width: 1280, height: 800, workspaceSlug: "work" },
+      { x: 40, y: 40, width: 1100, height: 760, isMaximized: true, workspaceSlug: "personal" },
+    ];
+    saveWindowSessionToFile(file, windows);
+
+    expect(loadWindowSession(file)).toEqual(windows);
+    // The first window stays at the top level, where older builds read it.
+    expect(loadWindowState(file)).toEqual(windows[0]);
+  });
+
+  it("omits additionalWindows when a single window is open", () => {
+    expect(JSON.parse(serializeWindowSession([{ width: 1000, workspaceSlug: "work" }]))).toEqual({
+      width: 1000,
+      workspaceSlug: "work",
+    });
+  });
+
+  it("drops extra windows without a valid, distinct workspace", () => {
+    const raw = JSON.stringify({
+      workspaceSlug: "work",
+      additionalWindows: [
+        { width: 900 },
+        { width: 900, workspaceSlug: "Not A Slug" },
+        { width: 900, workspaceSlug: "work" },
+        "garbage",
+        { width: 1000, workspaceSlug: "personal" },
+      ],
+    });
+
+    expect(parseWindowSession(raw)).toEqual([
+      { workspaceSlug: "work" },
+      { width: 1000, workspaceSlug: "personal" },
+    ]);
+  });
+
+  it("falls back to one default window on a missing or corrupt file", () => {
+    expect(loadWindowSession(join(tempDir(), "missing.json"))).toEqual([{}]);
+    expect(parseWindowSession("{ broken")).toEqual([{}]);
   });
 });
 

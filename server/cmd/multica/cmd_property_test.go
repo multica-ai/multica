@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"testing"
 
@@ -57,6 +59,34 @@ func TestBuildIssuePropertyRowsMultiValueDisplays(t *testing.T) {
 	}
 }
 
+// Free-form lists are stored and shown as the caller wrote them. Member-name
+// lookup belongs to actor properties only: a multi_text or multi_url entry
+// that happens to equal a member reference must not be replaced by that
+// member's name.
+func TestIssuePropertyDisplayValuesFreeFormListsIgnoreActorNames(t *testing.T) {
+	ref := "member:abababab-2222-4222-8222-222222222222"
+	actorNames := map[string]string{ref: "Ada"}
+
+	aliases := propertyDTO{ID: "p-aliases", Name: "Aliases", Type: "multi_text"}
+	gotText := issuePropertyDisplayValues(aliases, []any{ref, "plain"}, actorNames)
+	wantText := []string{ref, "plain"}
+	if !reflect.DeepEqual(gotText, wantText) {
+		t.Fatalf("multi_text display_values = %v, want %v", gotText, wantText)
+	}
+
+	links := propertyDTO{ID: "p-links", Name: "Links", Type: "multi_url"}
+	gotURL := issuePropertyDisplayValues(links, []any{ref}, actorNames)
+	if !reflect.DeepEqual(gotURL, []string{ref}) {
+		t.Fatalf("multi_url display_values = %v, want [%s]", gotURL, ref)
+	}
+
+	owners := propertyDTO{ID: testReviewerDefID, Name: "Owners", Type: "multi_actor"}
+	gotActors := issuePropertyDisplayValues(owners, []any{ref}, actorNames)
+	if !reflect.DeepEqual(gotActors, []string{"Ada"}) {
+		t.Fatalf("multi_actor display_values = %v, want [Ada]", gotActors)
+	}
+}
+
 func TestFormatIssuePropertyValueMultiValueNotArray(t *testing.T) {
 	platforms := propertyDTO{ID: testPlatformsDefID, Name: "Platforms", Type: "multi_select"}
 	// A value that is not an array falls through to the raw rendering and
@@ -93,5 +123,44 @@ func TestRunIssuePropertySetSharesMembersRequest(t *testing.T) {
 	want := []issuePropertyValueRow{{PropertyID: testReviewerDefID, Name: "Reviewer", Type: "actor", Value: "member:" + testMemberAdaID, Display: "Ada"}}
 	if !reflect.DeepEqual(rows, want) {
 		t.Errorf("rows = %#v, want %#v", rows, want)
+	}
+}
+
+// `property get` prints usage_count, so it must not use the catalog fetch
+// that opts out of counting (the server returns 0 under include_usage=false).
+func TestRunPropertyGetKeepsUsageCount(t *testing.T) {
+	const propID = "11111111-1111-1111-1111-111111111111"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/properties" {
+			http.NotFound(w, r)
+			return
+		}
+		usage := int64(2)
+		if r.URL.Query().Get("include_usage") == "false" {
+			usage = 0
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"properties": []propertyDTO{
+			{ID: propID, Name: "Impact", Type: "text", UsageCount: usage},
+		}})
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	for _, ref := range []string{"Impact", propID} {
+		cmd := &cobra.Command{Use: "get"}
+		cmd.Flags().String("output", "json", "")
+		out, err := captureStdout(t, func() error { return runPropertyGet(cmd, []string{ref}) })
+		if err != nil {
+			t.Fatalf("runPropertyGet(%q): %v", ref, err)
+		}
+		var got propertyDTO
+		if err := json.Unmarshal([]byte(out), &got); err != nil {
+			t.Fatalf("unmarshal output: %v\n%s", err, out)
+		}
+		if got.UsageCount != 2 {
+			t.Errorf("runPropertyGet(%q) usage_count = %d, want 2", ref, got.UsageCount)
+		}
 	}
 }

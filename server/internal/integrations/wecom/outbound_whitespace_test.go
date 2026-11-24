@@ -47,7 +47,7 @@ func TestOutbound_WhitespaceOnlyCompletionIsNotSentAndTheFilesCarryTheReply(t *t
 	reg.set(instID, conn.newSender())
 	q.sessionBinding.InstallationID = instID
 	q.installation.ID = instID
-	o := NewOutbound(q, reg, testLogger(),
+	o := NewOutbound(q, reg, nil, testLogger(),
 		WithOutboundMetrics(mx), WithAttachments(&fakeObjectStore{key: "obj/bin", data: []byte("DATA")}))
 	o.spawn = func(f func()) { f() }
 
@@ -74,7 +74,7 @@ func TestRelayedReply_WhitespaceOnlyContentIsNotSentAndTheFilesCarryTheReply(t *
 	conn := newMediaConn()
 	reg.set(instID, conn.newSender())
 	mx := newCountingMetrics()
-	o := NewOutbound(q, reg, testLogger(),
+	o := NewOutbound(q, reg, nil, testLogger(),
 		WithOutboundMetrics(mx), WithAttachments(&fakeObjectStore{key: "obj/bin", data: []byte("DATA")}))
 	o.spawn = func(f func()) { f() }
 

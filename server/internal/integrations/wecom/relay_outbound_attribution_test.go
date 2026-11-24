@@ -249,7 +249,7 @@ func TestRelayOutcomeGrace_OutlastsAChainThatSpendsADeliveryBudgetPerOffer(t *te
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(func() { cancel(); router.Wait() })
 	router.Start(ctx)
-	router.Attach(NewOutbound(nil, reg, testLogger()))
+	router.Attach(NewOutbound(nil, reg, nil, testLogger()))
 	relay.register(router)
 
 	offers := len(router.retryPlan) + 1

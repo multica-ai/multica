@@ -12,12 +12,16 @@ vi.mock("node:fs", () => ({
 const pages = new Map<string, { url: string }>([
   ["en:", { url: "/" }],
   ["zh:", { url: "/zh" }],
+  ["zh-Hant:", { url: "/zh-Hant" }],
   ["ko:", { url: "/ko" }],
   ["ja:", { url: "/ja" }],
+  ["fr:", { url: "/fr" }],
   ["en:agents", { url: "/agents" }],
   ["zh:agents", { url: "/zh/agents" }],
+  ["zh-Hant:agents", { url: "/zh-Hant/agents" }],
   ["ko:agents", { url: "/ko/agents" }],
   ["ja:agents", { url: "/ja/agents" }],
+  ["fr:agents", { url: "/fr/agents" }],
 ]);
 
 vi.mock("@/lib/source", () => ({
@@ -81,6 +85,36 @@ describe("docsAlternates", () => {
         en: "https://www.multica.ai/docs/agents",
         zh: "https://www.multica.ai/docs/zh/agents",
         ja: "https://www.multica.ai/docs/ja/agents",
+        "x-default": "https://www.multica.ai/docs/agents",
+      },
+    });
+  });
+
+  it("includes Traditional Chinese hreflang when a real *.zh-Hant.mdx page exists", async () => {
+    existingDocs.add("agents.zh-Hant.mdx");
+    const { docsAlternates } = await import("./site");
+
+    expect(docsAlternates(["agents"])).toEqual({
+      canonical: "https://www.multica.ai/docs/agents",
+      languages: {
+        en: "https://www.multica.ai/docs/agents",
+        zh: "https://www.multica.ai/docs/zh/agents",
+        "zh-Hant": "https://www.multica.ai/docs/zh-Hant/agents",
+        "x-default": "https://www.multica.ai/docs/agents",
+      },
+    });
+  });
+
+  it("includes French hreflang when a real *.fr.mdx page exists", async () => {
+    existingDocs.add("agents.fr.mdx");
+    const { docsAlternates } = await import("./site");
+
+    expect(docsAlternates(["agents"])).toEqual({
+      canonical: "https://www.multica.ai/docs/agents",
+      languages: {
+        en: "https://www.multica.ai/docs/agents",
+        zh: "https://www.multica.ai/docs/zh/agents",
+        fr: "https://www.multica.ai/docs/fr/agents",
         "x-default": "https://www.multica.ai/docs/agents",
       },
     });

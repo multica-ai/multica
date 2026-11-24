@@ -1697,3 +1697,185 @@ func TestProjectResourceLegacyRenameSkipsWorktreeGate(t *testing.T) {
 		t.Fatalf("switching to in_place needs no capability: %d %s", w.Code, w.Body.String())
 	}
 }
+
+// TestValidateGitRef pins the shape-only contract for a github_repo checkout
+// ref: every branch, tag and SHA we tell users they can type must pass, and
+// only input git itself could never resolve is rejected. Existence on the
+// remote is deliberately NOT checked here — the server cannot see the
+// repository, and a private repo or an offline daemon must not block saving
+// project configuration.
+//
+// Mirrors packages/core/github/repo-ref.test.ts.
+func TestValidateGitRef(t *testing.T) {
+	good := []string{
+		"", // empty means "use the repository's default branch"
+		"main",
+		"release/2026-09",
+		"team/alice/feat/new-thing",
+		"v1.2.3",
+		"a1b2c3d",
+		"5e0b1cfa0a7d6a1a0f4b3f2e1d0c9b8a7f6e5d4c",
+		"release.2026.09",
+		"fix/MUL-7504-pin-ref",
+		strings.Repeat("a", gitRefMaxLength),
+	}
+	bad := []string{
+		"my branch",   // space
+		"main~1",      // revision syntax
+		"main^",       // revision syntax
+		"origin:main", // revision syntax
+		"main?",
+		"refs/heads/*",
+		"feat\\thing",
+		"ma\nin",    // interior control character
+		"main..dev", // reads as a range
+		"main@{1}",  // reflog syntax
+		"@",         // shorthand for HEAD
+		"/main",
+		"main/",
+		"feat//thing",
+		".hidden",
+		"main.",
+		"main.lock",
+		"feat.lock/thing",
+		"feat/.hidden",
+		strings.Repeat("a", gitRefMaxLength+1),
+	}
+	for _, s := range good {
+		if err := validateGitRef(s); err != nil {
+			t.Errorf("validateGitRef(%q) = %v, want nil", s, err)
+		}
+	}
+	for _, s := range bad {
+		if err := validateGitRef(s); err == nil {
+			t.Errorf("validateGitRef(%q) = nil, want an error", s)
+		}
+	}
+}
+
+// A bad ref must be refused at save time with a 400, not stored and left to
+// blow up mid-task: the daemon surfaces an unresolvable ref as a 500 whose
+// message points at its local repo cache, minutes after the person who typed
+// it has moved on.
+func TestProjectResourceRejectsInvalidCheckoutRef(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Invalid ref project",
+	})
+	testHandler.CreateProject(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateProject: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var project ProjectResponse
+	if err := json.NewDecoder(w.Body).Decode(&project); err != nil {
+		t.Fatalf("decode CreateProject: %v", err)
+	}
+	defer func() {
+		req := newRequest("DELETE", "/api/projects/"+project.ID, nil)
+		req = withURLParam(req, "id", project.ID)
+		testHandler.DeleteProject(httptest.NewRecorder(), req)
+	}()
+
+	create := func(ref string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/projects/"+project.ID+"/resources", map[string]any{
+			"resource_type": "github_repo",
+			"resource_ref": map[string]any{
+				"url": "https://github.com/multica-ai/multica",
+				"ref": ref,
+			},
+		})
+		req = withURLParam(req, "id", project.ID)
+		testHandler.CreateProjectResource(w, req)
+		return w
+	}
+
+	if w := create("main..dev"); w.Code != http.StatusBadRequest {
+		t.Fatalf("create with invalid ref: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// The valid-ref path still works, and the ref round-trips.
+	w = create("release/2026-09")
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create with valid ref: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created ProjectResourceResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode CreateProjectResource: %v", err)
+	}
+	var stored githubRepoRef
+	if err := json.Unmarshal(created.ResourceRef, &stored); err != nil {
+		t.Fatalf("decode stored ref: %v", err)
+	}
+	if stored.Ref != "release/2026-09" {
+		t.Fatalf("stored ref = %q, want %q", stored.Ref, "release/2026-09")
+	}
+
+	// Update is gated by the same rule, and a rejected update leaves the
+	// stored ref alone rather than half-applying.
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/projects/"+project.ID+"/resources/"+created.ID, map[string]any{
+		"resource_ref": map[string]any{
+			"url": "https://github.com/multica-ai/multica",
+			"ref": "not a ref",
+		},
+	})
+	req = withURLParams(req, "id", project.ID, "resourceId", created.ID)
+	testHandler.UpdateProjectResource(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("update with invalid ref: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/projects/"+project.ID+"/resources", nil)
+	req = withURLParam(req, "id", project.ID)
+	testHandler.ListProjectResources(w, req)
+	var list struct {
+		Resources []ProjectResourceResponse `json:"resources"`
+		Total     int                       `json:"total"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&list); err != nil {
+		t.Fatalf("decode ListProjectResources: %v", err)
+	}
+	if len(list.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(list.Resources))
+	}
+	var afterReject githubRepoRef
+	if err := json.Unmarshal(list.Resources[0].ResourceRef, &afterReject); err != nil {
+		t.Fatalf("decode stored ref after rejected update: %v", err)
+	}
+	if afterReject.Ref != "release/2026-09" {
+		t.Fatalf("ref after rejected update = %q, want it unchanged at %q", afterReject.Ref, "release/2026-09")
+	}
+
+	// Clearing the ref is how a user goes back to the default branch.
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/projects/"+project.ID+"/resources/"+created.ID, map[string]any{
+		"resource_ref": map[string]any{
+			"url": "https://github.com/multica-ai/multica",
+			"ref": "",
+		},
+	})
+	req = withURLParams(req, "id", project.ID, "resourceId", created.ID)
+	testHandler.UpdateProjectResource(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("clear ref: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var cleared ProjectResourceResponse
+	if err := json.NewDecoder(w.Body).Decode(&cleared); err != nil {
+		t.Fatalf("decode cleared: %v", err)
+	}
+	// Fresh struct on purpose: json.Unmarshal leaves a field untouched when
+	// its key is absent, and "ref" is omitempty — reusing `stored` here would
+	// read back the previous value and pass no matter what the server wrote.
+	var clearedRef githubRepoRef
+	if err := json.Unmarshal(cleared.ResourceRef, &clearedRef); err != nil {
+		t.Fatalf("decode cleared ref: %v", err)
+	}
+	if clearedRef.Ref != "" {
+		t.Fatalf("ref after clear = %q, want empty", clearedRef.Ref)
+	}
+	if clearedRef.URL != "https://github.com/multica-ai/multica" {
+		t.Fatalf("url after clearing the ref = %q, want it preserved", clearedRef.URL)
+	}
+}

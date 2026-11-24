@@ -1,6 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,13 +15,183 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 )
 
+func TestSelfHostSetupHealthResponses(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		body     string
+		status   int
+		redirect bool
+		healthy  bool
+	}{
+		{name: "HTML login page", body: "<html>Sign in</html>"},
+		{name: "redirect to HTML login page", body: "<html>Sign in</html>", redirect: true},
+		{name: "unrelated JSON", body: `{"status":"healthy"}`},
+		{name: "unhealthy status", body: `{"status":"error"}`},
+		{name: "missing status", body: `{"pid":123}`},
+		{name: "non-string status", body: `{"status":true}`},
+		{name: "null response", body: `null`},
+		{name: "empty response"},
+		{name: "malformed JSON", body: `{"status":"ok"`},
+		{name: "trailing content", body: `{"status":"ok"}<html>Sign in</html>`},
+		{name: "oversized response", body: `{"status":"ok","extra":"` + strings.Repeat("x", 4096) + `"}`},
+		{name: "non-200 response", body: `{"status":"ok"}`, status: http.StatusServiceUnavailable},
+		{name: "legacy healthy response", body: `{"status":"ok"}`, healthy: true},
+		{name: "healthy response with extra fields", body: `{"status":"ok","pid":123,"commit":"abc123","started_at":"2026-11-10T00:00:00Z","future":{"key":true}}`, healthy: true},
+		{name: "healthy response after redirect", body: `{"status":"ok"}`, redirect: true, healthy: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			redirectTestHome(t, t.TempDir())
+			const profile = "self-host-health-test"
+			existing := cli.CLIConfig{
+				ServerURL:   "https://api.old.example",
+				AppURL:      "https://old.example",
+				WorkspaceID: "ws-1",
+				Token:       "mul_existing_token",
+				DeviceName:  "existing-device",
+				RuntimeName: "existing-runtime",
+			}
+			if err := cli.SaveCLIConfigForProfile(existing, profile); err != nil {
+				t.Fatal(err)
+			}
+			path, err := cli.CLIConfigPathForProfile(profile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.redirect && r.URL.Path == "/health" {
+					http.Redirect(w, r, "/redirected", http.StatusFound)
+					return
+				}
+				// A proxy may rewrite Content-Type, so only the payload matters.
+				w.Header().Set("Content-Type", "text/plain")
+				if tc.status != 0 {
+					w.WriteHeader(tc.status)
+				}
+				fmt.Fprint(w, tc.body)
+			}))
+			defer server.Close()
+
+			result, err := persistSelfHostConfigIfReachable(server.URL, "https://new.example", profile, existing, probeServer)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.healthy != tc.healthy {
+				t.Errorf("healthy = %v, want %v", result.healthy, tc.healthy)
+			}
+			if !tc.healthy {
+				after, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(before, after) {
+					t.Error("failed health probe changed the existing profile")
+				}
+				return
+			}
+			got, err := cli.LoadCLIConfigForProfile(profile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.ServerURL != server.URL || got.AppURL != "https://new.example" {
+				t.Error("healthy backend URLs were not saved")
+			}
+		})
+	}
+}
+
+func TestSetupSelfHostProbeFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		existing        bool
+		unreachable     bool
+		status          int
+		wantMessage     string
+		wantGatewayHint bool
+	}{
+		{name: "invalid health preserves profile", existing: true, wantMessage: "did not return a healthy Multica backend response", wantGatewayHint: true},
+		{name: "invalid health creates no profile", wantMessage: "did not return a healthy Multica backend response", wantGatewayHint: true},
+		{name: "connection failure preserves profile", existing: true, unreachable: true, wantMessage: "is not reachable"},
+		{name: "unauthorized response", existing: true, status: http.StatusUnauthorized, wantMessage: "returned HTTP 401 (Unauthorized) from /health"},
+		{name: "bad gateway response", existing: true, status: http.StatusBadGateway, wantMessage: "returned HTTP 502 (Bad Gateway) from /health"},
+		{name: "unavailable response", existing: true, status: http.StatusServiceUnavailable, wantMessage: "returned HTTP 503 (Service Unavailable) from /health"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			redirectTestHome(t, t.TempDir())
+			if tc.existing {
+				if err := cli.SaveCLIConfig(cli.CLIConfig{
+					ServerURL: "https://api.old.example", Token: "mul_existing_token", DeviceName: "existing-device",
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			path, err := cli.CLIConfigPathForProfile("")
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(path)
+			if err != nil && !os.IsNotExist(err) {
+				t.Fatal(err)
+			}
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.status != 0 {
+					w.WriteHeader(tc.status)
+				}
+				fmt.Fprint(w, "<html>Sign in</html>")
+			}))
+			defer server.Close()
+			if tc.unreachable {
+				server.Close()
+			}
+			cmd := testCmd()
+			cmd.Flags().String("server-url", "", "")
+			cmd.Flags().String("app-url", "", "")
+			cmd.Flags().Int("frontend-port", 3000, "")
+			if err := cmd.Flags().Set("server-url", server.URL); err != nil {
+				t.Fatal(err)
+			}
+			if err := cmd.Flags().Set("app-url", "https://new.example"); err != nil {
+				t.Fatal(err)
+			}
+
+			stderr := captureStderr(t)
+			defer stderr.restore()
+			pipeStdin(t, "y\n", func() {
+				if err := runSetupSelfHost(cmd, nil); err != nil {
+					t.Fatalf("setup: %v", err)
+				}
+			})
+			output := stderr.read()
+			if !strings.Contains(output, tc.wantMessage) || !strings.Contains(output, "configuration was left unchanged") {
+				t.Errorf("missing probe failure message: %s", output)
+			}
+			if strings.Contains(output, "login gateway") != tc.wantGatewayHint {
+				t.Errorf("gateway hint should appear only for invalid HTTP 200 health responses: %s", output)
+			}
+			after, err := os.ReadFile(path)
+			if !tc.existing {
+				if !os.IsNotExist(err) {
+					t.Errorf("failed setup created a profile: read error = %v", err)
+				}
+			} else if err != nil || !bytes.Equal(before, after) {
+				t.Errorf("failed setup changed the existing profile: read error = %v", err)
+			}
+		})
+	}
+}
+
 // TestPersistSelfHostConfigIfReachable verifies the fix for the
 // setup-wipes-token bug: a failed reachability probe must leave the existing
 // config (and its auth token) untouched, instead of overwriting it before the
 // probe and bailing — which left the user logged out with no recovery.
 func TestPersistSelfHostConfigIfReachable(t *testing.T) {
 	t.Run("unreachable server preserves existing config and token", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		redirectTestHome(t, t.TempDir())
 		existing := cli.CLIConfig{
 			ServerURL:   "https://api.old.example",
 			AppURL:      "https://old.example",
@@ -29,14 +203,14 @@ func TestPersistSelfHostConfigIfReachable(t *testing.T) {
 		}
 
 		proceed, err := persistSelfHostConfigIfReachable(
-			"https://api.new.example", "https://new.example", "",
-			func(string) bool { return false },
+			"https://api.new.example", "https://new.example", "", existing,
+			func(string) serverProbeResult { return serverProbeResult{} },
 		)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if proceed {
-			t.Fatalf("proceed: want false for unreachable server")
+		if proceed.statusCode != 0 || proceed.healthy {
+			t.Fatalf("probe result = %v, want unreachable", proceed)
 		}
 
 		got, err := cli.LoadCLIConfig()
@@ -52,17 +226,17 @@ func TestPersistSelfHostConfigIfReachable(t *testing.T) {
 	})
 
 	t.Run("reachable server writes new self-host config", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		redirectTestHome(t, t.TempDir())
 
 		proceed, err := persistSelfHostConfigIfReachable(
-			"https://api.new.example", "https://new.example", "",
-			func(string) bool { return true },
+			"https://api.new.example", "https://new.example", "", cli.CLIConfig{},
+			func(string) serverProbeResult { return serverProbeResult{statusCode: http.StatusOK, healthy: true} },
 		)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !proceed {
-			t.Fatalf("proceed: want true for reachable server")
+		if !proceed.healthy {
+			t.Fatalf("probe result = %v, want healthy", proceed)
 		}
 
 		got, err := cli.LoadCLIConfig()
@@ -403,7 +577,7 @@ func TestServerHostIsLocal(t *testing.T) {
 
 func TestSetupCommandsFailClosedInTaskContext(t *testing.T) {
 	ownerHome := t.TempDir()
-	t.Setenv("HOME", ownerHome)
+	redirectTestHome(t, ownerHome)
 	t.Setenv("MULTICA_AGENT_ID", "agent-test")
 	t.Setenv("MULTICA_TASK_ID", "task-test")
 	t.Setenv("MULTICA_TASK_CONFIG_ROOT", filepath.Join(t.TempDir(), "task-multica"))
@@ -432,5 +606,162 @@ func TestSetupCommandsFailClosedInTaskContext(t *testing.T) {
 	}
 	if string(after) != string(ownerBytes) {
 		t.Fatalf("owner config content changed: got %q", after)
+	}
+}
+
+func TestSetupKeepsProfileOnlyForTheSameBackend(t *testing.T) {
+	for _, tc := range []struct {
+		target string
+		keep   bool
+	}{
+		{"https://example.invalid/team/", true},
+		{"https://example.invalid/another", false},
+		{"https://example.invalid:8443/team", false},
+		{"http://example.invalid/team", false},
+		{"https://other.invalid/team", false},
+		{"https://EXAMPLE.invalid/team", false},
+		{"https://user@example.invalid/team", false},
+		{"https://example.invalid:443/team", false},
+	} {
+		t.Run(tc.target, func(t *testing.T) {
+			redirectTestHome(t, t.TempDir())
+			old := cli.CLIConfig{ServerURL: "https://example.invalid/team", Token: "test-only", WorkspaceID: "w", DeviceName: "workstation", PollInterval: "1m"}
+			if err := cli.SaveCLIConfigForProfile(old, "dev"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := persistSelfHostConfigIfReachable(tc.target, "https://app.invalid", "dev", old, func(string) serverProbeResult { return serverProbeResult{statusCode: http.StatusOK, healthy: true} }); err != nil {
+				t.Fatal(err)
+			}
+			got, err := cli.LoadCLIConfigForProfile("dev")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.keep && (got.DeviceName != old.DeviceName || got.PollInterval != old.PollInterval) {
+				t.Fatal("same backend lost profile settings")
+			}
+			if got.Token != "" || got.WorkspaceID != "" {
+				t.Fatal("setup retained login credentials")
+			}
+			if !tc.keep && got.DeviceName != "" {
+				t.Fatal("different backend inherited profile")
+			}
+		})
+	}
+}
+
+func TestSetupRejectsProfileChangedDuringConfirmationOrProbe(t *testing.T) {
+	redirectTestHome(t, t.TempDir())
+	const profile = "setup-change"
+	old := cli.CLIConfig{ServerURL: "https://a.invalid", AppURL: "https://a.invalid", Token: "old-fixture"}
+	newLogin := cli.CLIConfig{ServerURL: "https://b.invalid", AppURL: "https://b.invalid", Token: "new-fixture", DeviceName: "new-device"}
+	for _, stage := range []string{"while confirming", "during health check"} {
+		t.Run(stage, func(t *testing.T) {
+			if err := cli.SaveCLIConfigForProfile(old, profile); err != nil {
+				t.Fatal(err)
+			}
+			if stage == "while confirming" {
+				if err := cli.SaveCLIConfigForProfile(newLogin, profile); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ok, err := persistSelfHostConfigIfReachable(old.ServerURL, old.AppURL, profile, old, func(string) serverProbeResult {
+				if stage == "during health check" {
+					if err := cli.SaveCLIConfigForProfile(newLogin, profile); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return serverProbeResult{statusCode: http.StatusOK, healthy: true}
+			})
+			if err == nil || !strings.Contains(err.Error(), "profile changed") {
+				t.Fatalf("setup accepted stale confirmation: %v, %v", ok, err)
+			}
+			got, err := cli.LoadCLIConfigForProfile(profile)
+			if err != nil || got.ServerURL != newLogin.ServerURL || got.Token != newLogin.Token || got.DeviceName != newLogin.DeviceName {
+				t.Fatal("setup replaced a concurrently changed login")
+			}
+		})
+	}
+}
+
+func TestSetupDoesNotRewriteAnUnchangedTarget(t *testing.T) {
+	redirectTestHome(t, t.TempDir())
+	cfg := cli.CLIConfig{ServerURL: "https://example.test", AppURL: "https://app.example.test"}
+	if err := cli.SaveCLIConfigForProfile(cfg, "dev"); err != nil {
+		t.Fatal(err)
+	}
+	path, err := cli.CLIConfigPathForProfile("dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err := persistSelfHostConfigIfReachable(cfg.ServerURL+"/", cfg.AppURL+"/", "dev", cfg, func(string) serverProbeResult { return serverProbeResult{statusCode: http.StatusOK, healthy: true} })
+	if err != nil || !ok.healthy {
+		t.Fatalf("setup = %v, %v", ok, err)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(before, after) {
+		t.Fatal("unchanged profile was rewritten")
+	}
+}
+
+func TestSetupUnreadableProfileIsNotOverwritten(t *testing.T) {
+	for _, setup := range []struct {
+		name string
+		run  func(*cobra.Command, []string) error
+	}{
+		{"cloud", runSetupCloud},
+		{"self-host", runSetupSelfHost},
+	} {
+		for _, invalid := range []string{"invalid JSON", "permission denied"} {
+			t.Run(setup.name+"/"+invalid, func(t *testing.T) {
+				redirectTestHome(t, t.TempDir())
+				const profile = "unreadable-setup"
+				path, err := cli.CLIConfigPathForProfile(profile)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				before := []byte(`{"device_name":"preserve me",`)
+				if invalid == "permission denied" {
+					before = []byte(`{"device_name":"preserve me"}`)
+				}
+				if err := os.WriteFile(path, before, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if invalid == "permission denied" {
+					if err := os.Chmod(path, 0); err != nil {
+						t.Skipf("cannot make profile unreadable: %v", err)
+					}
+					defer os.Chmod(path, 0o600)
+					if _, err := os.ReadFile(path); err == nil {
+						t.Skip("platform allows reading a mode-000 profile")
+					}
+				}
+				cmd := testCmd()
+				cmd.Flags().String("profile", profile, "")
+				err = setup.run(cmd, nil)
+				if err == nil || !strings.Contains(err.Error(), "read existing profile") {
+					t.Fatalf("setup error = %v, want read existing profile", err)
+				}
+				if err := os.Chmod(path, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				after, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(before, after) {
+					t.Fatal("setup replaced an unreadable profile")
+				}
+			})
+		}
 	}
 }

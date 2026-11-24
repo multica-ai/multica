@@ -24,6 +24,7 @@ import type {
 } from "@multica/core/types";
 import {
   issueTimelineOptions,
+  issueCommentThreadOptions,
   issueKeys,
 } from "@multica/core/issues/queries";
 import {
@@ -34,6 +35,7 @@ import {
   useToggleCommentReaction,
   type ToggleCommentReactionVars,
 } from "@multica/core/issues/mutations";
+import { commentToTimelineEntry, mergeCommentThread } from "@multica/core/issues/comment-thread";
 import { sortTimelineEntriesAsc } from "@multica/core/issues/timeline-sort";
 import {
   unhandledCommentTriggerOutcomes,
@@ -47,27 +49,6 @@ import { blockedShortReasonLabel } from "../blocked-trigger-copy";
 
 type TLCache = TimelineEntry[];
 
-function commentToTimelineEntry(c: Comment): TimelineEntry {
-  return {
-    type: "comment",
-    id: c.id,
-    actor_type: c.author_type,
-    actor_id: c.author_id,
-    content: c.content,
-    parent_id: c.parent_id,
-    created_at: c.created_at,
-    updated_at: c.updated_at,
-    revision: c.revision,
-    comment_type: c.type,
-    reactions: c.reactions ?? [],
-    attachments: c.attachments ?? [],
-    resolved_at: c.resolved_at,
-    resolved_by_type: c.resolved_by_type,
-    resolved_by_id: c.resolved_by_id,
-    source_task_id: c.source_task_id,
-    deleted_at: c.deleted_at,
-  };
-}
 
 function acceptsCommentRevision(
   current: TimelineEntry,
@@ -109,14 +90,25 @@ function applyCommentSnapshot(
   }
 }
 
-export function useIssueTimeline(issueId: string, userId?: string) {
+export function useIssueTimeline(issueId: string, userId?: string, focusCommentId?: string) {
   const { t } = useT("issues");
   const qc = useQueryClient();
 
   const query = useQuery(issueTimelineOptions(issueId));
-  const { data, isLoading: loading } = query;
+  const { data, isLoading: loading, dataUpdatedAt } = query;
 
-  const timeline = useMemo<TimelineEntry[]>(() => data ?? [], [data]);
+  const needsThread = !!focusCommentId && !loading && !data?.some((entry) => entry.id === focusCommentId);
+  const threadQuery = useQuery({
+    ...issueCommentThreadOptions(issueId, focusCommentId ?? ""),
+    enabled: needsThread,
+  });
+  useEffect(() => {
+    if (threadQuery.error && needsThread) toast.error(t(($) => $.detail.load_failed));
+  }, [threadQuery.error, needsThread, t]);
+  const timeline = useMemo<TimelineEntry[]>(
+    () => mergeCommentThread(data ?? [], threadQuery.data ?? []),
+    [data, threadQuery.data],
+  );
 
   // Stable mutation handles. TanStack v5 returns a fresh result wrapper from
   // useMutation per render, but the inner mutateAsync / mutate functions are
@@ -350,10 +342,10 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   // on success — so a slow send no longer leaves the box full next to an
   // already-posted comment, and a failed send keeps the draft.
   const submitComment = useCallback(
-    async (content: string, attachmentIds?: string[], suppressAgentIds?: string[]): Promise<string | false> => {
+    async (content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[]): Promise<string | false> => {
       if (!content.trim() || !userId) return false;
       try {
-        const comment = await createComment({ content, attachmentIds, suppressAgentIds });
+        const comment = await createComment({ content, attachmentIds, suppressAgentIds, steerTaskIds });
         warnUnhandledTriggers(comment?.trigger_outcomes, comment?.content);
         return comment.id;
       } catch (err) {
@@ -369,7 +361,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   );
 
   const submitReply = useCallback(
-    async (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]): Promise<string | false> => {
+    async (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[]): Promise<string | false> => {
       if (!content.trim() || !userId) return false;
       try {
         const comment = await createComment({
@@ -378,6 +370,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           parentId,
           attachmentIds,
           suppressAgentIds,
+          steerTaskIds,
         });
         warnUnhandledTriggers(comment?.trigger_outcomes, comment?.content);
         return comment.id;
@@ -518,7 +511,13 @@ export function useIssueTimeline(issueId: string, userId?: string) {
 
   return {
     timeline: optimisticTimeline,
-    loading,
+    loading: loading || (needsThread && threadQuery.isPending),
+    /**
+     * When the cached timeline was last written (Query's `dataUpdatedAt`).
+     * Lets a caller tell whether `timeline` already reflects a read it
+     * started; `loading` cannot, as it is false while cached data refreshes.
+     */
+    dataUpdatedAt,
     submitComment,
     submitReply,
     editComment,

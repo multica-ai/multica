@@ -29,6 +29,11 @@
  * (packages/views/chat/components/chat-window.tsx ~262-345):
  *   seed messages → seed pendingTask → flip activeSessionId → POST →
  *   patch pendingTask with server task_id + created_at.
+ *
+ * During a reply on a queue-capable server, Send asks to add the message to
+ * that reply (`steer`) and the composer's Queue action keeps it for the next
+ * turn. The server decides whether steering applies; an accepted steer keeps
+ * the running head instead of seeding a new turn.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -37,8 +42,7 @@ import {
   Platform,
   View,
 } from "react-native";
-import { router } from "expo-router";
-import { useFocusEffect, useIsFocused } from "@react-navigation/native";
+import { router, useFocusEffect, useIsFocused } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   Agent,
@@ -50,7 +54,8 @@ import {
   hideQueuedChatMessages,
   removePendingChatTask,
 } from "@multica/core/chat/pending";
-import { canAssignAgentToIssue } from "@multica/core/permissions";
+import { refetchChatSessionsAfterCommit } from "@multica/core/chat/session-list";
+import { canAssignAgentToIssue } from "@multica/core/permissions/rules";
 import { api } from "@/data/api";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
@@ -76,10 +81,13 @@ import { useChatSessionPickerStore } from "@/data/stores/chat-session-picker-sto
 import { useChatSessionRealtime } from "@/data/realtime/use-chat-session-realtime";
 import {
   invalidatePendingTask,
-  seedAcceptedPendingTask,
+  reconcileAcceptedChatSend,
 } from "@/data/realtime/chat-ws-updaters";
 import { useWorkspaceAgentAvailability } from "@/lib/workspace-agent-availability";
+import { queuedChatMessages } from "@/lib/chat-queued-messages";
+import { chatSessionDisplayTitle } from "@/lib/chat-session-title";
 import { sendFailureMessage } from "@/lib/dispatch-reason";
+import { useT } from "@/lib/i18n";
 import { useAgentPresence } from "@/lib/use-agent-presence";
 import { Header } from "@/components/ui/header";
 import { ChatTitleButton } from "@/components/chat/chat-title-button";
@@ -92,10 +100,10 @@ import { OfflineBanner } from "@/components/chat/offline-banner";
 import { RuntimeRequiredBanner } from "@/components/chat/runtime-required-banner";
 import { useChatSelectStore } from "@/data/chat-select-store";
 import { isAgentRuntimeBound } from "@/lib/is-agent-runtime-bound";
-import { chatSessionDisplayTitle } from "@/lib/chat-session-title";
 
 export default function ChatTab() {
   const qc = useQueryClient();
+  const { t } = useT("chat");
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const userId = useAuthStore((s) => s.user?.id);
@@ -127,17 +135,11 @@ export default function ChatTab() {
   // state when no `activeSessionId` is persisted; on a phone, picking
   // a session is 4 taps, so jump straight to the most recent session.
   // Hydration is one-shot per workspace.
-  const hydratedWsRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!wsId) return;
-    if (hydratedWsRef.current === wsId) return;
-    if (sessions.length === 0) {
-      hydratedWsRef.current = wsId;
-      return;
-    }
-    hydratedWsRef.current = wsId;
-    setActiveSessionId(sessions[0].id);
-  }, [wsId, sessions]);
+  const [hydratedWs, setHydratedWs] = useState<string | null>(null);
+  if (wsId && hydratedWs !== wsId) {
+    setHydratedWs(wsId);
+    if (sessions.length > 0) setActiveSessionId(sessions[0].id);
+  }
   const { data: messages = [], isLoading: messagesLoading } = useQuery(
     chatMessagesOptions(activeSessionId),
   );
@@ -145,6 +147,7 @@ export default function ChatTab() {
     pendingChatTaskOptions(activeSessionId),
   );
   const visibleMessages = hideQueuedChatMessages(messages, pendingTask);
+  const queuedMessages = queuedChatMessages(pendingTask, messages);
   // Live execution trace for the in-flight task. `task:message` WS events
   // append rows to this same cache key via `appendTaskMessage`, so the
   // list/pill stay in sync without a polling fetch. `enabled` is gated by
@@ -254,16 +257,17 @@ export default function ChatTab() {
   const sessionPromiseRef = useRef<Promise<string | null> | null>(null);
 
   const ensureSession = useCallback(
-    async (titleSeed: string): Promise<string | null> => {
+    async (): Promise<string | null> => {
       if (activeSessionId) return activeSessionId;
       if (!currentAgent) return null;
       if (sessionPromiseRef.current) return sessionPromiseRef.current;
 
       const promise = (async () => {
         try {
+          // Untitled on purpose: the server derives the title from the first
+          // message it accepts, the same rule for every client and channel.
           const session = await createSession.mutateAsync({
             agent_id: currentAgent.id,
-            title: titleSeed.slice(0, 50),
           });
           return session.id;
         } finally {
@@ -280,7 +284,7 @@ export default function ChatTab() {
     async (
       content: string,
       attachmentIds: string[] = [],
-      options: { clearDraft?: boolean } = {},
+      options: { clearDraft?: boolean; queue?: boolean } = {},
     ) => {
       if (!currentAgent) return;
       // Invoke permission was revoked while this session was open — the server
@@ -288,15 +292,15 @@ export default function ChatTab() {
       // this state; this is the belt-and-braces guard.
       if (accessRevoked) {
         Alert.alert(
-          "No permission to run this agent",
-          "You no longer have permission to run this agent, so the message was not sent. Ask its owner for access.",
+          t("alerts.no_permission_title"),
+          t("alerts.no_permission_message"),
         );
         return;
       }
       if (!runtimeBound) {
         Alert.alert(
-          "Runtime required",
-          "Bind a runtime to this agent on web or desktop before sending a message.",
+          t("alerts.runtime_title"),
+          t("alerts.runtime_message"),
         );
         return;
       }
@@ -304,12 +308,12 @@ export default function ChatTab() {
       const isNewSession = !activeSessionId;
       let sessionId: string | null;
       try {
-        sessionId = await ensureSession(content);
+        sessionId = await ensureSession();
       } catch (err) {
         // Session create runs the same invoke gate as a send, so a permission
         // change refuses here too — and this is the only layer that sees the
         // reason code (MUL-6380).
-        Alert.alert("Message not sent", sendFailureMessage(err));
+        Alert.alert(t("alerts.not_sent"), sendFailureMessage(err, t));
         throw err;
       }
       if (!sessionId) return;
@@ -348,35 +352,26 @@ export default function ChatTab() {
       }
 
       try {
+        // One request per tap, never replayed: a send whose outcome is unknown
+        // fails visibly and keeps the draft, so a retry is the user's choice.
         const result = await api.sendChatMessage(sessionId, content, {
           attachmentIds: attachmentIds.length > 0 ? attachmentIds : undefined,
+          queue: options.queue,
         });
         // Replace the local bubble before reconciling pending state. When the
         // server says this is a follow-up, its real message id lets the shared
         // queue filter hide it immediately instead of waiting for the refetch.
-        qc.setQueryData<ChatMessage[]>(chatKeys.messages(sessionId), (old) =>
-          old?.map((message) =>
-            message.id === optimistic.id
-              ? {
-                  ...message,
-                  id: result.message_id,
-                  task_id: result.task_id,
-                  created_at: result.created_at,
-                }
-              : message,
-          ),
-        );
-        seedAcceptedPendingTask(qc, {
+        reconcileAcceptedChatSend(qc, {
           chat_session_id: sessionId,
-          task_id: result.task_id,
-          created_at: result.created_at,
-          message_id: result.message_id,
-          content,
+          optimistic_message_id: optimistic.id,
           optimistic_task_id: optimisticTaskId,
-          supports_queue: result.supports_queue,
-          queued: result.queued,
+          content,
+          result,
         });
-        qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
+        // This send just committed the new session's server-derived title.
+        if (isNewSession) {
+          void refetchChatSessionsAfterCommit(qc, chatKeys.sessions(wsId));
+        }
         if (options.clearDraft !== false) {
           clearDraft(sessionId);
         }
@@ -391,17 +386,19 @@ export default function ChatTab() {
         // The composer restores the draft on a thrown rejection but says nothing
         // about it, so a revoked-permission 403 used to read as a silent no-op
         // (MUL-6380). Name the cause here: only this layer sees the error body.
-        Alert.alert("Message not sent", sendFailureMessage(err));
+        Alert.alert(t("alerts.not_sent"), sendFailureMessage(err, t));
         throw err;
       }
     },
     [
+      wsId,
       activeSessionId,
       currentAgent,
       accessRevoked,
       runtimeBound,
       ensureSession,
       qc,
+      t,
       promoteNewDraft,
       clearDraft,
     ],
@@ -421,7 +418,7 @@ export default function ChatTab() {
         // Silent — task may have already terminated server-side.
       })
       .finally(() => invalidatePendingTask(qc, sessionId));
-  }, [pendingTask?.task_id, pendingTask?.status, activeSessionId, qc]);
+  }, [pendingTask, activeSessionId, qc]);
 
   // ── Header / sheet actions ─────────────────────────────────────────────
   const handleNewChat = useCallback(() => {
@@ -440,22 +437,25 @@ export default function ChatTab() {
 
   // Apply the user's pick from the chat-sessions route (or "no session"
   // when they delete the active one in the sheet).
-  useEffect(() => {
-    if (!selectRequest) return;
+  const [appliedSelect, setAppliedSelect] = useState<typeof selectRequest>(null);
+  if (selectRequest && selectRequest !== appliedSelect) {
+    setAppliedSelect(selectRequest);
     setSelectedAgentId(null);
     setActiveSessionId(selectRequest.id);
-    consumeSelect();
-  }, [selectRequest, consumeSelect]);
+  }
+  useEffect(() => {
+    if (selectRequest && selectRequest === appliedSelect) consumeSelect();
+  }, [selectRequest, appliedSelect, consumeSelect]);
 
   const handleDeleteActive = useCallback(() => {
     if (!activeSession) return;
     Alert.alert(
-      "Delete this chat?",
-      chatSessionDisplayTitle(activeSession.title),
+      t("alerts.delete_title"),
+      chatSessionDisplayTitle(activeSession.title, t),
       [
-        { text: "Cancel", style: "cancel" },
+        { text: t("common:actions.cancel"), style: "cancel" },
         {
-          text: "Delete",
+          text: t("alerts.delete_confirm"),
           style: "destructive",
           onPress: () => {
             const id = activeSession.id;
@@ -466,7 +466,7 @@ export default function ChatTab() {
       ],
       { cancelable: true },
     );
-  }, [activeSession, deleteSession]);
+  }, [activeSession, deleteSession, t]);
 
   // ── Composer disabled-state ────────────────────────────────────────────
   const disabled =
@@ -476,15 +476,15 @@ export default function ChatTab() {
     isArchived === true ||
     !runtimeBound;
   const disabledReason = !currentAgent
-    ? "No agent selected"
+    ? t("composer.no_agent")
     : accessRevoked
-      ? "You can no longer run this agent"
+      ? t("composer.revoked")
       : availability === "none"
-        ? "No agents in this workspace"
+        ? t("composer.no_agents")
         : isArchived
-          ? "This chat is archived"
+          ? t("composer.archived")
           : !runtimeBound
-            ? "Agent needs a runtime"
+            ? t("composer.runtime_required")
           : undefined;
 
   return (
@@ -528,6 +528,7 @@ export default function ChatTab() {
           quickActionsDisabled={sending || disabled}
           pendingTask={pendingTask}
           liveTaskMessages={liveTaskMessages}
+          queuedMessages={queuedMessages}
           availability={presenceAvailability}
         />
         {runtimeBound ? (
@@ -545,6 +546,7 @@ export default function ChatTab() {
           onStop={handleStop}
           sending={sending}
           allowStop={pendingTask?.status !== "queued"}
+          allowSendWhileSending={pendingTask?.supports_queue === true}
           disabled={disabled}
           disabledReason={disabledReason}
         />

@@ -38,17 +38,26 @@ const SOURCE = {
   skills: [],
 } as unknown as Agent;
 
-function setup(initial: { runtimesSettled: boolean; runtimes: RuntimeDevice[] }) {
+type SeedProps = {
+  runtimesSettled: boolean;
+  runtimes: RuntimeDevice[];
+  canAddInvocationMembers?: boolean | null;
+  source?: Agent;
+};
+
+function setup(initial: SeedProps) {
   const onSeed = vi.fn<(draft: AgentDraft, runtimeReset: boolean) => void>();
   const view = renderHook(
-    (props: { runtimesSettled: boolean; runtimes: RuntimeDevice[] }) =>
+    (props: SeedProps) =>
       useDuplicateDraftSeed({
-        source: SOURCE,
+        source: props.source ?? SOURCE,
         runtimesSettled: props.runtimesSettled,
         runtimes: props.runtimes,
         currentUserId: "user-1",
         fallbackRuntimeId: props.runtimes[0]?.id ?? "",
         nameSuffix: " copy",
+        canAddInvocationMembers:
+          props.canAddInvocationMembers === undefined ? true : props.canAddInvocationMembers,
         onSeed,
       }),
     { initialProps: initial },
@@ -121,5 +130,48 @@ describe("useDuplicateDraftSeed", () => {
 
     expect(onSeed).toHaveBeenCalledTimes(1);
     expect(onSeed.mock.calls[0]![1]).toBe(true);
+  });
+
+  describe("member access on a locked plan", () => {
+    const SHARED = {
+      ...SOURCE,
+      permission_mode: "public_to",
+      invocation_targets: [{ target_type: "member", target_id: "user-2" }],
+    } as unknown as Agent;
+
+    it("waits for the plan, then copies a member list as Only me when it is locked", () => {
+      const { onSeed, view } = setup({
+        runtimesSettled: true,
+        runtimes: [SOURCE_RUNTIME],
+        source: SHARED,
+        canAddInvocationMembers: null,
+      });
+      expect(onSeed).not.toHaveBeenCalled();
+
+      view.rerender({
+        runtimesSettled: true,
+        runtimes: [SOURCE_RUNTIME],
+        source: SHARED,
+        canAddInvocationMembers: false,
+      });
+      expect(onSeed).toHaveBeenCalledTimes(1);
+      expect(onSeed.mock.calls[0]![0]).toMatchObject({
+        permissionScope: "private",
+        memberIds: new Set(),
+      });
+    });
+
+    it("copies the member list when the plan includes it", () => {
+      const { onSeed } = setup({
+        runtimesSettled: true,
+        runtimes: [SOURCE_RUNTIME],
+        source: SHARED,
+        canAddInvocationMembers: true,
+      });
+      expect(onSeed.mock.calls[0]![0]).toMatchObject({
+        permissionScope: "members",
+        memberIds: new Set(["user-2"]),
+      });
+    });
   });
 });

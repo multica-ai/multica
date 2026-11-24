@@ -57,6 +57,7 @@ import {
 } from "@multica/core/hooks/use-file-upload";
 import { MAX_FILE_SIZE } from "@multica/core/constants/upload";
 import { useT } from "../i18n";
+import { storageLimitRefusal, type StorageLimitRefusal } from "../billing/storage-limit-notice";
 import type { UploadGate } from "./use-upload-gate";
 import type { ContentEditorRef } from "./content-editor";
 import { pastedTextSource } from "./extensions/file-upload";
@@ -220,6 +221,13 @@ export interface CoordinatedUploads {
   /** Drop a placeholder (dismiss a failure / interrupted). */
   removeUpload: (clientUploadId: string) => void;
   /**
+   * The last file the attachment storage limit refused (MUL-9489), shown by
+   * the composer as a StorageLimitNotice under its editor. Cleared by the
+   * next upload that succeeds, or by dismissStorageRefusal.
+   */
+  storageRefusal: StorageLimitRefusal | null;
+  dismissStorageRefusal: () => void;
+  /**
    * The submit gate for this composer. Combines the editor gate (this mount's
    * in-document uploads) with the coordinator-owned placeholders in the draft:
    * a composer reopened while a previous mount's upload is still in flight has
@@ -265,6 +273,7 @@ export function useCoordinatedUploads(
 ): CoordinatedUploads {
   const { t } = useT("editor");
   const [localUploads, setLocalUploads] = useState<DraftUpload[]>([]);
+  const [storageRefusal, setStorageRefusal] = useState<StorageLimitRefusal | null>(null);
   // Latest-value ref: handleUpload snapshots the target at invocation time.
   const resolveUploadTargetRef = useRef(opts?.resolveUploadTarget);
   resolveUploadTargetRef.current = opts?.resolveUploadTarget;
@@ -443,6 +452,7 @@ export function useCoordinatedUploads(
                   ),
                 );
               }
+              if (mountedRef.current) setStorageRefusal(null);
               resolve(toUploadResult(outcome.attachment));
             } else {
               const reason = outcome.error.message;
@@ -474,7 +484,15 @@ export function useCoordinatedUploads(
                   deliverPastedTextBack(undefined, editorRef, pastedText);
                 }
               }
-              toast.error(t(($) => $.upload.failed, { filename: file.name, reason }));
+              // A storage-limit refusal gets the notice under the editor
+              // (MUL-9489), which says what to do about it; a composer that
+              // has gone away still gets the plain toast.
+              const refusal = storageLimitRefusal(outcome.error, file.name);
+              if (refusal && mountedRef.current) {
+                setStorageRefusal(refusal);
+              } else {
+                toast.error(t(($) => $.upload.failed, { filename: file.name, reason }));
+              }
               resolve(null);
             }
           },
@@ -518,5 +536,15 @@ export function useCoordinatedUploads(
       hasUploadingDraft(binding ? binding.getUploads() : localUploadsRef.current),
   };
 
-  return { uploads, attachments, handleUpload, removeUpload, gate };
+  const dismissStorageRefusal = useCallback(() => setStorageRefusal(null), []);
+
+  return {
+    uploads,
+    attachments,
+    handleUpload,
+    removeUpload,
+    gate,
+    storageRefusal,
+    dismissStorageRefusal,
+  };
 }

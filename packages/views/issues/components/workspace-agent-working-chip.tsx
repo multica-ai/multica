@@ -1,5 +1,7 @@
 "use client";
 
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -7,10 +9,37 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "@multica/ui/components/ui/hover-card";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { useActorName } from "@multica/core/workspace/hooks";
-import type { WorkingAgentSummary } from "@multica/core/types";
+import type { AgentTask, WorkingAgentSummary } from "@multica/core/types";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
+import {
+  collapseWorkingAgentsWithSnapshot,
+  type WorkingExecutionUnit,
+} from "../surface/execution-actors";
 import { useT } from "../../i18n";
+
+const EMPTY_SNAPSHOT: AgentTask[] = [];
+
+export function useWorkingExecutionUnits(
+  agents: readonly WorkingAgentSummary[] | undefined,
+): WorkingExecutionUnit[] | undefined {
+  const wsId = useWorkspaceId();
+  const { hasActor } = useActorName();
+  const { data: snapshot = EMPTY_SNAPSHOT } = useQuery({
+    ...agentTaskSnapshotOptions(wsId),
+    enabled: Boolean(wsId) && (agents?.length ?? 0) > 0,
+  });
+  const isKnownSquad = useMemo(
+    () => (hasActor ? (id: string) => hasActor("squad", id) !== false : null),
+    [hasActor],
+  );
+  return useMemo(() => {
+    if (agents === undefined) return undefined;
+    return collapseWorkingAgentsWithSnapshot(agents, snapshot, isKnownSquad);
+  }, [agents, snapshot, isKnownSquad]);
+}
 
 interface WorkspaceAgentWorkingChipProps {
   value: boolean;
@@ -18,6 +47,8 @@ interface WorkspaceAgentWorkingChipProps {
   /** Agents working inside the surface this header belongs to, already narrowed
    *  by its scope and every active filter. `undefined` = not resolved yet. */
   agents: readonly WorkingAgentSummary[] | undefined;
+  /** Avatars and the number only, for a header that has run out of room. */
+  compact?: boolean;
 }
 
 /** What the projection says about activity in this surface. `unknown` is a
@@ -70,13 +101,17 @@ export function chipAppearance(
  */
 export function WorkingAgentsHoverContent({
   agents,
+  units: unitsProp,
 }: {
   agents: readonly WorkingAgentSummary[] | undefined;
+  units?: readonly WorkingExecutionUnit[] | undefined;
 }) {
   const { t } = useT("issues");
   const { getActorName, getActorInitials, getActorAvatarUrl } = useActorName();
+  const derivedUnits = useWorkingExecutionUnits(unitsProp === undefined ? agents : undefined);
+  const units = unitsProp ?? derivedUnits;
 
-  if (agents === undefined) {
+  if (units === undefined) {
     return (
       <p className="text-caption text-muted-foreground">
         {t(($) => $.agent_activity.unknown_hover)}
@@ -84,7 +119,7 @@ export function WorkingAgentsHoverContent({
     );
   }
 
-  if (agents.length === 0) {
+  if (units.length === 0) {
     return (
       <p className="text-caption text-muted-foreground">
         {t(($) => $.agent_activity.empty_hover)}
@@ -95,28 +130,40 @@ export function WorkingAgentsHoverContent({
   return (
     <div className="flex flex-col gap-2">
       <div className="text-caption font-medium text-muted-foreground">
-        {t(($) => $.agent_activity.hover_header, { count: agents.length })}
+        {t(($) => $.agent_activity.hover_header, { count: units.length })}
       </div>
       <div className="flex flex-col gap-1.5">
-        {agents.map((agent) => (
-          <div key={agent.id} className="flex items-center gap-2 text-caption">
-            <ActorAvatar
-              name={getActorName("agent", agent.id)}
-              initials={getActorInitials("agent", agent.id)}
-              avatarUrl={getActorAvatarUrl("agent", agent.id) ?? undefined}
-              isAgent
-              size="sm"
-            />
-            <span className="min-w-0 flex-1 truncate font-medium">
-              {getActorName("agent", agent.id)}
-            </span>
-            <span className="shrink-0 tabular-nums text-muted-foreground">
-              {t(($) => $.agent_activity.tasks_count, {
-                count: agent.running_task_count,
-              })}
-            </span>
-          </div>
-        ))}
+        {units.map((unit) => {
+          const memberNames =
+            unit.type === "squad" && unit.memberAgentIds.length > 0
+              ? unit.memberAgentIds
+                  .map((id) => getActorName("agent", id))
+                  .join("、")
+              : null;
+          return (
+            <div key={`${unit.type}:${unit.id}`} className="flex items-center gap-2 text-caption">
+              <ActorAvatar
+                name={getActorName(unit.type, unit.id)}
+                initials={getActorInitials(unit.type, unit.id)}
+                avatarUrl={getActorAvatarUrl(unit.type, unit.id) ?? undefined}
+                isAgent={unit.type === "agent"}
+                isSquad={unit.type === "squad"}
+                size="sm"
+              />
+              <span className="min-w-0 flex-1 truncate">
+                <span className="font-medium">{getActorName(unit.type, unit.id)}</span>
+                {memberNames ? (
+                  <span className="ml-1 text-muted-foreground">({memberNames})</span>
+                ) : null}
+              </span>
+              <span className="shrink-0 tabular-nums text-muted-foreground">
+                {t(($) => $.agent_activity.tasks_count, {
+                  count: unit.runningTaskCount,
+                })}
+              </span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -144,14 +191,18 @@ export function WorkspaceAgentWorkingChip({
   value,
   onToggle,
   agents,
+  compact = false,
 }: WorkspaceAgentWorkingChipProps) {
   const { t } = useT("issues");
+  const units = useWorkingExecutionUnits(agents);
   const activity = chipActivity(agents);
   const agentIds = agents?.map((agent) => agent.id) ?? [];
+  const actors = units?.map(({ type, id }) => ({ type, id })) ?? [];
+  const count = units?.length ?? 0;
   const label =
     activity === "unknown"
       ? t(($) => $.agent_activity.chip_agents_working_unknown)
-      : t(($) => $.agent_activity.chip_agents_working, { count: agentIds.length });
+      : t(($) => $.agent_activity.chip_agents_working, { count });
   const appearance = chipAppearance(value, activity);
 
   const trigger = (
@@ -164,12 +215,14 @@ export function WorkspaceAgentWorkingChip({
       aria-label={label}
     >
       {activity === "some" && (
-        <AgentAvatarStack agentIds={agentIds} size="sm" max={3} />
+        <AgentAvatarStack agentIds={agentIds} actors={actors} size="sm" max={3} />
       )}
-      <span className="tabular-nums md:hidden">
-        {activity === "unknown" ? "—" : agentIds.length}
+      <span className={compact ? "tabular-nums" : "tabular-nums md:hidden @max-3xl/issue-header:inline"}>
+        {activity === "unknown" ? "—" : count}
       </span>
-      <span className="hidden tabular-nums md:inline">{label}</span>
+      {!compact && (
+        <span className="hidden tabular-nums md:inline @max-3xl/issue-header:hidden">{label}</span>
+      )}
     </Button>
   );
 
@@ -177,10 +230,7 @@ export function WorkspaceAgentWorkingChip({
     <HoverCard>
       <HoverCardTrigger render={trigger} />
       <HoverCardContent align="end" className="w-72">
-        {/* Pass the projection through untouched. Defaulting to [] here would
-            hand the hover card a definite "nobody is working" for a state we
-            have not resolved. */}
-        <WorkingAgentsHoverContent agents={agents} />
+        <WorkingAgentsHoverContent agents={agents} units={units} />
       </HoverCardContent>
     </HoverCard>
   );

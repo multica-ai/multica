@@ -6,6 +6,8 @@ import { chatKeys } from "@multica/core/chat/queries";
 import type { Attachment, TaskMessagePayload } from "@multica/core/types";
 import type { ReactElement } from "react";
 import enChat from "../../locales/en/chat.json";
+import zhHansAgents from "../../locales/zh-Hans/agents.json";
+import zhHansChat from "../../locales/zh-Hans/chat.json";
 
 // The live timeline is a real list row rather than Virtuoso chrome (MUL-4922),
 // so it shares one identity with the persisted assistant row and keeps its
@@ -395,6 +397,170 @@ describe("ChatMessageList live timeline (MUL-3960 regression)", () => {
     expect(screen.getByText("3 steps")).toBeInTheDocument();
     expect(screen.queryByText("Intermediate narration")).not.toBeInTheDocument();
   });
+
+  it("marks only the settled answer as an annotation source, without remounting it", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), [
+      taskMsg(0, "tool_use", { tool: "Read", input: { path: "/tmp/x" } }),
+      taskMsg(1, "text", { content: "Stable final answer" }),
+    ]);
+    const revealSourceRef: { current: ((messageId: string) => boolean) | null } = { current: null };
+    const annotations = {
+      cardRef: () => {},
+      captureProps: {
+        "data-annotation-thread": "chat:session-1" as const,
+        onPointerUp: () => {}, onKeyUp: () => {}, onKeyDown: () => {},
+      },
+      popup: <></>,
+      revealSourceRef,
+    };
+    const view = (
+      messages: Parameters<typeof ChatMessageList>[0]["messages"],
+      pendingTask: Parameters<typeof ChatMessageList>[0]["pendingTask"],
+    ) => (
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList messages={messages} pendingTask={pendingTask} availability="online" annotations={annotations} />
+        </QueryClientProvider>
+      </I18nProvider>
+    );
+
+    const { rerender, container } = render(view([], { task_id: TASK_ID, status: "running" }));
+    const answerBefore = await screen.findByText("Stable final answer");
+    expect(container.querySelector("[data-comment-content]")).toBeNull();
+    expect(revealSourceRef.current?.("persisted-answer")).toBe(false);
+
+    rerender(view([{
+      id: "persisted-answer",
+      chat_session_id: "session-1",
+      role: "assistant",
+      content: "Stable final answer",
+      task_id: TASK_ID,
+      created_at: "2026-09-17T00:00:00Z",
+    }], null));
+
+    const answer = await screen.findByText("Stable final answer");
+    expect(answer).toBe(answerBefore);
+    expect(answer.closest("[data-comment-content]")?.getAttribute("data-comment-content")).toBe("persisted-answer");
+    expect(answer.closest("[data-annotation-thread]")).not.toBeNull();
+  });
+});
+
+describe("ChatMessageList tool rows (#8835 regression)", () => {
+  // An HTTP-proxy MCP tool (treg's `call`) passes `query` as an object of URL
+  // parameters. The row summary returned it as-is, React threw on an object
+  // child, and expanding the settled fold took down the whole chat.
+  it("expands a settled fold whose tool input carries non-string summary fields", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), [
+      taskMsg(0, "tool_use", {
+        tool: "mcp__treg__call",
+        input: {
+          endpoint_id: "zerobounce.people.email.verify",
+          query: { email: "a@example.com" },
+        },
+      }),
+      taskMsg(1, "tool_result", {
+        tool: "mcp__treg__call",
+        output: "{\"status\": 200, \"body\": {\"email_status\": \"Verified\"}}",
+      }),
+      taskMsg(2, "tool_use", { tool: "Read", input: { path: { dir: "/tmp" } } }),
+    ]);
+
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={[{
+              id: "settled-answer",
+              chat_session_id: "session-1",
+              role: "assistant",
+              content: "The email is verified.",
+              task_id: TASK_ID,
+              created_at: "2026-09-25T00:00:00Z",
+            }]}
+            pendingTask={null}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    fireEvent.click(await screen.findByText("3 steps"));
+
+    expect(screen.getByText("mcp__treg__call")).toBeInTheDocument();
+    expect(screen.getByText("zerobounce.people.email.verify")).toBeInTheDocument();
+    expect(screen.getByText("Read")).toBeInTheDocument();
+  });
+
+  it("localizes the multi-file patch summary", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), [
+      taskMsg(0, "tool_use", {
+        tool: "apply_patch",
+        input: {
+          changes: [
+            { path: "src/a.go", kind: "update", diff: "@@\n+x" },
+            { path: "src/b.go", kind: "add", content: "y" },
+          ],
+        },
+      }),
+    ]);
+
+    render(
+      <I18nProvider
+        locale="zh-Hans"
+        resources={{ "zh-Hans": { chat: zhHansChat, agents: zhHansAgents } }}
+      >
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={[]}
+            pendingTask={{ task_id: TASK_ID, status: "running" }}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText("src/a.go，另有 1 个文件")).toBeInTheDocument();
+  });
+});
+
+describe("ChatMessageList command tool rows", () => {
+  it("shows a command line by line, not as escaped JSON", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), [
+      taskMsg(0, "tool_use", {
+        tool: "Bash",
+        input: { command: "pnpm test\npnpm lint", description: "Run checks" },
+      }),
+    ]);
+
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={[]}
+            pendingTask={{ task_id: TASK_ID, status: "running" }}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    fireEvent.click(await screen.findByText("Bash"));
+
+    // Match the raw text: the default matcher collapses the newline that this
+    // test is about.
+    const command = Array.from(document.querySelectorAll("pre > div")).find(
+      (line) => line.textContent === "pnpm test\npnpm lint",
+    );
+    expect(command).toHaveClass("text-foreground");
+    // Same capped, scrolling box as the panel's other inputs and results.
+    expect(command?.parentElement).toHaveClass("max-h-32", "overflow-auto");
+    expect(screen.queryByText(/"command":/)).not.toBeInTheDocument();
+    expect(command?.nextElementSibling?.textContent).toContain('"description": "Run checks"');
+  });
 });
 
 describe("ChatMessageList footer spacing", () => {
@@ -502,7 +668,7 @@ describe("ChatMessageList quick actions skeleton", () => {
     created_at: "2026-07-22T00:00:00Z",
   };
 
-  it("renders pill skeletons for the message awaiting its supplement", () => {
+  it("renders chip skeletons for the message awaiting its supplement", () => {
     const qc = new QueryClient();
     const { container } = render(
       <I18nProvider locale="en" resources={TEST_RESOURCES}>
@@ -517,7 +683,7 @@ describe("ChatMessageList quick actions skeleton", () => {
         </QueryClientProvider>
       </I18nProvider>,
     );
-    expect(container.querySelectorAll(".rounded-full[aria-hidden] , [aria-hidden] .rounded-full").length).toBeGreaterThan(0);
+    expect(container.querySelectorAll('[aria-hidden] [data-slot="skeleton"]').length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: /suggested/i })).toBeNull();
   });
 
@@ -535,7 +701,89 @@ describe("ChatMessageList quick actions skeleton", () => {
         </QueryClientProvider>
       </I18nProvider>,
     );
-    expect(container.querySelector("[aria-hidden] .rounded-full")).toBeNull();
+    expect(container.querySelector('[aria-hidden] [data-slot="skeleton"]')).toBeNull();
+  });
+});
+
+describe("ChatMessageList reply timing caption", () => {
+  // Built from local components so the caption is stable in any host timezone;
+  // the matcher tolerates the hour's leading zero differing between Node and
+  // browser Intl ("2:32 PM" vs "02:32 PM").
+  const now = new Date();
+  const todayAt = (h: number, m: number) =>
+    new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m).toISOString();
+
+  it("appends the wall-clock time to the elapsed caption", async () => {
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[{
+              id: "timed-reply",
+              chat_session_id: "s1",
+              role: "assistant",
+              content: "Done.",
+              task_id: null,
+              created_at: todayAt(14, 32),
+              elapsed_ms: 38000,
+            }]}
+            pendingTask={null}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText(/Replied in 38s · 0?2:32 PM/)).toBeInTheDocument();
+  });
+
+  it("shows the time alone for legacy replies without elapsed_ms", async () => {
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[{
+              id: "legacy-reply",
+              chat_session_id: "s1",
+              role: "assistant",
+              content: "Done.",
+              task_id: null,
+              created_at: todayAt(14, 32),
+            }]}
+            pendingTask={null}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText(/2:32 PM/)).toBeInTheDocument();
+    expect(screen.queryByText(/Replied in/)).not.toBeInTheDocument();
+  });
+
+  it("timestamps failed replies", async () => {
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[{
+              id: "failed-reply",
+              chat_session_id: "s1",
+              role: "assistant",
+              content: "boom",
+              task_id: null,
+              created_at: todayAt(14, 32),
+              elapsed_ms: 12000,
+              failure_reason: "manual",
+            }]}
+            pendingTask={undefined}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText(/Failed after 12s · 0?2:32 PM/)).toBeInTheDocument();
   });
 });
 
@@ -575,6 +823,83 @@ describe("ChatMessageList onboarding kickoff", () => {
     expect(
       screen.queryByText("INTERNAL ONBOARDING PROMPT"),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("ChatMessageList wakeup turns", () => {
+  it("renders the wakeup input as a divider and the creating reply's card", async () => {
+    const now = Date.now();
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[
+              {
+                id: "promise",
+                chat_session_id: "s1",
+                role: "assistant",
+                content: "I'll tell you when it merges.",
+                task_id: "task-1",
+                created_at: new Date(0).toISOString(),
+              },
+              {
+                id: "wake-input",
+                chat_session_id: "s1",
+                role: "user",
+                content: "",
+                task_id: "task-2",
+                created_at: new Date(1).toISOString(),
+                message_kind: "wakeup",
+                wakeup_id: "w-1",
+              },
+              {
+                id: "report",
+                chat_session_id: "s1",
+                role: "assistant",
+                content: "It merged.",
+                task_id: "task-2",
+                created_at: new Date(2).toISOString(),
+              },
+            ]}
+            wakeups={[
+              {
+                id: "w-1",
+                chat_session_id: "s1",
+                agent_id: "agent-1",
+                title: "PR #42 merged",
+                instruction: "Report",
+                kind: "condition",
+                interval_seconds: null,
+                fire_at: null,
+                next_eval_at: new Date(now).toISOString(),
+                expires_at: new Date(now).toISOString(),
+                status: "fired",
+                end_reason: "condition",
+                ended_at: new Date(now).toISOString(),
+                check_count: 0,
+                last_check_note: null,
+                last_checked_at: null,
+                last_task_id: "task-2",
+                last_fired_at: new Date(now).toISOString(),
+                last_error: null,
+                source_message_id: null,
+                source_task_id: "task-1",
+                created_at: new Date(now).toISOString(),
+                updated_at: new Date(now).toISOString(),
+              },
+            ]}
+            pendingTask={undefined}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText("It merged.")).toBeInTheDocument();
+    expect(screen.getByText("Back to report · it happened · PR #42 merged")).toBeInTheDocument();
+    expect(screen.getByText("Will report back: PR #42 merged")).toBeInTheDocument();
+    expect(screen.getByText("Reported back")).toBeInTheDocument();
+    expect(document.querySelectorAll('[data-mc="chat-bubble"]')).toHaveLength(0);
   });
 });
 
@@ -724,6 +1049,12 @@ describe("ChatMessageList failure copy (MUL-5370 regression)", () => {
 
   const FALLBACK = enChat.message_list.failure.fallback;
 
+  it("explains revoked access with a rebind action rather than a generic retry", async () => {
+    renderFailure("runtime_access_revoked");
+    expect(await screen.findByText(enChat.message_list.failure.runtime_access_revoked)).toBeInTheDocument();
+    expect(screen.queryByText(FALLBACK)).not.toBeInTheDocument();
+  });
+
   it("renders dedicated copy for a stalled skill bundle download", async () => {
     renderFailure("skill_bundle_unavailable");
     expect(
@@ -742,6 +1073,17 @@ describe("ChatMessageList failure copy (MUL-5370 regression)", () => {
       await screen.findByText(
         enChat.message_list.failure.environment_prepare_failed,
       ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(FALLBACK)).not.toBeInTheDocument();
+  });
+
+  it("tells the reader to restore or relink a deleted project folder", async () => {
+    // MUL-9665. The reason has no agent_error family to degrade into, so
+    // without an entry it would land on the generic fallback, which cannot
+    // say the folder is gone or where to fix it.
+    renderFailure("local_directory_missing");
+    expect(
+      await screen.findByText(enChat.message_list.failure.local_directory_missing),
     ).toBeInTheDocument();
     expect(screen.queryByText(FALLBACK)).not.toBeInTheDocument();
   });

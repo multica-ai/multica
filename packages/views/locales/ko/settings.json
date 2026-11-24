@@ -5,7 +5,7 @@
     "add": "상태 추가",
     "show_archived": "보관됨 표시 ({{count}})",
     "archived_badge": "보관됨",
-    "archived_hint": "새로 지정할 수 없습니다. 이미 이 상태인 태스크는 그대로 유지됩니다.",
+    "archived_hint": "보드와 상태 선택 목록에서 제거되었습니다.",
     "reorder_failed": "새 순서를 저장하지 못했습니다.",
     "actions": {
       "move_up": "위로 이동",
@@ -16,11 +16,6 @@
       "reorder": "{{name}} 순서 변경"
     },
     "reorder_hint": "카테고리 안에서 드래그하면 보드, 목록, 메뉴의 순서가 바뀝니다.",
-    "built_in_dialog": {
-      "title": "기본 상태는 변경할 수 없습니다",
-      "description": "기본 상태는 Multica 시스템 동작에 사용되므로 편집하거나 보관할 수 없습니다. 카테고리 내 순서는 변경할 수 있습니다.",
-      "confirm": "확인"
-    },
     "editor": {
       "create_title": "새 상태",
       "edit_title": "상태 편집",
@@ -52,9 +47,9 @@
     "archive_dialog": {
       "retry": "보관 다시 시도",
       "title": "이 상태를 보관할까요?",
-      "description": "\"{{name}}\"의 모든 태스크를 다른 상태로 이동하세요. 비어 있을 때 보관할 수 있으며, 보관하면 보드와 상태 선택 목록에서 제거됩니다.",
+      "description": "\"{{name}}\"이(가) 보드와 상태 선택 목록에서 제거됩니다. 보관된 상태는 나중에 확인할 수 있습니다.",
       "in_use_title": "보관 전에 태스크 이동",
-      "in_use": "아직 {{count}}개의 태스크가 이 상태를 사용합니다. 완료되거나 취소된 태스크도 다른 상태로 이동한 후 다시 시도하세요.",
+      "in_use": "이 상태를 아직 사용 중인 태스크: {{count}}개. 완료 및 취소됨 상태의 태스크를 포함해 모두 다른 상태로 이동한 뒤 다시 시도하세요.",
       "view_issues": "태스크 보기",
       "archiving": "보관 중...",
       "cancel": "취소",
@@ -81,7 +76,12 @@
       "blocked": "외부 의존성으로 중단됨.",
       "done": "완료.",
       "cancelled": "진행하지 않기로 함."
-    }
+    },
+    "pr_auto_complete_badge": "PR 병합 시 자동 설정",
+    "built_in_locked": "기본 상태는 시스템 동작에 쓰이므로 편집하거나 보관할 수 없습니다. 순서는 바꿀 수 있습니다.",
+    "builtin_badge": "기본 제공",
+    "workflow_usage_other": "워크플로 {{count}}개에서 사용 중",
+    "workflow_usage_none": "사용하는 워크플로 없음"
   },
   "quick_actions": {
     "title": "퀵 액션",
@@ -108,7 +108,7 @@
     "field_visibility": "사용 범위",
     "public_target_hint": "모두가 트리거할 수 있는 에이전트만 지정할 수 있습니다.",
     "target_private": "비공개",
-    "target_missing": "실행자를 사용할 수 없음",
+    "target_missing": "에이전트를 사용할 수 없음",
     "archive": "보관",
     "unarchive": "복원",
     "edit": "편집",
@@ -123,6 +123,8 @@
     "field_name": "이름",
     "field_name_placeholder": "코드 리뷰",
     "field_target": "실행자",
+    "no_target": "에이전트 없음(댓글만 작성)",
+    "no_target_hint": "아무도 멘션하지 않고 메시지를 게시합니다.",
     "field_prompt": "프롬프트",
     "field_prompt_placeholder": "이 태스크에 연결된 코드를 검토하고 정확성과 예외 상황을 중점적으로 확인하세요.",
     "prompt_hint": "작성한 그대로 전달됩니다. 에이전트는 태스크를 이미 읽을 수 있습니다.",
@@ -137,35 +139,228 @@
     "toast_saved": "변경사항을 저장했습니다"
   },
   "preferences": {
-    "general_title": "일반",
-    "theme": {
-      "title": "테마",
-      "light": "라이트",
-      "dark": "다크",
-      "system": "시스템"
-    },
     "language": {
       "title": "언어",
       "english": "English",
-      "chinese": "中文",
+      "chinese": "简体中文",
+      "chinese_traditional": "繁體中文",
       "korean": "한국어",
       "japanese": "日本語",
       "french": "Français",
+      "spanish": "Español",
+      "russian": "Русский",
       "sync_failed": "이 기기에는 언어가 저장되었지만 계정 동기화에 실패했습니다. 다른 기기에서는 이전 언어가 표시될 수 있습니다."
     },
     "timezone": {
-      "title": "표시 시간대",
+      "title": "시간대",
       "browser_suffix": " (브라우저)",
       "hint": "모든 워크스페이스의 날짜와 차트에 적용됩니다.",
-      "sync_failed": "시간대 설정을 저장하지 못했습니다."
+      "sync_failed": "시간대를 저장할 수 없습니다.",
+      "search": "시간대 검색...",
+      "empty": "일치하는 시간대가 없습니다"
     },
     "sticky_comment_bar": {
       "title": "댓글 입력란을 하단에 고정"
     },
-    "issue_title": "태스크 생성",
-    "comments_title": "댓글",
-    "device_hint": "현재 기기에 저장됩니다.",
-    "issue_scope": "이 설정은 현재 기기의 현재 워크스페이스에 적용되며 태스크 생성 시 표시되는 필드만 변경합니다."
+    "running_agent_reply": {
+      "title": "실행 중인 에이전트에 답장할 때",
+      "steer": "현재 실행에 추가",
+      "after_run": "이번 실행 후 시작",
+      "hint": "기본값만 정합니다. 보내기 전에 메시지마다 바꿀 수 있습니다."
+    },
+    "comment_images": {
+      "title": "댓글 속 이미지",
+      "thumbnails": "썸네일",
+      "full": "원본 크기",
+      "hint": "썸네일로 보면 긴 스레드도 짧게 유지됩니다. 이미지를 클릭하면 원본 크기로 볼 수 있습니다."
+    },
+    "comments_title": "댓글 및 채팅",
+    "region_title": "언어 및 지역",
+    "issue_fields_title": "태스크 생성 시 표시할 필드",
+    "issue_fields": {
+      "field": "필드",
+      "quick": "에이전트로 생성",
+      "manual": "수동 생성",
+      "unsupported": "에이전트로 생성할 때는 사용할 수 없습니다"
+    }
+  },
+  "appearance": {
+    "reset": "기본값으로 재설정",
+    "color": {
+      "title": "색상"
+    },
+    "mode": {
+      "title": "모드",
+      "light": "라이트",
+      "dark": "다크",
+      "system": "시스템"
+    },
+    "theme": {
+      "title": "테마",
+      "description": "앱 전체의 색상, 테두리, 그림자, 모서리.",
+      "default": "기본",
+      "pop": "팝",
+      "built_in": "기본 제공",
+      "installed": "설치됨",
+      "remove": "{{name}} 제거",
+      "safe_mode": "안전 모드: 이 창을 닫을 때까지 테마가 꺼져 있어요.",
+      "safe_mode_exit": "내 테마 사용",
+      "folder": "테마 폴더",
+      "folder_problems": "테마 폴더의 일부 테마가 검사를 통과하지 못했어요. 고친 뒤 저장하세요. 그동안은 마지막으로 통과한 버전을 사용해요."
+    },
+    "import": {
+      "button": "테마 가져오기",
+      "from_zip": "테마 파일(.zip)",
+      "from_folder": "테마 폴더",
+      "storage_full": "이 기기에 테마를 저장할 공간이 부족해요. 다른 테마를 제거한 뒤 다시 시도하세요.",
+      "confirm_title": "‘{{name}}’을(를) 설치할까요?",
+      "warning": "테마는 대화상자와 경고를 포함한 모든 화면의 모양을 바꿀 수 있어요. 신뢰하는 사람이 만든 테마만 설치하세요.",
+      "author": "만든 사람",
+      "version": "버전",
+      "replaces": "{{to}} ({{from}} 대체)",
+      "includes": "포함",
+      "cancel": "취소",
+      "confirm": "설치하고 사용",
+      "error_title": "이 테마를 설치할 수 없어요",
+      "error_description": "아무것도 바뀌지 않았어요. 테마 파일에 다음 문제가 있어요:",
+      "close": "닫기",
+      "has_options_other": "옵션 {{count}}개",
+      "has_assets_other": "글꼴·이미지 {{count}}개",
+      "beta": "베타",
+      "beta_note": "사용자 테마는 베타예요. 테마가 쓰는 변수와 매니페스트가 바뀔 수 있어 테마를 업데이트해야 할 수도 있어요."
+    },
+    "store": {
+      "manage": "관리",
+      "title": "테마",
+      "description": "설치한 테마와 커뮤니티가 만든 테마입니다.",
+      "description_local": "설치한 테마입니다.",
+      "search": "테마 검색",
+      "installed_only": "설치된 테마만 보기",
+      "showing_other": "테마 {{count}}개 표시 중",
+      "installed": "설치됨",
+      "loading": "테마를 불러오는 중",
+      "error": "테마 스토어를 불러오지 못했습니다. 잠시 후 다시 시도하세요.",
+      "retry": "다시 시도",
+      "none_installed": "아직 설치된 테마가 없습니다.",
+      "no_results": "“{{query}}”와 일치하는 테마가 없습니다.",
+      "by": "작성자: {{author}}",
+      "downloads_other": "다운로드 {{downloads}}회",
+      "source": "GitHub에서 {{repo}} 보기",
+      "no_preview": "미리보기 없음",
+      "screenshot_alt": "{{mode}} 모드의 {{name}}",
+      "install": "설치",
+      "installing": "설치 중…",
+      "use": "사용",
+      "in_use": "사용 중",
+      "update": "{{version}}(으)로 업데이트",
+      "remove": "제거",
+      "taken": "같은 ID의 테마가 설치되어 있습니다",
+      "installed_toast": "“{{name}}”을(를) 설치했습니다.",
+      "updated": "“{{name}}”을(를) {{version}}(으)로 업데이트했습니다.",
+      "install_failed": "“{{name}}”을(를) 설치하지 못했습니다",
+      "warning": "테마는 대화 상자와 경고를 포함한 모든 페이지의 스타일을 바꿀 수 있습니다. 스토어 테마는 자동으로 검사되지만 커뮤니티가 만든 것입니다."
+    },
+    "updates": {
+      "title": "스토어 테마",
+      "description_other": "스토어에서 설치한 테마가 {{count}}개 있습니다.",
+      "check": "업데이트 확인",
+      "checking": "확인 중…",
+      "up_to_date": "스토어 테마가 모두 최신 상태입니다.",
+      "update_all": "모두 업데이트 ({{count}})"
+    },
+    "own": {
+      "title": "직접 만들기",
+      "description": "채팅이나 태스크에서 아무 에이전트에게 만들어 달라고 하거나, .zip 파일이나 폴더로 테마를 가져오거나, 현재 테마의 사본으로 시작하세요."
+    },
+    "tools": {
+      "duplicate": "“{{name}}” 복제해서 새 테마 만들기",
+      "open_folder": "테마 폴더 열기",
+      "guide": "테마 만드는 방법",
+      "duplicated_web": "{{file}}을(를) 내려받았어요. 압축을 풀고 theme.css를 고친 다음 폴더를 가져오세요.",
+      "duplicated_desktop": "테마 폴더에 “{{name}}”을(를) 만들었어요. theme.css를 저장하면 바로 반영돼요.",
+      "duplicate_failed": "복사본을 만들지 못했어요: {{error}}"
+    },
+    "theme_options": {
+      "title": "테마 옵션",
+      "description": "{{name}}에서 제공해요.",
+      "reset": "옵션 초기화"
+    },
+    "ui_text": {
+      "title": "인터페이스 글자",
+      "description": "메뉴, 버튼, 목록, 사이드바, 제목."
+    },
+    "latin_font": {
+      "title": "라틴 글꼴"
+    },
+    "ui_font": {
+      "inter": "기본",
+      "system": "시스템",
+      "serif": "세리프",
+      "mono": "고정폭"
+    },
+    "cjk_font": {
+      "title": "CJK 글꼴",
+      "description": "한자 글꼴. 일본어와 한국어도 이 설정을 따라요.",
+      "sans": "고딕",
+      "serif": "명조",
+      "kai": "해서",
+      "built_in": "기본",
+      "local": "이 기기",
+      "load_local": "이 기기의 글꼴 보기…",
+      "loading": "글꼴을 찾는 중…",
+      "none": "이 기기에 한자가 있는 글꼴이 없어요.",
+      "load_failed": "이 기기의 글꼴을 읽을 수 없어요.",
+      "sample": "永和九年 한글"
+    },
+    "follow_ui": "인터페이스와 같게",
+    "theme_font": "테마 글꼴",
+    "font_size": {
+      "title": "글꼴 크기",
+      "description": "텍스트만 확대합니다. 간격과 레이아웃은 그대로입니다.",
+      "value": "{{size}} px",
+      "default": "{{size}} px · 기본"
+    },
+    "content_text": {
+      "title": "본문 글자",
+      "description": "이슈 설명, 댓글, 채팅, 문서의 본문.",
+      "sample": "설명과 댓글은 길게 읽으니 읽기 좋은 글꼴로 바꿀 수 있어요. 목록과 버튼은 그대로 촘촘하게 유지돼요."
+    },
+    "code_font": {
+      "title": "코드 글꼴",
+      "description": "코드 블록, 인라인 코드, 로그.",
+      "geist": "기본",
+      "jetbrains": "합자",
+      "system": "시스템 고정폭"
+    },
+    "content_size": {
+      "title": "글자 크기",
+      "description": "본문만 바뀌어요. 기본값은 인터페이스와 같아요.",
+      "follow": "인터페이스 글자 크기에 맞추기"
+    },
+    "content_leading": {
+      "title": "줄 간격",
+      "compact": "좁게",
+      "default": "기본",
+      "relaxed": "넓게"
+    },
+    "layout": {
+      "title": "레이아웃 및 접근성"
+    },
+    "density": {
+      "title": "밀도",
+      "description": "이슈 목록, 검색 결과, 사이드바의 행 높이와 보드의 간격.",
+      "compact": "좁게",
+      "default": "기본",
+      "comfortable": "넓게"
+    },
+    "reduce_motion": {
+      "title": "동작 줄이기",
+      "description": "애니메이션과 전환 효과를 끕니다. 꺼져 있어도 시스템 설정은 적용됩니다."
+    },
+    "high_contrast": {
+      "title": "대비 높이기",
+      "description": "보조 텍스트를 진하게, 테두리를 뚜렷하게 합니다."
+    }
   },
   "shortcuts": {
     "title": "키보드 단축키",
@@ -189,8 +384,9 @@
     "no_results": "일치하는 단축키 동작이 없습니다.",
     "conflict_error": "이미 {{action}}에서 사용 중입니다.",
     "reserved_error": "브라우저 또는 데스크톱 창에서 예약된 단축키입니다.",
-    "send_error": "보내기는 Enter 또는 Mod+Enter만 사용할 수 있습니다.",
+    "send_error": "전송에는 Enter 또는 Cmd/Ctrl+Enter만 사용할 수 있습니다.",
     "unsafe_error": "이 키는 텍스트 입력이나 기본 키보드 탐색을 방해합니다.",
+    "unrecognized_error": "이 키 조합은 기록할 수 없습니다. 다른 조합을 사용해 보세요.",
     "send_enter_hint": "Shift+Enter로 단락을 삽입하거나 목록을 이어가고 코드 블록에서 줄을 바꿀 수 있습니다.",
     "categories": {
       "general": "일반",
@@ -217,6 +413,10 @@
         "label": "채팅 창 전환",
         "description": "플로팅 채팅 창을 열거나 닫습니다. 열면 메시지 입력란에 포커스합니다."
       },
+      "newChat": {
+        "label": "Multica에 묻기",
+        "description": "플로팅 채팅 창에서 새 채팅을 시작합니다."
+      },
       "findInIssue": {
         "label": "태스크에서 찾기",
         "description": "열린 태스크 상세 내용에서 검색합니다."
@@ -224,6 +424,30 @@
       "archiveInboxItem": {
         "label": "알림 보관",
         "description": "열린 인박스 알림을 보관합니다. 보관함을 보는 중에는 보관을 해제합니다."
+      },
+      "unsubscribeArchiveInboxItem": {
+        "label": "구독 해제 후 보관",
+        "description": "열린 알림의 태스크 구독을 해제하고 보관합니다. 나 또는 내 에이전트의 태스크가 아닐 때 사용할 수 있습니다."
+      },
+      "snoozeInboxItem": {
+        "label": "알림 미루기",
+        "description": "인박스에서 연 태스크를 미룹니다. 이미 미뤘다면 지금 되돌립니다."
+      },
+      "markInboxUnread": {
+        "label": "알림 읽지 않음으로 표시",
+        "description": "열려 있는 인박스 알림을 닫지 않고 읽음 또는 읽지 않음으로 전환합니다."
+      },
+      "nextInboxItem": {
+        "label": "다음 알림",
+        "description": "현재 인박스 목록에서 다음 알림을 엽니다."
+      },
+      "prevInboxItem": {
+        "label": "이전 알림",
+        "description": "현재 인박스 목록에서 이전 알림을 엽니다."
+      },
+      "undoInboxAction": {
+        "label": "인박스 작업 실행 취소",
+        "description": "토스트가 보이는 동안 마지막 보관, 미루기, 구독 해제를 취소합니다. 토스트가 사라진 뒤에는 열린 알림이 보관되었다면 인박스로 되돌리고, '인박스가 비었습니다' 화면에서는 그곳에 표시된 작업을 취소합니다."
       },
       "send": {
         "label": "보내기",
@@ -284,6 +508,10 @@
       "goSettings": {
         "label": "설정으로 이동",
         "description": "워크스페이스 설정을 엽니다."
+      },
+      "voiceInput": {
+        "label": "음성 입력",
+        "description": "마지막으로 사용한 입력란에 받아쓰기합니다. 길게 눌러 말합니다."
       }
     },
     "fixed": {
@@ -300,14 +528,21 @@
     }
   },
   "chat": {
-    "floating_title": "플로팅 창",
     "floating_label": "플로팅 채팅 창",
-    "floating_hint": "모든 페이지에 플로팅 채팅 버튼을 표시합니다."
+    "floating_hint": "모든 페이지에 플로팅 채팅 버튼을 표시합니다.",
+    "ask_agent_label": "Multica에게 묻기 에이전트",
+    "ask_agent_hint": "이 워크스페이스에서 하단 바로 시작하는 새 채팅의 에이전트입니다.",
+    "ask_agent_last_used": "마지막으로 사용한 에이전트"
   },
   "issue": {
+    "opening": {
+      "title": "태스크 열기",
+      "click": "카드나 행을 클릭하면 열리는 곳",
+      "page": "전체 페이지",
+      "peek": "사이드 미리보기",
+      "hint": "Shift+클릭하면 다른 쪽으로 열립니다."
+    },
     "description": "각 생성 방식의 툴바에 항상 표시할 필드를 선택합니다. 숨긴 필드는 ⋯ 메뉴에서 계속 사용할 수 있으며, 값이 있는 동안에는 자동으로 표시됩니다.",
-    "quick_create_title": "에이전트로 생성할 때의 도구 모음 필드",
-    "manual_create_title": "수동 생성 도구 모음 필드",
     "fields": {
       "status": "상태",
       "priority": "우선순위",
@@ -319,7 +554,6 @@
     }
   },
   "mcp": {
-    "title": "MCP",
     "description": "추가 후 에이전트의 MCP 탭에서 할당하세요.",
     "servers_title": "공유 서버",
     "write_only_note": "민감한 정보를 보호하기 위해 저장된 URL, 명령, 헤더, 환경 변수는 다시 표시되지 않습니다. 변경하려면 새 설정을 모두 입력하세요. 이름만 바꾸면 현재 설정과 에이전트 할당은 그대로 유지됩니다.",
@@ -336,7 +570,6 @@
     "remove_action": "삭제",
     "empty_title": "공유 MCP 서버가 없습니다",
     "disabled_badge": "비활성화됨",
-    "admin_only_note": "공유 MCP 서버는 워크스페이스 owner와 admin만 변경할 수 있습니다.",
     "delete_title": "공유 서버를 제거할까요?",
     "delete_description": "{{name}}은(는) 라이브러리와 할당된 모든 에이전트에서 제거되며 각 에이전트의 다음 실행부터 적용됩니다.",
     "delete_confirm": "제거",
@@ -356,43 +589,47 @@
     "tabs": {
       "profile": "프로필",
       "preferences": "환경설정",
+      "appearance": "모양",
       "shortcuts": "단축키",
       "issue": "태스크",
-      "chat": "채팅",
       "notifications": "알림",
       "tokens": "API 토큰",
       "general": "일반",
-      "repositories": "저장소",
       "github": "GitHub",
-      "integrations": "연동",
       "labs": "실험실",
       "members": "멤버",
       "labels": "레이블",
       "issue_statuses": "태스크 상태",
       "properties": "속성",
       "quick_actions": "퀵 액션",
-      "plugins": "Plugins",
-      "mcp": "MCP",
-      "billing": "결제 및 요금제"
+      "plugins": "플러그인",
+      "mcp": "MCP 서버",
+      "billing": "결제 및 요금제",
+      "code": "코드",
+      "channels": "메신저",
+      "workflows": "워크플로",
+      "voice_input": "음성 입력"
     },
     "groups": {
-      "personal": "개인 설정",
-      "workspace": "워크스페이스 관리",
-      "issues": "태스크 설정",
+      "personal": "개인",
+      "workspace": "워크스페이스",
+      "issues": "태스크 및 워크플로",
       "connections": "연결 및 확장",
-      "device": "데스크톱 앱"
+      "device": "이 기기"
     },
     "navigate": "설정 페이지로 이동",
-    "device_scope": "현재 기기"
+    "search": "설정 검색",
+    "search_clear": "검색 지우기",
+    "search_empty": "일치하는 설정이 없습니다",
+    "search_results_other": "결과 {{count}}개",
+    "admin_only": "소유자와 관리자만 변경할 수 있습니다"
   },
   "plugins": {
-    "title": "Plugins",
+    "title": "플러그인",
     "loading": "Plugins 불러오는 중",
     "load_failed": "Plugins를 불러올 수 없습니다",
     "load_failed_description": "다시 시도하세요. 설치된 Plugin에는 영향이 없습니다.",
-    "read_only": "읽기 전용",
-    "read_only_description": "워크스페이스 owner와 admin이 Plugin을 설치, 설정, 제거할 수 있습니다.",
-    "empty": "설치된 Plugin이 없습니다.",
+    "empty": "아직 설치된 플러그인이 없습니다.",
     "action_failed": "Plugin 작업에 실패했습니다",
     "enabled": "Plugin을 활성화했습니다",
     "disabled": "Plugin을 비활성화했습니다",
@@ -410,7 +647,7 @@
       "title": "설치됨"
     },
     "consent": {
-      "title": "이 Plugin이 요청하는 접근 권한",
+      "title": "이 플러그인이 다음 접근 권한을 요청합니다",
       "description": "승인은 이 버전에만 적용되며, 아래 범위와 사용자 본인의 권한을 넘지 않습니다.",
       "cancel": "취소",
       "confirm": "허용하고 설치",
@@ -498,6 +735,7 @@
     "save_failed": "속성을 저장하지 못했습니다",
     "limit_hint": "활성 속성 {{count}}/{{max}}",
     "archived_badge": "보관됨",
+    "options_preview": "{{name}}의 모든 옵션 보기",
     "types": {
       "text": "텍스트",
       "number": "숫자",
@@ -507,7 +745,9 @@
       "checkbox": "체크박스",
       "url": "URL",
       "actor": "멤버",
-      "multi_actor": "멤버(다중 선택)"
+      "multi_actor": "멤버(다중 선택)",
+      "multi_text": "텍스트 목록",
+      "multi_url": "URL 목록"
     },
     "actions": {
       "open": "{{name}} 작업",
@@ -584,10 +824,10 @@
     },
     "delete_dialog": {
       "title": "레이블을 삭제할까요?",
-      "description": "\"{{name}}\" 레이블을 삭제할까요? {{count}}개 리소스에서 제거되며 되돌릴 수 없습니다.",
       "cancel": "취소",
       "confirm": "레이블 삭제",
-      "failed": "레이블을 삭제하지 못했습니다"
+      "failed": "레이블을 삭제하지 못했습니다",
+      "description_other": "\"{{name}}\" 레이블을 삭제할까요? {{count}}개 리소스에서 제거되며 되돌릴 수 없습니다."
     }
   },
   "account": {
@@ -598,17 +838,62 @@
     "profile_description_label": "내 소개",
     "profile_description_hint": "나를 위해 실행하는 에이전트에게 매번 전달됩니다.",
     "profile_description_placeholder": "예: Go와 Postgres를 쓰는 백엔드 엔지니어. 간결한 PR과 변경사항에 맞춘 테스트를 선호합니다.",
-    "profile_description_too_long": "프로필이 너무 깁니다(최대 {{max}}자, 현재 {{count}}자).",
+    "profile_description_too_long": "자기소개가 너무 깁니다(최대 {{max}}자, 현재 {{count}}자).",
     "save": "프로필 업데이트",
     "saving": "업데이트 중...",
-    "toast_avatar_updated": "아바타를 업데이트했습니다",
     "toast_avatar_failed": "아바타를 업로드하지 못했습니다",
-    "toast_profile_updated": "프로필을 업데이트했습니다",
     "toast_profile_failed": "프로필을 업데이트하지 못했습니다"
   },
   "notifications": {
-    "title": "인박스 알림",
-    "description": "알림을 꺼도 태스크에서 관련 활동을 볼 수 있습니다.",
+    "title": "인박스",
+    "description": "'작업' 사이드바의 인박스에 들어올 이벤트를 고릅니다. 끈 이벤트는 알림을 만들지 않으며, 다시 켜도 놓친 알림은 돌아오지 않습니다.",
+    "categories": {
+      "direct": "나와 직접 관련된 것",
+      "issues": "구독 중인 태스크",
+      "projects": "구독 중인 프로젝트",
+      "agents": "에이전트"
+    },
+    "others_issues": {
+      "label": "다른 사람의 태스크",
+      "description": "다른 사람이나 그 사람의 에이전트에게 배정된 태스크 중 생성·댓글 작성 또는 멘션으로 팔로우 중인 항목입니다. 주요 업데이트에는 @멘션, 참여한 스레드의 답글, 그리고 \"상태 변경\"을 켠 경우 확인이 필요한 상태(검토 중, 막힘, 완료)가 포함됩니다.",
+      "key_updates": "주요 업데이트만",
+      "all": "모든 활동"
+    },
+    "leaving": {
+      "title": "인박스에서 빠지는 경우",
+      "description": "읽어도 인박스에서 사라지지 않습니다.",
+      "manual_label": "직접 보관",
+      "manual_description": "사이드바의 행이나 알림 상단에서",
+      "manual_value": "언제든지",
+      "auto_label": "내가 처리한 태스크 보관",
+      "auto_description": "내 동작만 해당됩니다. 새 알림이 오면 태스크가 다시 돌아옵니다.",
+      "auto_presets": {
+        "never": "안 함",
+        "completed": "완료했을 때",
+        "handled": "완료하거나 에이전트를 실행했을 때",
+        "custom": "사용자 지정",
+        "custom_item": "사용자 지정..."
+      },
+      "auto_recommended": "추천",
+      "auto_groups": {
+        "settle": "처리",
+        "tidy": "정리"
+      },
+      "auto_actions": {
+        "completed": "완료",
+        "agent_trigger": "에이전트 실행",
+        "comment": "답글",
+        "status": "상태 진행",
+        "assignee": "담당자 변경",
+        "priority": "우선순위 변경",
+        "project": "프로젝트 변경",
+        "dates": "날짜 변경",
+        "labels": "라벨 변경"
+      },
+      "archived_label": "보관된 알림",
+      "archived_description": "여기서 다시 찾고 보관을 해제할 수 있습니다",
+      "archived_action": "보관된 알림 보기"
+    },
     "toast_failed": "알림 설정을 업데이트하지 못했습니다",
     "groups": {
       "assignments": {
@@ -623,27 +908,41 @@
         "label": "댓글",
         "description": "팔로우 중인 태스크에 새 댓글이 달릴 때"
       },
+      "squad_handoffs": {
+        "label": "스쿼드 내부 인계 포함",
+        "description": "스쿼드 리더와 에이전트가 서로 작업을 넘기는 댓글입니다. @멘션, 에이전트 실행 실패, 확인이 필요한 상태는 계속 알림이 옵니다."
+      },
       "mentions": {
         "label": "멘션",
         "description": "누군가 나를 @멘션할 때(@all, @squad 포함)"
+      },
+      "reactions": {
+        "label": "반응",
+        "description": "내가 만든 태스크나 내가 쓴 댓글에 누군가 반응할 때"
       },
       "updates": {
         "label": "우선순위 및 마감일",
         "description": "팔로우 중인 태스크의 우선순위나 마감일이 바뀔 때"
       },
+      "new_issues": {
+        "label": "새 태스크",
+        "description": "구독 중인 프로젝트에 태스크가 생성될 때"
+      },
       "agent_activity": {
         "label": "에이전트 활동",
-        "description": "에이전트 실행이 완료되거나 실패할 때"
+        "description": "에이전트 실행이 실패하거나, 에이전트가 요청한 앱 작업이 차단되거나 만료될 때"
+      },
+      "chat_replies": {
+        "label": "채팅 답변 포함"
       }
     },
     "system": {
       "title": "시스템 알림",
-      "description": "Multica가 백그라운드에 있을 때 시스템 알림을 표시합니다.",
-      "label": "시스템 알림 표시"
+      "label": "Multica가 백그라운드에 있을 때 시스템 알림 표시"
     },
     "browser": {
       "label": "브라우저 알림",
-      "hint": "이 브라우저에서 새 인박스 항목에 대한 알림 배너를 표시하도록 허용합니다.",
+      "hint": "이 브라우저에서 받은편지함 알림과 채팅 답변의 배너를 표시하도록 허용합니다.",
       "enable": "사용",
       "granted": "이 브라우저에서 알림 배너를 표시할 수 있습니다.",
       "denied": "브라우저에서 차단되었습니다. 브라우저 설정에서 이 사이트의 알림을 허용하세요.",
@@ -676,7 +975,7 @@
     "revoke_aria": "{{name}} 폐기",
     "revoke_tooltip": "폐기",
     "revoke_dialog": {
-      "title": "토큰 폐기",
+      "title": "API 토큰을 폐기할까요?",
       "description": "이 토큰은 영구 폐기되며 더 이상 사용할 수 없습니다. 이 작업은 되돌릴 수 없습니다.",
       "cancel": "취소",
       "confirm": "폐기"
@@ -697,25 +996,20 @@
   },
   "workspace": {
     "section_general": "워크스페이스 정보",
-    "logo_label": "워크스페이스 로고",
+    "logo_label": "워크스페이스 아이콘",
     "change_logo_aria": "워크스페이스 로고 변경",
-    "click_logo_hint": "로고를 클릭하여 새 이미지를 업로드하세요",
-    "toast_logo_updated": "워크스페이스 로고를 업데이트했습니다",
+    "click_logo_hint": "로고를 클릭해 이미지를 업로드하거나 텍스트 아이콘을 만드세요",
     "toast_logo_failed": "워크스페이스 로고를 업로드하지 못했습니다",
     "name_label": "이름",
     "description_label": "설명",
     "description_placeholder": "이 워크스페이스는 무엇에 집중하나요?",
-    "context_label": "맥락",
+    "context_label": "에이전트 컨텍스트",
     "context_placeholder": "이 워크스페이스에서 작업하는 AI 에이전트가 알아야 할 배경 정보와 맥락",
     "slug_label": "슬러그",
     "issue_prefix_label": "태스크 접두사",
     "issue_prefix_hint": "{{example}} 같은 태스크 번호에 사용됩니다.",
-    "prefix_confirm_title": "태스크 접두사를 변경할까요?",
-    "prefix_confirm_description": "모든 태스크 번호가 {{oldPrefix}}-N에서 {{newPrefix}}-N으로 다시 매겨집니다. Pull request 제목, 브랜치 이름, 문서와 채팅의 링크처럼 {{oldPrefix}}-N을 사용하는 외부 참조는 더 이상 연결되지 않습니다.",
     "save": "저장",
     "saving": "저장하는 중...",
-    "manage_hint": "관리자와 소유자만 워크스페이스 설정을 업데이트할 수 있습니다.",
-    "toast_saved": "워크스페이스 설정을 저장했습니다",
     "toast_save_failed": "워크스페이스 설정을 저장하지 못했습니다",
     "danger_zone": "위험 영역",
     "leave_title": "워크스페이스 나가기",
@@ -724,7 +1018,7 @@
     "leave_default": "이 워크스페이스에서 내 계정을 제거합니다.",
     "leave_button": "워크스페이스 나가기",
     "leaving": "나가는 중...",
-    "leave_confirm_title": "워크스페이스 나가기",
+    "leave_confirm_title": "이 워크스페이스에서 나갈까요?",
     "leave_confirm_description": "{{name}}에서 나갈까요? 다시 초대받기 전까지 접근할 수 없습니다.",
     "toast_leave_failed": "워크스페이스에서 나가지 못했습니다",
     "delete_title": "워크스페이스 삭제",
@@ -733,10 +1027,21 @@
     "deleting": "삭제하는 중...",
     "toast_delete_failed": "워크스페이스를 삭제하지 못했습니다",
     "confirm_cancel": "취소",
-    "confirm_action": "확인"
+    "confirm_action": "워크스페이스 나가기",
+    "context_hint": "이 워크스페이스의 에이전트에게 실행할 때마다 전달됩니다.",
+    "slug_hint": "모든 워크스페이스 URL에 쓰이며 생성 후에는 변경할 수 없습니다.",
+    "copy_slug": "slug 복사",
+    "copy_failed": "복사하지 못했습니다",
+    "change_prefix": "접두사 변경...",
+    "prefix_dialog_title": "태스크 접두사 변경",
+    "prefix_dialog_description": "완료되거나 취소된 태스크를 포함해 모든 태스크의 번호가 바뀝니다.",
+    "prefix_new_label": "새 접두사",
+    "prefix_rule": "영문자와 숫자만, 최대 10자까지 사용할 수 있습니다.",
+    "prefix_confirm_action": "{{prefix}}(으)로 변경",
+    "prefix_external_warning": "PR 제목, 브랜치 이름, 문서, 채팅에 있는 이전 키({{oldExample}} 등)는 업데이트되지 않으므로 해당 링크가 작동하지 않습니다."
   },
   "delete_workspace_dialog": {
-    "title": "워크스페이스 삭제",
+    "title": "이 워크스페이스를 삭제할까요?",
     "description": "이 작업은 되돌릴 수 없습니다. 모든 태스크, 에이전트, 채팅, 실행 기록이 영구 삭제됩니다.",
     "type_to_confirm_prefix": "확인하려면 아래에",
     "type_to_confirm_suffix": "을(를) 입력하세요.",
@@ -746,52 +1051,53 @@
   },
   "labs": {
     "section_placeholder_title": "아직 실험 기능이 없습니다",
-    "section_placeholder_description": "실험적 설정은 출시되는 대로 여기에 표시됩니다. 현재 이 탭은 의도적으로 비어 있습니다.",
+    "section_placeholder_description": "실험적 기능이 출시되면 여기에 표시됩니다.",
     "toast_failed": "설정을 업데이트하지 못했습니다"
   },
   "github": {
-    "section_master": "GitHub 기능 사용",
-    "master_description_on": "끄면 GitHub 기능을 일시 중지하고 기존 데이터는 유지합니다.",
     "master_description_off": "GitHub 기능이 일시 중지되었습니다. 기존 데이터는 유지됩니다.",
-    "section_connection": "연결",
-    "connection_title": "GitHub App",
-    "connection_description_prefix": "태스크를 Pull request에 자동으로 연결합니다. PR의 브랜치 이름이나 제목에",
-    "connection_description_suffix": "이(가) 있거나 본문에 Closes MUL-123이 있으면 해당 태스크에 연결되고, 그 종료 키워드가 있는 PR이 병합될 때만 해당 태스크가",
-    "connection_description_done": "완료",
-    "connection_identifier_example": "MUL-123",
     "connected_to": "{{login}}에 연결됨",
     "connect_github": "GitHub 연결",
     "connect_opening": "여는 중...",
-    "connect_disabled_tooltip": "이 서버에 GitHub App이 설정되어 있지 않습니다",
     "disconnect": "연결 해제",
     "disconnecting": "연결 해제 중...",
-    "disconnect_confirm_title": "GitHub App 연결 해제",
-    "disconnect_confirm_description": "Multica가 이 설치의 Webhook 수신을 중단합니다. 기존 PR 미러와 연결은 유지되며, 언제든 다시 연결해 업데이트를 재개할 수 있습니다.",
+    "disconnect_confirm_title": "GitHub 계정 연결을 해제할까요?",
+    "disconnect_confirm_description": "이 워크스페이스에서 {{login}} 연결을 해제할까요? 이 계정의 업데이트가 중단됩니다. 기존 PR 기록과 링크는 유지되며 다른 연결에는 영향을 주지 않습니다.",
     "disconnect_confirm_cancel": "취소",
     "disconnect_confirm_action": "연결 해제",
     "not_configured": "이 배포에는 GitHub 연동이 설정되어 있지 않습니다. 운영자가 다음 값을 설정해야 합니다:",
     "not_configured_and": "및",
-    "read_only_hint": "읽기 전용 보기입니다. 워크스페이스 관리자와 소유자만 GitHub를 연결하거나 해제할 수 있습니다.",
     "contact_admin_to_connect": "이 워크스페이스에 GitHub가 연결되어 있지 않습니다. 관리자나 소유자에게 GitHub App 설정을 요청하세요.",
     "connected_by": "{{name}}님이 연결함",
     "toast_not_configured": "이 배포에는 GitHub 연동이 설정되어 있지 않습니다",
     "toast_open_failed": "GitHub 설치 화면을 열지 못했습니다",
     "toast_disconnect_failed": "GitHub App 연결을 해제하지 못했습니다",
     "toast_disconnected": "GitHub App 연결을 해제했습니다",
-    "section_features": "기능",
     "feature_pr_sidebar_label": "Pull request 사이드바",
     "feature_pr_sidebar_description": "연결된 Pull request를 태스크 상세 사이드바에 표시합니다.",
     "feature_co_author_label": "Co-authored-by 트레일러",
     "feature_co_author_description_prefix": "에이전트가 작성한 커밋에",
     "feature_co_author_description_suffix": "을(를) 추가합니다.",
     "feature_auto_link_label": "태스크와 PR 자동 연결",
-    "section_repositories": "저장소",
-    "repositories_shortcut_label": "저장소 URL은 저장소 탭에 있습니다",
-    "repositories_shortcut_link": "저장소 관리 →",
-    "toast_failed": "GitHub 설정을 업데이트하지 못했습니다"
+    "toast_failed": "GitHub 설정을 업데이트하지 못했습니다",
+    "feature_auto_link_description": "풀 리퀘스트의 브랜치 이름이나 제목에 태스크 ID가 포함되거나 설명에 “Closes {{example}}” 형식이 있으면 자동으로 태스크를 연결합니다.",
+    "status_paused": "일시 중지됨",
+    "pause": "GitHub 기능 일시 중지",
+    "resume": "GitHub 기능 재개",
+    "add_account": "계정 또는 조직 추가",
+    "disconnect_account": "{{login}} 연결 해제",
+    "errors": {
+      "missing_authorization": "GitHub에서 사용자 인증을 반환하지 않았습니다. 다시 연결하고 인증을 완료하세요. 기존 설치에서 반복되면 Multica 운영자에게 문의하세요.",
+      "installation_not_authorized": "개인 설치에는 소유자의 GitHub 계정을 사용하세요. 조직 설치에는 승인된 모든 저장소의 관리자 권한이 있는 계정을 사용하고 저장소를 하나 이상 선택하세요.",
+      "invalid_state": "GitHub 연결 요청이 만료되었거나 유효하지 않습니다. 설정 → 코드에서 다시 연결하세요.",
+      "incomplete_callback": "GitHub 연결 응답이 불완전합니다. 설정 → 코드에서 다시 연결하세요.",
+      "bad_workspace": "연결할 워크스페이스를 찾을 수 없습니다. 대상 워크스페이스를 열고 설정 → 코드에서 다시 시도하세요.",
+      "verification_failed": "GitHub 설치 관리 권한을 확인하지 못했습니다. 다시 연결하고 반복되면 Multica 운영자에게 GitHub App 설정 확인을 요청하세요.",
+      "persist_failed": "GitHub 연결을 저장하지 못했습니다. 설정 → 코드에서 다시 시도하고 반복되면 Multica 운영자에게 문의하세요."
+    }
   },
   "vcs": {
-    "section_title": "Git providers (self-hosted)",
+    "section_title": "셀프 호스팅 Git",
     "page_description": "셀프 호스팅 Forgejo, Gitea, GitLab 인스턴스를 연결해 Pull request를 태스크에 미러링합니다. 연결마다 액세스 토큰을 사용하며, 에이전트는 런타임 자체의 Git 자격 증명으로 브랜치를 푸시하고 PR을 엽니다.",
     "connect_title": "Connect a provider instance",
     "connected_as": "Connected as {{login}}",
@@ -807,7 +1113,7 @@
     "not_configured": "Git provider integration is not configured on this server. Ask an administrator to set",
     "contact_admin": "Ask a workspace admin to connect a Git provider instance.",
     "webhook_setup_title": "Finish setup in your provider",
-    "webhook_setup_description": "Add a webhook on your repository or organisation with the URL and secret below. Forgejo/Gitea: choose the Gitea format and the Pull Request (and Commit Status) events. GitLab: paste the secret as the token and enable Merge request and Pipeline events.",
+    "webhook_setup_description": "아래 URL과 시크릿을 사용해 저장소 또는 조직에 Webhook을 추가하세요. Forgejo/Gitea: Gitea 형식을 선택하고 Pull Request(및 Commit Status) 이벤트를 활성화하세요. GitLab: 시크릿을 토큰에 붙여넣고 Merge request 및 Pipeline 이벤트를 활성화하세요.",
     "webhook_url_label": "Webhook URL",
     "webhook_secret_label": "Webhook secret",
     "webhook_secret_warning": "Copy the secret now. It is shown only once and cannot be retrieved later.",
@@ -818,7 +1124,6 @@
     "disconnect_confirm_description": "이 연결에서 미러링된 Pull request와 태스크 연결이 제거됩니다. 되돌릴 수 없습니다.",
     "disconnect_confirm_cancel": "Cancel",
     "disconnect_confirm_action": "Disconnect",
-    "toast_connected": "Provider connected",
     "toast_connect_failed": "Could not connect to the provider",
     "toast_disconnected": "Provider disconnected",
     "toast_disconnect_failed": "Could not disconnect",
@@ -828,8 +1133,11 @@
     "rotate_confirm_cancel": "Cancel",
     "rotate_confirm_action": "Regenerate",
     "rotating": "Regenerating...",
-    "toast_rotated": "Webhook secret regenerated",
-    "toast_rotate_failed": "Could not regenerate webhook secret"
+    "toast_rotate_failed": "Could not regenerate webhook secret",
+    "hosts_hint": "GitLab, Gitea 또는 Forgejo.",
+    "connect_another": "추가로 연결",
+    "connection_actions": "{{url}} 작업",
+    "webhook_done": "저장했습니다"
   },
   "telegram": {
     "section_title": "Telegram",
@@ -852,7 +1160,7 @@
     "disconnect": "연결 해제",
     "disconnecting": "해제 중…",
     "disconnect_confirm_title": "이 Telegram 봇의 연결을 해제할까요?",
-    "disconnect_confirm_description": "봇이 이 워크스페이스의 Telegram 메시지를 더 이상 수신하지 않습니다. Multica의 대화 기록은 유지되며 같은 에이전트에서 다시 연결할 수 있습니다.",
+    "disconnect_confirm_description": "봇이 이 워크스페이스의 Telegram 메시지를 더 이상 수신하지 않습니다. Multica의 채팅 기록은 유지되며, 나중에 같은 에이전트에서 다시 연결할 수 있습니다.",
     "disconnect_confirm_cancel": "취소",
     "toast_disconnected": "Telegram 봇 연결을 해제했습니다",
     "toast_disconnect_failed": "연결 해제에 실패했습니다",
@@ -876,7 +1184,6 @@
     "section_title": "저장소",
     "description": "에이전트가 이 저장소에서 코드를 작업할 수 있습니다.",
     "url_placeholder": "https://git.example.com/org/repo.git 또는 git@git.example.com:org/repo.git",
-    "url_empty": "(빈 URL)",
     "description_placeholder": "설명(예: Go 백엔드 + Next.js 프런트엔드)",
     "add": "저장소 추가",
     "connect_github": "GitHub 연결",
@@ -898,26 +1205,44 @@
     "github_load_more": "더 불러오기",
     "github_selected_count": "{{count}}개 선택",
     "github_cancel": "취소",
-    "github_import": "저장소 추가",
-    "complete_manual_entry_first": "비어 있는 수동 저장소를 입력하거나 삭제한 후 가져오세요.",
+    "github_import": "저장소 {{count}}개 추가",
+    "github_import_other": "저장소 {{count}}개 추가",
     "save": "저장",
     "saving": "저장하는 중...",
     "saved_hint": "모든 변경사항 저장됨",
     "empty": "아직 저장소가 없습니다.",
     "edit_aria": "저장소 수정",
     "cancel_aria": "수정 취소",
-    "delete_aria": "저장소 삭제",
     "delete_confirm_title": "저장소를 삭제할까요?",
     "delete_confirm_description": "이 저장소는 워크스페이스에서 즉시 제거됩니다.",
     "delete_confirm_cancel": "취소",
     "delete_confirm_action": "저장소 삭제",
     "manage_hint": "관리자와 소유자만 저장소를 관리할 수 있습니다.",
-    "toast_saved": "저장소를 저장했습니다",
-    "toast_save_failed": "저장소를 저장하지 못했습니다"
+    "toast_save_failed": "저장소를 저장하지 못했습니다",
+    "add_manually": "URL 입력...",
+    "add_title": "저장소 추가",
+    "edit_title": "저장소 편집",
+    "edit": "편집",
+    "url_label": "저장소 URL",
+    "description_label": "설명",
+    "duplicate": "이미 추가된 저장소입니다.",
+    "actions_aria": "{{url}} 작업"
   },
   "desktop": {
     "tabs": {
       "updates": "업데이트"
+    },
+    "tab_bar": {
+      "pin": "탭 고정",
+      "unpin": "탭 고정 해제",
+      "close": "탭 닫기",
+      "close_others": "다른 탭 닫기",
+      "open_window": "새 창에서 열기",
+      "new": "새 탭",
+      "pinned_name": "{{title}} (고정됨)",
+      "copy_link": "링크 복사",
+      "link_copied": "링크를 복사했습니다",
+      "close_right": "오른쪽 탭 닫기"
     },
     "updates": {
       "title": "업데이트",
@@ -930,7 +1255,18 @@
       "up_to_date": "최신 버전입니다.",
       "downloading": "v{{version}}을(를) 백그라운드에서 다운로드 중입니다. 설치 준비가 끝나면 알림을 드립니다.",
       "check_now": "지금 확인",
-      "checking": "확인 중..."
+      "checking": "확인 중...",
+      "check_unavailable": "지금 업데이트를 확인할 수 없습니다. 잠시 후 다시 시도하세요.",
+      "check_network": "업데이트 서비스에 연결할 수 없습니다. 네트워크 연결을 확인하고 다시 시도하세요.",
+      "check_failed": "업데이트 확인에 실패했습니다. 다시 시도하세요.",
+      "download_failed": "업데이트 다운로드에 실패했습니다. 현재 버전을 계속 사용하면서 다시 시도할 수 있습니다.",
+      "download_ready": "v{{version}} 설치 준비가 완료되었습니다.",
+      "retry": "다시 시도",
+      "banner_dismiss": "닫기",
+      "banner_title": "업데이트 준비 완료",
+      "banner_body": "v{{version}}은(는) 다음 실행 시 적용됩니다.",
+      "banner_changelog": "변경 로그 보기",
+      "banner_restart": "지금 다시 시작"
     },
     "daemon": {
       "title": "데몬",
@@ -942,7 +1278,7 @@
       "external_description_before": "이 기기의 데몬은 앱 외부(예: WSL2)에서 실행되므로 앱에서 시작하거나 중지할 수 없습니다. 해당 환경에서 다음 명령을 실행하세요:",
       "external_description_after": ".",
       "auto_start_title": "앱 실행 시 자동 시작",
-      "auto_start_description": "로그인할 때 자동으로 시작합니다.",
+      "auto_start_description": "Multica Desktop을 실행할 때 로컬 데몬을 자동으로 시작합니다",
       "auto_stop_title": "앱 종료 시 자동 중지",
       "auto_stop_description": "데스크톱 앱을 닫으면 데몬을 중지합니다.",
       "cli_status": "CLI 상태",
@@ -1002,10 +1338,25 @@
       "reconnect_failed": "데몬에 다시 연결하지 못했습니다",
       "try_again_moment": "잠시 후 다시 시도하세요.",
       "try_again": "다시 시도하세요."
+    },
+    "errors": {
+      "not_found_title": "이 페이지는 존재하지 않습니다",
+      "not_found_description": "이 주소를 사용할 수 없습니다. 링크를 확인하거나 돌아가세요.",
+      "tab_error_title": "이 탭에서 문제가 발생했습니다",
+      "tab_error_description": "이 탭을 불러올 수 없습니다. 다시 불러오거나 문제가 계속되면 오류를 신고해 주세요.",
+      "go_to_issues": "태스크로 이동",
+      "reload_tab": "탭 다시 불러오기",
+      "close_tab": "탭 닫기",
+      "report_error": "오류 신고",
+      "issue_unavailable_title": "태스크를 사용할 수 없음",
+      "issue_unavailable_description": "이 워크스페이스는 계정에서 더 이상 사용할 수 없습니다.",
+      "something_went_wrong": "문제가 발생했습니다",
+      "reload": "다시 불러오기",
+      "close_window": "창 닫기",
+      "unknown_route_error": "알 수 없는 라우트 오류"
     }
   },
   "members": {
-    "section_title": "멤버 ({{count}})",
     "invite_title": "멤버 초대",
     "invite_email_placeholder": "user@company.com",
     "invite_button": "초대",
@@ -1013,7 +1364,7 @@
     "toast_invitation_sent": "초대를 보냈습니다",
     "toast_invitation_failed": "초대를 보내지 못했습니다",
     "toast_seat_capacity_unavailable": "멤버 좌석을 확인할 수 없습니다. 다시 시도해 주세요.",
-    "toast_seat_capacity_rate_limited": "좌석 요청이 많습니다. 잠시 후 다시 시도해 주세요.",
+    "toast_seat_capacity_rate_limited": "좌석 변경 요청이 한꺼번에 너무 많습니다. 잠시 후 다시 시도하세요.",
     "seat_purchase_title": "좌석을 추가하고 초대를 보내시겠어요?",
     "seat_purchase_description": "{{email}}에 사용할 구매 좌석이 없습니다. Stripe 견적을 확인한 뒤 좌석 구매와 초대를 함께 승인하세요.",
     "purchase_seat_and_invite": "좌석 1개 구매 후 초대",
@@ -1022,10 +1373,7 @@
     "seat_purchase_timeout": "좌석 구매가 제출되었지만 확인이 예상보다 오래 걸리고 있습니다. 초대는 전송되지 않았습니다. 결제 화면에 사용 가능한 좌석이 표시된 후 다시 초대하세요.",
     "seat_purchase_capacity_taken": "구매한 좌석을 더 이상 사용할 수 없어 초대가 전송되지 않았습니다. 현재 좌석을 확인한 후 다시 시도하세요.",
     "no_members": "멤버를 찾을 수 없습니다.",
-    "pending_title": "대기 중인 초대 ({{count}})",
-    "pending_status": "대기 중",
-    "revoke_invitation_tooltip": "초대 취소",
-    "revoke_invitation_title": "초대 취소",
+    "revoke_invitation_title": "초대를 취소할까요?",
     "revoke_invitation_description": "{{email}}에 보낸 초대를 취소할까요? 더 이상 이 워크스페이스에 참가할 수 없습니다.",
     "toast_invitation_revoked": "초대를 취소했습니다",
     "toast_invitation_revoke_failed": "초대를 취소하지 못했습니다",
@@ -1033,7 +1381,7 @@
     "toast_role_failed": "멤버를 업데이트하지 못했습니다",
     "toast_member_removed": "멤버를 제거했습니다",
     "toast_member_remove_failed": "멤버를 제거하지 못했습니다",
-    "remove_member_title": "{{name}} 제거",
+    "remove_member_title": "{{name}} 님을 제거할까요?",
     "remove_member_description": "{{workspace}}에서 {{name}}님을 제거할까요? 이 워크스페이스에 접근할 수 없게 됩니다.",
     "confirm_cancel": "취소",
     "confirm_action": "확인",
@@ -1053,11 +1401,12 @@
       "member": {
         "label": "멤버",
         "description": "태스크 생성 및 작업"
+      },
+      "guest": {
+        "label": "게스트",
+        "description": "공유된 프로젝트만 보고 댓글을 남길 수 있습니다. 에이전트는 실행할 수 없습니다."
       }
     },
-    "share_links_title": "공유 링크",
-    "role_field": "역할：",
-    "expiry_field": "만료：",
     "share_links_create_title": "공유 링크 만들기",
     "share_links_create_button": "생성",
     "share_links_creating": "생성 중...",
@@ -1074,7 +1423,65 @@
     "expiry_24h": "24시간",
     "expiry_7d": "7일",
     "expiry_30d": "30일",
-    "expiry_never": "무기한"
+    "expiry_never": "무기한",
+    "members_label": "멤버",
+    "pending_label": "대기 중인 초대",
+    "share_links_label": "공유 링크",
+    "share_links_description": "링크가 있는 사람은 만료되거나 취소될 때까지 선택한 역할로 참여할 수 있습니다.",
+    "search_placeholder": "이름 또는 이메일 검색",
+    "no_results": "일치하는 멤버가 없습니다.",
+    "no_invitations": "대기 중인 초대가 없습니다.",
+    "no_share_links": "아직 공유 링크가 없습니다.",
+    "email_label": "이메일",
+    "role_label": "역할",
+    "expiry_label": "만료",
+    "you": "나",
+    "joined": "{{date}} 참여",
+    "member_actions": "{{name}} 작업",
+    "invitation_meta": "{{sent}} 발송 · {{expires}} 만료",
+    "revoke_invitation_aria": "{{email}}에 보낸 초대 취소",
+    "seats_used": "{{purchased}}석 중 {{used}}석 사용",
+    "manage_seats": "좌석 관리",
+    "member_limit_full_title": "이 요금제는 멤버를 최대 {{limit}}명까지 허용하며, 자리가 모두 찼습니다",
+    "member_limit_full_description": "Pro로 업그레이드하면 멤버 수 제한이 없습니다. 멤버마다 유료 좌석이 필요하며, 이번 업그레이드에는 이 초대를 위한 좌석 1개가 포함됩니다. 먼저 멤버를 제거할 수도 있습니다.",
+    "member_limit_full_description_pending": "대기 중인 초대도 자리를 차지합니다(현재 {{pending}}건). Pro로 업그레이드하면 멤버 수 제한이 없습니다(멤버마다 유료 좌석이 필요하며, 이번 업그레이드에는 이 초대를 위한 좌석 1개가 포함됩니다). 먼저 초대를 취소하거나 멤버를 제거할 수도 있습니다.",
+    "member_limit_usage": "멤버 {{used}} / {{limit}}명",
+    "upgrade_and_invite": "업그레이드하고 초대",
+    "toast_member_limit_reached": "멤버 자리가 모두 찼습니다. 더 초대하려면 업그레이드하세요.",
+    "member_limit_full_description_no_upgrade": "대기 중인 초대를 취소하거나 멤버를 제거하면 자리가 생깁니다.",
+    "toast_invalid_email": "올바른 이메일 주소를 입력하세요.",
+    "toast_already_member": "{{email}}은(는) 이미 이 워크스페이스의 멤버입니다.",
+    "toast_invitation_pending": "{{email}}에게 보낸 초대가 이미 대기 중입니다.",
+    "toast_invite_check_unavailable": "기존 멤버와 초대를 확인하지 못했습니다. 잠시 후 다시 시도하세요.",
+    "member_limit_full_description_billing": "워크스페이스 구독에 조치가 필요합니다. 결제 및 요금제에서 구독을 복구하면 멤버를 추가할 수 있습니다. 먼저 멤버를 제거할 수도 있습니다.",
+    "open_billing": "결제 및 요금제 열기",
+    "guest_free_tag": "무료 · 좌석 없음",
+    "guest_projects_label": "접근할 수 있는 프로젝트",
+    "guest_projects_add": "프로젝트 추가…",
+    "guest_projects_remove": "{{project}} 제거",
+    "guest_projects_hint": "게스트는 다른 프로젝트, 에이전트, 자동화, 설정을 볼 수 없습니다.",
+    "invite_guest_button": "게스트 초대",
+    "all_label": "전체",
+    "guests_label": "게스트",
+    "guest_count": "게스트 {{count}}명",
+    "list_separator": ", ",
+    "takes_seat": "좌석 1개 사용",
+    "frees_seat": "좌석 반환",
+    "make_member": "멤버로 전환",
+    "make_member_title": "{{name}} 님을 멤버로 전환할까요?",
+    "make_member_description": "{{name}} 님이 워크스페이스 전체를 보고 에이전트를 실행할 수 있습니다. 좌석 1개를 사용합니다.",
+    "make_member_seat_description": "{{name}} 님이 워크스페이스 전체를 보고 에이전트를 실행할 수 있습니다. 구매한 좌석을 모두 사용 중이라 1개를 추가 구매합니다.",
+    "purchase_seat_and_make_member": "좌석 구매 후 멤버로 전환",
+    "making_member": "멤버로 전환 중…",
+    "make_guest_title": "{{name}} 님을 게스트로 전환할까요?",
+    "make_guest_description": "{{name}} 님은 아래 프로젝트만 볼 수 있고 좌석이 반환됩니다. 에이전트, 자동화, 런타임 접근은 회수됩니다.",
+    "make_guest_button": "게스트로 전환",
+    "manage_projects": "접근 가능한 프로젝트 관리",
+    "manage_projects_title": "{{name}} 님이 접근할 수 있는 프로젝트",
+    "save_projects": "저장",
+    "toast_projects_updated": "프로젝트를 업데이트했습니다",
+    "revoke_invitation_confirm": "초대 취소",
+    "remove_member_confirm": "멤버 제거"
   },
   "lark": {
     "section_title": "Lark",
@@ -1089,7 +1496,7 @@
     "loading": "불러오는 중…",
     "empty_title": "아직 연결된 봇이 없어요",
     "empty_description_prefix": "이 워크스페이스의 에이전트를 열고",
-    "empty_description_cta": "Lark에 연결",
+    "empty_description_cta": "Feishu / Lark에 연결",
     "empty_description_suffix": "을(를) 클릭해 봇을 설치하세요.",
     "revoked_badge": "취소됨",
     "region_feishu": "Feishu",
@@ -1102,12 +1509,12 @@
     "disconnect_confirm_cancel": "취소",
     "toast_disconnected": "Lark 봇 연결을 해제했어요",
     "toast_disconnect_failed": "연결 해제에 실패했어요",
-    "bind_button": "Lark에 연결",
+    "bind_button": "Feishu / Lark에 연결",
     "bind_button_title": "{{agent}}을(를) Lark 봇에 연결",
-    "bind_button_feishu": "Feishu에 연결",
-    "bind_button_lark": "Lark에 연결",
-    "bind_button_feishu_title": "{{agent}}을(를) Feishu(중국 본토판) 봇에 연결",
-    "bind_button_lark_title": "{{agent}}을(를) Lark(글로벌판) 봇에 연결",
+    "bind_button_feishu": "Feishu 연결",
+    "bind_button_lark": "Lark 연결",
+    "bind_button_feishu_title": "{{agent}}을(를) Feishu(중국) 봇에 연결",
+    "bind_button_lark_title": "{{agent}}을(를) Lark(글로벌) 봇에 연결",
     "agent_bot_connected_label": "Lark에 연결됨",
     "agent_bot_manage_link": "Lark에서 관리",
     "agent_bot_manage_tooltip": "Lark 개발자 콘솔에서 이 봇의 앱 페이지를 열어 스코프 관리, 이름 변경, 추가 권한 신청을 할 수 있어요.",
@@ -1115,22 +1522,24 @@
     "agent_bot_connected_label_lark": "Lark에 연결됨",
     "agent_bot_manage_link_feishu": "Feishu에서 관리",
     "agent_bot_manage_link_lark": "Lark에서 관리",
+    "agent_bot_silent_hint": "연결됐는데 Bot이 응답하지 않나요? 앱의 이벤트 구독 방식이 롱 커넥션인지 확인하세요.",
+    "agent_bot_silent_hint_link": "문제 해결",
     "agent_bot_manage_tooltip_feishu": "Feishu 개발자 콘솔에서 이 봇의 앱 페이지를 열어 스코프 관리, 이름 변경, 추가 권한 신청을 할 수 있어요.",
     "agent_bot_manage_tooltip_lark": "Lark 개발자 콘솔에서 이 봇의 앱 페이지를 열어 스코프 관리, 이름 변경, 추가 권한 신청을 할 수 있어요.",
     "agent_bot_disconnect_tooltip": "이 Lark 봇과 에이전트 연결을 해제합니다. 봇은 Lark 메시지 수신을 중단합니다.",
-    "install_dialog_title": "Lark에 연결",
-    "install_dialog_description": "휴대폰에서 Lark를 열고 아래 코드를 스캔해 PersonalAgent 봇을 만드세요.",
-    "install_dialog_description_for_agent": "휴대폰에서 Lark를 열고 아래 코드를 스캔해 {{agent}}용 봇을 만드세요.",
+    "install_dialog_title": "Feishu / Lark에 연결",
+    "install_dialog_description": "휴대폰에서 Lark를 열고 아래 코드를 스캔해 Bot 봇을 만드세요.",
+    "install_dialog_description_for_agent": "Feishu 또는 Lark로 QR 코드를 스캔해 {{agent}}용 봇을 만드세요.",
     "install_dialog_title_feishu": "Feishu에 연결",
     "install_dialog_title_lark": "Lark에 연결",
-    "install_dialog_description_feishu": "휴대폰에서 Feishu를 열고 아래 코드를 스캔해 PersonalAgent 봇을 만드세요.",
-    "install_dialog_description_lark": "휴대폰에서 Lark를 열고 아래 코드를 스캔해 PersonalAgent 봇을 만드세요.",
-    "install_dialog_description_for_agent_feishu": "휴대폰에서 Feishu를 열고 아래 코드를 스캔해 {{agent}}용 봇을 만드세요.",
-    "install_dialog_description_for_agent_lark": "휴대폰에서 Lark를 열고 아래 코드를 스캔해 {{agent}}용 봇을 만드세요.",
+    "install_dialog_description_feishu": "휴대폰에서 Feishu를 열고 아래 코드를 스캔해 Bot 봇을 만드세요.",
+    "install_dialog_description_lark": "휴대폰에서 Lark를 열고 아래 코드를 스캔해 Bot 봇을 만드세요.",
+    "install_dialog_description_for_agent_feishu": "Feishu로 QR 코드를 스캔해 {{agent}}용 봇을 만드세요.",
+    "install_dialog_description_for_agent_lark": "Lark로 QR 코드를 스캔해 {{agent}}용 봇을 만드세요.",
     "install_starting": "QR 코드를 준비하는 중…",
-    "install_scan_hint": "Lark → 스캔 → 새 PersonalAgent를 승인하세요.",
+    "install_scan_hint": "Lark → 스캔 → 새 Bot를 승인하세요.",
     "install_open_link_fallback": "또는 여기를 눌러 Lark에서 열기",
-    "install_success": "설치 완료 — 봇이 온라인 상태입니다.",
+    "install_success": "봇이 등록되었습니다. Feishu/Lark에서 메시지를 보내 수신을 확인하세요.",
     "install_success_toast": "Lark 봇이 설치되었어요",
     "install_open_link_fallback_feishu": "또는 여기를 눌러 Feishu에서 열기",
     "install_open_link_fallback_lark": "또는 여기를 눌러 Lark에서 열기",
@@ -1147,37 +1556,12 @@
     "install_error_installer_bind": "봇은 설치되었지만 Lark 신원을 연결하지 못했어요. 다시 시도하거나 지원팀에 문의하세요.",
     "install_error_session_lost": "설치 세션이 만료되었거나 유실되었어요. 다시 스캔해 처음부터 진행하세요.",
     "install_error_forbidden": "이 워크스페이스에 Lark 봇을 설치할 권한이 더 이상 없어요. 워크스페이스 관리자에게 문의하세요.",
-    "install_error_generic": "설치에 실패했어요. 다시 시도하세요."
-  },
-  "composio": {
-    "section_title": "Composio",
-    "page_description": "에이전트가 사용할 앱을 연결하세요.",
-    "not_enabled_title": "Composio integration not enabled",
-    "not_enabled_description_prefix": "Set",
-    "not_enabled_description_suffix": "on the server to enable Composio toolkit connections.",
-    "loading": "Loading toolkits…",
-    "load_failed": "Failed to load Composio toolkits.",
-    "empty_title": "No connectable apps yet",
-    "empty_description": "No toolkit has an enabled auth config in your Composio project yet. Enable one in the Composio dashboard to make it available here.",
-    "search_placeholder": "Search toolkits…",
-    "connect": "Connect",
-    "connecting": "Connecting…",
-    "connected": "Connected",
-    "disconnect": "Disconnect",
-    "disconnecting": "Disconnecting…",
-    "connect_failed": "Couldn't start the connection. Please try again.",
-    "disconnect_failed": "Couldn't disconnect. Please try again.",
-    "toast_disconnected": "Disconnected",
-    "disconnect_confirm_title": "Disconnect this app?",
-    "disconnect_confirm_description": "Your connected account will be revoked at Composio and your agents will lose access to this toolkit. You can reconnect later.",
-    "disconnect_confirm_cancel": "Cancel",
-    "connections_load_failed": "Couldn't load your existing connections, so connected status may be incomplete.",
-    "toast_connected": "연결되었습니다",
-    "toast_connect_failed": "연결을 완료하지 못했습니다. 다시 시도해 주세요.",
-    "last_used": "마지막 사용 {{when}}",
-    "last_used_never": "사용한 적 없음",
-    "expired": "토큰 만료됨",
-    "reconnect": "다시 연결"
+    "install_error_generic": "설치에 실패했어요. 다시 시도하세요.",
+    "bound_label": "연결 등록됨",
+    "inbound_pending": "등록됨 · 메시지 확인 대기",
+    "inbound_verified": "메시지 수신 확인됨",
+    "inbound_pending_hint": "Feishu/Lark에서 이 봇에 메시지를 보내 수신을 확인하세요. 도착하지 않으면 지속 연결 모드, im.message.receive_v1 구독, 앱 게시 및 승인 상태를 확인하세요. 기존 연결에는 확인 기록이 없을 수 있습니다.",
+    "inbound_verified_hint": "이번 연결에서 유효한 메시지를 받았습니다. 지속적인 연결, 에이전트 실행 또는 답장 성공을 의미하지는 않습니다."
   },
   "slack": {
     "section_title": "Slack",
@@ -1199,7 +1583,7 @@
     "disconnect": "연결 해제",
     "disconnecting": "연결 해제 중…",
     "disconnect_confirm_title": "이 Slack 봇을 연결 해제할까요?",
-    "disconnect_confirm_description": "봇이 이 워크스페이스의 Slack 메시지를 더 이상 받지 않습니다. 설치 기록은 감사를 위해 보관되며, 같은 에이전트에서 다시 설치할 수 있어요.",
+    "disconnect_confirm_description": "봇이 이 워크스페이스의 Slack 메시지를 더 이상 수신하지 않습니다. 설치 기록은 감사를 위해 보관되며, 나중에 같은 에이전트에서 다시 연결할 수 있습니다.",
     "disconnect_confirm_cancel": "취소",
     "toast_disconnected": "Slack 봇을 연결 해제했어요",
     "toast_disconnect_failed": "연결 해제에 실패했어요",
@@ -1229,7 +1613,7 @@
     "groups_title": "최근 그룹",
     "groups_description": "워크스페이스 멤버가 DingTalk 계정을 연결하고 그룹에서 이 봇을 @멘션하면 표시됩니다. 기본 목록에는 최근 90일 동안 활동한 그룹만 표시됩니다.",
     "groups_loading": "그룹을 불러오는 중…",
-    "groups_empty": "아직 그룹 메시지가 관찰되지 않았습니다.",
+    "groups_empty": "아직 그룹 활동이 없습니다.",
     "groups_no_recent": "최근 90일 동안 활동한 그룹이 없습니다.",
     "groups_inactive": "장기 미활동({{count}})",
     "groups_load_more": "더 불러오기",
@@ -1242,7 +1626,7 @@
     "group_mentions_other": "멘션 {{count}}회",
     "group_forget": "목록에서 삭제",
     "group_forget_title": "이 그룹을 목록에서 삭제할까요?",
-    "group_forget_description": "Multica 목록에서만 삭제됩니다. 대화와 메시지는 유지되며 봇을 다시 @멘션하면 목록에 다시 나타납니다.",
+    "group_forget_description": "DingTalk의 메시지는 삭제하지 않고 Multica 목록에서만 이 그룹을 제거합니다.",
     "group_forget_cancel": "취소",
     "group_forget_confirm": "목록에서 삭제",
     "group_forget_success": "그룹을 목록에서 삭제했습니다",
@@ -1252,28 +1636,28 @@
     "bot_permission_tooltip_suffix": "권한을 부여한 다음 이 봇이 추가된 DingTalk 그룹에서 다시 @멘션하세요.",
     "not_enabled_title": "DingTalk 연동이 활성화되지 않았어요",
     "not_enabled_description_prefix": "서버에서",
-    "not_enabled_description_suffix": "를 설정하면 DingTalk 로봇 설치가 활성화됩니다.",
+    "not_enabled_description_suffix": "을(를) 설정하면 DingTalk 봇이 활성화됩니다.",
     "not_enabled_self_host_hint": "셀프 호스팅: 자세한 내용은 프로젝트 README를 참고하세요.",
-    "connections_title": "연결",
+    "connections_title": "연결된 봇",
     "deleted_agent": "삭제된 에이전트",
     "loading": "불러오는 중…",
     "empty_title": "아직 연결된 봇이 없어요",
     "empty_description_prefix": "이 워크스페이스의 에이전트를 열고",
     "empty_description_cta": "DingTalk 연결",
-    "empty_description_suffix": "을(를) 클릭해 로봇을 설치하세요.",
+    "empty_description_suffix": "을(를) 클릭해 봇을 설치하세요.",
     "revoked_badge": "해제됨",
     "installed_at_label": "{{when}}에 설치됨",
     "identity_label": "연결된 Staff ID: {{identity}}",
     "disconnect": "연결 해제",
     "disconnecting": "연결 해제 중…",
     "disconnect_confirm_title": "이 DingTalk 봇을 연결 해제할까요?",
-    "disconnect_confirm_description": "봇이 이 워크스페이스의 DingTalk 메시지를 더 이상 받지 않습니다. 설치 기록은 감사를 위해 보관되며, 나중에 봇을 다시 연결할 수 있어요.",
+    "disconnect_confirm_description": "봇이 이 워크스페이스의 DingTalk 메시지를 더 이상 수신하지 않습니다. 설치 기록은 감사를 위해 보관되며, 나중에 같은 에이전트에서 다시 연결할 수 있습니다.",
     "disconnect_confirm_cancel": "취소",
     "toast_disconnected": "DingTalk 봇을 연결 해제했어요",
     "toast_disconnect_failed": "연결 해제에 실패했어요",
     "bind_button": "DingTalk 연결",
     "bind_button_title": "{{agent}}을(를) DingTalk 봇에 연결",
-    "agent_bot_connected_label": "연결된 봇:",
+    "agent_bot_connected_label": "DingTalk에 연결됨",
     "agent_bot_disconnect_tooltip": "이 DingTalk 봇을 에이전트에서 연결 해제합니다. 봇이 DingTalk 메시지를 받지 않게 됩니다.",
     "byo_dialog_title": "DingTalk 봇 연결",
     "byo_docs_link": "Step-by-step: Multica 에이전트를 DingTalk에 연결하기",
@@ -1290,7 +1674,7 @@
     "page_description": "WeCom에서 에이전트와 대화하거나 /issue로 태스크를 만드세요. 공개 콜백 URL은 필요 없습니다.",
     "not_enabled_title": "WeCom 통합이 활성화되지 않았어요",
     "not_enabled_description_prefix": "서버에서",
-    "not_enabled_description_suffix": "를 설정하면 WeCom 스마트봇 설치가 활성화돼요.",
+    "not_enabled_description_suffix": "을(를) 설정하면 WeCom 스마트봇이 활성화됩니다.",
     "not_enabled_self_host_hint": "셀프호스팅 사용자는 프로젝트 README를 참고해 주세요.",
     "preview_title": "WeCom 설치는 곧 제공됩니다",
     "preview_description": "이 배포 환경에서는 WeCom 연결이 활성화되지 않았습니다. 관리자에게 문의하세요.",
@@ -1305,7 +1689,7 @@
     "disconnect": "연결 해제",
     "disconnecting": "해제 중…",
     "disconnect_confirm_title": "이 WeCom 봇의 연결을 해제할까요?",
-    "disconnect_confirm_description": "봇이 이 워크스페이스의 WeCom 메시지를 더 이상 받지 않아요. 감사 기록은 유지되며 같은 에이전트에서 다시 설치할 수 있어요.",
+    "disconnect_confirm_description": "봇이 이 워크스페이스의 WeCom 메시지를 더 이상 수신하지 않습니다. 설치 기록은 감사를 위해 보관되며, 나중에 같은 에이전트에서 다시 연결할 수 있습니다.",
     "disconnect_confirm_cancel": "취소",
     "toast_disconnected": "WeCom 봇의 연결을 해제했어요",
     "toast_disconnect_failed": "연결 해제 실패",
@@ -1333,21 +1717,582 @@
     "byo_credentials_rejected": "WeCom이 이 Bot ID와 시크릿을 거부했어요. WeCom 관리 콘솔에서 두 값을 확인하고, 장기 연결이 켜진 스마트 봇인지도 확인해 주세요.",
     "byo_credentials_unverifiable": "WeCom에 연결하지 못해 이 봇을 확인할 수 없었어요. 인증 정보는 변경되지 않았어요. 잠시 후 다시 시도해 주세요.",
     "byo_install_failed": "봇을 저장하지 못했어요. 저희 쪽 문제입니다. 인증 정보는 변경되지 않았어요. 다시 시도해 보시고, 계속 실패하면 지원팀에 문의해 주세요.",
+    "scan_option_title": "새 봇 만들기",
+    "scan_option_description": "WeCom에서 QR 코드를 스캔해 새 스마트 봇을 만들고 연결합니다.",
+    "byo_option_title": "기존 봇 연결",
+    "byo_option_description": "이미 만든 스마트 봇의 Bot ID와 시크릿을 입력하세요.",
+    "scan_dialog_title": "QR 코드로 WeCom 봇 만들기",
+    "scan_starting": "QR 코드를 준비하는 중…",
+    "scan_hint": "휴대폰에서 WeCom을 열고 이 QR 코드를 스캔해 봇을 만드세요.",
+    "scan_expires_in": "{{seconds}}초 후 만료",
+    "scan_success_toast": "WeCom 봇을 만들고 연결했습니다",
+    "scan_again": "새 코드 받기",
+    "scan_close": "닫기",
+    "scan_error_expired": "스캔하기 전에 QR 코드가 만료되었습니다.",
+    "scan_error_generate_failed": "WeCom에서 QR 코드를 가져올 수 없습니다. 잠시 후 다시 시도하세요.",
+    "scan_error_integration_unconfigured": "이 서버에서는 QR 설치가 활성화되지 않았습니다.",
+    "scan_error_installation_conflict": "이 봇은 이미 다른 곳에 연결되어 있습니다. 그곳에서 연결을 해제한 뒤 다시 스캔하세요.",
+    "scan_error_bind_failed": "WeCom에서 봇은 만들어졌지만 이 에이전트에 연결하지 못했습니다. WeCom에서 봇을 삭제한 뒤 다시 스캔하세요.",
+    "scan_error_wecom_protocol_error": "WeCom이 예상치 못한 응답을 반환했습니다.",
+    "scan_error_internal_error": "문제가 발생했습니다. 다시 시도하세요.",
+    "scan_error_session_lost": "이 설치 세션을 사용할 수 없습니다. 새 코드를 받으세요.",
+    "scan_error_already_connected": "이 에이전트에는 이미 WeCom 봇이 연결되어 있습니다. 먼저 연결을 해제하세요.",
+    "scan_error_rate_limited": "시도 횟수가 너무 많습니다. 몇 분 후에 다시 시도하세요.",
     "byo_failed_toast": "WeCom 봇을 연결하지 못했어요"
   },
   "integrations": {
-    "code_title": "코드 및 저장소",
-    "messaging_title": "메시지 채널",
-    "apps_title": "내 앱 연결",
-    "apps_scope": "이 앱 연결은 내 계정에 속합니다. 워크스페이스 채널 연결은 위에서 관리합니다.",
-    "github_hint": "GitHub를 연결하고 풀 리퀘스트 연결을 설정합니다.",
-    "vcs_hint": "GitLab, Gitea 또는 Forgejo를 연결합니다.",
-    "apps_hint": "Composio를 통해 에이전트용 앱을 승인합니다.",
-    "back": "모든 연동",
     "status_connected": "연결됨",
     "status_not_connected": "연결되지 않음",
     "status_loading": "확인 중...",
-    "status_unknown": "상태를 확인할 수 없음",
-    "channel_hint": "{{channel}}에서 에이전트와 대화하고 태스크를 생성합니다."
+    "status_unknown": "상태를 확인할 수 없음"
+  },
+  "pr_merge_status": {
+    "label": "PR 병합 후 태스크 상태",
+    "description": "연결된 PR이 모두 병합되면 적용되며, 이후 병합에만 영향을 줍니다.",
+    "none": "변경하지 않음"
+  },
+  "layout": {
+    "scope": {
+      "account": "계정 · 모든 기기에 동기화",
+      "all_workspaces": "내 모든 워크스페이스",
+      "device": "이 기기에만",
+      "device_workspace": "이 기기에만 · {{name}}",
+      "workspace": "{{name}} 워크스페이스",
+      "workspace_only": "{{name}}에만 적용"
+    },
+    "read_only": {
+      "title": "보기 전용",
+      "description": "이 설정은 워크스페이스 소유자와 관리자만 변경할 수 있습니다.",
+      "contact": "이 설정은 소유자와 관리자만 변경할 수 있습니다. {{names}}에게 요청하세요.",
+      "separator": ", "
+    }
+  },
+  "code": {
+    "hosting_title": "코드 호스팅",
+    "pr_linking_title": "풀 리퀘스트와 태스크",
+    "github_actions": "GitHub 작업"
+  },
+  "channels": {
+    "breadcrumb": "탐색 경로",
+    "add": "메시지 채널 추가",
+    "connect": "연결",
+    "disconnect": "연결 해제",
+    "open": "열기",
+    "normal": "연결됨",
+    "waiting_message": "첫 메시지 대기 중",
+    "disconnected": "연결 안 됨",
+    "find_me": "{{platform}}에서 대화하기",
+    "manage": "{{platform}} 관리",
+    "last_message": "최근 메시지: {{time}}",
+    "ask_admin": "관리자에게 요청",
+    "unavailable": "연결할 수 없음",
+    "permissions_title": "연결 권한",
+    "owner_or_admin": "에이전트 소유자 또는 워크스페이스 관리자",
+    "admin_only": "워크스페이스 관리자만",
+    "connect_title": "메시지 채널 연결",
+    "choose_description": "에이전트와 플랫폼을 선택하세요.",
+    "authorize_description": "{{agent}}을(를) {{platform}}에 연결합니다.",
+    "agent_label": "에이전트",
+    "choose_agent": "에이전트 선택",
+    "platform_label": "플랫폼",
+    "region_label": "지역",
+    "method_label": "연결 방식",
+    "feishu": "Feishu(중국)",
+    "lark": "Lark(국제)",
+    "setup_guide": "설정 가이드",
+    "connection_changed": "이 연결을 더 이상 사용할 수 없습니다. 닫고 다시 시도하세요.",
+    "connect_failed": "봇을 연결할 수 없습니다.",
+    "connect_success": "메시지 채널이 연결되었습니다.",
+    "disconnect_failed": "봇 연결을 해제할 수 없습니다.",
+    "disconnect_title": "메시지 채널 연결을 해제할까요?",
+    "disconnect_description": "이 에이전트는 {{platform}}의 메시지를 더 이상 받지 않습니다.",
+    "agent_unavailable": "에이전트를 사용할 수 없음"
+  },
+  "mcp_usage": {
+    "agent_count_other": "에이전트 {{count}}개가 사용 중",
+    "none": "어떤 에이전트에도 할당되지 않음"
+  },
+  "mcp_sources": {
+    "title": "에이전트에 도구를 제공하는 방법",
+    "current": "현재 페이지",
+    "mcp": "관리자가 추가해 워크스페이스에서 공유하고, 에이전트별로 할당합니다.",
+    "apps": "Multica로 연결한 팀 또는 개인 계정을 각 에이전트에 추가합니다.",
+    "plugins": "설치하면 도구, 예약 훅, 저장소를 추가할 수 있으며 플러그인마다 권한을 부여합니다."
+  },
+  "weixin": {
+    "section_title": "WeChat",
+    "page_description": "연결 QR 코드를 스캔한 계정과의 개인 메시지입니다.",
+    "loading": "연결 중…",
+    "empty": "에이전트의 연동 탭에서 WeChat을 연결하세요.",
+    "close": "닫기",
+    "action_failed": "작업을 완료하지 못했습니다. 다시 시도하세요.",
+    "privacy_hint": "메시지는 이 워크스페이스에서 본인의 권한으로 실행됩니다. QR 코드를 공유하지 마세요.",
+    "qr_label": "WeChat 연결 QR 코드",
+    "scan_hint": "WeChat으로 스캔한 후 휴대폰에서 확인하세요.",
+    "scanned": "스캔되었습니다. WeChat에서 연결을 확인하세요.",
+    "verify_hint": "WeChat 인증이 필요합니다. 휴대폰에 표시된 코드를 입력하세요.",
+    "verify_label": "인증 코드",
+    "verify": "인증",
+    "success": "연결되었습니다. WeChat에서 봇에게 새 메시지를 보내세요.",
+    "expired": "QR 코드가 만료되었습니다. 새로 생성하세요.",
+    "blocked": "WeChat이 추가 인증을 차단했습니다. 나중에 다시 시도하세요.",
+    "already_bound": "이 봇은 이미 WeChat에 연결되어 있습니다. 이전 클라이언트의 연결을 해제하고 다시 시도하세요.",
+    "refresh": "새 QR 코드",
+    "retry": "다시 시도",
+    "already_connected": "이 WeChat 계정은 {{agent}}에 연결되어 있습니다. 먼저 해당 연결을 해제하세요.",
+    "connected_elsewhere": "이 WeChat 계정은 다른 곳에 연결되어 있습니다. 먼저 기존 연결을 해제하세요.",
+    "authorization_expired": "WeChat 인증이 만료되었습니다. 다시 스캔하여 연결하세요."
+  },
+  "connected_apps": {
+    "loading": "앱을 불러오는 중…",
+    "load_failed": "앱을 불러오지 못했습니다.",
+    "reconnect": "다시 연결",
+    "rules": "규칙",
+    "activity": "활동",
+    "disconnect": "연결 해제",
+    "catalog_title": "사용 가능한 앱",
+    "catalog_label": "멤버가 추가할 수 있는 앱",
+    "catalog_description": "엄선된 앱에는 검토된 기본 규칙이 있습니다. '모든 앱'은 Multica로 연결할 수 있는 모든 앱을 포함하며, Multica가 분류하지 못한 작업은 항상 먼저 확인을 받습니다. 사용자 지정 목록은 선택한 앱만 허용합니다.",
+    "catalog_all": "모든 앱",
+    "catalog_curated": "엄선된 앱만",
+    "catalog_custom": "사용자 지정 목록",
+    "toast_connected": "계정이 연결되었습니다",
+    "toast_connect_failed": "연결을 완료하지 못했습니다. 다시 시도하세요.",
+    "toast_disconnected": "연결이 해제되었습니다",
+    "toast_failed": "문제가 발생했습니다. 다시 시도하세요.",
+    "add": {
+      "empty": "일치하는 앱이 없습니다."
+    },
+    "detail": {
+      "team_title": "{{app}} · 팀 계정",
+      "personal_title": "{{app}} · 내 계정",
+      "rules_description": "에이전트가 이 계정으로 할 수 있는 일입니다. 에이전트 수준은 이 규칙을 더 엄격하게만 만들 수 있습니다.",
+      "rules_read_only": "팀 계정 규칙은 워크스페이스 관리자만 변경할 수 있습니다.",
+      "default": "기본값: {{policy}}",
+      "activity_empty": "아직 호출이 없습니다.",
+      "activity_failed": "활동을 불러오지 못했습니다."
+    },
+    "classes": {
+      "read": {
+        "label": "읽기",
+        "description": "검색, 목록, 가져오기"
+      },
+      "write": {
+        "label": "쓰기",
+        "description": "콘텐츠 생성 및 수정"
+      },
+      "send": {
+        "label": "보내기",
+        "description": "메일·메시지 보내기, 게시, 초대"
+      },
+      "delete": {
+        "label": "삭제",
+        "description": "삭제 또는 보관"
+      },
+      "share": {
+        "label": "공유",
+        "description": "권한 변경 또는 외부 공유"
+      }
+    },
+    "policies": {
+      "allow": "허용",
+      "confirm": "먼저 확인",
+      "block": "차단"
+    },
+    "outcomes": {
+      "ok": "실행됨",
+      "error": "실패",
+      "blocked": "차단됨",
+      "pending": "확인 대기",
+      "approved": "승인됨",
+      "rejected": "거절됨",
+      "rate_limited": "속도 제한",
+      "quota_exceeded": "월 한도 도달"
+    },
+    "scopes": {
+      "team": "팀 계정",
+      "personal": "실행 시작자의 계정"
+    },
+    "status": {
+      "connected": "연결됨",
+      "not_connected": "연결 안 됨",
+      "needs_reconnecting": "다시 연결 필요",
+      "requested": "요청됨"
+    },
+    "owner": {
+      "team": "팀 계정",
+      "personal": "내 계정"
+    },
+    "account_row": {
+      "admins_notified": "관리자에게 알림",
+      "withdraw": "철회",
+      "decline": "거절",
+      "toast_declined": "요청을 거절했습니다. 기다리던 에이전트는 이 계정 없이 계속합니다.",
+      "toast_withdrawn": "요청을 철회했습니다"
+    },
+    "disclosure": {
+      "title": "{{app}} 연결",
+      "personal_subtitle": "내 계정입니다. 다음 화면에서 앱에 로그인합니다.",
+      "team_subtitle": "워크스페이스 전체가 공유하는 팀 계정입니다. 다음 화면에서 앱에 로그인합니다.",
+      "without_asking": "에이전트가 매번 묻지 않고 할 수 있는 작업",
+      "logged": "에이전트의 모든 호출은 해당 태스크나 채팅에 기록됩니다.",
+      "used_by": "{{agents}}이(가) {{app}}을(를) 사용하며 이 계정으로 작업합니다.",
+      "used_by_none": "아직 이 앱을 사용하는 에이전트가 없습니다. 에이전트 페이지에서 추가하세요.",
+      "visibility_personal": "내가 시작한 실행에서만 사용됩니다. 내 다른 워크스페이스에서도 사용할 수 있습니다.",
+      "visibility_team": "팀 계정을 부여받은 에이전트는 누가 실행을 시작하든 이 계정으로 작업합니다.",
+      "cancel": "취소",
+      "continue": "계속"
+    },
+    "levels": {
+      "read": "읽기 전용",
+      "confirm_writes": "쓰기 전 확인",
+      "write": "쓰기 가능"
+    },
+    "request": {
+      "title_action": "{{agent}}이(가) {{tool}} 실행을 요청합니다",
+      "title_connect": "{{agent}}이(가) {{app}} 연결을 요청합니다",
+      "pending_count_other": "앱 작업 {{count}}개가 확인 대기 중",
+      "waiting_for": "{{name}} 님의 확인 대기 중",
+      "expires": "{{when}} 만료",
+      "redacted": "세부 내용은 {{name}} 님만 볼 수 있습니다.",
+      "arguments": "인수",
+      "edit": "편집",
+      "invalid_json": "인수는 JSON 객체여야 합니다.",
+      "approve": "승인 후 실행",
+      "approve_all": "모두 승인",
+      "reject": "거절",
+      "reject_reason": "이유 (선택, 에이전트에게 표시됨)",
+      "connect": "{{app}} 연결",
+      "connected_continue": "연결했습니다",
+      "status": {
+        "approved": "승인됨",
+        "rejected": "거절됨",
+        "failed": "실패",
+        "expired": "만료됨",
+        "cancelled": "취소됨"
+      },
+      "toast_approved": "승인했습니다. 에이전트가 이어서 진행합니다.",
+      "toast_rejected": "거절했습니다. 에이전트가 방식을 조정합니다.",
+      "toast_failed": "결정을 기록하지 못했습니다.",
+      "not_connected": "먼저 계정을 연결하세요.",
+      "connected_resumed": "{{app}} 연결됨. 에이전트가 멈춘 곳부터 이어서 진행합니다.",
+      "rate_limited": "이 계정이 분당 호출 한도에 도달했습니다. 1분 후에 다시 승인하세요.",
+      "rate_limited_some_other": "요청 {{count}}개가 분당 한도에 걸렸습니다. 1분 후에 다시 승인하세요.",
+      "withdrawn": "이 에이전트를 더 이상 사용할 수 없어 요청이 철회되었습니다.",
+      "title_connect_team": "{{agent}}에 {{app}} 계정이 필요합니다",
+      "title_member_ask": "{{name}} 님이 {{app}} 팀 계정을 요청했습니다",
+      "waiting_for_admin": "관리자를 기다리는 중",
+      "team_note": "팀 계정으로 동작하는 모든 에이전트가 사용할 수 있습니다.",
+      "admins_notified": "워크스페이스 관리자에게 받은 편지함으로 알렸습니다.",
+      "connect_team": "팀용으로 연결"
+    },
+    "tools": {
+      "tab": "도구",
+      "description": "도구의 분류에 따라 적용되는 규칙이 정해집니다. 자동 분류가 잘못된 도구는 수정할 수 있으며, 변경 사항은 워크스페이스에서 이 앱의 모든 계정에 적용됩니다.",
+      "read_only": "도구 분류는 워크스페이스 관리자만 변경할 수 있습니다.",
+      "search": "도구 검색",
+      "empty": "일치하는 도구가 없습니다.",
+      "auto": "자동 ({{class}})",
+      "truncated": "{{total}}개 중 {{shown}}개 표시 중. 검색해서 좁혀 보세요."
+    },
+    "custom": {
+      "title": "사용자 지정 앱 목록",
+      "description": "에이전트는 선택한 앱만 볼 수 있고, 다른 앱의 계정은 누구도 연결할 수 없습니다.",
+      "selected_other": "앱 {{count}}개 선택됨",
+      "cancel": "취소",
+      "save": "목록 저장",
+      "saved": "앱 목록을 저장했습니다",
+      "edit": "목록 편집",
+      "row_label": "허용된 앱",
+      "row_description_other": "앱 {{count}}개 허용"
+    },
+    "saved_access": {
+      "account": "이전 작업 제한이 여전히 이 계정을 제한하고 있습니다.",
+      "agent": "이 앱에 이전 읽기 전용 설정이 남아 있습니다.",
+      "catalog": "이전 앱 목록이 다른 앱을 숨기고 있습니다.",
+      "allow_actions": "모든 작업 허용",
+      "open_catalog": "모든 앱 표시",
+      "account_confirm": "이 계정이 할당된 에이전트는 읽기, 쓰기, 전송, 삭제, 공유를 할 수 있게 됩니다. 저장된 작업 제한이 대체됩니다.",
+      "agent_confirm": "이 에이전트는 계정에서 허용한 범위 내에서 이 앱의 읽기, 쓰기, 전송, 삭제, 공유를 할 수 있게 됩니다.",
+      "catalog_confirm": "워크스페이스에서 연결 가능한 모든 앱을 선택할 수 있게 됩니다. 기존 연결과 에이전트 앱 할당은 유지됩니다.",
+      "cancel": "취소",
+      "admin_required": "워크스페이스 관리자가 제한을 해제할 수 있습니다.",
+      "account_link": "이 계정에 저장된 작업 제한이 있습니다. 연결된 앱에서 해제하세요."
+    },
+    "hub": {
+      "description": "{{workspace}}의 에이전트가 사용할 수 있는 모든 앱과 각 앱에서 사용하는 계정입니다.",
+      "tabs": {
+        "in_use": "사용 중",
+        "attention": "확인 필요",
+        "accounts": "계정",
+        "all": "모든 앱"
+      },
+      "search": "앱 검색",
+      "popular": "{{workspace}}에서 인기",
+      "scope_team": "팀 계정",
+      "scope_personal": "개인 계정",
+      "scope_both": "팀 계정 및 개인 계정",
+      "used_by": "{{agents}} 사용 중",
+      "wanted_by": "{{agents}}이(가) 사용 희망",
+      "members_asked_other": "멤버 {{count}}명이 요청함",
+      "connect": "연결",
+      "reconnect": "다시 연결",
+      "ask_admin": "관리자에게 요청",
+      "toast_requested": "워크스페이스 관리자에게 {{app}} 연결을 요청했습니다.",
+      "empty_in_use": "아직 사용 중인 앱이 없습니다. 앱을 설정하면 에이전트가 사용할 수 있습니다.",
+      "empty_attention": "확인할 항목이 없습니다.",
+      "no_matches": "검색과 일치하는 앱이 없습니다.",
+      "unavailable": "이 서버에서는 앱을 사용할 수 없습니다.",
+      "retry": "다시 시도",
+      "category_all": "전체",
+      "category_curated": "추천",
+      "categories_label": "카테고리",
+      "categories_nav": "앱 카테고리",
+      "connect_oauth": "OAuth로 로그인",
+      "connect_key": "API 키 입력",
+      "show_more": "더 보기",
+      "categories": {
+        "ai_ml": "AI 및 머신러닝",
+        "developer_tools": "개발 도구 및 DevOps",
+        "data_analytics": "데이터 및 분석",
+        "productivity": "생산성 및 프로젝트 관리",
+        "collaboration": "협업 및 커뮤니케이션",
+        "marketing_social": "마케팅 및 소셜 미디어",
+        "documents": "문서 및 파일",
+        "sales_support": "영업 및 고객 지원",
+        "crm": "CRM",
+        "finance": "재무 및 회계",
+        "workflow_automation": "워크플로 자동화",
+        "design": "디자인 및 크리에이티브",
+        "ecommerce": "이커머스",
+        "advertising": "광고",
+        "scheduling": "일정 및 예약",
+        "entertainment": "엔터테인먼트 및 미디어",
+        "hr_recruiting": "HR 및 채용",
+        "education": "교육",
+        "model_context_protocol": "MCP 서버",
+        "marketing_automation": "마케팅 자동화",
+        "email": "이메일",
+        "security_identity_tools": "보안 및 ID 관리",
+        "forms_surveys": "양식 및 설문조사",
+        "databases": "데이터베이스",
+        "web_scraping_browser": "웹 스크래핑 및 브라우저",
+        "email_newsletters": "이메일 뉴스레터",
+        "business_intelligence": "비즈니스 인텔리전스",
+        "ai_web_scraping": "AI 웹 스크래핑",
+        "ai_agents": "AI 에이전트",
+        "web_search_research": "웹 검색 및 리서치",
+        "ai_sales_tools": "AI 영업 도구",
+        "ai_content_generation": "AI 콘텐츠 생성",
+        "payment_processing": "결제 처리",
+        "server_monitoring": "서버 모니터링",
+        "video_audio": "비디오 및 오디오",
+        "signatures": "전자 서명",
+        "phone_sms": "전화 및 SMS",
+        "audio_speech": "오디오 및 음성",
+        "ai_chatbots": "AI 챗봇",
+        "ai_document_extraction": "AI 문서 추출",
+        "url_shortener": "URL 단축",
+        "people_contact_data": "인물 및 연락처 데이터",
+        "notifications": "알림",
+        "event_management": "이벤트 관리",
+        "places_weather": "장소 및 날씨",
+        "market_data": "시장 데이터",
+        "it_operations": "IT 운영",
+        "internet_of_things": "사물인터넷",
+        "spreadsheets": "스프레드시트",
+        "fundraising": "모금",
+        "website_builders": "웹사이트 및 앱 빌더",
+        "reviews": "리뷰",
+        "company_data": "기업 데이터",
+        "ai_meeting_assistants": "AI 회의 도우미",
+        "bookmark_managers": "북마크 관리",
+        "social_creator_data": "소셜 및 크리에이터 데이터",
+        "seo_ai_visibility": "SEO 및 AI 가시성",
+        "legal_public_records": "법률 및 공공 기록",
+        "ai_safety": "AI 안전 및 규정 준수",
+        "other": "기타"
+      }
+    },
+    "app_page": {
+      "agents_title": "에이전트",
+      "agents_empty": "이 워크스페이스에 아직 에이전트가 없습니다.",
+      "source_label": "{{agent}}이(가) {{app}}에 사용하는 계정",
+      "source_team": "팀 계정",
+      "source_personal": "실행을 시작한 사람",
+      "not_using": "{{app}} 사용 안 함",
+      "enable": "{{agent}}이(가) {{app}}을(를) 사용하도록 허용",
+      "team_admin_only": "팀 계정 접근 권한은 워크스페이스 관리자만 변경할 수 있습니다.",
+      "save_failed": "에이전트를 업데이트하지 못했습니다.",
+      "activity_title": "최근 활동",
+      "activity_empty": "아직 {{app}}을(를) 사용한 에이전트가 없습니다.",
+      "as_team": "팀 계정으로",
+      "as_you": "내 계정으로",
+      "in_chat": "채팅",
+      "accounts_title": "계정",
+      "account_actions": "{{account}} 작업",
+      "capabilities_title": "에이전트가 할 수 있는 작업",
+      "capabilities_note": "매번 묻지 않고 실행합니다.",
+      "accounts_description": "{{workspace}}에서 에이전트가 사용할 수 있는 {{app}} 계정입니다.",
+      "team_account_hint": "{{workspace}} 전체가 공유 · 관리자가 연결",
+      "your_account_hint": "내가 시작한 실행에서만 사용",
+      "agents_description": "에이전트마다 어떤 계정으로 동작할지 고릅니다.",
+      "ready_team": "팀 계정으로 사용 가능",
+      "needs_team": "팀 계정 필요",
+      "ready_yours": "내 계정으로 사용 가능",
+      "needs_yours": "내 계정 필요"
+    },
+    "accounts_page": {
+      "empty": "이 워크스페이스에서 연결한 계정이 없습니다.",
+      "used_by": "{{agents}} 사용 중",
+      "team_title": "팀 계정",
+      "team_description_admin": "워크스페이스 전체가 공유합니다. 관리자만 연결할 수 있습니다.",
+      "team_description_member": "관리자가 연결합니다. 확인하고 요청할 수 있습니다.",
+      "team_empty": "아직 팀 계정이 없습니다.",
+      "yours_title": "내 계정",
+      "yours_description": "나만 사용할 수 있으며, 에이전트는 내가 시작한 실행에서 사용합니다.",
+      "needed_by": "{{agents}}에 필요"
+    },
+    "disconnect_dialog": {
+      "title": "{{app}} 연결을 해제할까요?",
+      "team_body": "이 에이전트들은 이 계정으로 동작합니다. 다음 {{app}} 작업에서는 일하는 대신 관리자에게 요청합니다.",
+      "personal_body": "이 에이전트들은 내가 시작한 실행에서 이 계정을 씁니다. 다음에 실행을 시작하면 다시 연결하라고 요청합니다.",
+      "agents": "사용 중인 에이전트",
+      "no_agents": "사용 중인 에이전트가 없습니다.",
+      "running": "실행 중 — 중지됩니다",
+      "active_runs_other": "진행 중인 실행 {{count}}개가 지금 중지됩니다.",
+      "impact_failed": "사용 중인 에이전트를 확인하지 못했습니다.",
+      "cancel": "취소",
+      "confirm": "연결 해제"
+    },
+    "team_requests": {
+      "title": "{{app}} 팀 계정이 필요합니다",
+      "run_waiting": "실행 대기 중",
+      "asked": "요청함",
+      "summary": " · “{{summary}}”",
+      "resumes": "한 번 연결하면 여기 있는 모든 요청이 해결되고, 대기 중인 실행은 멈춘 곳에서 이어집니다.",
+      "decline_all": "모두 거절",
+      "open_app": "앱 열기"
+    }
+  },
+  "voice_input": {
+    "description": "채팅, 댓글, 답글을 말로 입력합니다. 음성은 이 컴퓨터에서 받아쓰며 외부로 나가지 않습니다.",
+    "model_title": "음성 모델",
+    "model_hint": "모델은 이 컴퓨터에서 실행됩니다. 하나를 다운로드하거나 받은 모델 사이에서 전환하세요.",
+    "engine_unavailable": "이 컴퓨터에서는 기기 내 받아쓰기를 사용할 수 없습니다.",
+    "enabled": {
+      "title": "음성 입력",
+      "hint": "채팅, 댓글, 답글에 마이크 버튼을 표시하고 음성 입력 단축키를 켭니다."
+    },
+    "input_title": "입력",
+    "shortcut": {
+      "title": "단축키",
+      "hint": "화면에 입력란이 있으면 포커스가 없어도 동작합니다.",
+      "change": "변경",
+      "unassigned": "설정 안 됨"
+    },
+    "activation": {
+      "title": "실행 방식",
+      "auto": "탭 또는 길게 누르기",
+      "toggle": "탭",
+      "hold": "길게 누르기",
+      "hints": {
+        "auto": "탭하면 시작, 다시 탭하면 삽입. 길게 눌러 말하고 손을 떼면 삽입.",
+        "toggle": "탭하면 시작, 다시 탭하면 삽입.",
+        "hold": "길게 눌러 말하고 손을 떼면 삽입."
+      }
+    },
+    "recognition_title": "인식",
+    "language": {
+      "title": "말하는 언어",
+      "hint": "대부분은 자동 감지로 충분합니다. 짧은 문장이 다른 언어로 인식되면 언어를 지정하세요.",
+      "auto": "자동 감지"
+    },
+    "fillers": {
+      "title": "군말 제거",
+      "hint": "“음”, “어” 같은 머뭇거림을 지웁니다."
+    },
+    "vocabulary": {
+      "title": "어휘",
+      "hint": "제품명이나 동료 이름처럼 원하는 표기로 적고 싶은 이름과 용어. 최대 {{max}}개.",
+      "placeholder": "단어 추가",
+      "remove": "{{word}} 삭제"
+    },
+    "microphone_title": "마이크",
+    "device": {
+      "title": "입력 장치",
+      "default": "시스템 기본값",
+      "unnamed": "마이크 {{index}}",
+      "permission_hint": "마이크를 한 번 테스트하면 장치 이름이 표시됩니다."
+    },
+    "test": {
+      "title": "마이크 테스트",
+      "hint": "말해서 음량을 확인하세요. 녹음되지 않습니다.",
+      "blocked": "마이크 접근이 차단되어 있습니다. 브라우저나 시스템 설정에서 허용하세요.",
+      "start": "테스트",
+      "stop": "중지"
+    },
+    "history": {
+      "title": "기록",
+      "description": "녹음과 텍스트는 이 컴퓨터에만 저장되며 업로드되지 않습니다. 실패하거나 중단된 녹음은 원본 오디오로 다시 변환할 수 있습니다.",
+      "keep": {
+        "title": "기록 보관",
+        "hint": "녹음을 이 컴퓨터에 보관하는 기간입니다.",
+        "options": {
+          "off": "보관 안 함",
+          "1d": "1일",
+          "7d": "7일",
+          "30d": "30일",
+          "forever": "계속"
+        }
+      },
+      "clear": "모두 지우기",
+      "clear_dialog": {
+        "title": "음성 기록을 지울까요?",
+        "description": "이 컴퓨터에 보관된 모든 녹음과 텍스트가 삭제됩니다.",
+        "cancel": "취소"
+      },
+      "empty": "음성 입력 기록이 여기에 표시됩니다.",
+      "off": "기록이 꺼져 있습니다. 새 녹음은 보관되지 않습니다.",
+      "today": "오늘",
+      "yesterday": "어제",
+      "status": {
+        "transcribing": "변환 중…",
+        "failed": "변환 실패",
+        "interrupted": "변환 전에 중단됨"
+      },
+      "actions": {
+        "play": "녹음 재생",
+        "pause": "일시 정지",
+        "retranscribe": "다시 변환",
+        "copy": "텍스트 복사",
+        "delete": "삭제"
+      },
+      "copied": "복사됨",
+      "copy_failed": "복사하지 못했습니다",
+      "retry_failed": "이 녹음을 변환하지 못했습니다",
+      "show_more": "더 보기"
+    }
+  },
+  "private_projects": {
+    "title": "비공개 프로젝트",
+    "description": "비공개 프로젝트는 해당 프로젝트 멤버만 열 수 있습니다. 워크스페이스 소유자는 각 프로젝트의 멤버를 확인하고, 개입이 필요할 때 자신을 추가할 수 있습니다.",
+    "empty": "이 워크스페이스에는 비공개 프로젝트가 없습니다.",
+    "load_failed": "비공개 프로젝트를 불러오지 못했습니다.",
+    "retry": "다시 시도",
+    "no_members": "멤버 없음",
+    "lead_name": "{{name}}(리드)",
+    "more_members": "외 {{count}}명",
+    "archived": "보관됨",
+    "member": "참여 중",
+    "open": "열기",
+    "join": "참여",
+    "join_title": "“{{title}}” 프로젝트에 참여할까요?",
+    "join_description": "이 프로젝트의 멤버 목록에 추가되며 태스크, 댓글, 첨부 파일을 볼 수 있게 됩니다. 현재 멤버에게 알림이 전송됩니다.",
+    "join_description_empty": "이 프로젝트에는 멤버가 없습니다. 참여하면 유일한 멤버가 되며 태스크, 댓글, 첨부 파일을 볼 수 있게 됩니다.",
+    "join_confirm": "프로젝트 참여",
+    "cancel": "취소",
+    "toast_joined": "{{title}}에 참여했습니다",
+    "toast_failed": "프로젝트에 참여하지 못했습니다."
   }
 }

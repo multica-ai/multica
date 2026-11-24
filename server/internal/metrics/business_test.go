@@ -123,6 +123,22 @@ func TestBusinessMetricsLLMPricingAndUnpricedTokens(t *testing.T) {
 	}
 }
 
+func TestBusinessMetricsLLMPricingCursorFastVariant(t *testing.T) {
+	m := NewBusinessMetrics()
+
+	m.RecordLLMUsage("issue", "local", "cursor", "claude-opus-4-7-thinking-high-fast", 1_000_000, 1_000_000, 0, 0, 0)
+
+	if got := testutil.ToFloat64(m.llmCostUSD.WithLabelValues("cursor", "claude-opus-4-7-fast", "input", "local", "issue")); got != 30 {
+		t.Fatalf("cursor fast input cost = %v, want 30", got)
+	}
+	if got := testutil.ToFloat64(m.llmCostUSD.WithLabelValues("cursor", "claude-opus-4-7-fast", "output", "local", "issue")); got != 150 {
+		t.Fatalf("cursor fast output cost = %v, want 150", got)
+	}
+	if got := testutil.ToFloat64(m.llmRequests.WithLabelValues("cursor", "claude-opus-4-7-fast", "local")); got != 1 {
+		t.Fatalf("cursor fast request counter = %v, want 1", got)
+	}
+}
+
 func TestBusinessMetricsRegistryExposesAllFamilies(t *testing.T) {
 	registry := prometheus.NewRegistry()
 	m := NewBusinessMetrics()
@@ -187,6 +203,8 @@ func TestBusinessMetricsRegistryExposesAllFamilies(t *testing.T) {
 	m.RecordEntitlementDecision("autopilot_runs", "observe", "cache_fresh")
 	m.RecordEntitlementVersionRegression()
 	m.RecordAutopilotQuotaDecision("observe", "manual", "admitted")
+	m.RecordStorageQuotaSum("upload", "ok", 0.002)
+	m.RecordStorageQuotaDecision("enforce", "upload", "rejected")
 	m.ObserveRuntimeSweepStage(RuntimeSweepStageLiveness, time.Second, 2, 1)
 
 	families, err := registry.Gather()

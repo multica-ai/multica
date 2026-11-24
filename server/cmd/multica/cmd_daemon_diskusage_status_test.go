@@ -175,7 +175,7 @@ func TestDiskUsageNeedsParentStatus(t *testing.T) {
 func TestRunDaemonDiskUsageByWorkspaceTableMakesNoRequest(t *testing.T) {
 	pinHumanCLIContext(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
 	t.Setenv("MULTICA_SERVER_URL", "")
 
@@ -206,7 +206,7 @@ func TestRunDaemonDiskUsageByWorkspaceTableMakesNoRequest(t *testing.T) {
 func TestRunDaemonDiskUsageTaskTableResolvesStatus(t *testing.T) {
 	pinHumanCLIContext(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
 	t.Setenv("MULTICA_SERVER_URL", "")
 
@@ -233,7 +233,7 @@ func TestRunDaemonDiskUsageTaskTableResolvesStatus(t *testing.T) {
 func TestRunDaemonDiskUsageJSONSurvivesServerFailure(t *testing.T) {
 	pinHumanCLIContext(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
 	t.Setenv("MULTICA_SERVER_URL", "")
 
@@ -278,7 +278,7 @@ func TestRunDaemonDiskUsageJSONSurvivesServerFailure(t *testing.T) {
 func TestRunDaemonDiskUsageAllProfilesUsesPerProfileToken(t *testing.T) {
 	pinHumanCLIContext(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
 	t.Setenv("MULTICA_SERVER_URL", "")
 
@@ -376,7 +376,7 @@ func TestPrintRepoCacheLineSilentWhenEmpty(t *testing.T) {
 func setupTaskDiskUsageContext(t *testing.T, home, ownerServerURL string) string {
 	t.Helper()
 	t.Chdir(t.TempDir())
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
 	t.Setenv("MULTICA_SERVER_URL", "")
 
@@ -482,7 +482,7 @@ func TestResolveDiskUsageRootTaskContext(t *testing.T) {
 
 	t.Run("outside a task keeps profile resolution", func(t *testing.T) {
 		home := t.TempDir()
-		t.Setenv("HOME", home)
+		redirectTestHome(t, home)
 		t.Setenv("MULTICA_WORKSPACES_ROOT", "")
 		t.Setenv(daemon.TaskWorkspacesRootEnv, filepath.Join(t.TempDir(), "ignored"))
 
@@ -500,7 +500,7 @@ func TestRunDaemonDiskUsageHonorsProfileWorkspacesRoot(t *testing.T) {
 	pinHumanCLIContext(t)
 	home := t.TempDir()
 	customRoot := filepath.Join(t.TempDir(), "configured-workspaces")
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
 	if err := cli.SaveCLIConfig(cli.CLIConfig{WorkspacesRoot: customRoot}); err != nil {
 		t.Fatalf("SaveCLIConfig: %v", err)
@@ -528,7 +528,7 @@ func TestResolveDiskUsageRootEnvOverridesProfileConfig(t *testing.T) {
 	home := t.TempDir()
 	configRoot := filepath.Join(t.TempDir(), "configured-workspaces")
 	envRoot := filepath.Join(t.TempDir(), "env-workspaces")
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", envRoot)
 	if err := cli.SaveCLIConfig(cli.CLIConfig{WorkspacesRoot: configRoot}); err != nil {
 		t.Fatalf("SaveCLIConfig: %v", err)
@@ -550,7 +550,7 @@ func TestEnumerateDiskUsageRootsUsesAndDeduplicatesProfileConfig(t *testing.T) {
 	sharedRoot := filepath.Join(t.TempDir(), "shared-root")
 	uniqueRoot := filepath.Join(t.TempDir(), "unique-root")
 	neverRanRoot := filepath.Join(t.TempDir(), "never-ran-root")
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
 
 	configs := []struct {
@@ -590,5 +590,31 @@ func TestEnumerateDiskUsageRootsUsesAndDeduplicatesProfileConfig(t *testing.T) {
 		if roots[i] != want[i] {
 			t.Fatalf("roots[%d] = %+v, want %+v", i, roots[i], want[i])
 		}
+	}
+}
+
+func TestPrintDiskUsageTaskTableMarksInPlaceRun(t *testing.T) {
+	var output bytes.Buffer
+	printDiskUsageTaskTable(&output, daemon.DiskUsageReport{
+		TotalTaskCount: 2,
+		Tasks: []daemon.TaskDiskUsage{
+			{WorkspaceShort: "ws", TaskShort: "local", LocalDirectory: true},
+			{WorkspaceShort: "ws", TaskShort: "unknown"},
+		},
+	})
+	var localRow, unknownRow string
+	for _, line := range strings.Split(output.String(), "\n") {
+		if strings.Contains(line, "ws/local") {
+			localRow = line
+		}
+		if strings.Contains(line, "ws/unknown") {
+			unknownRow = line
+		}
+	}
+	if !strings.Contains(localRow, "in place") {
+		t.Fatalf("local run is missing its mode: %q", localRow)
+	}
+	if unknownRow == "" || strings.Contains(unknownRow, "in place") {
+		t.Fatalf("expected an unmarked row for the unknown run, got %q", unknownRow)
 	}
 }

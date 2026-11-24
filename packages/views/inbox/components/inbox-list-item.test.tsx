@@ -19,7 +19,7 @@ vi.mock("@multica/core/issue-statuses/hooks", () => ({
   useIssueStatuses: () => buildIssueStatusCatalog(catalogEntries),
 }));
 
-vi.mock("../../issues/components", () => ({
+vi.mock("../../issues/components/status-icon", () => ({
   StatusIcon: ({
     status,
     category,
@@ -121,6 +121,7 @@ function renderRow(props: {
   view: "inbox" | "archived";
   adapter?: NavigationAdapter;
   onClick?: () => void;
+  isSelected?: boolean;
 }) {
   return render(
     <WorkspaceSlugProvider slug="acme">
@@ -128,7 +129,7 @@ function renderRow(props: {
         <InboxListItem
           item={props.item}
           view={props.view}
-          isSelected={false}
+          isSelected={props.isSelected ?? false}
           onClick={props.onClick ?? vi.fn()}
           onAction={vi.fn()}
         />
@@ -137,7 +138,7 @@ function renderRow(props: {
   );
 }
 
-const unreadDot = (container: HTMLElement) => container.querySelector(".bg-brand");
+const unreadDot = (container: HTMLElement) => container.querySelector('[data-mc="unread-dot"]');
 const title = (container: HTMLElement) => container.querySelector(".truncate");
 
 describe("InboxListItem unread affordance", () => {
@@ -165,6 +166,17 @@ describe("InboxListItem unread affordance", () => {
 
     expect(unreadDot(container)).toBeNull();
     expect(title(container)?.className).not.toContain("font-medium");
+  });
+});
+
+describe("InboxListItem theme hooks", () => {
+  it("marks the row open in the detail pane as selected", () => {
+    const anchor = (container: HTMLElement) => container.querySelector('[data-mc="inbox-item"]');
+    expect(anchor(renderRow({ item: item(), view: "inbox", isSelected: true }).container)).toHaveAttribute(
+      "data-selected",
+      "true",
+    );
+    expect(anchor(renderRow({ item: item(), view: "inbox" }).container)).toHaveAttribute("data-selected", "false");
   });
 });
 
@@ -223,7 +235,7 @@ describe("InboxListItem keyboard semantics", () => {
     const actionButton = container.querySelector("button")!;
 
     expect(actionButton.className).toContain(
-      "[@media(hover:hover)]:group-hover:inline-flex",
+      "[@media(hover:hover)]:group-hover:opacity-100",
     );
     expect(actionButton.className).not.toMatch(/(^|\s)(sm|md|lg|xl|2xl):group-/);
   });

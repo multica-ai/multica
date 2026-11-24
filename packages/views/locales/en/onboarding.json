@@ -18,20 +18,20 @@
     "headline_line2": "in",
     "headline_emphasis": "one workspace.",
     "lede": "Assign them work like you'd assign a colleague — they pick it up, update status, and comment when done.",
-    "lede_web": "Desktop bundles the runtime — nothing to install. Continue on web to connect your own CLI.",
+    "lede_web": "Desktop includes the local runtime — no CLI setup required. Continue on web to connect your own CLI.",
     "download_desktop": "Download Desktop",
     "continue_on_web": "Continue on web",
     "start_exploring": "Start exploring",
     "skip_existing": "I've done this before",
     "illustration": {
       "card1_actor_name": "You",
-      "card1_actor_initial": "N",
+      "card1_actor_initial": "Y",
       "card1_body_prefix": " can you draft a short launch post? Pull from ",
       "card1_body_suffix": "'s interview findings.",
       "card1_mention_content": "@Content Agent",
       "card1_mention_research": "@Research Agent",
       "card2_actor_name": "Content Agent",
-      "card2_body": "On it. Pulling Research's quotes, drafting around the \"time saved\" angle…",
+      "card2_body": "On it. Pulling Research's quotes, drafting around the \"time saved\" angle...",
       "card3_actor_name": "Research Agent",
       "card3_body": "This week's user interviews summarized — 12 calls, 4 recurring themes, 3 pull-quotes.",
       "card3_timestamp": "15 min ago",
@@ -50,7 +50,7 @@
     "skip": "Skip",
     "cancel": "Cancel",
     "close": "Close",
-    "log_out": "Log out"
+    "log_out": "Sign out"
   },
   "source_backfill": {
     "eyebrow": "Quick question",
@@ -106,17 +106,16 @@
       "other_placeholder": "e.g. study group coordination"
     }
   },
-  "option_card": {
-    "other_label": "Other",
-    "other_aria": "Describe something else"
-  },
   "step_question": {
     "hint_pick": "You can skip this."
   },
   "cli_install": {
     "copy_aria": "Copy",
-    "intro": "You'll need an agent runtime on this computer (Claude Code, Codex, Cursor, …) for it to run your agent. Also works on servers and remote dev boxes.",
+    "intro": "You'll need an agent runtime on this computer (Claude Code, Codex, Cursor, ...) for it to run your agent. Also works on servers and remote dev boxes.",
     "step1_label": "Install the Multica CLI",
+    "platform_group": "Choose your platform",
+    "platform_macos_linux": "macOS / Linux",
+    "platform_windows": "Windows",
     "step2_label": "Start the daemon"
   },
   "cloud_waitlist": {
@@ -132,34 +131,13 @@
     "success_toast": "You're on the list. We'll email when cloud runtimes are live.",
     "failed_toast": "Failed to join waitlist"
   },
-  "welcome_after_onboarding": {
-    "skip": {
-      "loading": "Setting up your workspace…",
-      "title": "Welcome to Multica!",
-      "subtitle": "We've added one issue to help you connect a runtime. When it's ready, start with Mika from Runtimes.",
-      "got_it": "Got it",
-      "status_in_progress": "In progress",
-      "error_title": "We couldn't set that up",
-      "error_body": "The runtime guide didn't get created. You can try again, or connect a runtime from the Runtimes page whenever you're ready.",
-      "retry": "Try again",
-      "dismiss": "Not now",
-      "cards": {
-        "install_runtime": {
-          "title": "Connect a runtime",
-          "subtitle": "Install Codex or Kimi, then start the guided Mika chat from Runtimes."
-        }
-      }
-    }
-  },
   "step_workspace": {
-    "eyebrow_first": "Your first workspace",
-    "eyebrow_resume": "Pick up or start fresh",
     "headline_first": "Name your workspace.",
     "headline_resume": "Continue with {{name}}, or start another.",
     "lede_first": "A workspace is where your issues, agents, and projects live. You can invite teammates or spin up more workspaces later.",
     "lede_resume": "Resume setup with the workspace you already have, or create a new one alongside it — you can belong to any number of workspaces.",
     "name_label": "Workspace name",
-    "name_placeholder": "Acme Inc, My Lab, Side Projects…",
+    "name_placeholder": "Acme Inc, My Lab, Side Projects...",
     "random_name": "Random",
     "url_label": "URL",
     "slug_placeholder": "acme",
@@ -170,29 +148,27 @@
     "create_new_title": "Create a new workspace",
     "hint_opening": "Opening {{name}}.",
     "hint_creating": "Creating {{name}}.",
-    "hint_creating_pending": "Creating {{name}}…",
+    "hint_creating_pending": "Creating {{name}}...",
     "hint_creating_fallback": "your workspace",
     "hint_name_first": "Name your workspace to create it.",
     "hint_pick": "Pick your workspace or start a new one.",
     "cta_open": "Open {{name}}",
     "cta_create_named": "Create {{name}}",
     "cta_create_workspace": "Create workspace",
-    "cta_creating": "Creating…",
+    "cta_creating": "Creating...",
     "slug_format_error": "Only lowercase letters, numbers, and hyphens",
     "slug_taken_error": "That workspace URL is already taken.",
     "slug_reserved_error": "That workspace URL is reserved and cannot be used.",
     "slug_conflict_toast": "Choose a different workspace URL",
     "create_failed_toast": "Failed to create workspace",
-    "creation_disabled_eyebrow": "Workspace creation is disabled",
     "creation_disabled_headline": "Ask your administrator for an invitation.",
     "creation_disabled_lede": "This Multica instance does not allow new workspaces to be created. Once an administrator invites you to a workspace, accept the invitation and refresh to continue.",
-    "creation_disabled_logout": "Log out",
-    "creation_disabled_eyebrow_resume": "Your workspace",
+    "creation_disabled_logout": "Sign out",
     "creation_disabled_headline_resume": "Continue with {{name}}.",
     "creation_disabled_lede_resume": "Workspace creation is disabled on this instance, so you'll continue into your existing workspace."
   },
   "step_runtime": {
-    "scanning_headline": "Connecting this computer…",
+    "scanning_headline": "Connecting this computer...",
     "scanning_lede_prefix": "Your agent works through an AI coding tool you already have — like ",
     "scanning_lede_suffix": ", and others. We're checking this computer for ones you've installed.",
     "found_headline": "Where should Mika run?",
@@ -201,8 +177,6 @@
     "status_all_online": "all online",
     "status_none_online": "none online",
     "status_n_online": "{{count}} online",
-    "online_label": "online",
-    "offline_label": "offline",
     "empty_headline": "No agent runtime found on this computer yet.",
     "empty_lede_prefix": "An agent runtime is an AI coding tool we connect to — like ",
     "empty_lede_suffix": ". Install one and refresh, or pick a path below.",
@@ -214,14 +188,13 @@
     "empty_waitlist_action": "Coming soon",
     "skip": "Skip for now",
     "refresh": "Refresh",
-    "refreshing": "Refreshing…",
+    "refreshing": "Refreshing...",
     "hint_selected": "Selected: {{name}}",
     "hint_pick": "Pick an agent runtime above to start with Mika.",
-    "hint_waiting": "Waiting for the first result…",
+    "hint_waiting": "Waiting for the first result...",
     "continue": "Start with Mika"
   },
   "step_platform": {
-    "eyebrow": "Connect a computer",
     "headline": "Connect a computer to run your agent.",
     "lede": "Connect a computer so Mika can start working.",
     "hint_default": "You can connect later.",
@@ -236,7 +209,6 @@
     "cloud_action": "Coming soon",
     "cli_dialog_title": "Connect from the terminal",
     "cli_dialog_pick_hint": "Pick a computer above.",
-    "cli_dialog_connect": "Connect & continue",
     "runtimes_connected_one": "{{count}} computer connected",
     "runtimes_connected_other": "{{count}} computers connected",
     "live_listening": "Live · Waiting for your computer",
@@ -252,6 +224,7 @@
   },
   "errors": {
     "skip_failed": "Failed to finish onboarding",
+    "guide_failed": "Couldn't create the setup guide. Please try again.",
     "mika_setup_failed": "Couldn't start your Mika workspace"
   },
   "mika_intro": {

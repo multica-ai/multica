@@ -2,13 +2,12 @@ import "../global.css";
 
 import { useEffect, useRef } from "react";
 import { AppState, type AppStateStatus } from "react-native";
-import { Stack, router } from "expo-router";
+import { Stack, ThemeProvider, router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";
-import { ThemeProvider } from "@react-navigation/native";
 import { PortalHost } from "@rn-primitives/portal";
 import { api } from "@/data/api";
 import { maybeRenewSession } from "@/data/session-renewal";
@@ -19,6 +18,7 @@ import { SessionActivityBoundary } from "@/components/auth/session-activity-boun
 import { LightboxProvider, prewarmHighlighter } from "@/lib/markdown";
 import { NAV_THEME } from "@/lib/theme";
 import { useColorScheme } from "@/lib/use-color-scheme";
+import { MobileI18nProvider } from "@/lib/i18n";
 
 // Kick off Shiki highlighter init at module load — fires once per process,
 // finishes before the user navigates to any screen with a code block. If
@@ -79,27 +79,29 @@ export default function RootLayout() {
   const { colorScheme, isDarkColorScheme } = useColorScheme();
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
-        <KeyboardProvider>
-          <QueryClientProvider client={queryClient}>
-            <ThemeProvider value={NAV_THEME[colorScheme]}>
-              <AuthInitializer>
-                <SessionActivityBoundary>
-                <LightboxProvider>
-                  <StatusBar style={isDarkColorScheme ? "light" : "dark"} />
-                  <Stack screenOptions={{ headerShown: false }}>
-                    <Stack.Screen name="index" />
-                    <Stack.Screen name="(auth)" />
-                    <Stack.Screen name="(app)" />
-                  </Stack>
-                  <PortalHost />
-                </LightboxProvider>
-                </SessionActivityBoundary>
-              </AuthInitializer>
-            </ThemeProvider>
-          </QueryClientProvider>
-        </KeyboardProvider>
-      </SafeAreaProvider>
+      <MobileI18nProvider>
+        <SafeAreaProvider>
+          <KeyboardProvider>
+            <QueryClientProvider client={queryClient}>
+              <ThemeProvider value={NAV_THEME[colorScheme]}>
+                <AuthInitializer>
+                  <SessionActivityBoundary>
+                    <LightboxProvider>
+                      <StatusBar style={isDarkColorScheme ? "light" : "dark"} />
+                      <Stack screenOptions={{ headerShown: false }}>
+                        <Stack.Screen name="index" />
+                        <Stack.Screen name="(auth)" />
+                        <Stack.Screen name="(app)" />
+                      </Stack>
+                      <PortalHost />
+                    </LightboxProvider>
+                  </SessionActivityBoundary>
+                </AuthInitializer>
+              </ThemeProvider>
+            </QueryClientProvider>
+          </KeyboardProvider>
+        </SafeAreaProvider>
+      </MobileI18nProvider>
     </GestureHandlerRootView>
   );
 }

@@ -17,7 +17,8 @@ import { CliInstallInstructions, OnboardingFlow } from "@multica/views/onboardin
  * `<OnboardingFlow />`. Kept minimal — guard on auth, render, exit.
  *
  * Runtime-connected onboarding opens the Mika session that the final step
- * created and started. Other exits land on the workspace issues list, or root
+ * created and started; skipping the runtime opens the install-runtime guide
+ * issue it created. Other exits land on the workspace issues list, or root
  * when no workspace exists.
  *
  * `CliInstallInstructions` is passed in as the `runtimeInstructions`
@@ -77,7 +78,7 @@ export default function OnboardingPage() {
             );
           } else if (ws && destination?.kind === "issue") {
             router.push(
-              paths.workspace(ws.slug).issueDetail(destination.issueId),
+              paths.workspace(ws.slug).issueDetail(destination.issueRef),
             );
           } else if (ws) {
             router.push(paths.workspace(ws.slug).issues());

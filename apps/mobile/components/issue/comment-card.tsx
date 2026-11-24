@@ -57,6 +57,7 @@ import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { continuousCorners } from "@/lib/radius";
+import { useT } from "@/lib/i18n";
 import { ReactionBar } from "./reaction-bar";
 import { useCommentLongPress } from "./comment-context-menu";
 import { useCommentSelectStore } from "@/data/comment-select-store";
@@ -120,15 +121,16 @@ export function CommentCard({
   // Inbox deep-link target inside a resolved thread expands automatically —
   // otherwise tapping a notification would just reveal a bar with no content
   // and force the user to tap again.
-  useEffect(() => {
-    if (!resolved || !highlightedCommentId) return;
-    if (
-      highlightedCommentId === entry.id ||
-      replies.some((r) => r.id === highlightedCommentId)
-    ) {
-      setExpanded(true);
-    }
-  }, [resolved, highlightedCommentId, entry.id, replies]);
+  const highlightsThread = !!highlightedCommentId && (
+    highlightedCommentId === entry.id ||
+    replies.some((r) => r.id === highlightedCommentId)
+  );
+  const autoExpandTarget = resolved && highlightsThread ? highlightedCommentId : null;
+  const [previousExpandTarget, setPreviousExpandTarget] = useState<typeof autoExpandTarget>(null);
+  if (previousExpandTarget !== autoExpandTarget) {
+    setPreviousExpandTarget(autoExpandTarget);
+    if (autoExpandTarget) setExpanded(true);
+  }
 
   const visibleReplies = replies.filter((reply) => !isDeletedComment(reply));
   // A deleted reply renders nothing, so a notification pointing at one has no
@@ -232,6 +234,7 @@ function ResolvedThreadBar({
   onExpand: () => void;
 }) {
   const { getName } = useActorLookup();
+  const { t } = useT("issues");
   const { colorScheme } = useColorScheme();
   const mutedFg = THEME[colorScheme].mutedForeground;
 
@@ -273,15 +276,20 @@ function ResolvedThreadBar({
         className="flex-row items-center gap-2.5 px-4 py-3 rounded-xl bg-surface-1 active:opacity-70"
         style={continuousCorners}
         accessibilityRole="button"
-        accessibilityLabel={`Resolved thread by ${authorsLabel}, ${total} ${total === 1 ? "message" : "messages"}. Tap to expand.`}
+        accessibilityLabel={t("resolved.a11y_folded", {
+          authors: authorsLabel,
+          count: total,
+        })}
       >
         <Ionicons name="checkmark-circle" size={18} color={mutedFg} />
         <Text
           className="flex-1 text-sm text-muted-foreground"
           numberOfLines={1}
         >
-          Resolved · {total} {total === 1 ? "message" : "messages"} by{" "}
-          {authorsLabel}
+          {t("resolved.summary", {
+            count: total,
+            authors: authorsLabel,
+          })}
         </Text>
         <Ionicons name="chevron-down" size={14} color={mutedFg} />
       </Pressable>
@@ -307,6 +315,7 @@ function ResolvedIndicator({
   onCollapse: () => void;
 }) {
   const { getName } = useActorLookup();
+  const { t } = useT("issues");
   const { colorScheme } = useColorScheme();
   const mutedFg = THEME[colorScheme].mutedForeground;
   const resolverName = getName(
@@ -319,17 +328,16 @@ function ResolvedIndicator({
       onPress={onCollapse}
       className="flex-row items-center gap-2 active:opacity-60"
       accessibilityRole="button"
-      accessibilityLabel="Collapse resolved thread"
+      accessibilityLabel={t("resolved.collapse_a11y")}
     >
       <Ionicons name="checkmark-circle" size={14} color={mutedFg} />
       <Text className="text-xs text-muted-foreground flex-1" numberOfLines={1}>
-        Resolved by{" "}
-        <Text className="text-xs text-foreground font-medium">
-          {resolverName}
-        </Text>
+        {t("resolved.resolved_by", { name: resolverName })}
         {entry.resolved_at ? ` · ${timeAgo(entry.resolved_at)}` : ""}
       </Text>
-      <Text className="text-xs text-muted-foreground">Collapse</Text>
+      <Text className="text-xs text-muted-foreground">
+        {t("resolved.collapse")}
+      </Text>
     </Pressable>
   );
 }
@@ -428,6 +436,7 @@ function CommentBody({
   // normal server-backed comment OR an in-flight optimistic. Only set when
   // the matching `useCreateComment` mutation errored and the entry was
   // intentionally left in the cache to surface inline retry.
+  const { t } = useT("issues");
   const failed = useFailedCommentsStore((s) => s.failed[entry.id]);
   // Same query as IssueDescription — TanStack dedupes so this fires once
   // per issue regardless of how many comments need to resolve attachments.
@@ -448,7 +457,10 @@ function CommentBody({
 
   // Reactions live on TimelineEntry.reactions (mirrored from Comment).
   // Pass through to the bar; toggle finds existing match by emoji + actor.
-  const reactions: Reaction[] = (entry.reactions ?? []) as Reaction[];
+  const reactions = useMemo(
+    () => (entry.reactions ?? []) as Reaction[],
+    [entry.reactions],
+  );
 
   const onToggleReaction = useCallback(
     (emoji: string) => {
@@ -514,7 +526,7 @@ function CommentBody({
     // placeholder in packages/views/issues/components/comment-card.tsx.
     return (
       <Text className="text-sm italic text-muted-foreground">
-        This comment was deleted
+        {t("comments.deleted")}
       </Text>
     );
   }
@@ -589,6 +601,7 @@ function FailedActions({
   onDiscard: () => void;
 }) {
   const { colorScheme } = useColorScheme();
+  const { t } = useT("issues");
   const destructive = THEME[colorScheme].destructive;
   return (
     <View className="flex-row items-center gap-2 mt-0.5">
@@ -597,24 +610,26 @@ function FailedActions({
         className="flex-1 text-xs text-destructive"
         numberOfLines={1}
       >
-        {error || "Couldn't send"}
+        {error || t("failed.send")}
       </Text>
       <Pressable
         onPress={onRetry}
         hitSlop={6}
         accessibilityRole="button"
-        accessibilityLabel="Retry sending comment"
+        accessibilityLabel={t("failed.retry_a11y")}
       >
-        <Text className="text-xs text-primary font-medium">Retry</Text>
+        <Text className="text-xs text-primary font-medium">
+          {t("failed.retry")}
+        </Text>
       </Pressable>
       <Pressable
         onPress={onDiscard}
         hitSlop={6}
         accessibilityRole="button"
-        accessibilityLabel="Discard failed comment"
+        accessibilityLabel={t("failed.discard_a11y")}
       >
         <Text className="text-xs text-muted-foreground font-medium">
-          Discard
+          {t("failed.discard")}
         </Text>
       </Pressable>
     </View>

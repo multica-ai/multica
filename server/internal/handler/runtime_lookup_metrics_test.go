@@ -13,6 +13,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // TestAgentRuntimeLookupWSHotPathIsZeroRead drives 1,000 heartbeats through one
@@ -42,13 +43,13 @@ func TestAgentRuntimeLookupWSHotPathIsZeroRead(t *testing.T) {
 	before := lookupSnapshot(t, m)
 
 	for i := 0; i < 1000; i++ {
-		if _, err := h.HandleDaemonWSHeartbeat(ctx, identity, runtimeID, false); err != nil {
+		if _, err := h.HandleDaemonWSHeartbeat(ctx, identity, runtimeID, protocol.DaemonHeartbeatRequestPayload{}); err != nil {
 			t.Fatalf("HandleDaemonWSHeartbeat %d: %v", i, err)
 		}
 	}
 
-	httpBeat := newDaemonTokenRequest(http.MethodPost, "/api/daemon/heartbeat",
-		map[string]any{"runtime_id": runtimeID}, testWorkspaceID, "lookup-source-daemon")
+	httpBeat := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/heartbeat",
+		map[string]any{"runtime_id": runtimeID})
 	testutil.Call(t, h.DaemonHeartbeat, httpBeat).Want(http.StatusOK)
 
 	// A model poll for a runtime that no longer exists: the read-access gate

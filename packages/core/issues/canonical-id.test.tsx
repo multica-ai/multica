@@ -6,6 +6,7 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { setApiInstance } from "../api";
+import { ApiError } from "../api/client";
 import type { ApiClient } from "../api/client";
 import type { Issue } from "../types";
 import { createQueryClient } from "../query-client";
@@ -124,6 +125,22 @@ describe("useCanonicalIssue", () => {
     expect(getIssue).toHaveBeenCalledTimes(1);
   });
 
+  // In-app links carry the identifier, often to an issue a list, peek or
+  // create already cached by UUID.
+  it("opens an identifier URL from the issue cached by UUID without a request", async () => {
+    qc.setQueryData(issueKeys.detail("ws-1", ISSUE_UUID), issue);
+
+    const { result } = renderHook(() => useCanonicalIssue("ws-1", "TRS-134"), {
+      wrapper: createWrapper(qc),
+    });
+
+    expect(result.current.canonicalId).toBe(ISSUE_UUID);
+    expect(result.current.isResolving).toBe(false);
+    expect(result.current.issue).toEqual(issue);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(getIssue).not.toHaveBeenCalled();
+  });
+
   // The realtime updaters patch `issueKeys.detail(wsId, issue.id)` with the
   // UUID from the websocket payload; the resolution response is older and must
   // never overwrite it.
@@ -141,7 +158,7 @@ describe("useCanonicalIssue", () => {
   });
 
   it("reports a nonexistent identifier as terminally not-found", async () => {
-    getIssue.mockRejectedValue(new Error("issue not found"));
+    getIssue.mockRejectedValue(new ApiError("issue not found", 404, "Not Found"));
 
     const { result } = renderHook(() => useCanonicalIssue("ws-1", "ZZZ-134"), {
       wrapper: createWrapper(qc),
@@ -168,7 +185,7 @@ describe("useCanonicalIssue", () => {
       // 1 can only mean a remount refetched.
       defaultOptions: { queries: { staleTime: Infinity, retry: false } },
     });
-    getIssue.mockRejectedValue(new Error("issue not found"));
+    getIssue.mockRejectedValue(new ApiError("issue not found", 404, "Not Found"));
 
     const { result, rerender } = renderHook(() => useCanonicalIssue("ws-1", "ZZZ-134"), {
       wrapper: createWrapper(noRetry),

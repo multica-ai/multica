@@ -25,7 +25,7 @@
  *             settled-but-malformed fence still renders as source.
  */
 
-import { createContext, isValidElement, memo, useContext, useMemo, useRef } from "react";
+import { createContext, isValidElement, memo, useContext, useMemo, useRef, type ReactElement } from "react";
 import ReactMarkdown, {
   type Components,
   type ExtraProps,
@@ -57,6 +57,7 @@ import {
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
 import { useResolveIssueIdentifier } from "../issues/hooks";
 import { ProjectMentionCard } from "../projects/components/project-mention-card";
+import { DocMentionCard } from "../docs/components/doc-mention-card";
 import { useLinkHover, LinkHoverCard } from "../editor/link-hover-card";
 import {
   openLink,
@@ -67,8 +68,9 @@ import {
 import { preprocessMarkdown } from "../editor/utils/preprocess";
 import { highlightToHtml } from "../editor/utils/highlight-markdown";
 import { AttachmentDownloadProvider } from "../editor/attachment-download-context";
+import { useOpenAttachmentLink } from "../editor/use-open-attachment-link";
 import { Attachment as AttachmentRenderer } from "../editor/attachment";
-import { computeClosedFenceOffsets } from "./streaming-fence";
+import { computeClosedFences, type ClosedFence } from "./streaming-fence";
 import { remarkRepairCjkStrongTrailingWhitespace } from "./cjk-emphasis";
 import {
   CodeBlockShell,
@@ -77,6 +79,8 @@ import {
   isRichFenceLanguage,
   shouldUpgradeFence,
 } from "./rich-code-block";
+import { RichTable, RichTableSourceContext } from "./rich-table";
+import { getTextContent } from "./rich-table-model";
 import "katex/dist/katex.min.css";
 import "../editor/styles/index.css";
 import "./rich-content.css";
@@ -84,9 +88,7 @@ import "./rich-content.css";
 export type RichContentDensity = "compact" | "document";
 export type RichContentPhase = "streaming" | "settled";
 
-// ---------------------------------------------------------------------------
 // Fence gate context
-// ---------------------------------------------------------------------------
 //
 // The closed-fence offsets travel by context rather than by rebuilding the
 // components map. The map must stay referentially stable: react-markdown
@@ -94,18 +96,19 @@ export type RichContentPhase = "streaming" | "settled";
 // every highlighted <code>'s innerHTML and collapses an active text selection
 // inside a code block (MUL-3621).
 
-const ClosedFenceContext = createContext<ReadonlySet<number>>(new Set<number>());
+const ClosedFenceContext = createContext<ReadonlyMap<number, ClosedFence>>(
+  new Map<number, ClosedFence>(),
+);
 
-function useIsFenceClosed(offset: number | undefined): boolean {
+/** The closed fence at this source offset, or undefined while it is still open. */
+function useClosedFence(offset: number | undefined): ClosedFence | undefined {
   const closed = useContext(ClosedFenceContext);
   // An offset-less node cannot be matched to a source fence; refusing to
   // upgrade is the safe direction (source instead of a possibly partial block).
-  return offset != null && closed.has(offset);
+  return offset == null ? undefined : closed.get(offset);
 }
 
-// ---------------------------------------------------------------------------
 // Mention / link renderers
-// ---------------------------------------------------------------------------
 
 /**
  * Issue mention chip. Navigation — plain click, modifier click, and the
@@ -163,6 +166,15 @@ function ProjectMentionLink({ projectId, label }: { projectId: string; label?: s
   );
 }
 
+/** Doc mention chip; same click shielding as the issue and project chips. */
+function DocMentionLink({ docId, label }: { docId: string; label?: string }) {
+  return (
+    <span className="inline align-middle" onClick={(e) => e.stopPropagation()}>
+      <DocMentionCard docId={docId} fallbackLabel={label} />
+    </span>
+  );
+}
+
 function childrenToLabel(children: ReactNode): string | undefined {
   if (typeof children === "string") return children;
   if (Array.isArray(children)) return children.join("");
@@ -206,6 +218,7 @@ function unfurlableEntityLink(
 function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
   const slug = useWorkspaceSlug();
   const appOrigin = useAppOrigin();
+  const attachmentLink = useOpenAttachmentLink();
   // Platform probe only: `openInNewTab` present means desktop, where native
   // anchor behavior is a dead end and every click must be intercepted. Absent
   // (web), modified clicks are left to the browser — the only way to get a
@@ -216,8 +229,18 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
     return <span className="slash-command">{children}</span>;
   }
 
+  // A link to one of this deployment's attachments — the stable download URL
+  // `buildMarkdownURL` persists, or a raw storage URL on the CDN. A bare
+  // navigation there either cannot authenticate (the API host's session
+  // cookie is host-locked and SameSite=Strict; Desktop/mobile carry a bearer
+  // token no <a> can send) or lands on the CDN's native media page in a tab
+  // with no way back into the app. The file opens in the app's viewer
+  // instead, and one the viewer cannot show downloads through the
+  // credentialed download hook.
+  const isAttachmentLink = href ? !!attachmentLink.resolve(href) : false;
+
   if (isMentionHref(href)) {
-    const match = href.match(/^mention:\/\/(member|agent|issue|project|all)\/(.+)$/);
+    const match = href.match(/^mention:\/\/(member|agent|issue|project|doc|all)\/(.+)$/);
     if (match?.[1] === "issue" && match[2]) {
       // A bare identifier (from the autolink preprocessor) is carried as the id
       // segment; a real mention carries a UUID. Dispatch on the id shape.
@@ -233,6 +256,9 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
     }
     if (match?.[1] === "project" && match[2]) {
       return <ProjectMentionLink projectId={match[2]} label={childrenToLabel(children)} />;
+    }
+    if (match?.[1] === "doc" && match[2]) {
+      return <DocMentionLink docId={match[2]} label={childrenToLabel(children)} />;
     }
     // Member / agent / all mentions
     return <span className="mention">{children}</span>;
@@ -250,7 +276,16 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
           e.preventDefault();
           return;
         }
-        if (!desktopTabs && (e.metaKey || e.ctrlKey || e.shiftKey)) return;
+        // Modified clicks on web stay native — the browser owns "open in
+        // background tab" and the raw URL remains the durable reference.
+        // Desktop has no such tab to give, so every click opens in the app.
+        const modified = e.metaKey || e.ctrlKey || e.shiftKey;
+        if (isAttachmentLink && (desktopTabs || !modified)) {
+          e.preventDefault();
+          attachmentLink.open(href);
+          return;
+        }
+        if (!desktopTabs && modified) return;
         e.preventDefault();
         openLink(href, slug, appOrigin, resolveClickIntent(e));
       }}
@@ -261,12 +296,24 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
         // (denied, then dropped by the http/https allowlist), so route it.
         if (!desktopTabs) return;
         e.preventDefault();
+        if (attachmentLink.open(href)) return;
         openLink(href, slug, appOrigin, "background-tab");
       }}
     >
       {children}
     </a>
   );
+
+  // The viewer renders beside the anchor, not in it: React events bubble
+  // through portals, so clicks inside the viewer would reach the anchor.
+  if (isAttachmentLink) {
+    return (
+      <>
+        {plainLink}
+        {attachmentLink.modal}
+      </>
+    );
+  }
 
   // A bare in-app entity URL renders as the chip its mention form would.
   const entity = href
@@ -284,23 +331,14 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
   if (entity?.kind === "project") {
     return <ProjectMentionLink projectId={entity.id} />;
   }
+  if (entity?.kind === "doc") {
+    return <DocMentionLink docId={entity.id} />;
+  }
 
   return plainLink;
 }
 
-// ---------------------------------------------------------------------------
 // Fenced code
-// ---------------------------------------------------------------------------
-
-function getTextContent(node: ReactNode): string {
-  if (node == null || typeof node === "boolean") return "";
-  if (typeof node === "string" || typeof node === "number") return String(node);
-  if (Array.isArray(node)) return node.map(getTextContent).join("");
-  if (isValidElement<{ children?: ReactNode }>(node)) {
-    return getTextContent(node.props.children);
-  }
-  return "";
-}
 
 // Props react-markdown actually passes to a component override: the intrinsic
 // element's own props plus the source hast node (`ExtraProps`). Deriving them
@@ -343,13 +381,19 @@ function isMultiLineNode(node: ExtraProps["node"]): boolean {
 function RichCode({ className, children, node, ...props }: RichCodeProps) {
   const language = /language-(\w+)/.exec(className || "")?.[1];
   const isBlock = isMultiLineNode(node);
-  const isFenceClosed = useIsFenceClosed(nodeStartOffset(node));
+  const fence = useClosedFence(nodeStartOffset(node));
 
-  if (isBlock && shouldUpgradeFence(language, isFenceClosed)) {
+  if (isBlock && shouldUpgradeFence(language, fence != null)) {
     // isRichFenceLanguage is re-checked for the type narrow; shouldUpgradeFence
     // already required it.
     if (isRichFenceLanguage(language)) {
-      return <RichFenceBlock language={language} body={String(children).replace(/\n$/, "")} />;
+      return (
+        <RichFenceBlock
+          language={language}
+          body={String(children).replace(/\n$/, "")}
+          title={fence?.title}
+        />
+      );
     }
   }
 
@@ -388,7 +432,7 @@ function readFencedCodeChild(children: ReactNode): {
  */
 function RichPre({ children }: RichPreProps) {
   const { language, offset } = readFencedCodeChild(children);
-  const isFenceClosed = useIsFenceClosed(offset);
+  const isFenceClosed = useClosedFence(offset) != null;
 
   // Upgraded fences escape the <pre><code> envelope entirely. An OPEN
   // mermaid/html fence deliberately falls through to the normal code shell, so
@@ -448,12 +492,9 @@ const COMPONENTS: Partial<Components> = {
     return <div {...props}>{children}</div>;
   },
 
-  // Tables — wrap in tableWrapper div for border/radius/scroll (matches Tiptap)
-  table: ({ children }) => (
-    <div className="tableWrapper">
-      <table>{children}</table>
-    </div>
-  ),
+  // Tables keep Tiptap's tableWrapper (border/radius/scroll) and add column
+  // resizing, an expanded view and copy.
+  table: RichTable,
 
   code: RichCode,
   pre: RichPre,
@@ -476,9 +517,63 @@ const REHYPE_PLUGINS = [
   rehypeKatex,
 ] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
 
-// ---------------------------------------------------------------------------
+/**
+ * Rendered Markdown by source text. A comment mounts again whenever it scrolls
+ * back into a virtualized timeline or its issue is reopened, and parsing it
+ * (remark, rehype, sanitize, KaTeX) and building its element tree is most of
+ * that mount. Plugins, components and the URL transform are module constants,
+ * so the tree is a pure function of the processed source and React can reuse
+ * the elements across mounts. Settled content only: streaming text changes on
+ * every token and would only churn the cache (MUL-9538).
+ */
+interface RenderedMarkdown {
+  processed: string;
+  closedFences: ReturnType<typeof computeClosedFences>;
+  element: ReactElement;
+}
+
+const RENDERED_MARKDOWN_LIMIT = 150;
+const renderedMarkdown = new Map<string, RenderedMarkdown>();
+
+function renderMarkdown(content: string, cdnDomain: string): RenderedMarkdown {
+  const processed = highlightToHtml(
+    preprocessMarkdown(content, { cdnDomain, autolinkIssueIdentifiers: true }),
+  );
+  return {
+    processed,
+    // Derived from the SAME string handed to ReactMarkdown, so offsets line up
+    // with the hast node positions the `code`/`pre` renderers observe. Computing
+    // it from the raw pre-preprocess text would mis-match every rewritten node.
+    closedFences: computeClosedFences(processed),
+    // react-markdown's synchronous renderer is a plain function of its options.
+    element: ReactMarkdown({
+      children: processed,
+      remarkPlugins: REMARK_PLUGINS,
+      rehypePlugins: REHYPE_PLUGINS,
+      urlTransform: markdownUrlTransform,
+      components: COMPONENTS,
+    }),
+  };
+}
+
+function cachedRenderMarkdown(content: string, cdnDomain: string): RenderedMarkdown {
+  const key = `${cdnDomain}\u0000${content}`;
+  const hit = renderedMarkdown.get(key);
+  if (hit) {
+    // Least recently used goes first.
+    renderedMarkdown.delete(key);
+    renderedMarkdown.set(key, hit);
+    return hit;
+  }
+  const rendered = renderMarkdown(content, cdnDomain);
+  renderedMarkdown.set(key, rendered);
+  if (renderedMarkdown.size > RENDERED_MARKDOWN_LIMIT) {
+    renderedMarkdown.delete(renderedMarkdown.keys().next().value!);
+  }
+  return rendered;
+}
+
 // Component
-// ---------------------------------------------------------------------------
 
 export interface RichContentProps {
   content: string;
@@ -517,18 +612,12 @@ export const RichContent = memo(function RichContent({
   // late config arrival reprocesses exactly once.
   const cdnDomain = useConfigStore((s) => s.cdnDomain);
 
-  const processed = useMemo(
-    () =>
-      highlightToHtml(
-        preprocessMarkdown(content, { cdnDomain, autolinkIssueIdentifiers: true }),
-      ),
-    [content, cdnDomain],
+  const settled = phase === "settled";
+  const { processed, closedFences, element } = useMemo(
+    () => (settled ? cachedRenderMarkdown : renderMarkdown)(content, cdnDomain),
+    [content, cdnDomain, settled],
   );
-
-  // Derived from the SAME string handed to ReactMarkdown, so offsets line up
-  // with the hast node positions the `code`/`pre` renderers observe. Computing
-  // it from the raw pre-preprocess text would mis-match every rewritten node.
-  const closedFences = useMemo(() => computeClosedFenceOffsets(processed), [processed]);
+  const tableSource = useMemo(() => ({ source: content, rendered: processed }), [content, processed]);
 
   const wrapperRef = useRef<HTMLDivElement>(null);
   const hover = useLinkHover(wrapperRef);
@@ -543,17 +632,12 @@ export const RichContent = memo(function RichContent({
   const markdown = useMemo(
     () => (
       <ClosedFenceContext.Provider value={closedFences}>
-        <ReactMarkdown
-          remarkPlugins={REMARK_PLUGINS}
-          rehypePlugins={REHYPE_PLUGINS}
-          urlTransform={markdownUrlTransform}
-          components={COMPONENTS}
-        >
-          {processed}
-        </ReactMarkdown>
+        <RichTableSourceContext.Provider value={tableSource}>
+          {element}
+        </RichTableSourceContext.Provider>
       </ClosedFenceContext.Provider>
     ),
-    [processed, closedFences],
+    [element, closedFences, tableSource],
   );
 
   return (
@@ -561,6 +645,7 @@ export const RichContent = memo(function RichContent({
       <div
         ref={wrapperRef}
         data-rich-content=""
+        data-mc="content"
         data-density={density}
         data-phase={phase}
         className={cn(

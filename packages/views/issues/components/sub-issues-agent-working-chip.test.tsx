@@ -25,6 +25,15 @@ vi.mock("../../agents/components/agent-avatar-stack", () => ({
 }));
 
 vi.mock("./workspace-agent-working-chip", () => ({
+  useWorkingExecutionUnits: (
+    agents: readonly WorkspaceWorkingAgent[] | undefined,
+  ) =>
+    agents?.map((agent) => ({
+      type: "agent" as const,
+      id: agent.id,
+      runningTaskCount: agent.running_task_count,
+      memberAgentIds: [agent.id],
+    })),
   WorkingAgentsHoverContent: ({
     agents,
   }: {
@@ -118,7 +127,7 @@ describe("SubIssuesAgentWorkingChip", () => {
     render(<SubIssuesAgentWorkingChip parentIssueId="parent-1" />);
 
     expect(
-      screen.getByText("agent_activity.chip_agents_working:2"),
+      screen.getByText("agent_activity.chip_agents_working:2", { ignore: '[aria-hidden="true"] *' }),
     ).not.toBeNull();
     expect(screen.getByTestId("agent-avatar-stack").textContent).toBe(
       "agent-1,agent-2",
@@ -137,7 +146,7 @@ describe("SubIssuesAgentWorkingChip", () => {
     // The number and the hover body must never disagree — they are the same
     // list, not two derivations of one snapshot.
     expect(
-      screen.getByText("agent_activity.chip_agents_working:3"),
+      screen.getByText("agent_activity.chip_agents_working:3", { ignore: '[aria-hidden="true"] *' }),
     ).not.toBeNull();
     expect(screen.getByTestId("hover-body").textContent).toBe("3");
   });

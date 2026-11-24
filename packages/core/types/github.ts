@@ -57,6 +57,44 @@ export interface GitHubInstallation {
   connected_by?: string;
 }
 
+/** Why a PR is on an issue: linked by hand, or matched in its title / branch.
+ * "auto" is any other automatic link, such as "Closes MUL-1" in the body. */
+export type PullRequestLinkSource = "manual" | "title" | "branch" | "auto";
+
+/** What "every linked PR merged → move the issue to the workspace's target
+ * status" will do for one issue. The server computes it; the issue page only
+ * renders it. Older backends may still send `no_close_intent`. */
+export type PRAutoCompleteState =
+  | "none"
+  | "workspace_disabled"
+  | "issue_disabled"
+  | "terminal"
+  | "triage"
+  | "not_in_workflow"
+  | "at_target"
+  | "waiting"
+  | "not_merged"
+  | "all_merged";
+
+export interface PRAutoComplete {
+  /** Unknown future states are kept as strings; the UI renders nothing for them. */
+  state: PRAutoCompleteState | (string & {});
+  /** PRs the state is about: still open for `waiting`, closed without merging
+   * for `not_merged`, every linked PR for `all_merged`. */
+  pull_request_ids: string[];
+  issue_disabled: boolean;
+  workspace_enabled: boolean;
+  /** Status key a merge moves the issue to, or "none". Older backends omit
+   * it; they only ever moved issues to Done. */
+  target_status?: string;
+}
+
+export interface IssuePullRequestsResponse {
+  pull_requests: GitHubPullRequest[];
+  /** Absent on older backends. */
+  auto_complete: PRAutoComplete | null;
+}
+
 export interface GitHubPullRequest {
   id: string;
   /** Source provider. Older GitHub-only backends omit it. */
@@ -75,6 +113,8 @@ export interface GitHubPullRequest {
   closed_at: string | null;
   pr_created_at: string;
   pr_updated_at: string;
+  /** Only set on an issue's PR list. Older backends omit it. */
+  link_source?: PullRequestLinkSource;
   /** Conflict verdict from the GitHub API snapshot. Answers ONLY
    * "is there a conflict"; older backends omit it. */
   mergeable?: GitHubPullRequestMergeable | null;
@@ -117,6 +157,26 @@ export interface GitHubPullRequest {
   changed_files?: number;
 }
 
+/** One issue -> PR link as issue cards, list rows and table cells render it.
+ * The CI / merge snapshot stays on the issue's own PR list. */
+export interface IssuePullRequestSummary {
+  issue_id: string;
+  id: string;
+  provider: string;
+  repo_owner: string;
+  repo_name: string;
+  number: number;
+  title: string;
+  /** Unknown future states are kept as strings; chips fall back to "open". */
+  state: GitHubPullRequestState | (string & {});
+  html_url: string;
+}
+
+export interface IssuePullRequestSummariesResponse {
+  /** Newest first. */
+  pull_requests: IssuePullRequestSummary[];
+}
+
 export interface ListGitHubInstallationsResponse {
   installations: GitHubInstallation[];
   /** Whether the deployment has GitHub App credentials configured. When false, the Connect button is hidden / disabled. */
@@ -132,6 +192,7 @@ export interface ListGitHubInstallationsResponse {
 }
 
 export interface GitHubConnectResponse {
+  connection_id?: string;
   /** The GitHub App install URL the browser should open. Empty when `configured` is false. */
   url?: string;
   configured: boolean;
@@ -149,6 +210,7 @@ export interface GitHubRepository {
 }
 
 export interface ListGitHubRepositoriesResponse {
+  repository_selection?: "all" | "selected" | "unknown";
   repositories: GitHubRepository[];
   total_count: number;
   next_page: number | null;

@@ -25,6 +25,12 @@ deleted_task_messages AS (
 deleted_task_tokens AS (
     DELETE FROM task_token WHERE task_id IN (SELECT id FROM batch)
 ),
+deleted_task_supplements AS (
+    DELETE FROM task_supplement WHERE task_id IN (SELECT id FROM batch)
+),
+deleted_task_supplement_capabilities AS (
+    DELETE FROM task_supplement_capability WHERE task_id IN (SELECT id FROM batch)
+),
 deleted_channel_outbound_cards AS (
     DELETE FROM channel_outbound_card_message WHERE task_id IN (SELECT id FROM batch)
 ),
@@ -36,6 +42,9 @@ deleted_channel_task_deliveries AS (
 ),
 deleted_draft_restores AS (
     DELETE FROM chat_draft_restore WHERE task_id IN (SELECT id FROM batch)
+),
+deleted_task_context_receipts AS (
+    DELETE FROM task_context_receipt WHERE task_id IN (SELECT id FROM batch)
 )
 DELETE FROM agent_task_queue WHERE id IN (SELECT id FROM batch)
 `
@@ -108,6 +117,16 @@ DELETE FROM agent WHERE agent.workspace_id = $1
 
 func (q *Queries) DeleteWorkspaceAgents(ctx context.Context, workspaceID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteWorkspaceAgents, workspaceID)
+	return err
+}
+
+const deleteWorkspaceAppToolCallQuotaPeriods = `-- name: DeleteWorkspaceAppToolCallQuotaPeriods :exec
+DELETE FROM app_tool_call_quota_period
+WHERE app_tool_call_quota_period.workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceAppToolCallQuotaPeriods(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceAppToolCallQuotaPeriods, workspaceID)
 	return err
 }
 
@@ -226,8 +245,54 @@ func (q *Queries) DeleteWorkspaceConnections(ctx context.Context, workspaceID pg
 	return err
 }
 
+const deleteWorkspaceDashboardRangeViews = `-- name: DeleteWorkspaceDashboardRangeViews :exec
+DELETE FROM dashboard_range_view
+WHERE dashboard_range_view.workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceDashboardRangeViews(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceDashboardRangeViews, workspaceID)
+	return err
+}
+
+const deleteWorkspaceEntitlementFeatureAttempts = `-- name: DeleteWorkspaceEntitlementFeatureAttempts :exec
+DELETE FROM entitlement_feature_attempt
+WHERE entitlement_feature_attempt.workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceEntitlementFeatureAttempts(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceEntitlementFeatureAttempts, workspaceID)
+	return err
+}
+
+const deleteWorkspaceEntitlementLimitOverages = `-- name: DeleteWorkspaceEntitlementLimitOverages :exec
+DELETE FROM entitlement_limit_overage
+WHERE entitlement_limit_overage.workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceEntitlementLimitOverages(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceEntitlementLimitOverages, workspaceID)
+	return err
+}
+
 const deleteWorkspaceIssueRoots = `-- name: DeleteWorkspaceIssueRoots :exec
-WITH
+WITH deleted_wakeup_receipts AS (
+ DELETE FROM issue_wakeup_receipt WHERE wakeup_id IN (SELECT id FROM issue_wakeup WHERE workspace_id=$1)
+), deleted_wakeups AS (
+ DELETE FROM issue_wakeup WHERE workspace_id=$1
+),
+deleted_child_events AS (
+ DELETE FROM issue_child_event WHERE workspace_id=$1
+),
+deleted_unread AS (
+ DELETE FROM issue_unread WHERE workspace_id=$1
+),
+deleted_description_collab_state AS (
+ DELETE FROM issue_description_collab_state WHERE workspace_id=$1
+),
+deleted_description_revisions AS (
+ DELETE FROM issue_description_revision WHERE workspace_id=$1
+),
 deleted_issues AS (
     DELETE FROM issue WHERE issue.workspace_id = $1
 ),
@@ -294,6 +359,15 @@ deleted_task_tokens AS (
     DELETE FROM task_token
     WHERE workspace_id = $1
 ),
+deleted_orphan_task_supplements AS (
+    DELETE FROM task_supplement WHERE workspace_id = $1
+),
+deleted_orphan_task_supplement_capabilities AS (
+    DELETE FROM task_supplement_capability WHERE workspace_id = $1
+),
+deleted_orphan_task_context_receipts AS (
+    DELETE FROM task_context_receipt WHERE workspace_id = $1
+),
 deleted_hourly_dirty AS (
     DELETE FROM task_usage_hourly_dirty WHERE workspace_id = $1
 ),
@@ -311,15 +385,24 @@ deleted_lark_outbound_cards AS (
     DELETE FROM lark_outbound_card_message
     WHERE chat_session_id IN (SELECT id FROM ws_sessions)
 ),
+deleted_chat_submission_receipts AS (
+    DELETE FROM chat_submission_receipt WHERE chat_submission_receipt.workspace_id = $1
+),
 deleted_draft_restores AS (
     DELETE FROM chat_draft_restore
     WHERE chat_session_id IN (SELECT id FROM ws_sessions)
+),
+deleted_chat_wakeups AS (
+    DELETE FROM chat_wakeup WHERE workspace_id = $1
 ),
 deleted_agent_builder_drafts AS (
     DELETE FROM agent_builder_draft WHERE workspace_id = $1
 ),
 deleted_comment_reactions AS (
     DELETE FROM comment_reaction WHERE workspace_id = $1
+),
+deleted_comment_idempotency_receipts AS (
+    DELETE FROM comment_idempotency_receipt WHERE comment_idempotency_receipt.workspace_id = $1
 ),
 deleted_issue_reactions AS (
     DELETE FROM issue_reaction WHERE workspace_id = $1
@@ -329,6 +412,9 @@ deleted_activity AS (
 ),
 deleted_inbox AS (
     DELETE FROM inbox_item WHERE workspace_id = $1
+),
+deleted_issue_blockers AS (
+ DELETE FROM issue_blocker WHERE workspace_id=$1
 ),
 deleted_issue_dependencies AS (
     DELETE FROM issue_dependency
@@ -363,6 +449,12 @@ deleted_issue_vcs_links AS (
     DELETE FROM issue_vcs_pull_request
     WHERE issue_id IN (SELECT id FROM ws_issues)
        OR pull_request_id IN (SELECT id FROM ws_vcs_prs)
+),
+deleted_issue_pr_automation AS (
+    DELETE FROM issue_pr_automation WHERE workspace_id = $1
+),
+deleted_issue_pr_exclusions AS (
+    DELETE FROM issue_pull_request_exclusion WHERE workspace_id = $1
 ),
 deleted_agent_invocation_targets AS (
     DELETE FROM agent_invocation_target
@@ -418,6 +510,10 @@ deleted_channel_outbound_messages AS (
     DELETE FROM channel_outbound_message
     WHERE installation_id IN (SELECT id FROM ws_channel_installations)
 ),
+deleted_channel_reply_deliveries AS (
+    DELETE FROM channel_reply_delivery
+    WHERE installation_id IN (SELECT id FROM ws_channel_installations)
+),
 deleted_channel_chat_contexts AS (
     DELETE FROM channel_chat_context_generation
     WHERE chat_session_id IN (SELECT id FROM ws_sessions)
@@ -447,6 +543,53 @@ deleted_channel_user_bindings AS (
 ),
 deleted_channel_binding_tokens AS (
     DELETE FROM channel_binding_token WHERE workspace_id = $1
+),
+deleted_wecom_install_sessions AS (
+    DELETE FROM wecom_install_session WHERE workspace_id = $1
+),
+deleted_weixin_login_sessions AS (
+    DELETE FROM weixin_login_session WHERE workspace_id = $1
+),
+deleted_weixin_account_states AS (
+    DELETE FROM weixin_account_state
+    WHERE installation_id IN (SELECT id FROM ws_channel_installations)
+),
+deleted_workspace_composio_connections AS (
+    DELETE FROM workspace_composio_connection WHERE workspace_id = $1
+),
+deleted_remote_app_connections AS (
+    DELETE FROM remote_app_connection
+    WHERE (scope = 'team' AND owner_id = $1) OR workspace_id = $1
+),
+deleted_personal_composio_connections AS (
+    DELETE FROM user_composio_connection WHERE workspace_id = $1
+),
+deleted_agent_apps AS (
+    DELETE FROM agent_app WHERE workspace_id = $1
+),
+deleted_app_action_rules AS (
+    DELETE FROM app_action_rule WHERE workspace_id = $1
+),
+deleted_app_action_requests AS (
+    DELETE FROM app_action_request WHERE workspace_id = $1
+),
+deleted_app_tool_calls AS (
+    DELETE FROM app_tool_call WHERE workspace_id = $1
+),
+deleted_issue_environments AS (
+    DELETE FROM issue_environment WHERE workspace_id = $1
+),
+deleted_issue_environment_commands AS (
+    DELETE FROM issue_environment_command WHERE workspace_id = $1
+),
+deleted_issue_environment_configs AS (
+    DELETE FROM issue_environment_config WHERE workspace_id = $1
+),
+deleted_workspace_app_settings AS (
+    DELETE FROM workspace_app_setting WHERE workspace_id = $1
+),
+deleted_app_tool_class_overrides AS (
+    DELETE FROM app_tool_class_override WHERE workspace_id = $1
 ),
 deleted_lark_chat_bindings AS (
     DELETE FROM lark_chat_session_binding
@@ -574,8 +717,20 @@ WITH
 deleted_runtimes AS (
     DELETE FROM agent_runtime WHERE agent_runtime.workspace_id = $1
 ),
+deleted_runtime_rate_limits AS (
+    DELETE FROM runtime_rate_limit WHERE runtime_rate_limit.workspace_id = $1
+),
 deleted_profiles AS (
     DELETE FROM runtime_profile WHERE runtime_profile.workspace_id = $1
+),
+deleted_project_members AS (
+    DELETE FROM project_member WHERE project_member.workspace_id = $1
+),
+deleted_project_subscribers AS (
+    DELETE FROM project_subscriber WHERE project_subscriber.workspace_id = $1
+),
+deleted_project_folders AS (
+    DELETE FROM project_folder WHERE project_folder.workspace_id = $1
 )
 DELETE FROM project WHERE project.workspace_id = $1
 `
@@ -588,6 +743,11 @@ func (q *Queries) DeleteWorkspaceRuntimesAndProjects(ctx context.Context, worksp
 const deleteWorkspaceSquadsAndSkills = `-- name: DeleteWorkspaceSquadsAndSkills :exec
 WITH deleted_squads AS (
     DELETE FROM squad WHERE squad.workspace_id = $1
+),
+deleted_skill_versions AS (
+    -- Keyed by skill_id so the delete uses idx_skill_version_skill_version.
+    DELETE FROM skill_version
+    WHERE skill_version.skill_id IN (SELECT skill.id FROM skill WHERE skill.workspace_id = $1)
 )
 DELETE FROM skill WHERE skill.workspace_id = $1
 `

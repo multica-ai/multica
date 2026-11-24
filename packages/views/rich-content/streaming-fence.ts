@@ -1,5 +1,6 @@
 import { fromMarkdown } from "mdast-util-from-markdown";
 import type { Root, RootContent, Code } from "mdast";
+import { parseFenceTitle } from "../editor/utils/fence-title";
 
 /**
  * Fenced-code closedness gate for streaming RichContent (MUL-4922).
@@ -10,8 +11,12 @@ import type { Root, RootContent, Code } from "mdast";
  * created and destroyed dozens of times per second. Only a *closed* fence may
  * upgrade to a rich block.
  *
- * This module answers exactly one question — "which fenced code blocks in this
- * source are closed?" — and returns offsets. It deliberately does NOT render.
+ * This module answers one question — "which fenced code blocks in this source
+ * are closed?" — and returns their offsets. Since it holds the only parse that
+ * still sees a fence's info string, it also reads the block title from it
+ * (```html title="Weekly p95", MUL-7649): rehype-raw rebuilds the tree and
+ * drops the `meta` the code renderer would otherwise have received. It
+ * deliberately does NOT render.
  * Rendering stays in the single ReactMarkdown pipeline; a gate that rendered
  * would become the second renderer this sweep exists to delete.
  *
@@ -71,15 +76,19 @@ function endsWithClosingFence(raw: string): boolean {
   return closeFence[0] === marker && closeFence.length >= openFence.length;
 }
 
+export interface ClosedFence {
+  title: string | null;
+}
+
 /**
- * Start offsets of every fenced code block that is closed in `source`.
+ * Every fenced code block that is closed in `source`, keyed by start offset.
  *
  * `source` MUST be the final processed Markdown handed to ReactMarkdown — the
  * same string preprocess/highlight already rewrote. Offsets computed against
  * the raw pre-preprocess text would drift and mis-match the wrong node.
  */
-export function computeClosedFenceOffsets(source: string): Set<number> {
-  const closed = new Set<number>();
+export function computeClosedFences(source: string): Map<number, ClosedFence> {
+  const closed = new Map<number, ClosedFence>();
   if (!source) return closed;
 
   let tree: Root;
@@ -98,7 +107,9 @@ export function computeClosedFenceOffsets(source: string): Set<number> {
     const start = node.position?.start.offset;
     const end = node.position?.end.offset;
     if (start == null || end == null) continue;
-    if (endsWithClosingFence(source.slice(start, end))) closed.add(start);
+    if (endsWithClosingFence(source.slice(start, end))) {
+      closed.set(start, { title: parseFenceTitle(node.meta) });
+    }
   }
 
   return closed;

@@ -183,6 +183,11 @@ func (b *bindTestTasks) PromoteChannelChatTasksIfMediaReady(context.Context, pgt
 	b.promoted++
 	return nil
 }
+func (*bindTestTasks) MemberMayInvokeAgent(context.Context, pgtype.UUID, pgtype.UUID) (bool, error) {
+	// This rig is about media binding, not permission; the sender may run it.
+	return true, nil
+}
+
 func (*bindTestTasks) PromoteDeferredChannelIssueTask(context.Context, pgtype.UUID) error {
 	return nil
 }

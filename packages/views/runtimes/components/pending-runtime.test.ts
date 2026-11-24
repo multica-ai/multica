@@ -16,6 +16,7 @@ function profile(overrides: Partial<RuntimeProfile> = {}): RuntimeProfile {
   return {
     id: "profile-1",
     workspace_id: "ws-1",
+    daemon_id: "daemon-1",
     display_name: "Team Codex",
     protocol_family: "codex",
     command_name: "team-codex",
@@ -53,6 +54,29 @@ function runtime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
 }
 
 describe("pending custom runtime rows", () => {
+  it("only adds a pending profile on its bound machine", () => {
+    const profiles = [
+      profile(),
+      profile({ id: "other", daemon_id: "daemon-2" }),
+      profile({ id: "legacy", daemon_id: null }),
+    ];
+    const rows = pendingRuntimesForProfiles({
+      pendingProfiles: profiles.map((profile) => ({ profile, createdAt: 0 })),
+      runtimes: [runtime()],
+      localDaemonId: "daemon-1",
+    });
+    expect(rows.map((row) => row.id)).toEqual([
+      "runtime-1",
+      pendingRuntimeId("profile-1"),
+    ]);
+    expect(
+      pendingRuntimesForProfiles({
+        pendingProfiles: [{ profile: profile(), createdAt: 0 }],
+        runtimes: [],
+      }),
+    ).toEqual([]);
+  });
+
   it("builds a pending runtime from the newly created profile", () => {
     const createdAt = Date.parse("2026-01-01T00:00:00Z");
     const pending = pendingRuntimeFromProfile({

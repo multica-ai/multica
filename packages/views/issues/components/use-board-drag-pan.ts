@@ -34,51 +34,15 @@ const INTERACTIVE_SELECTOR = [
 ].join(", ");
 
 /**
- * Blank-area left-drag panning for a horizontally scrollable board (#6700,
- * Trello/Linear pattern): pressing the LEFT mouse button on empty board
- * background and dragging pans the board horizontally — the page follows the
- * cursor. Dragging a card still moves the card (dnd-kit); this hook stays out
- * of the way because it never activates when the gesture starts on a card or
- * any interactive element. Touch and pen input are intentionally left to the
- * browser; this PR only owns the left-mouse-button gesture.
+ * Returns left-mouse drag handlers for horizontal panning of empty board space.
+ * Exclude interactive elements and data-board-card roots so panning cannot compete
+ * with dnd-kit card dragging. Keep that attribute on every draggable card root.
  *
- * ### dnd-kit coexistence invariant (P2-5 — do not break)
- * These pointer handlers sit on the SAME scroll container that hosts the
- * `DndContext`. They are mutually exclusive with card dragging purely by
- * ORIGIN: `onPointerDown` bails whenever the press starts inside
- * `INTERACTIVE_SELECTOR`, and every draggable card root carries
- * `data-board-card` (see `DraggableBoardCard` in `board-card.tsx`). If a future
- * change removes that attribute from the card root, or nests the pan container
- * below the card listeners, card drags and board pans will start fighting.
- * Keep `data-board-card` on the card root and keep this exclusion in sync.
- *
- * ### Design notes
- *   - Pointer Events + pointer capture claimed on `pointerdown` (not deferred
- *     to first move), so every `pointermove` keeps dispatching to the container
- *     even after the pointer leaves it or the window. Deferring capture was the
- *     "scrolls back when the pointer exits the board" bug: without an early
- *     capture the browser ran a native selection-drag whose auto-scroll fought
- *     `scrollLeft`, and re-entering the container produced a jumped delta.
- *   - Text selection is suppressed from `pointerdown` (P1-3): `user-select:
- *     none` on the container plus `selectstart` / `dragstart` preventers, then
- *     restored in `reset`. Doing it on down (not after the 5px threshold) closes
- *     the window where Safari/Firefox would start a selection whose auto-scroll
- *     yanks the board back. Because selection can no longer begin, `pointermove`
- *     no longer needs a per-frame `removeAllRanges` (P3-7).
- *   - Mouse left button only (`event.pointerType === "mouse"` and
- *     `event.button === 0`). Touch/pen are untouched so native touch scrolling
- *     and pinch zoom stay browser-owned.
- *   - Activation is gated on a ~5px move so a plain click is not swallowed.
- *   - Panning uses the captured pointer's `clientX` deltas — never a hover
- *     target or `elementFromPoint` — so leaving the container can't lose track.
- *   - Horizontal axis only: `deltaY` is never read, `scrollTop` never written.
- *     `scrollLeft` is clamped to `[0, scrollWidth - clientWidth]` so reaching an
- *     edge stops cleanly instead of bouncing back.
- *   - Cleanup on `pointerup` / `pointercancel` / `lostpointercapture` and
- *     window `blur`, plus a `buttons` check on move, so a lost release cannot
- *     leave the board stuck in a panning state.
- *
- * Returns props to spread onto the scroll container.
+ * Capture the pointer and suppress native selection on pointerdown; waiting for
+ * the movement threshold lets native selection autoscroll fight scrollLeft.
+ * The threshold still distinguishes a click from a pan. Use captured clientX
+ * deltas and clamp horizontal bounds; leave touch and pen scrolling to the browser.
+ * Reset on release, cancellation, lost capture, blur, or a missing pressed button.
  */
 export function useBoardDragPan<T extends HTMLElement>() {
   const ref = useRef<T | null>(null);

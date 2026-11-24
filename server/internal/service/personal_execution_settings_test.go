@@ -74,7 +74,7 @@ func TestPersonalExecutionSettings(t *testing.T) {
 			}
 			claim := func(runtime pgtype.UUID, want *db.AgentTaskQueue) {
 				t.Helper()
-				task, err := svc.claimTask(ctx, aid, runtime)
+				task, err := svc.claimTask(ctx, aid, runtime, claimScope{claimPath: claimPathAgent})
 				if err != nil {
 					t.Fatal(err)
 				}

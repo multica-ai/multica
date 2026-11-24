@@ -2,10 +2,13 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -136,11 +139,40 @@ func (h *Handler) HandleVCSWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	switch provider.EventKind(r.Header) {
+	systemHook := conn.Provider == string(vcs.KindGitLab) && r.Header.Get("X-Gitlab-Event") == "System Hook"
+	switch provider.EventKind(r.Header, body) {
 	case vcs.EventPullRequest:
 		if pr, err := provider.ParsePullRequest(body); err != nil {
 			slog.Warn("vcs: bad pull_request payload", "provider", conn.Provider, "err", err)
 		} else {
+			if systemHook {
+				ws, err := h.Queries.GetWorkspace(r.Context(), conn.WorkspaceID)
+				if err != nil {
+					slog.Warn("vcs: load workspace for system hook failed", "err", err)
+					writeError(w, http.StatusServiceUnavailable, "workspace lookup failed")
+					return
+				}
+				if !gitLabSystemHookRepoAllowed(ws.Repos, conn.InstanceUrl, pr.RepoOwner, pr.RepoName) {
+					break
+				}
+				if checker, ok := provider.(vcs.RepositoryAccessChecker); ok {
+					token, err := h.openVCSSecret(conn.AccessTokenEncrypted)
+					if err != nil || token == "" {
+						slog.Warn("vcs: open access token for system hook failed", "err", err)
+						writeError(w, http.StatusInternalServerError, "access token error")
+						return
+					}
+					readable, err := checker.RepositoryReadable(r.Context(), conn.InstanceUrl, pr.RepoOwner, pr.RepoName, token)
+					if err != nil {
+						slog.Warn("vcs: system-hook repository access lookup failed", "provider", conn.Provider, "err", err)
+						writeError(w, http.StatusServiceUnavailable, "repository access lookup failed")
+						return
+					}
+					if !readable {
+						break
+					}
+				}
+			}
 			h.mirrorVCSPullRequest(r.Context(), conn, pr)
 		}
 	case vcs.EventCIStatus:
@@ -155,10 +187,76 @@ func (h *Handler) HandleVCSWebhook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
+// A system hook covers the entire GitLab instance. Only repositories explicitly
+// configured in this workspace may affect its issues; a similarly named repo
+// on another host or under another namespace must not match.
+func gitLabSystemHookRepoAllowed(raw []byte, instanceURL, owner, name string) bool {
+	var repos []workspaceRepoRef
+	if json.Unmarshal(raw, &repos) != nil || owner == "" || name == "" {
+		return false
+	}
+	instance, err := url.Parse(instanceURL)
+	if err != nil || instance.Host == "" {
+		return false
+	}
+	want := strings.Trim(instance.Path, "/")
+	if want != "" {
+		want += "/"
+	}
+	want += owner + "/" + name
+	for _, repo := range repos {
+		u, err := parseGitLabRepoURL(strings.TrimSpace(repo.URL))
+		if err != nil || !gitLabRepoURLMatchesInstance(u, instance) {
+			continue
+		}
+		path := strings.TrimSuffix(strings.Trim(u.Path, "/"), ".git")
+		if path == want {
+			return true
+		}
+	}
+	return false
+}
+
+func parseGitLabRepoURL(raw string) (*url.URL, error) {
+	if strings.Contains(raw, "://") {
+		return url.Parse(raw)
+	}
+	at := strings.Index(raw, "@")
+	colon := strings.Index(raw, ":")
+	if at <= 0 || colon <= at+1 || colon == len(raw)-1 {
+		return nil, errors.New("invalid scp-style repository URL")
+	}
+	return &url.URL{Scheme: "ssh", Host: raw[at+1 : colon], Path: "/" + raw[colon+1:], User: url.User(raw[:at])}, nil
+}
+func gitLabRepoURLMatchesInstance(repo, instance *url.URL) bool {
+	if repo.RawQuery != "" || repo.Fragment != "" {
+		return false
+	}
+	if repo.Scheme == "ssh" {
+		return strings.EqualFold(repo.Hostname(), instance.Hostname()) && repo.User != nil && repo.User.Username() == "git"
+	}
+	if repo.Scheme == "https" || repo.Scheme == "http" {
+		return repo.Scheme == instance.Scheme && strings.EqualFold(repo.Host, instance.Host) && repo.User == nil
+	}
+	return false
+}
+
 func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnection, ev vcs.PullRequestEvent) {
 	if ev.RepoOwner == "" || ev.RepoName == "" || ev.Number == 0 {
 		slog.Warn("vcs: pull_request missing repo identity", "provider", conn.Provider)
 		return
+	}
+
+	// The stored state before this event, so a merge completes issues once —
+	// when it happens — and not again on a later event of a merged PR.
+	prevState := ""
+	if prev, err := h.Queries.GetVCSPullRequestByKey(ctx, db.GetVCSPullRequestByKeyParams{
+		ConnectionID: conn.ID,
+		RepoOwner:    ev.RepoOwner,
+		RepoName:     ev.RepoName,
+		PrNumber:     ev.Number,
+	}); err == nil {
+		prevState = prev.State
 	}
 
 	pr, err := h.Queries.UpsertVCSPullRequest(ctx, db.UpsertVCSPullRequestParams{
@@ -190,15 +288,13 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 
 	// Out-of-order guard for the link write. UpsertVCSPullRequest keeps the
 	// newer persisted row on a stale redelivery, so `pr` may reflect a newer
-	// event than this `ev`. Everything the link write decides below — whether
-	// the PR still claims the issue, close_intent, preserveCloseIntent — comes
-	// from `ev`, so acting on a stale event would undo what the newer one
-	// already recorded (e.g. a redelivered older "opened" event clearing the
-	// close intent on a merged PR's link, blocking auto-advance, or dropping a
-	// link that event had just written). If the persisted row is strictly newer
-	// than this event, the newer event already linked and published — stop
-	// here. (An event with no usable timestamp falls back to now(), which is
-	// never strictly after the stored value, so it proceeds.)
+	// event than this `ev`. Everything the link pass decides below comes from
+	// `ev`, so acting on a stale event would undo what the newer one already
+	// recorded (e.g. a redelivered older event dropping a link the newer title
+	// carries). If the persisted row is strictly newer than this event, the
+	// newer event already linked and published — stop here. (An event with no
+	// usable timestamp falls back to now(), which is never strictly after the
+	// stored value, so it proceeds.)
 	evUpdatedAt := parseGHTimeRequired(ev.UpdatedAt)
 	if pr.PrUpdatedAt.Valid && evUpdatedAt.Valid && pr.PrUpdatedAt.Time.After(evUpdatedAt.Time) {
 		return
@@ -207,88 +303,45 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 	workspaceID := uuidToString(conn.WorkspaceID)
 	resp := vcsPullRequestToResponse(pr)
 
-	// Auto-link to issues by identifiers in title/body/branch. Connecting a
-	// a provider is the opt-in, so there is no separate per-workspace flag. The
-	// issue-side machinery is shared with GitHub.
+	// Auto-link to issues by identifiers in the title, branch, and closing
+	// keywords. Connecting a provider is the opt-in, so there is no separate
+	// per-workspace flag. The issue-side machinery is shared with GitHub
+	// (reconcileAutoLinks, maybeAutoCompleteIssue). A connection belongs to
+	// exactly one workspace, so there is no cross-workspace ambiguity to settle.
 	linkedIssueIDs := make([]string, 0)
-	idents := extractIdentifiers(ev.Title, ev.Body, ev.Branch)
-	closingIdents := map[string]struct{}{}
-	for _, c := range extractClosingIdentifiers(ev.Title, ev.Body) {
-		closingIdents[c] = struct{}{}
-	}
-	// claimedIdents are the identifiers this PR claims: a title prefix, a
-	// branch-name reference, or a body closing keyword. An identifier matched
-	// ONLY by a bare body mention is a drive-by reference — it claims nothing,
-	// so it gets no link row and drops one an earlier claim created. Mirrors the
-	// GitHub path (MUL-3739, MUL-7072); branch is deliberately excluded from the
-	// closing-keyword scan there and here.
-	claimedIdents := map[string]struct{}{}
-	for _, id := range extractIdentifiers(ev.Title, ev.Branch) {
-		claimedIdents[id] = struct{}{}
-	}
-	for c := range closingIdents {
-		claimedIdents[c] = struct{}{}
-	}
-	// Freeze close_intent once the terminal merge/close event has arrived.
-	preserveCloseIntent := !ev.Terminal() && (ev.State == "merged" || ev.State == "closed")
-	prefix := h.getIssuePrefix(ctx, conn.WorkspaceID)
-	reevalIssues := make([]db.Issue, 0, len(idents))
-	for _, id := range idents {
-		issue, ok := h.lookupIssueByIdentifier(ctx, conn.WorkspaceID, prefix, id)
-		if !ok {
-			continue
-		}
-		if _, claimed := claimedIdents[id]; !claimed {
-			// Passing mention: never links, and drops an earlier claim's link
-			// while the PR is still editable. Frozen once terminal, like
-			// close_intent.
-			if preserveCloseIntent {
-				continue
-			}
-			if err := h.Queries.UnlinkIssueFromVCSPullRequest(ctx, db.UnlinkIssueFromVCSPullRequestParams{
-				IssueID:       issue.ID,
-				PullRequestID: pr.ID,
-			}); err != nil {
-				slog.Warn("vcs: unlink failed", "err", err)
-				continue
-			}
-			reevalIssues = append(reevalIssues, issue)
-			continue
-		}
-		_, declared := closingIdents[id]
-		closeIntent := declared && !preserveCloseIntent
-		if err := h.Queries.LinkIssueToVCSPullRequest(ctx, db.LinkIssueToVCSPullRequestParams{
-			IssueID:             issue.ID,
-			PullRequestID:       pr.ID,
-			CloseIntent:         closeIntent,
-			PreserveCloseIntent: preserveCloseIntent,
-			LinkedByType:        strToText("system"),
-			LinkedByID:          pgtype.UUID{},
-		}); err != nil {
-			slog.Warn("vcs: link failed", "err", err)
-			continue
-		}
-		linkedIssueIDs = append(linkedIssueIDs, uuidToString(issue.ID))
-		reevalIssues = append(reevalIssues, issue)
-	}
-
-	if ev.State == "merged" || ev.State == "closed" {
-		// Keep the catalog local to this delivery and connection's workspace.
-		resolver := issuestatus.NewResolver(conn.WorkspaceID)
-		for _, issue := range reevalIssues {
-			// A custom terminal status counts as terminal here. (MUL-6243)
-			if s := resolver.Effective(ctx, h.issueStatusCatalog(), issue.Status); s == "done" || s == "cancelled" {
-				continue
-			}
-			counts, err := h.Queries.GetIssueCombinedPullRequestCloseAggregate(ctx, issue.ID)
+	ws, err := h.Queries.GetWorkspace(ctx, conn.WorkspaceID)
+	if err == nil {
+		var touched map[pgtype.UUID]struct{}
+		idents := prClaimedIdentifiers(ev.Title, ev.Body, ev.Branch)
+		linkedIssueIDs, touched = h.reconcileAutoLinks(ctx, ws, pr.ID, ev.State, prAutoLinkInput{
+			idents:    idents,
+			permits:   func(string) bool { return true },
+			ambiguous: func(string) bool { return false },
+			link: func(issueID pgtype.UUID) (int64, error) {
+				return h.Queries.LinkIssueToVCSPullRequest(ctx, db.LinkIssueToVCSPullRequestParams{IssueID: issueID, PullRequestID: pr.ID})
+			},
+			unlink: func(issueID pgtype.UUID) (int64, error) {
+				return h.Queries.UnlinkIssueFromVCSPullRequest(ctx, db.UnlinkIssueFromVCSPullRequestParams{IssueID: issueID, PullRequestID: pr.ID})
+			},
+			listAuto: func() ([]pgtype.UUID, error) {
+				return h.Queries.ListAutoLinkedIssueIDsForVCSPullRequest(ctx, pr.ID)
+			},
+		})
+		if ev.State == "merged" && prevState != "merged" {
+			issueIDs, err := h.Queries.ListIssueIDsForVCSPullRequest(ctx, pr.ID)
 			if err != nil {
-				slog.Warn("vcs: count linked pr states failed", "err", err, "issue_id", uuidToString(issue.ID))
-				continue
+				slog.Warn("vcs: list linked issues failed", "err", err)
 			}
-			if counts.OpenCount == 0 && counts.MergedWithCloseIntentCount > 0 {
-				h.advanceIssueToDone(ctx, issue, workspaceID)
+			for _, id := range issueIDs {
+				touched[id] = struct{}{}
 			}
 		}
+		resolver := issuestatus.NewResolver(conn.WorkspaceID)
+		for issueID := range touched {
+			h.maybeAutoCompleteIssue(ctx, conn.WorkspaceID, issueID, resolver)
+		}
+	} else {
+		slog.Warn("vcs: load workspace failed", "err", err)
 	}
 
 	h.publish(protocol.EventPullRequestUpdated, workspaceID, "system", "", map[string]any{

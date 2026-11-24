@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useRef, type ReactNode } from "react";
+import {useQuery} from "@tanstack/react-query";
+import {runtimeModelsOptions} from "@multica/core/runtimes";
+import {findModelCapabilityEntry,thinkingLevelRequiredForProvider} from "../components/inspector/model-capability";
 import {
   AGENT_DESCRIPTION_MAX_LENGTH,
   applyDraftModelChange,
@@ -9,12 +12,15 @@ import {
   type AgentPermissionScope,
 } from "@multica/core/agents";
 import { useConfigStore } from "@multica/core/config";
+import { usePaidFeatureAccess } from "@multica/core/billing";
+import { useWorkspaceId } from "@multica/core/hooks";
 import type { MemberWithUser, RuntimeDevice } from "@multica/core/types";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { PaidFeatureNotice, PaidFeatureUpgradeBadge } from "../../billing";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { useT } from "../../i18n";
 import {
@@ -25,6 +31,7 @@ import { CharCounter } from "../components/char-counter";
 import { ServiceTierSettingField } from "../components/inspector/service-tier-setting-field";
 import { ThinkingSettingField } from "../components/inspector/thinking-prop-row";
 import { ModelDropdown } from "../components/model-dropdown";
+import { QoderAgentSelect } from "../components/qoder-agent-select";
 import { RuntimePicker } from "../components/runtime-picker";
 import { SkillMultiSelect } from "../components/skill-multi-select";
 import { ConversationStartersEditor } from "../components/conversation-starters-editor";
@@ -38,6 +45,7 @@ const PERMISSION_SCOPES: AgentPermissionScope[] = [
 export function AgentConfigurationPanel({
   draft,
   onChange,
+  onAutomaticChange = onChange,
   runtimes,
   runtimesLoading,
   members,
@@ -48,9 +56,12 @@ export function AgentConfigurationPanel({
   onRuntimeSelect,
   runtimeSwitchPending = false,
   runtimeSwitchInFlight = false,
+  runtimeSummary,
 }: {
   draft: AgentDraft;
   onChange: (draft: AgentDraft) => void;
+  /** Value cleanup without user interaction, such as an unsupported model. */
+  onAutomaticChange?: (draft: AgentDraft) => void;
   runtimes: RuntimeDevice[];
   runtimesLoading: boolean;
   members: MemberWithUser[];
@@ -66,6 +77,9 @@ export function AgentConfigurationPanel({
   runtimeSwitchPending?: boolean;
   /** A rebind request is in flight. */
   runtimeSwitchInFlight?: boolean;
+  /** Replaces the runtime picker when the runtime was chosen in an earlier
+   *  step and changing it means going back there. */
+  runtimeSummary?: ReactNode;
 }) {
   const { t } = useT("agents");
   const conversationStartersSupported = useConfigStore(
@@ -79,6 +93,17 @@ export function AgentConfigurationPanel({
     (member) => member.user_id !== currentUserId,
   );
   const runtimeLocked = runtimeSwitchPending || runtimeSwitchInFlight;
+  // The agent does not exist yet, so a plan without member access makes the
+  // option unavailable. A draft that already picked people (restored, or
+  // seeded before the plan changed) can still drop them or switch away.
+  const wsId = useWorkspaceId();
+  const invocationMembers = usePaidFeatureAccess(wsId, "agent_invocation_members", {
+    hasExistingConfig: false,
+  });
+  const canAddMembers = invocationMembers.canAdd;
+  // The Qoder bridge refuses tasks from agents with skills or per-agent
+  // config, so the fields that would produce them are not offered.
+  const qoderRuntime = selectedRuntime?.provider === "qoder_cloud";
   const handleRuntimeSelect = (id: string) => {
     if (id === draft.runtimeId) return;
     if (onRuntimeSelect) {
@@ -147,6 +172,19 @@ export function AgentConfigurationPanel({
               />
             </div>
           </DraftFieldRow>
+          {conversationStartersSupported ? (
+            <DraftFieldRow
+              compact={compact}
+              align="start"
+              label={t(($) => $.conversation_starters.label)}
+              description={t(($) => $.conversation_starters.create_hint)}
+            >
+              <ConversationStartersEditor
+                value={draft.conversationStarters}
+                onChange={(value) => set("conversationStarters", value)}
+              />
+            </DraftFieldRow>
+          ) : null}
         </SettingsCard>
       </SettingsSection>
 
@@ -173,20 +211,18 @@ export function AgentConfigurationPanel({
               className="min-h-44 resize-y font-mono text-label leading-6"
             />
           </DraftFieldRow>
-          {conversationStartersSupported ? (
+          {qoderRuntime ? (
+            <p className="px-4 py-3 text-caption text-muted-foreground">
+              {t(($) => $.creation_studio.cloud_fields_note)}
+            </p>
+          ) : (
             <div className="px-4 py-4">
-              <ConversationStartersEditor
-                value={draft.conversationStarters}
-                onChange={(value) => set("conversationStarters", value)}
+              <SkillMultiSelect
+                selectedIds={draft.skillIds}
+                onChange={(ids) => set("skillIds", ids)}
               />
             </div>
-          ) : null}
-          <div className="px-4 py-4">
-            <SkillMultiSelect
-              selectedIds={draft.skillIds}
-              onChange={(ids) => set("skillIds", ids)}
-            />
-          </div>
+          )}
         </SettingsCard>
       </SettingsSection>
 
@@ -199,6 +235,7 @@ export function AgentConfigurationPanel({
             className={cn("grid gap-4 px-4 py-4", !compact && "sm:grid-cols-2")}
           >
             <div className="min-w-0">
+              {runtimeSummary ?? (
               <RuntimePicker
                 runtimes={runtimes}
                 runtimesLoading={runtimesLoading}
@@ -207,7 +244,9 @@ export function AgentConfigurationPanel({
                 selectedRuntimeId={draft.runtimeId}
                 onSelect={handleRuntimeSelect}
                 disabled={runtimeLocked}
+                autoSelect={!onRuntimeSelect}
               />
+              )}
               {/* A silently greyed-out picker is the worst version of this: the
                   user reaches for it exactly when the current runtime has gone
                   wrong, so say what unblocks it instead of just refusing. */}
@@ -217,15 +256,28 @@ export function AgentConfigurationPanel({
                 </p>
               )}
             </div>
-            <ModelDropdown
-              runtimeId={selectedRuntime?.id ?? null}
-              runtimeOnline={selectedRuntime?.status === "online"}
-              value={draft.model}
-              onChange={(value) => onChange(applyDraftModelChange(draft, value))}
-              // A successful switch clears the model, so an edit made while the
-              // rebind is in flight would be silently discarded.
-              disabled={!selectedRuntime || runtimeSwitchInFlight}
-            />
+            {qoderRuntime ? (
+              <QoderAgentSelect
+                value={draft.qoderAgentId}
+                onChange={(value) => set("qoderAgentId", value)}
+                disabled={runtimeLocked}
+              />
+            ) : (
+              <ModelDropdown
+                runtimeId={selectedRuntime?.id ?? null}
+                runtimeOnline={selectedRuntime?.status === "online"}
+                value={draft.model}
+                onChange={(value) =>
+                  onChange(applyDraftModelChange(draft, value))
+                }
+                onAutomaticChange={(value) =>
+                  onAutomaticChange(applyDraftModelChange(draft, value))
+                }
+                // A successful switch clears the model, so an edit made while the
+                // rebind is in flight would be silently discarded.
+                disabled={!selectedRuntime || runtimeSwitchInFlight}
+              />
+            )}
           </div>
           {/* Both fields fail closed: they render only when the exact selected
               model's live catalog advertises the capability (or a value is
@@ -250,41 +302,64 @@ export function AgentConfigurationPanel({
             role="radiogroup"
             aria-label={t(($) => $.creation_studio.sections.access)}
           >
-            {PERMISSION_SCOPES.map((scope) => (
-              <button
-                key={scope}
-                type="button"
-                role="radio"
-                aria-checked={draft.permissionScope === scope}
-                onClick={() => set("permissionScope", scope)}
-                className={cn(
-                  "flex w-full items-start gap-3 rounded-md px-3 py-2.5 text-left transition-colors",
-                  "hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  draft.permissionScope === scope && "bg-muted",
-                )}
-              >
-                <span
-                  className={cn(
-                    "mt-1 flex size-3.5 shrink-0 items-center justify-center rounded-full border",
-                    draft.permissionScope === scope && "border-primary",
-                  )}
-                  aria-hidden="true"
-                >
-                  {draft.permissionScope === scope ? (
-                    <span className="size-1.5 rounded-full bg-primary" />
+            {PERMISSION_SCOPES.map((scope) => {
+              // The badge is a sibling of the radio, not inside it, so it keeps
+              // its own focus and name and never selects the option.
+              const showBadge =
+                scope === "members" && invocationMembers.state === "unavailable";
+              return (
+                <div key={scope} className="relative">
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={draft.permissionScope === scope}
+                    disabled={
+                      scope === "members" &&
+                      !canAddMembers &&
+                      draft.permissionScope !== "members"
+                    }
+                    onClick={() => set("permissionScope", scope)}
+                    className={cn(
+                      "flex w-full items-start gap-3 rounded-md px-3 py-2.5 text-left transition-colors",
+                      "hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      "disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent",
+                      draft.permissionScope === scope && "bg-muted",
+                      showBadge && "pr-28",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "mt-1 flex size-3.5 shrink-0 items-center justify-center rounded-full border",
+                        draft.permissionScope === scope && "border-primary",
+                      )}
+                      aria-hidden="true"
+                    >
+                      {draft.permissionScope === scope ? (
+                        <span className="size-1.5 rounded-full bg-primary" />
+                      ) : null}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-body font-medium">
+                        {t(($) => $.creation_studio.access[scope].title)}
+                      </span>
+                      <span className="mt-0.5 block text-caption leading-5 text-muted-foreground">
+                        {t(($) => $.creation_studio.access[scope].description)}
+                      </span>
+                    </span>
+                  </button>
+                  {showBadge ? (
+                    <PaidFeatureUpgradeBadge
+                      feature="agent_invocation_members"
+                      className="absolute top-3 right-3"
+                    />
                   ) : null}
-                </span>
-                <span className="min-w-0">
-                  <span className="block text-body font-medium">
-                    {t(($) => $.creation_studio.access[scope].title)}
-                  </span>
-                  <span className="mt-0.5 block text-caption leading-5 text-muted-foreground">
-                    {t(($) => $.creation_studio.access[scope].description)}
-                  </span>
-                </span>
-              </button>
-            ))}
+                </div>
+              );
+            })}
           </div>
+          {invocationMembers.state === "unavailable" ? (
+            <PaidFeatureNotice state="unavailable" className="px-5 pb-3" />
+          ) : null}
           {draft.permissionScope === "members" ? (
             <div className="max-h-48 overflow-y-auto p-2">
               {otherMembers.map((member) => {
@@ -296,6 +371,7 @@ export function AgentConfigurationPanel({
                   >
                     <Checkbox
                       checked={checked}
+                      disabled={!checked && !canAddMembers}
                       onCheckedChange={(value) => {
                         const next = new Set(draft.memberIds);
                         if (value === true) next.add(member.user_id);
@@ -398,6 +474,15 @@ export function AgentExecutionOverrides({
 }) {
   const { t } = useT("agents");
   const runtimeOnline = runtime?.status === "online";
+  const modelsQuery = useQuery(runtimeModelsOptions(runtimeOnline && thinkingLevelRequiredForProvider(runtime?.provider ?? "") ? runtime?.id ?? null : null));
+  useEffect(() => {
+    if (disabled || !thinkingLevelRequiredForProvider(runtime?.provider ?? "")) return;
+    if (draft.thinkingLevel || !draft.model || !modelsQuery.isSuccess || !modelsQuery.data?.supported) return;
+    const entry = findModelCapabilityEntry(modelsQuery.data.models, draft.model, runtime?.provider ?? "");
+    const level = entry?.thinking?.default_level ?? entry?.thinking?.supported_levels[0]?.value;
+    if (level) onChange({ ...draft, thinkingLevel: level });
+  }, [disabled, draft, modelsQuery.data, modelsQuery.isSuccess, onChange, runtime?.provider]);
+
   return (
     <>
       <ThinkingSettingField
@@ -426,12 +511,14 @@ export function AgentExecutionOverrides({
 
 function DraftFieldRow({
   label,
+  description,
   children,
   compact = false,
   align = "center",
   htmlFor,
 }: {
   label: string;
+  description?: string;
   children: ReactNode;
   compact?: boolean;
   align?: "center" | "start";
@@ -447,13 +534,20 @@ function DraftFieldRow({
         !compact && (align === "center" ? "sm:items-center" : "sm:items-start"),
       )}
     >
-      {htmlFor ? (
-        <label htmlFor={htmlFor} className="text-body font-medium">
-          {label}
-        </label>
-      ) : (
-        <div className="text-body font-medium">{label}</div>
-      )}
+      <div className="min-w-0">
+        {htmlFor ? (
+          <label htmlFor={htmlFor} className="text-body font-medium">
+            {label}
+          </label>
+        ) : (
+          <div className="text-body font-medium">{label}</div>
+        )}
+        {description ? (
+          <p className="mt-0.5 text-caption leading-5 text-muted-foreground">
+            {description}
+          </p>
+        ) : null}
+      </div>
       <div className="min-w-0">{children}</div>
     </div>
   );

@@ -13,9 +13,7 @@ export function isSelfHealingRuntime(runtime: AgentRuntime): boolean {
   return runtime.runtime_mode === "local" && runtime.status === "online";
 }
 
-// ---------------------------------------------------------------------------
 // Formatting helpers
-// ---------------------------------------------------------------------------
 
 // Compound-unit relative timestamp ("2m 14s ago", "1d 4h ago", "6d 19h ago")
 // — gives the user enough precision to tell "just lost" from "long lost"
@@ -140,6 +138,27 @@ export function formatTokens(n: number): string {
   return `${Number(scaled.toFixed(1))}${unit.suffix}`;
 }
 
+/**
+ * Whole-number prompt-cache hit rate across mutually exclusive input buckets.
+ * Callers must sum each bucket before calling so the result is a ratio of sums,
+ * never an average of per-row percentages. Output tokens are not input-side
+ * traffic and therefore do not belong in the denominator.
+ *
+ * Returns null when no input-side usage was reported. Round ordinary values to
+ * the nearest percent, but reserve 100% for a genuinely complete cache hit.
+ */
+export function cacheHitRatePercent(
+  inputTokens: number,
+  cacheReadTokens: number,
+  cacheWriteTokens: number,
+): number | null {
+  const inputSideTokens = inputTokens + cacheReadTokens + cacheWriteTokens;
+  if (inputSideTokens <= 0) return null;
+
+  const percent = (cacheReadTokens / inputSideTokens) * 100;
+  return percent === 100 ? 100 : Math.min(Math.round(percent), 99);
+}
+
 // Cents below $100, whole dollars above — two decimals on a four-figure spend
 // is noise, and dropping them below $100 would round most single runs to $0.
 export function formatUsd(n: number): string {
@@ -147,9 +166,35 @@ export function formatUsd(n: number): string {
   return `$${n.toFixed(2)}`;
 }
 
-// ---------------------------------------------------------------------------
+export function formatCredits(n: number): string {
+  if (n >= 1000) return formatTokens(n);
+  if (n >= 100) return n.toFixed(0);
+  return String(Number(n.toFixed(2)));
+}
+
+/**
+ * A run's spend for display. Credits have no USD rate, so a credit-billed run
+ * shows its credits and a mix shows both; `creditsLabel` supplies the
+ * translated unit and provider name. Different providers' credits cannot
+ * be added together or combined with Multica's own billing credits.
+ */
+export function formatSpend(
+  usage: Pick<TaskUsageSummary, "cost" | "credits">,
+  creditsLabel: (credits: string, provider: string) => string,
+): string {
+  const parts = usage.cost > 0 || usage.credits.size === 0 ? [formatUsd(usage.cost)] : [];
+  for (const [provider, credits] of usage.credits) {
+    parts.push(creditsLabel(formatCredits(credits), provider));
+  }
+  return parts.join(" + ");
+}
+
+/** False for usage billed only in credits, whose token count is not reported. */
+export function hasTokenFigure(usage: Pick<TaskUsageSummary, "tokens" | "credits">): boolean {
+  return usage.tokens > 0 || usage.credits.size === 0;
+}
+
 // Cost estimation
-// ---------------------------------------------------------------------------
 
 // Pricing per million tokens (USD). Sources, each authoritative for the
 // rows tagged under it — keep in sync when providers release new models
@@ -168,9 +213,8 @@ export function formatUsd(n: number): string {
 // Moonshot, Zhipu and xAI do not bill cache writes separately (cached input
 // is just discounted on subsequent reads), so cacheWrite mirrors input there.
 // OpenAI historically did the same, but its GPT-5.6+ generation bills cache
-// writes at 1.25× input (cache reads still get the 90% cached-input
-// discount), so those rows carry a distinct cacheWrite. Codex usage doesn't
-// yet stream cache-write tokens, so that rate isn't exercised today.
+// writes at 1.25× input (cache reads generally get the 90% cached-input
+// discount; GPT-6.1 Sol and Terra get 95%), so those rows carry a distinct cacheWrite.
 //
 // The resolver matches exact keys after stripping a trailing date snapshot
 // (see `resolvePricing` below). It deliberately does NOT do startsWith
@@ -197,10 +241,19 @@ const MODEL_PRICING: Record<
   //    no future-dated pricing support yet, so update the row when the
   //    post-intro $3 / $15 rate takes effect. Fable 5 and 5.1 are Mythos-class
   //    SKUs at 10/50 (5.1 prices cache reads at 0.025x input, a quarter of the
-  //    usual 0.1x); Opus 4.5 through Opus 5 stay on the lower 5/25 Opus tier. --
+  //    usual 0.1x); Opus 4.5 through Opus 5 stay on the lower 5/25 Opus tier,
+  //    and Opus 5.5 drops to 4/20 (cache reads at 0.05x input). --
   "claude-sonnet-5":     { input: 2,    output: 10,   cacheRead: 0.20, cacheWrite: 2.50 },
+  // Sonnet 5.5 keeps the 2/10 tier but halves the cache-read rate.
+  "claude-sonnet-5-5":   { input: 2,    output: 10,   cacheRead: 0.10, cacheWrite: 2.50 },
+  // Haiku 5.5 uses the <=100K prompt tier. Above 100K (including cache
+  // reads/writes), all four rates are 5x higher. Rollups lack per-request
+  // prompt sizes, so long requests are underestimated. Mirror the backend
+  // estimate in server/internal/metrics/pricing.go.
+  "claude-haiku-5-5":    { input: 0.10, output: 0.50, cacheRead: 0.01, cacheWrite: 0.125 },
   "claude-fable-5-1":   { input: 10,   output: 50,   cacheRead: 0.25, cacheWrite: 12.50 },
   "claude-fable-5":     { input: 10,   output: 50,   cacheRead: 1.00, cacheWrite: 12.50 },
+  "claude-opus-5-5":    { input: 4,    output: 20,   cacheRead: 0.20, cacheWrite: 5.00 },
   "claude-opus-5":      { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25 },
   "claude-haiku-4-5":   { input: 1,    output: 5,    cacheRead: 0.10, cacheWrite: 1.25 },
   "claude-sonnet-4-5":  { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75 },
@@ -223,20 +276,79 @@ const MODEL_PRICING: Record<
   // -- OpenAI: dotted-minor Codex catalog SKUs. Each generation is priced
   //    independently — no fallback to `gpt-5`. Entries track
   //    `server/pkg/agent/models.go` (Codex provider list).
-  //    gpt-6-astra and gpt-5.6 (sol/terra/luna) use OpenAI's official rates.
-  //    5.6+ is the first OpenAI generation to bill cache writes separately:
-  //    cacheRead = 0.1x input (90% cached-input discount), cacheWrite = 1.25x
-  //    input (see the header note above). Codex usage doesn't yet report
-  //    cache-write tokens, so cacheWrite isn't exercised today, but the rate
-  //    is kept correct for when it is.
+  //    GPT-6 and GPT-5.6 rows use OpenAI's standard short-context rates
+  //    (developers.openai.com/api/docs/pricing, 2026-10-31). GPT-5.6 Sol
+  //    keeps its $5 / $30 list rate; the page's temporary promotional rate is
+  //    deliberately not used. 5.6+ is the first OpenAI generation to bill
+  //    cache writes separately: cacheRead generally = 0.1x input, cacheWrite
+  //    = 1.25x input (see the header note above). Mirror
+  //    server/internal/metrics/pricing.go.
   "gpt-6-astra":        { input: 10,   output: 50,   cacheRead: 1.00,  cacheWrite: 12.50 },
+  // GPT-6.1 Sol and Terra's cached input is 0.05x input; GPT-6 Sol's is 0.1x.
+  "gpt-6.1-sol":        { input: 2,    output: 10,   cacheRead: 0.10,  cacheWrite: 2.50 },
+  "gpt-6.1-terra":      { input: 1,    output: 5,    cacheRead: 0.05,  cacheWrite: 1.25 },
+  "gpt-6-sol":          { input: 2,    output: 10,   cacheRead: 0.20,  cacheWrite: 2.50 },
+  "gpt-6-luna":         { input: 0.10, output: 0.50, cacheRead: 0.01,  cacheWrite: 0.125 },
   "gpt-5.6-sol":        { input: 5,    output: 30,   cacheRead: 0.50,  cacheWrite: 6.25 },
-  "gpt-5.6-terra":      { input: 2.50, output: 15,   cacheRead: 0.25,  cacheWrite: 3.125 },
-  "gpt-5.6-luna":       { input: 1,    output: 6,    cacheRead: 0.10,  cacheWrite: 1.25 },
+  "gpt-5.6-terra":      { input: 2,    output: 12,   cacheRead: 0.20,  cacheWrite: 2.50 },
+  "gpt-5.6-luna":       { input: 0.20, output: 1.20, cacheRead: 0.02,  cacheWrite: 0.25 },
   "gpt-5.5":            { input: 5,    output: 30,   cacheRead: 0.50,  cacheWrite: 5 },
   "gpt-5.4-mini":       { input: 0.75, output: 4.50, cacheRead: 0.075, cacheWrite: 0.75 },
   "gpt-5.4":            { input: 2.50, output: 15,   cacheRead: 0.25,  cacheWrite: 2.50 },
   "gpt-5.3-codex":      { input: 1.75, output: 14,   cacheRead: 0.175, cacheWrite: 1.75 },
+
+  // -- Google: https://ai.google.dev/gemini-api/docs/pricing (2026-10-19;
+  //    Gemini 4 Neon and Hydrogen 2026-11-23).
+  //    Standard API-equivalent token estimates, not subscription charges.
+  //    Argon's intro rate ends 2026-11-30; Flash 3.6/3.8, Robotics and
+  //    3.8 TTS promotions end 2026-12-31. Update the static rows at expiry.
+  //    Google's deprecations page documents 3.5 Flash -> 3.6 and 3.7 -> 3.8
+  //    routing; those aliases use their destination's current rate.
+  //    Pro uses the <=200K request tier; totals lack per-request context
+  //    sizes. Flash/Lite use text/image/video input rates (audio can differ).
+  //    Cache writes estimate input processing only, excluding cache storage,
+  //    grounding and service-tier surcharges. Unsupported cache buckets are 0.
+  //    Speech-only SKUs have one input/output rate; mixed-modality Live,
+  //    Image, Omni and Embedding SKUs stay unmapped because aggregate tokens
+  //    cannot distinguish their rates. Mirror server/internal/metrics/pricing.go. --
+  "gemini-4-neon": { input: 3, output: 15, cacheRead: 0.15, cacheWrite: 3 },
+  "gemini-4-hydrogen": { input: 1.5, output: 7.5, cacheRead: 0.075, cacheWrite: 1.5 },
+  "gemini-4-argon": { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2 },
+  // Gemini 4 Carbon shares Argon's intro rate through 2026-11-30 (checked 2026-11-11).
+  "gemini-4-carbon": { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2 },
+  "gemini-3.8-flash": { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
+  "gemini-3.7-flash": { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
+  "gemini-3.6-flash": { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
+  "gemini-3.5-flash": { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
+  "gemini-3.5-flash-lite": { input: 0.3, output: 2.5, cacheRead: 0.03, cacheWrite: 0.3 },
+  "gemini-3.1-flash-lite": { input: 0.25, output: 1.5, cacheRead: 0.025, cacheWrite: 0.25 },
+  "gemini-3.1-pro": { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 2 },
+  "gemini-3.1-pro-preview": { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 2 },
+  "gemini-3.1-pro-preview-customtools": { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 2 },
+  "gemini-3-flash": { input: 0.5, output: 3, cacheRead: 0.05, cacheWrite: 0.5 },
+  "gemini-3-flash-preview": { input: 0.5, output: 3, cacheRead: 0.05, cacheWrite: 0.5 },
+  "gemini-2.5-pro": { input: 1.25, output: 10, cacheRead: 0.125, cacheWrite: 1.25 },
+  "gemini-2.5-flash": { input: 0.3, output: 2.5, cacheRead: 0.03, cacheWrite: 0.3 },
+  "gemini-2.5-flash-lite": { input: 0.1, output: 0.4, cacheRead: 0.01, cacheWrite: 0.1 },
+  "gemini-robotics-er-2-preview": { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1 },
+  "gemini-robotics-er-2-streaming-preview": { input: 1, output: 5, cacheRead: 0, cacheWrite: 0 },
+  "gemini-3.8-flash-tts": { input: 0.5, output: 9, cacheRead: 0, cacheWrite: 0 },
+  "gemini-3.8-flash-lite-tts": { input: 0.5, output: 6, cacheRead: 0, cacheWrite: 0 },
+  "gemini-3.1-flash-tts-preview": { input: 1, output: 20, cacheRead: 0, cacheWrite: 0 },
+  "gemini-2.5-flash-preview-tts": { input: 0.5, output: 10, cacheRead: 0, cacheWrite: 0 },
+  "gemini-2.5-pro-preview-tts": { input: 1, output: 20, cacheRead: 0, cacheWrite: 0 },
+  "gemini-3.5-transcribe": { input: 2, output: 12, cacheRead: 0, cacheWrite: 0 },
+  "gemini-3.5-transcribe-live": { input: 3.5, output: 21, cacheRead: 0, cacheWrite: 0 },
+  "gemini-3.5-live-translate-preview": { input: 3.5, output: 21, cacheRead: 0, cacheWrite: 0 },
+
+  // -- Antigravity serves GPT-OSS 120B from Google Cloud: Vertex AI's list
+  //    rate (https://cloud.google.com/model-garden/partner-models/pricing,
+  //    2026-11-23), which has no cache-hit rate, so cached tokens bill as
+  //    input. Provider-qualified because other runtimes reach gpt-oss
+  //    through hosts with their own rates. Orchestrator stays unmapped: it
+  //    splits a turn between a planner and an executor model. Mirror
+  //    server/internal/metrics/pricing.go. --
+  "antigravity/gpt-oss-120b": { input: 0.09, output: 0.36, cacheRead: 0.09, cacheWrite: 0.09 },
 
   // -- OpenAI: GPT-5 family (Codex CLI's default is gpt-5-codex; -codex/-mini/-nano variants priced per OpenAI tiers) --
   "gpt-5-codex":        { input: 1.25, output: 10,   cacheRead: 0.125, cacheWrite: 1.25 },
@@ -253,18 +365,21 @@ const MODEL_PRICING: Record<
   "gpt-4o-mini":        { input: 0.15, output: 0.60, cacheRead: 0.075, cacheWrite: 0.15 },
   "gpt-4o":             { input: 2.50, output: 10,   cacheRead: 1.25,  cacheWrite: 2.50 },
 
-  // -- DeepSeek (api-docs.deepseek.com/quick_start/pricing).
-  //    The official catalog lists exactly two current SKUs; `deepseek-chat`
-  //    and `deepseek-reasoner` are aliases that route to `deepseek-v4-flash`
-  //    (non-thinking and thinking mode respectively) per the same page.
-  //    `deepseek-v4-pro` is currently under a 75%-off promo that ends
-  //    2026-05-31 15:59 UTC; we price at the post-promo standard rate
-  //    ($1.74/$3.48) so the dashboard does not jump 4× on June 1 — accept
-  //    a brief over-estimate during the promo over a sudden cliff after it. --
-  "deepseek-v4-flash":  { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
+  // -- DeepSeek Flash: api-docs.deepseek.com/quick_start/pricing/ (2026-10-27).
+  // The English sheet supplies USD; the Chinese sheet lists CNY. The official
+  // Flash name and retired v4 aliases serve V4.1-Flash-1017. Preserve the
+  // existing Flash routing for chat/reasoner. Only known spellings and the
+  // 1017 snapshot resolve. Use peak USD rates because rollups lack each
+  // request's pricing window; off-peak costs half as much and reseller prices
+  // can differ. Cache writes bill as ordinary input. Mirror pricing.go.
+  "deepseek-flash":              { input: 0.30, output: 1.20, cacheRead: 0.006, cacheWrite: 0.30 },
+  "deepseek-v4-flash":           { input: 0.30, output: 1.20, cacheRead: 0.006, cacheWrite: 0.30 },
+  "deepseek-v4-flash-vision-exp": { input: 0.30, output: 1.20, cacheRead: 0.006, cacheWrite: 0.30 },
+  "deepseek-v4.1-flash":          { input: 0.30, output: 1.20, cacheRead: 0.006, cacheWrite: 0.30 },
+  "deepseek-v4.1-flash-1017":     { input: 0.30, output: 1.20, cacheRead: 0.006, cacheWrite: 0.30 },
+  "deepseek-chat":               { input: 0.30, output: 1.20, cacheRead: 0.006, cacheWrite: 0.30 },
+  "deepseek-reasoner":           { input: 0.30, output: 1.20, cacheRead: 0.006, cacheWrite: 0.30 },
   "deepseek-v4-pro":    { input: 1.74, output: 3.48, cacheRead: 0.0145, cacheWrite: 1.74 },
-  "deepseek-chat":      { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
-  "deepseek-reasoner":  { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
 
   // -- Moonshot Kimi (kimi.com/resources/kimi-k2-6-pricing).
   //    Only K2.6 is on the official price sheet today; earlier K2 variants
@@ -277,10 +392,24 @@ const MODEL_PRICING: Record<
   // Kimi Code CLI reports the same model as `kimi-code/k3`; provider-qualified
   // because `k3` is a generic id (see the provider-qualified keys note above).
   "kimi/k3":            { input: 3.0,  output: 15.0,  cacheRead: 0.30,   cacheWrite: 3.0 },
+  // Kimi K3.1 Pro (platform.kimi.ai/docs/pricing/chat via models.dev
+  // providers/moonshotai/models/kimi-k3.1-pro.toml, 2026-11-11); default 5m
+  // cache write is 1x input, like kimi-k3. `k3.1-pro` is generic, so it prices
+  // only under the provider-qualified `kimi/k3.1-pro` key (also covering
+  // Kimi Code's `kimi-code/k3.1-pro`); the highspeed SKU and CodeBuddy's
+  // `kimi-k3-1` stay unmapped.
+  "kimi-k3.1-pro":      { input: 2.0,  output: 10.0,  cacheRead: 0.20,   cacheWrite: 2.0 },
+  "kimi/k3.1-pro":      { input: 2.0,  output: 10.0,  cacheRead: 0.20,   cacheWrite: 2.0 },
+  // `kimi-for-coding` is a Kimi Code subscription route alias, not an API
+  // SKU with a published rate, so it stays unmapped.
 
   // -- Zhipu z.ai (docs.z.ai/guides/overview/pricing). Free flash tiers
   //    are priced at 0 so they resolve cleanly instead of falling through
   //    to the "unmapped" diagnostic. --
+  // GLM-5.3 and GLM-5.3-Flash (2026-11-11); the 5.3 Flash tier is paid,
+  // unlike the free 4.x flashes below.
+  "glm-5.3":            { input: 1.4,  output: 4.4,  cacheRead: 0.26,   cacheWrite: 1.4 },
+  "glm-5.3-flash":      { input: 0.15, output: 0.5,  cacheRead: 0.03,   cacheWrite: 0.15 },
   "glm-5.1":            { input: 1.4,  output: 4.4,  cacheRead: 0.26,   cacheWrite: 1.4 },
   "glm-5":              { input: 1.0,  output: 3.2,  cacheRead: 0.2,    cacheWrite: 1.0 },
   "glm-5-turbo":        { input: 1.2,  output: 4.0,  cacheRead: 0.24,   cacheWrite: 1.2 },
@@ -350,7 +479,7 @@ const MODEL_PRICING: Record<
   "grok-4.20-0309-reasoning":     { input: 1.25, output: 2.50, cacheRead: 0.20, cacheWrite: 1.25 },
   "grok-4.20-0309-non-reasoning": { input: 1.25, output: 2.50, cacheRead: 0.20, cacheWrite: 1.25 },
 
-  // -- Cursor Composer / Auto (cursor.com/docs/models-and-pricing,
+  // -- Cursor models: Composer / Grok / Auto (cursor.com/docs/models-and-pricing,
   //    cursor.com/docs/models/cursor-composer-2,
   //    cursor.com/docs/models/cursor-composer-2-5).
   //    Cursor's model ids are all unprefixed generic names (`auto`,
@@ -361,6 +490,8 @@ const MODEL_PRICING: Record<
   //    runtime model or the legacy key `cursor`. Cursor does not publish a
   //    cache-write rate for these rows; keep it at 0 so reported
   //    cache_write_tokens don't invent spend from input pricing.
+  //    Every `cursor/` row, and `cursorBaseModel` below, is mirrored in
+  //    server/internal/metrics/cursor_pricing.go; keep the two in sync.
   "cursor/auto":              { input: 1.25, output: 6,    cacheRead: 0.25,   cacheWrite: 0 },
   "cursor/composer-2.5-fast": { input: 3,    output: 15,   cacheRead: 0.5,    cacheWrite: 0 },
   "cursor/composer-2.5":      { input: 0.5,  output: 2.5,  cacheRead: 0.2,    cacheWrite: 0 },
@@ -368,6 +499,96 @@ const MODEL_PRICING: Record<
   "cursor/composer-2":        { input: 0.5,  output: 2.5,  cacheRead: 0.2,    cacheWrite: 0 },
   "cursor/composer-1.5":      { input: 3.5,  output: 17.5, cacheRead: 0.35,   cacheWrite: 0 },
   "cursor/composer-1":        { input: 1.25, output: 10,   cacheRead: 0.125,  cacheWrite: 0 },
+  "cursor/grok-4.7":          { input: 2,    output: 6,    cacheRead: 0.5,    cacheWrite: 0 },
+  "cursor/grok-4.7-fast":     { input: 4,    output: 12,   cacheRead: 1,      cacheWrite: 0 },
+  "cursor/grok-4.6":          { input: 2,    output: 6,    cacheRead: 0.5,    cacheWrite: 0 },
+  "cursor/grok-4.6-fast":     { input: 4,    output: 12,   cacheRead: 1,      cacheWrite: 0 },
+  "cursor/grok-4.5":          { input: 2,    output: 6,    cacheRead: 0.5,    cacheWrite: 0 },
+  "cursor/grok-4.5-fast":     { input: 4,    output: 18,   cacheRead: 1,      cacheWrite: 0 },
+
+  // -- Third-party models through Cursor (cursor.com/docs/models-and-pricing,
+  //    "Model pricing"). Cursor bills these at API list price, but its sheet
+  //    is the bill, so Cursor rows use it even where it differs from the
+  //    vendor rows above — except temporary promotional rates, which are not
+  //    used: GPT-5.6 Sol keeps its $5 / $30 list rate (Fast at 2x) rather
+  //    than the sheet's promo price, and Gemini 4 Carbon its $4 / $20 rate
+  //    from 2026-12-01 rather than the introductory $2 / $10 (the bare
+  //    gemini-4-carbon row above still carries the intro rate). Keys are the
+  //    Cursor base id left by `cursorBaseModel`, which drops the effort / thinking / fast
+  //    variant parts — effort and thinking don't change per-token rates.
+  //    A `-fast` row exists only where a Fast rate is published: on Cursor's
+  //    sheet, or (where Cursor offers a Fast variant its sheet doesn't price)
+  //    on the vendor's own sheet, since Cursor bills third-party models at
+  //    API list price. Other Fast variants stay unmapped rather than borrowing the
+  //    standard rate. Where the sheet lists no cache-write rate, cacheWrite is
+  //    0 (same as the Composer rows). Long-context surcharges (GPT >272K
+  //    input) can't be seen in aggregated rows, so those requests are
+  //    underestimated. --
+  "cursor/claude-opus-5-5":      { input: 4,    output: 20,   cacheRead: 0.2,   cacheWrite: 5 },
+  // Opus 5.5 / Opus 5 Fast: Anthropic's fast-mode rates, with its cache
+  // multipliers applied on top (Opus 5.5 reads at 0.05x input).
+  "cursor/claude-opus-5-5-fast": { input: 8,    output: 40,   cacheRead: 0.4,   cacheWrite: 10 },
+  "cursor/claude-opus-5":        { input: 5,    output: 25,   cacheRead: 0.5,   cacheWrite: 6.25 },
+  "cursor/claude-opus-5-fast":   { input: 10,   output: 50,   cacheRead: 1,     cacheWrite: 12.5 },
+  "cursor/claude-opus-4-8":      { input: 5,    output: 25,   cacheRead: 0.5,   cacheWrite: 6.25 },
+  // Published as "3x lower per-token pricing than Opus 4.7 fast mode".
+  "cursor/claude-opus-4-8-fast": { input: 10,   output: 50,   cacheRead: 1,     cacheWrite: 12.5 },
+  "cursor/claude-opus-4-7":      { input: 5,    output: 25,   cacheRead: 0.5,   cacheWrite: 6.25 },
+  "cursor/claude-opus-4-7-fast": { input: 30,   output: 150,  cacheRead: 3,     cacheWrite: 37.5 },
+  "cursor/claude-4.6-opus":      { input: 5,    output: 25,   cacheRead: 0.5,   cacheWrite: 6.25 },
+  "cursor/claude-4.5-opus":      { input: 5,    output: 25,   cacheRead: 0.5,   cacheWrite: 6.25 },
+  "cursor/claude-fable-5-2":     { input: 8,    output: 40,   cacheRead: 0.2,   cacheWrite: 10 },
+  "cursor/claude-fable-5-1":     { input: 10,   output: 50,   cacheRead: 0.25,  cacheWrite: 12.5 },
+  "cursor/claude-fable-5":       { input: 10,   output: 50,   cacheRead: 1,     cacheWrite: 12.5 },
+  "cursor/claude-sonnet-5-5":    { input: 2,    output: 10,   cacheRead: 0.1,   cacheWrite: 2.5 },
+  "cursor/claude-sonnet-5":      { input: 2,    output: 10,   cacheRead: 0.2,   cacheWrite: 2.5 },
+  "cursor/claude-4.6-sonnet":    { input: 3,    output: 15,   cacheRead: 0.3,   cacheWrite: 3.75 },
+  "cursor/claude-4.5-sonnet":    { input: 3,    output: 15,   cacheRead: 0.3,   cacheWrite: 3.75 },
+  "cursor/claude-4-sonnet":      { input: 3,    output: 15,   cacheRead: 0.3,   cacheWrite: 3.75 },
+  // <=100K prompt tier; see the claude-haiku-5-5 row above.
+  "cursor/claude-haiku-5-5":     { input: 0.1,  output: 0.5,  cacheRead: 0.01,  cacheWrite: 0.125 },
+  "cursor/gpt-5.6-sol":          { input: 5,    output: 30,   cacheRead: 0.5,   cacheWrite: 6.25 },
+  "cursor/gpt-5.6-sol-fast":     { input: 10,   output: 60,   cacheRead: 1,     cacheWrite: 12.5 },
+  "cursor/gpt-5.6-terra":        { input: 2,    output: 12,   cacheRead: 0.2,   cacheWrite: 2.5 },
+  "cursor/gpt-5.6-terra-fast":   { input: 4,    output: 24,   cacheRead: 0.4,   cacheWrite: 5 },
+  "cursor/gpt-5.6-luna":         { input: 0.2,  output: 1.2,  cacheRead: 0.02,  cacheWrite: 0.25 },
+  "cursor/gpt-5.6-luna-fast":    { input: 0.4,  output: 2.4,  cacheRead: 0.04,  cacheWrite: 0.5 },
+  "cursor/gpt-5.5":              { input: 5,    output: 30,   cacheRead: 0.5,   cacheWrite: 0 },
+  // GPT-5.5 / 5.3 Codex / 5.2 Fast: OpenAI's Fast-tier rates, since Cursor's
+  // sheet doesn't price these Fast variants.
+  "cursor/gpt-5.5-fast":         { input: 12.5, output: 75,   cacheRead: 1.25,  cacheWrite: 0 },
+  "cursor/gpt-5.4":              { input: 2.5,  output: 15,   cacheRead: 0.25,  cacheWrite: 0 },
+  "cursor/gpt-5.4-fast":         { input: 5,    output: 30,   cacheRead: 0.5,   cacheWrite: 0 },
+  "cursor/gpt-5.4-mini":         { input: 0.75, output: 4.5,  cacheRead: 0.075, cacheWrite: 0 },
+  "cursor/gpt-5.4-nano":         { input: 0.2,  output: 1.25, cacheRead: 0.02,  cacheWrite: 0 },
+  "cursor/gpt-5.3-codex":        { input: 1.75, output: 14,   cacheRead: 0.175, cacheWrite: 0 },
+  "cursor/gpt-5.3-codex-fast":   { input: 3.5,  output: 28,   cacheRead: 0.35,  cacheWrite: 0 },
+  "cursor/gpt-5.2":              { input: 1.75, output: 14,   cacheRead: 0.175, cacheWrite: 0 },
+  "cursor/gpt-5.2-fast":         { input: 3.5,  output: 28,   cacheRead: 0.35,  cacheWrite: 0 },
+  // GPT-5.1 is in Cursor's catalog but missing from its sheet: OpenAI list price.
+  "cursor/gpt-5.1":              { input: 1.25, output: 10,   cacheRead: 0.125, cacheWrite: 0 },
+  "cursor/gpt-5":                { input: 1.25, output: 10,   cacheRead: 0.125, cacheWrite: 0 },
+  "cursor/gpt-5-fast":           { input: 2.5,  output: 20,   cacheRead: 0.25,  cacheWrite: 0 },
+  "cursor/gpt-5-mini":           { input: 0.25, output: 2,    cacheRead: 0.025, cacheWrite: 0 },
+  "cursor/gemini-4-argon":       { input: 2,    output: 10,   cacheRead: 0.1,   cacheWrite: 0 },
+  "cursor/gemini-4-carbon":      { input: 4,    output: 20,   cacheRead: 0.2,   cacheWrite: 0 },
+  "cursor/gemini-4-hydrogen":    { input: 1.5,  output: 7.5,  cacheRead: 0.075, cacheWrite: 0 },
+  "cursor/gemini-3.8-flash":     { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0 },
+  "cursor/gemini-3.7-flash":     { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0 },
+  // Cursor bills 3.6 / 3.5 Flash above Google's current (promotional /
+  // rerouted) rate used by the bare rows; Cursor's sheet is the bill here.
+  "cursor/gemini-3.6-flash":     { input: 1.5,  output: 7.5,  cacheRead: 0.15,  cacheWrite: 0 },
+  "cursor/gemini-3.5-flash":     { input: 1.5,  output: 9,    cacheRead: 0.15,  cacheWrite: 0 },
+  "cursor/gemini-3.1-pro":       { input: 2,    output: 12,   cacheRead: 0.2,   cacheWrite: 0 },
+  "cursor/gemini-3-flash":       { input: 0.5,  output: 3,    cacheRead: 0.05,  cacheWrite: 0 },
+  "cursor/kimi-k3":              { input: 3,    output: 15,   cacheRead: 0.3,   cacheWrite: 0 },
+  "cursor/kimi-k2.7-code":       { input: 0.95, output: 4,    cacheRead: 0.19,  cacheWrite: 0 },
+  "cursor/glm-5.2":              { input: 1.4,  output: 4.4,  cacheRead: 0.26,  cacheWrite: 0 },
+  // Cursor spells DeepSeek V4.1 Flash 1017 without the dot.
+  "cursor/deepseek-v41-flash-1017": { input: 0.3, output: 1.2, cacheRead: 0.006, cacheWrite: 0 },
+  "cursor/muse-wonder-1.0":      { input: 4,    output: 20,   cacheRead: 0.2,   cacheWrite: 0 },
+  "cursor/muse-spark-1.3":       { input: 1.25, output: 4.25, cacheRead: 0.15,  cacheWrite: 0 },
+
   // Legacy fallback bucket when neither the result event nor the runtime
   // model is known — the daemon emits the literal `cursor`. This key equals
   // the provider name itself, so it can't collide across providers and stays
@@ -376,7 +597,7 @@ const MODEL_PRICING: Record<
 };
 
 // Resolve a model string to its pricing tier. Exact match, with four
-// tolerances applied in order:
+// tolerances applied in order (plus Gemini effort/display-name normalization):
 //
 //  1. Provider-prefixed IDs (`anthropic/claude-opus-4.7` from openclaw /
 //     opencode) — the `<provider>/` segment is routing metadata, not part
@@ -441,7 +662,74 @@ function pricingCandidates(model: string, provider?: string): string[] {
   const base = canonicalCandidates(model);
   const p = normalizeProvider(provider);
   if (!p) return base;
+  if (p === "cursor") return cursorPricingCandidates(model, base);
+  if (p === "antigravity") return antigravityPricingCandidates(model, base, p);
   return [...base.map((c) => qualify(p, c)), ...base];
+}
+
+// Cursor's catalog ids are a base model plus variant parts, in no fixed
+// order: `claude-opus-4-7-thinking-high-fast`, `claude-4.6-sonnet-medium-thinking`,
+// `cursor-grok-4.6-high`, or the parameterized
+// `claude-opus-4-8[context=1m,effort=high,fast=true]`.
+const CURSOR_VARIANT_SUFFIX = /-(?:fast|thinking|none|minimal|low|medium|high|xhigh|extra-high|max)$/;
+
+function cursorBaseModel(model: string): { base: string; fast: boolean } {
+  let id = model.trim().toLowerCase();
+  let fast = false;
+  const params = id.match(/\[([^\]]*)\]$/);
+  if (params) {
+    fast = /(?:^|,)\s*fast\s*=\s*true\s*(?:,|$)/.test(params[1] ?? "");
+    id = id.slice(0, params.index);
+  }
+  for (let m = id.match(CURSOR_VARIANT_SUFFIX); m; m = id.match(CURSOR_VARIANT_SUFFIX)) {
+    if (m[0] === "-fast") fast = true;
+    id = id.slice(0, m.index);
+  }
+  return { base: id.replace(/^cursor-/, ""), fast };
+}
+
+// Fast mode bills above the standard rate, so a Fast variant resolves only
+// through its exact id or its own `cursor/<base>-fast` row — never through a
+// canonical form (`[fast=true]` stripped as a context tag) or the base
+// model's price. Standard variants try the exact ids, then the Cursor base
+// row, then the bare vendor row for the same SKU.
+function cursorPricingCandidates(model: string, canonical: string[]): string[] {
+  const { base, fast } = cursorBaseModel(model);
+  if (fast) return [qualify("cursor", model), `cursor/${base}-fast`];
+  const qualified = canonical.map((c) => qualify("cursor", c));
+  if (!base) return [...qualified, ...canonical];
+  return [...new Set([...qualified, `cursor/${base}`, base, ...canonical])];
+}
+
+// Antigravity labels Claude models with the reasoning effort or its Thinking
+// mode, as a slug suffix (`claude-opus-5-5-high`, `claude-opus-4-6-thinking`)
+// or a display label (`Claude Opus 5.5 (High)`, `Claude Opus 5.5 (Thinking)`);
+// both select reasoning, not a SKU, so they price at the base tier like
+// canonGemini, scoped to antigravity — a bare `claude-opus-5-5-high`
+// elsewhere stays unmapped. GPT-OSS 120B arrives as `GPT-OSS 120B (Medium)`
+// or an effort-suffixed slug and resolves to `antigravity/gpt-oss-120b`.
+// Mirrors priceForAntigravityModel in pricing.go.
+const ANTIGRAVITY_CLAUDE_DISPLAY =
+  /^(?:[a-z][a-z0-9_-]*[/:])*claude (opus|sonnet|haiku|fable) (\d+(?:[.-]\d+)?)(?: \((?:minimal|low|medium|high|thinking)\))?$/i;
+const ANTIGRAVITY_CLAUDE_EFFORT =
+  /^(?:[a-z][a-z0-9_-]*[/:])*(claude-(?:opus|sonnet|haiku|fable)-\d+(?:[.-]\d+)?)-(?:minimal|low|medium|high|thinking)$/i;
+const ANTIGRAVITY_GPT_OSS_120B =
+  /^(?:[a-z][a-z0-9_-]*[/:])*gpt-oss(?:-120b(?:-(?:low|medium|high))?| 120b(?: \((?:low|medium|high)\))?)$/i;
+
+function antigravityBaseModel(model: string): string | undefined {
+  const id = model.trim().replace(/\[[^\]]+\]$/, "");
+  const display = ANTIGRAVITY_CLAUDE_DISPLAY.exec(id);
+  if (display) return `claude-${display[1]}-${display[2]!.replace(/\./g, "-")}`.toLowerCase();
+  const effort = ANTIGRAVITY_CLAUDE_EFFORT.exec(id);
+  if (effort) return effort[1]!.replace(/\./g, "-").toLowerCase();
+  return ANTIGRAVITY_GPT_OSS_120B.test(id) ? "gpt-oss-120b" : undefined;
+}
+// antigravityPricingCandidates appends the base id (one trailing context tag
+// tolerated), keeping the qualified-first lookup order.
+function antigravityPricingCandidates(model: string, base: string[], provider: string): string[] {
+  const resolved = antigravityBaseModel(model);
+  if (!resolved) return [...base.map((c) => qualify(provider, c)), ...base];
+  return [...base.map((c) => qualify(provider, c)), `${provider}/${resolved}`, ...base, resolved];
 }
 
 // The canonical storage/diagnostic key for a (model, provider) pair: the
@@ -526,24 +814,57 @@ function canonicalCandidates(model: string): string[] {
   // semantic, so we leave `gpt-5.4` etc. alone.
   const canonAnthropic = (s: string) =>
     s.startsWith("claude-") ? s.replace(/\./g, "-") : s;
+  // Amazon Bedrock prefixes Anthropic ids with a region family (`us.`, `eu.`,
+  // `apac.`, `global.`) and the vendor (`anthropic.`), and appends the
+  // inference-profile version to snapshot ids (`...-20250929-v1:0`). A Bedrock
+  // turn reports `us.anthropic.claude-sonnet-5`, which matched no table key at
+  // all, so every such turn rendered as $0 plus an "unmapped" warning. Only the
+  // vendor-prefixed forms are rewritten: `us.amazon.nova-*` and friends stay
+  // unmapped rather than borrowing a Claude rate. Mirrors `normalizeBedrockID`
+  // in server/internal/metrics/pricing.go.
+  const stripBedrock = (s: string) => {
+    const prefix = /^(?:(?:us|eu|apac|global)\.)?anthropic\.(claude-)/;
+    if (!prefix.test(s)) return s;
+    return s
+      .replace(prefix, "$1")
+      .replace(/-v\d+:\d+(\[[^\]]+\])?$/, "$1");
+  };
   // Trailing context-window tag (`claude-opus-4-7[1m]`). Same family,
   // same price tier — see resolver comment above for the 1M-context
   // pricing trade-off.
   const stripContextTag = (s: string) => s.replace(/\[[^\]]+\]$/, "");
 
+  // Antigravity's display labels and effort-suffixed IDs refer to the same
+  // Gemini SKU. Match only recognized shapes; never strip arbitrary variants.
+  // Neon and Hydrogen add a fourth level: `Extra` in the picker, `xhigh` in ids.
+  const canonGemini = (s: string) => {
+    const display = /^gemini (\d+(?:\.\d+)?) (flash(?:-lite)?|pro|argon|carbon|hydrogen|neon)(?: \((?:minimal|low|medium|high|extra)\))?$/i.exec(s);
+    if (display) return `gemini-${display[1]}-${display[2]}`.toLowerCase();
+    const slug = /^(gemini-\d+(?:\.\d+)?-(?:flash(?:-lite)?|pro|argon|carbon|hydrogen|neon))(?:-(?:minimal|low|medium|high|xhigh))?$/i.exec(s);
+    return slug ? slug[1]!.toLowerCase() : s;
+  };
+
   const raw = model;
   const noProvider = stripProvider(raw);
   const dashed = canonAnthropic(noProvider);
   const noTag = stripContextTag(dashed);
+  // Bedrock ids reach us with dots (`us.anthropic.claude-…`) and a
+  // `-v1:0` profile version, so they need the prefix strip BEFORE the
+  // dot↔dash normalisation that `canonAnthropic` only applies to `claude-*`.
+  const bedrock = canonAnthropic(stripContextTag(stripBedrock(noProvider)));
 
   push(raw);
   push(noProvider);
   push(dashed);
   push(noTag);
+  push(bedrock);
   push(stripDate(raw));
   push(stripDate(noProvider));
   push(stripDate(dashed));
   push(stripDate(noTag));
+  push(stripDate(bedrock));
+  push(canonGemini(noTag));
+  push(canonGemini(stripDate(noTag)));
   canonicalCandidatesCache.set(model, out);
   return out;
 }
@@ -598,6 +919,7 @@ export type Priceable = Pick<
 > & {
   provider?: string;
   cost_usd_ticks?: number;
+  credits_micros?: number;
   uncosted_input_tokens?: number;
   uncosted_output_tokens?: number;
   uncosted_cache_read_tokens?: number;
@@ -735,9 +1057,7 @@ export function estimateCostBreakdown(usage: Priceable): CostBreakdown {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Per-run usage
-// ---------------------------------------------------------------------------
 
 /** Collapsed usage for one agent run, or for a set of runs. */
 export interface TaskUsageSummary {
@@ -751,6 +1071,8 @@ export interface TaskUsageSummary {
   cacheWrite: number;
   /** Distinct models this run touched, in first-seen order. Usually one. */
   models: string[];
+  /** Credits grouped by provider, since their credit units are not interchangeable. */
+  credits: ReadonlyMap<string, number>;
 }
 
 /**
@@ -771,10 +1093,11 @@ export function summarizeTaskUsage(
   if (!usage || usage.length === 0) return null;
 
   const models: string[] = [];
+  const credits = new Map<string, number>();
   const summary: TaskUsageSummary = {
     tokens: 0, cost: 0, cacheSavings: 0,
     input: 0, output: 0, cacheRead: 0, cacheWrite: 0,
-    models,
+    models, credits,
   };
 
   for (const slice of usage) {
@@ -785,6 +1108,10 @@ export function summarizeTaskUsage(
     summary.cost += estimateCost(slice);
     summary.cacheSavings += estimateCacheSavings(slice);
     if (slice.model && !models.includes(slice.model)) models.push(slice.model);
+    if (slice.credits_micros != null) {
+      const provider = slice.provider || "unknown";
+      credits.set(provider, (credits.get(provider) ?? 0) + slice.credits_micros / 1e6);
+    }
   }
   summary.tokens =
     summary.input + summary.output + summary.cacheRead + summary.cacheWrite;
@@ -815,9 +1142,7 @@ export function estimateCacheSavings(usage: Priceable): number {
   return wouldHaveCost - actualCost;
 }
 
-// ---------------------------------------------------------------------------
 // Data aggregation
-// ---------------------------------------------------------------------------
 
 export interface DailyTokenData {
   date: string;
@@ -1024,6 +1349,9 @@ export function aggregateByWeek(
   usage: readonly WeeklyAggregable[],
   tz: string,
   weekCount: number,
+  // The first day the plan lets the dashboard read (MUL-9490); the leftmost
+  // week it cuts into is marked partial.
+  earliestDay: string | null = null,
 ): {
   weeklyTokens: WeeklyTokenData[];
   weeklyCostStack: WeeklyCostStackData[];
@@ -1055,6 +1383,9 @@ export function aggregateByWeek(
   }
 
   for (const u of usage) {
+    // Days before the plan's range never count, even when a response from a
+    // replica still on the old policy includes them.
+    if (earliestDay && u.date < earliestDay) continue;
     const wkStart = weekStartIso(u.date);
     if (wkStart < firstWeekStart || wkStart > currentWeekStart) continue;
     const tokens = tokenMap.get(wkStart);
@@ -1075,24 +1406,19 @@ export function aggregateByWeek(
 
   const decorate = (weekStart: string) => {
     const weekEnd = addDaysIso(weekStart, 6);
-    const partial = today < weekEnd;
-    // Inclusive count of how many days of this week have actually elapsed.
-    // Sits at 7 for closed weeks, 1..6 for the current week.
-    const elapsedDays = Math.min(
-      7,
-      Math.max(
-        1,
-        // Day index of `today` within [weekStart, weekEnd] + 1.
-        diffDaysIso(weekStart, today < weekStart ? weekStart : today < weekEnd ? today : weekEnd) + 1,
-      ),
-    );
+    // Inclusive count of the week's days that have elapsed and that the plan
+    // covers: 7 for a closed week, fewer for the current week or the leftmost
+    // week a history limit cuts into.
+    const from = earliestDay && earliestDay > weekStart ? earliestDay : weekStart;
+    const to = today < weekEnd ? today : weekEnd;
+    const daysCovered = Math.min(7, Math.max(1, diffDaysIso(from, to) + 1));
     return {
       weekStart,
       weekEnd,
       label: formatShortDate(weekStart),
       rangeLabel: `${formatShortDate(weekStart)} – ${formatShortDate(weekEnd)}`,
-      partial,
-      daysCovered: partial ? elapsedDays : 7,
+      partial: daysCovered < 7,
+      daysCovered,
     };
   };
 
@@ -1131,9 +1457,11 @@ export function sliceWindow(
   days: number,
   tz: string,
 ): { filtered: RuntimeUsage[]; prevFiltered: RuntimeUsage[] } {
+  // `days` calendar days including today. The backend's `days=N` series
+  // starts one day earlier on purpose, so the cutoff must not be today - N.
   const today = todayIso(tz);
-  const isoCurrent = addDaysIso(today, -days);
-  const isoPrev = addDaysIso(today, -days * 2);
+  const isoCurrent = addDaysIso(today, -(days - 1));
+  const isoPrev = addDaysIso(today, -(days * 2 - 1));
   return {
     filtered: usage.filter((u) => u.date >= isoCurrent),
     prevFiltered: usage.filter(
@@ -1150,13 +1478,11 @@ function diffDaysIso(from: string, to: string): number {
   return Math.round((b - a) / 86_400_000);
 }
 
-// ---------------------------------------------------------------------------
 // Calendar helpers — all date math runs on YYYY-MM-DD strings in the
 // runtime's IANA timezone. The backend already groups daily usage by
 // `start-of-day in runtime tz`, so we keep the entire frontend aggregation
 // on the same axis (Daily / Weekly) to avoid one-day drift when the browser
 // and runtime sit in different time zones.
-// ---------------------------------------------------------------------------
 
 // Today's calendar date (YYYY-MM-DD) in the given IANA timezone. `en-CA`
 // gives ISO-shaped output without us having to assemble Intl parts by hand.
@@ -1203,14 +1529,12 @@ export function formatShortDate(iso: string): string {
   });
 }
 
-// ---------------------------------------------------------------------------
 // Cost-by-X aggregations
 //
 // All three "Cost by …" tabs share the same shape: a sorted list of rows
 // where each row carries a key (agent name, model name, or hour-of-day),
 // total tokens and total cost. The chart / list components are oblivious
 // to which axis they're rendering — they just see {key, tokens, cost}.
-// ---------------------------------------------------------------------------
 
 export interface CostByKey {
   key: string;

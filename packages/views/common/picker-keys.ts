@@ -1,7 +1,5 @@
-// ---------------------------------------------------------------------------
 // Picker key policy — one answer to "what moves the highlight" and "what
 // accepts", shared by every list-with-a-highlight in the product.
-// ---------------------------------------------------------------------------
 //
 // Lives here rather than next to the editor's suggestion popups because the
 // consumers are no longer only editor pickers: the issue detail's thread

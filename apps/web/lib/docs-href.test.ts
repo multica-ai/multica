@@ -6,7 +6,9 @@ describe("docsHrefForLocale", () => {
   it("routes each supported locale to the matching docs entry", () => {
     expect(docsHrefForLocale("en")).toBe("/docs");
     expect(docsHrefForLocale("zh-Hans")).toBe("/docs/zh");
+    expect(docsHrefForLocale("zh-Hant")).toBe("/docs/zh-Hant");
     expect(docsHrefForLocale("ko")).toBe("/docs/ko");
     expect(docsHrefForLocale("ja")).toBe("/docs/ja");
+    expect(docsHrefForLocale("fr")).toBe("/docs/fr");
   });
 });

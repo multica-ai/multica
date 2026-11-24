@@ -55,6 +55,22 @@ func ParseRuntimeRouting(raw []byte) (*RuntimeRouting, error) {
 	return &routing, nil
 }
 
+// A steer may attach only to a running turn of the same execution principal.
+func sameRoutingUser(first, second []byte) bool {
+	a, err := ParseRuntimeRouting(first)
+	if err != nil {
+		return false
+	}
+	b, err := ParseRuntimeRouting(second)
+	if err != nil {
+		return false
+	}
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.ExecutionUserID == b.ExecutionUserID
+}
+
 func (r *RuntimeRouting) Route(agentID string) (RuntimeRoute, error) {
 	if r == nil {
 		return RuntimeRoute{}, fmt.Errorf("%w: missing execution snapshot", ErrTaskRuntimeUnavailable)
@@ -139,7 +155,7 @@ func (s *TaskService) resolveTaskRuntime(ctx context.Context, q *db.Queries, age
 			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return taskRuntimeSelection{}, fmt.Errorf("load default runtime: %w", err)
 			}
-			if err == nil && runtime.Visibility == "private" && runtime.OwnerID.Valid && runtime.OwnerID != agent.OwnerID {
+			if err == nil && runtime.Visibility == "private" && runtime.OwnerID.Valid && !RuntimeAllowsUser(runtime, agent.OwnerID) {
 				return taskRuntimeSelection{}, ErrTaskRuntimeAccessDenied
 			}
 		}

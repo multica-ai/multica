@@ -51,6 +51,7 @@ func addedReactionToResponse(r db.AddReactionRow) ReactionResponse {
 }
 
 func (h *Handler) AddReaction(w http.ResponseWriter, r *http.Request) {
+	r = h.withWakeupActor(r)
 	commentId := chi.URLParam(r, "commentId")
 
 	userID, ok := requireUserID(w, r)
@@ -74,6 +75,9 @@ func (h *Handler) AddReaction(w http.ResponseWriter, r *http.Request) {
 	// A deleted comment's tombstone takes no reactions.
 	if err != nil || comment.DeletedAt.Valid {
 		writeError(w, http.StatusNotFound, "comment not found")
+		return
+	}
+	if !h.requireIssueIDVisible(w, r, workspaceID, comment.IssueID, http.StatusNotFound, "comment not found") {
 		return
 	}
 
@@ -140,6 +144,7 @@ func (h *Handler) AddReaction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) RemoveReaction(w http.ResponseWriter, r *http.Request) {
+	r = h.withWakeupActor(r)
 	commentId := chi.URLParam(r, "commentId")
 
 	userID, ok := requireUserID(w, r)
@@ -163,6 +168,9 @@ func (h *Handler) RemoveReaction(w http.ResponseWriter, r *http.Request) {
 	// A deleted comment's tombstone has no reactions left to remove.
 	if err != nil || comment.DeletedAt.Valid {
 		writeError(w, http.StatusNotFound, "comment not found")
+		return
+	}
+	if !h.requireIssueIDVisible(w, r, workspaceID, comment.IssueID, http.StatusNotFound, "comment not found") {
 		return
 	}
 

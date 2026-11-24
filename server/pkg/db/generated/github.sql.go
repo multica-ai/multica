@@ -115,6 +115,57 @@ func (q *Queries) DeletePendingGitHubInstallation(ctx context.Context, installat
 	return err
 }
 
+const findGitHubPullRequestByURL = `-- name: FindGitHubPullRequestByURL :one
+SELECT id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files, api_mergeable, api_merge_state_status, checks_rollup_state, snapshot_head_sha, snapshot_fetched_at FROM github_pull_request
+WHERE workspace_id = $1
+  AND lower(rtrim(html_url, '/')) = lower($2::text)
+ORDER BY pr_updated_at DESC
+LIMIT 1
+`
+
+type FindGitHubPullRequestByURLParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	HtmlUrl     string      `json:"html_url"`
+}
+
+// Resolves a pasted PR URL to a mirrored PR. The caller normalizes the URL to
+// scheme://host/owner/repo/pull/N; html_url is stored in that shape.
+func (q *Queries) FindGitHubPullRequestByURL(ctx context.Context, arg FindGitHubPullRequestByURLParams) (GithubPullRequest, error) {
+	row := q.db.QueryRow(ctx, findGitHubPullRequestByURL, arg.WorkspaceID, arg.HtmlUrl)
+	var i GithubPullRequest
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.InstallationID,
+		&i.RepoOwner,
+		&i.RepoName,
+		&i.PrNumber,
+		&i.Title,
+		&i.State,
+		&i.HtmlUrl,
+		&i.Branch,
+		&i.AuthorLogin,
+		&i.AuthorAvatarUrl,
+		&i.MergedAt,
+		&i.ClosedAt,
+		&i.PrCreatedAt,
+		&i.PrUpdatedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.HeadSha,
+		&i.MergeableState,
+		&i.Additions,
+		&i.Deletions,
+		&i.ChangedFiles,
+		&i.ApiMergeable,
+		&i.ApiMergeStateStatus,
+		&i.ChecksRollupState,
+		&i.SnapshotHeadSha,
+		&i.SnapshotFetchedAt,
+	)
+	return i, err
+}
+
 const getGitHubInstallationByID = `-- name: GetGitHubInstallationByID :one
 SELECT id, workspace_id, installation_id, account_login, account_type, account_avatar_url, connected_by_id, created_at, updated_at FROM github_installation
 WHERE id = $1
@@ -190,33 +241,49 @@ func (q *Queries) GetGitHubPullRequest(ctx context.Context, arg GetGitHubPullReq
 	return i, err
 }
 
-const getIssuePullRequestCloseAggregate = `-- name: GetIssuePullRequestCloseAggregate :one
-SELECT
-    COALESCE(SUM(CASE WHEN pr.state IN ('open', 'draft') THEN 1 ELSE 0 END), 0)::bigint AS open_count,
-    COALESCE(SUM(CASE WHEN pr.state = 'merged' AND ipr.close_intent THEN 1 ELSE 0 END), 0)::bigint AS merged_with_close_intent_count
-FROM github_pull_request pr
-JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
-WHERE ipr.issue_id = $1
+const getGitHubPullRequestInWorkspace = `-- name: GetGitHubPullRequestInWorkspace :one
+SELECT id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files, api_mergeable, api_merge_state_status, checks_rollup_state, snapshot_head_sha, snapshot_fetched_at FROM github_pull_request
+WHERE id = $1 AND workspace_id = $2
 `
 
-type GetIssuePullRequestCloseAggregateRow struct {
-	OpenCount                  int64 `json:"open_count"`
-	MergedWithCloseIntentCount int64 `json:"merged_with_close_intent_count"`
+type GetGitHubPullRequestInWorkspaceParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-// Aggregates the issue's linked PRs into the two counts that gate
-// auto-advance: how many are still in flight (`open` or `draft`) and how
-// many merged PRs declared explicit closing intent on the link row. The
-// webhook auto-advances the issue when open_count = 0 AND
-// merged_with_close_intent_count > 0. Both the PR state and the link row
-// (with close_intent) are persisted before this query runs, so the result
-// is event-agnostic — a link-only sibling closing after a closing-keyword
-// PR has already merged still resolves the issue. A bare body mention is not
-// linked at all, so a passing reference can never keep open_count > 0.
-func (q *Queries) GetIssuePullRequestCloseAggregate(ctx context.Context, issueID pgtype.UUID) (GetIssuePullRequestCloseAggregateRow, error) {
-	row := q.db.QueryRow(ctx, getIssuePullRequestCloseAggregate, issueID)
-	var i GetIssuePullRequestCloseAggregateRow
-	err := row.Scan(&i.OpenCount, &i.MergedWithCloseIntentCount)
+func (q *Queries) GetGitHubPullRequestInWorkspace(ctx context.Context, arg GetGitHubPullRequestInWorkspaceParams) (GithubPullRequest, error) {
+	row := q.db.QueryRow(ctx, getGitHubPullRequestInWorkspace, arg.ID, arg.WorkspaceID)
+	var i GithubPullRequest
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.InstallationID,
+		&i.RepoOwner,
+		&i.RepoName,
+		&i.PrNumber,
+		&i.Title,
+		&i.State,
+		&i.HtmlUrl,
+		&i.Branch,
+		&i.AuthorLogin,
+		&i.AuthorAvatarUrl,
+		&i.MergedAt,
+		&i.ClosedAt,
+		&i.PrCreatedAt,
+		&i.PrUpdatedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.HeadSha,
+		&i.MergeableState,
+		&i.Additions,
+		&i.Deletions,
+		&i.ChangedFiles,
+		&i.ApiMergeable,
+		&i.ApiMergeStateStatus,
+		&i.ChecksRollupState,
+		&i.SnapshotHeadSha,
+		&i.SnapshotFetchedAt,
+	)
 	return i, err
 }
 
@@ -274,47 +341,92 @@ func (q *Queries) GetPendingGitHubInstallation(ctx context.Context, installation
 	return i, err
 }
 
-const linkIssueToPullRequest = `-- name: LinkIssueToPullRequest :exec
+const linkIssueToPullRequest = `-- name: LinkIssueToPullRequest :execrows
 
 INSERT INTO issue_pull_request (
-    issue_id, pull_request_id, linked_by_type, linked_by_id, close_intent
+    issue_id, pull_request_id, linked_by_type, linked_by_id
 ) VALUES (
-    $1, $2, $4, $5, $3
+    $1, $2, 'system', NULL
 )
-ON CONFLICT (issue_id, pull_request_id) DO UPDATE SET
-    close_intent = CASE
-        WHEN $6 THEN issue_pull_request.close_intent
-        ELSE EXCLUDED.close_intent
-    END
+ON CONFLICT (issue_id, pull_request_id) DO NOTHING
 `
 
 type LinkIssueToPullRequestParams struct {
-	IssueID             pgtype.UUID `json:"issue_id"`
-	PullRequestID       pgtype.UUID `json:"pull_request_id"`
-	CloseIntent         bool        `json:"close_intent"`
-	LinkedByType        pgtype.Text `json:"linked_by_type"`
-	LinkedByID          pgtype.UUID `json:"linked_by_id"`
-	PreserveCloseIntent bool        `json:"preserve_close_intent"`
+	IssueID       pgtype.UUID `json:"issue_id"`
+	PullRequestID pgtype.UUID `json:"pull_request_id"`
 }
 
 // =====================
 // Issue ↔ Pull Request link
 // =====================
-// close_intent reflects the PR's explicit close declaration at the moment
-// the webhook is allowed to update that intent. Open/edit/merge webhooks use
-// the current title/body parse result so authors can remove a closing keyword
-// before merge. Post-terminal edits can opt into preserving the stored value,
-// keeping the merge-time decision stable.
-func (q *Queries) LinkIssueToPullRequest(ctx context.Context, arg LinkIssueToPullRequestParams) error {
-	_, err := q.db.Exec(ctx, linkIssueToPullRequest,
-		arg.IssueID,
-		arg.PullRequestID,
-		arg.CloseIntent,
-		arg.LinkedByType,
-		arg.LinkedByID,
-		arg.PreserveCloseIntent,
-	)
-	return err
+// Automatic link from a PR title, branch, or closing keyword. Returns 1 only
+// when the link is new, so the webhook evaluates the merge automation on the
+// link event and not on every redelivery. An existing link (automatic or
+// manual) is left untouched. close_intent is no longer read or written
+// (MUL-7726).
+func (q *Queries) LinkIssueToPullRequest(ctx context.Context, arg LinkIssueToPullRequestParams) (int64, error) {
+	result, err := q.db.Exec(ctx, linkIssueToPullRequest, arg.IssueID, arg.PullRequestID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const linkIssueToPullRequestManually = `-- name: LinkIssueToPullRequestManually :execrows
+INSERT INTO issue_pull_request (
+    issue_id, pull_request_id, linked_by_type, linked_by_id
+) VALUES (
+    $1, $2, 'member', $3
+)
+ON CONFLICT (issue_id, pull_request_id) DO UPDATE SET
+    linked_by_type = 'member',
+    linked_by_id = EXCLUDED.linked_by_id
+WHERE issue_pull_request.linked_by_type IS DISTINCT FROM 'member'
+`
+
+type LinkIssueToPullRequestManuallyParams struct {
+	IssueID       pgtype.UUID `json:"issue_id"`
+	PullRequestID pgtype.UUID `json:"pull_request_id"`
+	LinkedByID    pgtype.UUID `json:"linked_by_id"`
+}
+
+// A member linked this PR by hand. Marking an existing automatic link as
+// manual keeps a later title edit from removing it. Returns 1 when the row was
+// inserted or converted.
+func (q *Queries) LinkIssueToPullRequestManually(ctx context.Context, arg LinkIssueToPullRequestManuallyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, linkIssueToPullRequestManually, arg.IssueID, arg.PullRequestID, arg.LinkedByID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const listAutoLinkedIssueIDsForPullRequest = `-- name: ListAutoLinkedIssueIDsForPullRequest :many
+SELECT issue_id FROM issue_pull_request
+WHERE pull_request_id = $1
+  AND COALESCE(linked_by_type, 'system') <> 'member'
+`
+
+// Issues this PR is linked to automatically. Manual links are not listed: the
+// webhook reconciles only what it created itself.
+func (q *Queries) ListAutoLinkedIssueIDsForPullRequest(ctx context.Context, pullRequestID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listAutoLinkedIssueIDsForPullRequest, pullRequestID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var issue_id pgtype.UUID
+		if err := rows.Scan(&issue_id); err != nil {
+			return nil, err
+		}
+		items = append(items, issue_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listGitHubInstallationsByInstallationID = `-- name: ListGitHubInstallationsByInstallationID :many
@@ -396,6 +508,52 @@ func (q *Queries) ListGitHubInstallationsByWorkspace(ctx context.Context, worksp
 	return items, nil
 }
 
+const listGitHubInstallationsWithConnectedBy = `-- name: ListGitHubInstallationsWithConnectedBy :many
+SELECT gi.id, gi.workspace_id, gi.installation_id, gi.account_login, gi.account_type, gi.account_avatar_url, gi.connected_by_id, gi.created_at, gi.updated_at, COALESCE(u.name, '')::text AS connected_by
+FROM github_installation gi
+LEFT JOIN member m ON m.user_id = gi.connected_by_id AND m.workspace_id = gi.workspace_id
+LEFT JOIN "user" u ON u.id = m.user_id
+WHERE gi.workspace_id = $1
+ORDER BY gi.created_at ASC
+`
+
+type ListGitHubInstallationsWithConnectedByRow struct {
+	GithubInstallation GithubInstallation `json:"github_installation"`
+	ConnectedBy        string             `json:"connected_by"`
+}
+
+// Only disclose the connector's display name while they belong to this workspace.
+func (q *Queries) ListGitHubInstallationsWithConnectedBy(ctx context.Context, workspaceID pgtype.UUID) ([]ListGitHubInstallationsWithConnectedByRow, error) {
+	rows, err := q.db.Query(ctx, listGitHubInstallationsWithConnectedBy, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListGitHubInstallationsWithConnectedByRow{}
+	for rows.Next() {
+		var i ListGitHubInstallationsWithConnectedByRow
+		if err := rows.Scan(
+			&i.GithubInstallation.ID,
+			&i.GithubInstallation.WorkspaceID,
+			&i.GithubInstallation.InstallationID,
+			&i.GithubInstallation.AccountLogin,
+			&i.GithubInstallation.AccountType,
+			&i.GithubInstallation.AccountAvatarUrl,
+			&i.GithubInstallation.ConnectedByID,
+			&i.GithubInstallation.CreatedAt,
+			&i.GithubInstallation.UpdatedAt,
+			&i.ConnectedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listIssueIDsForPullRequest = `-- name: ListIssueIDsForPullRequest :many
 SELECT issue_id FROM issue_pull_request
 WHERE pull_request_id = $1
@@ -414,6 +572,85 @@ func (q *Queries) ListIssueIDsForPullRequest(ctx context.Context, pullRequestID 
 			return nil, err
 		}
 		items = append(items, issue_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIssuePullRequestSummaries = `-- name: ListIssuePullRequestSummaries :many
+SELECT
+    ipr.issue_id,
+    pr.id, 'github'::text AS provider, pr.repo_owner, pr.repo_name,
+    pr.pr_number, pr.title, pr.state, pr.html_url, pr.pr_created_at
+FROM github_pull_request pr
+JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+JOIN issue i ON i.id = ipr.issue_id
+WHERE pr.workspace_id = $1
+  AND i.workspace_id = $1
+  AND ($2::uuid[] IS NULL OR NOT (COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY($2::uuid[])))
+UNION ALL
+SELECT
+    ipr.issue_id,
+    pr.id, pr.provider, pr.repo_owner, pr.repo_name,
+    pr.pr_number, pr.title, pr.state, pr.html_url, pr.pr_created_at
+FROM vcs_pull_request pr
+JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
+JOIN issue i ON i.id = ipr.issue_id
+WHERE pr.workspace_id = $1
+  AND i.workspace_id = $1
+  AND ($2::uuid[] IS NULL OR NOT (COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY($2::uuid[])))
+ORDER BY pr_created_at DESC
+`
+
+type ListIssuePullRequestSummariesParams struct {
+	WorkspaceID      pgtype.UUID   `json:"workspace_id"`
+	HiddenProjectIds []pgtype.UUID `json:"hidden_project_ids"`
+}
+
+type ListIssuePullRequestSummariesRow struct {
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	ID          pgtype.UUID        `json:"id"`
+	Provider    string             `json:"provider"`
+	RepoOwner   string             `json:"repo_owner"`
+	RepoName    string             `json:"repo_name"`
+	PrNumber    int32              `json:"pr_number"`
+	Title       string             `json:"title"`
+	State       string             `json:"state"`
+	HtmlUrl     string             `json:"html_url"`
+	PrCreatedAt pgtype.Timestamptz `json:"pr_created_at"`
+}
+
+// Every issue -> PR link in the workspace, GitHub and self-hosted providers
+// together, newest first. Carries only what an issue card or row needs to
+// render a PR chip (no CI/merge snapshot). Backs the workspace wide "Pull
+// requests" display option on board / list / table views. Links on issues in
+// private projects the caller cannot see are left out, as in the issue lists.
+func (q *Queries) ListIssuePullRequestSummaries(ctx context.Context, arg ListIssuePullRequestSummariesParams) ([]ListIssuePullRequestSummariesRow, error) {
+	rows, err := q.db.Query(ctx, listIssuePullRequestSummaries, arg.WorkspaceID, arg.HiddenProjectIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIssuePullRequestSummariesRow{}
+	for rows.Next() {
+		var i ListIssuePullRequestSummariesRow
+		if err := rows.Scan(
+			&i.IssueID,
+			&i.ID,
+			&i.Provider,
+			&i.RepoOwner,
+			&i.RepoName,
+			&i.PrNumber,
+			&i.Title,
+			&i.State,
+			&i.HtmlUrl,
+			&i.PrCreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -459,6 +696,7 @@ SELECT
     pr.api_mergeable, pr.api_merge_state_status, pr.checks_rollup_state,
     pr.snapshot_head_sha, pr.snapshot_fetched_at,
     pr.created_at, pr.updated_at,
+    COALESCE(ipr.linked_by_type, 'system')::text AS linked_by_type,
     COALESCE(c.total, 0)::bigint   AS checks_total,
     COALESCE(c.passed, 0)::bigint  AS checks_passed,
     COALESCE(c.failed, 0)::bigint  AS checks_failed,
@@ -500,6 +738,7 @@ type ListPullRequestsByIssueRow struct {
 	SnapshotFetchedAt   pgtype.Timestamptz `json:"snapshot_fetched_at"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	LinkedByType        string             `json:"linked_by_type"`
 	ChecksTotal         int64              `json:"checks_total"`
 	ChecksPassed        int64              `json:"checks_passed"`
 	ChecksFailed        int64              `json:"checks_failed"`
@@ -514,10 +753,9 @@ type ListPullRequestsByIssueRow struct {
 // refresh pipeline — NOT the legacy suite-level webhook aggregation, which is
 // removed. The `issue_prs` CTE narrows to this issue's PR ids first so the
 // aggregation only touches check rows for those PRs. Rows for an OLD head are
-// excluded by the snapshot_head_sha filter. Every link row is a working PR:
-// the webhook only links an identifier it read from the PR title, the branch
-// name, or a body closing keyword, so a bare body mention never lands here
-// (MUL-7072).
+// excluded by the snapshot_head_sha filter. Every link row is a delivery PR:
+// the webhook links an identifier it read from the PR title or branch name, and
+// a member can link one by hand (linked_by_type = 'member'). MUL-7429.
 func (q *Queries) ListPullRequestsByIssue(ctx context.Context, issueID pgtype.UUID) ([]ListPullRequestsByIssueRow, error) {
 	rows, err := q.db.Query(ctx, listPullRequestsByIssue, issueID)
 	if err != nil {
@@ -556,6 +794,7 @@ func (q *Queries) ListPullRequestsByIssue(ctx context.Context, issueID pgtype.UU
 			&i.SnapshotFetchedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LinkedByType,
 			&i.ChecksTotal,
 			&i.ChecksPassed,
 			&i.ChecksFailed,
@@ -572,7 +811,7 @@ func (q *Queries) ListPullRequestsByIssue(ctx context.Context, issueID pgtype.UU
 	return items, nil
 }
 
-const unlinkIssueFromPullRequest = `-- name: UnlinkIssueFromPullRequest :exec
+const unlinkIssueFromPullRequest = `-- name: UnlinkIssueFromPullRequest :execrows
 DELETE FROM issue_pull_request
 WHERE issue_id = $1 AND pull_request_id = $2
 `
@@ -582,9 +821,12 @@ type UnlinkIssueFromPullRequestParams struct {
 	PullRequestID pgtype.UUID `json:"pull_request_id"`
 }
 
-func (q *Queries) UnlinkIssueFromPullRequest(ctx context.Context, arg UnlinkIssueFromPullRequestParams) error {
-	_, err := q.db.Exec(ctx, unlinkIssueFromPullRequest, arg.IssueID, arg.PullRequestID)
-	return err
+func (q *Queries) UnlinkIssueFromPullRequest(ctx context.Context, arg UnlinkIssueFromPullRequestParams) (int64, error) {
+	result, err := q.db.Exec(ctx, unlinkIssueFromPullRequest, arg.IssueID, arg.PullRequestID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateGitHubInstallationAccountByInstallationID = `-- name: UpdateGitHubInstallationAccountByInstallationID :many
@@ -678,6 +920,7 @@ ON CONFLICT (workspace_id, repo_owner, repo_name, pr_number) DO UPDATE SET
     deletions     = EXCLUDED.deletions,
     changed_files = EXCLUDED.changed_files,
     updated_at = now()
+WHERE EXCLUDED.pr_updated_at >= github_pull_request.pr_updated_at
 RETURNING id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files, api_mergeable, api_merge_state_status, checks_rollup_state, snapshot_head_sha, snapshot_fetched_at
 `
 
@@ -718,6 +961,10 @@ type UpsertGitHubPullRequestParams struct {
 //     information that GitHub only re-computes lazily.
 //
 // INSERT path always writes the incoming value (NULL acceptable for a new row).
+//
+// GitHub may deliver events out of order. An event older than the stored row
+// (pr_updated_at) updates nothing and returns no row, so a late "opened" can't
+// roll a merged PR back to open — the same guard UpsertVCSPullRequest has.
 func (q *Queries) UpsertGitHubPullRequest(ctx context.Context, arg UpsertGitHubPullRequestParams) (GithubPullRequest, error) {
 	row := q.db.QueryRow(ctx, upsertGitHubPullRequest,
 		arg.WorkspaceID,

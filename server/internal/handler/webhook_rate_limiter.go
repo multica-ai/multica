@@ -279,12 +279,6 @@ return 1
 
 var webhookLimiterCheckScript = redis.NewScript(webhookLimiterCheckSrc)
 
-// webhookLimiterAllowSource exposes the script body for tests that want to
-// assert structural invariants (e.g. trim before count before insert)
-// without spinning up a real Redis. Lower-cased "Source" makes the
-// test-only intent explicit.
-func webhookLimiterAllowSource() string { return webhookLimiterAllowSrc }
-
 type redisWebhookRateLimiter struct {
 	cfg       SlidingWindowRateLimit
 	rdb       redis.UniversalClient

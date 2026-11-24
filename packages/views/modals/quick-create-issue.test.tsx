@@ -8,17 +8,29 @@ import {
   type ReactNode,
 } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const mockQuickCreateIssue = vi.hoisted(() => vi.fn());
+type VoiceOptions = { insert: (text: string) => boolean; submit?: () => void };
+const voiceOptions = vi.hoisted(() => ({ last: null as VoiceOptions | null }));
+
+// Voice input has its own tests; here only its wiring to the editor matters.
+vi.mock("../voice", () => ({
+  useComposerVoice: (options: VoiceOptions) => {
+    voiceOptions.last = options;
+    return { rootRef: () => {}, onFocusCapture: () => {} };
+  },
+  VoiceDialogFooter: ({ children }: { children: ReactNode }) => children,
+  VoiceMicButton: () => null,
+}));
 const mockCreateCommentSubIssue = vi.hoisted(() => vi.fn());
 const mockSetLastActor = vi.hoisted(() => vi.fn());
+const mockCountActorCreate = vi.hoisted(() => vi.fn());
 const mockSetQuickCreateFieldVisible = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockSetLastMode = vi.hoisted(() => vi.fn());
 const mockToastSuccess = vi.hoisted(() => vi.fn());
-const mockShowIssueLimitUpgradePrompt = vi.hoisted(() => vi.fn());
 // Uploads flow through the module-level coordinator, which calls
 // `api.uploadFile(file, ctx, signal)` (MUL-5181 L2).
 const mockApiUploadFile = vi.hoisted(() => vi.fn());
@@ -98,6 +110,8 @@ const mockQuickCreateStore = {
   lastActorType: null as "agent" | "squad" | null,
   lastActorId: null as string | null,
   setLastActor: mockSetLastActor,
+  actorCreateCounts: {} as Record<string, number>,
+  countActorCreate: mockCountActorCreate,
   keepOpen: false,
   setKeepOpen: mockSetKeepOpen,
   // Not part of the store's interface any more (MUL-5862), but an older
@@ -126,6 +140,10 @@ const mockSquadsData = vi.hoisted(
   () => ({ list: [] as Array<{ id: string; name: string; leader_id: string; archived_at: string | null }> }),
 );
 
+const mockAgentsData = vi.hoisted(
+  () => ({ list: [] as Array<{ id: string; name: string; archived_at: string | null; runtime_id: string }> }),
+);
+
 // Per-test override for the runtimes list. Non-admin members receive a
 // filtered list (ListVisibleAgentRuntimes) that omits other members' private
 // machines, so a selected agent can point at a runtime_id that is simply not
@@ -139,7 +157,7 @@ let mockUploadIdSeq = 0;
 const mockPreferenceQuery = vi.hoisted(() => ({ data: { runtimeId: null } as { runtimeId: string | null } | null, isPending: false, isError: false }));
 
 const mockRuntimesQuery = vi.hoisted(() => ({
-  data: [] as Array<{ id: string; owner_id?: string | null; visibility?: "private" | "public"; metadata: Record<string, unknown> }>,
+  data: [] as Array<{ id: string; provider?: string; owner_id?: string | null; visibility?: "private" | "public"; metadata: Record<string, unknown> }>,
   isSuccess: true,
   isError: false,
 }));
@@ -156,9 +174,7 @@ vi.mock("@tanstack/react-query", () => ({
       case "members":
         return { data: [{ user_id: "user-1", role: "admin" }] };
       case "agents":
-        return {
-          data: [{ id: "agent-1", name: "Bohan", archived_at: null, runtime_id: "runtime-1" }],
-        };
+        return { data: mockAgentsData.list };
       case "runtimes":
         return mockRuntimesQuery;
       case "projects":
@@ -198,10 +214,6 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-test",
 }));
 
-vi.mock("./use-issue-limit-upgrade-prompt", () => ({
-  useIssueLimitUpgradePrompt: () => mockShowIssueLimitUpgradePrompt,
-}));
-
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ name: "Test Workspace" }),
   useWorkspacePaths: () => ({
@@ -227,7 +239,8 @@ vi.mock("@multica/core/projects/queries", () => ({
   projectListOptions: () => ({ queryKey: ["projects"] }),
 }));
 
-vi.mock("@multica/core/issues/stores/quick-create-store", () => ({
+vi.mock("@multica/core/issues/stores/quick-create-store", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/issues/stores/quick-create-store")>()),
   useQuickCreateStore: (selector?: (state: typeof mockQuickCreateStore) => unknown) =>
     (selector ? selector(mockQuickCreateStore) : mockQuickCreateStore),
 }));
@@ -366,6 +379,12 @@ vi.mock("../editor", async () => {
       },
       uploadFile: runUpload,
       focus: vi.fn(),
+      insertText: (text: string) => {
+        valueRef.current += text;
+        setValue(valueRef.current);
+        onUpdate?.(valueRef.current);
+        return true;
+      },
       hasActiveUploads: () => inFlightRef.current > 0,
       // Placeholder rebuild contract: the real handle draws a card for an
       // upload the document is not showing and reports whether it landed.
@@ -460,14 +479,6 @@ vi.mock("../issues/components/pickers/property-picker", () => ({
   PickerEmpty: () => <div data-testid="picker-empty" />,
 }));
 
-vi.mock("@multica/ui/components/ui/button", () => ({
-  Button: ({ children, disabled, onClick }: { children: ReactNode; disabled?: boolean; onClick?: () => void }) => (
-    <button type="button" disabled={disabled} onClick={onClick}>
-      {children}
-    </button>
-  ),
-}));
-
 vi.mock("@multica/ui/components/ui/switch", () => ({
   Switch: ({ checked, onCheckedChange }: { checked: boolean; onCheckedChange: (v: boolean) => void }) => (
     <input
@@ -505,6 +516,16 @@ const TEST_RESOURCES = {
   en: { agents: enAgents, common: enCommon, modals: enModals, editor: enEditor, projects: enProjects, issues: enIssues },
 };
 
+// A row of the actor popover, as opposed to the quick-switch chip that can
+// carry the same name.
+function pickerRow(name: RegExp) {
+  const rows = screen
+    .getAllByRole("button", { name })
+    .filter((el) => el.hasAttribute("data-selected"));
+  expect(rows).toHaveLength(1);
+  return rows[0]!;
+}
+
 function renderPanel(props: React.ComponentProps<typeof AgentCreatePanel>) {
   return render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
@@ -514,11 +535,50 @@ function renderPanel(props: React.ComponentProps<typeof AgentCreatePanel>) {
 }
 
 describe("AgentCreatePanel", () => {
+  it("does not replace an explicitly cleared manual assignee with the filing agent", async () => {
+    const user = userEvent.setup();
+    renderPanel({ onClose: vi.fn(), onSwitchMode: vi.fn(), isExpanded: false, setIsExpanded: vi.fn(), data: { manual_assignee_cleared: true } });
+    await user.click(screen.getByRole("button", { name: /Switch to Manual/i }));
+    expect(mockIssueDraftStore.draft.manual.assigneeId).toBeUndefined();
+    expect(mockSetManual.mock.calls.some(([patch]) => "assigneeId" in patch)).toBe(false);
+  });
+
+  it("selects Qoder agents without the daemon CLI version gate", () => {
+    mockRuntimesQuery.data = [{ id: "runtime-1", provider: "qoder_cloud", metadata: {} }];
+    mockQuickCreateStore.lastActorType = "agent";
+    mockQuickCreateStore.lastActorId = "agent-1";
+    mockSquadsData.list = [{ id: "squad-1", name: "Cloud Squad", leader_id: "agent-1", archived_at: null }];
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+    expect(screen.getByRole("button", { name: /^Create$/i })).toBeEnabled();
+    expect(screen.queryByText(/daemon.*version/i)).not.toBeInTheDocument();
+    expect(screen.getAllByText("Bohan").length).toBeGreaterThan(0);
+    expect(pickerRow(/Cloud Squad/)).toBeInTheDocument();
+  });
+
+  it("blocks Qoder agents when the prompt references an attachment", () => {
+    mockRuntimesQuery.data = [{ id: "runtime-1", provider: "qoder_cloud", metadata: {} }];
+    mockQuickCreateStore.lastActorType = "agent";
+    mockQuickCreateStore.lastActorId = "agent-1";
+    const attachmentId = "019ec09d-6222-722b-bdfa-427b105d80be";
+    mockIssueDraftStore.draft.agent.prompt = `See ![shot](/api/attachments/${attachmentId}/download)`;
+    mockIssueDraftStore.draft.shared.attachments = [{
+      clientUploadId: attachmentId,
+      status: "uploaded",
+      filename: "shot.png",
+      attachment: { id: attachmentId, url: "https://cdn.example/shot.png", filename: "shot.png" },
+    } as never];
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+    expect(screen.getByRole("button", { name: /^Create$/i })).toBeDisabled();
+    expect(screen.getByText(/can't read attachments/i)).toBeInTheDocument();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockQuickCreateStore.lastActorType = null;
     mockQuickCreateStore.lastActorId = null;
     mockQuickCreateStore.lastProjectId = null;
+    mockQuickCreateStore.actorCreateCounts = {};
+    mockAgentsData.list = [{ id: "agent-1", name: "Bohan", archived_at: null, runtime_id: "runtime-1" }];
     mockCreateSettingsStore.quickCreateFields = ["project"];
     mockQuickCreateStore.keepOpen = false;
     mockIssueDraftStore.draft = emptyIssueDraft();
@@ -653,12 +713,15 @@ describe("AgentCreatePanel", () => {
   it.each([
     [{}, /doesn't report a CLI version/],
     [{ cli_version: "0.2.20" }, /daemon CLI is 0.2.20/],
-  ])("retains version warnings for an accessible runtime with metadata %j", (metadata, warning) => {
+  ])("retains version warnings for an accessible runtime with metadata %j", async (metadata, warning) => {
     mockRuntimesQuery.data[0]!.metadata = metadata;
     renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
 
     expect(screen.getByText(warning)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+    const create = screen.getByRole("button", { name: "Create" });
+    expect(create).toHaveAttribute("aria-disabled", "true");
+    await userEvent.click(create);
+    expect(mockQuickCreateIssue).not.toHaveBeenCalled();
   });
 
   it("allows another owner's public runtime with a supported release version", async () => {
@@ -674,9 +737,25 @@ describe("AgentCreatePanel", () => {
 
     expect(
       screen.getByPlaceholderText(
-        'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+        'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
       ),
     ).toHaveValue("Persisted draft prompt");
+  });
+
+  it("prefers a prompt handed in by the opener over the draft and saves it to the draft", () => {
+    renderPanel({
+      onClose: vi.fn(),
+      isExpanded: false,
+      setIsExpanded: vi.fn(),
+      data: { prompt: "fix the Safari login callback 500" },
+    });
+
+    expect(
+      screen.getByPlaceholderText(
+        'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
+      ),
+    ).toHaveValue("fix the Safari login callback 500");
+    expect(mockIssueDraftStore.draft.agent.prompt).toBe("fix the Safari login callback 500");
   });
 
   it("restores unfinished actor, project, priority, and due-date selections after remount", async () => {
@@ -693,7 +772,7 @@ describe("AgentCreatePanel", () => {
       setIsExpanded: vi.fn(),
     });
 
-    await user.click(screen.getByRole("button", { name: /Frontend Squad/ }));
+    await user.click(pickerRow(/Frontend Squad/));
     await user.click(screen.getByTestId("project-picker"));
     await user.click(screen.getByTestId("priority-picker"));
     await user.click(screen.getByTestId("due-date-picker"));
@@ -712,7 +791,7 @@ describe("AgentCreatePanel", () => {
     firstOpen.unmount();
     renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
 
-    expect(screen.getByRole("button", { name: /Frontend Squad/ })).toHaveAttribute(
+    expect(pickerRow(/Frontend Squad/)).toHaveAttribute(
       "data-selected",
       "true",
     );
@@ -728,7 +807,7 @@ describe("AgentCreatePanel", () => {
     renderPanel({ onClose, isExpanded: false, setIsExpanded: vi.fn() });
 
     const editor = screen.getByPlaceholderText(
-      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+      'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
     );
 
     await user.clear(editor);
@@ -752,26 +831,18 @@ describe("AgentCreatePanel", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("shows the upgrade recovery immediately when quick create is rejected by the issue preflight", async () => {
-    const user = userEvent.setup();
-    const onClose = vi.fn();
-    mockQuickCreateIssue.mockRejectedValue(
-      new ApiError("workspace has reached its issue limit", 402, "Payment Required", {
-        code: "issue_limit_reached",
-        limit: 1000,
-        policy_revision: 1,
-      }),
-    );
-
-    renderPanel({ onClose, isExpanded: false, setIsExpanded: vi.fn() });
-    await user.click(screen.getByRole("button", { name: /^Create$/i }));
-
-    await waitFor(() => {
-      expect(mockShowIssueLimitUpgradePrompt).toHaveBeenCalledTimes(1);
+  it("dictates into the prompt and lets voice send it to the agent", async () => {
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+    act(() => {
+      expect(voiceOptions.last?.insert("fix the inbox")).toBe(true);
     });
-    expect(mockToastSuccess).not.toHaveBeenCalled();
-    expect(mockClearDraft).not.toHaveBeenCalled();
-    expect(onClose).not.toHaveBeenCalled();
+    expect(mockSetAgent).toHaveBeenLastCalledWith({ prompt: expect.stringContaining("fix the inbox") });
+    act(() => voiceOptions.last?.submit?.());
+    await waitFor(() => {
+      expect(mockQuickCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({ agent_id: "agent-1", prompt: expect.stringContaining("fix the inbox") }),
+      );
+    });
   });
 
   it("reveals optional fields from the overflow and submits their values", async () => {
@@ -801,7 +872,7 @@ describe("AgentCreatePanel", () => {
     renderPanel({ onClose, isExpanded: false, setIsExpanded: vi.fn() });
 
     const editor = screen.getByPlaceholderText(
-      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+      'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
     );
     fireEvent.change(editor, { target: { value: "Half-typed request" } });
     await user.click(screen.getByRole("button", { name: "Customize fields..." }));
@@ -853,7 +924,7 @@ describe("AgentCreatePanel", () => {
     const onClose = vi.fn();
     renderPanel({ onClose, isExpanded: false, setIsExpanded: vi.fn() });
     const editor = screen.getByPlaceholderText(
-      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+      'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
     );
     fireEvent.change(editor, { target: { value: "Draft A prompt" } });
     fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
@@ -884,7 +955,7 @@ describe("AgentCreatePanel", () => {
     );
     const view = renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
     const editor = screen.getByPlaceholderText(
-      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+      'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
     );
     fireEvent.change(editor, { target: { value: "Draft A prompt" } });
     fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
@@ -912,7 +983,7 @@ describe("AgentCreatePanel", () => {
     );
     const view = renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
     const editor = screen.getByPlaceholderText(
-      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+      'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
     );
     fireEvent.change(editor, { target: { value: "Draft A prompt" } });
     fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
@@ -937,7 +1008,7 @@ describe("AgentCreatePanel", () => {
     await waitFor(() => expect(mockApiUploadFile).toHaveBeenCalled());
 
     const editor = screen.getByPlaceholderText(
-      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+      'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
     );
     await user.clear(editor);
     fireEvent.change(editor, {
@@ -974,10 +1045,10 @@ describe("AgentCreatePanel", () => {
 
     // The picker mock renders both sections inline as buttons; click the
     // squad row directly.
-    await user.click(screen.getByRole("button", { name: /Frontend Squad/ }));
+    await user.click(pickerRow(/Frontend Squad/));
 
     const editor = screen.getByPlaceholderText(
-      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+      'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
     );
     await user.clear(editor);
     await user.type(editor, "Investigate the regression");
@@ -1035,11 +1106,11 @@ describe("AgentCreatePanel", () => {
 
       renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
 
-      await user.click(screen.getByRole("button", { name: /Bohan/ }));
+      await user.click(pickerRow(/Bohan/));
       await user.click(screen.getByTestId("project-picker"));
       await user.type(
         screen.getByPlaceholderText(
-          'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+          'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
         ),
         "Ship it",
       );
@@ -1119,6 +1190,14 @@ describe("AgentCreatePanel", () => {
     expect(screen.getByTestId("project-picker")).toHaveTextContent("Project proj-1");
   });
 
+  it("opens without a project when asked for none, over an unfinished draft's project", () => {
+    mockIssueDraftStore.draft.shared.projectId = "proj-1";
+
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn(), data: { project_id: null } });
+
+    expect(screen.queryByText("Project proj-1")).toBeNull();
+  });
+
   // When the modal was opened from "Add sub issue" on an existing issue,
   // the manual panel transfers parent_issue_id through the `data` payload
   // on switch-to-agent. The agent panel must forward that UUID to the
@@ -1143,7 +1222,7 @@ describe("AgentCreatePanel", () => {
     expect(screen.getByTestId("agent-sub-issue-chip")).toBeInTheDocument();
 
     const editor = screen.getByPlaceholderText(
-      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+      'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
     );
     await user.clear(editor);
     await user.type(editor, "Investigate the regression");
@@ -1258,7 +1337,7 @@ describe("AgentCreatePanel", () => {
       // Each file is its own queue entry — making users wait for the first to
       // land before picking the second was a restriction with no race behind
       // it, and this issue explicitly removed it.
-      const submit = await screen.findByRole("button", { name: "Uploading…" });
+      const submit = await screen.findByRole("button", { name: "Uploading..." });
       expect(submit).toBeDisabled();
       expect(screen.getByRole("button", { name: "Upload file" })).not.toBeDisabled();
     });
@@ -1282,7 +1361,7 @@ describe("AgentCreatePanel", () => {
 
       renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
 
-      await user.click(screen.getByRole("button", { name: /Bohan/ }));
+      await user.click(pickerRow(/Bohan/));
 
       // No misleading "daemon has no CLI version" wall...
       expect(
@@ -1291,7 +1370,7 @@ describe("AgentCreatePanel", () => {
       // ...and Create is reachable (gated only by prompt content, as usual).
       await user.type(
         screen.getByPlaceholderText(
-          'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+          'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
         ),
         "Ship it",
       );
@@ -1310,16 +1389,20 @@ describe("AgentCreatePanel", () => {
 
       renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
 
-      await user.click(screen.getByRole("button", { name: /Bohan/ }));
+      await user.click(pickerRow(/Bohan/));
 
       expect(screen.getByText(/Create with agent needs ≥/i)).toBeInTheDocument();
       await user.type(
         screen.getByPlaceholderText(
-          'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+          'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
         ),
         "Ship it",
       );
-      expect(screen.getByRole("button", { name: /^Create$/i })).toBeDisabled();
+      // Blocked but still hoverable so its tooltip can explain why.
+      const create = screen.getByRole("button", { name: /^Create$/i });
+      expect(create).toHaveAttribute("aria-disabled", "true");
+      await user.click(create);
+      expect(mockQuickCreateIssue).not.toHaveBeenCalled();
     });
   });
 
@@ -1336,7 +1419,7 @@ describe("AgentCreatePanel", () => {
       renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
 
       const editor = screen.getByPlaceholderText(
-        'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+        'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"',
       );
 
       // Both presses inside ONE act: React cannot re-render between them, so
@@ -1383,7 +1466,106 @@ describe("AgentCreatePanel", () => {
       expect(create.parentElement).toBe(footer);
       expect(keepOpen.parentElement?.parentElement).toBe(footer);
       expect(attach.parentElement?.parentElement).toBe(footer);
-      expect(attach).toHaveAttribute("data-size", "sm");
+      expect(attach).not.toHaveAttribute("data-size");
+    });
+  });
+
+  // MUL-10012 — the three most used actors sit next to "Created by" as chips,
+  // ranked by how many issues each has filed, and ⌥1–⌥3 pick them.
+  describe("quick-switch chips", () => {
+    const agent = (id: string, name: string) => ({ id, name, archived_at: null, runtime_id: "runtime-1" });
+    const PROMPT_PLACEHOLDER =
+      'Tell the agent what to do, e.g. "fix the slow inbox loading in the Web project"';
+
+    beforeEach(() => {
+      mockAgentsData.list = [
+        agent("agent-1", "Bohan"),
+        agent("agent-2", "Ada"),
+        agent("agent-3", "Cyd"),
+        agent("agent-4", "Dex"),
+      ];
+      mockQuickCreateStore.actorCreateCounts = { "agent:agent-3": 5, "agent:agent-4": 2 };
+    });
+
+    const chips = () =>
+      within(screen.getByRole("group", { name: "Frequently used" })).getAllByRole("button");
+    const chipNames = () => chips().map((el) => el.textContent);
+    const pressedChip = () => chips().find((el) => el.getAttribute("aria-pressed") === "true");
+
+    it("ranks the chips by create count and fills the rest in list order", () => {
+      renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+      expect(chipNames()).toEqual(["Cyd", "Dex", "Bohan"]);
+      // With no draft or last pick, the default actor is the first agent.
+      expect(pressedChip()).toHaveTextContent("Bohan");
+    });
+
+    it("submits with the chip the user clicked", async () => {
+      const user = userEvent.setup();
+      renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+      await user.click(screen.getByRole("button", { name: "Dex", pressed: false }));
+      expect(pressedChip()).toHaveTextContent("Dex");
+
+      await user.type(screen.getByPlaceholderText(PROMPT_PLACEHOLDER), " now");
+      await user.click(screen.getByRole("button", { name: /^Create$/i }));
+
+      await waitFor(() => {
+        expect(mockQuickCreateIssue).toHaveBeenCalledWith(
+          expect.objectContaining({ agent_id: "agent-4" }),
+        );
+      });
+      expect(mockCountActorCreate).toHaveBeenCalledWith("agent", "agent-4");
+    });
+
+    it("picks a chip with ⌥ + its position, even from inside the prompt", () => {
+      renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+      const notPrevented = fireEvent.keyDown(screen.getByPlaceholderText(PROMPT_PLACEHOLDER), {
+        key: "2",
+        code: "Digit2",
+        altKey: true,
+      });
+
+      expect(notPrevented).toBe(false);
+      expect(pressedChip()).toHaveTextContent("Dex");
+      expect(mockIssueDraftStore.draft.agent).toEqual(
+        expect.objectContaining({ actorType: "agent", actorId: "agent-4" }),
+      );
+    });
+
+    it("leaves ⌥ + a digit past the chips to the editor", () => {
+      mockAgentsData.list = [agent("agent-1", "Bohan")];
+      renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+      const notPrevented = fireEvent.keyDown(screen.getByPlaceholderText(PROMPT_PLACEHOLDER), {
+        key: "2",
+        code: "Digit2",
+        altKey: true,
+      });
+
+      expect(notPrevented).toBe(true);
+    });
+
+    it("shows a pick from the full list as its own chip without moving the ranked ones", async () => {
+      const user = userEvent.setup();
+      renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+      await user.click(pickerRow(/Ada/));
+
+      expect(chipNames()).toEqual(["Cyd", "Dex", "Bohan", "Ada"]);
+      expect(pressedChip()).toHaveTextContent("Ada");
+    });
+
+    it("keeps the chip order fixed while the dialog stays open", async () => {
+      const user = userEvent.setup();
+      renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+      mockQuickCreateStore.actorCreateCounts = { "agent:agent-1": 50 };
+      // Any re-render reads the store again; the ranking must not.
+      await user.type(screen.getByPlaceholderText(PROMPT_PLACEHOLDER), "x");
+
+      expect(chipNames()).toEqual(["Cyd", "Dex", "Bohan"]);
     });
   });
 });

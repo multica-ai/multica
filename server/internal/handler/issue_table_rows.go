@@ -231,22 +231,33 @@ func normalizeIssueTableGroupKey(w http.ResponseWriter, group issueTableGroupSpe
 }
 
 func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
+	r = h.withBlockerViewer(r)
 	if h.DB == nil {
 		writeError(w, http.StatusInternalServerError, "database is unavailable")
 		return
 	}
-	baseHandler := h
 	var request issueTableRowsRequest
 	if !decodeIssueTableJSON(w, r, &request) {
 		return
 	}
+	response, ok := h.queryIssueTableRows(w, r, request)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+// queryIssueTableRows runs one table rows request. On failure it has already
+// written the error response and returns ok=false.
+func (h *Handler) queryIssueTableRows(w http.ResponseWriter, r *http.Request, request issueTableRowsRequest) (issueTableRowsResponse, bool) {
+	baseHandler := h
 	r, cancel := withIssueTableQueryTimeout(r)
 	defer cancel()
 	snapshot, tx, err := h.beginIssueTableSnapshot(r.Context())
 	if err != nil {
 		slog.Warn("ListIssueTableRows snapshot failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeIssueTableQueryFailure(w, r, "failed to start table query")
-		return
+		return issueTableRowsResponse{}, false
 	}
 	committed := false
 	defer func() {
@@ -257,22 +268,22 @@ func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
 	h = snapshot
 	limit, cursor, ok := normalizeIssueTablePage(w, request.Page)
 	if !ok {
-		return
+		return issueTableRowsResponse{}, false
 	}
 	groupKey, ok := normalizeIssueTableGroupKey(w, request.Group, request.GroupKey)
 	if !ok {
-		return
+		return issueTableRowsResponse{}, false
 	}
 	if !request.Hierarchy.Enabled && request.ParentID != nil {
 		writeError(w, http.StatusBadRequest, "parent_id requires hierarchy.enabled=true")
-		return
+		return issueTableRowsResponse{}, false
 	}
 	compiled, ok := h.compileIssueTableQuery(w, r, request.Query)
 	if !ok {
-		return
+		return issueTableRowsResponse{}, false
 	}
 	if !issueTableCursorMatches(w, cursor, compiled.fingerprint, groupKey, request.ParentID) {
-		return
+		return issueTableRowsResponse{}, false
 	}
 	branchIdentity := issueTableGroupIdentity(request.Group) + ":hierarchy=" + strconv.FormatBool(request.Hierarchy.Enabled)
 	if cursor != nil && cursor.BranchIdentity != branchIdentity {
@@ -280,11 +291,11 @@ func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
 			"error":   "cursor_query_mismatch",
 			"message": "cursor does not belong to this table branch",
 		})
-		return
+		return issueTableRowsResponse{}, false
 	}
 	group, ok := h.resolveIssueTableGroup(w, r, compiled.workspaceID, request.Group, true)
 	if !ok {
-		return
+		return issueTableRowsResponse{}, false
 	}
 	args := append([]any(nil), compiled.args...)
 	addArg := func(value any) string {
@@ -299,7 +310,7 @@ func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
 		addArg,
 	)
 	if !ok {
-		return
+		return issueTableRowsResponse{}, false
 	}
 	predicateKey := ""
 	if groupKey != nil {
@@ -307,7 +318,7 @@ func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
 	}
 	groupPredicate, ok := group.predicate(w, predicateKey, addArg)
 	if !ok {
-		return
+		return issueTableRowsResponse{}, false
 	}
 	branchPredicate := "TRUE"
 	if request.Hierarchy.Enabled {
@@ -320,7 +331,7 @@ func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
 			parentUUID, err := util.ParseUUID(*request.ParentID)
 			if err != nil {
 				writeError(w, http.StatusBadRequest, "invalid parent_id")
-				return
+				return issueTableRowsResponse{}, false
 			}
 			parentRef := addArg(parentUUID)
 			branchPredicate = fmt.Sprintf("i.parent_issue_id = %s::uuid AND EXISTS (SELECT 1 FROM membership parent WHERE parent.id = %s::uuid)", parentRef, parentRef)
@@ -328,7 +339,7 @@ func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
 	}
 	cursorPredicate, ok := resolvedSort.cursorPredicate(w, cursor, addArg)
 	if !ok {
-		return
+		return issueTableRowsResponse{}, false
 	}
 	limitRef := addArg(limit + 1)
 
@@ -390,10 +401,10 @@ func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
 
 	query := fmt.Sprintf(`%s
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
-       i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
+       i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.requester_user_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at,
 	       i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
-	       i.revision,
+	       i.revision, i.duplicate_of_issue_id,
 	       %s AS direct_child_count, i.table_sort_key
 	FROM page i
 	ORDER BY %s`, cte, childCountExpr, resolvedSort.orderBy())
@@ -402,7 +413,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 	if err != nil {
 		slog.Warn("ListIssueTableRows query failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeIssueTableQueryFailure(w, r, "failed to list table rows")
-		return
+		return issueTableRowsResponse{}, false
 	}
 	defer rows.Close()
 
@@ -425,6 +436,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 			&row.issue.AssigneeID,
 			&row.issue.CreatorType,
 			&row.issue.CreatorID,
+			&row.issue.RequesterUserID,
 			&row.issue.ParentIssueID,
 			&row.issue.Position,
 			&row.issue.StartDate,
@@ -438,17 +450,18 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 			&row.issue.Stage,
 			&row.issue.Properties,
 			&row.issue.Revision,
+			&row.issue.DuplicateOfIssueID,
 			&row.childCount,
 			&row.sortKey,
 		); err != nil {
 			writeIssueTableQueryFailure(w, r, "failed to list table rows")
-			return
+			return issueTableRowsResponse{}, false
 		}
 		scanned = append(scanned, row)
 	}
 	if err := rows.Err(); err != nil {
 		writeIssueTableQueryFailure(w, r, "failed to list table rows")
-		return
+		return issueTableRowsResponse{}, false
 	}
 	rows.Close()
 
@@ -460,7 +473,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		if err := h.DB.QueryRow(r.Context(), fmt.Sprintf("SELECT COUNT(*)::bigint FROM issue i WHERE %s", compiled.where), compiled.args...).Scan(&total); err != nil {
 			slog.Warn("ListIssueTableRows total count failed", append(logger.RequestAttrs(r), "error", err)...)
 			writeIssueTableQueryFailure(w, r, "failed to count table rows")
-			return
+			return issueTableRowsResponse{}, false
 		}
 	}
 
@@ -494,18 +507,23 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 	if err := tx.Commit(r.Context()); err != nil {
 		slog.Warn("ListIssueTableRows snapshot commit failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeIssueTableQueryFailure(w, r, "failed to finish table query")
-		return
+		return issueTableRowsResponse{}, false
 	}
 	committed = true
 
 	prefix := baseHandler.getIssuePrefix(r.Context(), compiled.workspaceID)
 	issueIDs := make([]pgtype.UUID, len(scanned))
+	var originals []pgtype.UUID
+	var blockerPageIDs []pgtype.UUID
 	for index, row := range scanned {
 		issueIDs[index] = row.issue.ID
+		originals = appendDuplicateOriginal(originals, row.issue.Status, row.issue.DuplicateOfIssueID)
+		blockerPageIDs = append(blockerPageIDs, row.issue.ID)
 	}
 	labelsByIssue := baseHandler.labelsByIssue(r.Context(), compiled.workspaceID, issueIDs)
-	// One Resolver for the page — see newStatusCategoryFiller. (MUL-6243)
-	fillTableRow := baseHandler.newStatusCategoryFiller(r.Context(), compiled.workspaceID)
+	// One Resolver and one originals read for the page — see
+	// newStatusCategoryFiller. (MUL-6243, MUL-7349)
+	fillTableRow := baseHandler.newStatusCategoryFiller(r.Context(), compiled.workspaceID, compiled.hidden, originals, blockerPageIDs...)
 	responseRows := make([]issueTableRowResponse, len(scanned))
 	for index, row := range scanned {
 		issue := issueListRowToResponse(row.issue, prefix)
@@ -530,5 +548,5 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		BranchTotal:      int64(len(responseRows)),
 		NextCursor:       nextCursor,
 	}
-	writeJSON(w, http.StatusOK, response)
+	return response, true
 }
