@@ -88,7 +88,7 @@ any row matches. A row matches when `event` equals the event name, `actions`
 
 `path` is dot-separated; a number indexes an array and `*` matches any element.
 `op` is `equals`, `not_equals`, `contains` (text), `in` (takes `values`), or
-`exists` (takes no value); `ignore_case` applies to text. Values are compared
+`exists` (takes no value; a JSON `null` counts as absent); `ignore_case` applies to text. Values are compared
 with their JSON type, so `"false"` does not match `false`. A missing path never
 matches. A row holds at most 20 conditions. `trigger-update` without a filter
 flag keeps the current filters; `--clear-event-filters` removes them.
@@ -110,7 +110,7 @@ material into comments, logs, docs, or PRs.
 3. If assigned to a squad, inspect the squad: `multica squad get <squad-id> --output json`; execution goes to the leader.
 4. Inspect the target agent/runtime: `multica agent get <agent-id> --output json` and `multica runtime list --output json`.
 5. For webhooks, inspect delivery status: `queued` means the worker has not completed dispatch; `failed` carries the worker error. A provider retry with the same `X-GitHub-Delivery` / `Idempotency-Key` reuses the original delivery.
-   An `ignored` delivery created no run, so `runs` shows nothing for it; its `reason_code` says why. Besides `trigger_disabled`, `autopilot_paused`, `autopilot_archived`, and `quota_exceeded`, the trigger's event filters drop deliveries: `event_filtered` means no row matched the event or action, and `payload_filtered` means a row matched but one of its `conditions` failed — `payload_condition_failure` names that condition and the payload value it saw.
+   An `ignored` delivery created no run, so `runs` shows nothing for it. `trigger_disabled`, `autopilot_paused`, and `autopilot_archived` are recorded in its `error`; `quota_exceeded`, `event_filtered`, and `payload_filtered` in its `reason_code`. `event_filtered` means no row matched the event or action, and `payload_filtered` means a row matched but one of its `conditions` failed — `payload_condition_failure` names that condition and the payload value it saw.
 6. For `create_issue`, inspect the created issue if the run records one.
 
 ## Access
