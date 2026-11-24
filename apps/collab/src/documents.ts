@@ -60,7 +60,9 @@ interface DocState {
 
 export interface WriteRequest {
   actor: Actor;
-  /** Stored revision and content the writer based `content` on. */
+  /** Stored revision and content the writer based `content` on. A restore
+   *  replaces the whole document, so it is refused unless `base_revision` is
+   *  still the stored revision once pending edits are saved. */
   base_revision?: number;
   base_content?: string;
   content?: string;
@@ -81,6 +83,7 @@ export interface EditRequest {
 export type WriteResult =
   | { status: "ok"; revision: number; content: string; title: string; merged: boolean }
   | { status: "conflict"; revision: number; content: string; conflicts: MergeConflict[] }
+  | { status: "stale"; revision: number; content: string }
   | { status: "edit_failed"; revision: number; content: string; failure: EditFailure }
   | { status: "too_large"; revision: number }
   | { status: "gone" };
@@ -212,6 +215,9 @@ export class DocumentStore {
   /** Whole-document write: three-way merged into the live document. */
   write(name: string, req: WriteRequest): Promise<WriteResult> {
     return this.withDocument(name, req.actor, async (document, state) => {
+      if (req.action === "restore" && req.base_revision !== undefined && req.base_revision !== state.revision) {
+        return { status: "stale", revision: state.revision, content: this.codec.ydocToMarkdown(document) };
+      }
       let merged = false;
       if (req.content !== undefined) {
         const current = this.codec.ydocToJSON(document);

@@ -123,6 +123,8 @@ make sqlc
 make cli ARGS="issue list"
 ```
 
+如果環境仍在登錄表中，即使已經過期，也可以在對應的檢出目錄執行 `make up ARGS="--ttl 48"` 來續期。資料會保留，有效期限從命令執行時起重新計算 48 小時。
+
 ## 修改前端功能
 
 Web 與 Desktop 都需要的功能按職責放置：

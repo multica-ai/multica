@@ -66,6 +66,22 @@ export interface DocTree {
   folders: DocFolder[];
   docs: DocSummary[];
 }
+/** An agent's run on a doc discussion, as the discussion shows it. */
+export interface DocTaskRun {
+  id: string;
+  agentId: string;
+  docThreadId: string;
+  /** Open wire value; the task statuses (queued, running, failed, ...). */
+  status: string;
+  failureReason: string;
+  /** Only for viewers who can see the agent. */
+  error: string | null;
+  cancelledBy?: { type: string; id?: string; name?: string };
+  createdAt: string;
+  completedAt: string | null;
+  /** The viewer can see the agent and the run is still active. */
+  canCancel: boolean;
+}
 export interface DocVersion {
   docId: string;
   number: number;
@@ -77,6 +93,10 @@ export interface DocVersion {
   actionRef: number | null;
   taskId: string | null;
   issueId: string | null;
+  /** The discussion an agent was answering when it saved this version, with
+   *  the text that discussion is about; null otherwise or once deleted. */
+  docThreadId: string | null;
+  docThreadQuote: string | null;
   /** Everyone whose edits the version carries. Empty for versions saved
    *  before live co-editing; the author is the one then. */
   contributors: { type: DocAuthorType; id: string }[];

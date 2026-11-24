@@ -189,11 +189,34 @@ func lockMemberRole(ctx context.Context, q *db.Queries, memberID pgtype.UUID, ex
 	return m, nil
 }
 
+// errLastOwner reports that a change would leave the workspace without an
+// owner.
+var errLastOwner = errors.New("workspace must have at least one owner")
+
+// lockOtherOwner locks the workspace's owner rows and fails with errLastOwner
+// when memberID is its only owner. Taken before any member row lock, it makes
+// two owners losing their role at once apply in turn, so the second sees the
+// first's change and keeps the last owner.
+func lockOtherOwner(ctx context.Context, q *db.Queries, workspaceID, memberID pgtype.UUID) error {
+	owners, err := q.LockWorkspaceOwners(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	for _, id := range owners {
+		if id == memberID && len(owners) == 1 {
+			return errLastOwner
+		}
+	}
+	return nil
+}
+
 // writeMemberUpdateError maps a role-change failure to its response.
 func writeMemberUpdateError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, errMemberRoleChanged):
 		writeMemberRoleChanged(w)
+	case errors.Is(err, errLastOwner):
+		writeError(w, http.StatusBadRequest, errLastOwner.Error())
 	case errors.Is(err, pgx.ErrNoRows):
 		writeError(w, http.StatusNotFound, "member not found")
 	case errors.Is(err, errGuestProjectNotVisible):

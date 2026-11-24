@@ -77,7 +77,7 @@ function NewWindowButton({ onOpen }: { onOpen: () => void }) {
         type="button"
         tabIndex={-1}
         aria-label={label}
-        className="-my-1 -mr-1 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 group-hover/workspace:opacity-100 group-data-highlighted/workspace:opacity-100 hover:bg-surface-selected hover:text-foreground"
+        className="-my-1 -mr-1 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-[opacity,background-color,color] duration-150 motion-reduce:transition-none group-hover/workspace:opacity-100 group-data-highlighted/workspace:opacity-100 hover:bg-surface-selected hover:text-foreground"
         onClick={(event) => {
           event.preventDefault();
           onOpen();
@@ -99,7 +99,7 @@ function PinButton({ pinned, unread, onToggle }: { pinned: boolean; unread: bool
   return (
     <TooltipHint label={label} side="right">
       <button type="button" aria-label={label} tabIndex={0}
-        className={cn("absolute inset-0 flex items-center justify-center rounded-md opacity-0 group-hover/workspace:opacity-100 group-data-highlighted/workspace:opacity-100 focus-visible:opacity-100 hover:bg-surface-selected", unread ? "text-brand" : "text-muted-foreground")}
+        className={cn("absolute inset-0 flex items-center justify-center rounded-md opacity-0 transition-[opacity,background-color,color] duration-150 motion-reduce:transition-none group-hover/workspace:opacity-100 group-data-highlighted/workspace:opacity-100 focus-visible:opacity-100 hover:bg-surface-selected", unread ? "text-brand" : "text-muted-foreground")}
         onClick={(event) => { event.preventDefault(); event.stopPropagation(); onToggle(); }}
         onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") event.stopPropagation(); }}
       >
@@ -171,7 +171,7 @@ export function RailWorkspaces() {
           <DropdownMenuTrigger
             aria-label={label}
             onContextMenu={tileMenu.openAtPointer}
-            className="relative inline-flex size-[34px] shrink-0 cursor-pointer items-center justify-center rounded-[var(--avatar-radius,var(--radius-lg))] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            className="relative inline-flex size-[34px] shrink-0 cursor-pointer items-center justify-center rounded-[var(--avatar-radius,var(--radius-lg))] outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring"
           >
             <WorkspaceAvatar
               name={current.name}
@@ -218,7 +218,7 @@ export function RailWorkspaces() {
                   <span className="min-w-0 flex-1 truncate">{ws.name}</span>
                   {isCurrent && <Check />}
                   <span className="relative flex size-5 shrink-0 items-center justify-center">
-                    <span className="flex group-hover/workspace:opacity-0 group-data-highlighted/workspace:opacity-0">
+                    <span className="flex transition-opacity duration-150 motion-reduce:transition-none group-hover/workspace:opacity-0 group-data-highlighted/workspace:opacity-0">
                       {ws.pinned_at ? (
                         <Pin className={cn("size-4 fill-current", !isCurrent && unreadIds.has(ws.id) ? "text-brand" : "text-muted-foreground")} />
                       ) : !isCurrent && unreadIds.has(ws.id) ? <UnreadDot /> : null}

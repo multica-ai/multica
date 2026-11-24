@@ -1,6 +1,9 @@
 "use client";
 
+import { AnimatePresence, motion } from "motion/react";
 import { TriangleAlert } from "@multica/ui/icons";
+import { useReducedMotion } from "@multica/core/appearance";
+import { UI_EASE_IN, UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { useChatStore } from "@multica/core/chat";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useIsGuest } from "@multica/core/permissions";
@@ -20,6 +23,7 @@ import { useTeamAgentStatus } from "./panels/team-status";
  */
 function TeamStatus({ wsId }: { wsId: string }) {
   const { t } = useT("layout");
+  const reduceMotion = useReducedMotion();
   const p = useWorkspacePaths();
   const shell = useAppShell();
   const { stuck, byAgent } = useTeamAgentStatus(wsId);
@@ -31,15 +35,35 @@ function TeamStatus({ wsId }: { wsId: string }) {
 
   return (
     <div className="flex min-w-0 items-center gap-1">
-      {waitingTasks > 0 && (
-        <AppLink
-          href={teamHref}
-          className="inline-flex h-[22px] min-w-0 items-center gap-1.5 rounded-md bg-page-canvas pr-2 pl-1.5 text-caption font-medium text-foreground ring-1 ring-surface-border outline-none transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-ring"
-        >
-          <TriangleAlert aria-hidden className="size-3.5 shrink-0 text-warning" />
-          <span className="truncate">{t(($) => $.panels.team.stuck, { count: waitingTasks })}</span>
-        </AppLink>
-      )}
+      <AnimatePresence initial={false}>
+        {waitingTasks > 0 && (
+          <motion.div
+            key="stuck-tasks-pill"
+            initial={reduceMotion ? false : { opacity: 0, y: 4, scale: 0.96 }}
+            animate={{
+              opacity: 1,
+              y: 0,
+              scale: 1,
+              transition: { duration: reduceMotion ? 0 : UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
+            }}
+            exit={{
+              opacity: 0,
+              y: reduceMotion ? 0 : 4,
+              scale: reduceMotion ? 1 : 0.96,
+              transition: { duration: reduceMotion ? 0 : UI_MOTION_DURATION.micro, ease: UI_EASE_IN },
+            }}
+            className="flex min-w-0"
+          >
+            <AppLink
+              href={teamHref}
+              className="inline-flex h-[22px] min-w-0 items-center gap-1.5 rounded-md bg-page-canvas pr-2 pl-1.5 text-caption font-medium text-foreground ring-1 ring-surface-border outline-none transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring"
+            >
+              <TriangleAlert aria-hidden className="size-3.5 shrink-0 text-warning" />
+              <span className="truncate">{t(($) => $.panels.team.stuck, { count: waitingTasks })}</span>
+            </AppLink>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

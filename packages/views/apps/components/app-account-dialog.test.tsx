@@ -8,7 +8,7 @@ import enSettings from "../../locales/en/settings.json";
 import { AppAccountDialog } from "./app-account-dialog";
 
 vi.mock("@multica/core/api", () => ({ api: {
-  getAppRules: vi.fn(), listAppTools: vi.fn(), listAppActivity: vi.fn(),
+  listAppActivity: vi.fn(),
 } }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 
@@ -17,9 +17,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-it("opens account activity directly without fetching or showing permission settings", async () => {
-  vi.mocked(api.getAppRules).mockResolvedValue({ rules: [] });
-  vi.mocked(api.listAppTools).mockResolvedValue({ tools: [] });
+it("opens account activity directly without showing permission settings", async () => {
   vi.mocked(api.listAppActivity).mockResolvedValue({ calls: [{
     id: "call-1", agent_id: "a1", issue_id: null, chat_session_id: null, triggered_by: null,
     tool_slug: "GMAIL_SEND_EMAIL", action_class: "send", outcome: "ok", error: null,
@@ -35,8 +33,6 @@ it("opens account activity directly without fetching or showing permission setti
   );
   expect(await screen.findByText("GMAIL_SEND_EMAIL")).toBeVisible();
   expect(api.listAppActivity).toHaveBeenCalledWith("gmail", "personal");
-  expect(api.getAppRules).not.toHaveBeenCalled();
-  expect(api.listAppTools).not.toHaveBeenCalled();
   expect(screen.queryByRole("tab")).not.toBeInTheDocument();
   expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
 });

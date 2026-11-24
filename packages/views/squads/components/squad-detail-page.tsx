@@ -97,8 +97,9 @@ import {
   PickerEmpty,
 } from "../../issues/components/pickers/property-picker";
 import { toast } from "sonner";
-import type { Issue, Squad, SquadMember, SquadMemberStatus, Agent, MemberWithUser } from "@multica/core/types";
+import type { Issue, Squad, SquadHandoffMode, SquadMember, SquadMemberStatus, Agent, MemberWithUser } from "@multica/core/types";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
+import { SquadBriefsSection, SquadHandoffSection } from "./squad-handoff-sections";
 
 const RECENT_WORK_LIMIT = 5;
 
@@ -178,8 +179,12 @@ export function SquadDetailPage() {
   // a discard so Escape cancels here the same way it does for the description.
   const discardNameRef = useRef(false);
 
+  // The previewed briefs render the roster and roles, so they follow member edits.
+  const refreshBriefs = () =>
+    queryClient.invalidateQueries({ queryKey: workspaceKeys.squadBriefs(wsId, squadId) });
+
   const updateSquadMut = useMutation({
-    mutationFn: (data: { name?: string; description?: string; instructions?: string; avatar_url?: string; leader_id?: string }) => api.updateSquad(squadId, data),
+    mutationFn: (data: { name?: string; description?: string; instructions?: string; avatar_url?: string; leader_id?: string; handoff_mode?: SquadHandoffMode }) => api.updateSquad(squadId, data),
     onSuccess: (updated) => {
       queryClient.setQueryData([...workspaceKeys.squads(wsId), squadId], updated);
       refetchSquad();
@@ -197,14 +202,14 @@ export function SquadDetailPage() {
         member_id: input.id,
         role: input.role?.trim() || undefined,
       }),
-    onSuccess: () => { refetchMembers(); toast.success(t(($) => $.toasts.member_added)); },
+    onSuccess: () => { refetchMembers(); refreshBriefs(); toast.success(t(($) => $.toasts.member_added)); },
     onError: (err) =>
       toast.error(err instanceof Error && err.message ? err.message : t(($) => $.toasts.member_add_failed)),
   });
 
   const removeMemberMut = useMutation({
     mutationFn: (m: SquadMember) => api.removeSquadMember(squadId, { member_type: m.member_type, member_id: m.member_id }),
-    onSuccess: () => { refetchMembers(); toast.success(t(($) => $.toasts.member_removed)); },
+    onSuccess: () => { refetchMembers(); refreshBriefs(); toast.success(t(($) => $.toasts.member_removed)); },
     onError: (err) =>
       toast.error(err instanceof Error && err.message ? err.message : t(($) => $.toasts.member_remove_failed)),
   });
@@ -216,7 +221,7 @@ export function SquadDetailPage() {
         member_id: input.member.member_id,
         role: input.role,
       }),
-    onSuccess: () => { refetchMembers(); toast.success(t(($) => $.toasts.role_updated)); },
+    onSuccess: () => { refetchMembers(); refreshBriefs(); toast.success(t(($) => $.toasts.role_updated)); },
     onError: (err) =>
       toast.error(err instanceof Error && err.message ? err.message : t(($) => $.toasts.role_update_failed)),
   });
@@ -458,11 +463,21 @@ export function SquadDetailPage() {
           setLeaderPending={setLeaderMut.isPending}
         />
 
+        <SquadHandoffSection
+          squad={squad}
+          leaderName={getEntityName("agent", squad.leader_id)}
+          canManage={canManage && !archived}
+          pending={updateSquadMut.isPending}
+          onChange={(mode) => updateSquadMut.mutate({ handoff_mode: mode }, { onSuccess: () => toast.success(t(($) => $.handoff.saved)) })}
+        />
+
         <SquadInstructionsSection
           squad={squad}
           canManage={canManage && !archived}
           onSave={async (next) => { await updateSquadMut.mutateAsync({ instructions: next }); toast.success(t(($) => $.toasts.instructions_saved)); }}
         />
+
+        {canManage && <SquadBriefsSection squadId={squad.id} getEntityName={getEntityName} />}
 
         <SquadRecentWorkSection
           issues={recentWork?.issues}

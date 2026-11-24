@@ -368,6 +368,8 @@ func parentIDForMeta(meta *execenv.GCMeta) string {
 		return strings.TrimSpace(meta.AutopilotRunID)
 	case execenv.GCKindQuickCreate:
 		return strings.TrimSpace(meta.TaskID)
+	case execenv.GCKindDoc:
+		return strings.TrimSpace(meta.DocID)
 	default:
 		return ""
 	}

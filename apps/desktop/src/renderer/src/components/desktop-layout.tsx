@@ -1,5 +1,8 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
+import { AnimatePresence, motion, useIsPresent } from "motion/react";
 import { useQuery } from "@tanstack/react-query";
+import { useReducedMotion } from "@multica/core/appearance";
+import { UI_EASE_OUT } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import {
@@ -105,6 +108,44 @@ function MainTopBar({ railMounted }: { railMounted: boolean }) {
   );
 }
 
+const CURTAIN_ENTER_DURATION = 0.16;
+const CURTAIN_EXIT_DURATION = 0.14;
+
+function WorkspaceLoadingCurtain({
+  label,
+  reduceMotion,
+}: {
+  label: string;
+  reduceMotion: boolean;
+}) {
+  const isPresent = useIsPresent();
+  return (
+    <motion.div
+      aria-label={label}
+      aria-live="polite"
+      role="status"
+      initial={reduceMotion ? false : { opacity: 0 }}
+      animate={{
+        opacity: 1,
+        transition: { duration: reduceMotion ? 0 : CURTAIN_ENTER_DURATION, ease: UI_EASE_OUT },
+      }}
+      exit={{
+        opacity: 0,
+        transition: { duration: reduceMotion ? 0 : CURTAIN_EXIT_DURATION, ease: UI_EASE_OUT },
+      }}
+      className={cn(
+        "absolute inset-0 z-20 flex items-center justify-center bg-page-canvas",
+        !isPresent && "pointer-events-none",
+      )}
+    >
+      <div className="flex flex-col items-center gap-4">
+        <MulticaIcon mode="think" size={40} />
+        <p className="text-body text-muted-foreground">{label}</p>
+      </div>
+    </motion.div>
+  );
+}
+
 // The content card: the space panel and the tab content share one surface,
 // split by a single hairline. It hugs the rail; without one (compact, or no
 // workspace yet) it mirrors the fixed mr-2 so it sits centred in the frame.
@@ -119,6 +160,7 @@ function MainCanvas({
 }) {
   const { isCompact } = useSidebar();
   const { t } = useT("layout");
+  const reduceMotion = useReducedMotion();
   const loadingLabel = t(($) => $.workspace_loader.loading_workspace);
 
   return (
@@ -137,18 +179,20 @@ function MainCanvas({
       <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
         {children}
       </div>
-      {showWorkspaceLoading && (
-        <div
-          aria-label={loadingLabel}
-          aria-live="polite"
-          className="absolute inset-0 z-20 flex items-center justify-center bg-page-canvas"
-          role="status"
-        >
-          <div className="flex flex-col items-center gap-4">
-            <MulticaIcon mode="think" size={40} />
-            <p className="text-body text-muted-foreground">{loadingLabel}</p>
-          </div>
-        </div>
+      {reduceMotion ? (
+        showWorkspaceLoading && (
+          <WorkspaceLoadingCurtain label={loadingLabel} reduceMotion />
+        )
+      ) : (
+        <AnimatePresence initial={false}>
+          {showWorkspaceLoading && (
+            <WorkspaceLoadingCurtain
+              key="workspace-loading-curtain"
+              label={loadingLabel}
+              reduceMotion={false}
+            />
+          )}
+        </AnimatePresence>
       )}
     </div>
   );

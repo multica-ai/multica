@@ -5,32 +5,63 @@ import type { IssueAssigneeType } from "../types";
  * handled them (e.g. completed the issue or triggered an agent,
  * `inbox:batch-archived` with one of these reasons). The Inbox reads this to
  * tell such an archive apart from any other way the open notification left,
- * such as another window archiving it.
+ * such as another window archiving it, and to distinguish triggering an agent
+ * (which stays in place so the user sees the run start) from completing an
+ * issue or other handled edits.
  */
-const AUTO_ARCHIVE_REASONS = new Set(["issue_status_terminal", "actor_acted"]);
+export type InboxAutoArchiveReason =
+  | "issue_status_terminal"
+  | "actor_acted"
+  | "agent_triggered";
+
+const AUTO_ARCHIVE_REASONS = new Set<string>([
+  "issue_status_terminal",
+  "actor_acted",
+  "agent_triggered",
+]);
+
+function resolveAutoArchiveReason(payload: {
+  reason?: string;
+  trigger?: string;
+}): InboxAutoArchiveReason | null {
+  if (!payload.reason || !AUTO_ARCHIVE_REASONS.has(payload.reason)) return null;
+  if (payload.reason === "actor_acted" && payload.trigger === "agent_triggered") {
+    return "agent_triggered";
+  }
+  return payload.reason as InboxAutoArchiveReason;
+}
 
 /** The archive lands within moments of the action; anything older is stale. */
 const AUTO_ARCHIVE_TTL_MS = 30_000;
 
-const archivedAt = new Map<string, number>();
+const archivedEntries = new Map<string, { at: number; reason: InboxAutoArchiveReason }>();
 
 /** Record an `inbox:batch-archived` payload, if it is an archive the user caused. */
 export function noteInboxAutoArchive(
-  payload: { issue_id?: string; reason?: string },
+  payload: { issue_id?: string; reason?: string; trigger?: string },
   now = Date.now(),
 ): void {
-  if (!payload.issue_id || !payload.reason || !AUTO_ARCHIVE_REASONS.has(payload.reason)) return;
-  for (const [issueId, at] of archivedAt) {
-    if (now - at > AUTO_ARCHIVE_TTL_MS) archivedAt.delete(issueId);
+  const reason = resolveAutoArchiveReason(payload);
+  if (!payload.issue_id || !reason) return;
+  for (const [issueId, entry] of archivedEntries) {
+    if (now - entry.at > AUTO_ARCHIVE_TTL_MS) archivedEntries.delete(issueId);
   }
-  archivedAt.set(payload.issue_id, now);
+  archivedEntries.set(payload.issue_id, { at: now, reason });
+}
+
+/** The user-caused reason that just archived `issueId`'s notifications, if any. Consumes the record. */
+export function takeInboxAutoArchiveReason(
+  issueId: string,
+  now = Date.now(),
+): InboxAutoArchiveReason | null {
+  const entry = archivedEntries.get(issueId);
+  archivedEntries.delete(issueId);
+  return entry && now - entry.at <= AUTO_ARCHIVE_TTL_MS ? entry.reason : null;
 }
 
 /** Whether the user's own action just archived `issueId`'s notifications. Consumes the record. */
 export function takeInboxAutoArchive(issueId: string, now = Date.now()): boolean {
-  const at = archivedAt.get(issueId);
-  archivedAt.delete(issueId);
-  return at !== undefined && now - at <= AUTO_ARCHIVE_TTL_MS;
+  return takeInboxAutoArchiveReason(issueId, now) !== null;
 }
 
 /**

@@ -22,7 +22,7 @@ import { useT } from "../../i18n";
 import { ProjectIcon } from "./project-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
 
-const TAB_TRIGGER_CLASS = "h-full rounded-none px-2.5 group-data-horizontal/tabs:after:bottom-0";
+const TAB_TRIGGER_CLASS = "h-full rounded-none px-2.5";
 
 /** Overview / Issues / Activity switch, sized to sit in a page header and underline at its bottom edge. */
 export function ProjectTabs({

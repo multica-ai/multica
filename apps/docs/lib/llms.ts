@@ -10,7 +10,11 @@ export const DOCS_URL = `${SITE_ORIGIN}${DOCS_BASE_PATH}`;
 
 type DocsPage = NonNullable<ReturnType<typeof source.getPage>>;
 
-/** Pages listed first in `llms.txt` for agents that install or operate Multica. */
+/**
+ * Pages listed first in `llms.txt` for agents that install or operate Multica.
+ * `self-hosting-ai` is written for agents only, so it is left out of the
+ * sidebar (meta.json); this list, `llms-full.txt` and its `.md` URL serve it.
+ */
 const AGENT_START_SLUGS = ["self-hosting-ai", "cloud-quickstart", "install-agent-runtime", "cli"];
 
 function langPrefix(lang: string): string {

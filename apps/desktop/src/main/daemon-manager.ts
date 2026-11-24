@@ -1,4 +1,4 @@
-import { app, ipcMain, BrowserWindow, shell, dialog, type MessageBoxOptions } from "electron";
+import { app, ipcMain, BrowserWindow, shell, dialog, net, type MessageBoxOptions } from "electron";
 import { execFile } from "child_process";
 import {
   readFile,
@@ -272,7 +272,7 @@ async function probeTokenValidity(profile: string): Promise<AuthProbeResult> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 4_000);
-    const res = await fetch(`${targetApiBaseUrl.replace(/\/+$/, "")}/api/me`, {
+    const res = await net.fetch(`${targetApiBaseUrl.replace(/\/+$/, "")}/api/me`, {
       headers: { Authorization: `Bearer ${token}` },
       signal: controller.signal,
     });
@@ -713,7 +713,7 @@ async function mintPat(jwt: string): Promise<string> {
     throw new Error("mint PAT: target API URL not set");
   }
   const url = `${targetApiBaseUrl.replace(/\/+$/, "")}/api/tokens`;
-  const res = await fetch(url, {
+  const res = await net.fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

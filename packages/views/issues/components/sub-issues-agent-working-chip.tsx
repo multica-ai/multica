@@ -11,7 +11,10 @@ import {
 import { useWorkspaceId } from "@multica/core/hooks";
 import { workspaceWorkingAgentsOptions } from "@multica/core/agents";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
-import { WorkingAgentsHoverContent } from "./workspace-agent-working-chip";
+import {
+  useWorkingExecutionUnits,
+  WorkingAgentsHoverContent,
+} from "./workspace-agent-working-chip";
 import { useT } from "../../i18n";
 
 interface SubIssuesAgentWorkingChipProps {
@@ -46,10 +49,13 @@ export const SubIssuesAgentWorkingChip = memo(
     const { data: agents = [] } = useQuery(
       workspaceWorkingAgentsOptions(wsId, "issue", undefined, parentIssueId),
     );
+    const units = useWorkingExecutionUnits(agents);
 
     if (agents.length === 0) return null;
 
     const agentIds = agents.map((agent) => agent.id);
+    const actors = units?.map(({ type, id }) => ({ type, id })) ?? [];
+    const count = units?.length ?? agentIds.length;
 
     return (
       <HoverCard>
@@ -58,15 +64,15 @@ export const SubIssuesAgentWorkingChip = memo(
             <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5" />
           }
         >
-          <AgentAvatarStack agentIds={agentIds} size="xs" max={3} />
+          <AgentAvatarStack agentIds={agentIds} actors={actors} size="xs" max={3} />
           <ShimmerText className="text-micro font-medium tabular-nums">
             {t(($) => $.agent_activity.chip_agents_working, {
-              count: agentIds.length,
+              count,
             })}
           </ShimmerText>
         </HoverCardTrigger>
         <HoverCardContent align="start" className="w-72">
-          <WorkingAgentsHoverContent agents={agents} />
+          <WorkingAgentsHoverContent agents={agents} units={units} />
         </HoverCardContent>
       </HoverCard>
     );

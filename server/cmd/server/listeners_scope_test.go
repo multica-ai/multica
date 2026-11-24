@@ -456,4 +456,23 @@ func TestRegisterListeners_InvitationRevokedStillTargetsInviteeNotActor(t *testi
 	}
 }
 
+func TestRegisterListeners_InboxUnreadGoesOnlyToRecipient(t *testing.T) {
+	bus := events.New()
+	fb := &fakeBroadcaster{}
+	registerListeners(bus, fb)
+
+	bus.Publish(events.Event{
+		Type: protocol.EventInboxUnread, WorkspaceID: "ws-1",
+		ActorType: "member", ActorID: "user-1",
+		Payload: map[string]any{"item_id": "item-1", "recipient_id": "user-1"},
+	})
+
+	if len(fb.workspaceCalls) != 0 {
+		t.Fatalf("inbox:unread leaked to workspace fanout: %+v", fb.workspaceCalls)
+	}
+	if len(fb.userCalls) != 1 || fb.userCalls[0].userID != "user-1" {
+		t.Fatalf("inbox:unread fanout = %+v, want user-1 only", fb.userCalls)
+	}
+}
+
 func inviteePtr(s string) *string { return &s }

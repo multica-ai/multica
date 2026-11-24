@@ -1,11 +1,15 @@
 "use client";
 
-import { CalendarDays, ChevronDown, FolderKanban, Lock } from "@multica/ui/icons";
+import { Bot, CalendarDays, ChevronDown, FolderKanban, Lock, Users } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
@@ -14,6 +18,8 @@ import { ProjectIcon } from "../../projects/components/project-icon";
 import { useT } from "../../i18n";
 import {
   ALL_PROJECTS,
+  ALL_SQUADS,
+  STANDALONE_SQUAD,
   TIME_RANGES,
   type TimeRange,
   type TimeRangeOption,
@@ -21,6 +27,7 @@ import {
 import { isRangeAllowed, type UpgradePlan } from "../history-range";
 
 type DashboardProject = { id: string; title: string; icon: string | null };
+type DashboardSquad = { id: string; name: string; avatar_url: string | null; archived_at?: string | null };
 
 /**
  * Page-scoped time range.
@@ -192,6 +199,100 @@ export function ProjectFilter({
               <span className="truncate">{project.title}</span>
             </DropdownMenuRadioItem>
           ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * Page-scoped attribution filter (all / standalone agents / specific squad).
+ * Mirrors ProjectFilter's ghost button grammar: quiet until narrowed, showing
+ * the selected squad's own avatar + name when active.
+ */
+export function SquadFilter({
+  squads,
+  squadValue,
+  onSquadChange,
+}: {
+  squads: DashboardSquad[];
+  squadValue: string;
+  onSquadChange: (value: string) => void;
+}) {
+  const { t } = useT("usage");
+  const allLabel = t(($) => $.filter.all_attribution);
+  const standaloneLabel = t(($) => $.filter.standalone_only);
+  const liveSquads = squads.filter((s) => !s.archived_at);
+  const isStandalone = squadValue === STANDALONE_SQUAD;
+  const selected = !isStandalone && squadValue !== ALL_SQUADS
+    ? squads.find((s) => s.id === squadValue)
+    : undefined;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={t(($) => $.filter.attribution_label)}
+            className="h-7 gap-1.5 px-2 text-body"
+          >
+            {selected ? (
+              <ActorAvatarBase
+                name={selected.name}
+                initials={selected.name.slice(0, 2).toUpperCase()}
+                avatarUrl={resolvePublicFileUrl(selected.avatar_url)}
+                isSquad
+                size="xs"
+              />
+            ) : isStandalone ? (
+              <Bot className="size-3.5 text-muted-foreground" />
+            ) : (
+              <Users className="size-3.5 text-muted-foreground" />
+            )}
+            <span className="max-w-40 truncate">
+              {selected ? selected.name : isStandalone ? standaloneLabel : allLabel}
+            </span>
+            <ChevronDown className="size-3 text-muted-foreground" />
+          </Button>
+        }
+      />
+      <DropdownMenuContent align="end" className="max-h-72 w-auto min-w-52">
+        <DropdownMenuRadioGroup
+          value={selected ? selected.id : isStandalone ? STANDALONE_SQUAD : ALL_SQUADS}
+          onValueChange={(value) => onSquadChange(value ?? ALL_SQUADS)}
+        >
+          <DropdownMenuRadioItem value={ALL_SQUADS}>
+            <Users className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate">{allLabel}</span>
+          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value={STANDALONE_SQUAD}>
+            <Bot className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate">{standaloneLabel}</span>
+          </DropdownMenuRadioItem>
+          {liveSquads.length > 0 ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                <DropdownMenuLabel className="text-micro font-medium text-muted-foreground">
+                  {t(($) => $.filter.squads_group)}
+                </DropdownMenuLabel>
+                {liveSquads.map((squad) => (
+                  <DropdownMenuRadioItem key={squad.id} value={squad.id}>
+                    <ActorAvatarBase
+                      name={squad.name}
+                      initials={squad.name.slice(0, 2).toUpperCase()}
+                      avatarUrl={resolvePublicFileUrl(squad.avatar_url)}
+                      isSquad
+                      size="xs"
+                    />
+                    <span className="truncate">{squad.name}</span>
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuGroup>
+            </>
+          ) : null}
         </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>

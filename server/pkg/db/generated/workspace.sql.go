@@ -99,6 +99,9 @@ cleared_outbound_cards AS (
 cleared_chat_submission_receipts AS (
     DELETE FROM chat_submission_receipt WHERE chat_submission_receipt.workspace_id = $1
 ),
+cleared_comment_idempotency_receipts AS (
+    DELETE FROM comment_idempotency_receipt WHERE comment_idempotency_receipt.workspace_id = $1
+),
 cleared_draft_restores AS (
     -- chat_draft_restore is keyed by chat_session_id with no FK (MUL-3515) and has
     -- no reaper, while its chat_session rows cascade away with the workspace. Reach

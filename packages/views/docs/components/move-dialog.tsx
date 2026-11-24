@@ -123,7 +123,7 @@ export function MoveDialog({
         onClick={() => setSelected(id)}
         style={{ paddingLeft: 8 + depth * 16 }}
         className={cn(
-          "flex h-8 w-full items-center gap-2 rounded-md pr-2 text-left text-body outline-none transition-colors focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40",
+          "flex h-8 w-full items-center gap-2 rounded-md pr-2 text-left text-body outline-none transition-colors focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40",
           choice === id
             ? "bg-surface-selected text-surface-selected-foreground"
             : "hover:bg-surface-hover",

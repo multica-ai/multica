@@ -24,7 +24,7 @@ test.describe("Mark as duplicate", () => {
     const duplicateTitle = `Status picker hard to tap ${run}`;
     const duplicate = await api.createIssue(duplicateTitle, { status: "todo" });
 
-    await page.goto(`/${slug}/issues/${duplicate.id}`);
+    await page.goto(`/${slug}/issues/${duplicate.identifier}`);
     // The detail page can close a just-opened picker while it finishes
     // loading, so retry opening until the action takes the click.
     await expect(async () => {
@@ -46,14 +46,16 @@ test.describe("Mark as duplicate", () => {
     await expect(page.getByRole("link", { name: original.identifier, exact: true })).toBeVisible();
 
     await originalLink.click();
-    await expect(page).toHaveURL(new RegExp(`/issues/${original.id}$`));
-    await expect(page.getByRole("button", { name: "Duplicates" })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/issues/${original.identifier}$`));
+    // Duplicates are a group of the Relations section.
+    await expect(page.getByRole("button", { name: "Relations", exact: true })).toBeVisible();
+    await expect(page.getByText("Duplicates", { exact: true })).toBeVisible();
     // The sidebar row names the duplicate with its title; the activity feed
     // links it by identifier alone.
     await expect(page.getByRole("link", { name: `${duplicate.identifier} ${duplicateTitle}` })).toBeVisible();
     await expect(page.getByText(`marked ${duplicate.identifier} as a duplicate of this issue`)).toBeVisible();
 
-    await page.goto(`/${slug}/issues/${duplicate.id}`);
+    await page.goto(`/${slug}/issues/${duplicate.identifier}`);
     await page.getByRole("button", { name: "Not a duplicate" }).click();
     await expect(page.getByRole("button", { name: "Not a duplicate" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Todo", exact: true }).first()).toBeVisible();

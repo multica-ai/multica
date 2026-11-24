@@ -533,7 +533,9 @@ func TestChildDoneAddedStageKeepsAPendingCloseForItsOwnPass(t *testing.T) {
 	agentID := handlerTestAgentID(t)
 	setIssueAssigneeDirect(t, fx.parent.ID, "agent", agentID)
 	dbfx.Exec(t, `UPDATE issue SET stage = 1 WHERE id = $1`, fx.child.ID)
-	second := createStagedChild(t, fx.parent.ID, 2, "todo")
+	// Parked, so stage 1's close hands the next stage to the parent instead of
+	// releasing it through its stage blockers.
+	second := createStagedChild(t, fx.parent.ID, 2, "backlog")
 	updateChildStatus(t, fx.child.ID, "done")
 	if runs := childDoneRuns(t, fx.parent.ID); len(runs) != 1 {
 		t.Fatalf("stage 1 closed: runs = %+v", runs)

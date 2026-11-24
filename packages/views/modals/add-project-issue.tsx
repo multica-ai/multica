@@ -6,10 +6,14 @@ import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
 
 export function AddProjectIssueModal({
+  open = true,
   onClose,
+  onOpenChangeComplete,
   data,
 }: {
+  open?: boolean;
   onClose: () => void;
+  onOpenChangeComplete?: (open: boolean) => void;
   data: Record<string, unknown> | null;
 }) {
   const { t } = useT("modals");
@@ -20,10 +24,11 @@ export function AddProjectIssueModal({
   // the toasts follow the request's promise rather than per-call callbacks.
   return (
     <IssuePickerModal
-      open
+      open={open}
       onOpenChange={(v) => {
         if (!v) onClose();
       }}
+      onOpenChangeComplete={onOpenChangeComplete}
       title={t(($) => $.add_project_issue.title)}
       description={t(($) => $.add_project_issue.description)}
       excludeIds={[]}

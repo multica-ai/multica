@@ -70,8 +70,10 @@
     "quick_create_unconfirmed": "透過 AI 代理建立待確認",
     "autopilot_paused": "自動化已暫停",
     "children_done": "子任務已全部結束",
+    "blockers_done": "等待的任務已結束",
     "project_owner_joined": "所有者加入了專案",
     "autopilot_quota_exceeded": "自動化執行次數已達上限",
+    "app_tool_calls_quota_exceeded": "應用呼叫次數已用完",
     "set_status": "狀態設為",
     "set_priority": "優先順序設為",
     "assigned_to": "分配給 {{name}}",
@@ -82,6 +84,7 @@
     "created_with_agent": "由 AI 代理建立：{{identifier}}",
     "failed_with_detail": "失敗：{{detail}}",
     "run_limit_blocked": "已達到上限，本次執行被阻止",
+    "app_tool_calls_limit_blocked": "本月 AI 代理無法再呼叫應用工具",
     "app_action_requested": "等待你確認",
     "app_action_reminder": "確認即將過期",
     "app_connect_requested": "請連線應用",
@@ -90,6 +93,7 @@
   "body": {
     "autopilot_title_limit": "自動化 \"{{title}}\" 未啟動，因為該工作區已達到當前週期 {{limit}} 次執行的上限。額度將在 {{resetAt}} 重置；工作區所有者或管理員也可以升級方案或加購執行次數。",
     "autopilot_limit": "該工作區已達到當前週期 {{limit}} 次自動化執行的上限。此執行未啟動。額度將在 {{resetAt}} 重置；工作區所有者或管理員也可以升級方案或加購執行次數。",
+    "app_tool_calls_limit": "本工作區本月的 {{limit}} 次應用呼叫已用完。在 {{resetAt}} 重置、升級方案或增加席位之前，AI 代理無法呼叫應用工具。",
     "project_owner_joined": "{{name}} 是工作區所有者，已把自己加入這個私有專案，現在可以看到其中的任務、評論和附件。"
   }
 }

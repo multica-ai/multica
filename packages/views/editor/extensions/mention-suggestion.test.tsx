@@ -500,6 +500,17 @@ describe("createMentionSuggestion", () => {
     expect(members(createMentionSuggestion(qc, { hideGuests: true }))).toEqual(["u1"]);
   });
 
+  it("leaves squads out where a squad cannot be asked", () => {
+    const qc = fakeQc({
+      squads: [{ id: "s1", name: "Design squad", leader_id: "a1", archived_at: null }],
+    });
+    const squads = (config: ReturnType<typeof createMentionSuggestion>) =>
+      (config.items!(itemArgs("design")) as MentionItem[]).filter((i) => i.type === "squad").map((i) => i.id);
+
+    expect(squads(createMentionSuggestion(qc))).toEqual(["s1"]);
+    expect(squads(createMentionSuggestion(qc, { hideSquads: true }))).toEqual([]);
+  });
+
   it("matches cached live projects synchronously and leaves archived ones to the server", () => {
     const qc = fakeQc({
       projects: [

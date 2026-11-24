@@ -98,6 +98,15 @@ export function locateInColumns(
   return null;
 }
 
+/** Whether `issueId` currently exists in any published column. */
+export function hasIssueInColumns(
+  columns: IssuePeekColumns | null,
+  issueId: string | null,
+): boolean {
+  if (!columns || !issueId) return false;
+  return columns.some((column) => column.includes(issueId));
+}
+
 /**
  * What a click on an issue card or row opens: a plain click opens the preferred
  * target (Settings → Preferences), Shift+Click the other one, so either is one

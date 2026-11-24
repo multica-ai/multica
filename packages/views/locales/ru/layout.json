@@ -74,9 +74,9 @@
     "label": "Навигация по приложению",
     "sheet_description": "Переключайтесь между представлениями и рабочими пространствами.",
     "work": "Работа",
-    "team": "Команда",
+    "team": "Агенты",
     "chat": "Чат",
-    "autopilots": "Автоматизация",
+    "autopilots": "Авто",
     "switch_workspace": "Сменить рабочее пространство",
     "open_in_new_window": "Открыть в новом окне",
     "open_in_new_window_click": "Нажмите",
@@ -96,7 +96,7 @@
     "workspace_meta_few": "{{slug}} · {{count}} участника",
     "workspace_meta_many": "{{slug}} · {{count}} участников",
     "workspace_meta_other": "{{slug}} · {{count}} участника",
-    "docs": "Документы"
+    "docs": "Доки"
   },
   "bottom_bar": {
     "label": "Строка состояния",
@@ -154,8 +154,6 @@
       "project_issues_retry": "Повторить",
       "new_issue_here": "Новая задача в этом проекте",
       "inbox_actions": "Действия со входящими",
-      "inbox_view_snoozed": "Показать отложенные",
-      "inbox_view_archived": "Открыть архив",
       "inbox_empty": "Нет уведомлений",
       "inbox_settings": "Отображение входящих",
       "inbox_all": "Все уведомления",

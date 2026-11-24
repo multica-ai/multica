@@ -216,6 +216,8 @@
       "created_by": "Creado por",
       "select_agent_aria": "Seleccionar agente",
       "pick_an_agent": "Elige un agente…",
+      "all_actors": "Todos los agentes y squads",
+      "frequent_actors_aria": "Usados con frecuencia",
       "no_agents": "No hay agentes ni squads disponibles.",
       "search_placeholder": "Buscar agentes y squads…",
       "agents_group": "Agentes",
