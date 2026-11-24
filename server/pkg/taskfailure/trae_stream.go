@@ -5,6 +5,12 @@ import (
 	"strings"
 )
 
+// IsTraePromptStreamDisconnect identifies the provider failure whose replay needs
+// a separate check of tool activity for the failed turn.
+func IsTraePromptStreamDisconnect(raw string) bool {
+	return classifyTraePromptStreamFailure(strings.ToLower(strings.TrimSpace(WithoutCodebuddyProtocolSummary(raw)))) == ReasonAgentProviderNetwork
+}
+
 // Trae wraps prompt errors in the same ACP internal error. Only discard that
 // wrapper when every recorded reconnect points to an interrupted response.
 func classifyTraePromptStreamFailure(lower string) Reason {
