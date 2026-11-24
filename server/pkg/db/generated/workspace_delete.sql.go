@@ -120,6 +120,16 @@ func (q *Queries) DeleteWorkspaceAgents(ctx context.Context, workspaceID pgtype.
 	return err
 }
 
+const deleteWorkspaceAppToolCallQuotaPeriods = `-- name: DeleteWorkspaceAppToolCallQuotaPeriods :exec
+DELETE FROM app_tool_call_quota_period
+WHERE app_tool_call_quota_period.workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceAppToolCallQuotaPeriods(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceAppToolCallQuotaPeriods, workspaceID)
+	return err
+}
+
 const deleteWorkspaceAutopilotChildren = `-- name: DeleteWorkspaceAutopilotChildren :exec
 WITH
 deleted_triggers AS (

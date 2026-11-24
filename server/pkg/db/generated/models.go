@@ -261,6 +261,17 @@ type AppToolCall struct {
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 }
 
+type AppToolCallQuotaPeriod struct {
+	WorkspaceID            pgtype.UUID        `json:"workspace_id"`
+	PeriodStart            pgtype.Timestamptz `json:"period_start"`
+	PeriodEnd              pgtype.Timestamptz `json:"period_end"`
+	UsedCount              int64              `json:"used_count"`
+	RejectionNotifiedAt    pgtype.Timestamptz `json:"rejection_notified_at"`
+	RejectionNotifiedLimit pgtype.Int8        `json:"rejection_notified_limit"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+}
+
 type AppToolClassOverride struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	ToolkitSlug string             `json:"toolkit_slug"`
