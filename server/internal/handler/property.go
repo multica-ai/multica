@@ -377,7 +377,7 @@ func (h *Handler) requirePropertyAdmin(w http.ResponseWriter, r *http.Request) (
 	if !ok {
 		return "", "", false
 	}
-	if actorType, _ := h.resolveActor(r, userID, workspaceID); actorType == "agent" {
+	if actorType, _ := h.permissionActor(r, userID, workspaceID); actorType == "agent" {
 		writeError(w, http.StatusForbidden, "agents cannot manage property definitions")
 		return "", "", false
 	}

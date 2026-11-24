@@ -852,7 +852,12 @@
     "save": "Update profile",
     "saving": "Updating...",
     "toast_avatar_failed": "Failed to upload avatar",
-    "toast_profile_failed": "Failed to update profile"
+    "toast_profile_failed": "Failed to update profile",
+    "full_delegation_title": "Agents with full delegation",
+    "full_delegation_description": "These agents can use your current permissions during chats you directly start. Revoke access here at any time.",
+    "full_delegation_revoke": "Revoke",
+    "full_delegation_empty": "No agents have full delegation.",
+    "full_delegation_error": "Could not revoke full delegation."
   },
   "notifications": {
     "title": "Inbox",

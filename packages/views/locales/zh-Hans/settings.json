@@ -842,7 +842,12 @@
     "save": "更新资料",
     "saving": "更新中...",
     "toast_avatar_failed": "上传头像失败",
-    "toast_profile_failed": "更新资料失败"
+    "toast_profile_failed": "更新资料失败",
+    "full_delegation_title": "已获完全委托的智能体",
+    "full_delegation_description": "这些智能体可在你直接启动的聊天中使用你当前的权限。你可随时在此撤销。",
+    "full_delegation_revoke": "撤销",
+    "full_delegation_empty": "没有已获完全委托的智能体。",
+    "full_delegation_error": "无法撤销完全委托。"
   },
   "notifications": {
     "title": "收件箱",

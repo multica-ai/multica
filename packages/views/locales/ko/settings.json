@@ -842,7 +842,12 @@
     "save": "프로필 업데이트",
     "saving": "업데이트 중...",
     "toast_avatar_failed": "아바타를 업로드하지 못했습니다",
-    "toast_profile_failed": "프로필을 업데이트하지 못했습니다"
+    "toast_profile_failed": "프로필을 업데이트하지 못했습니다",
+    "full_delegation_title": "전체 위임이 허용된 에이전트",
+    "full_delegation_description": "직접 시작한 채팅에서 이 에이전트들이 현재 권한을 사용할 수 있습니다. 여기에서 언제든지 철회할 수 있습니다.",
+    "full_delegation_revoke": "철회",
+    "full_delegation_empty": "전체 위임이 허용된 에이전트가 없습니다.",
+    "full_delegation_error": "전체 위임을 철회하지 못했습니다."
   },
   "notifications": {
     "title": "인박스",

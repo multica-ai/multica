@@ -15,7 +15,7 @@ func (h *Handler) requireProjectDeletion(w http.ResponseWriter, r *http.Request,
 		return false
 	}
 	wsID := uuidToString(project.WorkspaceID)
-	actorType, actorID := h.resolveActor(r, requestUserID(r), wsID)
+	actorType, actorID := h.permissionActor(r, requestUserID(r), wsID)
 	if actorType == "member" {
 		member, ok := h.workspaceMember(w, r, wsID)
 		if !ok {

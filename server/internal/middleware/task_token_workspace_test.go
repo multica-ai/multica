@@ -35,9 +35,10 @@ const (
 // Anything else fails the test, so an unexpected query on this path is
 // caught rather than silently returning zero values.
 type fakeTaskTokenDB struct {
-	t            *testing.T
-	grantAllowed bool
-	createAgents bool
+	t              *testing.T
+	grantAllowed   bool
+	createAgents   bool
+	fullDelegation bool
 }
 
 func (f *fakeTaskTokenDB) Exec(context.Context, string, ...interface{}) (pgconn.CommandTag, error) {
@@ -90,6 +91,16 @@ func (f *fakeTaskTokenDB) QueryRow(_ context.Context, sql string, args ...interf
 			*dest[0].(*pgtype.UUID) = util.MustParseUUID("55555555-0000-4000-8000-000000000005")
 			*dest[1].(*pgtype.UUID) = util.MustParseUUID("66666666-0000-4000-8000-000000000006")
 			*dest[2].(*bool) = f.createAgents
+		}}
+	case strings.Contains(sql, "name: AuthorizeFullAgentDelegation"):
+		if !f.fullDelegation {
+			return fakeRow{err: pgx.ErrNoRows}
+		}
+		if len(args) != 4 || args[0] != util.MustParseUUID(ttWorkspaceB) || args[1] != util.MustParseUUID(ttTaskID) || args[2] != util.MustParseUUID(ttAgentID) || args[3] != util.MustParseUUID(ttWorkspaceA) {
+			return fakeRow{err: pgx.ErrNoRows}
+		}
+		return fakeRow{scan: func(dest ...any) {
+			*dest[0].(*pgtype.UUID) = util.MustParseUUID("66666666-0000-4000-8000-000000000006")
 		}}
 	}
 	f.t.Errorf("unexpected QueryRow on task-token auth path: %s", sql)
