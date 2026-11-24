@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -49,8 +50,9 @@ type fakeSDK struct {
 	authConfigsSet bool
 	listAuthErr    error
 	// toolkit catalog (ListToolkits).
-	toolkits        []sdk.Toolkit
-	listToolkitsErr error
+	toolkits          []sdk.Toolkit
+	listToolkitsErr   error
+	listToolkitsCalls int
 }
 
 func (f *fakeSDK) bindTest(t testing.TB) { f.t = t }
@@ -115,6 +117,7 @@ func (f *fakeSDK) ListAuthConfigs(_ context.Context, _ sdk.ListAuthConfigsReques
 }
 
 func (f *fakeSDK) ListToolkits(_ context.Context, _ sdk.ListToolkitsRequest) (*sdk.ListToolkitsResponse, error) {
+	f.listToolkitsCalls++
 	if f.listToolkitsErr != nil {
 		return nil, f.listToolkitsErr
 	}
@@ -391,6 +394,60 @@ func TestListToolkits_FiltersToConnectable(t *testing.T) {
 	// slack carried no upstream logo, so the composio default logo URL is derived.
 	if slack, ok := bySlug["slack"]; !ok || slack.LogoURL != "https://logos.composio.dev/api/slack" {
 		t.Errorf("slack default logo = %+v", bySlug["slack"])
+	}
+}
+
+// TestListToolkits_CachesTheUpstreamList: the toolkit list is fetched once
+// per TTL, a failed refresh serves the last list, and the auth config filter
+// still applies on every read.
+func TestListToolkits_CachesTheUpstreamList(t *testing.T) {
+	t.Parallel()
+	sdkFake := &fakeSDK{
+		authConfigsSet: true,
+		authConfigs:    []sdk.AuthConfig{{ID: "ac_notion", Toolkit: sdk.Toolkit{Slug: "notion"}, Status: "ENABLED"}},
+		toolkits:       []sdk.Toolkit{{Slug: "notion", Name: "Notion"}, {Slug: "slack", Name: "Slack"}},
+	}
+	svc := newTestService(t, sdkFake, newFakeStore())
+	now := time.Unix(1_700_000_000, 0)
+	svc.now = func() time.Time { return now }
+	slugs := func() []string {
+		t.Helper()
+		tks, err := svc.ListToolkits(context.Background())
+		if err != nil {
+			t.Fatalf("ListToolkits: %v", err)
+		}
+		out := make([]string, 0, len(tks))
+		for _, tk := range tks {
+			out = append(out, tk.Slug)
+		}
+		return out
+	}
+
+	if got := slugs(); !slices.Equal(got, []string{"notion"}) {
+		t.Fatalf("first read = %v, want [notion]", got)
+	}
+	// A new auth config shows at once, from the cached list.
+	sdkFake.authConfigs = append(sdkFake.authConfigs, sdk.AuthConfig{ID: "ac_slack", Toolkit: sdk.Toolkit{Slug: "slack"}, Status: "ENABLED"})
+	svc.invalidateAuthConfigs()
+	if got := slugs(); !slices.Equal(got, []string{"notion", "slack"}) {
+		t.Fatalf("after new auth config = %v, want [notion slack]", got)
+	}
+	if sdkFake.listToolkitsCalls != 1 {
+		t.Fatalf("toolkit fetches within TTL = %d, want 1", sdkFake.listToolkitsCalls)
+	}
+
+	now = now.Add(toolkitCacheTTL + time.Second)
+	sdkFake.listToolkitsErr = errors.New("upstream blip")
+	if got := slugs(); !slices.Equal(got, []string{"notion", "slack"}) {
+		t.Fatalf("stale read = %v, want [notion slack]", got)
+	}
+	sdkFake.listToolkitsErr = nil
+	sdkFake.toolkits = []sdk.Toolkit{{Slug: "notion", Name: "Notion"}}
+	if got := slugs(); !slices.Equal(got, []string{"notion"}) {
+		t.Fatalf("refreshed read = %v, want [notion]", got)
+	}
+	if sdkFake.listToolkitsCalls != 3 {
+		t.Fatalf("toolkit fetches = %d, want 3", sdkFake.listToolkitsCalls)
 	}
 }
 

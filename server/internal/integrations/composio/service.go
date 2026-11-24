@@ -60,6 +60,11 @@ const defaultStateTTL = 5 * time.Minute
 // connect/list requests does not hammer /auth_configs.
 const defaultAuthCacheTTL = 5 * time.Minute
 
+// toolkitCacheTTL bounds how long Composio's toolkit list is reused. Fetching
+// it pages through well over a thousand toolkits, which makes the Apps page
+// wait seconds for its catalog; the list itself changes rarely.
+const toolkitCacheTTL = 5 * time.Minute
+
 // maxAuthConfigPages / maxToolkitPages cap the paginated fetch-all loops so a
 // pathological or buggy upstream cursor cannot spin forever. At limit=1000 per
 // page these cover far more than any real project / catalog.
@@ -141,7 +146,13 @@ type Service struct {
 	// authCreateMu serializes creating auth configs so two concurrent
 	// connects for the same new app do not register two configs.
 	authCreateMu sync.Mutex
-	tools        toolCache
+	// toolkitCache holds Composio's unfiltered toolkit list. Filtering by
+	// the auth config map still runs on every read, so a newly created auth
+	// config shows without waiting for this cache.
+	toolkitCacheMu  sync.Mutex
+	toolkitCache    []sdk.Toolkit
+	toolkitCacheExp time.Time
+	tools           toolCache
 	// teamConnectGate decides whether a completed team handshake may write
 	// its account; see SetTeamConnectGate.
 	teamConnectGate TeamConnectGate
@@ -635,9 +646,59 @@ func (s *Service) ListToolkits(ctx context.Context) ([]ToolkitView, error) {
 		return nil, fmt.Errorf("composio: resolve connectable toolkits: %w", err)
 	}
 	_, canCreateKeyConfigs := s.sdk.(customAuthCreator)
+	toolkits, err := s.allToolkits(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	out := []ToolkitView{}
 	seen := make(map[string]struct{})
+	for _, tk := range toolkits {
+		slug := strings.ToLower(strings.TrimSpace(tk.Slug))
+		if slug == "" {
+			continue
+		}
+		if _, dup := seen[slug]; dup {
+			continue
+		}
+		seen[slug] = struct{}{}
+		// Omit toolkits nobody can connect: no enabled auth config, no
+		// Composio-managed app, and no credential a member enters
+		// themselves.
+		existing, hasConfig := connectable[slug]
+		if !hasConfig && len(tk.ComposioManagedAuthSchemes) == 0 &&
+			(!canCreateKeyConfigs || userKeyScheme(tk) == "") {
+			continue
+		}
+		category := tk.PrimaryCategory()
+		out = append(out, ToolkitView{
+			Slug:       tk.Slug,
+			Name:       tk.Name,
+			LogoURL:    toolkitLogoURL(slug, tk.Logo()),
+			Category:   category.Name,
+			CategoryID: category.ID,
+			// Every surfaced toolkit is connectable by construction. The
+			// wire field is kept (see ComposioToolkitResponse) for backward
+			// compatibility with older desktop clients that branch on it.
+			Connectable:   true,
+			ConnectMethod: connectMethodFor(tk, existing),
+		})
+	}
+
+	return out, nil
+}
+
+// allToolkits returns Composio's toolkit list in usage order, from the cache
+// while it is fresh. Like authConfigMap it fetches under the lock and serves
+// a stale list when a refresh fails. The cached slice is replaced, never
+// mutated, so callers may read it freely.
+func (s *Service) allToolkits(ctx context.Context) ([]sdk.Toolkit, error) {
+	s.toolkitCacheMu.Lock()
+	defer s.toolkitCacheMu.Unlock()
+	if s.toolkitCache != nil && s.now().Before(s.toolkitCacheExp) {
+		return s.toolkitCache, nil
+	}
+	toolkits := []sdk.Toolkit{}
 	cursor := ""
 	for page := 0; page < maxToolkitPages; page++ {
 		resp, err := s.sdk.ListToolkits(ctx, sdk.ListToolkitsRequest{
@@ -646,46 +707,20 @@ func (s *Service) ListToolkits(ctx context.Context) ([]ToolkitView, error) {
 			SortBy: "usage",
 		})
 		if err != nil {
+			if s.toolkitCache != nil {
+				return s.toolkitCache, nil
+			}
 			return nil, fmt.Errorf("composio: list toolkits: %w", err)
 		}
-		for _, tk := range resp.Items {
-			slug := strings.ToLower(strings.TrimSpace(tk.Slug))
-			if slug == "" {
-				continue
-			}
-			if _, dup := seen[slug]; dup {
-				continue
-			}
-			seen[slug] = struct{}{}
-			// Omit toolkits nobody can connect: no enabled auth config, no
-			// Composio-managed app, and no credential a member enters
-			// themselves.
-			existing, hasConfig := connectable[slug]
-			if !hasConfig && len(tk.ComposioManagedAuthSchemes) == 0 &&
-				(!canCreateKeyConfigs || userKeyScheme(tk) == "") {
-				continue
-			}
-			category := tk.PrimaryCategory()
-			out = append(out, ToolkitView{
-				Slug:       tk.Slug,
-				Name:       tk.Name,
-				LogoURL:    toolkitLogoURL(slug, tk.Logo()),
-				Category:   category.Name,
-				CategoryID: category.ID,
-				// Every surfaced toolkit is connectable by construction. The
-				// wire field is kept (see ComposioToolkitResponse) for backward
-				// compatibility with older desktop clients that branch on it.
-				Connectable:   true,
-				ConnectMethod: connectMethodFor(tk, existing),
-			})
-		}
+		toolkits = append(toolkits, resp.Items...)
 		if resp.NextCursor == "" {
 			break
 		}
 		cursor = resp.NextCursor
 	}
-
-	return out, nil
+	s.toolkitCache = toolkits
+	s.toolkitCacheExp = s.now().Add(toolkitCacheTTL)
+	return toolkits, nil
 }
 
 // authConfigForToolkit returns the chosen auth_config_id for a toolkit slug, or
