@@ -10,7 +10,7 @@ La page **Statistiques** de la barre latérale regroupe la consommation des agen
 
 ## Organisation de la page
 
-La page a deux onglets, **Consommation** et **Erreurs**, qui partagent les filtres en haut à droite :
+La page a trois onglets, **Consommation**, **Erreurs** et **Contribution**, qui partagent les filtres en haut à droite (l'attribution ne s'applique pas à Contribution) :
 
 - **Période** : `1d`, `7d`, `30d` (par défaut), `90d`, `180d`, `365d`. `1d` signifie aujourd'hui, à partir de minuit dans votre fuseau horaire, et non les dernières 24 heures.
 - **Projet** : **Tous les projets** par défaut. Avec un projet sélectionné, seules les exécutions des tâches de ce projet comptent ; celles qui n'appartiennent à aucune tâche, comme les exécutions de chat, sont exclues.
@@ -72,6 +72,17 @@ Les codes de motif d'échec se répartissent en sept catégories :
 | Autre | Échecs impossibles à classer | Consulter le code d'erreur brut et la transcription |
 
 Pour le sens de chaque code et la manière de le traiter, voir [Exécutions · Référence des motifs d'échec](/tasks#référence-des-motifs-déchec).
+
+## Onglet Contribution
+
+L'onglet Contribution montre qui, parmi les personnes et les agents, a créé, discuté et livré quelles tâches. Y passer ajoute `?tab=contribution` à l'adresse.
+
+Chaque chiffre compte des tâches distinctes : deux commentaires sur la même tâche comptent une fois, et une tâche rouverte puis terminée à nouveau compte une seule livraison. Un sélecteur en haut propose deux vues :
+
+- **Vue d'ensemble** : stock (tâches ni terminées ni annulées, quelle que soit leur date), actives (tâches avec activité sur la période et non fermées à la fin), créées, terminées et non terminées (en cours ou en revue), activité de l'équipe, calendrier d'activité et trois classements : participation (création, commentaire ou changement de statut), collaboration (commentaire) et livraison (terminée). Personnes et agents sont classés séparément, les deux classements ne s'additionnent donc pas. Les tâches terminées automatiquement par le système sont signalées sous le classement de livraison au lieu d'y figurer. En bas, une liste montre chaque tâche avec activité sur la période, avec ses interactions (commentaires + changements de statut), ses participants et son délai de réalisation, triable selon chacun.
+- **Membres** : créations, commentaires, changements de statut et livraisons par personne et par agent, tendance hebdomadaire des membres choisis et la liste d'activité derrière ces chiffres.
+
+Seuls les commentaires et réponses ordinaires comptent comme collaboration ; les mises à jour de progression et les messages système non. Les tâches des projets privés que vous ne voyez pas sont exclues. Ces chiffres sont lus dans l'activité des tâches à l'ouverture de l'onglet, sans attendre l'agrégation toutes les 5 minutes.
 
 ## Calcul du coût
 
