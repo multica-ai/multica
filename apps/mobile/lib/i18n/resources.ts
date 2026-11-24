@@ -15,6 +15,7 @@ import editorRu from "@/locales/ru/editor.json";
 import inboxRu from "@/locales/ru/inbox.json";
 import issuesRu from "@/locales/ru/issues.json";
 import navigationRu from "@/locales/ru/navigation.json";
+import projectsRu from "@/locales/ru/projects.json";
 import settingsRu from "@/locales/ru/settings.json";
 import workspaceRu from "@/locales/ru/workspace.json";
 import authZh from "@/locales/zh-Hans/auth.json";
@@ -59,6 +60,7 @@ export const resources = {
     inbox: inboxRu,
     issues: issuesRu,
     navigation: navigationRu,
+    projects: projectsRu,
     settings: settingsRu,
     workspace: workspaceRu,
   },

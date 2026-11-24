@@ -152,7 +152,7 @@ describe("mobile i18n resources", () => {
 it("covers the Russian core flows and preserves their placeholders in every plural form", () => {
   const russian = new Map(readLocale("ru"));
   for (const [namespace, source] of readLocale("en")) {
-    if (!["auth.json", "issues.json", "chat.json", "editor.json", "navigation.json", "workspace.json"].includes(namespace)) continue;
+    if (!["auth.json", "issues.json", "chat.json", "editor.json", "navigation.json", "workspace.json", "projects.json", "settings.json"].includes(namespace)) continue;
     const translations = flattenEntries(russian.get(namespace));
     for (const [key, text] of flattenEntries(source)) {
       const keys = key.endsWith("_other")
