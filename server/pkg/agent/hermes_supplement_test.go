@@ -247,3 +247,22 @@ func TestHermesSupplementNotExposedWithoutNegotiation(t *testing.T) {
 		t.Fatalf("result=%+v, want a normal completed turn", result)
 	}
 }
+
+// Hermes publishes available_commands_update and usage_update after attach,
+// independently of the turn, so only agent output or a tool call opens steering.
+func TestHermesSupplementStartsOnlyOnTurnActivity(t *testing.T) {
+	t.Parallel()
+	s := newHermesSupplementSession()
+	s.steerAdvertised.Store(true)
+	s.open("ses_new")
+	for _, kind := range []string{"usage_update", "available_commands_update", "turn_end", ""} {
+		s.acceptUpdate(kind, []byte(`{}`))
+		if s.ready() {
+			t.Fatalf("%q opened steering before the turn produced output", kind)
+		}
+	}
+	s.acceptUpdate("agent_thought_chunk", []byte(`{"content":{"type":"text","text":"thinking"}}`))
+	if !s.ready() {
+		t.Fatal("agent output for the primary prompt must open steering")
+	}
+}

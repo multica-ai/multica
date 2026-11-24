@@ -105,12 +105,28 @@ func (s *hermesSupplementSession) acceptUpdate(updateType string, update json.Ra
 		s.acked.Store(true)
 		return false
 	}
+	if !hermesTurnActivity(updateType) {
+		return true
+	}
 	s.mu.Lock()
 	if s.prompted {
 		s.started = true
 	}
 	s.mu.Unlock()
 	return true
+}
+
+// hermesTurnActivity reports whether an update proves the primary turn is
+// running. Hermes sends available_commands_update and usage_update
+// asynchronously after attach (gateway_server.py `_after_attach`), so they can
+// arrive after session/prompt is written but before the turn starts; a `/steer`
+// sent then finds no running admission and is admitted as a new prompt.
+func hermesTurnActivity(updateType string) bool {
+	switch updateType {
+	case "agent_message_chunk", "agent_thought_chunk", "tool_call", "tool_call_update":
+		return true
+	}
+	return false
 }
 
 func hermesSteerAck(update json.RawMessage) bool {
