@@ -90,7 +90,7 @@ Task writes and runtime-side paths lock the same `agent`, `agent_runtime`, `work
 - Task enqueue order: the `agent` row first, then `lock_task_owner_rows` (migration 284) inside the writing statement takes FOR KEY SHARE on the workspace, issue, and runtime rows. New enqueue paths keep this order.
 - A path that locks `agent_runtime` before `agent` must let that FOR KEY SHARE through. To exclude only UPDATE/DELETE of the runtime, use FOR NO KEY UPDATE (`LockAgentRuntimeForClaimDelivery`, `LockAgentRuntimeForAccessChange`). Use FOR UPDATE (`LockAgentRuntime`) only when new rows must be stopped from referencing the runtime: runtime delete and teardown.
 - A new path that takes these rows in the reverse order ships with a test that forces the interleaving, as `server/internal/handler/chat_send_claim_deadlock_test.go` does.
-- Known, unfixed: runtime delete and teardown (`TeardownRuntime`, the runtime delete handlers, the runtime GC sweeper) take `LockAgentRuntime`, then the agents via `ListUserAgentsByRuntimeForUpdate` — the reverse of enqueue order. It can only deadlock with an enqueue while that runtime is being deleted.
+- Runtime teardown (`LockRuntimeTeardowns`) first serializes runtime and binding writers with FOR NO KEY UPDATE. Lock existing system chat sessions and all bound agents before upgrading the runtime to FOR UPDATE, then recheck dependencies without waiting on late references. For a batch, lock its dependencies before upgrading any runtime. Validate the delete plan and task drain under these locks.
 
 ## Backend UUID Rules
 

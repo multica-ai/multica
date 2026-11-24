@@ -72,13 +72,14 @@ func (h *Handler) DisconnectQoderConnection(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	qtx := h.Queries.WithTx(tx)
-	runtimeIDs, refused := h.checkQoderDisconnectPlan(w, r.Context(), tx, qtx, ws, expected)
+	targets, refused := h.checkQoderDisconnectPlan(w, r.Context(), tx, ws, expected)
 	if refused {
 		return
 	}
-	teardowns := make([]service.RuntimeTeardownResult, 0, len(runtimeIDs))
-	for _, runtimeID := range runtimeIDs {
-		teardown, err := service.TeardownRuntime(r.Context(), qtx, runtimeID, service.RuntimeTeardownOptions{CancelNonTerminalTasks: true})
+	teardowns := make([]service.RuntimeTeardownResult, 0, len(targets))
+	for _, target := range targets {
+		runtimeID := target.Runtime.ID
+		teardown, err := service.TeardownRuntime(r.Context(), qtx, target, service.RuntimeTeardownOptions{CancelNonTerminalTasks: true})
 		if err != nil {
 			if errors.Is(err, service.ErrRuntimeNotDrained) {
 				writeError(w, http.StatusConflict, "Qoder still has tasks in flight; retry in a moment")
@@ -109,11 +110,11 @@ func (h *Handler) DisconnectQoderConnection(w http.ResponseWriter, r *http.Reque
 	}
 
 	userID := user
-	for i, runtimeID := range runtimeIDs {
-		h.NotifyRuntimeGone(uuidToString(runtimeID))
+	for i, target := range targets {
+		h.NotifyRuntimeGone(uuidToString(target.Runtime.ID))
 		h.publishRuntimeTeardown(r.Context(), teardowns[i], wsID, userID)
 	}
-	slog.Info("qoder disconnected", "workspace_id", wsID, "disconnected_by", userID, "runtimes_removed", len(runtimeIDs))
+	slog.Info("qoder disconnected", "workspace_id", wsID, "disconnected_by", userID, "runtimes_removed", len(targets))
 	h.GetQoderConnection(w, r)
 }
 
@@ -144,7 +145,7 @@ func (h *Handler) stopQoderForDisconnect(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusConflict, "Qoder Cloud Agents is synchronizing; retry shortly")
 		return false
 	}
-	if _, refused := h.checkQoderDisconnectPlan(w, r.Context(), tx, h.Queries.WithTx(tx), ws, expected); refused {
+	if _, refused := h.checkQoderDisconnectPlan(w, r.Context(), tx, ws, expected); refused {
 		return false
 	}
 	var revokedHash string
@@ -170,8 +171,8 @@ func (h *Handler) stopQoderForDisconnect(w http.ResponseWriter, r *http.Request,
 // checkQoderDisconnectPlan locks the workspace's Qoder runtimes and refuses
 // while tasks run on them or when their active agents differ from the
 // confirmed set. It returns the runtimes to remove.
-func (h *Handler) checkQoderDisconnectPlan(w http.ResponseWriter, ctx context.Context, tx pgx.Tx, qtx *db.Queries, ws pgtype.UUID, expected map[string]struct{}) ([]pgtype.UUID, bool) {
-	rows, err := tx.Query(ctx, `SELECT id FROM agent_runtime WHERE workspace_id=$1 AND provider='qoder_cloud' ORDER BY id FOR UPDATE`, ws)
+func (h *Handler) checkQoderDisconnectPlan(w http.ResponseWriter, ctx context.Context, tx pgx.Tx, ws pgtype.UUID, expected map[string]struct{}) ([]service.RuntimeTeardown, bool) {
+	rows, err := tx.Query(ctx, `SELECT id FROM agent_runtime WHERE workspace_id=$1 AND provider='qoder_cloud' ORDER BY id FOR NO KEY UPDATE`, ws)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "cannot load Qoder runtime")
 		return nil, true
@@ -179,6 +180,14 @@ func (h *Handler) checkQoderDisconnectPlan(w http.ResponseWriter, ctx context.Co
 	runtimeIDs, err := pgx.CollectRows(rows, pgx.RowTo[pgtype.UUID])
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "cannot load Qoder runtime")
+		return nil, true
+	}
+	qtx := h.Queries.WithTx(tx)
+	targets, err := service.LockRuntimeTeardowns(ctx, qtx, runtimeIDs)
+	if err != nil {
+		if !writeRuntimeTeardownBusy(w, err) {
+			writeError(w, http.StatusInternalServerError, "cannot lock Qoder runtime dependencies")
+		}
 		return nil, true
 	}
 	var active bool
@@ -192,7 +201,7 @@ func (h *Handler) checkQoderDisconnectPlan(w http.ResponseWriter, ctx context.Co
 	}
 	var agents []db.Agent
 	for _, runtimeID := range runtimeIDs {
-		bound, err := qtx.ListActiveAgentsByRuntimeForUpdate(ctx, runtimeID)
+		bound, err := qtx.ListActiveAgentsByRuntime(ctx, runtimeID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "cannot check Qoder agents")
 			return nil, true
@@ -206,7 +215,7 @@ func (h *Handler) checkQoderDisconnectPlan(w http.ResponseWriter, ctx context.Co
 		writeJSON(w, http.StatusConflict, body)
 		return nil, true
 	}
-	return runtimeIDs, false
+	return targets, false
 }
 
 // qoderManagesRuntime reports whether a runtime belongs to a live Qoder

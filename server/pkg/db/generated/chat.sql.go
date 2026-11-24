@@ -2889,34 +2889,6 @@ func (q *Queries) LockChatSessionForTask(ctx context.Context, id pgtype.UUID) (p
 	return id_2, err
 }
 
-const lockChatSessionsBySystemRuntimeAgents = `-- name: LockChatSessionsBySystemRuntimeAgents :many
-SELECT cs.id FROM chat_session cs
-JOIN agent a ON a.id = cs.agent_id
-WHERE a.runtime_id = $1 AND a.kind = 'system'
-ORDER BY cs.id
-FOR UPDATE OF cs
-`
-
-func (q *Queries) LockChatSessionsBySystemRuntimeAgents(ctx context.Context, runtimeID pgtype.UUID) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, lockChatSessionsBySystemRuntimeAgents, runtimeID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []pgtype.UUID{}
-	for rows.Next() {
-		var id pgtype.UUID
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		items = append(items, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const lockChatSessionsByWorkspace = `-- name: LockChatSessionsByWorkspace :many
 SELECT id FROM chat_session
 WHERE workspace_id = $1
@@ -2944,6 +2916,36 @@ func (q *Queries) LockChatSessionsByWorkspace(ctx context.Context, workspaceID p
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockLateRuntimeTeardownChatSessions = `-- name: LockLateRuntimeTeardownChatSessions :exec
+SELECT cs.id FROM chat_session cs
+JOIN agent a ON a.id = cs.agent_id
+WHERE a.runtime_id = ANY($1::uuid[]) AND a.kind = 'system'
+ORDER BY cs.id
+FOR UPDATE OF cs NOWAIT
+`
+
+// A session created before we locked its carrier may have been missed by
+// the first scan. Fail without waiting if a writer now holds that session.
+func (q *Queries) LockLateRuntimeTeardownChatSessions(ctx context.Context, runtimeIds []pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, lockLateRuntimeTeardownChatSessions, runtimeIds)
+	return err
+}
+
+const lockRuntimeTeardownChatSessions = `-- name: LockRuntimeTeardownChatSessions :exec
+SELECT cs.id FROM chat_session cs
+JOIN agent a ON a.id = cs.agent_id
+WHERE a.runtime_id = ANY($1::uuid[]) AND a.kind = 'system'
+ORDER BY cs.id
+FOR NO KEY UPDATE OF cs
+`
+
+// Serialize session writers without blocking task inserts that need session
+// FK KEY SHARE while holding an agent lock.
+func (q *Queries) LockRuntimeTeardownChatSessions(ctx context.Context, runtimeIds []pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, lockRuntimeTeardownChatSessions, runtimeIds)
+	return err
 }
 
 const markChatSessionExplicitlyCreated = `-- name: MarkChatSessionExplicitlyCreated :one

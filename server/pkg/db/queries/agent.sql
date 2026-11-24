@@ -253,41 +253,29 @@ SELECT * FROM agent
 WHERE runtime_id = $1 AND archived_at IS NULL AND kind = 'user'
 ORDER BY name ASC;
 
--- name: ListActiveAgentsByRuntimeForUpdate :many
--- FOR UPDATE variant used inside the cascade-delete transaction. Locks
--- each currently-active agent row so a concurrent archive/move of one
--- of those rows blocks until our transaction commits. Pair with
--- LockAgentRuntime, which holds the runtime row exclusively to also
--- block FK-validated INSERTs / runtime_id updates that would otherwise
--- add a new agent to the runtime mid-cascade. Together they guarantee
--- that the set we compared against expected_active_agent_ids is stable.
-SELECT * FROM agent
-WHERE runtime_id = $1 AND archived_at IS NULL AND kind = 'user'
-ORDER BY name ASC
-FOR UPDATE;
-
 -- name: ListUserAgentIDsByRuntime :many
--- Non-locking companion to ListUserAgentsByRuntimeForUpdate, for callers that
--- must reason about retention GC without taking the teardown's locks.
---
--- Archived rows are included deliberately, and that is the whole point: an
--- archived agent can still own a non-terminal task, and gcRuntime counts those
+-- An archived agent can still own a non-terminal task, and gcRuntime counts those
 -- before it will delete a runtime. A read that filtered them would report a
 -- runtime as reclaimable when the sweeper is going to skip it.
 SELECT id FROM agent
 WHERE runtime_id = $1 AND kind = 'user'
 ORDER BY id;
 
--- name: ListUserAgentsByRuntimeForUpdate :many
--- Locks active AND archived user agents before a runtime teardown. Locking only
--- the active snapshot leaves a restore race: an archived row can become active
--- after confirmation and then be silently unbound. Runtime/profile delete
--- locks the parent runtime first (blocking new FK references), then calls this
--- in stable ID order (blocking restore/archive/move on existing rows).
-SELECT * FROM agent
-WHERE runtime_id = $1 AND kind = 'user'
+-- name: LockRuntimeTeardownAgents :exec
+-- Include archived agents and system carriers, which can also own tasks.
+SELECT id FROM agent
+WHERE runtime_id = ANY(@runtime_ids::uuid[])
 ORDER BY id
 FOR UPDATE;
+
+-- name: ListLockedRuntimeTeardownAgents :many
+-- Re-read after upgrading the runtime lock. A writer using only the FK check
+-- may have bound another agent before the upgrade. Never wait on that agent
+-- while holding the exclusive runtime lock.
+SELECT * FROM agent
+WHERE runtime_id = ANY(@runtime_ids::uuid[])
+ORDER BY id
+FOR UPDATE NOWAIT;
 
 -- name: ListNonOwnerAgentsByRuntime :many
 -- Returns bound agents whose owners lose access under the desired shared_with

@@ -1615,12 +1615,23 @@ WHERE workspace_id = $1
 ORDER BY id
 FOR UPDATE;
 
--- name: LockChatSessionsBySystemRuntimeAgents :many
+-- name: LockRuntimeTeardownChatSessions :exec
+-- Serialize session writers without blocking task inserts that need session
+-- FK KEY SHARE while holding an agent lock.
 SELECT cs.id FROM chat_session cs
 JOIN agent a ON a.id = cs.agent_id
-WHERE a.runtime_id = $1 AND a.kind = 'system'
+WHERE a.runtime_id = ANY(@runtime_ids::uuid[]) AND a.kind = 'system'
 ORDER BY cs.id
-FOR UPDATE OF cs;
+FOR NO KEY UPDATE OF cs;
+
+-- name: LockLateRuntimeTeardownChatSessions :exec
+-- A session created before we locked its carrier may have been missed by
+-- the first scan. Fail without waiting if a writer now holds that session.
+SELECT cs.id FROM chat_session cs
+JOIN agent a ON a.id = cs.agent_id
+WHERE a.runtime_id = ANY(@runtime_ids::uuid[]) AND a.kind = 'system'
+ORDER BY cs.id
+FOR UPDATE OF cs NOWAIT;
 
 -- name: DeleteChatDraftRestoresBySystemRuntimeAgents :exec
 -- chat_session cascades from agent, so hard-deleting a runtime's system agents

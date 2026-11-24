@@ -602,7 +602,12 @@ func TestChatSupplementRuntimeTeardownDoesNotStartNewWork(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(t.Context())
-	if _, err := service.TeardownRuntime(t.Context(), testHandler.Queries.WithTx(tx), task.RuntimeID, service.RuntimeTeardownOptions{CancelNonTerminalTasks: true}); err != nil {
+	qtx := testHandler.Queries.WithTx(tx)
+	target, err := service.LockRuntimeTeardown(t.Context(), qtx, task.RuntimeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.TeardownRuntime(t.Context(), qtx, target, service.RuntimeTeardownOptions{CancelNonTerminalTasks: true}); err != nil {
 		t.Fatal(err)
 	}
 	if err := tx.Commit(t.Context()); err != nil {
