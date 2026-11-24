@@ -14,7 +14,7 @@ var builtInStatusRules = []string{
 	"→ `in_review`",
 	"a dispatch turn leaves the parent `in_progress`",
 	"5. Before exiting, confirm the status still matches where things actually stand.",
-	"The workflow rules above refer to exact built-in status keys",
+	catalogBridgeBullet,
 }
 
 func TestBriefWithProjectWorkflowDropsBuiltInStatusRules(t *testing.T) {
@@ -122,13 +122,13 @@ func TestBriefWithStatusMapStatesTheMapRules(t *testing.T) {
 			"Entering a status that hands off reassigns the issue and starts its handler's run",
 			"A status without a handler hands nothing off: the work stays yours",
 			"At a step you handle, follow its Routes line.",
-			"leave `done`-category statuses to a human unless Routes leads there",
-			"a `closed`-category status that fits; comment why first",
+			"leave done-category statuses to a human unless Routes leads there",
+			"a status in the closed category that fits (`cancelled` when there are no custom statuses); comment why first",
 			"add no wakeup for that",
 			// A stuck step goes back to whoever can supply what is missing when
 			// it cannot park the issue: at a terminal status, whose author
 			// routed only the send-back, or without a blocked column.
-			"at a `done`- or `closed`-category status, its send-back route if it has one; elsewhere `blocked` when the map has it, else your step's send-back route when it has one",
+			"at a done- or closed-category status, its send-back route if it has one; elsewhere `blocked` when the map has it, else your step's send-back route when it has one",
 			"This issue's status map is in `[Project workflow]`",
 			"--duplicate-of",
 			"questions, discussion, and acknowledgements never touch status",

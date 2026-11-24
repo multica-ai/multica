@@ -11,7 +11,7 @@ Product contracts the runtime brief does not fully encode.
 - [Charts and files in a comment](#charts-and-files-in-a-comment)
 - [Incorrect to correct](#incorrect-to-correct)
 
-To attach a local file to an existing issue description, use `multica issue update <id> --attachment <local-path>`. The CLI appends the file's Markdown reference to the end of the description; to replace an image, also use `--description-file` to remove the old reference. Do not put local filesystem paths in the description.
+To attach a local file to an existing issue description, use `multica issue update <id> --attachment <local-path>`. The CLI appends the file's Markdown reference to the end of the description; to replace an image, also remove the old reference with `multica issue edit-description <id> --old <old reference> --new ""`. Do not put local filesystem paths in the description.
 
 ## PR linking
 
