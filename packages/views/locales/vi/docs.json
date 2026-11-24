@@ -1,0 +1,103 @@
+{
+  "untitled": "Chưa có tiêu đề",
+  "version_number": "v{{number}}",
+  "kb": "Tài liệu",
+  "actions": {
+    "new": "Mới",
+    "new_doc": "Tài liệu mới",
+    "new_folder": "Thư mục mới",
+    "rename": "Đổi tên",
+    "move": "Chuyển tới...",
+    "delete": "Xóa",
+    "cancel": "Hủy",
+    "history": "Lịch sử",
+    "more": "Thêm",
+    "copy_link": "Sao chép liên kết"
+  },
+  "errors": {
+    "move": "Không chuyển được",
+    "delete": "Không xóa được",
+    "save": "Không lưu được"
+  },
+  "move": {
+    "title": "Chuyển \"{{title}}\"",
+    "destination": "Đích đến",
+    "root": "Tài liệu (cấp cao nhất)",
+    "current": "Hiện tại",
+    "confirm": "Chuyển"
+  },
+  "delete": {
+    "title": "Xóa tài liệu này?",
+    "description": "\"{{title}}\" và toàn bộ lịch sử của nó sẽ bị xóa. Không thể hoàn tác.",
+    "confirm": "Xóa",
+    "folder_title": "Xóa thư mục này?",
+    "folder_description": "Xóa \"{{title}}\"? Chỉ xóa được thư mục trống. Không thể hoàn tác."
+  },
+  "tree": {
+    "more": "Thêm thao tác cho {{title}}",
+    "empty": "Chưa có tài liệu nào",
+    "new_doc_in": "Tài liệu mới trong {{title}}"
+  },
+  "editor": {
+    "placeholder": "Viết, hoặc gõ / để dùng lệnh...",
+    "title_label": "Tiêu đề",
+    "saving": "Đang lưu...",
+    "saved": "Đã lưu",
+    "save_failed": "Chưa lưu · Thử lại",
+    "retry": "Thử lại",
+    "conflict": "Đã được {{name}} cập nhật. Bản nháp của bạn vẫn được giữ. Tải lại để tiếp tục.",
+    "reload": "Tải lại bản mới nhất",
+    "draft": "Bản nháp đã lưu của bạn",
+    "unsaved_changes": "Thay đổi chưa lưu",
+    "live": "Trực tiếp",
+    "reconnecting": "Đang kết nối lại...",
+    "connecting": "Đang kết nối...",
+    "title_save_failed": "Chưa lưu tiêu đề",
+    "editing_now": "Đang chỉnh sửa"
+  },
+  "history": {
+    "title": "Lịch sử",
+    "current": "Hiện tại",
+    "restore": "Khôi phục phiên bản này",
+    "loading": "Đang tải...",
+    "from_discussion": "Từ bình luận: {{quote}}"
+  },
+  "not_found": {
+    "title": "Không tìm thấy tài liệu",
+    "description": "Có thể nó đã bị xóa."
+  },
+  "edited": "Đã sửa {{time}}",
+  "outline": "Đề mục",
+  "link_copied": "Đã sao chép liên kết",
+  "unavailable": {
+    "title": "Tài liệu chưa được bật trong không gian làm việc này",
+    "description": "Không gian làm việc này chưa bật Tài liệu."
+  },
+  "view_history": "Xem lịch sử",
+  "comments": {
+    "title": "Bình luận",
+    "add": "Bình luận",
+    "open": "Mở {{count}}",
+    "resolved": "Đã giải quyết {{count}}",
+    "close": "Đóng bình luận",
+    "quote_missing": "Đoạn văn bản được bình luận đã thay đổi",
+    "reply_placeholder": "Trả lời, hoặc @ ai đó...",
+    "new_placeholder": "Thêm bình luận, hoặc @ ai đó...",
+    "submit": "Bình luận",
+    "reply": "Trả lời",
+    "cancel": "Hủy",
+    "resolve": "Giải quyết",
+    "reopen": "Mở lại",
+    "delete": "Xóa bình luận",
+    "resolved_by": "{{name}} đã giải quyết",
+    "replies_other": "{{count}} phản hồi",
+    "empty_open": "Chưa có bình luận nào đang mở. Chọn văn bản rồi chọn Bình luận để bắt đầu.",
+    "empty_resolved": "Chưa có bình luận nào đã giải quyết.",
+    "errors": {
+      "save": "Không đăng được bình luận",
+      "delete": "Không xóa được bình luận",
+      "resolve": "Không cập nhật được bình luận"
+    },
+    "run_waiting_retry": "Đang chờ thử lại"
+  }
+}

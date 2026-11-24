@@ -92,6 +92,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Выбирайте привычного агента одной клавишей",
             body: "При создании задачи с агентом рядом с «Создано» появляются три агента и команды, которых вы выбираете чаще всего. Нажмите на нужного или Alt/Option+1–3, а стрелка рядом открывает поиск по всем.",
           },
+          vi: {
+            title: "Chọn agent quen thuộc chỉ bằng một phím",
+            body: "Khi tạo công việc cùng một agent, ba agent và squad bạn dùng nhiều nhất sẽ nằm cạnh mục Người tạo. Bấm vào một cái hoặc nhấn Alt/Option+1–3 để chuyển, hoặc bấm mũi tên bên cạnh để tìm trong tất cả.",
+          },
         },
       },
       {
@@ -131,6 +135,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Передачи внутри команды — не во «Входящие»",
             body: "В «Настройки → Уведомления» в разделе «Комментарии» отключите «Включать передачи внутри команды», и комментарии, которыми лидер и агенты команды передают друг другу работу, перестанут приходить. @упоминания и запуски, требующие внимания, по-прежнему приходят.",
           },
+          vi: {
+            title: "Giữ bàn giao của squad ngoài Hộp thư đến",
+            body: "Trong Cài đặt → Thông báo, tắt mục “Bao gồm bàn giao của squad” ở phần Bình luận để ngừng nhận các bình luận mà trưởng squad và các agent dùng để bàn giao việc cho nhau. Bình luận @nhắc bạn và các lượt chạy cần chú ý vẫn sẽ đến.",
+          },
         },
       },
       {
@@ -169,6 +177,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Расход по командам",
             body: "В разделе «Аналитика» выберите команду в фильтре «Принадлежность», чтобы все графики показывали только её, или сгруппируйте рейтинг и ошибки по командам. Разверните команду, чтобы увидеть расход каждого участника.",
+          },
+          vi: {
+            title: "Xem mức sử dụng theo squad",
+            body: "Trên trang Phân tích, chọn một squad trong bộ lọc Phân bổ để giới hạn mọi biểu đồ theo squad đó, hoặc nhóm bảng xếp hạng và lỗi theo squad. Mở rộng một squad để xem từng thành viên đã dùng bao nhiêu.",
           },
         },
       },
@@ -216,6 +228,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Разбирайте «Входящие» с клавиатуры",
             body: "На странице «Входящие» нажимайте J и K, чтобы перейти к следующему или предыдущему уведомлению без архивации, и U, чтобы отметить открытое уведомление непрочитанным. Щёлкните правой кнопкой по уведомлению во «Входящих» на панели «Работа», чтобы отметить его непрочитанным, архивировать или удалить.",
           },
+          vi: {
+            title: "Xử lý Hộp thư đến bằng bàn phím",
+            body: "Trên trang Hộp thư đến, nhấn J và K để chuyển tới thông báo sau hoặc trước mà không lưu trữ, và nhấn U để đánh dấu thông báo đang mở là chưa đọc. Bấm chuột phải vào một thông báo trong Hộp thư đến của bảng Công việc để đánh dấu chưa đọc, lưu trữ hoặc xóa nó.",
+          },
         },
       },
     ],
@@ -262,6 +278,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Все уведомления — на странице «Входящие»",
             body: "Нажмите на уведомление во «Входящих» на панели «Работа» — оно откроется на странице «Входящие», а все действия собраны в одной панели. Вверху раздела переключайтесь между вкладками «Входящие», «Отложенные» и «Архив»; E архивирует, H откладывает.",
           },
+          vi: {
+            title: "Xử lý mọi thông báo trên trang Hộp thư đến",
+            body: "Bấm một thông báo trong Hộp thư đến của bảng Công việc, nó sẽ mở trên trang Hộp thư đến với mọi thao tác gom trong một thanh. Chuyển giữa các tab Hộp thư đến, Đã tạm ẩn và Đã lưu trữ ở đầu mục; nhấn E để lưu trữ và H để tạm ẩn.",
+          },
         },
       },
       {
@@ -302,6 +322,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Следите за ходом проекта",
             body: "Откройте проект: на вкладке «Обзор» описание занимает всю ширину, а рядом — прогресс, недельный тренд и дата завершения в текущем темпе. Вкладка «Активность» показывает изменения. Отменённые задачи в прогресс не входят.",
           },
+          vi: {
+            title: "Xem tiến độ của một dự án",
+            body: "Mở một dự án: tab Tổng quan hiển thị mô tả ở chiều rộng đầy đủ, bên cạnh là tiến độ, xu hướng theo tuần và ngày hoàn thành dự tính theo tốc độ gần đây. Tab Hoạt động liệt kê những gì đã thay đổi. Các công việc đã hủy không tính vào tiến độ.",
+          },
         },
       },
       {
@@ -339,6 +363,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Предпросмотр HTML и Mermaid прямо при редактировании",
             body: "При редактировании описания задачи начните блок кода с ```html или ```mermaid — предпросмотр появится на месте. Нажмите на строку заголовка, чтобы добавить или переименовать заголовок, а Enter на выделенном блоке откроет исходный код.",
+          },
+          vi: {
+            title: "Xem trước HTML và Mermaid trong lúc sửa",
+            body: "Trong phần mô tả công việc đang sửa, bắt đầu một khối mã bằng ```html hoặc ```mermaid và bản xem trước sẽ hiển thị ngay tại chỗ. Bấm thanh tiêu đề của nó để thêm hoặc đổi tên tiêu đề, và nhấn Enter trên khối đang chọn để sửa mã nguồn.",
           },
         },
       },
@@ -386,6 +414,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Агенты возвращаются с отчётом в чат",
             body: "Попросите агента в чате сообщить, когда задача завершится или PR будет слит, — он отчитается в том же диалоге и напомнит о себе, если ждёт ответа от коллеги. Полоса над полем ввода показывает, чего именно он ждёт.",
           },
+          vi: {
+            title: "Agent quay lại báo cáo trong Trò chuyện",
+            body: "Nhờ một agent trong Trò chuyện báo cho bạn khi một công việc xong hoặc một PR được hợp nhất, nó sẽ báo lại ngay trong cuộc trò chuyện đó; nó cũng theo dõi tiếp khi nhờ người khác giúp bạn. Dải phía trên ô nhập tin nhắn cho biết nó đang chờ gì.",
+          },
         },
       },
       {
@@ -425,6 +457,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Дополняйте ответ прямо во время выполнения",
             body: "Пока агент отвечает в чате, просто напишите и отправьте сообщение: если поле показывает «Добавить в текущий запуск», оно вольётся в ответ без его остановки. С вложением или в иных случаях оно начнётся в следующем запуске.",
+          },
+          vi: {
+            title: "Thêm vào câu trả lời đang chạy",
+            body: "Trong lúc một agent đang trả lời trong Trò chuyện, cứ tiếp tục gõ rồi gửi: khi ô nhập hiển thị “Thêm vào lượt chạy hiện tại”, tin nhắn của bạn sẽ nhập vào câu trả lời đó mà không làm nó dừng lại. Với tệp đính kèm, trong một số trường hợp, nó hiển thị “Bắt đầu sau lượt chạy này” và chờ đến lượt tiếp theo.",
           },
         },
       },
@@ -466,6 +502,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Общайтесь с агентом через WeChat",
             body: "Откройте своего агента, выберите «Добавить канал сообщений» в разделе «Сообщения», укажите WeChat и отсканируйте QR-код. После этого пишите боту в личные сообщения — ответы и файлы придут туда же.",
           },
+          vi: {
+            title: "Trò chuyện với agent từ WeChat",
+            body: "Mở một agent bạn sở hữu, chọn “Thêm kênh nhắn tin” trong mục Nhắn tin, chọn WeChat rồi quét mã QR bằng WeChat của bạn. Sau đó nhắn riêng cho bot trong WeChat; câu trả lời và tệp sẽ quay lại đó.",
+          },
         },
       },
       {
@@ -505,6 +545,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Организуйте проекты в папки",
             body: "На боковой панели нажмите + рядом с «Проекты» и выберите «Новая папка», затем перетащите туда проекты или выберите «Переместить в папку» в меню проекта. В настройках отображения можно сгруппировать проекты по папкам.",
+          },
+          vi: {
+            title: "Sắp xếp dự án vào thư mục",
+            body: "Trong thanh bên, bấm + cạnh mục Dự án rồi chọn “Thư mục mới”, sau đó kéo dự án vào đó hoặc chọn “Chuyển tới thư mục” từ menu của dự án. Trên trang Dự án, mở Cài đặt hiển thị để nhóm theo thư mục.",
           },
         },
       },
@@ -552,6 +596,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Откладывайте уведомления на потом",
             body: "Входящие теперь находятся в верхней части панели «Работа». Наведите на уведомление и нажмите на часы — или нажмите H в открытой задаче — чтобы выбрать время возврата; до тех пор оно ждёт в разделе «Отложенные».",
           },
+          vi: {
+            title: "Tạm ẩn thông báo tới lúc khác",
+            body: "Hộp thư đến của bạn giờ nằm ở đầu bảng Công việc. Di chuột lên một thông báo rồi bấm biểu tượng đồng hồ, hoặc nhấn H trên một công việc đang mở, để chọn lúc nó quay lại; tới lúc đó nó vẫn chờ trong chế độ xem Đã tạm ẩn.",
+          },
         },
       },
       {
@@ -590,6 +638,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Диктуйте вместо набора текста в десктопе",
             body: "В десктопном приложении включите «Настройки → Голосовой ввод» и нажмите на микрофон в чате или комментарии (или удерживайте его во время речи). При первом запуске выберите модель — распознавание выполняется локально.",
+          },
+          vi: {
+            title: "Đọc thay vì gõ trên ứng dụng desktop",
+            body: "Trong ứng dụng desktop, bật Cài đặt → Nhập bằng giọng nói, rồi chạm vào biểu tượng mic trong Trò chuyện, bình luận hoặc câu trả lời để đọc, hoặc giữ mic trong lúc nói. Lần đầu tiên, hãy chọn một mô hình giọng nói để tải về; âm thanh được chuyển thành văn bản ngay trên máy của bạn.",
           },
         },
       },
@@ -630,6 +682,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Планируйте проекты на доске и архивируйте завершённые",
             body: "В разделе «Проекты» переключитесь на доску или сгруппируйте по статусу, приоритету или руководителю. Завершённый проект можно скрыть через архив и в любой момент восстановить из архивных проектов.",
           },
+          vi: {
+            title: "Lên kế hoạch dự án trên bảng, và lưu trữ dự án đã xong",
+            body: "Trên trang Dự án, mở Cài đặt hiển thị để chuyển sang dạng Bảng hoặc nhóm theo trạng thái, mức ưu tiên hay người phụ trách, và tìm kiếm từ tiêu đề. Lưu trữ một dự án từ menu của nó để ẩn đi, và khôi phục bất cứ lúc nào từ mục Dự án đã lưu trữ.",
+          },
         },
       },
       {
@@ -668,6 +724,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Меньше шума от чужих задач",
             body: "Вверху чужой задачи нажмите «Отписаться и архивировать» или Shift+E, чтобы отключить уведомления в один клик. По умолчанию приходят только ключевые обновления — режим меняется в «Настройки → Уведомления».",
+          },
+          vi: {
+            title: "Nhận ít thông báo hơn từ công việc của người khác",
+            body: "Ở đầu công việc của người khác, bấm “Bỏ theo dõi & lưu trữ” hoặc nhấn Shift+E để dừng nhận cập nhật của nó trong một bước. Công việc của họ giờ chỉ gửi các cập nhật quan trọng; để nhận tất cả, đặt mục Công việc của người khác thành Mọi hoạt động trong Cài đặt → Thông báo.",
           },
         },
       },
@@ -708,6 +768,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Редактируйте сразу несколько задач",
             body: "Отметьте задачи в списке и измените метки, проект или срок на нижней панели; в меню «Ещё» доступны дата начала, родительская задача и свойства. Пропущенные задачи можно выделить одной кнопкой и повторить.",
           },
+          vi: {
+            title: "Sửa nhiều công việc cùng lúc",
+            body: "Chọn các công việc trong một danh sách, rồi dùng thanh ở cuối để đổi nhãn, dự án hoặc ngày đến hạn; mục “Thêm thao tác” gồm ngày bắt đầu, công việc cha và thuộc tính tùy chỉnh. Nếu có công việc bị bỏ qua, bấm “Chỉ chọn các mục này” để sửa và thử lại.",
+          },
         },
       },
       {
@@ -746,6 +810,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Попросите агента создать тему оформления",
             body: "В чате или задаче опишите агенту нужные цвета, фон или стиль интерфейса. Он соберёт и проверит тему, после чего её можно включить в «Настройки → Внешний вид».",
+          },
+          vi: {
+            title: "Nhờ agent làm giao diện cho bạn",
+            body: "Trong Trò chuyện hoặc một công việc, nhờ bất kỳ agent nào làm một giao diện và mô tả màu sắc, nền hoặc kiểu kính bạn muốn. Nó sẽ tạo và kiểm tra giao diện rồi giao cho bạn; sau đó chuyển sang giao diện đó trong Cài đặt → Giao diện.",
           },
         },
       },
@@ -793,6 +861,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Устанавливайте и импортируйте темы",
             body: "В «Настройки → Внешний вид» нажмите «Управление» рядом с темой, чтобы установить темы сообщества или импортировать .zip / папку. Переключать темы можно в любой момент из меню аккаунта.",
           },
+          vi: {
+            title: "Cài đặt, nhập hoặc tạo giao diện",
+            body: "Trong Cài đặt → Giao diện, bấm Quản lý cạnh mục Giao diện để duyệt và cài các giao diện cộng đồng, hoặc dùng Nhập giao diện cho một tệp .zip hoặc thư mục. Chuyển giao diện bất cứ lúc nào từ mục Giao diện trong menu tài khoản.",
+          },
         },
       },
       {
@@ -831,6 +903,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Управляйте сервисами задачи с боковой панели",
             body: "Откройте задачу и запустите окружение в разделе «Окружения». Из меню каждого сервиса можно открыть логи, перезапустить или остановить его, а на десктопе — перейти прямо в окно приложения.",
+          },
+          vi: {
+            title: "Chạy các dịch vụ của công việc từ thanh bên của nó",
+            body: "Mở một công việc rồi dùng “Khởi động một môi trường” trong mục Môi trường ở thanh bên của nó. Menu của mỗi dịch vụ có thể xem nhật ký, khởi động lại hoặc dừng dịch vụ, và ứng dụng desktop có thể được đưa lên trước bằng “Chuyển sang cửa sổ”.",
           },
         },
       },
@@ -871,6 +947,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Оставляйте пометки к ответам агента",
             body: "В чате выделите фрагмент ответа агента и добавьте заметку. Сохранённые заметки ждут в поле ввода и отправляются вместе со следующим сообщением.",
+          },
+          vi: {
+            title: "Ghi chú trên câu trả lời của agent trong Trò chuyện",
+            body: "Trong Trò chuyện, chọn văn bản trong câu trả lời của một agent rồi thêm ghi chú. Ghi chú đã lưu sẽ chờ trong ô nhập tin nhắn và được gửi cùng tin nhắn tiếp theo của bạn, có hoặc không kèm thêm văn bản.",
           },
         },
       },
@@ -917,6 +997,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Выбирайте тему и шрифты во «Внешнем виде»",
             body: "Откройте «Настройки → Внешний вид», чтобы выбрать одну из пяти встроенных тем, настроить шрифты, размеры текста, плотность и контрастность для этого устройства.",
           },
+          vi: {
+            title: "Chọn giao diện và phông chữ trong Giao diện",
+            body: "Vào Cài đặt → Giao diện để chọn một trong năm giao diện có sẵn. Bạn cũng có thể đặt phông chữ và cỡ chữ cho giao diện và cho nội dung, đồng thời chỉnh mật độ và độ tương phản. Lựa chọn của bạn được lưu trên thiết bị này.",
+          },
         },
       },
       {
@@ -956,6 +1040,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Ограничьте доступ к проекту его участниками",
             body: "При создании проекта или в его свойствах выберите «Только участники проекта» и добавьте нужных людей. Задачи, комментарии и вложения увидят только они, а также владельцы и администраторы рабочего пространства.",
           },
+          vi: {
+            title: "Giữ dự án chỉ cho thành viên của nó",
+            body: "Khi tạo dự án, hoặc sau đó trong thuộc tính của nó, đặt Quyền truy cập thành Chỉ thành viên dự án rồi thêm những người cần truy cập. Sau đó các công việc, bình luận và tệp đính kèm của nó chỉ hiển thị với họ cùng chủ sở hữu và quản trị viên của không gian làm việc.",
+          },
         },
       },
       {
@@ -993,6 +1081,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Отслеживайте сервисы, запущенные задачей",
             body: "Откройте задачу и проверьте раздел «Окружения» на боковой панели — там показаны сервисы, запущенные агентами, их статус, ссылка и оставшееся время работы.",
+          },
+          vi: {
+            title: "Xem các dịch vụ mà một công việc đã khởi động",
+            body: "Mở một công việc và xem mục Môi trường trong thanh bên của nó để thấy các dịch vụ mà các lượt chạy của agent đã khởi động, kèm trạng thái, liên kết và thời gian còn lại. Trên macOS và Linux, agent có thể giữ một dịch vụ chạy bằng lệnh multica env start.",
           },
         },
       },
@@ -1039,6 +1131,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Восстанавливайте прошлые версии навыков",
             body: "Откройте навык и перейдите в «Историю», чтобы посмотреть сохранённые версии. Восстановленная версия станет актуальной для следующих запусков агентов.",
           },
+          vi: {
+            title: "Khôi phục phiên bản cũ của một skill",
+            body: "Mở một skill rồi vào Lịch sử để xem mỗi phiên bản đã lưu chứa gì. Khôi phục một phiên bản, và nó sẽ trở thành phiên bản mới nhất cho các lượt chạy tiếp theo của agent.",
+          },
         },
       },
       {
@@ -1078,6 +1174,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Показывайте только непрочитанные задачи",
             body: "В «Представлениях» добавьте встроенный вид «Непрочитанные» на боковую панель или отфильтруйте любой список по «Статус прочтения → Непрочитанные».",
           },
+          vi: {
+            title: "Chỉ xem các công việc chưa đọc",
+            body: "Trong mục Chế độ xem, gắn sao cho chế độ xem có sẵn Chưa đọc để thêm nó vào thanh bên. Bạn cũng có thể lọc bất kỳ chế độ xem nào theo Trạng thái đọc → Chưa đọc.",
+          },
         },
       },
       {
@@ -1115,6 +1215,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Закрепляйте основные рабочие пространства",
             body: "Откройте переключатель рабочих пространств и нажмите значок булавки, чтобы держать нужные сверху. Индикаторы непрочитанных сохраняются.",
+          },
+          vi: {
+            title: "Ghim các không gian làm việc chính của bạn",
+            body: "Mở bộ chuyển không gian làm việc rồi bấm vào ghim cạnh một không gian làm việc để giữ nó ở trên cùng. Dấu chấm chưa đọc vẫn hiển thị trên các không gian làm việc đã ghim.",
           },
         },
       },
@@ -1160,6 +1264,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Новый макет рабочего пространства",
             body: "Левая панель переключает разделы «Работа», «Команда», «Чат», «Входящие» и «Автопилот». Боковую панель рядом можно свернуть или изменить её ширину.",
           },
+          vi: {
+            title: "Bố cục không gian làm việc mới",
+            body: "Thanh bên trái chuyển giữa Công việc, Nhóm, Trò chuyện, Hộp thư đến và Auto. Thu gọn hoặc đổi kích thước bảng bên cạnh nó để có thêm chỗ.",
+          },
         },
       },
       {
@@ -1199,6 +1307,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Обновлённые представления",
             body: "Добавляйте представления в избранное, комбинируйте или исключайте фильтры, а также фильтруйте по статусу агента или «Я и мои агенты».",
           },
+          vi: {
+            title: "Chế độ xem được làm lại",
+            body: "Lưu chế độ xem dưới dạng yêu thích, kết hợp hoặc loại trừ bộ lọc, và lọc theo trạng thái agent hoặc “Tôi và các agent của tôi”.",
+          },
         },
       },
       {
@@ -1237,6 +1349,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Ограничивайте число одновременных запусков в среде выполнения",
             body: "Откройте среду выполнения и задайте лимит параллельных запусков. Остальные запуски будут ожидать в очереди.",
+          },
+          vi: {
+            title: "Giới hạn số lượt chạy đồng thời trên mỗi runtime",
+            body: "Mở một runtime và đặt số lượt chạy nó xử lý cùng lúc. Các lượt chạy thừa sẽ chờ trong hàng đợi.",
           },
         },
       },
@@ -1283,6 +1399,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Новая командная панель",
             body: "Выделите несколько задач и измените их разом через командную панель. Она также ищет по рабочему пространству и превращает фразу в новую задачу для агента.",
           },
+          vi: {
+            title: "Thanh lệnh mới",
+            body: "Chọn một vài công việc rồi mở thanh lệnh để thay đổi tất cả cùng lúc. Nó cũng tìm kiếm trong không gian làm việc và biến một câu thành công việc mới cho một agent.",
+          },
         },
       },
       {
@@ -1320,6 +1440,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "До 200 вариантов в свойствах",
             body: "Свойства с одиночным и множественным выбором теперь поддерживают до 200 вариантов с поиском по тексту и пиньиню.",
+          },
+          vi: {
+            title: "Tối đa 200 lựa chọn cho thuộc tính",
+            body: "Thuộc tính chọn một và chọn nhiều có thể chứa tới 200 lựa chọn, tìm kiếm được theo văn bản hoặc pinyin.",
           },
         },
       },
@@ -1366,6 +1490,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Запускайте задачи через Devin CLI",
             body: "Агенты могут работать через локальный Devin CLI с продолжением сессии, навыками проекта и MCP.",
           },
+          vi: {
+            title: "Chạy tác vụ trên Devin CLI",
+            body: "Agent có thể chạy trên Devin CLI cục bộ của bạn, với khả năng tiếp tục phiên, skill của dự án và MCP.",
+          },
         },
       },
       {
@@ -1404,6 +1532,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Multica на традиционном китайском",
             body: "Переключить язык интерфейса можно в разделе «Настройки» → «Язык».",
+          },
+          vi: {
+            title: "Multica bằng tiếng Trung phồn thể",
+            body: "Đổi ngôn ngữ ứng dụng trong Cài đặt → Tùy chọn.",
           },
         },
       },
@@ -1450,6 +1582,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
             title: "Рабочие процессы доступны каждому участнику",
             body: "Любой участник может создавать и дублировать рабочие процессы. Создатели и администраторы могут редактировать их и настраивать передачу задач.",
           },
+          vi: {
+            title: "Mọi thành viên đều tạo được workflow",
+            body: "Bất kỳ thành viên nào cũng có thể tạo và nhân bản workflow. Người tạo và quản trị viên có thể sửa chúng và thiết lập bàn giao.",
+          },
         },
       },
       {
@@ -1488,6 +1624,10 @@ export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
           ru: {
             title: "Делитесь средой выполнения с выбранными участниками",
             body: "Указывайте конкретных пользователей с доступом к среде выполнения, а не только «все» или «только я». При сужении доступа сначала показываются затронутые агенты.",
+          },
+          vi: {
+            title: "Chia sẻ runtime với thành viên được chọn",
+            body: "Chọn chính xác ai được dùng một runtime, không chỉ mọi người hoặc chỉ mình bạn. Siết quyền truy cập sẽ hiển thị các agent bị ảnh hưởng trước.",
           },
         },
       },
