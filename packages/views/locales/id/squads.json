@@ -93,6 +93,21 @@
     "visibility": "Visibilitas",
     "visibility_workspace": "Workspace"
   },
+  "handoff": {
+    "section_title": "Kolaborasi",
+    "mode_leader_title": "Leader yang menugaskan",
+    "mode_leader_description": "Setiap langkah kembali ke leader, {{leader}}, yang memilih langkah berikutnya. Default untuk squad yang sudah ada.",
+    "mode_direct_title": "Anggota serah terima langsung",
+    "mode_direct_description": "Leader menugaskan langkah pertama dan menangani pengecualian. Anggota memilih sendiri langkah berikutnya; menyerahkan untuk ditinjau atau meminta keputusan seseorang tidak lagi membangunkan leader.",
+    "guard_rounds": "Bolak-balik: hingga {{limit}} putaran",
+    "guard_daily": "Hingga {{limit}} serah terima per tugas per hari",
+    "guard_failed": "Run gagal → kembali ke leader",
+    "guard_no_next": "Tidak ada langkah berikutnya → kembali ke leader",
+    "saved": "Mode kolaborasi diperbarui",
+    "brief_title": "Yang diterima anggota",
+    "brief_hint": "Ditambahkan ke setiap run pada tugas yang ditugaskan ke squad ini",
+    "brief_empty": "Belum ada anggota agent"
+  },
   "toasts": {
     "member_added": "Anggota ditambahkan",
     "member_add_failed": "Gagal menambahkan anggota",
@@ -115,7 +130,7 @@
     "more_members_other": "+{{count}} lainnya"
   },
   "instructions_tab": {
-    "description": "Leader membaca instruksi ini setiap kali mengerjakan tugas yang ditugaskan ke squad ini.",
+    "description": "Leader dan setiap anggota agent membaca instruksi ini setiap kali mengerjakan tugas yang ditugaskan ke squad ini.",
     "unsaved_changes": "Perubahan belum disimpan",
     "save_button": "Simpan",
     "placeholder": "misalnya Selalu mulai dengan menulis test yang gagal. Utamakan commit kecil dan atomik."

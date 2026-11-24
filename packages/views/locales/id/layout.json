@@ -102,10 +102,10 @@
   "rail": {
     "label": "Navigasi aplikasi",
     "sheet_description": "Beralih antar tampilan dan workspace.",
-    "work": "Pekerjaan",
+    "work": "Kerja",
     "team": "Tim",
     "chat": "Chat",
-    "autopilots": "Otomatis",
+    "autopilots": "Auto",
     "switch_workspace": "Ganti workspace",
     "pin_workspace": "Sematkan workspace",
     "unpin_workspace": "Lepas sematan workspace",
@@ -122,7 +122,7 @@
     "reset_order": "Atur ulang ke urutan default",
     "copy_workspace_link": "Salin tautan workspace",
     "workspace_meta_other": "{{slug}} · {{count}} anggota",
-    "docs": "Dokumen"
+    "docs": "Dok"
   },
   "bottom_bar": {
     "label": "Bilah status",

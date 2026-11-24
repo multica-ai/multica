@@ -114,7 +114,8 @@
     "app_connect_requested": "Hubungkan aplikasi",
     "app_action_result": "Hasil tindakan aplikasi",
     "doc_comment": "Komentar baru di dokumen",
-    "doc_mentioned": "Disebut di dokumen"
+    "doc_mentioned": "Disebut di dokumen",
+    "blockers_done": "Tugas yang ditunggu selesai"
   },
   "labels": {
     "set_status_to": "Setel status ke",

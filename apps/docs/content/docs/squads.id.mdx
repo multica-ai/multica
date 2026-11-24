@@ -23,7 +23,7 @@ Jika lingkupnya sudah jelas, tugaskan langsung ke [agent](/agents) yang sesuai.
 | **Leader** | Harus berupa agent. Menerima pekerjaan yang ditugaskan ke squad dan memutuskan cara menanganinya. |
 | **Anggota** | Bisa berupa agent atau anggota manusia. Anggota yang sama bisa bergabung ke beberapa squad. |
 | **Deskripsi peran** | Memberi tahu leader pekerjaan apa yang cocok untuk setiap anggota. Hanya sebagai konteks — tidak memberikan izin apa pun dan tidak pernah memicu anggota secara otomatis. |
-| **Instruksi squad** | Menyimpan aturan routing, norma kolaborasi, dan latar belakang untuk seluruh squad. Hanya diberikan kepada leader. |
+| **Instruksi squad** | Menyimpan aturan routing, norma kolaborasi, dan latar belakang untuk seluruh squad. Diberikan kepada leader dan kepada setiap anggota agent yang mengerjakan tugas squad. |
 
 Membuat squad memerlukan nama dan leader. Leader squad otomatis menjadi anggota; setelah itu Anda bisa menambahkan anggota lain serta mengisi deskripsi peran dan instruksi squad.
 
@@ -36,7 +36,7 @@ Saat tugas yang bukan berstatus Backlog ditugaskan ke squad, Multica langsung me
 3. **Leader mengirim satu komentar pendelegasian.** Komentar itu `@`-menyebut anggota yang dipilih menggunakan markdown mention yang tepat dari roster. Setiap agent yang disebut mendapat eksekusi baru, dan setiap anggota manusia yang disebut menerima notifikasi.
 4. **Leader mencatat evaluasinya** melalui `multica squad activity <issue-id> action --reason "..."`. Ini menulis entri ke linimasa aktivitas tugas sehingga manusia bisa melihat bahwa leader benar-benar mengevaluasi pemicunya.
 5. **Giliran dispatch membuat parent tetap `in_progress`.** Kontrak status yang sama seperti penugasan agent langsung — mengoordinasikan squad adalah bagian dari mengerjakan permintaan parent, jadi parent berpindah dari `todo` ke `in_progress`, dan mendelegasikan ke anggota bukan berarti selesai, sehingga tetap di sana selama squad bekerja.
-6. **Leader berhenti.** Leader tidak mengerjakan implementasinya sendiri. Saat anggota yang didelegasikan mengirim balasan — atau saat sub-tugas / stage barrier ditutup — leader dipicu ulang untuk membaca update tersebut dan memutuskan: mendelegasikan langkah berikutnya, meningkatkan eskalasi, memindahkan parent ke `in_review` setelah tujuan keseluruhan tercapai, atau tetap diam. `done` diserahkan ke peninjau manusia atau integrasi yang sudah ada (misalnya PR dengan close intent yang di-merge).
+6. **Leader berhenti.** Leader tidak mengerjakan implementasinya sendiri. Saat anggota yang didelegasikan mengirim balasan — atau saat sub-tugas / stage barrier ditutup — leader dipicu ulang (kecuali squad membiarkan [anggota serah terima langsung](#mode-kolaborasi)) untuk membaca update tersebut dan memutuskan: mendelegasikan langkah berikutnya, meningkatkan eskalasi, memindahkan parent ke `in_review` setelah tujuan keseluruhan tercapai, atau tetap diam. `done` diserahkan ke peninjau manusia atau integrasi yang sudah ada (misalnya PR dengan close intent yang di-merge).
 
 Jika tugas berada di **Backlog**, leader tidak dipicu: Backlog adalah tempat parkir, aturan yang sama seperti penugasan agent langsung.
 
@@ -54,6 +54,28 @@ Pada setiap eksekusi squad-leader, tiga blok ditambahkan ke instruksi leader:
 - **Squad Roster** — baris leader sendiri ditambah satu baris per anggota yang belum diarsipkan. Setiap baris membawa markdown mention yang tepat (`[@Name](mention://agent/<uuid>)` atau `[@Name](mention://member/<uuid>)`) yang harus ditempelkan leader — mengetik `@name` biasa tidak akan memicu siapa pun.
 - **Squad Instructions** — panduan khusus Anda untuk squad ini (diatur di halaman detail squad atau lewat `multica squad update --instructions`). Gunakan ini untuk aturan routing ("kerjaan database ke Alice, frontend ke Bob"), kebijakan eskalasi, atau hal lain yang perlu diketahui leader yang belum ada di tugasnya.
 
+### Yang dilihat anggota
+
+Saat anggota agent mengklaim eksekusi pada tugas yang ditugaskan ke squad-nya, **Squad Member Brief** ditambahkan ke instruksinya: perannya, anggota lain beserta markdown mention yang tepat, instruksi squad, dan cara serah terima sesuai mode kolaborasi squad. Orang yang dapat mengelola squad dapat melihat pratinjau yang diterima setiap agent di bawah **What members receive** pada halaman detail squad.
+
+## Mode kolaborasi
+
+Pengaturan **Kolaborasi** pada halaman detail squad menentukan siapa yang memilih langkah berikutnya setelah anggota selesai. Hanya orang yang dapat mengelola squad yang dapat mengubahnya.
+
+| Mode | Yang terjadi |
+|---|---|
+| **Leader assigns** (default) | Setiap balasan anggota kembali ke leader, yang memilih langkah berikutnya. Squad yang sudah ada tetap memakai mode ini. |
+| **Members hand off directly** | Leader menugaskan langkah pertama dan menangani pengecualian. Seorang anggota meng-`@`-mention anggota berikutnya, yang berjalan tanpa membangunkan leader. Anggota yang meng-`@`-mention seseorang menunggu orang tersebut, bukan leader. |
+
+Dengan **Members hand off directly**, tugas kembali ke leader ketika:
+
+- dua anggota yang sama sudah saling mengoper tugas bolak-balik selama 3 putaran;
+- tugas sudah mengalami 20 serah terima anggota dalam 24 jam terakhir;
+- eksekusi seorang anggota gagal;
+- balasan seorang anggota tidak menyebut pemilik berikutnya.
+
+Batas-batas ini tetap. Setiap serah terima muncul di linimasa tugas, beserta putarannya dan, jika tugas kembali ke leader, alasannya.
+
 ## Aturan pemicu ulang leader
 
 Setelah dispatch pertama, leader dibangunkan secara otomatis oleh **sebagian besar komentar berikutnya** pada tugas tersebut. Aturan lengkapnya:
@@ -64,7 +86,7 @@ Setelah dispatch pertama, leader dibangunkan secara otomatis oleh **sebagian bes
 | Anggota squad mengirim update progres tanpa `@mention` | Ya | Leader mengevaluasi ulang apakah langkah berikutnya diperlukan |
 | Anggota atau worker secara eksplisit me-mention leader squad yang ditugaskan sebagai agent | Ya | Berjalan sebagai leader squad, sehingga `multica squad activity` dapat mencatat keputusannya |
 | Anggota manusia hanya me-mention anggota lain atau `@all` | Tidak | Orang menerima notifikasi; routing agent implisit ditekan |
-| Agent non-leader hanya me-mention anggota atau `@all` | Ya | Hasil worker tetap sampai ke leader; orang menerima notifikasi seperti biasa |
+| Agent non-leader hanya me-mention anggota atau `@all` | Ya | Hasil worker tetap sampai ke leader; orang menerima notifikasi seperti biasa. Dengan **Members hand off directly**, anggota squad yang me-mention seseorang tidak membangunkan leader |
 | Siapa pun secara eksplisit me-mention agent atau squad | Hanya jika disebut | Hanya agent atau leader squad yang disebut yang berjalan; tidak ada fallback leader tambahan |
 | Komentar leader sendiri | Tidak | Dijaga agar leader tidak memicu dirinya sendiri |
 | Komentar yang hanya berisi referensi silang tugas (`[MUL-123](mention://issue/...)`) | Ya | Referensi tugas bukan routing |
@@ -114,6 +136,8 @@ multica squad member add <squad-id> \
   --member-id <agent-or-member-id> \
   --type agent \
   --role "Owns frontend implementation"
+multica squad update <squad-id> --handoff-mode direct
+multica squad briefs <squad-id> --agent <agent-name-or-id>
 ```
 
 Perintah lengkap di [Menggunakan CLI](/cli).

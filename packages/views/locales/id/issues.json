@@ -189,7 +189,7 @@
     "section_project": "Proyek",
     "section_project_status": "Status proyek",
     "section_label": "Label",
-    "section_relation": "Terkait dengan saya",
+    "section_relation": "Relasi",
     "relation_assigned": "Ditugaskan ke saya",
     "relation_created": "Dibuat oleh saya",
     "relation_my_agents": "Pekerjaan agent saya",
@@ -273,7 +273,8 @@
     "advanced_group_match_trailing": "dari pilihan berikut",
     "advanced_group_hint": "Kondisi dalam grup ini digabungkan dengan “{{word}}”",
     "advanced_add_to_group": "Tambah ke grup",
-    "advanced_turn_into_group": "Jadikan grup"
+    "advanced_turn_into_group": "Jadikan grup",
+    "relation_blocked": "Diblokir"
   },
   "display": {
     "tooltip": "Pengaturan tampilan",
@@ -644,6 +645,13 @@
     "squad_leader_no_action_reason": "mengevaluasi: tidak perlu tindakan ({{reason}})",
     "squad_leader_failed": "evaluasi gagal",
     "squad_leader_failed_reason": "evaluasi gagal: {{reason}}",
+    "squad_handoff_to": "menyerahkan ke {{name}}",
+    "squad_handoff_human": "meminta {{name}} memutuskan",
+    "squad_handoff_leader": "mengembalikan ke {{name}}",
+    "squad_handoff_round": "putaran {{round}}",
+    "squad_handoff_reason_round_limit": "batas {{limit}} putaran tercapai",
+    "squad_handoff_reason_daily_limit": "batas serah terima harian tercapai",
+    "squad_handoff_reason_run_failed": "run gagal",
     "coalesced_badge": "×{{count}}",
     "activity_count_other": "{{count}} aktivitas",
     "show_more_activities_other": "Tampilkan {{count}} aktivitas lagi",
@@ -846,6 +854,7 @@
   },
   "agent_live": {
     "is_working": "{{name}} sedang bekerja",
+    "is_working_round": "{{label}} · putaran {{round}}",
     "is_queued": "{{name}} dalam antrean",
     "is_waiting_local_directory": "{{name}} menunggu direktori lokal",
     "queued_elapsed_prefix": "dalam antrean selama {{elapsed}}",
@@ -1067,6 +1076,7 @@
     "remove_parent_issue": "Hapus tugas induk",
     "remove_parent_issue_success": "Tugas induk dihapus",
     "add_sub_issue": "Tambah sub-tugas...",
+    "add_blocker": "Tambah pemblokir...",
     "delete_issue": "Hapus tugas",
     "mark_duplicate": "Tandai sebagai duplikat...",
     "open_in_new_window": "Buka di jendela baru"
@@ -2046,5 +2056,28 @@
     "focus_failed": "Tidak dapat beralih ke {{name}}",
     "retry": "Coba lagi",
     "dismiss": "Tutup"
+  },
+  "waiting": {
+    "title": "Menunggu",
+    "add": "Tambah pemblokir",
+    "remove": "Hapus {{identifier}}",
+    "count": "Menunggu {{count}} tugas",
+    "stage": "Tahap sebelumnya · {{finished}}/{{total}} selesai",
+    "hint": "Setelah tugas-tugas ini selesai, penerima tugas dimulai otomatis atau menerima notifikasi.",
+    "hint_backlog": "Tugas ini ada di Backlog, sehingga tidak dimulai otomatis saat tugas-tugas ini selesai. Tugas baru dimulai setelah keluar dari Backlog.",
+    "empty": "Tidak ada tugas yang ditunggu",
+    "picker_hint": "Pilih tugas yang harus selesai sebelum tugas ini dapat dimulai.",
+    "restricted": "{{count}} prasyarat dengan akses terbatas",
+    "ended": "Tugas yang ditunggu selesai",
+    "count_other": "Menunggu {{count}} tugas",
+    "marker_title": "Diblokir oleh {{count}} tugas",
+    "marker_title_other": "Diblokir oleh {{count}} tugas",
+    "marker_ended": "{{finished}}/{{total}} selesai",
+    "marker_more": "{{count}} lainnya",
+    "marker_more_other": "{{count}} lainnya",
+    "marker_auto_start": "{{name}} dimulai otomatis setelah ini selesai.",
+    "marker_notify": "{{name}} diberi tahu setelah ini selesai.",
+    "marker_unavailable": "{{name}} tidak dapat berjalan saat ini, sehingga tidak ada yang dimulai saat ini selesai.",
+    "marker_unassigned": "Tidak ada penerima tugas, sehingga tidak ada yang dimulai saat ini selesai."
   }
 }

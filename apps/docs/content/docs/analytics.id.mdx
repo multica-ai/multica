@@ -10,10 +10,11 @@ Halaman **Analytics** di sidebar merangkum penggunaan agent di seluruh ruang ker
 
 ## Tata letak halaman
 
-Halaman ini memiliki dua tab, **Usage** dan **Errors**, yang berbagi dua filter di kanan atas:
+Halaman ini memiliki dua tab, **Usage** dan **Errors**, yang berbagi filter di kanan atas:
 
 - **Time range**: `1d`, `7d`, `30d` (default), `90d`, `180d`, `365d`. `1d` berarti hari ini, dimulai dari tengah malam di zona waktu Anda, bukan 24 jam terakhir.
 - **Project**: **All projects** secara default. Jika sebuah proyek dipilih, hanya eksekusi pada tugas-tugas proyek tersebut yang dihitung; eksekusi yang tidak terkait tugas apa pun, seperti eksekusi chat, tidak ikut dihitung.
+- **Attribution** (tampil setelah ruang kerja memiliki squad): **All attribution** secara default. Pilih **Standalone agents only** untuk memeriksa eksekusi yang tidak dipicu melalui squad mana pun, atau pilih squad tertentu untuk membatasi setiap grafik, KPI, dan daftar di kedua tab ke squad tersebut — termasuk eksekusi leader-nya, eksekusi anggota yang didelegasikan, dan eksekusi pada sub-tugas yang dibuat squad.
 
 Hari dipotong menurut zona waktu Anda: yang diatur di **Settings → Preferences → Time zone**, atau zona waktu browser jika Anda belum mengaturnya. Header menampilkan zona waktu tersebut dan kapan data terakhir diperbarui. Server merangkum angka-angka setiap 5 menit dan halaman yang terbuka memuat ulang pada interval yang sama, sehingga eksekusi yang baru selesai dapat memerlukan beberapa menit untuk muncul; tombol refresh langsung mengambil angka terbaru.
 
@@ -25,7 +26,7 @@ Empat angka berada di bagian atas:
 
 | Kartu | Yang ditampilkan |
 | --- | --- |
-| **Cost** | Perkiraan biaya dalam USD; lihat [Cara biaya dihitung](#cara-biaya-dihitung) |
+| **Cost** | Perkiraan biaya dalam USD; lihat [Cara biaya dihitung](#cara-biaya-dihitung). Pada **All attribution**, mencatat porsi yang dipicu squad jika squad memiliki penggunaan; saat difilter ke sebuah squad, mencatat bahwa anggota yang didelegasikan ikut dihitung |
 | **Tokens** | Token input, output, cache-read, dan cache-write digabung, dengan rincian input dan output di bawahnya |
 | **Run time** | Total waktu eksekusi dari eksekusi yang selesai, dihitung dari saat tiap eksekusi mulai hingga berakhir |
 | **Runs** | Eksekusi yang selesai dalam rentang waktu, dan berapa banyak di antaranya yang gagal |
@@ -34,12 +35,15 @@ Run time dan Runs hanya menghitung eksekusi yang benar-benar mulai berjalan (sel
 
 Kartu tren menggambarkan Tokens, Cost, Time, atau Runs pada satu sumbu waktu, dengan granularitas **Daily** atau **Weekly**. `30d` dan `90d` menawarkan keduanya; `1d` dan `7d` hanya harian, `180d` dan `365d` hanya mingguan. Minggu dimulai pada hari Senin, dan minggu berjalan yang belum selesai digambar lebih pudar; saat di-hover, bar ditandai sebagai parsial dan menunjukkan berapa dari 7 harinya yang sudah berlalu.
 
-**Leaderboard** mencantumkan token, biaya, waktu eksekusi, dan jumlah eksekusi setiap agent, diurutkan menurut salah satu dari keempatnya yang Anda pilih. Leaderboard menampilkan 10 teratas; **Show all** menampilkan sisanya. Dua baris dapat mewakili lebih dari satu agent:
+**Leaderboard** mencantumkan token, biaya, waktu eksekusi, dan jumlah eksekusi, diurutkan menurut salah satu dari keempatnya yang Anda pilih. Leaderboard menampilkan 10 teratas; **Show all** menampilkan sisanya. Jika ruang kerja memiliki squad dan Attribution diatur ke **All attribution**, Anda dapat beralih antara **Agents** dan **Squads**:
 
-- **Deleted agents**: penggunaan agent yang sudah dihapus, digabung ke satu baris agar jumlah baris tetap sesuai dengan total di atas.
-- **Other agents**: agent yang tidak dapat Anda lihat, digabung ke satu baris. Owner dan admin ruang kerja melihat setiap agent yang dibuat anggota; anggota biasa tidak melihat agent privat milik orang lain, yang penggunaannya hanya muncul di sini, tanpa nama.
+- Pada **Agents**, dua baris agregat menjaga daftar tetap sesuai dengan total di atas:
+  - **Deleted agents**: penggunaan agent yang sudah dihapus, digabung ke satu baris.
+  - **Other agents**: agent yang tidak dapat Anda lihat, digabung ke satu baris. Owner dan admin ruang kerja melihat setiap agent yang dibuat anggota; anggota biasa tidak melihat agent privat milik orang lain, yang penggunaannya hanya muncul di sini, tanpa nama.
+- Pada **Squads**, setiap squad menggabungkan eksekusi leader dan anggota yang didelegasikan; perluas baris squad untuk melihat rincian per anggota (leader ditandai). Dua baris tambahan menjaga total tetap sesuai: **Standalone agents (non-Squad)** — disematkan di bagian bawah untuk `@`-mention langsung dan penugasan langsung — dan **Deleted squads**.
+- Saat difilter ke satu squad di **Attribution**, leaderboard langsung beralih ke rincian anggota squad tersebut.
 
-Jika sebagian eksekusi sebuah agent tidak melaporkan token, Tokens dan Cost miliknya diawali `≥` dan sebuah baris di bawah namanya menyebutkan berapa eksekusi yang tidak melaporkan penggunaan.
+Jika sebagian eksekusi sebuah agent atau squad tidak melaporkan token, Tokens dan Cost miliknya diawali `≥` dan sebuah baris di bawah namanya menyebutkan berapa eksekusi yang tidak melaporkan penggunaan.
 
 Pada demo di bawah, sebuah tim operasional memiliki tiga agent. Periksa dulu tren biaya, lalu siapa yang paling banyak menghabiskan biaya, dan terakhir cari penyebab kegagalan di tab Errors.
 
@@ -53,7 +57,7 @@ Di bawahnya:
 
 - **Daily errors** (atau Weekly errors): setiap warna dalam sebuah bar adalah satu kelas kegagalan.
 - **Failure mix**: setiap kegagalan dalam rentang waktu, dibagi menurut kelas. **Show error codes** menggantinya dengan kode alasan kegagalan mentah, yang dapat Anda cari di log atau tempelkan ke sebuah tugas.
-- **Top offenders**: diurutkan menurut jumlah kegagalan secara default, dengan semua yang melewati 8 teratas disembunyikan di balik sebuah toggle. Saat diurutkan menurut **Rate**, agent dengan kurang dari 10 eksekusi diurutkan paling akhir, karena rasio dari eksekusi sesedikit itu kurang bermakna. Mengklik nama agent membuka halaman detailnya, yang mencantumkan eksekusi terbarunya dan alasan setiap kegagalan.
+- **Errors by agent** (atau **Errors by squad**): diurutkan menurut jumlah kegagalan secara default, dengan semua yang melewati 8 teratas disembunyikan di balik sebuah toggle. Saat diurutkan menurut **Rate**, entri dengan kurang dari 10 eksekusi diurutkan paling akhir, karena rasio dari eksekusi sesedikit itu kurang bermakna. Jika ruang kerja memiliki squad dan Attribution diatur ke **All attribution**, beralihlah antara **Agents** dan **Squads** untuk melihat kegagalan per squad bersama **Standalone agents (non-Squad)** dan **Deleted squads**. Mengklik nama agent atau squad membuka halaman detailnya.
 
 Kode alasan kegagalan terbagi menjadi tujuh kelas:
 

@@ -61,7 +61,7 @@ Tulis **Prompt** persis seperti yang ingin dikirim, lalu simpan. Prompt dikirim 
 
 Action Team yang memanggil agent harus menggunakan agent yang dapat dijalankan oleh semua orang di ruang kerja. Untuk squad, ini berlaku pada leader-nya. Action pribadi dapat menggunakan agent yang Anda punya izin untuk menjalankannya.
 
-“Just me” mengatur siapa yang dapat melihat dan menggunakan action yang tersimpan. Setelah Anda menggunakannya pada sebuah tugas, komentar yang diposting dapat dilihat oleh orang-orang yang dapat melihat tugas tersebut.
+“Just me” mengatur siapa yang dapat melihat dan menggunakan action yang tersimpan. Setelah Anda menggunakannya pada sebuah tugas, komentar yang diposting dapat dilihat oleh orang-orang yang dapat melihat tugas tersebut. Selama eksekusi agent, action pribadi hanya dapat dijangkau jika Anda memulai eksekusi itu pada runtime yang masih Anda miliki; eksekusi yang dimulai anggota lain hanya melihat action Team.
 
 ## Mengelola action yang tersimpan
 
@@ -70,6 +70,19 @@ Di **Settings → Quick Actions** Anda dapat mengedit sebuah action, mengarsipka
 Jika tidak ada action pribadi atau Team yang dapat Anda lihat, sidebar tugas tidak menampilkan bagian Quick Actions. Daftar di sidebar tidak difilter menurut siapa yang dapat menjalankan tiap action; izin diperiksa saat Anda mengklik salah satunya.
 
 Jika mengklik sebuah action memberi tahu bahwa action tidak dapat dijalankan, minta admin memeriksa agent milik action tersebut dan siapa yang dapat menjalankannya. Jika komputer agent sedang offline, pekerjaan dimulai begitu komputer kembali online; lihat [Pemecahan masalah](/troubleshooting).
+
+## Menggunakan dari CLI
+
+Kelola dan jalankan quick action yang tersimpan dengan `multica quick-action`:
+
+```bash
+multica quick-action list
+multica quick-action create --name "Code Review" --agent Reviewer --prompt-file ./review.md
+multica quick-action run "Code Review" MUL-123 --dry-run
+multica quick-action run "Code Review" MUL-123
+```
+
+Action dapat dirujuk dengan UUID, awalan UUID yang unik, atau nama persis (tidak peka huruf besar/kecil). `--dry-run` menampilkan pratinjau komentar yang sudah dirender tanpa memostingnya. Membuat, memperbarui, mengarsipkan, memulihkan, dan menghapus quick action memerlukan anggota manusia (`--visibility` default-nya `private`; `public` memerlukan `owner` atau `admin` ruang kerja). Lihat [Menggunakan CLI](/cli) untuk daftar subcommand dan flag lengkap.
 
 ## Panduan terkait
 

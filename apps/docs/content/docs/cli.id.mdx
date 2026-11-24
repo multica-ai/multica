@@ -565,7 +565,8 @@ Migrasi dari parsing CSV: ganti `--attachment a,b` dengan `--attachment a --atta
 | | `search <query>` | Mencari skill | |
 | | `files list/upsert/delete <skill-id>` | Mengelola file di dalam skill | `list`: `--with-content`; `upsert` / `delete`: `--base-revision` (menolak penimpaan usang dengan HTTP 409) |
 | | `label list/add/remove <skill-id>` | Mengelola label pada skill | `add` / `remove`: `<label-id>` menerima UUID lengkap atau prefix singkat |
-| `squad` | `list/get/create/update/delete` | Mengelola squad (`delete` akan mengarsipkan) | |
+| `squad` | `list/get/create/update/delete` | Mengelola squad (`delete` akan mengarsipkan) | `update`: `--name`, `--description`, `--instructions`, `--leader`, `--avatar-url`, `--handoff-mode` (`leader` atau `direct`; lihat [Mode kolaborasi](/squads#mode-kolaborasi)) |
+| | `briefs <squad>` | Menampilkan konteks squad yang diterima setiap anggota agent; memerlukan izin untuk mengelola squad | `--agent` (nama atau ID) |
 | | `member list/add/set-role/remove` | Mengelola anggota squad | |
 | | `activity <issue-id> <outcome>` | Mencatat evaluasi dari leader | |
 | `chat` | `history`, `thread [id]` | Membaca sesi chat eksternal yang sedang ditangani oleh agent | `--limit`, `--before` |

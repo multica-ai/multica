@@ -110,6 +110,13 @@
     "squad_failed_with_reason": "evaluasi gagal: {{reason}}",
     "squad_failed": "evaluasi gagal",
     "squad_evaluated": "mengevaluasi pemicu squad",
+    "squad_handoff_to": "menyerahkan ke {{name}}",
+    "squad_handoff_human": "meminta {{name}} memutuskan",
+    "squad_handoff_leader": "mengembalikan ke {{name}}",
+    "squad_handoff_round": "putaran {{round}}",
+    "squad_handoff_reason_round_limit": "batas {{limit}} putaran tercapai",
+    "squad_handoff_reason_daily_limit": "batas serah terima harian tercapai",
+    "squad_handoff_reason_run_failed": "run gagal",
     "commented": "berkomentar"
   },
   "errors": {

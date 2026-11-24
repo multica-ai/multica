@@ -70,6 +70,7 @@
     "quick_create_unconfirmed": "Pembuatan dengan agent belum terkonfirmasi",
     "autopilot_paused": "Autopilot dijeda",
     "children_done": "Sub-tugas selesai",
+    "blockers_done": "Tugas yang ditunggu selesai",
     "project_owner_joined": "Pemilik bergabung ke proyek",
     "autopilot_quota_exceeded": "Batas eksekusi autopilot tercapai",
     "set_status": "Setel status ke",
