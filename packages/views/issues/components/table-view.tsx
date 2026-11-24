@@ -94,7 +94,7 @@ import {
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { propertyListOptions } from "@multica/core/properties";
 import { projectListOptions } from "@multica/core/projects/queries";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { buildActorNameResolver, useActorName } from "@multica/core/workspace/hooks";
 import {
   agentListOptions,
@@ -129,6 +129,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { DeferredTooltip } from "../../common/deferred-tooltip";
 import { LabelChip } from "../../labels/label-chip";
 import { resolveClickIntent, useIntentNavigate } from "../../navigation";
+import { useRestoredScrollOffset, useRestoredScrollRef } from "../../platform";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { useT } from "../../i18n";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
@@ -165,7 +166,10 @@ import {
 import type { ChildProgress } from "./list-row";
 import { ListLoadMoreFooter } from "./list-load-more-footer";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
+import { IssueBlockedMarker } from "./issue-blockers";
 import { IssueDuplicateOfMarker } from "./issue-duplicates";
+import { IssuePullRequestChips, useIssuePullRequestSummaries } from "./pull-request-chips";
+import { issuePullRequestSummariesOptions } from "@multica/core/github";
 
 // Enough placeholder rows to cover a typical viewport; the virtualizer only
 // mounts what fits, so overshooting costs nothing.
@@ -180,7 +184,9 @@ type TableViewProps = {
   search: string;
   onSearchChange: (query: string) => void;
   onLoadedIssuesChange: (issues: Issue[]) => void;
-  onCreateIssue: (defaults: IssueCreateDefaults) => void;
+  /** Omitted when the viewer cannot create issues: the row's add-sub-issue
+   *  button goes with it. */
+  onCreateIssue?: (defaults: IssueCreateDefaults) => void;
   exportIssues: () => Promise<Issue[]>;
   resolveExportLookups: (needs: {
     projects: boolean;
@@ -299,6 +305,7 @@ type ColumnLabelKey =
   | "created_at"
   | "updated_at"
   | "child_progress"
+  | "pull_requests"
   | "creator";
 
 const SORTABLE_COLUMNS: Partial<Record<TableSystemColumnKey, SortField>> = {
@@ -667,7 +674,8 @@ export function InlineTitle({
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
   /** Navigate to the issue — clicking the title is the primary way IN. */
   onOpen: (event: React.MouseEvent) => void;
-  onCreateSubIssue: () => void;
+  /** Omitted when the viewer cannot create issues. */
+  onCreateSubIssue?: () => void;
   onToggleParent: () => void;
   toggleLabel: string;
   renameLabel: string;
@@ -734,11 +742,12 @@ export function InlineTitle({
               }}
               onAuxClick={stopRowNavigation}
             >
-              {row.collapsed ? (
-                <ChevronRight className="size-3.5" />
-              ) : (
-                <ChevronDown className="size-3.5" />
-              )}
+              <ChevronRight
+                className={cn(
+                  "size-3.5 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+                  !row.collapsed && "rotate-90",
+                )}
+              />
             </button>
           }
         />
@@ -777,6 +786,7 @@ export function InlineTitle({
           >
             {row.issue.title}
           </button>
+          <IssueBlockedMarker issue={row.issue} />
           <IssueDuplicateOfMarker issue={row.issue} />
           {/* Lifted out of the flex flow, the way SidebarMenuAction is. Laid
             * out inline these two reserved ~40px of the title column for
@@ -796,23 +806,25 @@ export function InlineTitle({
             * follows the row's hover colour, since that is what the cell is
             * painted with when they appear. */}
           <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center gap-0.5 bg-gradient-to-l from-background from-70% to-transparent pr-1 pl-8 opacity-0 transition-opacity group-hover:from-[color-mix(in_oklab,var(--muted)_50%,var(--background))] group-hover/title:pointer-events-auto group-hover/title:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100">
-            <DeferredTooltip
-              content={createSubIssueLabel}
-              trigger={
-                <button
-                  type="button"
-                  aria-label={createSubIssueLabel}
-                  className="rounded-xs p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onCreateSubIssue();
-                  }}
-                  onAuxClick={stopRowNavigation}
-                >
-                  <Plus className="size-3" />
-                </button>
-              }
-            />
+            {onCreateSubIssue && (
+              <DeferredTooltip
+                content={createSubIssueLabel}
+                trigger={
+                  <button
+                    type="button"
+                    aria-label={createSubIssueLabel}
+                    className="rounded-xs p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onCreateSubIssue();
+                    }}
+                    onAuxClick={stopRowNavigation}
+                  >
+                    <Plus className="size-3" />
+                  </button>
+                }
+              />
+            )}
             <DeferredTooltip
               content={renameLabel}
               trigger={
@@ -916,11 +928,12 @@ export function IssueTableGroupRow({
           type="button"
           className="sticky left-4 flex w-fit items-center gap-2 text-caption font-medium"
         >
-          {group.collapsed ? (
-            <ChevronRight className="size-3.5" />
-          ) : (
-            <ChevronDown className="size-3.5" />
-          )}
+          <ChevronRight
+            className={cn(
+              "size-3.5 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+              !group.collapsed && "rotate-90",
+            )}
+          />
           {group.label}
           <span className="font-normal tabular-nums text-muted-foreground">
             {group.count}
@@ -987,7 +1000,7 @@ type TableViewMeta = {
    *  category and owner to decide whether the write needs confirming first. */
   updateIssue: (issue: Issue, updates: Partial<UpdateIssueRequest>) => void;
   openIssue: (issue: Issue, event?: React.MouseEvent) => void;
-  createSubIssue: (issue: Issue) => void;
+  createSubIssue: ((issue: Issue) => void) | undefined;
   toggleTableParentCollapsed: (issueId: string) => void;
   handleIssueSelection: (issueId: string, shiftKey: boolean) => void;
   getActorName: (actorType: string, actorId: string) => string;
@@ -1187,7 +1200,7 @@ function IssueTableBodyCell({
           onEditingChange={setEditorOpen}
           onUpdate={onUpdate}
           onOpen={(event) => meta.openIssue(issue, event)}
-          onCreateSubIssue={() => meta.createSubIssue(issue)}
+          onCreateSubIssue={meta.createSubIssue && (() => meta.createSubIssue?.(issue))}
           onToggleParent={() => meta.toggleTableParentCollapsed(issue.id)}
           toggleLabel={t(($) => $.table.toggle_sub_issues)}
           renameLabel={t(($) => $.table.rename_title)}
@@ -1306,6 +1319,8 @@ function IssueTableBodyCell({
         <span className="text-muted-foreground">{t(($) => $.table.empty_value)}</span>
       );
     }
+    case "pull_requests":
+      return <PullRequestsCell issueId={issue.id} />;
     case "creator":
       return (
         <span className="flex min-w-0 items-center gap-1.5">
@@ -1322,6 +1337,19 @@ function IssueTableBodyCell({
   }
   return null;
 }
+
+function PullRequestsCell({ issueId }: { issueId: string }) {
+  const { t } = useT("issues");
+  const pullRequests = useIssuePullRequestSummaries(issueId, true);
+  return pullRequests.length > 0 ? (
+    <IssuePullRequestChips pullRequests={pullRequests} max={3} />
+  ) : (
+    <span className="text-muted-foreground">{t(($) => $.table.empty_value)}</span>
+  );
+}
+
+const TABLE_SCROLL_KEY = "table";
+const TABLE_SCROLL_ROOT = { "data-tab-scroll-root": TABLE_SCROLL_KEY };
 
 export function TableView({
   serverQuery,
@@ -1389,6 +1417,10 @@ export function TableView({
   // The one cell whose editor (picker popup / rename input) is open — see
   // TableViewMeta.editingCellKey.
   const [editingCellKey, setEditingCellKey] = useState<string | null>(null);
+  // Pull-based scroll restoration (MUL-4741): the table's two-axis scroller
+  // gets its saved offsets back when it attaches.
+  const restoredScrollTop = useRestoredScrollOffset(TABLE_SCROLL_KEY);
+  const restoreScrollRef = useRestoredScrollRef(TABLE_SCROLL_KEY);
 
   const groupingPropertyId = propertyIdFromViewKey(tableGrouping);
   const effectiveTableGrouping =
@@ -2197,7 +2229,7 @@ export function TableView({
   const openIssue = useCallback(
     (issue: Issue, event?: React.MouseEvent) => {
       // Match card links, including the preferred default and modifier keys.
-      if (handlePeekClick(issue.id, event)) {
+      if (handlePeekClick(issue, event)) {
         if (event?.shiftKey) window.getSelection()?.removeAllRanges();
         return;
       }
@@ -2205,7 +2237,7 @@ export function TableView({
       // middle clicks open tabs. Callbacks without an event (keyboard
       // affordances) count as plain clicks.
       intentNavigate(
-        paths.issueDetail(issue.id),
+        paths.issueDetail(issueRouteRef(issue)),
         event ? resolveClickIntent(event) : "push",
         issue.identifier,
       );
@@ -2213,9 +2245,11 @@ export function TableView({
     [intentNavigate, paths, handlePeekClick],
   );
 
-  const createSubIssue = useCallback(
-    (issue: Issue) =>
-      onCreateIssue(subIssueCreateDefaults(issue)),
+  const createSubIssue = useMemo(
+    () =>
+      onCreateIssue
+        ? (issue: Issue) => onCreateIssue(subIssueCreateDefaults(issue))
+        : undefined,
     [onCreateIssue],
   );
 
@@ -2271,6 +2305,9 @@ export function TableView({
           cell: IssueTableBodyCell,
         };
         if (config.width !== undefined) definition.size = config.width;
+        // Room for three "#123" chips before the overflow count; the 150px
+        // default clips the second repo-prefixed chip mid-number.
+        else if (config.key === "pull_requests") definition.size = 200;
         return definition;
       }),
       {
@@ -2363,7 +2400,7 @@ export function TableView({
         const property = propertyId ? exportPropertyById.get(propertyId) : undefined;
         return property ? isActorPropertyType(property.type) : false;
       });
-      const [rows, exportLookups, exportActorName] = await Promise.all([
+      const [rows, exportLookups, exportActorName, exportPullRequests] = await Promise.all([
         mode === "all" ? exportIssues() : Promise.resolve(selectedIssues),
         resolveExportLookups({
           projects: csvColumns.some((column) => column.key === "project"),
@@ -2380,6 +2417,9 @@ export function TableView({
               buildActorNameResolver({ members, agents, squads }),
             )
           : Promise.resolve(getActorName),
+        csvColumns.some((column) => column.key === "pull_requests")
+          ? queryClient.fetchQuery(issuePullRequestSummariesOptions(wsId))
+          : Promise.resolve(null),
       ]);
       const headers = csvColumns.map((column) => {
         const propertyId = propertyIdFromViewKey(column.key);
@@ -2428,6 +2468,10 @@ export function TableView({
               const progress = exportLookups.childProgressMap.get(issue.id);
               return progress ? `${progress.done}/${progress.total}` : "";
             }
+            case "pull_requests":
+              return (exportPullRequests?.[issue.id] ?? [])
+                .map((pr) => pr.html_url)
+                .join(", ");
             case "creator":
               return exportActorName(issue.creator_type, issue.creator_id);
           }
@@ -2527,6 +2571,9 @@ export function TableView({
           <DataTable
             table={table}
             virtualizeRows
+            scrollContainerRef={restoreScrollRef}
+            initialScrollTop={restoredScrollTop}
+            scrollContainerAttributes={TABLE_SCROLL_ROOT}
             emptyMessage={t(($) => $.table.empty)}
             onRowClick={(row, event) => {
               if (row.original.kind === "issue") {

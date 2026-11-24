@@ -6,6 +6,7 @@
   "breadcrumb_aria": "当前菜单",
   "groups": {
     "pages": "页面",
+    "views": "视图",
     "commands": "命令",
     "members": "成员",
     "agents": "智能体",
@@ -15,6 +16,7 @@
     "autopilots": "自动化",
     "chats": "对话",
     "skills": "Skills",
+    "docs": "文档",
     "cancelled": "已取消",
     "recent": "最近",
     "workspaces": "工作区",
@@ -27,7 +29,7 @@
     "selected_issues_other": "已选 {{count}} 个任务",
     "current_project": "当前项目",
     "current_agent": "当前智能体",
-    "current_autopilot": "当前自动化",
+    "current_autopilot": "当前自动化任务",
     "inbox": "收件箱",
     "current_chat": "当前对话"
   },
@@ -36,12 +38,12 @@
     "current_mode_aria": "当前模式",
     "new_issue": "新建任务",
     "new_project": "新建项目",
-    "new_autopilot": "新建自动化",
+    "new_autopilot": "新建自动化任务",
     "chat_with_agent": "和智能体对话",
     "change_theme": "切换主题...",
     "send_feedback": "发送反馈",
     "copy_issue_link": "复制任务链接",
-    "copy_identifier": "复制标识符 ({{identifier}})",
+    "copy_identifier": "复制编号（{{identifier}}）",
     "fold_all_comments": "收起全部评论",
     "unfold_all_comments": "展开全部评论"
   },
@@ -74,7 +76,7 @@
     "chat": "和 {{name}} 对话",
     "assign_issue": "把任务指派给 {{name}}...",
     "new_issue": "新建任务给 {{name}}",
-    "pin_in_chat": "在聊天里固定",
+    "pin_in_chat": "在对话中固定",
     "unpin_in_chat": "从聊天里取消固定",
     "settings": "打开智能体设置"
   },
@@ -122,7 +124,6 @@
     "unsubscribed": "已取消订阅",
     "label_added": "已添加标签 {{name}}",
     "label_removed": "已移除标签 {{name}}",
-    "label_failed": "未能给所有任务添加标签 {{name}}",
     "update_failed": "更新失败",
     "assigned": "已把 {{identifier}} 指派给 {{name}}"
   },
@@ -133,8 +134,8 @@
     "type_to_find_people": "输入关键词查找成员和智能体"
   },
   "delegate": {
-    "row": "交给智能体：「{{prompt}}」",
-    "hint": "快速创建"
+    "row": "交给智能体：\"{{prompt}}\"",
+    "hint": "通过智能体创建"
   },
   "best": {
     "assign": "把 {{subject}} 指派给 {{name}}",
@@ -156,9 +157,10 @@
     "back": "返回",
     "prefix_commands": "命令",
     "prefix_issues": "任务",
-    "prefix_people": "人和智能体"
+    "prefix_people": "成员与智能体"
   },
   "trigger": {
     "label": "搜索..."
-  }
+  },
+  "untitled_doc": "未命名"
 }

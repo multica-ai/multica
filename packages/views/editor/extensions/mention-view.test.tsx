@@ -21,6 +21,7 @@ vi.mock("@tiptap/react", () => ({
 }));
 
 vi.mock("@multica/core/paths", () => ({
+  issueRouteRef: (issue: { id: string; identifier?: string | null }) => issue.identifier || issue.id,
   useWorkspacePaths: () => ({
     issueDetail: (id: string) => `/acme/issues/${id}`,
     projectDetail: (id: string) => `/acme/projects/${id}`,
@@ -28,12 +29,14 @@ vi.mock("@multica/core/paths", () => ({
 }));
 
 vi.mock("../../issues/components/issue-chip", () => ({
+  useChipIssue: () => undefined,
   IssueChip: ({ fallbackLabel }: { fallbackLabel?: string }) => (
     <span data-testid="issue-chip">{fallbackLabel}</span>
   ),
 }));
 
 vi.mock("../../projects/components/project-chip", () => ({
+  useChipProject: () => undefined,
   ProjectChip: ({ fallbackLabel }: { fallbackLabel?: string }) => (
     <span data-testid="project-chip">{fallbackLabel}</span>
   ),

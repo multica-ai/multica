@@ -3,7 +3,8 @@
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { formatDateOnly } from "@multica/core/issues/date";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { StatusIcon, PriorityIcon } from "../../issues/components";
+import { StatusIcon } from "../../issues/components/status-icon";
+import { PriorityIcon } from "../../issues/components/priority-icon";
 import type { InboxItem, InboxItemType, IssueStatus, IssuePriority } from "@multica/core/types";
 import { getQuickCreateOutcomeDetail } from "./inbox-display";
 import { useLocale, useT } from "../../i18n";
@@ -27,6 +28,8 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     due_date_changed: t(($) => $.types.due_date_changed),
     new_comment: t(($) => $.types.new_comment),
     mentioned: t(($) => $.types.mentioned),
+    doc_comment: t(($) => $.types.doc_comment),
+    doc_mentioned: t(($) => $.types.doc_mentioned),
     review_requested: t(($) => $.types.review_requested),
     task_completed: t(($) => $.types.task_completed),
     task_failed: t(($) => $.types.task_failed),
@@ -38,7 +41,10 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     quick_create_unconfirmed: t(($) => $.types.quick_create_unconfirmed),
     autopilot_paused: t(($) => $.types.autopilot_paused),
     autopilot_quota_exceeded: t(($) => $.types.autopilot_quota_exceeded),
+    app_tool_calls_quota_exceeded: t(($) => $.types.app_tool_calls_quota_exceeded),
     children_done: t(($) => $.types.children_done),
+    blockers_done: t(($) => $.types.blockers_done),
+    project_owner_joined: t(($) => $.types.project_owner_joined),
     app_action_requested: t(($) => $.types.app_action_requested),
     app_action_reminder: t(($) => $.types.app_action_reminder),
     app_connect_requested: t(($) => $.types.app_connect_requested),
@@ -51,6 +57,12 @@ export function useTypeLabels(): Record<InboxItemType, string> {
 function shortDate(dateStr: string, locale: string): string {
   return formatDateOnly(dateStr, { month: "short", day: "numeric" }, locale);
 }
+
+// The label sits in a one-line, ellipsis-truncated row. Keep it plain inline
+// content with the icon flowing in the text: an `inline-flex` wrapper is a
+// single atomic box, and when it does not fit the browser hides the whole box
+// behind the ellipsis, leaving only "Name …" on the row. (MUL-9407)
+const INLINE_ICON_CLASS = "inline-block h-3 w-3 align-[-0.125em]";
 
 export function InboxDetailLabel({ item }: { item: InboxItem }) {
   const { t } = useT("inbox");
@@ -68,15 +80,15 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
     case "status_changed": {
       if (!details.to) return <span>{typeLabels[item.type]}</span>;
       return (
-        <span className="inline-flex items-center gap-1">
-          {t(($) => $.labels.set_status_to)}
+        <span>
+          {t(($) => $.labels.set_status_to)}{" "}
           <StatusIcon
             status={details.to as IssueStatus}
             category={categoryOf(details.to)}
             color={colorOf(details.to)}
             icon={iconOf(details.to)}
-            className="h-3 w-3"
-          />
+            className={INLINE_ICON_CLASS}
+          />{" "}
           {statusLabelOf(details.to)}
         </span>
       );
@@ -85,9 +97,9 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
       if (!details.to) return <span>{typeLabels[item.type]}</span>;
       const label = priorityLabel(details.to, tIssues);
       return (
-        <span className="inline-flex items-center gap-1">
-          {t(($) => $.labels.set_priority_to)}
-          <PriorityIcon priority={details.to as IssuePriority} className="h-3 w-3" />
+        <span>
+          {t(($) => $.labels.set_priority_to)}{" "}
+          <PriorityIcon priority={details.to as IssuePriority} className={INLINE_ICON_CLASS} />{" "}
           {label}
         </span>
       );
@@ -142,6 +154,8 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
     }
     case "autopilot_quota_exceeded":
       return <span>{t(($) => $.labels.autopilot_quota_blocked)}</span>;
+    case "app_tool_calls_quota_exceeded":
+      return <span>{t(($) => $.labels.app_tool_calls_quota_blocked)}</span>;
     case "children_done": {
       // The stage arrives as a JSON number; details are typed as strings.
       const stage = details.stage != null ? String(details.stage) : "";

@@ -7,6 +7,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
 import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check, Archive, Pencil, Loader2, Square, X } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import { UI_EASE_IN, UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import {
@@ -38,6 +39,7 @@ import { NoAgentBanner } from "./no-agent-banner";
 import { ArchivedAgentBanner } from "./archived-agent-banner";
 import { AgentAccessRevokedBanner } from "./agent-access-revoked-banner";
 import { RuntimeRequiredBanner } from "./runtime-required-banner";
+import { CollapsibleSlot } from "./collapsible-slot";
 import {
   pendingChatTasksOptions,
   chatKeys,
@@ -54,6 +56,7 @@ import { ChatWindowMessages } from "./chat-window-messages";
 import { ChatInput } from "./chat-input";
 import { useChatAnnotations } from "./use-chat-annotations";
 import { ChatQueue } from "./chat-queue";
+import { ChatWakeupStrip, useChatWakeups } from "./chat-wakeups";
 import { ChatAppRequests } from "../../common/app-requests";
 import { EmptyState } from "./chat-empty-state";
 import { SessionRenameInput } from "./session-rename-input";
@@ -95,6 +98,7 @@ export function ChatWindow() {
   useQuickActionsPendingTimeout(activeSessionId ?? null, quickActionsPending);
   // Toast when an accepted refresh later fails in the daemon (async half).
   useQuickActionsFailureToast(activeSessionId ?? null);
+  const wakeups = useChatWakeups(activeSessionId);
 
   // The window adds its own focus moments — opening it, and Ask Multica starting
   // a new chat — on top of the controller's new-chat nonce. Both counters only
@@ -242,6 +246,26 @@ export function ChatWindow() {
   const closeLabel = t(($) => $.window.close_tooltip);
   const sizeTransition =
     isDragging || reduceMotion ? { duration: 0 } : { type: "spring" as const, duration: 0.3, bounce: 0 };
+  const visibilityTransition = reduceMotion
+    ? { duration: 0 }
+    : isVisible
+      ? { duration: UI_MOTION_DURATION.fast, ease: UI_EASE_OUT }
+      : { duration: UI_MOTION_DURATION.micro, ease: UI_EASE_IN };
+  const hiddenScale = isMobile || reduceMotion ? 1 : 0.96;
+  const hiddenY = reduceMotion ? 0 : 8;
+
+  const statusBanner = c.noAgent ? (
+    <NoAgentBanner />
+  ) : c.isAgentAccessRevoked ? (
+    <AgentAccessRevokedBanner agentName={activeAgent?.name} />
+  ) : c.isAgentArchived ? (
+    <ArchivedAgentBanner agentName={activeAgent?.name} />
+  ) : !c.isAgentRuntimeBound && activeAgent ? (
+    <RuntimeRequiredBanner agentId={activeAgent.id} agentName={activeAgent.name} />
+  ) : c.availability === "offline" || c.availability === "unstable" ? (
+    <OfflineBanner agentName={activeAgent?.name} availability={c.availability} />
+  ) : null;
+  const hasActiveWakeup = !!activeSessionId && wakeups.some((w) => w.status === "active");
 
   return (
     <motion.div
@@ -251,15 +275,19 @@ export function ChatWindow() {
       aria-hidden={!isOpen}
       className={containerClass}
       style={containerStyle}
-      initial={{ opacity: 0, ...motionSize }}
+      initial={{ opacity: 0, scale: hiddenScale, y: hiddenY, ...motionSize }}
       animate={{
         opacity: isVisible ? 1 : 0,
+        scale: isVisible ? 1 : hiddenScale,
+        y: isVisible ? 0 : hiddenY,
         ...motionSize,
       }}
       transition={{
         width: sizeTransition,
         height: sizeTransition,
-        opacity: { duration: 0.15 },
+        opacity: visibilityTransition,
+        scale: visibilityTransition,
+        y: visibilityTransition,
       }}
     >
       {!isMobile && <ChatResizeHandles onDragStart={startDrag} />}
@@ -393,27 +421,21 @@ export function ChatWindow() {
        *  We key off `noAgent` (the resolved-empty state) rather than
        *  `!activeAgent`, so the loading window between mount and the
        *  first agent-list response stays banner-free. */}
-      {c.noAgent ? (
-        <NoAgentBanner />
-      ) : c.isAgentAccessRevoked ? (
-        <AgentAccessRevokedBanner agentName={activeAgent?.name} />
-      ) : c.isAgentArchived ? (
-        <ArchivedAgentBanner agentName={activeAgent?.name} />
-      ) : !c.isAgentRuntimeBound && activeAgent ? (
-        <RuntimeRequiredBanner
-          agentId={activeAgent.id}
-          agentName={activeAgent.name}
-        />
-      ) : (
-        <OfflineBanner agentName={activeAgent?.name} availability={c.availability} />
-      )}
+      <CollapsibleSlot slotKey="chat-status-banner" visible={statusBanner !== null}>
+        {statusBanner}
+      </CollapsibleSlot>
 
       <div className="px-4">
         <ChatAppRequests sessionId={activeSessionId} />
       </div>
 
+      <CollapsibleSlot slotKey="chat-wakeup-slot" visible={hasActiveWakeup}>
+        <ChatWakeupStrip sessionId={activeSessionId} wakeups={wakeups} />
+      </CollapsibleSlot>
+
       <ChatQueue
         tasks={queuedTasks}
+        wakeups={wakeups}
         headStatus={pendingTask?.status}
         onSendNow={c.handleSendQueuedTaskNow}
         sendNowDisabled={c.isAgentAccessRevoked}
@@ -426,6 +448,7 @@ export function ChatWindow() {
        *  agent has been archived (read-only); locked out entirely when there's
        *  no agent (the EmptyState above carries the CTA). */}
       <ChatInput
+        hidden={!isOpen}
         onSend={c.handleSend}
         restoreDraftRequest={c.restoreDraftRequest}
         conversationStarterRequest={c.conversationStarterRequest}
@@ -435,6 +458,7 @@ export function ChatWindow() {
         onStop={c.handleStop}
         isRunning={!!pendingTaskId}
         allowSubmitWhileRunning={pendingTask?.supports_queue === true}
+        canSteerWhileRunning={pendingTask?.can_supplement}
         disabled={
           c.isSessionArchived ||
           c.isAgentArchived ||

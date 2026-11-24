@@ -40,8 +40,8 @@ Ne collez jamais le jeton dans une tâche, un message de discussion, un journal 
 
 ### Le connecter à un agent [#2-le-connecter-à-un-agent]
 
-1. Dans Multica, ouvrez **Agents**, sélectionnez un agent et ouvrez **Intégrations**.
-2. Cliquez sur **Connecter Telegram**.
+1. Dans Multica, ouvrez **Agents**, sélectionnez un agent et ouvrez **Messagerie**.
+2. Cliquez sur **Ajouter un canal de messagerie**, puis choisissez **Telegram**.
 3. Collez le jeton du bot et cliquez sur **Connecter**.
 
 Multica appelle Telegram pour vérifier le bot, s'assure qu'aucun webhook sortant n'entre en conflit avec le long polling, chiffre le jeton et démarre une connexion `getUpdates` supervisée. Un bot déjà connecté à un autre agent ou espace de travail doit d'abord y être déconnecté.
@@ -125,7 +125,7 @@ Sans stockage objet, le bot répond aux médias en indiquant qu'ils ne sont pas 
 
 ## Gérer les connexions
 
-Ouvrez **Paramètres → Messagerie → Telegram** pour voir les bots connectés. Les propriétaires et administrateurs peuvent en déconnecter un. La déconnexion arrête le long polling et les réponses sortantes, mais conserve les conversations Multica et les enregistrements d'audit.
+Ouvrez **Paramètres → Messagerie** pour voir les agents connectés, regroupés par plateforme. Sélectionnez un agent pour ouvrir sa section **Messagerie**. Les propriétaires et administrateurs de l'espace de travail peuvent y déconnecter le bot depuis son menu de gestion. La déconnexion arrête le long polling et les réponses sortantes, mais conserve les conversations Multica et les enregistrements d'audit.
 
 ## Configuration en auto-hébergement
 

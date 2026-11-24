@@ -42,24 +42,27 @@ import {
   EMPTY_CREATE_FEEDBACK_RESPONSE,
   EMPTY_INBOX_ITEMS,
   EMPTY_INBOX_UNREAD_SUMMARY,
+  EMPTY_SNOOZED_INBOX,
   EMPTY_SEARCH_PROJECTS_RESPONSE,
   EMPTY_USER,
   InboxItemListSchema,
   InboxUnreadSummarySchema,
+  SnoozedInboxListSchema,
   IssueTriggerPreviewSchema,
   ListIssuesResponseSchema,
   ListPropertiesResponseSchema,
   MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
   RuntimeModelListRequestSchema,
   SearchProjectsResponseSchema,
-  RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
   SendChatMessageResponseSchema,
+  SquadBriefsResponseSchema,
   SquadListSchema,
   SquadSchema,
   SourceContextPreviewSchema,
+  EMPTY_SQUAD_BRIEFS,
   TimelineEntriesSchema,
   UserSchema,
   PluginInstallationSchema,
@@ -208,6 +211,21 @@ describe("ChatSessionSchema", () => {
   });
 });
 describe("IssueSchema (via ListIssuesResponseSchema)", () => {
+  it("keeps older and malformed blocker projections from breaking an issue list", () => {
+    for (const fields of [{}, { blocked_count: "one", blocked_by: "bad" }, { blocked_count: -1, blocked_by: [{}] }]) {
+      const parsed = ListIssuesResponseSchema.parse({ issues: [{ ...baseIssue, ...fields }], total: 1 });
+      expect(parsed.issues[0]?.id).toBe(baseIssue.id);
+      expect(parsed.issues[0]?.blocked_count).toBeUndefined();
+      expect(parsed.issues[0]?.blocked_by).toBeUndefined();
+    }
+  });
+  it("carries manual and stage blockers independently of status", () => {
+    const blocker = { id: "b", identifier: "MUL-2", title: "Contract", status: "done", via: "stage", closed: true };
+    const parsed = ListIssuesResponseSchema.parse({ issues: [{ ...baseIssue, blocked_by: [blocker], blocked_count: 0 }], total: 1 });
+    expect(parsed.issues[0]?.blocked_by).toEqual([blocker]);
+    expect(parsed.issues[0]?.status).toBe(baseIssue.status);
+  });
+
   // A custom status key can be derived rather than readable — "客户确认" becomes
   // `in_review_2` — so the display name travels with it. The field has to
   // survive a server that predates it, since an issue that fails validation
@@ -875,6 +893,13 @@ describe("ChatPendingTaskSchema", () => {
       status: "running",
     });
     expect(parsed.queued_tasks).toBeUndefined();
+    expect(parsed.can_supplement).toBeUndefined();
+  });
+
+  it("accepts explicit steering capability and ignores malformed values", () => {
+    expect(ChatPendingTaskSchema.parse({ can_supplement: true }).can_supplement).toBe(true);
+    expect(ChatPendingTaskSchema.parse({ can_supplement: false }).can_supplement).toBe(false);
+    expect(ChatPendingTaskSchema.parse({ can_supplement: "yes" }).can_supplement).toBeUndefined();
   });
 
   it("parses queued task summaries", () => {
@@ -930,6 +955,14 @@ describe("SendChatMessageResponseSchema", () => {
 
   it("ignores a malformed additive queue position without losing the accepted send", () => {
     expect(SendChatMessageResponseSchema.parse({ ...base, queued: "no" }).queued).toBeUndefined();
+  });
+
+  it("preserves steering acceptance and tolerates older or malformed metadata", () => {
+    expect(SendChatMessageResponseSchema.parse({ ...base, steered: true }).steered).toBe(true);
+    expect(SendChatMessageResponseSchema.parse({ ...base, steered: true, message_task_id: "root-task" }).message_task_id).toBe("root-task");
+    expect(SendChatMessageResponseSchema.parse(base).steered).toBeUndefined();
+    expect(SendChatMessageResponseSchema.parse({ ...base, steered: "yes", message_created_at: 42, message_task_id: 42 }))
+      .toMatchObject({ ...base, steered: undefined, message_created_at: undefined, message_task_id: undefined });
   });
 });
 
@@ -1182,6 +1215,34 @@ describe("SquadListSchema member preview drift", () => {
     expect(parsed[0]?.member_preview).toHaveLength(2);
     expect(parsed[0]?.member_preview?.[0]?.role).toBe("leader");
   });
+
+  it("treats a squad from an older backend as leader handoff", () => {
+    expect(SquadSchema.parse(baseSquad).handoff_mode).toBe("leader");
+  });
+
+  it("falls back to leader handoff for an unknown mode", () => {
+    expect(SquadSchema.parse({ ...baseSquad, handoff_mode: "round_robin" }).handoff_mode).toBe("leader");
+    expect(SquadSchema.parse({ ...baseSquad, handoff_mode: "direct" }).handoff_mode).toBe("direct");
+  });
+});
+
+describe("SquadBriefsResponseSchema drift", () => {
+  it("defaults missing fields instead of dropping the briefs", () => {
+    const parsed = SquadBriefsResponseSchema.parse({
+      briefs: [{ member_type: "agent", member_id: "agent-2" }],
+    });
+    expect(parsed.handoff_mode).toBe("leader");
+    expect(parsed.briefs).toEqual([{ member_type: "agent", member_id: "agent-2", is_leader: false, brief: "" }]);
+  });
+
+  it("returns the empty fallback for a malformed body", () => {
+    expect(
+      parseWithFallback({ briefs: "nope" }, SquadBriefsResponseSchema, EMPTY_SQUAD_BRIEFS, {
+        endpoint: "GET /api/squads/:id/briefs",
+      }),
+    ).toEqual(EMPTY_SQUAD_BRIEFS);
+    expect(SquadBriefsResponseSchema.parse({}).briefs).toEqual([]);
+  });
 });
 
 // The workspace dashboard and runtime-detail pages were re-pointed at the
@@ -1271,7 +1332,6 @@ describe("dashboard + runtime usage schema drift", () => {
 
   it("coerces missing fields on every runtime usage schema", () => {
     expect(RuntimeUsageListSchema.parse([{ date: "2026-05-19" }])[0]?.input_tokens).toBe(0);
-    expect(RuntimeHourlyActivityListSchema.parse([{ hour: 9 }])[0]?.count).toBe(0);
     expect(RuntimeUsageByAgentListSchema.parse([{ model: "x" }])[0]?.agent_id).toBe("");
     expect(RuntimeUsageByHourListSchema.parse([{ hour: 9 }])[0]?.model).toBe("");
   });
@@ -1510,6 +1570,46 @@ describe("InboxUnreadSummarySchema", () => {
   });
 });
 
+describe("SnoozedInboxListSchema", () => {
+  const ENDPOINT = { endpoint: "GET /api/inbox/snoozed" };
+  const row = (overrides: Record<string, unknown> = {}) => ({
+    issue_id: "issue-1",
+    item_id: "inbox-1",
+    snoozed_until: "2026-06-16T08:00:00Z",
+    snoozed_at: "2026-06-15T08:00:00Z",
+    updates: 0,
+    ...overrides,
+  });
+
+  it("keeps a row whose issue identifier is missing or unusable", () => {
+    const parsed = parseWithFallback(
+      [row(), row({ issue_id: "issue-2", issue_identifier: 7 }), row({ issue_id: "issue-3", issue_identifier: "MUL-3" })],
+      SnoozedInboxListSchema,
+      EMPTY_SNOOZED_INBOX,
+      ENDPOINT,
+    );
+    expect(parsed.map((item) => item.issue_identifier)).toEqual([undefined, null, "MUL-3"]);
+  });
+
+  it("keeps a row whose issue title or status is missing or unusable", () => {
+    const parsed = parseWithFallback(
+      [
+        row(),
+        row({ issue_id: "issue-2", issue_title: 7, issue_status: "" }),
+        row({ issue_id: "issue-3", issue_title: "Fix login", issue_status: "in_review" }),
+      ],
+      SnoozedInboxListSchema,
+      EMPTY_SNOOZED_INBOX,
+      ENDPOINT,
+    );
+    expect(parsed.map((item) => [item.issue_title, item.issue_status])).toEqual([
+      [undefined, undefined],
+      [null, null],
+      ["Fix login", "in_review"],
+    ]);
+  });
+});
+
 describe("InboxItemListSchema", () => {
   const ENDPOINT = { endpoint: "GET /api/inbox/archived" };
 
@@ -1569,6 +1669,16 @@ describe("InboxItemListSchema", () => {
     expect(
       parseWithFallback([withoutOptionals], InboxItemListSchema, EMPTY_INBOX_ITEMS, ENDPOINT),
     ).toHaveLength(1);
+  });
+
+  it("keeps the row when the issue identifier is unusable", () => {
+    const parsed = parseWithFallback(
+      [row({ issue_identifier: 7 }), row({ id: "inbox-2", issue_identifier: "MUL-7" })],
+      InboxItemListSchema,
+      EMPTY_INBOX_ITEMS,
+      ENDPOINT,
+    );
+    expect(parsed.map((item) => item.issue_identifier)).toEqual([null, "MUL-7"]);
   });
 
   it("returns the empty fallback when an issue projection is wrong-typed", () => {
@@ -2072,6 +2182,11 @@ describe("SidebarProjectPrefsDocSchema", () => {
 // dialog, the "ask your operator" state, the revoked-vs-active badge), so a
 // malformed response must degrade to the safe state rather than a broken one.
 describe("WeCom installation schemas", () => {
+  it("accepts the bot display name while remaining compatible with older servers", () => {
+    expect(WecomInstallationSchema.parse({ id: "i1", bot_name: "Support Bot" }).bot_name).toBe("Support Bot");
+    expect(WecomInstallationSchema.parse({ id: "i1" }).bot_name).toBeUndefined();
+    expect(WecomInstallationSchema.safeParse({ id: "i1", bot_name: 42 }).success).toBe(false);
+  });
   it("parses a well-formed installation", () => {
     const parsed = WecomInstallationSchema.parse({
       id: "i1",

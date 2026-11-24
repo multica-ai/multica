@@ -144,7 +144,7 @@ func TestTaskPhaseRecorderHandleTaskMarksBoundaryPhases(t *testing.T) {
 		return TaskResult{Status: "completed"}, nil
 	})
 
-	d.handleTask(context.Background(), Task{ID: "task-1", RuntimeID: "runtime-1"}, 0)
+	d.handleTask(context.Background(), Task{ID: "task-1", RuntimeID: "runtime-1"}, newTestTaskSlot(0))
 
 	want := []taskPhase{taskPhaseClaimed, taskPhaseFinished}
 	if got := capture.phasesSnapshot(); !slices.Equal(got, want) {

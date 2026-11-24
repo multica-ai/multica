@@ -41,6 +41,7 @@ Describe the work, pick an agent or squad under **Created by**, and click **Crea
 - If the request names an assignee ("give this to Lei Li"), the agent assigns them. Otherwise the assignee is whoever you picked under **Created by**: the agent itself, or the squad if you picked one. New issues start in `todo`, so when the assignee is an agent, it starts working on the issue as soon as it exists.
 - The project, priority, and due date you set in the dialog are used as-is; the agent does not infer different ones from the text. Project shows by default, and priority and due date are under the **⋯** menu. Choose which fields always show in **Settings → Preferences → Fields shown when creating issues**.
 - With **Create another** on, the dialog stays open after each submission so you can write the next one.
+- Up to three agents or squads appear as quick-switch chips next to **Created by**, ranked by how often you create issues with them; click one or press `⌥1`–`⌥3` (`Alt+1`–`Alt+3` on Windows and Linux) to switch.
 - **Created by** lists only the agents and squads you are allowed to assign. If the agent's runtime has a multica CLI that is too old, the dialog asks you to upgrade the daemon or switch to manual create.
 
 ## Choose an assignee
@@ -140,6 +141,8 @@ An issue belongs to at most one [project](/projects); the project provides share
 
 Larger work can be split into sub-issues: the parent issue keeps the overall goal while sub-issues progress independently. Parent and child statuses do not affect each other.
 
+An issue's direct children are listed under **Sub-issues** below its description, with progress counting all children. Open a child from there.
+
 Creating a sub-issue from a parent prefills its project and, when set, its assignee. In manual create, **Copy parent fields** lets you choose priority, labels, dates, or individual custom properties to copy. Only the selected values replace your form values, once; later parent changes do not sync. The child keeps its own description and status. Labels, start date, and custom properties stay in the manual draft when switching to Create with agent.
 
 Sub-issues can be given a **stage** to advance in batches — 1, 2, 3. When every sub-issue in the earliest unfinished stage reaches `done` or `cancelled`, the parent issue receives a "sub-issues completed" notification; when the parent's assignee is an agent, it wakes up and decides whether to start the next stage. Sub-issues without a stage count as one batch and notify once when they all finish. The system triggers this wakeup; see [Issue wakeups](/issue-wakeups) for its rules and the other kinds of wakeup.
@@ -157,11 +160,13 @@ Save a combination of filters and display settings you use often as a view: clic
 | Visibility | Who sees it | Who can edit and delete it |
 |---|---|---|
 | **Only visible to me** | Only you | You |
-| **Visible to workspace members** | Every workspace member | You, plus workspace `owner` and `admin` |
+| **Visible to workspace members** | Members with the `owner`, `admin`, or `member` role | You, plus workspace `owner` and `admin` |
 
-The display settings saved in a view are its **Default display**: members see the view that way the first time they open it, then adjust it for themselves without affecting anyone else. A view lives on the page it was created on: one created in a project belongs to that project, and views created in **My Issues** are always private.
+The display settings saved in a view are its **Default display**: members see the view that way the first time they open it, then adjust it for themselves without affecting anyone else. A view lives on the page it was created on: one created in a project belongs to that project, and views created on the **My Issues** page are always private.
 
-Drag views in the view bar to reorder them; ordering and visibility in **Manage views** affect only you. Right-click a view to edit it, delete it, or **Pin to sidebar**.
+Drag views in the view bar to reorder them; ordering and visibility in **Manage views** affect only you. Right-click a view to edit it, delete it, or **Add to sidebar**, which lists it in the **Views** section of the Work panel.
+
+The Views section also offers four built-in views: **All issues**; **My work**, issues assigned to you or to your agents; **Working**, issues an agent is running on; and **Subscribed**, every issue you subscribe to. Issues you have [snoozed in your inbox](/inbox#snooze-an-issue) are on its **Snoozed** tab. My work, Working, and Subscribed are All issues under a fixed condition: other filters can narrow them, but that condition can't be removed or widened. The sliders button in the Views section header turns each built-in view on or off.
 
 ### Side preview
 
@@ -171,7 +176,11 @@ While the preview is open, `J` / `K` move to the next or previous issue, `H` / `
 
 ## Batch edits
 
-Select several issues in a list, a table, or a sub-issue list, and a batch toolbar appears at the bottom to change status, priority, or assignee, or delete them all at once. In a table, Shift-click selects a range.
+Select several issues in a list, a table, or a sub-issue list to show the batch toolbar. In a table, Shift-click selects a range. The toolbar edits status, priority, assignee, labels, project, and due date. **More actions** adds start date, parent, stage for sub-issues, custom properties, copying links, and deletion. The selection's right-click menu offers the same actions.
+
+Labels show whether they are on all, some, or none of the selected issues. Add or remove one without changing other labels, or clear all labels. Custom properties can be set or cleared; multi-value properties replace the whole value.
+
+If some issues cannot take a change, the others are still updated. The result names skipped issues and their reasons, with an action to select only those issues for correction and retry.
 
 - When the selection spans several projects, the status menu offers only statuses every selected issue's workflow allows. An issue that does not support a change keeps its value, and the rest are updated.
 - Batch status changes apply directly. Agent-assigned issues that leave `backlog` start running as usual.
@@ -209,3 +218,4 @@ Deletion cannot be undone: the issue with its comments, attachments, and linked 
 - [Comments](/comments) — discuss, reply, and @mention around an issue.
 - [Assign issues to agents](/assigning-issues) — hand work to an agent and start the first run.
 - [Runs](/tasks) — learn about queuing, running, retries, and cancellation.
+- [Share an agent pool across a team](/team-agent-pool) — how people and agents hand issues to each other and review the work.

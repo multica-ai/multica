@@ -15,7 +15,13 @@ import { DesktopLoginPage } from "./pages/login";
 import { DesktopAuthRecoveryPage } from "./pages/auth-recovery";
 import { DesktopShell } from "./components/desktop-layout";
 import { UpdateNotification } from "./components/update-notification";
+import { NativeContextMenu } from "./components/native-context-menu";
 import { IssueWindow } from "./components/issue-window";
+import { DesktopDevToolbar } from "./components/desktop-dev-toolbar";
+import {
+  DESKTOP_EMERGENCY_COPY,
+  resolveDesktopEmergencyLocale,
+} from "./components/emergency-copy";
 import { useTabStore } from "./stores/tab-store";
 import { useWindowOverlayStore } from "./stores/window-overlay-store";
 import { useOpenSettingsShortcut } from "./hooks/use-open-settings-shortcut";
@@ -25,6 +31,7 @@ import { syncDaemonOnLogin } from "./platform/daemon-login-sync";
 import { createDesktopLocaleAdapter } from "./platform/i18n-adapter";
 import { captureEvent } from "@multica/core/analytics";
 import { AppearanceSync } from "@multica/views/common/appearance-sync";
+import { MotionProvider } from "@multica/views/common/motion-provider";
 import { RESOURCES } from "@multica/views/locales";
 import { DesktopClientUsageReporter } from "./platform/client-usage-reporter";
 import { DiagnosticRouteReporter } from "./platform/diagnostic-route-reporter";
@@ -355,13 +362,22 @@ function AppContent() {
   return user ? <DesktopShell /> : <DesktopLoginPage />;
 }
 
-function BlockingRuntimeConfigError({ message }: { message: string }) {
+function BlockingRuntimeConfigError({
+  locale,
+  message,
+}: {
+  locale: SupportedLocale;
+  message: string;
+}) {
+  const copy = DESKTOP_EMERGENCY_COPY[resolveDesktopEmergencyLocale(locale)];
   return (
     <div className="flex h-screen items-center justify-center bg-background p-8 text-foreground">
       <div className="max-w-xl rounded-lg border bg-card p-6 shadow-sm">
-        <h1 className="text-title font-semibold">Desktop configuration error</h1>
+        <h1 className="text-title font-semibold">{copy.configTitle}</h1>
         <p className="mt-3 text-body text-muted-foreground">
-          Multica Desktop could not load <code>~/.multica/desktop.json</code>. Fix or remove the file and restart the app.
+          {copy.configDescriptionBefore}
+          <code>~/.multica/desktop.json</code>
+          {copy.configDescriptionAfter}
         </p>
         <pre className="mt-4 whitespace-pre-wrap rounded-md bg-muted p-3 text-caption text-muted-foreground">
           {message}
@@ -447,6 +463,7 @@ export default function App() {
   // with the Chinese-first fallback stack before the override kicks in.
   useLayoutEffect(() => {
     document.documentElement.lang = HTML_LANG[locale];
+    window.desktopAPI.setLocale?.(locale);
   }, [locale]);
 
   // React to OS-level language changes detected by main on focus regain.
@@ -468,43 +485,55 @@ export default function App() {
   }, [localeAdapter, locale]);
 
   return (
-    <ThemeProvider>
-      <AppearanceSync />
-      {runtimeConfigResult.ok ? (
-        <CoreProvider
-          apiBaseUrl={runtimeConfigResult.config.apiUrl}
-          wsUrl={runtimeConfigResult.config.wsUrl}
-          onLogout={
-            windowContext.kind === "main" ? handleDaemonLogout : undefined
-          }
-          onSessionExpired={
-            windowContext.kind === "main" ? handleSessionExpired : undefined
-          }
-          identity={identity}
-          locale={locale}
-          resources={resources}
-          localeAdapter={localeAdapter}
-        >
-          <DesktopAuthSessionBridge />
-          {windowContext.kind === "main" && <DiagnosticRouteReporter />}
-          {windowContext.kind === "main" && <WorkspaceWindowBridge />}
-          {windowContext.kind === "main" && <IssueDeepLinkBridge />}
-          {windowContext.kind === "main" && (
-            <DesktopClientUsageReporter
-              apiUrl={runtimeConfigResult.config.apiUrl}
-            />
-          )}
-          {windowContext.kind === "issue" ? (
-            <IssueWindowContent />
-          ) : (
-            <AppContent />
-          )}
-        </CoreProvider>
-      ) : (
-        <BlockingRuntimeConfigError message={runtimeConfigResult.error.message} />
-      )}
-      <Toaster />
-      {windowContext.kind === "main" && <UpdateNotification />}
-    </ThemeProvider>
+    <MotionProvider>
+      <ThemeProvider>
+        <AppearanceSync />
+        {runtimeConfigResult.ok ? (
+          <CoreProvider
+            apiBaseUrl={runtimeConfigResult.config.apiUrl}
+            wsUrl={runtimeConfigResult.config.wsUrl}
+            onLogout={
+              windowContext.kind === "main" ? handleDaemonLogout : undefined
+            }
+            onSessionExpired={
+              windowContext.kind === "main" ? handleSessionExpired : undefined
+            }
+            identity={identity}
+            locale={locale}
+            resources={resources}
+            localeAdapter={localeAdapter}
+          >
+            <DesktopAuthSessionBridge />
+            <NativeContextMenu />
+            {windowContext.kind === "main" && <DiagnosticRouteReporter />}
+            {windowContext.kind === "main" && <WorkspaceWindowBridge />}
+            {windowContext.kind === "main" && <IssueDeepLinkBridge />}
+            {windowContext.kind === "main" && (
+              <DesktopClientUsageReporter
+                apiUrl={runtimeConfigResult.config.apiUrl}
+              />
+            )}
+            {windowContext.kind === "issue" ? (
+              <IssueWindowContent />
+            ) : (
+              <AppContent />
+            )}
+            {/* Opt-in dev status bar; see "Dev Toolbar" in CONTRIBUTING.md. */}
+            {import.meta.env.DEV &&
+              import.meta.env.VITE_DEV_TOOLBAR &&
+              windowContext.kind === "main" && (
+                <DesktopDevToolbar apiUrl={runtimeConfigResult.config.apiUrl} />
+              )}
+          </CoreProvider>
+        ) : (
+          <BlockingRuntimeConfigError
+            locale={locale}
+            message={runtimeConfigResult.error.message}
+          />
+        )}
+        <Toaster />
+        {windowContext.kind === "main" && <UpdateNotification />}
+      </ThemeProvider>
+    </MotionProvider>
   );
 }

@@ -117,7 +117,7 @@ describe("IssueFilterMenu search", () => {
   it("offers values as conditions and toggles them", async () => {
     const store = renderFilterMenu();
     fireEvent.click(screen.getByRole("button", { name: "Filter" }));
-    const search = await screen.findByRole("textbox", { name: "Filter by field or value…" });
+    const search = await screen.findByRole("textbox", { name: "Filter by field or value..." });
     await userEvent.type(search, "lamb");
 
     const row = await screen.findByRole("menuitemcheckbox", { name: /Assignee\s*is\s*Lambda/ });
@@ -130,7 +130,7 @@ describe("IssueFilterMenu search", () => {
   it("matches fields by name and buckets by label", async () => {
     const store = renderFilterMenu();
     fireEvent.click(screen.getByRole("button", { name: "Filter" }));
-    const search = await screen.findByRole("textbox", { name: "Filter by field or value…" });
+    const search = await screen.findByRole("textbox", { name: "Filter by field or value..." });
     await userEvent.type(search, "overdue");
     fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: /Due date\s*is\s*Overdue/ }));
     expect(store.getState().dueDateFilters).toEqual(["overdue"]);

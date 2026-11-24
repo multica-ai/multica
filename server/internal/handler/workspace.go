@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -140,6 +141,37 @@ func (h *Handler) workspaceToResponse(w db.Workspace) WorkspaceResponse {
 	}
 }
 
+// guestWorkspaceSettings are the settings a guest's issue page reads to decide
+// what to show; everything else in settings configures the workspace.
+var guestWorkspaceSettings = []string{
+	"github_enabled",
+	"github_pr_sidebar_enabled",
+	"github_auto_link_prs_enabled",
+}
+
+// workspaceResponseFor is workspaceToResponse narrowed to the viewer's role.
+// A guest (MUL-9420) gets what identifies and displays the workspace, not the
+// agent instructions (context), repositories, or settings that configure it.
+// The fields stay present, empty, so every client parses the same shape.
+func (h *Handler) workspaceResponseFor(w db.Workspace, role string) WorkspaceResponse {
+	resp := h.workspaceToResponse(w)
+	if !projectaccess.IsGuestRole(role) {
+		return resp
+	}
+	settings := map[string]any{}
+	if all, ok := resp.Settings.(map[string]any); ok {
+		for _, key := range guestWorkspaceSettings {
+			if v, ok := all[key]; ok {
+				settings[key] = v
+			}
+		}
+	}
+	resp.Context = nil
+	resp.Settings = settings
+	resp.Repos = []any{}
+	return resp
+}
+
 type MemberResponse struct {
 	ID          string `json:"id"`
 	WorkspaceID string `json:"workspace_id"`
@@ -170,19 +202,31 @@ func (h *Handler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := make([]WorkspaceResponse, len(workspaces))
-	for i, ws := range workspaces {
-		resp[i] = h.workspaceToResponse(db.Workspace{
+	// A task token is bound to one workspace, and Auth stamps that workspace
+	// into X-Workspace-ID. List only that one, so an agent the owner started
+	// in one workspace never sees the owner's other workspaces.
+	boundWorkspaceID := ""
+	if r.Header.Get("X-Actor-Source") == "task_token" {
+		boundWorkspaceID = r.Header.Get("X-Workspace-ID")
+	}
+
+	resp := make([]WorkspaceResponse, 0, len(workspaces))
+	for _, ws := range workspaces {
+		if boundWorkspaceID != "" && uuidToString(ws.ID) != boundWorkspaceID {
+			continue
+		}
+		item := h.workspaceResponseFor(db.Workspace{
 			ID: ws.ID, Name: ws.Name, Slug: ws.Slug, Description: ws.Description,
 			Settings: ws.Settings, CreatedAt: ws.CreatedAt, UpdatedAt: ws.UpdatedAt,
 			Context: ws.Context, Repos: ws.Repos, IssuePrefix: ws.IssuePrefix,
 			IssueCounter: ws.IssueCounter, AvatarUrl: ws.AvatarUrl,
 			AttributionFailClosed: ws.AttributionFailClosed,
-		})
+		}, ws.Role)
 		if ws.PinnedAt.Valid {
 			pinnedAt := timestampToString(ws.PinnedAt)
-			resp[i].PinnedAt = &pinnedAt
+			item.PinnedAt = &pinnedAt
 		}
+		resp = append(resp, item)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -230,12 +274,17 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	member, ok := h.workspaceMember(w, r, id)
+	if !ok {
+		return
+	}
+
 	ws, err := h.Queries.GetWorkspace(r.Context(), idUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, h.workspaceToResponse(ws))
+	writeJSON(w, http.StatusOK, h.workspaceResponseFor(ws, member.Role))
 }
 
 type CreateWorkspaceRequest struct {
@@ -574,6 +623,9 @@ type MemberWithUserResponse struct {
 	Name        string  `json:"name"`
 	Email       string  `json:"email"`
 	AvatarURL   *string `json:"avatar_url"`
+	// ProjectIDs lists a guest's projects. Omitted for other roles, and for
+	// guests when a guest is asking.
+	ProjectIDs []string `json:"project_ids,omitempty"`
 }
 
 func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
@@ -589,9 +641,55 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := make([]MemberWithUserResponse, len(members))
-	for i, m := range members {
-		resp[i] = MemberWithUserResponse{
+	rows, err := h.Queries.ListGuestProjects(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list members")
+		return
+	}
+	guestProjects := map[[16]byte][]string{}
+	for _, row := range rows {
+		guestProjects[row.UserID.Bytes] = append(guestProjects[row.UserID.Bytes], uuidToString(row.ProjectID))
+	}
+	// A guest sees the members, itself, and only those guests it shares a
+	// project with: guests are often outside people who should not learn of
+	// each other. Nobody's projects are listed to a guest.
+	requester, _ := ctxMember(r.Context())
+	requesterIsGuest := projectaccess.IsGuestRole(requester.Role)
+	includeGuests := clientRendersGuestRole(r)
+	// Everyone else sees a guest's grants only on projects they can see
+	// themselves: a private project's id is not shown outside its members,
+	// owners and admins included (MUL-9284).
+	var requesterHidden projectaccess.Hidden
+	if !requesterIsGuest {
+		if requesterHidden, ok = h.requestHiddenProjects(w, r, uuidToString(wsUUID)); !ok {
+			return
+		}
+	}
+	visibleGuests := map[[16]byte]bool{requester.UserID.Bytes: true}
+	if requesterIsGuest {
+		mine := map[string]bool{}
+		for _, id := range guestProjects[requester.UserID.Bytes] {
+			mine[id] = true
+		}
+		for userID, ids := range guestProjects {
+			for _, id := range ids {
+				if mine[id] {
+					visibleGuests[userID] = true
+					break
+				}
+			}
+		}
+	}
+	resp := make([]MemberWithUserResponse, 0, len(members))
+	for _, m := range members {
+		guest := projectaccess.IsGuestRole(m.Role)
+		if guest && !includeGuests {
+			continue
+		}
+		if requesterIsGuest && guest && !visibleGuests[m.UserID.Bytes] {
+			continue
+		}
+		item := MemberWithUserResponse{
 			ID:          uuidToString(m.ID),
 			WorkspaceID: uuidToString(m.WorkspaceID),
 			UserID:      uuidToString(m.UserID),
@@ -601,6 +699,10 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 			Email:       m.UserEmail,
 			AvatarURL:   h.resolveAvatarURLPtr(textToPtr(m.UserAvatarUrl)),
 		}
+		if guest && !requesterIsGuest {
+			item.ProjectIDs = visibleProjectIDs(requesterHidden, guestProjects[m.UserID.Bytes])
+		}
+		resp = append(resp, item)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -609,6 +711,8 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 type CreateMemberRequest struct {
 	Email string `json:"email"`
 	Role  string `json:"role"`
+	// ProjectIDs are required for a guest and ignored otherwise.
+	ProjectIDs []string `json:"project_ids,omitempty"`
 }
 
 func (h *Handler) memberWithUserResponse(member db.Member, user db.User) MemberWithUserResponse {
@@ -624,6 +728,13 @@ func (h *Handler) memberWithUserResponse(member db.Member, user db.User) MemberW
 	}
 }
 
+// clientRendersGuestRole reports whether the caller declared it can render
+// guest rows. Member and invitation lists hide guests from older clients,
+// whose role tables have no guest entry and crash on one.
+func clientRendersGuestRole(r *http.Request) bool {
+	return requestHasClientCapability(r, protocol.AppCapabilityWorkspaceGuestsV1)
+}
+
 func normalizeMemberRole(role string) (string, bool) {
 	if role == "" {
 		return "member", true
@@ -631,7 +742,7 @@ func normalizeMemberRole(role string) (string, bool) {
 
 	role = strings.TrimSpace(role)
 	switch role {
-	case "owner", "admin", "member":
+	case "owner", "admin", "member", projectaccess.RoleGuest:
 		return role, true
 	default:
 		return "", false
@@ -640,6 +751,8 @@ func normalizeMemberRole(role string) (string, bool) {
 
 type UpdateMemberRequest struct {
 	Role string `json:"role"`
+	// ProjectIDs are required when the member becomes a guest.
+	ProjectIDs []string `json:"project_ids,omitempty"`
 }
 
 func (h *Handler) UpdateMember(w http.ResponseWriter, r *http.Request) {
@@ -693,12 +806,33 @@ func (h *Handler) UpdateMember(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	updatedMember, err := h.Queries.UpdateMemberRole(r.Context(), db.UpdateMemberRoleParams{
-		ID:   target.ID,
-		Role: role,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update member")
+	wasGuest := projectaccess.IsGuestRole(target.Role)
+	toGuest := projectaccess.IsGuestRole(role)
+	var updatedMember db.Member
+	var guestProjects []pgtype.UUID
+	switch {
+	case toGuest && !wasGuest:
+		var admission featureAdmission
+		if admission, ok = h.requireGuestAddition(w, r, target.WorkspaceID, "make_guest"); !ok {
+			return
+		}
+		if guestProjects, ok = h.parseGuestProjectIDs(w, r, target.WorkspaceID, req.ProjectIDs); !ok {
+			return
+		}
+		updatedMember, ok = h.demoteMemberToGuest(w, r, requester, target, guestProjects)
+		if ok {
+			admission.admitted(r.Context())
+		}
+	case wasGuest && !toGuest:
+		updatedMember, ok = h.promoteGuest(w, r, target, role)
+	default:
+		updatedMember, err = h.updateMemberRoleFrom(r.Context(), target, role)
+		if err != nil {
+			writeMemberUpdateError(w, err)
+			return
+		}
+	}
+	if !ok {
 		return
 	}
 
@@ -710,12 +844,47 @@ func (h *Handler) UpdateMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	resp := h.memberWithUserResponse(updatedMember, user)
 	userID := requestUserID(r)
+	// The event reaches every member, so it carries no projects: a guest's
+	// projects are shown per viewer (ListMembersWithUser).
 	h.publish(protocol.EventMemberUpdated, uuidToString(requester.WorkspaceID), "member", userID, map[string]any{
-		"member": h.memberWithUserResponse(updatedMember, user),
+		"member": resp,
 	})
+	if toGuest {
+		resp.ProjectIDs = uuidsToStrings(guestProjects)
+	}
 
-	writeJSON(w, http.StatusOK, h.memberWithUserResponse(updatedMember, user))
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// updateMemberRoleFrom changes a role that neither starts nor ends as guest.
+// The row is locked and must still hold target's role: a concurrent change
+// (say the member became a guest and gave up its seat) is never overwritten
+// by a request decided on the role it had before.
+func (h *Handler) updateMemberRoleFrom(ctx context.Context, target db.Member, role string) (db.Member, error) {
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return db.Member{}, err
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+	if target.Role == "owner" && role != "owner" {
+		if err := lockOtherOwner(ctx, qtx, target.WorkspaceID, target.ID); err != nil {
+			return db.Member{}, err
+		}
+	}
+	if _, err := lockMemberRole(ctx, qtx, target.ID, target.Role); err != nil {
+		return db.Member{}, err
+	}
+	updated, err := qtx.UpdateMemberRole(ctx, db.UpdateMemberRoleParams{ID: target.ID, Role: role})
+	if err != nil {
+		return db.Member{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return db.Member{}, err
+	}
+	return updated, nil
 }
 
 func (h *Handler) DeleteMember(w http.ResponseWriter, r *http.Request) {
@@ -755,6 +924,10 @@ func (h *Handler) DeleteMember(w http.ResponseWriter, r *http.Request) {
 
 	requesterUserID := requestUserID(r)
 	result, err := h.revokeAndRemoveMember(r.Context(), target.WorkspaceID, target.UserID, target.ID, parseUUID(requesterUserID))
+	if errors.Is(err, errLastOwner) {
+		writeError(w, http.StatusBadRequest, errLastOwner.Error())
+		return
+	}
 	if err != nil {
 		slog.Warn("delete member failed", append(logger.RequestAttrs(r), "error", err, "member_id", memberID, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to delete member")
@@ -800,6 +973,10 @@ func (h *Handler) LeaveWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := h.revokeAndRemoveMember(r.Context(), member.WorkspaceID, member.UserID, member.ID, member.UserID)
+	if errors.Is(err, errLastOwner) {
+		writeError(w, http.StatusBadRequest, errLastOwner.Error())
+		return
+	}
 	if err != nil {
 		slog.Warn("leave workspace failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to leave workspace")
@@ -1138,7 +1315,14 @@ func lockWorkspaceTaskOwners(ctx context.Context, qtx *db.Queries, workspaceID p
 	return nil
 }
 
+// DeleteWorkspace refuses machine credentials: a task token or cloud node PAT
+// authenticates as its owner, and deleting a workspace takes every issue, doc
+// and agent in it, so only a human may do it.
 func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
+	if isMachineCredentialActor(r) {
+		writeError(w, http.StatusForbidden, "this endpoint is only available to human actors")
+		return
+	}
 	workspaceID := workspaceIDFromURL(r, "id")
 
 	// Defense in depth: the route is already gated by the
@@ -1282,6 +1466,10 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 		{
+			name: "delete chat supplements",
+			run:  func() error { return qtx.DeleteChatTaskSupplementsByWorkspace(ctx, requester.WorkspaceID) },
+		},
+		{
 			name: "delete chat pins",
 			run:  func() error { return qtx.DeleteChatPinnedAgentsByWorkspace(ctx, requester.WorkspaceID) },
 		},
@@ -1328,6 +1516,22 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			run:  func() error { return qtx.DeleteWorkspaceAutopilotQuotaPeriods(ctx, requester.WorkspaceID) },
 		},
 		{
+			name: "delete app tool call quota periods",
+			run:  func() error { return qtx.DeleteWorkspaceAppToolCallQuotaPeriods(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete entitlement limit overages",
+			run:  func() error { return qtx.DeleteWorkspaceEntitlementLimitOverages(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete entitlement feature attempts",
+			run:  func() error { return qtx.DeleteWorkspaceEntitlementFeatureAttempts(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete dashboard range views",
+			run:  func() error { return qtx.DeleteWorkspaceDashboardRangeViews(ctx, requester.WorkspaceID) },
+		},
+		{
 			name: "delete chat messages",
 			run:  func() error { return qtx.DeleteWorkspaceChatMessages(ctx, requester.WorkspaceID) },
 		},
@@ -1344,6 +1548,10 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			// and below; this clears what normal writes logged before.
 			name: "delete search index changes",
 			run:  func() error { return qtx.DeleteWorkspaceSearchIndexChanges(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete search access markers",
+			run:  func() error { return qtx.DeleteWorkspaceMemberSearchAccess(ctx, requester.WorkspaceID) },
 		},
 		// Keep source-context object intents after the workspace row is gone.
 		// They are the durable retry ledger for an upload that began before the
@@ -1383,6 +1591,10 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			run: func() error {
 				return qtx.DeleteIssueWorkflowsForWorkspace(ctx, requester.WorkspaceID)
 			},
+		},
+		{
+			name: "delete docs",
+			run:  func() error { return qtx.DeleteWorkspaceDocs(ctx, requester.WorkspaceID) },
 		},
 		{
 			name: "delete autopilot children",

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -103,7 +104,10 @@ func (s *IssueWakeupService) Expiry(in *WakeupInput, now time.Time) (pgtype.Time
 	return pgtype.Timestamptz{Time: at, Valid: true}, pgtype.Int8{}, nil
 }
 
-type IssueWakeupService struct{ Tasks *TaskService }
+type IssueWakeupService struct {
+	Tasks              *TaskService
+	blockersBackfilled atomic.Bool
+}
 
 func (s *IssueWakeupService) Validate(in *WakeupInput, now time.Time) (pgtype.Timestamptz, error) {
 	bad := func(msg string) (pgtype.Timestamptz, error) {
@@ -643,9 +647,28 @@ func (s *IssueWakeupService) authorize(ctx context.Context, q *db.Queries, ws, m
 	return nil
 }
 
+// authorizeRun is authorize plus the private-project rule every issue run
+// obeys (guardRunProjectAccess): the rule's creator and the agent's owner must
+// both still see the issue's project.
+func (s *IssueWakeupService) authorizeRun(ctx context.Context, q *db.Queries, issue db.Issue, member pgtype.UUID, a db.Agent) error {
+	if err := s.authorize(ctx, q, issue.WorkspaceID, member, a); err != nil {
+		return err
+	}
+	if err := s.Tasks.guardRunProjectAccess(ctx, issue, a, member, member); err != nil {
+		if errors.Is(err, ErrProjectAccessDenied) {
+			return ErrWakeupForbidden
+		}
+		return err
+	}
+	return nil
+}
+
 // Tick uses the existing scheduler lease. Each config has a row lock as well,
 // so a manual retry or a second server cannot dispatch the same receipt twice.
 func (s *IssueWakeupService) Tick(ctx context.Context) error {
+	if err := s.backfillBlockerRules(ctx); err != nil {
+		return err
+	}
 	return s.tick(ctx, nil)
 }
 
@@ -1019,7 +1042,7 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 	if agent.ID.Valid && agent.RuntimeID != candidate.RuntimeID {
 		return tx.Commit(ctx)
 	}
-	authErr := s.authorize(ctx, q, w.WorkspaceID, w.CreatedBy, agent)
+	authErr := s.authorizeRun(ctx, q, issue, w.CreatedBy, agent)
 	if w.DisabledAt.Valid || !active || authErr != nil {
 		if authErr != nil && !errors.Is(authErr, ErrWakeupForbidden) {
 			return authErr
@@ -1097,7 +1120,7 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 			if next, err = s.pollCondition(ctx, tx, q, w, now); err != nil {
 				return err
 			}
-		} else if _, _, err = consumeConditionHints(ctx, tx, w.ID); err != nil {
+		} else if _, _, _, err = consumeConditionHints(ctx, tx, w.ID); err != nil {
 			return err
 		}
 	}
@@ -1244,6 +1267,11 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 			return err
 		}
 		if self {
+			// An acknowledged event leaves the rule waiting for its first run.
+			// An acknowledged condition has already been satisfied.
+			if w.Kind == "event" && w.Mode == "once" && len(w.Condition) == 0 && !timedOut {
+				enabled = w.Enabled
+			}
 			if err = q.ConsumeWakeupReceipts(ctx, db.ConsumeWakeupReceiptsParams{Ids: ids}); err != nil {
 				return err
 			}
@@ -1323,7 +1351,7 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 		if err = guardIssueNotInTriage(ctx, q, issue.ID, OriginNamed); err != nil {
 			return err
 		}
-		var squadID pgtype.UUID
+		var leaderSquadID pgtype.UUID
 		if issue.AssigneeType.String == "squad" && issue.AssigneeID.Valid {
 			squad, squadErr := q.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 				ID: issue.AssigneeID, WorkspaceID: issue.WorkspaceID,
@@ -1334,11 +1362,21 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 			// Only the issue's current, active squad leader gets leader authority.
 			// Other wakeup targets remain ordinary agent turns.
 			if squadErr == nil && !squad.ArchivedAt.Valid && squad.LeaderID == agent.ID {
-				squadID = squad.ID
+				leaderSquadID = squad.ID
+			}
+		}
+		usageSquadID := leaderSquadID
+		if !usageSquadID.Valid && w.SourceTaskID.Valid {
+			if srcTask, srcErr := q.GetAgentTask(ctx, w.SourceTaskID); srcErr == nil {
+				if srcTask.UsageSquadID.Valid {
+					usageSquadID = srcTask.UsageSquadID
+				} else if srcTask.SquadID.Valid {
+					usageSquadID = srcTask.SquadID
+				}
 			}
 		}
 		contextJSON, _ := json.Marshal(map[string]any{"wakeup_id": util.UUIDToString(w.ID), "wakeup_revision": w.Revision, "wakeup_evidence": evidence, "wakeup_chain": chain})
-		task, err = q.CreateWakeupTask(ctx, db.CreateWakeupTaskParams{ID: dbid.NewV7(), AgentID: w.AgentID, RuntimeID: agent.RuntimeID, IssueID: w.IssueID, Priority: priorityToInt(issue.Priority), TriggerCommentID: w.ParentCommentID, TriggerSummary: pgtype.Text{String: "Wakeup: " + truncateForSummary(w.Instruction, 160), Valid: true}, HandoffNote: pgtype.Text{String: noteText, Valid: true}, IsLeaderTask: pgtype.Bool{Bool: squadID.Valid, Valid: true}, SquadID: squadID, OriginatorUserID: w.CreatedBy, AccountableUserID: w.CreatedBy, OriginatorSource: pgtype.Text{String: "trigger_owner", Valid: true}, TriggerEvidenceKind: pgtype.Text{String: "issue_wakeup", Valid: true}, TriggerEvidenceRefID: w.ID, DelegatedFromTaskID: w.SourceTaskID, WakeupContext: contextJSON, RuntimeMcpOverlay: overlay.Overlay, RuntimeConnectedApps: overlay.ConnectedApps})
+		task, err = q.CreateWakeupTask(ctx, db.CreateWakeupTaskParams{ID: dbid.NewV7(), AgentID: w.AgentID, RuntimeID: agent.RuntimeID, IssueID: w.IssueID, Priority: priorityToInt(issue.Priority), TriggerCommentID: w.ParentCommentID, TriggerSummary: pgtype.Text{String: "Wakeup: " + truncateForSummary(w.Instruction, 160), Valid: true}, HandoffNote: pgtype.Text{String: noteText, Valid: true}, IsLeaderTask: pgtype.Bool{Bool: leaderSquadID.Valid, Valid: true}, SquadID: leaderSquadID, UsageSquadID: usageSquadID, OriginatorUserID: w.CreatedBy, AccountableUserID: w.CreatedBy, OriginatorSource: pgtype.Text{String: "trigger_owner", Valid: true}, TriggerEvidenceKind: pgtype.Text{String: "issue_wakeup", Valid: true}, TriggerEvidenceRefID: w.ID, DelegatedFromTaskID: w.SourceTaskID, WakeupContext: contextJSON, RuntimeMcpOverlay: overlay.Overlay, RuntimeConnectedApps: overlay.ConnectedApps})
 	}
 	if err != nil {
 		return err
@@ -1492,5 +1530,12 @@ func (s *IssueWakeupService) CheckClaim(ctx context.Context, task db.AgentTaskQu
 	if err != nil {
 		return err
 	}
-	return s.authorize(ctx, s.Tasks.Queries, w.WorkspaceID, w.CreatedBy, agent)
+	issue, err := s.Tasks.Queries.GetIssue(ctx, w.IssueID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrWakeupForbidden
+	}
+	if err != nil {
+		return err
+	}
+	return s.authorizeRun(ctx, s.Tasks.Queries, issue, w.CreatedBy, agent)
 }

@@ -97,7 +97,7 @@ describe("PluginPanelSection", () => {
   it("keeps the section header free of settings-only menus", () => {
     data.installed.plugins = [installation()];
     render(<PluginPanelSection issueId="issue-1" />, { wrapper: Wrapper });
-    expect(screen.getByRole("button", { name: "Plugins 1" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Plugins" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Plugins options" })).not.toBeInTheDocument();
   });
 

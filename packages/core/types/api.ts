@@ -5,6 +5,7 @@ import type { Project, ProjectStatus } from "./project";
 
 // Issue API
 export interface CreateIssueRequest {
+ blocked_by?: string[];
   title: string;
   description?: string;
   status?: IssueStatus;
@@ -51,6 +52,8 @@ export type CreateCommentSubIssueRequest =
   | CreateCommentSubIssueAgentRequest;
 
 export interface UpdateIssueRequest {
+ blocked_by?: string[];
+ remove_blocked_by?: string[];
   /** Legacy aggregate compare-and-swap token. New text editors use field
    * baselines so unrelated issue activity does not reject their edits. */
   expected_revision?: number;
@@ -94,6 +97,46 @@ export interface UpdateIssueRequest {
    *  cancelled removes the mark. Write-only — read it back through
    *  `listIssueDuplicates`. Control field: strip from optimistic patches. */
   duplicate_of_issue_id?: string;
+}
+
+/** Label changes for a batch update; add and remove leave other labels alone, clear removes every label not being added. */
+export interface BatchIssueLabelOps {
+  add?: string[];
+  remove?: string[];
+  clear?: boolean;
+}
+
+/** Custom property changes for a batch update, keyed by property id. */
+export interface BatchIssuePropertyOps {
+  set?: IssuePropertyValues;
+  unset?: string[];
+}
+
+export type BatchIssueOutcome =
+  | "updated"
+  | "unchanged"
+  | "skipped"
+  | "would_update"
+  | "deleted"
+  | "would_delete";
+
+/** One issue's outcome in a batch write; skipped results carry a reason code. */
+export interface BatchIssueResult {
+  issue_id: string;
+  identifier?: string;
+  outcome: BatchIssueOutcome;
+  code?: string;
+  message?: string;
+}
+
+export interface BatchUpdateIssuesResponse {
+  /** Issues that now hold the requested values (updated or already unchanged). */
+  updated: number;
+  /** Absent on servers that predate per-issue results. */
+  results?: BatchIssueResult[];
+  dry_run?: boolean;
+  /** The response could not be read, so which issues changed is unknown. */
+  unconfirmed?: boolean;
 }
 
 /** Both sides of an issue's duplicate relation (MUL-7349). */
@@ -147,6 +190,7 @@ export interface IssueTriggerPreview {
 }
 
 export interface ListIssuesParams {
+ blocked?: boolean;
   limit?: number;
   offset?: number;
   workspace_id?: string;
@@ -195,9 +239,8 @@ export interface ListIssuesParams {
   ids?: string[];
   /**
    * Widen the assignee filter to issues where the user is the *indirect*
-   * assignee — assignee is one of the user's owned agents, or a squad that
-   * involves the user (human member / leader-via-owned-agent / agent member
-   * owned by the user). Direct member assignment is intentionally excluded:
+   * assignee — assignee is one of the user's owned agents, or a squad led by
+   * an agent the user owns. Direct member assignment is intentionally excluded:
    * `involves_user_id` and `assignee_id=<user>` (tab "Assigned to me") produce
    * disjoint result sets by construction.
    */
@@ -298,11 +341,6 @@ export interface IssueAssigneeGroup {
   total: number;
 }
 
-/** Raw backend response shape for `GET /api/issues/grouped?group_by=assignee`. */
-export interface GroupedIssuesResponse {
-  groups: IssueAssigneeGroup[];
-}
-
 // Server-authoritative Table query contract. Membership, grouping and counts
 // are evaluated against the complete result set; the browser only owns view
 // state such as collapsed groups/parents.
@@ -313,7 +351,7 @@ export type IssueTableScope =
   | { kind: "creator"; actor: IssueActorRef }
   | { kind: "my"; relation: "assigned" | "created" | "involved" | "any" };
 
-export type IssueTableRelation = "assigned" | "created" | "my_agents" | "subscribed";
+export type IssueTableRelation = "assigned" | "created" | "my_agents" | "subscribed" | "blocked";
 
 export type IssueTableNegatableFilter =
   | "statuses"
@@ -380,6 +418,8 @@ export interface IssueTableFilters {
     end: string;
   };
   working_only?: boolean;
+  /** No visible running or queued work, matching the Inbox Idle filter. */
+  idle_only?: boolean;
   /** Match the running-task issue projection returned by
    *  `/api/working-agents`. An explicit empty list matches nothing. */
   working_issue_ids?: string[];
@@ -675,10 +715,14 @@ export interface UpdateMeRequest {
 export interface CreateMemberRequest {
   email: string;
   role?: MemberRole;
+  /** Required for a guest: the projects it can access. */
+  project_ids?: string[];
 }
 
 export interface UpdateMemberRequest {
   role: MemberRole;
+  /** Required when the member becomes a guest. */
+  project_ids?: string[];
 }
 
 // Personal Access Tokens

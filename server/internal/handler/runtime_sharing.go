@@ -18,6 +18,42 @@ var errRuntimeManagedByConnection = errors.New("runtime managed by connection")
 
 var errInvalidRuntimeShare = errors.New("invalid runtime sharing")
 
+// errRuntimeFeatureLocked rejects an addition to runtime_member_sharing; the
+// rejection is already recorded and the caller answers feature_locked.
+var errRuntimeFeatureLocked = errors.New("runtime member sharing is not included in the plan")
+
+const runtimeSharingOpAddMembers = "add_members"
+
+// runtimeMemberSharingAdds reports whether moving a runtime's access from
+// previous to next adds to the paid feature runtime_member_sharing (MUL-9491):
+// next shares the private runtime with someone previous did not. Switching
+// from "only me" or public to specific members is an addition; making it
+// public, making it "only me", removing people, and re-saving the same list
+// are not. Runtime claim and binding checks never consult the feature, so an
+// existing list keeps working after a downgrade.
+func runtimeMemberSharingAdds(previous, next db.AgentRuntime) bool {
+	if next.Visibility != "private" {
+		return false
+	}
+	var had []pgtype.UUID
+	if previous.Visibility == "private" {
+		had = previous.SharedWith
+	}
+	for _, id := range next.SharedWith {
+		if id != next.OwnerID && !slices.Contains(had, id) {
+			return true
+		}
+	}
+	return false
+}
+
+// runtimeShareRequestMayAdd reports whether a request names any recipient, the
+// only way it can add to runtime_member_sharing. Requests that cannot add skip
+// reading the feature.
+func runtimeShareRequestMayAdd(req UpdateAgentRuntimeRequest) bool {
+	return len(req.sharedWithIDs) > 0
+}
+
 func parseRuntimeSharedWith(w http.ResponseWriter, raw []string) ([]pgtype.UUID, bool) {
 	if len(raw) > 1000 {
 		writeError(w, http.StatusBadRequest, "shared_with has too many members")

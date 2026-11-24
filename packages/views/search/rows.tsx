@@ -18,7 +18,7 @@ export const GROUP_CLASS =
   "px-2 py-1 [&_[cmdk-group-heading]]:flex [&_[cmdk-group-heading]]:min-w-0 [&_[cmdk-group-heading]]:items-center [&_[cmdk-group-heading]]:gap-1.5 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-1.5 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-caption [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground";
 
 export const ROW_CLASS =
-  "group/row flex min-h-[var(--issue-row-height)] cursor-default select-none items-center gap-2.5 rounded-md px-2 py-1 text-body outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent";
+  "group/row flex min-h-[var(--issue-row-height)] cursor-default select-none items-center gap-2.5 rounded-md px-2 py-1 text-body outline-none transition-[background-color,opacity] duration-100 motion-reduce:transition-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent";
 
 export const ROW_ICON_CLASS = "size-4 shrink-0 text-muted-foreground";
 
@@ -71,6 +71,8 @@ export function CommandRow({
   const Icon = command.icon;
   return (
     <CommandPrimitive.Item
+      data-mc="palette-item"
+      data-type="command"
       value={scope ? `command:${scope}:${command.id}` : `command:${command.id}`}
       onSelect={() => {
         if (command.page) {

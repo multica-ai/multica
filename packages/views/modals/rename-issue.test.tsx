@@ -153,7 +153,7 @@ describe("RenameIssueModal", () => {
           code: "revision_conflict",
         });
       }
-      serverIssue = { ...serverIssue, ...updates, revision: serverIssue.revision + 1 };
+      serverIssue = { ...serverIssue, title: updates.title ?? serverIssue.title, revision: serverIssue.revision + 1 };
       return serverIssue;
     });
     const { onClose, input, queryClient } = renderModal(data);

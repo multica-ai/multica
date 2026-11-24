@@ -11,7 +11,7 @@ Product contracts the runtime brief does not fully encode.
 - [Charts and files in a comment](#charts-and-files-in-a-comment)
 - [Incorrect to correct](#incorrect-to-correct)
 
-To attach a local file to an existing issue description, use `multica issue update <id> --attachment <local-path>`. The CLI appends the file's Markdown reference to the end of the description; to replace an image, also use `--description-file` to remove the old reference. Do not put local filesystem paths in the description.
+To attach a local file to an existing issue description, use `multica issue update <id> --attachment <local-path>`. The CLI appends the file's Markdown reference to the end of the description; to replace an image, also remove the old reference with `multica issue edit-description <id> --old <old reference> --new ""`. Do not put local filesystem paths in the description.
 
 ## PR linking
 
@@ -105,8 +105,10 @@ a draft?" is `state == "draft"`; coarse CI status is `checks_conclusion`.
 If the command returns no linked PRs after a PR was opened, check the syntax
 first: the key must be in the PR title or branch, or right after a closing
 keyword in the body — a bare body mention does not count. When the syntax is the
-problem, editing the title re-runs the scan. If a person removed
-the PR from the issue, it stays removed until someone links it again.
+problem, editing the title re-runs the scan. Otherwise link the synced PR with
+`multica issue pull-requests link <issue-id> <pr-url>`; that also restores a PR
+someone removed (removed PRs stay off until relinked). `unlink <issue-id> <pr>`
+(URL, number, or id) removes one and keeps it removed.
 
 If the key is already written correctly and the list is still empty, stop editing
 the PR blind: another no-op edit cannot fix an integration that never received the
@@ -150,6 +152,34 @@ multica view issues "Bugs" --output json --fields identifier,title,status
 while `has_more` is true, pass `next_cursor` to `--cursor`. Views and their
 "me" conditions resolve against the runtime owner, so a member's private view
 is only visible when that member owns the runtime.
+
+When asked to set up or change a view, write it yourself instead of
+describing the settings for the user to click through. A view written here is
+the same view the app saves: it appears in the owner's sidebar and stays
+editable in the app.
+
+```bash
+multica view create --name "Open bugs" --label Bug --status done,cancelled --negate status --view-mode list
+multica view update "Open bugs" --priority urgent,high --visibility workspace
+multica view duplicate "Open bugs" --name "Urgent bugs" --priority urgent
+multica view delete "Urgent bugs"
+```
+
+- Filter flags take names (status, label, project, member, agent) and resolve
+  them before writing; `--property` takes the `issue list --property` forms,
+  `--negate <filter>` makes a filter "is not". Layout flags (`--view-mode`,
+  `--grouping`, `--sort`, ...) are in `multica view create --help`.
+- `--scope` (`workspace` default, `my`, or a project via `--project <name>`)
+  is fixed at creation. Views start private and owned by the runtime owner.
+- `update` changes only what its flags name; a list flag replaces that
+  filter and `--status ""` clears it. A view using the app's advanced
+  condition tree refuses filter flags: pass `--clear-filters`, or
+  `--definition-file` with JSON edited from `view get`.
+- `--dry-run` prints the request unsaved. After saving, check the result with
+  `view issues`. "Changed since it was read" saved nothing: re-run; a stale
+  `view get` export is refused too, so export again and redo the edits. A
+  permission refusal means the runtime owner neither owns the view nor is an
+  admin: report it rather than duplicating the view to work around it.
 
 ## Custom properties: typed workflow state
 
@@ -428,7 +458,7 @@ multica issue wakeup create <issue> --until-issue <other-issue-id> --until-issue
 - `--until-status KEY` — this issue's status is that key (built-in or one of the workspace's statuses).
 - `--until-pr checks` — a linked pull request's checks finished, passing or failing, on its current head. `--until-pr merged` — a linked pull request merged. `--until-pr conflicts` — an open linked GitHub pull request has merge conflicts on its current head, for example after another PR merged into its base; with `--mode continuous` it fires again each time a resolved conflict comes back or a new head is still conflicting. With several linked pull requests, any one satisfies it. These conditions inspect only PRs linked directly to this issue; they do not inherit a parent issue's PRs. Checks and conflicts also require server-side GitHub snapshots; conflicts are not detected on Forgejo, Gitea or GitLab pull requests. A missing link or snapshot is recorded in the rule's `last_error` and retried automatically rather than rejecting the rule.
 - `--until-children-done` — every sub-issue, staged or not, is closed (`done` or `cancelled`). With `--stage N` it waits only for staged sub-issues up to stage N, and stage N must have at least one. A parent with no sub-issues never fires. The parent's assignee already gets the sub-issue wakeup described under Stages in `references/sub-issues.md`; do not add this condition for the same wake.
-- `--until-issue ISSUE` — another issue in this workspace (identifier or UUID) reaches `--until-issue-state`: `done` (default), `ended` (done or cancelled), `in_review`, or `blocked`.
+- `--until-issue ISSUE` — another issue in this workspace (identifier or UUID) reaches `--until-issue-state`: `done` (default), `ended` (done or cancelled), `in_review`, or `blocked`. This is how to wait on another issue; `--event` rules only see events on the issue they are registered on. Register it on the issue whose run should wake: a squad leader waiting on a sub-issue registers it on the squad's issue, so the run keeps the squad context.
 - The same form also accepts `--until-assignee member|agent|squad:ID`, `--until-label LABEL_ID`, and `--until-property PROPERTY_ID=VALUE` (VALUE may be JSON). `multica issue wakeup create --help` lists them.
 - `wakeup create <issue> --kind at --after 10m --instruction-file ./instruction.md` schedules one run. Alternatively use `--at <RFC3339>`.
 - `wakeup create <issue> --kind every --every 1h --instruction-file ./instruction.md` schedules a repeating check. Or use `--kind cron --cron '0 * * * *' --timezone Asia/Shanghai`.

@@ -70,6 +70,13 @@ default.** Reviewers should request changes or close the PR until one is
 provided. PRs
 missing the problem, goal, or high-level proposal are also not ready for review.
 
+Do not add or translate docs in `apps/docs/content/docs/` or root `README*.md`
+for features gated behind a default-off flag in
+`server/internal/featureflags/keys.go` (permanently enabled compat keys do not
+count); note why docs were skipped in the PR description instead. When a PR
+flips a flag to default-on or removes it for general availability, add the docs
+across all locales in the same PR.
+
 ### Screenshots and Recordings
 
 Store PR evidence as [GitHub attachments](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli).
@@ -134,11 +141,12 @@ attachments are appended. Native `gh --attach` does not deduplicate retries.
 CLI uploads require **push access to the target repository** and a credential
 accepted by GitHub's upload endpoint. Version 2.103.2 lets that endpoint decide
 which GitHub App tokens can upload; it does not guarantee support for every App
-or an Actions `GITHUB_TOKEN`. Verify the actual agent/CI credential. Without
-push access, upload through the PR editor in GitHub's web interface. Contributors
-who must stay in the CLI should ask a maintainer in the PR to upload their files;
-opening a fork PR alone does not grant upload permission on the upstream repo.
-This helper targets GitHub.com, not GitHub Enterprise Server.
+or an Actions `GITHUB_TOKEN`. Verify the actual agent/CI credential. Contributors
+without upstream push access can use a public fork as described below, upload
+through the PR editor in GitHub's web interface, or ask a maintainer in the PR
+to upload their files. Opening a fork PR alone does not grant upload permission
+on the upstream repo. `scripts/pr-shots` targets GitHub.com, not GitHub
+Enterprise Server.
 
 Supported files are PNG, JPEG, GIF, WebP, SVG, MP4, MOV, and WebM. Images are
 limited to 10 MB; video limits are 10 MB on Free plans and 100 MB on paid plans.
@@ -160,6 +168,60 @@ initial frame during capture. To compare a particular animation frame, pause
 timestamp on both versions instead. Hold a loading state with a controlled
 local API response, rather than relying on a fixed sleep. Include a short
 recording when the motion or sequence itself is the change under review.
+
+#### CLI uploads from an external contributor's fork
+
+With GitHub CLI 2.103.2+, you can upload to a public fork or evidence repository
+you control, then use its native attachment URLs in your upstream PR. Choose a
+repository where your credential has push access and an issue you can use for
+contribution evidence. Forks may need Issues enabled in their repository
+settings. Review every capture before publishing and use synthetic test data
+suitable for public access.
+
+Save `evidence.md` beside the images, with the source commit for each capture,
+viewport, theme, and reproduction steps. Include local image references where
+the images should appear, for example `![Before](./before.png)` and
+`![After](./after.png)`.
+
+Replace `OWNER/EVIDENCE-REPO` with your public repository and `1` with the
+evidence issue's number. Run this from the directory containing the files.
+
+```bash
+gh issue comment 1 --repo OWNER/EVIDENCE-REPO --body-file ./evidence.md \
+  --attach ./before.png --attach ./after.png
+```
+
+The command prints the new comment's URL. Replace `COMMENT-ID` below with the
+number after `#issuecomment-` in that URL and read back that exact comment. The
+saved body contains the uploaded image Markdown.
+
+```bash
+gh api repos/OWNER/EVIDENCE-REPO/issues/comments/COMMENT-ID \
+  --jq .body > ./uploaded-evidence.md
+```
+
+Copy the relevant image Markdown into the Screenshots section of your upstream
+PR body, retaining captions and capture metadata. Keep the canonical
+`https://github.com/user-attachments/assets/...` URLs returned by GitHub. Raw-file
+URLs follow repository file retention, and Actions artifacts have expiry dates.
+To update an existing PR, replace `123` with your PR number, read its current
+body, and edit `pr.md` to add the evidence. Retain its other sections and closing
+issue references when saving it.
+
+```bash
+gh pr view 123 --repo multica-ai/multica --json body --jq .body > ./pr.md
+# Edit pr.md to add the uploaded image Markdown under Screenshots.
+gh pr edit 123 --repo multica-ai/multica --body-file ./pr.md
+```
+
+Check the upstream PR's rendered images and verify the URLs open while signed
+out. Keep the public evidence repository, issue, and original captures available
+for review. These native attachment URLs are independent of a source branch.
+
+Native `gh --attach` has no content-hash retry tracking. If it exits nonzero,
+inspect its output and read back the exact comment before retrying. A partial
+upload can still post the comment with the successful attachments. Reuse those
+URLs and attach only missing files in a new comment on the same evidence issue.
 
 ## Development Model
 
@@ -282,17 +344,21 @@ An environment is the database, ports, CLI profile and processes that belong to
 one checkout. It is a named object: it can be listed, inspected and deleted.
 
 ```bash
-make up                      # start this checkout's environment (api + web)
-make up C=api,web,daemon     # choose the components
+make up                      # start this checkout's environment (api + collab + web)
+make up C=api,collab,web,daemon  # choose the components
 make status                  # what is running, and whether it is yours
 make list                    # every environment on this machine
 make down                    # stop the processes, keep the data
+make down C=daemon           # stop only the listed components
 make destroy                 # stop, then drop the database and free the slot
 make gc                      # collect expired environments or ones whose checkout is gone
 ```
 
-Components are `api` (Go backend), `web` (Next.js), `daemon` (agent daemon) and
-`desktop` (Electron). Selecting any of them implies `api`. `make up` is
+Components are `api` (Go backend), `collab` (live doc co-editing), `web`
+(Next.js), `daemon` (agent daemon) and `desktop` (Electron). Selecting any of
+them implies `api`. `collab` gets its own port and a secret generated for the
+environment, and the API is wired to it only while it runs, so leaving it out
+(`make up C=api,web`) just turns docs back to saving through the API. `make up` is
 idempotent: re-running it against a live environment reuses the database, the
 profile and any component already healthy.
 
@@ -316,7 +382,9 @@ Three properties are worth knowing because the old flow lacked them:
 - **Temporary environments have a best-effort fallback.** `make up
   ARGS=--ephemeral` records a 24-hour TTL. The next `make up` automatically
   collects expired and directory-less environments; `make gc` runs the same
-  collection explicitly.
+  collection explicitly. Use `make up ARGS="--ttl 48"` to renew a checkout
+  whose environment is still registered, even after expiry. The command keeps
+  that environment's data and gives it a new 48-hour TTL.
 
 Run any command inside an environment's variables without repeating them:
 
@@ -537,6 +605,32 @@ make migrate-down
 
 These generic targets require a valid env file in the current directory.
 
+`make test` prepares and migrates the database before running the Go tests. In a worktree without `.env`, `make` automatically selects `.env.worktree`; you can also select it explicitly with `make test ENV_FILE=.env.worktree`.
+
+Before `make test`, `make check`, or `make check-worktree`, stop any development API using the same database so its background workers cannot pick up test jobs. Use the stop command that matches how you started it:
+
+- `make up` → `make down C=api`.
+- `make start` / `make dev` → `make stop`; `make start-worktree` → `make stop-worktree`.
+- `make server` → press Ctrl-C in its terminal.
+
+### Dev Toolbar
+
+Set `VITE_DEV_TOOLBAR=1` to pin a status bar to the bottom of the Web and Desktop dev builds. It shows the client, backend host, workspace, your role, and route, plus live JS heap, last navigation time, main-thread long-task share, in-flight requests, and WebSocket state. Production builds never render it.
+
+```bash
+VITE_DEV_TOOLBAR=1 make up          # or: VITE_DEV_TOOLBAR=1 pnpm dev:web / pnpm dev:desktop
+```
+
+To keep it on, add the line to the env file `make` loads (`.env` / `.env.worktree`), or to `apps/web/.env.local` / `apps/desktop/.env.development.local` for a direct `pnpm dev:*`. The minimize button at its right end collapses it to a small handle. In Desktop, **View → Show Dev Toolbar** turns it off and on without a restart, and the choice is remembered; while it is off, nothing is recorded, and turning it back on starts a new recording.
+
+Each reading opens the last five minutes behind it, kept in memory in that tab only: the heap curve and Query cache size (Mem), route changes and their timings (Nav), long tasks and the route they hit (Jank), every API request with its status, `X-Request-ID`, body and a copyable curl (Net), WebSocket state changes (Sync), and console errors, uncaught exceptions and unhandled rejections (Errors).
+
+For realtime and agent bugs:
+
+- **Events** lists WebSocket events, filterable by type and searchable by issue key, ID or payload text. Each event shows which query keys its handling wrote, invalidated, removed or refetched, including the refreshes realtime sync debounces onto a timer (work after an `await` is not followed). A reconnect shows how long the socket was down and how many queries it refetched; **Drop connection** closes the socket to try it. **Replay locally** runs a recorded event through realtime sync's handlers again, without other subscribers, and any write request made while handling it is refused.
+- **Cache** lists the TanStack Query cache, stale and fetching entries, searchable by key, with a button to invalidate one query.
+- **Runtimes** shows each runtime's status and CLI version; **Tasks** lists the workspace's queued and running agent tasks, and clicking one opens its issue.
+
 ## How Database Creation Works
 
 Database creation is automatic.
@@ -664,7 +758,7 @@ fixtures:
 
 ```bash
 make up C=api,web ARGS="--ephemeral"
-make env-exec ARGS="-- node scripts/dev-fixtures.mjs all"      # or: chat builder issue, --json
+make env-exec ARGS="-- node scripts/dev-fixtures.mjs all"      # or: chat builder issue task sidebar guest, --json
 make destroy ARGS="--yes"
 ```
 
@@ -674,6 +768,57 @@ with a wide description and a comment with a diff. The script registers a
 fixture runtime with the profile token and completes each task with canned
 Markdown through the daemon API, so it also works inside a daemon-managed task.
 It prints the URL of everything it created and exits.
+
+`sidebar` makes the Work panel look used, for sidebar mocks and screenshots. It
+creates 11 issues across three projects, pins three of them and the Desktop 2.0
+project, and adds two saved views. Three agents (Atlas, Nova and Sage) then
+comment, mention, assign, change dates and priorities, and react through their
+own task tokens, so every inbox row comes from the server's notification
+listeners: 11 notified issues, 6 of them unread, enough for "Show 6 more". The
+notifications are then backdated with `psql` to read from minutes to days old;
+without `psql` they keep their real times. `all` leaves `sidebar` out. Running
+it again adds new issues and notifications and reuses the agents, projects and
+views.
+
+`guest` is for checking a change as a guest. It signs `guest@localhost` in
+with the dev verification code, invites it as a guest of three projects and
+accepts: Client portal (visible to the workspace), Client contracts (private)
+and Client portal v1 (archived), each with an issue. The guest sees those and
+nothing else; the Internal planning project and its issue stay hidden from it.
+In Client portal, `dev@localhost` mentions the guest on one issue, replies to
+the guest's comment on its sub-issue and assigns it a third, which leaves three
+unread issues in the guest's Inbox. `--json` prints `guest_token` and
+`guest_user_id` with the project and issue URLs; set the token as
+`multica_token` to open the app as the guest. The token is kept in the
+environment's profile directory, so running it again signs in only when that
+token stopped working, keeps the membership and adds new issues and
+notifications. `--guest-email` signs in someone else as the guest, which is
+how `e2e/guest.spec.ts` gets a fresh guest on every run. `all` leaves `guest`
+out.
+
+`task` is for UI and CLI work that needs an agent mid-run: agent status,
+the issue's execution log, Working / Idle filters, task panels. It assigns a new
+issue to the `Fixture Worker` agent, claims and starts the task, writes a few
+execution log entries and moves the issue to In Progress, then leaves the task
+running. `--queued` adds a second task queued behind it on the same issue.
+With `--json` it also prints `task_id`, `agent_id` and the task's `mat_`
+`auth_token`, which is what the CLI needs to run as that agent inside a task
+checkout:
+
+```bash
+make env-exec ARGS="-- node scripts/dev-fixtures.mjs task --queued --json"
+make env-exec ARGS="-- node scripts/dev-fixtures.mjs task --hold"   # Ctrl-C to stop
+```
+
+Nothing heartbeats for the fixture runtime by default, so it shows offline
+about 150 seconds after the run. The held tasks are unaffected: the server
+fails them only once the runtime has been silent for its reconnect grace
+(`MULTICA_RUNTIME_RECONNECT_GRACE`, 3 hours by default), and an API restart does
+not touch them. When a screenshot needs the runtime or agent shown online, add
+`--hold`: the script then keeps heartbeating until Ctrl-C instead of exiting. A
+new environment, or `make destroy`, drops every held task with its database;
+run `task` again there. The fixture runtime reports the checkout's
+`git describe` version as its CLI version.
 
 ### Desktop
 

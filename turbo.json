@@ -34,8 +34,18 @@
     "mdx": {
       "outputs": [".source/**"]
     },
+    // `next-env.d.ts` is untracked (Next rewrites it with different paths in
+    // dev and build), yet `tsc` needs it for Next's image and stylesheet module
+    // types, so a fresh checkout has to generate it before `typecheck`.
+    // `next typegen` loads next.config, which regenerates `.source/` and
+    // `.next/types/` just as `next build` does; `build` depends on it too so
+    // the two never write those trees at the same time.
+    "typegen": {
+      "dependsOn": ["mdx"],
+      "outputs": ["next-env.d.ts", ".next/types/**"]
+    },
     "build": {
-      "dependsOn": ["^build", "mdx"],
+      "dependsOn": ["^build", "mdx", "typegen"],
       // No explicit `inputs`: turbo's default (every git-tracked file in the
       // package) is the only safe hash source now that the cache is actually
       // restored in CI. The previous narrow glob list matched neither
@@ -52,14 +62,21 @@
       // electron-vite) and signs the dev Desktop in (read by its main process).
       // Desktop's bundled CLI finds a custom dev-env registry through
       // MULTICA_DEV_HOME, or refuses its daemon inside an agent task.
-      "passThroughEnv": ["REMOTE_DEBUGGING_PORT", "MULTICA_DEV_AUTH_TOKEN", "MULTICA_DEV_HOME"]
+      // VITE_DEV_TOOLBAR turns on the web/desktop dev status bar.
+      "passThroughEnv": [
+        "REMOTE_DEBUGGING_PORT",
+        "MULTICA_DEV_AUTH_TOKEN",
+        "MULTICA_DEV_HOME",
+        "VITE_DEV_TOOLBAR"
+      ]
     },
     "dev:staging": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "passThroughEnv": ["VITE_DEV_TOOLBAR"]
     },
     "typecheck": {
-      "dependsOn": ["^typecheck", "mdx"]
+      "dependsOn": ["^typecheck", "mdx", "typegen"]
     },
     // Hash-only transit task. No package implements a `cache-inputs` script,
     // so every node resolves to <NONEXISTENT> and nothing is ever executed --

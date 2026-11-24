@@ -23,6 +23,8 @@ In the web or desktop app, there are two ways to use an action:
 | **Quick Actions** in the issue sidebar | Click an action to post its saved request immediately. If it has an agent or squad, it asks them to work on this issue. |
 | Type `/` in the comment box | Choose an action to insert its request as a draft. Edit it for this issue, then send when ready. Nothing is posted just by choosing it. |
 
+When the issue sidebar is closed, the issue's header shows its status, assignee and a **Quick Actions** menu, so you can use an action without reopening the sidebar.
+
 <QuickActionDemo />
 
 Using a quick action does not change the issue's assignee or status. Follow the reply in the issue's discussion and check the [execution log](/tasks) for the agent's progress.
@@ -61,7 +63,7 @@ Write the **Prompt** as you want it sent, then save. It is sent as written; vari
 
 Team actions that call an agent must use one everyone in the workspace can run. For a squad, this applies to its leader. Personal actions can use agents you have permission to run.
 
-“Just me” controls who can see and use the saved action. Once you use it on an issue, its posted comment is visible to people who can see that issue.
+“Just me” controls who can see and use the saved action. Once you use it on an issue, its posted comment is visible to people who can see that issue. During an agent run, personal actions are reachable only when you started the run on a runtime you still own; runs started by another member see only Team actions.
 
 ## Manage saved actions
 
@@ -70,6 +72,19 @@ In **Settings → Quick Actions** you can edit an action, archive it, or restore
 When there are no personal or Team actions you can see, the issue sidebar does not show a Quick Actions section. The sidebar list is not filtered by who can run each action; permission is checked when you click one.
 
 If clicking an action tells you it can't run, ask an admin to check the action's agent and who can run it. If the agent's computer is offline, the work starts once it comes back online; see [Troubleshooting](/troubleshooting).
+
+## Use from the CLI
+
+Manage and run saved quick actions with `multica quick-action`:
+
+```bash
+multica quick-action list
+multica quick-action create --name "Code Review" --agent Reviewer --prompt-file ./review.md
+multica quick-action run "Code Review" MUL-123 --dry-run
+multica quick-action run "Code Review" MUL-123
+```
+
+Actions can be referenced by UUID, unique UUID prefix, or exact name (case-insensitive). `--dry-run` previews the rendered comment without posting it. Creating, updating, archiving, restoring, and deleting quick actions require a human member (`--visibility` defaults to `private`; `public` requires workspace `owner` or `admin`). See [Using the CLI](/cli) for the full subcommand list and flags.
 
 ## Related guides
 

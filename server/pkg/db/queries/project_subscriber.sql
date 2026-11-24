@@ -27,10 +27,12 @@ SELECT EXISTS(
 -- issue is the narrower, more recent intent, so the project never brings the
 -- member back. Both notification fanout and the issue's effective subscriber
 -- list read this, so the two cannot disagree.
-WITH RECURSIVE ancestors(node_id, parent_id, depth) AS (
-    SELECT root.id, root.parent_issue_id, 0 FROM issue root WHERE root.id = sqlc.arg('issue_id')
-    UNION ALL
-    SELECT i.id, i.parent_issue_id, a.depth + 1 FROM issue i JOIN ancestors a ON i.id = a.parent_id
+-- UNION drops repeated rows, so a parent loop an older server stored still
+-- ends the walk.
+WITH RECURSIVE ancestors(node_id, parent_id, is_root) AS (
+    SELECT root.id, root.parent_issue_id, true FROM issue root WHERE root.id = sqlc.arg('issue_id')
+    UNION
+    SELECT i.id, i.parent_issue_id, false FROM issue i JOIN ancestors a ON i.id = a.parent_id
 )
 SELECT ps.user_id, ps.created_at
 FROM issue target
@@ -41,7 +43,6 @@ JOIN member m ON m.workspace_id = ps.workspace_id AND m.user_id = ps.user_id
 WHERE target.id = sqlc.arg('issue_id')
   AND (
       p.visibility <> 'private'
-      OR m.role IN ('owner', 'admin')
       OR EXISTS (
           SELECT 1 FROM project_member pm
           WHERE pm.project_id = p.id AND pm.user_id = ps.user_id
@@ -53,7 +54,7 @@ WHERE target.id = sqlc.arg('issue_id')
       JOIN ancestors a ON a.node_id = s.issue_id
       WHERE s.user_type = 'member' AND s.user_id = ps.user_id
         AND s.unsubscribed_at IS NOT NULL
-        AND (a.depth = 0 OR s.opt_out_scope = 'subtree')
+        AND (a.is_root OR s.opt_out_scope = 'subtree')
   )
 ORDER BY ps.created_at, ps.user_id;
 

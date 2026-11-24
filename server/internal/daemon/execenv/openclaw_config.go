@@ -1218,19 +1218,6 @@ func openclawRegistryAgentsList(bin string, timeout time.Duration) ([]any, error
 // to avoid spawning a real binary. Production code never reassigns it.
 var openclawExec = execOpenclawCLI
 
-// openclawLastNonEmptyLine returns the last non-empty, trimmed line of out.
-// Used by openclawParseActiveConfigPath for the `config file` fallback, where the
-// path is the last line the CLI prints.
-func openclawLastNonEmptyLine(out string) string {
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		if trimmed := strings.TrimSpace(lines[i]); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
-}
-
 // openclawOutputComplete returns the rule that decides whether the bytes
 // captured so far are a finished answer for this openclaw subcommand, for
 // agent.RunCollectQuiet's early return.

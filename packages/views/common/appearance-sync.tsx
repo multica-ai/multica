@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
   APPEARANCE_STORAGE_KEY,
@@ -22,6 +22,7 @@ import {
 } from "@multica/core/appearance";
 import { getShortcutPlatform, getShortcutRuntime } from "@multica/core/shortcuts";
 import { themeFolderAPI } from "../platform/theme-folder";
+import { removeBackdrop, syncBackdrop, type BackdropState } from "./backdrop-layer";
 
 const STYLE_ELEMENT_ID = "multica-appearance";
 const THEME_CSS_ELEMENT_ID = "multica-theme-css";
@@ -145,6 +146,29 @@ function useThemeFolderSync() {
   }, []);
 }
 
+/**
+ * Keeps the backdrop layer in step with the computed `--backdrop`. Returns
+ * the sync to call once the theme's CSS is written; mode changes call it
+ * themselves. The layer outlives each style rewrite and goes on unmount.
+ */
+function useBackdrop() {
+  const state = useRef<BackdropState>({ request: 0 });
+  const sync = useCallback(() => {
+    const styles = getComputedStyle(document.documentElement);
+    syncBackdrop(state.current, (name) => styles.getPropertyValue(name));
+  }, []);
+  useLayoutEffect(() => {
+    const observer = new MutationObserver(sync);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    const current = state.current;
+    return () => {
+      observer.disconnect();
+      removeBackdrop(current);
+    };
+  }, [sync]);
+  return sync;
+}
+
 function clearThemeAttributes(root: HTMLElement) {
   root.removeAttribute(APPEARANCE_THEME_ATTR);
   for (const name of root.getAttributeNames()) {
@@ -169,6 +193,7 @@ export function AppearanceSync() {
   useModeClasses();
   useStateClasses();
   useThemeFolderSync();
+  const syncBackdropLayer = useBackdrop();
 
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -188,6 +213,7 @@ export function AppearanceSync() {
     writeStyle(THEME_CSS_ELEMENT_ID, appearanceThemeCss(theme));
     writeStyle(STYLE_ELEMENT_ID, appearanceStylesheet(theme, prefs));
     orderStyles();
+    syncBackdropLayer();
 
     return () => {
       clearThemeAttributes(root);
@@ -195,7 +221,7 @@ export function AppearanceSync() {
       document.getElementById(STYLE_ELEMENT_ID)?.remove();
       document.getElementById(THEME_CSS_ELEMENT_ID)?.remove();
     };
-  }, [prefs, installed, safeMode]);
+  }, [prefs, installed, safeMode, syncBackdropLayer]);
 
   useEffect(() => {
     const onStorage = (event: StorageEvent) => {

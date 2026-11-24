@@ -241,6 +241,7 @@ func TestDaemonRegister_FailedProfileInheritsMachineName(t *testing.T) {
 
 	// A custom runtime profile fails to resolve on this machine.
 	profileID := insertRuntimeProfileFixture(t, ctx, "Custom Codex", "codex", "missing-codex")
+	dbfx.Exec(t, `UPDATE runtime_profile SET daemon_id = $1 WHERE id = $2`, daemonID, profileID)
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{

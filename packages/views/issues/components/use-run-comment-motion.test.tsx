@@ -1,8 +1,9 @@
 import { useState } from "react";
+import { useAppearanceStore } from "@multica/core/appearance";
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentTask } from "@multica/core/types";
-import { useNewRunIds, useRunAnimationVisibility, useRunCommentMotion, useRunDisclosureMotion } from "./use-run-comment-motion";
+import { revealElement, useNewRunIds, useRunAnimationVisibility, useRunCommentMotion, useRunDisclosureMotion } from "./use-run-comment-motion";
 
 const animate = vi.fn((_frames: Keyframe[], _options: KeyframeAnimationOptions) => ({ cancel: vi.fn() }));
 const originalAnimate = Object.getOwnPropertyDescriptor(Element.prototype, "animate");
@@ -107,6 +108,33 @@ describe("run comment motion", () => {
     expect(animate).not.toHaveBeenCalled();
   });
 
+  it("disables run arrival, reply and status motion with the Appearance Reduce motion switch", () => {
+    useAppearanceStore.getState().set({ reduceMotion: true });
+    try {
+      const view = render(<Slot status="running" />);
+      view.rerender(<Slot status="running" entering />);
+      view.rerender(<Slot status="running" entering replyId="reply" />);
+      view.rerender(<Slot status="completed" entering replyId="reply" />);
+      expect(animate).not.toHaveBeenCalled();
+      expect(screen.getByText("completed")).toBeInTheDocument();
+      expect(screen.getByText("Reply")).toBeInTheDocument();
+    } finally {
+      useAppearanceStore.getState().reset();
+    }
+  });
+
+  it("turns the disclosure arrow at once with the Appearance Reduce motion switch", () => {
+    useAppearanceStore.getState().set({ reduceMotion: true });
+    try {
+      render(<Disclosure />);
+      fireEvent.click(screen.getByRole("button", { name: "Toggle" }), { detail: 1 });
+      expect(animate).not.toHaveBeenCalled();
+      expect(screen.getByText("Activity")).toBeInTheDocument();
+    } finally {
+      useAppearanceStore.getState().reset();
+    }
+  });
+
   it("pauses ambient run motion outside the viewport", async () => {
     let notify!: IntersectionObserverCallback;
     const observe = vi.fn();
@@ -188,5 +216,19 @@ describe("run comment motion", () => {
     expect(animate).toHaveBeenLastCalledWith([{ rotate: "42deg" }, { rotate: "0deg" }], expect.objectContaining({ duration: 100 }));
     for (const animation of firstAnimations) expect(animation.cancel).toHaveBeenCalled();
     style.mockRestore();
+  });
+
+  it("reveals an element via WAAPI once and skips under reduced motion", () => {
+    const el = document.createElement("div");
+    const anim = revealElement(el, 150, -3);
+    expect(anim).not.toBeNull();
+    expect(animate).toHaveBeenCalledWith(
+      [{ opacity: 0, transform: "translateY(-3px)" }, { opacity: 1, transform: "translateY(0)" }],
+      expect.objectContaining({ duration: 150, easing: "cubic-bezier(0.23, 1, 0.32, 1)" }),
+    );
+    animate.mockClear();
+    reduced = true;
+    expect(revealElement(el, 150, -3)).toBeUndefined();
+    expect(animate).not.toHaveBeenCalled();
   });
 });

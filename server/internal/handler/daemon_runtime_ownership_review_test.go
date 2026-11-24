@@ -104,6 +104,7 @@ func TestDaemonRegister_ConcurrentDifferentProvidersAndProfilesHaveOneOwner(t *t
 			second := dbfx.User(t, "race second owner", "race-"+uuid.NewString()+"@example.com")
 			dbfx.Member(t, testWorkspaceID, second, "member")
 			daemonID := "race-" + uuid.NewString()
+			dbfx.Exec(t, `UPDATE runtime_profile SET daemon_id = $1 WHERE id = $2`, daemonID, profileID)
 			t.Cleanup(func() {
 				testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE workspace_id = $1 AND daemon_id = $2`, testWorkspaceID, daemonID)
 			})

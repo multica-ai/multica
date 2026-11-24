@@ -352,16 +352,20 @@ func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
 	// These are task nouns, not section headings: a task arrives as "set up an
 	// autopilot", never as "Core model".
 	triggerWords := map[string]string{
-		"references/issues.md":       "issue",
-		"references/sub-issues.md":   "sub-issue",
-		"references/mentions.md":     "mention",
-		"references/agents.md":       "agent",
-		"references/squads.md":       "squad",
-		"references/autopilots.md":   "autopilot",
-		"references/projects.md":     "project",
-		"references/runtimes.md":     "runtime",
-		"references/environments.md": "local environment",
-		"references/skill-import.md": "skill import",
+		"references/issues.md":        "issue",
+		"references/sub-issues.md":    "sub-issue",
+		"references/batch-changes.md": "batch",
+		"references/mentions.md":      "mention",
+		"references/agents.md":        "agent",
+		"references/squads.md":        "squad",
+		"references/autopilots.md":    "autopilot",
+		"references/projects.md":      "project",
+		"references/runtimes.md":      "runtime",
+		"references/environments.md":  "local environment",
+		"references/skill-import.md":  "skill import",
+		"references/themes.md":        "theme",
+		"references/inbox.md":         "inbox",
+		"references/docs.md":          "docs",
 	}
 
 	skill, ok := findSkill(t, PlatformSkillName)
@@ -436,6 +440,9 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"references/runtimes.md",
 				"references/environments.md",
 				"references/skill-import.md",
+				"references/themes.md",
+				"references/inbox.md",
+				"references/docs.md",
 				// Invariants deduplicated out of the eight merged bodies. Each
 				// was repeated in most of them; the router is now their only
 				// home, so losing one here loses it everywhere.
@@ -714,6 +721,55 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 			},
 		},
 		{
+			// MUL-9248: theme knowledge ships here instead of riding in a
+			// per-request prompt, so any agent can build one from any chat
+			// or issue. The checker gate and the two delivery paths are what
+			// make a delivered theme installable; losing either strands it.
+			file: "references/themes.md",
+			want: []string{
+				"docs/theming.md",
+				"scripts/theme-check.mjs",
+				"Deliver only when it reports **0 errors**",
+				"~/Library/Application Support/Multica/themes",
+				"%APPDATA%\\Multica\\themes",
+				"~/.config/Multica/themes",
+				"does not switch to it",
+				"every save to the theme in use applies",
+				"**Import theme**",
+				"multica attachment upload <path>",
+			},
+		},
+		{
+			// MUL-9549: an agent manages only its triggering owner's inbox,
+			// cannot delete, and bulk sweeps need explicit confirmation.
+			file: "references/docs.md",
+			want: []string{
+				"`--debug` shows\nthe server's `docs_disabled` code",
+				"Moves and folder commands do not take it",
+				"Prefer `doc edit` for a\ntargeted change",
+				"never retry the same body with a newer revision",
+				"multica doc comment list <doc-id>",
+				"Starting a thread, resolving, reopening and deleting are reserved for people",
+				"multica doc comment add <doc-id> --parent <comment-id>",
+				"multica doc restore <doc-id> --version 3 --base-revision <revision>",
+				"To undo one change and keep the rest, use `doc edit` instead",
+				"Deleting a doc or a folder answers `403`",
+			},
+		},
+		{
+			file: "references/inbox.md",
+			want: []string{
+				"**runtime owner's** inbox",
+				"do not retry with another credential",
+				"Notifications cannot be deleted from the CLI",
+				"multica inbox list --unread --output json",
+				"multica inbox read --issue MUL-123",
+				"multica inbox snooze <id>... --until 3h",
+				"multica inbox read --all --yes",
+				"Only run a bulk change when the person asked for that sweep",
+			},
+		},
+		{
 			file: "references/skill-import.md",
 			want: []string{
 				"multica skill import --url <url> --output json",
@@ -737,6 +793,11 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"multica agent skills list <agent-id> --output json",
 				"replace-all",
 				"`set` is the replacement path",
+				// MUL-9874: shared skills are edited from a revision so one
+				// agent's save cannot silently erase another's.
+				"multica skill update <skill-id> --content-file ./SKILL.md --base-revision <revision>",
+				"revision_conflict",
+				"Do not drop `--base-revision` to force the write through",
 			},
 			notWant: []string{
 				"multica agent skills set <agent-id> --skill-ids <skill-id>",

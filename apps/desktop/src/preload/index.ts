@@ -4,6 +4,7 @@ import type { RuntimeConfigResult } from "../shared/runtime-config";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
 import type {
   ManualUpdateCheckResult,
+  UpdaterDownloadState,
   UpdaterPreferences,
 } from "../shared/updater-types";
 import {
@@ -21,6 +22,17 @@ import {
 } from "../shared/issue-window";
 import { AUTH_SESSION_STATE_CHANNEL } from "../shared/auth-session";
 import {
+  DEV_TOOLBAR_VISIBLE_CHANGED_CHANNEL,
+  DEV_TOOLBAR_VISIBLE_GET_CHANNEL,
+} from "../shared/dev-toolbar";
+import {
+  CONTEXT_MENU_COMMAND_CHANNEL,
+  CONTEXT_MENU_REQUEST_CHANNEL,
+  isContextMenuRequest,
+  type ContextMenuCommand,
+  type ContextMenuRequest,
+} from "../shared/context-menu";
+import {
   THEME_FOLDER_CHANGED_CHANNEL,
   THEME_FOLDER_OPEN_CHANNEL,
   THEME_FOLDER_READ_CHANNEL,
@@ -33,6 +45,31 @@ import type {
   DaemonStatus,
   LocalRuntimeProbe,
 } from "../shared/daemon-types";
+import {
+  VOICE_HISTORY_AUDIO_CHANNEL,
+  VOICE_HISTORY_CHANGED_CHANNEL,
+  VOICE_HISTORY_LIST_CHANNEL,
+  VOICE_HISTORY_RETENTION_CHANNEL,
+  VOICE_HISTORY_CLEAR_CHANNEL,
+  VOICE_HISTORY_REMOVE_CHANNEL,
+  VOICE_HISTORY_SAVE_CHANNEL,
+  VOICE_HISTORY_UPDATE_CHANNEL,
+  VOICE_MODEL_CANCEL_CHANNEL,
+  VOICE_MODEL_DELETE_CHANNEL,
+  VOICE_MODEL_DOWNLOAD_CHANNEL,
+  VOICE_MODELS_CHANGED_CHANNEL,
+  VOICE_MODELS_LIST_CHANNEL,
+  VOICE_PREPARE_CHANNEL,
+  VOICE_TRANSCRIBE_CHANNEL,
+  type VoiceHistoryAudio,
+  type VoiceHistoryEntry,
+  type VoiceHistorySaveRequest,
+  type VoiceHistoryUpdate,
+  type VoiceModelRequest,
+  type VoiceModelsSnapshot,
+  type VoiceTranscribeRequest,
+  type VoiceTranscribeResult,
+} from "../shared/voice";
 import {
   MAIN_RENDERER_CHANNEL_STATE_CHANNEL,
   NEW_WINDOW_SHORTCUT_CHANNEL,
@@ -126,6 +163,11 @@ const desktopAPI = {
   /** OS-preferred locale (BCP 47), passed from main via additionalArguments.
    *  Used by the renderer's LocaleAdapter as the system-preference signal. */
   systemLocale,
+  /** Report the renderer's resolved in-app locale to main so native dialogs
+   *  and daemon error messages follow the user's Settings choice. */
+  setLocale: (locale: string) => {
+    ipcRenderer.send("locale:set", locale);
+  },
   /** Subscribe to OS language changes detected after boot. The renderer
    *  decides whether to act (no-op when the user has an explicit Settings
    *  choice). Returns an unsubscribe function. */
@@ -179,21 +221,26 @@ const desktopAPI = {
   setImmersiveMode: (immersive: boolean) =>
     ipcRenderer.invoke("window:setImmersive", immersive),
   /**
-   * Show a native OS notification for a new inbox item. Fired from the
-   * renderer only when the app is unfocused — in-focus feedback is the
-   * inbox sidebar's unread styling. `slug`, `itemId`, and `issueKey` are
-   * all round-tripped on click: slug pins routing to the source workspace
-   * (the user may switch workspaces before clicking the banner), itemId
-   * lets the renderer mark the row read, issueKey maps to the inbox URL
-   * param.
+   * Show a native OS notification. The source workspace and either the inbox
+   * selector or chat session are round-tripped on click. Main owns focus
+   * gating and deduplication across windows.
    */
   showNotification: (payload: {
     slug: string;
     itemId: string;
-    issueKey: string;
+    issueKey?: string;
+    chatSessionId?: string;
     title: string;
     body: string;
   }) => ipcRenderer.send("notification:show", payload),
+  getWindowForeground: (): Promise<boolean> => ipcRenderer.invoke("window:foreground"),
+  onWindowForegroundChanged: (callback: (foreground: boolean) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, foreground: unknown) => {
+      if (typeof foreground === "boolean") callback(foreground);
+    };
+    ipcRenderer.on("window:foreground-changed", handler);
+    return () => ipcRenderer.removeListener("window:foreground-changed", handler);
+  },
   /**
    * Update the OS dock / taskbar unread badge. Pass 0 to clear. Values
    * above 99 render as "99+" (capping is handled in the main process).
@@ -201,16 +248,15 @@ const desktopAPI = {
   setUnreadBadge: (count: number) =>
     ipcRenderer.send("badge:set", Math.max(0, Math.floor(count))),
   /**
-   * Subscribe to "open this inbox row" requests sent by the main process
-   * when the user clicks an OS notification banner. Returns an unsubscribe
-   * function. The payload echoes the `slug`, `itemId`, and `issueKey` that
-   * were passed to `showNotification`.
+   * Subscribe to inbox/chat navigation from an OS notification click.
+   * The existing channel also carries direct chat targets.
    */
   onInboxOpen: (
     callback: (payload: {
       slug: string;
       itemId: string;
-      issueKey: string;
+      issueKey?: string;
+      chatSessionId?: string;
     }) => void,
   ) => subscribeToMainRendererChannel("inbox:open", callback),
   /** Listen for native macOS back/forward swipe gestures. */
@@ -223,6 +269,19 @@ const desktopAPI = {
       ipcRenderer.removeListener(NAVIGATION_GESTURE_CHANNEL, handler);
     };
   },
+  /** Listen for right-clicks the page left unhandled, to draw their menu. */
+  onContextMenu: (callback: (request: ContextMenuRequest) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, request: unknown) => {
+      if (isContextMenuRequest(request)) callback(request);
+    };
+    ipcRenderer.on(CONTEXT_MENU_REQUEST_CHANNEL, handler);
+    return () => {
+      ipcRenderer.removeListener(CONTEXT_MENU_REQUEST_CHANNEL, handler);
+    };
+  },
+  /** Run the item picked in that menu. */
+  runContextMenuCommand: (command: ContextMenuCommand) =>
+    ipcRenderer.send(CONTEXT_MENU_COMMAND_CHANNEL, command),
   /** Report the renderer's memory-router path for recovery diagnostics. */
   setRendererRouteContext: (context: RendererRouteContextInput) =>
     ipcRenderer.send(RENDERER_ROUTE_CONTEXT_CHANNEL, context),
@@ -249,6 +308,43 @@ const desktopAPI = {
   /** Create a theme folder from files; never replaces an existing one. */
   writeThemeFolder: (name: string, files: ThemeFolderFile[]): Promise<ThemeFolderWriteResult> =>
     ipcRenderer.invoke(THEME_FOLDER_WRITE_CHANNEL, name, files),
+  /** On-device voice input: speech models and transcription in main. */
+  voice: {
+    listModels: (): Promise<VoiceModelsSnapshot> => ipcRenderer.invoke(VOICE_MODELS_LIST_CHANNEL),
+    onModelsChanged: (callback: (snapshot: VoiceModelsSnapshot) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, snapshot: VoiceModelsSnapshot) =>
+        callback(snapshot);
+      ipcRenderer.on(VOICE_MODELS_CHANGED_CHANNEL, handler);
+      return () => {
+        ipcRenderer.removeListener(VOICE_MODELS_CHANGED_CHANNEL, handler);
+      };
+    },
+    downloadModel: (id: string): Promise<void> => ipcRenderer.invoke(VOICE_MODEL_DOWNLOAD_CHANNEL, id),
+    cancelDownload: (id: string): Promise<void> => ipcRenderer.invoke(VOICE_MODEL_CANCEL_CHANNEL, id),
+    deleteModel: (id: string): Promise<void> => ipcRenderer.invoke(VOICE_MODEL_DELETE_CHANNEL, id),
+    prepare: (request: VoiceModelRequest) => ipcRenderer.send(VOICE_PREPARE_CHANNEL, request),
+    transcribe: (request: VoiceTranscribeRequest): Promise<VoiceTranscribeResult> =>
+      ipcRenderer.invoke(VOICE_TRANSCRIBE_CHANNEL, request),
+    history: {
+      list: (): Promise<VoiceHistoryEntry[]> => ipcRenderer.invoke(VOICE_HISTORY_LIST_CHANNEL),
+      onChanged: (callback: () => void) => {
+        const handler = () => callback();
+        ipcRenderer.on(VOICE_HISTORY_CHANGED_CHANNEL, handler);
+        return () => {
+          ipcRenderer.removeListener(VOICE_HISTORY_CHANGED_CHANNEL, handler);
+        };
+      },
+      save: (request: VoiceHistorySaveRequest): Promise<VoiceHistoryEntry | null> =>
+        ipcRenderer.invoke(VOICE_HISTORY_SAVE_CHANNEL, request),
+      update: (id: string, patch: VoiceHistoryUpdate): Promise<void> =>
+        ipcRenderer.invoke(VOICE_HISTORY_UPDATE_CHANNEL, id, patch),
+      audio: (id: string): Promise<VoiceHistoryAudio | null> => ipcRenderer.invoke(VOICE_HISTORY_AUDIO_CHANNEL, id),
+      remove: (id: string): Promise<void> => ipcRenderer.invoke(VOICE_HISTORY_REMOVE_CHANNEL, id),
+      setRetention: (keepDays: number | null): Promise<void> =>
+        ipcRenderer.invoke(VOICE_HISTORY_RETENTION_CHANNEL, keepDays),
+      clear: (): Promise<void> => ipcRenderer.invoke(VOICE_HISTORY_CLEAR_CHANNEL),
+    },
+  },
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
    *  The renderer should close the active tab; if it was the last tab,
    *  call `closeWindow()` to dismiss the window. Returns an unsubscribe fn. */
@@ -332,6 +428,25 @@ const desktopAPI = {
   /** Listen for Cmd/Ctrl+Shift+N new-window requests. */
   onNewWindowShortcut: (callback: () => void) =>
     subscribeToMainRendererChannel(NEW_WINDOW_SHORTCUT_CHANNEL, () => callback()),
+  /** Whether View → Show Dev Toolbar is checked. Always false unless the
+   *  dev build was started with VITE_DEV_TOOLBAR. */
+  getDevToolbarVisible: (): boolean => {
+    try {
+      return ipcRenderer.sendSync(DEV_TOOLBAR_VISIBLE_GET_CHANNEL) === true;
+    } catch {
+      return false;
+    }
+  },
+  /** Listen for View → Show Dev Toolbar being toggled. Returns an unsubscribe fn. */
+  onDevToolbarVisibleChange: (callback: (visible: boolean) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, visible: unknown) => {
+      if (typeof visible === "boolean") callback(visible);
+    };
+    ipcRenderer.on(DEV_TOOLBAR_VISIBLE_CHANGED_CHANNEL, handler);
+    return () => {
+      ipcRenderer.removeListener(DEV_TOOLBAR_VISIBLE_CHANGED_CHANNEL, handler);
+    };
+  },
 };
 
 type DaemonReauthResult =
@@ -396,6 +511,12 @@ const daemonAPI = {
 };
 
 const updaterAPI = {
+  getDownloadState: (): Promise<UpdaterDownloadState> => ipcRenderer.invoke("updater:get-download-state"),
+  onDownloadState: (callback: (state: UpdaterDownloadState) => void) => {
+    const handler = (_: unknown, state: UpdaterDownloadState) => callback(state);
+    ipcRenderer.on("updater:download-state", handler);
+    return () => ipcRenderer.removeListener("updater:download-state", handler);
+  },
   onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string }) => void) => {
     const handler = (_: unknown, info: { version: string; releaseNotes?: string }) => callback(info);
     ipcRenderer.on("updater:update-available", handler);

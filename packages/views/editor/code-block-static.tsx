@@ -15,9 +15,8 @@
  */
 
 import { useMemo, type CSSProperties } from "react";
-import { toHtml } from "hast-util-to-html";
 import { cn } from "@multica/ui/lib/utils";
-import { highlightCode } from "./syntax-highlight";
+import { highlightCodeHtml } from "./syntax-highlight";
 import { highlightToLines } from "../common/task-transcript/diff-highlight";
 import "./styles/code.css";
 
@@ -51,8 +50,7 @@ export function CodeBlockStatic({
       return { html: numberedLinesHtml(lines), lineCount: lines.length };
     }
     try {
-      const tree = highlightCode(code, language);
-      return { html: toHtml(tree) as string, lineCount: 0 };
+      return { html: highlightCodeHtml(code, language), lineCount: 0 };
     } catch {
       // Keep an unexpected highlighter failure from breaking the preview.
       return { html: escapeHtml(code), lineCount: 0 };

@@ -85,8 +85,8 @@ func TestRunUserProfileUpdateSendsResolvedDescription(t *testing.T) {
 	if _, err := captureStdout(t, func() error { return runUserProfileUpdate(cmd, nil) }); err != nil {
 		t.Fatalf("runUserProfileUpdate: %v", err)
 	}
-	if body["profile_description"] != "Reviewer\nTypeScript" {
-		t.Fatalf("body = %#v, want decoded description", body)
+	if body["profile_description"] != `Reviewer\nTypeScript` {
+		t.Fatalf("body = %#v, want literal description", body)
 	}
 }
 

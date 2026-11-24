@@ -11,8 +11,10 @@
     "usage": "分析",
     "runtimes": "ランタイム",
     "skills": "スキル",
+    "apps": "アプリ",
     "settings": "設定",
-    "views": "ビュー"
+    "views": "ビュー",
+    "docs": "ドキュメント"
   },
   "tab": {
     "issue": "タスク",
@@ -22,12 +24,15 @@
     "member": "メンバー",
     "squad": "スクワッド",
     "skill": "スキル",
+    "app": "アプリ",
     "machine": "マシン",
     "runtime": "ランタイム",
     "attachment": "添付ファイル",
     "create_agent": "エージェントを作成",
     "my_agents": "マイエージェントの作業",
-    "unknown": "不明なページ"
+    "unknown": "不明なページ",
+    "doc": "ドキュメント",
+    "docFolder": "フォルダー"
   },
   "help": {
     "trigger": "ヘルプ",
@@ -52,6 +57,12 @@
       "try": "試してみる",
       "open": "開く",
       "learn_more": "詳しく見る"
+    },
+    "deck": {
+      "tag": "新機能",
+      "next": "次へ",
+      "done": "了解",
+      "page": "{{total}} 件中 {{current}} 件目"
     }
   },
   "star_prompt": {
@@ -90,8 +101,7 @@
   },
   "rail": {
     "label": "アプリナビゲーション",
-    "sheet_description": "スペースとワークスペースを切り替えます。",
-    "inbox": "受信箱",
+    "sheet_description": "ビューとワークスペースを切り替えます。",
     "work": "作業",
     "team": "チーム",
     "chat": "チャット",
@@ -103,7 +113,16 @@
     "open_in_new_window_click": "クリック",
     "open_in_other_window": "別のウィンドウで開いています",
     "in_other_window": "別ウィンドウ",
-    "all_workspaces_open": "すべてのワークスペースがすでにウィンドウで開いています"
+    "all_workspaces_open": "すべてのワークスペースがすでにウィンドウで開いています",
+    "copy_link": "リンクをコピー",
+    "link_copied": "リンクをコピーしました",
+    "workspace_settings": "ワークスペース設定",
+    "mark_all_read": "すべて既読にする",
+    "mark_all_read_failed": "すべて既読にできませんでした",
+    "reset_order": "デフォルトの順序に戻す",
+    "copy_workspace_link": "ワークスペースのリンクをコピー",
+    "workspace_meta_other": "{{slug}} · メンバー {{count}} 人",
+    "docs": "文書"
   },
   "bottom_bar": {
     "label": "ステータスバー",
@@ -111,12 +130,12 @@
   },
   "panels": {
     "work": {
-      "my_agents": "マイエージェントの作業",
-      "all_issues": "すべてのタスク",
-      "unread": "未読",
       "views": "ビュー",
       "new_project": "新規プロジェクト",
       "new_issue_in_project": "{{name}} に新規タスク",
+      "new_issue_no_project": "プロジェクトなしで新規タスク",
+      "no_project": "プロジェクトなし",
+      "private_project": "プロジェクトメンバーのみ閲覧できます",
       "all_projects_other": "すべてのプロジェクト（{{count}}）",
       "project_issues": "{{name}} のタスク",
       "project_issues_empty": "タスクはありません",
@@ -137,11 +156,13 @@
       "projects_ordering": "並び順",
       "projects_order_manual": "手動",
       "projects_order_name": "名前",
-      "projects_order_updated": "最近更新",
+      "projects_order_updated": "最近のアクティビティ",
       "projects_order_created": "最近作成",
       "projects_show": "表示",
       "projects_only_mine": "自分がリードするプロジェクトのみ",
+      "projects_show_no_project": "「プロジェクトなし」を表示",
       "projects_show_count": "未完了タスク数",
+      "projects_minimal_icons": "デフォルトのアイコンのみ",
       "new_view": "新規ビュー",
       "all_views": "すべてのビュー",
       "view_actions": "{{name}} の操作",
@@ -150,23 +171,45 @@
       "view_edit": "ビューを編集",
       "view_rename": "名前を変更",
       "view_duplicate": "複製",
-      "view_delete": "ビューを削除"
+      "view_delete": "ビューを削除",
+      "new_issue_here": "このプロジェクトに新規タスク",
+      "inbox_actions": "インボックスの操作",
+      "inbox_empty": "通知はありません",
+      "inbox_settings": "インボックスの表示",
+      "inbox_all": "すべての通知",
+      "inbox_compact": "コンパクト表示",
+      "inbox_open": "開く",
+      "inbox_show_count": "未読数",
+      "inbox_rail_badge": "「作業」に未読バッジを表示",
+      "inbox_types": "受け取る通知",
+      "inbox_types_hint": "オフにするとこれらの通知は届かず、再度オンにしてもオフ期間中の通知は遡って配信されません。",
+      "inbox_more_settings": "すべての通知設定",
+      "section_limit": "表示件数",
+      "pinned_settings": "ピン留めの表示",
+      "views_settings": "ビューの表示",
+      "views_builtin": "組み込みビュー",
+      "views_show_count": "件数",
+      "guest_badge": "ゲスト",
+      "guest_badge_hint": "共有されたプロジェクトを閲覧・コメントできます。",
+      "involved": "関わっているタスク",
+      "shared_projects": "共有されたプロジェクト"
     },
     "team": {
       "new_agent": "新規エージェント",
       "needs_attention": "要対応",
-      "stuck_other": "{{count}} 件のタスクがオフラインのランタイムを待機中",
+      "stuck_other": "オフラインのランタイム待ちの実行 {{count}} 件",
       "working_now": "作業中",
       "show_more_agents": "さらに {{count}} 件を表示…",
       "show_fewer_agents": "表示を減らす",
-      "running_tasks_other": "{{count}} 件のタスクを実行中",
+      "running_tasks_other": "進行中の実行 {{count}} 件",
       "all_agents": "すべてのエージェント",
       "my_agents": "マイエージェント",
       "squads_and_members": "スクワッドとメンバー",
       "members_other": "メンバー {{count}} 人",
       "resources": "リソース",
       "runtimes_online_other": "{{count}} 台オンライン",
-      "invite_member": "メンバーを招待"
+      "invite_member": "メンバーを招待",
+      "open_issue": "{{identifier}} を開く"
     },
     "autopilots": {
       "all": "すべてのオートパイロット",
@@ -202,6 +245,7 @@
     "select_row": "行を選択",
     "row_actions": "行の操作",
     "sort_by": "並び替え",
+    "group_by": "グループ化",
     "direction_asc": "昇順",
     "direction_desc": "降順",
     "section_columns": "列",
@@ -220,5 +264,19 @@
     "go_to_slide": "{{index}} 枚目に移動",
     "previous": "前へ",
     "next": "次へ"
+  },
+  "context_menu": {
+    "cut": "切り取り",
+    "copy": "コピー",
+    "paste": "貼り付け",
+    "select_all": "すべて選択",
+    "add_to_dictionary": "辞書に追加",
+    "open_link": "ブラウザでリンクを開く",
+    "copy_link_address": "リンクのアドレスをコピー",
+    "copy_image": "画像をコピー",
+    "copy_code": "コードをコピー",
+    "copy_table": "表をコピー",
+    "copied": "コピーしました",
+    "copy_failed": "コピーできませんでした"
   }
 }

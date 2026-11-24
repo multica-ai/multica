@@ -29,8 +29,8 @@ import { IssueSurface, IssueSurfaceWithStore } from "./issue-surface";
 import { createIssueStatusListStore } from "@multica/core/issue-statuses";
 import { baselineFromQuery } from "@multica/core/issue-views/baseline";
 import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
-import { UNREAD_VIEW_ID } from "@multica/core/issue-views/unread-view";
 import { setCurrentWorkspace } from "@multica/core/platform";
+import { memberListOptions } from "@multica/core/workspace/queries";
 import { statusTableMethodsFromLegacy } from "./status-table-test-api";
 
 // Mutable so tests can simulate a workspace switch — the workspace layout
@@ -90,6 +90,7 @@ vi.mock("../../i18n", () => ({
 }));
 
 vi.mock("../../navigation", () => ({
+  useWarmRoute: () => undefined,
   AppLink: ({ children, href, ...props }: React.ComponentProps<"a">) => (
     <a href={href} {...props}>
       {children}
@@ -176,7 +177,6 @@ describe("IssueSurface — scope switch loading semantics", () => {
       listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       ...statusTableMethodsFromLegacy(listIssues),
-      listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot: vi.fn(() => never<AgentTask[]>()),
       getChildIssueProgress: vi.fn(() => never()),
@@ -285,7 +285,6 @@ describe("IssueSurface — scope switch loading semantics", () => {
       listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       ...statusTableMethodsFromLegacy(listIssues),
-      listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot: vi.fn(() => never<AgentTask[]>()),
       getChildIssueProgress: vi.fn(() => never()),
@@ -377,7 +376,6 @@ describe("IssueSurface — table pagination ownership", () => {
       listIssues,
       listIssueTableRows,
       listIssueTableFacets: vi.fn(() => never()),
-      listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot: vi.fn(() =>
         Promise.resolve(
@@ -474,7 +472,6 @@ describe("IssueSurface — table pagination ownership", () => {
       listIssues,
       listIssueTableRows,
       listIssueTableFacets: vi.fn(() => never()),
-      listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => Promise.resolve([])),
       getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
       getChildIssueProgress: vi.fn(() => Promise.resolve([])),
@@ -556,7 +553,6 @@ describe("IssueSurface — table pagination ownership", () => {
         }),
       ),
       listIssueTableFacets: vi.fn(() => never()),
-      listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => Promise.resolve([])),
       getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
       getChildIssueProgress: vi.fn(() => Promise.resolve([])),
@@ -618,7 +614,6 @@ describe("IssueSurface — table pagination ownership", () => {
       listIssues,
       listIssueTableRows,
       listIssueTableFacets: vi.fn(() => never()),
-      listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => Promise.resolve([])),
       getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
       getChildIssueProgress: vi.fn(() => Promise.resolve([])),
@@ -714,7 +709,6 @@ describe("IssueSurface — table pagination ownership", () => {
         }),
       ),
       listIssueTableFacets: vi.fn(() => never()),
-      listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => Promise.resolve([])),
       getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
       getChildIssueProgress: vi.fn(() => Promise.resolve([])),
@@ -782,12 +776,12 @@ describe("IssueSurface — filtered empty state", () => {
       listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       ...statusTableMethodsFromLegacy(listIssues),
-      listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot: vi.fn(() => never<AgentTask[]>()),
       getWorkspaceWorkingAgents: vi.fn(() => Promise.resolve([])),
       getChildIssueProgress: vi.fn(() => never()),
       listIssueUnread: vi.fn(() => Promise.resolve([])),
+      listSubscribedIssueIds: vi.fn(() => Promise.resolve([])),
       listIssueViews: vi.fn(() => Promise.resolve([])),
     } as unknown as ApiClient);
     pruneIssueSurfaceViewStates([]);
@@ -850,8 +844,8 @@ describe("IssueSurface — filtered empty state", () => {
     expect(screen.queryByText("filtered_empty.title")).toBeNull();
   });
 
-  function unreadViewSurface() {
-    useActiveIssueViewStore.getState().setActive("ws-1:workspace", UNREAD_VIEW_ID);
+  function subscribedViewSurface() {
+    useActiveIssueViewStore.getState().setActive("ws-1:workspace", "subscribed");
     return (
       <QueryClientProvider client={qc}>
         <IssueSurface
@@ -864,42 +858,23 @@ describe("IssueSurface — filtered empty state", () => {
     );
   }
 
-  it("keeps the built-in Unread view's condition when its filters are cleared", async () => {
-    const store = getIssueSurfaceViewStore(`view:${UNREAD_VIEW_ID}`);
-    act(() => store.setState({ unreadFilter: true, agentRunningFilter: true }));
+  it("keeps a built-in view's condition when its filters are cleared", async () => {
+    const store = getIssueSurfaceViewStore("view:subscribed");
+    act(() => store.setState({ relationFilters: ["subscribed"], agentRunningFilter: true }));
 
-    render(unreadViewSurface());
+    render(subscribedViewSurface());
 
     fireEvent.click(await screen.findByRole("button", { name: "filtered_empty.clear_button" }));
     expect(store.getState().agentRunningFilter).toBe(false);
-    expect(store.getState().unreadFilter).toBe(true);
-    await screen.findByText("filtered_empty.unread_title");
+    expect(store.getState().relationFilters).toEqual(["subscribed"]);
+    await screen.findByText("filtered_empty.title");
     expect(screen.queryByRole("button", { name: "filtered_empty.clear_button" })).toBeNull();
   });
 
   it.each(["created_at", "updated_at"] as const)(
-    "offers recovery for an empty Unread view narrowed only by %s",
+    "clears %s with other user filters while preserving the built-in view's condition and display",
     async (field) => {
-      const store = getIssueSurfaceViewStore(`view:${UNREAD_VIEW_ID}`);
-      act(() => store.getState().setDateFilter({ field, from: "2026-01-01", to: "2026-01-02" }));
-
-      render(unreadViewSurface());
-
-      await screen.findByText("filtered_empty.title");
-      expect(screen.queryByText("filtered_empty.unread_title")).toBeNull();
-      fireEvent.click(screen.getByRole("button", { name: "filtered_empty.clear_button" }));
-
-      expect(store.getState().dateFilter).toBeNull();
-      expect(store.getState().unreadFilter).toBe(true);
-      await screen.findByText("filtered_empty.unread_title");
-      expect(screen.queryByRole("button", { name: "filtered_empty.clear_button" })).toBeNull();
-    },
-  );
-
-  it.each(["created_at", "updated_at"] as const)(
-    "clears %s with other user filters while preserving Unread and display settings",
-    async (field) => {
-      const store = getIssueSurfaceViewStore(`view:${UNREAD_VIEW_ID}`);
+      const store = getIssueSurfaceViewStore("view:subscribed");
       act(() => store.setState({
         dateFilter: { field, from: "2026-01-01", to: "2026-01-02" },
         priorityFilters: ["high"],
@@ -909,7 +884,7 @@ describe("IssueSurface — filtered empty state", () => {
         showSubIssues: false,
       }));
 
-      render(unreadViewSurface());
+      render(subscribedViewSurface());
 
       fireEvent.click(await screen.findByRole("button", { name: "filtered_empty.clear_button" }));
 
@@ -917,16 +892,18 @@ describe("IssueSurface — filtered empty state", () => {
         dateFilter: null,
         priorityFilters: [],
         agentRunningFilter: false,
-        unreadFilter: true,
+        relationFilters: ["subscribed"],
         sortBy: "title",
         sortDirection: "asc",
         showSubIssues: false,
       });
-      await screen.findByText("filtered_empty.unread_title");
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: "filtered_empty.clear_button" })).toBeNull(),
+      );
     },
   );
 
-  it("clears a date interval on an ordinary surface without adding Unread", async () => {
+  it("clears a date interval on an ordinary surface without adding a relation", async () => {
     const store = getIssueSurfaceViewStore("project:pf");
     act(() => store.getState().setDateFilter({ field: "created_at", from: "2026-01-01", to: "2026-01-02" }));
 
@@ -935,36 +912,85 @@ describe("IssueSurface — filtered empty state", () => {
     fireEvent.click(await screen.findByRole("button", { name: "filtered_empty.clear_button" }));
 
     expect(store.getState().dateFilter).toBeNull();
-    expect(store.getState().unreadFilter).toBe(false);
+    expect(store.getState().relationFilters).toEqual([]);
     await screen.findByText("detail.empty_issues_title");
   });
 
-  it("keeps the built-in Unread view's condition when a workspace switch reloads its state", async () => {
+  it("keeps a built-in view's condition when a workspace switch reloads its state", async () => {
     setCurrentWorkspace("acme", "ws-1");
-    const store = getIssueSurfaceViewStore(`view:${UNREAD_VIEW_ID}`);
-    render(unreadViewSurface());
-    await screen.findByText("filtered_empty.unread_title");
+    const store = getIssueSurfaceViewStore("view:subscribed");
+    render(subscribedViewSurface());
+    await screen.findByText("filtered_empty.title");
 
     // The next workspace has no saved state for this view, so the reload
-    // resets the store to defaults, unread off.
+    // resets the store to defaults, without the relation.
     await act(async () => {
       setCurrentWorkspace("beta", "ws-1");
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
 
-    expect(store.getState().unreadFilter).toBe(true);
-    expect(screen.getByText("filtered_empty.unread_title")).toBeInTheDocument();
+    expect(store.getState().relationFilters).toEqual(["subscribed"]);
     setCurrentWorkspace(null, null);
   });
 
-  it("restores the built-in Unread view's condition from state saved without it", async () => {
-    const store = getIssueSurfaceViewStore(`view:${UNREAD_VIEW_ID}`);
-    act(() => store.setState({ unreadFilter: false }));
+  it("restores a built-in view's condition from state saved without it, and un-negates it", async () => {
+    const store = getIssueSurfaceViewStore("view:subscribed");
+    act(() => store.setState({ relationFilters: [], negatedFilters: ["relation"] }));
 
-    render(unreadViewSurface());
+    render(subscribedViewSurface());
 
-    await screen.findByText("filtered_empty.unread_title");
-    expect(store.getState().unreadFilter).toBe(true);
+    await screen.findByText("filtered_empty.title");
+    expect(store.getState().relationFilters).toEqual(["subscribed"]);
+    expect(store.getState().negatedFilters).toEqual([]);
+  });
+
+  it("keeps a built-in view to exactly its relations: another one would widen it", async () => {
+    const store = getIssueSurfaceViewStore("view:subscribed");
+    render(subscribedViewSurface());
+    await screen.findByText("filtered_empty.title");
+
+    act(() => store.getState().toggleRelationFilter("assigned"));
+
+    expect(store.getState().relationFilters).toEqual(["subscribed"]);
+  });
+
+  it("keeps Working to running agents: adding idle would list every issue", async () => {
+    const store = getIssueSurfaceViewStore("view:working");
+    useActiveIssueViewStore.getState().setActive("ws-1:workspace", "working");
+    render(
+      <QueryClientProvider client={qc}>
+        <IssueSurface
+          scope={{ type: "workspace", actorKind: "all" }}
+          modes={["list"]}
+          renderHeader={() => null}
+          batchToolbar="never"
+        />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(store.getState().agentRunningFilter).toBe(true));
+
+    act(() => store.setState({ agentIdleFilter: true }));
+
+    expect(store.getState()).toMatchObject({ agentRunningFilter: true, agentIdleFilter: false });
+  });
+
+  it("puts back the agent filter Working is defined by", async () => {
+    const store = getIssueSurfaceViewStore("view:working");
+    act(() => store.setState({ agentRunningFilter: false, agentIdleFilter: true }));
+    useActiveIssueViewStore.getState().setActive("ws-1:workspace", "working");
+
+    render(
+      <QueryClientProvider client={qc}>
+        <IssueSurface
+          scope={{ type: "workspace", actorKind: "all" }}
+          modes={["list"]}
+          renderHeader={() => null}
+          batchToolbar="never"
+        />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(store.getState()).toMatchObject({ agentRunningFilter: true, agentIdleFilter: false }));
   });
 });
 
@@ -989,7 +1015,6 @@ describe("IssueSurface — status catalog failure", () => {
         rowRequests.push(request);
         return tableMethods.listIssueTableRows(request);
       }),
-      listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot: vi.fn(() => never<AgentTask[]>()),
       getChildIssueProgress: vi.fn(() => never()),
@@ -1112,5 +1137,128 @@ describe("IssueSurface — status catalog failure", () => {
     // Still no blocking error, and the surface never stopped fetching.
     expect(screen.queryByRole("alert")).toBeNull();
     expect(rowRequests.length).toBeGreaterThanOrEqual(before);
+  });
+});
+
+describe("IssueSurface — guest create affordances (MUL-9420)", () => {
+  let qc: QueryClient;
+
+  function seedRole(role: "member" | "guest") {
+    qc.setQueryData(memberListOptions("ws-1").queryKey, [
+      {
+        id: "m-1",
+        workspace_id: "ws-1",
+        user_id: mockAuthUser.id,
+        role,
+        created_at: "2026-01-01T00:00:00Z",
+        name: mockAuthUser.name,
+        email: mockAuthUser.email,
+        avatar_url: null,
+      },
+    ]);
+  }
+
+  function useIssues(issues: Issue[]) {
+    const listIssues = vi.fn((params?: ListIssuesParams) => {
+      const rows = params?.status === "todo" ? issues : [];
+      return Promise.resolve({ issues: rows, total: rows.length } satisfies ListIssuesResponse);
+    });
+    setApiInstance({
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
+      listIssues,
+      ...statusTableMethodsFromLegacy(listIssues),
+      listProjects: vi.fn(() => never()),
+      listMembers: vi.fn(() => never()),
+      getAgentTaskSnapshot: vi.fn(() => never<AgentTask[]>()),
+      getWorkspaceWorkingAgents: vi.fn(() => Promise.resolve([])),
+      getChildIssueProgress: vi.fn(() => never()),
+      listIssueUnread: vi.fn(() => Promise.resolve([])),
+      listSubscribedIssueIds: vi.fn(() => Promise.resolve([])),
+      listIssueViews: vi.fn(() => Promise.resolve([])),
+    } as unknown as ApiClient);
+  }
+
+  beforeEach(() => {
+    mockWsId.current = "ws-1";
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // Resolve `t(($) => $.a.b)` to "a.b" so controls can be found by key.
+    mockTranslate.mockImplementation(((...args: unknown[]) => {
+      const path: string[] = [];
+      const probe: unknown = new Proxy(() => {}, {
+        get: (_target, property) => {
+          path.push(String(property));
+          return probe;
+        },
+      });
+      (args[0] as (value: unknown) => unknown)(probe);
+      return path.join(".");
+    }) as unknown as () => string);
+    pruneIssueSurfaceViewStates([]);
+  });
+
+  afterEach(() => {
+    cleanup();
+    qc.clear();
+    pruneIssueSurfaceViewStates([]);
+    mockTranslate.mockImplementation(() => "translated");
+    vi.restoreAllMocks();
+  });
+
+  function surface(renderEmpty?: (context: { canCreate: boolean }) => React.ReactNode) {
+    return (
+      <QueryClientProvider client={qc}>
+        <IssueSurface
+          scope={{ type: "project", projectId: "pg" }}
+          modes={["list"]}
+          renderHeader={() => null}
+          renderEmpty={renderEmpty}
+          batchToolbar="never"
+        />
+      </QueryClientProvider>
+    );
+  }
+
+  it("offers a member the empty state's create actions", async () => {
+    useIssues([]);
+    seedRole("member");
+    render(surface());
+
+    await screen.findByText("detail.empty_issues_title");
+    expect(screen.getByRole("button", { name: "detail.empty_issues_new_button" })).toBeInTheDocument();
+  });
+
+  it("drops the empty state's create actions for a guest", async () => {
+    useIssues([]);
+    seedRole("guest");
+    render(surface());
+
+    await screen.findByText("detail.empty_issues_title");
+    expect(screen.queryByRole("button", { name: "detail.empty_issues_new_button" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "detail.empty_issues_add_existing" })).toBeNull();
+  });
+
+  it("tells a page's own empty state that a guest cannot create", async () => {
+    useIssues([]);
+    seedRole("guest");
+    const renderEmpty = vi.fn(({ canCreate }: { canCreate: boolean }) => (
+      <div data-testid="custom-empty">{String(canCreate)}</div>
+    ));
+    render(surface(renderEmpty));
+
+    expect(await screen.findByTestId("custom-empty")).toHaveTextContent("false");
+  });
+
+  it("hides the list group's add-issue button from a guest only", async () => {
+    useIssues([makeIssue("g1", "Guest-visible issue", "pg")]);
+    seedRole("member");
+    const { unmount } = render(surface());
+    await screen.findByText("Guest-visible issue");
+    expect(screen.getAllByRole("button", { name: "list.add_issue_tooltip" }).length).toBeGreaterThan(0);
+    unmount();
+
+    seedRole("guest");
+    render(surface());
+    await screen.findByText("Guest-visible issue");
+    expect(screen.queryByRole("button", { name: "list.add_issue_tooltip" })).toBeNull();
   });
 });

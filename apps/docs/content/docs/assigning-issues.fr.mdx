@@ -74,7 +74,7 @@ Votre capacité à assigner un agent dépend de son Accès :
 - **Personnes précises** : le propriétaire et les membres listés peuvent l'exécuter ;
 - **Tout l'espace de travail** : tous les membres de l'espace de travail peuvent l'exécuter.
 
-Les propriétaires et administrateurs de l'espace de travail peuvent gérer les agents, mais pouvoir voir un agent ne signifie pas pouvoir l'exécuter. Le sélecteur d'assignation désactive les agents que vous ne pouvez pas exécuter. Voir [Agents](/agents#permissions-et-accès) pour les règles complètes.
+Les propriétaires et administrateurs de l'espace de travail peuvent gérer les agents, mais pouvoir voir un agent ne signifie pas pouvoir l'exécuter. Le sélecteur d'assignation n'affiche pas les agents que vous ne pouvez pas exécuter. Voir [Agents](/agents#permissions-et-accès) pour les règles complètes.
 
 ## Changer ou retirer l'assigné
 
@@ -96,6 +96,8 @@ multica issue assign MUL-42 --unassign
 Dans les scripts, utilisez `--to-id <uuid>` pour éviter de cibler un mauvais objet portant le même nom. Retrouvez les UUID avec `multica agent list --output json` ou `multica workspace member list --output json`.
 
 Utilisez `--no-start` lorsque l'assignation doit enregistrer le responsable sans créer de nouvelle exécution — par exemple lorsque le même agent traite déjà la tâche depuis une autre exécution. La même option est disponible sur `issue update` et `issue status`. Si un flux qui ne fait qu'enregistrer le responsable modifie à la fois l'assignation et le statut, passez-la aux deux commandes : neutraliser le déclenchement de l'assignation ne neutralise pas une exécution déclenchée ensuite par le changement de statut.
+
+Si une assignation ou un changement de statut ne démarre aucune exécution — par exemple parce que la tâche est en `backlog` ou que l'agent n'a pas de runtime — la commande en indique la raison sur stderr. `issue batch update` affiche la même indication dans sa colonne de raison.
 
 ## Étapes suivantes
 

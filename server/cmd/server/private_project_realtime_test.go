@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/extension"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -22,7 +23,7 @@ const (
 	ppPrivate       = "00000000-0000-0000-0000-0000000000b1"
 	ppPublic        = "00000000-0000-0000-0000-0000000000b2"
 	ppMember        = "00000000-0000-0000-0000-0000000000c1"
-	ppAdmin         = "00000000-0000-0000-0000-0000000000c2"
+	ppShared        = "00000000-0000-0000-0000-0000000000c2" // member of both private projects
 	ppSecretIssue   = "00000000-0000-0000-0000-0000000000d1"
 	ppPublicIssue   = "00000000-0000-0000-0000-0000000000d2"
 	ppSecretTask    = "00000000-0000-0000-0000-0000000000e1"
@@ -37,10 +38,18 @@ const (
 	ppAutopilotTask    = "00000000-0000-0000-0000-0000000000e2"
 	ppQuickCreateTask  = "00000000-0000-0000-0000-0000000000e3"
 	ppCrossProjectTask = "00000000-0000-0000-0000-0000000000e4"
+
+	// Workspace members in no private project, and another issue in the
+	// first private project.
+	ppPlain         = "00000000-0000-0000-0000-0000000000c4"
+	ppGuest         = "00000000-0000-0000-0000-0000000000c5"
+	ppSecretSibling = "00000000-0000-0000-0000-0000000000d4"
 )
 
 type fakeAudienceQuerier struct {
 	fail bool
+	// noPrivateProjects makes the workspace have no private project at all.
+	noPrivateProjects bool
 }
 
 func ppUUID(s string) pgtype.UUID {
@@ -55,19 +64,22 @@ func (f fakeAudienceQuerier) ListPrivateProjectAudience(context.Context, pgtype.
 	if f.fail {
 		return nil, errors.New("db down")
 	}
+	if f.noPrivateProjects {
+		return nil, nil
+	}
+	// The audience is these rows and nothing else: nobody is added for their
+	// workspace role.
 	return []db.ListPrivateProjectAudienceRow{
 		{ProjectID: ppUUID(ppPrivate), UserID: ppUUID(ppMember)},
+		{ProjectID: ppUUID(ppPrivate), UserID: ppUUID(ppShared)},
+		{ProjectID: ppUUID(ppPrivate2), UserID: ppUUID(ppShared)},
 		{ProjectID: ppUUID(ppPrivate2), UserID: ppUUID(ppOther)},
 	}, nil
 }
 
-func (fakeAudienceQuerier) ListWorkspaceManagerUserIDs(context.Context, pgtype.UUID) ([]pgtype.UUID, error) {
-	return []pgtype.UUID{ppUUID(ppAdmin)}, nil
-}
-
 func (fakeAudienceQuerier) GetIssueProjectID(_ context.Context, id pgtype.UUID) (pgtype.UUID, error) {
 	switch util.UUIDToString(id) {
-	case ppSecretIssue:
+	case ppSecretIssue, ppSecretSibling:
 		return ppUUID(ppPrivate), nil
 	case ppPublicIssue:
 		return ppUUID(ppPublic), nil
@@ -75,6 +87,14 @@ func (fakeAudienceQuerier) GetIssueProjectID(_ context.Context, id pgtype.UUID) 
 		return ppUUID(ppPrivate2), nil
 	}
 	return pgtype.UUID{}, pgx.ErrNoRows
+}
+
+func (fakeAudienceQuerier) ListMembers(_ context.Context, ws pgtype.UUID) ([]db.Member, error) {
+	var out []db.Member
+	for _, id := range []string{ppMember, ppShared, ppOther, ppPlain} {
+		out = append(out, db.Member{WorkspaceID: ws, UserID: ppUUID(id), Role: "member"})
+	}
+	return append(out, db.Member{WorkspaceID: ws, UserID: ppUUID(ppGuest), Role: "guest"}), nil
 }
 
 func (fakeAudienceQuerier) GetCommentIssueProjectID(_ context.Context, id pgtype.UUID) (pgtype.UUID, error) {
@@ -96,6 +116,13 @@ func (fakeAudienceQuerier) GetAgentTask(_ context.Context, id pgtype.UUID) (db.A
 		return db.AgentTaskQueue{ID: id, Context: []byte(`{"type":"quick_create","project_id":"` + ppPrivate + `","parent_issue_id":"` + ppSecretIssue2 + `"}`)}, nil
 	}
 	return db.AgentTaskQueue{}, pgx.ErrNoRows
+}
+
+func (fakeAudienceQuerier) GetAutopilot(_ context.Context, id pgtype.UUID) (db.Autopilot, error) {
+	if util.UUIDToString(id) == ppAutopilot {
+		return db.Autopilot{ID: id, ProjectID: ppUUID(ppPrivate)}, nil
+	}
+	return db.Autopilot{}, pgx.ErrNoRows
 }
 
 func (f fakeAudienceQuerier) ListIssueProjectIDs(ctx context.Context, ids []pgtype.UUID) ([]db.ListIssueProjectIDsRow, error) {
@@ -135,7 +162,7 @@ func privateAudienceScopes(fb *fakeBroadcaster) []string {
 func TestRegisterListeners_PrivateProjectEventsReachOnlyItsAudience(t *testing.T) {
 	want := []string{
 		realtime.WorkspaceMemberScopeID(ppWorkspace, ppMember),
-		realtime.WorkspaceMemberScopeID(ppWorkspace, ppAdmin),
+		realtime.WorkspaceMemberScopeID(ppWorkspace, ppShared),
 	}
 	sort.Strings(want)
 	private := []events.Event{
@@ -145,6 +172,11 @@ func TestRegisterListeners_PrivateProjectEventsReachOnlyItsAudience(t *testing.T
 		{Type: protocol.EventProjectUpdated, Payload: map[string]any{"project": map[string]any{"id": ppPrivate}}},
 		{Type: protocol.EventProjectMembersChanged, Payload: map[string]any{"project_id": ppPrivate}},
 		{Type: protocol.EventTaskMessage, TaskID: ppSecretTask, Payload: map[string]any{"task_id": ppSecretTask}},
+		// Autopilots bound to the project, by payload object and by bare id.
+		{Type: protocol.EventAutopilotCreated, Payload: map[string]any{"autopilot": map[string]any{"id": ppAutopilot, "project_id": ppPrivate}}},
+		{Type: protocol.EventAutopilotUpdated, Payload: map[string]any{"autopilot_id": ppAutopilot}},
+		{Type: protocol.EventAutopilotRunStart, Payload: map[string]any{"autopilot_id": ppAutopilot, "run_id": "r"}},
+		{Type: protocol.EventAutopilotRunDone, Payload: map[string]any{"autopilot_id": ppAutopilot, "run_id": "r"}},
 		// Issue-less runs read the project too: a run-only autopilot and a
 		// quick-create into it.
 		{Type: protocol.EventTaskMessage, TaskID: ppAutopilotTask, Payload: map[string]any{"task_id": ppAutopilotTask}},
@@ -171,6 +203,8 @@ func TestRegisterListeners_PrivateProjectEventsReachOnlyItsAudience(t *testing.T
 		// A deleted issue cannot be resolved: keep fanout, never go silent.
 		{Type: protocol.EventIssueDeleted, Payload: map[string]any{"issue_id": "00000000-0000-0000-0000-00000000dead"}},
 		{Type: protocol.EventAgentStatus, Payload: map[string]any{"agent_id": "a"}},
+		{Type: protocol.EventAutopilotUpdated, Payload: map[string]any{"autopilot": map[string]any{"id": "x", "project_id": nil}}},
+		{Type: protocol.EventAutopilotDeleted, Payload: map[string]any{"autopilot_id": "00000000-0000-0000-0000-00000000dead"}},
 	}
 	for _, e := range public {
 		bus := events.New()
@@ -181,6 +215,35 @@ func TestRegisterListeners_PrivateProjectEventsReachOnlyItsAudience(t *testing.T
 		if len(fb.workspaceCalls) != 1 {
 			t.Errorf("%s %v: workspace broadcasts = %d, want 1", e.Type, e.Payload, len(fb.workspaceCalls))
 		}
+	}
+}
+
+func TestRegisterListeners_ExtensionProjectEventReachesOnlyItsAudience(t *testing.T) {
+	const filed = "test_extension:filed"
+	extension.RegisterProjectEvent(filed)
+
+	publish := func(eventType, projectID string) *fakeBroadcaster {
+		bus := events.New()
+		fb := &fakeBroadcaster{}
+		registerListeners(bus, fb, newPrivateProjectAudience(fakeAudienceQuerier{}))
+		bus.Publish(events.Event{Type: eventType, WorkspaceID: ppWorkspace, Payload: map[string]any{"project_id": projectID, "folder_id": "f"}})
+		return fb
+	}
+
+	fb := publish(filed, ppPrivate)
+	want := []string{
+		realtime.WorkspaceMemberScopeID(ppWorkspace, ppMember),
+		realtime.WorkspaceMemberScopeID(ppWorkspace, ppShared),
+	}
+	sort.Strings(want)
+	if got := privateAudienceScopes(fb); len(fb.workspaceCalls) != 0 || len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("private project: workspace=%d delivered=%v, want only %v", len(fb.workspaceCalls), got, want)
+	}
+	if fb := publish(filed, ppPublic); len(fb.workspaceCalls) != 1 {
+		t.Fatalf("public project: workspace broadcasts = %d, want 1", len(fb.workspaceCalls))
+	}
+	if fb := publish("test_extension:unregistered", ppPrivate); len(fb.workspaceCalls) != 1 {
+		t.Fatalf("unregistered event: workspace broadcasts = %d, want 1", len(fb.workspaceCalls))
 	}
 }
 
@@ -225,7 +288,7 @@ func TestRegisterListeners_RunAcrossPrivateProjectsReachesOnlyTheirCommonAudienc
 	registerListeners(bus, fb, newPrivateProjectAudience(fakeAudienceQuerier{}))
 	bus.Publish(events.Event{Type: protocol.EventTaskMessage, WorkspaceID: ppWorkspace, TaskID: ppCrossProjectTask,
 		Payload: map[string]any{"task_id": ppCrossProjectTask}})
-	want := []string{realtime.WorkspaceMemberScopeID(ppWorkspace, ppAdmin)}
+	want := []string{realtime.WorkspaceMemberScopeID(ppWorkspace, ppShared)}
 	if got := privateAudienceScopes(fb); len(fb.workspaceCalls) != 0 || len(got) != 1 || got[0] != want[0] {
 		t.Fatalf("workspace=%d scoped=%v, want only %v: a member of one project must not read a run that also reads the other", len(fb.workspaceCalls), got, want)
 	}
@@ -291,7 +354,7 @@ func TestPrivateProjectTaskAudienceInvalidatesCachedProjects(t *testing.T) {
 			}
 			members, private, err := a.Audience(context.Background(), e)
 			if err != nil || !private || len(members) != 2 || members[1] != ppOther {
-				t.Fatalf("moved run audience = %v, %v, %v; want admin and new project's member", members, private, err)
+				t.Fatalf("moved run audience = %v, %v, %v; want the new project's two members", members, private, err)
 			}
 		})
 	}
@@ -309,7 +372,7 @@ func TestPrivateProjectTaskCacheDoesNotCacheMembership(t *testing.T) {
 		t.Fatal(err)
 	}
 	members, private, err := a.Audience(context.Background(), e)
-	if err != nil || !private || len(members) != 1 || members[0] != ppAdmin {
+	if err != nil || !private || len(members) != 1 || members[0] != ppShared {
 		t.Fatalf("revoked member still receives run: %v, %v, %v", members, private, err)
 	}
 }

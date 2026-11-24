@@ -28,6 +28,8 @@ export interface NavigationAdapter {
     title?: string,
     opts?: { activate?: boolean },
   ) => void;
+  /** Desktop only: open an issue path in its own window. */
+  openIssueInNewWindow?: (path: string, title: string) => void;
   /** Web only: hand an issue path to the installed desktop app. */
   openInDesktop?: (path: string) => void;
   /**

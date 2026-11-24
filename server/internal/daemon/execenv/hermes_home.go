@@ -339,6 +339,12 @@ func hermesProfileDir(root, name string) (home string, mustExist bool, err error
 // store actually holds a transcript, so the caller never
 // tells a task it can resume history that is not there.
 func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, workspaceSkills []SkillContextForEnv, env map[string]string, memoryStore, sessionStore string, logger *slog.Logger) (sessions hermesSessionMount, err error) {
+	return prepareHermesHomeTracked(hermesHome, sourceHome, sourceMustExist, workspaceSkills, env, memoryStore, sessionStore, logger, nil)
+}
+
+// prepareHermesHomeTracked additionally records, when installed is non-nil,
+// each written skill's absolute directory by skill ID.
+func prepareHermesHomeTracked(hermesHome, sourceHome string, sourceMustExist bool, workspaceSkills []SkillContextForEnv, env map[string]string, memoryStore, sessionStore string, logger *slog.Logger, installed map[string]string) (sessions hermesSessionMount, err error) {
 	sharedHome := strings.TrimSpace(sourceHome)
 	if sharedHome == "" {
 		sharedHome = platformDefaultHermesHome()
@@ -394,7 +400,7 @@ func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, work
 	if err := writeDerivedHermesEnv(sharedHome, hermesHome); err != nil {
 		return hermesSessionMount{}, fmt.Errorf("derive hermes .env: %w", err)
 	}
-	if err := writeHermesBoundSkills(hermesHome, workspaceSkills, logger); err != nil {
+	if err := writeHermesBoundSkills(hermesHome, workspaceSkills, logger, installed); err != nil {
 		return hermesSessionMount{}, err
 	}
 	return sessions, nil
@@ -890,7 +896,7 @@ func computeHermesExternalDirs(sharedHome string, existing []string, env map[str
 // skill removed since the last run can't linger, then writes only the
 // Multica-bound skills. They keep their natural slug (no user skills share this
 // dir) and therefore take precedence over any same-named external skill.
-func writeHermesBoundSkills(hermesHome string, workspaceSkills []SkillContextForEnv, logger *slog.Logger) error {
+func writeHermesBoundSkills(hermesHome string, workspaceSkills []SkillContextForEnv, logger *slog.Logger, installed map[string]string) error {
 	skillsDir := filepath.Join(hermesHome, "skills")
 	if err := os.RemoveAll(skillsDir); err != nil {
 		return fmt.Errorf("clear hermes skills dir: %w", err)
@@ -902,7 +908,7 @@ func writeHermesBoundSkills(hermesHome string, workspaceSkills []SkillContextFor
 		return os.MkdirAll(skillsDir, 0o700)
 	}
 	// This directory is owned by the isolated home and replaced on every run.
-	return writeSkillFiles(skillsDir, workspaceSkills, nil)
+	return writeSkillFilesTracked(skillsDir, workspaceSkills, nil, installed)
 }
 
 // existingHermesExternalDirs reads the raw skills.external_dirs entries from a

@@ -88,6 +88,8 @@ Context that is too large cannot be captured: up to 256 comments from the thread
 
 Use [Quick Actions](/quick-actions) to save who to ask and what to say. Click one in the issue sidebar to send it immediately, or type `/` in the comment box to insert it as a draft you can edit before sending.
 
+To request a [skill](/skills) in an issue comment or reply, type `/` followed by part of its name or description. The menu shows matching skills enabled for the agents your draft will reach. Choose a skill to insert its link, then send the comment when ready.
+
 ## @-mentions
 
 Type `@` and pick a target from the list:
@@ -96,9 +98,10 @@ Type `@` and pick a target from the list:
 |---|---|
 | **Member** | Gets a mention notification in the inbox; an @ in a comment does not create a subscription. |
 | **Agent** | Creates a run for that agent; agents have no inbox. |
-| **Squad** | Notifies the squad's members and triggers the squad leader. |
+| **Squad** | Triggers the squad leader; squad members are not notified. |
 | **Issue** | Inserts a link to another issue — no notification, no agent trigger. |
-| **@all** | Notifies every workspace member and triggers no agent. |
+| **Project** | Inserts a link to a project — no notification, no agent trigger. |
+| **@all** | Notifies every workspace member; the mention itself starts no agent. A worker agent's comment still returns to the assigned squad leader, or the guest squad leader in its delegation thread, unless an agent or squad is explicitly mentioned. |
 
 Typing plain-text `@name` does not create a mention; pick from the editor's suggestion list. Typing a valid issue key converts it into an issue link automatically.
 

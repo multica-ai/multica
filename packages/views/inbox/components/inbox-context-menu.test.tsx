@@ -22,7 +22,7 @@ vi.mock("@multica/core/issue-statuses/hooks", () => ({
   }),
 }));
 
-vi.mock("../../issues/components", () => ({ StatusIcon: () => null }));
+vi.mock("../../issues/components/status-icon", () => ({ StatusIcon: () => null }));
 vi.mock("../../issues/components/issue-agent-activity-indicator", () => ({
   IssueAgentActivityIndicator: () => null,
 }));
@@ -95,6 +95,7 @@ function renderRow({
     onMarkRead: vi.fn(),
     onMarkUnread: vi.fn(),
     onAction: vi.fn(),
+    onDelete: vi.fn(),
     ...actions,
   };
   render(
@@ -116,6 +117,13 @@ function renderRow({
 }
 
 describe("inbox row context menu", () => {
+  it.each(["inbox", "archived"] as const)("offers deletion in the %s view", async (view) => {
+    const onDelete = vi.fn();
+    const { row } = renderRow({ view, actions: { onDelete } });
+    fireEvent.contextMenu(row);
+    fireEvent.click(await screen.findByText("Delete"));
+    expect(onDelete).toHaveBeenCalledWith("inbox-1");
+  });
   it("offers mark-as-unread on a read row and reports the item id", async () => {
     const onMarkUnread = vi.fn();
     const { row } = renderRow({
@@ -148,6 +156,39 @@ describe("inbox row context menu", () => {
     fireEvent.click(await screen.findByText("Archive"));
 
     expect(onAction).toHaveBeenCalledWith("inbox-3");
+  });
+
+  it("offers unsubscribe & archive on rows the page accepts", async () => {
+    const onUnsubscribeArchive = vi.fn();
+    const { row } = renderRow({
+      entry: item({ id: "inbox-4" }),
+      actions: { onUnsubscribeArchive, canUnsubscribe: () => true },
+    });
+
+    fireEvent.contextMenu(row);
+    fireEvent.click(await screen.findByText("Unsubscribe & archive"));
+
+    expect(onUnsubscribeArchive).toHaveBeenCalledWith("inbox-4");
+  });
+
+  it("omits unsubscribe & archive on the viewer's own issues", async () => {
+    const { row } = renderRow({
+      actions: { onUnsubscribeArchive: vi.fn(), canUnsubscribe: () => false },
+    });
+    fireEvent.contextMenu(row);
+    expect(await screen.findByText("Archive")).toBeInTheDocument();
+    expect(screen.queryByText("Unsubscribe & archive")).toBeNull();
+  });
+
+  it("omits unsubscribe & archive in the archived view", async () => {
+    const { row } = renderRow({
+      entry: item({ archived: true }),
+      view: "archived",
+      actions: { onUnsubscribeArchive: vi.fn(), canUnsubscribe: () => true },
+    });
+    fireEvent.contextMenu(row);
+    expect(await screen.findByText("Unarchive")).toBeInTheDocument();
+    expect(screen.queryByText("Unsubscribe & archive")).toBeNull();
   });
 
   it("drops the read toggle in the archived view and offers unarchive", async () => {
@@ -200,6 +241,13 @@ describe("inbox row context menu", () => {
 // A touch pointer has neither hover nor right-click, so the row's compact menu
 // is the only way in. It must therefore offer what right-click offers.
 describe("inbox row compact menu", () => {
+  it("offers deletion without selecting the row", async () => {
+    const onDelete = vi.fn();
+    renderRow({ actions: { onDelete } });
+    fireEvent.click(screen.getByRole("button", { name: "Notification actions" }));
+    fireEvent.click(await screen.findByText("Delete"));
+    expect(onDelete).toHaveBeenCalledWith("inbox-1");
+  });
   const openMenu = () =>
     fireEvent.click(screen.getByRole("button", { name: "Notification actions" }));
 
@@ -251,7 +299,7 @@ describe("inbox row compact menu", () => {
       wrap(
         <InboxContextMenuProvider
           view="inbox"
-          actions={{ onMarkRead: vi.fn(), onMarkUnread: vi.fn(), onAction: vi.fn() }}
+          actions={{ onMarkRead: vi.fn(), onMarkUnread: vi.fn(), onAction: vi.fn(), onDelete: vi.fn() }}
         >
           <InboxListItem
             item={item()}

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bell,
   Blocks,
@@ -11,8 +11,8 @@ import {
   ListPlus,
   Lock,
   MessagesSquare,
+  Mic,
   Palette,
-  Plug,
   Search,
   Server,
   Settings,
@@ -24,6 +24,7 @@ import {
   Workflow,
   Zap,
 } from "@multica/ui/icons";
+import { prefersReducedMotion } from "@multica/core/appearance";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useFeatureEnabled } from "@multica/core/config";
 import { useCurrentMember } from "@multica/core/permissions";
@@ -33,8 +34,9 @@ import {
 } from "@multica/core/feature-flags";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { cn } from "@multica/ui/lib/utils";
-import { resolveSettingsLocation, settingsHref } from "./settings-navigation";
+import { movedAppsHref, resolveSettingsLocation, settingsHref } from "./settings-navigation";
 import { AppLink, useNavigation } from "../../navigation";
+import { useRestoredScrollRef } from "../../platform/scroll-restoration";
 import { AccountTab } from "./account-tab";
 import { PreferencesTab } from "./preferences-tab";
 import { AppearanceTab } from "./appearance-tab";
@@ -43,13 +45,14 @@ import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { CodeTab } from "./code-tab";
 import { ChannelsTab } from "./channels-tab";
-import { ConnectedAppsTab, useComposioAvailable } from "./connected-apps-tab";
 import { NotificationsTab } from "./notifications-tab";
 import { LabelsTab } from "./labels-tab";
 import { WorkflowsTab } from "../../workflows/workflows-tab";
 import { PropertiesTab } from "./properties-tab";
 import { QuickActionsTab } from "./quick-actions-tab";
 import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
+import { localVoiceAPI } from "../../platform/local-voice";
+import { VoiceInputTab } from "./voice-input-tab";
 import { PluginsTab } from "./plugins-tab";
 import { McpTab } from "./mcp-tab";
 import { BillingTab } from "./billing-tab";
@@ -114,7 +117,7 @@ interface SettingsScopeGroup {
 const SETTINGS_HEADER_RAIL = cn(
   "flex min-w-0 flex-1 items-center gap-2",
   "md:pl-[max(1rem,calc(50%-var(--settings-column)/2+2rem))]",
-  "md:group-has-[[data-slot=sidebar-trigger]]/settings-header:pl-[max(0px,calc(50%-var(--settings-column)/2-0.25rem))]",
+  "md:group-has-[[data-sidebar=trigger]]/settings-header:pl-[max(0px,calc(50%-var(--settings-column)/2-0.25rem))]",
   "md:pr-[max(1.5rem,calc(50%-var(--settings-column)/2+2.5rem))]",
 );
 
@@ -127,6 +130,8 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
   const workspaceName = workspace?.name ?? t(($) => $.page.workspace_fallback);
   const { role } = useCurrentMember(workspace?.id ?? "");
   const isMember = role === "member";
+  // A guest (MUL-9420) has personal settings only.
+  const isGuest = role === "guest";
   const navigation = useNavigation();
   const paths = useWorkspacePaths();
   const listCollapsed = useListColumnCollapsed();
@@ -135,7 +140,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
     BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
     false,
   );
-  const appsAvailable = useComposioAvailable();
+  const voiceInputAvailable = localVoiceAPI() !== undefined;
   const entry = (
     value: string,
     label: string,
@@ -144,7 +149,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
     options: { wide?: boolean; adminOnly?: boolean } = {},
   ): SettingsEntry => ({ value, label, icon, content, ...options });
 
-  const groups: SettingsScopeGroup[] = [
+  const scopeGroups: SettingsScopeGroup[] = [
     {
       key: "personal",
       label: t(($) => $.page.groups.personal),
@@ -177,6 +182,9 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               Keyboard,
               <KeyboardShortcutsTab />,
             ),
+            ...(voiceInputAvailable
+              ? [entry("voice-input", t(($) => $.page.tabs.voice_input), Mic, <VoiceInputTab />)]
+              : []),
             entry("tokens", t(($) => $.page.tabs.tokens), KeyRound, <TokensTab />),
           ],
         },
@@ -247,9 +255,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               MessagesSquare,
               <ChannelsTab />,
             ),
-            ...(appsAvailable
-              ? [entry("apps", t(($) => $.page.tabs.apps), Plug, <ConnectedAppsTab />)]
-              : []),
             entry("mcp", t(($) => $.page.tabs.mcp), Server, <McpTab />, {
               adminOnly: true,
             }),
@@ -274,6 +279,9 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
         ]
       : []),
   ];
+  const groups = isGuest
+    ? scopeGroups.filter((group) => group.key !== "workspace")
+    : scopeGroups;
   const allEntries = groups.flatMap((group) =>
     group.subgroups.flatMap((subgroup) => subgroup.entries),
   );
@@ -281,10 +289,14 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
   // Wakeup defaults moved to the issue wakeups list; old links land there.
   const wakeupsMoved = location.tab === "wakeups";
   const wakeupsTarget = wakeupsHref(paths.autopilots());
+  // The workspace's apps and accounts moved to their own page.
+  const appsMoved = location.tab === "apps";
+  const appsTarget = movedAppsHref(paths.apps(), navigation.searchParams, location.section);
   const { replace } = navigation;
   useEffect(() => {
     if (wakeupsMoved) replace(wakeupsTarget);
-  }, [wakeupsMoved, wakeupsTarget, replace]);
+    else if (appsMoved) replace(appsTarget);
+  }, [wakeupsMoved, wakeupsTarget, appsMoved, appsTarget, replace]);
   const candidate =
     location.tab === "billing" && !billingEnabled ? "workspace" : location.tab;
   const active =
@@ -343,6 +355,16 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
   // page. Tab content can still be loading on the first frame, so wait briefly
   // for the anchor before scrolling it into view and flashing it.
   const contentRef = useRef<HTMLDivElement>(null);
+  // Every settings page shares the route, so each restores its own offset.
+  const contentKey = `${active.value}:${location.integration ?? ""}`;
+  const restoreScrollRef = useRestoredScrollRef(`settings:${contentKey}`);
+  const attachContent = useCallback(
+    (el: HTMLDivElement | null) => {
+      contentRef.current = el;
+      restoreScrollRef(el);
+    },
+    [restoreScrollRef],
+  );
   useEffect(() => {
     const anchor = location.section;
     if (!anchor) return;
@@ -360,12 +382,9 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
         }
         return;
       }
-      const reduceMotion =
-        typeof window.matchMedia === "function" &&
-        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       target.scrollIntoView?.({
         block: "center",
-        behavior: reduceMotion ? "auto" : "smooth",
+        behavior: prefersReducedMotion() ? "auto" : "smooth",
       });
       target.setAttribute("data-flash", "true");
       flashTimer = setTimeout(() => target.removeAttribute("data-flash"), FLASH_MS);
@@ -595,8 +614,9 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
         </PageHeader>
         <SettingsHeaderContext.Provider value={headerSlots}>
           <div
-            ref={contentRef}
-            key={`${active.value}:${location.integration ?? ""}`}
+            ref={attachContent}
+            key={contentKey}
+            data-tab-scroll-root={`settings:${contentKey}`}
             className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain"
           >
             <div className="mx-auto w-full max-w-(--settings-column) px-4 py-6 sm:px-6 md:px-10 md:py-8">

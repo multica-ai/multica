@@ -29,13 +29,26 @@ Execution modes:
 multica autopilot list --output json
 multica autopilot get <autopilot-id> --output json
 multica autopilot create --title "<title>" --description "<task prompt>" --agent <agent-name-or-id> --mode create_issue|run_only --output json
+multica autopilot create --title "<title>" --description "<task prompt>" --squad <squad-name-or-id> --mode create_issue|run_only --output json
+multica autopilot update <autopilot-id> --squad <squad-name-or-id> --output json
 multica autopilot update <autopilot-id> --status active|paused --output json
 multica autopilot runs <autopilot-id> --output json
 multica autopilot trigger-add <autopilot-id> --kind schedule --cron "0 9 * * *" --timezone Asia/Shanghai --output json
 multica autopilot trigger-add <autopilot-id> --kind webhook --label "ci" --output json
+multica autopilot trigger-add <autopilot-id> --kind webhook --event-filters-file ./filters.json --output json
+multica autopilot trigger-update <autopilot-id> <trigger-id> --event-filters-file ./filters.json --output json
 multica autopilot trigger <autopilot-id> --output json
 multica autopilot trigger-rotate-url <autopilot-id> <trigger-id> --yes --output json
 ```
+
+The assignee flags `--agent`, `--squad`, and `--squad-id` are mutually exclusive,
+and `create` requires exactly one of them.
+On `update`, any of them retargets the autopilot (`--agent` moves a squad
+autopilot back to a single agent); leave them all out to keep the current
+assignee.
+
+A CLI that answers `unknown flag: --squad` predates squad assignees: assign the
+squad in the web app, or ask the user to update the CLI.
 
 Do not run `trigger`, `delete`, `trigger-delete`, or `trigger-rotate-url` to
 test — those are real side effects. Use `trigger` only when the user explicitly
@@ -52,6 +65,33 @@ The default `multica autopilot list` table includes `LAST_STATUS`. Treat a
 healthy-looking `STATUS=active` row with `LAST_STATUS=failed` as a failing
 autopilot; inspect `multica autopilot runs <id> --output json` for the failure
 reason.
+
+A webhook trigger accepts every event until it has event filters.
+`--event-filters-file` takes a JSON array of rows; a delivery is accepted when
+any row matches. A row matches when `event` equals the event name, `actions`
+(omit for any action) contains the action, and every one of its optional
+`conditions` holds on the payload:
+
+```json
+[
+  {
+    "event": "pull_request",
+    "actions": ["opened", "synchronize"],
+    "conditions": [
+      { "path": "pull_request.draft", "op": "equals", "value": false },
+      { "path": "pull_request.labels.*.name", "op": "equals", "value": "needs-review" },
+      { "path": "pull_request.base.ref", "op": "in", "values": ["main", "release"] }
+    ]
+  }
+]
+```
+
+`path` is dot-separated; a number indexes an array and `*` matches any element.
+`op` is `equals`, `not_equals`, `contains` (text), `in` (takes `values`), or
+`exists` (takes no value; a JSON `null` counts as absent); `ignore_case` applies to text. Values are compared
+with their JSON type, so `"false"` does not match `false`. A missing path never
+matches. A row holds at most 20 conditions. `trigger-update` without a filter
+flag keeps the current filters; `--clear-event-filters` removes them.
 
 A schedule trigger without `--timezone` runs in **UTC**. Name the zone whenever
 a human confirmed a wall-clock time, or they will confirm a morning job and
@@ -70,6 +110,7 @@ material into comments, logs, docs, or PRs.
 3. If assigned to a squad, inspect the squad: `multica squad get <squad-id> --output json`; execution goes to the leader.
 4. Inspect the target agent/runtime: `multica agent get <agent-id> --output json` and `multica runtime list --output json`.
 5. For webhooks, inspect delivery status: `queued` means the worker has not completed dispatch; `failed` carries the worker error. A provider retry with the same `X-GitHub-Delivery` / `Idempotency-Key` reuses the original delivery.
+   An `ignored` delivery created no run, so `runs` shows nothing for it. `trigger_disabled`, `autopilot_paused`, and `autopilot_archived` are recorded in its `error`; `quota_exceeded`, `event_filtered`, and `payload_filtered` in its `reason_code`. `event_filtered` means no row matched the event or action, and `payload_filtered` means a row matched but one of its `conditions` failed — `payload_condition_failure` names that condition and the payload value it saw.
 6. For `create_issue`, inspect the created issue if the run records one.
 
 ## Access

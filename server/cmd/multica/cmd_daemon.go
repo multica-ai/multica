@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -88,6 +89,7 @@ var daemonDiskUsageCmd = &cobra.Command{
 		"overridable via MULTICA_GC_ARTIFACT_PATTERNS) so the report stays in sync with what the GC reclaims.\n" +
 		"A .git directory counts toward the total but never toward the artifact subset — the GC frees it only\n" +
 		"when it removes the whole run directory. Symlinks are never followed.\n\n" +
+		"The MODE column marks in-place runs when recorded in local metadata. JSON includes local_directory: true for those runs.\n\n" +
 		"The STATUS column shows the current status of the issue each directory belongs to, which requires\n" +
 		"contacting the server. When the machine is offline, logged out, or the request fails, the column is\n" +
 		"left blank and the rest of the report still prints. --by-workspace has no STATUS column and therefore\n" +
@@ -229,6 +231,11 @@ const (
 	defaultDaemonLogMaxSizeMB  = 20 // rotate the active daemon.log once it reaches this size
 	defaultDaemonLogMaxBackups = 5  // how many rotated files to keep
 	defaultDaemonLogMaxAgeDays = 30 // drop rotated files older than this
+	// lumberjack converts MB to int64 bytes and days to time.Duration.
+	// Bound both conversions before passing user-provided values to it.
+	maxDaemonLogSizeMB  = math.MaxInt64 / (1024 * 1024)
+	maxDaemonLogBackups = math.MaxInt64
+	maxDaemonLogAgeDays = math.MaxInt64 / int64(24*time.Hour)
 	// errLogMaxBytes bounds daemon.err.log (raw crash/panic sink). It is
 	// enforced by rolling the file to a single ".1" backup at open time, so a
 	// crash loop that repeatedly appends panic output can't reintroduce the
@@ -241,28 +248,37 @@ const (
 // bulk of daemon.log volume is the daemon's own slog output plus agent
 // subprocess stderr (all forwarded through slog), so bounding this writer
 // bounds essentially all growth.
-func newDaemonLogRotator(logPath string) *lumberjack.Logger {
+func newDaemonLogRotator(logPath string, cfg cli.CLIConfig) *lumberjack.Logger {
 	return &lumberjack.Logger{
 		Filename:   logPath,
-		MaxSize:    envPositiveIntOrDefault("MULTICA_DAEMON_LOG_MAX_SIZE_MB", defaultDaemonLogMaxSizeMB),
-		MaxBackups: envPositiveIntOrDefault("MULTICA_DAEMON_LOG_MAX_BACKUPS", defaultDaemonLogMaxBackups),
-		MaxAge:     envPositiveIntOrDefault("MULTICA_DAEMON_LOG_MAX_AGE_DAYS", defaultDaemonLogMaxAgeDays),
+		MaxSize:    daemonLogInt("MULTICA_DAEMON_LOG_MAX_SIZE_MB", cfg.DaemonLogMaxSizeMB, defaultDaemonLogMaxSizeMB, maxDaemonLogSizeMB),
+		MaxBackups: daemonLogInt("MULTICA_DAEMON_LOG_MAX_BACKUPS", cfg.DaemonLogMaxBackups, defaultDaemonLogMaxBackups, maxDaemonLogBackups),
+		MaxAge:     daemonLogInt("MULTICA_DAEMON_LOG_MAX_AGE_DAYS", cfg.DaemonLogMaxAgeDays, defaultDaemonLogMaxAgeDays, maxDaemonLogAgeDays),
 		Compress:   true,
 	}
 }
 
+// Ignore invalid persisted values too: hand-edited config must not disable
+// retention or overflow lumberjack's size/age conversions.
+func daemonLogInt(key string, saved, def int, max int64) int {
+	if saved > 0 && int64(saved) <= max {
+		def = saved
+	}
+	return envPositiveIntOrDefault(key, def, max)
+}
+
 // envPositiveIntOrDefault reads a strictly positive integer env var, falling
-// back to def when unset, blank, malformed, zero, or negative. Zero is treated
+// back to def when unset, blank, malformed, zero, negative, or over max. Zero is treated
 // as "use default" on purpose: lumberjack reads MaxSize=0 as 100MB and
 // MaxBackups=0 / MaxAge=0 as "keep everything", so honoring a literal 0 would
 // silently disable retention and reintroduce unbounded growth.
-func envPositiveIntOrDefault(key string, def int) int {
+func envPositiveIntOrDefault(key string, def int, max int64) int {
 	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {
 		return def
 	}
 	n, err := strconv.Atoi(v)
-	if err != nil || n <= 0 {
+	if err != nil || n <= 0 || int64(n) > max {
 		return def
 	}
 	return n
@@ -972,6 +988,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	// than server URL: an unreadable / missing config only means "no
 	// persisted overrides", not "cannot start".
 	fileCfg, _ := cli.LoadCLIConfigForProfile(profile)
+	logLevel := resolveDaemonLogLevel(fileCfg.LogLevel)
 	// Pick the log sink. A user who runs `daemon start --foreground` in a shell
 	// keeps live, colored logging on their terminal (a documented debugging
 	// path — see docs troubleshooting). A detached/background child, whose
@@ -983,7 +1000,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		logRotator *lumberjack.Logger
 	)
 	if logger_pkg.StderrIsTerminal() {
-		logger = logger_pkg.NewLogger("daemon")
+		logger = logger_pkg.NewWriterLoggerDefault("daemon", os.Stderr, logLevel, false)
 	} else {
 		// An older self-update launcher may have handed this process daemon.log
 		// itself as stdout/stderr. On Windows that inherited handle lacks
@@ -992,12 +1009,12 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		// daemon.log solely owned by the rotator. No-op on Unix, where an open
 		// fd never blocks rename.
 		repointStdioToErrLog(daemonStderrLogPathForProfile(profile))
-		logRotator = newDaemonLogRotator(daemonLogPathForProfile(profile))
+		logRotator = newDaemonLogRotator(daemonLogPathForProfile(profile), fileCfg)
 		defer logRotator.Close()
 		// Route both this process's structured logger and the package-global
 		// slog default through the rotator, so every log line — including
 		// LoadConfig's slog.Warn below — is captured and rotated.
-		logger = logger_pkg.NewWriterLoggerDefault("daemon", logRotator)
+		logger = logger_pkg.NewWriterLoggerDefault("daemon", logRotator, logLevel, true)
 	}
 
 	serverURL := resolveDaemonServerURL(cmd, profile)
@@ -1198,7 +1215,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		// including the package-global slog default (which would otherwise
 		// reopen daemon.log on its next write).
 		if logRotator != nil {
-			logger = logger_pkg.NewWriterLoggerDefault("daemon", os.Stderr)
+			logger = logger_pkg.NewWriterLoggerDefault("daemon", os.Stderr, logLevel, true)
 			_ = logRotator.Close()
 		}
 
@@ -1631,6 +1648,19 @@ func printDaemonStatusReport(w io.Writer, label string, health map[string]any) {
 		}
 		rows = append(rows, row{"Agents", strings.Join(parts, ", ")})
 	}
+	if skipped, ok := health["skipped_agents"].(map[string]any); ok {
+		lineBreaks := strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
+		parts := make([]string, 0, len(skipped))
+		for name, value := range skipped {
+			if reason, ok := value.(string); ok && reason != "" {
+				parts = append(parts, name+": "+lineBreaks.Replace(reason))
+			}
+		}
+		if len(parts) > 0 {
+			sort.Strings(parts)
+			rows = append(rows, row{"Skipped agents", strings.Join(parts, "; ")})
+		}
+	}
 	if ws, ok := health["workspaces"].([]any); ok {
 		rows = append(rows, row{"Workspaces", strconv.Itoa(len(ws))})
 	}
@@ -1797,6 +1827,16 @@ func resolveWorkspacesRootForProfile(profile, flagValue string) (string, error) 
 		fileCfg.WorkspacesRoot,
 	)
 	return daemon.ResolveWorkspacesRoot(profile, override)
+}
+
+// resolveDaemonLogLevel picks the daemon log level: LOG_LEVEL wins when set,
+// otherwise the profile's log_level. An empty result leaves the logger on its
+// built-in default (debug).
+func resolveDaemonLogLevel(cfgValue string) string {
+	if !envUnset("LOG_LEVEL") {
+		return os.Getenv("LOG_LEVEL")
+	}
+	return cfgValue
 }
 
 // resolveDaemonDurationOverride is the numeric counterpart for
@@ -2235,6 +2275,10 @@ func printDiskUsageTaskTable(w io.Writer, report daemon.DiskUsageReport) {
 	for _, task := range report.Tasks {
 		displayedSize += task.SizeBytes
 		displayedArtifact += task.ArtifactSizeBytes
+		mode := "-"
+		if task.LocalDirectory {
+			mode = "in place"
+		}
 		rows = append(rows, []string{
 			task.WorkspaceShort + "/" + task.TaskShort,
 			task.Kind,
@@ -2242,9 +2286,10 @@ func printDiskUsageTaskTable(w io.Writer, report daemon.DiskUsageReport) {
 			formatAge(task.AgeSeconds),
 			formatBytes(task.SizeBytes),
 			formatBytes(task.ArtifactSizeBytes),
+			mode,
 		})
 	}
-	cli.PrintTable(w, []string{"PATH", "KIND", "STATUS", "AGE", "SIZE", "ARTIFACTS"}, rows)
+	cli.PrintTable(w, []string{"PATH", "KIND", "STATUS", "AGE", "SIZE", "ARTIFACTS", "MODE"}, rows)
 
 	if len(report.Tasks) < report.TotalTaskCount {
 		// Report-wide totals stay anchored to the full scan; the displayed

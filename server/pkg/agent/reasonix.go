@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -215,8 +214,7 @@ func (b *reasonixBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	readerDone := make(chan struct{})
 	go func() {
 		defer close(readerDone)
-		scanner := bufio.NewScanner(stdout)
-		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		scanner := newAgentStreamScanner(stdout)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
@@ -224,7 +222,15 @@ func (b *reasonixBackend) Execute(ctx context.Context, prompt string, opts ExecO
 			}
 			c.handleLine(line)
 		}
-		c.closeAllPending(fmt.Errorf("reasonix process exited"))
+		if scanErr := scanner.Err(); scanErr != nil {
+			// The run terminal state is unknown once the scanner stops: surface
+			// the transport fault instead of a generic exit. Close the read pipe
+			// first so a runtime still writing an oversized event cannot block.
+			_ = stdout.Close()
+			c.closeAllPending(fmt.Errorf("reasonix stdout scan failed: %w", scanErr))
+		} else {
+			c.closeAllPending(fmt.Errorf("reasonix process exited"))
+		}
 	}()
 
 	// Drive the ACP session lifecycle in a goroutine.

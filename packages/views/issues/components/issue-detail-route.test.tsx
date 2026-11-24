@@ -5,11 +5,15 @@ import type { ReactNode } from "react";
 import { setApiInstance } from "@multica/core/api";
 import { ApiError } from "@multica/core/api/client";
 import type { ApiClient } from "@multica/core/api/client";
+import { inboxKeys } from "@multica/core/inbox/queries";
+import type { InboxItem } from "@multica/core/types";
+import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider } from "../../navigation";
 import type { NavigationAdapter } from "../../navigation";
 import { IssueDetail, IssueDetailSkeleton } from "./issue-detail";
 import {
   IssueDetailRoute,
+  parseAppRequestHighlightHash,
   parseCommentHighlightHash,
   useCanonicalIssueUrl,
 } from "./issue-detail-route";
@@ -147,6 +151,16 @@ describe("parseCommentHighlightHash", () => {
   });
 });
 
+describe("parseAppRequestHighlightHash", () => {
+  it.each([
+    ["#app-request-01a02814-f098-7309-8286-0b249c66884d", "01a02814-f098-7309-8286-0b249c66884d"],
+    ["#comment-c1", undefined],
+    ["#app-request-", undefined],
+  ])("maps %s to %s", (hash, expected) => {
+    expect(parseAppRequestHighlightHash(hash)).toBe(expected);
+  });
+});
+
 describe("IssueDetailRoute with an identifier that names no issue", () => {
   // Regression: the route used to fall through to IssueDetail with the raw
   // identifier. IssueDetail mounted a second observer on the query that had
@@ -257,5 +271,44 @@ describe("IssueDetailSkeleton embedded layouts", () => {
     expect(view.container.querySelector(".w-80.border-l")).toBeNull();
     view.unmount();
     localStorage.removeItem(storageKey);
+  });
+
+  it("reserves no Inbox bar on the issue page, even for an issue in the Inbox", () => {
+    const getIssue = vi.fn(() => new Promise<never>(() => {}));
+    setApiInstance({ getIssue, getBaseUrl: () => "" } as unknown as ApiClient);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    qc.setQueryData<InboxItem[]>(inboxKeys.list("ws-1"), [
+      {
+        id: "n-42",
+        workspace_id: "ws-1",
+        recipient_type: "member",
+        recipient_id: "member-1",
+        actor_type: "agent",
+        actor_id: "agent-1",
+        type: "new_comment",
+        severity: "info",
+        issue_id: "issue-42",
+        issue_identifier: "MUL-42",
+        title: "Keep Inbox chrome steady",
+        body: null,
+        issue_status: "in_review",
+        issue_priority: "none",
+        read: false,
+        archived: false,
+        created_at: "2026-11-23T00:00:00Z",
+        details: null,
+      },
+    ]);
+
+    const view = renderWithI18n(
+      <QueryClientProvider client={qc}>
+        {wrapper({ children: <IssueDetailRoute routeId="MUL-42" /> })}
+      </QueryClientProvider>,
+    );
+
+    expect(view.container.querySelector("[data-inbox-bar]")).toBeNull();
+
+    view.unmount();
+    qc.clear();
   });
 });

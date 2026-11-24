@@ -14,6 +14,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import type { IssueAssigneeType, IssueStatus, UpdateIssueRequest } from "@multica/core/types";
 import { useUpdateIssue, useBatchUpdateIssues } from "@multica/core/issues/mutations";
+import { useBatchResultToast } from "../issues/components/batch-result-toast";
 import { errorCode } from "@multica/core/api";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -91,10 +92,14 @@ interface RunConfirmData {
  * single-issue promotion out of backlog.
  */
 export function RunConfirmModal({
+  open = true,
   onClose,
+  onOpenChangeComplete,
   data,
 }: {
+  open?: boolean;
   onClose: () => void;
+  onOpenChangeComplete?: (open: boolean) => void;
   data: Record<string, unknown> | null;
 }) {
   const { t } = useT("modals");
@@ -111,6 +116,7 @@ export function RunConfirmModal({
 
   const updateIssue = useUpdateIssue();
   const batchUpdate = useBatchUpdateIssues();
+  const { report: reportBatch } = useBatchResultToast();
 
   const wsId = useWorkspaceId();
   // Built-ins resolve through i18n, custom statuses through the catalog, so the
@@ -153,14 +159,11 @@ export function RunConfirmModal({
           ...payload,
         });
       } else {
-        const { updated } = await batchUpdate.mutateAsync({ ids: issueIds, updates: payload });
+        const response = await batchUpdate.mutateAsync({ ids: issueIds, updates: payload });
         // A partial batch still closes (the applied writes are real), but it
-        // warns with the real count and skips onApplied so the caller keeps
+        // names the skipped issues and skips onApplied so the caller keeps
         // its selection for a retry.
-        if (updated < issueIds.length) {
-          toast.warning(
-            tIssues(($) => $.batch.update_partial, { updated, count: issueIds.length }),
-          );
+        if (!reportBatch(response, issueIds.length, { successMessage: null })) {
           onClose();
           return;
         }
@@ -226,7 +229,11 @@ export function RunConfirmModal({
   );
 
   return (
-    <Dialog open onOpenChange={(v) => { if (!v && !submitting) onClose(); }}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => { if (!v && !submitting) onClose(); }}
+      onOpenChangeComplete={onOpenChangeComplete}
+    >
       {/* Wider than the primitive's sm:max-w-sm: the two actions are long
           phrases, not "Cancel"/"Save". In French they measure ~435px with the
           send-shortcut keycaps against the 352px the default leaves, so the
@@ -265,7 +272,6 @@ export function RunConfirmModal({
                     shortcut={sendShortcut}
                     decorative
                     className="ml-1"
-                    keyClassName="border-background/30 bg-background/15 text-primary-foreground shadow-none"
                   />
                 ) : null}
               </>

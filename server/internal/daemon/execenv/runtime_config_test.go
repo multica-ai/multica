@@ -509,7 +509,7 @@ func TestIssueWorkflowHonorsAgentIdentity(t *testing.T) {
 		// One enumeration, in Instruction Precedence, covering every action
 		// type Agent Identity can forbid. This and workflow step 3 each used to
 		// carry their own list and the two disagreed (MUL-5442).
-		"Never treat this runtime workflow as permission to change issue status, investigate, implement, create issues, update issues, delegate, or otherwise act beyond your Agent Identity.",
+		"The workflow never widens what your Agent Identity allows: when it forbids changing issue status, investigating, implementing, creating issues, updating issues, delegating, or any other action, skip that action.",
 		// MUL-5442 (carried through MUL-6417): the forbids-clause is stated
 		// once on the status-rule header instead of once per status bullet.
 		"skip any status call your Agent Identity forbids",
@@ -527,6 +527,10 @@ func TestIssueWorkflowHonorsAgentIdentity(t *testing.T) {
 	}
 
 	for _, banned := range []string{
+		// Read unconditionally, this denied investigating and implementing
+		// even to agents whose identity forbids neither, against step 3's
+		// "complete the task" (MUL-9092).
+		"Never treat this runtime workflow as permission",
 		"4. Run `multica issue status " + issueID + " in_progress`\n",
 		"5. Follow your Skills and Agent Identity to complete the task (write code, investigate, etc.)",
 		"8. When done, run `multica issue status " + issueID + " in_review`\n",
@@ -628,7 +632,7 @@ func TestInstructionPrecedenceOnlyAppliesToIssueWorkflow(t *testing.T) {
 			for _, banned := range []string{
 				"## Instruction Precedence",
 				"issue workflow below",
-				"Never treat this runtime workflow as permission to change issue status",
+				"The workflow never widens what your Agent Identity allows",
 			} {
 				if strings.Contains(out, banned) {
 					t.Errorf("%s brief must not inherit issue-only precedence text %q\n---\n%s", tc.name, banned, out)
@@ -675,7 +679,8 @@ func TestChatOutputDoesNotRequireIssueComment(t *testing.T) {
 // this rule. Runs both the legacy and slim paths.
 func TestOutputForbidsMidRunProgressComments(t *testing.T) {
 	wantPhrases := []string{
-		"Post exactly ONE comment per run",
+		"Post only your final result, before this turn exits",
+		"one reply per thread when the per-turn message lists several threads",
 		"Do NOT post progress updates",
 	}
 	issueCtxs := map[string]TaskContextForEnv{
@@ -690,6 +695,11 @@ func TestOutputForbidsMidRunProgressComments(t *testing.T) {
 				if !strings.Contains(out, want) {
 					t.Errorf("%s/%s brief missing output rule %q\n---\n%s", label, name, want, out)
 				}
+			}
+			// A multi-thread run is told to post one reply per thread; a
+			// per-run cap of one comment contradicted it (MUL-9092).
+			if strings.Contains(out, "exactly ONE comment per run") {
+				t.Errorf("%s/%s brief still caps a run at one comment\n---\n%s", label, name, out)
 			}
 		}
 		// Chat keeps its own delivery channel; it must not inherit the
@@ -874,6 +884,26 @@ func TestConnectedAppsBlockLivesOutsideBrief(t *testing.T) {
 	})
 	if strings.Contains(out, "## Connected Apps") {
 		t.Errorf("brief must not carry Connected Apps — it is per-run state (MUL-5377)\n---\n%s", out)
+	}
+}
+
+func TestConnectedAppsBlockRemoteAppUsesItsOwnServer(t *testing.T) {
+	t.Parallel()
+	block := BuildConnectedAppsBlock([]runtimeapps.ConnectedApp{{
+		Provider: "multica_remote", ServerName: "mobbin", ToolkitSlug: "mobbin", ToolkitName: "Mobbin",
+		AccountScope: "personal", Level: "read", AccountStatus: "not_connected",
+	}})
+	for _, want := range []string{
+		"- Mobbin (`mobbin`) via MCP server `mobbin` — account of the person who triggered this run, read only, not connected",
+		"Call the tools of an app on its own MCP server directly.",
+		"call `apps_request_connection` on `multica_apps`",
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("missing %q in\n%s", want, block)
+		}
+	}
+	if strings.Contains(block, "apps_run_tool") {
+		t.Errorf("a remote app alone must not point at apps_run_tool:\n%s", block)
 	}
 }
 
@@ -2296,6 +2326,7 @@ func TestBriefByteIdenticalAcrossRunsForEveryKind(t *testing.T) {
 		"chat":         {ChatSessionID: "chat-1", ChatChannelType: ChannelTypeSlack, AgentID: "a-1", AgentName: "Eve"},
 		"quick-create": {QuickCreatePrompt: "make an issue", AgentID: "a-1", AgentName: "Eve"},
 		"autopilot":    {AutopilotRunID: "run-1", AutopilotID: "ap-1", AgentID: "a-1", AgentName: "Eve"},
+		"doc-comment":  {DocID: "doc-1", AgentID: "a-1", AgentName: "Eve"},
 		// WeCom is the channel a real deployment flips the file-delivery
 		// verdict on. The Slack row above catches the same leak today, but only
 		// because the brief's copy is channel-agnostic; scope that copy to
@@ -2421,6 +2452,35 @@ func TestBriefCarriesTheWhenToSplitRule(t *testing.T) {
 	flags := strings.Index(out, "`--status todo` starts an agent-assigned child immediately")
 	if rule < 0 || flags < 0 || rule > flags {
 		t.Errorf("the split rule must come before the sub-issue flags it gates:\n%s", out)
+	}
+}
+
+// TestBriefBatchesTheOpeningReads pins MUL-9919: the independent reads of
+// workflow steps 1–2 go out in one turn without truncated output, and the rule
+// sits under step 2 (after both reads it covers, before step 3) for every
+// provider.
+func TestBriefBatchesTheOpeningReads(t *testing.T) {
+	t.Parallel()
+
+	const lead = "The reads that steps 1–2 still require do not depend on each other — the per-turn message names the issue id and any triggering thread — "
+	const rule = "so issue them together in ONE turn, not one read per turn: prefer parallel tool calls, which keep each output whole, and chain them in one shell command only when parallel calls are unavailable. Never cut these reads short with `head -c` or similar"
+	for _, provider := range []string{"claude", "codex"} {
+		out := buildMetaSkillContent(provider, TaskContextForEnv{IssueID: "issue-1", TriggerCommentID: "comment-1"})
+		at := strings.Index(out, rule)
+		step2 := strings.Index(out, "2. Catch up on the comment history")
+		step3 := strings.Index(out, "\n3. ")
+		if at < 0 {
+			t.Errorf("%s brief lost the batched-read rule:\n%s", provider, out)
+			continue
+		}
+		// MUL-10028: assignment runs carry no triggering thread, so the rule
+		// must not promise one.
+		if !strings.Contains(out, lead+rule) {
+			t.Errorf("%s brief: batched-read rule lost its lead-in:\n%s", provider, out)
+		}
+		if step2 < 0 || step3 < 0 || at < step2 || at > step3 {
+			t.Errorf("%s brief: batched-read rule must sit between step 2 and step 3:\n%s", provider, out)
+		}
 	}
 }
 
@@ -2619,6 +2679,24 @@ func TestEveryBriefThatTeachesJSONOutputAlsoWarnsAgainstMergingStderr(t *testing
 		}
 		if !strings.Contains(brief, wantWhy) {
 			t.Errorf("%s brief states %q without %q; a rule with no reason is the first one dropped under pressure", name, wantRule, wantWhy)
+		}
+	}
+}
+
+// A doc discussion run delivers into the discussion, not onto an issue
+// (MUL-9933): its brief must not send the agent to `multica issue comment add`.
+func TestDocCommentBriefDeliversIntoDiscussion(t *testing.T) {
+	t.Parallel()
+
+	brief := buildMetaSkillContentSlim("claude", TaskContextForEnv{DocID: "doc-1", AgentID: "a-1", AgentName: "Eve", DocsEnabled: true})
+	for _, want := range []string{"discussion on a Multica doc", "`multica doc comment add`", "## Mentions"} {
+		if !strings.Contains(brief, want) {
+			t.Fatalf("doc brief missing %q:\n%s", want, brief)
+		}
+	}
+	for _, unwanted := range []string{"Final results MUST be delivered via `multica issue comment add`", "## Sub-issue Creation", "## Comment Formatting"} {
+		if strings.Contains(brief, unwanted) {
+			t.Fatalf("doc brief must not contain %q", unwanted)
 		}
 	}
 }

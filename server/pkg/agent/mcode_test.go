@@ -46,9 +46,7 @@ while IFS= read -r line; do
   esac
 done
 `, args, requests, loadSession)
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake mcode: %v", err)
-	}
+	writeTestExecutable(t, bin, []byte(script))
 	return bin, requests, args
 }
 
@@ -83,9 +81,7 @@ while IFS= read -r line; do
   esac
 done
 `, requests, readyAfter.Seconds(), ready, ready)
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake mcode: %v", err)
-	}
+	writeTestExecutable(t, bin, []byte(script))
 	return bin, requests
 }
 
@@ -110,9 +106,7 @@ while IFS= read -r line; do
   esac
 done
 `
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake mcode: %v", err)
-	}
+	writeTestExecutable(t, bin, []byte(script))
 	return bin
 }
 

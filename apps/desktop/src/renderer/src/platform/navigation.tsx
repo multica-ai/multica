@@ -18,6 +18,7 @@ import {
   openWorkspaceInNewWindow,
   otherWindowWorkspaces,
 } from "./workspace-windows";
+import { parseIssueWindowPath } from "../../../shared/issue-window";
 
 function requireRuntimeAppUrl(scope: string): string {
   const runtimeConfig = window.desktopAPI.runtimeConfig;
@@ -132,7 +133,10 @@ export function routeContentLinkPath(
   store.openTab(path, "", { activate: disposition === "foreground-tab" });
 }
 
-/** A desktop deep link explicitly targets its URL, including a new comment. */
+/**
+ * A desktop deep link (an issue or a chat session) explicitly targets its URL,
+ * including a new comment or the chat session to select.
+ */
 export function routeIssueDeepLinkPath(path: string): void {
   const store = useTabStore.getState();
   const slug = workspaceSlugForPath(path);
@@ -266,6 +270,10 @@ export function DesktopNavigationProvider({
         store.openTab(path, title ?? "", { activate: opts?.activate });
       },
       openWorkspaceInNewWindow,
+      openIssueInNewWindow: (path: string, title: string) => {
+        if (!parseIssueWindowPath(path)) return;
+        void window.desktopAPI.openIssueWindow({ path, title });
+      },
       workspacesInOtherWindows: () => [...otherWindowWorkspaces()],
       getShareableUrl: (path: string) => `${appUrl}${path}`,
     }),

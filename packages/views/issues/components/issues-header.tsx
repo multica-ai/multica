@@ -1,8 +1,12 @@
 "use client";
 
-import { cloneElement, useEffect, useMemo, useRef, useState } from "react";
+import { cloneElement, useEffect, useId, useMemo, useRef, useState } from "react";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
+import { UI_INDICATOR_SPRING } from "@multica/ui/lib/motion";
 import {
   Activity,
+  BotOff,
   BellRing,
   Bot,
   CalendarClock,
@@ -15,6 +19,7 @@ import {
   Columns3,
   Eye,
   Filter,
+  Flag,
   FolderKanban,
   FolderMinus,
   List,
@@ -168,6 +173,7 @@ function getActiveFilterCount(
     advancedFilter?: AdvancedFilterGroup | null;
     dateFilter?: IssueDateFilter | null;
     agentRunningFilter?: boolean;
+    agentIdleFilter?: boolean;
     unreadFilter?: boolean;
   },
   // Inside a saved view only the user's additions on top of the view's own
@@ -216,6 +222,7 @@ function getActiveFilterCount(
   }
   if (state.dateFilter) count++;
   if (state.agentRunningFilter && !baseline?.agentRunning) count++;
+  if (state.agentIdleFilter && !baseline?.agentIdle) count++;
   if (state.unreadFilter && !baseline?.unread) count++;
   return count;
 }
@@ -959,6 +966,7 @@ const RELATION_ICONS: Record<IssueRelationFilter, typeof User> = {
   created: UserPen,
   my_agents: Bot,
   subscribed: BellRing,
+  blocked: Flag,
 };
 
 /** Read-only sentence form of the active filters, shown on hover so a closed
@@ -1075,6 +1083,7 @@ export function IssueFilterMenu({
   const negatedFilters = useViewStore((s) => s.negatedFilters);
   const propertyFilters = useViewStore((s) => s.propertyFilters);
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
+  const agentIdleFilter = useViewStore((s) => s.agentIdleFilter);
   const unreadFilter = useViewStore((s) => s.unreadFilter);
   const viewStoreApi = useViewStoreApi();
   const act = viewStoreApi.getState();
@@ -1139,11 +1148,13 @@ export function IssueFilterMenu({
         advancedFilter,
         dateFilter: showDateFilter ? dateFilter : null,
         agentRunningFilter,
+        agentIdleFilter,
         unreadFilter,
       },
       viewBaseline,
     ) > 0;
   const fixedTitle = viewBaseline ? t(($) => $.filters.in_view) : undefined;
+  const relationsFixed = (viewBaseline?.relation.size ?? 0) > 0;
   const { chips: allChips } = useFilterChips(showDateFilter ? dateFilter : null, onDateFilterChange, viewBaseline);
   const chips = showRelation ? allChips : allChips.filter((chip) => chip.key !== "relation");
   const chipByKey = new Map(chips.map((chip) => [chip.key, chip]));
@@ -1176,7 +1187,7 @@ export function IssueFilterMenu({
     key === "date"
       ? t(($) => $.filters.section_date)
       : key === "agentRunning"
-        ? `${t(($) => $.filters.section_agent_status)} ${t(($) => $.filters.agent_status_running)}`
+        ? `${t(($) => $.filters.section_agent_status)} ${t(($) => $.filters.agent_status_running)} ${t(($) => $.filters.agent_status_idle)}`
         : key === "unread"
           ? `${t(($) => $.filters.section_read_state)} ${t(($) => $.filters.read_state_unread)}`
         : key.startsWith("property:")
@@ -1252,14 +1263,25 @@ export function IssueFilterMenu({
               <DropdownMenuSubContent className="w-auto min-w-44">
                 <DropdownMenuCheckboxItem
                   checked={agentRunningFilter}
-                  disabled={viewBaseline?.agentRunning === true}
-                  title={viewBaseline?.agentRunning === true ? fixedTitle : undefined}
+                  disabled={viewBaseline?.agentRunning === true || viewBaseline?.agentIdle === true}
+                  title={viewBaseline?.agentRunning || viewBaseline?.agentIdle ? fixedTitle : undefined}
                   onCheckedChange={() => act.toggleAgentRunningFilter()}
                   className={FILTER_ITEM_CLASS}
                 >
                   <HoverCheck checked={agentRunningFilter} />
                   <Activity className="size-3.5 text-muted-foreground" />
                   {t(($) => $.filters.agent_status_running)}
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem
+                  checked={agentIdleFilter}
+                  disabled={viewBaseline?.agentRunning === true || viewBaseline?.agentIdle === true}
+                  title={viewBaseline?.agentRunning || viewBaseline?.agentIdle ? fixedTitle : undefined}
+                  onCheckedChange={() => act.toggleAgentIdleFilter()}
+                  className={FILTER_ITEM_CLASS}
+                >
+                  <HoverCheck checked={agentIdleFilter} />
+                  <BotOff className="size-3.5 text-muted-foreground" />
+                  {t(($) => $.filters.agent_status_idle)}
                 </DropdownMenuCheckboxItem>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
@@ -1419,10 +1441,12 @@ export function IssueFilterMenu({
                 {triggerValue("relation")}
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="w-auto min-w-52">
-                <FilterOperatorSwitch dimension="relation" />
+                {/* A view defined by relations owns the whole dimension:
+                    another value would widen it, not narrow it. */}
+                {!relationsFixed && <FilterOperatorSwitch dimension="relation" />}
                 {ISSUE_RELATION_FILTERS.map((relation) => {
                   const checked = relationFilters.includes(relation);
-                  const fixed = viewBaseline?.relation.has(relation) === true;
+                  const fixed = relationsFixed;
                   const Icon = RELATION_ICONS[relation];
                   return (
                     <DropdownMenuCheckboxItem
@@ -1613,6 +1637,7 @@ export function IssueFilterMenu({
     if (!viewBaseline) return false;
     if (value === "none" && field === "assignee") return viewBaseline.includeNoAssignee;
     if (value === "none" && field === "project") return viewBaseline.includeNoProject;
+    if (field === "relation" && relationsFixed) return true;
     return viewBaseline[field].has(value);
   };
   const sectionKeys = [
@@ -1877,6 +1902,7 @@ export function IssueDisplayControls({
   const advancedFilter = useViewStore((s) => s.advancedFilter);
   const negatedFilters = useViewStore((s) => s.negatedFilters);
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
+  const agentIdleFilter = useViewStore((s) => s.agentIdleFilter);
   const unreadFilter = useViewStore((s) => s.unreadFilter);
   const cardPropertyIds = useViewStore((s) => s.cardPropertyIds);
   const sortBy = useViewStore((s) => s.sortBy);
@@ -1959,6 +1985,7 @@ export function IssueDisplayControls({
       advancedFilter,
       dateFilter: showDateFilter ? dateFilter : null,
       agentRunningFilter,
+      agentIdleFilter,
       unreadFilter,
     },
     viewBaseline,
@@ -1985,7 +2012,7 @@ export function IssueDisplayControls({
     project: "group_project",
     assignee: "group_assignee",
   };
-  const CARD_PROPERTY_LABEL_KEY: Record<typeof CARD_PROPERTY_OPTIONS[number]["key"], "card_priority" | "card_description" | "card_assignee" | "card_start_date" | "card_due_date" | "card_project" | "card_labels" | "card_child_progress"> = {
+  const CARD_PROPERTY_LABEL_KEY: Record<typeof CARD_PROPERTY_OPTIONS[number]["key"], "card_priority" | "card_description" | "card_assignee" | "card_start_date" | "card_due_date" | "card_project" | "card_labels" | "card_child_progress" | "card_pull_requests"> = {
     priority: "card_priority",
     description: "card_description",
     assignee: "card_assignee",
@@ -1994,6 +2021,7 @@ export function IssueDisplayControls({
     project: "card_project",
     labels: "card_labels",
     childProgress: "card_child_progress",
+    pullRequests: "card_pull_requests",
   };
   const availableCardPropertyOptions = cardPropertyOptionsForView(viewMode);
   const availableSortOptions = sortOptionsForView(viewMode, grouping);
@@ -2027,6 +2055,9 @@ export function IssueDisplayControls({
         : effectiveTableGrouping === "project"
           ? t(($) => $.table.columns.project)
           : t(($) => $.table.group_none);
+  const viewToggleIndicatorId = useId();
+  const prefersReducedMotion = useReducedMotion();
+  const viewToggleTransition = prefersReducedMotion ? { duration: 0 } : UI_INDICATOR_SPRING;
   // A Gantt layout persisted on a surface without Gantt renders as List.
   const layout: ViewMode = viewMode === "gantt" && !allowGantt ? "list" : viewMode;
   const layouts = LAYOUTS.filter(({ mode }) => mode !== "gantt" || allowGantt);
@@ -2116,18 +2147,30 @@ export function IssueDisplayControls({
                   layouts.length === 5 ? "grid-cols-5" : "grid-cols-4",
                 )}
               >
-                {layouts.map(({ mode, Icon }) => (
-                  <Toggle
-                    key={mode}
-                    pressed={layout === mode}
-                    onPressedChange={() => act.setViewMode(mode)}
-                    title={t(($) => $.view[mode])}
-                    className="h-auto min-w-0 flex-col gap-1 rounded-md px-0.5 py-1.5 text-caption font-normal text-muted-foreground hover:bg-transparent hover:text-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm aria-pressed:hover:bg-background"
-                  >
-                    <Icon className="size-4" />
-                    <span className="max-w-full truncate">{t(($) => $.view[mode])}</span>
-                  </Toggle>
-                ))}
+                {layouts.map(({ mode, Icon }) => {
+                  const active = layout === mode;
+                  return (
+                    <Toggle
+                      key={mode}
+                      pressed={active}
+                      onPressedChange={() => act.setViewMode(mode)}
+                      title={t(($) => $.view[mode])}
+                      className="relative h-auto min-w-0 flex-col gap-1 rounded-md px-0.5 py-1.5 text-caption font-normal text-muted-foreground hover:bg-transparent hover:text-foreground aria-pressed:bg-transparent aria-pressed:text-foreground aria-pressed:hover:bg-transparent"
+                    >
+                      {active && (
+                        <motion.span
+                          layoutId={viewToggleIndicatorId}
+                          transition={viewToggleTransition}
+                          aria-hidden="true"
+                          data-slot="view-toggle-indicator"
+                          className="pointer-events-none absolute inset-0 rounded-md bg-background shadow-sm"
+                        />
+                      )}
+                      <Icon className="relative z-10 size-4" />
+                      <span className="relative z-10 max-w-full truncate">{t(($) => $.view[mode])}</span>
+                    </Toggle>
+                  );
+                })}
               </div>
             )}
             <div className="space-y-3">

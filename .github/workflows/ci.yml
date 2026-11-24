@@ -9,9 +9,14 @@ on:
     - cron: "23 3 * * *"
   workflow_dispatch:
 
+# Only a PR's runs supersede each other. A push filters paths against the
+# commit just before it, so a cancelled main run's scope is never re-checked
+# and a breaking commit lands green (MUL-8798). A shared group is not enough
+# either: with cancel-in-progress off, a new run still cancels a pending one,
+# so every non-PR run gets its own group.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # PRs and main pushes use the same paths. Scheduled/manual runs validate all
@@ -23,13 +28,16 @@ jobs:
       pull-requests: read
     outputs:
       frontend: ${{ steps.decide.outputs.frontend }}
+      docs: ${{ steps.decide.outputs.docs }}
       backend: ${{ steps.decide.outputs.backend }}
       sqlc: ${{ steps.decide.outputs.sqlc }}
       runtime: ${{ steps.decide.outputs.runtime }}
+      processtree: ${{ steps.decide.outputs.processtree }}
       quality_only: ${{ steps.decide.outputs.quality_only }}
       scripts: ${{ steps.decide.outputs.scripts }}
       installer: ${{ steps.decide.outputs.installer }}
       images: ${{ steps.decide.outputs.images }}
+      e2e: ${{ steps.decide.outputs.e2e }}
       full: ${{ steps.decide.outputs.full }}
     steps:
       - name: Checkout
@@ -82,8 +90,8 @@ jobs:
       - name: Verify generated SQL is up to date
         run: |
           make sqlc
-          git diff --exit-code -- server/pkg/db/generated
-          untracked="$(git ls-files --others --exclude-standard -- server/pkg/db/generated)"
+          git diff --exit-code -- server/pkg/db/generated server/ee
+          untracked="$(git ls-files --others --exclude-standard -- server/pkg/db/generated server/ee)"
           if [ -n "$untracked" ]; then
             printf 'Untracked generated SQL files:\n%s\n' "$untracked"
             exit 1
@@ -256,9 +264,170 @@ jobs:
       - name: Test views shard ${{ matrix.index }}/${{ matrix.total }}
         run: pnpm exec turbo test --filter='@multica/views' -- --shard=${{ matrix.index }}/${{ matrix.total }}
 
+  # The jobs above exclude docs because a per-PR `next build` of the docs site
+  # was too heavy (#1279). Its Vitest suite is not: it guards content such as
+  # unrendered CJK bold and finishes in seconds. It gets its own scope so a
+  # content-only PR runs it and an unrelated PR pays nothing, and installs only
+  # the docs package and its workspace dependencies so the job stays far off
+  # the frontend critical path.
+  docs-test:
+    needs: changes
+    if: ${{ needs.changes.outputs.docs == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install docs dependencies
+        run: pnpm install --frozen-lockfile --filter @multica/docs...
+
+      - name: Test docs
+        run: pnpm --filter @multica/docs test
+
+  # Playwright against a real API and a production web build. Three specs run
+  # here so far. The guest spec: a guest passes an API allowlist that no
+  # member-side test exercises, so a member component reused on a guest page
+  # can fail with 403 unnoticed (MUL-9873). The Inbox header spec: the Work
+  # panel's Inbox tabs shipped cut to their first letter in every language
+  # once already (MUL-9930). The rail labels spec: the Autopilots rail tile
+  # was cut to "Autop…" in most languages (MUL-9942). The rest of e2e/ runs
+  # locally through `make check`.
+  # The web app is served the way scripts/web-prod.mjs serves it: same-origin,
+  # with `next start` proxying /api and /ws to the API.
+  e2e:
+    needs: changes
+    if: ${{ needs.changes.outputs.e2e == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: multica
+          POSTGRES_USER: multica
+          POSTGRES_PASSWORD: multica
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U multica -d multica"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://multica:multica@localhost:5432/multica?sslmode=disable
+      PORT: "8080"
+      FRONTEND_PORT: "3000"
+      FRONTEND_ORIGIN: http://localhost:3000
+      MULTICA_APP_URL: http://localhost:3000
+      PLAYWRIGHT_BASE_URL: http://localhost:3000
+      NEXT_TELEMETRY_DISABLED: "1"
+      # With Docs off the palette never searches docs, so a guest's refused
+      # doc search would go unnoticed.
+      FF_DOCS_V1: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "~1.27.4"
+          check-latest: true
+          cache: false
+
+      # Restore only: backend-tests owns publishing this entry.
+      - name: Restore Go module cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('server/go.sum') }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Chromium and the system fonts the locale specs measure text with come
+      # from Playwright's image, tagged with the installed @playwright/test so
+      # the two never drift. `playwright install --with-deps` fetched the same
+      # fonts through the runner's Ubuntu apt mirror, which mostly took 5 to 9
+      # minutes (MUL-10057).
+      - name: Pull the Playwright image
+        id: playwright
+        run: |
+          image="mcr.microsoft.com/playwright:v$(node -p 'require("@playwright/test/package.json").version')-noble"
+          docker pull --quiet "$image"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+
+      - name: Build and migrate the API
+        working-directory: server
+        run: |
+          go build -o bin/server ./cmd/server
+          go run ./cmd/migrate up
+
+      # REMOTE_API_URL is a runtime setting; at build time it breaks prerendering.
+      - name: Build the web app
+        env:
+          NEXT_PUBLIC_API_URL: ""
+          NEXT_PUBLIC_WS_URL: ""
+          REMOTE_API_URL: ""
+        run: pnpm --filter @multica/web build
+
+      - name: Start the API and the web app
+        run: |
+          (cd server && nohup ./bin/server > "$RUNNER_TEMP/api.log" 2>&1 &)
+          (cd apps/web && PORT=3000 REMOTE_API_URL=http://localhost:8080 nohup node_modules/.bin/next start --port 3000 > "$RUNNER_TEMP/web.log" 2>&1 &)
+          for url in http://localhost:8080/health http://localhost:3000/; do
+            for _ in $(seq 1 60); do
+              curl -sf -o /dev/null "$url" && break
+              sleep 1
+            done
+            curl -sf -o /dev/null "$url" || { echo "$url did not answer within 60s"; exit 1; }
+          done
+
+      # Only the specs run in the image. Host networking reaches the API, the
+      # web app and Postgres on localhost, and the checkout is mounted at its
+      # own path because pnpm's bin shims hold absolute paths.
+      - name: Run the guest, Inbox header and rail labels specs
+        env:
+          IMAGE: ${{ steps.playwright.outputs.image }}
+        run: >-
+          docker run --rm --network host --ipc host
+          -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE"
+          -e CI -e DATABASE_URL -e PORT -e FRONTEND_ORIGIN -e PLAYWRIGHT_BASE_URL
+          "$IMAGE"
+          node_modules/.bin/playwright test e2e/guest.spec.ts e2e/inbox-section-header-locales.spec.ts e2e/app-rail-labels-locales.spec.ts
+
+      - name: Upload logs and Playwright results
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: |
+            test-results/
+            ${{ runner.temp }}/api.log
+            ${{ runner.temp }}/web.log
+          if-no-files-found: ignore
+
   # Preserve the aggregate check names while validating intentional skips.
   frontend:
-    needs: [changes, frontend-build, frontend-test, frontend-views-test, frontend-quality]
+    needs: [changes, frontend-build, frontend-test, frontend-views-test, frontend-quality, docs-test, e2e]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -266,7 +435,7 @@ jobs:
       - name: Check frontend job results
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
-          JOB_SCOPES: '{"frontend-build":"frontend","frontend-test":"frontend","frontend-views-test":"frontend","frontend-quality":"quality_only"}'
+          JOB_SCOPES: '{"frontend-build":"frontend","frontend-test":"frontend","frontend-views-test":"frontend","frontend-quality":"quality_only","docs-test":"docs","e2e":"e2e"}'
         run: node scripts/ci-scope.mjs gate
 
   # The Go caches are handled explicitly here rather than through setup-go's
@@ -392,6 +561,10 @@ jobs:
       - name: Build
         run: cd server && go build -race ./...
 
+      # The open-source server, without the commercial packages in server/ee.
+      - name: Build without ee
+        run: cd server && go build -race -tags oss ./cmd/...
+
       # The `agentintegration` files execute real agent CLIs, so no CI job runs
       # them. Nothing compiled them either, which let them rot silently: a
       # helper renamed in an ordinary test file, or two branches each defining
@@ -506,10 +679,47 @@ jobs:
         working-directory: server
         run: go tool govulncheck ./...
 
+  # Every other backend job builds for Linux, so a `_darwin.go` file or a
+  # `//go:build darwin` test that falls out of step with a shared signature
+  # stayed green until the release build compiled it. Cross-vetting from
+  # ubuntu type-checks the whole module, tests included, the way macOS builds
+  # it, without paying for a macOS runner. arm64 because that is what Apple
+  # silicon users run; cgo is off when cross-compiling, as in the release.
+  # Its own runner rather than a backend-tests step: a cold darwin vet adds
+  # ~1 GB to the build cache that job publishes (see MUL-7547), and here it
+  # runs in parallel with the long pole instead of extending it.
+  backend-darwin-vet:
+    needs: changes
+    if: ${{ needs.changes.outputs.backend == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "~1.27.4"
+          check-latest: true
+          cache: false
+
+      - name: Restore Go module cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('server/go.sum') }}
+
+      - name: Vet darwin build
+        working-directory: server
+        env:
+          GOOS: darwin
+          GOARCH: arm64
+        run: go vet ./...
+
   # Preserve the existing required-check name while allowing tests, generated
   # SQL verification, and the vulnerability scan to run independently.
   backend:
-    needs: [changes, backend-tests, backend-agent-tests, sqlc-check, go-vulnerability-scan, macos-runtime, windows-execenv, script-checks, installer]
+    needs: [changes, backend-tests, backend-agent-tests, backend-darwin-vet, sqlc-check, go-vulnerability-scan, macos-runtime, macos-processtree, windows-execenv, script-checks, installer]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -517,7 +727,7 @@ jobs:
       - name: Check backend job results
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
-          JOB_SCOPES: '{"backend-tests":"backend","backend-agent-tests":"backend","sqlc-check":"sqlc","go-vulnerability-scan":"backend","macos-runtime":"full","windows-execenv":"runtime","script-checks":"scripts","installer":"installer"}'
+          JOB_SCOPES: '{"backend-tests":"backend","backend-agent-tests":"backend","backend-darwin-vet":"backend","sqlc-check":"sqlc","go-vulnerability-scan":"backend","macos-runtime":"full","macos-processtree":"processtree","windows-execenv":"runtime","script-checks":"scripts","installer":"installer"}'
         run: node scripts/ci-scope.mjs gate
 
   windows-execenv:
@@ -559,7 +769,7 @@ jobs:
         # These fixtures must redirect both the Windows user profile and the
         # platform-native Hermes home; otherwise discovery scans the runner's
         # real skills instead of the test directories.
-        run: go test ./internal/daemon -v -run '^(TestListRuntimeLocalSkills_HermesFollowsTaskHome|TestLocalSkills_DiscoversACPProviderRoots)$' -count=1 -timeout=5m
+        run: go test ./internal/daemon -v -run '^(TestListRuntimeLocalSkills_HermesFollowsTaskHome|TestLocalSkills_DiscoversACPProviderRoots|TestGC_LocalCodexHomePreservesJunctionTargets)$' -count=1 -timeout=5m
 
       - name: Test Windows Git Bash temp lifecycle
         working-directory: server
@@ -608,7 +818,7 @@ jobs:
         # still reports cleanup as unconfirmed, and that a descendant holding
         # inherited stdout neither keeps Result blocked nor survives cleanup.
         # -v makes RUN/PASS evidence explicit in CI logs.
-        run: go test ./pkg/agent -v -run '^(TestStartOwnedProcessTreeCapturesImmediateDescendants|TestStartOwnedProcessTreeLeavesNoSuspendedChild|TestWaitProcessGroupGoneWithoutOwnershipReportsUnconfirmed|TestCodexInitializeRetrySupportedWithOwnedProcessTree|TestCodexWindowsDescendantsDieWithTheOwnedProcessTree|TestCodeArtsWindowsCancellationTerminatesDescendants)$' -count=1 -timeout=5m
+        run: go test ./pkg/agent -v -run '^(TestStartOwnedProcessTreeCapturesImmediateDescendants|TestStartOwnedProcessTreeLeavesNoSuspendedChild|TestWaitProcessGroupGoneWithoutOwnershipReportsUnconfirmed|TestCodexInitializeRetrySupportedWithOwnedProcessTree|TestCodexWindowsDescendantsDieWithTheOwnedProcessTree|TestCodeArtsWindowsCancellationTerminatesDescendants|TestDiscoverCodeArtsModelsRetriesAfterVerboseTimeout)$' -count=1 -timeout=5m
 
       - name: Test Windows Hermes gateway ownership and reservation
         working-directory: server
@@ -661,7 +871,7 @@ jobs:
         # silently as "ok".
         run: go test ./internal/daemon/execenv -v -run '^TestWindowsOpenclawShim' -count=1 -timeout=5m
 
-      - name: Test Windows workdir containment guard in the CLI
+      - name: Test Windows CLI workdir guard and attachment rewriting
         if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
         # The CLI's --content-file / --attachment guard decides whether a path is
@@ -680,9 +890,10 @@ jobs:
         # tests run nowhere else. It matters twice over on a non-admin host,
         # where the package's cross-platform cases skip for want of the symlink
         # privilege; the ubuntu backend job covers those shapes instead.
+        # The attachment regression covers both bare names and drive-letter file URLs.
         # -v so a silent skip (or a -run pattern that stops matching) is visible
         # in the log instead of passing as "ok".
-        run: go test ./cmd/multica -v -run '^TestFileWithinWorkingDirWindows' -count=1 -timeout=5m
+        run: go test ./cmd/multica -v -run '^Test(FileWithinWorkingDirWindows|RewriteAttachmentLinksCaseInsensitiveOnWindows$)' -count=1 -timeout=5m
 
       - name: Test Windows link-target classification in internal/util
         if: ${{ needs.changes.outputs.backend == 'true' }}
@@ -711,15 +922,14 @@ jobs:
         # objects are private copies rather than NTFS hard links sharing one
         # file and one security descriptor with the daemon-owned cache. The
         # cross-volume test covers what a hard link cannot express at all.
-        # Scoped to the two windows-tagged tests by exact name. A prefix match
-        # also caught the package's cross-platform isolated-checkout test,
-        # which cannot run here: repocache derives a cache directory name from
-        # the full source repo path, so a t.TempDir() path that already embeds
-        # a long test name doubles and blows past MAX_PATH. That test belongs
-        # to the ubuntu backend job, which runs the whole package.
+        # Exact names keep unrelated package tests out of this Windows check.
         # -v so a skip (single-volume runner) is visible instead of passing
         # silently as "ok".
         run: go test ./internal/daemon/repocache -v -run '^(TestIsolatedCheckoutIsCommittableOnWindows|TestIsolatedCheckoutAcrossVolumesOnWindows)$' -count=1 -timeout=5m
+
+      - name: Test Windows long repository URL checkout and cache upgrade
+        working-directory: server
+        run: go test ./internal/daemon/repocache -v -run '^(TestCheckoutLongRepoURL|TestMigrateUnusedLegacyCache|TestMigrationDoesNotOverwriteExistingDestination|TestMigrationKeepsLockedWorktree|TestMigrationFailureKeepsUsableLegacyCache|TestMigrationFailureRespectsCancellation|TestCreateWorktreeFailureDoesNotLeakBranch)$' -count=1 -timeout=5m
 
       - name: Test Windows directory-junction link safety
         working-directory: server
@@ -796,15 +1006,17 @@ jobs:
         # backend job still covers the untagged and Unix arms.
         run: go test -race ./pkg/agent -v -run 'TestCursorBackground|TestCaptureCursorBackground' -count=1 -timeout=5m
 
-  # The only macOS runner here, and the only place cursor_background_process_darwin.go
-  # is ever built: it signals a process group through XNU's per-process unique
-  # identity so a recycled PID cannot redirect a kill, and the two tests pinning
-  # that are `//go:build darwin`. Windows keeps its arm as a step in
-  # windows-execenv, but macOS has no sibling job to join, and this covers one
-  # integration's background shell rather than the shared launch path every
-  # agent uses. So the daily full run carries it instead of charging every
-  # backend merge for a macOS runner; `full` also means the stress counts below
-  # are now the only finalization pass, replacing the single-count merge variant.
+  # The daily macOS runtime runner, and the only place the darwin-only code
+  # runs (backend-darwin-vet only type-checks it). It began with
+  # cursor_background_process_darwin.go, which signals a process group through
+  # XNU's per-process unique identity so a recycled PID cannot redirect a kill,
+  # and the two tests pinning that are `//go:build darwin`. Windows keeps its
+  # arm as a step in windows-execenv, but macOS has no sibling job to join,
+  # and this covers one integration's background shell rather than the shared
+  # launch path every agent uses. So the daily full run carries it instead of
+  # charging every backend merge for a macOS runner; `full` also means the
+  # stress counts below are now the only finalization pass, replacing the
+  # single-count merge variant.
   macos-runtime:
     needs: changes
     if: ${{ needs.changes.outputs.full == 'true' }}
@@ -836,6 +1048,48 @@ jobs:
         shell: bash
         working-directory: server
         run: CGO_ENABLED=0 go test ./pkg/agent -run '^TestCaptureCursorBackground(KernelRejectsStaleIdentity|DetachedSession|LateDescendant)$' -count=1
+
+      # The ubuntu backend job passes these same tests through the Linux
+      # implementations; only a macOS host reaches pi_cleanup_darwin.go,
+      # localenv's lsof/ps/AppKit detection, and the LaunchAgent writer.
+      # localenv's focusApp needs a GUI login session and stays uncovered.
+      # Runs even when a Cursor step above failed, since it shares nothing with
+      # them. -race reuses the objects those steps already built.
+      # -v so a silent skip or a -run pattern that stops matching is visible.
+      - name: Test macOS Pi cleanup, local environments, and autostart
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: server
+        run: |
+          go test -race ./pkg/agent -v -run '^TestPiCleanup' -count=1 -timeout=10m
+          go test -race ./internal/daemon -v -run '^TestPiCleanup' -count=1 -timeout=10m
+          go test -race ./internal/daemon/localenv -v -count=1 -timeout=10m
+          go test -race ./cmd/multica -v -run 'Autostart|LaunchAgent' -count=1 -timeout=10m
+
+  # MUL-9162: Darwin's kill(-pgid) skips group members that are exiting or
+  # zombies and returns EPERM instead of ESRCH while the group drains, so
+  # processtree treats that EPERM as "nothing left to signal". The branch is
+  # gated on runtime.GOOS, so the ubuntu backend job passes the same tests
+  # without ever reaching it; only a macOS host proves the handling is still
+  # there. Scoped to the package itself (stdlib-only, ~10s at -count=3) so a
+  # macOS runner is charged only to PRs that touch it, plus every full run.
+  # -count=3 because the test lands in the drain window only a few times per
+  # thousand iterations.
+  macos-processtree:
+    needs: changes
+    if: ${{ needs.changes.outputs.processtree == 'true' }}
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "~1.27.4"
+          check-latest: true
+          cache-dependency-path: server/go.sum
+      - name: Test macOS process-group drain handling
+        shell: bash
+        working-directory: server
+        run: go test ./internal/daemon/processtree/ -v -count=3 -timeout=5m
 
   image-budget:
     # Soft gate against the 21.7MB of raw PNG/JPG that MUL-6352 cleared out:
@@ -922,6 +1176,11 @@ jobs:
 
       - name: Test UI performance comparison runner
         run: bash scripts/perf-compare.test.sh
+
+      - name: Test fake Composio against the OpenAPI snapshot
+        # Every endpoint the Go client calls must answer in the shape the
+        # checked-in Composio v3.1 spec defines; fields it lacks fail here.
+        run: node --test scripts/fake-composio.test.mjs
 
       - name: Verify reserved-slugs.ts is up to date
         # Re-runs the generator and fails on any drift from the

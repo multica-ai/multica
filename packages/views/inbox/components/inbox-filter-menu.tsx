@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode, type RefObject } from "react";
 import { Filter, RotateCcw, Search } from "@multica/ui/icons";
 import { PRIORITY_DISPLAY_ORDER } from "@multica/core/issues/config";
 import { DUE_DATE_FILTERS, FILTER_NONE_VALUE } from "@multica/core/issues/stores/filter-tree";
@@ -111,6 +111,15 @@ function ValueItem({
   );
 }
 
+/** Opens the filter from another control, such as an item of a section's ⋯ menu. */
+export interface InboxFilterMenuOpener {
+  /** Open from this control; opening from the menu's own trigger leaves it false. */
+  open: boolean;
+  onClose: () => void;
+  /** The control the menu hangs from and hands focus back to while opened from it. */
+  anchor: RefObject<HTMLElement | null>;
+}
+
 /**
  * The inbox filter, shaped like the issue filter: search, the dimensions in
  * use pinned on top, then notification and issue fields, "is" / "is not" per
@@ -126,6 +135,8 @@ export function InboxFilterMenu({
   issueFieldsSupport = "supported",
   activeIssueIds = EMPTY_ISSUE_IDS,
   archived = false,
+  sectionTrigger,
+  opener,
 }: {
   wsId: string;
   items: InboxItem[];
@@ -134,6 +145,16 @@ export function InboxFilterMenu({
   /** Issues an agent is running or queued on. */
   activeIssueIds?: ReadonlySet<string>;
   archived?: boolean;
+  /**
+   * In a panel section's header instead of a page header: a plain row button
+   * styled by the section, its menu opening to the right.
+   */
+  sectionTrigger?: { className: string; activeClassName: string };
+  /**
+   * Opens the menu from elsewhere. The trigger then shows only while filters
+   * are set, so a filtered list still says so at a glance.
+   */
+  opener?: InboxFilterMenuOpener;
 }) {
   const { t } = useT("inbox");
   const { t: tIssues } = useT("issues");
@@ -143,10 +164,18 @@ export function InboxFilterMenu({
   const store = useInboxFilterStore.getState();
   const clearPriorityFilters = useInboxFilterStore((state) => state.clearPriorityFilters);
   const clearIssueFieldFilters = useInboxFilterStore((state) => state.clearIssueFieldFilters);
-  const [open, setOpen] = useState(false);
+  const [ownOpen, setOwnOpen] = useState(false);
+  const open = ownOpen || (opener?.open ?? false);
+  // Kept from the moment the menu opens: the opener closes first, the menu's
+  // close and focus return after.
+  const [fromOpener, setFromOpener] = useState(false);
+  // The body is built only while the menu is open or closing: the trigger
+  // also sits in the always-mounted Work panel, which re-renders often.
+  const [bodyMounted, setBodyMounted] = useState(false);
   const [search, setSearch] = useState("");
   const [activeAtOpen, setActiveAtOpen] = useState<ReadonlySet<InboxFilterKey> | null>(null);
   const query = search.trim().toLowerCase();
+  const [wasOpen, setWasOpen] = useState(false);
   const { getActorName, getActorInitials, getActorAvatarUrl } = useActorName();
 
   const effectiveFilters = useMemo(
@@ -156,6 +185,13 @@ export function InboxFilterMenu({
   const facetsQuery = useQuery({ ...archivedInboxFacetsOptions(wsId, effectiveFilters), enabled: archived && open });
   const facets = archived ? facetsQuery.data : undefined;
   const activeCount = inboxFilterCount(effectiveFilters);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setBodyMounted(true);
+    if (open) setFromOpener(!ownOpen);
+    setActiveAtOpen(open ? new Set(activeInboxFilterKeys(effectiveFilters)) : null);
+    if (!open) setSearch("");
+  }
   const chips = useInboxFilterChips(wsId, effectiveFilters);
   const chipByKey = new Map(chips.map((chip) => [chip.key, chip]));
 
@@ -524,7 +560,7 @@ export function InboxFilterMenu({
   }
   const matchedValues = valueHits.filter((hit) => matchesFilterQuery(hit.label, query)).slice(0, 50);
 
-  const menuBody = query ? (
+  const menuBody = !bodyMounted ? null : query ? (
     <>
       {fieldHits.length > 0 && (
         <DropdownMenuGroup>
@@ -595,33 +631,69 @@ export function InboxFilterMenu({
   return (
     <DropdownMenu
       open={open}
+      onOpenChangeComplete={(next) => {
+        if (!next) setBodyMounted(false);
+      }}
       onOpenChange={(next) => {
-        setOpen(next);
-        setActiveAtOpen(next ? new Set(activeInboxFilterKeys(effectiveFilters)) : null);
-        if (!next) setSearch("");
+        setOwnOpen(next);
+        if (!next) opener?.onClose();
       }}
     >
-      <DropdownMenuTrigger
-        render={
-          <IconButton
-            variant={activeCount > 0 ? "default" : "ghost"}
-            size="icon-sm"
-            label={triggerLabel}
-            tooltipSide="bottom"
-            className={cn(
-              "text-muted-foreground",
-              activeCount > 0 &&
-                "w-auto gap-1 bg-brand px-2 text-white hover:bg-brand/90",
-            )}
-          />
-        }
+      {sectionTrigger ? (
+        // Hidden rather than unmounted: without a mounted trigger, opening a
+        // submenu closes the whole menu.
+        <DropdownMenuTrigger
+          render={
+            <button
+              type="button"
+              aria-label={triggerLabel}
+              className={cn(
+                sectionTrigger.className,
+                "data-popup-open:bg-surface-selected data-popup-open:opacity-100",
+                activeCount > 0 ? sectionTrigger.activeClassName : "data-popup-open:text-foreground",
+              )}
+              // Kept while the menu is open, so clearing the last filter
+              // inside it does not pull the trigger out from under it.
+              hidden={!!opener && activeCount === 0 && !(open && activeAtOpen !== null && activeAtOpen.size > 0)}
+            />
+          }
+        >
+          <Filter className="size-3.5" />
+          {activeCount > 0 && (
+            <span className="text-caption tabular-nums">{activeCount}</span>
+          )}
+        </DropdownMenuTrigger>
+      ) : (
+        <DropdownMenuTrigger
+          render={
+            <IconButton
+              variant={activeCount > 0 ? "default" : "ghost"}
+              size="icon-sm"
+              label={triggerLabel}
+              tooltipSide="bottom"
+              className={cn(
+                "text-muted-foreground",
+                activeCount > 0 &&
+                  "w-auto gap-1 bg-brand px-2 text-white hover:bg-brand/90",
+              )}
+            />
+          }
+        >
+          <Filter className="size-4" />
+          {activeCount > 0 && (
+            <span className="text-caption tabular-nums">{activeCount}</span>
+          )}
+        </DropdownMenuTrigger>
+      )}
+      <DropdownMenuContent
+        side={sectionTrigger ? "right" : undefined}
+        align={sectionTrigger ? "start" : "end"}
+        sideOffset={sectionTrigger ? 8 : undefined}
+        anchor={fromOpener ? opener?.anchor : undefined}
+        // Back to the opener, also when the trigger hides as the last filter clears.
+        finalFocus={fromOpener || activeCount === 0 ? opener?.anchor : undefined}
+        className="w-auto min-w-64 p-0"
       >
-        <Filter className="size-4" />
-        {activeCount > 0 && (
-          <span className="text-caption tabular-nums">{activeCount}</span>
-        )}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-auto min-w-64 p-0">
         <div data-filter-search className="flex items-center gap-1.5 border-b border-foreground/5 px-2.5 py-2">
           <Search className="size-3.5 shrink-0 text-muted-foreground" />
           <input

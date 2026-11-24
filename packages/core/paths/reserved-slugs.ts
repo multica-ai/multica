@@ -300,6 +300,7 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "usage",
   "runtimes",
   "skills",
+  "apps",
   "settings",
   "workspaces",
   "teams",
@@ -339,6 +340,7 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "readyz",
   "healthz",
   "ws",
+  "collab",
   "metrics",
   "ping",
 

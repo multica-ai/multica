@@ -101,7 +101,7 @@ Access decides which members can run this agent (assign, @-mention, or chat):
 | Access | Meaning |
 |---|---|
 | **Only me** | Only you can run it. The default. |
-| **Entire workspace** | Every workspace member can run it. |
+| **Entire workspace** | Members with the `owner`, `admin`, or `member` role. |
 | **Specific people** | Only you and the selected members can run it. |
 
 ![Access settings: Only me, Entire workspace, Specific people](/images/docs/agent-access-settings.webp)
@@ -118,7 +118,7 @@ On the agent's detail page you can keep adjusting:
 | **Environment variables** | Inject variables when the AI coding tool starts. |
 | **Custom arguments** | Appended item by item to the AI coding tool's CLI arguments. |
 | **MCP** | Configure MCP servers for AI coding tools that support them: add one just for this agent, or pick from the workspace's shared MCP servers. |
-| **Integrations** | Connect external services this agent can use. |
+| **Messaging** | Connect this agent to chat platforms such as Feishu, Slack, DingTalk, WeCom, or Telegram. |
 
 The daemon hosting the runtime also has a global concurrency cap (default 20); the effective concurrency is the smaller of the two.
 

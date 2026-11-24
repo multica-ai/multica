@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
 	"path"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -19,8 +21,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/imagemetadata"
-	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
+	"github.com/multica-ai/multica/server/internal/thumbnail"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -108,6 +112,11 @@ type AttachmentResponse struct {
 	// Displayed image dimensions, absent for non-images and older uploads.
 	Width  *int32 `json:"width,omitempty"`
 	Height *int32 `json:"height,omitempty"`
+	// ThumbnailURL is the stable, auth-gated path of a downscaled copy for
+	// grid tiles, set only for large raster images. Durable like the stable
+	// download path; never a substitute for the original in viewers or
+	// downloads.
+	ThumbnailURL string `json:"thumbnail_url,omitempty"`
 }
 
 // attachmentURLMode selects how DownloadURL is rendered on a response.
@@ -170,6 +179,7 @@ func (h *Handler) attachmentToResponse(a db.Attachment, mode attachmentURLMode) 
 		URL:          a.Url,
 		DownloadURL:  util.AttachmentDownloadPath(id),
 		MarkdownURL:  h.buildMarkdownURL(a, id),
+		ThumbnailURL: h.attachmentThumbnailURL(a, id),
 		ContentType:  a.ContentType,
 		SizeBytes:    a.SizeBytes,
 		CreatedAt:    a.CreatedAt.Time.Format("2006-01-02T15:04:05Z07:00"),
@@ -460,7 +470,8 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 
 	// If workspace context is available, validate membership before uploading.
 	if workspaceID != "" {
-		if _, err := h.getWorkspaceMember(r.Context(), userID, workspaceID); err != nil {
+		member, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
+		if err != nil {
 			writeError(w, http.StatusForbidden, "not a member of this workspace")
 			return
 		}
@@ -493,7 +504,14 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			if !h.requireProjectVisible(w, r, workspaceID, issue.ProjectID, http.StatusForbidden, "invalid issue_id") {
 				return
 			}
-			params.IssueID = issue.ID
+			// A guest's upload (MUL-9420) is a draft for its next comment, not
+			// a change to the issue: it stays unbound, visible only to the
+			// guest, until CreateComment links it with the comment
+			// (LinkAttachmentsToComment accepts unbound rows). A member's
+			// upload still attaches to the issue at once.
+			if uploaderType != "member" || !h.isGuest(r, workspaceID, userID) {
+				params.IssueID = issue.ID
+			}
 		}
 		if commentID := r.FormValue("comment_id"); commentID != "" {
 			commentUUID, ok := parseUUIDOrBadRequest(w, commentID, "comment_id")
@@ -503,6 +521,16 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			comment, err := h.Queries.GetComment(r.Context(), commentUUID)
 			// A deleted comment's tombstone takes no attachments.
 			if err != nil || uuidToString(comment.WorkspaceID) != workspaceID || comment.DeletedAt.Valid {
+				writeError(w, http.StatusForbidden, "invalid comment_id")
+				return
+			}
+			if !h.requireIssueIDVisible(w, r, workspaceID, comment.IssueID, http.StatusForbidden, "invalid comment_id") {
+				return
+			}
+			// A guest attaches files only to its own comments (MUL-9420);
+			// seeing a comment is not enough to add to it.
+			if uploaderType == "member" && h.isGuest(r, workspaceID, userID) &&
+				(comment.AuthorType != "member" || uuidToString(comment.AuthorID) != userID) {
 				writeError(w, http.StatusForbidden, "invalid comment_id")
 				return
 			}
@@ -574,13 +602,24 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			params.ChatSessionID = task.ChatSessionID
 		}
 
+		// Every field is validated; check the storage limit before writing
+		// the object, so a refused upload stores nothing.
+		if err := h.storageQuota().Admit(r.Context(), params.WorkspaceID, params.SizeBytes, service.StorageSourceUpload); err != nil {
+			// The role read with membership above decides, so a failed
+			// second lookup cannot show a guest the workspace's usage.
+			if !writeStorageLimitReached(w, err, !projectaccess.IsGuestRole(member.Role)) {
+				writeError(w, http.StatusInternalServerError, "upload failed")
+			}
+			return
+		}
+
 		if dimensions, ok := imagemetadata.Dimensions(data); ok {
 			params.Width = pgtype.Int4{Int32: dimensions.Width, Valid: true}
 			params.Height = pgtype.Int4{Int32: dimensions.Height, Valid: true}
 		}
 		link, err := h.Storage.Upload(r.Context(), key, data, contentType, header.Filename)
 		if err != nil {
-			if writeUploadCancellation(w, r, err) {
+			if writeRequestCancellation(w, r, err) {
 				return
 			}
 			slog.Error("file upload failed", "error", err)
@@ -610,7 +649,7 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		if err != nil {
-			if writeUploadCancellation(w, r, err) {
+			if writeRequestCancellation(w, r, err) {
 				// The record write may have committed. Deleting uploaded bytes
 				// could leave a committed attachment pointing at a missing object.
 				return
@@ -619,6 +658,7 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			// S3 upload succeeded but DB record failed — still return the link
 			// so the file is usable. Log the error for investigation.
 		} else {
+			h.prewarmAttachmentThumbnail(att.Attachment())
 			if att.IssueRevision > 0 && att.IssueID.Valid {
 				h.publish(protocol.EventIssueAttachmentsChanged, workspaceID, uploaderType, uploaderID, map[string]any{
 					"issue_id":       uuidToString(att.IssueID),
@@ -653,7 +693,7 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 	// No workspace context (e.g. avatar upload) — upload directly.
 	link, err := h.Storage.Upload(r.Context(), key, data, contentType, header.Filename)
 	if err != nil {
-		if writeUploadCancellation(w, r, err) {
+		if writeRequestCancellation(w, r, err) {
 			return
 		}
 		slog.Error("file upload failed", "error", err)
@@ -900,17 +940,25 @@ func (h *Handler) loadAttachmentForDownload(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusNotFound, "attachment not found")
 		return db.Attachment{}, false
 	}
+	// A task token acts only in the workspace it is bound to; Auth stamps
+	// that workspace into X-Workspace-ID. Membership alone is not enough:
+	// the task's user may belong to the attachment's other workspace too.
+	if r.Header.Get("X-Actor-Source") == "task_token" && r.Header.Get("X-Workspace-ID") != workspaceID {
+		writeError(w, http.StatusNotFound, "attachment not found")
+		return db.Attachment{}, false
+	}
 	if h.MembershipCache.Get(r.Context(), userID, workspaceID) {
 		if !h.requireAttachmentVisible(w, r, workspaceID, att) {
 			return db.Attachment{}, false
 		}
 		return att, true
 	}
-	if _, err := h.getWorkspaceMember(r.Context(), userID, workspaceID); err != nil {
+	member, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
+	if err != nil {
 		writeError(w, http.StatusNotFound, "attachment not found")
 		return db.Attachment{}, false
 	}
-	h.MembershipCache.Set(r.Context(), userID, workspaceID)
+	h.cacheMembership(r.Context(), member)
 	if !h.requireAttachmentVisible(w, r, workspaceID, att) {
 		return db.Attachment{}, false
 	}
@@ -1056,11 +1104,17 @@ func shouldProxyAttachmentURL(rawURL string) bool {
 func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request, att db.Attachment, key string, forceAttachment bool) {
 	reader, err := h.Storage.GetReader(r.Context(), key)
 	if err != nil {
+		if writeRequestCancellation(w, r, err) {
+			return
+		}
 		slog.Error("failed to open attachment for download", "id", uuidToString(att.ID), "key", key, "error", err)
 		writeError(w, http.StatusNotFound, "attachment object not found")
 		return
 	}
 	defer reader.Close()
+	if writeRequestCancellation(w, r, r.Context().Err()) {
+		return
+	}
 
 	if att.ContentType != "" {
 		w.Header().Set("Content-Type", att.ContentType)
@@ -1091,6 +1145,22 @@ func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request
 
 	// Non-seekable backend: single-range fallback.
 	h.serveProxyRange(w, r, att, reader)
+}
+
+// A socket write can report a closed connection instead of context.Canceled.
+// Preserve unrelated write errors and distinguish them from storage reads.
+type attachmentStreamWriter struct {
+	http.ResponseWriter
+	request *http.Request
+}
+
+func (w attachmentStreamWriter) Write(data []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(data)
+	if errors.Is(w.request.Context().Err(), context.Canceled) &&
+		(errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, net.ErrClosed)) {
+		err = errors.Join(context.Canceled, err)
+	}
+	return n, err
 }
 
 // serveProxyRange streams a (possibly partial) attachment body from a
@@ -1137,10 +1207,18 @@ func (h *Handler) serveProxyRange(w http.ResponseWriter, r *http.Request, att db
 	}
 
 	if serveFull {
+		if writeRequestCancellation(w, r, r.Context().Err()) {
+			return
+		}
 		if total >= 0 {
 			w.Header().Set("Content-Length", strconv.FormatInt(total, 10))
 		}
-		if _, err := io.Copy(w, reader); err != nil {
+		w.WriteHeader(http.StatusOK)
+		if _, err := io.Copy(attachmentStreamWriter{ResponseWriter: w, request: r}, reader); err != nil {
+			if isRequestCancellation(r, err) {
+				slog.Info("attachment download cancelled", "id", uuidToString(att.ID))
+				return
+			}
 			slog.Error("failed to stream attachment download", "id", uuidToString(att.ID), "error", err)
 		}
 		return
@@ -1152,6 +1230,9 @@ func (h *Handler) serveProxyRange(w http.ResponseWriter, r *http.Request, att db
 	// ServeContent path above).
 	if start > 0 {
 		if _, err := io.CopyN(io.Discard, reader, start); err != nil {
+			if writeRequestCancellation(w, r, err) {
+				return
+			}
 			// The skip failed BEFORE any response header was written. We must send
 			// an explicit error status here: a bare `return` would let net/http
 			// emit its default 200 OK + empty body, which a resuming client reads
@@ -1168,7 +1249,11 @@ func (h *Handler) serveProxyRange(w http.ResponseWriter, r *http.Request, att db
 	w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, start+length-1, total))
 	w.Header().Set("Content-Length", strconv.FormatInt(length, 10))
 	w.WriteHeader(http.StatusPartialContent)
-	if _, err := io.CopyN(w, reader, length); err != nil {
+	if _, err := io.CopyN(attachmentStreamWriter{ResponseWriter: w, request: r}, reader, length); err != nil {
+		if isRequestCancellation(r, err) {
+			slog.Info("attachment range download cancelled", "id", uuidToString(att.ID))
+			return
+		}
 		slog.Error("failed to stream attachment range", "id", uuidToString(att.ID), "error", err)
 	}
 }
@@ -1516,18 +1601,6 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 
 // Attachment linking
 
-// linkAttachmentsByIssueIDs links unbound attachments to an issue. A caller
-// that did not already advance the issue revision can ask this visible change
-// to advance it exactly once.
-func (h *Handler) linkAttachmentsByIssueIDs(ctx context.Context, issueID, workspaceID pgtype.UUID, ids []pgtype.UUID, bumpRevision bool) (db.LinkAttachmentsToIssueRow, error) {
-	return h.Queries.LinkAttachmentsToIssue(ctx, db.LinkAttachmentsToIssueParams{
-		IssueID:       issueID,
-		WorkspaceID:   workspaceID,
-		AttachmentIds: ids,
-		BumpRevision:  bumpRevision,
-	})
-}
-
 // attachmentOwnerLockAttempts bounds the re-read below. An attachment gains an
 // owner once, when the issue or comment it was uploaded for links it, so one
 // retry is enough in practice; the bound is what keeps a pathological
@@ -1574,7 +1647,7 @@ func (h *Handler) attachmentOwnerLockAttempt(ctx context.Context, att db.Attachm
 	if att.IssueID.Valid {
 		// A missing issue is not an error here: its cascade took the attachment
 		// with it, which the re-read below reports as pgx.ErrNoRows.
-		if _, err := qtx.LockIssueForAttachmentWrite(ctx, db.LockIssueForAttachmentWriteParams{
+		if _, err := qtx.LockIssueForWrite(ctx, db.LockIssueForWriteParams{
 			ID:          att.IssueID,
 			WorkspaceID: att.WorkspaceID,
 		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -1609,30 +1682,27 @@ func (h *Handler) attachmentOwnerLockAttempt(ctx context.Context, att db.Attachm
 	return fresh, tx.Commit(ctx)
 }
 
-// deleteS3Object removes a single file from S3 by its CDN URL.
+// deleteS3Object removes a single file, and its thumbnail, from S3 by its CDN URL.
 func (h *Handler) deleteS3Object(ctx context.Context, url string) {
 	if h.Storage == nil || url == "" {
 		return
 	}
-	h.Storage.Delete(ctx, h.Storage.KeyFromURL(url))
+	h.deleteS3Objects(ctx, []string{url})
 }
 
-// deleteS3Objects removes multiple files from S3 by their CDN URLs.
+// deleteS3Objects removes multiple files, and their thumbnails, from S3 by
+// their CDN URLs.
 func (h *Handler) deleteS3Objects(ctx context.Context, urls []string) {
 	if h.Storage == nil || len(urls) == 0 {
 		return
 	}
-	keys := make([]string, len(urls))
-	for i, u := range urls {
-		keys[i] = h.Storage.KeyFromURL(u)
+	keys := make([]string, 0, len(urls))
+	for _, u := range urls {
+		key := h.Storage.KeyFromURL(u)
+		keys = append(keys, key)
+		if thumbKey, ok := thumbnail.StorageKey(key); ok {
+			keys = append(keys, thumbKey)
+		}
 	}
 	h.Storage.DeleteKeys(ctx, keys)
-}
-
-func writeUploadCancellation(w http.ResponseWriter, r *http.Request, err error) bool {
-	if !errors.Is(r.Context().Err(), context.Canceled) || !errors.Is(err, context.Canceled) {
-		return false
-	}
-	w.WriteHeader(middleware.StatusClientClosedRequest)
-	return true
 }

@@ -1,5 +1,7 @@
 # Repository Instructions
 
+This codebase is yours: what it's for and how it's built are your call, and you'll keep building on it.
+
 Multica is a task management platform where people and agents collaborate on issues. These instructions apply to all coding agents working in this repository.
 
 ## Scope and Reading Order
@@ -53,6 +55,7 @@ Docs-only changes can use link/reference checks and `git diff --check`; state th
 
 - TanStack Query owns API/server data. Zustand owns client state such as filters, drafts, modals, and tab layout; persist only durable preferences/drafts/layout, not server data or ephemeral UI state.
 - Web/desktop shared stores live in `packages/core/`. Desktop platform stores remain in desktop; mobile stores remain in mobile. Do not define stores in `packages/views/`.
+- Desktop tabs in a window share one set of Zustand stores and mount one at a time; a web tab gets its own. State describing how the current page was reached (source list, selection, highlight) must not assume one page: a click that opens a new tab leaves the current page's record intact and still records the target tab's own.
 - On web/desktop, workspace identity is route-driven; platform mirrors exist only for request headers, storage namespaces, and reconnects. React Context is for platform plumbing, not a second server-state store.
 - Among stores, only auth/workspace stores may call `api.*` directly; other server interactions belong in queries/mutations.
 - Workspace-scoped query keys include `wsId`; account-level keys remain account-scoped. Hooks needing workspace context accept `wsId` unless guaranteed to run under its provider.
@@ -60,6 +63,7 @@ Docs-only changes can use link/reference checks and `git diff --check`; state th
 - WebSocket events patch or invalidate Query caches, not server payloads in Zustand. Clearing client-owned pointers is allowed with one responder and a self-initiated guard when this client can cause the event.
 - Optimistic field patches require a predictable result, rare failure, trivial rollback, and staying on the current screen. Snapshot before patching, roll back on failure, and invalidate uncertain projections on settle.
 - Create/delete/leave and confirmation flows await the server before navigation or cleanup; do not optimistically delete entities. Exceptions: workspace leave (known debt under Desktop Rules) and mobile inbox mark-read (mobile instructions).
+- When the caller can unmount before the request settles (moving to the next item, closing a dialog or menu), attach toasts and follow-up work to the request promise (`mutateAsync().then(onSuccess, onError)`) or to `useMutation`'s own callbacks, not to per-call `mutate(vars, { onSuccess, onError })` callbacks, which React Query skips once the caller unmounts. Test these flows with the real mutation hook and a mocked API, unmounting the caller before the request settles (`packages/views/inbox/components/use-inbox-snooze.test.tsx`, `packages/views/issues/actions/__tests__/issue-inbox-actions.test.tsx`).
 - Message sends use visible pending state and retry on failure.
 
 ## API Compatibility
@@ -76,7 +80,17 @@ Installed desktop clients may talk to newer backends. Preserve response compatib
 - Every migration-created index, including indexes on new tables, uses `CREATE [UNIQUE] INDEX CONCURRENTLY`. Each concurrent index build gets its own single-statement migration file; the runner executes files outside an explicit transaction.
 - Register every concurrent index build in `server/cmd/migrate/main.go` so an interrupted build's INVALID index is dropped before retry: up-direction builds in `concurrentIndexCleanups`, down-direction rebuilds in `concurrentDownIndexCleanups` (version → index name).
 - Before pushing a migration, rebase onto the latest `origin/main`, number it as the current highest prefix plus one, and run `go test ./cmd/migrate ./internal/migrations` from `server/`.
+- A PR's green CI covers only the main it ran against; main can take the same number later without a textual conflict. Right before merging a PR that adds migrations, run `git fetch origin main` and `node scripts/check-migration-numbers.mjs --head <PR head>`. A failing check, or a failing `Migration numbers vs latest main` status on the PR, means renumber first, never merge as is.
 - Conditionally skipped migrations are still recorded in `schema_migrations`. Later DDL touching conditional objects must be idempotent (`IF EXISTS` / `IF NOT EXISTS`); document recovery if the missing object would break runtime behavior.
+
+## Row Lock Order
+
+Task writes and runtime-side paths lock the same `agent`, `agent_runtime`, `workspace`, and `issue` rows; two paths taking a pair in opposite orders with conflicting modes deadlock (MUL-9501).
+
+- Task enqueue order: the `agent` row first, then `lock_task_owner_rows` (migration 284) inside the writing statement takes FOR KEY SHARE on the workspace, issue, and runtime rows. New enqueue paths keep this order.
+- A path that locks `agent_runtime` before `agent` must let that FOR KEY SHARE through. To exclude only UPDATE/DELETE of the runtime, use FOR NO KEY UPDATE (`LockAgentRuntimeForClaimDelivery`, `LockAgentRuntimeForAccessChange`). Use FOR UPDATE (`LockAgentRuntime`) only when new rows must be stopped from referencing the runtime: runtime delete and teardown.
+- A new path that takes these rows in the reverse order ships with a test that forces the interleaving, as `server/internal/handler/chat_send_claim_deadlock_test.go` does.
+- Known, unfixed: runtime delete and teardown (`TeardownRuntime`, the runtime delete handlers, the runtime GC sweeper) take `LockAgentRuntime`, then the agents via `ListUserAgentsByRuntimeForUpdate` — the reverse of enqueue order. It can only deadlock with an enqueue while that runtime is being deleted.
 
 ## Backend UUID Rules
 
@@ -105,11 +119,13 @@ Workspace-scoped queries filter by `workspace_id`; membership gates access and `
 ## Web/Desktop UI Rules
 
 - For Button and Dialog usage, read `packages/ui/docs/button.md` and `packages/ui/docs/dialog.md`.
+- Before building or reviewing an interaction that changes layout (overlays, expand/collapse, list rows, drag and drop, content switches, selection indicators, value feedback), read `packages/ui/docs/motion.md`: tokens, reduced motion, where not to animate, and the shared primitives. Such a PR attaches a GIF and the frame-sampling results from `scripts/motion/capture.mjs`.
 - Prefer existing shadcn/Base UI primitives. Add components with `pnpm ui:add <component>`.
 - For `pnpm ui:add @reui/<name>`, decline overwrite prompts. Keep `REUI_LICENSE_KEY` in the environment, never in repo files. Adapt vendored primitives into `packages/ui/components/ui/` and compositions into `packages/views/`.
-- Import icons from `@multica/ui/icons`; no icon library is installed. If the icon you need is missing, draw it by following `.agents/skills/multica-icons/SKILL.md`. Do not substitute an inline SVG or an emoji. Rewrite icon imports in `ui:add` output before committing.
+- Import icons from `@multica/ui/icons`; no icon library is installed. If the icon you need is missing, draw it by following `.agents/skills/multica-icons/SKILL.md`. Do not substitute an inline SVG or an emoji. Rewrite icon imports in `ui:add` output before committing. Exception: proportional-width optical keycap glyphs live exclusively in `KBD_GLYPHS` inside `packages/ui/components/ui/kbd.tsx` and are only for `<Kbd>`.
 - Use shared semantic tokens in `packages/ui/styles/`. Typography uses the role-named `--text-*` scale in `packages/ui/styles/tokens.css`, not Tailwind's default size ramp.
 - Selected states remain identifiable on hover. Handle overflow, long text, and scrolling deliberately; avoid unnecessary local state and dividers.
+- Issue links use the identifier (`MUL-123`): `paths.issueDetail` takes an `IssueRouteRef` from `issueRouteRef(issue)`. With only a UUID, use `useIssueRouteRef` (or `cachedIssueRouteRef` in event handlers). A UUID URL is rewritten to the identifier after load, which mounts the issue page a second time on web.
 
 ## Testing
 
@@ -117,6 +133,7 @@ Workspace-scoped queries filter by `workspace_id`; membership gates access and `
 - Give each behavior one canonical test layer: helper tests own parsing/state matrices; component tests cover wiring, accessibility, happy paths, and named regressions. Prefer a failing regression test before behavioral fixes.
 - DOM-free `.test.ts` files start with `// @vitest-environment node`; do not use it if it would silently switch the code under test to an SSR path.
 - Every workspace with jsdom suites loads `@multica/vitest-setup/web-storage` in its Vitest setup; do not add per-package `localStorage` shims.
+- A test that reads files outside its package and that package's workspace dependencies declares them as `$TURBO_ROOT$/...` in the package's `turbo.json` `tasks.test.inputs`, and in the CI path group that runs it (`.github/ci-paths.json`); otherwise CI replays a cached pass when only those files change. `scripts/check-test-cache-inputs.mjs` enforces this.
 - Views tests must not mock `next/*` or `react-router-dom`. Mock stores with their Zustand callable shape plus `getState`; mock API calls at `@multica/core/api`.
 - E2E setup/teardown uses `TestApiClient`.
 - DB-backed Go tests use `server/internal/testutil` fixtures (`dbfx.Issue`, `dbfx.Task`, `dbfx.Insert`) and `testutil.Call(h, req).Want(status).JSON(&out)`. Keep product assertions and case-specific diagnostics in the test, not fixture helpers.
@@ -131,5 +148,7 @@ Workspace-scoped queries filter by `workspace_id`; membership gates access and `
 - Before adding complexity for a speculative or vanishingly unlikely race or security edge case, explain the concrete failure mode, likelihood, and complexity cost to the user and get their buy-in. Do not silently expand scope for theoretical robustness.
 - Do not add internal compatibility shims, dual writes, fallback paths, or legacy adapters unless requested. This does not relax API response compatibility above.
 - Use names, types, and tests to express behavior. Code comments are English and kept for non-obvious rationale and constraints; remove superseded plans and incident narratives when updating code. Preserve tool directives and mixed-version contracts.
+- When a change alters user-visible behavior, a setting, a default, a shortcut, or an entry point, `rg` `apps/docs/content/docs` for the feature's name and the terms of the old behavior; a newly added label is not in the docs yet. In the same PR, update every affected page and its locale siblings (`inbox.mdx`, `inbox.zh.mdx`, ...). Text the change makes wrong is always fixed here; if the docs only lack the new behavior, you may link a docs follow-up issue from the PR description instead. Exception: do not document features gated behind a default-off flag in `server/internal/featureflags/keys.go` (permanently enabled compat keys do not count) in `apps/docs/content/docs/` or root `README*.md`; note why docs were skipped in the PR description instead. When a PR flips a flag to default-on or removes it for general availability, add the docs across all locales in the same PR (content removed earlier can be recovered from the diff of PR #11111).
+- A new built-in runtime prefix (`MULTICA_<PREFIX>_PATH`/`_ENDPOINT`) or `MULTICA_<PREFIX>_ARGS` variable must appear in every `apps/docs/content/docs/environment-variables*.mdx`; `apps/docs/lib/env-var-coverage.test.ts` enforces this, and its exemption list is for runtimes deliberately kept out of the docs.
 - New global pre-workspace routes use a single word or `/{noun}/{verb}`, not hyphenated root names. Update `server/internal/handler/reserved_slugs.json`, run `pnpm generate:reserved-slugs`, and commit `packages/core/paths/reserved-slugs.ts` when changing reserved slugs.
 - Use atomic conventional commits and the repository PR template. Follow the [pull request requirements](CONTRIBUTING.md#pull-request-requirements): Problem, Goal, Proposal (high-level design understandable without much background), Alternatives (optional), and Screenshots. Attach screenshots or a screen recording for UI or interaction changes (missing both means rejection by default). For releases, follow [.github/RELEASING.md](.github/RELEASING.md); default to a patch bump unless specified otherwise.
