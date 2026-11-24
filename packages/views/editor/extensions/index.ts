@@ -28,7 +28,6 @@ import Typography from "@tiptap/extension-typography";
 import TableRow from "@tiptap/extension-table-row";
 import TableHeader from "@tiptap/extension-table-header";
 import TableCell from "@tiptap/extension-table-cell";
-import { Table } from "@tiptap/extension-table";
 import { TaskList } from "@tiptap/extension-list";
 import { Markdown } from "@tiptap/markdown";
 import Collaboration from "@tiptap/extension-collaboration";
@@ -61,6 +60,7 @@ import { createBlockInsertSuggestion } from "./block-insert-suggestion";
 import { SuggestionTriggerArmingExtension } from "./suggestion-trigger-arming";
 import { CodeBlockView } from "./code-block-view";
 import { TableView } from "./table-view";
+import { TableWithLineBreaks } from "./table";
 import { RICH_TABLE_CHROME_ATTRIBUTE } from "../../rich-content/rich-table";
 import { PatchedListItem, PatchedOrderedList, PatchedTaskItem } from "./list-item";
 import { createMarkdownPasteExtension } from "./markdown-paste";
@@ -197,7 +197,7 @@ export function createEditorExtensions(
     // shrink below min-content, so the horizontal scrollbar lands on the
     // page-level scroll container instead of the table itself. That covers
     // renderHTML; the editor itself draws TableView, the readonly tables' frame.
-    Table.extend({
+    TableWithLineBreaks.extend({
       addNodeView() {
         return ReactNodeViewRenderer(TableView, {
           contentDOMElementTag: "tbody",
