@@ -11,7 +11,7 @@ vi.mock("react", async (importOriginal) => ({
   useCallback: (callback: unknown) => callback,
 }));
 vi.mock("react-native", () => ({
-  ActionSheetIOS: {}, Alert: {}, FlatList: "FlatList", View: "View",
+  Alert: {}, FlatList: "FlatList", View: "View",
 }));
 vi.mock("expo-router", () => ({ router: { push: vi.fn() } }));
 vi.mock("@expo/vector-icons", () => ({ Ionicons: "Ionicons" }));
@@ -34,6 +34,9 @@ vi.mock("@/data/workspace-store", () => ({
   useWorkspaceStore: (selector: (value: unknown) => unknown) => selector({
     currentWorkspaceId: "workspace-1", currentWorkspaceSlug: "acme",
   }),
+}));
+vi.mock("@/lib/use-action-sheet", () => ({
+  useActionSheet: () => ({ showActionSheetWithOptions: vi.fn() }),
 }));
 vi.mock("@/lib/use-color-scheme", () => ({ useColorScheme: () => ({ colorScheme: "light" }) }));
 vi.mock("@/lib/theme", () => ({ THEME: { light: { mutedForeground: "gray" } } }));

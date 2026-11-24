@@ -12,13 +12,13 @@
  */
 import { useState } from "react";
 import {
-  ActionSheetIOS,
   Alert,
   ActivityIndicator,
   Pressable,
   ScrollView,
   View,
 } from "react-native";
+import { useActionSheet } from "@/lib/use-action-sheet";
 import * as ImagePicker from "expo-image-picker";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
@@ -45,6 +45,7 @@ function initialsOf(name: string | undefined): string {
 }
 
 export default function ProfileSettingsScreen() {
+  const { showActionSheetWithOptions } = useActionSheet();
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
   const { t } = useT("settings");
@@ -79,7 +80,7 @@ export default function ProfileSettingsScreen() {
             : t("common:actions.cancel"),
     );
 
-    ActionSheetIOS.showActionSheetWithOptions(
+    showActionSheetWithOptions(
       {
         options: visibleOptions,
         cancelButtonIndex: cancelIndex,

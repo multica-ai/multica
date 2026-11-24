@@ -22,6 +22,7 @@
   "dependencies": {
     "@expo/dom-webview": "~57.0.1",
     "@expo/metro-runtime": "~57.0.16",
+    "@expo/react-native-action-sheet": "^4.1.1",
     "@expo/vector-icons": "^15.1.1",
     "@multica/core": "workspace:*",
     "@react-native-community/datetimepicker": "9.1.0",

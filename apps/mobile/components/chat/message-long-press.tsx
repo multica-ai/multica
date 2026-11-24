@@ -4,7 +4,7 @@
  * caller's highlight ring while the sheet is on screen).
  *
  * iOS-native first per apps/mobile/CLAUDE.md §UI components → waterfall
- * step 1: `ActionSheetIOS.showActionSheetWithOptions`. Zero custom
+ * step 1: show the message action sheet. Zero custom
  * layout, zero animation, zero overflow math, zero new deps.
  *
  * Item set (v1, conditional):
@@ -16,7 +16,7 @@
  * native alternative" threshold in apps/mobile/CLAUDE.md.
  */
 import { useCallback, useState } from "react";
-import { ActionSheetIOS } from "react-native";
+import { useActionSheet } from "@/lib/use-action-sheet";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import type { ChatMessage } from "@multica/core/types";
@@ -27,6 +27,7 @@ export function useChatMessageLongPress(
   message: ChatMessage,
 ): { onLongPress: () => void; isPressed: boolean } {
   const [isPressed, setIsPressed] = useState(false);
+  const { showActionSheetWithOptions } = useActionSheet();
   const { t } = useT("issues");
 
   const onLongPress = useCallback(() => {
@@ -55,7 +56,7 @@ export function useChatMessageLongPress(
 
     const cancelButtonIndex = options.length - 1;
 
-    ActionSheetIOS.showActionSheetWithOptions(
+    showActionSheetWithOptions(
       { options, cancelButtonIndex },
       (i) => {
         setIsPressed(false);
@@ -77,7 +78,7 @@ export function useChatMessageLongPress(
         }
       },
     );
-  }, [message, t]);
+  }, [message, t, showActionSheetWithOptions]);
 
   return { onLongPress, isPressed };
 }

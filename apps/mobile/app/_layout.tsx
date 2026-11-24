@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { AppState, type AppStateStatus } from "react-native";
 import { Stack, ThemeProvider, router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import { ActionSheetProvider } from "@expo/react-native-action-sheet";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { KeyboardProvider } from "react-native-keyboard-controller";
@@ -81,25 +82,27 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <MobileI18nProvider>
         <SafeAreaProvider>
-          <KeyboardProvider>
-            <QueryClientProvider client={queryClient}>
-              <ThemeProvider value={NAV_THEME[colorScheme]}>
-                <AuthInitializer>
-                  <SessionActivityBoundary>
-                    <LightboxProvider>
-                      <StatusBar style={isDarkColorScheme ? "light" : "dark"} />
-                      <Stack screenOptions={{ headerShown: false }}>
-                        <Stack.Screen name="index" />
-                        <Stack.Screen name="(auth)" />
-                        <Stack.Screen name="(app)" />
-                      </Stack>
-                      <PortalHost />
-                    </LightboxProvider>
-                  </SessionActivityBoundary>
-                </AuthInitializer>
-              </ThemeProvider>
-            </QueryClientProvider>
-          </KeyboardProvider>
+          <ActionSheetProvider>
+            <KeyboardProvider>
+              <QueryClientProvider client={queryClient}>
+                <ThemeProvider value={NAV_THEME[colorScheme]}>
+                  <AuthInitializer>
+                    <SessionActivityBoundary>
+                      <LightboxProvider>
+                        <StatusBar style={isDarkColorScheme ? "light" : "dark"} />
+                        <Stack screenOptions={{ headerShown: false }}>
+                          <Stack.Screen name="index" />
+                          <Stack.Screen name="(auth)" />
+                          <Stack.Screen name="(app)" />
+                        </Stack>
+                        <PortalHost />
+                      </LightboxProvider>
+                    </SessionActivityBoundary>
+                  </AuthInitializer>
+                </ThemeProvider>
+              </QueryClientProvider>
+            </KeyboardProvider>
+          </ActionSheetProvider>
         </SafeAreaProvider>
       </MobileI18nProvider>
     </GestureHandlerRootView>
