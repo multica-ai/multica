@@ -9093,6 +9093,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	supplementSupported := agent.SupportsTaskSupplement(provider, resolvedVersion) && (task.IssueID != "" || task.ChatSessionID != "")
 	if supplementSupported {
 		switch provider {
+		case "hermes":
+			// The version floor describes Hermes Agent. Other CLIs speaking
+			// the Hermes protocol family, such as jcode, have no `/steer`.
+			supplementSupported = !usesCustomProfileCommand
 		case "cursor":
 			supplementHookCommand, supplementSupported = cursorSupplementHookCommand(env)
 		case "antigravity":
