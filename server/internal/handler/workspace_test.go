@@ -1187,6 +1187,66 @@ WHERE autopilot_id = $1 AND user_id = $2
 	}
 }
 
+// TestDeleteMember_PrunesAutopilotCollaborators: a removed member who is
+// invited back must not regain write access to autopilots they were granted
+// before. The delete is scoped to that user and to this workspace.
+func TestDeleteMember_PrunesAutopilotCollaborators(t *testing.T) {
+	fx := setupRevocationFixture(t, "handler-tests-revoke-autopilot-collaborator", "daemon-revoke-autopilot-collaborator")
+
+	insertAutopilot := func(workspaceID string) string {
+		id := dbfx.Insert(t, "autopilot", testutil.Cols{
+			"workspace_id":    workspaceID,
+			"title":           "Revocation autopilot collaborator",
+			"assignee_type":   "agent",
+			"assignee_id":     fx.AgentID,
+			"status":          "active",
+			"execution_mode":  "run_only",
+			"created_by_type": "member",
+			"created_by_id":   testUserID,
+		})
+		dbfx.Cleanup(t, `DELETE FROM autopilot_collaborator WHERE autopilot_id = $1`, id)
+		return id
+	}
+	autopilotID := insertAutopilot(fx.WorkspaceID)
+	otherWorkspaceID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name":         "Revocation collaborator other workspace",
+		"slug":         fmt.Sprintf("handler-tests-revoke-autopilot-collaborator-other-%d", time.Now().UnixNano()),
+		"description":  "tenant-scope regression fixture",
+		"issue_prefix": "RCO",
+	})
+	otherAutopilotID := insertAutopilot(otherWorkspaceID)
+	dbfx.Exec(t, `
+INSERT INTO autopilot_collaborator (autopilot_id, user_type, user_id, granted_by)
+VALUES ($1, 'member', $3, $4), ($1, 'member', $4, $4), ($2, 'member', $3, $4)
+`, autopilotID, otherAutopilotID, fx.TargetUserID, testUserID)
+
+	req := newRequest("DELETE", "/api/workspaces/"+fx.WorkspaceID+"/members/"+fx.MemberID, nil)
+	req.Header.Set("X-Workspace-ID", fx.WorkspaceID)
+	req = withURLParams(req, "id", fx.WorkspaceID, "memberId", fx.MemberID)
+	testutil.Call(t, testHandler.DeleteMember, req).Want(http.StatusNoContent)
+
+	granted := func(autopilotID, userID string) bool {
+		t.Helper()
+		ok, err := testHandler.Queries.IsAutopilotCollaborator(context.Background(), db.IsAutopilotCollaboratorParams{
+			AutopilotID: parseUUID(autopilotID),
+			UserID:      parseUUID(userID),
+		})
+		if err != nil {
+			t.Fatalf("read collaborator: %v", err)
+		}
+		return ok
+	}
+	if granted(autopilotID, fx.TargetUserID) {
+		t.Error("removed member still holds write access to the autopilot")
+	}
+	if !granted(autopilotID, testUserID) {
+		t.Error("remaining member's access was pruned")
+	}
+	if !granted(otherAutopilotID, fx.TargetUserID) {
+		t.Error("access in another workspace was pruned")
+	}
+}
+
 // TestLeaveWorkspace_RevokesOwnRuntimes is the self-removal counterpart: when
 // a member leaves a workspace voluntarily, their own runtimes are revoked
 // with the same atomic write set as DeleteMember.
