@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -493,13 +494,14 @@ func TestIssueBlockerReleaseHidesReferencesFromGuest(t *testing.T) {
 func TestIssueBlockerRemovalRequiresBlockerVisibility(t *testing.T) {
 	agent := seededReadyAgentID(t)
 	svc := service.IssueWakeupService{Tasks: testHandler.TaskService}
-	writes := map[string]func(user, id string, updates map[string]any) *testutil.Response{
-		"single": func(user, id string, updates map[string]any) *testutil.Response {
-			return testutil.Call(t, testHandler.UpdateIssue, withURLParam(asUser(newRequest("PUT", "/api/issues/"+id, updates), user), "id", id))
+	// Bodies are raw JSON so a test can repeat a key in a chosen order.
+	writes := map[string]func(user, id, updates string) *testutil.Response{
+		"single": func(user, id, updates string) *testutil.Response {
+			return testutil.Call(t, testHandler.UpdateIssue, withURLParam(asUser(newRequest("PUT", "/api/issues/"+id, json.RawMessage(updates)), user), "id", id))
 		},
-		"batch": func(user, id string, updates map[string]any) *testutil.Response {
+		"batch": func(user, id, updates string) *testutil.Response {
 			return testutil.Call(t, testHandler.BatchUpdateIssues, asUser(newRequest("POST", "/api/issues/batch-update?workspace_id="+testWorkspaceID, map[string]any{
-				"issue_ids": []string{id}, "updates": updates,
+				"issue_ids": []string{id}, "updates": json.RawMessage(updates),
 			}), user))
 		},
 	}
@@ -523,11 +525,23 @@ func TestIssueBlockerRemovalRequiresBlockerVisibility(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			write(f.insider, f.publicIssue, map[string]any{"blocked_by": []string{f.secretIssue}}).Want(http.StatusOK)
-			remove := map[string]any{"remove_blocked_by": []string{f.secretIssue}}
+			write(f.insider, f.publicIssue, fmt.Sprintf(`{"blocked_by":[%q]}`, f.secretIssue)).Want(http.StatusOK)
+			remove := fmt.Sprintf(`{"remove_blocked_by":[%q]}`, f.secretIssue)
 			write(f.outsider, f.publicIssue, remove).Want(http.StatusBadRequest)
+			// A second key that differs only in case must not swap the checked
+			// list for another one before the write.
+			for _, key := range []string{"blocked_by", "remove_blocked_by"} {
+				body := fmt.Sprintf(`{%q:[%q],%q:[]}`, key, f.secretIssue, strings.ToUpper(key))
+				write(f.outsider, f.publicIssue, body).Want(http.StatusBadRequest)
+			}
 			removeProjectMemberRow(t, f.projectID, f.insider)
-			write(f.insider, f.publicIssue, remove).Want(http.StatusBadRequest)
+			hidden := write(f.insider, f.publicIssue, remove).Want(http.StatusBadRequest).Text()
+			// A missing ID gets the same answer as a hidden one, so a member who
+			// lost access can't learn whether the private issue still exists.
+			missing := write(f.insider, f.publicIssue, fmt.Sprintf(`{"remove_blocked_by":[%q]}`, uuid.NewString())).Want(http.StatusBadRequest).Text()
+			if hidden != missing {
+				t.Fatalf("hidden blocker answered %q, missing blocker %q", hidden, missing)
+			}
 			tick()
 			if n := edges(); n != 1 {
 				t.Fatalf("rejected removals left %d edges, want 1", n)
