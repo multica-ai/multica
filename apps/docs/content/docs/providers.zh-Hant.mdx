@@ -21,7 +21,7 @@ Multica 支援 31 款 AI 程式設計工具。它不替代你在用的工具：�
 
 | 工具 | 檢測命令 | 會話恢復 | Multica 管理 MCP | 在 Multica 選模型 | Skill 注入位置 |
 |---|---|---:|---:|---:|---|
-| Antigravity | `agy` | ✓ | — | ✓ | `.agents/skills/` |
+| Antigravity | `agy` | ✓ | ✓ | ✓ | `.agents/skills/` |
 | Claude Code | `claude` | ✓ | ✓ | ✓ | `.claude/skills/` |
 | CodeBuddy | `codebuddy` | ✓ | ✓ | ✓ | `.codebuddy/skills/` |
 | CodeArts | `codearts` | ✓ | ✓ | ✓ | `.codeartsdoer/skills/` |
@@ -136,7 +136,7 @@ Multica 儲存工具返回的會話標識。下次在同一任務中繼續工作
 
 ## MCP 配置
 
-Amp、Factory Droid、Antigravity、GitHub Copilot CLI、DevEco Code、Muse Code 和 ZeroClaw 暫不讀取 AI 代理中的 MCP 配置，建立 AI 代理時不顯示這一項。
+Amp、Factory Droid、GitHub Copilot CLI、DevEco Code、Muse Code 和 ZeroClaw 暫不讀取 AI 代理中的 MCP 配置，建立 AI 代理時不顯示這一項。
 
 向 Pi 下發受管 MCP 配置需要 Pi 0.99.0 或更高版本。舊版 Pi 仍可執行未配置 MCP 的 AI 代理。
 

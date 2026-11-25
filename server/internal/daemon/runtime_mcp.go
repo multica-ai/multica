@@ -453,6 +453,10 @@ func listRuntimeLocalMcpServers(provider, cliVersion string) ([]runtimeLocalMcpS
 		// providers already make and avoids sending full tool-chain state over
 		// the wire.
 		path, key, source, format = filepath.Join(home, ".omp", "agent", "mcp.json"), "mcpServers", "User config", "json"
+	case "antigravity":
+		// Inventory only: agy loads this file itself, so merging it into the
+		// task's MCP config would start every user server twice.
+		path, key, source, format = filepath.Join(home, ".gemini", "config", "mcp_config.json"), "mcpServers", "User config", "jsonc"
 	default:
 		return []runtimeLocalMcpServerSummary{}, false, nil
 	}
@@ -553,6 +557,12 @@ func readRuntimeMcpDocument(path, format string) (map[string]any, error) {
 }
 
 func readRuntimeMcpServers(provider, cliVersion, path, key, format string) (map[string]any, error) {
+	// agy tolerates an empty file here, which its config migration leaves behind.
+	if provider == "antigravity" {
+		if raw, err := os.ReadFile(path); err == nil && len(bytes.TrimSpace(raw)) == 0 {
+			return nil, nil
+		}
+	}
 	cfg, err := readRuntimeMcpDocument(path, format)
 	if err != nil {
 		return nil, err
@@ -695,6 +705,10 @@ func runtimeMcpTransport(entry map[string]any) string {
 		return "stdio"
 	}
 	if _, ok := entry["url"]; ok {
+		return "http"
+	}
+	// agy's legacy name for the Streamable HTTP url.
+	if _, ok := entry["serverUrl"]; ok {
 		return "http"
 	}
 	return "unknown"

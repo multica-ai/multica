@@ -21,7 +21,7 @@ Install steps are in [Install AI coding tools](/install-agent-runtime).
 
 | Tool | Detected command | Session resumption | Multica-managed MCP | Model picked in Multica | Skill injection path |
 |---|---|---:|---:|---:|---|
-| Antigravity | `agy` | ✓ | — | ✓ | `.agents/skills/` |
+| Antigravity | `agy` | ✓ | ✓ | ✓ | `.agents/skills/` |
 | Claude Code | `claude` | ✓ | ✓ | ✓ | `.claude/skills/` |
 | CodeBuddy | `codebuddy` | ✓ | ✓ | ✓ | `.codebuddy/skills/` |
 | CodeArts | `codearts` | ✓ | ✓ | ✓ | `.codeartsdoer/skills/` |
@@ -136,7 +136,7 @@ Retry and session-resumption rules are in [Runs](/tasks#manual-retry).
 
 ## MCP configuration
 
-Amp, Factory Droid, Antigravity, GitHub Copilot CLI, DevEco Code, Muse Code, and ZeroClaw do not read the MCP configuration on an agent yet, so the field is not shown when creating agents for them.
+Amp, Factory Droid, GitHub Copilot CLI, DevEco Code, Muse Code, and ZeroClaw do not read the MCP configuration on an agent yet, so the field is not shown when creating agents for them.
 
 Managed MCP delivery for Pi requires Pi 0.99.0 or later. Older Pi versions continue to run agents that have no MCP configuration.
 

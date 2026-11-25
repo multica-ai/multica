@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -599,6 +600,43 @@ func TestListRuntimeLocalMcpServersKimi(t *testing.T) {
 	}
 	if !supported || len(servers) != 1 || servers[0].Name != "paper" {
 		t.Fatalf("supported=%v servers=%#v", supported, servers)
+	}
+}
+
+// agy loads ~/.gemini/config/mcp_config.json itself, and tolerates the empty
+// file its config migration leaves behind. It is inventoried, never merged.
+func TestListRuntimeLocalMcpServersAntigravity(t *testing.T) {
+	home := t.TempDir()
+	redirectTestHome(t, home)
+	configDir := filepath.Join(home, ".gemini", "config")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(configDir, "mcp_config.json")
+	// JSONC, with a legacy serverUrl remote.
+	config := "{\n  // user scope\n  \"mcpServers\": {\n    \"local\": { \"command\": \"local-server\", },\n    \"remote\": { \"serverUrl\": \"https://remote.example/mcp\", },\n  },\n}\n"
+	for _, tc := range []struct {
+		content string
+		want    []runtimeLocalMcpServerSummary
+	}{
+		{"", []runtimeLocalMcpServerSummary{}},
+		{" \n", []runtimeLocalMcpServerSummary{}},
+		{config, []runtimeLocalMcpServerSummary{
+			{Name: "local", Transport: "stdio", Source: "User config", Enabled: true},
+			{Name: "remote", Transport: "http", Source: "User config", Enabled: true},
+		}},
+	} {
+		if err := os.WriteFile(configPath, []byte(tc.content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if servers, supported, err := listRuntimeLocalMcpServers("antigravity", ""); err != nil || !supported || !reflect.DeepEqual(servers, tc.want) {
+			t.Fatalf("config %q: supported=%v servers=%#v err=%v", tc.content, supported, servers, err)
+		}
+	}
+
+	agentConfig := json.RawMessage(`{"mcpServers":{"agent-only":{"command":"agent-cmd"}}}`)
+	if merged, err := mergeRuntimeAndAgentMcpConfig("antigravity", "", agentConfig); err != nil || string(merged) != string(agentConfig) {
+		t.Fatalf("antigravity merge must be a passthrough, got %s (%v)", merged, err)
 	}
 }
 

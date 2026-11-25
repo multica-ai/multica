@@ -1347,7 +1347,7 @@ func TestCreateWorktreeExcludesAgentSidecars(t *testing.T) {
 	if !strings.Contains(exclude, "CODEBUDDY.md\n") {
 		t.Fatalf("expected .git/info/exclude to contain CODEBUDDY.md, got:\n%s", exclude)
 	}
-	for _, pattern := range []string{".pi\n", ".omp\n"} {
+	for _, pattern := range []string{".pi\n", ".omp\n", ".agents/plugins/multica\n"} {
 		if !strings.Contains(exclude, pattern) {
 			t.Fatalf("expected .git/info/exclude to contain %q, got:\n%s", pattern, exclude)
 		}
