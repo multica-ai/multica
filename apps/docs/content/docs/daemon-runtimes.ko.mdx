@@ -281,7 +281,7 @@ Codex 기본 하위 에이전트도 기본적으로 꺼져 있습니다. Multica
 `MULTICA_TOKEN`을 사용하는 요청의 작성자는 서버가 결정하며, 태스크 댓글 같은 쓰기는 할당된 에이전트와 실행 중인 작업에 귀속됩니다. 자격 증명의 전체 바인딩, 권한, 귀속, 최대 24시간의 유효 기간 및 정리 동작은 [에이전트 실행용 임시 토큰](/auth-tokens#에이전트-실행용-임시-토큰)을 참고하세요.
 
 <Callout type="info">
-기본 제공 **Codex** 및 **Claude Code** 런타임은 후속 턴을 위해 기본적으로 웜 프로세스 풀을 재사용합니다. 웜 풀 실행 중에는 턴마다 바뀌는 작업 변수(`MULTICA_TOKEN`, `MULTICA_TASK_ID`, `MULTICA_TASK_CONFIG_ROOT`, `MULTICA_TASK_SLOT`)가 상주 프로세스의 정적 환경이 아니라 비공개 턴별 오버레이 파일을 통해 `multica` CLI에 전달되므로, 프로바이더 프로세스 환경이나 임의의 자식 스크립트에 노출되는 것은 보장되지 않습니다. 사용자 지정 런타임 프로필 명령은 웜 풀을 사용하지 않으며 계속해서 프로세스 환경에서 모든 변수를 직접 받습니다. 기본 제공 Codex 또는 Claude Code에서 기존 직접 환경 변수가 필요하면 데몬에 `MULTICA_WARM_POOL=0`을 설정하세요.
+기본 제공 **Codex**, **Claude Code** 및 **Devin** 런타임은 후속 턴을 위해 기본적으로 웜 프로세스 풀을 재사용합니다. 웜 풀 실행 중에는 턴마다 바뀌는 작업 변수(`MULTICA_TOKEN`, `MULTICA_TASK_ID`, `MULTICA_TASK_CONFIG_ROOT`, `MULTICA_TASK_SLOT`)가 상주 프로세스의 정적 환경이 아니라 비공개 턴별 오버레이 파일을 통해 `multica` CLI에 전달되므로, 프로바이더 프로세스 환경이나 임의의 자식 스크립트에 노출되는 것은 보장되지 않습니다. 사용자 지정 런타임 프로필 명령은 웜 풀을 사용하지 않으며 계속해서 프로세스 환경에서 모든 변수를 직접 받습니다. 기본 제공 Codex, Claude Code 또는 Devin에서 기존 직접 환경 변수가 필요하면 데몬에 `MULTICA_WARM_POOL=0`을 설정하세요.
 </Callout>
 
 <Callout type="warning">
