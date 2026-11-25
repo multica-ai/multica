@@ -182,6 +182,14 @@
       "quick": "エージェントで作成",
       "manual": "手動作成",
       "unsupported": "エージェントでの作成では使用できません"
+    },
+    "open_file": {
+      "title": "ファイルを開くアプリ",
+      "hint": "実行記録の Diff からファイルを開くときに使います。このデバイスに保存されます。",
+      "desktop_only": "デスクトップアプリでのみ利用できます。",
+      "finder": "Finder",
+      "explorer": "エクスプローラー",
+      "file_manager": "ファイルマネージャー"
     }
   },
   "appearance": {

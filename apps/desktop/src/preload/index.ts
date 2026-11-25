@@ -291,6 +291,14 @@ const desktopAPI = {
   /** Validate that a path is an existing readable+writable directory. */
   validateLocalDirectory: (path: string) =>
     ipcRenderer.invoke("local-directory:validate", path),
+  /** Installed editors + the OS file manager. Detection is local to this machine. */
+  listLocalFileOpeners: () => ipcRenderer.invoke("local-file:list-openers"),
+  /** Return the subset of absolute paths that exist on this machine. */
+  resolveLocalFiles: (paths: string[]) =>
+    ipcRenderer.invoke("local-file:resolve-many", paths),
+  /** Open a local file with a detected editor or the file manager. */
+  openLocalFile: (path: string, openerId: string) =>
+    ipcRenderer.invoke("local-file:open", { path, openerId }),
   /** Read every theme in the themes folder, and start watching it. */
   readThemeFolder: (): Promise<ThemeFolderSnapshot> =>
     ipcRenderer.invoke(THEME_FOLDER_READ_CHANNEL),

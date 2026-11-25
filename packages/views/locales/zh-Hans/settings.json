@@ -182,6 +182,14 @@
       "quick": "智能体创建",
       "manual": "手动创建",
       "unsupported": "智能体创建时不支持此字段"
+    },
+    "open_file": {
+      "title": "打开文件",
+      "hint": "从执行记录 Diff 打开文件时使用。保存在当前设备上。",
+      "desktop_only": "仅桌面应用可用",
+      "finder": "访达",
+      "explorer": "资源管理器",
+      "file_manager": "文件管理器"
     }
   },
   "appearance": {

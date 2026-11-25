@@ -5,6 +5,10 @@ import type { ContextMenuCommand, ContextMenuRequest } from "../shared/context-m
 import type { RendererRouteContextInput } from "../shared/renderer-route-context";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
 import type {
+  ListLocalFileOpenersResult,
+  OpenLocalFileResult,
+} from "../shared/open-local-file";
+import type {
   DesktopWindowContext,
   IssueWindowRequest,
 } from "../shared/issue-window";
@@ -136,6 +140,15 @@ interface DesktopAPI {
      *  Drives the worktree execution-mode option in the resource UI. */
     is_git_repo?: boolean;
   }>;
+  /** Installed editors plus the OS file manager on this machine. */
+  listLocalFileOpeners: () => Promise<ListLocalFileOpenersResult>;
+  /** Return the subset of absolute paths that exist as a file or directory. */
+  resolveLocalFiles: (paths: string[]) => Promise<string[]>;
+  /** Open a validated local path with a detected editor or the file manager. */
+  openLocalFile: (
+    path: string,
+    openerId: string,
+  ) => Promise<OpenLocalFileResult>;
   /** Read every theme in the themes folder in user data, and start watching it. */
   readThemeFolder: () => Promise<ThemeFolderSnapshot>;
   /** Called once a change in the themes folder settles. Returns an unsubscribe function. */

@@ -40,6 +40,7 @@ import {
 import { Input } from "@multica/ui/components/ui/input";
 import { Slider } from "@multica/ui/components/ui/slider";
 import { Switch } from "@multica/ui/components/ui/switch";
+import { useLocalFileOpeners, type LocalFileOpener } from "../../platform";
 import { useTheme } from "@multica/ui/components/common/theme-provider";
 import {
   BUILT_IN_THEMES,
@@ -166,8 +167,123 @@ export function AppearanceTab() {
         <InterfaceTextSection />
         <ContentTextSection />
         <LayoutSection />
+        <OpenFileSection />
       </div>
     </SettingsTab>
+  );
+}
+
+function fileManagerLabel(
+  platform: string | null,
+  labels: { finder: string; explorer: string; fileManager: string },
+): string {
+  if (platform === "darwin") return labels.finder;
+  if (platform === "win32") return labels.explorer;
+  return labels.fileManager;
+}
+
+function OpenFileSection() {
+  const { t } = useT("settings");
+  const { supported, openers, platform, effective, setOpenerId } =
+    useLocalFileOpeners();
+  const desktopOnly = t(($) => $.preferences.open_file.desktop_only);
+  const managerLabel = fileManagerLabel(platform, {
+    finder: t(($) => $.preferences.open_file.finder),
+    explorer: t(($) => $.preferences.open_file.explorer),
+    fileManager: t(($) => $.preferences.open_file.file_manager),
+  });
+
+  return (
+    <SettingsSection
+      title={t(($) => $.preferences.open_file.title)}
+      description={t(($) => $.preferences.open_file.hint)}
+      anchor="open-files"
+    >
+      <SettingsCard>
+        {!supported ? (
+          <SettingsRow
+            label={t(($) => $.preferences.open_file.title)}
+            description={desktopOnly}
+            size="select-wide"
+          >
+            <Select disabled items={[{ value: "unavailable", label: desktopOnly }]} value="unavailable">
+              <SelectTrigger
+                size="sm"
+                className="w-full"
+                aria-label={t(($) => $.preferences.open_file.title)}
+              >
+                <SelectValue>{desktopOnly}</SelectValue>
+              </SelectTrigger>
+              <SelectContent align="end">
+                <SelectItem value="unavailable">{desktopOnly}</SelectItem>
+              </SelectContent>
+            </Select>
+          </SettingsRow>
+        ) : (
+          <OpenFilePicker
+            openers={openers}
+            effectiveId={effective?.id}
+            managerLabel={managerLabel}
+            setOpenerId={setOpenerId}
+          />
+        )}
+      </SettingsCard>
+    </SettingsSection>
+  );
+}
+
+function OpenFilePicker({
+  openers,
+  effectiveId,
+  managerLabel,
+  setOpenerId,
+}: {
+  openers: LocalFileOpener[];
+  effectiveId?: string;
+  managerLabel: string;
+  setOpenerId: (openerId: string) => void;
+}) {
+  const { t } = useT("settings");
+  const items = openers.map((opener) => ({
+    value: opener.id,
+    label: opener.id === "file-manager" ? managerLabel : opener.name,
+  }));
+  const value = effectiveId ?? items[0]?.value;
+
+  return (
+    <SettingsRow
+      label={t(($) => $.preferences.open_file.title)}
+      size="select-wide"
+    >
+      <Select
+        items={items}
+        value={value}
+        onValueChange={(next) => {
+          if (!next || next === value) return;
+          setOpenerId(String(next));
+          toast.success(t(($) => $.auto_save.toast_saved), {
+            id: "settings-auto-save",
+          });
+        }}
+      >
+        <SelectTrigger
+          size="sm"
+          className="w-full"
+          aria-label={t(($) => $.preferences.open_file.title)}
+        >
+          <SelectValue>
+            {items.find((item) => item.value === value)?.label}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent align="end">
+          {items.map((item) => (
+            <SelectItem key={item.value} value={item.value}>
+              {item.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </SettingsRow>
   );
 }
 

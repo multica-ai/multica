@@ -22,6 +22,7 @@ import {
 } from "./daemon-manager";
 import { setupLocalDirectory } from "./local-directory";
 import { setupThemeFolder } from "./theme-folder";
+import { setupOpenLocalFile } from "./open-local-file";
 import { setupVoiceInput } from "./voice";
 import { configureLinuxFileDialogs } from "./linux-file-dialog";
 import { openExternalSafely, downloadURLSafely } from "./external-url";
@@ -1114,6 +1115,7 @@ if (!gotTheLock) {
     );
     setupLocalDirectory(() => mainWindows.mostRecent());
     setupThemeFolder();
+    setupOpenLocalFile();
     setupVoiceInput();
 
     // Registered after the updater and daemon gates, so a quit they hold
