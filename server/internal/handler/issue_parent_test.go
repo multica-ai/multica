@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -241,22 +242,41 @@ func TestParentChangeLocksParentTreeBeforeIssueRow(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
-	writes := map[string]func(issue, parent string) *httptest.ResponseRecorder{
-		"single": putIssueParent,
-		"batch": func(issue, parent string) *httptest.ResponseRecorder {
-			w := httptest.NewRecorder()
-			testHandler.BatchUpdateIssues(w, newRequest(http.MethodPost, "/api/issues/batch-update", map[string]any{
-				"issue_ids": []string{issue},
-				"updates":   map[string]any{"parent_issue_id": parent},
-			}))
-			return w
+	batch := func(body map[string]any) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		testHandler.BatchUpdateIssues(w, newRequest(http.MethodPost, "/api/issues/batch-update", body))
+		return w
+	}
+	writes := map[string]func(t *testing.T, issue, parent string) func() *httptest.ResponseRecorder{
+		"single": func(t *testing.T, issue, parent string) func() *httptest.ResponseRecorder {
+			return func() *httptest.ResponseRecorder { return putIssueParent(issue, parent) }
+		},
+		"batch": func(t *testing.T, issue, parent string) func() *httptest.ResponseRecorder {
+			return func() *httptest.ResponseRecorder {
+				return batch(map[string]any{
+					"issue_ids": []string{issue},
+					"updates":   map[string]any{"parent_issue_id": parent},
+				})
+			}
+		},
+		// Label operations send the batch through its own write path.
+		"batch with labels": func(t *testing.T, issue, parent string) func() *httptest.ResponseRecorder {
+			label := createTestIssueLabel(t, "parent-lock-"+uuid.NewString()[:8])
+			return func() *httptest.ResponseRecorder {
+				return batch(map[string]any{
+					"issue_ids": []string{issue},
+					"updates":   map[string]any{"parent_issue_id": parent},
+					"labels":    map[string]any{"add": []string{label}},
+				})
+			}
 		},
 	}
-	for name, write := range writes {
+	for name, prepare := range writes {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			issue := dbfx.Issue(t, name+" parent change")
 			parent := dbfx.Issue(t, name+" new parent")
+			write := prepare(t, issue, parent)
 
 			holder, err := testPool.Begin(ctx)
 			if err != nil {
@@ -272,7 +292,7 @@ func TestParentChangeLocksParentTreeBeforeIssueRow(t *testing.T) {
 			done := make(chan struct{})
 			go func() {
 				defer close(done)
-				w = write(issue, parent)
+				w = write()
 			}()
 			waitUntilDoneOrBlockedBy(t, holderPID, done)
 			select {
