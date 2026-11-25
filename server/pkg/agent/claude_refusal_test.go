@@ -165,3 +165,41 @@ func TestClaudeExecuteKeepsRefusalAnsweredByFallback(t *testing.T) {
 		t.Fatalf("expected no error, got %q", result.Error)
 	}
 }
+
+// A model_refusal_no_fallback event only counts on the main thread. When a
+// subagent was refused and the main thread later failed for an unrelated
+// reason, the failure keeps its own text and the session is not retired.
+func TestClaudeExecuteIgnoresSubagentRefusalEvent(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	const rateLimited = "API Error: 429 rate_limit_error"
+	result := func(parent string) string {
+		event := `{"type":"system","subtype":"model_refusal_no_fallback","session_id":"sess-sub","content":""`
+		if parent != "" {
+			event += `,"parent_tool_use_id":"` + parent + `"`
+		}
+		event += "}"
+		return `{"type":"system","subtype":"init","session_id":"sess-sub"}` + "\n" +
+			event + "\n" +
+			`{"type":"result","subtype":"success","is_error":true,"terminal_reason":"api_error","session_id":"sess-sub","result":"` + rateLimited + `"}` + "\n"
+	}
+
+	sub := runClaudeFixture(t, result("toolu_subagent"), "")
+	if sub.Status != "failed" {
+		t.Fatalf("expected status=failed, got %q", sub.Status)
+	}
+	if strings.HasPrefix(sub.Error, ClaudeModelRefusalMarker) {
+		t.Fatalf("a subagent's refusal must not mark the turn as refused, got %q", sub.Error)
+	}
+	if !strings.Contains(sub.Error, rateLimited) {
+		t.Fatalf("the main thread's own error must be reported, got %q", sub.Error)
+	}
+
+	main := runClaudeFixture(t, result(""), "")
+	if !strings.HasPrefix(main.Error, ClaudeModelRefusalMarker) {
+		t.Fatalf("a main-thread refusal event on an error result must mark the turn as refused, got %q", main.Error)
+	}
+}

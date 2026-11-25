@@ -110,7 +110,7 @@ AI 代理自身返回的錯誤通常不會自動重試。鑑權失效、額度�
 | `timeout` | 超過守護程序配置的執行時長上限 | 縮小任務範圍，或調整守護程序的 `agent_timeout` |
 | `iteration_limit` | 達到執行輪次上限 | 縮小任務範圍 |
 | `agent_blocked` | AI 代理主動報告無法繼續 | 按它在評論中的說明補充資訊 |
-| `api_invalid_request` | 平臺 API 拒絕了非法請求 | 重試；反覆出現時報告問題 |
+| `api_invalid_request` | 模型 API 拒絕了這段對話：請求被判為無效（例如圖片無法讀取），或模型拒絕回答 | 下一次執行會自動開啟新會話。如果同樣的請求一直被拒，換個說法或換個模型 |
 | `codex_semantic_inactivity` | Codex 長時間無有效輸出被判停滯 | 重試，或調整 Codex 停滯超時 |
 
 </Tab>

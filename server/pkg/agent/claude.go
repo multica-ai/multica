@@ -475,7 +475,10 @@ func (t *claudeTurn) handleMessage(msg claudeSDKMessage) {
 		if msg.SessionID != "" {
 			t.sessionID = msg.SessionID
 		}
-		if msg.Subtype == claudeSubtypeModelRefusalNoFallback {
+		// Only the main thread's refusal decides the turn. A subagent's
+		// refusal is reported back to the main thread as a tool result, and
+		// the main thread's own result says how the turn ended.
+		if msg.Subtype == claudeSubtypeModelRefusalNoFallback && msg.ParentToolUseID == "" {
 			t.sawRefusalNoFallback = true
 		}
 		sid := t.sessionID
