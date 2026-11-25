@@ -170,6 +170,18 @@ describe("onIssueLabelsChanged", () => {
     qc = new QueryClient();
   });
 
+  it.each([undefined, 2])("refreshes project progress, which counts issues by label (revision %s)", (revision) => {
+    const progressKey = projectKeys.progress(WS_ID, PROJECT_ID);
+    const membersKey = projectKeys.members(WS_ID, PROJECT_ID);
+    qc.setQueryData(progressKey, { by_label: [] });
+    qc.setQueryData(membersKey, []);
+
+    onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB], revision);
+
+    expect(qc.getQueryState(progressKey)?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(membersKey)?.isInvalidated).toBe(false);
+  });
+
   it("patches the per-issue label cache when present (LabelPicker source)", () => {
     qc.setQueryData<IssueLabelsResponse>(labelKeys.byIssue(WS_ID, ISSUE_ID), {
       labels: [labelA],

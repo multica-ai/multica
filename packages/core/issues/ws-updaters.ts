@@ -556,6 +556,14 @@ export function onIssueUpdated(
  * remounts — `staleTime: Infinity` + `refetchOnWindowFocus: false` (see
  * `query-client.ts`) means focus changes won't recover it.
  */
+/** Progress counts issues by label, and a label event doesn't name the project. */
+export function invalidateProjectProgress(qc: QueryClient, wsId: string) {
+  qc.invalidateQueries({
+    queryKey: projectKeys.all(wsId),
+    predicate: ({ queryKey }) => queryKey[2] === "detail" && queryKey[4] === "progress",
+  });
+}
+
 export function onIssueLabelsChanged(
   qc: QueryClient,
   wsId: string,
@@ -566,6 +574,7 @@ export function onIssueLabelsChanged(
   // Runs after the change is committed (event or mutation success), so the
   // archive can be asked again; the optimistic patch below cannot.
   void refreshArchivedInboxMatches(qc, wsId);
+  invalidateProjectProgress(qc, wsId);
   if (refetchForUnversionedIssueEvent(qc, wsId, issueId, revision)) {
     qc.invalidateQueries({ queryKey: labelKeys.byIssue(wsId, issueId) });
     return;
