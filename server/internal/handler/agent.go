@@ -3302,6 +3302,17 @@ func (h *Handler) ListWorkspaceWorkingAgents(w http.ResponseWriter, r *http.Requ
 		if !ok {
 			return
 		}
+		// A parent in a private project the caller cannot see is answered
+		// like one with nobody working, as project is below.
+		hiddenParent, err := h.issueInHiddenProject(r, workspaceID, parentIssueID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to resolve project access")
+			return
+		}
+		if hiddenParent {
+			writeJSON(w, http.StatusOK, []WorkspaceWorkingAgent{})
+			return
+		}
 	}
 
 	// Narrows the projection to one project's issues, for the project page.
