@@ -12,9 +12,11 @@ import {
   Bot,
   Check,
   ChevronDown,
+  CircleCheck,
   CircleDot,
   Clock,
   Ellipsis,
+  Flag,
   Folder,
   FolderKanban,
   FolderOpen,
@@ -803,6 +805,49 @@ function QuickSwitchArt() {
   );
 }
 
+/* ── Issue relations: Blocked by in the sidebar, with what starts next ── */
+
+const RELATION_BLOCKERS = [
+  { identifier: "MUL-12", ended: true, title: [44, 58] },
+  { identifier: "MUL-15", ended: false, title: [52, 36] },
+];
+
+function IssueRelationsArt() {
+  const { t } = useT("issues");
+  const ended = RELATION_BLOCKERS.filter((b) => b.ended).length;
+  return (
+    <Surface className="top-5 left-6 w-[19rem]">
+      <div className="flex h-8 items-center px-3">
+        <span className="text-label font-medium">{t(($) => $.relations.title)}</span>
+        <Plus className="ml-auto size-3.5 text-muted-foreground" />
+      </div>
+      <div className="px-1.5 pb-12">
+        <div className="flex items-center gap-1.5 px-1.5 pb-0.5 text-caption font-medium text-muted-foreground">
+          <Flag className="size-3.5 text-destructive" />
+          <span className="truncate">{t(($) => $.relations.blocked_by)}</span>
+          <span className="ml-auto shrink-0 font-normal tabular-nums">
+            {t(($) => $.waiting.marker_ended, { finished: ended, total: RELATION_BLOCKERS.length })}
+          </span>
+        </div>
+        {RELATION_BLOCKERS.map((blocker) => (
+          <div key={blocker.identifier} className="flex h-7 items-center gap-1.5 px-1.5 text-label">
+            {blocker.ended ? (
+              <CircleCheck className="size-3.5 shrink-0 text-success" />
+            ) : (
+              <CircleDot className="size-3.5 shrink-0 text-warning" />
+            )}
+            <span className="shrink-0 text-muted-foreground">{blocker.identifier}</span>
+            <TextLine words={blocker.title} />
+          </div>
+        ))}
+        <p className="px-1.5 pt-1 text-caption text-muted-foreground">
+          {t(($) => $.waiting.marker_auto_start, { name: SAMPLE.agent })}
+        </p>
+      </div>
+    </Surface>
+  );
+}
+
 export const THEMES_HERO: WhatsNewHero = { ground: "orange", Art: ThemesArt };
 export const ENVIRONMENTS_HERO: WhatsNewHero = { ground: "ice", Art: EnvironmentsArt };
 export const ANNOTATIONS_HERO: WhatsNewHero = { ground: "lime", Art: AnnotationsArt };
@@ -816,3 +861,4 @@ export const INBOX_TABS_HERO: WhatsNewHero = { ground: "lime", Art: InboxTabsArt
 export const PROJECT_OVERVIEW_HERO: WhatsNewHero = { ground: "ice", Art: ProjectOverviewArt };
 export const INBOX_TRIAGE_HERO: WhatsNewHero = { ground: "orange", Art: InboxTriageArt };
 export const QUICK_SWITCH_HERO: WhatsNewHero = { ground: "lime", Art: QuickSwitchArt };
+export const ISSUE_RELATIONS_HERO: WhatsNewHero = { ground: "ice", Art: IssueRelationsArt };

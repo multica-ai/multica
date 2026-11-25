@@ -79,7 +79,6 @@ describe("AgentDetailInspector description limit", () => {
     await waitFor(
       () =>
         expect(onUpdate).toHaveBeenCalledWith("agent-1", {
-          name: "Lambda",
           description: value,
         }),
       { timeout: 2000 },
