@@ -49,7 +49,7 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 <Callout type="warning">
 **这是特殊情况下的选项，不要因为方便就选它。** `local_directory` 是给那些"不得不这么开发"的人准备的，典型是一个 checkout 就几十 GB 的游戏项目，不可能每来一次运行就重新 clone 一份。
 
-如果你的目录只是一个能正常 clone 的普通 git 仓库，请用 `github_repo`：它默认走 worktree 模式，同一个仓库上的运行可以同时进行，数量不受限制。`local_directory` 默认同一时间只进行一次运行；如果这个目录本身是 git 仓库，可以主动开启 worktree 模式恢复并发（见[运行如何共享这个目录](#运行如何共享这个目录)）。拿不准时，先对照页首的两种资源。
+如果你的目录只是一个能正常 clone 的普通 git 仓库，请用 `github_repo`：它默认走 worktree 模式，同一个仓库上的运行可以同时进行，数量不受限制。新关联的 `local_directory` 在那台电脑的运行时支持隔离时默认使用 worktree 模式，同一目录上的运行可以同时进行；不支持时同一时间只进行一次运行。不是 git 仓库的目录请显式选择 `in_place`（见[运行如何共享这个目录](#运行如何共享这个目录)）。拿不准时，先对照页首的两种资源。
 </Callout>
 
 <Steps>
@@ -82,7 +82,7 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 每个项目在同一台守护进程上最多关联一个本地目录。团队中的不同电脑可以分别为同一个项目关联各自的目录。
 
 <Callout type="warning">
-在默认的 `in_place` 模式下，本地目录不是隔离环境：智能体会直接看到并修改当前分支和未提交的文件，Multica 也不会自动切换分支、stash、commit、push 或创建 PR。worktree 模式不一样，见下面的[运行如何共享这个目录](#运行如何共享这个目录)。
+在 `in_place` 模式下，本地目录不是隔离环境：智能体会直接看到并修改当前分支和未提交的文件，Multica 也不会自动切换分支、stash、commit、push 或创建 PR。worktree 模式不一样，见下面的[运行如何共享这个目录](#运行如何共享这个目录)。
 </Callout>
 
 <span id="task-如何共享这个目录" />
@@ -90,12 +90,12 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 
 ## 运行如何共享这个目录
 
-本地目录有两种执行模式，按资源逐个设置。在资源面板里可以直接切换，CLI 用 `--execution-mode`。Desktop 里这两种模式显示为 **直接修改** 和 **并行运行**；API、CLI 和本页其余部分都使用标识符。
+本地目录有两种执行模式，按资源逐个设置。新关联的资源在那台电脑的运行时声明支持隔离时默认使用 `worktree`，否则使用 `in_place`。在资源面板里可以直接切换，CLI 用 `--execution-mode`。Desktop 里这两种模式显示为 **直接修改** 和 **并行运行**；API、CLI 和本页其余部分都使用标识符。
 
 <LocalDirModeDemo />
 
-<Tabs items={["in_place（直接修改，默认）", "worktree（并行运行）"]}>
-<Tab value="in_place（直接修改，默认）" id="in-place">
+<Tabs items={["in_place（直接修改）", "worktree（并行运行）"]}>
+<Tab value="in_place（直接修改）" id="in-place">
 
 智能体直接在你的目录里工作，同一时间只进行一次运行。两次运行使用同一个真实目录时，后到的运行进入 `waiting_local_directory`，等前一次释放目录后继续。两个路径经不同符号链接指向同一目录时，同样串行。
 
@@ -221,13 +221,14 @@ multica project resource add <project-id> \
  --url https://github.com/multica-ai/multica \
  --ref main
 
-# 关联指定守护进程上的本地目录
+# 关联指定守护进程上的本地目录。不带 --execution-mode 时，支持隔离的电脑默认使用 worktree；
+# 传 --execution-mode in_place 让运行直接修改这个目录。非 git 目录在这类电脑上需要显式指定 in_place。
 multica project resource add <project-id> \
  --type local_directory \
  --local-path /absolute/path/to/repo \
  --daemon-id <daemon-id>
 
-# 关联一个本地 git 仓库，并让每次运行在各自的 worktree 中并发执行
+# 关联一个本地 git 仓库，并显式指定并行运行
 multica project resource add <project-id> \
  --type local_directory \
  --local-path /absolute/path/to/repo \

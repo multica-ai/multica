@@ -520,6 +520,14 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		}
 		normalizedRefs[i] = ref
 		if res.ResourceType == "local_directory" {
+			// Same default as the standalone create path, resolved before the
+			// gate below reads the mode off this ref.
+			ref, err = defaultLocalDirectoryExecutionMode(r.Context(), h.Queries, wsUUID, res.ResourceType, ref)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to check runtime capabilities")
+				return
+			}
+			normalizedRefs[i] = ref
 			var ld localDirectoryRef
 			if err := json.Unmarshal(ref, &ld); err != nil {
 				writeError(w, http.StatusBadRequest, "resources["+strconv.Itoa(i)+"]: "+err.Error())
