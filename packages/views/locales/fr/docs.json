@@ -81,6 +81,7 @@
     "resolved": "Résolus {{count}}",
     "close": "Fermer les commentaires",
     "quote_missing": "Le texte commenté a été modifié",
+    "quote_changed": "Texte modifié",
     "reply_placeholder": "Répondre, ou mentionner avec @…",
     "new_placeholder": "Ajouter un commentaire, ou @ pour mentionner quelqu'un...",
     "submit": "Commenter",
