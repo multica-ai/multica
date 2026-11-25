@@ -21,7 +21,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { AgentTranscriptDialog, StepBody } from "../../common/task-transcript/agent-transcript-dialog";
 import { buildTimeline } from "../../common/task-transcript/build-timeline";
-import { buildSteps, groupSteps, isCallStep, isGroupRow, type TraceRow } from "../../common/task-transcript/build-steps";
+import { buildSteps, groupSteps, isCallStep, isGroupRow, type TraceCallStep, type TraceRow, type TraceStep } from "../../common/task-transcript/build-steps";
 import { traceEventSummary, traceToolArgSummary } from "../../common/task-transcript/trace-event-presenter";
 import { redactSecrets } from "../../common/task-transcript/redact";
 import { runOutputKey } from "../utils/timeline-row-content";
@@ -84,40 +84,51 @@ export const REPLY_PENDING_CALL_NOTICE_MS = 60_000;
 function ReplyRunPendingCall({ task }: { task: AgentTask }) {
   const { t } = useT("issues");
   const [now, setNow] = useState(Date.now);
-  const [confirmStop, setConfirmStop] = useState(false);
-  const cancel = useCancelIssueRun(task.issue_id);
   const { data } = useTaskMessages(task.id, true);
   const items = useMemo(() => buildTimeline(data ?? []), [data]);
   const formatText = useTraceIssueLabels(useWorkspaceId(), task.issue_id, items, true);
-  const pending = useMemo(() => {
-    const steps = buildSteps(items);
-    for (let i = steps.length - 1; i >= 0; i--) {
-      const step = steps[i]!;
-      if (isCallStep(step) && !step.result) return step;
-    }
-    return undefined;
-  }, [items]);
+  const pending = useMemo(() => lastPendingCall(buildSteps(items)), [items]);
+  const waiting = pending !== undefined;
+  // Only a pending call has a wait to count; a settled run stays idle.
   useEffect(() => {
+    if (!waiting) return;
+    setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, []);
+  }, [waiting]);
   const startedAt = pending?.startedAt ? Date.parse(pending.startedAt) : Number.NaN;
   if (!pending || !Number.isFinite(startedAt) || now - startedAt < REPLY_PENDING_CALL_NOTICE_MS) return null;
   const step = redactSecrets(traceToolArgSummary(pending.call?.input, { formatText }) || pending.tool);
   const text = t(($) => $.inline_run.reply_pending_call, { step });
-  const stopLabel = cancel.isPending || cancel.isSuccess ? t(($) => $.inline_run.stopping) : t(($) => $.inline_run.stop);
   return <div className="flex min-h-7 min-w-0 items-center gap-2 py-1 text-label text-muted-foreground" data-reply-pending-call={task.id}>
     <Loader2 aria-hidden className="size-3.5 shrink-0 text-info motion-safe:animate-spin motion-safe:[animation-duration:900ms]" />
     <span role="status" className="min-w-0 flex-1 truncate" title={text}>{text}</span>
     <span className="shrink-0 whitespace-nowrap tabular-nums">{formatDuration(pending.startedAt!, now)}</span>
-    <IconButton size="icon-sm" variant="ghost" className="text-muted-foreground"
-      label={stopLabel} disabled={cancel.isPending || cancel.isSuccess}
-      onClick={() => setConfirmStop(true)}>
-      {cancel.isPending || cancel.isSuccess ? <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" /> : <Square className="size-3.5" />}
-    </IconButton>
-    <TerminateTaskConfirmDialog open={confirmStop} onOpenChange={setConfirmStop} showRunningNote
-      onConfirm={() => void cancel.mutateAsync(task.id).catch(() => toast.error(t(($) => $.execution_log.cancel_failed)))} />
+    <RunStopControl task={task} />
   </div>;
+}
+
+/** The call a live run is blocked on: the latest one still without a result. */
+function lastPendingCall(steps: TraceStep[]): TraceCallStep | undefined {
+  return steps.findLast((step): step is TraceCallStep => isCallStep(step) && !step.result);
+}
+
+/** Stop button and its confirmation, shared by the live run row and the reply's pending-call line. */
+function RunStopControl({ task }: { task: AgentTask }) {
+  const { t } = useT("issues");
+  const [confirmStop, setConfirmStop] = useState(false);
+  const cancel = useCancelIssueRun(task.issue_id);
+  const stopping = cancel.isPending || cancel.isSuccess;
+  return <>
+    <IconButton size="icon-sm" variant="ghost" className="text-muted-foreground"
+      label={stopping ? t(($) => $.inline_run.stopping) : t(($) => $.inline_run.stop)} disabled={stopping}
+      onClick={() => setConfirmStop(true)}>
+      {stopping ? <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" /> : <Square className="size-3.5" />}
+    </IconButton>
+    <TerminateTaskConfirmDialog open={confirmStop} onOpenChange={setConfirmStop}
+      showRunningNote={task.status !== "queued"}
+      onConfirm={() => cancel.mutate(task.id, { onError: () => toast.error(t(($) => $.execution_log.cancel_failed)) })} />
+  </>;
 }
 
 export function InlineCommentRun({ run, className, viewState, showIdentity = false, presentation = "inline", replyTo, replacesFailureNotice = false }: {
@@ -152,11 +163,9 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const localViewState = useInlineCommentRunState();
   const state = viewState ?? localViewState;
   const { expanded, setExpanded, fullLogOpen, setFullLogOpen, openFullLog, logFromKeyboard } = state;
-  const [confirmStop, setConfirmStop] = useState(false);
   const [now, setNow] = useState(Date.now);
   const [visibleCount, setVisibleCount] = useState(12);
   const animationVisibility = useRunAnimationVisibility<HTMLDivElement>();
-  const cancel = useCancelIssueRun(task.issue_id);
   const retry = useRetryIssueRun(task.issue_id);
   const regionId = useId();
   // Keep one disclosure button mounted across queued, live, and historical states.
@@ -184,7 +193,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
     ? formatDuration(start, end) : "";
   const output = !hasReply ? commentRunOutput(task) : null;
   const latest = steps.findLast((step) => step.kind !== "text" || step.item.content?.trim());
-  const pendingCall = steps.findLast((step) => isCallStep(step) && !step.result);
+  const pendingCall = lastPendingCall(steps);
   const current = pendingCall ?? latest;
   // Keep the last activity visible after a tool returns, until new progress arrives.
   const activitySummary = current && isCallStep(current)
@@ -200,21 +209,13 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const showProgress = active && !hasReply;
   const activityLabel = t(($) => $.inline_run.view_activity);
   const stepLabel = steps.length > 0 ? t(($) => $.inline_run.steps, { count: steps.length }) : "";
-  const stopLabel = cancel.isPending || cancel.isSuccess ? t(($) => $.inline_run.stopping) : t(($) => $.inline_run.stop);
   const transcript = fullLogOpen && <AgentTranscriptDialog open onOpenChange={setFullLogOpen}
     task={task} items={items} agentName={name} isLive={active} finalFocus={logFromKeyboard}
     contentState={isPending ? <p role="status" className="text-body text-muted-foreground">{t(($) => $.inline_run.loading)}</p>
       : isError ? <div role="alert" className="text-body text-destructive">{t(($) => $.inline_run.load_failed)}
         <button className="ml-2 underline" type="button" onClick={() => void refetch()}>{t(($) => $.inline_run.try_again)}</button>
       </div> : undefined} />;
-  const stopButton = active && <IconButton size="icon-sm" variant="ghost" className="text-muted-foreground"
-    label={stopLabel} disabled={cancel.isPending || cancel.isSuccess}
-    onClick={() => setConfirmStop(true)}>
-    {cancel.isPending || cancel.isSuccess ? <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" /> : <Square className="size-3.5" />}
-  </IconButton>;
-  const stopDialog = <TerminateTaskConfirmDialog open={confirmStop} onOpenChange={setConfirmStop}
-    showRunningNote={task.status !== "queued"}
-    onConfirm={() => cancel.mutate(task.id, { onError: () => toast.error(t(($) => $.execution_log.cancel_failed)) })} />;
+  const stopButton = active && <RunStopControl task={task} />;
   const fullLogButton = <Tooltip>
     <TooltipTrigger render={<Button type="button" size="icon-sm" variant="ghost"
       className="text-muted-foreground aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:hover:bg-muted/50"
@@ -310,7 +311,6 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
         </div>}
       </div>
       {transcript}
-      {stopDialog}
     </section>
   );
 }
