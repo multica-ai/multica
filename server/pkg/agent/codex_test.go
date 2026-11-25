@@ -1878,6 +1878,14 @@ func TestCodexDeliverableOutputExcludesNarration(t *testing.T) {
 		rawToolUse     = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"commandExecution","id":"c1","command":"tcpdump -i any -c 5"}}}`
 		rawToolResult  = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"commandExecution","id":"c1","status":"completed","aggregatedOutput":"5 packets captured"}}}`
 		legacyToolUse  = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"exec_command_begin","call_id":"c1","command":"tcpdump -i any -c 5"}}}`
+		rawAnswer      = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"m2","text":"The retry loop is the cause."}}}`
+		rawSearchStart = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"webSearch","id":"ws1","query":"codex release notes"}}}`
+		rawSearchEnd   = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"webSearch","id":"ws1","query":"codex release notes"}}}`
+		legacyToolEnd  = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"exec_command_end","call_id":"c1","output":"5 packets captured"}}}`
+		legacyFinal    = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"agent_message","message":"The retry loop is the cause.","phase":"final_answer"}}}`
+		legacyMCPBegin = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"mcp_tool_call_begin","call_id":"mcp1","invocation":{"server":"docs","tool":"search"}}}}`
+		legacyMCPEnd   = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"mcp_tool_call_end","call_id":"mcp1","invocation":{"server":"docs","tool":"search"}}}}`
+		legacyWebBegin = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"web_search_begin","call_id":"ws1"}}}`
 		narration      = "Let me check the logs."
 		wantDeliverabl = "The retry loop is the cause."
 	)
@@ -1986,6 +1994,63 @@ func TestCodexDeliverableOutputExcludesNarration(t *testing.T) {
 			wantStreamed: []string{narration, wantDeliverabl},
 		},
 		{
+			// Codex reports a background command's end when the process exits,
+			// which can be after the answer the model wrote while it ran. The
+			// end of a call whose start was seen must not retract that answer.
+			name:         "a started command ending after the answer keeps the answer",
+			protocol:     "raw",
+			lines:        []string{rawToolUse, rawAnswer, rawToolResult},
+			want:         wantDeliverabl,
+			wantStreamed: []string{wantDeliverabl},
+		},
+		{
+			name:         "a legacy started command ending after the answer keeps the answer",
+			protocol:     "legacy",
+			lines:        []string{legacyFirst, legacyToolUse, legacySecond, legacyToolEnd},
+			want:         wantDeliverabl,
+			wantStreamed: []string{narration, wantDeliverabl},
+		},
+		{
+			// An end without an observed start is the only sign that a tool
+			// ran after the text, so it still clears.
+			name:         "a tool end without its start still clears narration",
+			protocol:     "raw",
+			lines:        []string{rawNarration, rawToolResult},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			// Codex copies the phase onto the legacy event.
+			name:         "a legacy labelled final answer survives later tool use",
+			protocol:     "legacy",
+			lines:        []string{legacyFinal, legacyToolUse, legacyToolEnd},
+			want:         wantDeliverabl,
+			wantStreamed: []string{wantDeliverabl},
+		},
+		{
+			// Web search never reaches the transcript, but it is still a tool
+			// call after the narration.
+			name:         "phase-less narration followed by a web search yields no output",
+			protocol:     "raw",
+			lines:        []string{rawNarration, rawSearchStart, rawSearchEnd},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			name:         "legacy narration followed by an MCP call yields no output",
+			protocol:     "legacy",
+			lines:        []string{legacyFirst, legacyMCPBegin, legacyMCPEnd},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
+			name:         "legacy narration followed by a web search yields no output",
+			protocol:     "legacy",
+			lines:        []string{legacyFirst, legacyWebBegin},
+			want:         "",
+			wantStreamed: []string{narration},
+		},
+		{
 			// An explicitly labelled final answer survives later tool use: the
 			// app-server said this is the deliverable, and a post-answer tool
 			// call (e.g. posting the comment itself) does not retract that.
@@ -2007,15 +2072,13 @@ func TestCodexDeliverableOutputExcludesNarration(t *testing.T) {
 			var output codexOutputSelection
 			var streamed []string
 			c.onMessage = func(msg Message) {
-				switch msg.Type {
-				case MessageText:
+				if msg.Type == MessageText {
 					streamed = append(streamed, msg.Content)
-				case MessageToolUse, MessageToolResult:
-					output.observeToolActivity()
 				}
 			}
 			c.onAgentMessage = output.observeAgentMessage
 			c.onFinalAnswer = output.observeFinalAnswer
+			c.onToolActivity = output.observeToolActivity
 
 			for _, line := range tc.lines {
 				c.handleLine(line)
@@ -4536,6 +4599,44 @@ func TestCodexExecuteTrailingToolCallYieldsNoOutput(t *testing.T) {
 	}
 	if strings.Join(transcript, "") != narration {
 		t.Fatalf("transcript text = %q, want the narration preserved", transcript)
+	}
+}
+
+// TestCodexExecuteBackgroundCommandEndKeepsAnswer replays a background
+// command: Codex reports its end when the process exits, after the phase-less
+// answer the model wrote while it ran. The end of a call whose start was seen
+// is not a new tool call, so the answer stays the run's result.
+func TestCodexExecuteBackgroundCommandEndKeepsAnswer(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	const answer = "The capture finished; port 8080 is the only listener."
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-bg"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-bg","turn":{"id":"turn-bg"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thr-bg","turnId":"turn-bg","item":{"type":"commandExecution","id":"cmd-bg","command":"tcpdump -i any -c 5"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-bg","turnId":"turn-bg","item":{"type":"agentMessage","id":"msg-1","text":"`+answer+`"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-bg","turnId":"turn-bg","item":{"type":"commandExecution","id":"cmd-bg","status":"completed","aggregatedOutput":"5 packets captured"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-bg","turn":{"id":"turn-bg","status":"completed"}}}'`+"\n")
+
+	result, _ := executeFakeCodexCollectingMessages(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 5 * time.Second,
+	}, 10*time.Second)
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, want completed (error=%q)", result.Status, result.Error)
+	}
+	if result.Output != answer {
+		t.Fatalf("Result.Output = %q, want the answer written before the background command ended", result.Output)
 	}
 }
 
