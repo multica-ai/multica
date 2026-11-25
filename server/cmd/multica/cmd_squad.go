@@ -178,10 +178,13 @@ func runSquadCreate(cmd *cobra.Command, _ []string) error {
 
 // ── Update ──────────────────────────────────────────────────────────────────
 
-var squadUpdateCmd = &cobra.Command{
-	Use:   "update <squad-id>",
-	Short: "Update a squad",
-	Long: `Update a squad's fields. Only the flags you pass are changed.
+var squadUpdateCmd = newSquadUpdateCmd()
+
+func newSquadUpdateCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "update <squad-id>",
+		Short: "Update a squad",
+		Long: `Update a squad's fields. Only the flags you pass are changed.
 
 --handoff-mode decides who picks the next step after a member finishes:
   leader  every member reply returns to the leader (default)
@@ -191,8 +194,20 @@ var squadUpdateCmd = &cobra.Command{
           member run, or a reply that names no next owner)
 
 Changing the handoff mode requires permission to manage the squad.`,
-	Args: exactArgs(1),
-	RunE: runSquadUpdate,
+		Args: exactArgs(1),
+		RunE: runSquadUpdate,
+	}
+	cmd.Flags().String("name", "", "New name")
+	cmd.Flags().String("description", "", "New description")
+	cmd.Flags().String("instructions", "", "New instructions")
+	cmd.Flags().String("instructions-file", "", "Read instructions verbatim from a UTF-8 file. The path must be inside the current working directory unless --allow-external-file is set.")
+	cmd.MarkFlagsMutuallyExclusive("instructions", "instructions-file")
+	cmd.Flags().Bool("allow-external-file", false, "Allow --instructions-file to read a path outside the current working directory")
+	cmd.Flags().String("leader", "", "New leader agent (name or ID)")
+	cmd.Flags().String("avatar-url", "", "New avatar URL")
+	cmd.Flags().String("handoff-mode", "", "How members hand off: leader or direct")
+	cmd.Flags().String("output", "json", "Output format: table or json")
+	return cmd
 }
 
 func runSquadUpdate(cmd *cobra.Command, args []string) error {
@@ -223,6 +238,22 @@ func runSquadUpdate(cmd *cobra.Command, args []string) error {
 	if cmd.Flags().Changed("instructions") {
 		v, _ := cmd.Flags().GetString("instructions")
 		body["instructions"] = v
+	}
+	if cmd.Flags().Changed("instructions-file") {
+		path, _ := cmd.Flags().GetString("instructions-file")
+		// Read verbatim rather than through resolveTextFlag, which trims the
+		// trailing newline; the containment guard is the shared one.
+		if err := ensureFileFlagWithinWorkdir(cmd, "instructions-file", "instructions", path); err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read --instructions-file: %w", err)
+		}
+		if len(data) == 0 {
+			return fmt.Errorf("--instructions-file is empty")
+		}
+		body["instructions"] = string(data)
 	}
 	if cmd.Flags().Changed("leader") {
 		v, _ := cmd.Flags().GetString("leader")
@@ -623,15 +654,6 @@ func init() {
 	squadCreateCmd.Flags().String("description", "", "Squad description")
 	squadCreateCmd.Flags().String("leader", "", "Leader agent (name or ID) — required")
 	squadCreateCmd.Flags().String("output", "json", "Output format: table or json")
-
-	// update
-	squadUpdateCmd.Flags().String("name", "", "New name")
-	squadUpdateCmd.Flags().String("description", "", "New description")
-	squadUpdateCmd.Flags().String("instructions", "", "New instructions")
-	squadUpdateCmd.Flags().String("leader", "", "New leader agent (name or ID)")
-	squadUpdateCmd.Flags().String("avatar-url", "", "New avatar URL")
-	squadUpdateCmd.Flags().String("handoff-mode", "", "How members hand off: leader or direct")
-	squadUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// briefs
 	squadBriefsCmd.Flags().String("agent", "", "Only this agent member (name or ID)")
