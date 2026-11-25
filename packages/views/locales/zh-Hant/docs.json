@@ -81,6 +81,7 @@
     "resolved": "已解決 {{count}}",
     "close": "關閉評論",
     "quote_missing": "原文已修改，找不到劃線位置",
+    "quote_changed": "原文已修改",
     "reply_placeholder": "回覆，或 @ 某人…",
     "new_placeholder": "新增評論，或 @ 提及某人...",
     "submit": "評論",

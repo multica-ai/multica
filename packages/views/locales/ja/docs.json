@@ -81,6 +81,7 @@
     "resolved": "解決済み {{count}}",
     "close": "コメントを閉じる",
     "quote_missing": "コメントされたテキストが変更されました",
+    "quote_changed": "本文が変更済み",
     "reply_placeholder": "返信、または @ でメンション…",
     "new_placeholder": "コメントを入力、または @ でメンション...",
     "submit": "コメント",
