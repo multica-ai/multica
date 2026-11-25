@@ -4995,6 +4995,10 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if req.Updates.Title != nil && *req.Updates.Title == "" {
+		writeError(w, http.StatusBadRequest, "title is required")
+		return
+	}
 
 	// Detect which fields in "updates" were explicitly set (including null).
 	var rawTop map[string]json.RawMessage

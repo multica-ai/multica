@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 // Create rejects an empty name or title; update must reject it too, so an
@@ -20,6 +22,21 @@ func TestUpdateRejectsEmptyNameOrTitle(t *testing.T) {
 		testHandler.UpdateIssue(w, withURLParam(newRequest(http.MethodPut, "/api/issues/"+id, map[string]any{"title": ""}), "id", id))
 		assertEmptyNameRejected(t, w, "title is required")
 		assertStoredText(t, `SELECT title FROM issue WHERE id = $1`, id, "keep this issue title")
+	})
+
+	t.Run("issue batch", func(t *testing.T) {
+		firstID := dbfx.Issue(t, "first batch issue title")
+		secondID := dbfx.Issue(t, "second batch issue title")
+		req := newRequest(http.MethodPost, "/api/issues/batch-update", map[string]any{
+			"issue_ids": []string{firstID, secondID},
+			"updates":   map[string]any{"title": "", "priority": "high"},
+		})
+		response := testutil.Call(t, testHandler.BatchUpdateIssues, req)
+		assertEmptyNameRejected(t, response.ResponseRecorder, "title is required")
+		assertStoredText(t, `SELECT title FROM issue WHERE id = $1`, firstID, "first batch issue title")
+		assertStoredText(t, `SELECT title FROM issue WHERE id = $1`, secondID, "second batch issue title")
+		assertStoredText(t, `SELECT priority FROM issue WHERE id = $1`, firstID, "none")
+		assertStoredText(t, `SELECT priority FROM issue WHERE id = $1`, secondID, "none")
 	})
 
 	t.Run("project", func(t *testing.T) {
