@@ -142,8 +142,9 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 			}, true
 		}
 		if defaultCmd == "codex" && cmd == defaultCmd {
-			// Codex Desktop bundles its CLI inside the macOS app instead of
-			// installing it onto PATH.
+			// Codex Desktop bundles its CLI inside the macOS app, or on
+			// Windows inside the MSIX package / per-user runtime directory,
+			// instead of installing it onto PATH (#11467).
 			for _, p := range codexDesktopAppBundlePaths() {
 				if executableCandidate(p) {
 					return AgentEntry{
