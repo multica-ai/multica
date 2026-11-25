@@ -16,6 +16,7 @@
     "./common/cli-install-command": "./common/cli-install-command.tsx",
     "./common/context-menu-scope": "./common/context-menu-scope.tsx",
     "./common/menu-primitives": "./common/menu-primitives.ts",
+    "./common/motion-provider": "./common/motion-provider.tsx",
     "./common/shortcut-keycaps": "./common/shortcut-keycaps.tsx",
     "./editor": "./editor/index.ts",
     "./editor/schema": "./editor/schema/index.ts",

@@ -1,0 +1,15 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "test": {
+      // styles/reduced-motion.test.ts reads the stylesheets of the packages
+      // and apps that load this one.
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/views/**/*.css",
+        "$TURBO_ROOT$/apps/desktop/src/**/*.css",
+        "$TURBO_ROOT$/apps/web/**/*.css"
+      ]
+    }
+  }
+}

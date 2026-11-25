@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS uq_comment_idempotency_receipt_key;

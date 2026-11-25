@@ -28,7 +28,7 @@ Un répertoire local ne s'applique qu'au daemon auquel il est lié. Lorsque le d
 
 ## Ajouter un dépôt GitHub
 
-Ouvrez le projet et cliquez sur **Ajouter un dépôt** dans **Ressources → Dépôts**. Recherchez un dépôt rattaché à l'espace de travail ou collez une URL Git. Les dépôts de l'espace de travail se gèrent dans **Paramètres → Code** ; une fois GitHub connecté, la même page propose **Choisir depuis GitHub** pour importer les dépôts auxquels la GitHub App a accès.
+Ouvrez le projet, cliquez sur **Ajouter** dans **Ressources**, puis choisissez **Dépôt GitHub**. Recherchez un dépôt rattaché à l'espace de travail ou collez une URL Git. Les dépôts de l'espace de travail se gèrent dans **Paramètres → Code** ; une fois GitHub connecté, la même page propose **Choisir depuis GitHub** pour importer les dépôts auxquels la GitHub App a accès.
 
 Coller une URL de branche GitHub (`https://github.com/owner/repo/tree/branch`) renseigne séparément l’URL du dépôt et la branche de départ. Les noms de branche encodés dans l’URL sont décodés ; les paramètres de requête et les ancres de page sont exclus. Vérifiez la branche de départ avant d’ajouter le dépôt. Modifier l’URL du dépôt efface la branche de départ précédente, sauf si la nouvelle URL en précise une.
 
@@ -60,12 +60,12 @@ Assurez-vous que le daemon local de l'application de bureau est en ligne.
 </Step>
 <Step>
 
-Pour un projet existant, ouvrez **Ressources → Dossiers locaux** et suivez les étapes ci-dessous. Lors de la création d'un projet, utilisez plutôt l'onglet **Dossier local** ; le dossier et son mode sont enregistrés avec le projet.
+Pour un projet existant, suivez les étapes ci-dessous depuis **Ressources** sur la page du projet. Lors de la création d'un projet, utilisez plutôt l'onglet **Dossier local** ; le dossier et son mode sont enregistrés avec le projet.
 
 </Step>
 <Step>
 
-Sous votre ordinateur, cliquez sur **Choisir un dossier...**, puis sélectionnez le dossier à utiliser.
+Cliquez sur **Ajouter**, choisissez **Dossier local...**, puis sélectionnez le dossier à utiliser. La boîte de dialogue qui s'ouvre affiche le chemin ; cliquez sur **Changer...** pour en choisir un autre. Cette option est indisponible dans un navigateur, quand le daemon local est hors ligne ou quand cet ordinateur a déjà un dossier pour le projet.
 
 </Step>
 <Step>
@@ -97,6 +97,8 @@ Un répertoire local dispose de deux modes d'exécution, définis par ressource 
 <Tab value="in_place (Direct, par défaut)" id="in-place">
 
 L'agent travaille directement dans votre répertoire, et les exécutions ont lieu une à la fois. Lorsque deux exécutions utilisent le même répertoire réel, la seconde passe en `waiting_local_directory` et reprend une fois que la première a libéré le répertoire. Deux chemins qui mènent au même répertoire via des liens symboliques différents sont sérialisés de la même manière.
+
+Si le chemin lié est introuvable au démarrage d’une exécution en attente, celle-ci signale que le dossier du projet n’existe plus. Restaurez le dossier ou mettez à jour le chemin de la ressource avant de réessayer.
 
 L'attente ne modifie pas le répertoire et n'occupe pas de slot d'exécution du daemon. Une exécution en attente peut être annulée ; sinon, elle reprend le démarrage lorsque le répertoire et la capacité d'exécution sont disponibles.
 

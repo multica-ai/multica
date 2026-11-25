@@ -76,8 +76,11 @@ type MergeConflict struct {
 
 // Result statuses.
 const (
-	StatusOK         = "ok"
-	StatusConflict   = "conflict"
+	StatusOK       = "ok"
+	StatusConflict = "conflict"
+	// StatusStale: a restore named a revision that is no longer the stored
+	// one once pending edits are saved. Nothing was written.
+	StatusStale      = "stale"
 	StatusEditFailed = "edit_failed"
 	StatusGone       = "gone"
 	// StatusTooLarge: the write would make the doc larger than the API stores.
@@ -94,6 +97,8 @@ type Result struct {
 	Merged    bool            `json:"merged"`
 	Conflicts []MergeConflict `json:"conflicts,omitempty"`
 	Failure   *EditFailure    `json:"failure,omitempty"`
+	// Loaded: a flushed document is open in the service.
+	Loaded bool `json:"loaded,omitempty"`
 }
 
 // Write, Edit and Flush address a live document by its service name:
@@ -107,10 +112,50 @@ func (c *Client) Edit(ctx context.Context, document string, req EditRequest) (Re
 }
 
 // Flush persists pending editor changes of a loaded document, so a read sees
-// what people have typed. Documents nobody has open return immediately.
-func (c *Client) Flush(ctx context.Context, document string) error {
-	_, err := c.call(ctx, document, "flush", struct{}{})
-	return err
+// what people have typed. Documents nobody has open return immediately;
+// loaded reports whether it was open.
+func (c *Client) Flush(ctx context.Context, document string) (loaded bool, err error) {
+	result, err := c.call(ctx, document, "flush", struct{}{})
+	return result.Loaded, err
+}
+
+// RevalidateRequest names the editors a revocation may affect. WorkspaceID
+// is required; the other fields narrow it down.
+type RevalidateRequest struct {
+	WorkspaceID string `json:"workspace_id"`
+	// Actor limits it to one person's or agent's connections; Name is unused.
+	Actor *Actor `json:"actor,omitempty"`
+	// Document limits it to one document (DocumentName, IssueDocumentName).
+	Document string `json:"document,omitempty"`
+	// Type limits it to documents of a type: "doc" or "issue".
+	Type string `json:"type,omitempty"`
+}
+
+// Revalidate asks the editors connected under req for fresh tickets, which
+// the API mints only for those still allowed in; the rest are disconnected.
+// Call it after revoking access to a workspace, project or issue.
+func (c *Client) Revalidate(ctx context.Context, req RevalidateRequest) error {
+	raw, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+	endpoint := c.baseURL.JoinPath("internal", "revalidate")
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(raw))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set(SecretHeader, c.secret)
+	resp, err := c.http.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return fmt.Errorf("revalidate returned %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+	}
+	return nil
 }
 
 func (c *Client) call(ctx context.Context, document, op string, body any) (Result, error) {

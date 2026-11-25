@@ -1183,17 +1183,23 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		// Mentions first: a member who gets a `mentioned` row for this comment
 		// does not also get its `new_comment`, so one comment is one
 		// notification. A member who muted mentions still gets the comment.
+		mentions := parseMentions(commentContent)
 		mentioned := map[string]bool{}
-		if mentions := parseMentions(commentContent); len(mentions) > 0 {
+		if len(mentions) > 0 {
 			skip := map[string]bool{e.ActorID: true}
 			mentioned = notifyMentionedMembers(bus, queries, e, mentions, issueID, issueTitle, issueStatus,
 				issueTitle, commentContent, skip, commentDetails)
 		}
 
+		newCommentDetails := commentDetails
+		if authorType == "agent" && isSquadHandoff(ctx, queries, e.WorkspaceID, commentID, mentions) {
+			newCommentDetails = withDetail(commentDetails, inbox.SquadHandoffDetail, "true")
+		}
+
 		notifySubscribers(ctx, queries, bus, issueID, issueStatus, e.WorkspaceID, e,
 			mentioned, "new_comment", "info",
 			issueTitle, commentContent,
-			commentDetails)
+			newCommentDetails)
 
 		// A quick action posts its prompt as the member's own comment, so
 		// running one counts the same as replying.
@@ -1277,7 +1283,11 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		)
 	})
 
-	// task:completed — no inbox notification (completion is visible from status change)
+	// task:completed — no notification of its own; a squad leader run that
+	// ends its squad's chain delivers the handoff that woke it
+	bus.Subscribe(protocol.EventTaskCompleted, func(e events.Event) {
+		deliverSquadResult(ctx, queries, bus, e)
+	})
 
 	// task:failed — notify all subscribers except the agent
 	bus.Subscribe(protocol.EventTaskFailed, func(e events.Event) {

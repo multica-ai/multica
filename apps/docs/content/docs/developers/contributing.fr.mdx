@@ -131,6 +131,8 @@ Pour exécuter une commande CLI depuis les sources :
 make cli ARGS="issue list"
 ```
 
+Pour renouveler un environnement encore enregistré, même s’il a expiré, lancez `make up ARGS="--ttl 48"` depuis sa copie de travail. Ses données sont conservées et sa durée de vie est prolongée de 48 heures à compter de la commande.
+
 ## Modifier des fonctionnalités frontend
 
 Placez les fonctionnalités nécessaires à la fois à Web et à Desktop selon leur responsabilité :

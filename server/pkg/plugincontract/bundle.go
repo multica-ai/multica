@@ -292,6 +292,21 @@ func (v *surfaceModuleSyntaxVisitor) Enter(node js.INode) js.IVisitor {
 		if node.Op == js.AwaitToken && v.functionDepth == 0 {
 			v.moduleOnly = true
 		}
+	case *js.ForOfStmt:
+		if node.Await && v.functionDepth == 0 {
+			v.moduleOnly = true
+		}
+	case *js.MethodDecl:
+		js.Walk(v, &node.Name.PropertyName)
+		v.functionDepth++
+		js.Walk(v, &node.Params)
+		js.Walk(v, &node.Body)
+		v.functionDepth--
+		return nil
+	case *js.Field:
+		js.Walk(v, &node.Name.PropertyName)
+		js.Walk(v, node.Init)
+		return nil
 	case *js.FuncDecl, *js.ArrowFunc:
 		v.functionDepth++
 	}

@@ -111,11 +111,27 @@ func (h *Handler) ListProjectActivity(w http.ResponseWriter, r *http.Request) {
 		resp.NextCursor = &cursor
 		rows = rows[:limit]
 	}
+	// Seeing this project does not mean seeing every issue its activity names:
+	// a duplicate mark points at an issue that may sit in another private
+	// project.
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	actions := make([]string, len(rows))
+	details := make([][]byte, len(rows))
+	for i, row := range rows {
+		actions[i], details[i] = row.Action, row.Details
+	}
+	if err := h.redactHiddenActivityRefs(r, hidden, actions, details); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load project activity")
+		return
+	}
 	prefix := h.getIssuePrefix(ctx, wsUUID)
-	for _, row := range rows {
-		details := json.RawMessage(row.Details)
-		if len(details) == 0 {
-			details = json.RawMessage("{}")
+	for i, row := range rows {
+		raw := json.RawMessage(details[i])
+		if len(raw) == 0 {
+			raw = json.RawMessage("{}")
 		}
 		resp.Entries = append(resp.Entries, ProjectActivityEntry{
 			ID:              uuidToString(row.ID),
@@ -126,7 +142,7 @@ func (h *Handler) ListProjectActivity(w http.ResponseWriter, r *http.Request) {
 			ActorType:       row.ActorType.String,
 			ActorID:         uuidToString(row.ActorID),
 			Action:          row.Action,
-			Details:         details,
+			Details:         raw,
 			CreatedAt:       timestampToString(row.CreatedAt),
 		})
 	}

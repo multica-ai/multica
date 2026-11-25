@@ -66,7 +66,7 @@ export function InboxSnoozeMenu({
   snoozed?: boolean;
   onSnooze: (until: Date) => void;
   onUnsnooze?: () => void;
-  side?: "bottom" | "right";
+  side?: "top" | "bottom" | "right";
   align?: "start" | "end";
 }) {
   const [picking, setPicking] = useState(false);

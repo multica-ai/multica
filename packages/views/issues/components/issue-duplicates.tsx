@@ -1,6 +1,6 @@
 "use client";
 
-import { IssueSidebarSectionHeader } from "./issue-sidebar-section";
+import { IssueSidebarCollapsible, IssueSidebarSectionHeader } from "./issue-sidebar-section";
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -102,7 +102,7 @@ export function IssueDuplicatesSection({ issueId }: { issueId: string }) {
   return (
     <div>
       <IssueSidebarSectionHeader title={t(($) => $.duplicates.section_title)} open={open} onOpenChange={setOpen} count={duplicates.length} />
-      {open && (
+      <IssueSidebarCollapsible open={open}>
         <div className="px-2">
           {duplicates.map((duplicate) => (
             <AppLink
@@ -121,7 +121,7 @@ export function IssueDuplicatesSection({ issueId }: { issueId: string }) {
             </AppLink>
           ))}
         </div>
-      )}
+      </IssueSidebarCollapsible>
     </div>
   );
 }
