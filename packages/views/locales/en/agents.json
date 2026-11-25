@@ -969,7 +969,7 @@
     "kind_error": "Error",
     "context_chip_title": "How much of the model's context window this run occupies",
     "context_history_title": "Context history",
-    "context_history_loading": "Loading the run's history…",
+    "context_history_loading": "Loading the run's history...",
     "group_calls_one": "{{count}} call",
     "group_calls_other": "{{count}} calls",
     "step_running": "Still running",

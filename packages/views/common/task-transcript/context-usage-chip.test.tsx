@@ -117,7 +117,7 @@ describe("ContextUsageChip", () => {
 
     await userEvent.click(screen.getByRole("button"));
     expect(onOpenHistory).toHaveBeenCalledTimes(1);
-    expect(await screen.findByText("Loading the run's history…")).toBeInTheDocument();
+    expect(await screen.findByText("Loading the run's history...")).toBeInTheDocument();
   });
 });
 
