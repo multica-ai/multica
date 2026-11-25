@@ -245,3 +245,34 @@ describe("buildActivityMap", () => {
     expect(summarizeActivityWindow(a, 30).totalRuns).toBe(0);
   });
 });
+
+
+describe("aggregate duration", () => {
+  it("weights daily duration totals by measured runs, independent of task pages", () => {
+    const result = deriveAgentActivity([
+      { ...bucket("a", 0, 200), duration_ms: 12000000, duration_count: 200 },
+      { ...bucket("a", 1, 1), duration_ms: 600000, duration_count: 1 },
+    ], "2026-01-01", NOW);
+    expect(result.avgDurationMs).toBe(Math.round(12600000 / 201));
+  });
+
+  // completed_at > now() - 30 days can span 31 calendar days. The chart keeps
+  // 30 local-day slots, but the average must cover the whole server window.
+  it("averages the full rolling window, including the oldest day the chart drops", () => {
+    const now = Date.parse("2026-09-27T12:00:00Z");
+    const run = (bucketAt: string, durationMs: number): AgentActivityBucket => ({
+      agent_id: "a", bucket_at: bucketAt, task_count: 1, completed_count: 1,
+      failed_count: 0, cancelled_count: 0, duration_ms: durationMs, duration_count: 1,
+    });
+    const result = deriveAgentActivity([
+      run("2026-08-28T00:00:00Z", 61 * 60_000),
+      run("2026-09-27T00:00:00Z", 60_000),
+    ], "2026-01-01T00:00:00Z", now);
+    expect(result.buckets.reduce((sum, b) => sum + b.total, 0)).toBe(1);
+    expect(result.avgDurationMs).toBe(31 * 60_000);
+  });
+
+  it("does not estimate duration when the server omits aggregates", () => {
+    expect(deriveAgentActivity([bucket("a", 0, 5)], "2026-01-01", NOW).avgDurationMs).toBe(0);
+  });
+});

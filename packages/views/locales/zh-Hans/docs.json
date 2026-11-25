@@ -1,0 +1,103 @@
+{
+  "untitled": "未命名",
+  "version_number": "v{{number}}",
+  "kb": "知识库",
+  "actions": {
+    "new": "新建",
+    "new_doc": "新建文档",
+    "new_folder": "新建文件夹",
+    "rename": "重命名",
+    "move": "移动到...",
+    "delete": "删除",
+    "cancel": "取消",
+    "history": "历史",
+    "more": "更多",
+    "copy_link": "复制链接"
+  },
+  "errors": {
+    "move": "移动失败",
+    "delete": "删除失败",
+    "save": "保存失败"
+  },
+  "move": {
+    "title": "移动\"{{title}}\"",
+    "destination": "目标位置",
+    "root": "知识库（顶层）",
+    "current": "当前",
+    "confirm": "移动"
+  },
+  "delete": {
+    "title": "删除这篇文档？",
+    "description": "\"{{title}}\"及其全部历史都会被删除，无法撤销。",
+    "confirm": "删除",
+    "folder_title": "删除文件夹？",
+    "folder_description": "确定删除\"{{title}}\"？仅支持删除空文件夹，此操作无法撤销。"
+  },
+  "tree": {
+    "more": "{{title}} 的更多操作",
+    "empty": "还没有文档",
+    "new_doc_in": "在\"{{title}}\"中新建文档"
+  },
+  "editor": {
+    "placeholder": "开始写，或输入 / 调出命令...",
+    "title_label": "标题",
+    "saving": "保存中...",
+    "saved": "已保存",
+    "save_failed": "保存失败 · 重试",
+    "retry": "重试",
+    "conflict": "{{name}} 已更新文档。草稿已保留，刷新后继续编辑。",
+    "reload": "刷新最新版本",
+    "draft": "保留的草稿",
+    "unsaved_changes": "未保存的修改",
+    "live": "实时协作",
+    "reconnecting": "正在重新连接...",
+    "connecting": "正在连接...",
+    "title_save_failed": "标题未保存",
+    "editing_now": "正在编辑"
+  },
+  "history": {
+    "title": "历史",
+    "current": "当前",
+    "restore": "恢复此版本",
+    "loading": "加载中...",
+    "from_discussion": "来自评论：{{quote}}"
+  },
+  "not_found": {
+    "title": "未找到该文档",
+    "description": "它可能已被删除。"
+  },
+  "edited": "编辑于 {{time}}",
+  "view_history": "查看历史",
+  "outline": "大纲",
+  "link_copied": "链接已复制",
+  "unavailable": {
+    "title": "知识库暂未开放",
+    "description": "当前工作区尚未开启知识库。"
+  },
+  "comments": {
+    "title": "评论",
+    "add": "评论",
+    "open": "未解决 {{count}}",
+    "resolved": "已解决 {{count}}",
+    "close": "关闭评论",
+    "quote_missing": "原文已修改，找不到划线位置",
+    "reply_placeholder": "回复，或 @ 某人...",
+    "new_placeholder": "写下评论，@ 提及某人...",
+    "submit": "评论",
+    "reply": "回复",
+    "cancel": "取消",
+    "resolve": "解决",
+    "reopen": "重新打开",
+    "delete": "删除评论",
+    "resolved_by": "{{name}} 已解决",
+    "replies_other": "{{count}} 条回复",
+    "empty_open": "没有未解决的评论。选中文字后点\"评论\"即可发起。",
+    "empty_resolved": "没有已解决的评论。",
+    "errors": {
+      "save": "评论发送失败",
+      "delete": "评论删除失败",
+      "resolve": "无法更新评论状态"
+    },
+    "run_waiting_retry": "等待重试"
+  }
+}

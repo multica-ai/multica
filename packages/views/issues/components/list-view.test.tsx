@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, act, fireEvent } from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -9,6 +9,7 @@ import { ListView } from "./list-view";
 import { IssueContextMenuProvider } from "../actions";
 import { ScrollRestorationProvider, type ScrollRestorationAdapter } from "../../platform";
 import type { IssueStatusPagination } from "../surface/use-issue-status-branches";
+import type { IssueCreateDefaults } from "../surface/types";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
 
@@ -74,6 +75,7 @@ const mockViewState: {
   listCollapsedStatuses: IssueStatus[];
   toggleListCollapsed: (status: IssueStatus) => void;
   showStatus: (status: IssueStatus) => void;
+  hiddenStatuses: IssueStatus[];
 } = {
   sortBy: "position",
   sortDirection: "asc",
@@ -87,6 +89,7 @@ const mockViewState: {
         : [...mockViewState.listCollapsedStatuses, status];
   }),
   showStatus: vi.fn(),
+  hiddenStatuses: ["cancelled"],
 };
 
 vi.mock("@multica/core/issues/stores/view-store-context", () => ({
@@ -208,10 +211,10 @@ const PAGINATION = {
 function renderListView(
   issues: Issue[] = ISSUES,
   visibleStatuses: IssueStatus[] = ["todo"],
-  hiddenStatuses: IssueStatus[] = [],
   onMoveIssue = vi.fn(),
   statuses: IssueStatusEntry[] = [],
   scrollAdapter: ScrollRestorationAdapter = { get: () => undefined },
+  onCreateIssue?: (defaults: IssueCreateDefaults) => void,
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
@@ -225,9 +228,9 @@ function renderListView(
             <ListView
               issues={issues}
               visibleStatuses={visibleStatuses}
-              hiddenStatuses={hiddenStatuses}
               statusPagination={PAGINATION}
               onMoveIssue={onMoveIssue}
+              onCreateIssue={onCreateIssue}
             />
           </ScrollRestorationProvider>
         </IssueContextMenuProvider>
@@ -274,7 +277,7 @@ describe("ListView status header collapse", () => {
       return { top: 2400, height: 600 };
     });
     try {
-      renderListView(issues, ["todo"], [], vi.fn(), [], { get });
+      renderListView(issues, ["todo"], vi.fn(), [], { get });
       expect(get).toHaveBeenCalledWith("list");
       expect(seedRows).toBe(30);
       expect(spacerHeight).toBe("calc(70 * var(--issue-row-height))");
@@ -282,17 +285,6 @@ describe("ListView status header collapse", () => {
     } finally {
       styles.remove();
     }
-  });
-
-  it("shows hidden statuses with a recovery action", async () => {
-    const user = userEvent.setup();
-    renderListView(ISSUES, ["todo"], ["cancelled"]);
-
-    expect(screen.getByText("Hidden columns")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Show column" }));
-    await user.click(await screen.findByRole("menuitem", { name: "Show column" }));
-
-    expect(mockViewState.showStatus).toHaveBeenCalledWith("cancelled");
   });
 
   it("explains why same-status reordering is ignored under an automatic sort", () => {
@@ -344,6 +336,16 @@ describe("ListView status header collapse", () => {
 
     expect(mockViewState.listCollapsedStatuses).toEqual(["todo"]);
   });
+
+  it("names the header's add issue button after its tooltip", async () => {
+    const user = userEvent.setup();
+    const onCreateIssue = vi.fn();
+    renderListView(ISSUES, ["todo"], vi.fn(), [], { get: () => undefined }, onCreateIssue);
+
+    await user.click(screen.getByRole("button", { name: enIssues.list.add_issue_tooltip }));
+
+    expect(onCreateIssue).toHaveBeenCalledWith({ status: "todo" });
+  });
 });
 
 // Custom statuses remain visible in independent sections.
@@ -356,7 +358,7 @@ describe("ListView custom statuses", () => {
     } as IssueStatusEntry;
     mockViewState.sortBy = "position";
     mockViewState.listCollapsedStatuses = [];
-    renderListView(ISSUES, ["todo", "awaiting_response"], [], onMove, [status]);
+    renderListView(ISSUES, ["todo", "awaiting_response"], onMove, [status]);
     act(() => lastOnDragStart({ active: { id: "issue-1" } }));
     act(() => lastOnDragOver({
       active: { id: "issue-1" },

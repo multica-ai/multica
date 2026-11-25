@@ -18,8 +18,25 @@ func testLogger() *slog.Logger {
 	return slog.Default()
 }
 
+// clearGitConfigEnv unsets env-scoped git config inherited from the host
+// (daemon-managed tasks start with GIT_CONFIG_COUNT already set) and restores
+// it when the test ends.
+func clearGitConfigEnv(t *testing.T) {
+	t.Helper()
+	for _, kv := range os.Environ() {
+		key, _, _ := strings.Cut(kv, "=")
+		if key == "GIT_CONFIG_COUNT" ||
+			strings.HasPrefix(key, "GIT_CONFIG_KEY_") ||
+			strings.HasPrefix(key, "GIT_CONFIG_VALUE_") {
+			t.Setenv(key, "")
+			os.Unsetenv(key)
+		}
+	}
+}
+
 func TestGitEnv(t *testing.T) {
-	t.Parallel()
+	// Not parallel: clearGitConfigEnv mutates process-wide env.
+	clearGitConfigEnv(t)
 	env := gitEnv()
 
 	// Must contain GIT_TERMINAL_PROMPT=0.
@@ -32,6 +49,19 @@ func TestGitEnv(t *testing.T) {
 	}
 	if !found {
 		t.Error("gitEnv() must include GIT_TERMINAL_PROMPT=0")
+	}
+
+	// Must contain GCM_INTERACTIVE=never so the Windows Git Credential
+	// Manager cannot spray login dialogs from background sync.
+	found = false
+	for _, entry := range env {
+		if entry == "GCM_INTERACTIVE=never" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("gitEnv() must include GCM_INTERACTIVE=never")
 	}
 
 	// Must contain HOME from the current environment.
@@ -58,6 +88,9 @@ func TestGitEnv(t *testing.T) {
 			}
 		}
 		return false
+	}
+	if !envHas(env, "GIT_CONFIG_COUNT=1") {
+		t.Error("gitEnv() must include GIT_CONFIG_COUNT=1 (no pre-existing config)")
 	}
 	if !envHas(env, "GIT_CONFIG_KEY_0=safe.directory") {
 		t.Error("gitEnv() must include GIT_CONFIG_KEY_0=safe.directory (no pre-existing config)")
@@ -365,7 +398,7 @@ func TestCreateWorktreeContextCancelsRunningGitProcessTree(t *testing.T) {
 	}
 }
 
-func TestBareDirName(t *testing.T) {
+func TestLegacyBareDirName(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		input, want string
@@ -384,8 +417,8 @@ func TestBareDirName(t *testing.T) {
 		{"", "repo.git"},
 	}
 	for _, tt := range tests {
-		if got := bareDirName(tt.input); got != tt.want {
-			t.Errorf("bareDirName(%q) = %q, want %q", tt.input, got, tt.want)
+		if got := legacyBareDirName(tt.input); got != tt.want {
+			t.Errorf("legacyBareDirName(%q) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
 }
@@ -759,6 +792,72 @@ func TestCreateWorktree(t *testing.T) {
 	}
 	if got := strings.TrimSpace(string(out)); got != result.BranchName {
 		t.Errorf("expected branch %q, got %q", result.BranchName, got)
+	}
+}
+
+func TestCreateWorktreeReportsFailedFetch(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name     string
+		isolated bool
+	}{
+		{name: "shared worktree"},
+		{name: "isolated checkout", isolated: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			sourceRepo := createTestRepo(t)
+			cache := New(t.TempDir(), testLogger())
+			if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+				t.Fatalf("sync failed: %v", err)
+			}
+			params := WorktreeParams{
+				WorkspaceID:         "ws-1",
+				RepoURL:             sourceRepo,
+				WorkDir:             t.TempDir(),
+				AgentName:           "QA",
+				TaskID:              "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+				IsolatedGitMetadata: tc.isolated,
+			}
+
+			result, err := cache.CreateWorktree(params)
+			if err != nil {
+				t.Fatalf("CreateWorktree failed: %v", err)
+			}
+			if result.FetchError != "" {
+				t.Fatalf("FetchError = %q after a successful fetch, want empty", result.FetchError)
+			}
+			if got := isIsolatedCheckout(result.Path); got != tc.isolated {
+				t.Fatalf("isolated checkout = %v, want %v", got, tc.isolated)
+			}
+
+			if err := os.RemoveAll(sourceRepo); err != nil {
+				t.Fatalf("remove origin: %v", err)
+			}
+
+			// The reused checkout and a new one for another task both come from the
+			// cached copy and must say so instead of reading as current.
+			result, err = cache.CreateWorktree(params)
+			if err != nil {
+				t.Fatalf("CreateWorktree on the existing checkout failed: %v", err)
+			}
+			if !strings.Contains(result.FetchError, "git fetch") {
+				t.Fatalf("existing checkout FetchError = %q, want the git fetch error", result.FetchError)
+			}
+
+			params.WorkDir = t.TempDir()
+			params.TaskID = "c3d4e5f6-a7b8-9012-cdef-123456789012"
+			result, err = cache.CreateWorktree(params)
+			if err != nil {
+				t.Fatalf("CreateWorktree with an unreachable origin failed: %v", err)
+			}
+			if !strings.Contains(result.FetchError, "git fetch") {
+				t.Fatalf("new checkout FetchError = %q, want the git fetch error", result.FetchError)
+			}
+			if _, err := os.Stat(result.Path); err != nil {
+				t.Fatalf("checkout from the cached copy is missing: %v", err)
+			}
+		})
 	}
 }
 
@@ -1200,56 +1299,17 @@ func TestCreateWorktreeExcludesOpenCodeSkills(t *testing.T) {
 		t.Fatalf("CreateWorktree failed: %v", err)
 	}
 
-	agentEnv := map[string]string{}
-	if err := ConfigureAgentGitExcludes(t.TempDir(), agentEnv); err != nil {
-		t.Fatalf("ConfigureAgentGitExcludes: %v", err)
-	}
-	for _, path := range []string{".opencode/config.json", ".codeartsdoer/settings.json"} {
-		if !gitCheckIgnored(t, result.Path, agentEnv, path) {
-			t.Errorf("agent Git does not ignore %s", path)
-		}
-		if gitCheckIgnored(t, result.Path, nil, path) {
-			t.Errorf("user Git unexpectedly ignores %s", path)
-		}
-	}
-	if gitCheckIgnored(t, result.Path, agentEnv, ".config/opencode/settings.json") {
-		t.Fatal("stale .config/opencode pattern is ignored")
-	}
-	if err := os.MkdirAll(filepath.Join(result.Path, ".opencode"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(result.Path, ".opencode", "config.json"), []byte("{}"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	add := exec.Command("git", "-C", result.Path, "add", "-A")
-	add.Env = append(os.Environ(), envEntries(agentEnv)...)
-	if out, err := add.CombinedOutput(); err != nil {
-		t.Fatalf("agent git add -A: %s: %v", out, err)
-	}
-	staged := exec.Command("git", "-C", result.Path, "diff", "--cached", "--name-only")
-	if out, err := staged.CombinedOutput(); err != nil || len(out) != 0 {
-		t.Fatalf("runtime file was staged: %q, %v", out, err)
-	}
-
-	sibling, err := cache.CreateWorktree(WorktreeParams{
-		WorkspaceID: "ws-1", RepoURL: sourceRepo, WorkDir: t.TempDir(),
-		AgentName: "Other", TaskID: "sibling-exclude-test",
-	})
-	if err != nil {
-		t.Fatalf("create sibling worktree: %v", err)
-	}
-	if gitCheckIgnored(t, sibling.Path, nil, ".opencode/config.json") {
-		t.Fatal("agent exclude leaked to sibling worktree")
-	}
+	assertCheckoutIgnored(t, result.Path, true, ".opencode/skills/example", ".codeartsdoer/skills/example")
+	assertCheckoutIgnored(t, result.Path, false, ".config/opencode/example")
 }
 
 // TestCreateWorktreeExcludesAgentSidecars is the regression guard for
 // PR #5224's review feedback: once the daemon started writing
 // .codebuddy/skills/ and CODEBUDDY.md into the task workdir (instead of
 // reusing Claude's .claude/CLAUDE.md, which were already excluded), the
-// repo-cache worktree needed the new CodeBuddy sidecar paths in the agent's
-// effective Git excludes — otherwise they show up in `git status` and risk
-// being committed by the agent.
+// repo-cache worktree needed the new CodeBuddy sidecar paths added to
+// the effective excludes — otherwise these daemon-injected files show up in
+// `git status` and risk being committed by the agent.
 func TestCreateWorktreeExcludesAgentSidecars(t *testing.T) {
 	t.Parallel()
 	sourceRepo := createTestRepo(t)
@@ -1272,21 +1332,13 @@ func TestCreateWorktreeExcludesAgentSidecars(t *testing.T) {
 		t.Fatalf("CreateWorktree failed: %v", err)
 	}
 
-	agentEnv := map[string]string{}
-	if err := ConfigureAgentGitExcludes(t.TempDir(), agentEnv); err != nil {
-		t.Fatalf("ConfigureAgentGitExcludes: %v", err)
-	}
-	for _, path := range []string{".codebuddy/skills/a.md", "CODEBUDDY.md", ".pi/config.json", ".omp/config.json"} {
-		if !gitCheckIgnored(t, result.Path, agentEnv, path) {
-			t.Errorf("agent Git does not ignore %s", path)
-		}
-	}
+	assertCheckoutIgnored(t, result.Path, true, ".codebuddy/skills/example", "CODEBUDDY.md", ".pi", ".omp")
 }
 
 // TestCreateWorktreeDoesNotExcludeReasonixProjectConfig guards the layering
 // that makes a `reasonix.toml` exclude wrong. The daemon writes that file at
 // the WorkDir, and a managed checkout is a directory *inside* the WorkDir, so
-// this exclude list — which applies to the agent's Git subprocesses —
+// the checkout's exclude list
 // could never hide the daemon's copy. All it would do is make a project config
 // an agent legitimately creates inside the repository invisible to git status
 // for every provider.
@@ -1316,33 +1368,18 @@ func TestCreateWorktreeDoesNotExcludeReasonixProjectConfig(t *testing.T) {
 	if filepath.Dir(result.Path) != workDir {
 		t.Fatalf("checkout %q is not a child of the work dir %q", result.Path, workDir)
 	}
-	agentEnv := map[string]string{}
-	if err := ConfigureAgentGitExcludes(t.TempDir(), agentEnv); err != nil {
-		t.Fatalf("ConfigureAgentGitExcludes: %v", err)
-	}
-
-	configPath := filepath.Join(result.Path, "reasonix.toml")
-	if err := os.WriteFile(configPath, []byte("[permissions]\n"), 0o644); err != nil {
-		t.Fatalf("write project config: %v", err)
-	}
-	// git check-ignore exits 1 when the path is NOT ignored — the outcome this
-	// test wants, so the agent can still commit the file it wrote.
-	if gitCheckIgnored(t, result.Path, agentEnv, "reasonix.toml") {
-		t.Fatal("git ignores a repository reasonix.toml created inside the checkout")
-	}
+	assertCheckoutIgnored(t, result.Path, false, "reasonix.toml")
 }
 
-func gitCheckIgnored(t *testing.T, worktreePath string, agentEnv map[string]string, path string) bool {
+func assertCheckoutIgnored(t *testing.T, checkout string, want bool, paths ...string) {
 	t.Helper()
-	cmd := exec.Command("git", "-C", worktreePath, "check-ignore", "-q", path)
-	cmd.Env = append(os.Environ(), envEntries(agentEnv)...)
-	if err := cmd.Run(); err != nil {
-		if exit, ok := err.(*exec.ExitError); ok && exit.ExitCode() == 1 {
-			return false
+	for _, path := range paths {
+		out, err := runGitCombinedOutput("-C", checkout, "check-ignore", "--quiet", "--", path)
+		var exitErr *exec.ExitError
+		if want && err != nil || !want && !(errors.As(err, &exitErr) && exitErr.ExitCode() == 1) {
+			t.Fatalf("check-ignore %s in %s, want ignored=%v, got %v (%s)", path, checkout, want, err, out)
 		}
-		t.Fatalf("git check-ignore %s in %s: %v", path, worktreePath, err)
 	}
-	return true
 }
 
 func TestCreateWorktreeNotCached(t *testing.T) {
@@ -1680,7 +1717,7 @@ func TestEnsureRemoteTrackingLayoutMigratesLegacyCache(t *testing.T) {
 
 // TestCreateWorktreePathCollisionDoesNotLeakBranch verifies the secondary bug
 // fix: when the worktree path already exists as a non-worktree (e.g. a plain
-// directory), createWorktree must fail cleanly without leaking a branch into
+// directory), createWorktreeContext must fail cleanly without leaking a branch into
 // the bare repo. Previously the "already exists" retry logic would
 // misclassify path collisions as branch collisions and create a second
 // timestamp-suffixed branch before hitting the same path error.
@@ -1724,6 +1761,160 @@ func TestCreateWorktreePathCollisionDoesNotLeakBranch(t *testing.T) {
 	}
 	if leaked := strings.TrimSpace(string(out)); leaked != "" {
 		t.Errorf("branch leaked into bare repo after path-collision failure:\n%s", leaked)
+	}
+}
+
+func worktreeRegistration(t *testing.T, worktreePath string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+	if err != nil {
+		t.Fatalf("read .git file: %v", err)
+	}
+	return strings.TrimSpace(strings.TrimPrefix(string(data), "gitdir:"))
+}
+
+// A checkout whose registration git dropped, and later gave to another
+// checkout with the same directory name, makes `git status` read the other
+// checkout's index. CreateWorktree must replace it instead of failing on every
+// retry, and must leave the other checkout working.
+func TestCreateWorktreeReplacesCheckoutWhoseRegistrationWasReused(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	checkout := func(workDir, taskID string) (*WorktreeResult, error) {
+		return cache.CreateWorktree(WorktreeParams{
+			WorkspaceID: "ws-1",
+			RepoURL:     sourceRepo,
+			WorkDir:     workDir,
+			AgentName:   "agent",
+			TaskID:      taskID,
+		})
+	}
+
+	orphanWorkDir := t.TempDir()
+	orphan, err := checkout(orphanWorkDir, "a1111111-0000-0000-0000-00000000000a")
+	if err != nil {
+		t.Fatalf("first checkout failed: %v", err)
+	}
+	registration := worktreeRegistration(t, orphan.Path)
+	if err := os.RemoveAll(registration); err != nil {
+		t.Fatal(err)
+	}
+	other, err := checkout(t.TempDir(), "b2222222-0000-0000-0000-00000000000b")
+	if err != nil {
+		t.Fatalf("other checkout failed: %v", err)
+	}
+	if got := worktreeRegistration(t, other.Path); got != registration {
+		t.Fatalf("git did not reuse the registration: got %s, want %s", got, registration)
+	}
+
+	result, err := checkout(orphanWorkDir, "c3333333-0000-0000-0000-00000000000c")
+	if err != nil {
+		t.Fatalf("checkout over the orphaned tree failed: %v", err)
+	}
+	if got := currentBranchName(t, result.Path); got != result.BranchName {
+		t.Errorf("replaced checkout is on %q, want %q", got, result.BranchName)
+	}
+	if got := currentBranchName(t, other.Path); got != other.BranchName {
+		t.Errorf("other checkout is on %q, want %q", got, other.BranchName)
+	}
+	moved, err := filepath.Glob(orphan.Path + ".orphaned-*")
+	if err != nil || len(moved) != 1 {
+		t.Fatalf("orphaned tree not moved aside: %v, %v", moved, err)
+	}
+	if _, err := os.Stat(filepath.Join(moved[0], ".git")); !os.IsNotExist(err) {
+		t.Errorf("moved-aside tree still has a .git file pointing at the reused registration: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(moved[0], ".git.orphaned")); err != nil {
+		t.Errorf("moved-aside tree lost its .git contents: %v", err)
+	}
+}
+
+// Two repos with the same basename have separate bare caches and locks, so a
+// checkout from one can land on the path the other just failed to create.
+// Cleanup for one cache must not delete a tree registered in the other.
+func TestRemovePartialWorktreeKeepsCheckoutOfAnotherCache(t *testing.T) {
+	t.Parallel()
+	repoA, repoB := createTestRepo(t), createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: repoA}, {URL: repoB}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	other, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     repoB,
+		WorkDir:     t.TempDir(),
+		AgentName:   "agent",
+		TaskID:      "e5555555-0000-0000-0000-00000000000e",
+	})
+	if err != nil {
+		t.Fatalf("checkout failed: %v", err)
+	}
+
+	removePartialWorktree(cache.Lookup("ws-1", repoA), other.Path)
+
+	if got := currentBranchName(t, other.Path); got != other.BranchName {
+		t.Errorf("other cache's checkout is on %q, want %q", got, other.BranchName)
+	}
+}
+
+// A `git worktree add` cancelled before it returns must not leave its tree or
+// registration behind; the next checkout then starts clean. The slow
+// post-checkout hook runs after git has written both, so this covers cleanup
+// after a cancelled add rather than a half-written tree.
+func TestCreateWorktreeContextRemovesPartialCheckoutWhenCancelled(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	barePath := cache.Lookup("ws-1", sourceRepo)
+	hook := filepath.Join(barePath, "hooks", "post-checkout")
+	if err := os.MkdirAll(filepath.Dir(hook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\nsleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	workDir := t.TempDir()
+	params := WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     workDir,
+		AgentName:   "agent",
+		TaskID:      "d4444444-0000-0000-0000-000000000000",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := cache.CreateWorktreeContext(ctx, params); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("CreateWorktreeContext error = %v, want deadline exceeded", err)
+	}
+	worktreePath := filepath.Join(workDir, repoNameFromURL(sourceRepo))
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Fatalf("partial checkout left at %s, stat error = %v", worktreePath, err)
+	}
+	out, err := exec.Command("git", "-C", barePath, "worktree", "list", "--porcelain").Output()
+	if err != nil {
+		t.Fatalf("worktree list failed: %v", err)
+	}
+	if strings.Contains(string(out), worktreePath) {
+		t.Fatalf("registration for the partial checkout survived:\n%s", out)
+	}
+
+	if err := os.Remove(hook); err != nil {
+		t.Fatal(err)
+	}
+	result, err := cache.CreateWorktree(params)
+	if err != nil {
+		t.Fatalf("checkout after cancellation failed: %v", err)
+	}
+	if got := currentBranchName(t, result.Path); got != result.BranchName {
+		t.Errorf("checkout is on %q, want %q", got, result.BranchName)
 	}
 }
 

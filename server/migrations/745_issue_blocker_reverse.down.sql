@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS issue_blocker_reverse;

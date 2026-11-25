@@ -23,7 +23,7 @@ func effectiveServerNames(t *testing.T, provider string, bound []handler.Workspa
 	if err != nil {
 		t.Fatalf("ResolveAgentMcpConfig: %v", err)
 	}
-	merged, err := mergeRuntimeAndAgentMcpConfig(provider, resolved)
+	merged, err := mergeRuntimeAndAgentMcpConfig(provider, "", resolved)
 	if err != nil {
 		t.Fatalf("mergeRuntimeAndAgentMcpConfig: %v", err)
 	}
@@ -43,7 +43,7 @@ func writeOpencodeRuntimeConfig(t *testing.T, servers string) {
 	t.Helper()
 
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("XDG_CONFIG_HOME", "")
 	dir := filepath.Join(home, ".config", "opencode")
 	if err := os.MkdirAll(dir, 0o755); err != nil {

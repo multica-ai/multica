@@ -13,7 +13,7 @@ const builtInStatusLine = "- `multica issue status <id> <status>` — flip statu
 
 // catalogBridgeBullet distinguishes workflow keys from lifecycle categories;
 // it must appear exactly when a catalog is present.
-const catalogBridgeBullet = "- The workflow rules above refer to exact built-in status keys, not categories. Custom statuses share lifecycle semantics only, not built-in automation behavior.\n"
+const catalogBridgeBullet = "- The `in_progress` / `in_review` / `blocked` rules above refer to exact built-in status keys, not categories. Custom statuses share lifecycle semantics only, not built-in automation behavior.\n"
 
 func TestBriefStatusCatalogAbsentUsesBuiltInLine(t *testing.T) {
 	t.Parallel()
@@ -30,6 +30,21 @@ func TestBriefStatusCatalogAbsentUsesBuiltInLine(t *testing.T) {
 	withEmpty.IssueStatuses = []IssueStatusForEnv{}
 	if got := buildMetaSkillContent("claude", withEmpty); got != out {
 		t.Errorf("empty catalog must render byte-identical to absent catalog:\n%s", firstBriefDiff(out, got))
+	}
+}
+
+// TestBriefTeachesDuplicateMark pins the duplicate-mark bullet with and
+// without a status catalog, so agents cancelling a duplicate record the mark.
+func TestBriefTeachesDuplicateMark(t *testing.T) {
+	t.Parallel()
+	base := TaskContextForEnv{IssueID: "issue-1", AgentID: "a-1", AgentName: "Eve"}
+	withCatalog := base
+	withCatalog.IssueStatuses = []IssueStatusForEnv{{Key: "later", Name: "Later", Category: "backlog"}}
+	for name, ctx := range map[string]TaskContextForEnv{"no catalog": base, "catalog": withCatalog} {
+		out := buildMetaSkillContent("claude", ctx)
+		if got := strings.Count(out, duplicateOfCommandLine); got != 1 {
+			t.Errorf("%s: duplicate-mark bullet appears %d times, want 1\n---\n%s", name, got, out)
+		}
 	}
 }
 
@@ -177,6 +192,35 @@ func TestBriefStatusCatalogUnknownCategoriesDisclosed(t *testing.T) {
 		}
 		if !onlyUnknown && !strings.Contains(out, "`qa` (QA \\*bold\\* # Heading — line1 line2 \\[x\\])") {
 			t.Errorf("known status must retain sanitization: %s", out)
+		}
+	}
+}
+
+// TestBriefClosedRulePicksByCategory pins the closed rule after the catalog
+// bridge, which covers only the key rules above it, and keeps category names
+// out of code spans in every status-rule form, since `closed` or `started` as
+// a code token invites a status write the server rejects (MUL-7379).
+func TestBriefClosedRulePicksByCategory(t *testing.T) {
+	t.Parallel()
+	catalog := []IssueStatusForEnv{{Key: "wont_fix", Name: "Won't fix", Category: "closed"}}
+	withCatalog := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "issue-1", IssueStatuses: catalog})
+	bridge := strings.Index(withCatalog, catalogBridgeBullet)
+	closed := strings.Index(withCatalog, issueStatusClosedRule)
+	if bridge < 0 || closed < 0 || bridge > closed {
+		t.Errorf("catalog bridge (at %d) must precede the closed rule (at %d)\n---\n%s", bridge, closed, withCatalog)
+	}
+
+	for name, ctx := range map[string]TaskContextForEnv{
+		"built-in":   {IssueID: "issue-1"},
+		"catalog":    {IssueID: "issue-1", IssueStatuses: catalog},
+		"commands":   {IssueID: "issue-1", HasProjectWorkflow: true},
+		"status map": {IssueID: "issue-1", HasProjectWorkflow: true, ProjectWorkflowStatusMap: true},
+	} {
+		out := buildMetaSkillContent("claude", ctx)
+		for _, category := range []string{"unstarted", "started", "closed"} {
+			if strings.Contains(out, "`"+category+"`") {
+				t.Errorf("%s: brief renders category %q as a code token\n---\n%s", name, category, out)
+			}
 		}
 	}
 }

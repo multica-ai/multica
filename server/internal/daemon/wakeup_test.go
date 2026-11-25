@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -124,6 +125,48 @@ func TestRunTaskWakeupConnectionSignalsDisconnect(t *testing.T) {
 	}
 }
 
+func TestRunTaskWakeupConnectionRoutesTaskSupplementHint(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	sendHint := make(chan struct{})
+	serverDone := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		<-sendHint
+		payload, _ := json.Marshal(protocol.TaskAvailablePayload{RuntimeID: "runtime-1", TaskID: "task-1"})
+		_ = conn.WriteJSON(protocol.Message{Type: protocol.EventDaemonTaskSupplementAvailable, Payload: payload})
+		<-serverDone
+	}))
+	defer srv.Close()
+
+	d := New(Config{ServerBaseURL: srv.URL, HeartbeatInterval: time.Hour}, slog.Default())
+	supplementWakeup, unsubscribe := d.taskSupplementSignals.subscribe("task-1")
+	defer unsubscribe()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := d.runTaskWakeupConnection(ctx, []string{"runtime-1"}, make(chan taskWakeup, 2), make(chan struct{}))
+		errCh <- err
+	}()
+	close(sendHint)
+	select {
+	case <-supplementWakeup:
+	case <-time.After(time.Second):
+		t.Fatal("task supplement hint did not wake its exact task")
+	}
+	close(serverDone)
+	cancel()
+	select {
+	case <-errCh:
+	case <-time.After(time.Second):
+		t.Fatal("websocket reader did not release after cancellation")
+	}
+}
+
 // TestWSHeartbeatFreshnessSuppressesHTTP pins the WS-vs-HTTP coordination:
 // once a runtime acked over WS within the freshness window the HTTP
 // heartbeat loop must skip it to avoid duplicate DB writes.
@@ -151,6 +194,31 @@ func TestWSHeartbeatFreshnessSuppressesHTTP(t *testing.T) {
 	d.clearWSHeartbeatAcks()
 	if d.wsHeartbeatRecentlyAcked("runtime-2") {
 		t.Fatalf("expected clearWSHeartbeatAcks to drop all entries")
+	}
+}
+
+// TestHeartbeatSkipIsSilent pins that the WS-satisfied branch of the per-runtime
+// heartbeat writes nothing to the log. It is the steady state of a healthy
+// daemon, taken once per runtime per interval, so a line here grows daemon.log
+// without bound and keeps an idle daemon writing to disk around the clock.
+func TestHeartbeatSkipIsSilent(t *testing.T) {
+	var logs bytes.Buffer
+	d := New(Config{HeartbeatInterval: 15 * time.Second},
+		slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+
+	d.recordWSHeartbeatAck("runtime-1")
+	if !d.wsHeartbeatRecentlyAcked("runtime-1") {
+		t.Fatalf("expected just-acked runtime to be fresh")
+	}
+
+	// The client is nil on purpose: a logging regression on this path is
+	// caught by the assertion below, while a behavioural regression (the
+	// branch letting the tick fall through to the HTTP call) panics here
+	// instead of quietly passing.
+	d.runHeartbeatTick(context.Background(), "runtime-1")
+
+	if logs.Len() != 0 {
+		t.Fatalf("WS-satisfied heartbeat tick must not log, got: %q", logs.String())
 	}
 }
 

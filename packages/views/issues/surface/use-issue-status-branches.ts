@@ -106,13 +106,15 @@ function rebaseCursorState(
 
 /**
  * Per-status totals, never folded into lifecycle categories. The facet is
- * disjunctive, so narrow it to the selected keys when a status filter is active.
- * Unknown keys wait for catalog refresh instead of inflating another column.
+ * disjunctive, so apply the status filter to it here: keep the selected keys,
+ * or drop them when the filter is negated. Unknown keys wait for catalog
+ * refresh instead of inflating another column.
  */
 function statusCountsFromFacets(
   facets: IssueTableFacetsResponse | undefined,
   catalog: Pick<IssueStatusCatalog, "entryOf" | "isLoaded">,
   selectedStatuses: readonly string[] | undefined,
+  negated: boolean,
 ) {
   const counts = new Map<IssueStatus, number>();
   const selected =
@@ -121,7 +123,7 @@ function statusCountsFromFacets(
       : null;
   const statusFacet = facets?.facets.find((facet) => facet.kind === "status");
   for (const value of statusFacet?.values ?? []) {
-    if (selected && !selected.has(value.key)) continue;
+    if (selected && selected.has(value.key) === negated) continue;
     if (!isBuiltInIssueStatus(value.key) && !catalog.entryOf(value.key)) continue;
     counts.set(value.key, value.count);
   }
@@ -361,9 +363,10 @@ export function useIssueStatusBranches({
     statuses,
   ]);
 
+  const statusesNegated = query.filters.negate?.includes("statuses") ?? false;
   const counts = useMemo(
-    () => statusCountsFromFacets(facets, catalog, query.filters.statuses),
-    [facets, catalog, query.filters.statuses],
+    () => statusCountsFromFacets(facets, catalog, query.filters.statuses, statusesNegated),
+    [facets, catalog, query.filters.statuses, statusesNegated],
   );
   const loadMore = useCallback(
     (status: IssueStatus) => {

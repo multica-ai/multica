@@ -29,6 +29,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { useT } from "@/lib/i18n";
 
 interface Props {
   items: TaskMessagePayload[];
@@ -39,6 +40,7 @@ interface Props {
 
 export function ChatTimeline({ items, isStreaming = false }: Props) {
   const processSteps = items.filter((i) => i.type !== "text");
+  const { t } = useT("chat");
   if (processSteps.length === 0) return null;
 
   return (
@@ -46,15 +48,15 @@ export function ChatTimeline({ items, isStreaming = false }: Props) {
       <CollapsibleTrigger asChild>
         <View
           accessibilityRole="button"
-          accessibilityLabel={`${processSteps.length} step${processSteps.length === 1 ? "" : "s"}`}
+          accessibilityLabel={t("timeline.steps_count", {
+            count: processSteps.length,
+          })}
           className="flex-row items-center gap-1 active:opacity-70"
         >
           <Ionicons name="chevron-forward" size={12} color="#71717a" />
           {isStreaming ? <StreamingDot /> : null}
           <Text className="text-xs text-muted-foreground">
-            {processSteps.length === 1
-              ? "1 step"
-              : `${processSteps.length} steps`}
+            {t("timeline.steps_count", { count: processSteps.length })}
           </Text>
         </View>
       </CollapsibleTrigger>
@@ -124,6 +126,7 @@ function ThinkingRow({ item }: { item: TaskMessagePayload }) {
 
 function ToolCallRow({ item }: { item: TaskMessagePayload }) {
   const summary = getToolSummary(item);
+  const { t } = useT("chat");
   const hasInput = !!item.input && Object.keys(item.input).length > 0;
   // If the call has no expandable input, render a non-interactive row —
   // wrapping a static row in Collapsible adds a wasted tap target.
@@ -132,7 +135,7 @@ function ToolCallRow({ item }: { item: TaskMessagePayload }) {
       <View className="py-0.5 flex-row items-center gap-1.5">
         <View style={{ width: 12 }} />
         <Text className="text-xs font-medium text-foreground">
-          {item.tool ?? "tool"}
+          {item.tool ?? t("timeline.tool")}
         </Text>
         {summary ? (
           <Text
@@ -151,7 +154,7 @@ function ToolCallRow({ item }: { item: TaskMessagePayload }) {
         <View className="py-0.5 flex-row items-center gap-1.5 active:opacity-70">
           <Ionicons name="chevron-forward" size={12} color="#71717a" />
           <Text className="text-xs font-medium text-foreground">
-            {item.tool ?? "tool"}
+            {item.tool ?? t("timeline.tool")}
           </Text>
           {summary ? (
             <Text
@@ -176,9 +179,12 @@ function ToolCallRow({ item }: { item: TaskMessagePayload }) {
 
 function ToolResultRow({ item }: { item: TaskMessagePayload }) {
   const output = item.output ?? "";
+  const { t } = useT("chat");
   if (!output) return null;
   const preview = output.length > 80 ? `${output.slice(0, 80)}…` : output;
-  const prefix = item.tool ? `${item.tool} result: ` : "result: ";
+  const prefix = item.tool
+    ? t("timeline.tool_result_named", { tool: item.tool })
+    : t("timeline.tool_result_unnamed");
   return (
     <Collapsible>
       <CollapsibleTrigger asChild>
@@ -202,7 +208,7 @@ function ToolResultRow({ item }: { item: TaskMessagePayload }) {
         <View className="ml-4 mt-1 rounded-xs bg-muted/40 px-2 py-1.5">
           <Text className="text-xs text-muted-foreground">
             {output.length > 4000
-              ? `${output.slice(0, 4000)}\n…(truncated)`
+              ? `${output.slice(0, 4000)}\n${t("timeline.truncated")}`
               : output}
           </Text>
         </View>
@@ -212,6 +218,7 @@ function ToolResultRow({ item }: { item: TaskMessagePayload }) {
 }
 
 function ErrorRow({ item }: { item: TaskMessagePayload }) {
+  const { t } = useT("chat");
   return (
     <View className="py-0.5 flex-row items-start gap-1.5">
       <Ionicons
@@ -221,7 +228,7 @@ function ErrorRow({ item }: { item: TaskMessagePayload }) {
         style={{ marginTop: 2 }}
       />
       <Text className="flex-1 text-xs text-destructive" numberOfLines={3}>
-        {item.content}
+        {item.content || t("timeline.error")}
       </Text>
     </View>
   );

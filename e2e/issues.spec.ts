@@ -86,7 +86,7 @@ test.describe("Issues", () => {
     await expect(page.getByText(oldTitle)).toBeVisible();
     await expect(page.getByText(updatedTodayTitle)).toBeVisible();
 
-    await page.getByRole("button", { name: /filter/i }).click();
+    await page.getByRole("button", { name: "Filter", exact: true }).click();
     await page.getByRole("menuitem", { name: /^Date\b/ }).hover();
     await page.getByRole("menuitem", { name: "Today" }).click();
 
@@ -121,7 +121,7 @@ test.describe("Issues", () => {
     await expect(page.getByText(todayTitle)).toBeVisible();
     await expect(page.getByText(oldTitle)).toBeVisible();
 
-    await page.getByRole("button", { name: /filter/i }).click();
+    await page.getByRole("button", { name: "Filter", exact: true }).click();
     await page.getByRole("menuitem", { name: /^Date\b/ }).hover();
     const customDateButton = page.getByRole("button", { name: "Custom date or range" });
     await expect(customDateButton).toBeVisible();
@@ -136,7 +136,7 @@ test.describe("Issues", () => {
   test("can create a new issue", async ({ page }) => {
     await preferManualCreateMode(page);
 
-    const newIssueButton = page.getByRole("button", { name: "New Issue" });
+    const newIssueButton = page.getByRole("button", { name: "New Issue" }).first();
     await expect(newIssueButton).toBeVisible();
     await newIssueButton.click();
 
@@ -163,10 +163,8 @@ test.describe("Issues", () => {
     // Reload to see the new issue
     await reloadAppPage(page);
 
-    // Navigate to the issue detail. Use a suffix match so the selector works
-    // whether the href is legacy `/issues/{id}` or URL-refactored
-    // `/{slug}/issues/{id}`.
-    const issueLink = page.locator(`a[href$="/issues/${issue.id}"]`);
+    // Navigate to the issue detail using its canonical identifier link.
+    const issueLink = page.locator(`a[href$="/issues/${issue.identifier}"]`);
     await expect(issueLink).toBeVisible({ timeout: 5000 });
     await issueLink.click();
 
@@ -188,7 +186,7 @@ test.describe("Issues", () => {
   test("can dismiss issue creation", async ({ page }) => {
     await preferManualCreateMode(page);
 
-    await page.getByRole("button", { name: "New Issue" }).click();
+    await page.getByRole("button", { name: "New Issue" }).first().click();
 
     const titleInput = page.getByRole("textbox", { name: "Issue title" });
     await expect(titleInput).toBeVisible();
@@ -196,6 +194,6 @@ test.describe("Issues", () => {
     await page.keyboard.press("Escape");
 
     await expect(titleInput).not.toBeVisible();
-    await expect(page.getByRole("button", { name: "New Issue" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "New Issue" }).first()).toBeVisible();
   });
 });

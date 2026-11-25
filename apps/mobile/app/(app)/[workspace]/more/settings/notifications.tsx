@@ -1,11 +1,10 @@
 /**
- * Notification preferences subscreen. 6 inbox groups + system_notifications
- * toggle, each backed by an optimistic PATCH /api/notification-preferences.
+ * Notification preferences subscreen. Inbox groups and system delivery
+ * settings are backed by an optimistic PATCH /api/notification-preferences.
  *
- * Copy mirrors packages/views/settings/components/notifications-tab.tsx but
- * hardcoded English (mobile has no i18n infra yet). The group labels MUST
- * stay in sync with web — they describe the same server-side semantics,
- * and divergent labels would violate behavioral parity (apps/mobile/CLAUDE.md).
+ * Copy mirrors packages/views/settings/components/notifications-tab.tsx.
+ * Group labels describe the same server-side semantics as web; divergent
+ * labels would violate behavioral parity (apps/mobile/CLAUDE.md).
  */
 import { ActivityIndicator, ScrollView, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
@@ -13,51 +12,64 @@ import type {
   NotificationGroupKey,
   NotificationPreferences,
 } from "@multica/core/types";
+import { notificationPreferenceValue } from "@multica/core/notification-preferences/patch";
 import { Text } from "@/components/ui/text";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { notificationPreferenceOptions } from "@/data/queries/notification-preferences";
 import { useUpdateNotificationPreferences } from "@/data/mutations/notification-preferences";
+import { useT } from "@/lib/i18n";
 
 const INBOX_GROUPS: {
-  key: Exclude<NotificationGroupKey, "system_notifications">;
-  label: string;
-  description?: string;
+  key: Exclude<NotificationGroupKey, "system_notifications" | "chat_replies" | "squad_handoffs">;
+  labelKey: string;
+  descriptionKey?: string;
 }[] = [
   {
     key: "assignments",
-    label: "Assignments",
-    description: "Assigned or unassigned.",
+    labelKey: "groups.assignments",
+    descriptionKey: "groups.assignments_description",
   },
   {
     key: "status_changes",
-    label: "Status changes",
+    labelKey: "groups.status_changes",
   },
   {
     key: "comments",
-    label: "Comments",
-    description: "New comments on issues you're subscribed to.",
+    labelKey: "groups.comments",
+    descriptionKey: "groups.comments_description",
   },
   {
     key: "mentions",
-    label: "Mentions",
-    description: "When someone @mentions you, including @all and @squad.",
+    labelKey: "groups.mentions",
+    descriptionKey: "groups.mentions_description",
+  },
+  {
+    key: "reactions",
+    labelKey: "groups.reactions",
+    descriptionKey: "groups.reactions_description",
   },
   {
     key: "updates",
-    label: "Issue updates",
-    description: "Edits to title, description, labels, priority, or due date.",
+    labelKey: "groups.updates",
+    descriptionKey: "groups.updates_description",
+  },
+  {
+    key: "new_issues",
+    labelKey: "groups.new_issues",
+    descriptionKey: "groups.new_issues_description",
   },
   {
     key: "agent_activity",
-    label: "Agent activity",
-    description: "When an agent run fails.",
+    labelKey: "groups.agent_activity",
+    descriptionKey: "groups.agent_activity_description",
   },
 ];
 
 export default function NotificationsSettingsScreen() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const { t } = useT("settings");
   const { data, isLoading, error } = useQuery(
     notificationPreferenceOptions(wsId),
   );
@@ -66,13 +78,10 @@ export default function NotificationsSettingsScreen() {
   const preferences: NotificationPreferences = data?.preferences ?? {};
 
   const onToggle = (key: NotificationGroupKey, enabled: boolean) => {
-    const next: NotificationPreferences = { ...preferences };
-    if (enabled) {
-      // Default is "all" — omitting the key keeps the object clean.
-      delete next[key];
-    } else {
-      next[key] = "muted";
-    }
+    const next: NotificationPreferences = {
+      ...preferences,
+      [key]: enabled ? "all" : "muted",
+    };
     mutation.mutate(next);
   };
 
@@ -90,7 +99,7 @@ export default function NotificationsSettingsScreen() {
     return (
       <View className="flex-1 items-center justify-center bg-background px-6">
         <Text className="text-sm text-destructive text-center">
-          Failed to load notification preferences.
+          {t("errors.load_failed")}
         </Text>
       </View>
     );
@@ -102,21 +111,22 @@ export default function NotificationsSettingsScreen() {
       contentContainerClassName="px-4 py-4 gap-6"
     >
       <Section
-        title="Inbox notifications"
+        title={t("groups.inbox_notifications")}
       >
         {INBOX_GROUPS.map((group, idx) => {
-          const enabled = preferences[group.key] !== "muted";
+          const enabled =
+            notificationPreferenceValue(preferences, group.key) !== "muted";
           const isLast = idx === INBOX_GROUPS.length - 1;
           return (
             <View key={group.key}>
               <View className="flex-row items-center px-4 py-3 gap-3">
                 <View className="flex-1">
                   <Text className="text-base font-medium text-foreground">
-                    {group.label}
+                    {t(group.labelKey)}
                   </Text>
-                  {group.description ? (
+                  {group.descriptionKey ? (
                     <Text className="text-xs text-muted-foreground mt-0.5">
-                      {group.description}
+                      {t(group.descriptionKey)}
                     </Text>
                   ) : null}
                 </View>
@@ -125,31 +135,61 @@ export default function NotificationsSettingsScreen() {
                   onCheckedChange={(checked) => onToggle(group.key, checked)}
                 />
               </View>
+              {group.key === "comments" && enabled && (
+                <>
+                  <Separator />
+                  <View className="flex-row items-center pl-8 pr-4 py-3 gap-3">
+                    <View className="flex-1">
+                      <Text className="text-base font-medium text-foreground">
+                        {t("groups.squad_handoffs")}
+                      </Text>
+                      <Text className="text-xs text-muted-foreground mt-0.5">
+                        {t("groups.squad_handoffs_description")}
+                      </Text>
+                    </View>
+                    <Switch
+                      checked={
+                        notificationPreferenceValue(preferences, "squad_handoffs") !== "muted"
+                      }
+                      onCheckedChange={(checked) => onToggle("squad_handoffs", checked)}
+                    />
+                  </View>
+                </>
+              )}
               {!isLast ? <Separator /> : null}
             </View>
           );
         })}
       </Section>
 
-      <Section
-        title="System"
-      >
+      <Section title={t("groups.system")}>
         <View className="flex-row items-center px-4 py-3 gap-3">
           <View className="flex-1">
             <Text className="text-base font-medium text-foreground">
-              System notifications
-            </Text>
-            <Text className="text-xs text-muted-foreground mt-0.5">
-              Account changes, security alerts, product updates.
+              {t("groups.system_notifications")}
             </Text>
           </View>
           <Switch
             checked={systemEnabled}
-            onCheckedChange={(checked) =>
-              onToggle("system_notifications", checked)
-            }
+            onCheckedChange={(checked) => onToggle("system_notifications", checked)}
           />
         </View>
+        {systemEnabled && (
+          <>
+            <Separator />
+            <View className="flex-row items-center pl-8 pr-4 py-3 gap-3">
+              <View className="flex-1">
+                <Text className="text-base font-medium text-foreground">
+                  {t("groups.chat_replies")}
+                </Text>
+              </View>
+              <Switch
+                checked={preferences.chat_replies !== "muted"}
+                onCheckedChange={(checked) => onToggle("chat_replies", checked)}
+              />
+            </View>
+          </>
+        )}
       </Section>
     </ScrollView>
   );

@@ -4,6 +4,9 @@ description: Start Multica with Docker Compose, log in, and connect your first c
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+import { Accordion, Accordions } from "fumadocs-ui/components/accordion";
 
 Self-hosting Multica has two parts:
 
@@ -35,7 +38,10 @@ Multica uses Compose v2, invoked as `docker compose`. The legacy `docker-compose
 
 The computer also needs at least one [AI coding tool](/providers) installed and logged in, such as Claude Code, Codex, or Cursor. The Multica CLI is installed in step 5.
 
-## 1. Start Multica
+<Steps>
+<Step>
+
+## Start Multica [#1-start-multica]
 
 On the machine that will run the service:
 
@@ -45,7 +51,10 @@ cd multica
 make selfhost
 ```
 
-On first run, `make selfhost` will:
+Running `make selfhost` again reuses the existing `.env` and volumes; it does not regenerate secrets.
+
+<Accordions>
+<Accordion title="What make selfhost does on first run" id="what-make-selfhost-does">
 
 1. Create `.env` from `.env.example`
 2. Generate a random `JWT_SECRET`, PostgreSQL password, and `MULTICA_VCS_SECRET_KEY` (the encryption key for self-hosted Git integrations)
@@ -53,7 +62,8 @@ On first run, `make selfhost` will:
 4. Create persistent volumes and start the three containers
 5. Wait until the backend starts answering health checks
 
-Running `make selfhost` again reuses the existing `.env` and volumes; it does not regenerate secrets.
+</Accordion>
+</Accordions>
 
 <Callout type="info">
 `make selfhost` pulls published images and does not build the code in your checkout. To test local source, use `make selfhost-build`.
@@ -66,7 +76,10 @@ git checkout $(git tag -l 'v*' --sort=-v:refname | head -1)
 ```
 </Callout>
 
-## 2. Confirm the services are ready
+</Step>
+<Step>
+
+## Confirm the services are ready [#2-confirm-the-services-are-ready]
 
 Check container status:
 
@@ -88,13 +101,18 @@ The expected response is:
 
 The backend container runs database migrations on every startup before serving; there is no manual migration command to run.
 
-## 3. Choose how to access
+</Step>
+<Step>
 
-### Local access
+## Choose how to access [#3-choose-how-to-access]
+
+<Tabs items={["Local access", "Remote access"]}>
+<Tab value="Local access">
 
 Open [http://localhost:3000](http://localhost:3000) directly. You also won't need to pass any URLs when running `multica setup self-host` later.
 
-### Remote access
+</Tab>
+<Tab value="Remote access" id="remote-access">
 
 Docker Compose binds `3000` and `8080` to `127.0.0.1` only. Do not switch this to `0.0.0.0` to expose the ports to the public internet; use a reverse proxy with HTTPS instead.
 
@@ -113,7 +131,10 @@ MULTICA_PUBLIC_URL=https://api.example.com
 
 With this configuration all browser traffic stays on the app domain, so cookies never cross domains and `COOKIE_DOMAIN` is not needed. If the browser talks to the api domain directly instead, you must set it — see [Environment variables](/environment-variables).
 
-Then set up DNS and proxy the local ports with Caddy:
+Then set up DNS and proxy the local ports with Caddy. Caddy obtains TLS certificates and forwards WebSockets.
+
+<Tabs items={["Two domains", "Single origin"]}>
+<Tab value="Two domains">
 
 ```text
 app.example.com {
@@ -138,7 +159,8 @@ api.example.com {
 }
 ```
 
-If you would rather serve everything on a **single origin** (one domain, or one host with one port — common on small servers), route the daemon-critical paths to the backend explicitly and let the frontend handle the rest:
+</Tab>
+<Tab value="Single origin">
 
 ```text
 multica.example.com {
@@ -171,9 +193,12 @@ multica.example.com {
 }
 ```
 
-With a single origin, point both URLs at it (`FRONTEND_ORIGIN` and `MULTICA_APP_URL` in `.env`, then `--server-url` and `--app-url` in `multica setup self-host`).
+</Tab>
+</Tabs>
 
-Caddy obtains TLS certificates and forwards WebSockets. After editing `.env`, recreate the containers with `up -d` so the new configuration takes effect:
+**Single origin** (one domain, or one host with one port — common on small servers) routes the daemon-critical paths to the backend explicitly and lets the frontend handle the rest. Point both URLs at it: `FRONTEND_ORIGIN` and `MULTICA_APP_URL` in `.env`, then `--server-url` and `--app-url` in `multica setup self-host`.
+
+After editing `.env`, recreate the containers with `up -d` so the new configuration takes effect:
 
 ```bash
 docker compose -f docker-compose.selfhost.yml up -d
@@ -181,13 +206,27 @@ curl -fsS https://api.example.com/readyz
 curl -fsS https://app.example.com/api/config | grep -o '"daemon_server_url":"[^"]*"'
 ```
 
-The last command prints `daemon_server_url`, the URL daemons use to reach the API: `MULTICA_DAEMON_SERVER_URL` when set, then `MULTICA_PUBLIC_URL`, otherwise the app URL — `MULTICA_APP_URL`, falling back to `FRONTEND_ORIGIN`. When neither `MULTICA_APP_URL` nor `FRONTEND_ORIGIN` is set, the field is omitted from the response entirely (so the grep prints nothing), even if `MULTICA_DAEMON_SERVER_URL` or `MULTICA_PUBLIC_URL` is set. If it prints a `localhost` address, `.env` still carries local defaults: set `FRONTEND_ORIGIN` and `MULTICA_APP_URL` explicitly to the public URLs instead of relying on the `${FRONTEND_PORT}` references copied from `.env.example`, then recreate the containers.
+The last command prints `daemon_server_url`, the URL daemons use to reach the API. If it prints a `localhost` address, `.env` still carries local defaults: set `FRONTEND_ORIGIN` and `MULTICA_APP_URL` explicitly to the public URLs instead of relying on the `${FRONTEND_PORT}` references copied from `.env.example`, then recreate the containers.
+
+<Accordions>
+<Accordion title="How daemon_server_url is resolved" id="how-daemon-server-url-is-resolved">
+
+`MULTICA_DAEMON_SERVER_URL` when set, then `MULTICA_PUBLIC_URL`, otherwise the app URL — `MULTICA_APP_URL`, falling back to `FRONTEND_ORIGIN`. When neither `MULTICA_APP_URL` nor `FRONTEND_ORIGIN` is set, the field is omitted from the response entirely (so the grep prints nothing), even if `MULTICA_DAEMON_SERVER_URL` or `MULTICA_PUBLIC_URL` is set.
+
+</Accordion>
+</Accordions>
 
 <Callout type="warning">
 `docker compose restart` only restarts existing containers and does not re-read `.env`. After changing configuration, run `docker compose -f docker-compose.selfhost.yml up -d` to re-read `.env`.
 </Callout>
 
-## 4. Log in and create a workspace
+</Tab>
+</Tabs>
+
+</Step>
+<Step>
+
+## Log in and create a workspace [#4-log-in-and-create-a-workspace]
 
 Open `http://localhost:3000` locally, or the `https://app.example.com` you just configured, and enter your email to request a verification code.
 
@@ -210,7 +249,10 @@ Enter the code and create your first workspace. Once Resend or SMTP is configure
 Self-hosted deployments default to `APP_ENV=production`, which disables fixed verification codes. Do not set `MULTICA_DEV_VERIFICATION_CODE` on a public instance.
 </Callout>
 
-## 5. Connect a computer
+</Step>
+<Step>
+
+## Connect a computer [#5-connect-a-computer]
 
 Run the commands below on **the computer that runs your AI coding tools**, which is not necessarily the server running Docker.
 
@@ -220,25 +262,34 @@ Runs execute with the full permissions of the user running the daemon — they c
 
 Install the Multica CLI first:
 
-**macOS / Linux**
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
 ```
 
-**Windows PowerShell**
+</Tab>
+<Tab value="Windows">
 
 ```powershell
 irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
 ```
 
-If the Multica service runs on this same computer:
+</Tab>
+</Tabs>
+
+Then point the CLI at your service. Pick where the Multica service runs:
+
+<Tabs items={["On this computer", "On another machine"]}>
+<Tab value="On this computer">
 
 ```bash
 multica setup self-host
 ```
 
-If the Multica service runs on another machine, pass the two URLs you configured earlier:
+</Tab>
+<Tab value="On another machine">
 
 ```bash
 multica setup self-host \
@@ -246,7 +297,10 @@ multica setup self-host \
   --app-url https://app.example.com
 ```
 
-The command first checks `<server-url>/health`, then opens a browser to complete login. After login it stores local credentials and starts the daemon. A `Server not reachable` error at this step means the probe could not get a 200 from `/health`: the proxy forwards everything to a web release that does not forward the path, the proxy does not route `/health` to the backend at all, or a lower-level failure (DNS, TLS, firewall, timeout, 5xx from the backend) — see [Troubleshooting](/troubleshooting#multica-setup-reports-the-server-is-not-reachable).
+</Tab>
+</Tabs>
+
+When the service is on another machine, pass the two URLs you configured above. The command first checks `<server-url>/health`, then opens a browser to complete login. After login it stores local credentials and starts the daemon. A `Server not reachable` error at this step means the probe could not get a 200 from `/health`. There are three likely causes: the proxy forwards everything to a web release that does not forward the path; the proxy does not route `/health` to the backend at all; or a lower-level failure (DNS, TLS, firewall, timeout, 5xx from the backend). See [Troubleshooting](/troubleshooting#multica-setup-reports-the-server-is-not-reachable).
 
 Confirm the connection:
 
@@ -260,11 +314,17 @@ The output should show:
 - `Agents` listing the AI coding tools installed on this machine
 - `Workspaces` greater than `0`
 
-## 6. Complete the first run
+</Step>
+<Step>
+
+## Complete the first run [#6-complete-the-first-run]
 
 Back in Multica, once an online runtime appears in the runtime list, create an agent and assign it your first issue.
 
 When the run shows as completed and the agent's reply appears in the timeline, the self-hosted service, the computer, and the AI coding tool are all connected. For detailed steps, see steps 3-5 of the [quickstart](/cloud-quickstart).
+
+</Step>
+</Steps>
 
 ## Common admin commands
 
@@ -284,50 +344,32 @@ docker compose -f docker-compose.selfhost.yml up -d
 docker compose -f docker-compose.selfhost.yml down
 ```
 
-To upgrade to the latest published images:
-
-```bash
-git pull --ff-only
-docker compose -f docker-compose.selfhost.yml pull
-docker compose -f docker-compose.selfhost.yml up -d
-curl -fsS http://localhost:8080/readyz
-```
-
-Two ways to upgrade a Docker Compose install. On an existing install they produce the **same result** — the `selfhost` target in the `Makefile` runs the same `docker compose pull` + `up -d`, and additionally creates `.env` when it is missing and waits on `/health` before printing a status summary. Pick whichever you prefer:
-
-```bash
-cd multica
-git pull
-make selfhost
-```
-
-```bash
-cd multica
-git pull
-docker compose -f docker-compose.selfhost.yml pull
-docker compose -f docker-compose.selfhost.yml up -d
-```
-
-### What `git pull` actually does
-
-`git pull` updates **`docker-compose.selfhost.yml` itself** — new environment variables, new services, changed healthchecks. It is **not** how you get a new Multica version.
-
-The version you end up running is resolved by `docker compose pull`, which asks GHCR what the tag points at right now. A checkout that is months out of date will still pull today's `latest` images; conversely, `git pull` alone changes nothing until you pull images and recreate the containers.
-
 <Callout type="warning">
-**If you pinned `MULTICA_IMAGE_TAG`, neither command upgrades anything.** Both images resolve as `${MULTICA_IMAGE_TAG:-latest}` (`docker-compose.selfhost.yml:42`, `:125`), and `.env.example` ships `MULTICA_IMAGE_TAG=latest`. If your `.env` pins an exact release, `pull` just re-fetches that same tag and you stay on the old version — no error, no warning. Check before you upgrade:
+`docker compose down` keeps `pgdata` and `backend_uploads`. Adding `-v` deletes these volumes, including the database; do not run `docker compose down -v` unless you intend to wipe the instance.
+</Callout>
+
+## Upgrade
+
+<Steps>
+<Step>
+
+### Check for a pinned image tag
+
+Both images resolve as `${MULTICA_IMAGE_TAG:-latest}` (`docker-compose.selfhost.yml`, `services.backend.image` / `services.frontend.image`), and `.env.example` ships `MULTICA_IMAGE_TAG=latest`.
 
 ```bash
 grep MULTICA_IMAGE_TAG .env
 # MULTICA_IMAGE_TAG=v0.4.5   ← pinned: edit to `latest` (or the release you want) first
 ```
+
+<Callout type="warning">
+**If you pinned `MULTICA_IMAGE_TAG`, the upgrade commands below upgrade nothing.** `pull` just re-fetches that same tag and you stay on the old version — no error, no warning.
 </Callout>
 
-### Your `.env` is not overwritten
+</Step>
+<Step>
 
-`make selfhost` only generates `.env` when the file is **missing**. Re-running it on an existing install leaves your `JWT_SECRET`, Postgres password, email settings, and `FRONTEND_ORIGIN` exactly as they were.
-
-### Back up Postgres first
+### Back up Postgres
 
 Migrations are forward-only, so take a dump before upgrading a deployment you care about:
 
@@ -336,25 +378,53 @@ docker compose -f docker-compose.selfhost.yml exec -T postgres \
   pg_dump -U multica multica > multica-backup.sql && gzip multica-backup.sql
 ```
 
+Use your own `POSTGRES_USER` / `POSTGRES_DB` from `.env` if you changed them from the `multica` defaults. Data lives in the named volume `multica_pgdata`, which survives `docker compose down` — but not `down -v`.
+
 <Callout type="warning">
 **Do not pipe `pg_dump` straight into `gzip`.** A shell reports the exit status of the *last* command in a pipeline, so `pg_dump … | gzip > backup.sql.gz` exits `0` even when the dump failed — leaving a perfectly valid 20-byte archive containing nothing. Redirecting to a file first makes `pg_dump`'s own exit status the one that counts, and `&&` only compresses a dump that actually succeeded.
 </Callout>
 
-Use your own `POSTGRES_USER` / `POSTGRES_DB` from `.env` if you changed them from the `multica` defaults. Data lives in the named volume `multica_pgdata`, which survives `docker compose down` — but not `down -v`.
+</Step>
+<Step>
 
-### Migrations run themselves
+### Pull the new images and recreate the containers
 
-As in [Step 1](#1-start-multica), the backend container runs `./migrate up` on startup (`docker/entrypoint.sh`) before serving traffic. There is no separate upgrade command — bringing up the new image *is* the migration step. Watch it happen:
+On an existing install both commands produce the **same result** — the `selfhost` target in the `Makefile` runs the same `docker compose pull` + `up -d`, and additionally creates `.env` when it is missing and waits on `/health` before printing a status summary. Pick whichever you prefer:
+
+<Tabs items={["make selfhost", "docker compose"]}>
+<Tab value="make selfhost">
+
+```bash
+cd multica
+git pull --ff-only
+make selfhost
+```
+
+</Tab>
+<Tab value="docker compose">
+
+```bash
+cd multica
+git pull --ff-only
+docker compose -f docker-compose.selfhost.yml pull
+docker compose -f docker-compose.selfhost.yml up -d
+```
+
+</Tab>
+</Tabs>
+
+As in [step 2](#2-confirm-the-services-are-ready), the backend container runs `./migrate up` on startup (`docker/entrypoint.sh`) before serving traffic. There is no separate upgrade command: bringing up the new image *is* the migration step. Watch it happen:
 
 ```bash
 docker compose -f docker-compose.selfhost.yml logs -f backend
 ```
 
-Migrations run automatically when the backend starts; migrations that backfill historical data (such as 103) complete the backfill automatically too. In rare cases the automatic backfill fails with `refusing to drop legacy daily rollups` — see [Troubleshooting](/troubleshooting#migration-103-blocks-an-upgrade).
+Migrations that backfill historical data (such as 103) complete the backfill automatically too. In rare cases the automatic backfill fails with `refusing to drop legacy daily rollups` — see [Troubleshooting](/troubleshooting#migration-103-blocks-an-upgrade).
+
+</Step>
+<Step>
 
 ### Verify with `/readyz`, not `/health`
-
-`/health` is a **liveness** probe — it returns `{"status":"ok"}` as long as the process is up, including when migrations failed. `/readyz` (`server/cmd/server/router.go:680`; `/healthz` is an alias) checks the database and the applied migration set, so it is the one that catches a bad upgrade:
 
 ```bash
 curl -s localhost:8080/readyz
@@ -363,15 +433,32 @@ curl -s localhost:8080/readyz
 
 Anything other than HTTP 200 with both checks `ok` means the new version did not finish migrating — check the backend logs before sending traffic at it.
 
-### Kubernetes
+`/health` is a **liveness** probe — it returns `{"status":"ok"}` as long as the process is up, including when migrations failed. `/readyz` (`readyHandler`, registered in `server/cmd/server/router.go`; `/healthz` is an alias) checks the database and the applied migration set, so it is the one that catches a bad upgrade.
+
+</Step>
+</Steps>
+
+<Accordions type="multiple">
+<Accordion title="What git pull actually does" id="what-git-pull-actually-does">
+
+`git pull` updates **`docker-compose.selfhost.yml` itself** — new environment variables, new services, changed healthchecks. It is **not** how you get a new Multica version.
+
+The version you end up running is resolved by `docker compose pull`, which asks GHCR what the tag points at right now. A checkout that is months out of date will still pull today's `latest` images; conversely, `git pull` alone changes nothing until you pull images and recreate the containers.
+
+</Accordion>
+<Accordion title="Your .env is not overwritten" id="your-env-is-not-overwritten">
+
+`make selfhost` only generates `.env` when the file is **missing**. Re-running it on an existing install leaves your `JWT_SECRET`, Postgres password, email settings, and `FRONTEND_ORIGIN` exactly as they were.
+
+</Accordion>
+<Accordion title="Upgrading on Kubernetes" id="kubernetes">
 
 Helm has its own upgrade path: set `images.backend.tag` / `images.frontend.tag` to the release you want in your values file, then `helm upgrade`. Changing the tag changes the pod spec, so Kubernetes pulls the new image and rolls the Deployments — this is the reliable route.
 
 `kubectl -n multica rollout restart` is **not** an upgrade on its own. The chart ships `pullPolicy: IfNotPresent` (`deploy/helm/multica/values.yaml`), so a node that already has that tag cached reuses the old image and the restart silently changes nothing — the same class of trap as a pinned `MULTICA_IMAGE_TAG`. If you want to track a floating tag that way, set `images.backend.pullPolicy` / `images.frontend.pullPolicy` to `Always` first. See the [Self-hosting guide](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING.md#kubernetes-deployment-alternative).
 
-<Callout type="warning">
-`docker compose down` keeps `pgdata` and `backend_uploads`. Adding `-v` deletes these volumes, including the database; do not run `docker compose down -v` unless you intend to wipe the instance.
-</Callout>
+</Accordion>
+</Accordions>
 
 ## Common issues
 

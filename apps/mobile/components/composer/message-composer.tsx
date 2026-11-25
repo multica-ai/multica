@@ -33,6 +33,9 @@
  *     `onClearReplyTarget` from its store; chat doesn't.
  *   - Stop visual / animation — chat passes a `renderStop()` slot when
  *     `isSending` is true.
+ *   - What a send during a run means — chat opts in with
+ *     `allowSubmitWhileSending` and adds a `queueAction`; the composer only
+ *     reports which action submitted.
  *
  * Cleanup: mention draft store cleared on unmount so navigating away
  * from comment-A's draft doesn't leak `@张三` into comment-B's composer.
@@ -55,6 +58,7 @@ import * as DocumentPicker from "expo-document-picker";
 import { api, MAX_FILE_SIZE } from "@/data/api";
 import { useMentionDraftStore } from "@/data/stores/mention-draft-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
+import { composerActions } from "@/lib/composer-actions";
 import { stripMarkdown } from "@/lib/strip-markdown";
 import { THEME } from "@/lib/theme";
 import { continuousCorners } from "@/lib/radius";
@@ -65,6 +69,8 @@ import {
   type ComposerAttachmentItem,
   type MentionChip,
 } from "@/components/issue/composer-attachment-row";
+import { useT } from "@/lib/i18n";
+import { isStorageLimitReached } from "@/lib/upload-error";
 
 export interface MessageComposerReplyTarget {
   actorName: string;
@@ -80,6 +86,8 @@ interface Props {
     content: string;
     attachmentIds: string[];
     mentions: MentionChip[];
+    /** True when submitted through `queueAction` instead of Send. */
+    queue: boolean;
   }) => Promise<void>;
 
   /** Push target for the `@` button. The picker route reads /
@@ -116,6 +124,13 @@ interface Props {
    *  this to show a Stop affordance while the agent is running. */
   isSending?: boolean;
   renderStop?: () => ReactNode;
+  /** While `isSending`, still accept typed content. Send takes the action
+   *  slot whenever there is content to send; Stop stays reachable for an
+   *  empty composer or an upload in flight (same slot rule as web chat). */
+  allowSubmitWhileSending?: boolean;
+  /** Secondary submit shown beside Send while `isSending` with content.
+   *  Chat uses it for "queue for the next turn". */
+  queueAction?: { accessibilityLabel: string };
 
   /** Hard-disable. Used when chat has no usable agent. The pill shows
    *  `disabledReason` instead of `pillLabel`, and the pill is
@@ -159,8 +174,8 @@ export function MessageComposer({
   onSubmit,
   mentionPickerPath,
   uploadContext,
-  placeholder = "Type a message…",
-  pillLabel = "Type a message…",
+  placeholder,
+  pillLabel,
   pillIcon = "chatbubble-ellipses-outline",
   value: controlledValue,
   onChangeText: controlledOnChange,
@@ -169,12 +184,17 @@ export function MessageComposer({
   expandTrigger,
   isSending = false,
   renderStop,
+  allowSubmitWhileSending = false,
+  queueAction,
   disabled = false,
   disabledReason,
   manageKeyboard = true,
 }: Props) {
   const { colorScheme } = useColorScheme();
   const theme = THEME[colorScheme];
+  const { t } = useT("chat");
+  const resolvedPlaceholder = placeholder ?? t("composer.default_placeholder");
+  const resolvedPillLabel = pillLabel ?? t("composer.default_placeholder");
   const insets = useSafeAreaInsets();
   const inputRef = useRef<TextInput>(null);
   const [expanded, setExpanded] = useState(false);
@@ -213,24 +233,31 @@ export function MessageComposer({
 
   // Auto-expand + focus when an `expandTrigger` changes. Comment uses
   // this to react to the long-press → reply flow setting a reply target.
-  const triggerSeen = useRef<string | null>(null);
+  const [triggerSeen, setTriggerSeen] = useState<string | null>(null);
   if (
     expandTrigger &&
-    triggerSeen.current !== expandTrigger &&
+    triggerSeen !== expandTrigger &&
     !disabled
   ) {
-    triggerSeen.current = expandTrigger;
+    setTriggerSeen(expandTrigger);
     setExpanded(true);
-    requestAnimationFrame(() => inputRef.current?.focus());
   }
+  useEffect(() => {
+    if (!expanded || !triggerSeen || disabled) return;
+    const frame = requestAnimationFrame(() => inputRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [expanded, triggerSeen, disabled]);
 
-  const hasInFlightUpload = attachments.some((a) => a.status === "uploading");
-  const canSend =
-    !disabled &&
-    !isSending &&
-    !submitting &&
-    !hasInFlightUpload &&
-    (text.trim().length > 0 || mentions.length > 0);
+  const { canSend, showStop, showQueue } = composerActions({
+    isSending,
+    allowSubmitWhileSending,
+    hasStop: !!renderStop,
+    hasQueueAction: !!queueAction,
+    hasContent: text.trim().length > 0 || mentions.length > 0,
+    hasInFlightUpload: attachments.some((a) => a.status === "uploading"),
+    submitting,
+    disabled,
+  });
 
   const expand = useCallback(() => {
     if (disabled) return;
@@ -243,7 +270,7 @@ export function MessageComposer({
     requestAnimationFrame(() => inputRef.current?.focus());
   }, [disabled, onClearReplyTarget]);
 
-  const handleSubmit = useCallback(async () => {
+  const handleSubmit = useCallback(async (queue: boolean) => {
     if (!canSend) return;
     const textSnap = text;
     const mentionsSnap = mentions;
@@ -275,6 +302,7 @@ export function MessageComposer({
         content,
         attachmentIds: activeIds,
         mentions: mentionsSnap,
+        queue,
       });
       // Success → fully exit composing mode. Explicit triple-step
       // because a missing blur leaves the keyboard up; missing
@@ -326,7 +354,11 @@ export function MessageComposer({
           ),
         );
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Unknown error";
+        const message = isStorageLimitReached(err)
+          ? t("editor:upload.storage_full_title")
+          : err instanceof Error
+            ? err.message
+            : t("common:states.error");
         setAttachments((prev) =>
           prev.map((it) =>
             it.localId === localId
@@ -336,7 +368,7 @@ export function MessageComposer({
         );
       }
     },
-    [uploadContext],
+    [uploadContext, t, setAttachments],
   );
 
   const onImagePress = useCallback(async () => {
@@ -348,7 +380,10 @@ export function MessageComposer({
     const picked = picker.assets[0];
     if (!picked) return;
     if (picked.fileSize != null && picked.fileSize > MAX_FILE_SIZE) {
-      Alert.alert("File too large", "Files must be smaller than 100 MB.");
+      Alert.alert(
+        t("composer.file_too_large_title"),
+        t("composer.file_too_large_message"),
+      );
       return;
     }
     const filename = picked.fileName ?? `image-${Date.now()}.jpg`;
@@ -370,7 +405,7 @@ export function MessageComposer({
       name: filename,
       type: mimeType,
     });
-  }, [startUpload]);
+  }, [startUpload, t]);
 
   const onFilePress = useCallback(async () => {
     const picker = await DocumentPicker.getDocumentAsync({
@@ -381,7 +416,10 @@ export function MessageComposer({
     const picked = picker.assets[0];
     if (!picked) return;
     if (picked.size != null && picked.size > MAX_FILE_SIZE) {
-      Alert.alert("File too large", "Files must be smaller than 100 MB.");
+      Alert.alert(
+        t("composer.file_too_large_title"),
+        t("composer.file_too_large_message"),
+      );
       return;
     }
     const mimeType = picked.mimeType ?? "application/octet-stream";
@@ -402,11 +440,11 @@ export function MessageComposer({
       name: picked.name,
       type: mimeType,
     });
-  }, [startUpload]);
+  }, [startUpload, t]);
 
   const onRemoveAttachment = useCallback((localId: string) => {
     setAttachments((prev) => prev.filter((it) => it.localId !== localId));
-  }, []);
+  }, [setAttachments]);
 
   const onRetryAttachment = useCallback(
     (localId: string) => {
@@ -425,7 +463,7 @@ export function MessageComposer({
         type: item.mimeType,
       });
     },
-    [attachments, startUpload],
+    [attachments, startUpload, setAttachments],
   );
 
   const onAtPress = useCallback(() => {
@@ -469,7 +507,7 @@ export function MessageComposer({
           color={theme.mutedForeground}
         />
         <Text className="text-base text-muted-foreground">
-          {disabled && disabledReason ? disabledReason : pillLabel}
+          {disabled && disabledReason ? disabledReason : resolvedPillLabel}
         </Text>
       </Pressable>
     </View>
@@ -492,13 +530,13 @@ export function MessageComposer({
               className="flex-1 text-xs font-medium text-muted-foreground"
               numberOfLines={1}
             >
-              Replying to {replyTarget.actorName}
+              {t("composer.replying_to", { name: replyTarget.actorName })}
             </Text>
             <Pressable
               onPress={onClearReplyTarget}
               hitSlop={8}
               accessibilityRole="button"
-              accessibilityLabel="Cancel reply"
+              accessibilityLabel={t("composer.cancel_reply")}
             >
               <Ionicons
                 name="close-circle"
@@ -539,7 +577,7 @@ export function MessageComposer({
           value={text}
           onChangeText={setText}
           onBlur={onBlur}
-          placeholder={placeholder}
+          placeholder={resolvedPlaceholder}
           placeholderTextColor={theme.mutedForeground}
           multiline
           editable={!disabled}
@@ -556,25 +594,39 @@ export function MessageComposer({
             iconSize={20}
             color={mentions.length > 0 ? theme.primary : undefined}
             onPress={onAtPress}
-            accessibilityLabel="Mention someone or an issue"
+            accessibilityLabel={t("composer.mention")}
             className="h-8 w-8"
           />
           <IconButton
             name="image-outline"
             iconSize={20}
             onPress={onImagePress}
-            accessibilityLabel="Upload image"
+            accessibilityLabel={t("composer.upload_image")}
             className="h-8 w-8"
           />
           <IconButton
             name="attach-outline"
             iconSize={20}
             onPress={onFilePress}
-            accessibilityLabel="Upload file"
+            accessibilityLabel={t("composer.upload_file")}
             className="h-8 w-8"
           />
           <View className="flex-1" />
-          {isSending && renderStop ? (
+          {showQueue && queueAction ? (
+            <IconButton
+              name="time-outline"
+              iconSize={20}
+              onPress={() => void handleSubmit(true)}
+              disabled={!canSend}
+              // No trailing slop: Send's 12pt slop already reaches into the
+              // gap, and an overlap would let a Queue tap land on Send.
+              hitSlop={{ top: 12, bottom: 12, left: 8, right: 0 }}
+              className="mr-4 h-8 w-8"
+              accessibilityLabel={queueAction.accessibilityLabel}
+              accessibilityState={{ disabled: !canSend }}
+            />
+          ) : null}
+          {showStop && renderStop ? (
             renderStop()
           ) : (
             <IconButton
@@ -582,11 +634,11 @@ export function MessageComposer({
               iconSize={18}
               color={theme.primaryForeground}
               variant="default"
-              onPress={handleSubmit}
+              onPress={() => void handleSubmit(false)}
               disabled={!canSend}
               hitSlop={12}
               className="h-8 w-8 rounded-full"
-              accessibilityLabel="Send"
+              accessibilityLabel={t("composer.send")}
               accessibilityState={{ disabled: !canSend }}
             />
           )}

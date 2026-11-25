@@ -1,0 +1,101 @@
+---
+title: Authentification et jetons
+description: Comprendre les sessions de connexion du navigateur, les jetons d'accès personnels et les identifiants temporaires qu'utilisent les agents pendant les exécutions.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Au quotidien, dans Multica, vous manipulez principalement deux types d'identifiants : les sessions de connexion du navigateur et les jetons d'accès personnels. Les sessions du navigateur servent au web et à Desktop ; les jetons d'accès personnels servent au CLI, au daemon, aux scripts et à l'API.
+
+## Sessions de connexion du navigateur
+
+Après une connexion par code de vérification envoyé par e-mail ou via Google, Multica stocke un JWT dans un cookie HttpOnly nommé `multica_auth`. Le navigateur l'envoie automatiquement ; JavaScript ne peut pas le lire directement.
+
+Par défaut, une session dure 30 jours, mais il ne s'agit pas d'un compte à rebours depuis la connexion : une session utilisée en continu est réémise avant son expiration, si bien que rester connecté n'oblige pas à se reconnecter à intervalles réguliers. Elle n'est réémise qu'une fois passée la moitié de sa durée de vie ; une session inutilisée peut donc prendre fin moins de 30 jours après sa dernière utilisation. Les administrateurs d'instances auto-hébergées peuvent ajuster cette durée de vie avec `AUTH_TOKEN_TTL` ; voir [Configuration de la connexion et de l'inscription](/auth-setup#durée-de-vie-des-sessions). La déconnexion efface les cookies d'authentification et CSRF du navigateur courant.
+
+Les cookies du navigateur ne sont pas faits pour être copiés dans des scripts ou dans le CLI ; utilisez un jeton d'accès personnel pour accéder à Multica depuis un terminal.
+
+## Jetons d'accès personnels
+
+Un jeton d'accès personnel (PAT) commence par `mul_` et représente votre compte. Il peut accéder à tous les espaces de travail et à toutes les API auxquels vous avez accès : protégez-le comme un mot de passe.
+
+Lorsque vous créez un jeton dans **Paramètres → Jetons d'API**, vous indiquez un nom et choisissez une expiration de 30 jours, 90 jours ou 1 an, ou « Sans expiration » ; 90 jours est présélectionné. Le jeton complet n'est affiché qu'une seule fois ; une fois la boîte de dialogue fermée, Multica ne conserve que :
+
+- le hachage du jeton ;
+- les premiers caractères, pour l'identifier ;
+- le nom, la date de création, la date d'expiration et la date de dernière utilisation.
+
+La valeur complète ne peut pas être récupérée. Si vous la perdez, révoquez l'ancien jeton et créez-en un nouveau.
+
+<Callout type="warning">
+Ne mettez pas de PAT dans des dépôts, des tâches, des commentaires, des captures d'écran ou des journaux, et ne le passez pas directement dans des commandes shell qui sont conservées.
+</Callout>
+
+## Le CLI et les PAT
+
+Lorsque vous exécutez `multica login`, le CLI effectue la connexion via le navigateur, puis crée un PAT valable 90 jours et l'enregistre dans le fichier de configuration du profil courant :
+
+```text
+~/.multica/config.json
+~/.multica/profiles/<name>/config.json
+```
+
+Le daemon se connecte à Multica avec ce même PAT. Un PAT `mul_` doté d'une date d'expiration est renouvelé automatiquement lorsqu'il lui reste moins de 7 jours, ce qui le prolonge jusqu'à 90 jours à compter de ce moment. Un renouvellement en échec laisse le jeton inchangé ; une fois un jeton expiré ou révoqué, exécutez de nouveau `multica login`.
+
+Sur une machine sans navigateur, créez d'abord un PAT sur le web, puis laissez le CLI vous le demander de manière sécurisée :
+
+```bash
+multica login --token
+```
+
+## Utiliser un PAT dans les requêtes API
+
+Placez le PAT dans l'en-tête `Authorization` :
+
+```bash
+export MULTICA_TOKEN='mul_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+
+curl https://api.multica.ai/api/me \
+  -H "Authorization: Bearer $MULTICA_TOKEN"
+```
+
+Les appels d'API au niveau de l'espace de travail nécessitent aussi l'espace de travail, selon ce qu'exige le point de terminaison :
+
+```bash
+curl https://api.multica.ai/api/issues \
+  -H "Authorization: Bearer $MULTICA_TOKEN" \
+  -H "X-Workspace-ID: $MULTICA_WORKSPACE_ID"
+```
+
+Dans les scripts, récupérez le jeton depuis un gestionnaire de secrets ou une variable d'environnement protégée — ne l'écrivez jamais en dur. Sur les instances auto-hébergées, remplacez le domaine par votre propre adresse d'API publique.
+
+## Déconnexion et révocation
+
+`multica auth logout` supprime uniquement le PAT enregistré dans le profil CLI courant ; la déconnexion sur le web supprime uniquement les cookies du navigateur courant. Aucune des deux ne révoque le jeton d'accès personnel côté serveur.
+
+Si un jeton a pu fuiter, révoquez-le immédiatement dans **Paramètres → Jetons d'API**. Une fois révoqué, le PAT ne peut plus jamais être utilisé, et les autres machines et scripts qui l'avaient enregistré perdent également l'accès.
+
+## Jetons temporaires pour les exécutions d'agents
+
+Lorsque le daemon prend en charge une exécution, le serveur crée pour celle-ci un jeton temporaire préfixé par `mat_`. Il est lié à l'utilisateur, à l'espace de travail, à l'agent et à l'exécution en cours, reste valide 24 heures au maximum et est supprimé à la fin de l'exécution.
+
+Le daemon injecte ce jeton temporaire dans l'outil de codage IA au lieu de transmettre le PAT de l'utilisateur à l'agent. Les requêtes effectuées par l'agent sont donc enregistrées comme des actions de l'agent, et le jeton ne permet pas d'accéder aux opérations sensibles réservées aux utilisateurs ou aux propriétaires.
+
+Ces jetons sont créés automatiquement par le serveur ; les utilisateurs n'ont jamais besoin de les enregistrer ni de les gérer.
+
+## Autres identifiants machine
+
+Le serveur reconnaît également deux identifiants utilisés dans des scénarios internes ou gérés :
+
+| Préfixe | Rôle | Géré par |
+| --- | --- | --- |
+| `mcn_` | Connexions Multica Cloud Node | Multica Cloud Fleet |
+| `mdt_` | Protocole d'authentification du daemon limité à un espace de travail | Flux internes du serveur |
+
+Les installations Cloud, auto-hébergées et Desktop classiques n'ont jamais besoin de les créer manuellement. Le CLI et le daemon côté utilisateur utilisent toujours des PAT `mul_` ; ne construisez pas vous-même de jetons avec d'autres préfixes.
+
+## Étapes suivantes
+
+- [Utiliser le CLI](/cli) — `login`, `auth status` et configuration des profils.
+- [Daemon et runtimes](/daemon-runtimes) — où a lieu le renouvellement des PAT.
+- [Configuration de la connexion et de l'inscription](/auth-setup) — configuration côté serveur de la durée de vie des sessions et des restrictions d'inscription.

@@ -12,10 +12,11 @@ import {
   Server,
   Trash2,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "@multica/core/api";
+import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import type {
   RuntimeProfile,
   RuntimeProfileType,
@@ -26,6 +27,7 @@ import {
   useUpdateRuntimeProfile,
 } from "@multica/core/runtimes";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   Dialog,
   DialogClose,
@@ -37,6 +39,14 @@ import {
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { Textarea } from "@multica/ui/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
+import { buildRuntimeMachines } from "./runtime-machines";
 import { cn } from "@multica/ui/lib/utils";
 import { ProviderLogo } from "./provider-logo";
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
@@ -67,6 +77,7 @@ type DialogState =
 export function RuntimeProfilesDialog({
   wsId,
   intent = "manage",
+  daemonId,
   machineName,
   initialProfile,
   onProfileCreated,
@@ -74,6 +85,7 @@ export function RuntimeProfilesDialog({
 }: {
   wsId: string;
   intent?: "create" | "edit" | "manage";
+  daemonId?: string;
   machineName?: string;
   initialProfile?: RuntimeProfile;
   onProfileCreated?: (profile: RuntimeProfile) => void;
@@ -113,7 +125,7 @@ export function RuntimeProfilesDialog({
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent
         className={cn(
-          "flex max-h-[88vh] flex-col gap-0 overscroll-contain p-0",
+          "flex max-h-[88%] flex-col gap-0 overscroll-contain p-0",
           intent === "manage" ? "sm:max-w-3xl" : "sm:max-w-2xl",
         )}
         showCloseButton={false}
@@ -147,17 +159,17 @@ export function RuntimeProfilesDialog({
               )}
               <DialogClose
                 render={
-                  <Button
+                  <IconButton
                     type="button"
                     variant="ghost"
                     size="icon-sm"
                     className="shrink-0"
-                    aria-label={t(($) => $.profiles.close)}
+                    label={t(($) => $.profiles.close)}
+                    tooltipSide="bottom"
                   />
                 }
               >
                 <X aria-hidden="true" className="h-4 w-4" />
-                <span className="sr-only">{t(($) => $.profiles.close)}</span>
               </DialogClose>
             </div>
           </div>
@@ -184,6 +196,7 @@ export function RuntimeProfilesDialog({
         {state.surface === "form" ? (
           <ProfileFormView
             wsId={wsId}
+            daemonId={daemonId}
             mode={state.mode}
             step={state.mode === "create" ? state.step : "details"}
             family={
@@ -248,9 +261,7 @@ export function RuntimeProfilesDialog({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Master list — custom profiles first, built-in families as collapsed reference.
-// ---------------------------------------------------------------------------
 
 function CatalogList({
   catalog,
@@ -472,10 +483,8 @@ function CatalogRow({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Detail panel — adaptive: built-in is read-only, custom shows fields +
 // Edit / Delete.
-// ---------------------------------------------------------------------------
 
 function DetailPanel({
   entry,
@@ -636,12 +645,11 @@ function DetailRow({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Create / edit form.
-// ---------------------------------------------------------------------------
 
 function ProfileFormView({
   wsId,
+  daemonId,
   mode,
   step,
   family,
@@ -654,6 +662,7 @@ function ProfileFormView({
   onSaved,
 }: {
   wsId: string;
+  daemonId?: string;
   mode: "create" | "edit";
   step: "family" | "details";
   family: RuntimeProfileType;
@@ -723,6 +732,7 @@ function ProfileFormView({
   return (
     <ProfileDetailsForm
       wsId={wsId}
+      daemonId={daemonId}
       mode={mode}
       family={family}
       profile={profile}
@@ -736,6 +746,7 @@ function ProfileFormView({
 
 function ProfileDetailsForm({
   wsId,
+  daemonId,
   mode,
   family,
   profile,
@@ -745,6 +756,7 @@ function ProfileDetailsForm({
   onSaved,
 }: {
   wsId: string;
+  daemonId?: string;
   mode: "create" | "edit";
   family: RuntimeProfileType;
   profile: RuntimeProfile | null;
@@ -757,6 +769,23 @@ function ProfileDetailsForm({
   const idPrefix = `runtime-profile-${useId().replace(/:/g, "")}`;
   const createProfile = useCreateRuntimeProfile(wsId);
   const updateProfile = useUpdateRuntimeProfile(wsId);
+  const canBindMachine = mode === "edit" && !profile?.daemon_id;
+  const { data: runtimes = [] } = useQuery({
+    ...runtimeListOptions(wsId),
+    enabled: canBindMachine,
+  });
+  const machineOptions = useMemo(
+    () => [
+      { value: "", label: t(($) => $.profiles.form.machine_placeholder) },
+      ...buildRuntimeMachines(runtimes, { now: Date.now() }).flatMap((machine) =>
+        machine.mode === "local" && machine.daemonId
+          ? [{ value: machine.daemonId, label: machine.title }]
+          : [],
+      ),
+    ],
+    [runtimes, t],
+  );
+  const [bindingMachine, setBindingMachine] = useState("");
 
   const [values, setValues] = useState<ProfileFormValues>({
     displayName: profile?.display_name ?? "",
@@ -800,6 +829,7 @@ function ProfileDetailsForm({
     try {
       if (mode === "create") {
         const created = await createProfile.mutateAsync({
+          ...(daemonId ? { daemon_id: daemonId } : {}),
           display_name: values.displayName.trim(),
           runtime_type: family,
           command_name: commandName,
@@ -812,6 +842,7 @@ function ProfileDetailsForm({
         const updated = await updateProfile.mutateAsync({
           profileId: profile.id,
           patch: {
+            ...(canBindMachine && bindingMachine ? { daemon_id: bindingMachine } : {}),
             display_name: values.displayName.trim(),
             command_name: commandName,
             fixed_args: fixedArgs,
@@ -822,8 +853,14 @@ function ProfileDetailsForm({
         onSaved(updated);
       }
     } catch (err) {
-      // 409 from create/patch means the display name collides.
-      if (err instanceof ApiError && err.status === 409) {
+      const conflictCode =
+        err instanceof ApiError && err.body &&
+        typeof err.body === "object" && "code" in err.body
+          ? err.body.code : undefined;
+      if (
+        err instanceof ApiError && err.status === 409 &&
+        conflictCode !== "runtime_profile_machine_conflict"
+      ) {
         setDuplicateName(true);
         return;
       }
@@ -872,6 +909,43 @@ function ProfileDetailsForm({
               ? t(($) => $.profiles.form.step_details_label)
               : t(($) => $.profiles.form.edit_title)}
           </h3>
+        )}
+
+        {canBindMachine && (
+          <div className="space-y-1.5">
+            <Label
+              htmlFor={`${idPrefix}-machine`}
+              className="text-caption text-muted-foreground"
+            >
+              {t(($) => $.profiles.form.machine_label)}
+            </Label>
+            <Select
+              items={machineOptions}
+              value={bindingMachine}
+              onValueChange={(value) => {
+                setBindingMachine(value ?? "");
+              }}
+              disabled={submitting}
+            >
+              <SelectTrigger
+                id={`${idPrefix}-machine`}
+                className="w-full"
+                aria-describedby={`${idPrefix}-machine-hint`}
+              >
+                <SelectValue placeholder={t(($) => $.profiles.form.machine_placeholder)} />
+              </SelectTrigger>
+              <SelectContent>
+                {machineOptions.map((machine) => (
+                  <SelectItem key={machine.value} value={machine.value}>
+                    {machine.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p id={`${idPrefix}-machine-hint`} className="text-caption text-muted-foreground">
+              {t(($) => $.profiles.form.machine_hint)}
+            </p>
+          </div>
         )}
 
         <div className="space-y-1.5">

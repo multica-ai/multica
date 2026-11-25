@@ -352,14 +352,20 @@ func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
 	// These are task nouns, not section headings: a task arrives as "set up an
 	// autopilot", never as "Core model".
 	triggerWords := map[string]string{
-		"references/issues.md":       "issue",
-		"references/mentions.md":     "mention",
-		"references/agents.md":       "agent",
-		"references/squads.md":       "squad",
-		"references/autopilots.md":   "autopilot",
-		"references/projects.md":     "project",
-		"references/runtimes.md":     "runtime",
-		"references/skill-import.md": "skill import",
+		"references/issues.md":        "issue",
+		"references/sub-issues.md":    "sub-issue",
+		"references/batch-changes.md": "batch",
+		"references/mentions.md":      "mention",
+		"references/agents.md":        "agent",
+		"references/squads.md":        "squad",
+		"references/autopilots.md":    "autopilot",
+		"references/projects.md":      "project",
+		"references/runtimes.md":      "runtime",
+		"references/environments.md":  "local environment",
+		"references/skill-import.md":  "skill import",
+		"references/themes.md":        "theme",
+		"references/inbox.md":         "inbox",
+		"references/docs.md":          "docs",
 	}
 
 	skill, ok := findSkill(t, PlatformSkillName)
@@ -425,13 +431,18 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"Do not read them all",
 				// The router's whole job: name every domain and its file.
 				"references/issues.md",
+				"references/sub-issues.md",
 				"references/mentions.md",
 				"references/agents.md",
 				"references/squads.md",
 				"references/autopilots.md",
 				"references/projects.md",
 				"references/runtimes.md",
+				"references/environments.md",
 				"references/skill-import.md",
+				"references/themes.md",
+				"references/inbox.md",
+				"references/docs.md",
 				// Invariants deduplicated out of the eight merged bodies. Each
 				// was repeated in most of them; the router is now their only
 				// home, so losing one here loses it everywhere.
@@ -467,27 +478,22 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				// both halves of it are pinned: a syntax problem is repairable
 				// by editing the PR, and an integration problem is not — an
 				// agent that keeps editing burns deliveries on a no-op.
-				"editing the title or adding a closing keyword re-runs the scan",
+				"editing the title re-runs the scan",
 				"stop editing the PR blind",
 				"whether the installation is bound to this workspace",
 				"redelivered once the receiving side is fixed",
-				"unless the issue should auto-advance",
 				"include the PR URL when a PR exists",
 				"Closes MUL-123",
-				"--status backlog",
 				// The link table is the only sanctioned source of PR state,
 				// and the guard against stale data survives MUL-6966 without
 				// naming the key it used to name: `issue get` still returns
 				// whatever an older run left on the issue, but a warning that
 				// spells out a metadata key teaches the key.
 				"stale values left on the issue by an earlier run",
-				// MUL-5442: the brief's Sub-issue Creation section is a
-				// one-line map pointing here. These anchors are the demoted
-				// playbook — if they leave, the brief pointer dangles.
-				"todo starts work now, backlog parks it",
-				"`--stage <N>`",
-				"when a whole stage finishes",
-				"multica issue status <child-id> todo",
+				// MUL-8441 moved the sub-issue playbook out. Daemons released
+				// before the move still point their brief here for it, so the
+				// signpost must name where it went.
+				"references/sub-issues.md",
 				// MUL-6966 phase 1 retired the metadata write discipline
 				// along with the brief section that pointed here. What the
 				// bans were protecting still needs a home, so the
@@ -495,6 +501,13 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				// the routing rule they encoded.
 				"workflow state a human should see and filter by goes in",
 				"goes in the result comment",
+				// #8001: --property comparisons. The op-by-type table is the
+				// only thing between an agent and a silently empty page, and
+				// the two rejections are the cases it would otherwise retry.
+				"Comparisons use the same flag",
+				"`~=` (contains, case-insensitive)",
+				"`!=` is rejected (the server has no not-equal filter)",
+				"so they do not form a range",
 				// #7768: nothing about concurrent runs is pushed into the
 				// prompt any more (MUL-6984), so the skill has to carry the
 				// pull path itself. All three anchors are load-bearing — the
@@ -527,6 +540,9 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"High-signal keys",
 				"reuse these names so queries stay consistent",
 				"scratchpad for run state",
+				// #8001 replaced the reservation with the operators; a bullet
+				// that says only `=` works would contradict the one below it.
+				"Only `=` is supported today",
 				// Per-turn workflow the runtime brief owns; duplicating it here
 				// is how the two drift apart.
 				"Start from the trigger, not from memory",
@@ -535,9 +551,36 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 			},
 		},
 		{
+			file: "references/sub-issues.md",
+			want: []string{
+				// MUL-5442: the brief's Sub-issue Creation section is a
+				// one-line map pointing here. These anchors are the demoted
+				// playbook — if they leave, the brief pointer dangles.
+				"todo starts work now, backlog parks it",
+				"--status backlog",
+				"`--stage <N>`",
+				"wakes the parent assignee when a stage",
+				"multica issue status <child-id> todo",
+				// MUL-8441: the brief's split rule is the short form of this
+				// section; the child-side half depends on the [Parent issue]
+				// block the daemon renders.
+				"Before splitting: one issue, one PR",
+				"Slice by user-visible behavior, never by layer",
+				"A PR that is large to review is not a reason to split",
+				"`[Parent issue]` block",
+			},
+		},
+		{
 			file: "references/mentions.md",
 			want: []string{
 				"(member|agent|squad|issue|all)/([0-9a-fA-F-]+|all)",
+				"canonical inline links with visible label text",
+				"Text removed by HTML sanitization",
+				"reference links, images, autolinks, titles",
+				"Code examples are inert as mentions",
+				"A fenced `diff` of agent instructions cannot invoke",
+				"paste it into",
+				"Prose mentions in blockquotes still count",
 				"multica workspace member list --output json",
 				"enqueues a run for that agent",
 				"enqueues NOTHING",
@@ -646,6 +689,24 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 			},
 		},
 		{
+			file: "references/environments.md",
+			want: []string{
+				".multica/environments.toml",
+				"multica env start <name>",
+				// The port block is what keeps parallel runs from colliding;
+				// an agent that hard-codes a port breaks the second run.
+				"`MULTICA_PORT` through `MULTICA_PORT+9`",
+				// A detaching start command ends the environment at once and
+				// leaves its work unreachable by stop.
+				"`docker compose up -d`",
+				// ttl is a Go duration; the day unit fails to parse.
+				"`7d` is rejected",
+				// Reuse is keyed on the checkout as well as the name, so a run
+				// with its own checkout gets a second instance, not the old one.
+				"the name and the checkout all match",
+			},
+		},
+		{
 			file: "references/projects.md",
 			want: []string{
 				"Projects are durable context containers",
@@ -657,6 +718,55 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"Project resources are durable and affect future tasks",
 				"github_repo.resource_ref.url",
 				"resource_ref.ref",
+			},
+		},
+		{
+			// MUL-9248: theme knowledge ships here instead of riding in a
+			// per-request prompt, so any agent can build one from any chat
+			// or issue. The checker gate and the two delivery paths are what
+			// make a delivered theme installable; losing either strands it.
+			file: "references/themes.md",
+			want: []string{
+				"docs/theming.md",
+				"scripts/theme-check.mjs",
+				"Deliver only when it reports **0 errors**",
+				"~/Library/Application Support/Multica/themes",
+				"%APPDATA%\\Multica\\themes",
+				"~/.config/Multica/themes",
+				"does not switch to it",
+				"every save to the theme in use applies",
+				"**Import theme**",
+				"multica attachment upload <path>",
+			},
+		},
+		{
+			// MUL-9549: an agent manages only its triggering owner's inbox,
+			// cannot delete, and bulk sweeps need explicit confirmation.
+			file: "references/docs.md",
+			want: []string{
+				"`--debug` shows\nthe server's `docs_disabled` code",
+				"Moves and folder commands do not take it",
+				"Prefer `doc edit` for a\ntargeted change",
+				"never retry the same body with a newer revision",
+				"multica doc comment list <doc-id>",
+				"Starting a thread, resolving, reopening and deleting are reserved for people",
+				"multica doc comment add <doc-id> --parent <comment-id>",
+				"multica doc restore <doc-id> --version 3 --base-revision <revision>",
+				"To undo one change and keep the rest, use `doc edit` instead",
+				"Deleting a doc or a folder answers `403`",
+			},
+		},
+		{
+			file: "references/inbox.md",
+			want: []string{
+				"**runtime owner's** inbox",
+				"do not retry with another credential",
+				"Notifications cannot be deleted from the CLI",
+				"multica inbox list --unread --output json",
+				"multica inbox read --issue MUL-123",
+				"multica inbox snooze <id>... --until 3h",
+				"multica inbox read --all --yes",
+				"Only run a bulk change when the person asked for that sweep",
 			},
 		},
 		{
@@ -683,6 +793,11 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"multica agent skills list <agent-id> --output json",
 				"replace-all",
 				"`set` is the replacement path",
+				// MUL-9874: shared skills are edited from a revision so one
+				// agent's save cannot silently erase another's.
+				"multica skill update <skill-id> --content-file ./SKILL.md --base-revision <revision>",
+				"revision_conflict",
+				"Do not drop `--base-revision` to force the write through",
 			},
 			notWant: []string{
 				"multica agent skills set <agent-id> --skill-ids <skill-id>",
@@ -716,8 +831,10 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 // reference its value: it proves the skill teaches exactly what
 // util.ParseMentions enforces. The skill's "Incorrect" examples must parse to
 // nothing (the @gpt-boy class of bug: a name where a UUID belongs fails
-// silently), and its "Correct" example must parse. If the mention regex drifts,
-// this breaks and the skill's claims must be re-checked.
+// silently), and its "Correct" example must parse. If ParseMentions drifts,
+// this breaks and the skill's claims must be re-checked. Goldmark link nodes
+// exclude code; parseMentionLink validates canonical source and visible labels
+// in internal/util/mention.go. These assertions replace the retired source map.
 func TestPlatformSkillTeachesTheParserContract(t *testing.T) {
 	const uuid = "7f3a1b2c-0000-4000-8000-000000000abc"
 
@@ -750,6 +867,35 @@ func TestPlatformSkillTeachesTheParserContract(t *testing.T) {
 			name:    "all uses the literal all",
 			content: "[@all](mention://all/all) heads up",
 			want:    []util.Mention{{Type: "all", ID: "all"}},
+		},
+		{
+			name:    "empty label cannot trigger an agent",
+			content: "[](mention://agent/" + uuid + ")",
+		},
+		{
+			name:    "script content cannot make an agent label visible",
+			content: "[<script>Agent</script>@](mention://agent/" + uuid + ")",
+		},
+		{
+			name:    "template content cannot make an agent label visible",
+			content: "[<template>Agent</template>@](mention://agent/" + uuid + ")",
+		},
+		{
+			name:    "reference link cannot trigger an agent",
+			content: "[@Agent][target]\n\n[target]: mention://agent/" + uuid,
+		},
+		{
+			name:    "inline code example is inert",
+			content: "`[@Agent](mention://agent/" + uuid + ")`",
+		},
+		{
+			name:    "details diff example is inert",
+			content: "<details>\n<summary>Instructions</summary>\n\n```diff\n+ [@Agent](mention://agent/" + uuid + ")\n```\n\n</details>",
+		},
+		{
+			name:    "copied example in prose parses",
+			content: "[@Agent](mention://agent/" + uuid + ") please review",
+			want:    []util.Mention{{Type: "agent", ID: uuid}},
 		},
 		{
 			// Skill: "Using the wrong type for a real UUID still parses — it

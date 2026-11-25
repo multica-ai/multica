@@ -203,9 +203,13 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		startTime := time.Now()
 		var lastAssistantText string
 		var finalResultText string
+		var resultErrorText string
 		sawResult := false
 		resultIsError := false
 		sawBackgroundTask := false
+		sawStartedEvent := false
+		topLevelError := ""
+		fatalStartupError := false
 		var sessionID string
 		usage := make(map[string]TokenUsage)
 		seenUsage := make(map[string]struct{})
@@ -222,7 +226,8 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 			_ = stdout.Close()
 		}()
 
-		scanner := newAgentStreamScanner(stdout)
+		countedStdout := &byteCountingReader{Reader: stdout}
+		scanner := newAgentStreamScanner(countedStdout)
 
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
@@ -239,6 +244,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 
 			switch msg.Type {
 			case "assistant":
+				sawStartedEvent = true
 				assistantEventCount++
 				turn := b.handleAssistant(msg, msgCh, usage, seenUsage)
 				toolUseCount += turn.toolUses
@@ -247,8 +253,10 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 				}
 				lastAssistantText = turn.resolveFallback(lastAssistantText)
 			case "user":
+				sawStartedEvent = true
 				b.handleUser(msg, msgCh)
 			case "system":
+				sawStartedEvent = true
 				if msg.SessionID != "" {
 					sessionID = msg.SessionID
 				}
@@ -265,11 +273,34 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 				sawResult = true
 				finalResultText = msg.ResultText
 				resultIsError = msg.IsError
+				resultErrorText = ""
+				if msg.IsError {
+					resultErrorText = codebuddyResultError(msg)
+				}
 				sessionID = msg.SessionID
-				if resultUsage := codebuddyResultUsage(msg, opts.Model); len(resultUsage) > 0 {
+				if resultUsage := codebuddyResultUsage(msg, opts.Model, opts.ResumeSessionID != ""); len(resultUsage) > 0 {
 					usage = resultUsage
 				}
 				closeStdin()
+			case "error":
+				// Startup failures can leave CodeBuddy alive and silent (issue
+				// #9200). Once a run has emitted system/assistant activity, the
+				// same event can be recoverable, so keep the process running.
+				if sawResult || fatalStartupError {
+					break
+				}
+				topLevelError = strings.TrimSpace(msg.Error)
+				if topLevelError == "" {
+					topLevelError = "codebuddy emitted a top-level error event without details"
+				}
+				if !sawStartedEvent && runCtx.Err() == nil {
+					fatalStartupError = true
+					// Cancel only before the run starts; this also releases the
+					// scanner and cmd.Wait when the CLI remains alive.
+					cancel()
+				} else {
+					trySend(msgCh, Message{Type: MessageLog, Level: "error", Content: topLevelError})
+				}
 			case "log":
 				if msg.Log != nil {
 					trySend(msgCh, Message{
@@ -312,14 +343,23 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 			exitErr,
 			sessionID,
 			streamTerminalState{
-				lastAssistantText: lastAssistantText,
-				finalResultText:   finalResultText,
-				sawResult:         sawResult,
-				resultIsError:     resultIsError,
-				scanErr:           scanErr,
+				lastAssistantText:   lastAssistantText,
+				finalResultText:     finalResultText,
+				sawResult:           sawResult,
+				resultIsError:       resultIsError,
+				scanErr:             scanErr,
+				terminalReasonError: resultErrorText,
 			},
 			completionGuardError,
 		)
+		// A startup error explains our own cancellation. After the run has
+		// started, use its last error only if it exited without a result;
+		// preserve an external cancellation or timeout otherwise.
+		if topLevelError != "" && !sawResult && (fatalStartupError || runCtx.Err() == nil) {
+			finalStatus = "failed"
+			finalOutput = ""
+			finalError = topLevelError
+		}
 
 		// cmd.Wait() has returned — stderrBuf.Tail() is complete. Resume
 		// rejection phrases often land only on stderr (mirror Claude MUL-4966).
@@ -327,7 +367,8 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		if finalError != "" {
 			finalError = withAgentStderr(finalError, "codebuddy", stderrTail)
 		}
-		logStreamProtocolObservation(b.cfg.Logger, streamProtocolObservation{
+		// Context shutdown closes stdout itself; exclude that read error.
+		observation := streamProtocolObservation{
 			provider:                   "codebuddy",
 			cliVersion:                 b.cfg.CLIVersion,
 			model:                      opts.Model,
@@ -340,10 +381,14 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 			resultIsError:              resultIsError,
 			resultBytes:                len(finalResultText),
 			lastAssistantBytes:         len(lastAssistantText),
-			scannerError:               scanErr != nil,
+			scannerError:               scanErr != nil && runCtx.Err() == nil,
 			unreadableAssistantCount:   unreadableAssistantCount,
 			anthropicBaseURLConfigured: strings.TrimSpace(b.cfg.Env["ANTHROPIC_BASE_URL"]) != "",
-		})
+		}
+		logStreamProtocolObservation(b.cfg.Logger, observation)
+		if finalError != "" {
+			finalError = codebuddyFailureDiagnostic(finalError, observation, countedStdout.bytes, stderrBuf.TotalBytes())
+		}
 
 		b.cfg.Logger.Info("codebuddy finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
@@ -534,17 +579,33 @@ func writeCodebuddyInput(w io.Writer, prompt string) error {
 
 const codebuddyDisableBackgroundTasksEnv = "CODEBUDDY_CODE_DISABLE_BACKGROUND_TASKS"
 
-// buildCodebuddyEnv merges task env and always forces background tasks off.
+// CodeBuddy's PowerShell tool moves a command to the background when it hits
+// its foreground timeout and only honors this variable — the headless
+// background-task disable above does not stop it (issue #9200).
+const codebuddyDisableBashAutoBackgroundEnv = "CODEBUDDY_BASH_AUTO_BACKGROUND_DISABLED"
+
+// A user-scope SERVER__PORT (shared by several tools' configs) pins every
+// codebuddy run's internal HTTP server to one port; a second concurrent run
+// then dies with EADDRINUSE before doing any work (issue #9200). Port 0 lets
+// the OS assign a free port per run.
+const codebuddyInternalPortEnv = "SERVER__PORT"
+
+// buildCodebuddyEnv merges task env and always forces background tasks off,
+// a random internal HTTP port and the PowerShell auto-background disable.
 // Multica's adapter closes stdin after the first result; CodeBuddy's
 // background lifecycle can push task_notification after that point, which we
-// cannot observe. The official CLI documents this variable for exactly that
-// headless shape (https://www.codebuddy.ai/docs/cli/headless).
+// cannot observe. The official CLI documents the disable variable for exactly
+// that headless shape (https://www.codebuddy.ai/docs/cli/headless).
 //
-// Append the forced entry last so os/exec's platform-aware dedup
-// (case-insensitive on Windows, last-wins) keeps our "=1" even when the
+// Append the forced entries last so os/exec's platform-aware dedup
+// (case-insensitive on Windows, last-wins) keeps them even when the
 // inherited or custom_env key differs only by case.
 func buildCodebuddyEnv(extra map[string]string) []string {
-	return append(buildEnv(extra), codebuddyDisableBackgroundTasksEnv+"=1")
+	return append(buildEnv(extra),
+		codebuddyInternalPortEnv+"=0",
+		codebuddyDisableBashAutoBackgroundEnv+"=1",
+		codebuddyDisableBackgroundTasksEnv+"=1",
+	)
 }
 
 // codebuddySystemIsBackgroundTask reports CodeBuddy's real background-task
@@ -568,11 +629,17 @@ type codebuddySDKMessage struct {
 	Model           string          `json:"model,omitempty"`
 	ParentToolUseID string          `json:"parent_tool_use_id,omitempty"`
 
+	// Top-level error events can be fatal during startup or recoverable once
+	// the run has begun; the message is inline rather than in a result event.
+	Error string `json:"error,omitempty"`
+
 	// result fields — CodeBuddy failures use is_error + errors/errors_info;
 	// there is no Claude-style terminal_reason=prompt_too_long signal in the
 	// shipped @tencent-ai/codebuddy-code 2.150.0 protocol.
 	ResultText string                               `json:"result,omitempty"`
 	IsError    bool                                 `json:"is_error,omitempty"`
+	Errors     json.RawMessage                      `json:"errors,omitempty"`
+	ErrorsInfo json.RawMessage                      `json:"errors_info,omitempty"`
 	DurationMs float64                              `json:"duration_ms,omitempty"`
 	NumTurns   int                                  `json:"num_turns,omitempty"`
 	Usage      *codebuddyUsage                      `json:"usage,omitempty"`
@@ -629,7 +696,7 @@ type codebuddyControlRequestPayload struct {
 	Input    json.RawMessage `json:"input,omitempty"`
 }
 
-func codebuddyResultUsage(msg codebuddySDKMessage, fallbackModel string) map[string]TokenUsage {
+func codebuddyResultUsage(msg codebuddySDKMessage, fallbackModel string, isResume bool) map[string]TokenUsage {
 	if len(msg.ModelUsage) > 0 {
 		usage := make(map[string]TokenUsage, len(msg.ModelUsage))
 		for model, u := range msg.ModelUsage {
@@ -646,6 +713,13 @@ func codebuddyResultUsage(msg codebuddySDKMessage, fallbackModel string) map[str
 		if len(usage) > 0 {
 			return usage
 		}
+	}
+
+	// CodeBuddy's modelUsage is per execution, but usage includes earlier
+	// executions in a resumed session. Without modelUsage, retain this run's
+	// assistant-event accounting rather than replacing it with session totals.
+	if isResume {
+		return nil
 	}
 
 	model := msg.Model

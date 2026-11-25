@@ -396,6 +396,15 @@ describe("reply annotations", () => {
     expect(useCommentDraftStore.getState().addAnnotation("edit:issue:comment", annotation)).toBeUndefined();
   });
 
+  it("keeps chat annotation drafts without text or a reply target", () => {
+    const store = useCommentDraftStore.getState();
+    expect(store.addAnnotation("chat:session-1", { ...annotation, sourceCommentId: "message-1" })).toBe("a");
+    expect(store.getAnnotations("chat:session-1")[0]?.sourceCommentId).toBe("message-1");
+    expect(useCommentDraftStore.getState().drafts["chat:session-1"]?.replyTarget).toBeUndefined();
+    store.removeAnnotation("chat:session-1", "a");
+    expect(useCommentDraftStore.getState().drafts["chat:session-1"]).toBeUndefined();
+  });
+
   it("reopens duplicate ranges, bounds collection, and changes identity only on actual edits", () => {
     const store = useCommentDraftStore.getState();
     expect(store.addAnnotation(key, annotation)).toBe("a");
@@ -443,6 +452,30 @@ describe("reply annotations", () => {
     resetAllRegisteredDrafts();
     expect(useCommentDraftStore.getState().getAnnotations(key)).toHaveLength(0);
     setCurrentWorkspace(null, null);
+  });
+
+  it("persists an in-progress pending annotation across rehydration and clears it on dismiss or clearDraft", async () => {
+    const store = useCommentDraftStore.getState();
+    store.setPendingAnnotation(key, { annotation, existing: false });
+    expect(store.getAnnotations(key)).toHaveLength(0);
+    expect(useCommentDraftStore.getState().drafts[key]?.replyTarget).toBeUndefined();
+    expect(store.getPendingAnnotation(key)).toEqual({ annotation, existing: false });
+
+    const before = useCommentDraftStore.getState().drafts[key];
+    store.setPendingAnnotation(key, { annotation: { ...annotation }, existing: false });
+    expect(useCommentDraftStore.getState().drafts[key]).toBe(before);
+
+    await flush();
+    useCommentDraftStore.getState().drafts = {};
+    await useCommentDraftStore.persist.rehydrate();
+    expect(useCommentDraftStore.getState().getPendingAnnotation(key)).toEqual({ annotation, existing: false });
+
+    useCommentDraftStore.getState().clearPendingAnnotation(key);
+    expect(useCommentDraftStore.getState().drafts[key]).toBeUndefined();
+
+    useCommentDraftStore.getState().setPendingAnnotation(key, { annotation, existing: false });
+    useCommentDraftStore.getState().clearDraft(key);
+    expect(useCommentDraftStore.getState().getPendingAnnotation(key)).toBeUndefined();
   });
 
 });

@@ -6,8 +6,15 @@ import type { AgentTask } from "@multica/core/types";
 const mockState = vi.hoisted(() => ({
   snapshot: [] as unknown[],
   summaries: [] as unknown[],
+  paused: [] as unknown[],
 }));
 
+vi.mock("./wakeup-condition-names", () => ({
+  useConditionNames: () => ({ status: (key: string) => key, label: () => undefined, property: () => undefined, actor: (_type: string, id: string) => id }),
+}));
+vi.mock("../../common/use-viewing-timezone", () => ({
+  useViewingTimezone: () => "UTC",
+}));
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
@@ -28,18 +35,41 @@ vi.mock("../../agents/components/agent-activity-hover-content", () => ({
   AgentActivityHoverContent: () => <div data-testid="activity-hover" />,
 }));
 
-vi.mock("../../i18n", () => ({
-  useT: () => ({
-    t: (
-      selector: (strings: typeof en) => string,
-      params: Record<string, unknown> = {},
-    ) =>
-      selector(en).replace(/{{(\w+)}}/g, (_, key: string) =>
-        String(params[key] ?? ""),
-      ),
-  }),
-  useLocale: () => "en",
-}));
+vi.mock("../../i18n", () => {
+  const pluralProxy = (obj: Record<string, unknown>): unknown =>
+    new Proxy(obj, {
+      get(target, prop: string) {
+        if (prop in target) {
+          const val = target[prop];
+          return val && typeof val === "object"
+            ? pluralProxy(val as Record<string, unknown>)
+            : val;
+        }
+        if (`${prop}_other` in target || `${prop}_one` in target) {
+          return (count: number) =>
+            (count === 1 ? target[`${prop}_one`] : target[`${prop}_other`]) ??
+            target[`${prop}_other`];
+        }
+        return undefined;
+      },
+    });
+  const proxiedEn = pluralProxy(en as unknown as Record<string, unknown>) as typeof en;
+  return {
+    useT: () => ({
+      t: (
+        selector: (strings: typeof en) => string | ((count: number) => string),
+        params: Record<string, unknown> = {},
+      ) => {
+        const raw = selector(proxiedEn);
+        const template = typeof raw === "function" ? raw(Number(params.count ?? 0)) : raw;
+        return template.replace(/{{(\w+)}}/g, (_, key: string) =>
+          String(params[key] ?? ""),
+        );
+      },
+    }),
+    useLocale: () => "en",
+  };
+});
 
 // The hover card only portals its content once open, so absence of the body
 // cannot distinguish "closed" from "not wired up". Mock the primitive instead
@@ -87,6 +117,10 @@ vi.mock("@tanstack/react-query", async () => {
             : mockState.snapshot,
         };
       }
+      if (opts.queryKey?.[0] === "issue-wakeup-paused")
+        return {
+          data: opts.select ? opts.select(mockState.paused) : mockState.paused,
+        };
       if (opts.queryKey?.[0] === "issue-wakeup-summaries")
         return {
           data: opts.select
@@ -119,6 +153,7 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
 }
 
 beforeEach(() => {
+  mockState.paused = [];
   cleanup();
   mockState.snapshot = [makeTask()];
   mockState.summaries = [];
@@ -177,9 +212,23 @@ it("shows waiting and aggregate count even without an active run", () => {
   mockState.snapshot = [];
   mockState.summaries = [eventSummary];
   render(<IssueAgentActivityIndicator issueId="issue-1" hoverCard={false} />);
-  expect(screen.getByText("Waiting for trigger")).toBeInTheDocument();
+  // The cue says what the issue waits for, in a few words.
+  expect(screen.getByText("Waiting for a run to end")).toBeInTheDocument();
   expect(screen.getByText("+1")).toBeInTheDocument();
   expect(screen.queryByTestId("agent-avatar-stack")).toBeNull();
+});
+it("names the person a reply wait is for", () => {
+  mockState.snapshot = [];
+  mockState.summaries = [{ ...eventSummary, event_types: ["comment.created"], filter_actor_type: "member", filter_actor_id: "u1", filter_actor_name: "Jiayuan" }];
+  render(<IssueAgentActivityIndicator issueId="issue-1" hoverCard={false} />);
+  expect(screen.getByText("Waiting for Jiayuan to reply")).toBeInTheDocument();
+});
+it("flags a rule the platform paused when nothing else is waiting", () => {
+  mockState.snapshot = [];
+  mockState.summaries = [];
+  mockState.paused = [{ issue_id: "issue-1", id: "wake-9", agent_id: "agent-1", paused_reason: "loop" }];
+  render(<IssueAgentActivityIndicator issueId="issue-1" hoverCard={false} />);
+  expect(screen.getByText("Wakeup paused")).toBeInTheDocument();
 });
 it("prioritizes active runs, marking wakeup origin separately from future count", () => {
   mockState.snapshot = [

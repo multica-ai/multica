@@ -40,6 +40,15 @@ WHERE id = ANY(@ids::uuid[])
   AND workspace_id = @workspace_id
 ORDER BY created_at ASC, id ASC;
 
+-- name: ListCommentOriginsForIssue :many
+-- Author and time of the live comments in @ids, without their bodies: the
+-- issue attachment list labels each file with the comment that delivered it.
+SELECT id, author_type, author_id, created_at FROM comment
+WHERE id = ANY(@ids::uuid[])
+  AND issue_id = @issue_id
+  AND workspace_id = @workspace_id
+  AND deleted_at IS NULL;
+
 -- name: ListChildCommentsForParents :many
 -- Fetch one descendant level for a bounded set of parent comments. Each parent
 -- maps back to its thread root in the Go breadth-first walk, avoiding one query
@@ -104,16 +113,30 @@ thread_stats AS (
            MAX(comment_created_at)::timestamptz AS last_activity_at
     FROM membership
     GROUP BY root_id
+),
+thread_resolutions AS (
+    SELECT DISTINCT ON (m.root_id)
+           m.root_id,
+           c.id AS resolution_id,
+           c.content AS resolution_content
+    FROM membership m
+    JOIN comment c ON c.id = m.id
+    WHERE m.id <> m.root_id
+      AND c.resolved_at IS NOT NULL
+    ORDER BY m.root_id, c.resolved_at DESC, c.created_at ASC, c.id ASC
 )
 SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
        c.created_at, c.updated_at, c.parent_id, c.workspace_id,
        c.resolved_at, c.resolved_by_type, c.resolved_by_id,
        c.source_task_id, c.quick_action_id, c.revision, c.deleted_at,
        ts.reply_count AS reply_count,
-       ts.last_activity_at AS last_activity_at
+       ts.last_activity_at AS last_activity_at,
+       tr.resolution_id AS resolution_id,
+       tr.resolution_content AS resolution_content
 FROM selected_roots sr
 JOIN comment c ON c.id = sr.id
 JOIN thread_stats ts ON ts.root_id = sr.id
+LEFT JOIN thread_resolutions tr ON tr.root_id = sr.id
 ORDER BY c.created_at ASC, c.id ASC;
 
 -- name: ListRootCommentsSinceForIssue :many
@@ -150,16 +173,30 @@ thread_stats AS (
            MAX(comment_created_at)::timestamptz AS last_activity_at
     FROM membership
     GROUP BY root_id
+),
+thread_resolutions AS (
+    SELECT DISTINCT ON (m.root_id)
+           m.root_id,
+           c.id AS resolution_id,
+           c.content AS resolution_content
+    FROM membership m
+    JOIN comment c ON c.id = m.id
+    WHERE m.id <> m.root_id
+      AND c.resolved_at IS NOT NULL
+    ORDER BY m.root_id, c.resolved_at DESC, c.created_at ASC, c.id ASC
 )
 SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
        c.created_at, c.updated_at, c.parent_id, c.workspace_id,
        c.resolved_at, c.resolved_by_type, c.resolved_by_id,
        c.source_task_id, c.quick_action_id, c.revision, c.deleted_at,
        ts.reply_count AS reply_count,
-       ts.last_activity_at AS last_activity_at
+       ts.last_activity_at AS last_activity_at,
+       tr.resolution_id AS resolution_id,
+       tr.resolution_content AS resolution_content
 FROM selected_roots sr
 JOIN comment c ON c.id = sr.id
 JOIN thread_stats ts ON ts.root_id = sr.id
+LEFT JOIN thread_resolutions tr ON tr.root_id = sr.id
 ORDER BY c.created_at ASC, c.id ASC;
 
 -- name: ListThreadCommentsForIssuePaged :many
@@ -375,25 +412,67 @@ LIMIT 1;
 -- recorded in this run's planned inputs. Timestamp-only implicit agent replies
 -- remain excluded. Replays are scoped to the completing agent, never a fan-out.
 -- Ordered ASC so later comments coalesce onto the follow-up created by the first.
-SELECT * FROM comment
-WHERE issue_id = @issue_id
-  AND (id = ANY(@planned_comment_ids::uuid[])
-       OR comment_thread_root_id(id) = sqlc.narg('comment_thread_id')::uuid)
+SELECT c.* FROM comment c
+WHERE c.issue_id = @issue_id
+  AND (c.id = ANY(@planned_comment_ids::uuid[])
+       OR comment_thread_root_id(c.id) = sqlc.narg('comment_thread_id')::uuid
+       -- An agent comment that steered this run but was never read took the
+       -- place of the follow-up its mention would have queued; replay it.
+       OR (c.author_type = 'agent' AND EXISTS (
+           SELECT 1 FROM task_supplement steered
+           WHERE steered.comment_id = c.id AND steered.task_id = sqlc.narg('task_id')::uuid
+             AND steered.status <> 'delivered'
+       )))
   -- A deleted comment is no longer input, even when replies keep its row.
-  AND deleted_at IS NULL
+  AND c.deleted_at IS NULL
+  -- A member comment that steered this agent's running turn belongs to that
+  -- turn, regardless of delivery status: failed delivery must not become an
+  -- automatic new run, because the member sees the failure and can retry or
+  -- send it as a new run. No one watches an agent's steering receipt, so an
+  -- agent comment belongs to the turn only once delivered; otherwise it is
+  -- replayed like any other mention. The same comment still reconciles
+  -- normally for any other agent it addressed without steering.
+  AND NOT EXISTS (
+      SELECT 1 FROM task_supplement s
+      JOIN agent_task_queue bound ON bound.id = s.task_id
+      WHERE s.comment_id = c.id AND s.workspace_id = c.workspace_id
+        AND bound.agent_id = @agent_id
+        AND (c.author_type <> 'agent' OR s.status = 'delivered')
+  )
+  -- An explicit member/agent cancellation acknowledges the planned input for
+  -- this agent only for completing tasks already in flight at cancellation;
+  -- automatic cancellations deliberately remain replayable.
+  AND NOT EXISTS (
+      SELECT 1
+      FROM agent_task_queue cancelled
+      WHERE cancelled.issue_id = c.issue_id
+        AND cancelled.agent_id = @agent_id
+        AND cancelled.status = 'cancelled'
+        AND cancelled.cancelled_by_type IN ('member', 'agent')
+        AND cancelled.cancelled_by_id IS NOT NULL
+        AND cancelled.completed_at IS NOT NULL
+        AND cancelled.completed_at >= @since
+        AND c.updated_at <= cancelled.completed_at
+        AND (
+            cancelled.trigger_comment_id = c.id
+            OR c.id = ANY(cancelled.coalesced_comment_ids)
+        )
+  )
+  -- Nor does a comment whose author chose not to start this agent for it.
+  AND NOT COALESCE(@agent_id::uuid = ANY(c.suppressed_agent_ids), false)
   AND (
       (
-          author_type IN ('member', 'agent')
-          AND (created_at > @since OR id = ANY(@planned_comment_ids::uuid[]))
+          c.author_type IN ('member', 'agent')
+          AND (c.created_at > @since OR c.id = ANY(@planned_comment_ids::uuid[]))
       )
       OR (
-          author_type = 'system'
-          AND type = 'progress_update'
-          AND source_task_id IS NOT NULL
-          AND id = ANY(@planned_comment_ids::uuid[])
+          c.author_type = 'system'
+          AND c.type = 'progress_update'
+          AND c.source_task_id IS NOT NULL
+          AND c.id = ANY(@planned_comment_ids::uuid[])
       )
   )
-ORDER BY created_at ASC, id ASC;
+ORDER BY c.created_at ASC, c.id ASC;
 
 -- name: GetComment :one
 SELECT * FROM comment
@@ -445,8 +524,8 @@ WITH touched_issue AS (
     WHERE issue.id = sqlc.arg(issue_id) AND issue.workspace_id = sqlc.arg(workspace_id)
     RETURNING issue.id, issue.workspace_id, issue.revision
 ), inserted_comment AS (
-    INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, source_task_id, quick_action_id, via_plugin_id, id)
-    SELECT ti.id, ti.workspace_id, sqlc.arg(author_type), sqlc.arg(author_id), sqlc.arg(content), sqlc.arg(type), sqlc.narg(parent_id), sqlc.narg(source_task_id), sqlc.narg(quick_action_id), sqlc.narg(via_plugin_id), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
+    INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, source_task_id, quick_action_id, via_plugin_id, suppressed_agent_ids, id)
+    SELECT ti.id, ti.workspace_id, sqlc.arg(author_type), sqlc.arg(author_id), sqlc.arg(content), sqlc.arg(type), sqlc.narg(parent_id), sqlc.narg(source_task_id), sqlc.narg(quick_action_id), sqlc.narg(via_plugin_id), sqlc.narg(suppressed_agent_ids)::uuid[], COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
     FROM touched_issue ti
     RETURNING *
 )
@@ -520,6 +599,11 @@ WITH locked_issue AS MATERIALIZED (
     UPDATE comment SET
         content = $2,
         source_task_id = sqlc.narg(source_task_id)::uuid,
+        -- New text re-decides which agents it must not start, under the same
+        -- revision check as the text itself.
+        suppressed_agent_ids = CASE WHEN target.content IS DISTINCT FROM $2
+                                    THEN sqlc.narg(suppressed_agent_ids)::uuid[]
+                                    ELSE comment.suppressed_agent_ids END,
         revision = comment.revision + CASE WHEN target.did_change THEN 1 ELSE 0 END,
         updated_at = CASE WHEN target.did_change THEN now() ELSE comment.updated_at END
     FROM target
@@ -843,3 +927,33 @@ FROM comment c
 JOIN ancestor_ids path ON path.id = c.id
 ORDER BY c.id
 FOR UPDATE OF c;
+
+-- name: ListThreadMemberAuthors :many
+-- The members who wrote any other comment in the thread @comment_id belongs
+-- to: its root and every reply under that root, at any depth. Used by the
+-- bystander delivery tier, so a reply in a thread you took part in still
+-- reaches you on an issue you are only watching (MUL-9343).
+WITH RECURSIVE root_of AS (
+    SELECT c.id, c.parent_id
+    FROM comment c
+    WHERE c.id = @comment_id AND c.workspace_id = @workspace_id
+    UNION ALL
+    SELECT p.id, p.parent_id
+    FROM comment p
+    JOIN root_of r ON p.id = r.parent_id
+),
+thread AS (
+    SELECT c.id
+    FROM comment c
+    WHERE c.id = (SELECT id FROM root_of WHERE parent_id IS NULL LIMIT 1)
+    UNION ALL
+    SELECT c.id
+    FROM comment c
+    JOIN thread t ON c.parent_id = t.id
+)
+SELECT DISTINCT c.author_id
+FROM comment c
+JOIN thread t ON t.id = c.id
+WHERE c.id <> @comment_id
+  AND c.author_type = 'member'
+  AND c.deleted_at IS NULL;

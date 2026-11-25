@@ -1,14 +1,20 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
+import {
+  api,
+  ApiError,
+  DuplicateIssueErrorBodySchema,
+  type DuplicateIssueErrorBody,
+  parseWithFallback,
+} from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import {
   completeOnboarding,
   ONBOARDING_STEP_ORDER,
   saveQuestionnaire,
   useBootstrapMika,
-  useWelcomeStore,
   type OnboardingStep,
   type QuestionnaireAnswers,
 } from "@multica/core/onboarding";
@@ -21,8 +27,14 @@ import { StepWorkspace } from "./steps/step-workspace";
 import { StepRuntimeConnect } from "./steps/step-runtime-connect";
 import { StepPlatformFork } from "./steps/step-platform-fork";
 import { OnboardingLogoutButton } from "./components/onboarding-logout-button";
-import { getMikaOnboarding, pickContentLang } from "./templates";
+import {
+  getMikaOnboarding,
+  INSTALL_RUNTIME_ISSUE_BODY,
+  INSTALL_RUNTIME_ISSUE_TITLE,
+  pickContentLang,
+} from "./templates";
 import { useT } from "../i18n";
+import { issueRouteRef, type IssueRouteRef } from "@multica/core/paths";
 
 const EMPTY_QUESTIONNAIRE: QuestionnaireAnswers = {
   source: [],
@@ -82,21 +94,23 @@ function mergeQuestionnaire(
 /**
  * Shell's onComplete contract carries the workspace plus an optional
  * destination. Runtime-connected onboarding opens the real Mika conversation
- * started by the final step; other exits land on the workspace issue list.
+ * started by the final step; runtime-skipped onboarding opens the guide issue
+ * it created; the Welcome skip lands on the workspace issue list.
  *
  * Three exit shapes feed onComplete:
  *   - Skip-existing (Welcome): completeOnboarding marks onboarded; navigate
  *     to the existing workspace's issue list.
- *   - Runtime-skipped (no runtime on Step 3): completeOnboarding marks
- *     onboarded; we push a {choice:"skip"} welcome signal and navigate
- *     to the workspace. The welcome hook in the workspace shell creates
- *     one install-runtime guide issue on landing.
+ *   - Runtime-skipped (no runtime on Step 3): create one install-runtime guide
+ *     issue assigned to the member, mark onboarding complete, and open that
+ *     issue. Once a runtime appears, the Runtimes page offers the same Mika
+ *     bootstrap used by the connected path.
  *   - Runtime-connected: create or repair the workspace's Mika on the selected
  *     runtime, start one hidden onboarding kickoff, mark onboarding complete,
  *     and open Mika's real chat. No fixed specialist team is created.
  *
- * This file never touches createAgent / createIssue. The runtime-skipped
- * guide flow remains in `packages/views/workspace/welcome-after-onboarding.tsx`.
+ * Both workspace-provisioning exits finish their writes BEFORE
+ * completeOnboarding: it refreshes the user, and the web shell unmounts this
+ * flow and redirects as soon as `onboarded_at` is set.
  */
 interface OnboardingFlowProps {
   onComplete: (
@@ -124,11 +138,7 @@ interface OnboardingFlowProps {
   runtimesPending?: boolean;
 }
 
-export function OnboardingFlow(props: OnboardingFlowProps) {
-  return <OnboardingStepFlow {...props} />;
-}
-
-function OnboardingStepFlow({
+export function OnboardingFlow({
   onComplete,
   mode = "first_run",
   onCancel,
@@ -158,6 +168,11 @@ function OnboardingStepFlow({
   // rail. Only the workspace step sets it today.
   const [stepBusy, setStepBusy] = useState(false);
   const bootstrapMika = useBootstrapMika(workspace?.id ?? "");
+  // Keyed by workspace so retrying Skip after completeOnboarding failed reuses
+  // the guide issue instead of creating a second one.
+  const guideIssueRef = useRef<{ workspaceId: string; issueRef: IssueRouteRef } | null>(
+    null,
+  );
 
   // Fetched at Step 0 + Step 2. Step 2 uses it to detect a pre-existing
   // workspace from an earlier abandoned onboarding (so StepWorkspace shows
@@ -286,6 +301,46 @@ function OnboardingStepFlow({
         }
         return;
       }
+      let issueRef =
+        guideIssueRef.current?.workspaceId === workspace.id
+          ? guideIssueRef.current.issueRef
+          : null;
+      if (!issueRef) {
+        const contentLang = pickContentLang(i18n.language);
+        try {
+          const issue = await api.createIssue(
+            {
+              title: INSTALL_RUNTIME_ISSUE_TITLE[contentLang],
+              description: INSTALL_RUNTIME_ISSUE_BODY[contentLang],
+              status: "in_progress",
+              priority: "high",
+              assignee_type: "member",
+              assignee_id: user.id,
+            },
+            workspace.slug,
+          );
+          issueRef = issueRouteRef(issue);
+        } catch (err) {
+          // A reload, or a create whose response was lost, leaves the guide
+          // from an earlier attempt in place; the duplicate guard then
+          // answers with that issue, which is the one to open.
+          const duplicate =
+            err instanceof ApiError && err.status === 409
+              ? parseWithFallback<DuplicateIssueErrorBody | null>(
+                  err.body,
+                  DuplicateIssueErrorBodySchema,
+                  null,
+                  { endpoint: "POST /api/issues (active_duplicate_issue)" },
+                )
+              : null;
+          if (!duplicate) {
+            toast.error(t(($) => $.errors.guide_failed));
+            return;
+          }
+          issueRef = issueRouteRef(duplicate.issue);
+        }
+        guideIssueRef.current = { workspaceId: workspace.id, issueRef };
+      }
       try {
         await completeOnboarding("runtime_skipped", workspace.id);
       } catch (err) {
@@ -294,13 +349,9 @@ function OnboardingStepFlow({
         );
         return;
       }
-      useWelcomeStore.getState().set({
-        workspaceId: workspace.id,
-        choice: "skip",
-      });
-      onComplete(workspace, undefined);
+      onComplete(workspace, { kind: "issue", issueRef });
     },
-    [answers, bootstrapMika, i18n.language, workspace, onComplete, t],
+    [answers, bootstrapMika, i18n.language, workspace, onComplete, t, user.id],
   );
 
   const handleBack = useCallback((from: OnboardingStep) => {
@@ -328,7 +379,7 @@ function OnboardingStepFlow({
   // reach the workspace step, whose own back button means "leave" — and
   // leaving there would strand a workspace with no runtime, no Mika, and no
   // guidance. The remaining exits both end somewhere coherent: Skip runs the
-  // runtime-skipped path (guide issue + land in the new workspace), and
+  // runtime-skipped path (create the guide issue and open it), and
   // continuing provisions Mika.
   // Log out lives at the foot of the progress rail rather than pinned to the
   // window corner: pinned put it outside the measure and above Back, which
@@ -429,7 +480,7 @@ function OnboardingStepFlow({
 export type OnboardingMode = "first_run" | "new_workspace";
 
 export type OnboardingDestination =
-  | { kind: "issue"; issueId: string }
+  | { kind: "issue"; issueRef: IssueRouteRef }
   | {
       kind: "chat";
       sessionId: string;

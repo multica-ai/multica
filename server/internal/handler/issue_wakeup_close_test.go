@@ -32,11 +32,8 @@ func TestIssueCloseStopsWakeupsInApplication(t *testing.T) {
 			testutil.Call(t, testHandler.BatchUpdateIssues, req).Want(http.StatusOK)
 		}},
 		{"merged pull request", func(t *testing.T, issue string) {
-			row, err := testHandler.Queries.GetIssue(ctx, parseUUID(issue))
-			if err != nil {
-				t.Fatal(err)
-			}
-			testHandler.advanceIssueToDone(ctx, row, testWorkspaceID)
+			linkMergedGitHubPRForTest(t, issue, "wake-close")
+			testHandler.maybeAutoCompleteIssue(ctx, parseUUID(testWorkspaceID), parseUUID(issue), nil)
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

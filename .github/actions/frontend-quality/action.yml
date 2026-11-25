@@ -3,20 +3,36 @@ description: Shared UI checks using the caller's installed dependencies
 runs:
   using: composite
   steps:
+    # Same entry point as local runs, so a new scripts/**/*.test.mjs file is
+    # picked up here without being listed.
+    - name: Test repository scripts
+      shell: bash
+      run: pnpm test:scripts
+
     - name: Check packages/ui wildcard exports
       shell: bash
-      run: |
-        bash scripts/check-ui-wildcard-exports.test.sh
-        node scripts/check-ui-wildcard-exports.mjs
+      run: node scripts/check-ui-wildcard-exports.mjs
 
     - name: Check UI radius tokens
       shell: bash
-      run: |
-        node --test scripts/check-ui-radius-tokens.test.mjs
-        node scripts/check-ui-radius-tokens.mjs
+      run: node scripts/check-ui-radius-tokens.mjs
 
-    # Keep existing knip findings advisory in either caller.
+    - name: Check UI transition properties
+      shell: bash
+      run: node scripts/check-ui-transition-properties.mjs
+
+    - name: Check UI focus outlines
+      shell: bash
+      run: node scripts/check-ui-focus-outlines.mjs
+
+    - name: Check tests declare the files they read outside their package
+      shell: bash
+      run: node scripts/check-test-cache-inputs.mjs
+
+    - name: Check shared dependencies use the pnpm catalog
+      shell: bash
+      run: node scripts/check-dependency-catalog.mjs
+
     - name: Check for dead code and phantom dependencies (knip)
-      continue-on-error: true
       shell: bash
       run: pnpm knip

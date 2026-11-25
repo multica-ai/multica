@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -54,7 +55,27 @@ const (
 	// dshMulticaProfileName is the profile the backend launches. Kept beside
 	// the install command so the two cannot drift.
 	dshMulticaProfileName = "multica"
+
+	// dshMulticaRuntimePackage is the bridge a multica profile has to load
+	// before this daemon will treat the profile as installed. `dsh plugin add`
+	// records that name in dependencies and, when the package is a bundle, in
+	// dsh.profile.bundles — including installs from git, a directory, or a tarball.
+	dshMulticaRuntimePackage = "@multica-ai/dsh-runtime"
+	dshLegacyRuntimePackage  = "dsh-profile-multica"
+	dshBaseProfileBundle     = "@deepseek-ai/dsh-base"
 )
+
+// dshProfileManifest is the slice of a profile package.json this daemon reads.
+// Dependency values are left raw; only their presence matters when separating
+// an existing configuration from an empty install skeleton.
+type dshProfileManifest struct {
+	Dependencies map[string]json.RawMessage `json:"dependencies"`
+	DSH          struct {
+		Profile struct {
+			Bundles []string `json:"bundles"`
+		} `json:"profile"`
+	} `json:"dsh"`
+}
 
 // dshProvisionTimeout bounds the whole install. It is a package manager
 // talking to a registry, so it is generous next to the CLI probes.
@@ -62,19 +83,43 @@ const dshProvisionTimeout = 3 * time.Minute
 
 // dshMulticaProfilePresent reports whether the `multica` profile is installed.
 //
-// A stat, deliberately. This is the cheap change detector the discovery loop
-// runs on every tick, and both things that change the answer — `dsh plugin
-// --profile multica add` and a user removing the directory — create or remove
-// exactly this file. DSH decides a profile exists the same way: dsh-app-boot's
-// loadProfile falls back to a built-in template, or fails, when the manifest is
-// missing.
+// Installed means the manifest loads the Multica runtime bundle, not that the file
+// exists. A refused `dsh plugin add` leaves package.json behind with empty
+// dependencies and only DSH's template bundle; a stat of that file made every
+// later probe look transient and blocked the automatic install.
+//
+// A file that cannot be read or parsed still counts as installed. The daemon
+// cannot tell a broken manifest from one it should not overwrite, and guessing
+// "missing" is what starts an install.
 //
 // The authoritative question — "does --probe actually succeed?" — costs booting
-// a whole DSH process, so it stays in the probe round this signal forces.
+// a whole DSH process, so it stays in the probe round this signal forces. This
+// read is the cheap check the discovery loop runs on every tick.
 func dshMulticaProfilePresent() bool {
+	path := dshMulticaProfileManifestPath()
+	if path == "" {
+		return false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		// Missing is the only negative answer. A permission error or a file
+		// that is not a regular file stays "installed": this daemon will not
+		// treat something it cannot read as absent.
+		return !os.IsNotExist(err)
+	}
+	var manifest dshProfileManifest
+	if json.Unmarshal(data, &manifest) != nil {
+		return true
+	}
+	return dshProfileNamesRuntime(manifest)
+}
+
+// dshMulticaProfileManifestPath is <DSH_HOME>/profiles/multica/package.json.
+// An empty result means the home directory could not be resolved.
+func dshMulticaProfileManifestPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return false
+		return ""
 	}
 	// DSH_HOME is DSH's own override, and the profile store lives under it
 	// either way. Same resolution local_skills.go uses to find ~/.dsh/skills.
@@ -82,8 +127,46 @@ func dshMulticaProfilePresent() bool {
 	if dshHome == "" {
 		dshHome = filepath.Join(home, ".dsh")
 	}
-	_, err = os.Stat(filepath.Join(dshHome, "profiles", dshMulticaProfileName, "package.json"))
-	return err == nil
+	return filepath.Join(dshHome, "profiles", dshMulticaProfileName, "package.json")
+}
+
+// dshProfileNamesRuntime reports whether the manifest lists the Multica runtime
+// as a loaded profile bundle, without the legacy bridge.
+func dshProfileNamesRuntime(manifest dshProfileManifest) bool {
+	for _, bundle := range manifest.DSH.Profile.Bundles {
+		if bundle == dshLegacyRuntimePackage {
+			return false
+		}
+	}
+	for _, bundle := range manifest.DSH.Profile.Bundles {
+		if bundle == dshMulticaRuntimePackage {
+			return true
+		}
+	}
+	return false
+}
+
+// dshMulticaProfileNeedsMigration separates an existing bridge configuration
+// from a missing profile or the empty template left by a refused install.
+// Never provision over an existing bridge just because it is not usable.
+func dshMulticaProfileNeedsMigration() bool {
+	data, err := os.ReadFile(dshMulticaProfileManifestPath())
+	if err != nil {
+		return false
+	}
+	var manifest dshProfileManifest
+	if json.Unmarshal(data, &manifest) != nil || dshProfileNamesRuntime(manifest) {
+		return false
+	}
+	if len(manifest.Dependencies) > 0 {
+		return true
+	}
+	for _, bundle := range manifest.DSH.Profile.Bundles {
+		if bundle != dshBaseProfileBundle {
+			return true
+		}
+	}
+	return false
 }
 
 // dshProfileBundleSpecs returns the configured install candidates, in order,
@@ -190,21 +273,25 @@ const dshProvisionOutputBytes = 2048
 // colon and an @ before the next path separator, so "https://host:8443/p" and
 // "ssh://git@host/p" are left alone.
 //
-// Local to provisioning rather than added to pkg/redact's shared pattern list.
+// Local to DSH diagnostics rather than added to pkg/redact's shared pattern list.
 // redact.Text runs over every agent's task messages, comments and error text, so
 // a rule added there changes output for every provider; the case that needs it
 // here is one package manager's error text, and widening a shared filter is its
 // own change with its own blast radius.
 var dshProvisionURLCredentials = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.\-]*)://[^/?#\s:@]+:[^/?#\s@]+@`)
 
-// dshProvisionOutput renders captured output for a log line. Registry errors
+// Quoted credential fields also occur inside prefixed JSON diagnostic lines.
+var dshQuotedCredential = regexp.MustCompile(`(?i)("(?:api[_-]?key|api[_-]?secret|secret[_-]?key|secret|access[_-]?token|auth[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|database[_-]?url|db[_-]?(?:password|url)|redis[_-]?url|password|token|authorization)"\s*:\s*)"(?:\\.|[^"\\])*"`)
+
+// dshDiagnosticOutput renders captured probe/install diagnostics. Registry errors
 // routinely echo the request URL back, so URL credentials are scrubbed and the
 // shared redactor still runs for the token shapes it knows, before the text is
 // bounded.
-func dshProvisionOutput(raw []byte) string {
+func dshDiagnosticOutput(raw []byte) string {
 	text := dshProvisionURLCredentials.ReplaceAllString(
-		strings.TrimSpace(string(raw)), "$1://[REDACTED URL CREDENTIALS]@")
-	text = redact.Text(text)
+		strings.ToValidUTF8(strings.TrimSpace(string(raw)), "�"), "$1://[REDACTED URL CREDENTIALS]@")
+	text = dshQuotedCredential.ReplaceAllString(text, `${1}"[REDACTED CREDENTIAL]"`)
+	text = strings.ReplaceAll(redact.Text(text), "\x00", "")
 	if len(text) <= dshProvisionOutputBytes {
 		return text
 	}
@@ -214,7 +301,7 @@ func dshProvisionOutput(raw []byte) string {
 	// produces is an invalid-UTF-8 log line, which downstream JSON encoders
 	// rewrite into replacement characters.
 	tail := text[len(text)-dshProvisionOutputBytes:]
-	for len(tail) > 0 && !utf8.ValidString(tail[:1]) {
+	for len(tail) > 0 && !utf8.RuneStart(tail[0]) {
 		tail = tail[1:]
 	}
 	return "…" + tail
@@ -265,6 +352,9 @@ func dshProvisionCommand(dshPath, spec string) *exec.Cmd {
 // best-effort either way, and the missing-profile verdict stands until a probe
 // succeeds.
 func provisionDshMulticaProfile(ctx context.Context, dshPath string, logger *slog.Logger) error {
+	if dshMulticaProfileNeedsMigration() {
+		return fmt.Errorf("%s", dshProfileMigrationReason)
+	}
 	specs := dshProfileBundleSpecs()
 	if len(specs) == 0 {
 		return nil
@@ -274,6 +364,14 @@ func provisionDshMulticaProfile(ctx context.Context, dshPath string, logger *slo
 
 	var lastErr error
 	for i, spec := range specs {
+		// A profile may appear after discovery or after a failed candidate.
+		// Never continue installation over a now-populated profile.
+		if dshMulticaProfileNeedsMigration() {
+			return fmt.Errorf("%s", dshProfileMigrationReason)
+		}
+		if dshMulticaProfilePresent() {
+			return lastErr
+		}
 		output, err := processtree.CombinedOutput(ctx, dshProvisionCommand(dshPath, spec), 5*time.Second)
 		switch {
 		case err == nil && dshMulticaProfilePresent():
@@ -296,11 +394,15 @@ func provisionDshMulticaProfile(ctx context.Context, dshPath string, logger *slo
 			// done the job, and stopping on it would hide a later spec that
 			// would have.
 			lastErr = fmt.Errorf("dsh plugin --profile %s add (candidate %d of %d): reported success without creating the profile: %s",
-				dshMulticaProfileName, i+1, len(specs), dshProvisionOutput(output))
+				dshMulticaProfileName, i+1, len(specs), dshDiagnosticOutput(output))
 		default:
 			lastErr = fmt.Errorf("dsh plugin --profile %s add (candidate %d of %d): %w: %s",
-				dshMulticaProfileName, i+1, len(specs), err, dshProvisionOutput(output))
+				dshMulticaProfileName, i+1, len(specs), err, dshDiagnosticOutput(output))
 		}
+		// Leave the directory. A refused add can write a skeleton, and a failure
+		// can also land on a profile the user already had. dshMulticaProfilePresent
+		// treats a manifest that does not name the runtime as missing, so the
+		// next restart retries over it and --probe is not started.
 		logger.Warn("DSH runtime profile install failed",
 			"bundle_candidate", i+1, "candidates", len(specs), "error", lastErr)
 	}

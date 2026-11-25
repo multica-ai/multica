@@ -3,7 +3,28 @@ SELECT * FROM project
 WHERE workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR priority = sqlc.narg('priority'))
+  AND (sqlc.arg('include_archived')::boolean OR archived_at IS NULL)
 ORDER BY created_at DESC;
+
+-- name: ArchiveProject :one
+-- Guarded on archived_at IS NULL so a repeated archive keeps the first
+-- actor and time; no row means it was already archived (or is gone).
+UPDATE project SET
+    archived_at = now(),
+    archived_by_type = sqlc.narg('archived_by_type'),
+    archived_by_id = sqlc.narg('archived_by_id'),
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2 AND archived_at IS NULL
+RETURNING *;
+
+-- name: RestoreProject :one
+UPDATE project SET
+    archived_at = NULL,
+    archived_by_type = NULL,
+    archived_by_id = NULL,
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2 AND archived_at IS NOT NULL
+RETURNING *;
 
 -- name: GetProjectInWorkspace :one
 SELECT * FROM project
@@ -26,22 +47,23 @@ FOR UPDATE;
 -- name: CreateProject :one
 INSERT INTO project (
     workspace_id, title, description, icon, status,
-    lead_type, lead_id, priority, start_date, due_date
+    lead_type, lead_id, priority, start_date, due_date, workflow_id,
+    creator_type, creator_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
 ) RETURNING *;
 
 -- name: UpdateProject :one
 UPDATE project SET
     title = COALESCE(sqlc.narg('title'), title),
-    description = sqlc.narg('description'),
-    icon = sqlc.narg('icon'),
+    description = CASE WHEN sqlc.arg('description_set')::boolean THEN sqlc.narg('description') ELSE description END,
+    icon = CASE WHEN sqlc.arg('icon_set')::boolean THEN sqlc.narg('icon') ELSE icon END,
     status = COALESCE(sqlc.narg('status'), status),
     priority = COALESCE(sqlc.narg('priority'), priority),
-    lead_type = sqlc.narg('lead_type'),
-    lead_id = sqlc.narg('lead_id'),
-    start_date = sqlc.narg('start_date'),
-    due_date = sqlc.narg('due_date'),
+    lead_type = CASE WHEN sqlc.arg('lead_type_set')::boolean THEN sqlc.narg('lead_type') ELSE lead_type END,
+    lead_id = CASE WHEN sqlc.arg('lead_id_set')::boolean THEN sqlc.narg('lead_id') ELSE lead_id END,
+    start_date = CASE WHEN sqlc.arg('start_date_set')::boolean THEN sqlc.narg('start_date') ELSE start_date END,
+    due_date = CASE WHEN sqlc.arg('due_date_set')::boolean THEN sqlc.narg('due_date') ELSE due_date END,
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -55,10 +77,54 @@ SELECT count(*) FROM issue
 WHERE project_id = $1;
 
 -- name: GetProjectIssueStats :many
+-- done_count counts every terminal issue (done and closed categories) and
+-- keeps that meaning for older clients; completed_count is the done category
+-- alone, so cancelled = done_count - completed_count.
 SELECT project_id,
        count(*)::bigint AS total_count,
-       count(*) FILTER (WHERE status = ANY(sqlc.arg('terminal_status_keys')::text[]))::bigint AS done_count
+       count(*) FILTER (WHERE status = ANY(sqlc.arg('terminal_status_keys')::text[]))::bigint AS done_count,
+       count(*) FILTER (WHERE status = ANY(sqlc.arg('completed_status_keys')::text[]))::bigint AS completed_count,
+       count(*) FILTER (WHERE status = ANY(sqlc.arg('started_status_keys')::text[]))::bigint AS started_count,
+       max(GREATEST(updated_at, last_activity_at))::timestamptz AS last_issue_activity_at
 FROM issue
 WHERE workspace_id = sqlc.arg('workspace_id')::uuid
   AND project_id = ANY(sqlc.arg('project_ids')::uuid[])
 GROUP BY project_id;
+
+-- name: ListProjectProgressIssues :many
+SELECT id, status, assignee_type, assignee_id, created_at,
+       ARRAY(
+           SELECT il.label_id FROM issue_to_label il
+           WHERE il.issue_id = issue.id
+           ORDER BY il.label_id
+       )::uuid[] AS label_ids
+FROM issue
+WHERE workspace_id = sqlc.arg('workspace_id')::uuid
+  AND project_id = sqlc.arg('project_id')::uuid;
+
+-- name: ListIssueStatusChangesSince :many
+SELECT issue_id, details, created_at
+FROM activity_log
+WHERE workspace_id = sqlc.arg('workspace_id')::uuid
+  AND issue_id = ANY(sqlc.arg('issue_ids')::uuid[])
+  AND action = 'status_changed'
+  AND created_at >= sqlc.arg('since')::timestamptz
+ORDER BY created_at, id;
+
+-- name: ListProjectActivity :many
+-- The newest activity on a project's issues, newest first, keyset-paged on
+-- (created_at, id). Only the given actions are read, so autosaves and run
+-- bookkeeping stay out of the project feed. A zero cursor reads from the top.
+SELECT a.id, a.issue_id, a.actor_type, a.actor_id, a.action, a.details, a.created_at,
+       i.number AS issue_number, i.title AS issue_title, i.status AS issue_status
+FROM activity_log a
+JOIN issue i ON i.id = a.issue_id
+WHERE i.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND i.project_id = sqlc.arg('project_id')::uuid
+  AND a.action = ANY(sqlc.arg('actions')::text[])
+  AND (
+      sqlc.narg('before_at')::timestamptz IS NULL
+      OR (a.created_at, a.id) < (sqlc.narg('before_at')::timestamptz, sqlc.narg('before_id')::uuid)
+  )
+ORDER BY a.created_at DESC, a.id DESC
+LIMIT sqlc.arg('row_limit');

@@ -5,7 +5,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { Issue } from "@multica/core/types";
-import { api } from "@multica/core/api";
+import { searchIssues } from "@multica/core/search-index";
 import {
   Command,
   CommandDialog,
@@ -18,22 +18,43 @@ import {
 import { StatusIcon } from "../issues/components/status-icon";
 import { useT } from "../i18n";
 
+/** Issues offered before the user types, under a heading. */
+export interface IssuePickerSuggestionGroup {
+  key: string;
+  heading: string;
+  issues: Issue[];
+}
+
 interface IssuePickerModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onOpenChangeComplete?: (open: boolean) => void;
   title: string;
   description: string;
   excludeIds: string[];
   onSelect: (issue: Issue) => void;
+  closeOnSelect?: boolean;
+  error?: string;
+  pending?: boolean;
+  /** Shown while the query is empty; groups without issues are skipped. */
+  suggestions?: IssuePickerSuggestionGroup[];
+  /** Drops issues from results and suggestions alike; excludeIds always applies. */
+  isSelectable?: (issue: Issue) => boolean;
 }
 
 export function IssuePickerModal({
   open,
   onOpenChange,
+  onOpenChangeComplete,
   title,
   description,
   excludeIds,
   onSelect,
+  suggestions,
+  closeOnSelect = true,
+  error,
+  pending = false,
+  isSelectable,
 }: IssuePickerModalProps) {
   const { t } = useT("modals");
   const { colorOf, iconOf } = useIssueStatuses(useWorkspaceId());
@@ -42,12 +63,18 @@ export function IssuePickerModal({
   const [isLoading, setIsLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const abortRef = useRef<AbortController>(undefined);
+  const selectable = useCallback(
+    (issue: Issue) => !excludeIds.includes(issue.id) && (isSelectable?.(issue) ?? true),
+    [excludeIds, isSelectable],
+  );
+  const suggestionGroups = (suggestions ?? [])
+    .map((group) => ({ ...group, issues: group.issues.filter(selectable) }))
+    .filter((group) => group.issues.length > 0);
 
   useEffect(() => {
     if (!open) {
-      setQuery("");
-      setResults([]);
-      setIsLoading(false);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (abortRef.current) abortRef.current.abort();
     }
   }, [open]);
 
@@ -67,14 +94,14 @@ export function IssuePickerModal({
         const controller = new AbortController();
         abortRef.current = controller;
         try {
-          const res = await api.searchIssues({
+          const res = await searchIssues({
             q: q.trim(),
             limit: 20,
             include_closed: true,
             signal: controller.signal,
           });
           if (!controller.signal.aborted) {
-            setResults(res.issues.filter((i) => !excludeIds.includes(i.id)));
+            setResults(res.issues.filter(selectable));
             setIsLoading(false);
           }
         } catch {
@@ -84,13 +111,43 @@ export function IssuePickerModal({
         }
       }, 300);
     },
-    [excludeIds],
+    [selectable],
+  );
+
+  const row = (issue: Issue) => (
+    <CommandItem
+      key={issue.id}
+      value={issue.id}
+      onSelect={() => {
+        if (pending) return;
+        onSelect(issue);
+        if (closeOnSelect) onOpenChange(false);
+      }}
+    >
+      <StatusIcon
+        status={issue.status}
+        color={colorOf(issue.status)}
+        icon={iconOf(issue.status)}
+        category={issueStatusCategory(issue) ?? undefined}
+        className="h-3.5 w-3.5 shrink-0"
+      />
+      <span className="text-muted-foreground shrink-0">{issue.identifier}</span>
+      <span className="truncate">{issue.title}</span>
+    </CommandItem>
   );
 
   return (
     <CommandDialog
       open={open}
       onOpenChange={onOpenChange}
+      onOpenChangeComplete={(nextOpen) => {
+        if (!nextOpen) {
+          setQuery("");
+          setResults([]);
+          setIsLoading(false);
+        }
+        onOpenChangeComplete?.(nextOpen);
+      }}
       title={title}
       description={description}
     >
@@ -103,6 +160,7 @@ export function IssuePickerModal({
             search(v);
           }}
         />
+        {error && <p role="alert" className="px-3 py-2 text-caption text-destructive">{error}</p>}
         <CommandList>
           {isLoading && (
             <div className="py-6 text-center text-body text-muted-foreground">
@@ -112,35 +170,18 @@ export function IssuePickerModal({
           {!isLoading && query.trim() && results.length === 0 && (
             <CommandEmpty>{t(($) => $.issue_picker.no_results)}</CommandEmpty>
           )}
-          {!isLoading && !query.trim() && (
+          {!isLoading && !query.trim() && suggestionGroups.length === 0 && (
             <div className="py-6 text-center text-body text-muted-foreground">
               {t(($) => $.issue_picker.prompt_to_search)}
             </div>
           )}
-          {results.length > 0 && (
-            <CommandGroup>
-              {results.map((issue) => (
-                <CommandItem
-                  key={issue.id}
-                  value={issue.id}
-                  onSelect={() => {
-                    onSelect(issue);
-                    onOpenChange(false);
-                  }}
-                >
-                  <StatusIcon
-                    status={issue.status}
-                    color={colorOf(issue.status)}
-                    icon={iconOf(issue.status)}
-                    category={issueStatusCategory(issue) ?? undefined}
-                    className="h-3.5 w-3.5 shrink-0"
-                  />
-                  <span className="text-muted-foreground shrink-0">{issue.identifier}</span>
-                  <span className="truncate">{issue.title}</span>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          )}
+          {!isLoading && !query.trim() &&
+            suggestionGroups.map((group) => (
+              <CommandGroup key={group.key} heading={group.heading}>
+                {group.issues.map(row)}
+              </CommandGroup>
+            ))}
+          {results.length > 0 && <CommandGroup>{results.map(row)}</CommandGroup>}
         </CommandList>
       </Command>
     </CommandDialog>

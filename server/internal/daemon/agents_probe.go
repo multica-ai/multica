@@ -1,8 +1,11 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -142,7 +145,7 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 			// Codex Desktop bundles its CLI inside the macOS app instead of
 			// installing it onto PATH.
 			for _, p := range codexDesktopAppBundlePaths() {
-				if _, err := os.Stat(p); err == nil {
+				if executableCandidate(p) {
 					return AgentEntry{
 						Path:    p,
 						Command: cmd,
@@ -269,6 +272,15 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_ANTIGRAVITY_PATH", "agy", "MULTICA_ANTIGRAVITY_MODEL"); ok {
 		agents["antigravity"] = e
 	}
+	// Meta Muse Code (`muse`) exposes its session protocol (MSP) through
+	// `muse serve`. The launcher script installs and updates the real binary
+	// under ~/.local/bin, so the PATH entry is what a host actually has.
+	if e, ok := probe("MULTICA_MUSE_PATH", "muse", "MULTICA_MUSE_MODEL"); ok {
+		agents["muse"] = e
+	}
+	if e, ok := probe("MULTICA_DEVIN_PATH", "devin", "MULTICA_DEVIN_MODEL"); ok {
+		agents["devin"] = e
+	}
 	// Qoder CLI ships as the `qodercli` binary (Qoder Desktop does not put it
 	// on PATH; users install it separately, often via an npm global prefix).
 	// It must go through probe() like every other provider so the login-shell
@@ -303,6 +315,12 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_QWEN_PATH", "qwen", "MULTICA_QWEN_MODEL"); ok {
 		agents["qwen"] = e
 	}
+	if e, ok := probe("MULTICA_AMP_PATH", "amp", "MULTICA_AMP_MODEL"); ok {
+		agents["amp"] = e
+	}
+	if e, ok := probe("MULTICA_DROID_PATH", "droid", "MULTICA_DROID_MODEL"); ok {
+		agents["droid"] = e
+	}
 	// QwenPaw (`qwenpaw`) is the QwenPaw CLI agent, driven over ACP via
 	// `qwenpaw acp`. It takes no model env var: the backend never calls
 	// session/set_model (it would rewrite QwenPaw's shared agent config), so
@@ -330,6 +348,32 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	// advertise a knob that silently does nothing.
 	if e, ok := probe("MULTICA_ZEROCLAW_PATH", "zeroclaw", ""); ok {
 		agents["zeroclaw"] = e
+	}
+	// museapp (muse.ai) is not a CLI: there is no binary to discover. The
+	// daemon advertises a museapp runtime exactly when
+	// MULTICA_MUSEAPP_ENDPOINT points at a Muse receptionist; reachability and
+	// protocol version are verified against the receptionist itself in
+	// probeBuiltinRuntime (there is no --version to run).
+	// MULTICA_MUSEAPP_MODEL is informational only — the backend's wire
+	// protocol has no model parameter, see ModelSelectionSupported.
+	if strings.TrimSpace(os.Getenv("MULTICA_MUSEAPP_ENDPOINT")) != "" {
+		agents["museapp"] = AgentEntry{
+			Command: "museapp",
+			Model:   strings.TrimSpace(os.Getenv("MULTICA_MUSEAPP_MODEL")),
+		}
+	}
+	if e, ok := probe("MULTICA_ZCODE_PATH", "zcode", "MULTICA_ZCODE_MODEL"); ok {
+		agents["zcode"] = e
+	} else if strings.TrimSpace(os.Getenv("MULTICA_ZCODE_PATH")) == "" {
+		for _, candidate := range zcodeDesktopAppBundlePaths() {
+			if executableCandidate(candidate) {
+				agents["zcode"] = AgentEntry{
+					Path: candidate, Command: "zcode",
+					Model: os.Getenv("MULTICA_ZCODE_MODEL"),
+				}
+				break
+			}
+		}
 	}
 	return agents
 }
@@ -383,9 +427,11 @@ type dshProbeVerdict int
 const (
 	// dshProbeOK: the profile answered with the protocol version this backend drives.
 	dshProbeOK dshProbeVerdict = iota
-	// dshProbeMissingProfile: the probe ran and no profile manifest is present,
-	// which is the same fact DSH itself checks before refusing to boot. This is
-	// the only verdict that may install a bundle or condemn the runtime.
+	// An existing profile needs manual repair, never provisioning over it.
+	dshProbeNeedsMigration
+	// dshProbeMissingProfile: the manifest does not name the Multica runtime.
+	// A file that merely exists is not enough — a refused install leaves one.
+	// This is the only verdict that may install a bundle.
 	dshProbeMissingProfile
 	// dshProbeIncompatible: something answered, with a protocol this daemon does
 	// not drive. The profile is installed, so installing over it would replace a
@@ -396,6 +442,12 @@ const (
 	dshProbeUnavailable
 )
 
+type dshProbeResult struct {
+	verdict       dshProbeVerdict
+	detail        string
+	repairSummary string
+}
+
 // dshProbeTimeout bounds one `--probe`.
 //
 // The healthy path boots a whole DSH process — on a Desktop install that means
@@ -405,10 +457,10 @@ const (
 // cost is paid only by a probe that has nothing to say, and it stays well
 // inside the daemon's own 45s startup window.
 //
-// A missing profile does spend the whole budget here: DSH does not refuse the
-// probe, it hangs. That is bounded by construction — the state ends the moment
-// someone installs the profile — and the verdict below no longer depends on
-// telling that hang apart from a busy machine.
+// A manifest that does not name the runtime returns before this budget.
+// Probing that state hangs, and the manifest is enough to call it missing.
+// The budget is spent only when a manifest that does name the runtime
+// produces no frame.
 //
 // A var so tests can shrink it instead of waiting out a real timeout.
 var dshProbeTimeout = 15 * time.Second
@@ -433,7 +485,22 @@ func parseDshProbeFrame(output string) (dshProbeFrame, bool) {
 // Scoped to the caller's context as well as its own timeout: `--probe` boots a
 // whole DSH process, and a round abandoned by a shutting-down daemon should not
 // go on holding one for the rest of the timeout — once per retry, per provider.
-func probeDshMulticaProfile(ctx context.Context, executablePath string) dshProbeVerdict {
+func probeDshMulticaProfile(ctx context.Context, executablePath string) dshProbeResult {
+	// A cancelled round says nothing about the profile, and it must be decided
+	// before the manifest: a shutdown is not evidence the profile is missing.
+	if ctx.Err() != nil {
+		return dshProbeResult{verdict: dshProbeUnavailable}
+	}
+	if dshMulticaProfileNeedsMigration() {
+		return dshProbeResult{verdict: dshProbeNeedsMigration}
+	}
+	// A manifest that does not name the runtime is missing. Decide that before
+	// starting dsh: on current DSH, --probe against the skeleton a refused
+	// install leaves hangs until this timeout, and the file is already the answer.
+	if !dshMulticaProfilePresent() {
+		return dshProbeResult{verdict: dshProbeMissingProfile}
+	}
+
 	parent := ctx
 	ctx, cancel := context.WithTimeout(parent, dshProbeTimeout)
 	defer cancel()
@@ -443,7 +510,12 @@ func probeDshMulticaProfile(ctx context.Context, executablePath string) dshProbe
 	// grandchildren holding the stdout pipe open — which is both a leaked
 	// process and, as this probe's own tests showed, a wait that outlives the
 	// timeout it was supposed to be bounded by.
-	output, _ := processtree.Output(ctx, cmd, time.Second)
+	// Keep protocol stdout separate from diagnostics: stderr must never turn
+	// a failed startup into an affirmative probe response. Run uses the same
+	// ownership/lifetime as Output, while retaining stderr on timeout too.
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	runErr := processtree.Run(ctx, cmd, time.Second)
 
 	// The frame decides, not the exit status. A profile that printed a valid
 	// answer has answered, whatever the process did on its way out — and the
@@ -453,18 +525,18 @@ func probeDshMulticaProfile(ctx context.Context, executablePath string) dshProbe
 	// agent.DshProtocolVersion, not a local copy: this decides whether the
 	// daemon may drive the profile, and the code that drives it is the only
 	// honest source for that number.
-	if frame, ok := parseDshProbeFrame(string(output)); ok {
+	if frame, ok := parseDshProbeFrame(stdout.String()); ok {
 		if frame.Version == 1 && frame.Runtime == "dsh" && frame.ProtocolVersion == agent.DshProtocolVersion {
-			return dshProbeOK
+			return dshProbeResult{verdict: dshProbeOK}
 		}
-		return dshProbeIncompatible
+		return dshProbeResult{verdict: dshProbeIncompatible}
 	}
 
 	// No usable answer. A cancelled ROUND is the one case that says nothing
 	// about the profile: the daemon is shutting down, or this round was
 	// abandoned, and the probe never got to finish on its own terms.
 	if parent.Err() != nil {
-		return dshProbeUnavailable
+		return dshProbeResult{verdict: dshProbeUnavailable, detail: dshProbeDiagnostic(runErr, stdout.Bytes(), stderr.Bytes())}
 	}
 
 	// Otherwise the manifest decides, and how the probe failed does not.
@@ -480,10 +552,28 @@ func probeDshMulticaProfile(ctx context.Context, executablePath string) dshProbe
 	//
 	// The manifest is the same file DSH's own loadProfile consults before it
 	// refuses to boot, so a confirmed-absent one is evidence, not a guess —
-	// while a manifest that IS present keeps every failure transient, which is
-	// what protects a working install from being overwritten during an upgrade.
+	// A present manifest must never authorize installation. Unknown failures
+	// stay transient; a completed core-compatibility refusal below is manual
+	// repair and uses the existing confirmation lifecycle before demotion.
 	if !dshMulticaProfilePresent() {
-		return dshProbeMissingProfile
+		return dshProbeResult{verdict: dshProbeMissingProfile}
 	}
-	return dshProbeUnavailable
+	detail := dshProbeDiagnostic(runErr, stdout.Bytes(), stderr.Bytes())
+	var exitErr *exec.ExitError
+	completed := runErr == nil || (errors.As(runErr, &exitErr) && exitErr.ProcessState.Exited())
+	if ctx.Err() == nil && completed {
+		if summary := dshCompatibilitySummary(stderr.String(), dshBridgeCompatibilityRefusal); summary != "" {
+			repairSummary := fmt.Sprintf(
+				"%s; back up and inspect %q, update the Multica bridge to a build compatible with the installed DSH, and rerun dsh --profile multica --probe.",
+				summary, dshMulticaProfileManifestPath())
+			return dshProbeResult{verdict: dshProbeNeedsMigration, repairSummary: repairSummary, detail: repairSummary + " " + detail}
+		}
+		if summary := dshCompatibilitySummary(stderr.String(), dshCoreCompatibilityRefusal); summary != "" {
+			repairSummary := fmt.Sprintf(
+				"%s; back up and inspect %q to align profile-local DSH core dependencies with the application packages, retain required independent plugins, and rerun dsh --profile multica --probe.",
+				summary, dshMulticaProfileManifestPath())
+			return dshProbeResult{verdict: dshProbeNeedsMigration, repairSummary: repairSummary, detail: repairSummary + " " + detail}
+		}
+	}
+	return dshProbeResult{verdict: dshProbeUnavailable, detail: detail}
 }

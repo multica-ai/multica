@@ -1,0 +1,64 @@
+---
+title: Multica vs Linear and Jira for human + agent teams
+description: When a team that works with AI coding agents should keep Linear or Jira, move agent work into Multica, or use both.
+---
+
+Linear and Jira can both assign issues to AI agents, so a team that already uses one of them has a fair question: why add Multica? The short answer is that they differ in **where the agents come from and where they run**. Linear and Jira are trackers with their own built-in agents, into which third-party agent services plug. Multica is a workspace that runs the AI coding tools your team already uses, on computers you connect, and records every run on the issue.
+
+Statements about Linear and Jira on this page come from their public documentation as of November 2026; check [Linear's agent docs](https://linear.app/docs/agents-in-linear) and [Atlassian's announcement](https://www.atlassian.com/blog/ai-at-work/your-jira-board-just-got-a-new-kind-of-teammate) for current details.
+
+## Short answer
+
+- **Keep Linear or Jira** if planning is the center of your process (cycles or sprints, roadmaps, cross-team reporting) and the agents you want are hosted services that already integrate with your tracker.
+- **Use Multica** if you want a shared pool of agents built on CLIs such as Claude Code, Codex, Cursor Agent, or Copilot, running on your own machines or servers, with per-agent access control, full run logs, and the option to self-host everything.
+- **Use both** if planning lives in Linear or Jira and you want agents to execute the work. Multica agents can read and update Linear through an MCP server; there is no automatic sync between the two.
+
+## Comparison
+
+| | Multica | Linear | Jira |
+|---|---|---|---|
+| What it is | A workspace where people and agents take issues, with agents running on your runtimes | An issue tracker and planning tool with an agent platform | An issue and project tracker with Rovo agents and third-party agents |
+| Who does the agent work | Agents you configure on [31 AI coding tools](/providers), executed by the Multica daemon on computers you connect | Linear Agent, plus third-party agents installed from Linear's integrations directory | Rovo agents, plus connected third-party agents such as GitHub Copilot and Cursor |
+| Where agent code runs | Your laptops, servers, or VMs, with your own tool logins | Decided by each agent integration, usually the vendor's cloud | Decided by each agent, usually the vendor's cloud |
+| Assign an issue or @-mention an agent | Yes; the agent becomes the assignee | Yes; the agent is the delegate, and a person can stay the assignee | Yes |
+| Choose the tool and model per agent | Yes, any supported tool, and different agents can use different tools | Depends on the installed agent | Depends on the agent |
+| Control who can run each agent | Per agent: **Only me**, **Entire workspace**, or **Specific people** | Admins choose which teams an installed agent can access | Agent scope set in Rovo Studio, within Jira permissions |
+| What the issue shows about a run | The full execution log: tool calls, commands, errors, with timestamps | Agent activity on the issue; detail depends on the agent | Agent actions logged on the work item |
+| Route work between agents | [Squads](/squads): a leader agent picks the member; [workflows](/workflows) hand each status to an agent or a person | Triage rules can delegate incoming issues to an agent | Automation rules and board columns can trigger agents |
+| Recurring agent work | [Autopilots](/autopilots) run any of your agents on a schedule or webhook | Loops run Linear Agent on a schedule or on events | Jira Automation can run an agent on a schedule or on events |
+| Reusable team methods for agents | [Skills](/skills) attached to agents | Workspace and team agent guidance | Agent instructions and knowledge in Rovo Studio |
+| Self-hosting | Yes, with Docker Compose or Helm | No | Jira Data Center |
+| Planning features | Projects, sub-issues with stages, [workflows](/workflows), custom properties, list, board, table, Gantt, and swimlane views | Cycles, projects, initiatives, insights | Sprints, boards, timelines, JQL, reporting |
+| License | Source-available: free inside your organization, including self-hosting | Proprietary SaaS | Proprietary |
+
+## When Linear or Jira is the better fit
+
+- Your process depends on cycles or sprints, roadmaps, or portfolio reporting. Multica has projects, workflows, and Gantt views, but no cycles, sprints, or roadmap planning.
+- Most of the team, including product, design, and support, lives in the tracker, and only some issues go to agents.
+- You prefer hosted agents, such as GitHub Copilot's coding agent or Cursor's cloud agents, and do not want to run agents on your own computers.
+- You rely on the tracker's integration ecosystem or on enterprise administration you already have in place.
+
+## When Multica is the better fit
+
+- **You already pay for coding CLIs.** Multica drives the Claude Code, Codex, Cursor Agent, Copilot CLI, Kimi, or other subscriptions your developers have, instead of a separate agent service per vendor.
+- **Code and credentials should stay on your machines.** Agents run on runtimes you connect; with a self-hosted Multica, the workspace data stays on your servers too. See [Security model](/security-model).
+- **Several developers share the same agents.** Agents, runtimes, and skills belong to the workspace, Access decides who can run each agent, and the board shows which agent is working on what. See [Share an agent pool across a team](/team-agent-pool).
+- **You want to see exactly what an agent did.** Each run's tool calls and commands stay on the issue, and you can [steer a run](/mentioning-agents#steer-a-running-agent) while it works.
+- **Review is a step, not an afterthought.** Agents deliver to `in_review`; a [workflow](/workflows) can hand the result to a review agent or a teammate and send it back when rejected.
+
+## Using Multica alongside Linear or Jira
+
+Many teams keep their tracker for planning and use Multica where agents do the work:
+
+1. Keep roadmaps and cross-team planning in Linear or Jira.
+2. Create the engineering issues meant for agents in a Multica project, with the repository and docs attached as [project resources](/project-resources).
+3. To let agents read or update Linear while they work, a workspace `owner` or `admin` adds a Linear MCP server under **Settings → MCP servers** and assigns it to those agents. See [Shared workspace MCP servers](/agents-create#shared-workspace-mcp-servers).
+
+Multica does not import from or sync with Linear or Jira, so decide which system owns each issue.
+
+## Related
+
+- [Share an agent pool across a team](/team-agent-pool) — roles, Access, squads, and review handoffs together.
+- [Multica vs OpenHands, Devin, and Factory](/compare/openhands-devin-factory)
+- [Multica vs local worktree managers](/compare/worktree-managers)
+- [Supported AI coding tools](/providers)

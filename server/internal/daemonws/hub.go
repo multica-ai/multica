@@ -22,7 +22,16 @@ const (
 // ClientIdentity captures the already-authenticated daemon connection scope.
 type ClientIdentity struct {
 	DaemonID string
-	UserID   string
+	// DaemonTokenHash is the hash of the mdt_ token that authenticated the
+	// connection (empty for user credentials). RPCs replay requests without
+	// an Authorization header, so credential-specific checks such as Qoder
+	// revocation re-validate this hash on every call (MUL-8154).
+	DaemonTokenHash string
+	// DaemonTokenOwnerID is the runtime owner that token is bound to (empty
+	// for Qoder-managed tokens and user credentials), replayed into every RPC
+	// so the per-runtime owner binding holds over WS as well (MUL-8154).
+	DaemonTokenOwnerID string
+	UserID             string
 	// WorkspaceID is the legacy single-workspace scope used by older callers
 	// and daemon-token auth. New code should populate WorkspaceIDs from the
 	// runtime rows authorized for this connection.
@@ -285,7 +294,7 @@ func (h *Hub) forgetRuntimeGoneSeen(eventID string) {
 // runtimeID is one of identity.RuntimeIDs (the connection's authenticated
 // scope) and return the ack payload to send back. Returning an error skips
 // the ack and is logged at debug level.
-type HeartbeatHandler func(ctx context.Context, identity ClientIdentity, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, error)
+type HeartbeatHandler func(ctx context.Context, identity ClientIdentity, runtimeID string, req protocol.DaemonHeartbeatRequestPayload) (*protocol.DaemonHeartbeatAckPayload, error)
 
 // RPCHandler processes a generic daemon:rpc_request (MUL-4257). It dispatches
 // on method (e.g. "tasks.claim"), scoping work to identity (DaemonID +
@@ -444,7 +453,14 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request, identity C
 
 // NotifyTaskAvailable sends a best-effort wakeup to daemons watching runtimeID.
 func (h *Hub) NotifyTaskAvailable(runtimeID, taskID string) {
-	h.notifyTaskAvailable(runtimeID, taskID, "")
+	h.notifyTask(protocol.EventDaemonTaskAvailable, runtimeID, taskID, "")
+}
+
+// NotifyTaskSupplementAvailable wakes only the daemon that owns runtimeID;
+// the task ID lets that daemon wake the matching in-flight run without polling
+// or disturbing the machine-level new-task claim loop.
+func (h *Hub) NotifyTaskSupplementAvailable(runtimeID, taskID string) {
+	h.notifyTask(protocol.EventDaemonTaskSupplementAvailable, runtimeID, taskID, "")
 }
 
 // NotifyRuntimeProfilesChanged asks connected daemons in workspaceID to pull
@@ -475,11 +491,11 @@ func (h *Hub) NotifyRuntimeGone(runtimeID string) {
 	h.notifyRuntimeGone(runtimeID, "")
 }
 
-func (h *Hub) notifyTaskAvailable(runtimeID, taskID, eventID string) {
-	if h == nil || runtimeID == "" {
+func (h *Hub) notifyTask(eventType, runtimeID, taskID, eventID string) {
+	if h == nil || runtimeID == "" || (eventType == protocol.EventDaemonTaskSupplementAvailable && taskID == "") {
 		return
 	}
-	data, err := taskAvailableFrame(runtimeID, taskID)
+	data, err := taskWakeupFrame(eventType, runtimeID, taskID)
 	if err != nil {
 		return
 	}
@@ -608,10 +624,10 @@ func (h *Hub) DeliverDaemonRuntime(scopeID string, frame []byte, eventID string)
 		M.WakeupReceivedTotal.Add(1)
 	}
 	switch msg.Type {
-	case protocol.EventDaemonTaskAvailable:
+	case protocol.EventDaemonTaskAvailable, protocol.EventDaemonTaskSupplementAvailable:
 		var payload protocol.TaskAvailablePayload
-		if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.RuntimeID == "" {
-			slog.Debug("daemon websocket relay: invalid task_available payload", "error", err, "scope_id", scopeID, "event_id", eventID)
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.RuntimeID == "" || (msg.Type == protocol.EventDaemonTaskSupplementAvailable && payload.TaskID == "") {
+			slog.Debug("daemon websocket relay: invalid task wakeup payload", "type", msg.Type, "error", err, "scope_id", scopeID, "event_id", eventID)
 			M.WakeupDeliveredMiss.Add(1)
 			return
 		}
@@ -757,9 +773,9 @@ func (h *Hub) notifyUserFrame(userID string, data []byte, eventID string) (deliv
 	return delivered, deduped
 }
 
-func taskAvailableFrame(runtimeID, taskID string) ([]byte, error) {
+func taskWakeupFrame(eventType, runtimeID, taskID string) ([]byte, error) {
 	return json.Marshal(protocol.Message{
-		Type: protocol.EventDaemonTaskAvailable,
+		Type: eventType,
 		Payload: mustMarshalRaw(protocol.TaskAvailablePayload{
 			RuntimeID: runtimeID,
 			TaskID:    taskID,
@@ -1029,6 +1045,9 @@ func (c *client) handleRPCFrame(raw json.RawMessage) {
 			hctx, cancel = context.WithTimeout(c.ctx, time.Duration(req.TimeoutMs)*time.Millisecond)
 			defer cancel()
 		}
+		completion := &rpcCompletion{}
+		hctx = context.WithValue(hctx, rpcCompletionKey{}, completion)
+		defer completion.run()
 		status, body, err := handler(hctx, c.identity, req.Method, req.Body)
 		if err != nil {
 			if status < 400 {
@@ -1098,7 +1117,7 @@ func (c *client) handleHeartbeatFrame(raw json.RawMessage) {
 	// that keeps the HTTP heartbeat from putting a per-call timeout on
 	// PopPending. The natural bound is the read pump's lifetime (the conn
 	// closes if the daemon goes away) plus Redis's own server-side limits.
-	ack, err := handler(context.Background(), c.identity, payload.RuntimeID, payload.SupportsBatchImport)
+	ack, err := handler(context.Background(), c.identity, payload.RuntimeID, payload)
 	if err != nil {
 		slog.Warn("daemon websocket heartbeat handler failed",
 			"error", err,

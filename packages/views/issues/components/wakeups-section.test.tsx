@@ -1,14 +1,33 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import type { ReactNode } from "react";
 import type { IssueWakeup } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { WakeupsSection } from "./wakeups-section";
 const mutate = vi.fn();
 const enable = vi.fn();
+const trigger = vi.fn();
+const remove = vi.fn();
+let runs: unknown[] = [];
+let empty = false;
+let wakeupsError = false;
+const refetch = vi.fn();
 let pending = false;
 let wakeup: IssueWakeup;
 let status = "queued";
+let viewTZ = "UTC";
+vi.mock("./wakeup-condition-names", () => ({
+  useConditionNames: () => ({ status: (key: string) => key, label: () => undefined, property: () => undefined, actor: (_type: string, id: string) => id }),
+}));
+vi.mock("../../navigation", () => ({
+  AppLink: ({ href, children, ...props }: { href: string; children: ReactNode }) => (
+    <a href={href} {...props}>
+      {children}
+    </a>
+  ),
+}));
 vi.mock("@multica/core/paths", () => ({
+  useWorkspacePaths: () => ({ autopilots: () => "/acme/autopilots" }),
   useCurrentWorkspace: () => ({ id: "ws" }),
 }));
 vi.mock("@multica/core/issues", () => ({
@@ -16,23 +35,53 @@ vi.mock("@multica/core/issues", () => ({
   issueTasksOptions: () => ({ queryKey: ["tasks"] }),
   useDisableIssueWakeup: () => ({ mutate, isPending: false }),
   useEnableIssueWakeup: () => ({ mutateAsync: enable, isPending: pending }),
+  useCreateIssueWakeup: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useTriggerIssueWakeup: () => ({ mutate: trigger, isPending: false }),
+  useDeleteIssueWakeup: () => ({ mutate: remove, isPending: false }),
+  issueWakeupRunsOptions: () => ({ queryKey: ["runs"] }),
 }));
 vi.mock("@tanstack/react-query", () => ({
   useQuery: ({ queryKey }: { queryKey: string[] }) => ({
-    data: queryKey[0] === "wakeups" ? [wakeup] : [{ id: "task", status }],
+    isError: queryKey[0] === "wakeups" && wakeupsError,
+    refetch,
+    data:
+      queryKey[0] === "wakeups"
+        ? empty || wakeupsError ? [] : [wakeup]
+        : queryKey[0] === "tasks"
+          ? [{ id: "task", status }]
+          : queryKey[0] === "runs"
+            ? runs
+            : [],
   }),
+}));
+vi.mock("../../common/use-viewing-timezone", () => ({
+  useViewingTimezone: () => viewTZ,
 }));
 vi.mock("../../common/task-transcript", () => ({
   TranscriptButton: () => <button>Transcript</button>,
+}));
+vi.mock("./wakeup-create", () => ({
+  WakeupCreate: ({ defaultOpen, onOpenChange }: { defaultOpen?: boolean; onOpenChange?: (open: boolean) => void }) => (
+    <button type="button" data-default-open={defaultOpen ? "true" : "false"} onClick={() => onOpenChange?.(false)}>
+      New wakeup
+    </button>
+  ),
 }));
 vi.mock("./wakeup-instruction-editor", () => ({
   WakeupInstructionEditor: () => <button>Edit prompt</button>,
 }));
 beforeEach(() => {
   mutate.mockReset();
+  trigger.mockReset();
+  remove.mockReset();
+  runs = [];
+  empty = false;
+  wakeupsError = false;
+  refetch.mockReset();
   enable.mockReset().mockResolvedValue(undefined);
   pending = false;
   status = "queued";
+  viewTZ = "UTC";
   wakeup = {
     id: "wake",
     revision: 2,
@@ -56,6 +105,53 @@ beforeEach(() => {
   };
 });
 describe("Wakeups sidebar", () => {
+  it("keeps the header to the add action without a settings-only menu", () => {
+    renderWithI18n(<WakeupsSection issueId="issue" />);
+    expect(screen.getByRole("button", { name: "Wakeups" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Wakeups options" })).not.toBeInTheDocument();
+  });
+  it("counts the current rules once the section is collapsed", () => {
+    renderWithI18n(<WakeupsSection issueId="issue" />);
+    fireEvent.click(screen.getByRole("button", { name: "Wakeups" }));
+    expect(screen.getByRole("button", { name: "Wakeups 1" })).toHaveAttribute("aria-expanded", "false");
+  });
+  it("stays out of the sidebar while empty until the add row reveals it", () => {
+    empty = true;
+    const { container } = renderWithI18n(<WakeupsSection issueId="issue" />);
+    expect(container).toBeEmptyDOMElement();
+  });
+  it("opens creation under a static title when revealed and ends the reveal when it closes", () => {
+    empty = true;
+    const onRevealEnd = vi.fn();
+    renderWithI18n(<WakeupsSection issueId="issue" reveal onRevealEnd={onRevealEnd} />);
+    expect(screen.getByText("Wakeups")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Wakeups" })).not.toBeInTheDocument();
+    const create = screen.getByRole("button", { name: "New wakeup" });
+    expect(create).toHaveAttribute("data-default-open", "true");
+    fireEvent.click(create);
+    expect(onRevealEnd).toHaveBeenCalled();
+  });
+  it("is not revealed on an ended issue, where nothing can be created", () => {
+    empty = true;
+    const { container } = renderWithI18n(<WakeupsSection issueId="issue" reveal closed />);
+    expect(container).toBeEmptyDOMElement();
+  });
+  it("keeps history accessible even without current rules", () => {
+    wakeup.enabled = false;
+    status = "completed";
+    renderWithI18n(<WakeupsSection issueId="issue" />);
+    expect(screen.getByRole("button", { name: "Wakeups" })).toHaveAttribute("aria-expanded", "true");
+  });
+  it("shows retry when wakeups fail to load instead of hiding the section", () => {
+    wakeupsError = true;
+    renderWithI18n(<WakeupsSection issueId="issue" />);
+    fireEvent.click(screen.getByRole("button", { name: "Could not load wakeups. Retry" }));
+    expect(refetch).toHaveBeenCalledTimes(1);
+  });
+  it("leaves the issue's own agent out of the row", () => {
+    renderWithI18n(<WakeupsSection issueId="issue" defaultAgentId="agent" />);
+    expect(screen.getByRole("button", { name: /Every hour/ })).not.toHaveTextContent("Emacs");
+  });
   it("describes hourly schedules without exposing interval seconds", () => {
     renderWithI18n(<WakeupsSection issueId="issue" />, { locale: "zh-Hans" });
     expect(screen.getByRole("button", { name: /唤醒 Emacs/ })).toHaveTextContent("每小时唤醒");
@@ -71,13 +167,45 @@ describe("Wakeups sidebar", () => {
     fireEvent.click(row);
     await waitFor(() => expect(screen.getByText("0 9 * * * · UTC")).toBeVisible());
   });
-  it("exposes the toggle and reveals the full prompt only on opening details", async () => {
+  describe("one-time wakeup stored in UTC", () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-09-23T10:00:00Z"));
+      viewTZ = "Asia/Shanghai";
+      wakeup.kind = "at";
+      wakeup.mode = "once";
+      wakeup.interval_seconds = null;
+    });
+    afterEach(() => vi.useRealTimers());
+
+    it("shows the fire time in the viewer's timezone", async () => {
+      wakeup.next_fire_at = "2026-09-23T14:05:00Z";
+      renderWithI18n(<WakeupsSection issueId="issue" />);
+      const row = screen.getByRole("button", { name: /Wake Emacs/ });
+      expect(row).toHaveTextContent("Today 10:05 PM");
+      expect(row).not.toHaveTextContent("Wake at");
+      fireEvent.click(row);
+      await waitFor(() =>
+        expect(screen.getByText(/· Asia\/Shanghai$/)).toBeVisible(),
+      );
+    });
+
+    it("moves the fire time to the viewer's next day", () => {
+      wakeup.next_fire_at = "2026-09-23T17:00:00Z";
+      renderWithI18n(<WakeupsSection issueId="issue" />);
+      const row = screen.getByRole("button", { name: /Wake Emacs/ });
+      expect(row).toHaveTextContent("Sep 24, 01:00 AM");
+      expect(row).not.toHaveTextContent("Today");
+    });
+  });
+  it("keeps the toggle and the full prompt in details", async () => {
     renderWithI18n(<WakeupsSection issueId="issue" />);
     expect(screen.queryByText("Check CI")).not.toBeVisible();
-    fireEvent.click(screen.getByRole("switch", { name: "Wakeup for Emacs" }));
-    expect(mutate).toHaveBeenCalledWith("wake", expect.any(Object));
+    expect(screen.queryByRole("switch")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Wake Emacs/ }));
     await waitFor(() => expect(screen.getByText("Check CI")).toBeVisible());
+    fireEvent.click(screen.getByRole("switch", { name: "Wakeup for Emacs" }));
+    expect(mutate).toHaveBeenCalledWith("wake", expect.any(Object));
     expect(screen.getByRole("button", { name: "Transcript" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Edit prompt" })).toBeVisible();
   });
@@ -88,7 +216,8 @@ describe("Wakeups sidebar", () => {
     wakeup.event_types = ["task.completed"];
     renderWithI18n(<WakeupsSection issueId="issue" />);
     expect(screen.queryByText(/Wakeup history/)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel this execution" }));
+    fireEvent.click(screen.getByRole("button", { name: /Wake Emacs/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel this run" }));
     expect(mutate).toHaveBeenCalled();
   });
   it("keeps an already claimed single run visible without offering withdrawal", () => {
@@ -107,7 +236,7 @@ describe("Wakeups sidebar", () => {
     renderWithI18n(<WakeupsSection issueId="issue" />);
     expect(screen.queryByRole("button", { name: /Wake Emacs/ })).toBeNull();
     expect(screen.queryByRole("switch")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Wakeup history 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Wakeup history · 1" }));
     expect(screen.getByRole("button", { name: /Wake Emacs/ })).toBeVisible();
   });
   it("uses server run status while the run detail query is still incomplete", () => {
@@ -127,7 +256,8 @@ it("re-enables a manually disabled recurring configuration with its revision", a
   wakeup.disabled_at = "2026-09-16T00:00:00Z";
   status = "completed";
   renderWithI18n(<WakeupsSection issueId="issue" />);
-  fireEvent.click(screen.getByRole("button", { name: "Wakeup history 1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Wakeup history · 1" }));
+  fireEvent.click(screen.getByRole("button", { name: /Wake Emacs/ }));
   const toggle = screen.getByRole("switch", { name: "Wakeup for Emacs" });
   expect(toggle).not.toBeChecked();
   fireEvent.click(toggle);
@@ -140,7 +270,8 @@ it("blocks re-enabling on terminal issues", () => {
   wakeup.enabled = false;
   status = "completed";
   renderWithI18n(<WakeupsSection issueId="issue" closed />);
-  fireEvent.click(screen.getByRole("button", { name: "Wakeup history 1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Wakeup history · 1" }));
+  fireEvent.click(screen.getByRole("button", { name: /Wake Emacs/ }));
   expect(screen.getByRole("switch")).toHaveAttribute("aria-disabled", "true");
   fireEvent.click(screen.getByRole("switch"));
   expect(enable).not.toHaveBeenCalled();
@@ -155,7 +286,8 @@ it("requires a new future time for an expired one-shot", async () => {
   wakeup.next_fire_at = "2020-01-01T00:00:00Z";
   status = "completed";
   renderWithI18n(<WakeupsSection issueId="issue" />);
-  fireEvent.click(screen.getByRole("button", { name: "Wakeup history 1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Wakeup history · 1" }));
+  fireEvent.click(screen.getByRole("button", { name: /Wake Emacs/ }));
   expect(screen.queryByRole("switch")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Set a new time" }));
   const input = await screen.findByLabelText(/Time \(/);
@@ -182,7 +314,8 @@ it("uses explicit resubscribe for a completed one-shot event", async () => {
   wakeup.mode = "once";
   status = "completed";
   renderWithI18n(<WakeupsSection issueId="issue" />);
-  fireEvent.click(screen.getByRole("button", { name: "Wakeup history 1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Wakeup history · 1" }));
+  fireEvent.click(screen.getByRole("button", { name: /Wake Emacs/ }));
   expect(screen.queryByRole("switch")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Enable again" }));
   await waitFor(() =>
@@ -196,6 +329,7 @@ it("uses explicit resubscribe for a completed one-shot event", async () => {
 it("disables controls during a pending mutation", () => {
   pending = true;
   renderWithI18n(<WakeupsSection issueId="issue" />);
+  fireEvent.click(screen.getByRole("button", { name: /Wake Emacs/ }));
   expect(screen.getByRole("switch")).toHaveAttribute("aria-disabled", "true");
   fireEvent.click(screen.getByRole("switch"));
   expect(enable).not.toHaveBeenCalled();
@@ -218,15 +352,15 @@ it("describes the source condition in Chinese, keeping instructions in details",
   expect(screen.getByText(/监听范围/)).toHaveTextContent("当前任务");
 });
 
-it("shows a disabled rule independently from its last successful execution", () => {
+it("shows a disabled rule without repeating its successful last run", () => {
   wakeup.enabled = false;
   wakeup.disabled_at = "2026-09-16T00:00:00Z";
   status = "completed";
   renderWithI18n(<WakeupsSection issueId="issue" />);
-  fireEvent.click(screen.getByRole("button", { name: "Wakeup history 1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Wakeup history · 1" }));
   const row = screen.getByRole("button", { name: /Wake Emacs/ });
   expect(row).toHaveTextContent("Turned off");
-  expect(row).toHaveTextContent("Last execution: Run succeeded");
+  expect(row).not.toHaveTextContent("Run succeeded");
 });
 
 it("keeps a failed one-shot triggered without calling the rule completed", () => {
@@ -236,10 +370,10 @@ it("keeps a failed one-shot triggered without calling the rule completed", () =>
   wakeup.event_types = ["comment.created"];
   status = "failed";
   renderWithI18n(<WakeupsSection issueId="issue" />);
-  fireEvent.click(screen.getByRole("button", { name: "Wakeup history 1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Wakeup history · 1" }));
   const row = screen.getByRole("button", { name: /Wake Emacs/ });
   expect(row).toHaveTextContent("Triggered");
-  expect(row).toHaveTextContent("This execution: Run failed");
+  expect(row).toHaveTextContent("Current run: Run failed");
   expect(row).not.toHaveTextContent("Completed");
 });
 
@@ -265,4 +399,110 @@ it("keeps a redacted actor restriction visible without exposing an ID", () => {
   wakeup.filter_actor_name = null;
   renderWithI18n(<WakeupsSection issueId="issue" />);
   expect(screen.getByRole("button", { name: /triggered by Selected agent/ })).toBeInTheDocument();
+});
+
+describe("v2 sidebar", () => {
+  it("offers a new-wakeup button on open issues only", () => {
+    const { unmount } = renderWithI18n(<WakeupsSection issueId="issue" />);
+    expect(screen.getByRole("button", { name: "New wakeup" })).toBeVisible();
+    unmount();
+    renderWithI18n(<WakeupsSection issueId="issue" closed />);
+    expect(screen.queryByRole("button", { name: "New wakeup" })).toBeNull();
+  });
+
+  it("describes a wait's deadline in the row and who created it in details", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-24T08:00:00Z"));
+    try {
+      Object.assign(wakeup, {
+        kind: "event", mode: "once", event_types: ["comment.created"], interval_seconds: null,
+        filter_actor_type: "member", filter_actor_id: "u", filter_actor_name: "Jiayuan",
+        expires_at: "2026-09-27T06:00:00Z", expiry_seconds: 259200, on_timeout: "wake",
+        created_by_agent: true, created_by_name: "Jiayuan", source_agent_name: "Emacs",
+      });
+      renderWithI18n(<WakeupsSection issueId="issue" />, { locale: "zh-Hans" });
+      const row = screen.getByRole("button", { name: /由 Jiayuan 触发/ });
+      expect(row).toHaveTextContent("唤醒 Emacs · 仅触发一次 · 还剩 2 天 22 小时");
+      fireEvent.click(row);
+      await waitFor(() => expect(screen.getByText(/来源/)).toHaveTextContent("Emacs 创建（代表 Jiayuan）"));
+      expect(screen.getByText(/有效期/)).toHaveTextContent("超时后唤醒 Emacs 处理");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("marks a rule ended by its deadline as timed out", () => {
+    Object.assign(wakeup, {
+      kind: "event", mode: "once", event_types: ["comment.created"], enabled: false,
+      expires_at: "2020-01-01T00:00:00Z", timed_out_at: "2020-01-01T00:00:30Z",
+    });
+    status = "completed";
+    renderWithI18n(<WakeupsSection issueId="issue" />);
+    fireEvent.click(screen.getByRole("button", { name: "Wakeup history · 1" }));
+    expect(screen.getByRole("button", { name: /Wake Emacs/ })).toHaveTextContent("Timed out");
+  });
+
+});
+
+describe("conditions, limits and history", () => {
+  it("reads a platform condition as its own sentence, without the hint events", async () => {
+    Object.assign(wakeup, {
+      kind: "event", mode: "once", event_types: ["issue.status_changed"], interval_seconds: null,
+      condition: { type: "issue_field", field: "status", value: "in_review" },
+    });
+    renderWithI18n(<WakeupsSection issueId="issue" />, { locale: "zh-Hans" });
+    const row = screen.getByRole("button", { name: /当状态变为in_review时/ });
+    fireEvent.click(row);
+    await screen.findByRole("dialog");
+    expect(screen.queryByText(/以下任一事件发生时/)).toBeNull();
+  });
+
+  it("says why the platform paused a rule and how many times it fired", async () => {
+    Object.assign(wakeup, {
+      kind: "event", mode: "continuous", event_types: ["comment.created"], interval_seconds: null,
+      enabled: false, paused_reason: "max_fires", max_fires: 5, fire_count: 5,
+    });
+    status = "completed";
+    renderWithI18n(<WakeupsSection issueId="issue" />);
+    fireEvent.click(screen.getByRole("button", { name: "Wakeup history · 1" }));
+    const row = screen.getByRole("button", { name: /Wake Emacs/ });
+    expect(row).toHaveTextContent("Paused automatically");
+    expect(row).toHaveTextContent("Stopped after reaching 5 runs");
+    fireEvent.click(row);
+    expect(await screen.findByText("Triggered 5 of at most 5 times")).toBeVisible();
+    expect(screen.getByText(/Turn it back on to resume/)).toBeVisible();
+  });
+
+  it("lists the rule's runs, with a silent check's note", async () => {
+    runs = [
+      { id: "r2", status: "completed", created_at: "2026-09-24T01:00:00Z", started_at: null, completed_at: null, checkin_note: "Progress 38%", triggers: ["time.due"], commented: false },
+      { id: "r1", status: "completed", created_at: "2026-09-23T01:00:00Z", started_at: null, completed_at: null, checkin_note: "", triggers: ["time.due"], commented: true },
+    ];
+    renderWithI18n(<WakeupsSection issueId="issue" />, { locale: "zh-Hans" });
+    fireEvent.click(screen.getByRole("button", { name: /每小时唤醒/ }));
+    expect(await screen.findByText("触发记录")).toBeVisible();
+    expect(screen.getByText("静默检查")).toBeVisible();
+    expect(screen.getByText(/Progress 38%/)).toBeVisible();
+    expect(screen.getByText("运行成功 · 发表了评论")).toBeVisible();
+  });
+
+  it("wakes the agent now and deletes the rule after confirmation", async () => {
+    renderWithI18n(<WakeupsSection issueId="issue" />);
+    fireEvent.click(screen.getByRole("button", { name: /Every hour/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Wake now" }));
+    expect(trigger).toHaveBeenCalledWith("wake", expect.anything());
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    const confirm = await screen.findByRole("alertdialog");
+    expect(confirm).toHaveTextContent("Emacs is no longer woken by it");
+    fireEvent.click(within(confirm).getByRole("button", { name: "Delete" }));
+    expect(remove).toHaveBeenCalledWith("wake", expect.anything());
+  });
+
+  it("offers neither action on an ended issue", async () => {
+    renderWithI18n(<WakeupsSection issueId="issue" closed />);
+    fireEvent.click(screen.getByRole("button", { name: /Every hour/ }));
+    await screen.findByRole("dialog");
+    expect(screen.queryByRole("button", { name: "Wake now" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+  });
 });

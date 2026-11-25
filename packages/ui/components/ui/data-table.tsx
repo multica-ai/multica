@@ -32,6 +32,12 @@ import { cn } from "@multica/ui/lib/utils";
 // header behave alike, and keeps a plain click from committing a width.
 const RESIZE_DRAG_THRESHOLD = 4;
 
+// Extra per-row presentation: a class and data attributes for the standard
+// data row (custom rows from `renderRow` carry their own).
+export type DataTableRowProps = {
+  className?: string;
+} & { [attribute: `data-${string}`]: string | undefined };
+
 interface DataTableProps<TData> extends React.ComponentProps<"div"> {
   table: TanstackTable<TData>;
   // Optional bar shown below the table when ≥1 row is selected. We
@@ -51,6 +57,8 @@ interface DataTableProps<TData> extends React.ComponentProps<"div"> {
   // Optional escape hatch for semantic rows such as collapsible group
   // headers. Return null/undefined to use the standard data row renderer.
   renderRow?: (row: Row<TData>) => React.ReactNode;
+  // Marks a standard data row, e.g. the one a side panel is showing.
+  getRowProps?: (row: Row<TData>) => DataTableRowProps | undefined;
   // A caller-supplied <tfoot> (summary / quick-create rows, for example).
   footer?: React.ReactNode;
   // Render only the visible row window for large tables. Callers should use
@@ -59,6 +67,14 @@ interface DataTableProps<TData> extends React.ComponentProps<"div"> {
   virtualizeRows?: boolean;
   virtualRowHeight?: number;
   virtualOverscan?: number;
+  // The element that scrolls both axes, for callers that save and restore its
+  // offsets; data attributes land on the same element.
+  scrollContainerRef?: (element: HTMLDivElement | null) => void;
+  scrollContainerAttributes?: { [attribute: `data-${string}`]: string | undefined };
+  // Vertical offset to open at. With virtualizeRows the virtualizer scrolls
+  // its element here when it attaches, so a restored offset must come in
+  // through this rather than only through scrollContainerRef.
+  initialScrollTop?: number;
 }
 
 // Headless data-table shell — adapted from Dice UI's data-table
@@ -84,10 +100,14 @@ export function DataTable<TData>({
   emptyMessage = "No results.",
   onRowClick,
   renderRow,
+  getRowProps,
   footer,
   virtualizeRows = false,
   virtualRowHeight = 41,
   virtualOverscan = 10,
+  scrollContainerRef,
+  scrollContainerAttributes,
+  initialScrollTop,
   className,
   ...props
 }: DataTableProps<TData>) {
@@ -308,6 +328,13 @@ export function DataTable<TData>({
   }, [columnSizing, leafColumns]);
 
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
+  const attachScrollContainer = React.useCallback(
+    (element: HTMLDivElement | null) => {
+      scrollRef.current = element;
+      scrollContainerRef?.(element);
+    },
+    [scrollContainerRef],
+  );
 
   // Drives the pinned columns' trailing shadow. It only means something once
   // content is passing beneath them, so it stays off at rest. The state is a
@@ -351,6 +378,7 @@ export function DataTable<TData>({
     estimateSize: () => virtualRowHeight,
     getItemKey: getVirtualRowKey,
     overscan: virtualOverscan,
+    initialOffset: initialScrollTop,
     // Rows are not all one height. Callers use renderRow for group headers and
     // end-of-column footers, which are shorter than a data row, so a single
     // estimate drifts from the real layout as those accumulate — the window
@@ -363,9 +391,12 @@ export function DataTable<TData>({
   const firstVirtualItem = virtualItems[0];
   const lastVirtualItem = virtualItems[virtualItems.length - 1];
   const virtualPaddingTop = firstVirtualItem?.start ?? 0;
+  // Before the virtualizer has measured the viewport it yields no items; the
+  // spacer still spans every row so the first commit has its real height
+  // (a restored scroll offset assigned then is not clamped to the top).
   const virtualPaddingBottom = lastVirtualItem
     ? rowVirtualizer.getTotalSize() - lastVirtualItem.end
-    : 0;
+    : rowVirtualizer.getTotalSize();
 
   const bodyProps: DataTableBodyProps<TData> = {
     table,
@@ -373,6 +404,7 @@ export function DataTable<TData>({
     emptyMessage,
     onRowClick,
     renderRow,
+    getRowProps,
     hasExplicitSize,
     measureRow: rowVirtualizer.measureElement,
     virtualizeRows,
@@ -388,7 +420,8 @@ export function DataTable<TData>({
     >
       <div className="relative flex min-h-0 flex-1 flex-col">
       <div
-        ref={scrollRef}
+        ref={attachScrollContainer}
+        {...scrollContainerAttributes}
         className="flex min-h-0 flex-1 flex-col overflow-auto bg-background"
       >
         <table
@@ -411,6 +444,7 @@ export function DataTable<TData>({
               <TableRow key={headerGroup.id} className="hover:bg-transparent">
                 {headerGroup.headers.map((header) => {
                   const isPinned = header.column.getIsPinned();
+                  const sorted = header.column.getIsSorted();
                   const columnHasExplicitSize = hasExplicitSize(
                     header.column.id,
                   );
@@ -425,6 +459,16 @@ export function DataTable<TData>({
                       // Lets a drag measure every column by id instead of
                       // pairing <th> elements with columns positionally.
                       data-column-id={header.column.id}
+                      // Only a table sorted through TanStack's own sorting
+                      // state says so; views that order rows themselves
+                      // leave every header unmarked.
+                      aria-sort={
+                        sorted === "asc"
+                          ? "ascending"
+                          : sorted === "desc"
+                            ? "descending"
+                            : undefined
+                      }
                       // Marks the frozen block's trailing edge for the scroll
                       // shadow to measure against. Rendered widths differ from
                       // configured ones under fixed table-layout, so the
@@ -576,6 +620,7 @@ interface DataTableBodyProps<TData> {
   emptyMessage: React.ReactNode;
   onRowClick?: (row: Row<TData>, event: React.MouseEvent) => void;
   renderRow?: (row: Row<TData>) => React.ReactNode;
+  getRowProps?: (row: Row<TData>) => DataTableRowProps | undefined;
   hasExplicitSize: (columnId: string) => boolean;
   // The virtualizer's own measuring ref; rows report their height through it.
   measureRow: (element: HTMLElement | null) => void;
@@ -591,6 +636,7 @@ function DataTableBody<TData>({
   emptyMessage,
   onRowClick,
   renderRow,
+  getRowProps,
   hasExplicitSize,
   measureRow,
   virtualizeRows,
@@ -617,9 +663,11 @@ function DataTableBody<TData>({
           )
         : <React.Fragment key={row.id}>{customRow}</React.Fragment>;
     }
+    const { className: rowClassName, ...rowAttributes } = getRowProps?.(row) ?? {};
     return (
       <TableRow
         key={row.id}
+        {...rowAttributes}
         {...measured}
         data-state={row.getIsSelected() && "selected"}
         onClick={
@@ -644,7 +692,7 @@ function DataTableBody<TData>({
         // `group` lets pinned cells track row hover via group-hover (their bg
         // is in className, not on the row, so they stay opaque enough to cover
         // content scrolling beneath them).
-        className={cn("group", onRowClick && "cursor-pointer")}
+        className={cn("group", onRowClick && "cursor-pointer", rowClassName)}
       >
         {row.getVisibleCells().map((cell) => {
           const isPinned = cell.column.getIsPinned();

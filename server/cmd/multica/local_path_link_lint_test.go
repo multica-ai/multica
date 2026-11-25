@@ -262,9 +262,7 @@ func TestGuardLocalPathLinksOnlyFiresInAgentContext(t *testing.T) {
 	})
 }
 
-// The per-command fix hint. `issue update` is the trap: it has no --attachment
-// flag, so a shared "pass --attachment" message would point the agent at an
-// argument the command rejects and turn one failure into two.
+// The per-command fix hint should now use `issue update --attachment`.
 func TestGuardLocalPathLinksHintIsPerCommand(t *testing.T) {
 	workdir := withWorkdir(t)
 	shot := filepath.Join(workdir, "shot.png")
@@ -276,19 +274,16 @@ func TestGuardLocalPathLinksHintIsPerCommand(t *testing.T) {
 	err := guardLocalPathLinks(
 		"[screenshot]("+shot+")",
 		"issue description",
-		"`multica issue update` cannot carry files — deliver the file with `multica issue comment add <issue-id> --attachment <path>` instead, and drop the link.",
+		"Attach the file with `multica issue update <issue-id> --attachment <path>` and drop the local-path link.",
 	)
 	if err == nil {
 		t.Fatal("expected a hard failure")
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "`multica issue update` cannot carry files") {
+	if !strings.Contains(msg, "multica issue update <issue-id> --attachment <path>") {
 		t.Errorf("update hint missing, got: %v", msg)
 	}
-	if !strings.Contains(msg, "multica issue comment add <issue-id> --attachment <path>") {
-		t.Errorf("update hint must redirect to comment add, got: %v", msg)
-	}
-	if strings.Contains(msg, "multica issue update --attachment") {
-		t.Errorf("update hint must never name a flag `issue update` does not have, got: %v", msg)
+	if strings.Contains(msg, "multica issue comment add") {
+		t.Errorf("update hint must not redirect to comment add, got: %v", msg)
 	}
 }

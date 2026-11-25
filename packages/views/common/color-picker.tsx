@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Dices, Pipette } from "lucide-react";
+import { Dices, Pipette } from "@multica/ui/icons";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
-import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../i18n";
@@ -200,16 +200,15 @@ export function ColorPickerPanel({
       {/* Eyedropper + hue slider */}
       <div className="flex items-center gap-2.5">
         {eyedropperSupported && (
-          <Button
+          <IconButton
             type="button"
             variant="outline"
             size="icon-sm"
-            aria-label={t(($) => $.color_picker.eyedropper)}
-            title={t(($) => $.color_picker.eyedropper)}
+            label={t(($) => $.color_picker.eyedropper)}
             onClick={pickFromScreen}
           >
             <Pipette className="size-3.5" />
-          </Button>
+          </IconButton>
         )}
         <div
           role="slider"
@@ -299,6 +298,7 @@ export function ColorPickerPanel({
               onChange(preset);
             }}
             className={cn(
+              // eslint-disable-next-line no-restricted-syntax -- color swatch
               "size-5 rounded-full transition-transform hover:scale-110",
               currentHex === preset &&
                 "ring-2 ring-ring ring-offset-2 ring-offset-surface-raised",

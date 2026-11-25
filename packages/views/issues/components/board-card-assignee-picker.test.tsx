@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { useModalStore } from "@multica/core/modals";
 import type { Issue, IssueAssigneeType } from "@multica/core/types";
 import { AppLink, NavigationProvider, type NavigationAdapter } from "../../navigation";
 import {
@@ -8,9 +9,13 @@ import {
 } from "../surface/actions-context";
 import { BoardCardContent } from "./board-card";
 
+const queryData = vi.hoisted(() => new Map<string, unknown[]>());
+
 vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-query")>()),
-  useQuery: () => ({ data: [] }),
+  useQuery: ({ queryKey }: { queryKey: readonly unknown[] }) => ({
+    data: queryData.get(queryKey.join("/")) ?? [],
+  }),
 }));
 
 vi.mock("@multica/core/hooks", () => ({
@@ -110,7 +115,7 @@ const actions: IssueSurfaceActions = {
   createIssue: vi.fn(),
   updateIssue: vi.fn(),
   moveIssue: vi.fn(),
-  batchUpdate: vi.fn().mockResolvedValue(undefined),
+  batchUpdate: vi.fn().mockResolvedValue({ updated: 1 }),
   batchDelete: vi.fn().mockResolvedValue(undefined),
 };
 
@@ -216,5 +221,62 @@ describe("BoardCardContent assignee picker", () => {
     expect(container.querySelector("svg")).toBeNull();
     expect(screen.queryByText("Translated")).not.toBeInTheDocument();
     viewState.cardProperties.priority = false;
+  });
+});
+
+// The card picker is a single-issue write like the right-click menu on the
+// same card, so handing the issue to an agent routes on the run-confirm gate
+// (MUL-6463). The gate's matrix lives in ../actions/run-confirm-gate.test.ts.
+describe("BoardCardContent assignee picker run confirmation", () => {
+  afterEach(() => {
+    queryData.clear();
+    vi.mocked(actions.updateIssue).mockClear();
+    useModalStore.getState().close();
+  });
+
+  function renderAndPick(name: string) {
+    queryData.set("workspaces/ws-1/members", [
+      { user_id: "viewer-1", name: "Viewer", role: "member" },
+      { user_id: "member-2", name: "Teammate", role: "member" },
+    ]);
+    queryData.set("workspaces/ws-1/agents", [
+      { id: "agent-2", name: "Builder", owner_id: "viewer-1", archived_at: null },
+    ]);
+    const issue = makeIssue("member");
+    const { container } = render(
+      <NavigationProvider value={navigation}>
+        <IssueSurfaceActionsProvider actions={actions}>
+          <BoardCardContent issue={issue} editable />
+        </IssueSurfaceActionsProvider>
+      </NavigationProvider>,
+    );
+    fireEvent.click(container.querySelector('[data-slot="avatar"]')!);
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(name) }));
+    return issue;
+  }
+
+  it("confirms before handing the issue to an agent", () => {
+    const issue = renderAndPick("Builder");
+
+    const { modal, data } = useModalStore.getState();
+    expect(modal).toBe("issue-run-confirm");
+    expect(data).toMatchObject({
+      issueIds: [issue.id],
+      mode: "assign",
+      assigneeType: "agent",
+      assigneeId: "agent-2",
+    });
+    expect(actions.updateIssue).not.toHaveBeenCalled();
+  });
+
+  it("applies a member reassignment directly", () => {
+    const issue = renderAndPick("Teammate");
+
+    expect(useModalStore.getState().modal).toBeNull();
+    expect(actions.updateIssue).toHaveBeenCalledWith(
+      issue.id,
+      { assignee_type: "member", assignee_id: "member-2" },
+      expect.anything(),
+    );
   });
 });

@@ -1,0 +1,71 @@
+---
+title: Membres et rôles
+description: Invitez des membres et des invités et choisissez les droits d’accès de chacun.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { RolesDemo } from "@/components/demos/roles-demo";
+
+Dans un [espace de travail](/workspaces), les rôles `owner`, `admin` et `member` permettent de créer des tâches et de les commenter. Leurs droits diffèrent pour la gestion des paramètres et des membres. Les [invités](#invités) peuvent lire et commenter les tâches uniquement dans les projets partagés avec eux.
+
+## Droits des propriétaires, administrateurs et membres [#les-trois-rôles]
+
+| Action | owner (Propriétaire) | admin (Administrateur) | member (Membre) |
+|---|:---:|:---:|:---:|
+| Consulter l'espace de travail et collaborer au quotidien | ✓ | ✓ | ✓ |
+| Modifier les paramètres de l'espace de travail | ✓ | ✓ | — |
+| Inviter un `admin` ou un `member` | ✓ | ✓ | — |
+| Modifier ou retirer un `admin` ou un `member` | ✓ | ✓ | — |
+| Accorder ou révoquer le rôle `owner`, retirer un `owner` | ✓ | — | — |
+| Supprimer l'espace de travail | ✓ | — | — |
+
+Un espace de travail doit toujours conserver au moins un `owner` : le dernier `owner` ne peut être ni rétrogradé, ni retiré, ni quitter l'espace de travail.
+
+<RolesDemo />
+
+<Callout type="info">
+Les invités ne peuvent pas exécuter d’agent. Chaque agent a son propre périmètre d'accès (**Accès**), et `owner` comme `admin` ne peuvent pas le contourner pour exécuter des agents auxquels l'accès ne leur a pas été accordé. Consultez [Agents](/agents#permissions-et-accès).
+</Callout>
+
+<Callout type="info">
+Les rôles n'ouvrent pas non plus les projets privés. Un `owner` ou un `admin` ne voit un projet privé que s'il est sur sa liste de membres. Consultez [Projets privés](/projects#private-projects).
+</Callout>
+
+## Inviter des membres
+
+`owner` et `admin` cliquent sur **Inviter un membre** dans **Paramètres → Membres**, saisissent une adresse e-mail, choisissent un rôle et envoient l'invitation. Les invitations peuvent accorder `admin`, `member` ou un accès [invité](#invités) ; un `owner` doit d'abord rejoindre l'espace de travail, puis être promu par un `owner` existant.
+
+![Gestion des membres : le formulaire d'invitation et la liste des membres avec leurs rôles](/images/docs/members-roster.webp)
+
+La personne invitée accepte en se connectant avec cette adresse e-mail — aucune inscription préalable n'est nécessaire. Les invitations sont valables 7 jours ; renvoyez-en une après expiration. Sur les instances auto-hébergées qui restreignent l'inscription, une invitation en attente et encore valide permet à cette adresse e-mail de créer un compte sans entrée distincte dans la liste d'autorisation — consultez [Configuration de l'authentification](/auth-setup#invitations-et-restrictions-dinscription).
+
+Le lien d'invitation n'apparaît que dans l'e-mail ; il n'existe aucun endroit dans le produit pour le consulter ou le copier. Si l'envoi de l'e-mail échoue, l'invitation existe tout de même — révoquez-la et envoyez-en une nouvelle.
+
+Pour obtenir un lien à transmettre directement, générez-en un dans l'onglet **Liens de partage** de **Paramètres → Membres** en choisissant un rôle et une durée de validité. Toute personne qui a ce lien peut rejoindre l'espace de travail avec le rôle choisi, jusqu'à ce qu'il expire ou soit révoqué.
+
+## Invités
+
+Un invité ne voit que les projets partagés avec lui. Dans ces projets, il peut lire les tâches, les commenter, y réagir et les suivre ; il ne peut ni créer ni modifier de tâches, ni lancer ou mentionner d'agents, ni ouvrir les paramètres de l'espace de travail, et il ne voit aucun autre projet, agent, autopilot ou runtime.
+
+`owner` et `admin` invitent un invité en choisissant **Invité** dans la fenêtre d'invitation et en sélectionnant les projets qu'il peut voir. Depuis le menu d'actions d'un membre, ils peuvent faire d'un membre un invité, ce qui lui retire ses agents, autopilots et accès aux runtimes ; faire d'un invité un membre ; ou modifier les projets d'un invité avec **Gérer les projets accessibles**.
+
+## Changer de rôle
+
+Dans la liste des membres, ouvrez le menu d'actions à droite d'un membre et choisissez **Changer de rôle** ; le nouveau rôle s'applique immédiatement.
+
+Un `admin` peut faire passer un membre de `admin` à `member` et inversement, et peut retirer les membres qui ont l'un de ces deux rôles. Tout changement impliquant `owner` — promotion, modification ou retrait — ne peut être effectué que par un `owner`.
+
+## Retirer un membre
+
+Un membre retiré perd immédiatement l'accès à l'espace de travail. Les tâches, commentaires et autres traces de collaboration qu'il a créés restent dans l'espace de travail.
+
+<Callout type="warning">
+Retirer un membre désactive aussi les runtimes dont il est propriétaire, archive les agents qui y sont liés et annule les exécutions non terminées. Les autorisations que le membre avait reçues dans les périmètres d'accès des agents sont également supprimées, et ne sont pas rétablies automatiquement s'il rejoint de nouveau l'espace de travail.
+</Callout>
+
+## Étapes suivantes
+
+- [Tâches](/issues) — le travail que membres et agents traitent ensemble.
+- [Agents](/agents) — en quoi les rôles de l'espace de travail diffèrent de l'accès aux agents.
+- [Daemon et runtimes](/daemon-runtimes) — à qui appartiennent les runtimes et où ils tournent.
+- [Partager un pool d'agents dans une équipe](/team-agent-pool) — rôles et accès aux agents ensemble, avec l'exemple d'une équipe de 10 personnes.

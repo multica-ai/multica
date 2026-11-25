@@ -10,12 +10,38 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
 	"github.com/multica-ai/multica/server/pkg/remotemcp/remotemcptest"
 )
+
+func TestRemoteMCPServerNameUsesSafeDistinctContributionIdentities(t *testing.T) {
+	connections := []remotemcp.Connection{
+		{ContributionKey: "example__toolbox", ContributionID: "plugin:12345678-1234-4234-8234-1234567890ab:toolbox"},
+		{ContributionKey: "example__toolbox", ContributionID: "plugin:12345678-1234-4234-8234-1234567890ac:toolbox"},
+		{ContributionKey: "example__toolbox", ContributionID: "plugin:12345678-1234-4234-8234-1234567890ab:other_hook"},
+		{ContributionKey: "Mixed Case/☃", ContributionID: "00000000-0000-0000-0000-000000000001"},
+	}
+	safeName := regexp.MustCompile(`^[a-z0-9_-]+$`)
+	seen := map[string]bool{}
+	for _, connection := range connections {
+		name := remoteMCPServerName(connection)
+		if !safeName.MatchString(name) {
+			t.Errorf("Codex-incompatible server name %q for %q", name, connection.ContributionID)
+		}
+		if seen[name] {
+			t.Errorf("distinct contribution identities alias to %q", name)
+		}
+		seen[name] = true
+		if again := remoteMCPServerName(connection); again != name {
+			t.Fatalf("server identity changed: %q != %q", again, name)
+		}
+	}
+}
 
 func TestRemoteMCPProxyFiltersToolsAndInjectsCredential(t *testing.T) {
 	fixture := remotemcptest.NewServer()
@@ -117,7 +143,9 @@ func TestRemoteMCPProxyPreservesAcceptedNotificationStatus(t *testing.T) {
 }
 
 func TestRemoteMCPProxyRechecksCredentialBeforeUpstreamCall(t *testing.T) {
+	const contributionID = "plugin:12345678-1234-4234-8234-1234567890ab:toolbox"
 	called := false
+	credentialChecked := false
 	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
 	defer upstream.Close()
 	endpoint, _ := url.Parse(upstream.URL)
@@ -125,18 +153,22 @@ func TestRemoteMCPProxyRechecksCredentialBeforeUpstreamCall(t *testing.T) {
 		endpoint: endpoint, client: upstream.Client(), path: "/capability",
 		semaphore: make(chan struct{}, remoteMCPMaxConcurrency),
 		connection: remotemcp.Connection{
-			ContributionID: "contribution", CredentialHeader: "Authorization",
+			ContributionID: contributionID, CredentialHeader: "Authorization",
 			ApprovedTools: []remotemcp.Tool{{Name: "allowed"}},
 		},
-		resolveCredential: func(context.Context, string) (http.Header, error) {
+		resolveCredential: func(_ context.Context, id string) (http.Header, error) {
+			credentialChecked = true
+			if id != contributionID {
+				t.Errorf("credential lookup identity = %q, want original %q", id, contributionID)
+			}
 			return nil, errors.New("revoked")
 		},
 	}
 	request := httptest.NewRequest(http.MethodPost, "/capability", bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"allowed","arguments":{}}}`))
 	response := httptest.NewRecorder()
 	proxy.ServeHTTP(response, request)
-	if called || !strings.Contains(response.Body.String(), "revoked or unavailable") {
-		t.Fatalf("called=%v response=%s", called, response.Body.String())
+	if !credentialChecked || called || !strings.Contains(response.Body.String(), "revoked or unavailable") {
+		t.Fatalf("credentialChecked=%v called=%v response=%s", credentialChecked, called, response.Body.String())
 	}
 }
 
@@ -158,9 +190,55 @@ func TestRemoteMCPProviderMatrixAndConfigMerge(t *testing.T) {
 	}
 }
 
-func TestDecodeRemoteMCPSSEData(t *testing.T) {
-	raw, err := decodeRemoteMCPSSEData("text/event-stream; charset=utf-8", []byte("event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1}\n\n"))
-	if err != nil || string(raw) != `{"jsonrpc":"2.0","id":1}` {
-		t.Fatalf("decodeRemoteMCPSSEData = %q, %v", raw, err)
+func TestRemoteMCPProxyFiltersMultiLineAndNotificationPrefixedSSEToolsList(t *testing.T) {
+	schema := json.RawMessage(`{"type":"object","properties":{}}`)
+	canonical, err := canonicalRemoteMCPJSON(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+		_, _ = io.WriteString(w,
+			"event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{\"progress\":1}}\n\n"+
+				"event: message\n"+
+				"data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"tools\":[\n"+
+				"data: {\"name\":\"fixture.read\",\"description\":\"Read\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}},\n"+
+				"data: {\"name\":\"fixture.write\",\"description\":\"Write\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}\n"+
+				"data: ]}}\n\n")
+		w.(http.Flusher).Flush()
+		// Keep the stream open, as Streamable HTTP servers may.
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer upstream.Close()
+	defer close(release)
+	endpoint, _ := url.Parse(upstream.URL)
+	proxy := &remoteMCPProxy{
+		taskID: "task", endpoint: endpoint, client: upstream.Client(), path: "/capability",
+		semaphore: make(chan struct{}, remoteMCPMaxConcurrency),
+		logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+		connection: remotemcp.Connection{
+			InstallationID: "installation", ContributionKey: "fixture",
+			ApprovedTools: []remotemcp.Tool{{
+				Name: "fixture.read", Description: "pinned", InputSchema: canonical,
+				SchemaDigest: remotemcp.DigestBytes(canonical), Risk: "read",
+			}},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	request := httptest.NewRequestWithContext(ctx, http.MethodPost, "/capability", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`))
+	response := httptest.NewRecorder()
+	proxy.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	if strings.Contains(body, `"error"`) || strings.Contains(body, "fixture.write") || !strings.Contains(body, "fixture.read") {
+		t.Fatalf("filtered SSE tools/list = %s", body)
 	}
 }

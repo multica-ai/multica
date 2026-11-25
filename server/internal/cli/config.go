@@ -63,6 +63,12 @@ type CLIConfig struct {
 	// MULTICA_DAEMON_MAX_CONCURRENT_TASKS env, this field, default.
 	MaxConcurrentTasks int `json:"max_concurrent_tasks,omitempty"`
 
+	// Daemon log rotation overrides. Zero means unset; valid environment values
+	// take precedence, followed by these fields, then the 20 MB / 5 / 30 defaults.
+	DaemonLogMaxSizeMB  int `json:"daemon_log_max_size_mb,omitempty"`
+	DaemonLogMaxBackups int `json:"daemon_log_max_backups,omitempty"`
+	DaemonLogMaxAgeDays int `json:"daemon_log_max_age_days,omitempty"`
+
 	// PollInterval is how often the daemon polls the server for new tasks
 	// (Go duration string, e.g. "10s", "500ms"). Same persist-once
 	// motivation as MaxConcurrentTasks. Empty ("") means "not set — use
@@ -91,6 +97,8 @@ type CLIConfig struct {
 	// DefaultHeartbeatInterval.
 	HeartbeatInterval string `json:"heartbeat_interval,omitempty"`
 
+	LogLevel string `json:"log_level,omitempty"`
+
 	// AgentTimeout is the absolute wall-clock cap per agent run (Go
 	// duration string). Unlike the other duration knobs, "0s" is a
 	// meaningful, non-default value here: it explicitly disables the cap
@@ -103,6 +111,13 @@ type CLIConfig struct {
 	// explicit 0), MULTICA_AGENT_TIMEOUT env, this field,
 	// DefaultAgentTimeout.
 	AgentTimeout *string `json:"agent_timeout,omitempty"`
+
+	// AgentIdleWatchdog is the no-message safety window. Empty means unset;
+	// 0s disables the watchdog.
+	AgentIdleWatchdog string `json:"agent_idle_watchdog,omitempty"`
+	// AgentToolWatchdog is the maximum silent in-flight tool window. Empty
+	// means unset; 0s disables the tool-specific bound.
+	AgentToolWatchdog string `json:"agent_tool_watchdog,omitempty"`
 
 	// CodexSemanticInactivityTimeout is the Codex-specific inactivity
 	// watchdog window (Go duration string). Persist-once semantics match

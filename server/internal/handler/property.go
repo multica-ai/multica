@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issueproperty"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -40,7 +42,7 @@ import (
 //     values but keep existing ones resolvable.
 const (
 	maxActivePropertiesPerWorkspace = 20
-	maxPropertySelectOptions        = 50
+	maxPropertySelectOptions        = 200
 	maxPropertyNameLen              = 32
 	maxPropertyIconLen              = 32
 	maxPropertyDescriptionLen       = 500
@@ -52,10 +54,10 @@ const (
 	maxPropertyActorValues = 20
 )
 
-var validPropertyTypes = []string{"text", "number", "select", "multi_select", "date", "checkbox", "url", "actor", "multi_actor"}
+var validPropertyTypes = []string{"text", "number", "select", "multi_select", "date", "checkbox", "url", "actor", "multi_actor", "multi_text", "multi_url"}
 
-// Property icons use stable catalog keys that the Web client maps to Lucide
-// glyphs. Keeping this allowlist at the API boundary prevents arbitrary text
+// Property icons use stable catalog keys that the Web client maps to its
+// icon glyphs. Keeping this allowlist at the API boundary prevents arbitrary text
 // (including emoji) from leaking into every issue surface that renders icons.
 var validPropertyIcons = map[string]struct{}{
 	"circle-dot": {}, "signal-high": {}, "user-round": {}, "folder-kanban": {},
@@ -83,9 +85,7 @@ var reservedPropertyNames = map[string]struct{}{
 	"metadata": {}, "properties": {},
 }
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 type PropertyOption struct {
 	ID    string `json:"id"`
@@ -146,22 +146,6 @@ func propertyToResponse(p db.IssueProperty, usageCount int64) PropertyResponse {
 	return resp
 }
 
-func propertyListRowToResponse(row db.ListIssuePropertiesRow) PropertyResponse {
-	return propertyToResponse(db.IssueProperty{
-		ID:          row.ID,
-		WorkspaceID: row.WorkspaceID,
-		Name:        row.Name,
-		Type:        row.Type,
-		Description: row.Description,
-		Icon:        row.Icon,
-		Config:      row.Config,
-		Position:    row.Position,
-		ArchivedAt:  row.ArchivedAt,
-		CreatedAt:   row.CreatedAt,
-		UpdatedAt:   row.UpdatedAt,
-	}, row.UsageCount)
-}
-
 type CreatePropertyRequest struct {
 	Name        string          `json:"name"`
 	Type        string          `json:"type"`
@@ -178,9 +162,7 @@ type UpdatePropertyRequest struct {
 	Archived    *bool           `json:"archived"`
 }
 
-// ---------------------------------------------------------------------------
 // Validation
-// ---------------------------------------------------------------------------
 
 func normalizePropertyName(name string) string {
 	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(name)), " ", "_")
@@ -238,7 +220,7 @@ func propertyTypeHasOptions(t string) bool {
 }
 
 // validatePropertyConfig canonicalizes the config for storage. Select-type
-// properties require 1..50 options; each option gets a stable server-assigned
+// properties require 1..200 options; each option gets a stable server-assigned
 // UUID if the caller didn't provide one (values reference option IDs, so
 // option renames never touch issue rows). Non-select types must not carry
 // options and are stored as {}.
@@ -295,24 +277,13 @@ func propertyOptionIDs(cfg PropertyConfig) map[string]int {
 	return ids
 }
 
-func selectOptionsHint(cfg PropertyConfig) string {
-	parts := make([]string, len(cfg.Options))
-	for i, opt := range cfg.Options {
-		parts[i] = fmt.Sprintf("%s (%s)", opt.ID, opt.Name)
-	}
-	return strings.Join(parts, ", ")
-}
-
-// ---------------------------------------------------------------------------
 // Actor values (MUL-6286)
-// ---------------------------------------------------------------------------
 
 // Compatibility aliases keep the focused handler tests on the same helper
 // names while the implementation is shared with IssueService.Create.
 type actorRef = issueproperty.ActorRef
 
 func propertyTypeIsActor(t string) bool { return issueproperty.IsActor(t) }
-func actorKindsHint() string            { return issueproperty.ActorKindsHint() }
 func parseActorRef(s string) (actorRef, error) {
 	return issueproperty.ParseActorRef(s)
 }
@@ -393,9 +364,7 @@ func parseIssueProperties(raw []byte) map[string]any {
 	return util.JSONObjectOrEmpty(raw)
 }
 
-// ---------------------------------------------------------------------------
 // Definition handlers
-// ---------------------------------------------------------------------------
 
 // requirePropertyAdmin gates definition writes: human owner/admin members
 // only. Agent actors are rejected before the role check — an agent inherits
@@ -425,7 +394,7 @@ func (h *Handler) ListProperties(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	includeArchived := r.URL.Query().Get("include_archived") == "true"
-	rows, err := h.Queries.ListIssueProperties(r.Context(), db.ListIssuePropertiesParams{
+	listed, err := h.Queries.ListIssueProperties(r.Context(), db.ListIssuePropertiesParams{
 		WorkspaceID:     wsUUID,
 		IncludeArchived: includeArchived,
 	})
@@ -434,11 +403,111 @@ func (h *Handler) ListProperties(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list properties")
 		return
 	}
-	resp := make([]PropertyResponse, len(rows))
-	for i, row := range rows {
-		resp[i] = propertyListRowToResponse(row)
+	// usage_count costs a pass over the workspace's property-carrying issues,
+	// so callers that only need the catalog (issue surfaces, CLI name
+	// resolution, realtime refetches) send include_usage=false and get 0.
+	// Anything else keeps the counts, which is what older clients expect.
+	var usage map[string]int64
+	if r.URL.Query().Get("include_usage") != "false" {
+		// Issues in private projects the caller cannot see are not counted
+		// (MUL-8472), as in label usage counts.
+		hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+		if !ok {
+			return
+		}
+		if usage, err = h.countPropertyUsage(r.Context(), wsUUID, hidden, listed); err != nil {
+			slog.Warn("count property usage failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to list properties")
+			return
+		}
+	}
+	resp := make([]PropertyResponse, len(listed))
+	for i, p := range listed {
+		resp[i] = propertyToResponse(p, usage[uuidToString(p.ID)])
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"properties": resp, "total": len(resp)})
+}
+
+// propertyUsageKeysPerScan caps how many definitions one usage scan counts:
+// each becomes an output column, and PostgreSQL allows at most 1664.
+const propertyUsageKeysPerScan = 1000
+
+// countPropertyUsage returns, keyed by property id, how many of the
+// workspace's issues outside hidden projects carry a value for each of the
+// given definitions.
+func (h *Handler) countPropertyUsage(ctx context.Context, workspaceID pgtype.UUID, hidden projectaccess.Hidden, props []db.IssueProperty) (map[string]int64, error) {
+	usage := make(map[string]int64, len(props))
+	for start := 0; start < len(props); start += propertyUsageKeysPerScan {
+		chunk := props[start:min(start+propertyUsageKeysPerScan, len(props))]
+		query, args := propertyUsageQuery(workspaceID, hidden, chunk)
+		counts := make([]int64, len(chunk))
+		dest := make([]any, len(chunk))
+		for i := range counts {
+			dest[i] = &counts[i]
+		}
+		if err := h.DB.QueryRow(ctx, query, args...).Scan(dest...); err != nil {
+			return nil, err
+		}
+		for i, p := range chunk {
+			usage[uuidToString(p.ID)] = counts[i]
+		}
+	}
+	return usage, nil
+}
+
+// propertyUsageQuery counts, in one pass over the workspace's issues, how
+// many carry each definition's key: one COUNT(*) FILTER column per
+// definition, in order.
+//
+// The shape is deliberate:
+//   - Not a per-definition `properties ? id` subquery: idx_issue_properties_gin
+//     is jsonb_path_ops, which cannot serve `?`, so each definition re-read
+//     every issue in the workspace.
+//   - No row per (issue, key), as jsonb_object_keys or an unnest join would
+//     produce: when most issues carry the counted keys, building and grouping
+//     those rows costs more than the per-definition scans did.
+//   - The scan filters on workspace_id (and, for a caller with hidden
+//     projects, project_id) inside an OFFSET 0 subquery, and every JSON
+//     check runs above it. A JSON condition in the same scan
+//     can be checked before workspace_id (PostgreSQL appends the equality it
+//     derives for workspace_id after the other filters). A sequential scan
+//     then reads every other workspace's bags too, which costs most when
+//     other workspaces store large ones.
+//   - `properties || '{}'` detoasts each bag once for all the `?` checks.
+//     Bags past the TOAST threshold would otherwise be fetched and
+//     decompressed again for every `?`. A single definition skips it: its
+//     one `?` reads the bag once already.
+func propertyUsageQuery(workspaceID pgtype.UUID, hidden projectaccess.Hidden, props []db.IssueProperty) (string, []any) {
+	args := make([]any, 0, len(props)+2)
+	args = append(args, workspaceID)
+	scope := "i.workspace_id = $1::uuid"
+	if ids := hidden.Param(); ids != nil {
+		args = append(args, ids)
+		scope += " AND " + hiddenProjectPredicate("i.project_id", fmt.Sprintf("$%d", len(args)))
+	}
+	if len(props) == 1 {
+		args = append(args, uuidToString(props[0].ID))
+		return fmt.Sprintf(`SELECT COUNT(*) FILTER (WHERE s.properties ? $%d::text)
+FROM (
+	SELECT i.properties
+	FROM issue i
+	WHERE %s
+	OFFSET 0
+) s`, len(args), scope), args
+	}
+	columns := make([]string, len(props))
+	for i, p := range props {
+		args = append(args, uuidToString(p.ID))
+		columns[i] = fmt.Sprintf("COUNT(*) FILTER (WHERE s.properties ? $%d::text)", len(args))
+	}
+	return fmt.Sprintf(`SELECT %s
+FROM (
+	SELECT i.properties || '{}'::jsonb AS properties
+	FROM issue i
+	WHERE %s
+	OFFSET 0
+) s
+WHERE s.properties <> '{}'::jsonb`, strings.Join(columns, ", "), scope), args
 }
 
 func (h *Handler) GetProperty(w http.ResponseWriter, r *http.Request) {
@@ -664,9 +733,7 @@ func (h *Handler) UpdateProperty(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// ---------------------------------------------------------------------------
 // Issue value handlers
-// ---------------------------------------------------------------------------
 
 type SetIssuePropertyRequest struct {
 	Value json.RawMessage `json:"value"`
@@ -846,9 +913,7 @@ func (h *Handler) withPropertyLock(r *http.Request, lockKeys []string, fn func(q
 	return tx.Commit(r.Context())
 }
 
-// ---------------------------------------------------------------------------
 // List-endpoint support: properties filter + property sort expressions
-// ---------------------------------------------------------------------------
 
 const (
 	maxPropertiesFilterDefinitions = 20
@@ -1003,33 +1068,41 @@ func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([][]json.Raw
 		writeError(w, http.StatusBadRequest, "properties filter must be a JSON object of {definitionId: [values]}")
 		return nil, false
 	}
-	if len(parsed) > maxPropertiesFilterDefinitions {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("properties filter cannot cover more than %d definitions", maxPropertiesFilterDefinitions))
+	groups, err := compilePropertiesFilter(parsed)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return nil, false
+	}
+	return groups, true
+}
+
+// compilePropertiesFilter is parsePropertiesFilterParam after decoding; the
+// error is the 400 message. Returns nil when nothing constrains.
+func compilePropertiesFilter(parsed map[string][]json.RawMessage) ([][]json.RawMessage, error) {
+	errInvalid := errors.New("properties filter is invalid")
+	if len(parsed) > maxPropertiesFilterDefinitions {
+		return nil, fmt.Errorf("properties filter cannot cover more than %d definitions", maxPropertiesFilterDefinitions)
 	}
 	groups := make([][]json.RawMessage, 0, len(parsed))
 	totalAlternatives := 0
 	for definitionID, values := range parsed {
 		if _, err := uuid.Parse(definitionID); err != nil {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("properties filter key %q is not a definition id", definitionID))
-			return nil, false
+			return nil, fmt.Errorf("properties filter key %q is not a definition id", definitionID)
 		}
 		if len(values) == 0 {
 			continue
 		}
 		if len(values) > maxPropertiesFilterValues {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("properties filter for %s cannot list more than %d values", definitionID, maxPropertiesFilterValues))
-			return nil, false
+			return nil, fmt.Errorf("properties filter for %s cannot list more than %d values", definitionID, maxPropertiesFilterValues)
 		}
 		alternatives := make([]json.RawMessage, 0, len(values)*3)
-		appendAlt := func(v any) bool {
+		appendAlt := func(v any) error {
 			buf, err := json.Marshal(map[string]any{definitionID: v})
 			if err != nil {
-				writeError(w, http.StatusBadRequest, "properties filter is invalid")
-				return false
+				return errInvalid
 			}
 			alternatives = append(alternatives, buf)
-			return true
+			return nil
 		}
 		hasNoValue := false
 		for _, rawValue := range values {
@@ -1038,8 +1111,7 @@ func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([][]json.Raw
 			if err := json.Unmarshal(rawValue, &stringValue); err == nil {
 				value := stringValue
 				if value == "" {
-					writeError(w, http.StatusBadRequest, "properties filter values cannot be empty")
-					return nil, false
+					return nil, errors.New("properties filter values cannot be empty")
 				}
 				if value == noPropertyValue {
 					if hasNoValue {
@@ -1047,19 +1119,22 @@ func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([][]json.Raw
 					}
 					marker, err := json.Marshal(map[string]string{noPropertyValue: definitionID})
 					if err != nil {
-						writeError(w, http.StatusBadRequest, "properties filter is invalid")
-						return nil, false
+						return nil, errInvalid
 					}
 					alternatives = append(alternatives, marker)
 					hasNoValue = true
 					continue
 				}
-				if !appendAlt(value) || !appendAlt([]string{value}) { // select string / multi_select element
-					return nil, false
+				// select string / multi_select element
+				if err := appendAlt(value); err != nil {
+					return nil, err
+				}
+				if err := appendAlt([]string{value}); err != nil {
+					return nil, err
 				}
 				if value == "true" || value == "false" {
-					if !appendAlt(value == "true") { // checkbox boolean
-						return nil, false
+					if err := appendAlt(value == "true"); err != nil { // checkbox boolean
+						return nil, err
 					}
 				}
 				if num, err := strconv.ParseFloat(value, 64); err == nil &&
@@ -1068,8 +1143,8 @@ func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([][]json.Raw
 					// stored jsonb number, not the string form appended above. NaN /
 					// Infinity are skipped: they are not representable as JSON, so
 					// marshaling them would 400 the whole filter.
-					if !appendAlt(num) {
-						return nil, false
+					if err := appendAlt(num); err != nil {
+						return nil, err
 					}
 				}
 				continue
@@ -1077,18 +1152,15 @@ func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([][]json.Raw
 			// An object member is a scalar operator.
 			var op propertyFilterOperator
 			if err := json.Unmarshal(rawValue, &op); err != nil || op.Op == "" {
-				writeError(w, http.StatusBadRequest, "properties filter values must be strings or {op, value} objects")
-				return nil, false
+				return nil, errors.New("properties filter values must be strings or {op, value} objects")
 			}
 			pattern, err := validatePropertyFilterOperator(definitionID, op)
 			if err != nil {
-				writeError(w, http.StatusBadRequest, err.Error())
-				return nil, false
+				return nil, err
 			}
-			buf, marshalErr := json.Marshal(pattern)
-			if marshalErr != nil {
-				writeError(w, http.StatusBadRequest, "properties filter is invalid")
-				return nil, false
+			buf, err := json.Marshal(pattern)
+			if err != nil {
+				return nil, errInvalid
 			}
 			alternatives = append(alternatives, buf)
 		}
@@ -1096,15 +1168,14 @@ func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([][]json.Raw
 		groups = append(groups, alternatives)
 	}
 	if len(groups) == 0 {
-		return nil, true
+		return nil, nil
 	}
 	// Bound the OR fan-out: each alternative becomes one bind parameter in
 	// the SQL below, and a runaway filter would bloat the statement.
 	if totalAlternatives > 256 {
-		writeError(w, http.StatusBadRequest, "properties filter is too large")
-		return nil, false
+		return nil, errors.New("properties filter is too large")
 	}
-	return groups, true
+	return groups, nil
 }
 
 // parseNoPropertyValuePattern reports whether an alternative is the synthesized

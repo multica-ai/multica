@@ -539,3 +539,95 @@ func TestHydrateDeferredChannelIssueTaskOverlayDoesNotOverwriteMergedCommentPlan
 		t.Fatalf("runtime_mcp_overlay = %s, want merged overlay %s", storedOverlay, mergedOverlay)
 	}
 }
+
+// The channel router publishes this snapshot for the issue it created, but
+// the media download gives others up to DefaultMediaTimeout to act on it. A
+// duplicate mark made in that window is on the row the snapshot reads, and
+// clients patch their cache with the snapshot, so it must carry the mark
+// rather than a null that erases it (MUL-7349).
+func TestPublishAttachmentsChangedKeepsDuplicateMark(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userID, _, issueID := seedAttributionFixture(t, pool)
+	workspaceUUID := util.MustParseUUID(workspaceID)
+	created, err := q.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+		ID: util.MustParseUUID(issueID), WorkspaceID: workspaceUUID,
+	})
+	if err != nil {
+		t.Fatalf("load issue: %v", err)
+	}
+	var originalID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, number, title, creator_type, creator_id, priority, status)
+		VALUES ($1, (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1),
+			'attr original', 'member', $2, 'none', 'in_progress')
+		RETURNING id`, workspaceID, userID).Scan(&originalID); err != nil {
+		t.Fatalf("seed original: %v", err)
+	}
+	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, originalID) })
+	original, err := q.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+		ID: util.MustParseUUID(originalID), WorkspaceID: workspaceUUID,
+	})
+	if err != nil {
+		t.Fatalf("load original: %v", err)
+	}
+	workspace, err := q.GetWorkspace(ctx, workspaceUUID)
+	if err != nil {
+		t.Fatalf("load workspace: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		status string
+		want   bool
+	}{
+		{"marked during the download", "cancelled", true},
+		// A pointer an older server left on a reopened issue is no mark.
+		{"pointer left on a reopened issue", "todo", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := pool.Exec(ctx, `UPDATE issue SET status = $1, duplicate_of_issue_id = $2 WHERE id = $3`,
+				tc.status, originalID, issueID); err != nil {
+				t.Fatalf("mark: %v", err)
+			}
+			bus := events.New()
+			svc := &IssueService{Bus: bus, Queries: q}
+			var updated events.Event
+			bus.Subscribe(protocol.EventIssueUpdated, func(e events.Event) { updated = e })
+
+			svc.PublishAttachmentsChanged(ctx, created, util.MustParseUUID(userID))
+
+			payload, _ := updated.Payload.(map[string]any)
+			snapshot, ok := payload["issue"].(map[string]any)
+			if !ok {
+				t.Fatalf("issue update payload = %#v", updated.Payload)
+			}
+			value, present := snapshot["duplicate_of"]
+			if !present {
+				t.Fatal("snapshot has no duplicate_of key")
+			}
+			ref, _ := value.(map[string]any)
+			if !tc.want {
+				if ref != nil {
+					t.Fatalf("duplicate_of = %v, want null", ref)
+				}
+				return
+			}
+			want := map[string]any{
+				"id":         originalID,
+				"identifier": IssueIdentifier(workspace.IssuePrefix, original.Number),
+				"title":      "attr original",
+				"status":     "in_progress",
+			}
+			if len(ref) != len(want) {
+				t.Fatalf("duplicate_of = %v, want %v", ref, want)
+			}
+			for k, v := range want {
+				if ref[k] != v {
+					t.Fatalf("duplicate_of = %v, want %v", ref, want)
+				}
+			}
+		})
+	}
+}

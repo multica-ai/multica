@@ -55,8 +55,14 @@ func TestHermesEscapedPipeHolderHelper(t *testing.T) {
 	if _, err := syscall.Setsid(); err != nil {
 		t.Fatalf("setsid: %v", err)
 	}
-	if err := os.WriteFile(statePath, []byte(fmt.Sprintf("%d %d", os.Getpid(), syscall.Getpgrp())), 0o600); err != nil {
+	// Both readers use file existence as the ready signal. Publish only after
+	// the full identity is written, so neither can observe an empty file.
+	pendingPath := statePath + ".pending"
+	if err := os.WriteFile(pendingPath, []byte(fmt.Sprintf("%d %d", os.Getpid(), syscall.Getpgrp())), 0o600); err != nil {
 		t.Fatalf("record holder identity: %v", err)
+	}
+	if err := os.Rename(pendingPath, statePath); err != nil {
+		t.Fatalf("publish holder identity: %v", err)
 	}
 	time.Sleep(hermesEscapedHolderLifetime)
 }
@@ -136,6 +142,11 @@ func TestHermesBackendClosesSessionWhenEarlyFailureLeavesEscapedHolder(t *testin
 // left the agent's process group.
 func startHermesWithEscapedHolder(t *testing.T, cases string) (*Session, <-chan struct{}) {
 	t.Helper()
+	return startACPWithEscapedHolder(t, "hermes", cases)
+}
+
+func startACPWithEscapedHolder(t *testing.T, provider, cases string) (*Session, <-chan struct{}) {
+	t.Helper()
 
 	testBinary, err := os.Executable()
 	if err != nil {
@@ -143,7 +154,7 @@ func startHermesWithEscapedHolder(t *testing.T, cases string) (*Session, <-chan 
 	}
 	dir := t.TempDir()
 	statePath := filepath.Join(dir, "holder-state")
-	fakePath := filepath.Join(dir, "hermes")
+	fakePath := filepath.Join(dir, provider)
 	// The holder is started without redirections on purpose: inheriting fd 1
 	// and 2 is what keeps the daemon's pipes open after their writer is gone.
 	//
@@ -166,9 +177,9 @@ done
 `, spawnHolder)
 	writeTestExecutable(t, fakePath, []byte(script))
 
-	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New(provider, Config{ExecutablePath: fakePath, Logger: slog.Default()})
 	if err != nil {
-		t.Fatalf("new hermes backend: %v", err)
+		t.Fatalf("new %s backend: %v", provider, err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	t.Cleanup(cancel)

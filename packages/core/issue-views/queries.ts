@@ -13,7 +13,28 @@ export const issueViewKeys = {
     [...issueViewKeys.all(wsId), scope.scope_type, scope.scope_id ?? null] as const,
   detail: (wsId: string, id: string) =>
     [...issueViewKeys.all(wsId), "detail", id] as const,
+  everywhere: (wsId: string) => [...issueViewKeys.all(wsId), "everywhere"] as const,
 };
+
+/** Every view the caller can open, across workspace, my and project scopes. */
+export function issueViewEverywhereOptions(wsId: string) {
+  return queryOptions({
+    queryKey: issueViewKeys.everywhere(wsId),
+    queryFn: async () => {
+      try {
+        return await api.listIssueViews({ scope_type: "all" });
+      } catch {
+        // Backends without the cross-scope list reject scope_type=all.
+        const [workspace, my] = await Promise.all([
+          api.listIssueViews({ scope_type: "workspace" }),
+          api.listIssueViews({ scope_type: "my" }),
+        ]);
+        return [...workspace, ...my];
+      }
+    },
+    enabled: !!wsId,
+  });
+}
 
 export function issueViewListOptions(wsId: string, scope: IssueViewScope) {
   return queryOptions({
@@ -35,14 +56,15 @@ export function issueViewDetailOptions(wsId: string, id: string) {
 /**
  * Client-side mirror of the server's canManageIssueView: the owner, or a
  * workspace owner/admin for views shared to the workspace. Drives which
- * affordances render — the server re-checks on every write.
+ * affordances render — the server re-checks on every write. A guest has no
+ * saved views, so it manages none, even one it made as a member.
  */
 export function canManageIssueView(
   view: { owner_id: string; visibility: string },
   userId: string | null,
   role: string | null | undefined,
 ): boolean {
-  if (!userId) return false;
+  if (!userId || role === "guest") return false;
   if (view.owner_id === userId) return true;
   return view.visibility === "workspace" && (role === "owner" || role === "admin");
 }

@@ -609,6 +609,7 @@ func createProfileBackedRuntime(t *testing.T, ctx context.Context, name string) 
 	`, testWorkspaceID, "daemon-"+profileID, name, name+" device", testUserID, profileID).Scan(&runtimeID); err != nil {
 		t.Fatalf("insert profile-backed runtime: %v", err)
 	}
+	dbfx.Exec(t, `UPDATE runtime_profile SET daemon_id = $2 WHERE id = $1`, profileID, "daemon-"+profileID)
 
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM agent WHERE runtime_id = $1`, runtimeID)

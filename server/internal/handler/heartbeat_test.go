@@ -87,6 +87,18 @@ func readRuntimeRow(t *testing.T, runtimeID string) (status string, lastSeen tim
 	return
 }
 
+// pinRuntimeLastSeenAtToDBNow stamps last_seen_at with the database clock, the
+// clock the heartbeat write uses, so "did the write move it forward" does not
+// depend on the test process and the database agreeing on the time.
+func pinRuntimeLastSeenAtToDBNow(t *testing.T, runtimeID string) {
+	t.Helper()
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE agent_runtime SET last_seen_at = now() WHERE id = $1`, runtimeID,
+	); err != nil {
+		t.Fatalf("pin last_seen_at: %v", err)
+	}
+}
+
 func setRuntimeLastSeenAt(t *testing.T, runtimeID string, when time.Time) {
 	t.Helper()
 	if _, err := testPool.Exec(context.Background(),
@@ -215,7 +227,7 @@ func TestRecordHeartbeat_NoopStoreAlwaysWritesDB(t *testing.T) {
 
 	// Pin last_seen_at to "just now" to ensure the DB-flush condition is not
 	// what's driving the write.
-	setRuntimeLastSeenAt(t, runtimeID, time.Now())
+	pinRuntimeLastSeenAtToDBNow(t, runtimeID)
 	rt := loadRuntime(t, runtimeID)
 	before := rt.LastSeenAt.Time
 
@@ -403,7 +415,7 @@ func TestRecordHeartbeat_TouchErrorFallsBackToDB(t *testing.T) {
 	testHandler.LivenessStore = fake
 	t.Cleanup(func() { testHandler.LivenessStore = orig })
 
-	setRuntimeLastSeenAt(t, runtimeID, time.Now())
+	pinRuntimeLastSeenAtToDBNow(t, runtimeID)
 	rt := loadRuntime(t, runtimeID)
 	before := rt.LastSeenAt.Time
 

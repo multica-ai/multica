@@ -1,56 +1,15 @@
 package wecom
 
-// relay_outbound.go — how a reply reaches the replica that can send it.
+// Relay completions to the replica holding the bot's WebSocket lease.
+// Redis claims keyed by turn deduplicate replay across restarts and replicas.
 //
-// WeCom is the one channel with no outbound REST path: every write goes over
-// the aibot WebSocket, and the WS lease means exactly one replica holds it.
-// chat:done, meanwhile, is published on the in-process events.Bus by whichever
-// replica served the daemon's POST /tasks/{id}/complete — a load-balancer
-// decision. Off-lease, outbound.go used to have nothing to do but drop the
-// reply (GH #7215, #6890; SELF_HOSTING.md states the resulting constraint).
+// Relay consumers run on the shard reader, so enqueue bounded work and return
+// without waiting for platform acknowledgements. Register before readers start;
+// Attach supplies the eventual handler while early frames wait in the queue.
 //
-// This routes it over the Redis Stream relay the repository already runs for
-// exactly this shape of problem: daemonws.RelayNotifier wakes a daemon
-// connected to another replica by publishing under ScopeDaemonRuntime, and
-// every node's XREAD loop hands the frame to whoever holds that connection.
-//
-// THREE THINGS THAT MECHANISM REQUIRES OF ITS CONSUMERS, and that a naive copy
-// of the daemon-wakeup shape does not satisfy:
-//
-//  1. It replays. A shard reader starts from (now - ReplayGrace), not "$", so
-//     events published while a pod was down are re-read — its own doc says
-//     "downstream consumers must be idempotent". A per-process seen-set is not
-//     idempotent across a restart, and does not span two replicas either. The
-//     claim therefore lives in Redis, keyed on the turn, with a lifetime that
-//     comfortably outlasts the replay window. Redis is not a new dependency
-//     here: it IS the transport. No Redis means no relay, which means no
-//     cross-replica delivery and nothing to deduplicate.
-//
-//  2. It calls the consumer SYNCHRONOUSLY on the shard read loop. The daemon
-//     wakeup's work there is a map lookup and a buffered write; ours is a
-//     network round trip that waits up to ackTimeout for the platform's
-//     verdict. Doing that inline would let one unhealthy bot stall browser
-//     realtime traffic, daemon wakeups, and every other bot on that shard. So
-//     DeliverWecomOutbound only hands the frame to a bounded queue and
-//     returns.
-//
-//  3. Its readers start early. Registration therefore has to be possible
-//     before the senders registry and the subscriber exist: this object is
-//     built and registered first, and Attach supplies the handler afterwards.
-//     Frames that arrive in between wait in the queue rather than being
-//     dropped against a nil field.
-//
-// ORDERING: every reply for one installation is carried by one queue and one
-// worker, in the order it arrived — INCLUDING across a re-offer. A frame that
-// has to be tried again does not go to the back of the queue; it parks at the
-// head of its own installation's line and everything behind it waits, because
-// two answers to the same person arriving in the wrong order is the defect
-// this ordering exists to prevent.
-//
-// Sharding is a CONCURRENCY bound, not an isolation guarantee: installations
-// are hashed onto RelayConfig.Shards queues, so two bots that collide on a
-// shard do wait behind each other. What the shard count buys is that one slow
-// bot cannot occupy every worker.
+// Preserve per-installation order across re-offers by retrying at the queue head.
+// Hashed shards bound concurrency, not isolation: colliding installations can
+// still wait behind each other.
 
 import (
 	"context"
@@ -105,6 +64,11 @@ type DedupeStore interface {
 	// same operation, so a holder that comes back later finds its Settle
 	// refused and records nothing. See RelayOutbound.settle.
 	Resolve(ctx context.Context, key string) (claimState, error)
+	// ClaimState is Resolve WITHOUT the fence: it reports what the key holds
+	// right now and changes nothing. It is what an inbox publish polls while it
+	// waits to see whether a replica took the delivery; Resolve would fence a
+	// holder that is merely mid-delivery. See RelayOutbound.confirmInbox.
+	ClaimState(ctx context.Context, key string) (claimState, error)
 	// ClaimBudget is the longest ONE round trip above may take. The store
 	// states it because the store enforces it: outcomeGrace pays this budget
 	// once per offer, and a copy of the number kept by the dispatcher would be
@@ -195,6 +159,15 @@ type RelayConfig struct {
 	// a tenth of one poll — and expired long before the move it existed for.
 	LeaseSettle time.Duration
 
+	// AcceptanceWindow is how long an inbox publish waits to see a replica take
+	// the delivery claim before it concludes that nobody holds that bot's
+	// socket. Its bound is the frame's trip to every replica's dispatcher plus
+	// one claim round trip (DedupeStore.ClaimBudget), NOT the re-offer chain
+	// the reply path's outcomeGrace outlasts: an inbox frame nobody claimed has
+	// no chain behind it, so waiting the chain out would only delay the
+	// fallback. Zero takes defaultRelayAcceptanceWindow.
+	AcceptanceWindow time.Duration
+
 	// RetryBackoff is the FIRST wait between re-offers; the chain doubles from
 	// there, capped at a quarter of LeaseSettle so a lease that lands early is
 	// not sat out. Small on purpose: the common reason a re-offer succeeds is
@@ -211,6 +184,11 @@ const (
 	// here would be free to drift from the thing it is meant to outlast.
 	defaultRelayLeaseSettle  = engine.DefaultPollInterval
 	defaultRelayRetryBackoff = 200 * time.Millisecond
+	// defaultRelayAcceptanceWindow matches defaultClaimBudget: one claim round
+	// trip plus room for the bus fan-out and a dispatcher's turn. The two live
+	// in different files on purpose — this is the relay's bound on how long it
+	// will wait, that is the store's bound on how long one call may take.
+	defaultRelayAcceptanceWindow = 2 * time.Second
 )
 
 // withDefaults fills the zero fields and returns the completed config.
@@ -237,6 +215,9 @@ func (c RelayConfig) withDefaults() RelayConfig {
 	}
 	if c.RetryBackoff <= 0 {
 		c.RetryBackoff = defaultRelayRetryBackoff
+	}
+	if c.AcceptanceWindow <= 0 {
+		c.AcceptanceWindow = defaultRelayAcceptanceWindow
 	}
 	return c
 }
@@ -278,7 +259,7 @@ func (c RelayConfig) retryPlan() []time.Duration {
 // read for itself, so an attachment is fetched by the replica that will send
 // it rather than shipped through Redis.
 type relayFrame struct {
-	Kind           string `json:"kind"` // relayKindReply | relayKindInbox | relayKindSeal
+	Kind           string `json:"kind"` // relayKindReply | relayKindInbox | relayKindSeal | relayKindProgress
 	InstallationID string `json:"installation_id"`
 	ChatID         string `json:"chat_id"`
 	ChatType       int    `json:"chat_type"`
@@ -293,6 +274,15 @@ type relayFrame struct {
 	WorkspaceID  string `json:"workspace_id,omitempty"`
 	SessionID    string `json:"session_id,omitempty"`
 	CarriesFiles bool   `json:"carries_files,omitempty"`
+
+	// RoundID, Seq and Milestone are a relayKindProgress frame's whole
+	// content: which round (chat_input_task_id, for an auto-retry clone), how
+	// far the reporting run's transcript had got (task_message.seq), and
+	// whether this is the "starting the agent" milestone instead. No text: the
+	// round's holder reads the rows itself (see relayKindProgress).
+	RoundID   string `json:"round_id,omitempty"`
+	Seq       int32  `json:"seq,omitempty"`
+	Milestone bool   `json:"milestone,omitempty"`
 }
 
 const (
@@ -310,8 +300,53 @@ const (
 	// reply whose round is gone falls through to an ordinary push; one
 	// cancel-all click would then put 这次处理已取消 into every chat in the
 	// deployment. A seal frame with no round does NOTHING AT ALL.
+	//
+	// And it is for whoever holds the ROUND, which is not a question the
+	// socket or the claim can answer, so it takes neither: it is published
+	// under its task id, since it carries no installation and the stream
+	// reader drops a frame with no scope id, and perform hands it to every
+	// replica's deliverRelayed without the ownership gate or the claim. Gated
+	// on the socket it reached nobody; claimed once for the deployment, the
+	// replica that won could be one without the round, and the holder would
+	// lose the race and never close the bubble. Every replica but the holder
+	// finds no round and returns, and a copy that reaches the holder twice
+	// finds the round already taken.
 	relayKindSeal = "seal"
+
+	// relayKindProgress says a run has new progress — a tool call, reasoning,
+	// the starting milestone — to the replica holding that run's bubble. It
+	// is a nudge, not a delivery, and none of the machinery above applies to
+	// it:
+	//
+	//   - It never enters the dispatcher's shard queues. DeliverWecomOutbound
+	//     hands it straight to the progress sink, so a burst of progress takes
+	//     no queue space from an answer and never waits in line ahead of one.
+	//   - It takes no claim. Its dedupe is the round's own record of how far
+	//     the run's transcript is already shown (roundEntry.folded), on the
+	//     one replica that holds the round, so a copy, a replay or an
+	//     out-of-order frame is a no-op there, and the terminal claim key is
+	//     never touched.
+	//   - It carries no text. The holder reads the rows the daemon's request
+	//     already committed to task_message, and redacts them itself; reasoning
+	//     cannot be redacted before it is joined (safeThinking), and this
+	//     relay keeps every frame in a Redis stream for its replay window.
+	//   - Like a seal it is for whoever holds the ROUND, not the socket: a
+	//     replica with no round for it does nothing.
+	relayKindProgress = "progress"
 )
+
+// progressSink is the half of the typing indicator the relay hands progress
+// frames to. It must not block: it is called on the shard read loop.
+type progressSink interface {
+	acceptRelayedProgress(f relayFrame)
+}
+
+// progressAttacher is how the typing indicator registers as that sink.
+// *RelayOutbound satisfies it; a test relay that does not is simply never
+// handed progress.
+type progressAttacher interface {
+	attachProgress(s progressSink)
+}
 
 // relayHandler performs a delivery on the replica that holds the socket.
 // *Outbound implements it; the indirection is what lets this object be
@@ -371,6 +406,40 @@ const (
 	// a send at its own risk.
 	outcomeProvablyNotSent
 )
+
+// relayPublish is what one trip through the cross-replica router produced.
+//
+// The bool it replaces could not tell "the bus took it" from "a replica took
+// the delivery" from "the publish call itself failed", and an inbox push needs
+// all three: only an accepted-and-claimed frame is a delivery it may stop
+// making, and only a failed publish forbids it from trying another bot.
+type relayPublish int
+
+const (
+	// relayNotWired — nothing reached the bus: no relay is attached, or the
+	// frame could not even be built. A caller may treat it as a delivery that
+	// certainly did not happen.
+	relayNotWired relayPublish = iota
+	// relayAccepted — the bus took the frame. For a reply or a seal that is the
+	// whole answer. For an inbox push it means a replica that owns the target
+	// bot's socket took the delivery claim, so somebody is carrying it.
+	relayAccepted
+	// relayNoHolder — the bus took the frame, but across the acceptance window
+	// no replica took the delivery claim: nobody holds that installation's
+	// socket, so every dispatcher discards the frame. Only an inbox push can
+	// report this (see confirmInbox). The delivery provably did not happen.
+	relayNoHolder
+	// relayUncertain — the publish call failed, or the claim store could not
+	// answer. The frame may or may not have been accepted, so nothing may be
+	// concluded and nothing may be re-routed on this evidence.
+	relayUncertain
+)
+
+// routed reports whether the bus took the frame, which is the whole question
+// the reply and seal callers ask. They have no second route to fall back to,
+// and a frame that may have been accepted is treated as not carried, so they
+// keep their old local-send behaviour.
+func (p relayPublish) routed() bool { return p == relayAccepted }
 
 // seenEvents is a bounded, per-process set of relay event ids already acted on.
 // It is a cheap first gate in front of the Redis claim — the publisher's own
@@ -467,6 +536,13 @@ type RelayOutbound struct {
 	ready   chan struct{}
 	handler relayHandler
 
+	// progress is where relayKindProgress frames go. Set during boot by the
+	// typing indicator (attachProgress) while the shard readers may already
+	// be running, hence atomic. Without one, a progress frame is dropped and
+	// that is said once (warnNoProgress).
+	progress       atomic.Value // progressSink
+	warnNoProgress sync.Once
+
 	queues []chan queued
 	wg     sync.WaitGroup
 }
@@ -513,6 +589,27 @@ func (r *RelayOutbound) mx() Metrics {
 		return v.(Metrics)
 	}
 	return nopMetrics{}
+}
+
+// attachProgress makes s the receiver of progress frames.
+func (r *RelayOutbound) attachProgress(s progressSink) {
+	if r != nil && s != nil {
+		r.progress.Store(s)
+	}
+}
+
+// deliverProgress hands a progress frame to the sink, on the shard reader's
+// goroutine, and never to the dispatcher's queues (see relayKindProgress).
+func (r *RelayOutbound) deliverProgress(f relayFrame) {
+	if s, ok := r.progress.Load().(progressSink); ok {
+		s.acceptRelayedProgress(f)
+		return
+	}
+	r.warnNoProgress.Do(func() {
+		r.logger.Warn("wecom relay: progress frames are arriving and nothing here shows them; " +
+			"a run whose reports reach another replica shows no steps in its bubble, and a long run's " +
+			"bubble is not handed over before the stream window ends")
+	})
 }
 
 // Attach supplies the handler that performs deliveries. Called once, after the
@@ -793,27 +890,175 @@ func (r *RelayOutbound) Wait() {
 	}
 }
 
-// publish hands a delivery to the other replicas. Reports whether it went out.
-func (r *RelayOutbound) publish(f relayFrame, eventID string) bool {
+// publish hands a delivery to the other replicas and reports what the bus did
+// with it. See relayPublish for why the answer is not a bool.
+//
+// It NEVER waits: every caller of this one either has no second route to take
+// when nobody holds the target bot, or is not in a position to take one. The
+// single caller that is (an inbox push with the recipient-wide bot behind it)
+// asks through publishAwaitingHolder instead, and pays the wait only there.
+func (r *RelayOutbound) publish(f relayFrame, eventID string) relayPublish {
+	return r.publishFrame(context.Background(), f, eventID, false)
+}
+
+// publishAwaitingHolder is publish plus the acceptance wait: it answers whether
+// a replica owning the target bot's socket actually took the delivery, which is
+// what an inbox push needs before it may put a second card in the member's chat
+// through another bot. The wait is bounded by ctx, and by the acceptance window
+// it configures -- see confirmInbox.
+//
+// WHY IT IS A SEPARATE ENTRY POINT. Bus delivery is synchronous on the caller's
+// goroutine, and the publisher of an inbox:new is the HTTP request that created
+// the comment; only one replica holds a given bot's socket, so this wait is the
+// common path in a multi-replica deployment. Spending it where the answer is
+// then discarded -- a member-authored push, which has no second route to try,
+// or the fallback attempt itself, which has nothing behind it -- holds the
+// request open for a verdict nobody can act on. Those callers keep publish.
+func (r *RelayOutbound) publishAwaitingHolder(ctx context.Context, f relayFrame, eventID string) relayPublish {
+	return r.publishFrame(ctx, f, eventID, true)
+}
+
+// publishFrame is the one implementation behind the two entry points.
+func (r *RelayOutbound) publishFrame(ctx context.Context, f relayFrame, eventID string, awaitHolder bool) relayPublish {
 	if r == nil || r.publisher == nil {
-		return false
+		return relayNotWired
 	}
 	body, err := json.Marshal(f)
 	if err != nil {
 		r.logger.Warn("wecom relay: marshal outbound frame", "error", err)
-		return false
+		return relayNotWired
 	}
-	if err := r.publisher.PublishWithID(realtime.ScopeWecomOutbound, f.InstallationID, "", body, eventID); err != nil {
+	scope := f.InstallationID
+	if f.Kind == relayKindSeal {
+		scope = f.TaskID // see relayKindSeal
+	}
+	if err := r.publisher.PublishWithID(realtime.ScopeWecomOutbound, scope, "", body, eventID); err != nil {
 		r.logger.Warn("wecom relay: publish failed",
 			"error", err, "installation_id", f.InstallationID, "task_id", f.TaskID)
-		return false
+		// The bus call failed, but a publish whose RESPONSE was lost may still
+		// have been accepted. Nothing may be concluded from it.
+		return relayUncertain
 	}
 	// A published reply is now owed an outcome by somebody. watchOutcomes is
 	// that somebody — see its comment for why it cannot be anyone else.
 	if f.Kind == relayKindReply {
 		r.awaitOutcome(f, eventID)
 	}
-	return true
+	// Reply and seal frames are fire-and-forget: their callers read only "did
+	// the bus take it", and counting a routed reply twice is what the outcome
+	// watch exists to prevent. Only the inbox push asks whether a replica
+	// actually took the delivery, because only it has a second route to fall
+	// back to -- and only when the caller asked to wait.
+	if !awaitHolder || f.Kind != relayKindInbox {
+		return relayAccepted
+	}
+	if r.dedupe == nil {
+		// No claim store means no relay in production (see DedupeStore); the
+		// bus call is the only signal available, so take it.
+		return relayAccepted
+	}
+	return r.confirmInbox(ctx, eventID)
+}
+
+// confirmInbox answers whether a replica took the delivery claim for an inbox
+// frame the bus accepted, so the publisher can tell "somebody is carrying this"
+// from "nobody holds that bot's socket" without waiting out a re-offer chain
+// that will never exist.
+//
+// It reads the claim key for up to RelayConfig.AcceptanceWindow. A claim that
+// appears means a replica owning the installation's socket engaged the
+// delivery, and the relay's own guarantees (re-offers, the outcome record) take
+// over from there. A key still absent at the end of the window means no replica
+// even took it — the frame is handed to each replica exactly once and only a
+// socket holder claims — so none ever will. The publisher then FENCES the key
+// under a token no delivery worker presents (fenceTokenFor) and reports
+// relayNoHolder, which is what lets the caller
+// route the notification somewhere else. The fence is what keeps that safe: a
+// dispatcher that is late, or a replica replaying the frame across a restart,
+// finds the claim taken and delivers nothing -- on the publishing replica too,
+// which is the one a fence under its own delivery token would NOT have stopped.
+// See fenceTokenFor.
+//
+// A claim store that cannot answer is relayUncertain: the delivery might be
+// happening, and the caller must not route a second copy on that. So is a
+// caller whose own budget ran out mid-wait -- the wait is bounded by ctx as
+// well as by the window, because this runs on a request's goroutine.
+func (r *RelayOutbound) confirmInbox(ctx context.Context, eventID string) relayPublish {
+	window := r.cfg.AcceptanceWindow
+	// THE CALLER'S BUDGET IS THE OUTER BOUND. This wait runs on the goroutine
+	// that is serving an HTTP request (see publishAwaitingHolder), so a caller
+	// that runs out of time must take the wait with it rather than be held for
+	// a window it configured elsewhere. A tighter caller deadline shortens the
+	// window; with no deadline the window stands.
+	deadline := time.Now().Add(window)
+	callerDeadline, hasCallerDeadline := ctx.Deadline()
+	if hasCallerDeadline && callerDeadline.Before(deadline) {
+		deadline = callerDeadline
+	}
+	// The poll's OWN deadline ends the wait; the context is the backstop that
+	// keeps a claim store which ignores its deadline from outlasting it, so it
+	// gets a little more room than the loop. Were the two equal, the context
+	// could fire in the same instant the last poll lands and the verdict would
+	// rest on which select case won: reporting "uncertain" for a bot nobody
+	// holds, and silently giving up the fallback.
+	pollCtx, cancel := context.WithTimeout(ctx, time.Until(deadline)+window/8+time.Millisecond)
+	defer cancel()
+	key := dedupeKey(eventID)
+	// Eight polls over whatever window actually applies, so a caller that
+	// shortened the wait still samples it evenly rather than once at the start
+	// and once past its own deadline.
+	step := window / 8
+	if effective := time.Until(deadline); effective < window {
+		step = effective / 8
+	}
+	if step < time.Millisecond {
+		step = time.Millisecond
+	}
+	for {
+		state, err := r.dedupe.ClaimState(pollCtx, key)
+		if err != nil {
+			r.logger.WarnContext(pollCtx, "wecom relay: inbox claim state unreadable; the push is not re-routed",
+				"error", err, "event_id", eventID)
+			return relayUncertain
+		}
+		if state != claimAbsent {
+			return relayAccepted
+		}
+		if !time.Now().Before(deadline) {
+			break
+		}
+		timer := time.NewTimer(step)
+		select {
+		case <-timer.C:
+		case <-pollCtx.Done():
+			timer.Stop()
+			return relayUncertain
+		}
+	}
+	// A deadline can pass before its cancellation callback updates Err. An
+	// expired caller must not fence the unconfirmed delivery or start a fallback.
+	callerErr := ctx.Err()
+	if callerErr == nil && hasCallerDeadline && !time.Now().Before(callerDeadline) {
+		callerErr = context.DeadlineExceeded
+	}
+	if callerErr != nil {
+		r.logger.WarnContext(ctx, "wecom relay: the caller's budget ran out before an inbox push's bot could be confirmed; not re-routing",
+			"error", callerErr, "event_id", eventID)
+		return relayUncertain
+	}
+	won, err := r.dedupe.Claim(pollCtx, key, r.fenceTokenFor(eventID), r.dedupeTTL)
+	if err != nil {
+		r.logger.WarnContext(pollCtx, "wecom relay: could not fence an unclaimed inbox delivery; the push is not re-routed",
+			"error", err, "event_id", eventID)
+		return relayUncertain
+	}
+	if !won {
+		// A replica took the claim between the last read and the fence.
+		return relayAccepted
+	}
+	r.logger.InfoContext(pollCtx, "wecom relay: no replica holds the inbox push's bot; its sender may route it elsewhere",
+		"event_id", eventID)
+	return relayNoHolder
 }
 
 // DeliverWecomOutbound is realtime.WecomOutboundDeliverer. It must not block:
@@ -828,13 +1073,30 @@ func (r *RelayOutbound) DeliverWecomOutbound(scopeID string, frame []byte, event
 		r.logger.Warn("wecom relay: undecodable frame", "error", err, "installation_id", scopeID)
 		return
 	}
+	if f.Kind == relayKindProgress {
+		r.deliverProgress(f)
+		return
+	}
 	select {
-	case r.queues[r.shardFor(f.InstallationID)] <- queued{frame: f, eventID: eventID}:
+	case r.queues[r.shardFor(dispatchKey(f))] <- queued{frame: f, eventID: eventID}:
 	default:
 		// Shed rather than stall the shard. Counted, because a reply nobody
 		// gets is exactly what this whole path exists to stop being silent.
 		r.shed(queued{frame: f, eventID: eventID}, "dispatch queue full")
 	}
+}
+
+// dispatchKey picks the shard queue a frame waits on. Replies and inbox pushes
+// go by installation, which is what keeps one bot's frames in order. A seal
+// carries no installation, so keying it the same way would put every seal in
+// the deployment on one queue behind one worker, and a cancel-all burst past
+// QueueDepth would be shed: those bubbles would keep spinning. A seal needs no
+// ordering against anything but its own round, so it goes by task id.
+func dispatchKey(f relayFrame) string {
+	if f.Kind == relayKindSeal {
+		return f.TaskID
+	}
+	return f.InstallationID
 }
 
 func (r *RelayOutbound) shardFor(installationID string) int {
@@ -848,6 +1110,13 @@ func (r *RelayOutbound) shardFor(installationID string) int {
 // False means it is owed another offer, which the caller schedules at the head
 // of the installation's line.
 func (r *RelayOutbound) perform(ctx context.Context, item queued) bool {
+	if item.frame.Kind == relayKindSeal {
+		// Neither gate below applies: see relayKindSeal.
+		dctx, cancel := context.WithTimeout(ctx, r.cfg.deliveryBudget())
+		r.handler.deliverRelayed(dctx, item.frame)
+		cancel()
+		return true
+	}
 	// Ownership FIRST, the global claim second. The claim is a cross-replica
 	// SET NX: every replica reads every frame, and if one that cannot send
 	// were allowed to win it, the replica that can send would lose the race,
@@ -1062,6 +1331,19 @@ func settleBudgetSpent(ctx context.Context) bool {
 // tokenFor is the owner token one claim is held under: this process, and the
 // delivery. Stable across re-offers on this process, unique across replicas.
 func (r *RelayOutbound) tokenFor(eventID string) string { return r.owner + "/" + eventID }
+
+// fenceTokenFor is the token a no-holder fence is planted under, and it is
+// deliberately NOT tokenFor. Claim answers "won" when the stored value equals
+// the caller's token, so a fence planted under the publisher's own delivery
+// token would be reclaimable by that replica's dispatcher the moment its
+// socket came back -- the ordinary reconnect, not an exotic one -- and the
+// frame it then delivered would be the second card the fallback had already
+// replaced. The suffix makes the fenced value one no delivery worker ever
+// presents, so the fence holds against every worker on every replica, the
+// publishing one included. It is never released; the claim TTL retires it.
+func (r *RelayOutbound) fenceTokenFor(eventID string) string {
+	return r.tokenFor(eventID) + "/fence"
+}
 
 func dedupeKey(eventID string) string { return "wecom:outbound:claim:" + eventID }
 
@@ -1280,9 +1562,13 @@ func relayEventID(e events.Event, taskID pgtype.UUID) string {
 	return "wecom:" + e.Type + ":" + util.UUIDToString(taskID)
 }
 
-// relayInboxEventID is the same rule for an inbox push, which has no task.
-func relayInboxEventID(itemID, recipientID string) string {
-	return "wecom:inbox:" + itemID + ":" + recipientID
+// relayInboxEventID is the same rule for an inbox push, which has no task. The
+// installation is part of the id because one push is offered to two bots: the
+// acting agent's, then the recipient-wide one. The publisher FENCES the claim
+// of a bot nobody holds before it tries the other, and distinct ids are what
+// keep that fence from also swallowing the route around it.
+func relayInboxEventID(itemID, recipientID, installationID string) string {
+	return "wecom:inbox:" + itemID + ":" + recipientID + ":" + installationID
 }
 
 // deliverRelayed performs a delivery published by another replica. It is the
@@ -1353,11 +1639,17 @@ func (o *Outbound) deliverRelayed(ctx context.Context, f relayFrame) relayResult
 				if !hasVisibleChar(text) {
 					text = wordlessSealCopy(t.Handle.Locale, f.CarriesFiles)
 				}
-				sealErr := o.finishStream(ctx, t.Handle, text)
+				// The same split the local path makes (outbound.go): a closing
+				// frame is clipped to 20480 bytes, so the rest follows as
+				// messages under the bubble.
+				head, rest := splitForBubble(text)
+				sealErr := o.finishStream(ctx, t.Handle, head)
 				switch classifySeal(sealErr) {
 				case sealOnScreen:
+					o.sendRest(ctx, t.Handle, rest)
 					record, spoke = o.delivered, true
 				case sealUnknown:
+					o.sendRest(ctx, t.Handle, rest)
 					se := sealErr
 					record = func() {
 						o.unconfirmedFor(ctx, f.SessionID, f.Kind, unconfirmedSealReason(se), se)
@@ -1377,7 +1669,18 @@ func (o *Outbound) deliverRelayed(ctx context.Context, f relayFrame) relayResult
 	// that was going to close the bubble is what the room gets instead — the
 	// same substitution the local path makes (outbound.go).
 	if hasVisibleChar(text) && !spoke {
-		if err := sender.sendTextCtx(ctx, f.ChatID, f.ChatType, text); err != nil {
+		if err := sender.sendTextCtx(guardReply(ctx, o.q, instID), f.ChatID, f.ChatType, text); err != nil {
+			if f.Kind == relayKindReply && errors.Is(err, errInstallationGone) && !errors.Is(err, errPartiallySent) {
+				// Revoked while the reply waited. Final, unlike the other
+				// refusals that precede the write: no replica may write it, so
+				// another offer would only walk the retry chain and come back
+				// as no_live_connection. An inbox push takes the ordinary
+				// route below — the publisher offers a proven miss to the
+				// member's other bot, which is still the right place for it.
+				return relayResult{outcome: outcomeDone, record: func() {
+					o.skippedFor(ctx, f.SessionID, skipInstallationInactive)
+				}}
+			}
 			// WHETHER THIS FRAME IS FINISHED IS SETTLED BEFORE ANY COUNTER
 			// MOVES. A frame that is owed another offer is still in flight,
 			// and counting it here counts it once per attempt: the dispatcher
@@ -1435,6 +1738,13 @@ func (o *Outbound) deliverRelayed(ctx context.Context, f relayFrame) relayResult
 			ChatID:         f.ChatID,
 			ChatType:       f.ChatType,
 			SessionID:      f.SessionID,
+			// Same reason as the direct path in outbound.go: the failure runs
+			// on a detached goroutine with no context left to read a profile
+			// with, so the reader's language is resolved here. A relayed reply
+			// is the one a multi-replica deployment takes most of the time —
+			// without this, an English reader's file-failure notice arrives in
+			// the deployment's language and nothing else differs.
+			Locale: localeFor(ctx, o.q, instID, f.ChatType, f.ChatID),
 		}, !hasVisibleChar(f.Content))
 	}
 	return relayResult{outcome: outcomeDone, record: record}

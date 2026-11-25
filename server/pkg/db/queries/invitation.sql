@@ -1,6 +1,6 @@
 -- name: CreateInvitation :one
-INSERT INTO workspace_invitation (id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO workspace_invitation (id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, expires_at, project_ids)
+VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE(sqlc.narg('project_ids')::uuid[], '{}'))
 RETURNING *;
 
 -- name: GetInvitation :one
@@ -48,6 +48,15 @@ WHERE id = $1 AND status = 'pending';
 -- name: GetPendingInvitationByEmail :one
 SELECT * FROM workspace_invitation
 WHERE workspace_id = $1 AND invitee_email = $2 AND status = 'pending' AND expires_at > now();
+
+-- name: HasPendingInvitationForEmail :one
+SELECT EXISTS (
+    SELECT 1
+    FROM workspace_invitation
+    WHERE invitee_email = $1
+      AND status = 'pending'
+      AND expires_at > now()
+);
 
 -- name: ExpireStalePendingInvitations :many
 -- Mark any past-due pending invitations for (workspace_id, invitee_email) as expired,

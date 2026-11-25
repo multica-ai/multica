@@ -6,6 +6,17 @@ SELECT * FROM workspace_mcp_server
 WHERE workspace_id = $1
 ORDER BY name ASC;
 
+-- name: CountWorkspaceMcpServerAgents :many
+-- How many live agents each library entry is assigned to, for the workspace
+-- settings list. Archived agents never receive the server, so they are not
+-- counted; servers with no assignment are simply absent from the result.
+SELECT ams.server_id, COUNT(*)::bigint AS agent_count
+FROM agent_mcp_server ams
+JOIN workspace_mcp_server s ON s.id = ams.server_id
+JOIN agent a ON a.id = ams.agent_id
+WHERE s.workspace_id = $1 AND a.archived_at IS NULL
+GROUP BY ams.server_id;
+
 -- name: LockWorkspaceMcpServerForShare :one
 -- Taken by the assignment writer before it inserts. A shared row lock
 -- conflicts with the exclusive lock DeleteWorkspaceMcpServer takes, so an

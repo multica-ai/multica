@@ -5,6 +5,7 @@ import type { Project, ProjectStatus } from "./project";
 
 // Issue API
 export interface CreateIssueRequest {
+ blocked_by?: string[];
   title: string;
   description?: string;
   status?: IssueStatus;
@@ -51,6 +52,8 @@ export type CreateCommentSubIssueRequest =
   | CreateCommentSubIssueAgentRequest;
 
 export interface UpdateIssueRequest {
+ blocked_by?: string[];
+ remove_blocked_by?: string[];
   /** Legacy aggregate compare-and-swap token. New text editors use field
    * baselines so unrelated issue activity does not reject their edits. */
   expected_revision?: number;
@@ -80,6 +83,68 @@ export interface UpdateIssueRequest {
    *  MUL-3375). The assignee/status change still applies. Control field —
    *  strip from optimistic cache patches; never written onto the Issue. */
   suppress_run?: boolean;
+  /** When a status change hands the issue off to a workflow step's handler,
+   *  also stop the active runs of the agent it was taken from (MUL-7420).
+   *  Control field — strip from optimistic cache patches. */
+  stop_previous_assignee_runs?: boolean;
+  /** With a project move: enter the destination workflow's column the issue
+   *  lands on, handing it off like a status change (MUL-7420). Without it a
+   *  project move is administrative. Control field — strip from optimistic
+   *  cache patches. */
+  enter_workflow_step?: boolean;
+  /** Marks this issue as a duplicate of another issue (MUL-7349). The server
+   *  also sets status to cancelled; any later status change away from
+   *  cancelled removes the mark. Write-only — read it back through
+   *  `listIssueDuplicates`. Control field: strip from optimistic patches. */
+  duplicate_of_issue_id?: string;
+}
+
+/** Label changes for a batch update; add and remove leave other labels alone, clear removes every label not being added. */
+export interface BatchIssueLabelOps {
+  add?: string[];
+  remove?: string[];
+  clear?: boolean;
+}
+
+/** Custom property changes for a batch update, keyed by property id. */
+export interface BatchIssuePropertyOps {
+  set?: IssuePropertyValues;
+  unset?: string[];
+}
+
+export type BatchIssueOutcome =
+  | "updated"
+  | "unchanged"
+  | "skipped"
+  | "would_update"
+  | "deleted"
+  | "would_delete";
+
+/** One issue's outcome in a batch write; skipped results carry a reason code. */
+export interface BatchIssueResult {
+  issue_id: string;
+  identifier?: string;
+  outcome: BatchIssueOutcome;
+  code?: string;
+  message?: string;
+}
+
+export interface BatchUpdateIssuesResponse {
+  /** Issues that now hold the requested values (updated or already unchanged). */
+  updated: number;
+  /** Absent on servers that predate per-issue results. */
+  results?: BatchIssueResult[];
+  dry_run?: boolean;
+  /** The response could not be read, so which issues changed is unknown. */
+  unconfirmed?: boolean;
+}
+
+/** Both sides of an issue's duplicate relation (MUL-7349). */
+export interface IssueDuplicates {
+  /** The original this issue duplicates, when it is marked as a duplicate. */
+  duplicate_of: Issue | null;
+  /** Issues marked as duplicates of this one. */
+  duplicates: Issue[];
 }
 
 /**
@@ -95,6 +160,7 @@ export interface MoveIssueRequest
     | "assignee_id"
     | "parent_issue_id"
     | "project_id"
+    | "stop_previous_assignee_runs"
   > {
   before_id: string | null;
   after_id: string | null;
@@ -124,6 +190,7 @@ export interface IssueTriggerPreview {
 }
 
 export interface ListIssuesParams {
+ blocked?: boolean;
   limit?: number;
   offset?: number;
   workspace_id?: string;
@@ -152,6 +219,7 @@ export interface ListIssuesParams {
    */
   assignee_types?: IssueAssigneeType[];
   creator_id?: string;
+  created_by_user_id?: string;
   project_id?: string;
   /** Actor-aware table facets. OR within each field. */
   assignee_filters?: IssueActorRef[];
@@ -171,9 +239,8 @@ export interface ListIssuesParams {
   ids?: string[];
   /**
    * Widen the assignee filter to issues where the user is the *indirect*
-   * assignee — assignee is one of the user's owned agents, or a squad that
-   * involves the user (human member / leader-via-owned-agent / agent member
-   * owned by the user). Direct member assignment is intentionally excluded:
+   * assignee — assignee is one of the user's owned agents, or a squad led by
+   * an agent the user owns. Direct member assignment is intentionally excluded:
    * `involves_user_id` and `assignee_id=<user>` (tab "Assigned to me") produce
    * disjoint result sets by construction.
    */
@@ -225,6 +292,7 @@ export interface ListGroupedIssuesParams {
   assignee_id?: string;
   assignee_ids?: string[];
   creator_id?: string;
+  created_by_user_id?: string;
   project_id?: string;
   /** See `ListIssuesParams.involves_user_id` — same semantics. */
   involves_user_id?: string;
@@ -273,11 +341,6 @@ export interface IssueAssigneeGroup {
   total: number;
 }
 
-/** Raw backend response shape for `GET /api/issues/grouped?group_by=assignee`. */
-export interface GroupedIssuesResponse {
-  groups: IssueAssigneeGroup[];
-}
-
 // Server-authoritative Table query contract. Membership, grouping and counts
 // are evaluated against the complete result set; the browser only owns view
 // state such as collapsed groups/parents.
@@ -287,6 +350,38 @@ export type IssueTableScope =
   | { kind: "assignee"; actor: IssueActorRef }
   | { kind: "creator"; actor: IssueActorRef }
   | { kind: "my"; relation: "assigned" | "created" | "involved" | "any" };
+
+export type IssueTableRelation = "assigned" | "created" | "my_agents" | "subscribed" | "blocked";
+
+export type IssueTableNegatableFilter =
+  | "statuses"
+  | "priorities"
+  | "assignees"
+  | "creators"
+  | "project_ids"
+  | "project_statuses"
+  | "label_ids"
+  | "relations"
+  | "due_dates";
+
+export type IssueTableDueDate = "overdue" | "today" | "this_week" | "next_7_days" | "none";
+
+/** One node of `filters.advanced`: a group when it has `children`. */
+export type IssueTableFilterNode = IssueTableFilterGroup | IssueTableFilterCondition;
+
+export interface IssueTableFilterGroup {
+  match: "all" | "any";
+  children: IssueTableFilterNode[];
+}
+
+export interface IssueTableFilterCondition {
+  /** A flat filter's field, or `property:<definitionId>`. */
+  field: IssueTableNegatableFilter | `property:${string}`;
+  negate?: boolean;
+  /** Actors are `${type}:${id}`; assignees and project_ids accept "none".
+   *  A property takes `filters.properties` members. */
+  values: PropertyFilterValue[];
+}
 
 export interface IssueTableFilters {
   statuses?: IssueStatus[];
@@ -301,6 +396,19 @@ export interface IssueTableFilters {
    *  matches. */
   project_statuses?: ProjectStatus[];
   label_ids?: string[];
+  /** How the requesting user relates to the issue, OR within the list:
+   *  assigned to me, created by me, assigned to an agent I own. */
+  relations?: IssueTableRelation[];
+  /** Dimensions whose predicate is inverted ("is not"). Listing a dimension
+   *  that has no values of its own changes nothing. */
+  negate?: IssueTableNegatableFilter[];
+  /** Relative due-date buckets, OR within the list. Needs `today`. */
+  due_dates?: IssueTableDueDate[];
+  /** The viewer's calendar day ("YYYY-MM-DD") the due-date buckets resolve
+   *  against. */
+  today?: string;
+  /** A condition tree ANDed with the flat filters above. */
+  advanced?: IssueTableFilterGroup;
   /** Same shape as `ListIssuesParams.properties`: bare strings are exact
    *  equality / "No value", operator objects narrow scalar matches. */
   properties?: Record<string, PropertyFilterValue[]>;
@@ -310,9 +418,14 @@ export interface IssueTableFilters {
     end: string;
   };
   working_only?: boolean;
+  /** No visible running or queued work, matching the Inbox Idle filter. */
+  idle_only?: boolean;
   /** Match the running-task issue projection returned by
    *  `/api/working-agents`. An explicit empty list matches nothing. */
   working_issue_ids?: string[];
+  /** Match the viewer's unread issues as the client holds them
+   *  (`/api/issues/unread`). An explicit empty list matches nothing. */
+  unread_issue_ids?: string[];
   include_sub_issues?: boolean;
 }
 
@@ -499,16 +612,16 @@ export interface WorkingAgentSummary {
   running_task_count: number;
 }
 
-/** Per-status bucket in the paginated issue cache. `total` is the server count (all pages), not the length of `issues`. */
+/** Per-category bucket in the issue list cache. The list's fetch sets `total` to the bucket's row count. */
 export interface IssueStatusBucket {
   issues: Issue[];
   total: number;
 }
 
 /**
- * Frontend cache shape for the issue list. Data is bucketed by status so
- * each column can paginate independently. Assembled from per-status
- * `api.listIssues` responses by the query functions in `issues/queries.ts`.
+ * Frontend cache shape for the issue list. Data is bucketed by status
+ * category. Assembled from one `api.listIssues` response by the query
+ * functions in `issues/queries.ts`.
  */
 export interface ListIssuesCache {
   /** Bucketed by status CATEGORY — see PAGINATED_CATEGORIES. (MUL-6243) */
@@ -535,6 +648,60 @@ export interface SearchProjectsResponse {
   projects: SearchProjectResult[];
 }
 
+// Local search index sync (MUL-7754): GET /api/search-index/manifest,
+// GET /api/search-index/snapshot, POST /api/search-index/changes.
+
+/** Issue as the local search index stores it: a search row without match fields. */
+export interface SearchIndexIssue extends Issue {
+  /** Sub-second `updated_at`, which server search breaks ranking ties with. */
+  search_updated_at: string;
+}
+
+/** Project as the local index stores it. Issue and resource counts are not synced. */
+export interface SearchIndexProject extends Project {
+  search_updated_at: string;
+}
+
+export interface SearchIndexComment {
+  id: string;
+  issue_id: string;
+  content: string;
+  /** Sub-second RFC 3339 timestamp. */
+  created_at: string;
+}
+
+export interface SearchIndexManifest {
+  /** Opaque catch-up cursor for the snapshot the new copy starts from. */
+  cursor: string;
+  issue_count: number;
+  comment_count: number;
+  project_count: number;
+  /** UTF-8 bytes of every title, description, and live comment. */
+  text_bytes: number;
+}
+
+export interface SearchIndexSnapshotPage {
+  issues: SearchIndexIssue[];
+  comments: SearchIndexComment[];
+  /** Every project, on the first page only. */
+  projects: SearchIndexProject[];
+  next_after_number: number;
+  done: boolean;
+}
+
+export interface SearchIndexChanges {
+  issues: SearchIndexIssue[];
+  comments: SearchIndexComment[];
+  projects: SearchIndexProject[];
+  deleted: {
+    issues: string[];
+    comments: string[];
+    projects: string[];
+  };
+  cursor: string;
+  has_more: boolean;
+}
+
 export interface UpdateMeRequest {
   name?: string;
   avatar_url?: string;
@@ -548,10 +715,14 @@ export interface UpdateMeRequest {
 export interface CreateMemberRequest {
   email: string;
   role?: MemberRole;
+  /** Required for a guest: the projects it can access. */
+  project_ids?: string[];
 }
 
 export interface UpdateMemberRequest {
   role: MemberRole;
+  /** Required when the member becomes a guest. */
+  project_ids?: string[];
 }
 
 // Personal Access Tokens

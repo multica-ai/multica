@@ -55,6 +55,7 @@ func TestOpenCodeV2RefusesSynthesizedMCPWithoutAgentConfig(t *testing.T) {
 		ExecutablePath: fakeCLI,
 		CLIVersion:     "opencode v2.0.10",
 		BuiltinRuntime: true,
+		Env:            map[string]string{"MULTICA_OPENCODE_TRANSPORT": "run"},
 		Logger:         slog.Default(),
 	})
 	if err != nil {

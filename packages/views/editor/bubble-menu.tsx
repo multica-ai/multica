@@ -20,6 +20,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useReducedMotion } from "@multica/core/appearance";
 import {
   computePosition,
   offset,
@@ -37,6 +38,7 @@ import { useCreateIssue } from "@multica/core/issues/mutations";
 import { useT } from "../i18n";
 import { createShortcutChord, type ShortcutChord } from "@multica/core/shortcuts";
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
+import { contextMenuOrigin } from "@multica/ui/lib/context-menu-origin";
 import { Toggle, toggleVariants } from "@multica/ui/components/ui/toggle";
 import { Separator } from "@multica/ui/components/ui/separator";
 import {
@@ -51,7 +53,7 @@ import {
   PopoverContent,
 } from "@multica/ui/components/ui/popover";
 import { Input } from "@multica/ui/components/ui/input";
-import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   Bold,
   Italic,
@@ -74,11 +76,9 @@ import {
   FilePlus,
   Loader2,
   MessageSquarePlus,
-} from "lucide-react";
+} from "@multica/ui/icons";
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 function shouldShowBubbleMenu(editor: Editor, hasSelectionAction = false): boolean {
   if (!editor.isEditable) return false;
@@ -92,9 +92,7 @@ function shouldShowBubbleMenu(editor: Editor, hasSelectionAction = false): boole
   return true;
 }
 
-// ---------------------------------------------------------------------------
 // Mark Toggle Button
-// ---------------------------------------------------------------------------
 
 type InlineMark = "bold" | "italic" | "strike" | "code" | "highlight";
 
@@ -144,9 +142,7 @@ function MarkButton({
   );
 }
 
-// ---------------------------------------------------------------------------
 // URL normalisation
-// ---------------------------------------------------------------------------
 
 /** Protocols that can execute code in the browser — the only ones we block. */
 const DANGEROUS_PROTOCOL_RE = /^(javascript|data|vbscript):/i;
@@ -174,9 +170,7 @@ function normalizeUrl(input: string): string {
   return `https://${trimmed}`;
 }
 
-// ---------------------------------------------------------------------------
 // Link Edit Bar
-// ---------------------------------------------------------------------------
 
 function LinkEditBar({
   editor,
@@ -224,42 +218,40 @@ function LinkEditBar({
           if (e.key === "Escape") { e.preventDefault(); onClose(); editor.commands.focus(); }
         }}
       />
-      <Button
+      <IconButton
         size="icon-xs"
         variant="ghost"
-        aria-label={t(($) => $.bubble_menu.link_edit.apply)}
+        label={t(($) => $.bubble_menu.link_edit.apply)}
         onClick={apply}
         onMouseDown={(e) => e.preventDefault()}
       >
         <Check className="size-3.5" />
-      </Button>
+      </IconButton>
       {existingHref && (
-        <Button
+        <IconButton
           size="icon-xs"
           variant="ghost"
-          aria-label={t(($) => $.bubble_menu.link_edit.remove)}
+          label={t(($) => $.bubble_menu.link_edit.remove)}
           onClick={remove}
           onMouseDown={(e) => e.preventDefault()}
         >
           <Unlink className="size-3.5" />
-        </Button>
+        </IconButton>
       )}
-      <Button
+      <IconButton
         size="icon-xs"
         variant="ghost"
-        aria-label={t(($) => $.bubble_menu.link_edit.close)}
+        label={t(($) => $.bubble_menu.link_edit.close)}
         onClick={() => { onClose(); editor.commands.focus(); }}
         onMouseDown={(e) => e.preventDefault()}
       >
         <X className="size-3.5" />
-      </Button>
+      </IconButton>
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
 // Heading Dropdown
-// ---------------------------------------------------------------------------
 
 function HeadingDropdown({ editor, onOpenChange, activeLevel }: { editor: Editor; onOpenChange: (open: boolean) => void; activeLevel: number | undefined }) {
   const { t } = useT("editor");
@@ -315,9 +307,7 @@ function HeadingDropdown({ editor, onOpenChange, activeLevel }: { editor: Editor
   );
 }
 
-// ---------------------------------------------------------------------------
 // List Dropdown
-// ---------------------------------------------------------------------------
 
 function ListDropdown({ editor, onOpenChange, isBullet, isOrdered, isTask }: { editor: Editor; onOpenChange: (open: boolean) => void; isBullet: boolean; isOrdered: boolean; isTask: boolean }) {
   const { t } = useT("editor");
@@ -393,9 +383,7 @@ function ListDropdown({ editor, onOpenChange, isBullet, isOrdered, isTask }: { e
   );
 }
 
-// ---------------------------------------------------------------------------
 // Create Sub-Issue Button
-// ---------------------------------------------------------------------------
 
 /**
  * Turns the current selection into a sub-issue of `parentIssueId` and replaces
@@ -488,9 +476,7 @@ function CreateSubIssueButton({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Main Bubble Menu — @floating-ui/dom + portal to body
-// ---------------------------------------------------------------------------
 
 function EditorBubbleMenu({
   editor,
@@ -563,8 +549,9 @@ function EditorBubbleMenu({
       setTimeout(() => {
         if (editor.isDestroyed) return;
         const el = floatingRef.current;
-        if (el && el.contains(document.activeElement)) return;
-        if (editor.view.hasFocus()) return;
+        const active = contextMenuOrigin(document.activeElement);
+        if (el && el.contains(active)) return;
+        if (editor.view.hasFocus() || editor.view.dom.contains(active)) return;
         setVisible(false);
       }, 0);
     };
@@ -585,6 +572,7 @@ function EditorBubbleMenu({
       }).then(({ x, y, middlewareData }) => {
         if (!el.isConnected) return;
         const hidden = middlewareData.hide?.referenceHidden;
+        el.dataset.state = hidden ? "closed" : "open";
         el.style.visibility = hidden ? "hidden" : "visible";
         el.style.left = `${x}px`;
         el.style.top = `${y}px`;
@@ -601,7 +589,7 @@ function EditorBubbleMenu({
   useEffect(() => {
     if (!visible) return;
     const handle = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
+      const target = contextMenuOrigin(e.target) as HTMLElement;
       if (editor.view.dom.contains(target)) return;
       if (floatingRef.current?.contains(target)) return;
       setVisible(false);
@@ -623,9 +611,19 @@ function EditorBubbleMenu({
     [editor],
   );
 
+  const reduceMotion = useReducedMotion();
+  const prevModeRef = useRef(mode);
+  const modeChanged = prevModeRef.current !== mode;
+  useEffect(() => {
+    prevModeRef.current = mode;
+  }, [mode]);
+
   return (
     <div
       ref={floatingRef}
+      data-mc="editor-toolbar"
+      data-mode={mode === "link-edit" ? "link" : "format"}
+      data-state={visible ? "open" : "closed"}
       style={{
         position: "fixed",
         zIndex: 50,
@@ -634,6 +632,14 @@ function EditorBubbleMenu({
       }}
       onMouseDown={(e) => e.preventDefault()}
     >
+      <div
+        key={mode}
+        className={
+          modeChanged && !reduceMotion
+            ? "animate-in fade-in duration-[120ms] ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:animate-none"
+            : undefined
+        }
+      >
       {mode === "link-edit" ? (
         <LinkEditBar editor={editor} onClose={() => { setMode("toolbar"); editor.commands.focus(); }} />
       ) : (
@@ -725,6 +731,7 @@ function EditorBubbleMenu({
           </div>
         </TooltipProvider>
       )}
+      </div>
     </div>
   );
 }

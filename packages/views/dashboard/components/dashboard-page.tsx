@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { BarChart3, RefreshCw } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { BarChart3, RefreshCw } from "@multica/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import {
@@ -12,24 +12,37 @@ import {
   NumberFlow,
 } from "@multica/ui/components/ui/number-flow";
 import { useWorkspaceId } from "@multica/core/hooks";
-import type { Agent } from "@multica/core/types";
-import { agentListOptions } from "@multica/core/workspace/queries";
+import { useFeatureEnabled } from "@multica/core/config";
+import {
+  BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
+  DASHBOARD_HISTORY_365D_FLAG,
+} from "@multica/core/feature-flags";
+import { workspaceSubscriptionPricesOptions } from "@multica/core/billing";
+import { useWorkspacePaths } from "@multica/core/paths";
+import type { Agent, Squad } from "@multica/core/types";
+import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import {
   dashboardKeys,
   dashboardUsageDailyOptions,
   dashboardUsageByAgentOptions,
+  dashboardUsageBySquadOptions,
   dashboardAgentRunTimeOptions,
+  dashboardSquadRunTimeOptions,
   dashboardRunTimeDailyOptions,
   dashboardFailuresDailyOptions,
   dashboardFailuresByAgentOptions,
+  dashboardFailuresBySquadOptions,
+  useDashboardHistoryLimit,
 } from "@multica/core/dashboard";
+import { toast } from "sonner";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
-import { PAGE_GUTTER } from "../../layout/page-header";
-import { CollectionPageHeader } from "../../layout/collection-page";
+import { CollectionPageState } from "../../layout/collection-page";
+import { PageHeader } from "../../layout/page-header";
 import { KpiCard } from "../../runtimes/components/shared";
 import { useNavigation } from "../../navigation";
+import { useRestoredScrollRef } from "../../platform/scroll-restoration";
 import {
   addDaysIso,
   aggregateByWeek,
@@ -47,6 +60,8 @@ import {
   aggregateDailyTokens,
   aggregateFailureClasses,
   aggregateFailureReasons,
+  aggregateSquadDashboardRows,
+  aggregateSquadFailures,
   aggregateWeeklyErrors,
   aggregateWeeklyTasks,
   aggregateWeeklyTime,
@@ -55,31 +70,45 @@ import {
   computeDailyTotals,
   computeFailureTotals,
   isSyntheticAgentRow,
+  isSyntheticSquadRow,
   mergeAgentDashboardRows,
 } from "../utils";
 import {
   ALL_PROJECTS,
+  ALL_SQUADS,
+  STANDALONE_SQUAD,
   DurationNumberFlow,
   dimsForDays,
   type TimeRange,
 } from "./dashboard-shared";
-import { ProjectFilter, TimeRangeFilter } from "./dashboard-filters";
+import { ProjectFilter, SquadFilter, TimeRangeFilter } from "./dashboard-filters";
 import { UsageTrendCard } from "./usage-trend-card";
-import { Leaderboard } from "./leaderboard";
+import { Leaderboard, type LeaderboardGroupBy } from "./leaderboard";
 import { ErrorsTab } from "./errors-tab";
-import { cn } from "@multica/ui/lib/utils";
+import {
+  earliestReadableDay,
+  effectiveRange,
+  isRangeAllowed,
+  planForRange,
+} from "../history-range";
+import { dashboardTimeRanges } from "./dashboard-shared";
 
 // Stable references — `data ?? []` would create a new empty array on
 // every render while the query is loading, which breaks useMemo's
 // reference-equality dep check and trips the exhaustive-deps lint rule.
 const EMPTY_DAILY: import("@multica/core/types").DashboardUsageDaily[] = [];
 const EMPTY_BY_AGENT: import("@multica/core/types").DashboardUsageByAgent[] = [];
+const EMPTY_BY_SQUAD: import("@multica/core/types").DashboardUsageBySquad[] = [];
 const EMPTY_RUNTIME: import("@multica/core/types").DashboardAgentRunTime[] = [];
+const EMPTY_SQUAD_RUNTIME: import("@multica/core/types").DashboardSquadRunTime[] = [];
 const EMPTY_RUNTIME_DAILY: import("@multica/core/types").DashboardRunTimeDaily[] = [];
 const EMPTY_FAILURE_DAILY: import("@multica/core/types").DashboardFailureDaily[] = [];
 const EMPTY_FAILURE_BY_AGENT: import("@multica/core/types").DashboardFailureByAgent[] =
   [];
+const EMPTY_FAILURE_BY_SQUAD: import("@multica/core/types").DashboardFailureBySquad[] =
+  [];
 const EMPTY_AGENTS: Agent[] = [];
+const EMPTY_SQUADS: Squad[] = [];
 
 type DashboardTab = "usage" | "errors";
 const TAB_QUERY_KEY = "tab";
@@ -137,9 +166,9 @@ function useDataFreshness(
  * where the failure breakdown sat below a leaderboard that could itself run to
  * thirty rows, and the only way to chart failures was to hide spend.
  *
- * Scope is expressed by where a control lives: the toolbar under the header
- * carries the tabs and the two page-scoped filters (time range, project),
- * every card carries its own view switches. All six rollups are fetched for
+ * Scope is expressed by where a control lives: the header carries the tabs and
+ * the two page-scoped filters (time range, project), every card carries its
+ * own view switches. All six rollups are fetched for
  * both tabs — they are small, and prefetching is what makes switching tabs
  * instant — but the loading and empty states are per tab, so Usage does not
  * wait on the failure queries.
@@ -153,8 +182,54 @@ export function DashboardPage() {
   const viewTZ = useViewingTimezone();
   const navigation = useNavigation();
   const locales = i18n.resolvedLanguage ?? i18n.language;
-  const [days, setDays] = useState<TimeRange>(30);
+  // What the reader picked. The page reads `days`, the longest range the plan
+  // covers up to that pick (MUL-9490), derived rather than written back so an
+  // upgrade restores the pick.
+  const [selectedDays, setSelectedDays] = useState<TimeRange>(30);
+  const history = useDashboardHistoryLimit(wsId);
+  const ranges = dashboardTimeRanges(useFeatureEnabled(DASHBOARD_HISTORY_365D_FLAG, false));
+  const days = effectiveRange(selectedDays, history.maxDays, ranges);
+  // Every dashboard query waits for the limit and is keyed on it.
+  const historyLimit = history.ready ? history.maxDays : undefined;
+  const billingEnabled = useFeatureEnabled(BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG, false);
+  const workspacePaths = useWorkspacePaths();
+  const viewPlans = () => navigation.push(`${workspacePaths.settings()}?tab=billing`);
+  // Plan labels on locked ranges come from the limits Cloud enforces; prices
+  // are read only once a range is actually locked.
+  const hasLockedRange = ranges.some((r) => !isRangeAllowed(r.days, history.maxDays));
+  const { data: prices } = useQuery({
+    ...workspaceSubscriptionPricesOptions(wsId),
+    enabled: billingEnabled && hasLockedRange && wsId.length > 0,
+  });
+  const planLimits = prices?.planLimits ?? null;
+
+  // A limit that tightens while the page is open (a trial ending, a
+  // downgrade) moves the page to a shorter range. Say so once, rather than
+  // letting the range change silently.
+  const previousMaxDays = useRef<number | null | undefined>(undefined);
+  useEffect(() => {
+    const previous = previousMaxDays.current;
+    previousMaxDays.current = history.ready ? history.maxDays : undefined;
+    if (!history.ready || previous === undefined || history.maxDays === null) return;
+    const tightened = previous === null || history.maxDays < previous;
+    if (!tightened || isRangeAllowed(selectedDays, history.maxDays)) return;
+    const message = t(($) => $.history_limit.fell_back, { days: history.maxDays });
+    if (billingEnabled) {
+      toast(message, {
+        action: { label: t(($) => $.history_limit.view_plans), onClick: viewPlans },
+      });
+    } else {
+      toast(message);
+    }
+    // Only a change in the limit announces anything.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [history.ready, history.maxDays]);
   const [projectValue, setProjectValue] = useState<string>(ALL_PROJECTS);
+  const [squadValue, setSquadValue] = useState<string>(ALL_SQUADS);
+  const [leaderboardGroupBy, setLeaderboardGroupBy] =
+    useState<LeaderboardGroupBy>("agent");
+  // One scroller for both tabs: the offset restored is the shown tab's.
+  const restoreScrollRef = useRestoredScrollRef("dashboard");
 
   // The tab lives in the URL because the Errors view is the half of this page
   // people paste at each other ("this agent failed 54 times, see for
@@ -178,77 +253,152 @@ export function DashboardPage() {
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const agentsQuery = useQuery(agentListOptions(wsId));
   const agents = agentsQuery.data ?? EMPTY_AGENTS;
+  const squadsQuery = useQuery(squadListOptions(wsId));
+  const squads = squadsQuery.data ?? EMPTY_SQUADS;
 
-  // Validate the picked project against the current workspace's list. A
-  // stale UUID — left over from a project that's been deleted, or from the
-  // previous workspace after a switch — would silently filter every query to
-  // empty rows while the header still reads "All projects". Derive the
-  // effective filter so the API call matches the user-visible selection.
   const projectId = useMemo(() => {
     if (projectValue === ALL_PROJECTS) return null;
     return projects.some((p) => p.id === projectValue) ? projectValue : null;
   }, [projectValue, projects]);
 
-  // The weekly charts paint `ceil(days / 7)` trailing calendar weeks anchored
-  // at today-in-UTC. In the worst case (today = Sunday) the leftmost Monday
-  // sits `weekCount * 7 - 1` days back, so a vanilla `days=30` request would
-  // silently truncate the leftmost bucket. Over-fetch the per-date queries to
-  // cover the full first week.
-  //
-  // Unconditionally, not only when a chart is weekly: the dimension is now a
-  // card-level control, so the page cannot know which grain is on screen — and
-  // fetching for the wider of the two means flipping a card between Daily and
-  // Weekly never refetches. Daily aggregations trim back to exactly `days`
-  // client-side via `dailyCutoffIso` below, so the extra rows change nothing
-  // they show. The per-agent rollups stay at `days` so KPI/leaderboard labels
-  // (e.g. "Tasks · 30D") keep their advertised window.
+  const squadFilterParam = useMemo(() => {
+    if (squadValue === ALL_SQUADS) return null;
+    if (squadValue === STANDALONE_SQUAD) return STANDALONE_SQUAD;
+    return squads.some((s) => s.id === squadValue) ? squadValue : null;
+  }, [squadValue, squads]);
+
+  const selectedSquad = useMemo(() => {
+    if (!squadFilterParam || squadFilterParam === STANDALONE_SQUAD) return null;
+    return squads.find((s) => s.id === squadFilterParam) ?? null;
+  }, [squadFilterParam, squads]);
+
   const weekCount = Math.max(1, Math.ceil(days / 7));
   const chartFetchDays = weekCount * 7;
 
   const dailyQuery = useQuery(
-    dashboardUsageDailyOptions(wsId, chartFetchDays, projectId, viewTZ),
+    dashboardUsageDailyOptions(
+      wsId,
+      chartFetchDays,
+      projectId,
+      viewTZ,
+      historyLimit,
+      squadFilterParam,
+    ),
   );
-  // The three per-agent rollups carry no date, so `dailyCutoffIso` below
-  // cannot trim them — their window is closed server-side at exactly `days`
-  // calendar buckets (parseExactSinceParamInTZ). Anything derived from these
-  // three is therefore already on the same span as the trimmed daily series;
-  // do NOT put a per-agent rollup back on the N+1 cutoff, or the leaderboard
-  // and the Run time / Tasks KPIs silently widen by one day while the chart
-  // and the Cost / Tokens KPIs beside them do not (MUL-5551).
   const byAgentQuery = useQuery(
-    dashboardUsageByAgentOptions(wsId, days, projectId, viewTZ),
+    dashboardUsageByAgentOptions(
+      wsId,
+      days,
+      projectId,
+      viewTZ,
+      historyLimit,
+      squadFilterParam,
+    ),
   );
+  const bySquadQuery = useQuery({
+    ...dashboardUsageBySquadOptions(
+      wsId,
+      days,
+      projectId,
+      viewTZ,
+      historyLimit,
+      squadFilterParam,
+    ),
+    enabled:
+      !!wsId &&
+      historyLimit !== undefined &&
+      squadFilterParam === null,
+  });
   const runTimeQuery = useQuery(
-    dashboardAgentRunTimeOptions(wsId, days, projectId, viewTZ),
+    dashboardAgentRunTimeOptions(
+      wsId,
+      days,
+      projectId,
+      viewTZ,
+      historyLimit,
+      squadFilterParam,
+    ),
   );
+  const squadRunTimeQuery = useQuery({
+    ...dashboardSquadRunTimeOptions(
+      wsId,
+      days,
+      projectId,
+      viewTZ,
+      historyLimit,
+      squadFilterParam,
+    ),
+    enabled:
+      !!wsId &&
+      historyLimit !== undefined &&
+      squadFilterParam === null,
+  });
   const runTimeDailyQuery = useQuery(
-    dashboardRunTimeDailyOptions(wsId, chartFetchDays, projectId, viewTZ),
+    dashboardRunTimeDailyOptions(
+      wsId,
+      chartFetchDays,
+      projectId,
+      viewTZ,
+      historyLimit,
+      squadFilterParam,
+    ),
   );
   const failuresDailyQuery = useQuery(
-    dashboardFailuresDailyOptions(wsId, chartFetchDays, projectId, viewTZ),
+    dashboardFailuresDailyOptions(
+      wsId,
+      chartFetchDays,
+      projectId,
+      viewTZ,
+      historyLimit,
+      squadFilterParam,
+    ),
   );
   const failuresByAgentQuery = useQuery(
-    dashboardFailuresByAgentOptions(wsId, days, projectId, viewTZ),
+    dashboardFailuresByAgentOptions(
+      wsId,
+      days,
+      projectId,
+      viewTZ,
+      historyLimit,
+      squadFilterParam,
+    ),
   );
+  const failuresBySquadQuery = useQuery({
+    ...dashboardFailuresBySquadOptions(
+      wsId,
+      days,
+      projectId,
+      viewTZ,
+      historyLimit,
+      squadFilterParam,
+    ),
+    enabled:
+      !!wsId &&
+      historyLimit !== undefined &&
+      squadFilterParam === null,
+  });
 
   const dailyUsage = dailyQuery.data ?? EMPTY_DAILY;
   const byAgentUsage = byAgentQuery.data ?? EMPTY_BY_AGENT;
+  const bySquadUsage = bySquadQuery.data ?? EMPTY_BY_SQUAD;
   const runTimeRows = runTimeQuery.data ?? EMPTY_RUNTIME;
+  const squadRunTimeRows = squadRunTimeQuery.data ?? EMPTY_SQUAD_RUNTIME;
   const runTimeDailyRows = runTimeDailyQuery.data ?? EMPTY_RUNTIME_DAILY;
   const failureDailyRows = failuresDailyQuery.data ?? EMPTY_FAILURE_DAILY;
   const failureByAgentRows = failuresByAgentQuery.data ?? EMPTY_FAILURE_BY_AGENT;
+  const failureBySquadRows = failuresBySquadQuery.data ?? EMPTY_FAILURE_BY_SQUAD;
 
   const queryClient = useQueryClient();
-  // "Refreshing" covers any of the six rollups being in flight, whichever
-  // trigger started it (button, interval, mount) — the header spinner and the
-  // timestamp describe the same set of queries.
   const isRefreshing =
     dailyQuery.isFetching ||
     byAgentQuery.isFetching ||
+    bySquadQuery.isFetching ||
     runTimeQuery.isFetching ||
+    squadRunTimeQuery.isFetching ||
     runTimeDailyQuery.isFetching ||
     failuresDailyQuery.isFetching ||
-    failuresByAgentQuery.isFetching;
+    failuresByAgentQuery.isFetching ||
+    failuresBySquadQuery.isFetching;
   const handleRefresh = () => {
     void queryClient.invalidateQueries({ queryKey: dashboardKeys.all(wsId) });
   };
@@ -293,12 +443,13 @@ export function DashboardPage() {
   // two failure rollups, and a workspace with spend but no failures is not an
   // empty dashboard.
   const usageLoading =
+    !history.ready ||
     dailyQuery.isLoading ||
     byAgentQuery.isLoading ||
     runTimeQuery.isLoading ||
     runTimeDailyQuery.isLoading;
   const errorsLoading =
-    failuresDailyQuery.isLoading || failuresByAgentQuery.isLoading;
+    !history.ready || failuresDailyQuery.isLoading || failuresByAgentQuery.isLoading;
 
   const usageHasNoData =
     !usageLoading &&
@@ -362,21 +513,21 @@ export function DashboardPage() {
     () => (agentsQuery.isSuccess ? new Set(agents.map((a) => a.id)) : null),
     [agentsQuery.isSuccess, agents],
   );
+  const knownSquadIds = useMemo(
+    () => (squadsQuery.isSuccess ? new Set(squads.map((s) => s.id)) : null),
+    [squadsQuery.isSuccess, squads],
+  );
 
-  // The per-agent split has no date to trim on, so its window is closed
-  // server-side instead — GetDashboardFailuresByAgent uses the exact N-day
-  // cutoff rather than the N+1 one.
-  //
-  // Anonymize BEFORE aggregating: the sentinel then behaves like any other
-  // agent id, so the bucket's failure classes are summed from real
-  // per-(agent, reason) rows instead of being reconstructed from rows that
-  // have already collapsed to a single dominant class.
   const agentFailureRows = useMemo(
     () =>
       aggregateAgentFailures(
         anonymizeUnresolvedAgentRows(failureByAgentRows, knownAgentIds),
       ),
     [failureByAgentRows, knownAgentIds],
+  );
+  const squadFailureRows = useMemo(
+    () => aggregateSquadFailures(failureBySquadRows, knownSquadIds),
+    [failureBySquadRows, knownSquadIds],
   );
 
   // Weekly aggregates — built from the over-fetched per-date queries so the
@@ -385,23 +536,31 @@ export function DashboardPage() {
   // pre-zeroed inside the helpers, so sparse weeks render as empty bars
   // instead of being dropped (MUL-2382 weekly window scoping). Week
   // boundaries follow the viewer's timezone.
+  //
+  // Under a plan limit the leftmost week can start before the first day the
+  // plan covers; the server returns nothing for those days, and the week is
+  // marked partial so the short bar is not read as a dip.
+  const earliestDay = useMemo(
+    () => earliestReadableDay(todayIso(viewTZ), history.maxDays, addDaysIso),
+    [viewTZ, history.maxDays],
+  );
   const weekly = useMemo(
-    () => aggregateByWeek(dailyUsage, viewTZ, weekCount),
-    [dailyUsage, viewTZ, weekCount],
+    () => aggregateByWeek(dailyUsage, viewTZ, weekCount, earliestDay),
+    [dailyUsage, viewTZ, weekCount, earliestDay],
   );
   const weeklyCost = weekly.weeklyCostStack;
   const weeklyTokens = weekly.weeklyTokens;
   const weeklyTime = useMemo(
-    () => aggregateWeeklyTime(runTimeDailyRows, viewTZ, weekCount),
-    [runTimeDailyRows, viewTZ, weekCount],
+    () => aggregateWeeklyTime(runTimeDailyRows, viewTZ, weekCount, earliestDay),
+    [runTimeDailyRows, viewTZ, weekCount, earliestDay],
   );
   const weeklyTasks = useMemo(
-    () => aggregateWeeklyTasks(runTimeDailyRows, viewTZ, weekCount),
-    [runTimeDailyRows, viewTZ, weekCount],
+    () => aggregateWeeklyTasks(runTimeDailyRows, viewTZ, weekCount, earliestDay),
+    [runTimeDailyRows, viewTZ, weekCount, earliestDay],
   );
   const weeklyErrors = useMemo(
-    () => aggregateWeeklyErrors(failureDailyRows, viewTZ, weekCount),
-    [failureDailyRows, viewTZ, weekCount],
+    () => aggregateWeeklyErrors(failureDailyRows, viewTZ, weekCount, earliestDay),
+    [failureDailyRows, viewTZ, weekCount, earliestDay],
   );
   const agentTokenRows = useMemo(
     () => aggregateAgentTokens(byAgentUsage),
@@ -438,6 +597,25 @@ export function DashboardPage() {
     () => bucketUnknownAgentRows(agentRows, knownAgentIds),
     [agentRows, knownAgentIds],
   );
+  const squadDashboardRows = useMemo(
+    () =>
+      aggregateSquadDashboardRows(
+        bySquadUsage,
+        squadRunTimeRows,
+        knownAgentIds,
+        knownSquadIds,
+      ),
+    [bySquadUsage, squadRunTimeRows, knownAgentIds, knownSquadIds],
+  );
+  const squadCostSummary = useMemo(() => {
+    if (squadFilterParam !== null || totals.cost <= 0) return null;
+    const squadCost = squadDashboardRows
+      .filter((r) => !isSyntheticSquadRow(r.squadId))
+      .reduce((sum, r) => sum + r.cost, 0);
+    if (squadCost <= 0) return null;
+    const pct = Math.min(100, Math.round((squadCost / totals.cost) * 100));
+    return { cost: `$${squadCost.toFixed(2)}`, pct };
+  }, [squadFilterParam, squadDashboardRows, totals.cost]);
   // Distinct hard-deleted agents folded into the bucket — drives the caption's
   // "· N deleted" suffix (the bucket itself is a single row). The server's
   // restricted bucket is not in `knownAgentIds` either but is not a deletion,
@@ -462,69 +640,78 @@ export function DashboardPage() {
       onValueChange={handleTabChange}
       className="flex h-full min-h-0 flex-col gap-0"
     >
-      <CollectionPageHeader
-        icon={BarChart3}
-        title={t(($) => $.title)}
-        actions={
-          /* Data freshness cluster: the timestamp and the action that advances
-             it stay together. Refresh re-pulls the same scope, so it lives here
-             with the page metadata rather than among the scope controls. */
-          <div className="flex items-center gap-1">
-            {tzLabel ? (
-              <span className="hidden text-caption text-muted-foreground lg:inline">
-                {updatedLabel
-                  ? t(($) => $.header.timezone_and_updated, {
-                      tz: tzLabel,
-                      time: updatedLabel,
-                    })
-                  : tzLabel}
-              </span>
-            ) : null}
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={t(($) => $.header.refresh)}
-              onClick={handleRefresh}
-              disabled={isRefreshing}
-            >
-              <RefreshCw className={isRefreshing ? "animate-spin" : undefined} />
-            </Button>
-          </div>
-        }
-      />
-
-      {/* View toolbar, same grammar as the issues surface header: view
-          switching on the left, page-scoped filters on the right. Both tabs
-          share the range and project filter, which is why the filters live
-          here and not inside a tab. */}
-      <div className={cn("h-12 shrink-0 overflow-x-auto border-b [-webkit-overflow-scrolling:touch]", PAGE_GUTTER)}>
-        <div className="flex h-full w-max min-w-full items-center justify-between gap-2">
-          <TabsList variant="line" className="gap-0 p-0 group-data-horizontal/tabs:h-full">
+      {/* The two tabs are views of the same data, so they sit beside the
+          title; both share the range and project filter, which is why the
+          filters live in the header and not inside a tab. */}
+      <PageHeader>
+        <div className="flex min-w-0 flex-1 items-center gap-2 self-stretch">
+          <h1 className="flex min-w-0 items-center gap-2 px-2 text-body font-medium">
+            <BarChart3 aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+            <span className="truncate">{t(($) => $.title)}</span>
+          </h1>
+          <TabsList variant="line" className="shrink-0 gap-0 p-0 group-data-horizontal/tabs:h-full">
             <TabsTrigger
               value="usage"
-              className="h-full rounded-none px-2.5 text-label group-data-horizontal/tabs:after:bottom-0"
+              className="h-full rounded-none px-2.5"
             >
               {t(($) => $.tab_usage)}
             </TabsTrigger>
             <TabsTrigger
               value="errors"
-              className="h-full rounded-none px-2.5 text-label group-data-horizontal/tabs:after:bottom-0"
+              className="h-full rounded-none px-2.5"
             >
               {t(($) => $.errors.title)}
             </TabsTrigger>
           </TabsList>
-          <div className="flex shrink-0 items-center gap-2">
-            <TimeRangeFilter days={days} onChange={setDays} />
-            <ProjectFilter
-              projects={projects}
-              projectValue={projectValue}
-              onProjectChange={setProjectValue}
-            />
-          </div>
         </div>
-      </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {tzLabel ? (
+            <span className="mr-1 hidden text-caption text-muted-foreground lg:inline">
+              {updatedLabel
+                ? t(($) => $.header.timezone_and_updated, {
+                    tz: tzLabel,
+                    time: updatedLabel,
+                  })
+                : tzLabel}
+            </span>
+          ) : null}
+          <TimeRangeFilter
+            days={days}
+            onChange={setSelectedDays}
+            maxDays={history.maxDays}
+            planForDays={(range) => planForRange(range, planLimits)}
+            onViewPlans={billingEnabled ? viewPlans : null}
+            ranges={ranges}
+          />
+          <ProjectFilter
+            projects={projects}
+            projectValue={projectValue}
+            onProjectChange={setProjectValue}
+          />
+          {squads.length > 0 ? (
+            <SquadFilter
+              squads={squads}
+              squadValue={squadValue}
+              onSquadChange={setSquadValue}
+            />
+          ) : null}
+          <IconButton
+            label={t(($) => $.header.refresh)}
+            tooltipSide="bottom"
+            className="text-muted-foreground"
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+          >
+            <RefreshCw className={isRefreshing ? "animate-spin" : undefined} />
+          </IconButton>
+        </div>
+      </PageHeader>
 
-      <div className="flex-1 overflow-y-auto">
+      <div
+        ref={restoreScrollRef}
+        data-tab-scroll-root="dashboard"
+        className="flex-1 overflow-y-auto"
+      >
         <div className="mx-auto max-w-6xl p-6">
           <TabsContent value="usage" className="space-y-5">
             {usageLoading ? (
@@ -539,6 +726,16 @@ export function DashboardPage() {
                   <KpiCard
                     label={t(($) => $.kpi.cost_label, { days })}
                     value={<CurrencyNumberFlow value={totals.cost} locales={locales} />}
+                    hint={
+                      selectedSquad
+                        ? t(($) => $.kpi.cost_squad_hint, { name: selectedSquad.name })
+                        : squadCostSummary
+                          ? t(($) => $.kpi.cost_squad_share_hint, {
+                              cost: squadCostSummary.cost,
+                              pct: squadCostSummary.pct,
+                            })
+                          : undefined
+                    }
                   />
                   <KpiCard
                     label={t(($) => $.kpi.tokens_label, { days })}
@@ -611,6 +808,15 @@ export function DashboardPage() {
                   agents={agents}
                   deletedAgentCount={deletedAgentCount}
                   lessThanMinuteLabel={lessThanMinuteLabel}
+                  squadRows={squadDashboardRows}
+                  squads={squads}
+                  groupBy={leaderboardGroupBy}
+                  onGroupByChange={
+                    squadFilterParam === null && squads.length > 0
+                      ? setLeaderboardGroupBy
+                      : undefined
+                  }
+                  selectedSquad={selectedSquad}
                 />
               </>
             )}
@@ -627,9 +833,12 @@ export function DashboardPage() {
                 classRows={failureClassRows}
                 reasonRows={failureReasonRows}
                 agentRows={agentFailureRows}
+                squadRows={squadFailureRows}
                 dailyErrors={dailyErrors}
                 weeklyErrors={weeklyErrors}
                 agents={agents}
+                squads={squads}
+                allowSquadGrouping={squadFilterParam === null && squads.length > 0}
                 locales={locales}
               />
             )}
@@ -653,12 +862,10 @@ function DashboardSkeleton() {
 function DashboardEmpty() {
   const { t } = useT("usage");
   return (
-    <div className="flex flex-col items-center rounded-lg border border-dashed py-12 text-center">
-      <BarChart3 className="h-6 w-6 text-faint-foreground" />
-      <p className="mt-3 text-body font-medium">{t(($) => $.empty.title)}</p>
-      <p className="mt-1 max-w-md text-caption text-muted-foreground">
-        {t(($) => $.empty.body)}
-      </p>
-    </div>
+    <CollectionPageState
+      icon={BarChart3}
+      title={t(($) => $.empty.title)}
+      description={t(($) => $.empty.body)}
+    />
   );
 }

@@ -7,7 +7,11 @@ import {
   EMPTY_AGENT_FILTERS,
   type AgentListFilters,
 } from "@multica/core/agents/stores";
-import { rowMatchesFilters, type AgentListRow } from "./agents-page";
+import {
+  matchesAgentSearch,
+  rowMatchesFilters,
+  type AgentListRow,
+} from "./agents-page";
 
 function makeRow(
   overrides: Partial<AgentListRow["agent"]> = {},
@@ -71,9 +75,9 @@ describe("rowMatchesFilters — access dimension", () => {
       permission_mode: "public_to",
       invocation_targets: [{ target_type: "member", target_id: "u" }],
     });
-    expect(rowMatchesFilters(ownerOnly, noFilters, "")).toBe(true);
-    expect(rowMatchesFilters(workspace, noFilters, "")).toBe(true);
-    expect(rowMatchesFilters(specific, noFilters, "")).toBe(true);
+    expect(rowMatchesFilters(ownerOnly, noFilters)).toBe(true);
+    expect(rowMatchesFilters(workspace, noFilters)).toBe(true);
+    expect(rowMatchesFilters(specific, noFilters)).toBe(true);
   });
 
   it("filters to owner-only", () => {
@@ -82,8 +86,8 @@ describe("rowMatchesFilters — access dimension", () => {
       permission_mode: "public_to",
       invocation_targets: [{ target_type: "workspace", target_id: null }],
     });
-    expect(rowMatchesFilters(ownerOnly, withAccess(noFilters, "owner-only"), "")).toBe(true);
-    expect(rowMatchesFilters(workspace, withAccess(noFilters, "owner-only"), "")).toBe(false);
+    expect(rowMatchesFilters(ownerOnly, withAccess(noFilters, "owner-only"))).toBe(true);
+    expect(rowMatchesFilters(workspace, withAccess(noFilters, "owner-only"))).toBe(false);
   });
 
   it("filters to workspace", () => {
@@ -96,9 +100,9 @@ describe("rowMatchesFilters — access dimension", () => {
       permission_mode: "public_to",
       invocation_targets: [{ target_type: "member", target_id: "u" }],
     });
-    expect(rowMatchesFilters(workspace, withAccess(noFilters, "workspace"), "")).toBe(true);
-    expect(rowMatchesFilters(ownerOnly, withAccess(noFilters, "workspace"), "")).toBe(false);
-    expect(rowMatchesFilters(specific, withAccess(noFilters, "workspace"), "")).toBe(false);
+    expect(rowMatchesFilters(workspace, withAccess(noFilters, "workspace"))).toBe(true);
+    expect(rowMatchesFilters(ownerOnly, withAccess(noFilters, "workspace"))).toBe(false);
+    expect(rowMatchesFilters(specific, withAccess(noFilters, "workspace"))).toBe(false);
   });
 
   it("filters to specific-people", () => {
@@ -111,9 +115,9 @@ describe("rowMatchesFilters — access dimension", () => {
       permission_mode: "public_to",
       invocation_targets: [{ target_type: "member", target_id: "u" }],
     });
-    expect(rowMatchesFilters(specific, withAccess(noFilters, "specific-people"), "")).toBe(true);
-    expect(rowMatchesFilters(workspace, withAccess(noFilters, "specific-people"), "")).toBe(false);
-    expect(rowMatchesFilters(ownerOnly, withAccess(noFilters, "specific-people"), "")).toBe(false);
+    expect(rowMatchesFilters(specific, withAccess(noFilters, "specific-people"))).toBe(true);
+    expect(rowMatchesFilters(workspace, withAccess(noFilters, "specific-people"))).toBe(false);
+    expect(rowMatchesFilters(ownerOnly, withAccess(noFilters, "specific-people"))).toBe(false);
   });
 
   it("multi-select access filter is OR-combined", () => {
@@ -123,8 +127,8 @@ describe("rowMatchesFilters — access dimension", () => {
       invocation_targets: [{ target_type: "workspace", target_id: null }],
     });
     const filters: AgentListFilters = { ...noFilters, access: ["owner-only", "workspace"] };
-    expect(rowMatchesFilters(ownerOnly, filters, "")).toBe(true);
-    expect(rowMatchesFilters(workspace, filters, "")).toBe(true);
+    expect(rowMatchesFilters(ownerOnly, filters)).toBe(true);
+    expect(rowMatchesFilters(workspace, filters)).toBe(true);
   });
 
   it("access filter combines with other dimensions (AND)", () => {
@@ -141,8 +145,8 @@ describe("rowMatchesFilters — access dimension", () => {
       access: ["owner-only"],
       owners: ["user-1"],
     };
-    expect(rowMatchesFilters(ownerUser1, filters, "")).toBe(true);
-    expect(rowMatchesFilters(ownerUser2, filters, "")).toBe(false);
+    expect(rowMatchesFilters(ownerUser1, filters)).toBe(true);
+    expect(rowMatchesFilters(ownerUser2, filters)).toBe(false);
   });
 
   it("access + availability filter: both must pass (AND)", () => {
@@ -159,8 +163,8 @@ describe("rowMatchesFilters — access dimension", () => {
       access: ["workspace"],
       availability: ["online"],
     };
-    expect(rowMatchesFilters(onlineAgent, filters, "")).toBe(true);
-    expect(rowMatchesFilters(offlineAgent, filters, "")).toBe(false);
+    expect(rowMatchesFilters(onlineAgent, filters)).toBe(true);
+    expect(rowMatchesFilters(offlineAgent, filters)).toBe(false);
   });
 
   it("access + runtimes filter: both must pass (AND)", () => {
@@ -175,8 +179,8 @@ describe("rowMatchesFilters — access dimension", () => {
       access: ["owner-only"],
       runtimes: ["rt-local"],
     };
-    expect(rowMatchesFilters(localAgent, filters, "")).toBe(true);
-    expect(rowMatchesFilters(cloudAgent, filters, "")).toBe(false);
+    expect(rowMatchesFilters(localAgent, filters)).toBe(true);
+    expect(rowMatchesFilters(cloudAgent, filters)).toBe(false);
   });
 
   it("access filter value matches the same derivation as effectiveAccessScope", () => {
@@ -219,5 +223,37 @@ describe("rowMatchesFilters — access dimension", () => {
         label,
       ).toBe(expected);
     }
+  });
+});
+
+describe("matchesAgentSearch", () => {
+  const reviewer = makeRow({
+    name: "PR Reviewer",
+    description: "Reviews pull requests before merge",
+  });
+  const chinese = makeRow({ name: "审核助手", description: "代码审查" });
+  const noDescription = makeRow({ name: "Docs Bot", description: "" });
+
+  it("matches every row while the query is empty or whitespace", () => {
+    expect(matchesAgentSearch(reviewer, "")).toBe(true);
+    expect(matchesAgentSearch(reviewer, "   ")).toBe(true);
+  });
+
+  it("matches the name, ignoring case and surrounding spaces", () => {
+    expect(matchesAgentSearch(reviewer, "  reviewer ")).toBe(true);
+    expect(matchesAgentSearch(reviewer, "PR REV")).toBe(true);
+    expect(matchesAgentSearch(reviewer, "deploy")).toBe(false);
+  });
+
+  it("matches the description", () => {
+    expect(matchesAgentSearch(reviewer, "pull requests")).toBe(true);
+    expect(matchesAgentSearch(noDescription, "pull")).toBe(false);
+  });
+
+  it("matches Chinese names and descriptions by pinyin", () => {
+    expect(matchesAgentSearch(chinese, "shenhe")).toBe(true);
+    expect(matchesAgentSearch(chinese, "shzs")).toBe(true);
+    expect(matchesAgentSearch(chinese, "daima")).toBe(true);
+    expect(matchesAgentSearch(chinese, "fabu")).toBe(false);
   });
 });

@@ -58,3 +58,27 @@ WHERE workspace_id = $1
   AND details->>'to_type' IS NOT NULL
   AND details->>'to_id' IS NOT NULL
 GROUP BY details->>'to_type', details->>'to_id';
+
+-- name: GetLastIssueStatusChange :one
+-- Who last changed an issue's status, and to what: names the mover when an
+-- agent's status change is refused because the issue left its step (MUL-7420).
+SELECT actor_type, actor_id FROM activity_log
+WHERE issue_id = @issue_id AND action = 'status_changed'
+ORDER BY created_at DESC, id DESC
+LIMIT 1;
+
+-- name: ListRecentSquadHandoffs :many
+-- The newest squad handoff records on one issue, newest first. Served by
+-- idx_activity_log_issue_keyset; the action filter is applied to that window.
+SELECT * FROM activity_log
+WHERE issue_id = @issue_id
+  AND action = 'squad_handoff'
+ORDER BY created_at DESC, id DESC
+LIMIT @row_limit;
+
+-- name: CountSquadMemberHandoffsSince :one
+SELECT count(*) FROM activity_log
+WHERE issue_id = @issue_id
+  AND action = 'squad_handoff'
+  AND details->>'kind' = 'member'
+  AND created_at > @since;

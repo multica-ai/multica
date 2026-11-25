@@ -141,6 +141,11 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 		if err := r.post(ctx, inst, msg, chatStartedText); err != nil {
 			r.logger.WarnContext(ctx, "dingtalk replier: new-chat confirmation failed", "installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
+	case engine.OutcomeHelp:
+		if err := r.post(ctx, inst, msg, engine.HelpTextEnglish); err != nil {
+			r.logger.WarnContext(ctx, "dingtalk replier: help reply failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
 	case engine.OutcomeIssueUsage:
 		text := issueUsageText
 		if res.IssueUsageHadMedia {
@@ -328,7 +333,7 @@ func issueMarkdownIdentifier(res engine.Result, appURL string) string {
 	// Parentheses in an application's base path must not terminate the Markdown
 	// link destination, even when they are valid URL path characters.
 	href = strings.NewReplacer("(", "%28", ")", "%29").Replace(href)
-	return "[" + escapeMarkdownText(identifier) + "](" + href + ")"
+	return "[" + escapeMarkdownLinkLabel(identifier) + "](" + href + ")"
 }
 
 func issueResultIdentifier(res engine.Result) string {

@@ -21,6 +21,8 @@ _features
 /Dockerfile.web
 /Makefile
 /*.md
+# apps/docs embeds this file with <include> (content/docs/self-hosting-ai.mdx).
+!/SELF_HOSTING_AI.md
 /docker-compose*.yml
 /playwright.config.ts
 /skills-lock.json
@@ -36,6 +38,11 @@ _features
 !/apps/web/**
 !/apps/docs
 !/apps/docs/**
+# Root pnpm patchedDependencies needs these files even for frontend-only installs.
+!/apps/mobile
+/apps/mobile/*
+!/apps/mobile/patches
+!/apps/mobile/patches/**
 /scripts/
 
 *.log

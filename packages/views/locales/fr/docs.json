@@ -1,0 +1,104 @@
+{
+  "untitled": "Sans titre",
+  "version_number": "v{{number}}",
+  "kb": "Documents",
+  "actions": {
+    "new": "Nouveau",
+    "new_doc": "Nouveau document",
+    "new_folder": "Nouveau dossier",
+    "rename": "Renommer",
+    "move": "Déplacer vers...",
+    "delete": "Supprimer",
+    "cancel": "Annuler",
+    "history": "Historique",
+    "more": "Plus",
+    "copy_link": "Copier le lien"
+  },
+  "errors": {
+    "move": "Impossible de déplacer l'élément",
+    "delete": "Impossible de supprimer l'élément",
+    "save": "Impossible d'enregistrer les modifications"
+  },
+  "move": {
+    "title": "Déplacer « {{title}} »",
+    "destination": "Destination",
+    "root": "Documents (niveau racine)",
+    "current": "Actuel",
+    "confirm": "Déplacer"
+  },
+  "delete": {
+    "title": "Supprimer ce document ?",
+    "description": "« {{title}} » et tout son historique seront supprimés. Action irréversible.",
+    "confirm": "Supprimer",
+    "folder_title": "Supprimer ce dossier ?",
+    "folder_description": "Supprimer « {{title}} » ? Seuls les dossiers vides peuvent être supprimés. Cette action est irréversible."
+  },
+  "tree": {
+    "more": "Plus d'actions pour {{title}}",
+    "empty": "Aucun document",
+    "new_doc_in": "Nouveau document dans {{title}}"
+  },
+  "editor": {
+    "placeholder": "Écrivez, ou tapez / pour les commandes...",
+    "title_label": "Titre",
+    "saving": "Enregistrement...",
+    "saved": "Enregistré",
+    "save_failed": "Non enregistré · Réessayer",
+    "retry": "Réessayer",
+    "conflict": "{{name}} a modifié le document. Votre brouillon est conservé. Rechargez pour continuer.",
+    "reload": "Recharger la dernière version",
+    "draft": "Votre brouillon conservé",
+    "unsaved_changes": "Modifications non enregistrées",
+    "live": "En direct",
+    "reconnecting": "Reconnexion...",
+    "connecting": "Connexion...",
+    "title_save_failed": "Titre non enregistré",
+    "editing_now": "En train de modifier"
+  },
+  "history": {
+    "title": "Historique",
+    "current": "Actuelle",
+    "restore": "Restaurer cette version",
+    "loading": "Chargement...",
+    "from_discussion": "Depuis le commentaire : {{quote}}"
+  },
+  "not_found": {
+    "title": "Document introuvable",
+    "description": "Il a peut-être été supprimé."
+  },
+  "edited": "Modifié {{time}}",
+  "view_history": "Voir l'historique",
+  "outline": "Plan",
+  "link_copied": "Lien copié",
+  "unavailable": {
+    "title": "Documents n'est pas activé dans cet espace de travail",
+    "description": "Documents n'est pas activé dans cet espace de travail."
+  },
+  "comments": {
+    "title": "Commentaires",
+    "add": "Commenter",
+    "open": "Ouverts {{count}}",
+    "resolved": "Résolus {{count}}",
+    "close": "Fermer les commentaires",
+    "quote_missing": "Le texte commenté a été modifié",
+    "reply_placeholder": "Répondre, ou mentionner avec @…",
+    "new_placeholder": "Ajouter un commentaire, ou @ pour mentionner quelqu'un...",
+    "submit": "Commenter",
+    "reply": "Répondre",
+    "cancel": "Annuler",
+    "resolve": "Résoudre",
+    "reopen": "Rouvrir",
+    "delete": "Supprimer le commentaire",
+    "resolved_by": "Résolu par {{name}}",
+    "replies_one": "{{count}} réponse",
+    "replies_other": "{{count}} réponses",
+    "empty_open": "Aucun commentaire ouvert. Sélectionnez du texte et choisissez Commenter pour en lancer un.",
+    "empty_resolved": "Aucun commentaire résolu.",
+    "errors": {
+      "save": "Impossible de publier le commentaire",
+      "delete": "Impossible de supprimer le commentaire",
+      "resolve": "Impossible de mettre à jour le commentaire"
+    },
+    "run_waiting_retry": "En attente d'une nouvelle tentative"
+  }
+}

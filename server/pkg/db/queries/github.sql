@@ -7,6 +7,15 @@ SELECT * FROM github_installation
 WHERE workspace_id = $1
 ORDER BY created_at ASC;
 
+-- name: ListGitHubInstallationsWithConnectedBy :many
+-- Only disclose the connector's display name while they belong to this workspace.
+SELECT sqlc.embed(gi), COALESCE(u.name, '')::text AS connected_by
+FROM github_installation gi
+LEFT JOIN member m ON m.user_id = gi.connected_by_id AND m.workspace_id = gi.workspace_id
+LEFT JOIN "user" u ON u.id = m.user_id
+WHERE gi.workspace_id = $1
+ORDER BY gi.created_at ASC;
+
 -- name: ListGitHubInstallationsByInstallationID :many
 -- One installation_id can be bound to several workspaces; webhook routing lists
 -- every binding and fans the event out to each bound workspace. Ordered oldest
@@ -89,6 +98,10 @@ SELECT * FROM github_pending_installation WHERE installation_id = $1
 --      mergeability, and silently clobbering a known clean/dirty would lose
 --      information that GitHub only re-computes lazily.
 -- INSERT path always writes the incoming value (NULL acceptable for a new row).
+--
+-- GitHub may deliver events out of order. An event older than the stored row
+-- (pr_updated_at) updates nothing and returns no row, so a late "opened" can't
+-- roll a merged PR back to open — the same guard UpsertVCSPullRequest has.
 INSERT INTO github_pull_request (
     workspace_id, installation_id, repo_owner, repo_name, pr_number,
     title, state, html_url, branch, author_login, author_avatar_url,
@@ -123,6 +136,7 @@ ON CONFLICT (workspace_id, repo_owner, repo_name, pr_number) DO UPDATE SET
     deletions     = EXCLUDED.deletions,
     changed_files = EXCLUDED.changed_files,
     updated_at = now()
+WHERE EXCLUDED.pr_updated_at >= github_pull_request.pr_updated_at
 RETURNING *;
 
 -- name: GetGitHubPullRequest :one
@@ -137,10 +151,9 @@ WHERE workspace_id = $1 AND repo_owner = $2 AND repo_name = $3 AND pr_number = $
 -- refresh pipeline — NOT the legacy suite-level webhook aggregation, which is
 -- removed. The `issue_prs` CTE narrows to this issue's PR ids first so the
 -- aggregation only touches check rows for those PRs. Rows for an OLD head are
--- excluded by the snapshot_head_sha filter. Every link row is a working PR:
--- the webhook only links an identifier it read from the PR title, the branch
--- name, or a body closing keyword, so a bare body mention never lands here
--- (MUL-7072).
+-- excluded by the snapshot_head_sha filter. Every link row is a delivery PR:
+-- the webhook links an identifier it read from the PR title or branch name, and
+-- a member can link one by hand (linked_by_type = 'member'). MUL-7429.
 WITH issue_prs AS (
     SELECT pr.id, pr.snapshot_head_sha
     FROM github_pull_request pr
@@ -178,6 +191,7 @@ SELECT
     pr.api_mergeable, pr.api_merge_state_status, pr.checks_rollup_state,
     pr.snapshot_head_sha, pr.snapshot_fetched_at,
     pr.created_at, pr.updated_at,
+    COALESCE(ipr.linked_by_type, 'system')::text AS linked_by_type,
     COALESCE(c.total, 0)::bigint   AS checks_total,
     COALESCE(c.passed, 0)::bigint  AS checks_passed,
     COALESCE(c.failed, 0)::bigint  AS checks_failed,
@@ -188,6 +202,35 @@ JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
 LEFT JOIN checks c ON c.pr_id = pr.id
 WHERE ipr.issue_id = sqlc.arg('issue_id')
 ORDER BY pr.pr_created_at DESC;
+
+-- name: ListIssuePullRequestSummaries :many
+-- Every issue -> PR link in the workspace, GitHub and self-hosted providers
+-- together, newest first. Carries only what an issue card or row needs to
+-- render a PR chip (no CI/merge snapshot). Backs the workspace wide "Pull
+-- requests" display option on board / list / table views. Links on issues in
+-- private projects the caller cannot see are left out, as in the issue lists.
+SELECT
+    ipr.issue_id,
+    pr.id, 'github'::text AS provider, pr.repo_owner, pr.repo_name,
+    pr.pr_number, pr.title, pr.state, pr.html_url, pr.pr_created_at
+FROM github_pull_request pr
+JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+JOIN issue i ON i.id = ipr.issue_id
+WHERE pr.workspace_id = sqlc.arg('workspace_id')
+  AND i.workspace_id = sqlc.arg('workspace_id')
+  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR NOT (COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY(sqlc.narg('hidden_project_ids')::uuid[])))
+UNION ALL
+SELECT
+    ipr.issue_id,
+    pr.id, pr.provider, pr.repo_owner, pr.repo_name,
+    pr.pr_number, pr.title, pr.state, pr.html_url, pr.pr_created_at
+FROM vcs_pull_request pr
+JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
+JOIN issue i ON i.id = ipr.issue_id
+WHERE pr.workspace_id = sqlc.arg('workspace_id')
+  AND i.workspace_id = sqlc.arg('workspace_id')
+  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR NOT (COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY(sqlc.narg('hidden_project_ids')::uuid[])))
+ORDER BY pr_created_at DESC;
 
 -- name: GetIssueReviewHeadSha :one
 -- Returns the head SHA of the commit currently "under review" for an issue:
@@ -221,44 +264,57 @@ LIMIT 1;
 SELECT issue_id FROM issue_pull_request
 WHERE pull_request_id = $1;
 
--- name: GetIssuePullRequestCloseAggregate :one
--- Aggregates the issue's linked PRs into the two counts that gate
--- auto-advance: how many are still in flight (`open` or `draft`) and how
--- many merged PRs declared explicit closing intent on the link row. The
--- webhook auto-advances the issue when open_count = 0 AND
--- merged_with_close_intent_count > 0. Both the PR state and the link row
--- (with close_intent) are persisted before this query runs, so the result
--- is event-agnostic — a link-only sibling closing after a closing-keyword
--- PR has already merged still resolves the issue. A bare body mention is not
--- linked at all, so a passing reference can never keep open_count > 0.
-SELECT
-    COALESCE(SUM(CASE WHEN pr.state IN ('open', 'draft') THEN 1 ELSE 0 END), 0)::bigint AS open_count,
-    COALESCE(SUM(CASE WHEN pr.state = 'merged' AND ipr.close_intent THEN 1 ELSE 0 END), 0)::bigint AS merged_with_close_intent_count
-FROM github_pull_request pr
-JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
-WHERE ipr.issue_id = $1;
-
 -- =====================
 -- Issue ↔ Pull Request link
 -- =====================
 
--- name: LinkIssueToPullRequest :exec
--- close_intent reflects the PR's explicit close declaration at the moment
--- the webhook is allowed to update that intent. Open/edit/merge webhooks use
--- the current title/body parse result so authors can remove a closing keyword
--- before merge. Post-terminal edits can opt into preserving the stored value,
--- keeping the merge-time decision stable.
+-- name: LinkIssueToPullRequest :execrows
+-- Automatic link from a PR title, branch, or closing keyword. Returns 1 only
+-- when the link is new, so the webhook evaluates the merge automation on the
+-- link event and not on every redelivery. An existing link (automatic or
+-- manual) is left untouched. close_intent is no longer read or written
+-- (MUL-7726).
 INSERT INTO issue_pull_request (
-    issue_id, pull_request_id, linked_by_type, linked_by_id, close_intent
+    issue_id, pull_request_id, linked_by_type, linked_by_id
 ) VALUES (
-    $1, $2, sqlc.narg('linked_by_type'), sqlc.narg('linked_by_id'), $3
+    $1, $2, 'system', NULL
+)
+ON CONFLICT (issue_id, pull_request_id) DO NOTHING;
+
+-- name: LinkIssueToPullRequestManually :execrows
+-- A member linked this PR by hand. Marking an existing automatic link as
+-- manual keeps a later title edit from removing it. Returns 1 when the row was
+-- inserted or converted.
+INSERT INTO issue_pull_request (
+    issue_id, pull_request_id, linked_by_type, linked_by_id
+) VALUES (
+    $1, $2, 'member', sqlc.narg('linked_by_id')
 )
 ON CONFLICT (issue_id, pull_request_id) DO UPDATE SET
-    close_intent = CASE
-        WHEN sqlc.arg('preserve_close_intent') THEN issue_pull_request.close_intent
-        ELSE EXCLUDED.close_intent
-    END;
+    linked_by_type = 'member',
+    linked_by_id = EXCLUDED.linked_by_id
+WHERE issue_pull_request.linked_by_type IS DISTINCT FROM 'member';
 
--- name: UnlinkIssueFromPullRequest :exec
+-- name: ListAutoLinkedIssueIDsForPullRequest :many
+-- Issues this PR is linked to automatically. Manual links are not listed: the
+-- webhook reconciles only what it created itself.
+SELECT issue_id FROM issue_pull_request
+WHERE pull_request_id = $1
+  AND COALESCE(linked_by_type, 'system') <> 'member';
+
+-- name: UnlinkIssueFromPullRequest :execrows
 DELETE FROM issue_pull_request
 WHERE issue_id = $1 AND pull_request_id = $2;
+
+-- name: GetGitHubPullRequestInWorkspace :one
+SELECT * FROM github_pull_request
+WHERE id = $1 AND workspace_id = $2;
+
+-- name: FindGitHubPullRequestByURL :one
+-- Resolves a pasted PR URL to a mirrored PR. The caller normalizes the URL to
+-- scheme://host/owner/repo/pull/N; html_url is stored in that shape.
+SELECT * FROM github_pull_request
+WHERE workspace_id = $1
+  AND lower(rtrim(html_url, '/')) = lower(sqlc.arg('html_url')::text)
+ORDER BY pr_updated_at DESC
+LIMIT 1;

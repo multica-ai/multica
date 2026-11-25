@@ -8,9 +8,18 @@ Part I and Part II together constitute the "Multica License". Neither part
 grants any rights on its own. Condition 3 states how the two parts fit
 together and what must be delivered when you redistribute.
 
+The Multica License does not apply to the files in the `server/ee/` and
+`packages/ee/` directories. Those files are governed by the commercial
+license in the LICENSE file of each directory.
+
 ------------------------------------------------------------------------
 
                        Part I — Additional Conditions
+
+In this Multica License, "the producer" means Index Labs (Hong Kong)
+Limited, the company that develops and distributes Multica. Commercial
+licenses and branding waivers may be requested at
+https://www.multica.ai/contact-sales.
 
 1. Multica may be utilized commercially, including as a backend service for
    other applications or as a task management platform for enterprises,
@@ -112,7 +121,7 @@ together and what must be delivered when you redistribute.
       deliver this complete file. Delivering Part II alone does not
       satisfy the Multica License or section 4(a) of Part II.
 
-© 2025-2026 Multica, Inc.
+© 2025-2026 Index Labs (Hong Kong) Limited
 
 ------------------------------------------------------------------------
 
