@@ -145,6 +145,8 @@ The evaluation order is:
 4. Otherwise, if the email has a pending, unexpired workspace invitation — allow.
 5. Otherwise — reject.
 
+Existing users skip this check. To apply the allowlists to existing users and invitations too, see [Strict allowlist](#strict-allowlist).
+
 Common configurations:
 
 ```dotenv
@@ -169,6 +171,29 @@ Existing users can continue to sign in. New users without a matching allowlist e
 You do not need to add ordinary invitees to `ALLOWED_EMAILS` or restart the server. The invitation must still be accepted through the normal invitation flow to join the workspace.
 
 Revoking an invitation does not delete an account already created using it or prevent that existing account from signing in.
+
+## Strict allowlist [#strict-allowlist]
+
+By default the allowlists only filter new signups. Set `EMAIL_ALLOWLIST_STRICT=true` to make `ALLOWED_EMAILS` and `ALLOWED_EMAIL_DOMAINS` apply to every account:
+
+- Requesting a login code, verifying a code, and Google sign-in reject an address that matches neither list, including addresses that already have an account. The check runs before a code is sent or a session is created.
+- A pending invitation no longer lets an address outside the lists sign up.
+- Inviting an address outside the lists to a workspace returns 403.
+- An address that matches either list can still sign up when `ALLOW_SIGNUP=false`.
+
+```dotenv
+EMAIL_ALLOWLIST_STRICT=true
+ALLOWED_EMAIL_DOMAINS=company.com
+ALLOWED_EMAILS=partner@example.net
+```
+
+The switch has no effect while both lists are empty, and the server logs a warning at startup in that case.
+
+The error message lists the domains in `ALLOWED_EMAIL_DOMAINS`, but never the entries of `ALLOWED_EMAILS`. With only `ALLOWED_EMAILS` set, it asks the user to contact an administrator. Google sign-in keeps the `email_not_allowed` error code, and the web app shows its usual message for it.
+
+<Callout type="warning">
+Turning the switch on, or removing an address from a list, does not revoke sessions or personal access tokens issued earlier. Sessions slide, so a session in active use keeps renewing. Pending invitations to addresses outside the lists are not deleted either; they can no longer be used to sign up. To cut off access right away, remove those users from their workspaces.
+</Callout>
 
 ## Session lifetime
 

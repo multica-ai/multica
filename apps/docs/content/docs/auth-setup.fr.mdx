@@ -145,6 +145,8 @@ L'ordre d'évaluation est le suivant :
 4. Sinon, si l'adresse e-mail a une invitation à un espace de travail en attente et non expirée — autorisé.
 5. Sinon — refusé.
 
+Les utilisateurs existants ne passent pas par cette vérification. Pour appliquer aussi les listes d'autorisation aux utilisateurs existants et aux invitations, voir [Liste d'autorisation stricte](#strict-allowlist).
+
 Configurations courantes :
 
 ```dotenv
@@ -169,6 +171,29 @@ Les utilisateurs existants peuvent continuer à se connecter. Les nouveaux utili
 Vous n'avez pas besoin d'ajouter les invités ordinaires à `ALLOWED_EMAILS` ni de redémarrer le serveur. L'invitation doit toujours être acceptée via le flux d'invitation habituel pour rejoindre l'espace de travail.
 
 La révocation d'une invitation ne supprime pas un compte déjà créé grâce à elle et n'empêche pas ce compte existant de se connecter.
+
+## Liste d'autorisation stricte [#strict-allowlist]
+
+Par défaut, les listes d'autorisation ne filtrent que les nouvelles inscriptions. Définissez `EMAIL_ALLOWLIST_STRICT=true` pour que `ALLOWED_EMAILS` et `ALLOWED_EMAIL_DOMAINS` s'appliquent à tous les comptes :
+
+- La demande d'un code de connexion, la vérification du code et la connexion Google refusent une adresse qui ne correspond à aucune des deux listes, y compris une adresse qui possède déjà un compte. La vérification a lieu avant l'envoi d'un code ou la création d'une session.
+- Une invitation en attente ne permet plus à une adresse hors des listes de s'inscrire.
+- Inviter une adresse hors des listes dans un espace de travail renvoie 403.
+- Une adresse qui correspond à l'une des listes peut toujours s'inscrire lorsque `ALLOW_SIGNUP=false`.
+
+```dotenv
+EMAIL_ALLOWLIST_STRICT=true
+ALLOWED_EMAIL_DOMAINS=company.com
+ALLOWED_EMAILS=partner@example.net
+```
+
+L'option n'a aucun effet tant que les deux listes sont vides ; dans ce cas, le serveur journalise un avertissement au démarrage.
+
+Le message d'erreur indique les domaines de `ALLOWED_EMAIL_DOMAINS`, mais jamais les entrées de `ALLOWED_EMAILS`. Lorsque seule `ALLOWED_EMAILS` est définie, il invite l'utilisateur à contacter un administrateur. La connexion Google conserve le code d'erreur `email_not_allowed`, pour lequel l'application web affiche son message habituel.
+
+<Callout type="warning">
+Activer l'option, ou retirer une adresse d'une liste, ne révoque pas les sessions ni les jetons d'accès personnels émis auparavant. Les sessions sont glissantes : une session utilisée activement continue d'être renouvelée. Les invitations en attente adressées à des adresses hors des listes ne sont pas supprimées non plus ; elles ne permettent simplement plus de s'inscrire. Pour couper l'accès immédiatement, retirez ces utilisateurs de leurs espaces de travail.
+</Callout>
 
 ## Durée de vie des sessions
 

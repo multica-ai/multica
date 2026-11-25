@@ -78,6 +78,12 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "email is required")
 		return
 	}
+	// Under EMAIL_ALLOWLIST_STRICT an invitation cannot admit an address the
+	// allowlist would reject at sign-in.
+	if err := h.checkStrictEmailAllowlist(email); err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
 
 	role, valid := normalizeMemberRole(req.Role)
 	if !valid {

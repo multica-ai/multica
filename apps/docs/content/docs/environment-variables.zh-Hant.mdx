@@ -115,6 +115,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `ALLOW_SIGNUP` | `true` | 未配置任何白名單時是否允許建立新帳號 |
 | `ALLOWED_EMAILS` | 空 | 允許註冊的完整信箱，逗號分隔 |
 | `ALLOWED_EMAIL_DOMAINS` | 空 | 允許註冊的信箱網域，逗號分隔 |
+| `EMAIL_ALLOWLIST_STRICT` | `false` | 設為 `true` 且配置了白名單時，白名單同樣約束已有使用者和邀請；見[嚴格白名單](/auth-setup#strict-allowlist) |
 | `DISABLE_WORKSPACE_CREATION` | `false` | 禁止所有使用者新建工作區；沒有 owner/admin 例外 |
 | `WORKSPACE_CREATION_ALLOWED_EMAILS` | 空 | 允許新建工作區的完整信箱地址，逗號分隔。設定後其他使用者新建會返回 403。`DISABLE_WORKSPACE_CREATION=true` 優先。不授予訪問其他工作區的權限 |
 | `MULTICA_DEV_VERIFICATION_CODE` | 空 | 非 production 環境使用的固定 6 位測試驗證碼 |

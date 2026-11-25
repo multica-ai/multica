@@ -115,6 +115,7 @@ primary와 복제본의 연결 한도는 서로 독립적입니다. 모든 API �
 | `ALLOW_SIGNUP` | `true` | allowlist가 없을 때 새 계정 생성 허용 여부 |
 | `ALLOWED_EMAILS` | 비어 있음 | 가입을 허용할 전체 이메일 주소, 쉼표로 구분 |
 | `ALLOWED_EMAIL_DOMAINS` | 비어 있음 | 가입을 허용할 이메일 도메인, 쉼표로 구분 |
+| `EMAIL_ALLOWLIST_STRICT` | `false` | `true`이고 allowlist가 설정되어 있으면 기존 사용자와 초대에도 allowlist를 적용합니다. [엄격한 allowlist](/auth-setup#strict-allowlist) 참고 |
 | `DISABLE_WORKSPACE_CREATION` | `false` | 모든 사용자의 새 워크스페이스 생성을 금지. owner/admin 예외 없음 |
 | `WORKSPACE_CREATION_ALLOWED_EMAILS` | 비어 있음 | 워크스페이스 생성을 허용할 전체 이메일 주소, 쉼표로 구분. 설정하면 그 외 사용자는 403을 받습니다. `DISABLE_WORKSPACE_CREATION=true`가 우선합니다. 다른 워크스페이스에 대한 접근 권한은 부여하지 않습니다 |
 | `MULTICA_DEV_VERIFICATION_CODE` | 비어 있음 | production이 아닌 환경에서 사용하는 고정 6자리 테스트 인증 코드 |

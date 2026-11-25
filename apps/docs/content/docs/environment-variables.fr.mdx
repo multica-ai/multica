@@ -115,6 +115,7 @@ SMTP est prioritaire sur Resend dès que `SMTP_HOST` n'est pas vide.
 | `ALLOW_SIGNUP` | `true` | Autorise ou non la création de nouveaux comptes lorsqu'aucune liste d'autorisation n'est configurée |
 | `ALLOWED_EMAILS` | vide | Adresses e-mail complètes autorisées à s'inscrire, séparées par des virgules |
 | `ALLOWED_EMAIL_DOMAINS` | vide | Domaines e-mail autorisés à s'inscrire, séparés par des virgules |
+| `EMAIL_ALLOWLIST_STRICT` | `false` | Lorsque `true` et qu'une liste d'autorisation est définie, les listes s'appliquent aussi aux utilisateurs existants et aux invitations ; voir [Liste d'autorisation stricte](/auth-setup#strict-allowlist) |
 | `DISABLE_WORKSPACE_CREATION` | `false` | Empêche tous les utilisateurs de créer des espaces de travail ; aucune exception pour les propriétaires ou les administrateurs |
 | `WORKSPACE_CREATION_ALLOWED_EMAILS` | vide | Adresses e-mail complètes autorisées à créer des espaces de travail, séparées par des virgules. Si défini, les autres utilisateurs reçoivent une 403. `DISABLE_WORKSPACE_CREATION=true` est prioritaire. N'accorde aucun accès aux autres espaces de travail |
 | `MULTICA_DEV_VERIFICATION_CODE` | vide | Code de test fixe à 6 chiffres pour les environnements hors production |

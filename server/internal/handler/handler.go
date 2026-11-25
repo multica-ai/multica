@@ -76,6 +76,12 @@ type Config struct {
 	AllowSignup         bool
 	AllowedEmails       []string
 	AllowedEmailDomains []string
+	// EmailAllowlistStrict, when true and at least one of AllowedEmails /
+	// AllowedEmailDomains is set, applies the allowlist to existing users and
+	// invitees too: every sign-in path and CreateInvitation reject an address
+	// outside it. When false (the default) the allowlist only filters new
+	// signups, and a pending invitation still admits an unlisted address.
+	EmailAllowlistStrict bool
 	// DisableWorkspaceCreation, when true, makes POST /api/workspaces return
 	// 403 for every caller. There is no role/owner exception because the repo
 	// has no platform-admin concept; operators bootstrap the workspace with
