@@ -390,8 +390,10 @@
     "send_enter_hint": "Shift+Enter 可插入段落、继续列表，或在代码块中换行。",
     "categories": {
       "general": "常规",
+      "issue": "任务",
       "navigation": "导航"
     },
+    "issue_scope": "作用于眼前的任务：预览中的任务、列表中选中的任务，或当前打开的任务。",
     "actions": {
       "openSearch": {
         "label": "打开搜索",
@@ -448,6 +450,38 @@
       "undoInboxAction": {
         "label": "撤销收件箱操作",
         "description": "提示还在时，撤销上一次归档、延后或取消订阅；提示消失后，打开的通知已归档时把它放回收件箱，在\"收件箱已清空\"页撤销页面上写明的操作。"
+      },
+      "setIssueStatus": {
+        "label": "更改状态",
+        "description": "打开状态选择。"
+      },
+      "assignIssue": {
+        "label": "指派负责人",
+        "description": "打开负责人选择。"
+      },
+      "setIssuePriority": {
+        "label": "设置优先级",
+        "description": "打开优先级选择。"
+      },
+      "setIssueLabels": {
+        "label": "编辑标签",
+        "description": "打开标签选择。"
+      },
+      "setIssueDueDate": {
+        "label": "设置截止日期",
+        "description": "打开截止日期选择。"
+      },
+      "moveIssueToProject": {
+        "label": "移动到项目",
+        "description": "打开项目选择。"
+      },
+      "runIssueQuickAction": {
+        "label": "运行快捷操作",
+        "description": "仅在单个任务且有可用的快捷操作时可用。"
+      },
+      "replyToIssue": {
+        "label": "回复",
+        "description": "聚焦当前任务的评论框。"
       },
       "send": {
         "label": "发送",

@@ -390,8 +390,10 @@
     "send_enter_hint": "Shift+Enter로 단락을 삽입하거나 목록을 이어가고 코드 블록에서 줄을 바꿀 수 있습니다.",
     "categories": {
       "general": "일반",
+      "issue": "태스크",
       "navigation": "탐색"
     },
+    "issue_scope": "눈앞의 태스크에 적용됩니다: 미리보기 중인 태스크, 목록에서 선택한 태스크, 또는 열려 있는 태스크.",
     "actions": {
       "openSearch": {
         "label": "검색 열기",
@@ -448,6 +450,38 @@
       "undoInboxAction": {
         "label": "인박스 작업 실행 취소",
         "description": "토스트가 보이는 동안 마지막 보관, 미루기, 구독 해제를 취소합니다. 토스트가 사라진 뒤에는 열린 알림이 보관되었다면 인박스로 되돌리고, '인박스가 비었습니다' 화면에서는 그곳에 표시된 작업을 취소합니다."
+      },
+      "setIssueStatus": {
+        "label": "상태 변경",
+        "description": "상태 선택을 엽니다."
+      },
+      "assignIssue": {
+        "label": "담당자 지정",
+        "description": "담당자 선택을 엽니다."
+      },
+      "setIssuePriority": {
+        "label": "우선순위 설정",
+        "description": "우선순위 선택을 엽니다."
+      },
+      "setIssueLabels": {
+        "label": "라벨 편집",
+        "description": "라벨 선택을 엽니다."
+      },
+      "setIssueDueDate": {
+        "label": "마감일 설정",
+        "description": "마감일 선택을 엽니다."
+      },
+      "moveIssueToProject": {
+        "label": "프로젝트로 이동",
+        "description": "프로젝트 선택을 엽니다."
+      },
+      "runIssueQuickAction": {
+        "label": "빠른 작업 실행",
+        "description": "활성화된 빠른 작업이 있는 단일 태스크에서 사용할 수 있습니다."
+      },
+      "replyToIssue": {
+        "label": "답글",
+        "description": "열린 태스크의 댓글 입력란에 포커스합니다."
       },
       "send": {
         "label": "보내기",

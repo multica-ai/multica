@@ -9,6 +9,7 @@ import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { Issue, QuickAction, UpdateIssueRequest } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { useT } from "../../i18n";
 import { useStatusLabel } from "../utils/status-label";
 import { AssigneePicker } from "./pickers/assignee-picker";
@@ -64,7 +65,12 @@ export function IssueBarActions({
         isDuplicate={isDuplicate}
         align="start"
         side={side}
-        tooltip={t(($) => $.detail.prop_status)}
+        tooltip={
+          <>
+            {t(($) => $.detail.prop_status)}
+            <ActionShortcutKeycaps action="setIssueStatus" />
+          </>
+        }
         triggerRender={chip}
         trigger={
           <>
@@ -85,7 +91,12 @@ export function IssueBarActions({
         onUpdate={onUpdate}
         align="start"
         side={side}
-        tooltip={t(($) => $.detail.prop_assignee)}
+        tooltip={
+          <>
+            {t(($) => $.detail.prop_assignee)}
+            <ActionShortcutKeycaps action="assignIssue" />
+          </>
+        }
         triggerRender={chip}
         trigger={
           assigned ? (

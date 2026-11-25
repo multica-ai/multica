@@ -27,6 +27,8 @@ import { useT } from "../i18n";
 import { PaletteContext, type PaletteApi } from "./palette-context";
 import { PaletteFooter } from "./footer";
 import { PaletteHostDialogs } from "./host-dialogs";
+import { IssueShortcuts } from "./issue-shortcuts";
+import { clearPendingPalettePage, usePendingPalettePage } from "./palette-launch";
 import { PageView } from "./pages/page-view";
 import { RootView } from "./root-view";
 import { useRootModel } from "./use-root-model";
@@ -44,6 +46,7 @@ export function SearchCommand() {
   const workspaceSlug = useWorkspaceSlug();
   const open = useSearchStore((s) => s.open);
   const setOpen = useSearchStore((s) => s.setOpen);
+  const launchPage = usePendingPalettePage();
   const [hostDialog, setHostDialog] = useState<PaletteHostDialog | null>(null);
   const close = useCallback(() => setOpen(false), [setOpen]);
   const openHostDialog = useCallback(
@@ -70,26 +73,46 @@ export function SearchCommand() {
               selection and pending searches together with their workspace.
               Base UI's Portal keeps the body mounted through the exit animation
               and unmounts it once closed, so no `{open && ...}` gate is needed. */}
-          <PaletteBody key={workspaceSlug} active={open} close={close} openHostDialog={openHostDialog} />
+          <PaletteBody
+            key={workspaceSlug}
+            active={open}
+            launchPage={launchPage}
+            close={close}
+            openHostDialog={openHostDialog}
+          />
         </DialogContent>
       </Dialog>
       <PaletteHostDialogs dialog={hostDialog} onClose={() => setHostDialog(null)} />
+      <IssueShortcuts />
     </>
   );
 }
 
 function PaletteBody({
   active,
+  launchPage,
   close,
   openHostDialog,
 }: {
   active: boolean;
+  /** The page an issue shortcut opened the palette on (`openPalettePage`). */
+  launchPage: PaletteStackEntry | null;
   close: () => void;
   openHostDialog: (dialog: PaletteHostDialog) => void;
 }) {
   const intentNavigate = useIntentNavigate();
   const [pageQuery, setPageQuery] = useState("");
-  const [stack, setStack] = useState<PaletteStackEntry[]>([]);
+  const [stack, setStack] = useState<PaletteStackEntry[]>(() => (launchPage ? [launchPage] : []));
+
+  // The body mounts as the palette opens, so the launch page is its first
+  // page; one that arrives while it is still mounted (reopened mid-exit)
+  // replaces the stack.
+  useEffect(() => {
+    if (!launchPage) return;
+    clearPendingPalettePage();
+    setStack((prev) => (prev.length === 1 && prev[0] === launchPage ? prev : [launchPage]));
+    setPageQuery("");
+  }, [launchPage]);
 
   // cmdk's onSelect carries no event, so the activating gesture's modifiers
   // are recorded on the capture phase (click on a result, Enter in the input)

@@ -75,7 +75,7 @@ export function KeyboardShortcutsTab() {
     });
   }, [query, t]);
 
-  const groups: readonly ShortcutCategory[] = ["general", "navigation"];
+  const groups: readonly ShortcutCategory[] = ["general", "issue", "navigation"];
 
   const capture = (actionId: ShortcutActionId, event: React.KeyboardEvent) => {
     event.preventDefault();
@@ -156,6 +156,7 @@ export function KeyboardShortcutsTab() {
           <SettingsSection
             key={category}
             title={t(($) => $.shortcuts.categories[category])}
+            description={category === "issue" ? t(($) => $.shortcuts.issue_scope) : undefined}
           >
             <SettingsCard>
               {actions.map((action) => (
@@ -283,6 +284,8 @@ function ShortcutRow({
     "nextInboxItem",
     "prevInboxItem",
     "undoInboxAction",
+    "runIssueQuickAction",
+    "replyToIssue",
     "send",
   ].includes(action.id)
     ? t(($) => $.shortcuts.actions[action.id].description)

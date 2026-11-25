@@ -396,8 +396,10 @@
     "send_enter_hint": "Shift+Enter inserta un párrafo, continúa una lista o añade un salto de línea en un bloque de código.",
     "categories": {
       "general": "General",
+      "issue": "Tarea",
       "navigation": "Navegación"
     },
+    "issue_scope": "Actúa sobre la tarea que tienes delante: la de la vista previa, las seleccionadas en una lista o la tarea abierta.",
     "actions": {
       "openSearch": {
         "label": "Abrir búsqueda",
@@ -454,6 +456,38 @@
       "undoInboxAction": {
         "label": "Deshacer acción de la bandeja",
         "description": "Deshace el último archivado, posposición o baja mientras se ve su aviso; después, restaura la notificación abierta una vez archivada o lo que indica Bandeja de entrada vacía."
+      },
+      "setIssueStatus": {
+        "label": "Cambiar estado",
+        "description": "Abre el selector de estado."
+      },
+      "assignIssue": {
+        "label": "Asignar",
+        "description": "Abre el selector de responsable."
+      },
+      "setIssuePriority": {
+        "label": "Establecer prioridad",
+        "description": "Abre el selector de prioridad."
+      },
+      "setIssueLabels": {
+        "label": "Editar etiquetas",
+        "description": "Abre el selector de etiquetas."
+      },
+      "setIssueDueDate": {
+        "label": "Establecer fecha de fin",
+        "description": "Abre el selector de fecha de fin."
+      },
+      "moveIssueToProject": {
+        "label": "Mover a proyecto",
+        "description": "Abre el selector de proyecto."
+      },
+      "runIssueQuickAction": {
+        "label": "Ejecutar acción rápida",
+        "description": "Disponible en una sola tarea cuando hay acciones rápidas activas."
+      },
+      "replyToIssue": {
+        "label": "Responder",
+        "description": "Enfoca el cuadro de comentarios de la tarea abierta."
       },
       "send": {
         "label": "Enviar",

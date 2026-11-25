@@ -20,6 +20,14 @@ export type ShortcutActionId =
   | "nextInboxItem"
   | "prevInboxItem"
   | "undoInboxAction"
+  | "setIssueStatus"
+  | "assignIssue"
+  | "setIssuePriority"
+  | "setIssueLabels"
+  | "setIssueDueDate"
+  | "moveIssueToProject"
+  | "runIssueQuickAction"
+  | "replyToIssue"
   | "send"
   | "voiceInput"
   | "goBack"
@@ -37,7 +45,7 @@ export type ShortcutActionId =
   | "goSkills"
   | "goSettings";
 
-export type ShortcutCategory = "general" | "navigation";
+export type ShortcutCategory = "general" | "issue" | "navigation";
 
 export interface ShortcutModifiers {
   /** Command on macOS, Control on Windows/Linux. */
@@ -153,6 +161,27 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
     defaultShortcut: createShortcutChord("Z"),
     allowInEditable: false,
   },
+  // Issue verbs act on the issue in front of the user: a peek, a list
+  // selection, or the open issue (Inbox detail or issue page). The letters
+  // follow Linear, including ⇧P for project (P is priority) and ⇧D for due date.
+  { id: "setIssueStatus", category: "issue", defaultShortcut: createShortcutChord("S"), allowInEditable: false },
+  { id: "assignIssue", category: "issue", defaultShortcut: createShortcutChord("A"), allowInEditable: false },
+  { id: "setIssuePriority", category: "issue", defaultShortcut: createShortcutChord("P"), allowInEditable: false },
+  { id: "setIssueLabels", category: "issue", defaultShortcut: createShortcutChord("L"), allowInEditable: false },
+  {
+    id: "setIssueDueDate",
+    category: "issue",
+    defaultShortcut: createShortcutChord("D", { shift: true }),
+    allowInEditable: false,
+  },
+  {
+    id: "moveIssueToProject",
+    category: "issue",
+    defaultShortcut: createShortcutChord("P", { shift: true }),
+    allowInEditable: false,
+  },
+  { id: "runIssueQuickAction", category: "issue", defaultShortcut: createShortcutChord("Q"), allowInEditable: false },
+  { id: "replyToIssue", category: "issue", defaultShortcut: createShortcutChord("R"), allowInEditable: false },
   { id: "send", category: "general", defaultShortcut: primary("Enter"), allowInEditable: true },
   // Voice input works where the caret is, so it must fire inside editors. It
   // is matched on keydown AND keyup (holding it is push-to-talk), so the voice

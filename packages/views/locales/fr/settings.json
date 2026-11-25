@@ -396,8 +396,10 @@
     "send_enter_hint": "Maj+Entrée insère un paragraphe, poursuit une liste, ou ajoute un saut de ligne dans un bloc de code.",
     "categories": {
       "general": "Général",
+      "issue": "Tâche",
       "navigation": "Navigation"
     },
+    "issue_scope": "Agit sur la tâche devant vous : celle de l'aperçu, les tâches sélectionnées dans une liste ou la tâche ouverte.",
     "actions": {
       "openSearch": {
         "label": "Ouvrir la recherche",
@@ -454,6 +456,38 @@
       "undoInboxAction": {
         "label": "Annuler l'action de la boîte de réception",
         "description": "Annule le dernier archivage, report ou désabonnement tant que son message s'affiche ; ensuite, restaure la notification ouverte une fois archivée ou ce qu'indique Boîte de réception vide."
+      },
+      "setIssueStatus": {
+        "label": "Changer le statut",
+        "description": "Ouvre le sélecteur de statut."
+      },
+      "assignIssue": {
+        "label": "Assigner",
+        "description": "Ouvre le sélecteur de responsable."
+      },
+      "setIssuePriority": {
+        "label": "Définir la priorité",
+        "description": "Ouvre le sélecteur de priorité."
+      },
+      "setIssueLabels": {
+        "label": "Modifier les libellés",
+        "description": "Ouvre le sélecteur de libellés."
+      },
+      "setIssueDueDate": {
+        "label": "Définir l'échéance",
+        "description": "Ouvre le sélecteur d'échéance."
+      },
+      "moveIssueToProject": {
+        "label": "Déplacer vers un projet",
+        "description": "Ouvre le sélecteur de projet."
+      },
+      "runIssueQuickAction": {
+        "label": "Lancer une action rapide",
+        "description": "Disponible sur une seule tâche quand des actions rapides sont actives."
+      },
+      "replyToIssue": {
+        "label": "Répondre",
+        "description": "Place le curseur dans la zone de commentaire de la tâche ouverte."
       },
       "send": {
         "label": "Envoyer",
