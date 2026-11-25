@@ -1071,7 +1071,41 @@ func worktreeIsDirty(worktreePath string) (bool, error) {
 // removeLocalWorktreeDir unregisters the worktree from the user's repo and
 // deletes its directory. The branch is deliberately left alone — it is the
 // task's deliverable.
+//
+// The removal is retried on a short backoff because on Windows a directory
+// that is any process's working directory cannot be deleted, and the handles
+// that pin it — the provider's own shell children finishing late, an antivirus
+// or indexer scan of the tree — close asynchronously after the processes are
+// already gone. Failing the whole task the moment the first unlink hits a
+// sharing violation misreports a delivery that is already committed (the
+// caller fails the task precisely because removal could not be confirmed), so
+// the retry buys the platform's lag, not unlimited patience: the budget stays
+// small enough that a genuinely leaked process still fails the task.
 func removeLocalWorktreeDir(gitRoot, worktreePath string, logger *slog.Logger) error {
+	var removeErr error
+	for attempt := 0; ; attempt++ {
+		removeErr = removeLocalWorktreeDirOnce(gitRoot, worktreePath, logger)
+		if removeErr == nil {
+			return nil
+		}
+		if attempt >= worktreeRemoveMaxAttempts-1 {
+			return removeErr
+		}
+		backoff := time.Duration(250*(1<<attempt)) * time.Millisecond
+		if logger != nil {
+			logger.Info("execenv: worktree removal blocked (transient lock?); retrying",
+				"path", worktreePath, "attempt", attempt+1, "backoff", backoff.String(), "error", removeErr)
+		}
+		time.Sleep(backoff)
+	}
+}
+
+// worktreeRemoveMaxAttempts bounds the removal retry loop: 250+500+1000+2000
+// ms of backoff plus the attempts themselves stays well under ten seconds —
+// far past Windows's handle-teardown lag, far short of hiding a real leak.
+const worktreeRemoveMaxAttempts = 5
+
+func removeLocalWorktreeDirOnce(gitRoot, worktreePath string, logger *slog.Logger) error {
 	var removeErr error
 	if out, err := runGit(gitRoot, "worktree", "remove", "--force", worktreePath); err != nil {
 		removeErr = err
