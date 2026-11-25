@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -484,5 +485,80 @@ func TestIssueBlockerReleaseHidesReferencesFromGuest(t *testing.T) {
 				t.Errorf("guest %s names a blocker it can't open (%s): %s", name, secret, got)
 			}
 		}
+	}
+}
+
+// Removing a dependency is gated like adding one: a member who can't open the
+// private prerequisite can't drop it, even with its ID in hand — including a
+// member who added it before losing access to the project.
+func TestIssueBlockerRemovalRequiresBlockerVisibility(t *testing.T) {
+	agent := seededReadyAgentID(t)
+	svc := service.IssueWakeupService{Tasks: testHandler.TaskService}
+	// Bodies are raw JSON so a test can repeat a key in a chosen order.
+	writes := map[string]func(user, id, updates string) *testutil.Response{
+		"single": func(user, id, updates string) *testutil.Response {
+			return testutil.Call(t, testHandler.UpdateIssue, withURLParam(asUser(newRequest("PUT", "/api/issues/"+id, json.RawMessage(updates)), user), "id", id))
+		},
+		"batch": func(user, id, updates string) *testutil.Response {
+			return testutil.Call(t, testHandler.BatchUpdateIssues, asUser(newRequest("POST", "/api/issues/batch-update?workspace_id="+testWorkspaceID, map[string]any{
+				"issue_ids": []string{id}, "updates": json.RawMessage(updates),
+			}), user))
+		},
+	}
+	for name, write := range writes {
+		t.Run(name, func(t *testing.T) {
+			f := newPrivateProjectFixture(t)
+			t.Cleanup(func() {
+				dbfx.Exec(t, "DELETE FROM issue_blocker WHERE issue_id=$1", f.publicIssue)
+				cleanupChildDoneIssue(f.publicIssue)
+			})
+			dbfx.Exec(t, "UPDATE issue SET status='todo',assignee_type='agent',assignee_id=$2 WHERE id=$1", f.publicIssue, agent)
+			edges := func() int {
+				return dbfx.Count(t, "SELECT count(*) FROM issue_blocker WHERE issue_id=$1 AND blocker_issue_id=$2", f.publicIssue, f.secretIssue)
+			}
+			runs := func() int {
+				return dbfx.Count(t, "SELECT count(*) FROM agent_task_queue WHERE issue_id=$1", f.publicIssue)
+			}
+			tick := func() {
+				t.Helper()
+				if err := svc.TickWorkspaces(context.Background(), parseUUID(testWorkspaceID)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			write(f.insider, f.publicIssue, fmt.Sprintf(`{"blocked_by":[%q]}`, f.secretIssue)).Want(http.StatusOK)
+			remove := fmt.Sprintf(`{"remove_blocked_by":[%q]}`, f.secretIssue)
+			write(f.outsider, f.publicIssue, remove).Want(http.StatusBadRequest)
+			// A second key that differs only in case must not swap the checked
+			// list for another one before the write.
+			for _, key := range []string{"blocked_by", "remove_blocked_by"} {
+				body := fmt.Sprintf(`{%q:[%q],%q:[]}`, key, f.secretIssue, strings.ToUpper(key))
+				write(f.outsider, f.publicIssue, body).Want(http.StatusBadRequest)
+			}
+			removeProjectMemberRow(t, f.projectID, f.insider)
+			hidden := write(f.insider, f.publicIssue, remove).Want(http.StatusBadRequest).Text()
+			// A missing ID gets the same answer as a hidden one, so a member who
+			// lost access can't learn whether the private issue still exists.
+			missing := write(f.insider, f.publicIssue, fmt.Sprintf(`{"remove_blocked_by":[%q]}`, uuid.NewString())).Want(http.StatusBadRequest).Text()
+			if hidden != missing {
+				t.Fatalf("hidden blocker answered %q, missing blocker %q", hidden, missing)
+			}
+			tick()
+			if n := edges(); n != 1 {
+				t.Fatalf("rejected removals left %d edges, want 1", n)
+			}
+			if n := runs(); n != 0 {
+				t.Fatalf("rejected removals started %d runs", n)
+			}
+			// The edge was the only thing holding the run back: a member who
+			// can see the prerequisite removes it and the issue starts.
+			write(testUserID, f.publicIssue, remove).Want(http.StatusOK)
+			tick()
+			if n := edges(); n != 0 {
+				t.Fatalf("authorized removal left %d edges", n)
+			}
+			if n := runs(); n != 1 {
+				t.Fatalf("authorized removal started %d runs, want 1", n)
+			}
+		})
 	}
 }
