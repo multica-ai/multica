@@ -48,13 +48,16 @@ var historicalShareCRMOriginVersions = []string{
 	"736_issue_origin_sharecrm_chat_validate",
 	"743_issue_origin_sharecrm_chat",
 	"744_issue_origin_sharecrm_chat_validate",
+	"754_issue_origin_sharecrm_chat",
+	"755_issue_origin_sharecrm_chat_validate",
 }
 
-// migrationsAfter742 are upstream 743-753 plus the ShareCRM pair this release
+// migrationsAfter742 are upstream 743-755 plus the ShareCRM pair this release
 // ships. Recorded-key upgrades skip them while building the previous schema,
 // so the upgrade step is what applies them. A database that already recorded
-// 743_issue_origin_sharecrm_chat still runs 743_issue_blocker: the ledger key
-// is the whole filename.
+// 743_issue_origin_sharecrm_chat still runs 743_issue_blocker, and one that
+// recorded 754_issue_origin_sharecrm_chat still runs
+// 754_issue_stage_blockers_skip_top_level: the ledger key is the whole filename.
 var migrationsAfter742 = []string{
 	"743_issue_blocker",
 	"744_issue_blocker_unique",
@@ -67,8 +70,19 @@ var migrationsAfter742 = []string{
 	"751_app_tool_call_workspace_metered_idx",
 	"752_doc_comment_agent_runs",
 	"753_agent_task_queue_doc_idx",
-	"754_issue_origin_sharecrm_chat",
-	"755_issue_origin_sharecrm_chat_validate",
+	"754_issue_stage_blockers_skip_top_level",
+	"755_task_usage_hourly_rollup_hour_key",
+	"756_issue_origin_sharecrm_chat",
+	"757_issue_origin_sharecrm_chat_validate",
+}
+
+// migrationsAfter753 are the files this sync adds on top of the previous
+// ShareCRM tip (upstream through 753, ShareCRM recorded as 754/755).
+var migrationsAfter753 = []string{
+	"754_issue_stage_blockers_skip_top_level",
+	"755_task_usage_hourly_rollup_hour_key",
+	"756_issue_origin_sharecrm_chat",
+	"757_issue_origin_sharecrm_chat_validate",
 }
 
 func TestIssueOriginUpgradeLedgerPaths(t *testing.T) {
@@ -251,6 +265,8 @@ func TestEmptyDatabaseUpgradeAllowsChannelOriginsAndIsIdempotent(t *testing.T) {
 	}
 	assertLedger(t, ctx, pool, "743_issue_origin_sharecrm_chat", false)
 	assertLedger(t, ctx, pool, "744_issue_origin_sharecrm_chat_validate", false)
+	assertLedger(t, ctx, pool, "754_issue_origin_sharecrm_chat", false)
+	assertLedger(t, ctx, pool, "755_issue_origin_sharecrm_chat_validate", false)
 	assertLedger(t, ctx, pool, "735_issue_origin_sharecrm_chat", false)
 	assertLedger(t, ctx, pool, "736_issue_origin_sharecrm_chat_validate", false)
 	assertLedger(t, ctx, pool, "735_task_usage_hourly_squad_col", true)
@@ -332,6 +348,7 @@ func TestEmptyDatabaseUpgradeAllowsChannelOriginsAndIsIdempotent(t *testing.T) {
 	assertIndexValid(t, ctx, pool, "idx_comment_idempotency_receipt_created")
 	assertSquadUsageShape(t, ctx, pool)
 	assertBlockerAndQuotaShape(t, ctx, pool)
+	assertStageBlockerSkipAndUsageRollup(t, ctx, pool)
 
 	var before int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&before); err != nil {
@@ -387,8 +404,8 @@ func TestCurrentShareCRMReleaseUpgradesWithoutRebuildingRateLimit(t *testing.T) 
 	before := snapshotOrigins(t, ctx, pool)
 	files := realMigrationFiles(t, []string{
 		"673_runtime_rate_limit",
-		"754_issue_origin_sharecrm_chat",
-		"755_issue_origin_sharecrm_chat_validate",
+		"756_issue_origin_sharecrm_chat",
+		"757_issue_origin_sharecrm_chat_validate",
 	}, "up")
 	options := runOptions{
 		Direction: "up", Files: files,
@@ -426,8 +443,8 @@ func TestCurrentShareCRMReleaseUpgradesWithoutRebuildingRateLimit(t *testing.T) 
 	assertLedger(t, ctx, pool, "704_issue_origin_sharecrm_chat_validate", true)
 	assertLedger(t, ctx, pool, "743_issue_origin_sharecrm_chat", true)
 	assertLedger(t, ctx, pool, "744_issue_origin_sharecrm_chat_validate", true)
-	assertLedger(t, ctx, pool, "754_issue_origin_sharecrm_chat", true)
-	assertLedger(t, ctx, pool, "755_issue_origin_sharecrm_chat_validate", true)
+	assertLedger(t, ctx, pool, "756_issue_origin_sharecrm_chat", true)
+	assertLedger(t, ctx, pool, "757_issue_origin_sharecrm_chat_validate", true)
 }
 
 func TestPreSyncShareCRMSchemaUpgradesThroughProjectFolders(t *testing.T) {
@@ -457,8 +474,8 @@ func TestPreSyncShareCRMSchemaUpgradesThroughProjectFolders(t *testing.T) {
 	files := realMigrationFiles(t, []string{
 		"681_project_folder",
 		"682_project_folder_name_idx",
-		"754_issue_origin_sharecrm_chat",
-		"755_issue_origin_sharecrm_chat_validate",
+		"756_issue_origin_sharecrm_chat",
+		"757_issue_origin_sharecrm_chat_validate",
 	}, "up")
 	options := runOptions{
 		Direction: "up", Files: files,
@@ -507,8 +524,8 @@ func TestPreSyncShareCRMSchemaUpgradesThroughProjectFolders(t *testing.T) {
 		"682_project_folder_name_idx",
 		"683_issue_origin_sharecrm_chat",
 		"684_issue_origin_sharecrm_chat_validate",
-		"754_issue_origin_sharecrm_chat",
-		"755_issue_origin_sharecrm_chat_validate",
+		"756_issue_origin_sharecrm_chat",
+		"757_issue_origin_sharecrm_chat_validate",
 	} {
 		assertLedger(t, ctx, pool, version, true)
 	}
@@ -538,8 +555,8 @@ func TestRetiredShareCRMWidenValidatesOnNextMigrate(t *testing.T) {
 	if err := runMigrations(ctx, pool, runOptions{
 		Direction: "up",
 		Files: realMigrationFiles(t, []string{
-			"754_issue_origin_sharecrm_chat",
-			"755_issue_origin_sharecrm_chat_validate",
+			"756_issue_origin_sharecrm_chat",
+			"757_issue_origin_sharecrm_chat_validate",
 		}, "up"),
 		SchemaMigrationsTable: schema + ".schema_migrations",
 		AdvisoryLockKey:       testLockKey(),
@@ -552,8 +569,8 @@ func TestRetiredShareCRMWidenValidatesOnNextMigrate(t *testing.T) {
 	assertLedger(t, ctx, pool, "682_issue_origin_sharecrm_chat_validate", false)
 	assertLedger(t, ctx, pool, "683_issue_origin_sharecrm_chat", false)
 	assertLedger(t, ctx, pool, "684_issue_origin_sharecrm_chat_validate", false)
-	assertLedger(t, ctx, pool, "754_issue_origin_sharecrm_chat", true)
-	assertLedger(t, ctx, pool, "755_issue_origin_sharecrm_chat_validate", true)
+	assertLedger(t, ctx, pool, "756_issue_origin_sharecrm_chat", true)
+	assertLedger(t, ctx, pool, "757_issue_origin_sharecrm_chat_validate", true)
 }
 
 func TestMorningShareCRMSchemaUpgradesThroughEntitlement(t *testing.T) {
@@ -605,8 +622,8 @@ func TestMorningShareCRMSchemaUpgradesThroughEntitlement(t *testing.T) {
 	files := realMigrationFiles(t, []string{
 		"683_entitlement_feature_attempt",
 		"684_entitlement_feature_attempt_scope_idx",
-		"754_issue_origin_sharecrm_chat",
-		"755_issue_origin_sharecrm_chat_validate",
+		"756_issue_origin_sharecrm_chat",
+		"757_issue_origin_sharecrm_chat_validate",
 	}, "up")
 	options := runOptions{
 		Direction: "up", Files: files,
@@ -645,8 +662,8 @@ func TestMorningShareCRMSchemaUpgradesThroughEntitlement(t *testing.T) {
 		"684_entitlement_feature_attempt_scope_idx",
 		"685_issue_origin_sharecrm_chat",
 		"686_issue_origin_sharecrm_chat_validate",
-		"754_issue_origin_sharecrm_chat",
-		"755_issue_origin_sharecrm_chat_validate",
+		"756_issue_origin_sharecrm_chat",
+		"757_issue_origin_sharecrm_chat_validate",
 	} {
 		assertLedger(t, ctx, pool, version, true)
 	}
@@ -656,7 +673,7 @@ func TestMorningShareCRMSchemaUpgradesThroughEntitlement(t *testing.T) {
 // fork tip: ShareCRM origin filenames 685/686 are recorded, the origin check
 // is validated, and runtime_rate_limit keeps its OID and row. This merge
 // records upstream docs 685-694 and inbox 695/696 under different filenames
-// and re-applies the ShareCRM widen as 754/755 without swapping the check.
+// and re-applies the ShareCRM widen as 756/757 without swapping the check.
 // Inbox migrations run while sharecrm_chat rows and new writes still succeed.
 func TestShareCRM685686UpgradesThroughDocs(t *testing.T) {
 	ctx, pool, schema := newOriginSandbox(t)
@@ -715,8 +732,8 @@ func TestShareCRM685686UpgradesThroughDocs(t *testing.T) {
 		"694_doc_version_workspace_idx",
 		"695_inbox_item_returned_at",
 		"696_inbox_item_active_shown_idx",
-		"754_issue_origin_sharecrm_chat",
-		"755_issue_origin_sharecrm_chat_validate",
+		"756_issue_origin_sharecrm_chat",
+		"757_issue_origin_sharecrm_chat_validate",
 	}, "up")
 	options := runOptions{
 		Direction: "up", Files: files,
@@ -762,8 +779,8 @@ func TestShareCRM685686UpgradesThroughDocs(t *testing.T) {
 		"694_doc_version_workspace_idx",
 		"695_inbox_item_returned_at",
 		"696_inbox_item_active_shown_idx",
-		"754_issue_origin_sharecrm_chat",
-		"755_issue_origin_sharecrm_chat_validate",
+		"756_issue_origin_sharecrm_chat",
+		"757_issue_origin_sharecrm_chat_validate",
 		"673_runtime_rate_limit",
 	} {
 		assertLedger(t, ctx, pool, version, true)
@@ -774,7 +791,7 @@ func TestShareCRM685686UpgradesThroughDocs(t *testing.T) {
 // origin filenames 695/696 are already recorded and the origin check is
 // validated. Upstream inbox migrations now use 695/696, so they must run
 // while existing sharecrm_chat rows and new ShareCRM writes still succeed.
-// The renamed tail 754/755 records itself and does not swap that check.
+// The renamed tail 756/757 records itself and does not swap that check.
 func TestShareCRM695696UpgradesThroughInbox(t *testing.T) {
 	ctx, pool, schema := newOriginSandbox(t)
 	prepareShareCRMIssue(t, ctx, pool, true)
@@ -836,8 +853,8 @@ func TestShareCRM695696UpgradesThroughInbox(t *testing.T) {
 	tail := runOptions{
 		Direction: "up",
 		Files: realMigrationFiles(t, []string{
-			"754_issue_origin_sharecrm_chat",
-			"755_issue_origin_sharecrm_chat_validate",
+			"756_issue_origin_sharecrm_chat",
+			"757_issue_origin_sharecrm_chat_validate",
 		}, "up"),
 		SchemaMigrationsTable: schema + ".schema_migrations",
 		AdvisoryLockKey:       testLockKey(),
@@ -859,8 +876,8 @@ func TestShareCRM695696UpgradesThroughInbox(t *testing.T) {
 		"696_issue_origin_sharecrm_chat_validate",
 		"695_inbox_item_returned_at",
 		"696_inbox_item_active_shown_idx",
-		"754_issue_origin_sharecrm_chat",
-		"755_issue_origin_sharecrm_chat_validate",
+		"756_issue_origin_sharecrm_chat",
+		"757_issue_origin_sharecrm_chat_validate",
 		"685_docs",
 		"694_doc_version_workspace_idx",
 	} {
@@ -923,8 +940,8 @@ func TestPureUpstreamValidatedOriginGainsDocsAndShareCRM(t *testing.T) {
 			"694_doc_version_workspace_idx",
 			"695_inbox_item_returned_at",
 			"696_inbox_item_active_shown_idx",
-			"754_issue_origin_sharecrm_chat",
-			"755_issue_origin_sharecrm_chat_validate",
+			"756_issue_origin_sharecrm_chat",
+			"757_issue_origin_sharecrm_chat_validate",
 		}, "up"),
 		SchemaMigrationsTable: schema + ".schema_migrations",
 		AdvisoryLockKey:       testLockKey(),
@@ -951,8 +968,8 @@ func TestPureUpstreamValidatedOriginGainsDocsAndShareCRM(t *testing.T) {
 	assertLedger(t, ctx, pool, "685_docs", true)
 	assertLedger(t, ctx, pool, "695_inbox_item_returned_at", true)
 	assertLedger(t, ctx, pool, "696_inbox_item_active_shown_idx", true)
-	assertLedger(t, ctx, pool, "754_issue_origin_sharecrm_chat", true)
-	assertLedger(t, ctx, pool, "755_issue_origin_sharecrm_chat_validate", true)
+	assertLedger(t, ctx, pool, "756_issue_origin_sharecrm_chat", true)
+	assertLedger(t, ctx, pool, "757_issue_origin_sharecrm_chat_validate", true)
 	assertIndexValid(t, ctx, pool, "idx_inbox_active_shown")
 	assertLedger(t, ctx, pool, "685_issue_origin_sharecrm_chat", false)
 	assertLedger(t, ctx, pool, "686_issue_origin_sharecrm_chat_validate", false)
@@ -962,7 +979,7 @@ func TestPureUpstreamValidatedOriginGainsDocsAndShareCRM(t *testing.T) {
 // ShareCRM origin filenames 697/698 are already recorded and the origin
 // check is validated. Upstream now uses 697/698 for autopilot_run's
 // idempotency key and its unique index, 699-702 for the guest role and
-// member_search_access, and the ShareCRM widen continues as 754/755.
+// member_search_access, and the ShareCRM widen continues as 756/757.
 // The new tail must not swap a check that already allows sharecrm_chat,
 // and the retired ledger keys stay beside the new filenames.
 func TestShareCRM697698UpgradesThroughAutopilot(t *testing.T) {
@@ -1014,8 +1031,8 @@ func TestShareCRM697698UpgradesThroughAutopilot(t *testing.T) {
 			"700_member_search_access",
 			"701_member_search_access_pkey_index",
 			"702_member_search_access_pkey",
-			"754_issue_origin_sharecrm_chat",
-			"755_issue_origin_sharecrm_chat_validate",
+			"756_issue_origin_sharecrm_chat",
+			"757_issue_origin_sharecrm_chat_validate",
 		}, "up"),
 		SchemaMigrationsTable: schema + ".schema_migrations",
 		AdvisoryLockKey:       testLockKey(),
@@ -1065,8 +1082,8 @@ func TestShareCRM697698UpgradesThroughAutopilot(t *testing.T) {
 		"702_member_search_access_pkey",
 		"703_issue_origin_sharecrm_chat",
 		"704_issue_origin_sharecrm_chat_validate",
-		"754_issue_origin_sharecrm_chat",
-		"755_issue_origin_sharecrm_chat_validate",
+		"756_issue_origin_sharecrm_chat",
+		"757_issue_origin_sharecrm_chat_validate",
 	} {
 		assertLedger(t, ctx, pool, version, true)
 	}
@@ -1077,7 +1094,7 @@ func TestShareCRM697698UpgradesThroughAutopilot(t *testing.T) {
 // check is validated. Upstream now uses 703-707 for doc_comment, 708/709
 // for the attachment workspace size index, and 710 for
 // autopilot_quota_period.rejection_notified_limit. The ShareCRM widen
-// continues as 754/755 and must not swap a check that already allows
+// continues as 756/757 and must not swap a check that already allows
 // sharecrm_chat. The retired ledger keys stay beside the new filenames.
 // An existing runtime_rate_limit keeps its OID and row.
 func TestShareCRM703704UpgradesThroughDocComments(t *testing.T) {
@@ -1142,8 +1159,8 @@ func TestShareCRM703704UpgradesThroughDocComments(t *testing.T) {
 			"708_attachment_workspace_size_idx",
 			"709_drop_attachment_workspace_index",
 			"710_autopilot_quota_limit_notice",
-			"754_issue_origin_sharecrm_chat",
-			"755_issue_origin_sharecrm_chat_validate",
+			"756_issue_origin_sharecrm_chat",
+			"757_issue_origin_sharecrm_chat_validate",
 		}, "up"),
 		SchemaMigrationsTable: schema + ".schema_migrations",
 		AdvisoryLockKey:       testLockKey(),
@@ -1199,8 +1216,8 @@ func TestShareCRM703704UpgradesThroughDocComments(t *testing.T) {
 		"708_attachment_workspace_size_idx",
 		"709_drop_attachment_workspace_index",
 		"710_autopilot_quota_limit_notice",
-		"754_issue_origin_sharecrm_chat",
-		"755_issue_origin_sharecrm_chat_validate",
+		"756_issue_origin_sharecrm_chat",
+		"757_issue_origin_sharecrm_chat_validate",
 		"673_runtime_rate_limit",
 	} {
 		assertLedger(t, ctx, pool, version, true)
@@ -1210,7 +1227,7 @@ func TestShareCRM703704UpgradesThroughDocComments(t *testing.T) {
 // TestShareCRM711712UpgradesThroughDashboardRange is an older fork tip.
 // ShareCRM origin filenames 711/712 are already recorded and the origin
 // check is validated. Upstream now uses 711/712 for dashboard_range_view and
-// uq_dashboard_range_view_scope. The ShareCRM widen continues as 754/755 and
+// uq_dashboard_range_view_scope. The ShareCRM widen continues as 756/757 and
 // must not swap a check that already allows sharecrm_chat. The retired
 // ledger keys stay beside the new filenames.
 func TestShareCRM711712UpgradesThroughDashboardRange(t *testing.T) {
@@ -1235,8 +1252,8 @@ func TestShareCRM711712UpgradesThroughDashboardRange(t *testing.T) {
 		Files: realMigrationFiles(t, []string{
 			"711_dashboard_range_view",
 			"712_dashboard_range_view_scope_idx",
-			"754_issue_origin_sharecrm_chat",
-			"755_issue_origin_sharecrm_chat_validate",
+			"756_issue_origin_sharecrm_chat",
+			"757_issue_origin_sharecrm_chat_validate",
 		}, "up"),
 		SchemaMigrationsTable: schema + ".schema_migrations",
 		AdvisoryLockKey:       testLockKey(),
@@ -1260,8 +1277,8 @@ func TestShareCRM711712UpgradesThroughDashboardRange(t *testing.T) {
 		"712_issue_origin_sharecrm_chat_validate",
 		"711_dashboard_range_view",
 		"712_dashboard_range_view_scope_idx",
-		"754_issue_origin_sharecrm_chat",
-		"755_issue_origin_sharecrm_chat_validate",
+		"756_issue_origin_sharecrm_chat",
+		"757_issue_origin_sharecrm_chat_validate",
 	} {
 		assertLedger(t, ctx, pool, version, true)
 	}
@@ -1272,10 +1289,11 @@ func TestShareCRM711712UpgradesThroughDashboardRange(t *testing.T) {
 // keys 732_issue_origin_sharecrm_chat and
 // 733_issue_origin_sharecrm_chat_validate. Upstream reused 732-734 for
 // comment idempotency receipts and 735-742 for task_usage_hourly squad
-// attribution. Those files must run, and so must upstream 743-753. The new
-// ShareCRM filenames 754/755 must record themselves without swapping the
+// attribution. Those files must run, and so must upstream 743-755. The new
+// ShareCRM filenames 756/757 must record themselves without swapping the
 // origin check, and a second upgrade must leave the ledger and the OID
-// alone. The 735/736 and 743/744 ShareCRM filenames are not on this database.
+// alone. The 735/736, 743/744, and 754/755 ShareCRM filenames are not on
+// this database.
 func TestPreviousShareCRMTipUpgradesThroughCommentIdempotency(t *testing.T) {
 	upgradeFromRecordedShareCRMKeys(t, recordedShareCRMUpgrade{
 		database: "origin_prev_732",
@@ -1301,6 +1319,8 @@ func TestPreviousShareCRMTipUpgradesThroughCommentIdempotency(t *testing.T) {
 			"736_issue_origin_sharecrm_chat_validate",
 			"743_issue_origin_sharecrm_chat",
 			"744_issue_origin_sharecrm_chat_validate",
+			"754_issue_origin_sharecrm_chat",
+			"755_issue_origin_sharecrm_chat_validate",
 		},
 	})
 }
@@ -1309,10 +1329,10 @@ func TestPreviousShareCRMTipUpgradesThroughCommentIdempotency(t *testing.T) {
 // tip: comment idempotency 732-734 is already applied, and the ShareCRM
 // origin pair is recorded as 735_issue_origin_sharecrm_chat /
 // 736_issue_origin_sharecrm_chat_validate. Upstream then reused 735-742 for
-// squad usage. Those files must still run, and so must upstream 743-753.
-// 754/755 must be a no-op for an origin check that already allows
+// squad usage. Those files must still run, and so must upstream 743-755.
+// 756/757 must be a no-op for an origin check that already allows
 // sharecrm_chat, and the retired 735/736 keys stay in the ledger. The
-// 743/744 ShareCRM filenames are not on this database.
+// 743/744 and 754/755 ShareCRM filenames are not on this database.
 func TestRecordedShareCRM735736UpgradesThroughSquadUsage(t *testing.T) {
 	upgradeFromRecordedShareCRMKeys(t, recordedShareCRMUpgrade{
 		database: "origin_prev_735",
@@ -1335,6 +1355,8 @@ func TestRecordedShareCRM735736UpgradesThroughSquadUsage(t *testing.T) {
 			"733_issue_origin_sharecrm_chat_validate",
 			"743_issue_origin_sharecrm_chat",
 			"744_issue_origin_sharecrm_chat_validate",
+			"754_issue_origin_sharecrm_chat",
+			"755_issue_origin_sharecrm_chat_validate",
 		},
 	})
 }
@@ -1342,9 +1364,9 @@ func TestRecordedShareCRM735736UpgradesThroughSquadUsage(t *testing.T) {
 // TestRecordedShareCRM732And735UpgradesThroughSquadUsage is a database that
 // recorded both retired ShareCRM pairs: 732/733 from the post-#49 tip and
 // 735/736 from the unmerged PR #50 tip, including comment idempotency
-// 732-734. Squad usage 735-742 and upstream 743-753 still apply under their
-// own filenames, and 754/755 does not rebuild the origin check. The 743/744
-// ShareCRM filenames are not on this database.
+// 732-734. Squad usage 735-742 and upstream 743-755 still apply under their
+// own filenames, and 756/757 does not rebuild the origin check. The 743/744
+// and 754/755 ShareCRM filenames are not on this database.
 func TestRecordedShareCRM732And735UpgradesThroughSquadUsage(t *testing.T) {
 	upgradeFromRecordedShareCRMKeys(t, recordedShareCRMUpgrade{
 		database: "origin_prev_732_735",
@@ -1367,6 +1389,8 @@ func TestRecordedShareCRM732And735UpgradesThroughSquadUsage(t *testing.T) {
 		absentAfter: []string{
 			"743_issue_origin_sharecrm_chat",
 			"744_issue_origin_sharecrm_chat_validate",
+			"754_issue_origin_sharecrm_chat",
+			"755_issue_origin_sharecrm_chat_validate",
 		},
 	})
 }
@@ -1374,9 +1398,10 @@ func TestRecordedShareCRM732And735UpgradesThroughSquadUsage(t *testing.T) {
 // TestRecordedShareCRM743744UpgradesThroughBlockers is the previous PR #50
 // tip: upstream through 742 is applied, and the ShareCRM origin pair is
 // recorded as 743_issue_origin_sharecrm_chat /
-// 744_issue_origin_sharecrm_chat_validate. Upstream then reused 743-753.
-// Those files must still run. 754/755 must be a no-op for an origin check
+// 744_issue_origin_sharecrm_chat_validate. Upstream then reused 743-755.
+// Those files must still run. 756/757 must be a no-op for an origin check
 // that already allows sharecrm_chat, and the retired 743/744 keys stay.
+// The 754/755 ShareCRM filenames are not on this database.
 func TestRecordedShareCRM743744UpgradesThroughBlockers(t *testing.T) {
 	upgradeFromRecordedShareCRMKeys(t, recordedShareCRMUpgrade{
 		database: "origin_prev_743",
@@ -1390,15 +1415,18 @@ func TestRecordedShareCRM743744UpgradesThroughBlockers(t *testing.T) {
 			"733_issue_origin_sharecrm_chat_validate",
 			"735_issue_origin_sharecrm_chat",
 			"736_issue_origin_sharecrm_chat_validate",
+			"754_issue_origin_sharecrm_chat",
+			"755_issue_origin_sharecrm_chat_validate",
 		},
 	})
 }
 
 // TestRecordedShareCRM732735743UpgradesThroughBlockers is a database that
-// recorded every retired ShareCRM pair from this fork: 732/733, 735/736, and
-// 743/744. Comment idempotency, squad usage, and upstream 743-753 were not
-// applied under their own filenames. Each of those files still runs, and
-// 754/755 does not rebuild the origin check.
+// recorded retired ShareCRM pairs 732/733, 735/736, and 743/744. Comment
+// idempotency, squad usage, and upstream 743-755 were not applied under
+// their own filenames. Each of those files still runs, and 756/757 does not
+// rebuild the origin check. The 754/755 ShareCRM filenames are not on this
+// database.
 func TestRecordedShareCRM732735743UpgradesThroughBlockers(t *testing.T) {
 	upgradeFromRecordedShareCRMKeys(t, recordedShareCRMUpgrade{
 		database: "origin_prev_732_735_743",
@@ -1422,6 +1450,70 @@ func TestRecordedShareCRM732735743UpgradesThroughBlockers(t *testing.T) {
 			"736_issue_origin_sharecrm_chat_validate",
 			"743_issue_origin_sharecrm_chat",
 			"744_issue_origin_sharecrm_chat_validate",
+		},
+		absentAfter: []string{
+			"754_issue_origin_sharecrm_chat",
+			"755_issue_origin_sharecrm_chat_validate",
+		},
+	})
+}
+
+// TestRecordedShareCRM754755UpgradesThroughStageBlockers is the previous
+// merged tip (PR #50): upstream through 753 is applied, and the ShareCRM
+// origin pair is recorded as 754_issue_origin_sharecrm_chat /
+// 755_issue_origin_sharecrm_chat_validate. Upstream then reused 754/755 for
+// the top-level blocker skip and the hourly usage rollup. Those files must
+// still run. 756/757 must be a no-op for an origin check that already allows
+// sharecrm_chat, and the retired 754/755 keys stay.
+func TestRecordedShareCRM754755UpgradesThroughStageBlockers(t *testing.T) {
+	upgradeFromRecordedShareCRMKeys(t, recordedShareCRMUpgrade{
+		database: "origin_prev_754",
+		skip:     migrationsAfter753,
+		recorded: []string{
+			"754_issue_origin_sharecrm_chat",
+			"755_issue_origin_sharecrm_chat_validate",
+		},
+		absentAfter: []string{
+			"732_issue_origin_sharecrm_chat",
+			"733_issue_origin_sharecrm_chat_validate",
+			"735_issue_origin_sharecrm_chat",
+			"736_issue_origin_sharecrm_chat_validate",
+			"743_issue_origin_sharecrm_chat",
+			"744_issue_origin_sharecrm_chat_validate",
+		},
+	})
+}
+
+// TestRecordedShareCRM732735743754UpgradesThroughStageBlockers is a database
+// that recorded every retired ShareCRM pair from this fork: 732/733, 735/736,
+// 743/744, and 754/755. Comment idempotency, squad usage, upstream 743-755,
+// and the new ShareCRM filenames 756/757 still run, and 756/757 does not
+// rebuild the origin check.
+func TestRecordedShareCRM732735743754UpgradesThroughStageBlockers(t *testing.T) {
+	upgradeFromRecordedShareCRMKeys(t, recordedShareCRMUpgrade{
+		database: "origin_prev_732_735_743_754",
+		skip: append([]string{
+			"732_comment_idempotency_receipt",
+			"733_comment_idempotency_receipt_key",
+			"734_comment_idempotency_receipt_created",
+			"735_task_usage_hourly_squad_col",
+			"736_task_usage_hourly_squad_uq_idx",
+			"737_task_usage_hourly_dirty_squad_uq_idx",
+			"738_task_usage_hourly_workspace_squad_idx",
+			"739_task_usage_hourly_squad_pipeline",
+			"740_task_usage_hourly_drop_legacy_key",
+			"741_task_usage_hourly_dirty_drop_legacy_key",
+			"742_task_usage_hourly_squad_rollback_merge",
+		}, migrationsAfter742...),
+		recorded: []string{
+			"732_issue_origin_sharecrm_chat",
+			"733_issue_origin_sharecrm_chat_validate",
+			"735_issue_origin_sharecrm_chat",
+			"736_issue_origin_sharecrm_chat_validate",
+			"743_issue_origin_sharecrm_chat",
+			"744_issue_origin_sharecrm_chat_validate",
+			"754_issue_origin_sharecrm_chat",
+			"755_issue_origin_sharecrm_chat_validate",
 		},
 	})
 }
@@ -1543,6 +1635,7 @@ func upgradeFromRecordedShareCRMKeys(t *testing.T, spec recordedShareCRMUpgrade)
 	assertIndexValid(t, ctx, pool, "idx_comment_idempotency_receipt_created")
 	assertSquadUsageShape(t, ctx, pool)
 	assertBlockerAndQuotaShape(t, ctx, pool)
+	assertStageBlockerSkipAndUsageRollup(t, ctx, pool)
 	assertValidatedChannelOrigins(t, ctx, pool)
 	present := append([]string{}, spec.recorded...)
 	present = append(present,
@@ -1646,8 +1739,8 @@ func runOriginMigrations(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 	versions := []string{
 		"667_issue_origin_weixin_chat",
 		"668_issue_origin_weixin_chat_validate",
-		"754_issue_origin_sharecrm_chat",
-		"755_issue_origin_sharecrm_chat_validate",
+		"756_issue_origin_sharecrm_chat",
+		"757_issue_origin_sharecrm_chat_validate",
 	}
 	if err := runMigrations(ctx, pool, runOptions{
 		Direction:             "up",
@@ -1784,6 +1877,17 @@ func assertLedger(t *testing.T, ctx context.Context, pool *pgxpool.Pool, version
 	}
 	if got != want {
 		t.Fatalf("ledger %s recorded = %t, want %t", version, got, want)
+	}
+}
+
+func assertStageBlockerSkipAndUsageRollup(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+	t.Helper()
+	var blocker, rollup string
+	if err := pool.QueryRow(ctx, `SELECT pg_get_functiondef('record_issue_stage_blockers()'::regprocedure)`).Scan(&blocker); err != nil || !strings.Contains(blocker, "NEW.parent_issue_id IS NULL") {
+		t.Fatalf("record_issue_stage_blockers missing top-level skip, error = %v, def = %s", err, blocker)
+	}
+	if err := pool.QueryRow(ctx, `SELECT pg_get_functiondef('rollup_task_usage_hourly_window(timestamptz,timestamptz)'::regprocedure)`).Scan(&rollup); err != nil || !strings.Contains(rollup, "dirty_hour_keys") {
+		t.Fatalf("rollup_task_usage_hourly_window missing hour-key recompute, error = %v, def = %s", err, rollup)
 	}
 }
 

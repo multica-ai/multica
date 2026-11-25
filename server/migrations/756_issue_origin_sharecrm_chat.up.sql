@@ -3,7 +3,7 @@
 -- Older releases used these full ledger keys for the same logical change.
 -- The runner does not delete them, and the files must not come back: a
 -- database that never recorded that exact string would execute them again,
--- and 649/657/661/665/673/674/681/682/683/684/685/686/695/696/697/698/703/704/711/712/732/733/735/736/743/744
+-- and 649/657/661/665/673/674/681/682/683/684/685/686/695/696/697/698/703/704/711/712/732/733/735/736/743/744/754/755
 -- are now different migrations.
 --   649_issue_origin_sharecrm_chat / 650_issue_origin_sharecrm_chat_validate
 --   657_issue_origin_sharecrm_chat / 658_issue_origin_sharecrm_chat_validate
@@ -20,6 +20,7 @@
 --   732_issue_origin_sharecrm_chat / 733_issue_origin_sharecrm_chat_validate
 --   735_issue_origin_sharecrm_chat / 736_issue_origin_sharecrm_chat_validate
 --   743_issue_origin_sharecrm_chat / 744_issue_origin_sharecrm_chat_validate
+--   754_issue_origin_sharecrm_chat / 755_issue_origin_sharecrm_chat_validate
 --
 -- 681/682 on upstream are project_folder and its name index. 683/684 are
 -- entitlement_feature_attempt and its scope index. 685-694 are the docs
@@ -45,19 +46,23 @@
 -- and the blocker rules. 747 is squad.handoff_mode. 748-751 are
 -- app_tool_call_quota_period, its scope index, the quota columns, and the
 -- workspace metered index. 752 records doc discussion runs. 753 builds
--- idx_agent_task_queue_doc. Those filenames are not the previous ShareCRM
--- pairs 732_issue_origin_sharecrm_chat /
+-- idx_agent_task_queue_doc. 754 replaces record_issue_stage_blockers so a
+-- top-level insert skips the blocker graph. 755 recomputes
+-- rollup_task_usage_hourly_window per hour key. Those filenames are not the
+-- previous ShareCRM pairs 732_issue_origin_sharecrm_chat /
 -- 733_issue_origin_sharecrm_chat_validate,
 -- 735_issue_origin_sharecrm_chat /
--- 736_issue_origin_sharecrm_chat_validate, or
+-- 736_issue_origin_sharecrm_chat_validate,
 -- 743_issue_origin_sharecrm_chat /
--- 744_issue_origin_sharecrm_chat_validate.
+-- 744_issue_origin_sharecrm_chat_validate, or
+-- 754_issue_origin_sharecrm_chat /
+-- 755_issue_origin_sharecrm_chat_validate.
 -- A database that already recorded the ShareCRM filenames above still runs
--- this file, and it still runs 732-753: the ledger key is the whole
+-- this file, and it still runs 732-755: the ledger key is the whole
 -- filename, not the numeric prefix.
 -- When weixin_chat and sharecrm_chat are already allowed, including when a
 -- retired widen left the check NOT VALID, this file returns without another
--- catalog swap. Migration 755 validates.
+-- catalog swap. Migration 757 validates.
 --
 -- 667/668 on this fork already union sharecrm_chat in, including on a
 -- database whose 667 committed before that repair existed (668 reads the

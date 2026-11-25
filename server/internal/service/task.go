@@ -854,11 +854,15 @@ func (s *TaskService) resolveInheritedSquadID(ctx context.Context, issue db.Issu
 			}
 		}
 	}
+	return resolveIssueOriginSquadID(ctx, s.Queries, issue, agentID)
+}
+
+func resolveIssueOriginSquadID(ctx context.Context, q *db.Queries, issue db.Issue, agentID pgtype.UUID) pgtype.UUID {
 	if issue.OriginType.Valid &&
 		(issue.OriginType.String == "agent_create" || issue.OriginType.String == "quick_create") &&
 		issue.OriginID.Valid {
-		if originTask, err := s.Queries.GetAgentTask(ctx, issue.OriginID); err == nil {
-			if sid := effectiveTaskSquadID(originTask); sid.Valid && s.agentInSquad(ctx, sid, agentID) {
+		if originTask, err := q.GetAgentTask(ctx, issue.OriginID); err == nil {
+			if sid := effectiveTaskSquadID(originTask); sid.Valid && agentInSquad(ctx, q, sid, agentID) {
 				return sid
 			}
 		}
@@ -867,11 +871,11 @@ func (s *TaskService) resolveInheritedSquadID(ctx context.Context, issue db.Issu
 }
 
 // agentInSquad reports whether agentID leads or belongs to squadID.
-func (s *TaskService) agentInSquad(ctx context.Context, squadID, agentID pgtype.UUID) bool {
-	if squad, err := s.Queries.GetSquad(ctx, squadID); err == nil && squad.LeaderID == agentID {
+func agentInSquad(ctx context.Context, q *db.Queries, squadID, agentID pgtype.UUID) bool {
+	if squad, err := q.GetSquad(ctx, squadID); err == nil && squad.LeaderID == agentID {
 		return true
 	}
-	isMember, err := s.Queries.IsSquadMember(ctx, db.IsSquadMemberParams{SquadID: squadID, MemberType: "agent", MemberID: agentID})
+	isMember, err := q.IsSquadMember(ctx, db.IsSquadMemberParams{SquadID: squadID, MemberType: "agent", MemberID: agentID})
 	return err == nil && isMember
 }
 
@@ -7293,6 +7297,9 @@ func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, targ
 		if target.leaderSquad != nil {
 			isLeader, squadID = true, target.leaderSquad.ID
 		}
+		// The recovery run continues the coordinator's run, so it keeps that
+		// run's squad usage attribution.
+		usageSquadID := s.resolveInheritedSquadID(ctx, target.issue, target.agent.ID, squadID, target.source.ID)
 		task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 			ID:                   dbid.NewV7(),
 			AgentID:              target.agent.ID,
@@ -7303,6 +7310,7 @@ func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, targ
 			TriggerSummary:       s.buildCommentTriggerSummary(ctx, target.issue.WorkspaceID, target.comment.ID),
 			IsLeaderTask:         pgtype.Bool{Bool: isLeader, Valid: isLeader},
 			SquadID:              squadID,
+			UsageSquadID:         usageSquadID,
 			OriginatorUserID:     originator,
 			AccountableUserID:    accountable,
 			RuntimeMcpOverlay:    overlay.Overlay,

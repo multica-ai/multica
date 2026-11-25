@@ -110,7 +110,7 @@ import { RunLifecycleDemo } from "@/components/demos/run-lifecycle-demo";
 | `timeout` | 超过守护进程配置的执行时长上限 | 缩小任务范围，或调整守护进程的 `agent_timeout` |
 | `iteration_limit` | 达到执行轮次上限 | 缩小任务范围 |
 | `agent_blocked` | 智能体主动报告无法继续 | 按它在评论中的说明补充信息 |
-| `api_invalid_request` | 平台 API 拒绝了非法请求 | 重试；反复出现时报告问题 |
+| `api_invalid_request` | 模型 API 拒绝了这段对话：请求被判为无效（例如图片无法读取），或模型拒绝回答 | 下一次运行会自动开启新会话。如果同样的请求一直被拒，换个说法或换个模型 |
 | `codex_semantic_inactivity` | Codex 长时间无有效输出被判停滞 | 重试，或调整 Codex 停滞超时 |
 
 </Tab>

@@ -360,7 +360,8 @@ function DocEditor({ doc }: { doc: Doc }) {
     }),
     [t],
   );
-  // A click inside highlighted text opens its discussion.
+  // A click inside highlighted text opens its discussion; a click anywhere
+  // else in the text lets go of the open one.
   const onBodyClick = () => {
     const selection = window.getSelection();
     if (!selection?.isCollapsed || !selection.anchorNode) return;
@@ -368,6 +369,8 @@ function DocEditor({ doc }: { doc: Doc }) {
     if (id) {
       setActiveThread(id);
       setCommentsOpen(true);
+    } else {
+      setActiveThread(null);
     }
   };
   const titleValue = solo ? draft.title : liveTitle.value;

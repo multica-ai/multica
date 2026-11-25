@@ -110,7 +110,7 @@ import { RunLifecycleDemo } from "@/components/demos/run-lifecycle-demo";
 | `timeout` | デーモンに設定された実行時間の上限を超えた | タスクの範囲を狭めるか、デーモンの `agent_timeout` を調整する |
 | `iteration_limit` | 実行の反復回数の上限に達した | タスクの範囲を狭める |
 | `agent_blocked` | エージェントが続行できないと自ら報告した | エージェントがコメントで求めた情報を補う |
-| `api_invalid_request` | プラットフォーム API が不正なリクエストを拒否した | リトライし、繰り返し発生する場合は問題を報告する |
+| `api_invalid_request` | モデル API がこの会話を拒否した。リクエストが無効と判定された（画像を読み取れないなど）か、モデルが回答を拒否した | 次回の実行は自動的に新しいセッションで始まる。同じリクエストが拒否され続ける場合は、言い換えるかモデルを変更する |
 | `codex_semantic_inactivity` | Codex が長時間有効な出力を出さず、停滞と判定された | リトライするか、Codex の停滞タイムアウトを調整する |
 
 </Tab>

@@ -262,15 +262,11 @@ func assertIssueStatusStillActive(ctx context.Context, qtx *db.Queries, workspac
 	return nil
 }
 
-// runWithIssueStatusGuard runs an issue write that lands on a custom status
-// inside a transaction that re-verifies the status under the shared catalog
-// lock (see assertIssueStatusStillActive). Request writes also carry trusted
-// wakeup actor identity in transaction-local settings, including built-in targets.
+// runWithIssueStatusGuard runs an issue write inside a transaction that
+// re-verifies a custom status under the shared catalog lock (see
+// assertIssueStatusStillActive). Request writes also carry trusted wakeup actor
+// identity in transaction-local settings.
 func (h *Handler) runWithIssueStatusGuard(ctx context.Context, workspaceID pgtype.UUID, statusKey string, fn func(q *db.Queries) error) error {
-	_, hasActor := ctx.Value(wakeupActorKey{}).(wakeupActor)
-	if !hasActor && (statusKey == "" || issuestatus.IsBuiltIn(statusKey)) {
-		return fn(h.Queries)
-	}
 	tx, err := h.beginWakeupWrite(ctx)
 	if err != nil {
 		return err
@@ -287,9 +283,11 @@ func (h *Handler) runWithIssueStatusGuard(ctx context.Context, workspaceID pgtyp
 	return tx.Commit(ctx)
 }
 
-// updateIssueWithStatusGuard writes params under the status-archive guard.
-func (h *Handler) updateIssueWithStatusGuard(ctx context.Context, workspaceID pgtype.UUID, statusKey string, params db.UpdateIssueParams) (db.Issue, error) {
-	var issue db.Issue
+// updateIssueWithStatusGuard writes params under the status-archive guard,
+// leaving fields rawFields does not name as the locked row has them. It returns
+// the written issue and the row it replaced.
+func (h *Handler) updateIssueWithStatusGuard(ctx context.Context, workspaceID pgtype.UUID, statusKey string, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, workflowAssignee bool) (db.Issue, db.Issue, error) {
+	var issue, current db.Issue
 	var cancelledWakeups []db.AgentTaskQueue
 	err := h.runWithIssueStatusGuard(ctx, workspaceID, statusKey, func(q *db.Queries) error {
 		if params.DuplicateOfIssueID.Valid {
@@ -298,14 +296,33 @@ func (h *Handler) updateIssueWithStatusGuard(ctx context.Context, workspaceID pg
 			}
 		}
 		var innerErr error
+		current, innerErr = lockIssueForFieldUpdate(ctx, q, workspaceID, &params, rawFields, workflowAssignee)
+		if innerErr != nil {
+			return innerErr
+		}
 		issue, cancelledWakeups, innerErr = updateIssueStoppingWakeups(ctx, q, params)
 		return innerErr
 	})
 	if err != nil {
-		return issue, err
+		return issue, current, err
 	}
 	h.broadcastCancelledWakeups(ctx, workspaceID, cancelledWakeups)
-	return issue, nil
+	return issue, current, nil
+}
+
+// lockIssueForFieldUpdate locks the issue row for the rest of the transaction
+// and takes the nullable fields rawFields does not name from it, so a write
+// that waited behind another one does not put that one's fields back.
+func lockIssueForFieldUpdate(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, params *db.UpdateIssueParams, rawFields map[string]json.RawMessage, workflowAssignee bool) (db.Issue, error) {
+	current, err := q.LockIssueForDescriptionUpdate(ctx, db.LockIssueForDescriptionUpdateParams{
+		ID:          params.ID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		return db.Issue{}, fmt.Errorf("lock issue for update: %w", err)
+	}
+	refreshUntouchedNullableIssueParams(params, current, rawFields, workflowAssignee)
+	return current, nil
 }
 
 // updateIssueStoppingWakeups writes params and, when the write moves the issue
@@ -3652,7 +3669,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.validateBlockerVisibility(w, r, wsUUID, req.BlockedBy) {
+	if !h.validateBlockerVisibility(w, r, wsUUID, blockerIDs) {
 		return
 	}
 	res, err := h.IssueService.Create(r.Context(), service.IssueCreateParams{
@@ -3765,11 +3782,11 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, CreateIssueResponse{IssueResponse: resp, PRAutoCompleteDisabled: req.PRAutoCompleteDisabled})
 }
 
+// UpdateIssueRequest leaves out blocked_by and remove_blocked_by: they are
+// read only through parseIssueBlockerEdit.
 type UpdateIssueRequest struct {
-	BlockedBy        []string `json:"blocked_by,omitempty"`
-	RemoveBlockedBy  []string `json:"remove_blocked_by,omitempty"`
-	ExpectedRevision *int64   `json:"expected_revision,omitempty"`
-	Title            *string  `json:"title"`
+	ExpectedRevision *int64  `json:"expected_revision,omitempty"`
+	Title            *string `json:"title"`
 	// TitleBase is the title adopted by the editor before producing Title. It
 	// protects title edits without coupling them to unrelated issue mutations.
 	TitleBase   *string `json:"title_base,omitempty"`
@@ -3914,7 +3931,7 @@ var errIssueFieldConflict = errors.New("issue text field conflict")
 // session that could merge it.
 var errIssueDescriptionRevisionConflict = errors.New("issue description revision conflict")
 
-func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, titleBase, descriptionBase *string, descriptionBaseRevision *int64, attachmentIDs []pgtype.UUID, statusKey string, workflowAssignee bool) (db.Issue, db.Issue, bool, error) {
+func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, blockers issueBlockerEdit, titleBase, descriptionBase *string, descriptionBaseRevision *int64, attachmentIDs []pgtype.UUID, statusKey string, workflowAssignee bool) (db.Issue, db.Issue, bool, error) {
 	if h.TxStarter == nil {
 		return db.Issue{}, db.Issue{}, false, errors.New("atomic issue update requires transaction starter")
 	}
@@ -4005,11 +4022,8 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 		}
 	}
 
-	var blockerInput UpdateIssueRequest
-	_ = json.Unmarshal(rawFields["blocked_by"], &blockerInput.BlockedBy)
-	_ = json.Unmarshal(rawFields["remove_blocked_by"], &blockerInput.RemoveBlockedBy)
-	for _, value := range blockerInput.RemoveBlockedBy {
-		if err = qtx.RemoveIssueBlocker(ctx, db.RemoveIssueBlockerParams{WorkspaceID: workspaceID, IssueID: issue.ID, BlockerIssueID: parseUUID(value)}); err != nil {
+	for _, blocker := range blockers.remove {
+		if err = qtx.RemoveIssueBlocker(ctx, db.RemoveIssueBlockerParams{WorkspaceID: workspaceID, IssueID: issue.ID, BlockerIssueID: blocker}); err != nil {
 			return db.Issue{}, current, false, err
 		}
 	}
@@ -4017,12 +4031,12 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 	if blockerActor.id == "" {
 		blockerActor = wakeupActor{kind: issue.CreatorType, id: uuidToString(issue.CreatorID)}
 	}
-	for _, value := range blockerInput.BlockedBy {
-		if err = service.AddIssueBlocker(ctx, qtx, workspaceID, issue.ID, parseUUID(value), blockerActor.kind, parseUUID(blockerActor.id)); err != nil {
+	for _, blocker := range blockers.add {
+		if err = service.AddIssueBlocker(ctx, qtx, workspaceID, issue.ID, blocker, blockerActor.kind, parseUUID(blockerActor.id)); err != nil {
 			return db.Issue{}, current, false, err
 		}
 	}
-	if len(blockerInput.BlockedBy)+len(blockerInput.RemoveBlockedBy) > 0 {
+	if blockers.changes() {
 		if _, err = tx.Exec(ctx, "UPDATE issue SET revision=revision+1,updated_at=clock_timestamp(),last_activity_at=clock_timestamp() WHERE id=$1 AND workspace_id=$2", issue.ID, workspaceID); err != nil {
 			return db.Issue{}, current, false, err
 		}
@@ -4090,19 +4104,14 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	req.Description = sanitizeNullBytesPtr(req.Description)
 	req.DescriptionBase = sanitizeNullBytesPtr(req.DescriptionBase)
 
-	if _, ok := h.parseBlockerIDs(w, req.BlockedBy); !ok {
-		return
-	}
-	if _, ok := h.parseBlockerIDs(w, req.RemoveBlockedBy); !ok {
-		return
-	}
-	if !h.validateBlockerVisibility(w, r, prevIssue.WorkspaceID, req.BlockedBy) {
-		return
-	}
-
 	// Track which fields were explicitly present in JSON (even if null)
 	var rawFields map[string]json.RawMessage
 	json.Unmarshal(bodyBytes, &rawFields)
+
+	blockers, ok := h.parseIssueBlockerEdit(w, r, prevIssue.WorkspaceID, rawFields)
+	if !ok {
+		return
+	}
 
 	if prevIssue.TriageState.Valid {
 		if field := triageLockedField(rawFields); field != "" {
@@ -4392,13 +4401,17 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if req.Description != nil || req.TitleBase != nil || req.DescriptionBase != nil || len(attachmentIDs) > 0 || issueBlockerGraphTouched(rawFields) {
 		var lockedPrev db.Issue
 		issue, lockedPrev, attachmentsChanged, err = h.updateIssueAtomically(
-			writeCtx, prevIssue.WorkspaceID, params, rawFields, req.TitleBase, req.DescriptionBase, req.DescriptionBaseRevision, attachmentIDs, statusKeyForGuard, handoff != nil,
+			writeCtx, prevIssue.WorkspaceID, params, rawFields, blockers, req.TitleBase, req.DescriptionBase, req.DescriptionBaseRevision, attachmentIDs, statusKeyForGuard, handoff != nil,
 		)
 		if lockedPrev.ID.Valid {
 			prevIssue = lockedPrev
 		}
 	} else {
-		issue, err = h.updateIssueWithStatusGuard(writeCtx, prevIssue.WorkspaceID, statusKeyForGuard, params)
+		var lockedPrev db.Issue
+		issue, lockedPrev, err = h.updateIssueWithStatusGuard(writeCtx, prevIssue.WorkspaceID, statusKeyForGuard, params, rawFields, handoff != nil)
+		if lockedPrev.ID.Valid {
+			prevIssue = lockedPrev
+		}
 	}
 	if err != nil {
 		if writeIssueBlockerError(w, err) {
@@ -4510,7 +4523,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	// The other end of each edge lists this issue under blocking, so clients
 	// refresh more than this issue when its blockers change.
-	updatedPayload["blockers_changed"] = len(req.BlockedBy)+len(req.RemoveBlockedBy) > 0
+	updatedPayload["blockers_changed"] = blockers.changes()
 	if handoff != nil {
 		updatedPayload["workflow_handoff"] = workflowHandoffPayload(issue, handoff, h.workflowHandoffBrief(r.Context(), issue, handoff), willRun)
 	}
@@ -4955,12 +4968,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	req.Updates.Title = sanitizeNullBytesPtr(req.Updates.Title)
 	req.Updates.Description = sanitizeNullBytesPtr(req.Updates.Description)
 
-	if _, ok := h.parseBlockerIDs(w, req.Updates.BlockedBy); !ok {
-		return
-	}
-	if _, ok := h.parseBlockerIDs(w, req.Updates.RemoveBlockedBy); !ok {
-		return
-	}
 	if len(req.IssueIDs) == 0 {
 		writeError(w, http.StatusBadRequest, "issue_ids is required")
 		return
@@ -5031,7 +5038,8 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.validateBlockerVisibility(w, r, wsUUID, req.Updates.BlockedBy) {
+	blockers, ok := h.parseIssueBlockerEdit(w, r, wsUUID, rawUpdates)
+	if !ok {
 		return
 	}
 	// Status is validated against this workspace's catalog, so it has to wait
@@ -5316,13 +5324,17 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			// legacy single-update clients that omit description_base.
 			var lockedPrev db.Issue
 			issue, lockedPrev, _, err = h.updateIssueAtomically(
-				writeCtx, prevIssue.WorkspaceID, params, rawUpdates, nil, nil, nil, nil, issueStatusGuard, handoff != nil,
+				writeCtx, prevIssue.WorkspaceID, params, rawUpdates, blockers, nil, nil, nil, nil, issueStatusGuard, handoff != nil,
 			)
 			if err == nil {
 				prevIssue = lockedPrev
 			}
 		case labelPlan == nil && propertyPlan == nil:
-			issue, err = h.updateIssueWithStatusGuard(writeCtx, wsUUID, issueStatusGuard, params)
+			var lockedPrev db.Issue
+			issue, lockedPrev, err = h.updateIssueWithStatusGuard(writeCtx, wsUUID, issueStatusGuard, params, rawUpdates, handoff != nil)
+			if err == nil {
+				prevIssue = lockedPrev
+			}
 		default:
 			var fieldParams *db.UpdateIssueParams
 			if hasFieldUpdate {
@@ -5331,13 +5343,21 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				issueStatusGuard = ""
 			}
 			var written batchIssueWrite
-			written, err = h.writeBatchIssue(writeCtx, wsUUID, prevIssue, fieldParams, issueStatusGuard, labelPlan, propertyPlan)
+			written, err = h.writeBatchIssue(writeCtx, wsUUID, prevIssue, fieldParams, rawUpdates, handoff != nil, issueStatusGuard, labelPlan, propertyPlan)
+			if err == nil {
+				prevIssue = written.prev
+			}
 			issue, labelsChanged, propertiesChanged = written.issue, written.labelsChanged, written.propertiesChanged
 		}
 		if err != nil {
+			if message, ok := issueBlockerConflict(err); ok {
+				skip(issueID, identifier, "blocker_conflict", message)
+				continue
+			}
 			// The archive race is a property of the batch's shared target
 			// status, not of one issue, so every remaining item would fail the
 			// same way. Abort with 409 instead of reporting a partial update.
+			// A blocker that does not exist is shared the same way.
 			if writeIssueBlockerError(w, err) {
 				return
 			}
@@ -5390,7 +5410,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				"title_changed":              req.Updates.Title != nil && prevIssue.Title != issue.Title,
 				"prev_title":                 prevIssue.Title,
 				"parent_changed":             prevIssue.ParentIssueID != issue.ParentIssueID,
-				"blockers_changed":           len(req.Updates.BlockedBy)+len(req.Updates.RemoveBlockedBy) > 0,
+				"blockers_changed":           blockers.changes(),
 				"prev_parent_issue_id":       uuidToPtr(prevIssue.ParentIssueID),
 				"prev_status":                prevIssue.Status,
 				"duplicate_of_issue_id":      liveDuplicateMark(issue.Status, issue.DuplicateOfIssueID),

@@ -27,6 +27,7 @@ import {
   RotateCw,
 } from "@multica/ui/icons";
 import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { useReducedMotion } from "@multica/core/appearance";
 import { isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
@@ -1427,20 +1428,23 @@ function ToolCallRow({ item }: { item: ChatTimelineItem }) {
   });
   const hasInput = item.input && Object.keys(item.input).length > 0;
   const command = useMemo(() => readCommandInput(item.input), [item.input]);
+  const tooltip = [item.tool, summary].filter(Boolean).join(" · ");
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded-xs px-1 -mx-1 py-0.5 text-caption hover:bg-accent/30 transition-colors">
-        <ChevronRight
-          className={cn(
-            "h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
-            open && "rotate-90",
-            !hasInput && "invisible",
-          )}
-        />
-        <span className="font-medium text-foreground shrink-0">{item.tool}</span>
-        {summary && <span className="truncate text-muted-foreground">{summary}</span>}
-      </CollapsibleTrigger>
+      <TruncatedTooltip content={tooltip}>
+        <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded-xs px-1 -mx-1 py-0.5 text-caption hover:bg-accent/30 transition-colors">
+          <ChevronRight
+            className={cn(
+              "h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+              open && "rotate-90",
+              !hasInput && "invisible",
+            )}
+          />
+          <span className="max-w-[60%] shrink-0 truncate font-medium text-foreground">{item.tool}</span>
+          {summary && <span className="truncate text-muted-foreground">{summary}</span>}
+        </CollapsibleTrigger>
+      </TruncatedTooltip>
       {hasInput && (
         <CollapsibleContent>
           {command ? (

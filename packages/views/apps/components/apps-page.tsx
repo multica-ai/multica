@@ -102,7 +102,8 @@ function AppsDirectory() {
   const accountRows = useAccountRows(viewerOverview, catalog.data?.apps ?? []);
   // Until the catalog arrives the directory only knows the apps in use, so
   // anything counted over the whole catalog would be wrong, not just early.
-  const catalogReady = catalog.isSuccess;
+  // A failed refresh keeps the catalog already loaded.
+  const catalogReady = !!catalog.data;
   const catalogPending = catalog.isPending;
 
   // The view lives in the URL so a connect flow started here comes back to it.
@@ -275,7 +276,7 @@ function AppsDirectory() {
     content = <CardGridSkeleton count={6} />;
   } else if (tab === "accounts") {
     content = <AccountsList overview={loaded.viewerOverview} rows={accountRows} matches={matchesAccount} />;
-  } else if (tab === "all" && catalog.isError) {
+  } else if (tab === "all" && catalog.isError && !catalogReady) {
     content = <CatalogFailed onRetry={() => catalog.refetch()} />;
   } else if (tab === "all" && !catalogReady) {
     content = <CardGridSkeleton count={12} />;

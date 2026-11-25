@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/projectaccess"
@@ -43,16 +42,28 @@ type IssueBlockerResponse struct {
 }
 
 func writeIssueBlockerError(w http.ResponseWriter, err error) bool {
-	if errors.Is(err, service.ErrIssueBlockerNotFound) || errors.Is(err, service.ErrIssueBlockerSelf) {
+	if errors.Is(err, service.ErrIssueBlockerNotFound) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return true
 	}
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && strings.HasPrefix(pgErr.ConstraintName, "issue_blocker_") {
-		writeError(w, http.StatusBadRequest, pgErr.Message)
+	if message, ok := issueBlockerConflict(err); ok {
+		writeError(w, http.StatusBadRequest, message)
 		return true
 	}
 	return false
+}
+
+// issueBlockerConflict reports a dependency rule the written issue itself would
+// break, and the sentence to show for it.
+func issueBlockerConflict(err error) (string, bool) {
+	if errors.Is(err, service.ErrIssueBlockerSelf) {
+		return err.Error(), true
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && strings.HasPrefix(pgErr.ConstraintName, "issue_blocker_") {
+		return pgErr.Message, true
+	}
+	return "", false
 }
 
 func (h *Handler) parseBlockerIDs(w http.ResponseWriter, values []string) ([]pgtype.UUID, bool) {
@@ -162,7 +173,10 @@ func publicBlockerResponse(issue IssueResponse) IssueResponse {
 	return issue
 }
 
-func (h *Handler) validateBlockerVisibility(w http.ResponseWriter, r *http.Request, ws pgtype.UUID, ids []string) bool {
+// validateBlockerVisibility rejects an ID that is not an issue the caller can
+// open in this workspace. A hidden issue and a missing one get the same 400, so
+// the answer never tells the caller whether a private issue exists.
+func (h *Handler) validateBlockerVisibility(w http.ResponseWriter, r *http.Request, ws pgtype.UUID, ids []pgtype.UUID) bool {
 	if len(ids) == 0 {
 		return true
 	}
@@ -170,22 +184,57 @@ func (h *Handler) validateBlockerVisibility(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return false
 	}
-	if hidden.Empty() {
-		return true
+	refs, err := h.Queries.ListIssueRefsInWorkspace(r.Context(), db.ListIssueRefsInWorkspaceParams{WorkspaceID: ws, Ids: ids})
+	if err != nil {
+		writeError(w, 500, "failed to resolve blocker access")
+		return false
+	}
+	visible := make(map[pgtype.UUID]bool, len(refs))
+	for _, ref := range refs {
+		visible[ref.ID] = hidden.CanSeeProject(ref.ProjectID)
 	}
 	for _, id := range ids {
-		project, err := h.Queries.GetIssueProjectID(r.Context(), parseUUID(id))
-		if errors.Is(err, pgx.ErrNoRows) {
-			continue
-		}
-		if err != nil {
-			writeError(w, 500, "failed to resolve blocker access")
-			return false
-		}
-		if !hidden.CanSeeProject(project) {
+		if !visible[id] {
 			writeError(w, 400, "blocker issue not found in this workspace")
 			return false
 		}
 	}
 	return true
+}
+
+// issueBlockerEdit is the blocker change an issue update makes. It is read
+// once, from the exact keys that decide whether the blocker graph is written,
+// and the transaction writes these parsed IDs: the IDs that pass the checks
+// are the IDs written.
+type issueBlockerEdit struct {
+	add, remove []pgtype.UUID
+}
+
+func (e issueBlockerEdit) changes() bool {
+	return len(e.add)+len(e.remove) > 0
+}
+
+func (h *Handler) parseIssueBlockerEdit(w http.ResponseWriter, r *http.Request, ws pgtype.UUID, fields map[string]json.RawMessage) (issueBlockerEdit, bool) {
+	var edit issueBlockerEdit
+	var ok bool
+	if edit.add, ok = h.parseBlockerField(w, r, ws, fields["blocked_by"]); !ok {
+		return issueBlockerEdit{}, false
+	}
+	if edit.remove, ok = h.parseBlockerField(w, r, ws, fields["remove_blocked_by"]); !ok {
+		return issueBlockerEdit{}, false
+	}
+	return edit, true
+}
+
+func (h *Handler) parseBlockerField(w http.ResponseWriter, r *http.Request, ws pgtype.UUID, raw json.RawMessage) ([]pgtype.UUID, bool) {
+	var values []string
+	if raw != nil && json.Unmarshal(raw, &values) != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return nil, false
+	}
+	ids, ok := h.parseBlockerIDs(w, values)
+	if !ok || !h.validateBlockerVisibility(w, r, ws, ids) {
+		return nil, false
+	}
+	return ids, true
 }

@@ -199,6 +199,9 @@ export function ProjectOverviewBody({
             placeholder={t(($) => $.detail.description_placeholder)}
             onUpdate={(md) => onUpdate({ description: md || null })}
             debounceMs={1500}
+            // Switching tabs or leaving the page within the debounce must keep
+            // what the user last typed.
+            flushPendingOnUnmount
           />
         </ObjectSection>
 
