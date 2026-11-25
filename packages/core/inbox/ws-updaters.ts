@@ -43,13 +43,13 @@ async function refreshInboxQuery(qc: QueryClient, queryKey: QueryKey) {
 //   row of the issue supplies its issue fields, and the order is known.
 // - The issue is not snoozed. A notification that ends a snooze brings the
 //   issue's earlier rows back too, and only the server has them. One that
-//   joins a snooze arrives as inbox:snoozed instead, so Snoozed is untouched.
+//   joins a snooze arrives as inbox:snoozed instead.
 //
 // A notification on an archived issue puts the issue back in the inbox, and
 // the archive excludes an issue with an active row (ListArchivedInboxItems),
-// so its loaded archived rows go. Which archived groups and facet counts match
-// is the server's call: those are marked stale and re-read when they are next
-// mounted, not now.
+// so its loaded archived rows go. The archive, its facet counts and Snoozed
+// are the server's to recompute: they are marked stale and re-read when they
+// are next mounted, not now.
 export async function onInboxNew(
   qc: QueryClient,
   wsId: string,
@@ -76,7 +76,7 @@ export async function onInboxNew(
   patchInboxQueries(qc, revived.map((cache) => cache.queryKey), (items) =>
     items.filter((i) => i.issue_id !== issueId),
   );
-  for (const queryKey of [inboxKeys.archived(wsId), inboxKeys.facets(wsId)]) {
+  for (const queryKey of [inboxKeys.archived(wsId), inboxKeys.facets(wsId), inboxKeys.snoozed(wsId)]) {
     void qc.invalidateQueries({ queryKey, refetchType: "none" });
   }
 }

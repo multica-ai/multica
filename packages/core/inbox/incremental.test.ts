@@ -60,8 +60,8 @@ describe("inboxRowFromPush", () => {
       .toMatchObject({ id: "n2", issue_identifier: "MUL-9" });
   });
 
-  it("keeps the status the push carries", () => {
-    expect(inboxRowFromPush(pushed({ issue_status: "done" }), [listed])?.issue_status).toBe("done");
+  it("takes the status from the issue's listed row, not from a push written earlier", () => {
+    expect(inboxRowFromPush(pushed({ issue_status: "todo" }), [listed])?.issue_status).toBe("in_progress");
   });
 
   it("knows nothing about an issue without another row", () => {

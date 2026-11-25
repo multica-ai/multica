@@ -13,6 +13,7 @@ import {
   patchInboxIssueProjection,
 } from "./ws-updaters";
 import { setApiInstance } from "../api";
+import { createQueryClient } from "../query-client";
 import type { ApiClient } from "../api/client";
 import { inboxIssueFieldsSupport, inboxPriorityFilterSupport } from "./filters";
 import { INBOX_REFRESH_INTERVAL_MS } from "./incremental";
@@ -534,7 +535,8 @@ function push(id: string, issueId: string | null, overrides: Partial<InboxItem> 
     created_at: "2026-11-24T10:00:00Z",
     ...overrides,
   });
-  return item as InboxItem;
+  // The push carries issue_status only when its writer knew it.
+  return ("issue_status" in overrides ? { ...item, issue_status: overrides.issue_status } : item) as InboxItem;
 }
 
 function inboxClient() {
@@ -583,7 +585,19 @@ describe("onInboxNew", () => {
     expect(once?.map((row) => row.id)).toEqual(["n2", "n1"]);
   });
 
-  it("brings an archived issue back: its archived rows go, the archive is marked stale but not re-read", async () => {
+  it("shows the issue's current status when a notification arrives after the issue moved on", async () => {
+    const qc = inboxClient();
+    qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), [listed("n1", "issue-a")]);
+    onInboxIssueStatusChanged(qc, wsId, "issue-a", "done");
+
+    // Written while the issue was still in progress, delivered after.
+    await onInboxNew(qc, wsId, push("n2", "issue-a", { issue_status: "in_progress" }));
+
+    const [row] = deduplicateInboxItems(qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))!);
+    expect(row).toMatchObject({ id: "n2", issue_status: "done" });
+  });
+
+  it("brings an archived issue back: its archived rows go, the archive and Snoozed are marked stale but not re-read", async () => {
     const qc = inboxClient();
     qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), [listed("n1", "issue-b")]);
     const pagesKey = [...inboxKeys.pages(wsId), {}];
@@ -630,11 +644,9 @@ describe("onInboxNew", () => {
       expect(archive.getCurrentResult().data?.pages[0]?.items.map((row) => row.id)).toEqual(["a2"]);
       expect(qc.getQueryData<ArchivedInboxPage>(lookupKey)?.items).toEqual([]);
       expect(pagesFn).not.toHaveBeenCalled();
-      for (const key of [pagesKey, lookupKey, facetsKey]) {
+      for (const key of [pagesKey, lookupKey, facetsKey, inboxKeys.snoozed(wsId)]) {
         expect(qc.getQueryState(key)?.isInvalidated).toBe(true);
       }
-      // A notification that joins a snooze arrives as inbox:snoozed.
-      expect(qc.getQueryState(inboxKeys.snoozed(wsId))?.isInvalidated).toBe(false);
     } finally {
       unsubscribe();
       qc.clear();
@@ -834,6 +846,38 @@ describe("onInboxNewSummaryInvalidate", () => {
       expect(queryFn).toHaveBeenCalledTimes(2);
       expect(peak).toBe(1);
       expect(observer.getCurrentResult().data).toEqual([{ workspace_id: wsId, count: 2 }]);
+    } finally {
+      unsubscribe();
+      qc.clear();
+    }
+  });
+
+  it.each([
+    ["before", 100],
+    ["after", 1500],
+  ])("is not held by a read that pauses its retry while the window is hidden (next push %s the pause)", async (_when, nextPushMs) => {
+    // The app's own client and inbox retry policy: a 500 is retried once,
+    // about a second later, and a hidden window holds that retry for focus.
+    // The desktop dock badge keeps the summary enabled meanwhile.
+    const qc = createQueryClient();
+    const queryFn = vi
+      .fn<() => Promise<{ workspace_id: string; count: number }[]>>()
+      .mockResolvedValueOnce([{ workspace_id: wsId, count: 8 }])
+      .mockRejectedValueOnce(Object.assign(new Error("500"), { status: 500 }))
+      .mockResolvedValue([{ workspace_id: wsId, count: 9 }]);
+    const observer = new QueryObserver(qc, { queryKey: inboxKeys.unreadSummary(), queryFn });
+    const unsubscribe = observer.subscribe(() => {});
+
+    try {
+      await vi.advanceTimersByTimeAsync(10);
+      focusManager.setFocused(false);
+      void onInboxNewSummaryInvalidate(qc);
+      await vi.advanceTimersByTimeAsync(nextPushMs);
+      void onInboxNewSummaryInvalidate(qc);
+      await vi.advanceTimersByTimeAsync(INBOX_REFRESH_INTERVAL_MS * 3);
+
+      expect(queryFn).toHaveBeenCalledTimes(3);
+      expect(observer.getCurrentResult().data).toEqual([{ workspace_id: wsId, count: 9 }]);
     } finally {
       unsubscribe();
       qc.clear();

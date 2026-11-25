@@ -33,9 +33,10 @@ export function inboxRowFromPush(
   return {
     ...item,
     issue_identifier: row.issue_identifier,
-    // The push carries the status at the time of the notification, when the
-    // writer knew it.
-    issue_status: item.issue_status ?? row.issue_status,
+    // Not the push's: that is the status when the notification was written,
+    // and it can arrive after an issue event already moved the issue on. The
+    // listed rows carry the current one, as issue events keep them patched.
+    issue_status: row.issue_status,
     issue_priority: row.issue_priority,
     issue_project_id: row.issue_project_id,
     issue_assignee_type: row.issue_assignee_type,
@@ -62,6 +63,22 @@ function isListableItem(item: InboxItem): boolean {
 // (the desktop dock badge reads the summary while the window is hidden).
 function readingOut(qc: QueryClient, queryKey: QueryKey): boolean {
   return qc.getQueryCache().findAll({ queryKey }).some((query) => query.state.fetchStatus === "fetching");
+}
+
+// Settles with `refresh`, or as soon as a read under `queryKey` pauses after
+// it starts: a retry held for focus or the network holds nothing on the
+// server, so it must not hold back the next refresh either, which cancels it
+// and reads again.
+function readOrPause(qc: QueryClient, queryKey: QueryKey, refresh: () => Promise<unknown>): Promise<unknown> {
+  const cache = qc.getQueryCache();
+  let unsubscribe = () => {};
+  const paused = new Promise<void>((resolve) => {
+    unsubscribe = cache.subscribe((event) => {
+      if (event.type !== "updated" || event.action.type !== "pause") return;
+      if (cache.findAll({ queryKey }).includes(event.query)) resolve();
+    });
+  });
+  return Promise.race([refresh(), paused]).finally(unsubscribe);
 }
 
 function readsSettled(qc: QueryClient, queryKey: QueryKey): Promise<void> {
@@ -137,7 +154,7 @@ function startRefresh(
   const read = () => {
     gate.reading = true;
     gate.startedAt = Date.now();
-    return refresh();
+    return readOrPause(qc, queryKey, refresh);
   };
   const run: Promise<void> = (readingOut(qc, queryKey) ? readsSettled(qc, queryKey).then(read) : read())
     .then(() => undefined, () => undefined)
