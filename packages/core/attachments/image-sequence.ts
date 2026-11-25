@@ -18,11 +18,13 @@
  * apps/mobile/CLAUDE.md: pure functions from @multica/core are importable).
  */
 
+import { decodeHTMLAttribute } from "entities/decode";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { normalizeUri } from "micromark-util-sanitize-uri";
 import type { Attachment } from "../types/attachment";
 import {
   attachmentIdFromDownloadURL,
+  attachmentIdFromLocalUploadURL,
   contentReferencesAttachment,
 } from "../types/attachment-url";
 
@@ -109,7 +111,7 @@ export function matchAttachmentByURL(
   attachments: ReadonlyArray<Attachment> | null | undefined,
 ): Attachment | undefined {
   if (!url || !attachments?.length) return undefined;
-  const idFromUrl = attachmentIdFromDownloadURL(url);
+  const idFromUrl = attachmentIdFromDownloadURL(url) ?? attachmentIdFromLocalUploadURL(url);
   if (idFromUrl) {
     const byId = attachments.find((a) => a.id === idFromUrl);
     if (byId) return byId;
@@ -198,10 +200,55 @@ const INLINE_REF_CACHE_LIMIT = 500;
 // Timeline updates can then resolve current metadata without reparsing old bodies.
 const inlineRefCache = new Map<string, ReadonlyArray<InlineRef>>();
 
-// Raw `<img src=...>` — reachable because the readonly renderer runs
-// rehypeRaw + rehypeSanitize, and the sanitize schema keeps img.
-const HTML_IMAGE_RE =
-  /<img\b[^>]*?\ssrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s">']+))[^>]*>/gi;
+// Raw `<img>` — reachable because the readonly renderer runs rehypeRaw +
+// rehypeSanitize, and the sanitize schema keeps img. The renderer receives
+// `src` and `alt` after parse5 has tokenized the tag and decoded its character
+// references, so the attributes are read the same way.
+const HTML_IMAGE_START_RE = /<img(?=[\t\n\f\r />])/gi;
+const HTML_SPACE_RE = /[\t\n\f\r ]/;
+
+/**
+ * Attributes of the start tag whose name ends at `from`, keyed by lowercase
+ * name with the first occurrence winning, or null when the tag never closes.
+ */
+function readTagAttributes(html: string, from: number): Map<string, string> | null {
+  const attributes = new Map<string, string>();
+  const skipSpace = (i: number) => {
+    while (i < html.length && HTML_SPACE_RE.test(html[i]!)) i++;
+    return i;
+  };
+  let i = from;
+  while (i < html.length) {
+    const c = html[i]!;
+    if (c === ">") return attributes;
+    if (c === "/" || HTML_SPACE_RE.test(c)) {
+      i++;
+      continue;
+    }
+    const nameStart = i;
+    i++;
+    while (i < html.length && !/[\t\n\f\r />=]/.test(html[i]!)) i++;
+    const name = html.slice(nameStart, i).toLowerCase();
+    i = skipSpace(i);
+    let value = "";
+    if (html[i] === "=") {
+      i = skipSpace(i + 1);
+      const quote = html[i];
+      if (quote === '"' || quote === "'") {
+        const end = html.indexOf(quote, i + 1);
+        if (end < 0) return null;
+        value = html.slice(i + 1, end);
+        i = end + 1;
+      } else {
+        const valueStart = i;
+        while (i < html.length && html[i] !== ">" && !HTML_SPACE_RE.test(html[i]!)) i++;
+        value = html.slice(valueStart, i);
+      }
+    }
+    if (!attributes.has(name)) attributes.set(name, decodeHTMLAttribute(value));
+  }
+  return null;
+}
 
 // `!file[name](url)` on its own line — `preprocessFileCards` turns it into a
 // fileCard div, which the renderer hands to <Attachment>: an image filename
@@ -269,10 +316,16 @@ function extractInlineRefs(rawContent: string): ReadonlyArray<InlineRef> {
         });
       }
     } else if (node.type === "html") {
-      for (const m of node.value.matchAll(HTML_IMAGE_RE)) {
-        const url = (m[1] ?? m[2] ?? m[3] ?? "").trim();
+      for (const m of node.value.matchAll(HTML_IMAGE_START_RE)) {
+        const attributes = readTagAttributes(node.value, m.index + m[0].length);
+        const url = attributes?.get("src");
         if (url) {
-          refs.push({ index: index + m.index, url, filename: "", isFileCard: false });
+          refs.push({
+            index: index + m.index,
+            url,
+            filename: attributes?.get("alt") ?? "",
+            isFileCard: false,
+          });
         }
       }
     } else if (node.type === "code" || node.type === "inlineCode") {
@@ -319,7 +372,7 @@ export interface ImageSequenceItem {
   /**
    * Identity used to open the sequence at the clicked attachment. The
    * attachment id when the reference resolves to a record, otherwise the URL
-   * passed to the image/card renderer after Markdown decoding/normalization.
+   * passed to the image/card renderer after Markdown or HTML decoding.
    */
   key: string;
   /** Best-known URL. Callers holding `attachment` should prefer re-resolving. */

@@ -1,5 +1,6 @@
 "use client";
 
+import { docDetailOptions, docTreeOptions } from "@multica/core/docs";
 import { useMemo } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { issueStatusListOptions, buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
@@ -23,8 +24,9 @@ import {
   squadListOptions,
 } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
-import { runtimeDisplayName } from "@multica/core/runtimes";
+import { runtimeDisplayLabel } from "@multica/core/runtimes";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
+import { appCatalogOptions } from "@multica/core/connected-apps";
 import {
   inboxListOptions,
   archivedInboxPagesOptions,
@@ -70,16 +72,24 @@ const PENDING_RESOURCE_KEYS: ReadonlySet<TabLabelKey> = new Set<TabLabelKey>([
   "member",
   "squad",
   "skill",
+  "doc",
+  "docFolder",
+  "app",
   "machine",
   "runtime",
 ]);
 
-function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): TabEntityData {
+interface ResolvedTabEntityData extends TabEntityData {
+  issue?: NonNullable<TabEntityData["issue"]> & { id: string };
+}
+
+function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): ResolvedTabEntityData {
   const { t: chatT } = useT("chat");
 
   // Read both inbox lists cache-only; the archived view keeps its own list, so
   // an archived selection has to resolve against the archived cache — the same
-  // list the InboxPage populates when `?view=archived` is active.
+  // list the InboxPage populates when `?view=archived` is active. A Snoozed
+  // selection is the snoozed issue itself.
   const inboxList = useQuery({ ...inboxListOptions(wsId), enabled: false }).data;
   const inboxFilters = useInboxFilters(wsId);
   const archivedPages = useInfiniteQuery({ ...archivedInboxPagesOptions(wsId, inboxFilters), enabled: false }).data;
@@ -92,7 +102,7 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Ta
     ...(archivedLookup?.items ?? []),
   ], [archivedPages, archivedLookup]);
   const activeInboxList =
-    subject.kind === "inbox" && subject.archived ? archivedInboxList : inboxList;
+    subject.kind === "inbox" && subject.view === "archived" ? archivedInboxList : inboxList;
   const inboxItem =
     subject.kind === "inbox" && subject.selectedKey
       ? (activeInboxList?.find(
@@ -120,7 +130,8 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Ta
   // The canonical query seeds/subscribes to the UUID entry even when the URL
   // uses an identifier, so background tabs receive realtime patches too.
   const { issue } = useCanonicalIssue(wsId, issueId, {
-    enabled: fetch && (subject.kind === "issue" || !!inboxItem?.issue_id),
+    enabled:
+      fetch && (subject.kind === "issue" || !!inboxItem?.issue_id || (subject.kind === "inbox" && subject.view === "snoozed")),
   });
 
   const project = useQuery({
@@ -134,6 +145,11 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Ta
     ),
     enabled: false,
   }).data;
+  const doc = useQuery({
+    ...docDetailOptions(wsId, subject.kind === "doc" ? subject.id : NONE),
+    enabled: false,
+  }).data;
+  const docTree = useQuery({ ...docTreeOptions(wsId), enabled: false }).data;
   const skill = useQuery({
     ...skillDetailOptions(wsId, subject.kind === "skill" ? subject.id : NONE),
     enabled: false,
@@ -144,12 +160,14 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Ta
   const squads = useQuery({ ...squadListOptions(wsId), enabled: false }).data;
   const runtimes = useQuery({ ...runtimeListOptions(wsId), enabled: false }).data;
   const sessions = useQuery({ ...chatSessionsOptions(wsId), enabled: false }).data;
+  const appCatalog = useQuery({ ...appCatalogOptions(wsId), enabled: false }).data;
 
-  const data: TabEntityData = {};
+  const data: ResolvedTabEntityData = {};
   switch (subject.kind) {
     case "issue":
       if (issue) {
         data.issue = {
+          id: issue.id,
           identifier: issue.identifier,
           title: issue.title,
           status: issue.status,
@@ -163,9 +181,20 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Ta
     case "autopilot":
       if (autopilot) data.autopilot = { title: autopilot.autopilot.title };
       break;
+    case "doc":
+      if (doc) data.doc = { title: doc.title };
+      break;
+    case "docFolder":
+      data.docFolder = docTree?.folders.find((f) => f.id === subject.id);
+      break;
     case "skill":
       if (skill) data.skill = { name: skill.name };
       break;
+    case "app": {
+      const name = appCatalog?.apps.find((a) => a.slug === subject.slug)?.name;
+      if (name) data.app = { name };
+      break;
+    }
     case "actor": {
       const name =
         subject.actorType === "agent"
@@ -178,12 +207,12 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Ta
     }
     case "machine": {
       const rt = runtimes?.find((r) => r.id === subject.machineId);
-      if (rt) data.machine = { name: runtimeDisplayName(rt) };
+      if (rt) data.machine = { name: runtimeDisplayLabel(rt) };
       break;
     }
     case "runtime": {
       const rt = runtimes?.find((r) => r.id === subject.runtimeId);
-      if (rt) data.runtime = { name: runtimeDisplayName(rt) };
+      if (rt) data.runtime = { name: runtimeDisplayLabel(rt) };
       break;
     }
     case "chat":
@@ -252,6 +281,8 @@ export interface TabPresentationResult {
   title: string;
   /** False while a resource title is only a type label or persisted fallback. */
   titleResolved: boolean;
+  /** Also available for background tabs whose issue pages have not mounted. */
+  issueIdentity?: { id: string; identifier: string };
 }
 
 /**
@@ -311,6 +342,9 @@ export function useTabPresentation(
     title,
     titleResolved: !selectionPending &&
       (titleSpec.kind !== "tab" || !PENDING_RESOURCE_KEYS.has(titleSpec.tabKey)),
+    issueIdentity: data.issue
+      ? { id: data.issue.id, identifier: data.issue.identifier }
+      : undefined,
   };
 }
 

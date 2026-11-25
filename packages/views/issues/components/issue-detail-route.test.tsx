@@ -5,11 +5,15 @@ import type { ReactNode } from "react";
 import { setApiInstance } from "@multica/core/api";
 import { ApiError } from "@multica/core/api/client";
 import type { ApiClient } from "@multica/core/api/client";
+import { inboxKeys } from "@multica/core/inbox/queries";
+import type { InboxItem } from "@multica/core/types";
+import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider } from "../../navigation";
 import type { NavigationAdapter } from "../../navigation";
-import { IssueDetail } from "./issue-detail";
+import { IssueDetail, IssueDetailSkeleton } from "./issue-detail";
 import {
   IssueDetailRoute,
+  parseAppRequestHighlightHash,
   parseCommentHighlightHash,
   useCanonicalIssueUrl,
 } from "./issue-detail-route";
@@ -103,6 +107,36 @@ describe("useCanonicalIssueUrl", () => {
     );
     expect(replace).toHaveBeenCalledWith("/acme/issues/TRS-134#comment-comment-7");
   });
+
+  it("keeps a deliverable link's tail while canonicalizing a UUID", () => {
+    renderHook(
+      () => useCanonicalIssueUrl(
+        "cb240efb-154c-42a8-ae92-42b02676feca",
+        "TRS-134",
+        "",
+        "调研 报告.html",
+      ),
+      { wrapper },
+    );
+    expect(replace).toHaveBeenCalledWith(
+      "/acme/issues/TRS-134/deliverables/%E8%B0%83%E7%A0%94%20%E6%8A%A5%E5%91%8A.html",
+    );
+  });
+
+  it("leaves a canonical deliverable link alone", () => {
+    renderHook(() => useCanonicalIssueUrl("TRS-134", "TRS-134", "", "report.html"), { wrapper });
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  // The deliverable argument is optional: every existing caller passes the
+  // hash alone, and its comment deep link must come out exactly as before.
+  it("still keeps only the comment hash when no deliverable is named", () => {
+    renderHook(
+      () => useCanonicalIssueUrl("trs-134", "TRS-134", "#comment-c1", undefined),
+      { wrapper },
+    );
+    expect(replace).toHaveBeenCalledWith("/acme/issues/TRS-134#comment-c1");
+  });
 });
 
 describe("parseCommentHighlightHash", () => {
@@ -114,6 +148,16 @@ describe("parseCommentHighlightHash", () => {
     ["#comment-unsafe/value", undefined],
   ])("maps %s to %s", (hash, expected) => {
     expect(parseCommentHighlightHash(hash)).toBe(expected);
+  });
+});
+
+describe("parseAppRequestHighlightHash", () => {
+  it.each([
+    ["#app-request-01a02814-f098-7309-8286-0b249c66884d", "01a02814-f098-7309-8286-0b249c66884d"],
+    ["#comment-c1", undefined],
+    ["#app-request-", undefined],
+  ])("maps %s to %s", (hash, expected) => {
+    expect(parseAppRequestHighlightHash(hash)).toBe(expected);
   });
 });
 
@@ -178,6 +222,93 @@ describe("IssueDetailRoute with an identifier that names no issue", () => {
 
     // A failed resolve must never rewrite the URL.
     expect(replace).not.toHaveBeenCalled();
+    qc.clear();
+  });
+});
+
+describe("IssueDetailRoute loading sidebar layout", () => {
+  it.each([
+    [undefined, true],
+    [{ content: 80, sidebar: 20 }, true],
+    [{ content: 100, sidebar: 0 }, false],
+  ])("respects saved layout %j while resolving", (layout, sidebarVisible) => {
+    const storageKey = "react-resizable-panels:multica_issue_detail_layout";
+    if (layout) localStorage.setItem(storageKey, JSON.stringify(layout));
+    else localStorage.removeItem(storageKey);
+    const getIssue = vi.fn(() => new Promise<never>(() => {}));
+    setApiInstance({ getIssue } as unknown as ApiClient);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const view = render(
+      <QueryClientProvider client={qc}>
+        {wrapper({ children: <IssueDetailRoute routeId="TES-1" /> })}
+      </QueryClientProvider>,
+    );
+    expect(!!view.container.querySelector(".w-80.border-l")).toBe(sidebarVisible);
+    expect(getIssue).toHaveBeenCalledTimes(1);
+    view.unmount();
+    qc.clear();
+    localStorage.removeItem(storageKey);
+  });
+});
+
+describe("IssueDetailSkeleton embedded layouts", () => {
+  it("reads the host layout without borrowing the page layout", () => {
+    const pageKey = "react-resizable-panels:multica_issue_detail_layout";
+    const hostKey = "react-resizable-panels:embedded-detail";
+    localStorage.setItem(pageKey, JSON.stringify({ content: 80, sidebar: 20 }));
+    localStorage.setItem(hostKey, JSON.stringify({ content: 100, sidebar: 0 }));
+    const view = render(wrapper({ children: <IssueDetailSkeleton layoutId="embedded-detail" /> }));
+    expect(view.container.querySelector(".w-80.border-l")).toBeNull();
+    view.unmount();
+    localStorage.removeItem(pageKey);
+    localStorage.removeItem(hostKey);
+  });
+
+  it("keeps sidebar-free surfaces clear even when the saved layout is open", () => {
+    const storageKey = "react-resizable-panels:multica_issue_detail_layout";
+    localStorage.setItem(storageKey, JSON.stringify({ content: 80, sidebar: 20 }));
+    const view = render(wrapper({ children: <IssueDetailSkeleton sidebar={false} /> }));
+    expect(view.container.querySelector(".w-80.border-l")).toBeNull();
+    view.unmount();
+    localStorage.removeItem(storageKey);
+  });
+
+  it("reserves no Inbox bar on the issue page, even for an issue in the Inbox", () => {
+    const getIssue = vi.fn(() => new Promise<never>(() => {}));
+    setApiInstance({ getIssue, getBaseUrl: () => "" } as unknown as ApiClient);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    qc.setQueryData<InboxItem[]>(inboxKeys.list("ws-1"), [
+      {
+        id: "n-42",
+        workspace_id: "ws-1",
+        recipient_type: "member",
+        recipient_id: "member-1",
+        actor_type: "agent",
+        actor_id: "agent-1",
+        type: "new_comment",
+        severity: "info",
+        issue_id: "issue-42",
+        issue_identifier: "MUL-42",
+        title: "Keep Inbox chrome steady",
+        body: null,
+        issue_status: "in_review",
+        issue_priority: "none",
+        read: false,
+        archived: false,
+        created_at: "2026-11-23T00:00:00Z",
+        details: null,
+      },
+    ]);
+
+    const view = renderWithI18n(
+      <QueryClientProvider client={qc}>
+        {wrapper({ children: <IssueDetailRoute routeId="MUL-42" /> })}
+      </QueryClientProvider>,
+    );
+
+    expect(view.container.querySelector("[data-inbox-bar]")).toBeNull();
+
+    view.unmount();
     qc.clear();
   });
 });

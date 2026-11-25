@@ -55,12 +55,35 @@ function TooltipProvider({
   )
 }
 
-function Tooltip({ ...props }: TooltipPrimitive.Root.Props) {
-  return <TooltipPrimitive.Root data-slot="tooltip" {...props} />
+// Tooltips in Multica carry non-interactive labels, shortcuts, and timestamps
+// (hover-interactive previews use HoverCard). Disabling the hoverable popup by
+// default puts `pointer-events: none` on the positioner and skips Base UI's
+// safe-polygon bridge, so moving upward across a dense column of triggers
+// (Activity timestamps, sidebar rows, inbox actions) switches to the row above
+// instead of getting caught on the previous tooltip's popup. Callers can still
+// pass `disableHoverablePopup={false}` when a tooltip needs to stay open while
+// hovered.
+function Tooltip({
+  disableHoverablePopup = true,
+  ...props
+}: TooltipPrimitive.Root.Props) {
+  return (
+    <TooltipPrimitive.Root
+      data-slot="tooltip"
+      disableHoverablePopup={disableHoverablePopup}
+      {...props}
+    />
+  )
 }
 
 function TooltipTrigger({ ...props }: TooltipPrimitive.Trigger.Props) {
-  return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />
+  return (
+    <TooltipPrimitive.Trigger
+      data-slot="tooltip-trigger"
+      data-trigger="tooltip"
+      {...props}
+    />
+  )
 }
 
 function TooltipContent({
@@ -80,7 +103,16 @@ function TooltipContent({
   // The popup is a `.dark` scope, so the text, status colors, and keycaps
   // inside it take dark-theme values against the dark tooltip surface in both
   // page themes. Its own fill and shadow are resolved on the positioner, which
-  // is still in the page theme.
+  // is still in the page theme. A theme's --tooltip-foreground is never
+  // declared by `.dark`, so it reaches the text from either mode.
+  //
+  // An instant tooltip zeroes its animation's duration instead of removing the
+  // animation. The delay group marks a tooltip instant while its exit may still
+  // be playing, and Base UI 1.3 unmounts a closing popup only once its
+  // animations finish: a removed animation never finishes, so the popup would
+  // stay on screen after the pointer has left. `duration-100` would also give
+  // every property a transition (scrollbar-color among them) that the unmount
+  // waits on, so transitions are off.
   return (
     <TooltipPrimitive.Portal>
       <TooltipPrimitive.Positioner
@@ -94,7 +126,7 @@ function TooltipContent({
         <TooltipPrimitive.Popup
           data-slot="tooltip-content"
           className={cn(
-            "dark z-50 inline-flex w-fit max-w-xs origin-(--transform-origin) items-center gap-1.5 rounded-lg bg-(--tooltip-fill) px-2.5 py-1 text-caption text-foreground shadow-(--tooltip-elevation) has-data-[slot=kbd]:pr-1.5 data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 **:data-[slot=kbd]:relative **:data-[slot=kbd]:isolate **:data-[slot=kbd]:z-50 **:data-[slot=kbd]:rounded-sm data-[state=delayed-open]:animate-in data-[state=delayed-open]:fade-in-0 data-[state=delayed-open]:zoom-in-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+            "dark z-50 inline-flex w-fit max-w-xs origin-(--transform-origin) items-center gap-1.5 rounded-tooltip bg-(--tooltip-fill) px-2.5 py-1 text-caption text-tooltip-foreground shadow-(--tooltip-elevation) transition-none duration-100 ease-[cubic-bezier(0.23,1,0.32,1)] has-data-[slot=kbd]:pr-1.5 data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 **:data-[slot=kbd]:relative **:data-[slot=kbd]:isolate **:data-[slot=kbd]:z-50 **:data-[slot=kbd]:rounded-sm data-[state=delayed-open]:animate-in data-[state=delayed-open]:fade-in-0 data-[state=delayed-open]:zoom-in-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-[instant]:animation-duration-0! motion-reduce:animate-none!",
             className
           )}
           {...props}

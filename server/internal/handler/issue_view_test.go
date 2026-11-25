@@ -206,6 +206,115 @@ func TestUpdateIssueViewRevisionConflict(t *testing.T) {
 	}
 }
 
+// A shared view is writable by its owner and workspace admins only; a plain
+// member who can open it is refused, and someone else's private view stays
+// a 404 even for an admin.
+func TestIssueViewWritesRequireOwnerOrAdmin(t *testing.T) {
+	shared, code, body := createIssueViewForTest(t, map[string]any{
+		"name":       "Shared, owner-managed",
+		"scope_type": "workspace",
+		"visibility": "workspace",
+		"query":      map[string]any{},
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create shared: %d %s", code, body)
+	}
+	private, code, body := createIssueViewForTest(t, map[string]any{
+		"name":       "Owner only",
+		"scope_type": "workspace",
+		"query":      map[string]any{},
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create private: %d %s", code, body)
+	}
+
+	patch := func(userID string, view IssueViewResponse) int {
+		w := httptest.NewRecorder()
+		req := newRequest("PATCH", "/api/issue-views/"+view.ID, map[string]any{
+			"name":              "Taken over",
+			"expected_revision": view.Revision,
+		})
+		req.Header.Set("X-User-ID", userID)
+		testHandler.UpdateIssueView(w, withURLParam(req, "id", view.ID))
+		return w.Code
+	}
+	remove := func(userID string, view IssueViewResponse) int {
+		w := httptest.NewRecorder()
+		req := newRequest("DELETE", "/api/issue-views/"+view.ID, nil)
+		req.Header.Set("X-User-ID", userID)
+		testHandler.DeleteIssueView(w, withURLParam(req, "id", view.ID))
+		return w.Code
+	}
+
+	member := createSecondWorkspaceMember(t)
+	if got := patch(member, shared); got != http.StatusForbidden {
+		t.Fatalf("member update of a shared view: expected 403, got %d", got)
+	}
+	if got := remove(member, shared); got != http.StatusForbidden {
+		t.Fatalf("member delete of a shared view: expected 403, got %d", got)
+	}
+
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE member SET role = 'admin' WHERE workspace_id = $1 AND user_id = $2`,
+		testWorkspaceID, member); err != nil {
+		t.Fatalf("promote member: %v", err)
+	}
+	if got := patch(member, private); got != http.StatusNotFound {
+		t.Fatalf("admin update of another's private view: expected 404, got %d", got)
+	}
+	if got := remove(member, private); got != http.StatusNotFound {
+		t.Fatalf("admin delete of another's private view: expected 404, got %d", got)
+	}
+	if got := patch(member, shared); got != http.StatusOK {
+		t.Fatalf("admin update of a shared view: expected 200, got %d", got)
+	}
+	if got := remove(member, shared); got != http.StatusNoContent {
+		t.Fatalf("admin delete of a shared view: expected 204, got %d", got)
+	}
+}
+
+// A definition in a format newer than any client reads is refused on create,
+// and an update naming a format other than the stored one cannot overwrite it.
+func TestIssueViewDefinitionVersionGuards(t *testing.T) {
+	_, code, body := createIssueViewForTest(t, map[string]any{
+		"name":               "From the future",
+		"scope_type":         "workspace",
+		"definition_version": issueViewDefinitionVersionMax + 1,
+		"query":              map[string]any{},
+	})
+	if code != http.StatusBadRequest {
+		t.Fatalf("create with an unknown definition_version: expected 400, got %d: %s", code, body)
+	}
+
+	view, code, body := createIssueViewForTest(t, map[string]any{
+		"name":       "Versioned",
+		"scope_type": "workspace",
+		"query":      map[string]any{},
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create: %d %s", code, body)
+	}
+	patch := func(fields map[string]any) (int, string) {
+		fields["expected_revision"] = view.Revision
+		w := httptest.NewRecorder()
+		req := newRequest("PATCH", "/api/issue-views/"+view.ID, fields)
+		testHandler.UpdateIssueView(w, withURLParam(req, "id", view.ID))
+		return w.Code, w.Body.String()
+	}
+	if got, body := patch(map[string]any{
+		"query":              map[string]any{"statusFilters": []string{"todo"}},
+		"definition_version": view.DefinitionVersion + 1,
+	}); got != http.StatusBadRequest || !strings.Contains(body, "definition_version") {
+		t.Fatalf("mismatched definition_version: expected 400, got %d: %s", got, body)
+	}
+	if got, body := patch(map[string]any{
+		"query":              map[string]any{"statusFilters": []string{"todo"}},
+		"definition_version": view.DefinitionVersion,
+	}); got != http.StatusOK {
+		t.Fatalf("matching definition_version: expected 200, got %d: %s", got, body)
+	}
+}
+
 // createSecondWorkspaceMember inserts another user + membership in the test
 // workspace and returns the user id.
 func createSecondWorkspaceMember(t *testing.T) string {

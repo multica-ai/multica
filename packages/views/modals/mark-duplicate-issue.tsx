@@ -36,10 +36,14 @@ const notDuplicate = (candidate: Issue) => !isDuplicateIssue(candidate);
  * left out of candidates and search results alike.
  */
 export function MarkDuplicateIssueModal({
+  open = true,
   onClose,
+  onOpenChangeComplete,
   data,
 }: {
+  open?: boolean;
   onClose: () => void;
+  onOpenChangeComplete?: (open: boolean) => void;
   data: Record<string, unknown> | null;
 }) {
   const { t } = useT("modals");
@@ -93,51 +97,50 @@ export function MarkDuplicateIssueModal({
 
   return (
     <IssuePickerModal
-      open
+      open={open}
       onOpenChange={(v) => {
         if (!v) onClose();
       }}
+      onOpenChangeComplete={onOpenChangeComplete}
       title={t(($) => $.mark_duplicate.title)}
       description={t(($) => $.mark_duplicate.description)}
       excludeIds={excludeIds}
       suggestions={suggestions}
       isSelectable={notDuplicate}
-      onSelect={(selected) => {
-        updateIssue.mutate(
-          {
+      onSelect={async (selected) => {
+        // The picker closes immediately. Await the mutation so feedback survives
+        // unmounting, unlike per-call mutation observer callbacks.
+        try {
+          await updateIssue.mutateAsync({
             id: issueId,
             status: "cancelled",
             duplicate_of_issue_id: selected.id,
-          },
-          {
-            onSuccess: () =>
-              toast.success(
-                t(($) => $.mark_duplicate.toast_success, {
+          });
+          toast.success(
+            t(($) => $.mark_duplicate.toast_success, {
+              identifier: selected.identifier,
+            }),
+          );
+        } catch (err) {
+          switch (errorCode(err)) {
+            case "duplicate_target_is_duplicate":
+              toast.error(
+                t(($) => $.mark_duplicate.error_target_is_duplicate, {
                   identifier: selected.identifier,
                 }),
-              ),
-            onError: (err) => {
-              switch (errorCode(err)) {
-                case "duplicate_target_is_duplicate":
-                  toast.error(
-                    t(($) => $.mark_duplicate.error_target_is_duplicate, {
-                      identifier: selected.identifier,
-                    }),
-                  );
-                  return;
-                case "issue_has_duplicates":
-                  toast.error(t(($) => $.mark_duplicate.error_has_duplicates));
-                  return;
-                default:
-                  toast.error(
-                    err instanceof Error && err.message
-                      ? err.message
-                      : t(($) => $.mark_duplicate.toast_failed),
-                  );
-              }
-            },
-          },
-        );
+              );
+              return;
+            case "issue_has_duplicates":
+              toast.error(t(($) => $.mark_duplicate.error_has_duplicates));
+              return;
+            default:
+              toast.error(
+                err instanceof Error && err.message
+                  ? err.message
+                  : t(($) => $.mark_duplicate.toast_failed),
+              );
+          }
+        }
       }}
     />
   );

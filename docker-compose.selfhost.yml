@@ -1,4 +1,6 @@
-# Self-hosting Docker Compose — starts PostgreSQL, backend, and frontend.
+# Self-hosting Docker Compose — starts PostgreSQL, backend, and frontend, plus
+# the optional collab service for live doc co-editing (COLLAB_SECRET and
+# COMPOSE_PROFILES=collab in .env; see .env.example).
 #
 # Services bind to 127.0.0.1 only. For cross-machine or public access, front
 # them with a reverse proxy (Caddy / nginx / Cloudflare Tunnel) that terminates
@@ -63,15 +65,19 @@ services:
       - backend_uploads:/app/data/uploads
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-multica}:${POSTGRES_PASSWORD:-multica}@postgres:5432/${POSTGRES_DB:-multica}?sslmode=disable
+      DATABASE_MAX_CONNS: ${DATABASE_MAX_CONNS:-}
+      DATABASE_MIN_CONNS: ${DATABASE_MIN_CONNS:-}
       DATABASE_SEARCH_WORK_MEM_MB: ${DATABASE_SEARCH_WORK_MEM_MB:-64}
       DATABASE_REPLICA_URL: ${DATABASE_REPLICA_URL:-}
       DATABASE_REPLICA_MAX_CONNS: ${DATABASE_REPLICA_MAX_CONNS:-}
       DATABASE_REPLICA_MIN_CONNS: ${DATABASE_REPLICA_MIN_CONNS:-}
       REDIS_URL: ${REDIS_URL:-}
       REDIS_CLUSTER_MODE: ${REDIS_CLUSTER_MODE:-false}
+      REDIS_DISABLE_CLIENT_NAME: ${REDIS_DISABLE_CLIENT_NAME:-}
       PORT: "8080"
       MAINTENANCE_PORT: ${MAINTENANCE_PORT:-}
       METRICS_ADDR: ${METRICS_ADDR:-}
+      REALTIME_METRICS_TOKEN: ${REALTIME_METRICS_TOKEN:-}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set to a strong random value — generate one with 'openssl rand -hex 32'}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3000}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
@@ -100,7 +106,11 @@ services:
       CLOUDFRONT_DOMAIN: ${CLOUDFRONT_DOMAIN:-}
       CLOUDFRONT_KEY_PAIR_ID: ${CLOUDFRONT_KEY_PAIR_ID:-}
       CLOUDFRONT_PRIVATE_KEY: ${CLOUDFRONT_PRIVATE_KEY:-}
+      # Without S3, uploads always land in the backend_uploads volume mounted
+      # at /app/data/uploads, so LOCAL_UPLOAD_DIR is deliberately not passed.
+      LOCAL_UPLOAD_BASE_URL: ${LOCAL_UPLOAD_BASE_URL:-}
       COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
+      AUTH_TOKEN_TTL: ${AUTH_TOKEN_TTL:-}
       APP_ENV: ${APP_ENV:-production}
       MULTICA_DEV_VERIFICATION_CODE: ${MULTICA_DEV_VERIFICATION_CODE:-}
       MULTICA_APP_URL: ${MULTICA_APP_URL:-http://localhost:3000}
@@ -119,6 +129,10 @@ services:
       MULTICA_CLOUD_URL: ${MULTICA_CLOUD_URL:-}
       GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      # Required for new connections: verify the installing user's access.
+      GITHUB_APP_CLIENT_ID: ${GITHUB_APP_CLIENT_ID:-}
+      GITHUB_APP_CLIENT_SECRET: ${GITHUB_APP_CLIENT_SECRET:-}
+      # Required for new connections to prove organization repository control.
       # App API credentials. The pull_request webhook is what mirrors a PR
       # onto a card; these are what let the server authenticate as the App
       # and pull the CI / mergeability snapshot that enriches it, plus
@@ -153,6 +167,10 @@ services:
       # Empty default = headers ignored, RemoteAddr used. Set e.g.
       # "127.0.0.1/32" when running behind a same-host reverse proxy.
       MULTICA_TRUSTED_PROXIES: ${MULTICA_TRUSTED_PROXIES:-}
+      # The same for the auth endpoints' per-IP limiter, which is active once
+      # REDIS_URL is set. Behind a reverse proxy, leaving it empty puts every
+      # user in the proxy's single bucket.
+      RATE_LIMIT_TRUSTED_PROXIES: ${RATE_LIMIT_TRUSTED_PROXIES:-}
       # Server-side LLM layer, backing internal helpers such as chat title
       # generation. Both the API key and the base URL empty = layer disabled,
       # and callers fall back silently rather than failing. MULTICA_LLM_MAX_RETRIES
@@ -177,6 +195,7 @@ services:
       MULTICA_LARK_SECRET_KEY: ${MULTICA_LARK_SECRET_KEY:-}
       MULTICA_LARK_HTTP_BASE_URL: ${MULTICA_LARK_HTTP_BASE_URL:-}
       MULTICA_LARK_CALLBACK_BASE_URL: ${MULTICA_LARK_CALLBACK_BASE_URL:-}
+      MULTICA_LARK_WS_PROXY_URL: ${MULTICA_LARK_WS_PROXY_URL:-}
       # Slack bot integration. MULTICA_SLACK_SECRET_KEY is the opt-in: unset =
       # integration disabled. It decrypts the per-installation bot/app tokens,
       # which are brought by each workspace via OAuth/BYO and stored encrypted
@@ -195,6 +214,9 @@ services:
       MULTICA_VCS_INTEGRATION_ENABLED: ${MULTICA_VCS_INTEGRATION_ENABLED:-true}
       # VCS integration at-rest encryption key for token-based providers
       MULTICA_VCS_SECRET_KEY: ${MULTICA_VCS_SECRET_KEY:-}
+      # Community theme store (Settings → Appearance → Manage). Always on; the
+      # registry URL points it at another registry's index.json.
+      MULTICA_THEME_REGISTRY_URL: ${MULTICA_THEME_REGISTRY_URL:-}
       # WeCom smart-bot integration. MULTICA_WECOM_SECRET_KEY is the
       # opt-in: unset = integration disabled. It encrypts each installation's
       # smart-bot secret at rest. The server needs it to unseal a bot's
@@ -229,6 +251,45 @@ services:
       # (bot_token_encrypted), so this single deployment-wide key is all
       # the operator needs to set here.
       MULTICA_TELEGRAM_SECRET_KEY: ${MULTICA_TELEGRAM_SECRET_KEY:-}
+      MULTICA_WEIXIN_SECRET_KEY: ${MULTICA_WEIXIN_SECRET_KEY:-}
+      # Tool steps shown in the streamed reply: auto (default; details in
+      # private chats, kind of work in groups), off, summary or detail.
+      MULTICA_TELEGRAM_TOOL_PROGRESS: ${MULTICA_TELEGRAM_TOOL_PROGRESS:-}
+      # Feature flags, documented in .env.example. Each is passed only when
+      # set: an empty FF_ value would pin the flag off instead of leaving the
+      # default. Workspace Docs is off until FF_DOCS_V1=true and live issue
+      # descriptions until FF_ISSUE_DESCRIPTION_LIVE=true; the other two are
+      # kill switches for features that are on by default.
+      FF_DOCS_V1:
+      FF_ISSUE_DESCRIPTION_LIVE:
+      FF_LOCAL_SEARCH_INDEX:
+      FF_DASHBOARD_HISTORY_365D:
+      # Live co-editing for Workspace Docs, served by the optional collab
+      # service below. Setting COLLAB_SECRET turns it on and points the API at
+      # that service; enable the service with COMPOSE_PROFILES=collab.
+      COLLAB_SECRET: ${COLLAB_SECRET:-}
+      COLLAB_INTERNAL_URL: ${COLLAB_INTERNAL_URL:-${COLLAB_SECRET:+http://collab:8095}}
+    restart: unless-stopped
+
+  # Optional: started only with COMPOSE_PROFILES=collab (or --profile collab),
+  # together with COLLAB_SECRET above. Editors reach it through the backend's
+  # /collab WebSocket, so it publishes no port. Every open doc lives in this
+  # process's memory: run exactly one.
+  collab:
+    image: ${MULTICA_COLLAB_IMAGE:-ghcr.io/multica-ai/multica-collab}:${MULTICA_IMAGE_TAG:-latest}
+    profiles: ["collab"]
+    depends_on:
+      - backend
+    environment:
+      COLLAB_SECRET: ${COLLAB_SECRET:-}
+      MULTICA_API_URL: http://backend:8080
+      COLLAB_PORT: "8095"
+      # Must match the CDN domain the backend reports: CLOUDFRONT_DOMAIN with
+      # S3 storage; with local uploads, the host of LOCAL_UPLOAD_BASE_URL, or
+      # empty when that is unset. Only the S3 case is filled in here.
+      MULTICA_CDN_DOMAIN: ${MULTICA_CDN_DOMAIN:-${CLOUDFRONT_DOMAIN:-}}
+    # SIGTERM gives it up to 15s to store every open doc.
+    stop_grace_period: 30s
     restart: unless-stopped
 
   frontend:

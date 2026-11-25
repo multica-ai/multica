@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { IssueView } from "@multica/core/api/schemas";
 import { renderWithI18n } from "../test/i18n";
@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   unstar: vi.fn(),
   open: vi.fn(),
   create: vi.fn(),
+  canManage: vi.fn(() => true),
+  setVisibility: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-query", () => ({
@@ -52,7 +54,8 @@ vi.mock("./use-view-actions", () => ({
       star: mocks.star,
       unstar: mocks.unstar,
     },
-    canManage: () => true,
+    canManage: mocks.canManage,
+    setVisibility: mocks.setVisibility,
     open: mocks.open,
     create: mocks.create,
     duplicate: vi.fn(),
@@ -110,6 +113,8 @@ beforeEach(() => {
   mocks.unstar.mockReset();
   mocks.open.mockReset();
   mocks.create.mockReset();
+  mocks.canManage.mockReturnValue(true);
+  mocks.setVisibility.mockReset();
   useActiveIssueViewStore.setState({ active: {} });
 });
 
@@ -156,6 +161,36 @@ describe("AllViewsPage", () => {
     );
   });
 
+  it("shares a project view from its row menu without opening it", async () => {
+    const projectView = view("project-view", "Project review", {
+      scope_type: "project",
+      scope_id: "project-1",
+    });
+    mocks.views = [projectView];
+    const user = userEvent.setup();
+    const { push } = renderPage();
+
+    await user.click(screen.getByRole("button", { name: "Actions for Project review" }));
+    await user.click(await screen.findByRole("menuitem", { name: /^Visible to\s*Only me/ }));
+    expect(await screen.findByRole("menuitemradio", { name: "Only me" })).toHaveAttribute("aria-checked", "true");
+    // The open submenu marks its parent menu `pointer-events: none` in jsdom.
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Workspace members" }));
+
+    expect(mocks.setVisibility).toHaveBeenCalledWith(projectView, "workspace");
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it.each(["my", "unmanaged"])("hides sharing for %s views", async (kind) => {
+    mocks.views = [view("v1", "Needs review", { scope_type: kind === "my" ? "my" : "workspace" })];
+    mocks.canManage.mockReturnValue(kind !== "unmanaged");
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "Actions for Needs review" }));
+    expect(await screen.findByRole("menuitem", { name: "Duplicate" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /^Visible to/ })).not.toBeInTheDocument();
+  });
+
   it("stars and unstars without opening the view", async () => {
     const user = userEvent.setup();
     const { push } = renderPage();
@@ -172,17 +207,21 @@ describe("AllViewsPage", () => {
     expect(useActiveIssueViewStore.getState().active[WORKSPACE_KEY]).toBe("v2");
   });
 
-  it("lists Unread as a built-in that is starred on demand and opens its view", async () => {
+  it.each([
+    ["My work", "my_work"],
+    ["Working", "working"],
+    ["Subscribed", "subscribed"],
+  ])("lists %s as a built-in that is starred on demand and opens its view", async (name, id) => {
     const user = userEvent.setup();
     const { push } = renderPage();
 
-    await user.click(screen.getByRole("button", { name: "Add Unread to sidebar" }));
-    expect(mocks.star).toHaveBeenCalledWith("builtin:unread");
+    await user.click(screen.getByRole("button", { name: `Add ${name} to sidebar` }));
+    expect(mocks.star).toHaveBeenCalledWith(`builtin:${id}`);
     expect(push).not.toHaveBeenCalled();
 
-    await user.click(screen.getByText("Unread"));
-    expect(push).toHaveBeenCalledWith("/acme/issues?view=unread");
-    expect(useActiveIssueViewStore.getState().active[WORKSPACE_KEY]).toBe("unread");
+    await user.click(screen.getByText(name));
+    expect(push).toHaveBeenCalledWith(`/acme/issues?view=${id}`);
+    expect(useActiveIssueViewStore.getState().active[WORKSPACE_KEY]).toBe(id);
   });
 
   it("opens a view in place for a shift-click, which rows never hand to the browser", async () => {
@@ -214,23 +253,17 @@ describe("AllViewsPage", () => {
     expect(useActiveIssueViewStore.getState().active[WORKSPACE_KEY]).toBe("v-open");
   });
 
-  it("gives My Issues and My agents' work their own URLs", async () => {
+  it("opens a built-in view's own URL in a new tab", async () => {
     const user = userEvent.setup();
     const openInNewTab = vi.fn();
-    const { push } = renderPage({ openInNewTab });
-    const row = (name: string) =>
-      screen
-        .getByRole("button", { name: new RegExp(`^(Add ${name} to|Remove ${name} from) sidebar$`) })
-        .closest('[role="row"]')!;
+    renderPage({ openInNewTab });
+    const row = screen
+      .getByRole("button", { name: /^(Add My work to|Remove My work from) sidebar$/ })
+      .closest('[role="row"]')!;
 
     await user.keyboard("{Meta>}");
-    await user.click(row("My Issues"));
-    await user.click(row("My agents' work"));
+    await user.click(row);
     await user.keyboard("{/Meta}");
-    expect(openInNewTab).toHaveBeenCalledWith("/acme/my-issues", "My Issues");
-    expect(openInNewTab).toHaveBeenCalledWith("/acme/my-issues?scope=agents", "My agents' work");
-
-    await user.click(row("My agents' work"));
-    expect(push).toHaveBeenCalledWith("/acme/my-issues?scope=agents");
+    expect(openInNewTab).toHaveBeenCalledWith("/acme/issues?view=my_work", "My work");
   });
 });

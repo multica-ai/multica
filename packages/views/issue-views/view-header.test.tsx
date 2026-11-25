@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { IssueView } from "@multica/core/api/schemas";
 import { myIssuesViewStore } from "@multica/core/issues/stores/my-issues-view-store";
@@ -7,6 +7,7 @@ import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-contex
 import { getIssueSurfaceViewStore } from "@multica/core/issues/stores/surface-view-store";
 import { issueViewSeedDefinition } from "@multica/core/issue-views/definition";
 import { useIssueViewRenameStore } from "@multica/core/issue-views/rename-store";
+import { useIssueViewEditStore } from "@multica/core/issue-views/edit-store";
 import { NavigationProvider, type NavigationAdapter } from "../navigation";
 import { renderWithI18n } from "../test/i18n";
 import type { IssueSurfaceController } from "../issues/surface/use-issue-surface-controller";
@@ -14,9 +15,12 @@ import { IssueViewHeader } from "./view-header";
 
 const copyLink = vi.hoisted(() => vi.fn());
 const rename = vi.hoisted(() => vi.fn());
+const setVisibility = vi.hoisted(() => vi.fn());
 const active = vi.hoisted(() => ({ view: null as IssueView | null }));
+const viewer = vi.hoisted(() => ({ guest: false }));
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
+vi.mock("@multica/core/permissions", () => ({ useIsGuest: () => viewer.guest }));
 vi.mock("@multica/core/paths", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/paths")>();
   return { ...actual, useWorkspacePaths: () => actual.paths.workspace("acme") };
@@ -30,6 +34,7 @@ vi.mock("./use-view-actions", () => ({
     canManage: () => true,
     copyLink,
     rename,
+    setVisibility,
     save: vi.fn(),
     remove: vi.fn(),
     create: vi.fn(),
@@ -99,8 +104,11 @@ function renderHeader(kind: "workspace" | "my", store: string, adapter = adapter
 beforeEach(() => {
   copyLink.mockClear();
   rename.mockClear();
+  setVisibility.mockClear();
   active.view = null;
+  viewer.guest = false;
   useIssueViewRenameStore.setState({ target: null });
+  useIssueViewEditStore.setState({ viewId: null });
   myIssuesViewStore.setState({ scope: "assigned" });
 });
 
@@ -115,7 +123,7 @@ describe("IssueViewHeader copy link", () => {
     },
     {
       kind: "my",
-      title: "My Issues",
+      title: "My issues",
       pathname: "/acme/my-issues",
       search: "",
       expected: "/acme/my-issues",
@@ -134,6 +142,35 @@ describe("IssueViewHeader copy link", () => {
     await user.click(screen.getByRole("button", { name: title }));
     await user.click(await screen.findByRole("menuitem", { name: "Copy link" }));
     expect(copyLink).toHaveBeenCalledWith(expected);
+  });
+});
+
+describe("IssueViewHeader new issue button", () => {
+  it("offers a member the new-issue button", () => {
+    renderHeader("my", "header-new-issue-member", adapterFor("/acme/my-issues"));
+    expect(screen.getByRole("button", { name: "New issue" })).toBeInTheDocument();
+  });
+
+  it("hides the new-issue button from a guest (MUL-9420)", () => {
+    viewer.guest = true;
+    renderHeader("my", "header-new-issue-guest", adapterFor("/acme/my-issues"));
+    expect(screen.queryByRole("button", { name: "New issue" })).toBeNull();
+  });
+});
+
+describe("IssueViewHeader visibility", () => {
+  it("keeps the visibility controls in the view's title menu", async () => {
+    active.view = savedView();
+    renderHeader("workspace", "header-visibility");
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Untitled view" }));
+    await user.click(await screen.findByRole("menuitem", { name: /^Visible to\s*Only me/ }));
+    expect(await screen.findByRole("menuitemradio", { name: "Only me" })).toHaveAttribute("aria-checked", "true");
+    // The open submenu marks its parent menu `pointer-events: none` in jsdom.
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Workspace members" }));
+
+    expect(setVisibility).toHaveBeenCalledWith(active.view, "workspace");
   });
 });
 
@@ -175,5 +212,34 @@ describe("IssueViewHeader setup of a new view", () => {
     renderHeader("workspace", "header-setup-defined");
 
     expect(screen.queryByTestId("view-setup-bar")).toBeNull();
+  });
+});
+
+describe("IssueViewHeader edit from elsewhere", () => {
+  it("opens the filter menu of the view asked to be edited, once", () => {
+    active.view = savedView({ query: { labelFilters: ["bug"] } });
+    useIssueViewEditStore.setState({ viewId: "view-1" });
+    renderHeader("workspace", "header-edit-defined");
+
+    expect(screen.getByRole("menu", { name: "Filter menu" })).toBeInTheDocument();
+    expect(useIssueViewEditStore.getState().viewId).toBeNull();
+  });
+
+  it("opens the setup bar's menu for a view that saves nothing yet", () => {
+    active.view = savedView();
+    useIssueViewEditStore.setState({ viewId: "view-1" });
+    renderHeader("workspace", "header-edit-setup");
+
+    expect(within(screen.getByTestId("view-setup-bar")).getByRole("menu", { name: "Filter menu" })).toBeInTheDocument();
+    expect(screen.getAllByRole("menu", { name: "Filter menu" })).toHaveLength(1);
+  });
+
+  it("leaves another view's request alone", () => {
+    active.view = savedView({ query: { labelFilters: ["bug"] } });
+    useIssueViewEditStore.setState({ viewId: "view-2" });
+    renderHeader("workspace", "header-edit-other");
+
+    expect(screen.queryByRole("menu", { name: "Filter menu" })).toBeNull();
+    expect(useIssueViewEditStore.getState().viewId).toBe("view-2");
   });
 });

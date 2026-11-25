@@ -7,6 +7,7 @@ display metadata; it is context later injected into task briefs and
 - [Core model](#core-model)
 - [CLI](#cli)
 - [local_directory execution modes](#local_directory-execution-modes)
+- [Archived projects](#archived-projects)
 - [Referring to a project in a comment](#referring-to-a-project-in-a-comment)
 - [When to add a resource](#when-to-add-a-resource)
 - [Debugging wrong context](#debugging-wrong-context)
@@ -25,6 +26,13 @@ multica project get <project-id> --output json
 multica project resource list <project-id> --output json
 ```
 
+Project progress counts issues: `scope` leaves out cancelled issues, `completed`
+is the done category, and `started` issues are tracked separately without adding
+to `percent`. Read it from `progress` on the project, or from
+`multica project progress` for the weekly history, forecast and the
+per-assignee or per-label breakdown. `multica project activity` lists what
+changed on the project's issues, newest first.
+
 Project resources are mutated through project resource commands/endpoints. Issue
 comments do not create durable project resources.
 
@@ -33,6 +41,10 @@ quick-create task) is bound to a project, the project description is injected
 into the agent's brief under `## Project Context` and written to
 `.multica/project/resources.json` as `project_description`. Use it for
 project-wide rules/context that should apply to every task in the project.
+Point at docs, issues and projects with mention links
+(`[Doc Title](mention://doc/<doc-id>)`, `[MUL-123](mention://issue/<uuid>)`),
+not bare IDs: the project page renders them as links, and agents read the same
+ID out of the link.
 
 Common resource types:
 
@@ -47,12 +59,19 @@ Common resource types:
 ```bash
 multica project list --output json
 multica project get <project-id> --output json
+multica project overview <project-id>                 # project + progress + resources + working agents + recent activity
+multica project progress <project-id> --output json   # scope/completed/started, weekly history, forecast, by assignee and label
+multica project progress <project-id> --by label      # per-label breakdown table
+multica project activity <project-id> --output json   # issue changes in the project, newest first; page with --before <next_cursor>
 multica project create --title "<title>" --repo <github-url> --output json
 multica project create --title "<title>" --start-date 2026-03-01 --due-date 2026-03-31 --output json
 multica project update <project-id> --title "<title>" --output json
 multica project update <project-id> --due-date 2026-04-15 --output json
 multica project update <project-id> --start-date "" --output json   # clear the start date
 multica project status <project-id> in_progress --output json
+multica project list --archived --output json
+multica project archive <project-id> --output json
+multica project restore <project-id> --output json
 multica project resource list <project-id> --output json
 multica project resource add <project-id> --type github_repo --url <github-url> --output json
 multica project resource add <project-id> --type github_repo --url <github-url> --ref <branch-or-sha> --output json
@@ -110,6 +129,31 @@ run in place. Saving `worktree` is refused (HTTP 422, code
 advertise the capability — the fix is updating the Multica app there, then
 retrying. Pass an empty value to clear it back to the default.
 
+## Archived projects
+
+Archiving is separate from status: a `completed` or `cancelled` project can be
+archived or not, and restoring it keeps its status. An archived project has a
+non-null `archived_at` (plus `archived_by_type` / `archived_by_id`).
+
+- `project list` hides archived projects; `--archived` lists only them.
+  `project get`, `project restore` and `issue list --project` still reach
+  them. An ID prefix resolves to a live project first and to an archived one
+  only when nothing live matches; `--project` on `issue create` and
+  `autopilot create` refuses an archived-only match and prints the restore
+  command. Updates resolve it normally and leave the decision to the server.
+- It accepts no new issues. Creating an issue with `--project` set to it, or
+  moving an issue into it, fails with HTTP 409 code `project_archived`. Issues
+  already in it stay readable and editable, and sub-issues of those issues
+  inherit the project as before.
+- Archiving pauses every active autopilot that files issues into the project
+  (`pause_reason: project_archived`; `project archive` lists them). Restoring
+  does not resume them, and an autopilot cannot be resumed or pointed at the
+  project while it stays archived.
+- When your task's project is archived, the brief says so. Finish the work at
+  hand; restore the project only when the user asks.
+
+Archive and restore need the same permission as editing the project.
+
 ## Referring to a project in a comment
 
 A project has no `MUL-123`-style identifier, so writing its title as prose
@@ -152,8 +196,8 @@ is task-local checkout state.
 
 ## Side effects
 
-Project create/update/delete/status and project resource add/update/remove
-mutate durable workspace state and affect future tasks. Ask before changing
+Project create/update/delete/status/archive/restore and project resource
+add/update/remove mutate durable workspace state and affect future tasks. Ask before changing
 `local_directory` unless the user explicitly requested that exact local path.
 
 ## Project workflows
@@ -161,8 +205,8 @@ mutate durable workspace state and affect future tasks. Ask before changing
 A project can use a workflow: its ordered status columns, where a column may
 hand the issue off to a handler — a fixed agent, squad or member, the project
 lead, or the issue's creator. When the issue's project uses one, the per-turn
-prompt carries a `[Project workflow]` block. Its statuses and commands are
-the whole status contract for this issue: the built-in moves in the issues
+prompt carries a `[Project workflow]` block. Its statuses are the whole
+status contract for this issue: the built-in moves in the issues
 reference (`in_progress` on start, `in_review` on delivery) do not apply.
 
 - **The step's scope is its instructions.** A step that hands off carries the
@@ -178,9 +222,12 @@ reference (`in_progress` on start, `in_review` on delivery) do not apply.
 - **Changing the status is the handoff.** Entering a column that hands off
   reassigns the issue to that column's handler and starts their run; a member
   handler is assigned and runs nothing. Nothing advances the status when a run
-  ends: finishing a step means moving the issue to the next status yourself,
-  with the command the block names. A column can also name a "needs changes"
-  status that sends the issue back.
+  ends: finishing a step means moving the issue to the next status yourself.
+  The block is a status map — each status's category, meaning, handler and
+  where its author routes finished work ("Routes") — and you set the
+  status that matches where the issue stands; an older runtime gets the
+  commands to run instead. A column can also name a "needs changes" status
+  that sends the issue back.
 - **Entering a step you handle starts your run.** Even when your own run makes
   the move, a run for the new step queues behind the current one, and the
   write skips your own event wakeups so one change starts one run. Do not add
@@ -195,7 +242,7 @@ reference (`in_progress` on start, `in_review` on delivery) do not apply.
   `workflow_step_moved`, naming who moved it. Do not retry; comment if
   something still needs attention.
 - **The assignee owns the step.** Only the issue's assignee gets the step's
-  instructions and commands. Any other agent on the issue — mentioned in a
+  instructions and is told to move it. Any other agent on the issue — mentioned in a
   comment, say — sees the statuses and leaves them to the assignee unless
   explicitly asked to change them.
 - **No `blocked` column.** When the workflow has none, comment why you cannot
@@ -221,6 +268,16 @@ issue inside a workflow needs none of them.
 - Whole workflow: `multica workflow create|update --steps-file <json>`
   replaces all steps; `multica workflow delete` is refused for Default and for
   a workflow a project still uses.
+- Status catalog: a step's `new_status` may carry `icon` (`dotted`, `circle`,
+  `half`, `three_quarters`, `check`, `slash`, `cross`; empty keeps the category
+  default), so a definition applied in a fresh workspace renders the glyph its
+  author declared. The field applies only when the status is created — a
+  status that already exists by name is reused unchanged. Repair an existing
+  catalog row, including on a workspace that synced before the field was
+  declared, with `multica issue-status update <key-or-name> --icon <value>`
+  (`--icon ""` resets it), and read the catalog with `multica issue-status
+  list`. These commands edit the workspace catalog, not a workflow, and need
+  workspace owner/admin.
 - Switching: `multica project workflow set <project-id> <workflow|default>`.
   Run it with `--dry-run` first. Issues on statuses the target lacks need
   `--map old=new`; a missing mapping fails with

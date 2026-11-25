@@ -22,6 +22,7 @@ var MinVersions = map[string]string{
 	"copilot":     "1.0.0",     // --output-format json envelope stable from 1.0.x
 	"grok":        "0.2.89",    // ACP + authenticate/session-load/set_model/MCP and --effort thinking flag
 	"qwen":        "0.20.0",    // stream-json protocol captured and verified against Qwen Code 0.20.0
+	"droid":       "1.8.0",     // native exec stream-json envelope verified against the official executable
 	"dim":         "0.3.10",    // cross-run session/load: per-process lock releases on graceful exit
 	"mcode":       "0.1.2",     // ACP v1 session/new, prompt, MCP capability forwarding
 	"muse":        "1.4.10",    // MSP stable surface: session/start, turn/start, item stream
@@ -152,10 +153,21 @@ func SupportsTaskSupplement(provider, version string) bool {
 		// into the running ACP turn (queued, then injected at the next
 		// tool/message boundary of the same session/prompt).
 		minimum = "2.33.0"
+	case "antigravity":
+		// 1.4.8 is the oldest agy verified to append PreInvocation injectSteps
+		// userMessage entries to the running turn and to report each as a
+		// user_input step on the stream-json output.
+		minimum = "1.4.8"
 	case "cursor":
 		// 2026.10.14 is the oldest build verified to forward postToolUse
 		// additional_context into the model turn in --print mode.
 		minimum = "2026.10.14"
+	case "hermes":
+		// 0.22.3 is the oldest Hermes Agent whose gateway ACP answers `/steer`
+		// with an acknowledgement and keeps late guidance inside the running
+		// admission. The backend also requires the session to advertise the
+		// command; jcode shares this provider and is gated out by the daemon.
+		minimum = "0.22.3"
 	default:
 		return false
 	}

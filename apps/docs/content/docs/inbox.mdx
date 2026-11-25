@@ -8,19 +8,30 @@ import { InboxDemo } from "@/components/demos/inbox-demo";
 
 The inbox collects the work activity that concerns you and flags where something changed that needs your attention. It isn't a full activity log; the full story stays on the corresponding issue.
 
+## Where to find it
+
+The inbox is a section of the **Work** panel, below Pinned and above Views and Projects; with nothing pinned, it is the first section. Its header holds three tabs: **Inbox**, **Snoozed** and **Archived**. Only the open tab shows its name; the other two are icons, named when you hover them. Select the open tab again to collapse the section. The unread count shows next to **Inbox** and as a badge on **Work** in the app rail; right-click **Work** for **Mark all as read**.
+
+The **Inbox** tab lists one row per issue, newest first, read and unread alike. A row shows the issue's status, its title and time; a dot marks it unread. Turn off **Compact rows** in the display settings to add who did what on a second line. Hover a row for a card with the full title, the comment, and **Open**, **Mark as read** (or **Mark as unread** when read), **Snooze**, and **Archive**. Right-click a row for **Open in new tab**, **Mark as read** / **Mark as unread**, **Archive** (or **Unarchive** on the Archived tab), **Unsubscribe & archive**, and **Delete**.
+
+On a phone, the Work panel sits in the drawer. Its Inbox section ends with **All notifications**, which opens the Inbox page with its own list, the same three tabs, and filters.
+
 ## What lands in the inbox
 
 Common notifications include:
 
 - an issue is assigned to you, or moved away from you;
-- an issue you subscribe to gets a new comment, or its assignee, status, priority, or dates change;
+- an issue you subscribe to gets a new comment, or its assignee, priority, or dates change (on other people's issues, only key updates by default; see below);
+- an issue you subscribe to changes status, once you turn on **Status changes**, which is off by default;
 - someone @-mentions you in an issue description or comment;
 - an issue or comment you created gets a reaction;
 - an agent run fails on an issue you subscribe to;
+- an issue is created in a project you subscribe to;
+- every [blocker](/issues#relations) on an issue assigned to you ends (**Waiting tasks ended**);
 - [creating an issue through an agent](/issues#create-with-agent) completes or fails;
 - an autopilot you subscribe to creates a new issue, or is paused after consecutive failures.
 
-Your own actions don't notify you. Multiple notifications on the same issue merge into one entry; open it to see the issue's recent changes.
+Your own actions don't notify you. Multiple notifications on the same issue merge into one row; open it to see the issue's recent changes.
 
 ## Sources of automatic subscription
 
@@ -35,46 +46,133 @@ These participants subscribe to an issue automatically:
 Changing the assignee does not remove existing subscriptions. Subscribe or unsubscribe anytime on the issue page; after unsubscribing, ordinary updates stop reaching your inbox, while direct @-mentions still notify you individually.
 
 <Callout type="info">
-When a sub-issue's status changes, subscribers of the parent issue are notified as well. Sub-issue comments, priority, and date changes do not bubble up to the parent.
+With **Status changes** on, a sub-issue's status change also notifies subscribers of the parent issue. Sub-issue comments, priority, and date changes do not bubble up to the parent.
 </Callout>
 
-## Agents don't use the inbox
+## Other people's issues
 
-The inbox is only for workspace members. Even when an agent is the assignee or a subscriber, it never reads inbox notifications.
+On an issue assigned to someone else or to their agent, a subscription you picked up by creating, commenting on, or being mentioned in it brings only key updates by default: @-mentions, replies in threads you took part in, and, with **Status changes** on, statuses that need a person, such as `in_review`, `blocked`, or `done`. Routine comments and other changes stay on the issue. Issues you subscribed to yourself, issues you follow through their project, and issues assigned to you or your agents still bring every kind of notification you have turned on.
+
+The issue page marks such a subscription **Key updates only**. Its menu offers **Get all activity**, which turns it into an explicit subscription to this issue; there's no way back to key updates for that issue afterwards, only unsubscribing. **Change the default** opens **Settings → Notifications**, where **Other people's issues**, at the top of **Issues you subscribe to**, switches all such issues to **All activity**.
+
+## Agents and the inbox
+
+Inbox notifications belong to workspace members. An agent may read and change the runtime owner's notifications only when the server verifies that the owner is the upstream human who triggered the run. This identity follows agent delegation chains. The rule covers every inbox action: the active, archived and snoozed lists, unread counts, and every change. Runs triggered by another person or without a verifiable human, and cloud-node credentials without a task binding, are refused. An agent's unread counts cover only the workspace its run belongs to, never the owner's other workspaces. Only people can delete notifications. The server logs each change an agent makes, with the agent, the run and the person it acted for.
 
 @-mentioning an agent in a comment, assigning an issue to it, or triggering an autopilot creates a run directly; no notification is left for the agent. `@all` notifies members only.
 
+## Manage from the CLI
+
+Use your existing CLI login to read and handle your notifications. Listing never marks anything read:
+
+```sh
+multica inbox count
+multica inbox list --unread --since 1d --output json
+multica inbox list --issue MUL-123
+multica inbox list --archived     # or --snoozed
+```
+
+Each row shows the notification ID, the issue key, the type, who it is from, the title and a short summary of the comment or change. `--unread`, `--issue` (an issue key or UUID), `--since` (an RFC 3339 time or a duration such as `2h`, `1d`, `1w`), `--project` and `--type` filter the list. `--archived` reads the whole archive page by page, so an issue archived long ago can still be found and restored. `--project` accepts a full UUID or a unique ID prefix, including the short ID from `multica project list`; no match or an ambiguous prefix produces an error. The table also keeps the issue, comment and project IDs and cuts the summary short; `--output json` has the full summary.
+
+Handle notifications by the IDs the list shows:
+
+```sh
+multica inbox read <id>...                      # unread <id>... reverses it
+multica inbox read --issue MUL-123              # every notification on one issue
+multica inbox archive <id>...                   # unarchive <id>... restores
+multica inbox snooze <id>... --until tomorrow   # RFC 3339, 30m, 3h, 1d, 1w; unsnooze <id>... ends it
+```
+
+As in the app, reading, archiving or snoozing a notification on an issue applies to the whole issue, while marking one unread changes only that notification. A failure on one ID doesn't stop the others; the command reports which failed and exits non-zero.
+
+The bulk actions match the inbox menu: `multica inbox read --all`, and `multica inbox archive` with `--all`, `--read` (issues whose newest notification is read) or `--completed` (issues in a `done` or `closed` status). They need `--yes`, or a typed confirmation when run by hand, and leave snoozed issues alone, except `--completed`: as in the app, it also archives a done or closed issue while it's snoozed, ending the snooze. Every change reports how many notifications it actually changed, whole issues included; one already in that state counts 0. `--output json` returns the same count, with the result for each ID. Notifications can't be deleted from the CLI.
+
+An authorized agent run uses its task credential for all of this; it never falls back to a person's login.
+
 ## Handle notifications
 
-Selecting a notification marks it as read. Archive it when you're done; archiving doesn't modify or delete the corresponding issue.
+Click a row to open the notification on the Inbox page, at the comment it is about. Every notification opens there, including those without an issue, such as autopilot pauses and quick-create results. The row stays lit while it is open, and clicking it again takes you back to that spot. Opening it marks the notification read, and the row stays in the list. In the issue's header, **Open issue page** (↗) opens the issue on a page of its own, without the inbox actions; on a phone, the back arrow returns to the list.
 
 <InboxDemo />
 
-Once an issue reaches a status that hands it back to a person, its **Run failed** notifications archive automatically. Those statuses are `in_review`, custom statuses in the `started` category, and any status in the `done` or `closed` category. `blocked` is the exception: it hands the issue over too, but the work is still stuck, so the earlier failures are still worth reading.
+A group of actions floats above the comment box, centred on the issue. It offers what usually settles the notification, the issue's own actions first, then the notification's, each with its shortcut beside it:
 
-Right-click a notification for **Mark as read** / **Mark as unread** and **Archive** (**Unarchive** in the Archived view). Mark as unread is the "I looked, but I'm not done with this" action: the notification goes back to unread and raises the unread count again, and it stays unread even while you keep it open; opening it again later marks it read as usual. Archived notifications keep their read state, so restoring one brings it back exactly as you left it.
+- **Status**, **Assignee** and **Quick actions** change the issue itself, as its properties do. Quick actions appear once your workspace has some.
+- **Snooze** (`H`) takes the issue out of your inbox until a time you pick, and opens the next one. See [Snooze an issue](#snooze-an-issue) below.
+- **Archive** (`E`), the filled button, archives the notification and opens the next one. Archiving doesn't modify or delete the issue. To finish the issue, change its status instead; by default that archives its notification too (see [When a notification leaves the inbox](#when-a-notification-leaves-the-inbox)).
+- **⋯**, always last, holds the less frequent ones:
+  - **Mark as unread / Mark as read** (`U`) toggles the open notification's read state in place without closing it.
+  - **Unsubscribe & archive** (`⇧E`) is offered on issues that aren't yours: not assigned to you or to an agent you own. It unsubscribes you from the issue, archives the notification and opens the next one. Ordinary updates stop reaching your inbox, while @mentions still do. On an issue with sub-issues the menu lists two choices, this issue only or this issue with all its sub-issues, and `⇧E` opens it on them. For this issue only, the confirmation offers **Undo**, which restores the subscription as it was. Leaving the sub-issues as well can't be undone there; subscribe again on the issue page instead. The same action is on the hover card and in a row's right-click menu.
 
-From the inbox menu you can also:
+When the window is narrow, the shortcuts give way first, then the names; hover a button for both.
 
-- mark all as read;
-- archive all, or archive all read;
-- archive notifications for issues in `done` or `cancelled`;
-- open Archived and restore a notification.
+The next one is the next row the section lists under its current filters, so you can work through the inbox without going back to the list. Press `J` and `K` to step to the next or previous notification in the current tab without archiving.
 
-Open **Archived** at the bottom of the inbox to browse older notifications. More records load as you scroll. Filters apply to the entire archive, including records that have not loaded yet.
+**Filter**, in the section's ⋯ menu on the **Inbox** and **Archived** tabs, narrows the list by notification type, when it was received, and who it is from, or by the issue's status and priority. While filters are set, a filter button with their count shows in the section header and reopens them; **Clear filters** resets them.
 
-## Tune notification types
+On the **Inbox** tab, the section's ⋯ menu holds the bulk actions:
 
-Open **Settings → Notifications** to toggle each group separately:
+- **Mark all as read**;
+- **Archive all read**;
+- **Archive completed**, for issues in the `done` or `closed` category;
+- **Archive all** (asks for confirmation before archiving all active notifications; snoozed issues are left alone).
 
-- assignments;
-- status changes;
-- comments;
-- mentions;
-- priority and dates;
-- agent activity.
+The **Archived** tab lists the archived notifications. More records load as you scroll, and filters apply to the entire archive, including records that have not loaded yet. Archived notifications keep their read state, so **Move back to Inbox**, on the row or in the group over an open one (or `E`), brings one back exactly as you left it.
 
-Turning a group off doesn't stop the changes from being recorded on the issue — it only stops the inbox notifications. A few types, such as reactions, quick-create results, and autopilot pauses, sit outside these six groups and are always delivered. System and browser notifications control desktop banners and don't change the inbox itself.
+## Snooze an issue
+
+Snooze takes an issue out of your inbox until a time you pick, then brings it back on top, unread. Snooze from **Snooze** in the group over the issue (or press `H`), from the button beside Archive when you hover a row, or from a row's hover card. Pick **1 hour**, **3 hours**, **1 day**, **3 days** or **1 week**, or **Pick a date and time…** for any time within a year. A day or more keeps the current time of day, except that one chosen between 22:00 and 6:00 comes back at 9:00. The confirmation lets you undo (`Z`); undoing a change of time puts back the previous one.
+
+While an issue is snoozed:
+
+- new notifications on it wait with it and don't count toward the unread badge. When it comes back, the row says **Snooze ended** and how many updates arrived meanwhile;
+- it comes back early when someone mentions you by name, it is assigned to you, a run fails, all its sub-issues finish, or all its blockers end. `@all` mentions don't wake it;
+- **Mark all as read** and the archive-all actions leave it alone. Archiving it ends the snooze, and so does completing the issue yourself while **Archive issues you handle** counts completing (it does by default);
+- opening the issue's own page doesn't read it or end the snooze. Open it from the **Snoozed** tab and the group over it shows when it comes back. Click that time to bring it back now (`H`) or pick another time.
+
+Snooze is personal: it only changes your own inbox. Everything you've snoozed is on the **Snoozed** tab, where the button on each row brings it back now.
+
+If the **Snoozed** tab can't load, choose **Retry**. Previously loaded items stay visible if a refresh fails.
+
+## When a notification leaves the inbox
+
+Reading a notification doesn't remove it. A row leaves the inbox only when:
+
+- you archive it, from its row, the hover card, the group over the issue, or a bulk action;
+- you snooze its issue. This one is temporary: the issue comes back at the time you picked, or earlier when something needs you. See [Snooze an issue](#snooze-an-issue);
+- you handle its issue yourself, as **Archive issues you handle** in **Settings → Notifications** says. The default, **When you complete it or trigger an agent**, counts moving the issue to a `done` or `closed` status, and any action that actually hands work to an agent: commenting, running a quick action, or steering an active run; assigning an agent or squad on a non-`backlog` issue; promoting an agent- or squad-assigned issue out of `backlog` (including to `todo`); moving into a workflow step with an agent handler; rerunning a task; or manually firing a wakeup. Organizing an issue without waking an agent—such as moving an unassigned issue from `backlog` to `todo`, parking an agent assignment in `backlog`, unassigning, posting a `/note` comment, suppressing triggers, or hitting a blocked runtime—leaves the notification in your inbox. **When you complete it** counts only `done` and `closed`, **Never** turns this off, and **Custom** picks actions one by one, including replying, moving status forward, reassigning, or changing priority, project, dates or labels, which are off by default. Only your own notifications on that issue are archived, read or not. When someone else or an agent does the same, its notifications stay in your inbox, so you still see the news;
+- it's a **Run failed** notification and its issue moves to a status that hands it back to a person: `in_review`, a custom status in the `started` category, or any status in the `done` or `closed` category. This archives everyone's Run failed notifications on the issue, whoever moved it, and doesn't depend on the setting above. `blocked` is the exception: it hands the issue over too, but the work is still stuck, so the earlier failures are still worth reading.
+- your inbox in the workspace goes past 2,000 notifications. It keeps the newest 2,000 and shortly afterwards archives the older ones, read or not. A notification that comes back from a snooze or that you restore from the archive counts from when it came back. Notifications on a snoozed issue don't count and are left alone.
+
+Open windows drop an archived row right away, except the one you have open. When its notification leaves the inbox on its own (you set the issue to `done` from its status, trigger an agent on it, another window archived it, or an edit took it out of the section's filters), the row stays lit where it was and the group over the issue offers **Undo archive** (`Z`), which brings the notification back. Hover it for why it was archived and what happens next, as in *Changed to In Progress · Returns to Inbox on new activity*. When you trigger an agent, the issue's header shows it at work, while the sidebar row updates in place until you move on. When a change you made from the group archived the notification, the group keeps **Status**, **Assignee** and **Quick actions** for the next change. **Next** (`E`), now the filled button, opens the next row. On an issue that isn't yours, **⋯** at the end offers **Unsubscribe from this issue**, which leaves the notification where it is; the group over a snoozed issue or one opened from the **Archived** tab offers it too. The row leaves once you move on, and any running issue stays visible under **Views → Working**. When it was the last notification in your inbox, there is no **Next**; `E` opens the cleared inbox.
+
+When you take the open row out yourself, from the group over the issue, its row, the hover card, or a bulk action that includes it, the next row opens instead. With nothing left to open, the inbox page opens on **Inbox cleared**. It names what you just did, with **Undo** (or `Z`) to bring it back, and shows how many issues are snoozed and when the next one returns. When filters hid the rest of your inbox, it says how many notifications are left and offers **Clear filters and continue** instead. Going back returns to the issue. Archiving and the bulk actions confirm with **Undo**, which brings the notifications back and leaves the issue's status as it is. Confirmations that offer **Undo**, for archiving, snoozing and unsubscribing alike, stay for 10 seconds, and while one shows, `Z` undoes that latest action.
+
+A later notification on the issue lands in the inbox again.
+
+**Settings → Notifications → Leaving the Inbox** holds **Archive issues you handle** (**Never**, **When you complete it**, **When you complete it or trigger an agent**, or **Custom**) and a link to the archived notifications.
+
+## Display and notification types
+
+The sliders button in the Inbox section header opens its display settings, which are saved on this device:
+
+- **Rows shown**: 5, 10, or 20; a **Show more** row lists the rest.
+- **Compact rows**: one line per row, on by default; turned off, rows add who did what on a second line.
+- **Unread count**: the number next to the section title.
+- **Unread badge on Work**: the badge on Work in the app rail.
+
+Below them, **Notify me about** turns each kind of notification on or off. These are the same switches as **Settings → Notifications**, which groups them by how they reach you:
+
+| Group | Kinds |
+|---|---|
+| **About you** | Assignments, Mentions, Reactions |
+| **Issues you subscribe to** | Status changes, Comments, Priority & Due date |
+| **Projects you subscribe to** | New issues |
+| **Agents** | Agent activity (failed runs) |
+
+**Status changes** starts off; every other kind starts on. A kind that's turned off creates no notification, and turning it back on doesn't bring back what you missed; the changes are still recorded on the issue. A few types, such as quick-create results and autopilot pauses, sit outside these groups and are always delivered. System and browser notifications control desktop banners and don't change the inbox itself.
+
+Under **Comments**, **Include squad handoffs** covers the comments a squad's leader and agents pass work to each other with, on an issue assigned to the squad or one the squad was @-mentioned on: the leader @-mentioning an agent or squad, and the agents reporting back. It starts on; turn it off to keep only the comments meant for people. Comments that @-mention you or anyone else, agent replies to a person's comment, and failed agent runs still arrive. The report a squad finishes with arrives too: when the leader's run after an agent's report ends without passing the work on or writing a comment, that report is delivered then. Status changes follow the **Status changes** switch.
 
 ## Next steps
 

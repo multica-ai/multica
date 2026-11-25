@@ -5,8 +5,9 @@ import { describe, expect, it, vi } from "vitest";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
 import { issueKeys } from "@multica/core/issues/queries";
+import type { SidebarIssuesRequest } from "@multica/core/issues/sidebar-list";
 import { issueUnreadOptions } from "@multica/core/issues/unread";
-import type { AgentTask, Issue, IssueUnread, ListIssuesParams } from "@multica/core/types";
+import type { AgentTask, Issue, IssueUnread } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { IssueContextMenuProvider } from "../../issues/actions";
 import { SidebarIssueList, TreeRow } from "./sidebar-tree";
@@ -46,6 +47,7 @@ vi.mock("@multica/core/issue-statuses/hooks", () => ({
   useIssueStatuses: () => buildIssueStatusCatalog([]),
 }));
 vi.mock("../../navigation", () => ({
+  useWarmRoute: () => undefined,
   AppLink: ({
     children,
     href,
@@ -70,9 +72,15 @@ vi.mock("@multica/core/paths", async (importOriginal) => {
 });
 
 const SOURCE = "project:p1";
-const PARAMS: ListIssuesParams = { project_id: "p1", sort_by: "updated_at", sort_direction: "desc" };
+const PARAMS: SidebarIssuesRequest = {
+  table: {
+    scope: { kind: "project", project_id: "p1" },
+    filters: {},
+    sort: { field: "updated_at", direction: "desc" },
+  },
+};
 const issues = (count: number): Issue[] =>
-  Array.from({ length: count }, (_, i) => ({ id: `issue-${i + 1}`, title: `Issue ${i + 1}`, status: "todo" }) as Issue);
+  Array.from({ length: count }, (_, i) => ({ id: `issue-${i + 1}`, identifier: `MUL-${i + 1}`, title: `Issue ${i + 1}`, status: "todo" }) as Issue);
 
 function renderList({
   total = 18,
@@ -82,7 +90,7 @@ function renderList({
   onCollapse = vi.fn(),
 }: {
   total?: number;
-  params?: ListIssuesParams | null;
+  params?: SidebarIssuesRequest | null;
   tasks?: Partial<AgentTask>[];
   unread?: IssueUnread[];
   onCollapse?: () => void;
@@ -124,11 +132,11 @@ describe("SidebarIssueList", () => {
       ],
     });
     expect(rows().map((row) => row.getAttribute("href"))).toEqual([
-      "/acme/issues/issue-1#comment-comment-1",
-      "/acme/issues/issue-2",
-      "/acme/issues/issue-3#comment-task-3",
-      "/acme/issues/issue-4",
-      "/acme/issues/issue-5",
+      "/acme/issues/MUL-1#comment-comment-1",
+      "/acme/issues/MUL-2",
+      "/acme/issues/MUL-3#comment-task-3",
+      "/acme/issues/MUL-4",
+      "/acme/issues/MUL-5",
     ]);
   });
 
@@ -239,6 +247,6 @@ describe("sidebar title disclosure", () => {
       vi.useRealTimers();
     }
     expect(document.querySelector("[data-slot=tooltip-content]")).toBeNull();
-    expect(link).toHaveAttribute("href", "/acme/issues/issue-1");
+    expect(link).toHaveAttribute("href", "/acme/issues/MUL-1");
   });
 });

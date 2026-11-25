@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   FolderGit2,
@@ -72,6 +72,7 @@ import type {
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { SettingsCard, SettingsSection } from "./settings-layout";
+import type { useConnectGitHub } from "./use-connect-github";
 import { GitHubMark } from "./github-mark";
 
 const EMPTY_REPOSITORIES: WorkspaceRepo[] = [];
@@ -120,8 +121,11 @@ export function repositoryIdentity(rawURL: string): string | null {
 }
 
 interface RepositoryDraft {
-  /** Index being edited, or null when adding. */
-  index: number | null;
+  /**
+   * Stored URL of the repository being edited, or null when adding. The server
+   * keeps URLs unique; a row index goes stale when the list changes elsewhere.
+   */
+  editingURL: string | null;
   url: string;
   description: string;
 }
@@ -131,7 +135,7 @@ interface RepositoryDraft {
  * and editing happen in a dialog that saves on confirm, so a half-typed URL
  * is never persisted and every change is one deliberate request.
  */
-export function RepositoriesSection() {
+export function RepositoriesSection({ connection }: { connection: ReturnType<typeof useConnectGitHub> }) {
   const { t } = useT("settings");
   const workspace = useCurrentWorkspace();
   const wsId = useWorkspaceId();
@@ -143,8 +147,16 @@ export function RepositoriesSection() {
 
   const [draft, setDraft] = useState<RepositoryDraft | null>(null);
   const [saving, setSaving] = useState(false);
-  const [pendingRemovalIndex, setPendingRemovalIndex] = useState<number | null>(null);
-  const [connectingGitHub, setConnectingGitHub] = useState(false);
+  const [pendingRemovalURL, setPendingRemovalURL] = useState<string | null>(null);
+  const {
+    connecting: connectingGitHub,
+    connect: connectGitHub,
+    connectedInstallationID,
+    reset: resetConnection,
+  } = connection;
+  const [preselectInstallationID, setPreselectInstallationID] = useState("");
+  const preselectedRepositoryIDs = useRef(new Set<number>());
+  const handledCallback = useRef("");
   const [githubPickerOpen, setGitHubPickerOpen] = useState(false);
   const [selectedInstallationID, setSelectedInstallationID] = useState("");
   const [selectedRepositories, setSelectedRepositories] = useState<
@@ -165,13 +177,14 @@ export function RepositoriesSection() {
     [githubData?.installations],
   );
   const githubConnectConfigured = githubData?.configured === true;
+  const canManageGitHub = canManageWorkspace && githubData?.can_manage === true;
   const githubBrowseConfigured =
     githubData?.repository_browse_configured === true;
   const githubRepositoriesQuery = useInfiniteQuery({
     ...githubInstallationRepositoriesOptions(wsId, selectedInstallationID),
     enabled:
       githubPickerOpen &&
-      canManageWorkspace &&
+      canManageGitHub &&
       githubBrowseConfigured &&
       !!selectedInstallationID,
   });
@@ -215,9 +228,11 @@ export function RepositoriesSection() {
   // error). Open the picker once the installation list reflects the new
   // install, then drop the one-shot params so a refresh does not repeat it.
   useEffect(() => {
+    const callbackKey = navigation.searchParams.toString();
+    if (handledCallback.current === callbackKey) return;
     const connected = navigation.searchParams.get("github_connected") === "1";
     const githubError = navigation.searchParams.get("github_error");
-    if ((!connected && !githubError) || !canManageWorkspace) return;
+    if ((!connected && !githubError) || !canManageGitHub) return;
     if (
       !githubError &&
       (githubInstallationsPending || githubInstallationsFetching)
@@ -225,11 +240,42 @@ export function RepositoriesSection() {
       return;
     }
 
+    handledCallback.current = callbackKey;
     if (githubError) {
-      toast.error(t(($) => $.repositories.github_connect_failed));
+      switch (githubError) {
+        case "missing_authorization":
+          toast.error(t(($) => $.github.errors.missing_authorization));
+          break;
+        case "installation_not_authorized":
+          toast.error(t(($) => $.github.errors.installation_not_authorized));
+          break;
+        case "invalid_state":
+          toast.error(t(($) => $.github.errors.invalid_state));
+          break;
+        case "missing_params":
+        case "bad_installation_id":
+          toast.error(t(($) => $.github.errors.incomplete_callback));
+          break;
+        case "bad_workspace":
+          toast.error(t(($) => $.github.errors.bad_workspace));
+          break;
+        case "verification_failed":
+          toast.error(t(($) => $.github.errors.verification_failed));
+          break;
+        case "persist_failed":
+          toast.error(t(($) => $.github.errors.persist_failed));
+          break;
+        default:
+          toast.error(t(($) => $.repositories.github_connect_failed));
+      }
     } else if (githubInstallations.length > 0 && githubBrowseConfigured) {
-      setSelectedInstallationID(githubInstallations[0]!.id);
-      setGitHubPickerOpen(true);
+      const installationID = navigation.searchParams.get("github_installation") ?? githubInstallations[0]!.id;
+      if (githubInstallations.some((installation) => installation.id === installationID)) {
+        setSelectedInstallationID(installationID);
+        setPreselectInstallationID(installationID);
+        preselectedRepositoryIDs.current.clear();
+        setGitHubPickerOpen(true);
+      }
     } else if (githubInstallations.length > 0) {
       toast.error(t(($) => $.repositories.github_browse_not_configured));
     }
@@ -237,10 +283,11 @@ export function RepositoriesSection() {
     const next = new URLSearchParams(navigation.searchParams);
     next.delete("github_connected");
     next.delete("github_error");
+    next.delete("github_installation");
     const search = next.toString();
     navigation.replace(`${navigation.pathname}${search ? `?${search}` : ""}`);
   }, [
-    canManageWorkspace,
+    canManageGitHub,
     githubBrowseConfigured,
     githubInstallations,
     githubInstallationsFetching,
@@ -248,6 +295,55 @@ export function RepositoriesSection() {
     navigation,
     t,
   ]);
+
+  useEffect(() => {
+    const installationID = connectedInstallationID;
+    if (!installationID || !canManageGitHub || githubInstallationsPending || githubInstallationsFetching) return;
+    if (!githubInstallations.some((installation) => installation.id === installationID)) return;
+    if (githubBrowseConfigured) {
+      setSelectedInstallationID(installationID);
+      setPreselectInstallationID(installationID);
+      preselectedRepositoryIDs.current.clear();
+      setGitHubPickerOpen(true);
+    } else {
+      toast.error(t(($) => $.repositories.github_browse_not_configured));
+    }
+    resetConnection();
+  }, [connectedInstallationID, resetConnection, canManageGitHub, githubInstallations, githubInstallationsPending, githubInstallationsFetching, githubBrowseConfigured, t]);
+
+  const preselectingRepositories = githubPickerOpen &&
+    selectedInstallationID === preselectInstallationID &&
+    githubRepositoriesQuery.data?.pages[0]?.repository_selection === "selected";
+
+  const {
+    hasNextPage,
+    isFetchingNextPage,
+    isError: repositoriesError,
+    fetchNextPage,
+  } = githubRepositoriesQuery;
+  useEffect(() => {
+    if (preselectingRepositories && hasNextPage &&
+      !isFetchingNextPage && !repositoriesError) {
+      void fetchNextPage();
+    }
+  }, [preselectingRepositories, hasNextPage, isFetchingNextPage, repositoriesError, fetchNextPage]);
+
+  useEffect(() => {
+    if (!githubPickerOpen || selectedInstallationID !== preselectInstallationID ||
+      githubRepositoriesQuery.data?.pages[0]?.repository_selection !== "selected") return;
+    const additions = githubRepositories.filter((repository) => {
+      if (preselectedRepositoryIDs.current.has(repository.id)) return false;
+      preselectedRepositoryIDs.current.add(repository.id);
+      const identity = repositoryIdentity(repository.clone_url);
+      return !repository.archived && !!identity && !existingRepositoryIdentities.has(identity);
+    });
+    if (additions.length) {
+      setSelectedRepositories((current) => new Map([
+        ...current,
+        ...additions.map((repository) => [repository.id, repository] as const),
+      ]));
+    }
+  }, [githubPickerOpen, selectedInstallationID, preselectInstallationID, githubRepositoriesQuery.data, githubRepositories, existingRepositoryIdentities]);
 
   const persist = async (next: WorkspaceRepo[]) => {
     if (!workspace) return false;
@@ -276,8 +372,8 @@ export function RepositoriesSection() {
   const draftDuplicate =
     !!draftIdentity &&
     repositories.some(
-      (repository, index) =>
-        index !== draft?.index &&
+      (repository) =>
+        repository.url !== draft?.editingURL &&
         repositoryIdentity(repository.url) === draftIdentity,
     );
 
@@ -287,20 +383,19 @@ export function RepositoriesSection() {
       url: draft.url.trim(),
       ...(draft.description.trim() ? { description: draft.description.trim() } : {}),
     };
-    const next =
-      draft.index === null
-        ? [...repositories, entry]
-        : repositories.map((repository, index) =>
-            index === draft.index ? entry : repository,
-          );
+    const next = repositories.some((repository) => repository.url === draft.editingURL)
+      ? repositories.map((repository) =>
+          repository.url === draft.editingURL ? entry : repository,
+        )
+      : [...repositories, entry];
     if (await persist(next)) setDraft(null);
   };
 
-  const removeRepository = async (index: number) => {
+  const removeRepository = async (url: string) => {
     const ok = await persist(
-      repositories.filter((_, repoIndex) => repoIndex !== index),
+      repositories.filter((repository) => repository.url !== url),
     );
-    if (ok) setPendingRemovalIndex(null);
+    if (ok) setPendingRemovalURL(null);
   };
 
   const openGitHubPicker = () => {
@@ -310,28 +405,10 @@ export function RepositoriesSection() {
     setGitHubPickerOpen(true);
   };
 
-  const connectGitHub = async () => {
-    setConnectingGitHub(true);
-    try {
-      const response = await api.getGitHubConnectURL(wsId, "repositories");
-      if (!response.configured || !response.url) {
-        toast.error(t(($) => $.repositories.github_not_configured));
-        return;
-      }
-      window.open(response.url, "_blank", "noopener");
-    } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : t(($) => $.repositories.github_connect_failed),
-      );
-    } finally {
-      setConnectingGitHub(false);
-    }
-  };
-
   const closeGitHubPicker = () => {
     setGitHubPickerOpen(false);
+    setPreselectInstallationID("");
+    preselectedRepositoryIDs.current.clear();
     setSelectedRepositories(new Map());
     setRepositorySearch("");
   };
@@ -371,11 +448,6 @@ export function RepositoriesSection() {
 
   if (!workspace) return null;
 
-  const githubItemDisabled =
-    connectingGitHub ||
-    !githubBrowseConfigured ||
-    (!githubConnectConfigured && githubInstallations.length === 0);
-
   return (
     <SettingsSection
       title={t(($) => $.repositories.section_title)}
@@ -389,34 +461,34 @@ export function RepositoriesSection() {
               <ChevronDown />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-auto min-w-56">
-              <DropdownMenuItem
-                disabled={githubItemDisabled}
-                onClick={() =>
-                  githubInstallations.length > 0
-                    ? openGitHubPicker()
-                    : void connectGitHub()
-                }
-              >
-                {connectingGitHub ? (
-                  <LoaderCircle className="animate-spin" />
-                ) : (
-                  <GitHubMark className="size-4" />
-                )}
-                <span className="flex flex-col">
-                  <span>
-                    {githubInstallations.length > 0
-                      ? t(($) => $.repositories.choose_from_github)
-                      : t(($) => $.repositories.connect_github)}
-                  </span>
-                  {!githubBrowseConfigured ? (
-                    <span className="text-caption text-muted-foreground">
-                      {t(($) => $.repositories.github_browse_not_configured)}
-                    </span>
+              {canManageGitHub ? (
+                <>
+                  {githubInstallations.length > 0 ? (
+                    <DropdownMenuItem disabled={!githubBrowseConfigured} onClick={openGitHubPicker}>
+                      <GitHubMark className="size-4" />
+                      <span className="flex flex-col">
+                        <span>{t(($) => $.repositories.choose_from_github)}</span>
+                        {!githubBrowseConfigured ? (
+                          <span className="text-caption text-muted-foreground">
+                            {t(($) => $.repositories.github_browse_not_configured)}
+                          </span>
+                        ) : null}
+                      </span>
+                    </DropdownMenuItem>
                   ) : null}
-                </span>
-              </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={connectingGitHub || !githubConnectConfigured}
+                    onClick={() => void connectGitHub()}
+                  >
+                    {connectingGitHub ? <LoaderCircle className="animate-spin" /> : <GitHubMark className="size-4" />}
+                    {githubInstallations.length > 0
+                      ? t(($) => $.github.add_account)
+                      : t(($) => $.repositories.connect_github)}
+                  </DropdownMenuItem>
+                </>
+              ) : null}
               <DropdownMenuItem
-                onClick={() => setDraft({ index: null, url: "", description: "" })}
+                onClick={() => setDraft({ editingURL: null, url: "", description: "" })}
               >
                 <Pencil />
                 {t(($) => $.repositories.add_manually)}
@@ -453,7 +525,7 @@ export function RepositoriesSection() {
                   )}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <TruncatedTooltip content={repository.url}>
+                  <TruncatedTooltip content={repository.url} focusable>
                     <p className="truncate font-mono text-label">
                       {repository.url}
                     </p>
@@ -483,7 +555,7 @@ export function RepositoriesSection() {
                       <DropdownMenuItem
                         onClick={() =>
                           setDraft({
-                            index,
+                            editingURL: repository.url,
                             url: repository.url,
                             description: repository.description ?? "",
                           })
@@ -494,7 +566,7 @@ export function RepositoriesSection() {
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         variant="destructive"
-                        onClick={() => setPendingRemovalIndex(index)}
+                        onClick={() => setPendingRemovalURL(repository.url)}
                       >
                         <Trash2 />
                         {t(($) => $.repositories.delete_confirm_action)}
@@ -517,7 +589,7 @@ export function RepositoriesSection() {
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>
-              {draft?.index === null
+              {draft?.editingURL === null
                 ? t(($) => $.repositories.add_title)
                 : t(($) => $.repositories.edit_title)}
             </DialogTitle>
@@ -595,7 +667,7 @@ export function RepositoriesSection() {
           if (!open && !saving) closeGitHubPicker();
         }}
       >
-        <DialogContent className="flex max-h-[85vh] flex-col gap-0 p-0 sm:max-w-2xl">
+        <DialogContent className="flex max-h-[85%] flex-col gap-0 p-0 sm:max-w-2xl">
           <DialogHeader className="border-b px-6 py-5">
             <DialogTitle>
               {t(($) => $.repositories.github_picker_title)}
@@ -762,19 +834,19 @@ export function RepositoriesSection() {
             </Button>
             <Button
               onClick={() => void importGitHubRepositories()}
-              disabled={selectedRepositories.size === 0 || saving}
+              disabled={selectedRepositories.size === 0 || saving || (preselectingRepositories && (githubRepositoriesQuery.hasNextPage || githubRepositoriesQuery.isFetchingNextPage))}
               aria-busy={saving || undefined}
             >
-              {t(($) => $.repositories.github_import)}
+              {t(($) => $.repositories.github_import, { count: selectedRepositories.size })}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       <AlertDialog
-        open={pendingRemovalIndex !== null}
+        open={pendingRemovalURL !== null}
         onOpenChange={(open) => {
-          if (!open && !saving) setPendingRemovalIndex(null);
+          if (!open && !saving) setPendingRemovalURL(null);
         }}
       >
         <AlertDialogContent>
@@ -794,8 +866,8 @@ export function RepositoriesSection() {
               variant="destructive"
               disabled={saving}
               onClick={() => {
-                if (pendingRemovalIndex !== null) {
-                  void removeRepository(pendingRemovalIndex);
+                if (pendingRemovalURL !== null) {
+                  void removeRepository(pendingRemovalURL);
                 }
               }}
             >

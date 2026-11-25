@@ -139,17 +139,6 @@ func keysOf(steps []Step) []string {
 	return keys
 }
 
-// MiddleKeys returns the workflow's own steps, without the fixed statuses.
-func MiddleKeys(keys []string) []string {
-	out := make([]string, 0, len(keys))
-	for _, key := range keys {
-		if !IsFixed(key) {
-			out = append(out, key)
-		}
-	}
-	return out
-}
-
 // BuiltInDefaultKeys is Default before a workspace stores its own.
 func BuiltInDefaultKeys() []string {
 	return ArrangeKeys([]string{issuestatus.Backlog, issuestatus.InProgress, issuestatus.InReview, issuestatus.Blocked})
@@ -311,6 +300,15 @@ func (d Definition) HandsOffAnywhere() bool {
 // NextStatus is where a step's handler moves the issue when done: the step's
 // own choice, or else the next status on the board that is not blocked.
 func (d Definition) NextStatus(key string) string {
+	return d.nextStatus(key, nil)
+}
+
+// nextStatus is NextStatus that also passes over closed statuses on the
+// board: custom statuses sit before blocked / done / cancelled, so a custom
+// closed one such as wont_fix would otherwise be where finished work goes
+// (MUL-9913). effective resolves a key to its canonical behavior; nil leaves
+// every key as itself. A step's own choice is kept as configured.
+func (d Definition) nextStatus(key string, effective func(string) string) string {
 	step, ok := d.Step(key)
 	if !ok {
 		return ""
@@ -323,12 +321,19 @@ func (d Definition) NextStatus(key string) string {
 			continue
 		}
 		for _, next := range d.Steps[i+1:] {
-			if next.StatusKey != issuestatus.Blocked {
+			if next.StatusKey != issuestatus.Blocked && effectiveOf(effective, next.StatusKey) != issuestatus.Cancelled {
 				return next.StatusKey
 			}
 		}
 	}
 	return ""
+}
+
+func effectiveOf(effective func(string) string, key string) string {
+	if effective == nil {
+		return key
+	}
+	return effective(key)
 }
 
 // handlerlessSpan is the stretch of work an assignee owns from a step that
@@ -353,8 +358,9 @@ type handlerlessSpan struct {
 // issue there. Otherwise it reaches the end of the board, and delivering sets
 // the last status before done other than in_progress, leaving done to a
 // human as without a workflow; only when no such status exists does it set
-// what follows (done).
-func (d Definition) handlerlessSpan(key string) handlerlessSpan {
+// what follows (done). A custom done or closed status ends the walk the way
+// done does; effective resolves it as nextStatus does.
+func (d Definition) handlerlessSpan(key string, effective func(string) string) handlerlessSpan {
 	current, ok := d.Step(key)
 	if !ok || current.HandsOff() {
 		return handlerlessSpan{}
@@ -368,13 +374,13 @@ func (d Definition) handlerlessSpan(key string) handlerlessSpan {
 	var passed []string
 	seen := map[string]bool{key: true}
 	for at := key; ; {
-		next := d.NextStatus(at)
+		next := d.nextStatus(at, effective)
 		if next == "" || seen[next] {
 			break
 		}
 		seen[next] = true
 		step, _ := d.Step(next)
-		if step.HandsOff() || next == issuestatus.Done || next == issuestatus.Cancelled {
+		if behavior := effectiveOf(effective, next); step.HandsOff() || behavior == issuestatus.Done || behavior == issuestatus.Cancelled {
 			span.until = next
 			break
 		}
@@ -508,14 +514,12 @@ func ValidateHandoff(s Step, def Definition) error {
 	}
 	switch s.Handler.Type {
 	case HandlerNone, HandlerProjectLead:
-	case HandlerAgent, HandlerMember:
+	case HandlerAgent, HandlerSquad, HandlerMember:
 		if s.Handler.ID == "" {
 			return invalid("choose a %s to hand off to", s.Handler.Type)
 		}
-	case HandlerSquad, HandlerCreator:
-		// A squad routes work itself, so a handoff to one would compete with
-		// its own assignment. (MUL-7420)
-		return invalid("hand off to an agent, a member or the project lead")
+	case HandlerCreator:
+		return invalid("hand off to an agent, a squad, a member or the project lead")
 	default:
 		return invalid("unknown handler type %q", s.Handler.Type)
 	}
@@ -740,6 +744,14 @@ type BriefInput struct {
 	MovedBy string
 	// StatusName resolves a catalog key to its display name.
 	StatusName func(key string) string
+	// EffectiveStatus resolves a catalog key to its canonical behavior. With
+	// no resolver, the key itself determines the behavior.
+	EffectiveStatus func(key string) string
+	// StatusCategory resolves a catalog key to its lifecycle category, and
+	// StatusDescription to the catalog's description of a custom status. The
+	// status map names both; without a resolver a custom status shows neither.
+	StatusCategory    func(key string) string
+	StatusDescription func(key string) string
 	// HandlerName describes who a step hands off to, e.g. "Sentinel" or
 	// "Lin (project lead)". Empty means the step does not hand off.
 	HandlerName func(step Step) string
@@ -759,45 +771,43 @@ type BriefInput struct {
 	// the zero value — also what the editor and timeline show — leaves these
 	// lines out rather than forbid what nothing asks for (MUL-8145).
 	LegacyRuntimeRules bool
+	// StepCommands renders the per-step command list — Step done, Needs
+	// changes — for a daemon whose runtime brief still points at those
+	// commands (one without protocol.DaemonCapabilityWorkflowStatusMapV1).
+	// The zero value renders the status map, whose rules the runtime brief
+	// states (MUL-9913). LegacyRuntimeRules implies the command list.
+	StepCommands bool
 }
 
 // Brief renders what an agent reads about the issue's project workflow: the
 // workflow's statuses, who each step hands off to, and — for the assignee —
-// the current step's instructions and the commands for the next move. The
-// runtime brief points at this block instead of stating built-in status rules;
-// for an older daemon that still states them, LegacyRuntimeRules adds the
-// lines that override them.
+// the current step's instructions. A current daemon gets the status map
+// (statusMapBrief) and states the rules for choosing from it; StepCommands
+// renders the per-step commands an older daemon's runtime brief points at
+// instead, and LegacyRuntimeRules adds the lines that override the built-in
+// rules a still older one states.
 //
 // It is the one rendering of a workflow for agents: the claim carries it into
 // every run's prompt, and the editor and timeline show the same text. Names
 // and instructions are user-authored, so control characters are dropped and
 // names are kept to one line.
 func Brief(in BriefInput) string {
+	if !in.StepCommands && !in.LegacyRuntimeRules {
+		return statusMapBrief(in)
+	}
 	step, _ := in.Workflow.Step(in.StatusKey)
 	stepMoved := in.BoundStep != "" && in.BoundStep != in.StatusKey
-	name := func(key string) string {
-		if in.StatusName == nil {
-			return key
-		}
-		if n := briefLine(in.StatusName(key)); n != "" {
-			return n
-		}
-		return key
-	}
+	terminal := in.atTerminal()
+	// Nothing on the board follows a terminal status, so its only moves are
+	// the ones its author configured (MUL-9746).
+	terminalMoves := terminal && (step.NextStatusKey != "" || step.BackStatusKey != "")
+	name := in.statusName
 	var b strings.Builder
-	title := briefLine(in.Workflow.Name)
-	if project := briefLine(in.ProjectName); project != "" {
-		title = fmt.Sprintf("%s (%s)", title, project)
-	}
-	fmt.Fprintf(&b, "This project's workflow — %s\n", title)
+	writeBriefTitle(&b, in)
 	// Each move names who the target step hands off to, so the list needs no
 	// preamble about handoffs.
 	handsOffTo := func(key string) string {
-		target, ok := in.Workflow.Step(key)
-		if !ok || in.HandlerName == nil {
-			return ""
-		}
-		if who := briefLine(in.HandlerName(target)); who != "" {
+		if who := in.handlerOf(key); who != "" {
 			return " — hands off to " + who
 		}
 		return ""
@@ -805,8 +815,8 @@ func Brief(in BriefInput) string {
 	// An older daemon still states the built-in rules itself, so its brief
 	// keeps the per-step wording rather than add a second in_progress rule.
 	var span handlerlessSpan
-	if !stepMoved && !in.Observer && !in.LegacyRuntimeRules {
-		span = in.Workflow.handlerlessSpan(in.StatusKey)
+	if !stepMoved && !in.Observer && !in.LegacyRuntimeRules && !terminal {
+		span = in.Workflow.handlerlessSpan(in.StatusKey, in.EffectiveStatus)
 	}
 	if in.LegacyRuntimeRules && !stepMoved {
 		b.WriteString("This workflow replaces the status rules in your runtime instructions: use only the status keys below")
@@ -816,20 +826,9 @@ func Brief(in BriefInput) string {
 		b.WriteString(".\n")
 	}
 	if stepMoved {
-		mover := briefLine(in.MovedBy)
-		if mover == "" {
-			mover = "someone else"
-		}
-		fmt.Fprintf(&b, "This run remains bound to %s, but %s is now at %s (last moved by %s).\n",
-			statusLabel(name(in.BoundStep), in.BoundStep), in.IssueIdentifier, statusLabel(name(in.StatusKey), in.StatusKey), mover)
-		b.WriteString("Do not change the issue's status in this run, including when starting or finishing work; this overrides the status rules in your runtime instructions. Do not retry a refused status change. Leave a comment if something needs attention. A member can review the current state and explicitly rerun the work.\n")
+		writeStepMovedIntro(&b, in)
 	} else if in.Observer {
-		assignee := "is unassigned"
-		if who := briefLine(in.AssigneeName); who != "" {
-			assignee = "is assigned to " + who
-		}
-		fmt.Fprintf(&b, "%s is at the %q step and %s. You are not its assignee: leave the status to them unless you are explicitly asked to change it.\n",
-			in.IssueIdentifier, name(in.StatusKey), assignee)
+		writeObserverIntro(&b, in)
 	} else if span.ok {
 		// A step without a handler is a progress marker, not a stage: naming
 		// it "the step you handle" made agents split one task across columns
@@ -841,15 +840,12 @@ func Brief(in BriefInput) string {
 			b.WriteString("to finish.\n")
 		}
 	} else {
-		fmt.Fprintf(&b, "You are handling the %q step of %s.\n", name(in.StatusKey), in.IssueIdentifier)
-		if instructions := briefText(step.Instructions); instructions != "" {
-			b.WriteString("\nStep instructions:\n")
-			for _, line := range strings.Split(instructions, "\n") {
-				b.WriteString("> ")
-				b.WriteString(line)
-				b.WriteString("\n")
-			}
+		if terminal && !terminalMoves {
+			writeTerminalIntro(&b, in)
+		} else {
+			fmt.Fprintf(&b, "You are handling the %q step of %s.\n", name(in.StatusKey), in.IssueIdentifier)
 		}
+		writeStepInstructions(&b, step)
 	}
 	b.WriteString("\nStatuses in this workflow:\n")
 	for _, s := range in.Workflow.Steps {
@@ -875,6 +871,9 @@ func Brief(in BriefInput) string {
 		b.WriteString("\nMoving the issue into a step that hands off reassigns it to that step's handler and starts their run.\n")
 		return b.String()
 	}
+	if terminal && !terminalMoves {
+		return b.String()
+	}
 	b.WriteString("\nYour moves:\n")
 	switch {
 	case span.ok:
@@ -887,7 +886,11 @@ func Brief(in BriefInput) string {
 			fmt.Fprintf(&b, "Step done      → leave the issue at `%s`; `done` is set by a human\n", in.StatusKey)
 		}
 	default:
-		if next := in.Workflow.NextStatus(in.StatusKey); next != "" {
+		next := step.NextStatusKey
+		if !terminal {
+			next = in.Workflow.nextStatus(in.StatusKey, in.EffectiveStatus)
+		}
+		if next != "" {
 			fmt.Fprintf(&b, "Step done      → multica issue status %s %s%s\n", in.IssueIdentifier, next, handsOffTo(next))
 		}
 	}
@@ -895,7 +898,7 @@ func Brief(in BriefInput) string {
 		fmt.Fprintf(&b, "Needs changes  → multica issue status %s %s%s\n", in.IssueIdentifier, step.BackStatusKey, handsOffTo(step.BackStatusKey))
 	}
 	switch {
-	case in.Workflow.Has(issuestatus.Blocked):
+	case in.Workflow.Has(issuestatus.Blocked) && !terminal:
 		fmt.Fprintf(&b, "Can't proceed  → multica issue status %s blocked, then comment why\n", in.IssueIdentifier)
 	case step.BackStatusKey != "":
 		b.WriteString("Can't proceed  → comment why, then run Needs changes\n")
@@ -913,6 +916,82 @@ func Brief(in BriefInput) string {
 	}
 	b.WriteString("When the issue enters a step you handle, you get a run automatically — do not add a wakeup for that. Wakeups for anything else (a time, a PR, another issue, a step someone else handles) are fine.\n")
 	return b.String()
+}
+
+func writeBriefTitle(b *strings.Builder, in BriefInput) {
+	title := briefLine(in.Workflow.Name)
+	if project := briefLine(in.ProjectName); project != "" {
+		title = fmt.Sprintf("%s (%s)", title, project)
+	}
+	fmt.Fprintf(b, "This project's workflow — %s\n", title)
+}
+
+func writeStepMovedIntro(b *strings.Builder, in BriefInput) {
+	mover := briefLine(in.MovedBy)
+	if mover == "" {
+		mover = "someone else"
+	}
+	fmt.Fprintf(b, "This run remains bound to %s, but %s is now at %s (last moved by %s).\n",
+		statusLabel(in.statusName(in.BoundStep), in.BoundStep), in.IssueIdentifier, statusLabel(in.statusName(in.StatusKey), in.StatusKey), mover)
+	b.WriteString("Do not change the issue's status in this run, including when starting or finishing work; this overrides the status rules in your runtime instructions. Do not retry a refused status change. Leave a comment if something needs attention. A member can review the current state and explicitly rerun the work.\n")
+}
+
+func writeObserverIntro(b *strings.Builder, in BriefInput) {
+	assignee := "is unassigned"
+	if who := briefLine(in.AssigneeName); who != "" {
+		assignee = "is assigned to " + who
+	}
+	fmt.Fprintf(b, "%s is at the %q step and %s. You are not its assignee: leave the status to them unless you are explicitly asked to change it.\n",
+		in.IssueIdentifier, in.statusName(in.StatusKey), assignee)
+}
+
+func writeTerminalIntro(b *strings.Builder, in BriefInput) {
+	fmt.Fprintf(b, "%s has reached the terminal status %s. Leave the issue at this status unless a member explicitly asks you to reopen it.\n",
+		in.IssueIdentifier, statusLabel(in.statusName(in.StatusKey), in.StatusKey))
+}
+
+func writeStepInstructions(b *strings.Builder, step Step) {
+	instructions := briefText(step.Instructions)
+	if instructions == "" {
+		return
+	}
+	b.WriteString("\nStep instructions:\n")
+	for _, line := range strings.Split(instructions, "\n") {
+		b.WriteString("> ")
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+}
+
+// statusName is a status's display name, or its key when it has none —
+// built-in statuses have no stored name, and their key reads on its own.
+func (in BriefInput) statusName(key string) string {
+	if in.StatusName == nil {
+		return key
+	}
+	if n := briefLine(in.StatusName(key)); n != "" {
+		return n
+	}
+	return key
+}
+
+// handlerOf names who entering key hands off to, or "" when it hands off to
+// no one.
+func (in BriefInput) handlerOf(key string) string {
+	target, ok := in.Workflow.Step(key)
+	if !ok || in.HandlerName == nil {
+		return ""
+	}
+	return briefLine(in.HandlerName(target))
+}
+
+func (in BriefInput) effective(key string) string {
+	return effectiveOf(in.EffectiveStatus, key)
+}
+
+func (in BriefInput) atTerminal() bool {
+	behavior := in.effective(in.StatusKey)
+	return behavior == issuestatus.Done || behavior == issuestatus.Cancelled
 }
 
 // briefLine keeps a user-authored name on one line of a brief: line breaks

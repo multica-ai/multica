@@ -396,30 +396,6 @@ func Effective(ctx context.Context, q Querier, workspaceID pgtype.UUID, status s
 	return customBehavior(status, entry.Category)
 }
 
-// EffectiveAndName resolves a status to BOTH its behavior and its display name
-// in one catalog read, for payload builders that need the pair.
-//
-// Two separate calls would double the query on every background event carrying
-// a custom status. Same fail-safe direction as Effective: an unresolvable key
-// yields the key unchanged and an empty name.
-//
-// The name is empty for a built-in on purpose — clients localize those from the
-// key, so echoing the seeded English one would be the single string a
-// non-English workspace has to ignore. (MUL-6749)
-func EffectiveAndName(ctx context.Context, q Querier, workspaceID pgtype.UUID, status string) (string, string) {
-	if IsBuiltIn(status) {
-		return status, ""
-	}
-	entry, err := q.GetIssueStatusEntryByKey(ctx, db.GetIssueStatusEntryByKeyParams{
-		WorkspaceID: workspaceID,
-		Key:         status,
-	})
-	if err != nil {
-		return status, ""
-	}
-	return customBehavior(status, entry.Category), entry.Name
-}
-
 // Category resolves a status to its four-value lifecycle category.
 // Unknown keys return empty so callers never guess at lifecycle
 // behavior when a catalog read fails.
@@ -436,9 +412,12 @@ func CategoryWithError(ctx context.Context, q Querier, workspaceID pgtype.UUID, 
 	return category, err
 }
 
-// CategoryAndName is the payload-oriented counterpart to EffectiveAndName.
-// It shares one catalog read while returning the public category rather than
-// the internal behavior projection.
+// CategoryAndName resolves a status to its public lifecycle category and its
+// display name in one catalog read.
+//
+// The name is empty for a built-in on purpose — clients localize those from the
+// key, so echoing the seeded English one would be the single string a
+// non-English workspace has to ignore. (MUL-6749)
 func CategoryAndName(ctx context.Context, q Querier, workspaceID pgtype.UUID, status string) (string, string) {
 	category, name, _ := categoryAndName(ctx, q, workspaceID, status)
 	return category, name
@@ -586,6 +565,7 @@ type Resolver struct {
 	workspaceID pgtype.UUID
 	categories  map[string]string
 	names       map[string]string
+	descs       map[string]string
 	archived    map[string]bool
 	loaded      bool
 	loadErr     error
@@ -616,10 +596,12 @@ func (r *Resolver) load(ctx context.Context, q Querier) {
 	}
 	r.categories = make(map[string]string, len(entries))
 	r.names = make(map[string]string, len(entries))
+	r.descs = make(map[string]string, len(entries))
 	r.archived = make(map[string]bool)
 	for _, e := range entries {
 		r.categories[e.Key] = e.Category
 		r.names[e.Key] = e.Name
+		r.descs[e.Key] = e.Description
 		if e.ArchivedAt.Valid {
 			r.archived[e.Key] = true
 		}
@@ -701,6 +683,16 @@ func (r *Resolver) Name(ctx context.Context, q Querier, status string) string {
 	}
 	r.load(ctx, q)
 	return r.names[status]
+}
+
+// Description returns a CUSTOM status's catalog description, or "" for a
+// built-in — the same rule as Name — and for a key the catalog does not hold.
+func (r *Resolver) Description(ctx context.Context, q Querier, status string) string {
+	if IsBuiltIn(status) {
+		return ""
+	}
+	r.load(ctx, q)
+	return r.descs[status]
 }
 
 // ExpandCategories turns a set of categories into the status keys that belong

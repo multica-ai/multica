@@ -295,7 +295,7 @@ func TestGrokPricingMatchesRecordedTurn(t *testing.T) {
 	// Captured payload: inputTokens 12929, cachedReadTokens 10880,
 	// outputTokens 29, totalTokens 12958, costUsdTicks 75360000. Grok counts
 	// the cached prefix inside inputTokens, so the uncached remainder is
-	// 12929 - 10880 = 2049 (see excludeACPCachedInput in pkg/agent/hermes.go).
+	// 12929 - 10880 = 2049 (see normalizeACPTokenUsage in pkg/agent/acp_usage.go).
 	const (
 		uncachedInput = int64(2049)
 		cacheRead     = int64(10880)
@@ -373,6 +373,59 @@ func TestPriceForModelAliasAlibabaMoonshotVolcengine(t *testing.T) {
 		}
 		if got != tc.want {
 			t.Fatalf("PriceForModelAlias(%q) = %+v, want %+v", tc.model, got, tc.want)
+		}
+	}
+}
+
+// TestPriceForModelAliasGLM53AndKimiK31Pro pins the newly priced SKUs and the
+// transports that report them: Hermes' `custom:glm-5.3` and opencode's
+// `zhipuai/glm-5.3` (routing prefixes reach the rows through the `(^|/|:)`
+// anchors), Kimi Code's `kimi-code/k3.1-pro`. The distinct CodeBuddy SKU
+// `kimi-k3-1`, the double-price `kimi-k3.1-pro-highspeed` variants and Kimi
+// Code's subscription coding-route alias `kimi-for-coding` (absent from
+// Moonshot's API price sheet, like `ark-code-latest`) stay unmapped rather
+// than borrowing a guessed rate.
+func TestPriceForModelAliasGLM53AndKimiK31Pro(t *testing.T) {
+	glm53 := ModelPrice{Provider: "zai", Model: "glm-5.3", InputPerM: 1.4, CacheReadPerM: 0.26, CacheWritePerM: 1.4, OutputPerM: 4.4}
+	glm53Flash := ModelPrice{Provider: "zai", Model: "glm-5.3-flash", InputPerM: 0.15, CacheReadPerM: 0.03, CacheWritePerM: 0.15, OutputPerM: 0.5}
+	kimiK31 := ModelPrice{Provider: "moonshotai", Model: "kimi-k3.1-pro", InputPerM: 2.0, CacheReadPerM: 0.20, CacheWritePerM: 2.0, OutputPerM: 10.0}
+	cases := []struct {
+		model string
+		want  ModelPrice
+	}{
+		{"glm-5.3", glm53},
+		{"custom:glm-5.3", glm53},
+		{"zhipuai/glm-5.3", glm53},
+		{"glm-5.3[1m]", glm53},
+		{"glm-5.3-flash", glm53Flash},
+		{"kimi-k3.1-pro", kimiK31},
+		{"kimi-code/k3.1-pro", kimiK31},
+		{"k3.1-pro", kimiK31},
+		{"kimi-k3.1-pro[1m]", kimiK31},
+	}
+	for _, tc := range cases {
+		got, ok := PriceForModelAlias(tc.model)
+		if !ok {
+			t.Fatalf("PriceForModelAlias(%q) did not resolve", tc.model)
+		}
+		if got != tc.want {
+			t.Fatalf("PriceForModelAlias(%q) = %+v, want %+v", tc.model, got, tc.want)
+		}
+	}
+
+	for _, model := range []string{
+		"kimi-for-coding",
+		"kimi-code/kimi-for-coding",
+		"kimi-k3-1",
+		"kimi-k3.1-pro-highspeed",
+		"kimi-code/k3.1-pro-highspeed",
+		"k3.1-pro-highspeed",
+		"glm-5.3-flashx",
+		"glm-5.3-fast",
+		"glm-5.3-extra",
+	} {
+		if got, ok := PriceForModelAlias(model); ok {
+			t.Fatalf("PriceForModelAlias(%q) unexpectedly resolved to %+v; want unmapped", model, got)
 		}
 	}
 }
@@ -496,6 +549,8 @@ func TestPriceForModelAliasAnthropicFable51(t *testing.T) {
 	// the Fable 5.1 row specifically.
 	fable51 := ModelPrice{Provider: "anthropic", Model: "claude-fable-5-1", InputPerM: 10, CacheReadPerM: 0.25, CacheWritePerM: 12.5, OutputPerM: 50}
 	fable5 := ModelPrice{Provider: "anthropic", Model: "claude-fable-5", InputPerM: 10, CacheReadPerM: 1, CacheWritePerM: 12.5, OutputPerM: 50}
+	// Fable 5.2 is its own, cheaper row.
+	fable52 := ModelPrice{Provider: "anthropic", Model: "claude-fable-5-2", InputPerM: 8, CacheReadPerM: 0.2, CacheWritePerM: 10, OutputPerM: 40}
 	cases := []struct {
 		model string
 		want  ModelPrice
@@ -522,6 +577,11 @@ func TestPriceForModelAliasAnthropicFable51(t *testing.T) {
 		{model: "claude-fable-5-1-20260901", want: fable51},
 		{model: "claude-fable-5-1-latest", want: fable51},
 		{model: "claude-fable-5-1-20260901[1m]", want: fable51},
+		{model: "claude-fable-5-2", want: fable52},
+		{model: "claude-fable-5.2", want: fable52},
+		{model: "anthropic/claude-fable-5-2", want: fable52},
+		{model: "claude-fable-5-2[1m]", want: fable52},
+		{model: "claude-fable-5-2-20261101", want: fable52},
 	}
 
 	for _, tc := range cases {
@@ -539,10 +599,11 @@ func TestPriceForModelAliasAnthropicFable51(t *testing.T) {
 	// neighbour's tier. This is the same failure the `-1` suffix had against
 	// the Fable 5 rule, so guard it on the 5.1 rule as well.
 	for _, model := range []string{
-		"claude-fable-5-2",
-		"claude-fable-5.2",
+		"claude-fable-5-3",
+		"claude-fable-5.3",
 		"claude-fable-5-10",
 		"claude-fable-5.10",
+		"claude-fable-5-2x",
 		"claude-fable-5-1x",
 	} {
 		if got, ok := PriceForModelAlias(model); ok {

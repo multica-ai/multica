@@ -263,6 +263,43 @@ export function findMarkdownLinkRanges(text: string): CodeRange[] {
   return ranges
 }
 
+// CommonMark raw-HTML open tag (spec "Raw HTML"). Unquoted values exclude
+// whitespace, so attribute boundaries are unambiguous and matching stays linear.
+const HTML_ATTRIBUTE = String.raw`\s+[A-Za-z_:][\w.:-]*(?:\s*=\s*(?:[^\s"'=<>\x60]+|'[^']*'|"[^"]*"))?`
+const HTML_OPEN_TAG_REGEX = new RegExp(
+  String.raw`<[A-Za-z][A-Za-z0-9-]*(?:${HTML_ATTRIBUTE})*\s*\/?>`,
+  'g'
+)
+const HTML_ANCHOR_CLOSE_REGEX = /<\/a\s*>/gi
+
+/**
+ * Find raw HTML open tags so auto-linkification leaves their attribute values
+ * alone: rewriting `<img src="https://…">` produces `src="[url](url)"`, which
+ * renders blank and is saved back as a broken image. An `<a>` range runs
+ * through its `</a>`, since its text is already link text.
+ */
+export function findHtmlTagRanges(text: string, codeRanges: CodeRange[] = []): CodeRange[] {
+  if (!text.includes('<')) return []
+
+  const ranges: CodeRange[] = []
+  HTML_OPEN_TAG_REGEX.lastIndex = 0
+  let match
+  while ((match = HTML_OPEN_TAG_REGEX.exec(text)) !== null) {
+    const start = match.index
+    if (isEscaped(text, start) || isInsideCode(start, codeRanges)) continue
+
+    let end = start + match[0].length
+    if (/^<a[\s>]/i.test(match[0]) && !match[0].endsWith('/>')) {
+      HTML_ANCHOR_CLOSE_REGEX.lastIndex = end
+      const close = HTML_ANCHOR_CLOSE_REGEX.exec(text)
+      if (close) end = close.index + close[0].length
+    }
+    ranges.push({ start, end })
+    HTML_OPEN_TAG_REGEX.lastIndex = end
+  }
+  return ranges
+}
+
 /**
  * Check if a link at given position is already a markdown link
  * Looks for patterns like [text](url) or [text][ref]
@@ -413,6 +450,8 @@ export function preprocessLinks(text: string): string {
 
   if (links.length === 0) return text
 
+  const htmlRanges = findHtmlTagRanges(text, codeRanges)
+
   // Build result, converting raw links to markdown links
   let result = ''
   let lastIndex = 0
@@ -423,6 +462,9 @@ export function preprocessLinks(text: string): string {
 
     // Skip if this match is inside an existing markdown link or image.
     if (markdownLinkRanges.some((range) => rangesOverlap(link, range))) continue
+
+    // Skip if inside an HTML tag's attributes or an `<a>` element.
+    if (htmlRanges.some((range) => rangesOverlap(link, range))) continue
 
     // Skip if already a markdown link
     if (isAlreadyLinked(text, link.start, link.end)) continue

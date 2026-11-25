@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 type terminalLookupDB struct {
@@ -59,7 +60,7 @@ func TestFencedTerminalLookupFailureRemainsRetryable(t *testing.T) {
 			if kind == "complete" {
 				task, changed, err = svc.CompleteTaskWithTransition(context.Background(), pgtype.UUID{}, nil, "", "", "", false, "", "", generation)
 			} else {
-				task, changed, err = svc.FailTaskWithTransition(context.Background(), pgtype.UUID{}, "cancelled", "", "", "", "cancelled", false, "", "", generation)
+				task, changed, err = svc.FailTaskWithTransition(context.Background(), pgtype.UUID{}, protocol.TaskFailRequest{Error: "cancelled", FailureReason: "cancelled", ExpectedDispatchedAt: generation.Format(time.RFC3339Nano)})
 			}
 			if !errors.Is(err, lookupErr) || task != nil || changed {
 				t.Fatalf("unknown generation must remain retryable: task=%v transitioned=%v err=%v", task, changed, err)

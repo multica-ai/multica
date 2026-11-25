@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { paths } from "./paths";
+import { paths, type IssueRouteRef } from "./paths";
 import { WORKSPACE_PAGES, type WorkspacePageKey } from "./route-icons";
 import { spaceForPath } from "./spaces";
 
@@ -15,16 +15,17 @@ describe("spaceForPath", () => {
   });
 
   it.each([
-    [ws.inbox(), "inbox"],
+    [ws.inbox(), "work"],
     [ws.myIssues(), "work"],
     [ws.issues(), "work"],
-    [ws.issueDetail("MUL-1"), "work"],
+    [ws.issueDetail("MUL-1" as IssueRouteRef), "work"],
     [ws.projectDetail("p-1"), "work"],
     [ws.agentDetail("a-1"), "team"],
     [ws.squadDetail("s-1"), "team"],
     [ws.memberDetail("m-1"), "team"],
     [ws.runtimeDetail("r-1"), "team"],
     [ws.skills(), "team"],
+    [ws.appDetail("gmail"), "team"],
     [ws.usage(), "team"],
     [ws.chatSession("c-1"), "chat"],
     [ws.autopilotDetail("ap-1"), "autopilots"],

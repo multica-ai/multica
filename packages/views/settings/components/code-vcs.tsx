@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Copy, FolderGit2, GitBranch, MoreHorizontal, RefreshCw, Unplug } from "@multica/ui/icons";
+import { FolderGit2, GitBranch, MoreHorizontal, RefreshCw, Unplug } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
@@ -436,6 +437,22 @@ function CopyField({
   copyLabel: string;
   mono?: boolean;
 }) {
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const handleClick = () => {
+    onCopy(value);
+    setCopied(true);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
     <div className="space-y-1.5">
       <Label htmlFor={id} className="text-caption">
@@ -452,10 +469,10 @@ function CopyField({
           variant="outline"
           size="icon-sm"
           className="shrink-0"
-          onClick={() => onCopy(value)}
+          onClick={handleClick}
           label={`${copyLabel}: ${label}`}
         >
-          <Copy />
+          <CopyCheckIcon copied={copied} />
         </IconButton>
       </div>
     </div>

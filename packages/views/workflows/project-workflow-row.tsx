@@ -2,27 +2,16 @@
 
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Check, ChevronDown, Settings, Workflow } from "@multica/ui/icons";
+import { Check, Workflow } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { api, clientErrorMessage } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { handoffStepCount, resolveProjectWorkflow, useIssueWorkflows, useSetProjectWorkflow } from "@multica/core/issue-workflows";
-import { useWorkspacePaths } from "@multica/core/paths";
 import { projectListOptions } from "@multica/core/projects/queries";
 import type { IssueWorkflow, IssueWorkflowMappingPlan, Project } from "@multica/core/types";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@multica/ui/components/ui/dropdown-menu";
-import { useNavigation } from "../navigation";
+import { DropdownMenuItem } from "@multica/ui/components/ui/dropdown-menu";
 import { useT } from "../i18n";
 import { WorkflowMappingDialog } from "./workflow-mapping-dialog";
-import { useWorkflowPermissions } from "./permissions";
 
 interface PendingSwitch {
   workflowId: string | null;
@@ -154,66 +143,34 @@ export function WorkflowChoiceItems({
 }
 
 /**
- * The project's Workflow property (MUL-7420). Admins and the project lead
- * switch it; everyone else sees which one it uses.
+ * The project's Workflow property (MUL-7420). It opens the project's flow
+ * panel for everyone; switching lives there (MUL-8941).
  */
-export function ProjectWorkflowControl({ project }: { project: Project }) {
+export function ProjectWorkflowControl({ project, onOpen }: { project: Project; onOpen: () => void }) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
-  const navigation = useNavigation();
-  const paths = useWorkspacePaths();
   const { workflows } = useIssueWorkflows(wsId);
-  const { canManageProject } = useWorkflowPermissions(project);
-  const { choose, busy, dialog } = useProjectWorkflowSwitch(project);
   const current = resolveProjectWorkflow(workflows, project);
 
   const name = current?.name ?? t(($) => $.workflows.default_name);
   const handoffs = current ? handoffStepCount(current) : 0;
   const handoffLabel = handoffs > 0 ? t(($) => $.workflows.settings.handoffs, { count: handoffs }) : null;
 
-  if (!canManageProject) {
-    return (
-      <span title={name} className="-ml-1 inline-flex min-w-0 items-center gap-1.5 px-1 py-0.5 text-caption">
-        <Workflow aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="truncate font-medium">{name}</span>
-      </span>
-    );
-  }
-
   return (
-    <>
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          disabled={busy}
-          render={
-            <button
-              type="button"
-              title={handoffLabel ? `${name} · ${handoffLabel}` : name}
-              className="-ml-1 inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-caption transition-colors hover:bg-accent data-popup-open:bg-accent"
-            >
-              <Workflow aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-              {/* Only the name competes for the narrow sidebar row (MUL-8119):
-                  a sibling summary, however it is weighted, still takes width
-                  from the name. The handoff count lives in the title and the
-                  picker items instead. */}
-              <span className="min-w-0 truncate font-medium">{name}</span>
-              <ChevronDown aria-hidden className="size-3 shrink-0 text-muted-foreground" />
-            </button>
-          }
-        />
-        <DropdownMenuContent align="start" className="w-80">
-          <DropdownMenuGroup>
-            <DropdownMenuLabel>{t(($) => $.workflows.project.picker_title)}</DropdownMenuLabel>
-            <WorkflowChoiceItems project={project} onChoose={(w) => void choose(w)} />
-          </DropdownMenuGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => navigation.push(`${paths.settings()}?tab=workflows`)}>
-            <Settings aria-hidden className="size-3.5" />
-            {t(($) => $.workflows.project.manage)}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      {dialog}
-    </>
+    <button
+      type="button"
+      disabled={!current}
+      onClick={onOpen}
+      aria-haspopup="dialog"
+      title={handoffLabel ? `${name} · ${handoffLabel}` : name}
+      className="-ml-1 inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-caption transition-colors hover:bg-accent disabled:pointer-events-none"
+    >
+      <Workflow aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+      {/* Only the name competes for the narrow sidebar row (MUL-8119):
+          a sibling summary, however it is weighted, still takes width
+          from the name. The handoff count lives in the title and the
+          picker items instead. */}
+      <span className="min-w-0 truncate font-medium">{name}</span>
+    </button>
   );
 }

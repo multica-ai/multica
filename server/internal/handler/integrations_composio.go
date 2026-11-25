@@ -8,8 +8,12 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/connectedapps"
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // Composio integration handlers (MUL-3720, Stage 2 MVP). A Composio connection
@@ -105,8 +109,9 @@ func (h *Handler) ComposioConnectInit(w http.ResponseWriter, r *http.Request) {
 // session cookie (expired session, SameSite/ITP stripping, private window,
 // self-hosted callback subdomain). Identity therefore comes solely from the
 // HMAC-signed `state` query param, which CompleteCallback verifies before
-// doing anything. On success the row is upserted and the browser is redirected
-// to the settings page; any failure redirects to the same page with a stable
+// doing anything. On success the row is upserted, connection requests waiting
+// on this account resume their agents, and the browser is redirected to where
+// the flow started (the settings page by default); any failure redirects to the same page with a stable
 // error code so the user is never left on a blank API response.
 func (h *Handler) ComposioCallback(w http.ResponseWriter, r *http.Request) {
 	if h.Composio == nil || !h.composioMCPAppsEnabled(r.Context()) {
@@ -118,15 +123,130 @@ func (h *Handler) ComposioCallback(w http.ResponseWriter, r *http.Request) {
 	status := q.Get("status")
 	connectedAccountID := q.Get("connected_account_id")
 
-	slug, err := h.Composio.CompleteCallback(r.Context(), state, status, connectedAccountID)
-	if err != nil {
-		// Every failure (tampered/expired state, non-success status, write
-		// error) collapses to the generic failure redirect — we never tell the
-		// browser which check failed.
-		http.Redirect(w, r, h.Composio.CallbackRedirect(slug, false), http.StatusFound)
+	result, err := h.Composio.CompleteCallback(r.Context(), state, status, connectedAccountID)
+	if errors.Is(err, composio.ErrTeamConnectRefused) {
+		// The handshake was verified and only the workspace's plan refused
+		// the account: say so, so the page offers the upgrade instead of a
+		// retry that would fail the same way.
+		http.Redirect(w, r, h.Composio.CallbackRedirectFailure(result, composio.CallbackFeatureLockedReason), http.StatusFound)
 		return
 	}
-	http.Redirect(w, r, h.Composio.CallbackRedirect(slug, true), http.StatusFound)
+	if err != nil {
+		// Every other failure (tampered/expired state, non-success status,
+		// write error) collapses to the generic failure redirect — we never
+		// tell the browser which check failed.
+		http.Redirect(w, r, h.Composio.CallbackRedirect(result, false), http.StatusFound)
+		return
+	}
+	if h.ConnectedApps != nil && !result.Team() {
+		userID, uerr := parseUUIDStrict(result.UserID)
+		workspaceID, werr := parseUUIDStrict(result.PersonalWorkspaceID)
+		if uerr == nil && werr == nil {
+			h.ConnectedApps.ResolveConnectRequests(r.Context(), workspaceID, userID, result.ToolkitSlug)
+		}
+	}
+	if h.ConnectedApps != nil && result.Team() {
+		workspaceID, werr := parseUUIDStrict(result.WorkspaceID)
+		adminID, aerr := parseUUIDStrict(result.ConnectedBy)
+		if werr == nil && aerr == nil {
+			h.ConnectedApps.ResolveTeamConnectRequests(r.Context(), workspaceID, adminID, result.ToolkitSlug)
+		}
+	}
+	http.Redirect(w, r, h.Composio.CallbackRedirect(result, true), http.StatusFound)
+}
+
+// ComposioImpactAgent is one agent that acts through a personal account.
+type ComposioImpactAgent struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	WorkspaceID   string `json:"workspace_id"`
+	WorkspaceName string `json:"workspace_name"`
+	// Running is true while a run the caller started on the agent is active.
+	Running bool `json:"running"`
+}
+
+// GetComposioConnectionImpact (GET
+// /api/integrations/composio/connections/{id}/impact) is what disconnecting
+// one of the caller's personal accounts would stop: the agents in the
+// account's workspace (every workspace, for an account made before accounts
+// belonged to one) that act through it when the caller runs them.
+func (h *Handler) GetComposioConnectionImpact(w http.ResponseWriter, r *http.Request) {
+	if h.Composio == nil || !h.composioMCPAppsEnabled(r.Context()) {
+		writeFeatureDisabled(w, "composio_not_configured", "composio integration not configured")
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	userUUID, ok := parseUUIDOrBadRequest(w, userID, "user id")
+	if !ok {
+		return
+	}
+	connUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "connection id")
+	if !ok {
+		return
+	}
+	ctx := r.Context()
+	var slug string
+	var workspaceID pgtype.UUID
+	if conn, err := h.Queries.GetUserComposioConnection(ctx, db.GetUserComposioConnectionParams{ID: connUUID, UserID: userUUID}); err == nil {
+		slug, workspaceID = connectedapps.NormalizeSlug(conn.ToolkitSlug), conn.WorkspaceID
+	} else if remote, rerr := h.remotePersonalConnection(ctx, connUUID, userUUID); rerr == nil {
+		// Personal remote app accounts are disconnected through this API too.
+		slug, workspaceID = remote.AppSlug, remote.WorkspaceID
+	} else {
+		writeError(w, http.StatusNotFound, "composio connection not found")
+		return
+	}
+	rows, err := h.Queries.ListPersonalAppAgentsForUser(ctx, db.ListPersonalAppAgentsForUserParams{
+		UserID: userUUID, ToolkitSlug: slug,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list agents")
+		return
+	}
+	agents := make([]ComposioImpactAgent, 0, len(rows))
+	ids := make([]pgtype.UUID, 0, len(rows))
+	for _, row := range rows {
+		if workspaceID.Valid && row.WorkspaceID != workspaceID {
+			continue
+		}
+		if !h.CanActFor(ctx, row.WorkspaceID, row.ID, userUUID) {
+			continue
+		}
+		ids = append(ids, row.ID)
+		agents = append(agents, ComposioImpactAgent{
+			ID: uuidToString(row.ID), Name: row.Name,
+			WorkspaceID: uuidToString(row.WorkspaceID), WorkspaceName: row.WorkspaceName,
+		})
+	}
+	if len(ids) > 0 {
+		running, err := h.Queries.ListAgentsWithActiveTasksForOriginator(ctx, db.ListAgentsWithActiveTasksForOriginatorParams{
+			AgentIds: ids, OriginatorUserID: userUUID,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list active runs")
+			return
+		}
+		active := make(map[string]bool, len(running))
+		for _, id := range running {
+			active[uuidToString(id)] = true
+		}
+		for i := range agents {
+			agents[i].Running = active[agents[i].ID]
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"agents": agents})
+}
+
+func (h *Handler) remotePersonalConnection(ctx context.Context, id, userID pgtype.UUID) (db.RemoteAppConnection, error) {
+	if h.ConnectedApps == nil {
+		return db.RemoteAppConnection{}, pgx.ErrNoRows
+	}
+	return h.Queries.GetRemoteAppConnectionForOwner(ctx, db.GetRemoteAppConnectionForOwnerParams{
+		ID: id, Scope: connectedapps.ScopePersonal, OwnerID: userID,
+	})
 }
 
 // ListComposioConnections (GET /api/integrations/composio/connections) returns
@@ -216,7 +336,13 @@ func (h *Handler) DeleteComposioConnection(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	if err := h.Composio.Disconnect(r.Context(), userUUID, connUUID); err != nil {
+	err := h.Composio.Disconnect(r.Context(), userUUID, connUUID)
+	if errors.Is(err, composio.ErrConnectionNotFound) && h.ConnectedApps != nil {
+		// Personal remote app accounts are listed with these and removed
+		// through the same endpoint.
+		_, err = h.ConnectedApps.DisconnectRemote(r.Context(), connUUID, connectedapps.ScopePersonal, userUUID)
+	}
+	if err != nil {
 		if errors.Is(err, composio.ErrConnectionNotFound) {
 			writeError(w, http.StatusNotFound, "composio connection not found")
 			return

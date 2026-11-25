@@ -1,8 +1,7 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlarmClock,
   Bell,
   Blocks,
   CreditCard,
@@ -12,7 +11,8 @@ import {
   ListPlus,
   Lock,
   MessagesSquare,
-  Plug,
+  Mic,
+  Palette,
   Search,
   Server,
   Settings,
@@ -24,7 +24,8 @@ import {
   Workflow,
   Zap,
 } from "@multica/ui/icons";
-import { useCurrentWorkspace } from "@multica/core/paths";
+import { prefersReducedMotion } from "@multica/core/appearance";
+import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useFeatureEnabled } from "@multica/core/config";
 import { useCurrentMember } from "@multica/core/permissions";
 import {
@@ -33,22 +34,25 @@ import {
 } from "@multica/core/feature-flags";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { cn } from "@multica/ui/lib/utils";
-import { resolveSettingsLocation, settingsHref } from "./settings-navigation";
+import { movedAppsHref, resolveSettingsLocation, settingsHref } from "./settings-navigation";
 import { AppLink, useNavigation } from "../../navigation";
+import { useRestoredScrollRef } from "../../platform/scroll-restoration";
 import { AccountTab } from "./account-tab";
 import { PreferencesTab } from "./preferences-tab";
+import { AppearanceTab } from "./appearance-tab";
 import { TokensTab } from "./tokens-tab";
 import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { CodeTab } from "./code-tab";
 import { ChannelsTab } from "./channels-tab";
-import { ConnectedAppsTab, useComposioAvailable } from "./connected-apps-tab";
 import { NotificationsTab } from "./notifications-tab";
 import { LabelsTab } from "./labels-tab";
 import { WorkflowsTab } from "../../workflows/workflows-tab";
 import { PropertiesTab } from "./properties-tab";
 import { QuickActionsTab } from "./quick-actions-tab";
 import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
+import { localVoiceAPI } from "../../platform/local-voice";
+import { VoiceInputTab } from "./voice-input-tab";
 import { PluginsTab } from "./plugins-tab";
 import { McpTab } from "./mcp-tab";
 import { BillingTab } from "./billing-tab";
@@ -60,7 +64,7 @@ import {
 import { searchSettings } from "./settings-search";
 import { HighlightText } from "../../search/highlight-text";
 import { useSettingsSearchIndex } from "./use-settings-search-index";
-import { WakeupsTab } from "./wakeups-tab";
+import { wakeupsHref } from "../../autopilots/components/wakeups-tab";
 import { CollapsedNavTrigger, PageHeader } from "../../layout/page-header";
 import { PanelHeader } from "../../layout/panel-nav";
 import { useListColumnCollapsed } from "../../layout/app-shell-context";
@@ -99,6 +103,24 @@ interface SettingsScopeGroup {
   subgroups: SettingsSubgroup[];
 }
 
+/**
+ * The header's title and actions sit on the body's centred column
+ * (`--settings-column`, padded `md:px-10`), not on the page gutter: on a
+ * window wider than the column they would otherwise not share an edge.
+ *
+ * `50%` is half the header's content box, which is the page minus
+ * `PAGE_GUTTER` on each side, so `50% - column / 2` is the column's offset
+ * inside it. The title's `h2` adds `px-2`, so `+ 2rem` lands its icon on the
+ * body's 40px inset. A collapsed-nav trigger before the rail takes 36px of
+ * that offset. Below `md` the page stacks and the header keeps the gutter.
+ */
+const SETTINGS_HEADER_RAIL = cn(
+  "flex min-w-0 flex-1 items-center gap-2",
+  "md:pl-[max(1rem,calc(50%-var(--settings-column)/2+2rem))]",
+  "md:group-has-[[data-sidebar=trigger]]/settings-header:pl-[max(0px,calc(50%-var(--settings-column)/2-0.25rem))]",
+  "md:pr-[max(1.5rem,calc(50%-var(--settings-column)/2+2.5rem))]",
+);
+
 const FLASH_MS = 1600;
 const ANCHOR_WAIT_MS = 1500;
 
@@ -108,14 +130,17 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
   const workspaceName = workspace?.name ?? t(($) => $.page.workspace_fallback);
   const { role } = useCurrentMember(workspace?.id ?? "");
   const isMember = role === "member";
+  // A guest (MUL-9420) has personal settings only.
+  const isGuest = role === "guest";
   const navigation = useNavigation();
+  const paths = useWorkspacePaths();
   const listCollapsed = useListColumnCollapsed();
   const pluginsEnabled = useFeatureEnabled(PLUGINS_V1_FLAG, false);
   const billingEnabled = useFeatureEnabled(
     BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
     false,
   );
-  const appsAvailable = useComposioAvailable();
+  const voiceInputAvailable = localVoiceAPI() !== undefined;
   const entry = (
     value: string,
     label: string,
@@ -124,7 +149,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
     options: { wide?: boolean; adminOnly?: boolean } = {},
   ): SettingsEntry => ({ value, label, icon, content, ...options });
 
-  const groups: SettingsScopeGroup[] = [
+  const scopeGroups: SettingsScopeGroup[] = [
     {
       key: "personal",
       label: t(($) => $.page.groups.personal),
@@ -140,6 +165,12 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               <PreferencesTab />,
             ),
             entry(
+              "appearance",
+              t(($) => $.page.tabs.appearance),
+              Palette,
+              <AppearanceTab />,
+            ),
+            entry(
               "notifications",
               t(($) => $.page.tabs.notifications),
               Bell,
@@ -151,8 +182,8 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               Keyboard,
               <KeyboardShortcutsTab />,
             ),
-            ...(appsAvailable
-              ? [entry("apps", t(($) => $.page.tabs.apps), Plug, <ConnectedAppsTab />)]
+            ...(voiceInputAvailable
+              ? [entry("voice-input", t(($) => $.page.tabs.voice_input), Mic, <VoiceInputTab />)]
               : []),
             entry("tokens", t(($) => $.page.tabs.tokens), KeyRound, <TokensTab />),
           ],
@@ -191,10 +222,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
           entries: [
             entry("workflows", t(($) => $.page.tabs.workflows), Workflow, <WorkflowsTab />, {
               wide: true,
-            }),
-            entry("wakeups", t(($) => $.page.tabs.wakeups), AlarmClock, <WakeupsTab />, {
-              wide: true,
-              adminOnly: true,
             }),
             entry("labels", t(($) => $.page.tabs.labels), Tags, <LabelsTab />, {
               wide: true,
@@ -252,10 +279,24 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
         ]
       : []),
   ];
+  const groups = isGuest
+    ? scopeGroups.filter((group) => group.key !== "workspace")
+    : scopeGroups;
   const allEntries = groups.flatMap((group) =>
     group.subgroups.flatMap((subgroup) => subgroup.entries),
   );
   const location = resolveSettingsLocation(navigation.searchParams);
+  // Wakeup defaults moved to the issue wakeups list; old links land there.
+  const wakeupsMoved = location.tab === "wakeups";
+  const wakeupsTarget = wakeupsHref(paths.autopilots());
+  // The workspace's apps and accounts moved to their own page.
+  const appsMoved = location.tab === "apps";
+  const appsTarget = movedAppsHref(paths.apps(), navigation.searchParams, location.section);
+  const { replace } = navigation;
+  useEffect(() => {
+    if (wakeupsMoved) replace(wakeupsTarget);
+    else if (appsMoved) replace(appsTarget);
+  }, [wakeupsMoved, wakeupsTarget, appsMoved, appsTarget, replace]);
   const candidate =
     location.tab === "billing" && !billingEnabled ? "workspace" : location.tab;
   const active =
@@ -314,6 +355,16 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
   // page. Tab content can still be loading on the first frame, so wait briefly
   // for the anchor before scrolling it into view and flashing it.
   const contentRef = useRef<HTMLDivElement>(null);
+  // Every settings page shares the route, so each restores its own offset.
+  const contentKey = `${active.value}:${location.integration ?? ""}`;
+  const restoreScrollRef = useRestoredScrollRef(`settings:${contentKey}`);
+  const attachContent = useCallback(
+    (el: HTMLDivElement | null) => {
+      contentRef.current = el;
+      restoreScrollRef(el);
+    },
+    [restoreScrollRef],
+  );
   useEffect(() => {
     const anchor = location.section;
     if (!anchor) return;
@@ -331,12 +382,9 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
         }
         return;
       }
-      const reduceMotion =
-        typeof window.matchMedia === "function" &&
-        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       target.scrollIntoView?.({
         block: "center",
-        behavior: reduceMotion ? "auto" : "smooth",
+        behavior: prefersReducedMotion() ? "auto" : "smooth",
       });
       target.setAttribute("data-flash", "true");
       flashTimer = setTimeout(() => target.removeAttribute("data-flash"), FLASH_MS);
@@ -421,7 +469,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
   );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background md:flex-row">
+    <div data-mc="settings-page" className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background md:flex-row">
       <ListColumn
         collapsed={listCollapsed}
         // Below md the navigation stacks above the content as a select.
@@ -455,10 +503,12 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
             )}
           </select>
         </div>
-        <div className="relative mx-3 mb-3 hidden shrink-0 md:block">
+        {/* Same insets as a nav row: the border on the row highlight's edge,
+            the glyph on the icon column, the text on the label column. */}
+        <div className="relative mx-2 mb-3 hidden shrink-0 md:block">
           <Search
             aria-hidden="true"
-            className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+            className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
           />
           <input
             type="search"
@@ -488,7 +538,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
             placeholder={t(($) => $.page.search)}
             aria-label={t(($) => $.page.search)}
             aria-controls={query ? "settings-search-results" : undefined}
-            className="h-8 w-full rounded-lg border border-input bg-transparent pl-8 pr-8 text-body outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30 [&::-webkit-search-cancel-button]:hidden"
+            className="h-8 w-full rounded-lg border border-input bg-transparent pl-[37px] pr-8 text-body outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30 [&::-webkit-search-cancel-button]:hidden"
           />
           {query ? (
             <TooltipHint label={t(($) => $.page.search_clear)}>
@@ -505,7 +555,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
         </div>
         <nav
           aria-label={t(($) => $.page.title)}
-          className="hidden min-h-0 overflow-y-auto px-3 pb-6 md:block"
+          className="hidden min-h-0 overflow-y-auto px-2 pb-6 md:block"
         >
           {query ? (
             searchResults
@@ -533,39 +583,43 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
           )}
         </nav>
       </ListColumn>
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <PageHeader leading={listCollapsed ? <CollapsedNavTrigger /> : false}>
-          <div className="flex min-w-0 flex-1 items-center gap-2">
-            <h2 className="flex min-w-0 items-center gap-2 px-2 text-body font-medium">
-              <ActiveIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-              {detailOpen ? (
-                <AppLink
-                  href={href(active.value)}
-                  className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  {active.label}
-                </AppLink>
-              ) : (
-                <span className="truncate">{active.label}</span>
-              )}
-              <span ref={setHeaderTrail} className="contents" />
-            </h2>
-            <span ref={setHeaderMeta} className="contents" />
+      <div
+        className="flex min-h-0 min-w-0 flex-1 flex-col"
+        style={{ "--settings-column": active.wide ? "64rem" : "56rem" } as React.CSSProperties}
+      >
+        <PageHeader
+          className="group/settings-header"
+          leading={listCollapsed ? <CollapsedNavTrigger /> : false}
+        >
+          <div className={SETTINGS_HEADER_RAIL}>
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <h2 className="flex min-w-0 items-center gap-2 px-2 text-body font-medium">
+                <ActiveIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                {detailOpen ? (
+                  <AppLink
+                    href={href(active.value)}
+                    className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    {active.label}
+                  </AppLink>
+                ) : (
+                  <span className="truncate">{active.label}</span>
+                )}
+                <span ref={setHeaderTrail} className="contents" />
+              </h2>
+              <span ref={setHeaderMeta} className="contents" />
+            </div>
+            <div ref={setHeaderActions} className="flex shrink-0 items-center gap-2 empty:hidden" />
           </div>
-          <div ref={setHeaderActions} className="flex shrink-0 items-center gap-2 empty:hidden" />
         </PageHeader>
         <SettingsHeaderContext.Provider value={headerSlots}>
           <div
-            ref={contentRef}
-            key={`${active.value}:${location.integration ?? ""}`}
+            ref={attachContent}
+            key={contentKey}
+            data-tab-scroll-root={`settings:${contentKey}`}
             className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain"
           >
-            <div
-              className={cn(
-                "mx-auto w-full px-4 py-6 sm:px-6 md:px-10 md:py-8",
-                active.wide ? "max-w-5xl" : "max-w-4xl",
-              )}
-            >
+            <div className="mx-auto w-full max-w-(--settings-column) px-4 py-6 sm:px-6 md:px-10 md:py-8">
               {active.content}
             </div>
           </div>

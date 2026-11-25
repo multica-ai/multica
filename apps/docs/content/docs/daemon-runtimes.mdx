@@ -49,7 +49,7 @@ The daemon runs in the background by default. Common commands:
 
 | Command | Purpose |
 | --- | --- |
-| `multica daemon status` | Show daemon and connection status |
+| `multica daemon status` | Show daemon and connection status, including why any detected agent was skipped |
 | `multica daemon logs -f` | Follow the logs |
 | `multica daemon restart` | Restart the daemon and re-detect local tools |
 | `multica daemon stop` | Stop the daemon |
@@ -60,6 +60,22 @@ To place run workspaces on another disk, persist a root for the current profile 
 On startup, the daemon detects supported AI coding tools on `PATH` and registers runtimes for the workspaces you are allowed to connect. If a tool was just installed or signed in, restart the daemon to detect it.
 
 The daemon needs at least one built-in supported AI coding tool detected before it will start. Install methods and executable names are in [Install AI coding tools](/install-agent-runtime).
+
+### Run in a Linux container [#linux-container]
+
+Install the Multica CLI and at least one supported coding tool in the image. Run the container as a non-root user. Set `MULTICA_SERVER_URL` to the API URL reachable from inside the container. Mount a personal access token as a secret and pass it to login on standard input. Replace `my-workspace` with your workspace slug.
+
+```bash
+multica --profile container login --token < /run/secrets/multica-pat
+multica --profile container workspace switch my-workspace
+exec multica --profile container daemon start --foreground --no-auto-update
+```
+
+Run login and workspace selection when provisioning the profile. For a long-lived runtime, mount the container user's `~/.multica` on writable persistent storage. It stores the profile's access token and the daemon ID. If the directory is lost when the container is replaced, you must log in again and the daemon registers a new runtime. Agents assigned to the original runtime cannot pick up tasks in the replacement container.
+
+To preserve run directories and the `.repos` cache across container replacements, mount the workspaces root on writable persistent storage. With `--profile container`, the default workspaces root is `~/multica_workspaces_container`.
+
+Configure the coding tool's own authentication separately. Let the container supervisor restart the foreground daemon, and upgrade the CLI by replacing the image.
 
 ### Start at login [#autostart]
 
@@ -80,6 +96,12 @@ The registered command is `multica daemon start --foreground` for that profile, 
 - If a file Multica did not create already sits at that location (your own systemd unit, for example), `enable` and `disable` refuse to modify it.
 - A daemon launched by Desktop is managed by Desktop; `daemon start` neither hints nor refreshes a registration for it.
 
+### Updating the CLI from Runtimes [#updating-cli]
+
+When a newer release is available for a standalone CLI daemon, runtime owners and workspace admins can click **Update** on the **Runtimes** page. If the machine is running tasks and the daemon supports queued updates, the update is held without interrupting active work, and the **Runtimes** page shows **Updates when idle** with the running task count and a **Cancel** button across every runtime on that machine.
+
+Installation starts automatically once the last running task finishes. Only one unfinished update is allowed per machine; a queued update expires after 24 hours if the machine never becomes idle, and can be cancelled until installation begins. Daemons on older CLI versions without queue support refuse remote updates while busy; retry once the machine is idle. Daemons launched by Multica Desktop are managed by Desktop and upgraded with the Desktop app instead.
+
 ## Dispatch and online status
 
 Once registered, a runtime keeps a persistent connection. When a new run enters the queue, the server notifies the matching daemon; the daemon also polls periodically so a dropped connection does not lose the notification. When a runtime is online with spare capacity, runs usually start immediately.
@@ -91,7 +113,7 @@ When a runtime is offline:
 - Runs already queued wait for the runtime to recover; they do not move to another computer. A queued run fails only once the runtime has stopped heartbeating for longer than the reconnect grace **and** the run has itself been queued that long. A runtime that is merely busy keeps its backlog, and work assigned to an already-offline runtime still gets a full grace period to wait.
 - Runs already in progress do not fail right away. They fail with `runtime_offline` only after the runtime's heartbeat has been missing longer than the reconnect grace (`MULTICA_RUNTIME_RECONNECT_GRACE`, 3 hours by default); eligible issue or chat runs can retry automatically.
 - When the daemon starts again, it re-registers its runtimes and reclaims runs that did not end cleanly last time.
-- A runtime offline for more than 7 days with no agents bound to it (including archived ones) is cleaned up automatically.
+- A runtime offline for more than 7 days with no active user agents or unfinished tasks is cleaned up automatically; archived agents and task history are preserved. For unbound legacy custom profiles, only instances on machines owned by the profile creator are kept until an administrator selects the machine.
 
 In the demo below, a run assigned while the computer is offline waits in the queue and is claimed only after the computer comes back online.
 
@@ -103,9 +125,13 @@ Detailed states and retry rules are in [Runs](/tasks).
 
 One daemon executes at most 20 runs at a time by default; each agent at most 6. Effective concurrency is the smaller of the two.
 
+Runs waiting for a Direct local directory do not use a daemon execution slot. They reacquire a slot before starting and still count as owned work for shutdown and update safety.
+
 Once a limit is reached, new runs keep queueing. Adjust a single agent's concurrency in the agent settings, and the machine-wide cap with `MULTICA_DAEMON_MAX_CONCURRENT_TASKS`. Parallel runs compete for machine capacity, tool account quota, and the same working directory all at once.
 
 Token usage, cost, and failures across runs are summarized per workspace on the [Analytics](/analytics) page; `multica runtime usage <runtime-id>` shows token usage for a single runtime.
+
+For Claude Code and Codex runtimes, the runtime's page also shows **Limits**: how much of the plan's 5-hour session and weekly windows the CLI account has used, when each resets, and whether usage is running ahead of the time elapsed. The CLI reports these while it runs tasks, so the numbers are as of the runtime's latest run. API-key accounts have no plan limits to show.
 
 ## Local MCP configuration [#local-mcp]
 
@@ -122,7 +148,7 @@ Once an agent has an MCP configuration (even an empty one), Multica generates a 
 | Claude Code | `mcpServers` in `~/.claude.json`, plus MCP servers from enabled plugins |
 | Codex | `mcp_servers` in `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`) |
 | Cursor Agent | `mcpServers` in `~/.cursor/mcp.json` |
-| OpenCode | `mcp` in `$XDG_CONFIG_HOME/opencode/opencode.json` (default `~/.config/opencode/opencode.json`) |
+| OpenCode | `mcp` in `$XDG_CONFIG_HOME/opencode/opencode.json` and `opencode.jsonc` in the same directory (default `~/.config/opencode/`). The JSONC file takes precedence. |
 | OpenClaw | `mcp.servers` in `$CLAWDBOT_CONFIG_PATH`, or in `$OPENCLAW_STATE_DIR/openclaw.json` (default `~/.openclaw/openclaw.json`) |
 | CodeArts | `mcp` in `~/.codeartsdoer/codearts_cli.json` or `codearts_cli.jsonc` |
 
@@ -130,13 +156,41 @@ CodeBuddy, Kimi CLI, and Pi load their user-level configuration themselves at st
 
 The merge happens on the runtime's computer; the commands, URLs, headers, and environment values of local servers are never uploaded. The "Inherited from runtime" list on the agent's **MCP** tab shows only each server's name, transport, source, and whether it is enabled; one shadowed by a same-named agent server is marked "Overridden by Multica". If a local configuration file cannot be parsed, the daemon logs a warning and that run uses only the agent's configuration.
 
+### Cursor MCP logins [#cursor-mcp-login]
+
+Cursor stores MCP OAuth logins per project directory, and every run has its own directory. The daemon therefore keeps one login file per Cursor agent on the runtime's computer, `cursor-mcp-auth/<agent-id>/mcp-auth.json` in the Multica config directory, and gives each run a copy of it. The daemon merges the changes Cursor makes to that copy back into the agent's file every few seconds and when the run ends, so a token one run refreshes reaches the agent's later runs. Log in to a server such as Mobbin once and the agent's later runs on that computer use the login. It is separate from the logins of your own Cursor projects, so a run never signs you out there. Every run of the agent on that computer uses it, including runs other members trigger.
+
+When the agent has an MCP configuration, each run gets its own Cursor data directory, and the run's `mcp-auth.json` there is the copy. When it has none, the run uses your own Cursor data directory (`~/.cursor`, or the daemon's `CURSOR_DATA_DIR`) and the MCP servers configured there; the daemon only replaces the `mcp-auth.json` that Cursor keeps for the run's directory under `projects/` with a copy of the agent's file. The copy is removed when the run's directory is cleaned up.
+
+Without an MCP configuration, two kinds of run get no copy, because their Cursor project is one you work in too and the copy would replace your own login there: runs that work in place in a project's local directory, and runs whose directory is enclosed by a git repository, such as a dotfiles repository in your home folder, since Cursor then treats that repository as the project. These runs use whatever login Cursor already holds for that directory, and their transcript gives no login command; log in by running `cursor-agent mcp login <server>` in that directory yourself.
+
+If a server still needs a login, the run's transcript says which one and gives the command to run on the runtime's computer. For an agent with an MCP configuration, for example:
+
+```bash
+cd ~/.multica/cursor-mcp-auth/<agent-id>/login/workdir && CURSOR_DATA_DIR=~/.multica/cursor-mcp-auth/<agent-id>/login/cursor-data cursor-agent mcp login mobbin
+```
+
+For an agent without one, the command uses your own Cursor data directory:
+
+```bash
+cd ~/.multica/cursor-mcp-auth/<agent-id>/user-login/workdir && CURSOR_DATA_DIR=~/.cursor cursor-agent mcp login mobbin
+```
+
+Both commands run in a login folder kept next to the agent's login file, so they still work after the run's own directory has been cleaned up.
+
+The login applies from the agent's next run, which collects it from the login folder before it starts; the current run does not pick it up. To use a login file of your own instead, set `CURSOR_MCP_AUTH_SOURCE` in the agent's environment variables to an absolute path to an `mcp-auth.json` or the Cursor project directory containing it; it takes priority over the per-agent file. Two runs of one agent that refresh the same token at the same moment can still sign each other out; log in again if that happens.
+
 ## Cleanup and retention [#cleanup]
 
 The daemon runs its first cleanup about 30 seconds after starting, then every 2 hours. Directories in use by a running run are never cleaned. `multica daemon disk-usage` shows usage per workspace or per run. The durations below are defaults; the matching `MULTICA_GC_*` variables are in [Environment variables](/environment-variables#gc).
 
+The per-run `MODE` column marks in-place runs with `in place`. JSON reports these rows as `local_directory: true` when the run metadata identifies the mode.
+
 ### Run directories
 
-Each run gets a directory under the workspaces root (default `~/multica_workspaces`) holding the checked-out code, output, and logs; later runs on the same issue reuse it. The whole directory is removed:
+Each run gets a directory under the workspaces root (default `~/multica_workspaces`) holding the checked-out code, output, and logs; later runs on the same issue reuse it.
+
+The table covers whole-directory cleanup for directories managed by Multica. Runs that work in place in a project's local directory retain their separate record directory, as described below.
 
 | Run source | When it is removed |
 |---|---|
@@ -145,15 +199,19 @@ Each run gets a directory under the workspaces root (default `~/multica_workspac
 | Autopilot (Run Only), quick create | On the next cleanup after the run ends |
 | No owner found (missing metadata, or the server no longer has the record) | After 72 hours without changes to the directory |
 
-While the issue is still open, 12 hours after a run completes only regenerable content is removed: `node_modules`, `.next`, and `.turbo` directories, plus the cache the daemon prepares for Codex. Everything else stays. A daemon connected to Multica Cloud also removes the whole directory 14 days after the run completes, whether or not the issue is closed; self-hosted daemons do not do this by default.
+While the issue is still open, 12 hours after a run completes only regenerable content is removed: `node_modules`, `.next`, and `.turbo` directories, plus these exact paths under `codex-home`: `.sandbox-bin`, `.tmp/plugins`, `.tmp/marketplaces`, and `cache/remote_plugin_catalog`. Other files, including SQLite databases and their WAL files, stay. Managed issue-run directories are also removed 14 days after completion by default, whether or not the issue is closed.
 
-For an unarchived chat in a work directory managed by Multica, the daemon applies the same regenerable content cleanup 12 hours after its last run ends by default. After a successful cleanup, the daemon skips repeat scans for that run. A later completed run becomes eligible again after the same delay. When a chat runs directly in a project's local directory, this cleanup is limited to the daemon's `codex-home/.sandbox-bin` cache in the run's record directory.
+For an unarchived chat in a work directory managed by Multica, the daemon applies the same regenerable content cleanup 12 hours after its last run ends by default. After a successful cleanup, the daemon skips repeat scans for that run. A later completed run becomes eligible again after the same delay. For chats in a project's local directory, only the exact Codex cache paths above are cleaned.
 
-A run on a project's local directory works in your own directory, which the daemon never touches. The record directory Multica creates for that run (logs and so on) is kept too; only regenerable caches inside it are cleaned.
+When a run works in place, its working directory is your project directory. The daemon leaves it alone during cleanup. Its record directory keeps daemon logs and `output/`. After `MULTICA_GC_COMPLETED_TASK_TTL` (14 days by default), the daemon removes its entire `codex-home` if session history is stored outside the record directory. Homes with task-local session history are retained. Set the variable to `0` to disable home expiry. A later run rebuilds the home and reconnects the conversation store; that store still follows its own session retention policy below.
+
+The record directory can therefore still appear in `multica daemon disk-usage --by-task` after the run ends. The completed-task TTL does not remove the record directory or expire other provider homes, such as a retained `hermes-home`.
 
 ### Shared repository cache
 
 The daemon keeps one bare-repository cache per workspace repository, under `.repos/<workspace-id>/` in the workspaces root. Runs of the same workspace on this computer share it: each checkout creates a git worktree from the cache and only fetches new commits instead of cloning again. Codex runs on Linux and Windows are the exception and get a standalone clone with `.git` inside the work directory, because Codex's workspace-write sandbox leaves Git metadata outside the work directory read-only.
+
+New cache directory names use up to 16 ASCII characters from the repository name plus a 12-character hash, keeping long remote URLs from lengthening Git's metadata paths on Windows. During sync or checkout, an existing cache moves to the short name if no registered worktrees remain after pruning stale entries and the destination does not exist. Its contents are preserved without cloning again. Caches with registered worktrees keep their original paths so linked checkouts continue working. If migration fails, the daemon logs a warning and continues using the existing cache; a later attempt can retry.
 
 A cache is removed only when all three hold: no workspace or project references the repository any more, no worktrees remain, and no run has checked out from it for 30 days. It is cloned again when needed. After removing stale agent branches, the daemon runs `git reflog expire --expire=30.days --all` and `git gc --prune=30.days` on the cache while no runs are executing.
 
@@ -164,6 +222,7 @@ A cache is removed only when all three hold: no workspace or project references 
 | Codex session records (one per agent per issue) | `multica-sessions/` in the Codex home (default `~/.codex`) | Removed after 14 days unused; later runs on that issue can no longer resume the earlier Codex session |
 | Hermes session records | `hermes-sessions/` in the Multica config directory (default `~/.multica`; `~/.multica/profiles/<name>` for a named profile) | Removed after 14 days unused |
 | Hermes memory (one per agent) | `hermes-state/` in the same directory | Removed after 90 days unused |
+| Cursor MCP logins (one per agent) | `cursor-mcp-auth/` in the same directory | Kept |
 | Each run's private temporary directory (`TMPDIR`) | `multica-task-*` in the system temp directory | Removed when the run ends; if the daemon was killed, a later cleanup removes it |
 
 Hermes issue and chat tasks use their conversation's session directory as an isolated `HERMES_HOME`, with a regular `state.db` and its SQLite journals inside it. This works with both in-process ACP and gateway-backed Hermes. Existing session stores are reused, and task-local history is migrated before the next run starts.
@@ -187,6 +246,10 @@ To share it with selected people instead, open the runtime's detail page, choose
 When the owner removes members, narrows a public runtime to specific members, or makes it **private** again, Multica shows the affected agents and active runs, including Agent Builder sessions, before applying the change. Confirmation unbinds those teammates' agents, cancels their queued, dispatched, running, local-directory-waiting and deferred runs with `runtime_access_revoked`, and pauses active autopilots assigned to the unbound agents. Agents and runs belonging to the owner or to members who keep access are unaffected. A changed plan requires renewed confirmation; concurrent chat writes may require a retry. To resume work, bind the agent to an accessible runtime, then explicitly resume its paused autopilots.
 
 Cancellation preserves chat history and stores draft/attachment recovery data on the server. Web and desktop use the existing draft recovery UI; mobile does not yet expose that recovery UI. A started turn with no output waits for the daemon's cancellation acknowledgement or the server's finalize grace period before deciding whether to restore the input. A connected daemon observes cancellation through its regular check. If the computer is offline, server-side access is still revoked immediately, but the local process may continue until it receives cancellation after reconnecting; the server cannot guarantee an immediate remote stop.
+
+### Remove a built-in local runtime [#remove-a-runtime]
+
+On the runtime detail page, open the actions menu and choose **Delete runtime**. If agents are still bound, review the list and confirm that you want to unbind them. Their instructions, chats, and run history are preserved. Queued and in-progress runs are canceled. Multica pauses active autopilots assigned to those agents or to squads they lead. Bind the agents to another runtime before assigning new work. After rebinding, manually resume the paused autopilots. A daemon that still detects the tool can register it again.
 
 ## Custom runtime profiles
 
@@ -217,9 +280,24 @@ The table lists the variables that custom runtimes can use today. It is intentio
 
 The server determines authorship for requests made with `MULTICA_TOKEN`; writes such as issue comments are attributed to the assigned agent and active task. For the token's complete binding, permissions, attribution, 24-hour maximum lifetime, and cleanup behavior, see [Temporary tokens for agent runs](/auth-tokens#temporary-tokens-for-agent-runs).
 
-<Callout type="warning">
-These values live in the runtime process's real environment. Any child process the runtime starts inherits all of them by default, including `MULTICA_TOKEN`. If a child should not hold the credential, strip it explicitly; do not rely on process isolation that is not there. The exception runs the other way: tools that filter their own subprocess environment may require an explicit allow rule. For example, Codex's shell tool drops names containing `TOKEN`, `KEY`, or `SECRET`, so the daemon installs a managed shell policy that allows the required task variables. Keep the token in process environments only—never in a prompt, log, repository file, or persistent configuration. A child shares the parent task's identity and permissions; it does not receive a new, independently scoped identity.
+<Callout type="info">
+Built-in **Codex** and **Claude Code** runtimes reuse warm provider processes across follow-up turns by default. During warm-pooled runs, per-task variables that change every turn (`MULTICA_TOKEN`, `MULTICA_TASK_ID`, `MULTICA_TASK_CONFIG_ROOT`, `MULTICA_TASK_SLOT`) are provided to the daemon's `multica` CLI through a private per-turn overlay file rather than set in the long-lived provider process's static environment, so they are not guaranteed to appear in the provider process environment or arbitrary child scripts. Custom runtime profile commands do not use the warm pool and continue receiving all variables directly in the process environment. Set `MULTICA_WARM_POOL=0` on the daemon if a built-in Codex or Claude Code workflow needs the legacy direct environment variables.
 </Callout>
+
+<Callout type="warning">
+When injected directly into the process environment (including custom runtime profiles and runs with `MULTICA_WARM_POOL=0`), these values live in the runtime process's real environment. Any child process the runtime starts inherits all of them by default, including `MULTICA_TOKEN`. If a child should not hold the credential, strip it explicitly; do not rely on process isolation that is not there. The exception runs the other way: tools that filter their own subprocess environment may require an explicit allow rule. For example, Codex's shell tool drops names containing `TOKEN`, `KEY`, or `SECRET`, so the daemon installs a managed shell policy that allows the required task variables. Keep the token in process environments only—never in a prompt, log, repository file, or persistent configuration. A child shares the parent task's identity and permissions; it does not receive a new, independently scoped identity.
+</Callout>
+
+### Secrets managers in the launch command [#secrets-managers]
+
+Some teams start the agent through a secrets manager, with a command such as `doppler run -- claude`. The secrets manager starts after the daemon and rebuilds the agent's environment from your secrets project. If that project also stores a `MULTICA_TOKEN`, often a personal `mul_` token kept for scripts, it replaces the task token, and every Multica CLI call inside the task fails with `agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token`. When the CLI sees a `mul_` token next to `MULTICA_TASK_ID`, the error points to this section.
+
+Let the daemon's values win:
+
+- **Doppler**: add `--preserve-env=MULTICA_TOKEN` before `--`, for example `doppler run --preserve-env=MULTICA_TOKEN -- claude`. If the project defines other `MULTICA_` variables, list them separated by commas: `--preserve-env=MULTICA_TOKEN,MULTICA_SERVER_URL`. Doppler only accepts the `=` form; `--preserve-env MULTICA_TOKEN` with a space does not work. The option has no effect together with `--mount`.
+- **Other tools**: use the tool's option that lets existing environment variables take precedence, or remove `MULTICA_` variables from the secrets project used for agent runs.
+
+A shell profile such as `~/.zshrc` that exports `MULTICA_TOKEN` replaces the task token the same way when the agent's shell loads it. Remove that export, or set it only when `MULTICA_TASK_ID` is empty.
 
 ### Creating a profile
 
@@ -230,7 +308,9 @@ Only workspace owners and admins can create, edit, or delete custom runtime prof
 3. Choose the protocol family the command is actually compatible with.
 4. Fill in the name, command, and fixed arguments, then save.
 
-The profile is shared across the workspace. Each connected computer looks up the command on its own; only computers that can resolve it on `PATH` register the corresponding runtime. Creating a profile does not install the command, and it does not sign other members in to the tool.
+A new profile belongs only to the computer selected when you create it. Only that computer’s daemon downloads and registers it; other computers are unaffected, even if they have the same command installed. If the command cannot be resolved, its error appears only on the selected computer. Creating a profile does not install the command or sign in to the tool.
+
+For older profiles, **Machine** in **Edit custom runtime** is optional: leave **Keep current machines** selected to change only the name, command, or other settings. Selecting a machine removes unused copies on other machines; active agents or unfinished tasks there block the binding. Archived agents and task history are preserved. Until the profile is bound, instances on machines owned by its creator are kept so the daemon can reconnect. Other members’ unused copies follow the normal seven-day offline cleanup.
 
 The command field takes an executable and arguments, not a shell script. Plain arguments, quotes, and backslash escapes work; pipes, redirects, `&&`, `;`, backticks, and environment variable expansion do not. When you need those behaviors, put them in a wrapper script and use that script as the command.
 
@@ -265,7 +345,10 @@ Remove the path override:
 multica runtime profile unset-path <profile-id>
 ```
 
-Editing a profile only affects runs claimed afterwards. Before deleting a profile, deal with the active agents still bound to its runtimes. Deleting only the runtime instance on one computer does not delete the profile — a running daemon will re-register it.
+Editing a profile only affects runs claimed afterwards.
+
+- **Retire one machine.** You cannot delete a runtime instance directly while its custom profile exists. Stop the daemon on the retired machine so it cannot re-register the instance. An offline instance is eligible for automatic cleanup after 7 days, once it has no active agents or unfinished tasks. If a legacy profile still keeps a copy on its creator’s machine, edit the profile and select the machine that should keep it.
+- **Retire the profile.** Deleting a profile removes its runtimes on every registered machine. First move active agents to runtimes outside the profile, or archive agents that can be retired. If you cannot manage a blocking agent, ask its owner to move or archive it.
 
 ## Qoder Cloud Agents remote runtime
 

@@ -16,6 +16,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
 
+const managedCodexArtifactPaths = "codex-home/.sandbox-bin,codex-home/.tmp/marketplaces,codex-home/.tmp/plugins,codex-home/cache/remote_plugin_catalog"
+
 func writeFile(t *testing.T, path string, size int) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -53,10 +55,11 @@ func TestScanDiskUsage_AggregatesAndCategorizes(t *testing.T) {
 	taskA2 := filepath.Join(root, wsA, "bbbbbbbb")
 	writeFile(t, filepath.Join(taskA2, "workdir/notes.md"), 500)
 	mustWriteMeta(t, taskA2, execenv.GCMeta{
-		Kind:          execenv.GCKindChat,
-		ChatSessionID: "chat-1",
-		WorkspaceID:   wsA,
-		CompletedAt:   time.Now().Add(-1 * time.Hour),
+		Kind:           execenv.GCKindChat,
+		ChatSessionID:  "chat-1",
+		WorkspaceID:    wsA,
+		CompletedAt:    time.Now().Add(-1 * time.Hour),
+		LocalDirectory: true,
 	})
 
 	taskB1 := filepath.Join(root, wsB, "cccccccc")
@@ -188,6 +191,9 @@ func TestScanDiskUsage_AggregatesAndCategorizes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal report: %v", err)
 	}
+	if got := strings.Count(string(raw), `"local_directory":true`); got != 1 {
+		t.Fatalf("expected exactly one in-place run, got %d: %s", got, raw)
+	}
 	for _, want := range []string{
 		`"kind"`,
 		`"parent_status"`,
@@ -310,27 +316,30 @@ func TestScanDiskUsage_ManagedCodexSandboxIsExactAndDeduplicated(t *testing.T) {
 	taskDir := filepath.Join(root, wsID, "tttttttt")
 	writeFile(t, filepath.Join(taskDir, "codex-home/.sandbox-bin/codex.exe"), 300)
 	writeFile(t, filepath.Join(taskDir, "workdir/repo/.sandbox-bin/cache"), 400)
+	for _, rel := range []string{".tmp/plugins", ".tmp/marketplaces", "cache/remote_plugin_catalog"} {
+		writeFile(t, filepath.Join(taskDir, "codex-home", rel, "catalog"), 100)
+	}
 
 	report, err := ScanDiskUsage(root, nil)
 	if err != nil {
 		t.Fatalf("ScanDiskUsage managed-only: %v", err)
 	}
-	if got := report.Tasks[0].SizeBytes; got != 700 {
-		t.Fatalf("size_bytes=%d, want 700", got)
+	if got := report.Tasks[0].SizeBytes; got != 1000 {
+		t.Fatalf("size_bytes=%d, want 1000", got)
 	}
-	if got := report.Tasks[0].ArtifactSizeBytes; got != 300 {
-		t.Fatalf("artifact_size_bytes=%d, want exact managed 300", got)
+	if got := report.Tasks[0].ArtifactSizeBytes; got != 600 {
+		t.Fatalf("artifact_size_bytes=%d, want exact managed 600", got)
 	}
-	if got := strings.Join(report.ManagedArtifactSubpaths, ","); got != "codex-home/.sandbox-bin" {
-		t.Fatalf("managed artifact paths=%q, want codex-home/.sandbox-bin", got)
+	if got := strings.Join(report.ManagedArtifactSubpaths, ","); got != managedCodexArtifactPaths {
+		t.Fatalf("managed artifact paths=%q, want %s", got, managedCodexArtifactPaths)
 	}
 
 	report, err = ScanDiskUsage(root, []string{".sandbox-bin"})
 	if err != nil {
 		t.Fatalf("ScanDiskUsage broad basename: %v", err)
 	}
-	if got := report.Tasks[0].ArtifactSizeBytes; got != 700 {
-		t.Fatalf("artifact_size_bytes=%d, want 700 without double counting", got)
+	if got := report.Tasks[0].ArtifactSizeBytes; got != 1000 {
+		t.Fatalf("artifact_size_bytes=%d, want 1000 without double counting", got)
 	}
 }
 
@@ -547,8 +556,8 @@ func TestScanDiskUsageRoots_SumsAcrossRoots(t *testing.T) {
 	if agg.TotalWorkspaceCount != 2 {
 		t.Fatalf("TotalWorkspaceCount = %d, want 2", agg.TotalWorkspaceCount)
 	}
-	if got := strings.Join(agg.ManagedArtifactSubpaths, ","); got != "codex-home/.sandbox-bin" {
-		t.Fatalf("managed artifact paths=%q, want codex-home/.sandbox-bin", got)
+	if got := strings.Join(agg.ManagedArtifactSubpaths, ","); got != managedCodexArtifactPaths {
+		t.Fatalf("managed artifact paths=%q, want %s", got, managedCodexArtifactPaths)
 	}
 }
 

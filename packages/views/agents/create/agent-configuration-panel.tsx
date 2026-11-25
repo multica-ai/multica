@@ -6,18 +6,22 @@ import {runtimeModelsOptions} from "@multica/core/runtimes";
 import {findModelCapabilityEntry,thinkingLevelRequiredForProvider} from "../components/inspector/model-capability";
 import {
   AGENT_DESCRIPTION_MAX_LENGTH,
+  agentDescriptionLength,
   applyDraftModelChange,
   applyDraftRuntimeChange,
   type AgentDraft,
   type AgentPermissionScope,
 } from "@multica/core/agents";
 import { useConfigStore } from "@multica/core/config";
+import { usePaidFeatureAccess } from "@multica/core/billing";
+import { useWorkspaceId } from "@multica/core/hooks";
 import type { MemberWithUser, RuntimeDevice } from "@multica/core/types";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { PaidFeatureNotice, PaidFeatureUpgradeBadge } from "../../billing";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { useT } from "../../i18n";
 import {
@@ -90,6 +94,14 @@ export function AgentConfigurationPanel({
     (member) => member.user_id !== currentUserId,
   );
   const runtimeLocked = runtimeSwitchPending || runtimeSwitchInFlight;
+  // The agent does not exist yet, so a plan without member access makes the
+  // option unavailable. A draft that already picked people (restored, or
+  // seeded before the plan changed) can still drop them or switch away.
+  const wsId = useWorkspaceId();
+  const invocationMembers = usePaidFeatureAccess(wsId, "agent_invocation_members", {
+    hasExistingConfig: false,
+  });
+  const canAddMembers = invocationMembers.canAdd;
   // The Qoder bridge refuses tasks from agents with skills or per-agent
   // config, so the fields that would produce them are not offered.
   const qoderRuntime = selectedRuntime?.provider === "qoder_cloud";
@@ -149,14 +161,14 @@ export function AgentConfigurationPanel({
                 onChange={(event) => set("description", event.target.value)}
                 placeholder={t(($) => $.create_dialog.description_placeholder)}
                 rows={compact ? 3 : 4}
-                // The create API rejects >255 characters with a 400. Cap the
-                // input and show the counter so the limit is visible before
-                // submitting, matching the settings page.
-                maxLength={AGENT_DESCRIPTION_MAX_LENGTH}
+                // The create API rejects >255 code points with a 400. No
+                // maxLength (UTF-16 units, wrong for emoji): the counter shows
+                // the limit and Create stays disabled past it, matching the
+                // settings page.
                 className="resize-y"
               />
               <CharCounter
-                length={[...draft.description].length}
+                length={agentDescriptionLength(draft.description)}
                 max={AGENT_DESCRIPTION_MAX_LENGTH}
               />
             </div>
@@ -291,41 +303,64 @@ export function AgentConfigurationPanel({
             role="radiogroup"
             aria-label={t(($) => $.creation_studio.sections.access)}
           >
-            {PERMISSION_SCOPES.map((scope) => (
-              <button
-                key={scope}
-                type="button"
-                role="radio"
-                aria-checked={draft.permissionScope === scope}
-                onClick={() => set("permissionScope", scope)}
-                className={cn(
-                  "flex w-full items-start gap-3 rounded-md px-3 py-2.5 text-left transition-colors",
-                  "hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  draft.permissionScope === scope && "bg-muted",
-                )}
-              >
-                <span
-                  className={cn(
-                    "mt-1 flex size-3.5 shrink-0 items-center justify-center rounded-full border",
-                    draft.permissionScope === scope && "border-primary",
-                  )}
-                  aria-hidden="true"
-                >
-                  {draft.permissionScope === scope ? (
-                    <span className="size-1.5 rounded-full bg-primary" />
+            {PERMISSION_SCOPES.map((scope) => {
+              // The badge is a sibling of the radio, not inside it, so it keeps
+              // its own focus and name and never selects the option.
+              const showBadge =
+                scope === "members" && invocationMembers.state === "unavailable";
+              return (
+                <div key={scope} className="relative">
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={draft.permissionScope === scope}
+                    disabled={
+                      scope === "members" &&
+                      !canAddMembers &&
+                      draft.permissionScope !== "members"
+                    }
+                    onClick={() => set("permissionScope", scope)}
+                    className={cn(
+                      "flex w-full items-start gap-3 rounded-md px-3 py-2.5 text-left transition-colors",
+                      "hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      "disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent",
+                      draft.permissionScope === scope && "bg-muted",
+                      showBadge && "pr-28",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "mt-1 flex size-3.5 shrink-0 items-center justify-center rounded-full border",
+                        draft.permissionScope === scope && "border-primary",
+                      )}
+                      aria-hidden="true"
+                    >
+                      {draft.permissionScope === scope ? (
+                        <span className="size-1.5 rounded-full bg-primary" />
+                      ) : null}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-body font-medium">
+                        {t(($) => $.creation_studio.access[scope].title)}
+                      </span>
+                      <span className="mt-0.5 block text-caption leading-5 text-muted-foreground">
+                        {t(($) => $.creation_studio.access[scope].description)}
+                      </span>
+                    </span>
+                  </button>
+                  {showBadge ? (
+                    <PaidFeatureUpgradeBadge
+                      feature="agent_invocation_members"
+                      className="absolute top-3 right-3"
+                    />
                   ) : null}
-                </span>
-                <span className="min-w-0">
-                  <span className="block text-body font-medium">
-                    {t(($) => $.creation_studio.access[scope].title)}
-                  </span>
-                  <span className="mt-0.5 block text-caption leading-5 text-muted-foreground">
-                    {t(($) => $.creation_studio.access[scope].description)}
-                  </span>
-                </span>
-              </button>
-            ))}
+                </div>
+              );
+            })}
           </div>
+          {invocationMembers.state === "unavailable" ? (
+            <PaidFeatureNotice state="unavailable" className="px-5 pb-3" />
+          ) : null}
           {draft.permissionScope === "members" ? (
             <div className="max-h-48 overflow-y-auto p-2">
               {otherMembers.map((member) => {
@@ -337,6 +372,7 @@ export function AgentConfigurationPanel({
                   >
                     <Checkbox
                       checked={checked}
+                      disabled={!checked && !canAddMembers}
                       onCheckedChange={(value) => {
                         const next = new Set(draft.memberIds);
                         if (value === true) next.add(member.user_id);

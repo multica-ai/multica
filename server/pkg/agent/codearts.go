@@ -763,6 +763,10 @@ func buildCodeArtsMCPConfigContent(raw json.RawMessage) (string, error) {
 // discoverCodeArtsModels uses the model catalog command exposed by CodeArts.
 // CodeArts does not expose OpenCode variants, so variant metadata is removed.
 func discoverCodeArtsModels(ctx context.Context, runtimeCmd Command) ([]Model, error) {
+	return discoverCodeArtsModelsWithin(ctx, runtimeCmd, 15*time.Second)
+}
+
+func discoverCodeArtsModelsWithin(ctx context.Context, runtimeCmd Command, attemptTimeout time.Duration) ([]Model, error) {
 	if runtimeCmd.Path == "" {
 		runtimeCmd.Path = "codearts"
 	}
@@ -777,9 +781,10 @@ func discoverCodeArtsModels(ctx context.Context, runtimeCmd Command) ([]Model, e
 		}
 	}
 
-	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
+	// A stalled verbose listing must leave the plain listing its own budget.
 	run := func(args ...string) []Model {
+		runCtx, cancel := context.WithTimeout(ctx, attemptTimeout)
+		defer cancel()
 		cmd := runtimeCmd.exec(runCtx, args...)
 		hideAgentWindow(cmd)
 		cmd.Env = buildCodeArtsEnv(nil)

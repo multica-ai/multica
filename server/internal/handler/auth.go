@@ -61,6 +61,7 @@ var supportedLanguages = map[string]struct{}{
 	"ja":      {},
 	"fr":      {},
 	"es":      {},
+	"ru":      {},
 }
 
 type UserResponse struct {
@@ -77,8 +78,13 @@ type UserResponse struct {
 	// Always serialized (null when unset): clients treat a missing key as
 	// "server cannot track What's new" and suppress the auto-opening card.
 	WhatsNewSeenVersion *string `json:"whats_new_seen_version"`
-	CreatedAt           string  `json:"created_at"`
-	UpdatedAt           string  `json:"updated_at"`
+	// Star prompt bookkeeping. The count is always serialized: clients treat
+	// a missing key as "server cannot track the prompt" and never show it.
+	StarPromptShownCount  int32   `json:"star_prompt_shown_count"`
+	StarPromptLastShownAt *string `json:"star_prompt_last_shown_at"`
+	StarPromptStarredAt   *string `json:"star_prompt_starred_at"`
+	CreatedAt             string  `json:"created_at"`
+	UpdatedAt             string  `json:"updated_at"`
 }
 
 // MaxProfileDescriptionLen caps the user-supplied profile_description body.
@@ -106,6 +112,9 @@ func (h *Handler) userToResponse(u db.User) UserResponse {
 		OnboardingQuestionnaire: json.RawMessage(q),
 		ProfileDescription:      u.ProfileDescription,
 		WhatsNewSeenVersion:     textToPtr(u.WhatsNewSeenVersion),
+		StarPromptShownCount:    u.StarPromptShownCount,
+		StarPromptLastShownAt:   timestampToPtr(u.StarPromptLastShownAt),
+		StarPromptStarredAt:     timestampToPtr(u.StarPromptStarredAt),
 		CreatedAt:               timestampToString(u.CreatedAt),
 		UpdatedAt:               timestampToString(u.UpdatedAt),
 	}
@@ -552,11 +561,15 @@ func writeGoogleLoginActionableError(w http.ResponseWriter, err error) bool {
 	return true
 }
 
+// googleOAuthClient bounds each Google OAuth call. The API server sets no
+// WriteTimeout, so an unanswered call would otherwise hold the handler open.
+var googleOAuthClient = &http.Client{Timeout: 15 * time.Second}
+
 func (h *Handler) googleHTTPClient() *http.Client {
 	if h.googleOAuthHTTPClient != nil {
 		return h.googleOAuthHTTPClient
 	}
-	return http.DefaultClient
+	return googleOAuthClient
 }
 
 func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
@@ -584,13 +597,21 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Exchange authorization code for tokens.
-	tokenResp, err := h.googleHTTPClient().PostForm("https://oauth2.googleapis.com/token", url.Values{
+	tokenForm := url.Values{
 		"code":          {req.Code},
 		"client_id":     {clientID},
 		"client_secret": {clientSecret},
 		"redirect_uri":  {redirectURI},
 		"grant_type":    {"authorization_code"},
-	})
+	}
+	tokenReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, "https://oauth2.googleapis.com/token", strings.NewReader(tokenForm.Encode()))
+	if err != nil {
+		slog.Error("failed to create google token request", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	tokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	tokenResp, err := h.googleHTTPClient().Do(tokenReq)
 	if err != nil {
 		slog.Error("google oauth token exchange failed", "error", err)
 		writeError(w, http.StatusBadGateway, "failed to exchange code with Google")

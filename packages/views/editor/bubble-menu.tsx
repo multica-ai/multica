@@ -20,6 +20,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useReducedMotion } from "@multica/core/appearance";
 import {
   computePosition,
   offset,
@@ -37,6 +38,7 @@ import { useCreateIssue } from "@multica/core/issues/mutations";
 import { useT } from "../i18n";
 import { createShortcutChord, type ShortcutChord } from "@multica/core/shortcuts";
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
+import { contextMenuOrigin } from "@multica/ui/lib/context-menu-origin";
 import { Toggle, toggleVariants } from "@multica/ui/components/ui/toggle";
 import { Separator } from "@multica/ui/components/ui/separator";
 import {
@@ -547,8 +549,9 @@ function EditorBubbleMenu({
       setTimeout(() => {
         if (editor.isDestroyed) return;
         const el = floatingRef.current;
-        if (el && el.contains(document.activeElement)) return;
-        if (editor.view.hasFocus()) return;
+        const active = contextMenuOrigin(document.activeElement);
+        if (el && el.contains(active)) return;
+        if (editor.view.hasFocus() || editor.view.dom.contains(active)) return;
         setVisible(false);
       }, 0);
     };
@@ -569,6 +572,7 @@ function EditorBubbleMenu({
       }).then(({ x, y, middlewareData }) => {
         if (!el.isConnected) return;
         const hidden = middlewareData.hide?.referenceHidden;
+        el.dataset.state = hidden ? "closed" : "open";
         el.style.visibility = hidden ? "hidden" : "visible";
         el.style.left = `${x}px`;
         el.style.top = `${y}px`;
@@ -585,7 +589,7 @@ function EditorBubbleMenu({
   useEffect(() => {
     if (!visible) return;
     const handle = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
+      const target = contextMenuOrigin(e.target) as HTMLElement;
       if (editor.view.dom.contains(target)) return;
       if (floatingRef.current?.contains(target)) return;
       setVisible(false);
@@ -607,9 +611,19 @@ function EditorBubbleMenu({
     [editor],
   );
 
+  const reduceMotion = useReducedMotion();
+  const prevModeRef = useRef(mode);
+  const modeChanged = prevModeRef.current !== mode;
+  useEffect(() => {
+    prevModeRef.current = mode;
+  }, [mode]);
+
   return (
     <div
       ref={floatingRef}
+      data-mc="editor-toolbar"
+      data-mode={mode === "link-edit" ? "link" : "format"}
+      data-state={visible ? "open" : "closed"}
       style={{
         position: "fixed",
         zIndex: 50,
@@ -618,6 +632,14 @@ function EditorBubbleMenu({
       }}
       onMouseDown={(e) => e.preventDefault()}
     >
+      <div
+        key={mode}
+        className={
+          modeChanged && !reduceMotion
+            ? "animate-in fade-in duration-[120ms] ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:animate-none"
+            : undefined
+        }
+      >
       {mode === "link-edit" ? (
         <LinkEditBar editor={editor} onClose={() => { setMode("toolbar"); editor.commands.focus(); }} />
       ) : (
@@ -709,6 +731,7 @@ function EditorBubbleMenu({
           </div>
         </TooltipProvider>
       )}
+      </div>
     </div>
   );
 }

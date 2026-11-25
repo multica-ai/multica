@@ -20,7 +20,7 @@
   },
   "archive": {
     "confirm_title": "全部歸檔？",
-    "confirm_body": "這會歸檔所有收件箱專案，包括已讀和未讀。你仍可在任務頁中找到它們。"
+    "confirm_body": "這會封存所有收件箱項目（無論已讀或未讀）。你仍可在任務頁面中找到它們。"
   },
   "errors": {
     "load_failed": "收件箱載入失敗：{{message}}"
@@ -31,21 +31,24 @@
     "priority_medium": "中",
     "priority_high": "高",
     "priority_urgent": "緊急",
-    "status_todo": "todo",
-    "status_in_progress": "in_progress",
-    "status_done": "done",
-    "status_blocked": "blocked",
+    "status_todo": "待辦",
+    "status_in_progress": "進行中",
+    "status_done": "已完成",
+    "status_blocked": "已阻塞",
     "notification": "通知",
     "close": "關閉通知",
     "unavailable": "此通知已不可用。",
     "billing_disabled": "該工作區無法修改帳單設定。請聯絡工作區管理員。",
-    "contact_admin": "請讓工作區所有者或管理員檢視帳單選項。",
+    "contact_admin": "請讓工作區所有者或管理員升級方案或加購執行次數。",
     "review_billing": "檢視帳單選項",
-    "review_billing_web": "在網頁端開啟 Multica 檢視帳單選項。"
+    "review_billing_web": "在網頁端開啟 Multica 檢視帳單選項。",
+    "buy_runs": "加購執行次數",
+    "buy_runs_web": "在網頁端開啟 Multica 加購執行次數。"
   },
   "type": {
     "assigned": "已分配",
     "subscribed": "已訂閱",
+    "issue_created": "新任務",
     "unassigned": "已取消分配",
     "reassigned": "重新分配",
     "status_changed": "狀態已更改",
@@ -54,18 +57,23 @@
     "due_date_changed": "截止日期已更改",
     "new_comment": "新評論",
     "mentioned": "提到了你",
+    "doc_comment": "文件有新評論",
+    "doc_mentioned": "在文件中提到了你",
     "review_requested": "請求審查",
     "task_completed": "執行完成",
     "task_failed": "執行失敗",
     "agent_blocked": "AI 代理受阻",
     "agent_completed": "AI 代理已完成",
     "reaction_added": "新增了表情",
-    "quick_create_done": "快速建立完成",
-    "quick_create_failed": "快速建立失敗",
-    "quick_create_unconfirmed": "快速建立需要確認",
+    "quick_create_done": "已透過 AI 代理建立",
+    "quick_create_failed": "透過 AI 代理建立失敗",
+    "quick_create_unconfirmed": "透過 AI 代理建立待確認",
     "autopilot_paused": "自動化已暫停",
     "children_done": "子任務已全部結束",
+    "blockers_done": "等待的任務已結束",
+    "project_owner_joined": "所有者加入了專案",
     "autopilot_quota_exceeded": "自動化執行次數已達上限",
+    "app_tool_calls_quota_exceeded": "應用呼叫次數已用完",
     "set_status": "狀態設為",
     "set_priority": "優先順序設為",
     "assigned_to": "分配給 {{name}}",
@@ -75,18 +83,17 @@
     "reacted_with": "回應了 {{emoji}}",
     "created_with_agent": "由 AI 代理建立：{{identifier}}",
     "failed_with_detail": "失敗：{{detail}}",
-    "run_limit_blocked": "已達到上限，本次執行被阻止"
+    "run_limit_blocked": "已達到上限，本次執行被阻止",
+    "app_tool_calls_limit_blocked": "本月 AI 代理無法再呼叫應用工具",
+    "app_action_requested": "等待你確認",
+    "app_action_reminder": "確認即將過期",
+    "app_connect_requested": "請連線應用",
+    "app_action_result": "應用操作結果"
   },
   "body": {
-    "autopilot_title_limit": "自動化 \"{{title}}\" 未啟動，因為該工作區已達到當前週期 {{limit}} 次執行的上限。額度將在 {{resetAt}} 重置。",
-    "autopilot_limit": "該工作區已達到當前週期 {{limit}} 次自動化執行的上限。此執行未啟動。額度將在 {{resetAt}} 重置。"
-  },
-  "actions.archive_completed": "歸檔已完成項",
-  "detail.status_todo": "todo",
-  "detail.status_done": "done",
-  "detail.status_blocked": "blocked",
-  "type.task_completed": "執行完成",
-  "type.task_failed": "執行失敗",
-  "type.run_limit_blocked": "已達到上限，本次執行被阻止",
-  "body.autopilot_title_limit": "自動化 \"{{title}}\" 未啟動，因為該工作區已達到當前週期 {{limit}} 次執行的上限。額度將在 {{resetAt}} 重置。"
+    "autopilot_title_limit": "自動化 \"{{title}}\" 未啟動，因為該工作區已達到當前週期 {{limit}} 次執行的上限。額度將在 {{resetAt}} 重置；工作區所有者或管理員也可以升級方案或加購執行次數。",
+    "autopilot_limit": "該工作區已達到當前週期 {{limit}} 次自動化執行的上限。此執行未啟動。額度將在 {{resetAt}} 重置；工作區所有者或管理員也可以升級方案或加購執行次數。",
+    "app_tool_calls_limit": "本工作區本月的 {{limit}} 次應用呼叫已用完。在 {{resetAt}} 重置、升級方案或增加席位之前，AI 代理無法呼叫應用工具。",
+    "project_owner_joined": "{{name}} 是工作區所有者，已把自己加入這個私有專案，現在可以看到其中的任務、評論和附件。"
+  }
 }

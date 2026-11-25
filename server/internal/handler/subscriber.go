@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/inbox"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -20,6 +22,13 @@ type SubscriberResponse struct {
 	UserID    string `json:"user_id"`
 	Reason    string `json:"reason"`
 	CreatedAt string `json:"created_at"`
+	// ProjectCovered marks a direct row whose member also subscribes to the
+	// issue's project. Delivery already accounts for it; clients that predate
+	// Delivery still read it.
+	ProjectCovered bool `json:"project_covered,omitempty"`
+	// Delivery is how much of this issue the member actually receives, as the
+	// notification fanout decides it. Absent on agent rows, which get no inbox.
+	Delivery inbox.Delivery `json:"delivery,omitempty"`
 }
 
 func subscriberToResponse(s db.IssueSubscriber) SubscriberResponse {
@@ -46,13 +55,83 @@ func (h *Handler) ListIssueSubscribers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := make([]SubscriberResponse, len(subscribers))
-	for i, s := range subscribers {
-		resp[i] = subscriberToResponse(s)
+	// Project subscribers have no row here but are notified all the same, so
+	// they are part of the issue's effective list. A direct row wins: it
+	// carries the reason the member is involved in this issue specifically.
+	projectSubscribers, err := h.Queries.ListProjectSubscribersForIssue(r.Context(), issue.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list subscribers")
+		return
+	}
+
+	projectCovered := make(map[string]bool, len(projectSubscribers))
+	for _, ps := range projectSubscribers {
+		projectCovered[uuidToString(ps.UserID)] = true
+	}
+
+	var memberIDs []pgtype.UUID
+	for _, s := range subscribers {
+		if s.UserType == "member" {
+			memberIDs = append(memberIDs, s.UserID)
+		}
+	}
+	prefs := inbox.LoadPreferences(r.Context(), h.Queries, issue.WorkspaceID, memberIDs)
+	ownerLoaded := false
+	var owner inbox.IssueOwner
+	var ownerErr error
+	// Fails open like the fanout: an unreadable owner delivers every event.
+	isSomeoneElses := func(userID string) bool {
+		if !ownerLoaded {
+			ownerLoaded = true
+			owner, ownerErr = inbox.LoadIssueOwner(r.Context(), h.Queries, issue)
+			if ownerErr != nil {
+				slog.Warn("resolve issue owner for subscriber delivery", "issue_id", issueID, "error", ownerErr)
+			}
+		}
+		return ownerErr == nil && owner.IsSomeoneElses(userID)
+	}
+
+	resp := make([]SubscriberResponse, 0, len(subscribers)+len(projectSubscribers))
+	direct := make(map[string]bool, len(subscribers))
+	for _, s := range subscribers {
+		row := subscriberToResponse(s)
+		if s.UserType == "member" {
+			direct[row.UserID] = true
+			row.ProjectCovered = projectCovered[row.UserID]
+			// The project fanout delivers every event to a project watcher on
+			// top of whatever the direct row narrows to.
+			if row.ProjectCovered {
+				row.Delivery = inbox.DeliveryAll
+			} else {
+				userID := row.UserID
+				row.Delivery = inbox.SubscriptionDelivery(s.Reason, prefs[userID],
+					func() bool { return isSomeoneElses(userID) })
+			}
+		}
+		resp = append(resp, row)
+	}
+	for _, ps := range projectSubscribers {
+		userID := uuidToString(ps.UserID)
+		if direct[userID] {
+			continue
+		}
+		resp = append(resp, SubscriberResponse{
+			IssueID:   uuidToString(issue.ID),
+			UserType:  "member",
+			UserID:    userID,
+			Reason:    subscriberReasonProject,
+			CreatedAt: timestampToString(ps.CreatedAt),
+			Delivery:  inbox.DeliveryAll,
+		})
 	}
 
 	writeJSON(w, http.StatusOK, resp)
 }
+
+// subscriberReasonProject marks a subscription inherited from the issue's
+// project. It is never stored on issue_subscriber; leaving the issue writes an
+// opt-out tombstone instead (RemoveIssueSubscriber).
+const subscriberReasonProject = "project"
 
 // ListSubscribedIssueIDs returns the ids of every issue in the workspace the
 // caller subscribes to, so clients can evaluate the "subscribed" relation on
@@ -62,13 +141,19 @@ func (h *Handler) ListSubscribedIssueIDs(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	wsUUID, ok := parseUUIDOrBadRequest(w, ctxWorkspaceID(r.Context()), "workspace id")
+	workspaceID := ctxWorkspaceID(r.Context())
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
 	if !ok {
 		return
 	}
 	ids, err := h.Queries.ListSubscribedIssueIDs(r.Context(), db.ListSubscribedIssueIDsParams{
-		WorkspaceID: wsUUID,
-		UserID:      parseUUID(userID),
+		WorkspaceID:      wsUUID,
+		UserID:           parseUUID(userID),
+		HiddenProjectIds: hidden.Param(),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list subscribed issues")
@@ -114,6 +199,9 @@ func (h *Handler) SubscribeToIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "target user is not a member of this workspace")
 		return
 	}
+	if h.refuseGuestForOthers(w, r, workspaceID, callerActorType, callerActorID, targetUserType, targetUserID) {
+		return
+	}
 
 	// Explicit action, so this CLEARS any earlier opt-out tombstone — the user
 	// is overriding their own unsubscribe. Rule-driven subscribes deliberately
@@ -137,6 +225,22 @@ func (h *Handler) SubscribeToIssue(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeJSON(w, http.StatusOK, map[string]bool{"subscribed": true})
+}
+
+// refuseGuestForOthers writes a 403 when a guest targets a subscription other
+// than its own. Subscribing a member notifies them and unsubscribing one hides
+// replies and mentions from them, and a subtree may reach past the guest's
+// projects: none of that is a guest's to decide for someone else. Both ids
+// must already have passed isWorkspaceEntity, as parseUUID panics otherwise.
+func (h *Handler) refuseGuestForOthers(w http.ResponseWriter, r *http.Request, workspaceID, callerType, callerID, targetType, targetID string) bool {
+	if targetType == callerType && uuidToString(parseUUID(targetID)) == uuidToString(parseUUID(callerID)) {
+		return false
+	}
+	if !h.isGuest(r, workspaceID, requestUserID(r)) {
+		return false
+	}
+	writeError(w, http.StatusForbidden, "guests can only change their own subscription")
+	return true
 }
 
 // UnsubscribeFromIssue removes a user's subscription from an issue.
@@ -200,6 +304,10 @@ func (h *Handler) unsubscribeFromIssue(w http.ResponseWriter, r *http.Request, s
 	// (MUL-5483 review round 8).
 	targetUserID = uuidToString(parseUUID(targetUserID))
 
+	if h.refuseGuestForOthers(w, r, workspaceID, callerActorType, callerActorID, targetUserType, targetUserID) {
+		return
+	}
+
 	// Every issue this call actually left. The subtree variant reports the whole
 	// set so each one gets its own broadcast: a client with a CHILD issue open
 	// never sees the root's event, and would otherwise keep showing a
@@ -243,6 +351,63 @@ func (h *Handler) unsubscribeFromIssue(w http.ResponseWriter, r *http.Request, s
 	}
 
 	writeJSON(w, http.StatusOK, map[string]bool{"subscribed": false})
+}
+
+// UndoUnsubscribeFromIssue reverses the caller's own issue-scope unsubscribe,
+// restoring the subscription as it was (see UndoIssueUnsubscribe) rather than
+// subscribing again: a member who left a commenter or delegated subscription
+// gets that back, not a manual one that delivers every event. It acts on the
+// caller only. A separate route, so an older server answers 404 instead of
+// quietly doing something else (as UnsubscribeFromIssueSubtree explains).
+// 409 when there is no opt-out to undo, e.g. it was already reversed.
+func (h *Handler) UndoUnsubscribeFromIssue(w http.ResponseWriter, r *http.Request) {
+	issueID := chi.URLParam(r, "id")
+	issue, ok := h.loadIssueForUser(w, r, issueID)
+	if !ok {
+		return
+	}
+	workspaceID := uuidToString(issue.WorkspaceID)
+	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+	actorID = uuidToString(parseUUID(actorID))
+
+	row, err := h.Queries.UndoIssueUnsubscribe(r.Context(), db.UndoIssueUnsubscribeParams{
+		IssueID:  issue.ID,
+		UserType: actorType,
+		UserID:   parseUUID(actorID),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to undo unsubscribe")
+		return
+	}
+
+	reason := row.RevivedReason
+	if row.DroppedOptOut && actorType == "member" {
+		projectSubscribers, err := h.Queries.ListProjectSubscribersForIssue(r.Context(), issue.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to undo unsubscribe")
+			return
+		}
+		for _, ps := range projectSubscribers {
+			if uuidToString(ps.UserID) == actorID {
+				reason = subscriberReasonProject
+				break
+			}
+		}
+	}
+	if reason == "" && !row.DroppedOptOut {
+		writeError(w, http.StatusConflict, "no unsubscribe to undo")
+		return
+	}
+
+	if reason != "" {
+		h.publish(protocol.EventSubscriberAdded, workspaceID, actorType, actorID, map[string]any{
+			"issue_id":  issueID,
+			"user_type": actorType,
+			"user_id":   actorID,
+			"reason":    reason,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"subscribed": reason != "", "reason": reason})
 }
 
 // errTargetNoLongerMember reports that the target left the workspace between

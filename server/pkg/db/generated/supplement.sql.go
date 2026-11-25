@@ -103,16 +103,20 @@ WITH locked_task AS MATERIALIZED (
       AND t.agent_id = $3
       AND r.workspace_id = $4
       AND t.status = 'running'
+      AND (
+          $5::uuid IS NULL
+          OR (t.is_leader_task AND t.squad_id = $5::uuid)
+      )
       AND cap.capability = 'task-supplement-v1'
-      AND r.provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro')
-      AND ($5::text <> 'agent' OR (
+      AND r.provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro', 'pi', 'antigravity', 'hermes')
+      AND ($6::text <> 'agent' OR (
           (SELECT count(*) FROM task_supplement s
            JOIN comment c ON c.id = s.comment_id
-           WHERE s.task_id = t.id AND c.author_type = 'agent') < $6::int
+           WHERE s.task_id = t.id AND c.author_type = 'agent') < $7::int
           AND (SELECT count(*) FROM task_supplement s
                JOIN comment c ON c.id = s.comment_id
                WHERE s.task_id = t.id AND c.author_type = 'agent'
-                 AND s.author_id = $7) < $8::int
+                 AND s.author_id = $8) < $9::int
       ))
     FOR UPDATE OF t
 ), inserted AS (
@@ -120,8 +124,8 @@ WITH locked_task AS MATERIALIZED (
         task_id, workspace_id, issue_id, comment_id, author_id,
         client_request_id, status
     )
-    SELECT t.id, $4, t.issue_id, $9, $7,
-           $10, 'pending'
+    SELECT t.id, $4, t.issue_id, $10, $8,
+           $11, 'pending'
     FROM locked_task t
     RETURNING task_id, workspace_id, issue_id, comment_id, author_id, client_request_id, status, failure_reason, attempt_count, created_at, updated_at, delivered_at
 )
@@ -131,16 +135,17 @@ JOIN locked_task ON locked_task.id = inserted.task_id
 `
 
 type BindCommentTaskSupplementParams struct {
-	TaskID              pgtype.UUID `json:"task_id"`
-	IssueID             pgtype.UUID `json:"issue_id"`
-	AgentID             pgtype.UUID `json:"agent_id"`
-	WorkspaceID         pgtype.UUID `json:"workspace_id"`
-	AuthorType          string      `json:"author_type"`
-	MaxAgentBindings    int32       `json:"max_agent_bindings"`
-	AuthorID            pgtype.UUID `json:"author_id"`
-	MaxBindingsPerAgent int32       `json:"max_bindings_per_agent"`
-	CommentID           pgtype.UUID `json:"comment_id"`
-	ClientRequestID     pgtype.UUID `json:"client_request_id"`
+	TaskID                pgtype.UUID `json:"task_id"`
+	IssueID               pgtype.UUID `json:"issue_id"`
+	AgentID               pgtype.UUID `json:"agent_id"`
+	WorkspaceID           pgtype.UUID `json:"workspace_id"`
+	RequiredLeaderSquadID pgtype.UUID `json:"required_leader_squad_id"`
+	AuthorType            string      `json:"author_type"`
+	MaxAgentBindings      int32       `json:"max_agent_bindings"`
+	AuthorID              pgtype.UUID `json:"author_id"`
+	MaxBindingsPerAgent   int32       `json:"max_bindings_per_agent"`
+	CommentID             pgtype.UUID `json:"comment_id"`
+	ClientRequestID       pgtype.UUID `json:"client_request_id"`
 }
 
 type BindCommentTaskSupplementRow struct {
@@ -172,6 +177,7 @@ func (q *Queries) BindCommentTaskSupplement(ctx context.Context, arg BindComment
 		arg.IssueID,
 		arg.AgentID,
 		arg.WorkspaceID,
+		arg.RequiredLeaderSquadID,
 		arg.AuthorType,
 		arg.MaxAgentBindings,
 		arg.AuthorID,
@@ -293,7 +299,7 @@ WITH locked_task AS MATERIALIZED (
       AND r.workspace_id = $3
       AND t.status = 'running'
       AND cap.capability = 'task-supplement-v1'
-      AND r.provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro')
+      AND r.provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro', 'pi', 'antigravity', 'hermes')
     FOR UPDATE OF t
 ), touched_issue AS (
     UPDATE issue i SET
@@ -843,7 +849,7 @@ func (q *Queries) SettleTerminalTaskSupplements(ctx context.Context, taskIds []p
 
 const startAgentTaskWithSupplement = `-- name: StartAgentTaskWithSupplement :one
 WITH candidate AS MATERIALIZED (
-    SELECT t.id, t.issue_id, r.workspace_id, r.provider
+    SELECT t.id, t.issue_id, t.chat_session_id, r.workspace_id, r.provider
     FROM agent_task_queue t
     JOIN agent_runtime r ON r.id = t.runtime_id
     WHERE t.id = $2
@@ -854,8 +860,8 @@ WITH candidate AS MATERIALIZED (
     SELECT id, workspace_id, issue_id, 'task-supplement-v1'
     FROM candidate
     WHERE $3::boolean
-      AND provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro')
-      AND issue_id IS NOT NULL
+      AND provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro', 'pi', 'antigravity', 'hermes')
+      AND (issue_id IS NOT NULL OR chat_session_id IS NOT NULL)
     ON CONFLICT DO NOTHING
     RETURNING task_id
 )
@@ -864,7 +870,9 @@ SET status = 'running',
     started_at = now(),
     wait_reason = NULL,
     prepare_lease_expires_at = NULL,
-    result = CASE WHEN $1::boolean AND candidate.provider IN ('pi', 'omp')
+    result = CASE WHEN $1::boolean AND candidate.provider = 'museapp'
+                  THEN COALESCE(t.result, '{}'::jsonb) || '{"process_cleanup_capability":"museapp-process-cleanup-v1"}'::jsonb
+                  WHEN $1::boolean AND candidate.provider IN ('pi', 'omp')
                   THEN COALESCE(t.result, '{}'::jsonb) || '{"process_cleanup_capability":"pi-process-cleanup-v1"}'::jsonb
                   ELSE t.result END
 FROM candidate
@@ -872,7 +880,7 @@ WHERE t.id = candidate.id
   -- Reference the data-modifying CTE explicitly: capability persistence and
   -- the returned running row are one indivisible statement.
   AND (SELECT count(*) FROM capability) >= 0
-RETURNING t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.wait_reason, t.initiator_user_id, t.handoff_note, t.prepare_lease_expires_at, t.squad_id, t.runtime_mcp_overlay, t.escalation_for_task_id, t.fire_at, t.originator_user_id, t.runtime_connected_apps, t.coalesced_comment_ids, t.delivered_comment_ids, t.chat_input_task_id, t.chat_finalize_deferred_at, t.originator_source, t.delegated_from_task_id, t.retry_of_task_id, t.rerun_of_task_id, t.rule_version_id, t.trigger_evidence_kind, t.trigger_evidence_ref_id, t.accountable_user_id, t.session_rollout_missing, t.retired_session_id, t.quick_actions_disabled, t.regenerate_quick_actions_for, t.branch_name, t.durable_work_dir, t.channel_context_revision, t.comment_thread_id, t.cancelled_by_type, t.cancelled_by_id, t.cancelled_by_name, t.issue_snapshot, t.workflow_step
+RETURNING t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.wait_reason, t.initiator_user_id, t.handoff_note, t.prepare_lease_expires_at, t.squad_id, t.runtime_mcp_overlay, t.escalation_for_task_id, t.fire_at, t.originator_user_id, t.runtime_connected_apps, t.coalesced_comment_ids, t.delivered_comment_ids, t.chat_input_task_id, t.chat_finalize_deferred_at, t.originator_source, t.delegated_from_task_id, t.retry_of_task_id, t.rerun_of_task_id, t.rule_version_id, t.trigger_evidence_kind, t.trigger_evidence_ref_id, t.accountable_user_id, t.session_rollout_missing, t.retired_session_id, t.quick_actions_disabled, t.regenerate_quick_actions_for, t.branch_name, t.durable_work_dir, t.channel_context_revision, t.comment_thread_id, t.cancelled_by_type, t.cancelled_by_id, t.cancelled_by_name, t.issue_snapshot, t.workflow_step, t.usage_squad_id, t.doc_id, t.doc_thread_id, t.doc_comment_id
 `
 
 type StartAgentTaskWithSupplementParams struct {
@@ -948,6 +956,10 @@ func (q *Queries) StartAgentTaskWithSupplement(ctx context.Context, arg StartAge
 		&i.CancelledByName,
 		&i.IssueSnapshot,
 		&i.WorkflowStep,
+		&i.UsageSquadID,
+		&i.DocID,
+		&i.DocThreadID,
+		&i.DocCommentID,
 	)
 	return i, err
 }

@@ -97,7 +97,7 @@ Authenticate using a personal access token directly. Useful for headless environ
 multica auth status
 ```
 
-Shows your current server, user, and token validity.
+Shows your current server and user when the token can be verified. If verification fails, check the reported error before signing in again.
 
 ### Logout
 
@@ -233,7 +233,7 @@ multica daemon status
 multica daemon status --output json
 ```
 
-Shows PID, uptime, detected agents, and watched workspaces.
+Shows PID, uptime, detected agents (including why any detected agent was skipped), and watched workspaces.
 
 ### Logs
 
@@ -279,6 +279,8 @@ The daemon auto-detects these AI CLIs on your PATH:
 | [Codex](https://github.com/openai/codex) | `codex` | OpenAI's coding agent |
 | [GitHub Copilot CLI](https://docs.github.com/en/copilot) | `copilot` | GitHub's coding agent (model routed by your GitHub entitlement) |
 | OpenCode | `opencode` | Open-source coding agent |
+| Muse Code | `muse` | Muse Session Protocol via `muse serve` |
+| ZeroClaw | `zeroclaw` | ACP via `zeroclaw acp`; model is managed by ZeroClaw |
 | [ZCode](https://zcode.z.ai/) | `zcode` / ZCode Desktop | Native NDJSON app-server, sessions, model discovery, thinking levels, MCP and yolo execution |
 | OpenClaw | `openclaw` | Open-source coding agent |
 | Hermes | `hermes` | Nous Research coding agent |
@@ -295,6 +297,8 @@ The daemon auto-detects these AI CLIs on your PATH:
 | [Trae](https://docs.trae.cn/cli) | `traecli` | ByteDance TRAE CLI (ACP via `traecli acp serve`) |
 | [Grok Build CLI](https://docs.x.ai/) | `grok` | xAI Grok Build CLI (ACP via `grok agent stdio`) |
 | [Qwen Code](https://github.com/QwenLM/qwen-code) | `qwen` | Alibaba Qwen Code (`qwen -p` with stream-json) |
+| [Amp](https://ampcode.com/docs/cli) | `amp` | Local `amp --execute --stream-json`; requires an access token in `AMP_API_KEY` for unattended execution. Model configuration selects an Amp mode. Managed MCP and live supplements are unsupported. |
+| [Factory Droid](https://docs.factory.com/droid-exec/overview) | `droid` | Native CLI 1.8.0+, `droid exec` with stream-json; sign in or set `FACTORY_API_KEY`. Uses `--auto high`; Multica-managed MCP and live supplements are unsupported. |
 | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) | `qwenpaw` | QwenPaw ACP coding agent (ACP via `qwenpaw acp`; model is fixed by its own configuration) |
 | [MiniMax Code](https://github.com/MiniMax-AI/minimax-code) | `mcode` | MiniMax Code ACP coding agent (ACP via `mcode acp`; model is managed by MCode) |
 | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | `dsh` | DeepSeek Harness (`dsh --profile multica --stdio`; requires the Multica runtime profile to be installed; reads AGENTS.md and .dsh/skills/) |
@@ -320,6 +324,52 @@ does not clear those blocks or establish that earlier background processes exite
 4. Heartbeats are sent periodically (default: 15s) so the server knows the daemon is alive
 5. On shutdown, all runtimes are deregistered
 
+### Local Environments
+
+The issue sidebar's **Environments** section lists the servers and desktop apps associated with an issue's runs, grouped by the machine they run on. A localhost URL opens only on that machine. The daemon reports environments in two ways:
+
+- **Detected.** On macOS and Linux, any process listening on a TCP port whose working directory is inside a run's directory shows up. It has to be seen on two scans in a row, about 30 seconds apart, so short-lived test servers stay out. The agent CLIs themselves are ignored, and so are servers in a project's own local directory, which the user started.
+- **Declared.** A repository can describe its environments in `.multica/environments.toml`. An agent starts one with `multica env start <name>`. The daemon then supervises it: the environment keeps running after the run ends and stops at its TTL. If it is still running when the daemon restarts, the new daemon process picks it back up.
+
+```toml
+[environments.web]
+label = "Web app"
+start = "pnpm dev --port $MULTICA_PORT"
+# url defaults to http://localhost:$MULTICA_PORT; set url = "" when there is none
+# ready = "http://localhost:$MULTICA_PORT/health"   # defaults to url
+# stop = "docker compose down"                      # runs before the process group is signalled
+ttl = "24h"                                         # 1m to 7d, default 24h
+```
+
+Each environment gets ten ports, `MULTICA_PORT` through `MULTICA_PORT+9`. Parallel runs therefore never collide. `start` runs with `/bin/sh -c` from the directory that holds `.multica/`, with the caller's `PATH`. The daemon's `MULTICA_*` credentials are not passed to it. Output goes to a log under `<workspaces root>/.environments/v1/`, and `multica env start` prints its path. The full log file stays on the machine; the daemon can send portions of it to the server for the sidebar, as described below.
+
+```bash
+multica env start web          # waits until the ready URL answers below 500, then prints the URL
+multica env start web --wait=false
+multica env list
+multica env stop web
+```
+
+A declared environment's own servers are not listed a second time as detected ones. That includes servers its `start` command detaches into process groups of their own, as long as they stay in the session `start` runs in. When two environments from the same checkout share a server, such as one API, and the one that started it ends, the server passes to the other while it runs. When such an environment has no URL and one of its processes is a desktop app, the sidebar shows the environment as that app, and Desktop on the same machine can bring its window forward.
+
+These commands use the running task's credential, so they work only inside a run. Environments belong to the issue, which means a later run on the same issue can list and stop what an earlier one started. Neither detected nor declared environments are supported on Windows yet.
+
+#### Sidebar controls
+
+- **Declared environments:** use **+** to start an environment reported by the latest run on a machine, using that run's checkout. An environment's menu offers **Stop**, **Restart**, and **View logs**. Restart reads the repository's current declaration, so it needs the checkout and `.multica/environments.toml` to still exist.
+- **Detected servers:** the menu offers **Stop**, with confirmation. They have no captured log or restart command.
+- **Detected desktop apps:** Desktop on the same machine can bring their window forward. They cannot be stopped or restarted from the sidebar; declare the app as an environment to manage its lifecycle there.
+
+Starting, stopping, or restarting requires a human workspace member who can access the issue and use the machine. The machine must be online and its daemon must support environment controls; an older daemon requires an update. Reading logs requires access to the issue, but not permission to control the machine. Sidebar actions work without an active agent run; the CLI commands above still require a run's credential.
+
+#### Logs shared with the issue
+
+**View logs** reads the last 500 lines, capped at 256 KiB per request, from a declared environment. While the environment is live, the dialog follows its output by requesting another tail about every five seconds. You can pause following, refresh, search, wrap, or copy the displayed output. Read the local file on the machine when you need the complete log.
+
+A crashed declared environment also reports a short excerpt automatically: its last two non-empty log lines, each truncated to 240 characters. The sidebar can show that excerpt even when the machine is offline; a fresh log read needs the machine online.
+
+The server applies secret redaction to uploaded log tails and crash excerpts before storing them. Log-read records are eligible for deletion after ten minutes and are removed by a sweeper that runs every minute. Crash excerpts are stored separately with the environment record, so that ten-minute cleanup does not remove them. Anyone with access to the issue can read the shared output; do not rely on redaction to make arbitrary application logs safe to share.
+
 ### Configuration
 
 Daemon behavior is configured via flags or environment variables:
@@ -329,6 +379,10 @@ Daemon behavior is configured via flags or environment variables:
 | Poll interval | `--poll-interval` | `MULTICA_DAEMON_POLL_INTERVAL` | `30s` (catch-up fallback; WebSocket wake signals deliver work sooner) |
 | Healthy WebSocket claim poll upper bound | `--ws-claim-poll-interval` | `MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL` | `3m` (configured independently of `--poll-interval`; downward jitter makes the normal interval `2m30s`–`2m45s`, while old servers and uncertain claims retain the ordinary poll interval) |
 | Heartbeat interval | `--heartbeat-interval` | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` |
+| Daemon log level | — | `LOG_LEVEL` | `debug` (or persist per profile with `multica config set log_level <level>`; `LOG_LEVEL` takes precedence) |
+| Daemon log max size (MB) | — | `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `20` (or persist per profile with `daemon_log_max_size_mb`) |
+| Daemon log max backups | — | `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `5` (or persist per profile with `daemon_log_max_backups`) |
+| Daemon log max age (days) | — | `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `30` (or persist per profile with `daemon_log_max_age_days`) |
 | Agent timeout | `--agent-timeout` | `MULTICA_AGENT_TIMEOUT` | `0` (no cap; bounded by the watchdogs) |
 | Agent idle watchdog | — | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` (`0` disables the whole watchdog suite) |
 | Agent tool watchdog | — | `MULTICA_AGENT_TOOL_WATCHDOG` | same as the idle watchdog (`0` = never force-stop during a tool call) |
@@ -338,14 +392,14 @@ Daemon behavior is configured via flags or environment variables:
 | Codex turn-interrupt timeout | — | `MULTICA_CODEX_TURN_INTERRUPT_TIMEOUT` | `2s` (bounded grace period for `turn/interrupt` acknowledgement and `turn/completed`; tune from the logged interrupt latency on unusually slow hosts) |
 | OpenCode idle watchdog | — | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` (`0` falls back to the generic idle watchdog; cannot extend it) |
 | Max concurrent tasks | `--max-concurrent-tasks` | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` |
-| Daemon ID | `--daemon-id` | `MULTICA_DAEMON_ID` | hostname |
+| Daemon ID | `--daemon-id` | `MULTICA_DAEMON_ID` | Persistent UUID stored in `~/.multica/daemon.id` and shared across profiles |
 | Device name | `--device-name` | `MULTICA_DAEMON_DEVICE_NAME` | hostname |
 | Runtime name | `--runtime-name` | `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` |
 | Workspaces root | — | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` |
 | GC enabled | — | `MULTICA_GC_ENABLED` | `true` (set `false`/`0` to disable) |
 | GC scan interval | — | `MULTICA_GC_INTERVAL` | `2h` |
 | GC TTL (done/cancelled issues) | — | `MULTICA_GC_TTL` | `24h` |
-| GC completed-task TTL (issue tasks) | — | `MULTICA_GC_COMPLETED_TASK_TTL` | `14d` on Multica Cloud, `0` (disabled) elsewhere |
+| GC completed-task TTL (issue tasks) | — | `MULTICA_GC_COMPLETED_TASK_TTL` | `14d` (set `0` to disable) |
 | GC orphan TTL (no `.gc_meta.json`) | — | `MULTICA_GC_ORPHAN_TTL` | `72h` |
 | GC artifact TTL (completed tasks) | — | `MULTICA_GC_ARTIFACT_TTL` | `12h` (set `0` to disable) |
 | GC artifact patterns | — | `MULTICA_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` |
@@ -361,7 +415,7 @@ The daemon periodically scans `MULTICA_WORKSPACES_ROOT` for cleanup. The active-
 
 - **Full task cleanup** — when an issue's status is `done` or `cancelled` and has been idle for `MULTICA_GC_TTL`, the entire task directory is removed.
 - **Completed-task retention bound** — `MULTICA_GC_COMPLETED_TASK_TTL` fully removes an inactive issue task once its `.gc_meta.json` `completed_at` age exceeds the configured duration, even while the parent issue remains open. Cleanup waits for a successful parent-issue status check, never removes an active environment, and never fully removes a `local_directory` environment. A later rerun provisions a fresh environment instead of resuming the removed checkout.
-  - The default depends on where the daemon points: `14d` against Multica Cloud, and `0` (disabled, retain indefinitely) for self-host and every other origin — including cloud staging and previews. Set the variable to opt in or out on either side; an explicit `0` disables the policy on Cloud too.
+  - The default is `14d` on every server, Multica Cloud and self-host alike. Set the variable to change it; an explicit `0` disables the policy and keeps every completed environment until its issue becomes `done` or `cancelled`.
   - Removing an environment discards work an agent left uncommitted or unpushed on its branch, along with that task's `output/` and `logs/`. The per-issue Codex session store lives outside `MULTICA_WORKSPACES_ROOT` under its own TTL, so a later rerun still resumes the agent's prior session — it just starts from a fresh checkout. Size the TTL against that trade, and keep it comfortably above `MULTICA_GC_INTERVAL`: the active-root guard protects a task that is currently running, not one whose follow-up run is queued but unclaimed.
 - **Orphan cleanup** — task directories with no `.gc_meta.json` (e.g. left over from a daemon crash) are removed once they exceed `MULTICA_GC_ORPHAN_TTL`.
 - **Artifact-only cleanup** — when a task has been completed for at least `MULTICA_GC_ARTIFACT_TTL` but the issue is still open, regenerable build outputs whose directory basename matches `MULTICA_GC_ARTIFACT_PATTERNS` are removed. The daemon also reclaims the exact managed path `codex-home/.sandbox-bin`; old task metadata without `completed_at` becomes eligible for this managed-only cleanup after its `.gc_meta.json` file has been idle for `MULTICA_GC_ORPHAN_TTL`. The rest of the task (source, `.git`, `output/`, `logs/`, `.gc_meta.json`, Codex auth/config/session state) is preserved so the agent can resume it. The same basename patterns apply to unarchived chats that use a daemon-managed work directory once the chat status check succeeds and the last run has been complete for `MULTICA_GC_ARTIFACT_TTL`. After a successful cleanup, the daemon skips repeat scans for that run. A later completed run becomes eligible again after the same delay.
@@ -377,7 +431,7 @@ The daemon periodically scans `MULTICA_WORKSPACES_ROOT` for cleanup. The active-
 
 Configured patterns are basename-only — entries containing `/` or `\` are silently dropped — and `.git` subtrees are never descended into. The managed Codex cache is matched by its exact relative path, so a repository's own `.sandbox-bin` is not removed unless an operator explicitly adds that basename to `MULTICA_GC_ARTIFACT_PATTERNS`. The default list (`node_modules`, `.next`, `.turbo`) is intentionally narrow; extend it per deployment if your repos consistently produce other regenerable directories (for example, `MULTICA_GC_ARTIFACT_PATTERNS=node_modules,.next,.turbo,target,__pycache__`). To disable artifact cleanup entirely, including the managed Codex cache, set `MULTICA_GC_ARTIFACT_TTL=0`.
 
-`multica daemon disk-usage` reports the `.repos` footprint on its own line rather than folding it into the per-task totals — every task in a workspace checks out from that shared cache, so attributing it to individual task directories would double-count it. Note that the repo cache is reclaimed on the schedule above and not by any per-issue status change, so it is normal for it to persist after every task directory is gone.
+`multica daemon disk-usage` reports the `.repos` footprint on its own line rather than folding it into the per-task totals — every task in a workspace checks out from that shared cache, so attributing it to individual task directories would double-count it. In per-task output (`--by-task`), the `MODE` column marks runs that worked in place in a project's local directory as `in place` (`local_directory: true` in JSON when recorded in local metadata). Note that the repo cache is reclaimed on the schedule above and not by any per-issue status change, so it is normal for it to persist after every task directory is gone.
 
 Agent-specific overrides:
 
@@ -432,6 +486,12 @@ Agent-specific overrides:
 | `MULTICA_QWEN_PATH` | Custom path to the `qwen` binary |
 | `MULTICA_QWEN_MODEL` | Override the Qwen Code model used |
 | `MULTICA_QWEN_ARGS` | Daemon-wide extra Qwen arguments (POSIX shellword parsing; managed protocol flags are filtered) |
+| `MULTICA_AMP_PATH` | Custom path to the `amp` executable |
+| `MULTICA_AMP_MODEL` | Amp mode (such as `high`); empty uses Amp's default |
+| `MULTICA_AMP_ARGS` | Supported extra Amp options, e.g. `--features fast`; protocol, executor, prompt and mode overrides are filtered |
+| `MULTICA_DROID_PATH` | Custom path to the native `droid` executable |
+| `MULTICA_DROID_MODEL` | Droid model ID; defaults to Droid's own configuration |
+| `MULTICA_DROID_ARGS` | Daemon-wide Droid arguments, e.g. `--reasoning-effort high`; managed protocol, prompt, session, and working-directory flags are filtered |
 | `MULTICA_QWENPAW_PATH` | Custom path to the `qwenpaw` binary |
 | `MULTICA_QWENPAW_ARGS` | Daemon-wide extra QwenPaw arguments (POSIX shellword parsing; managed protocol flags are filtered) |
 | `MULTICA_MCODE_PATH` | Custom path to the `mcode` binary |
@@ -554,7 +614,7 @@ multica workspace list --full-id
 multica workspace list --output json
 ```
 
-The current default workspace is marked with `*`. Table output shows short UUID prefixes — pass `--full-id` when you need the canonical UUIDs.
+The current default workspace is marked with `*`. Table output shows short UUID prefixes — pass `--full-id` when you need the canonical UUIDs. With a task token, the list contains only the workspace bound to the run.
 
 ### Switch Default Workspace
 
@@ -587,6 +647,7 @@ multica workspace member list <workspace-id>
 ```bash
 multica issue list
 multica issue list --status in_progress
+multica issue list --blocked
 multica issue list --priority urgent --assignee "Agent Name"
 multica issue list --assignee-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
 multica issue list --full-id
@@ -597,7 +658,7 @@ multica issue list --output json --fields=id,title,status,priority  # narrow the
 multica issue list --output json --resolve-properties  # property names beside the ids
 ```
 
-Table output shows a routable issue `KEY` such as `MUL-123`; copy that key into follow-up commands like `issue get`, `issue comment list`, `issue status`, or `--parent`. Add `--full-id` when you need canonical UUIDs. Available filters: `--status`, `--priority`, `--assignee` / `--assignee-id`, `--project`, `--metadata`, `--property`, plus `--limit` and `--offset` for paging. Use `--assignee-id <uuid>` for unambiguous filtering when names overlap.
+Table output shows a routable issue `KEY` such as `MUL-123`; copy that key into follow-up commands like `issue get`, `issue comment list`, `issue status`, or `--parent`. Add `--full-id` when you need canonical UUIDs. Available filters: `--status`, `--priority`, `--assignee` / `--assignee-id`, `--project`, `--blocked` (only issues waiting for unfinished manual blockers or earlier stages), `--metadata`, `--property`, plus `--limit` and `--offset` for paging. Use `--assignee-id <uuid>` for unambiguous filtering when names overlap.
 
 If the server cannot count the matching issues, the list request fails with `failed to count issues` instead of returning the page length as a fabricated total. Successful response fields are unchanged. This trades availability of a partial page for an explicit failure that callers can retry.
 
@@ -653,9 +714,12 @@ multica issue get <id> --resolve-properties   # property names beside the ids, a
 ```bash
 multica issue create --title "Fix login bug" --description "..." --priority high --assignee "Lambda"
 multica issue create --title "Fix login bug" --assignee-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
+multica issue create --title "Ship release" --assignee "Lambda" --status todo --blocked-by MUL-101 --blocked-by MUL-102
 ```
 
-Flags: `--title` (required), `--description`, `--status`, `--priority`, `--assignee` / `--assignee-id`, `--parent`, `--project`, `--due-date`. Pass `--assignee-id <uuid>` (mutually exclusive with `--assignee`) when scripting against the IDs returned by `multica workspace member list --output json` / `multica agent list --output json`.
+Flags: `--title` (required), `--description` / `--description-stdin` / `--description-file`, `--status`, `--priority`, `--assignee` / `--assignee-id`, `--parent`, `--stage`, `--blocked-by` (repeatable; issue key or UUID to wait for before starting), `--project`, `--start-date`, `--due-date`, `--attachment` (repeatable), `--property` (repeatable), `--allow-duplicate`, `--pr-auto-complete`. Pass `--assignee-id <uuid>` (mutually exclusive with `--assignee`) when scripting against the IDs returned by `multica workspace member list --output json` / `multica agent list --output json`.
+
+For issues with unfinished blockers (`--blocked-by`, or earlier `--stage` siblings under the same parent), creating, assigning, or changing status does not start an agent run until all blockers reach a `done` or `closed` status (including `cancelled`) or are removed. Once unblocked, a non-`backlog` issue starts automatically (or notifies a member assignee); a `backlog` issue stays parked until it leaves `backlog`. `issue get --output json` includes `blocked_by` (each with `via: "manual"` or `"stage"`), `blocked_count`, and `blocking` (issues waiting on this one). Direct @-mentions and comment replies still start runs while blockers remain.
 
 ### Update Issue
 
@@ -663,10 +727,32 @@ Flags: `--title` (required), `--description`, `--status`, `--priority`, `--assig
 multica issue update <id> --title "New title" --priority urgent
 multica issue update <id> --position 4.5
 multica issue update <id> --attachment revised.png
+multica issue update <id> --blocked-by MUL-101 --remove-blocked-by MUL-99
+multica issue update <id> --description-file ./desc.md --description-base-revision <rev>
+multica issue edit-description <id> --old "Status: draft" --new "Status: ready"
 ```
 
 `--position` sets the raw ordering value within the board column (lower sorts first). For relative moves, `issue reorder` is easier because it works out the value for you.
-`--attachment` uploads a local file and appends its Markdown reference to the end of the issue description. Repeat the flag to attach multiple files. To replace an existing image, also use `--description-file` to remove the old reference from the description.
+`--blocked-by` and `--remove-blocked-by` (both repeatable; issue key or UUID) add or remove manual blockers. Stage blockers follow `--stage` and `--parent` and cannot be removed with `--remove-blocked-by`.
+`--attachment` uploads a local file and appends its Markdown reference to the end of the issue description. Repeat the flag to attach multiple files. To replace an existing image, also remove the old reference with `multica issue edit-description <id> --old <old reference> --new ""`.
+`--description-base-revision` takes the `description_revision` from `multica issue get` and refuses stale description overwrites with HTTP 409 if the description changed since that revision.
+To change part of a description without rewriting the whole body, use `multica issue edit-description <id>` with `--old` / `--old-file` and `--new` / `--new-file` (add `--replace-all` to replace every occurrence; otherwise `--old` must match exactly once).
+
+### Delete Issue
+
+```bash
+multica issue delete <id>                 # prompts before deleting
+multica issue delete <id> --yes           # no prompt
+multica issue delete MUL-101 MUL-102 --yes --output json
+```
+
+Deletion is permanent and removes the issue's comments and attachments, cancels its in-flight runs, fails linked autopilot runs, clears duplicate marks that pointed at it, and detaches its child issues without deleting them.
+
+Ids may be issue keys or full UUIDs. Every id is resolved with a read before the prompt, full UUIDs included, so an unknown, stale or invisible issue aborts the whole command instead of leaving a partial batch; several ids go to one batch request whose permission check covers the whole selection.
+
+`--yes` skips the confirmation. Without it the command reads stdin; if stdin closes without an answer (a non-interactive run) the command fails without deleting, while answering `n` declines and deletes nothing.
+
+With `--output json`, one id prints `{"id": "<uuid>", "deleted": true}` and several print `{"ids": ["<uuid>", ...], "deleted": true}`, always with canonical UUIDs whatever spelling was passed. If the server deletes only part of a batch, the command prints `{"ids": ["<uuid>", ...], "deleted": false, "deleted_count": N}` and exits non-zero.
 
 ### Reorder Issue
 
@@ -767,6 +853,12 @@ multica issue comment add <issue-id> --parent <comment-id> --content "Thanks!"
 # start it; an agent never steers itself and adds at most 3 messages to one
 # run. Prints per run whether it was steered.
 multica issue comment add <issue-id> --content-file note.md --steer <run-id>
+
+# Supply an explicit idempotency key so retrying after a timeout or lost
+# connection returns the already-saved comment instead of posting twice.
+# Inside an agent run, the CLI derives this key automatically from the run,
+# issue, parent, content, steer flags, and attachments.
+multica issue comment add <issue-id> --content-file note.md --idempotency-key <key>
 
 # Delete a comment
 multica issue comment delete <comment-id>
@@ -896,9 +988,10 @@ belongs to a workspace and can optionally have a lead (member or agent).
 multica project list
 multica project list --status in_progress
 multica project list --output json
+multica project list --archived
 ```
 
-Available filters: `--status`.
+Available filters: `--status`, `--archived` (only archived projects; they are hidden by default).
 
 ### Get Project
 
@@ -906,6 +999,50 @@ Available filters: `--status`.
 multica project get <id>
 multica project get <id> --output json
 ```
+
+The response includes `progress`: `scope` is every issue except cancelled ones,
+`completed` counts done issues, `started` issues are tracked but do not add to
+`percent`. The table output shows it as a PROGRESS column (`5/11 (45%)`).
+
+### Project Overview
+
+```bash
+multica project overview <id>                  # JSON by default
+multica project overview <id> --output table
+```
+
+Returns everything on the project page in one read:
+`{"project": ..., "progress": ..., "resources": [...], "working_agents": [...], "activity": [...]}`.
+`working_agents` lists the agents running a task on one of the project's issues
+right now, with the issue ids; `activity` is the 10 newest entries of
+`multica project activity`. New sections are added as new top-level keys.
+
+### Project Progress
+
+```bash
+multica project progress <id>                  # summary and forecast
+multica project progress <id> --history        # weekly scope / started / completed
+multica project progress <id> --by assignee    # per-assignee breakdown
+multica project progress <id> --by label       # per-label breakdown
+multica project progress <id> --output json    # everything above
+```
+
+The forecast is a completion date from the trailing 4-week completion rate;
+it is omitted when there is less than a week of history or nothing was
+completed recently.
+
+### Project Activity
+
+```bash
+multica project activity <id>                          # newest 30, table by default
+multica project activity <id> --limit 100 --output json
+multica project activity <id> --before <next_cursor>   # older entries
+```
+
+What changed on the project's issues, newest first: issue creation and status,
+assignee, priority, start/due date, title and duplicate changes. Each entry names
+the issue (`issue_identifier`, `issue_title`, `issue_status`), the actor and the
+`details` of the change. JSON output carries `next_cursor` until the last page.
 
 ### Create Project
 
@@ -933,6 +1070,18 @@ multica project status <id> in_progress
 
 Valid statuses: `planned`, `in_progress`, `paused`, `completed`, `cancelled`.
 
+### Archive and Restore
+
+```bash
+multica project archive <id>
+multica project restore <id>
+```
+
+Archiving hides a project from lists and pickers and stops new issues from being
+filed into it (HTTP 409 `project_archived`); existing issues stay editable.
+Active autopilots that file into the project are paused, and restoring does not
+resume them. Archiving is independent of status.
+
 ### Delete Project
 
 ```bash
@@ -942,12 +1091,13 @@ multica project delete <id>
 ### Associating Issues with Projects
 
 Use the `--project` flag on `issue create` / `issue update` to attach an issue to a
-project, or on `issue list` to filter issues by project:
+project, or on `issue list` / `issue search` to filter issues by project:
 
 ```bash
 multica issue create --title "Login bug" --project <project-id>
 multica issue update <issue-id> --project <project-id>
 multica issue list --project <project-id>
+multica issue search "Login" --project <project-id>
 ```
 
 ## Setup
@@ -984,9 +1134,17 @@ Shows config file path, server URL, app URL, and default workspace.
 multica config set server_url https://api.example.com
 multica config set app_url https://app.example.com
 multica config set workspace_id <workspace-id>
+
+# Persist daemon log level and rotation settings per profile
+multica config set log_level info
+multica config set daemon_log_max_size_mb 50
+multica config set daemon_log_max_backups 10
+multica config set daemon_log_max_age_days 14
 ```
 
 `config set workspace_id <id>` is the low-level interface — it writes the value verbatim without checking that the workspace exists or that you have access. Prefer `multica workspace switch <id|slug>` for day-to-day workspace changes; it does both checks before saving.
+
+Daemon profile keys (`device_name`, `runtime_name`, `workspaces_root`, `max_concurrent_tasks`, `poll_interval`, `ws_claim_poll_interval`, `heartbeat_interval`, `log_level`, `daemon_log_max_size_mb`, `daemon_log_max_backups`, `daemon_log_max_age_days`, `agent_timeout`, `agent_idle_watchdog`, `agent_tool_watchdog`, `codex_semantic_inactivity_timeout`, `codex_handshake_timeout`, `disable_auto_update`, `auto_update_check_interval`, `disable_auto_reload`) are read when the daemon starts. Pass `""` to clear a saved setting. Precedence is `--flag` > environment variable (`MULTICA_*` or `LOG_LEVEL`) > `config.json` > built-in default.
 
 ## Autopilot Commands
 
@@ -1024,7 +1182,14 @@ multica autopilot create \
   --mode create_issue \
   --subscriber "Alice"
 
+multica autopilot create \
+  --title "Weekly dependency audit" \
+  --description "Audit dependencies for security updates." \
+  --squad "Backend Squad" \
+  --mode create_issue
+
 multica autopilot update <id> --status paused
+multica autopilot update <id> --squad-id <squad-uuid>
 multica autopilot update <id> --description "New prompt"
 multica autopilot update <id> --subscriber "Alice" --subscriber "Bob"
 multica autopilot update <id> --clear-subscribers
@@ -1032,6 +1197,7 @@ multica autopilot delete <id>
 ```
 
 `--mode` accepts `create_issue` (creates a new issue on each run and assigns it to the agent) or `run_only` (enqueues a direct agent task without creating an issue). `--agent` accepts either a name or UUID.
+To assign a squad instead, use `--squad` (name or ID) or `--squad-id` (canonical UUID); the run goes to the squad's leader, and in `create_issue` mode the created issue is assigned to the squad. `--agent`, `--squad`, and `--squad-id` are mutually exclusive, and `create` requires one of them. On `update` they switch the assignee (sending `assignee_type` with `assignee_id`); an update without any of them leaves the current assignee untouched. Table output labels the assignee by type, e.g. `squad:Backend Squad`.
 `--subscriber` accepts a workspace member name or user ID and may be repeated; on update it replaces the autopilot's subscriber template. Subscribers receive inbox notifications for issues created by a `create_issue` autopilot. Use `--clear-subscribers` to remove all autopilot subscribers.
 
 ### Manual Trigger
@@ -1041,10 +1207,10 @@ multica autopilot trigger <id>            # Fires the autopilot once, returns th
 ```
 
 The command exits non-zero unless the run actually started (`issue_created` or
-`running`). A `skipped` run — admission refused, runtime offline, quota
-exhausted, a duplicate already in flight — dispatched nothing; its
-`failure_reason` and `reason_code` are printed to stderr, and `--output json`
-still writes the full run to stdout first.
+`running`). If a run is `skipped` (for example, the runtime is offline
+or a duplicate is already in flight), the CLI prints its
+`failure_reason` and `reason_code` to stderr. With `--output json`,
+it first writes the full run to stdout.
 
 Run as an agent (inside a task, or over A2A), the trigger is authorized as the
 human that run acts for, not as the owner of the machine it executes on. That
@@ -1079,6 +1245,115 @@ output — use `autopilot get <id> --output json --show-secrets` to reveal them.
 The CLI exposes cron-based `schedule` triggers via `trigger-add`, and `webhook`
 triggers via `trigger-add --kind webhook` plus `trigger-rotate-url`. The data model
 also defines an `api` kind, which is not surfaced here.
+
+### Webhook Event, Action, and Payload Filters
+
+Use a JSON file to configure the same event, action, and optional payload-field `conditions` filters as the web UI:
+
+```json
+[
+  {"event": "pull_request_review", "actions": ["submitted"]},
+  {
+    "event": "pull_request",
+    "conditions": [
+      {"path": "pull_request.draft", "op": "equals", "value": false},
+      {"path": "pull_request.base.ref", "op": "equals", "value": "main"}
+    ]
+  },
+  {"event": "push"}
+]
+```
+
+Save this array as `filters.json`, then create or update a webhook trigger:
+
+```bash
+multica autopilot trigger-add <autopilot-id> --kind webhook --event-filters-file filters.json
+multica autopilot trigger-update <autopilot-id> <trigger-id> --event-filters-file filters.json
+multica autopilot get <autopilot-id> --output json
+```
+
+An event without `actions` (or with an empty actions array) accepts every action
+for that event. Each row supports up to 20 payload `conditions` (field path up
+to 256 characters; `in` list up to 100 values), using the same operators and
+matching rules as the app. Filters apply only to webhook triggers; schedule
+triggers reject them. The server validates the filters using the same rules as
+UI submissions.
+
+Omitting `--event-filters-file` on update preserves the saved filters. Replacing
+filters requires a nonempty array; `null`, an empty array, unknown fields, and
+malformed files are rejected. To explicitly remove filters and accept all events:
+
+```bash
+multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filters
+```
+
+`--clear-event-filters` cannot be combined with `--event-filters-file`. Creation
+without a filter file accepts all events.
+
+## Squads
+
+Manage squads, collaboration handoff modes, member rosters, and generated member briefs:
+
+```bash
+# List and inspect squads (get shows the current handoff mode)
+multica squad list
+multica squad get <squad-id>
+
+# Create and configure a squad
+multica squad create --name "Product Delivery" --leader <agent-name-or-id>
+multica squad update <squad-id> --handoff-mode direct
+multica squad update <squad-id> --instructions "Route DB tasks to Alice and UI to Bob."
+
+# Manage members
+multica squad member list <squad-id>
+multica squad member add <squad-id> --member-id <agent-or-member-id> --type agent --role "Owns frontend"
+multica squad member set-role <squad-id> --member-id <agent-or-member-id> --role "Owns backend and migrations"
+multica squad member remove <squad-id> --member-id <agent-or-member-id>
+
+# Preview the squad context each agent member receives (requires squad manage permission)
+multica squad briefs <squad-id>
+multica squad briefs <squad-id> --agent <agent-name-or-id>
+
+# Record a leader evaluation on an issue
+multica squad activity <issue-id> action --reason "Delegated implementation to Frontend Agent"
+
+# Archive a squad (transfers active issues/autopilots to the former leader)
+multica squad delete <squad-id>
+```
+
+Member type flags default to `agent`; pass `--type member` to `squad member add` / `remove`, or `--member-type member` to `squad member set-role`, for a human member.
+
+`--handoff-mode` accepts `leader` (default: every member reply returns to the leader) or `direct` (members hand work to the next member by `@`-mentioning them directly without waking the leader; fixed guardrails return the issue to the leader after 3 back-and-forth rounds, 20 member handoffs in 24 hours, a failed member run, or a reply naming no next owner).
+
+## Quick Actions
+
+Manage and run saved quick actions (reusable prompts with an optional agent or squad target) from the CLI:
+
+```bash
+# List active quick actions (add --include-archived to include archived ones)
+multica quick-action list
+multica quick-action list --include-archived --full-id --output json
+
+# Inspect one action by UUID, unique UUID prefix, or exact name (case-insensitive)
+multica quick-action get "Code Review"
+
+# Create a quick action (--visibility defaults to private; omit --agent/--squad for targetless)
+multica quick-action create --name "Code Review" --agent Reviewer --prompt-file ./review.md
+multica quick-action create --name "Handoff" --squad "Backend Squad" --visibility public --prompt "Take over from here."
+
+# Update, archive, restore (alias: unarchive), or permanently delete
+multica quick-action update "Code Review" --squad "Review Squad"
+multica quick-action update "Code Review" --clear-target
+multica quick-action archive "Code Review"
+multica quick-action restore "Code Review"
+multica quick-action delete "Code Review"
+
+# Run a quick action on an issue (or preview without posting)
+multica quick-action run "Code Review" MUL-123 --dry-run
+multica quick-action run "Code Review" MUL-123
+```
+
+Creating, updating, archiving, restoring, and deleting quick actions require a human member (`--visibility public` requires workspace `owner` or `admin` and a publicly invocable target). During an agent run, private quick actions are reachable only when the run was started by their creator on a runtime that member still owns; runs started by another member see only public actions.
 
 ## Other Commands
 
@@ -1219,6 +1494,26 @@ On the API, both endpoints accept `?include=content` and `?include=metadata`.
 A request that sends neither still gets `content`, on both endpoints, so a
 server upgrade never changes what an un-upgraded client receives — it is the
 CLI that asks for the smaller shape.
+
+### Safe concurrent skill edits
+
+`multica skill get` includes a `revision` field (shown as a `REVISION` column in
+table output) that increments by 1 on every write to the skill or its supporting
+files. Pass `--base-revision <revision>` on `skill update`, `skill files upsert`,
+and `skill files delete` to avoid overwriting concurrent changes:
+
+```bash
+multica skill get <skill-id> --with-content --output json
+multica skill update <skill-id> --content-file ./SKILL.md --base-revision <revision>
+multica skill files upsert <skill-id> --path notes.md --content-file ./notes.md --base-revision <revision>
+multica skill files delete <skill-id> <file-id> --base-revision <revision>
+```
+
+If the skill changed since `--base-revision`, the server returns HTTP 409 with
+`"code": "revision_conflict"` and the current `actual_revision`, leaving the
+skill untouched. Re-read with `multica skill get --with-content`, merge your
+changes, and retry with the new revision. Omitting `--base-revision` preserves
+last-write-wins behavior for older scripts.
 
 ### Custom runtime compatibility targets
 

@@ -1,13 +1,12 @@
 "use client";
 
-import { IssueSidebarSectionHeader } from "./issue-sidebar-section";
+import { IssueSidebarCollapsible, IssueSidebarSectionHeader } from "./issue-sidebar-section";
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Bell, Clock3, ChevronRight, GitPullRequest, Link2, ListChecks, CircleDot, Play } from "@multica/ui/icons";
 import { toast } from "sonner";
 import {
-  issueSystemWakeupsOptions,
   issueWakeupRunsOptions,
   issueWakeupsOptions,
   useDeleteIssueWakeup,
@@ -38,7 +37,7 @@ import {
 import { WakeupInstructionEditor } from "./wakeup-instruction-editor";
 import { WakeupControl } from "./wakeup-control";
 import { WakeupCreate } from "./wakeup-create";
-import { SystemWakeupRow } from "./system-wakeup-row";
+import { useSidebarRevealMotion } from "./use-sidebar-reveal-motion";
 import { TranscriptButton } from "../../common/task-transcript";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { useLocale, useT } from "../../i18n";
@@ -154,6 +153,7 @@ function WakeupRow({
   onDisable,
   onEnable,
   closed,
+  agentAssumed,
 }: {
   wakeup: IssueWakeup;
   task?: AgentTask;
@@ -162,6 +162,8 @@ function WakeupRow({
   onDisable: () => void;
   closed: boolean;
   onEnable: (input?: { at?: string; rearm?: boolean }) => Promise<void>;
+  /** The woken agent is the issue's own, so the row need not name it. */
+  agentAssumed: boolean;
 }) {
   const { t } = useT("issues");
   const workspaceId = useCurrentWorkspace()?.id ?? "";
@@ -174,34 +176,33 @@ function WakeupRow({
   const trigger = useTriggerIssueWakeup(workspaceId, wakeup.issue_id);
   const paused = text.paused(wakeup);
   const fires = text.fires(wakeup);
+  // A finished, successful run is the expected outcome and goes unsaid here.
+  const showRunState = !!status && (activeRun || status !== "completed");
   return (
-    <div
-      className="grid grid-cols-[minmax(0,1fr)_auto]"
-      aria-busy={pending}
-    >
+    <div aria-busy={pending}>
       <Popover open={detailOpen} onOpenChange={setDetailOpen}>
         <PopoverTrigger
           render={
             <button
               type="button"
-              className="col-span-2 col-start-1 row-start-1 grid min-w-0 grid-cols-subgrid rounded-md py-2 text-left text-label hover:bg-accent/50 focus-visible:outline-2 focus-visible:outline-ring"
+              className="flex w-full min-w-0 flex-col rounded-md py-2 text-left text-label hover:bg-accent/50 focus-visible:outline-2 focus-visible:outline-ring"
             />
           }
         >
-          <span className="flex min-h-7 min-w-0 items-center gap-2 pl-2 pr-1">
+          <span className="flex min-h-7 min-w-0 items-center gap-2.5 px-2">
             <Icon
               className="mt-px size-3.5 shrink-0 text-muted-foreground"
               aria-hidden="true"
             />
             <span className="line-clamp-2 min-w-0 break-words">
-              {text.trigger(wakeup)}
+              {text.trigger(wakeup, true)}
             </span>
           </span>
-          <span className="col-span-2 min-w-0 break-words pl-7.5 pr-2 text-caption">
-            <span className="block text-muted-foreground">
-              {text.summary(wakeup, closed)}
+          <span className="min-w-0 break-words pl-8 pr-2 text-caption">
+            <span className="block text-muted-foreground empty:hidden">
+              {text.summary(wakeup, closed, agentAssumed)}
             </span>
-            {status && (
+            {showRunState && (
               <span className="block text-muted-foreground">
                 {t(
                   ($) =>
@@ -324,9 +325,17 @@ function WakeupRow({
             </div>
           )}
           {detailOpen && <WakeupHistory wakeup={wakeup} />}
-          {!closed && (
-            <div className="flex items-center gap-1 border-t border-border pt-2.5">
-              {!wakeup.disabled_at && (
+          <div className="flex items-center gap-1 border-t border-border pt-2.5">
+            <WakeupControl
+              size="xs"
+              wakeup={wakeup}
+              task={task}
+              pending={pending}
+              closed={closed}
+              onDisable={onDisable}
+              onEnable={onEnable}
+            />
+            {!closed && !wakeup.disabled_at && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -341,23 +350,11 @@ function WakeupRow({
                   <Play aria-hidden="true" />
                   {t(($) => $.wakeups.detail.wake_now)}
                 </Button>
-              )}
-              <DeleteWakeup wakeup={wakeup} onDeleted={() => setDetailOpen(false)} />
-            </div>
-          )}
+            )}
+            {!closed && <DeleteWakeup wakeup={wakeup} onDeleted={() => setDetailOpen(false)} />}
+          </div>
         </PopoverContent>
       </Popover>
-      <div className="z-10 col-start-2 row-start-1 self-start">
-        <WakeupControl
-          size="sm"
-          wakeup={wakeup}
-          task={task}
-          pending={pending}
-          closed={closed}
-          onDisable={onDisable}
-          onEnable={onEnable}
-        />
-      </div>
     </div>
   );
 }
@@ -366,11 +363,16 @@ export function WakeupsSection({
   issueId,
   closed = false,
   defaultAgentId,
+  reveal = false,
+  onRevealEnd,
 }: {
   issueId: string;
   closed?: boolean;
   /** Preselected target for a new wakeup: the issue's agent assignee. */
   defaultAgentId?: string;
+  /** Shows the section while empty with the create form open, until it closes. */
+  reveal?: boolean;
+  onRevealEnd?: () => void;
 }) {
   const { t } = useT("issues");
   const workspaceId = useCurrentWorkspace()?.id ?? "";
@@ -378,18 +380,17 @@ export function WakeupsSection({
   const [historyOpen, setHistoryOpen] = useState(false);
   const {
     data = [],
-    isError: wakeupsError,
+    isError,
     refetch,
   } = useQuery(issueWakeupsOptions(workspaceId, issueId));
   const { data: tasks = [] } = useQuery(issueTasksOptions(issueId));
-  const { data: systemRules = [], isError: systemRulesError, refetch: refetchSystemRules } = useQuery(issueSystemWakeupsOptions(workspaceId, issueId));
-  const isError = wakeupsError === true || systemRulesError === true;
-  const hasContent = data.length > 0 || (!closed && systemRules.length > 0) || isError;
+  const hasContent = data.length > 0 || isError;
   const text = useWakeupText();
   const disable = useDisableIssueWakeup(workspaceId, issueId);
   const enable = useEnableIssueWakeup(workspaceId, issueId);
-  // Open issues always show the section so people can add a wakeup.
-  if (closed && !hasContent) return null;
+  const motion = useSidebarRevealMotion<HTMLElement>(reveal && !closed, hasContent, onRevealEnd);
+  // An empty section is offered by the sidebar's add row instead.
+  if (!motion.shown) return null;
   const current = data.filter((w) => isCurrentWakeup(w, wakeupRun(w, tasks)));
   const history = data.filter((w) => !isCurrentWakeup(w, wakeupRun(w, tasks)));
   const row = (wakeup: IssueWakeup) => (
@@ -400,6 +401,7 @@ export function WakeupsSection({
       sourceTask={tasks.find((task) => task.id === wakeup.filter_task_id)}
       pending={disable.isPending || enable.isPending}
       closed={closed}
+      agentAssumed={!!defaultAgentId && wakeup.agent_id === defaultAgentId}
       onEnable={async (input = {}) => {
         await enable.mutateAsync({
           id: wakeup.id,
@@ -422,21 +424,29 @@ export function WakeupsSection({
     />
   );
   return (
-    <section>
+    <section ref={motion.ref}>
       <IssueSidebarSectionHeader
         id={`issue-wakeups-${issueId}`}
         title={t(($) => $.wakeups.title)} open={open} onOpenChange={setOpen}
-        count={current.length + (!closed ? systemRules.length : 0)}
+        count={current.length}
         collapsible={hasContent}
-        actions={!closed ? <WakeupCreate workspaceId={workspaceId} issueId={issueId} defaultAgentId={defaultAgentId} /> : undefined}
+        actions={!closed ? (
+          <WakeupCreate
+            workspaceId={workspaceId}
+            issueId={issueId}
+            defaultAgentId={defaultAgentId}
+            defaultOpen={reveal}
+            onOpenChange={(next) => !next && reveal && motion.end()}
+          />
+        ) : undefined}
       />
-      {open && hasContent && (
+      <IssueSidebarCollapsible open={open && hasContent}>
         <div className="px-2">
           {isError && (
             <button
               type="button"
               className="flex min-h-8 w-full items-center rounded-md px-2 py-1.5 text-left text-label text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-              onClick={() => { void refetch(); void refetchSystemRules(); }}
+              onClick={() => void refetch()}
             >
               {t(($) => $.wakeups.retry)}
             </button>
@@ -446,10 +456,6 @@ export function WakeupsSection({
               {t(($) => $.wakeups.closed_hint)}
             </p>
           )}
-          {!closed &&
-            systemRules.map((rule) => (
-              <SystemWakeupRow key={rule.rule} rule={rule} workspaceId={workspaceId} issueId={issueId} />
-            ))}
           {current.map(row)}
           {history.length > 0 && (
             <>
@@ -457,19 +463,22 @@ export function WakeupsSection({
                 type="button"
                 aria-expanded={historyOpen}
                 onClick={() => setHistoryOpen(!historyOpen)}
-                className="flex min-h-9 w-full items-center gap-1 rounded-md px-2 py-1 text-label text-muted-foreground hover:bg-accent/50 focus-visible:outline-2 focus-visible:outline-ring"
+                className="flex min-h-9 w-full items-center gap-2.5 rounded-md px-2 py-1 text-label text-muted-foreground transition-colors hover:bg-accent/50 focus-visible:outline-2 focus-visible:outline-ring"
               >
-                <ChevronRight
-                  className={`size-3 ${historyOpen ? "rotate-90" : ""}`}
-                  aria-hidden="true"
-                />
+                <span className="flex size-3.5 shrink-0 items-center justify-center" aria-hidden="true">
+                  <ChevronRight
+                    className={`size-3 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none ${historyOpen ? "rotate-90" : ""}`}
+                  />
+                </span>
                 {t(($) => $.wakeups.ended, { count: history.length })}
               </button>
-              {historyOpen && history.map(row)}
+              <IssueSidebarCollapsible open={historyOpen}>
+                {history.map(row)}
+              </IssueSidebarCollapsible>
             </>
           )}
         </div>
-      )}
+      </IssueSidebarCollapsible>
     </section>
   );
 }

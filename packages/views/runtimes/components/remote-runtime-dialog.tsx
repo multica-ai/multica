@@ -30,7 +30,7 @@ export function RemoteRuntimeDialog({
         if (!open) onClose();
       }}
     >
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="max-h-[85%] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{t(($) => $.qoder.connect_title)}</DialogTitle>
           <DialogDescription>

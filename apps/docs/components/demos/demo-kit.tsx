@@ -1,33 +1,20 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-  type RefObject,
-} from "react";
-import {
-  ArrowDown,
-  ArrowLeft,
-  ArrowRight,
-  ArrowUp,
-  Bot,
-  Check,
-  CornerDownRight,
-  Loader2,
-  RotateCcw,
-} from "@multica/ui/icons";
-import { Button } from "@multica/ui/components/ui/button";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useTheme } from "next-themes";
+import { Pause, Play, RotateCcw } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { useDocsLocale } from "@/components/locale-link";
 import type { Lang } from "@/lib/i18n";
 import { demoChromeCopy } from "@/lib/translations";
+import { CLIP_MANIFEST } from "./clip-manifest";
 
-// Building blocks for the scripted product demos embedded in docs pages. The
-// demos imitate the product with docs-local markup instead of importing
-// @multica/views, which needs live stores and queries.
+// Shared primitives for the three native demo mediums in Multica Docs:
+//   1. EditorialClip    — real English product recordings + localized chapter scrubber
+//   2. EditorialFigure  — architectural SVG schematics aligned with the warm-paper palette
+//   3. EditorialUtility — borderless prose-embedded decision tools & matrices
+
+const VIDEO_BASE = "/docs/videos/demos";
 
 /** Picks a demo's scenario copy for the page language, falling back to English. */
 export function useDemoCopy<T>(copy: { en: T } & Partial<Record<Lang, T>>): T {
@@ -35,285 +22,339 @@ export function useDemoCopy<T>(copy: { en: T } & Partial<Record<Lang, T>>): T {
   return copy[lang] ?? copy.en;
 }
 
-/** Timers owned by one demo run: cleared on replay and on unmount. */
-export function useDemoTimers() {
-  const ids = useRef<number[]>([]);
-  const clear = useCallback(() => {
-    for (const id of ids.current) window.clearTimeout(id);
-    ids.current = [];
-  }, []);
-  const after = useCallback((ms: number, fn: () => void) => {
-    ids.current.push(window.setTimeout(fn, ms));
-  }, []);
-  useEffect(() => clear, [clear]);
-  return { after, clear };
+export interface ClipChapter {
+  /** Short localized chapter label shown below its progress segment. */
+  label: string;
+  /** Timestamp in seconds where this chapter begins. */
+  at: number;
+}
+
+function formatClock(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  const mins = Math.floor(s / 60);
+  const secs = s % 60;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
 /**
- * True once the element has been mostly on screen, so a demo starts when the
- * reader reaches it rather than while they read the top of the page.
+ * Medium 1: Real recorded English product clip with a quiet editorial frame
+ * and clickable chapter progress bar. Auto-plays muted when visible (unless
+ * reduced motion is requested) and pauses when scrolled offscreen.
  */
-export function useStartWhenVisible<T extends Element>(): [RefObject<T | null>, boolean] {
-  const ref = useRef<T>(null);
-  const [visible, setVisible] = useState(false);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || visible) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry?.isIntersecting) {
-          setVisible(true);
-          observer.disconnect();
-        }
-      },
-      { threshold: 0.35 },
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [visible]);
-  return [ref, visible];
-}
-
-export function DemoFrame({
+export function EditorialClip({
+  slug,
   title,
+  chapters,
+  duration,
   caption,
-  onReplay,
-  frameRef,
-  children,
 }: {
+  slug: string;
   title: string;
-  /** What the reader should do or notice now; announced to screen readers. */
-  caption: ReactNode;
-  onReplay: () => void;
-  frameRef?: RefObject<HTMLElement | null>;
-  children: ReactNode;
+  chapters: ClipChapter[];
+  /** Nominal duration in seconds, used before video metadata arrives. */
+  duration: number;
+  caption?: string;
 }) {
   const lang = useDocsLocale();
   const chrome = demoChromeCopy[lang];
-  // `isolate` keeps the demos' own z-indexes below the sticky page header.
+  const { resolvedTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  const theme = mounted && resolvedTheme === "dark" ? "dark" : "light";
+  const videoSrc = `${VIDEO_BASE}/${slug}-${theme}.mp4`;
+  const posterSrc = `${VIDEO_BASE}/${slug}-${theme}.jpg`;
+
+  const darkVariant = theme === "dark" ? CLIP_MANIFEST[slug]?.dark : undefined;
+  const activeChapters = darkVariant
+    ? chapters.map((ch, i) => ({
+        label: ch.label,
+        at: darkVariant.chapters[i]?.at ?? ch.at,
+      }))
+    : chapters;
+  const nominalDuration = darkVariant?.duration ?? duration;
+
+  const figureRef = useRef<HTMLElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  const [playing, setPlaying] = useState(false);
+  const [userPaused, setUserPaused] = useState(false);
+  const [inView, setInView] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [mediaDuration, setMediaDuration] = useState(nominalDuration);
+
+  const totalDuration = mediaDuration > 0 ? mediaDuration : nominalDuration;
+
+  // Pause when scrolled offscreen; autoplay when visible unless user paused or reduced motion.
+  useEffect(() => {
+    const el = figureRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setInView(Boolean(entry?.isIntersecting)),
+      { threshold: 0.25 },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (inView && !userPaused && !reducedMotion) {
+      video.play().catch(() => {});
+    } else if (!inView && !video.paused) {
+      video.pause();
+    }
+  }, [inView, userPaused, videoSrc]);
+
+  // Keep current playback position when toggling between light and dark video sources.
+  const prevTimeRef = useRef(0);
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const resumeAt = prevTimeRef.current;
+    const onLoaded = () => {
+      if (Number.isFinite(video.duration) && video.duration > 0) {
+        setMediaDuration(video.duration);
+      }
+      if (resumeAt > 0 && resumeAt < (video.duration || duration)) {
+        video.currentTime = resumeAt;
+      }
+    };
+    video.addEventListener("loadedmetadata", onLoaded);
+    return () => video.removeEventListener("loadedmetadata", onLoaded);
+  }, [videoSrc, duration]);
+
+  const togglePlay = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) {
+      setUserPaused(false);
+      video.play().catch(() => {});
+    } else {
+      setUserPaused(true);
+      video.pause();
+    }
+  }, []);
+
+  const seekTo = useCallback((at: number) => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.currentTime = at;
+    prevTimeRef.current = at;
+    setCurrentTime(at);
+    setUserPaused(false);
+    video.play().catch(() => {});
+  }, []);
+
+  const activeChapter = (() => {
+    let idx = 0;
+    for (let i = 0; i < activeChapters.length; i++) {
+      if (currentTime + 0.08 >= activeChapters[i]!.at) idx = i;
+    }
+    return idx;
+  })();
+
+  const chapterProgress = (idx: number) => {
+    const start = activeChapters[idx]!.at;
+    const end = activeChapters[idx + 1]?.at ?? totalDuration;
+    if (currentTime <= start) return 0;
+    if (currentTime >= end) return 100;
+    const span = Math.max(0.1, end - start);
+    return Math.min(100, Math.max(0, ((currentTime - start) / span) * 100));
+  };
+
   return (
     <figure
-      ref={frameRef}
-      className="not-prose isolate my-6 overflow-hidden rounded-xl border bg-card text-card-foreground shadow-sm"
+      ref={figureRef}
+      className="not-prose my-7 border-y border-[var(--docs-rule)] py-4"
     >
-      <div className="flex items-center gap-2 border-b bg-muted/40 py-1.5 pr-1.5 pl-3">
-        <span className="shrink-0 rounded-sm bg-brand/10 px-1.5 py-0.5 text-micro font-medium text-brand">
-          {chrome.label}
-        </span>
-        <span className="min-w-0 flex-1 truncate text-caption text-muted-foreground">{title}</span>
-        <Button type="button" size="xs" variant="ghost" className="text-muted-foreground" onClick={onReplay}>
-          <RotateCcw />
-          {chrome.replay}
-        </Button>
+      <div className="mb-3 flex items-baseline justify-between gap-4">
+        <div className="min-w-0 font-[family-name:var(--font-serif)] text-[1.0625rem] leading-[1.35] tracking-[-0.01em] text-foreground">
+          {title}
+        </div>
+        <div className="flex shrink-0 items-center gap-2 font-mono text-[0.6875rem] tabular-nums text-muted-foreground">
+          <span>
+            {formatClock(currentTime)} / {formatClock(totalDuration)}
+          </span>
+          <button
+            type="button"
+            onClick={togglePlay}
+            aria-label={playing ? chrome.pause : chrome.play}
+            className="inline-flex size-6 items-center justify-center rounded-sm border border-border bg-card text-foreground transition-colors hover:border-[var(--primary)] hover:text-[var(--primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {playing ? <Pause className="size-3" /> : <Play className="size-3 translate-x-[0.5px]" />}
+          </button>
+        </div>
       </div>
-      <div className="relative">{children}</div>
-      <figcaption
-        role="status"
-        aria-live="polite"
-        className="border-t bg-muted/40 px-3 py-2 text-label text-muted-foreground"
+
+      <div
+        className="overflow-hidden rounded-[5px] border border-border bg-muted/40 cursor-pointer"
+        onClick={togglePlay}
       >
-        {caption}
-      </figcaption>
+        <video
+          key={videoSrc}
+          ref={videoRef}
+          src={videoSrc}
+          poster={posterSrc}
+          muted
+          loop
+          playsInline
+          preload="metadata"
+          aria-label={title}
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
+          onTimeUpdate={(e) => {
+            const t = e.currentTarget.currentTime;
+            prevTimeRef.current = t;
+            setCurrentTime(t);
+          }}
+          className="block aspect-[16/10] w-full bg-background object-cover"
+        />
+      </div>
+
+      {activeChapters.length > 0 && (
+        <div
+          className="mt-3 grid gap-2.5"
+          style={{ gridTemplateColumns: `repeat(${activeChapters.length}, minmax(0, 1fr))` }}
+        >
+          {activeChapters.map((chapter, idx) => {
+            const pct = chapterProgress(idx);
+            const active = idx === activeChapter;
+            const done = idx < activeChapter;
+            return (
+              <button
+                key={`${chapter.at}-${chapter.label}`}
+                type="button"
+                onClick={() => seekTo(chapter.at)}
+                className="group flex min-w-0 flex-col gap-1.5 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              >
+                <span className="block h-[2.5px] w-full overflow-hidden rounded-full bg-border">
+                  <span
+                    className={cn(
+                      "block h-full rounded-full transition-[width] duration-150 ease-linear motion-reduce:transition-none",
+                      active ? "bg-[var(--primary)]" : done ? "bg-foreground/35" : "bg-transparent",
+                    )}
+                    style={{ width: `${pct}%` }}
+                  />
+                </span>
+                <span
+                  className={cn(
+                    "truncate text-[0.75rem] leading-[1.35] transition-colors",
+                    active
+                      ? "font-medium text-foreground"
+                      : "text-muted-foreground group-hover:text-foreground",
+                  )}
+                >
+                  <span className="mr-1 font-mono text-[0.65rem] opacity-65">
+                    {String(idx + 1).padStart(2, "0")}
+                  </span>
+                  {chapter.label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {caption && (
+        <figcaption className="mt-2.5 text-[0.8125rem] leading-[1.5] text-muted-foreground">
+          {caption}
+        </figcaption>
+      )}
     </figure>
   );
 }
 
 /**
- * Draws the eye to the control the reader should use next: a pulsing ring
- * around it and a plain "Click" with an arrow pointing at it. The control's
- * own label says what it does, so the hint never repeats it. It is
- * decorative; the frame caption carries the instruction for assistive
- * technology.
+ * Medium 2: Publication-grade architectural schematic frame.
+ * Hairline top/bottom rules, editorial serif title, warm-paper SVG surface,
+ * and a fixed-height quiet caption strip below.
  */
-export function CoachMark({
-  active,
-  quiet = false,
-  side = "top",
-  align = "center",
-  ringClassName = "rounded-lg",
-  className,
+export function EditorialFigure({
+  kicker,
+  title,
+  actions,
+  caption,
   children,
 }: {
-  active: boolean;
-  /** Show only the ring, e.g. where a label would cover neighbouring content. */
-  quiet?: boolean;
-  /** Where the label sits relative to the control; the arrow points back at it. */
-  side?: "top" | "bottom" | "left" | "right";
-  align?: "start" | "center" | "end";
-  ringClassName?: string;
-  className?: string;
+  kicker?: string;
+  title: string;
+  actions?: ReactNode;
+  caption?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <figure className="not-prose my-7 border-y border-[var(--docs-rule)] py-4">
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-3">
+        <div className="flex min-w-0 items-baseline gap-2.5">
+          {kicker && (
+            <span className="shrink-0 font-mono text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-[var(--primary)]">
+              {kicker}
+            </span>
+          )}
+          <span className="font-[family-name:var(--font-serif)] text-[1.0625rem] leading-[1.35] tracking-[-0.01em] text-foreground">
+            {title}
+          </span>
+        </div>
+        {actions}
+      </div>
+
+      <div className="rounded-[4px] border border-border bg-card/70 p-3.5 sm:p-5">
+        {children}
+      </div>
+
+      {caption && (
+        <figcaption className="mt-3 min-h-[1.35rem] text-[0.8125rem] leading-[1.55] text-muted-foreground">
+          {caption}
+        </figcaption>
+      )}
+    </figure>
+  );
+}
+
+/**
+ * Medium 3: Borderless prose-embedded utility (filters, decision matrices,
+ * role tables). No card box, no blue "Try it" badge, no pulsing cues.
+ */
+export function EditorialUtility({
+  title,
+  meta,
+  onReset,
+  children,
+}: {
+  title: string;
+  meta?: ReactNode;
+  onReset?: () => void;
   children: ReactNode;
 }) {
   const lang = useDocsLocale();
-  const Arrow = { top: ArrowDown, bottom: ArrowUp, left: ArrowRight, right: ArrowLeft }[side];
-  const vertical = side === "top" || side === "bottom";
+  const chrome = demoChromeCopy[lang];
   return (
-    <span className={cn("relative inline-flex", className)}>
-      {children}
-      {active && (
-        <>
-          <span
-            aria-hidden
-            className={cn("demo-halo pointer-events-none absolute -inset-1 ring-2 ring-brand", ringClassName)}
-          />
-          {!quiet && (
-            <span
-              aria-hidden
-              className={cn(
-                // Phones have no room for labels beside controls; the ring and the
-                // caption remain.
-                "pointer-events-none absolute z-20 flex w-max max-w-56 gap-0.5 text-caption font-medium text-brand motion-safe:animate-in motion-safe:fade-in max-sm:hidden",
-                side === "top" && "bottom-full mb-1.5 flex-col",
-                side === "bottom" && "top-full mt-1.5 flex-col-reverse",
-                side === "left" && "top-1/2 right-full mr-2 -translate-y-1/2 items-center",
-                side === "right" && "top-1/2 left-full ml-2 -translate-y-1/2 flex-row-reverse items-center",
-                vertical && align === "start" && "left-0 items-start",
-                vertical && align === "center" && "left-1/2 -translate-x-1/2 items-center",
-                vertical && align === "end" && "right-0 items-end",
-              )}
+    <section
+      aria-label={title}
+      className="not-prose my-7 border-y border-[var(--docs-rule)] py-4"
+    >
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <div className="font-[family-name:var(--font-serif)] text-[1.0625rem] leading-[1.35] tracking-[-0.01em] text-foreground">
+          {title}
+        </div>
+        <div className="flex items-center gap-3 text-[0.75rem] text-muted-foreground">
+          {meta}
+          {onReset && (
+            <button
+              type="button"
+              onClick={onReset}
+              className="inline-flex items-center gap-1 text-muted-foreground transition-colors hover:text-foreground"
             >
-              {/* A halo in the card color keeps lines underneath from crossing the text. */}
-              <span className="[text-shadow:0_0_2px_var(--card),0_0_4px_var(--card),0_0_6px_var(--card)]">
-                {demoChromeCopy[lang].click}
-              </span>
-              <Arrow className={cn("size-3.5 shrink-0", `demo-nudge-${side}`)} />
-            </span>
+              <RotateCcw className="size-3" />
+              {chrome.reset}
+            </button>
           )}
-        </>
-      )}
-    </span>
-  );
-}
-
-export function DemoAvatar({ name, agent = false }: { name: string; agent?: boolean }) {
-  return (
-    <span
-      aria-hidden
-      className={cn(
-        "inline-flex size-5 shrink-0 items-center justify-center rounded-full text-micro font-medium",
-        agent ? "bg-brand/12 text-brand" : "bg-muted text-foreground",
-      )}
-    >
-      {agent ? <Bot className="size-3" /> : name.slice(0, 1)}
-    </span>
-  );
-}
-
-export type StepState = "running" | "done";
-
-export function DemoStep({ state, children }: { state: StepState; children: ReactNode }) {
-  return (
-    <li className="m-0 flex min-w-0 items-start gap-2 py-0.5 ps-0 text-caption text-muted-foreground motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-1">
-      {state === "running" ? (
-        <Loader2 aria-hidden className="mt-px size-3.5 shrink-0 text-brand motion-safe:animate-spin" />
-      ) : (
-        <Check aria-hidden className="mt-px size-3.5 shrink-0 text-success" />
-      )}
-      <span className={cn("min-w-0", state === "running" && "text-foreground")}>{children}</span>
-    </li>
-  );
-}
-
-/** The step-list marker for a message a running turn has read (mirrors the product). */
-export function DemoSteerMarker({ label, detail }: { label: string; detail: string }) {
-  return (
-    <li className="m-0 flex min-w-0 items-center gap-2 rounded-xs bg-brand/7 px-1 py-1.5 text-caption motion-safe:animate-in motion-safe:fade-in dark:bg-brand/12">
-      <CornerDownRight aria-hidden className="size-3.5 shrink-0 text-brand" />
-      <span className="min-w-0 truncate">
-        <span className="font-medium">{label}</span>
-        <span className="text-muted-foreground"> · {detail}</span>
-      </span>
-    </li>
-  );
-}
-
-/** One agent run as it appears in the issue timeline. */
-export function DemoRun({
-  agent,
-  status,
-  active,
-  children,
-}: {
-  agent: string;
-  status: string;
-  active: boolean;
-  children?: ReactNode;
-}) {
-  return (
-    <div className="min-w-0 motion-safe:animate-in motion-safe:fade-in">
-      <div className="flex min-h-7 items-center gap-2">
-        <DemoAvatar name={agent} agent />
-        <span className="truncate text-body font-medium">{agent}</span>
-        <span className="inline-flex items-center gap-1 text-caption text-muted-foreground">
-          {active ? (
-            <Loader2 aria-hidden className="size-3 text-brand motion-safe:animate-spin" />
-          ) : (
-            <Check aria-hidden className="size-3 text-success" />
-          )}
-          {status}
-        </span>
+        </div>
       </div>
-      {children && <ul className="mt-1 flex flex-col gap-0.5 pl-7">{children}</ul>}
-    </div>
-  );
-}
-
-/** A posted comment in the issue timeline. */
-export function DemoComment({
-  author,
-  agent = false,
-  children,
-  footer,
-}: {
-  author: string;
-  agent?: boolean;
-  children: ReactNode;
-  footer?: ReactNode;
-}) {
-  return (
-    <div className="min-w-0 rounded-lg border bg-background px-3 py-2 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1">
-      <div className="flex items-center gap-2">
-        <DemoAvatar name={author} agent={agent} />
-        <span className="text-label font-medium">{author}</span>
-      </div>
-      <div className="mt-1 pl-7 text-body break-words">{children}</div>
-      {footer && <div className="mt-1.5 pl-7">{footer}</div>}
-    </div>
-  );
-}
-
-export function DemoReceipt({ read, children }: { read: boolean; children: ReactNode }) {
-  return (
-    <span className="flex items-center gap-1.5 text-caption text-muted-foreground">
-      {read ? (
-        <Check aria-hidden className="size-3.5 shrink-0 text-success" />
-      ) : (
-        <Loader2 aria-hidden className="size-3.5 shrink-0 motion-safe:animate-spin" />
-      )}
       {children}
-    </span>
-  );
-}
-
-/** The round send button of the comment composer. */
-export function DemoSendButton({
-  label,
-  disabled,
-  onClick,
-}: {
-  label: string;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      disabled={disabled}
-      onClick={onClick}
-      className="inline-flex size-7 items-center justify-center rounded-full bg-foreground text-background transition-opacity outline-none hover:opacity-85 focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-40"
-    >
-      <ArrowUp className="size-4" />
-    </button>
+    </section>
   );
 }

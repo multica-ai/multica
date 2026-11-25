@@ -1,33 +1,34 @@
 "use client";
 
-import { forwardRef, memo, useCallback, useLayoutEffect, useState } from "react";
+import { forwardRef, memo, useLayoutEffect, useRef, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, ChevronUp } from "@multica/ui/icons";
+import { ChevronDown, ChevronRight, ChevronUp, Lock } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
-import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { issueStatusCategory } from "@multica/core/issues";
 import { issueDetailOptions, sidebarIssuesOptions } from "@multica/core/issues/queries";
 import { SIDEBAR_FIRST_PAGE, SIDEBAR_PAGE_STEP, type SidebarIssuesRequest } from "@multica/core/issues/sidebar-list";
 import { useSidebarKeptStore } from "@multica/core/issues/stores/sidebar-kept-store";
+import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { issueUnreadTarget, useIssueUnread } from "@multica/core/issues/unread";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
-import type { AgentTask, Issue, IssueUnread, ListIssuesParams } from "@multica/core/types";
-import { AppLink } from "../../navigation";
+import type { Issue, IssueUnread } from "@multica/core/types";
+import { AppLink, useWarmRoute } from "../../navigation";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { StatusIcon } from "../../issues/components/status-icon";
 import { StatusPicker } from "../../issues/components/pickers/status-picker";
 import { IssueActionsContextMenu } from "../../issues/actions";
 import { useIssueActions } from "../../issues/actions/use-issue-actions";
-import { selectIssueTasks } from "../../issues/surface/activity";
+import { type IssueAgentState, useIssueAgentState } from "../../issues/surface/use-issue-agent-state";
 import { useStatusLabel } from "../../issues/utils/status-label";
 import { DeferredPopup } from "../../common/deferred-popup";
 import { useT, useTimeAgo } from "../../i18n";
-import { PANEL_ROW_CLASS, panelRowStateClass } from "../panel-nav";
+import { PANEL_ROW_CLASS, panelRowAnchor, panelRowStateClass, usePanelDisclosureSettled } from "../panel-nav";
 
 /** A working agent's issue title: dimmer at rest and a wider highlight than
  *  the default shimmer, so the sweep reads at sidebar size. */
@@ -35,13 +36,15 @@ export const SIDEBAR_SHIMMER_CLASS =
   "[--shimmer-text-base:var(--faint-foreground)] [--shimmer-text-spread:22%]";
 
 export const TREE_ROW_BUTTON_CLASS =
-  "relative z-10 flex size-5 shrink-0 items-center justify-center rounded-md outline-none transition-[color,opacity] hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring";
+  "relative z-10 flex size-5 shrink-0 items-center justify-center rounded-md outline-none transition-[color,opacity] hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring";
 
 interface TreeRowProps extends React.ComponentProps<"div"> {
   href: string;
   label: string;
   icon: React.ReactNode;
   active: boolean;
+  /** The open issue sits under this collapsed row, which no list shows. */
+  located?: boolean;
   /** Omit the expand props for a row that only opens its page. */
   expanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
@@ -49,12 +52,98 @@ interface TreeRowProps extends React.ComponentProps<"div"> {
   /** Label for the expand toggle; `aria-expanded` carries its state. */
   toggleLabel?: string;
   onPrefetch?: () => void;
+  /** Right after the label, which truncates before it: a marker like a lock. */
+  labelSuffix?: React.ReactNode;
   /** End of the row: a count, or a settings button. */
   trailing?: React.ReactNode;
   onNavigate?: (event: React.MouseEvent<HTMLAnchorElement>) => void;
   onNavigateInPlace?: () => void;
   rowRef?: React.Ref<HTMLDivElement>;
 }
+
+// A step below the selected row: no fill, so it marks the place without
+// competing with a lit row.
+const TREE_ROW_LOCATED_CLASS =
+  "data-located:font-medium data-located:text-foreground data-located:[&_svg_.icon-body]:fill-current data-located:[&_svg_.icon-body]:[fill-opacity:0.2]";
+
+function treeRowKeyHandler(expanded: boolean, onExpandedChange: ((expanded: boolean) => void) | undefined) {
+  return (event: React.KeyboardEvent) => {
+    if (!onExpandedChange) return;
+    if (event.key === "ArrowRight" && !expanded) {
+      event.preventDefault();
+      onExpandedChange(true);
+    } else if (event.key === "ArrowLeft" && expanded) {
+      event.preventDefault();
+      onExpandedChange(false);
+    }
+  };
+}
+
+interface TreeToggleRowProps extends React.ComponentProps<"div"> {
+  label: string;
+  icon: React.ReactNode;
+  located?: boolean;
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
+  listId: string;
+  onPrefetch?: () => void;
+  trailing?: React.ReactNode;
+  rowRef?: React.Ref<HTMLDivElement>;
+}
+
+/**
+ * A tree row with no page of its own: the whole row expands it in place, and
+ * the chevron takes the icon's place on hover as on `TreeRow`.
+ */
+export const TreeToggleRow = forwardRef<HTMLButtonElement, TreeToggleRowProps>(function TreeToggleRow(
+  { label, icon, located = false, expanded, onExpandedChange, listId, onPrefetch, trailing, rowRef, className, ...rowProps },
+  buttonRef,
+) {
+  const onKeyDown = treeRowKeyHandler(expanded, onExpandedChange);
+  return (
+    <div
+      {...rowProps}
+      ref={rowRef}
+      data-located={located ? "" : undefined}
+      className={cn(
+        PANEL_ROW_CLASS,
+        panelRowStateClass(false),
+        "group/row relative",
+        expanded && "text-foreground",
+        TREE_ROW_LOCATED_CLASS,
+        className,
+      )}
+    >
+      <span className="relative flex size-4 shrink-0 items-center justify-center">
+        <span className="flex group-hover/row:opacity-0 group-has-[:focus-visible]/row:opacity-0 [@media(pointer:coarse)]:opacity-0">
+          {icon}
+        </span>
+        <ChevronRight
+          aria-hidden
+          className={cn(
+            "absolute size-3.5 text-muted-foreground opacity-0 transition-transform duration-150 ease-out group-hover/row:opacity-100 group-has-[:focus-visible]/row:opacity-100 motion-reduce:transition-none [@media(pointer:coarse)]:opacity-100",
+            expanded && "rotate-90",
+          )}
+        />
+      </span>
+      <TruncatedTooltip content={label}>
+        <button
+          ref={buttonRef}
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={expanded ? listId : undefined}
+          onClick={() => onExpandedChange(!expanded)}
+          onKeyDown={onKeyDown}
+          onPointerEnter={onPrefetch}
+          className="min-w-0 flex-1 truncate text-left outline-none after:absolute after:inset-0 after:rounded-lg focus-visible:after:outline-2 focus-visible:after:outline-ring"
+        >
+          {label}
+        </button>
+      </TruncatedTooltip>
+      {trailing}
+    </div>
+  );
+});
 
 /**
  * A nav row that expands in place. The link stretches over the whole row so
@@ -67,11 +156,13 @@ export const TreeRow = forwardRef<HTMLAnchorElement, TreeRowProps>(function Tree
     label,
     icon,
     active,
+    located = false,
     expanded,
     onExpandedChange,
     listId,
     toggleLabel,
     onPrefetch,
+    labelSuffix,
     trailing,
     onNavigate,
     onNavigateInPlace,
@@ -81,26 +172,20 @@ export const TreeRow = forwardRef<HTMLAnchorElement, TreeRowProps>(function Tree
   },
   linkRef,
 ) {
-  const onKeyDown = (event: React.KeyboardEvent) => {
-    if (!onExpandedChange) return;
-    if (event.key === "ArrowRight" && !expanded) {
-      event.preventDefault();
-      onExpandedChange(true);
-    } else if (event.key === "ArrowLeft" && expanded) {
-      event.preventDefault();
-      onExpandedChange(false);
-    }
-  };
+  const onKeyDown = treeRowKeyHandler(!!expanded, onExpandedChange);
 
   return (
     <div
       {...rowProps}
+      {...panelRowAnchor(active)}
       ref={rowRef}
+      data-located={located && !active ? "" : undefined}
       className={cn(
         PANEL_ROW_CLASS,
         panelRowStateClass(active),
         "group/row relative",
         expanded && !active && "text-foreground",
+        TREE_ROW_LOCATED_CLASS,
         className,
       )}
     >
@@ -146,9 +231,10 @@ export const TreeRow = forwardRef<HTMLAnchorElement, TreeRowProps>(function Tree
           onKeyDown={onKeyDown}
           onClick={onNavigate}
           onNavigateInPlace={onNavigateInPlace}
-          className="min-w-0 flex-1 truncate outline-none after:absolute after:inset-0 after:rounded-lg focus-visible:after:outline-2 focus-visible:after:outline-ring"
+          className="flex min-w-0 flex-1 items-center gap-1.5 outline-none after:absolute after:inset-0 after:rounded-lg focus-visible:after:outline-2 focus-visible:after:outline-ring"
         >
-          {label}
+          <span className="min-w-0 truncate">{label}</span>
+          {labelSuffix}
         </AppLink>
       </TruncatedTooltip>
       {trailing}
@@ -156,10 +242,29 @@ export const TreeRow = forwardRef<HTMLAnchorElement, TreeRowProps>(function Tree
   );
 });
 
+/** Marks a private project, which only its members can see. It sits above
+ *  the row link's stretched hit area so its tooltip opens; a click still
+ *  reaches the link. */
+export function PrivateProjectLock() {
+  const { t } = useT("layout");
+  const label = t(($) => $.panels.work.private_project);
+  return (
+    <TooltipHint label={label}>
+      <span
+        role="img"
+        aria-label={label}
+        className="relative z-10 flex shrink-0 text-faint-foreground in-data-[active=true]:text-muted-foreground"
+      >
+        <Lock className="size-3" />
+      </span>
+    </TooltipHint>
+  );
+}
+
 /** Issues under an expanded row sit flush and a step smaller than the rows
  *  around them, so a group reads as one block. */
 const TREE_CHILD_ROW_CLASS =
-  "flex min-h-[26px] w-full items-center gap-2 rounded-lg px-2 py-[3px] text-left text-label transition-colors outline-none focus-visible:outline-2 focus-visible:outline-ring";
+  "flex min-h-[26px] w-full items-center gap-2 rounded-lg px-2 py-[3px] text-left text-label transition-colors outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring";
 
 /** An issue row whose context menu is open stays lit as if hovered. The
  *  selected row keeps its own fill. */
@@ -167,7 +272,9 @@ export function issueRowMenuOpenClass(active: boolean) {
   return active ? undefined : "data-popup-open:bg-surface-hover data-popup-open:text-foreground";
 }
 
-const EMPTY_PARAMS: ListIssuesParams = {};
+const EMPTY_PARAMS: SidebarIssuesRequest = {
+  table: { scope: { kind: "workspace" }, filters: {}, sort: { field: "position", direction: "asc" } },
+};
 const EMPTY_ISSUES: Issue[] = [];
 
 /**
@@ -197,7 +304,9 @@ export function useKeptActiveItem<T extends { id: string }>(
  * The issues under an expanded row: the first page, then "Load more" in
  * steps. `params: null` means the row's settings can match nothing;
  * `undefined` that they are still resolving, or — with `paramsError` — that
- * they could not resolve, which `onRetry` tries again.
+ * they could not resolve, which `onRetry` tries again. `activeIssueId` is the
+ * row that lights; the open issue `openIssueId` names is listed last when
+ * `ownsOpen` claims it and no loaded page has it, lit or not.
  */
 export function SidebarIssueList({
   id,
@@ -207,6 +316,8 @@ export function SidebarIssueList({
   paramsError = false,
   onRetry,
   activeIssueId,
+  openIssueId = activeIssueId,
+  ownsOpen,
   onCollapse,
 }: {
   id: string;
@@ -216,6 +327,8 @@ export function SidebarIssueList({
   paramsError?: boolean;
   onRetry?: () => void;
   activeIssueId: string | null;
+  openIssueId?: string | null;
+  ownsOpen?: (issue: Issue) => boolean;
   onCollapse: () => void;
 }) {
   const { t } = useT("layout");
@@ -229,14 +342,27 @@ export function SidebarIssueList({
     placeholderData: keepPreviousData,
   });
   const listed = params ? (query.data?.issues ?? EMPTY_ISSUES) : EMPTY_ISSUES;
+  useWarmRoute("issue", listed[0] ? p.issueDetail(issueRouteRef(listed[0])) : null);
   const total = params ? (query.data?.total ?? 0) : 0;
   // The list no longer carries a kept issue; the detail cache follows its
   // edits, and dropping it on delete ends the keep.
-  const { data: activeIssue } = useQuery({
-    ...issueDetailOptions(wsId, activeIssueId ?? ""),
+  const openId = activeIssueId ?? openIssueId;
+  const { data: openIssue } = useQuery({
+    ...issueDetailOptions(wsId, openId ?? ""),
     enabled: false,
   });
-  const issues = useKeptActiveItem(source, listed, activeIssueId, activeIssue);
+  const kept = useKeptActiveItem(source, listed, activeIssueId, openIssue);
+  const issues =
+    openIssue &&
+    openIssue.id === openId &&
+    ownsOpen?.(openIssue) &&
+    !kept.some((issue) => issue.id === openIssue.id)
+      ? [...kept, openIssue]
+      : kept;
+  const locating = useSidebarTreeStore(
+    (s) => !!activeIssueId && s.locate?.source === source && s.locate.issueId === activeIssueId,
+  );
+  const settled = usePanelDisclosureSettled();
 
   const onKeyDown = (event: React.KeyboardEvent) => {
     if (event.key !== "ArrowLeft") return;
@@ -246,8 +372,11 @@ export function SidebarIssueList({
 
   const tailClass = cn(TREE_CHILD_ROW_CLASS, panelRowStateClass(false), "gap-1.5 min-h-6 text-caption text-faint-foreground");
 
+  // The connector sits on the parent icon's centre line (`ml-5`), and the
+  // child icons on the parent's label column: 1px border + 9px + the child
+  // row's 8px reaches the parent row's 12px + 16px icon + 10px gap.
   return (
-    <ul id={id} className="mb-2 ml-5 border-l border-surface-border pl-1.5">
+    <ul id={id} data-sidebar-list={source} className="mb-2 ml-5 border-l border-surface-border pl-[9px]">
       {params === undefined && paramsError ? (
         <li className="flex h-[26px] items-center gap-2 px-2 text-caption text-faint-foreground">
           <span className="min-w-0 truncate">{t(($) => $.panels.work.project_issues_error)}</span>
@@ -280,8 +409,9 @@ export function SidebarIssueList({
               <SidebarIssueRow
                 wsId={wsId}
                 issue={issue}
-                href={p.issueDetail(issue.id)}
+                href={p.issueDetail(issueRouteRef(issue))}
                 active={issue.id === activeIssueId}
+                locating={locating && settled && issue.id === activeIssueId}
                 statusColor={statusCatalog.colorOf(issue.status)}
                 statusIcon={statusCatalog.iconOf(issue.status)}
                 statusLabel={statusLabel(issue.status)}
@@ -320,28 +450,19 @@ export function SidebarIssueList({
   );
 }
 
-type IssueAgentState = { running: boolean; agentIds: string[] } | null;
-
-/** The agents running on an issue, or queued for it when none is running yet. */
-export function useIssueAgentState(wsId: string, issueId: string): IssueAgentState {
-  const select = useCallback(
-    (snapshot: AgentTask[]): IssueAgentState => {
-      const { running, queued } = selectIssueTasks(snapshot, issueId);
-      const tasks = running.length > 0 ? running : queued;
-      if (tasks.length === 0) return null;
-      return { running: running.length > 0, agentIds: [...new Set(tasks.map((task) => task.agent_id))] };
-    },
-    [issueId],
-  );
-  const { data = null } = useQuery({ ...agentTaskSnapshotOptions(wsId), select });
-  return data;
-}
+export { type IssueAgentState, useIssueAgentState };
 
 export function IssueAgentBadge({ agents }: { agents: NonNullable<IssueAgentState> }) {
   const { t } = useT("issues");
   return (
     <>
-      <AgentAvatarStack agentIds={agents.agentIds} size="xs" max={2} opacity={agents.running ? "full" : "half"} />
+      <AgentAvatarStack
+        agentIds={agents.agentIds}
+        actors={agents.actors}
+        size="xs"
+        max={2}
+        opacity={agents.running ? "full" : "half"}
+      />
       <span className="sr-only">
         {agents.running
           ? t(($) => $.agent_activity.status_running)
@@ -388,7 +509,7 @@ export function SidebarIssueStatus({
       aria-label={label}
       // A pinned row is draggable; pressing its icon must not pick it up.
       onPointerDown={(event) => event.stopPropagation()}
-      className="relative z-10 -m-1 flex shrink-0 items-center justify-center rounded-md p-1 outline-none transition-colors hover:bg-surface-selected focus-visible:outline-2 focus-visible:outline-ring data-popup-open:bg-surface-selected"
+      className="relative z-10 -m-1 flex shrink-0 items-center justify-center rounded-md p-1 outline-none transition-colors hover:bg-surface-selected focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring data-popup-open:bg-surface-selected"
     />
   );
   return (
@@ -470,6 +591,7 @@ const SidebarIssueRow = memo(function SidebarIssueRow({
   issue,
   href,
   active,
+  locating,
   statusColor,
   statusIcon,
   statusLabel,
@@ -479,6 +601,8 @@ const SidebarIssueRow = memo(function SidebarIssueRow({
   issue: Issue;
   href: string;
   active: boolean;
+  /** "Show in sidebar" asked for this row: scroll to it once. */
+  locating: boolean;
   statusColor: string | null;
   statusIcon: string | null;
   statusLabel: string;
@@ -486,10 +610,20 @@ const SidebarIssueRow = memo(function SidebarIssueRow({
 }) {
   const agents = useIssueAgentState(wsId, issue.id);
   const unread = useIssueUnread(wsId, issue.id);
+  const rowRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!locating) return;
+    rowRef.current?.scrollIntoView?.({ block: "nearest" });
+    useSidebarTreeStore.getState().requestLocate(null);
+  }, [locating]);
 
   return (
     <IssueActionsContextMenu issue={issue}>
-      <div className={cn(TREE_CHILD_ROW_CLASS, panelRowStateClass(active), issueRowMenuOpenClass(active), "relative")}>
+      <div
+        {...panelRowAnchor(active)}
+        ref={rowRef}
+        className={cn(TREE_CHILD_ROW_CLASS, panelRowStateClass(active), issueRowMenuOpenClass(active), "relative")}
+      >
         <SidebarIssueStatus
           issue={issue}
           color={statusColor}
@@ -500,6 +634,7 @@ const SidebarIssueRow = memo(function SidebarIssueRow({
         <AppLink
           href={unreadIssueHref(href, unread)}
           newTabTitle={issue.title}
+          data-issue-id={issue.id}
           aria-current={active ? "page" : undefined}
           onKeyDown={onKeyDown}
           className={ISSUE_ROW_LINK_CLASS}

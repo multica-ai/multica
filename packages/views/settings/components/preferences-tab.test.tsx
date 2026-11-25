@@ -30,14 +30,9 @@ const mockReload = vi.hoisted(() => vi.fn());
 const mockToastWarning = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
 const mockToastSuccess = vi.hoisted(() => vi.fn());
-const mockSetTheme = vi.hoisted(() => vi.fn());
 const mockSetUser = vi.hoisted(() => vi.fn());
 const userRef = vi.hoisted(() => ({
   current: null as { id: string; timezone?: string | null } | null,
-}));
-
-vi.mock("@multica/ui/components/common/theme-provider", () => ({
-  useTheme: () => ({ theme: "light", setTheme: mockSetTheme }),
 }));
 
 vi.mock("@multica/core/i18n/react", async () => {
@@ -66,6 +61,9 @@ vi.mock("@multica/core/chat", () => ({
     { getState: () => chatState },
   ),
 }));
+
+// Reads the workspace's agents; covered by its own test.
+vi.mock("./quick-chat-agent-row", () => ({ QuickChatAgentRow: () => null }));
 
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ id: "ws-1", name: "Acme" }),
@@ -160,21 +158,6 @@ describe("PreferencesTab — Language switcher", () => {
     expect(mockReload).not.toHaveBeenCalled();
   });
 
-  it("applies the theme on this device without announcing success", async () => {
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    render(<PreferencesTab />, { wrapper: I18nWrapper });
-
-    const group = screen.getByRole("group", { name: "Theme" });
-    expect(within(group).getByRole("button", { name: "Light" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    await user.click(within(group).getByRole("button", { name: "Dark" }));
-
-    expect(mockSetTheme).toHaveBeenCalledWith("dark");
-    expect(mockToastSuccess).not.toHaveBeenCalled();
-  });
-
   it.each([
     { name: "한국어", locale: "ko" },
     { name: "日本語", locale: "ja" },
@@ -243,6 +226,8 @@ describe("PreferencesTab — Time zone", () => {
     supportedValuesOf?: (key: "timeZone") => string[];
   };
   const realSupportedValuesOf = intlWithValues.supportedValuesOf;
+  // On a machine set to Asia/Tokyo the "(browser)" entry matches too.
+  const TOKYO_ZONE = /^Asia\/Tokyo(?! \(browser\))/;
   beforeAll(() => {
     intlWithValues.supportedValuesOf = () => [];
   });
@@ -288,7 +273,7 @@ describe("PreferencesTab — Time zone", () => {
     const user = userEvent.setup();
     render(<PreferencesTab />, { wrapper: I18nWrapper });
 
-    await pickTimezone(user, "tokyo", /Asia\/Tokyo/);
+    await pickTimezone(user, "tokyo", TOKYO_ZONE);
 
     await waitFor(() => {
       expect(mockUpdateMe).toHaveBeenCalledWith({ timezone: "Asia/Tokyo" });
@@ -303,7 +288,7 @@ describe("PreferencesTab — Time zone", () => {
     const user = userEvent.setup();
     render(<PreferencesTab />, { wrapper: I18nWrapper });
 
-    await pickTimezone(user, "tokyo", /Asia\/Tokyo/);
+    await pickTimezone(user, "tokyo", TOKYO_ZONE);
 
     await waitFor(() => {
       expect(mockUpdateMe).toHaveBeenCalledWith({ timezone: "Asia/Tokyo" });
@@ -432,8 +417,8 @@ describe("PreferencesTab — Scope", () => {
   it("labels where each group of settings is stored", () => {
     render(<PreferencesTab />, { wrapper: I18nWrapper });
     expect(screen.getByText("Account · synced")).toBeInTheDocument();
-    // Appearance, opening issues, comments & chat.
-    expect(screen.getAllByText("This device only")).toHaveLength(3);
+    // Opening issues, comments & chat.
+    expect(screen.getAllByText("This device only")).toHaveLength(2);
   });
 
   it("switches what clicking a card or row opens, and says what Shift does", async () => {

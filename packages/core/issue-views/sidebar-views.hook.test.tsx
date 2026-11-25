@@ -48,7 +48,7 @@ describe("useSidebarViews writes", () => {
   });
 
   it("keeps starred views that have not loaded when unstarring a built-in", async () => {
-    const { result } = setup(preference(["builtin:my_issues", "view:a", "builtin:all_issues", "view:b"]));
+    const { result } = setup(preference(["builtin:my_work", "view:a", "builtin:all_issues", "view:b"]));
     await waitFor(() => expect(result.current.isStarred("view:a")).toBe(true));
     expect(result.current.viewsPending).toBe(true);
 
@@ -56,7 +56,7 @@ describe("useSidebarViews writes", () => {
 
     await waitFor(() => expect(putIssueViewPreference).toHaveBeenCalledTimes(1));
     expect(putIssueViewPreference.mock.calls[0]![0].prefs.order).toEqual([
-      "builtin:my_issues",
+      "builtin:my_work",
       "view:a",
       "view:b",
     ]);

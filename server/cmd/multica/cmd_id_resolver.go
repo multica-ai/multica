@@ -20,12 +20,18 @@ type resolvedID struct {
 	// Display is a best-effort label for human-facing messages. It may equal
 	// ID when resolution does not fetch display metadata from the server.
 	Display string
+	// Archived is set when the prefix matched only an archived candidate. A
+	// full UUID is not looked up, so it never sets this.
+	Archived bool
 }
 
 type idCandidate struct {
 	ID      string
 	Display string
 	Detail  string
+	// Archived candidates only resolve when no live candidate matches the
+	// prefix, so an archived project never makes a live one ambiguous.
+	Archived bool
 }
 
 func displayID(id string, full bool) string {
@@ -75,7 +81,16 @@ func compactUUID(id string) string {
 	return strings.ToLower(strings.ReplaceAll(strings.TrimSpace(id), "-", ""))
 }
 
+const defaultListHint = "run the list command with --full-id"
+
 func resolveIDByPrefix(ctx context.Context, client *cli.APIClient, kind, input string, fetch func(context.Context, *cli.APIClient) ([]idCandidate, error)) (resolvedID, error) {
+	return resolveIDByPrefixWithListHint(ctx, client, kind, input, defaultListHint, fetch)
+}
+
+// resolveIDByPrefixWithListHint is resolveIDByPrefix for resources whose list
+// command needs a different hint, e.g. one that always prints full UUIDs and
+// has no --full-id flag. listHint completes "Use more characters or ...".
+func resolveIDByPrefixWithListHint(ctx context.Context, client *cli.APIClient, kind, input, listHint string, fetch func(context.Context, *cli.APIClient) ([]idCandidate, error)) (resolvedID, error) {
 	trimmed := strings.TrimSpace(input)
 	if trimmed == "" {
 		return resolvedID{}, fmt.Errorf("%s id is required", kind)
@@ -104,21 +119,35 @@ func resolveIDByPrefix(ctx context.Context, client *cli.APIClient, kind, input s
 		}
 	}
 
+	live := make([]idCandidate, 0, len(matches))
+	for _, m := range matches {
+		if !m.Archived {
+			live = append(live, m)
+		}
+	}
+	if len(live) > 0 {
+		matches = live
+	}
+
 	switch len(matches) {
 	case 0:
-		return resolvedID{}, fmt.Errorf("no %s found matching id prefix %q; run the list command with --full-id to copy the full UUID", kind, input)
+		return resolvedID{}, fmt.Errorf("no %s found matching id prefix %q; %s to copy the full UUID", kind, input, listHint)
 	case 1:
 		display := matches[0].Display
 		if display == "" {
 			display = matches[0].ID
 		}
-		return resolvedID{ID: matches[0].ID, Display: display}, nil
+		return resolvedID{ID: matches[0].ID, Display: display, Archived: matches[0].Archived}, nil
 	default:
-		return resolvedID{}, ambiguousIDPrefixError(kind, input, matches)
+		return resolvedID{}, ambiguousIDPrefixErrorWithListHint(kind, input, listHint, matches)
 	}
 }
 
 func ambiguousIDPrefixError(kind, input string, matches []idCandidate) error {
+	return ambiguousIDPrefixErrorWithListHint(kind, input, defaultListHint, matches)
+}
+
+func ambiguousIDPrefixErrorWithListHint(kind, input, listHint string, matches []idCandidate) error {
 	sort.Slice(matches, func(i, j int) bool {
 		return matches[i].ID < matches[j].ID
 	})
@@ -126,7 +155,7 @@ func ambiguousIDPrefixError(kind, input string, matches []idCandidate) error {
 	for _, m := range matches {
 		parts = append(parts, "  "+m.ID)
 	}
-	return fmt.Errorf("ambiguous %s id prefix %q; matches:\n%s\nUse more characters or run the list command with --full-id", kind, input, strings.Join(parts, "\n"))
+	return fmt.Errorf("ambiguous %s id prefix %q; matches:\n%s\nUse more characters or %s", kind, input, strings.Join(parts, "\n"), listHint)
 }
 
 // resolveIssueRef accepts only the two canonical issue references:
@@ -353,11 +382,29 @@ func resolveProjectID(ctx context.Context, client *cli.APIClient, input string) 
 	return resolveIDByPrefix(ctx, client, "project", input, fetchProjectCandidates)
 }
 
+// resolveProjectIDForNewWork resolves --project on creates that file new work
+// into a project (issue create, autopilot create). Updates use
+// resolveProjectID: the server alone knows whether the project changes. A prefix that
+// only matches an archived project is refused here with the restore command,
+// instead of round-tripping to the server's 409 project_archived.
+func resolveProjectIDForNewWork(ctx context.Context, client *cli.APIClient, input string) (resolvedID, error) {
+	ref, err := resolveProjectID(ctx, client, input)
+	if err != nil {
+		return resolvedID{}, err
+	}
+	if ref.Archived {
+		return resolvedID{}, fmt.Errorf("project %q is archived and accepts no new work; restore it first with: multica project restore %s", ref.Display, ref.ID)
+	}
+	return ref, nil
+}
+
 func fetchProjectCandidates(ctx context.Context, client *cli.APIClient) ([]idCandidate, error) {
 	if client.WorkspaceID == "" {
 		return nil, fmt.Errorf("workspace_id is required to resolve project id prefixes")
 	}
-	params := url.Values{"workspace_id": {client.WorkspaceID}}
+	// Archived projects are candidates too, so get / restore / issue list
+	// --project still reach them; resolveIDByPrefix prefers live projects.
+	params := url.Values{"workspace_id": {client.WorkspaceID}, "include_archived": {"true"}}
 	var result map[string]any
 	if err := client.GetJSON(ctx, "/api/projects?"+params.Encode(), &result); err != nil {
 		return nil, err
@@ -369,10 +416,15 @@ func fetchProjectCandidates(ctx context.Context, client *cli.APIClient) ([]idCan
 		if !ok {
 			continue
 		}
+		detail := strVal(p, "status")
+		if strVal(p, "archived_at") != "" {
+			detail += ", archived"
+		}
 		candidates = append(candidates, idCandidate{
-			ID:      strVal(p, "id"),
-			Display: strVal(p, "title"),
-			Detail:  strVal(p, "status"),
+			ID:       strVal(p, "id"),
+			Display:  strVal(p, "title"),
+			Detail:   detail,
+			Archived: strVal(p, "archived_at") != "",
 		})
 	}
 	return candidates, nil

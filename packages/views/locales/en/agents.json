@@ -65,15 +65,6 @@
     "search_runtime_filtered": "No agents on \"{{machine}}\" match \"{{query}}\".",
     "runtime_filtered": "No agents on \"{{machine}}\"."
   },
-  "runtime_filter": {
-    "all": "All runtimes",
-    "section_local": "Local",
-    "section_remote": "Remote",
-    "section_cloud": "Cloud",
-    "agent_count_one": "{{count}} agent",
-    "agent_count_other": "{{count}} agents",
-    "empty": "No machines yet"
-  },
   "columns": {
     "agent": "Agent",
     "status": "Status",
@@ -115,7 +106,6 @@
     "archive": "Archive",
     "set_access": "Set access scope",
     "set_access_dialog_title": "Set access scope",
-    "set_access_applies_to": "Applies to {{count}} agents.",
     "set_access_skipped": "{{count}} skipped (not owned by you).",
     "set_access_dialog_confirm": "Apply",
     "set_access_bulk_partial": "Applied to {{succeeded}}; {{failed}} failed (kept in current state).",
@@ -142,7 +132,9 @@
     "archive_dialog_title": "Archive \"{{name}}\"?",
     "archive_dialog_description": "The agent won't be assignable or mentionable, and any active runs will be cancelled. All history is preserved and you can restore it later.",
     "archive_dialog_cancel": "Cancel",
-    "archive_dialog_confirm": "Archive"
+    "archive_dialog_confirm": "Archive",
+    "set_access_applies_to_one": "Applies to {{count}} agent.",
+    "set_access_applies_to_other": "Applies to {{count}} agents."
   },
   "detail": {
     "back_to_agents_full": "Back to agents",
@@ -158,10 +150,10 @@
     "bind_runtime": "Bind runtime",
     "restore": "Restore",
     "archive_dialog_title": "Archive agent?",
-    "archive_dialog_description": "\"{{name}}\" will be archived. It won't be assignable or mentionable, but all history is preserved. You can restore it later.",
+    "archive_dialog_description": "\"{{name}}\" will be archived. It won't be assignable or mentionable, and any active runs will be cancelled. All history is preserved, and you can restore it later.",
     "archive_dialog_cancel": "Cancel",
     "archive_dialog_confirm": "Archive",
-    "more_archive": "Archive Agent",
+    "more_archive": "Archive agent",
     "agent_updated_toast": "Agent updated",
     "update_failed_toast": "Failed to update agent",
     "agent_archived_toast": "Agent archived",
@@ -208,7 +200,6 @@
     "rename_required": "Name is required",
     "edit_description_title": "Edit description",
     "description_placeholder": "What does this agent do?",
-    "save": "Save",
     "cancel": "Cancel"
   },
   "overview": {
@@ -232,14 +223,16 @@
     "status": "Status",
     "runs_7d": "Runs (7d)",
     "edit_access_aria": "Access: {{value}}. Change access",
-    "all_settings": "All settings"
-  },
-  "skill_attach": {
-    "trigger_aria": "Attach a workspace skill",
-    "trigger_label": "Attach"
+    "all_settings": "All settings",
+    "apps": "Apps",
+    "apps_needs_account_one": "{{count}} needs your account",
+    "apps_needs_account_other": "{{count}} need your account",
+    "apps_count_one": "{{count}} app",
+    "apps_count_other": "{{count}} apps",
+    "apps_none": "None",
+    "apps_aria": "Apps: {{value}}. Show apps"
   },
   "pickers": {
-    "concurrency_tooltip": "Concurrency · {{value}} max concurrent runs",
     "concurrency_range": "Max concurrent runs ({{min}}–{{max}})",
     "runtime_none": "No runtime",
     "runtime_tooltip": "Runtime · {{name}} · {{status}}",
@@ -253,9 +246,9 @@
     "model_tooltip": "Model · {{value}}",
     "model_managed_by_runtime": "Managed by runtime",
     "model_search_placeholder": "Search or type a model ID",
-    "model_discovering": "Discovering models…",
+    "model_discovering": "Discovering models...",
     "model_refresh": "Refresh models",
-    "model_refreshing": "Refreshing models…",
+    "model_refreshing": "Refreshing models...",
     "model_discovery_failed_title": "Could not list this runtime's models.",
     "model_discovery_failed_hint": "Type a model ID above to enter one manually.",
     "model_empty": "No models available",
@@ -268,7 +261,7 @@
     "thinking_default": "Follow CLI config",
     "thinking_tooltip": "Thinking · {{value}}",
     "thinking_clear": "Follow CLI config",
-    "thinking_clear_title": "Clear the override and let the local CLI config (claude/codex) decide the reasoning level",
+    "thinking_clear_title": "Clear the override and use the runtime's default reasoning setting",
     "service_tier_default": "Runtime default",
     "service_tier_standard": "Standard",
     "service_tier_standard_description": "Standard speed and standard usage",
@@ -300,7 +293,7 @@
     "environment": "Environment",
     "custom_args": "Custom Args",
     "mcp_config": "MCP",
-    "composio_mcp": "MCP Apps",
+    "composio_mcp": "Apps",
     "integrations": "Integrations",
     "runtime_config": "Routing",
     "qoder_agent": "Qoder Cloud Agents",
@@ -315,13 +308,8 @@
     "duplicate_title": "Duplicate {{name}}",
     "step_ai": "Build through conversation",
     "modes": {
-      "template": {
-        "title": "Use a template",
-        "description": "Start from curated instructions and skills, then adapt every detail to your workspace."
-      },
       "ai": {
-        "title": "Build with AI",
-        "description": "Create an editable configuration through conversation."
+        "title": "Build with AI"
       }
     },
     "sections": {
@@ -349,10 +337,6 @@
       }
     },
     "builder": {
-      "setup_title": "Choose a runtime for Agent Builder",
-      "setup_description": "This runtime powers setup and is the default for the new agent.",
-      "start": "Start conversation",
-      "connect_runtime": "Connect a runtime",
       "draft_parse_failed": "This reply could not fill the form. Ask the assistant to generate the draft again, or fill it in manually.",
       "start_failed": "Could not start Agent Builder.",
       "send_failed": "Could not send your message.",
@@ -365,12 +349,12 @@
       "runtime_online": "Runtime online",
       "runtime_offline": "Runtime offline",
       "empty_title": "What should this agent do?",
-      "empty_description": "Describe what this agent should do.",
+      "empty_description": "Describe its role, workflow, or tools — I'll draft the configuration for you.",
       "prompt_review": "Review frontend pull requests",
       "prompt_research": "Research competitors and summarize findings",
       "prompt_assistant": "Help our team plan and write projects",
-      "thinking": "Updating the draft…",
-      "placeholder": "Describe the agent you need…",
+      "thinking": "Updating the draft...",
+      "placeholder": "Describe the agent you need...",
       "send": "Send message"
     },
     "live_draft": "Agent configuration",
@@ -379,7 +363,7 @@
     "duplicate_runtime_reset_notice": "The original runtime is unavailable, so this copy runs on another one. Model, thinking level and speed were cleared because they only apply to the runtime they were chosen on.",
     "create_agent": "Create agent",
     "create_and_add": "Create & add to squad",
-    "creating": "Creating agent…",
+    "creating": "Creating agent...",
     "create_failed": "Could not create the agent.",
     "name_conflict": "An agent with this name already exists.",
     "drafts": {
@@ -389,8 +373,9 @@
       "discard_confirm": "The conversation and its configuration are deleted permanently.",
       "discard_title": "Discard this draft?",
       "discard_cancel": "Keep editing",
-      "banner": "You have {{count}} unfinished draft(s)",
-      "pick_hint": "Pick one to continue."
+      "pick_hint": "Pick one to continue.",
+      "banner_one": "You have {{count}} unfinished draft",
+      "banner_other": "You have {{count}} unfinished drafts"
     },
     "close": "Close",
     "steps": {
@@ -404,11 +389,11 @@
     "ask_ai": "Let AI write it",
     "change_runtime": "Change",
     "runtime_label": "Runtime",
-    "runtime_loading": "Loading runtime…",
+    "runtime_loading": "Loading runtime...",
     "runtime_missing": "This runtime is no longer available.",
     "cloud_fields_note": "Skills, MCP and conversation starters are only available on local and remote runtimes.",
     "done": {
-      "loading": "Finishing up…",
+      "loading": "Finishing up...",
       "title": "{{name}} is ready",
       "runs_on": "Runs on {{runtime}}",
       "joined_squad": "Added to squad {{squad}}",
@@ -422,7 +407,7 @@
     },
     "runtime_step": {
       "title": "Where should this agent run?",
-      "search_placeholder": "Search harnesses or machines",
+      "search_placeholder": "Search runtimes or machines",
       "groups": {
         "machines": "Machines",
         "cloud": "Cloud services"
@@ -430,12 +415,12 @@
       "this_machine": "This machine",
       "owner_you": "You",
       "custom_badge": "Custom",
-      "web_local_title": "Use this computer's harnesses with the desktop app",
+      "web_local_title": "Use this computer's runtimes with the desktop app",
       "download_desktop": "Download desktop app",
-      "harness_count_one": "{{count}} harness",
-      "harness_count_other": "{{count}} harnesses",
-      "local_starting": "Starting the local daemon…",
-      "local_empty_title": "No harness found on this machine",
+      "harness_count_one": "{{count}} runtime",
+      "harness_count_other": "{{count}} runtimes",
+      "local_starting": "Starting the local daemon...",
+      "local_empty_title": "No agent CLIs found on this machine",
       "local_empty_hint": "Install a CLI such as Claude Code or Codex, and it will show up here.",
       "more_harnesses_one": "{{count}} more: {{names}}",
       "more_harnesses_other": "{{count}} more: {{names}}",
@@ -463,23 +448,17 @@
     }
   },
   "create_dialog": {
-    "title_create": "Create Agent",
-    "title_duplicate": "Duplicate Agent",
-    "description_duplicate": "Create a new agent based on \"{{name}}\". Instructions, env, and skills are copied for you.",
     "name_label": "Name",
     "name_placeholder": "e.g. Deep Research Agent",
     "description_label": "Description",
     "description_placeholder": "What does this agent do?",
-    "visibility_label": "Visibility",
     "access": {
-      "label": "Access",
-      "private_title": "Private",
+      "private_title": "Only me",
       "private_desc": "Only you can run this agent",
-      "public_title": "Public",
+      "public_title": "Shared",
       "public_desc": "Choose who can run this agent",
       "public_workspace_option": "Everyone in this workspace",
       "public_members_group": "Specific people",
-      "public_members_empty": "No workspace members to choose from",
       "public_targets_empty_hint": "Pick at least one option below — otherwise the agent stays private."
     },
     "runtime_label": "Runtime",
@@ -490,22 +469,15 @@
     "runtime_cloud_badge": "Cloud",
     "runtime_private_badge": "Private",
     "runtime_private_locked_tooltip": "Private runtime — only its owner can create agents on it. Ask the owner to switch it to Public to share.",
-    "runtime_search_placeholder": "Search machines…",
+    "runtime_search_placeholder": "Search machines...",
     "runtime_no_results": "No matching machines",
     "runtime_group_online": "{{online}}/{{total}} online",
     "duplicate_copy_suffix": " (Copy)",
-    "create": "Create",
-    "creating": "Creating...",
-    "cancel": "Cancel",
-    "create_failed_toast": "Failed to create agent",
     "skill_attach_failed_toast": "Agent created, but failed to attach skills: {{error}}",
     "squad_join_failed_toast": "Agent \"{{name}}\" was created but couldn't join the squad: {{error}}. You can add it manually from Members.",
     "instructions": {
       "label": "Instructions",
-      "placeholder_blank": "Click to write instructions…",
-      "placeholder_duplicate": "Click to view or edit the duplicated instructions",
-      "collapse": "Collapse",
-      "editor_placeholder": "Write what this agent should do, what to focus on, what to avoid…"
+      "editor_placeholder": "Write what this agent should do, what to focus on, what to avoid..."
     },
     "skills_section": {
       "label": "Skills",
@@ -514,10 +486,10 @@
       "selected_other": "{{count}} selected — click to edit",
       "collapse": "Collapse",
       "list_empty_multi": "No skills in this workspace yet. Create or import one first.",
-      "list_loading": "Loading…",
+      "list_loading": "Loading...",
       "list_empty_default": "No skills available.",
       "list_no_match": "No skills match.",
-      "search_placeholder": "Search skills…"
+      "search_placeholder": "Search skills..."
     },
     "avatar": {
       "change_aria": "Change avatar",
@@ -556,8 +528,8 @@
       "discard": "Discard"
     },
     "instructions": {
-      "intro": "Set the system prompt used for every run. Markdown is supported.",
-      "system_prompt_label": "System prompt",
+      "intro": "Tell this agent how to work on every run. Markdown is supported.",
+      "system_prompt_label": "Instructions",
       "placeholder": "Define this agent's role, expertise, and working style.\n\n# Example\nYou are a frontend engineer specializing in React and TypeScript.\n\n## Working Style\n- Write small, focused PRs — one commit per logical change\n- Prefer composition over inheritance\n- Always add unit tests for new components\n\n## Constraints\n- Do not modify shared/ types without explicit approval\n- Follow the existing component patterns in features/",
       "system_layer_label": "Maintained by Multica",
       "system_layer_hint": "Updates with each Multica release. You can't edit it, and your notes below are never overwritten.",
@@ -584,6 +556,7 @@
       "bulk_placeholder": "API_KEY=value\nBASE_URL=https://example.com",
       "bulk_plaintext_notice": "Values are shown in plain text while bulk editing.",
       "bulk_unsupported_toast": "\"{{key}}\" can't be shown as text — edit it as a row",
+      "bulk_invalid_key_toast": "Bulk text only supports names like API_KEY — edit \"{{key}}\" as a row",
       "parse_error_malformed": "Line {{line}} isn't a KEY=value assignment",
       "parse_error_duplicate": "Duplicate key \"{{key}}\" on line {{line}}",
       "paste_invalid_toast": "Couldn't parse pasted environment variables",
@@ -600,7 +573,7 @@
       "not_revealed_empty": "No environment variables configured.",
       "not_revealed_hint": "Values stay masked until you reveal them. Every reveal and edit is recorded in the workspace audit log.",
       "reveal_action": "Reveal & edit",
-      "revealing": "Revealing…",
+      "revealing": "Revealing...",
       "reveal_failed_toast": "Failed to load env values",
       "empty_editable": "No environment variables configured."
     },
@@ -639,8 +612,8 @@
       "workspace_library_empty": "This workspace has no MCP servers to assign yet. Add them in workspace Settings → MCP.",
       "workspace_none_assigned": "No workspace MCP servers assigned to this agent yet.",
       "workspace_add_action": "Add from workspace",
-      "workspace_loading": "Loading assigned servers…",
-      "dialog_name_locked": "The name cannot be changed here — renaming would add a second server and leave this one behind. Remove and re-add it instead.",
+      "workspace_loading": "Loading assigned servers...",
+      "dialog_name_locked": "Server names can't be changed here. Use Rename from the server menu instead, or remove and re-add the entry.",
       "workspace_overridden_badge": "Overridden",
       "workspace_disabled_badge": "Disabled",
       "runtime_title": "Inherited from runtime",
@@ -648,7 +621,7 @@
       "refresh_action": "Refresh",
       "runtime_missing": "Assign a local runtime to discover inherited MCP servers.",
       "runtime_offline": "The local runtime is offline. Reconnect it to refresh inherited MCP servers.",
-      "runtime_discovering": "Discovering MCP servers from the local runtime…",
+      "runtime_discovering": "Discovering MCP servers from the local runtime...",
       "runtime_failed": "Couldn't discover runtime MCP servers. Try again.",
       "runtime_forbidden": "You don't have permission to view this runtime's MCP servers.",
       "runtime_unsupported": "This runtime version cannot report its MCP inventory yet.",
@@ -667,8 +640,8 @@
       "rename_failed_toast": "Could not rename the MCP server",
       "deleted_toast": "MCP server deleted",
       "delete_failed_toast": "Failed to delete MCP server",
-      "dialog_add_title": "Add MCP Server",
-      "dialog_edit_title": "Edit MCP Server",
+      "dialog_add_title": "Add MCP server",
+      "dialog_edit_title": "Edit MCP server",
       "dialog_edit_title_named": "Edit configuration for {{name}}",
       "dialog_replace_title": "Replace configuration for {{name}}",
       "dialog_replace_description": "To protect sensitive information, saved values aren't shown again. Enter the complete new configuration. Existing agent assignments will stay the same.",
@@ -713,30 +686,14 @@
       "dialog_add_action": "Add",
       "dialog_update_action": "Save",
       "dialog_replace_action": "Replace configuration",
-      "delete_dialog_title": "Delete MCP Server?",
+      "delete_dialog_title": "Delete MCP server?",
       "delete_dialog_description": "{{name}} will no longer be available to this agent. Runtime servers are not affected.",
-      "delete_action": "Delete Server",
+      "delete_action": "Delete server",
       "invalid_json": "Invalid JSON: {{error}}",
       "save_failed_toast": "Failed to save MCP config",
       "redacted_title": "Configured — hidden from your view",
       "redacted_hint": "Only the agent owner or a workspace admin can read this config.",
       "dialog_json_help": "Edit the full server configuration as JSON."
-    },
-    "composio_mcp": {
-      "subtitle": "Check a toolkit to let this agent mount it as an MCP server — but only when you (its creator) are the one who triggered the run, directly or down a sub-agent chain.",
-      "loading": "Loading your connections…",
-      "load_failed": "Couldn't load your connected apps. Try again shortly.",
-      "empty_title": "No connected apps yet",
-      "empty_link_to_settings": "Connect one in Settings → Integrations",
-      "open_settings": "Open settings",
-      "connected": "Connected",
-      "toggle_aria": "Allow {{toolkit}} for this agent",
-      "saving": "Saving…",
-      "save_failed_toast": "Couldn't save — please try again",
-      "redacted_title": "Configured — hidden from your view",
-      "redacted_hint": "Only the agent's creator can view or change which apps it may use.",
-      "shared_warning": "This agent is shared. People who can run this agent may use the Composio apps you enable here. Use Private or narrow the access list if these apps expose sensitive data.",
-      "workspace_warning": "Public to workspace: any workspace member may use these Composio apps through this agent."
     },
     "runtime_config": {
       "mode_label": "Routing mode",
@@ -746,7 +703,7 @@
       "model_override_hint": "Applies to all runs claimed by this agent until changed or cleared. Clearing uses the model bound to the selected OpenClaw agent; its identity stays the same.",
       "model_override_placeholder": "openrouter/@preset/agent-reasoning",
       "mode_local_hint": "Run on this computer.",
-      "mode_gateway_hint": "The daemon dials an OpenClaw Gateway. Leave the endpoint fields blank to inherit them from the daemon host's `~/.openclaw/openclaw.json`.",
+      "mode_gateway_hint": "Connect to an OpenClaw Gateway. Leave endpoint fields blank to inherit them from `~/.openclaw/openclaw.json` on the machine.",
       "gateway_legend": "Gateway endpoint",
       "host_label": "Host",
       "host_placeholder": "gw.internal",
@@ -756,7 +713,7 @@
       "token_placeholder": "Bearer token issued by the gateway",
       "token_masked_placeholder": "Saved — submit a new value to rotate, or leave blank to keep",
       "tls_label": "Use TLS",
-      "tls_hint": "Dial https:// instead of http://",
+      "tls_hint": "Connect over https:// instead of http://",
       "saved_toast": "Routing config saved",
       "save_failed_toast": "Failed to save routing config"
     },
@@ -776,13 +733,13 @@
       "runtime_toggle_failed_toast": "Failed to change inherited skill status",
       "runtime_missing": "Assign a local runtime to discover inherited skills.",
       "runtime_offline": "The local runtime is offline. Reconnect it to refresh inherited skills.",
-      "runtime_discovering": "Discovering skills from the local runtime…",
+      "runtime_discovering": "Discovering skills from the local runtime...",
       "runtime_failed": "Couldn't discover runtime skills. Try again.",
       "runtime_forbidden": "You don't have permission to view this runtime's skills.",
       "runtime_unsupported": "This runtime does not expose local skills.",
       "runtime_empty": "No local skills were found for this runtime.",
       "detail_title": "Skill details",
-      "detail_loading": "Loading skill details…",
+      "detail_loading": "Loading skill details...",
       "detail_source": "Source",
       "detail_provider": "Provider",
       "detail_plugin": "Plugin",
@@ -796,7 +753,7 @@
       "add_dialog_empty": "All workspace skills are already assigned.",
       "add_dialog_no_match": "No skills match your search.",
       "add_dialog_empty_partial": "No more skills to add — this agent already has all of them.",
-      "add_dialog_saving": "Adding…",
+      "add_dialog_saving": "Adding...",
       "add_dialog_confirm_default": "Add",
       "add_dialog_confirm_one": "Add {{count}} skill",
       "add_dialog_confirm_other": "Add {{count}} skills",
@@ -804,13 +761,13 @@
       "add_failed_toast": "Failed to add skill"
     },
     "integrations": {
-      "members_note": "Only workspace owners and admins can manage this connection. You can view connected bots in Settings → Integrations."
+      "members_note": "View and manage messaging channels on the agent page."
     },
     "activity": {
       "status": {
         "queued": "Queued",
         "dispatched": "Dispatched",
-        "waiting_local_directory": "Waiting for directory",
+        "waiting_local_directory": "Waiting for local folder",
         "running": "Running",
         "completed": "Succeeded",
         "failed": "Failed",
@@ -835,23 +792,42 @@
       "source_issue": "Issue",
       "source_chat": "Chat",
       "source_autopilot": "Autopilot",
+      "source_doc": "Doc",
       "source_untracked": "Untracked",
       "source_quick_create": "Quick create",
       "source_creating_issue": "Creating issue",
       "source_chat_session": "Chat session",
       "source_autopilot_run": "Autopilot run",
-      "issue_short_fallback": "Issue {{prefix}}…",
+      "source_doc_comment": "Doc comment",
+      "issue_short_fallback": "Issue {{prefix}}...",
       "triggered_by": "Triggered by",
       "open_issue_aria": "Open issue",
       "open_issue_tooltip": "Open issue",
       "transcript_tooltip": "View transcript",
       "cancel_task_aria": "Cancel run",
       "cancel_task_tooltip": "Cancel run",
-      "cancelling_tooltip": "Cancelling…",
+      "cancelling_tooltip": "Cancelling...",
       "cancel_failed_toast": "Failed to cancel run",
       "started_prefix": "Started {{when}}",
       "dispatched_prefix": "Dispatched {{when}}",
       "queued_prefix": "Queued {{when}}"
+    },
+    "connected_apps": {
+      "loading": "Loading apps...",
+      "load_failed": "Couldn't load this agent's apps.",
+      "empty": "No connected apps available.",
+      "level": "Account scope",
+      "team_admin_only": "Only workspace admins can give an agent a team account.",
+      "team_shared_warning": "Anyone who can run this agent can use this team account through it.",
+      "manage_link": "Manage accounts in Apps → Accounts",
+      "save_failed_toast": "Couldn't save — please try again",
+      "team_help": "Shared workspace account, connected by admins.",
+      "personal_help": "Each run uses the account of whoever triggers it. They must connect their own account.",
+      "available_accounts": "Available: {{accounts}}",
+      "enable": "Enable {{app}}",
+      "account_for": "Account for {{app}}",
+      "connect_hint": "Connect another account in Settings if you don’t see the app you need.",
+      "available_personal": "Your account"
     }
   },
   "char_counter": {
@@ -862,11 +838,11 @@
   },
   "visibility": {
     "private": {
-      "label": "Personal",
-      "tooltip": "Personal · only the owner and people they allow can run this agent"
+      "label": "Only me",
+      "tooltip": "Private · only the owner and people they allow can run this agent"
     },
     "workspace": {
-      "label": "Workspace",
+      "label": "Entire workspace",
       "tooltip": "Workspace · everyone in this workspace can use this agent"
     }
   },
@@ -880,7 +856,6 @@
       "specific_people": "Specific people",
       "owner_only": "Owner only"
     },
-    "trigger_members_count": "{{count}} people",
     "trigger_members_empty": "Specific people",
     "trigger_team": "Team",
     "private_title": "Only me",
@@ -891,7 +866,7 @@
     "workspace_title": "Entire workspace",
     "workspace_desc": "All workspace members can run this agent",
     "members_title": "Specific people",
-    "members_desc": "Only the people you pick can run this agent",
+    "members_desc": "You and the people you pick can run this agent",
     "team_title": "Public to team",
     "team_desc": "Grant access to a whole team",
     "team_coming_soon": "Coming soon",
@@ -899,11 +874,13 @@
     "public_group": "Public access",
     "owner_only_readonly": "Only the agent owner can change who can run this agent.",
     "members_empty": "No workspace members to choose from",
-    "composio_switch_hint": "Heads up — this agent has Composio apps enabled. Sharing it lets everyone with access use those apps through this agent."
+    "composio_switch_hint": "Heads up — this agent has connected apps enabled. Sharing it lets anyone with access use those apps through this agent.",
+    "trigger_members_count_one": "{{count}} person",
+    "trigger_members_count_other": "{{count}} people"
   },
   "profile_card": {
     "unavailable": "Agent unavailable",
-    "detail_link": "Detail →",
+    "detail_link": "View details →",
     "runtime_label": "Runtime",
     "skills_label": "Skills",
     "owner_label": "Owner",
@@ -919,7 +896,7 @@
     "failed_indicator": "Failed"
   },
   "transcript": {
-    "dialog_title": "Agent Execution Transcript",
+    "dialog_title": "Agent execution transcript",
     "status_running": "Running",
     "status_completed": "Completed",
     "status_failed": "Failed",
@@ -950,6 +927,7 @@
     "trigger_retry": "Retry",
     "trigger_chat": "From chat",
     "trigger_quick_create": "Quick create",
+    "trigger_doc_comment": "From a doc comment",
     "trigger_direct": "Direct assignment",
     "run_info": "Run details",
     "details_runtime": "Runtime",
@@ -982,7 +960,7 @@
     "outcome_files_other": "{{count}} files",
     "outcome_commands_one": "{{count}} command",
     "outcome_commands_other": "{{count}} commands",
-    "search_placeholder": "Search this run…",
+    "search_placeholder": "Search this run...",
     "no_matches": "No steps match this search.",
     "more_actions": "More",
     "kind_text": "Agent",
@@ -1007,7 +985,46 @@
     "tool_kind_write": "Edits",
     "tool_kind_read": "Reads",
     "tool_kind_misc": "Other",
-    "trigger_wakeup": "Wakeup"
+    "trigger_wakeup": "Wakeup",
+    "context_receipt_title": "Context received",
+    "context_receipt_summary_one": "{{count}} source",
+    "context_receipt_summary_other": "{{count}} sources",
+    "context_receipt_model": "Model",
+    "context_receipt_session": "Session",
+    "context_receipt_session_resumed": "Resumed a prior session (its history is also in context)",
+    "context_receipt_session_new": "New session",
+    "context_receipt_session_fresh_retry": "New session after the resume was rejected",
+    "context_receipt_mcp": "MCP servers",
+    "context_receipt_mcp_none": "None",
+    "context_receipt_warning": "{{source}}: {{status}}",
+    "context_receipt_col_source": "Source",
+    "context_receipt_col_size": "Size",
+    "context_receipt_col_delivery": "Delivered via",
+    "context_receipt_col_load": "Loaded",
+    "context_receipt_same_as_brief": "Same as runtime brief",
+    "context_receipt_footnote": "Recorded by the daemon before the agent started. Sizes and short hashes only; no content is stored. \"Verified\" means this runtime version was tested to load the file. Skill sizes and hashes cover complete written packages; file bytes do not show what the model read.",
+    "context_source_runtime_brief": "Runtime brief",
+    "context_source_agent_instructions": "Agent instructions",
+    "context_source_project_description": "Project description",
+    "context_source_existing_instructions": "Repository instructions",
+    "context_source_task_prompt": "Turn prompt",
+    "context_source_skill": "Skill: {{name}}",
+    "context_delivery_file": "File",
+    "context_delivery_inline": "System prompt",
+    "context_delivery_prompt": "Turn input",
+    "context_delivery_embedded": "Inside the runtime brief",
+    "context_delivery_none": "No channel",
+    "context_load_delivered": "Delivered",
+    "context_load_verified": "Verified",
+    "context_load_verified_other_version": "Verified on {{version}} only",
+    "context_load_unverified": "Not verified",
+    "context_load_not_delivered": "Not delivered",
+    "context_receipt_direct_bytes": "Direct input: {{size}}",
+    "context_receipt_file_bytes": "Files on disk: {{size}}",
+    "context_receipt_package": "Package",
+    "context_receipt_instruction_file_bytes": "Instruction files: {{size}}",
+    "context_receipt_skill_package_bytes": "Skill packages: {{size}}",
+    "context_receipt_other_file_bytes": "Other files: {{size}}"
   },
   "task_failure": {
     "cancelled_by_system": "Cancelled by the system",
@@ -1019,6 +1036,8 @@
       "runtime_recovery": "Daemon restarted",
       "runtime_access_revoked": "Runtime access revoked",
       "timeout": "Run timed out",
+      "cleanup_unconfirmed": "Couldn't confirm the agent process stopped",
+      "cleanup_blocked": "Previous run may be active; rerun manually",
       "iteration_limit": "Hit the iteration limit",
       "agent_blocked": "Waiting on human input",
       "api_invalid_request": "Rejected by the model API",
@@ -1038,16 +1057,17 @@
       "agent_error_context_overflow": "Context window exceeded",
       "agent_error_missing_config": "Missing API key or configuration",
       "agent_error_model_not_found_or_unavailable": "Model unavailable",
-      "agent_error_runtime_version_unsupported": "Runner CLI version unsupported",
-      "agent_error_runtime_missing_executable": "Runner CLI not installed",
+      "agent_error_runtime_version_unsupported": "Agent CLI version unsupported",
+      "agent_error_runtime_missing_executable": "Agent CLI not installed",
       "agent_error_unknown": "Agent execution error",
-      "agent_fallback_message": "Agent returned a fallback message",
+      "agent_fallback_message": "Agent couldn't produce a valid reply",
       "codex_resume_oversized": "Session too large to resume",
       "idle_watchdog": "Agent stopped after inactivity",
       "local_directory_error": "Local directory error",
+      "local_directory_missing": "Project's local folder no longer exists",
       "cancelled": "Cancelled by the system",
       "agent_error": "Agent execution error",
-      "codex_semantic_inactivity": "Codex semantic inactivity timeout",
+      "codex_semantic_inactivity": "Codex stopped making progress",
       "manual": "Cancelled by user",
       "user_cancelled": "Cancelled by user"
     }
@@ -1065,7 +1085,6 @@
     "section_owner": "Owner",
     "section_model": "Model"
   },
-  "actions": {},
   "intro": {
     "title": "Hire your first AI teammate",
     "description": "Agents take on issues like teammates do: they work on your runtime with tools like Claude Code and Codex, then deliver in the comments.",
@@ -1089,5 +1108,36 @@
       "comment": "Fixed: pricing cards stack into one column under 375px. PR is open and tests pass.",
       "step_read": "Read {{file}}"
     }
+  },
+  "apps_section": {
+    "title": "Apps",
+    "empty": "This agent doesn't use any apps yet.",
+    "connect_yours": "Connect yours",
+    "reconnect": "Reconnect",
+    "connect_team": "Connect team account",
+    "acts_as_team": "Acts as the team account",
+    "acts_as_starter": "Acts as whoever starts the run"
+  },
+  "add_app_dialog": {
+    "title": "Add an app to {{agent}}",
+    "description": "A personal-account app uses the account of whoever starts the agent, so you can add it without an account of your own.",
+    "search_one": "Search {{count}} app",
+    "search_other": "Search {{count}} apps",
+    "search_label": "Search apps",
+    "curated": "Curated",
+    "recommended_team": "Usually a team account",
+    "recommended_personal": "Usually a personal account",
+    "team_connected": "Team account connected",
+    "add": "Add",
+    "add_aria": "Add {{app}}",
+    "empty": "No apps match.",
+    "load_failed": "Couldn't load apps.",
+    "added_toast": "Added {{app}} to {{agent}}."
+  },
+  "app_requests": {
+    "title_adds_app": "{{agent}} wants to use {{app}}",
+    "new_app": "New app for this agent",
+    "adds_app_note": "Answering adds {{app}} to {{agent}} for future runs.",
+    "add_to_agent": "Add {{app}} to {{agent}}"
   }
 }

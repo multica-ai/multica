@@ -285,6 +285,100 @@ func lookupStatusName(t *testing.T, key string) string {
 	return name
 }
 
+func lookupStatusIcon(t *testing.T, key string) string {
+	t.Helper()
+	var icon string
+	dbfx.QueryRow(t, `SELECT icon FROM issue_status WHERE workspace_id = $1 AND key = $2`, testWorkspaceID, key).Scan(&icon)
+	return icon
+}
+
+// new_status.icon reaches the catalog: a fresh workspace that applies a
+// workflow definition renders the glyph its author declared instead of the
+// category default. Before the field existed the key was dropped by JSON
+// decoding and the apply still reported success.
+func TestCreateIssueWorkflowNewStatusCarriesIcon(t *testing.T) {
+	seedTestCatalog(t)
+	resetDefaultWorkflow(t)
+	statusName := "Icon " + workflowTestSuffix()
+	var created IssueWorkflowResponse
+	testutil.Call(t, testHandler.CreateIssueWorkflow, workflowRequest("POST", "/api/issue-workflows", map[string]any{
+		"name":  "Icon template " + workflowTestSuffix(),
+		"steps": []map[string]any{{"new_status": map[string]any{"name": statusName, "category": "started", "icon": "three_quarters"}}, {"status_key": "in_review"}},
+	})).Want(http.StatusCreated).JSON(&created)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue_workflow WHERE id = $1`, created.ID)
+		testPool.Exec(context.Background(), `DELETE FROM issue_status WHERE workspace_id = $1 AND name = $2`, testWorkspaceID, statusName)
+	})
+
+	var newKey string
+	for _, s := range created.Steps {
+		if lookupStatusName(t, s.StatusKey) == statusName {
+			newKey = s.StatusKey
+		}
+	}
+	if newKey == "" {
+		t.Fatalf("workflow steps %+v lack the new status", created.Steps)
+	}
+	if icon := lookupStatusIcon(t, newKey); icon != "three_quarters" {
+		t.Fatalf("icon = %q, want three_quarters", icon)
+	}
+}
+
+// An icon outside the catalog vocabulary fails the workflow write instead of
+// being written through or silently replaced.
+func TestCreateIssueWorkflowNewStatusRejectsUnknownIcon(t *testing.T) {
+	seedTestCatalog(t)
+	resetDefaultWorkflow(t)
+	statusName := "Bad icon " + workflowTestSuffix()
+	testutil.Call(t, testHandler.CreateIssueWorkflow, workflowRequest("POST", "/api/issue-workflows", map[string]any{
+		"name":  "Bad icon template " + workflowTestSuffix(),
+		"steps": []map[string]any{{"new_status": map[string]any{"name": statusName, "category": "started", "icon": "in_review"}}},
+	})).Want(http.StatusBadRequest)
+	var count int
+	dbfx.QueryRow(t, `SELECT count(*) FROM issue_status WHERE workspace_id = $1 AND name = $2`, testWorkspaceID, statusName).Scan(&count)
+	if count != 0 {
+		t.Fatalf("invalid icon still created %d status rows", count)
+	}
+}
+
+// Applying a template whose status already exists reuses that status without
+// rewriting its icon: the catalog row is shared by every workflow, and a
+// per-workflow write would silently revert a local edit.
+func TestCreateIssueWorkflowNewStatusReuseKeepsIcon(t *testing.T) {
+	seedTestCatalog(t)
+	resetDefaultWorkflow(t)
+	statusName := "Reused " + workflowTestSuffix()
+	create := func(name, icon string) IssueWorkflowResponse {
+		t.Helper()
+		var wf IssueWorkflowResponse
+		testutil.Call(t, testHandler.CreateIssueWorkflow, workflowRequest("POST", "/api/issue-workflows", map[string]any{
+			"name":  name,
+			"steps": []map[string]any{{"new_status": map[string]any{"name": statusName, "category": "started", "icon": icon}}},
+		})).Want(http.StatusCreated).JSON(&wf)
+		t.Cleanup(func() {
+			testPool.Exec(context.Background(), `DELETE FROM issue_workflow WHERE id = $1`, wf.ID)
+		})
+		return wf
+	}
+	first := create("Reuse one "+workflowTestSuffix(), "three_quarters")
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue_status WHERE workspace_id = $1 AND name = $2`, testWorkspaceID, statusName)
+	})
+	var key string
+	for _, s := range first.Steps {
+		if lookupStatusName(t, s.StatusKey) == statusName {
+			key = s.StatusKey
+		}
+	}
+	if key == "" {
+		t.Fatalf("first workflow %+v lacks the new status", first.Steps)
+	}
+	create("Reuse two "+workflowTestSuffix(), "check")
+	if icon := lookupStatusIcon(t, key); icon != "three_quarters" {
+		t.Fatalf("reuse rewrote the shared icon to %q", icon)
+	}
+}
+
 func TestDefaultWorkflowIsEditableButNotDeletable(t *testing.T) {
 	seedTestCatalog(t)
 	resetDefaultWorkflow(t)
@@ -472,7 +566,7 @@ func TestStatusChangeHandsOffOnDefaultProject(t *testing.T) {
 		t.Fatalf("handoff note = %q, want none: the brief rides the claim", tasks[0].HandoffNote.String)
 	}
 	brief := claimBriefForTest(t, issueID, tasks[0])
-	for _, want := range []string{"Implement it and open a PR.", "This project's workflow — Default (Workflow handoff project)", "Step done      → multica issue status"} {
+	for _, want := range []string{"Implement it and open a PR.", "This project's workflow — Default (Workflow handoff project)", "\nStatus map for "} {
 		if !strings.Contains(brief, want) {
 			t.Fatalf("claim brief is missing %q:\n%s", want, brief)
 		}
@@ -897,11 +991,11 @@ func TestClaimCarriesProjectWorkflow(t *testing.T) {
 	quietProject := createWorkflowTestProject(t, "Workflow quiet project")
 	quiet := dbfx.Issue(t, "no handoffs", testutil.Cols{"project_id": quietProject, "status": "todo"})
 	quietIssue, _ := testHandler.Queries.GetIssue(context.Background(), util.MustParseUUID(quiet))
-	if testHandler.claimProjectWorkflow(context.Background(), quietIssue, nil, false) != nil {
+	if testHandler.claimProjectWorkflow(context.Background(), quietIssue, nil, false, false) != nil {
 		t.Fatal("a Default project without handoffs must not carry a workflow")
 	}
 	stale := db.AgentTaskQueue{AgentID: util.MustParseUUID(agentID), WorkflowStep: pgtype.Text{String: "waiting_for_merge", Valid: true}}
-	if testHandler.claimProjectWorkflow(context.Background(), quietIssue, &stale, false) != nil {
+	if testHandler.claimProjectWorkflow(context.Background(), quietIssue, &stale, false, false) != nil {
 		t.Fatal("a Default project without handoffs must not restrict a stale binding")
 	}
 
@@ -910,16 +1004,29 @@ func TestClaimCarriesProjectWorkflow(t *testing.T) {
 		"project_id": projectID, "status": "in_progress", "assignee_type": "agent", "assignee_id": agentID,
 	})
 
-	// The assignee's run gets the step's instructions and its commands.
+	// The assignee's run gets the step's instructions and the status map.
 	brief := claimBriefForTest(t, issueID, db.AgentTaskQueue{AgentID: util.MustParseUUID(agentID)})
 	for _, want := range []string{
 		"This project's workflow — Default (Workflow claim project)",
 		"Implement it and open a PR.",
+		"\nStatus map for ",
 		"   ← current",
-		"Step done      → multica issue status",
 	} {
 		if !strings.Contains(brief, want) {
 			t.Fatalf("assignee brief is missing %q:\n%s", want, brief)
+		}
+	}
+	// A daemon without the status map keeps the per-step commands its
+	// runtime brief points at, and is not told the brief is a map.
+	issue, _ := testHandler.Queries.GetIssue(context.Background(), util.MustParseUUID(issueID))
+	assignee := db.AgentTaskQueue{AgentID: util.MustParseUUID(agentID)}
+	if mapped := testHandler.claimProjectWorkflow(context.Background(), issue, &assignee, false, false); mapped == nil || !mapped.StatusMap {
+		t.Fatalf("current daemon's claim must mark the status map: %+v", mapped)
+	}
+	for _, legacy := range []bool{false, true} {
+		commands := testHandler.claimProjectWorkflow(context.Background(), issue, &assignee, legacy, true)
+		if commands == nil || commands.StatusMap || !strings.Contains(commands.Brief, "Step done      → multica issue status") || strings.Contains(commands.Brief, "Status map for ") {
+			t.Fatalf("legacy=%v daemon must keep the command brief: %+v", legacy, commands)
 		}
 	}
 	if matched := claimBriefForTest(t, issueID, db.AgentTaskQueue{AgentID: util.MustParseUUID(agentID), WorkflowStep: pgtype.Text{String: "in_progress", Valid: true}}); matched != brief {
@@ -935,8 +1042,51 @@ func TestClaimCarriesProjectWorkflow(t *testing.T) {
 
 	plain := dbfx.Issue(t, "no workflow", testutil.Cols{"status": "todo"})
 	plainIssue, _ := testHandler.Queries.GetIssue(context.Background(), util.MustParseUUID(plain))
-	if testHandler.claimProjectWorkflow(context.Background(), plainIssue, nil, false) != nil {
+	if testHandler.claimProjectWorkflow(context.Background(), plainIssue, nil, false, false) != nil {
 		t.Fatal("an issue outside a project must not carry a workflow")
+	}
+}
+
+func TestWorkflowBriefOmitsMovesAtCustomTerminalStatuses(t *testing.T) {
+	agentID := seededReadyAgentID(t)
+	for _, tc := range []struct{ key, category, instructions string }{
+		{"brief_verified", "done", "Record the release in the project notes."},
+		{"brief_wont_fix", "closed", ""},
+	} {
+		t.Run(tc.category, func(t *testing.T) {
+			status := createTestCustomStatus(t, tc.key, tc.category)
+			workflow := createTestWorkflow(t, "Terminal status "+workflowTestSuffix(), status.Key)
+			draft := map[string]any{}
+			if tc.instructions != "" {
+				draft = handToAgent(agentID, tc.instructions)
+				setWorkflowHandoff(t, workflow.ID, status.Key, draft).Want(http.StatusOK)
+			}
+			draft["status_key"] = status.Key
+			projectID := createWorkflowTestProject(t, "Custom terminal status project")
+			setProjectWorkflow(t, projectID, map[string]any{"workflow_id": workflow.ID}).Want(http.StatusOK)
+			issueID := dbfx.Issue(t, "At a custom terminal status", testutil.Cols{
+				"project_id": projectID, "status": status.Key, "assignee_type": "agent", "assignee_id": agentID,
+			})
+			checkBrief := func(source, brief string) {
+				_, column, _ := strings.Cut(brief, "\n- `"+status.Key+"`")
+				column, _, _ = strings.Cut(column, "\n")
+				if !strings.HasSuffix(column, "   ← current") ||
+					strings.Contains(brief, "Your moves:") || strings.Contains(brief, "multica issue status") {
+					t.Errorf("%s brief should show %q as current without offering moves:\n%s", source, status.Key, brief)
+				}
+				if tc.instructions != "" && !strings.Contains(brief, tc.instructions) {
+					t.Errorf("%s brief dropped the configured instructions:\n%s", source, brief)
+				}
+			}
+			checkBrief("claim", claimBriefForTest(t, issueID, db.AgentTaskQueue{AgentID: parseUUID(agentID)}))
+
+			var preview struct {
+				Brief string `json:"brief"`
+			}
+			req := withURLParam(workflowRequest("POST", "/api/issue-workflows/"+workflow.ID+"/brief", draft), "id", workflow.ID)
+			testutil.Call(t, testHandler.PreviewIssueWorkflowBrief, req).Want(http.StatusOK).JSON(&preview)
+			checkBrief("preview", preview.Brief)
+		})
 	}
 }
 
@@ -968,7 +1118,7 @@ func TestClaimExplainsMovedWorkflowStep(t *testing.T) {
 				if observer {
 					claim.AgentID = other
 				}
-				got := testHandler.claimProjectWorkflow(ctx, issue, &claim, legacy)
+				got := testHandler.claimProjectWorkflow(ctx, issue, &claim, legacy, legacy)
 				if got == nil {
 					t.Fatal("missing workflow brief")
 				}
@@ -1010,15 +1160,15 @@ func TestClaimExplainsMovedWorkflowStep(t *testing.T) {
 	agentUpdateIssue(t, issueID, agentID, taskID, map[string]any{"status": "in_review"}).Want(http.StatusConflict)
 }
 
-// claimBriefForTest renders the workflow brief a claim of task would carry
-// for the issue as it is now.
+// claimBriefForTest renders the workflow brief a current daemon's claim of
+// task would carry for the issue as it is now.
 func claimBriefForTest(t *testing.T, issueID string, task db.AgentTaskQueue) string {
 	t.Helper()
 	issue, err := testHandler.Queries.GetIssue(context.Background(), util.MustParseUUID(issueID))
 	if err != nil {
 		t.Fatalf("load issue: %v", err)
 	}
-	got := testHandler.claimProjectWorkflow(context.Background(), issue, &task, false)
+	got := testHandler.claimProjectWorkflow(context.Background(), issue, &task, false, false)
 	if got == nil {
 		t.Fatalf("claim of %s carries no workflow", issueID)
 	}
@@ -1070,7 +1220,7 @@ func TestPreviewIssueWorkflowBriefUsesTheDraft(t *testing.T) {
 		"status_key": "in_progress", "handler": map[string]any{"type": "agent", "id": agentID}, "instructions": "Draft step.",
 		"project_id": projectID,
 	}).Want(http.StatusOK).JSON(&got)
-	for _, want := range []string{"Default (Workflow brief project)", "Draft step.", "← current", "in_review\nCan't proceed"} {
+	for _, want := range []string{"Default (Workflow brief project)", "Draft step.", "← current", "    Routes: next `in_review`.\n"} {
 		if !strings.Contains(got.Brief, want) {
 			t.Fatalf("draft brief is missing %q:\n%s", want, got.Brief)
 		}
@@ -1229,16 +1379,15 @@ func TestAgentStatusChangeOnDefaultIgnoresStep(t *testing.T) {
 	agentUpdateIssue(t, issueID, agentID, taskID, map[string]any{"status": "in_review"}).Want(http.StatusOK)
 }
 
-// Squads can't be handed to, but a handoff away from an issue a squad owns
-// offers to stop — and stops — the runs made on
-// the squad's behalf, recording who stopped them.
+// A handoff away from an issue a squad owns offers to stop — and stops — the
+// runs made on the squad's behalf, recording who stopped them.
 func TestHandoffStopsPreviousSquadRuns(t *testing.T) {
 	seedTestCatalog(t)
 	agentID := seededReadyAgentID(t)
 	squadID := dbfx.Squad(t, "Workflow review squad "+workflowTestSuffix(), agentID)
 	projectID := createWorkflowTestProject(t, "Workflow squad stop project")
 	setColumnHandoff(t, projectID, "in_progress", map[string]any{"handler": map[string]any{"type": "member", "id": testUserID}}).Want(http.StatusOK)
-	setColumnHandoff(t, projectID, "in_review", map[string]any{"handler": map[string]any{"type": "squad", "id": squadID}}).Want(http.StatusBadRequest)
+	setColumnHandoff(t, projectID, "in_review", map[string]any{"handler": map[string]any{"type": "squad", "id": squadID}}).Want(http.StatusOK)
 	issueID := dbfx.Issue(t, "squad reviewing", testutil.Cols{
 		"project_id": projectID, "status": "in_review", "assignee_type": "squad", "assignee_id": squadID,
 	})
@@ -1246,6 +1395,10 @@ func TestHandoffStopsPreviousSquadRuns(t *testing.T) {
 	dbfx.QueryRow(t, `SELECT runtime_id::text FROM agent WHERE id = $1`, agentID).Scan(&runtimeID)
 	running := dbfx.Task(t, agentID, testutil.Cols{
 		"issue_id": issueID, "squad_id": squadID, "runtime_id": runtimeID, "status": "running", "started_at": time.Now(),
+	})
+	otherSquad := dbfx.Squad(t, "Another squad sharing the leader "+workflowTestSuffix(), agentID)
+	unrelated := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": issueID, "squad_id": otherSquad, "runtime_id": runtimeID, "status": "deferred", "fire_at": time.Now(),
 	})
 
 	var preview WorkflowHandoffPreviewResponse
@@ -1263,6 +1416,10 @@ func TestHandoffStopsPreviousSquadRuns(t *testing.T) {
 	dbfx.QueryRow(t, `SELECT name FROM "user" WHERE id = $1`, testUserID).Scan(&memberName)
 	if status != "cancelled" || stoppedBy == nil || *stoppedBy != memberName {
 		t.Fatalf("squad run = %s stopped by %v, want cancelled by %s", status, stoppedBy, memberName)
+	}
+	dbfx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id = $1`, unrelated).Scan(&status)
+	if status != "deferred" {
+		t.Fatalf("handoff cancelled another squad's waiting run: %s", status)
 	}
 }
 

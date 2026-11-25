@@ -204,13 +204,13 @@ func TestNormalizeWebhookPayload_XEventTypeHeader(t *testing.T) {
 // ── Event filter helpers ────────────────────────────────────────────────────
 
 func TestWebhookEventAllowedByTriggerScope_NoFiltersAllowsAll(t *testing.T) {
-	if !webhookEventAllowedByTriggerScope(nil, WebhookEnvelope{Event: "github.push"}) {
+	if !evaluateWebhookTriggerScope(nil, WebhookEnvelope{Event: "github.push"}).Allowed {
 		t.Fatal("nil filters should allow all")
 	}
-	if !webhookEventAllowedByTriggerScope([]byte{}, WebhookEnvelope{Event: "github.push"}) {
+	if !evaluateWebhookTriggerScope([]byte{}, WebhookEnvelope{Event: "github.push"}).Allowed {
 		t.Fatal("empty filters should allow all")
 	}
-	if !webhookEventAllowedByTriggerScope([]byte("[]"), WebhookEnvelope{Event: "github.push"}) {
+	if !evaluateWebhookTriggerScope([]byte("[]"), WebhookEnvelope{Event: "github.push"}).Allowed {
 		t.Fatal("empty JSON array should allow all")
 	}
 }
@@ -218,7 +218,7 @@ func TestWebhookEventAllowedByTriggerScope_NoFiltersAllowsAll(t *testing.T) {
 func TestWebhookEventAllowedByTriggerScope_FiltersUndeclaredEvent(t *testing.T) {
 	filters := []byte(`[{"event":"workflow_run","actions":["completed"]}]`)
 	env := WebhookEnvelope{Event: "github.push", EventPayload: json.RawMessage(`{"action":"pushed"}`)}
-	if webhookEventAllowedByTriggerScope(filters, env) {
+	if evaluateWebhookTriggerScope(filters, env).Allowed {
 		t.Fatal("undeclared event should be filtered")
 	}
 }
@@ -226,7 +226,7 @@ func TestWebhookEventAllowedByTriggerScope_FiltersUndeclaredEvent(t *testing.T) 
 func TestWebhookEventAllowedByTriggerScope_FiltersUndeclaredAction(t *testing.T) {
 	filters := []byte(`[{"event":"workflow_run","actions":["completed"]}]`)
 	env := WebhookEnvelope{Event: "github.workflow_run.in_progress", EventPayload: json.RawMessage(`{"action":"in_progress"}`)}
-	if webhookEventAllowedByTriggerScope(filters, env) {
+	if evaluateWebhookTriggerScope(filters, env).Allowed {
 		t.Fatal("undeclared action should be filtered")
 	}
 }
@@ -234,7 +234,7 @@ func TestWebhookEventAllowedByTriggerScope_FiltersUndeclaredAction(t *testing.T)
 func TestWebhookEventAllowedByTriggerScope_AllowsDeclaredAction(t *testing.T) {
 	filters := []byte(`[{"event":"workflow_run","actions":["completed"]}]`)
 	env := WebhookEnvelope{Event: "github.workflow_run.completed", EventPayload: json.RawMessage(`{"action":"completed"}`)}
-	if !webhookEventAllowedByTriggerScope(filters, env) {
+	if !evaluateWebhookTriggerScope(filters, env).Allowed {
 		t.Fatal("declared action should be allowed")
 	}
 }
@@ -242,7 +242,7 @@ func TestWebhookEventAllowedByTriggerScope_AllowsDeclaredAction(t *testing.T) {
 func TestWebhookEventAllowedByTriggerScope_AnyActionWhenEmpty(t *testing.T) {
 	filters := []byte(`[{"event":"workflow_run"}]`)
 	env := WebhookEnvelope{Event: "github.workflow_run.in_progress", EventPayload: json.RawMessage(`{"action":"in_progress"}`)}
-	if !webhookEventAllowedByTriggerScope(filters, env) {
+	if !evaluateWebhookTriggerScope(filters, env).Allowed {
 		t.Fatal("empty actions should allow any action for the event")
 	}
 }
@@ -263,7 +263,7 @@ func TestWebhookEventAllowedByTriggerScope_MultipleFiltersSameEvent(t *testing.T
 		Event:        "github.workflow_run.completed",
 		EventPayload: json.RawMessage(`{"action":"completed"}`),
 	}
-	if !webhookEventAllowedByTriggerScope(filters, completed) {
+	if !evaluateWebhookTriggerScope(filters, completed).Allowed {
 		t.Fatal("workflow_run.completed should match the first filter")
 	}
 
@@ -271,7 +271,7 @@ func TestWebhookEventAllowedByTriggerScope_MultipleFiltersSameEvent(t *testing.T
 		Event:        "github.workflow_run.requested",
 		EventPayload: json.RawMessage(`{"action":"requested"}`),
 	}
-	if !webhookEventAllowedByTriggerScope(filters, requested) {
+	if !evaluateWebhookTriggerScope(filters, requested).Allowed {
 		t.Fatal("workflow_run.requested should match the second filter — pre-fix this silently dropped")
 	}
 
@@ -279,7 +279,7 @@ func TestWebhookEventAllowedByTriggerScope_MultipleFiltersSameEvent(t *testing.T
 		Event:        "github.workflow_run.in_progress",
 		EventPayload: json.RawMessage(`{"action":"in_progress"}`),
 	}
-	if webhookEventAllowedByTriggerScope(filters, inProgress) {
+	if evaluateWebhookTriggerScope(filters, inProgress).Allowed {
 		t.Fatal("workflow_run.in_progress is in neither filter and should be filtered out")
 	}
 }
@@ -294,7 +294,7 @@ func TestWebhookEventAllowedByTriggerScope_MalformedDenies(t *testing.T) {
 		Event:        "github.workflow_run.completed",
 		EventPayload: json.RawMessage(`{"action":"completed"}`),
 	}
-	if webhookEventAllowedByTriggerScope(corrupt, env) {
+	if evaluateWebhookTriggerScope(corrupt, env).Allowed {
 		t.Fatal("malformed event_filters must fail closed (deny), never widen the allowlist")
 	}
 }
@@ -303,18 +303,144 @@ func TestWebhookEventAllowedByTriggerScope_MultipleFilters(t *testing.T) {
 	filters := []byte(`[{"event":"workflow_run","actions":["completed"]},{"event":"check_suite","actions":["completed","failure"]}]`)
 
 	allowed1 := WebhookEnvelope{Event: "github.check_suite.completed", EventPayload: json.RawMessage(`{"action":"completed"}`)}
-	if !webhookEventAllowedByTriggerScope(filters, allowed1) {
+	if !evaluateWebhookTriggerScope(filters, allowed1).Allowed {
 		t.Fatal("check_suite.completed should be allowed")
 	}
 
 	allowed2 := WebhookEnvelope{Event: "github.check_suite.failure", EventPayload: json.RawMessage(`{"action":"failure"}`)}
-	if !webhookEventAllowedByTriggerScope(filters, allowed2) {
+	if !evaluateWebhookTriggerScope(filters, allowed2).Allowed {
 		t.Fatal("check_suite.failure should be allowed")
 	}
 
 	filtered := WebhookEnvelope{Event: "github.check_suite.requested", EventPayload: json.RawMessage(`{"action":"requested"}`)}
-	if webhookEventAllowedByTriggerScope(filters, filtered) {
+	if evaluateWebhookTriggerScope(filters, filtered).Allowed {
 		t.Fatal("check_suite.requested should be filtered")
+	}
+}
+
+// reviewFilters scopes pull_request deliveries to ready, labelled PRs on
+// release branches that weren't opened by a bot.
+const reviewFilters = `[{"event":"pull_request","actions":["opened","synchronize"],"conditions":[
+	{"path":"pull_request.draft","op":"equals","value":false},
+	{"path":"pull_request.labels.*.name","op":"equals","value":"needs-review","ignore_case":true},
+	{"path":"pull_request.base.ref","op":"in","values":["main","release"]},
+	{"path":"sender.type","op":"not_equals","value":"Bot"}
+]}]`
+
+func pullRequestEnvelope(payload string) WebhookEnvelope {
+	return WebhookEnvelope{Event: "github.pull_request.opened", EventPayload: json.RawMessage(payload)}
+}
+
+func TestWebhookEventAllowedByTriggerScope_PayloadConditions(t *testing.T) {
+	filters := []byte(reviewFilters)
+	const labelled = `"labels":[{"name":"backend"},{"name":"Needs-Review"}]`
+	cases := []struct {
+		name    string
+		payload string
+		want    bool
+	}{
+		{"all conditions hold", `{"action":"opened","pull_request":{"draft":false,` + labelled + `,"base":{"ref":"main"}},"sender":{"type":"User"}}`, true},
+		{"draft", `{"action":"opened","pull_request":{"draft":true,` + labelled + `,"base":{"ref":"main"}},"sender":{"type":"User"}}`, false},
+		{"label missing", `{"action":"opened","pull_request":{"draft":false,"labels":[{"name":"backend"}],"base":{"ref":"main"}},"sender":{"type":"User"}}`, false},
+		{"no labels", `{"action":"opened","pull_request":{"draft":false,"labels":[],"base":{"ref":"main"}},"sender":{"type":"User"}}`, false},
+		{"other base branch", `{"action":"opened","pull_request":{"draft":false,` + labelled + `,"base":{"ref":"dev"}},"sender":{"type":"User"}}`, false},
+		{"bot sender", `{"action":"opened","pull_request":{"draft":false,` + labelled + `,"base":{"ref":"main"}},"sender":{"type":"Bot"}}`, false},
+		{"missing path", `{"action":"opened","pull_request":{"draft":false,` + labelled + `}}`, false},
+		{"string is not a boolean", `{"action":"opened","pull_request":{"draft":"false",` + labelled + `,"base":{"ref":"main"}},"sender":{"type":"User"}}`, false},
+		{"non-object payload", `["needs-review"]`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := evaluateWebhookTriggerScope(filters, pullRequestEnvelope(tc.payload)).Allowed; got != tc.want {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestWebhookEventAllowedByTriggerScope_ConditionsDoNotShadowLaterFilters(t *testing.T) {
+	filters := []byte(`[
+		{"event":"pull_request","conditions":[{"path":"pull_request.draft","op":"equals","value":false}]},
+		{"event":"pull_request","conditions":[{"path":"pull_request.number","op":"equals","value":42}]}
+	]`)
+	if !evaluateWebhookTriggerScope(filters, pullRequestEnvelope(`{"pull_request":{"draft":true,"number":42}}`)).Allowed {
+		t.Fatal("second filter should match when the first one's conditions fail")
+	}
+}
+
+func TestWebhookEventAllowedByTriggerScope_ConditionOps(t *testing.T) {
+	payload := `{"status":"Open","closed_at":null,"count":3,"items":[{"tag":"urgent"},{"tag":"docs"}],"commits":[{"files":["a.go"]},{"files":["README.md"]}]}`
+	cases := []struct {
+		name string
+		cond string
+		want bool
+	}{
+		{"equals is case-sensitive by default", `{"path":"status","op":"equals","value":"open"}`, false},
+		{"equals ignore_case", `{"path":"status","op":"equals","value":"open","ignore_case":true}`, true},
+		{"not_equals", `{"path":"status","op":"not_equals","value":"Closed"}`, true},
+		{"not_equals on missing path", `{"path":"missing","op":"not_equals","value":"x"}`, false},
+		{"equals number", `{"path":"count","op":"equals","value":3}`, true},
+		{"contains on number", `{"path":"count","op":"contains","value":"3"}`, false},
+		{"array index", `{"path":"items.0.tag","op":"equals","value":"urgent"}`, true},
+		{"array index out of range", `{"path":"items.2.tag","op":"equals","value":"urgent"}`, false},
+		{"wildcard any element", `{"path":"items.*.tag","op":"equals","value":"docs"}`, true},
+		{"wildcard no element", `{"path":"items.*.tag","op":"equals","value":"bug"}`, false},
+		{"wildcard not_equals means none", `{"path":"items.*.tag","op":"not_equals","value":"docs"}`, false},
+		{"wildcard not_equals holds", `{"path":"items.*.tag","op":"not_equals","value":"bug"}`, true},
+		{"nested wildcards", `{"path":"commits.*.files.*","op":"contains","value":".md"}`, true},
+		{"wildcard on object", `{"path":"status.*","op":"equals","value":"Open"}`, false},
+		{"in ignore_case", `{"path":"status","op":"in","values":["closed","open"],"ignore_case":true}`, true},
+		{"exists", `{"path":"items.*.tag","op":"exists"}`, true},
+		{"exists on missing path", `{"path":"merged_at","op":"exists"}`, false},
+		{"exists ignores null", `{"path":"closed_at","op":"exists"}`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			filters := []byte(`[{"event":"pull_request","conditions":[` + tc.cond + `]}]`)
+			if got := evaluateWebhookTriggerScope(filters, pullRequestEnvelope(payload)).Allowed; got != tc.want {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestValidateWebhookEventFilters_Conditions(t *testing.T) {
+	var valid []WebhookEventFilter
+	if err := json.Unmarshal([]byte(reviewFilters), &valid); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if err := validateWebhookEventFilters(valid); err != nil {
+		t.Fatalf("valid filters rejected: %v", err)
+	}
+
+	invalid := map[string]string{
+		"empty path":        `{"path":"","op":"equals","value":"x"}`,
+		"empty segment":     `{"path":"sender..type","op":"equals","value":"x"}`,
+		"unknown op":        `{"path":"sender.type","op":"matches","value":"x"}`,
+		"missing value":     `{"path":"sender.type","op":"equals"}`,
+		"object value":      `{"path":"sender.type","op":"equals","value":{"a":1}}`,
+		"contains non-text": `{"path":"sender.type","op":"contains","value":1}`,
+		"empty in":          `{"path":"sender.type","op":"in","values":[]}`,
+		"exists with value": `{"path":"sender.type","op":"exists","value":"x"}`,
+	}
+	for name, cond := range invalid {
+		t.Run(name, func(t *testing.T) {
+			var filters []WebhookEventFilter
+			if err := json.Unmarshal([]byte(`[{"event":"pull_request","conditions":[`+cond+`]}]`), &filters); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if err := validateWebhookEventFilters(filters); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+
+	tooMany := WebhookEventFilter{Event: "pull_request"}
+	for range maxWebhookPayloadConditions + 1 {
+		tooMany.Conditions = append(tooMany.Conditions, WebhookPayloadCondition{Path: "a", Op: payloadOpEquals, Value: "x"})
+	}
+	if err := validateWebhookEventFilters([]WebhookEventFilter{tooMany}); err == nil {
+		t.Fatal("expected error above the condition cap")
 	}
 }
 
@@ -337,5 +463,105 @@ func TestSplitWebhookEvent(t *testing.T) {
 			t.Fatalf("splitWebhookEvent(%q) = (%q, %q, %q), want (%q, %q, %q)",
 				tc.input, p, n, a, tc.wantProvider, tc.wantName, tc.wantAction)
 		}
+	}
+}
+
+// ── GitLab object_attributes action extraction ─────────────────────────────
+
+// TestWebhookActionCandidates_GitLabObjectAttributes verifies that action and
+// state are extracted from the nested object_attributes field in GitLab
+// webhook payloads. Before this fix, action filtering was a no-op for GitLab
+// because the code only looked at top-level fields (GitHub-style).
+func TestWebhookActionCandidates_GitLabObjectAttributes(t *testing.T) {
+	// GitLab MR open event: action and state are inside object_attributes.
+	payload := json.RawMessage(`{
+		"object_kind": "merge_request",
+		"object_attributes": {
+			"action": "open",
+			"state": "opened",
+			"title": "Test MR"
+		}
+	}`)
+	candidates := webhookActionCandidates("", payload)
+	found := make(map[string]bool, len(candidates))
+	for _, c := range candidates {
+		found[c] = true
+	}
+	if !found["open"] {
+		t.Errorf("expected 'open' in candidates, got %v", candidates)
+	}
+	if !found["opened"] {
+		t.Errorf("expected 'opened' in candidates, got %v", candidates)
+	}
+}
+
+func TestWebhookActionCandidates_GitLabMergedEvent(t *testing.T) {
+	payload := json.RawMessage(`{
+		"object_kind": "merge_request",
+		"object_attributes": {
+			"action": "merge",
+			"state": "merged"
+		}
+	}`)
+	candidates := webhookActionCandidates("", payload)
+	found := make(map[string]bool, len(candidates))
+	for _, c := range candidates {
+		found[c] = true
+	}
+	if !found["merge"] {
+		t.Errorf("expected 'merge' in candidates, got %v", candidates)
+	}
+	if !found["merged"] {
+		t.Errorf("expected 'merged' in candidates, got %v", candidates)
+	}
+}
+
+func TestWebhookActionCandidates_GitHubTopLevelStillWorks(t *testing.T) {
+	// Ensure the fix doesn't break GitHub-style top-level action extraction.
+	payload := json.RawMessage(`{"action": "opened", "pull_request": {"number": 7}}`)
+	candidates := webhookActionCandidates("", payload)
+	found := false
+	for _, c := range candidates {
+		if c == "opened" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'opened' in candidates for GitHub payload, got %v", candidates)
+	}
+}
+
+// TestWebhookEventAllowedByTriggerScope_GitLabMRActionFilter pins the fix for
+// GitLab MR action filtering. Before the fix, action filters never matched
+// GitLab payloads because action/state lived inside object_attributes.
+func TestWebhookEventAllowedByTriggerScope_GitLabMRActionFilter(t *testing.T) {
+	// Filter: only allow open/update/reopen for Merge Request Hook.
+	filters := []byte(`[{"event":"Merge Request Hook","actions":["open","update","reopen"]}]`)
+
+	// MR open event should pass.
+	openEnv := WebhookEnvelope{
+		Event:        "gitlab.Merge Request Hook",
+		EventPayload: json.RawMessage(`{"object_kind":"merge_request","object_attributes":{"action":"open","state":"opened"}}`),
+	}
+	if !evaluateWebhookTriggerScope(filters, openEnv).Allowed {
+		t.Fatal("GitLab MR open should be allowed by filter [open, update, reopen]")
+	}
+
+	// MR merge event should be filtered out.
+	mergeEnv := WebhookEnvelope{
+		Event:        "gitlab.Merge Request Hook",
+		EventPayload: json.RawMessage(`{"object_kind":"merge_request","object_attributes":{"action":"merge","state":"merged"}}`),
+	}
+	if evaluateWebhookTriggerScope(filters, mergeEnv).Allowed {
+		t.Fatal("GitLab MR merge should be filtered out by filter [open, update, reopen]")
+	}
+
+	// MR close event should be filtered out.
+	closeEnv := WebhookEnvelope{
+		Event:        "gitlab.Merge Request Hook",
+		EventPayload: json.RawMessage(`{"object_kind":"merge_request","object_attributes":{"action":"close","state":"closed"}}`),
+	}
+	if evaluateWebhookTriggerScope(filters, closeEnv).Allowed {
+		t.Fatal("GitLab MR close should be filtered out by filter [open, update, reopen]")
 	}
 }

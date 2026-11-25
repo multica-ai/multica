@@ -1,12 +1,12 @@
 ---
 title: AI コーディングツール比較
-description: Multica が対応する AI コーディングツールと、モデル、MCP、セッション、スキルの違いを比較します。
+description: Multica が対応する 31 種類の AI コーディングツール（Claude Code、Codex、Cursor、Copilot など）と、検出、モデル、MCP、セッション、割り込み、スキルの違いを比較します。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { ProviderPickerDemo } from "@/components/demos/provider-picker-demo";
 
-Multica は、普段使っている AI コーディングツールの代わりになるものではありません。ランタイムがコンピューターにインストール済みでログイン済みのツールを呼び出し、実行の進捗と結果をタスクに書き戻します。すでにいずれかのツールを使っているなら、通常はそのまま使い続けられます。まだ決めていない場合は、次の 4 点を確認してください。
+Multica は 31 種類の AI コーディングツールに対応しています。普段使っているツールの代わりになるものではありません。ランタイムがコンピューターにインストール済みでログイン済みのツールを呼び出し、実行の進捗と結果をタスクに書き戻します。すでにいずれかのツールを使っているなら、通常はそのまま使い続けられます。まだ決めていない場合は、次の 4 点を確認してください。
 
 - コンピューターにすでにインストールされているか
 - アカウントでどのモデルを利用できるか
@@ -45,14 +45,62 @@ Multica は、普段使っている AI コーディングツールの代わり�
 | Qoder CN CLI | `qoderclicn` | ✓ | ✓ | ✓ | `.qoder/skills/` |
 | Qwen Code | `qwen` | ✓ | ✓ | ✓ | `.qwen/skills/` |
 | QwenPaw | `qwenpaw` | ✓ | ✓ | — | 1 回の実行専用のワークスペース `skills/` |
+| Amp | `amp` | ✓ | — | モード | `.agents/skills/` |
+| Factory Droid | `droid` | ✓ | — | ✓ | `.factory/skills/` |
 | Reasonix | `reasonix` | ✓ | ✓ | ✓ | `.reasonix/skills/` |
 | Trae CLI | `traecli` | ✓ | ✓ | ✓ | `.traecli/skills/` |
 | Dim | `dim` | ✓ | ✓ | ✓ | — |
 | ZeroClaw | `zeroclaw` | ✓ | — | — | — |
+| ZCode | `zcode` / ZCode Desktop | ✓ | ✓ | ✓ | `.zcode/skills/` |
+
+<Callout type="info">
+Gemini CLI には対応していません。組み込みツールから削除されたため、Multica が実行できるツールに Gemini を挙げているページは情報が古くなっています。
+</Callout>
+
+Claude Code では、デーモンの環境変数 `CLAUDE_CONFIG_DIR` に絶対パスを指定すると、Multica はその場所からユーザーとプラグインのスキルを一覧表示・インポートします。起動ラッパー内だけで指定したパスはスキャンに反映されません。
+
+Amp のモデル欄では、基盤モデルの ID ではなく `high` などの Amp の**モード**を指定します。空欄なら Amp の既定値を使います。
+
+Amp ではデーモンまたはエージェントの環境に `AMP_API_KEY` も必要で、保存済みの対話型ログインだけでは実行できません。
 
 「Multica による MCP 管理」とは、エージェント設定に MCP server を入力し、Multica が実行前にその設定を対応ツールへ渡せることを意味します。この列が示すのは Multica が代わりに設定できるかどうかで、ツール自体にほかの MCP 設定方法があるかどうかではありません。
 
 「Multica でのモデル選択」が — のツールは、ツール自身の設定でモデルを選びます。[モデルの取得元](#モデルの取得元)を参照してください。
+
+## ツールを接続する
+
+表のツールはすべて同じ方法で接続します。コンピューター上の Multica デーモンが各ツールのコマンドを `PATH` から探し、見つかったツールごとにランタイムを 1 つ登録します。実行はそのコンピューター上で、ツール自身のログインとサブスクリプションを使って行われます。Multica はツールを同梱せず、モデルへの呼び出しを中継することもありません。
+
+1. ツール自身のドキュメントに従ってインストールし、ログインします。
+2. 同じコンピューターで [Multica デスクトップアプリ](/desktop-app) を開くと、コンピューターが自動で接続されます。または CLI をインストールしてデーモンを起動します。
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+   multica setup
+   ```
+
+   Windows では 1 行目を `irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex` にします。セルフホストのインスタンスでは[セルフホストクイックスタート](/self-host-quickstart)のコマンドを使います。
+3. **ランタイム** ページでそのコンピューターの下にツールが表示されていることを確認します。`multica runtime list` でも確認できます。あとで別のツールを入れたら、`multica daemon restart` を実行するかデスクトップアプリを開き直します。
+4. そのランタイムで[エージェントを作成](/agents-create)し、タスクを割り当てます。
+
+デーモンの `PATH` から見えない場所にツールを入れた場合は、`MULTICA_<PREFIX>_PATH` でその場所を指定します。[環境変数](/environment-variables#デーモン設定)を参照してください。1 台のコンピューターに複数のツールを載せられ、1 つのワークスペースに複数のコンピューターをつなげるので、同じボードの上で、あるマシンでは Claude Code、別のマシンでは Codex や Kimi を動かせます。
+
+## 割り込みへの対応
+
+実行が終わるのを待たずに、[作業中の実行にメッセージを追加](/mentioning-agents#実行中のエージェントに割り込む)できます。これには AI コーディングツールの対応と、次のバージョン以上が必要です。
+
+| ツール | 最低バージョン |
+|---|---|
+| Antigravity | 1.4.8 |
+| Claude Code | 2.1.110 |
+| Codex | 0.100.0 |
+| Cursor Agent | 2026.10.14 |
+| Grok | 1.0.14 |
+| Hermes | 0.22.3 |
+| Kiro CLI | 2.33.0 |
+| Pi | 1.4.0 |
+
+それ以外のツールや古いバージョンでは「現在の実行に追加」は表示されません。返信は現在の実行の後に新しい実行で扱われるか、現在の実行を止めてやり直すことになります。
 
 ## モデルの取得元
 
@@ -67,6 +115,8 @@ Devin は `WINDSURF_API_KEY` があれば使用し、なければ `devin auth lo
 モデルを選択しない場合、Multica はそのツールのデフォルト設定を使用します。一覧が空の場合は、ランタイムがオンラインでツールにログイン済みであることを確認してから、モデル一覧を更新してください。
 
 QwenPaw、MiniMax Code、ZeroClaw は例外です。Multica 側で選んだモデルを受け付けないため、選択欄は操作できず「ランタイムで管理」と表示されます。モデルは各ツール側の設定で選んでください。これらのツールでモデル一覧が空なのは正常で、ランタイムがオフラインという意味ではありません。
+
+Antigravity の推論バリアントが `agy models` にある場合、それぞれが別のモデルとして表示されます。モデル選択欄で、接尾辞を含む正確なバリアントを選んでください。Multica には Antigravity 専用の 推論設定はありません。カスタム引数で `--effort` を渡す場合、選択したモデルと併用できるかどうかは Antigravity が判定します。
 
 DeepSeek Harness のモデルカタログはランタイム自身が提供します（`dsh --profile multica --list-models`）。モデル ID は `provider/model` 形式（例: `deepseek-official/deepseek-chat`）なので、一覧から完全な ID を選択してください。
 
@@ -84,7 +134,7 @@ Multica はツールから返されたセッション識別子を保存します
 
 ## MCP 設定
 
-Antigravity、GitHub Copilot CLI、DevEco Code、Muse Code、ZeroClaw は、現時点ではエージェントの MCP 設定を読み取らないため、これらのツールではエージェント作成画面にこの項目が表示されません。
+Amp、Factory Droid、Antigravity、GitHub Copilot CLI、DevEco Code、Muse Code、ZeroClaw は、現時点ではエージェントの MCP 設定を読み取らないため、これらのツールではエージェント作成画面にこの項目が表示されません。
 
 Pi への管理 MCP 設定の引き渡しには Pi 0.99.0 以降が必要です。それより古い Pi でも、MCP 設定のないエージェントは引き続き実行できます。
 
@@ -113,3 +163,9 @@ Codex、Hermes、OpenClaw の動作は少し異なります。
 - [エージェントを作成・設定する](/agents-create) — モデルと thinking level の設定
 - [AI コーディングツールをインストールする](/install-agent-runtime) — インストールと検出の手順
 - [デーモンとランタイム](/daemon-runtimes) — ランタイムの登録と同時実行
+
+## ZCode
+
+ZCode はネイティブの NDJSON `app-server` プロトコルで、セッションの作成・再開・キャンセル、モデル検出、推論レベル、MCP に対応します。タスクは yolo モードで実行され、対話的なツール承認は求められません。推論レベルの選択肢はランタイムのモデルカタログから取得し、エージェント作成時には選択したモデルの既定値が維持されます。
+
+macOS では ZCode Desktop に同梱された CLI も自動検出します。Node.js のインストールが必要です。Linux でも ZCode Desktop を自動検出し、デスクトップウィンドウを開かずに同梱 CLI を実行します。Node.js の追加インストールや環境変数の手動設定は不要です。デスクトップアプリで有効になっている API-key/Coding Plan 接続を、プロセス専用の一時設定へ取り込みます。この設定は終了時に削除され、元のファイルは変更されません。Start Plan の認証トークンは API キーではなく、このアカウント認証方式には対応していません。モデルが検出されない場合は、ZCode Desktop で利用可能な API 接続を設定してください。

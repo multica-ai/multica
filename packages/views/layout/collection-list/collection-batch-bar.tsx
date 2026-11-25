@@ -1,7 +1,8 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
 import { X } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
@@ -29,7 +30,7 @@ export function CollectionBatchBar({
   children: ReactNode;
 }) {
   const { t } = useT("layout");
-  const reduceMotion = useReducedMotion() ?? false;
+  const reduceMotion = useReducedMotion();
   const offset = reduceMotion ? "translateY(0)" : "translateY(8px)";
 
   return (
@@ -54,15 +55,12 @@ export function CollectionBatchBar({
             animate={{
               opacity: 1,
               transform: "translateY(0)",
-              transition: { duration: UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
+              transition: { duration: reduceMotion ? 0 : UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
             }}
             exit={{
               opacity: 0,
               transform: offset,
-              transition: {
-                duration: reduceMotion ? UI_MOTION_DURATION.fast : UI_MOTION_DURATION.micro,
-                ease: UI_EASE_OUT,
-              },
+              transition: { duration: reduceMotion ? 0 : UI_MOTION_DURATION.micro, ease: UI_EASE_OUT },
             }}
           >
             <div className="mr-1 flex items-center gap-1.5 border-r pl-1 pr-2">

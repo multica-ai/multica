@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -88,6 +89,7 @@ var daemonDiskUsageCmd = &cobra.Command{
 		"overridable via MULTICA_GC_ARTIFACT_PATTERNS) so the report stays in sync with what the GC reclaims.\n" +
 		"A .git directory counts toward the total but never toward the artifact subset — the GC frees it only\n" +
 		"when it removes the whole run directory. Symlinks are never followed.\n\n" +
+		"The MODE column marks in-place runs when recorded in local metadata. JSON includes local_directory: true for those runs.\n\n" +
 		"The STATUS column shows the current status of the issue each directory belongs to, which requires\n" +
 		"contacting the server. When the machine is offline, logged out, or the request fails, the column is\n" +
 		"left blank and the rest of the report still prints. --by-workspace has no STATUS column and therefore\n" +
@@ -165,7 +167,7 @@ type daemonRuntimeProbe struct {
 }
 
 func runDaemonProbeRuntimes(cmd *cobra.Command, _ []string) error {
-	if err := requireHumanLocalCommand("daemon probe-runtimes"); err != nil {
+	if err := requireHumanLocalDaemonCommand(cmd, "daemon probe-runtimes"); err != nil {
 		return err
 	}
 	cfg, err := daemon.LoadConfig(daemon.Overrides{
@@ -229,6 +231,11 @@ const (
 	defaultDaemonLogMaxSizeMB  = 20 // rotate the active daemon.log once it reaches this size
 	defaultDaemonLogMaxBackups = 5  // how many rotated files to keep
 	defaultDaemonLogMaxAgeDays = 30 // drop rotated files older than this
+	// lumberjack converts MB to int64 bytes and days to time.Duration.
+	// Bound both conversions before passing user-provided values to it.
+	maxDaemonLogSizeMB  = math.MaxInt64 / (1024 * 1024)
+	maxDaemonLogBackups = math.MaxInt64
+	maxDaemonLogAgeDays = math.MaxInt64 / int64(24*time.Hour)
 	// errLogMaxBytes bounds daemon.err.log (raw crash/panic sink). It is
 	// enforced by rolling the file to a single ".1" backup at open time, so a
 	// crash loop that repeatedly appends panic output can't reintroduce the
@@ -241,28 +248,37 @@ const (
 // bulk of daemon.log volume is the daemon's own slog output plus agent
 // subprocess stderr (all forwarded through slog), so bounding this writer
 // bounds essentially all growth.
-func newDaemonLogRotator(logPath string) *lumberjack.Logger {
+func newDaemonLogRotator(logPath string, cfg cli.CLIConfig) *lumberjack.Logger {
 	return &lumberjack.Logger{
 		Filename:   logPath,
-		MaxSize:    envPositiveIntOrDefault("MULTICA_DAEMON_LOG_MAX_SIZE_MB", defaultDaemonLogMaxSizeMB),
-		MaxBackups: envPositiveIntOrDefault("MULTICA_DAEMON_LOG_MAX_BACKUPS", defaultDaemonLogMaxBackups),
-		MaxAge:     envPositiveIntOrDefault("MULTICA_DAEMON_LOG_MAX_AGE_DAYS", defaultDaemonLogMaxAgeDays),
+		MaxSize:    daemonLogInt("MULTICA_DAEMON_LOG_MAX_SIZE_MB", cfg.DaemonLogMaxSizeMB, defaultDaemonLogMaxSizeMB, maxDaemonLogSizeMB),
+		MaxBackups: daemonLogInt("MULTICA_DAEMON_LOG_MAX_BACKUPS", cfg.DaemonLogMaxBackups, defaultDaemonLogMaxBackups, maxDaemonLogBackups),
+		MaxAge:     daemonLogInt("MULTICA_DAEMON_LOG_MAX_AGE_DAYS", cfg.DaemonLogMaxAgeDays, defaultDaemonLogMaxAgeDays, maxDaemonLogAgeDays),
 		Compress:   true,
 	}
 }
 
+// Ignore invalid persisted values too: hand-edited config must not disable
+// retention or overflow lumberjack's size/age conversions.
+func daemonLogInt(key string, saved, def int, max int64) int {
+	if saved > 0 && int64(saved) <= max {
+		def = saved
+	}
+	return envPositiveIntOrDefault(key, def, max)
+}
+
 // envPositiveIntOrDefault reads a strictly positive integer env var, falling
-// back to def when unset, blank, malformed, zero, or negative. Zero is treated
+// back to def when unset, blank, malformed, zero, negative, or over max. Zero is treated
 // as "use default" on purpose: lumberjack reads MaxSize=0 as 100MB and
 // MaxBackups=0 / MaxAge=0 as "keep everything", so honoring a literal 0 would
 // silently disable retention and reintroduce unbounded growth.
-func envPositiveIntOrDefault(key string, def int) int {
+func envPositiveIntOrDefault(key string, def int, max int64) int {
 	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {
 		return def
 	}
 	n, err := strconv.Atoi(v)
-	if err != nil || n <= 0 {
+	if err != nil || n <= 0 || int64(n) > max {
 		return def
 	}
 	return n
@@ -551,7 +567,7 @@ func requireDaemonAuth(profile string) error {
 }
 
 func runDaemonStart(cmd *cobra.Command, _ []string) error {
-	if err := requireHumanLocalCommand("daemon start"); err != nil {
+	if err := requireHumanLocalDaemonCommand(cmd, "daemon start"); err != nil {
 		return err
 	}
 	foreground, _ := cmd.Flags().GetBool("foreground")
@@ -684,49 +700,14 @@ func runDaemonBackground(cmd *cobra.Command) error {
 		fmt.Fprintf(os.Stderr, "Warning: could not write PID file: %v\n", err)
 	}
 
-	// Poll the health endpoint until the daemon reports ready ("running") or we
-	// time out. The daemon binds the health port almost immediately but reports
-	// status:"starting" until preflight finishes (PAT renew + initial workspace
-	// sync, which exec's every configured agent for version detection and can
-	// take ~20s on a cold cache). Wait long enough to cover that so a healthy
-	// cold start is not misreported as a failure.
-	const startupTimeout = 45 * time.Second
-	deadline := time.Now().Add(startupTimeout)
-	started := false
-	lastStatus := ""
-	for time.Now().Before(deadline) {
-		select {
-		case waitErr := <-waitCh:
-			return daemonStartupFailureError(daemonStartupLogs{
-				logPath:      logPath,
-				logOffset:    logOffset,
-				errLogPath:   errLogPath,
-				errLogOffset: errLogOffset,
-			}, waitErr, profile, resolveDaemonServerURL(cmd, profile))
-		case <-time.After(500 * time.Millisecond):
-		}
-		// The child publishes the port only after it has bound the listener.
-		// Ignore a stale record from a previous daemon, even if its port works.
-		record, ok := readDaemonPortRecord(profile)
-		if !ok || record.PID != pid {
-			continue
-		}
-		hctx, hcancel := context.WithTimeout(context.Background(), 2*time.Second)
-		health = checkDaemonHealthOnPort(hctx, record.Port)
-		hcancel()
-		lastStatus, _ = health["status"].(string)
-		if lastStatus == "running" && health["profile"] == profile && health["pid"] == float64(pid) {
-			started = true
-			break
-		}
-	}
-	if !started {
-		if lastStatus == "starting" {
-			fmt.Fprintf(os.Stderr, "Daemon is still starting after %s (agent detection / workspace sync is taking longer than expected). Check logs:\n  %s\n", startupTimeout, logPath)
-		} else {
-			fmt.Fprintf(os.Stderr, "Daemon may not have started successfully. Check logs:\n  %s\n  %s (crash output)\n", logPath, errLogPath)
-		}
-		return nil
+	started, err := waitForDaemonStartup(waitCh, pid, profile, 45*time.Second, daemonStartupLogs{
+		logPath:      logPath,
+		logOffset:    logOffset,
+		errLogPath:   errLogPath,
+		errLogOffset: errLogOffset,
+	}, resolveDaemonServerURL(cmd, profile))
+	if err != nil || !started {
+		return err
 	}
 
 	if profile != "" {
@@ -736,6 +717,49 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	}
 	fmt.Fprintf(os.Stderr, "Logs: %s\n", logPath)
 	return nil
+}
+
+func waitForDaemonStartup(waitCh <-chan error, pid int, profile string, startupTimeout time.Duration, logs daemonStartupLogs, serverURL string) (bool, error) {
+	// Poll the health endpoint until the daemon reports ready ("running") or we
+	// time out. The daemon binds the health port almost immediately but reports
+	// status:"starting" until preflight finishes (PAT renew + initial workspace
+	// sync, which exec's every configured agent for version detection and can
+	// take ~20s on a cold cache). Wait long enough to cover that so a healthy
+	// cold start is not misreported as a failure.
+	deadline := time.Now().Add(startupTimeout)
+	lastStatus := ""
+	for time.Now().Before(deadline) {
+		select {
+		case waitErr := <-waitCh:
+			return false, daemonStartupFailureError(logs, waitErr, profile, serverURL)
+		case <-time.After(500 * time.Millisecond):
+		}
+		// The child publishes the port only after it has bound the listener.
+		// Ignore a stale record from a previous daemon, even if its port works.
+		record, ok := readDaemonPortRecord(profile)
+		if !ok || record.PID != pid {
+			continue
+		}
+		hctx, hcancel := context.WithTimeout(context.Background(), 2*time.Second)
+		health := checkDaemonHealthOnPort(hctx, record.Port)
+		hcancel()
+		// Only this child's responses can establish readiness or earn the
+		// slow-start grace period. Keep the last verified status if a later
+		// probe fails or the port answers for a different daemon.
+		if health["profile"] != profile || health["pid"] != float64(pid) {
+			continue
+		}
+		lastStatus, _ = health["status"].(string)
+		if lastStatus == "running" {
+			return true, nil
+		}
+	}
+	if lastStatus == "starting" {
+		fmt.Fprintf(os.Stderr, "Daemon is still starting after %s (agent detection / workspace sync is taking longer than expected). Check logs:\n  %s\n", startupTimeout, logs.logPath)
+		return false, nil
+	}
+
+	return false, fmt.Errorf("daemon startup timed out after %s without a matching health response. Check logs:\n  %s\n  %s (crash output)", startupTimeout, logs.logPath, logs.errLogPath)
 }
 
 // resolveDaemonServerURL resolves the server URL the daemon will talk to,
@@ -964,6 +988,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	// than server URL: an unreadable / missing config only means "no
 	// persisted overrides", not "cannot start".
 	fileCfg, _ := cli.LoadCLIConfigForProfile(profile)
+	logLevel := resolveDaemonLogLevel(fileCfg.LogLevel)
 	// Pick the log sink. A user who runs `daemon start --foreground` in a shell
 	// keeps live, colored logging on their terminal (a documented debugging
 	// path — see docs troubleshooting). A detached/background child, whose
@@ -975,7 +1000,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		logRotator *lumberjack.Logger
 	)
 	if logger_pkg.StderrIsTerminal() {
-		logger = logger_pkg.NewLogger("daemon")
+		logger = logger_pkg.NewWriterLoggerDefault("daemon", os.Stderr, logLevel, false)
 	} else {
 		// An older self-update launcher may have handed this process daemon.log
 		// itself as stdout/stderr. On Windows that inherited handle lacks
@@ -984,12 +1009,12 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		// daemon.log solely owned by the rotator. No-op on Unix, where an open
 		// fd never blocks rename.
 		repointStdioToErrLog(daemonStderrLogPathForProfile(profile))
-		logRotator = newDaemonLogRotator(daemonLogPathForProfile(profile))
+		logRotator = newDaemonLogRotator(daemonLogPathForProfile(profile), fileCfg)
 		defer logRotator.Close()
 		// Route both this process's structured logger and the package-global
 		// slog default through the rotator, so every log line — including
 		// LoadConfig's slog.Warn below — is captured and rotated.
-		logger = logger_pkg.NewWriterLoggerDefault("daemon", logRotator)
+		logger = logger_pkg.NewWriterLoggerDefault("daemon", logRotator, logLevel, true)
 	}
 
 	serverURL := resolveDaemonServerURL(cmd, profile)
@@ -1190,7 +1215,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		// including the package-global slog default (which would otherwise
 		// reopen daemon.log on its next write).
 		if logRotator != nil {
-			logger = logger_pkg.NewWriterLoggerDefault("daemon", os.Stderr)
+			logger = logger_pkg.NewWriterLoggerDefault("daemon", os.Stderr, logLevel, true)
 			_ = logRotator.Close()
 		}
 
@@ -1380,7 +1405,7 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 // --- daemon stop ---
 
 func runDaemonStop(cmd *cobra.Command, _ []string) error {
-	if err := requireHumanLocalCommand("daemon stop"); err != nil {
+	if err := requireHumanLocalDaemonCommand(cmd, "daemon stop"); err != nil {
 		return err
 	}
 	profile := resolveProfile(cmd)
@@ -1487,8 +1512,8 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 	}
 	output, _ := cmd.Flags().GetString("output")
 
-	// Safe to list profiles here: daemonStatusHealthPort already rejected an
-	// explicit --profile inside a daemon-managed task.
+	// Safe to list profiles here: daemonStatusHealthPort already rejected every
+	// explicit --profile inside a daemon-managed task except a dev-env one.
 	if err := requireKnownProfile(profile); err != nil {
 		var unknown *unknownProfileError
 		if output == "json" && errors.As(err, &unknown) {
@@ -1517,9 +1542,10 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 	// possible — and the task's profile is necessarily empty (--profile is
 	// rejected) while the host may run a named one, which would make every
 	// named-profile host look like a conflict and break the standing contract
-	// that `daemon status` in a task reports on the daemon hosting it.
+	// that `daemon status` in a task reports on the daemon hosting it. A dev-env
+	// profile's port is profile-derived like any other, so it keeps the check.
 	var conflict *daemonProfileMismatchError
-	if daemonAlive(health) && !inDaemonTaskIdentityContext() {
+	if daemonAlive(health) && (!inDaemonTaskIdentityContext() || devEnvOwnsDaemonProfile(cmd)) {
 		errors.As(daemonIdentityMismatch(health, profile, healthPort), &conflict)
 	}
 
@@ -1562,10 +1588,11 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 // whatever profile name the caller passes, so deriving the port there would let
 // a task report on a daemon that is not the one hosting it — and for a task
 // hosted by a named-profile daemon it would silently probe the default daemon
-// instead. A missing port fails closed rather than guessing.
+// instead. A missing port fails closed rather than guessing. The one exception
+// is a dev-env profile, which names a daemon the task started itself.
 func daemonStatusHealthPort(cmd *cobra.Command) (int, error) {
 	profile := resolveProfile(cmd)
-	if !inDaemonTaskIdentityContext() {
+	if !inDaemonTaskIdentityContext() || devEnvOwnsDaemonProfile(cmd) {
 		return resolveHealthPort(profile), nil
 	}
 	if profile != "" {
@@ -1620,6 +1647,19 @@ func printDaemonStatusReport(w io.Writer, label string, health map[string]any) {
 			parts[i] = fmt.Sprint(a)
 		}
 		rows = append(rows, row{"Agents", strings.Join(parts, ", ")})
+	}
+	if skipped, ok := health["skipped_agents"].(map[string]any); ok {
+		lineBreaks := strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
+		parts := make([]string, 0, len(skipped))
+		for name, value := range skipped {
+			if reason, ok := value.(string); ok && reason != "" {
+				parts = append(parts, name+": "+lineBreaks.Replace(reason))
+			}
+		}
+		if len(parts) > 0 {
+			sort.Strings(parts)
+			rows = append(rows, row{"Skipped agents", strings.Join(parts, "; ")})
+		}
 	}
 	if ws, ok := health["workspaces"].([]any); ok {
 		rows = append(rows, row{"Workspaces", strconv.Itoa(len(ws))})
@@ -1787,6 +1827,16 @@ func resolveWorkspacesRootForProfile(profile, flagValue string) (string, error) 
 		fileCfg.WorkspacesRoot,
 	)
 	return daemon.ResolveWorkspacesRoot(profile, override)
+}
+
+// resolveDaemonLogLevel picks the daemon log level: LOG_LEVEL wins when set,
+// otherwise the profile's log_level. An empty result leaves the logger on its
+// built-in default (debug).
+func resolveDaemonLogLevel(cfgValue string) string {
+	if !envUnset("LOG_LEVEL") {
+		return os.Getenv("LOG_LEVEL")
+	}
+	return cfgValue
 }
 
 // resolveDaemonDurationOverride is the numeric counterpart for
@@ -2225,6 +2275,10 @@ func printDiskUsageTaskTable(w io.Writer, report daemon.DiskUsageReport) {
 	for _, task := range report.Tasks {
 		displayedSize += task.SizeBytes
 		displayedArtifact += task.ArtifactSizeBytes
+		mode := "-"
+		if task.LocalDirectory {
+			mode = "in place"
+		}
 		rows = append(rows, []string{
 			task.WorkspaceShort + "/" + task.TaskShort,
 			task.Kind,
@@ -2232,9 +2286,10 @@ func printDiskUsageTaskTable(w io.Writer, report daemon.DiskUsageReport) {
 			formatAge(task.AgeSeconds),
 			formatBytes(task.SizeBytes),
 			formatBytes(task.ArtifactSizeBytes),
+			mode,
 		})
 	}
-	cli.PrintTable(w, []string{"PATH", "KIND", "STATUS", "AGE", "SIZE", "ARTIFACTS"}, rows)
+	cli.PrintTable(w, []string{"PATH", "KIND", "STATUS", "AGE", "SIZE", "ARTIFACTS", "MODE"}, rows)
 
 	if len(report.Tasks) < report.TotalTaskCount {
 		// Report-wide totals stay anchored to the full scan; the displayed

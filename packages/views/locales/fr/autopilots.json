@@ -21,7 +21,8 @@
     "active": "Active",
     "paused": "En pause",
     "paused_runtime_required": "En pause — l'assigné a besoin d'un runtime",
-    "archived": "Archivée"
+    "archived": "Archivée",
+    "paused_project_archived": "En pause — son projet est archivé"
   },
   "execution_mode": {
     "create_issue": "Créer une tâche",
@@ -75,12 +76,11 @@
     "run_blocked_invocation_not_allowed": "Non déclenchée — vous n'avez pas la permission d'utiliser l'agent de cette automatisation",
     "run_blocked_runtime_offline": "Non déclenchée — le runtime de l'agent est hors ligne",
     "run_blocked_agent_runtime_required": "Non déclenchée — l'agent n'a pas de runtime ; associez-en un pour l'exécuter",
-    "run_blocked_runtime_access_denied": "Non déclenchée — l'agent ne peut pas s'exécuter sur son runtime privé ; passez-le en public ou réassociez/copiez l'agent",
+    "run_blocked_runtime_access_denied": "Non déclenchée — le runtime privé de cet agent n'est pas accessible. Rendez le runtime public ou associez l'agent à un runtime accessible.",
     "run_blocked_target_unavailable": "Non déclenchée — l'agent est indisponible",
-    "run_blocked_attribution": "Non déclenchée — l'exécution n'a pas pu être attribuée à un membre responsable",
-    "run_blocked_already_active": "Non déclenchée — une exécution récente couvre déjà ce cas",
+    "run_blocked_attribution": "Non déclenchée — aucun membre actif n'est disponible pour exécuter cette automatisation.",
+    "run_blocked_already_active": "Non déclenchée — une exécution est déjà en cours ou vient de se terminer.",
     "run_blocked_quota_exceeded": "Non déclenché — la limite d'exécutions de la période est atteinte",
-    "run_blocked_issue_limit_reached": "Non déclenchée : l'espace de travail a atteint sa limite de tâches",
     "run_blocked_generic": "Non déclenchée — l'exécution a été bloquée",
     "section_triggers": "Déclencheurs",
     "section_run_history": "Historique des exécutions",
@@ -90,10 +90,10 @@
     "field_project": "Projet",
     "no_project": "Aucun projet",
     "project_unavailable": "Projet indisponible",
-    "field_prompt": "Invite",
+    "field_prompt": "Procédure",
     "field_subscribers": "Abonnés",
     "field_subscribers_none": "Aucun",
-    "no_prompt": "Aucune invite pour l'instant.",
+    "no_prompt": "Aucune procédure pour l'instant.",
     "copy_link": "Copier le lien",
     "link_copied": "Lien copié",
     "link_copy_failed": "Impossible de copier le lien",
@@ -104,7 +104,7 @@
       "with_trigger": "{{trigger}} · {{action}}"
     },
     "add_trigger": "Ajouter un déclencheur",
-    "no_triggers": "Aucun déclencheur configuré. Ajoutez une planification pour une exécution automatique.",
+    "no_triggers": "Aucun déclencheur configuré. Ajoutez une planification ou un webhook pour une exécution automatique.",
     "no_runs": "Aucune exécution pour l'instant. Cliquez sur « Exécuter maintenant » pour déclencher manuellement.",
     "delete_button": "Supprimer l'automatisation",
     "toast_deleted": "Automatisation supprimée",
@@ -115,7 +115,8 @@
       "cancel": "Annuler",
       "confirm": "Supprimer",
       "deleting": "Suppression..."
-    }
+    },
+    "paused_project_archived": "En pause car son projet a été archivé. Restaurez le projet, puis réactivez cette automatisation."
   },
   "access": {
     "title": "Gérer l'accès",
@@ -147,6 +148,8 @@
   "run": {
     "issue_linked": "Tâche liée",
     "view_log": "Voir le journal d'exécution",
+    "stop": "Arrêter l'exécution",
+    "stop_failed": "Impossible d'arrêter l'exécution.",
     "skipped_group": {
       "label": "Ignorées",
       "summary": "{{count}} exécutions ignorées"
@@ -180,6 +183,10 @@
     "url_copied": "URL du webhook copiée",
     "url_copy_failed": "Échec de la copie",
     "edit_schedule": "Modifier la planification",
+    "edit_webhook": "Modifier le webhook",
+    "event_filter_summary_all": "Accepte tous les événements",
+    "event_filter_summary_conditions_one": "{{count}} condition",
+    "event_filter_summary_conditions_other": "{{count}} conditions",
     "rotate_url": "Renouveler l'URL",
     "rotate_confirm_title": "Renouveler l'URL du webhook",
     "rotate_confirm_description": "L'URL actuelle cessera de fonctionner immédiatement. Tous les systèmes externes qui l'appellent devront être mis à jour avec la nouvelle. Continuer ?",
@@ -192,7 +199,7 @@
     "toast_delete_failed": "Échec de la suppression du déclencheur",
     "delete_dialog": {
       "title": "Supprimer le déclencheur",
-      "description": "Ce déclencheur sera retiré et l'automatisation cessera de se déclencher selon cette planification. Cette action est irréversible.",
+      "description": "Ce déclencheur sera supprimé et ne déclenchera plus cette automatisation. Cette action est irréversible.",
       "cancel": "Annuler",
       "confirm": "Supprimer",
       "deleting": "Suppression..."
@@ -242,7 +249,19 @@
       "toast_failed": "Échec du rejeu",
       "disabled_invalid_signature": "Rejeu impossible — la signature était invalide",
       "disabled_rejected": "Impossible de rejouer une livraison rejetée",
-      "disabled_queued": "Encore en file d'attente — rejouez une fois qu'elle sera traitée"
+      "disabled_queued": "Une relance est déjà en file d'attente. Attendez qu'elle se termine."
+    },
+    "ignore": {
+      "title": "Motif du filtrage",
+      "payload_filtered": "Conditions de la charge utile non remplies",
+      "event_filtered": "Événement ou action non correspondant",
+      "trigger_disabled": "Déclencheur désactivé",
+      "autopilot_paused": "Automatisation en pause",
+      "autopilot_archived": "Automatisation archivée",
+      "quota_exceeded": "Quota d’exécutions atteint",
+      "actual_value": "Valeur réelle",
+      "missing": "Champ absent",
+      "truncated": "Aperçu tronqué. Consultez le contenu brut pour la valeur complète."
     }
   },
   "add_trigger_dialog": {
@@ -269,12 +288,18 @@
     "toast_updated": "Planification mise à jour",
     "toast_update_failed": "Échec de la mise à jour de la planification"
   },
+  "edit_webhook_dialog": {
+    "title": "Modifier le webhook",
+    "label_placeholder": "ex. Pull requests GitHub",
+    "toast_updated": "Webhook mis à jour",
+    "toast_update_failed": "Échec de la mise à jour du webhook"
+  },
   "dialog": {
     "sr_create": "Nouvelle automatisation",
     "sr_edit": "Modifier l'automatisation",
     "header_create": "Nouvelle automatisation",
     "header_edit": "Modifier l'automatisation",
-    "subtitle": "Travail IA récurrent",
+    "subtitle": "Travail IA planifié ou déclenché par webhook",
     "expand": "Développer",
     "collapse": "Replier",
     "close": "Fermer",
@@ -324,12 +349,40 @@
     "webhook_created_done": "Terminé",
     "event_filter_label": "Filtres d'événements",
     "event_filter_docs_link_label": "Comprendre le fonctionnement des filtres d'événements",
-    "event_filter_event_placeholder": "ex. workflow_run",
-    "event_filter_actions_placeholder": "completed, failed",
-    "event_filter_add": "Ajouter",
-    "event_filter_remove_label": "Retirer le filtre",
-    "event_filter_hint": "Ne traiter que les webhooks correspondant à ces événements. Laissez vide pour tous les accepter.",
+    "event_filter_event_placeholder": "Événement, ex. pull_request",
+    "event_filter_actions_placeholder": "Actions (facultatif)",
+    "event_filter_add_rule": "Ajouter une règle",
+    "event_filter_event_label": "Événement",
+    "event_filter_actions_label": "Actions",
+    "event_filter_new_rule_label": "Nouvelle règle",
+    "event_filter_condition_label": "Condition",
+    "event_filter_error_event_required": "Saisissez un nom d'événement.",
+    "event_filter_error_path_required": "Saisissez un champ de la charge utile.",
+    "event_filter_error_path_invalid": "Séparez les noms de champ par des points, {{path}} caractères maximum.",
+    "event_filter_error_value_required": "Saisissez une valeur.",
+    "event_filter_error_too_many_values": "{{values}} valeurs maximum.",
+    "event_filter_remove_label": "Supprimer la règle",
+    "event_filter_hint": "Seuls les événements correspondant à une règle et à toutes ses conditions sont traités. Laissez vide pour tout accepter.",
+    "event_filter_condition_remove_label": "Retirer la condition",
+    "event_filter_condition_add_label": "Ajouter une condition",
+    "event_filter_condition_ops": {
+      "equals": "est",
+      "not_equals": "n'est pas",
+      "contains": "contient",
+      "in": "est parmi",
+      "exists": "existe"
+    },
+    "event_filter_condition_path_label": "Champ de la charge utile",
+    "event_filter_condition_path_placeholder": "Champ de la charge utile, ex. pull_request.base.ref",
+    "event_filter_condition_op_label": "Opérateur",
+    "event_filter_condition_value_label": "Valeur",
+    "event_filter_condition_value_placeholder": "ex. main",
+    "event_filter_condition_values_placeholder": "main, release",
+    "event_filter_condition_ignore_case": "Ignorer la casse",
     "schedule_multiple_notice": "Cette automatisation a {{count}} planifications. Fermez cette fenêtre et modifiez chacune dans la liste Déclencheurs ci-dessous.",
+    "webhook_multiple_notice": "Cette automatisation a plusieurs webhooks. Fermez cette fenêtre et modifiez chacun dans la liste Déclencheurs ci-dessous.",
+    "webhook_edit_filters": "Modifier les filtres",
+    "webhook_filters_saved_separately": "Les filtres d'événements sont enregistrés immédiatement — cliquer sur Annuler ici ne les annulera pas.",
     "schedule_empty": "Aucune planification — cette automatisation ne s'exécute que sur déclenchement manuel.",
     "schedule_add": "Ajouter une planification",
     "error_title_required": "Saisissez un nom pour cette automatisation.",
@@ -343,7 +396,8 @@
         "label": "Exécution seule",
         "description": "Exécution silencieuse, aucune tâche créée"
       }
-    }
+    },
+    "event_filter_condition_all": "Et la charge utile remplit toutes les conditions"
   },
   "schedule_editor": {
     "time_label": "Heure",
@@ -461,7 +515,9 @@
       "warning": "Cette action est irréversible.",
       "cancel": "Annuler",
       "confirm": "Supprimer définitivement",
-      "deleting": "Suppression…"
+      "deleting": "Suppression…",
+      "title_multiple": "Supprimer {{count}} autopilotes ?",
+      "description_single": "« {{name}} » et son historique d'exécution seront définitivement supprimés."
     }
   },
   "wakeups": {
@@ -484,7 +540,7 @@
     "loading": "Chargement des réveils…",
     "disable_selected": "Désactiver la sélection",
     "confirm_title": "Désactiver {{count}} réveils ?",
-    "confirm_body": "Les réveils futurs seront arrêtés. Les exécutions en file non confiées à un agent seront retirées. Les exécutions déjà confiées continueront ; arrêtez-les depuis le journal d’exécution.",
+    "confirm_body": "Les réveils futurs s'arrêteront. Les exécutions en file d'attente qui n'ont pas encore démarré seront annulées. Les exécutions déjà en cours se poursuivront — arrêtez-les depuis le journal d'exécution.",
     "cancel": "Annuler",
     "confirm": "Désactiver",
     "disabling": "Désactivation…",
@@ -543,7 +599,28 @@
         "reply": "« La PR est fusionnée. Je mets à jour la doc et je ferme la tâche. »",
         "event_examples": "PR fusionnée, nouveau commentaire"
       }
-    }
+    },
+    "defaults": {
+      "title": "À la fin des sous-tâches",
+      "description": "Réveille le responsable de la tâche parente quand une étape se termine alors qu’une étape suivante attend, puis une fois de plus quand toutes les sous-tâches sont fermées. Un responsable humain reçoit une notification à la place.",
+      "badge": "Valeur par défaut de l’espace",
+      "enabled": "Activé par défaut",
+      "instruction": "Instruction par défaut",
+      "instruction_hint": "Envoyée à l’agent réveillé. Laissez vide pour utiliser l’instruction intégrée ci-dessous.",
+      "instruction_placeholder": "Laisser vide pour l’instruction intégrée",
+      "builtin": "Instruction intégrée",
+      "instruction_invalid": "Limitez l’instruction à 4 000 octets.",
+      "save": "Enregistrer",
+      "saving": "Enregistrement…",
+      "save_error": "Impossible d’enregistrer la valeur par défaut.",
+      "customized_one": "{{count}} tâche ouverte a son propre réglage et ignore cette valeur par défaut.",
+      "customized_other": "{{count}} tâches ouvertes ont leur propre réglage et ignorent cette valeur par défaut.",
+      "admin_only": "Seuls les propriétaires et administrateurs peuvent modifier ces valeurs.",
+      "load_error": "Impossible de charger les valeurs par défaut des réveils.",
+      "edit_instruction": "Modifier l’instruction par défaut",
+      "view_instruction": "Voir l’instruction par défaut"
+    },
+    "banner_single": "1 réveil a été mis en pause automatiquement : {{issue}} « {{condition}} » — {{reason}}"
   },
   "intro": {
     "label": "Automatisation",

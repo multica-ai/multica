@@ -23,10 +23,13 @@ import type { SidebarIssuesRequest } from "./sidebar-list";
 import { ALL_STATUSES } from "./config";
 import { issueColumnCategory } from "./status-category";
 
-export function issueTasksOptions(issueId: string) {
+export function issueTasksOptions(issueId: string, includeDescendants = false, view: "timeline" | "history" = "timeline") {
+  const key = includeDescendants ? issueKeys.subtreeTasks(issueId) : issueKeys.tasks(issueId);
   return queryOptions({
-    queryKey: issueKeys.tasks(issueId),
-    queryFn: () => api.listTasksByIssue(issueId),
+    queryKey: view === "history" ? [...key, "history"] : key,
+    queryFn: () => view === "timeline"
+      ? api.listTasksByIssue(issueId, includeDescendants, { view })
+      : api.listTasksByIssue(issueId, includeDescendants),
     enabled: !!issueId,
     staleTime: 30_000,
     refetchOnWindowFocus: true,
@@ -159,6 +162,11 @@ export const issueKeys = {
     [...issueKeys.childrenByParentsAll(wsId), parentIds] as const,
   childProgress: (wsId: string) =>
     [...issueKeys.all(wsId), "child-progress"] as const,
+  /** Prefix for every per-issue environments query in a workspace. */
+  environmentsAll: (wsId: string) =>
+    [...issueKeys.all(wsId), "environments"] as const,
+  environments: (wsId: string, issueId: string) =>
+    [...issueKeys.environmentsAll(wsId), issueId] as const,
   /** Prefix-match keys for invalidating the per-issue caches below across
    *  all issues. These keys carry no wsId, so `issueKeys.all(wsId)` does NOT
    *  cover them — WS reconnect recovery must invalidate these `*All`
@@ -168,6 +176,8 @@ export const issueKeys = {
   /** Full-issue timeline (single TanStack Query, no cursor). */
   timeline: (issueId: string) =>
     [...issueKeys.timelineAll(), issueId] as const,
+  commentThread: (issueId: string, commentId: string) =>
+    [...issueKeys.timeline(issueId), "thread", commentId] as const,
   /** Prefix across all issues — WS task lifecycle events invalidate here so
    *  an open composer's trigger preview refreshes when an agent's queue
    *  state changes (the dedup guard makes the answer queue-dependent). */
@@ -183,9 +193,6 @@ export const issueKeys = {
   /** PREFIX — the picker hook appends a signature of the prospective write. */
   issueTriggerPreview: (signature: string) =>
     [...issueKeys.issueTriggerPreviewAll(), signature] as const,
-  reactionsAll: () => ["issues", "reactions"] as const,
-  reactions: (issueId: string) =>
-    [...issueKeys.reactionsAll(), issueId] as const,
   subscribersAll: () => ["issues", "subscribers"] as const,
   subscribers: (issueId: string) =>
     [...issueKeys.subscribersAll(), issueId] as const,
@@ -197,12 +204,11 @@ export const issueKeys = {
    *  click time. */
   attachments: (issueId: string) =>
     [...issueKeys.attachmentsAll(), issueId] as const,
-  /** Prefix-match key for invalidating tasks across all issues — used by
-   *  the global WS task: prefix path so any task lifecycle event refreshes
-   *  every per-issue list, regardless of which issue is currently mounted. */
+  /** Prefix for reconnects and task events without an issue scope. */
   tasksAll: () => ["issues", "tasks"] as const,
   /** Per-issue task list (issue-detail Execution log section). */
   tasks: (issueId: string) => [...issueKeys.tasksAll(), issueId] as const,
+  subtreeTasks: (issueId: string) => [...issueKeys.tasks(issueId), "subtree"] as const,
   sourceContextPreview: (wsId: string, anchorCommentId: string) =>
     ["source-context", "preview", wsId, anchorCommentId] as const,
 };
@@ -225,6 +231,7 @@ export type MyIssuesFilter = Pick<
   | "assignee_ids"
   | "assignee_types"
   | "creator_id"
+  | "created_by_user_id"
   | "project_id"
   | "involves_user_id"
 >;
@@ -458,7 +465,7 @@ export function projectGanttIssuesOptions(
   });
 }
 
-/** Both list endpoints cap a page here, so a longer sidebar list is fetched in pages. */
+/** The table endpoint caps a page here, so a longer sidebar list is fetched in pages. */
 const SIDEBAR_MAX_PAGE = 100;
 
 async function listSidebarTableIssues(query: IssueTableQuerySpec, limit: number): Promise<ListIssuesResponse> {
@@ -481,22 +488,6 @@ async function listSidebarTableIssues(query: IssueTableQuerySpec, limit: number)
   return { issues, total };
 }
 
-async function listSidebarIssues(params: ListIssuesParams, limit: number): Promise<ListIssuesResponse> {
-  const issues: Issue[] = [];
-  let total = 0;
-  do {
-    const page = await api.listIssues({
-      ...params,
-      limit: Math.min(limit - issues.length, SIDEBAR_MAX_PAGE),
-      offset: issues.length,
-    });
-    issues.push(...page.issues);
-    total = page.total;
-    if (page.issues.length === 0) break;
-  } while (issues.length < limit && issues.length < total);
-  return { issues, total };
-}
-
 /** The first `limit` issues of a sidebar list, with the filtered total. */
 export function sidebarIssuesOptions(
   wsId: string,
@@ -506,10 +497,7 @@ export function sidebarIssuesOptions(
 ) {
   return queryOptions({
     queryKey: issueKeys.sidebar(wsId, source, request, limit),
-    queryFn: () =>
-      "table" in request
-        ? listSidebarTableIssues(request.table, limit)
-        : listSidebarIssues(request, limit),
+    queryFn: () => listSidebarTableIssues(request.table, limit),
   });
 }
 
@@ -683,12 +671,55 @@ export function issueTimelineOptions(issueId: string) {
   });
 }
 
-export function issueReactionsOptions(issueId: string) {
+/**
+ * The issue a link names by UUID or identifier, also cached under its UUID,
+ * the key the issue page reads it by once an identifier URL has resolved
+ * through the identifier-keyed entry (`useCanonicalIssue`).
+ */
+export async function fetchIssueByRef(qc: QueryClient, wsId: string, ref: string): Promise<Issue> {
+  const issue = await qc.fetchQuery(issueDetailOptions(wsId, ref));
+  if (issue.id !== ref) {
+    qc.setQueryData<Issue>(issueKeys.detail(wsId, issue.id), (old) => old ?? issue);
+  }
+  return issue;
+}
+
+/**
+ * Warm what the issue page holds its first paint and a comment landing on: the
+ * issue, its timeline, its runs and its sub-issues, so opening it renders from
+ * cache instead of waiting on a request chain. All four are fetched in
+ * parallel. With an `identifier`, the issue is fetched under the key an
+ * identifier URL resolves through and mirrored to its UUID, so a link to that
+ * URL warming the same issue shares the request. prefetchQuery honours each
+ * query's staleTime: a warm entry costs nothing. `runs: false` leaves out the
+ * runs, for a viewer whose issue page shows none (a guest).
+ */
+export async function prefetchIssuePage(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  identifier?: string | null,
+  { runs = true }: { runs?: boolean } = {},
+): Promise<void> {
+  await Promise.all([
+    identifier
+      ? fetchIssueByRef(qc, wsId, identifier).catch(() => undefined)
+      : qc.prefetchQuery(issueDetailOptions(wsId, issueId)),
+    qc.prefetchQuery(issueTimelineOptions(issueId)),
+    runs && qc.prefetchQuery(issueTasksOptions(issueId)),
+    qc.prefetchQuery(childIssuesOptions(wsId, issueId)),
+  ]);
+}
+
+export function issueCommentThreadOptions(issueId: string, commentId: string) {
   return queryOptions({
-    queryKey: issueKeys.reactions(issueId),
+    queryKey: issueKeys.commentThread(issueId, commentId),
     queryFn: async () => {
-      const issue = await api.getIssue(issueId);
-      return issue.reactions ?? [];
+      const comments = await api.listComments(issueId, { thread: commentId });
+      if (!comments.some((comment) => comment.id === commentId)) {
+        throw new Error("Comment not found in thread");
+      }
+      return comments;
     },
   });
 }
@@ -697,6 +728,25 @@ export function issueSubscribersOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.subscribers(issueId),
     queryFn: () => api.listIssueSubscribers(issueId),
+  });
+}
+
+// Reports arrive over realtime; the interval only re-derives "unreachable"
+// once a daemon goes quiet, and a command expiring when its machine never
+// answers, which no event announces.
+export function issueEnvironmentsOptions(wsId: string, issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.environments(wsId, issueId),
+    queryFn: () => api.listIssueEnvironments(issueId),
+    enabled: !!wsId && !!issueId,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      const pending = !!data && (
+        data.pending_starts.length > 0 ||
+        data.environments.some((env) => env.pending_action?.status === "pending")
+      );
+      return pending ? 5_000 : 60_000;
+    },
   });
 }
 
@@ -717,3 +767,4 @@ export function issueAttachmentsOptions(issueId: string) {
     queryFn: () => api.listAttachments(issueId),
   });
 }
+

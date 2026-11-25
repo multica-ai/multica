@@ -41,6 +41,7 @@ Describe the work, pick an agent or squad under **Created by**, and click **Crea
 - If the request names an assignee ("give this to Lei Li"), the agent assigns them. Otherwise the assignee is whoever you picked under **Created by**: the agent itself, or the squad if you picked one. New issues start in `todo`, so when the assignee is an agent, it starts working on the issue as soon as it exists.
 - The project, priority, and due date you set in the dialog are used as-is; the agent does not infer different ones from the text. Project shows by default, and priority and due date are under the **⋯** menu. Choose which fields always show in **Settings → Preferences → Fields shown when creating issues**.
 - With **Create another** on, the dialog stays open after each submission so you can write the next one.
+- Up to three agents or squads appear as quick-switch chips next to **Created by**, ranked by how often you create issues with them; click one or press `⌥1`–`⌥3` (`Alt+1`–`Alt+3` on Windows and Linux) to switch.
 - **Created by** lists only the agents and squads you are allowed to assign. If the agent's runtime has a multica CLI that is too old, the dialog asks you to upgrade the daemon or switch to manual create.
 
 ## Choose an assignee
@@ -140,9 +141,11 @@ An issue belongs to at most one [project](/projects); the project provides share
 
 Larger work can be split into sub-issues: the parent issue keeps the overall goal while sub-issues progress independently. Parent and child statuses do not affect each other.
 
+An issue's direct children are listed under **Sub-issues** below its description, with progress counting all children. Open a child from there.
+
 Creating a sub-issue from a parent prefills its project and, when set, its assignee. In manual create, **Copy parent fields** lets you choose priority, labels, dates, or individual custom properties to copy. Only the selected values replace your form values, once; later parent changes do not sync. The child keeps its own description and status. Labels, start date, and custom properties stay in the manual draft when switching to Create with agent.
 
-Sub-issues can be given a **stage** to advance in batches — 1, 2, 3. When every sub-issue in the earliest unfinished stage reaches `done` or `cancelled`, the parent issue receives a "sub-issues completed" notification; when the parent's assignee is an agent, it wakes up and decides whether to start the next stage. Sub-issues without a stage count as one batch and notify once when they all finish. The system triggers this wakeup; see [Issue wakeups](/issue-wakeups) for its rules and the other kinds of wakeup.
+Sub-issues can be given a **stage** to advance in batches — 1, 2, 3. A later stage automatically waits for every sub-issue in all earlier stages to reach `done` or `cancelled`: sub-issues created in `todo` start automatically once earlier stages finish, while sub-issues parked in `backlog` stay parked and wake the parent's assignee to review and promote them. The parent is also woken when every sub-issue closes (sub-issues without a stage count as one batch and notify once when they all finish). See [Relations](#relations) and [Issue wakeups](/issue-wakeups) for the full rules.
 
 ## Views and display settings [#switch-views]
 
@@ -152,16 +155,18 @@ The **Display** menu adjusts the current layout. Boards group by status, assigne
 
 ### Save a view
 
-Save a combination of filters and display settings you use often as a view: click the **Views** button next to the view bar, choose **New view**, and give it a name and visibility.
+Save a combination of filters and display settings you use often with **Save as view**, then name the view. New views start private. To share one, open its menu in the sidebar, in **All views**, or from its page title, and choose **Visible to → Workspace members**. Any member can share a view they created; project views remain limited to members who can access that project.
 
 | Visibility | Who sees it | Who can edit and delete it |
 |---|---|---|
-| **Only visible to me** | Only you | You |
-| **Visible to workspace members** | Every workspace member | You, plus workspace `owner` and `admin` |
+| **Only me** | Only you | You |
+| **Workspace members** | Members with the `owner`, `admin`, or `member` role who can also access its project, if any | You, plus workspace `owner` and `admin` |
 
-The display settings saved in a view are its **Default display**: members see the view that way the first time they open it, then adjust it for themselves without affecting anyone else. A view lives on the page it was created on: one created in a project belongs to that project, and views created in **My Issues** are always private.
+The display settings saved in a view are its **Default display**: members see the view that way the first time they open it, then adjust it for themselves without affecting anyone else. A view lives on the page it was created on: one created in a project belongs to that project, and views created on the **My Issues** page are always private.
 
-Drag views in the view bar to reorder them; ordering and visibility in **Manage views** affect only you. Right-click a view to edit it, delete it, or **Pin to sidebar**.
+Other members can find shared views in **All views** and add them to their own sidebar with the star button. Starring and ordering sidebar views affect only you; sharing a view does not add it to everyone else's sidebar.
+
+The Views section also offers four built-in views: **All issues**; **My work**, issues assigned to you or to your agents; **Working**, issues an agent is running on; and **Subscribed**, every issue you subscribe to. Issues you have [snoozed in your inbox](/inbox#snooze-an-issue) are on its **Snoozed** tab. My work, Working, and Subscribed are All issues under a fixed condition: other filters can narrow them, but that condition can't be removed or widened. The sliders button in the Views section header turns each built-in view on or off.
 
 ### Side preview
 
@@ -171,23 +176,40 @@ While the preview is open, `J` / `K` move to the next or previous issue, `H` / `
 
 ## Batch edits
 
-Select several issues in a list, a table, or a sub-issue list, and a batch toolbar appears at the bottom to change status, priority, or assignee, or delete them all at once. In a table, Shift-click selects a range.
+Select several issues in a list, a table, or a sub-issue list to show the batch toolbar. In a table, Shift-click selects a range. The toolbar edits status, priority, assignee, labels, project, and due date. **More actions** adds start date, parent, stage for sub-issues, custom properties, copying links, and deletion. The selection's right-click menu offers the same actions.
+
+Labels show whether they are on all, some, or none of the selected issues. Add or remove one without changing other labels, or clear all labels. Custom properties can be set or cleared; multi-value properties replace the whole value.
+
+If some issues cannot take a change, the others are still updated. The result names skipped issues and their reasons, with an action to select only those issues for correction and retry.
 
 - When the selection spans several projects, the status menu offers only statuses every selected issue's workflow allows. An issue that does not support a change keeps its value, and the rest are updated.
 - Batch status changes apply directly. Agent-assigned issues that leave `backlog` start running as usual.
 - Batch-assigning to an agent or squad first asks you to confirm the runs that will start; if every selected issue is in `backlog`, the assignment applies directly.
 
-## Mark as duplicate
+## Relations [#relations]
 
-When the same thing was filed twice, open the extra issue and choose **Mark as duplicate** from the status menu or from **Relations** in the issue actions menu, then pick the original. The picker suggests issues with a similar title and issues you viewed recently.
+The **Relations** section in the issue sidebar groups unfinished blockers (**Blocked by**), unfinished issues waiting on this one (**Blocking**), and **Duplicates**. The section stays hidden when empty; add a relation from its **+**, from the sidebar add row, or from **Relations** in the issue actions menu.
+
+### Blockers and waiting work
+
+Choose **Wait for another task** to add a blocker that must end before this issue starts, or **Block another task** to make another issue wait for this one. Sub-issues in a later stage also list unfinished earlier-stage siblings with a **Stage** tag; stage blockers follow the parent and stage automatically and cannot be removed one by one. Adding a cycle or blocking an issue on itself is rejected.
+
+- Adding blockers does not change the issue's status — use the manual `blocked` status when work is held up by missing information or an external condition.
+- While unfinished blockers remain, assigning an agent or squad (or moving the issue out of `backlog`) does not start a run. Direct @-mentions and comment replies still run.
+- Once every blocker reaches a `done` or `closed` status (including `cancelled`) or is removed, an agent or squad assignee starts automatically and a member assignee receives a **Waiting tasks ended** inbox notification. If the issue is in `backlog`, nothing starts until it leaves `backlog`.
+- Unfinished issues with open blockers show a red flag and count in lists, boards, and tables; hover the flag to see the blockers and whether the assignee will start automatically or be notified. Use the **Relationships → Blocked** filter (or `multica issue list --blocked`) to find waiting issues; already-finished issues are excluded. Blockers in private projects or projects a guest cannot see are counted as restricted prerequisites without revealing their titles.
+
+### Mark as duplicate
+
+When the same thing was filed twice, open the extra issue and choose **Mark as duplicate** from the status menu, from **Relations** in the issue actions menu, or from the sidebar's **Relations** menu, then pick the original. The picker suggests issues with a similar title and issues you viewed recently.
 
 The issue moves to `cancelled` and remembers its original:
 
 - A **Duplicate of** banner above the title links to the original and shows its current status. In lists, boards, and tables, an arrow with the original's number appears next to the issue.
-- The original's sidebar gains a **Duplicates** section listing the issues marked as its duplicates and who created them.
+- The original's sidebar lists the issues marked as its duplicates under **Relations → Duplicates**.
 - To undo a mistake, click **Not a duplicate** on the banner; the issue goes back to `todo`. Changing the status to anything other than `cancelled` also removes the mark.
 
-The relation is one level deep: an issue that is itself a duplicate cannot be an original, and an issue that already has duplicates cannot be marked as a duplicate. If a project's workflow has no `cancelled`, the issue actions menu does not offer it.
+The relation is one level deep: an issue that is itself a duplicate cannot be an original, and an issue that already has duplicates cannot be marked as a duplicate. If a project's workflow has no `cancelled`, the menu does not offer it.
 
 ## Delete an issue
 
@@ -209,3 +231,4 @@ Deletion cannot be undone: the issue with its comments, attachments, and linked 
 - [Comments](/comments) — discuss, reply, and @mention around an issue.
 - [Assign issues to agents](/assigning-issues) — hand work to an agent and start the first run.
 - [Runs](/tasks) — learn about queuing, running, retries, and cancellation.
+- [Share an agent pool across a team](/team-agent-pool) — how people and agents hand issues to each other and review the work.

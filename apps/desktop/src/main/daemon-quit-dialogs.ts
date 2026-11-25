@@ -1,4 +1,5 @@
 import type { MessageBoxOptions } from "electron";
+import { type DialogLocale, resolveDialogLocale } from "./dialog-locale";
 
 interface QuitLabels {
   title: string;
@@ -17,7 +18,7 @@ interface QuitLabels {
   ignoreAndQuit: string;
 }
 
-const labels: Record<string, QuitLabels> = {
+const labels: Record<DialogLocale, QuitLabels> = {
   en: {
     title: "Quit Multica",
     activeRuns: (count) => `${count} ${count === 1 ? "run is" : "runs are"} active on this device.`,
@@ -98,23 +99,67 @@ const labels: Record<string, QuitLabels> = {
     cancelQuit: "종료 취소",
     ignoreAndQuit: "무시하고 종료",
   },
+  fr: {
+    title: "Quitter Multica",
+    activeRuns: (count) =>
+      count === 1
+        ? "1 exécution est en cours sur cet appareil."
+        : `${count} exécutions sont en cours sur cet appareil.`,
+    unknownRuns: "Impossible de confirmer si des exécutions sont en cours sur cet appareil.",
+    interruptRuns: "L'arrêt immédiat du démon interrompra les exécutions en cours.",
+    interruptUnknownRuns: "L'arrêt du démon peut interrompre des exécutions sur cet appareil.",
+    cancel: "Annuler",
+    stopAndQuit: "Arrêter et quitter",
+    failureTitle: "Impossible de confirmer l'arrêt",
+    daemonStopped: "Le démon s'est arrêté, mais la fin de toutes ses exécutions n'a pas pu être confirmée.",
+    shutdownUnknown: "Impossible de confirmer que le démon et ses exécutions se sont arrêtés.",
+    cancelAfterStop: "Si vous annulez, Multica reste ouvert et le démon reste arrêté. Les exécutions en arrière-plan peuvent continuer.",
+    cancelUnconfirmed: "Si vous annulez, Multica reste ouvert avec le redémarrage automatique du démon désactivé. Les exécutions en arrière-plan peuvent continuer.",
+    cancelQuit: "Annuler la fermeture",
+    ignoreAndQuit: "Ignorer et quitter",
+  },
+  es: {
+    title: "Salir de Multica",
+    activeRuns: (count) =>
+      count === 1
+        ? "Hay 1 ejecución activa en este dispositivo."
+        : `Hay ${count} ejecuciones activas en este dispositivo.`,
+    unknownRuns: "No se pudo confirmar si hay ejecuciones activas en este dispositivo.",
+    interruptRuns: "Detener el daemon ahora interrumpirá las ejecuciones activas.",
+    interruptUnknownRuns: "Detener el daemon puede interrumpir ejecuciones en este dispositivo.",
+    cancel: "Cancelar",
+    stopAndQuit: "Detener ahora y salir",
+    failureTitle: "No se pudo confirmar el cierre",
+    daemonStopped: "El daemon se detuvo, pero no se pudo confirmar que todas sus ejecuciones hayan finalizado.",
+    shutdownUnknown: "No se pudo confirmar si el daemon y sus ejecuciones se detuvieron.",
+    cancelAfterStop: "Si cancelas, Multica permanece abierto y el daemon detenido. Las ejecuciones en segundo plano pueden continuar.",
+    cancelUnconfirmed: "Si cancelas, Multica permanece abierto con el reinicio automático del daemon desactivado. Las ejecuciones en segundo plano pueden continuar.",
+    cancelQuit: "Cancelar salida",
+    ignoreAndQuit: "Ignorar y salir",
+  },
+  ru: {
+    title: "Выйти из Multica",
+    activeRuns: (count) => `На этом устройстве активно запусков: ${count}.`,
+    unknownRuns: "Не удалось проверить, активны ли запуски на этом устройстве.",
+    interruptRuns: "Остановка демона сейчас прервёт активные запуски.",
+    interruptUnknownRuns: "Остановка демона может прервать запуски на этом устройстве.",
+    cancel: "Отмена",
+    stopAndQuit: "Остановить и выйти",
+    failureTitle: "Не удалось подтвердить остановку",
+    daemonStopped: "Демон остановлен, но не удалось подтвердить завершение всех запусков.",
+    shutdownUnknown: "Не удалось подтвердить, что демон и его запуски остановлены.",
+    cancelAfterStop: "При отмене Multica останется открытым, а демон — остановленным. Фоновые запуски могут продолжиться.",
+    cancelUnconfirmed: "При отмене Multica останется открытым с отключённым автозапуском демона. Фоновые запуски могут продолжиться.",
+    cancelQuit: "Отменить выход",
+    ignoreAndQuit: "Игнорировать и выйти",
+  },
 };
-
-function quitLabels(preferredLanguage: string): QuitLabels {
-  const preferred = preferredLanguage.toLowerCase();
-  if (preferred.startsWith("zh")) {
-    return /^zh-(hant|tw|hk|mo)\b/.test(preferred) ? labels["zh-Hant"] : labels["zh-Hans"];
-  }
-  if (preferred.startsWith("ja")) return labels.ja;
-  if (preferred.startsWith("ko")) return labels.ko;
-  return labels.en;
-}
 
 export function quitConfirmationOptions(
   preferredLanguage: string,
   activeRuns: number | null,
 ): MessageBoxOptions {
-  const copy = quitLabels(preferredLanguage);
+  const copy = labels[resolveDialogLocale(preferredLanguage)];
   return {
     type: "warning",
     title: copy.title,
@@ -131,7 +176,7 @@ export function quitFailureOptions(
   preferredLanguage: string,
   daemonStopped: boolean,
 ): MessageBoxOptions {
-  const copy = quitLabels(preferredLanguage);
+  const copy = labels[resolveDialogLocale(preferredLanguage)];
   return {
     type: "warning",
     title: copy.failureTitle,

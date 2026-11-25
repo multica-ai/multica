@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 func TestFailTaskWithTransitionStaleGenerationSkipsRetryOverlay(t *testing.T) {
@@ -47,8 +49,9 @@ func TestFailTaskWithTransitionStaleGenerationSkipsRetryOverlay(t *testing.T) {
 		Composio:     builder,
 		FeatureFlags: composioMCPAppsTestFlags(true),
 	}
-	_, transitioned, err := svc.FailTaskWithTransition(ctx, taskID,
-		"provider unavailable", "", "", "", "agent_error.provider_network", false, "", "", stale.DispatchedAt.Time)
+	_, transitioned, err := svc.FailTaskWithTransition(ctx, taskID, protocol.TaskFailRequest{
+		Error: "provider unavailable", FailureReason: "agent_error.provider_network", ExpectedDispatchedAt: stale.DispatchedAt.Time.Format(time.RFC3339Nano),
+	})
 	if !errors.Is(err, ErrTaskClaimGenerationMismatch) {
 		t.Fatalf("stale fenced failure error = %v, want ErrTaskClaimGenerationMismatch", err)
 	}

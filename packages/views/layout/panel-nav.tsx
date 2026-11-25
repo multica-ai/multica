@@ -1,7 +1,10 @@
 "use client";
 
-import { useId, useRef } from "react";
+import { createContext, useContext, useId, useRef, useState, type RefObject } from "react";
+import { AnimatePresence, motion, useIsPresent } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
 import { ChevronDown } from "@multica/ui/icons";
+import { UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { AppLink } from "../navigation";
@@ -38,8 +41,11 @@ export function PanelHeader({
   /** Trailing actions (icon buttons). */
   children?: React.ReactNode;
 }) {
+  // `pr-2.5` centres a 28px action on the same line as a section's 24px
+  // action (`PanelBody px-2` + `PanelSection pr-1`), so the trailing column
+  // does not step between the header and the sections under it.
   return (
-    <div className="flex h-12 shrink-0 items-center gap-1 pl-5 pr-2">
+    <div className="flex h-12 shrink-0 items-center gap-1 pl-5 pr-2.5">
       {leading}
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {/* A control passed as the title truncates its own label; clipping
@@ -59,35 +65,154 @@ export function PanelHeader({
   );
 }
 
+const PanelScrollContext = createContext<RefObject<HTMLDivElement | null> | null>(null);
+
+/** The scroll container of the enclosing `PanelBody`, for lists that virtualize inside it. */
+export function usePanelScrollRef() {
+  return useContext(PanelScrollContext);
+}
+
+/**
+ * Whether `PanelBody` masks its scroll edges. Some Android Chromium/WebView
+ * builds paint the mask's opaque stop as a solid black layer inside the
+ * compact nav sheet, covering its rows, so the sheet turns the fade off on
+ * touch screens, where scrolling already shows the overflow.
+ */
+export const PanelScrollFadeContext = createContext(true);
+
 export function PanelBody({
   children,
   onClickCapture,
+  onAuxClickCapture,
 }: {
   children: React.ReactNode;
   onClickCapture?: React.MouseEventHandler<HTMLDivElement>;
+  onAuxClickCapture?: React.MouseEventHandler<HTMLDivElement>;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const fadeStyle = useScrollFade(ref, 24);
+  const fade = useContext(PanelScrollFadeContext);
   return (
     <div
       ref={ref}
-      style={fadeStyle}
+      style={fade ? fadeStyle : undefined}
       onClickCapture={onClickCapture}
-      className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-4 [&>section:first-child]:mt-0"
+      onAuxClickCapture={onAuxClickCapture}
+      className="scrollbar-slim min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-4 [&>section:first-child]:mt-0"
+    >
+      <PanelScrollContext.Provider value={ref}>{children}</PanelScrollContext.Provider>
+    </div>
+  );
+}
+
+const PanelDisclosureSettledContext = createContext(true);
+
+/**
+ * False while an enclosing `PanelDisclosure` is still opening, when the rows
+ * inside are not at their final position and scrolling to one would miss it.
+ */
+export function usePanelDisclosureSettled() {
+  return useContext(PanelDisclosureSettledContext);
+}
+
+function PanelDisclosureInner({
+  id,
+  className,
+  onOpened,
+  children,
+}: {
+  id?: string;
+  className?: string;
+  onOpened: () => void;
+  children: React.ReactNode;
+}) {
+  const isPresent = useIsPresent();
+  return (
+    <motion.div
+      id={id}
+      inert={!isPresent}
+      // Clip only while the height moves, so rows' focus outlines aren't cut
+      // off once the section rests open.
+      initial={{ height: 0, opacity: 0, overflow: "hidden" }}
+      animate={{
+        height: "auto",
+        opacity: 1,
+        transition: { duration: UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
+        transitionEnd: { overflow: "visible" },
+      }}
+      exit={{
+        height: 0,
+        opacity: 0,
+        overflow: "hidden",
+        transition: { duration: UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
+      }}
+      onAnimationComplete={() => {
+        if (isPresent) onOpened();
+      }}
+      className={cn(!isPresent && "pointer-events-none", className)}
     >
       {children}
-    </div>
+    </motion.div>
+  );
+}
+
+/**
+ * Smooth 150ms height + opacity disclosure matched to sidebar and section
+ * chevron rotation. Unmounts children after exit (and immediately under
+ * reduced motion) so collapsed lists release their subscriptions.
+ */
+export function PanelDisclosure({
+  open,
+  id,
+  className,
+  children,
+}: {
+  open: boolean;
+  id?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const reduceMotion = useReducedMotion();
+  const parentSettled = usePanelDisclosureSettled();
+  const [settled, setSettled] = useState(open);
+  if (settled !== open && (!open || reduceMotion)) setSettled(open);
+  if (reduceMotion) {
+    return open ? (
+      <div id={id} className={className}>
+        {children}
+      </div>
+    ) : null;
+  }
+  return (
+    <PanelDisclosureSettledContext.Provider value={parentSettled && settled}>
+      <AnimatePresence initial={false}>
+        {open && (
+          <PanelDisclosureInner key="disclosure" id={id} className={className} onOpened={() => setSettled(true)}>
+            {children}
+          </PanelDisclosureInner>
+        )}
+      </AnimatePresence>
+    </PanelDisclosureSettledContext.Provider>
   );
 }
 
 export function PanelSection({
   label,
+  heading,
   action,
   collapsed,
   onCollapsedChange,
   children,
-}: {
+  ...props
+}: Omit<React.ComponentProps<"section">, "children" | "className"> & {
   label: string;
+  /**
+   * Shown in place of the label (the Inbox's tabs), which then only names the
+   * section for assistive tech. With `onCollapsedChange`, a chevron after it
+   * toggles the section; it takes room only while the section is collapsed,
+   * so the heading must collapse it too.
+   */
+  heading?: React.ReactNode;
   /** Rendered at the end of the label row (e.g. a create button). */
   action?: React.ReactNode;
   /** With `onCollapsedChange`, the label toggles the section's content. */
@@ -98,36 +223,69 @@ export function PanelSection({
   const id = useId();
   const contentId = useId();
   const collapsible = !!onCollapsedChange;
+  const chevron = (
+    <ChevronDown
+      aria-hidden
+      className={cn(
+        "size-3.5 shrink-0 transition-[rotate,opacity] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+        collapsed
+          ? "-rotate-90"
+          : "opacity-0 group-hover/section:opacity-100 group-focus-within/section:opacity-100",
+      )}
+    />
+  );
   return (
-    <section aria-labelledby={id} className="mt-5">
+    <section {...props} data-mc="panel-section" aria-labelledby={id} className="mt-5">
       <div className="group/section flex h-7 items-center gap-1 pl-3 pr-1">
-        <h3 id={id} className="min-w-0 flex-1 truncate text-caption font-medium text-muted-foreground">
-          {collapsible ? (
-            <button
-              type="button"
-              aria-expanded={!collapsed}
-              aria-controls={collapsed ? undefined : contentId}
-              onClick={() => onCollapsedChange(!collapsed)}
-              className="-mx-1 flex max-w-full items-center gap-0.5 rounded-md px-1 outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-            >
-              <span className="truncate">{label}</span>
-              <ChevronDown
-                aria-hidden
-                className={cn(
-                  "size-3.5 shrink-0 transition-[transform,opacity] duration-150 ease-out motion-reduce:transition-none",
-                  collapsed
-                    ? "-rotate-90"
-                    : "opacity-0 group-hover/section:opacity-100 group-focus-within/section:opacity-100",
-                )}
-              />
-            </button>
-          ) : (
-            label
-          )}
-        </h3>
+        {heading ? (
+          <>
+            <h3 id={id} className="sr-only">
+              {label}
+            </h3>
+            <div className="flex min-w-0 flex-1 items-center gap-0.5 text-caption font-medium text-muted-foreground">
+              {heading}
+              {collapsible && (
+                <button
+                  type="button"
+                  aria-label={label}
+                  aria-expanded={!collapsed}
+                  aria-controls={collapsed ? undefined : contentId}
+                  onClick={() => onCollapsedChange(!collapsed)}
+                  className={cn(
+                    "flex size-5 shrink-0 items-center justify-center rounded-md outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring",
+                    // An open section leaves the row to its heading; the
+                    // heading itself collapses it (the Inbox's open tab).
+                    !collapsed && "sr-only focus-visible:not-sr-only",
+                  )}
+                >
+                  {chevron}
+                </button>
+              )}
+            </div>
+          </>
+        ) : (
+          <h3 id={id} className="min-w-0 flex-1 truncate text-caption font-medium text-muted-foreground">
+            {collapsible ? (
+              <button
+                type="button"
+                aria-expanded={!collapsed}
+                aria-controls={collapsed ? undefined : contentId}
+                onClick={() => onCollapsedChange(!collapsed)}
+                className="-mx-1 flex max-w-full items-center gap-0.5 rounded-md px-1 outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring"
+              >
+                <span className="truncate">{label}</span>
+                {chevron}
+              </button>
+            ) : (
+              label
+            )}
+          </h3>
+        )}
         {action}
       </div>
-      {!collapsed && <div id={contentId}>{children}</div>}
+      <PanelDisclosure open={!collapsed} id={contentId}>
+        {children}
+      </PanelDisclosure>
     </section>
   );
 }
@@ -145,12 +303,17 @@ export function PanelList({
 }
 
 export const PANEL_ROW_CLASS =
-  "flex min-h-8 w-full items-center gap-2.5 rounded-lg px-3 py-1.5 text-left text-body transition-colors outline-none focus-visible:outline-2 focus-visible:outline-ring";
+  "flex min-h-[var(--nav-item-height,2rem)] w-full items-center gap-2.5 rounded-nav-item px-3 py-[var(--nav-item-padding-y,0.375rem)] text-left text-body transition-colors outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring";
+
+/** The `nav-item` theme anchor; every row with an active state carries it. */
+export function panelRowAnchor(active: boolean) {
+  return { "data-mc": "nav-item", "data-active": active ? "true" : "false" } as const;
+}
 
 export function panelRowStateClass(active: boolean) {
   return active
-    ? "bg-surface-selected text-surface-selected-foreground hover:bg-surface-selected"
-    : "text-muted-foreground hover:bg-surface-hover hover:text-foreground";
+    ? "bg-nav-item-active text-nav-item-active-foreground hover:bg-nav-item-active"
+    : "text-nav-item hover:bg-nav-item-hover hover:text-nav-item-hover-foreground";
 }
 
 export function PanelCount({ value, className }: { value: number; className?: string }) {
@@ -174,6 +337,10 @@ interface PanelLinkProps {
   trailing?: React.ReactNode;
   /** Runs before navigation, e.g. to select a list scope the page reads. */
   onNavigate?: () => void;
+  onContextMenu?: React.MouseEventHandler<HTMLAnchorElement>;
+  /** Rendered beside the link, inside the row's list item: a right-click menu,
+   *  which must not nest inside the anchor. */
+  menu?: React.ReactNode;
   className?: string;
 }
 
@@ -185,6 +352,8 @@ export function PanelLink({
   description,
   trailing,
   onNavigate,
+  onContextMenu,
+  menu,
   className,
 }: PanelLinkProps) {
   return (
@@ -194,6 +363,8 @@ export function PanelLink({
         newTabTitle={label}
         aria-current={active ? "page" : undefined}
         onClick={onNavigate}
+        onContextMenu={onContextMenu}
+        {...panelRowAnchor(active)}
         className={cn(
           PANEL_ROW_CLASS,
           panelRowStateClass(active),
@@ -214,6 +385,7 @@ export function PanelLink({
         )}
         {trailing}
       </AppLink>
+      {menu}
     </li>
   );
 }

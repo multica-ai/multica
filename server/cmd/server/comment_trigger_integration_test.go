@@ -67,16 +67,19 @@ func mintAgentTaskToken(t *testing.T, agentID, taskID, boundUserID string) strin
 	return raw
 }
 
-// ensureAgentTask returns a task UUID belonging to the given agent, inserting a
-// queued one if none exists. authRequestWithAgent binds its mat_ token to that
-// task, so callers keep treating "name the agent" as the single knob for
-// posing as one.
+// ensureAgentTask returns a live task UUID belonging to the given agent,
+// inserting a queued one if none exists. authRequestWithAgent binds its mat_
+// token to that task, so callers keep treating "name the agent" as the single
+// knob for posing as one. A terminal task would not do: auth refuses a token
+// whose task has ended (GitHub #11378).
 func ensureAgentTask(t *testing.T, agentID string) string {
 	t.Helper()
 	ctx := context.Background()
 	var taskID string
 	if err := testPool.QueryRow(ctx,
-		`SELECT id::text FROM agent_task_queue WHERE agent_id = $1 LIMIT 1`,
+		`SELECT id::text FROM agent_task_queue
+		 WHERE agent_id = $1 AND status NOT IN ('completed', 'failed', 'cancelled')
+		 LIMIT 1`,
 		agentID,
 	).Scan(&taskID); err == nil && taskID != "" {
 		return taskID

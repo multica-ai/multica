@@ -13,9 +13,23 @@
     "unread_other": "{{count}} discussions non lues",
     "default": "Demander à Multica"
   },
+  "bar": {
+    "history": "Historique des discussions",
+    "history_group": {
+      "today": "Aujourd'hui",
+      "week": "7 derniers jours",
+      "older": "Plus anciennes"
+    },
+    "close_chip": "Fermer {{title}}",
+    "all_chats": "Toutes les discussions",
+    "more_one": "{{count}} autre discussion",
+    "more_other": "{{count}} autres discussions"
+  },
   "input": {
+    "page_context_add": "Ajouter cette page comme contexte",
+    "page_context_remove": "Retirer le contexte de la page",
     "placeholder_no_agent": "Créez un agent pour commencer à discuter",
-    "placeholder_archived": "Cette session est archivée",
+    "placeholder_archived": "Cette discussion est archivée",
     "placeholder_archived_agent": "Cet agent a été archivé",
     "placeholder_runtime_required": "Associez un runtime pour continuer",
     "placeholder_access_revoked": "Vous n'avez plus l'autorisation d'exécuter cet agent",
@@ -27,10 +41,10 @@
     "send_failed_toast": "Échec de l'envoi du message",
     "send_blocked_toast": "Message non envoyé — vous n'avez plus la permission d'utiliser cet agent",
     "runtime_required_toast": "Message non envoyé — associez d'abord un runtime à cet agent",
-    "runtime_access_denied_toast": "Message non envoyé — cet agent ne peut pas s'exécuter sur son runtime privé. Passez le runtime en public, ou réassociez/copiez l'agent vers un runtime que son propriétaire peut utiliser.",
+    "runtime_access_denied_toast": "Le runtime privé de cet agent n'est pas accessible. Rendez le runtime public ou associez l'agent à un runtime accessible.",
     "attachment_bind_failed_toast": "Message envoyé, mais les fichiers n'ont pas été joints. Veuillez réessayer dans un instant.",
     "add_tooltip": "Ajouter",
-    "upload_file": "Image ou fichiers",
+    "upload_file": "Images ou fichiers",
     "project_context": "Contexte de projet",
     "change_project_context": "Changer le contexte de projet",
     "remove_project_context": "Retirer le contexte de projet",
@@ -41,10 +55,10 @@
     "title_one": "{{count}} message en file d'attente",
     "title_other": "{{count}} messages en file d'attente",
     "clear": "Tout effacer",
-    "steer": "Réorienter",
-    "steer_unavailable": "La réorientation est possible une fois la réponse en cours démarrée",
+    "steer": "Envoyer maintenant (arrête la réponse)",
+    "steer_unavailable": "Disponible après le début de la réponse",
     "steer_no_permission": "Vous n'avez plus l'autorisation d'exécuter cet agent",
-    "steer_unavailable_toast": "La réorientation est indisponible. Actualisation de la file d'attente.",
+    "steer_unavailable_toast": "Envoi immédiat indisponible. Actualisation de la file.",
     "edit": "Modifier le message en file d'attente",
     "remove": "Retirer le message de la file d'attente",
     "more": "Plus d'actions sur la file d'attente",
@@ -52,6 +66,8 @@
     "action_failed_toast": "Impossible de mettre à jour le message en file d'attente"
   },
   "message_list": {
+    "jump_to_latest": "Aller au plus récent",
+    "new_reply": "Nouvelle réponse",
     "show_details": "Afficher les détails",
     "replied_in": "Réponse en {{elapsed}}",
     "failed_after": "Échec après {{elapsed}}",
@@ -62,18 +78,19 @@
       "timeout": "L'agent a mis trop de temps et s'est arrêté avant de terminer. Réessayez, ou découpez votre demande en étapes plus courtes.",
       "codex_semantic_inactivity": "L'agent est resté inactif et s'est arrêté avant de terminer. Veuillez réessayer.",
       "runtime_offline": "L'agent est actuellement hors ligne et n'a donc pas pu répondre. Veuillez réessayer dès son retour en ligne.",
-      "runtime_access_denied": "Cet agent ne peut pas s'exécuter sur son runtime privé et n'a donc pas pu répondre. Passez le runtime en public, ou réassociez/copiez l'agent vers un runtime que son propriétaire peut utiliser.",
+      "runtime_access_denied": "Le runtime privé de cet agent n'est pas accessible. Rendez le runtime public ou associez l'agent à un runtime accessible.",
       "runtime_recovery": "L'agent a redémarré avant d'avoir pu terminer. Veuillez réessayer.",
       "runtime_access_revoked": "L'accès au runtime a été révoqué. Associez l'agent à un runtime accessible avant de lancer une nouvelle exécution.",
       "manual": "Cette réponse a été annulée.",
       "skill_bundle_unavailable": "Les skills de l'agent n'ont pas pu être téléchargés : il n'a donc jamais démarré. C'est généralement un problème de connexion — veuillez réessayer.",
-      "runtime_cli_timeout": "L'outil OpenClaw local n'a pas répondu à temps, l'exécution n'a donc jamais démarré. C'est un délai de démarrage local, pas un problème de réseau — réessayer ne servira à rien tant que l'outil ne démarrera pas plus vite ou que le délai ne sera pas allongé (MULTICA_OPENCLAW_CLI_TIMEOUT).",
+      "runtime_cli_timeout": "Le CLI OpenClaw local a expiré avant de répondre. Vérifiez votre configuration locale du CLI OpenClaw ou augmentez MULTICA_OPENCLAW_CLI_TIMEOUT avant de réessayer.",
       "environment_prepare_failed": "La machine de l'agent n'a pas pu préparer cette exécution, qui n'a donc jamais démarré. L'erreur ci-dessous indique la cause locale : souvent un manque d'espace disque, une permission, un dossier encore utilisé ou une configuration illisible. Le problème ne vient ni de l'agent ni du fournisseur du modèle.",
+      "local_directory_missing": "Le dossier local lié à ce projet n'existe plus sur la machine de l'agent, donc l'exécution n'a jamais démarré. Restaurez le dossier, puis réessayez. Pour utiliser un autre dossier, ouvrez le projet dans l'application de bureau de cette machine, retirez l'ancien dossier dans Ressources, puis liez le nouveau via Ajouter → Dossier local... : un navigateur ne peut pas choisir de dossier.",
       "provider_network": "La connexion au fournisseur du modèle a été perdue avant la fin de la réponse. Vérifiez votre réseau et réessayez.",
-      "provider_auth_or_access": "Le compte de modèle de l'agent n'est plus connecté. Reconnectez-vous, puis réessayez.",
+      "provider_auth_or_access": "Le fournisseur a refusé les identifiants ou l'accès de cet agent. Vérifiez la clé API ou le compte — ils ont peut-être expiré ou perdu l'accès.",
       "provider_quota_limit": "Le compte de modèle de l'agent n'a plus de crédit. Rechargez-le ou changez de compte, puis réessayez.",
       "provider_capacity_or_rate_limit": "Le fournisseur du modèle est saturé ou limite le débit de ce compte. Veuillez réessayer dans un instant.",
-      "context_overflow": "Cette conversation est devenue trop longue pour le modèle. Démarrez une nouvelle session, ou découpez votre demande en étapes plus courtes.",
+      "context_overflow": "Cette discussion est devenue trop longue pour le modèle. Démarrez une nouvelle discussion pour continuer.",
       "runtime_missing_executable": "Le CLI de l'agent n'a pas pu être exécuté sur cette machine. Vérifiez qu'il est correctement installé et présent dans le PATH, puis réessayez.",
       "runtime_version_unsupported": "Le CLI de l'agent est trop ancien pour ce runtime. Mettez-le à jour, puis réessayez.",
       "fallback": "Une erreur est survenue et l'agent n'a pas pu terminer sa réponse. Veuillez réessayer."
@@ -119,7 +136,7 @@
       "confirming": "Arrêt..."
     },
     "delete_dialog": {
-      "title": "Supprimer la session de discussion",
+      "title": "Supprimer la discussion",
       "description_with_title": "« {{title}} » et ses messages seront définitivement supprimés. Cette action est irréversible.",
       "description_default": "Cette session de discussion et ses messages seront définitivement supprimés. Cette action est irréversible.",
       "cancel": "Annuler",
@@ -133,6 +150,7 @@
     "restore_tooltip": "Restaurer",
     "expand_tooltip": "Développer",
     "minimize_tooltip": "Réduire",
+    "close_tooltip": "Fermer",
     "another_running": "Une autre discussion est en cours",
     "another_unread": "Une autre discussion a des réponses non lues",
     "running": "En cours",
@@ -172,7 +190,6 @@
       "label": "Recommander une action",
       "prompt": "Examinez ce que vous savez de mon espace de travail et recommandez une première action utile."
     },
-    "customize": "Personnaliser les amorces",
     "uploading": "Attendez la fin des téléversements avant d’utiliser une amorce.",
     "draft_in_progress": "Envoyez ou effacez votre brouillon avant d’utiliser une amorce."
   },
@@ -192,12 +209,12 @@
     "digest": {
       "title": "Laissez le résumé quotidien s'écrire tout seul",
       "desc": "Un résumé matinal de l'avancement de l'espace de travail, directement dans votre boîte de réception.",
-      "prompt": "Mets en place une automatisation quotidienne qui publie un résumé matinal de l'avancement de l'espace de travail"
+      "prompt": "Mets en place une automatisation quotidienne qui résume chaque matin l'activité de la veille dans l'espace de travail."
     },
     "digest_badge": "Tous les jours à 9 h"
   },
   "no_agent_banner": "Vous avez besoin d'un agent pour commencer à discuter.",
-  "archived_agent_banner": "{{name}} a été archivé — cette conversation est en lecture seule.",
+  "archived_agent_banner": "{{name}} est archivé, cette discussion est donc en lecture seule.",
   "agent_access_revoked_banner": "Vous n'avez plus l'autorisation d'exécuter {{name}} — cette conversation est en lecture seule.",
   "runtime_required_banner": {
     "fallback_name": "L'agent",
@@ -238,8 +255,6 @@
     "no_response_preview": "Aucune réponse textuelle",
     "quick_agents": "Agents fréquents",
     "add": "Ajouter",
-    "add_agent": "Ajouter un agent fréquent",
-    "unpin_agent": "Retirer des agents fréquents",
     "waiting": "En attente de réponse",
     "pin": "Épingler",
     "unpin": "Détacher",
@@ -247,7 +262,9 @@
     "archive": "Archiver",
     "unarchive": "Désarchiver",
     "archived_title": "Archivées",
-    "row_actions_aria": "Actions de discussion"
+    "row_actions_aria": "Actions de discussion",
+    "wakeup_preview": "Revenu faire le point",
+    "wakeup_active": "Attend pour faire le point"
   },
   "header": {
     "agent_settings": "Paramètres de l'agent",
@@ -255,5 +272,59 @@
     "archive": "Archiver la discussion",
     "unarchive": "Désarchiver la discussion",
     "delete": "Supprimer la discussion"
+  },
+  "wakeup": {
+    "panel_title": "Réveils",
+    "panel_empty": "Aucun réveil dans cette conversation",
+    "panel_ended": "Terminés récemment",
+    "strip_waiting": "En attente : {{title}}",
+    "card": "Reviendra faire le point : {{title}}",
+    "ends": "se termine {{relative}}",
+    "reminder_at": "rappel {{relative}}",
+    "next_check": "prochaine vérification {{relative}}",
+    "last_check": "Dernière vérification : {{note}}",
+    "cancel": "Annuler le réveil",
+    "cancel_failed": "Impossible d'annuler le réveil",
+    "retry": "Réessayer",
+    "retry_failed": "Impossible de relancer le réveil",
+    "change_timing": "Modifier l'horaire",
+    "timing_interval": "Toutes les",
+    "timing_deadline": "Jusqu'à",
+    "timing_reminder": "Rappel",
+    "timing_keep": "Inchangé",
+    "timing_custom": "Personnalisé",
+    "timing_check_limit": "{{max}} vérifications au maximum",
+    "timing_failed": "Impossible de modifier l'horaire",
+    "status": {
+      "active": "En attente",
+      "fired": "Point fait",
+      "expired": "Échéance atteinte",
+      "cancelled": "Annulé",
+      "failed": "N'a pas pu s'exécuter"
+    },
+    "report": {
+      "waiting": "En attente du compte rendu",
+      "running": "Compte rendu en cours…",
+      "failed": "Compte rendu impossible"
+    },
+    "failure": {
+      "permission_revoked": "La personne à l'origine de la demande ne peut plus exécuter cet agent",
+      "access_lost": "L'élément surveillé est passé dans un projet privé",
+      "dispatch_failed": "L'agent n'a pas pu s'exécuter"
+    },
+    "kind": {
+      "condition": "Quand cela arrive",
+      "at": "Rappel",
+      "check": "Vérification régulière"
+    },
+    "divider": {
+      "condition": "Retour pour faire le point · c'est arrivé",
+      "at": "Retour pour faire le point · rappel",
+      "check": "Retour pour faire le point · vérification",
+      "expired": "Retour pour faire le point · échéance atteinte",
+      "generic": "Retour pour faire le point"
+    },
+    "queue_label": "Réveil : {{title}}",
+    "queue_fallback": "Réveil"
   }
 }

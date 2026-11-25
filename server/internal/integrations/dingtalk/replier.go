@@ -141,6 +141,11 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 		if err := r.post(ctx, inst, msg, chatStartedText); err != nil {
 			r.logger.WarnContext(ctx, "dingtalk replier: new-chat confirmation failed", "installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
+	case engine.OutcomeHelp:
+		if err := r.post(ctx, inst, msg, engine.HelpTextEnglish); err != nil {
+			r.logger.WarnContext(ctx, "dingtalk replier: help reply failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
 	case engine.OutcomeIssueUsage:
 		text := issueUsageText
 		if res.IssueUsageHadMedia {

@@ -5,9 +5,9 @@
     "body": "Notifications and agent updates appear here."
   },
   "actions": {
-    "mark_read": "Mark read",
-    "mark_unread": "Mark unread",
-    "mark_all_read": "Mark all read",
+    "mark_read": "Mark as read",
+    "mark_unread": "Mark as unread",
+    "mark_all_read": "Mark all as read",
     "archive": "Archive",
     "archive_all": "Archive all",
     "archive_all_read": "Archive all read",
@@ -39,13 +39,16 @@
     "close": "Close notification",
     "unavailable": "This notification is no longer available.",
     "billing_disabled": "Billing changes are unavailable for this workspace. Contact your workspace administrator for help.",
-    "contact_admin": "Ask a workspace owner or admin to review the billing options.",
+    "contact_admin": "Ask a workspace owner or admin to upgrade the plan or buy more runs.",
     "review_billing": "Review billing options",
-    "review_billing_web": "Open Multica on the web to review billing options."
+    "review_billing_web": "Open Multica on the web to review billing options.",
+    "buy_runs": "Buy more runs",
+    "buy_runs_web": "Open Multica on the web to buy more runs."
   },
   "type": {
     "assigned": "Assigned",
     "subscribed": "Subscribed",
+    "issue_created": "New issue",
     "unassigned": "Unassigned",
     "reassigned": "Reassigned",
     "status_changed": "Status changed",
@@ -54,18 +57,23 @@
     "due_date_changed": "Due date changed",
     "new_comment": "New comment",
     "mentioned": "Mentioned",
+    "doc_comment": "New comment on a doc",
+    "doc_mentioned": "Mentioned in a doc",
     "review_requested": "Review requested",
-    "task_completed": "Task completed",
-    "task_failed": "Task failed",
+    "task_completed": "Run completed",
+    "task_failed": "Run failed",
     "agent_blocked": "Agent blocked",
     "agent_completed": "Agent completed",
     "reaction_added": "Reaction added",
-    "quick_create_done": "Quick-create done",
-    "quick_create_failed": "Quick-create failed",
-    "quick_create_unconfirmed": "Quick-create needs a check",
+    "quick_create_done": "Created with agent",
+    "quick_create_failed": "Create with agent failed",
+    "quick_create_unconfirmed": "Create with agent unconfirmed",
     "autopilot_paused": "Autopilot paused",
     "children_done": "Sub-issues finished",
+    "blockers_done": "Waiting tasks ended",
+    "project_owner_joined": "Owner joined project",
     "autopilot_quota_exceeded": "Autopilot run limit reached",
+    "app_tool_calls_quota_exceeded": "App call limit reached",
     "set_status": "Set status to",
     "set_priority": "Set priority to",
     "assigned_to": "Assigned to {{name}}",
@@ -75,10 +83,17 @@
     "reacted_with": "Reacted with {{emoji}}",
     "created_with_agent": "Created with agent: {{identifier}}",
     "failed_with_detail": "Failed: {{detail}}",
-    "run_limit_blocked": "Run blocked because the limit was reached"
+    "run_limit_blocked": "Run blocked because the limit was reached",
+    "app_tool_calls_limit_blocked": "Agents can no longer run app tools this month",
+    "app_action_requested": "Needs your confirmation",
+    "app_action_reminder": "Confirmation expiring soon",
+    "app_connect_requested": "Connect an app",
+    "app_action_result": "App action result"
   },
   "body": {
-    "autopilot_title_limit": "Autopilot \"{{title}}\" was not started because this workspace has reached its limit of {{limit}} runs for the current period. The allowance resets {{resetAt}}.",
-    "autopilot_limit": "This workspace has reached its limit of {{limit}} autopilot runs for the current period. This execution was not started. The allowance resets {{resetAt}}."
+    "autopilot_title_limit": "Autopilot \"{{title}}\" was not started because this workspace has reached its limit of {{limit}} runs for the current period. The allowance resets {{resetAt}}; a workspace owner or admin can also upgrade or buy more runs.",
+    "autopilot_limit": "This workspace has reached its limit of {{limit}} autopilot runs for the current period. This execution was not started. The allowance resets {{resetAt}}; a workspace owner or admin can also upgrade or buy more runs.",
+    "app_tool_calls_limit": "This workspace has used its {{limit}} app calls for this month. Agents can't run app tools until the allowance resets {{resetAt}}, or until the workspace upgrades or adds seats.",
+    "project_owner_joined": "{{name}} is a workspace owner and added themselves to this private project. They can now see its issues, comments, and attachments."
   }
 }

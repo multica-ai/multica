@@ -894,6 +894,52 @@ sleep 60
 `
 }
 
+func TestAntigravityBackendManagedWakeup(t *testing.T) {
+	t.Parallel()
+
+	// Trimmed agy 1.5.12 capture with one repeated final usage snapshot.
+	fakePath := filepath.Join(t.TempDir(), "agy")
+	writeTestExecutable(t, fakePath, []byte(`#!/bin/sh
+cat <<'JSONL'
+{"event":"step_update","step_update":{"step_index":0,"state":"DONE","step_type":"user_input"}}
+{"event":"step_update","step_update":{"step_index":1,"state":"DONE","step_type":"agent_response","usage":{"input_tokens":8975,"output_tokens":84,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":9059}}}
+{"event":"step_update","step_update":{"step_index":2,"state":"ACTIVE","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","parameters":{"CommandLine":"sleep 25"}}}}
+{"event":"step_update","step_update":{"step_index":2,"state":"DONE","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","parameters":{"CommandLine":"sleep 25"},"output":"Command exited with code 0."}}}
+{"event":"step_update","step_update":{"step_index":3,"state":"DONE","step_type":"agent_response","text_delta":"Waiting for completion.\n","usage":{"input_tokens":2325,"output_tokens":8,"thinking_tokens":0,"cache_read_tokens":6935,"total_tokens":2333}}}
+{"event":"step_update","step_update":{"step_index":4,"state":"DONE","step_type":"system_message"}}
+{"event":"step_update","step_update":{"step_index":5,"state":"ACTIVE","step_type":"agent_response","text_delta":"Command finished."}}
+{"event":"step_update","step_update":{"step_index":5,"state":"DONE","step_type":"agent_response","text_delta":"\n","usage":{"input_tokens":2297,"output_tokens":7,"thinking_tokens":0,"cache_read_tokens":7227,"total_tokens":2304}}}
+{"event":"step_update","step_update":{"step_index":5,"state":"DONE","step_type":"agent_response","usage":{"input_tokens":2297,"output_tokens":7,"thinking_tokens":0,"cache_read_tokens":7227,"total_tokens":2304}}}
+{"event":"result","result":{"status":"SUCCESS","response":"Waiting for completion.\nCommand finished.\n","usage":{"input_tokens":13597,"output_tokens":99,"thinking_tokens":0,"cache_read_tokens":14162,"total_tokens":13696}}}
+JSONL
+`))
+	backend := &antigravityBackend{cfg: Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()}}
+	ctx, cancel := context.WithTimeout(context.Background(), testFallbackTimeout)
+	defer cancel()
+	session, err := backend.Execute(ctx, "fixture prompt", ExecOptions{ResumeSessionID: "conversation"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tools []Message
+	for msg := range session.Messages {
+		if msg.Type == MessageToolUse || msg.Type == MessageToolResult {
+			tools = append(tools, msg)
+		}
+	}
+	result := <-session.Result
+	if result.Status != "completed" || result.Output != "Waiting for completion.\nCommand finished.\n" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if len(tools) != 2 || tools[0].Type != MessageToolUse || tools[1].Type != MessageToolResult ||
+		tools[0].Tool != "run_command" || tools[0].CallID == "" || tools[0].CallID != tools[1].CallID {
+		t.Fatalf("expected one closed run_command call, got %+v", tools)
+	}
+	want := TokenUsage{InputTokens: 13597, OutputTokens: 99, CacheReadTokens: 14162}
+	if len(result.Usage) != 1 || result.Usage["unknown"] != want {
+		t.Fatalf("usage = %+v, want %+v", result.Usage, want)
+	}
+}
+
 func TestAntigravityBackendStreamJSONCapturesUsage(t *testing.T) {
 	t.Parallel()
 
@@ -1393,5 +1439,143 @@ func TestAntigravityBackendSumsCompletedStepsWhenCancelled(t *testing.T) {
 	want := TokenUsage{InputTokens: 170, OutputTokens: 17, CacheReadTokens: 30}
 	if got := result.Usage["gemini-3.8-flash-high"]; got != want {
 		t.Fatalf("usage = %+v, want %+v", got, want)
+	}
+}
+
+// A cancelled run never reaches the terminal Result the daemon reads the
+// session from, so the conversation id must be announced as soon as agy names
+// it (#11316).
+func TestAntigravityBackendAnnouncesConversationBeforeCancel(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "agy")
+	writeTestExecutable(t, fakePath, []byte(fakeAgyCancelledStreamJSONScript()))
+	backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
+	if err != nil {
+		t.Fatalf("new antigravity backend: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var announced []string
+	for msg := range session.Messages {
+		if msg.Type == MessageStatus && msg.SessionID != "" {
+			announced = append(announced, msg.SessionID)
+		}
+		if msg.Type == MessageText && msg.Content == "working" {
+			cancel()
+		}
+	}
+	<-session.Result
+	want := []string{"27a6d8f2-8523-46fc-8fc9-87e630cbe295"}
+	if !slices.Equal(announced, want) {
+		t.Fatalf("announced session ids = %q, want %q (once, before the cancel)", announced, want)
+	}
+}
+
+func TestAntigravityCurrentTurnRecovery(t *testing.T) {
+	t.Parallel()
+	step := func(index int, kind, state, text string) string {
+		return fmt.Sprintf("{\"event\":\"step_update\",\"step_update\":{\"step_index\":%d,\"step_type\":%q,\"state\":%q,\"text_delta\":%q}}\n", index, kind, state, text)
+	}
+	boundary := step(10, "user_input", "DONE", "")
+	answer := step(14, "agent_response", "ACTIVE", "Final answer.") + step(14, "agent_response", "DONE", "\n")
+	const retryError = "Malformed function call: Function call is empty - no input to parse. Retries remaining: 3"
+	const resumeEOF = "API error (attempt 3): request failed: Post \"https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse\": EOF"
+	for _, tc := range []struct {
+		name, steps, status, response, cause string
+		exit                                 int
+		resumed, completed                   bool
+	}{
+		{name: "retry with narration and executor log", steps: boundary + step(11, "agent_response", "DONE", "Working.\n") + step(12, "tool", "DONE", "") + step(13, "error_message", "DONE", "") + answer, completed: true},
+		{name: "partial attempt before retry", steps: boundary + step(11, "agent_response", "ACTIVE", "Partial attempt") + step(13, "error_message", "DONE", "") + answer, completed: true},
+		{name: "canonical response need not equal deltas", steps: boundary + answer, response: "Canonical answer from agy.", completed: true},
+		{name: "historical quota", steps: step(1, "error_message", "DONE", "") + boundary + answer, cause: "RESOURCE_EXHAUSTED (429)", resumed: true, completed: true},
+		{name: "historical unavailable", steps: boundary + answer, cause: "UNAVAILABLE (503)", resumed: true, completed: true},
+		{name: "diagnostic line", steps: "CLI diagnostic\n" + boundary + answer, completed: true},
+		{name: "completed metadata", steps: boundary + answer + step(15, "checkpoint", "DONE", ""), completed: true},
+		{name: "exit 1", steps: boundary + answer, exit: 1},
+		{name: "exit 3", steps: boundary + answer, exit: 3},
+		{name: "active final response", steps: boundary + step(14, "agent_response", "ACTIVE", "Partial answer.")},
+		{name: "newer active response", steps: boundary + answer + step(15, "agent_response", "ACTIVE", "Partial answer.")},
+		{name: "empty final response", steps: boundary + step(14, "agent_response", "DONE", " \n")},
+		{name: "empty result response", steps: boundary + answer, response: " \n"},
+		{name: "unfinished boundary", steps: step(10, "user_input", "ACTIVE", "") + answer},
+		{name: "two boundaries", steps: boundary + step(11, "user_input", "DONE", "") + answer},
+		{name: "missing index", steps: boundary + "{\"event\":\"step_update\",\"step_update\":{\"step_type\":\"tool\",\"state\":\"DONE\"}}\n" + answer},
+		{name: "negative index", steps: boundary + step(-1, "tool", "DONE", "") + answer},
+		{name: "history is not an answer", steps: step(1, "agent_response", "DONE", "Old answer.") + boundary},
+		{name: "error after answer", steps: boundary + answer + step(15, "error_message", "DONE", "")},
+		{name: "unfinished tool after answer", steps: boundary + answer + step(15, "tool", "ACTIVE", "")},
+		{name: "done tool after answer", steps: boundary + answer + step(15, "tool", "DONE", "")},
+		{name: "subagent after answer", steps: boundary + answer + step(15, "subagent", "DONE", "")},
+		{name: "unfinished metadata", steps: boundary + answer + step(15, "checkpoint", "ACTIVE", "")},
+		{name: "quota without recovery", steps: boundary + step(13, "error_message", "DONE", ""), cause: "RESOURCE_EXHAUSTED (429)"},
+		{name: "permission without recovery", steps: boundary + step(13, "error_message", "DONE", ""), cause: "PERMISSION_DENIED (403)"},
+		{name: "cancelled result", steps: boundary + answer, status: "CANCELLED"},
+		{name: "legacy fresh transport", steps: answer, cause: antigravityNetworkIssueError, exit: 1, completed: true},
+		{name: "legacy resumed EOF exit 0", steps: step(1, "agent_response", "DONE", "RESUME-BC-OK"), response: "RESUME-BC-OK\n", cause: resumeEOF, exit: 0, resumed: true, completed: true},
+		{name: "legacy resumed EOF exit 1", steps: step(1, "agent_response", "DONE", "RESUME-BC-OK"), response: "RESUME-BC-OK\n", cause: resumeEOF, exit: 1, resumed: true, completed: true},
+		{name: "legacy trailing error", steps: answer + step(15, "error_message", "DONE", ""), cause: antigravityNetworkIssueError},
+		{name: "legacy trailing tool", steps: answer + step(15, "tool", "ACTIVE", ""), cause: antigravityNetworkIssueError},
+		{name: "legacy unfinished metadata", steps: answer + step(15, "checkpoint", "ACTIVE", ""), cause: antigravityNetworkIssueError},
+		{name: "resumed without boundary", steps: answer, resumed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if tc.status == "" {
+				tc.status = "ERROR"
+			}
+			if tc.response == "" {
+				tc.response = "Working.\nFinal answer.\n"
+			}
+			if tc.cause == "" {
+				tc.cause = retryError
+			}
+			script := `#!/bin/sh
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --log-file) printf '%s\n' 'agent executor error: recovered attempt' > "$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+cat <<'JSONL'
+` + tc.steps + fmt.Sprintf("{\"event\":\"result\",\"result\":{\"status\":%q,\"response\":%q,\"error\":%q}}\nJSONL\nexit %d\n", tc.status, tc.response, tc.cause, tc.exit)
+			fakePath := filepath.Join(t.TempDir(), "agy")
+			writeTestExecutable(t, fakePath, []byte(script))
+			logs := &strings.Builder{}
+			backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: slog.New(slog.NewTextHandler(logs, nil))})
+			if err != nil {
+				t.Fatal(err)
+			}
+			opts := ExecOptions{}
+			if tc.resumed {
+				opts.ResumeSessionID = "fixture-conversation"
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			session, err := backend.Execute(ctx, "fixture prompt", opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for range session.Messages {
+			}
+			result := <-session.Result
+			want := "failed"
+			if tc.completed {
+				want = "completed"
+			} else if tc.status == "CANCELLED" {
+				want = "cancelled"
+			}
+			if result.Status != want || result.Output != tc.response || (result.Error == "") != tc.completed {
+				t.Fatalf("result = %+v, want %s preserving canonical response", result, want)
+			}
+			if tc.completed && (!strings.Contains(logs.String(), "level=WARN") || !strings.Contains(logs.String(), fmt.Sprintf("err=%q", tc.cause))) {
+				t.Fatalf("missing warning with original error: %s", logs.String())
+			}
+		})
 	}
 }

@@ -28,7 +28,7 @@
     "system": "跟随系统",
     "english": "English",
     "chinese_simplified": "简体中文",
-    "chinese_traditional": "繁体中文"
+    "chinese_traditional": "繁體中文"
   },
   "notifications": {
     "title": "通知",
@@ -71,17 +71,21 @@
     "status_changes": "状态变更",
     "comments": "评论",
     "comments_description": "你订阅的任务有新评论时。",
+    "squad_handoffs": "包含小队内部交接",
+    "squad_handoffs_description": "小队队长给成员派活、成员向队长回报的评论。@你、智能体运行失败和小队收尾时的最终回报照常通知。",
     "mentions": "提及",
     "mentions_description": "有人用 @ 提到你时，包括 @all 和 @squad。",
-    "updates": "任务更新",
-    "updates_description": "标题、描述、标签、优先级或截止日期变更时。",
+    "reactions": "表情回应",
+    "reactions_description": "有人对你创建的任务或你写的评论添加表情时。",
+    "updates": "优先级与截止日期",
+    "updates_description": "你订阅的任务优先级或截止日期变更时。",
+    "new_issues": "新任务",
+    "new_issues_description": "你订阅的项目中有新任务创建时。",
     "agent_activity": "智能体动态",
-    "agent_activity_description": "智能体运行失败时。",
+    "agent_activity_description": "智能体运行失败，或智能体请求的应用操作被拦截、过期时。",
     "inbox_notifications": "收件箱通知",
     "system": "系统",
     "system_notifications": "系统通知",
-    "system_description": "账号变更、安全提醒和产品更新。"
-  },
-  "groups.assignments_description": "任务分配给我或取消分配给我时。",
-  "groups.mentions_description": "有人用 @ 提到你时，包括 @all 和 @squad。"
+    "chat_replies": "包含聊天回复"
+  }
 }

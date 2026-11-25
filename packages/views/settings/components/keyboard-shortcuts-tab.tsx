@@ -21,6 +21,7 @@ import {
   createShortcutChord,
   isReservedShortcut,
   isShortcutAllowedForAction,
+  isShortcutModifierKey,
   isPlainShortcut,
   resolveShortcut,
   shortcutFromEvent,
@@ -46,6 +47,7 @@ type CaptureError =
   | { kind: "reserved" }
   | { kind: "send" }
   | { kind: "unsafe" }
+  | { kind: "unrecognized" }
   | null;
 
 export function KeyboardShortcutsTab() {
@@ -73,7 +75,7 @@ export function KeyboardShortcutsTab() {
     });
   }, [query, t]);
 
-  const groups: readonly ShortcutCategory[] = ["general", "navigation"];
+  const groups: readonly ShortcutCategory[] = ["general", "issue", "navigation"];
 
   const capture = (actionId: ShortcutActionId, event: React.KeyboardEvent) => {
     event.preventDefault();
@@ -92,7 +94,12 @@ export function KeyboardShortcutsTab() {
     }
 
     const shortcut = shortcutFromEvent(event.nativeEvent);
-    if (!shortcut) return;
+    if (!shortcut) {
+      if (!isShortcutModifierKey(event.key)) {
+        setCaptureError({ kind: "unrecognized" });
+      }
+      return;
+    }
     if (isReservedShortcut(shortcut)) {
       setCaptureError({ kind: "reserved" });
       return;
@@ -101,7 +108,7 @@ export function KeyboardShortcutsTab() {
       setCaptureError({ kind: actionId === "send" ? "send" : "unsafe" });
       return;
     }
-    const conflict = findShortcutConflict(actionId, shortcut);
+    const conflict = findShortcutConflict(actionId, shortcut, event.nativeEvent);
     if (conflict) {
       setCaptureError({ kind: "conflict", actionId: conflict });
       return;
@@ -149,6 +156,7 @@ export function KeyboardShortcutsTab() {
           <SettingsSection
             key={category}
             title={t(($) => $.shortcuts.categories[category])}
+            description={category === "issue" ? t(($) => $.shortcuts.issue_scope) : undefined}
           >
             <SettingsCard>
               {actions.map((action) => (
@@ -266,7 +274,20 @@ function ShortcutRow({
   const { t } = useT("settings");
   const label = t(($) => $.shortcuts.actions[action.id].label);
   // Keep descriptions in the search index, but only show non-obvious behavior.
-  const description = ["openSearch", "toggleRightSidebar", "archiveInboxItem", "send"].includes(action.id)
+  const description = [
+    "openSearch",
+    "toggleRightSidebar",
+    "archiveInboxItem",
+    "unsubscribeArchiveInboxItem",
+    "snoozeInboxItem",
+    "markInboxUnread",
+    "nextInboxItem",
+    "prevInboxItem",
+    "undoInboxAction",
+    "runIssueQuickAction",
+    "replyToIssue",
+    "send",
+  ].includes(action.id)
     ? t(($) => $.shortcuts.actions[action.id].description)
     : undefined;
   const errorText = error?.kind === "reserved"
@@ -275,6 +296,8 @@ function ShortcutRow({
       ? t(($) => $.shortcuts.send_error)
     : error?.kind === "unsafe"
       ? t(($) => $.shortcuts.unsafe_error)
+    : error?.kind === "unrecognized"
+      ? t(($) => $.shortcuts.unrecognized_error)
     : error?.kind === "conflict"
       ? t(($) => $.shortcuts.conflict_error, {
           action: t(($) => $.shortcuts.actions[error.actionId].label),
@@ -318,7 +341,7 @@ function ShortcutRow({
                 {t(($) => $.shortcuts.recording)}
               </span>
             ) : shortcut ? (
-              <ShortcutKeycaps shortcut={shortcut} decorative />
+              <ShortcutKeycaps shortcut={shortcut} layout="split" decorative />
             ) : (
               <span className="font-sans font-normal text-muted-foreground">
                 {t(($) => $.shortcuts.unassigned)}
@@ -363,7 +386,7 @@ function ShortcutRow({
 function FixedShortcutRow({ label, shortcut }: { label: string; shortcut: ShortcutChord }) {
   return (
     <SettingsRow label={label}>
-      <ShortcutKeycaps shortcut={shortcut} size="md" className="justify-end" />
+      <ShortcutKeycaps shortcut={shortcut} size="md" layout="split" className="justify-end" />
     </SettingsRow>
   );
 }

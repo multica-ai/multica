@@ -17,13 +17,16 @@ import type { CommandBarContext } from "@multica/core/command-bar";
 import { useArchiveAllReadInbox, useMarkAllInboxRead } from "@multica/core/inbox/mutations";
 import { openCreateIssueWithPreference } from "@multica/core/issues/stores";
 import { useModalStore } from "@multica/core/modals";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useIsGuest } from "@multica/core/permissions";
 import { useShortcut } from "@multica/core/shortcuts";
 import { isFloatingChatRouteSuppressed } from "../../chat/floating-chat-visibility";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { usePalette } from "../palette-context";
 import type { PaletteCommand } from "../types";
+
+const MEMBER_ONLY_COMMAND_IDS = new Set(["new-issue", "chat-with-agent", "new-project", "new-autopilot"]);
 
 /**
  * Commands that exist everywhere. `primary` ones form the empty state's New
@@ -39,6 +42,8 @@ export function useGlobalCommands(contexts: readonly CommandBarContext[]): Palet
   const toggleChatShortcut = useShortcut("toggleChat");
   const markAllRead = useMarkAllInboxRead();
   const archiveAllRead = useArchiveAllReadInbox();
+  // A guest (MUL-9420) creates nothing and never chats with agents.
+  const guest = useIsGuest(useCurrentWorkspace()?.id);
 
   const projectContext = contexts.find((c) => c.kind === "project");
   const projectId = projectContext?.kind === "project" ? projectContext.project.id : null;
@@ -48,7 +53,7 @@ export function useGlobalCommands(contexts: readonly CommandBarContext[]): Palet
 
   return useMemo<PaletteCommand[]>(() => {
     const chatPath = p.chat();
-    return [
+    const commands: PaletteCommand[] = [
       {
         id: "new-issue",
         label: t(($) => $.commands.new_issue),
@@ -132,7 +137,7 @@ export function useGlobalCommands(contexts: readonly CommandBarContext[]): Palet
         id: "theme",
         label: t(($) => $.commands.change_theme),
         icon: Palette,
-        keywords: ["theme", "appearance", "dark", "light", "system", "mode", "主题", "深色", "浅色"],
+        keywords: ["theme", "appearance", "dark", "light", "system", "mode", "color", "colour", "主题", "深色", "浅色", "配色"],
         page: { type: "theme" },
       },
       {
@@ -143,9 +148,11 @@ export function useGlobalCommands(contexts: readonly CommandBarContext[]): Palet
         run: () => useModalStore.getState().open("feedback"),
       },
     ];
+    return guest ? commands.filter((command) => !MEMBER_ONLY_COMMAND_IDS.has(command.id)) : commands;
   }, [
     archiveAllRead,
     createIssueShortcut,
+    guest,
     inbox,
     markAllRead,
     navigation,

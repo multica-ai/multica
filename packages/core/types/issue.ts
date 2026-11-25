@@ -183,7 +183,16 @@ export interface IssueDuplicateOf {
   status: IssueStatus;
 }
 
+export interface IssueBlocker extends IssueDuplicateOf {
+ via: "manual" | "stage" | string;
+ closed: boolean;
+}
+
 export interface Issue {
+ blocked_by?: IssueBlocker[];
+ blocked_count?: number;
+ /** The issues waiting on this one. Only the detail read carries it. */
+ blocking?: IssueBlocker[];
   id: string;
   workspace_id: string;
   number: number;
@@ -211,6 +220,7 @@ export interface Issue {
   assignee_id: string | null;
   creator_type: IssueAssigneeType;
   creator_id: string;
+  requester_id?: string | null;
   parent_issue_id: string | null;
   /**
    * The original this issue duplicates (MUL-7349): present only while the
@@ -239,6 +249,8 @@ export interface Issue {
   updated_at: string;
   /** Monotonic server revision; absent when connected to an older backend. */
   revision?: number;
+  /** Moves only when the description changes; absent on older backends. */
+  description_revision?: number;
   /**
    * Null until the server's historical activity backfill reaches this row.
    * This RFC3339 timestamp may include sub-second precision while legacy

@@ -80,8 +80,14 @@ vi.mock("../../navigation", () => ({
   useNavigation: () => ({ push: vi.fn() }),
 }));
 
+vi.mock("../../billing/storage-limit-notice", () => ({ useStorageLimitToast: () => () => false }));
+
 vi.mock("./delete-workspace-dialog", () => ({
   DeleteWorkspaceDialog: () => null,
+}));
+
+vi.mock("./private-projects-section", () => ({
+  PrivateProjectsSection: () => <div data-testid="private-projects" />,
 }));
 
 vi.mock("sonner", () => ({
@@ -155,13 +161,62 @@ describe("WorkspaceTab — automatic updates", () => {
     await waitFor(() => {
       expect(mockUpdateWorkspace).toHaveBeenCalledWith("workspace-1", {
         name: "Renamed Workspace",
-        description: "",
-        context: "",
       });
     });
     // The inline save state reports success; a toast would repeat it.
     expect(mockToastSuccess).not.toHaveBeenCalled();
     expect(mockInvalidateQueries).not.toHaveBeenCalled();
+  });
+
+  it("shows a context changed elsewhere and does not write the old one back", async () => {
+    const user = setupUser();
+    workspaceRef.current = { ...workspaceRef.current, context: "old context" };
+    const { rerender } = render(<WorkspaceTab />, { wrapper: I18nWrapper });
+    expect(screen.getByDisplayValue("old context")).toBeInTheDocument();
+
+    workspaceRef.current = { ...workspaceRef.current, context: "new context" };
+    rerender(<WorkspaceTab />);
+    const contextInput = screen.getByDisplayValue("new context");
+    await user.click(contextInput);
+    await user.tab();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(mockUpdateWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("keeps an unsaved edit when the same field changes elsewhere", async () => {
+    const user = setupUser();
+    const { rerender } = render(<WorkspaceTab />, { wrapper: I18nWrapper });
+    const nameInput = screen.getByDisplayValue("Test Workspace");
+    await user.type(nameInput, " mine");
+
+    workspaceRef.current = { ...workspaceRef.current, name: "Theirs", context: "new context" };
+    rerender(<WorkspaceTab />);
+    expect(nameInput).toHaveValue("Test Workspace mine");
+    await user.tab();
+
+    await waitFor(() => {
+      expect(mockUpdateWorkspace).toHaveBeenCalledExactlyOnceWith("workspace-1", {
+        name: "Test Workspace mine",
+      });
+    });
+  });
+
+  it("follows later changes to a field again once its own edit is saved", async () => {
+    const user = setupUser();
+    const { rerender } = render(<WorkspaceTab />, { wrapper: I18nWrapper });
+    const nameInput = screen.getByDisplayValue("Test Workspace");
+    await user.type(nameInput, " mine");
+    await user.tab();
+    await waitFor(() => expect(mockUpdateWorkspace).toHaveBeenCalledOnce());
+    workspaceRef.current = { ...workspaceRef.current, name: "Test Workspace mine" };
+    rerender(<WorkspaceTab />);
+    await vi.advanceTimersByTimeAsync(0);
+
+    workspaceRef.current = { ...workspaceRef.current, name: "Theirs" };
+    rerender(<WorkspaceTab />);
+
+    expect(nameInput).toHaveValue("Theirs");
   });
 
   it("changes the prefix only from its own dialog, after previewing the result", async () => {
@@ -218,6 +273,20 @@ describe("WorkspaceTab — automatic updates", () => {
     await user.clear(input);
     expect(input).toHaveAttribute("aria-invalid", "true");
     expect(within(dialog).getByRole("button", { name: /^Change to/ })).toBeDisabled();
+  });
+
+  it.each([
+    ["owner", true],
+    ["admin", false],
+    ["member", false],
+  ] as const)("shows the private projects overview to a workspace %s: %s", (role, shown) => {
+    membersRef.current = [
+      { user_id: "user-1", role, name: "Ada" },
+      { user_id: "user-2", role: "owner", name: "Grace" },
+    ];
+    render(<WorkspaceTab />, { wrapper: I18nWrapper });
+
+    expect(screen.queryByTestId("private-projects") !== null).toBe(shown);
   });
 
   it("shows regular members the values read-only, with who to ask", () => {

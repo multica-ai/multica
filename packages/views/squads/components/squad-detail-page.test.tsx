@@ -28,7 +28,7 @@ vi.mock("@tanstack/react-query", () => ({
     refetch: vi.fn(),
     ...mocks.queries[(options.queryKey ?? []).join("/")],
   }),
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useQueryClient: () => ({ invalidateQueries: vi.fn(), setQueryData: vi.fn() }),
   useMutation: ({ mutationFn }: { mutationFn: (input?: unknown) => Promise<unknown> }) => ({
     mutate: (input?: unknown) => void mutationFn(input),
     mutateAsync: (input?: unknown) => mutationFn(input),
@@ -39,7 +39,8 @@ vi.mock("@multica/core/workspace/queries", () => ({
   agentListOptions: () => ({ queryKey: ["agents"] }),
   memberListOptions: () => ({ queryKey: ["members"] }),
   squadMemberStatusOptions: () => ({ queryKey: ["member-status"] }),
-  workspaceKeys: { squads: () => ["squads"] },
+  squadBriefsOptions: () => ({ queryKey: ["briefs"] }),
+  workspaceKeys: { squads: () => ["squads"], squadBriefs: () => ["briefs"] },
 }));
 vi.mock("@multica/core/api", () => ({ api: mocks.api }));
 vi.mock("@multica/core/auth", () => ({
@@ -47,6 +48,7 @@ vi.mock("@multica/core/auth", () => ({
 }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 vi.mock("@multica/core/paths", () => ({
+  issueRouteRef: (issue: { id: string; identifier?: string | null }) => issue.identifier || issue.id,
   useCurrentWorkspace: () => ({ id: "ws-1", slug: "acme" }),
   useWorkspacePaths: () => ({
     squads: () => "/acme/squads",
@@ -78,6 +80,23 @@ vi.mock("../../editor/content-editor", () => ({
       aria-label="Instructions editor"
       value={value}
       onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => onUpdate(event.target.value)}
+    />
+  ),
+}));
+vi.mock("../../editor/title-editor", () => ({
+  TitleEditor: ({
+    defaultValue,
+    placeholder,
+    onBlur,
+  }: {
+    defaultValue?: string;
+    placeholder?: string;
+    onBlur?: (value: string) => void;
+  }) => (
+    <input
+      aria-label={placeholder}
+      defaultValue={defaultValue}
+      onBlur={(event) => onBlur?.(event.target.value)}
     />
   ),
 }));
@@ -145,6 +164,15 @@ function seed(squad: Squad | undefined = SQUAD, extra: Record<string, QueryResul
     "squads/sq-1/members": { data: MEMBERS },
     "member-status": { data: { members: STATUSES } },
     "squads/sq-1/recent-issues": { data: { issues: [ISSUE], total: 1 } },
+    briefs: {
+      data: {
+        handoff_mode: "leader",
+        briefs: [
+          { member_type: "agent", member_id: "agent-lead", is_leader: true, brief: "## Squad Operating Protocol" },
+          { member_type: "agent", member_id: "agent-2", is_leader: false, brief: "## Squad Member Brief\nYou are Kappa" },
+        ],
+      },
+    },
     agents: {
       data: [
         { id: "agent-lead", name: "Lambda", archived_at: null },
@@ -222,7 +250,7 @@ describe("SquadDetailPage", () => {
     expect(mocks.copyText).toHaveBeenCalledWith("https://multica.test/acme/squads/sq-1");
 
     await user.click(screen.getByRole("button", { name: "More actions" }));
-    await user.click(await screen.findByRole("menuitem", { name: "Create Agent" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Create agent" }));
     expect(push).toHaveBeenCalledWith("/acme/agents/new?squad=sq-1");
 
     await user.click(screen.getByRole("button", { name: "More actions" }));
@@ -243,13 +271,13 @@ describe("SquadDetailPage", () => {
     expect(within(members).getByText("Lambda")).toBeInTheDocument();
     expect(within(members).getByText("Leader")).toBeInTheDocument();
     expect(within(members).getByText("Working on")).toBeInTheDocument();
-    expect(within(members).getByRole("link", { name: "ARIE-2" })).toHaveAttribute("href", "/acme/issues/i-1");
+    expect(within(members).getByRole("link", { name: "ARIE-2" })).toHaveAttribute("href", "/acme/issues/ARIE-2");
 
     expect(within(section("Instructions")).getByText("Start with a failing test.")).toBeInTheDocument();
     expect(within(section("Instructions")).getByRole("button", { name: "Edit" })).toBeInTheDocument();
 
     const recent = section("Recent work");
-    expect(within(recent).getByRole("link", { name: /Fix login/ })).toHaveAttribute("href", "/acme/issues/i-1");
+    expect(within(recent).getByRole("link", { name: /Fix login/ })).toHaveAttribute("href", "/acme/issues/ARIE-2");
   });
 
   it("keeps per-member actions in the row menu", async () => {
@@ -272,6 +300,33 @@ describe("SquadDetailPage", () => {
     });
   });
 
+  it("switches how members hand off and previews what they receive", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    const collaboration = section("Collaboration");
+    expect(within(collaboration).getByRole("radio", { name: /Leader assigns/ })).toHaveAttribute("aria-checked", "true");
+    expect(within(collaboration).queryByText(/up to 3 rounds/)).toBeNull();
+    await user.click(within(collaboration).getByRole("radio", { name: /Members hand off directly/ }));
+    expect(mocks.api.updateSquad).toHaveBeenCalledWith("sq-1", { handoff_mode: "direct" });
+
+    const preview = section("What members receive");
+    expect(within(preview).getByRole("tab", { name: "Kappa" })).toHaveAttribute("aria-selected", "true");
+    expect(within(preview).getByText(/You are Kappa/)).toBeInTheDocument();
+    await user.click(within(preview).getByRole("tab", { name: "Lambda" }));
+    expect(within(preview).getByText("## Squad Operating Protocol")).toBeInTheDocument();
+  });
+
+  it("states the direct mode's fixed guardrails", () => {
+    seed({ ...SQUAD, handoff_mode: "direct" });
+    renderPage();
+
+    const collaboration = section("Collaboration");
+    expect(within(collaboration).getByRole("radio", { name: /Members hand off directly/ })).toHaveAttribute("aria-checked", "true");
+    expect(within(collaboration).getByText("Back-and-forth: up to 3 rounds")).toBeInTheDocument();
+    expect(within(collaboration).getByText("Run failed → back to leader")).toBeInTheDocument();
+  });
+
   it("edits instructions in place", async () => {
     const user = userEvent.setup();
     renderPage();
@@ -282,6 +337,78 @@ describe("SquadDetailPage", () => {
     await user.type(editor, "Ship small.");
     await user.click(screen.getByRole("button", { name: "Save" }));
     expect(mocks.api.updateSquad).toHaveBeenCalledWith("sq-1", { instructions: "Ship small." });
+  });
+
+  it("renames the squad in place and keeps the name when it is cleared", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    const name = screen.getByRole("textbox", { name: "Squad name" });
+    await user.clear(name);
+    await user.type(name, "  Night Shift ");
+    await user.tab();
+    expect(mocks.api.updateSquad).toHaveBeenCalledWith("sq-1", { name: "Night Shift" });
+
+    mocks.api.updateSquad.mockClear();
+    await user.clear(screen.getByRole("textbox", { name: "Squad name" }));
+    await user.tab();
+    expect(mocks.api.updateSquad).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "Squad name" })).toHaveValue("Strike Team");
+  });
+
+  it("discards a name edit on Escape", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    const name = screen.getByRole("textbox", { name: "Squad name" });
+    await user.type(name, " typo");
+    await user.keyboard("{Escape}");
+    await user.tab();
+    expect(mocks.api.updateSquad).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "Squad name" })).toHaveValue("Strike Team");
+  });
+
+  it("edits the description in place: blur saves, Escape discards", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "Ships the risky stuff" }));
+    const field = screen.getByRole("textbox", { name: "What is this squad responsible for?" });
+    expect(field).toHaveFocus();
+    await user.type(field, " carefully");
+    await user.tab();
+    expect(mocks.api.updateSquad).toHaveBeenCalledWith("sq-1", {
+      description: "Ships the risky stuff carefully",
+    });
+
+    mocks.api.updateSquad.mockClear();
+    await user.click(screen.getByRole("button", { name: /Ships the risky stuff/ }));
+    await user.type(screen.getByRole("textbox", { name: "What is this squad responsible for?" }), " never");
+    await user.keyboard("{Escape}");
+    expect(mocks.api.updateSquad).not.toHaveBeenCalled();
+    expect(screen.queryByRole("textbox", { name: "What is this squad responsible for?" })).toBeNull();
+  });
+
+  it("keeps a description draft whose save failed so it can be retried", async () => {
+    const user = userEvent.setup();
+    mocks.api.updateSquad.mockRejectedValueOnce(new Error("offline"));
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "Ships the risky stuff" }));
+    await user.type(screen.getByRole("textbox", { name: "What is this squad responsible for?" }), " carefully");
+    await user.tab();
+    expect(mocks.api.updateSquad).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole("button", { name: "Ships the risky stuff" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Ships the risky stuff" }));
+    expect(screen.getByRole("textbox", { name: "What is this squad responsible for?" })).toHaveValue(
+      "Ships the risky stuff carefully",
+    );
+    await user.tab();
+    expect(mocks.api.updateSquad).toHaveBeenCalledTimes(2);
+    expect(mocks.api.updateSquad).toHaveBeenLastCalledWith("sq-1", {
+      description: "Ships the risky stuff carefully",
+    });
   });
 
   it("lists the squad's properties in the panel", () => {
@@ -301,9 +428,14 @@ describe("SquadDetailPage", () => {
     renderPage();
 
     expect(screen.getByRole("button", { name: "Assign work" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Strike Team" })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Squad name" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Ships the risky stuff" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Add member" })).toBeNull();
     expect(within(section("Instructions")).queryByRole("button", { name: "Edit" })).toBeNull();
     expect(screen.queryByTestId("avatar-upload")).toBeNull();
+    expect(within(section("Collaboration")).getByRole("radio", { name: /Members hand off directly/ })).toBeDisabled();
+    expect(screen.queryByRole("heading", { level: 2, name: "What members receive" })).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "More actions" }));
     expect(await screen.findByRole("menuitem", { name: "Copy link" })).toBeInTheDocument();

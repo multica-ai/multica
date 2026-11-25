@@ -1,12 +1,12 @@
 ---
-title: AI coding tools comparison
-description: Compare the AI coding tools Multica supports, and how models, MCP, sessions, and skills differ.
+title: Supported AI coding tools
+description: The 31 AI coding tools Multica works with, including Claude Code, Codex, Cursor, and Copilot, and how detection, models, MCP, sessions, steering, and skills differ.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { ProviderPickerDemo } from "@/components/demos/provider-picker-demo";
 
-Multica does not replace the AI coding tool you use: a runtime invokes the tool already installed and signed in on the computer, then writes progress and results back to the issue. If you already use one of these tools, you can usually keep it. If you have not picked one yet, weigh four things:
+Multica works with 31 AI coding tools. It does not replace the tool you use: a runtime invokes the tool already installed and signed in on the computer, then writes progress and results back to the issue. If you already use one of these tools, you can usually keep it, and different agents in one workspace can use different tools. If you have not picked one yet, weigh four things:
 
 - whether it is already installed on the computer;
 - which models your account can use;
@@ -45,17 +45,64 @@ Install steps are in [Install AI coding tools](/install-agent-runtime).
 | Qoder CN CLI | `qoderclicn` | ✓ | ✓ | ✓ | `.qoder/skills/` |
 | Qwen Code | `qwen` | ✓ | ✓ | ✓ | `.qwen/skills/` |
 | QwenPaw | `qwenpaw` | ✓ | ✓ | — | per-run workspace `skills/` |
+| Amp | `amp` | ✓ | — | Mode | `.agents/skills/` |
+| Factory Droid | `droid` | ✓ | — | ✓ | `.factory/skills/` |
 | Reasonix | `reasonix` | ✓ | ✓ | ✓ | `.reasonix/skills/` |
 | Trae CLI | `traecli` | ✓ | ✓ | ✓ | `.traecli/skills/` |
 | Dim | `dim` | ✓ | ✓ | ✓ | — |
 | ZeroClaw | `zeroclaw` | ✓ | — | — | — |
 | ZCode | `zcode` / ZCode Desktop | ✓ | ✓ | ✓ | `.zcode/skills/` |
 
+<Callout type="info">
+Gemini CLI is not supported. It was removed from the built-in tools, so a page that lists Gemini among the tools Multica runs is out of date.
+</Callout>
+
+For Claude Code, Multica lists and imports user and plugin skills from an absolute `CLAUDE_CONFIG_DIR` set in the daemon environment. Paths set only inside a launch wrapper are not visible to the scanner.
+
+For Amp, the model field selects an Amp **mode**, such as `high`, rather than an underlying model ID. Leave it empty to use Amp’s default.
+
+Amp also requires `AMP_API_KEY` in the daemon or agent environment; a saved interactive login alone is not enough.
+
 "Multica-managed MCP" means you can define MCP servers in the agent configuration and Multica passes them to the tool before a run. The column only says whether Multica can configure it for you, not whether the tool has other ways to configure MCP.
 
 Tools with — under "Model picked in Multica" take their model from their own configuration; see [Model sources](#model-sources).
 
 Devin supports stdio MCP servers; HTTP/SSE entries are passed only if the CLI advertises support. Devin skills are imported from `$XDG_CONFIG_HOME/devin/skills` (default `~/.config/devin/skills`) or `%APPDATA%\devin\skills` on Windows, then the legacy `cognition/skills` root, then `~/.codeium/<channel>/skills` (`windsurf`, `windsurf-next`, `windsurf-insiders`, in that order), and finally `~/.agents/skills`. On duplicate skill keys, the first root wins for both listing and import.
+
+## Connect a tool
+
+Every tool in the table connects the same way: the Multica daemon on a computer looks up each tool's command on `PATH` and registers one runtime per tool it finds. Runs execute on that computer, with the tool's own login and subscription; Multica does not ship the tools or proxy their model calls.
+
+1. Install the tool and sign in to it, the way its own docs describe.
+2. On the same computer, open [Multica Desktop](/desktop-app), which connects the computer automatically, or install the CLI and start the daemon:
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+   multica setup
+   ```
+
+   On Windows, use `irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex` for the first line. Self-hosted instances use the commands in the [Self-host quickstart](/self-host-quickstart).
+3. Check that the tool shows up as a runtime under that computer on the **Runtimes** page, or with `multica runtime list`. After installing another tool, run `multica daemon restart` or reopen Desktop.
+4. [Create an agent](/agents-create) on that runtime and assign it an issue.
+
+If the tool is installed somewhere the daemon's `PATH` does not reach, point `MULTICA_<PREFIX>_PATH` at it; see [Environment variables](/environment-variables#daemon-configuration). One computer can host several tools, and a workspace can mix computers, so a team can run Claude Code on one machine and Codex or Kimi on another from the same board.
+
+## Steer a running run
+
+You can [add a message to a run that is still working](/mentioning-agents#steer-a-running-agent) instead of waiting for the next run. This needs support from the AI coding tool, and from these versions on:
+
+| Tool | Minimum version |
+|---|---|
+| Antigravity | 1.4.8 |
+| Claude Code | 2.1.110 |
+| Codex | 0.100.0 |
+| Cursor Agent | 2026.10.14 |
+| Grok | 1.0.14 |
+| Hermes | 0.22.3 |
+| Kiro CLI | 2.33.0 |
+| Pi | 1.4.0 |
+
+With other tools or older versions, **Add to current run** is not offered: a reply is handled in a new run after the current one, or you stop the current run and start over.
 
 ## Model sources
 
@@ -70,6 +117,8 @@ Devin's picker lists the model choices advertised by its ACP session. Choose a c
 Devin reads `WINDSURF_API_KEY` when set, otherwise the login saved by `devin auth login`; unknown ACP auth methods do not block that stored login. Model discovery uses the daemon user's credentials: a key set only in an agent's custom environment is unavailable to the runtime model picker. An empty session model list prompts you to check those credentials and your team's model allowlist. Multica preserves Devin's configured session mode rather than raising permissions. If it defaults to `plan`, switch to an editing mode in Devin before dispatching work that must change files.
 
 QwenPaw, MiniMax Code, and ZeroClaw are exceptions: they do not accept a model chosen from Multica, so the picker is inert and shows "Managed by runtime". Choose the model in the tool's own configuration instead. An empty model list for these tools is expected and does not mean the runtime is offline.
+
+For Antigravity, use the model picker to select the exact reasoning variant shown by `agy models`, including any suffix. Multica has no separate **Thinking** setting for Antigravity. If you pass `--effort` in custom arguments, Antigravity checks whether it can be combined with the selected model.
 
 DeepSeek Harness advertises its model catalog from the runtime itself (`dsh --profile multica --list-models`). Its model ids use the `provider/model` form (for example `deepseek-official/deepseek-chat`), so select the full id from the list.
 
@@ -87,7 +136,7 @@ Retry and session-resumption rules are in [Runs](/tasks#manual-retry).
 
 ## MCP configuration
 
-Antigravity, GitHub Copilot CLI, DevEco Code, Muse Code, and ZeroClaw do not read the MCP configuration on an agent yet, so the field is not shown when creating agents for them.
+Amp, Factory Droid, Antigravity, GitHub Copilot CLI, DevEco Code, Muse Code, and ZeroClaw do not read the MCP configuration on an agent yet, so the field is not shown when creating agents for them.
 
 Managed MCP delivery for Pi requires Pi 0.99.0 or later. Older Pi versions continue to run agents that have no MCP configuration.
 
@@ -121,5 +170,5 @@ For creating and binding skills, see [Skills](/skills).
 
 ZCode uses its native NDJSON `app-server` protocol for session creation, resumption, cancellation, model discovery, thinking levels, and MCP. Tasks run in yolo mode without interactive tool approval. Reasoning choices come from the runtime model catalog; creating an agent preserves the selected model's default level.
 
-On macOS the daemon also discovers ZCode Desktop's bundled Node entry point; Node.js must be installed. Enabled desktop API-key/Coding Plan connections are imported into a process-private temporary provider configuration, which is removed on exit without changing the original files. Start Plan identity tokens are not API keys and this account-authentication path is not supported. Configure a working API connection in ZCode Desktop if discovery returns no models.
+On macOS the daemon also discovers ZCode Desktop's bundled CLI; Node.js must be installed. On Linux it discovers ZCode Desktop and runs the bundled CLI without opening a desktop window; no separate Node.js installation or manual environment configuration is needed. Enabled desktop API-key/Coding Plan connections are imported into a process-private temporary provider configuration, which is removed on exit without changing the original files. Start Plan identity tokens are not API keys and this account-authentication path is not supported. Configure a working API connection in ZCode Desktop if discovery returns no models.
 

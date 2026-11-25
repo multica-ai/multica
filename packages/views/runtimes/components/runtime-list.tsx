@@ -4,8 +4,6 @@ import { useMemo, useState } from "react";
 import {
   AlertTriangle,
   ExternalLink,
-  Globe,
-  Users,
   Loader2,
   Pencil,
   Trash2,
@@ -38,11 +36,6 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@multica/ui/components/ui/dropdown-menu";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@multica/ui/components/ui/tooltip";
 import { useIntentNavigate } from "../../navigation";
 import {
   CollectionEmptyValue,
@@ -54,10 +47,12 @@ import {
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { ProviderLogo } from "./provider-logo";
+import { RateLimitCell } from "./rate-limit-section";
 import { HealthIcon, useHealthLabel } from "./shared";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
 import { RuntimeProfilesDialog } from "./runtime-profiles-dialog";
+import { RuntimeListVisibility } from "./runtime-list-visibility";
 import {
   computeCostInWindow,
   pctChange,
@@ -137,8 +132,11 @@ export function buildWorkloadIndex(
 function RuntimeNameCell({
   runtime,
   machineTitle,
+  canEditVisibility,
 }: {
   runtime: AgentRuntime;
+  /** Owner-only, the same rule as the detail page. */
+  canEditVisibility: boolean;
   /**
    * The containing machine's title. Lets a per-runtime alias surface here
    * while a machine-level rename (shared by every runtime on the daemon)
@@ -156,9 +154,9 @@ function RuntimeNameCell({
         <>
           <RuntimeKindBadge runtime={runtime} />
           <PendingRuntimeBadge runtime={runtime} />
-          <VisibilityBadge runtime={runtime} />
         </>
       }
+      trailing={<RuntimeListVisibility runtime={runtime} canEdit={canEditVisibility} />}
     />
   );
 }
@@ -199,30 +197,6 @@ function PendingRuntimeBadge({ runtime }: { runtime: AgentRuntime }) {
     <span className="inline-flex shrink-0 items-center rounded-xs bg-warning/10 px-1 text-micro font-medium text-warning">
       {t(($) => $.list.badge_registering)}
     </span>
-  );
-}
-
-// Only public is worth a badge — private is the default and rendering a
-// `🔒 Private` chip on every row turns the whole column into noise.
-function VisibilityBadge({ runtime }: { runtime: AgentRuntime }) {
-  const { t } = useT("runtimes");
-  const scope = runtime.visibility === "public" ? "public" : "members";
-  if (scope === "members" && !runtime.shared_with?.length) return null;
-  const Icon = scope === "public" ? Globe : Users;
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <span className="inline-flex shrink-0 items-center gap-0.5 rounded-xs bg-info/10 px-1 text-micro font-medium text-info">
-            <Icon className="h-2.5 w-2.5" />
-            {t(($) => $.detail.visibility_label[scope])}
-          </span>
-        }
-      />
-      <TooltipContent>
-        {t(($) => $.detail.visibility_hint_readonly[scope])}
-      </TooltipContent>
-    </Tooltip>
   );
 }
 
@@ -627,7 +601,19 @@ export function RuntimeList({
     {
       key: "name",
       header: t(($) => $.list.col_runtime),
-      cell: (row) => <RuntimeNameCell runtime={row.runtime} machineTitle={machineTitle} />,
+      cell: (row) => (
+        <RuntimeNameCell
+          runtime={row.runtime}
+          machineTitle={machineTitle}
+          // Pending custom runtimes are client-side placeholders the server
+          // cannot patch yet.
+          canEditVisibility={
+            !!user &&
+            row.runtime.owner_id === user.id &&
+            !isPendingCustomRuntime(row.runtime)
+          }
+        />
+      ),
     },
     {
       // Health folds the workload in as a suffix ("Healthy · 2 tasks") —
@@ -662,6 +648,20 @@ export function RuntimeList({
       header: t(($) => $.list.col_agents),
       width: 92,
       cell: (row) => <AgentStack agentIds={row.workload.agentIds} />,
+    },
+    {
+      key: "rate_limits",
+      header: t(($) => $.list.col_rate_limits),
+      width: 88,
+      cell: (row) =>
+        isPendingCustomRuntime(row.runtime) ? (
+          <CollectionEmptyValue />
+        ) : (
+          <RateLimitCell
+            runtime={row.runtime}
+            enabled={canReadRuntimeUsage(row.runtime, user?.id ?? null)}
+          />
+        ),
     },
     {
       key: "cost",

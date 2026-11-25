@@ -91,23 +91,57 @@
   50% { opacity: 0.3; }
 }
 
+/* The pulse stops; the dimmed image still reads as uploading. */
+@media (prefers-reduced-motion: reduce) {
+  .image-uploading {
+    animation: none;
+  }
+}
+
 .image-toolbar {
+  /* Keep the resting controls near their image so tabbing to them scrolls it into view. */
   position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
+  top: 0;
+  inset-inline-end: 0;
   display: flex;
+  width: max-content;
   gap: 1px;
   padding: 0.25rem;
   background: color-mix(in srgb, black 75%, transparent);
   backdrop-filter: blur(8px);
   border-radius: var(--radius);
   opacity: 0;
-  transition: opacity 0.15s;
-  z-index: 1;
+  pointer-events: none;
+  z-index: 30;
 }
 
-.image-figure:hover .image-toolbar {
+.image-toolbar[data-placement] {
+  position: fixed;
+  inset-inline-end: auto;
+  top: var(--image-toolbar-y, 0);
+  left: var(--image-toolbar-x, 0);
+}
+
+.image-toolbar:is([data-placement="top"], [data-placement="bottom"]) {
   opacity: 1;
+  pointer-events: auto;
+  transition: opacity 0.15s;
+}
+
+/* Keep the gap between the image and its toolbar hoverable. */
+.image-toolbar::after {
+  position: absolute;
+  inset-inline: 0;
+  height: 4px;
+  content: "";
+}
+
+.image-toolbar[data-placement="top"]::after {
+  top: 100%;
+}
+
+.image-toolbar[data-placement="bottom"]::after {
+  bottom: 100%;
 }
 
 .image-toolbar button {
@@ -123,4 +157,71 @@
 
 .image-toolbar button:hover {
   background: color-mix(in srgb, white 15%, transparent);
+}
+
+/*
+ * Issue-timeline comment images. `data-comment-images` sits on the timeline
+ * and the bottom composer, carrying the personal "Images in comments"
+ * preference ("thumbnails" | "full"). "full" keeps the rules above.
+ *
+ * Thumbnails: attached images sit in a wrapping row at one height and their
+ * own aspect (never cropped); a lone one, and any image in the body, gets a
+ * larger box. Sized figures are capped by width, because capping the height
+ * of an `aspect-ratio` image would stretch it. Click opens the full size.
+ */
+[data-comment-images="thumbnails"] [data-comment-image-list] {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+[data-comment-images="thumbnails"] [data-comment-image-list] .image-standalone .image-content {
+  max-height: 12.5rem;
+}
+
+[data-comment-images="thumbnails"] [data-comment-image-list] .image-standalone[data-sized] {
+  width: min(var(--image-width), 100%, 12.5rem * var(--image-aspect));
+}
+
+[data-comment-images="thumbnails"] [data-comment-image-list] > .image-node:only-child .image-content {
+  max-width: min(100%, 35rem);
+  max-height: 25rem;
+}
+
+[data-comment-images="thumbnails"] [data-comment-image-list] > .image-node:only-child .image-standalone[data-sized] {
+  width: min(var(--image-width), 100%, 35rem, 25rem * var(--image-aspect));
+}
+
+[data-comment-images="thumbnails"] .image-figure[data-sized]:not(.image-standalone) {
+  width: min(var(--image-width), 100%, 35rem, 25rem * var(--image-aspect));
+}
+
+[data-comment-images="thumbnails"] .image-figure[data-pending]:not(.image-standalone) {
+  max-width: 35rem;
+}
+
+[data-comment-images="thumbnails"] .image-figure:not([data-sized], [data-pending], .image-standalone) .image-content {
+  width: auto;
+  max-width: min(100%, 35rem);
+  max-height: 25rem;
+}
+
+/* Comment composers, whatever the preference: an image keeps its place in
+   the text as a small thumbnail, so what is being written stays in view. */
+[data-comment-images] .ProseMirror .image-node {
+  text-align: start;
+}
+
+[data-comment-images] .ProseMirror .image-figure[data-sized] {
+  width: min(var(--image-width), 100%, 7.5rem * var(--image-aspect));
+}
+
+[data-comment-images] .ProseMirror .image-figure[data-pending] {
+  width: 12rem;
+}
+
+[data-comment-images] .ProseMirror .image-figure:not([data-sized], [data-pending]) .image-content {
+  width: auto;
+  max-width: 100%;
+  max-height: 7.5rem;
 }

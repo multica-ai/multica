@@ -1,8 +1,11 @@
 "use client";
 
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useStatusLabel } from "../utils/status-label";
 import { useMemo, type ReactNode } from "react";
+import { UI_EASE_IN, UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import {
   Bot,
   CalendarClock,
@@ -53,6 +56,7 @@ import { PriorityIcon } from "./priority-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useProjectStatusLabels } from "../../projects/components/labels";
 import { useT } from "../../i18n";
+import { paletteColor } from "@multica/core/appearance";
 
 /** One rendered chip: a dimension with its selected values summarised. */
 export interface FilterChip {
@@ -194,7 +198,7 @@ function DotStack({ colors }: { colors: string[] }) {
         <span
           key={i}
           className="size-2.5 rounded-full"
-          style={{ backgroundColor: color }}
+          style={{ backgroundColor: paletteColor(color) }}
         />
       ))}
     </IconStack>
@@ -233,6 +237,7 @@ export function useFilterChips(
   const negatedFilters = useViewStore((s) => s.negatedFilters);
   const propertyFilters = useViewStore((s) => s.propertyFilters);
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
+  const agentIdleFilter = useViewStore((s) => s.agentIdleFilter);
   const unreadFilter = useViewStore((s) => s.unreadFilter);
   const store = useViewStoreApi();
   const negated = new Set(negatedFilters);
@@ -323,6 +328,7 @@ export function useFilterChips(
       propertyFilters: s.propertyFilters,
       advancedFilter: s.advancedFilter,
       agentRunningFilter: s.agentRunningFilter,
+      agentIdleFilter: s.agentIdleFilter,
       unreadFilter: s.unreadFilter,
     };
     switch (dimension) {
@@ -448,15 +454,16 @@ export function useFilterChips(
       onRemove: () => clearDimension("status"),
     });
   }
-  if (agentRunningFilter && !baseline?.agentRunning) {
+  if ((agentRunningFilter && !baseline?.agentRunning) || (agentIdleFilter && !baseline?.agentIdle)) {
     chips.push({
       key: "agentRunning",
       icon: <Bot className={CHIP_ICON_CLASS} />,
       label: t(($) => $.filters.section_agent_status),
-      value: t(($) => $.filters.agent_status_running),
+      value: agentIdleFilter ? t(($) => $.filters.agent_status_idle) : t(($) => $.filters.agent_status_running),
       onRemove: () => {
         const s = store.getState();
         if (s.agentRunningFilter) s.toggleAgentRunningFilter();
+        if (s.agentIdleFilter) s.toggleAgentIdleFilter();
       },
     });
   }
@@ -683,18 +690,32 @@ export function useFilterChips(
   return { chips, hasAny: chips.length > 0, clearAll };
 }
 
-export function ChipSpan({ chip, className }: { chip: FilterChip; className?: string }) {
+export function ChipSpan({
+  chip,
+  className,
+  compact = false,
+}: {
+  chip: FilterChip;
+  className?: string;
+  /** Icon and value only, for narrow columns; the field name moves to the
+   *  hover title. */
+  compact?: boolean;
+}) {
   const { t } = useT("issues");
   const removeLabel = t(($) => $.filters.chip_remove, { name: chip.label });
+  const operator = chip.negated ? t(($) => $.filters.operator_is_not) : t(($) => $.filters.operator_is);
   return (
     // Keyed per dimension: the chip animates in once when its dimension
     // first gains a value; value changes inside it re-render without
     // re-animating. No exit animation — unmount presence isn't worth the
     // machinery for a 150ms nicety.
-    <span className={cn("flex h-6 max-w-72 shrink-0 items-center gap-1.5 rounded-md bg-background pl-2 pr-1 text-caption shadow-xs animate-in fade-in-0 zoom-in-95 duration-150", className)}>
+    <span
+      title={compact ? `${chip.label} ${operator} ${chip.value}` : undefined}
+      className={cn("flex h-6 max-w-72 shrink-0 items-center gap-1.5 rounded-md bg-background pl-2 pr-1 text-caption shadow-xs animate-in fade-in-0 zoom-in-95 duration-150", compact && "min-w-0 max-w-full shrink", className)}
+    >
       <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
         {chip.icon}
-        <span>{chip.label}</span>
+        {!compact && <span>{chip.label}</span>}
       </span>
       <span className="flex min-w-0 items-center gap-1">
         {chip.negated && <FilterOperator negated />}
@@ -759,35 +780,62 @@ export function FilterChipsBar({
   viewBaseline?: IssueViewBaseline;
 }) {
   const { t } = useT("issues");
+  const reduceMotion = useReducedMotion();
   const { chips, hasAny, clearAll } = useFilterChips(dateFilter, onDateFilterChange, viewBaseline);
 
-  if (!hasAny) return null;
-
   return (
-    <div className="mx-4 mb-2 flex shrink-0 flex-wrap items-center gap-1.5 rounded-lg bg-muted/50 px-2 py-1.5">
-      {chips.map((chip) => (
-        <ChipSpan key={chip.key} chip={chip} />
-      ))}
-      <span className="ml-auto flex items-center gap-1.5">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={clearAll}
-          className="h-6 px-2 text-caption text-muted-foreground"
+    <AnimatePresence initial={false}>
+      {hasAny && (
+        <motion.div
+          key="filter-chips-bar"
+          initial={reduceMotion ? false : { opacity: 0, height: 0, marginBottom: 0, overflow: "hidden" }}
+          animate={{
+            opacity: 1,
+            height: "auto",
+            marginBottom: 8,
+            transition: { duration: reduceMotion ? 0 : UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
+            transitionEnd: { overflow: "visible" },
+          }}
+          exit={
+            reduceMotion
+              ? { opacity: 0, transition: { duration: 0 } }
+              : {
+                  opacity: 0,
+                  height: 0,
+                  marginBottom: 0,
+                  overflow: "hidden",
+                  transition: { duration: UI_MOTION_DURATION.micro, ease: UI_EASE_IN },
+                }
+          }
+          className="mx-4 shrink-0"
         >
-          {t(($) => $.filters.chip_clear)}
-        </Button>
-        {onSave && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onSave}
-            className="h-6 px-2 text-caption"
-          >
-            {saveLabel ?? t(($) => $.filters.chip_save)}
-          </Button>
-        )}
-      </span>
-    </div>
+          <div className="flex flex-wrap items-center gap-1.5 rounded-lg bg-muted/50 px-2 py-1.5">
+            {chips.map((chip) => (
+              <ChipSpan key={chip.key} chip={chip} />
+            ))}
+            <span className="ml-auto flex items-center gap-1.5">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={clearAll}
+                className="h-6 px-2 text-caption text-muted-foreground"
+              >
+                {t(($) => $.filters.chip_clear)}
+              </Button>
+              {onSave && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={onSave}
+                  className="h-6 px-2 text-caption"
+                >
+                  {saveLabel ?? t(($) => $.filters.chip_save)}
+                </Button>
+              )}
+            </span>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }

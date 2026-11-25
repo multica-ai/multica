@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import type {
   WorkspaceSeatPurchasePreview,
@@ -31,7 +33,6 @@ function summary(purchased: number, available: number): WorkspaceSubscriptionSum
       status: "active",
       seats: purchased,
       limits: {
-        issueCount: { mode: "unlimited", limit: null },
         autopilotRuns: { mode: "unlimited", limit: null },
       },
       currentPeriodEnd: null,
@@ -57,7 +58,13 @@ function summary(purchased: number, available: number): WorkspaceSubscriptionSum
       checkout: false,
       portal: true,
       purchaseSeats: true,
+      changePlan: false,
+      checkPlanChange: false,
+      purchaseAutopilotRuns: false,
     },
+    autopilotAddon: null,
+    planChange: null,
+    trial: null,
   };
 }
 
