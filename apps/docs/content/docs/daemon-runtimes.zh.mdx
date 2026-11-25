@@ -282,7 +282,7 @@ Codex 原生子智能体同样默认关闭：父线程结束时，Multica 就把
 使用 `MULTICA_TOKEN` 发起请求时，作者身份由服务端决定；任务评论等写入操作会归属到被指派的智能体和当前 task。令牌的完整绑定关系、权限、归属方式、最长 24 小时的有效期和清理规则见[智能体执行的临时令牌](/auth-tokens#智能体执行的临时令牌)。
 
 <Callout type="info">
-内置的 **Codex** 和 **Claude Code** 运行时默认开启会话进程池以复用跟进轮进程。在进程池模式下，每轮都会变化的任务变量（`MULTICA_TOKEN`、`MULTICA_TASK_ID`、`MULTICA_TASK_CONFIG_ROOT`、`MULTICA_TASK_SLOT`）改由守护进程通过私有的单轮覆盖文件提供给 `multica` CLI，不再写入常驻进程的静态环境变量，因此不保证出现在 provider 进程环境或任意子脚本中。自定义运行时配置命令不启用进程池，仍直接在进程环境中接收全部变量。如果内置 Codex 或 Claude Code 的工作流需要旧的直接环境变量行为，可在守护进程环境中设置 `MULTICA_WARM_POOL=0`。
+内置的 **Codex** 和 **Claude Code** 运行时默认开启会话进程池以复用跟进轮进程。在进程池模式下，每轮都会变化的任务变量（`MULTICA_TOKEN`、`MULTICA_TASK_ID`、`MULTICA_TASK_CONFIG_ROOT`、`MULTICA_TASK_SLOT`）改由守护进程通过私有的单轮覆盖文件提供给 `multica` CLI，不再写入常驻进程的静态环境变量，因此不保证出现在 provider 进程环境或任意子脚本中。以 worktree 模式运行的本地目录任务和自定义运行时配置命令会启动新进程，并直接在进程环境中接收全部任务变量。如果内置 Codex 或 Claude Code 的工作流需要旧的直接环境变量行为，可在守护进程环境中设置 `MULTICA_WARM_POOL=0`。
 </Callout>
 
 <Callout type="warning">

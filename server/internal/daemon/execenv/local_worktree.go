@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -1082,13 +1083,9 @@ func worktreeIsDirty(worktreePath string) (bool, error) {
 // the retry buys the platform's lag, not unlimited patience: the budget stays
 // small enough that a genuinely leaked process still fails the task.
 func removeLocalWorktreeDir(gitRoot, worktreePath string, logger *slog.Logger) error {
-	var removeErr error
 	for attempt := 0; ; attempt++ {
-		removeErr = removeLocalWorktreeDirOnce(gitRoot, worktreePath, logger)
-		if removeErr == nil {
-			return nil
-		}
-		if attempt >= worktreeRemoveMaxAttempts-1 {
+		removeErr := removeLocalWorktreeDirOnce(gitRoot, worktreePath, logger)
+		if removeErr == nil || runtime.GOOS != "windows" || attempt >= worktreeRemoveMaxAttempts-1 {
 			return removeErr
 		}
 		backoff := time.Duration(250*(1<<attempt)) * time.Millisecond
@@ -1100,28 +1097,35 @@ func removeLocalWorktreeDir(gitRoot, worktreePath string, logger *slog.Logger) e
 	}
 }
 
-// worktreeRemoveMaxAttempts bounds the removal retry loop: 250+500+1000+2000
-// ms of backoff plus the attempts themselves stays well under ten seconds —
-// far past Windows's handle-teardown lag, far short of hiding a real leak.
+// worktreeRemoveMaxAttempts caps the backoff at 3.75 seconds. Git commands
+// also have their own timeout.
 const worktreeRemoveMaxAttempts = 5
 
 func removeLocalWorktreeDirOnce(gitRoot, worktreePath string, logger *slog.Logger) error {
-	var removeErr error
-	if out, err := runGit(gitRoot, "worktree", "remove", "--force", worktreePath); err != nil {
-		removeErr = err
+	out, gitErr := runGit(gitRoot, "worktree", "remove", "--force", worktreePath)
+	if gitErr == nil {
+		// Git for Windows can unregister a worktree and exit successfully
+		// while leaving directory junctions behind (#7548).
+		if _, statErr := os.Lstat(worktreePath); errors.Is(statErr, os.ErrNotExist) {
+			return nil
+		} else if statErr != nil {
+			return fmt.Errorf("confirm worktree removal: %w", statErr)
+		} else if runtime.GOOS != "windows" {
+			return errors.New("worktree directory still exists after git removal reported success")
+		}
+	} else if logger != nil {
+		logger.Warn("execenv: git worktree remove failed; pruning registration",
+			"path", worktreePath, "output", out, "error", gitErr)
+	}
+
+	removeErr := gitErr
+	if rmErr := os.RemoveAll(worktreePath); rmErr != nil {
+		removeErr = errors.Join(removeErr, rmErr)
 		if logger != nil {
-			logger.Warn("execenv: git worktree remove failed; pruning registration",
-				"path", worktreePath, "output", out, "error", err)
+			logger.Warn("execenv: remove worktree directory failed", "path", worktreePath, "error", rmErr)
 		}
-		// Fall back to deleting the directory ourselves and dropping the now
-		// dangling registration, so the user's repo isn't left listing a
-		// worktree that no longer exists.
-		if rmErr := os.RemoveAll(worktreePath); rmErr != nil {
-			removeErr = errors.Join(removeErr, rmErr)
-			if logger != nil {
-				logger.Warn("execenv: remove worktree directory failed", "path", worktreePath, "error", rmErr)
-			}
-		}
+	}
+	if gitErr != nil {
 		if out, pruneErr := runGit(gitRoot, "worktree", "prune"); pruneErr != nil && logger != nil {
 			logger.Warn("execenv: git worktree prune failed", "output", out, "error", pruneErr)
 		}
@@ -1136,7 +1140,7 @@ func removeLocalWorktreeDirOnce(gitRoot, worktreePath string, logger *slog.Logge
 	if removeErr != nil {
 		return fmt.Errorf("worktree directory still exists after removal fallback: %w", removeErr)
 	}
-	return errors.New("worktree directory still exists after git removal reported success")
+	return errors.New("worktree directory still exists after removal fallback")
 }
 
 // deleteBranch drops a task branch that carries nothing worth keeping — an
