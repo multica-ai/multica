@@ -1006,6 +1006,8 @@
     "lane_model": "Модель",
     "lane_tool": "Инструменты",
     "outcome_label": "Создано",
+    "plan_label": "Прогресс",
+    "plan_open_steps": "Показать все шаги",
     "outcome_files_one": "{{count}} файл",
     "outcome_files_other": "Файлов: {{count}}",
     "outcome_commands_one": "{{count}} команда",

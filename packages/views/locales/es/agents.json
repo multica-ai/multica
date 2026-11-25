@@ -931,6 +931,8 @@
     "lane_model": "Modelo",
     "lane_tool": "Herramientas",
     "outcome_label": "Produjo",
+    "plan_label": "Progreso",
+    "plan_open_steps": "Mostrar todos los pasos",
     "outcome_files_one": "{{count}} archivo",
     "outcome_files_other": "{{count}} archivos",
     "outcome_commands_one": "{{count}} comando",

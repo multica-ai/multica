@@ -790,6 +790,8 @@
     "lane_model": "모델",
     "lane_tool": "도구",
     "outcome_label": "산출물",
+    "plan_label": "진행",
+    "plan_open_steps": "모든 단계 보기",
     "outcome_files_other": "파일 {{count}}개",
     "outcome_commands_other": "명령 {{count}}개",
     "search_placeholder": "이 작업 검색…",

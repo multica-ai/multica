@@ -310,6 +310,39 @@ describe("AgentTranscriptDialog", () => {
     expect(inspector.firstElementChild).toHaveTextContent(label);
   });
 
+  it("shows the agent's plan as progress, with every step on click", async () => {
+    renderDialog([
+      {
+        seq: 1,
+        type: "tool_use",
+        tool: "update_plan",
+        callId: "plan-1",
+        input: {
+          plan: [
+            { step: "Read the code", status: "completed" },
+            { step: "Write the fix", status: "inProgress" },
+            { step: "Run the tests", status: "pending" },
+          ],
+        },
+      },
+      { seq: 2, type: "tool_result", tool: "update_plan", callId: "plan-1", output: "Plan updated" },
+    ]);
+
+    const row = screen.getByRole("button", { name: "Show all plan steps" });
+    expect(row).toHaveTextContent("Progress");
+    expect(row).toHaveTextContent("1/3");
+    expect(row).toHaveTextContent("Write the fix");
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "1");
+
+    await userEvent.click(row);
+    expect(await screen.findByText("Run the tests")).toBeInTheDocument();
+  });
+
+  it("has no progress row when the run published no plan", () => {
+    renderDialog(items);
+    expect(screen.queryByRole("button", { name: "Show all plan steps" })).not.toBeInTheDocument();
+  });
+
   it("has no trigger row for a run with no snapshot", () => {
     renderDialog(items, { task: { ...baseTask, trigger_summary: undefined } });
     expect(screen.queryByText("Trigger")).not.toBeInTheDocument();

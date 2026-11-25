@@ -231,7 +231,7 @@ func (b *claudeBackend) spawnClaudeProcess(ctx context.Context, execPath string,
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
-	cmd.Env = buildEnv(childEnv)
+	cmd.Env = withClaudeTodoTools(buildEnv(childEnv))
 	if err := claudeRootSudoPreflight(args, cmd.Env); err != nil {
 		cleanupOnErr()
 		return nil, nil, err

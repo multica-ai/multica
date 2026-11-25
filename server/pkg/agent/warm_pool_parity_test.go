@@ -117,7 +117,7 @@ func TestClaudeColdAndWarmTurnsShareLifecycle(t *testing.T) {
 	// Claude Code reports them. The task id comes from the pooled overlay file
 	// when there is one, otherwise from the inherited environment.
 	script := `#!/bin/sh
-printf '%s\n' "$$" >> "$SPAWN_LOG"
+printf '%s todo=%s\n' "$$" "$CLAUDE_CODE_ENABLE_TODO_TOOLS" >> "$SPAWN_LOG"
 turn=0
 while IFS= read -r line; do
   case "$line" in
@@ -214,8 +214,14 @@ done
 			if err != nil {
 				t.Fatal(err)
 			}
-			if n := len(splitNonEmptyLines(string(spawns))); n != mode.wantSpawns {
+			spawnLines := splitNonEmptyLines(string(spawns))
+			if n := len(spawnLines); n != mode.wantSpawns {
 				t.Fatalf("claude spawned %d times, want %d", n, mode.wantSpawns)
+			}
+			for _, line := range spawnLines {
+				if !strings.HasSuffix(line, " todo=1") {
+					t.Fatalf("claude spawn did not enable the checklist tools: %q", line)
+				}
 			}
 			if pool.Len() != 0 {
 				t.Fatalf("pool holds %d sessions after the failed turn, want 0", pool.Len())
@@ -234,7 +240,7 @@ func TestCodexColdAndWarmTurnsShareLifecycle(t *testing.T) {
 	// One app-server serves turns until stdin closes and reports cumulative
 	// thread usage, so a reused process must report only the per-turn delta.
 	script := `#!/bin/sh
-printf '%s\n' "$$" >> "$SPAWN_LOG"
+printf '%s args=%s\n' "$$" "$*" >> "$SPAWN_LOG"
 turn_num=0
 while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
@@ -328,8 +334,14 @@ done
 			if err != nil {
 				t.Fatal(err)
 			}
-			if n := len(splitNonEmptyLines(string(spawns))); n != mode.wantSpawns {
+			spawnLines := splitNonEmptyLines(string(spawns))
+			if n := len(spawnLines); n != mode.wantSpawns {
 				t.Fatalf("codex spawned %d times, want %d", n, mode.wantSpawns)
+			}
+			for _, line := range spawnLines {
+				if !strings.Contains(line, " -c tools.update_plan.enabled=true") {
+					t.Fatalf("codex spawn did not enable update_plan: %q", line)
+				}
 			}
 			if pool.Len() != 0 {
 				t.Fatalf("pool holds %d sessions after the failed turn, want 0", pool.Len())

@@ -4972,7 +4972,7 @@ func TestBuildCodexArgsExplicitFastOverridesLowerPriorityDisable(t *testing.T) {
 	}, slog.Default())
 
 	want := []string{
-		"app-server", "--listen", "stdio://",
+		"app-server", "--listen", "stdio://", "-c", "tools.update_plan.enabled=true",
 		"--disable", "memory_tool",
 		"-c", "features.memory_tool=false",
 		"--enable", "multi_agent",
@@ -4991,7 +4991,7 @@ func TestBuildCodexArgsFutureServiceTierDoesNotForceFastMode(t *testing.T) {
 		CustomArgs:  []string{"--disable", codexFastModeFeature},
 	}, slog.Default())
 
-	want := []string{"app-server", "--listen", "stdio://", "--disable", codexFastModeFeature}
+	want := []string{"app-server", "--listen", "stdio://", "-c", "tools.update_plan.enabled=true", "--disable", codexFastModeFeature}
 	if !reflect.DeepEqual(args, want) {
 		t.Fatalf("buildCodexArgs future tier = %v, want %v", args, want)
 	}
@@ -5050,7 +5050,7 @@ func TestNormalizeCodexLaunchArgsStripsShellQuotes(t *testing.T) {
 	}
 
 	launch := buildCodexArgs(ExecOptions{CustomArgs: []string{"'-c'", "'windows.sandbox=unelevated'"}}, slog.Default())
-	wantLaunch := append([]string{"app-server", "--listen", "stdio://"}, want...)
+	wantLaunch := append([]string{"app-server", "--listen", "stdio://", "-c", "tools.update_plan.enabled=true"}, want...)
 	if !reflect.DeepEqual(launch, wantLaunch) {
 		t.Fatalf("buildCodexArgs = %v, want %v", launch, wantLaunch)
 	}

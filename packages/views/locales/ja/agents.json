@@ -790,6 +790,8 @@
     "lane_model": "モデル",
     "lane_tool": "ツール",
     "outcome_label": "成果",
+    "plan_label": "進捗",
+    "plan_open_steps": "すべてのステップを表示",
     "outcome_files_other": "{{count}} 件のファイル",
     "outcome_commands_other": "{{count}} 件のコマンド",
     "search_placeholder": "この実行を検索…",
