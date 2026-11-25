@@ -380,6 +380,9 @@
     "record_aria": "{{action}}のショートカットを変更",
     "recording": "キーを入力",
     "record_hint": "Esc でキャンセル · Delete でクリア",
+    "record_sequence_hint": "キーを押すか、G → I のように 2 つ続けて押すとシーケンスになります · Esc でキャンセル",
+    "record_then_hint": "2 つ目のキーを押す · ↵ で 1 キーのまま · Backspace でやり直し",
+    "then": "→",
     "unassigned": "未設定",
     "no_results": "一致するショートカット操作はありません。",
     "conflict_error": "すでに{{action}}で使用されています。",
@@ -483,6 +486,10 @@
         "label": "返信",
         "description": "開いているタスクのコメント欄にフォーカスします。"
       },
+      "showShortcuts": {
+        "label": "キーボードショートカットを表示",
+        "description": "ショートカットの一覧を開きます。今のページのものが先頭です。"
+      },
       "send": {
         "label": "送信",
         "description": "新しいタスクの作成にも使えます。"
@@ -559,6 +566,32 @@
       "zoom_out": "縮小",
       "reset_zoom": "ズームをリセット",
       "close_dialog": "ダイアログまたはメニューを閉じる"
+    },
+    "cheatsheet": {
+      "title": "キーボードショートカット",
+      "current_page": "現在のページ",
+      "footer_prefix": "ショートカットはこのデバイスに保存されます。変更は ",
+      "footer_link": "設定 › ショートカット",
+      "footer_suffix": " から。",
+      "groups": {
+        "inbox": "受信箱",
+        "issue": "タスク",
+        "navigation": "ナビゲーション",
+        "general": "一般",
+        "list": "リストとボード",
+        "editor": "エディター"
+      },
+      "rows": {
+        "list_move": "下 / 上へ移動",
+        "list_columns": "ボードの列を移動",
+        "list_open": "開く",
+        "list_peek": "プレビュー",
+        "list_select": "選択",
+        "list_extend": "選択を広げる",
+        "list_select_all": "すべて選択",
+        "list_clear": "選択を解除",
+        "editor_leave": "入力欄から出る"
+      }
     }
   },
   "chat": {
