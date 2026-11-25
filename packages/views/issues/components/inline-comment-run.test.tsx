@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { api } from "@multica/core/api";
 import { chatKeys } from "@multica/core/chat/queries";
 import { issueKeys } from "@multica/core/issues/queries";
+import { TooltipProvider } from "@multica/ui/components/ui/tooltip";
 import type { AgentTask, TimelineEntry } from "@multica/core/types";
 import type { TaskMessagePayload } from "@multica/core/types/events";
 import { renderWithI18n } from "../../test/i18n";
@@ -43,14 +44,38 @@ afterEach(() => {
 
 function setup(initialTask: AgentTask, hasReply = false, presentation: "inline" | "header" = "inline") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  const view = (current: AgentTask, reply = hasReply) => <QueryClientProvider client={client}>
-    <InlineCommentRun run={{ task: current, commentId: "comment", hasReply: reply }} presentation={presentation} />
-  </QueryClientProvider>;
+  const view = (current: AgentTask, reply = hasReply) => <TooltipProvider>
+    <QueryClientProvider client={client}>
+      <InlineCommentRun run={{ task: current, commentId: "comment", hasReply: reply }} presentation={presentation} />
+    </QueryClientProvider>
+  </TooltipProvider>;
   const rendered = renderWithI18n(view(initialTask));
   return { client, rerender: (current: AgentTask, reply = hasReply) => rendered.rerender(view(current, reply)) };
 }
 
 describe("InlineCommentRun", () => {
+  it("shows a clipped tool name and its summary when the activity step is focused", async () => {
+    const tool = "mcp__company-knowledge-base__search_documents_with_filters";
+    vi.mocked(api.listTaskMessages).mockResolvedValue([
+      { task_id: id, issue_id: "issue", seq: 1, type: "tool_use", tool, input: { query: "release checklist" } },
+    ]);
+    setup(task());
+    fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
+    const label = await screen.findByText(tool);
+    label.style.overflowX = "hidden";
+    Object.defineProperties(label, {
+      scrollWidth: { value: 360 },
+      clientWidth: { value: 120 },
+    });
+
+    const step = label.closest("summary");
+    expect(step).not.toBeNull();
+    await act(async () => { step?.focus(); });
+    expect(step).toHaveFocus();
+
+    expect(document.querySelector("[data-slot='tooltip-content']")).toHaveTextContent(`${tool} · release checklist`);
+  });
+
   it("places a delivered steer between the steps it arrived between", async () => {
     vi.mocked(api.listTaskMessages).mockResolvedValue([
       { task_id: id, issue_id: "issue", seq: 1, type: "tool_use", tool: "exec_command", input: { command: "cat login.tsx" }, created_at: "2026-09-07T00:00:05Z" },

@@ -349,8 +349,9 @@ function InlineStep({ row, live, formatText }: { row: TraceRow; live: boolean; f
     : row.kind === "text" ? traceEventSummary({ ...row.item, content: redactSecrets(formatText(row.item.content ?? "")) }) || t(($) => $.inline_run.message)
     : row.kind === "thinking" ? thinkingPreview(row.item.content, formatText) || t(($) => $.inline_run.thinking)
     : t(($) => $.inline_run.error);
+  const tooltip = call && toolSummary ? `${row.tool} · ${toolSummary}` : summary;
   return <details className="min-w-0 text-caption" onToggle={onToggle}>
-    <TruncatedTooltip content={summary}>
+    <TruncatedTooltip content={tooltip}>
       <summary onClick={disclosure.onTrigger} className="flex cursor-pointer list-none items-center gap-2 rounded-xs py-1.5 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
         {pending ? <Loader2 aria-hidden className="size-3.5 shrink-0 animate-spin text-info motion-reduce:animate-none" />
           : <Icon aria-hidden className={cn("size-3.5 shrink-0", error ? "text-destructive" : "text-muted-foreground")} />}
