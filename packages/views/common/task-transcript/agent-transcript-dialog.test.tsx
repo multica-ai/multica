@@ -588,6 +588,30 @@ describe("AgentTranscriptDialog", () => {
     expect(screen.getByText("/c.ts")).toBeInTheDocument();
   });
 
+  it("widens the offset column for a run past an hour so the label clears the rail", () => {
+    // "+73:12:05" is nine monospace characters; the minutes-only column holds
+    // six, so the label ran into the rail beside it.
+    renderDialog(
+      [
+        { seq: 1, type: "text", content: "Starting", created_at: "2026-06-08T08:00:30Z" },
+        { seq: 2, type: "text", content: "Still going", created_at: "2026-06-11T09:12:05Z" },
+      ],
+      { task: { ...baseTask, completed_at: "2026-06-11T09:12:10Z" } },
+    );
+
+    // Every row shares the wider column so the rails stay in one line.
+    expect(screen.getByText("+73:12:05")).toHaveClass("w-16");
+    expect(screen.getByText("+00:30")).toHaveClass("w-16");
+  });
+
+  it("keeps the narrow offset column for a run under an hour", () => {
+    renderDialog([
+      { seq: 1, type: "text", content: "Starting", created_at: "2026-06-08T08:00:30Z" },
+    ]);
+
+    expect(screen.getByText("+00:30")).toHaveClass("w-11");
+  });
+
   it("narrows the list to steps matching the search", () => {
     renderDialog();
 

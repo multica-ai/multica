@@ -550,6 +550,11 @@ export function AgentTranscriptDialog({
     return undefined;
   }, [steps]);
   const runEnd = task.completed_at ?? lastStamp;
+  // Past an hour the offset gains an hours field ("+1:02:03"), wider than the
+  // minutes-only column holds; widen it for every row so the rails line up.
+  const runEndMs = timeMs(runEnd);
+  const longRun =
+    runStartMs !== undefined && runEndMs !== undefined && runEndMs - runStartMs >= 3_600_000;
 
   const lanes = useMemo(() => buildLanes(steps, runStart, runEnd), [steps, runStart, runEnd]);
   const toolKinds = useMemo(() => toolKindTotals(steps), [steps]);
@@ -1306,6 +1311,7 @@ export function AgentTranscriptDialog({
                     row={row}
                     formatText={formatText}
                     runStartMs={runStartMs}
+                    longRun={longRun}
                     isLive={isLive}
                     entering={isLive && enteringSeqs.has(row.seq)}
                     selectedSeq={selectedSeq}
@@ -1492,6 +1498,7 @@ interface TranscriptRowProps {
   formatText: (text: string) => string;
   row: TraceRow;
   runStartMs?: number;
+  longRun: boolean;
   isLive: boolean;
   entering?: boolean;
   selectedSeq: number | null;
@@ -1525,13 +1532,24 @@ function TranscriptRow(props: TranscriptRowProps) {
 }
 
 /** The offset column: where in the run this happened. */
-function OffsetCell({ startedAt, runStartMs }: { startedAt?: string; runStartMs?: number }) {
+function OffsetCell({
+  startedAt,
+  runStartMs,
+  longRun,
+}: {
+  startedAt?: string;
+  runStartMs?: number;
+  longRun: boolean;
+}) {
   const locale = useLocale();
   const at = timeMs(startedAt);
   const label = at !== undefined && runStartMs !== undefined ? formatOffset(at - runStartMs) : "";
   return (
     <span
-      className="w-11 shrink-0 pt-0.5 text-right font-mono text-micro tabular-nums text-faint-foreground"
+      className={cn(
+        longRun ? "w-16" : "w-11",
+        "shrink-0 pt-0.5 text-right font-mono text-micro tabular-nums text-faint-foreground",
+      )}
       title={startedAt ? new Date(startedAt).toLocaleString(locale) : undefined}
     >
       {label}
@@ -1596,10 +1614,10 @@ function StepDuration({
  * identity — the glyph says "the agent's own words", which is what the facet
  * selects, and it says it in 12px without a repeated string.
  */
-function ProseRow({ row, runStartMs }: TranscriptRowProps & { row: TraceMessageStep }) {
+function ProseRow({ row, runStartMs, longRun }: TranscriptRowProps & { row: TraceMessageStep }) {
   return (
     <div className="group flex items-start gap-2 px-4 py-2.5">
-      <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} />
+      <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} longRun={longRun} />
       <span aria-hidden className="mt-1 w-0.5 self-stretch rounded-full bg-success" />
       <StepIcon step={row} className="mt-1 h-3 w-3 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1 pr-2">
@@ -1619,6 +1637,7 @@ function StepRow({
   row,
   formatText,
   runStartMs,
+  longRun,
   isLive,
   selectedSeq,
   onSelect,
@@ -1656,7 +1675,7 @@ function StepRow({
         row.kind === "error" && "bg-destructive/5",
       )}
     >
-      <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} />
+      <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} longRun={longRun} />
       <span
         aria-hidden
         className={cn(
@@ -1699,6 +1718,7 @@ function GroupRow({
   row,
   formatText,
   runStartMs,
+  longRun,
   selectedSeq,
   expanded,
   onToggleGroup,
@@ -1722,7 +1742,7 @@ function GroupRow({
         aria-expanded={expanded}
         className="group flex w-full items-start gap-2 px-4 py-1.5 text-left transition-colors hover:bg-accent/40"
       >
-        <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} />
+        <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} longRun={longRun} />
         <span aria-hidden className="mt-0.5 w-0.5 self-stretch rounded-full bg-border" />
         <ChevronRight
           aria-hidden
@@ -1745,7 +1765,10 @@ function GroupRow({
         <DurationCell ms={row.durationMs} />
       </button>
       {expanded && (
-        <div className="ml-[4.4rem] border-l pl-3">
+        <div
+          // The indent lands the border on the rail, past the offset column.
+          className={cn(longRun ? "ml-[5.65rem]" : "ml-[4.4rem]", "border-l pl-3")}
+        >
           {row.steps.map((step) => (
             <button
               key={step.seq}
