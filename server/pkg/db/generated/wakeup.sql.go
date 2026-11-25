@@ -616,6 +616,24 @@ func (q *Queries) DeleteIssueWakeupReceipts(ctx context.Context, id pgtype.UUID)
 	return err
 }
 
+const detachWakeupsFromComments = `-- name: DetachWakeupsFromComments :exec
+UPDATE issue_wakeup SET parent_comment_id=NULL
+WHERE workspace_id= $1 AND parent_comment_id=ANY($2::uuid[])
+`
+
+type DetachWakeupsFromCommentsParams struct {
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	CommentIds  []pgtype.UUID `json:"comment_ids"`
+}
+
+// A wakeup outlives the comment it was scheduled from. Its runs carry that
+// comment as their trigger, which must exist, so a deleted comment is dropped
+// from the rule instead.
+func (q *Queries) DetachWakeupsFromComments(ctx context.Context, arg DetachWakeupsFromCommentsParams) error {
+	_, err := q.db.Exec(ctx, detachWakeupsFromComments, arg.WorkspaceID, arg.CommentIds)
+	return err
+}
+
 const disableIssueWakeups = `-- name: DisableIssueWakeups :exec
 UPDATE issue_wakeup SET enabled=false,disabled_at=clock_timestamp(),updated_at=clock_timestamp()
 WHERE issue_id= $1 AND disabled_at IS NULL AND system_rule IS NULL
