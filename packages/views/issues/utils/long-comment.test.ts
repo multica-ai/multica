@@ -47,6 +47,8 @@ describe("longCommentPreview", () => {
   it("starts at the text when the body opens with blank lines", () => {
     expect(longCommentPreview(`${"\n".repeat(40)}${"a".repeat(20_000)}`)).toBe("a".repeat(2_000));
     expect(longCommentPreview(`${" ".repeat(2_000)}${"b".repeat(20_000)}`)).toBe("b".repeat(2_000));
+    // The first line keeps its indentation.
+    expect(longCommentPreview(`\n\n    const x = 1;\n${"y".repeat(20_000)}`).startsWith("    const x = 1;\n")).toBe(true);
   });
 
   it("never splits a surrogate pair", () => {

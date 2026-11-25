@@ -34,8 +34,10 @@ export function isLongComment(content: string | null | undefined): boolean {
  * in the second half of that window. A single huge line is cut hard.
  */
 export function longCommentPreview(body: string): string {
-  // Leading blank lines render as nothing; start the window at the text.
-  const content = body.slice(Math.max(0, body.search(/\S/)));
+  // Leading blank lines render as nothing; start the window at the first line
+  // with text, keeping its indentation (an indented code block stays code).
+  let content = body.replace(/^(?:[ \t]*\r?\n)+/, "");
+  if (!content.slice(0, PREVIEW_MAX_CHARS).trim()) content = content.trimStart();
   let end = Math.min(content.length, PREVIEW_MAX_CHARS);
   let lines = 0;
   for (let index = content.indexOf("\n"); index !== -1 && index < end; index = content.indexOf("\n", index + 1)) {
