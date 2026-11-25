@@ -325,6 +325,10 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		logger.Warn("execenv: codex-home ensure memory config failed", "error", err)
 	}
 
+	if err := ensureCodexProjectDocMaxBytes(filepath.Join(codexHome, "config.toml"), logger); err != nil {
+		logger.Warn("execenv: codex-home ensure project_doc_max_bytes failed", "error", err)
+	}
+
 	return nil
 }
 

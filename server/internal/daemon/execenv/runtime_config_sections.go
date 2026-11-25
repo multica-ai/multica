@@ -41,6 +41,19 @@ import (
 // below.
 
 // writeHeader emits the brief's leading title and one-line elevator pitch.
+const briefCompleteMarker = "<!-- MULTICA-RUNTIME-BRIEF-COMPLETE -->"
+
+// writeTruncationGuard tells the model how to recover if a runtime silently
+// cuts this file at a size cap (Codex 32 KiB default, Antigravity 24,000 B).
+// Keep this short: it must itself fit in the surviving prefix.
+func writeTruncationGuard(b *strings.Builder) {
+	fmt.Fprintf(b, "This brief ends with the closing marker `%s`. If you do not see that marker, or you see a `<truncated N bytes>` marker, the runtime has cut this file. Read the remainder (for example `tail -c <N> AGENTS.md`) and apply every unread platform rule before starting.\n\n", briefCompleteMarker)
+}
+
+func writeBriefClosingMarker(b *strings.Builder) {
+	b.WriteString(briefCompleteMarker + "\n")
+}
+
 func writeHeader(b *strings.Builder) {
 	b.WriteString("# Multica Agent Runtime\n\n")
 	b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
@@ -1094,10 +1107,42 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	// every resume; they now travel in the per-turn user message
 	// (daemon.BuildPrompt) instead. See MUL-5377.
 	writeHeader(&b)
+	writeTruncationGuard(&b)
 	writeBackgroundTaskSafetySlim(&b, provider)
+
+	// Behavior-critical platform rules come before user-controlled blocks
+	// (agent instructions, workspace context, project description) and the
+	// command catalogue. Codex and Antigravity truncate AGENTS.md at a hard
+	// byte cap, and the cut previously landed on Mentions, Output, and the
+	// "always use the CLI" / delivery rules. See #11480.
+	writeAlwaysUseCLI(&b)
+	if kind == kindIssue || kind == kindDocComment {
+		writeMentions(&b, ctx.DocsEnabled)
+	}
+	writeOutput(&b, kind, ctx)
+
+	writeWorkflowHeader(&b)
+	switch kind {
+	case kindChat:
+		writeWorkflowChat(&b)
+	case kindDocComment:
+		writeWorkflowDocComment(&b)
+	case kindQuickCreate:
+		writeWorkflowQuickCreate(&b)
+	case kindAutopilotRunOnly:
+		writeWorkflowAutopilot(&b)
+	case kindIssue:
+		writeWorkflowIssue(&b, ctx)
+	}
+
+	if kind == kindIssue {
+		writeInstructionPrecedence(&b)
+	}
+
 	writeAgentIdentity(&b, ctx)
 	writeRequestingUser(&b, ctx)
 	writeWorkspaceContext(&b, ctx)
+	writeProjectContext(&b, ctx)
 
 	switch kind {
 	case kindQuickCreate:
@@ -1115,26 +1160,6 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 		writeRepositories(&b, ctx)
 	}
 
-	writeProjectContext(&b, ctx)
-
-	if kind == kindIssue {
-		writeInstructionPrecedence(&b)
-	}
-
-	writeWorkflowHeader(&b)
-	switch kind {
-	case kindChat:
-		writeWorkflowChat(&b)
-	case kindDocComment:
-		writeWorkflowDocComment(&b)
-	case kindQuickCreate:
-		writeWorkflowQuickCreate(&b)
-	case kindAutopilotRunOnly:
-		writeWorkflowAutopilot(&b)
-	case kindIssue:
-		writeWorkflowIssue(&b, ctx)
-	}
-
 	if kind.hasIssueContext() && ctx.IssueID != "" {
 		writeSubIssueCreation(&b, ctx)
 	}
@@ -1145,15 +1170,10 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	writeSkills(&b, provider, ctx)
 
 	if kind == kindIssue {
-		writeMentions(&b, ctx.DocsEnabled)
 		writeAttachments(&b)
 	}
-	if kind == kindDocComment {
-		writeMentions(&b, ctx.DocsEnabled)
-	}
 
-	writeAlwaysUseCLI(&b)
-	writeOutput(&b, kind, ctx)
+	writeBriefClosingMarker(&b)
 
 	return b.String()
 }

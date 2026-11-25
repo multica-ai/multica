@@ -189,7 +189,11 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) (strin
 		// Unknown provider — skip config injection, prompt-only mode.
 		return content, nil
 	}
-	return content, writeRuntimeConfigFile(path, content)
+	if err := writeRuntimeConfigFile(path, content); err != nil {
+		return content, err
+	}
+	warnIfRuntimeInstructionFileExceedsCap(path, provider)
+	return content, nil
 }
 
 // runtimeConfigPath returns the absolute path to the runtime config file that

@@ -810,8 +810,8 @@ func TestWorkspaceContextRenderedAcrossTaskKinds(t *testing.T) {
 			}
 			// The block must precede Available Commands so it acts as
 			// background framing, not a footer hidden below CLI usage.
-			ctxIdx := strings.Index(out, "## Workspace Context")
-			cmdsIdx := strings.Index(out, "## Available Commands")
+			ctxIdx := headingIndex(out, "## Workspace Context")
+			cmdsIdx := headingIndex(out, "## Available Commands")
 			if ctxIdx == -1 || cmdsIdx == -1 || ctxIdx > cmdsIdx {
 				t.Errorf("[%s] `## Workspace Context` must appear above `## Available Commands` (ctx=%d, cmds=%d)", tc.name, ctxIdx, cmdsIdx)
 			}
@@ -2421,9 +2421,10 @@ func TestBriefSkillsListIsNamesOnly(t *testing.T) {
 			if !ok {
 				t.Fatal("brief has no Skills section")
 			}
-			section, _, _ = strings.Cut(section, "## Mentions\n\n")
+			section, _, _ = strings.Cut(section, "\n## ")
+			section, _, _ = strings.Cut(section, briefCompleteMarker)
 			const want = "You have the following skills installed (discovered automatically):\n\n- **pr-review**\n\n"
-			if section != want {
+			if strings.TrimSpace(section) != strings.TrimSpace(want) {
 				t.Errorf("native-discovery Skills section changed:\ngot  %q\nwant %q", section, want)
 			}
 		})
