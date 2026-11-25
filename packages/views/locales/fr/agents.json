@@ -1036,6 +1036,8 @@
       "runtime_recovery": "Daemon redémarré",
       "runtime_access_revoked": "Accès au runtime révoqué",
       "timeout": "Délai d'exécution dépassé",
+      "cleanup_unconfirmed": "Impossible de confirmer l'arrêt du processus de l'agent",
+      "cleanup_blocked": "Exécution précédente peut-être en cours ; relancez",
       "iteration_limit": "Limite d'itérations atteinte",
       "agent_blocked": "En attente d'une réponse humaine",
       "api_invalid_request": "Rejetée par l'API du modèle",

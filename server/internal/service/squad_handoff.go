@@ -46,14 +46,16 @@ func IsValidSquadHandoffMode(mode string) bool {
 // failed member run instead of the member that handed the work over. That is
 // the case only for a direct-handoff squad's issue, when the run that handed
 // off was a member turn on that same issue: a leader dispatch already recovers
-// to the leader, and a handoff across issues keeps its own coordinator.
+// to the leader, a handoff across issues keeps its own coordinator, and a
+// failed leader run recovers to the member that woke it, as in leader mode.
 func squadDirectHandoffLeader(ctx context.Context, q *db.Queries, issue db.Issue, failed, source db.AgentTaskQueue) *db.Squad {
 	if source.IsLeaderTask || failed.IssueID != issue.ID ||
 		!issue.AssigneeType.Valid || issue.AssigneeType.String != "squad" || !issue.AssigneeID.Valid {
 		return nil
 	}
 	squad, err := q.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{ID: issue.AssigneeID, WorkspaceID: issue.WorkspaceID})
-	if err != nil || squad.ArchivedAt.Valid || squad.HandoffMode != SquadHandoffModeDirect || squad.LeaderID == source.AgentID {
+	if err != nil || squad.ArchivedAt.Valid || squad.HandoffMode != SquadHandoffModeDirect ||
+		squad.LeaderID == source.AgentID || squad.LeaderID == failed.AgentID {
 		return nil
 	}
 	isMember, err := q.IsSquadMember(ctx, db.IsSquadMemberParams{SquadID: squad.ID, MemberType: "agent", MemberID: source.AgentID})

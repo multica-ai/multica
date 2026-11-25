@@ -2163,15 +2163,10 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no local attachments to update; --attachment accepts file paths, not URLs")
 	}
 	desc, changed := body["description"].(string)
+	var descRevision *int64
 	if len(pending) > 0 && !changed {
-		var issue struct {
-			Description *string `json:"description"`
-		}
-		if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID), &issue); err != nil {
+		if desc, descRevision, err = fetchIssueDescription(ctx, client, issueRef.ID); err != nil {
 			return fmt.Errorf("get issue description before binding attachments: %w", err)
-		}
-		if issue.Description != nil {
-			desc = *issue.Description
 		}
 	}
 	attachmentIDs := make([]string, 0, len(pending))
@@ -2185,9 +2180,17 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		attachmentRefs = append(attachmentRefs, uploaded)
 		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
 	}
+	// setDescription adds the uploaded files to current. A revision makes the
+	// server refuse the write if the description changed after it was read.
+	setDescription := func(current string, revision *int64) {
+		current = applyAttachmentLinks(os.Stderr, current, "issue description", pending, attachmentRefs)
+		body["description"] = appendAttachmentReferences(current, attachmentRefs)
+		if revision != nil {
+			body["description_base_revision"] = *revision
+		}
+	}
 	if len(attachmentRefs) > 0 {
-		desc = applyAttachmentLinks(os.Stderr, desc, "issue description", pending, attachmentRefs)
-		body["description"] = appendAttachmentReferences(desc, attachmentRefs)
+		setDescription(desc, descRevision)
 		body["attachment_ids"] = attachmentIDs
 	}
 	if noStart && len(body) > 0 {
@@ -2196,7 +2199,17 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 
 	var result map[string]any
 	if len(body) > 0 {
-		if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
+		err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result)
+		// Someone edited the description during the upload: add the files to
+		// the new text instead of writing the old text over it.
+		for retry := 0; retry < 3 && descRevision != nil && isIssueDescriptionConflict(err); retry++ {
+			if desc, descRevision, err = fetchIssueDescription(ctx, client, issueRef.ID); err != nil {
+				break
+			}
+			setDescription(desc, descRevision)
+			err = client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result)
+		}
+		if err != nil {
 			if len(attachmentIDs) > 0 {
 				return fmt.Errorf("update issue (uploaded IDs: %v): %w", attachmentIDs, err)
 			}
@@ -2239,6 +2252,29 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	return cli.PrintJSON(os.Stdout, result)
+}
+
+// fetchIssueDescription reads an issue's description and its revision. The
+// revision is nil when the server does not report one.
+func fetchIssueDescription(ctx context.Context, client *cli.APIClient, issueID string) (string, *int64, error) {
+	var issue struct {
+		Description *string `json:"description"`
+		Revision    *int64  `json:"description_revision"`
+	}
+	if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(issueID), &issue); err != nil {
+		return "", nil, err
+	}
+	if issue.Description == nil {
+		return "", issue.Revision, nil
+	}
+	return *issue.Description, issue.Revision, nil
+}
+
+// isIssueDescriptionConflict reports whether an update was refused because the
+// description changed after it was read.
+func isIssueDescriptionConflict(err error) bool {
+	var httpErr *cli.HTTPError
+	return errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusConflict && strings.Contains(httpErr.Body, "issue_description")
 }
 
 // issueDescriptionWriteError explains a refused description write and how to

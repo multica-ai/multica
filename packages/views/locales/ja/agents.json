@@ -865,6 +865,8 @@
       "runtime_recovery": "デーモンが再起動しました",
       "runtime_access_revoked": "ランタイムへのアクセスが取り消されました",
       "timeout": "実行がタイムアウトしました",
+      "cleanup_unconfirmed": "エージェントプロセスの終了を確認できませんでした",
+      "cleanup_blocked": "前回の実行が未終了の可能性。手動で再実行",
       "iteration_limit": "反復回数の上限に達しました",
       "agent_blocked": "人による入力を待機中",
       "api_invalid_request": "モデル API に拒否されました",

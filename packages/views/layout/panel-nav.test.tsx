@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { DEFAULT_APPEARANCE, useAppearanceStore } from "@multica/core/appearance";
-import { PanelBody, PanelDisclosure, PanelScrollFadeContext } from "./panel-nav";
+import { PanelBody, PanelDisclosure, PanelScrollFadeContext, usePanelDisclosureSettled } from "./panel-nav";
 
 // jsdom drops `mask-image`, so the fade stands in as a style it keeps.
 vi.mock("@multica/ui/hooks/use-scroll-fade", () => ({
@@ -96,5 +96,54 @@ describe("PanelDisclosure", () => {
       </PanelDisclosure>,
     );
     expect(screen.queryByText("reduced body")).toBeNull();
+  });
+
+  describe("usePanelDisclosureSettled", () => {
+    function Probe() {
+      return <span>{usePanelDisclosureSettled() ? "settled" : "opening"}</span>;
+    }
+    function Nested({ outer, inner }: { outer: boolean; inner: boolean }) {
+      return (
+        <PanelDisclosure open={outer}>
+          <PanelDisclosure open={inner}>
+            <Probe />
+          </PanelDisclosure>
+        </PanelDisclosure>
+      );
+    }
+
+    it("is settled from the start in a section that mounts open", () => {
+      render(<Nested outer inner />);
+      expect(screen.getByText("settled")).toBeInTheDocument();
+    });
+
+    it.each([
+      { name: "its own section", from: { outer: true, inner: false } },
+      { name: "the section around it", from: { outer: false, inner: true } },
+      { name: "both", from: { outer: false, inner: false } },
+    ])("waits for $name to finish opening", async ({ from }) => {
+      const { rerender } = render(<Nested {...from} />);
+      rerender(<Nested outer inner />);
+      expect(screen.getByText("opening")).toBeInTheDocument();
+      expect(await screen.findByText("settled")).toBeInTheDocument();
+    });
+
+    it("waits again when reopened before the close finishes", async () => {
+      const { rerender } = render(<Nested outer inner />);
+      rerender(<Nested outer inner={false} />);
+      rerender(<Nested outer inner />);
+      expect(screen.getByText("opening")).toBeInTheDocument();
+      expect(await screen.findByText("settled")).toBeInTheDocument();
+    });
+
+    it("is settled in the same frame under reduced motion, and stays so when motion returns", () => {
+      useAppearanceStore.setState({ ...DEFAULT_APPEARANCE, reduceMotion: true });
+      const { rerender } = render(<Nested outer={false} inner={false} />);
+      rerender(<Nested outer inner />);
+      expect(screen.getByText("settled")).toBeInTheDocument();
+
+      act(() => useAppearanceStore.setState({ ...DEFAULT_APPEARANCE }));
+      expect(screen.getByText("settled")).toBeInTheDocument();
+    });
   });
 });

@@ -262,15 +262,11 @@ func assertIssueStatusStillActive(ctx context.Context, qtx *db.Queries, workspac
 	return nil
 }
 
-// runWithIssueStatusGuard runs an issue write that lands on a custom status
-// inside a transaction that re-verifies the status under the shared catalog
-// lock (see assertIssueStatusStillActive). Request writes also carry trusted
-// wakeup actor identity in transaction-local settings, including built-in targets.
+// runWithIssueStatusGuard runs an issue write inside a transaction that
+// re-verifies a custom status under the shared catalog lock (see
+// assertIssueStatusStillActive). Request writes also carry trusted wakeup actor
+// identity in transaction-local settings.
 func (h *Handler) runWithIssueStatusGuard(ctx context.Context, workspaceID pgtype.UUID, statusKey string, fn func(q *db.Queries) error) error {
-	_, hasActor := ctx.Value(wakeupActorKey{}).(wakeupActor)
-	if !hasActor && (statusKey == "" || issuestatus.IsBuiltIn(statusKey)) {
-		return fn(h.Queries)
-	}
 	tx, err := h.beginWakeupWrite(ctx)
 	if err != nil {
 		return err
@@ -287,9 +283,11 @@ func (h *Handler) runWithIssueStatusGuard(ctx context.Context, workspaceID pgtyp
 	return tx.Commit(ctx)
 }
 
-// updateIssueWithStatusGuard writes params under the status-archive guard.
-func (h *Handler) updateIssueWithStatusGuard(ctx context.Context, workspaceID pgtype.UUID, statusKey string, params db.UpdateIssueParams) (db.Issue, error) {
-	var issue db.Issue
+// updateIssueWithStatusGuard writes params under the status-archive guard,
+// leaving fields rawFields does not name as the locked row has them. It returns
+// the written issue and the row it replaced.
+func (h *Handler) updateIssueWithStatusGuard(ctx context.Context, workspaceID pgtype.UUID, statusKey string, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, workflowAssignee bool) (db.Issue, db.Issue, error) {
+	var issue, current db.Issue
 	var cancelledWakeups []db.AgentTaskQueue
 	err := h.runWithIssueStatusGuard(ctx, workspaceID, statusKey, func(q *db.Queries) error {
 		if params.DuplicateOfIssueID.Valid {
@@ -298,14 +296,33 @@ func (h *Handler) updateIssueWithStatusGuard(ctx context.Context, workspaceID pg
 			}
 		}
 		var innerErr error
+		current, innerErr = lockIssueForFieldUpdate(ctx, q, workspaceID, &params, rawFields, workflowAssignee)
+		if innerErr != nil {
+			return innerErr
+		}
 		issue, cancelledWakeups, innerErr = updateIssueStoppingWakeups(ctx, q, params)
 		return innerErr
 	})
 	if err != nil {
-		return issue, err
+		return issue, current, err
 	}
 	h.broadcastCancelledWakeups(ctx, workspaceID, cancelledWakeups)
-	return issue, nil
+	return issue, current, nil
+}
+
+// lockIssueForFieldUpdate locks the issue row for the rest of the transaction
+// and takes the nullable fields rawFields does not name from it, so a write
+// that waited behind another one does not put that one's fields back.
+func lockIssueForFieldUpdate(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, params *db.UpdateIssueParams, rawFields map[string]json.RawMessage, workflowAssignee bool) (db.Issue, error) {
+	current, err := q.LockIssueForDescriptionUpdate(ctx, db.LockIssueForDescriptionUpdateParams{
+		ID:          params.ID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		return db.Issue{}, fmt.Errorf("lock issue for update: %w", err)
+	}
+	refreshUntouchedNullableIssueParams(params, current, rawFields, workflowAssignee)
+	return current, nil
 }
 
 // updateIssueStoppingWakeups writes params and, when the write moves the issue
@@ -4398,7 +4415,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			prevIssue = lockedPrev
 		}
 	} else {
-		issue, err = h.updateIssueWithStatusGuard(writeCtx, prevIssue.WorkspaceID, statusKeyForGuard, params)
+		var lockedPrev db.Issue
+		issue, lockedPrev, err = h.updateIssueWithStatusGuard(writeCtx, prevIssue.WorkspaceID, statusKeyForGuard, params, rawFields, handoff != nil)
+		if lockedPrev.ID.Valid {
+			prevIssue = lockedPrev
+		}
 	}
 	if err != nil {
 		if writeIssueBlockerError(w, err) {
@@ -5322,7 +5343,11 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				prevIssue = lockedPrev
 			}
 		case labelPlan == nil && propertyPlan == nil:
-			issue, err = h.updateIssueWithStatusGuard(writeCtx, wsUUID, issueStatusGuard, params)
+			var lockedPrev db.Issue
+			issue, lockedPrev, err = h.updateIssueWithStatusGuard(writeCtx, wsUUID, issueStatusGuard, params, rawUpdates, handoff != nil)
+			if err == nil {
+				prevIssue = lockedPrev
+			}
 		default:
 			var fieldParams *db.UpdateIssueParams
 			if hasFieldUpdate {
@@ -5331,13 +5356,21 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				issueStatusGuard = ""
 			}
 			var written batchIssueWrite
-			written, err = h.writeBatchIssue(writeCtx, wsUUID, prevIssue, fieldParams, issueStatusGuard, labelPlan, propertyPlan)
+			written, err = h.writeBatchIssue(writeCtx, wsUUID, prevIssue, fieldParams, rawUpdates, handoff != nil, issueStatusGuard, labelPlan, propertyPlan)
+			if err == nil {
+				prevIssue = written.prev
+			}
 			issue, labelsChanged, propertiesChanged = written.issue, written.labelsChanged, written.propertiesChanged
 		}
 		if err != nil {
+			if message, ok := issueBlockerConflict(err); ok {
+				skip(issueID, identifier, "blocker_conflict", message)
+				continue
+			}
 			// The archive race is a property of the batch's shared target
 			// status, not of one issue, so every remaining item would fail the
 			// same way. Abort with 409 instead of reporting a partial update.
+			// A blocker that does not exist is shared the same way.
 			if writeIssueBlockerError(w, err) {
 				return
 			}

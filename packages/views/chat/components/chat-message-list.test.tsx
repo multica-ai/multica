@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { chatKeys } from "@multica/core/chat/queries";
+import { TooltipProvider } from "@multica/ui/components/ui/tooltip";
 import type { Attachment, TaskMessagePayload } from "@multica/core/types";
 import type { ReactElement } from "react";
 import enChat from "../../locales/en/chat.json";
@@ -527,6 +528,37 @@ describe("ChatMessageList tool rows (#8835 regression)", () => {
 });
 
 describe("ChatMessageList command tool rows", () => {
+  it("shows a clipped tool name and summary on focus and keeps the row expandable", async () => {
+    const tool = "mcp__company-knowledge-base__search_documents_with_filters";
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), [
+      taskMsg(0, "tool_use", { tool, input: { query: "release checklist" } }),
+    ]);
+    render(
+      <TooltipProvider>
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <QueryClientProvider client={qc}>
+            <ChatMessageList messages={[]} pendingTask={{ task_id: TASK_ID, status: "running" }} availability="online" />
+          </QueryClientProvider>
+        </I18nProvider>
+      </TooltipProvider>,
+    );
+    const label = await screen.findByText(tool);
+    label.style.overflowX = "hidden";
+    Object.defineProperties(label, {
+      scrollWidth: { value: 360 },
+      clientWidth: { value: 120 },
+    });
+
+    const trigger = screen.getByRole("button", { name: /mcp__company-knowledge-base__search_documents_with_filters/ });
+    await act(async () => { trigger.focus(); });
+    expect(trigger).toHaveFocus();
+    expect(document.querySelector("[data-slot='tooltip-content']")).toHaveTextContent(`${tool} · release checklist`);
+
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+  });
+
   it("shows a command line by line, not as escaped JSON", async () => {
     const qc = new QueryClient();
     qc.setQueryData(chatKeys.taskMessages(TASK_ID), [

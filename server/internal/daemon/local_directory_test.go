@@ -491,6 +491,30 @@ func TestLocalPathLockerCtxCancel(t *testing.T) {
 	}
 }
 
+func TestLocalPathLockerRejectsCancelledAcquireOnFreePath(t *testing.T) {
+	locker := NewLocalPathLocker()
+	path := t.TempDir()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	release, err := locker.Acquire(ctx, path, "cancelled-task", nil)
+	if release != nil {
+		defer release()
+		t.Fatal("cancelled task acquired the lock")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("acquire error = %v, want context.Canceled", err)
+	}
+
+	nextCtx, cancelNext := context.WithTimeout(t.Context(), time.Second)
+	defer cancelNext()
+	release, err = locker.Acquire(nextCtx, path, "next-task", nil)
+	if err != nil {
+		t.Fatalf("acquire for next task: %v", err)
+	}
+	defer release()
+}
+
 func TestLocalPathLockerDistinctPathsParallel(t *testing.T) {
 	locker := NewLocalPathLocker()
 

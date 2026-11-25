@@ -1006,6 +1006,8 @@
       "runtime_recovery": "守護程序已重啟",
       "runtime_access_revoked": "執行時訪問已撤銷",
       "timeout": "執行超時",
+      "cleanup_unconfirmed": "未能確認 AI 代理行程已結束",
+      "cleanup_blocked": "上次執行可能未結束，需手動重新執行",
       "iteration_limit": "達到迭代次數上限",
       "agent_blocked": "等待人工輸入",
       "api_invalid_request": "模型 API 拒絕了請求",

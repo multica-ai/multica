@@ -375,6 +375,28 @@ describe("PullRequestList sidebar rows", () => {
     expect(screen.getByTestId("pull-request-row")).not.toHaveTextContent("119 files");
   });
 
+  it("lets the diff wrap away on its own instead of squeezing the number", async () => {
+    // Nested in the number's shrinkable group, a narrow row drew the diff
+    // over the number; as a sibling it wraps whole onto the clipped line.
+    mockPRs = [makePR({ number: 11590, additions: 500, deletions: 22 })];
+    renderList();
+    await waitForRender();
+    const line = screen.getByTestId("pull-request-diff").parentElement!;
+    expect(line).toHaveClass("flex-wrap", "overflow-hidden");
+    expect(screen.getByText("#11590").parentElement).toBe(line);
+  });
+
+  it("gives the repo name only leftover room, so it truncates before the diff wraps", async () => {
+    mockPRs = [
+      makePR({ id: "a", number: 42, additions: 5, deletions: 1 }),
+      makePR({ id: "b", number: 7, repo_name: "gadget" }),
+    ];
+    renderList();
+    await waitForRender();
+    expect(screen.getByText("widget")).toHaveClass("basis-0", "grow", "max-w-fit", "truncate");
+    expect(screen.getByText("widget").parentElement).toBe(screen.getByTestId("pull-request-diff").parentElement);
+  });
+
   it.each([
     ["checks are running", { checks_rollup: "pending" as const, checks_total: 4, checks_running: 2 }],
     ["the snapshot is stale", { snapshot_stale: true, snapshot_fetched_at: new Date(Date.now() - 3_600_000).toISOString() }],

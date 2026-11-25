@@ -647,6 +647,7 @@ multica workspace member list <workspace-id>
 ```bash
 multica issue list
 multica issue list --status in_progress
+multica issue list --blocked
 multica issue list --priority urgent --assignee "Agent Name"
 multica issue list --assignee-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
 multica issue list --full-id
@@ -657,7 +658,7 @@ multica issue list --output json --fields=id,title,status,priority  # narrow the
 multica issue list --output json --resolve-properties  # property names beside the ids
 ```
 
-Table output shows a routable issue `KEY` such as `MUL-123`; copy that key into follow-up commands like `issue get`, `issue comment list`, `issue status`, or `--parent`. Add `--full-id` when you need canonical UUIDs. Available filters: `--status`, `--priority`, `--assignee` / `--assignee-id`, `--project`, `--metadata`, `--property`, plus `--limit` and `--offset` for paging. Use `--assignee-id <uuid>` for unambiguous filtering when names overlap.
+Table output shows a routable issue `KEY` such as `MUL-123`; copy that key into follow-up commands like `issue get`, `issue comment list`, `issue status`, or `--parent`. Add `--full-id` when you need canonical UUIDs. Available filters: `--status`, `--priority`, `--assignee` / `--assignee-id`, `--project`, `--blocked` (only issues waiting for unfinished manual blockers or earlier stages), `--metadata`, `--property`, plus `--limit` and `--offset` for paging. Use `--assignee-id <uuid>` for unambiguous filtering when names overlap.
 
 If the server cannot count the matching issues, the list request fails with `failed to count issues` instead of returning the page length as a fabricated total. Successful response fields are unchanged. This trades availability of a partial page for an explicit failure that callers can retry.
 
@@ -713,9 +714,12 @@ multica issue get <id> --resolve-properties   # property names beside the ids, a
 ```bash
 multica issue create --title "Fix login bug" --description "..." --priority high --assignee "Lambda"
 multica issue create --title "Fix login bug" --assignee-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
+multica issue create --title "Ship release" --assignee "Lambda" --status todo --blocked-by MUL-101 --blocked-by MUL-102
 ```
 
-Flags: `--title` (required), `--description`, `--status`, `--priority`, `--assignee` / `--assignee-id`, `--parent`, `--project`, `--due-date`. Pass `--assignee-id <uuid>` (mutually exclusive with `--assignee`) when scripting against the IDs returned by `multica workspace member list --output json` / `multica agent list --output json`.
+Flags: `--title` (required), `--description` / `--description-stdin` / `--description-file`, `--status`, `--priority`, `--assignee` / `--assignee-id`, `--parent`, `--stage`, `--blocked-by` (repeatable; issue key or UUID to wait for before starting), `--project`, `--start-date`, `--due-date`, `--attachment` (repeatable), `--property` (repeatable), `--allow-duplicate`, `--pr-auto-complete`. Pass `--assignee-id <uuid>` (mutually exclusive with `--assignee`) when scripting against the IDs returned by `multica workspace member list --output json` / `multica agent list --output json`.
+
+For issues with unfinished blockers (`--blocked-by`, or earlier `--stage` siblings under the same parent), creating, assigning, or changing status does not start an agent run until all blockers reach a `done` or `closed` status (including `cancelled`) or are removed. Once unblocked, a non-`backlog` issue starts automatically (or notifies a member assignee); a `backlog` issue stays parked until it leaves `backlog`. `issue get --output json` includes `blocked_by` (each with `via: "manual"` or `"stage"`), `blocked_count`, and `blocking` (issues waiting on this one). Direct @-mentions and comment replies still start runs while blockers remain.
 
 ### Update Issue
 
@@ -723,11 +727,13 @@ Flags: `--title` (required), `--description`, `--status`, `--priority`, `--assig
 multica issue update <id> --title "New title" --priority urgent
 multica issue update <id> --position 4.5
 multica issue update <id> --attachment revised.png
+multica issue update <id> --blocked-by MUL-101 --remove-blocked-by MUL-99
 multica issue update <id> --description-file ./desc.md --description-base-revision <rev>
 multica issue edit-description <id> --old "Status: draft" --new "Status: ready"
 ```
 
 `--position` sets the raw ordering value within the board column (lower sorts first). For relative moves, `issue reorder` is easier because it works out the value for you.
+`--blocked-by` and `--remove-blocked-by` (both repeatable; issue key or UUID) add or remove manual blockers. Stage blockers follow `--stage` and `--parent` and cannot be removed with `--remove-blocked-by`.
 `--attachment` uploads a local file and appends its Markdown reference to the end of the issue description. Repeat the flag to attach multiple files. To replace an existing image, also remove the old reference with `multica issue edit-description <id> --old <old reference> --new ""`.
 `--description-base-revision` takes the `description_revision` from `multica issue get` and refuses stale description overwrites with HTTP 409 if the description changed since that revision.
 To change part of a description without rewriting the whole body, use `multica issue edit-description <id>` with `--old` / `--old-file` and `--new` / `--new-file` (add `--replace-all` to replace every occurrence; otherwise `--old` must match exactly once).
@@ -1240,13 +1246,20 @@ The CLI exposes cron-based `schedule` triggers via `trigger-add`, and `webhook`
 triggers via `trigger-add --kind webhook` plus `trigger-rotate-url`. The data model
 also defines an `api` kind, which is not surfaced here.
 
-### Webhook Event and Action Filters
+### Webhook Event, Action, and Payload Filters
 
-Use a JSON file to configure the same event/action filters as the web UI:
+Use a JSON file to configure the same event, action, and optional payload-field `conditions` filters as the web UI:
 
 ```json
 [
   {"event": "pull_request_review", "actions": ["submitted"]},
+  {
+    "event": "pull_request",
+    "conditions": [
+      {"path": "pull_request.draft", "op": "equals", "value": false},
+      {"path": "pull_request.base.ref", "op": "equals", "value": "main"}
+    ]
+  },
   {"event": "push"}
 ]
 ```
@@ -1260,8 +1273,11 @@ multica autopilot get <autopilot-id> --output json
 ```
 
 An event without `actions` (or with an empty actions array) accepts every action
-for that event. Filters apply only to webhook triggers; schedule triggers reject
-them. The server validates the filters using the same rules as UI submissions.
+for that event. Each row supports up to 20 payload `conditions` (field path up
+to 256 characters; `in` list up to 100 values), using the same operators and
+matching rules as the app. Filters apply only to webhook triggers; schedule
+triggers reject them. The server validates the filters using the same rules as
+UI submissions.
 
 Omitting `--event-filters-file` on update preserves the saved filters. Replacing
 filters requires a nonempty array; `null`, an empty array, unknown fields, and
@@ -1272,8 +1288,42 @@ multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filte
 ```
 
 `--clear-event-filters` cannot be combined with `--event-filters-file`. Creation
-without a filter file accepts all events. These flags configure existing event
-and action matching; they do not add payload-field conditions.
+without a filter file accepts all events.
+
+## Squads
+
+Manage squads, collaboration handoff modes, member rosters, and generated member briefs:
+
+```bash
+# List and inspect squads (get shows the current handoff mode)
+multica squad list
+multica squad get <squad-id>
+
+# Create and configure a squad
+multica squad create --name "Product Delivery" --leader <agent-name-or-id>
+multica squad update <squad-id> --handoff-mode direct
+multica squad update <squad-id> --instructions "Route DB tasks to Alice and UI to Bob."
+
+# Manage members
+multica squad member list <squad-id>
+multica squad member add <squad-id> --member-id <agent-or-member-id> --type agent --role "Owns frontend"
+multica squad member set-role <squad-id> --member-id <agent-or-member-id> --role "Owns backend and migrations"
+multica squad member remove <squad-id> --member-id <agent-or-member-id>
+
+# Preview the squad context each agent member receives (requires squad manage permission)
+multica squad briefs <squad-id>
+multica squad briefs <squad-id> --agent <agent-name-or-id>
+
+# Record a leader evaluation on an issue
+multica squad activity <issue-id> action --reason "Delegated implementation to Frontend Agent"
+
+# Archive a squad (transfers active issues/autopilots to the former leader)
+multica squad delete <squad-id>
+```
+
+Member type flags default to `agent`; pass `--type member` to `squad member add` / `remove`, or `--member-type member` to `squad member set-role`, for a human member.
+
+`--handoff-mode` accepts `leader` (default: every member reply returns to the leader) or `direct` (members hand work to the next member by `@`-mentioning them directly without waking the leader; fixed guardrails return the issue to the leader after 3 back-and-forth rounds, 20 member handoffs in 24 hours, a failed member run, or a reply naming no next owner).
 
 ## Quick Actions
 

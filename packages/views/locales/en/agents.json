@@ -1036,6 +1036,8 @@
       "runtime_recovery": "Daemon restarted",
       "runtime_access_revoked": "Runtime access revoked",
       "timeout": "Run timed out",
+      "cleanup_unconfirmed": "Couldn't confirm the agent process stopped",
+      "cleanup_blocked": "Previous run may be active; rerun manually",
       "iteration_limit": "Hit the iteration limit",
       "agent_blocked": "Waiting on human input",
       "api_invalid_request": "Rejected by the model API",

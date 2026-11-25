@@ -14,6 +14,8 @@ export const FAILURE_REASON_I18N_KEYS = {
   runtime_reconnect_timeout: "runtime_reconnect_timeout",
   runtime_recovery: "runtime_recovery",
   timeout: "timeout",
+  cleanup_unconfirmed: "cleanup_unconfirmed",
+  cleanup_blocked: "cleanup_blocked",
   iteration_limit: "iteration_limit",
   agent_blocked: "agent_blocked",
   api_invalid_request: "api_invalid_request",

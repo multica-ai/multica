@@ -29,6 +29,8 @@ export const REASONS = new Set([
   "runtime_reconnect_timeout",
   "runtime_recovery",
   "timeout",
+  "cleanup_unconfirmed",
+  "cleanup_blocked",
   "iteration_limit",
   "agent_blocked",
   "api_invalid_request",
