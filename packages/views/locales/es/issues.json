@@ -2177,7 +2177,7 @@
     "count_one": "Esperando {{count}} tarea",
     "count_other": "Esperando {{count}} tareas",
     "hint": "Al terminar estas tareas, el responsable comienza automáticamente o recibe una notificación.",
-    "hint_backlog": "Esta tarea está en Backlog, así que no comenzará automáticamente cuando terminen estas tareas. Comenzará cuando salga de Backlog.",
+    "hint_backlog": "No comenzará automáticamente mientras esté en Backlog.",
     "picker_hint": "Selecciona una tarea que deba terminar antes que esta.",
     "restricted": "{{count}} requisitos restringidos",
     "ended": "Las tareas en espera terminaron",
