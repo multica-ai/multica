@@ -2349,6 +2349,43 @@ export const DashboardFailureBySquadListSchema = z.array(
   DashboardFailureBySquadSchema,
 );
 
+// Per-member usage (`/api/dashboard/usage/by-member` and `/usage/member-tasks`).
+// Same leniency rules as the schemas above. A malformed `usage` array costs
+// that row its usage rather than dropping the whole response.
+const DashboardMemberUsageSchema = z.object({
+  provider: z.string().default(""),
+  model: z.string().default(""),
+  input_tokens: z.number().default(0),
+  output_tokens: z.number().default(0),
+  cache_read_tokens: z.number().default(0),
+  cache_write_tokens: z.number().default(0),
+  ...CostSplitShape,
+}).loose();
+
+const DashboardUsageByMemberSchema = z.object({
+  user_id: z.string().default(""),
+  task_count: z.number().default(0),
+  usage: z.array(DashboardMemberUsageSchema).catch([]),
+}).loose();
+
+export const DashboardUsageByMemberListSchema = z.array(DashboardUsageByMemberSchema);
+
+const DashboardMemberTaskSchema = z.object({
+  task_id: z.string().default(""),
+  agent_id: z.string().default(""),
+  status: z.string().default(""),
+  kind: z.enum(["issue", "chat", "other"]).catch("other"),
+  issue_id: z.string().nullable().default(null),
+  issue_identifier: z.string().nullable().default(null),
+  issue_title: z.string().nullable().default(null),
+  chat_session_id: z.string().nullable().default(null),
+  chat_title: z.string().nullable().default(null),
+  last_used_at: z.string().default(""),
+  usage: z.array(DashboardMemberUsageSchema).catch([]),
+}).loose();
+
+export const DashboardMemberTaskListSchema = z.array(DashboardMemberTaskSchema);
+
 // Runtime usage schemas — the runtime-detail page's four usage endpoints
 // (`/api/runtimes/:id/usage*`). Same leniency rules as the dashboard
 // schemas above: numbers default to 0, strings to "", `.loose()` passes

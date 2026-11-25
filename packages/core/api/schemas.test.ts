@@ -26,6 +26,8 @@ import {
   DashboardRunTimeDailyListSchema,
   DashboardFailureByAgentListSchema,
   DashboardFailureDailyListSchema,
+  DashboardUsageByMemberListSchema,
+  DashboardMemberTaskListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
   ChatDraftRestoresResponseSchema,
@@ -1260,6 +1262,32 @@ describe("SquadBriefsResponseSchema drift", () => {
 // that field to a sane default rather than dropping the WHOLE array to
 // the `[]` fallback — one drifted row must not blank the entire chart.
 describe("dashboard + runtime usage schema drift", () => {
+  it("fills missing fields on by-member rows and keeps a row whose usage is malformed", () => {
+    const [row, broken] = DashboardUsageByMemberListSchema.parse([
+      { usage: [{ model: "m" }] },
+      { user_id: "u2", task_count: 3, usage: "nope" },
+    ]);
+    expect(row?.user_id).toBe("");
+    expect(row?.task_count).toBe(0);
+    expect(row?.usage[0]?.input_tokens).toBe(0);
+    // Uncosted split stays undefined (not 0) so an old row still gets priced.
+    expect(row?.usage[0]?.uncosted_input_tokens).toBeUndefined();
+    expect(broken?.usage).toEqual([]);
+    expect(broken?.task_count).toBe(3);
+  });
+
+  it("degrades unknown member-task kinds and bad usage to safe defaults", () => {
+    const [task] = DashboardMemberTaskListSchema.parse([
+      { task_id: "t1", kind: "autopilot", usage: null },
+    ]);
+    expect(task?.kind).toBe("other");
+    expect(task?.usage).toEqual([]);
+    expect(task?.chat_title).toBeNull();
+    expect(task?.issue_id).toBeNull();
+    expect(task?.issue_identifier).toBeNull();
+    expect(DashboardMemberTaskListSchema.safeParse(null).success).toBe(false);
+  });
+
   it("coerces a missing numeric field to 0 instead of dropping the array", () => {
     const parsed = DashboardUsageDailyListSchema.parse([
       { date: "2026-05-19", model: "claude-opus-4-7", input_tokens: 100 },

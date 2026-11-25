@@ -133,5 +133,31 @@
   },
   "duration": {
     "less_than_minute": "1분 미만"
+  },
+  "members": {
+    "tab": "멤버별",
+    "title": "멤버별 사용량",
+    "description": "각 실행은 그 실행을 요청한 사람(에이전트를 @멘션·할당·예약한 사람)에게 집계됩니다. 에이전트 간 위임도 처음 요청한 사람까지 추적합니다.",
+    "caption_other": "멤버 {{count}}명",
+    "own_only": "내 사용량만 볼 수 있습니다.",
+    "header_member": "멤버",
+    "header_tokens": "토큰",
+    "header_cost": "비용",
+    "header_tasks": "사용량 있는 실행",
+    "unattributed": "미지정",
+    "former_member": "나간 멤버",
+    "no_data": "이 기간에는 멤버 사용량이 없습니다.",
+    "show_tasks": "{{name}}의 최근 실행 보기",
+    "hide_tasks": "{{name}}의 최근 실행 숨기기",
+    "recent_title": "최근 실행",
+    "recent_hint": "이 기간에 사용량이 있는 최근 실행 최대 {{limit}}개입니다.",
+    "recent_empty": "이 기간에 사용량이 있는 실행이 없습니다.",
+    "recent_error": "최근 실행을 불러오지 못했습니다.",
+    "chat_run": "채팅",
+    "generic_run": "기타 실행",
+    "other_agents": "기타 에이전트",
+    "header_task": "실행",
+    "header_agent": "에이전트",
+    "header_time": "마지막 사용"
   }
 }

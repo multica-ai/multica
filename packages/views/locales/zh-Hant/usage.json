@@ -133,5 +133,31 @@
   },
   "duration": {
     "less_than_minute": "<1分鐘"
+  },
+  "members": {
+    "tab": "按成員",
+    "title": "按成員統計用量",
+    "description": "每次執行都算在它的負責人名下：誰 @ 的、誰指派的、誰設定的自動任務；AI 代理轉派給其他 AI 代理時，也會追溯到最初的那個人。",
+    "caption_other": "{{count}} 位成員",
+    "own_only": "你只能看到自己的用量。",
+    "header_member": "成員",
+    "header_tokens": "Token",
+    "header_cost": "費用",
+    "header_tasks": "有用量的執行",
+    "unattributed": "未歸屬",
+    "former_member": "已離開的成員",
+    "no_data": "所選時間範圍內暫無成員用量。",
+    "show_tasks": "展開 {{name}} 最近的執行",
+    "hide_tasks": "收起 {{name}} 最近的執行",
+    "recent_title": "最近的執行",
+    "recent_hint": "所選時間範圍內有用量的最近 {{limit}} 次執行。",
+    "recent_empty": "所選時間範圍內沒有有用量的執行。",
+    "recent_error": "最近的執行載入失敗。",
+    "chat_run": "聊天",
+    "generic_run": "其他執行",
+    "other_agents": "其他 AI 代理",
+    "header_task": "執行",
+    "header_agent": "AI 代理",
+    "header_time": "最近使用"
   }
 }

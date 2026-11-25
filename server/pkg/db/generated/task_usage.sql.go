@@ -531,6 +531,167 @@ func (q *Queries) ListDashboardFailuresDaily(ctx context.Context, arg ListDashbo
 	return items, nil
 }
 
+const listDashboardMemberTaskUsage = `-- name: ListDashboardMemberTaskUsage :many
+WITH recent AS (
+    SELECT
+        atq.id AS task_id,
+        MAX(tu.created_at)::timestamptz AS last_used_at
+    FROM task_usage tu
+    JOIN agent_task_queue atq ON atq.id = tu.task_id
+    JOIN agent a ON a.id = atq.agent_id
+    LEFT JOIN issue i ON i.id = atq.issue_id
+    WHERE a.workspace_id = $2
+      AND atq.runtime_id IS NOT NULL
+      AND tu.created_at >= $1::timestamptz
+      AND ($3::uuid IS NULL OR i.project_id = $3)
+      AND (
+          $4::text = ''
+          OR ($4::text = 'standalone' AND COALESCE(atq.usage_squad_id, atq.squad_id) IS NULL)
+          OR ($4::text = 'squad' AND COALESCE(atq.usage_squad_id, atq.squad_id) = $5::uuid)
+      )
+      AND (
+            ($6::bool AND atq.accountable_user_id IS NULL)
+         OR (NOT $6::bool AND atq.accountable_user_id = $7::uuid)
+      )
+    GROUP BY atq.id
+    ORDER BY MAX(tu.created_at) DESC, atq.id
+    LIMIT $8::int
+)
+SELECT
+    r.task_id,
+    r.last_used_at,
+    atq.agent_id,
+    atq.status,
+    atq.issue_id,
+    atq.chat_session_id,
+    atq.autopilot_run_id,
+    atq.context,
+    i.number           AS issue_number,
+    i.title            AS issue_title,
+    cs.title           AS chat_title,
+    cs.creator_id      AS chat_creator_id,
+    LOWER(tu.provider) AS provider,
+    tu.model,
+    SUM(tu.input_tokens)::bigint       AS input_tokens,
+    SUM(tu.output_tokens)::bigint      AS output_tokens,
+    SUM(tu.cache_read_tokens)::bigint  AS cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint AS cache_write_tokens,
+    COALESCE(SUM(tu.cost_usd_ticks), 0)::bigint AS cost_usd_ticks,
+    COALESCE(SUM(tu.input_tokens)       FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_input_tokens,
+    COALESCE(SUM(tu.output_tokens)      FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_output_tokens,
+    COALESCE(SUM(tu.cache_read_tokens)  FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_read_tokens,
+    COALESCE(SUM(tu.cache_write_tokens) FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_write_tokens
+FROM recent r
+JOIN agent_task_queue atq ON atq.id = r.task_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+LEFT JOIN chat_session cs ON cs.id = atq.chat_session_id
+JOIN task_usage tu ON tu.task_id = r.task_id
+WHERE tu.created_at >= $1::timestamptz
+GROUP BY r.task_id, r.last_used_at, atq.id, i.number, i.title, cs.title, cs.creator_id,
+         LOWER(tu.provider), tu.model
+ORDER BY r.last_used_at DESC, r.task_id, LOWER(tu.provider), tu.model
+`
+
+type ListDashboardMemberTaskUsageParams struct {
+	SinceHour    pgtype.Timestamptz `json:"since_hour"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	ProjectID    pgtype.UUID        `json:"project_id"`
+	SquadScope   string             `json:"squad_scope"`
+	SquadID      pgtype.UUID        `json:"squad_id"`
+	Unattributed bool               `json:"unattributed"`
+	UserID       pgtype.UUID        `json:"user_id"`
+	TaskLimit    int32              `json:"task_limit"`
+}
+
+type ListDashboardMemberTaskUsageRow struct {
+	TaskID                   pgtype.UUID        `json:"task_id"`
+	LastUsedAt               pgtype.Timestamptz `json:"last_used_at"`
+	AgentID                  pgtype.UUID        `json:"agent_id"`
+	Status                   string             `json:"status"`
+	IssueID                  pgtype.UUID        `json:"issue_id"`
+	ChatSessionID            pgtype.UUID        `json:"chat_session_id"`
+	AutopilotRunID           pgtype.UUID        `json:"autopilot_run_id"`
+	Context                  []byte             `json:"context"`
+	IssueNumber              pgtype.Int4        `json:"issue_number"`
+	IssueTitle               pgtype.Text        `json:"issue_title"`
+	ChatTitle                pgtype.Text        `json:"chat_title"`
+	ChatCreatorID            pgtype.UUID        `json:"chat_creator_id"`
+	Provider                 string             `json:"provider"`
+	Model                    string             `json:"model"`
+	InputTokens              int64              `json:"input_tokens"`
+	OutputTokens             int64              `json:"output_tokens"`
+	CacheReadTokens          int64              `json:"cache_read_tokens"`
+	CacheWriteTokens         int64              `json:"cache_write_tokens"`
+	CostUsdTicks             int64              `json:"cost_usd_ticks"`
+	UncostedInputTokens      int64              `json:"uncosted_input_tokens"`
+	UncostedOutputTokens     int64              `json:"uncosted_output_tokens"`
+	UncostedCacheReadTokens  int64              `json:"uncosted_cache_read_tokens"`
+	UncostedCacheWriteTokens int64              `json:"uncosted_cache_write_tokens"`
+}
+
+// The most recent runs (by latest usage in the window) of ONE accountable user,
+// or with @unattributed of the runs nobody is accountable for, one row per
+// (run, provider, model) so the client can price each run. A user id from
+// another workspace matches nothing: every run is pinned to this workspace
+// through its agent.
+//
+// autopilot_run_id and context ride along so the handler can resolve the
+// projects a run is about (projectaccess.TasksProjects) without re-reading the
+// runs, and chat_creator_id so it can withhold a chat's title from everyone
+// but the chat's creator.
+func (q *Queries) ListDashboardMemberTaskUsage(ctx context.Context, arg ListDashboardMemberTaskUsageParams) ([]ListDashboardMemberTaskUsageRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardMemberTaskUsage,
+		arg.SinceHour,
+		arg.WorkspaceID,
+		arg.ProjectID,
+		arg.SquadScope,
+		arg.SquadID,
+		arg.Unattributed,
+		arg.UserID,
+		arg.TaskLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardMemberTaskUsageRow{}
+	for rows.Next() {
+		var i ListDashboardMemberTaskUsageRow
+		if err := rows.Scan(
+			&i.TaskID,
+			&i.LastUsedAt,
+			&i.AgentID,
+			&i.Status,
+			&i.IssueID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Context,
+			&i.IssueNumber,
+			&i.IssueTitle,
+			&i.ChatTitle,
+			&i.ChatCreatorID,
+			&i.Provider,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.CostUsdTicks,
+			&i.UncostedInputTokens,
+			&i.UncostedOutputTokens,
+			&i.UncostedCacheReadTokens,
+			&i.UncostedCacheWriteTokens,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDashboardRunTimeDaily = `-- name: ListDashboardRunTimeDaily :many
 SELECT
     DATE(atq.completed_at AT TIME ZONE $2::text) AS date,
@@ -715,6 +876,71 @@ func (q *Queries) ListDashboardSquadRunTime(ctx context.Context, arg ListDashboa
 	return items, nil
 }
 
+const listDashboardTaskCountByMember = `-- name: ListDashboardTaskCountByMember :many
+SELECT
+    atq.accountable_user_id,
+    COUNT(DISTINCT atq.id)::int AS task_count
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND atq.runtime_id IS NOT NULL
+  AND tu.created_at >= $2::timestamptz
+  AND ($3::uuid IS NULL OR i.project_id = $3)
+  AND (
+      $4::text = ''
+      OR ($4::text = 'standalone' AND COALESCE(atq.usage_squad_id, atq.squad_id) IS NULL)
+      OR ($4::text = 'squad' AND COALESCE(atq.usage_squad_id, atq.squad_id) = $5::uuid)
+  )
+  AND ($6::uuid IS NULL OR atq.accountable_user_id = $6)
+GROUP BY atq.accountable_user_id
+`
+
+type ListDashboardTaskCountByMemberParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	SinceHour   pgtype.Timestamptz `json:"since_hour"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+	SquadScope  string             `json:"squad_scope"`
+	SquadID     pgtype.UUID        `json:"squad_id"`
+	OnlyUserID  pgtype.UUID        `json:"only_user_id"`
+}
+
+type ListDashboardTaskCountByMemberRow struct {
+	AccountableUserID pgtype.UUID `json:"accountable_user_id"`
+	TaskCount         int32       `json:"task_count"`
+}
+
+// Distinct runs with usage in the window, per accountable user. Kept apart from
+// ListDashboardUsageByMember because a run that used two models sits in two of
+// its rows and would be counted twice there.
+func (q *Queries) ListDashboardTaskCountByMember(ctx context.Context, arg ListDashboardTaskCountByMemberParams) ([]ListDashboardTaskCountByMemberRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardTaskCountByMember,
+		arg.WorkspaceID,
+		arg.SinceHour,
+		arg.ProjectID,
+		arg.SquadScope,
+		arg.SquadID,
+		arg.OnlyUserID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardTaskCountByMemberRow{}
+	for rows.Next() {
+		var i ListDashboardTaskCountByMemberRow
+		if err := rows.Scan(&i.AccountableUserID, &i.TaskCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDashboardUsageByAgent = `-- name: ListDashboardUsageByAgent :many
 SELECT
     agent_id,
@@ -810,6 +1036,125 @@ func (q *Queries) ListDashboardUsageByAgent(ctx context.Context, arg ListDashboa
 			&i.UncostedCacheReadTokens,
 			&i.UncostedCacheWriteTokens,
 			&i.TaskCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDashboardUsageByMember = `-- name: ListDashboardUsageByMember :many
+
+SELECT
+    atq.accountable_user_id,
+    LOWER(tu.provider) AS provider,
+    tu.model,
+    SUM(tu.input_tokens)::bigint       AS input_tokens,
+    SUM(tu.output_tokens)::bigint      AS output_tokens,
+    SUM(tu.cache_read_tokens)::bigint  AS cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint AS cache_write_tokens,
+    COALESCE(SUM(tu.cost_usd_ticks), 0)::bigint AS cost_usd_ticks,
+    COALESCE(SUM(tu.input_tokens)       FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_input_tokens,
+    COALESCE(SUM(tu.output_tokens)      FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_output_tokens,
+    COALESCE(SUM(tu.cache_read_tokens)  FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_read_tokens,
+    COALESCE(SUM(tu.cache_write_tokens) FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_write_tokens
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND atq.runtime_id IS NOT NULL
+  AND tu.created_at >= $2::timestamptz
+  AND ($3::uuid IS NULL OR i.project_id = $3)
+  AND (
+      $4::text = ''
+      OR ($4::text = 'standalone' AND COALESCE(atq.usage_squad_id, atq.squad_id) IS NULL)
+      OR ($4::text = 'squad' AND COALESCE(atq.usage_squad_id, atq.squad_id) = $5::uuid)
+  )
+  AND ($6::uuid IS NULL OR atq.accountable_user_id = $6)
+GROUP BY atq.accountable_user_id, LOWER(tu.provider), tu.model
+ORDER BY atq.accountable_user_id, LOWER(tu.provider), tu.model
+`
+
+type ListDashboardUsageByMemberParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	SinceHour   pgtype.Timestamptz `json:"since_hour"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+	SquadScope  string             `json:"squad_scope"`
+	SquadID     pgtype.UUID        `json:"squad_id"`
+	OnlyUserID  pgtype.UUID        `json:"only_user_id"`
+}
+
+type ListDashboardUsageByMemberRow struct {
+	AccountableUserID        pgtype.UUID `json:"accountable_user_id"`
+	Provider                 string      `json:"provider"`
+	Model                    string      `json:"model"`
+	InputTokens              int64       `json:"input_tokens"`
+	OutputTokens             int64       `json:"output_tokens"`
+	CacheReadTokens          int64       `json:"cache_read_tokens"`
+	CacheWriteTokens         int64       `json:"cache_write_tokens"`
+	CostUsdTicks             int64       `json:"cost_usd_ticks"`
+	UncostedInputTokens      int64       `json:"uncosted_input_tokens"`
+	UncostedOutputTokens     int64       `json:"uncosted_output_tokens"`
+	UncostedCacheReadTokens  int64       `json:"uncosted_cache_read_tokens"`
+	UncostedCacheWriteTokens int64       `json:"uncosted_cache_write_tokens"`
+}
+
+// Per-member usage (the dashboard's "By member" tab).
+//
+// "Member" is the run's accountable human, agent_task_queue.accountable_user_id:
+// the person a run was ultimately done for, followed through agent-to-agent
+// hand-offs. NULL means nobody could be attributed (the "unattributed" bucket).
+//
+// task_usage_hourly has no accountable dimension, so these three read raw
+// task_usage with the filters rollup_task_usage_hourly_window applies (agent in
+// this workspace, runtime_id NOT NULL, project from the run's issue, squad from
+// COALESCE(usage_squad_id, squad_id)), so the member rows add up to the totals
+// usage/daily and usage/by-agent report for the same window.
+//
+// @since_hour is the handler's cutoff rounded UP to the hour: the hourly
+// rollups keep a bucket when bucket_hour >= cutoff, and for a usage row that is
+// exactly created_at >= ceil_to_hour(cutoff). Passing it pre-rounded keeps the
+// predicate on the bare column, which idx_task_usage_created_at can serve.
+//
+// @only_user_id, when non-NULL, restricts the result to one accountable user.
+// The handler sets it for every caller who is not an owner or admin, so a plain
+// member's restriction lives in the SQL rather than in a post-filter.
+// Per-(accountable user, provider, model) token aggregates. provider + model
+// stay on the wire so the client prices them like usage/by-agent.
+func (q *Queries) ListDashboardUsageByMember(ctx context.Context, arg ListDashboardUsageByMemberParams) ([]ListDashboardUsageByMemberRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardUsageByMember,
+		arg.WorkspaceID,
+		arg.SinceHour,
+		arg.ProjectID,
+		arg.SquadScope,
+		arg.SquadID,
+		arg.OnlyUserID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardUsageByMemberRow{}
+	for rows.Next() {
+		var i ListDashboardUsageByMemberRow
+		if err := rows.Scan(
+			&i.AccountableUserID,
+			&i.Provider,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.CostUsdTicks,
+			&i.UncostedInputTokens,
+			&i.UncostedOutputTokens,
+			&i.UncostedCacheReadTokens,
+			&i.UncostedCacheWriteTokens,
 		); err != nil {
 			return nil, err
 		}

@@ -133,5 +133,31 @@
   },
   "duration": {
     "less_than_minute": "<1分钟"
+  },
+  "members": {
+    "tab": "按成员",
+    "title": "按成员统计用量",
+    "description": "每次运行都算在它的负责人名下：谁 @ 的、谁分配的、谁设的自动任务；智能体转派给其他智能体时，也会追溯到最初的那个人。",
+    "caption_other": "{{count}} 位成员",
+    "own_only": "你只能看到自己的用量。",
+    "header_member": "成员",
+    "header_tokens": "Token",
+    "header_cost": "费用",
+    "header_tasks": "有用量的运行",
+    "unattributed": "未归属",
+    "former_member": "已离开的成员",
+    "no_data": "所选时间范围内暂无成员用量。",
+    "show_tasks": "展开 {{name}} 最近的运行",
+    "hide_tasks": "收起 {{name}} 最近的运行",
+    "recent_title": "最近的运行",
+    "recent_hint": "所选时间范围内有用量的最近 {{limit}} 次运行。",
+    "recent_empty": "所选时间范围内没有有用量的运行。",
+    "recent_error": "最近的运行加载失败。",
+    "chat_run": "聊天",
+    "generic_run": "其他运行",
+    "other_agents": "其他智能体",
+    "header_task": "运行",
+    "header_agent": "智能体",
+    "header_time": "最近使用"
   }
 }
