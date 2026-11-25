@@ -12,7 +12,12 @@ vi.mock("@multica/core/chat/mutations", () => ({
   useRegenerateChatQuickActions: () => ({ mutateAsync: vi.fn() }),
 }));
 const listProps = vi.hoisted(() => ({
-  current: null as null | { revealKey?: string | null; onRevealed?: () => void },
+  current: null as null | {
+    revealKey?: string | null;
+    onRevealed?: () => void;
+    onEditQueuedTask?: (taskId: string) => Promise<void> | void;
+    onRemoveQueuedTask?: (taskId: string) => Promise<void> | void;
+  },
 }));
 vi.mock("./chat-message-list", () => ({
   ChatMessageList: ({
@@ -20,13 +25,17 @@ vi.mock("./chat-message-list", () => ({
     messages,
     revealKey,
     onRevealed,
+    onEditQueuedTask,
+    onRemoveQueuedTask,
   }: {
     active: boolean;
     messages: ChatMessage[];
     revealKey?: string | null;
     onRevealed?: () => void;
+    onEditQueuedTask?: (taskId: string) => Promise<void> | void;
+    onRemoveQueuedTask?: (taskId: string) => Promise<void> | void;
   }) => {
-    listProps.current = { revealKey, onRevealed };
+    listProps.current = { revealKey, onRevealed, onEditQueuedTask, onRemoveQueuedTask };
     return (
       <div data-testid="messages" data-active={active}>
         {messages.map((message) => <p key={message.id}>{message.content}</p>)}
@@ -53,7 +62,15 @@ function renderWindow(
     sessionId = "session-1",
     cached = true,
     onReady,
-  }: { sessionId?: string | null; cached?: boolean; onReady?: () => void } = {},
+    onEditQueuedTask,
+    onRemoveQueuedTask,
+  }: {
+    sessionId?: string | null;
+    cached?: boolean;
+    onReady?: () => void;
+    onEditQueuedTask?: (taskId: string) => Promise<void> | void;
+    onRemoveQueuedTask?: (taskId: string) => Promise<void> | void;
+  } = {},
 ) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const key = chatKeys.messagesPage("session-1");
@@ -70,6 +87,8 @@ function renderWindow(
             onQuickAction={vi.fn()}
             quickActionsDisabled={false}
             quickActionsPendingMessageId={null}
+            onEditQueuedTask={onEditQueuedTask}
+            onRemoveQueuedTask={onRemoveQueuedTask}
             onReady={onReady}
           >
             <div>empty</div>
@@ -117,6 +136,15 @@ describe("floating chat message readiness", () => {
     expect(onReady).not.toHaveBeenCalled();
     expect(listProps.current?.revealKey).toBe("session-1");
     expect(listProps.current?.onRevealed).toBe(onReady);
+  });
+
+  it("forwards queued action callbacks to the message list", () => {
+    const onEditQueuedTask = vi.fn();
+    const onRemoveQueuedTask = vi.fn();
+    renderWindow(true, { onEditQueuedTask, onRemoveQueuedTask });
+
+    expect(listProps.current?.onEditQueuedTask).toBe(onEditQueuedTask);
+    expect(listProps.current?.onRemoveQueuedTask).toBe(onRemoveQueuedTask);
   });
 
   it("does not report ready while the area is leaving", () => {
