@@ -276,6 +276,22 @@ describe("AppsPage", () => {
     expect(title.querySelector("[data-slot=skeleton]")).toBeNull();
   });
 
+  it("keeps the loaded catalog when a later refresh fails", async () => {
+    const user = userEvent.setup();
+    nav.search = "tab=all";
+    renderPage();
+    await screen.findByRole("link", { name: "Linear" });
+    vi.mocked(api.listAppCatalog).mockRejectedValue(new Error("upstream"));
+    // Asking for a team account reloads everything under connected apps.
+    await user.click(screen.getByRole("button", { name: "Ask an admin" }));
+    await waitFor(() => expect(api.listAppCatalog).toHaveBeenCalledTimes(2));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Linear" })).toBeInTheDocument();
+    expect(navLink(/^All apps/)).toHaveTextContent(/4$/);
+    expect(within(directoryNav()).getByRole("region", { name: "Categories" })).toBeInTheDocument();
+  });
+
   it("recovers an empty saved catalog only after an admin confirms", async () => {
     overview = { ...overview, catalog_mode: "custom", allowed_toolkits: [], can_manage: true };
     vi.mocked(api.updateAppSettings).mockImplementation(async () => {
