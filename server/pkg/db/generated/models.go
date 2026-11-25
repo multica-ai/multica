@@ -2037,6 +2037,16 @@ type SysCronExecution struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
+type TaskCodeChange struct {
+	TaskID         pgtype.UUID        `json:"task_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	Repos          []byte             `json:"repos"`
+	ReposTruncated bool               `json:"repos_truncated"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type TaskContextReceipt struct {
 	TaskID      pgtype.UUID        `json:"task_id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
