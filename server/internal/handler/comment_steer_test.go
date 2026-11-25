@@ -32,7 +32,7 @@ func runningSteerableTask(t *testing.T, f supplementFixture, name string) (agent
 	runtimeID := dbfx.Runtime(t, "steer-"+name, testutil.Cols{"provider": "claude"})
 	agentID = dbfx.Agent(t, name, runtimeID)
 	taskID = dbfx.Task(t, agentID, testutil.Cols{
-		"issue_id": f.issueID, "runtime_id": runtimeID, "status": "running", "started_at": testutil.Raw("now()"),
+		"issue_id": f.issueID, "runtime_id": runtimeID, "trigger_comment_id": f.triggerID, "status": "running", "started_at": testutil.Raw("now()"),
 	})
 	dbfx.Exec(t, `INSERT INTO task_supplement_capability (task_id, workspace_id, issue_id, capability) VALUES ($1, $2, $3, $4)`,
 		taskID, testWorkspaceID, f.issueID, protocol.DaemonCapabilityTaskSupplementV1)
@@ -136,7 +136,7 @@ func TestCreateCommentSteersOnlyRunningRecipients(t *testing.T) {
 	content := agentMention("Supplement", f.agentID) + " only web; " + agentMention("Idle recipient", idleAgentID) + " check desktop"
 
 	var created CommentResponse
-	postSteeredComment(t, f.issueID, "", content, f.taskID).Want(http.StatusCreated).JSON(&created)
+	postSteeredComment(t, f.issueID, f.triggerID, content, f.taskID).Want(http.StatusCreated).JSON(&created)
 	if len(created.Supplements) != 1 || created.Supplements[0].AgentID != f.agentID {
 		t.Fatalf("receipts = %+v, want the running agent only", created.Supplements)
 	}
@@ -160,7 +160,7 @@ func TestCreateCommentSteersSeveralRunningTurns(t *testing.T) {
 	content := agentMention("Supplement", f.agentID) + " and " + agentMention("Second runner", otherAgentID) + " stop touching desktop"
 
 	var created CommentResponse
-	postSteeredComment(t, f.issueID, "", content, f.taskID, otherTaskID).Want(http.StatusCreated).JSON(&created)
+	postSteeredComment(t, f.issueID, f.triggerID, content, f.taskID, otherTaskID).Want(http.StatusCreated).JSON(&created)
 	got := map[string]string{}
 	for _, receipt := range created.Supplements {
 		got[receipt.AgentID] = receipt.TaskID
@@ -187,7 +187,7 @@ func TestCompletionReplaysASteeredCommentOnlyForAgentsItDidNotSteer(t *testing.T
 	content := agentMention("Supplement", f.agentID) + " only web; " + agentMention("Waits its turn", otherAgentID) + " next round"
 
 	var created CommentResponse
-	postSteeredComment(t, f.issueID, "", content, f.taskID).Want(http.StatusCreated).JSON(&created)
+	postSteeredComment(t, f.issueID, f.triggerID, content, f.taskID).Want(http.StatusCreated).JSON(&created)
 	if len(created.Supplements) != 1 || created.Supplements[0].AgentID != f.agentID {
 		t.Fatalf("receipts = %+v, want the steered agent only", created.Supplements)
 	}
@@ -335,5 +335,68 @@ func TestCreateCommentSteerKeepsSkillCapsuleCommentsAsOwnTurns(t *testing.T) {
 		f.issueID, f.taskID).Scan(&trigger)
 	if trigger != created.ID {
 		t.Fatalf("follow-up trigger = %s, want the skill-capsule comment %s", trigger, created.ID)
+	}
+}
+
+func TestCommentSteeringThreadIsolation(t *testing.T) {
+	for _, mode := range []string{"same-root", "same-nested", "other-thread", "new-root", "assignment", "assignment-top-level", "coalesced-other-thread"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newSupplementFixture(t, "claude", "running", true)
+			dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE issue_id = $1`, f.issueID)
+			dbfx.Exec(t, `UPDATE agent_task_queue SET delivered_comment_ids=ARRAY[trigger_comment_id] WHERE id=$1`, f.taskID)
+			root := dbfx.Comment(t, f.issueID, agentMention("Target", f.agentID)+" another topic")
+			parent := root
+			same := mode == "same-root" || mode == "same-nested" || mode == "assignment-top-level"
+			switch mode {
+			case "same-root":
+				parent = f.triggerID
+			case "same-nested":
+				parent = dbfx.Comment(t, f.issueID, "nested reply", testutil.Cols{"parent_id": f.triggerID})
+				dbfx.Exec(t, `UPDATE agent_task_queue SET trigger_comment_id=$2 WHERE id=$1`, f.taskID, parent)
+			case "new-root":
+				parent = ""
+			case "assignment", "assignment-top-level":
+				if mode == "assignment-top-level" {
+					parent = ""
+				}
+				dbfx.Exec(t, `UPDATE agent_task_queue SET trigger_comment_id=NULL,comment_thread_id=NULL WHERE id=$1`, f.taskID)
+			case "coalesced-other-thread":
+				dbfx.Exec(t, `UPDATE agent_task_queue SET coalesced_comment_ids=ARRAY[$2::uuid],delivered_comment_ids=ARRAY[trigger_comment_id,$2::uuid] WHERE id=$1`, f.taskID, root)
+			}
+			var created CommentResponse
+			postSteeredComment(t, f.issueID, parent, agentMention("Target", f.agentID)+" answer this topic", f.taskID).Want(http.StatusCreated).JSON(&created)
+			if same {
+				if len(created.Supplements) != 1 || !steeredAgent(created, f.agentID) {
+					t.Fatalf("same-thread comment not steered: %+v", created)
+				}
+				return
+			}
+			if len(created.Supplements) != 0 || steeredAgent(created, f.agentID) {
+				t.Fatalf("different/unknown thread was steered: %+v", created)
+			}
+			if n := dbfx.Count(t, `SELECT count(*) FROM task_supplement WHERE comment_id=$1`, created.ID); n != 0 {
+				t.Fatalf("unexpected receipt count %d", n)
+			}
+			completeTaskViaDaemon(t, f.taskID)
+			var nextID string
+			dbfx.QueryRow(t, `SELECT id FROM agent_task_queue WHERE agent_id=$1 AND trigger_comment_id=$2 AND status='queued'`, f.agentID, created.ID).Scan(&nextID)
+			req := withURLParam(newOwnerDaemonRequest(http.MethodPost, "/claim", nil), "runtimeId", f.runtimeID)
+			var claim struct {
+				Task *AgentTaskResponse `json:"task"`
+			}
+			testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK).JSON(&claim)
+			wantRoot := root
+			if parent == "" {
+				wantRoot = created.ID
+			}
+			if claim.Task == nil || claim.Task.ID != nextID || claim.Task.TriggerThreadID != wantRoot || claim.Task.TriggerCommentID == nil || *claim.Task.TriggerCommentID != created.ID {
+				t.Fatalf("queued reply lost its thread: %+v, want %s", claim.Task, wantRoot)
+			}
+			// The follow-up posts its response under the input it actually claimed.
+			reply := postAgentComment(t, f.issueID, f.agentID, nextID, map[string]any{"content": "Answer in the new thread", "parent_id": *claim.Task.TriggerCommentID})
+			if reply.ParentID == nil || *reply.ParentID != created.ID {
+				t.Fatalf("reply parent=%v, want %s", reply.ParentID, created.ID)
+			}
+		})
 	}
 }

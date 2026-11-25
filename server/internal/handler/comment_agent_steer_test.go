@@ -68,25 +68,25 @@ func TestAgentCommentSteersAnAgentItMayInvoke(t *testing.T) {
 		wantSteered  bool
 	}{
 		{name: "named turn", wantSteered: true, body: func(f agentSteerFixture) map[string]any {
-			return map[string]any{"content": agentMention("Target", f.agentID) + " only fix web", "steer_task_ids": []string{f.taskID}}
+			return map[string]any{"parent_id": f.triggerID, "content": agentMention("Target", f.agentID) + " only fix web", "steer_task_ids": []string{f.taskID}}
 		}},
 		{name: "steer resolves the running turn", wantSteered: true, body: func(f agentSteerFixture) map[string]any {
-			return map[string]any{"content": agentMention("Target", f.agentID) + " only fix web", "steer": true}
+			return map[string]any{"parent_id": f.triggerID, "content": agentMention("Target", f.agentID) + " only fix web", "steer": true}
 		}},
 		{name: "no steer intent keeps the normal trigger", body: func(f agentSteerFixture) map[string]any {
-			return map[string]any{"content": agentMention("Target", f.agentID) + " only fix web"}
+			return map[string]any{"parent_id": f.triggerID, "content": agentMention("Target", f.agentID) + " only fix web"}
 		}},
 		{name: "chain that may not invoke the target", noOriginator: true, body: func(f agentSteerFixture) map[string]any {
-			return map[string]any{"content": agentMention("Target", f.agentID) + " only fix web", "steer": true}
+			return map[string]any{"parent_id": f.triggerID, "content": agentMention("Target", f.agentID) + " only fix web", "steer": true}
 		}},
 		{name: "pi named turn", provider: "pi", wantSteered: true, body: func(f agentSteerFixture) map[string]any {
-			return map[string]any{"content": agentMention("Target", f.agentID) + " only fix web", "steer_task_ids": []string{f.taskID}}
+			return map[string]any{"parent_id": f.triggerID, "content": agentMention("Target", f.agentID) + " only fix web", "steer_task_ids": []string{f.taskID}}
 		}},
 		{name: "pi chain that may not invoke the target", provider: "pi", noOriginator: true, body: func(f agentSteerFixture) map[string]any {
-			return map[string]any{"content": agentMention("Target", f.agentID) + " only fix web", "steer": true}
+			return map[string]any{"parent_id": f.triggerID, "content": agentMention("Target", f.agentID) + " only fix web", "steer": true}
 		}},
 		{name: "own running turn", self: true, body: func(f agentSteerFixture) map[string]any {
-			return map[string]any{"content": agentMention("Me", f.callerAgent) + " note to self", "steer_task_ids": []string{f.callerTask}}
+			return map[string]any{"parent_id": f.triggerID, "content": agentMention("Me", f.callerAgent) + " note to self", "steer_task_ids": []string{f.callerTask}}
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -124,7 +124,7 @@ func insertAgentBinding(t *testing.T, f supplementFixture, taskID, authorAgentID
 func TestAgentSteeringIsCappedPerAgentAndPerTurn(t *testing.T) {
 	t.Run("per authoring agent", func(t *testing.T) {
 		f := newAgentSteerFixture(t)
-		body := map[string]any{"content": agentMention("Target", f.agentID) + " narrow it", "steer": true}
+		body := map[string]any{"parent_id": f.triggerID, "content": agentMention("Target", f.agentID) + " narrow it", "steer": true}
 		for i := range maxAgentSteersPerAgentPerTurn + 1 {
 			created := postAgentComment(t, f.issueID, f.callerAgent, f.callerTask, body)
 			if got, want := steeredAgent(created, f.agentID), i < maxAgentSteersPerAgentPerTurn; got != want {
@@ -137,7 +137,7 @@ func TestAgentSteeringIsCappedPerAgentAndPerTurn(t *testing.T) {
 		for i := range maxAgentSteersPerTurn - 1 {
 			insertAgentBinding(t, f.supplementFixture, f.taskID, dbfx.Agent(t, fmt.Sprintf("Earlier steerer %d", i), f.runtimeID))
 		}
-		body := map[string]any{"content": agentMention("Target", f.agentID) + " narrow it", "steer": true}
+		body := map[string]any{"parent_id": f.triggerID, "content": agentMention("Target", f.agentID) + " narrow it", "steer": true}
 		if created := postAgentComment(t, f.issueID, f.callerAgent, f.callerTask, body); !steeredAgent(created, f.agentID) {
 			t.Fatalf("last slot not used: %+v", created.TriggerOutcomes)
 		}
@@ -146,7 +146,7 @@ func TestAgentSteeringIsCappedPerAgentAndPerTurn(t *testing.T) {
 			t.Fatalf("full turn was steered: %+v", created.TriggerOutcomes)
 		}
 		var member CommentResponse
-		postSteeredComment(t, f.issueID, "", agentMention("Target", f.agentID)+" member note", f.taskID).Want(http.StatusCreated).JSON(&member)
+		postSteeredComment(t, f.issueID, f.triggerID, agentMention("Target", f.agentID)+" member note", f.taskID).Want(http.StatusCreated).JSON(&member)
 		if !steeredAgent(member, f.agentID) {
 			t.Fatalf("member steering was capped: %+v", member.TriggerOutcomes)
 		}
@@ -206,7 +206,7 @@ func TestAgentSteeredCommentReplaysUnlessDelivered(t *testing.T) {
 		t.Run(tc.status, func(t *testing.T) {
 			f := newAgentSteerFixture(t)
 			created := postAgentComment(t, f.issueID, f.callerAgent, f.callerTask, map[string]any{
-				"content": agentMention("Target", f.agentID) + " only fix web", "steer": true,
+				"parent_id": f.triggerID, "content": agentMention("Target", f.agentID) + " only fix web", "steer": true,
 			})
 			if !steeredAgent(created, f.agentID) {
 				t.Fatalf("not steered: %+v", created.TriggerOutcomes)
@@ -228,7 +228,7 @@ func TestAgentSteeredCommentReplaysUnlessDelivered(t *testing.T) {
 func TestClaimTaskSupplementAttributesAgentMessages(t *testing.T) {
 	f := newAgentSteerFixture(t)
 	created := postAgentComment(t, f.issueID, f.callerAgent, f.callerTask, map[string]any{
-		"content": agentMention("Target", f.agentID) + " only fix web", "steer": true,
+		"parent_id": f.triggerID, "content": agentMention("Target", f.agentID) + " only fix web", "steer": true,
 	})
 	if !steeredAgent(created, f.agentID) {
 		t.Fatalf("not steered: %+v", created.TriggerOutcomes)

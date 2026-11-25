@@ -137,9 +137,11 @@ multica issue rerun-task <run-id> --issue MUL-123 --fresh
 Add a comment to a run that is still working, instead of queueing a follow-up run (only runs that accept additional messages; you can steer an agent exactly when your comment could start it):
 
 ```bash
-multica issue comment add MUL-123 --content-file note.md --steer <task-id>
-multica issue comment add MUL-123 --content-file note.md --steer-active
+multica issue comment add MUL-123 --content-file note.md --parent <comment-id> --steer <task-id>
+multica issue comment add MUL-123 --content-file note.md --parent <comment-id> --steer-active
 ```
+
+Only a reply in the thread of the comment that started a run is added to that run; a run started by assignment takes only top-level comments. Any other comment waits for a follow-up run.
 
 If `issue comment add` times out or loses its connection, the comment may already be saved. Inside an agent run, rerunning the same command is safe: the CLI sends an idempotency key derived from the run, issue, parent, content and attachments, and the server returns the saved comment instead of posting it again. Elsewhere, pass the same `--idempotency-key <key>` on each attempt to get the same protection. Older servers ignore the key.
 

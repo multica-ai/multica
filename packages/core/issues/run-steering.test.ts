@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { AgentTask } from "../types";
-import { agentRunState, commentSupplementReceipts, recipientActions, recipientRouting, resolveRecipientAction, TASK_SUPPLEMENT_CAPABILITY } from "./run-steering";
+import { agentRunState, commentSupplementReceipts, isTaskTriggeredInThread, recipientActions, recipientRouting, resolveRecipientAction, TASK_SUPPLEMENT_CAPABILITY } from "./run-steering";
 
 function task(over: Partial<AgentTask>): AgentTask {
   return {
@@ -82,5 +82,16 @@ describe("recipient actions", () => {
       { agentId: "d", action: "after_run", state: busy },
     ]);
     expect(routing).toEqual({ steerTaskIds: [steerable.task.id], suppressAgentIds: ["b"], restartTaskIds: ["turn-c"] });
+  });
+});
+
+describe("thread isolation", () => {
+  it("matches the actual trigger, not coalesced input or an assignment turn", () => {
+    const comments = ["root", "reply", "nested-reply"];
+    expect(isTaskTriggeredInThread(task({ trigger_comment_id: "root" }), comments)).toBe(true);
+    expect(isTaskTriggeredInThread(task({ trigger_comment_id: "nested-reply" }), comments)).toBe(true);
+    expect(isTaskTriggeredInThread(task({ trigger_comment_id: "other", coalesced_comment_ids: ["reply"] }), comments)).toBe(false);
+    expect(isTaskTriggeredInThread(task({}), comments)).toBe(false);
+    expect(isTaskTriggeredInThread(task({ trigger_comment_id: "missing" }), comments)).toBe(false);
   });
 });

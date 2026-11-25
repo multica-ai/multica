@@ -137,9 +137,11 @@ multica issue rerun-task <run-id> --issue MUL-123 --fresh
 把评论插话到仍在进行中的运行，而不是排队一个后续运行（仅限支持插话的运行；你的评论能启动哪个智能体，就能向它插话）：
 
 ```bash
-multica issue comment add MUL-123 --content-file note.md --steer <task-id>
-multica issue comment add MUL-123 --content-file note.md --steer-active
+multica issue comment add MUL-123 --content-file note.md --parent <comment-id> --steer <task-id>
+multica issue comment add MUL-123 --content-file note.md --parent <comment-id> --steer-active
 ```
+
+只有与触发该运行的评论同一评论串的回复才会插话到该运行；指派触发的运行只接收顶层评论。其他评论等待后续一轮处理。
 
 如果 `issue comment add` 超时或连接中断，评论可能已经保存。在智能体运行中，直接重新执行同一条命令是安全的：CLI 会根据运行、任务、父评论、内容和附件生成幂等键，服务器会返回已保存的评论，不会再发一条。在其他场景下，每次尝试都传同一个 `--idempotency-key <key>` 即可获得同样的保护。旧版服务器会忽略这个键。
 

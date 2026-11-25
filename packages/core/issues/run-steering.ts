@@ -46,6 +46,11 @@ export function isSteerableTask(task: AgentTask): boolean {
     && task.can_supplement === true;
 }
 
+/** Only the triggering thread may steer a turn; coalesced input or output placement is not ownership. */
+export function isTaskTriggeredInThread(task: AgentTask, commentIds: readonly string[]): boolean {
+  return !!task.trigger_comment_id && commentIds.includes(task.trigger_comment_id);
+}
+
 export function agentRunState(tasks: readonly AgentTask[], agentId: string): AgentRunState {
   // A running turn wins over a queued follow-up: it is what a message reaches now.
   let queued: AgentTask | undefined;

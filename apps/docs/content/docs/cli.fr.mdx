@@ -137,9 +137,11 @@ multica issue rerun-task <run-id> --issue MUL-123 --fresh
 Ajouter un commentaire à une exécution encore en cours, au lieu de mettre une exécution de suivi en file d'attente (uniquement les exécutions qui acceptent des messages supplémentaires, et seulement pour un agent que votre commentaire pourrait démarrer) :
 
 ```bash
-multica issue comment add MUL-123 --content-file note.md --steer <task-id>
-multica issue comment add MUL-123 --content-file note.md --steer-active
+multica issue comment add MUL-123 --content-file note.md --parent <comment-id> --steer <task-id>
+multica issue comment add MUL-123 --content-file note.md --parent <comment-id> --steer-active
 ```
+
+Seule une réponse dans le fil du commentaire qui a lancé l'exécution la rejoint ; une exécution lancée par attribution n'accepte que les commentaires de premier niveau. Les autres commentaires attendent une exécution suivante.
 
 Si `issue comment add` expire ou perd sa connexion, le commentaire est peut-être déjà enregistré. Dans une exécution d'agent, relancer la même commande est sans risque : la CLI envoie une clé d'idempotence dérivée de l'exécution, du ticket, du commentaire parent, du contenu et des pièces jointes, et le serveur renvoie le commentaire enregistré au lieu de le publier une seconde fois. Ailleurs, passez la même `--idempotency-key <key>` à chaque tentative pour obtenir la même protection. Les serveurs plus anciens ignorent la clé.
 

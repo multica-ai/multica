@@ -67,7 +67,7 @@ interface ReplyInputProps {
   onEditAnnotation?: (id: string) => boolean;
   annotationComposer?: AnnotationComposerSlot;
   /** Whether a running turn takes this reply by default: true for the turn
-   *  that belongs to this thread. Other recipients' turns can still be chosen. */
+   *  that was triggered in this thread. Other threads' turns cannot be steered. */
   steerByDefault?: (task: AgentTask) => boolean;
 }
 
