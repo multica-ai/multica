@@ -187,12 +187,16 @@
     "copy_link": "Копировать ссылку",
     "copy_id": "Копировать ID агента",
     "link_copied_toast": "Ссылка скопирована",
-    "id_copied_toast": "ID агента скопирован"
+    "id_copied_toast": "ID агента скопирован",
+    "command_cwd": "Рабочий каталог: {{dir}}",
+    "command_timeout": "Тайм-аут: {{seconds}} с"
   },
   "inspector": {
     "section_profile": "Профиль",
     "section_execution": "Выполнение",
     "qoder_execution_note": "Модель, инструменты и навыки настраиваются у агента в Qoder Cloud Agents.",
+    "command_working_dir": "Рабочий каталог",
+    "command_variables_hint": "Переменные: {{vars}}",
     "section_access": "Доступ",
     "section_properties": "Свойства",
     "section_details": "Сведения",

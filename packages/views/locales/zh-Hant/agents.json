@@ -160,12 +160,16 @@
     "copy_link": "複製連結",
     "copy_id": "複製 AI 代理 ID",
     "link_copied_toast": "連結已複製",
-    "id_copied_toast": "AI 代理 ID 已複製"
+    "id_copied_toast": "AI 代理 ID 已複製",
+    "command_cwd": "工作目錄：{{dir}}",
+    "command_timeout": "逾時時間：{{seconds}} 秒"
   },
   "inspector": {
     "section_profile": "資料",
     "section_execution": "執行配置",
     "qoder_execution_note": "模型、工具和 skill 在 Qoder Cloud Agents 中的 AI 代理上設定。",
+    "command_working_dir": "工作目錄",
+    "command_variables_hint": "變數：{{vars}}",
     "section_access": "訪問權限",
     "section_properties": "屬性",
     "section_details": "詳情",

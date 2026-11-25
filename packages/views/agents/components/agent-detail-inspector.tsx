@@ -349,7 +349,9 @@ export function AgentDetailInspector({
                   </SettingsRow>
                   <SettingsRow
                     label={t(($) => $.tab_body.mcp_config.dialog_args_label)}
-                    description={`Variables: ${COMMAND_ENV_PLACEHOLDERS.join(", ")}`}
+                    description={t(($) => $.inspector.command_variables_hint, {
+                      vars: COMMAND_ENV_PLACEHOLDERS.join(", "),
+                    })}
                     size="text"
                     align="start"
                   >
@@ -370,13 +372,14 @@ export function AgentDetailInspector({
                     />
                   </SettingsRow>
                   <SettingsRow
-                    label="Working directory"
+                    label={t(($) => $.inspector.command_working_dir)}
                     size="select-wide"
                   >
                     <CommandTextField
                       id="agent-command-working-dir"
-                      ariaLabel="Working directory"
+                      ariaLabel={t(($) => $.inspector.command_working_dir)}
                       value={commandConfig.workingDir ?? ""}
+                      // eslint-disable-next-line no-restricted-syntax -- technical environment variable placeholder
                       placeholder="${MULTICA_WORK_DIR}"
                       canEdit={canEdit}
                       onSave={(nextDir) =>
@@ -508,6 +511,7 @@ function CommandField({
         }
       }}
       disabled={!canEdit}
+      // eslint-disable-next-line no-restricted-syntax -- technical CLI command example
       placeholder="python3"
       aria-label={t(($) => $.tab_body.mcp_config.dialog_command_label)}
       className="font-mono"
@@ -556,6 +560,7 @@ function CommandArgsField({
         }
       }}
       disabled={!canEdit}
+      // eslint-disable-next-line no-restricted-syntax -- technical CLI arguments example
       placeholder="review --from ${MULTICA_BASE_BRANCH} --to ${MULTICA_WORK_BRANCH}"
       aria-label={t(($) => $.tab_body.mcp_config.dialog_args_label)}
       className="font-mono"

@@ -169,7 +169,9 @@
     "copy_link": "Copiar enlace",
     "copy_id": "Copiar ID del agente",
     "link_copied_toast": "Enlace copiado",
-    "id_copied_toast": "ID del agente copiado"
+    "id_copied_toast": "ID del agente copiado",
+    "command_cwd": "Directorio de trabajo: {{dir}}",
+    "command_timeout": "Tiempo de espera: {{seconds}} s"
   },
   "inspector": {
     "section_profile": "Perfil",
@@ -200,7 +202,9 @@
     "edit_description_title": "Editar descripción",
     "description_placeholder": "¿Qué hace este agente?",
     "cancel": "Cancelar",
-    "qoder_execution_note": "El modelo, las herramientas y las skills se configuran en el agente desde Qoder Cloud Agents."
+    "qoder_execution_note": "El modelo, las herramientas y las skills se configuran en el agente desde Qoder Cloud Agents.",
+    "command_working_dir": "Directorio de trabajo",
+    "command_variables_hint": "Variables: {{vars}}"
   },
   "overview": {
     "attention_title": "Ejecuciones que requieren atención",

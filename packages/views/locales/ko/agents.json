@@ -160,12 +160,16 @@
     "copy_link": "링크 복사",
     "copy_id": "에이전트 ID 복사",
     "link_copied_toast": "링크를 복사했습니다",
-    "id_copied_toast": "에이전트 ID를 복사했습니다"
+    "id_copied_toast": "에이전트 ID를 복사했습니다",
+    "command_cwd": "작업 디렉터리: {{dir}}",
+    "command_timeout": "제한 시간: {{seconds}}초"
   },
   "inspector": {
     "section_profile": "프로필",
     "section_execution": "실행 설정",
     "qoder_execution_note": "모델, 도구, 스킬은 Qoder Cloud Agents의 에이전트에서 설정합니다.",
+    "command_working_dir": "작업 디렉터리",
+    "command_variables_hint": "변수: {{vars}}",
     "section_access": "접근 권한",
     "section_properties": "속성",
     "section_details": "세부 정보",

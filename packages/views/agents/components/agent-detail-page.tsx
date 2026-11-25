@@ -741,12 +741,12 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
                 </div>
                 {commandConfig.workingDir ? (
                   <div className="mt-2 text-muted-foreground">
-                    cwd: {commandConfig.workingDir}
+                    {t(($) => $.detail.command_cwd, { dir: commandConfig.workingDir })}
                   </div>
                 ) : null}
                 {commandConfig.timeoutSeconds ? (
                   <div className="mt-1 text-muted-foreground">
-                    timeout: {commandConfig.timeoutSeconds}s
+                    {t(($) => $.detail.command_timeout, { seconds: commandConfig.timeoutSeconds })}
                   </div>
                 ) : null}
               </div>

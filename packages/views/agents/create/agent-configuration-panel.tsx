@@ -283,6 +283,7 @@ export function AgentConfigurationPanel({
                   aria-label={t(($) => $.tab_body.mcp_config.dialog_command_label)}
                   value={draft.command}
                   onChange={(event) => set("command", event.target.value)}
+                  // eslint-disable-next-line no-restricted-syntax -- technical CLI command example
                   placeholder="python3"
                   disabled={!selectedRuntime || runtimeLocked}
                   className="font-mono text-caption"

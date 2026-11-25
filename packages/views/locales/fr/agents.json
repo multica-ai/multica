@@ -169,12 +169,16 @@
     "copy_link": "Copier le lien",
     "copy_id": "Copier l'ID de l'agent",
     "link_copied_toast": "Lien copié",
-    "id_copied_toast": "ID de l'agent copié"
+    "id_copied_toast": "ID de l'agent copié",
+    "command_cwd": "Répertoire de travail : {{dir}}",
+    "command_timeout": "Délai d'expiration : {{seconds}} s"
   },
   "inspector": {
     "section_profile": "Profil",
     "section_execution": "Exécution",
     "qoder_execution_note": "Le modèle, les outils et les skills se configurent sur l’agent dans Qoder Cloud Agents.",
+    "command_working_dir": "Répertoire de travail",
+    "command_variables_hint": "Variables : {{vars}}",
     "section_access": "Accès",
     "section_properties": "Propriétés",
     "section_details": "Détails",

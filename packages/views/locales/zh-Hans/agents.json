@@ -160,12 +160,16 @@
     "copy_link": "复制链接",
     "copy_id": "复制智能体 ID",
     "link_copied_toast": "链接已复制",
-    "id_copied_toast": "智能体 ID 已复制"
+    "id_copied_toast": "智能体 ID 已复制",
+    "command_cwd": "工作目录: {{dir}}",
+    "command_timeout": "超时时间: {{seconds}} 秒"
   },
   "inspector": {
     "section_profile": "资料",
     "section_execution": "执行配置",
     "qoder_execution_note": "模型、工具和 skill 在 Qoder Cloud Agents 中的智能体上设置。",
+    "command_working_dir": "工作目录",
+    "command_variables_hint": "变量: {{vars}}",
     "section_access": "访问权限",
     "section_properties": "属性",
     "section_details": "详情",
