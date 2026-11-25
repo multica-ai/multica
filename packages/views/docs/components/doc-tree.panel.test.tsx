@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -73,4 +73,23 @@ it("folder row actions are siblings of the disclosure and never fold the folder"
 
   fireEvent.click(toggle);
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
+});
+
+it.each([
+  ["Open", "link", ["Rename", "Move to...", "Delete"]],
+  ["Specs", "button", ["New doc", "New folder", "Rename", "Move to..."]],
+] as const)("right-clicking %s opens its row menu", async (name, role, items) => {
+  render(<QueryClientProvider client={qc}><I18nProvider locale="en" resources={{ en: { docs: enDocs } }}><DocTree /></I18nProvider></QueryClientProvider>);
+
+  const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 60 });
+  fireEvent(screen.getByRole(role, { name }), event);
+
+  expect(event.defaultPrevented).toBe(true);
+  for (const item of items) expect(await screen.findByRole("menuitem", { name: item })).toBeTruthy();
+  // The row reads as open, which keeps its actions shown.
+  const row = screen.getByRole("button", { name: `More actions for ${name}` }).closest(".group\\/row");
+  expect(row?.hasAttribute("data-menu-open")).toBe(true);
+
+  fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+  await waitFor(() => expect(row?.hasAttribute("data-menu-open")).toBe(false));
 });
