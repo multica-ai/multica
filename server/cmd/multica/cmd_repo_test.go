@@ -381,3 +381,56 @@ func TestRepoCheckoutRetryDelay(t *testing.T) {
 		t.Fatalf("default delay = %s, want 1s", got)
 	}
 }
+
+func TestRepoCheckoutRetryDelayFallsBackOnNonPositive(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 12, 0, 0, 0, 0, time.UTC)
+	for _, value := range []string{
+		"0",
+		"-1",
+		now.Add(-time.Minute).Format(http.TimeFormat),
+		now.Format(http.TimeFormat),
+	} {
+		t.Run(value, func(t *testing.T) {
+			t.Parallel()
+			if got := repoCheckoutRetryDelay(value, now); got != time.Second {
+				t.Fatalf("repoCheckoutRetryDelay(%q) = %s, want 1s", value, got)
+			}
+		})
+	}
+}
+
+func TestRunRepoCheckoutGivesUpOnSustainedRepoBusy(t *testing.T) {
+	const cap = 3
+	repoCheckoutBusyRetryLimit = cap
+	t.Cleanup(func() { repoCheckoutBusyRetryLimit = maxRepoCheckoutBusyRetries })
+
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.Header().Set("X-Multica-Retryable", "repo-busy")
+		w.Header().Set("Retry-After", "0")
+		http.Error(w, "repository busy", http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_DAEMON_PORT", strings.TrimPrefix(srv.URL, "http://127.0.0.1:"))
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_AGENT_NAME", "Test Agent")
+	t.Setenv("MULTICA_TASK_ID", "task-1")
+	t.Setenv("MULTICA_TOKEN", "mat_repo_checkout_test")
+
+	err := runRepoCheckout(&cobra.Command{}, []string{"https://github.com/org/repo.git"})
+	if err == nil {
+		t.Fatal("runRepoCheckout unexpectedly succeeded")
+	}
+	if !strings.Contains(err.Error(), "busy") {
+		t.Fatalf("error = %v, want busy", err)
+	}
+	if strings.Contains(err.Error(), "connect to daemon") {
+		t.Fatalf("error = %v, must not say connect to daemon", err)
+	}
+	if attempts != cap {
+		t.Fatalf("checkout attempts = %d, want %d", attempts, cap)
+	}
+}
