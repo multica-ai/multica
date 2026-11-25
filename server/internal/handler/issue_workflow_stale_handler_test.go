@@ -25,6 +25,13 @@ func TestWorkflowStepWithUnassignableHandlerSkipsHandoff(t *testing.T) {
 				dbfx.Exec(t, `UPDATE agent SET archived_at = now() WHERE id = $1`, agentID)
 			}
 		}},
+		{"active squad with an archived leader", func(t *testing.T, _ string) (map[string]any, func()) {
+			leaderID := dbfx.Agent(t, "Retired squad leader "+workflowTestSuffix(), runtimeID)
+			squadID := dbfx.Squad(t, "Squad with retired leader "+workflowTestSuffix(), leaderID)
+			return map[string]any{"type": "squad", "id": squadID}, func() {
+				dbfx.Exec(t, `UPDATE agent SET archived_at = now() WHERE id = $1`, leaderID)
+			}
+		}},
 		{"removed member", func(t *testing.T, _ string) (map[string]any, func()) {
 			userID, _ := addWorkflowTestMember(t, "leaver")
 			return map[string]any{"type": "member", "id": userID}, func() {

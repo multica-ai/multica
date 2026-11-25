@@ -118,9 +118,9 @@ func (h *Handler) applyIssueWorkflow(ctx context.Context, prev db.Issue, params 
 }
 
 // handoffTargetRetired reports whether a resolved handler can no longer take
-// work: an archived agent or squad, or a user who left the workspace. Its step
-// then hands off to nobody, like a relative handler with nobody to resolve
-// to, instead of failing every write that enters the step.
+// work: an archived agent or squad, a squad without an active leader, or a
+// user who left the workspace. The step then behaves like a relative handler
+// with nobody to resolve to.
 func (h *Handler) handoffTargetRetired(ctx context.Context, workspaceID pgtype.UUID, assigneeType string, assigneeID pgtype.UUID) bool {
 	switch assigneeType {
 	case "agent":
@@ -128,7 +128,14 @@ func (h *Handler) handoffTargetRetired(ctx context.Context, workspaceID pgtype.U
 		return errors.Is(err, pgx.ErrNoRows) || (err == nil && agent.ArchivedAt.Valid)
 	case "squad":
 		squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{ID: assigneeID, WorkspaceID: workspaceID})
-		return errors.Is(err, pgx.ErrNoRows) || (err == nil && squad.ArchivedAt.Valid)
+		if err != nil {
+			return errors.Is(err, pgx.ErrNoRows)
+		}
+		if squad.ArchivedAt.Valid {
+			return true
+		}
+		leader, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{ID: squad.LeaderID, WorkspaceID: workspaceID})
+		return errors.Is(err, pgx.ErrNoRows) || (err == nil && leader.ArchivedAt.Valid)
 	case "member":
 		_, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{UserID: assigneeID, WorkspaceID: workspaceID})
 		return errors.Is(err, pgx.ErrNoRows)
