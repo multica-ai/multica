@@ -7293,6 +7293,9 @@ func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, targ
 		if target.leaderSquad != nil {
 			isLeader, squadID = true, target.leaderSquad.ID
 		}
+		// The recovery run continues the coordinator's run, so it keeps that
+		// run's squad usage attribution.
+		usageSquadID := s.resolveInheritedSquadID(ctx, target.issue, target.agent.ID, squadID, target.source.ID)
 		task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 			ID:                   dbid.NewV7(),
 			AgentID:              target.agent.ID,
@@ -7303,6 +7306,7 @@ func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, targ
 			TriggerSummary:       s.buildCommentTriggerSummary(ctx, target.issue.WorkspaceID, target.comment.ID),
 			IsLeaderTask:         pgtype.Bool{Bool: isLeader, Valid: isLeader},
 			SquadID:              squadID,
+			UsageSquadID:         usageSquadID,
 			OriginatorUserID:     originator,
 			AccountableUserID:    accountable,
 			RuntimeMcpOverlay:    overlay.Overlay,

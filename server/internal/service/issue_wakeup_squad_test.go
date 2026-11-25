@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -76,5 +77,38 @@ func TestIssueWakeupSquadLeaderAttribution(t *testing.T) {
 				t.Fatalf("squad_id=%s, want %s", util.UUIDToString(task.SquadID), util.UUIDToString(wantSquad))
 			}
 		})
+	}
+}
+
+// A squad member's blockers-done run on a sub-issue its squad created counts
+// toward the squad's usage, like the member's assignment run on that issue.
+func TestSystemWakeupInheritsSquadUsageFromIssueOrigin(t *testing.T) {
+	f, s, issue, agent := wakeFixture(t)
+	ctx := context.Background()
+	leader := f.privateAgentOwnedBy(t, f.UserID, "squad leader")
+	squad := f.Squad(t, "Usage squad", leader)
+	f.SquadMember(t, squad, "agent", agent)
+	origin := f.Task(t, leader, testutil.Cols{"status": "completed", "completed_at": testutil.Raw("now()"), "is_leader_task": true, "squad_id": squad})
+	f.Exec(t, "UPDATE issue SET assignee_type='agent',assignee_id=$2,status='todo',origin_type='agent_create',origin_id=$3 WHERE id=$1", issue, agent, origin)
+	blocker := f.Issue(t, "squad blocker")
+	if err := AddIssueBlocker(ctx, f.q, parseTestUUID(t, f.WorkspaceID), issue, parseTestUUID(t, blocker), "member", parseTestUUID(t, f.UserID)); err != nil {
+		t.Fatal(err)
+	}
+	f.Cleanup(t, "DELETE FROM issue_blocker WHERE issue_id=$1", issue)
+	w := blockerRule(t, f, issue)
+	f.Exec(t, "UPDATE issue SET status='done' WHERE id=$1", blocker)
+	if err := s.TickWorkspaces(ctx, parseTestUUID(t, f.WorkspaceID)); err != nil {
+		t.Fatal(err)
+	}
+	got := blockerRule(t, f, issue)
+	if got.ID != w.ID || !got.LastTaskID.Valid {
+		t.Fatalf("blockers-done rule queued no run: %+v", got)
+	}
+	task, err := f.q.GetAgentTask(ctx, got.LastTaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sid := util.UUIDToString(effectiveTaskSquadID(task)); sid != squad {
+		t.Fatalf("blockers-done run squad usage = %q, want %s", sid, squad)
 	}
 }
