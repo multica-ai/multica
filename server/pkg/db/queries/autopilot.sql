@@ -66,7 +66,7 @@ INSERT INTO autopilot (
 -- name: UpdateAutopilot :one
 UPDATE autopilot SET
     title = COALESCE(sqlc.narg('title'), title),
-    description = COALESCE(sqlc.narg('description'), description),
+    description = sqlc.narg('description'),
     assignee_type = COALESCE(sqlc.narg('assignee_type'), assignee_type),
     assignee_id = COALESCE(sqlc.narg('assignee_id')::uuid, assignee_id),
     status = COALESCE(sqlc.narg('status'), status),
@@ -329,15 +329,25 @@ RETURNING *;
 -- index uq_autopilot_run_trigger_planned, this gives dispatch-layer
 -- idempotency: a stale-steal retry at the same plan_time cannot create
 -- a second run for the same (trigger_id, planned_at) pair (MUL-3551).
+--
+-- idempotency_key is set only for a run that is not metered against the
+-- autopilot run quota; uq_autopilot_run_idempotency_key makes a retried
+-- request reuse its run.
 INSERT INTO autopilot_run (
     autopilot_id, trigger_id, source, status, trigger_payload, squad_id, planned_at,
-    webhook_delivery_id, quota_reservation_id, reason_code, id
+    webhook_delivery_id, quota_reservation_id, reason_code, idempotency_key, id
 ) VALUES (
     $1, sqlc.narg('trigger_id'), $2, $3, sqlc.narg('trigger_payload'),
     sqlc.narg('squad_id'), sqlc.narg('planned_at'),
     sqlc.narg('webhook_delivery_id'), sqlc.narg('quota_reservation_id'),
-    sqlc.narg('reason_code'), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
+    sqlc.narg('reason_code'), sqlc.narg('idempotency_key'),
+    COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 ) RETURNING *;
+
+-- name: GetAutopilotRunByIdempotencyKey :one
+SELECT * FROM autopilot_run
+WHERE autopilot_id = $1
+  AND idempotency_key = $2;
 
 -- name: GetAutopilotRunByTriggerAndPlanned :one
 -- Idempotent lookup used by DispatchAutopilotForPlan to detect a
@@ -835,6 +845,17 @@ WHERE autopilot_id = $1 AND user_type = $2 AND user_id = $3;
 -- Application-layer cleanup run inside the autopilot delete transaction.
 DELETE FROM autopilot_collaborator
 WHERE autopilot_id = $1;
+
+-- name: DeleteAutopilotCollaboratorsByMember :exec
+-- Collaborator grants carry no FK, so member removal must prune them in the
+-- same application transaction: a re-invited user must not regain write access
+-- they were granted before. Scoped to the workspace like the subscriber prune.
+DELETE FROM autopilot_collaborator AS c
+USING autopilot AS a
+WHERE c.autopilot_id = a.id
+  AND a.workspace_id = sqlc.arg(workspace_id)
+  AND c.user_type = 'member'
+  AND c.user_id = sqlc.arg(user_id);
 
 -- name: IsAutopilotCollaborator :one
 SELECT EXISTS (

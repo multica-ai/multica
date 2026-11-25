@@ -59,6 +59,7 @@ func NewIssueService(q *db.Queries, tx TxStarter, bus *events.Bus, ac analytics.
 // to IssueService.Create. The handler owns the parsing step that turns its
 // request payload into this struct; the service stays transport-agnostic.
 type IssueCreateParams struct {
+	BlockedBy     []pgtype.UUID
 	WorkspaceID   pgtype.UUID
 	Title         string
 	Description   pgtype.Text
@@ -231,6 +232,10 @@ type IssueCreateResult struct {
 // savepoint has to be established before the statement that might fail, so every
 // successful create would pay for it too.
 func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts IssueCreateOpts) (IssueCreateResult, error) {
+	// PostgreSQL TEXT rejects NUL, which survives a JSON round trip. Cleaned
+	// here so every create entry stores the same text.
+	p.Title = util.SanitizeTextForPostgres(p.Title)
+	p.Description.String = util.SanitizeTextForPostgres(p.Description.String)
 	res, err := s.createOnce(ctx, p, opts)
 	if err == nil {
 		return res, nil
@@ -284,6 +289,11 @@ func (s *IssueService) createOnce(ctx context.Context, p IssueCreateParams, opts
 	}
 	defer tx.Rollback(ctx)
 	qtx := s.Queries.WithTx(tx)
+	if len(p.BlockedBy) > 0 || p.Stage.Valid {
+		if err = qtx.LockIssueBlockerGraph(ctx, p.WorkspaceID); err != nil {
+			return IssueCreateResult{}, err
+		}
+	}
 
 	properties, err := validateIssueCreateProperties(ctx, tx, qtx, p.WorkspaceID, p.Properties)
 	if err != nil {
@@ -493,6 +503,11 @@ func (s *IssueService) createOnce(ctx context.Context, p IssueCreateParams, opts
 		return IssueCreateResult{}, classifyIssueNumberCollision(fmt.Errorf("create issue: %w", err), issueNumber)
 	}
 
+	for _, blockerID := range p.BlockedBy {
+		if err = AddIssueBlocker(ctx, qtx, p.WorkspaceID, issue.ID, blockerID, p.CreatorType, p.CreatorID); err != nil {
+			return IssueCreateResult{}, err
+		}
+	}
 	if p.PRAutoCompleteDisabled {
 		if err := qtx.SetIssuePRAutoCompleteDisabled(ctx, db.SetIssuePRAutoCompleteDisabledParams{
 			IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, AutoCompleteDisabled: true,
@@ -998,6 +1013,10 @@ func (s *IssueService) shouldEnqueueAgentTaskWithQueries(ctx context.Context, q 
 	if issue.TriageState.Valid || issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status) == "backlog" {
 		return false
 	}
+	blocked, err := q.HasOpenIssueBlockers(ctx, db.HasOpenIssueBlockersParams{WorkspaceID: issue.WorkspaceID, IssueID: issue.ID})
+	if err != nil || blocked {
+		return false
+	}
 	return isAgentAssigneeReadyWithQueries(ctx, s.runtimeLookup(q), issue)
 }
 
@@ -1029,6 +1048,10 @@ func agentAssigneeVerdict(ctx context.Context, lookup RuntimeLookup, issue db.Is
 
 func (s *IssueService) shouldEnqueueSquadLeaderOnAssign(ctx context.Context, issue db.Issue) bool {
 	if issue.TriageState.Valid || issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
+		return false
+	}
+	blocked, err := s.Queries.HasOpenIssueBlockers(ctx, db.HasOpenIssueBlockersParams{WorkspaceID: issue.WorkspaceID, IssueID: issue.ID})
+	if err != nil || blocked {
 		return false
 	}
 	return s.isSquadLeaderReady(ctx, issue)

@@ -2,7 +2,7 @@
 
 import { useId, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowUpRight, BarChart3, BookOpenText, Bot, MessageSquare, Monitor, Plus, User, UserPlus, Users } from "@multica/ui/icons";
+import { ArrowUpRight, BarChart3, BookOpenText, Bot, MessageSquare, Monitor, Plug, Plus, User, UserPlus, Users } from "@multica/ui/icons";
 import { DropdownMenuItem } from "@multica/ui/components/ui/dropdown-menu";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -11,21 +11,25 @@ import { agentTaskSnapshotOptions, type AgentPresenceDetail } from "@multica/cor
 import { useAgentsViewStore } from "@multica/core/agents/stores";
 import { useAuthStore } from "@multica/core/auth";
 import { useChatStore } from "@multica/core/chat";
+import { appsOverviewOptions } from "@multica/core/connected-apps";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
-import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useCurrentWorkspace, useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { memberListOptions, skillListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
-import type { Agent, AgentTask } from "@multica/core/types";
+import type { Agent, AgentTask, Squad } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
 import { isFloatingChatRouteSuppressed } from "../../chat/floating-chat-visibility";
 import { AgentRowActions } from "../../agents/components/agent-row-actions";
 import { shouldOpenRowMenu, useRowMenu } from "../../common/point-menu";
 import { CollectionRowContext } from "../collection-list/row-context";
 import { availabilityConfig } from "../../agents/presence";
-import { useT } from "../../i18n";
+import { useLocale, useT } from "../../i18n";
+import { buildAppDirectory } from "../../apps/lib/directory";
+import { useComposioAvailable } from "../../common/use-composio-available";
+import { useViewerAppsOverview } from "../../common/use-viewer-apps-overview";
 import { buildRuntimeMachines, runtimeMachineCounts } from "../../runtimes/components/runtime-machines";
 import {
   PanelBody,
@@ -167,7 +171,7 @@ function AgentPanelLink({
           </DropdownMenuItem>
         )}
         {currentIssue && (
-          <DropdownMenuItem onClick={() => push(p.issueDetail(currentIssue.id))}>
+          <DropdownMenuItem onClick={() => push(p.issueDetail(issueRouteRef(currentIssue)))}>
             <ArrowUpRight className="h-3.5 w-3.5" />
             {t(($) => $.panels.team.open_issue, { identifier: currentIssue.identifier })}
           </DropdownMenuItem>
@@ -242,6 +246,88 @@ function WorkingAgentRow({
   );
 }
 
+function WorkingSquadRow({
+  squad,
+  tasks,
+  agentNameById,
+  wsId,
+  active,
+}: {
+  squad: Squad;
+  tasks: AgentTask[];
+  agentNameById: ReadonlyMap<string, string>;
+  wsId: string;
+  active: boolean;
+}) {
+  const { t } = useT("layout");
+  const locale = useLocale();
+  const p = useWorkspacePaths();
+  const primaryTask = tasks[0];
+  const issue = useRunningIssue(wsId, tasks.length === 1 ? primaryTask : undefined);
+  const memberNames = [
+    ...new Set(
+      tasks
+        .map((task) => agentNameById.get(task.agent_id))
+        .filter((name): name is string => Boolean(name)),
+    ),
+  ];
+  const memberSeparator =
+    locale.startsWith("zh") || locale.startsWith("ja") ? "、" : ", ";
+  const singleMember = memberNames[0] ?? null;
+  const description =
+    tasks.length === 1 && issue && singleMember
+      ? `${issue.identifier} · ${singleMember}`
+      : tasks.length === 1 && issue
+        ? `${issue.identifier} ${issue.title}`
+        : memberNames.length > 0
+          ? `${t(($) => $.panels.team.running_tasks, { count: tasks.length })} · ${memberNames.join(memberSeparator)}`
+          : t(($) => $.panels.team.running_tasks, { count: tasks.length });
+
+  return (
+    <PanelLink
+      href={p.squadDetail(squad.id)}
+      label={squad.name}
+      active={active}
+      icon={
+        <span className="relative shrink-0">
+          <ActorAvatar
+            name={squad.name}
+            initials={squad.name.slice(0, 2).toUpperCase()}
+            avatarUrl={resolvePublicFileUrl(squad.avatar_url)}
+            isSquad
+            size="md"
+          />
+          <span className="absolute -right-0.5 -bottom-0.5 size-2 rounded-full bg-brand ring-2 ring-page-canvas" />
+        </span>
+      }
+      description={description}
+    />
+  );
+}
+
+/** The Apps link, counting the apps that need someone to act. */
+function AppsPanelLink({ wsId }: { wsId: string }) {
+  const { t } = useT("layout");
+  const p = useWorkspacePaths();
+  const { pathname } = useNavigation();
+  const viewerId = useAuthStore((s) => s.user?.id ?? null);
+  const { data } = useQuery({ ...appsOverviewOptions(wsId), enabled: !!wsId });
+  const overview = useViewerAppsOverview(wsId, data);
+  const attention = useMemo(() => {
+    if (!overview) return 0;
+    return buildAppDirectory({ overview, catalog: [], viewerId }).attention.length;
+  }, [overview, viewerId]);
+  return (
+    <PanelLink
+      href={p.apps()}
+      icon={<Plug />}
+      label={t(($) => $.nav.apps)}
+      active={isPathWithin(pathname, p.apps())}
+      trailing={<PanelCount value={attention} />}
+    />
+  );
+}
+
 export function TeamPanel() {
   const { t } = useT("layout");
   const p = useWorkspacePaths();
@@ -270,9 +356,59 @@ export function TeamPanel() {
 
   const { data: squads = [] } = useQuery({ ...squadListOptions(wsId), enabled: !!wsId });
   const liveSquads = useMemo(() => squads.filter((squad) => !squad.archived_at), [squads]);
+  const liveSquadById = useMemo(
+    () => new Map(liveSquads.map((squad) => [squad.id, squad] as const)),
+    [liveSquads],
+  );
+  const agentNameById = useMemo(
+    () => new Map(agents.map((agent) => [agent.id, agent.name] as const)),
+    [agents],
+  );
+
+  // Collapse running tasks belonging to a live Squad into a single Squad entry
+  // in "Working now". Agents whose running work is entirely inside squads are
+  // folded into those squad rows; agents with standalone running tasks remain
+  // listed individually alongside the squads.
+  const { workingSquadEntries, standaloneWorkingAgents, standaloneRunningTaskByAgent } = useMemo(() => {
+    const tasksBySquad = new Map<string, AgentTask[]>();
+    const standaloneTaskByAgent = new Map<string, AgentTask>();
+    const squadOnlyAgentIds = new Set<string>();
+    const standaloneAgentIds = new Set<string>();
+
+    for (const task of snapshot) {
+      if (task.status !== "running") continue;
+      const squadId = task.squad_id?.trim() || "";
+      if (squadId && liveSquadById.has(squadId)) {
+        const list = tasksBySquad.get(squadId) ?? [];
+        list.push(task);
+        tasksBySquad.set(squadId, list);
+        squadOnlyAgentIds.add(task.agent_id);
+      } else {
+        standaloneAgentIds.add(task.agent_id);
+        if (!standaloneTaskByAgent.has(task.agent_id)) {
+          standaloneTaskByAgent.set(task.agent_id, task);
+        }
+      }
+    }
+
+    const squadEntries = Array.from(tasksBySquad.entries())
+      .map(([squadId, tasks]) => ({ squad: liveSquadById.get(squadId)!, tasks }))
+      .filter((entry) => Boolean(entry.squad));
+
+    const standaloneAgents = working.filter(
+      (agent) => !squadOnlyAgentIds.has(agent.id) || standaloneAgentIds.has(agent.id),
+    );
+
+    return {
+      workingSquadEntries: squadEntries,
+      standaloneWorkingAgents: standaloneAgents,
+      standaloneRunningTaskByAgent: standaloneTaskByAgent,
+    };
+  }, [snapshot, liveSquadById, working]);
   const { data: members = [] } = useQuery({ ...memberListOptions(wsId), enabled: !!wsId });
   const { data: skills = [] } = useQuery({ ...skillListOptions(wsId), enabled: !!wsId });
   const { data: runtimes = [] } = useQuery({ ...runtimeListOptions(wsId), enabled: !!wsId });
+  const appsAvailable = useComposioAvailable();
   const machineCounts = useMemo(() => {
     const machines = buildRuntimeMachines(runtimes, { now: Date.now() }).filter(
       (machine) => !machine.runtimes.every((runtime) => runtime.provider === "qoder_cloud"),
@@ -343,26 +479,66 @@ export function TeamPanel() {
           />
         )}
 
-        {working.length > 0 && (
-          <AgentStatusSection
-            key={`working:${wsId}`}
-            label={t(($) => $.panels.team.working_now)}
-            agents={working}
-            collapsed={workingCollapsed}
-            onCollapsedChange={setWorkingCollapsed}
-            renderAgent={(agent) => (
-              <WorkingAgentRow
-                key={agent.id}
-                agent={agent}
-                detail={byAgent.get(agent.id)}
-                task={runningTaskByAgent.get(agent.id)}
-                wsId={wsId}
-                active={isPathWithin(pathname, p.agentDetail(agent.id))}
-                canManage={canManageAgent(agent)}
-                canChat={canChatWith(agent)}
-              />
-            )}
-          />
+        {(workingSquadEntries.length > 0 || standaloneWorkingAgents.length > 0) && (
+          workingSquadEntries.length === 0 ? (
+            <AgentStatusSection
+              key={`working:${wsId}`}
+              label={t(($) => $.panels.team.working_now)}
+              agents={standaloneWorkingAgents}
+              collapsed={workingCollapsed}
+              onCollapsedChange={setWorkingCollapsed}
+              renderAgent={(agent) => (
+                <WorkingAgentRow
+                  key={agent.id}
+                  agent={agent}
+                  detail={byAgent.get(agent.id)}
+                  task={standaloneRunningTaskByAgent.get(agent.id) ?? runningTaskByAgent.get(agent.id)}
+                  wsId={wsId}
+                  active={isPathWithin(pathname, p.agentDetail(agent.id))}
+                  canManage={canManageAgent(agent)}
+                  canChat={canChatWith(agent)}
+                />
+              )}
+            />
+          ) : (
+            <PanelSection
+              key={`working:${wsId}`}
+              label={t(($) => $.panels.team.working_now)}
+              collapsed={workingCollapsed}
+              onCollapsedChange={setWorkingCollapsed}
+              action={
+                <PanelCount
+                  value={workingSquadEntries.length + standaloneWorkingAgents.length}
+                  className="pr-2"
+                />
+              }
+            >
+              <PanelList>
+                {workingSquadEntries.map(({ squad, tasks }) => (
+                  <WorkingSquadRow
+                    key={`squad:${squad.id}`}
+                    squad={squad}
+                    tasks={tasks}
+                    agentNameById={agentNameById}
+                    wsId={wsId}
+                    active={isPathWithin(pathname, p.squadDetail(squad.id))}
+                  />
+                ))}
+                {standaloneWorkingAgents.map((agent) => (
+                  <WorkingAgentRow
+                    key={agent.id}
+                    agent={agent}
+                    detail={byAgent.get(agent.id)}
+                    task={standaloneRunningTaskByAgent.get(agent.id) ?? runningTaskByAgent.get(agent.id)}
+                    wsId={wsId}
+                    active={isPathWithin(pathname, p.agentDetail(agent.id))}
+                    canManage={canManageAgent(agent)}
+                    canChat={canChatWith(agent)}
+                  />
+                ))}
+              </PanelList>
+            </PanelSection>
+          )
         )}
 
         <PanelSection label={t(($) => $.nav.agents)}>
@@ -426,6 +602,7 @@ export function TeamPanel() {
               active={isPathWithin(pathname, p.skills())}
               trailing={<PanelCount value={skills.length} />}
             />
+            {appsAvailable && <AppsPanelLink wsId={wsId} />}
             <PanelLink
               href={p.runtimes()}
               icon={<Monitor />}

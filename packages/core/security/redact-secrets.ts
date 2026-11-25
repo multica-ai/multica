@@ -18,10 +18,18 @@ const patterns: { re: RegExp; replacement: string }[] = [
   { re: /\bAIza[0-9A-Za-z_-]{35}([^0-9A-Za-z_-]|$)/g, replacement: "[REDACTED GOOGLE API KEY]$1" },
   // GitLab personal access tokens
   { re: /\bglpat-[A-Za-z0-9_-]{20,}\b/g, replacement: "[REDACTED GITLAB TOKEN]" },
+  // Match the server's Multica token rule and preserve short JSON control escapes.
+  { re: /(?:\b|(\\[bfnrt]))(?:mat|mul|mdt|mcn)_[0-9a-fA-F]{40}\b/g, replacement: "$1[REDACTED_MULTICA_TOKEN]" },
   // OpenAI / Anthropic API keys
   { re: /\bsk-[A-Za-z0-9_-]{20,}\b/g, replacement: "[REDACTED API KEY]" },
-  // Slack tokens
-  { re: /\bxox[bporas]-[A-Za-z0-9-]{10,}\b/g, replacement: "[REDACTED SLACK TOKEN]" },
+  // Slack tokens (bot/user plus config/refresh xoxe-)
+  { re: /\bxox[bporase]-[A-Za-z0-9-]{10,}\b/g, replacement: "[REDACTED SLACK TOKEN]" },
+  // Slack app-level tokens (xapp-), which the xox*- rule above does not cover
+  { re: /\bxapp-[A-Za-z0-9-]{10,}\b/g, replacement: "[REDACTED SLACK TOKEN]" },
+  // Stripe live secret / restricted keys (sk_live_ / rk_live_). The sk-
+  // hyphen rule above does not match the underscore form. Publishable
+  // pk_live_ keys are public and intentionally left unredacted.
+  { re: /\b(?:sk|rk)_live_[0-9A-Za-z]{16,}\b/g, replacement: "[REDACTED STRIPE KEY]" },
   // JWT tokens
   { re: /\bey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, replacement: "[REDACTED JWT]" },
   // Bearer tokens

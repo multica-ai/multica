@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SwimLaneView } from "./swimlane-view";
@@ -14,6 +14,9 @@ import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
 
 const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
+
+const mockToastInfo = vi.hoisted(() => vi.fn());
+vi.mock("sonner", () => ({ toast: { info: mockToastInfo } }));
 
 // Mock hooks
 vi.mock("@multica/core/hooks", () => ({
@@ -112,8 +115,8 @@ type SwimlaneGroupingMock = "parent" | "project" | "assignee";
 // flip grouping must set both `swimlaneGrouping` and the matching slice
 // in `swimlaneOrders` / `collapsedSwimlanes`.
 const mockViewState: {
-  sortBy: "position";
-  sortDirection: "asc";
+  sortBy: "position" | "updated_at";
+  sortDirection: "asc" | "desc";
   cardProperties: Record<string, boolean>;
   swimlaneGrouping: SwimlaneGroupingMock;
   swimlaneOrders: Record<SwimlaneGroupingMock, string[]>;
@@ -794,7 +797,7 @@ describe("SwimLaneView", () => {
 
     const links = screen.getAllByRole("link", { name: "Open parent issue" });
     expect(links).toHaveLength(1);
-    expect(links[0]).toHaveAttribute("href", expect.stringContaining("parent-1"));
+    expect(links[0]).toHaveAttribute("href", "/acme/issues/PROJ-1");
   });
 
   it("calls onMoveIssue on drag-and-drop end", () => {
@@ -880,6 +883,58 @@ describe("SwimLaneView", () => {
     );
     // Moving lanes within Unstarted must preserve the concrete Backlog key.
     expect(mockOnMoveIssue.mock.calls[0]![1]).toHaveProperty("status", "todo");
+  });
+
+  describe("when cells are not in manual order", () => {
+    // Shown newest first, so the in-progress cell reads a, b: positions 20, 10.
+    const sortedIssues: Issue[] = [
+      { id: "a", status: "in_progress", position: 20, updated_at: "2026-01-04T00:00:00Z" },
+      { id: "b", status: "in_progress", position: 10, updated_at: "2026-01-03T00:00:00Z" },
+      { id: "moved", status: "todo", position: 15, updated_at: "2026-01-02T00:00:00Z" },
+      { id: "todo-2", status: "todo", position: 5, updated_at: "2026-01-01T00:00:00Z" },
+    ].map((fields) => ({ ...mockIssues[2]!, ...fields }) as Issue);
+
+    beforeEach(() => {
+      mockViewState.sortBy = "updated_at";
+      mockViewState.sortDirection = "desc";
+    });
+    afterEach(() => {
+      mockViewState.sortBy = "position";
+      mockViewState.sortDirection = "asc";
+    });
+
+    it("leaves the manual order alone when a card is dropped in its own cell", () => {
+      const mockOnMoveIssue = vi.fn();
+      renderWithI18n(<SwimLaneView issues={sortedIssues} onMoveIssue={mockOnMoveIssue} />);
+
+      act(() => lastOnDragEnd({ active: { id: "moved" }, over: { id: "todo-2" } }));
+
+      expect(mockOnMoveIssue).not.toHaveBeenCalled();
+      expect(mockToastInfo).toHaveBeenCalledWith(
+        enIssues.board.manual_reorder_hint,
+        expect.anything(),
+      );
+    });
+
+    it("changes the status and keeps the position, with anchors in manual order", () => {
+      const mockOnMoveIssue = vi.fn();
+      renderWithI18n(<SwimLaneView issues={sortedIssues} onMoveIssue={mockOnMoveIssue} />);
+
+      // Between a (20) and b (10) the anchors run backwards, and the server
+      // rejects the whole move.
+      act(() => lastOnDragOver({ active: { id: "moved" }, over: { id: "b" } }));
+      act(() =>
+        lastOnDragEnd({ active: { id: "moved" }, over: { id: "swim:parent:none:in_progress" } }),
+      );
+
+      expect(mockOnMoveIssue).toHaveBeenCalledTimes(1);
+      expect(mockOnMoveIssue.mock.calls[0]![1]).toMatchObject({
+        status: "in_progress",
+        position: 15,
+        before_id: null,
+        after_id: "a",
+      });
+    });
   });
 
   const multiParentIssues: Issue[] = [

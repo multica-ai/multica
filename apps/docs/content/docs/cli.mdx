@@ -141,6 +141,8 @@ multica issue comment add MUL-123 --content-file note.md --steer <task-id>
 multica issue comment add MUL-123 --content-file note.md --steer-active
 ```
 
+If `issue comment add` times out or loses its connection, the comment may already be saved. Inside an agent run, rerunning the same command is safe: the CLI sends an idempotency key derived from the run, issue, parent, content and attachments, and the server returns the saved comment instead of posting it again. Elsewhere, pass the same `--idempotency-key <key>` on each attempt to get the same protection. Older servers ignore the key.
+
 If an open issue with the same title (case-insensitive, extra spaces ignored) already exists under the same project and parent, `issue create` refuses and points to that issue. To create another one anyway, add `--allow-duplicate`. To mark an issue as a duplicate of another, run `multica issue status MUL-124 cancelled --duplicate-of MUL-123`.
 
 For sequential PR delivery, use `issue create --title "..." --pr-auto-complete off` or `issue update <id> --pr-auto-complete off` to keep that issue's status when PRs merge. Use `--pr-auto-complete on` to restore the workspace rule; this takes effect at the next PR event. `issue pull-requests <id>` shows the issue override, workspace setting, target status, and decision state, even with no linked PRs. Supported servers save the creation override atomically; older servers receive a follow-up PUT. If that fails, the CLI reports the created issue ID and an update command to retry, so do not repeat the create.
@@ -332,7 +334,7 @@ multica runtime profile create --display-name "Internal Claude wrapper" \
   --command-name ccms --runtime-type claude
 ```
 
-`daemon autostart` registers the current profile to start at login; see [Start at login](/daemon-runtimes#autostart) for platform details. `runtime usage` covers 90 days by default, and `--days` goes up to 365. `runtime update` asks the daemon on that computer to update its CLI to the given version; `--wait` waits for completion and exits non-zero if the update fails or times out, or if the wait itself times out. `runtime profile create` takes the compatible tool through `--runtime-type` (the older `--protocol-family` still works); fixed arguments can currently be set only in the web app. `runtime profile create` binds the profile to this machine by default; use `--daemon-id <id>` to select another registered local machine. Bind an older, unscoped profile with `multica runtime profile update <profile-id> --daemon-id <id>`.
+`daemon autostart` registers the current profile to start at login; see [Start at login](/daemon-runtimes#autostart) for platform details. `runtime usage` covers 90 days by default, and `--days` goes up to 365. `runtime update` asks the daemon on that computer to update its CLI to the given version. Unlike clicking **Update** on the **Runtimes** page (which [queues while busy](/daemon-runtimes#updating-cli)), this request is not queued: if the machine is running tasks, the update fails instead of waiting. `--wait` waits for completion and exits non-zero if the update fails or times out, or if the wait itself times out. `runtime profile create` takes the compatible tool through `--runtime-type` (the older `--protocol-family` still works); fixed arguments can currently be set only in the web app. `runtime profile create` binds the profile to this machine by default; use `--daemon-id <id>` to select another registered local machine. Bind an older, unscoped profile with `multica runtime profile update <profile-id> --daemon-id <id>`.
 
 Deleting a runtime that still has active agents bound to it is refused by default. `multica runtime delete <id> --cascade` unbinds those agents, preserves their configuration and history, and cancels their active runs.
 
@@ -419,10 +421,11 @@ multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filte
 | --- | --- |
 | `issue` | Create, update, assign, and search issues; manage comments, subscribers, labels, properties, wakeups, the timeline, and runs |
 | `project` | Manage projects, their resources, and the workflow they use |
-| `inbox` | Read your notifications without changing read status |
+| `inbox` | Read and manage your notifications: list, mark read, archive, snooze |
 | `workflow` | Manage issue workflows: statuses and who handles each one |
 | `issue-status` | Manage the workspace status catalog: statuses, their color, and their icon |
 | `label`, `property` | Manage workspace labels and custom properties |
+| `quick-action` | Manage and run workspace quick actions |
 | `view` | Read saved issue views and list the issues a view shows |
 | `agent`, `skill`, `squad` | Manage agents, skills, and squads |
 | `autopilot` | Manage automations, triggers, and run history |
@@ -498,10 +501,11 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 
 | Command | Subcommand | Purpose | Key flags |
 | --- | --- | --- | --- |
-| `issue` | `list` | List issues | `--status`, `--priority`, `--assignee`, `--project`, `--updated-since` / `--updated-until` (paired RFC3339 bounds), `--metadata` (repeatable), `--property` (repeatable, `"Name=Value"` or a comparison such as `"Score>=3"`, `"Due<2026-01-01"`, `"Notes~=text"`; `__none__` matches unset), `--limit`, `--offset`, `--sort` (incl. `property:<name-or-id>`), `--full-id`, `--fields` (JSON only; comma-separated fields to keep), `--resolve-properties` (JSON only; rows with property, option and member names beside the stored ids) |
+| `issue` | `list` | List issues | `--status`, `--priority`, `--assignee`, `--project`, `--blocked` (only issues waiting on unfinished blockers or earlier stages), `--updated-since` / `--updated-until` (paired RFC3339 bounds), `--metadata` (repeatable), `--property` (repeatable, `"Name=Value"` or a comparison such as `"Score>=3"`, `"Due<2026-01-01"`, `"Notes~=text"`; `__none__` matches unset), `--limit`, `--offset`, `--sort` (incl. `property:<name-or-id>`), `--full-id`, `--fields` (JSON only; comma-separated fields to keep), `--resolve-properties` (JSON only; rows with property, option and member names beside the stored ids) |
 | | `get <id>` | Show a single issue | `--resolve-properties` (JSON only; rows with property, option and member names beside the stored ids) |
-| | `create` | Create an issue | `--title` (required), `--description` / `--description-stdin` / `--description-file`, `--pr-auto-complete on/off`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--project`, `--start-date`, `--due-date`, `--attachment` (repeatable), `--property` (repeatable), `--allow-duplicate` (create even when an open issue with the same title exists) |
-| | `update <id>` | Update issue fields | Same fields as `create`, plus `--position`, `--no-start`, `--duplicate-of` |
+| | `create` | Create an issue | `--title` (required), `--description` / `--description-stdin` / `--description-file`, `--pr-auto-complete on/off`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--blocked-by` (repeatable; issue key or UUID to wait for before starting), `--project`, `--start-date`, `--due-date`, `--attachment` (repeatable), `--property` (repeatable), `--allow-duplicate` (create even when an open issue with the same title exists) |
+| | `update <id>` | Update issue fields | Same fields as `create`, plus `--remove-blocked-by` (repeatable; removes a manual blocker), `--description-base-revision` (from `issue get`; refuses stale description overwrites), `--position`, `--no-start`, `--duplicate-of` |
+| | `edit-description <id>` | Replace exact text in an issue's description without rewriting the whole body | `--old` / `--old-file` (required), `--new` / `--new-file` (required), `--replace-all` |
 | | `batch update <id>...` | Apply one change to several issues | `--ids-stdin`, `--status`, `--priority`, `--assignee` / `--assignee-id` / `--unassign`, `--project`, `--start-date`, `--due-date`, `--parent`, `--stage`, `--add-label`, `--remove-label`, `--clear-labels`, `--property`, `--unset-property`, `--no-start`, `--dry-run` |
 | | `delete <id>...` | Permanently delete one or more issues | `--yes` skips confirmation; accepts issue keys or full UUIDs; `--dry-run` |
 | | `assign <id>` | Assign or unassign | `--to` (fuzzy name match against members, agents, and squads), `--to-id`, `--unassign`, `--no-start` |
@@ -526,6 +530,9 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | | `cancel-task <task-id>` | Cancel a running or queued run | `--issue` |
 | `project` | `get/create/update/delete` | Manage projects | `create`: `--title` (required), `--lead`, `--status`, `--icon`, `--start-date`, `--due-date`, `--repo` (repeatable), `--visibility` (`workspace` or `private`), `--member` (repeatable, with `--visibility private`); `update`: `--visibility`, `--member` (adds the members whether the project is becoming private or already is) |
 | | `list` | List and filter projects | `--status`, `--priority`, `--lead`, `--search`, `--archived`, `--sort` (`name`, `priority`, `status`, `progress`, `start_date`, `due_date`, `created_at`, `last_activity_at`), `--direction` (`asc` / `desc`), `--limit` (1–200), `--offset` |
+| | `overview <id>` | Return the project, its progress, resources, running agents, and recent activity in one read | `--output` (`json` by default, or `table`) |
+| | `progress <id>` | Show project progress, weekly history, forecast, and breakdown | `--history`, `--by` (`assignee` or `label`), `--output` (`table` or `json`) |
+| | `activity <id>` | List recent changes across the project's issues, newest first | `--limit`, `--before` (`next_cursor` from JSON output), `--output` (`table` or `json`) |
 | | `status <id> <status>` | Change project status | |
 | | `archive/restore <id>` | Archive or restore a project. Archived projects are hidden from `list`, accept no new issues, and pause the autopilots that file into them | `list --archived` lists only archived projects |
 | | `resource list/add/update/remove` | Manage project resources | `--type`, `--url`, `--default-branch-hint`, `--ref`, `--local-path`, `--daemon-id`, `--execution-mode` (`in_place` / `worktree` for a local directory) |
@@ -536,6 +543,7 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | `issue-status` | `list/get/create/update/archive` | Manage the workspace status catalog — the statuses every workflow picks from. To change an issue's current status, use `issue status` | `create`: `--name`, `--category`, `--color`, `--key`, `--icon`; `update`: `--name`, `--description`, `--color`, `--icon` (empty resets to the category default), `--position`; `list`: `--include-archived`. Mutations require workspace owner/admin |
 | `label` | `list/get/create/update/delete` | Manage workspace labels | `list`: `--resource-type` (`issue` or `skill`), `--full-id`; `create`: `--name`, `--color`, `--resource-type` (`issue` or `skill`), `--description` |
 | `property` | `list/get/create/update/archive/unarchive` | Manage workspace custom properties | `create`: `--name`, `--type` (`text`, `number`, `select`, `multi_select`, `date`, `checkbox`, `url`, `actor`, `multi_actor`, `multi_text`, `multi_url`), `--option` (repeatable, select types only); `list`: `--include-archived`; the type cannot be changed after creation |
+| `quick-action` | `list/get/create/update/archive/restore/delete/run` | Manage and run [quick actions](/quick-actions). References accept a UUID, UUID prefix, or exact name; management writes require a human member (`public` requires workspace owner/admin) | `list`: `--include-archived`, `--full-id`; `create` / `update`: `--name`, `--description`, `--prompt` / `--prompt-file` / `--prompt-stdin`, `--agent` / `--squad` (or `--clear-target` on `update`), `--visibility` (`private` or `public`; default `private` on `create`), `--status` (`update`); `run <action> <issue>`: `--dry-run` previews without posting |
 | `view` | `list/get/issues/create/update/duplicate/delete` | Read the saved views you can open (your own and workspace-shared ones); `issues` lists what a view shows, in its saved order, with every saved filter applied by the server. `create`, `update`, `duplicate` and `delete` write views exactly as the app saves them, so they show in the sidebar and stay editable there; `update` changes only what its flags name and refuses to overwrite a view that changed since it was read. Only the owner, or a workspace owner/admin for a shared view, can change or delete one. Inside an agent run, the views and any "my" conditions are the runtime owner's | `<view>` accepts an ID, ID prefix, or exact name; `list`: `--scope` (`workspace`, `my`, `project`), `--project`, `--full-id`; `issues`: `--limit` (at most 100), `--cursor` (the previous page's `next_cursor`), `--today` (the day relative due-date filters resolve against; default today), `--fields` (JSON only), `--full-id`; `create`: `--name`, `--scope`, `--project`, `--scope-variant`, `--visibility`; `create/update/duplicate` filters: `--status`, `--priority`, `--assignee`, `--creator`, `--label`, `--project-filter`, `--project-status`, `--relation`, `--due`, `--property "Name=Value"`, `--negate <filter>`, `--include-no-assignee`, `--include-no-project`, `--agent-running`, `--agent-idle`, `--unread`; display: `--view-mode`, `--grouping`, `--table-grouping`, `--swimlane-grouping`, `--gantt-zoom`, `--sort`, `--direction`, `--show-sub-issues`; `--definition-file` (JSON `query`/`display`, e.g. edited `view get` output), `--clear-filters` (update/duplicate), `--dry-run` |
 | `agent` | `list/get/create/update/archive/restore` | Manage agents | `--name`, `--runtime-id` (required for `create`), `--instructions`, `--conversation-starters`, `--model`, `--thinking-level`, `--custom-env` / `--custom-env-file` / `--custom-env-stdin` (`create` only), `--custom-args`, `--mcp-config` / `--mcp-config-file` / `--mcp-config-stdin`, `--permission-mode`, `--visibility` (older form), `--max-concurrent-tasks` |
 | | `copy <agent-id>` | Copy into a new agent; the original is untouched | `--name` (defaults to the original name plus ` (copy)`), `--runtime-id` (copying to another runtime also requires `--model`), `--no-skills`; secret configuration such as `custom_env`, `mcp_config`, and `runtime_config` is not copied — re-provide it with the same flags as `create` |
@@ -548,21 +556,29 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | | `trigger <id>` | Trigger a run manually | |
 | | `runs <id>` | View run history | |
 | | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | Manage schedule and webhook triggers | `trigger-add`: `--kind` (`schedule` or `webhook`), `--cron`, `--timezone` (default UTC), `--label` |
-| `workspace` | `list/get/create/update/switch` | Manage workspaces; `switch` sets the current profile's default workspace | `create`: `--name`, `--slug` (both required), `--issue-prefix`, `--description`, `--context` / `--context-stdin`; `update` changes the same fields except the slug |
+| `workspace` | `list/get/create/update/switch` | Manage workspaces; `switch` sets the current profile's default workspace; in an agent run, `list` shows only its own workspace | `create`: `--name`, `--slug` (both required), `--issue-prefix`, `--description`, `--context` / `--context-stdin`; `update` changes the same fields except the slug |
 | | `mcp list/add/update/remove` | Manage the workspace's MCP server library | Writes are owner/admin. A server added here is assigned to no agent — give it to one with `multica agent mcp add`. `list` shows names and transports only; the stored entry is write-only and never returned. `--server-config-file` / `--server-config-stdin` keep tokens out of shell history |
 | | `member list/invite <email>` | View members, send invites | `invite`: `--role` (member or admin, default member) |
 | `repo` | `list/add/remove/checkout` | Manage workspace repositories and check them out locally | `--url` (repeatable); `checkout`: `--ref` |
-| `skill` | `list/get/create/update/delete` | Manage skills | |
+| `skill` | `list/get/create/update/delete` | Manage skills | `get`: `--with-content` (returns metadata and `revision` by default); `update`: `--base-revision` (from `skill get`; rejects stale overwrites with HTTP 409) |
 | | `import` | Import a skill from a URL or local file | `--url` / `--file`, `--on-conflict` (`fail`, `overwrite`, `rename`, `skip`; default `fail`) |
 | | `search <query>` | Search skills | |
-| | `files list/upsert/delete <skill-id>` | Manage the files inside a skill | |
+| | `files list/upsert/delete <skill-id>` | Manage the files inside a skill | `list`: `--with-content`; `upsert` / `delete`: `--base-revision` (rejects stale overwrites with HTTP 409) |
 | | `label list/add/remove <skill-id>` | Manage labels on a skill | `add` / `remove`: `<label-id>` accepts a full UUID or short prefix |
-| `squad` | `list/get/create/update/delete` | Manage squads (`delete` archives) | |
+| `squad` | `list/get/create/update/delete` | Manage squads (`delete` archives) | `update`: `--name`, `--description`, `--instructions`, `--leader`, `--avatar-url`, `--handoff-mode` (`leader` or `direct`; see [Collaboration mode](/squads#collaboration-mode)) |
+| | `briefs <squad>` | Show the squad context each agent member receives; requires permission to manage the squad | `--agent` (name or ID) |
 | | `member list/add/set-role/remove` | Manage squad members | |
 | | `activity <issue-id> <outcome>` | Record a leader evaluation | |
 | `chat` | `history`, `thread [id]` | Read the external chat session an agent is currently handling | `--limit`, `--before` |
 | | `wakeup create/list/get/update/cancel/finish/checkin` | Manage follow-ups in the current chat run; see [Chat wakeups](#chat-wakeups) | `--title`, `--instruction` / `--instruction-file`, `--until-*`, `--at` / `--after`, `--every`, `--expires-in` / `--expires-at`; `checkin`: `--note` |
-| `inbox` | `list` | [Read your active notifications](/inbox) without marking them read | `--project`, `--type`, `--output` (`table` or `json`); filters apply locally |
+| `inbox` | `list` | [List your notifications](/inbox) without marking them read; `--archived` or `--snoozed` lists those instead | `--unread`, `--issue`, `--since`, `--project`, `--type`, `--output` (`table` or `json`); `--archived` reads every page |
+| | `count` | Unread count in this workspace and in each of your workspaces; an agent run sees only its own workspace | `--output` |
+| | `read [<id>...]` | Mark notifications read, the whole issue for each; or every notification on one issue, or all | `--issue`, `--all` (needs `--yes`) |
+| | `unread <id>...` | Mark notifications unread | |
+| | `archive [<id>...]` | Archive notifications, the whole issue for each; or in bulk | `--all`, `--read`, `--completed` (each needs `--yes`) |
+| | `unarchive <id>...` | Restore archived notifications | |
+| | `snooze <id>...` | Take each notification's issue out of the inbox until a time | `--until` (RFC 3339, `30m`, `3h`, `1d`, `1w`, `tomorrow`) |
+| | `unsnooze <id>...` | Bring snoozed issues back now | |
 
 ### Runtime
 

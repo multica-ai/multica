@@ -17,15 +17,19 @@ import { useT } from "../../i18n";
 import type { InboxView } from "./inbox-view";
 
 export function InboxDeleteDialog({
+  open = true,
   item,
   view,
   onClose,
   onDeleted,
+  onOpenChangeComplete,
 }: {
+  open?: boolean;
   item: InboxItem;
   view: InboxView;
   onClose: () => void;
   onDeleted: (id: string) => void;
+  onOpenChangeComplete?: (open: boolean) => void;
 }) {
   const { t } = useT("inbox");
   const mutation = useDeleteInbox();
@@ -44,10 +48,11 @@ export function InboxDeleteDialog({
 
   return (
     <AlertDialog
-      open
-      onOpenChange={(open) => {
-        if (!open && !mutation.isPending) onClose();
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen && !mutation.isPending) onClose();
       }}
+      onOpenChangeComplete={onOpenChangeComplete}
     >
       <AlertDialogContent>
         <AlertDialogHeader>

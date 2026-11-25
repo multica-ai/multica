@@ -3,7 +3,13 @@ title: 微信 Bot
 description: 掃碼透過 iLink 將微信帳號連接到 Multica AI 代理。
 ---
 
+import { Callout } from "fumadocs-ui/components/callout";
+
 Multica 參考騰訊 [OpenClaw Weixin 外掛](https://github.com/Tencent/openclaw-weixin) 的協定，直接連接微信 iLink Bot 服務。這與企業微信渠道獨立，不需要安裝 OpenClaw，也不透過桌面微信自動化收發訊息。
+
+<Callout type="info">
+微信整合[由社群維護](/community-maintained)：隨每個版本釋出，但沒有官方支援 SLA。遇到問題請提交 [GitHub 任務](https://github.com/multica-ai/multica/issues)。
+</Callout>
 
 ## 連線
 
@@ -19,6 +25,7 @@ Multica 參考騰訊 [OpenClaw Weixin 外掛](https://github.com/Tencent/opencla
 
 - 文字訊息會繼續同一個 Multica 聊天，最終回覆以純文字返回微信。長回覆按完整 Unicode 字元分段，不提供串流編輯。
 - AI 代理執行期間，微信支援時會顯示「正在輸入」，完成、失敗或取消後停止提示。單次續期失敗後，會在下一個 5 秒週期繼續嘗試。無法取得輸入狀態憑證或提示請求失敗，不影響正常收發。
+- `/help` 查看可用命令，不觸發 AI 代理執行，也不改變目前聊天。
 - `/new [訊息]` 新建聊天；`/clear [訊息]` 重設目前聊天的 AI 代理上下文；`/issue <標題>` 建立任務並分配給此 AI 代理。
 - 配置物件儲存後，圖片、檔案、影片和未轉寫的語音會作為附件進入聊天。微信提供的語音轉寫作為文字處理；Multica 不額外提供語音辨識，也不轉換 SILK 音訊。
 - AI 代理最終回覆中的附件會傳送回微信。支援的圖片和 MP4 影片使用原生媒體訊息，其他格式（包括音訊）使用檔案訊息。本適配器限制每次傳輸不超過 **20 MiB**。檔案傳送失敗時會提示，檔案仍保留在 Multica 中。

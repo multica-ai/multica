@@ -45,6 +45,8 @@ multica daemon status --output json
 multica daemon logs --lines 100
 ```
 
+如果 CLI 无法验证令牌，请先检查提示中的错误，再决定是否重新登录。
+
 常见原因包括：
 
 - CLI 尚未登录，或本机保存的令牌已经失效；
@@ -65,6 +67,8 @@ multica daemon restart
 ```bash
 multica config show
 ```
+
+在 macOS 上，如果守护进程日志显示 `connect: no route to host`，但同一台 Mac 的终端可以成功运行 `curl -fsS <server-url>/health`，请记录同一时段内的两项结果。附上守护进程的启动方式（Desktop、登录服务或终端），以及 macOS 和守护进程的版本。终端的结果只说明该 shell 进程能连通。
 
 </Accordion>
 <Accordion title={<><code>multica setup</code> 报告服务器不可达</>} id="multica-setup-reports-the-server-is-not-reachable" value="multica-setup-reports-the-server-is-not-reachable">
@@ -162,6 +166,15 @@ multica issue runs <issue-id>
 先在执行电脑的终端中直接运行同一款工具。工具自身也无法开始时，先修复工具登录或配置，再从执行日志重试运行。
 
 </Accordion>
+<Accordion title="AI 编程工具在 macOS 代理网络中超时" id="ai-coding-tool-times-out-behind-a-macos-proxy" value="ai-coding-tool-times-out-behind-a-macos-proxy">
+
+如果 Grok 等 AI 编程工具在终端中运行正常，在 Multica 桌面端却超时，请检查终端是否导出了代理环境变量。在 macOS 上，本地守护进程和它启动的工具会继承启动它们的进程的环境变量。从程序坞启动桌面端时，应用不会读取 shell 导出的变量，也不会将 macOS「网络」中的代理设置转换成环境变量。
+
+如果只有一个智能体需要代理，请在该智能体的[环境变量](/agents-create#环境变量与凭据)中添加它的工具所需的代理变量。例如，本地 HTTP 代理可设置为 `HTTPS_PROXY=http://127.0.0.1:7897`，请换成实际的代理地址。如果 Multica 部署在本机，可将需要直连的主机加入 `NO_PROXY`，例如 `localhost,127.0.0.1,::1`。开始一次新的运行，使修改生效。
+
+这些设置只作用于该智能体的工具进程，不作用于守护进程。如果守护进程需要通过代理连接 Multica 服务器，或需要获取最新的模型列表（守护进程用自己的环境获取模型列表），请单独配置它的启动环境。开机自启的守护进程见[开机自启](/daemon-runtimes#autostart)。
+
+</Accordion>
 <Accordion title="升级 CLI 后 macOS 上的运行卡住" id="runs-hang-on-macos-after-a-cli-upgrade" value="runs-hang-on-macos-after-a-cli-upgrade">
 
 通过 Homebrew 安装的 `multica` CLI 升级后（无论是 `brew upgrade`、`multica update`、**运行时**页面上的**更新**，还是守护进程自动更新），读取 `~/Desktop`、`~/Documents`、`~/Downloads`、iCloud 云盘或其他受保护文件夹的运行可能停滞：智能体进程不占用 CPU，运行既不结束也不失败。
@@ -175,6 +188,17 @@ multica issue runs <issue-id>
 3. 按启动守护进程时的方式重启它：`multica daemon restart`；LaunchAgent 则用 `launchctl kickstart -k gui/$(id -u)/<label>`。
 
 每次升级 CLI 后都需要重复这些步骤。只有连接 Multica Cloud 的守护进程默认开启自动更新；用 `--no-auto-update` 启动守护进程后，只在你手动升级时更新。[桌面应用](/desktop-app)内置的 CLI 使用 Developer ID 签名，授权在升级后依然有效。
+
+</Accordion>
+<Accordion title="使用 Hermes CLI 后，Hermes 运行会重新安装依赖" id="hermes-runs-reinstall-dependencies-after-you-use-the-hermes-cli" value="hermes-runs-reinstall-dependencies-after-you-use-the-hermes-cli">
+
+如果你交替使用 Hermes CLI 或 Hermes 桌面应用和 Multica 中的 Hermes，每次切换都可能多花 30–60 秒启动，因为 Hermes 会重建共享的 Python 依赖环境。每次重建都会在磁盘上留下一个新版本的依赖环境，直到 Hermes 将它清理掉。
+
+如果你常用的 Hermes 主目录把 `memory.provider` 设成了带 Python 依赖的插件，就会出现这个现象。每次 Multica 运行使用独立的 Hermes 主目录，共享已安装的依赖，并关闭外部记忆提供方，让记忆不在不同运行之间共享。Hermes 根据当前主目录中的插件判断需要哪些依赖。两个主目录的需求不同，都会把对方安装的环境视为过期。上游在 [NousResearch/hermes-agent#137726](https://github.com/NousResearch/hermes-agent/issues/137726) 跟踪这个问题。
+
+要确认是否正在重装，请在[守护进程日志](#日志位置)中查找 `hermes is reinstalling its dependency environment before this task starts`。随后的 `hermes dependency reinstall finished` 日志会在 `startup_delay_ms` 中记录从启动到就绪的总耗时，包括重装时间。
+
+在 Hermes 修复这个问题之前，可以在自己常用的 Hermes `config.yaml` 中设置 `memory.provider: ""` 来避免重建。这样也会关闭 CLI 的记忆插件。如果继续使用该插件，每次切换后的第一次启动都可能变慢。
 
 </Accordion>
 </Accordions>

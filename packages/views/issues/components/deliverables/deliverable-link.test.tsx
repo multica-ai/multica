@@ -31,6 +31,7 @@ vi.mock("@multica/core/paths", async () => {
 });
 
 import { OpenDeliverableOnLoad, useCopyDeliverableLink } from "./deliverable-link";
+import type { IssueRouteRef } from "@multica/core/paths";
 
 function attachment(over: Partial<Attachment> & { id: string }): Attachment {
   return {
@@ -161,7 +162,7 @@ describe("OpenDeliverableOnLoad", () => {
 
 describe("useCopyDeliverableLink", () => {
   it("copies the latest-version link, not a link to one upload", async () => {
-    const { result } = renderHook(() => useCopyDeliverableLink("MUL-1"), {
+    const { result } = renderHook(() => useCopyDeliverableLink("MUL-1" as IssueRouteRef), {
       wrapper: ({ children }) => withNav(children),
     });
     result.current?.("调研 报告.html");
@@ -173,7 +174,7 @@ describe("useCopyDeliverableLink", () => {
 
   it("reports a failed copy", async () => {
     copyTextMock.mockResolvedValueOnce(false);
-    const { result } = renderHook(() => useCopyDeliverableLink("MUL-1"), {
+    const { result } = renderHook(() => useCopyDeliverableLink("MUL-1" as IssueRouteRef), {
       wrapper: ({ children }) => withNav(children),
     });
     result.current?.("report.html");

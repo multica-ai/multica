@@ -131,7 +131,7 @@ func taskSupplementFailureReason(ctx context.Context, err error) string {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return protocol.TaskSupplementFailureTimeout
 	}
-	if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+	if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, agent.ErrSupplementTurnEnded) {
 		return protocol.TaskSupplementFailureTurnEnded
 	}
 	if strings.Contains(strings.ToLower(err.Error()), "turn") && strings.Contains(strings.ToLower(err.Error()), "not started") {

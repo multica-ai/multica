@@ -1,7 +1,10 @@
 "use client";
 
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
-import { StatusIcon } from "../../issues/components";
+import { UI_EASE_OUT } from "@multica/ui/lib/motion";
+import { StatusIcon } from "../../issues/components/status-icon";
 import {
   IssueAgentActivityIndicator,
 } from "../../issues/components/issue-agent-activity-indicator";
@@ -13,7 +16,8 @@ import type { InboxView } from "./inbox-view";
 import { InboxDetailLabel, useTypeLabels } from "./inbox-detail-label";
 import {
   getInboxDisplayTitle,
-  isAutopilotQuotaNotice,
+  inboxIssueRef,
+  isQuotaNotice,
 } from "./inbox-display";
 import { useInboxContextMenu } from "./inbox-context-menu";
 import { useStatusLabel } from "../../issues/utils/status-label";
@@ -56,6 +60,7 @@ export function InboxListItem({
   onAction: () => void;
 }) {
   const { t } = useT("inbox");
+  const reduceMotion = useReducedMotion();
   const timeAgo = useTimeAgo();
   const typeLabels = useTypeLabels();
   // Inbox is a cross-workspace surface, so the catalog is read against the
@@ -70,10 +75,10 @@ export function InboxListItem({
   const slug = useWorkspaceSlug();
   const issueHref =
     slug && item.issue_id
-      ? paths.workspace(slug).issueDetail(item.issue_id)
+      ? paths.workspace(slug).issueDetail(inboxIssueRef(item, item.issue_id))
       : null;
   const intentNavigate = useIntentNavigate();
-  const displayTitle = isAutopilotQuotaNotice(item.type)
+  const displayTitle = isQuotaNotice(item.type)
     ? typeLabels[item.type]
     : getInboxDisplayTitle(item);
   const isArchivedView = view === "archived";
@@ -144,11 +149,25 @@ export function InboxListItem({
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-1.5">
-            {showUnread && (
-              <span data-mc="unread-dot" className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand" />
-            )}
+            <AnimatePresence initial={false}>
+              {showUnread && (
+                <motion.span
+                  key="unread-dot"
+                  data-mc="unread-dot"
+                  initial={false}
+                  animate={{ opacity: 1, scale: 1, width: 6 }}
+                  exit={{
+                    opacity: 0,
+                    scale: 0,
+                    width: 0,
+                    transition: { duration: reduceMotion ? 0 : 0.12, ease: UI_EASE_OUT },
+                  }}
+                  className="h-1.5 shrink-0 rounded-full bg-brand"
+                />
+              )}
+            </AnimatePresence>
             <span
-              className={`truncate text-body ${showUnread ? "font-medium" : "text-muted-foreground"}`}
+              className={`truncate text-body transition-colors ${showUnread ? "font-medium" : "text-muted-foreground"}`}
             >
               {displayTitle}
             </span>
@@ -168,7 +187,7 @@ export function InboxListItem({
                     e.stopPropagation();
                     onAction();
                   }}
-                  className="hidden rounded-xs p-0.5 text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring [@media(hover:hover)]:group-hover:inline-flex [@media(hover:hover)]:group-focus-within:inline-flex"
+                  className="hidden rounded-xs p-0.5 text-muted-foreground outline-none transition-opacity duration-100 hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring motion-reduce:transition-none [@media(hover:hover)]:pointer-events-none [@media(hover:hover)]:inline-flex [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:pointer-events-auto [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:pointer-events-auto [@media(hover:hover)]:group-focus-within:opacity-100"
                 >
                   <ActionIcon className="h-3.5 w-3.5" />
                 </button>

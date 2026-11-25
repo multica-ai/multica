@@ -218,7 +218,10 @@ func NewAPIClient(baseURL, workspaceID, token string) *APIClient {
 // which keeps signing regardless of this capability — so the signature in list
 // payloads was pure cost: raw bytes, a per-attachment RSA sign, and bytes that
 // differ on every read and therefore defeat agent prompt caching.
-const clientCapabilities = "stable_attachment_urls"
+//
+// workspace-guests-v1 keeps guests in workspace member and invitation lists,
+// which the server hides from clients that cannot render the guest role.
+const clientCapabilities = "stable_attachment_urls,workspace-guests-v1"
 
 func (c *APIClient) setHeaders(req *http.Request) {
 	req.Header.Set("X-Client-Capabilities", clientCapabilities)
@@ -316,6 +319,34 @@ func (c *APIClient) GetJSONWithHeaders(ctx context.Context, path string, out any
 	return resp.Header, nil
 }
 
+// GetJSONWithRequestHeaders performs a GET request with extra request headers
+// (for example Idempotency-Key) and returns the response headers on success.
+func (c *APIClient) GetJSONWithRequestHeaders(ctx context.Context, path string, headers map[string]string, out any) (http.Header, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	c.setHeaders(req)
+	for name, value := range headers {
+		req.Header.Set(name, value)
+	}
+
+	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, newHTTPError(http.MethodGet, path, resp)
+	}
+	if out == nil {
+		return resp.Header, nil
+	}
+	return resp.Header, wrapBodyRead(req, json.NewDecoder(resp.Body).Decode(out))
+}
+
 // DeleteJSON performs a DELETE request.
 func (c *APIClient) DeleteJSON(ctx context.Context, path string) error {
 	return c.DeleteJSONResponse(ctx, path, nil)
@@ -387,32 +418,42 @@ func (c *APIClient) DeleteJSONWithBody(ctx context.Context, path string, body an
 
 // PostJSON performs a POST request with a JSON body.
 func (c *APIClient) PostJSON(ctx context.Context, path string, body any, out any) error {
+	_, err := c.PostJSONWithHeaders(ctx, path, body, nil, out)
+	return err
+}
+
+// PostJSONWithHeaders performs a POST request with extra request headers (for
+// example Idempotency-Key) and returns the response headers on success.
+func (c *APIClient) PostJSONWithHeaders(ctx context.Context, path string, body any, headers map[string]string, out any) (http.Header, error) {
 	data, err := json.Marshal(body)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(data))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	c.setHeaders(req)
+	for name, value := range headers {
+		req.Header.Set(name, value)
+	}
 
 	resp, err := c.HTTPClient.Do(req)
 	err = wrapTransport(req, err)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return newHTTPError(http.MethodPost, path, resp)
+		return nil, newHTTPError(http.MethodPost, path, resp)
 	}
 	if out == nil {
-		return nil
+		return resp.Header, nil
 	}
-	return wrapBodyRead(req, json.NewDecoder(resp.Body).Decode(out))
+	return resp.Header, wrapBodyRead(req, json.NewDecoder(resp.Body).Decode(out))
 }
 
 // PutJSON performs a PUT request with a JSON body.
@@ -816,7 +857,19 @@ func (c *APIClient) DownloadFile(ctx context.Context, downloadURL string) ([]byt
 		c.setHeaders(req)
 	}
 
-	resp, err := c.HTTPClient.Do(req)
+	// Downloads may have a longer caller budget than ordinary API requests.
+	// Keep the shared client unchanged for concurrent requests and preserve
+	// its timeout when the caller has no deadline (or disabled client timeouts).
+	httpClient := c.HTTPClient
+	if deadline, ok := ctx.Deadline(); ok && httpClient.Timeout > 0 {
+		if remaining := time.Until(deadline); remaining > httpClient.Timeout {
+			clientCopy := *httpClient
+			clientCopy.Timeout = remaining
+			httpClient = &clientCopy
+		}
+	}
+
+	resp, err := httpClient.Do(req)
 	err = wrapTransport(req, err)
 	if err != nil {
 		return nil, err

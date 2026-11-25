@@ -1,10 +1,15 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { useT } from "../i18n";
+import {
+  storageLimitRefusal,
+  useStorageLimitToast,
+  type StorageLimitRefusal,
+} from "../billing/storage-limit-notice";
 
 /**
  * `useFileUpload` wired to the failure toast the upload gate depends on.
@@ -17,18 +22,36 @@ import { useT } from "../i18n";
  *
  * `useFileUpload` lives in `@multica/core`, which may not import a UI library,
  * so the toast is supplied here — once, rather than per composer.
+ *
+ * A file the attachment storage limit refused (MUL-9489) is reported with
+ * what to do about it: as `storageRefusal` for a host that renders a
+ * StorageLimitNotice under its editor (`inlineStorageNotice`), otherwise as a
+ * toast carrying the same notice.
  */
-function useEditorUpload() {
+function useEditorUpload(opts?: { inlineStorageNotice?: boolean }) {
   const { t } = useT("editor");
+  const inline = opts?.inlineStorageNotice === true;
+  const [storageRefusal, setStorageRefusal] = useState<StorageLimitRefusal | null>(null);
+  const toastStorageLimit = useStorageLimitToast();
   const onError = useCallback(
     (error: Error, file: File) => {
+      if (inline) {
+        const refusal = storageLimitRefusal(error, file.name);
+        if (refusal) {
+          setStorageRefusal(refusal);
+          return;
+        }
+      } else if (toastStorageLimit(error, file.name)) {
+        return;
+      }
       toast.error(
         t(($) => $.upload.failed, { filename: file.name, reason: error.message }),
       );
     },
-    [t],
+    [inline, t, toastStorageLimit],
   );
-  return useFileUpload(api, onError);
+  const dismissStorageRefusal = useCallback(() => setStorageRefusal(null), []);
+  return { ...useFileUpload(api, onError), storageRefusal, dismissStorageRefusal };
 }
 
 export { useEditorUpload };

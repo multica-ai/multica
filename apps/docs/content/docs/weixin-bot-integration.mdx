@@ -3,7 +3,13 @@ title: WeChat Bot
 description: Scan a QR code to connect your WeChat account to a Multica agent through iLink.
 ---
 
+import { Callout } from "fumadocs-ui/components/callout";
+
 Multica connects to WeChat's iLink Bot service using the protocol implemented by Tencent's [OpenClaw Weixin plugin](https://github.com/Tencent/openclaw-weixin). This is a separate channel from WeCom. You do not need to install OpenClaw or run a desktop WeChat automation tool.
+
+<Callout type="info">
+WeChat support is [community-maintained](/community-maintained): it ships in every release, but carries no official support SLA. Report problems in [GitHub issues](https://github.com/multica-ai/multica/issues).
+</Callout>
 
 ## Connect
 
@@ -23,6 +29,7 @@ The QR code in this illustration is a test fixture, not a live authorization cod
 
 - Text messages continue the same Multica chat. Final answers return to WeChat in plain text; long answers are split into Unicode-safe messages. There is no streaming message editing.
 - While the agent works, Multica renews WeChat's typing indicator when available. It stops after completion, failure, or cancellation. A failed renewal is retried at the next five-second interval. Missing typing permission or a failed indicator request does not interrupt messages or replies.
+- `/help` lists available commands without starting an agent run or changing the current chat.
 - `/new [message]` starts a new Multica chat. `/clear [message]` resets agent-visible context in the current chat. `/issue <title>` creates an issue assigned to the connected agent.
 - With object storage configured, incoming images, files, video, and untranscribed voice notes are attached to the Multica chat. Voice transcription supplied by WeChat is used as text; Multica does not add a speech-to-text service or convert SILK audio.
 - Files attached to an agent's final answer return to WeChat. Supported images and MP4 video use native media messages; other formats, including audio, use file messages. Each transfer is limited to **20 MiB** by this adapter. A failed outgoing file transfer produces a notice; the file remains in Multica.

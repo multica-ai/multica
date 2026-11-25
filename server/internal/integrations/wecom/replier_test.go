@@ -217,6 +217,7 @@ func TestReply_CommandOutcomes_PostGuidance(t *testing.T) {
 		want    string
 	}{
 		{engine.OutcomeFreshPending, copyFor(DefaultLocale).FreshPending},
+		{engine.OutcomeHelp, copyFor(DefaultLocale).Help},
 		{engine.OutcomeIssueUsage, copyFor(DefaultLocale).IssueUsage},
 	} {
 		t.Run(string(tc.outcome), func(t *testing.T) {

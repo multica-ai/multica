@@ -10,7 +10,6 @@ import { useIssuePeekActions } from "../surface/peek-context";
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
   useSensor,
   useSensors,
   useDroppable,
@@ -26,6 +25,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { Virtuoso } from "react-virtuoso";
 import { ChevronRight, EyeOff, GripVertical, MoreHorizontal, Pencil, Plus } from "@multica/ui/icons";
 import { useQuery, useQueries, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import type {
   Issue,
   IssueAssigneeType,
@@ -37,9 +37,9 @@ import type {
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import { useViewBaseline } from "../surface/view-baseline-context";
 import { filterIssues, type IssueFilters } from "../utils/filter";
-import { getMoveAnchors } from "../utils/drag-utils";
+import { getMoveAnchors, insertIdByPosition, IssueCardPointerSensor } from "../utils/drag-utils";
 import type { SwimlaneGrouping } from "@multica/core/issues/stores/view-store";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import type { IssueStatusCatalog } from "@multica/core/issue-statuses";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
@@ -54,6 +54,7 @@ import {
 import { sortIssues } from "../utils/sort";
 import { BUILT_IN_STATUS_ORDER, STATUS_CONFIG } from "@multica/core/issues/config";
 import { DraggableBoardCard, BoardCardContent } from "./board-card";
+import { createIssueDropAnimation, ISSUE_DRAG_OVERLAY_CLASS } from "./drag-drop-animation";
 import { StatusIcon } from "./status-icon";
 import { Button } from "@multica/ui/components/ui/button";
 import { StatusHeading } from "./status-heading";
@@ -233,7 +234,7 @@ interface LaneGroup {
   title: string;
   identifier: string;
   /** Parent issue (parent grouping only) — drives the open-parent link + status icon in the header. */
-  parentIssue: Pick<Issue, "id" | "status"> | null;
+  parentIssue: Pick<Issue, "id" | "identifier" | "status"> | null;
   /** Project metadata (project grouping only) — drives the icon in the header. */
   project: Project | null;
   /** Actor (assignee grouping only) — drives the avatar in the header. */
@@ -576,7 +577,7 @@ function buildServerLanes(
           (unavailable ? labels.otherParents : labels.noParent),
         identifier: value.parent?.identifier ?? "",
         parentIssue: value.parent
-          ? { id: value.parent.id, status: value.parent.status as IssueStatus }
+          ? { id: value.parent.id, identifier: value.parent.identifier, status: value.parent.status as IssueStatus }
           : null,
         project: null,
         actor: null,
@@ -990,6 +991,8 @@ function SwimLaneViewImpl({
   );
 
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
+  const skipDropAnimationRef = useRef(false);
+  const dropAnimation = useMemo(() => createIssueDropAnimation(skipDropAnimationRef), []);
   // The outer scroll box is the customScrollParent for the lane Virtuoso.
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
   const laneListRef = useRef<HTMLDivElement>(null);
@@ -1075,17 +1078,19 @@ function SwimLaneViewImpl({
   );
 
   const sensors = useSensors(
-    useSensor(PointerSensor, {
+    useSensor(IssueCardPointerSensor, {
       activationConstraint: { distance: 5 },
     }),
   );
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
+    skipDropAnimationRef.current = false;
     isDraggingRef.current = true;
     const activeId = event.active.id as string;
     // Lane drags don't carry an Issue payload — clear the card overlay so
     // we don't show a stale card during a lane reorder.
     if (parseLaneId(activeId) !== null) {
+      skipDropAnimationRef.current = true;
       setActiveIssue(null);
       return;
     }
@@ -1106,6 +1111,7 @@ function SwimLaneViewImpl({
         const overCell = findCellIn(prev, cellSet, overId);
         if (!activeCell || !overCell) return prev;
         if (issueMapRef.current.get(activeId)?.status !== overCell.status && entryOf(overCell.status)?.archived_at) return prev;
+        if (sortBy !== "position") return prev;
         if (
           activeCell.laneKey === overCell.laneKey &&
           activeCell.status === overCell.status
@@ -1180,7 +1186,7 @@ function SwimLaneViewImpl({
         };
       });
     },
-    [cellSet, laneByKey, entryOf],
+    [cellSet, laneByKey, entryOf, sortBy],
   );
 
   const handleDragEnd = useCallback(
@@ -1189,7 +1195,10 @@ function SwimLaneViewImpl({
       isDraggingRef.current = false;
       setActiveIssue(null);
 
-      const reset = () => setLocalCells(cells);
+      const reset = () => {
+        skipDropAnimationRef.current = true;
+        setLocalCells(cells);
+      };
 
       if (!over) {
         reset();
@@ -1272,12 +1281,44 @@ function SwimLaneViewImpl({
         return;
       }
 
-      let finalCells = cols;
-      // Handle reordering within the same target cell upon drop.
-      if (
+      const sameCell =
         activeCell.laneKey === overCell.laneKey &&
-        activeCell.status === overCell.status
-      ) {
+        activeCell.status === overCell.status;
+      let finalCells = cols;
+      if (sortBy !== "position") {
+        if (sameCell) {
+          reset();
+          if (activeId !== overId) {
+            toast.info(t(($) => $.board.manual_reorder_hint), {
+              id: "issue-manual-reorder-hint",
+            });
+          }
+          return;
+        }
+        // Only the lane or status changes, as on Board and List. The anchors
+        // come from the card's manual position, not the slot it was dropped in:
+        // neighbors on screen can have positions that run backwards, and the
+        // server rejects the whole move for those.
+        const without = (laneKey: string, status: string) =>
+          (cols[laneKey]?.[status] ?? []).filter((id) => id !== activeId);
+        const sourceIds = without(activeCell.laneKey, activeCell.status);
+        const targetIds = insertIdByPosition(
+          without(overCell.laneKey, overCell.status),
+          activeId,
+          issueMapRef.current.get(activeId)?.position ?? 0,
+          issueMapRef.current,
+        );
+        finalCells = {
+          ...cols,
+          [activeCell.laneKey]: { ...cols[activeCell.laneKey], [activeCell.status]: sourceIds },
+        };
+        finalCells[overCell.laneKey] = {
+          ...finalCells[overCell.laneKey],
+          [overCell.status]: targetIds,
+        };
+        setLocalCells(finalCells);
+      } else if (sameCell) {
+        // Handle reordering within the same target cell upon drop.
         const ids = cols[activeCell.laneKey]?.[activeCell.status];
         if (ids) {
           const oldIndex = ids.indexOf(activeId);
@@ -1303,8 +1344,10 @@ function SwimLaneViewImpl({
       }
 
       const finalIds = finalCells[finalOverCell.laneKey]?.[finalOverCell.status] ?? [];
-      const newPosition = computePosition(finalIds, activeId, issueMapRef.current);
       const currentIssue = issueMapRef.current.get(activeId);
+      const newPosition = sortBy === "position"
+        ? computePosition(finalIds, activeId, issueMapRef.current)
+        : (currentIssue?.position ?? 0);
       const targetLane = laneByKey.get(finalOverCell.laneKey);
       if (!targetLane) {
         reset();
@@ -1350,7 +1393,7 @@ function SwimLaneViewImpl({
         },
       );
     },
-    [cells, cellSet, laneByKey, laneGroups, onMoveIssue, swimlaneGrouping, viewStoreApi, entryOf],
+    [cells, cellSet, laneByKey, laneGroups, onMoveIssue, swimlaneGrouping, viewStoreApi, entryOf, sortBy, t],
   );
 
   // Grid template: one column per status, fixed width COLUMN_WIDTH, gap COLUMN_GAP.
@@ -1410,6 +1453,7 @@ function SwimLaneViewImpl({
   // localCells resyncing with the cache afterwards — see the same handler in
   // list-view for the touch path that makes this routine (MUL-6240).
   const handleDragCancel = useCallback(() => {
+    skipDropAnimationRef.current = true;
     isDraggingRef.current = false;
     setActiveIssue(null);
     setLocalCells(cells);
@@ -1577,9 +1621,9 @@ function SwimLaneViewImpl({
         </div>
       </div>
 
-      <DragOverlay dropAnimation={null}>
+      <DragOverlay dropAnimation={dropAnimation}>
         {activeIssue ? (
-          <div className="w-[280px] rotate-2 scale-105 cursor-grabbing opacity-90 shadow-lg shadow-black/10">
+          <div className={`w-[280px] ${ISSUE_DRAG_OVERLAY_CLASS}`}>
             <BoardCardContent
               issue={activeIssue}
               childProgress={childProgressMap.get(activeIssue.id)}
@@ -1665,7 +1709,7 @@ function DraggableSwimLane({
   }, 0);
 
   return (
-    <div ref={setNodeRef} style={style} className={`flex flex-col ${isDragging ? "opacity-50" : ""}`}>
+    <div ref={setNodeRef} style={style} className={`flex flex-col transition-opacity duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none ${isDragging ? "opacity-50" : ""}`}>
       {/* Non-interactive container — the inner collapse button and any
           ancillary links (e.g. open-parent) are independent controls so we
           don't nest an <a> inside a <button>. The drag listeners attach
@@ -1722,7 +1766,7 @@ function DraggableSwimLane({
             content={t(($) => $.swimlane.open_parent)}
             trigger={
               <AppLink
-                href={paths.issueDetail(lane.parentIssue.id)}
+                href={paths.issueDetail(issueRouteRef(lane.parentIssue))}
                 aria-label={t(($) => $.swimlane.open_parent)}
                 className="inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
               >
@@ -1807,6 +1851,7 @@ function SwimLaneCell({
   // Never show the hover highlight on a readOnly cell — the guards will
   // reject the drop, so visual confirmation would be misleading.
   const { t } = useT("issues");
+  const sortBy = useViewStore((s) => s.sortBy);
   const { categoryOf, entryOf } = statusCatalog;
   const archived = !!entryOf(status)?.archived_at;
   const isOver = !readOnly && !archived && droppableIsOver;
@@ -1849,6 +1894,7 @@ function SwimLaneCell({
               project={
                 issue.project_id ? projectMap?.get(issue.project_id) : undefined
               }
+              disableSorting={sortBy !== "position"}
             />
           ))}
         </SortableContext>

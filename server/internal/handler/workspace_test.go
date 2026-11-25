@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -1186,6 +1187,66 @@ WHERE autopilot_id = $1 AND user_id = $2
 	}
 }
 
+// TestDeleteMember_PrunesAutopilotCollaborators: a removed member who is
+// invited back must not regain write access to autopilots they were granted
+// before. The delete is scoped to that user and to this workspace.
+func TestDeleteMember_PrunesAutopilotCollaborators(t *testing.T) {
+	fx := setupRevocationFixture(t, "handler-tests-revoke-autopilot-collaborator", "daemon-revoke-autopilot-collaborator")
+
+	insertAutopilot := func(workspaceID string) string {
+		id := dbfx.Insert(t, "autopilot", testutil.Cols{
+			"workspace_id":    workspaceID,
+			"title":           "Revocation autopilot collaborator",
+			"assignee_type":   "agent",
+			"assignee_id":     fx.AgentID,
+			"status":          "active",
+			"execution_mode":  "run_only",
+			"created_by_type": "member",
+			"created_by_id":   testUserID,
+		})
+		dbfx.Cleanup(t, `DELETE FROM autopilot_collaborator WHERE autopilot_id = $1`, id)
+		return id
+	}
+	autopilotID := insertAutopilot(fx.WorkspaceID)
+	otherWorkspaceID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name":         "Revocation collaborator other workspace",
+		"slug":         fmt.Sprintf("handler-tests-revoke-autopilot-collaborator-other-%d", time.Now().UnixNano()),
+		"description":  "tenant-scope regression fixture",
+		"issue_prefix": "RCO",
+	})
+	otherAutopilotID := insertAutopilot(otherWorkspaceID)
+	dbfx.Exec(t, `
+INSERT INTO autopilot_collaborator (autopilot_id, user_type, user_id, granted_by)
+VALUES ($1, 'member', $3, $4), ($1, 'member', $4, $4), ($2, 'member', $3, $4)
+`, autopilotID, otherAutopilotID, fx.TargetUserID, testUserID)
+
+	req := newRequest("DELETE", "/api/workspaces/"+fx.WorkspaceID+"/members/"+fx.MemberID, nil)
+	req.Header.Set("X-Workspace-ID", fx.WorkspaceID)
+	req = withURLParams(req, "id", fx.WorkspaceID, "memberId", fx.MemberID)
+	testutil.Call(t, testHandler.DeleteMember, req).Want(http.StatusNoContent)
+
+	granted := func(autopilotID, userID string) bool {
+		t.Helper()
+		ok, err := testHandler.Queries.IsAutopilotCollaborator(context.Background(), db.IsAutopilotCollaboratorParams{
+			AutopilotID: parseUUID(autopilotID),
+			UserID:      parseUUID(userID),
+		})
+		if err != nil {
+			t.Fatalf("read collaborator: %v", err)
+		}
+		return ok
+	}
+	if granted(autopilotID, fx.TargetUserID) {
+		t.Error("removed member still holds write access to the autopilot")
+	}
+	if !granted(autopilotID, testUserID) {
+		t.Error("remaining member's access was pruned")
+	}
+	if !granted(otherAutopilotID, fx.TargetUserID) {
+		t.Error("access in another workspace was pruned")
+	}
+}
+
 // TestLeaveWorkspace_RevokesOwnRuntimes is the self-removal counterpart: when
 // a member leaves a workspace voluntarily, their own runtimes are revoked
 // with the same atomic write set as DeleteMember.
@@ -1576,5 +1637,34 @@ func TestUpdateWorkspace_RejectsInvalidIssuePrefix(t *testing.T) {
 	dbfx.QueryRow(t, `SELECT issue_prefix FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&after)
 	if after != before {
 		t.Fatalf("issue_prefix changed on a rejected update: %q → %q", before, after)
+	}
+}
+
+func TestListWorkspacesTaskCredentialSeesOnlyBoundWorkspace(t *testing.T) {
+	bound := newInboxWriteFixture(t)
+	other := newInboxWriteFixture(t)
+	token := bound.taskToken(t, testUserID)
+	ids := func(got []WorkspaceResponse) map[string]bool {
+		set := make(map[string]bool, len(got))
+		for _, ws := range got {
+			set[ws.ID] = true
+		}
+		return set
+	}
+
+	// The owner's own credential still lists every workspace.
+	var owner []WorkspaceResponse
+	testutil.Call(t, testHandler.ListWorkspaces, newRequest(http.MethodGet, "/api/workspaces", nil)).Want(http.StatusOK).JSON(&owner)
+	if got := ids(owner); !got[bound.workspaceID] || !got[other.workspaceID] {
+		t.Fatalf("owner list = %v, want both %s and %s", got, bound.workspaceID, other.workspaceID)
+	}
+
+	// The CLI lists workspaces without a workspace selector.
+	asAgent := middleware.Auth(testHandler.Queries, nil, nil, nil)(http.HandlerFunc(testHandler.ListWorkspaces))
+	req := testutil.WithHeaders(testutil.JSONRequest(http.MethodGet, "/api/workspaces", nil), "Authorization", "Bearer "+token)
+	var agent []WorkspaceResponse
+	testutil.Call(t, asAgent.ServeHTTP, req).Want(http.StatusOK).JSON(&agent)
+	if len(agent) != 1 || agent[0].ID != bound.workspaceID {
+		t.Fatalf("task credential list = %v, want only bound workspace %s", ids(agent), bound.workspaceID)
 	}
 }

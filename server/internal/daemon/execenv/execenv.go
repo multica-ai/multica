@@ -170,6 +170,7 @@ type TaskContextForEnv struct {
 	ProjectArchived               bool                    // project is archived; rendered as a note in the Project Context section
 	ProjectResources              []ProjectResourceForEnv // resources attached to the project
 	ChatSessionID                 string                  // non-empty for chat tasks
+	DocID                         string                  // non-empty for doc discussion tasks (MUL-9933)
 	// ChatChannelType is the IM platform behind a chat session ("slack",
 	// "feishu", "wecom"); empty for a web/mobile chat. It names the surface in
 	// the brief's copy; what that surface can DELIVER is the separate field
@@ -195,6 +196,10 @@ type TaskContextForEnv struct {
 	// TestBriefByteIdenticalAcrossRunsForEveryKind is what keeps this field out
 	// of the brief.
 	ChatChannelDeliversFiles bool
+	// DocsEnabled is the server's docs_v1 flag from the claim. The brief lists
+	// `multica doc` and mention://doc only when it is true, so agents are not
+	// sent to an API that answers 403 docs_disabled.
+	DocsEnabled bool
 
 	AutopilotRunID          string // non-empty for autopilot run_only tasks
 	AutopilotID             string
@@ -228,6 +233,10 @@ type TaskContextForEnv struct {
 	// statuses and commands are the issue's real contract (MUL-8145). Servers
 	// that send no workflow leave it false and the brief unchanged.
 	HasProjectWorkflow bool
+	// ProjectWorkflowStatusMap is true when that block is a status map
+	// rather than per-step commands (MUL-9913): the brief then states the
+	// rules for choosing from the map. Only meaningful with HasProjectWorkflow.
+	ProjectWorkflowStatusMap bool
 	// ConnectedApps lists per-run external app capabilities mounted through
 	// MCP overlays. Rendered briefly so the agent can map app names such as
 	// Notion to the actual MCP server name (`composio`).
@@ -339,9 +348,13 @@ type Environment struct {
 	// isolated from the user's persistent ~/.cursor/projects state.
 	CursorDataDir string
 	// CursorUserDataDir is set instead of CursorDataDir when the task runs on
-	// the user's Cursor data dir and its project there is linked to the
+	// the user's Cursor data dir and its project there is seeded with the
 	// agent's MCP login. Cursor uses that dir by default, so it is not exported.
 	CursorUserDataDir string
+	// CursorMcpAuthMirror merges the MCP login changes Cursor makes in the
+	// task's copy back into the agent's login. Nil when the login is
+	// task-local or the provider is not Cursor.
+	CursorMcpAuthMirror *CursorMcpAuthMirror
 	// HermesHome is the effective HERMES_HOME overlay (set only for
 	// the hermes provider, and only when the agent has skills bound — empty
 	// otherwise, leaving the user's real home in place). With a conversation
@@ -647,15 +660,16 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// follow-up can be claimed the instant the prior task completes — before
 	// the prior handler writes .gc_meta.json — so reuse eligibility must be
 	// provable from an artifact that exists the moment the env is created. Only
-	// managed (non-local_directory) issue and chat envs get this marker; that is
-	// exactly the set with a durable conversation scope. Non-fatal: a write failure
+	// managed (non-local_directory) issue, chat and doc discussion envs get this
+	// marker; that is exactly the set with a durable conversation scope. Non-fatal: a write failure
 	// only costs the next follow-up its session reuse (it falls back to a fresh
 	// session), which must never block dispatching this task.
-	if params.LocalWorkDir == "" && (params.Task.IssueID != "" || params.Task.ChatSessionID != "") {
+	if params.LocalWorkDir == "" && (params.Task.IssueID != "" || params.Task.ChatSessionID != "" || params.Task.DocID != "") {
 		if err := WriteManagedEnvProvenance(envRoot, ManagedEnvProvenance{
 			WorkspaceID:   params.WorkspaceID,
 			IssueID:       params.Task.IssueID,
 			ChatSessionID: params.Task.ChatSessionID,
+			DocID:         params.Task.DocID,
 			AgentID:       params.Task.AgentID,
 		}); err != nil && logger != nil {
 			logger.Warn("execenv: write managed env provenance failed (non-fatal); a follow-up may start a fresh session", "error", err)
@@ -731,15 +745,10 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// still reads ~/.cursor/mcp.json, but only servers with approval entries in
 	// this per-task data dir can load, so user-global MCP servers do not leak
 	// into managed-MCP runs. Without managed MCP the task runs on the user's
-	// data dir, and only its MCP login is linked there.
+	// data dir, and only its MCP login is copied there.
 	if params.Provider == "cursor" {
-		cursorDataDir, err := prepareCursorMcpConfig(envRoot, workDir, params.McpConfig, params.CursorMcpAuthSource, params.CursorMcpAuthStore, manifest, logger)
-		if err != nil {
+		if err := prepareCursorMcp(env, envRoot, workDir, params.McpConfig, params.CursorMcpAuthSource, params.CursorMcpAuthStore, params.CursorUserDataDir, manifest, logger); err != nil {
 			return nil, fmt.Errorf("execenv: prepare cursor mcp config: %w", err)
-		}
-		env.CursorDataDir = cursorDataDir
-		if cursorDataDir == "" {
-			env.CursorUserDataDir = linkCursorUserMcpAuth(params.CursorUserDataDir, envRoot, workDir, params.CursorMcpAuthSource, params.CursorMcpAuthStore, logger)
 		}
 	}
 
@@ -1071,14 +1080,9 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// mcp_config must replace the prior run's .cursor/mcp.json and isolated
 	// approvals before the next cursor-agent process starts.
 	if params.Provider == "cursor" && env.RootDir != "" {
-		cursorDataDir, err := prepareCursorMcpConfig(env.RootDir, params.WorkDir, params.McpConfig, params.CursorMcpAuthSource, params.CursorMcpAuthStore, manifest, logger)
-		if err != nil {
+		if err := prepareCursorMcp(env, env.RootDir, params.WorkDir, params.McpConfig, params.CursorMcpAuthSource, params.CursorMcpAuthStore, params.CursorUserDataDir, manifest, logger); err != nil {
 			logger.Warn("execenv: refresh cursor mcp config failed", "error", err)
 			return nil
-		}
-		env.CursorDataDir = cursorDataDir
-		if cursorDataDir == "" {
-			env.CursorUserDataDir = linkCursorUserMcpAuth(params.CursorUserDataDir, env.RootDir, params.WorkDir, params.CursorMcpAuthSource, params.CursorMcpAuthStore, logger)
 		}
 	}
 
@@ -1171,6 +1175,9 @@ const (
 	GCKindChat         GCMetaKind = "chat"
 	GCKindAutopilotRun GCMetaKind = "autopilot_run"
 	GCKindQuickCreate  GCMetaKind = "quick_create"
+	// GCKindDoc is a doc discussion run's env, reused by the agent's next run
+	// on the same doc (MUL-9933).
+	GCKindDoc GCMetaKind = "doc"
 )
 
 // GCMeta is persisted to .gc_meta.json inside the env root so the GC loop
@@ -1188,6 +1195,7 @@ type GCMeta struct {
 	IssueID        string     `json:"issue_id,omitempty"`
 	ChatSessionID  string     `json:"chat_session_id,omitempty"`
 	AutopilotRunID string     `json:"autopilot_run_id,omitempty"`
+	DocID          string     `json:"doc_id,omitempty"`
 	TaskID         string     `json:"task_id,omitempty"`
 	WorkspaceID    string     `json:"workspace_id"`
 	CompletedAt    time.Time  `json:"completed_at"`
@@ -1269,6 +1277,7 @@ type ManagedEnvProvenance struct {
 	WorkspaceID   string `json:"workspace_id"`
 	IssueID       string `json:"issue_id,omitempty"`
 	ChatSessionID string `json:"chat_session_id,omitempty"`
+	DocID         string `json:"doc_id,omitempty"`
 	AgentID       string `json:"agent_id"`
 }
 

@@ -7,6 +7,8 @@ func TestPriceForModelAliasGemini(t *testing.T) {
 		id    string
 		price ModelPrice
 	}{
+		{"gemini-4-neon", ModelPrice{Provider: "google", Model: "gemini-4-neon", InputPerM: 3, CacheReadPerM: 0.15, CacheWritePerM: 3, OutputPerM: 15}},
+		{"gemini-4-hydrogen", ModelPrice{Provider: "google", Model: "gemini-4-hydrogen", InputPerM: 1.5, CacheReadPerM: 0.075, CacheWritePerM: 1.5, OutputPerM: 7.5}},
 		{"gemini-4-argon", ModelPrice{Provider: "google", Model: "gemini-4-argon", InputPerM: 2, CacheReadPerM: 0.1, CacheWritePerM: 2, OutputPerM: 10}},
 		{"gemini-4-carbon", ModelPrice{Provider: "google", Model: "gemini-4-carbon", InputPerM: 2, CacheReadPerM: 0.1, CacheWritePerM: 2, OutputPerM: 10}},
 		{"gemini-3.8-flash", ModelPrice{Provider: "google", Model: "gemini-3.8-flash", InputPerM: 0.75, CacheReadPerM: 0.075, CacheWritePerM: 0.75, OutputPerM: 3.75}},
@@ -50,12 +52,14 @@ func TestPriceForModelAliasGemini(t *testing.T) {
 		{"Gemini 3.1 Pro", "gemini-3.1-pro"},
 		{"Gemini 4 Argon", "gemini-4-argon"},
 		{"Gemini 4 Carbon", "gemini-4-carbon"},
+		{"Gemini 4 Neon", "gemini-4-neon"},
+		{"Gemini 4 Hydrogen", "gemini-4-hydrogen"},
 	} {
 		want, ok := PriceForModelAlias(tc.id)
 		if !ok {
 			t.Fatalf("missing price for %q", tc.id)
 		}
-		for _, alias := range []string{tc.label, tc.label + " (High)", "google/" + tc.label + " (Low)", tc.id + "-minimal", "antigravity:" + tc.id + "-high", "custom:google/" + tc.id + "-low[1m]"} {
+		for _, alias := range []string{tc.label, tc.label + " (High)", "google/" + tc.label + " (Low)", tc.label + " (Extra)", tc.id + "-minimal", tc.id + "-xhigh", "antigravity:" + tc.id + "-high", "custom:google/" + tc.id + "-low[1m]"} {
 			if got, ok := PriceForModelAlias(alias); !ok || got != want {
 				t.Errorf("display/effort alias %q = %+v, %v; want %+v", alias, got, ok, want)
 			}
@@ -90,6 +94,14 @@ func TestPriceForModelAliasGemini(t *testing.T) {
 		"gemini-4-argon[1m][2m]",
 		"gemini-4-carbon-fast",
 		"gemini-4-carbon[1m][2m]",
+		"gemini-4-neon-fast",
+		"gemini-4-neon-max",
+		"gemini-4-neon-extra",
+		"gemini-4-neon[1m][2m]",
+		"gemini-4-hydrogen-fast",
+		"Gemini 4 Neon (Ultra)",
+		"Gemini 4 Hydrogen (Xhigh)",
+		"Gemini 4 Neon Medium",
 	} {
 		if got, ok := PriceForModelAlias(alias); ok {
 			t.Errorf("unknown or multimodal alias %q borrowed a rate: %+v", alias, got)

@@ -56,6 +56,43 @@ func TestCloudFeatureActionsAreDeliveredUnchanged(t *testing.T) {
 	}
 }
 
+// Revision 7 adds three features. Each is read on its own: a policy from an
+// older Cloud that lacks them leaves them off without touching the features
+// it does carry.
+func TestRevisionSevenFeaturesAreReadIndependently(t *testing.T) {
+	server := httptest.NewServer(featurePolicyHandler(t, `{
+		"private_projects":{"action":"observe"},
+		"agent_invocation_members":{"action":"enforce"},
+		"runtime_member_sharing":{"action":"observe"},
+		"team_app_accounts":{"action":"off"}
+	}`))
+	defer server.Close()
+	client := newTestClient(t, server.URL, nil)
+	workspaceID := uuid.New()
+	for name, want := range map[FeatureName]Action{
+		FeaturePrivateProjects:        ActionObserve,
+		FeatureAgentInvocationMembers: ActionEnforce,
+		FeatureRuntimeMemberSharing:   ActionObserve,
+		FeatureTeamAppAccounts:        ActionOff,
+	} {
+		if got := client.Feature(context.Background(), workspaceID, name); got.Action != want || got.Reason != ReasonRefreshed && got.Reason != ReasonCacheFresh {
+			t.Fatalf("%s = %+v, want %s", name, got, want)
+		}
+	}
+
+	older := httptest.NewServer(featurePolicyHandler(t, `{"private_projects":{"action":"enforce"}}`))
+	defer older.Close()
+	client = newTestClient(t, older.URL, nil)
+	for _, name := range []FeatureName{FeatureAgentInvocationMembers, FeatureRuntimeMemberSharing, FeatureTeamAppAccounts} {
+		if got := client.Feature(context.Background(), workspaceID, name); got.Action != ActionOff || got.Reason != ReasonFeatureMissing {
+			t.Fatalf("%s from an older policy = %+v, want off/feature_missing", name, got)
+		}
+	}
+	if got := client.Feature(context.Background(), workspaceID, FeaturePrivateProjects); got.Action != ActionEnforce {
+		t.Fatalf("private_projects = %+v, want enforce", got)
+	}
+}
+
 // One feature that cannot be read falls back to off with a reason, and the
 // metered gate from the same response still enforces.
 func TestMalformedFeatureIsIsolatedFromGatesAndOtherFeatures(t *testing.T) {

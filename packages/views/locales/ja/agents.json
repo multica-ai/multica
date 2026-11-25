@@ -102,7 +102,6 @@
     "archive": "アーカイブ",
     "set_access": "アクセス範囲を設定",
     "set_access_dialog_title": "アクセス範囲を設定",
-    "set_access_applies_to": "{{count}} 件の agent に適用します。",
     "set_access_skipped": "{{count}} 件スキップ(あなた所有ではありません)。",
     "set_access_dialog_confirm": "適用",
     "set_access_bulk_partial": "{{succeeded}} 件適用、{{failed}} 件失敗(現在の状態を維持)。",
@@ -125,7 +124,8 @@
     "archive_dialog_title": "\"{{name}}\" をアーカイブしますか？",
     "archive_dialog_description": "このエージェントは割り当てやメンションができなくなり、アクティブな実行はすべてキャンセルされます。履歴はすべて保持され、後で復元できます。",
     "archive_dialog_cancel": "キャンセル",
-    "archive_dialog_confirm": "アーカイブ"
+    "archive_dialog_confirm": "アーカイブ",
+    "set_access_applies_to_other": "{{count}} 件の agent に適用します。"
   },
   "detail": {
     "back_to_agents_full": "エージェントに戻る",
@@ -141,7 +141,7 @@
     "bind_runtime": "ランタイムを設定",
     "restore": "復元",
     "archive_dialog_title": "エージェントをアーカイブしますか？",
-    "archive_dialog_description": "\"{{name}}\" がアーカイブされます。割り当てやメンションはできなくなりますが、履歴はすべて保持されます。後で復元できます。",
+    "archive_dialog_description": "「{{name}}」はアーカイブされ、割り当てやメンションができなくなります。進行中の実行はキャンセルされますが、履歴は保持されます。あとから復元できます。",
     "archive_dialog_cancel": "キャンセル",
     "archive_dialog_confirm": "アーカイブ",
     "more_archive": "エージェントをアーカイブ",
@@ -211,7 +211,12 @@
     "status": "ステータス",
     "runs_7d": "実行 (7日)",
     "edit_access_aria": "アクセス: {{value}}。アクセスを変更",
-    "all_settings": "すべての設定"
+    "all_settings": "すべての設定",
+    "apps": "アプリ",
+    "apps_needs_account_other": "{{count}} 件が自分のアカウントを必要としています",
+    "apps_count_other": "{{count}} 個のアプリ",
+    "apps_none": "なし",
+    "apps_aria": "アプリ: {{value}}。アプリを表示"
   },
   "pickers": {
     "concurrency_range": "最大同時実行数（{{min}}–{{max}}）",
@@ -242,7 +247,7 @@
     "thinking_default": "CLI 設定に従う",
     "thinking_tooltip": "思考 · {{value}}",
     "thinking_clear": "CLI 設定に従う",
-    "thinking_clear_title": "上書きをクリアし、推論レベルをローカルの CLI 設定（claude/codex）に任せます",
+    "thinking_clear_title": "上書きを解除して、ランタイムのデフォルトの推論設定を使用する",
     "service_tier_default": "ランタイムのデフォルト",
     "service_tier_standard": "標準",
     "service_tier_standard_description": "通常速度と標準使用量",
@@ -289,9 +294,9 @@
     "description_label": "説明",
     "description_placeholder": "このエージェントは何をしますか？",
     "access": {
-      "private_title": "プライベート",
+      "private_title": "自分のみ",
       "private_desc": "このエージェントを実行できるのはあなただけです",
-      "public_title": "公開",
+      "public_title": "共有",
       "public_desc": "このエージェントを実行できる人を選択します",
       "public_workspace_option": "ワークスペース全員",
       "public_members_group": "特定のメンバー",
@@ -362,8 +367,8 @@
       "discard": "破棄"
     },
     "instructions": {
-      "intro": "すべての実行で使用する System Prompt を設定します。Markdown に対応しています。",
-      "system_prompt_label": "System Prompt",
+      "intro": "このエージェントが毎回の実行でどのように作業するかを指示します。Markdown に対応しています。",
+      "system_prompt_label": "指示",
       "placeholder": "このエージェントの役割、専門分野、作業スタイルを定義してください。\n\n# 例\nあなたは React と TypeScript を専門とするフロントエンドエンジニアです。\n\n## 作業スタイル\n- 小さく焦点を絞った PR を作成する — 論理的な変更ごとに1コミット\n- 継承よりコンポジションを優先する\n- 新しいコンポーネントには必ずユニットテストを追加する\n\n## 制約\n- 明示的な承認なしに shared/ の型を変更しない\n- features/ の既存のコンポーネントパターンに従う",
       "system_layer_label": "Multica が管理",
       "system_layer_hint": "Multica のリリースごとに更新されます。編集はできず、下に書いた内容が上書きされることもありません。",
@@ -445,7 +450,7 @@
       "workspace_none_assigned": "このエージェントにはまだワークスペース MCP サーバーが割り当てられていません。",
       "workspace_add_action": "ワークスペースから追加",
       "workspace_loading": "割り当て済みサーバーを読み込み中…",
-      "dialog_name_locked": "ここでは名前を変更できません。変更すると別のサーバーが追加され、元のサーバーが残ります。削除してから追加し直してください。",
+      "dialog_name_locked": "サーバー名はここでは変更できません。サーバーメニューの「名前を変更」を使うか、削除して追加し直してください。",
       "workspace_overridden_badge": "上書き",
       "workspace_disabled_badge": "無効",
       "runtime_title": "ランタイムから継承",
@@ -535,7 +540,7 @@
       "model_override_hint": "変更またはクリアするまで、このエージェントが受け取るすべての実行に適用されます。空欄にすると、同じ OpenClaw エージェントのまま、紐づくモデルに戻ります。",
       "model_override_placeholder": "openrouter/@preset/agent-reasoning",
       "mode_local_hint": "このコンピュータで実行します。",
-      "mode_gateway_hint": "daemon は OpenClaw Gateway にダイヤルします。エンドポイントフィールドを空欄のままにすると daemon ホストの `~/.openclaw/openclaw.json` から継承します。",
+      "mode_gateway_hint": "OpenClaw Gateway に接続します。エンドポイント欄を空欄にすると、マシン上の `~/.openclaw/openclaw.json` の設定を引き継ぎます。",
       "gateway_legend": "Gateway エンドポイント",
       "host_label": "Host",
       "host_placeholder": "gw.internal",
@@ -545,7 +550,7 @@
       "token_placeholder": "Gateway が発行する bearer トークン",
       "token_masked_placeholder": "保存済み — ローテーションするには新しい値を入力。空欄のままだと保持されます",
       "tls_label": "TLS を使用",
-      "tls_hint": "http:// の代わりに https:// でダイヤル",
+      "tls_hint": "http:// ではなく https:// で接続する",
       "saved_toast": "ルーティング設定を保存しました",
       "save_failed_toast": "ルーティング設定の保存に失敗しました"
     },
@@ -598,7 +603,7 @@
       "status": {
         "queued": "待機中",
         "dispatched": "ディスパッチ済み",
-        "waiting_local_directory": "ディレクトリ待機中",
+        "waiting_local_directory": "ローカルフォルダー待ち",
         "running": "実行中",
         "completed": "成功",
         "failed": "失敗",
@@ -622,11 +627,13 @@
       "source_issue": "タスク",
       "source_chat": "チャット",
       "source_autopilot": "オートパイロット",
+      "source_doc": "ドキュメント",
       "source_untracked": "未追跡",
       "source_quick_create": "クイック作成",
       "source_creating_issue": "タスクを作成中",
       "source_chat_session": "チャットセッション",
       "source_autopilot_run": "オートパイロット実行",
+      "source_doc_comment": "ドキュメントのコメント",
       "issue_short_fallback": "タスク {{prefix}}...",
       "triggered_by": "トリガーした人",
       "open_issue_aria": "タスクを開く",
@@ -644,14 +651,10 @@
       "loading": "アプリを読み込み中…",
       "load_failed": "このエージェントのアプリを読み込めませんでした。",
       "empty": "接続済みのアプリはありません。",
-      "level": "レベル",
-      "team_connected": "チームアカウント接続済み",
-      "team_missing": "チームアカウント未接続",
-      "personal_connected": "あなたのアカウントは接続済み",
-      "personal_missing": "このアプリはまだ接続していません",
+      "level": "アカウント範囲",
       "team_admin_only": "エージェントにチームアカウントを付与できるのはワークスペース管理者のみです。",
       "team_shared_warning": "このエージェントを実行できる人は、このチームアカウントを通じて操作できます。",
-      "manage_link": "設定 → 接続済みアプリ でアカウントを管理",
+      "manage_link": "アプリ → アカウント でアカウントを管理",
       "save_failed_toast": "保存できませんでした。もう一度お試しください",
       "team_help": "管理者が接続する、ワークスペース共有のアカウントです。",
       "personal_help": "実行を開始した人のアカウントを使います。各自で接続する必要があります。",
@@ -670,11 +673,11 @@
   },
   "visibility": {
     "private": {
-      "label": "個人",
-      "tooltip": "個人 · オーナーとオーナーが許可した人のみがこのエージェントを実行できます"
+      "label": "自分のみ",
+      "tooltip": "非公開 · 所有者と許可されたメンバーのみがこのエージェントを実行できます"
     },
     "workspace": {
-      "label": "ワークスペース",
+      "label": "ワークスペース全体",
       "tooltip": "ワークスペース · このワークスペースの全員がこのエージェントを使用できます"
     }
   },
@@ -688,7 +691,6 @@
       "specific_people": "特定のメンバー",
       "owner_only": "オーナーのみ"
     },
-    "trigger_members_count": "{{count}} 人",
     "trigger_members_empty": "特定のメンバー",
     "trigger_team": "チーム",
     "private_title": "プライベート",
@@ -699,7 +701,7 @@
     "workspace_title": "ワークスペースに公開",
     "workspace_desc": "このワークスペースの全員がこのエージェントを実行できます",
     "members_title": "特定のメンバーに公開",
-    "members_desc": "選択した人だけがこのエージェントを実行できます",
+    "members_desc": "あなたと選択した人がこのエージェントを実行できます",
     "team_title": "チームに公開",
     "team_desc": "チーム全体にアクセス権を付与します",
     "team_coming_soon": "近日公開",
@@ -707,11 +709,12 @@
     "public_group": "公開アクセス",
     "owner_only_readonly": "このエージェントを実行できる相手は、オーナーのみが変更できます。",
     "members_empty": "選択できるワークスペースメンバーがいません",
-    "composio_switch_hint": "ご注意 — このエージェントは Composio アプリが有効です。共有すると、アクセス権を持つ全員がこのエージェントを通じてこれらのアプリを利用できます。"
+    "composio_switch_hint": "注意: このエージェントでは連携アプリが有効になっています。共有すると、アクセス権を持つメンバーがこのエージェント経由でそれらのアプリを利用できるようになります。",
+    "trigger_members_count_other": "{{count}} 人"
   },
   "profile_card": {
     "unavailable": "エージェントを利用できません",
-    "detail_link": "詳細 →",
+    "detail_link": "詳細を見る →",
     "runtime_label": "ランタイム",
     "skills_label": "スキル",
     "owner_label": "オーナー",
@@ -758,6 +761,7 @@
     "trigger_retry": "再試行",
     "trigger_chat": "チャットから",
     "trigger_quick_create": "クイック作成",
+    "trigger_doc_comment": "ドキュメントのコメントから",
     "trigger_direct": "直接アサイン",
     "run_info": "実行の詳細",
     "details_runtime": "ランタイム",
@@ -861,6 +865,8 @@
       "runtime_recovery": "デーモンが再起動しました",
       "runtime_access_revoked": "ランタイムへのアクセスが取り消されました",
       "timeout": "実行がタイムアウトしました",
+      "cleanup_unconfirmed": "エージェントプロセスの終了を確認できませんでした",
+      "cleanup_blocked": "前回の実行が未終了の可能性。手動で再実行",
       "iteration_limit": "反復回数の上限に達しました",
       "agent_blocked": "人による入力を待機中",
       "api_invalid_request": "モデル API に拒否されました",
@@ -880,16 +886,17 @@
       "agent_error_context_overflow": "コンテキストウィンドウを超過しました",
       "agent_error_missing_config": "API キーまたは設定がありません",
       "agent_error_model_not_found_or_unavailable": "モデルを利用できません",
-      "agent_error_runtime_version_unsupported": "ランナー CLI のバージョンはサポートされていません",
-      "agent_error_runtime_missing_executable": "ランナー CLI がインストールされていません",
+      "agent_error_runtime_version_unsupported": "エージェント CLI のバージョンが非対応です",
+      "agent_error_runtime_missing_executable": "エージェント CLI がインストールされていません",
       "agent_error_unknown": "エージェント実行エラー",
-      "agent_fallback_message": "エージェントがフォールバックメッセージを返しました",
+      "agent_fallback_message": "エージェントが有効な返信を生成できませんでした",
       "codex_resume_oversized": "セッションが大きすぎて再開できません",
       "idle_watchdog": "エージェントが長時間応答しなかったため停止しました",
       "local_directory_error": "ローカルディレクトリエラー",
+      "local_directory_missing": "プロジェクトのローカルフォルダが見つかりません",
       "cancelled": "システムによってキャンセルされました",
       "agent_error": "エージェント実行エラー",
-      "codex_semantic_inactivity": "Codex に進行がないままタイムアウトしました",
+      "codex_semantic_inactivity": "Codex の処理が進まなくなりました",
       "manual": "ユーザーがキャンセルしました",
       "user_cancelled": "ユーザーがキャンセルしました"
     }
@@ -953,7 +960,7 @@
       "runtime_online": "ランタイムはオンライン",
       "runtime_offline": "ランタイムはオフライン",
       "empty_title": "このエージェントに何をさせますか？",
-      "empty_description": "このエージェントに任せたいことを説明してください。",
+      "empty_description": "役割、ワークフロー、使用するツールを説明してください。設定の下書きを作成します。",
       "prompt_review": "フロントエンドの Pull Request をレビュー",
       "prompt_research": "競合を調査して結果を要約",
       "prompt_assistant": "チームのプロジェクト計画と文章作成を支援",
@@ -977,8 +984,8 @@
       "discard_confirm": "会話と右側の設定は完全に削除されます。",
       "discard_title": "この作成を破棄しますか？",
       "discard_cancel": "編集を続ける",
-      "banner": "未完了の下書きが {{count}} 件あります",
-      "pick_hint": "続きを選んでください。"
+      "pick_hint": "続きを選んでください。",
+      "banner_other": "未完了の下書きが {{count}} 件あります"
     },
     "close": "閉じる",
     "steps": {
@@ -1010,7 +1017,7 @@
     },
     "runtime_step": {
       "title": "このエージェントをどこで実行しますか？",
-      "search_placeholder": "ハーネスまたはマシンを検索",
+      "search_placeholder": "ランタイムまたはマシンを検索",
       "groups": {
         "machines": "マシン",
         "cloud": "クラウドサービス"
@@ -1018,11 +1025,11 @@
       "this_machine": "このマシン",
       "owner_you": "あなた",
       "custom_badge": "カスタム",
-      "web_local_title": "このコンピューターのハーネスはデスクトップアプリで使えます",
+      "web_local_title": "デスクトップアプリでこのコンピューターのランタイムを使用する",
       "download_desktop": "デスクトップアプリをダウンロード",
-      "harness_count_other": "{{count}} 個のハーネス",
+      "harness_count_other": "{{count}} 件のランタイム",
       "local_starting": "ローカルデーモンを起動中…",
-      "local_empty_title": "このマシンにハーネスが見つかりません",
+      "local_empty_title": "このマシンにエージェント CLI が見つかりません",
       "local_empty_hint": "Claude Code や Codex などの CLI をインストールすると、ここに表示されます。",
       "more_harnesses_other": "ほか {{count}} 件：{{names}}",
       "add_remote": "マシンを接続",
@@ -1047,7 +1054,6 @@
       "next": "次へ"
     }
   },
-  "actions": {},
   "intro": {
     "title": "最初の AI チームメイトを迎える",
     "description": "エージェントはチームメンバーと同じようにタスクを引き受けます。ランタイム上で Claude Code や Codex などを使って作業し、終わったらコメントで成果を渡します。",
@@ -1071,5 +1077,35 @@
       "comment": "修正しました。375px 以下では料金カードを 1 列にしています。PR を作成し、テストも通っています。",
       "step_read": "{{file}} を読む"
     }
+  },
+  "apps_section": {
+    "title": "アプリ",
+    "empty": "このエージェントはまだアプリを使用していません。",
+    "connect_yours": "自分のアカウントを接続",
+    "reconnect": "再接続",
+    "connect_team": "チームアカウントを接続",
+    "acts_as_team": "チームアカウントとして動作",
+    "acts_as_starter": "実行を開始した人のアカウントとして動作"
+  },
+  "add_app_dialog": {
+    "title": "{{agent}} にアプリを追加",
+    "description": "個人アカウントのアプリはエージェントを開始した人のアカウントを使うため、自分のアカウントがなくても追加できます。",
+    "search_other": "{{count}} 個のアプリを検索",
+    "search_label": "アプリを検索",
+    "curated": "厳選",
+    "recommended_team": "通常はチームアカウント",
+    "recommended_personal": "通常は個人アカウント",
+    "team_connected": "チームアカウント接続済み",
+    "add": "追加",
+    "add_aria": "{{app}} を追加",
+    "empty": "一致するアプリはありません。",
+    "load_failed": "アプリを読み込めませんでした。",
+    "added_toast": "{{app}} を {{agent}} に追加しました。"
+  },
+  "app_requests": {
+    "title_adds_app": "{{agent}} が {{app}} を使おうとしています",
+    "new_app": "このエージェントの新しいアプリ",
+    "adds_app_note": "応答すると、今後の実行で {{agent}} が {{app}} を使えるようになります。",
+    "add_to_agent": "{{app}} を {{agent}} に追加"
   }
 }

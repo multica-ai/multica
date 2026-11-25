@@ -409,6 +409,7 @@ func (h *Handler) CreateTaskSupplement(w http.ResponseWriter, r *http.Request) {
 		"comment": resp, "issue_title": issue.Title, "issue_revision": created.IssueRevision,
 	})
 	h.notifyTaskSupplementAvailable(task)
+	h.archiveActorInboxOnAgentTrigger(r.Context(), uuidToString(issue.WorkspaceID), uuidToString(issue.ID), "member", uuidToString(authorID))
 	writeJSON(w, http.StatusCreated, resp)
 }
 

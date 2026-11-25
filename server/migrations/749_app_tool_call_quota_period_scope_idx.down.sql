@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS uq_app_tool_call_quota_period_scope;

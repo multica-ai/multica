@@ -16,6 +16,7 @@
     "autopilots": "오토파일럿",
     "chats": "채팅",
     "skills": "스킬",
+    "docs": "문서",
     "cancelled": "취소됨",
     "recent": "최근 항목",
     "workspaces": "워크스페이스",
@@ -134,7 +135,7 @@
   },
   "delegate": {
     "row": "에이전트에게 맡기기: “{{prompt}}”",
-    "hint": "빠른 만들기"
+    "hint": "에이전트로 만들기"
   },
   "best": {
     "assign": "{{subject}}를 {{name}}에게 지정",
@@ -160,5 +161,6 @@
   },
   "trigger": {
     "label": "검색..."
-  }
+  },
+  "untitled_doc": "제목 없음"
 }

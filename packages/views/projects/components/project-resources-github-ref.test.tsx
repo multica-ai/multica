@@ -99,8 +99,16 @@ vi.mock("../../platform/use-local-daemon-status", () => ({
   useLocalDaemonStatus: () => ({ daemonId: null, deviceName: null, running: false }),
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+const clipboard = vi.hoisted(() => ({ copyText: vi.fn() }));
+vi.mock("@multica/ui/lib/clipboard", () => clipboard);
 
 import { ProjectResourcesSection } from "./project-resources-section";
+
+async function openRepoPanel() {
+  fireEvent.click(screen.getByRole("button", { name: "Add" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: /^GitHub repository/ }));
+  await screen.findByLabelText(/paste a github url/i);
+}
 
 describe("ProjectResourcesSection — github_repo checkout ref", () => {
   beforeEach(() => {
@@ -129,15 +137,20 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
           <ProjectResourcesSection projectId="p1" />
         </QueryClientProvider>,
       );
-      const [firstButton, secondButton] = screen.getAllByRole("button", { name: /remove/i });
-      fireEvent.click(firstButton!);
+      const [firstButton, secondButton] = screen.getAllByRole("button", { name: /^actions for/i });
+      const removeFrom = async (trigger: HTMLElement) => {
+        fireEvent.click(trigger);
+        fireEvent.click(await screen.findByRole("menuitem", { name: /remove/i }));
+      };
+      await removeFrom(firstButton!);
       await waitFor(() => expect(firstButton).toBeDisabled());
       expect(firstButton).toHaveAttribute("aria-busy", "true");
       expect(secondButton).toBeEnabled();
       fireEvent.click(firstButton!);
+      expect(screen.queryByRole("menuitem", { name: /remove/i })).toBeNull();
       expect(remove).toHaveBeenCalledTimes(1);
 
-      fireEvent.click(secondButton!);
+      await removeFrom(secondButton!);
       await waitFor(() => expect(secondButton).toBeDisabled());
       expect(remove).toHaveBeenCalledTimes(2);
       await act(async () => {
@@ -155,6 +168,15 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
     }
   });
 
+  it("lists the repositories read-only, with nothing to add, remove or change", () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" readOnly />);
+    expect(screen.getByText("Release line")).toBeTruthy();
+    expect(screen.getByText("release/2026-09")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Add" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^actions for/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /release\/2026-09/ })).toBeNull();
+  });
+
   it("shows the ref beside a repo that has a custom label", () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
     expect(screen.getByText("Release line")).toBeTruthy();
@@ -167,7 +189,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
     expect(screen.getAllByText("multica-ai/api")).not.toHaveLength(0);
     expect(screen.getByText(AVAILABLE_REPO.description)).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: /add repository/i }));
+    await openRepoPanel();
     expect(screen.getByText(ATTACHABLE_REPO.description)).toBeTruthy();
     fireEvent.click(
       screen.getByRole("button", { name: /multica-ai\/daemon/i }),
@@ -240,7 +262,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
   it("attaches a repo with the ref typed alongside its URL", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getByRole("button", { name: /add repository/i }));
+    await openRepoPanel();
     const urlInput = screen.getByLabelText(/paste a github url/i);
     fireEvent.change(urlInput, {
       target: { value: "https://github.com/multica-ai/other" },
@@ -266,7 +288,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
   ])("offers to add %s that is not in the workspace list", async (_label, address) => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getByRole("button", { name: /add repository/i }));
+    await openRepoPanel();
     const input = screen.getByLabelText(/paste a github url/i);
     fireEvent.change(input, { target: { value: address } });
 
@@ -280,10 +302,10 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
     });
   });
 
-  it.each(["multica", "agent sdk"])("keeps %j a search rather than an address", (term) => {
+  it.each(["multica", "agent sdk"])("keeps %j a search rather than an address", async (term) => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getByRole("button", { name: /add repository/i }));
+    await openRepoPanel();
     const input = screen.getByLabelText(/paste a github url/i);
     fireEvent.change(input, { target: { value: term } });
 
@@ -293,20 +315,20 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
     expect(createMock).not.toHaveBeenCalled();
   });
 
-  it("splits a pasted /tree/ URL into the repo and the branch it points at", async () => {
+  it("saves the decoded branch from a pasted GitHub URL without page parameters", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getByRole("button", { name: /add repository/i }));
+    await openRepoPanel();
     // What someone copies out of the address bar when they want a branch.
     // Stored whole, this is a clone URL that does not exist.
     fireEvent.change(screen.getByLabelText(/paste a github url/i), {
-      target: { value: "https://github.com/multica-ai/other/tree/release/2026-09" },
+      target: { value: "https://github.com/multica-ai/other/tree/release%2F%E4%B8%AD%E6%96%87?tab=readme-ov-file#readme" },
     });
 
     const urlInput = screen.getByLabelText(/paste a github url/i) as HTMLInputElement;
     const refInput = screen.getByLabelText(/starting branch/i) as HTMLInputElement;
     expect(urlInput.value).toBe("https://github.com/multica-ai/other");
-    expect(refInput.value).toBe("release/2026-09");
+    expect(refInput.value).toBe("release/中文");
 
     fireEvent.click(screen.getByRole("button", { name: /^add multica-ai\//i }));
     await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
@@ -314,7 +336,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
       resource_type: "github_repo",
       resource_ref: {
         url: "https://github.com/multica-ai/other",
-        ref: "release/2026-09",
+        ref: "release/中文",
       },
     });
   });
@@ -324,7 +346,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
   it("normalises a pasted browse URL even when a branch is already filled in", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getByRole("button", { name: /add repository/i }));
+    await openRepoPanel();
     const urlInput = () => screen.getByLabelText(/paste a github url/i) as HTMLInputElement;
     const refInput = () => screen.getByLabelText(/starting branch/i) as HTMLInputElement;
 
@@ -348,10 +370,35 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
     });
   });
 
+  it.each([
+    "https://github.com/multica-ai/one.git",
+    "https://github.com/multica-ai/two",
+    "git@github.com:multica-ai/two.git",
+  ])("clears the previous branch when replacing a browse URL with %s", async (url) => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+
+    await openRepoPanel();
+    const input = screen.getByLabelText(/paste a github url/i);
+    fireEvent.change(input, {
+      target: { value: "https://github.com/multica-ai/one/tree/release/2026-09" },
+    });
+    expect((screen.getByLabelText(/starting branch/i) as HTMLInputElement).value).toBe("release/2026-09");
+
+    fireEvent.change(input, { target: { value: url } });
+    expect((screen.getByLabelText(/starting branch/i) as HTMLInputElement).value).toBe("");
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
+    expect(createMock.mock.calls[0]?.[0]).toEqual({
+      resource_type: "github_repo",
+      resource_ref: { url },
+    });
+  });
+
   it("omits the ref key entirely when the field is left empty", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getByRole("button", { name: /add repository/i }));
+    await openRepoPanel();
     fireEvent.change(screen.getByLabelText(/paste a github url/i), {
       target: { value: "https://github.com/multica-ai/other" },
     });
@@ -364,10 +411,10 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
     });
   });
 
-  it("blocks attaching when the ref is invalid, without touching the URL field", () => {
+  it("blocks attaching when the ref is invalid, without touching the URL field", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getByRole("button", { name: /add repository/i }));
+    await openRepoPanel();
     fireEvent.change(screen.getByLabelText(/paste a github url/i), {
       target: { value: "https://github.com/multica-ai/other" },
     });
@@ -386,12 +433,11 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
   it("says 'Default branch' when nothing is pinned, rather than showing nothing", () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    // `.group` is the row root; the link's immediate parent is only its top line.
-    const pinnedRow = screen.getByText("Release line").closest(".group") as HTMLElement;
+    const pinnedRow = screen.getByText("Release line").closest("[data-resource-row]") as HTMLElement;
     expect(within(pinnedRow).queryByText("release/2026-09")).toBeTruthy();
     expect(within(pinnedRow).queryByText(/default branch/i)).toBeNull();
 
-    const plainRow = screen.getAllByText("multica-ai/api")[0]?.closest(".group") as HTMLElement;
+    const plainRow = screen.getAllByText("multica-ai/api")[0]?.closest("[data-resource-row]") as HTMLElement;
     expect(within(plainRow).queryByText(/default branch/i)).toBeTruthy();
     expect(within(plainRow).queryByText("release/2026-09")).toBeNull();
   });
@@ -445,24 +491,34 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
 
   // One field serves both search and paste; only a URL turns it into an
   // attach form, so a search term never offers to attach itself.
-  it("filters workspace repositories for a search term without offering to attach it", () => {
+  it("filters workspace repositories for a search term without offering to attach it", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getByRole("button", { name: /add repository/i }));
+    await openRepoPanel();
     fireEvent.change(screen.getByLabelText(/paste a github url/i), {
       target: { value: "daemon" },
     });
 
     expect(screen.getByRole("button", { name: /multica-ai\/daemon/i })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /multica-ai\/api/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^multica-ai\/api/i })).toBeNull();
     expect(screen.queryByLabelText(/starting branch/i)).toBeNull();
   });
 
-  // Picking a folder needs this machine's daemon, so web has nothing to offer
-  // in the group until a folder exists somewhere.
-  it("leaves out the local folder group on web when the project has none", () => {
+  it("copies a repository's URL from its row menu", async () => {
+    clipboard.copyText.mockResolvedValue(true);
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
-    expect(screen.getByText("Repositories")).toBeTruthy();
-    expect(screen.queryByText("Local folders")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Actions for Release line" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Copy URL" }));
+    await waitFor(() => expect(clipboard.copyText).toHaveBeenCalledWith("https://github.com/multica-ai/multica"));
+  });
+
+  // Picking a folder needs this machine's daemon, so web keeps the entry and
+  // says where it works instead.
+  it("tells web that folders are added from the desktop app", async () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    const item = await screen.findByRole("menuitem", { name: /^Local folder/ });
+    expect(item.getAttribute("aria-disabled")).toBe("true");
+    expect(item.textContent).toContain("Only in the desktop app");
   });
 });

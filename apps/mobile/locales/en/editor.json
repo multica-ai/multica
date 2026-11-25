@@ -16,6 +16,8 @@
     "file_too_large_title": "File too large",
     "file_too_large_message": "Files must be smaller than 100 MB.",
     "failed": "Upload failed",
-    "error": "Unknown error"
+    "error": "Unknown error",
+    "storage_full_title": "Attachment storage is full",
+    "storage_full_message": "This file wasn't uploaded. Existing attachments aren't affected. Ask an admin to upgrade the plan, or delete attachments you no longer need."
   }
 }

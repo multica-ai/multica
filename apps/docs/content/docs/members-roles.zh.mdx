@@ -1,14 +1,14 @@
 ---
 title: 成员与权限
-description: 邀请成员，并用 owner、admin 和 member 三种角色管理工作区权限。
+description: 邀请成员和访客，为每个人选择合适的工作区权限。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { RolesDemo } from "@/components/demos/roles-demo";
 
-加入[工作区](/workspaces)的人都是成员，每位成员有一个角色：`owner`、`admin` 或 `member`。角色只控制工作区设置和团队管理；创建任务、发表评论等日常协作对所有成员开放。
+在[工作区](/workspaces)中，`owner`、`admin` 和 `member` 都能创建任务和发表评论，但管理设置和成员的权限不同。[访客](#访客)只能在分享给自己的项目中查看任务和发表评论。
 
-## 三种角色
+## 成员管理权限 [#三种角色]
 
 | 操作 | owner | admin | member |
 |---|:---:|:---:|:---:|
@@ -24,7 +24,7 @@ import { RolesDemo } from "@/components/demos/roles-demo";
 <RolesDemo />
 
 <Callout type="info">
-角色不决定谁能运行智能体。每个智能体有独立的访问范围（Access），`owner` 和 `admin` 也不能绕过它运行未授权的智能体。详见[智能体](/agents#权限与-access)。
+访客无法运行智能体。每个智能体有独立的访问范围（Access），`owner` 和 `admin` 也不能绕过它运行未授权的智能体。详见[智能体](/agents#权限与-access)。
 </Callout>
 
 <Callout type="info">
@@ -33,7 +33,7 @@ import { RolesDemo } from "@/components/demos/roles-demo";
 
 ## 邀请成员
 
-`owner` 和 `admin` 在**设置 → 成员**中点击**邀请成员**，填写邮箱、选择角色后发送。邀请只能授予 `admin` 或 `member`；`owner` 需要先加入工作区，再由现有 `owner` 提升。
+`owner` 和 `admin` 在**设置 → 成员**中点击**邀请成员**，填写邮箱、选择角色后发送。邀请可以授予 `admin`、`member` 或[访客](#访客)身份；`owner` 需要先加入工作区，再由现有 `owner` 提升。
 
 ![成员管理：邀请表单与带角色的成员名册](/images/docs/members-roster.webp)
 
@@ -42,6 +42,12 @@ import { RolesDemo } from "@/components/demos/roles-demo";
 邀请链接只出现在邮件里，产品界面中没有查看或复制它的入口。邮件发送失败时邀请记录仍然存在，可以撤销后重新发送。
 
 需要一条能直接转发的链接时，在**设置 → 成员**的**分享链接**中选择角色和有效期后生成。拿到链接的人都可以以所选角色加入，直到链接过期或被撤销。
+
+## 访客
+
+访客只能看到分享给自己的项目。在这些项目里，访客可以查看任务、评论、添加表情回应和关注任务；不能创建或修改任务，不能运行或 @ agent，也不能打开工作区设置，看不到其他项目、agent、autopilot 和 runtime。
+
+`owner` 和 `admin` 在邀请弹窗里选择**访客**并勾选可访问的项目，即可邀请访客。在成员的操作菜单里，可以把成员设为访客（收回其 agent、autopilot 和 runtime 权限），把访客设为成员，或通过**管理可访问的项目**调整访客能看到的项目。和私有项目的其他信息一样，访客在某个私有项目上的权限，只有该项目成员列表里的人能看到和修改；调整访客的项目时，你不在其中的私有项目上的权限保持不变。
 
 ## 调整角色
 
@@ -62,3 +68,4 @@ import { RolesDemo } from "@/components/demos/roles-demo";
 - [任务](/issues) — 了解成员和智能体共同处理的工作。
 - [智能体](/agents) — 区分工作区角色与智能体 Access。
 - [守护进程与运行时](/daemon-runtimes) — 了解运行时由谁拥有以及在哪里执行。
+- [团队共享智能体池](/team-agent-pool) — 用 10 人团队的例子把角色和智能体 Access 串起来。

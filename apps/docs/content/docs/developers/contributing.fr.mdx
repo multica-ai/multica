@@ -11,7 +11,7 @@ Multica est composé d'un backend Go et d'un monorepo pnpm. Le moyen le plus sim
 
 - Node.js 22
 - pnpm 10.28.2
-- Go 1.26.6
+- Go 1.26.9
 - Docker Engine ou Docker Desktop
 - Git et Make
 
@@ -70,7 +70,7 @@ Les différents worktrees partagent le conteneur PostgreSQL, pas la base de donn
 ### Workflow complet
 
 ```bash
-make up               # Démarre l'environnement de ce checkout (C=api,web,daemon,desktop)
+make up               # Démarre l'environnement de ce checkout (C=api,collab,web,daemon,desktop)
 make status           # Affiche ce qui tourne et prouve qu'il s'agit de cet environnement
 make list             # Liste tous les environnements de cette machine
 make down             # Arrête les processus, conserve la base de données
@@ -117,11 +117,21 @@ make migrate-down
 make sqlc
 ```
 
+`make test` prépare la base de données et applique les migrations avant les tests Go. Dans un worktree sans `.env`, `make` sélectionne automatiquement `.env.worktree` ; vous pouvez aussi le sélectionner explicitement avec `make test ENV_FILE=.env.worktree`.
+
+Avant `make test`, `make check` ou `make check-worktree`, arrêtez toute API de développement utilisant la même base pour que ses tâches de fond ne traitent pas les travaux de test. Utilisez la commande d’arrêt correspondant à la commande de démarrage :
+
+- `make up` → `make down C=api`.
+- `make start` / `make dev` → `make stop` ; `make start-worktree` → `make stop-worktree`.
+- `make server` → appuyez sur Ctrl-C dans son terminal.
+
 Pour exécuter une commande CLI depuis les sources :
 
 ```bash
 make cli ARGS="issue list"
 ```
+
+Pour renouveler un environnement encore enregistré, même s’il a expiré, lancez `make up ARGS="--ttl 48"` depuis sa copie de travail. Ses données sont conservées et sa durée de vie est prolongée de 48 heures à compter de la commande.
 
 ## Modifier des fonctionnalités frontend
 

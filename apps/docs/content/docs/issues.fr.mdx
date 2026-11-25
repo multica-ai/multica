@@ -41,6 +41,7 @@ Décrivez le travail, choisissez un agent ou un squad dans **Créé par** et cli
 - Si la demande nomme un assigné (« confie-la à Lei Li »), l'agent l'assigne. Sinon, l'assigné est ce que vous avez choisi dans **Créé par** : l'agent lui-même, ou le squad. Les nouvelles tâches démarrent en `todo` ; quand l'assigné est un agent, il commence donc à la traiter dès qu'elle existe.
 - Le projet, la priorité et la date d'échéance choisis dans la fenêtre sont repris tels quels ; l'agent n'en déduit pas d'autres du texte. Le projet est visible par défaut, la priorité et l'échéance sont dans le menu **⋯**. Les champs toujours affichés se règlent dans **Paramètres → Préférences → Champs affichés à la création de tâches**.
 - Avec **En créer un autre** activé, la fenêtre reste ouverte après chaque envoi pour enchaîner la demande suivante.
+- Jusqu’à trois agents ou squads apparaissent en raccourcis à côté de **Créé par**, classés selon la fréquence à laquelle vous créez des tâches avec eux ; cliquez dessus ou appuyez sur `⌥1`–`⌥3` (`Alt+1`–`Alt+3` sous Windows et Linux) pour changer rapidement.
 - **Créé par** ne liste que les agents et squads que vous avez le droit d'assigner. Si la CLI multica du runtime de l'agent est trop ancienne, la fenêtre propose de mettre à jour le daemon ou de passer en création manuelle.
 
 ## Choisir l'assigné
@@ -140,9 +141,9 @@ Une tâche appartient à un [projet](/projects) au plus ; le projet fournit des 
 
 Un travail plus important peut être découpé en sous-tâches : la tâche parente conserve l'objectif global tandis que les sous-tâches avancent indépendamment. Les statuts de la tâche parente et des sous-tâches ne s'influencent pas.
 
-Ouvrez une sous-tâche directe depuis **Sous-tâches** dans la barre latérale droite de la tâche. Jusqu'à 10 sous-tâches, l'ordre correspond à la liste principale. Au-delà, les 10 premières s'affichent en donnant la priorité aux sous-tâches non terminées, tout en conservant l'ordre des étapes dans chaque groupe. **Afficher N de plus** déplie toute la liste dans la barre latérale ; **Réduire** revient aux 10 premières. Votre position de lecture est conservée et la barre latérale reste ouverte sur écran étroit. La progression compte toutes les sous-tâches. **Personnaliser la barre latérale** permet de masquer ou de réordonner cette section.
+Les sous-tâches directes d'une tâche sont listées sous **Sous-tâches**, sous sa description, avec une progression qui compte toutes les sous-tâches. Ouvrez-en une depuis cette liste.
 
-Les sous-tâches peuvent recevoir une **Étape** pour avancer par lots — 1, 2, 3. Lorsque toutes les sous-tâches de la première étape non terminée atteignent `done` ou `cancelled`, la tâche parente reçoit une notification « sous-tâches terminées » ; si l'assigné de la tâche parente est un agent, celui-ci se réveille et décide s'il lance l'étape suivante. Les sous-tâches sans étape forment un seul lot et ne déclenchent qu'une notification, lorsqu'elles sont toutes terminées. Ce réveil est déclenché par le système ; ses règles et les autres types de réveil sont décrits dans [Réveils de tâches](/issue-wakeups).
+Les sous-tâches peuvent recevoir une **Étape** pour avancer par lots — 1, 2, 3. Une étape ultérieure attend automatiquement que toutes les sous-tâches des étapes précédentes atteignent `done` ou `cancelled` : les sous-tâches créées en `todo` démarrent automatiquement une fois les étapes précédentes terminées, tandis que celles laissées en `backlog` restent en attente et réveillent l'assigné du parent pour les vérifier et les sortir de `backlog`. Le parent est aussi réveillé lorsque toutes les sous-tâches sont terminées (les sous-tâches sans étape forment un seul lot et notifient une fois qu'elles sont toutes closes). Voir [Relations](#relations) et [Réveils de tâches](/issue-wakeups) pour les règles complètes.
 
 ## Vues et affichage [#changer-de-vue]
 
@@ -152,18 +153,18 @@ Le menu **Affichage** règle la disposition en cours. Un tableau se regroupe par
 
 ### Enregistrer une vue
 
-Une combinaison de filtres et d'affichage que vous utilisez souvent peut devenir une vue : cliquez sur le bouton **Vues** à côté de la barre des vues, choisissez **Nouvelle vue**, puis donnez-lui un nom et une visibilité.
+Enregistrez une combinaison de filtres et d'affichage avec **Enregistrer comme vue**, puis donnez-lui un nom. Les nouvelles vues sont privées. Pour en partager une, ouvrez son menu dans la barre latérale, dans **Toutes les vues** ou depuis son titre, puis choisissez **Visible par → Membres de l'espace de travail**. Tout membre peut partager les vues qu'il a créées ; une vue de projet reste réservée aux membres ayant accès à ce projet.
 
 | Visibilité | Qui la voit | Qui peut la modifier et la supprimer |
 |---|---|---|
-| **Visible par moi seul** | Vous seul | Vous |
-| **Visible par les membres de l'espace de travail** | Tous les membres | Vous, ainsi que les `owner` et `admin` de l'espace de travail |
+| **Moi uniquement** | Vous seul | Vous |
+| **Membres de l'espace de travail** | Les membres ayant le rôle `owner`, `admin` ou `member` et accès au projet concerné, le cas échéant | Vous, ainsi que les `owner` et `admin` de l'espace de travail |
 
 Les réglages d'affichage enregistrés dans une vue sont son **Affichage par défaut** : les membres la voient ainsi à la première ouverture, puis l'ajustent chacun pour soi sans gêner les autres. Une vue appartient à la page où elle a été créée : celle créée dans un projet reste dans ce projet, et celles créées sur la page **Mes tâches** sont toujours privées.
 
-Faites glisser les vues dans la barre pour les réordonner ; l'ordre et la visibilité réglés dans **Gérer les vues** ne concernent que vous. Un clic droit sur une vue permet de la modifier, de la supprimer ou de l'**Ajouter à la barre latérale**, ce qui la place dans la section **Vues** du panneau Travail.
+Les autres membres retrouvent les vues partagées dans **Toutes les vues** et peuvent les ajouter à leur barre latérale avec le bouton étoile. Les favoris et leur ordre ne concernent que vous : partager une vue ne l'ajoute pas automatiquement à la barre latérale des autres membres.
 
-La section Vues propose aussi cinq vues intégrées : **Toutes les tâches** ; **Mon travail**, les tâches assignées à vous ou à vos agents ; **En cours d'exécution**, les tâches sur lesquelles un agent travaille ; et **Abonnements**, toutes les tâches que vous suivez. **Reportés** affiche les tâches que vous avez [reportées dans la boîte de réception](/inbox#reporter-une-tâche). Mon travail, En cours d'exécution et Abonnements sont Toutes les tâches sous une condition fixe : d'autres filtres peuvent les restreindre, mais cette condition ne peut être ni retirée ni élargie. Le bouton de réglages dans l'en-tête de la section Vues active ou désactive chaque vue intégrée.
+La section Vues propose aussi quatre vues intégrées : **Toutes les tâches** ; **Mon travail**, les tâches assignées à vous ou à vos agents ; **En cours d'exécution**, les tâches sur lesquelles un agent travaille ; et **Abonnements**, toutes les tâches que vous suivez. Les tâches que vous avez [reportées dans la boîte de réception](/inbox#reporter-une-tâche) se trouvent dans son onglet **Reportés**. Mon travail, En cours d'exécution et Abonnements sont Toutes les tâches sous une condition fixe : d'autres filtres peuvent les restreindre, mais cette condition ne peut être ni retirée ni élargie. Le bouton de réglages dans l'en-tête de la section Vues active ou désactive chaque vue intégrée.
 
 ### Aperçu latéral
 
@@ -183,17 +184,30 @@ Si certaines tâches refusent une modification, les autres sont quand même mise
 - Un changement de statut groupé s'applique directement. Les tâches assignées à un agent qui quittent `backlog` démarrent normalement une exécution.
 - Une assignation groupée à un agent ou à un squad demande d'abord de confirmer les exécutions qui vont démarrer ; si toutes les tâches sélectionnées sont en `backlog`, elle s'applique directement.
 
-## Marquer comme doublon
+## Relations [#relations]
 
-Quand la même chose a été saisie deux fois, ouvrez la tâche en trop et choisissez **Marquer comme doublon** dans le menu des statuts ou dans **Relations** du menu d'actions de la tâche, puis sélectionnez la tâche d'origine. Le sélecteur propose d'abord les tâches au titre proche et celles que vous avez consultées récemment.
+La section **Relations** du panneau latéral regroupe les bloqueurs non terminés (**Bloquée par**), les tâches non terminées qui attendent celle-ci (**Bloque**) et les **Doublons**. Elle reste masquée lorsqu'elle est vide ; ajoutez une relation depuis son bouton **+**, la ligne d'ajout en bas du panneau latéral ou le sous-menu **Relations** du menu d'actions de la tâche.
+
+### Bloqueurs et tâches en attente
+
+Choisissez **Attendre une autre tâche** pour ajouter un prérequis qui doit se terminer avant celle-ci, ou **Bloquer une autre tâche** pour qu'une autre tâche attende la fin de celle-ci. Les sous-tâches d'une étape ultérieure affichent aussi les sous-tâches non terminées des étapes précédentes avec une étiquette **Étape** ; ces blocages suivent automatiquement la tâche parente et l'étape et ne peuvent pas être retirés un par un. Les dépendances circulaires et l'auto-blocage sont refusés.
+
+- Ajouter un bloqueur ne modifie pas le statut de la tâche : utilisez le statut manuel `blocked` lorsque le travail est arrêté par une information manquante ou une condition externe.
+- Tant qu'il reste un bloqueur non terminé, assigner un agent ou un squad (ou sortir la tâche de `backlog`) ne lance pas d'exécution. Les @mentions directes et les réponses dans les commentaires s'exécutent normalement.
+- Dès que tous les bloqueurs atteignent un statut de catégorie `done` ou `closed` (`cancelled` inclus) ou sont retirés, un agent ou un squad assigné démarre automatiquement et un membre assigné reçoit une notification **Les tâches attendues sont terminées** dans la boîte de réception. Si la tâche est en `backlog`, rien ne démarre tant qu'elle n'en sort pas.
+- Les tâches non terminées qui ont des bloqueurs ouverts affichent un drapeau rouge avec leur nombre dans les listes, tableaux et grilles ; survolez le drapeau pour voir les bloqueurs et si le responsable démarrera automatiquement ou sera notifié. Utilisez le filtre **Relations → Bloqué** (ou `multica issue list --blocked`) pour trouver les tâches en attente ; les tâches déjà terminées en sont exclues. Les bloqueurs situés dans des projets privés ou invisibles pour un invité sont comptés comme prérequis à accès restreint sans révéler leur titre.
+
+### Marquer comme doublon
+
+Quand la même chose a été saisie deux fois, ouvrez la tâche en trop et choisissez **Marquer comme doublon** dans le menu des statuts, dans **Relations** du menu d'actions de la tâche ou depuis le menu **Relations** du panneau latéral, puis sélectionnez la tâche d'origine. Le sélecteur propose d'abord les tâches au titre proche et celles que vous avez consultées récemment.
 
 La tâche passe en `cancelled` et garde le lien vers l'originale :
 
 - Un bandeau **Doublon de** au-dessus du titre renvoie à la tâche d'origine et affiche son statut actuel. Dans les listes, tableaux et grilles, une flèche avec le numéro de l'originale apparaît à côté de la tâche.
-- Le panneau latéral de l'originale gagne une section **Doublons** qui liste les tâches marquées comme ses doublons et leurs créateurs.
+- Le panneau latéral de l'originale liste les tâches marquées comme ses doublons sous **Relations → Doublons**.
 - En cas d'erreur, cliquez sur **Pas un doublon** dans le bandeau : la tâche revient en `todo`. Passer la tâche à n'importe quel statut autre que `cancelled` retire aussi la marque.
 
-La relation n'a qu'un niveau : une tâche déjà marquée comme doublon ne peut pas servir d'originale, et une tâche qui a déjà des doublons ne peut pas être marquée comme doublon. Si le workflow du projet n'a pas de `cancelled`, le menu d'actions de la tâche ne propose pas cette option.
+La relation n'a qu'un niveau : une tâche déjà marquée comme doublon ne peut pas servir d'originale, et une tâche qui a déjà des doublons ne peut pas être marquée comme doublon. Si le workflow du projet n'a pas de `cancelled`, le menu ne propose pas cette option.
 
 ## Supprimer une tâche
 
@@ -215,3 +229,4 @@ La suppression est irréversible : la tâche, avec ses commentaires, ses pièces
 - [Commentaires](/comments) — discutez, répondez et utilisez les @mentions autour d'une tâche.
 - [Assigner des tâches aux agents](/assigning-issues) — confiez du travail à un agent et lancez la première exécution.
 - [Exécutions](/tasks) — découvrez la mise en file d'attente, le déroulement, les relances et l'annulation.
+- [Partager un pool d'agents dans une équipe](/team-agent-pool) — comment personnes et agents se passent les tâches et relisent le travail.

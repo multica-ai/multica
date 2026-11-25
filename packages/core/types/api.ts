@@ -5,6 +5,7 @@ import type { Project, ProjectStatus } from "./project";
 
 // Issue API
 export interface CreateIssueRequest {
+ blocked_by?: string[];
   title: string;
   description?: string;
   status?: IssueStatus;
@@ -51,6 +52,8 @@ export type CreateCommentSubIssueRequest =
   | CreateCommentSubIssueAgentRequest;
 
 export interface UpdateIssueRequest {
+ blocked_by?: string[];
+ remove_blocked_by?: string[];
   /** Legacy aggregate compare-and-swap token. New text editors use field
    * baselines so unrelated issue activity does not reject their edits. */
   expected_revision?: number;
@@ -187,6 +190,7 @@ export interface IssueTriggerPreview {
 }
 
 export interface ListIssuesParams {
+ blocked?: boolean;
   limit?: number;
   offset?: number;
   workspace_id?: string;
@@ -235,9 +239,8 @@ export interface ListIssuesParams {
   ids?: string[];
   /**
    * Widen the assignee filter to issues where the user is the *indirect*
-   * assignee — assignee is one of the user's owned agents, or a squad that
-   * involves the user (human member / leader-via-owned-agent / agent member
-   * owned by the user). Direct member assignment is intentionally excluded:
+   * assignee — assignee is one of the user's owned agents, or a squad led by
+   * an agent the user owns. Direct member assignment is intentionally excluded:
    * `involves_user_id` and `assignee_id=<user>` (tab "Assigned to me") produce
    * disjoint result sets by construction.
    */
@@ -338,11 +341,6 @@ export interface IssueAssigneeGroup {
   total: number;
 }
 
-/** Raw backend response shape for `GET /api/issues/grouped?group_by=assignee`. */
-export interface GroupedIssuesResponse {
-  groups: IssueAssigneeGroup[];
-}
-
 // Server-authoritative Table query contract. Membership, grouping and counts
 // are evaluated against the complete result set; the browser only owns view
 // state such as collapsed groups/parents.
@@ -353,7 +351,7 @@ export type IssueTableScope =
   | { kind: "creator"; actor: IssueActorRef }
   | { kind: "my"; relation: "assigned" | "created" | "involved" | "any" };
 
-export type IssueTableRelation = "assigned" | "created" | "my_agents" | "subscribed";
+export type IssueTableRelation = "assigned" | "created" | "my_agents" | "subscribed" | "blocked";
 
 export type IssueTableNegatableFilter =
   | "statuses"
@@ -717,10 +715,14 @@ export interface UpdateMeRequest {
 export interface CreateMemberRequest {
   email: string;
   role?: MemberRole;
+  /** Required for a guest: the projects it can access. */
+  project_ids?: string[];
 }
 
 export interface UpdateMemberRequest {
   role: MemberRole;
+  /** Required when the member becomes a guest. */
+  project_ids?: string[];
 }
 
 // Personal Access Tokens

@@ -20,20 +20,26 @@ vi.mock("../../navigation", () => ({
     </a>
   ),
 }));
-const { mutate } = vi.hoisted(() => ({ mutate: vi.fn() }));
+const { mutate, resolve } = vi.hoisted(() => ({ mutate: vi.fn(), resolve: vi.fn() }));
 vi.mock("@multica/core/notification-preferences/mutations", () => ({
   useUpdateNotificationPreferences: () => ({ mutate }),
+  useResolveAutoArchivePrompt: () => ({ mutate: resolve }),
 }));
 vi.mock("./browser-notification-setting", () => ({ BrowserNotificationSetting: () => null }));
 
 afterEach(() => {
   cleanup();
   mutate.mockReset();
+  resolve.mockReset();
 });
 
-function renderTab(preferences: Record<string, string> = {}) {
+function renderTab(preferences: Record<string, string> = {}, { prompt = false } = {}) {
   const qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
-  qc.setQueryData(notificationPreferenceKeys.all("ws-a"), { workspace_id: "ws-a", preferences });
+  qc.setQueryData(notificationPreferenceKeys.all("ws-a"), {
+    workspace_id: "ws-a",
+    preferences,
+    auto_archive_prompt: prompt,
+  });
   render(
     <QueryClientProvider client={qc}>
       <I18nProvider locale="en" resources={{ en: { settings: enSettings } }}>
@@ -61,13 +67,14 @@ describe("Inbox notification settings", () => {
       "Other people's issues",
       "Status changes",
       "Comments",
-      "Priority & Due date",
+      "Include squad handoffs",
+      "Priority & due date",
       "Projects you subscribe to",
       "New issues",
       "Agents",
       "Agent activity",
     ]);
-    expect(within(inbox).getByRole("switch", { name: "Priority & Due date" })).not.toBeChecked();
+    expect(within(inbox).getByRole("switch", { name: "Priority & due date" })).not.toBeChecked();
     expect(within(inbox).getByRole("switch", { name: "Comments" })).toBeChecked();
   });
 
@@ -81,6 +88,24 @@ describe("Inbox notification settings", () => {
 
     await user.click(statusChanges);
     expect(mutate).toHaveBeenCalledWith({ status_changes: "all" }, expect.anything());
+  });
+
+  it("keeps squad handoffs on under Comments until you turn them off", async () => {
+    const user = userEvent.setup();
+    renderTab();
+    const handoffs = within(screen.getByRole("region", { name: "Inbox" })).getByRole("switch", {
+      name: "Include squad handoffs",
+    });
+    expect(handoffs).toBeChecked();
+
+    await user.click(handoffs);
+    expect(mutate).toHaveBeenCalledWith({ squad_handoffs: "muted" }, expect.anything());
+  });
+
+  it("hides squad handoffs while comments are off", () => {
+    renderTab({ comments: "muted" });
+    const inbox = screen.getByRole("region", { name: "Inbox" });
+    expect(within(inbox).queryByRole("switch", { name: "Include squad handoffs" })).toBeNull();
   });
 
   it("shows status changes on once you turned them on", () => {
@@ -103,22 +128,120 @@ describe("Inbox notification settings", () => {
     renderTab();
     const leaving = screen.getByRole("region", { name: "Leaving the Inbox" });
     expect(leaving).toHaveTextContent("Reading a notification doesn't take it out of the Inbox.");
-    expect(leaving).toHaveTextContent("Issues others complete stay in your Inbox.");
+    expect(leaving).toHaveTextContent("Only your own actions count.");
     expect(within(leaving).getByRole("link", { name: "View archived" })).toHaveAttribute(
       "href",
       "/acme/inbox?view=archived",
     );
   });
 
-  it.each<{ preferences: Record<string, string>; checked: boolean }>([
-    { preferences: {}, checked: true },
-    { preferences: { auto_archive_completed: "muted" }, checked: false },
-  ])("toggles archiving issues you complete: %j", ({ preferences, checked }) => {
+  const ALL_ACTIONS_OFF = {
+    auto_archive_completed: "muted",
+    auto_archive_on_agent_trigger: "muted",
+    auto_archive_on_comment: "muted",
+    auto_archive_on_status: "muted",
+    auto_archive_on_assignee: "muted",
+  };
+  const ACTIONS_OFF_BUT = (on: string[]) =>
+    Object.fromEntries(
+      [
+        "auto_archive_completed",
+        "auto_archive_on_agent_trigger",
+        "auto_archive_on_comment",
+        "auto_archive_on_status",
+        "auto_archive_on_assignee",
+        "auto_archive_on_priority",
+        "auto_archive_on_project",
+        "auto_archive_on_dates",
+        "auto_archive_on_labels",
+      ].map((key) => [key, on.includes(key) ? "all" : "muted"]),
+    );
+  const archiveChoice = () =>
+    within(screen.getByRole("region", { name: "Leaving the Inbox" })).getByRole("combobox", {
+      name: "Archive issues you handle",
+    });
+
+  it.each<{ preferences: Record<string, string>; shown: string; custom: boolean }>([
+    { preferences: {}, shown: "When you complete it or trigger an agent", custom: false },
+    { preferences: { ...ALL_ACTIONS_OFF, auto_archive_completed: "all" }, shown: "When you complete it", custom: false },
+    { preferences: ALL_ACTIONS_OFF, shown: "Never", custom: false },
+    { preferences: { auto_archive_on_labels: "all" }, shown: "Custom", custom: true },
+  ])("names the choice your actions match: %j", ({ preferences, shown, custom }) => {
     renderTab(preferences);
+    expect(archiveChoice()).toHaveTextContent(shown);
+    expect(screen.queryByRole("checkbox", { name: "Change labels" }) !== null).toBe(custom);
+  });
+
+  it("offers the presets, the recommended one marked, then a custom choice", async () => {
+    const user = userEvent.setup();
+    renderTab();
+    await user.click(archiveChoice());
+    const options = await screen.findAllByRole("option");
+    expect(options.map((option) => [option.textContent, option.getAttribute("aria-selected")])).toEqual([
+      ["Never", "false"],
+      ["When you complete it", "false"],
+      ["When you complete it or trigger an agentRecommended", "true"],
+      ["Custom...", "false"],
+    ]);
+  });
+
+  it("saves every action when you pick a preset", async () => {
+    const user = userEvent.setup();
+    renderTab();
+    await user.click(archiveChoice());
+    await user.click(await screen.findByRole("option", { name: "When you complete it" }));
+    expect(mutate).toHaveBeenCalledWith(ACTIONS_OFF_BUT(["auto_archive_completed"]), expect.anything());
+  });
+
+  it("lists every action under a custom choice, grouped, with yours checked", async () => {
+    const user = userEvent.setup();
+    renderTab();
+    await user.click(archiveChoice());
+    await user.click(await screen.findByRole("option", { name: "Custom..." }));
+    expect(mutate).not.toHaveBeenCalled();
+    expect(archiveChoice()).toHaveTextContent("Custom");
     const leaving = screen.getByRole("region", { name: "Leaving the Inbox" });
-    const toggle = within(leaving).getByRole("switch", { name: "Archive issues you complete" });
-    if (checked) expect(toggle).toBeChecked();
-    else expect(toggle).not.toBeChecked();
+    expect(leaving).toHaveTextContent("Handling it");
+    expect(leaving).toHaveTextContent("Tidying it");
+    const checked = within(leaving)
+      .getAllByRole("checkbox")
+      .map((box) => [box.closest("label")?.textContent, box.getAttribute("aria-checked")]);
+    expect(checked).toEqual([
+      ["Complete", "true"],
+      ["Trigger an agent", "true"],
+      ["Reply", "false"],
+      ["Move it forward", "false"],
+      ["Reassign", "false"],
+      ["Change priority", "false"],
+      ["Change project", "false"],
+      ["Change dates", "false"],
+      ["Change labels", "false"],
+    ]);
+
+    await user.click(within(leaving).getByRole("checkbox", { name: "Change labels" }));
+    expect(mutate).toHaveBeenCalledWith(
+      ACTIONS_OFF_BUT([
+        "auto_archive_completed",
+        "auto_archive_on_agent_trigger",
+        "auto_archive_on_labels",
+      ]),
+      expect.anything(),
+    );
+  });
+
+  it("answers the pending one-time question when you choose here", async () => {
+    const user = userEvent.setup();
+    renderTab({ ...ALL_ACTIONS_OFF, auto_archive_completed: "all" }, { prompt: true });
+    await user.click(archiveChoice());
+    await user.click(await screen.findByRole("option", { name: "Never" }));
+    expect(resolve).toHaveBeenCalledWith(ACTIONS_OFF_BUT([]), expect.anything());
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
+  it("keeps the Leaving the Inbox card focused on when issues archive without an After archiving setting", () => {
+    renderTab();
+    const leaving = screen.getByRole("region", { name: "Leaving the Inbox" });
+    expect(within(leaving).queryByRole("combobox", { name: "After archiving" })).toBeNull();
   });
 });
 
@@ -145,7 +268,7 @@ describe("notification setting hierarchy", () => {
       </QueryClientProvider>,
     );
     expect(screen.queryByRole("region", { name: "Chat" })).toBeNull();
-    const system = screen.getByRole("region", { name: "System Notifications" });
+    const system = screen.getByRole("region", { name: "System notifications" });
     if (systemMuted) {
       expect(within(system).queryByRole("switch", { name: "Include chat replies" })).toBeNull();
       expect(within(system).getAllByRole("switch")).toHaveLength(1);

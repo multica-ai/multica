@@ -351,3 +351,26 @@ func TestResolveDaemonDisableSignalPrecedence(t *testing.T) {
 		})
 	}
 }
+
+// TestResolveDaemonLogLevelPrecedence pins LOG_LEVEL > profile log_level.
+func TestResolveDaemonLogLevelPrecedence(t *testing.T) {
+	cases := []struct {
+		name string
+		env  string
+		cfg  string
+		want string
+	}{
+		{"env wins over cfg", "error", "info", "error"},
+		{"cfg used when env unset", "", "info", "info"},
+		{"whitespace env counts as unset", "   ", "warn", "warn"},
+		{"all unset returns empty", "", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("LOG_LEVEL", tc.env)
+			if got := resolveDaemonLogLevel(tc.cfg); got != tc.want {
+				t.Fatalf("resolveDaemonLogLevel(%q) with LOG_LEVEL=%q = %q, want %q", tc.cfg, tc.env, got, tc.want)
+			}
+		})
+	}
+}

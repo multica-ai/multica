@@ -66,6 +66,42 @@ func TestCancelChatSessionWakeup_RequesterOrSessionOwner(t *testing.T) {
 	}
 }
 
+// Changing a wakeup's timing follows the cancel rule: the requester or the
+// session's owner, nobody else, and only while it is active.
+func TestRescheduleChatSessionWakeup(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	agentID := createHandlerTestAgent(t, "ChatWakeupRescheduleAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	suffix := time.Now().UnixNano()
+	requester := createWorkspaceMemberUser(t, "Reschedule requester", fmt.Sprintf("reschedule-requester-%d@multica.test", suffix))
+	bystander := createWorkspaceMemberUser(t, "Reschedule bystander", fmt.Sprintf("reschedule-bystander-%d@multica.test", suffix))
+	wakeupID := seedChatWakeup(t, sessionID, agentID, requester)
+
+	reschedule := func(userID string, body map[string]any) *testutil.Response {
+		t.Helper()
+		req := newRequestAs(userID, http.MethodPatch, "/api/chat/sessions/"+sessionID+"/wakeups/"+wakeupID, body)
+		req = withURLParams(req, "sessionId", sessionID, "wakeupId", wakeupID)
+		return testutil.Call(t, testHandler.RescheduleChatSessionWakeup, withChatTestWorkspaceCtx(t, req))
+	}
+	at := time.Now().UTC().Truncate(time.Second).Add(3 * time.Hour)
+	reschedule(bystander, map[string]any{"at": at}).Want(http.StatusForbidden)
+	reschedule(requester, map[string]any{"at": time.Now().Add(-time.Minute)}).Want(http.StatusBadRequest)
+	reschedule(requester, map[string]any{"interval_seconds": 900}).Want(http.StatusBadRequest)
+	for i, userID := range []string{requester, testUserID} {
+		want := at.Add(time.Duration(i) * time.Hour)
+		var updated ChatWakeupResponse
+		reschedule(userID, map[string]any{"at": want}).Want(http.StatusOK).JSON(&updated)
+		got, err := time.Parse(time.RFC3339, *updated.FireAt)
+		if updated.Title != "Release shipped" || err != nil || !got.Equal(want) {
+			t.Fatalf("rescheduled reminder = %+v, want fire_at %v", updated, want)
+		}
+	}
+	cancelChatWakeupAs(t, testUserID, sessionID, wakeupID)
+	reschedule(requester, map[string]any{"at": at}).Want(http.StatusConflict)
+}
+
 // chat_wakeup has no chat_session FK, so DeleteChatSession prunes it.
 func TestDeleteChatSession_PrunesChatWakeups(t *testing.T) {
 	if testHandler == nil {

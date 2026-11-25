@@ -27,6 +27,7 @@ type TaskDiskUsage struct {
 	Kind              string `json:"kind"`
 	ParentID          string `json:"parent_id,omitempty"`
 	ParentStatus      string `json:"parent_status"`
+	LocalDirectory    bool   `json:"local_directory,omitempty"`
 	AgeSeconds        int64  `json:"age_seconds"`
 	SizeBytes         int64  `json:"size_bytes"`
 	ArtifactSizeBytes int64  `json:"artifact_size_bytes"`
@@ -334,6 +335,7 @@ func buildTaskUsage(taskDir, wsID, taskShort string, matcher artifactMatcher) Ta
 		}
 		usage.Kind = string(meta.Kind)
 		usage.ParentID = parentIDForMeta(meta)
+		usage.LocalDirectory = meta.LocalDirectory
 		if !meta.CompletedAt.IsZero() {
 			usage.AgeSeconds = int64(time.Since(meta.CompletedAt).Seconds())
 		} else if age, ok := gcMetaFileAge(taskDir); ok {
@@ -366,6 +368,8 @@ func parentIDForMeta(meta *execenv.GCMeta) string {
 		return strings.TrimSpace(meta.AutopilotRunID)
 	case execenv.GCKindQuickCreate:
 		return strings.TrimSpace(meta.TaskID)
+	case execenv.GCKindDoc:
+		return strings.TrimSpace(meta.DocID)
 	default:
 		return ""
 	}

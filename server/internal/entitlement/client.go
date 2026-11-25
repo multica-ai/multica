@@ -23,6 +23,10 @@ const (
 	defaultFailureRetry   = 5 * time.Second
 	maxPolicyTTL          = 5 * time.Minute
 	maxResponseBodySize   = 64 << 10
+	// minForcedRefreshAge bounds RefreshGate: a policy received this recently
+	// is already current, so repeated rejections cost no more Cloud requests
+	// than one per workspace in this window.
+	minForcedRefreshAge = 5 * time.Second
 )
 
 var (
@@ -56,6 +60,8 @@ type Client struct {
 
 var (
 	_ Provider        = (*Client)(nil)
+	_ Refresher       = (*Client)(nil)
+	_ FreshRefresher  = (*Client)(nil)
 	_ FeatureProvider = (*Client)(nil)
 )
 
@@ -112,6 +118,47 @@ func (c *Client) Gate(ctx context.Context, workspaceID uuid.UUID, name GateName)
 		return c.recordDecision(name, offDecision(reason))
 	}
 	return c.recordDecision(name, decisionFromEntry(entry, name, reason, stale))
+}
+
+// RefreshGate fetches the workspace's policy again unless the cached one
+// arrived within minForcedRefreshAge, then resolves the gate from it. When
+// that fetch fails it answers exactly like Gate, from the cache or fail-open.
+func (c *Client) RefreshGate(ctx context.Context, workspaceID uuid.UUID, name GateName) Decision {
+	if !c.Enabled() || workspaceID == uuid.Nil || !name.valid() {
+		return c.Gate(ctx, workspaceID, name)
+	}
+	entry, refreshed, err := c.refreshShared(ctx, workspaceID, "force:"+workspaceID.String(),
+		func(cached cacheEntry, now time.Time) bool {
+			return cached.hasPolicy && now.Before(cached.freshUntil) && now.Sub(cached.receivedAt) < minForcedRefreshAge
+		})
+	if err != nil {
+		return c.Gate(ctx, workspaceID, name)
+	}
+	reason := ReasonCacheFresh
+	if refreshed {
+		reason = ReasonRefreshed
+	}
+	return c.recordDecision(name, decisionFromEntry(entry, name, reason, false))
+}
+
+// RefreshGateNow fetches the workspace's policy from Cloud now, without
+// RefreshGate's reuse window, then resolves the gate from it. Concurrent
+// callers for the workspace share one fetch. When the fetch fails it answers
+// exactly like Gate, from the cache or fail-open.
+func (c *Client) RefreshGateNow(ctx context.Context, workspaceID uuid.UUID, name GateName) Decision {
+	if !c.Enabled() || workspaceID == uuid.Nil || !name.valid() {
+		return c.Gate(ctx, workspaceID, name)
+	}
+	entry, refreshed, err := c.refreshShared(ctx, workspaceID, "now:"+workspaceID.String(),
+		func(cacheEntry, time.Time) bool { return false })
+	if err != nil {
+		return c.Gate(ctx, workspaceID, name)
+	}
+	reason := ReasonCacheFresh
+	if refreshed {
+		reason = ReasonRefreshed
+	}
+	return c.recordDecision(name, decisionFromEntry(entry, name, reason, false))
 }
 
 // Feature resolves one paid feature from the same cached policy as Gate, so
@@ -187,14 +234,29 @@ type refreshResult struct {
 }
 
 func (c *Client) refresh(ctx context.Context, workspaceID uuid.UUID) (cacheEntry, bool, error) {
+	return c.refreshShared(ctx, workspaceID, workspaceID.String(), func(cached cacheEntry, now time.Time) bool {
+		return cached.hasPolicy && now.Before(cached.freshUntil)
+	})
+}
+
+// refreshShared fetches the policy once per key for all concurrent callers.
+// reuse decides whether the cached entry is current enough to skip the fetch.
+// Forced refreshes use their own key so a normal caller already inside the
+// shared call cannot hand them back the entry they meant to replace.
+func (c *Client) refreshShared(
+	ctx context.Context,
+	workspaceID uuid.UUID,
+	key string,
+	reuse func(cached cacheEntry, now time.Time) bool,
+) (cacheEntry, bool, error) {
 	// A refresh is shared by all callers for this workspace, so its lifetime
 	// cannot belong to whichever request happens to enter singleflight first.
 	// Keep request-scoped values, but let the independent fetch timeout bound it.
 	refreshCtx := context.WithoutCancel(ctx)
-	value, err, _ := c.refreshes.Do(workspaceID.String(), func() (any, error) {
+	value, err, _ := c.refreshes.Do(key, func() (any, error) {
 		now := c.now()
 		if cached, ok := c.cache.get(workspaceID); ok {
-			if cached.hasPolicy && now.Before(cached.freshUntil) {
+			if reuse(cached, now) {
 				return refreshResult{entry: cached}, nil
 			}
 			if now.Before(cached.retryAfter) {
@@ -216,6 +278,7 @@ func (c *Client) refresh(ctx context.Context, workspaceID uuid.UUID) (cacheEntry
 		entry := cacheEntry{
 			hasPolicy:  true,
 			policy:     policy.snapshot,
+			receivedAt: receivedAt,
 			freshUntil: receivedAt.Add(ttl),
 			staleUntil: receivedAt.Add(ttl).Add(c.staleGrace),
 		}
@@ -251,6 +314,37 @@ type wirePolicy struct {
 	// wrong JSON type, cannot fail the decode of the whole policy and with it
 	// the metered gates. normalizeFeatures parses it entry by entry.
 	Features json.RawMessage `json:"features"`
+	// undecodableGates names gates whose value had the wrong JSON shape.
+	undecodableGates map[string]bool
+}
+
+// UnmarshalJSON decodes each gate on its own. A gate of the wrong JSON shape
+// is marked undecodable instead of failing the whole response, so an optional
+// gate falls back alone and cannot take autopilot_runs down with it.
+func (p *wirePolicy) UnmarshalJSON(data []byte) error {
+	type plain wirePolicy
+	var envelope struct {
+		plain
+		// Shallower than plain.Gates, so it receives the "gates" key.
+		Gates map[string]json.RawMessage `json:"gates"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return err
+	}
+	*p = wirePolicy(envelope.plain)
+	p.Gates = make(map[string]wireGate, len(envelope.Gates))
+	for name, raw := range envelope.Gates {
+		var gate wireGate
+		if err := json.Unmarshal(raw, &gate); err != nil {
+			if p.undecodableGates == nil {
+				p.undecodableGates = make(map[string]bool)
+			}
+			p.undecodableGates[name] = true
+			continue
+		}
+		p.Gates[name] = gate
+	}
+	return nil
 }
 
 type wireGate struct {
@@ -316,15 +410,38 @@ func normalizePolicy(wire wirePolicy) (fetchedPolicy, error) {
 		return fetchedPolicy{}, ErrInvalidPolicy
 	}
 	// Unknown gates are ignored for additive compatibility.
-	gates := make(map[GateName]Gate, 1)
-	for _, name := range []GateName{GateAutopilotRuns} {
+	gates := make(map[GateName]Gate, 5)
+	wireAutopilot, ok := wire.Gates[string(GateAutopilotRuns)]
+	if !ok {
+		return fetchedPolicy{}, ErrInvalidPolicy
+	}
+	autopilot, err := normalizeGate(GateAutopilotRuns, wireAutopilot)
+	if err != nil {
+		return fetchedPolicy{}, err
+	}
+	gates[GateAutopilotRuns] = autopilot
+	// Gates added after autopilot_runs are optional and read on their own,
+	// like features: a missing or malformed one is off for that gate alone, so
+	// Cloud and Multica can deploy in either order and a bad value cannot turn
+	// the autopilot quota off.
+	gateReasons := make(map[GateName]Reason)
+	for _, name := range []GateName{GateMembers, GateStorageBytes, GateDashboardHistoryDays, GateAppToolCalls} {
+		if wire.undecodableGates[string(name)] {
+			gates[name] = Gate{Action: ActionOff}
+			gateReasons[name] = ReasonGateInvalid
+			continue
+		}
 		wireGate, ok := wire.Gates[string(name)]
 		if !ok {
-			return fetchedPolicy{}, ErrInvalidPolicy
+			gates[name] = Gate{Action: ActionOff}
+			gateReasons[name] = ReasonGateMissing
+			continue
 		}
 		gate, err := normalizeGate(name, wireGate)
 		if err != nil {
-			return fetchedPolicy{}, err
+			gates[name] = Gate{Action: ActionOff}
+			gateReasons[name] = ReasonGateInvalid
+			continue
 		}
 		gates[name] = gate
 	}
@@ -334,6 +451,7 @@ func normalizePolicy(wire wirePolicy) (fetchedPolicy, error) {
 			subscriptionVersion: wire.SubscriptionVersion,
 			cloudValidUntil:     wire.ValidUntil,
 			gates:               gates,
+			gateReasons:         gateReasons,
 			features:            normalizeFeatures(wire.Features),
 		},
 		validForSeconds: wire.ValidForSeconds,
@@ -363,7 +481,13 @@ func normalizeGate(name GateName, wire wireGate) (Gate, error) {
 	if periodFields != 0 && periodFields != 3 {
 		return Gate{}, ErrInvalidPolicy
 	}
-	if name == GateAutopilotRuns && periodFields != 3 {
+	// A budget that resets needs its period.
+	if (name == GateAutopilotRuns || name == GateAppToolCalls) && periodFields != 3 {
+		return Gate{}, ErrInvalidPolicy
+	}
+	// A day count: positive, within the product's range, never a period.
+	if name == GateDashboardHistoryDays &&
+		(periodFields != 0 || *wire.Limit < 1 || *wire.Limit > MaxDashboardHistoryDays) {
 		return Gate{}, ErrInvalidPolicy
 	}
 	if periodFields == 3 && (!wire.PeriodStart.Before(*wire.PeriodEnd) || !wire.PeriodStart.Before(*wire.ResetAt)) {
@@ -426,7 +550,12 @@ func normalizeFeature(raw json.RawMessage) featureEntry {
 // notification object must never invalidate the enforcement gate and fail open
 // the underlying quota, so it is dropped independently.
 func normalizeNotificationPolicy(wire *wireNotificationPolicy) *NotificationPolicy {
-	if wire == nil || wire.OnRejection != NotificationFirstRejectionPerPeriod {
+	if wire == nil {
+		return nil
+	}
+	switch wire.OnRejection {
+	case NotificationFirstRejectionPerPeriod, NotificationFirstRejectionPerLimit:
+	default:
 		return nil
 	}
 	return &NotificationPolicy{
@@ -436,12 +565,17 @@ func normalizeNotificationPolicy(wire *wireNotificationPolicy) *NotificationPoli
 
 func decisionFromEntry(entry cacheEntry, name GateName, reason Reason, stale bool) Decision {
 	gate := cloneGate(entry.policy.gates[name])
-	if stale && gate.Action == ActionEnforce {
+	if fallback, ok := entry.policy.gateReasons[name]; ok {
+		reason = fallback
+	}
+	downgraded := stale && gate.Action == ActionEnforce
+	if downgraded {
 		gate.Action = ActionObserve
 	}
 	return Decision{
 		Gate:                gate,
 		Reason:              reason,
+		Downgraded:          downgraded,
 		PolicyRevision:      entry.policy.policyRevision,
 		SubscriptionVersion: entry.policy.subscriptionVersion,
 		CloudValidUntil:     entry.policy.cloudValidUntil,

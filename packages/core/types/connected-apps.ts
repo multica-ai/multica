@@ -37,6 +37,19 @@ export interface AgentApp {
   level: AppAccessLevel;
 }
 
+/** Everything waiting for a team account for one app: agents' runs and
+ * members' asks. */
+export interface AppTeamRequest {
+  toolkit_slug: string;
+  /** People waiting: whoever started each run, and members who asked. */
+  requested_by: string[];
+  /** Members who asked themselves; they can withdraw it. */
+  asked_by?: string[];
+  /** Agents waiting on it, or that members wanted it for; may be empty. */
+  agent_ids: string[];
+  last_requested_at: string;
+}
+
 export interface AppsOverview {
   catalog_mode: AppCatalogMode;
   /** The apps of a custom catalog. */
@@ -46,6 +59,20 @@ export interface AppsOverview {
   team: AppConnection[];
   personal: AppConnection[];
   agent_apps: AgentApp[];
+  /** Open requests for team accounts the workspace has not connected. */
+  team_requests?: AppTeamRequest[];
+}
+
+/** What disconnecting one of the caller's accounts stops in its workspace. */
+export interface PersonalAppImpact {
+  agents: {
+    id: string;
+    name: string;
+    workspace_id: string;
+    workspace_name: string;
+    /** A run the caller started is using the agent right now. */
+    running: boolean;
+  }[];
 }
 
 export interface AppCatalogEntry {
@@ -53,20 +80,13 @@ export interface AppCatalogEntry {
   name: string;
   logo?: string;
   category?: string;
+  category_id?: string;
   curated: boolean;
   recommended_scope?: AppAccountScope;
   /** False only in the admin's full view for apps the catalog leaves out. */
   allowed?: boolean;
-}
-
-/** One tool of an app and how this workspace classifies it. */
-export interface AppTool {
-  slug: string;
-  name: string;
-  description: string;
-  auto_class: AppActionClass;
-  class: AppActionClass;
-  overridden: boolean;
+  /** "key" when connecting asks the member for an API key or token. */
+  connect_method?: "oauth" | "key";
 }
 
 export type AppCallOutcome =
@@ -76,7 +96,8 @@ export type AppCallOutcome =
   | "pending"
   | "approved"
   | "rejected"
-  | "rate_limited";
+  | "rate_limited"
+  | "quota_exceeded";
 
 /** One call an issue's runs made through an app. */
 export interface IssueAppCall {
@@ -156,6 +177,12 @@ export interface AppRequest {
   error: string | null;
   reason: string | null;
   redacted: boolean;
+  /** A connect request for an app the agent does not have yet; answering it
+   * adds the app to the agent. */
+  adds_app?: boolean;
+  /** Whether the viewer may answer it: any admin for a team account request,
+   * otherwise the approver. Older servers omit it. */
+  can_decide?: boolean;
   expires_at: string;
   decided_by: string | null;
   decided_at: string | null;

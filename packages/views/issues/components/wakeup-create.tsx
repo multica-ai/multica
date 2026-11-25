@@ -23,6 +23,7 @@ import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { labelListOptions } from "@multica/core/labels/queries";
 import { propertyListOptions } from "@multica/core/properties/queries";
 import { isAgentRuntimeBound } from "@multica/core/agents";
+import { canAssignAgentToIssue, useCurrentMember } from "@multica/core/permissions";
 import { ApiError } from "@multica/core/api";
 import { agentListOptions, memberListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { shortcutMatchesEvent, useShortcut } from "@multica/core/shortcuts";
@@ -59,6 +60,7 @@ import { PickerEmpty, PickerItem, PickerSection, PropertyPicker } from "./picker
 import { IssuePickerModal } from "../../modals/issue-picker-modal";
 import { useStatusLabel } from "../utils/status-label";
 import { useWakeupText } from "./wakeup-presentation";
+import { useReopenOnReveal } from "./use-sidebar-reveal-motion";
 import {
   WAKEUP_EVENT_TYPES,
   WAKEUP_MAX_FIRES,
@@ -86,14 +88,23 @@ export function WakeupCreate({
   workspaceId,
   issueId,
   defaultAgentId,
+  defaultOpen = false,
+  onOpenChange,
 }: {
   workspaceId: string;
   issueId: string;
   defaultAgentId?: string;
+  defaultOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const { t } = useT("issues");
-  const [open, setOpen] = useState(false);
+  const [open, setOpenState] = useState(defaultOpen);
+  useReopenOnReveal(defaultOpen, () => setOpenState(true));
   const busy = useRef(false);
+  const setOpen = (next: boolean) => {
+    setOpenState(next);
+    onOpenChange?.(next);
+  };
   return (
     <Popover
       open={open}
@@ -153,13 +164,17 @@ export function WakeupCreateForm({
   const text = useWakeupText();
   const timezone = useViewingTimezone();
   const id = useId();
-  const [draft, setDraft] = useState(() => emptyWakeupDraft(defaultAgentId, timezone));
+  const [rawDraft, setDraft] = useState(() => emptyWakeupDraft(defaultAgentId, timezone));
   const [error, setError] = useState("");
   const create = useCreateIssueWakeup(workspaceId, issueId);
   const sendShortcut = useShortcut("send");
-  const { data: agents = [] } = useQuery(agentListOptions(workspaceId));
+  const agents = useRunnableAgents(workspaceId);
   const { data: properties = [] } = useQuery(propertyListOptions(workspaceId));
   const { data: issue } = useQuery(issueDetailOptions(workspaceId, issueId));
+  // The default is the issue's agent assignee, which may be an agent this
+  // member cannot run. Only a runnable agent counts as chosen, so the form
+  // asks for one up front instead of failing on submit.
+  const draft = agents.some((a) => a.id === rawDraft.agentId) ? rawDraft : { ...rawDraft, agentId: "" };
   const update = (patch: Partial<WakeupDraft>) => {
     setDraft((prev) => ({ ...prev, ...patch }));
     setError("");
@@ -197,7 +212,14 @@ export function WakeupCreateForm({
       setError(
         code === "wakeup_capacity_exceeded"
           ? t(($) => $.wakeups.create.capacity_error)
-          : text.error(err, t(($) => $.wakeups.create.error)),
+          : code === "wakeup_agent_not_invocable"
+            ? t(($) => $.wakeups.create.agent_error)
+            : // Any other refusal is about the rule's settings, such as a
+              // member or agent it waits on that left the workspace, not
+              // about managing a rule that does not exist yet.
+              err instanceof ApiError && err.status === 403
+              ? t(($) => $.wakeups.create.error)
+              : text.error(err, t(($) => $.wakeups.create.error)),
       );
     } finally {
       onBusy?.(false);
@@ -234,6 +256,7 @@ export function WakeupCreateForm({
             value={draft.agentId}
             onChange={(agentId) => update({ agentId })}
             placeholder={t(($) => $.wakeups.create.choose_agent)}
+            runnableOnly
           />
         </div>
       </div>
@@ -355,7 +378,6 @@ export function WakeupCreateForm({
               shortcut={sendShortcut}
               decorative
               className="ml-1 max-sm:hidden"
-              keyClassName="border-background/30 bg-background/15 text-primary-foreground shadow-none"
             />
           ) : null}
         </Button>
@@ -626,23 +648,44 @@ function useMatches() {
   return { setFilter, matches };
 }
 
+/**
+ * Agents this member can wake. The server refuses a wakeup whose agent is
+ * archived, has no runtime, or that the member may not invoke; the assignee
+ * picker lists agents by the same rule.
+ */
+function useRunnableAgents(workspaceId: string) {
+  const { data = [] } = useQuery(agentListOptions(workspaceId));
+  const { userId, role } = useCurrentMember(workspaceId);
+  return useMemo(
+    () =>
+      data.filter(
+        (a) => !a.archived_at && isAgentRuntimeBound(a) && canAssignAgentToIssue(a, { userId, role }).allowed,
+      ),
+    [data, userId, role],
+  );
+}
+
 function AgentChoice({
   workspaceId,
   value,
   onChange,
   placeholder,
   allowAny = false,
+  runnableOnly = false,
 }: {
   workspaceId: string;
   value: string;
   onChange: (id: string) => void;
   placeholder: string;
   allowAny?: boolean;
+  /** List only agents this member can wake; otherwise any unarchived agent. */
+  runnableOnly?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const { setFilter, matches } = useMatches();
   const { data = [] } = useQuery(agentListOptions(workspaceId));
-  const agents = useMemo(() => data.filter((a) => !a.archived_at), [data]);
+  const runnable = useRunnableAgents(workspaceId);
+  const agents = useMemo(() => (runnableOnly ? runnable : data.filter((a) => !a.archived_at)), [runnableOnly, runnable, data]);
   const selected = agents.find((a) => a.id === value);
   const pick = (id: string) => {
     onChange(id);
@@ -684,7 +727,6 @@ function AgentChoice({
             <PickerItem
               key={a.id}
               selected={a.id === value}
-              disabled={!allowAny && !isAgentRuntimeBound(a)}
               onClick={() => pick(a.id)}
             >
               <ActorAvatar actorType="agent" actorId={a.id} size="sm" showStatusDot />

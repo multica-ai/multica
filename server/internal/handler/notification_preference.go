@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/multica-ai/multica/server/internal/inbox"
@@ -17,21 +19,37 @@ import (
 // not an inbox event group — it's a delivery-channel toggle controlling
 // whether native OS notification banners fire — but it shares the same
 // preferences map so a single endpoint covers all user notification
-// preferences. `auto_archive_completed` is not an event group either: "muted"
-// stops your notifications from being archived when you complete an issue.
+// preferences. The `auto_archive_*` keys are not event groups either: each
+// says whether one action you take on an issue archives your notifications on
+// it. Completing and triggering an agent archive unless "muted"; commenting,
+// status changes, reassigning, priority, project, date and label edits archive
+// only with "all". `squad_handoffs` narrows `comments` to leave out the
+// comments a squad's agents hand work to each other with (MUL-10008).
+// `after_auto_archive` is a legacy preference kept accepted for older
+// clients; current clients always stay on an auto-archived issue.
 var validNotifGroups = map[string]bool{
-	"assignments":            true,
-	"status_changes":         true,
-	"comments":               true,
-	"chat_replies":           true,
-	"mentions":               true,
-	"reactions":              true,
-	"updates":                true,
-	"agent_activity":         true,
-	"new_issues":             true,
-	"system_notifications":   true,
-	"auto_archive_completed": true,
-	"others_issues":          true,
+	"assignments":                   true,
+	"status_changes":                true,
+	"comments":                      true,
+	"squad_handoffs":                true,
+	"chat_replies":                  true,
+	"mentions":                      true,
+	"reactions":                     true,
+	"updates":                       true,
+	"agent_activity":                true,
+	"new_issues":                    true,
+	"system_notifications":          true,
+	"auto_archive_completed":        true,
+	"auto_archive_on_agent_trigger": true,
+	"auto_archive_on_comment":       true,
+	"auto_archive_on_status":        true,
+	"auto_archive_on_assignee":      true,
+	"auto_archive_on_priority":      true,
+	"auto_archive_on_project":       true,
+	"auto_archive_on_dates":         true,
+	"auto_archive_on_labels":        true,
+	"after_auto_archive":            true,
+	"others_issues":                 true,
 }
 
 // validNotifValues is the set of allowed preference values for a group not
@@ -45,9 +63,20 @@ var validNotifValues = map[string]bool{
 // `others_issues` is how much of someone else's issue a passive subscriber
 // receives: absent or "key_updates" for mentions, thread replies and handoffs,
 // "all" for every event. Muting it would only hide what still needs you.
+// `after_auto_archive` is absent or "stay" to keep the archived notification
+// open, "next" to open the next one.
 var notifValuesByGroup = map[string]map[string]bool{
-	"others_issues": {"all": true, "key_updates": true},
+	"others_issues":      {"all": true, "key_updates": true},
+	"after_auto_archive": {"stay": true, "next": true},
 }
+
+// autoArchivePromptKey marks a workspace where the member has not yet answered
+// the one-time question of which actions archive their notifications. Migration
+// 718 writes it for members who archived notifications before replying,
+// changing status and reassigning did so by default. It is stored with the
+// preferences but answered as the response's own `auto_archive_prompt` flag,
+// so no client ever echoes it back in a write.
+const autoArchivePromptKey = "auto_archive_prompt"
 
 func validNotifValue(group, value string) bool {
 	if values, ok := notifValuesByGroup[group]; ok {
@@ -70,8 +99,9 @@ func (h *Handler) GetNotificationPreferences(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusOK, map[string]any{
-				"workspace_id": workspaceID,
-				"preferences":  inbox.WithDefaults(nil),
+				"workspace_id":        workspaceID,
+				"preferences":         inbox.WithDefaults(nil),
+				"auto_archive_prompt": false,
 			})
 			return
 		}
@@ -135,10 +165,13 @@ func writeNotificationPreferenceResponse(
 	if err := json.Unmarshal(pref.Preferences, &prefs); err != nil {
 		prefs = map[string]string{}
 	}
+	_, prompt := prefs[autoArchivePromptKey]
+	delete(prefs, autoArchivePromptKey)
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"workspace_id": workspaceID,
-		"preferences":  inbox.WithDefaults(prefs),
+		"workspace_id":        workspaceID,
+		"preferences":         inbox.WithDefaults(prefs),
+		"auto_archive_prompt": prompt,
 	})
 }
 
@@ -202,4 +235,65 @@ func (h *Handler) PatchNotificationPreferences(w http.ResponseWriter, r *http.Re
 		return
 	}
 	writeNotificationPreferenceResponse(w, workspaceID, pref)
+}
+
+// ResolveAutoArchivePrompt answers the one-time auto-archive question once for
+// all of the caller's workspaces: the supplied `auto_archive_*` values are
+// merged into every one of their preference rows still marked with
+// auto_archive_prompt, and the marker is dropped. An empty map keeps what each
+// workspace has. Answers with the current workspace's preferences.
+func (h *Handler) ResolveAutoArchivePrompt(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	prefs, ok := decodeNotificationPreferenceRequest(w, r)
+	if !ok {
+		return
+	}
+	for k := range prefs {
+		if !strings.HasPrefix(k, "auto_archive_") {
+			writeError(w, http.StatusBadRequest, "invalid preference group: "+k)
+			return
+		}
+	}
+	prefsJSON, ok := marshalNotificationPreferences(w, prefs)
+	if !ok {
+		return
+	}
+
+	if err := h.Queries.ResolveAutoArchivePrompt(r.Context(), db.ResolveAutoArchivePromptParams{
+		UserID:      parseUUID(userID),
+		Preferences: prefsJSON,
+	}); err != nil {
+		slog.Warn("ResolveAutoArchivePrompt failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to update notification preferences")
+		return
+	}
+	h.GetNotificationPreferences(w, r)
+}
+
+func (h *Handler) archiveActorInboxOnAgentTrigger(ctx context.Context, workspaceID, issueID, actorType, actorID string) {
+	inbox.ArchiveActorIssueInbox(ctx, h.Queries, h.Bus, workspaceID, issueID, actorType, actorID, inbox.AutoArchiveAgentTriggerPref)
+}
+
+// issueRunTriggeredAgent reports whether an issue write actually handed work to
+// an agent (queued a fresh run or coalesced into a pending one). Deferred
+// (backlog parking, suppress_run, self-loop) and blocked outcomes do not count.
+func issueRunTriggeredAgent(outcome *IssueRunOutcome) bool {
+	return outcome != nil && (outcome.Status == DispatchQueued || outcome.Status == DispatchCoalesced)
+}
+
+// commentResultsTriggeredAgent reports whether a comment actually reached at
+// least one agent (queued, coalesced into a pending run, deferred to an active
+// run's completion reconcile, or steered into a running turn). Blocked targets
+// do not count.
+func commentResultsTriggeredAgent(results map[string]commentEnqueueResult) bool {
+	for _, res := range results {
+		switch res.status {
+		case DispatchQueued, DispatchCoalesced, DispatchDeferred, DispatchSteered:
+			return true
+		}
+	}
+	return false
 }

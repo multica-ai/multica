@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { copyText, copyTextAndHtml } from "./clipboard";
+import { canCopyImage, copyImage, copyText, copyTextAndHtml } from "./clipboard";
 
 const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
 
@@ -204,5 +204,57 @@ describe("copyTextAndHtml", () => {
     expect(await copyTextAndHtml("plain", "<b>rich</b>")).toBe(true);
     expect(write).not.toHaveBeenCalled();
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith("plain");
+  });
+});
+
+describe("copyImage", () => {
+  class FakeClipboardItem {
+    constructor(readonly data: Record<string, Promise<Blob>>) {}
+  }
+
+  // Like the browser, the write settles only once the item's data has.
+  function stubClipboard() {
+    const written: Blob[] = [];
+    const write = vi.fn(async (items: FakeClipboardItem[]) => {
+      written.push(await items[0]!.data["image/png"]!);
+    });
+    Object.defineProperty(navigator, "clipboard", { value: { write }, configurable: true });
+    vi.stubGlobal("ClipboardItem", FakeClipboardItem);
+    return { write, written };
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("copies the PNG a loader returns, starting the write before it settles", async () => {
+    const { write, written } = stubClipboard();
+    const png = new Blob(["png"], { type: "image/png" });
+    let resolve!: (blob: Blob) => void;
+    const loader = vi.fn(() => new Promise<Blob>((r) => (resolve = r)));
+
+    const copied = copyImage(loader);
+    expect(loader).toHaveBeenCalledTimes(1);
+    expect(write).toHaveBeenCalledTimes(1);
+    resolve(png);
+
+    expect(await copied).toBe(true);
+    expect(written).toEqual([png]);
+  });
+
+  it("is unavailable without the async Clipboard API, as on plain http://", async () => {
+    vi.stubGlobal("ClipboardItem", FakeClipboardItem);
+    const loader = vi.fn(async () => new Blob(["png"], { type: "image/png" }));
+    expect(canCopyImage()).toBe(false);
+    expect(await copyImage(loader)).toBe(false);
+    expect(loader).not.toHaveBeenCalled();
+
+    stubClipboard();
+    expect(canCopyImage()).toBe(true);
+  });
+
+  it("fails when the loader does", async () => {
+    stubClipboard();
+    expect(await copyImage(() => Promise.reject(new Error("synthetic 404")))).toBe(false);
   });
 });

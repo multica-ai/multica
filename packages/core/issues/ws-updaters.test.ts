@@ -12,9 +12,13 @@ import {
   onIssueLabelsChanged,
   onIssueMetadataChanged,
   onIssuePropertiesChanged,
+  onIssueReactionAdded,
+  onIssueReactionRemoved,
   onIssueUpdated,
   patchIssueLabels,
   patchIssueProperties,
+  patchIssueReactions,
+  removeReactionFromList,
 } from "./ws-updaters";
 import { issueKeys } from "./queries";
 import { NO_PROJECT_SIDEBAR_SOURCE } from "./sidebar-list";
@@ -164,6 +168,18 @@ describe("onIssueLabelsChanged", () => {
 
   beforeEach(() => {
     qc = new QueryClient();
+  });
+
+  it.each([undefined, 2])("refreshes project progress, which counts issues by label (revision %s)", (revision) => {
+    const progressKey = projectKeys.progress(WS_ID, PROJECT_ID);
+    const membersKey = projectKeys.members(WS_ID, PROJECT_ID);
+    qc.setQueryData(progressKey, { by_label: [] });
+    qc.setQueryData(membersKey, []);
+
+    onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB], revision);
+
+    expect(qc.getQueryState(progressKey)?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(membersKey)?.isInvalidated).toBe(false);
   });
 
   it("patches the per-issue label cache when present (LabelPicker source)", () => {
@@ -515,6 +531,80 @@ describe("auxiliary issue activity ordering", () => {
     expectInvalidated(qc, activityKey);
     expect(qc.getQueryState(positionKey)?.isInvalidated).toBe(false);
     qc.clear();
+  });
+});
+
+describe("issue reactions on the detail cache", () => {
+  const reaction: IssueReaction = {
+    id: "reaction-1",
+    issue_id: ISSUE_ID,
+    actor_type: "member",
+    actor_id: "user-1",
+    emoji: "+1",
+    created_at: "2025-01-01T00:00:00Z",
+  };
+  const detailKey = issueKeys.detail(WS_ID, ISSUE_ID);
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient();
+  });
+
+  it("adds a reaction without advancing the snapshot revision, and marks it stale", () => {
+    qc.setQueryData<Issue>(detailKey, { ...baseIssue, revision: 3 });
+
+    onIssueReactionAdded(qc, WS_ID, ISSUE_ID, reaction, 4);
+    onIssueReactionAdded(qc, WS_ID, ISSUE_ID, reaction, 4);
+
+    const detail = qc.getQueryData<Issue>(detailKey);
+    expect(detail?.reactions).toEqual([reaction]);
+    expect(detail?.revision).toBe(3);
+    expectInvalidated(qc, detailKey);
+  });
+
+  it("removes the actor's reaction for that emoji", () => {
+    const other = { ...reaction, id: "reaction-2", actor_id: "user-2" };
+    qc.setQueryData<Issue>(detailKey, { ...baseIssue, revision: 3, reactions: [reaction, other] });
+
+    onIssueReactionRemoved(qc, WS_ID, ISSUE_ID, reaction, 4);
+
+    expect(qc.getQueryData<Issue>(detailKey)?.reactions).toEqual([other]);
+  });
+
+  it("ignores events the cached snapshot already includes", () => {
+    const readded = { ...reaction, id: "reaction-3" };
+    qc.setQueryData<Issue>(detailKey, { ...baseIssue, revision: 5, reactions: [readded] });
+
+    onIssueReactionRemoved(qc, WS_ID, ISSUE_ID, reaction, 4);
+
+    expect(qc.getQueryData<Issue>(detailKey)?.reactions).toEqual([readded]);
+  });
+
+  it("ignores an event older than one already applied", () => {
+    qc.setQueryData<Issue>(detailKey, { ...baseIssue, revision: 3 });
+
+    onIssueReactionRemoved(qc, WS_ID, ISSUE_ID, reaction, 5);
+    onIssueReactionAdded(qc, WS_ID, ISSUE_ID, reaction, 4);
+
+    expect(qc.getQueryData<Issue>(detailKey)?.reactions).toBeUndefined();
+  });
+
+  it("patches and refetches the detail for an unversioned event", () => {
+    qc.setQueryData<Issue>(detailKey, { ...baseIssue, revision: 3 });
+
+    onIssueReactionAdded(qc, WS_ID, ISSUE_ID, reaction);
+
+    expect(qc.getQueryData<Issue>(detailKey)?.reactions).toEqual([reaction]);
+    expectInvalidated(qc, detailKey);
+  });
+
+  it("patches the detail directly for a local write without a revision", () => {
+    qc.setQueryData<Issue>(detailKey, { ...baseIssue, revision: 3, reactions: [reaction] });
+
+    patchIssueReactions(qc, WS_ID, ISSUE_ID, removeReactionFromList(reaction));
+
+    expect(qc.getQueryData<Issue>(detailKey)?.reactions).toEqual([]);
+    expect(qc.getQueryState(detailKey)?.isInvalidated).toBe(false);
   });
 });
 
@@ -893,16 +983,6 @@ describe("onIssueDeleted", () => {
         created_at: "2025-01-01T00:00:00Z",
       },
     ]);
-    qc.setQueryData<IssueReaction[]>(issueKeys.reactions(ISSUE_ID), [
-      {
-        id: "reaction-1",
-        issue_id: ISSUE_ID,
-        actor_type: "member",
-        actor_id: "user-1",
-        emoji: "+1",
-        created_at: "2025-01-01T00:00:00Z",
-      },
-    ]);
     qc.setQueryData<IssueSubscriber[]>(issueKeys.subscribers(ISSUE_ID), [
       {
         issue_id: ISSUE_ID,
@@ -955,7 +1035,6 @@ describe("onIssueDeleted", () => {
 
     expect(qc.getQueryData(issueKeys.detail(WS_ID, ISSUE_ID))).toBeUndefined();
     expect(qc.getQueryData(issueKeys.timeline(ISSUE_ID))).toBeUndefined();
-    expect(qc.getQueryData(issueKeys.reactions(ISSUE_ID))).toBeUndefined();
     expect(qc.getQueryData(issueKeys.subscribers(ISSUE_ID))).toBeUndefined();
     expect(qc.getQueryData(issueKeys.usage(ISSUE_ID))).toBeUndefined();
     expect(qc.getQueryData(issueKeys.attachments(ISSUE_ID))).toBeUndefined();

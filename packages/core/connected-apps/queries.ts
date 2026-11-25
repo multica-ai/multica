@@ -14,9 +14,12 @@ export const connectedAppsKeys = {
   activity: (wsId: string, slug: string, scope: AppAccountScope) =>
     [...connectedAppsKeys.all(wsId), "activity", slug, scope] as const,
   impact: (wsId: string, slug: string) => [...connectedAppsKeys.all(wsId), "impact", slug] as const,
+  personalImpact: (wsId: string, connectionId: string) =>
+    [...connectedAppsKeys.all(wsId), "personal-impact", connectionId] as const,
   agentApps: (wsId: string, agentId: string) =>
     [...connectedAppsKeys.all(wsId), "agent", agentId] as const,
   requests: (wsId: string) => [...connectedAppsKeys.all(wsId), "requests"] as const,
+  myPendingRequests: (wsId: string) => [...connectedAppsKeys.requests(wsId), "mine"] as const,
   issueRequests: (wsId: string, issueId: string) =>
     [...connectedAppsKeys.requests(wsId), "issue", issueId] as const,
   chatRequests: (wsId: string, sessionId: string) =>
@@ -54,6 +57,19 @@ export const teamAppImpactOptions = (wsId: string, slug: string) =>
   queryOptions({
     queryKey: connectedAppsKeys.impact(wsId, slug),
     queryFn: () => api.getTeamAppImpact(slug),
+  });
+
+export const personalAppImpactOptions = (wsId: string, connectionId: string) =>
+  queryOptions({
+    queryKey: connectedAppsKeys.personalImpact(wsId, connectionId),
+    queryFn: () => api.getPersonalAppImpact(connectionId),
+  });
+
+/** Requests in this workspace still waiting on the caller. */
+export const myPendingAppRequestsOptions = (wsId: string) =>
+  queryOptions({
+    queryKey: connectedAppsKeys.myPendingRequests(wsId),
+    queryFn: () => api.listAppRequests().then((r) => r.requests),
   });
 
 export const agentAppsOptions = (wsId: string, agentId: string) =>

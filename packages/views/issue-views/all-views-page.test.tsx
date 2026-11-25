@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { IssueView } from "@multica/core/api/schemas";
 import { renderWithI18n } from "../test/i18n";
@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   unstar: vi.fn(),
   open: vi.fn(),
   create: vi.fn(),
+  canManage: vi.fn(() => true),
+  setVisibility: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-query", () => ({
@@ -52,7 +54,8 @@ vi.mock("./use-view-actions", () => ({
       star: mocks.star,
       unstar: mocks.unstar,
     },
-    canManage: () => true,
+    canManage: mocks.canManage,
+    setVisibility: mocks.setVisibility,
     open: mocks.open,
     create: mocks.create,
     duplicate: vi.fn(),
@@ -110,6 +113,8 @@ beforeEach(() => {
   mocks.unstar.mockReset();
   mocks.open.mockReset();
   mocks.create.mockReset();
+  mocks.canManage.mockReturnValue(true);
+  mocks.setVisibility.mockReset();
   useActiveIssueViewStore.setState({ active: {} });
 });
 
@@ -128,8 +133,8 @@ describe("AllViewsPage", () => {
 
     expect(screen.getByRole("heading", { level: 1, name: "All views" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "All views" }));
-    expect(await screen.findByRole("menuitemradio", { name: /^All views/ })).toHaveTextContent("7");
-    expect(screen.getByRole("menuitemradio", { name: /^Built-in/ })).toHaveTextContent("5");
+    expect(await screen.findByRole("menuitemradio", { name: /^All views/ })).toHaveTextContent("6");
+    expect(screen.getByRole("menuitemradio", { name: /^Built-in/ })).toHaveTextContent("4");
     expect(screen.getByRole("menuitemradio", { name: /^Created by me/ })).toHaveTextContent("1");
     await user.click(screen.getByRole("menuitemradio", { name: /^Shared/ }));
 
@@ -154,6 +159,36 @@ describe("AllViewsPage", () => {
     expect(mocks.create).toHaveBeenCalledWith(
       expect.objectContaining({ scope: { scope_type: "workspace" }, renameIn: "header" }),
     );
+  });
+
+  it("shares a project view from its row menu without opening it", async () => {
+    const projectView = view("project-view", "Project review", {
+      scope_type: "project",
+      scope_id: "project-1",
+    });
+    mocks.views = [projectView];
+    const user = userEvent.setup();
+    const { push } = renderPage();
+
+    await user.click(screen.getByRole("button", { name: "Actions for Project review" }));
+    await user.click(await screen.findByRole("menuitem", { name: /^Visible to\s*Only me/ }));
+    expect(await screen.findByRole("menuitemradio", { name: "Only me" })).toHaveAttribute("aria-checked", "true");
+    // The open submenu marks its parent menu `pointer-events: none` in jsdom.
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Workspace members" }));
+
+    expect(mocks.setVisibility).toHaveBeenCalledWith(projectView, "workspace");
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it.each(["my", "unmanaged"])("hides sharing for %s views", async (kind) => {
+    mocks.views = [view("v1", "Needs review", { scope_type: kind === "my" ? "my" : "workspace" })];
+    mocks.canManage.mockReturnValue(kind !== "unmanaged");
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "Actions for Needs review" }));
+    expect(await screen.findByRole("menuitem", { name: "Duplicate" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /^Visible to/ })).not.toBeInTheDocument();
   });
 
   it("stars and unstars without opening the view", async () => {

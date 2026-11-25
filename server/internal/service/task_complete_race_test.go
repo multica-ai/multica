@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
@@ -155,7 +156,7 @@ func TestFailTask_AlreadyFinalized(t *testing.T) {
 				Bus:     events.New(),
 			}
 
-			got, transitioned, err := svc.FailTaskWithTransition(context.Background(), taskID, "agent crashed", "", "", "", "", false, "", "")
+			got, transitioned, err := svc.FailTaskWithTransition(context.Background(), taskID, protocol.TaskFailRequest{Error: "agent crashed"})
 			if err != nil {
 				t.Fatalf("expected no error, got %v", err)
 			}

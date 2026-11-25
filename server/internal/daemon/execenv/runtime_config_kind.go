@@ -6,7 +6,7 @@ package execenv
 // flag that once gated it against a legacy verbose brief was retired in
 // MUL-4297, so this is now the only brief).
 //
-// Four kinds, mutually exclusive in practice. classifyTask documents the
+// Five kinds, mutually exclusive in practice. classifyTask documents the
 // tiebreak rule that applies if a future caller accidentally violates the
 // mutex.
 type taskKind int
@@ -32,12 +32,14 @@ const (
 	kindQuickCreate
 	// kindChat: interactive chat session, no issue.
 	kindChat
+	// kindDocComment: answering a doc discussion (MUL-9933), no issue.
+	kindDocComment
 )
 
 // classifyTask maps a TaskContextForEnv to the single taskKind the slim
 // brief should be assembled for. Precedence (documented for the tiebreak
 // case, although the daemon never sets two specific-kind flags at once):
-// chat → quick-create → autopilot run-only → issue.
+// chat → doc discussion → quick-create → autopilot run-only → issue.
 //
 // Deliberately does not read ctx.TriggerCommentID: the classification must
 // not vary across runs of the same resumed session, or the brief's bytes
@@ -46,6 +48,8 @@ func classifyTask(ctx TaskContextForEnv) taskKind {
 	switch {
 	case ctx.ChatSessionID != "":
 		return kindChat
+	case ctx.DocID != "":
+		return kindDocComment
 	case ctx.QuickCreatePrompt != "":
 		return kindQuickCreate
 	case ctx.AutopilotRunID != "":

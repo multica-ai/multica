@@ -3,7 +3,13 @@ title: Bot WeChat
 description: Scannez un QR code pour connecter votre compte WeChat à un agent Multica via iLink.
 ---
 
+import { Callout } from "fumadocs-ui/components/callout";
+
 Multica se connecte au service iLink Bot de WeChat avec le protocole implémenté par le [plugin OpenClaw Weixin](https://github.com/Tencent/openclaw-weixin) de Tencent. Ce canal est distinct de WeCom. Vous n'avez pas besoin d'installer OpenClaw ni d'utiliser un outil d'automatisation de WeChat sur ordinateur.
+
+<Callout type="info">
+La prise en charge de WeChat est [maintenue par la communauté](/community-maintained) : elle est incluse dans chaque version, mais sans SLA de support officiel. Signalez les problèmes dans les [issues GitHub](https://github.com/multica-ai/multica/issues).
+</Callout>
 
 ## Se connecter
 
@@ -23,6 +29,7 @@ Le QR code de cette illustration sert aux tests ; ce n'est pas un code d'autoris
 
 - Les messages texte poursuivent la même discussion Multica. Les réponses finales sont renvoyées à WeChat en texte brut ; les longues réponses sont découpées sans casser les caractères Unicode. Les messages ne sont pas modifiés en continu pendant la génération.
 - Pendant l'exécution, Multica renouvelle l'indicateur de saisie de WeChat lorsqu'il est disponible. Il s'arrête après la fin, l'échec ou l'annulation. Un renouvellement qui échoue est retenté au prochain intervalle de cinq secondes. Une permission manquante ou une erreur de l'indicateur n'interrompt ni les messages ni les réponses.
+- `/help` affiche les commandes disponibles sans lancer d'exécution de l'agent ni modifier la discussion actuelle.
 - `/new [message]` démarre une nouvelle discussion Multica. `/clear [message]` réinitialise le contexte visible par l'agent dans la discussion actuelle. `/issue <titre>` crée une tâche assignée à l'agent connecté.
 - Lorsque le stockage objet est configuré, les images, fichiers, vidéos et notes vocales non transcrites reçus sont joints à la discussion Multica. Les transcriptions fournies par WeChat sont utilisées comme texte ; Multica n'ajoute pas de service de reconnaissance vocale et ne convertit pas l'audio SILK.
 - Les fichiers joints à la réponse finale de l'agent sont renvoyés à WeChat. Les images prises en charge et les vidéos MP4 utilisent les messages multimédias natifs ; les autres formats, y compris l'audio, sont envoyés comme fichiers. Cet adaptateur limite chaque transfert à **20 MiB**. Un échec d'envoi produit un avertissement ; le fichier reste dans Multica.

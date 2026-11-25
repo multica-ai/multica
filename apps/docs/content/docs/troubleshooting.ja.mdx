@@ -45,6 +45,8 @@ multica daemon status --output json
 multica daemon logs --lines 100
 ```
 
+CLI がトークンを検証できない場合は、再ログインする前に表示されたエラーを確認してください。
+
 よくある原因:
 
 - CLI がまだログインしていない、またはローカルに保存されたトークンが失効している。
@@ -65,6 +67,8 @@ multica daemon restart
 ```bash
 multica config show
 ```
+
+macOS でデーモンログに `connect: no route to host` が出る一方、同じ Mac のターミナルで `curl -fsS <server-url>/health` が成功する場合は、同じ時間帯の両方の結果を記録してください。デーモンの起動方法（Desktop、ログインサービス、ターミナル）と、macOS とデーモンのバージョンも添えてください。ターミナルでの成功は、そのシェルプロセスから接続できたことだけを示します。
 
 </Accordion>
 <Accordion title={<><code>multica setup</code> がサーバーに到達できないと報告する</>} id="multica-setup-reports-the-server-is-not-reachable" value="multica-setup-reports-the-server-is-not-reachable">
@@ -162,6 +166,15 @@ multica issue runs <issue-id>
 まず実行用コンピューターのターミナルで、同じツールを直接実行してください。ツール単体でも起動できない場合は、先にツールのログインや設定を修復してから、実行ログから実行を再試行します。
 
 </Accordion>
+<Accordion title="macOS のプロキシ環境で AI コーディングツールがタイムアウトする" id="ai-coding-tool-times-out-behind-a-macos-proxy" value="ai-coding-tool-times-out-behind-a-macos-proxy">
+
+Grok などの AI コーディングツールがターミナルでは動作するのに Multica Desktop でタイムアウトする場合は、ターミナルでプロキシ用の環境変数をエクスポートしているか確認してください。macOS では、ローカルデーモンとデーモンが起動するツールは起動元の環境変数を引き継ぎます。Dock から Desktop を起動すると、シェルでエクスポートした変数や、macOS の「ネットワーク」で設定したプロキシは環境変数に反映されません。
+
+特定のエージェントだけで使う場合は、そのエージェントの[環境変数](/agents-create#環境変数と認証情報)にツールが必要とするプロキシ変数を追加します。ローカルの HTTP プロキシなら、たとえば `HTTPS_PROXY=http://127.0.0.1:7897` を実際のプロキシアドレスに置き換えて設定します。Multica をローカルでホストしている場合は、直接接続するホストを `NO_PROXY` に追加します。例は `localhost,127.0.0.1,::1` です。新しい実行を開始すると設定が反映されます。
+
+この設定はそのエージェントのツールのプロセスだけに適用され、デーモンには適用されません。デーモンが Multica サーバーへの接続にプロキシを必要とする場合や、最新のモデル一覧を取得したい場合（デーモンは自身の環境でモデル一覧を取得します）は、デーモンの起動環境を別途設定してください。ログイン時に自動起動するデーモンについては[ログイン時の自動起動](/daemon-runtimes#autostart)を参照してください。
+
+</Accordion>
 <Accordion title="CLI のアップグレード後に macOS で実行が止まる" id="runs-hang-on-macos-after-a-cli-upgrade" value="runs-hang-on-macos-after-a-cli-upgrade">
 
 Homebrew でインストールした `multica` CLI が `brew upgrade`、`multica update`、**ランタイム**ページの**更新**、またはデーモンの自動更新でアップグレードされた後、`~/Desktop`、`~/Documents`、`~/Downloads`、iCloud Drive などの保護されたフォルダーを読み取る実行が進まなくなることがあります。エージェントのプロセスは CPU を使わず、実行は完了も失敗もしません。
@@ -175,6 +188,17 @@ Homebrew でインストールした `multica` CLI が `brew upgrade`、`multica
 3. デーモンを起動したときと同じ方法で再起動します。通常は `multica daemon restart`、LaunchAgent の場合は `launchctl kickstart -k gui/$(id -u)/<label>` です。
 
 CLI をアップグレードするたびにこの手順を繰り返してください。自動更新がデフォルトで有効なのは Multica Cloud に接続したデーモンだけです。`--no-auto-update` を付けてデーモンを起動すると、手動で実行したときだけアップグレードされます。[Multica Desktop](/desktop-app) に同梱の CLI は Developer ID で署名されているため、アップグレード後も許可が維持されます。
+
+</Accordion>
+<Accordion title="Hermes CLI を使った後に依存関係が再インストールされる" id="hermes-runs-reinstall-dependencies-after-you-use-the-hermes-cli" value="hermes-runs-reinstall-dependencies-after-you-use-the-hermes-cli">
+
+Hermes CLI または Hermes デスクトップアプリと Multica の Hermes 実行を切り替えると、共有 Python 環境の再構築で起動に 30〜60 秒余分にかかることがあります。再構築するたびに新しい環境がディスクに作られ、Hermes がクリーンアップするまで残ります。
+
+この現象は、普段使う Hermes ホームの `memory.provider` に Python の依存関係を持つプラグインを指定している場合に起きます。Multica は実行ごとに独立した Hermes ホームを使い、インストール済みの依存関係を共有します。実行間でメモリを共有しないように、外部メモリプロバイダーは無効にします。Hermes はアクティブなホームのプラグインから必要な依存関係を判定するため、一方のホームで用意した環境を、もう一方では古い環境として扱います。[NousResearch/hermes-agent#137726](https://github.com/NousResearch/hermes-agent/issues/137726) でこの問題を追跡しています。
+
+確認するには、[デーモンのログ](#ログの場所)で `hermes is reinstalling its dependency environment before this task starts` を探します。続く `hermes dependency reinstall finished` の `startup_delay_ms` には、再インストールを含め、Hermes が起動して準備完了になるまでの時間が記録されます。
+
+Hermes 側で修正されるまでは、普段使う Hermes の `config.yaml` に `memory.provider: ""` を設定すると再構築を回避できます。この設定は CLI のメモリプラグインも無効にします。プラグインを有効にしたままにすると、切り替え後の最初の起動が遅くなることがあります。
 
 </Accordion>
 </Accordions>

@@ -84,18 +84,24 @@ export function __resetInlineMediaBlobCacheForTests(): void {
 // load failure as meaningful (the viewer skips broken images) waits it out
 // instead of rendering it.
 // Viewers and neighbour prefetch reauthenticate stale metadata on mount;
-// inline thumbnails stay lazy.
+// inline thumbnails stay lazy. A disabled call fetches nothing and returns
+// the picked URL, for a caller that is not rendering the original.
 export function useResignedInlineMedia(
   attachmentId: string | undefined,
   rawPickedUrl: string,
   blobFallback: boolean,
   {
+    enabled = true,
     refreshOnMount = false,
     metadataSource = "workspace",
+    workspaceId,
     currentMetadata,
   }: {
+    enabled?: boolean;
     refreshOnMount?: boolean;
     metadataSource?: "workspace" | "markdown-link";
+    /** Workspace that owns the attachment, when it may not be the current one. */
+    workspaceId?: string;
     currentMetadata?: Attachment;
   } = {},
 ): { url: string; pending: boolean; failed: boolean } {
@@ -114,6 +120,7 @@ export function useResignedInlineMedia(
     }
   })();
   const needsResign =
+    enabled &&
     !!resignAttachmentId &&
     !!pickedUrl &&
     (refreshOnMount ||
@@ -126,7 +133,9 @@ export function useResignedInlineMedia(
       : ["attachment-inline-resign", resignAttachmentId],
     queryFn: () => metadataSource === "markdown-link"
       ? api.getAttachmentForDownload(resignAttachmentId as string)
-      : api.getAttachment(resignAttachmentId as string),
+      : workspaceId
+        ? api.getAttachment(resignAttachmentId as string, { workspaceId })
+        : api.getAttachment(resignAttachmentId as string),
     enabled: needsResign && !currentMetadata,
     staleTime: refreshOnMount ? PREVIEW_RESIGN_STALE_MS : RESIGN_STALE_MS,
     gcTime: RESIGN_STALE_MS,
@@ -208,6 +217,38 @@ export function useResignedInlineMedia(
   };
 }
 
+// useAttachmentThumbnailURL resolves an attachment's `thumbnail_url` for a
+// grid tile. Web on the API's origin loads the path natively, with the session
+// cookie, so the browser can lazy-load and cache it. Clients that cannot ride
+// that cookie (see useResignedInlineMedia) fetch the bytes through the
+// authenticated client instead; a thumbnail is small enough to hold as a blob.
+// `failed` tells the caller to fall back to the original. A disabled call
+// loads nothing and returns an empty url.
+export function useAttachmentThumbnailURL(
+  attachmentId: string,
+  thumbnailPath: string,
+  enabled = true,
+): { url: string; pending: boolean; failed: boolean } {
+  const native =
+    (api.getBaseUrl?.() ?? "") === "" &&
+    thumbnailPath.startsWith("/") &&
+    !thumbnailPath.startsWith("//");
+  const fetchBytes = enabled && !native;
+  const { data: blob, isError } = useQuery({
+    queryKey: ["attachment-thumbnail-blob", attachmentId],
+    queryFn: ({ signal }) => api.getAttachmentThumbnailBlob(attachmentId, signal),
+    enabled: fetchBytes,
+    staleTime: Infinity,
+    gcTime: INLINE_BLOB_GC_MS,
+    retry: false,
+  });
+  const blobUrl = useObjectURL(fetchBytes ? `thumbnail:${attachmentId}` : undefined, blob, !!blob);
+  if (!enabled) return { url: "", pending: false, failed: false };
+  if (native) return { url: thumbnailPath, pending: false, failed: false };
+  if (isError) return { url: "", pending: false, failed: true };
+  return { url: blobUrl, pending: !blobUrl, failed: false };
+}
+
 // useFreshStreamedMediaURL resolves the URL the viewer streams a video, audio
 // file or PDF from. Unlike an inline image, these are never loaded before the
 // viewer opens, so whatever URL the attachment record carries is used for the
@@ -226,6 +267,7 @@ export function useFreshStreamedMediaURL(
   rawPickedUrl: string,
   enabled: boolean,
   pdf = false,
+  workspaceId?: string | null,
 ): { url: string; pending: boolean; failed: boolean; refreshIfExpired: () => Promise<boolean> } {
   const pickedUrl = resolveLegacyLocalMediaURL(rawPickedUrl);
   const id = attachmentId ?? attachmentIdFromDownloadURL(pickedUrl);
@@ -233,7 +275,10 @@ export function useFreshStreamedMediaURL(
   const stablePDFURL = id ? absolutizeAPIPath(attachmentDownloadPath(id)) : "";
   const { data: fresh, error, isError, refetch } = useQuery({
     queryKey: ["attachment-stream-resign", id],
-    queryFn: () => api.getAttachment(id as string),
+    queryFn: () =>
+      workspaceId
+        ? api.getAttachment(id as string, { workspaceId })
+        : api.getAttachment(id as string),
     enabled: active,
     staleTime: Infinity,
     gcTime: 0,

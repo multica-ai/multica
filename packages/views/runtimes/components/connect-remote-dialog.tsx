@@ -9,7 +9,8 @@ import {
 } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "@multica/core/appearance";
-import { Check, ChevronRight, Copy, Terminal } from "@multica/ui/icons";
+import { Check, ChevronRight, Terminal } from "@multica/ui/icons";
+import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -220,11 +221,7 @@ function CopyButton({ text, ariaLabel }: { text: string; ariaLabel: string }) {
         aria-label={ariaLabel}
         className="shrink-0 rounded-xs p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        {copied ? (
-          <Check className="h-3.5 w-3.5 text-success" aria-hidden />
-        ) : (
-          <Copy className="h-3.5 w-3.5" aria-hidden />
-        )}
+        <CopyCheckIcon copied={copied} />
       </button>
     </TooltipHint>
   );

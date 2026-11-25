@@ -59,9 +59,12 @@ import { sortTimelineEntriesAsc } from "./timeline-sort";
 import { applyCommentDeletion, removeCommentSubtree } from "./comment-deletion";
 import { configStore } from "../config";
 import {
+  addReactionToList,
   onIssueAuxiliaryRevision,
   invalidateIssueOwnerProjections,
+  patchIssueReactions,
   reconcileIssueFullSnapshotRevision,
+  removeReactionFromList,
 } from "./ws-updaters";
 
 // Shared mutation variable types — used by both mutation hooks and
@@ -214,6 +217,8 @@ export function useUpdateIssue() {
         duplicate_of_issue_id: _duplicateOfIssueId,
         description: _description,
         description_base: _descriptionBase,
+        blocked_by: _blockedBy,
+        remove_blocked_by: _removeBlockedBy,
         title_base: _titleBase,
         expected_revision: _expectedRevision,
         ...patch
@@ -327,6 +332,8 @@ export function useUpdateIssue() {
         enter_workflow_step: _enterWorkflowStep,
         duplicate_of_issue_id: _duplicateOfIssueId,
         description_base: _descriptionBase,
+        blocked_by: _blockedBy,
+        remove_blocked_by: _removeBlockedBy,
         move_intent: _moveIntent,
         id: _id,
         ...intent
@@ -580,6 +587,8 @@ export function useBatchUpdateIssues() {
         enter_workflow_step: _enterWorkflowStep,
         description: _description,
         description_base: _descriptionBase,
+        blocked_by: _blockedBy,
+        remove_blocked_by: _removeBlockedBy,
         ...patch
       } = updates;
       await qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
@@ -1167,11 +1176,15 @@ export function useToggleIssueReaction(issueId: string) {
       }
       return api.addIssueReaction(issueId, emoji);
     },
-    onSuccess: (reaction) => {
-      onIssueAuxiliaryRevision(qc, wsId, issueId, reaction?.issue_revision);
+    onSuccess: (reaction, { existing }) => {
+      if (reaction) {
+        patchIssueReactions(qc, wsId, issueId, addReactionToList(reaction), reaction.issue_revision);
+      } else if (existing) {
+        patchIssueReactions(qc, wsId, issueId, removeReactionFromList(existing));
+      }
     },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.reactions(issueId) });
+    onError: () => {
+      qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId), exact: true });
     },
   });
 }

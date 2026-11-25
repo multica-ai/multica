@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -158,8 +159,8 @@ func TestClaim_LeaderTaskFromCommentMention_InjectsBriefing(t *testing.T) {
 func TestClaim_LeaderTaskWithMovedStepLeavesStatusUnchanged(t *testing.T) {
 	seedTestCatalog(t)
 	for _, bound := range []string{"waiting_for_merge", "in_progress", ""} {
-		for _, legacy := range []bool{false, true} {
-			t.Run(fmt.Sprintf("bound=%s/legacy=%v", bound, legacy), func(t *testing.T) {
+		for _, daemon := range []string{"legacy", "commands", "map"} {
+			t.Run(fmt.Sprintf("bound=%s/%s", bound, daemon), func(t *testing.T) {
 				fx := newSquadBriefingClaimFixture(t, t.Context(), "Workflow leader")
 				projectID := deliveryProject(t, "Leader workflow project", fx.AgentID)
 				dbfx.Exec(t, `UPDATE issue SET project_id=$2,status='in_progress',assignee_type='squad',assignee_id=$3 WHERE id=$1`, fx.IssueID, projectID, fx.SquadID)
@@ -172,8 +173,11 @@ func TestClaim_LeaderTaskWithMovedStepLeavesStatusUnchanged(t *testing.T) {
 				}
 				taskID := dbfx.Task(t, fx.AgentID, cols)
 				req := withURLParam(newOwnerDaemonRequest(http.MethodPost, "/api/daemon/runtimes/"+fx.RuntimeID+"/tasks/claim", nil), "runtimeId", fx.RuntimeID)
-				if !legacy {
+				switch daemon {
+				case "commands":
 					req.Header.Set("X-Client-Capabilities", protocol.DaemonCapabilityWorkflowStatusRulesV1)
+				case "map":
+					req.Header.Set("X-Client-Capabilities", protocol.DaemonCapabilityWorkflowStatusRulesV1+","+protocol.DaemonCapabilityWorkflowStatusMapV1)
 				}
 				var resp struct {
 					Task *AgentTaskResponse `json:"task"`
@@ -183,11 +187,19 @@ func TestClaim_LeaderTaskWithMovedStepLeavesStatusUnchanged(t *testing.T) {
 					t.Fatalf("missing workflow leader claim: %+v", resp.Task)
 				}
 				instructions := resp.Task.Agent.Instructions
+				if resp.Task.ProjectWorkflow.StatusMap != (daemon == "map") {
+					t.Fatalf("status_map = %v for a %s daemon", resp.Task.ProjectWorkflow.StatusMap, daemon)
+				}
+				wrapUp := "run that block's Step done command"
+				if daemon == "map" {
+					wrapUp = "move it to the status the map gives for that step's finished work"
+				}
+				compact := strings.Join(strings.Fields(instructions), " ")
 				if !strings.Contains(instructions, "## Squad Roster") {
 					t.Fatal("workflow restriction removed the leader's coordination briefing")
 				}
 				if bound == "waiting_for_merge" {
-					if !strings.Contains(instructions, "Leave the parent issue's status unchanged") || strings.Contains(instructions, "run that block's Step done command") {
+					if !strings.Contains(instructions, "Leave the parent issue's status unchanged") || strings.Contains(compact, wrapUp) {
 						t.Fatalf("stale leader's instructions contradict its workflow brief:\n%s", instructions)
 					}
 					for _, move := range builtInParentMoves {
@@ -195,7 +207,7 @@ func TestClaim_LeaderTaskWithMovedStepLeavesStatusUnchanged(t *testing.T) {
 							t.Errorf("stale leader received built-in move %q", move)
 						}
 					}
-				} else if !strings.Contains(instructions, "run that block's Step done command") {
+				} else if !strings.Contains(compact, wrapUp) {
 					t.Fatalf("current or unbound leader lost its wrap-up instruction:\n%s", instructions)
 				}
 			})
@@ -220,6 +232,27 @@ func TestClaim_NonLeaderTask_NoBriefing(t *testing.T) {
 	}
 	if isLeader {
 		t.Fatalf("non-leader task must not report is_leader_task=true: %s", raw)
+	}
+}
+
+// TestClaim_DocsEnabledFollowsFlag pins docs_enabled on the claim: the daemon
+// writes `multica doc` into the agent brief only when the server says so.
+func TestClaim_DocsEnabledFollowsFlag(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("docs_v1=%v", enabled), func(t *testing.T) {
+			withFeatureFlag(t, testHandler, featureflags.DocsV1, enabled)
+			ctx := context.Background()
+			fx := newSquadBriefingClaimFixture(t, ctx, fmt.Sprintf("Docs flag %v", enabled))
+			enqueueClaimTask(t, ctx, fx, false /*isLeader*/, true /*withSquadID*/)
+
+			_, _, _, raw := claimAgentInstructionsForTest(t, fx.RuntimeID)
+			if got := strings.Contains(raw, `"docs_enabled":true`); got != enabled {
+				t.Fatalf("docs_enabled in claim = %v, want %v: %s", got, enabled, raw)
+			}
+		})
 	}
 }
 

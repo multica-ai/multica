@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
+import { prefersReducedMotion } from "@multica/core/appearance";
 import type { AgentTask } from "@multica/core/types";
 import { UI_EASE_OUT_CSS, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 
 const EMPTY_IDS: ReadonlySet<string> = new Set();
 
-function reveal(element: HTMLElement | null, duration: number, translate = 0) {
+export function revealElement(element: HTMLElement | null, duration: number, translate = 0) {
   if (!element?.animate) return;
-  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-  if (reduced) return;
+  if (prefersReducedMotion()) return;
   return element.animate(
     translate
       ? [{ opacity: 0, transform: `translateY(${translate}px)` }, { opacity: 1, transform: "translateY(0)" }]
@@ -63,13 +63,13 @@ export function useRunCommentMotion(entering: boolean, replyId: string | undefin
     previous.current = { entering, replyId, status };
     const animations: (Animation | undefined)[] = [];
     if (entering && !before.entering) {
-      animations.push(reveal(ref.current, UI_MOTION_DURATION.fast * 1000, 4));
+      animations.push(revealElement(ref.current, UI_MOTION_DURATION.fast * 1000, 4));
     } else if (replyId && replyId !== before.replyId) {
       const body = Array.from(ref.current?.querySelectorAll<HTMLElement>("[data-comment-content]") ?? [])
         .find((element) => element.dataset.commentContent === replyId);
-      animations.push(reveal(body ?? null, UI_MOTION_DURATION.fast * 1000));
+      animations.push(revealElement(body ?? null, UI_MOTION_DURATION.fast * 1000));
     } else if (status !== before.status) {
-      animations.push(reveal(ref.current?.querySelector("[data-run-status]") ?? null, UI_MOTION_DURATION.micro * 1000));
+      animations.push(revealElement(ref.current?.querySelector("[data-run-status]") ?? null, UI_MOTION_DURATION.micro * 1000));
     }
     return () => { for (const animation of animations) animation?.cancel(); };
   }, [entering, replyId, status]);
@@ -79,6 +79,7 @@ export function useRunCommentMotion(entering: boolean, replyId: string | undefin
 /** Animate the toggle itself, including when historical runs mount a new trigger. */
 export function useRunDisclosureMotion(open: boolean) {
   const chevronRef = useRef<SVGSVGElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const pending = useRef(false);
   const focusedTrigger = useRef<HTMLElement | null>(null);
   const fromRotation = useRef("0deg");
@@ -91,17 +92,21 @@ export function useRunDisclosureMotion(open: boolean) {
       chevronRef.current?.closest<HTMLElement>("button, summary")?.focus({ preventScroll: true });
     }
     if (!requested) return;
-    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    if (reduced) return;
+    if (prefersReducedMotion()) return;
     const duration = (open ? UI_MOTION_DURATION.fast : UI_MOTION_DURATION.micro) * 1000;
     const arrow = chevronRef.current?.animate?.(
       [{ rotate: fromRotation.current }, { rotate: open ? "90deg" : "0deg" }],
       { duration, easing: UI_EASE_OUT_CSS },
     );
-    return () => { arrow?.cancel(); };
+    const content = open ? revealElement(contentRef.current, UI_MOTION_DURATION.fast * 1000, -3) : undefined;
+    return () => {
+      arrow?.cancel();
+      content?.cancel();
+    };
   }, [open]);
   return {
     chevronRef,
+    contentRef,
     onTrigger(event: MouseEvent<HTMLElement>) {
       pending.current = event.detail > 0;
       focusedTrigger.current = event.detail === 0 && document.activeElement === event.currentTarget ? event.currentTarget : null;
