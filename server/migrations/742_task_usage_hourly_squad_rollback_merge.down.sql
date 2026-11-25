@@ -15,8 +15,12 @@
 -- when a standalone (squad_id = NULL) row already shares the 7-column key.
 --
 -- Unprocessed task_usage_hourly_dirty rows carrying a non-NULL squad_id are
--- discarded here so 741 down can rebuild uq_task_usage_hourly_dirty_key; those
--- buckets will recompute on the next triggering touch or watermark backfill.
+-- folded into their legacy 7-column key (squad_id = NULL, latest enqueued_at)
+-- so 741 down can rebuild uq_task_usage_hourly_dirty_key while the legacy
+-- rollup still recomputes those buckets. They must not be dropped: most dirty
+-- rows come from issue project moves and issue / task / task_usage deletes,
+-- which never bump task_usage.updated_at, so the watermark scan would never
+-- revisit those buckets and they would keep stale totals forever.
 CREATE TEMP TABLE _tmp_merged_task_usage_hourly ON COMMIT DROP AS
 SELECT
     bucket_hour, workspace_id, runtime_id, agent_id, project_id, provider, model,
@@ -60,5 +64,20 @@ SELECT
     uncosted_cache_read_tokens, uncosted_cache_write_tokens,
     task_count, event_count, updated_at
   FROM _tmp_merged_task_usage_hourly;
+
+-- uq_task_usage_hourly_dirty_squad_key_idx (737, NULLS NOT DISTINCT) is still
+-- present here and backs the ON CONFLICT against existing squad_id = NULL rows.
+INSERT INTO task_usage_hourly_dirty (
+    bucket_hour, workspace_id, runtime_id, agent_id, project_id, squad_id, provider, model,
+    enqueued_at
+)
+SELECT
+    bucket_hour, workspace_id, runtime_id, agent_id, project_id, NULL, provider, model,
+    MAX(enqueued_at)
+  FROM task_usage_hourly_dirty
+ WHERE squad_id IS NOT NULL
+ GROUP BY bucket_hour, workspace_id, runtime_id, agent_id, project_id, provider, model
+ON CONFLICT (bucket_hour, workspace_id, runtime_id, agent_id, project_id, squad_id, provider, model) DO UPDATE
+    SET enqueued_at = GREATEST(task_usage_hourly_dirty.enqueued_at, EXCLUDED.enqueued_at);
 
 DELETE FROM task_usage_hourly_dirty WHERE squad_id IS NOT NULL;
