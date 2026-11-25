@@ -36,6 +36,10 @@ export {
   useResolvedExpandStore,
   selectExpandedResolved,
 } from "./resolved-expand-store";
+export {
+  useLongCommentExpandStore,
+  selectExpandedLongComments,
+} from "./long-comment-expand-store";
 export { useCommentComposerStore, type CommentImageLayout, type RunningAgentReply } from "./comment-composer-store";
 export { useCommentDraftStore, type CommentDraftKey, type PendingAnnotationDraft } from "./comment-draft-store";
 export {
