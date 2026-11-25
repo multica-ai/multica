@@ -345,6 +345,7 @@ import {
   AttachmentListSchema,
   AttachmentResponseSchema,
   CancelTaskResponseSchema,
+  CancelQueuedAgentTasksResponseSchema,
   ChatDraftRestoresResponseSchema,
   ChatWakeupListSchema,
   ChatMessageListSchema,
@@ -2476,6 +2477,19 @@ export class ApiClient {
   // surfaces can clear their live cards.
   async cancelAgentTasks(id: string): Promise<{ cancelled: number }> {
     return this.fetch(`/api/agents/${id}/cancel-tasks`, { method: "POST" });
+  }
+
+  async cancelQueuedAgentTasks(id: string, taskIds: string[]) {
+    const raw = await this.fetch<unknown>(`/api/agents/${id}/cancel-queued-tasks`, {
+      method: "POST",
+      body: JSON.stringify({ task_ids: taskIds }),
+    });
+    return parseWithFallback<{ cancelled: number; skipped: number } | null>(
+      raw,
+      CancelQueuedAgentTasksResponseSchema,
+      null,
+      { endpoint: "cancelQueuedAgentTasks" },
+    );
   }
 
   async listQoderEnvironments(wsId: string, token: string, baseUrl: string, signal?: AbortSignal) {

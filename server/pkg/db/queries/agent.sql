@@ -746,6 +746,18 @@ SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL,
 WHERE agent_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
 
+-- name: CancelQueuedAgentTasks :many
+UPDATE agent_task_queue
+SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL,
+    cancelled_by_type = sqlc.arg('cancelled_by_type'),
+    cancelled_by_id = sqlc.narg('cancelled_by_id'),
+    cancelled_by_name = sqlc.narg('cancelled_by_name')
+WHERE agent_id = sqlc.arg('agent_id')
+  AND id = ANY(sqlc.arg('task_ids')::uuid[])
+  AND status = 'queued'
+  AND chat_session_id IS NULL
+RETURNING *;
+
 -- name: CancelAgentTasksByTriggerComment :many
 -- Cancels active tasks whose planned batch contains the edited/deleted comment.
 -- The body may already have been embedded as either the primary trigger or a

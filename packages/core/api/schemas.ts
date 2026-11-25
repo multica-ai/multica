@@ -2590,6 +2590,11 @@ export const AgentActivityBucketListSchema = z.array(z.object({
 
 export const AgentTaskListSchema = z.array(AgentTaskSchema);
 
+export const CancelQueuedAgentTasksResponseSchema = z.object({
+  cancelled: z.number().int().nonnegative(),
+  skipped: z.number().int().nonnegative(),
+});
+
 export const AgentTaskPageSchema = z.object({
   tasks: AgentTaskListSchema,
   nextCursor: z.string().min(1).nullable(),

@@ -3069,6 +3069,51 @@ func (h *Handler) CancelAgentTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, cancelAgentTasksResponse{Cancelled: len(cancelled)})
 }
 
+type cancelQueuedAgentTasksResponse struct {
+	Cancelled int `json:"cancelled"`
+	Skipped   int `json:"skipped"`
+}
+
+func (h *Handler) CancelQueuedAgentTasks(w http.ResponseWriter, r *http.Request) {
+	agent, ok := h.loadAgentForUser(w, r, chi.URLParam(r, "id"))
+	if !ok || !h.canManageAgent(w, r, agent) {
+		return
+	}
+
+	var req struct {
+		TaskIDs []string `json:"task_ids"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&req); err != nil || len(req.TaskIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "task_ids must be a non-empty array of UUIDs")
+		return
+	}
+	taskIDs := make([]pgtype.UUID, 0, len(req.TaskIDs))
+	seen := make(map[pgtype.UUID]struct{}, len(req.TaskIDs))
+	for _, raw := range req.TaskIDs {
+		taskID, ok := parseUUIDOrBadRequest(w, raw, "task_ids")
+		if !ok {
+			return
+		}
+		if _, exists := seen[taskID]; !exists {
+			seen[taskID] = struct{}{}
+			taskIDs = append(taskIDs, taskID)
+		}
+	}
+
+	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(agent.WorkspaceID))
+	actor := h.taskCancellationActor(r.Context(), actorType, actorID)
+	cancelled, err := h.TaskService.CancelQueuedAgentTasks(r.Context(), agent.ID, taskIDs, actor)
+	if err != nil {
+		slog.Warn("cancel queued agent tasks failed", append(logger.RequestAttrs(r), "error", err, "agent_id", agent.ID)...)
+		writeError(w, http.StatusInternalServerError, "failed to cancel queued runs")
+		return
+	}
+	writeJSON(w, http.StatusOK, cancelQueuedAgentTasksResponse{
+		Cancelled: cancelled,
+		Skipped:   len(taskIDs) - cancelled,
+	})
+}
+
 // HeaderAgentTasksNextCursor preserves the array response used by installed clients.
 // An absent header means this is the last page.
 const HeaderAgentTasksNextCursor = "X-Agent-Tasks-Next-Cursor"

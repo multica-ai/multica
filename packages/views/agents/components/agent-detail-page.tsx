@@ -19,10 +19,13 @@ import {
   Trash2,
 } from "@multica/ui/icons";
 import { toast } from "sonner";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Agent, UpdateAgentRequest } from "@multica/core/types";
 import {
   type AgentPresenceDetail,
+  agentTasksKeys,
+  agentTaskSnapshotKeys,
+  agentTaskSnapshotOptions,
   isAgentRuntimeBound,
   useWorkspacePresenceMap,
 } from "@multica/core/agents";
@@ -72,6 +75,7 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { Spinner } from "@multica/ui/components/ui/spinner";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { cn } from "@multica/ui/lib/utils";
 import { AppLink, useNavigation } from "../../navigation";
@@ -180,6 +184,20 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
 
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [confirmCancelRuns, setConfirmCancelRuns] = useState(false);
+  const [cancelQueuedDialogOpen, setCancelQueuedDialogOpen] = useState(false);
+  const [queuedCancelSelection, setQueuedCancelSelection] = useState<{
+    agentId: string;
+    taskIds: string[];
+  } | null>(null);
+  const { data: taskSnapshot } = useQuery(agentTaskSnapshotOptions(wsId));
+  const cancelQueuedRuns = useMutation({
+    mutationFn: ({ agentId, taskIds }: { agentId: string; taskIds: string[] }) =>
+      api.cancelQueuedAgentTasks(agentId, taskIds),
+    onSettled: (_data, _error, { agentId }) => {
+      void qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
+      void qc.invalidateQueries({ queryKey: agentTasksKeys.detail(wsId, agentId) });
+    },
+  });
 
   const requestedView = viewFromParams(navigation.searchParams);
   const urlView = requestedView === "integrations" ? "channels" : requestedView;
@@ -338,6 +356,28 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     }
   };
 
+  const handleCancelQueuedRuns = async () => {
+    if (!queuedCancelSelection) return;
+    try {
+      const result = await cancelQueuedRuns.mutateAsync(queuedCancelSelection);
+      if (!result) {
+        toast.error(t(($) => $.row_actions.cancel_failed_toast));
+        return;
+      }
+      setCancelQueuedDialogOpen(false);
+      const message = t(($) => $.row_actions.cancelled_tasks_toast, { count: result.cancelled });
+      if (result.skipped > 0) {
+        toast.warning(message, {
+          description: t(($) => $.row_actions.cancel_queued_skipped_toast, { count: result.skipped }),
+        });
+      } else {
+        toast.success(message);
+      }
+    } catch {
+      toast.error(t(($) => $.row_actions.cancel_failed_toast));
+    }
+  };
+
   const listSegment = { href: paths.agents(), label: t(($) => $.page.title) };
 
   // --- Loading ---
@@ -450,6 +490,14 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const runningCount = presence?.runningCount ?? 0;
   const queuedCount = presence?.queuedCount ?? 0;
   const hasActiveWork = runningCount + queuedCount > 0;
+  const queuedTaskIds = (taskSnapshot ?? [])
+    .filter((task) =>
+      task.agent_id === agent.id &&
+      task.status === "queued" &&
+      !task.chat_session_id &&
+      task.kind !== "chat",
+    )
+    .map((task) => task.id);
   // Multica's built-in agents cannot be archived — the server refuses it.
   const canArchive = canEdit.allowed && !isArchived && !agent.system_key;
 
@@ -564,6 +612,17 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
             >
               <Copy />
               {t(($) => $.row_actions.duplicate)}
+            </DropdownMenuItem>
+          )}
+          {canEdit.allowed && !isArchived && queuedTaskIds.length > 0 && (
+            <DropdownMenuItem
+              onClick={() => {
+                setQueuedCancelSelection({ agentId: agent.id, taskIds: queuedTaskIds });
+                setCancelQueuedDialogOpen(true);
+              }}
+            >
+              <Square />
+              {t(($) => $.row_actions.cancel_all_queued_tasks)}
             </DropdownMenuItem>
           )}
           {canEdit.allowed && !isArchived && hasActiveWork && (
@@ -746,6 +805,40 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
       />
 
       <AgentWorkDialog agent={agent} open={workOpen} onOpenChange={openWork} />
+
+      <AlertDialog
+        open={cancelQueuedDialogOpen && queuedCancelSelection?.agentId === agent.id}
+        onOpenChange={(open) => {
+          if (!cancelQueuedRuns.isPending) setCancelQueuedDialogOpen(open);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t(($) => $.row_actions.cancel_queued_dialog_title, {
+                count: queuedCancelSelection?.taskIds.length ?? 0,
+              })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t(($) => $.row_actions.cancel_queued_dialog_description)}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={cancelQueuedRuns.isPending}>
+              {t(($) => $.row_actions.cancel_dialog_keep)}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={cancelQueuedRuns.isPending}
+              aria-busy={cancelQueuedRuns.isPending}
+              onClick={() => void handleCancelQueuedRuns()}
+            >
+              {cancelQueuedRuns.isPending && <Spinner aria-hidden="true" />}
+              {t(($) => $.row_actions.cancel_all_queued_tasks)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {confirmCancelRuns && (
         <AlertDialog

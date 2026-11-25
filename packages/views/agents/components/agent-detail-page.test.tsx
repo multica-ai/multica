@@ -146,17 +146,26 @@ const currentUserRef = vi.hoisted(() => ({
 }));
 const mockToastError = vi.hoisted(() => vi.fn());
 const mockToastSuccess = vi.hoisted(() => vi.fn());
+const mockToastWarning = vi.hoisted(() => vi.fn());
 const mockModalOpen = vi.hoisted(() => vi.fn());
 const mockGetAgent = vi.hoisted(() => vi.fn());
 const mockUpdateAgent = vi.hoisted(() => vi.fn());
 const mockArchiveAgent = vi.hoisted(() => vi.fn());
 const mockCancelAgentTasks = vi.hoisted(() => vi.fn());
+const mockCancelQueuedAgentTasks = vi.hoisted(() => vi.fn());
+const mockGetAgentTaskSnapshot = vi.hoisted(() => vi.fn());
 const mockCopyText = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
 vi.mock("@multica/core/agents", () => ({
+  agentTaskSnapshotKeys: { list: (wsId: string) => ["task-snapshot", wsId] },
+  agentTaskSnapshotOptions: (wsId: string) => ({
+    queryKey: ["task-snapshot", wsId],
+    queryFn: mockGetAgentTaskSnapshot,
+  }),
+  agentTasksKeys: { detail: (wsId: string, agentId: string) => ["agent-tasks", wsId, agentId] },
   isAgentRuntimeBound: (agent: { runtime_id: string; runtime_bound?: boolean }) =>
     agent.runtime_bound !== false && agent.runtime_id.length > 0,
   useWorkspacePresenceMap: () => ({ byAgent: presenceRef.current }),
@@ -252,6 +261,7 @@ vi.mock("@multica/core/api", () => {
       archiveAgent: mockArchiveAgent,
       restoreAgent: vi.fn(),
       cancelAgentTasks: mockCancelAgentTasks,
+      cancelQueuedAgentTasks: mockCancelQueuedAgentTasks,
     },
     ApiError,
   };
@@ -260,7 +270,7 @@ vi.mock("@multica/ui/lib/clipboard", () => ({
   copyText: mockCopyText,
 }));
 vi.mock("sonner", () => ({
-  toast: { success: mockToastSuccess, error: mockToastError },
+  toast: { success: mockToastSuccess, error: mockToastError, warning: mockToastWarning },
 }));
 
 import { AgentDetailPage } from "./agent-detail-page";
@@ -334,6 +344,8 @@ beforeEach(() => {
   mockUpdateAgent.mockResolvedValue({ ...baseAgent, model: "new-model" });
   mockArchiveAgent.mockResolvedValue(undefined);
   mockCancelAgentTasks.mockResolvedValue({ cancelled: 2 });
+  mockGetAgentTaskSnapshot.mockResolvedValue([]);
+  mockCancelQueuedAgentTasks.mockResolvedValue({ cancelled: 1, skipped: 1 });
   mockCopyText.mockResolvedValue(true);
   configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: false });
 });
@@ -895,5 +907,31 @@ describe("AgentDetailPage more actions", () => {
     expect(
       within(openMoreActions()).queryByRole("menuitem", { name: /Cancel all/ }),
     ).not.toBeInTheDocument();
+  });
+
+  it("confirms the queued runs for this agent and reports skipped runs", async () => {
+    agentsRef.current = [{ ...baseAgent, owner_id: "user-1" }];
+    mockGetAgentTaskSnapshot.mockResolvedValue([
+      { id: "queued-1", agent_id: "agent-1", status: "queued" },
+      { id: "queued-2", agent_id: "agent-1", status: "queued" },
+      { id: "running", agent_id: "agent-1", status: "running" },
+      { id: "chat", agent_id: "agent-1", status: "queued", chat_session_id: "chat-1" },
+      { id: "other-agent", agent_id: "agent-2", status: "queued" },
+    ]);
+    renderPage();
+
+    await screen.findByRole("button", { name: "Assign work" });
+    const menu = openMoreActions();
+    fireEvent.click(await within(menu).findByRole("menuitem", { name: "Cancel all queued runs" }));
+    expect(mockCancelQueuedAgentTasks).not.toHaveBeenCalled();
+    const dialog = await screen.findByRole("alertdialog", { name: "Cancel 2 queued runs?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel all queued runs" }));
+
+    await waitFor(() => {
+      expect(mockCancelQueuedAgentTasks).toHaveBeenCalledWith("agent-1", ["queued-1", "queued-2"]);
+      expect(mockToastWarning).toHaveBeenCalledWith("Cancelled 1 run", {
+        description: "1 run could no longer be cancelled.",
+      });
+    });
   });
 });
