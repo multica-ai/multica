@@ -157,12 +157,14 @@ interface ContentEditorBaseProps {
    * `pasted-text.txt` attachment instead of being inserted as body text.
    * Requires `onUploadFile`; without an uploader the paste stays text.
    *
-   * Opt-in ON PURPOSE, and today only chat passes it: a wall of pasted text
-   * there is context handed to an agent for one turn, and reads better as an
-   * attachment than as a body nobody scrolls. Every other editor keeps the
-   * paste inline — in issue and project descriptions a long paste IS the
-   * content, and in issue comments it is prose a human reader is expected to
-   * see in the thread.
+   * Opt-in ON PURPOSE, and the value is per surface (`paste-as-file.ts`).
+   * Chat converts early: a wall of pasted text there is context handed to an
+   * agent for one turn, and reads better as an attachment than as a body
+   * nobody scrolls. Issue comments convert only far later: a comment is prose
+   * a human reader is expected to see in the thread, so it stays inline until
+   * the paste is machine-sized (a log or JSON dump) and would otherwise be
+   * laid out in full for everyone who opens the issue. Issue and project
+   * descriptions never pass it — there a long paste IS the content.
    */
   pasteAsFileThreshold?: number;
   /**
