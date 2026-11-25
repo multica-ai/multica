@@ -36,14 +36,22 @@ const patterns: { re: RegExp; replacement: string }[] = [
   { re: /\bBearer\s+[A-Za-z0-9\-._~+/]+=*/gi, replacement: "Bearer [REDACTED]" },
   // Connection strings with embedded passwords
   { re: /(?:postgres|mysql|mongodb|redis|amqp)(?:ql)?:\/\/[^:\s]+:[^@\s]+@/gi, replacement: "[REDACTED CONNECTION STRING]@" },
-  // Generic key=value secret env vars
-  { re: /(?:API_KEY|API_SECRET|SECRET_KEY|SECRET|ACCESS_TOKEN|AUTH_TOKEN|PRIVATE_KEY|DATABASE_URL|DB_PASSWORD|DB_URL|REDIS_URL|PASSWORD|TOKEN)\s*[=:]\s*\S+/gi, replacement: "[REDACTED CREDENTIAL]" },
 ];
+
+// Apply after specific rules and recognize complete markers from the server.
+// Keep this in sync with server/pkg/redact/redact.go.
+const credentialAssignment = new RegExp(
+  String.raw`(\b[A-Z0-9_]*(?:API_KEY|API_SECRET|SECRET_KEY|SECRET|ACCESS_TOKEN|AUTH_TOKEN|PRIVATE_KEY|DATABASE_URL|DB_PASSWORD|DB_URL|REDIS_URL|PASSWORD|TOKEN)\s*[=:]\s*)` +
+    String.raw`(?:(["']?)(\[REDACTED(?: (?:API KEY|AWS KEY|AWS SECRET|CONNECTION STRING|CREDENTIAL|GITHUB TOKEN|GITLAB TOKEN|GOOGLE API KEY|JWT|PRIVATE KEY|SLACK TOKEN|STRIPE KEY)|_MULTICA_TOKEN)?\])(\S*)|\S+)`,
+  "gi",
+);
 
 export function redactSecrets(text: string): string {
   let result = text;
   for (const { re, replacement } of patterns) {
     result = result.replace(re, replacement);
   }
-  return result;
+  return result.replace(credentialAssignment, (match, assignment, quote, marker, suffix) =>
+    !quote && marker && !suffix ? match : assignment + "[REDACTED CREDENTIAL]",
+  );
 }

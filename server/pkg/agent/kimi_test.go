@@ -1681,7 +1681,8 @@ func TestScanKimiMainTurnFailureErrorMessageFormats(t *testing.T) {
 		{name: "array", raw: `["private-details"]`},
 		{name: "number", raw: `42`},
 		{name: "boolean", raw: `true`},
-		{name: "redacted object", raw: `{"code":"provider.failure","message":"api_key=fixture-secret","details":"private-details"}`, want: "[provider.failure] [REDACTED CREDENTIAL]"},
+		// Keep the variable name and the diagnostic sanitizer's marker.
+		{name: "redacted object", raw: `{"code":"provider.failure","message":"api_key=fixture-secret","details":"private-details"}`, want: "[provider.failure] api_key=[REDACTED]"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

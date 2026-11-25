@@ -282,7 +282,7 @@ func TestRedactMulticaTokenContext(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"environment assignment", "MULTICA_TOKEN=" + token, "MULTICA_[REDACTED CREDENTIAL]"},
+		{"environment assignment", "MULTICA_TOKEN=" + token, "MULTICA_TOKEN=[REDACTED_MULTICA_TOKEN]"},
 		{
 			name:  "escaped JSON",
 			input: `{"value":"line1\n` + token + `\t` + token + `"}`,
@@ -314,6 +314,43 @@ func TestRedactConnectionString(t *testing.T) {
 	got := Text(input)
 	if strings.Contains(got, "s3cret") {
 		t.Fatalf("connection string password not redacted: %s", got)
+	}
+}
+
+// TestRedactPrefixedCredentialKeepsTheName is the regression for #10269: the
+// generic rule matches the keyword anywhere in the name, so replacing the whole
+// match dropped the tail of a prefixed name ("GITEA_TOKEN=..." rendered as
+// "GITEA_[REDACTED CREDENTIAL]") and the reader could no longer tell which
+// variable the agent was handing over. The value is still masked.
+func TestRedactPrefixedCredentialKeepsTheName(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"reported example", "EXAMPLE_TOKEN=abc123def456", "EXAMPLE_TOKEN=[REDACTED CREDENTIAL]"},
+		{"GitHub token", "GITHUB_TOKEN=" + asm("ghp_", strings.Repeat("a", 36)), "GITHUB_TOKEN=[REDACTED GITHUB TOKEN]"},
+		{"quoted GitHub token", `GITHUB_TOKEN="` + asm("ghp_", strings.Repeat("a", 36)) + `"`, "GITHUB_TOKEN=[REDACTED CREDENTIAL]"},
+		{"incomplete marker", "EXAMPLE_TOKEN=[REDACTEDfixture", "EXAMPLE_TOKEN=[REDACTED CREDENTIAL]"},
+		{"marker with adjacent value", "EXAMPLE_TOKEN=[REDACTED CREDENTIAL]fixture", "EXAMPLE_TOKEN=[REDACTED CREDENTIAL]"},
+		{"prefixed token", "GITEA_TOKEN=" + asm("0123456789", "abcdef0123456789abcdef0123456789abcd"), "GITEA_TOKEN=[REDACTED CREDENTIAL]"},
+		{"prefixed api key", "JELLYFIN_API_KEY=" + asm("a1b2c3d4", "e5f60718293a4b5c6d7e8f90"), "JELLYFIN_API_KEY=[REDACTED CREDENTIAL]"},
+		{"colon separator", "export DB_PASSWORD: " + asm("hunter2", "-extra"), "export DB_PASSWORD: [REDACTED CREDENTIAL]"},
+		{"lowercase name", "gitea_token=" + asm("abc123", "def456"), "gitea_token=[REDACTED CREDENTIAL]"},
+		{"bare keyword", "TOKEN=" + asm("abc123", "xyz"), "TOKEN=[REDACTED CREDENTIAL]"},
+		{"two on one line", "A_TOKEN=" + asm("one1", "one2") + " B_SECRET=" + asm("two1", "two2"), "A_TOKEN=[REDACTED CREDENTIAL] B_SECRET=[REDACTED CREDENTIAL]"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Text(tc.input)
+			if got != tc.want {
+				t.Fatalf("redaction rewrote the name:\n  got:  %s\n  want: %s", got, tc.want)
+			}
+			if again := Text(got); again != got {
+				t.Fatalf("second redaction changed the result:\n  got:  %s\n  want: %s", again, got)
+			}
+		})
 	}
 }
 
