@@ -98,6 +98,11 @@ const (
 	// daemon puts on the agent's PATH has `issue comment add --steer`. The
 	// server tells a squad leader about steering only then.
 	DaemonCapabilityCLICommentSteerV1 = "cli-comment-steer-v1"
+	// DaemonCapabilityDocCommentV1 advertises that the daemon runs doc
+	// discussion tasks (MUL-9933): it renders their prompt and brief, and its
+	// CLI has `doc comment add`. An older daemon would treat such a task as an
+	// issue run with no issue, so the claim fails it before launch instead.
+	DaemonCapabilityDocCommentV1 = "doc-comment-v1"
 
 	TaskSupplementFailureTurnNotStarted   = "turn_not_started"
 	TaskSupplementFailureProviderRejected = "provider_rejected"
@@ -230,6 +235,23 @@ type TaskProgressPayload struct {
 // It carries no usage values; clients refetch through their authorized APIs.
 type TaskUsageUpdatedPayload struct {
 	TaskID string `json:"task_id"`
+}
+
+// TaskFailRequest reports the terminal failure of a daemon task.
+type TaskFailRequest struct {
+	Error          string `json:"error"`
+	SessionID      string `json:"session_id,omitempty"`
+	WorkDir        string `json:"work_dir,omitempty"`
+	DurableWorkDir string `json:"durable_work_dir,omitempty"`
+	FailureReason  string `json:"failure_reason,omitempty"`
+	// A worktree can produce a branch even when its task fails.
+	BranchName string `json:"branch_name,omitempty"`
+	// A missing rollout invalidates the withheld session's resume pointer.
+	SessionRolloutMissing bool `json:"session_rollout_missing,omitempty"`
+	// A known unresumable session must also be retired for subsequent tasks.
+	RetiredSessionID string `json:"retired_session_id,omitempty"`
+	// Older daemons and incomplete transcripts leave this proof unset.
+	NoToolCallsStarted bool `json:"no_tool_calls_started,omitempty"`
 }
 
 // TaskCompletedPayload is sent from daemon to server when a task finishes.

@@ -10,7 +10,6 @@ import { useIssuePeekActions } from "../surface/peek-context";
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
   useSensor,
   useSensors,
   useDroppable,
@@ -26,6 +25,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { Virtuoso } from "react-virtuoso";
 import { ChevronRight, EyeOff, GripVertical, MoreHorizontal, Pencil, Plus } from "@multica/ui/icons";
 import { useQuery, useQueries, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import type {
   Issue,
   IssueAssigneeType,
@@ -37,7 +37,7 @@ import type {
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import { useViewBaseline } from "../surface/view-baseline-context";
 import { filterIssues, type IssueFilters } from "../utils/filter";
-import { getMoveAnchors } from "../utils/drag-utils";
+import { getMoveAnchors, insertIdByPosition, IssueCardPointerSensor } from "../utils/drag-utils";
 import type { SwimlaneGrouping } from "@multica/core/issues/stores/view-store";
 import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -1078,7 +1078,7 @@ function SwimLaneViewImpl({
   );
 
   const sensors = useSensors(
-    useSensor(PointerSensor, {
+    useSensor(IssueCardPointerSensor, {
       activationConstraint: { distance: 5 },
     }),
   );
@@ -1111,6 +1111,7 @@ function SwimLaneViewImpl({
         const overCell = findCellIn(prev, cellSet, overId);
         if (!activeCell || !overCell) return prev;
         if (issueMapRef.current.get(activeId)?.status !== overCell.status && entryOf(overCell.status)?.archived_at) return prev;
+        if (sortBy !== "position") return prev;
         if (
           activeCell.laneKey === overCell.laneKey &&
           activeCell.status === overCell.status
@@ -1185,7 +1186,7 @@ function SwimLaneViewImpl({
         };
       });
     },
-    [cellSet, laneByKey, entryOf],
+    [cellSet, laneByKey, entryOf, sortBy],
   );
 
   const handleDragEnd = useCallback(
@@ -1280,12 +1281,44 @@ function SwimLaneViewImpl({
         return;
       }
 
-      let finalCells = cols;
-      // Handle reordering within the same target cell upon drop.
-      if (
+      const sameCell =
         activeCell.laneKey === overCell.laneKey &&
-        activeCell.status === overCell.status
-      ) {
+        activeCell.status === overCell.status;
+      let finalCells = cols;
+      if (sortBy !== "position") {
+        if (sameCell) {
+          reset();
+          if (activeId !== overId) {
+            toast.info(t(($) => $.board.manual_reorder_hint), {
+              id: "issue-manual-reorder-hint",
+            });
+          }
+          return;
+        }
+        // Only the lane or status changes, as on Board and List. The anchors
+        // come from the card's manual position, not the slot it was dropped in:
+        // neighbors on screen can have positions that run backwards, and the
+        // server rejects the whole move for those.
+        const without = (laneKey: string, status: string) =>
+          (cols[laneKey]?.[status] ?? []).filter((id) => id !== activeId);
+        const sourceIds = without(activeCell.laneKey, activeCell.status);
+        const targetIds = insertIdByPosition(
+          without(overCell.laneKey, overCell.status),
+          activeId,
+          issueMapRef.current.get(activeId)?.position ?? 0,
+          issueMapRef.current,
+        );
+        finalCells = {
+          ...cols,
+          [activeCell.laneKey]: { ...cols[activeCell.laneKey], [activeCell.status]: sourceIds },
+        };
+        finalCells[overCell.laneKey] = {
+          ...finalCells[overCell.laneKey],
+          [overCell.status]: targetIds,
+        };
+        setLocalCells(finalCells);
+      } else if (sameCell) {
+        // Handle reordering within the same target cell upon drop.
         const ids = cols[activeCell.laneKey]?.[activeCell.status];
         if (ids) {
           const oldIndex = ids.indexOf(activeId);
@@ -1311,8 +1344,10 @@ function SwimLaneViewImpl({
       }
 
       const finalIds = finalCells[finalOverCell.laneKey]?.[finalOverCell.status] ?? [];
-      const newPosition = computePosition(finalIds, activeId, issueMapRef.current);
       const currentIssue = issueMapRef.current.get(activeId);
+      const newPosition = sortBy === "position"
+        ? computePosition(finalIds, activeId, issueMapRef.current)
+        : (currentIssue?.position ?? 0);
       const targetLane = laneByKey.get(finalOverCell.laneKey);
       if (!targetLane) {
         reset();
@@ -1358,7 +1393,7 @@ function SwimLaneViewImpl({
         },
       );
     },
-    [cells, cellSet, laneByKey, laneGroups, onMoveIssue, swimlaneGrouping, viewStoreApi, entryOf],
+    [cells, cellSet, laneByKey, laneGroups, onMoveIssue, swimlaneGrouping, viewStoreApi, entryOf, sortBy, t],
   );
 
   // Grid template: one column per status, fixed width COLUMN_WIDTH, gap COLUMN_GAP.
@@ -1816,6 +1851,7 @@ function SwimLaneCell({
   // Never show the hover highlight on a readOnly cell — the guards will
   // reject the drop, so visual confirmation would be misleading.
   const { t } = useT("issues");
+  const sortBy = useViewStore((s) => s.sortBy);
   const { categoryOf, entryOf } = statusCatalog;
   const archived = !!entryOf(status)?.archived_at;
   const isOver = !readOnly && !archived && droppableIsOver;
@@ -1858,6 +1894,7 @@ function SwimLaneCell({
               project={
                 issue.project_id ? projectMap?.get(issue.project_id) : undefined
               }
+              disableSorting={sortBy !== "position"}
             />
           ))}
         </SortableContext>

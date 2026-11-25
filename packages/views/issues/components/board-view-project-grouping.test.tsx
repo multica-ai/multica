@@ -12,6 +12,7 @@ import { cleanup, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
 import { getIssueSurfaceViewStore } from "@multica/core/issues/stores/surface-view-store";
+import type { SortField } from "@multica/core/issues/stores/view-store";
 import type { Issue, Project } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { IssueContextMenuProvider } from "../actions/issue-actions-context-menu";
@@ -21,6 +22,19 @@ import {
   ScrollRestorationProvider,
   type ScrollRestorationAdapter,
 } from "../../platform";
+
+// jsdom has no layout, so dnd-kit never reports a hovered column by itself.
+const drag = vi.hoisted(() => ({ isOver: false }));
+vi.mock("@dnd-kit/core", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@dnd-kit/core")>();
+  return {
+    ...actual,
+    useDroppable: (args: Parameters<typeof actual.useDroppable>[0]) => ({
+      ...actual.useDroppable(args),
+      isOver: drag.isOver,
+    }),
+  };
+});
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 
@@ -195,21 +209,25 @@ describe("Board grouped by project", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    drag.isOver = false;
   });
 
   function render({
     descriptors = [NO_PROJECT_DESCRIPTOR, ...PROJECT_DESCRIPTORS],
     issues = ISSUES,
     scrollAdapter = { get: () => undefined },
+    sortBy,
   }: {
     descriptors?: IssueGroupBranches["descriptors"];
     issues?: Issue[];
     scrollAdapter?: ScrollRestorationAdapter;
+    sortBy?: SortField;
   } = {}) {
     const store = getIssueSurfaceViewStore(
       `board-project-${Math.floor(Math.random() * 1e9)}`,
     );
     store.getState().setGrouping("project");
+    if (sortBy) store.getState().setSortBy(sortBy);
     // Cards carry their own project chip by default, which would put the same
     // title in two places and make "the column header says X" unprovable.
     if (store.getState().cardProperties.project) {
@@ -296,6 +314,17 @@ describe("Board grouped by project", () => {
     const acmeColumn = screen.getByText("Acme Corp").closest("div.flex-col")!;
     expect(acmeColumn.textContent).toContain("MUL-acme");
     expect(acmeColumn.textContent).not.toContain("MUL-loose");
+  });
+
+  it.each([
+    ["the default sort", undefined, "Updated date"],
+    ["created date", "created_at", "Created date"],
+    ["priority", "priority", "Priority"],
+  ] as const)("names %s in the hint a hovered column shows", (_, sortBy, field) => {
+    drag.isOver = true;
+    render({ sortBy });
+
+    expect(screen.getAllByText(`Board ordered by ${field}`).length).toBeGreaterThan(0);
   });
 
   it("brings the column strip back to where it was scrolled sideways", () => {

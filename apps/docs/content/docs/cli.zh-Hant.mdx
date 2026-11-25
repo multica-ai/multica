@@ -475,10 +475,10 @@ CLI 配置檔案包含可代表你訪問 Multica 的令牌。不要提交到倉�
 
 | 命令 | 子命令 | 用途 | 關鍵 flag |
 | --- | --- | --- | --- |
-| `issue` | `list` | 列出任務 | `--status`、`--priority`、`--assignee`、`--project`、`--updated-since` / `--updated-until`（配套的 RFC3339 時間範圍）、`--metadata`（可重複）、`--property`（可重複，`"名稱=值"` 或 `"Score>=3"`、`"Due<2026-01-01"`、`"Notes~=text"` 這樣的比較；`__none__` 匹配未設定）、`--limit`、`--offset`、`--sort`（支援 `property:<名稱或 id>`）、`--full-id`、`--fields`（僅 JSON；逗號分隔，只輸出這些欄位）、`--resolve-properties`（僅 JSON；在儲存的 id 旁附上屬性、選項和成員名稱） |
+| `issue` | `list` | 列出任務 | `--status`、`--priority`、`--assignee`、`--project`、`--blocked`（僅列出等待未結束前置任務或前置階段的任務）、`--updated-since` / `--updated-until`（配套的 RFC3339 時間範圍）、`--metadata`（可重複）、`--property`（可重複，`"名稱=值"` 或 `"Score>=3"`、`"Due<2026-01-01"`、`"Notes~=text"` 這樣的比較；`__none__` 匹配未設定）、`--limit`、`--offset`、`--sort`（支援 `property:<名稱或 id>`）、`--full-id`、`--fields`（僅 JSON；逗號分隔，只輸出這些欄位）、`--resolve-properties`（僅 JSON；在儲存的 id 旁附上屬性、選項和成員名稱） |
 | | `get <id>` | 檢視單個任務 | `--resolve-properties`（僅 JSON；在儲存的 id 旁附上屬性、選項和成員名稱） |
-| | `create` | 建立任務 | `--title`（必填）、`--description` / `--description-stdin` / `--description-file`、`--pr-auto-complete on/off`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--project`、`--start-date`、`--due-date`、`--attachment`（可重複）、`--property`（可重複）、`--allow-duplicate`（已有同名未關閉任務時仍建立） |
-| | `update <id>` | 更新任務欄位 | 與 `create` 同類欄位，另有 `--description-base-revision`（取自 `issue get`，描述已變更時拒絕覆寫）、`--position`、`--no-start`、`--duplicate-of` |
+| | `create` | 建立任務 | `--title`（必填）、`--description` / `--description-stdin` / `--description-file`、`--pr-auto-complete on/off`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--blocked-by`（可重複；開始前需等待的任務編號或 UUID）、`--project`、`--start-date`、`--due-date`、`--attachment`（可重複）、`--property`（可重複）、`--allow-duplicate`（已有同名未關閉任務時仍建立） |
+| | `update <id>` | 更新任務欄位 | 與 `create` 同類欄位，另有 `--remove-blocked-by`（可重複；移除手動阻塞）、`--description-base-revision`（取自 `issue get`，描述已變更時拒絕覆寫）、`--position`、`--no-start`、`--duplicate-of` |
 | | `edit-description <id>` | 精確替換任務描述中的局部文字，無需整篇重寫 | `--old` / `--old-file`（必填）、`--new` / `--new-file`（必填）、`--replace-all` |
 | | `batch update <id>...` | 對多條任務套用相同修改 | `--ids-stdin`, `--status`, `--priority`, `--assignee` / `--assignee-id` / `--unassign`, `--project`, `--start-date`, `--due-date`, `--parent`, `--stage`, `--add-label`, `--remove-label`, `--clear-labels`, `--property`, `--unset-property`, `--no-start`, `--dry-run` |
 | | `delete <id>...` | 永久刪除一條或多條任務 | `--yes` 跳過確認；接受任務編號或完整 UUID; `--dry-run` |

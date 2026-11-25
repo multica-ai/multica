@@ -235,6 +235,68 @@ func TestUpdateIssueLocksParentTreeBeforeDuplicateRows(t *testing.T) {
 	}
 }
 
+// Single and batch parent changes wait for the parent tree before they lock
+// the issue row, the order every other parent write takes them in.
+func TestParentChangeLocksParentTreeBeforeIssueRow(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	writes := map[string]func(issue, parent string) *httptest.ResponseRecorder{
+		"single": putIssueParent,
+		"batch": func(issue, parent string) *httptest.ResponseRecorder {
+			w := httptest.NewRecorder()
+			testHandler.BatchUpdateIssues(w, newRequest(http.MethodPost, "/api/issues/batch-update", map[string]any{
+				"issue_ids": []string{issue},
+				"updates":   map[string]any{"parent_issue_id": parent},
+			}))
+			return w
+		},
+	}
+	for name, write := range writes {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			issue := dbfx.Issue(t, name+" parent change")
+			parent := dbfx.Issue(t, name+" new parent")
+
+			holder, err := testPool.Begin(ctx)
+			if err != nil {
+				t.Fatalf("begin parent lock holder: %v", err)
+			}
+			defer holder.Rollback(ctx)
+			if err := db.New(holder).LockIssueParentTree(ctx, parseUUID(testWorkspaceID)); err != nil {
+				t.Fatalf("hold parent tree lock: %v", err)
+			}
+			holderPID := holderBackendPID(t, ctx, holder)
+
+			var w *httptest.ResponseRecorder
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				w = write(issue, parent)
+			}()
+			waitUntilDoneOrBlockedBy(t, holderPID, done)
+			select {
+			case <-done:
+				t.Fatalf("parent change finished while the parent tree was locked: %d %s", w.Code, w.Body.String())
+			default:
+			}
+			if _, err := testPool.Exec(ctx, `SELECT id FROM issue WHERE id = $1 FOR KEY SHARE NOWAIT`, issue); err != nil {
+				t.Errorf("issue row was locked while the parent change waited for the parent tree: %v", err)
+			}
+			if err := holder.Commit(ctx); err != nil {
+				t.Fatalf("release parent tree lock: %v", err)
+			}
+			<-done
+			if w.Code != http.StatusOK {
+				t.Fatalf("parent change = %d %s, want 200", w.Code, w.Body.String())
+			}
+			if got := issueParentOf(t, issue); got != parent {
+				t.Fatalf("parent = %s, want %s", got, parent)
+			}
+		})
+	}
+}
+
 func waitUntilDoneOrBlockedBy(t *testing.T, holderPID int, done <-chan struct{}) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)

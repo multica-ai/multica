@@ -65,8 +65,12 @@ function SnoozedInboxRow({
 }) {
   const { t } = useT("inbox");
   const locale = useLocale();
-  const { data: issue } = useQuery(issueDetailOptions(wsId, entry.issue_id));
+  // The list carries the title and status; only an older server's leaves the row to fetch the issue.
+  const { data: issue } = useQuery({ ...issueDetailOptions(wsId, entry.issue_id), enabled: !entry.issue_title });
   const { categoryOf, colorOf, iconOf } = useIssueStatuses(wsId);
+  const title = issue?.title ?? entry.issue_title;
+  const status = issue?.status ?? entry.issue_status;
+  const identifier = issue?.identifier ?? entry.issue_identifier;
   const backAt = t(($) => $.snooze.back_at, { time: formatSnoozeTime(new Date(entry.snoozed_until), new Date(), locale) });
   return (
     <button
@@ -79,12 +83,12 @@ function SnoozedInboxRow({
       )}
     >
       <span className="flex size-7 shrink-0 items-center justify-center">
-        {issue ? (
+        {status ? (
           <StatusIcon
-            status={issue.status}
-            category={categoryOf(issue.status)}
-            color={colorOf(issue.status)}
-            icon={iconOf(issue.status)}
+            status={status}
+            category={categoryOf(status)}
+            color={colorOf(status)}
+            icon={iconOf(status)}
             className="size-4"
           />
         ) : (
@@ -92,10 +96,10 @@ function SnoozedInboxRow({
         )}
       </span>
       <span className="min-w-0 flex-1">
-        {issue ? (
+        {title ? (
           <span className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-body">{issue.title}</span>
-            <span className="shrink-0 text-caption tabular-nums text-muted-foreground">{issue.identifier}</span>
+            <span className="truncate text-body">{title}</span>
+            {identifier && <span className="shrink-0 text-caption tabular-nums text-muted-foreground">{identifier}</span>}
           </span>
         ) : (
           <Skeleton className="h-4 w-3/4" />

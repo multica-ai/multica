@@ -920,7 +920,7 @@
       },
       "squad_handoffs": {
         "label": "Inclure les passations de squad",
-        "description": "Commentaires par lesquels le chef et les agents d'un squad se transmettent le travail. Les @mentions, les exécutions d'agent échouées et les statuts qui nécessitent votre attention vous parviennent toujours."
+        "description": "Commentaires par lesquels le chef et les agents d'un squad se transmettent le travail. Les @mentions, les exécutions d'agent échouées et le compte rendu final du squad vous parviennent toujours."
       },
       "mentions": {
         "label": "Mentions",
@@ -1923,7 +1923,8 @@
       "pending": "En attente",
       "approved": "Approuvé",
       "rejected": "Refusé",
-      "rate_limited": "Limite atteinte"
+      "rate_limited": "Limite atteinte",
+      "quota_exceeded": "Limite mensuelle atteinte"
     },
     "scopes": {
       "team": "Compte d'équipe",
@@ -1940,7 +1941,7 @@
       "personal": "Votre compte"
     },
     "account_row": {
-      "admins_notified": "admins prévenus",
+      "admins_notified": "admin prévenu",
       "withdraw": "Retirer",
       "decline": "Refuser",
       "toast_declined": "Demandes refusées. Les agents en attente continuent sans.",
@@ -2001,7 +2002,7 @@
       "title_member_ask": "{{name}} a demandé un compte d'équipe {{app}}",
       "waiting_for_admin": "En attente d'un admin",
       "team_note": "Tous les agents qui agissent avec le compte d'équipe pourront l'utiliser.",
-      "admins_notified": "Les admins de l'espace de travail ont été prévenus dans la boîte de réception.",
+      "admins_notified": "Un admin de l'espace de travail a été prévenu dans la boîte de réception.",
       "connect_team": "Connecter pour l'équipe"
     },
     "tools": {
@@ -2065,10 +2066,10 @@
       "no_matches": "Aucune app ne correspond à votre recherche.",
       "unavailable": "Les apps ne sont pas disponibles sur ce serveur.",
       "retry": "Réessayer",
-      "category_all": "Toutes",
+      "catalog": "Catalogue",
+      "catalog_failed": "Impossible de charger le catalogue d'apps.",
       "category_curated": "À la une",
       "categories_label": "Catégories",
-      "categories_nav": "Catégories d'apps",
       "connect_oauth": "Connexion OAuth",
       "connect_key": "Utilise une clé API",
       "show_more": "Afficher plus",

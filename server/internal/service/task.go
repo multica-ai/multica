@@ -831,10 +831,16 @@ func effectiveTaskSquadID(task db.AgentTaskQueue) pgtype.UUID {
 // squad-created sub-issues) while leaving direct standalone human triggers
 // unattributed.
 //
+// An issue a squad run created stays the squad's work only for the squad's own
+// agents: a run reaching it without a squad from its trigger is the squad's
+// only when its agent leads or belongs to the squad. Without that, every later
+// run on the issue, and every issue those runs create, would count as the
+// squad's (MUL-10072).
+//
 // Callers write the result to usage_squad_id — NEVER to squad_id — so existing
 // leader/worker routing semantics keyed off squad_id (workflow step ownership,
 // self-trigger suppression, conversation root ownership) remain untouched.
-func (s *TaskService) resolveInheritedSquadID(ctx context.Context, issue db.Issue, explicitSquadID, delegatedFromTaskID pgtype.UUID) pgtype.UUID {
+func (s *TaskService) resolveInheritedSquadID(ctx context.Context, issue db.Issue, agentID pgtype.UUID, explicitSquadID, delegatedFromTaskID pgtype.UUID) pgtype.UUID {
 	if explicitSquadID.Valid {
 		return explicitSquadID
 	}
@@ -852,12 +858,21 @@ func (s *TaskService) resolveInheritedSquadID(ctx context.Context, issue db.Issu
 		(issue.OriginType.String == "agent_create" || issue.OriginType.String == "quick_create") &&
 		issue.OriginID.Valid {
 		if originTask, err := s.Queries.GetAgentTask(ctx, issue.OriginID); err == nil {
-			if sid := effectiveTaskSquadID(originTask); sid.Valid {
+			if sid := effectiveTaskSquadID(originTask); sid.Valid && s.agentInSquad(ctx, sid, agentID) {
 				return sid
 			}
 		}
 	}
 	return pgtype.UUID{}
+}
+
+// agentInSquad reports whether agentID leads or belongs to squadID.
+func (s *TaskService) agentInSquad(ctx context.Context, squadID, agentID pgtype.UUID) bool {
+	if squad, err := s.Queries.GetSquad(ctx, squadID); err == nil && squad.LeaderID == agentID {
+		return true
+	}
+	isMember, err := s.Queries.IsSquadMember(ctx, db.IsSquadMemberParams{SquadID: squadID, MemberType: "agent", MemberID: agentID})
+	return err == nil && isMember
 }
 
 // RecordHumanDelegation notes that attr's member personally started an agent
@@ -1038,6 +1053,8 @@ func (s *TaskService) taskMetricsContext(ctx context.Context, task db.AgentTaskQ
 		}
 	case task.AutopilotRunID.Valid:
 		source = "autopilot"
+	case task.DocID.Valid:
+		source = "doc_comment"
 	default:
 		if _, ok := s.parseQuickCreateContext(task); ok {
 			source = "quick_create"
@@ -1364,7 +1381,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
-	inheritedSquadID := s.resolveInheritedSquadID(ctx, issue, pgtype.UUID{}, attrDelegatedFrom)
+	inheritedSquadID := s.resolveInheritedSquadID(ctx, issue, issue.AssigneeID, pgtype.UUID{}, attrDelegatedFrom)
 	createParams := db.CreateAgentTaskParams{
 		ID:                   dbid.NewV7(),
 		AgentID:              issue.AssigneeID,
@@ -1542,7 +1559,7 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
-	resolvedSquadID := s.resolveInheritedSquadID(ctx, issue, squadID, attrDelegatedFrom)
+	resolvedSquadID := s.resolveInheritedSquadID(ctx, issue, agentID, squadID, attrDelegatedFrom)
 	params := db.CreateAgentTaskParams{
 		ID:                   dbid.NewV7(),
 		AgentID:              agentID,
@@ -5063,6 +5080,10 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 		}
 	}
 
+	if task.DocID.Valid {
+		s.ensureDocReply(ctx, task, result)
+	}
+
 	// Quick-create tasks: locate the issue the agent just created and push
 	// an inbox confirmation to the requester. The agent has no issue / chat
 	// link, so the regular completion paths above don't apply. We find the
@@ -5328,20 +5349,24 @@ func (s *TaskService) observeChatOutputLocalPath(task db.AgentTaskQueue, body st
 // (via classifyPoisonedError, the timeout / runtime classifier, etc.)
 // will have their value preserved untouched.
 func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) (*db.AgentTaskQueue, error) {
-	task, _, err := s.FailTaskWithTransition(ctx, taskID, errMsg, sessionID, workDir, branchName, failureReason, sessionRolloutMissing, retiredSessionID, durableWorkDir)
+	task, _, err := s.FailTaskWithTransition(ctx, taskID, protocol.TaskFailRequest{
+		Error: errMsg, SessionID: sessionID, WorkDir: workDir, BranchName: branchName, FailureReason: failureReason,
+		SessionRolloutMissing: sessionRolloutMissing, RetiredSessionID: retiredSessionID, DurableWorkDir: durableWorkDir,
+	})
 	return task, err
 }
 
 // FailTaskWithTransition is the failure counterpart to
 // CompleteTaskWithTransition. The bool is false for an idempotent replay that
 // observed an already-terminal row.
-func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) (*db.AgentTaskQueue, bool, error) {
+func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.UUID, report protocol.TaskFailRequest) (*db.AgentTaskQueue, bool, error) {
 	// Strip bytes PostgreSQL cannot store before anything else reads errMsg, so
 	// the classifier, the transaction and every downstream consumer see the one
 	// text we will actually persist (GH #7098). Kept at the service boundary
 	// rather than only in the /fail handler because failClaimedTaskBeforeLaunch
 	// reaches FailTask without going through request decoding.
-	errMsg = util.SanitizeTextForPostgres(errMsg)
+	errMsg := util.SanitizeTextForPostgres(report.Error)
+	failureReason := report.FailureReason
 
 	// MUL-2946: synthesise a refined reason from the error text whenever the
 	// caller didn't supply one. This is the last write-path guard against
@@ -5376,7 +5401,9 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		retryFireAt      pgtype.Timestamptz
 		retryMaxAttempts pgtype.Int4
 	)
-	if retryableReasons[failureReason] {
+	// Restoring a Trae session replays history, but the next prompt can still
+	// execute the same tool again. Older reporters cannot certify this turn.
+	if retryableReasons[failureReason] && (report.NoToolCallsStarted || !taskfailure.IsTraePromptStreamDisconnect(errMsg)) {
 		if parent, perr := s.Queries.GetAgentTask(ctx, taskID); perr != nil {
 			slog.Warn("fail task auto-retry: load parent failed",
 				"task_id", util.UUIDToString(taskID), "error", perr)
@@ -5415,16 +5442,16 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 			ID:             taskID,
 			Error:          pgtype.Text{String: errMsg, Valid: true},
 			FailureReason:  pgtype.Text{String: failureReason, Valid: failureReason != ""},
-			SessionID:      pgtype.Text{String: sessionID, Valid: sessionID != ""},
-			WorkDir:        pgtype.Text{String: workDir, Valid: workDir != ""},
-			DurableWorkDir: pgtype.Text{String: durableWorkDir, Valid: durableWorkDir != ""},
+			SessionID:      pgtype.Text{String: report.SessionID, Valid: report.SessionID != ""},
+			WorkDir:        pgtype.Text{String: report.WorkDir, Valid: report.WorkDir != ""},
+			DurableWorkDir: pgtype.Text{String: report.DurableWorkDir, Valid: report.DurableWorkDir != ""},
 			// A failed run can still have produced a branch: worktree mode
 			// commits whatever the agent left before tearing the worktree down,
 			// precisely so partial work survives. Dropping the name here would
 			// leave that commit with no pointer to it.
-			BranchName:            pgtype.Text{String: branchName, Valid: branchName != ""},
-			SessionRolloutMissing: sessionRolloutMissing,
-			RetiredSessionID:      pgtype.Text{String: retiredSessionID, Valid: retiredSessionID != ""},
+			BranchName:            pgtype.Text{String: report.BranchName, Valid: report.BranchName != ""},
+			SessionRolloutMissing: report.SessionRolloutMissing,
+			RetiredSessionID:      pgtype.Text{String: report.RetiredSessionID, Valid: report.RetiredSessionID != ""},
 		})
 		if errors.Is(err, pgx.ErrNoRows) && failureReason == taskfailure.ReasonProcessCleanupUnconfirmed.String() {
 			t, err = qtx.FailCancelledTaskProcessCleanup(ctx, db.FailCancelledTaskProcessCleanupParams{ID: taskID, ErrorMessage: errMsg})
@@ -5447,7 +5474,7 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		// un-upgraded daemon's agent_error.unknown row is caught by the error
 		// text too.
 		if t.ChatSessionID.Valid && ResumeUnsafeFailure(failureReason, errMsg) {
-			deadSession := sessionID
+			deadSession := report.SessionID
 			if deadSession == "" {
 				deadSession = t.SessionID.String
 			}
@@ -5465,10 +5492,10 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		// terminal status: the fresh-session retry that replaced it may well
 		// have succeeded, and the pointer would otherwise still name the
 		// transcript it retried away from.
-		if t.ChatSessionID.Valid && retiredSessionID != "" {
+		if t.ChatSessionID.Valid && report.RetiredSessionID != "" {
 			if err := qtx.ClearChatSessionSessionIfMatches(ctx, db.ClearChatSessionSessionIfMatchesParams{
 				ID:        t.ChatSessionID,
-				SessionID: pgtype.Text{String: retiredSessionID, Valid: true},
+				SessionID: pgtype.Text{String: report.RetiredSessionID, Valid: true},
 				RuntimeID: t.RuntimeID,
 			}); err != nil {
 				return fmt.Errorf("clear retired chat session resume pointer: %w", err)
@@ -5484,13 +5511,13 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 			// when there's no session_id to record, leave runtime_id untouched
 			// (NULL → COALESCE keeps the existing value).
 			var sessionRuntimeID pgtype.UUID
-			if sessionID != "" {
+			if report.SessionID != "" {
 				sessionRuntimeID = t.RuntimeID
 			}
 			if err := qtx.UpdateChatSessionSession(ctx, db.UpdateChatSessionSessionParams{
 				ID:        t.ChatSessionID,
-				SessionID: pgtype.Text{String: sessionID, Valid: sessionID != ""},
-				WorkDir:   pgtype.Text{String: workDir, Valid: workDir != ""},
+				SessionID: pgtype.Text{String: report.SessionID, Valid: report.SessionID != ""},
+				WorkDir:   pgtype.Text{String: report.WorkDir, Valid: report.WorkDir != ""},
 				RuntimeID: sessionRuntimeID,
 			}); err != nil {
 				return fmt.Errorf("update chat session resume pointer: %w", err)
@@ -5901,8 +5928,8 @@ func ResumeUnsafeFailure(failureReason, errorText string) bool {
 
 // retryEligible reports whether a failed task qualifies for an automatic retry
 // attempt: an infrastructure-shaped failure_reason, remaining attempt budget,
-// not an autopilot run, not a Triage run, and linked to an issue or chat
-// session. Shared by FailTask's in-transaction retry and the orphan sweeper's
+// not an autopilot run, not a Triage run, and linked to an issue, chat
+// session or doc discussion. Shared by FailTask's in-transaction retry and the orphan sweeper's
 // MaybeRetryFailedTask so both agree on which failures re-run.
 //
 // A Triage run is excluded for the reason autopilot runs are (MUL-7189 §5.6):
@@ -5914,7 +5941,7 @@ func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
 		t.Attempt < retryAttemptCeiling(failureReason, t.MaxAttempts) &&
 		!t.AutopilotRunID.Valid &&
 		!IsTriageTask(t) &&
-		(t.IssueID.Valid || t.ChatSessionID.Valid || isSourceContextQuickCreateTask(t))
+		(t.IssueID.Valid || t.ChatSessionID.Valid || t.DocID.Valid || isSourceContextQuickCreateTask(t))
 }
 
 func isSourceContextQuickCreateTask(task db.AgentTaskQueue) bool {
@@ -7892,6 +7919,10 @@ func taskEvent(eventType, workspaceID string, task db.AgentTaskQueue, extra ...m
 		payload["chat_session_id"] = chatSessionID
 		e.ChatSessionID = chatSessionID
 	}
+	// doc_id lets an open doc refresh its discussions' run status.
+	if task.DocID.Valid {
+		payload["doc_id"] = util.UUIDToString(task.DocID)
+	}
 	for _, fields := range extra {
 		for key, value := range fields {
 			payload[key] = value
@@ -8038,6 +8069,11 @@ func (s *TaskService) ResolveTaskScopeChecked(ctx context.Context, task db.Agent
 	// broadcasts, which is why quick-create tasks appeared stuck queued.
 	if qc, ok := s.parseQuickCreateContext(task); ok {
 		return TaskScope{WorkspaceID: qc.WorkspaceID}, nil
+	}
+	// Doc discussion runs carry their workspace in the context too, so a run
+	// cancelled by its doc's deletion still resolves.
+	if dc, ok := ParseDocCommentContext(task); ok {
+		return TaskScope{WorkspaceID: dc.WorkspaceID}, nil
 	}
 	if lookupErr != nil {
 		return TaskScope{}, fmt.Errorf("resolve task workspace: %w", lookupErr)

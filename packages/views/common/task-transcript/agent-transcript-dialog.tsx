@@ -852,6 +852,8 @@ export function AgentTranscriptDialog({
           ? t(($) => $.transcript.trigger_chat)
           : task.kind === "quick_create"
             ? t(($) => $.transcript.trigger_quick_create)
+            : task.kind === "doc_comment" || task.doc_id
+            ? t(($) => $.transcript.trigger_doc_comment)
             : task.kind === "direct"
               ? t(($) => $.transcript.trigger_direct)
               : t(($) => $.transcript.trigger_initial);

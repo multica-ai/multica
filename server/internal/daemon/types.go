@@ -160,6 +160,13 @@ type Task struct {
 	AutopilotDescription          string                 `json:"autopilot_description,omitempty"`            // autopilot description used as task prompt
 	AutopilotSource               string                 `json:"autopilot_source,omitempty"`                 // manual, schedule, webhook, or api
 	AutopilotTriggerPayload       json.RawMessage        `json:"autopilot_trigger_payload,omitempty"`        // optional trigger payload for webhook/api runs
+	DocID                         string                 `json:"doc_id,omitempty"`                           // non-empty for doc discussion tasks (MUL-9933)
+	DocThreadID                   string                 `json:"doc_thread_id,omitempty"`                    // the discussion's first comment; replies go under it
+	DocCommentID                  string                 `json:"doc_comment_id,omitempty"`                   // the comment that triggered the run
+	DocTitle                      string                 `json:"doc_title,omitempty"`                        // the doc's title
+	DocThreadQuote                string                 `json:"doc_thread_quote,omitempty"`                 // the doc text the discussion is about
+	DocCommentContent             string                 `json:"doc_comment_content,omitempty"`              // the triggering comment; empty when it was deleted before the claim
+	DocCommentAuthorName          string                 `json:"doc_comment_author_name,omitempty"`          // who wrote the triggering comment
 	QuickCreatePrompt             string                 `json:"quick_create_prompt,omitempty"`              // user's natural-language input for quick-create tasks
 	QuickCreatePriority           string                 `json:"quick_create_priority,omitempty"`            // explicit priority selected in quick-create
 	QuickCreateDueDate            string                 `json:"quick_create_due_date,omitempty"`            // explicit calendar due date selected in quick-create
@@ -338,9 +345,10 @@ type TaskResult struct {
 	WorkDir    string `json:"work_dir,omitempty"`   // working directory used during execution
 	// DurableWorkDir replaces WorkDir only after a disposable local worktree
 	// was finalized and its removal was confirmed. Empty keeps WorkDir authoritative.
-	DurableWorkDir string `json:"durable_work_dir,omitempty"`
-	EnvRoot        string `json:"-"` // env root dir for writing GC metadata (not sent to server)
-	FailureReason  string `json:"-"` // classifier forwarded to FailTask on the blocked path; empty falls back to 'agent_error'
+	DurableWorkDir     string `json:"durable_work_dir,omitempty"`
+	EnvRoot            string `json:"-"` // env root dir for writing GC metadata (not sent to server)
+	FailureReason      string `json:"-"` // classifier forwarded to FailTask on the blocked path; empty falls back to 'agent_error'
+	NoToolCallsStarted bool   `json:"-"` // positive evidence from the original prompt
 	// SessionRolloutMissing is set when the daemon withheld this task's Codex
 	// session because its rollout was not in the store (MUL-5305). Forwarded to
 	// the terminal report so the server clears the resume pointer and flags the

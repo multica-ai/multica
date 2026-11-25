@@ -631,14 +631,20 @@
       "wakeups": "Добавить будильник",
       "pull_requests": "Добавить pull request",
       "environments": "Добавить окружение",
-      "wakeups_pull_requests": "Добавить будильник или pull request",
-      "wakeups_environments": "Добавить будильник или окружение",
-      "pull_requests_environments": "Добавить pull request или окружение",
-      "all": "Добавить будильник, pull request или окружение",
+      "relations": "Добавить связь",
+      "pair": "Добавить {{first}} или {{second}}",
+      "many": "Добавить...",
+      "noun": {
+        "wakeups": "будильник",
+        "pull_requests": "pull request",
+        "environments": "окружение",
+        "relations": "связь"
+      },
       "menu": {
         "wakeups": "Будильник",
         "pull_requests": "Pull request",
-        "environments": "Окружение"
+        "environments": "Окружение",
+        "relations": "Связи"
       }
     },
     "footer": {
@@ -1247,7 +1253,8 @@
     "remove_parent_issue": "Убрать родительскую задачу",
     "remove_parent_issue_success": "Родительская задача убрана",
     "add_sub_issue": "Добавить подзадачу...",
-    "add_blocker": "Добавить зависимость...",
+    "add_blocker": "Ждать другую задачу...",
+    "add_blocking": "Блокировать другую задачу...",
     "delete_issue": "Удалить задачу",
     "mark_duplicate": "Отметить как дубликат...",
     "locate_in_sidebar": "Показать на боковой панели",
@@ -2204,7 +2211,8 @@
       "pending": "Ожидание",
       "approved": "Одобрено",
       "rejected": "Отклонено",
-      "rate_limited": "Лимит вызовов достигнут"
+      "rate_limited": "Лимит вызовов достигнут",
+      "quota_exceeded": "Месячный лимит исчерпан"
     }
   },
   "environments": {
@@ -2336,21 +2344,46 @@
     "retry": "Повторить",
     "dismiss": "Скрыть"
   },
+  "relations": {
+    "title": "Связи",
+    "add": "Добавить связь",
+    "wait_title": "Ждать другую задачу",
+    "block_title": "Блокировать другую задачу",
+    "blocked_by": "Заблокировано",
+    "blocking": "Блокирует",
+    "stage_tag": "Этап",
+    "stage_tag_hint": "Задано этапами родительской задачи",
+    "add_blocker_hint": "Эта задача начнётся после её завершения",
+    "add_blocking_hint": "Она начнётся после завершения этой задачи",
+    "mark_duplicate_hint": "Отменяет эту задачу",
+    "blocking_picker_hint": "Выберите задачу, которая не может начаться, пока не завершится эта."
+  },
   "waiting": {
-    "title": "Ожидание",
-    "add": "Добавить зависимость",
     "remove": "Удалить {{identifier}}",
     "count": "Ожидание задач: {{count}}",
     "count_one": "Ожидание задач: {{count}}",
     "count_few": "Ожидание задач: {{count}}",
     "count_many": "Ожидание задач: {{count}}",
     "count_other": "Ожидание задач: {{count}}",
-    "stage": "Предыдущие этапы · {{finished}}/{{total}} завершено",
     "hint": "После завершения этих задач исполнитель начнёт работу автоматически или получит уведомление.",
     "hint_backlog": "Задача в бэклоге, поэтому она не начнётся автоматически после завершения этих задач. Она начнётся, когда её переведут из бэклога.",
-    "empty": "Нет ожидаемых задач",
     "picker_hint": "Выберите задачу, которая должна завершиться раньше этой.",
     "restricted": "Ограниченные зависимости: {{count}}",
-    "ended": "Ожидаемые задачи завершены"
+    "ended": "Ожидаемые задачи завершены",
+    "marker_title": "Заблокировано задачами: {{count}}",
+    "marker_title_one": "Заблокировано задачами: {{count}}",
+    "marker_title_few": "Заблокировано задачами: {{count}}",
+    "marker_title_many": "Заблокировано задачами: {{count}}",
+    "marker_title_other": "Заблокировано задачами: {{count}}",
+    "marker_ended": "Завершено {{finished}}/{{total}}",
+    "marker_more": "Ещё {{count}}",
+    "marker_more_one": "Ещё {{count}}",
+    "marker_more_few": "Ещё {{count}}",
+    "marker_more_many": "Ещё {{count}}",
+    "marker_more_other": "Ещё {{count}}",
+    "marker_auto_start": "{{name}} начнёт работу автоматически после их завершения.",
+    "marker_notify": "{{name}} получит уведомление после их завершения.",
+    "marker_unavailable": "{{name}} сейчас не может работать, поэтому после их завершения ничего не начнётся.",
+    "marker_unassigned": "Исполнитель не назначен, поэтому после их завершения ничего не начнётся."
   }
 }

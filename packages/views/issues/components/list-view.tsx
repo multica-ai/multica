@@ -9,7 +9,6 @@ import { Accordion } from "@base-ui/react/accordion";
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
   useDroppable,
   useSensor,
   useSensors,
@@ -39,6 +38,7 @@ import {
   insertIdByPosition,
   issueMatchesGroup,
   getMoveUpdates,
+  IssueCardPointerSensor,
 } from "../utils/drag-utils";
 import type { BoardColumnGroup } from "./board-column";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
@@ -103,10 +103,7 @@ function ListViewImpl({
   const wsId = useWorkspaceId();
   const catalog = useIssueStatuses(wsId);
 
-  const sortFieldKey = sortBy === "created_at" ? "created" : sortBy;
-  const sortLabel = sortBy !== "position"
-    ? t(($) => $.board.ordered_by, { field: t(($) => $.display[`sort_${sortFieldKey}` as keyof typeof $.display]) })
-    : null;
+  const disableSorting = sortBy !== "position";
 
   const expandedStatuses = useMemo(
     () =>
@@ -181,7 +178,7 @@ function ListViewImpl({
   );
 
   const sensors = useSensors(
-    useSensor(PointerSensor, {
+    useSensor(IssueCardPointerSensor, {
       activationConstraint: { distance: 5 },
     })
   );
@@ -421,7 +418,7 @@ function ListViewImpl({
               onCreateIssue={onCreateIssue}
               dragEnabled={dragEnabled}
               isExpanded={isExpanded}
-              sortLabel={sortLabel}
+              disableSorting={disableSorting}
               scrollParent={scrollEl}
               rowHeight={rowHeight}
             />
@@ -475,7 +472,7 @@ function StatusAccordionItem({
   onCreateIssue,
   dragEnabled,
   isExpanded,
-  sortLabel,
+  disableSorting,
   scrollParent,
   rowHeight,
 }: {
@@ -489,7 +486,7 @@ function StatusAccordionItem({
   onCreateIssue?: (defaults: IssueCreateDefaults) => void;
   dragEnabled: boolean;
   isExpanded: boolean;
-  sortLabel: string | null;
+  disableSorting: boolean;
   scrollParent: HTMLElement | null;
   rowHeight: number | undefined;
 }) {
@@ -519,7 +516,6 @@ function StatusAccordionItem({
   });
   const isOver = droppableIsOver && !statusCatalog.entryOf(status)?.archived_at;
 
-  const disableSorting = !!sortLabel;
   const addIssueLabel = t(($) => $.list.add_issue_tooltip);
 
   // The infinite-scroll sentinel rides Virtuoso's Footer so it sits at the true

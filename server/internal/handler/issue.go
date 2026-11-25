@@ -73,6 +73,9 @@ type IssueResponse struct {
 	ParentIssueID *string                `json:"parent_issue_id"`
 	BlockedBy     []IssueBlockerResponse `json:"blocked_by"`
 	BlockedCount  int                    `json:"blocked_count"`
+	// Blocking lists the issues that wait on this one. Only the detail read
+	// fills it; every other rendering omits the key.
+	Blocking *[]IssueBlockerResponse `json:"blocking,omitempty"`
 	// DuplicateOf is the original this issue duplicates (MUL-7349), set only
 	// while the mark counts: the issue is cancelled and the original still
 	// exists. newStatusCategoryFiller resolves it from duplicateOfIssueID;
@@ -259,15 +262,11 @@ func assertIssueStatusStillActive(ctx context.Context, qtx *db.Queries, workspac
 	return nil
 }
 
-// runWithIssueStatusGuard runs an issue write that lands on a custom status
-// inside a transaction that re-verifies the status under the shared catalog
-// lock (see assertIssueStatusStillActive). Request writes also carry trusted
-// wakeup actor identity in transaction-local settings, including built-in targets.
+// runWithIssueStatusGuard runs an issue write inside a transaction that
+// re-verifies a custom status under the shared catalog lock (see
+// assertIssueStatusStillActive). Request writes also carry trusted wakeup actor
+// identity in transaction-local settings.
 func (h *Handler) runWithIssueStatusGuard(ctx context.Context, workspaceID pgtype.UUID, statusKey string, fn func(q *db.Queries) error) error {
-	_, hasActor := ctx.Value(wakeupActorKey{}).(wakeupActor)
-	if !hasActor && (statusKey == "" || issuestatus.IsBuiltIn(statusKey)) {
-		return fn(h.Queries)
-	}
 	tx, err := h.beginWakeupWrite(ctx)
 	if err != nil {
 		return err
@@ -284,38 +283,56 @@ func (h *Handler) runWithIssueStatusGuard(ctx context.Context, workspaceID pgtyp
 	return tx.Commit(ctx)
 }
 
-// updateIssueWithStatusGuard writes params under the status-archive guard.
-func (h *Handler) updateIssueWithStatusGuard(ctx context.Context, workspaceID pgtype.UUID, statusKey string, params db.UpdateIssueParams) (db.Issue, error) {
-	var issue db.Issue
+// updateIssueWithStatusGuard writes params under the status-archive guard,
+// leaving fields rawFields does not name as the locked row has them. It returns
+// the written issue and the row it replaced.
+func (h *Handler) updateIssueWithStatusGuard(ctx context.Context, workspaceID pgtype.UUID, statusKey string, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, workflowAssignee bool) (db.Issue, db.Issue, error) {
+	var issue, current db.Issue
 	var cancelledWakeups []db.AgentTaskQueue
 	err := h.runWithIssueStatusGuard(ctx, workspaceID, statusKey, func(q *db.Queries) error {
+		if err := lockIssueParentChange(ctx, q, workspaceID, params, rawFields); err != nil {
+			return err
+		}
+		if params.DuplicateOfIssueID.Valid {
+			if err := lockAndCheckDuplicateMark(ctx, q, workspaceID, params.ID, params.DuplicateOfIssueID); err != nil {
+				return err
+			}
+		}
 		var innerErr error
-		issue, cancelledWakeups, innerErr = updateIssueStoppingWakeups(ctx, q, workspaceID, params)
+		current, innerErr = lockIssueForFieldUpdate(ctx, q, workspaceID, &params, rawFields, workflowAssignee)
+		if innerErr != nil {
+			return innerErr
+		}
+		issue, cancelledWakeups, innerErr = updateIssueStoppingWakeups(ctx, q, params)
 		return innerErr
 	})
 	if err != nil {
-		return issue, err
+		return issue, current, err
 	}
 	h.broadcastCancelledWakeups(ctx, workspaceID, cancelledWakeups)
-	return issue, nil
+	return issue, current, nil
+}
+
+// lockIssueForFieldUpdate locks the issue row for the rest of the transaction
+// and takes the nullable fields rawFields does not name from it, so a write
+// that waited behind another one does not put that one's fields back.
+func lockIssueForFieldUpdate(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, params *db.UpdateIssueParams, rawFields map[string]json.RawMessage, workflowAssignee bool) (db.Issue, error) {
+	current, err := q.LockIssueForDescriptionUpdate(ctx, db.LockIssueForDescriptionUpdateParams{
+		ID:          params.ID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		return db.Issue{}, fmt.Errorf("lock issue for update: %w", err)
+	}
+	refreshUntouchedNullableIssueParams(params, current, rawFields, workflowAssignee)
+	return current, nil
 }
 
 // updateIssueStoppingWakeups writes params and, when the write moves the issue
 // into a done/closed status, ends its wakeups with the same queries. Callers
 // run it inside the status write's transaction and broadcast the returned runs
 // after commit.
-func updateIssueStoppingWakeups(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, params db.UpdateIssueParams) (db.Issue, []db.AgentTaskQueue, error) {
-	// Take the parent tree lock before locking rows for a duplicate mark.
-	if params.ParentIssueID.Valid {
-		if err := lockAndCheckIssueParent(ctx, q, workspaceID, params.ID, params.ParentIssueID); err != nil {
-			return db.Issue{}, nil, err
-		}
-	}
-	if params.DuplicateOfIssueID.Valid {
-		if err := lockAndCheckDuplicateMark(ctx, q, workspaceID, params.ID, params.DuplicateOfIssueID); err != nil {
-			return db.Issue{}, nil, err
-		}
-	}
+func updateIssueStoppingWakeups(ctx context.Context, q *db.Queries, params db.UpdateIssueParams) (db.Issue, []db.AgentTaskQueue, error) {
 	issue, err := q.UpdateIssue(ctx, params)
 	if err != nil || !params.Status.Valid {
 		return issue, nil, err
@@ -325,6 +342,16 @@ func updateIssueStoppingWakeups(ctx context.Context, q *db.Queries, workspaceID 
 		return db.Issue{}, nil, fmt.Errorf("stop closed issue wakeups: %w", err)
 	}
 	return issue, cancelled, nil
+}
+
+// lockIssueParentChange checks a write that sets parent_issue_id under the
+// workspace's parent tree lock. Callers take it before any issue row lock, so
+// every parent write takes the two in the same order.
+func lockIssueParentChange(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage) error {
+	if _, touched := rawFields["parent_issue_id"]; !touched || !params.ParentIssueID.Valid {
+		return nil
+	}
+	return lockAndCheckIssueParent(ctx, q, workspaceID, params.ID, params.ParentIssueID)
 }
 
 var errIssueParentCycle = errors.New("circular parent relationship detected")
@@ -1688,7 +1715,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	// Build dynamic SQL — same approach as ListGroupedIssues.
 	where := []string{"i.workspace_id = $1"}
 	if r.URL.Query().Get("blocked") == "true" {
-		where = append(where, "issue_has_open_blockers(i.workspace_id,i.id)")
+		where = append(where, blockedIssuePredicate)
 	}
 	args := []any{wsUUID}
 	addArg := func(v any) string {
@@ -2164,7 +2191,7 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 
 	where := []string{"i.workspace_id = $1"}
 	if r.URL.Query().Get("blocked") == "true" {
-		where = append(where, "issue_has_open_blockers(i.workspace_id,i.id)")
+		where = append(where, blockedIssuePredicate)
 	}
 	args := []any{wsUUID}
 	addArg := func(v any) string {
@@ -2608,6 +2635,17 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 		detailLabels = []LabelResponse{}
 	}
 	resp.Labels = &detailLabels
+
+	blocking, err := h.issueDependents(r.Context(), issue, prefix, hidden)
+	if writeQueryCancellation(w, r, err) {
+		return
+	}
+	if err != nil {
+		// Leave the key out rather than claim nothing waits on this issue.
+		slog.Warn("list issue dependents failed", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "error", err)...)
+	} else {
+		resp.Blocking = &blocking
+	}
 
 	// Fetch issue reactions.
 	reactions, err := h.Queries.ListIssueReactions(r.Context(), issue.ID)
@@ -3973,12 +4011,8 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 			return db.Issue{}, db.Issue{}, false, fmt.Errorf("lock issue attachments: %w", err)
 		}
 	}
-	// A parent change takes its tree lock before the issue row (see
-	// GetIssueParentID); the write below checks again under the same lock.
-	if params.ParentIssueID.Valid {
-		if err := lockAndCheckIssueParent(ctx, qtx, workspaceID, params.ID, params.ParentIssueID); err != nil {
-			return db.Issue{}, db.Issue{}, false, err
-		}
+	if err := lockIssueParentChange(ctx, qtx, workspaceID, params, rawFields); err != nil {
+		return db.Issue{}, db.Issue{}, false, err
 	}
 	current, err := qtx.LockIssueForDescriptionUpdate(ctx, db.LockIssueForDescriptionUpdateParams{
 		ID:          params.ID,
@@ -4031,7 +4065,7 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 	}
 	refreshUntouchedNullableIssueParams(&params, current, rawFields, workflowAssignee)
 
-	issue, cancelledWakeups, err := updateIssueStoppingWakeups(ctx, qtx, workspaceID, params)
+	issue, cancelledWakeups, err := updateIssueStoppingWakeups(ctx, qtx, params)
 	if err != nil {
 		return db.Issue{}, current, false, fmt.Errorf("update locked issue: %w", err)
 	}
@@ -4430,7 +4464,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			prevIssue = lockedPrev
 		}
 	} else {
-		issue, err = h.updateIssueWithStatusGuard(writeCtx, prevIssue.WorkspaceID, statusKeyForGuard, params)
+		var lockedPrev db.Issue
+		issue, lockedPrev, err = h.updateIssueWithStatusGuard(writeCtx, prevIssue.WorkspaceID, statusKeyForGuard, params, rawFields, handoff != nil)
+		if lockedPrev.ID.Valid {
+			prevIssue = lockedPrev
+		}
 	}
 	if err != nil {
 		if writeIssueBlockerError(w, err) {
@@ -4544,6 +4582,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"duplicate_of_issue_id":      liveDuplicateMark(issue.Status, issue.DuplicateOfIssueID),
 		"prev_duplicate_of_issue_id": liveDuplicateMark(prevIssue.Status, prevIssue.DuplicateOfIssueID),
 	}
+	// The other end of each edge lists this issue under blocking, so clients
+	// refresh more than this issue when its blockers change.
+	updatedPayload["blockers_changed"] = len(req.BlockedBy)+len(req.RemoveBlockedBy) > 0
 	if handoff != nil {
 		updatedPayload["workflow_handoff"] = workflowHandoffPayload(issue, handoff, h.workflowHandoffBrief(r.Context(), issue, handoff), willRun)
 	}
@@ -5346,7 +5387,11 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				prevIssue = lockedPrev
 			}
 		case labelPlan == nil && propertyPlan == nil:
-			issue, err = h.updateIssueWithStatusGuard(writeCtx, wsUUID, issueStatusGuard, params)
+			var lockedPrev db.Issue
+			issue, lockedPrev, err = h.updateIssueWithStatusGuard(writeCtx, wsUUID, issueStatusGuard, params, rawUpdates, handoff != nil)
+			if err == nil {
+				prevIssue = lockedPrev
+			}
 		default:
 			var fieldParams *db.UpdateIssueParams
 			if hasFieldUpdate {
@@ -5355,7 +5400,10 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				issueStatusGuard = ""
 			}
 			var written batchIssueWrite
-			written, err = h.writeBatchIssue(writeCtx, wsUUID, prevIssue, fieldParams, issueStatusGuard, labelPlan, propertyPlan)
+			written, err = h.writeBatchIssue(writeCtx, wsUUID, prevIssue, fieldParams, rawUpdates, handoff != nil, issueStatusGuard, labelPlan, propertyPlan)
+			if err == nil {
+				prevIssue = written.prev
+			}
 			issue, labelsChanged, propertiesChanged = written.issue, written.labelsChanged, written.propertiesChanged
 		}
 		if err != nil {
@@ -5418,6 +5466,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				"title_changed":              req.Updates.Title != nil && prevIssue.Title != issue.Title,
 				"prev_title":                 prevIssue.Title,
 				"parent_changed":             prevIssue.ParentIssueID != issue.ParentIssueID,
+				"blockers_changed":           len(req.Updates.BlockedBy)+len(req.Updates.RemoveBlockedBy) > 0,
 				"prev_parent_issue_id":       uuidToPtr(prevIssue.ParentIssueID),
 				"prev_status":                prevIssue.Status,
 				"duplicate_of_issue_id":      liveDuplicateMark(issue.Status, issue.DuplicateOfIssueID),

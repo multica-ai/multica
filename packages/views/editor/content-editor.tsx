@@ -204,6 +204,8 @@ interface ContentEditorBaseProps {
   mentionContextItems?: MentionItem[];
   /** Leave guests out of the @ list, for places guests cannot open (docs). */
   mentionHideGuests?: boolean;
+  /** Leave squads out of the @ list, for places a squad cannot be asked (doc discussions). */
+  mentionHideSquads?: boolean;
   /** Enable the `/` command picker. Defaults false. */
   enableSlashCommands?: boolean;
   /**
@@ -415,6 +417,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       mentionMode = "default",
       mentionContextItems,
       mentionHideGuests = false,
+      mentionHideSquads = false,
       enableSlashCommands = false,
       slashCommandMode = "skill",
       showBlockHandles = false,
@@ -639,6 +642,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         mentionMode,
         getMentionContextItems: () => mentionContextItemsRef.current,
         mentionHideGuests,
+        mentionHideSquads,
         enableSlashCommands,
         slashCommandMode,
         quickActionMenu: {

@@ -390,6 +390,8 @@ func (d *Daemon) applyGCActionWithChatMeta(ctx context.Context, taskDir string, 
 				attrs = append(attrs, "autopilot_run", checkedMeta.AutopilotRunID)
 			case execenv.GCKindQuickCreate:
 				attrs = append(attrs, "task", checkedMeta.TaskID)
+			case execenv.GCKindDoc:
+				attrs = append(attrs, "doc", checkedMeta.DocID)
 			}
 		}
 		d.logger.Info("gc: removed", attrs...)
@@ -588,6 +590,8 @@ func (d *Daemon) shouldCleanTaskDirForKind(ctx context.Context, taskDir string, 
 		return d.gcDecisionAutopilotRun(ctx, taskDir, meta)
 	case execenv.GCKindQuickCreate:
 		return d.gcDecisionQuickCreate(ctx, taskDir, meta)
+	case execenv.GCKindDoc:
+		return d.gcDecisionDoc(taskDir, meta)
 	default:
 		// Unknown kind: fall back to mtime-based orphan cleanup so a future
 		// daemon writing a kind we don't recognize doesn't get insta-wiped.
@@ -776,6 +780,23 @@ func (d *Daemon) gcDecisionChat(ctx context.Context, taskDir string, meta *exece
 		if time.Since(status.UpdatedAt) > d.cfg.GCTTL {
 			return gcActionClean, gcRemovalDetails{reason: "archived chat retention expired", status: status.Status, retention: d.cfg.GCTTL}
 		}
+	}
+	return gcActionSkip, gcRemovalDetails{}
+}
+
+// gcDecisionDoc keeps a doc discussion env for the agent's next run on the
+// doc. A doc has no end state, so the env goes once no run has used it for
+// GCTTL; every run rewrites the meta, which restarts that clock.
+func (d *Daemon) gcDecisionDoc(taskDir string, meta *execenv.GCMeta) (gcAction, gcRemovalDetails) {
+	if strings.TrimSpace(meta.DocID) == "" || meta.CompletedAt.IsZero() {
+		return d.orphanByMTime(taskDir, "incomplete doc meta")
+	}
+	idle := time.Since(meta.CompletedAt)
+	if idle > d.cfg.GCTTL {
+		return gcActionClean, gcRemovalDetails{reason: "idle doc env retention expired", retention: d.cfg.GCTTL}
+	}
+	if d.cfg.GCArtifactTTL > 0 && idle > d.cfg.GCArtifactTTL {
+		return gcActionCleanArtifacts, gcRemovalDetails{}
 	}
 	return gcActionSkip, gcRemovalDetails{}
 }

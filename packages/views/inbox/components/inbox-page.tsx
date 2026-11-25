@@ -103,18 +103,21 @@ import { inboxTabFromParam, inboxTabHref, type InboxTab, type InboxView } from "
 import { InboxTabs } from "./inbox-tabs";
 import { InboxArchivedBar } from "./inbox-bar";
 import { SnoozedInboxList } from "./snoozed-inbox-list";
-import { useArchivedInboxRows, useSnoozedInboxRows } from "./use-inbox-tab-rows";
+import { useArchivedInboxRows, useInboxTabPrefetch, useSnoozedInboxRows } from "./use-inbox-tab-rows";
 import { useTypeLabels } from "./inbox-detail-label";
 import {
   getInboxDisplayTitle,
   inboxRowHref,
   isAutopilotQuotaNotice,
+  isQuotaNotice,
   isQuickCreateOutcome,
   resolveDetailItem,
 } from "./inbox-display";
 import { AutopilotQuotaNotice } from "./autopilot-quota-notice";
+import { AppCallQuotaNotice } from "./app-call-quota-notice";
 import { InboxEmptyState } from "./inbox-empty-state";
 import { InboxKeptActions, useKeptInboxRowText } from "./inbox-kept-actions";
+import { InboxSettledMoreMenu } from "./inbox-more-menu";
 import { inboxListLoad, useFilteredInboxRows } from "./use-filtered-inbox-rows";
 import { useKeptOpenInboxRow } from "./use-kept-open-inbox-row";
 import { useAutoArchiveCause } from "./use-auto-archive-cause";
@@ -190,12 +193,14 @@ export function InboxPage() {
   const items = useMemo(() => deduplicateInboxItems(rawItems), [rawItems]);
   // The filters read every notification of an issue, not just its newest.
   const activeRows = useMemo(() => rawItems.filter((item) => !item.archived), [rawItems]);
+  const archived = useArchivedInboxRows(wsId, isArchivedView);
   const {
     query: archiveQuery,
     items: archivedItems,
     filters: archiveFilters,
     issueFieldsSupport: archiveIssueFields,
-  } = useArchivedInboxRows(wsId, isArchivedView);
+  } = archived;
+  const prefetchTab = useInboxTabPrefetch(wsId, archived);
   const fetchNextArchivedPage = archiveQuery.fetchNextPage;
   const loadNextArchivedPage = useCallback(() => { void fetchNextArchivedPage(); }, [fetchNextArchivedPage]);
   const archivedLoading = archiveQuery.isLoading;
@@ -868,6 +873,7 @@ export function InboxPage() {
         <InboxTabs
           tab={tab}
           onSelect={setTab}
+          onPrefetch={prefetchTab}
           unread={unreadCount}
           snoozed={snoozed.rows.length}
           size="page"
@@ -1083,6 +1089,7 @@ export function InboxPage() {
         <InboxKeptActions
           label={keptStatus.label}
           hint={keptStatus.hint}
+          undoLabel={keptStatus.undo}
           onUndo={() => void restoreInbox(settledNotice.item.id, { quiet: true })}
           next={nextInboxRow(listedItems, settledNotice.key)}
           onNext={() => advanceSelectionPast(settledNotice.item.id, listedItems)}
@@ -1097,7 +1104,10 @@ export function InboxPage() {
     item: tab === "inbox" ? (detailItem ?? undefined) : undefined,
     bar: (issueActions) =>
       isArchivedView && detailItem ? (
-        <InboxArchivedBar onRestore={() => handleUnarchive(detailItem.id)} />
+        <InboxArchivedBar
+          onRestore={() => handleUnarchive(detailItem.id)}
+          more={<InboxSettledMoreMenu issueId={issueId} />}
+        />
       ) : (
         <IssueInboxBar issueId={issueId} issueActions={issueActions} movingOn={detailSwapping} isSnoozedView={isSnoozedView} />
       ),
@@ -1162,7 +1172,7 @@ export function InboxPage() {
     {keptNotice}
     <div key={detailItem.id} className="animate-inbox-enter-fade p-6">
       <h2 className="text-title font-semibold">
-        {isAutopilotQuotaNotice(detailItem.type)
+        {isQuotaNotice(detailItem.type)
           ? typeLabels[detailItem.type]
           : getInboxDisplayTitle(detailItem)}
       </h2>
@@ -1174,6 +1184,8 @@ export function InboxPage() {
           item={detailItem}
           onOpenRecovery={showAutopilotQuotaRecoveryPrompt}
         />
+      ) : detailItem.type === "app_tool_calls_quota_exceeded" ? (
+        <AppCallQuotaNotice item={detailItem} />
       ) : detailItem.type === "project_owner_joined" && detailItem.details?.joined_by ? (
         <div className="mt-4 text-body leading-relaxed text-foreground">
           {t(($) => $.detail.project_owner_joined_body, { name: detailItem.details.joined_by })}

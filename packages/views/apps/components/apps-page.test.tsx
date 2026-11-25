@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useEffect, useState } from "react";
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
@@ -36,6 +36,13 @@ vi.mock("../../common/use-composio-available", () => ({ useComposioAvailable: ()
 let overview: AppsOverview;
 const nav = { search: "" };
 const replace = vi.fn();
+const push = vi.fn();
+
+/** The scrolling content beside the directory's navigation. */
+const content = () => document.querySelector<HTMLElement>("[data-tab-scroll-root]")!;
+const firstGrid = () => within(content()).getAllByRole("list")[0]!;
+const directoryNav = () => screen.getByRole("navigation", { name: "Apps" });
+const navLink = (name: RegExp) => within(directoryNav()).getByRole("link", { name });
 
 beforeEach(() => {
   composio.available = true;
@@ -71,12 +78,16 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-// Re-renders with the new search on replace, like the web and desktop routers.
+// Re-renders with the new search on navigation, like the web and desktop routers.
 function RoutedAppsPage({ search }: { search: string }) {
   const [current, setCurrent] = useState(search);
   useEffect(() => setCurrent(search), [search]);
   const adapter: NavigationAdapter = {
-    push: vi.fn(), back: vi.fn(), pathname: "/acme/apps",
+    back: vi.fn(), pathname: "/acme/apps",
+    push: (url) => {
+      push(url);
+      setCurrent(url.split("?")[1] ?? "");
+    },
     replace: (url) => {
       replace(url);
       setCurrent(url.split("?")[1] ?? "");
@@ -105,11 +116,12 @@ describe("AppsPage", () => {
   it("groups apps in use, puts the ones needing attention first and counts them", async () => {
     renderPage();
     await waitFor(() =>
-      expect(within(screen.getAllByRole("list")[0]!).getAllByRole("link").map((l) => l.textContent))
+      expect(within(firstGrid()).getAllByRole("link").map((l) => l.textContent))
         .toEqual(["Gmail", "Slack", "Notion"]),
     );
-    const list = screen.getAllByRole("list")[0];
-    expect(screen.getByRole("tab", { name: /Needs attention/ })).toHaveTextContent("2");
+    const list = firstGrid();
+    expect(navLink(/^Needs attention/)).toHaveTextContent("2");
+    expect(navLink(/^In use/)).toHaveAttribute("aria-current", "page");
     expect(within(list!).getByRole("link", { name: "Notion" })).toHaveAttribute("href", "/acme/apps/notion");
     // A card with nothing to do names its agents in place of an action.
     expect(within(list!).getAllByRole("img", { name: /^Used by / }).map((el) => el.getAttribute("aria-label")))
@@ -136,10 +148,13 @@ describe("AppsPage", () => {
   it("filters by search across every tab", async () => {
     const user = userEvent.setup();
     renderPage();
-    await screen.findByRole("tab", { name: /In use/ });
-    await user.click(screen.getByRole("tab", { name: /All apps/ }));
+    await screen.findByRole("link", { name: "Linear" });
+    await user.click(navLink(/^All apps/));
     await user.type(screen.getByRole("searchbox", { name: "Search apps" }), "iss");
-    expect(within(screen.getAllByRole("list")[0]!).getAllByRole("link").map((l) => l.textContent)).toEqual(["Linear"]);
+    expect(within(firstGrid()).getAllByRole("link").map((l) => l.textContent)).toEqual(["Linear"]);
+    // The navigation counts what the search leaves.
+    expect(navLink(/^All apps/)).toHaveTextContent(/1$/);
+    expect(navLink(/^In use/)).not.toHaveTextContent(/\d/);
   });
 
   it("narrows All apps to a category from the URL and names how each app connects", async () => {
@@ -154,22 +169,26 @@ describe("AppsPage", () => {
     const user = userEvent.setup();
     nav.search = "tab=all";
     renderPage();
-    const rail = await screen.findByRole("navigation", { name: "App categories" });
-    expect(within(rail).getAllByRole("button").map((b) => b.textContent)).toEqual([
-      "All5", "Featured1", "AI & Machine Learning3", "Collaboration & Communication1", "Data & Analytics1",
+    const tavily = await screen.findByRole("link", { name: "Tavily" });
+    const categories = within(directoryNav()).getByRole("region", { name: "Categories" });
+    expect(within(categories).getAllByRole("link").map((l) => l.textContent)).toEqual([
+      "AI & Machine Learning3", "Collaboration & Communication1", "Data & Analytics1",
     ]);
+    expect(navLink(/^All apps/)).toHaveTextContent(/5$/);
+    expect(navLink(/^Featured/)).toHaveTextContent(/1$/);
     // Without a category, cards name theirs.
-    expect(screen.getByRole("link", { name: "Tavily" }).closest("li")).toHaveTextContent("Data & Analytics");
+    expect(tavily.closest("li")).toHaveTextContent("Data & Analytics");
 
-    await user.click(within(rail).getByRole("button", { name: /AI & Machine Learning/ }));
-    expect(replace).toHaveBeenLastCalledWith("/acme/apps?tab=all&category=ai_ml");
-    expect(screen.getByRole("heading", { name: /^AI & Machine Learning/ })).toHaveTextContent(/3$/);
-    const list = screen.getAllByRole("list")[0]!;
+    await user.click(navLink(/^AI & Machine Learning/));
+    expect(push).toHaveBeenLastCalledWith("/acme/apps?tab=all&category=ai_ml");
+    expect(screen.getByRole("heading", { level: 2, name: /^AI & Machine Learning/ })).toHaveTextContent(/3$/);
+    expect(navLink(/^AI & Machine Learning/)).toHaveAttribute("aria-current", "page");
+    const list = firstGrid();
     expect(within(list).getAllByRole("link").map((l) => l.textContent)).toEqual(["OpenAI", "Gemini", "Mistral"]);
     expect(within(list).getAllByText("Uses an API key")).toHaveLength(3);
 
-    await user.click(screen.getByRole("tab", { name: /In use/ }));
-    expect(replace).toHaveBeenLastCalledWith("/acme/apps");
+    await user.click(navLink(/^In use/));
+    expect(push).toHaveBeenLastCalledWith("/acme/apps");
   });
 
   it("title-cases category names Multica has no label for", async () => {
@@ -179,22 +198,82 @@ describe("AppsPage", () => {
     overview = { ...overview, team: [], agent_apps: [] };
     nav.search = "tab=all";
     renderPage();
-    const rail = await screen.findByRole("navigation", { name: "App categories" });
-    expect(within(rail).getByRole("button", { name: /^Space Exploration/ })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "A" }).closest("li")).toHaveTextContent("Space Exploration");
+    expect((await screen.findByRole("link", { name: "A" })).closest("li")).toHaveTextContent("Space Exploration");
+    expect(navLink(/^Space Exploration/)).toBeInTheDocument();
   });
 
-  it("shows a long catalog a page at a time", async () => {
-    vi.mocked(api.listAppCatalog).mockResolvedValue({ catalog_mode: "all", apps: Array.from({ length: 75 }, (_, i) => ({
-      slug: `app${i}`, name: `App ${String(i).padStart(2, "0")}`, curated: false,
-    })) });
-    overview = { ...overview, team: [], agent_apps: [] };
+  it("loads more of a long catalog as the list scrolls to its end", async () => {
+    let reachEnd!: () => void;
+    const observe = vi.fn();
+    vi.stubGlobal("IntersectionObserver", vi.fn(function Observer(callback: IntersectionObserverCallback) {
+      reachEnd = () => act(() => callback([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver));
+      return { observe, disconnect: vi.fn(), unobserve: vi.fn(), takeRecords: vi.fn() };
+    }));
+    try {
+      vi.mocked(api.listAppCatalog).mockResolvedValue({ catalog_mode: "all", apps: Array.from({ length: 75 }, (_, i) => ({
+        slug: `app${i}`, name: `App ${String(i).padStart(2, "0")}`, curated: false,
+      })) });
+      overview = { ...overview, team: [], agent_apps: [] };
+      nav.search = "tab=all";
+      renderPage();
+      await screen.findByRole("link", { name: "App 00" });
+      expect(within(firstGrid()).getAllByRole("link")).toHaveLength(60);
+      expect(screen.getByRole("heading", { level: 2, name: /^All apps/ })).toHaveTextContent(/75$/);
+      reachEnd();
+      expect(within(firstGrid()).getAllByRole("link")).toHaveLength(75);
+      expect(observe).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("does not count the catalog before it arrives, and names apps in use once it does", async () => {
+    let resolveCatalog!: (value: Awaited<ReturnType<typeof api.listAppCatalog>>) => void;
+    vi.mocked(api.listAppCatalog).mockImplementation(() => new Promise((resolve) => { resolveCatalog = resolve; }));
+    renderPage();
+    // Apps in use show without the catalog, but their names come from it.
+    const cards = await waitFor(() => {
+      const links = within(firstGrid()).getAllByRole("link");
+      expect(links).toHaveLength(3);
+      return links;
+    });
+    expect(cards.map((l) => l.textContent)).toEqual(["gmail", "slack", "notion"]);
+    expect(cards.every((l) => l.querySelector("[data-slot=skeleton]"))).toBe(true);
+    expect(navLink(/^In use/)).toHaveTextContent(/3$/);
+    expect(navLink(/^All apps/)).not.toHaveTextContent(/\d/);
+    expect(within(directoryNav()).queryByRole("region", { name: "Categories" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Popular in Acme" })).toBeInTheDocument();
+
+    resolveCatalog({ catalog_mode: "all", apps: [
+      { slug: "gmail", name: "Gmail", curated: true },
+      { slug: "notion", name: "Notion", curated: true },
+      { slug: "slack", name: "Slack", curated: true },
+      { slug: "linear", name: "Linear", category: "Issues", curated: true },
+    ] });
+    await waitFor(() => expect(navLink(/^All apps/)).toHaveTextContent(/4$/));
+    expect(within(firstGrid()).getAllByRole("link").map((l) => l.textContent)).toEqual(["Gmail", "Slack", "Notion"]);
+  });
+
+  it("says when the catalog fails to load and retries it", async () => {
+    vi.mocked(api.listAppCatalog).mockRejectedValueOnce(new Error("upstream"));
     const user = userEvent.setup();
     nav.search = "tab=all";
     renderPage();
-    await user.click(await screen.findByRole("button", { name: /Show more/ }));
-    expect(within(screen.getAllByRole("list")[0]!).getAllByRole("link")).toHaveLength(75);
-    expect(screen.queryByRole("button", { name: /Show more/ })).not.toBeInTheDocument();
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Couldn't load the app catalog.");
+    expect(navLink(/^All apps/)).not.toHaveTextContent(/\d/);
+    await user.click(within(alert).getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("link", { name: "Linear" })).toBeInTheDocument();
+    expect(navLink(/^All apps/)).toHaveTextContent(/4$/);
+  });
+
+  it("names the view when a category link's catalog fails to load", async () => {
+    vi.mocked(api.listAppCatalog).mockRejectedValueOnce(new Error("upstream"));
+    nav.search = "tab=all&category=ai_ml";
+    renderPage();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't load the app catalog.");
+    const title = screen.getByRole("heading", { level: 2, name: /^All apps/ });
+    expect(title.querySelector("[data-slot=skeleton]")).toBeNull();
   });
 
   it("recovers an empty saved catalog only after an admin confirms", async () => {
@@ -229,7 +308,7 @@ describe("AppsPage", () => {
     (window as { desktopAPI?: unknown }).desktopAPI = { pickDirectory: vi.fn() };
     try {
       renderPage();
-      await screen.findByRole("tab", { name: /In use/ });
+      await screen.findByRole("link", { name: "Gmail" });
       expect(api.getAppsOverview).toHaveBeenCalledTimes(1);
       fireEvent.focus(window);
       await waitFor(() => expect(api.getAppsOverview).toHaveBeenCalledTimes(2));
@@ -240,7 +319,7 @@ describe("AppsPage", () => {
 
   it("does not reload on focus on the web, where the flow returns to this tab", async () => {
     renderPage();
-    await screen.findByRole("tab", { name: /In use/ });
+    await screen.findByRole("link", { name: "Gmail" });
     fireEvent.focus(window);
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(api.getAppsOverview).toHaveBeenCalledTimes(1);
@@ -293,9 +372,9 @@ describe("AppsPage › Accounts", () => {
     const team = await screen.findByRole("region", { name: "Team accounts" });
     await within(team).findByText("Slack");
     expect(within(team).getAllByText(/^(Notion|Linear|Slack)$/).map((el) => el.textContent)).toEqual(["Notion", "Linear", "Slack"]);
-    expect(screen.getByRole("tab", { name: /Accounts/ })).toHaveTextContent("5");
+    expect(navLink(/^Accounts/)).toHaveTextContent(/5$/);
     expect(within(row("team", "notion")).getAllByText("Needs reconnecting").length).toBeGreaterThan(0);
-    expect(within(row("team", "linear")).getAllByText(/Requested · admins notified/).length).toBeGreaterThan(0);
+    expect(within(row("team", "linear")).getAllByText(/Requested · admin notified/).length).toBeGreaterThan(0);
     expect(row("team", "linear")).toHaveTextContent("Name a2 needs it");
     // A member asks an admin; nothing connects an account apart from an app.
     expect(within(row("team", "notion")).getByRole("button", { name: "Ask an admin" })).toBeInTheDocument();
@@ -326,7 +405,7 @@ describe("AppsPage › Accounts", () => {
     await waitFor(() => expect(row("personal", "gmail")).toHaveTextContent("used by Name a1, Name shared"));
     expect(row("personal", "gmail")).not.toHaveTextContent("others-private");
     expect(row("personal", "youtube")).toBeNull();
-    expect(screen.getByRole("tab", { name: /Accounts/ })).toHaveTextContent("5");
+    expect(navLink(/^Accounts/)).toHaveTextContent(/5$/);
   });
 
   it("gives an admin Connect and Decline on a requested team account", async () => {
@@ -365,20 +444,35 @@ describe("AppsPage › Accounts", () => {
     nav.search = "";
     const user = userEvent.setup();
     renderPage();
-    await user.click(await screen.findByRole("tab", { name: /Accounts/ }));
-    expect(replace).toHaveBeenLastCalledWith("/acme/apps?tab=accounts");
+    await screen.findByRole("link", { name: "Gmail" });
+    await user.click(navLink(/^Accounts/));
+    expect(push).toHaveBeenLastCalledWith("/acme/apps?tab=accounts");
     await user.type(screen.getByRole("searchbox", { name: "Search apps" }), "not");
     const team = screen.getByRole("region", { name: "Team accounts" });
     expect(within(team).getByText("Notion")).toBeInTheDocument();
     expect(within(team).queryByText("Slack")).not.toBeInTheDocument();
     expect(within(screen.getByRole("region", { name: "Your accounts" })).getByText("You haven't connected any accounts in this workspace.")).toBeInTheDocument();
+    expect(navLink(/^Accounts/)).toHaveTextContent(/1$/);
   });
 
-  it("follows the URL when it changes outside the tabs, e.g. the sidebar link or Back", async () => {
+  it("counts accounts the search finds by slug, as the list does", async () => {
+    vi.mocked(api.listAppCatalog).mockResolvedValue({ catalog_mode: "all", apps: [
+      { slug: "googlecalendar", name: "Google Calendar", curated: true },
+    ] });
+    overview.personal = [{ id: "p-cal", toolkit_slug: "googlecalendar", status: "active", connected_at: "", last_used_at: null }];
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole("region", { name: "Your accounts" }).then((yours) => within(yours).findByText("Google Calendar"));
+    await user.type(screen.getByRole("searchbox", { name: "Search apps" }), "googlecalendar");
+    expect(within(screen.getByRole("region", { name: "Your accounts" })).getByText("Google Calendar")).toBeInTheDocument();
+    expect(navLink(/^Accounts/)).toHaveTextContent(/1$/);
+  });
+
+  it("follows the URL when it changes outside the page, e.g. the sidebar link or Back", async () => {
     const { navigate } = renderPage();
     expect(await screen.findByRole("region", { name: "Team accounts" })).toBeInTheDocument();
     navigate("");
-    await waitFor(() => expect(screen.getByRole("tab", { name: /In use/ })).toHaveAttribute("aria-selected", "true"));
+    await waitFor(() => expect(navLink(/^In use/)).toHaveAttribute("aria-current", "page"));
     expect(screen.queryByRole("region", { name: "Team accounts" })).not.toBeInTheDocument();
     navigate("tab=accounts");
     expect(await screen.findByRole("region", { name: "Team accounts" })).toBeInTheDocument();

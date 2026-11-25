@@ -1237,10 +1237,16 @@ export function useRealtimeSync(
       if (specificEvents.has(msg.type)) return;
       const prefix = msg.type.split(":")[0] ?? "";
       if (prefix === "task" && msg.type !== "task:progress") {
-        const payload = msg.payload as { issue_id?: unknown };
+        const payload = msg.payload as { issue_id?: unknown; doc_id?: unknown };
         const issueId = typeof payload?.issue_id === "string" && payload.issue_id ? payload.issue_id : null;
-        // Debounce per issue so simultaneous runs cannot erase each other's refresh.
-        debouncedRefresh(`issue-task:${issueId ?? "all"}`, () => {
+        const docId = typeof payload?.doc_id === "string" && payload.doc_id ? payload.doc_id : null;
+        const wsId = getCurrentWsId();
+        // A doc discussion run only changes that doc's run status.
+        if (docId) {
+          if (wsId) debouncedRefresh(`doc-task:${docId}`, () => {
+            qc.invalidateQueries({ queryKey: docKeys.tasks(wsId, docId) });
+          });
+        } else debouncedRefresh(`issue-task:${issueId ?? "all"}`, () => {
           qc.invalidateQueries({ queryKey: issueId ? issueKeys.tasks(issueId) : issueKeys.tasksAll() });
           // Events don't carry the ancestor chain needed to scope subtree projections.
           if (issueId) qc.invalidateQueries({ queryKey: issueKeys.tasksAll(), predicate: (q) => q.queryKey[3] === "subtree" });
@@ -1276,7 +1282,7 @@ export function useRealtimeSync(
     const unsubIssueUpdated = ws.on("issue:updated", (p) => {
       const payload = p as IssueUpdatedPayload;
       const { issue } = payload;
-      if (payload.status_changed || payload.parent_changed || payload.stage_changed) {
+      if (payload.status_changed || payload.parent_changed || payload.stage_changed || payload.blockers_changed) {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({queryKey: issueKeys.all(wsId)});
       }
@@ -1323,7 +1329,8 @@ export function useRealtimeSync(
       const wsId = getCurrentWsId();
       if (wsId) {
         onIssueCreated(qc, wsId, issue);
-        if (issue.parent_issue_id && issue.stage != null) qc.invalidateQueries({queryKey:issueKeys.all(wsId)});
+        // A new issue created waiting on others shows up under their `blocking`.
+        if ((issue.parent_issue_id && issue.stage != null) || issue.blocked_by?.some((b) => b.via === "manual")) qc.invalidateQueries({queryKey:issueKeys.all(wsId)});
       }
     });
 

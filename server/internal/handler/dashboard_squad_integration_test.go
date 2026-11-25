@@ -11,6 +11,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // TestDashboardSquadAttributionAndEndpoints verifies the end-to-end Squad usage
@@ -443,6 +444,63 @@ func TestSquadInheritanceAndDaemonClaimSafety(t *testing.T) {
 	}
 	if childTask.IsLeaderTask {
 		t.Fatalf("sub-issue task must have is_leader_task=false")
+	}
+
+	// Case D: On a squad-created sub-issue, a member directly @mentioning an
+	// agent outside the squad starts a standalone run, and so does that agent
+	// handing on to another outside agent; the same mention of a squad member
+	// stays the squad's (MUL-10072).
+	dbfx.Exec(t, `DELETE FROM agent_task_queue WHERE id = $1`, uuidToString(childTask.ID))
+	outsiderRuntimeID := createClaimReclaimRuntime(t, ctx, "inherit-outsider-rt")
+	outsiderID, _ := createClaimReclaimAgentAndIssue(t, ctx, outsiderRuntimeID, "inherit-outsider")
+	mentionByMember := func(agentID string) db.AgentTaskQueue {
+		t.Helper()
+		var cid string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content)
+			VALUES ($1, $2, 'member', $3, 'please take a look')
+			RETURNING id
+		`, testWorkspaceID, childIssueID, testUserID).Scan(&cid); err != nil {
+			t.Fatalf("create member comment: %v", err)
+		}
+		t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM comment WHERE id = $1`, cid) })
+		task, err := testHandler.TaskService.EnqueueTaskForMention(ctx, childIssue, parseUUID(agentID), parseUUID(cid), service.OriginNamed)
+		if err != nil {
+			t.Fatalf("EnqueueTaskForMention(%s): %v", agentID, err)
+		}
+		t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, uuidToString(task.ID)) })
+		return task
+	}
+	outsiderTask := mentionByMember(outsiderID)
+	if outsiderTask.UsageSquadID.Valid || outsiderTask.SquadID.Valid {
+		t.Fatalf("member mention of an outside agent on a squad sub-issue must be standalone, got usage_squad=%q squad=%q",
+			uuidToString(outsiderTask.UsageSquadID), uuidToString(outsiderTask.SquadID))
+	}
+	// That outside agent handing on to another outside agent is not the
+	// squad's either, though the hop is a delegation.
+	secondRuntimeID := createClaimReclaimRuntime(t, ctx, "inherit-outsider2-rt")
+	secondOutsiderID, _ := createClaimReclaimAgentAndIssue(t, ctx, secondRuntimeID, "inherit-outsider2")
+	var handoffID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content, source_task_id)
+		VALUES ($1, $2, 'agent', $3, 'please review', $4)
+		RETURNING id
+	`, testWorkspaceID, childIssueID, outsiderID, uuidToString(outsiderTask.ID)).Scan(&handoffID); err != nil {
+		t.Fatalf("create outside agent handoff comment: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM comment WHERE id = $1`, handoffID) })
+	handoffTask, err := testHandler.TaskService.EnqueueTaskForMention(ctx, childIssue, parseUUID(secondOutsiderID), parseUUID(handoffID), service.OriginNamed)
+	if err != nil {
+		t.Fatalf("EnqueueTaskForMention(second outsider): %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, uuidToString(handoffTask.ID)) })
+	if handoffTask.UsageSquadID.Valid {
+		t.Fatalf("outside agent handing on to another outside agent usage_squad_id = %q, want NULL (source %q)",
+			uuidToString(handoffTask.UsageSquadID), handoffTask.OriginatorSource.String)
+	}
+	dbfx.Exec(t, `INSERT INTO squad_member (squad_id, member_type, member_id, role) VALUES ($1, 'agent', $2, '')`, squadID, memberID)
+	if task := mentionByMember(memberID); uuidToString(task.UsageSquadID) != squadID {
+		t.Fatalf("member mention of a squad member on a squad sub-issue usage_squad_id = %q, want %q", uuidToString(task.UsageSquadID), squadID)
 	}
 
 	// Case C: Standalone human-created issue assigned to memberID stays usage_squad_id = NULL & squad_id = NULL.

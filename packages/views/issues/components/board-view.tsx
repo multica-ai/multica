@@ -8,7 +8,6 @@ import { useQuery } from "@tanstack/react-query";
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
   useSensor,
   useSensors,
   type DragStartEvent,
@@ -28,7 +27,7 @@ import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
 import { propertyListOptions, useSetIssueProperty, useUnsetIssueProperty } from "@multica/core/properties";
 import { useWorkspaceId } from "@multica/core/hooks";
-import type { IssueGrouping } from "@multica/core/issues/stores/view-store";
+import type { IssueGrouping, StaticSortField } from "@multica/core/issues/stores/view-store";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { BoardColumn, BOARD_CARD_WIDTH, type BoardColumnGroup } from "./board-column";
 import { BoardWorkflowContext, type BoardWorkflowContextValue } from "./board-workflow-context";
@@ -56,6 +55,7 @@ import type {
   IssueGroupBranches,
   IssueGroupPageState,
 } from "../surface/use-issue-group-branches";
+import { SORT_LABEL_KEY } from "../utils/sort-label";
 import { useDragSettle } from "./use-drag-settle";
 import { createIssueDropAnimation, ISSUE_DRAG_OVERLAY_CLASS } from "./drag-drop-animation";
 import { useIssuePeekActions } from "../surface/peek-context";
@@ -76,6 +76,7 @@ import {
   getMoveUpdates,
   propertyGroupId,
   projectGroupId,
+  IssueCardPointerSensor,
 } from "../utils/drag-utils";
 import { useStatusLabel } from "../utils/status-label";
 
@@ -337,13 +338,12 @@ function BoardViewImpl({
     },
     [setIssuePropertyMutation, t, unsetIssuePropertyMutation],
   );
-  const sortFieldKey = sortBy === "created_at" ? "created" : sortBy;
   const sortPropertyId = propertyIdFromViewKey(sortBy);
   const sortLabel = sortBy !== "position"
     ? t(($) => $.board.ordered_by, {
         field: sortPropertyId
           ? workspaceProperties.find((p) => p.id === sortPropertyId)?.name ?? ""
-          : t(($) => $.display[`sort_${sortFieldKey}` as keyof typeof $.display]),
+          : t(($) => $.display[SORT_LABEL_KEY[sortBy as StaticSortField]]),
       })
     : null;
   const { getActorName } = useActorName();
@@ -577,7 +577,7 @@ function BoardViewImpl({
   }
 
   const sensors = useSensors(
-    useSensor(PointerSensor, {
+    useSensor(IssueCardPointerSensor, {
       activationConstraint: { distance: 5 },
     })
   );

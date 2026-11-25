@@ -162,6 +162,12 @@ func SupportsTaskSupplement(provider, version string) bool {
 		// 2026.10.14 is the oldest build verified to forward postToolUse
 		// additional_context into the model turn in --print mode.
 		minimum = "2026.10.14"
+	case "hermes":
+		// 0.22.3 is the oldest Hermes Agent whose gateway ACP answers `/steer`
+		// with an acknowledgement and keeps late guidance inside the running
+		// admission. The backend also requires the session to advertise the
+		// command; jcode shares this provider and is gated out by the daemon.
+		minimum = "0.22.3"
 	default:
 		return false
 	}

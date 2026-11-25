@@ -204,11 +204,12 @@ func TestTerminalReportReplaysAfterDaemonRestart(t *testing.T) {
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	report := terminalTaskReport{
-		kind:          terminalTaskReportFail,
-		taskID:        "task-restart",
-		errorMessage:  "provider failed after doing useful work",
-		branchName:    "agent/partial-work",
-		failureReason: "agent_error.process_failure",
+		kind:               terminalTaskReportFail,
+		taskID:             "task-restart",
+		errorMessage:       "stream disconnected before any tool calls",
+		branchName:         "agent/partial-work",
+		failureReason:      "agent_error.provider_network",
+		noToolCallsStarted: true,
 	}
 
 	beforeRestart := New(cfg, logger)

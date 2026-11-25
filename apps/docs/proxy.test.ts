@@ -8,8 +8,13 @@ import nextConfig from "./next.config.mjs";
 import { config, markdownRewritePath, proxy } from "./proxy";
 
 describe("docs locale proxy matcher", () => {
-  it.each(["/docs/icon.svg", "/docs/icon.svg?icon.1234.svg"])(
-    "serves the favicon without a locale rewrite at %s",
+  it.each([
+    "/docs/icon.svg",
+    "/docs/icon.svg?icon.1234.svg",
+    "/docs/videos/demos/assign-light.mp4",
+    "/docs/videos/demos/assign-light.jpg",
+  ])(
+    "serves static assets without a locale rewrite at %s",
     (url) => {
       expect(unstable_doesMiddlewareMatch({ config, nextConfig, url })).toBe(false);
     },
