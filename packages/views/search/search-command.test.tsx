@@ -1648,5 +1648,38 @@ describe("SearchCommand", () => {
 
       expect(selectedValue()).toBe("doc:doc-oncall");
     });
+
+    it("scrolls the list back to the top row it selects", async () => {
+      const user = userEvent.setup();
+      await typeRunbook(user);
+      const list = document.querySelector<HTMLElement>("[cmdk-list]")!;
+      list.scrollTop = 120;
+      await landIssues();
+
+      expect(selectedValue()).toBe("issue-runbook");
+      expect(list.scrollTop).toBe(0);
+    });
+
+    it("ignores pointer moves over headings and disabled rows", async () => {
+      const user = userEvent.setup();
+      await typeRunbook(user);
+      fireEvent.pointerMove(screen.getByText("Docs"));
+      const handRow = document.querySelector<HTMLElement>('[cmdk-item=""][data-value="hand-to-agent"]')!;
+      expect(handRow).toHaveAttribute("aria-disabled", "true");
+      fireEvent.pointerMove(handRow);
+      await landIssues();
+
+      expect(selectedValue()).toBe("issue-runbook");
+    });
+
+    it("keeps a row the pointer moved to while results land", async () => {
+      const user = userEvent.setup();
+      await typeRunbook(user);
+      fireEvent.pointerMove(document.querySelector('[cmdk-item=""][data-value="doc:doc-oncall"]')!);
+      expect(selectedValue()).toBe("doc:doc-oncall");
+      await landIssues();
+
+      expect(selectedValue()).toBe("doc:doc-oncall");
+    });
   });
 });

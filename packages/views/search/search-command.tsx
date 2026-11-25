@@ -157,6 +157,7 @@ function PaletteBody({
 }
 
 const PALETTE_NAV_DURATION = 0.14;
+const ENABLED_ITEM = '[cmdk-item=""]:not([aria-disabled="true"])';
 
 /** Keys cmdk moves the selection on: arrows, and ⌃N/⌃J/⌃P/⌃K. */
 function isSelectionKey(e: Pick<KeyboardEvent, "key" | "ctrlKey">) {
@@ -283,10 +284,15 @@ function PaletteFrame({
   const model = useRootModel(rawQuery, contexts, { active: true });
 
   useLayoutEffect(() => {
-    if (!active || selectionMovedRef.current) return;
-    const first = listRef.current?.querySelector('[cmdk-item=""]:not([aria-disabled="true"])');
+    const list = listRef.current;
+    if (!active || !list || selectionMovedRef.current) return;
+    const first = list.querySelector(ENABLED_ITEM);
     const value = first?.getAttribute("data-value");
-    if (value && value !== selected) setSelected(value);
+    if (!first || !value || value === selected) return;
+    setSelected(value);
+    // cmdk scrolls only selections it makes itself, and this one lands first.
+    list.scrollTop = 0;
+    first.scrollIntoView({ block: "nearest" });
   }, [active, selected, model, current, pageQuery]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -362,9 +368,9 @@ function PaletteFrame({
 
         <CommandPrimitive.List
           ref={listRef}
-          // cmdk selects the row under a moving pointer.
-          onPointerMove={() => {
-            selectionMovedRef.current = true;
+          // cmdk selects the enabled row under a moving pointer, and nothing else.
+          onPointerMove={(e) => {
+            if ((e.target as Element).closest(ENABLED_ITEM)) selectionMovedRef.current = true;
           }}
           style={listHeight !== undefined ? { height: listHeight } : undefined}
           className={cn(
