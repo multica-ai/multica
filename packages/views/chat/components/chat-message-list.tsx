@@ -1438,7 +1438,7 @@ function ToolCallRow({ item }: { item: ChatTimelineItem }) {
             !hasInput && "invisible",
           )}
         />
-        <span className="font-medium text-foreground shrink-0">{item.tool}</span>
+        <span title={item.tool} className="max-w-[60%] shrink-0 truncate font-medium text-foreground">{item.tool}</span>
         {summary && <span className="truncate text-muted-foreground">{summary}</span>}
       </CollapsibleTrigger>
       {hasInput && (
