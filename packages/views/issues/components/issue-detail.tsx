@@ -78,7 +78,7 @@ import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, Command
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
-import { COMPOSER_DOCK_GAP, ComposerDock, JumpToLatestButton } from "./composer-dock";
+import { BackToTopButton, COMPOSER_DOCK_GAP, ComposerDock, JumpToLatestButton } from "./composer-dock";
 import { InboxIssueActions, IssueBarActions } from "./inbox-issue-actions";
 import { useInboxSelectionStore, type InboxTransitionDirection } from "@multica/core/inbox/selection-store";
 import { useReducedMotion } from "@multica/core/appearance";
@@ -224,6 +224,7 @@ import { revealTimelineList, scrollToTimelineComment } from "../utils/scroll-to-
 import { buildTimelineFindUnits, type TimelineFindUnit } from "../utils/timeline-find-units";
 import { estimateTimelineItemHeights, timelineCharsPerLine } from "../utils/timeline-height-estimates";
 import { useJumpToLatest } from "../hooks/use-jump-to-latest";
+import { useBackToTop } from "../hooks/use-back-to-top";
 import { useNewCommentsWhileAway } from "../hooks/use-new-comments-while-away";
 import { useInPageFind } from "../hooks/use-in-page-find";
 import { useStickyComposer } from "../hooks/use-sticky-composer";
@@ -2201,6 +2202,9 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
     nearTopOnly: isMobile,
     tailPending: timelineTail.issueId === id && timelineTail.pending,
   });
+  // All platforms: the ThreadMinimap rail has no tick for the top of the
+  // document, and it is not rendered on mobile or in the peek.
+  const backToTop = useBackToTop(scrollContainerEl);
   // Keyed to `away`, not `visible`: mobile hides the button past the top of
   // the page, but the reader has not reached the new comments there.
   const newComments = useNewCommentsWhileAway(timeline, {
@@ -3774,6 +3778,9 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
       count={newComments.ids.length}
     />
   ) : null;
+  const backToTopButton = backToTop.visible ? (
+    <BackToTopButton key="back-to-top" onClick={backToTop.toTop} label={t(($) => $.timeline.back_to_top)} />
+  ) : null;
 
   const showHeaderIssueActions = !guest && !inbox && !isPeek && !isMobile && !sidebarOpen;
 
@@ -4576,8 +4583,9 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
               page background and is invisible), and pb-4 so the card floats
               off the viewport edge — with -mb-4 giving the padding back to
               the column's py-8 so the at-rest layout doesn't shift. */}
-          {/* The composer dock: the Inbox's group and "Jump to latest"
-              (MUL-8324, MUL-8951) float just above the composer's top edge.
+          {/* The composer dock: the Inbox's group, "Jump to latest"
+              (MUL-8324, MUL-8951) at the right edge and "Back to top" at
+              the left float just above the composer's top edge.
               With the sticky composer the dock rides the composer itself;
               without it, it rides a zero-height sticky anchor just above the
               composer, which holds it off the viewport bottom (clear of a
@@ -4588,7 +4596,7 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
           <IssueAppRequests issueId={id} highlightId={highlightAppRequestId} highlightToken={highlightRequestToken} />
           {!stickyComposer && (
             <div className={cn("sticky bottom-6 z-10 h-0 max-md:above-chat-launcher", inboxBar && "mt-14")}>
-              <ComposerDock className="bottom-0" inboxBar={inboxBar} jump={jumpToLatestButton} />
+              <ComposerDock className="bottom-0" inboxBar={inboxBar} jump={jumpToLatestButton} top={backToTopButton} />
             </div>
           )}
           <div
@@ -4606,7 +4614,7 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
                 next keystroke would flush it into the new issue's
                 draft key. */}
             {stickyComposer && (
-              <ComposerDock className="bottom-full mb-3" inboxBar={inboxBar} jump={jumpToLatestButton} />
+              <ComposerDock className="bottom-full mb-3" inboxBar={inboxBar} jump={jumpToLatestButton} top={backToTopButton} />
             )}
             {!landingChromeHeld && (
               <CommentInput

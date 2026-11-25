@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "@multica/core/appearance";
-import { ArrowDown } from "@multica/ui/icons";
+import { ArrowDown, ArrowUp } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { UI_EASE_IN, UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
@@ -15,17 +15,21 @@ const JUMP_COUNT_CAP = 9;
 
 /**
  * What floats over the end of the timeline, just above the composer: the
- * Inbox's group centred (`inboxBar`) and Jump to latest at the right edge,
- * on one line. Neither takes layout. The row is the `@container/inbox-bar`
- * the group's labels give way to, so they collapse before the two can meet.
+ * Inbox's group centred (`inboxBar`), Jump to latest at the right edge and
+ * Back to top at the left, on one line. Neither edge affordance takes
+ * layout. The row is the `@container/inbox-bar` the group's labels give
+ * way to, so they collapse before they can reach either edge.
  */
 export function ComposerDock({
   inboxBar,
   jump,
+  top,
   className,
 }: {
   inboxBar?: ReactNode;
   jump: ReactNode;
+  /** The dock's left-edge affordance — Back to top. */
+  top?: ReactNode;
   /** Where the row sits: over the sticky composer, or pinned to the viewport bottom. */
   className: string;
 }) {
@@ -37,6 +41,7 @@ export function ComposerDock({
         className,
       )}
     >
+      <AnimatePresence initial={false}>{top}</AnimatePresence>
       {inboxBar && <div className="flex min-w-0 max-w-[calc(100%-6rem)] justify-center">{inboxBar}</div>}
       <AnimatePresence initial={false}>{jump}</AnimatePresence>
     </div>
@@ -100,6 +105,52 @@ export function JumpToLatestButton({
               {count > JUMP_COUNT_CAP ? `${JUMP_COUNT_CAP}+` : count}
             </span>
           )}
+        </Button>
+      </TooltipHint>
+    </motion.div>
+  );
+}
+
+/**
+ * Back to top (#9805): the dock's left-edge mirror of Jump to latest — a
+ * round button that returns the reader to the top of the document once
+ * they are more than a viewport below it. Its name says the rest, in the
+ * tooltip.
+ */
+export function BackToTopButton({ onClick, label }: { onClick: () => void; label: string }) {
+  const reduceMotion = useReducedMotion();
+  return (
+    <motion.div
+      initial={reduceMotion ? false : { opacity: 0, y: 8, scale: 0.96 }}
+      animate={{
+        opacity: 1,
+        y: 0,
+        scale: 1,
+        transition: { duration: reduceMotion ? 0 : UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
+      }}
+      exit={
+        reduceMotion
+          ? { opacity: 0, transition: { duration: 0 } }
+          : {
+              opacity: 0,
+              y: 6,
+              scale: 0.96,
+              transition: { duration: UI_MOTION_DURATION.micro, ease: UI_EASE_IN },
+            }
+      }
+      className="pointer-events-auto absolute left-0 top-1/2 -mt-5"
+    >
+      <TooltipHint label={label} side="top">
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          aria-label={label}
+          onClick={onClick}
+          // eslint-disable-next-line no-restricted-syntax -- back to top, the left-edge mirror of jump to latest
+          className="relative size-10 rounded-full bg-background shadow-lg dark:bg-background dark:hover:bg-muted"
+        >
+          <ArrowUp />
         </Button>
       </TooltipHint>
     </motion.div>
