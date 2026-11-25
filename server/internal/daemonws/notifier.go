@@ -138,6 +138,34 @@ func (n *RelayNotifier) NotifyPendingWork(runtimeID, kind string) {
 	M.WakeupPublishedTotal.Add(1)
 }
 
+// NotifyFileChangesRequested fans a runtime-scoped "pull file change requests
+// now" hint out to the local hub and, when Redis is configured, through the
+// relay so the API node that actually holds the daemon's WebSocket delivers
+// it. Shard key is the runtime ID, mirroring NotifyPendingWork.
+func (n *RelayNotifier) NotifyFileChangesRequested(runtimeID string) {
+	if runtimeID == "" {
+		return
+	}
+	eventID := ulid.Make().String()
+	if n.local != nil {
+		n.local.notifyFileChangesRequested(runtimeID, eventID)
+	}
+	if n.relay == nil {
+		return
+	}
+	frame, err := fileChangesRequestedFrame(runtimeID)
+	if err != nil {
+		M.WakeupPublishErrors.Add(1)
+		return
+	}
+	if err := n.relay.PublishWithID(realtime.ScopeDaemonRuntime, runtimeID, "", frame, eventID); err != nil {
+		M.WakeupPublishErrors.Add(1)
+		slog.Warn("daemon websocket file changes publish failed", "error", err, "runtime_id", runtimeID)
+		return
+	}
+	M.WakeupPublishedTotal.Add(1)
+}
+
 // NotifyRuntimeGone invalidates a deleted runtime on the local daemon
 // connection and on any connection held by another API node.
 func (n *RelayNotifier) NotifyRuntimeGone(runtimeID string) {

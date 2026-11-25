@@ -202,6 +202,12 @@ const (
 	// itself: the daemon still pulls the request through the normal heartbeat
 	// claim, so a lost or duplicated hint is harmless.
 	EventDaemonPendingWork = "daemon:pending_work"
+	// EventDaemonFileChangesRequested is a runtime-scoped hint that run file
+	// change bodies are being requested for that runtime. Like
+	// EventDaemonPendingWork it carries no work itself: the daemon pulls the
+	// requests over HTTP, so a lost or duplicated hint is harmless — it only
+	// costs latency until the next user retry.
+	EventDaemonFileChangesRequested = "daemon:file_changes_requested"
 	// Generic daemon→server request/response over the WebSocket control
 	// connection (MUL-4257). The daemon sends EventDaemonRPCRequest with a
 	// correlation id + method + body; the server replies EventDaemonRPCResponse

@@ -202,6 +202,14 @@ type DaemonPendingWorkNotifier interface {
 	NotifyPendingWork(runtimeID, kind string)
 }
 
+// DaemonFileChangesRequestedNotifier pushes "pull file change requests now"
+// hints for queued run file change body relays. Optional: when nil,
+// notifyDaemonFileChangesRequested falls back to the local DaemonHub, which is
+// the correct delivery scope for a single-node deployment.
+type DaemonFileChangesRequestedNotifier interface {
+	NotifyFileChangesRequested(runtimeID string)
+}
+
 // DaemonTaskSupplementNotifier sends a content-free wakeup for one exact run.
 // The daemon still pulls and authenticates the durable supplement over HTTP.
 type DaemonTaskSupplementNotifier interface {
@@ -278,8 +286,19 @@ type Handler struct {
 	// heartbeat-carried requests (MUL-5444). Optional: when nil,
 	// requestDaemonPendingWork falls back to the local DaemonHub, which is the
 	// correct delivery scope for a single-node deployment.
-	DaemonPendingWork    DaemonPendingWorkNotifier
-	DaemonTaskSupplement DaemonTaskSupplementNotifier
+	DaemonPendingWork DaemonPendingWorkNotifier
+	// DaemonFileChangesRequested pushes "pull file change requests now" hints
+	// for run file change body relays. Same fallback rules as
+	// DaemonPendingWork.
+	DaemonFileChangesRequested DaemonFileChangesRequestedNotifier
+	DaemonTaskSupplement       DaemonTaskSupplementNotifier
+	// FileChangeRelayStore holds run file change body relay requests between
+	// the user's GET and the daemon's POST. Nil disables the relay
+	// (single-node tests); New() installs the in-memory store and the router
+	// upgrades it to Redis when Redis is configured.
+	FileChangeRelayStore FileChangeRelayStore
+	// fileChangeRelaySlots caps concurrent waiting relays per API instance.
+	fileChangeRelaySlots chan struct{}
 	// ModelCatalogCache serves the last known good model list for a runtime so
 	// the picker can render without waiting for a daemon round trip
 	// (stale-while-revalidate, MUL-5444). Nil-safe: every call site treats a nil
@@ -553,6 +572,8 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		ModelCatalogCache:            NewInMemoryModelCatalogCache(),
 		LocalSkillListStore:          NewInMemoryLocalSkillListStore(),
 		LocalSkillImportStore:        NewInMemoryLocalSkillImportStore(),
+		FileChangeRelayStore:         NewInMemoryFileChangeRelayStore(),
+		fileChangeRelaySlots:         make(chan struct{}, fileChangeRelayMaxInFlight),
 		LivenessStore:                NewNoopLivenessStore(),
 		HeartbeatScheduler:           NewPassthroughHeartbeatScheduler(queries),
 		Storage:                      store,

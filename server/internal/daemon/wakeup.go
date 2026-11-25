@@ -446,6 +446,19 @@ func (d *Daemon) readTaskWakeupMessagesForConnection(conn *websocket.Conn, taskW
 			// Own goroutine: the hint triggers an HTTP heartbeat plus the work it
 			// claims, and the read pump must stay free for the next frame.
 			go d.handlePendingWorkHint(payload.RuntimeID, payload.Kind)
+		case protocol.EventDaemonFileChangesRequested:
+			var payload protocol.FileChangesRequestedPayload
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				d.logger.Debug("file changes requested websocket invalid payload", "error", err)
+				continue
+			}
+			if payload.RuntimeID == "" {
+				d.logger.Debug("file changes requested websocket missing runtime_id")
+				continue
+			}
+			// Own goroutine: the hint leads to HTTP pulls and local git reads,
+			// and the read pump must stay free for the next frame.
+			go d.handleFileChangesRequested(payload.RuntimeID)
 		case protocol.EventDaemonHeartbeatAck:
 			var ack HeartbeatResponse
 			if err := json.Unmarshal(msg.Payload, &ack); err != nil {

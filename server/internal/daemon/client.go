@@ -923,6 +923,34 @@ func (c *Client) ReportLocalSkillImportResult(ctx context.Context, runtimeID, re
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/local-skills/import/%s/result", runtimeID, requestID), result, nil)
 }
 
+// FileChangeRequest is one queued "fetch this file body from the pinned trees"
+// order the daemon claims after a file_changes_requested hint.
+type FileChangeRequest struct {
+	RequestID string    `json:"request_id"`
+	TaskID    string    `json:"task_id"`
+	FileID    string    `json:"file_id"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// GetPendingFileChangeRequests claims every pending run file change body
+// request for the runtime. A 404 means the server predates the relay; the
+// daemon stops probing instead of hammering a route that will never exist.
+func (c *Client) GetPendingFileChangeRequests(ctx context.Context, runtimeID string) ([]FileChangeRequest, error) {
+	var resp struct {
+		Requests []FileChangeRequest `json:"requests"`
+	}
+	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/file-change-requests", runtimeID), &resp); err != nil {
+		return nil, err
+	}
+	return resp.Requests, nil
+}
+
+// PostFileChangeResponse delivers the fetched file body (state "ok") or a
+// purged marker to the server's relay mailbox.
+func (c *Client) PostFileChangeResponse(ctx context.Context, requestID string, body any) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/file-change-requests/%s", requestID), body, nil)
+}
+
 // WorkspaceInfo holds minimal workspace metadata returned by the API.
 type WorkspaceInfo struct {
 	ID   string `json:"id"`

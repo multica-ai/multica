@@ -1875,6 +1875,15 @@ type RemoteAppOauthClient struct {
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 }
 
+type RunFileChange struct {
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	TaskID       pgtype.UUID        `json:"task_id"`
+	CollectionID pgtype.UUID        `json:"collection_id"`
+	Manifest     []byte             `json:"manifest"`
+	Bodies       []byte             `json:"bodies"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
 type RuntimeProfile struct {
 	ID             pgtype.UUID        `json:"id"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`

@@ -115,6 +115,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"lark_installation":                  workspaceDelete,
 	"lark_outbound_card_message":         workspaceDelete,
 	"lark_user_binding":                  workspaceDelete,
+	"run_file_change":                    workspaceDelete,
 	"maintenance_job":                    workspaceDeleteKeep, // Global maintenance audit history, not workspace-owned.
 	"member":                             workspaceDelete,
 	"member_search_access":               workspaceDelete,
