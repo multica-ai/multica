@@ -153,6 +153,8 @@
   },
   "kept": {
     "archived": "Archivado",
+    "undo_archive": "Deshacer archivado",
+    "unsubscribed": "Te diste de baja",
     "leaves": "Sale de la bandeja al continuar",
     "filtered": "Ya no coincide con tus filtros",
     "changed_status": "Estado cambiado a {{status}}",

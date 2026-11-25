@@ -43,16 +43,28 @@ type IssueBlockerResponse struct {
 }
 
 func writeIssueBlockerError(w http.ResponseWriter, err error) bool {
-	if errors.Is(err, service.ErrIssueBlockerNotFound) || errors.Is(err, service.ErrIssueBlockerSelf) {
+	if errors.Is(err, service.ErrIssueBlockerNotFound) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return true
 	}
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && strings.HasPrefix(pgErr.ConstraintName, "issue_blocker_") {
-		writeError(w, http.StatusBadRequest, pgErr.Message)
+	if message, ok := issueBlockerConflict(err); ok {
+		writeError(w, http.StatusBadRequest, message)
 		return true
 	}
 	return false
+}
+
+// issueBlockerConflict reports a dependency rule the written issue itself would
+// break, and the sentence to show for it.
+func issueBlockerConflict(err error) (string, bool) {
+	if errors.Is(err, service.ErrIssueBlockerSelf) {
+		return err.Error(), true
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && strings.HasPrefix(pgErr.ConstraintName, "issue_blocker_") {
+		return pgErr.Message, true
+	}
+	return "", false
 }
 
 func (h *Handler) parseBlockerIDs(w http.ResponseWriter, values []string) ([]pgtype.UUID, bool) {

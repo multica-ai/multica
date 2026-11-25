@@ -1283,7 +1283,11 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		)
 	})
 
-	// task:completed — no inbox notification (completion is visible from status change)
+	// task:completed — no notification of its own; a squad leader run that
+	// ends its squad's chain delivers the handoff that woke it
+	bus.Subscribe(protocol.EventTaskCompleted, func(e events.Event) {
+		deliverSquadResult(ctx, queries, bus, e)
+	})
 
 	// task:failed — notify all subscribers except the agent
 	bus.Subscribe(protocol.EventTaskFailed, func(e events.Event) {

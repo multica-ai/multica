@@ -150,6 +150,8 @@
   },
   "kept": {
     "archived": "アーカイブ済み",
+    "undo_archive": "アーカイブを取り消す",
+    "unsubscribed": "購読を解除しました",
     "leaves": "移動するとインボックスから外れます",
     "filtered": "フィルターに一致しなくなりました",
     "changed_status": "{{status}} に変更",

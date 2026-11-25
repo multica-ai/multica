@@ -5067,7 +5067,7 @@ func sanitizeTaskCompleteRequest(req *TaskCompleteRequest) {
 	req.RetiredSessionID = util.SanitizeTextForPostgres(req.RetiredSessionID)
 }
 
-func sanitizeTaskFailRequest(req *TaskFailRequest) {
+func sanitizeTaskFailRequest(req *protocol.TaskFailRequest) {
 	req.Error = util.SanitizeTextForPostgres(req.Error)
 	req.SessionID = util.SanitizeTextForPostgres(req.SessionID)
 	req.WorkDir = util.SanitizeTextForPostgres(req.WorkDir)
@@ -5117,7 +5117,7 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 			"task_id", taskID,
 			"failure_reason", taskfailure.ReasonAgentContextOverflow,
 		)
-		h.failTask(w, r, taskID, workspaceID, TaskFailRequest{
+		h.failTask(w, r, taskID, workspaceID, protocol.TaskFailRequest{
 			Error:          req.Output,
 			FailureReason:  string(taskfailure.ReasonAgentContextOverflow),
 			SessionID:      req.SessionID,
@@ -5842,28 +5842,6 @@ func (h *Handler) GetTaskStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": task.Status})
 }
 
-// FailTask marks a running task as failed.
-type TaskFailRequest struct {
-	Error          string `json:"error"`
-	SessionID      string `json:"session_id,omitempty"`
-	WorkDir        string `json:"work_dir,omitempty"`
-	DurableWorkDir string `json:"durable_work_dir,omitempty"`
-	FailureReason  string `json:"failure_reason,omitempty"`
-	// BranchName: a failed run can still have produced a branch — worktree mode
-	// commits whatever the agent left before tearing the worktree down. Report
-	// it so a partially-successful run is still findable.
-	BranchName string `json:"branch_name,omitempty"`
-	// SessionRolloutMissing: the daemon withheld this task's Codex session
-	// because its rollout was missing (MUL-5305). Clear the resume pointer and
-	// flag the continuity gap for the next claim.
-	SessionRolloutMissing bool `json:"session_rollout_missing,omitempty"`
-	// RetiredSessionID: a session this run proved unresumable and abandoned
-	// (GH #6066). Distinct from an empty SessionID, which only means "nothing
-	// to report" — this says "never hand this id to a later run". Older
-	// daemons omit it, which is exactly the pre-fix behaviour.
-	RetiredSessionID string `json:"retired_session_id,omitempty"`
-}
-
 func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
 
@@ -5873,7 +5851,7 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req TaskFailRequest
+	var req protocol.TaskFailRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -5891,13 +5869,13 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 // run re-classified at the /complete boundary lands through exactly the same
 // transaction, token revocation and runtime wake-up as one the daemon reported
 // as failed itself.
-func (h *Handler) failTask(w http.ResponseWriter, r *http.Request, taskID, workspaceID string, req TaskFailRequest) {
+func (h *Handler) failTask(w http.ResponseWriter, r *http.Request, taskID, workspaceID string, req protocol.TaskFailRequest) {
 	// MUL-5305: SessionRolloutMissing is applied inside FailTask's terminal
 	// transaction — forcing session_id NULL (overriding the COALESCE that would
 	// keep a stale mid-flight pin) and flagging the row in the same commit that
 	// creates and wakes the auto-retry, so the retry can never claim the withheld
 	// pointer or miss the continuity gap.
-	task, transitioned, err := h.TaskService.FailTaskWithTransition(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.BranchName, req.FailureReason, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir)
+	task, transitioned, err := h.TaskService.FailTaskWithTransition(r.Context(), parseUUID(taskID), req)
 	if err != nil {
 		// A FailTask error is an infrastructure failure (the terminal
 		// transaction that also clears the withheld session, writes the

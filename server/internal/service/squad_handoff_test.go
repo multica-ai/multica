@@ -135,3 +135,64 @@ func recoveryPending(t *testing.T, svc *TaskService, commentID pgtype.UUID) bool
 	}
 	return false
 }
+
+// A leader run woken by a member's comment on a direct-handoff squad's issue
+// fails: the member that handed it over recovers, as under leader dispatch.
+// Retargeting to the leader would make the failed leader its own recovery
+// target and drop the signal.
+func TestDelegatedFailureRecoveryForFailedDirectSquadLeader(t *testing.T) {
+	for _, mode := range []string{SquadHandoffModeDirect, SquadHandoffModeLeader} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := context.Background()
+			f, svc := seedDelegatedFailureFixture(t)
+			var squadID string
+			if err := f.pool.QueryRow(ctx, `
+				INSERT INTO squad (workspace_id, name, description, leader_id, creator_id, handoff_mode)
+				VALUES ($1, 'handoff squad', '', $2, $3, $4)
+				RETURNING id`, f.workspaceID, f.worker, f.userID, mode).Scan(&squadID); err != nil {
+				t.Fatalf("seed squad: %v", err)
+			}
+			t.Cleanup(func() {
+				f.pool.Exec(context.Background(), `DELETE FROM squad_member WHERE squad_id = $1`, squadID)
+				f.pool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID)
+			})
+			for _, member := range []string{f.coordinator, f.worker} {
+				if _, err := f.pool.Exec(ctx, `INSERT INTO squad_member (squad_id, member_type, member_id) VALUES ($1, 'agent', $2)`, squadID, member); err != nil {
+					t.Fatalf("seed squad member: %v", err)
+				}
+			}
+			if _, err := f.pool.Exec(ctx, `UPDATE issue SET assignee_type = 'squad', assignee_id = $2 WHERE id = $1`, f.issueID, squadID); err != nil {
+				t.Fatalf("assign squad: %v", err)
+			}
+			var failedID pgtype.UUID
+			if err := f.pool.QueryRow(ctx, `
+				INSERT INTO agent_task_queue (
+					agent_id, runtime_id, issue_id, status, priority, attempt, max_attempts,
+					originator_user_id, accountable_user_id, originator_source, delegated_from_task_id,
+					is_leader_task, squad_id
+				)
+				VALUES ($1, $2, $3, 'failed', 0, 1, 1, $4, $4, 'delegation', $5, true, $6)
+				RETURNING id`, f.worker, f.runtimeID, f.issueID, f.userID, f.sourceTask, squadID).Scan(&failedID); err != nil {
+				t.Fatalf("seed failed leader task: %v", err)
+			}
+
+			target, created, err := svc.ensureDelegatedFailureRecoveryComment(ctx, failedID)
+			if err != nil || target == nil || !created {
+				t.Fatalf("recovery signal: target=%v created=%v err=%v", target != nil, created, err)
+			}
+			if util.UUIDToString(target.agent.ID) != f.coordinator || target.leaderSquad != nil {
+				t.Fatalf("recovery target = %s (leader squad %v), want member %s", util.UUIDToString(target.agent.ID), target.leaderSquad != nil, f.coordinator)
+			}
+			var handoffs int
+			if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM activity_log WHERE issue_id = $1 AND action = $2`, f.issueID, SquadHandoffAction).Scan(&handoffs); err != nil {
+				t.Fatal(err)
+			}
+			if handoffs != 0 {
+				t.Fatalf("a failed leader run must not record a handoff to itself, got %d", handoffs)
+			}
+			if !recoveryPending(t, svc, target.comment.ID) {
+				t.Fatal("recovery signal not pending for the member that woke the leader")
+			}
+		})
+	}
+}

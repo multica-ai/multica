@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
 import type { WSClient } from "../api/ws-client";
-import { projectListOptions } from "../projects/queries";
+import { projectKeys, projectListOptions } from "../projects/queries";
 import type { Project } from "../types";
 import { useRealtimeSync, type RealtimeSyncStores } from "./use-realtime-sync";
 
@@ -26,15 +26,19 @@ vi.mock("../paths", () => ({
 
 function createRecordingWs() {
   const handlers: Record<string, (p: unknown) => void> = {};
+  const anyHandlers: ((msg: { type: string; payload: unknown }) => void)[] = [];
   const ws = {
     on: vi.fn((event: string, handler: (p: unknown) => void) => {
       handlers[event] = handler;
       return () => {};
     }),
-    onAny: vi.fn(() => () => {}),
+    onAny: vi.fn((handler: (msg: { type: string; payload: unknown }) => void) => {
+      anyHandlers.push(handler);
+      return () => {};
+    }),
     onReconnect: vi.fn(() => () => {}),
   } as unknown as WSClient;
-  return { ws, handlers };
+  return { ws, handlers, anyHandlers };
 }
 
 const stores = {
@@ -63,7 +67,7 @@ describe("useRealtimeSync — project recent activity", () => {
   let listProjects: ReturnType<typeof vi.fn>;
 
   function mount() {
-    const { ws, handlers } = createRecordingWs();
+    const { ws, handlers, anyHandlers } = createRecordingWs();
     const view = renderHook(
       () => {
         useRealtimeSync(ws, stores);
@@ -75,7 +79,7 @@ describe("useRealtimeSync — project recent activity", () => {
         ),
       },
     );
-    return { ...view, handlers };
+    return { ...view, handlers, anyHandlers };
   }
 
   beforeEach(() => {
@@ -119,5 +123,17 @@ describe("useRealtimeSync — project recent activity", () => {
       handlers["issue_metadata:changed"]?.({ issue_id: "issue-1", metadata: {} });
     });
     await waitFor(() => expect(listProjects).toHaveBeenCalledTimes(2), { timeout: 3000 });
+  });
+
+  it("refreshes project progress when a label is deleted", async () => {
+    const { anyHandlers } = mount();
+    const progressKey = projectKeys.progress("ws-1", "project-1");
+    qc.setQueryData(progressKey, { by_label: [] });
+
+    act(() => {
+      for (const handler of anyHandlers) handler({ type: "label:deleted", payload: { label_id: "label-1" } });
+    });
+
+    await waitFor(() => expect(qc.getQueryState(progressKey)?.isInvalidated).toBe(true));
   });
 });

@@ -15,6 +15,7 @@ import {
   CommandGroup,
   CommandItem,
 } from "@multica/ui/components/ui/command";
+import { Spinner } from "@multica/ui/components/ui/spinner";
 import { StatusIcon } from "../issues/components/status-icon";
 import { useT } from "../i18n";
 
@@ -61,6 +62,9 @@ export function IssuePickerModal({
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Issue[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  // The row whose write is in flight, so a picker that stays open on select
+  // shows where the click landed until the caller closes it.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const abortRef = useRef<AbortController>(undefined);
   const selectable = useCallback(
@@ -120,6 +124,7 @@ export function IssuePickerModal({
       value={issue.id}
       onSelect={() => {
         if (pending) return;
+        setSelectedId(issue.id);
         onSelect(issue);
         if (closeOnSelect) onOpenChange(false);
       }}
@@ -133,6 +138,7 @@ export function IssuePickerModal({
       />
       <span className="text-muted-foreground shrink-0">{issue.identifier}</span>
       <span className="truncate">{issue.title}</span>
+      {pending && selectedId === issue.id && <Spinner className="ml-auto size-3.5 shrink-0 text-muted-foreground" />}
     </CommandItem>
   );
 
@@ -145,6 +151,7 @@ export function IssuePickerModal({
           setQuery("");
           setResults([]);
           setIsLoading(false);
+          setSelectedId(null);
         }
         onOpenChangeComplete?.(nextOpen);
       }}
@@ -161,7 +168,7 @@ export function IssuePickerModal({
           }}
         />
         {error && <p role="alert" className="px-3 py-2 text-caption text-destructive">{error}</p>}
-        <CommandList>
+        <CommandList aria-busy={pending || undefined}>
           {isLoading && (
             <div className="py-6 text-center text-body text-muted-foreground">
               {t(($) => $.issue_picker.searching)}

@@ -4144,6 +4144,63 @@ func TestRunIssueUpdateAppendsLocalAttachmentToDescription(t *testing.T) {
 	}
 }
 
+// Someone edits the description while the file uploads: the update must add the
+// file to their text, not write the text read before the upload over it.
+func TestRunIssueUpdateAttachmentKeepsDescriptionEditedDuringUpload(t *testing.T) {
+	t.Chdir(t.TempDir())
+	const issueID = "11111111-1111-4111-8111-111111111111"
+	const uploadedID = "33333333-3333-4333-8333-333333333333"
+	path := writeIssueCreateAttachment(t, "revised.png")
+	description, revision := "Existing body", int64(4)
+	uploads := 0
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/upload-file":
+			uploads++
+			description, revision = "Existing body, edited", 5
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": uploadedID, "filename": "revised.png", "content_type": "image/png",
+				"markdown_url": "https://api.example/api/attachments/" + uploadedID + "/download",
+			})
+		case "/api/issues/" + issueID:
+			if r.Method == http.MethodGet {
+				_ = json.NewEncoder(w).Encode(map[string]any{"description": description, "description_revision": revision})
+				return
+			}
+			body = nil
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode update: %v", err)
+			}
+			if base, ok := body["description_base_revision"]; ok && base != float64(revision) {
+				w.WriteHeader(http.StatusConflict)
+				_ = json.NewEncoder(w).Encode(map[string]any{"code": "revision_conflict", "resource_type": "issue_description"})
+				return
+			}
+			description = body["description"].(string)
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": issueID, "title": "Updated"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	cmd := newIssueUpdateTestCmd()
+	_ = cmd.Flags().Set("attachment", path)
+	if err := runIssueUpdate(cmd, []string{issueID}); err != nil {
+		t.Fatalf("runIssueUpdate: %v", err)
+	}
+	if want := "Existing body, edited\n\n![revised.png](https://api.example/api/attachments/" + uploadedID + "/download)"; description != want {
+		t.Fatalf("description = %q, want %q", description, want)
+	}
+	if ids, ok := body["attachment_ids"].([]any); !ok || !reflect.DeepEqual(ids, []any{uploadedID}) {
+		t.Fatalf("attachment_ids = %#v", body["attachment_ids"])
+	}
+	if uploads != 1 {
+		t.Fatalf("uploads = %d, want 1", uploads)
+	}
+}
+
 func TestRunIssueUpdateAttachmentUsesProvidedDescriptionWithoutFetching(t *testing.T) {
 	t.Chdir(t.TempDir())
 	const issueID = "11111111-1111-4111-8111-111111111111"

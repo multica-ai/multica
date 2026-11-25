@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { issueIdentifierOptions } from "@multica/core/issues/queries";
 import { useCurrentWorkspace } from "@multica/core/paths";
-import { isIssueIdentifier } from "@multica/ui/markdown";
+import { isIssueIdentifier } from "@multica/ui/markdown/issue-identifiers";
 import type { Issue } from "@multica/core/types";
 
 /**

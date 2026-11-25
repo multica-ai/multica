@@ -116,7 +116,7 @@ diff，全都挂在同一个任务下——没人需要重新捋一遍上下文�
 </p>
 
 - **[执行日志](https://multica.ai/docs/zh/tasks) →** 每次工具调用、命令和报错都带时间戳，可以完整回放。
-- **[运行中插话](https://multica.ai/docs/zh/providers#插话支持) →** 智能体干活时直接回复，消息会进到当前这次运行，不用等下一次。目前支持 Claude Code、Codex、Cursor Agent、Grok、Kiro、Pi 和 Antigravity。
+- **[运行中插话](https://multica.ai/docs/zh/providers#插话支持) →** 智能体干活时直接回复，消息会进到当前这次运行，不用等下一次。目前支持 Claude Code、Codex、Cursor Agent、Grok、Hermes、Kiro、Pi 和 Antigravity。
 - **用量统计 →** 每次运行花了多少，按智能体、按任务都看得到。
 - **[人来验收](https://multica.ai/docs/zh/issues) →** 活先进入审核中，不直接进 main。上不上线你说了算。
 - **[收件箱](https://multica.ai/docs/zh/inbox) →** 只在智能体需要你拍板时提醒你，而不是每一步都来烦你。
@@ -131,7 +131,7 @@ diff，全都挂在同一个任务下——没人需要重新捋一遍上下文�
 - **[工作区](https://multica.ai/docs/zh/workspaces) →** 按团队隔离智能体、任务和设置。
 - **[角色](https://multica.ai/docs/zh/members-roles)与[使用权限](https://multica.ai/docs/zh/agents#权限与-access) →** 向访客分享指定项目，管理工作区角色，并设置谁能运行每个智能体。
 - **[安全模型](https://multica.ai/docs/zh/security-model) →** 智能体碰得到什么，碰不到什么。
-- **[Slack、飞书/Lark、钉钉、企业微信、Telegram、微信](https://multica.ai/docs/zh/channels) →** 在团队本来就在聊天的地方，触发和跟进智能体的工作。微信仅接收扫码连接账号的私聊消息。飞书/Lark 目前只开放中国大陆飞书的新连接；钉钉、企业微信和 Telegram 由[社区维护](https://multica.ai/docs/zh/community-maintained)。
+- **[Slack、飞书/Lark、钉钉、企业微信、Telegram、微信](https://multica.ai/docs/zh/channels) →** 在团队本来就在聊天的地方，触发和跟进智能体的工作。微信仅接收扫码连接账号的私聊消息。飞书/Lark 目前只开放中国大陆飞书的新连接；钉钉、企业微信、Telegram 和微信由[社区维护](https://multica.ai/docs/zh/community-maintained)。
 - **Web、[桌面端](https://multica.ai/docs/zh/desktop-app)、[移动端](https://multica.ai/docs/zh/mobile-app) →** macOS、Windows、Linux、iPhone、iPad，打开都是同一个工作区——iOS App 现在要自己从源码编译安装，还没上 App Store。
 - **[CLI 与 API](https://multica.ai/docs/zh/cli) →** 界面上能点的，CLI 和 API 里都能调。智能体操作 Multica，用的就是你那套 CLI。
 

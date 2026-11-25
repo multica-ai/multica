@@ -920,7 +920,7 @@
       },
       "squad_handoffs": {
         "label": "Include squad handoffs",
-        "description": "Comments a squad's leader and agents pass work to each other with. @mentions of you, failed agent runs and statuses that need attention still arrive."
+        "description": "Comments a squad's leader and agents pass work to each other with. @mentions of you, failed agent runs and the report a squad finishes with still arrive."
       },
       "mentions": {
         "label": "Mentions",
@@ -2066,10 +2066,10 @@
       "no_matches": "No apps match your search.",
       "unavailable": "Apps aren't available on this server.",
       "retry": "Try again",
-      "category_all": "All",
+      "catalog": "Catalog",
+      "catalog_failed": "Couldn't load the app catalog.",
       "category_curated": "Featured",
       "categories_label": "Categories",
-      "categories_nav": "App categories",
       "connect_oauth": "Signs in with OAuth",
       "connect_key": "Uses an API key",
       "show_more": "Show more",

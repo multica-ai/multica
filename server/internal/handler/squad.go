@@ -560,6 +560,16 @@ func (h *Handler) DeleteSquad(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("transfer squad autopilots failed", "squad_id", uuidToString(squad.ID), "error", err)
 	}
 
+	// Workflow steps that hand off to this squad follow it to the leader too.
+	movedWorkflows, err := h.Queries.TransferSquadWorkflowStepsToLeader(r.Context(), db.TransferSquadWorkflowStepsToLeaderParams{
+		WorkspaceID: squad.WorkspaceID,
+		SquadID:     uuidToString(squad.ID),
+		LeaderID:    uuidToString(squad.LeaderID),
+	})
+	if err != nil {
+		slog.Warn("transfer squad workflow steps failed", "squad_id", uuidToString(squad.ID), "error", err)
+	}
+
 	userID := requestUserID(r)
 	userUUID, _ := parseUUIDOrBadRequest(w, userID, "user_id")
 
@@ -575,6 +585,9 @@ func (h *Handler) DeleteSquad(w http.ResponseWriter, r *http.Request) {
 		"squad_id":  uuidToString(squad.ID),
 		"leader_id": uuidToString(squad.LeaderID),
 	})
+	if movedWorkflows > 0 {
+		h.publishIssueWorkflowChanged(workspaceID, member, "updated")
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

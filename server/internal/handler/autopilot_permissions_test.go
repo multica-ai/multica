@@ -3,9 +3,13 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // createPlainMember adds a fresh member-role user to the test workspace and
@@ -419,5 +423,72 @@ func TestAutopilotWrite_WebhookSecretRedactedForNonWriter(t *testing.T) {
 	}
 	if strangerView.Triggers[0].WebhookURL != nil {
 		t.Fatalf("stranger view: webhook_url leaked: %v", *strangerView.Triggers[0].WebhookURL)
+	}
+}
+
+// TestAddAutopilotCollaborator_LosesToConcurrentRevoke: a grant that validated
+// membership before a removal committed must not land behind the removal's
+// prune. It waits for the removal's lock, then rejects the departed member.
+func TestAddAutopilotCollaborator_LosesToConcurrentRevoke(t *testing.T) {
+	ctx := context.Background()
+	apID := createAutopilotAs(t, "", fmt.Sprintf("collaborator-revoke-race-%d", time.Now().UnixNano()))
+	target := createPlainMember(t, fmt.Sprintf("collaborator-revoke-race-%d@multica.ai", time.Now().UnixNano()))
+
+	revokeTx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin revoke tx: %v", err)
+	}
+	defer revokeTx.Rollback(context.Background())
+	holderPID := holderBackendPID(t, ctx, revokeTx)
+	qtx := testHandler.Queries.WithTx(revokeTx)
+	if err := qtx.LockSubscriberWrites(ctx, db.LockSubscriberWritesParams{
+		WorkspaceID: parseUUID(testWorkspaceID),
+		UserID:      parseUUID(target),
+	}); err != nil {
+		t.Fatalf("revoke lock: %v", err)
+	}
+	if err := qtx.DeleteAutopilotCollaboratorsByMember(ctx, db.DeleteAutopilotCollaboratorsByMemberParams{
+		WorkspaceID: parseUUID(testWorkspaceID),
+		UserID:      parseUUID(target),
+	}); err != nil {
+		t.Fatalf("revoke cleanup: %v", err)
+	}
+	if _, err := revokeTx.Exec(ctx,
+		`DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, target,
+	); err != nil {
+		t.Fatalf("revoke member delete: %v", err)
+	}
+
+	done := make(chan int, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		r := newRequest("POST", "/api/autopilots/"+apID+"/collaborators?workspace_id="+testWorkspaceID, map[string]any{"user_id": target})
+		testHandler.AddAutopilotCollaborator(w, withURLParam(r, "id", apID))
+		done <- w.Code
+	}()
+	if !waitForWaiterBlockedBy(t, holderPID, 10*time.Second) {
+		t.Fatal("grant did not wait for the removal's lock")
+	}
+	if err := revokeTx.Commit(ctx); err != nil {
+		t.Fatalf("commit revoke: %v", err)
+	}
+	select {
+	case code := <-done:
+		if code != http.StatusBadRequest {
+			t.Fatalf("grant status = %d, want 400 after the member left", code)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("grant never returned after the removal committed")
+	}
+
+	granted, err := testHandler.Queries.IsAutopilotCollaborator(ctx, db.IsAutopilotCollaboratorParams{
+		AutopilotID: parseUUID(apID),
+		UserID:      parseUUID(target),
+	})
+	if err != nil {
+		t.Fatalf("read collaborator: %v", err)
+	}
+	if granted {
+		t.Fatal("grant landed behind the removal's prune")
 	}
 }

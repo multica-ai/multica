@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -2124,6 +2126,55 @@ type ChatLastMessage struct {
 	MessageKind string `json:"message_kind"`
 }
 
+// chatLastMessagePreviewMaxRunes caps ChatLastMessage.Content. The list only
+// renders a one-line snippet, but shipping each session's full last reply made
+// the list payload grow with every long agent answer (#9954).
+const chatLastMessagePreviewMaxRunes = 256
+
+// chatLastMessagePreview mirrors the list client's cleanup before applying the
+// cap. Complete fences become whitespace, and Markdown markers are dropped before
+// counting runes so they cannot crowd out visible text.
+func chatLastMessagePreview(content string) string {
+	const fence = "```"
+	var preview strings.Builder
+	preview.Grow(min(len(content), chatLastMessagePreviewMaxRunes))
+	remaining := chatLastMessagePreviewMaxRunes
+	pendingSpace := false
+
+	for len(content) > 0 && remaining > 0 {
+		if strings.HasPrefix(content, fence) {
+			if end := strings.Index(content[len(fence):], fence); end >= 0 {
+				content = content[end+2*len(fence):]
+				pendingSpace = preview.Len() > 0
+				continue
+			}
+		}
+
+		r, width := utf8.DecodeRuneInString(content)
+		content = content[width:]
+		switch r {
+		case '#', '*', '`', '>', '~':
+			continue
+		}
+		// JavaScript's whitespace includes BOM and excludes NEXT LINE.
+		if r == '\uFEFF' || (r != '\u0085' && unicode.IsSpace(r)) {
+			pendingSpace = preview.Len() > 0
+			continue
+		}
+		if pendingSpace {
+			if remaining == 1 {
+				break
+			}
+			preview.WriteByte(' ')
+			remaining--
+			pendingSpace = false
+		}
+		preview.WriteRune(r)
+		remaining--
+	}
+	return preview.String()
+}
+
 // buildChatLastMessage assembles the preview from list-row columns; returns nil
 // when there is no last message (the LEFT JOIN produced a NULL timestamp).
 func buildChatLastMessage(at pgtype.Timestamptz, content, role string, failure pgtype.Text, kind string) *ChatLastMessage {
@@ -2134,7 +2185,7 @@ func buildChatLastMessage(at pgtype.Timestamptz, content, role string, failure p
 		content = ""
 	}
 	return &ChatLastMessage{
-		Content:       content,
+		Content:       chatLastMessagePreview(content),
 		Role:          role,
 		CreatedAt:     timestampToString(at),
 		FailureReason: textToPtr(failure),

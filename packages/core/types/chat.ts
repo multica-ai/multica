@@ -71,6 +71,8 @@ export interface ChatQuickActionsFailureState {
 
 /** Preview of a session's most recent message, for the IM-style list. */
 export interface ChatLastMessage {
+  /** One-line preview with code fences and Markdown markers removed, whitespace
+   * collapsed, and a cap of 256 Unicode code points. */
   content: string;
   role: "user" | "assistant";
   created_at: string;

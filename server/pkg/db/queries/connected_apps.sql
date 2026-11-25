@@ -377,6 +377,13 @@ WHERE workspace_id = $1 AND type = 'app_connect_requested' AND archived = false
   AND recipient_id IS DISTINCT FROM sqlc.narg('keep_recipient_id')::uuid
 RETURNING recipient_type, recipient_id;
 
+-- name: ListAppRequestInboxHolders :many
+-- The members holding an open notification for any of the requests.
+SELECT DISTINCT recipient_id FROM inbox_item
+WHERE workspace_id = $1 AND type = 'app_connect_requested' AND NOT archived
+  AND recipient_type = 'member'
+  AND details->>'request_id' = ANY(sqlc.arg('request_ids')::text[]);
+
 -- name: ListTeamConnectNotifiedRecipients :many
 -- Of recipient_ids, the members who already hold an open notification for a
 -- pending request for this app's team account, so are not told again.

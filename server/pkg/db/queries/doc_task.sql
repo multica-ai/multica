@@ -103,6 +103,15 @@ SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL,
 WHERE doc_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
 
+-- name: CancelAgentTasksByDocThread :many
+-- Discussion deletion cleanup, the counterpart of CancelAgentTasksByDoc.
+UPDATE agent_task_queue
+SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL,
+    cancelled_by_type = 'system', cancelled_by_id = NULL, cancelled_by_name = NULL
+WHERE doc_id = @doc_id AND doc_thread_id = @doc_thread_id
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+RETURNING *;
+
 -- name: GetLastDocTaskSession :one
 -- Resume context for an agent on a doc: one session and workdir per (doc,
 -- agent), the doc analogue of GetLastTaskSession. Keep the per-session

@@ -82,12 +82,12 @@ describe("IssueRelationsSection hint", () => {
   it("promises an automatic start for an issue outside Backlog", () => {
     renderSection(waitingIssue("todo"));
     expect(screen.getByText(/starts automatically or receives a notification/)).toBeInTheDocument();
-    expect(screen.queryByText(/is in Backlog/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/auto-start while in Backlog/)).not.toBeInTheDocument();
   });
 
   it("says a Backlog issue stays parked after its blockers end", () => {
     renderSection(waitingIssue("backlog"));
-    expect(screen.getByText(/is in Backlog, so it won't start automatically/)).toBeInTheDocument();
+    expect(screen.getByText(/Won't auto-start while in Backlog/)).toBeInTheDocument();
     expect(screen.queryByText(/starts automatically or receives a notification/)).not.toBeInTheDocument();
   });
 
@@ -95,7 +95,7 @@ describe("IssueRelationsSection hint", () => {
     renderSection(waitingIssue("done"));
     expect(screen.getByText("Prerequisite")).toBeInTheDocument();
     expect(screen.queryByText(/starts automatically or receives a notification/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/is in Backlog/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/auto-start while in Backlog/)).not.toBeInTheDocument();
   });
 });
 
@@ -229,7 +229,7 @@ describe("IssueBlockedMarker hover card", () => {
     expect(screen.getByText("No assignee, so nothing starts when these end.")).toBeInTheDocument();
     cleanup();
     await hover(blockedIssue({ status: "backlog" }));
-    expect(screen.getByText(/is in Backlog, so it won't start automatically/)).toBeInTheDocument();
+    expect(screen.getByText(/Won't auto-start while in Backlog/)).toBeInTheDocument();
   });
 
   it("counts blockers the viewer cannot see", async () => {
