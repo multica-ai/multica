@@ -733,7 +733,7 @@
     "trigger_blocked_runtime_profile_missing": "A la CLI de este agente le falta una configuración de runtime en su máquina: instálala allí.",
     "trigger_blocked_agent_runtime_required": "Este destino no tiene runtime; vincula uno para ejecutarlo",
     "trigger_blocked_runtime_access_denied": "No se puede acceder al runtime privado de este agente: haz que el runtime sea público o vincula el agente a un runtime accesible.",
-    "trigger_blocked_issue_agent_consecutive_failures": "Las ejecuciones automáticas se pausaron tras tres fallos consecutivos. Completa una ejecución manual para reanudarlas.",
+    "trigger_blocked_issue_agent_consecutive_failures": "Las ejecuciones automáticas se pausaron tras tres fallos consecutivos. Para reanudarlas, inicia una ejecución manual y espera a que termine correctamente.",
     "trigger_blocked_generic": "Este destino no se activará",
     "trigger_blocked_short_invocation_not_allowed": "No encontrado o sin permiso",
     "trigger_blocked_short_target_unavailable": "No disponible",

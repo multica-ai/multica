@@ -750,7 +750,7 @@
     "trigger_blocked_runtime_profile_missing": "This agent's CLI is missing a runtime configuration on its machine — install it there.",
     "trigger_blocked_agent_runtime_required": "This target has no runtime — bind one to run it",
     "trigger_blocked_runtime_access_denied": "This agent's private runtime isn't accessible — make the runtime public, or bind the agent to an accessible runtime.",
-    "trigger_blocked_issue_agent_consecutive_failures": "Automatic runs paused after three consecutive failures. Complete a manual run to resume.",
+    "trigger_blocked_issue_agent_consecutive_failures": "Automatic runs paused after three consecutive failures. To resume, start a manual run and let it finish successfully.",
     "trigger_blocked_generic": "This target won't be triggered",
     "trigger_blocked_short_invocation_not_allowed": "Not found or no permission",
     "trigger_blocked_short_target_unavailable": "Unavailable",
