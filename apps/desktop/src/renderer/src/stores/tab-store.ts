@@ -148,6 +148,16 @@ export interface WorkspaceTabGroup {
   issueAliases?: Record<string, string>;
 }
 
+interface ClosedTabDestination {
+  url: string;
+  title: string;
+  index: number;
+}
+
+const CLOSED_TAB_LIMIT = 20;
+
+type CloseTabOptions = { reason?: "user" | "recovery" };
+
 interface TabStore {
   /**
    * The workspace currently visible in the TabBar / TabContent. Null in three
@@ -174,6 +184,10 @@ interface TabStore {
    * Deliberately NOT persisted.
    */
   mountGeneration: number;
+  /** Renderer-local destinations, oldest first. Never persisted. */
+  closedTabsByWorkspace: Record<string, ClosedTabDestination[]>;
+  /** Recover the newest valid closed destination in the visible workspace. */
+  reopenClosedTab: () => void;
   /**
    * Bumped when a background open (Cmd/middle-click) lands on a tab that
    * already shows the resource. The open must not move the user, so instead
@@ -215,9 +229,10 @@ interface TabStore {
    *
    * Closing the ACTIVE tab activates the group's most recently visited
    * surviving tab (`recentTabIds`), falling back to the positional neighbour
-   * only when that order is empty.
+   * only when that order is empty. Multi-tab user closes record unpinned
+   * destinations. Recovery callers must explicitly pass reason: "recovery".
    */
-  closeTab: (tabId: string) => void;
+  closeTab: (tabId: string, options?: CloseTabOptions) => void;
   /** Close every other unpinned tab in the target tab's workspace. */
   closeOtherTabs: (tabId: string) => void;
   /** Close the unpinned tabs after the target tab in its workspace. */
@@ -279,7 +294,7 @@ interface TabStore {
    * destroys the crashing session entirely and falls back to the last tab
    * you were on (or a reseeded default if it was the last tab).
    */
-  closeActiveTab: () => void;
+  closeActiveTab: (options?: CloseTabOptions) => void;
   /**
    * Reorder within the active workspace's group only. Clamped so a tab can
    * never cross the pinned / unpinned boundary — a drag that would move a
@@ -506,6 +521,31 @@ export function sanitizeTabPath(path: string, savedGroupSlug?: string): string |
     return `/${firstSegment}/issues${suffix}`;
   }
   return path;
+}
+
+// Closed destinations contain routing metadata only. Recovery closes, pinned
+// tabs and last-tab reseeding never enter the stack.
+function cleanClosedUrl(url: string, slug: string): string | null {
+  if (!url.startsWith("/") || url.startsWith("//")) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(url, "https://multica.invalid");
+  } catch {
+    return null;
+  }
+  if (parsed.origin !== "https://multica.invalid") return null;
+  const normalized = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  const clean = sanitizeTabPath(normalized, slug);
+  return clean && workspaceSlugForPath(clean, slug) === slug ? clean : null;
+}
+
+function closedDestination(
+  tab: TabSession,
+  index: number,
+  slug: string,
+): ClosedTabDestination | null {
+  const url = cleanClosedUrl(tab.url, slug);
+  return !tab.pinned && url ? { url, title: tab.title, index } : null;
 }
 
 // Session factory
@@ -789,9 +829,10 @@ function findTabLocation(
 
 function buildCloseOtherTabsResult(
   byWorkspace: Record<string, WorkspaceTabGroup>,
+  closedTabsByWorkspace: Record<string, ClosedTabDestination[]>,
   tabId: string,
   scope: "others" | "right" = "others",
-): Record<string, WorkspaceTabGroup> | null {
+): Pick<TabStore, "byWorkspace" | "closedTabsByWorkspace"> | null {
   const hit = findTabLocation(byWorkspace, tabId);
   if (!hit) return null;
   const { slug, group, index } = hit;
@@ -805,10 +846,25 @@ function buildCloseOtherTabsResult(
   const nextActiveTabId = closingIds.has(group.activeTabId)
     ? tabId
     : group.activeTabId;
+  // LIFO recovery reconstructs a bulk close from left to right.
+  const removed = group.tabs
+    .flatMap((tab, index) => {
+      const closed = closingIds.has(tab.id)
+        ? closedDestination(tab, index, slug)
+        : null;
+      return closed ? [closed] : [];
+    })
+    .reverse();
 
   return {
-    ...byWorkspace,
-    [slug]: reconcileGroup(group, nextTabs, nextActiveTabId),
+    byWorkspace: {
+      ...byWorkspace,
+      [slug]: reconcileGroup(group, nextTabs, nextActiveTabId),
+    },
+    closedTabsByWorkspace: {
+      ...closedTabsByWorkspace,
+      [slug]: [...(closedTabsByWorkspace[slug] ?? []), ...removed].slice(-CLOSED_TAB_LIMIT),
+    },
   };
 }
 
@@ -825,6 +881,7 @@ export const useTabStore = create<TabStore>()(
       activeWorkspaceSlug: null,
       byWorkspace: {},
       mountGeneration: 0,
+      closedTabsByWorkspace: {},
       tabAttention: null,
 
       switchWorkspace(slug, openPath) {
@@ -1033,8 +1090,8 @@ export const useTabStore = create<TabStore>()(
         return tab.id;
       },
 
-      closeTab(tabId) {
-        const { byWorkspace } = get();
+      closeTab(tabId, options) {
+        const { byWorkspace, closedTabsByWorkspace } = get();
         const hit = findTabLocation(byWorkspace, tabId);
         if (!hit) return;
         const { slug, group, index } = hit;
@@ -1059,6 +1116,9 @@ export const useTabStore = create<TabStore>()(
           return;
         }
 
+        const closed = options?.reason === "recovery"
+          ? null
+          : closedDestination(group.tabs[index], index, slug);
         const nextTabs = group.tabs.filter((t) => t.id !== tabId);
         const nextActiveTabId =
           group.activeTabId === tabId
@@ -1070,21 +1130,74 @@ export const useTabStore = create<TabStore>()(
             ...byWorkspace,
             [slug]: reconcileGroup(group, nextTabs, nextActiveTabId),
           },
+          closedTabsByWorkspace: closed
+            ? {
+                ...closedTabsByWorkspace,
+                [slug]: [...(closedTabsByWorkspace[slug] ?? []), closed].slice(-CLOSED_TAB_LIMIT),
+              }
+            : closedTabsByWorkspace,
         });
       },
 
       closeOtherTabs(tabId) {
-        const { byWorkspace } = get();
-        const next = buildCloseOtherTabsResult(byWorkspace, tabId);
+        const { byWorkspace, closedTabsByWorkspace } = get();
+        const next = buildCloseOtherTabsResult(byWorkspace, closedTabsByWorkspace, tabId);
         if (!next) return;
-        set({ byWorkspace: next });
+        set(next);
+      },
+
+      reopenClosedTab() {
+        const {
+          activeWorkspaceSlug: slug,
+          byWorkspace,
+          closedTabsByWorkspace,
+        } = get();
+        if (!slug) return;
+        const group = byWorkspace[slug];
+        const stack = closedTabsByWorkspace[slug];
+        if (!group || !stack?.length) return;
+        const remaining = [...stack];
+        let destination: ClosedTabDestination | undefined;
+        let url: string | null = null;
+        while (remaining.length) {
+          destination = remaining.pop()!;
+          url = cleanClosedUrl(destination.url, slug);
+          if (url) break;
+        }
+        const nextClosed = { ...closedTabsByWorkspace, [slug]: remaining };
+        if (!url || !destination) {
+          set({ closedTabsByWorkspace: nextClosed });
+          return;
+        }
+        const existing = findTabForUrl(group, url);
+        const tab = existing ?? makeSession(url, destination.title);
+        const index = Math.min(
+          Math.max(destination.index, pinnedBoundary(group.tabs)),
+          group.tabs.length,
+        );
+        const tabs = existing
+          ? group.tabs
+          : [...group.tabs.slice(0, index), tab, ...group.tabs.slice(index)];
+        const historyBase = withActiveSessionVisit(group, slug);
+        set({
+          byWorkspace: {
+            ...byWorkspace,
+            [slug]: withBrowsingVisit(
+              reconcileGroup(historyBase, tabs, tab.id),
+              slug,
+              tab.url,
+              { title: tab.title },
+            ),
+          },
+          closedTabsByWorkspace: nextClosed,
+        });
       },
 
       closeTabsToRight(tabId) {
-        const { byWorkspace } = get();
-        const next = buildCloseOtherTabsResult(byWorkspace, tabId, "right");
+        const { byWorkspace, closedTabsByWorkspace } = get();
+        const next = buildCloseOtherTabsResult(byWorkspace, closedTabsByWorkspace, tabId, "right");
         if (!next) return;
-        set({ byWorkspace: next });
+        set(next);
       },
 
       setActiveTab(tabId) {
@@ -1311,12 +1424,12 @@ export const useTabStore = create<TabStore>()(
         set({ mountGeneration: mountGeneration + 1 });
       },
 
-      closeActiveTab() {
+      closeActiveTab(options) {
         const { activeWorkspaceSlug, byWorkspace, closeTab } = get();
         if (!activeWorkspaceSlug) return;
         const group = byWorkspace[activeWorkspaceSlug];
         if (!group) return;
-        closeTab(group.activeTabId);
+        closeTab(group.activeTabId, options);
       },
 
       moveTab(fromIndex, toIndex) {
@@ -1383,8 +1496,11 @@ export const useTabStore = create<TabStore>()(
       },
 
       validateWorkspaceSlugs(validSlugs) {
-        const { activeWorkspaceSlug, byWorkspace } = get();
-        let changed = false;
+        const { activeWorkspaceSlug, byWorkspace, closedTabsByWorkspace } = get();
+        const nextClosed = Object.fromEntries(
+          Object.entries(closedTabsByWorkspace).filter(([slug]) => validSlugs.has(slug)),
+        );
+        let changed = Object.keys(nextClosed).length !== Object.keys(closedTabsByWorkspace).length;
         const nextByWorkspace: Record<string, WorkspaceTabGroup> = {};
         for (const slug of Object.keys(byWorkspace)) {
           if (validSlugs.has(slug)) {
@@ -1421,7 +1537,11 @@ export const useTabStore = create<TabStore>()(
         }
 
         if (!changed) return;
-        set({ byWorkspace: nextByWorkspace, activeWorkspaceSlug: nextActive });
+        set({
+          byWorkspace: nextByWorkspace,
+          activeWorkspaceSlug: nextActive,
+          closedTabsByWorkspace: nextClosed,
+        });
       },
 
       reset() {
@@ -1429,6 +1549,7 @@ export const useTabStore = create<TabStore>()(
           activeWorkspaceSlug: null,
           byWorkspace: {},
           mountGeneration: 0,
+          closedTabsByWorkspace: {},
           tabAttention: null,
         });
       },
@@ -1468,8 +1589,10 @@ export const useTabStore = create<TabStore>()(
         return state as V5Persisted;
       },
       partialize: (state) => partializeTabs(state),
-      merge: (persistedState, currentState) =>
-        mergePersistedTabs(persistedState, currentState),
+      merge: (persistedState, currentState) => ({
+        ...mergePersistedTabs(persistedState, currentState),
+        closedTabsByWorkspace: {},
+      }),
     },
   ),
 );

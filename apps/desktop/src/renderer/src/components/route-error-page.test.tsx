@@ -108,6 +108,7 @@ describe("DesktopRouteErrorPage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /close tab/i }));
     expect(closeActiveTab).toHaveBeenCalledTimes(1);
+    expect(closeActiveTab).toHaveBeenCalledWith({ reason: "recovery" });
   });
 
   it("opens the feedback modal with structured error context only after click", async () => {
@@ -190,6 +191,7 @@ describe("DesktopRouteErrorPage", () => {
       renderUnmatchedRoute("/Users/whoever/Desktop/shot.png");
       fireEvent.click(await screen.findByRole("button", { name: /close tab/i }));
       expect(closeActiveTab).toHaveBeenCalledTimes(1);
+      expect(closeActiveTab).toHaveBeenCalledWith({ reason: "recovery" });
     });
 
     it("takes the recovery entry from the active workspace, NEVER from the bad pathname", async () => {
