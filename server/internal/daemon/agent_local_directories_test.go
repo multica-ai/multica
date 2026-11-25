@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -226,4 +227,84 @@ func TestAgentDefaultDirectoryMissingPathFailsBeforeExecution(t *testing.T) {
 	if _, err := os.Stat(missing); !os.IsNotExist(err) {
 		t.Fatalf("configured path must not be created: %v", err)
 	}
+}
+
+func TestAgentDefaultDirectoryMissingAfterPathLockWait(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "agent-default")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	realDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	locker := NewLocalPathLocker()
+	releaseHolder, err := locker.Acquire(ctx, realDir, "holder", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var finishHolder sync.Once
+	defer finishHolder.Do(releaseHolder)
+
+	type failure struct {
+		Reason string `json:"failure_reason"`
+		Error  string `json:"error"`
+	}
+	failures := make(chan failure, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/wait-local-directory"):
+			if err := os.Rename(dir, filepath.Join(parent, "moved")); err != nil {
+				t.Errorf("move agent-default directory while waiting: %v", err)
+			}
+			finishHolder.Do(releaseHolder)
+		case strings.HasSuffix(req.URL.Path, "/fail"):
+			var report failure
+			if err := json.NewDecoder(req.Body).Decode(&report); err != nil {
+				t.Errorf("decode terminal report: %v", err)
+			}
+			failures <- report
+		default:
+			t.Errorf("unexpected daemon call: %s %s", req.Method, req.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	d := &Daemon{
+		cfg: Config{
+			DaemonID:              "default-daemon",
+			AgentLocalDirectories: map[string]string{directoryTestAgentID: dir},
+		},
+		client:         NewClient(srv.URL),
+		localPathLocks: locker,
+		logger:         slog.Default(),
+	}
+	task := Task{ID: "waiter", AgentID: directoryTestAgentID, IssueID: "issue"}
+	release, abort := d.acquireLocalDirectoryLockIfNeeded(ctx, task, slog.Default(), newTestTaskSlot(0))
+	if release != nil {
+		release()
+		t.Error("waiter kept the lock for the missing directory")
+	}
+	if !abort {
+		t.Fatal("waiter continued after its agent-default directory moved")
+	}
+	select {
+	case report := <-failures:
+		if report.Reason != "local_directory_error" || !strings.Contains(report.Error, agentLocalDirectoriesEnv) {
+			t.Errorf("failure should identify the agent-default setting: %+v", report)
+		}
+	default:
+		t.Fatal("missing terminal failure report")
+	}
+	next, err := locker.Acquire(ctx, realDir, "next", nil)
+	if err != nil {
+		t.Fatalf("waiter did not release the path lock: %v", err)
+	}
+	next()
 }
