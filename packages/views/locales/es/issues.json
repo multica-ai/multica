@@ -703,6 +703,12 @@
     "add_reaction": "Añadir reacción",
     "collapse_thread": "Plegar conversación",
     "expand_thread": "Desplegar conversación",
+    "long": {
+      "expand": "Mostrar el comentario completo",
+      "collapse": "Plegar comentario",
+      "plain_text_notice": "Demasiado largo para darle formato; se muestra como texto sin formato.",
+      "download": "Descargar como .txt"
+    },
     "delete_title": "Eliminar comentario",
     "delete_desc": "Este comentario se eliminará permanentemente. No se puede deshacer.",
     "delete_desc_with_replies": "Este comentario y todas sus respuestas se eliminarán permanentemente. No se puede deshacer.",

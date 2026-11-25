@@ -42,6 +42,8 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { api, dispatchReasonCode, errorCode } from "@multica/core/api";
 import { ReplyInput, type ReplyInputHandle } from "./reply-input";
 import { VirtualThreadRow, shouldVirtualizeThreadRows } from "./virtual-thread-row";
+import { LongCommentContent } from "./long-comment-content";
+import { isLongComment } from "../utils/long-comment";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { AppCallChips } from "./app-call-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
@@ -1025,7 +1027,11 @@ function CommentRow({
           <div tabIndex={currentUserId ? 0 : undefined} role="group"
             aria-label={t(($) => $.reply.annotations.source_label, { name: entry.actor_name || getActorName(entry.actor_type, entry.actor_id) })}
             data-comment-content={entry.id} data-find-unit={entry.id} className="pl-12 pr-4 max-md:pl-3 max-md:pr-3 text-body leading-relaxed text-foreground">
-            <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
+            {isLongComment(entry.content) ? (
+              <LongCommentContent issueId={issueId} commentId={entry.id} content={entry.content!} attachments={entry.attachments} />
+            ) : (
+              <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
+            )}
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4 max-md:pl-3 max-md:pr-3" />
           <div className="pl-12 pr-4 max-md:pl-3 max-md:pr-3">
@@ -1672,7 +1678,11 @@ function CommentCardImpl({
                 <div tabIndex={currentUserId ? 0 : undefined} role="group"
             aria-label={t(($) => $.reply.annotations.source_label, { name: entry.actor_name || getActorName(entry.actor_type, entry.actor_id) })}
             data-comment-content={entry.id} data-find-unit={entry.id} className="pl-8 max-md:pl-0 text-body leading-relaxed text-foreground">
-                  <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
+                  {isLongComment(entry.content) ? (
+                    <LongCommentContent issueId={issueId} commentId={entry.id} content={entry.content!} attachments={entry.attachments} />
+                  ) : (
+                    <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
+                  )}
                 </div>
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8 max-md:pl-0" />
                 <div className="pl-8 max-md:pl-0">

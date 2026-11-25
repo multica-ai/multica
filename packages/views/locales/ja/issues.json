@@ -701,6 +701,12 @@
     "add_reaction": "リアクションを追加",
     "collapse_thread": "スレッドを折りたたむ",
     "expand_thread": "スレッドを展開",
+    "long": {
+      "expand": "コメント全文を表示",
+      "collapse": "コメントを折りたたむ",
+      "plain_text_notice": "長すぎるため、プレーンテキストで表示しています。",
+      "download": ".txt としてダウンロード"
+    },
     "delete_title": "コメントを削除",
     "delete_desc": "このコメントは完全に削除されます。この操作は元に戻せません。",
     "delete_desc_with_replies": "このコメントとすべての返信が完全に削除されます。この操作は元に戻せません。",

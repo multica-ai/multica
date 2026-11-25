@@ -701,6 +701,12 @@
     "add_reaction": "新增表情回應",
     "collapse_thread": "收起討論",
     "expand_thread": "展開討論",
+    "long": {
+      "expand": "展開全文",
+      "collapse": "收起評論",
+      "plain_text_notice": "內容過長，以純文字顯示。",
+      "download": "下載為 .txt"
+    },
     "delete_title": "刪除評論",
     "delete_desc": "這條評論會被永久刪除，無法撤銷。",
     "delete_desc_with_replies": "這條評論及其全部回覆會被永久刪除，無法撤銷。",

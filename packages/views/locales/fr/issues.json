@@ -720,6 +720,12 @@
     "add_reaction": "Ajouter une réaction",
     "collapse_thread": "Replier le fil",
     "expand_thread": "Développer le fil",
+    "long": {
+      "expand": "Afficher le commentaire complet",
+      "collapse": "Replier le commentaire",
+      "plain_text_notice": "Trop long pour être mis en forme ; affiché en texte brut.",
+      "download": "Télécharger en .txt"
+    },
     "delete_title": "Supprimer le commentaire",
     "delete_desc": "Ce commentaire sera définitivement supprimé. Cette action est irréversible.",
     "delete_desc_with_replies": "Ce commentaire et toutes ses réponses seront définitivement supprimés. Cette action est irréversible.",

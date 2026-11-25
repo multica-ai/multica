@@ -720,6 +720,12 @@
     "add_reaction": "Add reaction",
     "collapse_thread": "Collapse thread",
     "expand_thread": "Expand thread",
+    "long": {
+      "expand": "Show full comment",
+      "collapse": "Collapse comment",
+      "plain_text_notice": "Too long to format, shown as plain text.",
+      "download": "Download as .txt"
+    },
     "delete_title": "Delete comment",
     "delete_desc": "This comment will be permanently deleted. This cannot be undone.",
     "delete_desc_with_replies": "This comment and all its replies will be permanently deleted. This cannot be undone.",
