@@ -31,6 +31,7 @@ import {
   ExternalLink,
   Folder,
   RotateCw,
+  ShieldOff,
   type IconComponent,
 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
@@ -851,6 +852,19 @@ function FileCard({
                   icon={ArchiveX}
                   title={t(($) => $.transcript.net_record_purged)}
                   description={t(($) => $.transcript.net_record_purged_hint)}
+                />
+              </div>
+            ) : bodyState === "mismatch" && !validBody ? (
+              // The served content failed the capture-time digest check.
+              // Terminal: no retry, nothing to recover — the panel must say
+              // so instead of rendering content nothing vouches for.
+              <div data-testid="run-file-diff-body-mismatch">
+                <FileDiffStatus
+                  density="card"
+                  tone="danger"
+                  icon={ShieldOff}
+                  title={t(($) => $.transcript.net_digest_mismatch)}
+                  description={t(($) => $.transcript.net_digest_mismatch_hint)}
                 />
               </div>
             ) : body.isPending && manualRetry && body.isFetching ? (

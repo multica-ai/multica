@@ -670,6 +670,11 @@ func (c *Collector) Finish(ctx context.Context) Collection {
 				f.Before = nil
 				f.After = nil
 			}
+			// Pin the sanitized text as the capture-time anchor the body
+			// endpoints will verify on every read.
+			if f.BodyStatus == "available" || f.BodyStatus == "redacted" {
+				f.BodySHA256 = BodyDigest(deref(f.Before), deref(f.After))
+			}
 			if f.BodyStatus == "omitted" || f.BodyStatus == "unavailable" {
 				result.Status = "partial"
 			}
@@ -723,9 +728,19 @@ func (c *Collector) Finish(ctx context.Context) Collection {
 		}
 	}
 	result.FilesTotal = len(result.Files)
+	if result.Digest = result.ComputeDigest(); result.Digest != "" {
+		result.DigestVersion = DigestVersion
+	}
 	return result
 }
 func identity(s string) string { sum := sha256.Sum256([]byte(s)); return hex.EncodeToString(sum[:16]) }
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
 
 // finishGitRoot pins the after tree and materializes the root's manifest from
 // the two pinned commits. Coverage/Reason reflect pin or manifest failures.

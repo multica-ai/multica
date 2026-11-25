@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -133,6 +134,57 @@ func TestRunFileChangesDirectoryRootBodyLifecycle(t *testing.T) {
 	}
 }
 
+// The capture-time body digest must degrade a drifted row instead of
+// rendering content nothing vouches for: a stored directory body that no
+// longer matches its manifest anchor answers 410 digest_mismatch, and a
+// digest that does not cover its own manifest is refused at upload.
+func TestRunFileChangesDigestMismatchDegrades(t *testing.T) {
+	if testHandler == nil {
+		t.Fatal("database required")
+	}
+	id := seedBatchTask(t, "run-diff-digest")
+	dbfx.Cleanup(t, "DELETE FROM run_file_change WHERE task_id=$1", id)
+	c := rundiff.Empty(uuid.NewString(), "ready", "")
+	c.Roots = []rundiff.Root{{ID: "d", Label: "workdir", Kind: "directory", Coverage: "complete"}}
+	before, after := "old body", "new body"
+	c.Files = []rundiff.File{{ID: "d1", RootID: "d", Path: "notes.txt", Change: "modified", BeforeBytes: int64(len(before)), AfterBytes: int64(len(after)), BodyStatus: "available", Before: &before, After: &after}}
+	// The collector pins these at capture time; emulate that before upload.
+	for i := range c.Files {
+		c.Files[i].BodySHA256 = rundiff.BodyDigest(stringOf(c.Files[i].Before), stringOf(c.Files[i].After))
+	}
+	c.Digest = c.ComputeDigest()
+	c.DigestVersion = rundiff.DigestVersion
+	testutil.Call(t, testHandler.SaveRunFileChanges, diffPost(t, id, c)).Want(200)
+
+	req := testutil.WithURLParams(diffGet(id, testWorkspaceID, "/d1"), "taskId", id, "fileId", "d1")
+	testutil.Decode[rundiff.File](t, testHandler.GetRunFileChange, req, 200)
+
+	// Rewrite the stored row's body behind the manifest's back (the drift the
+	// digest exists to catch) and require the degraded answer.
+	dbfx.Exec(t, `UPDATE run_file_change
+	  SET bodies = jsonb_set(bodies, '{d1,after}', '"TAMPERED"')
+	  WHERE task_id=$1`, id)
+	mismatch := testutil.Call(t, testHandler.GetRunFileChange, req).Want(http.StatusGone)
+	var errBody map[string]string
+	mismatch.JSON(&errBody)
+	if errBody["code"] != "digest_mismatch" {
+		t.Fatalf("drifted body must answer digest_mismatch, got %+v", errBody)
+	}
+	if got := mismatch.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("mismatch cache-control: %q", got)
+	}
+
+	// An upload whose digest does not cover its own manifest is rejected
+	// before anything is stored.
+	bad := rundiff.Empty(uuid.NewString(), "ready", "")
+	bad.Roots = c.Roots
+	bad.Files = []rundiff.File{c.Files[0]}
+	bad.Files[0].BodySHA256 = rundiff.BodyDigest("before", "after")
+	bad.Digest = rundiff.BodyDigest("x", "y") // covers nothing
+	bad.DigestVersion = rundiff.DigestVersion
+	testutil.Call(t, testHandler.SaveRunFileChanges, diffPost(t, id, bad)).Want(400)
+}
+
 // stubFileChangeRelayStore drives GetRunFileChange's relay branches to
 // controlled outcomes so the failure envelopes are observable without a live
 // daemon: an empty store never answers (504), one holding a purged response
@@ -178,11 +230,33 @@ func TestRunFileChangeRelayErrorsAreNoStore(t *testing.T) {
 	c := rundiff.Empty(uuid.NewString(), "ready", "")
 	c.Roots = []rundiff.Root{{ID: "g", Label: "repo", Kind: "git", Coverage: "complete"}}
 	c.Files = []rundiff.File{{ID: "g1", RootID: "g", Path: "a.txt", Change: "modified", BeforeBytes: 4, AfterBytes: 5, BodyStatus: "available"}}
+	// Capture pins the served content; the manifest carries the anchor.
+	c.Files[0].BodySHA256 = rundiff.BodyDigest("captured-before", "captured-after")
+	c.Digest = c.ComputeDigest()
+	c.DigestVersion = rundiff.DigestVersion
 	testutil.Call(t, testHandler.SaveRunFileChanges, diffPost(t, id, c)).Want(200)
 	get := testutil.WithURLParams(diffGet(id, testWorkspaceID, "/g1"), "taskId", id, "fileId", "g1")
 
-	// 504: the daemon never answers within the wait window.
+	// A relayed body whose recomputed digest disagrees with the manifest
+	// anchor degrades to digest_mismatch instead of rendering.
+	mismatchPayload, _ := json.Marshal(rundiff.File{ID: "g1", RootID: "g", Path: "a.txt", Change: "modified", BodyStatus: "available", Before: ptr("stale"), After: ptr("content"), BodySHA256: rundiff.BodyDigest("stale", "content")})
 	h := *testHandler
+	h.FileChangeRelayStore = &stubFileChangeRelayStore{resp: &FileChangeRelayResponse{State: "ok", File: mismatchPayload}}
+	drifted := testutil.Call(t, h.GetRunFileChange, get).Want(http.StatusGone)
+	var driftErr map[string]string
+	drifted.JSON(&driftErr)
+	if driftErr["code"] != "digest_mismatch" {
+		t.Fatalf("drifted relay must answer digest_mismatch, got %+v", driftErr)
+	}
+	if got := drifted.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("mismatch cache-control: %q", got)
+	}
+	// The matching relay passes and serves the body.
+	relayPayload, _ := json.Marshal(rundiff.File{ID: "g1", RootID: "g", Path: "a.txt", Change: "modified", BodyStatus: "available", Before: ptr("captured-before"), After: ptr("captured-after"), BodySHA256: rundiff.BodyDigest("captured-before", "captured-after")})
+	h.FileChangeRelayStore = &stubFileChangeRelayStore{resp: &FileChangeRelayResponse{State: "ok", File: relayPayload}}
+	testutil.Decode[rundiff.File](t, h.GetRunFileChange, get, 200)
+
+	// 504: the daemon never answers within the wait window.
 	h.FileChangeRelayStore = &stubFileChangeRelayStore{}
 	timeout := testutil.Call(t, h.GetRunFileChange, get).Want(http.StatusGatewayTimeout)
 	if got := timeout.Header().Get("Cache-Control"); got != "no-store" {

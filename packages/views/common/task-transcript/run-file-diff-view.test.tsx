@@ -1065,6 +1065,26 @@ describe("relay states", () => {
     ).toBeNull();
   });
 
+  // Digest mismatch is terminal: served content failed the capture-time
+  // check, so the panel degrades with an explicit card and never renders
+  // the content, no matter how often it is refetched.
+  it("renders the terminal mismatch card for digest_mismatch without a retry action", async () => {
+    vi.mocked(api.getRunFileChangeBody).mockRejectedValueOnce(
+      relayError(410, "digest_mismatch"),
+    );
+    renderView("task", { runtime: localRuntime });
+    fireEvent.click(await findFileTrigger("repo-one", "same.ts"));
+    expect(await screen.findByTestId("run-file-diff-body-mismatch"))
+      .toHaveTextContent("Content verification failed");
+    expect(
+      screen.queryByRole("button", { name: "Retry" }),
+    ).toBeNull();
+    // And the body content is not in the tree at all.
+    expect(
+      screen.queryByTestId("run-file-diff-body-offline"),
+    ).toBeNull();
+  });
+
   it("marks the group header while the runtime is offline and hides it online", async () => {
     vi.mocked(api.listRuntimes).mockResolvedValue([offlineRuntime()]);
     const { client } = renderView("task", { runtime: localRuntime });

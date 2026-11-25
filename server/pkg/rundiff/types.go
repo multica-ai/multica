@@ -2,9 +2,13 @@
 package rundiff
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"fmt"
 	"path"
 	"regexp"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -56,6 +60,15 @@ type File struct {
 	// carries them.
 	BeforeOID string `json:"before_oid,omitempty"`
 	AfterOID  string `json:"after_oid,omitempty"`
+	// BodySHA256 pins the served content at capture time: the hex sha256 of
+	// the sanitized before side, a NUL byte, and the sanitized after side,
+	// exactly as the body endpoints serve them. Set for every file whose
+	// sides were captured (available/redacted); absent means "not verifiable"
+	// (binary, budget-omitted, or an unreadable side), never "matches".
+	// The server recomputes over whatever it is about to serve — stored
+	// directory bodies, or what the runtime's daemon relays back — and
+	// degrades to digest_mismatch when the check fails.
+	BodySHA256 string `json:"body_sha256,omitempty"`
 }
 type Collection struct {
 	SchemaVersion  int     `json:"schema_version"`
@@ -75,10 +88,76 @@ type Collection struct {
 	InsertionsTotal int64 `json:"insertions_total"`
 	DeletionsTotal  int64 `json:"deletions_total"`
 	StatsComplete   bool  `json:"stats_complete"`
+	// Digest covers the collection's verifiable identity: the file list and
+	// each file's BodySHA256, in the DigestVersion serialization. Absent
+	// means the collection predates integrity digests and nothing is checked.
+	Digest        string `json:"digest,omitempty"`
+	DigestVersion int    `json:"digest_version,omitempty"`
 }
 
 func Empty(id, status, reason string) Collection {
 	return Collection{SchemaVersion: 1, CollectionID: id, Status: status, Reason: reason, Scope: "registered_workdir_roots", Roots: []Root{}, Files: []File{}, TotalsComplete: true, StatsComplete: true}
+}
+
+// DigestVersion identifies the integrity-digest serialization below; a change
+// to the inputs or the framing must bump it.
+const DigestVersion = 1
+
+// BodyDigest pins one file's served content: hex sha256 over the before side,
+// a NUL separator, and the after side — the exact bytes the body endpoints
+// return, sanitized presentation included. A missing side hashes as empty.
+func BodyDigest(before, after string) string {
+	h := sha256.New()
+	h.Write([]byte(before))
+	h.Write([]byte{0})
+	h.Write([]byte(after))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// ComputeDigest derives the collection digest over the files that carry a
+// BodySHA256, sorted by (root_id, path) so upload order cannot change it. It
+// returns "" when no file is verifiable, which callers store as an absent
+// digest rather than a checked-and-passed one.
+func (c *Collection) ComputeDigest() string {
+	rows := make([]string, 0, len(c.Files))
+	for i := range c.Files {
+		f := &c.Files[i]
+		if f.BodySHA256 == "" {
+			continue
+		}
+		rows = append(rows, f.RootID+"\x1f"+f.Path+"\x1f"+f.Change+"\x1f"+f.ID+"\x1f"+f.BodySHA256)
+	}
+	if len(rows) == 0 {
+		return ""
+	}
+	sort.Strings(rows)
+	h := sha256.New()
+	fmt.Fprintf(h, "multica-run-file-changes-digest-v%d\n", DigestVersion)
+	for _, row := range rows {
+		h.Write([]byte(row))
+		h.Write([]byte{'\n'})
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// VerifyDigest recomputes the collection digest and reports whether it
+// matches. A collection with no verifiable files (no stored digest) passes:
+// absence is "not checked", and per-file verification still applies.
+func (c *Collection) VerifyDigest() bool {
+	if c.Digest == "" {
+		return true
+	}
+	computed := c.ComputeDigest()
+	return computed != "" && subtle.ConstantTimeCompare([]byte(computed), []byte(c.Digest)) == 1
+}
+
+// VerifyBody reports whether the given sides match the file's captured
+// digest. Files without BodySHA256 pass: absence is "not checked".
+func (f *File) VerifyBody(before, after string) bool {
+	if f.BodySHA256 == "" {
+		return true
+	}
+	return subtle.ConstantTimeCompare([]byte(BodyDigest(before, after)), []byte(f.BodySHA256)) == 1
 }
 
 var quotedCredential = regexp.MustCompile(`(?i)(["'](?:token|password|api_key|api_secret|secret|access_token|private_key)["']\s*[:=]\s*)["'](?:\\.|[^"'])*["']`)
@@ -257,5 +336,41 @@ func (c *Collection) ValidateAndSanitize() error {
 	if c.Roots == nil {
 		c.Roots = []Root{}
 	}
+	// Integrity digests are optional (older daemons never send them). When a
+	// digest travels, the manifest must carry it consistently: version 1
+	// framing, hex hashes, and a digest that actually covers the files it
+	// claims to. A mismatched digest means the upload was corrupted or
+	// assembled from mixed sources — reject it rather than store an anchor
+	// the read path would fail on forever.
+	for i := range c.Files {
+		f := &c.Files[i]
+		if f.BodySHA256 != "" && !isHexHash(f.BodySHA256) {
+			return fmt.Errorf("invalid body_sha256")
+		}
+	}
+	if c.Digest != "" {
+		if !isHexHash(c.Digest) || (c.DigestVersion != 0 && c.DigestVersion != DigestVersion) {
+			return fmt.Errorf("invalid digest framing")
+		}
+		if !c.VerifyDigest() {
+			return fmt.Errorf("digest does not cover the manifest")
+		}
+		c.DigestVersion = DigestVersion
+	} else {
+		c.DigestVersion = 0
+	}
 	return nil
+}
+
+func isHexHash(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }

@@ -19,6 +19,9 @@ const fileSchema = z
     // must still parse.
     insertions: z.number().int().nonnegative().optional(),
     deletions: z.number().int().nonnegative().optional(),
+    // Capture-time integrity anchor over the served content (hex sha256).
+    // Optional: absent means "not verified", never "verified".
+    body_sha256: z.string().optional(),
   })
   .transform((f) => ({
     id: f.id,
@@ -36,6 +39,7 @@ const fileSchema = z
     // wire: snapshots and fixtures without counts stay valid.
     ...(f.insertions !== undefined ? { insertions: f.insertions } : {}),
     ...(f.deletions !== undefined ? { deletions: f.deletions } : {}),
+    ...(f.body_sha256 !== undefined ? { bodySha256: f.body_sha256 } : {}),
   }));
 const rootSchema = z.object({
   id: z.string(),
@@ -63,6 +67,9 @@ const collectionSchema = z
     insertions_total: z.number().int().nonnegative().optional(),
     deletions_total: z.number().int().nonnegative().optional(),
     stats_complete: z.boolean().optional(),
+    // Capture-time integrity digest over the file list and per-file anchors.
+    digest: z.string().optional(),
+    digest_version: z.number().int().nonnegative().optional(),
   })
   .refine(
     (c) =>
@@ -88,6 +95,10 @@ const collectionSchema = z
       : {}),
     ...(c.stats_complete !== undefined
       ? { statsComplete: c.stats_complete }
+      : {}),
+    ...(c.digest !== undefined ? { digest: c.digest } : {}),
+    ...(c.digest_version !== undefined
+      ? { digestVersion: c.digest_version }
       : {}),
   }));
 const bodySchema = z

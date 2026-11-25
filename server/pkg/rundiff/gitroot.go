@@ -394,9 +394,15 @@ func (c *Collector) manifestRoot(ctx context.Context, r *rootState) ([]File, boo
 		if st.binary {
 			f.BodyStatus = "binary"
 		} else {
-			status, reason := c.classifyRow(ctx, r, e, f.BeforeBytes, f.AfterBytes)
+			status, reason, before, after := c.classifyRow(ctx, r, e, f.BeforeBytes, f.AfterBytes)
 			f.BodyStatus = status
 			f.Reason = reason
+			// The same sanitized text the relay will serve is in hand right
+			// here, so pin it: this is the capture-time anchor the server
+			// checks every relay response against.
+			if status == "available" || status == "redacted" {
+				f.BodySHA256 = BodyDigest(before, after)
+			}
 		}
 		if !st.binary {
 			if st.hasStats {
@@ -418,9 +424,10 @@ func (c *Collector) manifestRoot(ctx context.Context, r *rootState) ([]File, boo
 // classifyRow orders the presentation decisions for one non-binary row the
 // way the pre-tree collector did: baseline readability first (a missing or
 // unreadable before blob dominates everything), then the per-side budget that
-// turns oversize rows into metadata-only, then redaction. Content is never
-// attached — only the verdict travels.
-func (c *Collector) classifyRow(ctx context.Context, r *rootState, e *diffEntry, beforeBytes, afterBytes int64) (bodyStatus, reason string) {
+// turns oversize rows into metadata-only, then redaction. The sanitized text
+// travels only as far as this function's caller, which reduces it to the
+// capture-time body digest; content is never attached to the manifest.
+func (c *Collector) classifyRow(ctx context.Context, r *rootState, e *diffEntry, beforeBytes, afterBytes int64) (bodyStatus, reason string, before, after string) {
 	read := func(tree string) (string, bool) {
 		out, err := gitEnvRun(ctx, r.dir, nil, c.limits.SideBytes+1, nil, "cat-file", "blob", tree+":"+e.path)
 		if err != nil {
@@ -428,11 +435,10 @@ func (c *Collector) classifyRow(ctx context.Context, r *rootState, e *diffEntry,
 		}
 		return string(normalizeRuntime(e.path, out)), true
 	}
-	var before, after string
 	if e.beforeOID != "" {
 		var ok bool
 		if before, ok = read(r.beforeCommit); !ok {
-			return "unavailable", "baseline_object_missing"
+			return "unavailable", "baseline_object_missing", "", ""
 		}
 	}
 	oversize := (e.beforeOID != "" && beforeBytes > int64(c.limits.SideBytes)) ||
@@ -440,18 +446,18 @@ func (c *Collector) classifyRow(ctx context.Context, r *rootState, e *diffEntry,
 	if oversize {
 		// Above the per-side budget the content stays unviewable; the row and
 		// its line statistics still come from diff-tree.
-		return "omitted", "side_budget"
+		return "omitted", "side_budget", "", ""
 	}
 	if e.aftOID != "" {
 		var ok bool
 		if after, ok = read(r.afterCommit); !ok {
-			return "unavailable", "object_missing"
+			return "unavailable", "object_missing", "", ""
 		}
 	}
 	if redactsText(before) || redactsText(after) {
-		return "redacted", ""
+		return "redacted", "", before, after
 	}
-	return "available", ""
+	return "available", "", before, after
 }
 
 func redactsText(s string) bool { return SafeText(s) != s }

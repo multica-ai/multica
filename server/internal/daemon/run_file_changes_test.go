@@ -216,6 +216,19 @@ func TestRunDiffResidentRefsAndTaskGC(t *testing.T) {
 	if final.Status != "ready" || len(final.Files) != 1 || final.Files[0].Before != nil || final.Files[0].After != nil {
 		t.Fatalf("git upload: %+v", final)
 	}
+	// The capture pins the served content at upload time: the git file
+	// carries the digest over its sanitized sides, and the collection digest
+	// covers it. The relay path recomputes the same hash from the pinned
+	// trees on every request, so a drifted tree fails the server-side check.
+	if final.Files[0].BodySHA256 == "" {
+		t.Fatalf("git capture must pin a body digest: %+v", final.Files[0])
+	}
+	if want := rundiff.BodyDigest("before", "after"); final.Files[0].BodySHA256 != want {
+		t.Fatalf("digest over sanitized sides: got %s want %s", final.Files[0].BodySHA256, want)
+	}
+	if final.Digest == "" || !final.VerifyDigest() {
+		t.Fatalf("collection digest missing or unverifiable: %+v", final)
+	}
 	refs := git("for-each-ref", "--format=%(refname)", "refs/multica/run-diff/")
 	if strings.Count(refs, "\n") != 1 || !strings.Contains(refs, "/before") || !strings.Contains(refs, "/after") {
 		t.Fatalf("expected exactly before+after refs: %q", refs)

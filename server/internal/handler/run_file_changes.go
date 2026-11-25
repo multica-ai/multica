@@ -25,6 +25,9 @@ const (
 	fileChangeCodeRuntimeTimeout = "runtime_timeout"
 	fileChangeCodeRecordPurged   = "record_purged"
 	fileChangeCodeRelayBusy      = "relay_busy"
+	// digest_mismatch: the content about to be served does not match the
+	// capture-time anchor in the manifest. Never rendered as a diff.
+	fileChangeCodeDigestMismatch = "digest_mismatch"
 )
 
 // writeFileChangeError answers a relay failure. Relay outcomes are per-request
@@ -263,8 +266,23 @@ func (h *Handler) serveStoredFileChangeBody(w http.ResponseWriter, r *http.Reque
 		writeError(w, 500, "invalid stored body")
 		return
 	}
+	// Stored directory bodies are checked against the capture-time anchor
+	// exactly like relayed git bodies: a stale or rewritten row degrades to
+	// digest_mismatch instead of rendering content nothing vouches for.
+	if !f.VerifyBody(stringOf(f.Before), stringOf(f.After)) {
+		h.logFileChangeRelay(r, task.ID, file.ID, fileChangeCodeDigestMismatch, start)
+		writeFileChangeError(w, http.StatusGone, fileChangeCodeDigestMismatch, "stored content does not match the captured digest")
+		return
+	}
 	h.logFileChangeRelay(r, task.ID, file.ID, "ok", start)
 	writeJSON(w, 200, f)
+}
+
+func stringOf(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // relayFileChangeBody queues a fetch order for the runtime's daemon and waits
@@ -359,6 +377,19 @@ func (h *Handler) relayFileChangeBody(w http.ResponseWriter, r *http.Request, ta
 			s := rundiff.SafeText(*f.After)
 			f.After = &s
 		}
+		// The daemon recomputed the body digest over what it read from the
+		// pinned trees; compare the served content with the capture-time
+		// anchor stored in the manifest row. A mismatch means the trees
+		// drifted after capture — stale, swapped or tampered — and the
+		// content must degrade to unavailable, never render.
+		if !file.VerifyBody(stringOf(f.Before), stringOf(f.After)) {
+			h.logFileChangeRelay(r, task.ID, file.ID, fileChangeCodeDigestMismatch, start)
+			writeFileChangeError(w, http.StatusGone, fileChangeCodeDigestMismatch, "served content does not match the captured digest")
+			return
+		}
+		// The served row carries the recomputed anchor; keep the stored one
+		// authoritative in the response.
+		f.BodySHA256 = file.BodySHA256
 		h.logFileChangeRelay(r, task.ID, file.ID, result(""), start)
 		writeJSON(w, 200, f)
 		return

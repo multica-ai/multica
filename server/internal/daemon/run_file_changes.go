@@ -484,7 +484,20 @@ func (d *Daemon) buildFileChangeResponse(ctx context.Context, request FileChange
 	}
 	f := rundiff.AssembleRelayFile(*row, before, after)
 	f.BeforeOID, f.AfterOID = "", ""
+	// Recompute the body digest over exactly what this response serves, so
+	// the server can check it against the capture-time anchor: a stale or
+	// swapped tree fails the check instead of rendering as a faithful diff.
+	if f.BodyStatus == "available" || f.BodyStatus == "redacted" {
+		f.BodySHA256 = rundiff.BodyDigest(stringOf(f.Before), stringOf(f.After))
+	}
 	return fileChangeResponse{State: "ok", File: f}
+}
+
+func stringOf(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // ---------------------------------------------------------------------------

@@ -77,17 +77,25 @@ export function fileChangeBodyOptions(
 // cannot serve this body right now" — one recoverable offline display state.
 const offlineStatuses = new Set([503, 504, 429]);
 const offlineCodes = new Set(["runtime_offline", "runtime_timeout", "relay_busy"]);
-export type FileChangeBodyState = "ready" | "offline" | "purged" | "error";
+export type FileChangeBodyState =
+  | "ready"
+  | "offline"
+  | "purged"
+  | "mismatch"
+  | "error";
 /**
  * Classify a body fetch failure for display. Relay trouble with the
  * runtime (503/504/429, matched by status or error code so a proxy rewriting
  * statuses still lands) is one recoverable offline state, 410 is a terminal
- * purged record, and everything else — including a runtime that vanished
- * between manifest and relay — is a generic retryable failure.
+ * purged record, a digest mismatch means the served content no longer
+ * matches what was captured — terminal, never rendered as a diff — and
+ * everything else, including a runtime that vanished between manifest and
+ * relay, is a generic retryable failure.
  */
 export function fileChangeBodyState(error: unknown): FileChangeBodyState {
   if (!(error instanceof ApiError)) return "error";
   const code = errorCode(error);
+  if (code === "digest_mismatch") return "mismatch";
   if (error.status === 410 || code === "record_purged") return "purged";
   if (
     offlineStatuses.has(error.status) ||

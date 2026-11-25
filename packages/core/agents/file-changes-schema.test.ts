@@ -197,3 +197,23 @@ describe("unknown contract semantics", () => {
     ).toBe("unavailable");
   });
 });
+
+describe("integrity digests", () => {
+  it("carries the capture-time anchors when the wire provides them", () => {
+    const parsed = parseFileChanges({
+      ...collection,
+      digest: "a".repeat(64),
+      digest_version: 1,
+      files: [{ ...collection.files[0]!, body_sha256: "b".repeat(64) }],
+    });
+    expect(parsed.digest).toBe("a".repeat(64));
+    expect(parsed.digestVersion).toBe(1);
+    expect(parsed.files[0]!.bodySha256).toBe("b".repeat(64));
+  });
+
+  it("keeps snapshots without digests valid — absence is not verification", () => {
+    const parsed = parseFileChanges(collection);
+    expect(parsed.digest).toBeUndefined();
+    expect(parsed.files[0]!.bodySha256).toBeUndefined();
+  });
+});
