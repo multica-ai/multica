@@ -27,6 +27,7 @@ Common notifications include:
 - an issue or comment you created gets a reaction;
 - an agent run fails on an issue you subscribe to;
 - an issue is created in a project you subscribe to;
+- every [blocker](/issues#relations) on an issue assigned to you ends (**Waiting tasks ended**);
 - [creating an issue through an agent](/issues#create-with-agent) completes or fails;
 - an autopilot you subscribe to creates a new issue, or is paused after consecutive failures.
 
@@ -125,7 +126,7 @@ Snooze takes an issue out of your inbox until a time you pick, then brings it ba
 While an issue is snoozed:
 
 - new notifications on it wait with it and don't count toward the unread badge. When it comes back, the row says **Snooze ended** and how many updates arrived meanwhile;
-- it comes back early when someone mentions you by name, it is assigned to you, a run fails, or all its sub-issues finish. `@all` mentions don't wake it;
+- it comes back early when someone mentions you by name, it is assigned to you, a run fails, all its sub-issues finish, or all its blockers end. `@all` mentions don't wake it;
 - **Mark all as read** and the archive-all actions leave it alone. Archiving it ends the snooze, and so does completing the issue yourself while **Archive issues you handle** counts completing (it does by default);
 - opening the issue's own page doesn't read it or end the snooze. Open it from the **Snoozed** tab and the group over it shows when it comes back. Click that time to bring it back now (`H`) or pick another time.
 
