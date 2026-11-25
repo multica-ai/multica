@@ -438,8 +438,8 @@ export function IssueViewHeader({
                         <Link2 className="size-3.5" />
                         {t(($) => $.views.copy_link)}
                       </DropdownMenuItem>
+                      <ViewVisibilityMenuItems view={activeView} actions={actions} />
                     </DropdownMenuGroup>
-                    <ViewVisibilityMenuItems view={activeView} actions={actions} />
                     <DropdownMenuSeparator />
                     <DropdownMenuGroup>
                       {starId && (

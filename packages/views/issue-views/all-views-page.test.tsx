@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { IssueView } from "@multica/core/api/schemas";
 import { renderWithI18n } from "../test/i18n";
@@ -171,8 +171,10 @@ describe("AllViewsPage", () => {
     const { push } = renderPage();
 
     await user.click(screen.getByRole("button", { name: "Actions for Project review" }));
+    await user.click(await screen.findByRole("menuitem", { name: /^Visible to\s*Only me/ }));
     expect(await screen.findByRole("menuitemradio", { name: "Only me" })).toHaveAttribute("aria-checked", "true");
-    await user.click(screen.getByRole("menuitemradio", { name: "Workspace members" }));
+    // The open submenu marks its parent menu `pointer-events: none` in jsdom.
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Workspace members" }));
 
     expect(mocks.setVisibility).toHaveBeenCalledWith(projectView, "workspace");
     expect(push).not.toHaveBeenCalled();
@@ -186,7 +188,7 @@ describe("AllViewsPage", () => {
 
     await user.click(screen.getByRole("button", { name: "Actions for Needs review" }));
     expect(await screen.findByRole("menuitem", { name: "Duplicate" })).toBeInTheDocument();
-    expect(screen.queryByRole("menuitemradio", { name: "Workspace members" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /^Visible to/ })).not.toBeInTheDocument();
   });
 
   it("stars and unstars without opening the view", async () => {

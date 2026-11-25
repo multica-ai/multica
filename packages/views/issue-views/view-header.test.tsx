@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { IssueView } from "@multica/core/api/schemas";
 import { myIssuesViewStore } from "@multica/core/issues/stores/my-issues-view-store";
@@ -165,8 +165,10 @@ describe("IssueViewHeader visibility", () => {
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: "Untitled view" }));
+    await user.click(await screen.findByRole("menuitem", { name: /^Visible to\s*Only me/ }));
     expect(await screen.findByRole("menuitemradio", { name: "Only me" })).toHaveAttribute("aria-checked", "true");
-    await user.click(screen.getByRole("menuitemradio", { name: "Workspace members" }));
+    // The open submenu marks its parent menu `pointer-events: none` in jsdom.
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Workspace members" }));
 
     expect(setVisibility).toHaveBeenCalledWith(active.view, "workspace");
   });

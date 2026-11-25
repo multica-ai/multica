@@ -145,6 +145,7 @@ describe("ViewsSection", () => {
     renderSection();
 
     fireEvent.contextMenu(screen.getByRole("link", { name: "Not done" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^Visible to\s*Only me/ }));
     fireEvent.click(await screen.findByRole("menuitemradio", { name: "Workspace members" }));
 
     expect(actions.setVisibility).toHaveBeenCalledWith(view, "workspace");

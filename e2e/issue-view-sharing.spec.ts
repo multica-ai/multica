@@ -60,8 +60,9 @@ test("a member can share a project view from All views and make it private from 
     if (await star.getAttribute("aria-pressed") !== "true") await star.click();
     await row.getByRole("button", { name: "Actions for Project review", exact: true }).click();
     await expect(page.getByRole("menuitem", { name: "Copy link", exact: true })).toBeVisible();
-    await page.screenshot({ path: testInfo.outputPath("directory-sharing-menu.png") });
+    await page.getByRole("menuitem", { name: /^Visible to\s*Only me/ }).click();
     await expect(page.getByRole("menuitemradio", { name: "Only me", exact: true })).toBeChecked();
+    await page.screenshot({ path: testInfo.outputPath("directory-sharing-menu.png") });
     const shared = page.waitForResponse((res) => res.url().endsWith(`/api/issue-views/${view.id}`) && res.request().method() === "PATCH");
     await page.getByRole("menuitemradio", { name: "Workspace members", exact: true }).click();
     expect((await shared).status()).toBe(200);
@@ -83,7 +84,7 @@ test("a member can share a project view from All views and make it private from 
     const readerRow = readerPage.getByRole("row").filter({ hasText: "Project review" });
     await readerRow.getByRole("button", { name: "Actions for Project review", exact: true }).click();
     await expect(readerPage.getByRole("menuitem", { name: "Copy link", exact: true })).toBeVisible();
-    await expect(readerPage.getByRole("menuitemradio", { name: "Workspace members", exact: true })).toHaveCount(0);
+    await expect(readerPage.getByRole("menuitem", { name: /^Visible to/ })).toHaveCount(0);
     await readerPage.keyboard.press("Escape");
     await readerRow.getByText("Project review", { exact: true }).click();
     await expect(readerPage).toHaveURL(new RegExp(`/projects/${project.id}\\?view=${view.id}$`));
@@ -92,6 +93,7 @@ test("a member can share a project view from All views and make it private from 
     await readerPage.screenshot({ path: testInfo.outputPath("teammate-shared-view.png") });
 
     await page.getByRole("link", { name: "Project review", exact: true }).click({ button: "right" });
+    await page.getByRole("menuitem", { name: /^Visible to\s*Workspace members/ }).click();
     await expect(page.getByRole("menuitemradio", { name: "Workspace members", exact: true })).toBeChecked();
     await page.screenshot({ path: testInfo.outputPath("sidebar-sharing-menu.png") });
     const unshared = page.waitForResponse((res) => res.url().endsWith(`/api/issue-views/${view.id}`) && res.request().method() === "PATCH");
