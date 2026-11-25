@@ -699,6 +699,51 @@ describe("onIssueUpdated — source deletion detaches sub-issues", () => {
   });
 });
 
+describe("onIssueUpdated — blockers stay this reader's own", () => {
+  it("keeps the cached blocked_by when a broadcast carries a narrower list", () => {
+    const qc = new QueryClient();
+    const privateBlocker = {
+      id: OTHER_ISSUE_ID,
+      identifier: "MUL-2",
+      title: "Private blocker",
+      status: "todo",
+      via: "manual",
+      closed: false,
+    };
+    const child: Issue = {
+      ...parentedIssue,
+      blocked_by: [privateBlocker],
+      blocked_count: 1,
+      revision: 1,
+    };
+    const detailKey = issueKeys.detail(WS_ID, ISSUE_ID);
+    const childrenKey = issueKeys.children(WS_ID, PARENT_ISSUE_ID);
+    const listKey = issueKeys.list(WS_ID);
+    qc.setQueryData(detailKey, child);
+    qc.setQueryData(childrenKey, [child]);
+    qc.setQueryData(listKey, makeListCache(child));
+
+    // The server strips cross-project private blockers from every broadcast.
+    onIssueUpdated(qc, WS_ID, {
+      ...child,
+      title: "Renamed",
+      blocked_by: [],
+      revision: 2,
+    });
+
+    const expected = {
+      title: "Renamed",
+      blocked_by: [privateBlocker],
+      blocked_count: 1,
+      revision: 2,
+    };
+    expect(qc.getQueryData(detailKey)).toMatchObject(expected);
+    expect(qc.getQueryData<ListIssuesCache>(listKey)?.byStatus.unstarted?.issues[0])
+      .toMatchObject(expected);
+    expect(qc.getQueryData<Issue[]>(childrenKey)?.[0]).toMatchObject(expected);
+  });
+});
+
 describe("onIssueUpdated — position move is surgical, not a list refetch", () => {
   let qc: QueryClient;
 
