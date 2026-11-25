@@ -1041,6 +1041,40 @@ describe("IssueDetail (shared)", () => {
     }
   });
 
+  it("opens long comments and replies collapsed, and finds their tail only once expanded", async () => {
+    const tail = "needle at the very end";
+    const long = (label: string) => `${label} opening\n${"filler words ".repeat(1_000)}\n${tail}`;
+    mockApiObj.listTimeline.mockResolvedValue([
+      { ...mockTimeline[0]!, id: "long-root", parent_id: null, source_task_id: undefined, content: long("Root") },
+      { ...mockTimeline[0]!, id: "long-reply", parent_id: "long-root", source_task_id: undefined, content: long("Reply"),
+        created_at: new Date(Date.parse(mockTimeline[0]!.created_at) + 60_000).toISOString() },
+    ]);
+    mockApiObj.listTasksByIssue.mockResolvedValue([]);
+    const rects = vi.spyOn(HTMLElement.prototype, "getClientRects")
+      .mockReturnValue([new DOMRect(0, 0, 1, 1)] as unknown as DOMRectList);
+    configureShortcutPlatform("linux");
+    try {
+      renderIssueDetail();
+      await screen.findByText(/Root opening/);
+      await screen.findByText(/Reply opening/);
+      expect(screen.queryByText(new RegExp(tail))).toBeNull();
+      const toggles = screen.getAllByRole("button", { name: "Show full comment" });
+      expect(toggles).toHaveLength(2);
+
+      fireEvent.keyDown(document, { key: "f", code: "KeyF", ctrlKey: true });
+      fireEvent.change(await screen.findByRole("textbox", { name: "Find in issue..." }), { target: { value: "needle" } });
+      await waitFor(() => expect(screen.getByRole("search")).not.toHaveTextContent(/\d+\/\d+/));
+
+      fireEvent.click(toggles[1]!);
+      await waitFor(() => expect(screen.getByRole("search")).toHaveTextContent("1/1"));
+      expect(document.querySelector('[data-comment-content="long-reply"]')).toHaveTextContent(tail);
+      expect(document.querySelector('[data-comment-content="long-root"]')).not.toHaveTextContent(tail);
+    } finally {
+      rects.mockRestore();
+      configureShortcutPlatform(null);
+    }
+  });
+
   it("opens source-context creation from both a root comment and a reply", async () => {
     mockApiObj.listTimeline.mockResolvedValue([
       { ...mockTimeline[0], id: "source-root", parent_id: null },
