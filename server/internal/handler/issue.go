@@ -4116,6 +4116,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if !h.validateBlockerVisibility(w, r, prevIssue.WorkspaceID, req.BlockedBy) {
 		return
 	}
+	if !h.validateBlockerVisibility(w, r, prevIssue.WorkspaceID, req.RemoveBlockedBy) {
+		return
+	}
 
 	// Track which fields were explicitly present in JSON (even if null)
 	var rawFields map[string]json.RawMessage
@@ -5053,6 +5056,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.validateBlockerVisibility(w, r, wsUUID, req.Updates.BlockedBy) {
+		return
+	}
+	if !h.validateBlockerVisibility(w, r, wsUUID, req.Updates.RemoveBlockedBy) {
 		return
 	}
 	// Status is validated against this workspace's catalog, so it has to wait

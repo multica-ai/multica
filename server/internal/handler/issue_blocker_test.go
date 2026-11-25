@@ -486,3 +486,65 @@ func TestIssueBlockerReleaseHidesReferencesFromGuest(t *testing.T) {
 		}
 	}
 }
+
+// Removing a dependency is gated like adding one: a member who can't open the
+// private prerequisite can't drop it, even with its ID in hand — including a
+// member who added it before losing access to the project.
+func TestIssueBlockerRemovalRequiresBlockerVisibility(t *testing.T) {
+	agent := seededReadyAgentID(t)
+	svc := service.IssueWakeupService{Tasks: testHandler.TaskService}
+	writes := map[string]func(user, id string, updates map[string]any) *testutil.Response{
+		"single": func(user, id string, updates map[string]any) *testutil.Response {
+			return testutil.Call(t, testHandler.UpdateIssue, withURLParam(asUser(newRequest("PUT", "/api/issues/"+id, updates), user), "id", id))
+		},
+		"batch": func(user, id string, updates map[string]any) *testutil.Response {
+			return testutil.Call(t, testHandler.BatchUpdateIssues, asUser(newRequest("POST", "/api/issues/batch-update?workspace_id="+testWorkspaceID, map[string]any{
+				"issue_ids": []string{id}, "updates": updates,
+			}), user))
+		},
+	}
+	for name, write := range writes {
+		t.Run(name, func(t *testing.T) {
+			f := newPrivateProjectFixture(t)
+			t.Cleanup(func() {
+				dbfx.Exec(t, "DELETE FROM issue_blocker WHERE issue_id=$1", f.publicIssue)
+				cleanupChildDoneIssue(f.publicIssue)
+			})
+			dbfx.Exec(t, "UPDATE issue SET status='todo',assignee_type='agent',assignee_id=$2 WHERE id=$1", f.publicIssue, agent)
+			edges := func() int {
+				return dbfx.Count(t, "SELECT count(*) FROM issue_blocker WHERE issue_id=$1 AND blocker_issue_id=$2", f.publicIssue, f.secretIssue)
+			}
+			runs := func() int {
+				return dbfx.Count(t, "SELECT count(*) FROM agent_task_queue WHERE issue_id=$1", f.publicIssue)
+			}
+			tick := func() {
+				t.Helper()
+				if err := svc.TickWorkspaces(context.Background(), parseUUID(testWorkspaceID)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			write(f.insider, f.publicIssue, map[string]any{"blocked_by": []string{f.secretIssue}}).Want(http.StatusOK)
+			remove := map[string]any{"remove_blocked_by": []string{f.secretIssue}}
+			write(f.outsider, f.publicIssue, remove).Want(http.StatusBadRequest)
+			removeProjectMemberRow(t, f.projectID, f.insider)
+			write(f.insider, f.publicIssue, remove).Want(http.StatusBadRequest)
+			tick()
+			if n := edges(); n != 1 {
+				t.Fatalf("rejected removals left %d edges, want 1", n)
+			}
+			if n := runs(); n != 0 {
+				t.Fatalf("rejected removals started %d runs", n)
+			}
+			// The edge was the only thing holding the run back: a member who
+			// can see the prerequisite removes it and the issue starts.
+			write(testUserID, f.publicIssue, remove).Want(http.StatusOK)
+			tick()
+			if n := edges(); n != 0 {
+				t.Fatalf("authorized removal left %d edges", n)
+			}
+			if n := runs(); n != 1 {
+				t.Fatalf("authorized removal started %d runs, want 1", n)
+			}
+		})
+	}
+}
