@@ -20,6 +20,16 @@ import (
 // quota under an enforced limit.
 func newAppsQuotaFixture(t *testing.T, limit int) (*appsFixture, *entitlementtest.Stub) {
 	t.Helper()
+	stub, meter := enforceAppCallLimit(t, limit)
+	f := newAppsFixture(t, meter)
+	f.h.Entitlements = stub
+	return f, stub
+}
+
+// enforceAppCallLimit returns an entitlement stub that enforces limit app
+// calls this period, and the option that meters a gateway with it.
+func enforceAppCallLimit(t *testing.T, limit int) (*entitlementtest.Stub, func(*connectedapps.Config)) {
+	t.Helper()
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -30,16 +40,14 @@ func newAppsQuotaFixture(t *testing.T, limit int) (*appsFixture, *entitlementtes
 		Action: entitlement.ActionEnforce, Limit: &limit, PeriodStart: &start, PeriodEnd: &end, ResetAt: &end,
 		Notifications: &entitlement.NotificationPolicy{OnRejection: entitlement.NotificationFirstRejectionPerLimit},
 	}})
-	f := newAppsFixture(t, func(cfg *connectedapps.Config) {
-		cfg.CallQuota = service.AppToolCallQuota{Queries: testHandler.Queries, Entitlements: stub, TxStarter: testPool}
-	})
-	f.h.Entitlements = stub
 	t.Cleanup(func() {
 		ctx := context.Background()
 		testPool.Exec(ctx, `DELETE FROM app_tool_call_quota_period WHERE workspace_id = $1`, testWorkspaceID)
 		testPool.Exec(ctx, `DELETE FROM entitlement_limit_overage WHERE workspace_id = $1 AND gate = 'app_tool_calls'`, testWorkspaceID)
 	})
-	return f, stub
+	return stub, func(cfg *connectedapps.Config) {
+		cfg.CallQuota = service.AppToolCallQuota{Queries: testHandler.Queries, Entitlements: stub, TxStarter: testPool}
+	}
 }
 
 func (f *appsFixture) callOutcomes(t *testing.T) []string {
@@ -94,6 +102,30 @@ func TestConnectedApps_MonthlyQuotaRefusesGatewayCalls(t *testing.T) {
 	}
 	if n := f.inboxCount(t, testUserID, service.AppToolCallQuotaNoticeType); n != 1 {
 		t.Fatalf("owner notices = %d, want 1", n)
+	}
+}
+
+// Remote MCP apps do not run through Composio: their calls neither count
+// against the monthly limit nor stop at it.
+func TestConnectedApps_MonthlyQuotaSkipsRemoteApps(t *testing.T) {
+	stub, meter := enforceAppCallLimit(t, 0)
+	f := newRemoteAppsFixture(t, meter)
+	f.h.Entitlements = stub
+	f.connect(t, testUserID)
+	f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "mobbin", "account_scope": "personal", "level": "read"}})
+
+	_, result := f.remote(t, f.token(t), "tools/call", map[string]any{"name": "search_screens", "arguments": map[string]any{}})
+	if !strings.Contains(string(result), `"type":"image"`) {
+		t.Fatalf("remote call with no app calls left = %s", result)
+	}
+	if got := f.callOutcomes(t); len(got) != 1 || got[0] != "ok" {
+		t.Fatalf("call log = %v, want [ok]", got)
+	}
+	var metered, periods int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT (SELECT count(*) FROM app_tool_call WHERE task_id = $1 AND metered_period_start IS NOT NULL),
+		       (SELECT count(*) FROM app_tool_call_quota_period WHERE workspace_id = $2)`, f.taskID, testWorkspaceID).Scan(&metered, &periods); err != nil || metered != 0 || periods != 0 {
+		t.Fatalf("metered calls %d, quota periods %d (err %v); want none", metered, periods, err)
 	}
 }
 
