@@ -1587,4 +1587,66 @@ describe("SearchCommand", () => {
       expect(useSearchStore.getState().open).toBe(true);
     });
   });
+
+  // MUL-10220: cmdk picks the first enabled row when the input changes, which
+  // is often a local doc title hit while issue rows are still loading.
+  describe("selection while results land", () => {
+    const runbookIssue = {
+      ...makeIssue({ id: "issue-runbook", identifier: "MUL-300", title: "Runbook checklist" }),
+      match_source: "title",
+    };
+    let resolveIssues: (() => void) | null = null;
+
+    const typeRunbook = async (user: ReturnType<typeof userEvent.setup>) => {
+      seed(docTreeOptions("ws-test"), {
+        folders: [],
+        docs: [
+          { id: "doc-release", title: "Release runbook", folderId: null },
+          { id: "doc-oncall", title: "Oncall runbook", folderId: null },
+        ],
+      });
+      api("searchIssues").mockImplementation(({ q }: { q: string }) =>
+        q === "runbook"
+          ? new Promise((resolve) => {
+              resolveIssues = () => resolve({ issues: [runbookIssue], total: 1 });
+            })
+          : Promise.resolve({ issues: [], total: 0 }),
+      );
+      renderSearch();
+      await user.type(input(), "runbook");
+      await waitFor(() => expect(selectedValue()).toBe("doc:doc-release"));
+    };
+
+    const landIssues = async () => {
+      await waitFor(() => expect(resolveIssues).not.toBeNull());
+      await act(async () => resolveIssues!());
+      await waitFor(() => expect(renderedValues()[0]).toBe("issue-runbook"));
+    };
+
+    beforeEach(() => {
+      resolveIssues = null;
+    });
+
+    it("moves the selection to the top row when higher-ranked results arrive", async () => {
+      const user = userEvent.setup();
+      await typeRunbook(user);
+      await landIssues();
+
+      expect(selectedValue()).toBe("issue-runbook");
+      fireEvent.keyDown(input(), { key: "n", ctrlKey: true });
+      expect(selectedValue()).toBe("doc:doc-release");
+      fireEvent.keyDown(input(), { key: "p", ctrlKey: true });
+      expect(selectedValue()).toBe("issue-runbook");
+    });
+
+    it("keeps a row the user moved to while results land", async () => {
+      const user = userEvent.setup();
+      await typeRunbook(user);
+      fireEvent.keyDown(input(), { key: "n", ctrlKey: true });
+      expect(selectedValue()).toBe("doc:doc-oncall");
+      await landIssues();
+
+      expect(selectedValue()).toBe("doc:doc-oncall");
+    });
+  });
 });
