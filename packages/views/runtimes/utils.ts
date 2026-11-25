@@ -251,6 +251,8 @@ const MODEL_PRICING: Record<
   // prompt sizes, so long requests are underestimated. Mirror the backend
   // estimate in server/internal/metrics/pricing.go.
   "claude-haiku-5-5":    { input: 0.10, output: 0.50, cacheRead: 0.01, cacheWrite: 0.125 },
+  // Fable 5.2 is cheaper than 5 / 5.1: $8 / $40, cache read $0.20, write $10.
+  "claude-fable-5-2":   { input: 8,    output: 40,   cacheRead: 0.20, cacheWrite: 10.00 },
   "claude-fable-5-1":   { input: 10,   output: 50,   cacheRead: 0.25, cacheWrite: 12.50 },
   "claude-fable-5":     { input: 10,   output: 50,   cacheRead: 1.00, cacheWrite: 12.50 },
   "claude-opus-5-5":    { input: 4,    output: 20,   cacheRead: 0.20, cacheWrite: 5.00 },
