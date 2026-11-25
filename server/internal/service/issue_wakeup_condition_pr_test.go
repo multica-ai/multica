@@ -100,6 +100,8 @@ func TestWakeupConditionPREvaluation(t *testing.T) {
 		{"unlinked", "checks_finished", true, nil, errPRNotLinked, false},
 		{"unlinked merged", "merged", false, nil, errPRNotLinked, false},
 		{"no snapshot", "checks_finished", true, [][]any{row("open", "", "SUCCESS")}, errPRSnapshotPending, false},
+		{"checks verdict for an older head", "checks_finished", true, [][]any{{int32(1), "open", "old", "FAILURE", "head", "MERGEABLE", "p1"}}, errPRSnapshotPending, false},
+		{"checks legacy row with empty head_sha", "checks_finished", true, [][]any{{int32(1), "open", "old", "SUCCESS", "", "MERGEABLE", "p1"}}, nil, true},
 		{"pending", "checks_finished", true, [][]any{row("open", "head", "PENDING")}, nil, false},
 		{"no checks", "checks_finished", true, [][]any{row("open", "head", "")}, nil, false},
 		{"success", "checks_finished", true, [][]any{row("open", "head", "SUCCESS")}, nil, true},
