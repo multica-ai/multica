@@ -14,8 +14,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -971,6 +973,8 @@ type claimProjectContext struct {
 	Archived    bool
 	Resources   []ProjectResourceData
 	Repos       []RepoData
+
+	WorkspaceReposOnDemand bool
 }
 
 // applyTo copies the resolved context onto a claim response. Callers assign the
@@ -985,6 +989,7 @@ func (c claimProjectContext) applyTo(resp *AgentTaskResponse) {
 		resp.ProjectResources = c.Resources
 	}
 	resp.Repos = c.Repos
+	resp.WorkspaceReposOnDemand = c.WorkspaceReposOnDemand && resp.Kind != "quick_create"
 }
 
 // resolveClaimProjectContext loads the project context for one daemon claim.
@@ -1058,6 +1063,10 @@ func (h *Handler) resolveClaimProjectContext(ctx context.Context, projectID, wor
 				"workspace_id", uuidToString(workspaceID), "error", jsonErr)
 		} else if len(repos) > 0 {
 			out.Repos = repos
+			// Claims are daemon requests, so target the resolved task workspace.
+			eval := featureflag.EvalContextFrom(ctx)
+			eval.WorkspaceID = uuidToString(workspaceID)
+			out.WorkspaceReposOnDemand = featureflags.WorkspaceReposOnDemandEnabled(featureflag.WithEvalContext(ctx, eval), h.FeatureFlags)
 		}
 	}
 	return out, nil

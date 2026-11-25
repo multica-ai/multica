@@ -10,8 +10,11 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/featureflag"
 )
 
 // The claim path resolves project context from a SOFT reference: issue.project_id,
@@ -83,6 +86,61 @@ func assertNoForeignContext(t *testing.T, body string, extra ...string) {
 		if strings.Contains(body, leaked) {
 			t.Errorf("claim response leaked foreign tenant context %q: %s", leaked, body)
 		}
+	}
+}
+
+func TestResolveClaimProjectContextWorkspaceReposOnDemand(t *testing.T) {
+	ctx := context.Background()
+	workspaceID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name": "Repository catalog", "slug": "repository-catalog-on-demand", "issue_prefix": "RCOD",
+		"repos": json.RawMessage("[{\"url\":\"https://git.example.com/workspace.git\",\"description\":\"Billing\"}]"),
+	})
+	emptyProjectID := dbfx.Project(t, "No git resources", testutil.Cols{"workspace_id": workspaceID})
+	projectID := dbfx.Project(t, "With git resources", testutil.Cols{"workspace_id": workspaceID})
+	dbfx.Insert(t, "project_resource", testutil.Cols{
+		"workspace_id":  workspaceID,
+		"project_id":    projectID,
+		"resource_type": "github_repo",
+		"resource_ref":  json.RawMessage("{\"url\":\"https://git.example.com/project.git\",\"ref\":\"staging\"}"),
+	})
+	flags := featureflag.NewStaticProvider()
+	h := &Handler{Queries: testHandler.Queries, FeatureFlags: featureflag.NewService(flags)}
+	for _, tc := range []struct {
+		name             string
+		projectID        string
+		allowedWorkspace string
+		kind             string
+		wantOnDemand     bool
+		wantURL          string
+		wantRef          string
+	}{
+		{name: "default off", projectID: emptyProjectID, kind: "direct", wantURL: "https://git.example.com/workspace.git"},
+		{name: "different workspace allowlist", projectID: emptyProjectID, kind: "chat", allowedWorkspace: "other", wantURL: "https://git.example.com/workspace.git"},
+		{name: "chat without project", kind: "chat", allowedWorkspace: workspaceID, wantOnDemand: true, wantURL: "https://git.example.com/workspace.git"},
+		{name: "issue with empty project", projectID: emptyProjectID, kind: "direct", allowedWorkspace: workspaceID, wantOnDemand: true, wantURL: "https://git.example.com/workspace.git"},
+		{name: "run-only automation with empty project", projectID: emptyProjectID, kind: "autopilot", allowedWorkspace: workspaceID, wantOnDemand: true, wantURL: "https://git.example.com/workspace.git"},
+		{name: "project git repo improves specificity", projectID: projectID, kind: "chat", allowedWorkspace: workspaceID, wantURL: "https://git.example.com/project.git", wantRef: "staging"},
+		{name: "quick create skips workspace instructions", projectID: emptyProjectID, kind: "quick_create", allowedWorkspace: workspaceID, wantURL: "https://git.example.com/workspace.git"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			flags.Set(featureflags.WorkspaceReposOnDemand, featureflag.Rule{AllowBy: "workspace_id", Allow: []string{tc.allowedWorkspace}})
+			var projectID pgtype.UUID
+			if tc.projectID != "" {
+				projectID = parseUUID(tc.projectID)
+			}
+			project, err := h.resolveClaimProjectContext(ctx, projectID, parseUUID(workspaceID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp := AgentTaskResponse{Kind: tc.kind}
+			project.applyTo(&resp)
+			if resp.WorkspaceReposOnDemand != tc.wantOnDemand {
+				t.Errorf("workspace lookup = %v, want %v", resp.WorkspaceReposOnDemand, tc.wantOnDemand)
+			}
+			if len(resp.Repos) != 1 || resp.Repos[0].URL != tc.wantURL || resp.Repos[0].Ref != tc.wantRef {
+				t.Fatalf("checkout repos = %+v, want %s at %q", resp.Repos, tc.wantURL, tc.wantRef)
+			}
+		})
 	}
 }
 

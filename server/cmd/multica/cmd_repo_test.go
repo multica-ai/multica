@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +23,62 @@ func newRepoRegistryTestCmd(serverURL string) *cobra.Command {
 	_ = cmd.Flags().Set("server-url", serverURL)
 	_ = cmd.Flags().Set("workspace-id", "ws-1")
 	return cmd
+}
+
+func TestRunRepoListFiltersWorkspaceCatalog(t *testing.T) {
+	repos := []workspaceRepo{
+		{URL: "https://git.example.com/payments.git"},
+		{URL: "https://git.example.com/notify.git", Description: "MY SMS callbacks"},
+		{URL: "https://git.example.com/sms-platform.git", Description: "Notification delivery"},
+	}
+	t.Setenv("MULTICA_AGENT_ID", "agent-1")
+	t.Setenv("MULTICA_TASK_ID", "task-1")
+	t.Setenv("MULTICA_TOKEN", "mat_repo_list_test")
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/workspaces/ws-1" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer mat_repo_list_test" || r.Header.Get("X-Workspace-ID") != "ws-1" {
+			t.Error("repo list request did not use the current task credential and workspace")
+		}
+		_ = json.NewEncoder(w).Encode(repoWorkspaceResponse{ID: "ws-1", Repos: repos})
+	}))
+	defer srv.Close()
+
+	for _, tc := range []struct {
+		name string
+		args []string
+		want []workspaceRepo
+	}{
+		{name: "original full listing", want: repos},
+		{name: "description and URL", args: []string{"--query", " SmS "}, want: repos[1:]},
+		{name: "filter before limiting", args: []string{"--query", "sms", "--limit", "1"}, want: repos[1:2]},
+		{name: "limit only", args: []string{"--limit", "2"}, want: repos[:2]},
+		{name: "no matches", args: []string{"--query", "unknown"}, want: []workspaceRepo{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := newRepoRegistryTestCmd(srv.URL)
+			cmd.Flags().String("query", "", "")
+			cmd.Flags().Int("limit", 0, "")
+			if err := cmd.ParseFlags(tc.args); err != nil {
+				t.Fatal(err)
+			}
+			out, err := captureStdout(t, func() error { return runRepoList(cmd, nil) })
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []workspaceRepo
+			if err := json.Unmarshal([]byte(out), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got == nil || !slices.Equal(got, tc.want) {
+				t.Fatalf("repo list = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
 }
 
 func TestRunRepoAddAppendsAndDedupes(t *testing.T) {

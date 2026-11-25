@@ -163,7 +163,8 @@ type TaskContextForEnv struct {
 	AgentInstructions             string // agent identity/persona instructions, injected into CLAUDE.md
 	AgentSkills                   []SkillContextForEnv
 	DisabledRuntimeSkills         []RuntimeSkillRefForEnv
-	Repos                         []RepoContextForEnv     // workspace repos available for checkout
+	Repos                         []RepoContextForEnv     // repositories available for checkout
+	WorkspaceReposOnDemand        bool                    // discover workspace repositories through the CLI
 	ProjectID                     string                  // active project for this task, when present
 	ProjectTitle                  string                  // human-readable project title
 	ProjectDescription            string                  // durable project-level context, rendered into the brief's Project Context section
