@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
@@ -125,6 +126,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		usageSnapshot: usageSnapshot,
 		baselineUsage: baselineUsage,
 		rateLimits:    newRateLimitTracker(opts.OnRateLimits),
+		commandUUID:   uuid.NewString(),
 		controlErrors: make(chan error, 1),
 		resultCh:      make(chan struct{}),
 		usage:         make(map[string]TokenUsage),
@@ -189,7 +191,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		if opts.SkillInvocation != nil {
 			blocks = opts.SkillInvocation.claudeTextBlocks(commands)
 		}
-		err := writeClaudeInput(proc.inputWriter, blocks...)
+		err := writeClaudeInput(proc.inputWriter, turn.commandUUID, blocks...)
 		if err != nil {
 			turn.closeInput()
 			if supplements != nil {
@@ -416,12 +418,23 @@ type claudeTurn struct {
 	resultCh                 chan struct{}
 	resultOnce               sync.Once
 	stopAfterErrorResultOnce sync.Once
+	// commandUUID tags the prompt this turn writes. Claude Code reports each
+	// queued input's progress as command_lifecycle events keyed by that UUID.
+	commandUUID string
 
 	controlMu       sync.Mutex
 	pendingControls int
 	closeRequested  bool
 
-	mu                       sync.Mutex
+	mu sync.Mutex
+	// Resuming a session whose last turn was cut off can make Claude Code
+	// re-run that turn as its own command before the queued prompt
+	// (GH #11506). A result that arrives after another command started but
+	// before this turn's own command started is not this turn's answer.
+	// Once the own command starts, every result counts, whatever other
+	// commands do meanwhile (folded in, cancelled).
+	otherCommandStarted      bool
+	ownCommandStarted        bool
 	lastAssistantText        string
 	finalResultText          string
 	sawResult                bool
@@ -477,8 +490,30 @@ func (t *claudeTurn) handleMessage(msg claudeSDKMessage) {
 		sid := t.sessionID
 		t.mu.Unlock()
 		trySend(t.msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sid})
+	case "command_lifecycle":
+		if msg.State == "started" && !t.ownCommandStarted {
+			if msg.CommandUUID == t.commandUUID {
+				t.ownCommandStarted = true
+				// Text streamed by an earlier command must not become this
+				// turn's fallback output.
+				t.coalescer.flushAll()
+				t.lastAssistantText = ""
+			} else {
+				t.otherCommandStarted = true
+			}
+		}
+		t.mu.Unlock()
 	case "result":
 		t.coalescer.flushAll()
+		if t.otherCommandStarted && !t.ownCommandStarted {
+			t.mu.Unlock()
+			t.backend.cfg.Logger.Info("claude: ignoring result of a command this turn did not send",
+				"turn_command_uuid", t.commandUUID,
+				"result_bytes", len(msg.ResultText),
+				"is_error", msg.IsError,
+			)
+			return
+		}
 		t.sawResult = true
 		t.finalResultText = msg.ResultText
 		t.resultIsError = msg.IsError
@@ -996,6 +1031,10 @@ type claudeSDKMessage struct {
 	// stream_event fields (--include-partial-messages)
 	Event json.RawMessage `json:"event,omitempty"`
 
+	// command_lifecycle fields
+	CommandUUID string `json:"command_uuid,omitempty"`
+	State       string `json:"state,omitempty"`
+
 	// control request fields
 	RequestID string          `json:"request_id,omitempty"`
 	Request   json.RawMessage `json:"request,omitempty"`
@@ -1474,8 +1513,8 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 	return args
 }
 
-func writeClaudeInput(w io.Writer, prompts ...string) error {
-	data, err := buildClaudeInput(prompts...)
+func writeClaudeInput(w io.Writer, commandUUID string, prompts ...string) error {
+	data, err := buildClaudeInput(commandUUID, prompts...)
 	if err != nil {
 		return err
 	}
@@ -1485,7 +1524,9 @@ func writeClaudeInput(w io.Writer, prompts ...string) error {
 	return nil
 }
 
-func buildClaudeInput(prompts ...string) ([]byte, error) {
+// buildClaudeInput encodes one user frame. A non-empty commandUUID becomes the
+// frame's uuid, which Claude Code echoes in command_lifecycle events.
+func buildClaudeInput(commandUUID string, prompts ...string) ([]byte, error) {
 	content := make([]map[string]string, 0, len(prompts))
 	for _, prompt := range prompts {
 		content = append(content, map[string]string{"type": "text", "text": prompt})
@@ -1496,6 +1537,9 @@ func buildClaudeInput(prompts ...string) ([]byte, error) {
 			"role":    "user",
 			"content": content,
 		},
+	}
+	if commandUUID != "" {
+		payload["uuid"] = commandUUID
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
