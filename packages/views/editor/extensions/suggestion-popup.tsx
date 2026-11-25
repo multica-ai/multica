@@ -5,6 +5,9 @@ import { autoUpdate, computePosition, flip, offset, shift, size } from "@floatin
 import { ReactRenderer } from "@tiptap/react";
 import { exitSuggestion, type SuggestionKeyDownProps, type SuggestionProps } from "@tiptap/suggestion";
 import type { PluginKey } from "@tiptap/pm/state";
+import { prefersReducedMotion } from "@multica/core/appearance";
+import { contextMenuOrigin } from "@multica/ui/lib/context-menu-origin";
+import { UI_EASE_OUT_CSS, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 
 interface SuggestionPopupRenderOptions<
   TItem,
@@ -21,6 +24,8 @@ interface SuggestionPopupRenderOptions<
     ref: TRef | null | undefined,
     props: SuggestionKeyDownProps,
   ) => boolean;
+  /** Preferred side; `flip` still moves it when that side lacks room. */
+  placement?: "top-start" | "bottom-start";
 }
 
 export function createSuggestionPopupRender<
@@ -34,6 +39,7 @@ export function createSuggestionPopupRender<
   getProps,
   subscribe,
   onKeyDown,
+  placement = "top-start",
 }: SuggestionPopupRenderOptions<TItem, TSelected, TRef, TComponentProps>) {
   return () => {
     let renderer: ReactRenderer<TRef> | null = null;
@@ -42,19 +48,42 @@ export function createSuggestionPopupRender<
     let removeAutoUpdate: (() => void) | null = null;
     let unsubscribe: (() => void) | undefined;
     let currentProps: SuggestionProps<TItem, TSelected> | null = null;
+    let entered = false;
 
     const cleanup = () => {
       unsubscribe?.();
       unsubscribe = undefined;
       currentProps = null;
+      entered = false;
       removeOutsideListeners?.();
       removeOutsideListeners = null;
       removeAutoUpdate?.();
       removeAutoUpdate = null;
-      renderer?.destroy();
-      renderer = null;
-      popup?.remove();
+      const exitingPopup = popup;
+      const exitingRenderer = renderer;
       popup = null;
+      renderer = null;
+      if (exitingPopup && typeof exitingPopup.animate === "function" && !prefersReducedMotion()) {
+        const side = exitingPopup.dataset.side === "bottom" ? "bottom" : "top";
+        const dy = side === "top" ? 4 : -4;
+        exitingPopup.style.pointerEvents = "none";
+        const anim = exitingPopup.animate(
+          [
+            { opacity: 1, transform: "translateY(0) scale(1)" },
+            { opacity: 0, transform: `translateY(${dy}px) scale(0.97)` },
+          ],
+          { duration: UI_MOTION_DURATION.micro * 1000, easing: "cubic-bezier(0.4, 0, 1, 1)", fill: "forwards" },
+        );
+        const finish = () => {
+          exitingRenderer?.destroy();
+          exitingPopup.remove();
+        };
+        anim.onfinish = finish;
+        anim.oncancel = finish;
+      } else {
+        exitingRenderer?.destroy();
+        exitingPopup?.remove();
+      }
     };
 
     const requestExit = (props: SuggestionProps<TItem, TSelected>) => {
@@ -62,9 +91,10 @@ export function createSuggestionPopupRender<
     };
 
     const isInsideSuggestionSurface = (
-      target: EventTarget | null,
+      eventTarget: EventTarget | null,
       props: SuggestionProps<TItem, TSelected>,
     ) => {
+      const target = contextMenuOrigin(eventTarget);
       if (!(target instanceof Node)) return false;
       return props.editor.view.dom.contains(target) || !!popup?.contains(target);
     };
@@ -118,7 +148,8 @@ export function createSuggestionPopupRender<
         // squashed". Document-body editors (issue/project description, agent
         // instructions) also host this popup; there the caret usually has room
         // both ways, so `flip` keeps them on-screen regardless of the default.
-        placement: "top-start",
+        // The Docs block menu opts into `bottom-start`: it reads down the page.
+        placement,
         strategy: "fixed",
         middleware: [
           offset(6),
@@ -148,7 +179,23 @@ export function createSuggestionPopupRender<
         if (popup !== el) return;
         el.style.left = `${x}px`;
         el.style.top = `${y}px`;
-        el.dataset.side = placement.startsWith("top") ? "top" : "bottom";
+        const side = placement.startsWith("top") ? "top" : "bottom";
+        el.dataset.side = side;
+        if (!entered) {
+          entered = true;
+          el.style.opacity = "";
+          el.style.transformOrigin = side === "top" ? "bottom left" : "top left";
+          if (typeof el.animate === "function" && !prefersReducedMotion()) {
+            const dy = side === "top" ? 4 : -4;
+            el.animate(
+              [
+                { opacity: 0, transform: `translateY(${dy}px) scale(0.97)` },
+                { opacity: 1, transform: "translateY(0) scale(1)" },
+              ],
+              { duration: UI_MOTION_DURATION.fast * 1000, easing: UI_EASE_OUT_CSS },
+            );
+          }
+        }
       });
     };
 
@@ -182,6 +229,11 @@ export function createSuggestionPopupRender<
         popup = doc.createElement("div");
         popup.style.position = "fixed";
         popup.style.zIndex = "50";
+        if (typeof popup.animate === "function" && !prefersReducedMotion()) {
+          popup.style.opacity = "0";
+        }
+        const owner = props.editor.view.dom.closest("[data-editor-overlay-owner]")?.getAttribute("data-editor-overlay-owner");
+        if (owner) popup.setAttribute("data-editor-overlay-owner", owner);
         popup.appendChild(renderer.element);
         doc.body.appendChild(popup);
 

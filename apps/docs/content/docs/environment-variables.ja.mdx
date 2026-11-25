@@ -47,6 +47,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `LOG_LEVEL` | アプリのデフォルト | ログレベル |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 終了シグナル受信後、グレースフルシャットダウンを開始するまでの待機時間 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | オフラインのランタイムが処理中の作業を失敗させずに再接続できる猶予時間。`150s` 未満は `150s` に補正されます |
+| `FF_LOCAL_SEARCH_INDEX` | `on` | Web と Desktop がワークスペースごとにローカル検索インデックスを保持します。`off` にするとクライアントはサーバー経由の検索に切り替わります |
+| `FF_DASHBOARD_HISTORY_365D` | `on` | 分析ページで 365 日の期間を有効にします。1 年分の集計クエリがデータベースに重い場合は `off` にしてください |
 
 Kubernetes で shutdown hold を設定する場合、`terminationGracePeriodSeconds` は hold と実際のシャットダウンにかかる時間の合計より大きくしてください。
 
@@ -185,20 +187,18 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 |---|---|---|
 | GitHub | `GITHUB_APP_SLUG` | GitHub App の slug |
 | GitHub | `GITHUB_WEBHOOK_SECRET` | Webhook HMAC と接続 state の署名シークレット |
-| GitHub | `GITHUB_APP_ID` | PR カードの CI ステータス・マージ可否と「GitHub から選択」リポジトリに必要です |
-| GitHub | `GITHUB_APP_PRIVATE_KEY` | App ID と対になる完全な PEM 秘密鍵。用途は同上 |
+| GitHub | `GITHUB_APP_CLIENT_ID` | App の Client ID。接続するユーザーが installation にアクセスできるか確認するために必須 |
+| GitHub | `GITHUB_APP_CLIENT_SECRET` | Client ID と対になる client secret。新規接続に必須 |
+| GitHub | `GITHUB_APP_ID` | 新規接続で installation の管理権限確認に必須。PR カードとリポジトリ一覧にも使用 |
+| GitHub | `GITHUB_APP_PRIVATE_KEY` | 新規接続で installation の管理権限確認に必須。PR カードとリポジトリ一覧にも使用 |
 | Lark | `MULTICA_LARK_SECRET_KEY` | base64 エンコードされた 32 バイトの資格情報暗号化キー |
 | Slack | `MULTICA_SLACK_SECRET_KEY` | base64 エンコードされた 32 バイトの token 暗号化キー |
 | Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | base64 エンコードされた 32 バイトの Bot token 暗号化キー |
-| Composio | `COMPOSIO_API_KEY` | Composio ツール接続を有効化 |
-| Composio | `COMPOSIO_CALLBACK_BASE_URL` | コールバック API アドレス。`MULTICA_PUBLIC_URL` にフォールバック可能 |
-| Composio | `COMPOSIO_STATE_SECRET` | OAuth state の署名シークレット。`JWT_SECRET` から派生可能 |
+| WeChat | `MULTICA_WEIXIN_SECRET_KEY` | WeChat の認証情報と QR 状態を暗号化する Base64 エンコードの 32 バイトキー |
+| Telegram | `MULTICA_TELEGRAM_TOOL_PROGRESS` | ストリーミング返信に表示するツールのステップ。`auto`（既定。DM では詳細、グループでは作業の種類のみ）、`off`、`summary`、`detail` |
 | セルフホスト Git | `MULTICA_VCS_INTEGRATION_ENABLED` | Forgejo/Gitea/GitLab 連携のスイッチ。compose ではデフォルトで有効 |
 | セルフホスト Git | `MULTICA_VCS_SECRET_KEY` | base64 エンコードされた 32 バイトの暗号化キー（`openssl rand -base64 32`）。未設定の場合、この機能全体が利用できません |
-| Plugins | `MULTICA_PLUGIN_SECRET_KEY` | 保存済み secret と surface 起動 URL を暗号化する base64 形式の 32 バイト鍵 |
-| Plugins | `MULTICA_PLUGIN_SURFACE_ORIGIN` | バックエンドへルーティングする Cookie なしの専用 origin。app/API origin と分離し、`Host` を保持すること |
-| Plugins | `MULTICA_PLUGIN_API_URL` | バージョンを含む Plugin Public API の完全な Base URL（例: `https://plugin-api.example.com/v1`）。未設定時は `MULTICA_PUBLIC_URL` + `/v1` |
-| Plugins | `MULTICA_PLUGIN_DIR` | 開発時にローカル plugin bundle を公開するための任意の絶対ディレクトリ |
+| テーマストア | `MULTICA_THEME_REGISTRY_URL` | 公式レジストリの fork など、別のレジストリの `index.json`。[テーマと外観](/themes#セルフホスト)を参照 |
 
 `GITHUB_APP_ID` と秘密鍵を設定しなくても、PR の関連付け・ミラー・マージ時のステータス変更は通常どおり動きますが、カードに CI とマージ可否のステータスが表示されず、「GitHub から選択」のリポジトリ入口も無効になります。
 
@@ -248,7 +248,7 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | 出力もツール実行もない状態の静穏上限。`0` で watchdog 全体を無効化 |
 | `MULTICA_AGENT_TOOL_WATCHDOG` | `MULTICA_AGENT_IDLE_WATCHDOG` と同じ | 単一のツール呼び出しが静穏なままでいられる上限。モデルより長い余裕をツールに与えたい場合のみ設定し、`0` はツール実行中に強制停止しません。Cursor のバックグラウンドシェルは、起動したプロセスが終了するまで実行中として扱われます。この上限に達すると、デーモンはそれらのプロセスを停止し、Cursor が最終結果を出すための新しい watchdog 予算を与えます。プロセスの所有権やクリーンアップを検証できない場合は、通常の実行キャンセル方針に従います |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode 専用の静穏しきい値 |
-| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `MULTICA_AGENT_IDLE_WATCHDOG` と同じ | Codex のセマンティック静穏しきい値。Codex 自身のタイマーはツール実行中かどうかを判別できないため、独自の短い上限を持たず idle / tool 予算の大きい方に追従します |
+| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | idle と tool の予算のうち大きい方。デーモンの watchdog が無効なら `10m` | Codex のセマンティック静穏しきい値。Codex のタイマーはツールの実行中かどうかを判別できません。`MULTICA_AGENT_IDLE_WATCHDOG` が `0` でこの変数が未設定の場合、Codex は既定値の `10m` を使います。 |
 | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | Codex 初回ターンの無進捗上限を明示的に上書き；`0` はデフォルトを維持。実効の初回ターン待機は依然として `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` と全体の実行タイムアウトに制限される——`MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` をこの値より厳密に大きく（余裕を持たせて）設定すること。さもないと待機はその値で打ち切られ、モデルカタログの起動リトライがスキップされる。同値では不十分：セマンティックタイマーが先に起動するため、同値の場合でもリトライが失われることがある |
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`、`thread/start`・`thread/resume`：`60s` | Codex app-server 起動ハンドシェイクの上限。明示的な値は両方の予算を一括で上書きします |
 | `MULTICA_CODEX_MEMORY` | オフ | `1`、`true`、`yes`、`on` のいずれかにすると、デーモンが管理する Codex の実行で Codex ネイティブのメモリを残します。既定では実行ごとにオフになります。[Codex のネイティブメモリとサブエージェント](/daemon-runtimes#codex-memory)を参照 |
@@ -273,7 +273,7 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 | `MULTICA_GC_ENABLED` | `true` | `false` または `0` でクリーンアップ全体を止める |
 | `MULTICA_GC_INTERVAL` | `2h` | クリーンアップの間隔。デーモン起動の約 30 秒後に最初の 1 回を実行 |
 | `MULTICA_GC_TTL` | `24h` | タスクが `done` または `closed` カテゴリに入ってから、またはチャットセッションがアーカイブされてから、実行ディレクトリを削除するまでの時間 |
-| `MULTICA_GC_COMPLETED_TASK_TTL` | Multica Cloud は `14d`、セルフホストは `0` | タスクの実行が完了してからディレクトリ全体を削除するまでの時間。タスクが閉じているかどうかは問わない。`0` で無効。プロジェクトのローカルディレクトリでの実行には適用されない |
+| `MULTICA_GC_COMPLETED_TASK_TTL` | `14d` | 実行完了後、管理対象のタスクディレクトリを削除するまでの時間。ローカルディレクトリ実行は `codex-home` のみ削除し、daemon ログ、出力、外部のセッションを保持。ローカル履歴を持つ home は保持。`0` で無効 |
 | `MULTICA_GC_ORPHAN_TTL` | `72h` | 持ち主が見つからないディレクトリを、変更がないまま何時間経ったら削除するか |
 | `MULTICA_GC_ARTIFACT_TTL` | `12h` | 実行終了からデーモンが再生成できる内容を削除するまでの時間。次の行のパターンは、まだ閉じていないタスクと、管理対象の作業ディレクトリを使う未アーカイブのチャットに適用される。デーモンが管理する Codex キャッシュにも同じ時間が適用される。`0` でこれらのキャッシュを保持する |
 | `MULTICA_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` | 再生成できるとみなすディレクトリ名（カンマ区切り）。設定するとデフォルトの一覧を**置き換える**ため、デフォルトも残したいなら一緒に書く。`/` や `\` を含む項目は無視される |
@@ -286,15 +286,17 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 
 ### デーモンのログ [#daemon-logs]
 
+デーモンの既定のログレベルは `debug` です。変更するには `LOG_LEVEL`（`debug`、`info`、`warn`、`error`）を設定するか、`multica config set log_level info` でプロファイルの既定値を保存します。環境変数がプロファイルより優先されます。
+
 デーモンがバックグラウンドで（ターミナルにつながずに）動いているとき、ログは `~/.multica/daemon.log`（名前付きプロファイルでは `~/.multica/profiles/<name>/daemon.log`）に書かれ、サイズでローテーションされます。ローテーション後のファイルは gzip で圧縮されます。
 
-| 変数 | デフォルト | 説明 |
-|---|---|---|
-| `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `20` | `daemon.log` をローテーションするサイズ（MB） |
-| `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `5` | 残すローテーション済みファイルの最大数 |
-| `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `30` | ローテーション済みファイルを残す日数 |
+| 変数 | プロファイル設定キー | デフォルト | 説明 |
+|---|---|---|---|
+| `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `daemon_log_max_size_mb` | `20` | `daemon.log` をローテーションするサイズ（MB） |
+| `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `daemon_log_max_backups` | `5` | 残すローテーション済みファイルの最大数 |
+| `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `daemon_log_max_age_days` | `30` | ローテーション済みファイルを残す日数 |
 
-3 つとも正の整数を取ります。`0`、負の数、解釈できない値はデフォルトとして扱われ、「無制限」にはなりません。ローテーション済みファイルは、個数と日数のどちらかの上限に先に達した時点で削除されます。クラッシュ時の出力は同じディレクトリの `daemon.err.log` に書かれ、起動時に 5 MB を超えていれば `daemon.err.log.1` に名前が変わります。
+3 つとも正の整数を取ります。`multica --profile dev config set <key> <value>` で保存し、`config show` で保存値を確認します。`""` を渡すと設定を解除できます。変更は次回のデーモン起動または再起動時に反映されます。有効な環境変数はプロファイルより優先されます。未設定、空白、ゼロ、負数、不正な形式、オーバーフローの場合は有効なプロファイル値、それもなければ表のデフォルト値を使います。サイズと日数はバイト数や時間への変換でもオーバーフローしてはならず、`config set` は不正な値を拒否します。ゼロで保持制限を無効にはできません。ローテーション済みファイルは、個数と日数のどちらかの上限に先に達した時点で削除されます。クラッシュ時の出力は同じディレクトリの `daemon.err.log` に書かれ、起動時に 5 MB を超えていれば `daemon.err.log.1` に名前が変わります。
 
 ### ツールごとのパス、モデル、引数
 
@@ -305,6 +307,7 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 
 | ツール | プレフィックス | モデル変数 |
 |---|---|---|
+| Amp | `MULTICA_AMP` | ✓（Amp のモードを選択。例: `high`） |
 | Antigravity | `MULTICA_ANTIGRAVITY` | ✓（値は `agy models` が表示する名前そのもの） |
 | Claude Code | `MULTICA_CLAUDE` | ✓ |
 | CodeArts | `MULTICA_CODEARTS` | ✓ |
@@ -313,7 +316,9 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 | Cursor Agent | `MULTICA_CURSOR` | ✓ |
 | DeepSeek Harness | `MULTICA_DSH` | ✓（値は dsh のモデルカタログにある ID。例: `deepseek-official/deepseek-chat`） |
 | DevEco Code | `MULTICA_DEVECO` | ✓ |
+| Devin CLI | `MULTICA_DEVIN` | ✓ |
 | Dim | `MULTICA_DIM` | ✓（値は dim のモデルカタログにある ID） |
+| Factory Droid | `MULTICA_DROID` | ✓ |
 | GitHub Copilot CLI | `MULTICA_COPILOT` | ✓ |
 | Grok | `MULTICA_GROK` | ✓ |
 | Hermes | `MULTICA_HERMES` | ✓ |
@@ -331,6 +336,7 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 | QwenPaw | `MULTICA_QWENPAW` | — |
 | Reasonix | `MULTICA_REASONIX` | ✓ |
 | Trae CLI | `MULTICA_TRAECLI` | ✓ |
+| ZCode | `MULTICA_ZCODE` | ✓ |
 | ZeroClaw | `MULTICA_ZEROCLAW` | —（モデルは ZeroClaw のエージェント設定で管理） |
 
 </Accordion>
@@ -338,7 +344,7 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 
 QwenPaw と MiniMax Code には、Multica がモデルを渡さないためモデル変数がありません。詳しくは [AI コーディングツール比較](/providers#モデルの取得元)を参照してください。DeepSeek Harness には `MULTICA_DSH_PROFILE_BUNDLE` と `MULTICA_DSH_PLUGIN_PATH` もあり、次のセクションで説明します。
 
-マシン全体のデフォルト引数 `MULTICA_<PREFIX>_ARGS` は、現在 Claude Code、Codex、CodeBuddy、Qwen Code、QwenPaw の 5 ツールに対応しています。対応する変数は `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS`、`MULTICA_QWENPAW_ARGS` です。例:
+マシン全体のデフォルト引数 `MULTICA_<PREFIX>_ARGS` は、現在 Claude Code、Codex、CodeBuddy、Qwen Code、Amp、Factory Droid、QwenPaw の 7 ツールに対応しています。対応する変数は `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS`、`MULTICA_AMP_ARGS`、`MULTICA_DROID_ARGS`、`MULTICA_QWENPAW_ARGS` です。例:
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude
@@ -384,16 +390,22 @@ multica config show
 | `poll_interval` | `30s` | 実行のポーリング間隔 |
 | `ws_claim_poll_interval` | `3m` | 正常な WebSocket での claim 安全ポーリング上限。`poll_interval` とは独立して設定され、Daemon は下方向のジッターを適用します |
 | `heartbeat_interval` | `15s` | ハートビート間隔 |
+| `log_level` | `debug` | デーモンのログレベル（`debug`、`info`、`warn`、`error`）。`LOG_LEVEL` が優先されます |
 | `agent_timeout` | 無制限 | 1 回の実行の絶対時間上限 |
+| `agent_idle_watchdog` | `2h` | ツール実行中でないときの静穏上限。`0s` でデーモンの watchdog 全体を無効化し、`agent_tool_watchdog` も効かなくなります |
+| `agent_tool_watchdog` | `agent_idle_watchdog` と同じ | ツール実行中の静穏上限。`0s` にするとデーモンの watchdog は静穏なツール呼び出しを理由に実行を停止しなくなり、実行の上限は `agent_timeout`（デフォルトは無制限）だけになります |
 | `codex_semantic_inactivity_timeout` | 派生値 | Codex のセマンティック静穏しきい値。未設定なら idle と tool の watchdog 予算のうち大きい方を採用し、tool 予算が `0` の場合は idle 予算に回帰します。Codex 自身の `10m` が残るのは watchdog 一式を無効化したときだけです |
 | `codex_handshake_timeout` | `30s`、`thread/start`・`thread/resume`：`60s` | Codex app-server 起動ハンドシェイクの上限。明示的な値は両方の予算を一括で上書きします |
 | `disable_auto_update` | 環境に従う | `true` で自動更新を無効化。`false` はローカルの上書きをクリアし、環境変数またはデフォルトに戻します |
 | `auto_update_check_interval` | `6h` | 更新チェックの間隔 |
 | `disable_auto_reload` | 環境に従う | `true` でディスク上の置き換えへの追従を停止。`false` はローカルの上書きをクリア。`disable_auto_update` とは別に解決されます |
+| `daemon_log_max_size_mb` | `20` | `daemon.log` をローテーションするサイズ（MB）。[デーモンのログ](#daemon-logs)を参照 |
+| `daemon_log_max_backups` | `5` | 残すローテーション済みファイルの最大数 |
+| `daemon_log_max_age_days` | `30` | ローテーション済みファイルを残す日数 |
 
 値のルール:
 
-- duration 系のキーは正の Go duration（`10s`、`2h` など）を受け付け、`0s` と負の値は拒否されます。唯一の例外は `agent_timeout` で、`0s` は有効な値として実行時間上限を明示的に無効化します。
+- duration 系のキーは正の Go duration（`10s`、`2h` など）を受け付け、負の値は常に拒否されます。`0s` も受け付けるのは `agent_timeout`、`agent_idle_watchdog`、`agent_tool_watchdog` だけです。`agent_timeout` の `0s` は実行時間上限を明示的に無効化します。watchdog の 2 キーで `0s` が何を無効にするかは表を参照してください。
 - 空文字列を渡すと永続化された値がクリアされ、環境変数または組み込みデフォルトに戻ります。例: `multica config set poll_interval ""`。
 - `max_concurrent_tasks` には非負の整数が必要です。
 - 相対パスの `workspaces_root` は保存時に絶対パスへ変換されます。

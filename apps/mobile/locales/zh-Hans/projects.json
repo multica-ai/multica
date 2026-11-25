@@ -24,7 +24,9 @@
     "resources": "资源",
     "lead": "负责人",
     "no_resources": "尚未添加资源。",
-    "add_resource": "添加资源"
+    "add_resource": "添加资源",
+    "add_description": "添加描述",
+    "progress": "进度"
   },
   "form": {
     "icon_emoji": "图标（emoji）",
@@ -72,7 +74,5 @@
   "runs": {
     "working": "处理中",
     "count": "运行 · {{count}}"
-  },
-  "status.planned": "计划中",
-  "form.description_placeholder": "这个项目是做什么的？"
+  }
 }

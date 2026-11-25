@@ -34,8 +34,11 @@ import {
   issueTimelineOptions,
 } from "@multica/core/issues/queries";
 import { useRetryIssueRun, useToggleIssueSubscriber } from "@multica/core/issues/mutations";
+import { useIssueDeletion } from "@multica/core/issues/use-issue-deletion";
 import { useCommentCollapseStore, useResolvedExpandStore } from "@multica/core/issues/stores";
+import { useIsGuest } from "@multica/core/permissions";
 import { quickActionListOptions } from "@multica/core/quick-actions";
+import { useShortcut } from "@multica/core/shortcuts";
 import type { AgentTask, Issue } from "@multica/core/types";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useIssueActions } from "../../issues/actions/use-issue-actions";
@@ -54,6 +57,17 @@ const ACTIVE_TASK_STATUSES = new Set<AgentTask["status"]>([
   "running",
 ]);
 
+// What a guest may do to an issue, mirroring the server's guest allowlist:
+// copy, pin, subscribe and fold comments. Anything else is left out.
+const GUEST_COMMAND_IDS = new Set([
+  "issue-copy-link",
+  "issue-copy-identifier",
+  "issue-pin",
+  "issue-subscribe",
+  "issue-fold-comments",
+  "issue-unfold-comments",
+]);
+
 /** Commands for the issue on screen (`issue`) or a list selection (`issues`). */
 export function useIssueCommandGroup(
   target: IssueTarget | null,
@@ -69,22 +83,34 @@ export function useIssueCommandGroup(
   const single: Issue | null = target?.kind === "single" ? target.issue : null;
   const singleId = single?.id ?? "";
   const actions = useIssueActions(single);
+  // A guest (MUL-9420) changes nothing about an issue and cannot read its
+  // runs or the workspace's quick actions.
+  const guest = useIsGuest(wsId);
 
   const { data: quickActions = [] } = useQuery({
     ...quickActionListOptions(wsId),
-    enabled: !!single,
+    enabled: !!single && !guest,
   });
   const activeQuickActions = useMemo(
     () => quickActions.filter((action) => action.status === "active"),
     [quickActions],
   );
-  const { data: tasks = [] } = useQuery({ ...issueTasksOptions(singleId), enabled: !!single });
+  const { data: tasks = [] } = useQuery({ ...issueTasksOptions(singleId), enabled: !!single && !guest });
   const { data: subscribers = [] } = useQuery({
     ...issueSubscribersOptions(singleId),
     enabled: !!single,
   });
   const toggleSubscriber = useToggleIssueSubscriber(singleId);
   const retryRun = useRetryIssueRun(singleId);
+  const { canDelete } = useIssueDeletion(wsId);
+  const deletable = !!target && (target.kind === "single" ? canDelete(target.issue) : target.issues.every(canDelete));
+  const statusShortcut = useShortcut("setIssueStatus");
+  const assigneeShortcut = useShortcut("assignIssue");
+  const priorityShortcut = useShortcut("setIssuePriority");
+  const labelsShortcut = useShortcut("setIssueLabels");
+  const dueDateShortcut = useShortcut("setIssueDueDate");
+  const projectShortcut = useShortcut("moveIssueToProject");
+  const quickActionShortcut = useShortcut("runIssueQuickAction");
 
   return useMemo(() => {
     if (!target) return null;
@@ -101,6 +127,7 @@ export function useIssueCommandGroup(
         keywords: ["status", "state", "状态"],
         page: { type: "issue-status", target },
         crumb,
+        shortcut: statusShortcut,
         primary: true,
       },
       {
@@ -110,6 +137,7 @@ export function useIssueCommandGroup(
         keywords: ["assign", "assignee", "owner", "agent", "指派", "负责人"],
         page: { type: "issue-assignee", target },
         crumb,
+        shortcut: assigneeShortcut,
         primary: true,
       },
       {
@@ -119,6 +147,7 @@ export function useIssueCommandGroup(
         keywords: ["priority", "urgent", "优先级"],
         page: { type: "issue-priority", target },
         crumb,
+        shortcut: priorityShortcut,
         primary: true,
       },
     ];
@@ -133,6 +162,7 @@ export function useIssueCommandGroup(
           hint: t(($) => $.issue.quick_actions_available, { count: activeQuickActions.length }),
           page: { type: "issue-quick-action", issue: single },
           crumb,
+          shortcut: quickActionShortcut,
           primary: true,
         });
       }
@@ -154,6 +184,7 @@ export function useIssueCommandGroup(
         keywords: ["label", "tag", "标签"],
         page: { type: "issue-labels", target },
         crumb,
+        shortcut: labelsShortcut,
       },
       {
         id: "issue-due-date",
@@ -162,6 +193,7 @@ export function useIssueCommandGroup(
         keywords: ["due", "date", "deadline", "截止"],
         page: { type: "issue-due-date", target },
         crumb,
+        shortcut: dueDateShortcut,
       },
       {
         id: "issue-project",
@@ -170,6 +202,7 @@ export function useIssueCommandGroup(
         keywords: ["project", "move", "项目"],
         page: { type: "issue-project", target },
         crumb,
+        shortcut: projectShortcut,
       },
     );
 
@@ -310,26 +343,28 @@ export function useIssueCommandGroup(
               .catch(() => {});
           },
         },
-        {
+      );
+      if (deletable) {
+        commands.push({
           id: "issue-delete",
           label: t(($) => $.issue.delete),
           icon: Trash2,
           keywords: ["delete", "remove", "删除"],
           destructive: true,
           run: () => actions.openDeleteConfirm({ onDeletedFallbackPath }),
-        },
-      );
+        });
+      }
     } else if (target.kind === "batch") {
-      commands.push(
-        {
-          id: "issue-parent",
-          label: t(($) => $.issue.set_parent),
-          icon: Network,
-          keywords: ["parent", "sub", "父任务"],
-          page: { type: "issue-parent", target },
-          crumb,
-        },
-        {
+      commands.push({
+        id: "issue-parent",
+        label: t(($) => $.issue.set_parent),
+        icon: Network,
+        keywords: ["parent", "sub", "父任务"],
+        page: { type: "issue-parent", target },
+        crumb,
+      });
+      if (deletable) {
+        commands.push({
           id: "issue-delete",
           label: t(($) => $.issue.delete_selected, { count: target.issues.length }),
           icon: Trash2,
@@ -341,9 +376,12 @@ export function useIssueCommandGroup(
               issues: target.issues,
               clearSelection: target.clearSelection,
             }),
-        },
-      );
+        });
+      }
     }
+
+    const visible = guest ? commands.filter((command) => GUEST_COMMAND_IDS.has(command.id)) : commands;
+    if (visible.length === 0) return null;
 
     return {
       id: isSingle ? "context-issue" : "context-issues",
@@ -356,11 +394,20 @@ export function useIssueCommandGroup(
       ) : (
         <ContextHeading label={crumb} />
       ),
-      commands,
+      commands: visible,
     };
   }, [
     actions,
     activeQuickActions.length,
+    assigneeShortcut,
+    deletable,
+    dueDateShortcut,
+    labelsShortcut,
+    priorityShortcut,
+    projectShortcut,
+    quickActionShortcut,
+    statusShortcut,
+    guest,
     onDeletedFallbackPath,
     palette,
     queryClient,

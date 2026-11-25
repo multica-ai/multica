@@ -20,6 +20,7 @@ vi.mock("../../navigation", () => ({
 }));
 
 vi.mock("@multica/core/paths", () => ({
+  issueRouteRef: (issue: { id: string; identifier?: string | null }) => issue.identifier || issue.id,
   useWorkspacePaths: () => ({ issueDetail: (id: string) => `/acme/issues/${id}` }),
 }));
 
@@ -102,7 +103,7 @@ describe("SourceContextBadge", () => {
     expect(summary).toHaveClass("border-border/60", "bg-muted/30");
     expect(screen.getByRole("link", { name: /MUL-7 Current source title/ })).toHaveAttribute(
       "href",
-      "/acme/issues/source-issue",
+      "/acme/issues/MUL-7",
     );
     expect(screen.getByText("1/3")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Context snapshot" })).toBeInTheDocument();
@@ -118,7 +119,7 @@ describe("SourceContextBadge", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Go to source comment" }));
     await waitFor(() => expect(refetch).toHaveBeenCalledOnce());
-    expect(navigationPush).toHaveBeenCalledWith("/acme/issues/source-issue#comment-selected");
+    expect(navigationPush).toHaveBeenCalledWith("/acme/issues/NEW-7#comment-selected");
   });
 
   it("keeps the snapshot open when live-source revalidation fails", async () => {
@@ -142,8 +143,8 @@ describe("SourceContextBadge", () => {
     fireEvent.click(screen.getByRole("button", { name: "Context snapshot" }));
 
     const dialog = screen.getByRole("dialog");
-    expect(dialog).toHaveClass("h-[min(82dvh,56rem)]", "sm:max-w-4xl");
-    expect(dialog).not.toHaveClass("h-[calc(100dvh-2rem)]", "sm:max-w-[calc(100%-2rem)]");
+    expect(dialog).toHaveClass("h-[min(82%,56rem)]", "sm:max-w-4xl");
+    expect(dialog).not.toHaveClass("h-[calc(100%-2rem)]", "sm:max-w-[calc(100%-2rem)]");
     expect(screen.getByText("Source comment")).toHaveClass(
       "rounded-xs",
       "bg-info/10",
@@ -162,7 +163,7 @@ describe("SourceContextBadge", () => {
     const expand = screen.getByRole("button", { name: "Expand captured context" });
     expect(expand.closest('[data-slot="dialog-header"]')).toBeInTheDocument();
     fireEvent.click(expand);
-    expect(dialog).toHaveClass("h-[calc(100dvh-2rem)]", "sm:max-w-[calc(100%-2rem)]");
+    expect(dialog).toHaveClass("h-[calc(100%-2rem)]", "sm:max-w-[calc(100%-2rem)]");
     expect(screen.getByRole("button", { name: "Restore captured context size" })).toHaveAttribute("aria-pressed", "true");
   });
 
@@ -609,7 +610,7 @@ describe("SourceContextBadge", () => {
       expect(screen.getByText(author.expected)).toBeTruthy();
       expect(screen.queryByRole("button", { name: "Go to source comment" }) !== null)
         .toBe(display.openCurrent);
-      expect(dialog).toHaveClass("h-[min(82dvh,56rem)]", "sm:max-w-4xl");
+      expect(dialog).toHaveClass("h-[min(82%,56rem)]", "sm:max-w-4xl");
     },
   );
 });

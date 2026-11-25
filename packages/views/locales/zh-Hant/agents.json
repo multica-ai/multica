@@ -64,14 +64,6 @@
     "search_runtime_filtered": "\"{{machine}}\"上沒有匹配\"{{query}}\"的 AI 代理。",
     "runtime_filtered": "\"{{machine}}\"上還沒有 AI 代理。"
   },
-  "runtime_filter": {
-    "all": "全部執行時",
-    "section_local": "本地",
-    "section_remote": "遠端",
-    "section_cloud": "雲端",
-    "agent_count_other": "{{count}} 個 AI 代理",
-    "empty": "還沒有機器"
-  },
   "columns": {
     "agent": "AI 代理",
     "status": "狀態",
@@ -110,7 +102,6 @@
     "archive": "歸檔",
     "set_access": "設定訪問範圍",
     "set_access_dialog_title": "設定訪問範圍",
-    "set_access_applies_to": "將應用於 {{count}} 個 AI 代理。",
     "set_access_skipped": "{{count}} 個已跳過(不是你所有)。",
     "set_access_dialog_confirm": "應用",
     "set_access_bulk_partial": "已應用 {{succeeded}} 個;{{failed}} 個失敗(保持當前狀態)。",
@@ -133,7 +124,8 @@
     "archive_dialog_title": "歸檔\"{{name}}\"？",
     "archive_dialog_description": "歸檔後這個 AI 代理將無法被分配或提及，進行中的執行會被取消。所有歷史會被保留，可以稍後恢復。",
     "archive_dialog_cancel": "取消",
-    "archive_dialog_confirm": "歸檔"
+    "archive_dialog_confirm": "歸檔",
+    "set_access_applies_to_other": "將應用於 {{count}} 個 AI 代理。"
   },
   "detail": {
     "back_to_agents_full": "返回 AI 代理列表",
@@ -149,7 +141,7 @@
     "bind_runtime": "繫結執行時",
     "restore": "恢復",
     "archive_dialog_title": "歸檔 AI 代理？",
-    "archive_dialog_description": "\"{{name}}\"將被歸檔，無法被分配或提及，但所有歷史會被保留。可以稍後恢復。",
+    "archive_dialog_description": "「{{name}}」將被封存，且無法再被指派或提及。所有進行中的執行都會被取消，但歷史紀錄將保留。你之後可以隨時還原。",
     "archive_dialog_cancel": "取消",
     "archive_dialog_confirm": "歸檔",
     "more_archive": "歸檔 AI 代理",
@@ -199,7 +191,6 @@
     "rename_required": "名稱必填",
     "edit_description_title": "編輯描述",
     "description_placeholder": "這個 AI 代理做什麼？",
-    "save": "儲存",
     "cancel": "取消"
   },
   "overview": {
@@ -220,14 +211,14 @@
     "status": "狀態",
     "runs_7d": "執行（7 天）",
     "edit_access_aria": "訪問權限：{{value}}。變更訪問權限",
-    "all_settings": "全部設定"
-  },
-  "skill_attach": {
-    "trigger_aria": "附加工作區 skill",
-    "trigger_label": "附加"
+    "all_settings": "全部設定",
+    "apps": "應用程式",
+    "apps_needs_account_other": "{{count}} 個需要你的帳號",
+    "apps_count_other": "{{count}} 個應用",
+    "apps_none": "無",
+    "apps_aria": "應用程式：{{value}}。查看應用程式"
   },
   "pickers": {
-    "concurrency_tooltip": "併發 · 最多 {{value}} 次並行執行",
     "concurrency_range": "最大並行執行數（{{min}}–{{max}}）",
     "runtime_none": "無執行時",
     "runtime_tooltip": "執行時 · {{name}} · {{status}}",
@@ -256,7 +247,7 @@
     "thinking_default": "跟隨 CLI 配置",
     "thinking_tooltip": "思考 · {{value}}",
     "thinking_clear": "跟隨 CLI 配置",
-    "thinking_clear_title": "清除覆蓋，讓本地 CLI（claude/codex）的配置決定推理級別",
+    "thinking_clear_title": "清除覆蓋，改用執行時的預設推理設定",
     "service_tier_default": "執行時預設",
     "service_tier_standard": "標準速度",
     "service_tier_standard_description": "明確使用標準速度和標準用量",
@@ -288,7 +279,7 @@
     "environment": "環境變數",
     "custom_args": "自定義引數",
     "mcp_config": "MCP",
-    "composio_mcp": "MCP 應用",
+    "composio_mcp": "應用",
     "integrations": "整合",
     "runtime_config": "路由",
     "qoder_agent": "Qoder Cloud Agents",
@@ -303,13 +294,8 @@
     "duplicate_title": "複製 {{name}}",
     "step_ai": "透過對話建立",
     "modes": {
-      "template": {
-        "title": "使用模板",
-        "description": "從整理好的指令和 skill 開始，再根據工作區需要修改每個細節。"
-      },
       "ai": {
-        "title": "透過 AI 建立",
-        "description": "透過對話生成可編輯的配置草稿。"
+        "title": "透過 AI 建立"
       }
     },
     "sections": {
@@ -337,10 +323,6 @@
       }
     },
     "builder": {
-      "setup_title": "為 AI 代理構建器選擇執行時",
-      "setup_description": "該執行時用於建立對話，並預設用於新 AI 代理。",
-      "start": "開始對話",
-      "connect_runtime": "連線執行時",
       "draft_parse_failed": "本次回覆未能填入表單。請讓 AI 代理重新生成草稿，或手動填寫。",
       "start_failed": "無法啟動 AI 代理構建器。",
       "send_failed": "無法傳送訊息。",
@@ -353,7 +335,7 @@
       "runtime_online": "執行時線上",
       "runtime_offline": "執行時離線",
       "empty_title": "這個 AI 代理需要做什麼？",
-      "empty_description": "描述這個 AI 代理要做什麼。",
+      "empty_description": "描述它的職責、工作流程或工具——我會幫你草擬設定。",
       "prompt_review": "審查前端 Pull Request",
       "prompt_research": "研究競品並整理結論",
       "prompt_assistant": "幫助團隊規劃和撰寫專案",
@@ -377,8 +359,8 @@
       "discard_confirm": "對話和右側配置都會被永久刪除。",
       "discard_title": "放棄這次建立？",
       "discard_cancel": "繼續編輯",
-      "banner": "您有 {{count}} 條未完成的建立",
-      "pick_hint": "選一條繼續。"
+      "pick_hint": "選一條繼續。",
+      "banner_other": "您有 {{count}} 條未完成的建立"
     },
     "close": "關閉",
     "steps": {
@@ -410,7 +392,7 @@
     },
     "runtime_step": {
       "title": "這個 AI 代理在哪裡執行？",
-      "search_placeholder": "搜尋 harness 或機器",
+      "search_placeholder": "搜尋執行時或機器",
       "groups": {
         "machines": "機器",
         "cloud": "雲服務"
@@ -418,11 +400,11 @@
       "this_machine": "本機",
       "owner_you": "你",
       "custom_badge": "自定義",
-      "web_local_title": "在桌面端可以使用這臺電腦上的 harness",
+      "web_local_title": "透過桌面應用程式使用這台電腦上的執行時",
       "download_desktop": "下載桌面端",
-      "harness_count_other": "{{count}} 個 harness",
+      "harness_count_other": "{{count}} 個執行時",
       "local_starting": "正在啟動本機守護程序…",
-      "local_empty_title": "這臺機器上沒有找到 harness",
+      "local_empty_title": "這台機器上未偵測到 AI 代理 CLI",
       "local_empty_hint": "安裝 Claude Code、Codex 等 CLI 後，會出現在這裡。",
       "more_harnesses_other": "其餘 {{count}} 個：{{names}}",
       "add_remote": "連線機器",
@@ -448,23 +430,17 @@
     }
   },
   "create_dialog": {
-    "title_create": "建立 AI 代理",
-    "title_duplicate": "複製 AI 代理",
-    "description_duplicate": "基於\"{{name}}\"建立一個新 AI 代理。指令、環境變數和 skill 會一併複製。",
     "name_label": "名稱",
     "name_placeholder": "例如：深度研究 AI 代理",
     "description_label": "描述",
     "description_placeholder": "這個 AI 代理做什麼？",
-    "visibility_label": "可見性",
     "access": {
-      "label": "訪問權限",
-      "private_title": "私有",
+      "private_title": "僅自己",
       "private_desc": "只有你可以執行該 AI 代理",
-      "public_title": "公開",
+      "public_title": "共用",
       "public_desc": "選擇誰可以執行該 AI 代理",
       "public_workspace_option": "工作區內所有人",
       "public_members_group": "指定成員",
-      "public_members_empty": "沒有可選擇的工作區成員",
       "public_targets_empty_hint": "至少勾選下方一項——否則該 AI 代理仍為私有。"
     },
     "runtime_label": "執行時",
@@ -479,17 +455,10 @@
     "runtime_no_results": "沒有匹配的機器",
     "runtime_group_online": "{{online}}/{{total}} 線上",
     "duplicate_copy_suffix": "（副本）",
-    "create": "建立",
-    "creating": "建立中...",
-    "cancel": "取消",
-    "create_failed_toast": "建立 AI 代理失敗",
     "skill_attach_failed_toast": "AI 代理已建立，但 skill 關聯失敗：{{error}}",
     "squad_join_failed_toast": "AI 代理\"{{name}}\"已建立，但加入小隊失敗：{{error}}。你可以在 Members 標籤裡手動新增。",
     "instructions": {
       "label": "指令",
-      "placeholder_blank": "點選撰寫指令…",
-      "placeholder_duplicate": "點選檢視或編輯複製的指令",
-      "collapse": "收起",
       "editor_placeholder": "寫下這個 AI 代理該做什麼、關注什麼、要避開什麼…"
     },
     "skills_section": {
@@ -539,8 +508,8 @@
       "discard": "放棄修改"
     },
     "instructions": {
-      "intro": "設定每次執行都會使用的 System Prompt，支援 Markdown。",
-      "system_prompt_label": "System Prompt",
+      "intro": "告訴這個 AI 代理在每次執行時該如何運作，支援 Markdown。",
+      "system_prompt_label": "指令",
       "placeholder": "定義這個 AI 代理的角色、專長和工作風格。\n\n# 示例\n你是一名專注 React 和 TypeScript 的前端工程師。\n\n## 工作風格\n- 寫小而聚焦的 PR——每個邏輯變更一個 commit\n- 優先組合而不是繼承\n- 新元件總是配單元測試\n\n## 約束\n- 未經明確批准不要修改 shared/ 下的 type\n- 遵循 features/ 中現有的元件模式",
       "system_layer_label": "由 Multica 維護",
       "system_layer_hint": "隨 Multica 版本更新。你無法編輯這部分，你在下面寫的內容也永遠不會被覆蓋。",
@@ -566,6 +535,7 @@
       "bulk_placeholder": "API_KEY=值\nBASE_URL=https://example.com",
       "bulk_plaintext_notice": "批次編輯時，值以明文顯示。",
       "bulk_unsupported_toast": "\"{{key}}\" 的值無法用文字表示，請用逐條編輯修改",
+      "bulk_invalid_key_toast": "批次編輯只支援 API_KEY 這類變數名稱，請用逐條編輯修改 \"{{key}}\"",
       "parse_error_malformed": "第 {{line}} 行不是 KEY=value 格式",
       "parse_error_duplicate": "第 {{line}} 行的 key \"{{key}}\" 重複",
       "paste_invalid_toast": "無法解析貼上的環境變數",
@@ -621,7 +591,7 @@
       "workspace_none_assigned": "該 AI 代理尚未分配工作區 MCP Server。",
       "workspace_add_action": "從工作區新增",
       "workspace_loading": "正在載入已分配的 MCP Server...",
-      "dialog_name_locked": "儲存時不能修改名稱。如需重新命名，請刪除後重新新增。",
+      "dialog_name_locked": "伺服器名稱無法在此修改。請改從伺服器選單中使用「重新命名」，或移除該項目後重新新增。",
       "workspace_overridden_badge": "已覆蓋",
       "workspace_disabled_badge": "已禁用",
       "runtime_title": "從執行時繼承",
@@ -703,22 +673,6 @@
       "redacted_hint": "只有 AI 代理 owner 或工作區 admin 可以檢視此配置。",
       "dialog_json_help": "以 JSON 編輯完整的伺服器配置。"
     },
-    "composio_mcp": {
-      "subtitle": "勾選 toolkit，只在你自己（這個 AI 代理的建立者）直接或透過下級 AI 代理鏈路觸發這個 AI 代理時，才把它掛載為 MCP server。",
-      "loading": "正在載入你的連線…",
-      "load_failed": "無法載入你已連線的應用，請稍後重試。",
-      "empty_title": "還沒有已連線的應用",
-      "empty_link_to_settings": "去 \"設定 → 整合\" 連一個",
-      "open_settings": "開啟設定",
-      "connected": "已連線",
-      "toggle_aria": "允許該 AI 代理使用 {{toolkit}}",
-      "saving": "正在儲存…",
-      "save_failed_toast": "儲存失敗，請重試",
-      "redacted_title": "已配置——對你隱藏",
-      "redacted_hint": "只有該 AI 代理的建立者才能檢視或修改它可使用的應用。",
-      "shared_warning": "該 AI 代理已共享。能夠執行該 AI 代理的人可以透過它使用你在此啟用的 Composio 應用。如果這些應用涉及敏感資料，請改用\"私有\"或縮小訪問範圍。",
-      "workspace_warning": "公開給工作區：工作區內任何成員都可以透過該 AI 代理使用這些 Composio 應用。"
-    },
     "runtime_config": {
       "mode_label": "路由模式",
       "mode_local": "Local",
@@ -727,7 +681,7 @@
       "model_override_hint": "套用於此 AI 代理此後領取的所有執行，直到修改或清除。清除後使用所選 OpenClaw AI 代理綁定的模型，其身分保持不變。",
       "model_override_placeholder": "openrouter/@preset/agent-reasoning",
       "mode_local_hint": "在本機執行。",
-      "mode_gateway_hint": "守護程序連線 OpenClaw Gateway。端點欄位留空則繼承守護程序宿主 `~/.openclaw/openclaw.json` 裡的配置。",
+      "mode_gateway_hint": "連線到 OpenClaw Gateway。端點欄位留空時，將沿用機器上 `~/.openclaw/openclaw.json` 的設定。",
       "gateway_legend": "Gateway 端點",
       "host_label": "Host",
       "host_placeholder": "gw.internal",
@@ -737,7 +691,7 @@
       "token_placeholder": "Gateway 頒發的 bearer token",
       "token_masked_placeholder": "已儲存——輸入新值可輪換，留空則保留原 token",
       "tls_label": "啟用 TLS",
-      "tls_hint": "用 https:// 代替 http:// 連線",
+      "tls_hint": "使用 https:// 而非 http:// 連線",
       "saved_toast": "路由配置已儲存",
       "save_failed_toast": "儲存路由配置失敗"
     },
@@ -784,13 +738,13 @@
       "add_failed_toast": "新增 skill 失敗"
     },
     "integrations": {
-      "members_note": "只有工作區的所有者和管理員可以管理此連線。你可以在\"設定 → 整合\"中檢視已連線的 Bot。"
+      "members_note": "在 AI 代理首頁查看和管理訊息管道。"
     },
     "activity": {
       "status": {
         "queued": "排隊中",
         "dispatched": "已派發",
-        "waiting_local_directory": "等待目錄",
+        "waiting_local_directory": "等待選擇本機資料夾",
         "running": "進行中",
         "completed": "成功",
         "failed": "失敗",
@@ -814,11 +768,13 @@
       "source_issue": "任務",
       "source_chat": "聊天",
       "source_autopilot": "自動化",
+      "source_doc": "文件",
       "source_untracked": "未追蹤",
       "source_quick_create": "快速建立",
       "source_creating_issue": "正在建立任務",
       "source_chat_session": "聊天會話",
       "source_autopilot_run": "自動化執行",
+      "source_doc_comment": "文件評論",
       "issue_short_fallback": "任務 {{prefix}}...",
       "triggered_by": "觸發來源",
       "open_issue_aria": "開啟任務",
@@ -831,6 +787,23 @@
       "started_prefix": "{{when}}啟動",
       "dispatched_prefix": "{{when}}派發",
       "queued_prefix": "{{when}}排隊"
+    },
+    "connected_apps": {
+      "loading": "正在載入應用…",
+      "load_failed": "無法載入此 AI 代理的應用。",
+      "empty": "尚無已連線的應用程式。",
+      "level": "帳號範圍",
+      "team_admin_only": "只有工作區管理員可以給 AI 代理團隊帳號。",
+      "team_shared_warning": "能執行這個 AI 代理的人，都能透過它使用該團隊帳號。",
+      "manage_link": "在 應用程式 → 帳號 中管理帳號",
+      "save_failed_toast": "儲存失敗，請重試",
+      "team_help": "工作區共用的帳號，由管理員連線。",
+      "personal_help": "每次執行使用觸發者自己已連線的帳號；尚未連線時須先連線。",
+      "available_accounts": "可用：{{accounts}}",
+      "enable": "啟用 {{app}}",
+      "account_for": "{{app}} 的帳號",
+      "connect_hint": "找不到需要的應用程式？前往設定連線帳號。",
+      "available_personal": "你的帳號"
     }
   },
   "char_counter": {
@@ -841,11 +814,11 @@
   },
   "visibility": {
     "private": {
-      "label": "個人",
-      "tooltip": "個人 · 僅 owner 和其授權的人可以執行該 AI 代理"
+      "label": "僅自己",
+      "tooltip": "私密 · 僅擁有者及其授權的成員可以執行此 AI 代理"
     },
     "workspace": {
-      "label": "工作區",
+      "label": "整個工作區",
       "tooltip": "工作區 · 工作區內所有人都可以使用該 AI 代理"
     }
   },
@@ -859,7 +832,6 @@
       "specific_people": "指定成員",
       "owner_only": "僅所有者"
     },
-    "trigger_members_count": "{{count}} 人",
     "trigger_members_empty": "指定成員",
     "trigger_team": "團隊",
     "private_title": "僅自己",
@@ -870,7 +842,7 @@
     "workspace_title": "整個工作區",
     "workspace_desc": "預設允許工作區內所有成員執行該 AI 代理",
     "members_title": "指定成員",
-    "members_desc": "只有你選擇的人可以執行該 AI 代理",
+    "members_desc": "你和所選成員可以執行該 AI 代理",
     "team_title": "公開給團隊",
     "team_desc": "向整個團隊授予訪問權限",
     "team_coming_soon": "即將推出",
@@ -878,11 +850,12 @@
     "public_group": "公開訪問",
     "owner_only_readonly": "只有該 AI 代理的所有者可以更改誰能呼叫它。",
     "members_empty": "沒有可選擇的工作區成員",
-    "composio_switch_hint": "提示——該 AI 代理已啟用 Composio 應用。共享後，所有獲得訪問權限的人都可以透過該 AI 代理使用這些應用。"
+    "composio_switch_hint": "提示：該 AI 代理已啟用已連接的應用程式。共享後，有權存取此 AI 代理的人都將可以透過它使用這些應用程式。",
+    "trigger_members_count_other": "{{count}} 人"
   },
   "profile_card": {
     "unavailable": "AI 代理不可用",
-    "detail_link": "詳情 →",
+    "detail_link": "檢視詳情 →",
     "runtime_label": "執行時",
     "skills_label": "Skills",
     "owner_label": "所有者",
@@ -929,6 +902,7 @@
     "trigger_retry": "重試",
     "trigger_chat": "來自對話",
     "trigger_quick_create": "快速建立",
+    "trigger_doc_comment": "文件評論觸發",
     "trigger_direct": "直接指派",
     "run_info": "執行詳情",
     "details_runtime": "執行時",
@@ -982,7 +956,45 @@
     "tool_kind_write": "編輯",
     "tool_kind_read": "讀取",
     "tool_kind_misc": "其他",
-    "trigger_wakeup": "喚醒觸發"
+    "trigger_wakeup": "喚醒觸發",
+    "context_receipt_title": "上下文回執",
+    "context_receipt_summary_other": "{{count}} 個來源",
+    "context_receipt_model": "模型",
+    "context_receipt_session": "工作階段",
+    "context_receipt_session_resumed": "沿用了先前的工作階段（其歷史也在上下文中）",
+    "context_receipt_session_new": "新工作階段",
+    "context_receipt_session_fresh_retry": "恢復工作階段被拒後改用新工作階段",
+    "context_receipt_mcp": "MCP 服務",
+    "context_receipt_mcp_none": "無",
+    "context_receipt_warning": "{{source}}：{{status}}",
+    "context_receipt_col_source": "來源",
+    "context_receipt_col_size": "大小",
+    "context_receipt_col_delivery": "交付方式",
+    "context_receipt_col_load": "載入狀態",
+    "context_receipt_same_as_brief": "同執行說明",
+    "context_receipt_footnote": "由 daemon 在 AI 代理啟動前記錄。僅儲存大小與短雜湊，不儲存內容。\"已驗證\" 表示已測試此執行階段版本會載入該檔案。skill 的大小與雜湊涵蓋整個已寫入的套件；檔案位元組數不代表模型實際讀取的內容。",
+    "context_source_runtime_brief": "執行說明",
+    "context_source_agent_instructions": "代理程式指令",
+    "context_source_project_description": "專案描述",
+    "context_source_existing_instructions": "儲存庫自帶指令",
+    "context_source_task_prompt": "本輪 prompt",
+    "context_source_skill": "技能：{{name}}",
+    "context_delivery_file": "檔案",
+    "context_delivery_inline": "系統提示",
+    "context_delivery_prompt": "本輪輸入",
+    "context_delivery_embedded": "在執行說明內",
+    "context_delivery_none": "無交付管道",
+    "context_load_delivered": "已送達",
+    "context_load_verified": "已驗證",
+    "context_load_verified_other_version": "僅在 {{version}} 驗證過",
+    "context_load_unverified": "未驗證",
+    "context_load_not_delivered": "未送達",
+    "context_receipt_direct_bytes": "直接輸入：{{size}}",
+    "context_receipt_file_bytes": "磁碟檔案：{{size}}",
+    "context_receipt_package": "套件總量",
+    "context_receipt_instruction_file_bytes": "執行說明檔案：{{size}}",
+    "context_receipt_skill_package_bytes": "skill 套件：{{size}}",
+    "context_receipt_other_file_bytes": "其他檔案：{{size}}"
   },
   "task_failure": {
     "cancelled_by_system": "已由系統取消",
@@ -994,6 +1006,8 @@
       "runtime_recovery": "守護程序已重啟",
       "runtime_access_revoked": "執行時訪問已撤銷",
       "timeout": "執行超時",
+      "cleanup_unconfirmed": "未能確認 AI 代理行程已結束",
+      "cleanup_blocked": "上次執行可能未結束，需手動重新執行",
       "iteration_limit": "達到迭代次數上限",
       "agent_blocked": "等待人工輸入",
       "api_invalid_request": "模型 API 拒絕了請求",
@@ -1013,16 +1027,17 @@
       "agent_error_context_overflow": "上下文視窗已超限",
       "agent_error_missing_config": "缺少 API 金鑰或配置",
       "agent_error_model_not_found_or_unavailable": "模型不可用",
-      "agent_error_runtime_version_unsupported": "執行器 CLI 版本不受支援",
-      "agent_error_runtime_missing_executable": "未安裝執行器 CLI",
+      "agent_error_runtime_version_unsupported": "AI 代理 CLI 版本不受支援",
+      "agent_error_runtime_missing_executable": "未安裝 AI 代理 CLI",
       "agent_error_unknown": "AI 代理執行出錯",
-      "agent_fallback_message": "AI 代理返回了兜底訊息",
+      "agent_fallback_message": "AI 代理未能產生有效回覆",
       "codex_resume_oversized": "會話過大，無法恢復",
       "idle_watchdog": "AI 代理長時間無活動，執行已停止",
       "local_directory_error": "本地目錄出錯",
+      "local_directory_missing": "專案的本地資料夾已不存在",
       "cancelled": "系統已取消",
       "agent_error": "AI 代理執行出錯",
-      "codex_semantic_inactivity": "Codex 長時間沒有語義進展",
+      "codex_semantic_inactivity": "Codex 已停止推進進度",
       "manual": "使用者取消",
       "user_cancelled": "使用者取消"
     }
@@ -1039,7 +1054,6 @@
     "section_owner": "owner",
     "section_model": "模型"
   },
-  "actions": {},
   "intro": {
     "title": "招募第一位 AI 隊友",
     "description": "AI 代理像團隊成員一樣接任務：在你的執行時上用 Claude Code、Codex 等工具動手做，做完在評論裡交付。",
@@ -1063,5 +1077,35 @@
       "comment": "修好了：價格卡片在 375px 下改為單欄。已開 PR，測試通過。",
       "step_read": "讀取 {{file}}"
     }
+  },
+  "apps_section": {
+    "title": "應用程式",
+    "empty": "這個 AI 代理還沒有使用任何應用。",
+    "connect_yours": "連線我的帳號",
+    "reconnect": "重新連線",
+    "connect_team": "連線團隊帳號",
+    "acts_as_team": "以團隊帳號行動",
+    "acts_as_starter": "以發起執行的人的帳號行動"
+  },
+  "add_app_dialog": {
+    "title": "為 {{agent}} 新增應用",
+    "description": "使用個人帳號的應用會用發起執行者的帳號，所以即使你自己沒有帳號也可以新增。",
+    "search_other": "搜尋 {{count}} 個應用",
+    "search_label": "搜尋應用",
+    "curated": "精選",
+    "recommended_team": "通常用團隊帳號",
+    "recommended_personal": "通常用個人帳號",
+    "team_connected": "團隊帳號已連線",
+    "add": "新增",
+    "add_aria": "新增 {{app}}",
+    "empty": "沒有符合的應用。",
+    "load_failed": "無法載入應用。",
+    "added_toast": "已將 {{app}} 新增至 {{agent}}。"
+  },
+  "app_requests": {
+    "title_adds_app": "{{agent}} 想使用 {{app}}",
+    "new_app": "此 AI 代理的新應用",
+    "adds_app_note": "回應後，{{agent}} 之後的執行都可以使用 {{app}}。",
+    "add_to_agent": "將 {{app}} 新增至 {{agent}}"
   }
 }

@@ -26,10 +26,13 @@ import {
 } from "@multica/ui/components/ui/tooltip"
 import { PanelLeftIcon } from "@multica/ui/icons"
 
-const SIDEBAR_WIDTH_DEFAULT = 240
+const SIDEBAR_WIDTH_DEFAULT = 280
 const SIDEBAR_WIDTH_MIN = 200
 const SIDEBAR_WIDTH_MAX = 320
 const SIDEBAR_WIDTH_STORAGE_KEY = "sidebar_width"
+// Until the person drags the edge, a theme picks the width (docs/theming.md).
+// Keep the bounds and default in step with the three constants above.
+const SIDEBAR_WIDTH_THEMED = "clamp(200px, var(--sidebar-panel-width, 280px), 320px)"
 // List columns (Inbox, Chat) hold two-line rows with an avatar, so they get
 // their own width instead of the nav's: one shared value is either too narrow
 // for the rows or too wide for the nav's short labels.
@@ -75,12 +78,14 @@ function useStoredWidth(
   clamp: (width: number) => number
 ) {
   const [width, setWidth] = React.useState(defaultWidth)
+  const [stored, setStored] = React.useState(false)
   React.useEffect(() => {
-    const stored = localStorage.getItem(storageKey)
-    if (stored) {
-      const storedWidth = Number(stored)
+    const raw = localStorage.getItem(storageKey)
+    if (raw) {
+      const storedWidth = Number(raw)
       if (Number.isFinite(storedWidth)) {
         setWidth(clamp(storedWidth))
+        setStored(true)
       }
     }
   }, [storageKey, clamp])
@@ -88,11 +93,12 @@ function useStoredWidth(
     (w: number) => {
       const clamped = clamp(w)
       setWidth(clamped)
+      setStored(true)
       localStorage.setItem(storageKey, String(clamped))
     },
     [storageKey, clamp]
   )
-  return [width, commit] as const
+  return [width, commit, stored] as const
 }
 
 type SidebarContextProps = {
@@ -179,7 +185,7 @@ function SidebarProvider({
   const isCompact = useIsCompact()
   const [openMobile, setOpenMobile] = React.useState(false)
 
-  const [width, commitWidth] = useStoredWidth(
+  const [width, commitWidth, widthStored] = useStoredWidth(
     SIDEBAR_WIDTH_STORAGE_KEY,
     SIDEBAR_WIDTH_DEFAULT,
     clampSidebarWidth
@@ -293,7 +299,7 @@ function SidebarProvider({
           data-slot="sidebar-wrapper"
           style={
             {
-              "--sidebar-width": `${width}px`,
+              "--sidebar-width": widthStored ? `${width}px` : SIDEBAR_WIDTH_THEMED,
               "--list-column-width": `${listWidth}px`,
               "--sidebar-width-icon": SIDEBAR_WIDTH_ICON,
               ...style,
@@ -445,7 +451,6 @@ function SidebarTrigger({
   return (
     <IconButton
       data-sidebar="trigger"
-      data-slot="sidebar-trigger"
       label={t(($) => $.toggle_sidebar)}
       shortcut={shortcut}
       tooltipSide="bottom"
@@ -613,7 +618,7 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
       onPointerDown={onPointerDown}
       title={toggleLabel}
       className={cn(
-        "absolute inset-y-0 z-20 hidden w-4 touch-none cursor-ew-resize transition-[transform,background-color] ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:start-1/2 after:w-[2px] hover:after:bg-sidebar-border sm:flex ltr:-translate-x-1/2 rtl:-translate-x-1/2",
+        "absolute inset-y-0 z-20 hidden w-4 touch-none cursor-ew-resize transition-[translate,background-color] ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:start-1/2 after:w-[2px] hover:after:bg-sidebar-border sm:flex ltr:-translate-x-1/2 rtl:-translate-x-1/2",
         "group-data-[collapsible=offcanvas]:translate-x-0 group-data-[collapsible=offcanvas]:after:left-full hover:group-data-[collapsible=offcanvas]:bg-sidebar",
         "[[data-side=left][data-collapsible=offcanvas]_&]:-right-2",
         "[[data-side=right][data-collapsible=offcanvas]_&]:-left-2",

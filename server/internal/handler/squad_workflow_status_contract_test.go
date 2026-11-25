@@ -22,15 +22,16 @@ import (
 
 // leaderRuntimeBriefFor renders the runtime brief file a squad leader gets
 // from provider, with the squad protocol as its Agent Identity.
-func leaderRuntimeBriefFor(t *testing.T, provider, instructions string, hasProjectWorkflow bool) string {
+func leaderRuntimeBriefFor(t *testing.T, provider, instructions string, hasProjectWorkflow, statusMap bool) string {
 	t.Helper()
 	dir := t.TempDir()
 	if _, err := execenv.InjectRuntimeConfig(dir, provider, execenv.TaskContextForEnv{
-		IssueID:            "issue-1",
-		TriggerCommentID:   "comment-1",
-		AgentInstructions:  instructions,
-		IsSquadLeader:      true,
-		HasProjectWorkflow: hasProjectWorkflow,
+		IssueID:                  "issue-1",
+		TriggerCommentID:         "comment-1",
+		AgentInstructions:        instructions,
+		IsSquadLeader:            true,
+		HasProjectWorkflow:       hasProjectWorkflow,
+		ProjectWorkflowStatusMap: statusMap,
 	}); err != nil {
 		t.Fatalf("InjectRuntimeConfig(%s): %v", provider, err)
 	}
@@ -58,7 +59,7 @@ var builtInParentMoves = []string{
 func TestOwningLeaderInWorkflowMovesOnlyByWorkflowCommands(t *testing.T) {
 	protocol := squadOperatingProtocolFor(true, leaderWorkflowCurrentDaemon)
 	for _, provider := range []string{"claude", "codex"} {
-		combined := strings.Join(strings.Fields(protocol+"\n"+leaderRuntimeBriefFor(t, provider, protocol, true)), " ")
+		combined := strings.Join(strings.Fields(protocol+"\n"+leaderRuntimeBriefFor(t, provider, protocol, true, false)), " ")
 		for _, move := range builtInParentMoves {
 			if strings.Contains(combined, move) {
 				t.Errorf("%s: workflow leader instructions still carry built-in move %q", provider, move)
@@ -67,6 +68,9 @@ func TestOwningLeaderInWorkflowMovesOnlyByWorkflowCommands(t *testing.T) {
 		for _, want := range []string{
 			// The ownership grant and its standing wrap-up authorization survive.
 			"Own the parent issue status — through its project workflow.",
+			"Delegate only the current step's work",
+			"pass its instructions and constraints to members",
+			"confirm the current step's goal is met",
 			"run that block's Step done command",
 			"do it even when no comment asked you to",
 			// Dispatch is not delivery, in workflow terms, in both halves.
@@ -77,6 +81,36 @@ func TestOwningLeaderInWorkflowMovesOnlyByWorkflowCommands(t *testing.T) {
 				t.Errorf("%s: workflow leader instructions missing %q", provider, want)
 			}
 		}
+	}
+}
+
+// With a status map, neither half names a command the map lacks: the leader
+// moves the parent to the status the map gives once the step's goal is met.
+func TestOwningLeaderInStatusMapMovesByTheMap(t *testing.T) {
+	protocol := squadOperatingProtocolFor(true, leaderWorkflowStatusMap)
+	for _, provider := range []string{"claude", "codex"} {
+		combined := strings.Join(strings.Fields(protocol+"\n"+leaderRuntimeBriefFor(t, provider, protocol, true, true)), " ")
+		for _, move := range append(builtInParentMoves, "Step done") {
+			if strings.Contains(combined, move) {
+				t.Errorf("%s: status-map leader instructions carry %q", provider, move)
+			}
+		}
+		for _, want := range []string{
+			"Own the parent issue status — through its project workflow.",
+			"using only the statuses in the `[Project workflow]` status map",
+			"pass its instructions and constraints to members",
+			"move it to the status the map gives for that step's finished work",
+			"do it even when no comment asked you to",
+			"The parent stays at its current step while members work",
+			"dispatching members is not delivery — move the parent on only on a later turn",
+		} {
+			if !strings.Contains(combined, want) {
+				t.Errorf("%s: status-map leader instructions missing %q", provider, want)
+			}
+		}
+	}
+	if squadOperatingProtocolFor(false, leaderWorkflowStatusMap) != squadOperatingProtocolFor(false, leaderNoWorkflow) {
+		t.Fatal("guest leader protocol must not vary with the status map")
 	}
 }
 

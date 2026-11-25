@@ -183,8 +183,9 @@ func (w *WebhookDeliveryWorker) ProcessNext(ctx context.Context) (bool, error) {
 			return true, w.complete(ctx, delivery, deliveryStatusIgnored, pgtype.UUID{}, "autopilot_archived")
 		case autopilot.Status != "active":
 			return true, w.complete(ctx, delivery, deliveryStatusIgnored, pgtype.UUID{}, "autopilot_paused")
-		case !webhookEventAllowedByTriggerScope(trigger.EventFilters, envelope):
-			return true, w.complete(ctx, delivery, deliveryStatusIgnored, pgtype.UUID{}, "event_filtered")
+		}
+		if decision := evaluateWebhookTriggerScope(trigger.EventFilters, envelope); !decision.Allowed {
+			return true, w.complete(ctx, delivery, deliveryStatusIgnored, pgtype.UUID{}, decision.storedError(), decision.ReasonCode)
 		}
 	}
 

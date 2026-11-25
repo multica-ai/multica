@@ -7,14 +7,17 @@ import { buildIssueStatusCatalog } from "@multica/core/issue-statuses";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { renderWithI18n } from "../test/i18n";
+import type { IssueWorkflow } from "@multica/core/types";
 import { WorkflowEditorPage } from "./workflow-editor-page";
 
-const { createWorkflow } = vi.hoisted(() => ({ createWorkflow: vi.fn() }));
+const { createWorkflow, statusEntries } = vi.hoisted(() => ({ createWorkflow: vi.fn(), statusEntries: { current: [] as unknown[] } }));
 
 vi.mock("@multica/core/api", () => ({ api: {}, ApiError: class extends Error {}, clientErrorMessage: () => null }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 vi.mock("@multica/core/paths", () => ({ useCurrentWorkspace: () => ({ id: "ws-1", name: "Acme" }) }));
-vi.mock("@multica/core/issue-statuses/hooks", () => ({ useIssueStatuses: () => buildIssueStatusCatalog([]) }));
+vi.mock("@multica/core/issue-statuses/hooks", () => ({
+  useIssueStatuses: () => buildIssueStatusCatalog(statusEntries.current as never),
+}));
 vi.mock("@multica/core/workspace/hooks", () => ({ useActorName: () => ({ getActorName: () => "Builder" }) }));
 vi.mock("@multica/core/issue-workflows", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/issue-workflows")>()),
@@ -27,14 +30,14 @@ vi.mock("../common/actor-avatar", () => ({
   ActorAvatar: ({ actorId }: { actorId: string }) => <span data-testid={`avatar-${actorId}`} />,
 }));
 
-function renderEditor(props: { template?: "content"; canCreateStatus?: boolean } = {}) {
+function renderEditor(props: { template?: "content"; canCreateStatus?: boolean; seed?: IssueWorkflow } = {}) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   qc.setQueryData(projectListOptions("ws-1").queryKey, [] as never);
   qc.setQueryData(agentListOptions("ws-1").queryKey, [{ id: "agent-1", name: "Builder", archived_at: null }] as never);
   qc.setQueryData(memberListOptions("ws-1").queryKey, [] as never);
   renderWithI18n(
     <QueryClientProvider client={qc}>
-      <WorkflowEditorPage workflowId={null} seed={null} canEdit onBack={vi.fn()} onOpen={vi.fn()} {...props} />
+      <WorkflowEditorPage workflowId={null} seed={props.seed ?? null} canEdit onBack={vi.fn()} onOpen={vi.fn()} template={props.template} canCreateStatus={props.canCreateStatus} />
     </QueryClientProvider>,
   );
 }
@@ -42,6 +45,7 @@ function renderEditor(props: { template?: "content"; canCreateStatus?: boolean }
 afterEach(() => {
   cleanup();
   createWorkflow.mockReset();
+  statusEntries.current = [];
 });
 
 describe("WorkflowEditorPage", () => {
@@ -93,6 +97,29 @@ describe("WorkflowEditorPage", () => {
     fireEvent.click(screen.getByRole("combobox", { name: "When done, move to" }));
     expect(screen.queryByRole("option", { name: "Deploy" })).toBeNull();
   });
+
+  // The agent's brief never routes finished work into a closed column, so
+  // the editor's default must not either (MUL-9913).
+  it("skips a custom closed column when showing the default next", () => {
+    statusEntries.current = [{ key: "wont_fix", name: "Won't Fix", category: "closed", description: "", color: "", icon: "", position: 0 }];
+    const step = (status_key: string) => ({ status_key, handler: { type: "none" as const }, instructions: "" });
+    // Seeded as a duplicate: a new draft pre-filled with these columns.
+    renderEditor({
+      seed: {
+        id: "wf-1", workspace_id: "ws-1", name: "Delivery", description: "", is_default: false, owner_id: null,
+        project_ids: [], created_at: "", updated_at: "",
+        steps: [
+          step("todo"),
+          { status_key: "in_review", handler: { type: "agent", id: "agent-1" }, instructions: "" },
+          step("wont_fix"),
+          step("done"),
+          step("cancelled"),
+        ],
+      },
+    });
+    fireEvent.click(stepCard("In Review"));
+    expect(screen.getByRole("combobox", { name: "When done, move to" }).textContent).toContain("Next column (Done)");
+  });
 });
 
 // Statuses are shared by every board, so only admins add them (MUL-8120).
@@ -107,6 +134,43 @@ describe("WorkflowEditorPage status creation", () => {
     renderEditor({ template: "content", canCreateStatus: true });
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.getByRole("button", { name: "Create" }).hasAttribute("disabled")).toBe(false);
+  });
+});
+
+// The catalog refetches whenever anyone adds or archives a status.
+describe("WorkflowEditorPage when the status catalog changes", () => {
+  const status = (key: string, name: string) => ({ key, name, category: "started", description: "", color: "", icon: "", position: 0 });
+  const changeDescription = (value: string) =>
+    fireEvent.change(screen.getByRole("textbox", { name: "Description" }), { target: { value } });
+
+  it("keeps an unsaved new workflow", async () => {
+    renderEditor();
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "Release" } });
+    await addNewStatus("Deploy");
+
+    statusEntries.current = [status("triage", "Triage")];
+    changeDescription("Ships weekly");
+
+    expect((screen.getByRole("textbox", { name: "Name" }) as HTMLInputElement).value).toBe("Release");
+    expect((screen.getByRole("textbox", { name: "Description" }) as HTMLTextAreaElement).value).toBe("Ships weekly");
+    expect(stepCard("Deploy")).toBeTruthy();
+  });
+
+  it("uses a status an admin adds for a template without dropping the member's edits", async () => {
+    createWorkflow.mockResolvedValue({ id: "wf-1" });
+    renderEditor({ template: "content", canCreateStatus: false });
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "Blog" } });
+    expect(screen.getByRole("alert")).toBeTruthy();
+
+    statusEntries.current = [status("drafting", "Drafting"), status("editing", "Editing"), status("scheduled", "Scheduled")];
+    changeDescription("Posts");
+
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect((screen.getByRole("textbox", { name: "Name" }) as HTMLInputElement).value).toBe("Blog");
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(createWorkflow).toHaveBeenCalled());
+    const steps = createWorkflow.mock.calls[0]![0].steps as { status_key?: string }[];
+    expect(steps.map((s) => s.status_key)).toEqual(expect.arrayContaining(["drafting", "editing", "scheduled"]));
   });
 });
 

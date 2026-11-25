@@ -12,12 +12,19 @@ import {
   onIssueLabelsChanged,
   onIssueMetadataChanged,
   onIssuePropertiesChanged,
+  onIssueReactionAdded,
+  onIssueReactionRemoved,
   onIssueUpdated,
   patchIssueLabels,
   patchIssueProperties,
+  patchIssueReactions,
+  removeReactionFromList,
 } from "./ws-updaters";
 import { issueKeys } from "./queries";
+import { NO_PROJECT_SIDEBAR_SOURCE } from "./sidebar-list";
 import { labelKeys } from "../labels/queries";
+import { EMPTY_INBOX_FILTERS } from "../inbox/filters";
+import { archivedInboxFacetsOptions, archivedInboxPagesOptions } from "../inbox/queries";
 import { projectKeys } from "../projects/queries";
 import type {
   AgentActivityBucket,
@@ -163,6 +170,18 @@ describe("onIssueLabelsChanged", () => {
     qc = new QueryClient();
   });
 
+  it.each([undefined, 2])("refreshes project progress, which counts issues by label (revision %s)", (revision) => {
+    const progressKey = projectKeys.progress(WS_ID, PROJECT_ID);
+    const membersKey = projectKeys.members(WS_ID, PROJECT_ID);
+    qc.setQueryData(progressKey, { by_label: [] });
+    qc.setQueryData(membersKey, []);
+
+    onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB], revision);
+
+    expect(qc.getQueryState(progressKey)?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(membersKey)?.isInvalidated).toBe(false);
+  });
+
   it("patches the per-issue label cache when present (LabelPicker source)", () => {
     qc.setQueryData<IssueLabelsResponse>(labelKeys.byIssue(WS_ID, ISSUE_ID), {
       labels: [labelA],
@@ -203,6 +222,28 @@ describe("onIssueLabelsChanged", () => {
       labels: [labelB],
       issue_revision: 4,
     });
+  });
+
+  it("re-asks a label-filtered archive and its facets once a label change lands", () => {
+    const filters = { ...EMPTY_INBOX_FILTERS, labels: [labelB.id] };
+    const pages = archivedInboxPagesOptions(WS_ID, filters).queryKey;
+    const facets = archivedInboxFacetsOptions(WS_ID, filters).queryKey;
+    qc.setQueryData(pages, { pages: [{ items: [], nextCursor: null, hasMore: false }], pageParams: [null] });
+    qc.setQueryData(facets, { statuses: {}, priorities: {}, actors: {}, types: {}, projects: {}, assignees: {}, labels: {}, unreadCount: 0 });
+
+    onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB], 2);
+
+    expectInvalidated(qc, pages);
+    expectInvalidated(qc, facets);
+  });
+
+  it("leaves the archive alone for an optimistic label patch", () => {
+    const pages = archivedInboxPagesOptions(WS_ID, EMPTY_INBOX_FILTERS).queryKey;
+    qc.setQueryData(pages, { pages: [{ items: [], nextCursor: null, hasMore: false }], pageParams: [null] });
+
+    patchIssueLabels(qc, WS_ID, ISSUE_ID, [labelB]);
+
+    expect(qc.getQueryState(pages)?.isInvalidated).toBe(false);
   });
 
   it("leaves the per-issue label cache untouched when the picker has not fetched", () => {
@@ -493,6 +534,80 @@ describe("auxiliary issue activity ordering", () => {
   });
 });
 
+describe("issue reactions on the detail cache", () => {
+  const reaction: IssueReaction = {
+    id: "reaction-1",
+    issue_id: ISSUE_ID,
+    actor_type: "member",
+    actor_id: "user-1",
+    emoji: "+1",
+    created_at: "2025-01-01T00:00:00Z",
+  };
+  const detailKey = issueKeys.detail(WS_ID, ISSUE_ID);
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient();
+  });
+
+  it("adds a reaction without advancing the snapshot revision, and marks it stale", () => {
+    qc.setQueryData<Issue>(detailKey, { ...baseIssue, revision: 3 });
+
+    onIssueReactionAdded(qc, WS_ID, ISSUE_ID, reaction, 4);
+    onIssueReactionAdded(qc, WS_ID, ISSUE_ID, reaction, 4);
+
+    const detail = qc.getQueryData<Issue>(detailKey);
+    expect(detail?.reactions).toEqual([reaction]);
+    expect(detail?.revision).toBe(3);
+    expectInvalidated(qc, detailKey);
+  });
+
+  it("removes the actor's reaction for that emoji", () => {
+    const other = { ...reaction, id: "reaction-2", actor_id: "user-2" };
+    qc.setQueryData<Issue>(detailKey, { ...baseIssue, revision: 3, reactions: [reaction, other] });
+
+    onIssueReactionRemoved(qc, WS_ID, ISSUE_ID, reaction, 4);
+
+    expect(qc.getQueryData<Issue>(detailKey)?.reactions).toEqual([other]);
+  });
+
+  it("ignores events the cached snapshot already includes", () => {
+    const readded = { ...reaction, id: "reaction-3" };
+    qc.setQueryData<Issue>(detailKey, { ...baseIssue, revision: 5, reactions: [readded] });
+
+    onIssueReactionRemoved(qc, WS_ID, ISSUE_ID, reaction, 4);
+
+    expect(qc.getQueryData<Issue>(detailKey)?.reactions).toEqual([readded]);
+  });
+
+  it("ignores an event older than one already applied", () => {
+    qc.setQueryData<Issue>(detailKey, { ...baseIssue, revision: 3 });
+
+    onIssueReactionRemoved(qc, WS_ID, ISSUE_ID, reaction, 5);
+    onIssueReactionAdded(qc, WS_ID, ISSUE_ID, reaction, 4);
+
+    expect(qc.getQueryData<Issue>(detailKey)?.reactions).toBeUndefined();
+  });
+
+  it("patches and refetches the detail for an unversioned event", () => {
+    qc.setQueryData<Issue>(detailKey, { ...baseIssue, revision: 3 });
+
+    onIssueReactionAdded(qc, WS_ID, ISSUE_ID, reaction);
+
+    expect(qc.getQueryData<Issue>(detailKey)?.reactions).toEqual([reaction]);
+    expectInvalidated(qc, detailKey);
+  });
+
+  it("patches the detail directly for a local write without a revision", () => {
+    qc.setQueryData<Issue>(detailKey, { ...baseIssue, revision: 3, reactions: [reaction] });
+
+    patchIssueReactions(qc, WS_ID, ISSUE_ID, removeReactionFromList(reaction));
+
+    expect(qc.getQueryData<Issue>(detailKey)?.reactions).toEqual([]);
+    expect(qc.getQueryState(detailKey)?.isInvalidated).toBe(false);
+  });
+});
+
 describe("project progress invalidation", () => {
   let qc: QueryClient;
 
@@ -581,6 +696,51 @@ describe("onIssueUpdated — source deletion detaches sub-issues", () => {
     expectInvalidated(qc, oldChildrenKey);
     expectInvalidated(qc, batchedChildrenKey);
     expectInvalidated(qc, issueKeys.childProgress(WS_ID));
+  });
+});
+
+describe("onIssueUpdated — blockers stay this reader's own", () => {
+  it("keeps the cached blocked_by when a broadcast carries a narrower list", () => {
+    const qc = new QueryClient();
+    const privateBlocker = {
+      id: OTHER_ISSUE_ID,
+      identifier: "MUL-2",
+      title: "Private blocker",
+      status: "todo",
+      via: "manual",
+      closed: false,
+    };
+    const child: Issue = {
+      ...parentedIssue,
+      blocked_by: [privateBlocker],
+      blocked_count: 1,
+      revision: 1,
+    };
+    const detailKey = issueKeys.detail(WS_ID, ISSUE_ID);
+    const childrenKey = issueKeys.children(WS_ID, PARENT_ISSUE_ID);
+    const listKey = issueKeys.list(WS_ID);
+    qc.setQueryData(detailKey, child);
+    qc.setQueryData(childrenKey, [child]);
+    qc.setQueryData(listKey, makeListCache(child));
+
+    // The server strips cross-project private blockers from every broadcast.
+    onIssueUpdated(qc, WS_ID, {
+      ...child,
+      title: "Renamed",
+      blocked_by: [],
+      revision: 2,
+    });
+
+    const expected = {
+      title: "Renamed",
+      blocked_by: [privateBlocker],
+      blocked_count: 1,
+      revision: 2,
+    };
+    expect(qc.getQueryData(detailKey)).toMatchObject(expected);
+    expect(qc.getQueryData<ListIssuesCache>(listKey)?.byStatus.unstarted?.issues[0])
+      .toMatchObject(expected);
+    expect(qc.getQueryData<Issue[]>(childrenKey)?.[0]).toMatchObject(expected);
   });
 });
 
@@ -868,16 +1028,6 @@ describe("onIssueDeleted", () => {
         created_at: "2025-01-01T00:00:00Z",
       },
     ]);
-    qc.setQueryData<IssueReaction[]>(issueKeys.reactions(ISSUE_ID), [
-      {
-        id: "reaction-1",
-        issue_id: ISSUE_ID,
-        actor_type: "member",
-        actor_id: "user-1",
-        emoji: "+1",
-        created_at: "2025-01-01T00:00:00Z",
-      },
-    ]);
     qc.setQueryData<IssueSubscriber[]>(issueKeys.subscribers(ISSUE_ID), [
       {
         issue_id: ISSUE_ID,
@@ -930,7 +1080,6 @@ describe("onIssueDeleted", () => {
 
     expect(qc.getQueryData(issueKeys.detail(WS_ID, ISSUE_ID))).toBeUndefined();
     expect(qc.getQueryData(issueKeys.timeline(ISSUE_ID))).toBeUndefined();
-    expect(qc.getQueryData(issueKeys.reactions(ISSUE_ID))).toBeUndefined();
     expect(qc.getQueryData(issueKeys.subscribers(ISSUE_ID))).toBeUndefined();
     expect(qc.getQueryData(issueKeys.usage(ISSUE_ID))).toBeUndefined();
     expect(qc.getQueryData(issueKeys.attachments(ISSUE_ID))).toBeUndefined();
@@ -1131,10 +1280,13 @@ describe("project gantt cache invalidation", () => {
 // only the lists it can reorder or move the issue across.
 describe("sidebar issue lists", () => {
   const PROJECT_ID = "project-1";
-  const params = { project_id: PROJECT_ID, sort_by: "updated_at", sort_direction: "desc" } as const;
-  const ownKey = issueKeys.sidebar(WS_ID, `project:${PROJECT_ID}`, params, 5);
-  const otherKey = issueKeys.sidebar(WS_ID, "project:project-9", { project_id: "project-9" }, 5);
-  const viewKey = issueKeys.sidebar(WS_ID, "view:view-1", {}, 5);
+  const sort = { field: "updated_at", direction: "desc" } as const;
+  const projectRequest = (projectId: string) => ({
+    table: { scope: { kind: "project", project_id: projectId }, filters: {}, sort },
+  }) as const;
+  const ownKey = issueKeys.sidebar(WS_ID, `project:${PROJECT_ID}`, projectRequest(PROJECT_ID), 5);
+  const otherKey = issueKeys.sidebar(WS_ID, "project:project-9", projectRequest("project-9"), 5);
+  const viewKey = issueKeys.sidebar(WS_ID, "view:view-1", { table: { scope: { kind: "workspace" }, filters: {}, sort } }, 5);
   const builtinKey = issueKeys.sidebar(
     WS_ID,
     "builtin:all_issues",
@@ -1164,6 +1316,18 @@ describe("sidebar issue lists", () => {
   it("refetches the project an issue moves into", () => {
     onIssueUpdated(qc, WS_ID, { id: ISSUE_ID, project_id: "project-9", revision: 2 }, { projectChanged: true });
     expect(invalidated(otherKey)).toBe(true);
+  });
+
+  it("refetches No project when an issue leaves its project", () => {
+    const noProjectKey = issueKeys.sidebar(
+      WS_ID,
+      NO_PROJECT_SIDEBAR_SOURCE,
+      { table: { scope: { kind: "workspace" }, filters: { include_no_project: true }, sort } },
+      5,
+    );
+    qc.setQueryData(noProjectKey, { issues: [], total: 0 });
+    onIssueUpdated(qc, WS_ID, { id: ISSUE_ID, project_id: null, revision: 2 }, { projectChanged: true });
+    expect(invalidated(noProjectKey)).toBe(true);
   });
 
   it("refetches every list when an issue is created or deleted", () => {

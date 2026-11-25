@@ -1,7 +1,9 @@
 "use client";
 
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { AnimatePresence, motion, useIsPresent, useReducedMotion } from "motion/react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { AnimatePresence, motion, useIsPresent } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
 import { ChevronDown, ChevronUp, Maximize2, X } from "@multica/ui/icons";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import {
@@ -14,6 +16,10 @@ import { cn } from "@multica/ui/lib/utils";
 import { UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { useIssueRouteRef } from "@multica/core/issues/canonical-id";
+import { prefetchIssuePage } from "@multica/core/issues/queries";
+import { useIsGuest } from "@multica/core/permissions";
 import {
   createShortcutChord,
   isEditableShortcutTarget,
@@ -22,19 +28,24 @@ import {
 import { isImeComposing } from "@multica/core/utils";
 import { AppLink } from "../../navigation";
 import { PAGE_GUTTER } from "../../layout/page-header";
+import { WindowTitleBarProvider } from "../../platform/window-title-bar";
 import { ShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { useT } from "../../i18n";
 import { IssueDetail } from "./issue-detail";
 import {
   IssuePeekActionsContext,
+  IssuePeekColumnsContext,
   IssuePeekIdContext,
   IssuePeekPositionContext,
   PEEK_TARGET_ATTR,
+  hasIssueInColumns,
   locateInColumns,
   useIssuePeekActions,
+  useIssuePeekColumns,
   useIssuePeekPosition,
   type IssuePeekActions,
   type IssuePeekColumns,
+  type IssuePeekPosition,
 } from "../surface/peek-context";
 
 const NEXT_KEY = createShortcutChord("J");
@@ -80,6 +91,49 @@ export function IssuePeekHost({ children }: { children: ReactNode }) {
   const openId = peekId;
   const position = useMemo(() => locateInColumns(columns, openId), [columns, openId]);
 
+  // Keep the latest columns and last known neighbours for the open issue so
+  // deleting it can land on the next (or previous) surviving item even when
+  // the list/board cache prunes the deleted row before `onDelete` fires.
+  const columnsRef = useRef(columns);
+  columnsRef.current = columns;
+  const lastNeighboursRef = useRef<{
+    issueId: string;
+    nextId: string | null;
+    prevId: string | null;
+  } | null>(null);
+  if (!openId) {
+    lastNeighboursRef.current = null;
+  } else if (position) {
+    lastNeighboursRef.current = {
+      issueId: openId,
+      nextId: position.nextId,
+      prevId: position.prevId,
+    };
+  }
+
+  const handleDelete = useCallback((deletedId: string) => {
+    setPeekId((current) => {
+      if (current !== deletedId) return current;
+      const cols = columnsRef.current;
+      const pos = locateInColumns(cols, deletedId);
+      const fallback =
+        lastNeighboursRef.current?.issueId === deletedId
+          ? lastNeighboursRef.current
+          : null;
+      for (const candidate of [
+        pos?.nextId,
+        pos?.prevId,
+        fallback?.nextId,
+        fallback?.prevId,
+      ]) {
+        if (candidate && candidate !== deletedId && hasIssueInColumns(cols, candidate)) {
+          return candidate;
+        }
+      }
+      return null;
+    });
+  }, []);
+
   // Tracked from pointer events rather than queried with `:hover`, so the
   // card under a stationary pointer is known without a layout read.
   const hoveredCardRef = useRef<string | null>(null);
@@ -104,6 +158,7 @@ export function IssuePeekHost({ children }: { children: ReactNode }) {
     <IssuePeekActionsContext.Provider value={actions}>
       <IssuePeekIdContext.Provider value={openId}>
         <IssuePeekPositionContext.Provider value={position}>
+          <IssuePeekColumnsContext.Provider value={columns}>
           <div
             data-peek-open={openId ? "" : undefined}
             className="group/peek relative flex min-h-0 flex-1 flex-col [--issue-peek-width:520px]"
@@ -121,9 +176,12 @@ export function IssuePeekHost({ children }: { children: ReactNode }) {
                 (J / K is keyboard navigation — it must not animate); only
                 opening and closing the panel does. */}
             <AnimatePresence initial={false}>
-              {openId && <IssuePeekPanel key="issue-peek" issueId={openId} />}
+              {openId && (
+                <IssuePeekPanel key="issue-peek" issueId={openId} onDelete={handleDelete} />
+              )}
             </AnimatePresence>
           </div>
+          </IssuePeekColumnsContext.Provider>
         </IssuePeekPositionContext.Provider>
       </IssuePeekIdContext.Provider>
     </IssuePeekActionsContext.Provider>
@@ -133,14 +191,20 @@ export function IssuePeekHost({ children }: { children: ReactNode }) {
 // Memoized, and blind to the column order: the host re-renders on every board
 // reorder (a drag publishes columns on each hover), and none of that may reach
 // IssueDetail. What does follow the order lives in IssuePeekFollow.
-const IssuePeekPanel = memo(function IssuePeekPanel({ issueId }: { issueId: string }) {
+const IssuePeekPanel = memo(function IssuePeekPanel({
+  issueId,
+  onDelete,
+}: {
+  issueId: string;
+  onDelete: (issueId: string) => void;
+}) {
   const { t } = useT("issues");
-  const actions = useIssuePeekActions()!;
   const panelRef = useRef<HTMLElement>(null);
   // False while the exit animation plays: the closing panel no longer takes
   // clicks or keys, so the board is usable the moment the peek is dismissed.
   const isPresent = useIsPresent();
-  const reduceMotion = useReducedMotion() ?? false;
+  const reduceMotion = useReducedMotion();
+  const handleDelete = useCallback(() => onDelete(issueId), [onDelete, issueId]);
 
   return (
     <motion.aside
@@ -149,10 +213,14 @@ const IssuePeekPanel = memo(function IssuePeekPanel({ issueId }: { issueId: stri
       data-issue-peek=""
       className={cn(
         "absolute right-2 top-2 z-30 flex w-[min(var(--issue-peek-width),calc(100%-1rem))] flex-col overflow-hidden",
-        "rounded-xl bg-background shadow-[var(--floating-shadow)] ring-1 ring-surface-border",
+        "rounded-xl bg-background shadow-[var(--floating-shadow)] ring-1 ring-floating-border",
         // Stops above the chat launcher, which owns the dashboard's
         // bottom-right corner — the panel's composer would sit under it.
         "above-chat-launcher",
+        // Floats over the top of the page, which may be the window's drag
+        // region (the Desktop issue window); without this, its header's
+        // controls would move the window instead of taking the click.
+        "[-webkit-app-region:no-drag]",
         !isPresent && "pointer-events-none",
       )}
       // Slides in from the edge it is anchored to; the exit is shorter and
@@ -170,36 +238,38 @@ const IssuePeekPanel = memo(function IssuePeekPanel({ issueId }: { issueId: stri
       }}
     >
       {isPresent && <IssuePeekFollow issueId={issueId} panelRef={panelRef} />}
-      <ErrorBoundary
-        resetKeys={[issueId]}
-        // The default fallback is a bare message card; here it would be a
-        // panel with no way to close it but Esc.
-        fallback={({ error }) => (
-          <div className="flex flex-1 min-h-0 flex-col">
-            <div className={cn("flex h-12 shrink-0 items-center justify-end gap-1 border-b", PAGE_GUTTER)}>
-              <IssuePeekTrailingActions issueId={issueId} />
+      <WindowTitleBarProvider value={null}>
+        <ErrorBoundary
+          resetKeys={[issueId]}
+          // The default fallback is a bare message card; here it would be a
+          // panel with no way to close it but Esc.
+          fallback={({ error }) => (
+            <div className="flex flex-1 min-h-0 flex-col">
+              <div className={cn("flex h-12 shrink-0 items-center justify-end gap-1 border-b", PAGE_GUTTER)}>
+                <IssuePeekTrailingActions issueId={issueId} />
+              </div>
+              <div className="flex flex-1 min-h-0 items-center justify-center px-4 text-center text-body text-muted-foreground">
+                {error.message}
+              </div>
             </div>
-            <div className="flex flex-1 min-h-0 items-center justify-center px-4 text-center text-body text-muted-foreground">
-              {error.message}
-            </div>
-          </div>
-        )}
-      >
-        <IssueDetail
-          key={issueId}
-          issueId={issueId}
-          variant="peek"
-          defaultSidebarOpen={false}
-          leadingAction={<IssuePeekNav />}
-          trailingActions={<IssuePeekTrailingActions issueId={issueId} />}
-          onDelete={actions.close}
-        />
-      </ErrorBoundary>
+          )}
+        >
+          <IssueDetail
+            key={issueId}
+            issueId={issueId}
+            variant="peek"
+            defaultSidebarOpen={false}
+            leadingAction={<IssuePeekNav />}
+            trailingActions={<IssuePeekTrailingActions issueId={issueId} />}
+            onDelete={handleDelete}
+          />
+        </ErrorBoundary>
+      </WindowTitleBarProvider>
     </motion.aside>
   );
 });
 
-/** The panel's keyboard (Esc, J / K / H / L, arrows) and keeping the peeked issue in view. */
+/** The panel's keyboard (Esc, J / K / H / L, arrows), neighbour prefetch, and keeping the peeked issue in view. */
 function IssuePeekFollow({
   issueId,
   panelRef,
@@ -209,11 +279,16 @@ function IssuePeekFollow({
 }) {
   const actions = useIssuePeekActions()!;
   const position = useIssuePeekPosition();
-  const reduceMotion = useReducedMotion() ?? false;
+  const reduceMotion = useReducedMotion();
+
+  useIssuePeekPrefetch(issueId, position);
 
   // Read through a ref so the listener is bound once, not on every step.
   const positionRef = useRef(position);
   positionRef.current = position;
+  const columns = useIssuePeekColumns();
+  const columnCountRef = useRef(0);
+  columnCountRef.current = columns?.length ?? 0;
 
   useEffect(() => {
     // Whether the reader's last click landed in the panel. Clicking panel text
@@ -244,7 +319,12 @@ function IssuePeekFollow({
         step = ARROW_STEPS[event.key];
       }
       const target = step ? positionRef.current?.[step] : null;
-      if (!target) return;
+      if (!target) {
+        // Where H / L step across columns, the last column keeps them too:
+        // L there is not a cue to edit labels.
+        if ((step === "leftId" || step === "rightId") && columnCountRef.current > 1) event.preventDefault();
+        return;
+      }
       event.preventDefault();
       actions.open(target);
     };
@@ -287,6 +367,57 @@ function IssuePeekFollow({
   }, [issueId, position, panelRef, reduceMotion]);
 
   return null;
+}
+
+/**
+ * Warms the adjacent issues in the current column (`nextId`, then `prevId`)
+ * once the browser is idle, so stepping with J / K (or the prev/next arrows)
+ * renders from cache instead of flashing IssueDetailSkeleton.
+ */
+function useIssuePeekPrefetch(issueId: string, position: IssuePeekPosition | null) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  // A guest's issue page shows no runs, and the server refuses them.
+  const guest = useIsGuest(wsId);
+  const nextId = position?.nextId ?? null;
+  const prevId = position?.prevId ?? null;
+  const targets = useMemo(() => {
+    const picked: string[] = [];
+    for (const candidate of [nextId, prevId]) {
+      if (candidate && candidate !== issueId && !picked.includes(candidate)) {
+        picked.push(candidate);
+      }
+    }
+    return picked;
+  }, [issueId, nextId, prevId]);
+  const targetKey = targets.join(",");
+
+  useEffect(() => {
+    if (!wsId || !targetKey) return;
+    let cancelled = false;
+    const run = async () => {
+      // One issue at a time: each fans out into up to four requests.
+      for (const targetId of targets) {
+        if (cancelled) return;
+        await prefetchIssuePage(qc, wsId, targetId, undefined, { runs: !guest }).catch(() => {
+          // A failed warm-up is retried when the user steps to that issue.
+        });
+      }
+    };
+    if (typeof window.requestIdleCallback === "function") {
+      const id = window.requestIdleCallback(() => void run(), { timeout: 150 });
+      return () => {
+        cancelled = true;
+        window.cancelIdleCallback(id);
+      };
+    }
+    const timer = window.setTimeout(() => void run(), 100);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by target ids and viewer role
+  }, [qc, wsId, targetKey, guest]);
 }
 
 function isArrowWidgetTarget(target: EventTarget | null) {
@@ -351,6 +482,7 @@ function IssuePeekTrailingActions({ issueId }: { issueId: string }) {
   const { t } = useT("issues");
   const actions = useIssuePeekActions()!;
   const paths = useWorkspacePaths();
+  const issueRef = useIssueRouteRef(useWorkspaceId(), issueId);
 
   return (
     <>
@@ -358,7 +490,7 @@ function IssuePeekTrailingActions({ issueId }: { issueId: string }) {
         <TooltipTrigger
           render={
             <AppLink
-              href={paths.issueDetail(issueId)}
+              href={paths.issueDetail(issueRef)}
               aria-label={t(($) => $.peek.open_full_page)}
               className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }), "text-muted-foreground")}
             />

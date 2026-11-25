@@ -64,7 +64,7 @@ test.describe("Issue filter: search, due date, advanced", () => {
     await expect.poll(() => visibleIssueTitles(page, all)).toEqual([...all].sort());
 
     await page.getByRole("button", { name: "Filter", exact: true }).click();
-    await page.getByRole("textbox", { name: "Filter by field or value…" }).fill("urg");
+    await page.getByRole("textbox", { name: "Filter by field or value..." }).fill("urg");
     const urgentRow = page.getByRole("menuitemcheckbox", { name: /Priority\s*is\s*Urgent/ });
     await expect(urgentRow).toBeVisible();
     await shot(page, "01-search");
@@ -133,7 +133,7 @@ test.describe("Issue filter: search, due date, advanced", () => {
     // Delete the group: one overdue rule is a simple filter again.
     await page.getByRole("button", { name: "Advanced filter" }).click();
     await expect(panel).toBeVisible();
-    await group.getByRole("button", { name: "Condition actions" }).last().click();
+    await group.getByRole("button", { name: "Condition actions" }).first().click();
     await page.getByRole("menuitem", { name: "Delete group" }).click();
     await expect.poll(() => visibleIssueTitles(page, all)).toEqual([lowLate, mediumLate, urgentLate].sort());
     await panel.getByRole("button", { name: "Switch to simple filter" }).click();
@@ -160,12 +160,11 @@ test.describe("Issue filter: search, due date, advanced", () => {
     await expect(page.getByRole("menuitem", { name: property.name })).toBeVisible();
     await shot(page, "05-advanced-field-picker");
     await page.getByRole("menuitem", { name: property.name }).click();
-    await panel.getByRole("button", { name: "Values" }).nth(1).click();
-    await page.getByRole("menuitemcheckbox", { name: "No value" }).click();
-    await page.keyboard.press("Escape");
-
     const rows = panel.getByTestId("advanced-filter-row");
     await expect(rows).toHaveCount(2);
+    await rows.nth(1).getByRole("combobox", { name: "Match" }).click();
+    await page.getByRole("option", { name: "is empty" }).click();
+
     await expect(rows.nth(1)).toContainText(property.name);
     await expect(panel.getByRole("button", { name: "Add property filter" })).toHaveCount(0);
     await expect.poll(() => visibleIssueTitles(page, all)).toEqual([urgentLate, urgentUndated].sort());

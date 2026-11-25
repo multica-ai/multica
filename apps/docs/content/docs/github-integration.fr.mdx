@@ -17,6 +17,8 @@ Multica auto-hébergé peut aussi connecter en parallèle des instances Forgejo,
 
 Un propriétaire ou un administrateur de l'espace de travail peut effectuer la connexion :
 
+Une nouvelle connexion exige aussi le contrôle de l’installation GitHub : une installation personnelle doit appartenir à l’utilisateur qui autorise l’App ; une installation d’organisation exige la permission admin sur chaque dépôt couvert. Un accès en lecture seule ou partiel ne suffit pas. Sélectionnez au moins un dépôt pour une installation d’organisation.
+
 <Steps>
 <Step>
 Ouvrez **Paramètres → Code**.
@@ -31,6 +33,10 @@ Sur GitHub, choisissez le compte ou l'organisation, puis autorisez tous les dép
 Revenez sur Multica une fois l'installation terminée.
 </Step>
 </Steps>
+
+Choisissez **Ajouter un compte ou une organisation** dans la ligne GitHub ou le menu **Ajouter un dépôt** pour connecter une autre installation sans déconnecter les précédentes. Chaque connexion affiche le compte et la personne qui l’a connectée ; le sélecteur de dépôts permet de changer de compte. **Mettre en pause les fonctionnalités GitHub** s’applique à toutes les connexions de l’espace de travail.
+
+Si GitHub ne renvoie pas d’autorisation utilisateur, Multica ne peut pas vérifier une nouvelle connexion, même si l’App est déjà installée ou connectée à un autre espace. Reconnectez-vous et terminez l’autorisation ; si cela se répète, demandez à votre opérateur Multica de vérifier les réglages d’autorisation utilisateur de l’App. Modifier uniquement l’accès aux dépôts peut ne pas suffire.
 
 L'état de la connexion s'affiche sur la même page. Les membres ordinaires peuvent consulter cet état, mais ne peuvent ni connecter, ni déconnecter, ni modifier les interrupteurs.
 
@@ -76,7 +82,7 @@ Resolves MUL-123
 
 Une simple mention dans la description, comme `Related to MUL-123`, n'associe pas du tout la PR à cette tâche. Les messages de commit et les commentaires de PR ne déclenchent pas non plus l'association.
 
-Vous pouvez aussi associer une PR à la main : dans le bloc **Pull requests** de la tâche, cliquez sur **+** et collez l'URL de la PR. Pour retirer une PR d'une tâche, ouvrez le menu **⋯** de sa ligne et choisissez **Retirer de la tâche** ; Multica ne la réassociera plus à partir de son titre ou de sa branche.
+Vous pouvez aussi associer une PR à la main : dans le bloc **Pull requests** de la tâche, cliquez sur **+** et collez l'URL de la PR. Tant que la tâche n'a aucune PR, le bloc est masqué : utilisez plutôt la ligne **Ajouter …** en bas de la barre latérale, par exemple **Ajouter une pull request** ou **Ajouter un réveil ou une pull request**. Pour retirer une PR d'une tâche, ouvrez le menu **⋯** de sa ligne et choisissez **Retirer de la tâche** ; Multica ne la réassociera plus à partir de son titre ou de sa branche.
 
 ## Voir les PR d'une tâche
 
@@ -84,13 +90,13 @@ Une fois associées, les PR apparaissent dans le bloc **Pull requests** du déta
 
 - le dépôt, le numéro, le titre et l'auteur ;
 - l'état `Ouverte`, `Brouillon`, `Fusionnée` ou `Fermée` ;
-- le nombre de lignes ajoutées et supprimées, et le nombre de fichiers modifiés ;
+- le nombre de lignes ajoutées et supprimées, juste après le numéro, par exemple `#19 · +48 −12` ; le nombre de fichiers modifiés s'affiche au survol de la ligne ;
 - le statut CI : toutes les vérifications ont réussi (avec leur nombre), certaines sont en échec (avec le nom des vérifications concernées) ou certaines sont en cours ; les PR sans vérification configurée n'affichent pas cet élément, et « aucune vérification » n'est jamais considéré comme une réussite ;
 - la possibilité de fusion : « Prête à fusionner » (uniquement lorsque GitHub signale un état de fusion propre), « Conflits de fusion », « Bloquée » ou « En retard sur la base ».
 
 Le statut CI et la possibilité de fusion proviennent d'instantanés que Multica récupère depuis l'API GitHub, et les deux sont indépendants ; les PR fusionnées ou fermées n'affichent plus ni l'un ni l'autre. Lorsque GitHub est momentanément indisponible, la carte conserve le dernier instantané et le signale comme périmé.
 
-Sous la liste, une ligne indique ce qui va se passer : par exemple *Passe à Terminé quand #19 est fusionnée*, ou quelle PR a été fermée sans fusion. Cette ligne n'apparaît pas lorsque l'espace de travail ne change pas le statut ou que la tâche a déjà le statut cible.
+Sous la liste, une ligne indique ce qui va se passer : par exemple *Passe à Terminé quand #19 est fusionnée*, ou quelle PR a été fermée sans fusion. Quand une seule PR attend sa fusion, sa ligne l'indique directement : *À la fusion → Terminé*. Cette ligne n'apparaît pas lorsque l'espace de travail ne change pas le statut ou que la tâche a déjà le statut cible.
 
 Cliquez sur une entrée pour ouvrir la PR sur GitHub. Désactiver la **Barre latérale des pull requests** masque seulement ce bloc ; cela ne déconnecte rien.
 
@@ -101,7 +107,7 @@ Une PR fusionnée ne signifie pas forcément que la tâche est terminée : c'est
 Une tâche passe au statut choisi lorsque toutes les conditions suivantes sont réunies :
 
 1. toutes les PR associées sont `Merged` : une PR `Open` ou `Draft` fait attendre la tâche, tout comme une PR fermée sans fusion tant que vous ne l'avez pas retirée de la tâche ;
-2. la tâche n'est pas `done` ou `cancelled`, n'est pas en Triage, n'a pas déjà le statut cible et n'a pas été exclue pour elle seule (**Pull requests → ⋯ → Garder le statut à la fusion des PR**).
+2. la tâche n'est pas `done` ou `cancelled`, n'a pas déjà le statut cible et n'a pas été exclue pour elle seule (**Pull requests → ⋯ → Garder le statut à la fusion des PR**).
 
 <PrLinkDemo />
 
@@ -109,7 +115,7 @@ La façon dont une PR a été associée ne change rien : le titre, le nom de bra
 
 La vérification a lieu lorsqu'un événement de PR touche la tâche : une PR associée est fusionnée, une PR est associée, ou une association est retirée. Rouvrir une tâche ne la fait pas repasser au statut cible ; c'est la prochaine PR associée fusionnée qui le fait. Modifier le réglage ne change pas les tâches dont les PR ont été fusionnées auparavant.
 
-Le changement de statut est inscrit dans la chronologie comme une action système qui nomme les PR, et les membres abonnés à la tâche sont notifiés.
+Le changement de statut est inscrit dans la chronologie comme une action système qui nomme les PR, et les membres abonnés à la tâche sont notifiés s'ils ont activé les notifications de changement de statut.
 
 ## Plusieurs espaces de travail
 
@@ -121,7 +127,7 @@ Si un même identifiant correspond à une tâche dans plusieurs des espaces de t
 
 ## Déconnecter
 
-Choisir **Déconnecter** dans le menu **⋯** de la ligne GitHub, sur **Paramètres → Code**, supprime seulement la relation entre l'espace de travail Multica courant et l'installation ; cela ne désinstalle pas l'App de GitHub à votre place. Les enregistrements de PR existants sont conservés, et les nouveaux événements cessent d'arriver dans cet espace de travail.
+Dans **Paramètres → Code**, choisissez **Déconnecter** à côté du compte à retirer. Seule la connexion de cette installation à l’espace courant est supprimée ; les autres continuent de recevoir des événements. L’App reste installée sur GitHub et les PR et liens existants sont conservés.
 
 Pour révoquer l'autorisation d'accès aux dépôts côté GitHub, désinstallez l'App ou ajustez son périmètre de dépôts depuis la page des installations de GitHub Apps de votre compte personnel ou de votre organisation. Après la désinstallation, tous les espaces de travail Multica liés à cette installation cessent de recevoir des événements.
 
@@ -139,8 +145,8 @@ Créez l'App dans **Developer settings → GitHub Apps** sur GitHub et renseigne
 | Champ | Valeur |
 |---|---|
 | Homepage URL | L'adresse de votre frontend Multica, par ex. `https://multica.example.com` |
-| Callback URL | Laisser vide |
-| Setup URL | `https://<api-host>/api/github/setup`, avec **Redirect on update** activé |
+| Callback URL | `https://<api-host>/api/github/setup` |
+| Request user authorization (OAuth) during installation | Activer |
 | Webhook URL | `https://<api-host>/api/webhooks/github` |
 | Webhook secret | Une chaîne aléatoire que vous conservez durablement |
 
@@ -175,19 +181,21 @@ Récupérez le slug dans l'URL publique de l'App. Par exemple, le slug de `https
 ```dotenv
 GITHUB_APP_SLUG=multica-acme
 GITHUB_WEBHOOK_SECRET=<the webhook secret you entered when creating the App>
+GITHUB_APP_CLIENT_ID=<Client ID>
+GITHUB_APP_CLIENT_SECRET=<Client secret>
 FRONTEND_ORIGIN=https://multica.example.com
 ```
 
-Si `GITHUB_APP_SLUG` ou `GITHUB_WEBHOOK_SECRET` manque, le bouton de connexion est désactivé et le point de terminaison du webhook refuse de traiter les événements.
+Les six variables GitHub de cette section sont requises pour les nouvelles connexions, y compris `GITHUB_APP_ID` et `GITHUB_APP_PRIVATE_KEY`. Si une variable manque, la connexion est désactivée ; la réception des webhooks exige seulement `GITHUB_WEBHOOK_SECRET`. Les connexions existantes continuent de fonctionner. Avant le déploiement, définissez la première Callback URL sur cet endpoint et activez OAuth lors de l’installation. GitHub n’utilise alors pas de Setup URL distincte.
 
-Pour que la carte de PR affiche le statut CI et la possibilité de fusion, définissez aussi les deux variables suivantes. Multica s'en sert pour s'authentifier en tant qu'App et récupérer les instantanés :
+Pour les nouvelles connexions, le statut CI et la possibilité de fusion des PR, définissez aussi les deux variables suivantes. Multica compare la liste complète des dépôts de l’installation, obtenue avec un jeton metadata en lecture seule, aux dépôts administrés par l’utilisateur :
 
 ```dotenv
 GITHUB_APP_ID=<the GitHub App's numeric ID>
 GITHUB_APP_PRIVATE_KEY=<full PEM private key, keeping the BEGIN/END lines and newlines>
 ```
 
-Générez la clé privée dans **Private keys → Generate a private key** de la GitHub App. Sans ces deux variables, les PR sont toujours reflétées et les tâches toujours associées automatiquement et changées de statut à la fusion ; la carte de PR n'affiche simplement ni CI ni état de fusion.
+Générez la clé privée dans **Private keys → Generate a private key** de la GitHub App. Sans ces deux variables, la connexion est désactivée. Les connexions existantes continuent de refléter les PR et de mettre à jour les tâches via les webhooks, mais les cartes de PR n’affichent ni CI ni état de fusion.
 
 </Step>
 <Step>
@@ -207,7 +215,7 @@ Redémarrez le serveur API, puis effectuez la connexion dans **Paramètres → C
 
 ## Dépannage
 
-- **Bouton de connexion désactivé** : vérifiez que `GITHUB_APP_SLUG` et `GITHUB_WEBHOOK_SECRET` parviennent bien au processus de l'API.
+- **Bouton de connexion désactivé** : vérifiez les six variables GitHub ci-dessus, la première Callback URL et **Request user authorization (OAuth) during installation**.
 - **Le webhook renvoie 401** : vérifiez que la GitHub App et l'API utilisent le même secret de webhook, puis relancez la livraison depuis **Recent Deliveries** sur GitHub.
 - **PR non associée** : vérifiez que le dépôt fait partie du périmètre autorisé de l'App, que l'association automatique est activée, que l'identifiant appartient à l'espace de travail courant et que personne n'a retiré la PR de la tâche.
 - **Identifiant dans la description, mais PR non associée** : placez-le juste après un mot-clé de clôture (`Closes MUL-123`), ou dans le nom de branche ou le titre de la PR, ou associez la PR à la main.

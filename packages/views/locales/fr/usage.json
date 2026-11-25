@@ -8,7 +8,21 @@
   "filter": {
     "project_label": "Projet",
     "all_projects": "Tous les projets",
-    "period_label": "Période"
+    "period_label": "Période",
+    "attribution_label": "Attribution",
+    "all_attribution": "Toute attribution",
+    "standalone_only": "Agents autonomes uniquement",
+    "squads_group": "Squads"
+  },
+  "history_limit": {
+    "note": "Votre forfait couvre les {{days}} derniers jours. Passez à un forfait supérieur pour voir les données plus anciennes. Rien n'est supprimé.",
+    "fell_back": "Affichage des {{days}} derniers jours — la limite de votre forfait actuel.",
+    "view_plans": "Voir les forfaits",
+    "locked": "Non inclus dans votre forfait",
+    "plan": {
+      "pro": "Pro",
+      "business": "Business"
+    }
   },
   "kpi": {
     "cost_label": "Coût · {{days}} j",
@@ -17,10 +31,12 @@
     "run_time_label": "Temps d'exécution · {{days}} j",
     "run_time_hint": "Sur {{tasks}} exécutions",
     "tasks_label": "Exécutions · {{days}} j",
-    "tasks_hint": "{{failed}} en échec"
+    "tasks_hint": "{{failed}} en échec",
+    "cost_squad_hint": "{{name}} au global (membres délégués inclus)",
+    "cost_squad_share_hint": "Déclenché par Squad {{cost}} ({{pct}}%)"
   },
   "dim": {
-    "label": "Dimension",
+    "label": "Intervalle",
     "daily": "Quotidien",
     "weekly": "Hebdomadaire"
   },
@@ -50,8 +66,8 @@
     "kpi_failed_hint": "Sur {{total}} exécutions",
     "kpi_rate_label": "Taux d'échec · {{days}} j",
     "kpi_agents_label": "Agents touchés · {{days}} j",
-    "kpi_agents_hint": "Pire : {{name}} · {{count}}",
-    "tooltip_rate": "Taux d'erreur",
+    "kpi_agents_hint": "Le plus élevé : {{name}} ({{count}} en échec)",
+    "tooltip_rate": "Taux d'échec",
     "class": {
       "auth": "Authentification",
       "rate_limit": "Limite de débit",
@@ -66,8 +82,8 @@
     "mix_title": "Répartition des échecs · {{failed}}",
     "mix_label": "Répartition des échecs",
     "codes_label": "Codes d'erreur",
-    "by_agent": "Principaux fautifs",
-    "sort_label": "Classer les fautifs par",
+    "by_agent": "Erreurs par agent",
+    "sort_label": "Classer les agents par",
     "sort_failed": "Échecs",
     "sort_rate": "Taux",
     "header_agent": "Agent",
@@ -80,7 +96,8 @@
     "show_reasons": "Afficher les codes d'erreur",
     "hide_reasons": "Masquer les codes d'erreur",
     "show_all": "Afficher les {{count}}",
-    "show_less": "Afficher le top {{count}}"
+    "show_less": "Afficher le top {{count}}",
+    "by_squad": "Erreurs par squad"
   },
   "leaderboard": {
     "title": "Classement",
@@ -101,7 +118,16 @@
     "usage_totals_pending": "Les totaux de consommation sont encore en cours de traitement",
     "show_all": "Tout afficher",
     "show_less": "Afficher le top {{count}}",
-    "no_data": "Aucune activité d'agent sur cette fenêtre."
+    "no_data": "Aucune activité d'agent sur cette fenêtre.",
+    "group_label": "Grouper le classement par",
+    "group_agent": "Agents",
+    "group_squad": "Squads",
+    "header_squad": "Squad",
+    "squad_caption": "{{count}} squads",
+    "squad_members_title": "Répartition des membres de {{name}}",
+    "squad_members_count": "{{count}} membres impliqués",
+    "deleted_squads": "Squads supprimés",
+    "toggle_squad_members": "Afficher ou masquer les membres de {{name}}"
   },
   "empty": {
     "title": "Aucune consommation pour l'instant",

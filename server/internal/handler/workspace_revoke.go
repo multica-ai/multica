@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -43,7 +44,23 @@ import (
 // the requester (the admin doing the kick); for LeaveWorkspace it's the leaver
 // themselves.
 func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID, memberID, archivedBy pgtype.UUID) (revocationResult, error) {
+	return h.revokeMember(ctx, workspaceID, userID, memberID, archivedBy, nil, "")
+}
+
+// revokeAndDemoteToGuest is revokeAndRemoveMember for a member who becomes a
+// guest (MUL-9420): the same revocation, since a guest runs no agents, holds
+// no seat and sees only its projects, but the member row stays, with the
+// guest role and exactly guestProjects as its projects. fromRole is the role
+// the demotion was decided on: if the member no longer has it when the
+// transaction locks the row, nothing changes and errMemberRoleChanged is
+// returned.
+func (h *Handler) revokeAndDemoteToGuest(ctx context.Context, workspaceID, userID, memberID, archivedBy pgtype.UUID, guestProjects []pgtype.UUID, fromRole string) (revocationResult, error) {
+	return h.revokeMember(ctx, workspaceID, userID, memberID, archivedBy, guestProjects, fromRole)
+}
+
+func (h *Handler) revokeMember(ctx context.Context, workspaceID, userID, memberID, archivedBy pgtype.UUID, guestProjects []pgtype.UUID, fromRole string) (revocationResult, error) {
 	var empty revocationResult
+	demote := guestProjects != nil
 
 	tx, err := h.TxStarter.Begin(ctx)
 	if err != nil {
@@ -64,6 +81,20 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		UserID:      userID,
 	}); err != nil {
 		return empty, err
+	}
+
+	// Removing or demoting an owner must leave another one, counted under the
+	// owner row locks so a concurrent change to another owner is seen.
+	if err := lockOtherOwner(ctx, qtx, workspaceID, memberID); err != nil {
+		return empty, err
+	}
+
+	// A demotion re-checks the role under the row lock: a concurrent role
+	// change that committed first wins, and this one is refused.
+	if demote {
+		if _, err := lockMemberRole(ctx, qtx, memberID, fromRole); err != nil {
+			return empty, err
+		}
 	}
 
 	if _, err := qtx.LockRuntimeShareMemberRemoval(ctx, db.LockRuntimeShareMemberRemovalParams{
@@ -115,6 +146,13 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 			AgentIds:   archivedAgentIDs,
 		})
 		if err != nil {
+			return empty, err
+		}
+		cancelledIDs := make([]pgtype.UUID, 0, len(result.CancelledTasks))
+		for _, task := range result.CancelledTasks {
+			cancelledIDs = append(cancelledIDs, task.ID)
+		}
+		if err = qtx.WithdrawChatTaskSupplementsByTasks(ctx, cancelledIDs); err != nil {
 			return empty, err
 		}
 		if err = service.SettleTerminalTaskState(ctx, qtx, result.CancelledTasks...); err != nil {
@@ -218,6 +256,25 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		return empty, err
 	}
 
+	// autopilot_collaborator holds write grants, FK-free like the templates
+	// above. A grant left behind would hand a re-invited user their old write
+	// access back without anyone granting it.
+	if err := qtx.DeleteAutopilotCollaboratorsByMember(ctx, db.DeleteAutopilotCollaboratorsByMemberParams{
+		WorkspaceID: workspaceID,
+		UserID:      userID,
+	}); err != nil {
+		return empty, err
+	}
+
+	// App requests waiting on the member would otherwise let a later OAuth
+	// connect, or a stale tab, resume an agent in a workspace they left.
+	cancelledAppRequests, err := qtx.CancelPendingAppActionRequestsForApprover(ctx, db.CancelPendingAppActionRequestsForApproverParams{
+		WorkspaceID: workspaceID, ApproverUserID: userID,
+	})
+	if err != nil {
+		return empty, err
+	}
+
 	// Member row deletion lives inside the same tx so a successful revoke is
 	// never followed by a failed member-delete (which would leave the user
 	// still a member with a dead runtime), and a failed revoke never leaves
@@ -257,12 +314,55 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		result.ReadyChats = append(result.ReadyChats, readyChats...)
 	}
 
-	if err := qtx.DeleteMember(ctx, memberID); err != nil {
+	// No FK cascade (repo rule): a departing member leaves every private
+	// project in the workspace and stops watching every project. A new guest
+	// keeps its guest projects and the private projects hidden from the
+	// operator (guestProjectsToKeep).
+	if demote {
+		keep, err := guestProjectsToKeep(ctx, qtx, workspaceID, archivedBy, guestProjects)
+		if err != nil {
+			return empty, err
+		}
+		if _, err := qtx.RemoveUserFromProjectsExcept(ctx, db.RemoveUserFromProjectsExceptParams{
+			WorkspaceID: workspaceID, UserID: userID, KeepProjectIds: keep,
+		}); err != nil {
+			return empty, err
+		}
+		if _, err := qtx.AddUserToProjects(ctx, db.AddUserToProjectsParams{
+			WorkspaceID: workspaceID, UserID: userID, ProjectIds: guestProjects, AddedBy: archivedBy,
+		}); err != nil {
+			return empty, err
+		}
+	} else if err := qtx.DeleteProjectMembersByUser(ctx, db.DeleteProjectMembersByUserParams{
+		WorkspaceID: workspaceID, UserID: userID,
+	}); err != nil {
+		return empty, err
+	}
+	if err := qtx.DeleteProjectSubscribersByUser(ctx, db.DeleteProjectSubscribersByUserParams{
+		WorkspaceID: workspaceID, UserID: userID,
+	}); err != nil {
+		return empty, err
+	}
+	if demote {
+		if _, err := qtx.UpdateMemberRole(ctx, db.UpdateMemberRoleParams{ID: memberID, Role: projectaccess.RoleGuest}); err != nil {
+			return empty, err
+		}
+		// The new guest no longer sees most of what its local search copy
+		// holds; make that copy rebuild.
+		if err := markSearchAccessChanged(ctx, qtx, workspaceID, userID); err != nil {
+			return empty, err
+		}
+	} else if err := qtx.DeleteMember(ctx, memberID); err != nil {
 		return empty, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return empty, err
+	}
+	// After commit, like publishRevocation: admins are told about what is
+	// still waiting only once the cancellations are final.
+	if h.ConnectedApps != nil {
+		h.ConnectedApps.RequestsCancelled(ctx, cancelledAppRequests...)
 	}
 
 	return result, nil

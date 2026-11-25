@@ -1,7 +1,8 @@
-import { CircleDot, Command, Gauge, Globe, History, Layers, ListPlus, PanelLeft, Pin, Terminal, Users, Workflow, type IconComponent } from "@multica/ui/icons";
+import { AlarmClock, BellOff, CircleDot, CodeXml, Command, Flag, Folder, FolderKanban, Gauge, Globe, History, Inbox, Layers, ListChecks, ListPlus, Lock, MessageSquarePlus, Mic, Palette, PanelLeft, Pin, Quote, Server, Sparkles, Target, Terminal, Users, WeChat, Workflow, type IconComponent } from "@multica/ui/icons";
 import type { SupportedLocale } from "@multica/core/i18n";
 import type { WorkspacePaths } from "@multica/core/paths";
 import type { ReleaseStamp } from "@multica/core/whats-new";
+import { ANNOTATIONS_HERO, CHAT_STEERING_HERO, CHAT_WAKEUP_HERO, ENVIRONMENTS_HERO, INBOX_TABS_HERO, INBOX_TRIAGE_HERO, ISSUE_RELATIONS_HERO, PROJECT_FOLDERS_HERO, PROJECT_OVERVIEW_HERO, QUICK_SWITCH_HERO, SNOOZE_HERO, THEMES_HERO, VOICE_HERO, WEIXIN_HERO, type WhatsNewHero } from "./heroes";
 
 export interface HighlightCopy {
   title: string;
@@ -18,23 +19,1108 @@ export interface WhatsNewHighlight {
   /** Stable within its release; used as the React key and in tests. */
   id: string;
   icon: IconComponent;
-  /** English is required; a missing locale falls back to it. */
+  /** English is required; production entries in WHATS_NEW_RELEASES must cover every SupportedLocale. */
   copy: { en: HighlightCopy } & Partial<Record<SupportedLocale, HighlightCopy>>;
   action?: HighlightAction;
+  /** Puts the highlight in the What's new deck; highlights without one stay in the panel. */
+  hero?: WhatsNewHero;
 }
 
 export interface WhatsNewRelease extends ReleaseStamp {
   highlights: WhatsNewHighlight[];
 }
 
+/** The first release dealt as a corner deck; see WHATS_NEW_RELEASES. */
+export const WHATS_NEW_DECK_SINCE = "0.9.0";
+
 /**
  * In-app highlights per release, newest first. Not the changelog: only
- * user-visible changes worth discovering, 0–3 per release, with copy that
+ * user-visible changes worth discovering, with copy that
  * says how to use the feature. Fix-only releases get no entry, so they are
  * never marked as new in the panel. Versions and dates must
  * match the changelog entry the highlights come from.
+ *
+ * From WHATS_NEW_DECK_SINCE on, every entry needs at least one highlight with
+ * hero art: only those reach the corner deck, and an entry without one would
+ * reach users only through the Help menu.
  */
-export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
+export type CompleteWhatsNewRelease = Omit<WhatsNewRelease, "highlights"> & {
+  highlights: (Omit<WhatsNewHighlight, "copy"> & {
+    copy: Record<SupportedLocale, HighlightCopy>;
+  })[];
+};
+
+export const WHATS_NEW_RELEASES: CompleteWhatsNewRelease[] = [
+  {
+    version: "0.13.0",
+    date: "2026-11-25",
+    highlights: [
+      {
+        id: "issue-relations",
+        icon: Flag,
+        hero: ISSUE_RELATIONS_HERO,
+        copy: {
+          en: {
+            title: "Let an issue wait for others",
+            body: "In an issue's menu, choose Relations → Wait for another task, or add one under Relations in its sidebar. When those issues end, an agent assignee starts on its own and a person is notified.",
+          },
+          "zh-Hans": {
+            title: "让任务等其他任务完成再开始",
+            body: "在任务菜单中选择「关系 → 等待其他任务」，或在侧栏的「关系」里添加。这些任务结束后，负责的智能体会自动开始，负责的成员会收到通知。",
+          },
+          "zh-Hant": {
+            title: "讓任務等其他任務完成再開始",
+            body: "在任務選單中選擇「關係 → 等待其他任務」，或在側欄的「關係」裡新增。這些任務結束後，負責的 AI 代理會自動開始，負責的成員會收到通知。",
+          },
+          ja: {
+            title: "ほかのタスクが終わるまで待たせる",
+            body: "タスクのメニューで「関係 → 他のタスクを待つ」を選ぶか、サイドバーの「関係」から追加します。待っているタスクが終わると、担当のエージェントが自動で開始し、担当者が人なら通知が届きます。",
+          },
+          ko: {
+            title: "다른 태스크가 끝날 때까지 기다리게 하기",
+            body: "태스크 메뉴에서 '관계 → 다른 작업 기다리기'를 고르거나 사이드바의 '관계'에서 추가하세요. 기다리던 태스크가 끝나면 담당 에이전트가 자동으로 시작하고, 담당자가 사람이면 알림을 받습니다.",
+          },
+          fr: {
+            title: "Faites attendre une tâche",
+            body: "Dans le menu d'une tâche, choisissez Relations → Attendre une autre tâche, ou ajoutez-en une sous Relations dans sa barre latérale. Quand ces tâches se terminent, l'agent assigné démarre tout seul et une personne assignée est notifiée.",
+          },
+          es: {
+            title: "Haz que una tarea espere a otras",
+            body: "En el menú de una tarea, elige Relaciones → Esperar a otra tarea, o añade una en Relaciones de su barra lateral. Cuando esas tareas terminan, el agente asignado empieza solo y, si es una persona, recibe un aviso.",
+          },
+          ru: {
+            title: "Задача может ждать другие",
+            body: "В меню задачи выберите «Связи → Ждать другую задачу» или добавьте связь в разделе «Связи» на боковой панели. Когда эти задачи завершатся, назначенный агент начнёт работу сам, а назначенный человек получит уведомление.",
+          },
+        },
+      },
+      {
+        id: "squad-direct-handoff",
+        icon: Users,
+        action: { kind: "route", to: (p) => p.squads() },
+        copy: {
+          en: {
+            title: "Let squad members hand off directly",
+            body: "If you manage a squad, open it and set Collaboration to Members hand off directly. Members then pass the issue to each other, and the leader steps in only when a limit is reached or a run fails.",
+          },
+          "zh-Hans": {
+            title: "让小队成员直接交接",
+            body: "如果你管理一个小队，打开它，把「协作方式」设为「成员直接交接」。成员之间会直接传递任务，只有达到上限或运行失败时才交回队长。",
+          },
+          "zh-Hant": {
+            title: "讓小隊成員直接交接",
+            body: "如果你管理一個小隊，打開它，把「協作方式」設為「成員直接交接」。成員之間會直接傳遞任務，只有達到上限或執行失敗時才交回隊長。",
+          },
+          ja: {
+            title: "スクワッドのメンバー同士で直接引き継ぐ",
+            body: "スクワッドを管理している場合は、スクワッドを開いて「連携方法」を「メンバーが直接引き継ぐ」にします。メンバー同士でタスクを受け渡し、上限に達したときや実行が失敗したときだけリーダーが引き取ります。",
+          },
+          ko: {
+            title: "스쿼드 멤버끼리 바로 인계하기",
+            body: "스쿼드를 관리한다면 스쿼드를 열고 '협업 방식'을 '멤버가 직접 인계'로 바꾸세요. 멤버끼리 태스크를 넘기고, 한도에 도달하거나 실행이 실패할 때만 리더가 이어받습니다.",
+          },
+          fr: {
+            title: "Laissez les membres d'un squad se passer la main",
+            body: "Si vous gérez un squad, ouvrez-le et réglez Collaboration sur Les membres se passent la main. Les membres se transmettent alors la tâche, et le chef n'intervient que si une limite est atteinte ou qu'une exécution échoue.",
+          },
+          es: {
+            title: "Deja que los miembros del squad se pasen el trabajo",
+            body: "Si gestionas un squad, ábrelo y pon Colaboración en Los miembros se pasan el trabajo. Así los miembros se pasan la tarea entre ellos, y el líder solo interviene si se alcanza un límite o falla una ejecución.",
+          },
+          ru: {
+            title: "Участники команды передают работу напрямую",
+            body: "Если вы управляете командой, откройте её и в разделе «Совместная работа» выберите «Участники передают напрямую». Участники будут передавать задачу друг другу, а лидер подключится, только если достигнут лимит или запуск завершился ошибкой.",
+          },
+        },
+      },
+      {
+        id: "chat-wakeup-timing",
+        icon: AlarmClock,
+        action: { kind: "route", to: (p) => p.chat() },
+        copy: {
+          en: {
+            title: "Change when a wakeup checks back",
+            body: "In a chat, open Wakeups from the strip above the message box or the alarm clock in the header, then click the clock beside a wakeup to change its timing.",
+          },
+          "zh-Hans": {
+            title: "修改唤醒的时间",
+            body: "在聊天中，点输入框上方的提示条或页头的闹钟打开「唤醒」，再点某条唤醒旁的时钟即可修改时间。",
+          },
+          "zh-Hant": {
+            title: "修改喚醒的時間",
+            body: "在聊天中，點輸入框上方的提示列或頁首的鬧鐘開啟「喚醒」，再點某則喚醒旁的時鐘即可修改時間。",
+          },
+          ja: {
+            title: "ウェイクアップの時間を変更",
+            body: "チャットで入力欄の上のバーかヘッダーの目覚まし時計から「ウェイクアップ」を開き、ウェイクアップの横にある時計をクリックすると時間を変更できます。",
+          },
+          ko: {
+            title: "웨이크업 시간 바꾸기",
+            body: "채팅에서 입력창 위 막대나 헤더의 알람 시계로 '웨이크업'을 연 다음, 웨이크업 옆의 시계를 눌러 시간을 바꾸세요.",
+          },
+          fr: {
+            title: "Changez l'horaire d'un réveil",
+            body: "Dans une discussion, ouvrez Réveils depuis le bandeau au-dessus de la zone de saisie ou le réveil dans l'en-tête, puis cliquez sur l'horloge à côté d'un réveil pour modifier son horaire.",
+          },
+          es: {
+            title: "Cambia cuándo vuelve un recordatorio",
+            body: "En un chat, abre Recordatorios desde la barra sobre el cuadro de texto o el despertador del encabezado, y haz clic en el reloj junto a un recordatorio para cambiar su horario.",
+          },
+          ru: {
+            title: "Меняйте время напоминания",
+            body: "В чате откройте «Напоминания» с полосы над полем ввода или по значку будильника в заголовке, затем нажмите на часы рядом с напоминанием, чтобы изменить время.",
+          },
+        },
+      },
+    ],
+  },
+  {
+    version: "0.12.2",
+    date: "2026-11-24",
+    highlights: [
+      {
+        id: "quick-switch-agents",
+        icon: Users,
+        hero: QUICK_SWITCH_HERO,
+        copy: {
+          en: {
+            title: "Pick your usual agent in one keystroke",
+            body: "When you create an issue with an agent, your three most-used agents and squads sit next to Created by. Click one or press Alt/Option+1–3 to switch, or click the arrow beside them to search them all.",
+          },
+          "zh-Hans": {
+            title: "一键切换常用智能体",
+            body: "通过智能体创建任务时，「创建者」旁会列出你最常用的三个智能体或小队。点击或按 Alt/Option+1–3 即可切换，点旁边的箭头可以搜索全部。",
+          },
+          "zh-Hant": {
+            title: "一鍵切換常用 AI 代理",
+            body: "透過 AI 代理建立任務時，「建立者」旁會列出你最常用的三個 AI 代理或小隊。點選或按 Alt/Option+1–3 即可切換，點旁邊的箭頭可以搜尋全部。",
+          },
+          ja: {
+            title: "よく使うエージェントをワンキーで選ぶ",
+            body: "エージェントでタスクを作成するとき、「作成者」の横によく使うエージェントやスクワッドが 3 つ並びます。クリックするか Alt/Option+1–3 で切り替え、横の矢印からすべてを検索できます。",
+          },
+          ko: {
+            title: "자주 쓰는 에이전트를 키 하나로 고르기",
+            body: "에이전트로 태스크를 만들 때 '생성자' 옆에 자주 쓰는 에이전트와 스쿼드 3개가 표시됩니다. 클릭하거나 Alt/Option+1–3으로 전환하고, 옆의 화살표를 누르면 전체를 검색할 수 있습니다.",
+          },
+          fr: {
+            title: "Choisissez votre agent habituel d'une touche",
+            body: "Quand vous créez une tâche avec un agent, vos trois agents et squads les plus utilisés s'affichent à côté de Créé par. Cliquez sur l'un d'eux ou appuyez sur Alt/Option+1–3 pour changer, ou ouvrez la flèche à côté pour les chercher tous.",
+          },
+          es: {
+            title: "Elige tu agente habitual con una tecla",
+            body: "Al crear una tarea con un agente, tus tres agentes y squads más usados aparecen junto a Creado por. Haz clic en uno o pulsa Alt/Option+1–3 para cambiar, o abre la flecha de al lado para buscar entre todos.",
+          },
+          ru: {
+            title: "Выбирайте привычного агента одной клавишей",
+            body: "При создании задачи с агентом рядом с «Создано» появляются три агента и команды, которых вы выбираете чаще всего. Нажмите на нужного или Alt/Option+1–3, а стрелка рядом открывает поиск по всем.",
+          },
+        },
+      },
+      {
+        id: "squad-handoff-notifications",
+        icon: BellOff,
+        action: { kind: "route", to: (p) => `${p.settings()}?tab=notifications` },
+        copy: {
+          en: {
+            title: "Keep squad handoffs out of your Inbox",
+            body: "In Settings → Notifications, turn off Include squad handoffs under Comments to stop the comments a squad's leader and agents pass work with. @mentions of you and runs that need attention still arrive.",
+          },
+          "zh-Hans": {
+            title: "让小队内部交接不进收件箱",
+            body: "在「设置 → 通知」的「评论」下关闭「包含小队内部交接」，小队队长和成员之间派活、回报的评论就不再通知你。@你的评论和需要关注的运行照常通知。",
+          },
+          "zh-Hant": {
+            title: "讓小隊內部交接不進收件箱",
+            body: "在「設定 → 通知」的「評論」下關閉「包含小隊內部交接」，小隊隊長和成員之間指派工作、回報的評論就不再通知你。@ 提及你的評論和需要關注的執行照常通知。",
+          },
+          ja: {
+            title: "スクワッド内の引き継ぎをインボックスに入れない",
+            body: "「設定 → 通知」の「コメント」で「スクワッド内の引き継ぎを含める」をオフにすると、スクワッドのリーダーとエージェントが作業を受け渡すコメントは通知されなくなります。自分への @メンションや確認が必要な実行は引き続き届きます。",
+          },
+          ko: {
+            title: "스쿼드 내부 인계는 인박스에서 빼기",
+            body: "'설정 → 알림'의 '댓글'에서 '스쿼드 내부 인계 포함'을 끄면 스쿼드 리더와 에이전트가 작업을 주고받는 댓글은 알림이 오지 않습니다. 나를 @멘션한 댓글과 확인이 필요한 실행은 계속 알림이 옵니다.",
+          },
+          fr: {
+            title: "Gardez les passations de squad hors de la boîte de réception",
+            body: "Dans Paramètres → Notifications, désactivez Inclure les passations de squad sous Commentaires pour ne plus recevoir les commentaires par lesquels le chef et les agents d'un squad se transmettent le travail. Les @mentions et les exécutions qui demandent votre attention arrivent toujours.",
+          },
+          es: {
+            title: "Deja los traspasos del squad fuera de la bandeja de entrada",
+            body: "En Ajustes → Notificaciones, desactiva Incluir traspasos del squad en Comentarios para dejar de recibir los comentarios con los que el líder y los agentes de un squad se pasan el trabajo. Las @menciones y las ejecuciones que requieren atención te siguen llegando.",
+          },
+          ru: {
+            title: "Передачи внутри команды — не во «Входящие»",
+            body: "В «Настройки → Уведомления» в разделе «Комментарии» отключите «Включать передачи внутри команды», и комментарии, которыми лидер и агенты команды передают друг другу работу, перестанут приходить. @упоминания и запуски, требующие внимания, по-прежнему приходят.",
+          },
+        },
+      },
+      {
+        id: "squad-usage",
+        icon: Gauge,
+        action: { kind: "route", to: (p) => p.usage() },
+        copy: {
+          en: {
+            title: "See usage by squad",
+            body: "On Analytics, pick a squad in the Attribution filter to scope every chart to it, or group the leaderboard and errors by squad. Expand a squad to see what each member spent.",
+          },
+          "zh-Hans": {
+            title: "按小队查看用量",
+            body: "在「统计」页的「归属」筛选里选一个小队，所有图表就只看它；也可以把排行榜和错误按小队分组。展开小队能看到每个成员的消耗。",
+          },
+          "zh-Hant": {
+            title: "按小隊查看用量",
+            body: "在「統計」頁的「歸屬」篩選裡選一個小隊，所有圖表就只看它；也可以把排行榜和錯誤按小隊分組。展開小隊能看到每個成員的消耗。",
+          },
+          ja: {
+            title: "スクワッド別に使用量を確認",
+            body: "「分析」ページの「帰属」フィルターでスクワッドを選ぶと、すべてのグラフがそのスクワッドに絞られます。ランキングとエラーもスクワッド別にまとめられ、スクワッドを展開するとメンバーごとの消費がわかります。",
+          },
+          ko: {
+            title: "스쿼드별 사용량 보기",
+            body: "'분석' 페이지의 '귀속' 필터에서 스쿼드를 고르면 모든 차트가 그 스쿼드 기준으로 바뀝니다. 순위와 오류도 스쿼드별로 묶을 수 있고, 스쿼드를 펼치면 멤버별 사용량을 볼 수 있습니다.",
+          },
+          fr: {
+            title: "Consultez l'utilisation par squad",
+            body: "Dans Statistiques, choisissez un squad dans le filtre Attribution pour limiter tous les graphiques à ce squad, ou regroupez le classement et les erreurs par squad. Dépliez un squad pour voir la part de chaque membre.",
+          },
+          es: {
+            title: "Consulta el uso por squad",
+            body: "En Analítica, elige un squad en el filtro Atribución para que todos los gráficos muestren solo ese squad, o agrupa la clasificación y los errores por squad. Despliega un squad para ver lo que gastó cada miembro.",
+          },
+          ru: {
+            title: "Расход по командам",
+            body: "В разделе «Аналитика» выберите команду в фильтре «Принадлежность», чтобы все графики показывали только её, или сгруппируйте рейтинг и ошибки по командам. Разверните команду, чтобы увидеть расход каждого участника.",
+          },
+        },
+      },
+    ],
+  },
+  {
+    version: "0.12.1",
+    date: "2026-11-24",
+    highlights: [
+      {
+        id: "inbox-triage",
+        icon: Inbox,
+        hero: INBOX_TRIAGE_HERO,
+        action: { kind: "route", to: (p) => p.inbox() },
+        copy: {
+          en: {
+            title: "Triage the Inbox from the keyboard",
+            body: "On the Inbox page, press J and K to move to the next or previous notification without archiving, and U to mark the open one unread. Right-click a notification in the Work panel's Inbox to mark it unread, archive, or delete it.",
+          },
+          "zh-Hans": {
+            title: "用键盘处理收件箱",
+            body: "在收件箱页面按 J、K 切换到下一条或上一条通知，不会归档；按 U 把当前通知标为未读。在「工作」面板的收件箱里右键一条通知，可以标为未读、归档或删除。",
+          },
+          "zh-Hant": {
+            title: "用鍵盤處理收件箱",
+            body: "在收件箱頁面按 J、K 切換到下一則或上一則通知，不會歸檔；按 U 把目前的通知標為未讀。在「工作」面板的收件箱裡右鍵一則通知，可以標為未讀、歸檔或刪除。",
+          },
+          ja: {
+            title: "キーボードでインボックスを整理",
+            body: "インボックスページでは J と K でアーカイブせずに次や前の通知へ移動し、U で開いている通知を未読にできます。「作業」パネルのインボックスで通知を右クリックすると、未読にする、アーカイブ、削除を選べます。",
+          },
+          ko: {
+            title: "키보드로 인박스 정리하기",
+            body: "인박스 페이지에서 J와 K로 보관하지 않고 다음·이전 알림으로 이동하고, U로 열린 알림을 읽지 않음으로 표시합니다. '작업' 패널의 인박스에서 알림을 우클릭하면 읽지 않음으로 표시, 보관, 삭제할 수 있습니다.",
+          },
+          fr: {
+            title: "Triez la boîte de réception au clavier",
+            body: "Sur la page Boîte de réception, appuyez sur J et K pour passer à la notification suivante ou précédente sans archiver, et sur U pour marquer celle qui est ouverte comme non lue. Faites un clic droit sur une notification dans la boîte de réception du panneau Travail pour la marquer comme non lue, l'archiver ou la supprimer.",
+          },
+          es: {
+            title: "Gestiona la bandeja de entrada con el teclado",
+            body: "En la página de la bandeja de entrada, pulsa J y K para pasar a la notificación siguiente o anterior sin archivar, y U para marcar como no leída la que tienes abierta. Haz clic derecho en una notificación de la bandeja de entrada del panel Trabajo para marcarla como no leída, archivarla o eliminarla.",
+          },
+          ru: {
+            title: "Разбирайте «Входящие» с клавиатуры",
+            body: "На странице «Входящие» нажимайте J и K, чтобы перейти к следующему или предыдущему уведомлению без архивации, и U, чтобы отметить открытое уведомление непрочитанным. Щёлкните правой кнопкой по уведомлению во «Входящих» на панели «Работа», чтобы отметить его непрочитанным, архивировать или удалить.",
+          },
+        },
+      },
+    ],
+  },
+  {
+    version: "0.12.0",
+    date: "2026-11-23",
+    highlights: [
+      {
+        id: "inbox-tabs",
+        icon: Inbox,
+        hero: INBOX_TABS_HERO,
+        action: { kind: "route", to: (p) => p.inbox() },
+        copy: {
+          en: {
+            title: "Handle every notification on the Inbox page",
+            body: "Click a notification in the Work panel's Inbox and it opens on the Inbox page, with its actions in one bar. Switch between the Inbox, Snoozed, and Archived tabs at the top of the section; press E to archive and H to snooze.",
+          },
+          "zh-Hans": {
+            title: "在收件箱页面处理所有通知",
+            body: "在「工作」面板的收件箱里点一条通知，它会在收件箱页面打开，相关操作都在同一个操作栏里。分区顶部可切换「收件箱」「已延后」「已归档」三个页签；按 E 归档，按 H 延后。",
+          },
+          "zh-Hant": {
+            title: "在收件箱頁面處理所有通知",
+            body: "在「工作」面板的收件箱裡點一則通知，它會在收件箱頁面開啟，相關操作都在同一個操作列裡。分區頂部可切換「收件箱」「已延後」「已歸檔」三個頁籤；按 E 歸檔，按 H 延後。",
+          },
+          ja: {
+            title: "すべての通知をインボックスページで処理",
+            body: "「作業」パネルのインボックスで通知をクリックすると、インボックスページで開き、操作は 1 本のバーにまとまっています。セクション上部で「インボックス」「スヌーズ中」「アーカイブ済み」のタブを切り替えられ、E でアーカイブ、H でスヌーズします。",
+          },
+          ko: {
+            title: "모든 알림을 인박스 페이지에서 처리하기",
+            body: "'작업' 패널의 인박스에서 알림을 클릭하면 인박스 페이지에서 열리고, 관련 작업은 막대 하나에 모여 있습니다. 섹션 위쪽에서 '인박스', '미뤄둔 항목', '보관됨' 탭을 전환할 수 있으며, E로 보관하고 H로 미룹니다.",
+          },
+          fr: {
+            title: "Traitez toutes les notifications sur la page Boîte de réception",
+            body: "Cliquez sur une notification dans la boîte de réception du panneau Travail : elle s'ouvre sur la page Boîte de réception, avec ses actions réunies dans une seule barre. En haut de la section, passez d'un onglet à l'autre entre Boîte de réception, Reportés et Archivées ; appuyez sur E pour archiver et sur H pour reporter.",
+          },
+          es: {
+            title: "Gestiona todas las notificaciones en la página de la bandeja de entrada",
+            body: "Haz clic en una notificación de la bandeja de entrada del panel Trabajo y se abrirá en la página de la bandeja de entrada, con sus acciones en una sola barra. Arriba de la sección, cambia entre las pestañas Bandeja de entrada, Pospuestos y Archivado; pulsa E para archivar y H para posponer.",
+          },
+          ru: {
+            title: "Все уведомления — на странице «Входящие»",
+            body: "Нажмите на уведомление во «Входящих» на панели «Работа» — оно откроется на странице «Входящие», а все действия собраны в одной панели. Вверху раздела переключайтесь между вкладками «Входящие», «Отложенные» и «Архив»; E архивирует, H откладывает.",
+          },
+        },
+      },
+      {
+        id: "project-overview",
+        icon: Target,
+        hero: PROJECT_OVERVIEW_HERO,
+        action: { kind: "route", to: (p) => p.projects() },
+        copy: {
+          en: {
+            title: "See how a project is going",
+            body: "Open a project: the Overview tab shows its description at full width, next to progress, a weekly trend, and the finish date the recent pace points to. The Activity tab lists what changed. Cancelled issues don't count toward progress.",
+          },
+          "zh-Hans": {
+            title: "随时了解项目进展",
+            body: "打开一个项目，「概览」页签会整宽显示项目说明，旁边是进度、每周趋势，以及按近期速度预计的完成日期。「活动」页签列出项目的变化。已取消的任务不计入进度。",
+          },
+          "zh-Hant": {
+            title: "隨時掌握專案進展",
+            body: "打開一個專案，「概覽」頁籤會整寬顯示專案說明，旁邊是進度、每週趨勢，以及按近期速度預計的完成日期。「活動」頁籤列出專案的變化。已取消的任務不計入進度。",
+          },
+          ja: {
+            title: "プロジェクトの進み具合をひと目で",
+            body: "プロジェクトを開くと、「概要」タブに説明が全幅で表示され、横に進捗、週ごとの推移、最近のペースから見込まれる完了日が並びます。「アクティビティ」タブでは変更履歴を確認できます。キャンセルしたタスクは進捗に含まれません。",
+          },
+          ko: {
+            title: "프로젝트 진행 상황 한눈에 보기",
+            body: "프로젝트를 열면 '개요' 탭에 설명이 전체 너비로 표시되고, 옆에 진행률, 주간 추이, 최근 속도로 예상한 완료일이 함께 보입니다. '활동' 탭에서는 변경 내역을 볼 수 있습니다. 취소된 태스크는 진행률에 포함되지 않습니다.",
+          },
+          fr: {
+            title: "Suivez l'avancement d'un projet",
+            body: "Ouvrez un projet : l'onglet Aperçu affiche sa description en pleine largeur, à côté de l'avancement, de la tendance hebdomadaire et de la date de fin prévue au rythme récent. L'onglet Activité liste les changements. Les tâches annulées ne comptent pas dans l'avancement.",
+          },
+          es: {
+            title: "Consulta cómo va un proyecto",
+            body: "Abre un proyecto: la pestaña Resumen muestra su descripción a todo el ancho, junto al progreso, la tendencia semanal y la fecha de fin que marca el ritmo reciente. La pestaña Actividad muestra los cambios. Las tareas canceladas no cuentan en el progreso.",
+          },
+          ru: {
+            title: "Следите за ходом проекта",
+            body: "Откройте проект: на вкладке «Обзор» описание занимает всю ширину, а рядом — прогресс, недельный тренд и дата завершения в текущем темпе. Вкладка «Активность» показывает изменения. Отменённые задачи в прогресс не входят.",
+          },
+        },
+      },
+      {
+        id: "editor-live-blocks",
+        icon: CodeXml,
+        copy: {
+          en: {
+            title: "Preview HTML and Mermaid while you edit",
+            body: "In an issue description you're editing, start a code block with ```html or ```mermaid and the preview renders in place. Click its title bar to add or rename the title, and press Enter on the selected block to edit the source.",
+          },
+          "zh-Hans": {
+            title: "编辑时直接预览 HTML 和 Mermaid",
+            body: "编辑任务描述时，用 ```html 或 ```mermaid 开始一个代码块，预览会直接显示在原位。点标题栏可添加或重命名标题；选中代码块后按 Enter 即可编辑源码。",
+          },
+          "zh-Hant": {
+            title: "編輯時直接預覽 HTML 和 Mermaid",
+            body: "編輯任務描述時，用 ```html 或 ```mermaid 開始一個程式碼區塊，預覽會直接顯示在原位。點標題列可新增或重新命名標題；選取區塊後按 Enter 即可編輯原始碼。",
+          },
+          ja: {
+            title: "編集中に HTML と Mermaid をプレビュー",
+            body: "タスクの説明を編集中に ```html または ```mermaid でコードブロックを始めると、その場でプレビューが表示されます。タイトルバーをクリックしてタイトルを追加・変更でき、ブロックを選択して Enter を押すとソースを編集できます。",
+          },
+          ko: {
+            title: "편집하면서 HTML과 Mermaid 미리 보기",
+            body: "태스크 설명을 편집할 때 ```html 또는 ```mermaid로 코드 블록을 시작하면 그 자리에서 미리 보기가 표시됩니다. 제목 막대를 클릭해 제목을 추가하거나 바꿀 수 있고, 블록을 선택한 뒤 Enter를 누르면 소스를 편집합니다.",
+          },
+          fr: {
+            title: "Prévisualisez HTML et Mermaid pendant l'édition",
+            body: "Dans la description d'une tâche en cours d'édition, commencez un bloc de code par ```html ou ```mermaid : l'aperçu s'affiche sur place. Cliquez sur sa barre de titre pour ajouter ou renommer le titre, et appuyez sur Entrée sur le bloc sélectionné pour modifier la source.",
+          },
+          es: {
+            title: "Previsualiza HTML y Mermaid mientras editas",
+            body: "Al editar la descripción de una tarea, empieza un bloque de código con ```html o ```mermaid y la vista previa aparece en su sitio. Haz clic en la barra de título para añadir o cambiar el título, y pulsa Intro sobre el bloque seleccionado para editar el código.",
+          },
+          ru: {
+            title: "Предпросмотр HTML и Mermaid прямо при редактировании",
+            body: "При редактировании описания задачи начните блок кода с ```html или ```mermaid — предпросмотр появится на месте. Нажмите на строку заголовка, чтобы добавить или переименовать заголовок, а Enter на выделенном блоке откроет исходный код.",
+          },
+        },
+      },
+    ],
+  },
+  {
+    version: "0.11.0",
+    date: "2026-11-18",
+    highlights: [
+      {
+        id: "chat-wakeups",
+        icon: AlarmClock,
+        hero: CHAT_WAKEUP_HERO,
+        action: { kind: "route", to: (p) => p.chat() },
+        copy: {
+          en: {
+            title: "Agents come back to report in chat",
+            body: "Ask an agent in chat to tell you when an issue is done or a PR merges, and it reports back in the same conversation; it also follows up when it asks someone else for you. The strip above the message box shows what it's waiting for.",
+          },
+          "zh-Hans": {
+            title: "智能体会回到聊天里汇报",
+            body: "在聊天中让智能体在任务完成或 PR 合并时告诉你，它会回到同一个对话里汇报；替你找人要答复或评审时，它也会自动跟进。输入框上方的提示条会显示它正在等什么。",
+          },
+          "zh-Hant": {
+            title: "AI 代理會回到聊天裡匯報",
+            body: "在聊天中請 AI 代理在任務完成或 PR 合併時告訴你，它會回到同一個對話裡匯報；替你找人要答覆或審查時，它也會自動跟進。輸入框上方的提示列會顯示它正在等什麼。",
+          },
+          ja: {
+            title: "エージェントがチャットに戻って報告",
+            body: "チャットでエージェントに、タスクの完了や PR のマージを知らせるよう頼むと、同じ会話に戻って報告します。あなたの代わりに誰かへ回答やレビューを頼んだときも自動でフォローし、待っている内容は入力欄の上のバーに表示されます。",
+          },
+          ko: {
+            title: "에이전트가 채팅으로 돌아와 알려 주기",
+            body: "채팅에서 에이전트에게 태스크가 끝나거나 PR이 머지되면 알려 달라고 하면, 같은 대화로 돌아와 알려 줍니다. 나 대신 다른 사람에게 답변이나 리뷰를 요청할 때도 알아서 후속 확인하며, 기다리는 내용은 입력창 위 막대에 표시됩니다.",
+          },
+          fr: {
+            title: "Les agents reviennent faire le point dans la discussion",
+            body: "Dans une discussion, demandez à un agent de vous prévenir quand une tâche est terminée ou qu'une PR est fusionnée : il revient faire le point dans la même conversation. Il assure aussi le suivi quand il sollicite quelqu'un pour vous, et le bandeau au-dessus de la zone de saisie montre ce qu'il attend.",
+          },
+          es: {
+            title: "Los agentes vuelven al chat para informar",
+            body: "Pide a un agente en el chat que te avise cuando una tarea termine o se fusione un PR, y volverá a informar en la misma conversación; también hace seguimiento cuando consulta a otra persona por ti. La barra sobre el cuadro de texto muestra qué está esperando.",
+          },
+          ru: {
+            title: "Агенты возвращаются с отчётом в чат",
+            body: "Попросите агента в чате сообщить, когда задача завершится или PR будет слит, — он отчитается в том же диалоге и напомнит о себе, если ждёт ответа от коллеги. Полоса над полем ввода показывает, чего именно он ждёт.",
+          },
+        },
+      },
+      {
+        id: "chat-steering",
+        icon: MessageSquarePlus,
+        hero: CHAT_STEERING_HERO,
+        action: { kind: "route", to: (p) => p.chat() },
+        copy: {
+          en: {
+            title: "Add to a reply while it's running",
+            body: "While an agent replies in chat, keep typing and send: when the box says Add to current run, your message joins that reply without stopping it. With an attachment, among other cases, it says Start after this run and waits for the next turn.",
+          },
+          "zh-Hans": {
+            title: "在回复进行中补充要求",
+            body: "智能体在聊天中回复时，可以继续输入并发送：输入框显示「插话到当前运行」时，消息会并入这次回复，不会打断它。带附件等情况会显示「本轮结束后开始」，消息会等到下一轮再处理。",
+          },
+          "zh-Hant": {
+            title: "在回覆進行中補充要求",
+            body: "AI 代理在聊天中回覆時，可以繼續輸入並送出：輸入框顯示「插話到當前執行」時，訊息會併入這次回覆，不會打斷它。帶附件等情況會顯示「本輪結束後開始」，訊息會等到下一輪再處理。",
+          },
+          ja: {
+            title: "返信の途中で指示を追加",
+            body: "チャットでエージェントが返信している間も入力して送信でき、入力欄に「現在の実行に追加」と出ていれば、返信を止めずにその返信に加わります。添付ファイルがある場合などは「この実行の後に開始」と表示され、次のターンで処理されます。",
+          },
+          ko: {
+            title: "답변 도중에 지시 추가하기",
+            body: "에이전트가 채팅에서 답하는 동안에도 입력해 보낼 수 있으며, 입력창에 '현재 실행에 추가'가 보이면 답변을 멈추지 않고 그 답변에 반영됩니다. 첨부 파일이 있을 때처럼 '이번 실행 후 시작'이 보이면 다음 차례에 처리됩니다.",
+          },
+          fr: {
+            title: "Complétez une réponse en cours",
+            body: "Pendant qu'un agent répond dans une discussion, continuez à écrire et envoyez : si la zone de saisie indique Ajouter à l'exécution en cours, votre message rejoint cette réponse sans l'interrompre. Avec une pièce jointe, entre autres, elle indique Démarrer après cette exécution et le message attend le tour suivant.",
+          },
+          es: {
+            title: "Añade indicaciones mientras responde",
+            body: "Mientras un agente responde en el chat, sigue escribiendo y envía: si el cuadro indica Añadir a la ejecución actual, tu mensaje se suma sin detenerla. Con un archivo adjunto, entre otros casos, indica Empezar tras esta ejecución y espera al siguiente turno.",
+          },
+          ru: {
+            title: "Дополняйте ответ прямо во время выполнения",
+            body: "Пока агент отвечает в чате, просто напишите и отправьте сообщение: если поле показывает «Добавить в текущий запуск», оно вольётся в ответ без его остановки. С вложением или в иных случаях оно начнётся в следующем запуске.",
+          },
+        },
+      },
+      {
+        id: "weixin-channel",
+        icon: WeChat,
+        hero: WEIXIN_HERO,
+        action: { kind: "route", to: (p) => p.agents() },
+        copy: {
+          en: {
+            title: "Chat with an agent from WeChat",
+            body: "Open an agent you own, choose Add messaging channel under Messaging, pick WeChat, and scan the QR code with your own WeChat. Then message the bot privately in WeChat; replies and files come back there.",
+          },
+          "zh-Hans": {
+            title: "在微信里和智能体对话",
+            body: "打开你拥有的智能体，在「消息渠道」中选择「添加消息渠道」→「微信」，用你自己的微信扫码。之后在微信里私聊这个机器人，回复和文件都会发回微信。",
+          },
+          "zh-Hant": {
+            title: "在微信裡和 AI 代理對話",
+            body: "打開你擁有的 AI 代理，在「訊息渠道」中選擇「新增訊息管道」→「微信」，用你自己的微信掃碼。之後在微信裡私訊這個機器人，回覆和檔案都會傳回微信。",
+          },
+          ja: {
+            title: "WeChat からエージェントと話す",
+            body: "自分のエージェントを開き、「メッセージング」で「メッセージチャネルを追加」→「WeChat」を選び、自分の WeChat で QR コードをスキャンします。あとは WeChat でボットに個別メッセージを送ると、返信やファイルも WeChat に届きます。",
+          },
+          ko: {
+            title: "WeChat에서 에이전트와 대화하기",
+            body: "내가 소유한 에이전트를 열고 '메신저'에서 '메시지 채널 추가' → 'WeChat'을 고른 뒤, 내 WeChat으로 QR 코드를 스캔하세요. 이후 WeChat에서 봇에게 개인 메시지를 보내면 답변과 파일도 WeChat으로 돌아옵니다.",
+          },
+          fr: {
+            title: "Discutez avec un agent depuis WeChat",
+            body: "Ouvrez un agent dont vous êtes propriétaire, choisissez Ajouter un canal de messagerie sous Messagerie, puis WeChat, et scannez le code QR avec votre propre compte WeChat. Écrivez ensuite au bot en privé dans WeChat : les réponses et les fichiers y reviennent.",
+          },
+          es: {
+            title: "Chatea con un agente desde WeChat",
+            body: "Abre un agente propio, elige Añadir canal de mensajería en Mensajería, selecciona WeChat y escanea el código QR con tu cuenta. Luego escribe al bot en privado; las respuestas y archivos volverán allí.",
+          },
+          ru: {
+            title: "Общайтесь с агентом через WeChat",
+            body: "Откройте своего агента, выберите «Добавить канал сообщений» в разделе «Сообщения», укажите WeChat и отсканируйте QR-код. После этого пишите боту в личные сообщения — ответы и файлы придут туда же.",
+          },
+        },
+      },
+      {
+        id: "project-folders",
+        icon: Folder,
+        hero: PROJECT_FOLDERS_HERO,
+        action: { kind: "route", to: (p) => p.projects() },
+        copy: {
+          en: {
+            title: "Organize projects into folders",
+            body: "In the sidebar, click + next to Projects and choose New folder, then drag projects into it or pick Move to folder from a project's menu. On Projects, open Display settings to group by folder.",
+          },
+          "zh-Hans": {
+            title: "用文件夹整理项目",
+            body: "在侧栏「项目」旁点「+」→「新建文件夹」，再把项目拖进去，或在项目菜单里选「移动到文件夹」。在「项目」页打开「显示设置」，还可以按文件夹分组。",
+          },
+          "zh-Hant": {
+            title: "用資料夾整理專案",
+            body: "在側欄「專案」旁點「+」→「新增資料夾」，再把專案拖進去，或在專案選單裡選「移動到資料夾」。在「專案」頁打開「顯示設定」，還可以按資料夾分組。",
+          },
+          ja: {
+            title: "フォルダでプロジェクトを整理",
+            body: "サイドバーの「プロジェクト」横の「+」から「新しいフォルダ」を選び、プロジェクトをドラッグして入れるか、プロジェクトのメニューで「フォルダに移動」を選びます。「プロジェクト」ページの「表示設定」では、フォルダごとにグループ化もできます。",
+          },
+          ko: {
+            title: "폴더로 프로젝트 정리하기",
+            body: "사이드바의 '프로젝트' 옆 '+'에서 '새 폴더'를 고른 뒤, 프로젝트를 끌어다 넣거나 프로젝트 메뉴에서 '폴더로 이동'을 고르세요. '프로젝트' 페이지의 '표시 설정'에서 폴더별로 그룹화할 수도 있습니다.",
+          },
+          fr: {
+            title: "Rangez vos projets dans des dossiers",
+            body: "Dans la barre latérale, cliquez sur + à côté de Projets puis sur Nouveau dossier, et glissez-y des projets ou choisissez Déplacer vers un dossier dans le menu d'un projet. Dans Projets, ouvrez Affichage pour regrouper par dossier.",
+          },
+          es: {
+            title: "Organiza proyectos en carpetas",
+            body: "En la barra lateral, haz clic en + junto a Proyectos y elige Nueva carpeta; luego arrastra proyectos o usa Mover a carpeta desde su menú. En Proyectos, abre Mostrar para agrupar por carpeta.",
+          },
+          ru: {
+            title: "Организуйте проекты в папки",
+            body: "На боковой панели нажмите + рядом с «Проекты» и выберите «Новая папка», затем перетащите туда проекты или выберите «Переместить в папку» в меню проекта. В настройках отображения можно сгруппировать проекты по папкам.",
+          },
+        },
+      },
+    ],
+  },
+  {
+    version: "0.10.0",
+    date: "2026-11-16",
+    highlights: [
+      {
+        id: "inbox-snooze",
+        icon: AlarmClock,
+        hero: SNOOZE_HERO,
+        action: { kind: "route", to: (p) => p.inbox() },
+        copy: {
+          en: {
+            title: "Snooze a notification until later",
+            body: "Your Inbox now sits at the top of the Work panel. Hover a notification and click the clock, or press H on an open issue, to pick when it comes back; until then it waits in the Snoozed view.",
+          },
+          "zh-Hans": {
+            title: "把通知延后处理",
+            body: "收件箱现在位于「工作」面板顶部。悬停一条通知并点闹钟按钮，或在打开的任务上按 H，选好它回来的时间；在那之前，它会待在「已延后」视图里。",
+          },
+          "zh-Hant": {
+            title: "把通知延後處理",
+            body: "收件箱現在位於「工作」面板頂部。將游標移到一則通知上並點鬧鐘按鈕，或在開啟的任務上按 H，選好它回來的時間；在那之前，它會待在「已延後」檢視裡。",
+          },
+          ja: {
+            title: "通知をあとで処理する",
+            body: "インボックスは「作業」パネルの一番上に移りました。通知にカーソルを合わせて時計ボタンを押すか、開いているタスクで H を押して、戻ってくる時間を選びます。それまでは「スヌーズ中」ビューで待機します。",
+          },
+          ko: {
+            title: "알림을 나중으로 미루기",
+            body: "인박스가 이제 '작업' 패널 맨 위에 있습니다. 알림에 마우스를 올려 시계 버튼을 누르거나 열린 태스크에서 H를 눌러 다시 알릴 시간을 고르세요. 그때까지는 '미뤄둔 항목' 보기에 있습니다.",
+          },
+          fr: {
+            title: "Reportez une notification à plus tard",
+            body: "La boîte de réception est désormais en haut du panneau Travail. Survolez une notification et cliquez sur l'horloge, ou appuyez sur H dans une tâche ouverte, pour choisir quand elle revient ; d'ici là, elle attend dans la vue Reportés.",
+          },
+          es: {
+            title: "Pospón notificaciones para más tarde",
+            body: "Tu bandeja de entrada ahora aparece arriba del panel Trabajo. Pasa el cursor por una notificación y haz clic en el reloj, o pulsa H en una tarea abierta, para elegir cuándo volverá.",
+          },
+          ru: {
+            title: "Откладывайте уведомления на потом",
+            body: "Входящие теперь находятся в верхней части панели «Работа». Наведите на уведомление и нажмите на часы — или нажмите H в открытой задаче — чтобы выбрать время возврата; до тех пор оно ждёт в разделе «Отложенные».",
+          },
+        },
+      },
+      {
+        id: "desktop-voice-input",
+        icon: Mic,
+        hero: VOICE_HERO,
+        copy: {
+          en: {
+            title: "Dictate instead of typing on desktop",
+            body: "In the desktop app, turn on Settings → Voice input, then tap the mic in chat, a comment, or a reply to dictate, or hold it while you talk. The first time, pick a speech model to download; audio is transcribed on your computer.",
+          },
+          "zh-Hans": {
+            title: "在桌面端用语音代替打字",
+            body: "在桌面端打开「设置 → 语音输入」，然后在聊天、评论或回复的输入框里点麦克风开始听写，也可以按住麦克风说话。第一次使用时选一个语音模型下载，录音只在你的电脑上转写。",
+          },
+          "zh-Hant": {
+            title: "在桌面端用語音代替打字",
+            body: "在桌面端打開「設定 → 語音輸入」，然後在聊天、留言或回覆的輸入框裡點麥克風開始聽寫，也可以按住麥克風說話。第一次使用時選一個語音模型下載，錄音只在你的電腦上轉寫。",
+          },
+          ja: {
+            title: "デスクトップでは入力の代わりに話す",
+            body: "デスクトップアプリで「設定 → 音声入力」をオンにし、チャット、コメント、返信の入力欄でマイクを押すと音声入力が始まります。押し続けながら話すこともできます。初回は音声モデルを選んでダウンロードし、音声はこのコンピューター上で文字に変換されます。",
+          },
+          ko: {
+            title: "데스크톱에서 타이핑 대신 말하기",
+            body: "데스크톱 앱에서 '설정 → 음성 입력'을 켠 뒤 채팅, 댓글, 답글 입력창의 마이크를 눌러 받아쓰거나 누른 채로 말하세요. 처음에는 음성 모델을 골라 내려받으며, 음성은 이 컴퓨터에서 텍스트로 바뀝니다.",
+          },
+          fr: {
+            title: "Dictez au lieu de taper dans l'app de bureau",
+            body: "Dans l'app de bureau, activez Paramètres → Saisie vocale, puis cliquez sur le micro d'une discussion, d'un commentaire ou d'une réponse pour dicter, ou maintenez-le pendant que vous parlez. La première fois, choisissez un modèle vocal à télécharger ; l'audio est transcrit sur votre ordinateur.",
+          },
+          es: {
+            title: "Dicta en lugar de escribir en escritorio",
+            body: "En la app de escritorio, activa Ajustes → Entrada de voz y toca el micrófono en el chat o en un comentario para dictar, o mantenlo pulsado mientras hablas. La primera vez elige un modelo de voz; la transcripción ocurre en tu equipo.",
+          },
+          ru: {
+            title: "Диктуйте вместо набора текста в десктопе",
+            body: "В десктопном приложении включите «Настройки → Голосовой ввод» и нажмите на микрофон в чате или комментарии (или удерживайте его во время речи). При первом запуске выберите модель — распознавание выполняется локально.",
+          },
+        },
+      },
+      {
+        id: "project-board-archive",
+        icon: FolderKanban,
+        action: { kind: "route", to: (p) => p.projects() },
+        copy: {
+          en: {
+            title: "Plan projects on a board, and archive finished ones",
+            body: "On Projects, open Display settings to switch to Board or group by status, priority, or lead, and search from the header. Archive a project from its menu to hide it, and restore it any time from Archived projects.",
+          },
+          "zh-Hans": {
+            title: "用看板管理项目，并归档已完成的项目",
+            body: "在「项目」页打开「显示设置」，可以切换到看板，或按状态、优先级、负责人分组，也可以在页头搜索。在项目菜单里选「归档」即可把它隐藏，之后随时可以在「已归档的项目」里恢复。",
+          },
+          "zh-Hant": {
+            title: "用看板管理專案，並歸檔已完成的專案",
+            body: "在「專案」頁打開「顯示設定」，可以切換到看板，或按狀態、優先順序、負責人分組，也可以在頁首搜尋。在專案選單裡選「歸檔」即可把它隱藏，之後隨時可以在「已歸檔的專案」裡還原。",
+          },
+          ja: {
+            title: "プロジェクトをボードで管理し、終わったものはアーカイブ",
+            body: "「プロジェクト」ページで「表示設定」を開くと、ボードに切り替えたり、ステータス、優先度、リードでグループ化したりでき、ヘッダーから検索もできます。プロジェクトのメニューから「アーカイブ」を選ぶと非表示になり、「アーカイブ済みのプロジェクト」からいつでも復元できます。",
+          },
+          ko: {
+            title: "보드로 프로젝트를 관리하고 끝난 프로젝트는 보관하기",
+            body: "'프로젝트' 페이지에서 '표시 설정'을 열어 보드로 바꾸거나 상태, 우선순위, 리드별로 그룹화하고, 헤더에서 검색할 수 있습니다. 프로젝트 메뉴에서 '보관'을 고르면 숨겨지고, '보관된 프로젝트'에서 언제든 복원할 수 있습니다.",
+          },
+          fr: {
+            title: "Organisez vos projets en tableau et archivez ceux qui sont terminés",
+            body: "Dans Projets, ouvrez Affichage pour passer en Tableau ou regrouper par statut, priorité ou responsable, et cherchez depuis l'en-tête. Archivez un projet depuis son menu pour le masquer, et restaurez-le à tout moment depuis Projets archivés.",
+          },
+          es: {
+            title: "Planifica proyectos en tablero y archiva los terminados",
+            body: "En Proyectos, abre Mostrar para cambiar a Tablero o agrupar por estado, prioridad o responsable, y busca desde la cabecera. Archiva un proyecto desde su menú para ocultarlo y restáuralo cuando quieras desde Proyectos archivados.",
+          },
+          ru: {
+            title: "Планируйте проекты на доске и архивируйте завершённые",
+            body: "В разделе «Проекты» переключитесь на доску или сгруппируйте по статусу, приоритету или руководителю. Завершённый проект можно скрыть через архив и в любой момент восстановить из архивных проектов.",
+          },
+        },
+      },
+      {
+        id: "quieter-others-issues",
+        icon: BellOff,
+        action: { kind: "route", to: (p) => `${p.settings()}?tab=notifications` },
+        copy: {
+          en: {
+            title: "Hear less from other people's issues",
+            body: "At the top of someone else's issue, click Unsubscribe & archive or press Shift+E to stop its updates in one step. Their issues now send only key updates; to get everything, set Other people's issues to All activity in Settings → Notifications.",
+          },
+          "zh-Hans": {
+            title: "少收一些别人任务的通知",
+            body: "在别人的任务顶部点「取消订阅并归档」，或按 Shift+E，一步停掉它的更新。别人的任务现在默认只通知关键更新；想收到全部，可在「设置 → 通知」把「别人的任务」改为「全部动态」。",
+          },
+          "zh-Hant": {
+            title: "少收一些別人任務的通知",
+            body: "在別人的任務頂部點「取消訂閱並歸檔」，或按 Shift+E，一步停掉它的更新。別人的任務現在預設只通知關鍵更新；想收到全部，可在「設定 → 通知」把「別人的任務」改為「全部動態」。",
+          },
+          ja: {
+            title: "他の人のタスクの通知を減らす",
+            body: "他の人のタスクの上部で「購読解除してアーカイブ」を押すか Shift+E を押すと、更新をまとめて止められます。他の人のタスクは重要な更新だけが届くようになりました。すべて受け取るには「設定 → 通知」で「他の人のタスク」を「すべてのアクティビティ」にします。",
+          },
+          ko: {
+            title: "다른 사람의 태스크 알림 줄이기",
+            body: "다른 사람의 태스크 상단에서 '구독 해제 후 보관'을 누르거나 Shift+E를 누르면 업데이트를 한 번에 끌 수 있습니다. 다른 사람의 태스크는 이제 주요 업데이트만 알립니다. 모두 받으려면 '설정 → 알림'에서 '다른 사람의 태스크'를 '모든 활동'으로 바꾸세요.",
+          },
+          fr: {
+            title: "Moins de bruit venant des tâches des autres",
+            body: "En haut de la tâche d'une autre personne, cliquez sur Se désabonner et archiver ou appuyez sur Maj+E pour couper ses mises à jour en une fois. Les tâches des autres n'envoient plus que les mises à jour clés ; pour tout recevoir, réglez Tâches des autres sur Toute l'activité dans Paramètres → Notifications.",
+          },
+          es: {
+            title: "Recibe menos ruido de tareas ajenas",
+            body: "En la parte superior de una tarea ajena, haz clic en Darse de baja y archivar o pulsa Shift+E para silenciarla en un paso. Ahora solo envían novedades clave; puedes cambiarlo en Ajustes → Notificaciones.",
+          },
+          ru: {
+            title: "Меньше шума от чужих задач",
+            body: "Вверху чужой задачи нажмите «Отписаться и архивировать» или Shift+E, чтобы отключить уведомления в один клик. По умолчанию приходят только ключевые обновления — режим меняется в «Настройки → Уведомления».",
+          },
+        },
+      },
+      {
+        id: "batch-edit",
+        icon: ListChecks,
+        action: { kind: "route", to: (p) => p.issues() },
+        copy: {
+          en: {
+            title: "Edit many issues at once",
+            body: "Select issues in a list, then use the bar at the bottom to change labels, project, or due date; More actions covers start date, parent, and custom properties. If some are skipped, click Select only these to fix and retry them.",
+          },
+          "zh-Hans": {
+            title: "一次修改多个任务",
+            body: "在列表里选中多个任务，用底部的操作栏修改标签、项目或截止日期；开始日期、父任务和自定义属性在「更多操作」里。有任务被跳过时，点「只选中这些」单独处理它们。",
+          },
+          "zh-Hant": {
+            title: "一次修改多個任務",
+            body: "在列表裡選取多個任務，用底部的操作列修改標籤、專案或截止日期；開始日期、父任務和自訂屬性在「更多操作」裡。有任務被略過時，點「只選取這些」單獨處理它們。",
+          },
+          ja: {
+            title: "複数のタスクをまとめて編集",
+            body: "リストでタスクを複数選び、下部のバーでラベル、プロジェクト、期限を変更します。開始日、親タスク、カスタムプロパティは「その他の操作」にあります。スキップされたタスクがあれば「この件だけを選択」で選び直して対応できます。",
+          },
+          ko: {
+            title: "여러 태스크를 한 번에 편집하기",
+            body: "목록에서 태스크를 여러 개 선택한 뒤 하단 바에서 라벨, 프로젝트, 마감일을 바꾸세요. 시작일, 상위 태스크, 사용자 지정 속성은 '더 보기'에 있습니다. 건너뛴 태스크가 있으면 '이 항목만 선택'으로 골라 따로 처리할 수 있습니다.",
+          },
+          fr: {
+            title: "Modifiez plusieurs tâches à la fois",
+            body: "Sélectionnez des tâches dans une liste, puis utilisez la barre du bas pour changer les étiquettes, le projet ou la date d'échéance ; Plus d'actions couvre la date de début, le parent et les propriétés personnalisées. Si certaines sont ignorées, cliquez sur Sélectionner seulement ces tâches pour les reprendre.",
+          },
+          es: {
+            title: "Edita varias tareas a la vez",
+            body: "Selecciona tareas en una lista y usa la barra inferior para cambiar etiquetas, proyecto o fecha límite; Más acciones incluye fecha de inicio, tarea padre y propiedades. Si alguna se omite, haz clic en Seleccionar solo estas.",
+          },
+          ru: {
+            title: "Редактируйте сразу несколько задач",
+            body: "Отметьте задачи в списке и измените метки, проект или срок на нижней панели; в меню «Ещё» доступны дата начала, родительская задача и свойства. Пропущенные задачи можно выделить одной кнопкой и повторить.",
+          },
+        },
+      },
+      {
+        id: "agent-made-themes",
+        icon: Sparkles,
+        action: { kind: "route", to: (p) => `${p.settings()}?tab=appearance` },
+        copy: {
+          en: {
+            title: "Have an agent make your theme",
+            body: "In a chat or an issue, ask any agent for a theme and describe the colors, background, or glass look you want. It builds and checks the theme and hands it to you; then switch to it in Settings → Appearance.",
+          },
+          "zh-Hans": {
+            title: "让智能体帮你做主题",
+            body: "在聊天或任务里请任意智能体做一个主题，说清想要的颜色、背景或玻璃效果。它会制作并检查好主题交给你，之后在「设置 → 外观」里切换即可。",
+          },
+          "zh-Hant": {
+            title: "讓 AI 代理幫你做主題",
+            body: "在聊天或任務裡請任一 AI 代理做一個主題，說清想要的顏色、背景或玻璃效果。它會製作並檢查好主題交給你，之後在「設定 → 外觀」裡切換即可。",
+          },
+          ja: {
+            title: "エージェントにテーマを作ってもらう",
+            body: "チャットやタスクで、好きなエージェントにテーマを頼み、色や背景、ガラス風の見た目など希望を伝えます。エージェントがテーマを作って確認し、渡してくれるので、「設定 → 外観」で切り替えます。",
+          },
+          ko: {
+            title: "에이전트에게 테마 만들기 맡기기",
+            body: "채팅이나 태스크에서 아무 에이전트에게 테마를 요청하고 원하는 색, 배경, 유리 효과를 설명하세요. 에이전트가 테마를 만들고 확인한 뒤 전달하면 '설정 → 모양'에서 바꿔 쓰면 됩니다.",
+          },
+          fr: {
+            title: "Faites créer votre thème par un agent",
+            body: "Dans une discussion ou une tâche, demandez un thème à n'importe quel agent en décrivant les couleurs, le fond ou l'effet verre souhaités. Il crée et vérifie le thème, puis vous le remet ; activez-le ensuite dans Paramètres → Apparence.",
+          },
+          es: {
+            title: "Pide a un agente que cree tu tema",
+            body: "En un chat o tarea, pide a cualquier agente un tema describiendo los colores, fondo o estilo que prefieras. El agente lo crea, lo valida y te lo entrega para activarlo en Ajustes → Apariencia.",
+          },
+          ru: {
+            title: "Попросите агента создать тему оформления",
+            body: "В чате или задаче опишите агенту нужные цвета, фон или стиль интерфейса. Он соберёт и проверит тему, после чего её можно включить в «Настройки → Внешний вид».",
+          },
+        },
+      },
+    ],
+  },
+  {
+    version: "0.9.0",
+    date: "2026-11-13",
+    highlights: [
+      {
+        id: "community-themes",
+        icon: Palette,
+        hero: THEMES_HERO,
+        action: { kind: "route", to: (p) => `${p.settings()}?tab=appearance` },
+        copy: {
+          en: {
+            title: "Install, import, or make a theme",
+            body: "In Settings → Appearance, click Manage next to Theme to browse and install community themes, or use Import theme for a .zip or folder. Switch themes any time from Theme in the account menu.",
+          },
+          "zh-Hans": {
+            title: "安装、导入或制作主题",
+            body: "在「设置 → 外观」里点「主题」旁的「管理」，浏览并安装社区主题；也可以用「导入主题」导入 .zip 文件或文件夹。之后随时在账户菜单的「主题」里切换。",
+          },
+          "zh-Hant": {
+            title: "安裝、匯入或製作主題",
+            body: "在「設定 → 外觀」裡點「主題」旁的「管理」，瀏覽並安裝社群主題；也可以用「匯入主題」匯入 .zip 檔案或資料夾。之後隨時在帳戶選單的「主題」裡切換。",
+          },
+          ja: {
+            title: "テーマをインストール、読み込み、作成",
+            body: "「設定 → 外観」で「テーマ」の横の「管理」を押すと、コミュニティのテーマを探してインストールできます。.zip やフォルダーは「テーマを読み込む」から追加できます。切り替えはアカウントメニューの「テーマ」からいつでもできます。",
+          },
+          ko: {
+            title: "테마 설치, 가져오기, 만들기",
+            body: "'설정 → 모양'에서 '테마' 옆의 '관리'를 누르면 커뮤니티 테마를 둘러보고 설치할 수 있습니다. .zip 파일이나 폴더는 '테마 가져오기'로 추가하세요. 테마는 계정 메뉴의 '테마'에서 언제든 바꿀 수 있습니다.",
+          },
+          fr: {
+            title: "Installez, importez ou créez un thème",
+            body: "Dans Paramètres → Apparence, cliquez sur Gérer à côté de Thème pour parcourir et installer des thèmes de la communauté, ou utilisez Importer un thème pour un .zip ou un dossier. Changez de thème à tout moment depuis Thème dans le menu du compte.",
+          },
+          es: {
+            title: "Instala, importa o crea un tema",
+            body: "En Ajustes → Apariencia, haz clic en Gestionar junto a Tema para instalar temas de la comunidad, o usa Importar tema para un archivo .zip o carpeta. Cambia de tema en cualquier momento desde el menú de cuenta.",
+          },
+          ru: {
+            title: "Устанавливайте и импортируйте темы",
+            body: "В «Настройки → Внешний вид» нажмите «Управление» рядом с темой, чтобы установить темы сообщества или импортировать .zip / папку. Переключать темы можно в любой момент из меню аккаунта.",
+          },
+        },
+      },
+      {
+        id: "environment-controls",
+        icon: Server,
+        hero: ENVIRONMENTS_HERO,
+        copy: {
+          en: {
+            title: "Run an issue's services from its sidebar",
+            body: "Open an issue and use Start an environment under Environments in its sidebar. Each service's menu can view its logs, restart, or stop it, and desktop apps can be brought forward with Switch to window.",
+          },
+          "zh-Hans": {
+            title: "在任务侧栏里管理服务",
+            body: "打开一个任务，在侧栏「环境」里点「启动环境」。每个服务的菜单里可以查看日志、重启或停止；桌面应用可以用「切到窗口」切到前台。",
+          },
+          "zh-Hant": {
+            title: "在任務側欄裡管理服務",
+            body: "打開一個任務，在側欄「環境」裡點「啟動環境」。每個服務的選單裡可以查看日誌、重新啟動或停止；桌面應用程式可以用「切到視窗」切到前景。",
+          },
+          ja: {
+            title: "タスクのサイドバーからサービスを操作",
+            body: "タスクを開き、サイドバーの「環境」で「環境を起動」を選びます。各サービスのメニューからログの表示、再起動、停止ができ、デスクトップアプリは「ウィンドウに切り替え」で前面に出せます。",
+          },
+          ko: {
+            title: "태스크 사이드바에서 서비스 관리",
+            body: "태스크를 열고 사이드바의 '환경'에서 '환경 시작'을 누르세요. 서비스마다 메뉴에서 로그 보기, 재시작, 중지를 할 수 있고, 데스크톱 앱은 '창으로 전환'으로 앞으로 가져올 수 있습니다.",
+          },
+          fr: {
+            title: "Pilotez les services d'une tâche depuis sa barre latérale",
+            body: "Ouvrez une tâche et choisissez Démarrer un environnement sous Environnements dans sa barre latérale. Le menu de chaque service permet de voir les journaux, de le redémarrer ou de l'arrêter, et Afficher la fenêtre met une app de bureau au premier plan.",
+          },
+          es: {
+            title: "Ejecuta los servicios de una tarea desde su barra lateral",
+            body: "Abre una tarea y usa Iniciar un entorno en Entornos. El menú de cada servicio permite ver registros, reiniciar o detenerlo, y en escritorio puedes traer ventanas al frente con Cambiar a ventana.",
+          },
+          ru: {
+            title: "Управляйте сервисами задачи с боковой панели",
+            body: "Откройте задачу и запустите окружение в разделе «Окружения». Из меню каждого сервиса можно открыть логи, перезапустить или остановить его, а на десктопе — перейти прямо в окно приложения.",
+          },
+        },
+      },
+      {
+        id: "chat-annotations",
+        icon: Quote,
+        hero: ANNOTATIONS_HERO,
+        action: { kind: "route", to: (p) => p.chat() },
+        copy: {
+          en: {
+            title: "Annotate an agent's chat reply",
+            body: "In Chat, select text in an agent's reply and add a note. Saved notes wait in the message box and are sent with your next message, with or without more text.",
+          },
+          "zh-Hans": {
+            title: "批注智能体的聊天回复",
+            body: "在「聊天」里选中智能体回复中的文字并添加批注。保存的批注会留在输入框里，随下一条消息一起发送，也可以不另写文字直接发送。",
+          },
+          "zh-Hant": {
+            title: "批註 AI 代理的聊天回覆",
+            body: "在「聊天」裡選取 AI 代理回覆中的文字並新增批註。儲存的批註會留在輸入框裡，隨下一則訊息一起送出，也可以不另寫文字直接送出。",
+          },
+          ja: {
+            title: "エージェントのチャット返信に注釈を付ける",
+            body: "「チャット」でエージェントの返信のテキストを選び、注釈を追加します。保存した注釈は入力欄に残り、次のメッセージと一緒に送られます。注釈だけを送ることもできます。",
+          },
+          ko: {
+            title: "에이전트 채팅 답변에 주석 달기",
+            body: "'채팅'에서 에이전트 답변의 텍스트를 선택하고 주석을 추가하세요. 저장한 주석은 입력창에 남아 다음 메시지와 함께 보내지며, 주석만 보낼 수도 있습니다.",
+          },
+          fr: {
+            title: "Annotez la réponse d'un agent dans une discussion",
+            body: "Dans Discussion, sélectionnez du texte dans la réponse d'un agent et ajoutez une note. Les notes enregistrées restent dans la zone de saisie et partent avec votre prochain message, avec ou sans texte en plus.",
+          },
+          es: {
+            title: "Anota la respuesta de un agente en el chat",
+            body: "En el chat, selecciona texto de una respuesta del agente y añade una nota. Las notas guardadas esperan en el cuadro de texto y se envían con tu siguiente mensaje.",
+          },
+          ru: {
+            title: "Оставляйте пометки к ответам агента",
+            body: "В чате выделите фрагмент ответа агента и добавьте заметку. Сохранённые заметки ждут в поле ввода и отправляются вместе со следующим сообщением.",
+          },
+        },
+      },
+    ],
+  },
+  {
+    version: "0.8.2",
+    date: "2026-11-10",
+    highlights: [
+      {
+        id: "appearance-themes",
+        icon: Palette,
+        action: { kind: "route", to: (p) => `${p.settings()}?tab=appearance` },
+        copy: {
+          en: {
+            title: "Pick a theme and fonts in Appearance",
+            body: "Go to Settings → Appearance to choose one of five built-in themes. You can also set fonts and sizes for the interface and for content, and adjust density and contrast. Your choices are saved on this device.",
+          },
+          "zh-Hans": {
+            title: "在「外观」里选择主题和字体",
+            body: "进入「设置 → 外观」，从 5 套内置主题中选一套。还可以分别设置界面文字和内容文字的字体与字号，并调整信息密度和对比度。这些选择保存在本设备上。",
+          },
+          "zh-Hant": {
+            title: "在「外觀」裡選擇主題和字型",
+            body: "進入「設定 → 外觀」，從 5 套內建主題中選一套。還可以分別設定介面文字和內容文字的字型與字級，並調整資訊密度和對比度。這些選擇儲存在本裝置上。",
+          },
+          ja: {
+            title: "「外観」でテーマとフォントを選ぶ",
+            body: "「設定 → 外観」で 5 つの組み込みテーマから選べます。インターフェースと本文のフォントや文字サイズ、表示密度やコントラストも調整できます。設定はこのデバイスに保存されます。",
+          },
+          ko: {
+            title: "'모양'에서 테마와 글꼴 고르기",
+            body: "'설정 → 모양'에서 기본 제공 테마 5가지 중 하나를 고르세요. 인터페이스와 본문의 글꼴과 글자 크기, 밀도와 대비도 조절할 수 있습니다. 설정은 이 기기에 저장됩니다.",
+          },
+          fr: {
+            title: "Choisissez un thème et des polices dans Apparence",
+            body: "Allez dans Paramètres → Apparence pour choisir l'un des cinq thèmes intégrés. Vous pouvez aussi régler les polices et tailles de l'interface et du contenu, ainsi que la densité et le contraste. Vos choix sont enregistrés sur cet appareil.",
+          },
+          es: {
+            title: "Elige tema y tipografía en Apariencia",
+            body: "Ve a Ajustes → Apariencia para elegir entre cinco temas integrados, configurar fuentes y tamaños de interfaz y contenido, y ajustar densidad y contraste en este dispositivo.",
+          },
+          ru: {
+            title: "Выбирайте тему и шрифты во «Внешнем виде»",
+            body: "Откройте «Настройки → Внешний вид», чтобы выбрать одну из пяти встроенных тем, настроить шрифты, размеры текста, плотность и контрастность для этого устройства.",
+          },
+        },
+      },
+      {
+        id: "private-projects",
+        icon: Lock,
+        action: { kind: "route", to: (p) => p.projects() },
+        copy: {
+          en: {
+            title: "Keep a project to its members",
+            body: "When you create a project, or later in its properties, set Access to Project members only and add the people who need it. Its issues, comments, and attachments are then visible only to them and to workspace owners and admins.",
+          },
+          "zh-Hans": {
+            title: "让项目只对成员可见",
+            body: "创建项目时，或之后在项目属性里，把「访问权限」设为「仅项目成员」，再添加需要的人。项目中的任务、评论和附件就只有他们以及工作区所有者和管理员能看到。",
+          },
+          "zh-Hant": {
+            title: "讓專案只對成員可見",
+            body: "建立專案時，或之後在專案屬性裡，把「存取權限」設為「僅專案成員」，再新增需要的人。專案中的任務、評論和附件就只有他們以及工作區所有者和管理員能看到。",
+          },
+          ja: {
+            title: "プロジェクトをメンバーだけに公開",
+            body: "プロジェクトを作るとき、またはあとからプロパティで「アクセス権」を「プロジェクトメンバーのみ」にし、必要な人を追加します。そのタスク、コメント、添付ファイルは、メンバーとワークスペースのオーナー・管理者だけが見られます。",
+          },
+          ko: {
+            title: "프로젝트를 멤버에게만 공개",
+            body: "프로젝트를 만들 때나 나중에 속성에서 '접근 권한'을 '프로젝트 멤버만'으로 정하고 필요한 사람을 추가하세요. 그 프로젝트의 태스크, 댓글, 첨부 파일은 멤버와 워크스페이스 소유자·관리자만 볼 수 있습니다.",
+          },
+          fr: {
+            title: "Réservez un projet à ses membres",
+            body: "À la création d'un projet, ou plus tard dans ses propriétés, réglez Accès sur Membres du projet uniquement et ajoutez les personnes concernées. Ses tâches, commentaires et pièces jointes ne sont alors visibles que par elles et par les propriétaires et admins de l'espace de travail.",
+          },
+          es: {
+            title: "Limita un proyecto a sus miembros",
+            body: "Al crear un proyecto o en sus propiedades, establece Acceso en Solo miembros del proyecto y añade a las personas necesarias. Sus tareas, comentarios y adjuntos solo serán visibles para ellos y los administradores.",
+          },
+          ru: {
+            title: "Ограничьте доступ к проекту его участниками",
+            body: "При создании проекта или в его свойствах выберите «Только участники проекта» и добавьте нужных людей. Задачи, комментарии и вложения увидят только они, а также владельцы и администраторы рабочего пространства.",
+          },
+        },
+      },
+      {
+        id: "issue-environments",
+        icon: Server,
+        copy: {
+          en: {
+            title: "See the services an issue started",
+            body: "Open an issue and check Environments in its sidebar for the services its agent runs started, with status, link, and time left. On macOS and Linux, agents can keep a service running with multica env start.",
+          },
+          "zh-Hans": {
+            title: "查看任务启动的服务",
+            body: "打开一个任务，在侧栏的「环境」里查看智能体运行时启动的服务，以及状态、链接和剩余时间。在 macOS 和 Linux 上，智能体可以用 multica env start 让服务持续运行。",
+          },
+          "zh-Hant": {
+            title: "查看任務啟動的服務",
+            body: "打開一個任務，在側欄的「環境」裡查看 AI 代理執行時啟動的服務，以及狀態、連結和剩餘時間。在 macOS 和 Linux 上，AI 代理可以用 multica env start 讓服務持續執行。",
+          },
+          ja: {
+            title: "タスクが起動したサービスを確認",
+            body: "タスクを開き、サイドバーの「環境」で、エージェントの実行が起動したサービスとその状態、リンク、残り時間を確認できます。macOS と Linux では、エージェントが multica env start でサービスを動かし続けられます。",
+          },
+          ko: {
+            title: "태스크가 시작한 서비스 보기",
+            body: "태스크를 열고 사이드바의 '환경'에서 에이전트 실행이 시작한 서비스와 상태, 링크, 남은 시간을 확인하세요. macOS와 Linux에서는 에이전트가 multica env start로 서비스를 계속 실행해 둘 수 있습니다.",
+          },
+          fr: {
+            title: "Voyez les services lancés par une tâche",
+            body: "Ouvrez une tâche et consultez Environnements dans sa barre latérale : services lancés par les exécutions de l'agent, avec leur état, leur lien et le temps restant. Sur macOS et Linux, les agents peuvent garder un service actif avec multica env start.",
+          },
+          es: {
+            title: "Consulta los servicios iniciados por una tarea",
+            body: "Abre una tarea y revisa Entornos en su barra lateral para ver los servicios que iniciaron sus agentes, con estado, enlace y tiempo restante. En macOS y Linux los agentes pueden mantener servicios con multica env start.",
+          },
+          ru: {
+            title: "Отслеживайте сервисы, запущенные задачей",
+            body: "Откройте задачу и проверьте раздел «Окружения» на боковой панели — там показаны сервисы, запущенные агентами, их статус, ссылка и оставшееся время работы.",
+          },
+        },
+      },
+    ],
+  },
   {
     version: "0.8.1",
     date: "2026-11-06",
@@ -68,6 +1154,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
             title: "Restaurez une ancienne version d'un skill",
             body: "Ouvrez un skill et allez dans Historique pour voir le contenu de chaque version enregistrée. Restaurez-en une : elle devient la version la plus récente pour les prochaines exécutions de vos agents.",
           },
+          es: {
+            title: "Restaura una versión anterior de una habilidad",
+            body: "Abre una habilidad y ve a Historial para inspeccionar cada versión guardada. Al restaurar una, pasa a ser la versión más reciente para las próximas ejecuciones.",
+          },
+          ru: {
+            title: "Восстанавливайте прошлые версии навыков",
+            body: "Откройте навык и перейдите в «Историю», чтобы посмотреть сохранённые версии. Восстановленная версия станет актуальной для следующих запусков агентов.",
+          },
         },
       },
       {
@@ -99,6 +1193,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
             title: "N'affichez que les tâches non lues",
             body: "Dans Vues, ajoutez l'étoile à la vue intégrée Non lu pour l'afficher dans la barre latérale. Vous pouvez aussi filtrer n'importe quelle vue par État de lecture → Non lu.",
           },
+          es: {
+            title: "Muestra solo tareas sin leer",
+            body: "En Vistas, marca con estrella la vista Sin leer para añadirla a la barra lateral. También puedes filtrar cualquier vista por Estado de lectura → Sin leer.",
+          },
+          ru: {
+            title: "Показывайте только непрочитанные задачи",
+            body: "В «Представлениях» добавьте встроенный вид «Непрочитанные» на боковую панель или отфильтруйте любой список по «Статус прочтения → Непрочитанные».",
+          },
         },
       },
       {
@@ -128,6 +1230,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
           fr: {
             title: "Épinglez vos espaces de travail principaux",
             body: "Ouvrez le sélecteur d'espaces de travail et cliquez sur l'épingle à côté d'un espace pour le garder en haut. Les indicateurs de non-lu restent visibles.",
+          },
+          es: {
+            title: "Fija tus espacios de trabajo principales",
+            body: "Abre el selector de espacios de trabajo y haz clic en el pin junto a un espacio para mantenerlo arriba. Los indicadores de no leídos siguen visibles.",
+          },
+          ru: {
+            title: "Закрепляйте основные рабочие пространства",
+            body: "Откройте переключатель рабочих пространств и нажмите значок булавки, чтобы держать нужные сверху. Индикаторы непрочитанных сохраняются.",
           },
         },
       },
@@ -165,6 +1275,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
             title: "Une nouvelle mise en page",
             body: "La barre de gauche bascule entre Travail, Équipe, Chat, Boîte et Auto. Repliez ou redimensionnez le panneau latéral voisin pour gagner de la place.",
           },
+          es: {
+            title: "Nuevo diseño del espacio de trabajo",
+            body: "La barra izquierda alterna entre Trabajo, Equipo, Chat, Bandeja de entrada y Autopilot. Contrae o redimensiona el panel lateral para ganar espacio.",
+          },
+          ru: {
+            title: "Новый макет рабочего пространства",
+            body: "Левая панель переключает разделы «Работа», «Команда», «Чат», «Входящие» и «Автопилот». Боковую панель рядом можно свернуть или изменить её ширину.",
+          },
         },
       },
       {
@@ -196,6 +1314,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
             title: "Des vues repensées",
             body: "Ajoutez des vues en favori, combinez ou excluez des filtres, et filtrez par statut d'agent ou « Moi et mes agents ».",
           },
+          es: {
+            title: "Vistas renovadas",
+            body: "Guarda vistas en favoritos, combina o excluye filtros y filtra por estado del agente o «Yo y mis agentes».",
+          },
+          ru: {
+            title: "Обновлённые представления",
+            body: "Добавляйте представления в избранное, комбинируйте или исключайте фильтры, а также фильтруйте по статусу агента или «Я и мои агенты».",
+          },
         },
       },
       {
@@ -226,6 +1352,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
           fr: {
             title: "Limitez les exécutions simultanées par runtime",
             body: "Ouvrez un runtime et fixez combien d'exécutions il traite à la fois. Les suivantes attendent dans la file.",
+          },
+          es: {
+            title: "Limita ejecuciones simultáneas por entorno de ejecución",
+            body: "Abre un entorno de ejecución y define cuántas ejecuciones procesa a la vez. Las adicionales esperan en la cola.",
+          },
+          ru: {
+            title: "Ограничивайте число одновременных запусков в среде выполнения",
+            body: "Откройте среду выполнения и задайте лимит параллельных запусков. Остальные запуски будут ожидать в очереди.",
           },
         },
       },
@@ -264,6 +1398,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
             title: "Une nouvelle barre de commandes",
             body: "Sélectionnez quelques tâches et ouvrez la barre de commandes pour les modifier en une fois. Elle cherche aussi dans tout l'espace de travail et transforme une phrase en nouvelle tâche pour un agent.",
           },
+          es: {
+            title: "Nueva barra de comandos",
+            body: "Selecciona varias tareas y abre la barra de comandos para editarlas juntas. También busca en el espacio de trabajo y convierte una frase en una tarea para un agente.",
+          },
+          ru: {
+            title: "Новая командная панель",
+            body: "Выделите несколько задач и измените их разом через командную панель. Она также ищет по рабочему пространству и превращает фразу в новую задачу для агента.",
+          },
         },
       },
       {
@@ -293,6 +1435,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
           fr: {
             title: "Jusqu'à 200 options par propriété",
             body: "Les propriétés à choix unique ou multiple acceptent jusqu'à 200 options, que l'on retrouve par texte ou en pinyin.",
+          },
+          es: {
+            title: "Hasta 200 opciones por propiedad",
+            body: "Las propiedades de selección única y múltiple admiten hasta 200 opciones con búsqueda por texto o pinyin.",
+          },
+          ru: {
+            title: "До 200 вариантов в свойствах",
+            body: "Свойства с одиночным и множественным выбором теперь поддерживают до 200 вариантов с поиском по тексту и пиньиню.",
           },
         },
       },
@@ -331,6 +1481,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
             title: "Exécutez des tâches sur Devin CLI",
             body: "Les agents peuvent tourner sur votre Devin CLI local, avec reprise de session, skills de projet et MCP.",
           },
+          es: {
+            title: "Ejecuta tareas en Devin CLI",
+            body: "Los agentes pueden ejecutarse en tu Devin CLI local con reanudación de sesión, habilidades del proyecto y MCP.",
+          },
+          ru: {
+            title: "Запускайте задачи через Devin CLI",
+            body: "Агенты могут работать через локальный Devin CLI с продолжением сессии, навыками проекта и MCP.",
+          },
         },
       },
       {
@@ -361,6 +1519,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
           fr: {
             title: "Multica en chinois traditionnel",
             body: "Changez la langue de l'application dans Paramètres → Préférences.",
+          },
+          es: {
+            title: "Multica en chino tradicional",
+            body: "Cambia el idioma de la aplicación en Ajustes → Preferencias.",
+          },
+          ru: {
+            title: "Multica на традиционном китайском",
+            body: "Переключить язык интерфейса можно в разделе «Настройки» → «Язык».",
           },
         },
       },
@@ -399,6 +1565,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
             title: "Tous les membres créent des workflows",
             body: "Chaque membre peut créer et dupliquer des workflows. Les créateurs et les admins peuvent les modifier et configurer les transferts.",
           },
+          es: {
+            title: "Cualquier miembro puede crear flujos de trabajo",
+            body: "Todos los miembros pueden crear y duplicar flujos de trabajo. Los creadores y administradores pueden editarlos y configurar traspasos.",
+          },
+          ru: {
+            title: "Рабочие процессы доступны каждому участнику",
+            body: "Любой участник может создавать и дублировать рабочие процессы. Создатели и администраторы могут редактировать их и настраивать передачу задач.",
+          },
         },
       },
       {
@@ -429,6 +1603,14 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
           fr: {
             title: "Partagez un runtime avec des membres choisis",
             body: "Choisissez précisément qui peut utiliser un runtime, pas seulement tout le monde ou vous seul. Restreindre l'accès affiche d'abord les agents concernés.",
+          },
+          es: {
+            title: "Comparte un entorno de ejecución con miembros concretos",
+            body: "Elige exactamente quién puede usar un entorno de ejecución, no solo todos o únicamente tú. Al restringir el acceso, primero verás los agentes afectados.",
+          },
+          ru: {
+            title: "Делитесь средой выполнения с выбранными участниками",
+            body: "Указывайте конкретных пользователей с доступом к среде выполнения, а не только «все» или «только я». При сужении доступа сначала показываются затронутые агенты.",
           },
         },
       },

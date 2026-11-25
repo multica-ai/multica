@@ -7,8 +7,10 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { Check, ChevronRight, Copy, Terminal } from "@multica/ui/icons";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
+import { Check, ChevronRight, Terminal } from "@multica/ui/icons";
+import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -62,7 +64,7 @@ function WorkspaceConnectDialog({ wsId, currentUserId, onClose }: {
   const slug = useWorkspaceSlug();
   const qc = useQueryClient();
   const navigation = useNavigation();
-  const shouldReduceMotion = useReducedMotion() ?? false;
+  const shouldReduceMotion = useReducedMotion();
   const newRuntimeIdRef = useRef<string | null>(null);
   const initialDaemonIds = useRef<Set<string> | null>(null);
   const pendingInitialRefresh = useRef(false);
@@ -143,7 +145,7 @@ function WorkspaceConnectDialog({ wsId, currentUserId, onClose }: {
 
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="flex max-h-[85vh] flex-col gap-0 p-0 sm:max-w-lg">
+      <DialogContent className="flex max-h-[85%] flex-col gap-0 p-0 sm:max-w-lg">
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
             key={step}
@@ -219,11 +221,7 @@ function CopyButton({ text, ariaLabel }: { text: string; ariaLabel: string }) {
         aria-label={ariaLabel}
         className="shrink-0 rounded-xs p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        {copied ? (
-          <Check className="h-3.5 w-3.5 text-success" aria-hidden />
-        ) : (
-          <Copy className="h-3.5 w-3.5" aria-hidden />
-        )}
+        <CopyCheckIcon copied={copied} />
       </button>
     </TooltipHint>
   );

@@ -71,6 +71,9 @@ type IssueStatusData struct {
 // observer's — and goes into the per-turn prompt as is.
 type ProjectWorkflowData struct {
 	Brief string `json:"brief"`
+	// StatusMap marks a status-map brief (MUL-9913); an older server sends
+	// the per-step command brief and leaves it false.
+	StatusMap bool `json:"status_map,omitempty"`
 }
 
 // Task represents a claimed task from the server.
@@ -115,9 +118,11 @@ type Task struct {
 	ProjectID                     string                 `json:"project_id,omitempty"`                       // active project for this task, when present
 	ProjectTitle                  string                 `json:"project_title,omitempty"`                    // human-readable project title for context injection
 	ProjectDescription            string                 `json:"project_description,omitempty"`              // durable project-level context injected into the brief
+	ProjectArchived               bool                   `json:"project_archived,omitempty"`                 // project is archived; the brief says so
 	ProjectResources              []ProjectResourceData  `json:"project_resources,omitempty"`                // project-scoped resources to expose to the agent
 	IsLeaderTask                  bool                   `json:"is_leader_task,omitempty"`                   // true when executing in the squad-leader coordinator role
 	LeaderRoleResolved            bool                   `json:"leader_role_resolved,omitempty"`             // server capability: IsLeaderTask/SquadID authoritatively answer "is this a leader run". Absent on servers predating it — those before #4951 never sent is_leader_task at all, later ones send it without this guarantee — so taskIsSquadLeader falls back to the briefing marker for both (MUL-5811)
+	DocsEnabled                   bool                   `json:"docs_enabled,omitempty"`                     // the server's docs_v1 flag. Absent on servers predating it, which reads as false: the brief leaves out the `multica doc` and mention://doc lines
 	PriorSessionID                string                 `json:"prior_session_id,omitempty"`                 // Claude session ID from a previous task on this issue
 	PriorWorkDir                  string                 `json:"prior_work_dir,omitempty"`                   // work_dir from a previous task on this issue
 	PriorSessionResumeUnavailable bool                   `json:"prior_session_resume_unavailable,omitempty"` // MUL-5305: server signals a more recent Codex session was withheld (rollout missing) and PriorSessionID (if any) is an older fallback; the run must disclose the continuity gap even if that older session resumes cleanly. Absent/false on old servers.
@@ -144,6 +149,8 @@ type Task struct {
 	ChatType                      string                 `json:"chat_type,omitempty"`                        // "group" when the channel conversation is a shared room, "p2p" for a 1:1 with the bot. Empty for a web chat or an old server; the per-turn prompt then reports unknown rather than guessing 1:1
 	ChatInThread                  bool                   `json:"chat_in_thread,omitempty"`                   // true when the latest @mention was a thread reply; selects which read command the prompt tells the agent to start with
 	ChatMessage                   string                 `json:"chat_message,omitempty"`                     // user message content for chat tasks
+	ChatSkillMessage              *string                `json:"chat_skill_message,omitempty"`               // verified member-authored input only; excludes system kickoff and agent messages
+	ChatResumeMessage             *string                `json:"chat_resume_message,omitempty"`              // input excluding guidance already in PriorSessionID
 	ChatMessageAttachments        []ChatAttachmentMeta   `json:"chat_message_attachments,omitempty"`         // attachments linked to the chat message; agent uses these to `multica attachment download <id>`
 	ChatIntro                     bool                   `json:"chat_intro,omitempty"`                       // legacy compatibility for historical is_agent_intro sessions; new agent creation no longer creates these chats
 	RegenerateQuickActionsFor     string                 `json:"regenerate_quick_actions_for,omitempty"`     // set only by servers predating server-side quick-actions generation (MUL-5573). Read as a REFUSAL marker, never executed: see the guard in runTask
@@ -153,6 +160,13 @@ type Task struct {
 	AutopilotDescription          string                 `json:"autopilot_description,omitempty"`            // autopilot description used as task prompt
 	AutopilotSource               string                 `json:"autopilot_source,omitempty"`                 // manual, schedule, webhook, or api
 	AutopilotTriggerPayload       json.RawMessage        `json:"autopilot_trigger_payload,omitempty"`        // optional trigger payload for webhook/api runs
+	DocID                         string                 `json:"doc_id,omitempty"`                           // non-empty for doc discussion tasks (MUL-9933)
+	DocThreadID                   string                 `json:"doc_thread_id,omitempty"`                    // the discussion's first comment; replies go under it
+	DocCommentID                  string                 `json:"doc_comment_id,omitempty"`                   // the comment that triggered the run
+	DocTitle                      string                 `json:"doc_title,omitempty"`                        // the doc's title
+	DocThreadQuote                string                 `json:"doc_thread_quote,omitempty"`                 // the doc text the discussion is about
+	DocCommentContent             string                 `json:"doc_comment_content,omitempty"`              // the triggering comment; empty when it was deleted before the claim
+	DocCommentAuthorName          string                 `json:"doc_comment_author_name,omitempty"`          // who wrote the triggering comment
 	QuickCreatePrompt             string                 `json:"quick_create_prompt,omitempty"`              // user's natural-language input for quick-create tasks
 	QuickCreatePriority           string                 `json:"quick_create_priority,omitempty"`            // explicit priority selected in quick-create
 	QuickCreateDueDate            string                 `json:"quick_create_due_date,omitempty"`            // explicit calendar due date selected in quick-create
@@ -164,6 +178,9 @@ type Task struct {
 	HandoffNote                   string                 `json:"handoff_note,omitempty"`       // legacy assignment handoff instruction; rendered only in the per-turn prompt
 
 	ChatSource *protocol.ChatSource `json:"chat_source,omitempty"`
+	// ChatFeishuSource is the Feishu ids of the message a Feishu chat task
+	// answers. Older servers omit it and the prompt then lists no ids.
+	ChatFeishuSource *protocol.FeishuSource `json:"chat_feishu_source,omitempty"`
 
 	SquadID               string `json:"squad_id,omitempty"`                // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
 	SquadName             string `json:"squad_name,omitempty"`              // display name for the picker squad, used in prompt text
@@ -328,9 +345,10 @@ type TaskResult struct {
 	WorkDir    string `json:"work_dir,omitempty"`   // working directory used during execution
 	// DurableWorkDir replaces WorkDir only after a disposable local worktree
 	// was finalized and its removal was confirmed. Empty keeps WorkDir authoritative.
-	DurableWorkDir string `json:"durable_work_dir,omitempty"`
-	EnvRoot        string `json:"-"` // env root dir for writing GC metadata (not sent to server)
-	FailureReason  string `json:"-"` // classifier forwarded to FailTask on the blocked path; empty falls back to 'agent_error'
+	DurableWorkDir     string `json:"durable_work_dir,omitempty"`
+	EnvRoot            string `json:"-"` // env root dir for writing GC metadata (not sent to server)
+	FailureReason      string `json:"-"` // classifier forwarded to FailTask on the blocked path; empty falls back to 'agent_error'
+	NoToolCallsStarted bool   `json:"-"` // positive evidence from the original prompt
 	// SessionRolloutMissing is set when the daemon withheld this task's Codex
 	// session because its rollout was not in the store (MUL-5305). Forwarded to
 	// the terminal report so the server clears the resume pointer and flags the

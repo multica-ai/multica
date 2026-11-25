@@ -87,6 +87,111 @@ compose_published_port() {
   printf "%s" "$published"
 }
 
+# Host port the compose file is configured to publish for a container port,
+# resolved by Compose itself (`docker compose config`) so it follows the same
+# environment-over-.env precedence as `up`. Only used by the occupied-port
+# preflight below; returns non-zero when Compose cannot resolve it, in which
+# case the preflight is skipped and `up` behaves as before. Must be called from
+# the installation directory.
+compose_configured_port() {
+  local container_port=$1 configured
+
+  configured="$(docker compose -f docker-compose.selfhost.yml config --format json 2>/dev/null |
+    awk -v target="$container_port" '
+      /"target":/ { t = $0; gsub(/[^0-9]/, "", t); next }
+      /"published":/ {
+        p = $0; gsub(/[^0-9]/, "", p)
+        if (t == target && p != "") { print p; exit }
+      }
+    ' || true)"
+
+  case "$configured" in
+    "" | *[!0-9]*) return 1 ;;
+  esac
+
+  printf "%s" "$configured"
+}
+
+# True when something already accepts connections on 127.0.0.1:<port>, the
+# address the self-host stack publishes on. Uses bash's /dev/tcp so no extra
+# tool (lsof / ss / netstat) is needed; where that is unavailable the port is
+# simply treated as free.
+host_port_in_use() {
+  (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
+}
+
+# Fail early, with a fix the user can act on, when this machine's Docker Compose
+# cannot run the self-host stack. Without this, a missing Compose v2 plugin or a
+# Compose release too old for the file's top-level `name:` only surfaces once
+# `pull` / `up` runs, as a bare "(root) Additional property name is not allowed"
+# (#1401). `config --quiet` validates the file and .env the same way `up` would,
+# without contacting the Docker daemon. Must be called from the installation
+# directory.
+check_compose_supports_selfhost() {
+  local version output
+
+  if ! version="$(docker compose version 2>/dev/null)"; then
+    fail "Docker Compose v2 is required, but 'docker compose' is not available.
+  The legacy standalone 'docker-compose' (v1) is not supported.
+  Install or update Docker Desktop, or on Linux the docker-compose-plugin package:
+    https://docs.docker.com/compose/install/
+  Then re-run the installer."
+  fi
+
+  if output="$(docker compose -f docker-compose.selfhost.yml config --quiet 2>&1)"; then
+    return
+  fi
+
+  case "$output" in
+    *"Additional property"*)
+      fail "Your Docker Compose is too old for Multica's docker-compose.selfhost.yml.
+  Found: ${version}
+  Compose said: ${output}
+  Update Docker Desktop, or on Linux the docker-compose-plugin package, to the latest release:
+    https://docs.docker.com/compose/install/
+  Then re-run the installer."
+      ;;
+    *)
+      fail "Docker Compose could not load $INSTALL_DIR/docker-compose.selfhost.yml:
+  ${output}
+  Fix the problem above (for example a malformed line in $INSTALL_DIR/.env) and re-run the installer."
+      ;;
+  esac
+}
+
+# Fail before pulling and starting anything when a host port the stack needs is
+# already taken, instead of letting Docker abort halfway through `up -d` with
+# "port is already allocated" (#883). A port this installation's own running
+# stack already publishes is not a conflict: re-running the installer to
+# upgrade recreates those containers in place.
+check_selfhost_ports() {
+  local service container_port setting port
+  for service in backend frontend; do
+    case "$service" in
+      backend)
+        container_port=8080
+        setting="PORT=<free port> in $INSTALL_DIR/.env (or BACKEND_PORT / API_PORT / SERVER_PORT if you already set one of those)"
+        ;;
+      frontend)
+        container_port=3000
+        setting="FRONTEND_PORT=<free port> in $INSTALL_DIR/.env"
+        ;;
+    esac
+
+    port="$(compose_configured_port "$container_port")" || continue
+    if [ "$(compose_published_port "$service" "$container_port" || true)" = "$port" ]; then
+      continue
+    fi
+
+    if host_port_in_use "$port"; then
+      fail "Port $port is already in use on this machine, so the Multica $service cannot be published on it.
+  Stop whatever is listening there (see: lsof -nP -iTCP:$port -sTCP:LISTEN),
+  or pick another port: set $setting
+  and re-run the installer."
+    fi
+  done
+}
+
 detect_os() {
   case "$(uname -s)" in
     Darwin) OS="darwin" ;;
@@ -223,22 +328,30 @@ get_selfhost_ref() {
 
 checkout_server_ref() {
   local ref="$1"
+  local expected="" head=""
 
+  # Fetch and checkout are best-effort: a missing remote or a shallow clone
+  # should not abort here. The comparison below is what decides success.
   if [ "$ref" = "main" ]; then
     git fetch origin main --depth 1 2>/dev/null || true
     git checkout --force main 2>/dev/null || true
     git reset --hard origin/main 2>/dev/null || true
-    return
+    expected=$(git rev-parse --verify --quiet 'origin/main^{commit}' 2>/dev/null || true)
+  else
+    git fetch origin --tags --force 2>/dev/null || true
+    if git rev-parse --verify --quiet "refs/tags/$ref" >/dev/null; then
+      git checkout --force "$ref" 2>/dev/null || git checkout --force "tags/$ref" 2>/dev/null || true
+    else
+      git fetch origin "$ref" --depth 1 2>/dev/null || true
+      git checkout --force "$ref" 2>/dev/null || true
+    fi
+    expected=$(git rev-parse --verify --quiet "${ref}^{commit}" 2>/dev/null || true)
   fi
 
-  git fetch origin --tags --force 2>/dev/null || true
-  if git rev-parse --verify --quiet "refs/tags/$ref" >/dev/null; then
-    git checkout --force "$ref" 2>/dev/null || git checkout --force "tags/$ref" 2>/dev/null || true
-    return
+  head=$(git rev-parse --verify --quiet HEAD 2>/dev/null || true)
+  if [ -z "$expected" ] || [ "$expected" != "$head" ]; then
+    return 1
   fi
-
-  git fetch origin "$ref" --depth 1 2>/dev/null || true
-  git checkout --force "$ref" 2>/dev/null || true
 }
 
 pull_official_selfhost_images() {
@@ -274,11 +387,19 @@ install_cli() {
     local latest_ver
     latest_ver=$(get_latest_version)
 
+    if [ -z "$latest_ver" ]; then
+      # An empty lookup (offline, 500, no redirect) used to fall into the
+      # "versions are equal" branch below and print "up to date". The installed
+      # CLI still works, so keep it — but say what actually happened.
+      warn "Could not determine the latest Multica CLI release; keeping the installed $current_ver. Check your network connection and re-run the installer to upgrade."
+      return 0
+    fi
+
     # Normalize: strip leading 'v' for comparison
     local current_cmp="${current_ver#v}"
     local latest_cmp="${latest_ver#v}"
 
-    if [ -z "$latest_ver" ] || [ "$current_cmp" = "$latest_cmp" ]; then
+    if [ "$current_cmp" = "$latest_cmp" ]; then
       ok "Multica CLI is up to date ($current_ver)"
       return 0
     fi
@@ -357,7 +478,9 @@ setup_server() {
     cd "$INSTALL_DIR"
   fi
 
-  checkout_server_ref "$server_ref"
+  if ! checkout_server_ref "$server_ref"; then
+    fail "Could not check out $server_ref at $INSTALL_DIR. Check your network connection and re-run the installer."
+  fi
 
   ok "Repository ready at $INSTALL_DIR ($server_ref)"
 
@@ -381,6 +504,9 @@ setup_server() {
   else
     ok "Using existing .env"
   fi
+
+  check_compose_supports_selfhost
+  check_selfhost_ports
 
   # Start Docker Compose
   info "Pulling official Multica images..."

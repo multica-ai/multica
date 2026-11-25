@@ -6,6 +6,7 @@
   "breadcrumb_aria": "Menu actuel",
   "groups": {
     "pages": "Pages",
+    "views": "Vues",
     "commands": "Commandes",
     "members": "Membres",
     "agents": "Agents",
@@ -15,6 +16,7 @@
     "autopilots": "Automatisations",
     "chats": "Discussions",
     "skills": "Skills",
+    "docs": "Documents",
     "cancelled": "Annulés",
     "recent": "Récents",
     "workspaces": "Espaces de travail",
@@ -34,6 +36,7 @@
   },
   "commands": {
     "current_theme_aria": "Thème actuel",
+    "current_mode_aria": "Mode actuel",
     "new_issue": "Nouvelle tâche",
     "new_project": "Nouveau projet",
     "new_autopilot": "Nouvelle automatisation",
@@ -106,7 +109,6 @@
     "project": "Projet",
     "parent": "Tâche parente",
     "quick_actions": "Actions rapides",
-    "theme": "Thème",
     "project_status": "Statut du projet",
     "no_project": "Aucun projet",
     "current": "Actuel"
@@ -125,7 +127,6 @@
     "unsubscribed": "Désabonné",
     "label_added": "Libellé {{name}} ajouté",
     "label_removed": "Libellé {{name}} retiré",
-    "label_failed": "Impossible d'ajouter le libellé {{name}} à toutes les tâches",
     "update_failed": "Échec de la mise à jour",
     "assigned": "{{identifier}} assignée à {{name}}"
   },
@@ -136,14 +137,8 @@
     "type_to_find_people": "Tapez pour trouver des membres et des agents"
   },
   "delegate": {
-    "heading": "Confier à un agent",
-    "create_and_assign": "Créer une tâche et l'assigner à {{name}}",
-    "squad": "Squad",
-    "context_aria": "Contexte joint",
-    "parent": "Sous {{identifier}}",
-    "pick_crumb": "Choisir",
-    "pick_another": "Confier à un autre agent ou squad...",
-    "detected": "Instruction"
+    "row": "Confier à un agent : « {{prompt}} »",
+    "hint": "Créer avec un agent"
   },
   "best": {
     "assign": "Assigner {{subject}} à {{name}}",
@@ -162,8 +157,6 @@
     "navigate": "Naviguer",
     "select": "Valider",
     "open_in_new_tab": "Ouvrir dans un nouvel onglet",
-    "delegate": "Créer et confier à {{name}}",
-    "search_instead": "Rechercher comme mots-clés",
     "back": "Retour",
     "prefix_commands": "Commandes",
     "prefix_issues": "Tâches",
@@ -171,5 +164,6 @@
   },
   "trigger": {
     "label": "Rechercher..."
-  }
+  },
+  "untitled_doc": "Sans titre"
 }

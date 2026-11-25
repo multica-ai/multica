@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Local development environments as named, listable, deletable objects.
 #
-#   make up                      # start this checkout's environment (api + web)
+#   make up                      # start this checkout's environment (api + collab + web)
 #   make up C=api,web,daemon     # pick the components
 #   make status                  # what is running, and is it mine
 #   make list                    # every environment on this machine
 #   make down                    # stop the processes, keep the data
+#   make down C=daemon           # stop only some components
 #   make destroy                 # stop, then delete database + profile + slot
 #
 # Three rules the old flow got wrong, and why they are here:
@@ -39,8 +40,8 @@ DEV_CODE_DEFAULT=888888
 WORKSPACE_NAME="${MULTICA_DEV_WORKSPACE_NAME:-Dev}"
 WORKSPACE_SLUG="${MULTICA_DEV_WORKSPACE_SLUG:-dev}"
 
-ALL_COMPONENTS="api web daemon desktop"
-DEFAULT_COMPONENTS="api web"
+ALL_COMPONENTS="api collab web daemon desktop"
+DEFAULT_COMPONENTS="api collab web"
 
 # An agent runs with TMPDIR=/tmp/multica-task-<id>, deleted when the run ends.
 # Anything the Go toolchain builds there goes with it, so a binary started from
@@ -51,14 +52,17 @@ DEV_TMPDIR="${MULTICA_DEV_TMPDIR:-$HOME/.multica/dev-tmp}"
 # silently outranks server_url in a saved profile config. Every long-lived child
 # is launched without them, so a local daemon cannot authenticate its local
 # token against the production API — which fails as a bare 401 and reads like a
-# product bug. PATH is never stripped: the daemon resolves agent CLI paths by
-# forking the login shell.
+# product bug. MULTICA_TASK_ENV_FILE goes too: a warm pooled session exports it,
+# and the CLI reloads MULTICA_TOKEN / MULTICA_TASK_ID from that file on every
+# start, replacing the local token with the task's production one. PATH is
+# never stripped: the daemon resolves agent CLI paths by forking the login
+# shell.
 CLEAN_ENV=(env
   -u MULTICA_SERVER_URL -u MULTICA_TOKEN -u MULTICA_WORKSPACE_ID
   -u MULTICA_DAEMON_PORT -u MULTICA_AGENT_ID -u MULTICA_AGENT_NAME
   -u MULTICA_TASK_ID -u MULTICA_TASK_SLOT
   -u MULTICA_TASK_CONFIG_ROOT -u MULTICA_TASK_WORKSPACES_ROOT
-  -u MULTICA_WORKSPACES_ROOT)
+  -u MULTICA_WORKSPACES_ROOT -u MULTICA_TASK_ENV_FILE)
 
 # ---------------------------------------------------------------- output ----
 
@@ -93,10 +97,17 @@ expires_at_after_hours() {
 # flock is not on a stock macOS, so the lock is an atomic mkdir. The holder's
 # pid is recorded so a lock left behind by a killed process is recoverable
 # instead of wedging every later command.
+# mkdir's exit status alone is not the claim: uutils mkdir (Ubuntu 26.04)
+# also reports success to a caller that lost the race to create the directory.
+# Creating the pid file exclusively decides the holder.
+try_lock() {
+  mkdir "$LOCK_DIR" 2>/dev/null && (set -o noclobber; printf '%s\n' "$$" > "$LOCK_DIR/pid") 2>/dev/null
+}
+
 acquire_lock() {
   local waited=0
   mkdir -p "$DEV_HOME"
-  while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+  while ! try_lock; do
     local holder=""
     holder="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
     if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
@@ -107,10 +118,13 @@ acquire_lock() {
     [ "$waited" -lt 100 ] || die "Timed out waiting for the allocation lock at $LOCK_DIR. If nothing else is running, remove it."
     sleep 0.1
   done
-  printf '%s\n' "$$" > "$LOCK_DIR/pid"
 }
 
-release_lock() { rm -rf "$LOCK_DIR"; }
+release_lock() {
+  rm -f "$LOCK_DIR/pid"
+  # Once pid is gone the next holder may already have taken this directory.
+  rmdir "$LOCK_DIR" 2>/dev/null || true
+}
 
 # ---------------------------------------------------------------- registry ---
 
@@ -153,6 +167,14 @@ load_manifest() {
   # shellcheck disable=SC1090
   . "$file"
   [ "$NAME" = "$1" ] || die "Manifest $file declares NAME=$NAME; expected $1."
+  # Run from an agent task, everything launched for this environment loses the
+  # task's MULTICA_* identity (CLEAN_ENV) but still sits under the task's
+  # marker. This tells the CLI why, so its refusal does not call the task's own
+  # marker a leftover to delete. A human's run exports nothing: a marker in
+  # their checkout really can be a leftover.
+  if [ -n "${MULTICA_TASK_ID:-}${MULTICA_AGENT_ID:-}${MULTICA_TASK_CONFIG_ROOT:-}" ]; then
+    export MULTICA_DEV_ENV="$NAME"
+  fi
 }
 
 # Prints nothing (and succeeds) for a missing manifest or key: callers compare
@@ -169,6 +191,7 @@ manifest_field() {
     case "$key" in
       DIR) printf '%s' "$DIR" ;;
       OFFSET) printf '%s' "$OFFSET" ;;
+      DESKTOP_CDP_PORT) printf '%s' "${DESKTOP_CDP_PORT:-}" ;;
       *) return 1 ;;
     esac
   )
@@ -238,6 +261,10 @@ renderer_port_for_offset() {
   printf '%s' "$port"
 }
 
+collab_port_for_offset() {
+  printf '%s' $((14000 + $1))
+}
+
 desktop_app_data_root() {
   if [ -n "$DEV_DESKTOP_APP_DATA" ]; then
     printf '%s' "$DEV_DESKTOP_APP_DATA"
@@ -252,6 +279,89 @@ desktop_app_data_root() {
 
 desktop_user_data_dir() {
   printf '%s/Multica Canary %s' "$(desktop_app_data_root)" "$1"
+}
+
+# Desktop's daemon manager derives its own CLI profile from the backend URL
+# (apps/desktop/src/main/daemon-profile.ts), so every managed Desktop that
+# signs in owns `desktop-localhost-<backend port>` alongside this environment's
+# profile. Its daemon outlives Electron unless something stops it.
+desktop_daemon_profile() {
+  printf 'desktop-localhost-%s' "$BACKEND_PORT"
+}
+
+# A slot owns one backend port and one database name, both derived from its
+# offset, and destroy deletes by those names. Anything else in a manifest (the
+# shared 8080 backend, the default `multica` database) belongs to someone else.
+valid_offset() {
+  case "$1" in ""|*[!0-9]*|0?*) return 1 ;; esac
+  [ "$1" -lt 1000 ]
+}
+
+slot_backend_port_ok() {
+  valid_offset "$2" && [ "$1" = "$((18080 + $2))" ]
+}
+
+slot_database_name_ok() {
+  local db=$1 offset=$2 slug
+  valid_offset "$offset" || return 1
+  case "$db" in multica_*_"$offset") ;; *) return 1 ;; esac
+  slug="${db#multica_}"
+  slug="${slug%_"$offset"}"
+  case "$slug" in ""|*[!a-z0-9_]*) return 1 ;; esac
+}
+
+# Prints why OFFSET/PORT/DB/DATABASE_URL do not describe one slot, or nothing.
+slot_identity_problem() {
+  local offset=$1 port=$2 db=$3 url=$4 url_db
+  if ! valid_offset "$offset"; then
+    printf 'backend port %s is outside the slot range 18080-19079' "$port"
+  elif ! slot_backend_port_ok "$port" "$offset"; then
+    printf "backend port %s is not slot %s's port %s" "$port" "$offset" "$((18080 + offset))"
+  elif ! slot_database_name_ok "$db" "$offset"; then
+    printf "database %s is not slot %s's (multica_<slug>_%s)" "$db" "$offset" "$offset"
+  else
+    url_db="$(database_url_name "$url")"
+    [ "$url_db" = "$db" ] \
+      || printf 'DATABASE_URL points at database %s, not %s' "${url_db:-<none>}" "$db"
+  fi
+  return 0
+}
+
+# Chrome's conventional 9222 is left to whatever a human launches by hand.
+CDP_PORT_BASE=9223
+
+valid_port() {
+  case "$1" in
+    ""|*[!0-9]*) return 1 ;;
+  esac
+  [ "$1" -ge 1024 ] && [ "$1" -le 65535 ]
+}
+
+cdp_port_registered() {
+  local name
+  while read -r name; do
+    [ -n "$name" ] || continue
+    [ "$name" = "${2:-}" ] && continue
+    if [ "$(manifest_field "$name" DESKTOP_CDP_PORT)" = "$1" ]; then
+      return 0
+    fi
+  done <<EOF
+$(list_env_names)
+EOF
+  return 1
+}
+
+allocate_cdp_port() {
+  local self=$1 start=$2 i port
+  for i in $(seq 0 999); do
+    port=$((start + i))
+    [ "$port" -le 65535 ] || return 1
+    cdp_port_registered "$port" "$self" && continue
+    port_free "$port" || continue
+    printf '%s' "$port"
+    return 0
+  done
+  return 1
 }
 
 offset_registered() {
@@ -274,17 +384,19 @@ EOF
 # are actually free — the registry alone cannot see a process started before
 # this tooling existed.
 allocate_offset() {
-  local dir=$1 self=${2:-} start i offset backend frontend renderer
+  local dir=$1 self=${2:-} start i offset backend frontend renderer collab
   start="$(path_offset "$dir")"
   for i in $(seq 0 999); do
     offset=$(((start + i) % 1000))
     backend=$((18080 + offset))
     frontend=$((13000 + offset))
     renderer="$(renderer_port_for_offset "$offset")"
+    collab="$(collab_port_for_offset "$offset")"
     offset_registered "$offset" "$self" && continue
     port_free "$backend" || continue
     port_free "$frontend" || continue
     port_free "$renderer" || continue
+    port_free "$collab" || continue
     printf '%s' "$offset"
     return 0
   done
@@ -334,25 +446,71 @@ ensure_dev_code() {
   info "Set MULTICA_DEV_VERIFICATION_CODE=$DEV_CODE_DEFAULT in $1 (ignored when APP_ENV=production)."
 }
 
-rewrite_env_ports() {
-  local file="$REPO_ROOT/$1" offset=$2 backend=$3 frontend=$4 db=$5 tmp database_url escaped_database_url
-  database_url="$(database_url_with_name "${DATABASE_URL:-}" "$db")" \
-    || die "DATABASE_URL is not a valid PostgreSQL URL: ${DATABASE_URL:-<unset>}"
-  escaped_database_url="$(printf '%s' "$database_url" | sed 's/[\\&|]/\\&/g')"
+set_env_value() {
+  local file=$1 tmp
   tmp="$(mktemp)"
-  sed \
-    -e "s|^PORT=.*|PORT=${backend}|" \
-    -e "s|^FRONTEND_PORT=.*|FRONTEND_PORT=${frontend}|" \
-    -e "s|^FRONTEND_ORIGIN=.*|FRONTEND_ORIGIN=http://localhost:${frontend}|" \
-    -e "s|^POSTGRES_DB=.*|POSTGRES_DB=${db}|" \
-    -e "s|^DATABASE_URL=.*|DATABASE_URL=${escaped_database_url}|" \
-    -e "s|^MULTICA_SERVER_URL=.*|MULTICA_SERVER_URL=ws://localhost:${backend}/ws|" \
-    -e "s|^MULTICA_PUBLIC_URL=.*|MULTICA_PUBLIC_URL=http://localhost:${backend}|" \
-    -e "s|^MULTICA_APP_URL=.*|MULTICA_APP_URL=http://localhost:${frontend}|" \
-    -e "s|^NEXT_PUBLIC_API_URL=.*|NEXT_PUBLIC_API_URL=http://localhost:${backend}|" \
-    -e "s|^NEXT_PUBLIC_WS_URL=.*|NEXT_PUBLIC_WS_URL=ws://localhost:${backend}/ws|" \
-    "$file" > "$tmp"
+  ENV_KEY="$2" ENV_VALUE="$3" awk '
+    BEGIN { key = ENVIRON["ENV_KEY"] "="; line = key ENVIRON["ENV_VALUE"] }
+    index($0, key) == 1 { print line; found = 1; next }
+    { print }
+    END { if (!found) print line }
+  ' "$file" > "$tmp"
   mv "$tmp" "$file"
+}
+
+# A key the file lacks is appended, not skipped: `make` has already exported
+# its own defaults for all of these (PORT=8080, POSTGRES_DB=multica, ...), and
+# sourcing a file without the key leaves those in force.
+rewrite_env_ports() {
+  local file="$REPO_ROOT/$1" offset=$2 backend=$3 frontend=$4 db=$5 database_url base_url
+  base_url="${DATABASE_URL:-postgres://${POSTGRES_USER:-multica}:${POSTGRES_PASSWORD:-multica}@localhost:${POSTGRES_PORT:-5432}/postgres?sslmode=disable}"
+  database_url="$(database_url_with_name "$base_url" "$db")" \
+    || die "DATABASE_URL is not a valid PostgreSQL URL: $base_url"
+  set_env_value "$file" PORT "$backend"
+  set_env_value "$file" FRONTEND_PORT "$frontend"
+  set_env_value "$file" FRONTEND_ORIGIN "http://localhost:${frontend}"
+  set_env_value "$file" POSTGRES_DB "$db"
+  set_env_value "$file" DATABASE_URL "$database_url"
+  set_env_value "$file" MULTICA_SERVER_URL "ws://localhost:${backend}/ws"
+  set_env_value "$file" MULTICA_PUBLIC_URL "http://localhost:${backend}"
+  set_env_value "$file" MULTICA_APP_URL "http://localhost:${frontend}"
+  set_env_value "$file" NEXT_PUBLIC_API_URL "http://localhost:${backend}"
+  set_env_value "$file" NEXT_PUBLIC_WS_URL "ws://localhost:${backend}/ws"
+}
+
+# `make` derives LOCAL_UPLOAD_BASE_URL and GOOGLE_REDIRECT_URI before the slot
+# exists, so a first run inherits :8080 and :3000 whether the slot was
+# allocated or adopted from a generated .env.worktree.
+sync_slot_urls() {
+  sync_local_url "$1" LOCAL_UPLOAD_BASE_URL "http://localhost:$2" '/?'
+  sync_local_url "$1" GOOGLE_REDIRECT_URI "http://localhost:$3/auth/callback" '/auth/callback'
+}
+
+# The key follows the slot only while it holds a bare localhost origin; an S3,
+# proxy or other host someone configured is kept. The check runs on the loaded
+# value the services inherit, so a ${...} line that already resolves to the
+# slot is left as written.
+sync_local_url() {
+  local file=$1 key=$2 value=$3 suffix=$4 current="${!2:-}"
+  local pattern="^http://(localhost|127\\.0\\.0\\.1)(:[0-9]+)?${suffix}\$"
+  [ "$current" != "$value" ] || return 0
+  [ -z "$current" ] || [[ "$current" =~ $pattern ]] || return 0
+  set_env_value "$REPO_ROOT/$file" "$key" "$value"
+  export "$key=$value"
+}
+
+# Run after the rewritten file is loaded back. Something outside the keys
+# rewrite_env_ports owns (BACKEND_PORT outranks PORT in local-env.sh) can still
+# win, and registering then would hand destroy the shared backend and database.
+verify_env_ports() {
+  local file=$1 backend=$2 frontend=$3 db=$4 problems="" url_db
+  url_db="$(database_url_name "${DATABASE_URL:-}")"
+  [ "$PORT" = "$backend" ] || problems="$problems PORT=$PORT"
+  [ "$FRONTEND_PORT" = "$frontend" ] || problems="$problems FRONTEND_PORT=$FRONTEND_PORT"
+  [ "$POSTGRES_DB" = "$db" ] || problems="$problems POSTGRES_DB=$POSTGRES_DB"
+  [ "$url_db" = "$db" ] || problems="$problems DATABASE_URL->${url_db:-<none>}"
+  [ -z "$problems" ] \
+    || die "Allocated backend $backend, frontend $frontend, database $db, but $file still resolves to:$problems. Remove the overriding setting (BACKEND_PORT, API_PORT or SERVER_PORT in $file or the shell) and run make up again."
 }
 
 # ---------------------------------------------------------------- database ---
@@ -372,6 +530,33 @@ database_url_with_name() {
     url.pathname = "/" + process.argv[2];
     process.stdout.write(url.toString());
   ' "$1" "$2" 2>/dev/null
+}
+
+database_url_name() {
+  node -e '
+    const url = new URL(process.argv[1]);
+    process.stdout.write(decodeURIComponent(url.pathname.replace(/^\//, "")));
+  ' "$1" 2>/dev/null || true
+}
+
+# Prints the user of a DATABASE_URL the shared compose container can serve, or
+# nothing: the container only ever publishes localhost:5432.
+container_database_user() {
+  node -e '
+    const url = new URL(process.argv[1]);
+    if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) process.exit(0);
+    if ((url.port || "5432") !== "5432") process.exit(0);
+    process.stdout.write(decodeURIComponent(url.username) || "multica");
+  ' "$1" 2>/dev/null || true
+}
+
+# The path ensure_database takes without psql, so a database `up` created
+# through the container can be dropped on a machine that never had psql.
+container_psql() {
+  local user=$1
+  shift
+  command -v docker >/dev/null 2>&1 || return 1
+  docker compose -f "$REPO_ROOT/docker-compose.yml" exec -T postgres psql -U "$user" -d postgres "$@"
 }
 
 # Diagnoses the failure mode this whole script exists to make impossible:
@@ -485,6 +670,27 @@ process_parent_id() {
   ps -p "$1" -o ppid= 2>/dev/null | tr -d ' ' || true
 }
 
+# Every live descendant of a launcher, read from one process-table snapshot.
+# Turbo runs a task in its own process group, so a group kill of the launcher
+# reaches turbo but not electron-vite or Electron below it; they are found
+# here, while the launcher still anchors their PPID chain.
+descendant_pids() {
+  [ -n "$1" ] || return 0
+  ps -axo pid=,ppid= 2>/dev/null | awk -v root="$1" '
+    { parent[$1] = $2; order[NR] = $1 }
+    END {
+      keep[root] = 1
+      do {
+        changed = 0
+        for (i = 1; i <= NR; i++) {
+          pid = order[i]
+          if (!(pid in keep) && (parent[pid] in keep)) { keep[pid] = 1; changed = 1 }
+        }
+      } while (changed)
+      for (pid in keep) if (pid != root) print pid
+    }' || true
+}
+
 # Package runners may put a descendant in a nested process group (for example,
 # Turbo does this before Next binds its port). Follow PPIDs so ownership still
 # comes from the launcher tree instead of accepting a weaker command/user match.
@@ -546,17 +752,103 @@ api_identity_matches() {
   [ "$launched_at" = 0 ] || api_started_after "$health" "$launched_at"
 }
 
+# `go run` compiles the api once, at launch, so a later edit never reaches it,
+# and an uncommitted edit leaves the commit /health reports unchanged.
+# `start_api` records "<launcher pid> <fingerprint>" for the api it launched,
+# and an api of the current commit is current only when both still match.
+api_build_file() { printf '%s/api.build' "$STATE_DIR"; }
+
+stream_sha256() {
+  if command -v shasum >/dev/null 2>&1; then shasum -a 256; else sha256sum; fi | awk '{print $1}'
+}
+
+# Hashes everything in server/ that differs from HEAD: the diff of tracked
+# files, plus the paths and contents of untracked files that are not ignored.
+api_source_fingerprint() {
+  local dir=${DIR:-$REPO_ROOT} untracked
+  untracked="$(git -C "$dir" ls-files --others --exclude-standard -- server 2>/dev/null || true)"
+  {
+    git -C "$dir" diff --no-ext-diff --no-textconv --binary HEAD -- server 2>/dev/null || true
+    if [ -n "$untracked" ]; then
+      printf '%s\n' "$untracked"
+      printf '%s\n' "$untracked" | git -C "$dir" hash-object --stdin-paths 2>/dev/null || true
+    fi
+  } | stream_sha256
+}
+
+# Prints why the api, already matched on commit, was not launched from the
+# server/ sources the checkout has now, or nothing when it was.
+api_stale_reason() {
+  local recorded launcher
+  recorded="$(cat "$(api_build_file)" 2>/dev/null || true)"
+  launcher="$(component_pid api || true)"
+  if [ -z "$recorded" ] || [ "${recorded%% *}" != "$launcher" ]; then
+    printf 'has no recorded source fingerprint, so it may predate uncommitted server/ changes'
+  elif [ "${recorded#* }" != "$(api_source_fingerprint)" ]; then
+    printf 'was compiled before server/ changed (uncommitted changes differ)'
+  fi
+  return 0
+}
+
+# The API forwards editor WebSockets to collab and merges its own doc writes
+# through it, so it is pointed only at a collab this environment runs: one
+# that is down leaves every doc page waiting for a session before it gives up.
+# The API reads the setting once, at startup, so `start_api` records it in
+# api.collab and restarts an API launched with a different one.
+api_collab_file() { printf '%s/api.collab' "$STATE_DIR"; }
+
+api_collab_url() {
+  [ -n "${COLLAB_PORT:-}" ] || return 0
+  if component_selected collab || listener_belongs_to_component collab "$COLLAB_PORT"; then
+    printf 'http://localhost:%s' "$COLLAB_PORT"
+  fi
+  return 0
+}
+
+api_collab_reason() {
+  local recorded
+  recorded="$(cat "$(api_collab_file)" 2>/dev/null || true)"
+  [ "$recorded" != "$1" ] || return 0
+  if [ -n "$1" ]; then
+    printf 'is not connected to collab on :%s' "$COLLAB_PORT"
+  else
+    printf 'points at a collab service that is not running'
+  fi
+}
+
+# Signs editor tickets and authenticates the API and collab to each other.
+# Generated once per environment and kept with its state rather than in the env
+# file, where a self-hosted stack reading the same file would take it as the
+# switch that turns live editing on. A value set in the env file wins.
+collab_secret() {
+  local file="$STATE_DIR/collab.secret"
+  if [ -n "${COLLAB_SECRET:-}" ]; then
+    printf '%s' "$COLLAB_SECRET"
+    return 0
+  fi
+  if [ ! -s "$file" ]; then
+    (umask 077; node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))' > "$file")
+  fi
+  cat "$file"
+}
+
 start_api() {
-  local launched_at health waited=0 expected_commit
+  local launched_at health waited=0 expected_commit fingerprint reason collab_url
   expected_commit="$(checkout_commit)"
+  collab_url="$(api_collab_url)"
   if health="$(health_json)" && [ -n "$health" ] && component_pid api >/dev/null; then
     if api_identity_matches "$health" "$expected_commit"; then
-      record_component_listener api "$BACKEND_PORT" >/dev/null \
-        || die "The API listener changed while its identity was being verified. Refusing to reuse it."
-      ok "api already running on :$BACKEND_PORT (pid $(json_field "$health" pid), commit $expected_commit)"
-      return 0
-    fi
-    if health_belongs_to_api "$health"; then
+      reason="$(api_stale_reason)"
+      [ -n "$reason" ] || reason="$(api_collab_reason "$collab_url")"
+      if [ -z "$reason" ]; then
+        record_component_listener api "$BACKEND_PORT" >/dev/null \
+          || die "The API listener changed while its identity was being verified. Refusing to reuse it."
+        ok "api already running on :$BACKEND_PORT (pid $(json_field "$health" pid), commit $expected_commit)"
+        return 0
+      fi
+      warn "api on :$BACKEND_PORT (pid $(json_field "$health" pid)) $reason; restarting it."
+      stop_component api
+    elif health_belongs_to_api "$health"; then
       warn "api on :$BACKEND_PORT is ours but not commit $expected_commit; restarting it."
       stop_component api
     else
@@ -569,7 +861,17 @@ Run 'make down' here first — a leftover instance answers /health with 200 and 
   fi
 
   launched_at="$(now_epoch)"
-  launch_detached api make -C "$REPO_ROOT" -s api-dev ENV_FILE="$ENV_FILE"
+  # Taken before the compile starts, so an edit made while it runs reads as
+  # stale next time instead of being assumed compiled in.
+  fingerprint="$(api_source_fingerprint)"
+  if [ -n "$collab_url" ]; then
+    launch_detached api env COLLAB_INTERNAL_URL="$collab_url" COLLAB_SECRET="$(collab_secret)" \
+      make -C "$REPO_ROOT" -s api-dev ENV_FILE="$ENV_FILE"
+  else
+    launch_detached api env COLLAB_INTERNAL_URL= make -C "$REPO_ROOT" -s api-dev ENV_FILE="$ENV_FILE"
+  fi
+  printf '%s %s\n' "$(cat "$(pid_file api)")" "$fingerprint" > "$(api_build_file)"
+  printf '%s\n' "$collab_url" > "$(api_collab_file)"
   info "api launching (pid $(cat "$(pid_file api)")), log: $(log_file api)"
 
   while [ "$waited" -lt 300 ]; do
@@ -595,13 +897,34 @@ Run 'make down' here first — a leftover instance answers /health with 200 and 
   die "api never became healthy. Log: $(log_file api)"
 }
 
+# Next compiles routes on demand and holds `/` until the compile finishes, which
+# after a file change can take longer than one probe. Our own listener gets the
+# same 300s a fresh launch does before it counts as hung.
+wait_for_owned_web() {
+  local deadline
+  deadline=$(($(now_epoch) + 300))
+  curl -sf --max-time 15 "http://localhost:${FRONTEND_PORT}" >/dev/null 2>&1 && return 0
+  info "web on :$FRONTEND_PORT is ours but not answering yet (likely compiling); waiting for it."
+  while [ "$(now_epoch)" -lt "$deadline" ]; do
+    listener_belongs_to_component web "$FRONTEND_PORT" || return 1
+    sleep 2
+    curl -sf --max-time 15 "http://localhost:${FRONTEND_PORT}" >/dev/null 2>&1 && return 0
+  done
+  return 1
+}
+
 start_web() {
   local waited=0 listener
-  if curl -sf --max-time 15 "http://localhost:${FRONTEND_PORT}" >/dev/null 2>&1; then
-    listener="$(record_component_listener web "$FRONTEND_PORT" || true)"
-    if [ -n "$listener" ]; then
-      ok "web already running on :$FRONTEND_PORT (pid $listener)"
-      return 0
+  if listener_belongs_to_component web "$FRONTEND_PORT"; then
+    if wait_for_owned_web; then
+      listener="$(record_component_listener web "$FRONTEND_PORT" || true)"
+      if [ -n "$listener" ]; then
+        ok "web already running on :$FRONTEND_PORT (pid $listener)"
+        return 0
+      fi
+    elif listener_belongs_to_component web "$FRONTEND_PORT"; then
+      warn "web on :$FRONTEND_PORT is ours but did not answer within 300s; restarting it."
+      stop_component web
     fi
   fi
   if ! port_free "$FRONTEND_PORT"; then
@@ -626,6 +949,60 @@ start_web() {
     waited=$((waited + 2))
   done
   die "web never came up. Log: $(log_file web)"
+}
+
+collab_healthy() {
+  curl -sf --max-time 3 "http://localhost:${COLLAB_PORT}/health" >/dev/null 2>&1
+}
+
+# The CDN domain the API reports (Storage.CdnDomain): CLOUDFRONT_DOMAIN with
+# S3, otherwise the host of LOCAL_UPLOAD_BASE_URL. Collab needs the same value
+# to turn links to uploaded files into the same nodes the editor makes.
+collab_cdn_domain() {
+  if [ -n "${S3_BUCKET:-}" ]; then
+    printf '%s' "${CLOUDFRONT_DOMAIN:-}"
+    return 0
+  fi
+  node -e 'try { process.stdout.write(new URL(process.argv[1]).hostname); } catch {}' \
+    "${LOCAL_UPLOAD_BASE_URL:-http://localhost:${BACKEND_PORT}}"
+}
+
+# `tsx watch` restarts the service on every source change, so a running collab
+# of this environment is always current and is reused as it is.
+start_collab() {
+  local waited=0 listener
+  if listener_belongs_to_component collab "$COLLAB_PORT"; then
+    if collab_healthy && listener="$(record_component_listener collab "$COLLAB_PORT")"; then
+      ok "collab already running on :$COLLAB_PORT (pid $listener)"
+      return 0
+    fi
+    warn "collab on :$COLLAB_PORT is ours but not answering /health; restarting it."
+    stop_component collab
+  fi
+  if ! port_free "$COLLAB_PORT"; then
+    die "Port $COLLAB_PORT is busy: $(describe_port_owner "$COLLAB_PORT"). Run 'make down' here first."
+  fi
+
+  launch_detached collab env COLLAB_PORT="$COLLAB_PORT" COLLAB_SECRET="$(collab_secret)" \
+    MULTICA_API_URL="http://localhost:${BACKEND_PORT}" MULTICA_CDN_DOMAIN="$(collab_cdn_domain)" \
+    make -C "$REPO_ROOT" -s collab-dev ENV_FILE="$ENV_FILE"
+  info "collab launching (pid $(cat "$(pid_file collab)")), log: $(log_file collab)"
+
+  while [ "$waited" -lt 120 ]; do
+    if collab_healthy; then
+      listener="$(record_component_listener collab "$COLLAB_PORT" || true)"
+      if [ -z "$listener" ]; then
+        stop_component collab
+        die "Collab on :$COLLAB_PORT is not descended from the process this environment launched."
+      fi
+      ok "collab serving ws://localhost:$COLLAB_PORT (pid $listener)"
+      return 0
+    fi
+    component_pid collab >/dev/null || { tail -20 "$(log_file collab)" | sed 's/^/    /' >&2; die "collab exited during startup. Log: $(log_file collab)"; }
+    sleep 2
+    waited=$((waited + 2))
+  done
+  die "collab never became healthy. Log: $(log_file collab)"
 }
 
 # send-code once, verify-code once. Repeated verify attempts lock the code out
@@ -655,7 +1032,9 @@ ensure_credentials() {
     ws="$(json_field "$(cat "$config")" workspace_id || true)"
     if [ -n "$pat" ] && curl -sf --max-time 5 "$server/api/me" -H "Authorization: Bearer $pat" >/dev/null 2>&1; then
       WORKSPACE_ID="$ws"
+      DEV_TOKEN="$pat"
       write_profile_config "$config" "$pat" "$ws"
+      ensure_onboarded
       ok "CLI profile $PROFILE already authenticated"
       return 0
     fi
@@ -693,38 +1072,104 @@ Do not retry immediately — repeated attempts lock the code. Wait ~40s and re-r
   fi
   [ -n "$ws" ] || die "Workspace creation failed: $ws_response"
 
-  # A fresh user has onboarded_at = NULL and a browser login is bounced to
-  # /onboarding, so the URL this script prints would not land in the app.
-  curl -sS -X POST "$server/api/me/onboarding/complete" \
-    -H "Authorization: Bearer $pat" -H "X-Workspace-ID: $ws" \
-    -H 'Content-Type: application/json' -d '{"exit":"existing"}' >/dev/null 2>&1 || true
-
   write_profile_config "$config" "$pat" "$ws"
   WORKSPACE_ID="$ws"
+  DEV_TOKEN="$pat"
+  ensure_onboarded
   ok "Logged in as $DEV_EMAIL and wrote profile $PROFILE"
 }
 
-# The CLI refuses `daemon start` anywhere under a daemon-task marker, so a task
-# cannot spawn a second daemon that competes for its own work. Checking the
-# marker here turns that refusal into one actionable line, before this component
-# has spent a login and a CLI build on an outcome it cannot reach.
-daemon_task_marker() {
-  local dir="$REPO_ROOT" marker
-  while :; do
-    marker="$dir/.multica/daemon_task_context.json"
-    if [ -f "$marker" ] && grep -q 'multica-daemon-task' "$marker" 2>/dev/null; then
-      printf '%s' "$marker"
-      return 0
-    fi
-    [ "$dir" != "/" ] || break
-    dir="$(dirname "$dir")"
+# A fresh user has onboarded_at = NULL and a browser login is bounced to
+# /onboarding, so the URL this script prints would not land in the app. The
+# server keeps the first completion time, so repeating this is harmless.
+ensure_onboarded() {
+  curl -sf --max-time 5 -X POST "http://localhost:${BACKEND_PORT}/api/me/onboarding/complete" \
+    -H "Authorization: Bearer $DEV_TOKEN" -H "X-Workspace-ID: $WORKSPACE_ID" \
+    -H 'Content-Type: application/json' \
+    -d "{\"completion_path\":\"skip_existing\",\"workspace_id\":\"$(json_escape "$WORKSPACE_ID")\"}" \
+    >/dev/null || warn "could not mark $DEV_EMAIL onboarded; the browser may open /onboarding"
+}
+
+# Every component set gets the same signed-in, onboarded workspace with issues
+# in it: Web, Playwright and scripts/dev-fixtures.mjs all start from the profile
+# token, and Desktop and the daemon sign in with it.
+seed_dev_workspace() {
+  ensure_credentials
+  ensure_fixture_issues
+}
+
+# A fresh workspace has no issues, so neither an issue page nor the dedicated
+# issue window has anything to open. Two are created once; a workspace that
+# already holds any issue is left as it is.
+ensure_fixture_issues() {
+  local server="http://localhost:${BACKEND_PORT}" list total entry status title
+  list="$(curl -sf --max-time 5 "$server/api/issues?limit=1" \
+    -H "Authorization: Bearer $DEV_TOKEN" -H "X-Workspace-ID: $WORKSPACE_ID" || true)"
+  total="$(json_field "$list" total || true)"
+  if [ -z "$total" ]; then
+    warn "could not list issues in workspace $WORKSPACE_SLUG; skipped the issue fixture"
+    return 0
+  fi
+  [ "$total" = 0 ] || return 0
+  for entry in "todo|Fixture: issue list and board" "in_progress|Fixture: dedicated issue window"; do
+    status="${entry%%|*}"
+    title="${entry#*|}"
+    curl -sf --max-time 5 -X POST "$server/api/issues" \
+      -H "Authorization: Bearer $DEV_TOKEN" -H "X-Workspace-ID: $WORKSPACE_ID" \
+      -H 'Content-Type: application/json' \
+      -d "{\"title\":\"$title\",\"status\":\"$status\",\"priority\":\"medium\",\"description\":\"Seeded by scripts/dev-env.sh so issue views have content.\"}" \
+      >/dev/null || { warn "failed to create fixture issue '$title'"; return 0; }
   done
+  ok "seeded 2 issues in workspace $WORKSPACE_SLUG"
+}
+
+daemon_status_json() {
+  "${CLEAN_ENV[@]}" MULTICA_WORKSPACES_ROOT="$WORKSPACES_ROOT" \
+    "$MULTICA_BIN" daemon status --profile "$PROFILE" --output json 2>/dev/null || true
+}
+
+# A running daemon keeps executing the binary it was started from, and
+# `daemon start` is a no-op while one is up, so rebuilding alone never reaches
+# it. Uncommitted edits change the binary but not the commit it reports, so
+# `start_daemon` records "<pid> <sha256 of the binary>" for the daemon it
+# started, and a daemon is current only when both match.
+daemon_build_file() { printf '%s/daemon.build' "$STATE_DIR"; }
+
+file_sha256() {
+  { shasum -a 256 "$1" 2>/dev/null || sha256sum "$1" 2>/dev/null; } | awk '{print $1}' || true
+}
+
+short_commit() {
+  [ -n "$1" ] && [ "$1" != unknown ] || { printf 'unknown'; return 0; }
+  git -C "$DIR" rev-parse --short "$1" 2>/dev/null || printf '%.10s' "$1"
+}
+
+# Prints why the daemon in a `daemon status` payload is not running this
+# checkout's current build, or nothing when it is.
+daemon_stale_reason() {
+  local status=$1 expected_commit=$2 bin_hash=$3 running_commit pid recorded
+  running_commit="$(json_field "$status" cli_commit || true)"
+  pid="$(json_field "$status" pid || true)"
+  if [ "$running_commit" != "$expected_commit" ]; then
+    printf 'runs commit %s, checkout is at %s' \
+      "$(short_commit "$running_commit")" "$(short_commit "$expected_commit")"
+    return 0
+  fi
+  recorded="$(cat "$(daemon_build_file)" 2>/dev/null || true)"
+  if [ "${recorded%% *}" != "$pid" ]; then
+    printf 'was not started from %s by make up' "$MULTICA_BIN"
+  elif [ "${recorded#* }" != "$bin_hash" ]; then
+    printf 'runs an older build of commit %s (uncommitted changes differ)' "$(short_commit "$running_commit")"
+  fi
   return 0
 }
 
+# Under a daemon-task marker the CLI refuses daemon commands for every profile
+# except one this registry assigns to an environment, reached without the task's
+# identity and pointed at that environment's API — exactly how CLEAN_ENV and
+# the profile written above launch it (server/cmd/multica/dev_env_profile.go).
 start_daemon() {
-  local status state build_commit
-  ensure_credentials
+  local status state pid build_commit bin_hash reason active
 
   # Built, never `go run`: the daemon records its own executable path at startup
   # and re-execs it as the execution-environment helper for every task. Under
@@ -734,12 +1179,35 @@ start_daemon() {
   info "Building $MULTICA_BIN (a go run daemon would fail every task later)."
   build_commit="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || printf 'unknown')"
   (cd "$REPO_ROOT/server" && go build -ldflags "-X main.buildCommit=$build_commit" -o bin/multica ./cmd/multica) || die "Failed to build the multica CLI."
+  bin_hash="$(file_sha256 "$MULTICA_BIN")"
+
+  status="$(daemon_status_json)"
+  state="$(json_field "$status" status || true)"
+  if [ "$state" = running ] || [ "$state" = starting ]; then
+    pid="$(json_field "$status" pid || echo '?')"
+    reason="$(daemon_stale_reason "$status" "$build_commit" "$bin_hash")"
+    if [ -z "$reason" ] && [ "$state" = running ]; then
+      ok "daemon already running for profile $PROFILE (pid $pid, commit $(short_commit "$build_commit"))"
+      return 0
+    fi
+    if [ -n "$reason" ]; then
+      active="$(json_field "$status" active_task_count || echo 0)"
+      if [ "$active" -gt 0 ] 2>/dev/null; then
+        warn "daemon pid $pid $reason; restarting it (interrupts $active active task(s))."
+      else
+        warn "daemon pid $pid $reason; restarting it."
+      fi
+      "${CLEAN_ENV[@]}" MULTICA_WORKSPACES_ROOT="$WORKSPACES_ROOT" \
+        "$MULTICA_BIN" daemon stop --force --profile "$PROFILE" >/dev/null 2>&1 \
+        || die "Could not stop the stale daemon pid $pid for profile $PROFILE. Log: $PROFILE_DIR/daemon.log"
+      rm -f "$(daemon_build_file)"
+    fi
+  fi
 
   "${CLEAN_ENV[@]}" MULTICA_WORKSPACES_ROOT="$WORKSPACES_ROOT" \
     "$MULTICA_BIN" daemon start --profile "$PROFILE" 2>&1 | sed 's/^/    /' || true
 
-  status="$("${CLEAN_ENV[@]}" MULTICA_WORKSPACES_ROOT="$WORKSPACES_ROOT" \
-    "$MULTICA_BIN" daemon status --profile "$PROFILE" --output json 2>/dev/null || true)"
+  status="$(daemon_status_json)"
   state="$(json_field "$status" status || echo unknown)"
   # `daemon status` reports "stopped" plus port_conflict when the daemon
   # answering this profile's health port belongs to another profile, so a
@@ -750,7 +1218,12 @@ start_daemon() {
     fi
     die "Daemon is '$state' after start. Log: $PROFILE_DIR/daemon.log"
   fi
-  ok "daemon running for profile $PROFILE (pid $(json_field "$status" pid || echo '?'))"
+  pid="$(json_field "$status" pid || echo '?')"
+  if [ "$(json_field "$status" cli_commit || true)" != "$build_commit" ]; then
+    die "Daemon pid $pid reports commit $(short_commit "$(json_field "$status" cli_commit || true)") after start, not $(short_commit "$build_commit"). Run 'make down C=daemon' and retry."
+  fi
+  printf '%s %s\n' "$pid" "$bin_hash" > "$(daemon_build_file)"
+  ok "daemon running for profile $PROFILE (pid $pid, commit $(short_commit "$build_commit"))"
 }
 
 start_desktop() {
@@ -758,30 +1231,34 @@ start_desktop() {
   if component_pid desktop >/dev/null \
     && curl -sf --max-time 10 "http://localhost:${DESKTOP_RENDERER_PORT}" >/dev/null 2>&1 \
     && listener_belongs_to_component desktop "$DESKTOP_RENDERER_PORT" \
-    && desktop_env_matches; then
+    && desktop_env_matches \
+    && [ "${DESKTOP_CDP_CHANGED:-0}" != 1 ] && desktop_cdp_ready; then
       listener="$(record_component_listener desktop "$DESKTOP_RENDERER_PORT" || true)"
       [ -n "$listener" ] || die "The Desktop listener changed while its identity was being recorded."
-      ok "desktop already running (pid $(component_pid desktop), renderer $listener on :$DESKTOP_RENDERER_PORT)"
+      ok "desktop already running (pid $(component_pid desktop), renderer $listener on :$DESKTOP_RENDERER_PORT$(desktop_cdp_suffix))"
       return 0
   fi
   if component_pid desktop >/dev/null; then
-    warn "desktop launcher exists but its renderer/backend identity is stale; restarting it."
+    warn "desktop launcher exists but its renderer/backend/CDP identity is stale; restarting it."
     stop_component desktop
   fi
   if ! port_free "$DESKTOP_RENDERER_PORT"; then
     die "Desktop renderer port $DESKTOP_RENDERER_PORT is busy: $(describe_port_owner "$DESKTOP_RENDERER_PORT")."
   fi
+  if [ -n "$DESKTOP_CDP_PORT" ] && ! port_free "$DESKTOP_CDP_PORT"; then
+    die "Desktop CDP port $DESKTOP_CDP_PORT is busy: $(describe_port_owner "$DESKTOP_CDP_PORT"). Pick another with --remote-debugging-port N."
+  fi
 
-  # The marker makes destroy remove only a file this tool owns. Explicit
-  # renderer/app values bind Desktop to the registry allocation rather than
-  # independently hashing the checkout path again.
-  cat > "$DESKTOP_ENV_FILE" <<EOF
-# Managed by scripts/dev-env.sh for environment ${NAME}.
-VITE_API_URL=http://localhost:${BACKEND_PORT}
-VITE_WS_URL=ws://localhost:${BACKEND_PORT}/ws
-EOF
-  launch_detached desktop env \
-    DESKTOP_RENDERER_PORT="$DESKTOP_RENDERER_PORT" DESKTOP_APP_SUFFIX="$DESKTOP_APP_SUFFIX" \
+  write_desktop_env_file
+  # Desktop's main process delivers MULTICA_DEV_AUTH_TOKEN to the renderer the
+  # way a browser login's deep link does, so the session is stored exactly as
+  # it is for a human. electron-vite turns REMOTE_DEBUGGING_PORT into
+  # --remote-debugging-port; turbo.json passes both through to the dev task.
+  local launch_env=(env
+    DESKTOP_RENDERER_PORT="$DESKTOP_RENDERER_PORT" DESKTOP_APP_SUFFIX="$DESKTOP_APP_SUFFIX"
+    MULTICA_DEV_AUTH_TOKEN="$DEV_TOKEN")
+  [ -z "$DESKTOP_CDP_PORT" ] || launch_env+=(REMOTE_DEBUGGING_PORT="$DESKTOP_CDP_PORT")
+  launch_detached desktop "${launch_env[@]}" \
     make -C "$REPO_ROOT" -s desktop-dev ENV_FILE="$ENV_FILE"
 
   while [ "$waited" -lt 300 ]; do
@@ -802,7 +1279,18 @@ EOF
         die "desktop exited during renderer bootstrap. Log: $(log_file desktop)"
       fi
       printf '%s\n' "$listener" > "$(listener_pid_file desktop)"
-      ok "desktop ready (launcher $(component_pid desktop), renderer pid ${listener:-?}, backend :$BACKEND_PORT)"
+      # Vite answers before electron-vite has built main and started Electron,
+      # so the CDP endpoint is the proof that the app itself is up.
+      while ! desktop_cdp_ready; do
+        if ! component_pid desktop >/dev/null || [ "$waited" -ge 300 ]; then
+          tail -20 "$(log_file desktop)" | sed 's/^/    /' >&2 || true
+          stop_component desktop
+          die "Desktop never served CDP on :$DESKTOP_CDP_PORT from its own process tree. Log: $(log_file desktop)"
+        fi
+        sleep 2
+        waited=$((waited + 2))
+      done
+      ok "desktop ready (launcher $(component_pid desktop), renderer pid ${listener:-?}, backend :$BACKEND_PORT$(desktop_cdp_suffix))"
       return 0
     fi
     component_pid desktop >/dev/null \
@@ -814,15 +1302,80 @@ EOF
   die "desktop renderer never became ready on :$DESKTOP_RENDERER_PORT. Log: $(log_file desktop)"
 }
 
+# The marker makes destroy remove only a file this tool owns. Explicit
+# renderer/app values bind Desktop to the registry allocation rather than
+# independently hashing the checkout path again.
+write_desktop_env_file() {
+  cat > "$DESKTOP_ENV_FILE" <<EOF
+# Managed by scripts/dev-env.sh for environment ${NAME}.
+VITE_API_URL=http://localhost:${BACKEND_PORT}
+VITE_WS_URL=ws://localhost:${BACKEND_PORT}/ws
+VITE_APP_URL=http://localhost:${FRONTEND_PORT}
+EOF
+}
+
+desktop_env_file_managed() {
+  grep -q '^# Managed by scripts/dev-env.sh for environment ' "$DESKTOP_ENV_FILE" 2>/dev/null
+}
+
+# Every environment owns a Desktop slot, so `up` without the desktop component
+# still points the file at this backend: a Desktop started later through
+# env-exec otherwise talks to a backend that no longer exists. A file someone
+# wrote by hand is left alone unless the desktop component is selected.
+sync_desktop_env_file() {
+  if [ ! -f "$DESKTOP_ENV_FILE" ] || desktop_env_file_managed; then
+    desktop_env_matches || { write_desktop_env_file; info "Desktop env file → backend :$BACKEND_PORT"; }
+  else
+    info "Left $DESKTOP_ENV_FILE alone: it was not written by this tool."
+  fi
+}
+
 desktop_env_matches() {
   [ -f "$DESKTOP_ENV_FILE" ] \
     && grep -Fqx "# Managed by scripts/dev-env.sh for environment ${NAME}." "$DESKTOP_ENV_FILE" \
     && grep -Fqx "VITE_API_URL=http://localhost:${BACKEND_PORT}" "$DESKTOP_ENV_FILE" \
-    && grep -Fqx "VITE_WS_URL=ws://localhost:${BACKEND_PORT}/ws" "$DESKTOP_ENV_FILE"
+    && grep -Fqx "VITE_WS_URL=ws://localhost:${BACKEND_PORT}/ws" "$DESKTOP_ENV_FILE" \
+    && grep -Fqx "VITE_APP_URL=http://localhost:${FRONTEND_PORT}" "$DESKTOP_ENV_FILE"
+}
+
+desktop_cdp_ready() {
+  [ -n "${DESKTOP_CDP_PORT:-}" ] || return 0
+  curl -sf --max-time 5 "http://127.0.0.1:${DESKTOP_CDP_PORT}/json/version" >/dev/null 2>&1 \
+    && listener_belongs_to_component desktop "$DESKTOP_CDP_PORT"
+}
+
+desktop_cdp_suffix() {
+  [ -z "${DESKTOP_CDP_PORT:-}" ] || printf ', CDP :%s' "$DESKTOP_CDP_PORT"
+}
+
+# Electron does not stop the daemon it started when it quits (autoStop is off
+# by default), and that daemon talks to this environment's backend only.
+# A plain `daemon stop` exits 0 while the daemon is still finishing a run;
+# --force waits for the profile lock, escalates, and confirms cleanup. The pid
+# is checked again because the profile directory holding it is deleted next.
+stop_desktop_daemon() {
+  local profile pid bin
+  profile="$(desktop_daemon_profile)"
+  pid="$(cat "$DEV_PROFILES_HOME/$profile/daemon.pid" 2>/dev/null || true)"
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 0
+  if ! slot_backend_port_ok "$BACKEND_PORT" "${OFFSET:-}"; then
+    warn "left Desktop's daemon for profile $profile alone: :$BACKEND_PORT is not slot ${OFFSET:-?}'s backend port"
+    return 0
+  fi
+  bin="$MULTICA_BIN"
+  [ -x "$bin" ] || bin="$DIR/apps/desktop/resources/bin/multica"
+  if [ -x "$bin" ] && "${CLEAN_ENV[@]}" "$bin" daemon stop --force --profile "$profile" >/dev/null 2>&1 \
+    && ! kill -0 "$pid" 2>/dev/null; then
+    ok "stopped Desktop's daemon for profile $profile"
+    return 0
+  fi
+  warn "Desktop's daemon for profile $profile (pid $pid) is still running"
+  return 1
 }
 
 stop_component() {
   local name=$1 pid launcher="" status state recorded_listener="" port="" listener=""
+  local descendants="" child survivors=""
   case "$name" in
     daemon)
       if [ -x "$MULTICA_BIN" ]; then
@@ -853,6 +1406,7 @@ stop_component() {
 
   case "$name" in
     api) port="$BACKEND_PORT" ;;
+    collab) port="$COLLAB_PORT" ;;
     web) port="$FRONTEND_PORT" ;;
     desktop) port="$DESKTOP_RENDERER_PORT" ;;
   esac
@@ -870,6 +1424,7 @@ stop_component() {
         printf '%s\n' "$listener" > "$(listener_pid_file "$name")"
       fi
     fi
+    descendants="$(descendant_pids "$pid")"
     # Negative pid targets the process group, so make → go run → server all go
     # down together instead of leaving the real listener orphaned.
     kill -TERM -"$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
@@ -881,6 +1436,26 @@ stop_component() {
     if kill -0 "$pid" 2>/dev/null; then
       warn "$name launcher pid $pid is still running"
       return 1
+    fi
+    # Descendants in a nested process group (turbo → electron-vite → Electron)
+    # survive the group signal and would keep the app window open.
+    for child in $descendants; do
+      kill -0 "$child" 2>/dev/null && survivors="$survivors $child"
+    done
+    if [ -n "$survivors" ]; then
+      for child in $survivors; do kill -TERM "$child" 2>/dev/null || true; done
+      sleep 1
+      for child in $survivors; do
+        if kill -0 "$child" 2>/dev/null; then kill -KILL "$child" 2>/dev/null || true; fi
+      done
+      sleep 1
+      for child in $survivors; do
+        if kill -0 "$child" 2>/dev/null; then
+          warn "$name descendant pid $child is still running"
+          return 1
+        fi
+      done
+      info "stopped$survivors left in $name's nested process groups"
     fi
     rm -f "$(pid_file "$name")"
     ok "$name stopped (pid $pid)"
@@ -914,6 +1489,7 @@ stop_component() {
     fi
   fi
   rm -f "$(listener_pid_file "$name")"
+  [ "$name" != desktop ] || stop_desktop_daemon
 }
 
 # ------------------------------------------------------------------ status ---
@@ -921,36 +1497,86 @@ stop_component() {
 component_state() {
   case "$1" in
     api)
-      local health
+      local health expected_commit reported_commit reason
       health="$(health_json || true)"
-      if [ -n "$health" ] && api_identity_matches "$health" "$(checkout_commit)"; then
+      expected_commit="$(checkout_commit)"
+      reported_commit="$(json_field "$health" commit || true)"
+      if [ -n "$health" ] && api_identity_matches "$health" "$expected_commit"; then
+        reason="$(api_stale_reason)"
+        if [ -n "$reason" ]; then
+          printf 'stale|http://localhost:%s|pid %s %s; run make up to restart' "$BACKEND_PORT" \
+            "$(json_field "$health" pid || echo '?')" "$reason"
+          return 0
+        fi
         printf 'running|http://localhost:%s|pid %s commit %s started %s' "$BACKEND_PORT" \
           "$(json_field "$health" pid || echo '?')" \
-          "$(json_field "$health" commit || echo '?')" \
+          "$reported_commit" \
           "$(json_field "$health" started_at || echo '?')"
+      elif [ -n "$health" ] && health_belongs_to_api "$health" \
+        && [ "$reported_commit" != "$expected_commit" ]; then
+        # Same process this environment launched; only the checkout moved on.
+        # `make up` restarts it, so this is not an external conflict.
+        printf 'stale|http://localhost:%s|running %s, checkout at %s; run make up to restart' \
+          "$BACKEND_PORT" "${reported_commit:-?}" "$expected_commit"
       elif [ -n "$health" ]; then
         printf 'mismatch|http://localhost:%s|health responder is not this checkout/process' "$BACKEND_PORT"
       else
         printf 'stopped|http://localhost:%s|' "$BACKEND_PORT"
       fi
       ;;
-    web)
-      if curl -sf --max-time 10 "http://localhost:${FRONTEND_PORT}" >/dev/null 2>&1 \
-        && listener_belongs_to_component web "$FRONTEND_PORT"; then
-        printf 'running|http://localhost:%s|pid %s' "$FRONTEND_PORT" "$(port_listener_pid "$FRONTEND_PORT")"
-      elif [ -n "$(port_listener_pid "$FRONTEND_PORT")" ]; then
-        printf 'mismatch|http://localhost:%s|listener is not owned by this environment' "$FRONTEND_PORT"
+    collab)
+      local listener
+      listener="$(port_listener_pid "$COLLAB_PORT")"
+      if [ -z "$listener" ]; then
+        printf 'stopped|ws://localhost:%s|' "$COLLAB_PORT"
+      elif ! listener_pid_belongs_to_component collab "$listener"; then
+        printf 'mismatch|ws://localhost:%s|listener pid %s is not owned by this environment' \
+          "$COLLAB_PORT" "$listener"
+      elif collab_healthy; then
+        printf 'running|ws://localhost:%s|pid %s' "$COLLAB_PORT" "$listener"
       else
+        printf 'busy|ws://localhost:%s|pid %s is ours but not answering /health' "$COLLAB_PORT" "$listener"
+      fi
+      ;;
+    web)
+      local listener
+      listener="$(port_listener_pid "$FRONTEND_PORT")"
+      if [ -z "$listener" ]; then
         printf 'stopped|http://localhost:%s|' "$FRONTEND_PORT"
+      elif ! listener_pid_belongs_to_component web "$listener"; then
+        printf 'mismatch|http://localhost:%s|listener pid %s is not owned by this environment' \
+          "$FRONTEND_PORT" "$listener"
+      elif curl -sf --max-time 10 "http://localhost:${FRONTEND_PORT}" >/dev/null 2>&1; then
+        printf 'running|http://localhost:%s|pid %s' "$FRONTEND_PORT" "$listener"
+      else
+        # Next dev serializes compiles, so a probe can time out behind a slow
+        # route compile even though the listener is ours.
+        printf 'busy|http://localhost:%s|pid %s is ours but not responding (likely compiling); re-run make status' \
+          "$FRONTEND_PORT" "$listener"
       fi
       ;;
     daemon)
-      local status state
+      local status state pid running_commit reason
       if [ -x "$MULTICA_BIN" ]; then
-        status="$("${CLEAN_ENV[@]}" MULTICA_WORKSPACES_ROOT="$WORKSPACES_ROOT" \
-          "$MULTICA_BIN" daemon status --profile "$PROFILE" --output json 2>/dev/null || true)"
+        status="$(daemon_status_json)"
         state="$(json_field "$status" status || echo stopped)"
-        printf '%s|%s|pid %s' "$state" "$PROFILE" "$(json_field "$status" pid || echo '-')"
+        pid="$(json_field "$status" pid || echo '-')"
+        if [ "$state" != running ] && [ "$state" != starting ]; then
+          printf '%s|%s|pid %s' "$state" "$PROFILE" "$pid"
+          return 0
+        fi
+        running_commit="$(json_field "$status" cli_commit || true)"
+        # Measured against server/bin/multica as it is now: an edit that has
+        # not been rebuilt yet shows up only once `make up` compiles it.
+        reason="$(daemon_stale_reason "$status" \
+          "$(git -C "$DIR" rev-parse HEAD 2>/dev/null || printf 'unknown')" \
+          "$(file_sha256 "$MULTICA_BIN")")"
+        if [ -n "$reason" ]; then
+          printf 'stale|%s|pid %s %s; run make up C=daemon to restart' "$PROFILE" "$pid" "$reason"
+        else
+          printf '%s|%s|pid %s commit %s up %s' "$state" "$PROFILE" "$pid" \
+            "$(short_commit "$running_commit")" "$(json_field "$status" uptime || echo '?')"
+        fi
       else
         printf 'stopped|%s|not built' "$PROFILE"
       fi
@@ -961,11 +1587,13 @@ component_state() {
       if [ -n "$pid" ] \
         && curl -sf --max-time 10 "http://localhost:${DESKTOP_RENDERER_PORT}" >/dev/null 2>&1 \
         && listener_belongs_to_component desktop "$DESKTOP_RENDERER_PORT" \
-        && desktop_env_matches; then
-        printf 'running|http://localhost:%s|launcher %s renderer %s' \
-          "$DESKTOP_RENDERER_PORT" "$pid" "$(port_listener_pid "$DESKTOP_RENDERER_PORT")"
+        && desktop_env_matches && desktop_cdp_ready; then
+        printf 'running|http://localhost:%s|launcher %s renderer %s%s' \
+          "$DESKTOP_RENDERER_PORT" "$pid" "$(port_listener_pid "$DESKTOP_RENDERER_PORT")" \
+          "$( [ -z "${DESKTOP_CDP_PORT:-}" ] || printf ' cdp http://127.0.0.1:%s' "$DESKTOP_CDP_PORT" )"
       elif [ -n "$pid" ] || [ -n "$(port_listener_pid "$DESKTOP_RENDERER_PORT")" ]; then
-        printf 'mismatch|http://localhost:%s|renderer/backend identity does not match' "$DESKTOP_RENDERER_PORT"
+        printf 'mismatch|http://localhost:%s|renderer/backend%s identity does not match' "$DESKTOP_RENDERER_PORT" \
+          "$( [ -z "${DESKTOP_CDP_PORT:-}" ] || printf '/CDP :%s' "$DESKTOP_CDP_PORT" )"
       else
         printf 'stopped|http://localhost:%s|' "$DESKTOP_RENDERER_PORT"
       fi
@@ -1007,8 +1635,9 @@ print_status_json() {
   printf '{"name":"%s","dir":"%s","owner":"%s","created_at":"%s","ttl_hours":%s,"expires_at":"%s",' \
     "$(json_escape "$NAME")" "$(json_escape "$DIR")" "$(json_escape "$OWNER")" \
     "$(json_escape "$CREATED_AT")" "${TTL_HOURS:-0}" "$(json_escape "$EXPIRES_AT")"
-  printf '"backend_port":%s,"frontend_port":%s,"desktop_renderer_port":%s,"database":"%s","profile":"%s","env_file":"%s","logs":"%s","components":{' \
-    "$BACKEND_PORT" "$FRONTEND_PORT" "$DESKTOP_RENDERER_PORT" "$(json_escape "$DB_NAME")" "$(json_escape "$PROFILE")" \
+  printf '"backend_port":%s,"frontend_port":%s,"collab_port":%s,"desktop_renderer_port":%s,"desktop_cdp_port":%s,"workspace_slug":"%s","database":"%s","profile":"%s","env_file":"%s","logs":"%s","components":{' \
+    "$BACKEND_PORT" "$FRONTEND_PORT" "$COLLAB_PORT" "$DESKTOP_RENDERER_PORT" "${DESKTOP_CDP_PORT:-null}" \
+    "$(json_escape "$WORKSPACE_SLUG")" "$(json_escape "$DB_NAME")" "$(json_escape "$PROFILE")" \
     "$(json_escape "$ENV_FILE")" "$(json_escape "$LOG_DIR")"
   for comp in $ALL_COMPONENTS; do
     row="$(component_state "$comp")"
@@ -1023,7 +1652,12 @@ print_status_json() {
 }
 
 print_handoff() {
-  local entrypoint
+  local entrypoint live_docs
+  if [ -n "$(api_collab_url)" ]; then
+    live_docs="collab on :${COLLAB_PORT}, reached through the backend's /collab"
+  else
+    live_docs="off (collab is not running); docs save through the API"
+  fi
   if component_selected web; then
     entrypoint="Open        http://localhost:${FRONTEND_PORT}/${WORKSPACE_SLUG}/issues"
   elif component_selected desktop; then
@@ -1031,13 +1665,22 @@ print_handoff() {
   else
     entrypoint="API only    http://localhost:${BACKEND_PORT}"
   fi
+  if component_selected desktop; then
+    entrypoint="${entrypoint}
+  Desktop     signed in as ${DEV_EMAIL}, workspace /${WORKSPACE_SLUG}/issues"
+    [ -z "${DESKTOP_CDP_PORT:-}" ] || entrypoint="${entrypoint}
+  CDP         http://127.0.0.1:${DESKTOP_CDP_PORT}   (chromium.connectOverCDP)"
+  fi
   cat <<EOF
 
 ${C_GREEN}✓ Environment ready.${C_OFF}
 
   ${entrypoint}
   Sign in     ${DEV_EMAIL}  ·  code ${MULTICA_DEV_VERIFICATION_CODE:-$DEV_CODE_DEFAULT}
+  Token       profile ${PROFILE} (onboarded, workspace /${WORKSPACE_SLUG})
+  Fixtures    make env-exec ARGS="-- node scripts/dev-fixtures.mjs all"
   Backend     http://localhost:${BACKEND_PORT}   (GET /health reports pid + commit + started_at)
+  Live docs   ${live_docs}
   Commit      $(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)
   Environment ${NAME}$( [ "${TTL_HOURS:-0}" != 0 ] && printf ' (expires %s)' "$EXPIRES_AT" )
 
@@ -1066,9 +1709,11 @@ bind_paths() {
   PROFILE_DIR="$DEV_PROFILES_HOME/$PROFILE"
   WORKSPACES_ROOT="${WORKSPACES_ROOT:-$DEV_WORKSPACES_PARENT/multica_workspaces_$PROFILE}"
   DESKTOP_RENDERER_PORT="${DESKTOP_RENDERER_PORT:-$(renderer_port_for_offset "$OFFSET")}"
+  COLLAB_PORT="${COLLAB_PORT:-$(collab_port_for_offset "$OFFSET")}"
   DESKTOP_APP_SUFFIX="${DESKTOP_APP_SUFFIX:-$NAME}"
   DESKTOP_USER_DATA_DIR="${DESKTOP_USER_DATA_DIR:-$(desktop_user_data_dir "$DESKTOP_APP_SUFFIX")}"
   DESKTOP_ENV_FILE="${DESKTOP_ENV_FILE:-$DIR/apps/desktop/.env.development.local}"
+  DESKTOP_CDP_PORT="${DESKTOP_CDP_PORT:-}"
   EXPIRES_AT="${EXPIRES_AT:-}"
   MULTICA_BIN="$DIR/server/bin/multica"
   if [ ! -x "$MULTICA_BIN" ] && [ -x "$REPO_ROOT/server/bin/multica" ]; then
@@ -1089,6 +1734,7 @@ save_manifest() {
     write_manifest_value OFFSET "$OFFSET"
     write_manifest_value BACKEND_PORT "$BACKEND_PORT"
     write_manifest_value FRONTEND_PORT "$FRONTEND_PORT"
+    write_manifest_value COLLAB_PORT "$COLLAB_PORT"
     write_manifest_value DB_NAME "$DB_NAME"
     write_manifest_value DATABASE_URL "$DATABASE_URL"
     write_manifest_value PROFILE "$PROFILE"
@@ -1097,11 +1743,13 @@ save_manifest() {
     write_manifest_value DESKTOP_APP_SUFFIX "$DESKTOP_APP_SUFFIX"
     write_manifest_value DESKTOP_USER_DATA_DIR "$DESKTOP_USER_DATA_DIR"
     write_manifest_value DESKTOP_ENV_FILE "$DESKTOP_ENV_FILE"
+    write_manifest_value DESKTOP_CDP_PORT "${DESKTOP_CDP_PORT:-}"
   } > "$(manifest_of "$NAME")"
 }
 
 cmd_up() {
   local requested="$DEFAULT_COMPONENTS" name="" owner=human ttl=0 lifecycle_requested=0 comp
+  local cdp_request=""
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -1110,30 +1758,51 @@ cmd_up() {
       --name) name="$2"; shift 2 ;;
       --ephemeral) owner=agent; lifecycle_requested=1; [ "$ttl" != 0 ] || ttl=24; shift ;;
       --ttl) ttl="$2"; owner=agent; lifecycle_requested=1; shift 2 ;;
+      --cdp) cdp_request=auto; shift ;;
+      --remote-debugging-port) cdp_request="${2:-}"; shift 2 ;;
+      --remote-debugging-port=*) cdp_request="${1#*=}"; shift ;;
+      --no-cdp) cdp_request=off; shift ;;
       *) die "Unknown flag for up: $1" ;;
     esac
   done
 
   [ -z "$name" ] || require_env_name "$name"
   [ "$ttl" = 0 ] || require_ttl "$ttl"
+  case "$cdp_request" in
+    ""|auto|off) ;;
+    *) valid_port "$cdp_request" || die "--remote-debugging-port needs a port number between 1024 and 65535." ;;
+  esac
 
   for comp in $requested; do
     case " $ALL_COMPONENTS " in *" $comp "*) ;; *) die "Unknown component '$comp'. Valid: $ALL_COMPONENTS" ;; esac
   done
-  # web, daemon and desktop are all clients of the backend; selecting one
+  # Changing the port without the desktop component would rewrite the record
+  # while a running Desktop keeps serving the old port.
+  case " $requested " in
+    *" desktop "*) ;;
+    *) [ -z "$cdp_request" ] \
+         || die "--cdp, --remote-debugging-port and --no-cdp need the desktop component (C=desktop)." ;;
+  esac
+  # collab, web, daemon and desktop are all clients of the backend; selecting one
   # without api would produce an environment that cannot serve a single request.
   case " $requested " in *" api "*) ;; *) requested="api $requested" ;; esac
   COMPONENTS="$requested"
 
   # No resident cleanup service is required: every future environment start is
   # a safe opportunity to collect expired or directory-less environments.
-  cmd_gc --auto
+  # An explicit lifecycle change applies to this checkout's existing
+  # environment, including an expired one. Keep it for the renewal below.
+  local gc_args=(--auto)
+  if [ "$lifecycle_requested" = 1 ]; then
+    gc_args+=(--keep-current-checkout)
+  fi
+  cmd_gc "${gc_args[@]}"
 
   step "Prerequisites"
   local missing=() tool needed="node go curl"
   # pnpm is only required by the components that actually build JavaScript, so
   # `up C=api` works on a checkout that has never run an install.
-  if component_selected web || component_selected desktop; then needed="$needed pnpm"; fi
+  if component_selected web || component_selected desktop || component_selected collab; then needed="$needed pnpm"; fi
   for tool in $needed; do
     command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
   done
@@ -1144,15 +1813,6 @@ cmd_up() {
     export TMPDIR="$DEV_TMPDIR" TMP="$DEV_TMPDIR" TEMP="$DEV_TMPDIR"
   fi
   ok "node, go, curl found"
-
-  if component_selected daemon; then
-    local marker
-    marker="$(daemon_task_marker)"
-    [ -z "$marker" ] || die "The daemon component cannot start under a daemon-managed task.
-This checkout sits below $marker, and the CLI refuses 'daemon start' there so a
-task cannot spawn a second daemon competing for its own work.
-Start the rest with 'make up C=api,web', or run 'make up C=daemon' from your own shell."
-  fi
 
   step "Environment"
   ENV_FILE="$(detect_env_file)"
@@ -1191,11 +1851,14 @@ Start the rest with 'make up C=api,web', or run 'make up C=daemon' from your own
     # A slot is adopted only when the registry does not hold it and both ports
     # are genuinely free; otherwise a fresh one is allocated and the env file is
     # rewritten, which is the whole point of allocating instead of computing.
-    local candidate_renderer
+    local candidate_renderer candidate_collab
     candidate_renderer="$(renderer_port_for_offset "$offset")"
+    candidate_collab="$(collab_port_for_offset "$offset")"
     if [ "$PORT" -lt 18080 ] || [ "$FRONTEND_PORT" -ne $((13000 + offset)) ] \
+      || [ -n "$(slot_identity_problem "$offset" "$PORT" "$POSTGRES_DB" "${DATABASE_URL:-}")" ] \
       || offset_registered "$offset" || ! port_free "$PORT" \
-      || ! port_free "$FRONTEND_PORT" || ! port_free "$candidate_renderer"; then
+      || ! port_free "$FRONTEND_PORT" || ! port_free "$candidate_renderer" \
+      || ! port_free "$candidate_collab"; then
       if [ "$PORT" -ge 18080 ] && { offset_registered "$offset" || ! port_free "$PORT"; }; then
         warn "Slot $offset (port $PORT) is taken: $(describe_port_owner "$PORT"). Allocating another."
       fi
@@ -1204,17 +1867,24 @@ Start the rest with 'make up C=api,web', or run 'make up C=daemon' from your own
       local new_db="multica_$(slugify "$(basename "$REPO_ROOT")")_${offset}"
       rewrite_env_ports "$ENV_FILE" "$offset" "$new_backend" "$new_frontend" "$new_db"
       load_env_file "$ENV_FILE"
+      verify_env_ports "$ENV_FILE" "$new_backend" "$new_frontend" "$new_db"
       info "Allocated slot $offset — backend $new_backend, frontend $new_frontend, database $new_db"
     fi
+    local identity_problem
+    identity_problem="$(slot_identity_problem "$offset" "$PORT" "$POSTGRES_DB" "${DATABASE_URL:-}")"
+    [ -z "$identity_problem" ] \
+      || die "Refusing to register an environment for $ENV_FILE: $identity_problem. destroy would delete what the manifest names."
 
     NAME="${name:-$(slugify "$(basename "$REPO_ROOT")")-${offset}}"
     require_env_name "$NAME"
     PROFILE="dev-$(slugify "$(basename "$REPO_ROOT")")-${offset}"
     WORKSPACES_ROOT="$DEV_WORKSPACES_PARENT/multica_workspaces_$PROFILE"
     DESKTOP_RENDERER_PORT="$(renderer_port_for_offset "$offset")"
+    COLLAB_PORT="$(collab_port_for_offset "$offset")"
     DESKTOP_APP_SUFFIX="$NAME"
     DESKTOP_USER_DATA_DIR="$(desktop_user_data_dir "$DESKTOP_APP_SUFFIX")"
     DESKTOP_ENV_FILE="$REPO_ROOT/apps/desktop/.env.development.local"
+    DESKTOP_CDP_PORT=""
     [ ! -f "$(manifest_of "$NAME")" ] || die "Environment '$NAME' already exists for a different directory."
     mkdir -p "$(env_dir "$NAME")/logs"
     DIR="$REPO_ROOT"
@@ -1230,6 +1900,31 @@ Start the rest with 'make up C=api,web', or run 'make up C=daemon' from your own
     load_manifest "$NAME"
     ok "Registered environment $NAME"
   fi
+  sync_slot_urls "$ENV_FILE" "$BACKEND_PORT" "$FRONTEND_PORT"
+  bind_paths
+  # The CDP port is recorded like any other allocation: later `make up` runs
+  # and restarts keep it until --no-cdp clears it.
+  local previous_cdp="$DESKTOP_CDP_PORT"
+  case "$cdp_request" in
+    "") ;;
+    off) DESKTOP_CDP_PORT="" ;;
+    auto)
+      if [ -z "$DESKTOP_CDP_PORT" ]; then
+        DESKTOP_CDP_PORT="$(allocate_cdp_port "$NAME" $((CDP_PORT_BASE + OFFSET)))" \
+          || die "No free port for the Desktop CDP endpoint; pass --remote-debugging-port N."
+      fi
+      ;;
+    *)
+      ! cdp_port_registered "$cdp_request" "$NAME" \
+        || die "Port $cdp_request is already the CDP port of another environment."
+      DESKTOP_CDP_PORT="$cdp_request"
+      ;;
+  esac
+  DESKTOP_CDP_CHANGED=0
+  if [ "$DESKTOP_CDP_PORT" != "$previous_cdp" ]; then
+    DESKTOP_CDP_CHANGED=1
+    save_manifest
+  fi
   release_lock
   trap - EXIT
 
@@ -1238,7 +1933,7 @@ Start the rest with 'make up C=api,web', or run 'make up C=daemon' from your own
   # sees the same values the registry recorded.
   export PORT="$BACKEND_PORT" FRONTEND_PORT DATABASE_URL POSTGRES_DB="$DB_NAME"
 
-  if [ ! -d "$REPO_ROOT/node_modules" ] && { component_selected web || component_selected desktop; }; then
+  if [ ! -d "$REPO_ROOT/node_modules" ] && { component_selected web || component_selected desktop || component_selected collab; }; then
     step "Dependencies"
     (cd "$REPO_ROOT" && pnpm install) || die "pnpm install failed."
   fi
@@ -1248,13 +1943,24 @@ Start the rest with 'make up C=api,web', or run 'make up C=daemon' from your own
   migrate_database
   ok "$DB_NAME reachable through DATABASE_URL and migrated"
 
+  component_selected desktop || sync_desktop_env_file
+
   step "Components: $COMPONENTS"
   component_selected api && start_api
+  component_selected collab && start_collab
+  seed_dev_workspace
   component_selected web && start_web
   component_selected daemon && start_daemon
   component_selected desktop && start_desktop
 
   print_handoff
+}
+
+# collab saves open docs through the API on its way out, so it stops first.
+stop_order() {
+  local comp
+  for comp in "$@"; do [ "$comp" != collab ] || printf 'collab '; done
+  for comp in "$@"; do [ "$comp" = collab ] || printf '%s ' "$comp"; done
 }
 
 cmd_down() {
@@ -1273,14 +1979,20 @@ cmd_down() {
   local comp
   for comp in $requested; do
     case " $ALL_COMPONENTS " in *" $comp "*) ;; *) die "Unknown component '$comp'. Valid: $ALL_COMPONENTS" ;; esac
+  done
+  for comp in $(stop_order $requested); do
     stop_component "$comp"
   done
-  printf '\n%s✓ %s stopped.%s Database, profile and slot kept — `make up` restarts in seconds.\n' "$C_GREEN" "$NAME" "$C_OFF"
+  if [ "$requested" = "$ALL_COMPONENTS" ]; then
+    printf '\n%s✓ %s stopped.%s Database, profile and slot kept — `make up` restarts in seconds.\n' "$C_GREEN" "$NAME" "$C_OFF"
+  else
+    printf '\n%s✓ %s: stopped %s.%s Other components were left as they were — `make status` shows them.\n' "$C_GREEN" "$NAME" "$requested" "$C_OFF"
+  fi
 }
 
 cmd_destroy() {
-  local name="" assume_yes=0 reply admin_url failures=0
-  local expected_workspaces expected_desktop_data
+  local name="" assume_yes=0 reply admin_url db_user failures=0
+  local expected_workspaces expected_desktop_data desktop_profile_dir
   while [ $# -gt 0 ]; do
     case "$1" in
       --yes|-y) assume_yes=1; shift ;;
@@ -1298,12 +2010,18 @@ cmd_destroy() {
 
   export PORT="$BACKEND_PORT" FRONTEND_PORT DATABASE_URL POSTGRES_DB="$DB_NAME"
   step "Destroying $NAME"
-  local comp
-  for comp in $ALL_COMPONENTS; do
-    if ! stop_component "$comp"; then failures=$((failures + 1)); fi
+  local comp desktop_stopped=1
+  for comp in $(stop_order $ALL_COMPONENTS); do
+    if ! stop_component "$comp"; then
+      failures=$((failures + 1))
+      [ "$comp" != desktop ] || desktop_stopped=0
+    fi
   done
 
-  if command -v psql >/dev/null 2>&1; then
+  if ! slot_database_name_ok "$DB_NAME" "$OFFSET"; then
+    warn "refusing to drop database $DB_NAME: it is not slot $OFFSET's database (multica_<slug>_$OFFSET)"
+    failures=$((failures + 1))
+  elif command -v psql >/dev/null 2>&1; then
     admin_url="$(admin_database_url "$DATABASE_URL")"
     if PGCONNECT_TIMEOUT=3 psql "$admin_url" -tAc 'SELECT 1' >/dev/null 2>&1; then
       if psql "$admin_url" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS \"$DB_NAME\" WITH (FORCE)" >/dev/null; then
@@ -1317,8 +2035,18 @@ cmd_destroy() {
       failures=$((failures + 1))
     fi
   else
-    warn "psql not found; $DB_NAME was left in place."
-    failures=$((failures + 1))
+    db_user="$(container_database_user "$DATABASE_URL")"
+    if [ -n "$db_user" ] && container_psql "$db_user" -tAc 'SELECT 1' >/dev/null 2>&1; then
+      if container_psql "$db_user" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS \"$DB_NAME\" WITH (FORCE)" >/dev/null; then
+        ok "dropped database $DB_NAME through the shared PostgreSQL container"
+      else
+        warn "failed to drop database $DB_NAME; keeping its manifest"
+        failures=$((failures + 1))
+      fi
+    else
+      warn "psql not found and the shared PostgreSQL container is not reachable; $DB_NAME was left in place."
+      failures=$((failures + 1))
+    fi
   fi
 
   if rm -rf "$PROFILE_DIR"; then
@@ -1348,6 +2076,26 @@ cmd_destroy() {
   else
     warn "failed to remove Desktop userData $DESKTOP_USER_DATA_DIR"
     failures=$((failures + 1))
+  fi
+
+  # The profile holds the daemon's pid and config, which a retried destroy
+  # needs to stop it; keep it until Desktop and its daemon are confirmed gone.
+  desktop_profile_dir="$DEV_PROFILES_HOME/$(desktop_daemon_profile)"
+  if ! slot_backend_port_ok "$BACKEND_PORT" "$OFFSET"; then
+    if [ -d "$desktop_profile_dir" ]; then
+      warn "refusing to remove Desktop's CLI profile $(desktop_daemon_profile): :$BACKEND_PORT is not slot $OFFSET's backend port"
+      failures=$((failures + 1))
+    fi
+  elif [ "$desktop_stopped" != 1 ]; then
+    [ ! -d "$desktop_profile_dir" ] \
+      || warn "kept Desktop's CLI profile $(desktop_daemon_profile) for the retry"
+  elif [ -d "$desktop_profile_dir" ]; then
+    if rm -rf "$desktop_profile_dir"; then
+      ok "removed Desktop's CLI profile $(desktop_daemon_profile)"
+    else
+      warn "failed to remove Desktop's CLI profile $desktop_profile_dir"
+      failures=$((failures + 1))
+    fi
   fi
 
   if [ -f "$DESKTOP_ENV_FILE" ] \
@@ -1420,11 +2168,12 @@ EOF
 # in psql: an environment whose directory is gone, or whose TTL has passed, has
 # no owner left to stop it.
 cmd_gc() {
-  local dry_run=0 automatic=0 name age_hours created_epoch expiry_epoch reason
+  local dry_run=0 automatic=0 keep_current_checkout=0 name age_hours created_epoch expiry_epoch reason
   while [ $# -gt 0 ]; do
     case "$1" in
       --dry-run) dry_run=1 ;;
       --auto) automatic=1 ;;
+      --keep-current-checkout) keep_current_checkout=1 ;;
       *) die "Unknown flag for gc: $1" ;;
     esac
     shift
@@ -1434,6 +2183,9 @@ cmd_gc() {
     [ -n "$name" ] || continue
     (
       load_manifest "$name"
+      if [ "$keep_current_checkout" = 1 ] && [ "$DIR" = "$REPO_ROOT" ]; then
+        exit 0
+      fi
       reason=""
       [ -d "$DIR" ] || reason="its checkout directory is gone"
       if [ -z "$reason" ] && [ "${TTL_HOURS:-0}" != 0 ]; then
@@ -1481,6 +2233,13 @@ cmd_exec() {
   export PORT="$BACKEND_PORT" FRONTEND_PORT DATABASE_URL POSTGRES_DB="$DB_NAME"
   export TMPDIR="$DEV_TMPDIR" TMP="$DEV_TMPDIR" TEMP="$DEV_TMPDIR"
   export MULTICA_DEV_PROFILE="$PROFILE"
+  # Read by scripts/desktop-cdp.mjs to find this environment's Desktop.
+  export MULTICA_DEV_DESKTOP_RENDERER_URL="http://localhost:${DESKTOP_RENDERER_PORT}"
+  if [ -n "${DESKTOP_CDP_PORT:-}" ]; then
+    export MULTICA_DEV_DESKTOP_CDP_URL="http://127.0.0.1:${DESKTOP_CDP_PORT}"
+  else
+    unset MULTICA_DEV_DESKTOP_CDP_URL
+  fi
   exec "${CLEAN_ENV[@]}" MULTICA_WORKSPACES_ROOT="$WORKSPACES_ROOT" "$@"
 }
 
@@ -1488,8 +2247,9 @@ usage() {
   cat <<'EOF'
 Local development environments: named, listable, deletable.
 
-  dev-env.sh up      [--components api,web,daemon,desktop] [--all]
+  dev-env.sh up      [--components api,collab,web,daemon,desktop] [--all]
                      [--name N] [--ephemeral] [--ttl HOURS]
+                     [--cdp | --remote-debugging-port N | --no-cdp]
   dev-env.sh status  [name] [--json]
   dev-env.sh list    [--json]
   dev-env.sh down    [name] [--components ...]
@@ -1497,11 +2257,21 @@ Local development environments: named, listable, deletable.
   dev-env.sh gc      [--dry-run]
   dev-env.sh exec    [name] -- <command> [args...]
 
-Components: api (Go backend), web (Next.js), daemon (agent daemon),
-desktop (Electron). Anything selected implies api.
+Components: api (Go backend), collab (live doc co-editing), web (Next.js),
+daemon (agent daemon), desktop (Electron). Anything selected implies api.
+The default is api,collab,web. Without a running collab, docs save through
+the API instead of being edited live.
 
-down keeps the database, the CLI profile and the allocated slot.
-destroy consumes them.
+Every environment has an onboarded workspace with two issues, signed in
+through its CLI profile; scripts/dev-fixtures.mjs adds chat, Agent Builder,
+wide-markdown issue content, a running agent task and a Work panel with
+notifications, pins and projects. desktop starts signed in. --cdp exposes a
+Chrome DevTools Protocol port (printed by up and status --json) for Playwright's
+connectOverCDP; the port is kept for later runs until --no-cdp.
+
+down keeps the database, the CLI profile and the allocated slot; with
+--components (make down C=daemon) it stops only those and leaves the rest
+running. destroy consumes them and always acts on the whole environment.
 EOF
 }
 

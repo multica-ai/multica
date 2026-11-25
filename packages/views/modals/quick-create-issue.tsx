@@ -5,6 +5,7 @@ import {
   ArrowLeftRight,
   CalendarDays,
   Check,
+  ChevronDown,
   ChevronRight,
   FolderKanban,
   Maximize2,
@@ -34,7 +35,9 @@ import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { AppLink, resolveClickIntent } from "../navigation";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { isProjectArchived } from "@multica/core/projects";
 import {
+  rankFrequentActors,
   useQuickCreateStore,
   type QuickCreateActorType,
 } from "@multica/core/issues/stores/quick-create-store";
@@ -50,7 +53,13 @@ import {
   checkQuickCreateFieldsCliVersion,
   readRuntimeCliVersion,
 } from "@multica/core/runtimes";
-import { useShortcut } from "@multica/core/shortcuts";
+import {
+  createShortcutChord,
+  shortcutMatchesEvent,
+  useShortcut,
+  type ShortcutChord,
+} from "@multica/core/shortcuts";
+import { isImeComposing } from "@multica/core/utils";
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { DeferredTooltip } from "../common/deferred-tooltip";
 import {
@@ -62,6 +71,7 @@ import {
 } from "@multica/core/types";
 import { ActorAvatar } from "../common/actor-avatar";
 import { ClearablePillButton, PillButton } from "../common/pill-button";
+import { useComposerVoice, VoiceDialogFooter, VoiceMicButton } from "../voice";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { DueDatePicker, PriorityIcon, PriorityPicker } from "../issues/components";
 import { canAssignAgent } from "../issues/components/pickers/assignee-picker";
@@ -85,13 +95,22 @@ import {
 import { useIssueCreateUploads } from "./use-issue-create-uploads";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useT } from "../i18n";
+import { StorageLimitNotice, storageLimitRefusal, type StorageLimitRefusal } from "../billing/storage-limit-notice";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";
 import { SourceContextPreviewCard, useSourceContextFailureMessage } from "./source-context-preview";
-import { useIssueLimitUpgradePrompt } from "./use-issue-limit-upgrade-prompt";
 
 type ActorSelection =
   | { type: "agent"; id: string }
   | { type: "squad"; id: string };
+
+const sameActor = (a: ActorSelection | null, b: ActorSelection | null) =>
+  !!a && !!b && a.type === b.type && a.id === b.id;
+
+// ⌥1–⌥3 pick the quick-switch chips. Command/Ctrl+digit is not available:
+// browsers and the desktop tab strip own it (PRIMARY_RESERVED_VARIANTS).
+const QUICK_SWITCH_SHORTCUTS: readonly ShortcutChord[] = ["1", "2", "3"].map((key) =>
+  createShortcutChord(key, { alt: true }),
+);
 
 // AgentCreatePanel — agent-mode body of the create-issue dialog. Renders
 // only the inner content; the surrounding `<Dialog>` AND `<DialogContent>`
@@ -139,7 +158,6 @@ export function AgentCreatePanel({
     : undefined;
   const onSourceContextExpandedChange = data?.source_context_on_expanded_change as ((expanded: boolean) => void) | undefined;
   const sourceContextFailureMessage = useSourceContextFailureMessage();
-  const showIssueLimitUpgradePrompt = useIssueLimitUpgradePrompt();
   const userId = useAuthStore((s) => s.user?.id);
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
@@ -188,6 +206,11 @@ export function AgentCreatePanel({
   const lastActorType = useQuickCreateStore((s) => s.lastActorType);
   const lastActorId = useQuickCreateStore((s) => s.lastActorId);
   const setLastActor = useQuickCreateStore((s) => s.setLastActor);
+  const countActorCreate = useQuickCreateStore((s) => s.countActorCreate);
+  // Ranked from the counts as they were when the dialog opened: a create in
+  // keep-open mode must not reorder the chips under ⌥1–⌥3 mid-session.
+  const actorCreateCounts = useQuickCreateStore((s) => s.actorCreateCounts);
+  const [countsAtOpen] = useState(actorCreateCounts);
   const visibleFields = useIssueCreateSettingsStore((s) => s.quickCreateFields);
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
@@ -270,6 +293,44 @@ export function AgentCreatePanel({
     return visibleSquads.find((s) => s.id === actor.id);
   }, [actor, visibleSquads]);
 
+  const frequentActors = useMemo<ActorSelection[]>(
+    () =>
+      rankFrequentActors(
+        countsAtOpen,
+        [
+          ...visibleAgents.map((a) => ({ type: "agent" as const, id: a.id })),
+          ...visibleSquads.map((s) => ({ type: "squad" as const, id: s.id })),
+        ],
+        QUICK_SWITCH_SHORTCUTS.length,
+      ),
+    [countsAtOpen, visibleAgents, visibleSquads],
+  );
+
+  const pickActor = useCallback(
+    (next: ActorSelection) => {
+      setActor(next);
+      setAgent({ actorType: next.type, actorId: next.id });
+      setError(null);
+    },
+    [setAgent],
+  );
+
+  // Capture phase on the document so the chord is handled before the prompt
+  // editor sees it: on macOS ⌥1 would otherwise type "¡".
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || isImeComposing(e)) return;
+      const index = QUICK_SWITCH_SHORTCUTS.findIndex((s) => shortcutMatchesEvent(s, e));
+      const next = frequentActors[index];
+      if (!next) return;
+      e.preventDefault();
+      e.stopPropagation();
+      pickActor(next);
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  }, [frequentActors, pickActor]);
+
   // Unfinished selections live in the shared issue-create draft. The
   // last-successful actor remains a separate fallback, so closing a draft
   // never overwrites the default established by an actual create.
@@ -277,10 +338,11 @@ export function AgentCreatePanel({
   // Project has exactly two seeds, both carrying explicit user intent: the
   // project page (or manual panel) the modal was opened from, and the user's
   // own unfinished draft. It is deliberately NOT seeded from the last create
-  // — see quick-create-store (MUL-5862).
+  // — see quick-create-store (MUL-5862). An opener that passes `project_id:
+  // null` ("No project") means none, so the draft's does not fill in.
   const [projectId, setProjectId] = useState<string | null>(() => {
-    const seed = (data?.project_id as string | undefined) ?? draft.shared.projectId;
-    return seed ?? null;
+    if (data && "project_id" in data) return (data.project_id as string | null | undefined) ?? null;
+    return draft.shared.projectId ?? null;
   });
   const [priority, setPriority] = useState<IssuePriority>(
     (data?.priority as IssuePriority | undefined) ?? draft.shared.priority,
@@ -309,12 +371,13 @@ export function AgentCreatePanel({
   // Stale-id sweep. Once the project list query has actually resolved
   // (`isSuccess` — distinct from "data is the empty default during loading"),
   // a `projectId` that isn't in the list means the project was deleted in
-  // another session. Clear local state AND the unfinished draft — the draft
-  // is the only persisted copy left, and leaving it would make the next open
-  // re-seed and submit the same dead value.
+  // another session; an archived one takes no new issues either. Clear local
+  // state AND the unfinished draft — the draft is the only persisted copy
+  // left, and leaving it would make the next open re-seed and submit the same
+  // dead value.
   useEffect(() => {
     if (!projectsLoaded || projectId === null) return;
-    if (projects.some((p) => p.id === projectId)) return;
+    if (projects.some((p) => p.id === projectId && !isProjectArchived(p))) return;
     setProjectId(null);
     if (draft.shared.projectId === projectId) {
       setShared({ projectId: undefined });
@@ -373,7 +436,13 @@ export function AgentCreatePanel({
     (baseVersionCheck.state !== "ok" ||
       (usesExplicitFields && fieldVersionCheck.state !== "ok"));
 
-  const initialPrompt = draft.agent.prompt || (data?.prompt as string) || "";
+  // An opener's prompt (⌘K "Hand to agent") is newer than any unfinished
+  // draft, so it wins, and is written through so a mode switch keeps it.
+  const seedPrompt = typeof data?.prompt === "string" && data.prompt.trim() ? data.prompt : null;
+  const initialPrompt = seedPrompt ?? (draft.agent.prompt || "");
+  useEffect(() => {
+    if (seedPrompt) setAgent({ prompt: seedPrompt });
+  }, [seedPrompt, setAgent]);
   // The editor is uncontrolled — we read the latest markdown via the ref at
   // submit/switch time. `hasContent` mirrors emptiness so the Create button
   // can disable correctly without a controlled-input rerender on every keystroke.
@@ -391,7 +460,10 @@ export function AgentCreatePanel({
     attachments: pendingAttachments,
     handleUpload: handleUploadFile,
     gate,
+    storageRefusal,
+    dismissStorageRefusal,
   } = useIssueCreateUploads("agent", uploadGate, editorRef);
+  const [storageCopyRefusal, setStorageCopyRefusal] = useState<StorageLimitRefusal | null>(null);
   // The Qoder bridge cannot read attachments, so the issue it creates would be
   // assigned to an agent whose run fails immediately. Block instead of
   // silently dropping the attachment; the server re-checks.
@@ -482,12 +554,20 @@ export function AgentCreatePanel({
           });
         }
         setLastActor(actor.type, actor.id);
+        countActorCreate(actor.type, actor.id);
         setLastMode("agent");
         toast.success(t(($) => $.create_issue.agent.toast_sent), {
           duration: 4000,
         });
         return true;
       } catch (e) {
+        // A sub-issue copies its source attachments; a full workspace refuses
+        // that before creating anything (MUL-9489).
+        const copyRefusal = anchorCommentId ? storageLimitRefusal(e, "") : null;
+        if (copyRefusal) {
+          setStorageCopyRefusal({ ...copyRefusal, kind: "copy" });
+          return false;
+        }
         // Server returns 422 with { code, ... } for the structured rejection
         // paths the modal cares about. Surface the reason in-modal so the
         // user can switch to a live agent / upgrade their daemon without
@@ -499,10 +579,6 @@ export function AgentCreatePanel({
             current_version?: string;
             min_version?: string;
           };
-          if (body.code === "issue_limit_reached") {
-            showIssueLimitUpgradePrompt();
-            return false;
-          }
           if (body.code === "agent_unavailable") {
             setError(body.reason || t(($) => $.create_issue.agent.error_agent_unavailable_fallback));
             return false;
@@ -588,6 +664,11 @@ export function AgentCreatePanel({
     void composer.submit();
   };
   const submitting = composer.submitting;
+  const canCreate = !!actor && !versionBlocked && !qoderAttachmentBlocked && !(anchorCommentId && !sourcePreview);
+  const voice = useComposerVoice({
+    insert: (text) => editorRef.current?.insertText(text) ?? false,
+    submit: canCreate ? submit : undefined,
+  });
 
   // Switch to the manual form WITHOUT destroying the agent draft. The agent
   // slot (prompt + actor) is left untouched so a later manual→agent flip
@@ -661,7 +742,6 @@ export function AgentCreatePanel({
               shortcut={sendShortcut}
               decorative
               className="ml-1 max-sm:hidden"
-              keyClassName="border-background/30 bg-background/15 text-primary-foreground shadow-none"
             />
           ) : null}
         </>
@@ -723,15 +803,12 @@ export function AgentCreatePanel({
         <div className="px-5 pt-1 pb-2 shrink-0">
           <ActorPicker
             actor={actor}
+            frequentActors={frequentActors}
             visibleAgents={visibleAgents}
             visibleSquads={visibleSquads}
             selectedAgent={selectedAgent}
             selectedSquad={selectedSquad}
-            onPick={(next) => {
-              setActor(next);
-              setAgent({ actorType: next.type, actorId: next.id });
-              setError(null);
-            }}
+            onPick={pickActor}
             t={t}
           />
         </div>
@@ -762,6 +839,8 @@ export function AgentCreatePanel({
             editor unbounded and pushed the modal past the viewport. */}
         <div
           {...dropZoneProps}
+          ref={voice.rootRef}
+          onFocusCapture={voice.onFocusCapture}
           className="relative px-5 pb-3 flex flex-1 min-h-[140px] overflow-y-auto"
         >
           <ContentEditor
@@ -782,6 +861,17 @@ export function AgentCreatePanel({
           />
           {isDragOver && <FileDropOverlay />}
         </div>
+
+        {storageRefusal && (
+          <StorageLimitNotice refusal={storageRefusal} onDismiss={dismissStorageRefusal} className="mx-5 mb-2" />
+        )}
+        {storageCopyRefusal && (
+          <StorageLimitNotice
+            refusal={storageCopyRefusal}
+            onDismiss={() => setStorageCopyRefusal(null)}
+            className="mx-5 mb-2"
+          />
+        )}
 
         {anchorCommentId && (
           <SourceContextPreviewCard
@@ -910,7 +1000,7 @@ export function AgentCreatePanel({
           {parentIssueId && (
             <span
               data-testid="agent-sub-issue-chip"
-              className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-caption text-muted-foreground"
+              className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-caption text-muted-foreground"
               title={t(($) => $.create_issue.agent.sub_issue_of, {
                 identifier: parentIssueIdentifier ?? "",
               })}
@@ -932,65 +1022,69 @@ export function AgentCreatePanel({
               attach group reproduces what `justify-between` did when the
               children were two wrapper divs, and `justify-self-end` goes
               inert on flex items. */}
-        <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2.5 border-t px-4 py-3 shrink-0 sm:flex sm:flex-wrap">
-          <div className="flex min-h-7 items-center gap-2 sm:mr-auto">
-            {/* Deliberately NOT disabled while uploading: each file is its
-                own queue entry, so queueing a second one is safe and waiting
-                for the first to land just to attach the next is busywork. */}
-            <FileUploadButton
-              size="sm"
-              multiple
-              onSelect={(file) => editorRef.current?.uploadFile(file)}
-            />
-            {keepOpen && sentCount > 0 && (
-              <span className="text-caption text-emerald-600 dark:text-emerald-400">
-                {t(($) => $.create_issue.agent.sent_count, { count: sentCount })}
-              </span>
+        <VoiceDialogFooter voice={voice}>
+          <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2.5 border-t px-4 py-3 shrink-0 sm:flex sm:flex-wrap">
+            <div className="flex min-h-7 items-center gap-2 sm:mr-auto">
+              {/* Deliberately NOT disabled while uploading: each file is its
+                  own queue entry, so queueing a second one is safe and waiting
+                  for the first to land just to attach the next is busywork. */}
+              <FileUploadButton
+                multiple
+                onSelect={(file) => editorRef.current?.uploadFile(file)}
+              />
+              <VoiceMicButton voice={voice} />
+              {keepOpen && sentCount > 0 && (
+                <span className="text-caption text-emerald-600 dark:text-emerald-400">
+                  {t(($) => $.create_issue.agent.sent_count, { count: sentCount })}
+                </span>
+              )}
+            </div>
+            <TooltipHint label={t(($) => $.create_issue.switch_to_manual_tooltip)}>
+              <button
+                type="button"
+                onClick={switchToManual}
+                disabled={gate.uploading}
+                aria-disabled={gate.uploading || undefined}
+                aria-busy={gate.uploading || undefined}
+                className="flex shrink-0 items-center gap-1.5 justify-self-end text-caption px-2 py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <ArrowLeftRight className="size-3.5" />
+                {t(($) => $.create_issue.switch_to_manual)}
+              </button>
+            </TooltipHint>
+            <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
+              <Switch
+                size="sm"
+                checked={keepOpen}
+                onCheckedChange={setKeepOpen}
+              />
+              {t(($) => $.create_issue.create_another)}
+            </label>
+            {versionBlocked ? (
+              <Tooltip>
+                <TooltipTrigger render={createButton} />
+                <TooltipContent side="top">
+                  {t(($) => $.create_issue.agent.version_blocked_tooltip, { min: versionCheck.min })}
+                </TooltipContent>
+              </Tooltip>
+            ) : (
+              createButton
             )}
           </div>
-          <TooltipHint label={t(($) => $.create_issue.switch_to_manual_tooltip)}>
-            <button
-              type="button"
-              onClick={switchToManual}
-              disabled={gate.uploading}
-              aria-disabled={gate.uploading || undefined}
-              aria-busy={gate.uploading || undefined}
-              className="flex shrink-0 items-center gap-1.5 justify-self-end text-caption px-2 py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <ArrowLeftRight className="size-3.5" />
-              {t(($) => $.create_issue.switch_to_manual)}
-            </button>
-          </TooltipHint>
-          <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
-            <Switch
-              size="sm"
-              checked={keepOpen}
-              onCheckedChange={setKeepOpen}
-            />
-            {t(($) => $.create_issue.create_another)}
-          </label>
-          {versionBlocked ? (
-            <Tooltip>
-              <TooltipTrigger render={createButton} />
-              <TooltipContent side="top">
-                {t(($) => $.create_issue.agent.version_blocked_tooltip, { min: versionCheck.min })}
-              </TooltipContent>
-            </Tooltip>
-          ) : (
-            createButton
-          )}
-        </div>
+        </VoiceDialogFooter>
     </>
   );
 }
 
-// ActorPicker — the "Created by" trigger + searchable popover listing
-// agents and squads. Lives in this file (not under issues/components/pickers)
-// because it composes the generic PropertyPicker with a quick-create-shaped
-// trigger styled to match the modal header row — promoting it would invite
-// reuse pressure on a UI that's deliberately tuned for this one surface.
+// ActorPicker — the "Created by" row: one chip per frequently used actor
+// (⌥1–⌥3), then a chevron opening the searchable popover of every agent and
+// squad. A pick from the popover that is not one of the chips gets its own
+// selected chip, so the ranked chips never shift under their shortcuts.
+// Lives in this file (not under issues/components/pickers) because it is
+// tuned for this one surface — promoting it would invite reuse pressure.
 function ActorPicker({
   actor,
+  frequentActors,
   visibleAgents,
   visibleSquads,
   selectedAgent,
@@ -999,6 +1093,7 @@ function ActorPicker({
   t,
 }: {
   actor: ActorSelection | null;
+  frequentActors: ActorSelection[];
   visibleAgents: Agent[];
   visibleSquads: Squad[];
   selectedAgent: Agent | undefined;
@@ -1019,89 +1114,163 @@ function ActorPicker({
     [visibleSquads, query],
   );
 
-  const displayLabel = selectedSquad?.name ?? selectedAgent?.name;
   const displayActor: ActorSelection | null = selectedSquad
     ? { type: "squad", id: selectedSquad.id }
     : selectedAgent
       ? { type: "agent", id: selectedAgent.id }
       : null;
+  const pinnedActor =
+    displayActor && !frequentActors.some((a) => sameActor(a, displayActor)) ? displayActor : null;
+  const nameOf = (a: ActorSelection) =>
+    (a.type === "agent"
+      ? visibleAgents.find((x) => x.id === a.id)?.name
+      : visibleSquads.find((x) => x.id === a.id)?.name) ?? "";
+  const allActorsLabel = t(($) => $.create_issue.agent.all_actors);
+  const hasChips = frequentActors.length > 0;
 
   return (
-    <PropertyPicker
-      open={open}
-      onOpenChange={(v: boolean) => {
-        setOpen(v);
-        if (!v) setFilter("");
-      }}
-      width="w-64"
-      align="start"
-      searchable
-      searchPlaceholder={t(($) => $.create_issue.agent.search_placeholder)}
-      onSearchChange={setFilter}
-      trigger={
-        <span className="flex items-center gap-2 text-caption text-muted-foreground hover:text-foreground transition-colors">
-          <span>{t(($) => $.create_issue.agent.created_by)}</span>
-          {displayActor && displayLabel ? (
-            <span className="flex items-center gap-1.5 text-foreground">
-              <ActorAvatar
-                actorType={displayActor.type}
-                actorId={displayActor.id}
-                size="sm"
-              />
-              {displayLabel}
-            </span>
+    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-caption">
+      <span className="text-muted-foreground">{t(($) => $.create_issue.agent.created_by)}</span>
+      <div
+        role="group"
+        aria-label={t(($) => $.create_issue.agent.frequent_actors_aria)}
+        className="flex min-w-0 flex-wrap items-center gap-0.5"
+      >
+        {frequentActors.map((a, i) => (
+          <ActorChip
+            key={`${a.type}:${a.id}`}
+            actor={a}
+            name={nameOf(a)}
+            selected={sameActor(a, displayActor)}
+            shortcut={QUICK_SWITCH_SHORTCUTS[i]}
+            onClick={() => onPick(a)}
+          />
+        ))}
+        {pinnedActor && (
+          <>
+            <span aria-hidden="true" className="mx-1 h-3.5 w-px bg-border" />
+            <ActorChip
+              actor={pinnedActor}
+              name={nameOf(pinnedActor)}
+              selected
+              onClick={() => onPick(pinnedActor)}
+            />
+          </>
+        )}
+      </div>
+      <PropertyPicker
+        open={open}
+        onOpenChange={(v: boolean) => {
+          setOpen(v);
+          if (!v) setFilter("");
+        }}
+        width="w-64"
+        align="start"
+        searchable
+        searchPlaceholder={t(($) => $.create_issue.agent.search_placeholder)}
+        onSearchChange={setFilter}
+        tooltip={hasChips ? allActorsLabel : undefined}
+        triggerRender={
+          <button
+            type="button"
+            aria-label={hasChips ? allActorsLabel : undefined}
+            className={cn(
+              "flex h-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/60 hover:text-foreground data-popup-open:bg-accent data-popup-open:text-accent-foreground transition-colors cursor-pointer",
+              hasChips ? "w-6" : "px-1.5",
+            )}
+          />
+        }
+        trigger={
+          hasChips ? (
+            <ChevronDown className="size-3.5" />
           ) : (
             <span>{t(($) => $.create_issue.agent.pick_an_agent)}</span>
-          )}
-        </span>
-      }
-    >
-      {filteredAgents.length === 0 && filteredSquads.length === 0 ? (
-        query ? (
-          <PickerEmpty />
+          )
+        }
+      >
+        {filteredAgents.length === 0 && filteredSquads.length === 0 ? (
+          query ? (
+            <PickerEmpty />
+          ) : (
+            <div className="px-2 py-1.5 text-caption text-muted-foreground">
+              {t(($) => $.create_issue.agent.no_agents)}
+            </div>
+          )
         ) : (
-          <div className="px-2 py-1.5 text-caption text-muted-foreground">
-            {t(($) => $.create_issue.agent.no_agents)}
-          </div>
-        )
-      ) : (
-        <>
-          {filteredAgents.length > 0 && (
-            <PickerSection label={t(($) => $.create_issue.agent.agents_group)}>
-              {filteredAgents.map((a) => (
-                <PickerItem
-                  key={a.id}
-                  selected={actor?.type === "agent" && actor.id === a.id}
-                  onClick={() => {
-                    onPick({ type: "agent", id: a.id });
-                    setOpen(false);
-                  }}
-                >
-                  <ActorAvatar actorType="agent" actorId={a.id} size="sm" />
-                  <span className="truncate">{a.name}</span>
-                </PickerItem>
-              ))}
-            </PickerSection>
-          )}
-          {filteredSquads.length > 0 && (
-            <PickerSection label={t(($) => $.create_issue.agent.squads_group)}>
-              {filteredSquads.map((s) => (
-                <PickerItem
-                  key={s.id}
-                  selected={actor?.type === "squad" && actor.id === s.id}
-                  onClick={() => {
-                    onPick({ type: "squad", id: s.id });
-                    setOpen(false);
-                  }}
-                >
-                  <ActorAvatar actorType="squad" actorId={s.id} size="sm" />
-                  <span className="truncate">{s.name}</span>
-                </PickerItem>
-              ))}
-            </PickerSection>
-          )}
-        </>
-      )}
-    </PropertyPicker>
+          <>
+            {filteredAgents.length > 0 && (
+              <PickerSection label={t(($) => $.create_issue.agent.agents_group)}>
+                {filteredAgents.map((a) => (
+                  <PickerItem
+                    key={a.id}
+                    selected={actor?.type === "agent" && actor.id === a.id}
+                    onClick={() => {
+                      onPick({ type: "agent", id: a.id });
+                      setOpen(false);
+                    }}
+                  >
+                    <ActorAvatar actorType="agent" actorId={a.id} size="sm" />
+                    <span className="truncate">{a.name}</span>
+                  </PickerItem>
+                ))}
+              </PickerSection>
+            )}
+            {filteredSquads.length > 0 && (
+              <PickerSection label={t(($) => $.create_issue.agent.squads_group)}>
+                {filteredSquads.map((s) => (
+                  <PickerItem
+                    key={s.id}
+                    selected={actor?.type === "squad" && actor.id === s.id}
+                    onClick={() => {
+                      onPick({ type: "squad", id: s.id });
+                      setOpen(false);
+                    }}
+                  >
+                    <ActorAvatar actorType="squad" actorId={s.id} size="sm" />
+                    <span className="truncate">{s.name}</span>
+                  </PickerItem>
+                ))}
+              </PickerSection>
+            )}
+          </>
+        )}
+      </PropertyPicker>
+    </div>
+  );
+}
+
+function ActorChip({
+  actor,
+  name,
+  selected,
+  shortcut,
+  onClick,
+}: {
+  actor: ActorSelection;
+  name: string;
+  selected: boolean;
+  shortcut?: ShortcutChord;
+  onClick: () => void;
+}) {
+  return (
+    <TooltipHint
+      label={name}
+      shortcut={shortcut ? <ShortcutKeycaps shortcut={shortcut} decorative /> : undefined}
+    >
+      <button
+        type="button"
+        aria-pressed={selected}
+        onClick={onClick}
+        className={cn(
+          "inline-flex h-6 min-w-0 max-w-36 items-center gap-1.5 rounded-md pr-2 pl-1 transition-colors cursor-pointer",
+          selected
+            ? "bg-surface-selected font-medium text-surface-selected-foreground"
+            : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+        )}
+      >
+        <ActorAvatar actorType={actor.type} actorId={actor.id} size="xs" />
+        <span className="truncate">{name}</span>
+      </button>
+    </TooltipHint>
   );
 }

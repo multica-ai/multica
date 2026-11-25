@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { locateInColumns, resolveIssueClick } from "./peek-context";
+import { hasIssueInColumns, locateInColumns, resolveIssueClick } from "./peek-context";
 
 describe("locateInColumns", () => {
   const columns = [["a", "b", "c"], [], ["d"]];
@@ -37,6 +37,18 @@ describe("locateInColumns", () => {
     expect(locateInColumns(columns, "zzz")).toBeNull();
     expect(locateInColumns(null, "a")).toBeNull();
     expect(locateInColumns(columns, null)).toBeNull();
+  });
+});
+
+describe("hasIssueInColumns", () => {
+  const columns = [["a", "b"], [], ["c"]];
+
+  it("checks whether an issue id exists in any column", () => {
+    expect(hasIssueInColumns(columns, "a")).toBe(true);
+    expect(hasIssueInColumns(columns, "c")).toBe(true);
+    expect(hasIssueInColumns(columns, "zzz")).toBe(false);
+    expect(hasIssueInColumns(null, "a")).toBe(false);
+    expect(hasIssueInColumns(columns, null)).toBe(false);
   });
 });
 

@@ -299,7 +299,11 @@ type delegatedFailureFixture struct {
 
 func seedDelegatedFailureFixture(t *testing.T) (*delegatedFailureFixture, *TaskService) {
 	t.Helper()
-	pool := newResolveOriginatorPool(t)
+	return seedDelegatedFailureFixtureIn(t, newResolveOriginatorPool(t))
+}
+
+func seedDelegatedFailureFixtureIn(t *testing.T, pool *pgxpool.Pool) (*delegatedFailureFixture, *TaskService) {
+	t.Helper()
 	ctx := context.Background()
 	workspaceID, userID, coordinatorID, issueID := seedAttributionFixture(t, pool)
 	if _, err := pool.Exec(ctx, `UPDATE issue SET status = 'in_progress' WHERE id = $1`, issueID); err != nil {
@@ -1051,6 +1055,33 @@ func (f *delegatedFailureFixture) insertOrphanedWorkerTask(t *testing.T, attempt
 	return task
 }
 
+func TestHandleFailedTasksUnconfirmedCleanupDoesNotDelegate(t *testing.T) {
+	for _, reason := range []string{"cleanup_unconfirmed", "cleanup_blocked"} {
+		t.Run(reason, func(t *testing.T) {
+			f, svc := seedDelegatedFailureFixture(t)
+			failedID := f.insertWorkerTask(t, "failed", "comment", 1, 2)
+			if _, err := f.pool.Exec(t.Context(), `UPDATE agent_task_queue SET failure_reason=$2, error='worker stop unconfirmed', completed_at=now() WHERE id=$1`, failedID, reason); err != nil {
+				t.Fatal(err)
+			}
+			failed, err := svc.Queries.GetAgentTask(t.Context(), failedID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			svc.HandleFailedTasks(t.Context(), []db.AgentTaskQueue{failed})
+			var recoveryTasks, recoveryComments int
+			if err := f.pool.QueryRow(t.Context(), `SELECT count(*) FROM agent_task_queue WHERE trigger_evidence_kind='delegated_failure' AND trigger_evidence_ref_id=$1`, failedID).Scan(&recoveryTasks); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.pool.QueryRow(t.Context(), `SELECT count(*) FROM comment WHERE issue_id=$1 AND type='progress_update' AND source_task_id=$2`, f.issueID, failedID).Scan(&recoveryComments); err != nil {
+				t.Fatal(err)
+			}
+			if recoveryTasks != 0 || recoveryComments != 0 {
+				t.Fatalf("cleanup failure dispatched coordinator work: tasks=%d comments=%d", recoveryTasks, recoveryComments)
+			}
+		})
+	}
+}
+
 func TestHandleFailedTasksTerminalFailureCommentsOnTaskIssue(t *testing.T) {
 	f, svc := seedDelegatedFailureFixture(t)
 	ctx := context.Background()
@@ -1307,5 +1338,44 @@ func TestPendingDelegatedFailureSweepSkipsTriageSourceIssue(t *testing.T) {
 	sweepDelegatedFailureRecoveries(t, svc)
 	if n := f.recoveryTasks(t, failedID); n != 1 {
 		t.Fatalf("recovery tasks after accept = %d, want 1", n)
+	}
+}
+
+// A squad member's recovery run, after work it handed on failed, still counts
+// toward the squad's usage: it continues the member's squad-attributed run.
+func TestDelegatedFailureRecoveryKeepsSquadUsage(t *testing.T) {
+	f, svc := seedDelegatedFailureFixture(t)
+	ctx := context.Background()
+	var squadID string
+	if err := f.pool.QueryRow(ctx, `
+		INSERT INTO squad (workspace_id, name, description, leader_id, creator_id)
+		VALUES ($1, 'usage squad', '', $2, $3)
+		RETURNING id`, f.workspaceID, f.worker, f.userID).Scan(&squadID); err != nil {
+		t.Fatalf("seed squad: %v", err)
+	}
+	t.Cleanup(func() {
+		f.pool.Exec(context.Background(), `DELETE FROM squad_member WHERE squad_id = $1`, squadID)
+		f.pool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID)
+	})
+	if _, err := f.pool.Exec(ctx, `INSERT INTO squad_member (squad_id, member_type, member_id) VALUES ($1, 'agent', $2)`, squadID, f.coordinator); err != nil {
+		t.Fatalf("seed squad member: %v", err)
+	}
+	// The member's own run was attributed to the squad, as a run the leader
+	// handed to it is.
+	if _, err := f.pool.Exec(ctx, `UPDATE agent_task_queue SET usage_squad_id = $2 WHERE id = $1`, f.sourceTask, squadID); err != nil {
+		t.Fatalf("attribute source task: %v", err)
+	}
+	failedID := f.insertWorkerTask(t, "running", "comment", 1, 1)
+	if _, err := svc.FailTask(ctx, failedID, "worker failed", "", "", "", "agent_error.process_failure", false, "", ""); err != nil {
+		t.Fatalf("FailTask: %v", err)
+	}
+	var usageSquad string
+	if err := f.pool.QueryRow(ctx, `
+		SELECT COALESCE(COALESCE(usage_squad_id, squad_id)::text, '') FROM agent_task_queue
+		WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&usageSquad); err != nil {
+		t.Fatalf("read recovery task: %v", err)
+	}
+	if usageSquad != squadID {
+		t.Fatalf("recovery run squad usage = %q, want %s", usageSquad, squadID)
 	}
 }

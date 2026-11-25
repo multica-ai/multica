@@ -1,13 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowRight, Check } from "@multica/ui/icons";
+import { ArrowRight } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { LocaleLink } from "@/components/locale-link";
-import { CoachMark, DemoFrame, useDemoCopy, useStartWhenVisible } from "./demo-kit";
+import { EditorialUtility, useDemoCopy } from "./demo-kit";
 
 type Choice = {
-  /** The situation, worded as in the page's table. */
   need: string;
   method: string;
   how: string;
@@ -19,8 +18,6 @@ type Choice = {
 const copy = {
   en: {
     title: "Which way should I start the work?",
-    needsLabel: "What you need",
-    useLabel: "Use",
     howLabel: "How",
     whyLabel: "Why",
     choices: [
@@ -44,7 +41,7 @@ const copy = {
         need: "Send the same kind of request often",
         method: "Quick action",
         how: "Save the request as a quick action and use it from the issue.",
-        why: "Save who to ask and what to say once, then use the same request on other issues.",
+        why: "Save who to ask and what to say once, then reuse the same request on other issues.",
         page: "Quick Actions",
         href: "/quick-actions",
       },
@@ -52,7 +49,7 @@ const copy = {
         need: "Pass work through a repeatable set of steps",
         method: "Workflow",
         how: "Choose a project workflow and who takes over at each step.",
-        why: "The description, discussion, and earlier results stay on the same issue, so whoever handles the next step picks up where the last one left off.",
+        why: "The description, discussion, and earlier results stay on the same issue so the next handler picks up in place.",
         page: "Workflows",
         href: "/workflows",
       },
@@ -60,7 +57,7 @@ const copy = {
         need: "Ask a question without creating an issue",
         method: "Chat",
         how: "Start a chat with the agent.",
-        why: "A chat is not bound to any issue, and the entire conversation is private to you.",
+        why: "A chat is not bound to any issue, and the entire conversation stays private to you.",
         page: "Chat with agents",
         href: "/chat",
       },
@@ -68,30 +65,23 @@ const copy = {
         need: "Start recurring work by time or an outside event",
         method: "Autopilot",
         how: "Create an autopilot with an assignee and one or more triggers.",
-        why: "When triggered, Multica creates an issue or runs the agent directly, and keeps a record of every run.",
+        why: "When triggered, Multica creates an issue or runs the agent directly and records every run.",
         page: "Autopilots",
         href: "/autopilots",
       },
       {
         need: "Have an agent come back to an issue later",
         method: "Wakeup",
-        how: "In the issue sidebar, add a wakeup with a time or an event to wait for.",
-        why: "When the time comes or the event happens, the agent starts a new run on the same issue and continues from where things stand.",
+        how: "In the issue sidebar, add a wakeup with a time or event condition.",
+        why: "When the condition holds, the agent starts a new run on the same issue from where things stand.",
         page: "Issue wakeups",
         href: "/issue-wakeups",
       },
     ] as Choice[],
     readMore: (page: string) => `Read: ${page}`,
-    captions: {
-      idle: "Seven things you might want an agent to do.",
-      start: "Pick what you need to see which way fits.",
-      picked: (method: string) => `Use ${method}. Pick another need to compare.`,
-    },
   },
   zh: {
     title: "该用哪种方式让智能体开始工作？",
-    needsLabel: "你想做什么",
-    useLabel: "使用",
     howLabel: "怎么做",
     whyLabel: "为什么",
     choices: [
@@ -115,7 +105,7 @@ const copy = {
         need: "经常发送同一类请求",
         method: "快捷操作",
         how: "把请求保存成快捷操作，在任务中直接使用。",
-        why: "保存一次\"请谁来做、做什么\"，之后就能在其他任务上重复使用。",
+        why: "保存一次「请谁来做、做什么」，之后就能在其他任务上重复使用。",
         page: "快捷操作",
         href: "/quick-actions",
       },
@@ -153,17 +143,73 @@ const copy = {
       },
     ] as Choice[],
     readMore: (page: string) => `详见${page}`,
-    captions: {
-      idle: "你可能想让智能体做的七类事。",
-      start: "选一件你想做的事，看看该用哪种方式。",
-      // Space before a method that starts with "@" or a Latin letter, e.g. "用 @提及".
-      picked: (method: string) => `用${/^[@A-Za-z]/.test(method) ? " " : ""}${method}。换一件事可以对比。`,
-    },
+  },
+  "zh-Hant": {
+    title: "該用哪種方式讓智能體開始工作？",
+    howLabel: "怎麼做",
+    whyLabel: "為什麼",
+    choices: [
+      {
+        need: "讓智能體負責一條任務",
+        method: "指派任務",
+        how: "開啟任務，點擊負責人，選擇智能體或小隊。",
+        why: "智能體會讀取任務的說明和討論，並把進展和結果寫回原來的任務。",
+        page: "指派任務給智能體",
+        href: "/assigning-issues",
+      },
+      {
+        need: "請求協助，保留原來的負責人",
+        method: "@提及",
+        how: "在評論中 @智能體，或回覆它的評論繼續討論。",
+        why: "評論會成為這次執行的起點，任務的負責人和狀態都不會改變。",
+        page: "在評論中 @智能體",
+        href: "/mentioning-agents",
+      },
+      {
+        need: "經常發送同一類請求",
+        method: "快捷操作",
+        how: "把請求儲存成快捷操作，在任務中直接使用。",
+        why: "儲存一次「請誰來做、做什麼」，之後就能在其他任務上重複使用。",
+        page: "快捷操作",
+        href: "/quick-actions",
+      },
+      {
+        need: "讓任務按固定步驟交給不同處理人",
+        method: "工作流",
+        how: "為專案選擇工作流，安排每一步由誰接手。",
+        why: "任務的描述、討論和之前的結果都留在原處，下一位處理人可以接著做。",
+        page: "工作流",
+        href: "/workflows",
+      },
+      {
+        need: "問一個問題，不需要新建任務",
+        method: "對話",
+        how: "與智能體開始對話。",
+        why: "對話不綁定某一條任務，整段對話完全私人。",
+        page: "與智能體對話",
+        href: "/chat",
+      },
+      {
+        need: "按時間或外部事件展開重複性工作",
+        method: "自動化",
+        how: "建立自動化，選好執行方和觸發器。",
+        why: "觸發後，Multica 會建立任務或直接執行智能體，並保留每一次執行記錄。",
+        page: "自動化",
+        href: "/autopilots",
+      },
+      {
+        need: "讓智能體之後再回到某條任務",
+        method: "任務喚醒",
+        how: "在任務側欄新增喚醒，設好要等的時間或事件。",
+        why: "時間到了或事件發生後，智能體在同一條任務上開始新的執行，接著現在的進度做。",
+        page: "任務喚醒",
+        href: "/issue-wakeups",
+      },
+    ] as Choice[],
+    readMore: (page: string) => `詳見${page}`,
   },
   ja: {
     title: "どの方法でエージェントに作業を始めてもらう？",
-    needsLabel: "やりたいこと",
-    useLabel: "使うもの",
     howLabel: "やり方",
     whyLabel: "理由",
     choices: [
@@ -225,16 +271,9 @@ const copy = {
       },
     ] as Choice[],
     readMore: (page: string) => `詳しくは${page}`,
-    captions: {
-      idle: "エージェントに頼みたいことは、主に 7 種類あります。",
-      start: "やりたいことを選ぶと、合う方法が表示されます。",
-      picked: (method: string) => `${method}を使います。別の項目を選ぶと比べられます。`,
-    },
   },
   ko: {
     title: "어떤 방식으로 작업을 시작할까요?",
-    needsLabel: "하고 싶은 일",
-    useLabel: "사용할 기능",
     howLabel: "방법",
     whyLabel: "이유",
     choices: [
@@ -296,17 +335,9 @@ const copy = {
       },
     ] as Choice[],
     readMore: (page: string) => `자세히: ${page}`,
-    captions: {
-      idle: "에이전트에게 맡길 만한 일 일곱 가지입니다.",
-      start: "하고 싶은 일을 고르면 맞는 방법을 보여 줍니다.",
-      // Phrased so no particle has to agree with the method's final consonant.
-      picked: (method: string) => `${method} 기능을 사용하세요. 다른 일을 골라 비교해 보세요.`,
-    },
   },
   fr: {
     title: "Comment lancer le travail ?",
-    needsLabel: "Votre besoin",
-    useLabel: "À utiliser",
     howLabel: "Comment",
     whyLabel: "Pourquoi",
     choices: [
@@ -368,88 +399,80 @@ const copy = {
       },
     ] as Choice[],
     readMore: (page: string) => `Voir : ${page}`,
-    captions: {
-      idle: "Sept choses que vous pourriez demander à un agent.",
-      start: "Choisissez votre besoin pour voir la méthode adaptée.",
-      picked: (method: string) => `À utiliser : ${method}. Choisissez un autre besoin pour comparer.`,
-    },
   },
 };
 
 export function TriggerChooserDemo() {
   const t = useDemoCopy(copy);
-  const [frameRef, visible] = useStartWhenVisible<HTMLElement>();
-  const [picked, setPicked] = useState<number | null>(null);
-
-  const choice = picked === null ? null : t.choices[picked];
-  const caption = !visible ? t.captions.idle : choice ? t.captions.picked(choice.method) : t.captions.start;
+  const [picked, setPicked] = useState(0);
+  const choice = t.choices[picked] ?? t.choices[0]!;
 
   return (
-    <DemoFrame frameRef={frameRef} title={t.title} caption={caption} onReplay={() => setPicked(null)}>
-      <div className="grid gap-4 p-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-        <div className="min-w-0">
-          <div id="trigger-chooser-needs" className="mb-1.5 text-micro text-muted-foreground">
-            {t.needsLabel}
-          </div>
-          <ul aria-labelledby="trigger-chooser-needs" className="flex flex-col gap-1">
-            {t.choices.map((c, i) => (
-              <li key={c.need} className="flex">
-                <CoachMark
-                  active={visible && picked === null && i === 0}
-                  side="right"
-                  ringClassName="rounded-md"
-                  className="flex w-full"
-                >
-                  <button
-                    type="button"
-                    aria-pressed={picked === i}
-                    disabled={!visible}
-                    onClick={() => setPicked(i)}
-                    className={cn(
-                      "flex w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-body transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-                      picked === i ? "border-brand bg-brand/10 font-medium" : "bg-background hover:bg-muted",
-                    )}
-                  >
-                    <span className="min-w-0 flex-1">{c.need}</span>
-                    {picked === i && <Check aria-hidden className="size-3.5 shrink-0 text-brand" />}
-                  </button>
-                </CoachMark>
-              </li>
-            ))}
-          </ul>
+    <EditorialUtility title={t.title}>
+      <div className="grid gap-5 md:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+        <div role="tablist" aria-label={t.title} className="flex flex-col border-t border-border">
+          {t.choices.map((c, i) => {
+            const active = picked === i;
+            return (
+              <button
+                key={c.href}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setPicked(i)}
+                className={cn(
+                  "flex items-center justify-between gap-3 border-b border-border px-2.5 py-2 text-left text-[0.84375rem] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  active
+                    ? "bg-accent font-medium text-foreground"
+                    : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+                )}
+              >
+                <span className="min-w-0 flex-1">{c.need}</span>
+                <span className="shrink-0 font-mono text-[0.7rem] text-[var(--primary)]">
+                  → {c.method}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
-        <div className={cn("min-w-0", !choice && "max-sm:hidden")}>
-          {choice ? (
-            <div
-              key={picked}
-              className="flex h-full flex-col gap-2.5 rounded-lg border bg-background p-3 motion-safe:animate-in motion-safe:fade-in"
-            >
-              <div>
-                <div className="text-micro text-muted-foreground">{t.useLabel}</div>
-                <div className="text-title-sm font-medium text-brand">{choice.method}</div>
+        <div
+          role="tabpanel"
+          className="flex flex-col justify-between gap-4 rounded-r-[4px] border border-border border-l-2 border-l-[var(--primary)] bg-card px-4 py-4"
+        >
+          <div className="flex flex-col gap-3">
+            <div>
+              <div className="font-mono text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-[var(--primary)]">
+                {choice.method}
               </div>
-              <div>
-                <div className="text-micro text-muted-foreground">{t.howLabel}</div>
-                <p className="text-body">{choice.how}</p>
+              <div className="mt-1 font-[family-name:var(--font-serif)] text-[1.125rem] leading-[1.35] text-foreground">
+                {choice.need}
               </div>
-              <div>
-                <div className="text-micro text-muted-foreground">{t.whyLabel}</div>
-                <p className="text-body text-muted-foreground">{choice.why}</p>
-              </div>
-              <LocaleLink
-                href={choice.href}
-                className="mt-auto inline-flex w-fit items-center gap-1 text-label font-medium text-brand hover:underline"
-              >
-                {t.readMore(choice.page)}
-                <ArrowRight aria-hidden className="size-3.5" />
-              </LocaleLink>
             </div>
-          ) : (
-            <div aria-hidden className="h-full rounded-lg border border-dashed" />
-          )}
+            <div>
+              <div className="font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted-foreground">
+                {t.howLabel}
+              </div>
+              <p className="mt-0.5 text-[0.875rem] leading-[1.55] text-foreground">{choice.how}</p>
+            </div>
+            <div>
+              <div className="font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted-foreground">
+                {t.whyLabel}
+              </div>
+              <p className="mt-0.5 text-[0.84375rem] leading-[1.55] text-muted-foreground">
+                {choice.why}
+              </p>
+            </div>
+          </div>
+          <LocaleLink
+            href={choice.href}
+            className="inline-flex w-fit items-center gap-1.5 text-[0.8125rem] font-medium text-[var(--primary)] hover:underline"
+          >
+            {t.readMore(choice.page)}
+            <ArrowRight aria-hidden className="size-3.5" />
+          </LocaleLink>
         </div>
       </div>
-    </DemoFrame>
+    </EditorialUtility>
   );
 }

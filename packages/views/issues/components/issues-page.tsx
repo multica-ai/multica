@@ -23,13 +23,13 @@ export function IssuesPage() {
         modes={["board", "list", "table", "swimlane"]}
         batchToolbar="list"
         renderHeader={({ controller }) => <IssueViewHeader controller={controller} base={WORKSPACE_BASE} />}
-        renderEmpty={({ controller }) => (
+        renderEmpty={({ controller, canCreate }) => (
           <CollectionPageState
             icon={ListTodo}
             title={t(($) => $.page.empty_title)}
             description={t(($) => $.page.empty_description)}
             actions={
-              <>
+              canCreate && <>
                 <Button size="sm" onClick={() => controller.openCreateIssue()}>
                   <Plus aria-hidden="true" />
                   {t(($) => $.views.new_issue)}

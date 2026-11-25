@@ -56,14 +56,15 @@ export function issueViewDetailOptions(wsId: string, id: string) {
 /**
  * Client-side mirror of the server's canManageIssueView: the owner, or a
  * workspace owner/admin for views shared to the workspace. Drives which
- * affordances render — the server re-checks on every write.
+ * affordances render — the server re-checks on every write. A guest has no
+ * saved views, so it manages none, even one it made as a member.
  */
 export function canManageIssueView(
   view: { owner_id: string; visibility: string },
   userId: string | null,
   role: string | null | undefined,
 ): boolean {
-  if (!userId) return false;
+  if (!userId || role === "guest") return false;
   if (view.owner_id === userId) return true;
   return view.visibility === "workspace" && (role === "owner" || role === "admin");
 }

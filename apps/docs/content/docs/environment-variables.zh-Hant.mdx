@@ -47,6 +47,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `LOG_LEVEL` | 應用預設 | 日誌級別 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 收到終止訊號後，開始優雅退出前等待多久 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | 執行時離線後可重新連線且不終止在途執行的寬限時間；低於 `150s` 時按 `150s` 處理 |
+| `FF_LOCAL_SEARCH_INDEX` | `on` | Web 和 Desktop 為每個工作區維護本地搜尋索引；設為 `off` 可切回由服務端搜尋 |
+| `FF_DASHBOARD_HISTORY_365D` | `on` | 在資料統計頁開啟 365 天時間範圍；如果整年統計查詢對資料庫壓力過大可設為 `off` |
 
 在 Kubernetes 中設定 shutdown hold 時，`terminationGracePeriodSeconds` 要大於 hold 與實際退出所需時間之和。
 
@@ -181,20 +183,18 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 |---|---|---|
 | GitHub | `GITHUB_APP_SLUG` | GitHub App slug |
 | GitHub | `GITHUB_WEBHOOK_SECRET` | Webhook HMAC 與連線 state 簽名金鑰 |
-| GitHub | `GITHUB_APP_ID` | PR 卡片的 CI 狀態、可合併性和"從 GitHub 選擇"倉庫都需要它 |
-| GitHub | `GITHUB_APP_PRIVATE_KEY` | 與 App ID 配套的完整 PEM 私鑰，用途同上 |
+| GitHub | `GITHUB_APP_CLIENT_ID` | App 的 Client ID。新連線必需，用於驗證操作者能否存取該 installation |
+| GitHub | `GITHUB_APP_CLIENT_SECRET` | 與 Client ID 配對的 client secret，新連線必需 |
+| GitHub | `GITHUB_APP_ID` | 新連線必需，用於驗證安裝管理權限；也用於 PR 卡片和倉庫瀏覽 |
+| GitHub | `GITHUB_APP_PRIVATE_KEY` | 新連線必需，用於驗證安裝管理權限；也用於 PR 卡片和倉庫瀏覽 |
 | 飛書 | `MULTICA_LARK_SECRET_KEY` | base64 編碼的 32 位元組憑據加密金鑰 |
 | Slack | `MULTICA_SLACK_SECRET_KEY` | base64 編碼的 32 位元組 token 加密金鑰 |
 | Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | base64 編碼的 32 位元組 Bot token 加密金鑰 |
-| Composio | `COMPOSIO_API_KEY` | 啟用 Composio 工具連線 |
-| Composio | `COMPOSIO_CALLBACK_BASE_URL` | 回撥 API 地址；可回退到 `MULTICA_PUBLIC_URL` |
-| Composio | `COMPOSIO_STATE_SECRET` | OAuth state 簽名金鑰；可從 `JWT_SECRET` 派生 |
+| 微信 | `MULTICA_WEIXIN_SECRET_KEY` | base64 編碼的 32 位元組金鑰，用於加密 iLink 憑據、登入狀態與回覆上下文；未設定時不開放微信連線 |
+| Telegram | `MULTICA_TELEGRAM_TOOL_PROGRESS` | 流式回覆中展示的工具步驟：`auto`（預設，私聊顯示細節，群聊只顯示工作型別）、`off`、`summary` 或 `detail` |
 | 自託管 Git | `MULTICA_VCS_INTEGRATION_ENABLED` | Forgejo/Gitea/GitLab 整合開關，compose 預設開啟 |
 | 自託管 Git | `MULTICA_VCS_SECRET_KEY` | base64 編碼的 32 位元組加密金鑰（`openssl rand -base64 32`）；未配置時該功能整體不可用 |
-| 外掛 | `MULTICA_PLUGIN_SECRET_KEY` | base64 編碼的 32 位元組金鑰，用於加密已存 secret 和 surface 啟動 URL |
-| 外掛 | `MULTICA_PLUGIN_SURFACE_ORIGIN` | 路由到後端的獨立無 Cookie 瀏覽器 origin；必須不同於 app/API origin，並保留 `Host` |
-| 外掛 | `MULTICA_PLUGIN_API_URL` | 帶版本的外掛 Public API 完整 Base URL，例如 `https://plugin-api.example.com/v1`；未設定時使用 `MULTICA_PUBLIC_URL` + `/v1` |
-| 外掛 | `MULTICA_PLUGIN_DIR` | 開發時用於釋出本地外掛包的可選絕對目錄 |
+| 主題商店 | `MULTICA_THEME_REGISTRY_URL` | 改用其他倉庫的 `index.json`，例如官方倉庫的 fork；見 [主題與外觀](/themes#自託管) |
 
 不配置 `GITHUB_APP_ID` 和私鑰時，PR 仍會正常關聯、映象，並在合併後改狀態，但卡片上不顯示 CI 與可合併狀態，"從 GitHub 選擇"倉庫入口也會禁用。
 
@@ -244,7 +244,7 @@ API key 與 base URL 都為空時，這一層關閉，不會發出任何上游�
 | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | 沒有輸出且沒有工具執行時的靜默上限；`0` 表示整套 watchdog 關閉 |
 | `MULTICA_AGENT_TOOL_WATCHDOG` | 同 `MULTICA_AGENT_IDLE_WATCHDOG` | 單個工具呼叫持續靜默的上限；只有希望工具比模型有更多餘量時才單獨設定，`0` 表示工具執行期間永不強制停止。Cursor 的後臺 shell 在它啟動的程序退出前一直算作執行中；到達這個上限時，守護程序會停止這些程序，並給 Cursor 一段新的 watchdog 預算來產出終態結果。若程序歸屬或清理無法驗證，則回到普通的執行取消策略 |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode 專用靜默閾值 |
-| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | 同 `MULTICA_AGENT_IDLE_WATCHDOG` | Codex 語義靜默閾值。Codex 自己的計時器看不到工具是否在執行，因此跟隨 idle / tool 預算中較大的那個，而不再單獨保留一個更短的上限 |
+| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | idle 與 tool 預算中較大的值；守護程序的 watchdog 關閉時為 `10m` | Codex 語義靜默閾值。Codex 的計時器無法判斷是否正在執行工具。`MULTICA_AGENT_IDLE_WATCHDOG` 為 `0` 且未設定此變數時，Codex 使用自己的預設值 `10m`。 |
 | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | 顯式覆蓋 Codex 首輪無進展上限；`0` 保持預設值。實際首輪等待仍受 `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 和總執行超時限制——需將 `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 設為嚴格大於此值（並留出餘量），否則等待會被截斷至該值，且會跳過模型目錄啟動重試。設為相等還不夠：語義計時器先啟動，兩者相等時仍可能丟失該重試 |
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`；`thread/start`、`thread/resume`：`60s` | Codex app-server 啟動握手上限；顯式設定後會統一覆蓋兩類預算 |
 | `MULTICA_CODEX_MEMORY` | 關閉 | 設為 `1`、`true`、`yes` 或 `on` 時，在守護程序管理的 Codex 執行中保留 Codex 原生記憶；預設按執行關閉，見 [Codex 原生記憶與子 AI 代理](/daemon-runtimes#codex-memory) |
@@ -269,7 +269,7 @@ API key 與 base URL 都為空時，這一層關閉，不會發出任何上游�
 | `MULTICA_GC_ENABLED` | `true` | 設為 `false` 或 `0` 關閉整個清理迴圈 |
 | `MULTICA_GC_INTERVAL` | `2h` | 兩輪清理之間的間隔；守護程序啟動約 30 秒後先清理一次 |
 | `MULTICA_GC_TTL` | `24h` | 任務進入 `done` 或 `closed` 分類、或聊天會話歸檔後，再過多久刪除對應執行目錄 |
-| `MULTICA_GC_COMPLETED_TASK_TTL` | Multica Cloud `14d`；自託管 `0` | 任務執行完成多久後刪除整個目錄，不論任務是否關閉；`0` 表示關閉。不作用於專案本地目錄上的執行 |
+| `MULTICA_GC_COMPLETED_TASK_TTL` | `14d` | 執行完成後多久刪除受管任務目錄；本地目錄執行只刪除 `codex-home`，保留 daemon 日誌、輸出和外部會話儲存，仍有本地會話記錄的 home 不刪除。`0` 表示關閉此到期清理 |
 | `MULTICA_GC_ORPHAN_TTL` | `72h` | 找不到歸屬的目錄多久沒有改動後刪除 |
 | `MULTICA_GC_ARTIFACT_TTL` | `12h` | 從執行結束到守護程序清理可重新生成內容的時間。下一行的目錄名稱規則適用於未關閉的任務，以及使用受管理工作目錄的未歸檔聊天。守護程序管理的 Codex 快取也適用相同時長。設為 `0` 可保留這些快取 |
 | `MULTICA_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` | 按目錄名匹配的可再生成內容，逗號分隔。設定後**替換**預設列表，要保留預設項就一併寫上；含 `/` 或 `\` 的項會被忽略 |
@@ -282,15 +282,17 @@ API key 與 base URL 都為空時，這一層關閉，不會發出任何上游�
 
 ### 守護程序日誌 [#daemon-logs]
 
+守護程序預設以 `debug` 層級寫入日誌。設定 `LOG_LEVEL`（`debug`、`info`、`warn` 或 `error`）可以修改，也可以用 `multica config set log_level info` 儲存設定檔的預設值。環境變數優先於設定檔。
+
 守護程序在後臺執行（不連著終端）時，日誌寫入 `~/.multica/daemon.log`，命名 profile 為 `~/.multica/profiles/<name>/daemon.log`，並按大小輪轉，輪轉出的檔案用 gzip 壓縮。
 
-| 變數 | 預設值 | 說明 |
-|---|---|---|
-| `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `20` | `daemon.log` 達到多少 MB 時輪轉 |
-| `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `5` | 最多保留幾個輪轉檔案 |
-| `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `30` | 輪轉檔案保留的天數 |
+| 變數 | Profile 設定鍵 | 預設值 | 說明 |
+|---|---|---|---|
+| `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `daemon_log_max_size_mb` | `20` | `daemon.log` 達到多少 MB 時輪轉 |
+| `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `daemon_log_max_backups` | `5` | 最多保留幾個輪轉檔案 |
+| `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `daemon_log_max_age_days` | `30` | 輪轉檔案保留的天數 |
 
-三個變數都要求正整數；`0`、負數或無法解析的值按預設值處理，不會變成"不限制"。保留數量和天數哪個先到就按哪個刪除。崩潰輸出寫在同目錄的 `daemon.err.log`，啟動時超過 5 MB 就改名為 `daemon.err.log.1`。
+三個參數都要求正整數。用 `multica --profile dev config set <key> <value>` 儲存，`config show` 查看已儲存值，傳入 `""` 清除對應設定。修改在下次守護行程啟動或重新啟動時生效。有效環境變數優先於 profile；未設定、空白、零、負數、格式錯誤或溢出的環境值會回退到有效 profile 值，再回退到表中預設值。大小和天數還必須能安全轉換為位元組和時長；`config set` 會拒絕無效值。零不能關閉保留限制。保留數量和天數哪個先到就按哪個刪除。崩潰輸出寫在同目錄的 `daemon.err.log`，啟動時超過 5 MB 就改名為 `daemon.err.log.1`。
 
 ### 各 AI 程式設計工具的路徑、模型與引數
 
@@ -301,6 +303,7 @@ API key 與 base URL 都為空時，這一層關閉，不會發出任何上游�
 
 | 工具 | 字首 | 有模型變數 |
 |---|---|---|
+| Amp | `MULTICA_AMP` | ✓（選擇 Amp 模式，例如 `high`） |
 | Antigravity | `MULTICA_ANTIGRAVITY` | ✓（取值是 `agy models` 顯示的完整名稱） |
 | Claude Code | `MULTICA_CLAUDE` | ✓ |
 | CodeArts | `MULTICA_CODEARTS` | ✓ |
@@ -309,7 +312,9 @@ API key 與 base URL 都為空時，這一層關閉，不會發出任何上游�
 | Cursor Agent | `MULTICA_CURSOR` | ✓ |
 | DeepSeek Harness | `MULTICA_DSH` | ✓（取值是 dsh 模型目錄中的 id，例如 `deepseek-official/deepseek-chat`） |
 | DevEco Code | `MULTICA_DEVECO` | ✓ |
+| Devin CLI | `MULTICA_DEVIN` | ✓ |
 | Dim | `MULTICA_DIM` | ✓（取值是 dim 模型目錄中的 id） |
+| Factory Droid | `MULTICA_DROID` | ✓ |
 | GitHub Copilot CLI | `MULTICA_COPILOT` | ✓ |
 | Grok | `MULTICA_GROK` | ✓ |
 | Hermes | `MULTICA_HERMES` | ✓ |
@@ -327,6 +332,7 @@ API key 與 base URL 都為空時，這一層關閉，不會發出任何上游�
 | QwenPaw | `MULTICA_QWENPAW` | — |
 | Reasonix | `MULTICA_REASONIX` | ✓ |
 | Trae CLI | `MULTICA_TRAECLI` | ✓ |
+| ZCode | `MULTICA_ZCODE` | ✓ |
 | ZeroClaw | `MULTICA_ZEROCLAW` | —（模型由 ZeroClaw 的 AI 代理配置管理） |
 
 </Accordion>
@@ -334,7 +340,7 @@ API key 與 base URL 都為空時，這一層關閉，不會發出任何上游�
 
 QwenPaw 和 MiniMax Code 沒有模型變數，因為 Multica 不會向它們傳模型，詳見 [AI 程式設計工具對比](/providers#模型來源)。DeepSeek Harness 另有 `MULTICA_DSH_PROFILE_BUNDLE` 和 `MULTICA_DSH_PLUGIN_PATH`，見下一節。
 
-全機預設引數 `MULTICA_<字首>_ARGS` 目前支援 Claude Code、Codex、CodeBuddy、Qwen Code 和 QwenPaw 五款工具，對應變數是 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS` 和 `MULTICA_QWENPAW_ARGS`。例如：
+全機預設引數 `MULTICA_<字首>_ARGS` 目前支援 Claude Code、Codex、CodeBuddy、Qwen Code、Amp、Factory Droid 和 QwenPaw 七款工具，對應變數是 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS`、`MULTICA_AMP_ARGS`、`MULTICA_DROID_ARGS` 和 `MULTICA_QWENPAW_ARGS`。例如：
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude
@@ -380,16 +386,22 @@ multica config show
 | `poll_interval` | `30s` | 執行輪詢間隔 |
 | `ws_claim_poll_interval` | `3m` | 健康 WebSocket 下 claim 安全輪詢的上限，與 `poll_interval` 獨立配置；Daemon 會應用向下抖動 |
 | `heartbeat_interval` | `15s` | 心跳間隔 |
+| `log_level` | `debug` | 守護程序日誌層級：`debug`、`info`、`warn` 或 `error`。`LOG_LEVEL` 優先 |
 | `agent_timeout` | 不限制 | 單次執行的絕對時限 |
+| `agent_idle_watchdog` | `2h` | 沒有工具執行時的靜默上限；`0s` 關閉守護程序的整套 watchdog，`agent_tool_watchdog` 也隨之失效 |
+| `agent_tool_watchdog` | 同 `agent_idle_watchdog` | 工具執行期間的靜默上限；`0s` 表示守護程序的 watchdog 不會因工具靜默而停止執行，此時執行只受 `agent_timeout` 限制，而它預設不限制 |
 | `codex_semantic_inactivity_timeout` | 派生 | Codex 語義靜默閾值。未設定時取 idle 與 tool watchdog 預算中較大的那個；tool 預算為 `0` 時回落到 idle 預算；只有整套 watchdog 關閉時才保留 Codex 自己的 `10m` |
 | `codex_handshake_timeout` | `30s`；`thread/start`、`thread/resume`：`60s` | Codex app-server 啟動握手上限；顯式設定後會統一覆蓋兩類預算 |
 | `disable_auto_update` | 跟隨環境 | `true` 關閉自動更新；`false` 清除本地覆蓋，回到環境變數或預設 |
 | `auto_update_check_interval` | `6h` | 檢查更新的間隔 |
 | `disable_auto_reload` | 跟隨環境 | `true` 讓守護程序不再跟隨磁碟上被替換的二進位制；`false` 清除本地覆蓋。與 `disable_auto_update` 分開解析 |
+| `daemon_log_max_size_mb` | `20` | `daemon.log` 達到多少 MB 時輪轉，見[守護程序日誌](#daemon-logs) |
+| `daemon_log_max_backups` | `5` | 最多保留幾個輪轉檔案 |
+| `daemon_log_max_age_days` | `30` | 輪轉檔案保留的天數 |
 
 幾條取值規則：
 
-- duration 類鍵接受正的 Go duration（如 `10s`、`2h`），`0s` 和負值會被拒絕。唯一例外是 `agent_timeout`：`0s` 合法，表示明確關閉執行時限。
+- duration 類鍵接受正的 Go duration（如 `10s`、`2h`），負值一律拒絕。只有 `agent_timeout`、`agent_idle_watchdog`、`agent_tool_watchdog` 還接受 `0s`：`agent_timeout` 設為 `0s` 表示明確關閉執行時限，兩個 watchdog 鍵設為 `0s` 關閉什麼見上表。
 - 傳空字串清除已持久化的值，回到環境變數或內建預設，例如 `multica config set poll_interval ""`。
 - `max_concurrent_tasks` 要求非負整數。
 - 相對的 `workspaces_root` 值在儲存時會轉換為絕對路徑。

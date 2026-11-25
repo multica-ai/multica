@@ -28,12 +28,14 @@ monorepo 的包邊界是硬約束：
 
 | 包 | 可依賴 | 不能依賴 |
 | --- | --- | --- |
-| `packages/core` | 僅平臺無關基礎庫 | `react-dom`、`localStorage`、`process.env`、`next/*`、UI 庫 |
+| `packages/core` | 僅平臺無關基礎庫 | `react-dom`、`next/*`、UI 庫、`process.env`、直接使用 `localStorage` 或 `sessionStorage`（持久化走 `StorageAdapter`；僅 `analytics/exception-dedupe.ts` 和 `appearance/safe-mode.ts` 使用分頁級的 `sessionStorage`） |
 | `packages/ui` | 無業務依賴 | `@multica/core`、業務邏輯 |
-| `packages/views` | `core/`、`ui/` | `next/*`、`react-router-dom`、stores |
+| `packages/views` | `core/`、`ui/` | `next/*`、`react-router-dom`、store 定義 |
 | `apps/web/platform/` | `next/*` | 其他 app |
 | `apps/desktop/.../platform/` | `react-router-dom`、electron | 其他 app |
-| `apps/mobile/` | `@multica/core` 的類型和純函式 | Web/Desktop 的 React 頁面、store 和平臺實現 |
+| `apps/mobile/` | `@multica/core` 的類型和純函式，透過各模組自己的子路徑匯入 | Web/Desktop 的 React 頁面、store 和平臺實現，以及重新匯出它們的 core barrel |
+
+包邊界及其少數例外以根目錄 `AGENTS.md` 為準，修改時兩處同步。`packages/core` 這一行由 `packages/core/eslint.config.mjs` 透過 lint 強制，mobile 對 core 的匯入由 `apps/mobile/eslint.config.js` 強制。
 
 Web 和 Desktop 都有的邏輯，**必須**抽到共享包。"小段重複"也不算例外。Mobile 擁有獨立的 UI、資料層和發布流程，只共享類型與純函式。
 
@@ -200,18 +202,19 @@ Agent 在簡體中文（`zh-Hans`）中譯為**智能体**，在繁體中文（`
 | Empty / Failed / Success | 空 / 失败 / 成功 |
 | Error / Warning | 错误 / 警告 |
 
-### 角色名 + 狀態名（小寫英文，不翻）
+### 角色名與狀態名：介面展示在地化，協議識別碼保留小寫英文
 
-這些是 schema-level 識別碼，中文環境也保持小寫英文：
+UI 中的展示標籤（狀態選擇器、角色下拉選單、篩選器、通知描述等）按各語言自然翻譯：
 
-- 角色：`owner` / `admin` / `member`
+- 角色展示名（`zh-Hans`）：所有者 / 管理员 / 成员 / 访客
+- 任務狀態展示名（`zh-Hans`）：待规划 / 待办 / 进行中 / 审核中 / 已完成 / 已阻塞 / 已取消
+- 狀態分類展示名（`zh-Hans`）：未开始 / 已开始 / 已完成 / 已关闭
+
+僅在 API、資料庫、CLI 命令與程式碼引用中保留小寫英文 schema 識別碼：
+
+- 角色：`owner` / `admin` / `member` / `guest`
 - Issue 狀態：`backlog` / `todo` / `in_progress` / `in_review` / `done` / `blocked` / `cancelled`
 - Issue 狀態分類：`unstarted` / `started` / `done` / `closed`
-
-UI 裡展示這些值時保持英文（必要時用 code-style 包起來）：
-
-- "你需要 owner 權限"
-- "已切換到 in_progress"
 
 ### 詞組組合規則
 
@@ -299,6 +302,7 @@ i18next 用 `_one` / `_other`；中文不區分語法單複數，只填 `_other`
 - 引號：用 `"..."`（直引號），與英文 source 保持一致。**不要**用 `「」` 或彎引號
 - 省略號：用 `...`（三點）而非 `…`（單字元），與英文 source 保持一致
 - 中英混排：英文詞左右各加 1 個空格（詳見詞組組合規則）
+- 粗體挨著標點：結束的 `**` 緊跟在標點後面、後面又直接接文字時不算閉合，頁面上會直接顯示星號。中日韓文字裡粗體後面常常直接接下一個詞，最容易踩到。把標點移到粗體外面（`**問題（Problem）**和` → `**問題**（Problem）和`）；標點屬於按鈕名等標籤時，在 `**` 後面加空格（`點擊 **+**新增` → `點擊 **+** 新增`）。文件裡殘留未渲染的 `**` 會讓 `apps/docs/lib/unrendered-bold.test.ts` 失敗
 
 ### 風格原則
 

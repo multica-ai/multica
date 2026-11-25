@@ -37,10 +37,10 @@ interface AvatarCropDialogProps {
 }
 
 /**
- * Avatar cropper. The image pans/zooms/rotates beneath a fixed round crop
- * window; everything outside the window is dimmed. Output is a square {@link
- * AVATAR_OUTPUT_SIZE}px image — the round mask is display-only, never baked
- * into the pixels.
+ * Avatar cropper. The image pans/zooms/rotates beneath a fixed crop window in
+ * the avatar shape (`--avatar-radius`, a circle by default); everything
+ * outside the window is dimmed. Output is a square {@link AVATAR_OUTPUT_SIZE}px
+ * image — the mask is display-only, never baked into the pixels.
  *
  * Interaction (drag / zoom / rotate + the dim overlay) is delegated to
  * react-easy-crop; this component owns the chrome (header, zoom slider, rotate
@@ -147,8 +147,9 @@ export function AvatarCropDialog({
                 aspect={1}
                 minZoom={MIN_ZOOM}
                 maxZoom={MAX_ZOOM}
-                cropShape="round"
+                cropShape="rect"
                 showGrid={false}
+                classes={{ cropAreaClassName: "rounded-avatar" }}
                 style={{
                   containerStyle: { pointerEvents: pending ? "none" : undefined },
                 }}
@@ -171,7 +172,7 @@ export function AvatarCropDialog({
                   onClick={() => setRotation((r) => (r + 90) % 360)}
                   disabled={pending}
                   aria-label={t(($) => $.avatar_crop.rotate)}
-                  className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-background/90 text-foreground shadow-sm transition-colors hover:bg-background disabled:opacity-50"
+                  className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-lg bg-background/90 text-foreground shadow-sm transition-colors hover:bg-background disabled:opacity-50"
                 >
                   <RotateCw className="h-4 w-4" />
                 </button>

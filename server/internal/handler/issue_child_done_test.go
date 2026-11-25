@@ -119,11 +119,6 @@ func countPendingTasksForAgent(t *testing.T, issueID, agentID string) int {
 		WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched', 'running')`, issueID, agentID)
 }
 
-func countInboxItems(t *testing.T, recipientUserID, issueID string) int {
-	t.Helper()
-	return dbfx.Count(t, `SELECT count(*) FROM inbox_item WHERE recipient_id = $1 AND issue_id = $2`, recipientUserID, issueID)
-}
-
 // childDoneEntry is one timeline entry the rule wrote on the parent.
 type childDoneEntry struct {
 	Stage      *int32 `json:"stage"`
@@ -483,6 +478,100 @@ func TestChildDoneStagesThenWrapUp(t *testing.T) {
 	entries = childDoneEntries(t, fx.parent.ID)
 	if len(entries) != 2 || entries[1].Stage != nil || entries[1].Total != 4 {
 		t.Fatalf("wrap-up: entries = %+v", entries)
+	}
+}
+
+// Only a sub-issue closing wakes the assignee. Adding the next stage after
+// every sub-issue closed, or reopening a later one, closes nothing: the rule
+// records the new reading without a run, and the next close wakes as usual
+// (GitHub #10960).
+func TestChildDoneAddingOrReopeningAStageDoesNotWake(t *testing.T) {
+	fx := newChildDoneFixture(t, "in_progress")
+	agentID := handlerTestAgentID(t)
+	setIssueAssigneeDirect(t, fx.parent.ID, "agent", agentID)
+	dbfx.Exec(t, `UPDATE issue SET stage = 1 WHERE id = $1`, fx.child.ID)
+	completeRuns := func() {
+		dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'completed', completed_at = now() WHERE issue_id = $1`, fx.parent.ID)
+	}
+	expect := func(step string, n int) {
+		t.Helper()
+		if entries, runs := childDoneEntries(t, fx.parent.ID), childDoneRuns(t, fx.parent.ID); len(entries) != n || len(runs) != n {
+			t.Fatalf("%s: entries = %+v runs = %+v, want %d of each", step, entries, runs, n)
+		}
+	}
+
+	updateChildStatus(t, fx.child.ID, "done")
+	expect("stage 1 closed", 1)
+	completeRuns()
+
+	// Creating a sub-issue leaves its change to the scheduler sweep; process
+	// it now, as the sweep would, before stage 2 closes.
+	next := createStagedChild(t, fx.parent.ID, 2, "todo")
+	if err := (&service.IssueWakeupService{Tasks: testHandler.TaskService}).ProcessChildEvents(context.Background(), parseUUID(fx.parent.ID)); err != nil {
+		t.Fatal(err)
+	}
+	expect("stage 2 added", 1)
+
+	updateChildStatus(t, next.ID, "done")
+	expect("stage 2 closed", 2)
+	completeRuns()
+
+	updateChildStatus(t, next.ID, "in_progress")
+	runWakeupTick(t)
+	expect("stage 2 reopened", 2)
+
+	updateChildStatus(t, next.ID, "done")
+	expect("stage 2 closed again", 3)
+}
+
+// A pass that only sees a sub-issue being added can still read a close whose
+// change has not reached the rule yet. It must not record that close as seen:
+// the close's own pass wakes the assignee.
+func TestChildDoneAddedStageKeepsAPendingCloseForItsOwnPass(t *testing.T) {
+	ctx := context.Background()
+	fx := newChildDoneFixture(t, "in_progress")
+	agentID := handlerTestAgentID(t)
+	setIssueAssigneeDirect(t, fx.parent.ID, "agent", agentID)
+	dbfx.Exec(t, `UPDATE issue SET stage = 1 WHERE id = $1`, fx.child.ID)
+	// Parked, so stage 1's close hands the next stage to the parent instead of
+	// releasing it through its stage blockers.
+	second := createStagedChild(t, fx.parent.ID, 2, "backlog")
+	updateChildStatus(t, fx.child.ID, "done")
+	if runs := childDoneRuns(t, fx.parent.ID); len(runs) != 1 {
+		t.Fatalf("stage 1 closed: runs = %+v", runs)
+	}
+	dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'completed', completed_at = now() WHERE issue_id = $1`, fx.parent.ID)
+
+	// Stage 3 is added and its change is handed to the rule, whose immediate
+	// pass cannot take the rule's lock. Stage 2 then closes before the
+	// scheduler's pass runs, so that pass sees the addition and the close.
+	createStagedChild(t, fx.parent.ID, 3, "backlog")
+	lock, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = lock.Exec(ctx, `SELECT 1 FROM issue_wakeup WHERE issue_id = $1 AND system_rule = 'child_done' FOR UPDATE`, fx.parent.ID); err != nil {
+		t.Fatal(err)
+	}
+	svc := &service.IssueWakeupService{Tasks: testHandler.TaskService}
+	if err = svc.ProcessChildEvents(ctx, parseUUID(fx.parent.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if err = lock.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	dbfx.Exec(t, `UPDATE issue SET status = 'done' WHERE id = $1`, second.ID)
+	runWakeupTick(t)
+	if runs := childDoneRuns(t, fx.parent.ID); len(runs) != 1 {
+		t.Fatalf("the addition's pass woke the assignee: runs = %+v", runs)
+	}
+
+	if err = svc.ProcessChildEvents(ctx, parseUUID(fx.parent.ID)); err != nil {
+		t.Fatal(err)
+	}
+	runs := childDoneRuns(t, fx.parent.ID)
+	if len(runs) != 2 || !strings.Contains(runs[1].Note, `"next_stage":3`) {
+		t.Fatalf("stage 2 closed: runs = %+v, want a second run naming stage 3", runs)
 	}
 }
 

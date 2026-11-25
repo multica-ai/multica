@@ -27,8 +27,8 @@
     "title": "Language",
     "system": "System",
     "english": "English",
-    "chinese_simplified": "Simplified Chinese",
-    "chinese_traditional": "Traditional Chinese"
+    "chinese_simplified": "简体中文",
+    "chinese_traditional": "繁體中文"
   },
   "notifications": {
     "title": "Notifications",
@@ -46,9 +46,9 @@
     "empty": "No workspaces yet"
   },
   "avatar": {
-    "take": "Take Photo",
-    "library": "Choose from Library",
-    "remove": "Remove Photo",
+    "take": "Take photo",
+    "library": "Choose from library",
+    "remove": "Remove photo",
     "change_hint": "Tap to change photo",
     "permission_title": "Permission needed",
     "permission_message": "Camera access is required to take a photo.",
@@ -71,15 +71,21 @@
     "status_changes": "Status changes",
     "comments": "Comments",
     "comments_description": "New comments on issues you're subscribed to.",
+    "squad_handoffs": "Include squad handoffs",
+    "squad_handoffs_description": "Comments a squad's leader and agents pass work to each other with. @mentions of you, failed agent runs and the report a squad finishes with still arrive.",
     "mentions": "Mentions",
     "mentions_description": "When someone @mentions you, including @all and @squad.",
-    "updates": "Issue updates",
-    "updates_description": "Edits to title, description, labels, priority, or due date.",
+    "reactions": "Reactions",
+    "reactions_description": "When someone reacts to an issue you created or a comment you wrote.",
+    "updates": "Priority & due date",
+    "updates_description": "When priority or due date changes on issues you follow.",
+    "new_issues": "New issues",
+    "new_issues_description": "When an issue is created in a project you subscribe to.",
     "agent_activity": "Agent activity",
-    "agent_activity_description": "When an agent run fails.",
+    "agent_activity_description": "When an agent run fails, or an app action an agent asked to run is blocked or expires.",
     "inbox_notifications": "Inbox notifications",
     "system": "System",
     "system_notifications": "System notifications",
-    "system_description": "Account changes, security alerts, product updates."
+    "chat_replies": "Include chat replies"
   }
 }

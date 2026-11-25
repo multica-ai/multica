@@ -27,13 +27,7 @@
     "success": "Squad archivé"
   },
   "name_editor": {
-    "title": "Renommer le squad",
-    "placeholder": "Nom du squad",
-    "required": "Le nom est obligatoire",
-    "cancel": "Annuler",
-    "save": "Enregistrer",
-    "saved": "Enregistré",
-    "save_failed": "Échec de l'enregistrement"
+    "placeholder": "Nom du squad"
   },
   "add_member_dialog": {
     "title": "Ajouter un membre",
@@ -53,12 +47,9 @@
     "empty": "Ajouter un rôle…",
     "placeholder": "Rôle (par exemple : Relecteur)"
   },
-  "description_dialog": {
-    "title": "Modifier la description",
-    "placeholder_empty": "Ajouter une description",
-    "cancel": "Annuler",
-    "responsibility_placeholder": "De quoi ce squad est-il responsable ?",
-    "save": "Enregistrer"
+  "description_editor": {
+    "empty": "Ajouter une description",
+    "placeholder": "De quoi ce squad est-il responsable ?"
   },
   "members_tab": {
     "section_title": "Membres",
@@ -102,6 +93,21 @@
     "visibility": "Visibilité",
     "visibility_workspace": "Espace de travail"
   },
+  "handoff": {
+    "section_title": "Collaboration",
+    "mode_leader_title": "Le chef attribue",
+    "mode_leader_description": "Chaque étape revient au chef, {{leader}}, qui choisit la suivante. C’est le comportement par défaut des squads existants.",
+    "mode_direct_title": "Les membres se passent la main",
+    "mode_direct_description": "Le chef attribue la première étape et gère les exceptions. Chaque membre choisit l’étape suivante ; passer en revue ou consulter une personne ne réveille plus le chef.",
+    "guard_rounds": "Allers-retours : {{limit}} tours max.",
+    "guard_daily": "{{limit}} passations max. par tâche et par jour",
+    "guard_failed": "Exécution échouée → retour au chef",
+    "guard_no_next": "Pas d’étape suivante → retour au chef",
+    "saved": "Mode de collaboration mis à jour",
+    "brief_title": "Ce que reçoivent les membres",
+    "brief_hint": "Ajouté à chaque exécution sur une tâche assignée à ce squad",
+    "brief_empty": "Aucun agent membre pour l’instant"
+  },
   "toasts": {
     "member_added": "Membre ajouté",
     "member_add_failed": "Échec de l'ajout du membre",
@@ -112,11 +118,12 @@
     "leader_updated": "Responsable mis à jour",
     "leader_update_failed": "Échec de la mise à jour du responsable",
     "archive_failed": "Échec de l'archivage du squad",
-    "instructions_saved": "Instructions enregistrées"
+    "instructions_saved": "Instructions enregistrées",
+    "update_failed": "Échec de l'enregistrement"
   },
   "profile_card": {
     "unavailable": "Squad indisponible",
-    "detail_link": "Détail →",
+    "detail_link": "Voir les détails →",
     "archived": "Archivé",
     "member_count_one": "{{count}} membre",
     "member_count_other": "{{count}} membres",
@@ -125,7 +132,7 @@
     "more_members_other": "+{{count}} de plus"
   },
   "instructions_tab": {
-    "description": "Le chef lit ces instructions chaque fois qu’il travaille sur une tâche assignée à ce squad.",
+    "description": "Le chef et chaque agent membre lisent ces instructions chaque fois qu’ils travaillent sur une tâche assignée à ce squad.",
     "unsaved_changes": "Modifications non enregistrées",
     "save_button": "Enregistrer",
     "placeholder": "Par exemple : commencez toujours par écrire un test qui échoue. Privilégiez des commits petits et atomiques."
@@ -134,7 +141,6 @@
     "mine": "Mes squads",
     "all": "Tous les squads"
   },
-  "toolbar": {},
   "intro": {
     "title": "Réunissez vos agents en squad pour qu'ils travaillent en équipe",
     "description": "Assignez une tâche au squad. Son agent chef la lit, confie chaque étape au membre dont le rôle correspond et suit le travail jusqu'à l'objectif. Vous n'avez qu'un seul interlocuteur.",

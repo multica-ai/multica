@@ -44,11 +44,7 @@ export function useWorkspaceAgentAvailability(): WorkspaceAgentAvailability {
 
   if (!agentsFetched || !membersFetched) return "loading";
 
-  const rawRole = members?.find((m) => m.user_id === userId)?.role;
-  const role =
-    rawRole === "owner" || rawRole === "admin" || rawRole === "member"
-      ? rawRole
-      : null;
+  const role = members?.find((m) => m.user_id === userId)?.role ?? null;
 
   const hasVisibleAgent = (agents ?? []).some(
     (a) =>

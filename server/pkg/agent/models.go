@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -113,8 +114,8 @@ type Catalog struct {
 	// walks Models, so keeping these out is what makes an unrunnable model fail
 	// closed everywhere without each lookup having to remember a flag.
 	Unavailable []UnavailableModel
-	// Fallback reports that discovery did not succeed and Models is a static
-	// stand-in rather than the runtime's real catalog.
+	// Fallback reports that discovery is incomplete. Models may be a static
+	// stand-in or a live catalog whose capability probes did not finish.
 	//
 	// Several providers (codebuddy, copilot, cursor, grok) answer a failed
 	// discovery with a baked-in list so the picker still has something to
@@ -126,6 +127,9 @@ type Catalog struct {
 	// enter the server's day-scale model-catalog cache, which would pin one
 	// transient failure as the answer for 24h (MUL-5549).
 	Fallback bool
+	// EffortDiscoveryIncomplete distinguishes live ACP models with partial
+	// effort metadata from a static fallback. Fallback remains true for older servers.
+	EffortDiscoveryIncomplete bool
 	// CLIThinkingLevels is the effort vocabulary the installed binary itself
 	// accepts, read from the binary (claude's `--help`) rather than from any
 	// model list. nil means it is unknown; a non-nil empty slice means the
@@ -141,10 +145,9 @@ type Catalog struct {
 // be used to reject, rewrite, or drop a saved model, thinking level, or
 // service tier.
 //
-// A fallback is a static stand-in for a discovery that failed, and an empty
-// catalog is what the providers without one return in the same situation.
-// Both mean "unknown", not "unsupported": the saved value goes to the CLI
-// as-is and the CLI is the judge (MUL-7691).
+// Static stand-ins, incomplete capability probes, and empty catalogs mean
+// "unknown", not "unsupported": the saved value goes to the CLI as-is and
+// the CLI is the judge (MUL-7691).
 func (c Catalog) Verified() bool {
 	return !c.Fallback && len(c.Models) > 0
 }
@@ -158,23 +161,41 @@ func (c Catalog) Verified() bool {
 // report leaves the cache alone; flagging it here would change that. The
 // capability checks read emptiness themselves (Catalog.Verified).
 func discovered(models []Model, err error) (Catalog, error) {
+	if errors.Is(err, errACPEffortDiscoveryIncomplete) {
+		// The model IDs are real, but missing effort metadata must not be used
+		// to reject saved settings or cached as a complete discovery.
+		return Catalog{Models: models, Fallback: true, EffortDiscoveryIncomplete: true}, nil
+	}
 	return Catalog{Models: models}, err
 }
 
-// modelCache memoizes dynamic discovery calls so repeated UI loads
-// don't re-shell the agent CLI. Entries expire after cacheTTL.
+var errACPEffortDiscoveryIncomplete = errors.New("ACP per-model effort discovery incomplete")
+
+// modelCache memoizes dynamic discovery calls so repeated UI loads and
+// pre-launch task validations don't re-shell the agent CLI.
+//
+// Fresh entries are served immediately until freshUntil (modelCacheTTL).
+// Between freshUntil and staleUntil (modelCacheStaleTTL), cachedDiscovery
+// serves the last verified catalog immediately (stale-while-revalidate) and
+// kicks off at most one background refresh per cache key so task startup
+// latency never stalls on a cold discovery subprocess.
 type modelCacheEntry struct {
 	models      []Model
 	unavailable []UnavailableModel
-	expiresAt   time.Time
+	freshUntil  time.Time
+	staleUntil  time.Time
 }
 
 var (
-	modelCacheMu sync.Mutex
-	modelCache   = map[string]modelCacheEntry{}
+	modelCacheMu       sync.Mutex
+	modelCache         = map[string]modelCacheEntry{}
+	modelCacheInflight = map[string]bool{}
+	modelCacheTTL      = 15 * time.Minute
+	modelCacheStaleTTL = 30 * time.Minute
+	modelCacheNow      = time.Now
 )
 
-const modelCacheTTL = 60 * time.Second
+const modelCacheRefreshTimeout = 30 * time.Second
 
 // ListModels returns the models supported by the given agent provider.
 // For providers with a known static catalog it returns the baked-in
@@ -203,96 +224,99 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 	// degrading to manual entry.
 	if desc, ok := BuiltinRuntimeByID(providerType); ok {
 		if desc.ModelDiscovery != nil {
-			return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
-				return discovered(desc.ModelDiscovery(ctx, runtimeCmd))
+			return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
+				return discovered(desc.ModelDiscovery(callCtx, runtimeCmd))
 			})
 		}
 		return Catalog{Models: []Model{}}, nil
 	}
 	switch providerType {
 	case "claude":
-		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
-			return discoverClaudeCatalog(ctx, runtimeCmd), nil
+		return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
+			return discoverClaudeCatalog(callCtx, runtimeCmd), nil
 		})
 	case "codex":
-		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
-			return discoverCodexCatalog(ctx, runtimeCmd), nil
+		return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
+			return discoverCodexCatalog(callCtx, runtimeCmd), nil
 		})
 	case "antigravity":
 		// agy 1.0.6 added a `--model` flag plus an `agy models` catalog
 		// command (MUL-3125). Enumerate it on demand like the other
 		// dynamic-discovery backends.
-		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
-			return discovered(discoverAntigravityModels(ctx, runtimeCmd))
+		return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
+			return discovered(discoverAntigravityModels(callCtx, runtimeCmd))
 		})
 	case "traecli":
 		// Official TRAE CLI is ACP-native: it returns its model catalog from
 		// session/new. Enumerate it on demand like the other ACP backends
 		// (requires a logged-in traecli; falls back to manual entry on error).
-		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
-			return discovered(discoverTraecliModels(ctx, runtimeCmd))
+		return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
+			return discovered(discoverTraecliModels(callCtx, runtimeCmd))
 		})
 	case "cursor":
-		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
-			return discoverCursorModels(ctx, runtimeCmd)
+		return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
+			return discoverCursorModels(callCtx, runtimeCmd)
 		})
 	case "copilot":
-		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
-			return discoverCopilotModels(ctx, runtimeCmd)
+		return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
+			return discoverCopilotModels(callCtx, runtimeCmd)
 		})
 	case "hermes":
-		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
-			return discovered(discoverHermesModels(ctx, runtimeCmd))
+		return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
+			return discovered(discoverHermesModels(callCtx, runtimeCmd))
 		})
 	case "kimi":
-		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
-			return discovered(discoverKimiModels(ctx, runtimeCmd))
+		return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
+			return discovered(discoverKimiModels(callCtx, runtimeCmd))
 		})
 	case "reasonix":
-		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
-			return discovered(discoverReasonixModels(ctx, runtimeCmd))
+		return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
+			return discovered(discoverReasonixModels(callCtx, runtimeCmd))
 		})
 	case "dsh":
-		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
-			return discovered(discoverDshModels(ctx, runtimeCmd))
+		return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
+			return discovered(discoverDshModels(callCtx, runtimeCmd))
 		})
 	case "kiro":
-		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
-			return discovered(discoverKiroModels(ctx, runtimeCmd))
+		return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
+			return discovered(discoverKiroModels(callCtx, runtimeCmd))
 		})
 	case "qoder", "qoderclicn":
-		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
-			return discovered(discoverQoderModels(ctx, runtimeCmd, qoderDefaultBinary(providerType)))
+		return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
+			return discovered(discoverQoderModels(callCtx, runtimeCmd, qoderDefaultBinary(providerType)))
 		})
 	case "opencode":
-		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
-			return discovered(discoverOpenCodeModels(ctx, runtimeCmd))
+		return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
+			return discoverOpenCodeModels(callCtx, runtimeCmd)
 		})
 	case "codearts":
-		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
-			return discovered(discoverCodeArtsModels(ctx, runtimeCmd))
+		return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
+			return discovered(discoverCodeArtsModels(callCtx, runtimeCmd))
 		})
 	case "deveco":
-		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
-			return discovered(discoverDevecoModels(ctx, runtimeCmd))
+		return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
+			return discovered(discoverDevecoModels(callCtx, runtimeCmd))
 		})
 	case "pi":
-		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
-			return discovered(discoverPiModels(ctx, runtimeCmd))
+		return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
+			return discovered(discoverPiModels(callCtx, runtimeCmd))
 		})
 	case "openclaw":
-		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
-			return discovered(discoverOpenclawAgents(ctx, runtimeCmd))
+		return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
+			return discovered(discoverOpenclawAgents(callCtx, runtimeCmd))
 		})
 	case "codebuddy":
 		// discoverCodebuddyModels owns the thinking annotation too, so the one
 		// `--help` capture feeds both catalogs. Annotating out here would run
 		// the command a second time (MUL-5549).
-		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
-			return discoverCodebuddyModels(ctx, runtimeCmd)
+		return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
+			return discoverCodebuddyModels(callCtx, runtimeCmd)
 		})
-	case "qwen":
-		// Qwen Code has no account-independent headless model catalog. An
+	case "amp":
+		// Amp selects its own models; manual IDs select native modes.
+		return Catalog{Models: []Model{}}, nil
+	case "qwen", "droid":
+		// Qwen Code and Droid use runtime defaults or manual model IDs. An
 		// empty list keeps the runtime default and manual model entry available
 		// without advertising a Token-Plan-specific model to other accounts.
 		return Catalog{Models: []Model{}}, nil
@@ -305,8 +329,8 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		// here modelled on discoverTraecliModels.
 		return Catalog{Models: []Model{}}, nil
 	case "devin":
-		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
-			return discovered(discoverDevinModels(ctx, runtimeCmd))
+		return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
+			return discovered(discoverDevinModels(callCtx, runtimeCmd))
 		})
 	case "mcode":
 		// MCode's ACP server does not expose session-scoped model selection or
@@ -316,23 +340,23 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		// Meta Muse Code advertises its catalog over MSP model/list, a
 		// session-free query, and applies the pick through session/start
 		// modelId (or session/setModel on a resumed session).
-		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
-			return discoverMuseModels(ctx, runtimeCmd)
+		return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
+			return discoverMuseModels(callCtx, runtimeCmd)
 		})
 	case "grok":
 		// xAI Grok Build is ACP-native (`grok agent stdio`); model catalog
 		// comes from session/new. Falls back to a small static list so the
 		// UI picker stays usable offline / unauthenticated.
-		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
-			return discoverGrokModels(ctx, runtimeCmd)
+		return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
+			return discoverGrokModels(callCtx, runtimeCmd)
 		})
 	case "dim":
 		// Dim (dimcode) is ACP-native (`dim acp`); its model catalog is
 		// advertised by session/new under models.availableModels. Enumeration
 		// requires a logged-in dim (OAuth); on any failure fall back to an
 		// empty catalog so the UI keeps manual entry available.
-		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
-			return discoverDimModels(ctx, runtimeCmd)
+		return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
+			return discoverDimModels(callCtx, runtimeCmd)
 		})
 	case "zeroclaw":
 		// ZeroClaw's ACP server advertises no catalog: session/new answers
@@ -340,6 +364,12 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		// has no session-scoped model selection to consume one anyway — see
 		// ModelSelectionSupported. Return an empty list rather than spawning
 		// an ACP subprocess that can only ever come back empty.
+		return Catalog{Models: []Model{}}, nil
+	case "museapp":
+		// museapp (muse.ai) is a single personal agent behind a remote receptionist, not a
+		// model family: there is no catalog to discover and no session-scoped
+		// model selection to consume one. An empty list keeps manual entry
+		// available without spawning anything.
 		return Catalog{Models: []Model{}}, nil
 	case "zcode":
 		// ZCode has no model-catalog command or RPC — the catalog lives only
@@ -350,8 +380,8 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		// discoverTraecliModels); any failure degrades to the empty catalog so
 		// the UI keeps manual entry in the composite `providerId/modelId`
 		// format (see splitZcodeModelSelection).
-		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
-			return discoverZcodeModels(ctx, runtimeCmd)
+		return cachedDiscoveryWithContext(ctx, discoveryCacheKey(providerType, runtimeCmd), func(callCtx context.Context) (Catalog, error) {
+			return discoverZcodeModels(callCtx, runtimeCmd)
 		})
 	default:
 		return Catalog{}, fmt.Errorf("unknown agent type: %q", providerType)
@@ -461,7 +491,7 @@ func QualifyModelID(catalog Catalog, model string) (string, bool) {
 // in splitZcodeModelSelection.
 func ModelSelectionSupported(providerType string) bool {
 	switch providerType {
-	case "qwenpaw", "mcode", "zeroclaw":
+	case "qwenpaw", "mcode", "zeroclaw", "museapp":
 		// QwenPaw's `session/set_model` persists to agent.json at the agent
 		// scope, not the session scope. Calling it would mutate the user's
 		// shared, persistent agent config. Model override is therefore
@@ -473,7 +503,9 @@ func ModelSelectionSupported(providerType string) bool {
 		// its ACP dispatch table at all (0.8.4 answers -32601) and no handler
 		// reads a model param, so the model comes from the ZeroClaw agent
 		// profile (`agents.<alias>.model_provider`) and nothing Multica sends
-		// can change it.
+		// can change it. museapp is a single personal agent behind a remote
+		// receptionist: the wire protocol has no model parameter, so the
+		// receptionist's own configuration is the source of truth.
 		return false
 	default:
 		return true
@@ -542,20 +574,57 @@ func modelHasKnownPrefix(model string) bool {
 		isOpenAIReasoningSeriesID(model)
 }
 
-// cachedDiscovery invokes fn and caches the result for modelCacheTTL.
-// Callers build the key with discoveryCacheKey so two runtimes of the same
-// protocol family never share one memo entry when they enumerate different
-// binaries.
+// cachedDiscovery preserves the context-free helper signature used by tests
+// while sharing the stale-while-revalidate implementation below.
 func cachedDiscovery(key string, fn func() (Catalog, error)) (Catalog, error) {
+	return cachedDiscoveryWithContext(context.Background(), key, func(context.Context) (Catalog, error) {
+		return fn()
+	})
+}
+
+// cachedDiscoveryWithContext invokes fn and caches verified catalogs for
+// modelCacheTTL, serving stale entries up to modelCacheStaleTTL while
+// refreshing at most once in the background. Callers build the key with
+// discoveryCacheKey so two runtimes of the same protocol family never share
+// one memo entry when they enumerate different binaries.
+func cachedDiscoveryWithContext(ctx context.Context, key string, fn func(context.Context) (Catalog, error)) (Catalog, error) {
+	now := modelCacheNow()
 	modelCacheMu.Lock()
-	if entry, ok := modelCache[key]; ok && time.Now().Before(entry.expiresAt) {
-		out, unavailable := entry.models, entry.unavailable
-		modelCacheMu.Unlock()
-		return Catalog{Models: out, Unavailable: unavailable}, nil
+	if entry, ok := modelCache[key]; ok {
+		if now.Before(entry.freshUntil) {
+			out, unavailable := entry.models, entry.unavailable
+			modelCacheMu.Unlock()
+			return Catalog{Models: out, Unavailable: unavailable}, nil
+		}
+		if now.Before(entry.staleUntil) {
+			out, unavailable := entry.models, entry.unavailable
+			shouldRefresh := !modelCacheInflight[key]
+			if shouldRefresh {
+				modelCacheInflight[key] = true
+			}
+			modelCacheMu.Unlock()
+			if shouldRefresh {
+				go func() {
+					defer func() {
+						modelCacheMu.Lock()
+						delete(modelCacheInflight, key)
+						modelCacheMu.Unlock()
+					}()
+					refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), modelCacheRefreshTimeout)
+					defer cancel()
+					catalog, err := fn(refreshCtx)
+					if err != nil || len(catalog.Models) == 0 || catalog.Fallback {
+						return
+					}
+					storeModelCacheEntry(key, catalog)
+				}()
+			}
+			return Catalog{Models: out, Unavailable: unavailable}, nil
+		}
 	}
 	modelCacheMu.Unlock()
 
-	catalog, err := fn()
+	catalog, err := fn(ctx)
 	if err != nil {
 		return Catalog{}, err
 	}
@@ -575,14 +644,24 @@ func cachedDiscovery(key string, fn func() (Catalog, error)) (Catalog, error) {
 		return catalog, nil
 	}
 
+	storeModelCacheEntry(key, catalog)
+	return catalog, nil
+}
+
+func storeModelCacheEntry(key string, catalog Catalog) {
+	now := modelCacheNow()
+	staleTTL := modelCacheStaleTTL
+	if staleTTL < modelCacheTTL {
+		staleTTL = modelCacheTTL
+	}
 	modelCacheMu.Lock()
 	modelCache[key] = modelCacheEntry{
 		models:      catalog.Models,
 		unavailable: catalog.Unavailable,
-		expiresAt:   time.Now().Add(modelCacheTTL),
+		freshUntil:  now.Add(modelCacheTTL),
+		staleUntil:  now.Add(staleTTL),
 	}
 	modelCacheMu.Unlock()
-	return catalog, nil
 }
 
 // discoveryCacheKey scopes a discovery memo to the binary it enumerated.
@@ -795,20 +874,23 @@ func isOpenAIReasoningSeriesID(id string) bool {
 // discoverOpenCodeModels reads model metadata using the installed CLI's contract:
 // the model API on 2.x, and verbose model rows on 1.x. Plain IDs remain a
 // fallback when metadata discovery fails; no reasoning levels are invented.
-func discoverOpenCodeModels(ctx context.Context, runtimeCmd Command) ([]Model, error) {
-	if runtimeCmd.Path == "" {
-		runtimeCmd.Path = "opencode"
-	}
-	if _, err := exec.LookPath(runtimeCmd.Path); err != nil {
-		return []Model{}, nil
-	}
+func discoverOpenCodeModels(ctx context.Context, runtimeCmd Command) (Catalog, error) {
 	// Newer opencode (1.15+) syncs its hosted free-model catalog over the
 	// network on `opencode models`, which can take ~6s; the previous 5s cap
 	// timed out and returned an empty list, so the runtime showed online but
 	// the model picker was empty. See multica-ai/multica#3627.
-	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	version, _ := detectCLIVersion(runCtx, runtimeCmd)
+	return discoverOpenCodeModelsWithin(ctx, runtimeCmd, 15*time.Second)
+}
+
+func discoverOpenCodeModelsWithin(ctx context.Context, runtimeCmd Command, attemptTimeout time.Duration) (Catalog, error) {
+	if runtimeCmd.Path == "" {
+		runtimeCmd.Path = "opencode"
+	}
+	if _, err := exec.LookPath(runtimeCmd.Path); err != nil {
+		return Catalog{Models: []Model{}}, nil
+	}
+	metadataCtx, cancelMetadata := context.WithTimeout(ctx, attemptTimeout)
+	version, _ := detectCLIVersion(metadataCtx, runtimeCmd)
 	parsed, versionErr := parseSemver(version)
 	var models []Model
 	if versionErr == nil && parsed.Major >= 2 {
@@ -822,29 +904,38 @@ func discoverOpenCodeModels(ctx context.Context, runtimeCmd Command) ([]Model, e
 			if server == "" && !standalone {
 				args = append(args, "--standalone")
 			}
-			cmd := runtimeCmd.exec(runCtx, args...)
+			cmd := runtimeCmd.exec(metadataCtx, args...)
 			hideAgentWindow(cmd)
 			if out, err := outputOwned(cmd, runtimeCmd.logger); err == nil {
 				models = parseOpenCodeV2Models(out)
 			}
 		}
 	} else {
-		cmd := runtimeCmd.exec(runCtx, "models", "--verbose")
+		cmd := runtimeCmd.exec(metadataCtx, "models", "--verbose")
 		hideAgentWindow(cmd)
 		// A stale config can produce a non-zero exit with a usable catalog.
 		out, _ := outputOwned(cmd, runtimeCmd.logger)
 		models = parseOpenCodeModels(string(out))
 	}
-	if len(models) == 0 {
-		cmd := runtimeCmd.exec(runCtx, "models")
-		hideAgentWindow(cmd)
-		out, _ := outputOwned(cmd, runtimeCmd.logger)
-		models = parseOpenCodeModels(string(out))
+	metadataTimedOut := metadataCtx.Err() == context.DeadlineExceeded
+	cancelMetadata()
+	if len(models) > 0 {
+		return Catalog{Models: models}, nil
 	}
+
+	// A timed-out metadata probe must not expire the plain listing.
+	fallbackCtx, cancelFallback := context.WithTimeout(ctx, attemptTimeout)
+	defer cancelFallback()
+	cmd := runtimeCmd.exec(fallbackCtx, "models")
+	hideAgentWindow(cmd)
+	out, _ := outputOwned(cmd, runtimeCmd.logger)
+	models = parseOpenCodeModels(string(out))
 	if len(models) == 0 {
-		return []Model{}, nil
+		return Catalog{Models: []Model{}}, nil
 	}
-	return models, nil
+	// After a timeout, the plain IDs can populate the picker but cannot
+	// validate saved variants or replace an existing complete catalog.
+	return Catalog{Models: models, Fallback: metadataTimedOut}, nil
 }
 
 // OpenCode 2.x GET /api/model returns Location.response(Model.Info[]): an
@@ -1633,17 +1724,13 @@ func discoverHermesModels(ctx context.Context, runtimeCmd Command) ([]Model, err
 		tmpdirPrefix: "multica-hermes-discovery-",
 		strictErrors: true,
 		timeout:      hermesDiscoveryTimeout,
-		// The same handshake carries an effort selector on jcode and carries
-		// none on Hermes Agent, so annotate is what tells the two apart —
-		// Hermes Agent models come back with a nil Thinking and show no
-		// picker. annotate covers the session's current model; the probe
-		// switches the discovery session onto each remaining model for its
-		// own catalog. See probeACPModelEffort.
+		// Session options describe only the current model; probe other models
+		// individually rather than sharing an effort catalog across providers.
 		annotate:         annotateACPThinkingForSessionModel,
 		probeModelEffort: true,
 	})
 	if err != nil {
-		return nil, annotateHermesDiscoveryUnconfigured(err)
+		return models, annotateHermesDiscoveryUnconfigured(err)
 	}
 	return models, nil
 }
@@ -2182,6 +2269,14 @@ func discoverACPModels(ctx context.Context, runtimeCmd Command, p acpDiscoveryPr
 
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 4*1024*1024)
+	writeACP := func(msg any) error {
+		data, err := json.Marshal(msg)
+		if err != nil {
+			return err
+		}
+		_, err = stdin.Write(append(data, '\n'))
+		return err
+	}
 	nextID := 1
 	requestACP := func(method string, params any) (json.RawMessage, error) {
 		id := nextID
@@ -2192,12 +2287,7 @@ func discoverACPModels(ctx context.Context, runtimeCmd Command, p acpDiscoveryPr
 			"method":  method,
 			"params":  params,
 		}
-		data, err := json.Marshal(msg)
-		if err != nil {
-			return nil, err
-		}
-		data = append(data, '\n')
-		if _, err = stdin.Write(data); err != nil {
+		if err := writeACP(msg); err != nil {
 			return nil, err
 		}
 
@@ -2208,10 +2298,23 @@ func discoverACPModels(ctx context.Context, runtimeCmd Command, p acpDiscoveryPr
 			}
 			var env struct {
 				ID     json.RawMessage `json:"id"`
+				Method string          `json:"method"`
+				Params json.RawMessage `json:"params"`
 				Result json.RawMessage `json:"result"`
 				Error  json.RawMessage `json:"error"`
 			}
-			if err := json.Unmarshal([]byte(line), &env); err != nil || string(env.ID) != fmt.Sprint(id) {
+			if err := json.Unmarshal([]byte(line), &env); err != nil {
+				continue
+			}
+			// Agent requests have their own ID namespace. Answer before matching
+			// responses, including when the agent's ID equals our pending ID.
+			if env.Method != "" && len(env.ID) > 0 && string(env.ID) != "null" {
+				if err := writeACP(rejectACPDiscoveryRequest(env.ID, env.Method, env.Params)); err != nil {
+					return nil, err
+				}
+				continue
+			}
+			if string(env.ID) != fmt.Sprint(id) {
 				continue
 			}
 			if len(env.Error) > 0 && string(env.Error) != "null" {
@@ -2324,14 +2427,49 @@ func discoverACPModels(ctx context.Context, runtimeCmd Command, p acpDiscoveryPr
 		}, models, sessionResult)
 	}
 	if p.probeModelEffort {
+		probeIncomplete := false
 		probeACPModelEffort(runCtx, func(_ context.Context, method string, params any) (json.RawMessage, error) {
-			return requestACP(method, params)
+			result, err := requestACP(method, params)
+			if err != nil {
+				probeIncomplete = true
+			}
+			return result, err
 		}, sessionResult, models)
-		if err := runCtx.Err(); err != nil {
+		if err := ctx.Err(); err != nil {
 			return fail("per-model effort discovery", err)
+		}
+		// Effort metadata is optional: a rejected or slow model switch must
+		// not discard the catalog or claim unknown capabilities are absent.
+		// Unprobed models keep nil Thinking; confirmed metadata survives.
+		if probeIncomplete || runCtx.Err() != nil {
+			return models, errACPEffortDiscoveryIncomplete
 		}
 	}
 	return models, nil
+}
+
+// Discovery has no human to approve actions. Select an offered single-use
+// rejection, or refuse the client method without granting any permission.
+func rejectACPDiscoveryRequest(id json.RawMessage, method string, params json.RawMessage) map[string]any {
+	if method == "session/request_permission" {
+		var p struct {
+			Options []acpPermissionOption `json:"options"`
+		}
+		if json.Unmarshal(params, &p) == nil {
+			for _, option := range p.Options {
+				if option.OptionID != "" && strings.EqualFold(strings.TrimSpace(option.Kind), acpKindRejectOnce) {
+					return map[string]any{
+						"jsonrpc": "2.0", "id": id,
+						"result": map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": option.OptionID}},
+					}
+				}
+			}
+		}
+	}
+	return map[string]any{
+		"jsonrpc": "2.0", "id": id,
+		"error": map[string]any{"code": -32601, "message": "Client actions are unavailable during model discovery"},
+	}
 }
 
 func replaceEnvValue(env []string, key, value string) []string {

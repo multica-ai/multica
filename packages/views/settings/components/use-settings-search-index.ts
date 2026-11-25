@@ -1,6 +1,10 @@
 "use client";
 
 import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useCurrentWorkspace } from "@multica/core/paths";
+import { notificationPreferenceOptions } from "@multica/core/notification-preferences/queries";
+import { notificationPreferenceValue } from "@multica/core/notification-preferences/patch";
 import { useT } from "../../i18n";
 import type { SettingsSearchEntry } from "./settings-search";
 import { CHANNEL_INTEGRATIONS } from "./settings-navigation";
@@ -11,7 +15,9 @@ const NOTIFICATION_GROUPS = [
   "status_changes",
   "comments",
   "mentions",
+  "reactions",
   "updates",
+  "new_issues",
   "agent_activity",
 ] as const;
 
@@ -33,6 +39,14 @@ export function useSettingsSearchIndex(
   pages: readonly SettingsSearchPage[],
 ): SettingsSearchIndexEntry[] {
   const { t } = useT("settings");
+  const workspace = useCurrentWorkspace();
+  // Reads what the Notifications tab loaded; never fetches on its own.
+  const { data: notificationPreferences } = useQuery({
+    ...notificationPreferenceOptions(workspace?.id ?? ""),
+    enabled: false,
+  });
+  const commentsOn =
+    notificationPreferenceValue(notificationPreferences?.preferences ?? {}, "comments") !== "muted";
   return useMemo(() => {
     const visible = new Set(pages.map((page) => page.value));
     const rows: SettingsSearchIndexEntry[] = [
@@ -52,7 +66,84 @@ export function useSettingsSearchIndex(
         title: t(($) => $.preferences.timezone.title),
         description: t(($) => $.preferences.timezone.hint),
       },
-      { tab: "preferences", anchor: "theme", title: t(($) => $.preferences.theme.title) },
+      { tab: "appearance", anchor: "mode", title: t(($) => $.appearance.mode.title) },
+      {
+        tab: "appearance",
+        anchor: "theme",
+        title: t(($) => $.appearance.theme.title),
+        description: t(($) => $.appearance.theme.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "theme-import",
+        title: t(($) => $.appearance.own.title),
+        description: t(($) => $.appearance.own.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "ui-text",
+        title: t(($) => $.appearance.ui_text.title),
+        description: t(($) => $.appearance.ui_text.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "ui-cjk-font",
+        title: `${t(($) => $.appearance.ui_text.title)} · ${t(($) => $.appearance.cjk_font.title)}`,
+        description: t(($) => $.appearance.cjk_font.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "font-size",
+        title: t(($) => $.appearance.font_size.title),
+        description: t(($) => $.appearance.font_size.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "content-text",
+        title: t(($) => $.appearance.content_text.title),
+        description: t(($) => $.appearance.content_text.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "content-cjk-font",
+        title: `${t(($) => $.appearance.content_text.title)} · ${t(($) => $.appearance.cjk_font.title)}`,
+        description: t(($) => $.appearance.cjk_font.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "code-font",
+        title: t(($) => $.appearance.code_font.title),
+        description: t(($) => $.appearance.code_font.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "content-size",
+        title: `${t(($) => $.appearance.content_text.title)} · ${t(($) => $.appearance.content_size.title)}`,
+        description: t(($) => $.appearance.content_size.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "content-leading",
+        title: t(($) => $.appearance.content_leading.title),
+      },
+      {
+        tab: "appearance",
+        anchor: "density",
+        title: t(($) => $.appearance.density.title),
+        description: t(($) => $.appearance.density.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "reduce-motion",
+        title: t(($) => $.appearance.reduce_motion.title),
+        description: t(($) => $.appearance.reduce_motion.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "high-contrast",
+        title: t(($) => $.appearance.high_contrast.title),
+        description: t(($) => $.appearance.high_contrast.description),
+      },
       {
         tab: "preferences",
         anchor: "sticky-comment-bar",
@@ -63,6 +154,12 @@ export function useSettingsSearchIndex(
         anchor: "running-agent-reply",
         title: t(($) => $.preferences.running_agent_reply.title),
         description: t(($) => $.preferences.running_agent_reply.hint),
+      },
+      {
+        tab: "preferences",
+        anchor: "comment-images",
+        title: t(($) => $.preferences.comment_images.title),
+        description: t(($) => $.preferences.comment_images.hint),
       },
       {
         tab: "preferences",
@@ -97,6 +194,36 @@ export function useSettingsSearchIndex(
         title: t(($) => $.notifications.groups[group].label),
         description: t(($) => $.notifications.groups[group].description),
       })),
+      // The row is hidden while comments are off; Comments is the closest spot.
+      {
+        tab: "notifications",
+        anchor: commentsOn ? "squad_handoffs" : "comments",
+        title: t(($) => $.notifications.groups.squad_handoffs.label),
+        description: t(($) => $.notifications.groups.squad_handoffs.description),
+      },
+      {
+        tab: "notifications",
+        anchor: "others_issues",
+        title: t(($) => $.notifications.others_issues.label),
+        description: t(($) => $.notifications.others_issues.description),
+      },
+      {
+        tab: "notifications",
+        anchor: "auto_archive_completed",
+        title: t(($) => $.notifications.leaving.auto_label),
+        description: t(($) => $.notifications.leaving.auto_description),
+      },
+      {
+        tab: "notifications",
+        anchor: "archived",
+        title: t(($) => $.notifications.leaving.archived_label),
+        description: t(($) => $.notifications.leaving.archived_description),
+      },
+      {
+        tab: "notifications",
+        anchor: "chat_replies",
+        title: t(($) => $.notifications.groups.chat_replies.label),
+      },
       {
         tab: "notifications",
         anchor: "system",
@@ -123,9 +250,65 @@ export function useSettingsSearchIndex(
         description: t(($) => $.shortcuts.description),
       },
       {
-        tab: "apps",
-        title: t(($) => $.page.tabs.apps),
-        description: t(($) => $.composio.page_description),
+        tab: "voice-input",
+        title: t(($) => $.page.tabs.voice_input),
+        description: t(($) => $.voice_input.description),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-enabled",
+        title: t(($) => $.voice_input.enabled.title),
+        description: t(($) => $.voice_input.enabled.hint),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-model",
+        title: t(($) => $.voice_input.model_title),
+        description: t(($) => $.voice_input.model_hint),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-shortcut",
+        title: t(($) => $.voice_input.shortcut.title),
+        description: t(($) => $.voice_input.shortcut.hint),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-activation",
+        title: t(($) => $.voice_input.activation.title),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-language",
+        title: t(($) => $.voice_input.language.title),
+        description: t(($) => $.voice_input.language.hint),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-fillers",
+        title: t(($) => $.voice_input.fillers.title),
+        description: t(($) => $.voice_input.fillers.hint),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-vocabulary",
+        title: t(($) => $.voice_input.vocabulary.title),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-device",
+        title: t(($) => $.voice_input.device.title),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-test",
+        title: t(($) => $.voice_input.test.title),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-history",
+        title: t(($) => $.voice_input.history.title),
+        description: t(($) => $.voice_input.history.description),
       },
       // Workspace
       { tab: "workspace", anchor: "name", title: t(($) => $.workspace.name_label) },
@@ -142,16 +325,15 @@ export function useSettingsSearchIndex(
         anchor: "issue-prefix",
         title: t(($) => $.workspace.issue_prefix_label),
       },
+      {
+        tab: "workspace",
+        anchor: "private-projects",
+        title: t(($) => $.private_projects.title),
+      },
       { tab: "workspace", anchor: "leave", title: t(($) => $.workspace.leave_title) },
       { tab: "workspace", anchor: "delete", title: t(($) => $.workspace.delete_title) },
       { tab: "members", anchor: "invitations", title: t(($) => $.members.pending_label) },
       { tab: "members", anchor: "links", title: t(($) => $.members.share_links_label) },
-      {
-        tab: "wakeups",
-        anchor: "child-done",
-        title: t(($) => $.wakeups.child_done_title),
-        description: t(($) => $.wakeups.child_done_description),
-      },
       {
         tab: "labels",
         title: t(($) => $.page.tabs.labels),
@@ -230,5 +412,5 @@ export function useSettingsSearchIndex(
       ...pageEntries,
       ...rows.filter((row) => row.anchor || row.integration),
     ].filter((entry) => visible.has(entry.tab));
-  }, [pages, t]);
+  }, [pages, t, commentsOn]);
 }

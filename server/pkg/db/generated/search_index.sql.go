@@ -11,6 +11,15 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteWorkspaceMemberSearchAccess = `-- name: DeleteWorkspaceMemberSearchAccess :exec
+DELETE FROM member_search_access WHERE workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceMemberSearchAccess(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceMemberSearchAccess, workspaceID)
+	return err
+}
+
 const deleteWorkspaceSearchIndexChanges = `-- name: DeleteWorkspaceSearchIndexChanges :exec
 DELETE FROM search_index_change WHERE workspace_id = $1
 `
@@ -33,20 +42,37 @@ func (q *Queries) GetSearchIndexCurrentSnapshot(ctx context.Context) (string, er
 
 const getSearchIndexManifest = `-- name: GetSearchIndexManifest :one
 
-WITH ws AS (SELECT $1::uuid AS id)
+WITH ws AS (SELECT $1::uuid AS id, $2::uuid[] AS hidden),
+visible_issue AS (
+    SELECT i.id, i.title, i.description FROM issue i, ws
+    WHERE i.workspace_id = ws.id
+      AND (ws.hidden IS NULL OR NOT (COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY(ws.hidden)))
+),
+visible_comment AS (
+    SELECT c.content FROM comment c
+    JOIN visible_issue vi ON vi.id = c.issue_id, ws
+    WHERE c.workspace_id = ws.id AND c.deleted_at IS NULL
+),
+visible_project AS (
+    SELECT p.title, p.description FROM project p, ws
+    WHERE p.workspace_id = ws.id AND (ws.hidden IS NULL OR NOT (p.id = ANY(ws.hidden)))
+)
 SELECT
     pg_current_snapshot()::text AS snapshot,
-    (SELECT count(*) FROM issue i, ws WHERE i.workspace_id = ws.id)::bigint AS issue_count,
-    (SELECT COALESCE(sum(octet_length(i.title) + COALESCE(octet_length(i.description), 0)), 0)
-        FROM issue i, ws WHERE i.workspace_id = ws.id)::bigint AS issue_bytes,
-    (SELECT count(*) FROM comment c, ws
-        WHERE c.workspace_id = ws.id AND c.deleted_at IS NULL)::bigint AS comment_count,
-    (SELECT COALESCE(sum(octet_length(c.content)), 0) FROM comment c, ws
-        WHERE c.workspace_id = ws.id AND c.deleted_at IS NULL)::bigint AS comment_bytes,
-    (SELECT count(*) FROM project p, ws WHERE p.workspace_id = ws.id)::bigint AS project_count,
-    (SELECT COALESCE(sum(octet_length(p.title) + COALESCE(octet_length(p.description), 0)), 0)
-        FROM project p, ws WHERE p.workspace_id = ws.id)::bigint AS project_bytes
+    (SELECT count(*) FROM visible_issue)::bigint AS issue_count,
+    (SELECT COALESCE(sum(octet_length(title) + COALESCE(octet_length(description), 0)), 0)
+        FROM visible_issue)::bigint AS issue_bytes,
+    (SELECT count(*) FROM visible_comment)::bigint AS comment_count,
+    (SELECT COALESCE(sum(octet_length(content)), 0) FROM visible_comment)::bigint AS comment_bytes,
+    (SELECT count(*) FROM visible_project)::bigint AS project_count,
+    (SELECT COALESCE(sum(octet_length(title) + COALESCE(octet_length(description), 0)), 0)
+        FROM visible_project)::bigint AS project_bytes
 `
+
+type GetSearchIndexManifestParams struct {
+	WorkspaceID      pgtype.UUID   `json:"workspace_id"`
+	HiddenProjectIds []pgtype.UUID `json:"hidden_project_ids"`
+}
 
 type GetSearchIndexManifestRow struct {
 	Snapshot     string `json:"snapshot"`
@@ -65,9 +91,10 @@ type GetSearchIndexManifestRow struct {
 // than this snapshot and reaches the client through the change log. The byte
 // totals let the client reject a workspace too large for its memory budget
 // before downloading it; octet_length reads the stored length, so TOASTed
-// bodies are not decompressed.
-func (q *Queries) GetSearchIndexManifest(ctx context.Context, workspaceID pgtype.UUID) (GetSearchIndexManifestRow, error) {
-	row := q.db.QueryRow(ctx, getSearchIndexManifest, workspaceID)
+// bodies are not decompressed. Rows in hidden_project_ids are left out, as
+// the snapshot leaves them out.
+func (q *Queries) GetSearchIndexManifest(ctx context.Context, arg GetSearchIndexManifestParams) (GetSearchIndexManifestRow, error) {
+	row := q.db.QueryRow(ctx, getSearchIndexManifest, arg.WorkspaceID, arg.HiddenProjectIds)
 	var i GetSearchIndexManifestRow
 	err := row.Scan(
 		&i.Snapshot,
@@ -234,7 +261,7 @@ func (q *Queries) ListSearchIndexCommentsByIssues(ctx context.Context, arg ListS
 }
 
 const listSearchIndexIssuesByIDs = `-- name: ListSearchIndexIssuesByIDs :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, requester_user_id, description_revision FROM issue
 WHERE workspace_id = $1 AND id = ANY($2::uuid[])
 `
 
@@ -283,6 +310,8 @@ func (q *Queries) ListSearchIndexIssuesByIDs(ctx context.Context, arg ListSearch
 			&i.LastActivityAt,
 			&i.TriageState,
 			&i.DuplicateOfIssueID,
+			&i.RequesterUserID,
+			&i.DescriptionRevision,
 		); err != nil {
 			return nil, err
 		}
@@ -295,7 +324,7 @@ func (q *Queries) ListSearchIndexIssuesByIDs(ctx context.Context, arg ListSearch
 }
 
 const listSearchIndexIssuesPage = `-- name: ListSearchIndexIssuesPage :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id, requester_user_id, description_revision FROM issue
 WHERE workspace_id = $1 AND number > $2
 ORDER BY number
 LIMIT $3
@@ -348,6 +377,8 @@ func (q *Queries) ListSearchIndexIssuesPage(ctx context.Context, arg ListSearchI
 			&i.LastActivityAt,
 			&i.TriageState,
 			&i.DuplicateOfIssueID,
+			&i.RequesterUserID,
+			&i.DescriptionRevision,
 		); err != nil {
 			return nil, err
 		}
@@ -360,7 +391,7 @@ func (q *Queries) ListSearchIndexIssuesPage(ctx context.Context, arg ListSearchI
 }
 
 const listSearchIndexProjects = `-- name: ListSearchIndexProjects :many
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id, folder_id FROM project
 WHERE workspace_id = $1
 ORDER BY id
 `
@@ -391,6 +422,11 @@ func (q *Queries) ListSearchIndexProjects(ctx context.Context, workspaceID pgtyp
 			&i.WorkflowID,
 			&i.CreatorType,
 			&i.CreatorID,
+			&i.Visibility,
+			&i.ArchivedAt,
+			&i.ArchivedByType,
+			&i.ArchivedByID,
+			&i.FolderID,
 		); err != nil {
 			return nil, err
 		}
@@ -403,7 +439,7 @@ func (q *Queries) ListSearchIndexProjects(ctx context.Context, workspaceID pgtyp
 }
 
 const listSearchIndexProjectsByIDs = `-- name: ListSearchIndexProjectsByIDs :many
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id, folder_id FROM project
 WHERE workspace_id = $1 AND id = ANY($2::uuid[])
 `
 
@@ -438,6 +474,11 @@ func (q *Queries) ListSearchIndexProjectsByIDs(ctx context.Context, arg ListSear
 			&i.WorkflowID,
 			&i.CreatorType,
 			&i.CreatorID,
+			&i.Visibility,
+			&i.ArchivedAt,
+			&i.ArchivedByType,
+			&i.ArchivedByID,
+			&i.FolderID,
 		); err != nil {
 			return nil, err
 		}
@@ -447,6 +488,27 @@ func (q *Queries) ListSearchIndexProjectsByIDs(ctx context.Context, arg ListSear
 		return nil, err
 	}
 	return items, nil
+}
+
+const markSearchAccessChanged = `-- name: MarkSearchAccessChanged :exec
+INSERT INTO member_search_access (workspace_id, user_id, changed_xid, changed_at)
+VALUES ($1, $2, pg_current_xact_id(), now())
+ON CONFLICT (workspace_id, user_id) DO UPDATE
+    SET changed_xid = EXCLUDED.changed_xid,
+        changed_at = EXCLUDED.changed_at
+`
+
+type MarkSearchAccessChangedParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+// Records that this transaction changed what the user can see in the
+// workspace without rewriting the content (MUL-9420), so local search copies
+// built before it are rebuilt.
+func (q *Queries) MarkSearchAccessChanged(ctx context.Context, arg MarkSearchAccessChangedParams) error {
+	_, err := q.db.Exec(ctx, markSearchAccessChanged, arg.WorkspaceID, arg.UserID)
+	return err
 }
 
 const pruneSearchIndexChanges = `-- name: PruneSearchIndexChanges :one
@@ -486,6 +548,30 @@ func (q *Queries) PruneSearchIndexChanges(ctx context.Context, arg PruneSearchIn
 	var deleted_count int64
 	err := row.Scan(&deleted_count)
 	return deleted_count, err
+}
+
+const searchAccessChangedAfter = `-- name: SearchAccessChangedAfter :one
+SELECT EXISTS (
+    SELECT 1 FROM member_search_access
+    WHERE workspace_id = $1
+      AND user_id = $2
+      AND NOT pg_visible_in_snapshot(changed_xid, ($3::text)::pg_snapshot)
+)::bool AS changed
+`
+
+type SearchAccessChangedAfterParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	UserID        pgtype.UUID `json:"user_id"`
+	SinceSnapshot string      `json:"since_snapshot"`
+}
+
+// Whether the user's access in the workspace was changed by a transaction the
+// since snapshot does not include.
+func (q *Queries) SearchAccessChangedAfter(ctx context.Context, arg SearchAccessChangedAfterParams) (bool, error) {
+	row := q.db.QueryRow(ctx, searchAccessChangedAfter, arg.WorkspaceID, arg.UserID, arg.SinceSnapshot)
+	var changed bool
+	err := row.Scan(&changed)
+	return changed, err
 }
 
 const searchIndexSinceIsPruned = `-- name: SearchIndexSinceIsPruned :one

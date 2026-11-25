@@ -99,8 +99,16 @@ vi.mock("../../platform/use-local-daemon-status", () => ({
   useLocalDaemonStatus: () => ({ daemonId: null, deviceName: null, running: false }),
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+const clipboard = vi.hoisted(() => ({ copyText: vi.fn() }));
+vi.mock("@multica/ui/lib/clipboard", () => clipboard);
 
 import { ProjectResourcesSection } from "./project-resources-section";
+
+async function openRepoPanel() {
+  fireEvent.click(screen.getByRole("button", { name: "Add" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: /^GitHub repository/ }));
+  await screen.findByLabelText(/paste a github url/i);
+}
 
 describe("ProjectResourcesSection — github_repo checkout ref", () => {
   beforeEach(() => {
@@ -129,15 +137,20 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
           <ProjectResourcesSection projectId="p1" />
         </QueryClientProvider>,
       );
-      const [firstButton, secondButton] = screen.getAllByRole("button", { name: /remove/i });
-      fireEvent.click(firstButton!);
+      const [firstButton, secondButton] = screen.getAllByRole("button", { name: /^actions for/i });
+      const removeFrom = async (trigger: HTMLElement) => {
+        fireEvent.click(trigger);
+        fireEvent.click(await screen.findByRole("menuitem", { name: /remove/i }));
+      };
+      await removeFrom(firstButton!);
       await waitFor(() => expect(firstButton).toBeDisabled());
       expect(firstButton).toHaveAttribute("aria-busy", "true");
       expect(secondButton).toBeEnabled();
       fireEvent.click(firstButton!);
+      expect(screen.queryByRole("menuitem", { name: /remove/i })).toBeNull();
       expect(remove).toHaveBeenCalledTimes(1);
 
-      fireEvent.click(secondButton!);
+      await removeFrom(secondButton!);
       await waitFor(() => expect(secondButton).toBeDisabled());
       expect(remove).toHaveBeenCalledTimes(2);
       await act(async () => {
@@ -155,6 +168,15 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
     }
   });
 
+  it("lists the repositories read-only, with nothing to add, remove or change", () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" readOnly />);
+    expect(screen.getByText("Release line")).toBeTruthy();
+    expect(screen.getByText("release/2026-09")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Add" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^actions for/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /release\/2026-09/ })).toBeNull();
+  });
+
   it("shows the ref beside a repo that has a custom label", () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
     expect(screen.getByText("Release line")).toBeTruthy();
@@ -167,7 +189,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
     expect(screen.getAllByText("multica-ai/api")).not.toHaveLength(0);
     expect(screen.getByText(AVAILABLE_REPO.description)).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: /add resource/i }));
+    await openRepoPanel();
     expect(screen.getByText(ATTACHABLE_REPO.description)).toBeTruthy();
     fireEvent.click(
       screen.getByRole("button", { name: /multica-ai\/daemon/i }),
@@ -183,7 +205,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
   it("saves a new ref while preserving the rest of the stored ref", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getAllByRole("button", { name: /change the branch tasks work on/i })[0]!);
+    fireEvent.click(screen.getByRole("button", { name: "release/2026-09" }));
     const input = screen.getByLabelText(/starting branch/i);
     fireEvent.change(input, { target: { value: "release/2026-10" } });
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
@@ -206,7 +228,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
   it("clearing the field drops the key so tasks fall back to the default branch", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getAllByRole("button", { name: /change the branch tasks work on/i })[0]!);
+    fireEvent.click(screen.getByRole("button", { name: "release/2026-09" }));
     fireEvent.change(screen.getByLabelText(/starting branch/i), {
       target: { value: "" },
     });
@@ -225,14 +247,14 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
   it("refuses to save a ref git could never resolve", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getAllByRole("button", { name: /change the branch tasks work on/i })[0]!);
+    fireEvent.click(screen.getByRole("button", { name: "release/2026-09" }));
     fireEvent.change(screen.getByLabelText(/starting branch/i), {
       target: { value: "main..dev" },
     });
 
     const save = screen.getByRole("button", { name: /^save$/i }) as HTMLButtonElement;
     expect(save.disabled).toBe(true);
-    expect(screen.getByText(/not a valid branch, tag, or commit/i)).toBeTruthy();
+    expect(screen.getByText(/not a valid branch name/i)).toBeTruthy();
     fireEvent.click(save);
     expect(updateMock).not.toHaveBeenCalled();
   });
@@ -240,15 +262,15 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
   it("attaches a repo with the ref typed alongside its URL", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getByRole("button", { name: /add resource/i }));
-    const urlInput = screen.getByLabelText(/attach a github repo/i);
+    await openRepoPanel();
+    const urlInput = screen.getByLabelText(/paste a github url/i);
     fireEvent.change(urlInput, {
       target: { value: "https://github.com/multica-ai/other" },
     });
     fireEvent.change(screen.getByLabelText(/starting branch/i), {
       target: { value: "main" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /^add$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^add multica-ai\//i }));
 
     await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
     expect(createMock.mock.calls[0]?.[0]).toEqual({
@@ -257,28 +279,64 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
     });
   });
 
-  it("splits a pasted /tree/ URL into the repo and the branch it points at", async () => {
+  // The server accepts scp-like `[user@]host:path`, and SSH host aliases for
+  // multiple git accounts are written exactly that way, so the field has to
+  // treat them as addresses rather than as search terms.
+  it.each([
+    ["an SSH host alias", "github-work:team/repo.git"],
+    ["a user@host address on another server", "alice@git.example.com:team/repo.git"],
+  ])("offers to add %s that is not in the workspace list", async (_label, address) => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getByRole("button", { name: /add resource/i }));
+    await openRepoPanel();
+    const input = screen.getByLabelText(/paste a github url/i);
+    fireEvent.change(input, { target: { value: address } });
+
+    expect(screen.getByRole("button", { name: `Add ${address}` })).toBeTruthy();
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
+    expect(createMock.mock.calls[0]?.[0]).toEqual({
+      resource_type: "github_repo",
+      resource_ref: { url: address },
+    });
+  });
+
+  it.each(["multica", "agent sdk"])("keeps %j a search rather than an address", async (term) => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+
+    await openRepoPanel();
+    const input = screen.getByLabelText(/paste a github url/i);
+    fireEvent.change(input, { target: { value: term } });
+
+    expect(screen.queryByRole("button", { name: `Add ${term}` })).toBeNull();
+    expect(screen.queryByLabelText(/starting branch/i)).toBeNull();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
+  it("saves the decoded branch from a pasted GitHub URL without page parameters", async () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+
+    await openRepoPanel();
     // What someone copies out of the address bar when they want a branch.
     // Stored whole, this is a clone URL that does not exist.
-    fireEvent.change(screen.getByLabelText(/attach a github repo/i), {
-      target: { value: "https://github.com/multica-ai/other/tree/release/2026-09" },
+    fireEvent.change(screen.getByLabelText(/paste a github url/i), {
+      target: { value: "https://github.com/multica-ai/other/tree/release%2F%E4%B8%AD%E6%96%87?tab=readme-ov-file#readme" },
     });
 
-    const urlInput = screen.getByLabelText(/attach a github repo/i) as HTMLInputElement;
+    const urlInput = screen.getByLabelText(/paste a github url/i) as HTMLInputElement;
     const refInput = screen.getByLabelText(/starting branch/i) as HTMLInputElement;
     expect(urlInput.value).toBe("https://github.com/multica-ai/other");
-    expect(refInput.value).toBe("release/2026-09");
+    expect(refInput.value).toBe("release/中文");
 
-    fireEvent.click(screen.getByRole("button", { name: /^add$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^add multica-ai\//i }));
     await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
     expect(createMock.mock.calls[0]?.[0]).toEqual({
       resource_type: "github_repo",
       resource_ref: {
         url: "https://github.com/multica-ai/other",
-        ref: "release/2026-09",
+        ref: "release/中文",
       },
     });
   });
@@ -288,8 +346,8 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
   it("normalises a pasted browse URL even when a branch is already filled in", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getByRole("button", { name: /add resource/i }));
-    const urlInput = () => screen.getByLabelText(/attach a github repo/i) as HTMLInputElement;
+    await openRepoPanel();
+    const urlInput = () => screen.getByLabelText(/paste a github url/i) as HTMLInputElement;
     const refInput = () => screen.getByLabelText(/starting branch/i) as HTMLInputElement;
 
     fireEvent.change(urlInput(), {
@@ -304,7 +362,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
     expect(urlInput().value).toBe("https://github.com/multica-ai/two");
     expect(refInput().value).toBe("main");
 
-    fireEvent.click(screen.getByRole("button", { name: /^add$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^add multica-ai\//i }));
     await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
     expect(createMock.mock.calls[0]?.[0]).toEqual({
       resource_type: "github_repo",
@@ -312,14 +370,39 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
     });
   });
 
+  it.each([
+    "https://github.com/multica-ai/one.git",
+    "https://github.com/multica-ai/two",
+    "git@github.com:multica-ai/two.git",
+  ])("clears the previous branch when replacing a browse URL with %s", async (url) => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+
+    await openRepoPanel();
+    const input = screen.getByLabelText(/paste a github url/i);
+    fireEvent.change(input, {
+      target: { value: "https://github.com/multica-ai/one/tree/release/2026-09" },
+    });
+    expect((screen.getByLabelText(/starting branch/i) as HTMLInputElement).value).toBe("release/2026-09");
+
+    fireEvent.change(input, { target: { value: url } });
+    expect((screen.getByLabelText(/starting branch/i) as HTMLInputElement).value).toBe("");
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
+    expect(createMock.mock.calls[0]?.[0]).toEqual({
+      resource_type: "github_repo",
+      resource_ref: { url },
+    });
+  });
+
   it("omits the ref key entirely when the field is left empty", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getByRole("button", { name: /add resource/i }));
-    fireEvent.change(screen.getByLabelText(/attach a github repo/i), {
+    await openRepoPanel();
+    fireEvent.change(screen.getByLabelText(/paste a github url/i), {
       target: { value: "https://github.com/multica-ai/other" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /^add$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^add multica-ai\//i }));
 
     await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
     expect(createMock.mock.calls[0]?.[0]).toEqual({
@@ -328,18 +411,18 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
     });
   });
 
-  it("blocks attaching when the ref is invalid, without touching the URL field", () => {
+  it("blocks attaching when the ref is invalid, without touching the URL field", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getByRole("button", { name: /add resource/i }));
-    fireEvent.change(screen.getByLabelText(/attach a github repo/i), {
+    await openRepoPanel();
+    fireEvent.change(screen.getByLabelText(/paste a github url/i), {
       target: { value: "https://github.com/multica-ai/other" },
     });
     fireEvent.change(screen.getByLabelText(/starting branch/i), {
       target: { value: "bad ref" },
     });
 
-    const add = screen.getByRole("button", { name: /^add$/i }) as HTMLButtonElement;
+    const add = screen.getByRole("button", { name: /^add multica-ai\//i }) as HTMLButtonElement;
     expect(add.disabled).toBe(true);
     fireEvent.click(add);
     expect(createMock).not.toHaveBeenCalled();
@@ -350,12 +433,11 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
   it("says 'Default branch' when nothing is pinned, rather than showing nothing", () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    // `.group` is the row root; the link's immediate parent is only its top line.
-    const pinnedRow = screen.getByText("Release line").closest(".group") as HTMLElement;
+    const pinnedRow = screen.getByText("Release line").closest("[data-resource-row]") as HTMLElement;
     expect(within(pinnedRow).queryByText("release/2026-09")).toBeTruthy();
     expect(within(pinnedRow).queryByText(/default branch/i)).toBeNull();
 
-    const plainRow = screen.getAllByText("multica-ai/api")[0]?.closest(".group") as HTMLElement;
+    const plainRow = screen.getAllByText("multica-ai/api")[0]?.closest("[data-resource-row]") as HTMLElement;
     expect(within(plainRow).queryByText(/default branch/i)).toBeTruthy();
     expect(within(plainRow).queryByText("release/2026-09")).toBeNull();
   });
@@ -367,7 +449,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
   it("declines a pasted commit id and points at the per-task escape hatch", () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getAllByRole("button", { name: /change the branch tasks work on/i })[0]!);
+    fireEvent.click(screen.getByRole("button", { name: "release/2026-09" }));
     fireEvent.change(screen.getByLabelText(/starting branch/i), {
       target: { value: "5e0b1cfa0a7d6a1a0f4b3f2e1d0c9b8a7f6e5d4c" },
     });
@@ -382,12 +464,61 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
   it("still accepts a tag-shaped name — it could be a branch, and only the remote knows", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getAllByRole("button", { name: /change the branch tasks work on/i })[0]!);
+    fireEvent.click(screen.getByRole("button", { name: "release/2026-09" }));
     fireEvent.change(screen.getByLabelText(/starting branch/i), {
       target: { value: "v1.4.0" },
     });
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
 
     await waitFor(() => expect(updateMock).toHaveBeenCalledTimes(1));
+  });
+
+  it("keeps the branch editor open with the server's reason when a save is rejected", async () => {
+    updateMock.mockRejectedValueOnce(new Error("ref is not reachable"));
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "release/2026-09" }));
+    fireEvent.change(screen.getByLabelText(/starting branch/i), {
+      target: { value: "release/2026-10" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    expect(await screen.findByText("ref is not reachable")).toBeTruthy();
+    expect((screen.getByLabelText(/starting branch/i) as HTMLInputElement).value).toBe(
+      "release/2026-10",
+    );
+  });
+
+  // One field serves both search and paste; only a URL turns it into an
+  // attach form, so a search term never offers to attach itself.
+  it("filters workspace repositories for a search term without offering to attach it", async () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+
+    await openRepoPanel();
+    fireEvent.change(screen.getByLabelText(/paste a github url/i), {
+      target: { value: "daemon" },
+    });
+
+    expect(screen.getByRole("button", { name: /multica-ai\/daemon/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^multica-ai\/api/i })).toBeNull();
+    expect(screen.queryByLabelText(/starting branch/i)).toBeNull();
+  });
+
+  it("copies a repository's URL from its row menu", async () => {
+    clipboard.copyText.mockResolvedValue(true);
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+    fireEvent.click(screen.getByRole("button", { name: "Actions for Release line" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Copy URL" }));
+    await waitFor(() => expect(clipboard.copyText).toHaveBeenCalledWith("https://github.com/multica-ai/multica"));
+  });
+
+  // Picking a folder needs this machine's daemon, so web keeps the entry and
+  // says where it works instead.
+  it("tells web that folders are added from the desktop app", async () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    const item = await screen.findByRole("menuitem", { name: /^Local folder/ });
+    expect(item.getAttribute("aria-disabled")).toBe("true");
+    expect(item.textContent).toContain("Only in the desktop app");
   });
 });

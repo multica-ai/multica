@@ -124,7 +124,296 @@ survives an interrupted exit. It also checks that the message list's ancestor
 is never scaled, and that a reopened window never paints before its message
 list does. HTTP and WebSocket traffic is synthetic; no backend is needed.
 
-## When to run it
+## Issue history with a real local API
+
+`issue-history.spec.ts` measures direct issue entry and Inbox selection on the
+production UI against an isolated, migrated local API/database. It seeds and
+cleans up its own issues through `TestApiClient`; completed execution rows are
+inserted locally without dispatching agents. It never mocks HTTP or WebSocket
+responses. Run it explicitly with `PERF_SCENARIO=issue-history`.
+
+Start the API with `make up C=api ARGS="--ephemeral"`. Build each compared ref
+with `NEXT_PUBLIC_API_URL='' NEXT_PUBLIC_WS_URL='' pnpm --filter @multica/web build`,
+then run its production server with `REMOTE_API_URL` pointing at that API.
+Run the **same spec from the head checkout** against each server:
+
+```bash
+PERF_SCENARIO=issue-history PERF_REPEATS=5 \
+  PLAYWRIGHT_BASE_URL=http://localhost:<production-web-port> \
+  PERF_REPORT_PATH=<absolute-report-path> \
+  make env-exec ARGS="-- pnpm exec playwright test --config=playwright.perf.config.ts issue-history.spec.ts"
+```
+
+Each scenario gets one warmup and five fresh-browser-context samples. The
+default datasets have 120 or 716 Markdown replies and 20 completed runs with
+64 KiB outputs. An optional `PERF_ISSUE_SOURCE` JSON array of `{content}` adds
+a local discussion-text workload; keep private content outside Git and do not
+publish its screenshots. Reports contain only counts, byte sizes and a content
+digest. Compare digests before comparing samples.
+
+Reports include entry-to-visible-target time, main-thread task duration, long
+tasks, live heap after explicit GC, mounted comment bodies, DOM nodes and actual
+task-response body bytes (decompressed). CPU is unthrottled. Direct entry
+includes application boot; Inbox entry starts with the shell already loaded.
+Long tasks are snapshotted before the instrumentation's forced GC. Set
+`PERF_DATASET` to dataset names separated by commas or `PERF_ENTRY=direct|inbox` to
+repeat a focused case in alternating product order.
+These are observed local measurements, not latency thresholds. Stop other
+run-owned builds/tests before measuring; the report also records system load.
+Destroy the API environment after the comparison with `make destroy ARGS="--yes"`.
+
+## Core paths: big issues and Inbox switching
+
+`core-paths.spec.ts` is the benchmark the performance work (MUL-9539) is
+judged by. It measures the two paths people report as slow, on the production
+UI against a real local API, with a seeded "large workspace":
+
+- **issue**: open a big issue by URL, scroll its history to the end at a
+  steady pace while the images load, then, from the middle of the history,
+  toggle the left nav (⌘B) and the right sidebar ten times each. It runs on
+  two issues: `large` (300 comments, 80 images, 70 runs, 40 sub-issues) and
+  `p99` (54 / 54 / 36 / 38, the non-zero p99 of a production sample).
+- **inbox**: click through twenty rows of the Work panel's Inbox, then go back
+  and forth between the first five. `PERF_INBOX_ROWS=20` (default) uses the
+  largest section limit; `PERF_INBOX_ROWS=all` first presses "Show N more".
+  A switch ends when the notified comment is in view; `PERF_INBOX_UNTIL=title`
+  ends it at the issue title instead, for refs older than #10872 that do not
+  bring the comment into view.
+
+Each step reports **time until the content is on screen** and **stalls**:
+frames longer than 50 ms (Long Animation Frames), the longest one, and the
+scripts behind the worst. Interactions start at the click event's own
+timestamp and end in the frame where the target is laid out in the viewport,
+so Playwright's IPC is not in the number. A step whose content never appears
+fails rather than reporting a fast time.
+
+The dataset (`lib/core-dataset.ts`) takes its sizes from production
+aggregates: ~1,000 issues, ~1,800 notifications of which ~950 unread, and the
+issues above. Text, structure and image bytes are deterministic. The report
+carries a digest of the generator's source and the image bytes, so any edit to
+`lib/core-dataset.ts` gives a new digest, and both comparison scripts refuse
+to compare reports from different datasets. The first run seeds a `perf-core`
+workspace (about a minute); later runs reuse it until the digest changes.
+
+```bash
+make up C=api ARGS="--ephemeral"
+NEXT_PUBLIC_API_URL='' NEXT_PUBLIC_WS_URL='' pnpm --filter @multica/web build
+(cd apps/web && REMOTE_API_URL=http://localhost:<api-port> pnpm exec next start --port 3000) &
+PERF_SCENARIO=core-paths PERF_REPORT_PATH=$PWD/perf/main.json \
+  make env-exec ARGS="-- pnpm exec playwright test --config=playwright.perf.config.ts core-paths.spec.ts"
+node scripts/perf-core-report.mjs main=perf/main.json [other=perf/other.json ...]
+```
+
+`PERF_SCENARIO=core-issue` or `core-inbox` runs one scenario;
+`PERF_ISSUES=large` narrows the issue scenario; `PERF_REPEATS` (default 5)
+and `PERF_WARMUP` (default 1) set the rounds, each in a fresh browser context.
+`PERF_CPU_THROTTLE=4` slows the CPU for the whole sample: an M-series Mac
+absorbs work that a mid-range laptop shows as stalls, and a fix that only
+helps there (#10767's left-nav toggle) is invisible unthrottled. Sidebar
+toggles also report main-thread work per toggle, the most stable of the
+numbers.
+To compare two refs, run `perf-compare.mjs` inside the API's environment. It
+builds each ref in its own worktree, serves it against the local API, runs the
+spec from this checkout, then stops it before the next side starts:
+
+```bash
+make up C=api ARGS="--ephemeral"
+make env-exec ARGS="-- node scripts/perf-compare.mjs --scenario core-paths --base origin/main --head HEAD --out perf-report"
+```
+
+`--scenario core-issue` or `core-inbox` measures one path. The `PERF_*`
+settings above pass through. It writes `base.json`, `head.json` and
+`comparison.md`, whose table is the one `perf-core-report.mjs` prints; attach
+it to the PR. The **UI performance report** workflow does not offer these
+scenarios, because a GitHub runner has no local API to run them against.
+
+## Desktop: tab switches and Inbox clicks
+
+`desktop-tabs.spec.ts` measures what only Desktop has, in the real Electron
+app (production renderer from `electron-vite build`) on the core-path
+dataset (MUL-9609). Desktop mounts one tab at a time, so a tab switch
+unmounts the outgoing page and mounts the incoming one from the Query cache.
+
+- **tabs**: open six tabs (issue list, Inbox, the `large` issue read down to
+  its notified comment, `p99`, a 120-comment and a small issue), then click
+  through the tab strip twice.
+- **inbox**: the core-path Inbox scenario inside Desktop: click twenty Work
+  panel Inbox rows, then go back and forth between the first five.
+
+Each step reports the time from the click until the content is in view, the
+next paint (Event Timing), main-thread task time and Long Animation Frames,
+plus mounted DOM nodes. Every launch gets a fresh app-data directory and a
+temporary HOME with daemon auto-start off, so it never touches an installed
+Multica, its CLI profiles or its daemon, and hands the `multica://` handler
+back on exit.
+
+```bash
+make up C=api ARGS="--ephemeral"
+# Build each ref's Desktop against the API and keep its output under apps/desktop.
+(cd apps/desktop && VITE_API_URL=http://localhost:<api-port> VITE_WS_URL=ws://localhost:<api-port>/ws \
+  pnpm exec electron-vite build && rm -rf .perf-builds/head && cp -R out .perf-builds/head)
+PERF_SCENARIO=desktop PERF_REPORT_PATH=$PWD/perf/desktop.json \
+  PERF_DESKTOP_TARGETS=main=apps/desktop/.perf-builds/main,head=apps/desktop/.perf-builds/head \
+  make env-exec ARGS="-- pnpm exec playwright test --config=playwright.perf.config.ts desktop-tabs.spec.ts"
+```
+
+`PERF_SCENARIO=desktop-tabs` or `desktop-inbox` runs one scenario. Rounds
+alternate between the `PERF_DESKTOP_TARGETS` builds (default: this
+checkout's `apps/desktop/out`); `PERF_REPEATS`, `PERF_WARMUP` and
+`PERF_CPU_THROTTLE` work as in the core-path benchmark. `PERF_TRACE_DIR`
+writes a Chrome trace and CPU profile of the last round's last tab cycle.
+The renderer bundle is not minified, so profiles carry real function names.
+
+## Core paths on Desktop, idle CPU and memory growth
+
+The same core paths run in the Electron app, plus two scenarios only Desktop
+has (MUL-9612). `scripts/perf-desktop.mjs` builds Desktop for production
+against the environment's API, starts that build with a DevTools port, runs
+the specs over CDP with `PERF_PLATFORM=desktop`, and stops the app:
+
+```bash
+make up C=api ARGS="--ephemeral"
+make env-exec ARGS="-- node scripts/perf-desktop.mjs --out $PWD/perf/desktop"
+node scripts/perf-core-report.mjs web=perf/main.json \
+  desktop=perf/desktop/core-paths.json desktop=perf/desktop/desktop-resources.json
+```
+
+It writes `core-paths.json`, `desktop-resources.json`, `desktop.log` (the
+app's output) and `report.md`. `--scenarios` picks a subset (`core-issue`,
+`core-inbox`, `desktop-idle`, `desktop-memory`); `--skip-build` reuses
+`apps/desktop/out`, which must have been built against the same API port.
+`PERF_*` variables pass through. A full run takes about 35 minutes.
+
+- **Core paths** are the steps above, on the same dataset, with the same
+  clock and the same report. Each sample clears the renderer's storage and
+  HTTP cache, writes a tab layout holding only the measured route and
+  reloads: the app boots onto that tab as it does on launch. That is the
+  Desktop counterpart of opening a URL in a fresh browser context.
+  Every boot also writes English as the language choice, as the web
+  context's `locale: "en-US"` does; the specs match English labels, and
+  Desktop would otherwise follow the OS language.
+- **`desktop-idle`** opens the big issue (300 comments, 70 runs), waits 15 s,
+  then touches nothing for `PERF_IDLE_SECONDS` (300). CPU is sampled every
+  second per process role: main, renderer, GPU, utility (network, storage).
+  100% is one core. The renderer's own main-thread busy time and any stalls
+  are reported beside it.
+- **`desktop-memory`** clicks through the Work panel's twenty Inbox rows,
+  round and round, for `PERF_MEMORY_SECONDS` (600), sampling resident memory
+  every 5 s. It reports the growth slope over the whole window and over its
+  second half (the first minutes include caches filling), the first and last
+  minute, the JS heap at the end before and after GC, and whether switches
+  got slower.
+
+CPU and memory come from `ps` (`lib/process-tree.ts`): cumulative CPU time
+and RSS of the Electron main process and its descendants, read from outside
+the app. Processes without an Electron `--type` under it (the local daemon
+Desktop starts, and its agents) are reported as `other` and left out of the
+app total. Memory is RSS, not macOS's "memory footprint" in Activity Monitor;
+compare it run to run, not with that number.
+
+The app runs unpackaged from `apps/desktop/out` with a production renderer
+bundle; packaging, signing and auto-update are not part of it. It gets its own
+userData directory (`Multica Canary Perf <env>`) and starts signed out; the
+specs sign in as the dataset's user. Keep its window visible: Chromium
+throttles a hidden window, so `desktop-idle` fails rather than report one.
+
+`--attach` measures the development Desktop of `make up C=desktop
+ARGS="--cdp"` instead and leaves it running. Its React is the development
+build: slower, and it records profiling data, so use it only for problems
+that exist only there, such as the User Timing leak of MUL-8781:
+
+```bash
+make up C=api,desktop ARGS="--ephemeral --cdp"
+make env-exec ARGS="-- node scripts/perf-desktop.mjs --attach --scenarios desktop-memory --out $PWD/perf/dev"
+```
+
+## Retained memory while switching Inbox rows
+
+`desktop-memory` says whether the app grows; `inbox-heap.spec.ts` says what
+is kept. It drives the same Work-panel switches on the web build (or the
+Desktop renderer with `PERF_PLATFORM=desktop`) and, at each switch count in
+`PERF_HEAP_CHECKPOINTS` (default `0,40,80,160,320`), forces GC and records
+the JS heap, DOM nodes and event listeners. A count that keeps rising with
+the switches is a leak; caches level off. `PERF_HEAP_SNAPSHOT_DIR` also writes
+a heap snapshot at each checkpoint, to diff two counts in DevTools.
+
+```bash
+PERF_SCENARIO=inbox-heap PLAYWRIGHT_BASE_URL=http://localhost:3000 \
+  make env-exec ARGS="-- pnpm exec playwright test --config=playwright.perf.config.ts inbox-heap.spec.ts"
+```
+
+MUL-9634 found this way that every editor's Markdown tokenizers stayed on the
+global `marked`, with the unmounted issue behind them: ~1,000 DOM nodes per
+switch, until each editor got its own instance.
+
+## Inbox jump
+
+`inbox-jump.spec.ts` opens a notification about a reply deep in a long issue
+from the sidebar Inbox and measures the time from the pointer press to the
+reply being mounted and on screen, plus long tasks and how many comment bodies
+mounted on the way. It runs against production builds and an isolated local
+API, as the issue-history scenario does (MUL-9538).
+
+The first run seeds a deterministic issue shaped like GitHub #10775: 49
+comments (18 replies, agent reports with tables and code), 72 runs, 24
+sub-issues and 20 activity entries, plus a small neighbour issue. It writes
+the ids and the user's token to `PERF_MANIFEST`; later runs reuse it, so every
+build is measured on the same rows. Each sample:
+
+- **cold**: a fresh browser context loads the Inbox, waits
+  `PERF_COLD_SETTLE_MS` (default 1500), then opens the notification. Every
+  sample starts from an unread notification.
+- **warm**: in the same context, it opens the neighbour, then the long issue's
+  notification again.
+
+```bash
+make up C=api ARGS="--ephemeral"
+# Build each ref with NEXT_PUBLIC_API_URL='' NEXT_PUBLIC_WS_URL='' and serve it
+# with REMOTE_API_URL pointing at the API (see the issue-history section).
+PERF_SCENARIO=inbox-jump PERF_REPEATS=6 \
+  PERF_MANIFEST=<absolute-path>/inbox-jump-manifest.json \
+  PERF_TARGETS="main=http://localhost:3101,head=http://localhost:3102" \
+  PERF_REPORT_PATH=<absolute-report-path> \
+  make env-exec ARGS="-- pnpm exec playwright test --config=playwright.perf.config.ts inbox-jump.spec.ts"
+```
+
+Rounds alternate between the `PERF_TARGETS` builds, after one warmup round.
+`PERF_LATENCY_MS` adds a round-trip latency to every request, standing in for
+a remote API. `PERF_TRACE_DIR` writes a Chrome trace and CPU profile of the
+last round, or of every round with `PERF_TRACE_ALL=1`. The trace is bounded
+by the `bench:click` and `bench:visible` user-timing marks.
+
+The report holds per-target medians. Budgets on those medians are enforced
+only when set: `PERF_BUDGET_WARM_MS`, `PERF_BUDGET_WARM_LONGEST_TASK_MS`,
+`PERF_BUDGET_COLD_MS` and `PERF_BUDGET_COLD_LONGEST_TASK_MS`. The MUL-9538
+targets are 100, 50, 300 and none. Machine load moves these numbers, and the
+report records it, so compare builds from one alternating run, not across
+runs.
+
+## Navigation timing in a local environment
+
+`scripts/web-nav-timing.mjs` times a hover-then-click navigation under added
+latency, from the click to the target content on screen, with each request
+and each frame's page state relative to the click (MUL-9796). By default it
+opens a doc; `--from`, `--link` and `--until` time any other link.
+`make web-prod` serves the environment's web port from a production build for
+the length of one command, then starts the dev server again:
+
+```bash
+make up ARGS="--ephemeral"    # docs also need FF_DOCS_V1=true in the env file
+make env-exec ARGS="-- node scripts/web-nav-timing.mjs --label dev"
+make web-prod ARGS="-- node scripts/web-nav-timing.mjs --label prod"
+make destroy ARGS="--yes"
+```
+
+Judge navigation on the production build. `next dev` does not prefetch routes
+on hover and serves every module unbundled: MUL-9781 measured "open a doc" at
+0.66 s there, and only the production build showed the doc page's JS chunk
+waiting on the route's RSC payload. The build is same-origin and must use the
+environment's own web port, because the API accepts realtime WebSockets only
+from `FRONTEND_ORIGIN`; the header of `scripts/web-prod.mjs` has the rest.
+
+## When to run the typing scenarios
 
 Nothing runs this automatically. The routine guard is the component test from
 #8260, which pins the exact failure mode behind MUL-7227 — a streamed message

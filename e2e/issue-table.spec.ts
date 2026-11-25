@@ -42,31 +42,27 @@ function tableBody(request: Request): TableRequestBody {
 }
 
 async function switchToTable(page: Page) {
-  const currentView = page.getByRole("button", { name: "Board", exact: true });
-  await expect(currentView).toBeVisible();
-  await currentView.click();
-  const tableOption = page.getByRole("menuitemradio", {
-    name: "Table",
-    exact: true,
-  });
-  await tableOption.click();
-  await expect(
-    page.getByRole("button", { name: "Table", exact: true }),
-  ).toBeVisible();
-  await expect(tableOption).toBeHidden();
+  await page.getByRole("button", { name: "Display", exact: true }).click();
+  const popover = page.locator("[data-slot=popover-content]");
+  const tableToggle = popover.getByRole("button", { name: "Table", exact: true });
+  await expect(tableToggle).toBeVisible();
+  await tableToggle.click();
+  await expect(tableToggle).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Escape");
+  await expect(popover).toBeHidden();
 }
 
 async function groupByStatus(page: Page) {
-  await page.getByRole("button", { name: "Group", exact: true }).click();
-  const statusOption = page.getByRole("menuitemradio", {
-    name: "Status",
-    exact: true,
-  });
+  await page.getByRole("button", { name: "Display", exact: true }).click();
+  const popover = page.locator("[data-slot=popover-content]");
+  const grouping = popover.locator('[aria-label="Grouping"]');
+  await expect(grouping).toBeVisible();
+  await grouping.click();
+  const statusOption = page.getByRole("option", { name: "Status", exact: true });
   await statusOption.click();
-  await expect(
-    page.getByRole("button", { name: "Group: Status", exact: true }),
-  ).toBeVisible();
-  await expect(statusOption).toBeHidden();
+  await expect(grouping).toContainText("Status");
+  await page.keyboard.press("Escape");
+  await expect(popover).toBeHidden();
 }
 
 test.describe("Issue Table server grouping", () => {
@@ -148,7 +144,9 @@ test.describe("Issue Table server grouping", () => {
       .filter({ hasText: "Backlog" })
       .first();
     await expect(backlogGroup).toContainText("501");
-    await expect(page.getByText(/Loaded \d+ of 1001/)).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: new RegExp(`E2E Table Large ${run}`) }).first(),
+    ).toBeVisible();
     await expect(
       page.getByText(/Grouping and hierarchy are paused/),
     ).toHaveCount(0);
@@ -200,6 +198,11 @@ test.describe("Issue Table server grouping", () => {
     await reloadAppPage(page);
     await switchToTable(page);
 
+    const groupsPromise = page.waitForResponse(
+      (response) =>
+        apiPath(response.request()) === "/api/issues/table/groups" &&
+        response.status() === 200,
+    );
     const todoRootPromise = page.waitForResponse((response) => {
       if (apiPath(response.request()) !== "/api/issues/table/rows") return false;
       const body = tableBody(response.request());
@@ -225,18 +228,28 @@ test.describe("Issue Table server grouping", () => {
     });
 
     await groupByStatus(page);
-    const [todoRootResponse, todoChildrenResponse, doneRootResponse] =
+    const [groupsResponse, todoRootResponse, todoChildrenResponse, doneRootResponse] =
       await Promise.all([
+        groupsPromise,
         todoRootPromise,
         todoChildrenPromise,
         doneRootPromise,
       ]);
+    const groups = (await groupsResponse.json()) as TableGroupsResponse;
     const todoRoot = (await todoRootResponse.json()) as TableRowsResponse;
     const todoChildren =
       (await todoChildrenResponse.json()) as TableRowsResponse;
     const doneRoot = (await doneRootResponse.json()) as TableRowsResponse;
 
-    expect(todoRoot.total).toBe(3);
+    expect(groups.total).toBe(3);
+    expect(
+      Object.fromEntries(groups.groups.map((group) => [group.key, group.count])),
+    ).toEqual({
+      "status:todo": 2,
+      "status:done": 1,
+    });
+    // Grouped root requests skip the query-wide COUNT; totals come from /groups.
+    expect(todoRoot.total).toBe(0);
     expect(todoRoot.rows).toEqual([
       expect.objectContaining({
         issue: expect.objectContaining({ id: parent.id, title: parentTitle }),
@@ -270,15 +283,13 @@ test.describe("Issue Table server grouping", () => {
     page,
   }) => {
     const run = Date.now();
-    const seeds = await api.seedTableIssues(
+    await api.seedTableIssues(
       Array.from({ length: 60 }, (_, index) => ({
         title: `E2E Table Cursor ${run} ${index.toString().padStart(2, "0")}`,
         status: "todo" as const,
         position: index + 1,
       })),
     );
-    const moved = seeds.at(-1);
-    if (!moved) throw new Error("Cursor fixture was not created");
     await reloadAppPage(page);
 
     const firstHeadPromise = page.waitForResponse((response) => {
@@ -304,8 +315,10 @@ test.describe("Issue Table server grouping", () => {
     await tableScroller.evaluate((element) => {
       element.scrollTop = element.scrollHeight;
     });
-    await firstTailPromise;
-    await expect(page.getByText("Loaded 60 of 60", { exact: true })).toBeVisible();
+    const firstTail = (await (await firstTailPromise).json()) as TableRowsResponse;
+    const moved = firstTail.rows.at(-1)?.issue;
+    if (!moved) throw new Error("Tail cursor fixture row was not returned");
+    await expect(page.getByText("No more", { exact: true })).toBeVisible();
 
     const postUpdateResponses: Array<{
       body: TableRequestBody;
@@ -324,7 +337,9 @@ test.describe("Issue Table server grouping", () => {
       });
     };
     page.on("response", collectResponse);
-    await api.updateIssue(moved.id, { position: 0 });
+    // Moving a tail-page issue to the top of the default updated_at DESC order
+    // shifts the head/tail sort boundary and invalidates staleCursor.
+    await api.updateIssue(moved.id, { title: `${moved.title} moved` });
 
     await expect
       .poll(
@@ -365,7 +380,7 @@ test.describe("Issue Table server grouping", () => {
     ].map((row) => row.issue.id);
     expect(new Set(refreshedIds).size).toBe(60);
     expect(refreshedIds).toContain(moved.id);
-    await expect(page.getByText("Loaded 60 of 60", { exact: true })).toBeVisible();
+    await expect(page.getByText("No more", { exact: true })).toBeVisible();
     page.off("response", collectResponse);
   });
 

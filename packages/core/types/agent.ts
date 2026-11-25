@@ -135,6 +135,8 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "grok",
   "qwen",
   "qwenpaw",
+  "droid",
+  "amp",
   "mcode",
   "muse",
   "devin",
@@ -158,6 +160,7 @@ export type RuntimeProfileVisibility = "workspace" | "private";
 export interface RuntimeProfile {
   id: string;
   workspace_id: string;
+  daemon_id?: string | null;
   display_name: string;
   protocol_family: RuntimeProtocolFamily;
   runtime_type?: RuntimeProfileType;
@@ -176,6 +179,7 @@ export interface RuntimeProfile {
 // Optional fields are omitted entirely when unset (never sent as null/empty)
 // so the server applies its own defaults.
 export interface CreateRuntimeProfileRequest {
+  daemon_id?: string;
   display_name: string;
   protocol_family?: RuntimeProtocolFamily;
   runtime_type?: RuntimeProfileType;
@@ -189,6 +193,7 @@ export interface CreateRuntimeProfileRequest {
 // PATCH body — every field optional; `protocol_family` is intentionally
 // absent because it is immutable.
 export interface UpdateRuntimeProfileRequest {
+  daemon_id?: string;
   display_name?: string;
   command_name?: string;
   description?: string | null;
@@ -309,6 +314,9 @@ export interface TaskCancellationActor {
 }
 
 export interface AgentTask {
+  /** Owning issue labels supplied by subtree execution-history reads. */
+  issue_identifier?: string;
+  issue_title?: string;
   wakeup_id?: string;
   id: string;
   agent_id: string;
@@ -356,6 +364,14 @@ export interface AgentTask {
   chat_session_id?: string;
   /** Non-empty when the task was spawned by an autopilot run. */
   autopilot_run_id?: string;
+  /** Non-empty when this task belongs to a squad execution chain (leader or delegated member). */
+  squad_id?: string;
+  /** True when this task runs the agent as a squad leader. */
+  is_leader_task?: boolean;
+  /** Non-empty when an agent was asked for in a doc discussion. */
+  doc_id?: string;
+  /** The doc discussion (its first comment's id) the run answers. */
+  doc_thread_id?: string;
   /** Set when this task was created as an auto-retry of a parent task. */
   parent_task_id?: string;
   /** 1-based attempt counter; >1 means this is a retry. */
@@ -397,7 +413,7 @@ export interface AgentTask {
    * remains quick_create after its result issue is linked, so consumers can
    * distinguish creation work from later direct runs on that issue.
    */
-  kind?: "comment" | "autopilot" | "chat" | "quick_create" | "direct";
+  kind?: "comment" | "autopilot" | "chat" | "quick_create" | "doc_comment" | "direct";
   /**
    * Local working directory pinned for this task by the daemon. Empty until
    * the daemon reports a work_dir (typically once execution starts). This is
@@ -490,6 +506,52 @@ export interface TaskUsage {
   cache_write_tokens: number;
   cost_usd_ticks?: number;
   credits_micros?: number;
+}
+
+/**
+ * Per-run context receipt (MUL-9013): which context sources the daemon handed
+ * a run, with sizes, short hashes, delivery and load evidence. Metadata only.
+ * String enums stay open (`string`) so a newer daemon's value still renders.
+ */
+export type ContextReceiptLoad =
+  | "delivered"
+  | "verified"
+  | "verified_other_version"
+  | "unverified"
+  | "not_delivered"
+  | (string & {});
+
+export interface ContextReceiptSource {
+  kind: string;
+  name?: string;
+  bytes: number;
+  sha256?: string;
+  delivery: string;
+  path?: string;
+  load: ContextReceiptLoad;
+  verified_version?: string;
+  /** Set when this source is a section inside another (e.g. `runtime_brief`). */
+  parent?: string;
+}
+
+export interface ContextReceipt {
+  schema_version: number;
+  runtime: string;
+  runtime_version?: string;
+  model?: string;
+  prompt_bytes: number;
+  brief_bytes: number;
+  brief_delivery: string;
+  resumed_session: boolean;
+  fresh_retry?: boolean;
+  mcp_servers: string[];
+  sources: ContextReceiptSource[];
+}
+
+export interface TaskContextReceiptResponse {
+  /** Null when the run has none: an older daemon, or a run that never launched. */
+  receipt: ContextReceipt | null;
+  recorded_at?: string;
 }
 
 /**
@@ -1012,9 +1074,39 @@ export interface RuntimeUsage {
   uncosted_cache_write_tokens?: number;
 }
 
-export interface RuntimeHourlyActivity {
-  hour: number;
-  count: number;
+// Subscription rate limits of the account a runtime's agent CLI runs under
+// (`GET /api/runtimes/:id/rate-limits`, MUL-9427), as the CLI last reported
+// them during a task. Window kinds and statuses fall back to "other" / ""
+// when a newer server sends a value this client does not know.
+export type RuntimeRateLimitWindowKind =
+  | "session"
+  | "weekly"
+  | "weekly_opus"
+  | "weekly_sonnet"
+  | "other";
+
+export type RuntimeRateLimitStatus = "allowed" | "warning" | "rejected" | "";
+
+export interface RuntimeRateLimitWindow {
+  kind: RuntimeRateLimitWindowKind;
+  /** 0-100; can run slightly past 100. Absent when the CLI did not say. */
+  used_percent?: number;
+  /** 0 when unknown. */
+  window_minutes: number;
+  resets_at?: string;
+  status: RuntimeRateLimitStatus;
+}
+
+export interface RuntimeRateLimits {
+  plan_type: string;
+  status: RuntimeRateLimitStatus;
+  windows: RuntimeRateLimitWindow[];
+  credits?: { has_credits: boolean; unlimited: boolean; balance: string };
+  observed_at: string;
+}
+
+export interface RuntimeRateLimitsResponse {
+  rate_limits: RuntimeRateLimits | null;
 }
 
 // One (agent, provider, model) row of the "Cost by agent" tab on the runtime
@@ -1097,6 +1189,27 @@ export interface DashboardUsageByAgent {
   task_count: number;
 }
 
+// Per-(squad, agent, model) token totals for the workspace dashboard.
+// squad_id is "" for standalone (non-squad-triggered) agent runs.
+export interface DashboardUsageBySquad extends DashboardUsageByAgent {
+  squad_id: string;
+}
+
+// Per-(squad, agent) terminal-task run-time + counts for the workspace dashboard.
+// squad_id is "" for standalone (non-squad-triggered) agent runs.
+export interface DashboardSquadRunTime extends DashboardAgentRunTime {
+  squad_id: string;
+}
+
+// Per-(squad, agent, failure_reason) terminal-task counts for the Errors tab.
+// squad_id is "" for standalone (non-squad-triggered) agent runs.
+export interface DashboardFailureBySquad {
+  squad_id: string;
+  agent_id: string;
+  failure_reason: string;
+  task_count: number;
+}
+
 // Per-agent total terminal-task run-time + counts. Powers the workspace
 // dashboard's "time by agent" list. failed_count is a subset of
 // task_count (failed tasks still contribute to total_seconds because
@@ -1158,10 +1271,15 @@ export interface DashboardFailureByAgent {
 
 export type RuntimeUpdateStatus =
   | "pending"
+  // The daemon is busy and installs once its last agent task finishes.
+  | "scheduled"
   | "running"
   | "completed"
   | "failed"
-  | "timeout";
+  | "timeout"
+  | "cancelled"
+  // The machine did not become idle within 24 hours.
+  | "expired";
 
 export interface RuntimeUpdate {
   id: string;
@@ -1170,6 +1288,10 @@ export interface RuntimeUpdate {
   target_version: string;
   output?: string;
   error?: string;
+  /** Agent tasks the daemon is waiting for while `scheduled`. */
+  active_tasks?: number;
+  /** True until installation starts. */
+  cancellable: boolean;
   created_at: string;
   updated_at: string;
 }

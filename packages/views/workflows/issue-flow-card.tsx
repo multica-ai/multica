@@ -45,7 +45,6 @@ export function IssueFlowCard({ projectId, currentStatus }: { projectId: string 
           >
             <Workflow aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
             <span className="truncate text-foreground">{workflow.name}</span>
-            <span className="shrink-0 text-muted-foreground">{t(($) => $.workflows.detail.follows_project)}</span>
           </button>
         }
       />

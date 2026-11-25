@@ -1,74 +1,30 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
-import { useQuery, useQueryClient, useMutationState } from "@tanstack/react-query";
-import type { IssueReaction } from "@multica/core/types";
-import type {
-  IssueReactionAddedPayload,
-  IssueReactionRemovedPayload,
-} from "@multica/core/types";
-import { issueReactionsOptions, issueKeys } from "@multica/core/issues/queries";
+import { useQuery, useMutationState } from "@tanstack/react-query";
+import type { Issue, IssueReaction } from "@multica/core/types";
+import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useToggleIssueReaction, type ToggleIssueReactionVars } from "@multica/core/issues/mutations";
-import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
+import { useWorkspaceId } from "@multica/core/hooks";
 
+const NO_REACTIONS: IssueReaction[] = [];
+
+const selectReactions = (issue: Issue) => issue.reactions ?? NO_REACTIONS;
+
+/**
+ * Reactions are read off the issue detail query, so opening an issue costs a
+ * single `GET /api/issues/:id`. Realtime events and the toggle mutation patch
+ * that same cache entry (`patchIssueReactions`), and reconnect recovery
+ * refetches it with the rest of the workspace's issue caches.
+ */
 export function useIssueReactions(issueId: string, userId?: string) {
-  const qc = useQueryClient();
-  const { data: serverReactions = [], isLoading: loading } = useQuery(
-    issueReactionsOptions(issueId),
-  );
+  const wsId = useWorkspaceId();
+  const { data: serverReactions = NO_REACTIONS, isLoading: loading } = useQuery({
+    ...issueDetailOptions(wsId, issueId),
+    select: selectReactions,
+  });
 
   const toggleMutation = useToggleIssueReaction(issueId);
-
-  // Reconnect recovery
-  useWSReconnect(
-    useCallback(() => {
-      qc.invalidateQueries({ queryKey: issueKeys.reactions(issueId) });
-    }, [qc, issueId]),
-  );
-
-  // --- WS event handlers (update server cache for other users' actions) ---
-
-  useWSEvent(
-    "issue_reaction:added",
-    useCallback(
-      (payload: unknown) => {
-        const { reaction, issue_id } = payload as IssueReactionAddedPayload;
-        if (issue_id !== issueId) return;
-        qc.setQueryData<IssueReaction[]>(
-          issueKeys.reactions(issueId),
-          (old) => {
-            if (!old) return old;
-            if (old.some((r) => r.id === reaction.id)) return old;
-            return [...old, reaction];
-          },
-        );
-      },
-      [qc, issueId],
-    ),
-  );
-
-  useWSEvent(
-    "issue_reaction:removed",
-    useCallback(
-      (payload: unknown) => {
-        const p = payload as IssueReactionRemovedPayload;
-        if (p.issue_id !== issueId) return;
-        qc.setQueryData<IssueReaction[]>(
-          issueKeys.reactions(issueId),
-          (old) =>
-            old?.filter(
-              (r) =>
-                !(
-                  r.emoji === p.emoji &&
-                  r.actor_type === p.actor_type &&
-                  r.actor_id === p.actor_id
-                ),
-            ),
-        );
-      },
-      [qc, issueId],
-    ),
-  );
 
   // --- Optimistic UI derivation ---
   // Instead of writing temp data into the cache (which races with WS events),

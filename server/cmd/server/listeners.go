@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -35,7 +36,10 @@ import (
 // inherits the same cost silently. Keeping the list declarative puts the
 // internal/external payload boundary in one reviewable place.
 var internalOnlyPayloadKeys = map[string][]string{
-	protocol.EventIssueUpdated: {"prev_description", "prev_title"},
+	// The live-session keys feed activity folding and mention dedup.
+	// prev_duplicate_of_identifier names a deleted original for the activity
+	// log, which can no longer look it up or tell who could see it.
+	protocol.EventIssueUpdated: {"prev_description", "prev_title", "description_live_editors", "description_seen_mentions", "prev_duplicate_of_identifier"},
 	// task:failed error text is consumed synchronously by channel outbounds.
 	// It may contain provider/runtime detail that belongs in the originating
 	// chat transcript, not in the workspace-wide realtime fanout.
@@ -85,6 +89,9 @@ func isChatPrivateEvent(e events.Event) bool {
 // MemberPrivateUserID is dropped instead of reaching the workspace.
 var memberPrivateEvents = map[string]bool{
 	protocol.EventIssueViewPreferenceChanged: true,
+	protocol.EventPinCreated:                 true,
+	protocol.EventPinDeleted:                 true,
+	protocol.EventPinReordered:               true,
 }
 
 // registerListeners wires up event bus listeners for WS broadcasting.
@@ -98,15 +105,27 @@ var memberPrivateEvents = map[string]bool{
 // for a Redis-backed relay or a feature-flagged dual-write implementation
 // without touching any of the event listeners below. This is Phase 0 of the
 // horizontal-scaling plan tracked in MUL-1138.
-func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
+//
+// audience, when given, narrows events about private projects (MUL-8472) to
+// their members; see privateProjectAudience.
+func registerListeners(bus *events.Bus, b realtime.Broadcaster, audience ...privateProjectAudience) {
+	var projectAudience privateProjectAudience
+	if len(audience) > 0 {
+		projectAudience = audience[0]
+	}
+
 	// Personal events should NOT be broadcast to the whole workspace.
 	personalEvents := map[string]bool{
 		protocol.EventInboxNew:           true,
 		protocol.EventInboxRead:          true,
+		protocol.EventInboxUnread:        true,
 		protocol.EventInboxArchived:      true,
 		protocol.EventInboxUnarchived:    true,
+		protocol.EventInboxDeleted:       true,
 		protocol.EventInboxBatchRead:     true,
 		protocol.EventInboxBatchArchived: true,
+		protocol.EventInboxSnoozed:       true,
+		protocol.EventInboxUnsnoozed:     true,
 		protocol.EventInvitationCreated:  true,
 		protocol.EventInvitationRevoked:  true,
 		protocol.EventIssueUnreadChanged: true,
@@ -139,12 +158,29 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 		sendToRecipient(b, e, recipientID)
 	})
 
-	// inbox:read, inbox:archived, inbox:unarchived, inbox:batch-read,
+	// inbox:snoozed — a snooze names its recipient at the top level; a row
+	// written into a snooze carries it on the nested item, like inbox:new.
+	bus.Subscribe(protocol.EventInboxSnoozed, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		recipientID, _ := payload["recipient_id"].(string)
+		if item, ok := payload["item"].(map[string]any); ok && recipientID == "" {
+			recipientID, _ = item["recipient_id"].(string)
+		}
+		sendToRecipient(b, e, recipientID)
+	})
+
+	// inbox:read, inbox:unread, inbox:archived, inbox:unarchived, inbox:batch-read,
 	// inbox:batch-archived, issue_unread:changed — extract recipient from
 	// top-level payload
 	for _, eventType := range []string{
-		protocol.EventInboxRead, protocol.EventInboxArchived, protocol.EventInboxUnarchived,
+		protocol.EventInboxRead, protocol.EventInboxUnread,
+		protocol.EventInboxArchived, protocol.EventInboxUnarchived,
+		protocol.EventInboxDeleted,
 		protocol.EventInboxBatchRead, protocol.EventInboxBatchArchived,
+		protocol.EventInboxUnsnoozed,
 		protocol.EventIssueUnreadChanged,
 	} {
 		bus.Subscribe(eventType, func(e events.Event) {
@@ -303,6 +339,43 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 			realtime.M.RecordEvent(e.Type)
 			b.BroadcastToScope(realtime.ScopeWorkspaceMember, realtime.WorkspaceMemberScopeID(e.WorkspaceID, e.MemberPrivateUserID), data)
 			return
+		}
+
+		if projectAudience != nil && e.WorkspaceID != "" {
+			ctx, cancel := context.WithTimeout(context.Background(), audienceResolveTimeout)
+			recipients, private, err := projectAudience.Audience(ctx, e)
+			var refReaders map[string]map[string]bool
+			if err == nil {
+				refReaders, err = projectAudience.IssueRefReaders(ctx, e)
+			}
+			moved := len(refReaders) > 0 && duplicateMarkMoved(e)
+			perReader := moved && anyRefReader(refReaders)
+			if err == nil && perReader && !private {
+				recipients, err = projectAudience.Members(ctx, e.WorkspaceID)
+			}
+			cancel()
+			if err != nil {
+				logAudienceFailure(e, err)
+				return
+			}
+			if perReader {
+				realtime.M.RecordEvent(e.Type)
+				sendPerReader(b, e, data, recipients, refReaders)
+				return
+			}
+			if len(refReaders) > 0 {
+				if data, err = strippedFrame(e, !moved, func(id string) bool { return refReaders[id] != nil }); err != nil {
+					slog.Error("failed to marshal event", "event_type", e.Type, "error", err)
+					return
+				}
+			}
+			if private {
+				realtime.M.RecordEvent(e.Type)
+				for _, userID := range recipients {
+					b.BroadcastToScope(realtime.ScopeWorkspaceMember, realtime.WorkspaceMemberScopeID(e.WorkspaceID, userID), data)
+				}
+				return
+			}
 		}
 
 		// Phase 1 (MUL-1138): the per-resource scope routing for high-frequency

@@ -14,8 +14,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -35,12 +37,18 @@ type ProjectResponse struct {
 	CreatorID   *string `json:"creator_id"`
 	// StartDate / DueDate are calendar days ("YYYY-MM-DD"), no time-of-day or
 	// timezone — same contract as issue.start_date / issue.due_date.
-	StartDate  *string `json:"start_date"`
-	DueDate    *string `json:"due_date"`
-	CreatedAt  string  `json:"created_at"`
-	UpdatedAt  string  `json:"updated_at"`
-	IssueCount int64   `json:"issue_count"`
-	DoneCount  int64   `json:"done_count"`
+	StartDate *string `json:"start_date"`
+	DueDate   *string `json:"due_date"`
+	CreatedAt string  `json:"created_at"`
+	UpdatedAt string  `json:"updated_at"`
+	// LastActivityAt is the later of the project's own updated_at and the
+	// latest activity on any of its issues.
+	LastActivityAt string `json:"last_activity_at"`
+	IssueCount     int64  `json:"issue_count"`
+	// DoneCount counts every terminal issue, cancelled included. Progress is
+	// the figure to show as completion. (MUL-8879)
+	DoneCount int64           `json:"done_count"`
+	Progress  ProjectProgress `json:"progress"`
 	// ResourceCount is a breadcrumb pointing at the sub-collection at
 	// /api/projects/{id}/resources. Resources themselves stay out of this
 	// payload to keep parent metadata and child collections separate; clients
@@ -49,6 +57,15 @@ type ProjectResponse struct {
 	// WorkflowID is the workflow this project uses; null means the workspace
 	// Default workflow. (MUL-7420)
 	WorkflowID *string `json:"workflow_id"`
+	// Visibility is "workspace" (every member) or "private" (project members
+	// only, whatever their workspace role). (MUL-8472, MUL-9284)
+	Visibility string `json:"visibility"`
+	// ArchivedAt is non-null while the project is archived: hidden from
+	// default lists and pickers, closed to new issues, otherwise intact.
+	// Orthogonal to Status. (MUL-8861)
+	ArchivedAt     *string `json:"archived_at"`
+	ArchivedByType *string `json:"archived_by_type"`
+	ArchivedByID   *string `json:"archived_by_id"`
 }
 
 func projectToResponse(p db.Project) ProjectResponse {
@@ -68,34 +85,143 @@ func projectToResponse(p db.Project) ProjectResponse {
 		DueDate:     dateToPtr(p.DueDate),
 		CreatedAt:   timestampToString(p.CreatedAt),
 		UpdatedAt:   timestampToString(p.UpdatedAt),
-		WorkflowID:  uuidToPtr(p.WorkflowID),
+		// Until issue stats are applied, the project's own edits are its activity.
+		LastActivityAt: timestampToString(p.UpdatedAt),
+		WorkflowID:     uuidToPtr(p.WorkflowID),
+		Visibility:     projectVisibilityOrDefault(p.Visibility),
+		Progress:       newProjectProgress(0, 0, 0, 0),
+
+		ArchivedAt:     timestampToPtr(p.ArchivedAt),
+		ArchivedByType: textToPtr(p.ArchivedByType),
+		ArchivedByID:   uuidToPtr(p.ArchivedByID),
 	}
 }
 
-func (h *Handler) loadProjectIssueStats(ctx context.Context, workspaceID, projectID pgtype.UUID) (int64, int64) {
-	terminalStatusKeys := h.projectTerminalIssueStatusKeys(ctx, workspaceID)
+// projectVisibilityOrDefault keeps responses on the documented enum for a
+// db.Project built outside sqlc that left Visibility empty.
+func projectVisibilityOrDefault(v string) string {
+	if v == "" {
+		return projectaccess.VisibilityWorkspace
+	}
+	return v
+}
+
+// ProjectProgress is a project's completion, counted in issues. Cancelled
+// (closed-category) issues leave the scope instead of counting as done, and
+// started issues are reported but do not add to Percent. (MUL-8879)
+type ProjectProgress struct {
+	// Unit is what the counts measure; "issues" until estimates exist.
+	Unit      string `json:"unit"`
+	Scope     int64  `json:"scope"`
+	Completed int64  `json:"completed"`
+	Started   int64  `json:"started"`
+	Unstarted int64  `json:"unstarted"`
+	Cancelled int64  `json:"cancelled"`
+	// Percent is Completed / Scope rounded down, so 100 means every issue in
+	// scope is done.
+	Percent int64 `json:"percent"`
+}
+
+func newProjectProgress(total, terminal, completed, started int64) ProjectProgress {
+	cancelled := terminal - completed
+	scope := total - cancelled
+	p := ProjectProgress{
+		Unit:      "issues",
+		Scope:     scope,
+		Completed: completed,
+		Started:   started,
+		Unstarted: scope - completed - started,
+		Cancelled: cancelled,
+	}
+	if scope > 0 {
+		p.Percent = completed * 100 / scope
+	}
+	return p
+}
+
+// applyProjectIssueStats fills the issue counts and progress, and moves
+// LastActivityAt to the latest issue activity when that is later than the
+// project's own edit.
+func applyProjectIssueStats(resp *ProjectResponse, projectUpdatedAt pgtype.Timestamptz, s db.GetProjectIssueStatsRow) {
+	resp.IssueCount = s.TotalCount
+	resp.DoneCount = s.DoneCount
+	resp.Progress = newProjectProgress(s.TotalCount, s.DoneCount, s.CompletedCount, s.StartedCount)
+	if s.LastIssueActivityAt.Valid &&
+		(!projectUpdatedAt.Valid || s.LastIssueActivityAt.Time.After(projectUpdatedAt.Time)) {
+		resp.LastActivityAt = timestampToString(s.LastIssueActivityAt)
+	}
+}
+
+// projectStatusKeySets holds the status keys of each category project
+// progress counts, for indexed `status = ANY(...)` predicates.
+type projectStatusKeySets struct {
+	terminal  []string
+	completed []string
+	started   []string
+}
+
+// projectStatusKeySets keeps project responses useful if the custom status
+// catalog cannot be read: the built-in keys are less complete than the
+// workspace catalog, but they avoid rendering every project as 0/0.
+func (h *Handler) projectStatusKeySets(ctx context.Context, workspaceID pgtype.UUID) projectStatusKeySets {
+	custom, err := issuestatus.CustomKeyCategories(ctx, h.Queries, workspaceID)
+	if err != nil {
+		slog.Warn("read project status categories failed; using built-in keys",
+			"workspace_id", uuidToString(workspaceID), "error", err)
+		custom = nil
+	}
+	var sets projectStatusKeySets
+	add := func(key, category string) {
+		switch category {
+		case issuestatus.CategoryDone:
+			sets.completed = append(sets.completed, key)
+			sets.terminal = append(sets.terminal, key)
+		case issuestatus.CategoryClosed:
+			sets.terminal = append(sets.terminal, key)
+		case issuestatus.CategoryStarted:
+			sets.started = append(sets.started, key)
+		}
+	}
+	for _, key := range issuestatus.Canonical() {
+		category, _ := issuestatus.CategoryForBehavior(key)
+		add(key, category)
+	}
+	for key, category := range custom {
+		add(key, category)
+	}
+	return sets
+}
+
+// loadProjectIssueStatsMap returns issue stats keyed by project id. A failed
+// read leaves the map empty, so callers render zero counts rather than fail.
+func (h *Handler) loadProjectIssueStatsMap(ctx context.Context, workspaceID pgtype.UUID, projectIDs []pgtype.UUID) map[string]db.GetProjectIssueStatsRow {
+	out := make(map[string]db.GetProjectIssueStatsRow, len(projectIDs))
+	if len(projectIDs) == 0 {
+		return out
+	}
+	keys := h.projectStatusKeySets(ctx, workspaceID)
 	stats, err := h.Queries.GetProjectIssueStats(ctx, db.GetProjectIssueStatsParams{
-		WorkspaceID:        workspaceID,
-		ProjectIds:         []pgtype.UUID{projectID},
-		TerminalStatusKeys: terminalStatusKeys,
+		WorkspaceID:         workspaceID,
+		ProjectIds:          projectIDs,
+		TerminalStatusKeys:  keys.terminal,
+		CompletedStatusKeys: keys.completed,
+		StartedStatusKeys:   keys.started,
 	})
-	if err != nil || len(stats) == 0 {
-		return 0, 0
+	if err != nil {
+		slog.Warn("load project issue stats failed",
+			"workspace_id", uuidToString(workspaceID), "error", err)
+		return out
 	}
-	return stats[0].TotalCount, stats[0].DoneCount
+	for _, s := range stats {
+		out[uuidToString(s.ProjectID)] = s
+	}
+	return out
 }
 
-// projectTerminalIssueStatusKeys keeps project responses useful if the custom
-// status catalog cannot be read. Canonical terminal keys are less complete
-// than the workspace catalog, but they avoid rendering every project as 0/0.
-func (h *Handler) projectTerminalIssueStatusKeys(ctx context.Context, workspaceID pgtype.UUID) []string {
-	keys, err := h.terminalIssueStatusKeys(ctx, workspaceID)
-	if err == nil {
-		return keys
+func (h *Handler) fillProjectIssueStats(ctx context.Context, resp *ProjectResponse, project db.Project) {
+	if s, ok := h.loadProjectIssueStatsMap(ctx, project.WorkspaceID, []pgtype.UUID{project.ID})[uuidToString(project.ID)]; ok {
+		applyProjectIssueStats(resp, project.UpdatedAt, s)
 	}
-	slog.Warn("expand project terminal status categories failed; using canonical keys",
-		"workspace_id", uuidToString(workspaceID), "error", err)
-	return []string{issuestatus.Done, issuestatus.Cancelled}
 }
 
 func (h *Handler) loadProjectResourceCount(ctx context.Context, projectID pgtype.UUID) int64 {
@@ -117,6 +243,10 @@ type CreateProjectRequest struct {
 	StartDate   *string                               `json:"start_date"`
 	DueDate     *string                               `json:"due_date"`
 	Resources   []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
+	// Visibility "private" creates a private project (MUL-8472). MemberIDs seeds its member list; the creator is
+	// always added.
+	Visibility *string  `json:"visibility,omitempty"`
+	MemberIDs  []string `json:"member_ids,omitempty"`
 	// WorkflowID picks the project's workflow at creation; omitted or null
 	// uses the workspace Default workflow. A new project has no issues, so no
 	// status mapping is involved. (MUL-7420)
@@ -143,6 +273,11 @@ type UpdateProjectRequest struct {
 	LeadID      *string `json:"lead_id"`
 	StartDate   *string `json:"start_date"`
 	DueDate     *string `json:"due_date"`
+	// Visibility switches between "workspace" and "private" (MUL-8472).
+	// MemberIDs adds project members to a project that is or becomes
+	// "private"; see prepareProjectAccessUpdate.
+	Visibility *string  `json:"visibility"`
+	MemberIDs  []string `json:"member_ids,omitempty"`
 }
 
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
@@ -151,43 +286,44 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var statusFilter pgtype.Text
-	if s := r.URL.Query().Get("status"); s != "" {
-		statusFilter = pgtype.Text{String: s, Valid: true}
+	query, err := parseProjectListQuery(r.URL.Query())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
-	var priorityFilter pgtype.Text
-	if p := r.URL.Query().Get("priority"); p != "" {
-		priorityFilter = pgtype.Text{String: p, Valid: true}
-	}
+	// Archived projects are opt-in so agents resolving a project by name only
+	// see the ones that still accept work.
 	projects, err := h.Queries.ListProjects(r.Context(), db.ListProjectsParams{
-		WorkspaceID: wsUUID,
-		Status:      statusFilter,
-		Priority:    priorityFilter,
+		WorkspaceID:     wsUUID,
+		IncludeArchived: query.includeArchived,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list projects")
 		return
 	}
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	// Filters, sort and paging run here, after visibility, so a page never
+	// counts or skips a project the caller cannot see.
+	visible := projects[:0:0]
+	for _, p := range projects {
+		if (hidden.Empty() || hidden.CanSeeProject(p.ID)) && query.matchesProject(p) {
+			visible = append(visible, p)
+		}
+	}
+	projects = visible
 
 	// Batch-fetch issue stats and resource counts for all projects
-	statsMap := make(map[string]db.GetProjectIssueStatsRow)
+	statsMap := map[string]db.GetProjectIssueStatsRow{}
 	resourceCountMap := make(map[string]int64)
 	if len(projects) > 0 {
 		projectIDs := make([]pgtype.UUID, len(projects))
 		for i, p := range projects {
 			projectIDs[i] = p.ID
 		}
-		terminalStatusKeys := h.projectTerminalIssueStatusKeys(r.Context(), wsUUID)
-		stats, statsErr := h.Queries.GetProjectIssueStats(r.Context(), db.GetProjectIssueStatsParams{
-			WorkspaceID:        wsUUID,
-			ProjectIds:         projectIDs,
-			TerminalStatusKeys: terminalStatusKeys,
-		})
-		if statsErr == nil {
-			for _, s := range stats {
-				statsMap[uuidToString(s.ProjectID)] = s
-			}
-		}
+		statsMap = h.loadProjectIssueStatsMap(r.Context(), wsUUID, projectIDs)
 		counts, err := h.Queries.GetProjectResourceCounts(r.Context(), projectIDs)
 		if err == nil {
 			for _, c := range counts {
@@ -200,12 +336,18 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 	for i, p := range projects {
 		resp[i] = projectToResponse(p)
 		if s, ok := statsMap[resp[i].ID]; ok {
-			resp[i].IssueCount = s.TotalCount
-			resp[i].DoneCount = s.DoneCount
+			applyProjectIssueStats(&resp[i], p.UpdatedAt, s)
 		}
 		resp[i].ResourceCount = resourceCountMap[resp[i].ID]
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"projects": resp, "total": len(resp)})
+	sortProjectResponses(resp, query.sort, query.desc)
+	total := len(resp)
+	page := query.page(resp)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"projects": page,
+		"total":    total,
+		"has_more": query.offset+len(page) < total,
+	})
 }
 
 func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
@@ -226,8 +368,11 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
+	if !h.requireProjectVisible(w, r, workspaceID, project.ID, http.StatusNotFound, "project not found") {
+		return
+	}
 	resp := projectToResponse(project)
-	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), wsUUID, project.ID)
+	h.fillProjectIssueStats(r.Context(), &resp, project)
 	resp.ResourceCount = h.loadProjectResourceCount(r.Context(), project.ID)
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -273,6 +418,9 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	// PostgreSQL TEXT rejects NUL, which survives a JSON round trip.
+	req.Title = sanitizeNullBytes(req.Title)
+	req.Description = sanitizeNullBytesPtr(req.Description)
 	if req.Title == "" {
 		writeError(w, http.StatusBadRequest, "title is required")
 		return
@@ -394,6 +542,45 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// MUL-8472: a private project is created with its member list in the same
+	// transaction, so it is never briefly visible to the whole workspace.
+	private := false
+	var privateMemberIDs []pgtype.UUID
+	if req.Visibility != nil && *req.Visibility != "" && *req.Visibility != projectaccess.VisibilityWorkspace {
+		if *req.Visibility != projectaccess.VisibilityPrivate {
+			writeError(w, http.StatusBadRequest, "invalid visibility: must be one of workspace, private")
+			return
+		}
+		if !h.requireHumanProjectAccessActor(w, r, workspaceID) {
+			return
+		}
+		ids, ok := parseProjectMemberIDs(w, req.MemberIDs, "member_ids")
+		if !ok {
+			return
+		}
+		creator, ok := parseUUIDOrBadRequest(w, userID, "user id")
+		if !ok {
+			return
+		}
+		ids = append(ids, creator)
+		if leadType.Valid && leadType.String == "member" && leadID.Valid {
+			ids = append(ids, leadID)
+		}
+		private = true
+		privateMemberIDs = ids
+	}
+	var admission featureAdmission
+	if private {
+		if admission, ok = h.requireFeatureAddition(w, r, wsUUID, entitlement.FeaturePrivateProjects, privateProjectOpCreate); !ok {
+			return
+		}
+	}
+	// A new project shared with a guest is a guest addition (MUL-9420).
+	guestAdmission, ok := h.requireGuestProjectAddition(w, r, wsUUID, pgtype.UUID{}, privateMemberIDs)
+	if !ok {
+		return
+	}
+
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	creatorID, ok := parseUUIDOrBadRequest(w, actorID, "creator_id")
 	if !ok {
@@ -416,7 +603,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Without resources, keep the simple non-tx path.
-	if len(req.Resources) == 0 {
+	if len(req.Resources) == 0 && !private {
 		project, err := h.Queries.CreateProject(r.Context(), createParams)
 		if err != nil {
 			h.writeProjectWriteError(w, r, err, "create")
@@ -441,6 +628,30 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.writeProjectWriteError(w, r, err, "create")
 		return
+	}
+	if private {
+		inserted, err := qtx.AddProjectMembers(r.Context(), db.AddProjectMembersParams{
+			ProjectID:   project.ID,
+			WorkspaceID: project.WorkspaceID,
+			UserIds:     privateMemberIDs,
+			AddedBy:     parseUUIDOrInvalid(userID),
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to add project members")
+			return
+		}
+		if !h.allProjectMembersExist(w, r, qtx, project, privateMemberIDs, inserted) {
+			return
+		}
+		project, err = qtx.UpdateProjectVisibility(r.Context(), db.UpdateProjectVisibilityParams{
+			ID:          project.ID,
+			WorkspaceID: project.WorkspaceID,
+			Visibility:  projectaccess.VisibilityPrivate,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to set project visibility")
+			return
+		}
 	}
 
 	creator, _ := h.parseUserUUIDOrZero(userID)
@@ -477,6 +688,8 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to commit project create")
 		return
 	}
+	admission.admitted(r.Context())
+	guestAdmission.admitted(r.Context())
 
 	resourceResp := make([]ProjectResourceResponse, len(resourceRows))
 	for i, row := range resourceRows {
@@ -521,6 +734,9 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
+	if !h.requireProjectVisible(w, r, workspaceID, prevProject.ID, http.StatusNotFound, "project not found") {
+		return
+	}
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
@@ -535,6 +751,8 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	req.Title = sanitizeNullBytesPtr(req.Title)
+	req.Description = sanitizeNullBytesPtr(req.Description)
 	var rawFields map[string]json.RawMessage
 	json.Unmarshal(bodyBytes, &rawFields)
 
@@ -618,13 +836,38 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 			params.DueDate = pgtype.Date{Valid: false} // explicit null = clear date
 		}
 	}
-	project, err := h.Queries.UpdateProject(r.Context(), params)
-	if err != nil {
-		h.writeProjectWriteError(w, r, err, "update")
+	newLeadType, newLeadID := prevProject.LeadType, prevProject.LeadID
+	if params.LeadTypeSet {
+		newLeadType = params.LeadType
+	}
+	if params.LeadIDSet {
+		newLeadID = params.LeadID
+	}
+	leadChanged := newLeadType != prevProject.LeadType || newLeadID != prevProject.LeadID
+	access, ok := h.prepareProjectAccessUpdate(w, r, prevProject, req.Visibility, req.MemberIDs, newLeadType, newLeadID, leadChanged)
+	if !ok {
 		return
 	}
+	var admission featureAdmission
+	if access.privateAddition != "" {
+		if admission, ok = h.requireFeatureAddition(w, r, prevProject.WorkspaceID, entitlement.FeaturePrivateProjects, access.privateAddition); !ok {
+			return
+		}
+	}
+	// Adding a guest to the member list (or naming one lead of a private
+	// project) shares the project with it (MUL-9420).
+	guestAdmission, ok := h.requireGuestProjectAddition(w, r, prevProject.WorkspaceID, prevProject.ID, access.addIDs)
+	if !ok {
+		return
+	}
+	project, ok := h.writeProjectUpdate(w, r, params, access, userID)
+	if !ok {
+		return
+	}
+	admission.admitted(r.Context())
+	guestAdmission.admitted(r.Context())
 	resp := projectToResponse(project)
-	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), wsUUID, project.ID)
+	h.fillProjectIssueStats(r.Context(), &resp, project)
 	resp.ResourceCount = h.loadProjectResourceCount(r.Context(), project.ID)
 	h.publish(protocol.EventProjectUpdated, workspaceID, "member", userID, map[string]any{"project": resp})
 	writeJSON(w, http.StatusOK, resp)
@@ -646,6 +889,9 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+	if !h.requireProjectVisible(w, r, workspaceID, project.ID, http.StatusNotFound, "project not found") {
 		return
 	}
 	if !h.requireProjectDeletion(w, r, project) {
@@ -687,6 +933,20 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete project views")
 		return
 	}
+	if err := qtx.DeleteProjectMembersByProject(r.Context(), db.DeleteProjectMembersByProjectParams{
+		ProjectID:   project.ID,
+		WorkspaceID: project.WorkspaceID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete project members")
+		return
+	}
+	if err := qtx.DeleteProjectSubscribersByProject(r.Context(), db.DeleteProjectSubscribersByProjectParams{
+		ProjectID:   project.ID,
+		WorkspaceID: project.WorkspaceID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete project subscribers")
+		return
+	}
 	if err := qtx.DeleteProject(r.Context(), db.DeleteProjectParams{
 		ID:          project.ID,
 		WorkspaceID: project.WorkspaceID,
@@ -710,7 +970,7 @@ type SearchProjectResponse struct {
 }
 
 // buildProjectSearchQuery builds a dynamic SQL query for project search.
-func buildProjectSearchQuery(phrase string, terms []string, includeClosed bool) (string, []any) {
+func buildProjectSearchQuery(phrase string, terms []string, includeClosed, includeArchived bool, hiddenProjectIDs ...pgtype.UUID) (string, []any) {
 	phrase = strings.ToLower(phrase)
 	for i, t := range terms {
 		terms[i] = strings.ToLower(t)
@@ -768,6 +1028,9 @@ func buildProjectSearchQuery(phrase string, terms []string, includeClosed bool) 
 	if !includeClosed {
 		whereClause += " AND p.status NOT IN ('completed', 'cancelled')"
 	}
+	if !includeArchived {
+		whereClause += " AND p.archived_at IS NULL"
+	}
 
 	// --- ORDER BY ranking ---
 	var rankCases []string
@@ -801,8 +1064,10 @@ func buildProjectSearchQuery(phrase string, terms []string, includeClosed bool) 
 	// list. Demote ahead of rankExpr, with the same direct-hit exception as
 	// issue search (see buildSearchQuery): an exact title means the user is
 	// targeting that one project.
+	// Archived projects sink below cancelled ones for the same reason: they
+	// stay findable, but are rarely what the user is reaching for.
 	cancelledRank := fmt.Sprintf(
-		"CASE WHEN p.status = 'cancelled' AND LOWER(p.title) <> %s THEN 1 ELSE 0 END",
+		"CASE WHEN LOWER(p.title) = %s THEN 0 WHEN p.archived_at IS NOT NULL THEN 2 WHEN p.status = 'cancelled' THEN 1 ELSE 0 END",
 		phraseParam,
 	)
 
@@ -826,13 +1091,18 @@ func buildProjectSearchQuery(phrase string, terms []string, includeClosed bool) 
 		)
 	}
 
+	if len(hiddenProjectIDs) > 0 {
+		whereClause += fmt.Sprintf(" AND NOT (p.id = ANY(%s::uuid[]))", nextArg(hiddenProjectIDs))
+	}
+
 	limitParam := nextArg(nil)
 	offsetParam := nextArg(nil)
 
 	query := fmt.Sprintf(`SELECT p.id, p.workspace_id, p.title, p.description, p.icon,
 		p.status, p.priority, p.lead_type, p.lead_id,
 		p.start_date, p.due_date,
-		p.created_at, p.updated_at, p.creator_type, p.creator_id,
+		p.created_at, p.updated_at, p.visibility, p.creator_type, p.creator_id,
+		p.archived_at, p.archived_by_type, p.archived_by_id,
 		%s AS match_source
 	FROM project p
 	WHERE p.workspace_id = %s AND %s
@@ -877,6 +1147,7 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 	}
 
 	includeClosed := r.URL.Query().Get("include_closed") == "true"
+	includeArchived := r.URL.Query().Get("include_archived") == "true"
 
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
 	if !ok {
@@ -884,7 +1155,11 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 	}
 	terms := splitSearchTerms(q)
 
-	sqlQuery, args := buildProjectSearchQuery(q, terms, includeClosed)
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	sqlQuery, args := buildProjectSearchQuery(q, terms, includeClosed, includeArchived, hidden.Param()...)
 	args[1] = wsUUID
 	args[len(args)-2] = limit
 	args[len(args)-1] = offset
@@ -912,8 +1187,12 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 				&row.project.DueDate,
 				&row.project.CreatedAt,
 				&row.project.UpdatedAt,
+				&row.project.Visibility,
 				&row.project.CreatorType,
 				&row.project.CreatorID,
+				&row.project.ArchivedAt,
+				&row.project.ArchivedByType,
+				&row.project.ArchivedByID,
 				&row.matchSource,
 			); err != nil {
 				return fmt.Errorf("scan: %w", err)
@@ -923,7 +1202,7 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 		return rows.Err()
 	})
 	if err != nil {
-		if writeSearchCancellation(w, r, err) {
+		if writeQueryCancellation(w, r, err) {
 			return
 		}
 		// Statement-timeout surfaces as SQLSTATE 57014 — same
@@ -940,29 +1219,19 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to search projects")
 		return
 	}
-	if writeSearchCancellation(w, r, ctx.Err()) {
+	if writeQueryCancellation(w, r, ctx.Err()) {
 		return
 	}
 
 	// Batch-fetch issue stats and resource counts
-	statsMap := make(map[string]db.GetProjectIssueStatsRow)
+	statsMap := map[string]db.GetProjectIssueStatsRow{}
 	resourceCountMap := make(map[string]int64)
 	if len(results) > 0 {
 		projectIDs := make([]pgtype.UUID, len(results))
 		for i, r := range results {
 			projectIDs[i] = r.project.ID
 		}
-		terminalStatusKeys := h.projectTerminalIssueStatusKeys(ctx, wsUUID)
-		stats, statsErr := h.Queries.GetProjectIssueStats(ctx, db.GetProjectIssueStatsParams{
-			WorkspaceID:        wsUUID,
-			ProjectIds:         projectIDs,
-			TerminalStatusKeys: terminalStatusKeys,
-		})
-		if statsErr == nil {
-			for _, s := range stats {
-				statsMap[uuidToString(s.ProjectID)] = s
-			}
-		}
+		statsMap = h.loadProjectIssueStatsMap(ctx, wsUUID, projectIDs)
 		counts, err := h.Queries.GetProjectResourceCounts(ctx, projectIDs)
 		if err == nil {
 			for _, c := range counts {
@@ -975,8 +1244,7 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 	for i, row := range results {
 		pr := projectToResponse(row.project)
 		if s, ok := statsMap[pr.ID]; ok {
-			pr.IssueCount = s.TotalCount
-			pr.DoneCount = s.DoneCount
+			applyProjectIssueStats(&pr, row.project.UpdatedAt, s)
 		}
 		pr.ResourceCount = resourceCountMap[pr.ID]
 		spr := SearchProjectResponse{
@@ -996,7 +1264,7 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 		resp[i] = spr
 	}
 
-	if writeSearchCancellation(w, r, ctx.Err()) {
+	if writeQueryCancellation(w, r, ctx.Err()) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

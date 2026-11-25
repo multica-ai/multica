@@ -10,6 +10,10 @@ import {
   CollectionPageHeader,
 } from "./collection-page";
 import { CollapsedNavTrigger, PAGE_GUTTER, PageHeader } from "./page-header";
+import {
+  WINDOW_TITLE_BAR_CLASS,
+  WindowTitleBarProvider,
+} from "../platform/window-title-bar";
 
 const navigation = vi.hoisted(() => ({ pathname: "/acme/issues" }));
 vi.mock("../navigation", async (importOriginal) => ({
@@ -34,7 +38,7 @@ function renderHeader(
 // title stays left only while nothing distributes the free space: the content
 // group grows and the header never uses `justify-between`.
 function expectTitleLeftOfFreeSpace(header: HTMLElement) {
-  const trigger = header.querySelector("[data-slot='sidebar-trigger']");
+  const trigger = header.querySelector("[data-sidebar='trigger']");
   expect(trigger).not.toBeNull();
   expect(header.firstElementChild).toBe(trigger);
   expect(header).not.toHaveClass("justify-between");
@@ -94,7 +98,7 @@ describe("PageHeader base chrome", () => {
       { hasExternalTrigger: true },
     );
 
-    expect(header.querySelector("[data-slot='sidebar-trigger']")).toBeNull();
+    expect(header.querySelector("[data-sidebar='trigger']")).toBeNull();
     expect(within(header).getByRole("heading")).toBe(header.firstElementChild);
   });
 
@@ -107,14 +111,43 @@ describe("PageHeader base chrome", () => {
       </SidebarProvider>,
     );
 
-    expect(container.querySelector("[data-slot='sidebar-trigger']")).toBeNull();
+    expect(container.querySelector("[data-sidebar='trigger']")).toBeNull();
+  });
+
+  // A frameless window (the Desktop issue window) hands its title bar to the
+  // page header, which then has to clear the native window controls and
+  // carve its controls out of the drag region.
+  it("becomes the window's title bar under a WindowTitleBarProvider", () => {
+    const header = renderHeader(
+      <WindowTitleBarProvider value={{ leadingInset: 88 }}>
+        <PageHeader>
+          <h1>MUL-1</h1>
+        </PageHeader>
+      </WindowTitleBarProvider>,
+    );
+
+    expect(header.style.paddingLeft).toBe("88px");
+    expect(header).toHaveClass(WINDOW_TITLE_BAR_CLASS);
+  });
+
+  it("stays a plain header where the window has its own title bar", () => {
+    const header = renderHeader(
+      <WindowTitleBarProvider value={null}>
+        <PageHeader>
+          <h1>MUL-1</h1>
+        </PageHeader>
+      </WindowTitleBarProvider>,
+    );
+
+    expect(header.style.paddingLeft).toBe("");
+    expect(header).not.toHaveClass(WINDOW_TITLE_BAR_CLASS);
   });
 
   // Outside a `SidebarProvider` there is no nav to reopen at all.
   it("renders nothing when no sidebar is mounted", () => {
     const { container } = renderWithI18n(<CollapsedNavTrigger />);
 
-    expect(container.querySelector("[data-slot='sidebar-trigger']")).toBeNull();
+    expect(container.querySelector("[data-sidebar='trigger']")).toBeNull();
   });
 });
 
@@ -137,7 +170,7 @@ describe("CollapsedNavTrigger in the app shell", () => {
         </AppShellProvider>
       </SidebarProvider>,
     );
-    return () => container.querySelector("[data-slot='sidebar-trigger']");
+    return () => container.querySelector("[data-sidebar='trigger']");
   }
 
   it("is a compact-only trigger while the panel is open", () => {
@@ -151,10 +184,10 @@ describe("CollapsedNavTrigger in the app shell", () => {
     expect(trigger()).not.toHaveClass("md:hidden");
   });
 
-  // Inbox brings its own list column, so the panel's open state is not what
+  // Chat brings its own list column, so the panel's open state is not what
   // the trigger reopens there; the collapsed list column is.
   it("follows the list column in spaces without a shell panel", () => {
-    const trigger = renderInShell("/acme/inbox");
+    const trigger = renderInShell("/acme/chat");
     act(() => sidebar!.setOpen(false));
     expect(trigger()).toHaveClass("md:hidden");
 

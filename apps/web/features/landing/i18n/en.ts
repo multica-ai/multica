@@ -1,202 +1,19 @@
 import { githubUrl, discordUrl } from "../components/shared";
 import type { LandingDict } from "./types";
+import { enSiteCopy } from "./site-en";
 
-export function createEnDict(
-  allowSignup: boolean,
-  docsHref: string,
-): LandingDict {
+export function createEnDict(): LandingDict {
   return {
-  header: {
-    github: "GitHub",
-    cta: "Get started",
-    dashboard: "Dashboard",
-    docs: "Docs",
-    changelog: "Changelog",
-    useCases: "Use cases",
-    navigation: "Primary navigation",
-    openMenu: "Open navigation menu",
-    closeMenu: "Close navigation menu",
-  },
-
-  hero: {
-    headlineLine1: "Your next 10 hires",
-    headlineLine2: "won\u2019t be human.",
-    subheading:
-      "Multica is a source-available platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills \u2014 manage your human + agent workforce in one place.",
-    cta: "Start free trial",
-    downloadDesktop: "Download Desktop",
-    talkToSales: "Talk to sales",
-    worksWith: "Works with 20+ AI coding tools",
-    imageAlt: "Multica board view \u2014 issues managed by humans and agents",
-  },
-
-  features: {
-    teammates: {
-      label: "TEAMMATES",
-      title: "Assign to an agent like you\u2019d assign to a colleague",
-      description:
-        "Agents aren\u2019t passive tools \u2014 they\u2019re active participants. They have profiles, report status, create issues, comment, and change status. Your activity feed shows humans and agents working side by side.",
-      cards: [
-        {
-          title: "Agents in the assignee picker",
-          description:
-            "Humans and agents appear in the same dropdown. Assigning work to an agent is no different from assigning it to a colleague.",
-        },
-        {
-          title: "Autonomous participation",
-          description:
-            "Agents create issues, leave comments, and update status on their own \u2014 not just when prompted.",
-        },
-        {
-          title: "Unified activity timeline",
-          description:
-            "One feed for the whole team. Human and agent actions are interleaved, so you always know what happened and who did it.",
-        },
-      ],
-    },
-    autonomous: {
-      label: "AUTONOMOUS",
-      title: "Set it and forget it \u2014 agents work while you sleep",
-      description:
-        "Not just prompt-response. Full task lifecycle management: enqueue, claim, start, complete or fail. Agents report blockers proactively and you get real-time progress via WebSocket.",
-      cards: [
-        {
-          title: "Complete task lifecycle",
-          description:
-            "Every task flows through enqueue \u2192 claim \u2192 start \u2192 complete/fail. No silent failures \u2014 every transition is tracked and broadcast.",
-        },
-        {
-          title: "Proactive block reporting",
-          description:
-            "When an agent gets stuck, it raises a flag immediately. No more checking back hours later to find nothing happened.",
-        },
-        {
-          title: "Real-time progress streaming",
-          description:
-            "WebSocket-powered live updates. Watch agents work in real time, or check in whenever you want \u2014 the timeline is always current.",
-        },
-      ],
-    },
-    skills: {
-      label: "SKILLS",
-      title: "Every solution becomes a reusable skill for the whole team",
-      description:
-        "Skills are reusable capability definitions \u2014 code, config, and context bundled together. Write a skill once, and every agent on your team can use it. Your skill library compounds over time.",
-      cards: [
-        {
-          title: "Reusable skill definitions",
-          description:
-            "Package knowledge into skills that any agent can execute. Deploy to staging, write migrations, review PRs \u2014 all codified.",
-        },
-        {
-          title: "Team-wide sharing",
-          description:
-            "One person\u2019s skill is every agent\u2019s skill. Build once, benefit everywhere across your team.",
-        },
-        {
-          title: "Compound growth",
-          description:
-            "Day 1: you teach an agent to deploy. Day 30: every agent deploys, writes tests, and does code review. Your team\u2019s capabilities grow exponentially.",
-        },
-      ],
-    },
-    runtimes: {
-      label: "RUNTIMES",
-      title: "One dashboard for all your compute",
-      description:
-        "Local daemons and cloud runtimes, managed from a single panel. Real-time monitoring of online/offline status, usage charts, and activity heatmaps. Auto-detects 29 supported coding tools on your machine.",
-      cards: [
-        {
-          title: "Unified runtime panel",
-          description:
-            "Local daemons and cloud runtimes in one view. No context switching between different management interfaces.",
-        },
-        {
-          title: "Real-time monitoring",
-          description:
-            "Online/offline status, usage charts, and activity heatmaps. Know exactly what your compute is doing at any moment.",
-        },
-        {
-          title: "Auto-detection on first run",
-          description:
-            "Multica scans for 29 supported coding tools \u2014 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Devin CLI, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, and ZeroClaw, ZCode \u2014 and registers a runtime for each one it finds.",
-        },
-      ],
-    },
-  },
-
-  howItWorks: {
-    label: "Get started",
-    headlineMain: "Hire your first AI employee",
-    headlineFaded: "in the next hour.",
-    steps: [
-      {
-        title: allowSignup ? "Sign up & create your workspace" : "Login to your workspace",
-        description: allowSignup
-          ? "Enter your email, verify with a code, and you\u2019re in. Your workspace is created automatically \u2014 no setup wizard, no configuration forms."
-          : "Enter your email, verify with a code, and you\u2019re logged into your workspace \u2014 no setup wizard, no configuration forms.",
-      },
-      {
-        title: "Install the CLI & connect your machine",
-        description:
-          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 29 supported coding tools (Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Devin CLI, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw, ZCode). Whichever ones you already have installed get registered as runtimes automatically.",
-      },
-      {
-        title: "Create your first agent",
-        description:
-          "Give it a name, write instructions, and attach skills. Agents automatically activate on assignment, on comment, or on mention.",
-      },
-      {
-        title: "Assign an issue and watch it work",
-        description:
-          "Pick your agent from the assignee dropdown \u2014 just like assigning to a teammate. The task is queued, claimed, and executed automatically. Watch progress in real time.",
-      },
-    ],
-    cta: "Get started",
-    ctaGithub: "View on GitHub",
-    ctaDocs: "Read the docs",
-  },
-
-  openSource: {
-    label: "Source available",
-    headlineLine1: "Every line,",
-    headlineLine2: "on your terms.",
-    description:
-      "Multica\u2019s source code is public. Inspect every line, self-host it for free, and shape the future of human + agent collaboration. Offering Multica to others as a hosted service requires a commercial license.",
-    cta: "Star on GitHub",
-    licensingCta: "How licensing works \u2192",
-    highlights: [
-      {
-        title: "Self-host anywhere",
-        description:
-          "Run Multica on your own infrastructure. Docker Compose, single binary, or Kubernetes — your workspace data stays on servers you control.",
-      },
-      {
-        title: "No vendor lock-in",
-        description:
-          "Bring your own LLM provider, swap agent backends, extend the API. You own the stack, top to bottom.",
-      },
-      {
-        title: "Transparent by default",
-        description:
-          "Every line of code is auditable. See exactly how your agents make decisions, how tasks are routed, and where your data flows.",
-      },
-      {
-        title: "Community-driven",
-        description:
-          "Built with the community, not just for it. Contribute skills, integrations, and agent backends that benefit everyone.",
-      },
-    ],
-  },
-
+  ...enSiteCopy,
   faq: {
     label: "FAQ",
     headline: "Questions & answers.",
     items: [
+      { question: "Can I chat with an agent from WeChat?", answer: "Yes. Open an agent you own, choose Add messaging channel under Messaging, pick WeChat, and scan the QR code with your own WeChat. Private messages from the scanning account run with your workspace permissions, and replies and supported attachments return to the same conversation. Group chats are not supported; self-hosted servers must enable the WeChat integration." },
       {
         question: "What coding agents does Multica support?",
         answer:
-          "Multica supports 29 coding tools out of the box: Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Devin CLI, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw, and ZCode. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since the source code is public, you can also add your own backends. Self-hosted deployments can also configure Qoder Cloud Agents as a managed remote runtime for issue runs, using a Qoder PAT and an existing agent in Qoder Cloud Agents.",
+          "Multica supports 31 coding tools out of the box: Amp, Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Devin CLI, Dim, Factory Droid, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw, and ZCode. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since the source code is public, you can also add your own backends. Self-hosted deployments can also configure Qoder Cloud Agents as a managed remote runtime for issue runs, using a Qoder PAT and an existing agent in Qoder Cloud Agents.",
       },
       {
         question: "Do I need to self-host, or is there a cloud version?",
@@ -230,44 +47,6 @@ export function createEnDict(
           "As many as your hardware supports. Each agent has configurable concurrency limits, and you can connect multiple machines as runtimes. There are no artificial caps when you self-host.",
       },
     ],
-  },
-
-  footer: {
-    tagline:
-      "Project management for human + agent teams. Source-available, self-hostable, built for the future of work.",
-    cta: "Get started",
-    groups: {
-      product: {
-        label: "Product",
-        links: [
-          { label: "Features", href: "#features" },
-          { label: "How it Works", href: "#how-it-works" },
-          { label: "Use cases", href: "/usecases" },
-          { label: "Changelog", href: "/changelog" },
-          { label: "Download", href: "/download" },
-        ],
-      },
-      resources: {
-        label: "Resources",
-        links: [
-          { label: "Documentation", href: docsHref },
-          { label: "API", href: githubUrl },
-          { label: "X (Twitter)", href: "https://x.com/MulticaAI" },
-          { label: "Discord", href: discordUrl },
-        ],
-      },
-      company: {
-        label: "Company",
-        links: [
-          { label: "About", href: "/about" },
-          { label: "Licensing", href: "/licensing" },
-          { label: "Privacy", href: "/privacy" },
-          { label: "Contact Sales", href: "/contact-sales" },
-          { label: "GitHub", href: githubUrl },
-        ],
-      },
-    },
-    copyright: "\u00a9 {year} Multica. All rights reserved.",
   },
 
   about: {
@@ -522,6 +301,360 @@ export function createEnDict(
       fixes: "Bug Fixes",
     },
     entries: [
+      {
+        version: "0.13.0",
+        date: "2026-11-25",
+        title: "Issue dependencies that start work automatically, direct handoffs between squad members, and steering for Hermes",
+        changes: [],
+        features: [
+          "Mark an Issue as blocked by, blocking, or a duplicate of another from its Relations section or its menu.",
+          "When all of an Issue's blockers end, its agent starts automatically and an assigned person is notified.",
+          "Blocked Issues show a flag in lists and on the board; hover it to see what they're waiting for.",
+          "Filter by Blocked to find the Issues that are still waiting on others.",
+          "Squad managers can switch a squad to Members hand off directly, so members pass work to each other.",
+          "Squad handoffs show where work went and why; limits, failed runs, and archived squads return it to the leader.",
+          "Send follow-up instructions to a running Hermes agent in Issues and Chat with Hermes 0.22.3 or later.",
+          "Change a wakeup's timing from the Wakeups panel in Chat.",
+          "multica://open/chat links open a chat in the desktop app, reusing its tab if it's already open.",
+          "The runtime list shows who each runtime is shared with, and owners can change it right there.",
+        ],
+        improvements: [
+          "With the Issue sidebar closed, change status and assignee or run quick actions from the header.",
+          "Pull request rows in the Issue sidebar show lines added and removed again and fit narrow sidebars.",
+          "A project's resources are one list with a single Add menu.",
+          "The Inbox keeps Archived or Snoozed with Undo in the action bar, and hover card buttons stay in the card.",
+          "With squad handoffs muted, @squad handoffs are muted too, and the squad's final report still reaches you.",
+          "The Snoozed and Archived tabs, nearby Issues, and chat lists load faster, and deleting an Issue moves to the next.",
+          "Change who a saved view is shared with from its menu.",
+          "Runs say what a published reply is still waiting on and why process cleanup failed, and long tool names fit.",
+        ],
+        fixes: [
+          "Saving an Issue, settings, workflow, skill, or Autopilot keeps changes made elsewhere and text typed during the save.",
+          "Autopilot prompts can be cleared, and the repository dialog edits the repository you opened it for.",
+          "Descriptions written while the CLI uploads an attachment, or right before leaving a project's Overview, are kept.",
+          "Show in sidebar scrolls to the Issue, command palette submenus select their first row, and folder pickers follow sidebar order.",
+          "Board swimlanes can be dragged when the order isn't manual, and the drag hint names the current sort.",
+          "Desktop tabs can be dragged to reorder again, and the iOS Inbox no longer goes empty on some notifications.",
+          "Wakeups only offer agents you can run, and an agent's own events no longer use up a one-time wait.",
+          "Hourly usage keeps every run after a recount, and squad usage counts recovery and wakeup runs but not standalone ones.",
+          "Tokens of ended tasks stop working, workspaces always keep an owner, and removed members lose Autopilot access.",
+          "Runs another member starts no longer change who owns your chat, and Google sign-in no longer hangs.",
+          "Claude Code starts a new session after a refusal, ignores late results from earlier turns, and prices Claude Fable 5.2.",
+          "Pi, Trae, and Antigravity recover better from cancels and dropped streams, and the daemon stays responsive while reporting.",
+          "Agent descriptions with emoji have the same length limit in the app and on the server.",
+          "Only people who can see a private blocker can remove it from an Issue.",
+          "Fixed smaller issues with project progress, CLI attachment links, client secret redaction, and Telegram and Lark messages.",
+        ],
+      },
+      {
+        version: "0.12.2",
+        date: "2026-11-24",
+        title: "Quick-switch agents when creating Issues, see usage by squad, and leave squad handoffs out of your Inbox",
+        changes: [],
+        features: [
+          "Create with agent shows your three most-used agents and squads; click one or press Alt/Option + 1–3 to switch.",
+          "Turn off Include squad handoffs in Settings → Notifications to keep squad agents' handoff comments out of your Inbox.",
+          "On Analytics, filter usage by squad or group the leaderboard and errors by squad, with a breakdown per member.",
+        ],
+        improvements: [
+          "Inbox actions sit above the reply box, and after you archive the last notification, it still shows Archived with Undo.",
+          "A squad working on an Issue shows as one squad avatar in headers, sidebars, and Working now.",
+          "The Issue sidebar hides empty sections behind one Add row, and sub-issues move to the main column.",
+          "Jump to latest moves to the right and counts new comments, in the Inbox and on Issue pages.",
+        ],
+        fixes: [
+          "Tooltips no longer cover the next row in dense lists such as the Inbox and sidebar.",
+          "With reduced motion on, dialogs and menus close right away, and select dropdowns no longer lag when closing.",
+        ],
+      },
+      {
+        version: "0.12.1",
+        date: "2026-11-24",
+        title: "Triage the Inbox with J, K, and U, follow agent runs in place, and smoother animations",
+        changes: [],
+        features: [
+          "Trigger an agent from the Inbox and the Issue stays open, with the agent's live status in the bar and sidebar.",
+          "On the Inbox page, press J and K to move between notifications and U to mark one unread.",
+          "Right-click a notification in the Work panel to mark it unread, archive, or delete it.",
+          "New in the CLI: multica quick-action to manage quick actions and run one on an Issue.",
+        ],
+        improvements: [
+          "Dialogs, collapsible sections, tabs, drag and drop, desktop tab closing, and ⌘K drill-down animate more smoothly.",
+          "With reduced motion on, the Inbox, chat sessions, and run comments switch instantly, and image uploads stop pulsing.",
+          "Automatic archiving keeps you on the Issue you're reading, so the After archiving setting is gone.",
+          "Agents follow project workflows more reliably and no longer move finished Issues into closed statuses like Won't Fix.",
+          "Archive all asks for confirmation first, and snoozed Issues stay snoozed.",
+          "On a new device, the Work panel's Inbox starts with compact one-line rows; existing settings are kept.",
+        ],
+        fixes: [
+          "Follow-up instructions sent to a running Antigravity agent now reach it instead of starting a new run.",
+          "Desktop Issue tabs return to where you were reading, even in the middle of a comment.",
+          "Switching Inbox tabs keeps the open Issue, and notifications from other tabs no longer linger in the Inbox.",
+          "Duplicate marks no longer reveal private Issues in live updates or after the original Issue is deleted.",
+          "Fixed jumps when dropping dragged items, clipped focus rings, lingering tooltips, and closing panels that still took clicks.",
+        ],
+      },
+      {
+        version: "0.12.0",
+        date: "2026-11-23",
+        title: "A unified Inbox, project overviews with progress forecasts, and faster Codex and Claude Code runs",
+        changes: [],
+        features: [
+          "Every notification opens on the Inbox page, and the Work panel's Inbox has Inbox, Snoozed, and Archived tabs.",
+          "Change status, reassign, or run a quick action from the Inbox bar without opening the Issue page.",
+          "Completing an Issue or starting an agent on it archives it from your Inbox; change this in Settings → Notifications.",
+          "Projects have an Overview tab for the description, a sidebar with progress and recent activity, and an Activity tab.",
+          "Project progress leaves out cancelled Issues and shows a weekly trend and forecast finish date, also in the CLI.",
+          "HTML and Mermaid blocks render while you edit, with a title bar you can rename.",
+          "Send follow-up instructions to a running Antigravity agent.",
+          "Clicking Update on a busy machine queues the CLI update, which installs once the machine is idle.",
+          "The assignee picker puts your recent picks first and hides agents and squads you can't assign.",
+          "Chat replies show the time the agent replied.",
+          "New in the CLI: --base-revision for skill updates, and a saved daemon log level and log rotation per profile.",
+        ],
+        improvements: [
+          "Codex and Claude Code keep a warm session between turns, so follow-up turns start faster.",
+          "Issues open faster from lists, links, and search, and comment images load as smaller thumbnails.",
+          "Switching chats is faster, and archiving a chat moves smoothly to the next one.",
+          "Clearing your Inbox shows an Inbox Zero screen, and Z undoes the last archive.",
+          "Pinned items sit above the Inbox in the Work panel, and project and view counts are hidden by default.",
+          "Keyboard shortcuts and product wording are consistent across the apps, including desktop window titles and mobile errors.",
+          "Self-hosted Compose and Helm can set feature flags and pass every documented backend variable.",
+          "multica daemon status lists skipped agents, and disk usage marks in-place runs.",
+        ],
+        fixes: [
+          "Resending a comment after a lost response no longer posts it twice, and a doubled reaction is saved once.",
+          "Completed Issues keep their status when agents run on them, and stage and squad handoffs fire once, on time.",
+          "Agent output hides Multica tokens, and agent tokens can no longer delete a workspace or see your other workspaces.",
+          "Duplicate marks in project activity and Issue timelines no longer reveal Issues in private projects you can't see.",
+          "Annotation drafts survive new replies, image toolbars no longer cover thumbnails, and switching Issues no longer leaks memory.",
+          "Saved Idle views keep their filter, and My work includes only squads led by your own agents.",
+          "Larger images an agent sends to WeChat arrive instead of failing.",
+          "Desktop uses its proxy settings to start the daemon, and Cursor keeps MCP logins across tasks.",
+          "Model lists for OpenCode and CodeArts load after a timeout, and OpenCode JSONC and custom Claude skill folders are read.",
+          "Codex retries a timed-out start, and Kimi usage, Pi errors, Reasonix output, and missed chat replies show again.",
+          "Runs name a missing project folder or incompatible DSH profile, and the daemon cleans up leftover Git temporary files.",
+          "The CLI says when a secrets manager replaced its token, tells failed checks from expired sign-ins, and finishes slow downloads.",
+          "Per-minute token limits and insufficient balance show the right failure reason, and newer Antigravity models are priced.",
+          "Self-hosted install checks Docker Compose and busy ports first, and logs say when a secret key is set but invalid.",
+          "Fixed smaller issues with sign-in, private property counts, agent access labels, long project names, and Android scrolling.",
+        ],
+      },
+      {
+        version: "0.11.1",
+        date: "2026-11-19",
+        title: "List bot commands with /help, manage your Inbox from the CLI, and faster long Issues",
+        changes: [],
+        features: [
+          "Send /help to an agent's bot in WeChat, Lark, Slack, DingTalk, WeCom, or Telegram to list its commands.",
+          "Manage your Inbox from the CLI: mark read or unread, archive, restore, snooze, and update many at once.",
+        ],
+        improvements: [
+          "Your Inbox keeps the newest 2,000 notifications in each workspace and archives older ones automatically.",
+          "Long Issues open faster from the Inbox and show the comment you clicked first.",
+          "Switching desktop tabs and scrolling a long Inbox in the Work panel are smoother.",
+          "Image deliverables load as thumbnails in lists, and previews still show the full image.",
+        ],
+        fixes: [
+          "When the Inbox fails to load, it retries, then shows an error, and keeps notifications already loaded.",
+          "On desktop, every page keeps its scroll position across tab switches, including settings, Issue tables, and Gantt.",
+          "Attachment links such as videos and PDFs open in the in-app preview instead of the storage page.",
+          "The Work panel's Inbox highlights the row of an Issue you open from it again.",
+          "Hover over a cut-off Issue title to read it in full.",
+          "Changing a project's repository no longer carries over the old repository's branch.",
+          "Issue and project text containing hidden control characters now saves instead of failing.",
+          "Codex tasks load the plugins bundled with your Codex setup, so finished runs release their browser tabs.",
+          "Turning off the daemon's idle watchdog no longer removes Codex's inactivity timeout.",
+          "CLI and runtime errors now tell a dropped connection from an unreachable server and name version check timeouts.",
+        ],
+      },
+      {
+        version: "0.11.0",
+        date: "2026-11-18",
+        title: "Agents on WeChat, chat agents that report back, adding to a running reply, and project folders",
+        changes: [],
+        features: [
+          "Connect an agent to WeChat by scanning a QR code and chat with it privately, files included. Self-hosted servers turn it on with MULTICA_WEIXIN_SECRET_KEY.",
+          "Ask an agent in chat to tell you when something is done, and it reports back in the same conversation.",
+          "When you have an agent in chat ask someone for an answer, decision, or review, it reports back by default.",
+          "Send more instructions while an agent replies in chat, and they join its current reply without stopping it.",
+          "Organize projects into folders in the sidebar, drag them in or out, and group the Projects page by folder.",
+          "Filter autopilot webhook triggers by payload content, and edit each trigger's rules and on/off state right in its row.",
+          "GitLab System Hooks can sync merge requests to Issues, just like project webhooks.",
+          "In an Issue comment, type / and a few letters to pick one of the addressed agent's skills.",
+          "The Issue sidebar lists sub-Issues, so you can check and open them while reading.",
+          "Give a workspace a text icon of one or two characters and a color, without uploading an image.",
+          "Runtime pages show how much of your Claude Code and Codex plan limits is used and when they reset.",
+          "New in the CLI: read your Inbox, assign autopilots to squads, and see why an Issue change started no run.",
+        ],
+        improvements: [
+          "Long Issues scroll and search more smoothly, and toggling the sidebar or opening one from the Inbox is faster.",
+          "The Inbox stays quick to load when many notifications arrive at once.",
+          "Status change notifications are now off by default. Turn them back on in Settings → Notifications.",
+          "Mention projects from any editor, not just chat.",
+          "Copy a link with the title from Issue and project menus.",
+          "A run's skill details show both a skill's full package size and how much was sent to the agent.",
+        ],
+        fixes: [
+          "Cursor keeps each agent's MCP sign-ins across tasks, and shows a sign-in entry when one is missing.",
+          "Retries run on the agent's current runtime and no longer resume the old session after a runtime change.",
+          "Squad leaders still follow up when members mention people, and @squad mentions no longer notify every member.",
+          "Webhook action filters match GitLab merge request, pipeline, and job events, and separate deliveries no longer merge into one Issue.",
+          "Desktop stable updates arrive only once every platform's build is ready, failed updates recover, and Windows arm64 no longer downgrades.",
+          "Custom runtimes stay on the machine you chose instead of being copied to everyone's machines.",
+          "Tasks waiting for a local folder no longer block others, and task pickup no longer deadlocks with chat sends.",
+          "Multica's temporary run instructions in a tracked AGENTS.md or CLAUDE.md no longer end up in agent commits.",
+          "Skills you pick with / in chat or an Issue comment are now actually used by the agent.",
+          "Settings → Code manages several GitHub connections, and pasted GitHub branch links fill in the right branch.",
+          "Expired image links load again in the viewer, and anchors and links in HTML attachment previews work.",
+          "Inbox notifications open at their comment even below a long description.",
+          "Switching tabs or Issue views keeps your scroll position, and boards scroll sideways again.",
+          "Fixed smaller issues with self-hosted first run, DeepSeek Harness startup errors, skill size limits, plugin MCP names, and Connected Apps.",
+          "Fixed smaller issues with coordinator handoffs, self-mentions, failed field updates, Mark all as read, Inbox labels, and full-screen desktop tabs.",
+        ],
+      },
+      {
+        version: "0.10.0",
+        date: "2026-11-16",
+        title: "Desktop voice input, the Inbox in the Work panel with snooze, and project boards and archiving",
+        changes: [],
+        features: [
+          "On desktop, dictate into any message box after turning on Settings → Voice input, with audio transcribed on your computer.",
+          "The Inbox moves to the top of the Work panel, and each row shows the Issue's status and agent activity.",
+          "Snooze an Issue in your Inbox until later; it waits in the Snoozed view and comes back unread.",
+          "Unsubscribe from someone else's Issue and archive its notification in one step, with Undo.",
+          "Issues that belong to others send you only key updates by default, so your Inbox stays quieter.",
+          "The All Projects page adds a board, grouping, search, start and due dates, and recent activity.",
+          "Archive a project to hide it and pause its autopilots, and restore it any time.",
+          "Private projects are visible only to their members, even for workspace owners and admins. Owners can join any of them from Settings → General.",
+          "Bulk edit labels, project, dates, parent, and custom properties, and retry just the Issues that were skipped.",
+          "Themes style more of the app and can add a background and glass, and agents can build one for you.",
+          "Copy the full contents of a text, code, Markdown, JSON, or CSV attachment from its preview.",
+          "New in the CLI: manage saved views, link or unlink PRs, filter webhook events, bulk update Issues, and archive projects.",
+        ],
+        improvements: [
+          "You're notified about Issues agents create for you, a comment mentioning you notifies once, and reactions can be muted.",
+          "When you complete or cancel an Issue, your notifications for it leave your Inbox.",
+          "Built-in views become My work, Working, Subscribed, and Snoozed, and Projects has a No project row.",
+          "Open views from Cmd+K, every sidebar view shows a count, and desktop has New issue and Search in the rail.",
+          "Content text size uses the same slider as interface text.",
+          "The new Issue dialog keeps its last size, PR chips open the PR, and sidebar projects can use plain icons.",
+          "The theme store is always on and sorts themes by downloads; MULTICA_THEME_STORE no longer turns it off.",
+        ],
+        fixes: [
+          "The CLI keeps backslashes in inline text exactly as typed, so Windows paths, regular expressions, and LaTeX arrive intact. Scripts that relied on escapes such as \\n should pass real characters or use the command's file or stdin input.",
+          "Inbox notifications open at the first unread comment, and archiving one moves on to the next with Undo.",
+          "The open Inbox notification stays highlighted and in place when its Issue changes, and switching between notifications stays fast.",
+          "Menus inside board cards open again, and assigning an agent from a card's avatar asks for confirmation first.",
+          "Adding members to a private project from the API or CLI is no longer ignored.",
+          "Binding a GitHub installation checks that you control it, and agent task tokens can no longer manage plugins.",
+          "Repository checkouts on Windows no longer fail because of long paths.",
+          "Queued tasks no longer wait minutes for an idle runtime to pick them up. Update the daemon to get this fix.",
+          "Fixed CodeBuddy failure reasons and resumed usage, Kiro rate limits, TRAE stopping at a plan, and Copilot custom arguments.",
+          "Desktop reuses an Issue's open tab without stealing focus and no longer crashes when its log output closes.",
+          "Long links and images no longer widen dialogs, and clicks from extensions like Grammarly no longer close them.",
+          "The command palette resets when you switch workspaces, and chat's right-click menu stays open as you move the pointer.",
+          "Fixed smaller issues with CLI setup, descriptions, metadata keys, sign-in errors, webhook rotation, runtime deletion, and API 405 responses.",
+          "Fixed smaller issues with settings autosave, Jump to latest, invitations, the iPhone web app, Option shortcuts, Lark quotes, and prices.",
+        ],
+      },
+      {
+        version: "0.9.0",
+        date: "2026-11-13",
+        title: "Community themes, environment controls in the Issue sidebar, and one right-click menu on desktop",
+        changes: [],
+        features: [
+          "Make, import, or install community themes in Settings → Appearance, and switch themes from the account menu.",
+          "Start, stop, and restart services from Environments in the Issue sidebar, read their logs, and switch to desktop app windows.",
+          "Open a run to see the instructions, skills, and MCP servers it received.",
+          "Run tasks on Factory Droid and Amp.",
+          "The desktop app has one right-click menu everywhere, with quick actions for Issues.",
+          "Quick chat moves into a new bottom bar, and Shift+Cmd+J starts a new Ask Multica chat.",
+          "Select text in an agent's chat reply to annotate it, and the note is sent with your next message.",
+          "Choose whether chat replies send system notifications, and desktop background chat alerts and the Dock unread count work again.",
+          "Telegram replies show what the agent is doing as it works, with more detail in private chats than in groups.",
+          "Subscribe to every Issue in a project.",
+          "Show linked PRs and their status on boards, swimlanes, lists, and tables.",
+          "Delete an item from your Inbox after confirming, without touching the Issue or other members' notifications.",
+          "Permanently delete one or many Issues from the CLI, with a confirmation and a report of any that failed.",
+          "Choose and reorder the sections in the Issue sidebar.",
+          "Comment images show as thumbnails, and you can switch them to full size.",
+        ],
+        improvements: [
+          "Setting up a project's workflow, repositories, local folders, and sub-Issue wakeup defaults takes fewer steps.",
+          "Creating skills, managing labels, and inviting people are simpler, and squads can be edited in place.",
+          "Messaging channels belong to agents and connect with one click, and GitHub authorization brings you back with the repository selected.",
+          "Agent filters share one meaning of \"my agents\", add Idle, and Issues show who actually requested an agent's work.",
+          "Execution logs show command input line by line, and the runtime usage page keeps its time range.",
+          "Lark tasks include message, thread, and sender IDs, and Qoder sessions are marked as coming from Multica.",
+          "The CLI links local images in a body to the attachments uploaded with it.",
+          "The web app caches translations for each language, so pages load less repeated data.",
+        ],
+        fixes: [
+          "Long discussions render as you scroll, show all older images, and have a button to jump to the latest activity.",
+          "Private project Issues no longer show up through runs, references, autopilots, wakeup lists, or sub-Issue counts.",
+          "The Inbox opens the right comment, drops deleted items, and no longer jumps back to an old selection.",
+          "Images keep HTML addresses and preview in the same order everywhere, and titled Mermaid, HTML, and code blocks render again.",
+          "Label picks and order you change while a new label is created are no longer overwritten.",
+          "On desktop, tabs work in full screen, saved views switch correctly, and a closed sidebar stays closed on load.",
+          "Floating chats use the main chat's controls, drop the page context tag on send, and show the same title everywhere.",
+          "Mentioning a missing or unavailable agent leaves a lasting error, and mentions with no recipient no longer add subscribers.",
+          "Only sign-in sessions are renewed, daemon tokens no longer act as users, and builds use Go 1.27.4 for security fixes.",
+          "Fixed Antigravity resume, Hermes detection, ZCode on Linux, mise-installed runtimes, and false failures when macOS runs exit.",
+          "Claude execution logs keep thinking text, and Copilot reports usage for new sessions.",
+          "Raising a runtime's concurrency limit starts waiting tasks right away, and repeat checkouts reuse the same folder, branch, and access.",
+          "Daemons connected to self-hosted servers now delete finished tasks' working folders after 14 days by default, as on Cloud. To keep them, set MULTICA_GC_COMPLETED_TASK_TTL=0 before upgrading the daemon.",
+          "Usage counts the right calendar days, accepts reports that arrive out of order, and prices newer models.",
+          "Fixed smaller issues with cancelled uploads, failed installs, schedules that never run, deliverable links, file sizes, and environment variable editing.",
+        ],
+      },
+      {
+        version: "0.8.2",
+        date: "2026-11-10",
+        title: "Appearance themes, private projects for everyone, and Issue environments",
+        changes: [],
+        features: [
+          "The Multica website is redesigned, with its own address for each language (/zh, /ja, /ko).",
+          "Settings → Appearance: pick one of five built-in themes and set fonts, sizes, density, and contrast.",
+          "Private projects are available in every workspace. Their Issues are visible only to project members and workspace owners and admins.",
+          "An Issue's sidebar lists the services its runs started under Environments. On macOS and Linux, agents can keep a service running with multica env start.",
+          "Connected Apps is rebuilt in workspaces where it's enabled: connect team or personal accounts and choose which apps each agent uses.",
+          "Select text to comment on it and reply right there.",
+          "Copy a link that always opens the latest version of a deliverable.",
+          "Turn on Include sub-issues in the execution log to see runs and cost across all sub-Issues.",
+          "Filter the Inbox the same way as Issues.",
+          "Hand a workflow step to a squad.",
+          "Multica is available in Russian.",
+          "Run a personal agent on Muse app with the new museapp backend.",
+          "Qoder can use the workspace's GitHub App to access repositories.",
+          "Open an Issue from the web app in the desktop app.",
+          "Rename projects and edit saved views from their menus, and drag icons in the navigation bar to reorder spaces.",
+          "New in the CLI: --pr-auto-complete for Issues delivered over several PRs, --project for issue search, and issue-status commands.",
+        ],
+        improvements: [
+          "The navigation bar is narrower, buttons are rectangular, and Issues and chat use a wider column on wide screens.",
+          "Projects in the sidebar show their own icons, and the team page remembers collapsed groups.",
+          "Icon-only buttons have screen reader names, and cut-off labels can be read in full with the keyboard.",
+          "Fewer animations across the app and website.",
+          "Searching open Issues is faster.",
+        ],
+        fixes: [
+          "Attachments always require sign-in to download, and older images, audio, video, and PDFs open again. Update older desktop versions to keep local drafts and old links working.",
+          "Codex replies stream fully again instead of stopping after the first word.",
+          "Autopilots triggered by Issue updates run again.",
+          "A late 401 from an old request no longer signs you out.",
+          "Creating an Issue no longer fails when Issue numbers collide.",
+          "The daemon clears build caches of idle chats, so disk use stops growing.",
+          "Importing a folder with several local skills imports all of them.",
+          "CSV previews no longer split columns on separators inside quotes.",
+          "Hermes runs inside restricted Job Objects on Windows.",
+          "A failed Issue list can be retried, and Issue mentions and pending invitations refresh when you return to the window.",
+          "Search boxes in filter submenus accept typing again.",
+          "multica daemon start reports success only once the daemon is healthy.",
+          "Channel binding pages such as Lark and Slack no longer clash with workspace URLs.",
+          "Smaller fixes to the sidebar, squad pickers, autopilot run history, and the CLI.",
+        ],
+      },
       {
         version: "0.8.1",
         date: "2026-11-06",
@@ -4305,50 +4438,44 @@ export function createEnDict(
     ],
   },
   download: {
+    platforms: {
+      macArm64: "macOS · Apple Silicon",
+      macX64: "macOS · Intel",
+      winX64: "Windows · x64",
+      winArm64: "Windows · ARM64",
+      linuxX64: "Linux · x64",
+      linuxArm64: "Linux · ARM64",
+    },
     hero: {
-      macArm64: {
-        title: "Multica for macOS",
-        sub: "Apple Silicon · bundled daemon, zero setup",
-        primary: "Download (.dmg)",
-        altZip: "or download .zip",
+      eyebrow: "Desktop app",
+      title: {
+        mac: "Download Multica for macOS",
+        windows: "Download Multica for Windows",
+        linux: "Download Multica for Linux",
+        other: "Download Multica",
       },
-      macIntel: {
-        title: "Multica for macOS",
-        sub: "Intel · bundled daemon, zero setup",
-        primary: "Download (.dmg)",
-        altZip: "or download .zip",
+      lead: "The desktop app comes with the agent daemon, so Claude Code, Codex and the other coding agents on this computer connect on their own.",
+      leadOther: "Desktop apps for macOS, Windows and Linux, each with the agent daemon built in.",
+      mobileNote: "Multica’s desktop app runs on macOS, Windows and Linux. Open this page on your computer to download it.",
+      primary: {
+        macArm64Dmg: "Download for Apple Silicon",
+        macX64Dmg: "Download for Intel",
+        winX64Exe: "Download for Windows",
+        winArm64Exe: "Download for Windows ARM",
+        linuxAmd64AppImage: "Download AppImage",
+        linuxArm64AppImage: "Download AppImage",
       },
-      winX64: {
-        title: "Multica for Windows",
-        sub: "Bundled daemon, zero setup",
-        primary: "Download (.exe)",
+      alternate: {
+        macArm64Dmg: "Apple Silicon Mac",
+        macX64Dmg: "Intel Mac",
       },
-      winArm64: {
-        title: "Multica for Windows",
-        sub: "ARM · bundled daemon, zero setup",
-        primary: "Download (.exe)",
-      },
-      linux: {
-        title: "Multica for Linux",
-        sub: "Bundled daemon, zero setup",
-        primary: "Download AppImage",
-        altFormats: "or .deb / .rpm",
-      },
-      unknown: {
-        title: "Choose your platform",
-        sub: "All installers are listed below.",
-      },
-      safariMacHint: "On an Intel Mac? Choose the Intel download below.",
-      archFallbackHint: "Wrong architecture? See all formats below.",
+      released: "Released {date}",
+      whatsNew: "What’s new",
+      versionUnavailable: "Version unavailable. See all releases on GitHub.",
     },
     allPlatforms: {
-      title: "All platforms",
-      macArm64Label: "macOS · Apple Silicon",
-      macX64Label: "macOS · Intel",
-      winX64Label: "Windows · x64",
-      winArm64Label: "Windows · ARM64",
-      linuxX64Label: "Linux · x64",
-      linuxArm64Label: "Linux · ARM64",
+      title: "All downloads",
+      thisDevice: "This computer",
       formatDmg: ".dmg",
       formatZip: ".zip",
       formatExe: ".exe",
@@ -4356,28 +4483,55 @@ export function createEnDict(
       formatDeb: ".deb",
       formatRpm: ".rpm",
       unavailable: "Not available",
+      allReleases: "All releases",
     },
     cli: {
-      title: "Prefer the CLI?",
-      sub: "For servers, remote dev boxes, and headless setups. Same daemon as Desktop, installed via terminal.",
+      title: "On a server or a remote dev box?",
+      sub: "Install the CLI and run the same daemon there. The commands work over SSH too.",
       installLabel: "Install",
       platformGroup: "Choose your platform",
       platformMacosLinux: "macOS / Linux",
       platformWindows: "Windows",
       startLabel: "Start daemon",
-      sshNote: "Already on a server? Same commands work over SSH.",
       copyLabel: "Copy",
       copiedLabel: "Copied",
     },
-    cloud: {
-      title: "Cloud runtime (waitlist)",
-      sub: "We’ll host the runtime for you. Not live yet — leave your email to be notified.",
-    },
-    footer: {
-      releaseNotes: "What’s new in {version}",
-      allReleases: "View all releases",
-      currentVersion: "Current version: {version}",
-      versionUnavailable: "Version unavailable — check GitHub",
+    started: {
+      title: "Your download has started",
+      retry: "Didn’t start? Try again",
+      allDownloads: "All downloads",
+      install: {
+        title: "Install",
+        dmg: "Open the .dmg and drag Multica into Applications.",
+        zip: "Unzip it and move Multica into Applications.",
+        exe: "Run the installer. Multica opens when it finishes.",
+        appImage: "Make the AppImage executable, then run it.",
+        deb: "Install the .deb with apt or your package manager.",
+        rpm: "Install the .rpm with dnf or your package manager.",
+      },
+      signIn: {
+        title: "Sign in",
+        body: "Open Multica and sign in with your account.",
+        installed: "Already installed?",
+        open: "Open Multica",
+      },
+      agents: {
+        title: "Bring your agents",
+        body: "Multica finds Claude Code, Codex and the other coding agents on this computer.",
+      },
+      community: {
+        label: "While it downloads",
+        githubTitle: "Follow Multica on GitHub",
+        githubBody: "Star the repo to hear about new releases, or read the code behind the app you just downloaded.",
+        star: "Star on GitHub",
+        stars: "{count} stars",
+        discordTitle: "Join the Discord",
+        discordBody: "Ask questions, share workflows and talk to the team.",
+        join: "Join",
+        xTitle: "Follow @MulticaAI",
+        xBody: "Release notes and what’s coming next.",
+        follow: "Follow",
+      },
     },
   },
   contactSales: {

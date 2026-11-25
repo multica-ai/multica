@@ -50,6 +50,7 @@ import {
 import { useActorName } from "@multica/core/workspace/hooks";
 import { projectListOptions } from "@multica/core/projects/queries";
 import type {
+  IssueStatusEntry,
   IssueWorkflow,
   IssueWorkflowMappingPlan,
   IssueWorkflowStep,
@@ -151,6 +152,22 @@ function sameDraft(a: Draft, b: Draft): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+/** Points columns that would create a status at the one the catalog already has by that name. */
+function withExistingStatuses(draft: Draft, statuses: readonly IssueStatusEntry[]): Draft {
+  const used = new Set(draft.middle.flatMap((c) => ("status_key" in c ? [c.status_key] : [])));
+  let changed = false;
+  const middle = draft.middle.map((column): DraftColumn => {
+    if ("status_key" in column) return column;
+    const name = column.new_name.toLowerCase();
+    const existing = statuses.find((e) => e.name.toLowerCase() === name);
+    if (!existing || isFixedWorkflowStatus(existing.key) || used.has(existing.key)) return column;
+    used.add(existing.key);
+    changed = true;
+    return { id: column.id, status_key: existing.key };
+  });
+  return changed ? { ...draft, middle } : draft;
+}
+
 function mappingPlanFrom(err: unknown): IssueWorkflowMappingPlan | null {
   if (!(err instanceof ApiError) || err.status !== 409 || !err.body || typeof err.body !== "object") return null;
   const body = err.body as { code?: unknown; plan?: IssueWorkflowMappingPlan };
@@ -237,7 +254,7 @@ export function WorkflowEditorPage({
     };
     // Re-seed only when the target changes or the saved row is refreshed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [saved?.updated_at, workflowId, seed?.id, template, catalog.activeStatuses.length]);
+  }, [saved?.updated_at, workflowId, seed?.id, template]);
 
   const [draft, setDraft] = useState<Draft>(baseline);
   const [mappingPlan, setMappingPlan] = useState<IssueWorkflowMappingPlan | null>(null);
@@ -245,6 +262,11 @@ export function WorkflowEditorPage({
   const [selected, setSelected] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   useEffect(() => setDraft(baseline), [baseline]);
+  // The catalog can load or change under an open draft; that must not re-seed it.
+  useEffect(
+    () => setDraft((d) => withExistingStatuses(d, catalog.activeStatuses)),
+    [baseline, catalog.activeStatuses],
+  );
 
   const dirty = !workflowId || !sameDraft(draft, baseline);
   const pending = createWorkflow.isPending || updateWorkflow.isPending;
@@ -375,7 +397,7 @@ export function WorkflowEditorPage({
   ];
   const current = listed.find((c) => c.id === selectedId) ?? listed[1]!;
   const nextOf = (column: DraftColumn, h: Handoff | undefined) =>
-    h?.next_status_key ?? workflowNextStatus(draftFlow, columnKey(column));
+    h?.next_status_key ?? workflowNextStatus(draftFlow, columnKey(column), catalog.categoryOf);
   const card = (column: DraftColumn) => {
     const key = "status_key" in column ? column.status_key : null;
     const optional = key === "backlog" || key === "blocked";
@@ -590,7 +612,7 @@ export function WorkflowEditorPage({
           off={isOff(current)}
           handoff={draft.handoffs[current.id]}
           flow={flow}
-          defaultNextLabel={columnLabel(workflowNextStatus(draftFlow, columnKey(current)))}
+          defaultNextLabel={columnLabel(workflowNextStatus(draftFlow, columnKey(current), catalog.categoryOf))}
           canEdit={canEdit}
           statusOptions={middleIds.has(current.id) ? addable : null}
           onReplaceStatus={(key) => replaceStatus(current, key)}
@@ -765,7 +787,7 @@ function StepCard({
               <span className="shrink-0">{t(($) => $.workflows.editor.card_hand_to)}</span>
               {actor && <ActorAvatar actorType={actor.type} actorId={actor.id} size="xs" profileLink={false} />}
               <span className="min-w-0 truncate text-foreground">{actor ? getActorName(actor.type, actor.id) : who}</span>
-              {handoff?.handler.type === "agent" && nextLabel && (
+              {(handoff?.handler.type === "agent" || handoff?.handler.type === "squad") && nextLabel && (
                 <span className="shrink-0 truncate">· {t(($) => $.workflows.editor.card_then, { status: nextLabel })}</span>
               )}
             </>

@@ -8,7 +8,6 @@ import { useQuery } from "@tanstack/react-query";
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
   useSensor,
   useSensors,
   type DragStartEvent,
@@ -28,7 +27,7 @@ import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
 import { propertyListOptions, useSetIssueProperty, useUnsetIssueProperty } from "@multica/core/properties";
 import { useWorkspaceId } from "@multica/core/hooks";
-import type { IssueGrouping } from "@multica/core/issues/stores/view-store";
+import type { IssueGrouping, StaticSortField } from "@multica/core/issues/stores/view-store";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { BoardColumn, BOARD_CARD_WIDTH, type BoardColumnGroup } from "./board-column";
 import { BoardWorkflowContext, type BoardWorkflowContextValue } from "./board-workflow-context";
@@ -56,9 +55,12 @@ import type {
   IssueGroupBranches,
   IssueGroupPageState,
 } from "../surface/use-issue-group-branches";
+import { SORT_LABEL_KEY } from "../utils/sort-label";
 import { useDragSettle } from "./use-drag-settle";
+import { createIssueDropAnimation, ISSUE_DRAG_OVERLAY_CLASS } from "./drag-drop-animation";
 import { useIssuePeekActions } from "../surface/peek-context";
 import { useBoardDragPan } from "./use-board-drag-pan";
+import { useRestoredScrollRef } from "../../platform";
 import { useT } from "../../i18n";
 import {
   type DragMoveUpdates,
@@ -74,6 +76,7 @@ import {
   getMoveUpdates,
   propertyGroupId,
   projectGroupId,
+  IssueCardPointerSensor,
 } from "../utils/drag-utils";
 import { useStatusLabel } from "../utils/status-label";
 
@@ -335,13 +338,12 @@ function BoardViewImpl({
     },
     [setIssuePropertyMutation, t, unsetIssuePropertyMutation],
   );
-  const sortFieldKey = sortBy === "created_at" ? "created" : sortBy;
   const sortPropertyId = propertyIdFromViewKey(sortBy);
   const sortLabel = sortBy !== "position"
     ? t(($) => $.board.ordered_by, {
         field: sortPropertyId
           ? workspaceProperties.find((p) => p.id === sortPropertyId)?.name ?? ""
-          : t(($) => $.display[`sort_${sortFieldKey}` as keyof typeof $.display]),
+          : t(($) => $.display[SORT_LABEL_KEY[sortBy as StaticSortField]]),
       })
     : null;
   const { getActorName } = useActorName();
@@ -483,6 +485,8 @@ function BoardViewImpl({
 
   // --- Drag state ---
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
+  const skipDropAnimationRef = useRef(false);
+  const dropAnimation = useMemo(() => createIssueDropAnimation(skipDropAnimationRef), []);
   const [pendingHandoff, setPendingHandoff] = useState<{
     issue: Issue;
     status: IssueStatus;
@@ -573,7 +577,7 @@ function BoardViewImpl({
   }
 
   const sensors = useSensors(
-    useSensor(PointerSensor, {
+    useSensor(IssueCardPointerSensor, {
       activationConstraint: { distance: 5 },
     })
   );
@@ -588,9 +592,20 @@ function BoardViewImpl({
   // #6700: drag empty board background with the left button to pan horizontally
   // (Trello/Linear). Card drags start on `[data-board-card]` and are ignored.
   const pan = useBoardDragPan<HTMLDivElement>();
+  // Tab-session scroll restoration (MUL-4741) for the horizontal column
+  // strip; each column's own vertical offset is restored by BoardColumn.
+  const restoreScrollRef = useRestoredScrollRef("board");
+  const attachScroller = useCallback(
+    (el: HTMLDivElement | null) => {
+      pan.ref.current = el;
+      restoreScrollRef(el);
+    },
+    [pan.ref, restoreScrollRef],
+  );
 
   const handleDragStart = useCallback(
     (event: DragStartEvent) => {
+      skipDropAnimationRef.current = false;
       isDraggingRef.current = true;
       const issue = issueMapRef.current.get(event.active.id as string) ?? null;
       setActiveIssue(issue);
@@ -641,8 +656,10 @@ function BoardViewImpl({
       isDraggingRef.current = false;
       setActiveIssue(null);
 
-      const resetColumns = () =>
+      const resetColumns = () => {
+        skipDropAnimationRef.current = true;
         setColumns(buildColumns(groupedIssues, groups, grouping, groupingOptionIds));
+      };
 
       if (!over) {
         resetColumns();
@@ -820,6 +837,7 @@ function BoardViewImpl({
   // column mirror resyncing with the cache afterwards — see the same handler in
   // list-view for the touch path that makes this routine (MUL-6240).
   const handleDragCancel = useCallback(() => {
+    skipDropAnimationRef.current = true;
     isDraggingRef.current = false;
     setActiveIssue(null);
     setColumns(buildColumns(groupedIssues, groups, grouping, groupingOptionIds));
@@ -836,13 +854,14 @@ function BoardViewImpl({
       onDragCancel={handleDragCancel}
     >
       <div
-        ref={pan.ref}
+        ref={attachScroller}
         onPointerDown={pan.onPointerDown}
         onPointerMove={pan.onPointerMove}
         onPointerUp={pan.onPointerUp}
         onPointerCancel={pan.onPointerCancel}
         onLostPointerCapture={pan.onLostPointerCapture}
         data-board-scroller=""
+        data-tab-scroll-root="board"
         className={cn(
           "flex flex-1 min-h-0 gap-4 overflow-x-auto p-2",
           // While a side peek is open, a trailing spacer as wide as the panel
@@ -920,9 +939,9 @@ function BoardViewImpl({
         )}
       </div>
 
-      <DragOverlay dropAnimation={null}>
+      <DragOverlay dropAnimation={dropAnimation}>
         {activeIssue ? (
-          <div style={{ width: BOARD_CARD_WIDTH }} className="rotate-1 cursor-grabbing opacity-90 shadow-lg shadow-black/10">
+          <div style={{ width: BOARD_CARD_WIDTH }} className={ISSUE_DRAG_OVERLAY_CLASS}>
             <BoardCardContent
               issue={activeIssue}
               childProgress={childProgressMap.get(activeIssue.id)}

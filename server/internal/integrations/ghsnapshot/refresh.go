@@ -43,6 +43,11 @@ var (
 	// PRs watched by a "wake on merge conflict" rule stay in the sweep even
 	// when decided, re-fetched once their snapshot is older than this.
 	defaultWatchTTL = 5 * time.Minute
+	// PRs watched by an active "wake on checks finished" rule (issue or chat)
+	// use a tighter TTL and sweep cadence so missed webhooks or rate-limit
+	// pauses never stall --until-pr checks for tens of minutes.
+	defaultChecksWatchTTL = 2 * time.Minute
+	defaultWatchInterval  = time.Minute
 	// After a merge into a repository, GitHub recomputes the other PRs'
 	// mergeability asynchronously and may still answer with the old verdict
 	// at first, so watched PRs are fetched after each of these delays.
@@ -63,16 +68,18 @@ type Manager struct {
 	pool         TxBeginner
 	onApplied    func(ctx context.Context, prID pgtype.UUID)
 
-	concurrency   int
-	viewTTL       time.Duration
-	sweepTTL      time.Duration
-	sweepInterval time.Duration
-	sweepMaxRows  int32
-	watchTTL      time.Duration
-	mergeDelays   []time.Duration
-	chaseBackoff  []time.Duration
-	now           func() time.Time
-	jitter        func() time.Duration
+	concurrency    int
+	viewTTL        time.Duration
+	sweepTTL       time.Duration
+	sweepInterval  time.Duration
+	sweepMaxRows   int32
+	watchTTL       time.Duration
+	checksWatchTTL time.Duration
+	watchInterval  time.Duration
+	mergeDelays    []time.Duration
+	chaseBackoff   []time.Duration
+	now            func() time.Time
+	jitter         func() time.Duration
 	// fetch is the snapshot fetcher, a seam so tests can drive the queue /
 	// backoff without a live GitHub. Defaults to FetchPRSnapshot.
 	fetch func(ctx context.Context, c *Client, installationID int64, owner, repo string, number int32) (*PRSnapshot, error)
@@ -88,8 +95,9 @@ type Manager struct {
 	// this cursor and wraps, preventing a fixed first page from starving later
 	// installations when early addresses repeatedly fail.
 	sweepAfter address
-	// The same rotation for the conflict-watch sweep.
-	watchAfter address
+	// The same rotation for the conflict-watch and checks-watch sweeps.
+	watchAfter       address
+	checksWatchAfter address
 	// Secondary rate limits are scoped to the installation whose token incurred
 	// them. One customer must never pause every other installation.
 	rateUntil map[int64]time.Time
@@ -103,28 +111,30 @@ type Manager struct {
 // realtime PR update. Passing a nil client yields a disabled (no-op) manager.
 func NewManager(client *Client, queries *db.Queries, pool TxBeginner, onApplied func(ctx context.Context, prID pgtype.UUID)) *Manager {
 	return &Manager{
-		client:        client,
-		queries:       queries,
-		readSelector:  dbreader.NewPrimaryOnly(queries),
-		pool:          pool,
-		onApplied:     onApplied,
-		concurrency:   defaultConcurrency,
-		viewTTL:       defaultViewTTL,
-		sweepTTL:      defaultSweepTTL,
-		sweepInterval: defaultSweepInterval,
-		sweepMaxRows:  defaultSweepMaxRows,
-		watchTTL:      defaultWatchTTL,
-		mergeDelays:   defaultMergeWatchDelays,
-		chaseBackoff:  defaultChaseBackoff,
-		now:           time.Now,
-		jitter:        func() time.Duration { return time.Duration(rand.Int63n(int64(250 * time.Millisecond))) },
-		fetch:         FetchPRSnapshot,
-		queue:         make(chan address, queueBuffer),
-		active:        map[address]bool{},
-		inFlight:      map[address]bool{},
-		trailing:      map[address]bool{},
-		attempts:      map[address]int{},
-		rateUntil:     map[int64]time.Time{},
+		client:         client,
+		queries:        queries,
+		readSelector:   dbreader.NewPrimaryOnly(queries),
+		pool:           pool,
+		onApplied:      onApplied,
+		concurrency:    defaultConcurrency,
+		viewTTL:        defaultViewTTL,
+		sweepTTL:       defaultSweepTTL,
+		sweepInterval:  defaultSweepInterval,
+		sweepMaxRows:   defaultSweepMaxRows,
+		watchTTL:       defaultWatchTTL,
+		checksWatchTTL: defaultChecksWatchTTL,
+		watchInterval:  defaultWatchInterval,
+		mergeDelays:    defaultMergeWatchDelays,
+		chaseBackoff:   defaultChaseBackoff,
+		now:            time.Now,
+		jitter:         func() time.Duration { return time.Duration(rand.Int63n(int64(250 * time.Millisecond))) },
+		fetch:          FetchPRSnapshot,
+		queue:          make(chan address, queueBuffer),
+		active:         map[address]bool{},
+		inFlight:       map[address]bool{},
+		trailing:       map[address]bool{},
+		attempts:       map[address]int{},
+		rateUntil:      map[int64]time.Time{},
 	}
 }
 
@@ -159,6 +169,9 @@ func (m *Manager) Start(ctx context.Context) {
 		go m.worker(ctx)
 	}
 	go m.sweepLoop(ctx)
+	if m.watchInterval > 0 {
+		go m.watchSweepLoop(ctx)
+	}
 }
 
 // Enqueue schedules a refresh for a PR address. Repeated events coalesce, but
@@ -272,6 +285,7 @@ func (m *Manager) process(ctx context.Context, addr address) {
 
 	anyApplied := false
 	anyOpenApplied := false
+	anyOpenUnapplied := false
 	for _, row := range rows {
 		applied, err := m.applySnapshot(ctx, row.ID, snap)
 		if err != nil {
@@ -279,6 +293,9 @@ func (m *Manager) process(ctx context.Context, addr address) {
 			continue
 		}
 		if !applied {
+			if row.State == "open" || row.State == "draft" {
+				anyOpenUnapplied = true
+			}
 			continue
 		}
 		anyApplied = true
@@ -290,14 +307,14 @@ func (m *Manager) process(ctx context.Context, addr address) {
 		}
 	}
 
-	// Chase only while the snapshot is undecided AND a write proved that an
-	// open PR row still exists on this head. If the head advanced, its webhook
-	// owns the next refresh; if the row was removed, nothing remains to refresh.
-	// Replica lag can instead make rows empty; that omission is recovered by the
-	// bounded TTL sweep for an open/draft PR or by a later page-view refresh, so
-	// it must not start a chase without having observed current row state. A
-	// logged write failure is likewise left to those later triggers.
-	if anyApplied && anyOpenApplied && !snap.Decided() {
+	// Chase while the snapshot is undecided AND a write proved an open PR row
+	// still exists on this head. Also chase (bounded) when an open/draft PR row
+	// rejected the write due to a head-SHA mismatch and no trailing webhook
+	// refresh is already queued: right after pull_request.synchronize, GitHub's
+	// REST API can transiently return the previous head SHA, so without a chase
+	// the PR would wait for the next sweep. If the row was deleted or closed,
+	// the next fetch observes empty/closed rows and stops immediately.
+	if (anyApplied && anyOpenApplied && !snap.Decided()) || (!anyApplied && anyOpenUnapplied && !m.hasTrailing(addr)) {
 		m.scheduleChase(addr)
 	} else {
 		m.mu.Lock()
@@ -491,6 +508,12 @@ func (m *Manager) scheduleRetry(addr address, delay time.Duration) {
 	})
 }
 
+func (m *Manager) hasTrailing(addr address) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.trailing[addr]
+}
+
 func (m *Manager) sweepLoop(ctx context.Context) {
 	ticker := time.NewTicker(m.sweepInterval)
 	defer ticker.Stop()
@@ -499,21 +522,46 @@ func (m *Manager) sweepLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			m.sweepOnce(ctx)
+			m.sweepUndecided(ctx)
+		}
+	}
+}
+
+// watchSweepLoop runs on a tighter cadence than the platform-wide undecided
+// sweep so PRs watched by active wakeup rules (--until-pr checks / conflicts)
+// recover within minutes rather than waiting for the 10-minute general sweep.
+func (m *Manager) watchSweepLoop(ctx context.Context) {
+	ticker := time.NewTicker(m.watchInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.sweepWatchedOnce(ctx)
 		}
 	}
 }
 
 func (m *Manager) sweepOnce(ctx context.Context) {
 	m.sweepUndecided(ctx)
-	m.sweepConflictWatched(ctx)
+	m.sweepWatchedOnce(ctx)
 }
 
-// sweepUndecided enqueues a refresh for every open PR whose snapshot is both
-// stale and undecided. Bounded by sweepMaxRows. This is the safety net for an
-// undecided PR whose base branch changes without a pull_request webhook, and
-// for any webhook that was dropped during a deploy.
+func (m *Manager) sweepWatchedOnce(ctx context.Context) {
+	m.sweepConflictWatched(ctx)
+	m.sweepChecksWatched(ctx)
+}
+
+// sweepUndecided enqueues a refresh for every open PR whose snapshot is
+// missing for the current head or both stale and undecided. Bounded by
+// sweepMaxRows. This is the safety net for an undecided PR whose base branch
+// changes without a pull_request webhook, and for any webhook or refresh that
+// was dropped during a rate limit or deploy.
 func (m *Manager) sweepUndecided(ctx context.Context) {
+	if m.queries == nil {
+		return
+	}
 	m.mu.Lock()
 	after := m.sweepAfter
 	m.mu.Unlock()
@@ -550,6 +598,9 @@ func (m *Manager) sweepUndecided(ctx context.Context) {
 // fresh. A decided snapshot leaves the undecided sweep, yet a direct push to
 // the base branch can make it conflicting with no event for the PR itself.
 func (m *Manager) sweepConflictWatched(ctx context.Context) {
+	if m.queries == nil {
+		return
+	}
 	m.mu.Lock()
 	after := m.watchAfter
 	m.mu.Unlock()
@@ -570,6 +621,40 @@ func (m *Manager) sweepConflictWatched(ctx context.Context) {
 		last := rows[len(rows)-1]
 		m.mu.Lock()
 		m.watchAfter = address{InstallationID: last.InstallationID, Owner: last.RepoOwner, Repo: last.RepoName, Number: last.PrNumber}
+		m.mu.Unlock()
+	}
+	for _, r := range rows {
+		m.Enqueue(r.InstallationID, r.RepoOwner, r.RepoName, r.PrNumber)
+	}
+}
+
+// sweepChecksWatched keeps the PRs watched by an active "checks finished"
+// wakeup (issue or chat) fresh on a tighter TTL, covering missed CI webhooks,
+// rate-limit pauses, zero-check initial snapshots, and same-head re-runs.
+func (m *Manager) sweepChecksWatched(ctx context.Context) {
+	if m.queries == nil {
+		return
+	}
+	m.mu.Lock()
+	after := m.checksWatchAfter
+	m.mu.Unlock()
+
+	rows, err := m.queries.ListStaleChecksWatchedGitHubPRs(ctx, db.ListStaleChecksWatchedGitHubPRsParams{
+		OlderThan:           tsFromTime(m.now().Add(-m.checksWatchTTL)),
+		AfterInstallationID: after.InstallationID,
+		AfterRepoOwner:      after.Owner,
+		AfterRepoName:       after.Repo,
+		AfterPrNumber:       after.Number,
+		MaxRows:             m.sweepMaxRows,
+	})
+	if err != nil {
+		slog.Warn("ghsnapshot: checks-watch sweep query failed", "err", err.Error())
+		return
+	}
+	if len(rows) > 0 {
+		last := rows[len(rows)-1]
+		m.mu.Lock()
+		m.checksWatchAfter = address{InstallationID: last.InstallationID, Owner: last.RepoOwner, Repo: last.RepoName, Number: last.PrNumber}
 		m.mu.Unlock()
 	}
 	for _, r := range rows {

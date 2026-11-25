@@ -14,6 +14,28 @@
 
 const encode = (id: string) => encodeURIComponent(id);
 
+declare const issueRouteRefBrand: unique symbol;
+
+/**
+ * The `{segment}` of an `/{ws}/issues/{segment}` link: the issue's identifier
+ * (`MUL-123`), or its UUID only when the identifier is unknown. The issue page
+ * rewrites a UUID address to the identifier once the issue loads, and on web
+ * that rewrite mounts the page and refetches the issue a second time.
+ *
+ * Branded so a bare `issue.id` cannot reach `issueDetail`: build one with
+ * `issueRouteRef`, or with `useIssueRouteRef` (`@multica/core/issues/canonical-id`)
+ * when only the UUID is at hand.
+ */
+export type IssueRouteRef = string & { readonly [issueRouteRefBrand]: true };
+
+/**
+ * The route segment for an issue. `identifier` is a required key so a caller
+ * that has none says so with `identifier: null`.
+ */
+export function issueRouteRef(issue: { id: string; identifier: string | null | undefined }): IssueRouteRef {
+  return (issue.identifier || issue.id) as IssueRouteRef;
+}
+
 /**
  * `?focus=` token that scrolls the agent's General settings to its
  * conversation-starters editor and flashes it. Lives here because it is URL
@@ -41,7 +63,12 @@ function workspaceScoped(slug: string) {
     root: () => `${ws}/issues`,
     usage: () => `${ws}/usage`,
     issues: () => `${ws}/issues`,
-    issueDetail: (id: string) => `${ws}/issues/${encode(id)}`,
+    issueDetail: (ref: IssueRouteRef) => `${ws}/issues/${encode(ref)}`,
+    // Opens the newest upload of the deliverable named `filename` on this
+    // issue. Addresses the file by name, not by attachment id, so the link
+    // keeps pointing at the latest version as new ones are uploaded.
+    issueDeliverable: (ref: IssueRouteRef, filename: string) =>
+      `${ws}/issues/${encode(ref)}/deliverables/${encode(filename)}`,
     projects: () => `${ws}/projects`,
     projectDetail: (id: string) => `${ws}/projects/${encode(id)}`,
     autopilots: () => `${ws}/autopilots`,
@@ -55,16 +82,13 @@ function workspaceScoped(slug: string) {
     // Step 3: the agent exists; offer its first uses.
     newAgentDone: (agentId: string) =>
       `${ws}/agents/new/done/${encode(agentId)}`,
-    newAgentAi: () => `${ws}/agents/new/ai`,
     // One creation conversation. It is a durable object, not a step of the
-    // route above: it survives leaving the studio and is resumed later, so it
-    // owns an address instead of being a query param on the "start one" screen.
+    // routes above: it survives leaving the studio and is resumed later, so it
+    // owns an address instead of being a query param on the screen that started it.
     newAgentAiSession: (sessionId: string) =>
       `${ws}/agents/new/ai/${encode(sessionId)}`,
     agentDetail: (id: string) => `${ws}/agents/${encode(id)}`,
-    // Deep link behind "customize" in a chat's empty state: the agent's
-    // General settings, scrolled to the conversation starters that produced
-    // the buttons the viewer just looked at.
+    // The agent's General settings, scrolled to its conversation starters.
     agentConversationStarters: (id: string) =>
       `${ws}/agents/${encode(id)}?view=general&focus=${AGENT_FOCUS_CONVERSATION_STARTERS}`,
     memberDetail: (id: string) => `${ws}/members/${encode(id)}`,
@@ -83,8 +107,14 @@ function workspaceScoped(slug: string) {
     runtimeDetail: (id: string) => `${ws}/runtimes/${encode(id)}`,
     runtimeSettings: (machineId: string, runtimeId: string) =>
       `${ws}/runtimes/${encode(machineId)}/runtime/${encode(runtimeId)}`,
+    docs: () => `${ws}/docs`,
+    docDetail: (id: string) => `${ws}/docs/${encode(id)}`,
+    docHistory: (id: string) => `${ws}/docs/${encode(id)}/history`,
+    docFolder: (id: string) => `${ws}/docs/folders/${encode(id)}`,
     skills: () => `${ws}/skills`,
     skillDetail: (id: string) => `${ws}/skills/${encode(id)}`,
+    apps: () => `${ws}/apps`,
+    appDetail: (toolkitSlug: string) => `${ws}/apps/${encode(toolkitSlug)}`,
     settings: () => `${ws}/settings`,
     attachmentPreview: (id: string) => `${ws}/attachments/${encode(id)}/preview`,
   };

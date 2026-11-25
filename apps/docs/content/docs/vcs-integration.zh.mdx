@@ -99,6 +99,10 @@ Multica 不提供跳过证书校验的选项，因为连接请求会携带你的
 </Tab>
 </Tabs>
 
+<Callout type="info">
+GitLab 管理员也可以配置实例级 **System Hook**：使用同一 Webhook 地址与密钥，启用 **Merge request events**。Multica 只处理当前工作区 **设置 → 代码 → 代码仓库** 中列出的、属于已连接 GitLab 实例且可被连接令牌读取的仓库；其他系统事件会被忽略。代码仓库可以使用 HTTPS 或 SSH 克隆地址。System Hook 只发送 MR 事件，不发送 Pipeline 事件；如果需要 CI 状态，仍需保留项目级或群组级 Pipeline Webhook，二者可以同时配置。这样不必逐项目注册，但需要 GitLab 管理员权限。返回 `202` 仅代表请求已被接收，不保证任务已关联或改状态；接入前已合并的 MR 不会自动补处理。
+</Callout>
+
 Multica 会用存储的密钥校验每次投递，因此没有匹配密钥的 Webhook 会被拒绝。
 
 ## 镜像的内容

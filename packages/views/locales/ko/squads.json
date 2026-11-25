@@ -27,13 +27,7 @@
     "success": "스쿼드를 보관했습니다"
   },
   "name_editor": {
-    "title": "스쿼드 이름 변경",
-    "placeholder": "스쿼드 이름",
-    "required": "이름을 입력하세요",
-    "cancel": "취소",
-    "save": "저장",
-    "saved": "저장했습니다",
-    "save_failed": "저장하지 못했습니다"
+    "placeholder": "스쿼드 이름"
   },
   "add_member_dialog": {
     "title": "멤버 추가",
@@ -53,12 +47,9 @@
     "empty": "역할 추가...",
     "placeholder": "역할(예: 리뷰어)"
   },
-  "description_dialog": {
-    "title": "설명 수정",
-    "placeholder_empty": "설명 추가",
-    "cancel": "취소",
-    "responsibility_placeholder": "이 스쿼드는 무엇을 담당하나요?",
-    "save": "저장"
+  "description_editor": {
+    "empty": "설명 추가",
+    "placeholder": "이 스쿼드는 무엇을 담당하나요?"
   },
   "members_tab": {
     "section_title": "멤버",
@@ -102,6 +93,21 @@
     "visibility": "공개 범위",
     "visibility_workspace": "워크스페이스"
   },
+  "handoff": {
+    "section_title": "협업 방식",
+    "mode_leader_title": "리더가 배정",
+    "mode_leader_description": "모든 단계가 리더 {{leader}}에게 돌아가고, 리더가 다음 담당을 정합니다. 기존 스쿼드의 기본값입니다.",
+    "mode_direct_title": "멤버가 직접 인계",
+    "mode_direct_description": "리더는 첫 단계 배정과 예외 처리를 맡습니다. 멤버가 다음 단계를 직접 정하며, 리뷰나 사람 확인을 위한 인계는 리더를 깨우지 않습니다.",
+    "guard_rounds": "리뷰 왕복 최대 {{limit}}회",
+    "guard_daily": "태스크당 하루 최대 {{limit}}회 인계",
+    "guard_failed": "실행 실패 → 리더에게 되돌림",
+    "guard_no_next": "다음 단계 없음 → 리더에게 되돌림",
+    "saved": "협업 방식이 업데이트되었습니다",
+    "brief_title": "멤버가 실제로 받는 내용",
+    "brief_hint": "이 스쿼드의 태스크에서 실행할 때마다 추가됩니다",
+    "brief_empty": "아직 에이전트 멤버가 없습니다"
+  },
   "toasts": {
     "member_added": "멤버를 추가했습니다",
     "member_add_failed": "멤버를 추가하지 못했습니다",
@@ -112,18 +118,19 @@
     "leader_updated": "리더를 업데이트했습니다",
     "leader_update_failed": "리더를 업데이트하지 못했습니다",
     "archive_failed": "스쿼드를 보관하지 못했습니다",
-    "instructions_saved": "지침을 저장했습니다"
+    "instructions_saved": "지침을 저장했습니다",
+    "update_failed": "저장하지 못했습니다"
   },
   "profile_card": {
     "unavailable": "스쿼드를 사용할 수 없습니다",
-    "detail_link": "자세히 →",
+    "detail_link": "자세히 보기 →",
     "archived": "보관됨",
     "member_count_other": "멤버 {{count}}명",
     "members_section": "멤버",
     "more_members_other": "+{{count}}명 더 보기"
   },
   "instructions_tab": {
-    "description": "리더는 이 스쿼드에 할당된 태스크를 처리할 때마다 이 지침을 읽습니다.",
+    "description": "리더와 모든 에이전트 멤버는 이 스쿼드에 할당된 태스크를 처리할 때마다 이 지침을 읽습니다.",
     "unsaved_changes": "저장하지 않은 변경사항",
     "save_button": "저장",
     "placeholder": "예: 항상 실패하는 테스트부터 작성합니다. 커밋은 작고 독립적으로 유지합니다."
@@ -132,7 +139,6 @@
     "mine": "내 스쿼드",
     "all": "전체 스쿼드"
   },
-  "toolbar": {},
   "intro": {
     "title": "에이전트를 스쿼드로 묶어 팀처럼 일하게 하세요",
     "description": "태스크를 스쿼드에 할당하면 리더 에이전트가 내용을 읽고, 역할에 맞는 멤버에게 다음 단계를 맡기고, 목표를 이룰 때까지 챙깁니다. 소통할 창구는 하나뿐입니다.",

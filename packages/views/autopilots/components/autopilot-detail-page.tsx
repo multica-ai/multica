@@ -4,7 +4,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import {
   Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil,
   Ban, ChevronDown, ChevronRight, MoreHorizontal, Link2, ArrowUpRight, FilePlus2,
-  Webhook, RotateCw, Server, FileQuestion, FileText,
+  Webhook, RotateCw, Server, FileQuestion, FileText, Square, Archive,
 } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotDetailOptions, autopilotRunsOptions, autopilotRunOptions } from "@multica/core/autopilots/queries";
@@ -19,6 +19,7 @@ import {
 import { buildAutopilotWebhookUrl } from "@multica/core/autopilots";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useIssueRouteRef } from "@multica/core/issues/canonical-id";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
@@ -57,6 +58,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { ScheduleEditor } from "./schedule-editor/schedule-editor";
 import { WebhookUrlField } from "./webhook-url-field";
+import { WebhookEventFilterSummary } from "./webhook-event-filter-section";
 import { getDefaultScheduleConfig, type ScheduleConfig } from "./schedule-editor/model";
 import { browserTimezone } from "../../common/timezone-select";
 import { cronFields, parseCron, toCron } from "./schedule-editor/cron-mapping";
@@ -75,6 +77,7 @@ import { ReadonlyContent } from "../../editor";
 import { TranscriptButton } from "../../common/task-transcript";
 import { AutopilotDialog } from "./autopilot-dialog";
 import { EditScheduleTriggerDialog } from "./edit-schedule-trigger-dialog";
+import { EditWebhookTriggerDialog } from "./edit-webhook-trigger-dialog";
 import { useRunAutopilotNow } from "./use-run-autopilot-now";
 import { useRegisterCommandBarContext } from "../../search/register-context";
 import { WebhookPayloadPreview } from "./webhook-payload-preview";
@@ -156,9 +159,53 @@ function WebhookPayloadSlot({ autopilotId, runId }: { autopilotId: string; runId
   return <WebhookPayloadPreview payload={data.trigger_payload} />;
 }
 
-function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: string; agentName: string }) {
+// Stops a run_only run by cancelling its task. The server then fails the run
+// and broadcasts autopilot:run_done, which refetches this list, so the row
+// needs no local status patch.
+function StopRunButton({ taskId }: { taskId: string }) {
+  const { t } = useT("autopilots");
+  const [stopping, setStopping] = useState(false);
+
+  const stop = async () => {
+    if (stopping) return;
+    setStopping(true);
+    try {
+      await api.cancelTaskById(taskId);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.run.stop_failed));
+      setStopping(false);
+    }
+  };
+
+  return (
+    <IconButton
+      size="icon-sm"
+      variant="ghost"
+      className="shrink-0 text-muted-foreground hover:text-destructive"
+      onClick={stop}
+      disabled={stopping}
+      aria-busy={stopping}
+      label={t(($) => $.run.stop)}
+    >
+      {stopping ? <Loader2 className="size-3.5 animate-spin" /> : <Square className="size-3 fill-current" />}
+    </IconButton>
+  );
+}
+
+function RunRow({
+  run,
+  agentId,
+  agentName,
+  canStop = false,
+}: {
+  run: AutopilotRun;
+  agentId: string;
+  agentName: string;
+  canStop?: boolean;
+}) {
   const { t, i18n } = useT("autopilots");
   const wsPaths = useWorkspacePaths();
+  const issueRef = useIssueRouteRef(useWorkspaceId(), run.issue_id ?? "");
   const status = (RUN_VISUAL[run.status as RunStatus] ? (run.status as RunStatus) : "issue_created");
   const visual = RUN_VISUAL[status];
   const StatusIcon = visual.icon;
@@ -222,6 +269,9 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
           }
         />
       )}
+      {canStop && run.task_id && !run.issue_id && run.status === "running" && (
+        <StopRunButton taskId={run.task_id} />
+      )}
     </>
   );
 
@@ -229,7 +279,7 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
 
   if (run.issue_id) {
     return (
-      <AppLink href={wsPaths.issueDetail(run.issue_id)} className={cn(rowClass, "cursor-pointer")}>
+      <AppLink href={wsPaths.issueDetail(issueRef)} className={cn(rowClass, "cursor-pointer")}>
         {content}
       </AppLink>
     );
@@ -242,10 +292,12 @@ function RunHistoryList({
   runs,
   agentId,
   agentName,
+  canStop,
 }: {
   runs: AutopilotRun[];
   agentId: string;
   agentName: string;
+  canStop: boolean;
 }) {
   const visibleRuns = runs.filter((run) => run.status !== "skipped");
   const skippedRuns = runs.filter((run) => run.status === "skipped");
@@ -253,7 +305,7 @@ function RunHistoryList({
   return (
     <ObjectSectionCard>
       {visibleRuns.map((run) => (
-        <RunRow key={run.id} run={run} agentId={agentId} agentName={agentName} />
+        <RunRow key={run.id} run={run} agentId={agentId} agentName={agentName} canStop={canStop} />
       ))}
       {skippedRuns.length > 0 && (
         <SkippedRunsGroup runs={skippedRuns} agentId={agentId} agentName={agentName} />
@@ -389,18 +441,25 @@ export function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: Autopi
     </IconButton>
   ) : null;
 
-  // Schedule rows only: cron and timezone are the fields this dialog edits, and
-  // the API rejects them on any other kind. It rides alongside Delete so the
-  // row that states a schedule is also the row that can change it — without it
-  // an autopilot with two schedules has no editable schedule at all (MUL-7478).
+  // Each schedule and webhook row edits itself, riding alongside Delete so the
+  // row that states a trigger is also the row that can change it. The
+  // autopilot dialog speaks for one schedule and for a first-and-only webhook;
+  // without these, two schedules (MUL-7478), a webhook added beside a schedule
+  // or a second webhook had no editor at all. Api rows have nothing to edit.
+  const editLabel =
+    trigger.kind === "schedule"
+      ? t(($) => $.trigger_row.edit_schedule)
+      : isWebhook
+        ? t(($) => $.trigger_row.edit_webhook)
+        : null;
   const editButton =
-    canWrite && trigger.kind === "schedule" ? (
+    canWrite && editLabel ? (
       <IconButton
         size="icon-sm"
         variant="ghost"
         className="shrink-0 text-muted-foreground"
         onClick={() => setEditOpen(true)}
-        label={t(($) => $.trigger_row.edit_schedule)}
+        label={editLabel}
       >
         <Pencil className="size-3.5" />
       </IconButton>
@@ -445,7 +504,7 @@ export function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: Autopi
               })}
             </span>
           )}
-          {editButton}
+          {!showWebhookUrlRow && editButton}
           {!showWebhookUrlRow && deleteButton}
         </div>
       </div>
@@ -474,10 +533,16 @@ export function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: Autopi
                     <RotateCw className={cn("h-3.5 w-3.5 text-muted-foreground", rotateToken.isPending && "animate-spin")} />
                   </IconButton>
                 )}
+                {editButton}
                 {deleteButton}
               </>
             }
           />
+        </div>
+      )}
+      {isWebhook && (
+        <div className="mt-1.5 pl-6">
+          <WebhookEventFilterSummary filters={trigger.event_filters ?? []} />
         </div>
       )}
       <AlertDialog open={confirmOpen} onOpenChange={(v) => { if (!v && !deleting) setConfirmOpen(false); }}>
@@ -504,12 +569,21 @@ export function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: Autopi
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      <EditScheduleTriggerDialog
-        open={editOpen}
-        onOpenChange={setEditOpen}
-        autopilotId={autopilotId}
-        trigger={trigger}
-      />
+      {isWebhook ? (
+        <EditWebhookTriggerDialog
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          autopilotId={autopilotId}
+          trigger={trigger}
+        />
+      ) : (
+        <EditScheduleTriggerDialog
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          autopilotId={autopilotId}
+          trigger={trigger}
+        />
+      )}
       <AlertDialog open={rotateOpen} onOpenChange={(v) => { if (!v && !rotateToken.isPending) setRotateOpen(false); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -1008,7 +1082,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   const segments = [{ href: wsPaths.autopilots(), label: tLayout(($) => $.panels.autopilots.list) }];
 
   const shell = (leaf: ReactNode, children: ReactNode) => (
-    <ObjectPage layoutId={LAYOUT_ID} segments={segments} leaf={leaf}>
+    <ObjectPage type="autopilot" layoutId={LAYOUT_ID} segments={segments} leaf={leaf}>
       {children}
     </ObjectPage>
   );
@@ -1086,6 +1160,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
 
   return (
     <ObjectPage
+      type="autopilot"
       layoutId={LAYOUT_ID}
       segments={segments}
       leaf={<span className="min-w-0 truncate">{autopilot.title}</span>}
@@ -1170,6 +1245,23 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
             )}
           </div>
         )}
+        {autopilot.pause_reason === "project_archived" && (
+          <div
+            role="status"
+            className="flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-caption text-muted-foreground"
+          >
+            <Archive className="size-3.5 shrink-0" />
+            <span className="flex-1">{t(($) => $.detail.paused_project_archived)}</span>
+            {autopilot.project_id && (
+              <AppLink
+                href={wsPaths.projectDetail(autopilot.project_id)}
+                className="font-medium underline underline-offset-2"
+              >
+                {t(($) => $.detail.open_project)}
+              </AppLink>
+            )}
+          </div>
+        )}
 
         <ObjectIdentity
           media={<ObjectIconMark icon={summary.icon} />}
@@ -1234,6 +1326,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
               runs={runs}
               agentId={autopilot.assignee_id}
               agentName={getActorName(autopilot.assignee_type, autopilot.assignee_id)}
+              canStop={canWrite}
             />
           )}
         </ObjectSection>

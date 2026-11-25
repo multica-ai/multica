@@ -136,6 +136,12 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 			r.Header.Del("X-Agent-ID")
 			r.Header.Del("X-Task-ID")
 
+			// The user identity is server-set too. Every user-credential
+			// branch below stamps it, but the mdt_ branch does not, so a
+			// client value would otherwise reach handlers that read it as
+			// the caller (requestUserID).
+			r.Header.Del("X-User-ID")
+
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
 				slog.Debug("daemon_auth: missing authorization header", "path", r.URL.Path)
@@ -279,6 +285,10 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				}
 				pat, err := queries.GetPersonalAccessTokenByHash(r.Context(), hash)
 				if err != nil {
+					if r.Context().Err() == context.Canceled && errors.Is(err, context.Canceled) {
+						w.WriteHeader(StatusClientClosedRequest)
+						return
+					}
 					slog.Warn("daemon_auth: invalid PAT", "path", r.URL.Path, "error", err)
 					writeError(w, http.StatusUnauthorized, "invalid token")
 					return

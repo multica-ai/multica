@@ -1,12 +1,13 @@
-import { act, fireEvent } from "@testing-library/react";
+import { act, fireEvent, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { DEFAULT_APPEARANCE, useAppearanceStore } from "@multica/core/appearance";
 import { SidebarProvider } from "@multica/ui/components/ui/sidebar";
 import { renderWithI18n } from "../test/i18n";
 import { AppShellProvider, useAppShell } from "./app-shell-context";
 import { ListColumn } from "./list-column";
 
 vi.mock("../navigation", () => ({
-  useNavigation: () => ({ pathname: "/acme/inbox" }),
+  useNavigation: () => ({ pathname: "/acme/chat" }),
 }));
 
 let shell: ReturnType<typeof useAppShell> = null;
@@ -14,6 +15,9 @@ function Reader() {
   shell = useAppShell();
   return null;
 }
+
+/** No stored width: the theme's, or 280px when it sets none. */
+const UNSTORED_SIDEBAR_WIDTH = "clamp(200px, var(--sidebar-panel-width, 280px), 320px)";
 
 describe("ListColumn", () => {
   it("collapses the list column from its edge, like the space panel", () => {
@@ -61,7 +65,7 @@ describe("ListColumn", () => {
     expect(localStorage.getItem("list_column_width")).toBe("480");
     expect(localStorage.getItem("sidebar_width")).toBeNull();
     expect(wrapper.style.getPropertyValue("--list-column-width")).toBe("480px");
-    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("240px");
+    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe(UNSTORED_SIDEBAR_WIDTH);
   });
 
   it("restores a stored list width within its bounds", () => {
@@ -103,7 +107,7 @@ describe("ListColumn", () => {
         </SidebarProvider>,
       );
       const column = container.querySelector("[data-slot='list-column']");
-      act(() => shell!.requestPeek("inbox"));
+      act(() => shell!.requestPeek("chat"));
       act(() => vi.advanceTimersByTime(200));
       expect(column).not.toHaveAttribute("inert");
       expect(column).toHaveClass("w-0");
@@ -114,6 +118,67 @@ describe("ListColumn", () => {
       expect(container.querySelector("[data-slot='list-column-peek']")).toBeNull();
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  it("keeps the list visible while it collapses, so the edge clips it instead of a fade", async () => {
+    const { container, rerender } = renderWithI18n(<ListColumn>list</ListColumn>);
+    rerender(<ListColumn collapsed>list</ListColumn>);
+    const column = container.querySelector<HTMLElement>("[data-slot='list-column']")!;
+    const inner = column.firstElementChild as HTMLElement;
+    expect(column).toHaveClass("w-0", "overflow-hidden");
+    // Motion applies instant transitions on its next frame.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(inner.style.opacity).toBe("1");
+    expect(inner).not.toHaveClass("pointer-events-none");
+  });
+
+  it("keeps floating through the peek exit, then tucks back once it has slid out", async () => {
+    // Real timers: Motion's frame loop has to run for the exit to finish.
+    const { container } = renderWithI18n(
+      <SidebarProvider>
+        <AppShellProvider>
+          <Reader />
+          <ListColumn collapsed>list</ListColumn>
+        </AppShellProvider>
+      </SidebarProvider>,
+    );
+    const column = container.querySelector<HTMLElement>("[data-slot='list-column']")!;
+    const inner = column.firstElementChild as HTMLElement;
+    act(() => shell!.requestPeek("chat"));
+    await waitFor(() => expect(column).not.toHaveClass("overflow-hidden"));
+
+    act(() => shell!.closePeek());
+    // The same commit that ends the peek still floats the column.
+    expect(column).not.toHaveClass("overflow-hidden");
+    expect(inner).toHaveClass("pointer-events-none");
+
+    await waitFor(() => expect(column).toHaveClass("overflow-hidden"));
+    expect(inner).not.toHaveClass("pointer-events-none");
+    await waitFor(() => expect(inner.style.opacity).toBe("1"));
+  });
+
+  it("tucks back at once under reduced motion", () => {
+    useAppearanceStore.setState({ ...DEFAULT_APPEARANCE, reduceMotion: true });
+    vi.useFakeTimers();
+    try {
+      const { container } = renderWithI18n(
+        <SidebarProvider>
+          <AppShellProvider>
+            <Reader />
+            <ListColumn collapsed>list</ListColumn>
+          </AppShellProvider>
+        </SidebarProvider>,
+      );
+      const column = container.querySelector<HTMLElement>("[data-slot='list-column']")!;
+      act(() => shell!.requestPeek("chat"));
+      act(() => vi.advanceTimersByTime(200));
+      act(() => shell!.closePeek());
+      expect(column).toHaveClass("overflow-hidden");
+      expect(column.firstElementChild).not.toHaveClass("pointer-events-none");
+    } finally {
+      vi.useRealTimers();
+      useAppearanceStore.setState({ ...DEFAULT_APPEARANCE });
     }
   });
 });

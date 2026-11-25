@@ -27,13 +27,7 @@
     "success": "スカッドをアーカイブしました"
   },
   "name_editor": {
-    "title": "スクワッド名を変更",
-    "placeholder": "スクワッド名",
-    "required": "名前を入力してください",
-    "cancel": "キャンセル",
-    "save": "保存",
-    "saved": "保存しました",
-    "save_failed": "保存できませんでした"
+    "placeholder": "スクワッド名"
   },
   "add_member_dialog": {
     "title": "メンバーを追加",
@@ -53,12 +47,9 @@
     "empty": "役割を追加…",
     "placeholder": "役割（例：レビュアー）"
   },
-  "description_dialog": {
-    "title": "説明を編集",
-    "placeholder_empty": "説明を追加",
-    "cancel": "キャンセル",
-    "responsibility_placeholder": "このスクワッドの担当は何ですか？",
-    "save": "保存"
+  "description_editor": {
+    "empty": "説明を追加",
+    "placeholder": "このスクワッドの担当は何ですか？"
   },
   "members_tab": {
     "section_title": "メンバー",
@@ -102,6 +93,21 @@
     "visibility": "公開範囲",
     "visibility_workspace": "ワークスペース"
   },
+  "handoff": {
+    "section_title": "連携方法",
+    "mode_leader_title": "リーダーが割り振る",
+    "mode_leader_description": "各ステップはリーダー {{leader}} に戻り、次の担当をリーダーが決めます。既存のスクワッドの既定です。",
+    "mode_direct_title": "メンバーが直接引き継ぐ",
+    "mode_direct_description": "リーダーは最初の担当と例外対応を受け持ちます。メンバーは次のステップを自分で選び、レビューや人への確認の引き継ぎではリーダーを起こしません。",
+    "guard_rounds": "レビューの往復は最大 {{limit}} 回",
+    "guard_daily": "1 タスクあたり 1 日最大 {{limit}} 回の引き継ぎ",
+    "guard_failed": "実行失敗 → リーダーに戻す",
+    "guard_no_next": "次の担当なし → リーダーに戻す",
+    "saved": "連携方法を更新しました",
+    "brief_title": "メンバーが受け取る内容",
+    "brief_hint": "このスクワッドのタスクで実行するたびに追加されます",
+    "brief_empty": "エージェントメンバーはまだいません"
+  },
   "toasts": {
     "member_added": "メンバーを追加しました",
     "member_add_failed": "メンバーを追加できませんでした",
@@ -112,18 +118,19 @@
     "leader_updated": "リーダーを更新しました",
     "leader_update_failed": "リーダーを更新できませんでした",
     "archive_failed": "スクワッドをアーカイブできませんでした",
-    "instructions_saved": "指示を保存しました"
+    "instructions_saved": "指示を保存しました",
+    "update_failed": "保存できませんでした"
   },
   "profile_card": {
     "unavailable": "スクワッドを利用できません",
-    "detail_link": "詳細 →",
+    "detail_link": "詳細を見る →",
     "archived": "アーカイブ済み",
     "member_count_other": "メンバー {{count}}名",
     "members_section": "メンバー",
     "more_members_other": "他 {{count}}名"
   },
   "instructions_tab": {
-    "description": "リーダーは、このスクワッドに割り当てられたタスクを処理するたびにこの指示を読みます。",
+    "description": "リーダーとすべてのエージェントメンバーは、このスクワッドに割り当てられたタスクを処理するたびにこの指示を読みます。",
     "unsaved_changes": "保存していない変更",
     "save_button": "保存",
     "placeholder": "例：必ず失敗するテストから始める。コミットは小さく独立させる。"
@@ -132,7 +139,6 @@
     "mine": "自分のスクワッド",
     "all": "すべてのスクワッド"
   },
-  "toolbar": {},
   "intro": {
     "title": "エージェントをスクワッドにして、チームとして動かす",
     "description": "タスクをスクワッドに割り当てると、リーダーのエージェントが内容を読み、役割に合うメンバーに次のステップを任せ、目標達成まで追いかけます。やり取りする相手は一つだけです。",

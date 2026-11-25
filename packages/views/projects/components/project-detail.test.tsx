@@ -5,19 +5,29 @@ import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
 import { projectKeys } from "@multica/core/projects/queries";
+import { useModalStore } from "@multica/core/modals";
 import userEvent from "@testing-library/user-event";
 import type { Project } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
+import { useProjectTabStore } from "@multica/core/projects/tab-store";
+import { getIssueSurfaceViewStore, useIssuesScopeStore } from "@multica/core/issues/stores";
 import { ProjectDetail } from "./project-detail";
 
 const mocks = vi.hoisted(() => ({
   role: "admin",
+  isMobile: false,
+  defaultLayout: undefined as Record<string, number> | undefined,
   copyText: vi.fn(),
+  copyTextAndHtml: vi.fn(),
   deleteProject: vi.fn(),
   getProject: vi.fn(),
+  getProjectMembers: vi.fn(),
+  getProjectSubscription: vi.fn(),
+  setProjectSubscription: vi.fn(),
   getShareableUrl: vi.fn((path: string) => `https://app.example${path}`),
   push: vi.fn(),
+  replace: vi.fn(),
   recordVisit: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
@@ -25,10 +35,12 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@multica/ui/lib/clipboard", () => ({
   copyText: mocks.copyText,
+  copyTextAndHtml: mocks.copyTextAndHtml,
 }));
 
-vi.mock("../../workflows/project-workflow-menu", () => ({
-  ProjectWorkflowMenuHost: ({ children }: { children: (submenu: null) => React.ReactNode }) => children(null),
+vi.mock("../../workflows/project-workflow-sheet", () => ({
+  ProjectWorkflowMenuItem: () => null,
+  ProjectWorkflowSheet: () => null,
 }));
 vi.mock("../../workflows/project-workflow-row", () => ({ ProjectWorkflowControl: () => null }));
 
@@ -77,7 +89,7 @@ vi.mock("sonner", () => ({
 
 vi.mock("react-resizable-panels", () => ({
   useDefaultLayout: () => ({
-    defaultLayout: undefined,
+    defaultLayout: mocks.defaultLayout,
     onLayoutChanged: vi.fn(),
   }),
   usePanelRef: () => ({
@@ -90,7 +102,7 @@ vi.mock("react-resizable-panels", () => ({
 }));
 
 vi.mock("@multica/ui/hooks/use-mobile", () => ({
-  useIsMobile: () => false,
+  useIsMobile: () => mocks.isMobile,
 }));
 
 vi.mock("@multica/ui/components/common/emoji-picker", () => ({
@@ -129,14 +141,6 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
   DropdownMenuSeparator: () => <hr />,
 }));
 
-vi.mock("@multica/ui/components/ui/popover", () => ({
-  Popover: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  PopoverTrigger: ({ render }: { render: React.ReactNode }) => <>{render}</>,
-  PopoverContent: ({ children }: { children: React.ReactNode }) => (
-    <div>{children}</div>
-  ),
-}));
-
 vi.mock("@multica/ui/components/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   TooltipTrigger: ({ render }: { render: React.ReactNode }) => <>{render}</>,
@@ -156,7 +160,13 @@ vi.mock("../../editor", () => ({
   TitleEditor: ({ defaultValue }: { defaultValue: string }) => (
     <div>{defaultValue}</div>
   ),
-  ContentEditor: () => null,
+  ContentEditor: ({ flushPendingOnUnmount }: { flushPendingOnUnmount?: boolean }) => (
+    <div
+      data-testid="project-description"
+      data-flush-on-unmount={flushPendingOnUnmount ? "true" : undefined}
+    />
+  ),
+  ReadonlyContent: ({ content }: { content: string }) => <div>{content}</div>,
 }));
 
 vi.mock("../../common/actor-avatar", () => ({
@@ -168,7 +178,26 @@ vi.mock("../../issues/components/priority-icon", () => ({
 }));
 
 vi.mock("./project-resources-section", () => ({
-  ProjectResourcesSection: () => null,
+  ProjectResourcesSection: ({ readOnly }: { readOnly?: boolean }) => (
+    <div data-testid="project-resources" data-read-only={String(!!readOnly)} />
+  ),
+}));
+
+vi.mock("./project-insights", () => ({
+  ProjectInsights: ({ onFilter, onShowActivity, readOnly }: {
+    onFilter: (filter: unknown) => void;
+    onShowActivity: () => void;
+    readOnly?: boolean;
+  }) => (
+    <div data-testid="project-insights" data-read-only={String(!!readOnly)}>
+      <button type="button" onClick={() => onFilter({ kind: "label", id: "label-1" })}>Filter by Design</button>
+      <button type="button" onClick={onShowActivity}>View all activity</button>
+    </div>
+  ),
+}));
+
+vi.mock("./project-activity", () => ({
+  ProjectActivityPage: () => <div data-testid="project-activity-page" />,
 }));
 
 vi.mock("./project-start-date-picker", () => ({
@@ -190,13 +219,16 @@ vi.mock("../../issues/surface/issue-surface", () => ({
 vi.mock("../../issue-views/view-header", () => ({
   IssueViewHeader: ({
     baseMenu,
+    afterTitle,
     trailing,
   }: {
     baseMenu?: React.ReactNode;
+    afterTitle?: React.ReactNode;
     trailing?: React.ReactNode;
   }) => (
-    <header>
+    <header data-testid="issue-view-header">
       {baseMenu}
+      {afterTitle}
       {trailing}
     </header>
   ),
@@ -206,12 +238,15 @@ vi.mock("../../layout/animated-right-sidebar", () => ({
   AnimatedRightSidebar: ({ children }: { children: React.ReactNode }) => (
     <aside>{children}</aside>
   ),
-  getAnimatedRightSidebarInitialOpen: () => true,
+  getAnimatedRightSidebarInitialOpen: (
+    defaultOpen: boolean,
+    layout?: Record<string, number>,
+  ) => (typeof layout?.sidebar === "number" ? layout.sidebar > 0 : defaultOpen),
   rightSidebarPanelMotionProps: {},
   useRightSidebarShortcut: vi.fn(),
-  useAnimatedRightSidebarState: () => ({
-    open: true,
-    visualOpen: true,
+  useAnimatedRightSidebarState: (initialOpen: boolean) => ({
+    open: initialOpen,
+    visualOpen: initialOpen,
     motionEnabled: false,
     beginToggle: vi.fn(),
     handleResize: vi.fn(),
@@ -247,14 +282,14 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function renderProjectDetail() {
+function renderProjectDetail(search = "") {
   qc.setQueryData(["members"], [{ user_id: "user-1", name: "User One", role: mocks.role }]);
   const adapter: NavigationAdapter = {
     push: mocks.push,
-    replace: vi.fn(),
+    replace: mocks.replace,
     back: vi.fn(),
     pathname: "/test-workspace/projects/project-1",
-    searchParams: new URLSearchParams(),
+    searchParams: new URLSearchParams(search),
     hash: "",
     getShareableUrl: mocks.getShareableUrl,
   };
@@ -270,17 +305,31 @@ function renderProjectDetail() {
 
 beforeEach(() => {
   mocks.role = "admin";
+  mocks.isMobile = false;
+  mocks.defaultLayout = undefined;
   qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   qc.setQueryData(projectKeys.detail("workspace-1", PROJECT.id), PROJECT);
   qc.setQueryData(["agents"], []);
   qc.setQueryData(["pins"], []);
   pending = deferred();
   mocks.copyText.mockReset().mockResolvedValue(true);
+  mocks.copyTextAndHtml.mockReset().mockResolvedValue(true);
   mocks.deleteProject.mockReset().mockReturnValue(pending.promise);
   mocks.getProject.mockReset().mockResolvedValue(PROJECT);
-  setApiInstance({ deleteProject: mocks.deleteProject, getProject: mocks.getProject } as unknown as ApiClient);
+  mocks.getProjectMembers.mockReset().mockResolvedValue({ members: [], manager_id: null });
+  mocks.getProjectSubscription.mockReset().mockResolvedValue(false);
+  mocks.setProjectSubscription.mockReset().mockImplementation(async (_id: string, subscribed: boolean) => subscribed);
+  setApiInstance({
+    deleteProject: mocks.deleteProject,
+    getProject: mocks.getProject,
+    getProjectMembers: mocks.getProjectMembers,
+    getProjectSubscription: mocks.getProjectSubscription,
+    setProjectSubscription: mocks.setProjectSubscription,
+  } as unknown as ApiClient);
   mocks.getShareableUrl.mockClear();
   mocks.push.mockReset();
+  mocks.replace.mockReset();
+  useProjectTabStore.setState({ lastTab: {} });
   mocks.recordVisit.mockReset();
   mocks.toastSuccess.mockReset();
   mocks.toastError.mockReset();
@@ -289,6 +338,188 @@ beforeEach(() => {
 afterEach(() => {
   onlineManager.setOnline(true);
   qc.clear();
+  useModalStore.getState().close();
+});
+
+describe("ProjectDetail tabs", () => {
+  it("opens on Overview, with the title and description in the page and not the sidebar", () => {
+    renderProjectDetail();
+    expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /Issues\s*3/ })).toBeInTheDocument();
+    expect(screen.queryByTestId("issue-view-header")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Description" })).toBeInTheDocument();
+    expect(within(screen.getByRole("complementary")).queryByText("Description")).not.toBeInTheDocument();
+  });
+
+  it("saves a pending description edit when the tab or page closes", () => {
+    renderProjectDetail();
+    // Switching tabs unmounts the editor, so a still-debounced edit has to
+    // flush then; ContentEditor's own tests cover the flush itself.
+    expect(screen.getByTestId("project-description")).toHaveAttribute("data-flush-on-unmount", "true");
+  });
+
+  it("opens the panel with the properties, above the insights", () => {
+    renderProjectDetail();
+    const sidebar = screen.getByRole("complementary");
+    const properties = within(sidebar).getByTestId("project-properties");
+    expect(within(properties).getByRole("button", { name: "No lead" })).toBeInTheDocument();
+    expect(within(sidebar).getByTestId("project-insights")).toBeInTheDocument();
+    expect(
+      properties.compareDocumentPosition(within(sidebar).getByTestId("project-insights")) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("shows the activity feed for ?tab=activity", async () => {
+    renderProjectDetail("tab=activity");
+    expect(screen.getByRole("tab", { name: "Activity" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("project-activity-page")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Description" })).not.toBeInTheDocument();
+    expect(within(screen.getByRole("complementary")).getByTestId("project-properties")).toBeInTheDocument();
+  });
+
+  it("opens the Activity tab from the sidebar digest", async () => {
+    renderProjectDetail();
+    await userEvent.click(screen.getByRole("button", { name: "View all activity" }));
+    expect(mocks.replace).toHaveBeenCalledWith("/test-workspace/projects/project-1?tab=activity");
+  });
+
+  it("opens the Issues tab filtered to a breakdown row", async () => {
+    const store = getIssueSurfaceViewStore("project:project-1");
+    store.setState({ statusFilters: ["todo"] });
+    useIssuesScopeStore.getState().setScope("project:project-1", "members");
+    renderProjectDetail();
+    await userEvent.click(screen.getByRole("button", { name: "Filter by Design" }));
+    expect(store.getState().labelFilters).toEqual(["label-1"]);
+    expect(store.getState().statusFilters).toEqual([]);
+    expect(useIssuesScopeStore.getState().scopes["project:project-1"]).toBe("all");
+    expect(mocks.replace).toHaveBeenCalledWith("/test-workspace/projects/project-1?tab=issues");
+    store.getState().clearFilters();
+  });
+
+  it("shows the issue views for ?tab=issues and remembers that choice", () => {
+    renderProjectDetail("tab=issues");
+    expect(screen.getByTestId("issue-view-header")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Issues/ })).toHaveAttribute("aria-selected", "true");
+    expect(useProjectTabStore.getState().lastTab["project-1"]).toBe("issues");
+  });
+
+  it("switches tabs through the URL", async () => {
+    renderProjectDetail();
+    await userEvent.click(screen.getByRole("tab", { name: /Issues/ }));
+    expect(mocks.replace).toHaveBeenCalledWith("/test-workspace/projects/project-1?tab=issues");
+    expect(useProjectTabStore.getState().lastTab["project-1"]).toBe("issues");
+  });
+
+  it("reopens on the remembered tab unless the project has no issues", () => {
+    useProjectTabStore.setState({ lastTab: { "project-1": "issues" } });
+    const { unmount } = renderProjectDetail();
+    expect(screen.getByTestId("issue-view-header")).toBeInTheDocument();
+    unmount();
+
+    qc.setQueryData(projectKeys.detail("workspace-1", PROJECT.id), { ...PROJECT, issue_count: 0, done_count: 0 });
+    renderProjectDetail();
+    expect(screen.queryByTestId("issue-view-header")).not.toBeInTheDocument();
+  });
+});
+
+describe("ProjectDetail rename", () => {
+  it("opens the rename dialog with the current name from the header menu", async () => {
+    const user = userEvent.setup();
+    renderProjectDetail();
+
+    await user.click(screen.getByRole("button", { name: "Rename project" }));
+
+    expect(useModalStore.getState()).toMatchObject({
+      modal: "project-rename",
+      data: { projectId: "project-1", title: "Launch Plan" },
+    });
+  });
+});
+
+describe("ProjectDetail lead permissions", () => {
+  it("does not let ordinary members change the lead of a private project", async () => {
+    mocks.role = "member";
+    qc.setQueryData(projectKeys.detail("workspace-1", PROJECT.id), { ...PROJECT, visibility: "private" });
+    renderProjectDetail();
+    expect(screen.getByRole("button", { name: "No lead" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "No lead" }));
+    expect(screen.queryByPlaceholderText("Assign lead...")).not.toBeInTheDocument();
+  });
+
+  it("keeps the lead of a workspace project editable for ordinary members", async () => {
+    mocks.role = "member";
+    renderProjectDetail();
+    expect(screen.getByRole("button", { name: "No lead" })).toBeEnabled();
+    await userEvent.click(screen.getByRole("button", { name: "No lead" }));
+    expect(screen.getByPlaceholderText("Assign lead...")).toBeInTheDocument();
+  });
+});
+
+describe("ProjectDetail for a guest", () => {
+  beforeEach(() => {
+    mocks.role = "guest";
+    qc.setQueryData(projectKeys.detail("workspace-1", PROJECT.id), { ...PROJECT, description: "Ship the launch." });
+  });
+
+  it("keeps sharing, pinning and following, and drops every change to the project", async () => {
+    renderProjectDetail();
+    expect(screen.getByRole("button", { name: "Copy link" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Subscribe to all issues" })).toBeInTheDocument();
+    for (const name of ["Rename project", "Archive project", "Delete project"]) {
+      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    }
+  });
+
+  it("shows the overview as read-only, without the agent context", () => {
+    renderProjectDetail();
+    expect(screen.getByRole("heading", { name: "Launch Plan" })).toBeInTheDocument();
+    expect(screen.getByText("Ship the launch.")).toBeInTheDocument();
+    expect(screen.queryByText("Agent context")).not.toBeInTheDocument();
+    expect(screen.getByTestId("project-resources")).toHaveAttribute("data-read-only", "true");
+  });
+
+  it("locks the properties and passes read-only to the insights", () => {
+    renderProjectDetail();
+    const properties = screen.getByTestId("project-properties");
+    expect(within(properties).getByRole("button", { name: "No lead" }).closest("[inert]")).not.toBeNull();
+    expect(within(properties).getByText("Guests can view this project, but cannot change its properties.")).toBeInTheDocument();
+    expect(screen.getByTestId("project-insights")).toHaveAttribute("data-read-only", "true");
+  });
+
+  it("does not ask for the members of a private project it was shared", async () => {
+    qc.setQueryData(projectKeys.detail("workspace-1", PROJECT.id), { ...PROJECT, visibility: "private" });
+    renderProjectDetail();
+    expect(await screen.findByRole("button", { name: "Subscribe to all issues" })).toBeInTheDocument();
+    expect(mocks.getProjectMembers).not.toHaveBeenCalled();
+  });
+
+  it("says an archived project is archived without offering Restore", () => {
+    qc.setQueryData(projectKeys.detail("workspace-1", PROJECT.id), { ...PROJECT, archived_at: "2026-11-01T00:00:00Z" });
+    renderProjectDetail();
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Restore" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Restore project" })).not.toBeInTheDocument();
+  });
+
+  it("does not offer deletion to a creator who is now a guest", () => {
+    qc.setQueryData(projectKeys.detail("workspace-1", PROJECT.id), {
+      ...PROJECT,
+      creator_type: "member",
+      creator_id: "user-1",
+    });
+    renderProjectDetail();
+    expect(screen.queryByRole("button", { name: "Delete project" })).not.toBeInTheDocument();
+  });
+
+  it("leaves a member's page editable", () => {
+    mocks.role = "member";
+    renderProjectDetail();
+    expect(screen.getByRole("button", { name: "Rename project" })).toBeInTheDocument();
+    expect(screen.getByText("Agent context")).toBeInTheDocument();
+    expect(screen.getByTestId("project-resources")).toHaveAttribute("data-read-only", "false");
+    expect(within(screen.getByTestId("project-properties")).getByRole("button", { name: "No lead" }).closest("[inert]")).toBeNull();
+  });
 });
 
 describe("ProjectDetail sharing", () => {
@@ -304,6 +535,57 @@ describe("ProjectDetail sharing", () => {
     expect(mocks.copyText).toHaveBeenCalledWith(
       "https://app.example/test-workspace/projects/project-1",
     );
+  });
+});
+
+describe("ProjectDetail subscription", () => {
+  it("subscribes to every issue in the project and can unsubscribe again", async () => {
+    const user = userEvent.setup();
+    renderProjectDetail();
+
+    await user.click(await screen.findByRole("button", { name: "Subscribe to all issues" }));
+    expect(mocks.setProjectSubscription).toHaveBeenCalledWith("project-1", true);
+    expect(mocks.toastSuccess).toHaveBeenCalled();
+
+    await user.click(await screen.findByRole("button", { name: "Unsubscribe from project" }));
+    expect(mocks.setProjectSubscription).toHaveBeenLastCalledWith("project-1", false);
+    expect(await screen.findByRole("button", { name: "Subscribe to all issues" })).toBeInTheDocument();
+  });
+
+  it("keeps the current state and reports a failed update", async () => {
+    mocks.setProjectSubscription.mockRejectedValueOnce(new Error("boom"));
+    const user = userEvent.setup();
+    renderProjectDetail();
+
+    await user.click(await screen.findByRole("button", { name: "Subscribe to all issues" }));
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalled());
+    expect(screen.getByRole("button", { name: "Subscribe to all issues" })).toBeInTheDocument();
+  });
+});
+
+describe("ProjectDetail copy link with title", () => {
+  it("copies the project title as a Markdown link and an HTML anchor", async () => {
+    const user = userEvent.setup();
+    renderProjectDetail();
+
+    await user.click(screen.getByRole("button", { name: "Copy link with title" }));
+
+    expect(mocks.copyTextAndHtml).toHaveBeenCalledWith(
+      "[Launch Plan](https://app.example/test-workspace/projects/project-1)",
+      '<a href="https://app.example/test-workspace/projects/project-1">Launch Plan</a>',
+    );
+    expect(mocks.toastSuccess).toHaveBeenCalledWith("Link copied with title");
+  });
+
+  it("reports a failed copy without a success toast", async () => {
+    mocks.copyTextAndHtml.mockResolvedValueOnce(false);
+    const user = userEvent.setup();
+    renderProjectDetail();
+
+    await user.click(screen.getByRole("button", { name: "Copy link with title" }));
+
+    expect(mocks.toastError).toHaveBeenCalledWith("Failed to copy link");
+    expect(mocks.toastSuccess).not.toHaveBeenCalled();
   });
 });
 
@@ -407,5 +689,51 @@ describe("ProjectDetail project deletion", () => {
     expect(
       screen.queryByRole("button", { name: "Delete project" }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("ProjectDetail loading skeleton", () => {
+  beforeEach(() => {
+    qc.removeQueries({ queryKey: projectKeys.detail("workspace-1", PROJECT.id) });
+    mocks.getProject.mockReturnValue(new Promise<never>(() => {}));
+  });
+
+  it("renders aligned page header, tab slots, body, and 320px desktop sidebar while loading", () => {
+    renderProjectDetail();
+
+    const skeleton = screen.getByTestId("project-detail-skeleton");
+    expect(skeleton).toHaveAttribute("data-mc", "object-page");
+    expect(skeleton).toHaveAttribute("data-type", "project");
+    expect(skeleton).toHaveAttribute("aria-busy", "true");
+    expect(skeleton.querySelector('header[data-mc="page-header"]')).not.toBeNull();
+    expect(screen.getByTestId("project-detail-skeleton-tabs").children).toHaveLength(3);
+
+    const sidebar = screen.getByTestId("project-detail-skeleton-sidebar");
+    expect(sidebar.className).toContain("w-80");
+    expect(sidebar.className).toContain("border-l");
+  });
+
+  it("omits the desktop sidebar placeholder when the saved layout collapsed it", () => {
+    mocks.defaultLayout = { content: 100, sidebar: 0 };
+    renderProjectDetail();
+
+    expect(screen.getByTestId("project-detail-skeleton")).toBeInTheDocument();
+    expect(screen.queryByTestId("project-detail-skeleton-sidebar")).not.toBeInTheDocument();
+  });
+
+  it("matches a saved custom sidebar width percentage during loading", () => {
+    mocks.defaultLayout = { content: 72, sidebar: 28 };
+    renderProjectDetail();
+
+    const sidebar = screen.getByTestId("project-detail-skeleton-sidebar");
+    expect(sidebar).toHaveStyle({ width: "28%" });
+  });
+
+  it("hides the desktop sidebar placeholder on mobile viewports", () => {
+    mocks.isMobile = true;
+    renderProjectDetail();
+
+    expect(screen.getByTestId("project-detail-skeleton")).toBeInTheDocument();
+    expect(screen.queryByTestId("project-detail-skeleton-sidebar")).not.toBeInTheDocument();
   });
 });

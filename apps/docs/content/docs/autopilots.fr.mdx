@@ -16,7 +16,7 @@ Une automatisation lance du travail nouveau à partir d'un calendrier ou d'un we
 
 ## Créer une automatisation
 
-Ouvrez **Automatisation** dans la barre latérale, choisissez un modèle ou partez de zéro, puis configurez :
+Ouvrez **Auto** dans la barre de navigation, choisissez un modèle ou partez de zéro, puis configurez :
 
 - **Nom** : ce dont cette automatisation est responsable ;
 - **Procédure** : l'objectif, le contexte, les contraintes et les étapes que l'agent lit à chaque exécution ;
@@ -28,7 +28,7 @@ Ouvrez **Automatisation** dans la barre latérale, choisissez un modèle ou part
 
 Une automatisation est activée par défaut après l'enregistrement. **Exécuter maintenant** lance le flux complet une fois, à tout moment, sans attendre la planification.
 
-Voici une automatisation dont le mode de sortie est Créer une tâche. Cliquez sur **Exécuter maintenant**, ou avancez jusqu'à la prochaine exécution planifiée, et regardez-la créer une tâche, la confier à l'agent, puis terminer l'exécution.
+La séquence ci-dessous ouvre une automatisation en mode Créer une tâche (**Weekly dead-code audit**), déclenche **Run now** et montre la tâche créée apparaître dans l'historique d'exécution.
 
 <AutopilotDemo />
 
@@ -45,7 +45,7 @@ Le mode **Exécution seule** exige que le runtime soit disponible au moment du d
 
 ## Exécuter selon une planification
 
-L'éditeur de planification vous permet de choisir l'heure d'exécution, les jours de répétition, la plage horaire et le fuseau horaire, et affiche un aperçu des prochaines exécutions. Une automatisation peut avoir plusieurs planifications ; l'activation ou la désactivation d'un déclencheur individuel se fait avec la commande CLI `autopilot trigger-update` — voir [Utiliser le CLI](/cli) pour les paramètres.
+L'éditeur de planification vous permet de choisir l'heure d'exécution, les jours de répétition, la plage horaire et le fuseau horaire, et affiche un aperçu des prochaines exécutions. Une automatisation peut avoir plusieurs planifications ; pour modifier, activer ou désactiver un déclencheur individuel, cliquez sur le bouton de modification de sa ligne dans **Déclencheurs**, ou utilisez la commande CLI `autopilot trigger-update` — voir [Utiliser le CLI](/cli) pour les paramètres.
 
 Lorsque vous avez besoin de règles plus complexes, modifiez directement le cron standard à 5 champs :
 
@@ -87,9 +87,43 @@ Contraintes applicables aux requêtes webhook :
 
 ### Filtres d'événements
 
-Lorsqu'une même source envoie plusieurs types d'événements, ajoutez des filtres d'événements au déclencheur. Chaque ligne contient un nom d'événement et une liste facultative d'actions ; une exécution est déclenchée si une ligne correspond, et laisser toutes les lignes vides accepte tous les événements.
+Lorsqu'une même source envoie plusieurs types d'événements, ajoutez des filtres d'événements au déclencheur. Cliquez sur **Ajouter une règle** et saisissez un nom d'événement et une liste facultative d'actions ; une exécution est déclenchée si une règle correspond, et un déclencheur sans règle accepte tous les événements. Pour modifier les filtres d'un webhook, cliquez sur **Modifier le webhook** sur sa ligne dans **Déclencheurs**.
 
 Par exemple, avec `workflow_run` comme nom d'événement et `completed, failed` comme actions, seuls ces deux types de résultats `workflow_run` sont acceptés. Multica reconnaît l'événement et l'action à partir des en-têtes de requête et des champs de charge utile courants, notamment l'en-tête `X-GitHub-Event` de GitHub et le champ `action` du corps.
+
+Pour GitLab, le nom d'événement est la valeur de l'en-tête `X-Gitlab-Event` telle que GitLab l'envoie, par exemple `Merge Request Hook`, `Issue Hook` ou `Note Hook`, espaces et majuscules compris ; le champ `object_kind` de la charge utile (`merge_request`) ne correspond pas. Chaque action listée est comparée à la fois à `object_attributes.action` et à `object_attributes.state`, et la règle correspond si l'une des deux valeurs figure dans la liste. Cette règle accepte les merge requests créées, mises à jour ou rouvertes, et ignore les fusions et fermetures :
+
+```json
+{ "event": "Merge Request Hook", "actions": ["open", "update", "reopen"] }
+```
+
+Indiquez des verbes d'action (`open`, `update`, `reopen`, `merge`, `close`) plutôt que des états (`opened`, `merged`, `closed`). Les valeurs sont comparées à l'identique et jamais converties d'une forme à l'autre, et un état correspond à tout événement qui laisse l'objet dans cet état. Pousser un commit sur une merge request ouverte envoie `"action": "update"` avec `"state": "opened"`, et une approbation envoie `"action": "approval"` avec le même état : avec `opened`, chacun de ces événements lance donc une exécution, en plus des nouvelles merge requests.
+
+- `Issue Hook` avec `close` accepte les tickets fermés.
+- `Note Hook` avec `create` accepte les nouveaux commentaires ; un commentaire modifié envoie `update`.
+- Une règle GitLab sans actions accepte tous les événements portant ce nom.
+- Pour ne lancer une exécution qu’en cas d’échec, définissez **Actions** sur `failed` avec `Pipeline Hook` (`object_kind: "pipeline"`, statut dans `object_attributes.status`) ou `Job Hook` (`object_kind: "build"`, statut dans `build_status`). Les autres statuts, comme `success` et `running`, sont filtrés ; laisser Actions vide accepte tous les statuts de cet événement. Ces champs de statut CI ne s’appliquent qu’à leur type d’objet respectif. Consultez les [charges utiles des événements GitLab](https://docs.gitlab.com/user/project/integrations/webhook_events/#pipeline-events).
+
+Chaque règle peut aussi porter des `conditions` sur les champs de la charge utile : cliquez sur **Ajouter une condition** dans la règle, ou définissez-les via l'API. Toutes les conditions doivent être vraies pour que la règle corresponde ; un événement filtré est ignoré avant le démarrage de toute exécution. `path` parcourt la charge utile avec des points : un nombre indexe un tableau et `*` désigne n'importe quel élément (`pull_request.labels.*.name`). `op` vaut `equals`, `not_equals`, `contains`, `in` ou `exists`, et `ignore_case` s'applique au texte. Avec `*`, `equals`, `contains`, `in` et `exists` sont vraies si un élément correspond, et `not_equals` si aucun ne correspond. Un champ absent ne correspond jamais, et `exists` ignore `null`. Par exemple, cette règle n'accepte que les pull requests prêtes, étiquetées `needs-review`, qui ciblent `main` ou `release` et n'ont pas été ouvertes par un bot :
+
+```json
+{
+  "event": "pull_request",
+  "actions": ["opened", "synchronize"],
+  "conditions": [
+    { "path": "pull_request.draft", "op": "equals", "value": false },
+    { "path": "pull_request.labels.*.name", "op": "equals", "value": "needs-review" },
+    { "path": "pull_request.base.ref", "op": "in", "values": ["main", "release"] },
+    { "path": "sender.type", "op": "not_equals", "value": "Bot" }
+  ]
+}
+```
+
+Chaque règle accepte au maximum 20 conditions. Un chemin est limité à 256 caractères et une liste `in` à 100 valeurs. La création ou la modification d’un déclencheur avec une condition trop longue renvoie HTTP 400.
+
+Un tableau vide développé par `*` satisfait `not_equals` ; un chemin absent échoue toujours. Les événements ou actions non correspondants sont enregistrés comme `event_filtered`, et les conditions non remplies comme `payload_filtered`. Les deux renvoient HTTP 200 sans créer d’exécution ni de tâche. La liste affiche la raison et le premier champ bloquant ; le détail affiche la condition et la valeur réelle enregistrées à la réception. Modifier la règle ne change pas cet instantané. L’aperçu est limité à 10 valeurs de 256 caractères ; le contenu brut conserve la valeur complète.
+
+Vous pouvez aussi configurer entièrement ces filtres via le CLI avec `--event-filters-file`. Une mise à jour sans option de filtrage conserve les filtres existants ; `--clear-event-filters` les supprime explicitement et accepte tous les événements. Voir les [exemples CLI](/cli#webhook-event-filters) pour le format JSON et les commandes.
 
 ### Protéger l'URL du webhook
 
@@ -143,7 +177,7 @@ La mise en pause manuelle arrête les planifications, les webhooks et **Exécute
 
 ## Permissions
 
-- Tout membre de l'espace de travail peut créer des automatisations ;
+- Les rôles `owner`, `admin` et `member` peuvent créer des automatisations.
 - le créateur et les propriétaires/administrateurs de l'espace de travail peuvent modifier, exécuter, supprimer et gérer les déclencheurs ;
 - le créateur et les propriétaires/administrateurs peuvent accorder l'accès de gestion à des collaborateurs ;
 - les collaborateurs peuvent modifier, exécuter et gérer les déclencheurs, mais ne peuvent pas accorder l'accès à d'autres personnes ;

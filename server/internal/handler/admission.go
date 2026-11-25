@@ -68,6 +68,8 @@ const (
 	ReasonAlreadyActive         = dispatch.ReasonAlreadyActive
 	ReasonSelfTriggerSuppressed = dispatch.ReasonSelfTriggerSuppressed
 	ReasonIssueInTriage         = dispatch.ReasonIssueInTriage
+	ReasonProjectAccessBlocked  = dispatch.ReasonProjectAccessBlocked
+	ReasonHandedToLeader        = dispatch.ReasonHandedToLeader
 	ReasonInternalError         = dispatch.ReasonInternalError
 )
 
@@ -138,6 +140,8 @@ func dispatchBlockedFallbackMessage(code DispatchReasonCode) string {
 		return "a run is already active for this target"
 	case ReasonIssueInTriage:
 		return "the issue is in Triage and has no owner to run yet; accept it out of Triage first"
+	case ReasonProjectAccessBlocked:
+		return "the agent's owner is not a member of this private project"
 	default:
 		return "the run was blocked"
 	}

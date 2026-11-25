@@ -53,7 +53,15 @@ type SelectedMember = {
 // How many chips we show inline before collapsing the tail into "+N".
 const CHIP_DISPLAY_LIMIT = 3;
 
-export function CreateSquadModal({ onClose }: { onClose: () => void }) {
+export function CreateSquadModal({
+  open = true,
+  onClose,
+  onOpenChangeComplete,
+}: {
+  open?: boolean;
+  onClose: () => void;
+  onOpenChangeComplete?: (open: boolean) => void;
+}) {
   const { t } = useT("modals");
   const router = useNavigation();
   const wsPaths = useWorkspacePaths();
@@ -141,8 +149,12 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="p-0 gap-0 flex flex-col overflow-hidden !top-1/2 !left-1/2 !-translate-x-1/2 !-translate-y-1/2 !w-full !max-w-2xl !h-[85vh]">
+    <Dialog
+      open={open}
+      onOpenChange={(v) => { if (!v) onClose(); }}
+      onOpenChangeComplete={onOpenChangeComplete}
+    >
+      <DialogContent className="p-0 gap-0 flex flex-col overflow-hidden !top-1/2 !left-1/2 !-translate-x-1/2 !-translate-y-1/2 !w-full !max-w-2xl !h-[85%]">
         <DialogHeader className="border-b px-5 py-3 space-y-0">
           <DialogTitle className="text-title-sm font-semibold">
             {t(($) => $.create_squad.title)}
@@ -151,8 +163,7 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
 
         <div className="flex-1 overflow-y-auto p-5">
           <div className="space-y-4 min-w-0">
-            {/* Identity row mirrors CreateAgentDialog so the two creates read
-                as siblings — avatar (left) + name/description stack (right). */}
+            {/* Identity row: avatar (left) + name/description stack (right). */}
             <div className="flex items-start gap-4">
               <AvatarUploadControl
                 variant="squad"
@@ -221,7 +232,7 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
-        {/* Inline footer — see CreateAgentDialog: shadcn DialogFooter applies
+        {/* Inline footer: shadcn DialogFooter applies
             negative margins assuming a padded DialogContent. Our content is
             p-0, so a plain bordered row is the right call. */}
         <div className="flex items-center justify-end gap-2 border-t bg-background px-5 py-3">
@@ -591,7 +602,7 @@ function MemberChip({
 }) {
   const { t } = useT("modals");
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border bg-background px-1.5 py-0.5 text-caption">
+    <span className="inline-flex items-center gap-1 rounded-md border bg-background px-1.5 py-0.5 text-caption">
       <ActorAvatar actorType={m.type} actorId={m.id} size="xs" />
       <span className="max-w-[120px] truncate">{m.name}</span>
       <TooltipHint label={t(($) => $.create_squad.members_remove_aria, { name: m.name })}>
@@ -603,7 +614,7 @@ function MemberChip({
             onRemove();
           }}
           aria-label={t(($) => $.create_squad.members_remove_aria, { name: m.name })}
-          className="rounded-full text-muted-foreground hover:text-foreground"
+          className="rounded-sm text-muted-foreground hover:text-foreground"
         >
           <X className="h-3 w-3" />
         </button>

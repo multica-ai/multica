@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -90,8 +91,12 @@ func (h *Handler) ListWorkspaceWakeups(w http.ResponseWriter, r *http.Request) {
 			isAdmin = roleAllowed(manager.Role, "owner", "admin")
 		}
 	}
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return
+	}
 	result, err := h.Queries.ListWorkspaceWakeups(r.Context(), db.ListWorkspaceWakeupsParams{
-		WorkspaceID: parseUUID(workspaceID), AgentIds: ids, MemberID: managerID, IsAdmin: isAdmin,
+		WorkspaceID: parseUUID(workspaceID), AgentIds: ids, MemberID: managerID, IsAdmin: isAdmin, HiddenProjectIds: hidden.Param(),
 		Scope: scope, Kind: kind, Source: source, AgentID: agentID, Search: search, PageLimit: int32(limit), PageOffset: int32(page),
 	})
 	if err != nil {
@@ -116,6 +121,8 @@ func wakeupError(w http.ResponseWriter, err error) {
 		writeError(w, 409, err.Error())
 	case errors.Is(err, service.ErrWakeupInput):
 		writeError(w, 400, err.Error())
+	case errors.Is(err, service.ErrWakeupAgentNotInvocable):
+		writeErrorCode(w, 403, "wakeup_agent_not_invocable", err.Error())
 	case errors.Is(err, service.ErrWakeupForbidden):
 		writeError(w, 403, "wakeup permission denied")
 	case errors.Is(err, pgx.ErrNoRows):
@@ -172,7 +179,11 @@ func (h *Handler) ListWorkspaceWakeupSummaries(w http.ResponseWriter, r *http.Re
 	for id := range allowed {
 		ids = append(ids, parseUUID(id))
 	}
-	rows, err := h.Queries.ListWorkspaceWakeupSummaryRows(r.Context(), db.ListWorkspaceWakeupSummaryRowsParams{WorkspaceID: parseUUID(workspaceID), AgentIds: ids})
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	rows, err := h.Queries.ListWorkspaceWakeupSummaryRows(r.Context(), db.ListWorkspaceWakeupSummaryRowsParams{WorkspaceID: parseUUID(workspaceID), AgentIds: ids, HiddenProjectIds: hidden.Param()})
 	if err != nil {
 		wakeupError(w, err)
 		return
@@ -229,6 +240,7 @@ func (h *Handler) CreateIssueWakeup(w http.ResponseWriter, r *http.Request) {
 		wakeupError(w, err)
 		return
 	}
+	h.maybeRefreshPRsForIssueWakeup(r.Context(), issue.ID, result.Condition)
 	status := http.StatusCreated
 	if existingID.Valid {
 		status = http.StatusOK
@@ -297,7 +309,40 @@ func (h *Handler) EnableIssueWakeup(w http.ResponseWriter, r *http.Request) {
 		wakeupError(w, err)
 		return
 	}
+	h.maybeRefreshPRsForIssueWakeup(r.Context(), issue.ID, result.Condition)
 	writeJSON(w, 200, result)
+}
+
+// maybeRefreshPRsForIssueWakeup kicks off a non-blocking snapshot refresh for
+// open/draft GitHub PRs linked to issue when a checks/conflicts wakeup is
+// created or re-enabled and the PR's snapshot is missing or stale.
+func (h *Handler) maybeRefreshPRsForIssueWakeup(ctx context.Context, issueID pgtype.UUID, rawCondition []byte) {
+	if !h.PRRefresh.Enabled() || len(rawCondition) == 0 {
+		return
+	}
+	var cond service.WakeupCondition
+	if json.Unmarshal(rawCondition, &cond) != nil || cond.Type != "pull_request" {
+		return
+	}
+	if cond.Event != "checks_finished" && cond.Event != "conflicts" {
+		return
+	}
+	rows, err := h.Queries.ListPullRequestsByIssue(ctx, issueID)
+	if err != nil {
+		return
+	}
+	for _, row := range rows {
+		if row.State != "open" && row.State != "draft" {
+			continue
+		}
+		h.PRRefresh.MaybeEnqueueOnView(
+			row.InstallationID, row.RepoOwner, row.RepoName, row.PrNumber,
+			row.SnapshotFetchedAt.Time,
+			row.SnapshotFetchedAt.Valid &&
+				row.SnapshotHeadSha != "" &&
+				row.SnapshotHeadSha == row.HeadSha,
+		)
+	}
 }
 
 func (h *Handler) EditIssueWakeupInstruction(w http.ResponseWriter, r *http.Request) {
@@ -361,6 +406,8 @@ func (h *Handler) TriggerIssueWakeup(w http.ResponseWriter, r *http.Request) {
 		wakeupError(w, err)
 		return
 	}
+	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(issue.WorkspaceID))
+	h.archiveActorInboxOnAgentTrigger(r.Context(), uuidToString(issue.WorkspaceID), uuidToString(issue.ID), actorType, actorID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -472,7 +519,11 @@ func (h *Handler) ListPausedWakeups(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
 		return
 	}
-	rows, err := h.Queries.ListPausedWakeupIssues(r.Context(), parseUUID(workspaceID))
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	rows, err := h.Queries.ListPausedWakeupIssues(r.Context(), db.ListPausedWakeupIssuesParams{WorkspaceID: parseUUID(workspaceID), HiddenProjectIds: hidden.Param()})
 	if err != nil {
 		wakeupError(w, err)
 		return

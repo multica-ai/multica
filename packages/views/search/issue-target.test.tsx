@@ -6,7 +6,7 @@ import { buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { Issue } from "@multica/core/types";
 import { RESOURCES } from "../locales";
-import { useIssueTargetWriter } from "./issue-target";
+import { issueTargetFromContexts, useIssueTargetWriter } from "./issue-target";
 import type { IssueTarget } from "./types";
 
 const { mockUpdateIssue, mockToast, mockOpenModal } = vi.hoisted(() => ({
@@ -59,6 +59,32 @@ function renderWriter(target: IssueTarget) {
   );
   return renderHook(() => useIssueTargetWriter(target), { wrapper });
 }
+
+describe("issueTargetFromContexts", () => {
+  const other = { ...issue, id: "issue-2", identifier: "MUL-2" } as Issue;
+  const clearSelection = () => {};
+
+  it("takes the newest issue or selection", () => {
+    expect(issueTargetFromContexts([{ kind: "issue", issue: other }, { kind: "issue", issue }])).toEqual({
+      kind: "single",
+      issue: other,
+    });
+    expect(
+      issueTargetFromContexts([{ kind: "issues", issues: [issue, other], clearSelection }, { kind: "issue", issue }]),
+    ).toEqual({ kind: "batch", issues: [issue, other], clearSelection });
+  });
+
+  it("puts a list cursor behind a selection or a peeked issue, even a later one", () => {
+    const cursor = { kind: "issue", issue: other, cursor: true } as const;
+    expect(issueTargetFromContexts([cursor, { kind: "issue", issue }])).toEqual({ kind: "single", issue });
+    expect(issueTargetFromContexts([cursor, { kind: "issues", issues: [issue], clearSelection }])).toEqual({
+      kind: "batch",
+      issues: [issue],
+      clearSelection,
+    });
+    expect(issueTargetFromContexts([cursor])).toEqual({ kind: "single", issue: other });
+  });
+});
 
 describe("useIssueTargetWriter", () => {
   beforeEach(() => {

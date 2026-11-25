@@ -8,6 +8,7 @@ import {
   within,
   type RenderResult,
 } from "@testing-library/react";
+import { DEFAULT_APPEARANCE, useAppearanceStore } from "@multica/core/appearance";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { RESOURCES } from "@multica/views/locales";
@@ -22,6 +23,7 @@ type MockTab = {
 
 const state = vi.hoisted(() => ({
   activeWorkspaceSlug: "acme" as string | null,
+  tabAttention: null as { tabId: string; sequence: number } | null,
   byWorkspace: {
     acme: {
       activeTabId: "tA",
@@ -34,10 +36,13 @@ const state = vi.hoisted(() => ({
   togglePin: vi.fn<(tabId: string) => void>(),
   closeTab: vi.fn<(tabId: string) => void>(),
   closeOtherTabs: vi.fn<(tabId: string) => void>(),
+  closeTabsToRight: vi.fn<(tabId: string) => void>(),
   setActiveTab: vi.fn<(tabId: string) => void>(),
   moveTab: vi.fn<(from: number, to: number) => void>(),
   addTab: vi.fn<(path: string, title: string) => string>(),
   updateTab: vi.fn<(tabId: string, patch: { title?: string }) => void>(),
+  rememberIssueIdentity: vi.fn<(tabId: string, uuid: string, identifier: string) => void>(),
+  clearTabAttention: vi.fn<(sequence: number) => void>(),
   openIssueWindow: vi.fn(),
 }));
 
@@ -49,13 +54,19 @@ vi.mock("@/stores/tab-store", () => {
     get byWorkspace() {
       return state.byWorkspace;
     },
+    get tabAttention() {
+      return state.tabAttention;
+    },
     togglePin: state.togglePin,
     closeTab: state.closeTab,
     closeOtherTabs: state.closeOtherTabs,
+    closeTabsToRight: state.closeTabsToRight,
     setActiveTab: state.setActiveTab,
     moveTab: state.moveTab,
     addTab: state.addTab,
     updateTab: state.updateTab,
+    rememberIssueIdentity: state.rememberIssueIdentity,
+    clearTabAttention: state.clearTabAttention,
   };
   const useTabStore = Object.assign(
     (selector?: (s: typeof store) => unknown) =>
@@ -68,6 +79,10 @@ vi.mock("@/stores/tab-store", () => {
       : null;
   return { useTabStore, useActiveGroup };
 });
+
+vi.mock("@multica/views/navigation", () => ({
+  useNavigation: () => ({ getShareableUrl: (path: string) => `https://app.example${path}` }),
+}));
 
 vi.mock("@multica/core/paths", async (importOriginal) => ({
   // Spread the real module so pure helpers (parseTabSubject etc.) keep working.
@@ -85,12 +100,17 @@ vi.mock("@multica/core/paths", async (importOriginal) => ({
 // default `title` mirrors the persisted tab title (matching the real hook's
 // fallback); a test can set `pres.title` to simulate a resolved title that
 // differs, to exercise resolved-title persistence.
-const pres = vi.hoisted(() => ({ title: null as string | null, titleResolved: true }));
+const pres = vi.hoisted(() => ({
+  title: null as string | null,
+  titleResolved: true,
+  issueIdentity: undefined as { id: string; identifier: string } | undefined,
+}));
 vi.mock("@multica/views/layout", () => ({
-  useTabPresentation: vi.fn((_url: string, fallbackTitle?: string) => ({
+  useTabPresentation: vi.fn((url: string, fallbackTitle?: string) => ({
     visual: { kind: "icon", icon: "ListTodo" },
     title: pres.title ?? fallbackTitle ?? "",
     titleResolved: pres.titleResolved,
+    issueIdentity: url.includes("/issues/") ? pres.issueIdentity : undefined,
   })),
   ResourceLeadingVisual: ({ visual }: { visual: { kind: string; icon?: string } }) => (
     <span data-testid="tab-leading" data-visual-kind={visual.kind} data-icon={visual.icon} />
@@ -121,6 +141,7 @@ function englishTabBar() {
 
 function reset() {
   state.activeWorkspaceSlug = "acme";
+  state.tabAttention = null;
   state.byWorkspace = {
     acme: {
       activeTabId: "tA",
@@ -133,13 +154,17 @@ function reset() {
   state.togglePin.mockReset();
   state.closeTab.mockReset();
   state.closeOtherTabs.mockReset();
+  state.closeTabsToRight.mockReset();
   state.setActiveTab.mockReset();
   state.moveTab.mockReset();
   state.addTab.mockReset();
   state.updateTab.mockReset();
+  state.rememberIssueIdentity.mockReset();
+  state.clearTabAttention.mockReset();
   state.openIssueWindow.mockReset();
   pres.title = null;
   pres.titleResolved = true;
+  pres.issueIdentity = undefined;
   vi.mocked(useTabPresentation).mockClear();
 }
 
@@ -209,6 +234,19 @@ describe("TabBar hover action buttons", () => {
     expect(queryAllByLabelText("Close tab")).toHaveLength(1);
   });
 
+  it("keeps Pin and Close shown while the tab is pressed, not only on hover", () => {
+    // In full screen on a secondary display, Electron fires an offset
+    // pointermove right after pointerdown (electron/electron#55100), which
+    // drops :hover before mouseup. :active survives it.
+    const { getAllByLabelText } = render(<TabBar />);
+    for (const button of [
+      ...getAllByLabelText("Pin tab"),
+      ...getAllByLabelText("Close tab"),
+    ]) {
+      expect(button).toHaveClass("opacity-0", "group-hover:opacity-100", "group-active:opacity-100");
+    }
+  });
+
   it("keeps the full title visible on a pinned tab (no icon-only collapse)", () => {
     state.byWorkspace.acme.tabs = [
       { id: "tA", url: "/acme/issues", title: "Issues", pinned: true },
@@ -252,6 +290,23 @@ describe("TabBar hover action buttons", () => {
 });
 
 describe("TabBar title persistence", () => {
+  it("remembers the identity of a restored background identifier tab", () => {
+    const uuid = "01a08a00-0000-7000-8000-000000000001";
+    pres.issueIdentity = { id: uuid, identifier: "ACM-1" };
+    state.byWorkspace.acme.tabs[0] = {
+      id: "tA", url: "/acme/issues/ACM-1", title: "ACM-1", pinned: false,
+    };
+    state.byWorkspace.acme.activeTabId = "tB";
+
+    const { rerender } = render(<TabBar />);
+    expect(state.rememberIssueIdentity).toHaveBeenCalledExactlyOnceWith("tA", uuid, "ACM-1");
+    // A new result object for the same identity does not repeat the store write.
+    pres.issueIdentity = { id: uuid, identifier: "ACM-1" };
+    rerender(englishTabBar());
+    expect(state.rememberIssueIdentity).toHaveBeenCalledTimes(1);
+    expect(state.setActiveTab).not.toHaveBeenCalled();
+  });
+
   it("loads tab identities and persists resolved titles for background tabs too", () => {
     pres.title = "MUL-1: Fixed";
     state.byWorkspace.acme.tabs = [
@@ -280,6 +335,46 @@ describe("TabBar title persistence", () => {
   it("does not re-persist when the resolved title already matches (no loop)", () => {
     render(<TabBar />);
     expect(state.updateTab).not.toHaveBeenCalled();
+  });
+});
+
+describe("TabBar background open of an open tab", () => {
+  it("flashes the tab it landed on without activating it", () => {
+    state.tabAttention = { tabId: "tB", sequence: 1 };
+    const { container } = render(<TabBar />);
+
+    const frame = container.querySelector('[data-tab-id="tB"]')!;
+    expect(frame.querySelector("[data-tab-attention]")).not.toBeNull();
+    expect(container.querySelectorAll("[data-tab-attention]")).toHaveLength(1);
+    expect(state.setActiveTab).not.toHaveBeenCalled();
+  });
+
+  it("clears the signal once the flash has played", async () => {
+    state.tabAttention = { tabId: "tB", sequence: 3 };
+    render(<TabBar />);
+
+    await waitFor(() => expect(state.clearTabAttention).toHaveBeenCalledWith(3), {
+      timeout: 3000,
+    });
+  });
+
+  it("shows a static highlight without fading under reduced motion and clears after a short hold", async () => {
+    useAppearanceStore.getState().set({ reduceMotion: true });
+    try {
+      state.tabAttention = { tabId: "tB", sequence: 4 };
+      const { container } = render(<TabBar />);
+
+      const attention = container.querySelector<HTMLElement>("[data-tab-attention]");
+      expect(attention).not.toBeNull();
+      // Static span: no inline animated opacity style.
+      expect(attention?.style.opacity).toBe("");
+
+      await waitFor(() => expect(state.clearTabAttention).toHaveBeenCalledWith(4), {
+        timeout: 1500,
+      });
+    } finally {
+      useAppearanceStore.setState({ ...DEFAULT_APPEARANCE });
+    }
   });
 });
 
@@ -514,6 +609,67 @@ describe("TabBar overflow", () => {
   });
 });
 
+describe("TabBar reordering", () => {
+  it("lets a tab cross its neighbor and drop in the new position", async () => {
+    const { container, getByLabelText } = render(<TabBar />);
+    const tabStrip = container.querySelector("[data-tab-scroll-container]")!;
+    // jsdom has no layout. Give the strip and each tab's subtree the
+    // geometry of two adjacent tabs so dnd-kit's real collision logic runs.
+    const rectSpy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        if (this === tabStrip) return new DOMRect(0, 0, 300, 40);
+        const tab = this.closest("[data-tab-id]");
+        if (tab) {
+          const left = tab.getAttribute("data-tab-id") === "tA" ? 0 : 146;
+          return new DOMRect(left, 0, 140, 40);
+        }
+        return new DOMRect();
+      });
+
+    try {
+      fireEvent.pointerDown(getByLabelText("Issues"), {
+        button: 0,
+        pointerType: "mouse",
+        isPrimary: true,
+        clientX: 45,
+        clientY: 20,
+      });
+      fireEvent.pointerMove(document, { clientX: 55, clientY: 20 });
+      fireEvent.pointerMove(document, { clientX: 191, clientY: 20 });
+      fireEvent.pointerUp(document, { clientX: 191, clientY: 20 });
+
+      expect(state.moveTab).toHaveBeenCalledWith(0, 1);
+    } finally {
+      rectSpy.mockRestore();
+      // dnd-kit keeps its document-level click blocker for 50ms after a drop.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  });
+});
+
+describe("TabBar click activation", () => {
+  // electron/electron#55100: in macOS native full screen on a secondary
+  // display, a press near the top of the window is followed by one pointermove
+  // offset by that display's position, without the pointer moving.
+  it("switches tabs when a press is followed by a far-off stray pointermove", () => {
+    const { getByRole } = render(<TabBar />);
+    const tab = getByRole("button", { name: "Projects" });
+
+    fireEvent.pointerDown(tab, {
+      button: 0,
+      isPrimary: true,
+      clientX: 300,
+      clientY: 16,
+    });
+    fireEvent.pointerMove(document, { clientX: 708, clientY: 998 });
+    fireEvent.pointerUp(document, { clientX: 300, clientY: 16 });
+    fireEvent.click(tab);
+
+    expect(state.setActiveTab).toHaveBeenCalledWith("tB");
+  });
+});
+
 describe("TabBar context menu", () => {
   it("opens an issue-detail tab as a dedicated window", async () => {
     state.byWorkspace.acme.tabs = [
@@ -564,6 +720,28 @@ describe("TabBar context menu", () => {
     fireEvent.click(await findByText("Close other tabs"));
 
     expect(state.closeOtherTabs).toHaveBeenCalledWith("tB");
+  });
+
+  it("closes the tabs to the right, and only offers it when one would close", async () => {
+    state.byWorkspace.acme.tabs = [
+      { id: "tA", url: "/acme/issues", title: "Issues", pinned: false },
+      { id: "tB", url: "/acme/projects", title: "Projects", pinned: false },
+      { id: "tC", url: "/acme/agents", title: "Agents", pinned: true },
+    ];
+
+    const { findByRole, getByLabelText, unmount } = render(<TabBar />);
+    fireEvent.contextMenu(getByLabelText("Issues"));
+    fireEvent.click(await findByRole("menuitem", { name: "Close tabs to the right" }));
+    expect(state.closeTabsToRight).toHaveBeenCalledWith("tA");
+    unmount();
+
+    // Only a pinned tab sits to the right of Projects.
+    const second = render(<TabBar />);
+    fireEvent.contextMenu(second.getByLabelText("Projects"));
+    expect(await second.findByRole("menuitem", { name: "Close tabs to the right" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
   });
 
 });
@@ -623,6 +801,15 @@ describe("TabBar locale", () => {
       openWindow: "Abrir en ventana nueva",
       newTab: "Pestaña nueva",
       pinned: "Issues (fijada)",
+    },
+    ru: {
+      pin: "Закрепить вкладку",
+      unpin: "Открепить вкладку",
+      close: "Закрыть вкладку",
+      closeOthers: "Закрыть другие вкладки",
+      openWindow: "Открыть в новом окне",
+      newTab: "Новая вкладка",
+      pinned: "Issues (закреплено)",
     },
   } as const satisfies Record<
     Exclude<SupportedLocale, "en">,

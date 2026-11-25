@@ -11,6 +11,7 @@ import {
 } from "@multica/ui/components/ui/hover-card";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
+import { squadListOptions } from "@multica/core/workspace/queries";
 import type { AgentTask, IssueWakeupSummaryRow, PausedWakeup } from "@multica/core/types";
 import { pausedWakeupsOptions, workspaceWakeupSummariesOptions } from "@multica/core/issues/wakeups";
 import { cn } from "@multica/ui/lib/utils";
@@ -18,6 +19,7 @@ import type { AvatarSize } from "@multica/ui/lib/avatar-size";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { AgentActivityHoverContent } from "../../agents/components/agent-activity-hover-content";
 import { selectIssueTasks, type IssueTaskGroups } from "../surface/activity";
+import { groupExecutionTasksByActor } from "../surface/execution-actors";
 import { useT } from "../../i18n";
 import { useWakeupText } from "./wakeup-presentation";
 
@@ -126,20 +128,28 @@ export const IssueAgentActivityIndicator = memo(
       select,
     });
 
-    const { agentIds, opacity } = useMemo(() => {
+    const { data: squads } = useQuery(squadListOptions(wsId));
+    const knownSquadIds = useMemo(
+      () => (squads ? new Set(squads.map((s) => s.id)) : null),
+      [squads],
+    );
+
+    const { agentIds, actors, opacity } = useMemo(() => {
       // Stack heads: prefer running. If 0 running, fall back to queued.
       // Each case is visually distinct (running gets shimmer, queued gets
       // muted text) so the indicator always offers a face to hover.
       const primary =
         groups.running.length > 0 ? groups.running : groups.queued;
       const uniqueAgents = [...new Set(primary.map((t) => t.agent_id))];
+      const grouped = groupExecutionTasksByActor(primary, knownSquadIds);
       return {
         agentIds: uniqueAgents,
+        actors: grouped.map(({ type, id }) => ({ type, id })),
         opacity: (groups.running.length > 0 ? "full" : "half") as
           | "full"
           | "half",
       };
-    }, [groups]);
+    }, [groups, knownSquadIds]);
 
     const wakeupCount = wakeups[0]?.active_count ?? 0;
     const hasTasks = agentIds.length > 0;
@@ -164,6 +174,7 @@ export const IssueAgentActivityIndicator = memo(
       <>
         <AgentAvatarStack
           agentIds={agentIds}
+          actors={actors}
           size={size}
           opacity={opacity}
           max={3}

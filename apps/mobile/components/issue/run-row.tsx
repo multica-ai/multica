@@ -102,7 +102,7 @@ function StatusBadge({ task }: { task: AgentTask }) {
   // For failed tasks, surface the failure_reason inline so users don't have
   // to drill in. Missing / empty / unrecognised stays as just "Failed".
   if (task.status === "failed") {
-    const reasonLabel = runFailureBadgeLabel(task.failure_reason);
+    const reasonLabel = runFailureBadgeLabel(task.failure_reason, t);
     if (reasonLabel) {
       return (
         <Text className={`text-xs ${cls}`}>

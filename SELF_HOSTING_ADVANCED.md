@@ -120,7 +120,7 @@ use S3-compatible object storage instead.
 
 | Variable | Description |
 |----------|-------------|
-| `LOCAL_UPLOAD_DIR` | Directory attachments are written to (default: `./data/uploads`). The default is **relative to the backend's working directory** — `/app` in the bundled image, where the compose file mounts the `backend_uploads` volume. When running the binary manually it resolves against whatever directory you launched from, so set an absolute path; otherwise uploads land somewhere new each time the launch directory changes, and existing `attachment` rows point at files the server no longer looks for |
+| `LOCAL_UPLOAD_DIR` | Directory attachments are written to (default: `./data/uploads`). The default is **relative to the backend's working directory** — `/app` in the bundled image, where the compose file mounts the `backend_uploads` volume. The compose file does not pass this variable, so its uploads always stay on that volume; to move them, change the volume mount in a compose override. When running the binary manually it resolves against whatever directory you launched from, so set an absolute path; otherwise uploads land somewhere new each time the launch directory changes, and existing `attachment` rows point at files the server no longer looks for |
 | `LOCAL_UPLOAD_BASE_URL` | Optional absolute base for attachment URLs (e.g. `http://localhost:8080`). Leave empty to store `/uploads/...` paths that stay relative to the API origin |
 
 Uploads support files up to **100 MiB**. The backend allows an additional
@@ -206,6 +206,50 @@ fallback: Next uses `PORT` for its own frontend listener before it evaluates the
 rewrite configuration. Its backend fallback therefore accepts
 `BACKEND_PORT` → `API_PORT` → `SERVER_PORT` → `8080`, while an explicit
 `REMOTE_API_URL` or `NEXT_PUBLIC_API_URL` still takes priority.
+
+### Feature Flags (Optional)
+
+Some features are switched with `FF_<FLAG_KEY>` variables: `true`, `false` (or `on` / `off`), a percent rollout like `25%`, or a variant name.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FF_DOCS_V1` | off | Workspace Docs. |
+| `FF_LOCAL_SEARCH_INDEX` | on | Web and Desktop keep a local search index per workspace. Set `off` to make clients search through the server again. |
+| `FF_DASHBOARD_HISTORY_365D` | on | The 365-day range on the Analytics page. Set `off` if year-long dashboard queries are too slow for your database. |
+
+With Docker Compose, set them in `.env` and run `make selfhost` (or `docker compose -f docker-compose.selfhost.yml up -d`) again. `docker-compose.selfhost.yml` passes only the flags listed above, and only when they are set, so leave a flag out of `.env` to keep its default: a flag set to an empty value is off.
+
+With Helm, list flags by key under `backend.config.featureFlags`; each becomes `FF_<KEY>` in the backend ConfigMap, and the backend restarts when they change:
+
+```yaml
+backend:
+  config:
+    featureFlags:
+      docs_v1: true
+      local_search_index: false
+```
+
+### Live Doc Co-editing (Optional)
+
+Docs (`FF_DOCS_V1=true`, see [Feature Flags](#feature-flags-optional)) work without it: every edit saves through the API. The `collab` service adds live co-editing, where everyone in a doc sees each other's cursors and changes as they type, and the editor shows **Live**. Editors never connect to it directly. They open a WebSocket to `/collab` on the backend, the same way they reach `/ws`, and the backend forwards it.
+
+| Variable | Service | Description |
+|----------|---------|-------------|
+| `COLLAB_SECRET` | backend, collab | Shared secret that signs editor tickets and authenticates the backend and collab to each other. Generate with `openssl rand -hex 32`. In `docker-compose.selfhost.yml`, setting it is also what points the backend at the collab service. |
+| `COMPOSE_PROFILES` | Compose | Add `collab` to start the collab service (`COMPOSE_PROFILES=collab`). |
+| `COLLAB_INTERNAL_URL` | backend | Where the backend reaches collab. Compose derives `http://collab:8095` from `COLLAB_SECRET`; set it only when collab runs elsewhere. Live editing is off whenever this or `COLLAB_SECRET` is empty. |
+| `MULTICA_API_URL` | collab | Where collab reaches the backend to load and store docs. Compose sets `http://backend:8080`. |
+| `MULTICA_CDN_DOMAIN` | collab | Must equal the CDN domain the backend reports, so links to uploaded files become the same nodes the editor makes. That is `CLOUDFRONT_DOMAIN` with S3 storage, and the host of `LOCAL_UPLOAD_BASE_URL` with local uploads (empty when that is unset). Compose fills it from `CLOUDFRONT_DOMAIN`. |
+| `MULTICA_COLLAB_IMAGE` | Compose | Image repository; the tag follows `MULTICA_IMAGE_TAG`. |
+
+Turn it on with both lines in `.env`, then `make selfhost` (or `docker compose -f docker-compose.selfhost.yml up -d`):
+
+```bash
+COLLAB_SECRET=<openssl rand -hex 32>
+COMPOSE_PROFILES=collab
+```
+
+Set them together. A secret with no running collab service leaves every editor waiting 8 seconds before it falls back to saving through the API. Run exactly one collab instance: each open doc lives in that one process's memory. A reverse proxy needs a `/collab` route next to `/ws` (see [Reverse Proxy](#reverse-proxy)).
 
 ### Private CA Certificates (Optional)
 
@@ -531,7 +575,7 @@ In production, put a reverse proxy in front of both the backend and frontend to 
 ```
 multica.example.com {
     # WebSocket route — must come before the catch-all
-    @multica_ws path /ws /ws/*
+    @multica_ws path /ws /ws/* /collab
     handle @multica_ws {
         reverse_proxy localhost:8080 {
             flush_interval -1
@@ -553,7 +597,7 @@ app.example.com {
 }
 
 api.example.com {
-    @multica_ws path /ws /ws/*
+    @multica_ws path /ws /ws/* /collab
     handle @multica_ws {
         reverse_proxy localhost:8080 {
             flush_interval -1
@@ -564,7 +608,7 @@ api.example.com {
 }
 ```
 
-Two non-obvious bits inside the `/ws` block are worth calling out — both are common reasons real-time updates "stop working" on a Caddy-fronted self-host:
+Two non-obvious bits inside the `/ws` block are worth calling out — both are common reasons real-time updates "stop working" on a Caddy-fronted self-host. `/collab` is the WebSocket for [live doc co-editing](#live-doc-co-editing-optional) and needs the same treatment; it is harmless when collab is off:
 
 - **`path /ws /ws/*` (not `/ws*`)** — bare `handle /ws` is an exact match, so future path variants under `/ws/` fall through to the frontend block. The obvious shortcut `handle /ws*` overcorrects in the other direction: Caddy's `*` is a glob without a path-segment boundary, so it would also catch unrelated paths like `/ws-foo`, which is a legitimate workspace URL (only the exact slug `ws` is reserved). Listing `/ws` and `/ws/*` explicitly covers both real cases without overreach.
 - **`flush_interval -1`** — disables response buffering so WebSocket frames are forwarded as soon as they arrive. Without it, frames can sit behind Caddy's default flush window, which looks like delayed comments, missing typing indicators, or "comments only appear after a page refresh."
@@ -614,6 +658,16 @@ server {
         proxy_set_header Host $host;
         proxy_read_timeout 86400;
     }
+
+    # Live doc co-editing (same WebSocket settings)
+    location /collab {
+        proxy_pass http://localhost:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 86400;
+    }
 }
 ```
 
@@ -631,7 +685,7 @@ NEXT_PUBLIC_API_URL=https://api.example.com
 NEXT_PUBLIC_WS_URL=wss://api.example.com/ws
 ```
 
-> **`NEXT_PUBLIC_API_URL` and `REMOTE_API_URL` take the backend's origin — scheme + host (+ port) — and no path.** Write `https://api.example.com`, never `https://api.example.com/api`. The browser client appends its own prefixes, so a path is doubled: requests go to `/api/api/...` and every avatar, image and attachment resolves under `<your-path>/uploads/...`, which the backend does not serve — the app loads but data calls and images 404. A trailing `/api` is now stripped defensively, but any other path is kept, because a reverse proxy may legitimately mount the whole backend under a prefix.
+> **`NEXT_PUBLIC_API_URL` and `REMOTE_API_URL` take the backend's origin — scheme + host (+ port) — and no path.** Write `https://api.example.com`, never `https://api.example.com/api`. The browser client appends its own prefixes, so an `/api` suffix is doubled: requests go to `/api/api/...` instead of the backend's `/api/...` endpoints, breaking data calls and avatar loads. A trailing `/api` is now stripped defensively, but any other path is kept, because a reverse proxy may legitimately mount the whole backend under a prefix.
 >
 > This bites on upgrade: before v0.4.10 `NEXT_PUBLIC_API_URL` was inert in the published images, so a wrong value sat in `.env` doing nothing. v0.4.10 wired it through, and the stale value took effect. If you upgraded and the UI loads but nothing else does, check this variable first, then recreate the frontend container (`docker compose ... up -d --force-recreate frontend`) so the new value is picked up.
 
@@ -661,14 +715,24 @@ COOKIE_DOMAIN=                       # empty: cookies are host-only on app.examp
 # Frontend
 NEXT_PUBLIC_API_URL=                 # empty: the client uses relative /api paths on the page origin
 NEXT_PUBLIC_WS_URL=                  # empty
-REMOTE_API_URL=http://backend:8080   # target the Next.js rewrites proxy /v1, /api, /auth and /uploads to
+REMOTE_API_URL=http://backend:8080   # upstream for /v1, /api, /auth and /health
 ```
 
-Serve everything from the single `app.example.com` vhost. HTTP works out of the box, because Next.js rewrites forward `/v1`, `/api`, `/auth` and `/uploads` to `REMOTE_API_URL`. WebSockets do **not** go through those rewrites, so add a `/ws` block to the frontend vhost that reaches the backend directly:
+Serve everything from the single `app.example.com` vhost. HTTP works out of the box, because the frontend forwards `/v1`, `/api`, `/auth` and `/health` to `REMOTE_API_URL`. WebSockets do **not** go through those rewrites, so add a block for `/ws` and `/collab` to the frontend vhost that reaches the backend directly:
 
 ```nginx
 # Add to the app.example.com server block above
 location /ws {
+    proxy_pass http://localhost:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_read_timeout 86400;
+}
+
+# Live doc co-editing (same WebSocket settings)
+location /collab {
     proxy_pass http://localhost:8080;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
@@ -700,7 +764,7 @@ docker compose -f docker-compose.selfhost.yml up -d
 
 ### WebSocket for LAN / Non-localhost Access
 
-HTTP requests (Plugin API, issues, comments, uploads) work on LAN out of the box — Next.js rewrites proxy `/v1`, `/api`, `/auth`, and `/uploads` to the backend. **WebSockets do not**: Next.js rewrites only forward HTTP requests, not the `Upgrade` handshake a WebSocket needs. If you open the app on `http://<lan-ip>:3000`, real-time features (chat streaming, live issue updates, notifications) will fail to connect until you do one of the following:
+HTTP requests (issues, comments, file uploads) work on LAN out of the box — the frontend forwards `/api`, `/auth`, and `/health` to the backend. **WebSockets do not**: Next.js rewrites only forward HTTP requests, not the `Upgrade` handshake a WebSocket needs. If you open the app on `http://<lan-ip>:3000`, real-time features (chat streaming, live issue updates, notifications) will fail to connect until you do one of the following:
 
 1. **Put a reverse proxy in front of the stack (recommended).** Nginx or Caddy terminates the WebSocket upgrade and forwards it to the backend on port 8080. See the [Reverse Proxy](#reverse-proxy) section above — the Nginx example already includes a `location /ws { ... }` block with the correct `Upgrade` / `Connection` headers. Once a proxy is in place the browser connects directly through it, so no frontend rebuild is needed.
 
