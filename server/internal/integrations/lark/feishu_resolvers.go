@@ -44,10 +44,13 @@ func larkMsgFromRaw(msg channel.InboundMessage) (InboundMessage, error) {
 // shared session service, audit logger, and (optional) outbound replier +
 // typing indicator. Feishu is just another consumer of the channel-agnostic
 // engine.ChatSession — there is no Feishu-specific session implementation.
-func NewFeishuResolverSet(store *ChannelStore, session *engine.ChatSession, audit AuditLogger, replier OutcomeReplier, typing *TypingIndicatorManager, media engine.MediaResolver) engine.ResolverSet {
+//
+// openGroupAccess reports whether the deployment honours an installation's
+// GroupSendersAnyone policy; nil means it never does.
+func NewFeishuResolverSet(store *ChannelStore, session *engine.ChatSession, audit AuditLogger, replier OutcomeReplier, typing *TypingIndicatorManager, media engine.MediaResolver, openGroupAccess func(context.Context) bool) engine.ResolverSet {
 	set := engine.ResolverSet{
 		Installation: &feishuInstallationResolver{store: store},
-		Identity:     &feishuIdentityResolver{store: store},
+		Identity:     &feishuIdentityResolver{store: store, openGroupAccess: openGroupAccess},
 		Dedup:        &feishuDeduper{store: store},
 		Session:      &feishuSessionBinder{session: session},
 		Audit:        &feishuAuditor{audit: audit},
@@ -93,27 +96,61 @@ func (r *feishuInstallationResolver) ResolveInstallation(ctx context.Context, ms
 
 // ---- identity ----
 
-type feishuIdentityResolver struct{ store *ChannelStore }
+// identityStore is the slice of ChannelStore the identity resolver reads.
+type identityStore interface {
+	GetLarkUserBindingByOpenID(ctx context.Context, arg GetUserBindingByOpenIDParams) (UserBinding, error)
+	IsWorkspaceMember(ctx context.Context, workspaceID, userID pgtype.UUID) (bool, error)
+}
+
+type feishuIdentityResolver struct {
+	store           identityStore
+	openGroupAccess func(context.Context) bool
+}
 
 func (r *feishuIdentityResolver) ResolveSender(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage) (engine.ResolvedIdentity, error) {
 	binding, err := r.store.GetLarkUserBindingByOpenID(ctx, GetUserBindingByOpenIDParams{
 		InstallationID: inst.ID,
 		ChannelUserID:  msg.Source.SenderID,
 	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return engine.ResolvedIdentity{}, engine.ErrSenderUnbound
-		}
+	refusal := engine.ErrSenderUnbound
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+	case err != nil:
 		return engine.ResolvedIdentity{}, err
+	default:
+		isMember, err := r.store.IsWorkspaceMember(ctx, inst.WorkspaceID, binding.MulticaUserID)
+		if err != nil {
+			return engine.ResolvedIdentity{}, err
+		}
+		if isMember {
+			return engine.ResolvedIdentity{UserID: binding.MulticaUserID}, nil
+		}
+		refusal = engine.ErrSenderNotMember
 	}
-	isMember, err := r.store.IsWorkspaceMember(ctx, inst.WorkspaceID, binding.MulticaUserID)
+	return r.resolveOpenGroupSender(ctx, inst, msg, refusal)
+}
+
+// resolveOpenGroupSender serves a group sender who is unbound or not a member
+// as the installer when the installation lets anyone in a group use the Bot.
+// The installer must still be a member: a run needs an accountable member, and
+// the Router's invoke check then judges the installer. Otherwise the sender is
+// refused exactly as without the policy.
+func (r *feishuIdentityResolver) resolveOpenGroupSender(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, refusal error) (engine.ResolvedIdentity, error) {
+	larkInst, ok := inst.Platform.(Installation)
+	if !ok || msg.Source.ChatType != channel.ChatTypeGroup ||
+		larkInst.GroupSenderPolicy != GroupSendersAnyone ||
+		!inst.InstallerUserID.Valid ||
+		r.openGroupAccess == nil || !r.openGroupAccess(ctx) {
+		return engine.ResolvedIdentity{}, refusal
+	}
+	isMember, err := r.store.IsWorkspaceMember(ctx, inst.WorkspaceID, inst.InstallerUserID)
 	if err != nil {
 		return engine.ResolvedIdentity{}, err
 	}
 	if !isMember {
-		return engine.ResolvedIdentity{}, engine.ErrSenderNotMember
+		return engine.ResolvedIdentity{}, refusal
 	}
-	return engine.ResolvedIdentity{UserID: binding.MulticaUserID}, nil
+	return engine.ResolvedIdentity{UserID: inst.InstallerUserID}, nil
 }
 
 // ---- dedup ----

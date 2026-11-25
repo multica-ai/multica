@@ -35,6 +35,33 @@ const (
 	InstallationRevoked InstallationStatus = "revoked"
 )
 
+// GroupSenderPolicy decides who in a group chat may use the Bot.
+//
+// GroupSendersMembersOnly (the default, and the reading of any unknown value)
+// serves only senders bound to a member of the installation's workspace.
+// GroupSendersAnyone also serves group senders who are unbound or not members:
+// their turns run as the installer, who stays the accountable member, so the
+// installer's own invoke permission still decides. It never applies to p2p,
+// where an unbound sender still gets the binding card. Re-installing replaces
+// the config and so resets the policy, since the installer may change.
+type GroupSenderPolicy string
+
+const (
+	GroupSendersMembersOnly GroupSenderPolicy = "members_only"
+	GroupSendersAnyone      GroupSenderPolicy = "anyone_in_chat"
+)
+
+// ParseGroupSenderPolicy maps a stored or requested value to a policy. ok is
+// false for an unknown value, which reads as members only.
+func ParseGroupSenderPolicy(s string) (GroupSenderPolicy, bool) {
+	switch GroupSenderPolicy(s) {
+	case GroupSendersMembersOnly, GroupSendersAnyone:
+		return GroupSenderPolicy(s), true
+	default:
+		return GroupSendersMembersOnly, false
+	}
+}
+
 // Region identifies which Lark open-platform cloud an installation lives
 // on. Feishu (mainland China, open.feishu.cn / accounts.feishu.cn) and
 // Lark (international, open.larksuite.com / accounts.larksuite.com) are

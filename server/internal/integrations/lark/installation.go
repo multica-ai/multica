@@ -121,6 +121,19 @@ func (s *InstallationService) GetInWorkspace(ctx context.Context, id, workspaceI
 	return row, nil
 }
 
+// SetGroupSenderPolicy stores who in a group chat may use the Bot. The
+// workspace scope makes a forged id from another workspace a NotFound.
+func (s *InstallationService) SetGroupSenderPolicy(ctx context.Context, id, workspaceID pgtype.UUID, policy GroupSenderPolicy) (Installation, error) {
+	row, err := s.queries.SetLarkInstallationGroupSenderPolicy(ctx, id, workspaceID, policy)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Installation{}, ErrInstallationNotFound
+		}
+		return Installation{}, err
+	}
+	return row, nil
+}
+
 // ListByWorkspace returns every installation rooted at the workspace,
 // active and revoked, oldest first. The status column lets the UI
 // distinguish "wired up" from "torn down but kept for audit".

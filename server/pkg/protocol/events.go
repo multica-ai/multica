@@ -233,6 +233,7 @@ const (
 	// deleting the row; the audit trail is preserved.
 	EventLarkInstallationCreated = "lark_installation:created"
 	EventLarkInstallationRevoked = "lark_installation:revoked"
+	EventLarkInstallationUpdated = "lark_installation:updated"
 
 	// Slack installation lifecycle (MUL-3666). Same semantics as the Lark
 	// events: `created` covers both first install and OAuth re-install (the

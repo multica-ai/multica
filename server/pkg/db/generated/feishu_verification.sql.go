@@ -97,3 +97,40 @@ func (q *Queries) SetFeishuInstallationBotUnionID(ctx context.Context, arg SetFe
 	_, err := q.db.Exec(ctx, setFeishuInstallationBotUnionID, arg.BotUnionID, arg.ID)
 	return err
 }
+
+const setFeishuInstallationGroupSenderPolicy = `-- name: SetFeishuInstallationGroupSenderPolicy :one
+UPDATE channel_installation
+SET config = jsonb_set(config, '{group_sender_policy}', to_jsonb($1::text)),
+    updated_at = now()
+WHERE id = $2
+  AND workspace_id = $3
+  AND channel_type = 'feishu'
+RETURNING id, workspace_id, agent_id, channel_type, config, status, ws_lease_token, ws_lease_expires_at, installer_user_id, installed_at, created_at, updated_at
+`
+
+type SetFeishuInstallationGroupSenderPolicyParams struct {
+	GroupSenderPolicy string      `json:"group_sender_policy"`
+	ID                pgtype.UUID `json:"id"`
+	WorkspaceID       pgtype.UUID `json:"workspace_id"`
+}
+
+// Patches only the policy key so concurrent receipt / union_id writes survive.
+func (q *Queries) SetFeishuInstallationGroupSenderPolicy(ctx context.Context, arg SetFeishuInstallationGroupSenderPolicyParams) (ChannelInstallation, error) {
+	row := q.db.QueryRow(ctx, setFeishuInstallationGroupSenderPolicy, arg.GroupSenderPolicy, arg.ID, arg.WorkspaceID)
+	var i ChannelInstallation
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AgentID,
+		&i.ChannelType,
+		&i.Config,
+		&i.Status,
+		&i.WsLeaseToken,
+		&i.WsLeaseExpiresAt,
+		&i.InstallerUserID,
+		&i.InstalledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}

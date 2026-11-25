@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
 )
@@ -495,4 +496,81 @@ func TestLarkInstallationReceiptWireShape(t *testing.T) {
 	check(false)
 	row.FirstMessageReceivedAt = &now
 	check(true)
+}
+
+// TestUpdateLarkInstallation_GroupSenderPolicy covers who may change the policy,
+// that opening group access waits on the flag while closing it never does, and
+// that the patch keeps the rest of the stored config.
+func TestUpdateLarkInstallation_GroupSenderPolicy(t *testing.T) {
+	wireLarkInstallServices(t)
+	agentID, ownerID, memberID := privateAgentTestFixture(t)
+	ctx := context.Background()
+
+	if _, err := testPool.Exec(ctx,
+		`DELETE FROM channel_installation WHERE workspace_id = $1 AND agent_id = $2 AND channel_type = 'feishu'`,
+		testWorkspaceID, agentID); err != nil {
+		t.Fatalf("clear prior installation: %v", err)
+	}
+	var instID string
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO channel_installation (workspace_id, agent_id, channel_type, config, installer_user_id, status)
+VALUES ($1, $2, 'feishu', jsonb_build_object('app_id', 'cli_policy_test', 'first_message_received_at', '2026-01-02T03:04:05Z'), $3, 'active')
+RETURNING id
+`, testWorkspaceID, agentID, ownerID).Scan(&instID); err != nil {
+		t.Fatalf("seed installation: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM channel_installation WHERE id = $1`, instID)
+	})
+
+	update := func(userID, policy string) *httptest.ResponseRecorder {
+		req := newRequestAs(userID, http.MethodPatch,
+			"/api/workspaces/"+testWorkspaceID+"/lark/installations/"+instID,
+			map[string]string{"group_sender_policy": policy})
+		req = withURLParams(req, "id", testWorkspaceID, "installationId", instID)
+		w := httptest.NewRecorder()
+		testHandler.UpdateLarkInstallation(w, req)
+		return w
+	}
+	stored := func() (policy, appID string, receipt bool) {
+		if err := testPool.QueryRow(ctx, `
+SELECT COALESCE(config->>'group_sender_policy', ''), config->>'app_id', config ? 'first_message_received_at'
+FROM channel_installation WHERE id = $1`, instID).Scan(&policy, &appID, &receipt); err != nil {
+			t.Fatalf("read installation: %v", err)
+		}
+		return
+	}
+
+	withFeatureFlag(t, testHandler, featureflags.LarkOpenGroupAccess, false)
+	if w := update(testUserID, "anyone_in_chat"); w.Code != http.StatusForbidden {
+		t.Fatalf("open while flag off: want 403, got %d: %s", w.Code, w.Body.String())
+	}
+	if w := update(testUserID, "members_only"); w.Code != http.StatusOK {
+		t.Fatalf("close while flag off: want 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	withFeatureFlag(t, testHandler, featureflags.LarkOpenGroupAccess, true)
+	if w := update(testUserID, "everyone"); w.Code != http.StatusBadRequest {
+		t.Fatalf("unknown policy: want 400, got %d", w.Code)
+	}
+	if w := update(memberID, "anyone_in_chat"); w.Code != http.StatusForbidden {
+		t.Fatalf("unrelated member: want 403, got %d", w.Code)
+	}
+	if policy, _, _ := stored(); policy == "anyone_in_chat" {
+		t.Fatal("a refused update changed the stored policy")
+	}
+	w := update(ownerID, "anyone_in_chat")
+	if w.Code != http.StatusOK {
+		t.Fatalf("agent owner: want 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp LarkInstallationResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.GroupSenderPolicy != "anyone_in_chat" {
+		t.Fatalf("response policy = %q", resp.GroupSenderPolicy)
+	}
+	if policy, appID, receipt := stored(); policy != "anyone_in_chat" || appID != "cli_policy_test" || !receipt {
+		t.Fatalf("stored config = policy %q app_id %q receipt %v", policy, appID, receipt)
+	}
 }
