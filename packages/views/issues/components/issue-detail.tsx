@@ -170,9 +170,11 @@ import { issueLabelsOptions } from "@multica/core/labels";
 import { propertyListOptions } from "@multica/core/properties";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import {
+  selectExpandedLongComments,
   selectExpandedResolved,
   useCommentCollapseStore,
   useCommentComposerStore,
+  useLongCommentExpandStore,
   useRecentIssuesStore,
   useResolvedExpandStore,
   useSubIssuesCollapseStore,
@@ -2013,11 +2015,12 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const virtualTimelineRef = useRef<HTMLDivElement>(null);
   const collapsedThreadIds = useCommentCollapseStore((s) => s.collapsedByIssue[id] ?? EMPTY_COLLAPSED_IDS);
+  const expandedLongComments = useLongCommentExpandStore(selectExpandedLongComments(id));
   const findUnits = useMemo(() => {
     let built: TimelineFindUnit[] | null = null;
-    const folds = { expandedResolved, collapsed: new Set(collapsedThreadIds) };
+    const folds = { expandedResolved, collapsed: new Set(collapsedThreadIds), expandedLong: expandedLongComments };
     return () => (built ??= buildTimelineFindUnits(items, timelineView.threadReplies, commentRuns, folds));
-  }, [items, timelineView.threadReplies, commentRuns, expandedResolved, collapsedThreadIds]);
+  }, [items, timelineView.threadReplies, commentRuns, expandedResolved, collapsedThreadIds, expandedLongComments]);
   const [findReveal, setFindReveal] = useState<{ unit: TimelineFindUnit; done: () => void } | null>(null);
   const revealFindUnit = useCallback((unit: TimelineFindUnit, done: () => void) => {
     const request = { unit, done };
@@ -2162,7 +2165,7 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
       items,
       timelineView.threadReplies,
       commentRuns,
-      { expandedResolved, collapsed: new Set(collapsedThreadIds) },
+      { expandedResolved, collapsed: new Set(collapsedThreadIds), expandedLong: expandedLongComments },
       {
         charsPerLine: timelineCharsPerLine(scrollContainerWidth),
         // Mirrors renderItem: only the trailing block opens by default, and it
@@ -2177,7 +2180,7 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
       },
     );
   }, [timelineMeasured, scrollContainerWidth, items, timelineView.threadReplies, commentRuns, expandedResolved,
-    collapsedThreadIds, expandedActivityIds, collapsedActivityIds, showOlderActivityIds, lastActivityGroupId, handoffActivityGroupIds]);
+    collapsedThreadIds, expandedLongComments, expandedActivityIds, collapsedActivityIds, showOlderActivityIds, lastActivityGroupId, handoffActivityGroupIds]);
   // Whether Virtuoso can place a row by index. Without estimates it needs one
   // measured row first: the timeline is scrolled into view to get it. With
   // estimates it already can, and that detour would mount the top of the

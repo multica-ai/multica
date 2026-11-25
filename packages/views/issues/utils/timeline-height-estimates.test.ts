@@ -12,7 +12,7 @@ import type { TimelineFolds, TimelineRowItem } from "./timeline-row-content";
 function comment(id: string, content: string, overrides: Partial<TimelineEntry> = {}): TimelineEntry {
   return { id, type: "comment", actor_type: "member", actor_id: "user", created_at: "2026-09-07T00:00:00Z", content, ...overrides };
 }
-const OPEN: TimelineFolds = { expandedResolved: new Set(), collapsed: new Set() };
+const OPEN: TimelineFolds = { expandedResolved: new Set(), collapsed: new Set(), expandedLong: new Set() };
 const options = { charsPerLine: 80, activityLines: () => 0 };
 
 describe("estimateMarkdownHeight", () => {
@@ -61,6 +61,15 @@ describe("estimateTimelineItemHeights", () => {
     const [bar] = estimateTimelineItemHeights([{ kind: "resolved-bar", id: root.id, entry: root }], replies, new Map(), OPEN, options);
     expect(collapsed).toBeLessThan(100);
     expect(bar).toBeLessThan(100);
+  });
+
+  it("sizes a collapsed long comment by its preview", () => {
+    const huge = comment("huge", `{"rows":[${'{"id":1},'.repeat(20_000)}]}`);
+    const thread: TimelineRowItem[] = [{ kind: "comment", id: huge.id, entry: huge }];
+    const [collapsed] = estimateTimelineItemHeights(thread, new Map(), new Map(), OPEN, options);
+    const [expanded] = estimateTimelineItemHeights(thread, new Map(), new Map(), { ...OPEN, expandedLong: new Set([huge.id]) }, options);
+    expect(collapsed).toBeLessThan(1_000);
+    expect(expanded).toBeGreaterThan(10 * collapsed!);
   });
 
   it("adds a run's output to its block", () => {

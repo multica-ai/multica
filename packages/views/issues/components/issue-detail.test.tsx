@@ -396,6 +396,10 @@ vi.mock("@multica/core/issues/stores", async () => ({
   ...(await vi.importActual<
     typeof import("@multica/core/issues/stores/resolved-expand-store")
   >("@multica/core/issues/stores/resolved-expand-store")),
+  // Real store, in-memory: which long comments the reader expanded.
+  ...(await vi.importActual<
+    typeof import("@multica/core/issues/stores/long-comment-expand-store")
+  >("@multica/core/issues/stores/long-comment-expand-store")),
   // Real store: sub-issue display tests drive it with setState, and the
   // component reads it through the barrel — both must hit the same instance.
   ...(await vi.importActual<

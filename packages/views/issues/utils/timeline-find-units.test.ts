@@ -14,7 +14,7 @@ function comment(id: string, content: string, overrides: Partial<TimelineEntry> 
   return { id, type: "comment", actor_type: "member", actor_id: "user", created_at: "2026-09-07T00:00:00Z", content, ...overrides };
 }
 const at = (minute: number) => `2026-09-07T00:0${minute}:00Z`;
-const OPEN: TimelineFolds = { expandedResolved: new Set(), collapsed: new Set() };
+const OPEN: TimelineFolds = { expandedResolved: new Set(), collapsed: new Set(), expandedLong: new Set() };
 const keys = (units: { key: string }[]) => units.map((unit) => unit.key);
 
 describe("buildTimelineFindUnits", () => {
@@ -65,6 +65,18 @@ describe("buildTimelineFindUnits", () => {
     expect(keys(buildTimelineFindUnits(thread, folded, new Map(), OPEN))).toEqual(["root", "reply"]);
     expect(keys(buildTimelineFindUnits(thread, folded, new Map(),
       { ...OPEN, expandedResolved: new Set([root.id]) }))).toEqual(["root", "reply", "answer"]);
+  });
+
+  it("searches only the preview of a long comment until the reader expands it", () => {
+    const long = comment("long", `opening words\n${"filler ".repeat(3_000)}\nhidden ending`);
+    const thread: TimelineRowItem[] = [{ kind: "comment", id: long.id, entry: long }];
+
+    const [collapsed] = buildTimelineFindUnits(thread, new Map(), new Map(), OPEN);
+    expect(collapsed!.text).toContain("opening words");
+    expect(collapsed!.text).not.toContain("hidden ending");
+
+    const [expanded] = buildTimelineFindUnits(thread, new Map(), new Map(), { ...OPEN, expandedLong: new Set([long.id]) });
+    expect(expanded!.text).toContain("hidden ending");
   });
 
   it("leaves out a failure notice, which renders as its run's block", () => {

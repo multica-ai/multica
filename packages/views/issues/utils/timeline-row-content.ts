@@ -8,6 +8,7 @@ import {
   type CommentRun,
 } from "../components/comment-runs";
 import { deriveThreadResolution } from "../components/thread-utils";
+import { visibleCommentMarkdown } from "./long-comment";
 
 /** The fields of a timeline row this needs; issue-detail's rows satisfy it. */
 export type TimelineRowItem =
@@ -16,10 +17,14 @@ export type TimelineRowItem =
   | { kind: "resolved-bar"; id: string; entry: TimelineEntry }
   | { kind: "activity-group"; id: string };
 
-/** What the reader has folded: resolved threads they opened, threads they collapsed. */
+/**
+ * What the reader has folded: resolved threads they opened, threads they
+ * collapsed, long comments they expanded.
+ */
 export interface TimelineFolds {
   expandedResolved: ReadonlySet<string>;
   collapsed: ReadonlySet<string>;
+  expandedLong: ReadonlySet<string>;
 }
 
 /** A Markdown body a row renders: a comment, or the output of a run that posted none. */
@@ -64,8 +69,9 @@ function threadContent(
 ): TimelineRowContent {
   if (folds.collapsed.has(root.id)) return { shape: "collapsed-thread" };
   const bodies: TimelineRowBody[] = [];
+  // A long comment shows only its opening until the reader expands it.
   const add = (key: string, anchorId: string, markdown: string | null | undefined) => {
-    if (markdown) bodies.push({ key, anchorId, markdown });
+    if (markdown) bodies.push({ key, anchorId, markdown: visibleCommentMarkdown(markdown, folds.expandedLong.has(key)) });
   };
   const replies = [...(threadReplies.get(root.id) ?? [])];
   const runs = commentRuns.get(root.id) ?? [];
