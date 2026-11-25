@@ -164,9 +164,18 @@ export function useWakeupText() {
     w.mode === "once"
       ? t(($) => $.wakeups.once)
       : t(($) => $.wakeups.continuous);
-  const schedule = (w: WakeupPreview) => {
+  // `short` drops the "wake" verb where the surrounding list already says it.
+  const schedule = (w: WakeupPreview, short = false) => {
     if (w.kind === "every") {
       const seconds = w.interval_seconds ?? 0;
+      if (short)
+        return seconds === 3600
+          ? t(($) => $.wakeups.short.hourly)
+          : seconds % 3600 === 0
+            ? t(($) => $.wakeups.short.every_hours, { hours: seconds / 3600 })
+            : seconds % 60 === 0
+              ? t(($) => $.wakeups.every, { minutes: seconds / 60 })
+              : t(($) => $.wakeups.short.every_seconds, { seconds });
       return seconds === 3600
         ? t(($) => $.wakeups.hourly)
         : seconds % 3600 === 0
@@ -236,10 +245,13 @@ export function useWakeupText() {
       case "children_done":
         return c.stage ? { key: "children_stage" as const, values: { stage: c.stage } } : { key: "children_all" as const, values: {} };
       case "pull_request":
-        return { key: c.event === "merged" ? ("pr_merged" as const) : ("pr_checks" as const), values: {} };
+        return {
+          key: c.event === "merged" ? ("pr_merged" as const) : c.event === "conflicts" ? ("pr_conflicts" as const) : ("pr_checks" as const),
+          values: {},
+        };
       case "other_issue":
         return {
-          key: c.state === "ended" ? ("other_ended" as const) : c.state === "in_review" ? ("other_in_review" as const) : ("other_done" as const),
+          key: c.state === "ended" ? ("other_ended" as const) : c.state === "in_review" ? ("other_in_review" as const) : c.state === "blocked" ? ("other_blocked" as const) : ("other_done" as const),
           values: { issue: c.identifier || t(($) => $.wakeups.cond.another_issue) },
         };
     }
@@ -253,15 +265,20 @@ export function useWakeupText() {
     const { key, values } = conditionParts(c);
     return String(t(($) => $.wakeups.wait[key], values as Record<string, string | number>));
   };
-  const trigger = (w: WakeupPreview) => {
+  const trigger = (w: WakeupPreview, short = false) => {
     if (w.condition) return condition(w.condition);
-    if (w.kind === "every" || w.kind === "cron") return schedule(w);
-    if (w.kind === "at")
+    if (w.kind === "every" || w.kind === "cron") return schedule(w, short);
+    if (w.kind === "at") {
+      if (short)
+        return w.next_fire_at
+          ? t(($) => $.wakeups.short.at_time, { time: time(w.next_fire_at) })
+          : t(($) => $.wakeups.short.scheduled_time);
       return w.next_fire_at
         ? t(($) => $.wakeups.at_time, {
             time: time(w.next_fire_at),
           })
         : t(($) => $.wakeups.scheduled_time);
+    }
     const event = w.event_types[0] ?? "";
     let label = eventCondition(event, w);
     if (w.filter_task_id)
@@ -311,9 +328,10 @@ export function useWakeupText() {
       : t(($) => $.wakeups.until_date, { date: date(w.expires_at) });
   };
   // The row's second line: who is woken, how often, and when the rule ends.
-  const summary = (w: Omit<IssueWakeup, "instruction">, closed = false) =>
+  // `omitAgent` leaves out the agent when the reader can assume it.
+  const summary = (w: Omit<IssueWakeup, "instruction">, closed = false, omitAgent = false) =>
     [
-      t(($) => $.wakeups.wake_agent, { agent: w.agent_name }),
+      omitAgent ? null : t(($) => $.wakeups.wake_agent, { agent: w.agent_name }),
       w.kind === "event" || w.kind === "at" ? frequency(w) : state(w, closed),
       !w.enabled && (w.kind === "event" || w.kind === "at") ? state(w, closed) : null,
       closed ? null : ending(w),

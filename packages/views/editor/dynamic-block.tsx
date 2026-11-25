@@ -15,30 +15,38 @@
  *
  * The kinds supply only the preview; the frame owns the chrome, the source
  * view and the error panel.
+ *
+ * The editor draws the same frame (MUL-9760); see DynamicBlockEditing for what
+ * differs there.
  */
 
 import {
   useCallback,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
   type Ref,
 } from "react";
+import { prefersReducedMotion } from "@multica/core/appearance";
 import {
   AppWindow,
-  Check,
   ChevronDown,
   CodeXml,
-  Copy,
   Maximize2,
+  RotateCw,
   TriangleAlert,
   Workflow,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import { copyText } from "@multica/ui/lib/clipboard";
+import { isImeComposing } from "@multica/core/utils";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../i18n";
 import { CodeBlockStatic } from "./code-block-static";
@@ -75,7 +83,40 @@ export interface DynamicBlockError {
   line?: number;
 }
 
-type DynamicBlockView = "preview" | "source";
+export type DynamicBlockView = "preview" | "source";
+
+/**
+ * The block inside the editor (Docs, an issue description being edited). It
+ * is the read-only frame with three differences: the source view is
+ * ProseMirror's own editable `<pre>`, the title can be renamed in place, and
+ * the NodeView owns the view, because it has to keep the caret out of a
+ * source the preview is hiding.
+ */
+export interface DynamicBlockEditing {
+  /**
+   * The editable source. Mounted for the block's whole life and only hidden
+   * behind the preview: ProseMirror owns its DOM, and unmounting it would
+   * break editing.
+   */
+  source: ReactNode;
+  view: DynamicBlockView;
+  onViewChange: (view: DynamicBlockView) => void;
+  /** Writes the title back to the fence; absent while the editor is read-only. */
+  onTitleChange?: (title: string) => void;
+  /** The block is node-selected: outline it and keep its actions up. */
+  selected?: boolean;
+}
+
+/**
+ * `value` while `visible`, else the last value that was shown. A hidden
+ * preview is not rebuilt on every keystroke in the source; it catches up the
+ * moment it is shown again.
+ */
+export function useValueWhileVisible<T>(value: T, visible: boolean): T {
+  const [shown, setShown] = useState(value);
+  if (visible && shown !== value) setShown(value);
+  return visible ? value : shown;
+}
 
 interface DynamicBlockProps {
   kind: DynamicBlockKind;
@@ -86,13 +127,32 @@ interface DynamicBlockProps {
   error?: DynamicBlockError | null;
   /** Shows the fullscreen button when set. */
   onFullscreen?: () => void;
+  /** Reloads the current preview when the kind supports it. */
+  onReload?: () => void;
+  /** Reveals the mounted preview while its surface is enlarged. */
+  fullscreen?: boolean;
   /** Focus returns here when the kind's fullscreen surface closes. */
   fullscreenButtonRef?: Ref<HTMLButtonElement>;
   /**
    * The rendered content. It stays mounted while the source view is showing,
    * so switching back is instant; `active` says whether it is on screen.
+   * `collapsed` says the frame is clipping the body at the collapse point, so
+   * the preview must lay out at the clamp, never at its full height — a tall
+   * document that paints unclamped for even a frame slams virtualized
+   * timelines with a total-height shock (visible flicker on scroll jumps).
    */
-  preview: (options: { active: boolean }) => ReactNode;
+  preview: (options: { active: boolean; collapsed: boolean }) => ReactNode;
+  /**
+   * The preview body's content height in px, when the preview knows it (the
+   * html block's measured document height). Passing it moves the collapse
+   * decision out of DOM measurement: the frame flips to collapsed in the same
+   * render the height arrives, so the clamp and the height cannot land a
+   * frame apart. Omit — or pass null while the height is still unknown —
+   * for previews the frame must measure (mermaid).
+   */
+  bodyHeight?: number | null;
+  /** Set inside the editor. */
+  editing?: DynamicBlockEditing;
   className?: string;
 }
 
@@ -102,19 +162,57 @@ export function DynamicBlock({
   source,
   error,
   onFullscreen,
+  onReload,
+  fullscreen = false,
   fullscreenButtonRef,
   preview,
+  bodyHeight,
+  editing,
   className,
 }: DynamicBlockProps) {
   const { t } = useT("editor");
-  const [view, setView] = useState<DynamicBlockView>("preview");
+  const [ownView, setOwnView] = useState<DynamicBlockView>("preview");
+  const view = editing?.view ?? ownView;
+  const setView = editing?.onViewChange ?? setOwnView;
   const [copied, setCopied] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  // Overflow state for previews the frame must measure itself (mermaid). A
+  // preview that reports its height makes this read obsolete — the collapse
+  // decision then lands in the same render the height arrives, so the clamp
+  // and the height can never paint a frame apart.
+  const measuredBodyRef = useRef<HTMLDivElement>(null);
+  const [measuredOverflowing, setMeasuredOverflowing] = useState(false);
+  useLayoutEffect(() => {
+    if (bodyHeight != null) return;
+    const el = measuredBodyRef.current;
+    if (!el) return;
+    const measure = () =>
+      setMeasuredOverflowing(el.offsetHeight > DYNAMIC_BLOCK_COLLAPSE_AT_PX);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [bodyHeight]);
+  const overflowing =
+    bodyHeight != null
+      ? bodyHeight > DYNAMIC_BLOCK_COLLAPSE_AT_PX
+      : measuredOverflowing;
+  // The clamp is an inline-layout concern and stays on while the surface is
+  // enlarged: the dialog is fixed-position, so it escapes the clip and fills
+  // its own box, while the in-place footprint keeps holding the clamp —
+  // dropping the clip for the enlargement would re-expand the timeline for as
+  // long as the dialog is open, the very height jump this frame prevents.
+  const collapsed = overflowing && !expanded;
   const Icon = KIND_ICON[kind];
   const kindLabel = KIND_LABEL[kind];
   const trimmedTitle = title?.trim();
   // The actions stay up while they carry state the reader has to see: the
-  // source view (Preview is how to get back) and the copy confirmation.
-  const actionsPinned = view === "source" || copied;
+  // source view (Preview is how to get back) and the copy confirmation. In the
+  // editor they also stay up on a node-selected block, which has no hover.
+  const actionsPinned = view === "source" || copied || !!editing?.selected;
+  // Chrome inside a NodeView must not be editable text; the source must be.
+  const chromeEditable = editing ? false : undefined;
 
   const handleCopy = async () => {
     if (await copyText(source)) {
@@ -128,24 +226,39 @@ export function DynamicBlock({
       value={view}
       onValueChange={(value) => setView(value as DynamicBlockView)}
       data-dynamic-block={kind}
+      // Read by the editor's arrow keys (CodeBlockExtension).
+      data-dynamic-block-view={editing ? view : undefined}
       // No outer margin: the lazy shell around the block owns that spacing.
       className={cn(
         "group/dynamic-block gap-0 overflow-hidden rounded-lg border bg-surface shadow-[var(--surface-shadow)]",
         error && view === "preview" && "border-destructive/35",
+        editing?.selected && "outline-2 outline-offset-2 outline-brand",
         className,
       )}
     >
-      <div className="flex h-9 items-center gap-2 border-b pr-1.5 pl-3">
+      <div
+        contentEditable={chromeEditable}
+        suppressContentEditableWarning
+        className="flex h-9 items-center gap-2 border-b pr-1.5 pl-3"
+      >
         <Icon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
         {/* With no title, the kind name stands in and the chip would repeat it. */}
-        <span
-          className={cn(
-            "min-w-0 truncate text-label font-medium",
-            !trimmedTitle && "text-muted-foreground",
-          )}
-        >
-          {trimmedTitle || kindLabel}
-        </span>
+        {editing?.onTitleChange ? (
+          <DynamicBlockTitleInput
+            title={trimmedTitle ?? null}
+            kindLabel={kindLabel}
+            onChange={editing.onTitleChange}
+          />
+        ) : (
+          <span
+            className={cn(
+              "min-w-0 truncate text-label font-medium",
+              !trimmedTitle && "text-muted-foreground",
+            )}
+          >
+            {trimmedTitle || kindLabel}
+          </span>
+        )}
         {trimmedTitle && (
           <span className="inline-flex h-[18px] shrink-0 items-center rounded-sm bg-secondary px-1.5 text-micro text-muted-foreground">
             {kindLabel}
@@ -176,65 +289,277 @@ export function DynamicBlock({
               {t(($) => $.dynamic_block.source)}
             </TabsTrigger>
           </TabsList>
+          {onReload && (
+            <IconButton
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="text-muted-foreground"
+              disabled={view !== "preview"}
+              onClick={onReload}
+              label={t(($) => $.attachment.reload)}
+            >
+              <RotateCw />
+            </IconButton>
+          )}
           {onFullscreen && (
-            <Button
+            <IconButton
               ref={fullscreenButtonRef}
               type="button"
               variant="ghost"
               size="icon-xs"
               className="text-muted-foreground"
               onClick={onFullscreen}
-              title={t(($) => $.code_block.fullscreen)}
-              aria-label={t(($) => $.code_block.fullscreen)}
+              label={t(($) => $.code_block.fullscreen)}
             >
               <Maximize2 />
-            </Button>
+            </IconButton>
           )}
-          <Button
+          <IconButton
             type="button"
             variant="ghost"
             size="icon-xs"
             className="text-muted-foreground"
             onClick={handleCopy}
-            title={t(($) => $.dynamic_block.copy_source)}
-            aria-label={t(($) => $.dynamic_block.copy_source)}
+            label={t(($) => $.dynamic_block.copy_source)}
           >
-            {copied ? <Check /> : <Copy />}
-          </Button>
+            <CopyCheckIcon copied={copied} />
+          </IconButton>
         </div>
       </div>
-      <TabsContent value="preview" keepMounted>
-        {error && (
+      <TabsContent
+        value="preview"
+        keepMounted
+        hidden={!fullscreen && view !== "preview"}
+        inert={!fullscreen && view !== "preview"}
+        contentEditable={chromeEditable}
+        suppressContentEditableWarning
+      >
+        {error && view === "preview" && (
           <DynamicBlockErrorPanel
             kind={kind}
             error={error}
             onViewSource={() => setView("source")}
           />
         )}
-        <div hidden={!!error}>
-          <CollapsibleBody>{preview({ active: view === "preview" && !error })}</CollapsibleBody>
+        <div hidden={!!error && !fullscreen}>
+          <CollapsibleBody
+            collapsed={collapsed}
+            onExpand={() => setExpanded(true)}
+            measureRef={bodyHeight == null ? measuredBodyRef : undefined}
+          >
+            {preview({ active: view === "preview" && !error, collapsed })}
+          </CollapsibleBody>
         </div>
       </TabsContent>
-      <TabsContent value="source">
-        <CollapsibleBody>
-          <CodeBlockStatic
-            language={SOURCE_LANGUAGE[kind]}
-            body={source}
-            className="!m-0 !rounded-none !bg-muted"
-          />
-        </CollapsibleBody>
-      </TabsContent>
+      {editing ? (
+        // display:none rather than a 1px visually-hidden box, where the
+        // source would wrap every character onto its own line: tens of
+        // thousands of pixels of layout for a chart. The NodeView keeps the
+        // caret out while it is hidden. Shown, it does not collapse: the
+        // caret must never sit in a clipped line.
+        <div data-dynamic-block-source="" hidden={view !== "source"}>
+          {editing.source}
+        </div>
+      ) : (
+        <TabsContent value="source">
+          <SelfCollapsingBody>
+            <CodeBlockStatic
+              language={SOURCE_LANGUAGE[kind]}
+              body={source}
+              className="!m-0 !rounded-none !bg-muted"
+            />
+          </SelfCollapsingBody>
+        </TabsContent>
+      )}
     </Tabs>
   );
 }
 
 /**
- * Takes its content's height, collapsed past DYNAMIC_BLOCK_COLLAPSE_AT_PX
- * with a fade and "Show all". The content keeps laying out at full height
- * underneath, so expanding only lifts the clip — an HTML preview or diagram
- * is not rebuilt.
+ * The editor's title: reads like the read-only title, renames in place on
+ * click. Enter or leaving the field saves; Escape keeps the old title. A blank
+ * title removes the attribute, and the kind name stands in again.
  */
-function CollapsibleBody({ children }: { children: ReactNode }) {
+function DynamicBlockTitleInput({
+  title,
+  kindLabel,
+  onChange,
+}: {
+  title: string | null;
+  kindLabel: string;
+  onChange: (title: string) => void;
+}) {
+  const { t } = useT("editor");
+  const [draft, setDraft] = useState<string | null>(null);
+  // Escape unmounts the field, which blurs it; the blur must not save.
+  const discarded = useRef(false);
+
+  const commit = (value: string) => {
+    setDraft(null);
+    if (discarded.current) {
+      discarded.current = false;
+      return;
+    }
+    const next = value.trim();
+    if (next !== (title ?? "")) onChange(next);
+  };
+
+  if (draft != null) {
+    return (
+      <input
+        autoFocus
+        value={draft}
+        placeholder={kindLabel}
+        aria-label={t(($) => $.dynamic_block.title)}
+        onFocus={(event) => event.currentTarget.select()}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={(event) => commit(event.currentTarget.value)}
+        onKeyDown={(event) => {
+          if (isImeComposing(event)) return;
+          if (event.key === "Enter") {
+            event.preventDefault();
+            event.currentTarget.blur();
+          } else if (event.key === "Escape") {
+            // Escape cancels the rename only; it must not also close or
+            // leave whatever surface holds the editor.
+            event.preventDefault();
+            event.stopPropagation();
+            discarded.current = true;
+            event.currentTarget.blur();
+          }
+        }}
+        className="-mx-1 h-6 min-w-0 flex-1 rounded-sm bg-transparent px-1 text-label font-medium outline-none ring-1 ring-ring placeholder:text-muted-foreground"
+      />
+    );
+  }
+
+  return (
+    <TooltipHint label={title ? t(($) => $.dynamic_block.rename) : t(($) => $.dynamic_block.add_title)}>
+      <button
+        type="button"
+        onClick={() => setDraft(title ?? "")}
+        className={cn(
+          "-mx-1 min-w-0 truncate rounded-sm px-1 text-left text-label font-medium transition-colors hover:bg-accent",
+          !title && "text-muted-foreground",
+        )}
+      >
+        {title || kindLabel}
+      </button>
+    </TooltipHint>
+  );
+}
+
+/**
+ * Clips the preview body past DYNAMIC_BLOCK_COLLAPSE_AT_PX with a fade and
+ * "Show all". Whether to clip is decided by the frame (`collapsed`): either
+ * from a preview-reported height in the same render the height arrives, or —
+ * for previews the frame measures — from the ResizeObserver below. The content
+ * keeps laying out at full height underneath the clip (the preview clamps
+ * its own layout height when `collapsed`), so expanding only lifts the clip
+ * — an HTML preview or diagram is not rebuilt.
+ */
+function useSmoothExpandStyle(collapsed: boolean, innerRef: React.RefObject<HTMLDivElement | null>) {
+  const prevCollapsedRef = useRef(collapsed);
+  const [animatingHeight, setAnimatingHeight] = useState<number | null>(null);
+
+  useLayoutEffect(() => {
+    const wasCollapsed = prevCollapsedRef.current;
+    prevCollapsedRef.current = collapsed;
+    if (!wasCollapsed || collapsed) return;
+    if (prefersReducedMotion()) return;
+    const el = innerRef.current;
+    const targetHeight = el?.scrollHeight ?? 0;
+    if (targetHeight <= DYNAMIC_BLOCK_COLLAPSE_AT_PX) return;
+    setAnimatingHeight(DYNAMIC_BLOCK_COLLAPSE_AT_PX);
+    const frame = requestAnimationFrame(() => {
+      setAnimatingHeight(targetHeight);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [collapsed, innerRef]);
+
+  useEffect(() => {
+    if (animatingHeight === null) return;
+    const timer = window.setTimeout(() => setAnimatingHeight(null), 240);
+    return () => window.clearTimeout(timer);
+  }, [animatingHeight]);
+
+  const maxHeight = collapsed
+    ? DYNAMIC_BLOCK_COLLAPSE_AT_PX
+    : animatingHeight !== null
+      ? animatingHeight
+      : undefined;
+
+  return {
+    style: maxHeight !== undefined ? { maxHeight } : undefined,
+    onTransitionEnd: (e: React.TransitionEvent<HTMLDivElement>) => {
+      if (e.target === e.currentTarget && e.propertyName === "max-height" && !collapsed) {
+        setAnimatingHeight(null);
+      }
+    },
+  };
+}
+
+function CollapsibleBody({
+  collapsed,
+  onExpand,
+  measureRef,
+  children,
+}: {
+  collapsed: boolean;
+  onExpand: () => void;
+  /** Overflow measurement target for previews the frame must measure itself. */
+  measureRef?: Ref<HTMLDivElement>;
+  children: ReactNode;
+}) {
+  const { t } = useT("editor");
+  const innerRef = useRef<HTMLDivElement | null>(null);
+  const setInnerRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      innerRef.current = node;
+      if (typeof measureRef === "function") measureRef(node);
+      else if (measureRef && "current" in measureRef) (measureRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
+    },
+    [measureRef],
+  );
+  const expandProps = useSmoothExpandStyle(collapsed, innerRef);
+
+  return (
+    <div
+      className="relative overflow-hidden transition-[max-height] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none"
+      data-collapsed={collapsed ? "" : undefined}
+      style={expandProps.style}
+      onTransitionEnd={expandProps.onTransitionEnd}
+    >
+      <div ref={setInnerRef}>{children}</div>
+      {collapsed && (
+        <>
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-b from-transparent to-surface" />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-surface shadow-[var(--surface-shadow)]"
+            onClick={onExpand}
+          >
+            <ChevronDown />
+            {t(($) => $.dynamic_block.show_all)}
+          </Button>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The source view's body keeps its own measuring collapse (the behavior the
+ * preview's body had before the reported-height clamp): the frame cannot know
+ * a code block's height, and folding long sources stays useful there. Only
+ * the preview moved to the frame-decided clamp — its height is known, and the
+ * measure-after-paint race on that path is what the html-block flicker fix
+ * removes.
+ */
+function SelfCollapsingBody({ children }: { children: ReactNode }) {
   const { t } = useT("editor");
   const contentRef = useRef<HTMLDivElement>(null);
   const [contentHeight, setContentHeight] = useState(0);
@@ -256,12 +581,14 @@ function CollapsibleBody({ children }: { children: ReactNode }) {
   }, [measure]);
 
   const collapsed = !expanded && contentHeight > DYNAMIC_BLOCK_COLLAPSE_AT_PX;
+  const expandProps = useSmoothExpandStyle(collapsed, contentRef);
 
   return (
     <div
-      className="relative overflow-hidden"
+      className="relative overflow-hidden transition-[max-height] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none"
       data-collapsed={collapsed ? "" : undefined}
-      style={collapsed ? { maxHeight: DYNAMIC_BLOCK_COLLAPSE_AT_PX } : undefined}
+      style={expandProps.style}
+      onTransitionEnd={expandProps.onTransitionEnd}
     >
       <div ref={contentRef}>{children}</div>
       {collapsed && (
@@ -271,7 +598,7 @@ function CollapsibleBody({ children }: { children: ReactNode }) {
             type="button"
             variant="outline"
             size="sm"
-            className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-surface shadow-[var(--surface-shadow)]"
+            className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-surface shadow-[var(--surface-shadow)]"
             onClick={() => setExpanded(true)}
           >
             <ChevronDown />
@@ -326,7 +653,7 @@ function DynamicBlockErrorPanel({
             {t(($) => $.dynamic_block.view_source)}
           </Button>
           <Button type="button" variant="outline" size="sm" onClick={handleCopyError}>
-            {copied ? <Check /> : <Copy />}
+            <CopyCheckIcon copied={copied} />
             {t(($) => $.dynamic_block.copy_error)}
           </Button>
         </div>

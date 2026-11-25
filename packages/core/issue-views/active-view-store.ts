@@ -7,8 +7,9 @@ import type { IssueViewScope } from "./queries";
 /**
  * Which saved view is open on each surface container, keyed by
  * `${wsId}:${scope_type}[:${scope_id}]`. Client/view state (zustand per the
- * state rules): NOT persisted — on web the URL `?view=` param is the durable
+ * state rules): NOT persisted — the URL `?view=` param is the durable
  * carrier, and resurrecting a deleted view from storage would strand users.
+ * Desktop swaps the whole map with the active tab.
  */
 export function issueViewContainerKey(wsId: string, scope: IssueViewScope): string {
   return scope.scope_id
@@ -53,6 +54,8 @@ export function lockedDimensionsFromQuery(
   }
   if (nonEmptyArray(query.projectStatusFilters)) locked.add("projectStatus");
   if (nonEmptyArray(query.labelFilters)) locked.add("label");
+  if (nonEmptyArray(query.relationFilters)) locked.add("relation");
+  if (nonEmptyArray(query.dueDateFilters)) locked.add("dueDate");
   const propertyFilters = query.propertyFilters;
   if (propertyFilters && typeof propertyFilters === "object") {
     for (const [id, selected] of Object.entries(propertyFilters as Record<string, unknown>)) {

@@ -22,7 +22,16 @@ const (
 // ClientIdentity captures the already-authenticated daemon connection scope.
 type ClientIdentity struct {
 	DaemonID string
-	UserID   string
+	// DaemonTokenHash is the hash of the mdt_ token that authenticated the
+	// connection (empty for user credentials). RPCs replay requests without
+	// an Authorization header, so credential-specific checks such as Qoder
+	// revocation re-validate this hash on every call (MUL-8154).
+	DaemonTokenHash string
+	// DaemonTokenOwnerID is the runtime owner that token is bound to (empty
+	// for Qoder-managed tokens and user credentials), replayed into every RPC
+	// so the per-runtime owner binding holds over WS as well (MUL-8154).
+	DaemonTokenOwnerID string
+	UserID             string
 	// WorkspaceID is the legacy single-workspace scope used by older callers
 	// and daemon-token auth. New code should populate WorkspaceIDs from the
 	// runtime rows authorized for this connection.
@@ -285,7 +294,7 @@ func (h *Hub) forgetRuntimeGoneSeen(eventID string) {
 // runtimeID is one of identity.RuntimeIDs (the connection's authenticated
 // scope) and return the ack payload to send back. Returning an error skips
 // the ack and is logged at debug level.
-type HeartbeatHandler func(ctx context.Context, identity ClientIdentity, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, error)
+type HeartbeatHandler func(ctx context.Context, identity ClientIdentity, runtimeID string, req protocol.DaemonHeartbeatRequestPayload) (*protocol.DaemonHeartbeatAckPayload, error)
 
 // RPCHandler processes a generic daemon:rpc_request (MUL-4257). It dispatches
 // on method (e.g. "tasks.claim"), scoping work to identity (DaemonID +
@@ -1108,7 +1117,7 @@ func (c *client) handleHeartbeatFrame(raw json.RawMessage) {
 	// that keeps the HTTP heartbeat from putting a per-call timeout on
 	// PopPending. The natural bound is the read pump's lifetime (the conn
 	// closes if the daemon goes away) plus Redis's own server-side limits.
-	ack, err := handler(context.Background(), c.identity, payload.RuntimeID, payload.SupportsBatchImport)
+	ack, err := handler(context.Background(), c.identity, payload.RuntimeID, payload)
 	if err != nil {
 		slog.Warn("daemon websocket heartbeat handler failed",
 			"error", err,

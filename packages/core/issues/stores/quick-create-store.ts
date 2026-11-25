@@ -31,14 +31,46 @@ export type QuickCreateActorType = "agent" | "squad";
 //
 // The in-progress agent prompt no longer lives here — it moved into the
 // unified issue-create draft's `agent` slot (draft-store) so it shares one
-// lifecycle with the manual draft (MUL-5181). This store keeps only the
-// last-successful actor and the shared keep-open toggle.
+// lifecycle with the manual draft (MUL-5181). This store keeps the
+// last-successful actor, how many creates each actor has filed (which ranks
+// the quick-switch chips, MUL-10012), and the shared keep-open toggle.
 interface QuickCreateState {
   lastActorType: QuickCreateActorType | null;
   lastActorId: string | null;
   setLastActor: (type: QuickCreateActorType | null, id: string | null) => void;
+  /** Successful creates per actor, keyed by `actorCountKey`. */
+  actorCreateCounts: Record<string, number>;
+  countActorCreate: (type: QuickCreateActorType, id: string) => void;
   keepOpen: boolean;
   setKeepOpen: (v: boolean) => void;
+}
+
+export interface QuickCreateActorRef {
+  type: QuickCreateActorType;
+  id: string;
+}
+
+export function actorCountKey(type: QuickCreateActorType, id: string): string {
+  return `${type}:${id}`;
+}
+
+/**
+ * The actors shown as quick-switch chips: most creates first, ties and the
+ * slots no count fills kept in `candidates` order. Callers pass only actors
+ * the user can pick right now, so counts left behind by a deleted or
+ * archived agent never take a slot.
+ */
+export function rankFrequentActors(
+  counts: Record<string, number>,
+  candidates: readonly QuickCreateActorRef[],
+  limit: number,
+): QuickCreateActorRef[] {
+  const countOf = (a: QuickCreateActorRef) => counts[actorCountKey(a.type, a.id)] ?? 0;
+  return candidates
+    .map((actor, index) => ({ actor, index, count: countOf(actor) }))
+    .sort((a, b) => b.count - a.count || a.index - b.index)
+    .slice(0, limit)
+    .map(({ actor }) => actor);
 }
 
 export const useQuickCreateStore = create<QuickCreateState>()(
@@ -47,6 +79,14 @@ export const useQuickCreateStore = create<QuickCreateState>()(
       lastActorType: null,
       lastActorId: null,
       setLastActor: (type, id) => set({ lastActorType: type, lastActorId: id }),
+      actorCreateCounts: {},
+      countActorCreate: (type, id) =>
+        set((s) => {
+          const key = actorCountKey(type, id);
+          return {
+            actorCreateCounts: { ...s.actorCreateCounts, [key]: (s.actorCreateCounts[key] ?? 0) + 1 },
+          };
+        }),
       keepOpen: false,
       setKeepOpen: (v) => set({ keepOpen: v }),
     }),
@@ -68,6 +108,7 @@ registerDraftCleanup({
     useQuickCreateStore.setState({
       lastActorType: null,
       lastActorId: null,
+      actorCreateCounts: {},
       keepOpen: false,
     }),
 });

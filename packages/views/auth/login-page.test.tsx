@@ -140,7 +140,7 @@ describe("LoginPage", () => {
       screen.getByText(/sign in to multica/i),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/enter your email to get a login code/i),
+      screen.getByText(/enter your email to get a sign-in code/i),
     ).toBeInTheDocument();
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
     expect(
@@ -771,6 +771,13 @@ describe("validateCliCallback", () => {
     expect(validateCliCallback("http://8.8.8.8:9876/callback")).toBe(false);
     expect(validateCliCallback("http://192.169.1.1:9876/callback")).toBe(false);
   });
+
+  it.each(["198.18.0.1", "100.64.0.1", "169.254.1.1", "[::1]", "[fd00::1]"])(
+    "rejects unsupported callback address %s",
+    (host) => {
+      expect(validateCliCallback(`http://${host}:9876/callback`)).toBe(false);
+    },
+  );
 
   it("rejects invalid URLs", () => {
     expect(validateCliCallback("not-a-url")).toBe(false);

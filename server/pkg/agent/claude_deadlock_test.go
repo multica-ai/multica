@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 // TestMain intercepts when the test binary is re-executed as a fake
@@ -20,6 +22,9 @@ import (
 // invoked with a real agent CLI's argv: TestMain runs before the testing
 // package parses flags, so arguments like `run --format json` never reach it.
 func TestMain(m *testing.M) {
+	if testutil.RunPiCleanupFixture() {
+		os.Exit(0)
+	}
 	if os.Getenv(codeartsModelHelperEnv) == "1" {
 		runFakeCodeArtsModelHelper()
 		os.Exit(0)
@@ -59,6 +64,9 @@ func TestMain(m *testing.M) {
 	case "usage_fixture":
 		runFakeClaudeUsageFixture()
 		os.Exit(0)
+	case "pending_control_result":
+		runFakeClaudePendingControlResult()
+		os.Exit(0)
 	case "supplement":
 		runFakeClaudeSupplement()
 		os.Exit(0)
@@ -70,6 +78,9 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	case "background_control_request":
 		runFakeClaudeBackgroundControlRequest()
+		os.Exit(0)
+	case "resume_interrupted_turn":
+		runFakeClaudeResumeInterruptedTurn()
 		os.Exit(0)
 	case "async_launched_tool_result":
 		runFakeClaudeAsyncLaunchedToolResult()

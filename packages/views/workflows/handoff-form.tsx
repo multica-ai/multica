@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, clientErrorMessage } from "@multica/core/api";
@@ -8,7 +8,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useSetWorkflowHandoff, workflowNextStatus } from "@multica/core/issue-workflows";
 import { projectListOptions } from "@multica/core/projects/queries";
-import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
+import { agentListOptions, memberListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import type { IssueWorkflow, IssueWorkflowStep, Project } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -27,7 +27,7 @@ import {
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { cn } from "@multica/ui/lib/utils";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown } from "@multica/ui/icons";
 import { ActorAvatar } from "../common/actor-avatar";
 import { PickerEmpty, PickerItem, PickerSection, PropertyPicker } from "../issues/components/pickers/property-picker";
 import { StatusIcon } from "../issues/components/status-icon";
@@ -39,19 +39,19 @@ const NOT_SET = "__not_set__";
 type HandoffMode = "none" | "agent" | "member";
 
 function modeOf(handler: IssueWorkflowStep["handler"]): HandoffMode {
-  if (handler.type === "agent") return "agent";
+  if (handler.type === "agent" || handler.type === "squad") return "agent";
   if (handler.type === "member" || handler.type === "project_lead") return "member";
   return "none";
 }
 
 /**
  * The parts of a handoff that are saved. Instructions and next/back statuses
- * only reach an agent's brief, so they are kept for agent handoffs alone.
+ * reach an agent's or squad leader's brief.
  */
 export function savedHandoff<T extends Pick<IssueWorkflowStep, "handler" | "instructions" | "next_status_key" | "back_status_key">>(
   step: T,
 ): T {
-  if (step.handler.type === "agent") return step;
+  if (step.handler.type === "agent" || step.handler.type === "squad") return step;
   return { ...step, instructions: "", next_status_key: undefined, back_status_key: undefined };
 }
 
@@ -101,12 +101,18 @@ export function WorkflowHandoffForm({
   workflow,
   statusKey,
   canEdit,
+  canCopyForProject = true,
   project,
   onSaved,
 }: {
   workflow: IssueWorkflow;
   statusKey: string;
   canEdit: boolean;
+  /**
+   * Whether saving for this project only is offered: the copy switches the
+   * project's workflow, which only admins and the project's lead may do.
+   */
+  canCopyForProject?: boolean;
   /** The project the form is opened from: the brief preview is for it. */
   project?: Pick<Project, "id" | "title">;
   onSaved?: () => void;
@@ -129,9 +135,9 @@ export function WorkflowHandoffForm({
   useEffect(() => setDraft(saved), [saved]);
 
   const handler = draft.handler;
-  const needsTarget = (handler.type === "agent" || handler.type === "member") && !handler.id;
+  const needsTarget = (handler.type === "agent" || handler.type === "squad" || handler.type === "member") && !handler.id;
   const dirty = !sameStep(savedHandoff(draft), savedHandoff(saved));
-  const askScope = canEdit && dirty && !!project && !workflow.is_default && sharing.others.length > 0;
+  const askScope = canEdit && canCopyForProject && dirty && !!project && !workflow.is_default && sharing.others.length > 0;
   useEffect(() => {
     if (!dirty) setScope("all");
   }, [dirty]);
@@ -276,16 +282,34 @@ export function HandoffFields({
   canEdit,
   onPatch,
   onPreview,
+  defaultNextLabel,
 }: {
   step: IssueWorkflowStep;
+  /** The statuses next and back may name. */
   workflow: Pick<IssueWorkflow, "steps">;
   canEdit: boolean;
   onPatch: (patch: Partial<IssueWorkflowStep>) => void;
   onPreview?: () => void;
+  /**
+   * The default next status's label ("" for none), when it is resolved
+   * against more columns than `workflow` lists — the editor's unsaved ones.
+   */
+  defaultNextLabel?: string;
 }) {
   const { t } = useT("issues");
+  const wsId = useWorkspaceId();
+  const labelOf = useStatusLabel(wsId);
+  const catalog = useIssueStatuses(wsId);
   const mode = modeOf(step.handler);
-  const nextDefault = workflowNextStatus({ steps: workflow.steps.map((s) => ({ ...s, next_status_key: undefined })) }, step.status_key);
+  // Not derived from the status key: a step for a status still to be created
+  // goes by a draft id that need not be a valid element id.
+  const instructionsId = useId();
+  const nextDefault = workflowNextStatus(
+    { steps: workflow.steps.map((s) => ({ ...s, next_status_key: undefined })) },
+    step.status_key,
+    catalog.categoryOf,
+  );
+  const nextDefaultLabel = defaultNextLabel ?? (nextDefault ? labelOf(nextDefault) : "");
   const choose = (m: HandoffMode) => {
     if (m === mode) return;
     onPatch({ handler: m === "none" ? { type: "none" } : { type: m } });
@@ -348,10 +372,10 @@ export function HandoffFields({
           <Field
             label={t(($) => $.workflows.handoff.instructions)}
             hint={t(($) => $.workflows.editor.instructions_hint)}
-            htmlFor={`workflow-handoff-instructions-${step.status_key}`}
+            htmlFor={instructionsId}
           >
             <Textarea
-              id={`workflow-handoff-instructions-${step.status_key}`}
+              id={instructionsId}
               rows={4}
               maxLength={8000}
               readOnly={!canEdit}
@@ -364,7 +388,7 @@ export function HandoffFields({
             step={step}
             workflow={workflow}
             canEdit={canEdit}
-            nextDefault={nextDefault}
+            nextDefaultLabel={nextDefaultLabel}
             onPatch={onPatch}
             onPreview={onPreview}
           />
@@ -375,8 +399,7 @@ export function HandoffFields({
 }
 
 /**
- * The agent, or the member (project lead included), a column hands the issue
- * to. Squads are left out on purpose — they route work themselves. (MUL-7420)
+ * The agent, squad or member (project lead included) a column hands the issue to.
  */
 function HandlerPicker({
   kind,
@@ -392,12 +415,14 @@ function HandlerPicker({
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: squads = [] } = useQuery({ ...squadListOptions(wsId), enabled: kind === "agent" });
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
   const matches = (name: string) => !q || name.toLowerCase().includes(q);
   const agentRows = kind === "agent" ? agents.filter((a) => !a.archived_at && matches(a.name)) : [];
+  const squadRows = kind === "agent" ? squads.filter((s) => !s.archived_at && matches(s.name)) : [];
   const memberRows = kind === "member" ? members.filter((m) => matches(m.name)) : [];
   const leadLabel = t(($) => $.workflows.handler.project_lead);
   const pick = (handler: IssueWorkflowStep["handler"]) => {
@@ -409,7 +434,11 @@ function HandlerPicker({
     value.type === "project_lead"
       ? leadLabel
       : value.id
-        ? (value.type === "agent" ? agents.find((a) => a.id === value.id)?.name : members.find((m) => m.user_id === value.id)?.name) ?? ""
+        ? (value.type === "agent"
+            ? agents.find((a) => a.id === value.id)?.name
+            : value.type === "squad"
+              ? squads.find((s) => s.id === value.id)?.name
+              : members.find((m) => m.user_id === value.id)?.name) ?? ""
         : "";
   const placeholder = kind === "agent" ? t(($) => $.workflows.handoff.pick_agent) : t(($) => $.workflows.handoff.pick_member);
 
@@ -432,7 +461,7 @@ function HandlerPicker({
       }
       trigger={
         <>
-          {(value.type === "agent" || value.type === "member") && value.id && (
+          {(value.type === "agent" || value.type === "squad" || value.type === "member") && value.id && (
             <ActorAvatar actorType={value.type} actorId={value.id} size="xs" profileLink={false} />
           )}
           <span className={cn("min-w-0 flex-1 truncate", !current && "text-muted-foreground")}>{current || placeholder}</span>
@@ -451,6 +480,20 @@ function HandlerPicker({
           <span className="truncate">{agent.name}</span>
         </PickerItem>
       ))}
+      {squadRows.length > 0 && (
+        <PickerSection label={t(($) => $.pickers.assignee.squads_group)}>
+          {squadRows.map((squad) => (
+            <PickerItem
+              key={squad.id}
+              selected={is("squad", squad.id)}
+              onClick={() => pick({ type: "squad", id: squad.id })}
+            >
+              <ActorAvatar actorType="squad" actorId={squad.id} size="xs" profileLink={false} />
+              <span className="truncate">{squad.name}</span>
+            </PickerItem>
+          ))}
+        </PickerSection>
+      )}
       {memberRows.length > 0 && (
         <PickerSection label={t(($) => $.workflows.handoff.members)}>
           {memberRows.map((member) => (
@@ -465,7 +508,7 @@ function HandlerPicker({
           ))}
         </PickerSection>
       )}
-      {agentRows.length === 0 && memberRows.length === 0 && (q || kind === "agent") && <PickerEmpty />}
+      {agentRows.length === 0 && squadRows.length === 0 && memberRows.length === 0 && (q || kind === "agent") && <PickerEmpty />}
     </PropertyPicker>
   );
 }
@@ -474,14 +517,15 @@ function NextBackFields({
   step,
   workflow,
   canEdit,
-  nextDefault,
+  nextDefaultLabel,
   onPatch,
   onPreview,
 }: {
   step: IssueWorkflowStep;
   workflow: Pick<IssueWorkflow, "steps">;
   canEdit: boolean;
-  nextDefault: string | null;
+  /** The default next status's label; empty when there is none. */
+  nextDefaultLabel: string;
   onPatch: (patch: Partial<IssueWorkflowStep>) => void;
   onPreview?: () => void;
 }) {
@@ -507,8 +551,8 @@ function NextBackFields({
           const field = kind === "next" ? "next_status_key" : "back_status_key";
           const value = step[field];
           const unsetLabel =
-            kind === "next" && nextDefault
-              ? t(($) => $.workflows.handoff.next_default, { status: labelOf(nextDefault) })
+            kind === "next" && nextDefaultLabel
+              ? t(($) => $.workflows.handoff.next_default, { status: nextDefaultLabel })
               : t(($) => $.workflows.editor.none_option);
           const options = [{ value: NOT_SET, label: unsetLabel }, ...others.map((key) => ({ value: key, label: labelOf(key) }))];
           return (
@@ -545,17 +589,13 @@ function NextBackFields({
           );
         })}
       </div>
-      <p className="text-caption leading-5 text-muted-foreground">
-        {t(($) => $.workflows.editor.next_hint)}
-        {onPreview && (
-          <>
-            {" "}
-            <button type="button" onClick={onPreview} className="text-brand hover:underline">
-              {t(($) => $.workflows.editor.preview_brief)}
-            </button>
-          </>
-        )}
-      </p>
+      {onPreview && (
+        <p className="text-caption leading-5">
+          <button type="button" onClick={onPreview} className="text-brand hover:underline">
+            {t(($) => $.workflows.editor.preview_brief)}
+          </button>
+        </p>
+      )}
     </div>
   );
 }

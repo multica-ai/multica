@@ -76,8 +76,9 @@ func TestTaskMessageCallIDLiveAndHistory(t *testing.T) {
 			t.Run(reader.name+suffix, func(t *testing.T) {
 				req := testutil.JSONRequest(http.MethodGet, "/api/tasks/"+taskID+"/messages"+suffix, nil)
 				req = testutil.WithURLParams(req, "taskId", taskID)
-				ctx := middleware.WithDaemonContext(req.Context(), testWorkspaceID, "call-id-daemon")
-				ctx = middleware.SetMemberContext(ctx, testWorkspaceID, db.Member{})
+				// Both readers authenticate as the fixture runtime's owner.
+				req.Header.Set("X-User-ID", testUserID)
+				ctx := middleware.SetMemberContext(req.Context(), testWorkspaceID, db.Member{})
 				var history []map[string]any
 				testutil.Call(t, reader.handler, req.WithContext(ctx)).Want(http.StatusOK).JSON(&history)
 				want := live

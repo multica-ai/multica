@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/multica-ai/multica/server/internal/cli"
 )
 
 func newSkillImportTestCmd() *cobra.Command {
@@ -172,6 +174,122 @@ func TestRunSkillImportSendsOnConflictAndPrintsStructuredResult(t *testing.T) {
 	}
 }
 
+// The user-visible line for a failed URL import or refresh is FormatError of
+// the returned error. Each case is a response the import/refresh endpoints
+// actually write (see importFetchErrorResponse), plus a proxy's own 502 page,
+// which has no message and must keep the generic copy (GH #9812).
+var skillSourceErrorCases = []struct {
+	name   string
+	status int
+	body   string
+	want   string // FormatError output after the per-command lead-in
+}{
+	{
+		name:   "413 over file-count cap",
+		status: http.StatusRequestEntityTooLarge,
+		body:   `{"error":"import cap exceeded: import bundle would contain 600 files, exceeding the 512 file limit"}`,
+		want:   "Request too large: import cap exceeded: import bundle would contain 600 files, exceeding the 512 file limit",
+	},
+	{
+		name:   "502 source error",
+		status: http.StatusBadGateway,
+		body:   `{"error":"SKILL.md not found at skills/foo in acme/skills@main"}`,
+		want:   "{leadIn}SKILL.md not found at skills/foo in acme/skills@main",
+	},
+	{
+		name:   "503 source unavailable",
+		status: http.StatusServiceUnavailable,
+		body:   `{"error":"import source temporarily unavailable: could not read the acme/skills repository tree"}`,
+		want:   "{leadIn}import source temporarily unavailable: could not read the acme/skills repository tree",
+	},
+	{
+		name:   "504 fetch deadline",
+		status: http.StatusGatewayTimeout,
+		body:   `{"error":"skill import timed out fetching source files; the skill may be too large or the source too slow"}`,
+		want:   "{leadIn}skill import timed out fetching source files; the skill may be too large or the source too slow",
+	},
+	{
+		name:   "proxy 502 page keeps generic copy",
+		status: http.StatusBadGateway,
+		body:   `<html><body>502 Bad Gateway</body></html>`,
+		want:   "The Multica service is temporarily unavailable (server error). Please try again later; if it persists, contact support. Re-run with --debug to see the raw server response.",
+	},
+}
+
+func newSkillSourceErrorServer(t *testing.T, wantPath string, status int, body string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != wantPath {
+			t.Fatalf("path = %q, want %q", r.URL.Path, wantPath)
+		}
+		if strings.HasPrefix(body, "{") {
+			w.Header().Set("Content-Type", "application/json")
+		}
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, body)
+	}))
+}
+
+func setEnglishLocale(t *testing.T) {
+	t.Helper()
+	t.Setenv("LC_ALL", "")
+	t.Setenv("LC_MESSAGES", "")
+	t.Setenv("LANG", "en_US.UTF-8")
+}
+
+func TestRunSkillImportSurfacesSourceFetchErrors(t *testing.T) {
+	for _, tc := range skillSourceErrorCases {
+		t.Run(tc.name, func(t *testing.T) {
+			redirectTestHome(t, t.TempDir())
+			setEnglishLocale(t)
+			t.Setenv("MULTICA_TOKEN", "test-token")
+			t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
+			srv := newSkillSourceErrorServer(t, "/api/skills/import", tc.status, tc.body)
+			defer srv.Close()
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+
+			cmd := newSkillImportTestCmd()
+			_ = cmd.Flags().Set("url", "https://github.com/acme/skills/tree/main/skills/foo")
+			_, err := captureStdout(t, func() error { return runSkillImport(cmd, nil) })
+			if err == nil {
+				t.Fatal("expected import to fail")
+			}
+			want := strings.ReplaceAll(tc.want, "{leadIn}", "Skill import failed: ")
+			if got := cli.FormatError(err, false); got != want {
+				t.Errorf("FormatError = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestRunSkillRefreshSurfacesSourceFetchErrors(t *testing.T) {
+	for _, tc := range skillSourceErrorCases {
+		t.Run(tc.name, func(t *testing.T) {
+			redirectTestHome(t, t.TempDir())
+			setEnglishLocale(t)
+			t.Setenv("MULTICA_TOKEN", "test-token")
+			t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
+			srv := newSkillSourceErrorServer(t, "/api/skills/skill-123/refresh", tc.status, tc.body)
+			defer srv.Close()
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+
+			cmd := &cobra.Command{Use: "refresh"}
+			cmd.Flags().String("server-url", "", "")
+			cmd.Flags().String("workspace-id", "", "")
+			cmd.Flags().String("profile", "", "")
+			cmd.Flags().String("output", "table", "")
+			_, err := captureStdout(t, func() error { return runSkillRefresh(cmd, []string{"skill-123"}) })
+			if err == nil {
+				t.Fatal("expected refresh to fail")
+			}
+			want := strings.ReplaceAll(tc.want, "{leadIn}", "Skill refresh failed: ")
+			if got := cli.FormatError(err, false); got != want {
+				t.Errorf("FormatError = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func TestRunSkillSearchRequestsSearchEndpoint(t *testing.T) {
 	var gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -237,6 +355,7 @@ func newSkillUpdateTestCmd() *cobra.Command {
 	cmd.Flags().Bool("content-stdin", false, "")
 	cmd.Flags().String("content-file", "", "")
 	cmd.Flags().String("config", "", "")
+	cmd.Flags().Int64("base-revision", 0, "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
 }
@@ -250,6 +369,7 @@ func newSkillFilesUpsertTestCmd() *cobra.Command {
 	cmd.Flags().String("content", "", "")
 	cmd.Flags().Bool("content-stdin", false, "")
 	cmd.Flags().String("content-file", "", "")
+	cmd.Flags().Int64("base-revision", 0, "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
 }
@@ -787,5 +907,97 @@ func TestRunSkillLabelCommands(t *testing.T) {
 	}
 	if lastMethod != http.MethodGet || lastPath != "/api/skills/skill-1/labels" {
 		t.Fatalf("remove follow-up request: method=%s, path=%s", lastMethod, lastPath)
+	}
+}
+
+func TestRunSkillUpdateSendsBaseRevisionOnlyWhenSet(t *testing.T) {
+	var body map[string]any
+	srv := newSkillBodyCaptureServer(t, http.MethodPut, "/api/skills/skill-123", &body)
+	defer srv.Close()
+	setSkillServerEnv(t, srv.URL)
+
+	cmd := newSkillUpdateTestCmd()
+	_ = cmd.Flags().Set("content", "new body")
+	_ = cmd.Flags().Set("base-revision", "7")
+	if _, err := captureStdout(t, func() error { return runSkillUpdate(cmd, []string{"skill-123"}) }); err != nil {
+		t.Fatalf("runSkillUpdate: %v", err)
+	}
+	if body["base_revision"] != float64(7) {
+		t.Fatalf("base_revision = %v, want 7", body["base_revision"])
+	}
+
+	body = nil
+	cmd = newSkillUpdateTestCmd()
+	_ = cmd.Flags().Set("content", "new body")
+	if _, err := captureStdout(t, func() error { return runSkillUpdate(cmd, []string{"skill-123"}) }); err != nil {
+		t.Fatalf("runSkillUpdate without base revision: %v", err)
+	}
+	if _, sent := body["base_revision"]; sent {
+		t.Fatalf("base_revision must be omitted when --base-revision is unset, body: %v", body)
+	}
+}
+
+func TestRunSkillUpdateRejectsNonPositiveBaseRevision(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("no request expected, got %s %s", r.Method, r.URL.Path)
+	}))
+	defer srv.Close()
+	setSkillServerEnv(t, srv.URL)
+
+	cmd := newSkillUpdateTestCmd()
+	_ = cmd.Flags().Set("content", "new body")
+	_ = cmd.Flags().Set("base-revision", "0")
+	err := runSkillUpdate(cmd, []string{"skill-123"})
+	if err == nil || !strings.Contains(err.Error(), "--base-revision must be a positive revision") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestSkillWritesExplainRevisionConflict(t *testing.T) {
+	var gotPath, gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotQuery = r.URL.Path, r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": "resource changed since it was loaded", "code": "revision_conflict",
+			"resource_type": "skill", "expected_revision": 3, "actual_revision": 4,
+		})
+	}))
+	defer srv.Close()
+	setSkillServerEnv(t, srv.URL)
+
+	wantGuidance := func(t *testing.T, err error) {
+		t.Helper()
+		if err == nil {
+			t.Fatal("expected a conflict error")
+		}
+		for _, want := range []string{"changed since revision 3", "nothing was written", "multica skill get", "--base-revision"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("error %q missing %q", err.Error(), want)
+			}
+		}
+	}
+
+	update := newSkillUpdateTestCmd()
+	_ = update.Flags().Set("content", "new body")
+	_ = update.Flags().Set("base-revision", "3")
+	wantGuidance(t, runSkillUpdate(update, []string{"skill-123"}))
+
+	upsert := newSkillFilesUpsertTestCmd()
+	_ = upsert.Flags().Set("path", "notes.md")
+	_ = upsert.Flags().Set("content", "notes")
+	_ = upsert.Flags().Set("base-revision", "3")
+	wantGuidance(t, runSkillFilesUpsert(upsert, []string{"skill-123"}))
+
+	del := &cobra.Command{Use: "delete"}
+	del.Flags().String("server-url", "", "")
+	del.Flags().String("workspace-id", "", "")
+	del.Flags().String("profile", "", "")
+	del.Flags().Int64("base-revision", 0, "")
+	_ = del.Flags().Set("base-revision", "3")
+	wantGuidance(t, runSkillFilesDelete(del, []string{"skill-123", "file-1"}))
+	if gotPath != "/api/skills/skill-123/files/file-1" || gotQuery != "base_revision=3" {
+		t.Fatalf("delete request: path=%q query=%q", gotPath, gotQuery)
 	}
 }

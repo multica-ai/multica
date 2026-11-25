@@ -20,12 +20,15 @@ import {
   PROJECT_GANTT_PAGE_LIMIT,
   childrenByParentsOptions,
   childIssuesOptions,
+  fetchIssueByRef,
   flattenIssueBuckets,
   issueIdentifierOptions,
   issueKeys,
   issueListOptions,
   issueTableRowPageOptions,
+  prefetchIssuePage,
   projectGanttIssuesOptions,
+  sidebarIssuesOptions,
   sourceContextPreviewOptions,
 } from "./queries";
 import { onIssueUpdated } from "./ws-updaters";
@@ -462,6 +465,26 @@ describe("projectGanttIssuesOptions", () => {
     expect(data).toHaveLength(total);
   });
 
+  it("loads every page when the server caps the page size at 100 (#9572)", async () => {
+    // The server clamps `limit` to 100 regardless of what the client asks for.
+    const SERVER_PAGE_CAP = 100;
+    const total = 334;
+    const all = Array.from({ length: total }, (_, i) => makeIssue(i));
+    const listIssues = vi
+      .fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>()
+      .mockImplementation(async (params) => {
+        const offset = params?.offset ?? 0;
+        const limit = Math.min(params?.limit ?? SERVER_PAGE_CAP, SERVER_PAGE_CAP);
+        return { issues: all.slice(offset, offset + limit), total };
+      });
+    installFakeApi(listIssues);
+
+    const data = await qc.fetchQuery(projectGanttIssuesOptions(WS_ID, PROJECT_ID));
+
+    expect(data).toHaveLength(total);
+    expect(listIssues.mock.calls.map(([p]) => p?.offset)).toEqual([0, 100, 200, 300]);
+  });
+
   it("stops looping when the server reports a smaller-than-limit page (safety net for total drift)", async () => {
     // Server says `total` is huge but only ever returns short pages — the
     // loop must terminate on the first short page to avoid an infinite fetch.
@@ -693,5 +716,64 @@ describe("issueIdentifierOptions", () => {
       "identifier",
       "MUL-7",
     ]);
+  });
+});
+
+describe("sidebarIssuesOptions", () => {
+  const issues = Array.from({ length: 120 }, (_, i) => makeIssue(i));
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("walks table pages past the server's 100-row cap", async () => {
+    const listIssueTableRows = vi.fn(async (params: IssueTableRowsRequest): Promise<IssueTableRowsResponse> => {
+      const start = params.page?.cursor ? Number(params.page.cursor) : 0;
+      const end = start + Math.min(params.page?.limit ?? 50, 100);
+      return {
+        query_fingerprint: "fp",
+        group_key: null,
+        parent_id: null,
+        total: issues.length,
+        rows: issues.slice(start, end).map((issue) => ({ issue, direct_child_count: 0 })),
+        branch_total: issues.length,
+        next_cursor: end < issues.length ? String(end) : null,
+      };
+    });
+    setApiInstance({ listIssueTableRows } as unknown as ApiClient);
+    const table = { scope: { kind: "workspace" }, filters: {}, sort: { field: "position", direction: "asc" } } as const;
+
+    const result = await new QueryClient().fetchQuery(sidebarIssuesOptions(WS_ID, "view:a", { table }, 120));
+
+    expect(result.issues).toHaveLength(120);
+    expect(result.total).toBe(120);
+    expect(listIssueTableRows.mock.calls.map(([params]) => params.page)).toEqual([
+      { limit: 100, cursor: null },
+      { limit: 20, cursor: "100" },
+    ]);
+  });
+});
+
+describe("prefetchIssuePage", () => {
+  it("shares one issue request with a link warming the same issue by its identifier", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    const issue = makeIssue(7);
+    const getIssue = vi.fn().mockResolvedValue(issue);
+    setApiInstance({
+      getIssue,
+      listTimeline: vi.fn().mockResolvedValue([]),
+      listTasksByIssue: vi.fn().mockResolvedValue([]),
+      listChildIssues: vi.fn().mockResolvedValue({ issues: [] }),
+    } as unknown as ApiClient);
+
+    await Promise.all([
+      prefetchIssuePage(qc, WS_ID, issue.id, issue.identifier),
+      fetchIssueByRef(qc, WS_ID, issue.identifier),
+    ]);
+
+    expect(getIssue).toHaveBeenCalledTimes(1);
+    expect(getIssue.mock.calls[0]?.[0]).toBe("MUL-7");
+    expect(qc.getQueryData(issueKeys.detail(WS_ID, "MUL-7"))).toBe(issue);
+    expect(qc.getQueryData(issueKeys.detail(WS_ID, issue.id))).toBe(issue);
   });
 });

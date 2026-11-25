@@ -12,8 +12,11 @@
     "more_agents_other": "and {{count}} other agents"
   },
   "detail": {
-    "workspace_fallback": "Workspace",
     "members_breadcrumb": "Members",
+    "role": "Role",
+    "email": "Email",
+    "joined": "Joined",
+    "relation": "Relation",
     "breadcrumb_fallback": "Member",
     "not_found_title": "Member not found",
     "not_found_description": "This member may have left the workspace."

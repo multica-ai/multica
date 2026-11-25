@@ -121,6 +121,32 @@ describe("BillingReturnPage", () => {
     );
   });
 
+  it("forwards an add-on return with its Checkout Session so Billing can confirm it", async () => {
+    renderReturn("workspace_id=11111111-1111-1111-1111-111111111111&result=autopilot_addon&session_id=cs_test_42");
+    await waitFor(() =>
+      expect(mockReplace).toHaveBeenCalledWith(
+        "/acme/settings?tab=billing&result=autopilot_addon&session_id=cs_test_42",
+      ),
+    );
+
+    // Anything but a Stripe session ID shape is dropped.
+    mockReplace.mockReset();
+    renderReturn("workspace_id=11111111-1111-1111-1111-111111111111&result=autopilot_addon&session_id=../x&y");
+    await waitFor(() =>
+      expect(mockReplace).toHaveBeenCalledWith(
+        "/acme/settings?tab=billing&result=autopilot_addon",
+      ),
+    );
+
+    mockReplace.mockReset();
+    renderReturn("workspace_id=11111111-1111-1111-1111-111111111111&result=autopilot_addon_cancel&session_id=cs_test_42");
+    await waitFor(() =>
+      expect(mockReplace).toHaveBeenCalledWith(
+        "/acme/settings?tab=billing&result=autopilot_addon_cancel",
+      ),
+    );
+  });
+
   // Only `workspace_id` and `result` are read, and the destination is rebuilt
   // from paths — so a hand-crafted return link cannot redirect off-app.
   it("ignores an unrecognized result instead of forwarding it", async () => {

@@ -46,6 +46,10 @@ spec:
             - name: NEXT_PUBLIC_WS_URL
               value: {{ .Values.frontend.config.publicWsUrl | quote }}
             {{- end }}
+            {{- if .Values.frontend.config.googleAnalyticsId }}
+            - name: GOOGLE_ANALYTICS_ID
+              value: {{ .Values.frontend.config.googleAnalyticsId | quote }}
+            {{- end }}
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
       {{- with .Values.frontend.affinity }}

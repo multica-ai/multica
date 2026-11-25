@@ -3,6 +3,14 @@ export interface Attachment {
   workspace_id: string;
   issue_id: string | null;
   comment_id: string | null;
+  /**
+   * Origin of a comment file, from the issue attachment list only: the
+   * comment's author and time. Absent on description files, on other
+   * endpoints, and from servers older than this field.
+   */
+  comment_author_type?: string;
+  comment_author_id?: string;
+  comment_created_at?: string;
   chat_session_id: string | null;
   chat_message_id: string | null;
   uploader_type: string;
@@ -46,4 +54,17 @@ export interface Attachment {
   content_type: string;
   size_bytes: number;
   created_at: string;
+  /**
+   * An image's displayed pixel size, so a body can reserve its box before the
+   * image loads. Absent for other files and for older uploads.
+   */
+  width?: number;
+  height?: number;
+  /**
+   * Stable, auth-gated path of a downscaled copy for grid tiles, like
+   * `/api/attachments/<id>/thumbnail`. Set only for large raster images;
+   * absent everywhere else and from servers older than this field, where
+   * tiles load the original. Never use it for viewers or downloads.
+   */
+  thumbnail_url?: string;
 }

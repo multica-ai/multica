@@ -12,7 +12,7 @@ import (
 )
 
 const getUserComposioConnection = `-- name: GetUserComposioConnection :one
-SELECT id, user_id, toolkit_slug, auth_config_id, connected_account_id, composio_user_id, status, connected_at, last_used_at, created_at, updated_at FROM user_composio_connection
+SELECT id, user_id, toolkit_slug, auth_config_id, connected_account_id, composio_user_id, status, connected_at, last_used_at, created_at, updated_at, workspace_id FROM user_composio_connection
 WHERE id = $1 AND user_id = $2
 `
 
@@ -38,18 +38,28 @@ func (q *Queries) GetUserComposioConnection(ctx context.Context, arg GetUserComp
 		&i.LastUsedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.WorkspaceID,
 	)
 	return i, err
 }
 
 const listActiveUserComposioConnections = `-- name: ListActiveUserComposioConnections :many
-SELECT id, user_id, toolkit_slug, auth_config_id, connected_account_id, composio_user_id, status, connected_at, last_used_at, created_at, updated_at FROM user_composio_connection
+SELECT id, user_id, toolkit_slug, auth_config_id, connected_account_id, composio_user_id, status, connected_at, last_used_at, created_at, updated_at, workspace_id FROM user_composio_connection
 WHERE user_id = $1 AND status = 'active'
-ORDER BY connected_at DESC
+  AND (workspace_id = $2::uuid OR workspace_id IS NULL)
+ORDER BY (workspace_id IS NULL), connected_at DESC
 `
 
-func (q *Queries) ListActiveUserComposioConnections(ctx context.Context, userID pgtype.UUID) ([]UserComposioConnection, error) {
-	rows, err := q.db.Query(ctx, listActiveUserComposioConnections, userID)
+type ListActiveUserComposioConnectionsParams struct {
+	UserID      pgtype.UUID `json:"user_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// A member's active personal accounts in one workspace, plus the ones made
+// before accounts belonged to a workspace. This workspace's own come first,
+// so a reader keeping the first row per app prefers them.
+func (q *Queries) ListActiveUserComposioConnections(ctx context.Context, arg ListActiveUserComposioConnectionsParams) ([]UserComposioConnection, error) {
+	rows, err := q.db.Query(ctx, listActiveUserComposioConnections, arg.UserID, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -69,6 +79,47 @@ func (q *Queries) ListActiveUserComposioConnections(ctx context.Context, userID 
 			&i.LastUsedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.WorkspaceID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllActiveUserComposioConnections = `-- name: ListAllActiveUserComposioConnections :many
+SELECT id, user_id, toolkit_slug, auth_config_id, connected_account_id, composio_user_id, status, connected_at, last_used_at, created_at, updated_at, workspace_id FROM user_composio_connection
+WHERE user_id = $1 AND status = 'active'
+ORDER BY connected_at DESC
+`
+
+// Every active personal account of a member, in any workspace.
+func (q *Queries) ListAllActiveUserComposioConnections(ctx context.Context, userID pgtype.UUID) ([]UserComposioConnection, error) {
+	rows, err := q.db.Query(ctx, listAllActiveUserComposioConnections, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []UserComposioConnection{}
+	for rows.Next() {
+		var i UserComposioConnection
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.ToolkitSlug,
+			&i.AuthConfigID,
+			&i.ConnectedAccountID,
+			&i.ComposioUserID,
+			&i.Status,
+			&i.ConnectedAt,
+			&i.LastUsedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.WorkspaceID,
 		); err != nil {
 			return nil, err
 		}
@@ -101,9 +152,9 @@ func (q *Queries) MarkUserComposioConnectionRevoked(ctx context.Context, arg Mar
 const upsertUserComposioConnection = `-- name: UpsertUserComposioConnection :one
 
 INSERT INTO user_composio_connection (
-    user_id, toolkit_slug, auth_config_id, connected_account_id, composio_user_id, status
+    user_id, toolkit_slug, auth_config_id, connected_account_id, composio_user_id, status, workspace_id
 ) VALUES (
-    $1, $2, $3, $4, $5, 'active'
+    $1, $2, $3, $4, $5, 'active', $6::uuid
 )
 ON CONFLICT (user_id, connected_account_id) DO UPDATE SET
     toolkit_slug     = EXCLUDED.toolkit_slug,
@@ -111,7 +162,7 @@ ON CONFLICT (user_id, connected_account_id) DO UPDATE SET
     composio_user_id = EXCLUDED.composio_user_id,
     status           = 'active',
     updated_at       = now()
-RETURNING id, user_id, toolkit_slug, auth_config_id, connected_account_id, composio_user_id, status, connected_at, last_used_at, created_at, updated_at
+RETURNING id, user_id, toolkit_slug, auth_config_id, connected_account_id, composio_user_id, status, connected_at, last_used_at, created_at, updated_at, workspace_id
 `
 
 type UpsertUserComposioConnectionParams struct {
@@ -120,6 +171,7 @@ type UpsertUserComposioConnectionParams struct {
 	AuthConfigID       string      `json:"auth_config_id"`
 	ConnectedAccountID string      `json:"connected_account_id"`
 	ComposioUserID     string      `json:"composio_user_id"`
+	WorkspaceID        pgtype.UUID `json:"workspace_id"`
 }
 
 // =====================
@@ -136,6 +188,7 @@ func (q *Queries) UpsertUserComposioConnection(ctx context.Context, arg UpsertUs
 		arg.AuthConfigID,
 		arg.ConnectedAccountID,
 		arg.ComposioUserID,
+		arg.WorkspaceID,
 	)
 	var i UserComposioConnection
 	err := row.Scan(
@@ -150,6 +203,7 @@ func (q *Queries) UpsertUserComposioConnection(ctx context.Context, arg UpsertUs
 		&i.LastUsedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.WorkspaceID,
 	)
 	return i, err
 }

@@ -1,17 +1,30 @@
 "use client";
 
-import { useId, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
+import { AnimatePresence, motion } from "motion/react";
+import { UI_EASE_IN, UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import {
   AlertCircle,
   Building2,
   Check,
+  ChevronRight,
   Eye,
+  Globe,
   Laptop,
   Loader2,
   UserRound,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
+import { useReducedMotion } from "@multica/core/appearance";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { UI_INDICATOR_SPRING } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { memberListOptions } from "@multica/core/workspace/queries";
@@ -27,6 +40,7 @@ export type SettingsSaveStatus = "idle" | "saving" | "saved" | "error";
  */
 export type SettingsScope =
   | "account"
+  | "all-workspaces"
   | "device"
   | "device-workspace"
   | "workspace"
@@ -45,14 +59,16 @@ export function SettingsScopeBadge({ scope }: { scope: SettingsScope }) {
   if (scope === "workspace" || scope === "workspace-only" || scope === "device-workspace") {
     return <WorkspaceScopeBadge scope={scope} />;
   }
-  const Icon = scope === "account" ? UserRound : Laptop;
+  const Icon = scope === "account" ? UserRound : scope === "all-workspaces" ? Globe : Laptop;
   return (
     <span data-slot="settings-scope" className={SCOPE_BADGE_CLASS}>
       <Icon aria-hidden="true" className="size-3" />
       <span className="truncate">
         {scope === "account"
           ? t(($) => $.layout.scope.account)
-          : t(($) => $.layout.scope.device)}
+          : scope === "all-workspaces"
+            ? t(($) => $.layout.scope.all_workspaces)
+            : t(($) => $.layout.scope.device)}
       </span>
     </span>
   );
@@ -74,7 +90,8 @@ function WorkspaceScopeBadge({
       <WorkspaceAvatar
         name={name}
         avatarUrl={workspace.avatar_url}
-        className="size-3 rounded-xs border-0"
+        radius="xs"
+        className="size-3 border-0"
       />
     ) : (
       <Building2 aria-hidden="true" className="size-3" />
@@ -93,6 +110,22 @@ function WorkspaceScopeBadge({
   );
 }
 
+/**
+ * The settings page's one header, as a set of slots the open tab fills. The
+ * page names the section itself, so it stays put while a tab loads; the tab
+ * contributes what only it knows — where its setting takes effect, its
+ * page-level actions, and the name of a detail page opened inside it.
+ */
+export interface SettingsHeaderSlots {
+  trail: HTMLElement | null;
+  meta: HTMLElement | null;
+  actions: HTMLElement | null;
+  /** Tells the page a detail is open, so the section name links back. */
+  onDetailChange: (open: boolean) => void;
+}
+
+export const SettingsHeaderContext = createContext<SettingsHeaderSlots | null>(null);
+
 export function SettingsTab({
   title,
   description,
@@ -104,12 +137,52 @@ export function SettingsTab({
   title: ReactNode;
   description?: ReactNode;
   scope?: SettingsScope;
-  /** Primary page-level action, aligned with the title. */
+  /** Page-level actions, at the right of the page header. */
   actions?: ReactNode;
-  /** Parent location for detail pages; rendered above the title. */
+  /**
+   * Parent location for detail pages. Inside the settings page the header
+   * shows the trail itself; standalone, this renders above the title.
+   */
   breadcrumb?: ReactNode;
   children: ReactNode;
 }) {
+  const header = useContext(SettingsHeaderContext);
+  const detail = breadcrumb != null && breadcrumb !== false;
+  const onDetailChange = header?.onDetailChange;
+  useEffect(() => {
+    if (!onDetailChange || !detail) return;
+    onDetailChange(true);
+    return () => onDetailChange(false);
+  }, [onDetailChange, detail]);
+
+  if (header) {
+    return (
+      <div className="space-y-8">
+        {header.trail && detail
+          ? createPortal(
+              <>
+                <ChevronRight aria-hidden="true" className="size-3 shrink-0 text-faint-foreground" />
+                <span aria-current="page" className="min-w-0 truncate">
+                  {title}
+                </span>
+              </>,
+              header.trail,
+            )
+          : null}
+        {header.meta && scope
+          ? createPortal(<SettingsScopeBadge scope={scope} />, header.meta)
+          : null}
+        {header.actions && actions ? createPortal(actions, header.actions) : null}
+        {description ? (
+          <p className="max-w-2xl text-body leading-6 text-muted-foreground">
+            {description}
+          </p>
+        ) : null}
+        {children}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-8">
       <header>
@@ -291,37 +364,55 @@ export function SettingsViewTabs<T extends string>({
   value: T;
   onChange: (value: T) => void;
 }) {
+  const indicatorId = useId();
+  const prefersReducedMotion = useReducedMotion();
+  const transition = prefersReducedMotion ? { duration: 0 } : UI_INDICATOR_SPRING;
+
   return (
     <div
       role="tablist"
       aria-label={label}
       className="inline-flex w-fit items-center gap-0.5 rounded-lg bg-muted p-0.5"
     >
-      {items.map((item) => (
-        <button
-          key={item.value}
-          type="button"
-          role="tab"
-          aria-selected={value === item.value}
-          onClick={() => onChange(item.value)}
-          className={cn(
-            "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-label font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ring",
-            value === item.value
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {item.label}
-          {item.count !== undefined ? (
-            <>
-              {" "}
-              <span className="text-caption font-normal tabular-nums text-muted-foreground">
-                {item.count}
-              </span>
-            </>
-          ) : null}
-        </button>
-      ))}
+      {items.map((item) => {
+        const active = value === item.value;
+        return (
+          <button
+            key={item.value}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(item.value)}
+            className={cn(
+              "relative inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-label font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ring",
+              active
+                ? "text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {active && (
+              <motion.span
+                layoutId={indicatorId}
+                transition={transition}
+                aria-hidden="true"
+                data-slot="settings-view-tabs-indicator"
+                className="pointer-events-none absolute inset-0 rounded-md bg-background shadow-sm"
+              />
+            )}
+            <span className="relative z-10 inline-flex items-center gap-1.5">
+              {item.label}
+              {item.count !== undefined ? (
+                <>
+                  {" "}
+                  <span className="text-caption font-normal tabular-nums text-muted-foreground">
+                    {item.count}
+                  </span>
+                </>
+              ) : null}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -372,12 +463,12 @@ export function SettingsSaveState({
   savedLabel: string;
   errorLabel: string;
 }) {
-  if (status === "idle") return null;
+  const reduceMotion = useReducedMotion();
 
   const content =
     status === "saving" ? (
       <>
-        <Loader2 className="size-3 animate-spin" />
+        <Loader2 className="size-3 animate-spin motion-reduce:animate-none" />
         {savingLabel}
       </>
     ) : status === "saved" ? (
@@ -385,22 +476,37 @@ export function SettingsSaveState({
         <Check className="size-3 text-success" />
         {savedLabel}
       </>
-    ) : (
+    ) : status === "error" ? (
       <>
         <AlertCircle className="size-3 text-destructive" />
         {errorLabel}
       </>
-    );
+    ) : null;
 
   return (
-    <span
-      role="status"
-      className={cn(
-        "inline-flex items-center gap-1.5 text-caption text-muted-foreground",
-        status === "error" && "text-destructive",
+    <AnimatePresence mode="wait" initial={false}>
+      {status !== "idle" && (
+        <motion.span
+          key={status}
+          role="status"
+          initial={reduceMotion ? false : { opacity: 0, y: 2 }}
+          animate={{
+            opacity: 1,
+            y: 0,
+            transition: { duration: reduceMotion ? 0 : UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
+          }}
+          exit={{
+            opacity: 0,
+            transition: { duration: reduceMotion ? 0 : UI_MOTION_DURATION.micro, ease: UI_EASE_IN },
+          }}
+          className={cn(
+            "inline-flex items-center gap-1.5 text-caption text-muted-foreground",
+            status === "error" && "text-destructive",
+          )}
+        >
+          {content}
+        </motion.span>
       )}
-    >
-      {content}
-    </span>
+    </AnimatePresence>
   );
 }

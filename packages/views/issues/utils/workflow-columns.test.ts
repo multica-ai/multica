@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import type { IssueWorkflow } from "@multica/core/types";
-import { surfaceStatusOrder, useColumnWorkflow, workflowColumns } from "./workflow-columns";
+import { useColumnWorkflow, workflowColumns } from "./workflow-columns";
 
 const workflow: IssueWorkflow = {
   id: "wf-1",
@@ -9,6 +9,7 @@ const workflow: IssueWorkflow = {
   name: "Delivery",
   description: "",
   is_default: false,
+  owner_id: null,
   steps: ["todo", "code_review", "in_progress", "done"].map((status_key) => ({
     status_key,
     handler: { type: "none" as const },
@@ -26,6 +27,7 @@ const { defaultWithoutBlocked } = vi.hoisted(() => ({
     name: "Default",
     description: "",
     is_default: true,
+    owner_id: null,
     steps: ["todo", "in_progress", "in_review", "done", "cancelled"].map((status_key) => ({
       status_key,
       handler: { type: "none" as const },
@@ -37,7 +39,6 @@ const { defaultWithoutBlocked } = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("@multica/core/config", () => ({ useFeatureEnabled: () => true }));
 vi.mock("@multica/core/issue-workflows", () => ({
   defaultWorkflow: () => defaultWithoutBlocked,
   useIssueWorkflows: () => ({ workflows: [defaultWithoutBlocked] }),
@@ -65,6 +66,10 @@ describe("workflowColumns (MUL-7420)", () => {
 });
 
 describe("useColumnWorkflow (MUL-7420)", () => {
+  it("follows Default outside a project without feature flag configuration", () => {
+    expect(useColumnWorkflow("ws-1", null, false).workflow).toBe(defaultWithoutBlocked);
+  });
+
   it("follows the project's workflow on a project board", () => {
     expect(useColumnWorkflow("ws-1", "project-1", false).workflow).toBe(defaultWithoutBlocked);
   });
@@ -72,23 +77,5 @@ describe("useColumnWorkflow (MUL-7420)", () => {
   it("lets an explicit status filter reach a status the project's workflow dropped", () => {
     const { workflow: selected } = useColumnWorkflow("ws-1", "project-1", true);
     expect(workflowColumns(["blocked"], selected)).toEqual(["blocked"]);
-  });
-});
-
-describe("surfaceStatusOrder (MUL-7420)", () => {
-  it("lists the workflow's steps, then the catalog statuses it leaves out", () => {
-    expect(surfaceStatusOrder(["backlog", "todo", "in_progress", "in_review", "done", "blocked"], workflow)).toEqual([
-      "todo",
-      "code_review",
-      "in_progress",
-      "done",
-      "backlog",
-      "in_review",
-      "blocked",
-    ]);
-  });
-
-  it("is the catalog order without a workflow", () => {
-    expect(surfaceStatusOrder(["backlog", "todo"], null)).toEqual(["backlog", "todo"]);
   });
 });

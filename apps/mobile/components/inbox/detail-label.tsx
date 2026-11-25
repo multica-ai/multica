@@ -37,6 +37,7 @@ const PRIORITY_LABEL: Record<IssuePriority, string> = {
 const TYPE_KEY: Record<InboxItemType, string> = {
   issue_assigned: "type.assigned",
   issue_subscribed: "type.subscribed",
+  issue_created: "type.issue_created",
   unassigned: "type.unassigned",
   assignee_changed: "type.reassigned",
   status_changed: "type.status_changed",
@@ -45,6 +46,8 @@ const TYPE_KEY: Record<InboxItemType, string> = {
   due_date_changed: "type.due_date_changed",
   new_comment: "type.new_comment",
   mentioned: "type.mentioned",
+  doc_comment: "type.doc_comment",
+  doc_mentioned: "type.doc_mentioned",
   review_requested: "type.review_requested",
   task_completed: "type.task_completed",
   task_failed: "type.task_failed",
@@ -56,7 +59,14 @@ const TYPE_KEY: Record<InboxItemType, string> = {
   quick_create_unconfirmed: "type.quick_create_unconfirmed",
   autopilot_paused: "type.autopilot_paused",
   autopilot_quota_exceeded: "type.autopilot_quota_exceeded",
+  app_tool_calls_quota_exceeded: "type.app_tool_calls_quota_exceeded",
   children_done: "type.children_done",
+  blockers_done: "type.blockers_done",
+  project_owner_joined: "type.project_owner_joined",
+  app_action_requested: "type.app_action_requested",
+  app_action_reminder: "type.app_action_reminder",
+  app_connect_requested: "type.app_connect_requested",
+  app_action_result: "type.app_action_result",
 };
 
 // due_date is a calendar day — format timezone-safely (no offset day shift).
@@ -164,6 +174,8 @@ export function InboxDetailLabel({
       }
       case "autopilot_quota_exceeded":
         return t("type.run_limit_blocked");
+      case "app_tool_calls_quota_exceeded":
+        return t("type.app_tool_calls_limit_blocked");
       default:
         return t(TYPE_KEY[item.type]) ?? item.type;
     }

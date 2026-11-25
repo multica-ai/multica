@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -244,6 +243,14 @@ func resolveRealPath(absPath string) (string, error) {
 	return real, nil
 }
 
+// errLocalDirectoryMissing marks a linked directory that no longer exists on
+// this machine — the user deleted or moved it after linking it to the project.
+// acquireLocalDirectoryLockIfNeeded reports it as local_directory_missing
+// rather than the generic local_directory_error, so the run says what to fix.
+// The message text is also the server's witness for upgrading older daemons'
+// reports (taskfailure.NormalizeDaemonReason); keep its prefix stable.
+var errLocalDirectoryMissing = errors.New("local_directory: path does not exist")
+
 // validateLocalPath enforces the daemon-side preconditions for running an
 // agent against a user-supplied directory:
 //
@@ -274,7 +281,7 @@ func validateLocalPath(absPath string) error {
 	info, err := os.Stat(absPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("local_directory: path does not exist: %q", absPath)
+			return fmt.Errorf("%w: %q", errLocalDirectoryMissing, absPath)
 		}
 		return fmt.Errorf("local_directory: stat %q: %w", absPath, err)
 	}
@@ -437,21 +444,6 @@ func checkDirReadWrite(dir string) error {
 	return nil
 }
 
-// isGitWorkTree reports whether path is the working tree of a git repo. The
-// daemon uses this to skip branch / worktree machinery when the user has
-// already pointed the project at their own clone — the agent operates on
-// the current branch in place. Returns false on any error (git not on PATH,
-// path not in a repo, exec failure) so the caller can treat "not a git
-// tree" and "can't tell" the same way: skip the git-specific path.
-func isGitWorkTree(ctx context.Context, path string) bool {
-	cmd := exec.CommandContext(ctx, "git", "-C", path, "rev-parse", "--is-inside-work-tree")
-	out, err := cmd.Output()
-	if err != nil {
-		return false
-	}
-	return strings.TrimSpace(string(out)) == "true"
-}
-
 // LocalPathLocker serialises agent tasks that share the same on-disk path.
 // The lock is owned for the entire lifetime of a task (claim → context
 // write → agent execution → result report), not just the agent execution
@@ -506,17 +498,17 @@ func (l *LocalPathLocker) Holder(realPath string) string {
 // Returns a release func that the caller must invoke (typically deferred)
 // to free the lock. The release is idempotent.
 //
-// Acquire is cancellable via ctx. When ctx is cancelled while the goroutine
-// is blocked on the lock, Acquire returns ctx.Err() and the lock is NOT
-// taken. This is the same contract as sync.Mutex.Lock paired with
-// context-aware cancellation — a daemon shutdown won't wedge inside the
-// per-path wait queue.
+// Acquire returns ctx.Err() without transferring ownership if cancellation
+// is observed before granting the lock, including on the uncontended path.
 func (l *LocalPathLocker) Acquire(ctx context.Context, realPath, taskID string, onWait func(holder string)) (func(), error) {
 	if realPath == "" {
 		return nil, errors.New("local_directory: realpath required for lock")
 	}
 	if taskID == "" {
 		return nil, errors.New("local_directory: taskID required for lock")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	l.mu.Lock()
@@ -527,12 +519,20 @@ func (l *LocalPathLocker) Acquire(ctx context.Context, realPath, taskID string, 
 	}
 	l.mu.Unlock()
 
-	// Try the fast path first — no allocation, no waiter goroutine.
-	if entry.mu.TryLock() {
+	adopt := func() (func(), error) {
+		// Both the lock and cancellation can become ready during a handoff.
+		if err := ctx.Err(); err != nil {
+			entry.mu.Unlock()
+			return nil, err
+		}
 		entry.mu2.Lock()
 		entry.holderID = taskID
 		entry.mu2.Unlock()
 		return l.releaser(realPath, entry), nil
+	}
+	// Try the fast path first — no allocation, no waiter goroutine.
+	if entry.mu.TryLock() {
+		return adopt()
 	}
 
 	// Slow path: somebody else holds the lock. Fire onWait once with the
@@ -553,10 +553,7 @@ func (l *LocalPathLocker) Acquire(ctx context.Context, realPath, taskID string, 
 
 	select {
 	case <-acquired:
-		entry.mu2.Lock()
-		entry.holderID = taskID
-		entry.mu2.Unlock()
-		return l.releaser(realPath, entry), nil
+		return adopt()
 	case <-ctx.Done():
 		// We lost the wait — the goroutine above will still complete and
 		// take the lock. Spin off a clean-up goroutine that releases it

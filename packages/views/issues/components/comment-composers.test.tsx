@@ -1,10 +1,13 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ComponentProps, type ReactNode, type Ref } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
-import type { Attachment } from "@multica/core/types";
+import type { AgentSkillSummary, Attachment } from "@multica/core/types";
+import type { Editor } from "@tiptap/core";
 import { useCommentComposerStore, useCommentDraftStore } from "@multica/core/issues/stores";
+import { issueKeys } from "@multica/core/issues/queries";
+import { workspaceKeys } from "@multica/core/workspace/queries";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
 import { renderWithI18n } from "../../test/i18n";
 import { CommentInput } from "./comment-input";
@@ -13,9 +16,13 @@ import { ReplyInput } from "./reply-input";
 /** Shape of ContentEditor's `quickActionMenu` prop, as the composers pass it. */
 type QuickActionMenuProp = {
   getQuickActions?: () => { id: string; name: string; description?: string }[];
-  renderQuickAction?: (quickActionId: string) => Promise<string>;
-  onRenderError?: (error: unknown) => void;
+  getQuickActionContent?: (quickActionId: string) => string;
+  getSkills?: (editor: Editor) => AgentSkillSummary[];
 };
+
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: { getState: () => ({ user: { id: "user-1" } }) },
+}));
 
 // Uploads now flow through the module-level coordinator, which calls
 // `api.uploadFile(file, ctx, signal)` (MUL-5181). Tests drive uploads by
@@ -23,7 +30,10 @@ type QuickActionMenuProp = {
 const apiUploadFile = vi.hoisted(() => vi.fn());
 const apiListWorkspaces = vi.hoisted(() => vi.fn());
 const apiListQuickActions = vi.hoisted(() => vi.fn());
-const apiRenderQuickAction = vi.hoisted(() => vi.fn());
+const apiGetIssue = vi.hoisted(() => vi.fn());
+const apiListAgents = vi.hoisted(() => vi.fn());
+const apiListSquads = vi.hoisted(() => vi.fn());
+const apiListMembers = vi.hoisted(() => vi.fn());
 const apiPreviewCommentTriggers = vi.hoisted(() => vi.fn());
 const apiListTasksByIssue = vi.hoisted(() => vi.fn());
 const apiCancelTask = vi.hoisted(() => vi.fn());
@@ -39,8 +49,8 @@ const editorQuickActionMenu = vi.hoisted(() => ({
 // Observability + failure control for the write-back insert path (MUL-5181):
 // `insertMarkdownAtEnd` returns false while the (simulated) Tiptap instance
 // doesn't exist yet, exactly like the real handle.
-// Post-send caret policy: the top-level composer blurs (the page scrolls to the
-// posted comment instead), a thread reply keeps the caret for the next reply.
+// Post-send caret policy: both the top-level composer and a thread reply blur,
+// so the page's keyboard shortcuts work again straight after a send.
 const focusCalls = vi.hoisted(() => ({ focused: 0, blurred: 0 }));
 const insertMarkdownSpy = vi.hoisted(() => vi.fn());
 const insertPlaceholderSpy = vi.hoisted(() => vi.fn());
@@ -56,12 +66,20 @@ const editorUploadSignal = vi.hoisted(
 // the same or the two records drift apart only in tests.
 let mockUploadIdSeq = 0;
 
+vi.mock("@multica/core/permissions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/permissions")>()),
+  useIsGuest: () => false,
+}));
 vi.mock("@multica/core/api", () => ({
   api: {
+    getBaseUrl: () => "https://api.example.test",
     uploadFile: apiUploadFile,
     listWorkspaces: apiListWorkspaces,
     listQuickActions: apiListQuickActions,
-    renderQuickAction: apiRenderQuickAction,
+    getIssue: apiGetIssue,
+    listAgents: apiListAgents,
+    listSquads: apiListSquads,
+    listMembers: apiListMembers,
     previewCommentTriggers: apiPreviewCommentTriggers,
     listTasksByIssue: apiListTasksByIssue,
     cancelTask: apiCancelTask,
@@ -241,6 +259,12 @@ function renderCommentInput(onSubmit = vi.fn().mockResolvedValue(true)) {
   return { ...view, onSubmit };
 }
 
+function DraftReplyInput(props: ComponentProps<typeof ReplyInput>) {
+  const parentId = useCommentDraftStore((s) =>
+    (props.draftKey ? s.drafts[props.draftKey]?.replyTarget?.commentId : undefined) ?? props.parentId);
+  return <ReplyInput {...props} parentId={parentId} />;
+}
+
 function renderReplyInput({
   onSubmit = vi.fn().mockResolvedValue("reply-new"),
   onAccepted,
@@ -253,7 +277,7 @@ function renderReplyInput({
   draftKey?: `reply:${string}:${string}`;
 } = {}) {
   const view = renderWithProviders(
-    <ReplyInput
+    <DraftReplyInput
       issueId="issue-1"
       parentId="comment-1"
       avatarType="member"
@@ -274,6 +298,12 @@ function activateComposer(shellTestId: "comment-composer-shell" | "reply-compose
   fireEvent.click(screen.getByTestId(shellTestId));
 }
 
+/** Native `disabled` while empty or sending; `aria-disabled` while an upload
+ *  blocks it, so the reason tooltip stays reachable. */
+function isSendBlocked(button: HTMLButtonElement): boolean {
+  return button.disabled || button.getAttribute("aria-disabled") === "true";
+}
+
 function getSubmitButton(container: HTMLElement): HTMLButtonElement {
   // Submit is always the last button in a composer's action cluster.
   const buttons = container.querySelectorAll("button");
@@ -287,7 +317,10 @@ beforeEach(() => {
   apiUploadFile.mockReset();
   apiListWorkspaces.mockReset();
   apiListQuickActions.mockReset();
-  apiRenderQuickAction.mockReset();
+  apiGetIssue.mockReset().mockResolvedValue({ id: "issue-1", assignee_type: null, assignee_id: null });
+  apiListAgents.mockReset().mockResolvedValue([]);
+  apiListSquads.mockReset().mockResolvedValue([]);
+  apiListMembers.mockReset().mockResolvedValue([{ user_id: "user-1", role: "member", name: "User" }]);
   apiPreviewCommentTriggers.mockReset();
   apiListTasksByIssue.mockReset();
   apiCancelTask.mockReset();
@@ -320,18 +353,19 @@ describe("quick action `/` menu", () => {
     apiListWorkspaces.mockResolvedValue([workspace]);
     apiListQuickActions.mockResolvedValue({
       quick_actions: [
-        { id: "qa-1", name: "review", description: "Ask for a review", status: "active" },
+        { id: "qa-1", name: "review", description: "Ask for a review", status: "active", assignee_type: "", prompt: "Review this issue" },
         { id: "qa-2", name: "retired", description: "", status: "archived" },
       ],
     });
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    return renderWithI18n(
+    const view = renderWithI18n(
       <QueryClientProvider client={queryClient}>
         {/* useQuickActionMenu resolves the workspace from the slug context; without
             it the catalog query stays disabled and every menu reads as empty. */}
         <WorkspaceSlugProvider slug="acme">{ui}</WorkspaceSlugProvider>
       </QueryClientProvider>,
     );
+    return { ...view, queryClient };
   }
 
   // Both composers post to the same issue, so `/` must offer the same catalog in
@@ -359,6 +393,63 @@ describe("quick action `/` menu", () => {
     },
   ];
 
+  async function replySkillIds({
+    timeline,
+    parentId = "comment-1",
+    targetMissing = false,
+    squads = [],
+  }: {
+    timeline: unknown[];
+    parentId?: string;
+    targetMissing?: boolean;
+    squads?: unknown[];
+  }) {
+    const agentIds = [
+      "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      "parent-agent",
+      "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "root-leader",
+    ];
+    apiGetIssue.mockResolvedValue({
+      id: "issue-1",
+      assignee_type: "agent",
+      assignee_id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+    });
+    apiListAgents.mockResolvedValue(agentIds.map((id) => ({
+      id,
+      runtime_id: "runtime-1",
+      archived_at: null,
+      owner_id: null,
+      permission_mode: "public_to",
+      invocation_targets: [{ target_type: "workspace", target_id: null }],
+      skills: [{ id: `${id}-skill`, name: id, description: "" }],
+    })));
+    apiListSquads.mockResolvedValue(squads);
+    const view = renderInWorkspace(
+      <ReplyInput
+        issueId="issue-1"
+        parentId={parentId}
+        avatarType="member"
+        avatarId="user-1"
+        targetMissing={targetMissing}
+        onSubmit={vi.fn().mockResolvedValue(true)}
+      />,
+    );
+    view.queryClient.setQueryData(issueKeys.timeline("issue-1"), timeline);
+    activateComposer("reply-composer-shell");
+    await waitFor(() => {
+      expect(view.queryClient.getQueryData(issueKeys.detail("ws-1", "issue-1"))).toBeDefined();
+      expect(view.queryClient.getQueryData(workspaceKeys.agents("ws-1"))).toHaveLength(agentIds.length);
+      if (squads.length) {
+        expect(view.queryClient.getQueryData(workspaceKeys.squads("ws-1"))).toHaveLength(squads.length);
+      }
+    });
+    const editor = { state: { doc: { descendants: () => {} } } } as unknown as Editor;
+    const ids = editorQuickActionMenu.last?.getSkills?.(editor).map((skill) => skill.id) ?? [];
+    expect(apiListTasksByIssue).not.toHaveBeenCalled();
+    return ids;
+  }
+
   for (const composer of composers) {
     it(`offers the workspace's active quick actions in the ${composer.name}`, async () => {
       renderInWorkspace(composer.element);
@@ -371,19 +462,136 @@ describe("quick action `/` menu", () => {
       });
     });
 
-    it(`binds quick action rendering to this issue in the ${composer.name}`, async () => {
-      apiRenderQuickAction.mockResolvedValue("rendered body");
+    it(`builds quick action text from the catalog in the ${composer.name}`, async () => {
       renderInWorkspace(composer.element);
       activateComposer(composer.shell);
 
       await waitFor(() => {
-        expect(editorQuickActionMenu.last?.renderQuickAction).toBeTypeOf("function");
+        expect(editorQuickActionMenu.last?.getQuickActionContent?.("qa-1")).toBe("Review this issue");
       });
-      await editorQuickActionMenu.last?.renderQuickAction?.("qa-1");
+    });
 
-      expect(apiRenderQuickAction).toHaveBeenCalledWith("issue-1", "qa-1");
+    it(`resolves Issue assignee skills in the ${composer.name}`, async () => {
+      apiPreviewCommentTriggers.mockResolvedValue({ agents: [], blocked: [] });
+      apiGetIssue.mockResolvedValue({
+        id: "issue-1",
+        assignee_type: "agent",
+        assignee_id: "agent-1",
+      });
+      apiListAgents.mockResolvedValue([{
+        id: "agent-1",
+        runtime_id: "runtime-1",
+        archived_at: null,
+        owner_id: null,
+        permission_mode: "public_to",
+        invocation_targets: [{ target_type: "workspace", target_id: null }],
+        skills: [{ id: "skill-1", name: "deploy", description: "Ship changes" }],
+      }]);
+      renderInWorkspace(composer.element);
+      activateComposer(composer.shell);
+      const editor = {
+        state: { doc: { descendants: () => {} } },
+      } as unknown as Editor;
+
+      await waitFor(() => {
+        expect(editorQuickActionMenu.last?.getSkills?.(editor).map((skill) => skill.id))
+          .toEqual(["skill-1"]);
+      });
+
+      fireEvent.change(screen.getByTestId("editor"), { target: { value: "draft" } });
+      await waitFor(() => expect(apiPreviewCommentTriggers).toHaveBeenCalled());
+      await waitFor(() => expect(editorQuickActionMenu.last?.getSkills?.(editor)).toEqual([]));
     });
   }
+
+  it("uses the parent comment agent's skills in ReplyInput", async () => {
+    const parent = {
+      type: "comment",
+      id: "comment-1",
+      actor_type: "agent",
+      actor_id: "parent-agent",
+      content: "Agent answer",
+      parent_id: null,
+    };
+
+    expect(await replySkillIds({ timeline: [parent] })).toEqual(["parent-agent-skill"]);
+  });
+
+  it("uses the conversation owner when ReplyInput targets a member root", async () => {
+    const root = {
+      type: "comment",
+      id: "root",
+      actor_type: "member",
+      actor_id: "user-2",
+      content: "Please investigate",
+      parent_id: null,
+    };
+    const agentReply = {
+      ...root,
+      id: "agent-reply",
+      actor_type: "agent",
+      actor_id: "parent-agent",
+      content: "Agent answer",
+      parent_id: root.id,
+    };
+
+    expect(await replySkillIds({ timeline: [root, agentReply], parentId: root.id }))
+      .toEqual(["parent-agent-skill"]);
+  });
+
+  it.each([
+    {
+      name: "agent",
+      content: "[@Root](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa) [@Assignee](mention://agent/cccccccc-cccc-cccc-cccc-cccccccccccc)",
+      squads: [],
+      expected: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa-skill",
+    },
+    {
+      name: "squad",
+      content: "[@Team](mention://squad/dddddddd-dddd-dddd-dddd-dddddddddddd) [@Assignee](mention://agent/cccccccc-cccc-cccc-cccc-cccccccccccc)",
+      squads: [{ id: "dddddddd-dddd-dddd-dddd-dddddddddddd", leader_id: "root-leader", archived_at: null }],
+      expected: "root-leader-skill",
+    },
+  ])("uses the first root $name mention in ReplyInput", async ({ content, squads, expected }) => {
+    const root = {
+      type: "comment",
+      id: "root",
+      actor_type: "member",
+      actor_id: "user-2",
+      content,
+      parent_id: null,
+    };
+    const reply = { ...root, id: "comment-1", content: "Reply", parent_id: root.id };
+
+    expect(await replySkillIds({ timeline: [root, reply], squads })).toEqual([expected]);
+  });
+
+  it("keeps member-to-member ReplyInput threads silent", async () => {
+    const root = {
+      type: "comment",
+      id: "root",
+      actor_type: "member",
+      actor_id: "user-2",
+      content: "Question",
+      parent_id: null,
+    };
+    const reply = { ...root, id: "comment-1", content: "Reply", parent_id: root.id };
+
+    expect(await replySkillIds({ timeline: [root, reply] })).toEqual([]);
+  });
+
+  it("returns no ReplyInput skills when the target is missing", async () => {
+    const parent = {
+      type: "comment",
+      id: "comment-1",
+      actor_type: "agent",
+      actor_id: "parent-agent",
+      content: "Agent answer",
+      parent_id: null,
+    };
+
+    expect(await replySkillIds({ timeline: [parent], targetMissing: true })).toEqual([]);
+  });
 });
 
 /**
@@ -424,11 +632,32 @@ describe("comment composers", () => {
     activateComposer("reply-composer-shell");
     expect(screen.getByPlaceholderText("Leave a reply...")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Attach file" })).toBeInTheDocument();
+    expect(container.querySelectorAll("button")).toHaveLength(1);
+    act(() => screen.getByTestId("editor").focus());
+    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
     expect(container.querySelectorAll("button")).toHaveLength(2);
 
     const shell = screen.getByTestId("drop-zone");
     expect(shell.className).not.toMatch(/max-h-/);
     expect(shell.className).not.toContain("h-[60vh]");
+  });
+
+  it("makes room for recipients a pending annotation previews while the reply is empty", async () => {
+    apiListTasksByIssue.mockResolvedValue([]);
+    apiPreviewCommentTriggers.mockResolvedValue({
+      agents: [{ id: "agent-1", name: "Lambda", source: "thread_parent", reason: "" }],
+    });
+    const pending = { id: "a", sourceCommentId: "comment-1", sourceActorName: "Lambda", quote: "Selected text",
+      note: "Please revise", start: 0, prefix: "", suffix: "" };
+    renderWithProviders(
+      <ReplyInput issueId="issue-1" parentId="comment-1" avatarType="member" avatarId="user-1"
+        onSubmit={vi.fn()} draftKey="reply:issue-1:comment-1"
+        annotationComposer={{ pending, render: () => null }} />,
+    );
+
+    expect(screen.getByTestId("reply-composer-shell")).toBeInTheDocument();
+    await screen.findByRole("button", { name: /Lambda trigger/ }, { timeout: 5000 });
+    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
   });
 
   it("keeps main comment submission wired after removing expand", async () => {
@@ -629,13 +858,13 @@ describe("comment composers", () => {
     resolveSubmit(true);
 
     // Success: the composer clears (now empty → submit disabled, lock released).
-    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(true));
     expect(screen.getByTestId("editor").closest("[aria-busy]")).toBeNull();
   });
 
-  // Post-send caret policy. The two composers deliberately disagree: posting a
-  // top-level comment ends the turn and drops the caret, while a thread reply
-  // leaves the user mid-conversation with the box ready for the next one.
+  // Post-send caret policy. Both composers drop the caret once the send is
+  // accepted: a focused editor swallows the page's keyboard shortcuts, so
+  // leaving the caret in a reply box traps the user until they click away.
   it("blurs the top-level composer after a posted comment", async () => {
     const { container } = renderCommentInput();
 
@@ -650,17 +879,18 @@ describe("comment composers", () => {
     expect(focusCalls.focused).toBe(0);
   });
 
-  it("keeps the caret in the reply box after a posted reply", async () => {
+  it("blurs the reply box after a posted reply", async () => {
     const { container } = renderReplyInput();
 
     activateComposer("reply-composer-shell");
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "replied" } });
-    // Discard the shell→editor activation focus; what follows is the refocus.
+    // Discard the shell→editor activation focus; what follows is entirely the
+    // post-send policy.
     focusCalls.focused = 0;
     fireEvent.click(getSubmitButton(container));
 
-    await waitFor(() => expect(focusCalls.focused).toBeGreaterThan(0));
-    expect(focusCalls.blurred).toBe(0);
+    await waitFor(() => expect(focusCalls.blurred).toBeGreaterThan(0));
+    expect(focusCalls.focused).toBe(0);
   });
 
   it("reports the new reply id as the accepted scroll target", async () => {
@@ -675,7 +905,7 @@ describe("comment composers", () => {
     expect(onAccepted).toHaveBeenCalledWith("reply-new");
   });
 
-  it("does not refocus the reply box when the send fails", async () => {
+  it("leaves reply focus alone when the send fails", async () => {
     const onSubmit = vi.fn().mockResolvedValue(false);
     const { container } = renderReplyInput({ onSubmit });
 
@@ -687,6 +917,7 @@ describe("comment composers", () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
     await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
     expect(focusCalls.focused).toBe(0);
+    expect(focusCalls.blurred).toBe(0);
   });
 
   // Regression: the tab-switch flush re-writes IDENTICAL content mid-flight;
@@ -742,16 +973,16 @@ describe("comment composers", () => {
     });
 
     expect(useCommentDraftStore.getState().getDraft("new:issue-1")).toBe("draft A plus more");
-    // …and the post-send caret policy must stand down with it: the guard left
+    // ...and the post-send caret policy must stand down with it: the guard left
     // the editor holding "draft A plus more", so blurring would yank the caret
     // out of the sentence the user is still writing.
     await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
     expect(focusCalls.blurred).toBe(0);
   });
 
-  // Same coupling on the reply side: refocus is bound to having actually wiped
+  // Same coupling on the reply side: the blur is bound to having actually wiped
   // the editor, not merely to acceptance.
-  it("does not refocus a reply box whose mid-flight draft was kept", async () => {
+  it("does not blur a reply box whose mid-flight draft was kept", async () => {
     let resolveSubmit!: (v: boolean) => void;
     const onSubmit = vi.fn(() => new Promise<boolean>((r) => { resolveSubmit = r; }));
     renderReplyInput({ onSubmit, draftKey: "reply:issue-1:comment-1" });
@@ -773,6 +1004,7 @@ describe("comment composers", () => {
       "reply A plus more",
     );
     await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    expect(focusCalls.blurred).toBe(0);
     expect(focusCalls.focused).toBe(0);
   });
 
@@ -827,7 +1059,7 @@ describe("comment composers", () => {
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
     // Failed send must NOT clear — the box still has content, submit stays live.
-    await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(false));
   });
 });
 
@@ -880,7 +1112,7 @@ describe("comment composers — upload submit gate", () => {
 
     const pending = startPendingUpload(container);
 
-    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(true));
     // Screen readers must hear "busy", not just a dead control.
     expect(getSubmitButton(container)).toHaveAttribute("aria-busy", "true");
 
@@ -888,7 +1120,7 @@ describe("comment composers — upload submit gate", () => {
       pending.resolve(uploadAttachment("att-1", "https://cdn.example/att-1.png"));
     });
 
-    await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(false));
     expect(getSubmitButton(container)).not.toHaveAttribute("aria-busy");
   });
 
@@ -903,7 +1135,7 @@ describe("comment composers — upload submit gate", () => {
     activateComposer("comment-composer-shell");
     const pending = startPendingUpload(container, "mine.png");
 
-    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(true));
     expect(insertPlaceholderSpy).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -956,7 +1188,7 @@ describe("comment composers — upload submit gate", () => {
     activateComposer("comment-composer-shell");
 
     const pending = startPendingUpload(container, "doomed.png");
-    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(true));
 
     await act(async () => {
       pending.fail();
@@ -1032,7 +1264,7 @@ describe("comment composers — upload submit gate", () => {
     // Draft + pending upload mount the editor directly (no shell).
     const editor = await screen.findByTestId("editor");
 
-    expect(getSubmitButton(container)).toBeDisabled();
+    expect(isSendBlocked(getSubmitButton(container))).toBe(true);
     expect(getSubmitButton(container)).toHaveAttribute("aria-busy", "true");
 
     // The shortcut path bypasses the button — the submit-time re-read of the
@@ -1052,7 +1284,7 @@ describe("comment composers — upload submit gate", () => {
           uploadAttachment("att-prev", "https://cdn.example/att-prev.png"),
         );
     });
-    await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(false));
     fireEvent.keyDown(editor, { key: "Enter", metaKey: true });
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
   });
@@ -1065,18 +1297,18 @@ describe("comment composers — upload submit gate", () => {
     const first = startPendingUpload(container, "a.png");
     const second = startPendingUpload(container, "b.png");
 
-    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(true));
 
     // First one lands — the second is still in flight, so send must stay shut.
     await act(async () => {
       first.resolve(uploadAttachment("att-a", "https://cdn.example/att-a.png"));
     });
-    expect(getSubmitButton(container)).toBeDisabled();
+    expect(isSendBlocked(getSubmitButton(container))).toBe(true);
 
     await act(async () => {
       second.resolve(uploadAttachment("att-b", "https://cdn.example/att-b.png"));
     });
-    await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(false));
   });
 
   it("re-enables send after a FAILED upload so the draft isn't stuck", async () => {
@@ -1085,14 +1317,14 @@ describe("comment composers — upload submit gate", () => {
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "will fail" } });
 
     const pending = startPendingUpload(container);
-    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(true));
 
     // uploadWithToast reports the failure and resolves null — the placeholder
     // is dropped and the body never referenced it, so submit must come back.
     await act(async () => {
       pending.fail();
     });
-    await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(false));
   });
 
   it("sends the attachment id once the upload completes", async () => {
@@ -1105,7 +1337,7 @@ describe("comment composers — upload submit gate", () => {
       pending.resolve(uploadAttachment("att-9", "https://cdn.example/att-9.png"));
     });
 
-    await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(false));
     fireEvent.click(getSubmitButton(container));
 
     await waitFor(() =>
@@ -1177,11 +1409,11 @@ describe("comment composers — upload submit gate", () => {
     });
 
     // The LIVE EDITOR received the insert (not just the store — an append the
-    // mounted editor never saw would be erased by its next emit)…
+    // mounted editor never saw would be erased by its next emit)...
     expect(insertMarkdownSpy).toHaveBeenCalledWith(
       expect.stringContaining("https://cdn.example/att-live.png"),
     );
-    // …and the draft body converged through the normal onUpdate pipeline.
+    // ...and the draft body converged through the normal onUpdate pipeline.
     await waitFor(() =>
       expect(useCommentDraftStore.getState().getDraft("new:issue-1")).toContain(
         "https://cdn.example/att-live.png",
@@ -1231,7 +1463,7 @@ describe("comment composers — upload submit gate", () => {
 
     startPendingUpload(container);
 
-    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    await waitFor(() => expect(isSendBlocked(getSubmitButton(container))).toBe(true));
     expect(getSubmitButton(container)).toHaveAttribute("aria-busy", "true");
   });
 
@@ -1314,7 +1546,9 @@ describe.each(["reply", "description"])("annotations in %s drafts", (source) => 
     useCommentDraftStore.getState().addAnnotation(draftKey, { ...annotation, note: "" });
     const onSubmit = vi.fn().mockResolvedValue(false);
     renderAnnotatedComposer(onSubmit);
-    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    // Nothing to send: the comment box keeps a blocked send, a reply rests as one line.
+    if (source === "description") expect(isSendBlocked(screen.getByRole("button", { name: "Send" }) as HTMLButtonElement)).toBe(true);
+    else expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /1 annotation/ })).not.toBeInTheDocument();
     act(() => { useCommentDraftStore.getState().addAnnotation(draftKey, { ...annotation, note: "New note" }); });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));

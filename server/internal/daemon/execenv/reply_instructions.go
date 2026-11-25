@@ -148,7 +148,7 @@ func BuildColdCommentsHint(issueID, triggerCommentID, triggerThreadID string) st
 		"Triggering thread: "+
 			"`multica issue comment list %s --thread %s --tail 30 --compact --output json` "+
 			"(that thread's root + its 30 newest replies). "+
-			"The scan workflow step 2 requires is the same command with `--roots-only --summary` in place of `--thread ... --tail 30`.\n\n",
+			"The scan that workflow step 2 requires is the same command with `--roots-only --summary` in place of `--thread ... --tail 30`.\n\n",
 		issueID, threadID,
 	)
 }

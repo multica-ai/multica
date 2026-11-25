@@ -13,6 +13,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { configStore } from "@multica/core/config";
+import type { Attachment } from "@multica/core/types";
 
 const APP_ORIGIN = "https://app.example";
 
@@ -47,13 +48,43 @@ vi.mock("../editor/link-hover-card", () => ({
 }));
 
 // Intercepted-attachment-link click handler. A plain `<a>` to the API-host
-// attachment endpoint cannot authenticate a bare navigation (WK-11), so the
-// renderer must hand the click to this hook instead of `window.open`. We mock
-// the module so the test asserts the dispatch, not the download plumbing.
+// attachment endpoint cannot authenticate a bare navigation (WK-11), and a raw
+// CDN link lands on the storage host's media page (MUL-9566), so the renderer
+// opens the file in the viewer and downloads only what the viewer cannot show.
+// The download hook is mocked so the test asserts the dispatch, not the
+// download plumbing.
 const downloadAttachmentSpy = vi.fn();
 vi.mock("../editor/use-download-attachment", () => ({
   useDownloadAttachment: () => downloadAttachmentSpy,
 }));
+
+const getAttachmentForDownload = vi.hoisted(() => vi.fn());
+vi.mock("@multica/core/api", () => ({
+  api: { getBaseUrl: () => "", getAttachmentForDownload },
+}));
+
+const toastError = vi.hoisted(() => vi.fn());
+vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn() } }));
+
+const CDN_DOMAIN = "static.example";
+const WS_ID = "0e0e0e0e-0000-4000-8000-000000000000";
+
+function attachmentRecord(id: string, filename: string, contentType: string): Attachment {
+  return {
+    id,
+    workspace_id: WS_ID,
+    issue_id: null,
+    comment_id: null,
+    uploader_type: "member",
+    uploader_id: "u",
+    filename,
+    url: `https://${CDN_DOMAIN}/workspaces/${WS_ID}/${id}`,
+    download_url: `https://${CDN_DOMAIN}/workspaces/${WS_ID}/${id}?Signature=s`,
+    content_type: contentType,
+    size_bytes: 1024,
+    created_at: "2026-11-18T00:00:00Z",
+  } as Attachment;
+}
 
 vi.mock("mermaid", () => ({
   default: { initialize: vi.fn(), render: vi.fn() },
@@ -68,6 +99,7 @@ beforeEach(() => {
   navigatedPaths = [];
   act(() => {
     configStore.getState().setAttachmentPublicUrl("https://multica-api.erlinerd.com");
+    configStore.getState().setCdnConfig({ cdnDomain: CDN_DOMAIN });
   });
   window.addEventListener("multica:navigate", captureNavigate);
   openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
@@ -77,8 +109,11 @@ afterEach(() => {
   window.removeEventListener("multica:navigate", captureNavigate);
   vi.restoreAllMocks();
   downloadAttachmentSpy.mockClear();
+  getAttachmentForDownload.mockReset();
+  toastError.mockClear();
   act(() => {
     configStore.getState().setAttachmentPublicUrl("");
+    configStore.getState().setCdnConfig({ cdnDomain: "" });
   });
 });
 
@@ -152,33 +187,98 @@ describe("RichContent link routing", () => {
 
   // WK-11: a plain-link attachment download URL (the shape `buildMarkdownURL`
   // persists into bodies in private-storage deployments — absolute, API-host
-  // pinned) cannot authenticate a bare navigation, so it must be routed through
-  // the credentialed download hook rather than window.open.
-  it("routes a UUID attachment download link through the download hook (WK-11)", () => {
+  // pinned) cannot authenticate a bare navigation, so it must never reach
+  // window.open. A file the viewer cannot show downloads through the
+  // credentialed hook.
+  it("downloads a non-previewable attachment link through the download hook (WK-11)", async () => {
     const id = "01a13179-08aa-7898-ae86-3a1994d2147e";
     const download = `https://multica-api.erlinerd.com/api/attachments/${id}/download`;
-    renderContent(`[audit-report.md](${download})`);
+    getAttachmentForDownload.mockResolvedValue(attachmentRecord(id, "audit.zip", "application/zip"));
+    renderContent(`[audit.zip](${download})`);
 
-    screen.getByText("audit-report.md").click();
+    screen.getByText("audit.zip").click();
 
-    // Not opened as an unauthenticated external navigation, and not treated as
-    // an in-app path.
+    await vi.waitFor(() => expect(downloadAttachmentSpy).toHaveBeenCalledWith(id));
+    expect(getAttachmentForDownload).toHaveBeenCalledWith(id);
     expect(openSpy).not.toHaveBeenCalled();
     expect(navigatedPaths).toEqual([]);
-    expect(downloadAttachmentSpy).toHaveBeenCalledWith(id);
   });
 
-  it("recognizes the API-host link when runtime config arrives after rendering", () => {
+  it("recognizes the API-host link when runtime config arrives after rendering", async () => {
     const id = "01a13179-08aa-7898-ae86-3a1994d2147e";
     const download = `https://multica-api.erlinerd.com/api/attachments/${id}/download`;
+    getAttachmentForDownload.mockResolvedValue(attachmentRecord(id, "report.zip", "application/zip"));
     act(() => configStore.getState().setAttachmentPublicUrl(""));
-    renderContent(`[report.pdf](${download})`);
+    renderContent(`[report.zip](${download})`);
 
     act(() => configStore.getState().setAttachmentPublicUrl("https://multica-api.erlinerd.com"));
-    screen.getByText("report.pdf").click();
+    screen.getByText("report.zip").click();
 
-    expect(downloadAttachmentSpy).toHaveBeenCalledWith(id);
+    await vi.waitFor(() => expect(downloadAttachmentSpy).toHaveBeenCalledWith(id));
     expect(openSpy).not.toHaveBeenCalled();
+  });
+
+  // MUL-9566: a video link played on the storage host's native page, in a tab
+  // with no way back into the app. It plays in the viewer instead.
+  it("plays a video download link in the viewer", async () => {
+    const id = "01a13179-08aa-7898-ae86-3a1994d2147e";
+    getAttachmentForDownload.mockResolvedValue(attachmentRecord(id, "demo.mp4", "video/mp4"));
+    renderContent(`[demo.mp4](/api/attachments/${id}/download)`);
+
+    screen.getByText("demo.mp4").click();
+
+    expect(await screen.findByRole("dialog", { name: "demo.mp4" })).toBeTruthy();
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(downloadAttachmentSpy).not.toHaveBeenCalled();
+  });
+
+  it("plays an inline CDN video link in the viewer instead of opening the raw URL", async () => {
+    const id = "01a13179-08aa-7898-ae86-3a1994d2147e";
+    const cdnUrl = `https://${CDN_DOMAIN}/workspaces/${WS_ID}/${id}.mp4`;
+    getAttachmentForDownload.mockResolvedValue(attachmentRecord(id, "demo.mp4", "video/mp4"));
+    // Inline, so it stays a link rather than becoming a file card.
+    renderContent(`The recording: [demo.mp4](${cdnUrl}) — have a look.`);
+
+    screen.getByText("demo.mp4").click();
+
+    expect(await screen.findByRole("dialog", { name: "demo.mp4" })).toBeTruthy();
+    expect(getAttachmentForDownload).toHaveBeenCalledWith(id);
+    expect(openSpy).not.toHaveBeenCalled();
+  });
+
+  it("plays a bare CDN video URL in the viewer", async () => {
+    const id = "01a13179-08aa-7898-ae86-3a1994d2147e";
+    const cdnUrl = `https://${CDN_DOMAIN}/workspaces/${WS_ID}/${id}.mp4`;
+    getAttachmentForDownload.mockResolvedValue(attachmentRecord(id, "demo.mp4", "video/mp4"));
+    renderContent(`Recording at ${cdnUrl} for review.`);
+
+    screen.getByText(cdnUrl).click();
+
+    expect(await screen.findByRole("dialog", { name: "demo.mp4" })).toBeTruthy();
+    expect(openSpy).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed lookup instead of falling back to the raw URL", async () => {
+    const id = "01a13179-08aa-7898-ae86-3a1994d2147e";
+    const cdnUrl = `https://${CDN_DOMAIN}/workspaces/${WS_ID}/${id}.mp4`;
+    getAttachmentForDownload.mockRejectedValue(new Error("403"));
+    renderContent(`See [demo.mp4](${cdnUrl}) here.`);
+
+    screen.getByText("demo.mp4").click();
+
+    await vi.waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(downloadAttachmentSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps a non-attachment path on the CDN host external", () => {
+    const other = `https://${CDN_DOMAIN}/marketing/launch.mp4`;
+    renderContent(`See [launch](${other}) here.`);
+
+    screen.getByText("launch").click();
+
+    expect(getAttachmentForDownload).not.toHaveBeenCalled();
+    expect(openSpy).toHaveBeenCalledWith(other, "_blank", "noopener,noreferrer");
   });
 
   it("does not intercept a non-UUID /api/attachments link", () => {

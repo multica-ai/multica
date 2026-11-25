@@ -119,6 +119,9 @@ const (
 	// The dedicated chat_session_id column still exists for its own consumers;
 	// this makes the attribution UI's jump-to-evidence path uniform (MUL-4302 §2).
 	EvidenceChat EvidenceKind = "chat"
+	// EvidenceDocComment points at the doc discussion comment that started
+	// the run (MUL-9933).
+	EvidenceDocComment EvidenceKind = "doc_comment"
 )
 
 // TriggerKind enumerates every path that can enqueue a run. Kept as an explicit
@@ -137,6 +140,7 @@ const (
 	KindStageWakeup       TriggerKind = "stage_wakeup"
 	KindQuickCreate       TriggerKind = "quick_create"
 	KindChat              TriggerKind = "chat"
+	KindDocComment        TriggerKind = "doc_comment"
 	KindAutopilotSchedule TriggerKind = "autopilot_schedule"
 	KindAutopilotWebhook  TriggerKind = "autopilot_webhook"
 	KindAutopilotManual   TriggerKind = "autopilot_manual"
@@ -174,6 +178,18 @@ type Result struct {
 	RerunOfTaskID       pgtype.UUID
 	EvidenceKind        EvidenceKind
 	EvidenceRefID       pgtype.UUID
+
+	// HumanAction is true only when UserID's own deliberate action caused this
+	// enqueue: a member comment, an assign/promote/manual trigger/rerun by an
+	// actor, a chat message, a quick-create. It is false for runs derived on a
+	// human's behalf (issue-creator fallback for system wakeups, delegation,
+	// trigger_owner), even though some of those also carry SourceDirectHuman.
+	// Activity reporting only — never consulted for authorization.
+	HumanAction bool
+	// HumanActedAt is when that action happened, when it is known to differ from
+	// the enqueue time (a member comment folded or re-enqueued later). Invalid
+	// means "now".
+	HumanActedAt pgtype.Timestamptz
 }
 
 // finalizeAttribution enforces the one-way Phase 1 accountability invariant
@@ -198,6 +214,7 @@ type CommentFacts struct {
 	CommentID  pgtype.UUID
 	AuthorType string // "member" | "agent" | other
 	AuthorID   pgtype.UUID
+	CreatedAt  pgtype.Timestamptz
 
 	// For agent-authored comments: the source task the comment was written
 	// from (comment.source_task_id) and that task's originator_user_id. The
@@ -229,6 +246,8 @@ func ClassifyComment(f CommentFacts, agentAuthoredSource Source) Result {
 			Source:        SourceDirectHuman,
 			EvidenceKind:  EvidenceComment,
 			EvidenceRefID: f.CommentID,
+			HumanAction:   f.AuthorID.Valid,
+			HumanActedAt:  f.CreatedAt,
 		})
 	case "agent":
 		r := Result{EvidenceKind: EvidenceComment, EvidenceRefID: f.CommentID}
@@ -304,6 +323,7 @@ func ClassifyDirect(f DirectFacts) Result {
 			Source:        SourceDirectHuman,
 			EvidenceKind:  EvidenceIssueAssignment,
 			EvidenceRefID: f.IssueID,
+			HumanAction:   true,
 		})
 	}
 	if f.CreatorType == "member" && f.CreatorID.Valid {
@@ -354,6 +374,7 @@ func DirectHumanRun(userID pgtype.UUID, evidenceKind EvidenceKind, evidenceRefID
 		Source:        SourceDirectHuman,
 		EvidenceKind:  evidenceKind,
 		EvidenceRefID: evidenceRefID,
+		HumanAction:   true,
 	})
 }
 

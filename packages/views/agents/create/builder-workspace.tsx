@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useDefaultLayout } from "react-resizable-panels";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,11 +12,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from "@multica/ui/components/ui/resizable";
+import { BuilderWorkspaceLayout } from "./builder-workspace-layout";
 import {
   applyDraftRuntimeChange,
   decodeBuilderInput,
@@ -76,9 +71,6 @@ export function BuilderWorkspace({
   onRuntimeLabel: (label: string | null) => void;
 }) {
   const { t } = useT("agents");
-  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
-    id: "multica_agent_builder_layout",
-  });
 
   // Resuming: the conversation already runs somewhere, and only the server
   // knows where. Until it answers, the form seeds no runtime at all — falling
@@ -87,7 +79,10 @@ export function BuilderWorkspace({
   const runtimeSeed = useMemo(
     () => ({
       ready: sessionSettled,
-      runtimeId: session?.runtime_id || fallbackRuntimeId,
+      // An existing session with an empty runtime is authoritatively unbound.
+      // Only a just-created, not-yet-listed session may use the URL fallback.
+      runtimeId: session?.runtime_id ?? fallbackRuntimeId,
+      fallbackToFirstUsable: false,
     }),
     [fallbackRuntimeId, session?.runtime_id, sessionSettled],
   );
@@ -163,6 +158,7 @@ export function BuilderWorkspace({
   const submit = useCreateAgentSubmit({
     draft,
     runtimeId: selectedRuntime?.id ?? null,
+    runtimeProvider: selectedRuntime?.provider,
     squadId,
     template: "agent_builder",
     // The agent is already committed here, so builder cleanup must never turn
@@ -270,20 +266,18 @@ export function BuilderWorkspace({
     [builder.messages],
   );
 
-  // True once the draft's runtime is known to match the carrier's. Until then
-  // no selection may reach the server: RuntimePicker seeds an empty selection by
-  // calling onSelect itself, and in this pane onSelect rebinds the live
-  // conversation — so honouring that seed would move the conversation to
-  // whatever runtime sorts first, silently when idle and as "stop the current
-  // reply before switching runtime" when not.
-  const runtimeKnown = sessionSettled && draft.runtimeId.length > 0;
+  // An explicitly unbound carrier is resolved too: the user must be able to
+  // select a runtime and bind it, even when there is only one available.
+  // Automatic selection stays disabled for live sessions so a local draft
+  // cannot display a binding the server never committed.
+  const runtimeResolved = sessionSettled && (session !== undefined || fallbackRuntimeId.length > 0);
 
   useEffect(() => {
     onRuntimeLabel(selectedRuntime ? runtimeDisplayLabel(selectedRuntime) : null);
   }, [onRuntimeLabel, selectedRuntime]);
 
   const handleRuntimeSelect = async (runtimeId: string) => {
-    if (!runtimeKnown) return;
+    if (!runtimeResolved) return;
     if (!runtimeId || runtimeId === draft.runtimeId) return;
     const bound = await builder.switchRuntime(runtimeId);
     if (!bound) return;
@@ -320,18 +314,8 @@ export function BuilderWorkspace({
 
   return (
     <>
-      {/* The group lives here, not on the route, so its two panels are its
-          only children — the same shape the chat page uses. A group whose
-          children alternate between one and two panels (setup vs conversation)
-          cannot keep a single persisted layout straight, and a panel arriving
-          through a child component's fragment is not a child it can measure. */}
-      <ResizablePanelGroup
-        orientation="horizontal"
-        className="min-h-0 flex-1"
-        defaultLayout={defaultLayout}
-        onLayoutChanged={onLayoutChanged}
-      >
-        <ResizablePanel id="conversation" minSize="30%">
+      <BuilderWorkspaceLayout
+        conversation={
           <BuilderConversation
             sessionId={sessionId}
             messages={displayMessages}
@@ -354,15 +338,9 @@ export function BuilderWorkspace({
                 : undefined
             }
           />
-        </ResizablePanel>
-        <ResizableHandle />
-        <ResizablePanel
-          id="config"
-          defaultSize={420}
-          minSize={340}
-          groupResizeBehavior="preserve-pixel-size"
-        >
-          <div className="flex h-full min-h-0 flex-col border-l bg-muted/10">
+        }
+        configuration={
+          <div className="flex h-full min-h-0 flex-col bg-muted/10">
             <div className="min-h-0 flex-1 overflow-y-auto">
               <div className="mx-auto max-w-2xl px-5 py-6">
                 <div className="mb-6">
@@ -397,23 +375,25 @@ export function BuilderWorkspace({
                   // Also locked while the carrier's runtime is unknown, so the
                   // picker cannot offer a switch it would refuse to perform.
                   runtimeSwitchInFlight={
-                    builder.switchingRuntime || !runtimeKnown
+                    builder.switchingRuntime || !runtimeResolved
                   }
                 />
               </div>
             </div>
-            <CreateAgentFooter
-              canCreate={canCreate}
-              creating={submit.creating}
-              squad={!!squadId}
-              error={submit.formError}
-              onCreate={() => void submit.create()}
-              onDiscard={() => setConfirmingDiscard(true)}
-              discarding={builder.closing}
-            />
           </div>
-        </ResizablePanel>
-      </ResizablePanelGroup>
+        }
+        footer={
+          <CreateAgentFooter
+            canCreate={canCreate}
+            creating={submit.creating}
+            squad={!!squadId}
+            error={submit.formError}
+            onCreate={() => void submit.create()}
+            onDiscard={() => setConfirmingDiscard(true)}
+            discarding={builder.closing}
+          />
+        }
+      />
 
       <AlertDialog
         open={confirmingDiscard}

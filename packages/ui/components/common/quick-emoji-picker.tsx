@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, lazy, Suspense } from "react";
-import { SmilePlus } from "lucide-react";
+import { SmilePlus } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { Popover, PopoverTrigger, PopoverContent } from "@multica/ui/components/ui/popover";
+import { DeferredTooltip } from "./deferred-tooltip";
 
 const EmojiPicker = lazy(() =>
   import("./emoji-picker").then((m) => ({ default: m.EmojiPicker })),
@@ -16,10 +17,25 @@ interface QuickEmojiPickerProps {
   align?: "start" | "end";
   className?: string;
   ariaLabel?: string;
+  /** Controlled open state, for opening the picker from elsewhere (a menu). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-function QuickEmojiPicker({ onSelect, align = "start", className, ariaLabel = "Add reaction" }: QuickEmojiPickerProps) {
-  const [open, setOpen] = useState(false);
+function QuickEmojiPicker({
+  onSelect,
+  align = "start",
+  className,
+  ariaLabel = "Add reaction",
+  open: controlledOpen,
+  onOpenChange,
+}: QuickEmojiPickerProps) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const setOpen = (v: boolean) => {
+    setUncontrolledOpen(v);
+    onOpenChange?.(v);
+  };
   const [showFull, setShowFull] = useState(false);
 
   const handleOpenChange = (v: boolean) => {
@@ -35,16 +51,20 @@ function QuickEmojiPicker({ onSelect, align = "start", className, ariaLabel = "A
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
-      <PopoverTrigger
-        render={
-          <button
-            type="button"
-            aria-label={ariaLabel}
-            title={ariaLabel}
-            className={cn("inline-flex shrink-0 items-center justify-center h-6 w-6 rounded-full text-muted-foreground hover:bg-accent hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", className)}
-          >
-            <SmilePlus className="h-3.5 w-3.5" aria-hidden />
-          </button>
+      <DeferredTooltip
+        content={ariaLabel}
+        trigger={
+          <PopoverTrigger
+            render={
+              <button
+                type="button"
+                aria-label={ariaLabel}
+                className={cn("inline-flex shrink-0 items-center justify-center h-6 w-6 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", className)}
+              >
+                <SmilePlus className="h-3.5 w-3.5" aria-hidden />
+              </button>
+            }
+          />
         }
       />
       <PopoverContent align={align} className="w-auto p-0">

@@ -1,14 +1,16 @@
 "use client";
 
+import { IssueSidebarCollapsible, IssueSidebarSectionHeader } from "./issue-sidebar-section";
+
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, ChevronRight } from "lucide-react";
+import { ArrowRight } from "@multica/ui/icons";
 import type { Issue, IssueDuplicateOf } from "@multica/core/types";
 import { issueStatusCategory } from "@multica/core/issues";
 import { issueDuplicatesOptions } from "@multica/core/issues/queries";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, issueRouteRef } from "@multica/core/paths";
 import { Button } from "@multica/ui/components/ui/button";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AppLink, resolveClickIntent, rowLinkInteractiveProps, useIntentNavigate } from "../../navigation";
@@ -50,7 +52,7 @@ export function IssueDuplicateBanner({
   return (
     <div className="mb-4 flex items-center gap-1 rounded-md border bg-muted/40 py-1 pl-3 pr-1 text-body">
       <AppLink
-        href={paths.issueDetail(original.id)}
+        href={paths.issueDetail(issueRouteRef(original))}
         newTabTitle={original.identifier}
         className="group flex min-w-0 flex-1 items-center gap-2 py-1"
       >
@@ -99,24 +101,14 @@ export function IssueDuplicatesSection({ issueId }: { issueId: string }) {
 
   return (
     <div>
-      <button
-        type="button"
-        className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${open ? "" : "text-muted-foreground hover:text-foreground"}`}
-        onClick={() => setOpen(!open)}
-      >
-        {t(($) => $.duplicates.section_title)}{" "}
-        <span className="rounded-xs bg-muted px-1 text-micro font-medium tabular-nums text-muted-foreground">
-          {duplicates.length}
-        </span>
-        <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`} />
-      </button>
-      {open && (
-        <div className="pl-2">
+      <IssueSidebarSectionHeader title={t(($) => $.duplicates.section_title)} open={open} onOpenChange={setOpen} count={duplicates.length} />
+      <IssueSidebarCollapsible open={open}>
+        <div className="px-2">
           {duplicates.map((duplicate) => (
             <AppLink
               key={duplicate.id}
-              href={paths.issueDetail(duplicate.id)}
-              className="group flex items-center gap-1.5 rounded-md px-2 -mx-2 py-1.5 text-caption hover:bg-accent/50 transition-colors"
+              href={paths.issueDetail(issueRouteRef(duplicate))}
+              className="group flex items-center gap-1.5 rounded-md px-2 py-2 text-caption hover:bg-accent/50 transition-colors"
             >
               <ActorAvatar
                 actorType={duplicate.creator_type}
@@ -129,7 +121,7 @@ export function IssueDuplicatesSection({ issueId }: { issueId: string }) {
             </AppLink>
           ))}
         </div>
-      )}
+      </IssueSidebarCollapsible>
     </div>
   );
 }
@@ -185,7 +177,7 @@ function DuplicateOfAnchor({
   const tooltip = useMarkerTooltip(original);
   return (
     <AppLink
-      href={paths.issueDetail(original.id)}
+      href={paths.issueDetail(issueRouteRef(original))}
       newTabTitle={original.identifier}
       title={tooltip}
       {...rowLinkInteractiveProps}
@@ -209,7 +201,7 @@ function DuplicateOfControl({
   const paths = useWorkspacePaths();
   const navigate = useIntentNavigate();
   const tooltip = useMarkerTooltip(original);
-  const href = paths.issueDetail(original.id);
+  const href = paths.issueDetail(issueRouteRef(original));
   const stop = (e: React.SyntheticEvent) => {
     e.preventDefault();
     e.stopPropagation();

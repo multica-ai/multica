@@ -14,7 +14,7 @@ func TestInMemoryUpdateStore_HasPending(t *testing.T) {
 		t.Fatalf("empty store should not report pending: has=%v err=%v", has, err)
 	}
 
-	if _, err := store.Create(ctx, "rt-1", "v1.2.3", "user-1"); err != nil {
+	if _, err := store.Create(ctx, "rt-1", "", "v1.2.3", "user-1", false); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	if has, err := store.HasPending(ctx, "rt-1"); err != nil || !has {
@@ -24,7 +24,7 @@ func TestInMemoryUpdateStore_HasPending(t *testing.T) {
 		t.Fatalf("expected pending=false for unrelated runtime: has=%v err=%v", has, err)
 	}
 
-	if _, err := store.PopPending(ctx, "rt-1"); err != nil {
+	if _, err := store.PopPending(ctx, "rt-1", false); err != nil {
 		t.Fatalf("pop: %v", err)
 	}
 	if has, err := store.HasPending(ctx, "rt-1"); err != nil || has {
@@ -36,7 +36,7 @@ func TestInMemoryUpdateStore_PopPendingIgnoresTerminalHistory(t *testing.T) {
 	ctx := context.Background()
 	store := NewInMemoryUpdateStore()
 
-	first, err := store.Create(ctx, "rt-1", "v1.2.3", "user-1")
+	first, err := store.Create(ctx, "rt-1", "", "v1.2.3", "user-1", false)
 	if err != nil {
 		t.Fatalf("create first: %v", err)
 	}
@@ -44,12 +44,12 @@ func TestInMemoryUpdateStore_PopPendingIgnoresTerminalHistory(t *testing.T) {
 		t.Fatalf("fail first: %v", err)
 	}
 	time.Sleep(2 * time.Millisecond)
-	second, err := store.Create(ctx, "rt-1", "v1.2.4", "user-1")
+	second, err := store.Create(ctx, "rt-1", "", "v1.2.4", "user-1", false)
 	if err != nil {
 		t.Fatalf("create second: %v", err)
 	}
 
-	got, err := store.PopPending(ctx, "rt-1")
+	got, err := store.PopPending(ctx, "rt-1", false)
 	if err != nil {
 		t.Fatalf("pop: %v", err)
 	}
@@ -62,11 +62,11 @@ func TestInMemoryUpdateStore_RunningRequestTimesOut(t *testing.T) {
 	ctx := context.Background()
 	store := NewInMemoryUpdateStore()
 
-	req, err := store.Create(ctx, "rt-timeout", "v1.2.3", "user-1")
+	req, err := store.Create(ctx, "rt-timeout", "", "v1.2.3", "user-1", false)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	claimed, err := store.PopPending(ctx, "rt-timeout")
+	claimed, err := store.PopPending(ctx, "rt-timeout", false)
 	if err != nil {
 		t.Fatalf("pop: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestInMemoryUpdateStore_RunningRequestTimesOut(t *testing.T) {
 	}
 
 	aged := time.Now().Add(-(updateRunningTimeout + time.Second))
-	claimed.RunStartedAt = &aged
+	store.requests[req.ID].RunStartedAt = &aged
 	got, err := store.Get(ctx, req.ID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
@@ -95,17 +95,17 @@ func TestInMemoryUpdateStore_RejectsConcurrentActiveUntilTerminal(t *testing.T) 
 	ctx := context.Background()
 	store := NewInMemoryUpdateStore()
 
-	req, err := store.Create(ctx, "rt-1", "v1.2.3", "user-1")
+	req, err := store.Create(ctx, "rt-1", "", "v1.2.3", "user-1", false)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if _, err := store.Create(ctx, "rt-1", "v1.2.4", "user-1"); err != errUpdateInProgress {
+	if _, err := store.Create(ctx, "rt-1", "", "v1.2.4", "user-1", false); err != errUpdateInProgress {
 		t.Fatalf("second create error = %v, want errUpdateInProgress", err)
 	}
 	if err := store.Complete(ctx, req.ID, "done"); err != nil {
 		t.Fatalf("complete: %v", err)
 	}
-	if _, err := store.Create(ctx, "rt-1", "v1.2.4", "user-1"); err != nil {
+	if _, err := store.Create(ctx, "rt-1", "", "v1.2.4", "user-1", false); err != nil {
 		t.Fatalf("create after terminal should succeed: %v", err)
 	}
 }

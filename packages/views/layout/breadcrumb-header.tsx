@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, type ReactNode } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { PageHeader } from "./page-header";
 import { AppLink } from "../navigation";

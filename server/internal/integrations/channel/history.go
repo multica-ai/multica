@@ -58,6 +58,11 @@ type HistoryMessage struct {
 // HistoryPage is one normalized page. Messages are ordered OLDEST-FIRST so the
 // transcript reads top-to-bottom like the chat does.
 type HistoryPage struct {
+	// Native source fields are optional. Name and permalink depend on the
+	// installation's existing permissions and the provider's availability.
+	ChannelID   string `json:"channel_id,omitempty"`
+	ChannelName string `json:"channel_name,omitempty"`
+	Permalink   string `json:"permalink,omitempty"`
 	// ChannelType is the platform the history came from ("slack"). Empty when
 	// the session is not bound to any channel (a web-only chat session).
 	ChannelType string `json:"channel_type,omitempty"`

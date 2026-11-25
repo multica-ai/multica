@@ -237,7 +237,8 @@ UPDATE quick_action SET
     name = COALESCE($3, name),
     description = COALESCE($4, description),
     assignee_type = COALESCE($5, assignee_type),
-    assignee_id = COALESCE($6, assignee_id),
+    assignee_id = CASE WHEN $5::text IS NOT NULL
+        THEN $6::uuid ELSE assignee_id END,
     prompt = COALESCE($7, prompt),
     visibility = COALESCE($8, visibility),
     status = COALESCE($9, status),
@@ -259,8 +260,8 @@ type UpdateQuickActionParams struct {
 }
 
 // COALESCE-on-narg partial update: an omitted field keeps its stored value.
-// assignee_type and assignee_id move together (the handler requires both), so
-// a type swap can never land with a mismatched id.
+// The handler resolves the resulting assignee pair and writes both columns.
+// A supplied type also permits clearing the UUID for a targetless action.
 func (q *Queries) UpdateQuickAction(ctx context.Context, arg UpdateQuickActionParams) (QuickAction, error) {
 	row := q.db.QueryRow(ctx, updateQuickAction,
 		arg.ID,

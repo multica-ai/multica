@@ -3,6 +3,20 @@
 // Kept in core so both apps and the test suite read from one source.
 export const AGENT_DESCRIPTION_MAX_LENGTH = 255;
 
+/**
+ * Description length the way the server counts it: Unicode code points
+ * (`utf8.RuneCountInString` in the handler, `char_length` in the DB check),
+ * not UTF-16 units. `"😀".length` is 2 but counts as 1 here. Use this for the
+ * counter and every save/submit gate so they always agree.
+ */
+export function agentDescriptionLength(description: string): number {
+  return [...description].length;
+}
+
+export function isAgentDescriptionWithinLimit(description: string): boolean {
+  return agentDescriptionLength(description) <= AGENT_DESCRIPTION_MAX_LENGTH;
+}
+
 export const AGENT_CONVERSATION_STARTERS_MAX = 3;
 export const AGENT_CONVERSATION_STARTER_LABEL_MAX_LENGTH = 80;
 export const AGENT_CONVERSATION_STARTER_MAX_LENGTH = 4000;

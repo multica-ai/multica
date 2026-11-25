@@ -35,18 +35,41 @@ vi.mock("../../agents/components/agent-activity-hover-content", () => ({
   AgentActivityHoverContent: () => <div data-testid="activity-hover" />,
 }));
 
-vi.mock("../../i18n", () => ({
-  useT: () => ({
-    t: (
-      selector: (strings: typeof en) => string,
-      params: Record<string, unknown> = {},
-    ) =>
-      selector(en).replace(/{{(\w+)}}/g, (_, key: string) =>
-        String(params[key] ?? ""),
-      ),
-  }),
-  useLocale: () => "en",
-}));
+vi.mock("../../i18n", () => {
+  const pluralProxy = (obj: Record<string, unknown>): unknown =>
+    new Proxy(obj, {
+      get(target, prop: string) {
+        if (prop in target) {
+          const val = target[prop];
+          return val && typeof val === "object"
+            ? pluralProxy(val as Record<string, unknown>)
+            : val;
+        }
+        if (`${prop}_other` in target || `${prop}_one` in target) {
+          return (count: number) =>
+            (count === 1 ? target[`${prop}_one`] : target[`${prop}_other`]) ??
+            target[`${prop}_other`];
+        }
+        return undefined;
+      },
+    });
+  const proxiedEn = pluralProxy(en as unknown as Record<string, unknown>) as typeof en;
+  return {
+    useT: () => ({
+      t: (
+        selector: (strings: typeof en) => string | ((count: number) => string),
+        params: Record<string, unknown> = {},
+      ) => {
+        const raw = selector(proxiedEn);
+        const template = typeof raw === "function" ? raw(Number(params.count ?? 0)) : raw;
+        return template.replace(/{{(\w+)}}/g, (_, key: string) =>
+          String(params[key] ?? ""),
+        );
+      },
+    }),
+    useLocale: () => "en",
+  };
+});
 
 // The hover card only portals its content once open, so absence of the body
 // cannot distinguish "closed" from "not wired up". Mock the primitive instead

@@ -10,7 +10,9 @@ import {
   useHasOnboarded,
 } from "@multica/core/paths";
 import { useWorkspaceList } from "@multica/core/workspace";
+import { useIsGuest } from "@multica/core/permissions";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
+import { useRecentVisitsStore } from "@multica/core/command-bar";
 import { useNavigation } from "../navigation";
 
 /**
@@ -38,6 +40,10 @@ import { useNavigation } from "../navigation";
  * from "slug not found". Otherwise users could see a transient redirect
  * before their workspace list arrives.
  */
+// The workspace sections a guest (MUL-9420) may open; every other section is
+// about agents or workspace administration, which the server refuses it.
+const GUEST_SECTIONS = new Set(["inbox", "my-issues", "issues", "projects", "settings"]);
+
 export function useDashboardGuard() {
   const { pathname, replace } = useNavigation();
   const user = useAuthStore((s) => s.user);
@@ -60,6 +66,13 @@ export function useDashboardGuard() {
     }
   }, [user, isLoading, workspaceListReady, workspace, workspaces, hasOnboarded, replace]);
 
+  const guest = useIsGuest(workspace?.id);
+  const section = pathname.split("/")[2] ?? "";
+  const guestBlocked = guest && !!workspace && !GUEST_SECTIONS.has(section);
+  useEffect(() => {
+    if (guestBlocked && workspace) replace(paths.workspace(workspace.slug).inbox());
+  }, [guestBlocked, workspace, replace]);
+
   useEffect(() => {
     useNavigationStore.getState().onPathChange(pathname);
   }, [pathname]);
@@ -69,10 +82,10 @@ export function useDashboardGuard() {
   // changes (workspace deleted, user kicked, user left).
   useEffect(() => {
     if (!workspaceListReady) return;
-    useRecentIssuesStore
-      .getState()
-      .pruneWorkspaces(workspaces.map((w) => w.id));
+    const activeWsIds = workspaces.map((w) => w.id);
+    useRecentIssuesStore.getState().pruneWorkspaces(activeWsIds);
+    useRecentVisitsStore.getState().pruneWorkspaces(activeWsIds);
   }, [workspaceListReady, workspaces]);
 
-  return { user, isLoading, workspace };
+  return { user, isLoading, workspace, guestBlocked };
 }

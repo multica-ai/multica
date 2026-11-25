@@ -1,71 +1,4 @@
 {
-  "title": "결제(테스트 페이지)",
-  "subtitle": "multica-cloud의 /api/v1/billing/*로 직접 전달합니다. 완성된 UI가 아니라 proxy와 Stripe 흐름을 검증하기 위해 모든 endpoint를 한 페이지에 모아둔 것입니다.",
-  "endpoints": {
-    "balance": "GET /api/cloud-billing/balance",
-    "transactions": "GET /api/cloud-billing/transactions",
-    "batches": "GET /api/cloud-billing/batches",
-    "topups": "GET /api/cloud-billing/topups",
-    "buy": "GET /price-tiers · POST /checkout-sessions · POST /portal-sessions"
-  },
-  "balance": {
-    "title": "잔액",
-    "credits_suffix": "credits",
-    "meta": "raw micro: {{micro}} · owner: {{owner}}… · updated {{updated}}"
-  },
-  "buy": {
-    "title": "크레딧 구매 / 결제 관리",
-    "no_tiers": "설정된 가격 tier가 없습니다. Cloud에 Stripe key가 설정되지 않았을 수 있으며 checkout은 503을 반환합니다.",
-    "tier_money_to_credits": "{{money}} → {{credits}} credits",
-    "tier_bonus": " + 보너스 {{credits}}",
-    "tier_bonus_with_expiry": " + 보너스 {{credits}}({{expiry}})",
-    "tier_id": "id: {{id}}",
-    "open_portal": "Stripe Billing Portal 열기",
-    "portal_hint": "아직 결제하지 않은 사용자에게는 400이 예상됩니다(Stripe customer record가 아직 없음).",
-    "toast_no_url": "Cloud가 checkout URL을 반환하지 않았습니다",
-    "toast_checkout_failed": "Checkout 실패",
-    "toast_no_portal_url": "Portal URL이 반환되지 않았습니다",
-    "toast_portal_failed": "Portal 열기 실패"
-  },
-  "checkout": {
-    "session_label": "Checkout session {{prefix}}…",
-    "loading": "주문 상태를 불러오는 중…",
-    "fetch_failed": "상태 조회 실패: {{error}}",
-    "fetch_failed_unknown": "알 수 없는 오류",
-    "final_status": "최종 상태: {{status}}",
-    "polling_status": "상태 확인 중… 현재: {{status}}",
-    "status_unknown": "unknown",
-    "label_order": "주문",
-    "label_tier": "Tier",
-    "label_charged": "결제됨",
-    "charged_value": "{{money}} · {{credits}} credits",
-    "charged_with_bonus": "{{money}} · {{credits}} credits + 보너스 {{bonus}}",
-    "clear_url": "URL에서 지우기"
-  },
-  "transactions": {
-    "title": "거래 내역",
-    "empty": "아직 거래 내역이 없습니다.",
-    "credits_value": "{{value}} credits",
-    "row_meta": "{{date}} · balance after: {{balance}} credits · ref: {{ref}}",
-    "ref_empty": "—"
-  },
-  "batches": {
-    "title": "크레딧 batch",
-    "empty": "아직 batch가 없습니다.",
-    "remaining_over_total": "{{remaining}} / {{total}} credits",
-    "id_suffix": "{{id}}…",
-    "consumed": "사용됨: {{value}} credits",
-    "expires_suffix": " · 만료 {{value}}",
-    "never_expires_suffix": " · 만료 없음"
-  },
-  "topups": {
-    "title": "Topup 주문",
-    "empty": "아직 topup 주문이 없습니다.",
-    "amount_to_credits": "{{money}} → {{credits}} credits",
-    "amount_to_credits_with_bonus": "{{money}} → {{credits}} credits + 보너스 {{bonus}}",
-    "row_meta": "{{date}} · stripe: {{checkout}}",
-    "stripe_empty": "—"
-  },
   "workspace": {
     "title": "결제 및 요금제",
     "description": "이 워크스페이스의 요금제, 한도, 사용자 좌석 및 Stripe 결제를 관리합니다.",
@@ -73,6 +6,7 @@
     "plan": {
       "free": "Free",
       "pro": "Pro",
+      "business": "Business",
       "unknown": "알 수 없는 요금제"
     },
     "status": {
@@ -94,18 +28,22 @@
     "actions": {
       "retry": "다시 시도",
       "retry_autopilots": "자동화 사용량 다시 시도",
-      "upgrade": "Pro로 업그레이드",
+      "retry_storage": "첨부 파일 저장 공간 사용량 다시 시도",
+      "retry_app_calls": "앱 호출 사용량 다시 불러오기",
+      "upgrade_to": "{{plan}}로 업그레이드",
+      "switch_to": "{{plan}}로 전환",
       "manage": "결제 관리",
       "add_seats": "좌석 추가",
       "cancel": "취소",
-      "continue_to_stripe": "Stripe로 이동"
+      "continue_to_stripe": "Stripe로 이동",
+      "check_status": "상태 확인"
     },
     "errors": {
       "action_title": "결제 작업 실패",
       "temporarily_unavailable": "결제 서비스를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도하세요.",
       "not_enabled": "이 배포에서는 워크스페이스 구독을 사용할 수 없습니다. 관리자에게 문의하세요.",
       "permission_changed": "현재 워크스페이스 역할로는 이 작업을 수행할 수 없습니다. 페이지를 새로고침해 현재 권한을 확인하세요.",
-      "checkout_response": "서버 응답을 읽을 수 없어 Checkout을 열지 못했습니다. 선택한 결제 주기를 유지하고 다시 시도하세요.",
+      "checkout_response": "예기치 않은 응답으로 인해 결제 페이지를 열 수 없습니다. 다시 시도해 주세요.",
       "already_subscribed": "이 워크스페이스에는 이미 구독이 있습니다. 현재 요금제를 새로고침했습니다.",
       "checkout_failed": "Checkout을 만들지 못했습니다. 잠시 후 다시 시도하세요.",
       "portal_response": "서버 응답을 읽을 수 없어 Billing Portal을 열지 못했습니다.",
@@ -119,13 +57,13 @@
       "syncing_title": "구독 활성화 중",
       "syncing_description": "결제가 완료되었습니다. Stripe의 요금제 변경 확인을 기다리고 있습니다.",
       "timeout_description": "결제는 접수되었지만 구독이 아직 동기화 중입니다. 잠시 후 페이지를 새로고침하세요.",
-      "active_title": "Pro 활성화됨",
-      "active_description": "이 워크스페이스에서 이제 Pro를 사용할 수 있습니다."
+      "active_title": "{{plan}} 활성화됨",
+      "active_description": "이제 이 워크스페이스에서 {{plan}}를 사용할 수 있습니다."
     },
     "past_due": {
       "title": "결제 정보를 확인해야 합니다",
       "description": "결제 관리에서 결제 수단을 업데이트하세요.",
-      "grace_description": "Pro 이용을 유지하려면 {{date}}까지 결제 수단을 업데이트하세요."
+      "grace_description": "유료 요금제를 유지하려면 {{date}}까지 결제 수단을 업데이트하세요."
     },
     "subscription_notice": {
       "canceling_title": "구독 취소가 예정되어 있습니다",
@@ -134,7 +72,7 @@
       "incomplete_title": "구독 설정이 완료되지 않았습니다",
       "incomplete_description": "결제 관리를 열어 결제 설정을 완료하거나 확인하세요.",
       "incomplete_expired_title": "구독 설정이 만료되었습니다",
-      "incomplete_expired_description": "이전 결제 설정은 Pro를 활성화하지 못한 채 만료되었습니다. 필요할 때 다시 업그레이드하세요.",
+      "incomplete_expired_description": "이전 결제 설정은 구독이 시작되기 전에 만료되었습니다. 필요할 때 다시 업그레이드하세요.",
       "paused_title": "구독이 일시 중지되었습니다",
       "paused_description": "결제 관리를 열어 일시 중지 상태와 복구 방법을 확인하세요.",
       "unpaid_title": "구독이 미결제 상태입니다",
@@ -145,21 +83,40 @@
       "title": "현재 요금제",
       "plan": "워크스페이스 요금제",
       "members": "사용자 좌석",
-      "members_description": "에이전트와 대기 중인 초대는 좌석에 포함되지 않습니다.",
+      "members_description": "이 워크스페이스의 활성 멤버 수입니다. 에이전트는 좌석을 차지하지 않습니다.",
       "member_count_other": "멤버 {{count}}명",
       "billing_interval": "결제 주기",
-      "period_end": "현재 결제 기간 종료일"
+      "period_end": "현재 결제 기간 종료일",
+      "change_plan": "요금제 변경",
+      "business_adds": "Business에서는 비공개 프로젝트, 멤버별 접근 권한, 팀 앱 계정, 더 높은 자동화 한도를 사용할 수 있습니다.",
+      "plan_change_hold": "요금제 변경",
+      "plan_change_confirming": "{{plan}}(으)로 전환하는 중입니다. Stripe의 확인을 기다리고 있으며, 확인될 때까지 좌석과 요금제를 변경할 수 없습니다.",
+      "plan_change_unresolved": "{{plan}}(으)로의 전환을 확인할 수 없습니다. 지원팀에 문의하세요. 해결될 때까지 좌석과 요금제를 변경할 수 없습니다.",
+      "plan_change_state_confirming": "확인 중",
+      "plan_change_state_unresolved": "지원 필요"
     },
     "upgrade": {
-      "title": "Pro로 업그레이드",
-      "description": "결제 주기를 선택한 다음 Stripe Checkout에서 현재 좌석과 최종 금액을 확인하세요.",
+      "title": "업그레이드",
       "interval_label": "결제 주기",
       "monthly": "월간",
       "yearly": "연간",
-      "pro_for_team_other": "사용자 좌석 {{count}}개에 Pro 적용",
       "price_loading": "구독 가격을 불러오는 중",
-      "unit_price": "사용자 좌석당 {{price}}",
-      "price_at_checkout": "구매 전에 서버가 사용자 멤버를 다시 계산합니다. 결제 전 Stripe Checkout에서 공식 좌석당 가격과 총액을 확인할 수 있습니다."
+      "unit_price_month": "사용자 좌석당 월 {{price}}",
+      "unit_price_year_monthly": "사용자 좌석당 월 {{price}}, 연간 결제",
+      "unit_price_year": "사용자 좌석당 연 {{price}}",
+      "price_at_checkout": "결제 시 활성 사용자 멤버 수가 계산됩니다. 결제 전에 Stripe에서 최종 좌석당 가격과 총액을 확인할 수 있습니다.",
+      "recommended": "추천",
+      "features": {
+        "pro_members": "멤버 수 무제한",
+        "pro_autopilots": "멤버당 매월 자동화 실행 1,000회",
+        "pro_storage": "멤버당 첨부 파일 저장 공간 10GB",
+        "pro_dashboard": "90일 분석 기록",
+        "business_everything": "Pro의 모든 기능",
+        "business_access": "비공개 프로젝트와 멤버별 접근 권한",
+        "business_apps": "팀 앱 계정과 승인 규칙",
+        "business_autopilots": "멤버당 매월 자동화 실행 3,000회",
+        "business_reports": "멤버별 사용량 및 비용 보고서"
+      }
     },
     "management": {
       "title": "구독 관리",
@@ -169,7 +126,6 @@
     },
     "limits": {
       "title": "사용량 및 한도",
-      "issues": "태스크 수",
       "autopilots": "자동화 실행",
       "unlimited": "무제한",
       "per_month": "월 {{count}}회",
@@ -180,7 +136,28 @@
       "usage_total": "{{total}} / {{limit}}",
       "usage_breakdown": "완료 {{used}} · 진행 중 {{reserved}}",
       "resets_at": "{{date}}에 초기화",
-      "usage_unavailable": "사용량을 일시적으로 불러올 수 없습니다"
+      "usage_unavailable": "사용량을 일시적으로 불러올 수 없습니다",
+      "members": "멤버",
+      "members_pending": "대기 중인 초대: {{pending}}건",
+      "metering": "일정, Webhook, 에이전트로 시작된 실행은 집계됩니다. 멤버가 지금 실행으로 시작한 실행은 집계되지 않습니다.",
+      "storage": "첨부 파일 저장 공간",
+      "storage_description": "이슈, 댓글, 채팅의 첨부 파일입니다.",
+      "storage_label": "첨부 파일 저장 공간 사용량",
+      "app_calls": "앱 호출",
+      "app_calls_description": "에이전트가 연결된 앱에서 실행하는 호출입니다. 도구 검색은 집계되지 않습니다.",
+      "app_calls_label": "앱 호출 사용량",
+      "app_calls_by_member": "멤버별 앱 호출",
+      "app_calls_no_person": "자동 실행",
+      "app_calls_former_member": "나간 멤버",
+      "addon": "추가 실행 횟수",
+      "addon_description": "한도를 다 쓰면 다음 달 초기화되거나 추가 구매할 때까지 자동화가 일시 중지됩니다.",
+      "addon_included": "추가 구매 {{runs}}회 포함",
+      "addon_none": "이번 달 추가 구매 없음",
+      "addon_purchased": "이번 달 {{runs}}회 추가 구매함",
+      "addon_buy": "추가 구매 · {{price}} / {{runs}}회",
+      "addon_buy_fallback": "실행 횟수 추가 구매",
+      "dashboard_history": "분석 조회 기간",
+      "dashboard_history_days": "최근 {{days}}일"
     },
     "seats": {
       "title": "좌석",
@@ -216,8 +193,9 @@
       "preview_unreadable": "예상 금액을 읽지 못했습니다. 좌석 수를 변경하거나 다시 시도하세요.",
       "preview_failed": "예상 금액을 일시적으로 불러올 수 없습니다. 잠시 후 다시 시도하세요.",
       "capacity_out_of_sync": "Stripe 좌석 수가 결제 기록과 일치하지 않습니다. 구매를 다시 시도하기 전에 지원팀에 문의하세요.",
-      "in_progress": "다른 좌석 구매가 처리 중입니다. 완료될 때까지 기다리세요. 오래 지속되면 지원팀에 문의하세요.",
-      "purchase_unreadable": "구매 응답을 읽지 못했습니다. 이 견적을 다시 시도하면 같은 구매 요청이 재사용됩니다.",
+      "in_progress": "다른 좌석 구매가 처리 중입니다. 완료될 때까지 잠시 기다리거나 계속 멈춰 있으면 지원팀에 문의하세요.",
+      "plan_change_in_progress": "요금제 변경을 아직 처리하는 중입니다. 몇 분 후에 다시 시도하세요.",
+      "purchase_unreadable": "구매 응답을 확인하지 못했습니다. 안심하고 다시 시도하세요. 중복 결제되지 않습니다.",
       "purchase_failed": "좌석을 추가하지 못했습니다. 같은 견적으로 다시 시도하거나 만료된 경우 새로고침하세요.",
       "payment_failed": "결제를 완료하지 못했습니다. Stripe에서 결제 수단을 업데이트한 후 새 견적을 요청하세요.",
       "quote_changed": "좌석 수 또는 예상 금액이 변경되었습니다. 갱신된 견적을 확인하세요.",
@@ -232,18 +210,48 @@
       "delayed_description": "자동 확인이 중지되었습니다. 구매는 계속 완료될 수 있습니다. 다른 구매를 시작하기 전에 나중에 다시 확인하거나 지원팀에 문의하세요.",
       "delayed_description_with_expiry": "자동 확인이 중지되었습니다. {{date}} 이후에도 대기 중이면 페이지를 다시 불러온 후 새 견적을 요청하세요. 대기 상태가 계속되면 지원팀에 문의하세요.",
       "submitted_other": "좌석 {{count}}개 구매를 제출했습니다. Stripe 확인 후 새 용량이 표시됩니다.",
-      "error_title": "예상 금액을 업데이트할 수 없습니다"
+      "error_title": "예상 금액을 업데이트할 수 없습니다",
+      "plan_change_unresolved": "요금제 변경을 확인할 수 없습니다. 좌석을 추가하기 전에 지원팀에 문의하세요."
+    },
+    "plan_change": {
+      "upgrade_description": "즉시 적용됩니다. 현재 결제 기간의 남은 기간에 대한 차액이 지금 청구됩니다.",
+      "downgrade_description": "즉시 적용됩니다. 사용하지 않은 차액은 다음 청구서에서 차감됩니다. 이미 구성한 Business 설정은 계속 작동하지만 읽기 전용이 됩니다.",
+      "seats": "좌석",
+      "charge_today": "오늘 청구액",
+      "credit": "다음 청구서 차감액",
+      "next_invoice": "다음 갱신 금액",
+      "tax_notice": "세금, 크레딧 및 최종 청구 세부 정보는 Stripe가 결정합니다.",
+      "preview_loading": "견적을 불러오는 중...",
+      "preview_failed": "견적을 일시적으로 가져올 수 없습니다. 잠시 후 다시 시도하세요.",
+      "rate_limited": "견적 요청이 너무 많습니다. 잠시 기다린 후 다시 시도하세요.",
+      "in_progress": "좌석 구매를 처리하는 중입니다. 완료된 후 다시 시도하세요.",
+      "change_in_progress": "요금제 변경을 아직 처리하는 중입니다. 몇 분 후에 다시 시도하세요.",
+      "not_active": "이 구독은 지금 요금제를 변경할 수 없습니다. 현재 요금제를 새로 고쳤습니다.",
+      "quote_changed": "구독 또는 가격이 변경되었습니다. 새로 고친 견적을 확인한 후 다시 확정하세요.",
+      "payment_failed": "결제를 완료하지 못했습니다. 결제 관리에서 결제 수단을 업데이트한 후 다시 시도하세요.",
+      "failed": "요금제를 변경하지 못했습니다. 같은 견적으로 다시 시도하세요.",
+      "unreadable": "응답을 읽을 수 없습니다. 다시 시도하면 같은 요청이 재사용됩니다.",
+      "error_title": "요금제를 변경할 수 없음",
+      "success_title": "요금제가 변경됨",
+      "success_description": "이제 이 워크스페이스는 {{plan}} 요금제를 사용합니다.",
+      "unresolved": "이전 요금제 변경을 확인할 수 없습니다. 요금제를 변경하기 전에 지원팀에 문의하세요.",
+      "check_failed": "요금제 변경을 확인할 수 없습니다. 다시 시도하세요.",
+      "addon_downgrade_notice": "변경 후 이번 달 한도는 추가 구매분을 포함해 {{limit}}회가 됩니다. 이번 달에 {{used}}회를 사용했습니다.",
+      "addon_downgrade_notice_limit_only": "변경 후 이번 달 한도는 추가 구매분을 포함해 {{limit}}회가 됩니다."
     },
     "confirm": {
       "title": "Stripe Checkout으로 이동할까요?",
-      "description": "결제 주기: {{interval}}. 현재 사용자 멤버: {{count}}. Stripe가 좌석을 다시 계산하고 결제 전에 최종 금액을 표시합니다."
+      "description": "요금제: {{plan}}. 결제 주기: {{interval}}. 현재 사용자 멤버: {{count}}. Stripe가 좌석을 다시 계산하고 결제 전에 최종 금액을 표시합니다.",
+      "held_invite": "{{email}}에게 보낼 초대를 위한 유료 좌석 1개가 추가됩니다. 결제가 완료되면 결제 및 요금제에서 초대를 보내세요."
+    },
+    "held_invite": {
+      "title": "워크스페이스가 이제 {{plan}} 요금제입니다",
+      "description": "업그레이드할 때까지 보류해 둔 {{email}} 초대({{role}})가 있습니다. 지금 보낼까요?",
+      "role_admin": "관리자",
+      "role_member": "멤버",
+      "send": "초대 보내기",
+      "discard": "버리기"
     }
-  },
-  "shared": {
-    "request_failed": "요청 실패",
-    "refresh": "새로고침",
-    "paging": "{{page}} / {{totalPages}} 페이지 · 총 {{total}}개",
-    "date_dash": "—"
   },
   "return_page": {
     "redirecting": "워크스페이스 결제 페이지로 돌아갑니다…",
@@ -253,5 +261,119 @@
     "workspace_missing_description": "Stripe에서 돌아왔지만 이 워크스페이스를 사용할 수 없습니다. 삭제되었거나 접근 권한이 변경되었을 수 있습니다. 원하는 워크스페이스의 결제 페이지에서 현재 상태를 확인해 주세요.",
     "retry": "다시 시도",
     "go_to_app": "Multica로 이동"
+  },
+  "paid_feature": {
+    "read_only": "읽기 전용입니다. 편집하려면 업그레이드하세요.",
+    "unavailable": "이 워크스페이스의 요금제에 포함되어 있지 않습니다.",
+    "view_plans": "요금제 보기",
+    "locked_error": "이 워크스페이스의 요금제에 포함되어 있지 않습니다. 기존 설정은 계속 적용되며, 추가하려면 업그레이드하세요.",
+    "upgrade_to_add": "업그레이드",
+    "business": "Business",
+    "badge_label": "Business 기능. 자세히 보기",
+    "upgrade_to_business": "Business로 업그레이드",
+    "ask_admin": "워크스페이스 관리자에게 Business로 업그레이드를 요청하세요.",
+    "upgrade_card": {
+      "agent_invocation_members": {
+        "title": "특정 사용자에게 에이전트 실행을 허용하는 것은 Business 기능입니다",
+        "description": "나만 사용하거나 워크스페이스 전체에 공개하는 설정은 모든 요금제에서 사용할 수 있습니다."
+      },
+      "runtime_member_sharing": {
+        "title": "런타임을 특정 멤버와 공유하는 것은 Business 기능입니다",
+        "description": "\"비공개\"와 \"공개\"는 모든 요금제에서 사용할 수 있습니다."
+      }
+    }
+  },
+  "trial": {
+    "status": {
+      "active": "Business 체험",
+      "days_left_other": "{{count}}일 남음",
+      "active_label_other": "Business 체험, {{count}}일 남음. 결제 화면을 엽니다.",
+      "free": "Free",
+      "upgrade": "업그레이드",
+      "ended_label": "Business 체험이 끝나 이 워크스페이스는 Free로 전환되었습니다. 결제 화면을 열어 업그레이드하세요.",
+      "ending": "곧 종료",
+      "ending_label": "Business 체험이 곧 끝납니다. 결제 화면을 엽니다."
+    },
+    "reminder": {
+      "halfway_title_other": "Business 체험이 절반 지났습니다. {{count}}일 남았습니다.",
+      "days_left_title_other": "Business 체험이 {{count}}일 남았습니다.",
+      "last_day_title": "Business 체험이 하루 안에 끝납니다.",
+      "body": "{{date}}에 이 워크스페이스는 Free로 전환됩니다. Business를 계속 사용하려면 요금제를 선택하세요.",
+      "later": "나중에",
+      "choose_plan": "요금제 선택"
+    },
+    "welcome": {
+      "title_other": "환영합니다! 이 워크스페이스는 Business를 {{count}}일 동안 무료로 체험할 수 있습니다",
+      "body": "비공개 프로젝트 등 Business 기능을 사용할 수 있습니다. 카드 등록은 필요 없으며, 체험이 끝나면 자동으로 Free로 전환됩니다.",
+      "action": "포함된 기능 보기",
+      "close": "닫기"
+    },
+    "ended": {
+      "title": "Business 체험이 끝났습니다",
+      "description": "{{workspace}}이(가) Free로 전환되었습니다. 삭제된 데이터는 없습니다.",
+      "description_without_name": "이 워크스페이스가 Free로 전환되었습니다. 삭제된 데이터는 없습니다.",
+      "kept": "기존 멤버, 프로젝트, 설정은 그대로 유지됩니다.",
+      "private_projects": "비공개 프로젝트는 비공개로 유지됩니다. 접근 목록은 업그레이드 전까지 읽기 전용입니다.",
+      "autopilot": "자동화는 월 {{limit}}회이며, 이번 달 {{used}}회 사용했습니다.",
+      "autopilot_paused": "자동화는 월 {{limit}}회이며, 이번 달 {{used}}회 사용해 {{date}}까지 일시 중지되었습니다.",
+      "keep_free": "Free로 계속 사용",
+      "upgrade": "Business로 업그레이드",
+      "member_title": "이 워크스페이스는 Free로 전환되었습니다",
+      "member_description": "기존 설정은 그대로 동작합니다. 더 필요한 기능이 있으면 워크스페이스 관리자에게 문의하세요."
+    },
+    "card": {
+      "title": "Business 체험",
+      "badge_other": "체험 중 · {{count}}일 남음",
+      "description": "{{date}}까지 체험합니다. 결제 수단이 등록되어 있지 않으므로 체험 후 Free로 전환되며 요금이 청구되지 않습니다.",
+      "started": "{{date}} 시작",
+      "progress": "{{total}}일 중 {{day}}일째",
+      "ends": "{{date}} 종료",
+      "ended_title": "Business 체험이 끝났습니다",
+      "ended_description": "체험이 {{date}}에 끝났습니다. 아래에서 요금제를 선택하면 Business 기능을 다시 사용할 수 있습니다.",
+      "choose_plan": "요금제 선택",
+      "ended_description_member": "체험이 {{date}}에 끝났습니다. Business 기능을 다시 사용하려면 워크스페이스 관리자에게 업그레이드를 요청하세요."
+    },
+    "features": {
+      "title": "체험 중인 Business 기능",
+      "description": "체험이 종료되어도 어떤 항목도 삭제되거나 꺼지지 않습니다. 기존 설정은 읽기 전용으로 계속 활성 상태를 유지하며, 새 항목만 추가할 수 없습니다.",
+      "private_projects": {
+        "name": "비공개 프로젝트",
+        "after": "체험 후에도 비공개로 유지되며, 접근 목록은 읽기 전용이 됩니다."
+      },
+      "guests": {
+        "name": "게스트",
+        "after": "체험 후에도 기존 게스트는 접근 권한을 유지합니다. 새 게스트를 초대하려면 Pro 또는 Business가 필요합니다."
+      }
+    }
+  },
+  "storage_limit": {
+    "title": "{{filename}}을(를) 업로드하지 못했습니다",
+    "copy_title": "하위 이슈가 생성되지 않았습니다: 원본 첨부 파일을 복사할 수 없습니다",
+    "admin_body": "첨부 파일 저장 공간이 가득 찼습니다({{used}} / {{limit}}). 기존 첨부 파일에는 영향이 없습니다.",
+    "admin_body_no_figures": "첨부 파일 저장 공간이 가득 찼습니다. 기존 첨부 파일에는 영향이 없습니다.",
+    "member_body": "첨부 파일 저장 공간이 가득 찼습니다. 관리자에게 요금제 업그레이드를 요청하거나 필요 없는 첨부 파일을 삭제하세요.",
+    "dismiss": "닫기"
+  },
+  "autopilot_addon": {
+    "title": "자동화 실행 횟수 추가 구매",
+    "description": "추가 구매한 횟수는 이번 달에만 유효하며 워크스페이스 전체가 함께 사용합니다. 플랜 한도를 먼저 사용합니다.",
+    "options_label": "추가할 횟수",
+    "option": "{{runs}}회",
+    "usage_summary": "이번 달 {{used}} / {{limit}}회 사용, {{date}}에 초기화.",
+    "pay": "{{amount}} 결제하러 가기",
+    "pay_fallback": "결제하러 가기",
+    "cancel": "취소",
+    "loading": "추가 구매 가격을 불러오는 중…",
+    "unavailable": "이 워크스페이스는 지금 실행 횟수를 추가 구매할 수 없습니다.",
+    "conflict": "지금은 추가 구매할 수 없거나 가격이 변경되었습니다. 옵션을 확인한 후 다시 시도하세요.",
+    "error": "결제 페이지를 열지 못했습니다. 다시 시도하세요.",
+    "success_title": "실행 횟수를 추가했습니다",
+    "success_description": "이번 달에 {{runs}}회가 추가되었습니다. 자동화는 다음 실행부터 다시 시작됩니다.",
+    "confirming_title": "결제를 확인하는 중",
+    "confirming_description": "Stripe가 결제를 확인하면 바로 실행 횟수가 추가됩니다. 잠시 후 아래 사용량을 확인하세요.",
+    "not_paid_title": "결제가 완료되지 않았습니다",
+    "not_paid_description": "청구되지 않았으며 실행 횟수도 추가되지 않았습니다.",
+    "cancel_title": "결제를 취소했습니다",
+    "cancel_description": "청구되지 않았습니다."
   }
 }

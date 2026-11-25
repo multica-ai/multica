@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { buildCreateAgentRequest, type AgentDraft } from "@multica/core/agents";
 import { api, ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { refreshFeaturesOnLockedError } from "@multica/core/billing";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { Agent } from "@multica/core/types";
 import {
@@ -13,7 +14,9 @@ import {
   workspaceKeys,
 } from "@multica/core/workspace/queries";
 import { useNavigation } from "../../navigation";
+import { withSquadParam } from "./squad-param";
 import { useT } from "../../i18n";
+import { usePaidFeatureErrorMessage } from "../../billing";
 
 interface AgentCreateErrors {
   nameError: string | null;
@@ -43,6 +46,8 @@ export function classifyAgentCreateError(
 export function useCreateAgentSubmit(options: {
   draft: AgentDraft;
   runtimeId: string | null;
+  /** Provider of `runtimeId`, so settings it cannot run are not submitted. */
+  runtimeProvider?: string;
   squadId: string | null;
   /** Creation-source attribution for the `agent_created` analytics event. */
   template?: string;
@@ -55,13 +60,21 @@ export function useCreateAgentSubmit(options: {
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
   const qc = useQueryClient();
+  const paidFeatureError = usePaidFeatureErrorMessage();
 
   const [creating, setCreating] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const { draft, runtimeId, squadId, template, duplicateSource, onCreated } =
-    options;
+  const {
+    draft,
+    runtimeId,
+    runtimeProvider,
+    squadId,
+    template,
+    duplicateSource,
+    onCreated,
+  } = options;
 
   const create = async () => {
     if (!runtimeId || creating) return;
@@ -73,6 +86,7 @@ export function useCreateAgentSubmit(options: {
         buildCreateAgentRequest({
           draft,
           runtimeId,
+          runtimeProvider,
           template,
           duplicateSource,
         }),
@@ -109,22 +123,20 @@ export function useCreateAgentSubmit(options: {
       // Reconcile other list projections in the background instead of making
       // navigation wait on a second network request.
       void qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-      toast.success(
-        t(($) => $.creation_studio.created, {
-          name: agent.name || draft.name.trim(),
-        }),
-      );
-      navigation.push(
-        squadId ? paths.squadDetail(squadId) : paths.agentDetail(agent.id),
-      );
+      // Replace, not push: back from the done step must not reopen a form
+      // whose agent already exists.
+      navigation.replace(withSquadParam(paths.newAgentDone(agent.id), squadId));
     } catch (error) {
       const nextErrors = classifyAgentCreateError(
         error,
         t(($) => $.creation_studio.create_failed),
         t(($) => $.creation_studio.name_conflict),
       );
+      refreshFeaturesOnLockedError(qc, wsId, error);
       setNameError(nextErrors.nameError);
-      setFormError(nextErrors.formError);
+      setFormError(
+        nextErrors.formError === null ? null : paidFeatureError(error, nextErrors.formError),
+      );
       setCreating(false);
     }
   };

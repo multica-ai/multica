@@ -16,10 +16,10 @@ import (
 // mis-wired cache branch in production code.
 func reportModelList(t *testing.T, requestID string, body map[string]any) *httptest.ResponseRecorder {
 	t.Helper()
-	req := newDaemonTokenRequest(
+	req := newOwnerDaemonRequest(
 		http.MethodPost,
 		"/api/daemon/runtimes/"+testRuntimeID+"/models/"+requestID+"/result",
-		body, testWorkspaceID, "daemon-mul5549",
+		body,
 	)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("runtimeId", testRuntimeID)
@@ -247,4 +247,46 @@ func TestModelCatalogCacheDecision(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestReportModelListResult_PartialHermesReportProvidesConfirmedEffort(t *testing.T) {
+	ctx := context.Background()
+	cache := withModelListStores(t)
+	request, err := testHandler.ModelListStore.Create(ctx, testRuntimeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := reportModelList(t, request.ID, map[string]any{
+		"status":                      "completed",
+		"supported":                   true,
+		"fallback":                    true,
+		"effort_discovery_incomplete": true,
+		"models": []ModelEntry{
+			{
+				ID: "confirmed", Label: "Confirmed", Default: true,
+				Thinking: &ModelThinking{SupportedLevels: []ThinkingLevel{{Value: "high", Label: "High"}}},
+			},
+			{ID: "unprobed", Label: "Unprobed"},
+		},
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("report partial catalog: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	report, err := testHandler.ModelListStore.Get(ctx, request.ID)
+	if err != nil || report == nil || len(report.Models) != 2 || report.Models[0].Thinking == nil {
+		t.Fatalf("the picker must receive confirmed effort metadata: report=%+v err=%v", report, err)
+	}
+	if got := testHandler.acpThinkingDecision(ctx, "hermes", parseUUID(testRuntimeID), "confirmed", "high"); got != acpEffortPresent {
+		t.Fatalf("save validation lost confirmed effort evidence: got %v, want %v", got, acpEffortPresent)
+	}
+	if got := testHandler.acpThinkingDecision(ctx, "hermes", parseUUID(testRuntimeID), "unprobed", "high"); got != acpEffortUnknown {
+		t.Fatalf("unprobed model got decision %v, want unknown", got)
+	}
+	if got := testHandler.acpThinkingDecision(ctx, "hermes", parseUUID(testRuntimeID), "confirmed", "low"); got != acpEffortUnknown {
+		t.Fatalf("unadvertised level got decision %v, want unknown", got)
+	}
+	if snapshot, err := cache.Get(ctx, testRuntimeID); err != nil || snapshot != nil {
+		t.Fatalf("partial report must not populate the complete picker cache: got %v, err %v", snapshot, err)
+	}
+
 }

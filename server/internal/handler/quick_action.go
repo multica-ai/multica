@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -23,7 +24,7 @@ import (
 //
 // Contract highlights:
 //   - Running one is NOT a new dispatch path. It renders the prompt, posts an
-//     ordinary comment carrying the target's mention markup (marked with
+//     ordinary comment carrying optional target mention markup (marked with
 //     quick_action_id), and hands off to triggerTasksForComment. Permission, attribution, squad routing,
 //     the execution log, and pending-task coalescing are inherited from the
 //     comment path rather than reimplemented — the MUL-3375 lesson about four
@@ -35,7 +36,7 @@ import (
 //     with no explanation, which is harder to debug than a button that says
 //     why it refused.
 //   - `visibility` is the author's stated intent, not an authorization
-//     decision. A `public` action must bind a target every member can invoke,
+//     decision. A `public` action may only bind a target every member can invoke,
 //     so it is runnable by construction; the run-time gate still has the final
 //     say, so a target that goes private later fails loudly at click time
 //     rather than silently granting anything.
@@ -170,6 +171,9 @@ func validateQuickActionPrompt(raw string) (string, error) {
 }
 
 func validateQuickActionAssignee(assigneeType, assigneeID string) error {
+	if assigneeType == "" && assigneeID == "" {
+		return nil
+	}
 	if assigneeType != "agent" && assigneeType != "squad" {
 		return fmt.Errorf("assignee_type must be \"agent\" or \"squad\"")
 	}
@@ -192,28 +196,14 @@ func normalizeQuickActionVisibility(raw string) (string, error) {
 
 // Target resolution
 
-// quickActionTarget is the resolved execution target of an action: the agent
-// that will actually run, plus the display identity the client should show.
-// For a squad binding, Agent is the squad leader and Name is the SQUAD's name,
-// because the squad is what the user bound and what the mention will address.
-type quickActionTarget struct {
-	Agent     db.Agent
-	Name      string
-	AvatarURL string
-	// MentionType is the mention:// scheme the rendered comment must use so
-	// the existing trigger path routes it exactly as a hand-typed mention.
-	MentionType string
-	// MentionID is the id inside the mention link: the agent id, or the SQUAD
-	// id for a squad binding (the trigger path resolves the leader itself).
-	MentionID string
-	Found     bool
-}
-
 // resolveQuickActionTarget loads the execution target. A missing/archived
 // agent, or a missing/archived squad, resolves to Found=false — the caller
 // renders that as an unavailable target rather than failing the whole list.
 func (h *Handler) resolveQuickActionTarget(ctx context.Context, qa db.QuickAction) quickActionTarget {
 	switch qa.AssigneeType {
+	case "":
+		// An intentionally unset target is available, not an orphaned binding.
+		return quickActionTarget{Found: true}
 	case "squad":
 		squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 			ID:          qa.AssigneeID,
@@ -338,6 +328,9 @@ func (h *Handler) loadQuickActionCatalog(ctx context.Context, workspaceID pgtype
 // entirely from the pre-loaded maps. The two must agree; the shared shape of
 // quickActionTarget is what keeps them honest.
 func (c quickActionCatalog) resolve(qa db.QuickAction) (quickActionTarget, bool) {
+	if qa.AssigneeType == "" {
+		return quickActionTarget{Found: true}, true
+	}
 	if qa.AssigneeType == "squad" {
 		squad, ok := c.squads[uuidToString(qa.AssigneeID)]
 		if !ok || squad.ArchivedAt.Valid {
@@ -401,7 +394,7 @@ func (h *Handler) quickActionToResponse(ctx context.Context, qa db.QuickAction) 
 	resp.TargetMissing = !target.Found
 	if target.Found {
 		resp.TargetName = target.Name
-		resp.TargetPublic = h.agentInvocableByEveryone(ctx, target.Agent)
+		resp.TargetPublic = qa.AssigneeType == "" || h.agentInvocableByEveryone(ctx, target.Agent)
 	}
 	return resp
 }
@@ -454,11 +447,34 @@ func (h *Handler) loadReachableQuickAction(
 		writeError(w, http.StatusNotFound, "quick action not found")
 		return db.QuickAction{}, false
 	}
-	if qa.Visibility == "private" && uuidToString(qa.CreatedByID) != userID {
-		writeError(w, http.StatusNotFound, "quick action not found")
-		return db.QuickAction{}, false
+	if qa.Visibility == "private" {
+		viewer := h.quickActionViewer(r, userID, workspaceID)
+		if !viewer.Valid || viewer != qa.CreatedByID {
+			writeError(w, http.StatusNotFound, "quick action not found")
+			return db.QuickAction{}, false
+		}
 	}
 	return qa, true
+}
+
+// quickActionViewer is the member whose private quick actions this request may
+// reach. A task token's user id is the runtime owner, not whoever started the
+// run, so a run another member started gets an invalid UUID: it matches no
+// creator and leaves only public actions. Lookup failures fail closed the same
+// way.
+func (h *Handler) quickActionViewer(r *http.Request, userID string, workspaceID pgtype.UUID) pgtype.UUID {
+	ok, err := h.requestRepresentsUser(r, userID, workspaceID)
+	if err != nil {
+		slog.Warn("resolve quick action viewer failed", append(logger.RequestAttrs(r), "error", err)...)
+	}
+	if !ok {
+		return pgtype.UUID{}
+	}
+	viewer, err := util.ParseUUID(userID)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	return viewer
 }
 
 // requirePublicQuickActionRole gates writes that leave an action `public`.
@@ -473,7 +489,9 @@ func (h *Handler) requirePublicQuickActionRole(w http.ResponseWriter, r *http.Re
 // ListQuickActions returns the workspace catalog. It performs NO permission
 // work: `private` rows are scoped to their creator by the query (that is what
 // the field means, not a permission check), and every other row is returned to
-// everyone. Whether the caller may RUN one is answered by RunQuickAction.
+// everyone. Whether the caller may RUN one is answered by RunQuickAction. The
+// creator is matched against quickActionViewer, never the raw user id, because
+// a task token's user id is its runtime owner.
 func (h *Handler) ListQuickActions(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
@@ -484,8 +502,7 @@ func (h *Handler) ListQuickActions(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	viewerUUID, ok := parseUUIDOrBadRequest(w, userID, "user id")
-	if !ok {
+	if _, ok := parseUUIDOrBadRequest(w, userID, "user id"); !ok {
 		return
 	}
 
@@ -493,7 +510,7 @@ func (h *Handler) ListQuickActions(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.Queries.ListQuickActions(r.Context(), db.ListQuickActionsParams{
 		WorkspaceID:     wsUUID,
 		IncludeArchived: includeArchived,
-		ViewerID:        viewerUUID,
+		ViewerID:        h.quickActionViewer(r, userID, wsUUID),
 	})
 	if err != nil {
 		slog.Warn("list quick actions failed", append(logger.RequestAttrs(r), "error", err)...)
@@ -541,9 +558,12 @@ func (h *Handler) CreateQuickAction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	assigneeUUID, ok := parseUUIDOrBadRequest(w, req.AssigneeID, "assignee_id")
-	if !ok {
-		return
+	var assigneeUUID pgtype.UUID
+	if req.AssigneeType != "" {
+		assigneeUUID, ok = parseUUIDOrBadRequest(w, req.AssigneeID, "assignee_id")
+		if !ok {
+			return
+		}
 	}
 	prompt, err := validateQuickActionPrompt(req.Prompt)
 	if err != nil {
@@ -660,9 +680,12 @@ func (h *Handler) UpdateQuickAction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	newUUID, ok := parseUUIDOrBadRequest(w, newID, "assignee_id")
-	if !ok {
-		return
+	var newUUID pgtype.UUID
+	if newType != "" {
+		newUUID, ok = parseUUIDOrBadRequest(w, newID, "assignee_id")
+		if !ok {
+			return
+		}
 	}
 	if req.AssigneeType != nil || req.AssigneeID != nil {
 		params.AssigneeType = pgtype.Text{String: newType, Valid: true}
@@ -755,6 +778,9 @@ func trimmedWithinLimit(w http.ResponseWriter, raw string, limit int, field stri
 // and, for a `public` action, that every member can invoke it. Writes the 400
 // itself and returns false when the binding is rejected.
 func (h *Handler) validateQuickActionBinding(w http.ResponseWriter, r *http.Request, assigneeType string, id, workspaceID pgtype.UUID, visibility string) bool {
+	if assigneeType == "" {
+		return true
+	}
 	qa := db.QuickAction{AssigneeType: assigneeType, AssigneeID: id, WorkspaceID: workspaceID}
 	target := h.resolveQuickActionTarget(r.Context(), qa)
 	if !target.Found {
@@ -773,11 +799,9 @@ func (h *Handler) validateQuickActionBinding(w http.ResponseWriter, r *http.Requ
 
 // RenderQuickAction returns what the action WOULD post, without posting it.
 //
-// This backs the composer hand-off (the `/` slash command): the user gets the
-// fully rendered text in the comment box to edit before sending. Rendering
-// stays on the server even for this read-only path so there is exactly one
-// interpolation implementation — a client-side copy would drift from the run
-// path and quietly send something different from the preview.
+// Kept for installed clients that resolve draft text over HTTP. Current
+// clients build drafts from the catalog; shared fixtures keep that text aligned
+// with buildQuickActionBody. Invocation permission is checked again on send.
 func (h *Handler) RenderQuickAction(w http.ResponseWriter, r *http.Request) {
 	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
 	if !ok {
@@ -805,7 +829,7 @@ func (h *Handler) RenderQuickAction(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	// Same gate as the run path: the preview would otherwise hand a user the
 	// exact text needed to trigger an agent they may not invoke.
-	if !h.canInvokeAgent(r.Context(), target.Agent, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID) {
+	if qa.AssigneeType != "" && !h.canInvokeAgent(r.Context(), target.Agent, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID) {
 		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
 		return
 	}
@@ -813,15 +837,6 @@ func (h *Handler) RenderQuickAction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"content": buildQuickActionBody(qa, target),
 	})
-}
-
-// buildQuickActionBody prepends the mention line that actually triggers the
-// run. It is parsed by the same ParseMentions the composer's output goes
-// through, so a quick action is indistinguishable from a hand-typed @mention
-// downstream. The prompt itself is passed through untouched — see the file
-// header for why there is no interpolation step.
-func buildQuickActionBody(qa db.QuickAction, target quickActionTarget) string {
-	return fmt.Sprintf("[@%s](mention://%s/%s)\n\n%s", target.Name, target.MentionType, target.MentionID, qa.Prompt)
 }
 
 // RunQuickAction renders the action and posts it as a quick_action comment,
@@ -864,10 +879,10 @@ func (h *Handler) RunQuickAction(w http.ResponseWriter, r *http.Request) {
 	// the action, not an invitation to talk, and Triage is where nobody has
 	// agreed the work should be done yet. Opening it later is deleting this if.
 	//
-	// Before the comment is written, not after: a quick action is a comment AND
-	// a run, and posting the prompt to an entry that will never run it leaves an
-	// instruction addressed to nobody (MUL-7189 §2.3).
-	if issue.TriageState.Valid {
+	// Before the comment is written, not after: a targeted action is a comment
+	// AND a run (MUL-7189 §2.3). Targetless actions are ordinary messages, so
+	// they can be posted in triage without dispatching work.
+	if qa.AssigneeType != "" && issue.TriageState.Valid {
 		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonIssueInTriage)
 		return
 	}
@@ -882,7 +897,7 @@ func (h *Handler) RunQuickAction(w http.ResponseWriter, r *http.Request) {
 	originatorUserID := h.invokeOriginatorFromRequest(r, actorType, actorID)
 	// The single permission gate. Issue visibility never implies the right to
 	// trigger someone's private agent.
-	if !h.canInvokeAgent(r.Context(), target.Agent, actorType, actorID, originatorUserID, workspaceID) {
+	if qa.AssigneeType != "" && !h.canInvokeAgent(r.Context(), target.Agent, actorType, actorID, originatorUserID, workspaceID) {
 		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
 		return
 	}
@@ -921,7 +936,7 @@ func (h *Handler) RunQuickAction(w http.ResponseWriter, r *http.Request) {
 		"issue_revision":      created.IssueRevision,
 	})
 
-	resp.TriggerOutcomes = h.triggerTasksForComment(r.Context(), issue, comment, nil, actorType, actorID, originatorUserID, nil, nil)
+	resp.TriggerOutcomes = h.triggerTasksForComment(r.Context(), issue, comment, nil, actorType, actorID, originatorUserID, nil, commentSteerRequest{})
 
 	// Usage telemetry is best-effort and deliberately outside the run's
 	// success path: a failed counter must never cost the user the run.

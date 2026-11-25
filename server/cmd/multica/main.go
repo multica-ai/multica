@@ -10,6 +10,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 var (
@@ -48,9 +49,14 @@ func init() {
 
 	// Core commands
 	issueCmd.GroupID = groupCore
+	inboxCmd.GroupID = groupCore
+	issueStatusCatalogCmd.GroupID = groupCore
 	projectCmd.GroupID = groupCore
+	workflowCmd.GroupID = groupCore
 	labelCmd.GroupID = groupCore
 	propertyCmd.GroupID = groupCore
+	quickActionCmd.GroupID = groupCore
+	viewCmd.GroupID = groupCore
 	agentCmd.GroupID = groupCore
 	autopilotCmd.GroupID = groupCore
 	workspaceCmd.GroupID = groupCore
@@ -74,13 +80,20 @@ func init() {
 	versionCmd.GroupID = groupAdditional
 
 	rootCmd.AddCommand(issueCmd)
+	rootCmd.AddCommand(inboxCmd)
+	rootCmd.AddCommand(docCmd)
+	rootCmd.AddCommand(issueStatusCatalogCmd)
 	rootCmd.AddCommand(projectCmd)
+	rootCmd.AddCommand(workflowCmd)
 	rootCmd.AddCommand(labelCmd)
 	rootCmd.AddCommand(propertyCmd)
+	rootCmd.AddCommand(quickActionCmd)
+	rootCmd.AddCommand(viewCmd)
 	rootCmd.AddCommand(agentCmd)
 	rootCmd.AddCommand(autopilotCmd)
 	rootCmd.AddCommand(workspaceCmd)
 	rootCmd.AddCommand(repoCmd)
+	rootCmd.AddCommand(environmentCmd)
 	rootCmd.AddCommand(skillCmd)
 	rootCmd.AddCommand(squadCmd)
 	rootCmd.AddCommand(chatCmd)
@@ -99,12 +112,24 @@ func init() {
 }
 
 func main() {
+	if err := agent.ApplyTaskEnvFileOverlay(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	if len(os.Args) == 2 && os.Args[1] == execenv.PreparationHelperArg {
 		logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 		if err := execenv.RunPreparationHelper(os.Stdin, os.Stdout, logger); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+		return
+	}
+	if len(os.Args) == 2 && os.Args[1] == agent.CursorHookHelperArg {
+		agent.RunCursorHookRelay(os.Stdin, os.Stdout, os.Getenv)
+		return
+	}
+	if len(os.Args) == 2 && os.Args[1] == agent.AntigravityHookHelperArg {
+		agent.RunAntigravityHookRelay(os.Stdin, os.Stdout, os.Getenv)
 		return
 	}
 	cli.CleanupStaleUpdateArtifacts()

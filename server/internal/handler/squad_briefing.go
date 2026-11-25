@@ -2,9 +2,11 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -18,8 +20,9 @@ import (
 //
 // Keep this text English-only (matches existing agent-harness conventions)
 // and keep the mention syntax exactly aligned with util.MentionRe — the
-// "Squad Roster" block below renders concrete examples that round-trip
-// through util.ParseMentions, and the protocol text refers to that format.
+// "Squad Roster" block below renders copyable examples as inline code so the
+// briefing itself does not trigger, and the pasted syntax round-trips
+// through util.ParseMentions. The protocol text refers to that format.
 //
 // Responsibility 5 is the single statement of the no_action rule (MUL-6984).
 // The runtime brief's workflow step 4 and ## Output, and the per-turn reply
@@ -121,6 +124,82 @@ const squadParentStatusOwned = `6. **Own the parent issue status.** This issue i
    when no comment asked you to. Leave ` + "`" + `done` + "`" + ` to a human reviewer or
    existing integrations (for example a PR with close intent that merges).`
 
+// leaderWorkflow says whether an owning leader's issue follows a project
+// workflow that came with the claim, and whether the daemon's runtime brief
+// still states the built-in in_progress / in_review rules (MUL-8145).
+type leaderWorkflow int
+
+const (
+	leaderNoWorkflow leaderWorkflow = iota
+	// leaderWorkflowCurrentDaemon: the runtime brief points at
+	// [Project workflow] and states no built-in moves.
+	leaderWorkflowCurrentDaemon
+	// leaderWorkflowStatusMap: [Project workflow] is a status map with no
+	// per-step commands; the runtime brief states its rules (MUL-9913).
+	leaderWorkflowStatusMap
+	// leaderWorkflowLegacyDaemon: the runtime brief still says to set
+	// in_progress first and in_review on delivery, so responsibility 6 has
+	// to rule those moves out for this issue.
+	leaderWorkflowLegacyDaemon
+	// leaderWorkflowStepMoved: the run's binding no longer matches the issue,
+	// so it must leave status unchanged even when its squad owns the issue.
+	leaderWorkflowStepMoved
+)
+
+const squadParentStatusStepMoved = `6. **Leave the parent issue's status unchanged for this run.** This issue
+   is assigned to your squad, but this run's workflow binding no longer matches
+   the issue's current step. Follow the explanation in ` + "`" + `[Project workflow]` + "`" + `.
+   Keep the current status even when you confirm the overall goal is met; do
+   not change it to mark progress or delivery. This overrides the status rules
+   in your runtime instructions. Leave a comment if something needs attention;
+   a member can review the current state and explicitly rerun the work.`
+
+// squadParentStatusOwnedInWorkflow is responsibility 6 for an owning leader
+// whose issue follows a project workflow that came with the claim (MUL-8145).
+// The workflow may list neither in_progress nor in_review — the server rejects
+// a status outside it — and entering a step with a handler reassigns the
+// issue, so squadParentStatusOwned's "move to in_progress, then in_review"
+// would be refused or hand the parent away mid-dispatch. The ownership
+// boundary and the standing wrap-up authorization stay; the moves become the
+// [Project workflow] commands the runtime brief points at.
+const squadParentStatusOwnedInWorkflow = `6. **Own the parent issue status — through its project workflow.** This issue
+   is assigned to your squad and follows its project workflow, so its status
+   is yours to move (unless Agent Identity forbids status changes), using only
+   the commands in ` + "`" + `[Project workflow]` + "`" + `. Delegate only the current
+   step's work and pass its instructions and constraints to members in your
+   delegation comment; their observer brief does not include step instructions.
+   The parent stays at its
+   current step while members work — a successful dispatch is not completion.
+   On later turns, do not move it for routine progress updates. When you
+   confirm the current step's goal is met, run that block's Step done command — this
+   responsibility is itself the standing instruction that authorizes that
+   change, so do it even when no comment asked you to.`
+
+// squadParentStatusOwnedInStatusMap is squadParentStatusOwnedInWorkflow for
+// a [Project workflow] status map, which lists no Step done command: the
+// leader picks the status from the map once the step's goal is met.
+const squadParentStatusOwnedInStatusMap = `6. **Own the parent issue status — through its project workflow.** This issue
+   is assigned to your squad and follows its project workflow, so its status
+   is yours to move (unless Agent Identity forbids status changes), using only
+   the statuses in the ` + "`" + `[Project workflow]` + "`" + ` status map. Delegate only the current
+   step's work and pass its instructions and constraints to members in your
+   delegation comment; their observer brief does not include step instructions.
+   The parent stays at its
+   current step while members work — a successful dispatch is not completion.
+   On later turns, do not move it for routine progress updates. When you
+   confirm the current step's goal is met, move it to the status the map gives
+   for that step's finished work — this responsibility is itself the standing
+   instruction that authorizes that change, so do it even when no comment
+   asked you to.`
+
+// squadParentStatusWorkflowOverridesRuntime follows
+// squadParentStatusOwnedInWorkflow for a daemon whose runtime brief still
+// states the built-in moves.
+const squadParentStatusWorkflowOverridesRuntime = `
+   This overrides the in_progress / in_review rules in your runtime
+   instructions: never set either on this issue just to mark progress or
+   delivery.`
+
 // squadParentStatusNotOwned is responsibility 6 for every other leader path:
 // an @squad mention on an issue owned by someone else (MUL-3724), and
 // quick-create, where no issue exists yet on this turn. Granting status
@@ -165,11 +244,50 @@ const squadOperatingProtocolHardRules = `Hard rules:
   @mention on this issue, or create a ` + "`" + `todo` + "`" + ` child issue assigned to
   them. Never both for the same work.`
 
+// squadSteerRule is added to the hard rules only for a daemon that ships a
+// CLI with --steer (protocol.DaemonCapabilityCLICommentSteerV1): an older CLI
+// rejects the flag and the comment is never posted.
+const squadSteerRule = `- A worker already running on this issue gets a new comment only after its
+  run ends. To correct it mid-run (wrong direction, a missing fact, a
+  narrower scope), steer that run instead: add the comment with
+  ` + "`" + `--steer <run-id>` + "`" + ` (run ids from ` + "`" + `multica issue runs <issue-id> --active` + "`" + `), or
+  ` + "`" + `--steer-active` + "`" + ` for every running worker you may steer. Only a run that
+  accepts additional messages (` + "`" + `can_supplement: true` + "`" + ` in
+  ` + "`" + `multica issue runs <issue-id> --active --output json` + "`" + `) can be steered, and
+  the command reports per run whether it was. New work is still a normal
+  delegation.`
+
+// squadLeaderDirectHandoff tells the leader of a direct-handoff squad which
+// replies still reach it. It narrows responsibility 4's re-trigger list; the
+// guard numbers are the server's (service.SquadHandoff*Limit).
+var squadLeaderDirectHandoff = fmt.Sprintf(`## Handoff Mode: Direct
+
+Members of this squad hand the issue to each other directly: when a member
+finishes, it @mentions the next member (or a person) in its result comment,
+and that handoff does NOT wake you. Delegate only the first step, then handle
+exceptions. You are woken when:
+- a member replies without naming a next step, or reports the issue done;
+- a member's run fails;
+- the same two members pass the issue back and forth more than %d rounds;
+- the issue exceeds %d member handoffs in 24 hours.
+When you delegate the next step after one of these, the round count starts over.`,
+	service.SquadHandoffRoundLimit, service.SquadHandoffDailyLimit)
+
 // squadOperatingProtocolFor assembles the protocol, selecting the parent-status
-// responsibility that matches this leader's actual authority over the issue.
-func squadOperatingProtocolFor(ownsIssueStatus bool) string {
+// responsibility that matches this leader's actual authority over the issue
+// and, for an owner, whether the issue's project workflow governs its moves.
+func squadOperatingProtocolFor(ownsIssueStatus bool, workflow leaderWorkflow) string {
 	status := squadParentStatusNotOwned
-	if ownsIssueStatus {
+	switch {
+	case ownsIssueStatus && workflow == leaderWorkflowStepMoved:
+		status = squadParentStatusStepMoved
+	case ownsIssueStatus && workflow == leaderWorkflowCurrentDaemon:
+		status = squadParentStatusOwnedInWorkflow
+	case ownsIssueStatus && workflow == leaderWorkflowStatusMap:
+		status = squadParentStatusOwnedInStatusMap
+	case ownsIssueStatus && workflow == leaderWorkflowLegacyDaemon:
+		status = squadParentStatusOwnedInWorkflow + squadParentStatusWorkflowOverridesRuntime
+	case ownsIssueStatus:
 		status = squadParentStatusOwned
 	}
 	return squadOperatingProtocolHeader + "\n" + status + "\n\n" + squadOperatingProtocolHardRules
@@ -190,12 +308,26 @@ func squadOperatingProtocolFor(ownsIssueStatus bool) string {
 // including ones where the squad is a guest on someone else's issue, so this
 // flag is what keeps status authority from leaking along with the roster.
 //
+// workflow says whether the claim carries a [Project workflow] block for the
+// issue; an owning leader then moves the parent with that block's commands
+// instead of in_progress / in_review (MUL-8145).
+//
 // Archived agent members are skipped — there's no point asking the leader
 // to delegate to a retired agent. Members whose underlying record can't be
 // loaded (deleted user/agent races, FK weirdness) are also skipped silently.
-func buildSquadLeaderBriefing(ctx context.Context, q *db.Queries, squad db.Squad, ownsIssueStatus bool) string {
+//
+// steer adds the rule for steering a running worker; see squadSteerRule.
+func buildSquadLeaderBriefing(ctx context.Context, q *db.Queries, squad db.Squad, ownsIssueStatus bool, workflow leaderWorkflow, steer bool) string {
 	var sb strings.Builder
-	sb.WriteString(squadOperatingProtocolFor(ownsIssueStatus))
+	sb.WriteString(squadOperatingProtocolFor(ownsIssueStatus, workflow))
+	if steer {
+		sb.WriteString("\n")
+		sb.WriteString(squadSteerRule)
+	}
+	if squad.HandoffMode == service.SquadHandoffModeDirect {
+		sb.WriteString("\n\n")
+		sb.WriteString(squadLeaderDirectHandoff)
+	}
 	sb.WriteString("\n\n")
 	sb.WriteString(buildSquadRoster(ctx, q, squad))
 
@@ -365,4 +497,141 @@ func formatRosterRow(name, kind, role, skills, mention string) string {
 // uses the mention:// scheme with the entity type and UUID.
 func formatMention(name, mentionType, id string) string {
 	return "[@" + name + "](mention://" + mentionType + "/" + id + ")"
+}
+
+// squadMemberHandoffLeader and squadMemberHandoffDirect are the "Handing Off"
+// section of a member brief, one per squad handoff mode. %s is the leader's
+// name; the direct text also takes the two guard limits.
+const squadMemberHandoffLeader = `## Handing Off
+
+This squad uses leader dispatch. When you finish your part, post your result
+as one comment on this issue. Your reply wakes the leader, %s, who decides
+the next step.`
+
+const squadMemberHandoffDirect = `## Handing Off
+
+Members of this squad hand the issue to each other directly. When you finish
+your part, decide the next step yourself and state it in your result comment:
+- Another member should continue or review the work: @mention exactly that
+  member, using the mention markdown under Your Squad. Never ask for a review
+  of your own work.
+- A person needs to decide: @mention that person. The leader is not woken;
+  the person replies on the issue.
+- You are blocked, the work is out of scope, or you are unsure what comes
+  next: do not @mention anyone and say why. Your reply goes to the leader, %s.
+- The whole issue is done: say so without @mentioning anyone. The leader
+  wraps it up.
+Name one next owner per comment. The same two members can pass the issue back
+and forth at most %d rounds, and an issue takes at most %d member handoffs in
+24 hours. Past either limit, or when a member's run fails, the issue goes back
+to the leader.`
+
+// buildSquadMemberBriefing composes the squad context appended to a member's
+// Instructions when it claims a non-leader task on an issue assigned to its
+// squad: who it is in the squad, the roster it can hand off to, the squad's
+// rules, and how it hands off under the squad's handoff mode.
+//
+// It must never contain squadBriefingMarker ("## Squad Operating Protocol"):
+// a daemon that predates leader_role_resolved infers the leader role from
+// that heading.
+func buildSquadMemberBriefing(ctx context.Context, q *db.Queries, squad db.Squad, self db.Agent) string {
+	leaderName := "the leader"
+	if leader, err := q.GetAgent(ctx, squad.LeaderID); err == nil {
+		leaderName = leader.Name
+	}
+	members, err := q.ListSquadMembers(ctx, squad.ID)
+	if err != nil {
+		members = nil
+	}
+	selfID := util.UUIDToString(self.ID)
+	role := ""
+	for _, m := range members {
+		if m.MemberType == "agent" && util.UUIDToString(m.MemberID) == selfID {
+			role = strings.TrimSpace(m.Role)
+		}
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## Squad Member Brief\n\n")
+	sb.WriteString("You are working on this issue as ")
+	sb.WriteString(self.Name)
+	sb.WriteString(", a member of the squad \"")
+	sb.WriteString(squad.Name)
+	sb.WriteString("\". The squad leader, ")
+	sb.WriteString(leaderName)
+	sb.WriteString(", dispatches work and handles exceptions; you do your part and hand off.")
+	if role != "" {
+		sb.WriteString("\nYour role in this squad: \"")
+		sb.WriteString(role)
+		sb.WriteString("\".")
+	}
+	sb.WriteString("\n\n")
+	sb.WriteString(buildSquadMemberRoster(ctx, q, squad, leaderName, members, selfID))
+
+	if trimmed := strings.TrimSpace(squad.Instructions); trimmed != "" {
+		sb.WriteString("\n## Squad Rules (")
+		sb.WriteString(squad.Name)
+		sb.WriteString(")\n\n")
+		sb.WriteString(trimmed)
+		sb.WriteString("\n")
+	}
+	sb.WriteString("\n")
+	if squad.HandoffMode == service.SquadHandoffModeDirect {
+		sb.WriteString(fmt.Sprintf(squadMemberHandoffDirect, leaderName, service.SquadHandoffRoundLimit, service.SquadHandoffDailyLimit))
+	} else {
+		sb.WriteString(fmt.Sprintf(squadMemberHandoffLeader, leaderName))
+	}
+	return sb.String()
+}
+
+// buildSquadMemberRoster is buildSquadRoster from a member's seat: the leader
+// row, then every other non-archived member. The member itself is left out so
+// it cannot pick itself as the next owner.
+func buildSquadMemberRoster(ctx context.Context, q *db.Queries, squad db.Squad, leaderName string, members []db.SquadMember, selfID string) string {
+	var sb strings.Builder
+	sb.WriteString("## Your Squad\n\nLeader:\n- ")
+	sb.WriteString(leaderName)
+	sb.WriteString(" — agent — `")
+	sb.WriteString(formatMention(leaderName, "agent", util.UUIDToString(squad.LeaderID)))
+	sb.WriteString("`\n")
+
+	leaderID := util.UUIDToString(squad.LeaderID)
+	skillNamesByAgentID, skillsLoaded := loadSquadMemberSkillNames(ctx, q, members, leaderID)
+	rows := make([]string, 0, len(members))
+	for _, m := range members {
+		id := util.UUIDToString(m.MemberID)
+		if m.MemberType == "agent" && (id == leaderID || id == selfID) {
+			continue
+		}
+		if row := renderMemberRow(ctx, q, m, skillNamesByAgentID, skillsLoaded); row != "" {
+			rows = append(rows, row)
+		}
+	}
+	if len(rows) == 0 {
+		sb.WriteString("\nOther members: (none)\n")
+		return sb.String()
+	}
+	sb.WriteString("\nOther members:\n")
+	for _, r := range rows {
+		sb.WriteString(r)
+	}
+	return sb.String()
+}
+
+// squadMemberBriefingForClaim returns the member brief for a non-leader claim
+// on an issue assigned to a squad the agent belongs to, or "" when the run is
+// not a squad member turn.
+func squadMemberBriefingForClaim(ctx context.Context, q *db.Queries, issue db.Issue, agent db.Agent) string {
+	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "squad" || !issue.AssigneeID.Valid {
+		return ""
+	}
+	squad, err := q.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{ID: issue.AssigneeID, WorkspaceID: issue.WorkspaceID})
+	if err != nil || squad.ArchivedAt.Valid || squad.LeaderID == agent.ID {
+		return ""
+	}
+	isMember, err := q.IsSquadMember(ctx, db.IsSquadMemberParams{SquadID: squad.ID, MemberType: "agent", MemberID: agent.ID})
+	if err != nil || !isMember {
+		return ""
+	}
+	return buildSquadMemberBriefing(ctx, q, squad, agent)
 }

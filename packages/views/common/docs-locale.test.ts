@@ -7,6 +7,7 @@ describe("docsLocalePrefix", () => {
     ["en", ""],
     [undefined, ""],
     ["zh-Hans", "/zh"],
+    ["zh-Hant", "/zh-Hant"],
     ["ja", "/ja"],
     ["ko", "/ko"],
     ["fr", "/fr"],

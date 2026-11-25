@@ -56,9 +56,12 @@ const devVerificationCodeEnv = "MULTICA_DEV_VERIFICATION_CODE"
 var supportedLanguages = map[string]struct{}{
 	"en":      {},
 	"zh-Hans": {},
+	"zh-Hant": {},
 	"ko":      {},
 	"ja":      {},
 	"fr":      {},
+	"es":      {},
+	"ru":      {},
 }
 
 type UserResponse struct {
@@ -72,8 +75,16 @@ type UserResponse struct {
 	OnboardedAt             *string         `json:"onboarded_at"`
 	OnboardingQuestionnaire json.RawMessage `json:"onboarding_questionnaire"`
 	ProfileDescription      string          `json:"profile_description"`
-	CreatedAt               string          `json:"created_at"`
-	UpdatedAt               string          `json:"updated_at"`
+	// Always serialized (null when unset): clients treat a missing key as
+	// "server cannot track What's new" and suppress the auto-opening card.
+	WhatsNewSeenVersion *string `json:"whats_new_seen_version"`
+	// Star prompt bookkeeping. The count is always serialized: clients treat
+	// a missing key as "server cannot track the prompt" and never show it.
+	StarPromptShownCount  int32   `json:"star_prompt_shown_count"`
+	StarPromptLastShownAt *string `json:"star_prompt_last_shown_at"`
+	StarPromptStarredAt   *string `json:"star_prompt_starred_at"`
+	CreatedAt             string  `json:"created_at"`
+	UpdatedAt             string  `json:"updated_at"`
 }
 
 // MaxProfileDescriptionLen caps the user-supplied profile_description body.
@@ -100,6 +111,10 @@ func (h *Handler) userToResponse(u db.User) UserResponse {
 		OnboardedAt:             timestampToPtr(u.OnboardedAt),
 		OnboardingQuestionnaire: json.RawMessage(q),
 		ProfileDescription:      u.ProfileDescription,
+		WhatsNewSeenVersion:     textToPtr(u.WhatsNewSeenVersion),
+		StarPromptShownCount:    u.StarPromptShownCount,
+		StarPromptLastShownAt:   timestampToPtr(u.StarPromptLastShownAt),
+		StarPromptStarredAt:     timestampToPtr(u.StarPromptStarredAt),
 		CreatedAt:               timestampToString(u.CreatedAt),
 		UpdatedAt:               timestampToString(u.UpdatedAt),
 	}
@@ -546,11 +561,15 @@ func writeGoogleLoginActionableError(w http.ResponseWriter, err error) bool {
 	return true
 }
 
+// googleOAuthClient bounds each Google OAuth call. The API server sets no
+// WriteTimeout, so an unanswered call would otherwise hold the handler open.
+var googleOAuthClient = &http.Client{Timeout: 15 * time.Second}
+
 func (h *Handler) googleHTTPClient() *http.Client {
 	if h.googleOAuthHTTPClient != nil {
 		return h.googleOAuthHTTPClient
 	}
-	return http.DefaultClient
+	return googleOAuthClient
 }
 
 func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
@@ -578,13 +597,21 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Exchange authorization code for tokens.
-	tokenResp, err := h.googleHTTPClient().PostForm("https://oauth2.googleapis.com/token", url.Values{
+	tokenForm := url.Values{
 		"code":          {req.Code},
 		"client_id":     {clientID},
 		"client_secret": {clientSecret},
 		"redirect_uri":  {redirectURI},
 		"grant_type":    {"authorization_code"},
-	})
+	}
+	tokenReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, "https://oauth2.googleapis.com/token", strings.NewReader(tokenForm.Encode()))
+	if err != nil {
+		slog.Error("failed to create google token request", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	tokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	tokenResp, err := h.googleHTTPClient().Do(tokenReq)
 	if err != nil {
 		slog.Error("google oauth token exchange failed", "error", err)
 		writeError(w, http.StatusBadGateway, "failed to exchange code with Google")
@@ -745,7 +772,15 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 // IssueCliToken returns a fresh JWT for the authenticated user.
 // This allows cookie-authenticated browser sessions to obtain a bearer token
 // that can be handed off to the CLI via the cli_callback redirect.
+//
+// Machine credentials (mat_ task tokens, mcn_ cloud-node PATs) are refused
+// here as well as at the router (MUL-8154), so a route refactor cannot turn
+// a scoped agent credential into a long-lived session.
 func (h *Handler) IssueCliToken(w http.ResponseWriter, r *http.Request) {
+	if isMachineCredentialActor(r) {
+		writeError(w, http.StatusForbidden, "this endpoint is only available to human actors")
+		return
+	}
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return

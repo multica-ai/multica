@@ -141,9 +141,9 @@ beforeEach(() => {
 
 describe("AgentProfileCard — Runtime row", () => {
   it.each([
-    ["online", "svg.lucide-wifi"],
-    ["unstable", "svg.lucide-wifi-high"],
-    ["offline", "svg.lucide-wifi-off"],
+    ["online", "svg.icon-wifi"],
+    ["unstable", "svg.icon-wifi-high"],
+    ["offline", "svg.icon-wifi-off"],
   ] as const)(
     "uses projected %s availability when the private runtime row is hidden",
     (runtimeAvailability, iconSelector) => {
@@ -191,5 +191,21 @@ describe("AgentProfileCard — Model row", () => {
     // No effort token anywhere on the card.
     expect(screen.queryByText("high")).toBeNull();
     expect(screen.queryByText("medium")).toBeNull();
+  });
+});
+
+describe("AgentProfileCard — Settings", () => {
+  it("links to the agent's settings", () => {
+    renderCard();
+    expect(screen.getByRole("button", { name: "Settings" })).toHaveAttribute(
+      "href",
+      "/test/agents/agent-1?view=general",
+    );
+  });
+
+  it("offers no settings link for an archived agent", () => {
+    mockAgents.current = [makeAgent({ archived_at: "2026-06-01T00:00:00Z" })];
+    renderCard();
+    expect(screen.queryByRole("button", { name: "Settings" })).not.toBeInTheDocument();
   });
 });

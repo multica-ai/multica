@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -8,6 +9,30 @@ import (
 	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
+
+func TestClassifyPoisonedErrorIgnoresCodebuddyProtocolSummary(t *testing.T) {
+	for _, count := range []int{400, 1400, 4000} {
+		summary := fmt.Sprintf("\n[codebuddy protocol: exit_code=0 stdout_bytes=%d stderr_bytes=0 event_count=1 invalid_event_count=0 assistant_event_count=0 tool_use_count=0 saw_result=true result_is_error=true result_bytes=0 last_assistant_bytes=0 scanner_error=false]", count)
+		for _, tc := range []struct {
+			raw  string
+			want taskfailure.Reason
+		}{
+			{`HTTP 404 {"type":"invalid_request_error","message":"unknown model test-model","code":"model_not_found"}`, taskfailure.ReasonAgentModelNotFoundOrUnavailable},
+			{`HTTP 401 {"type":"invalid_request_error","message":"invalid api key","code":"invalid_api_key"}`, taskfailure.ReasonAgentProviderAuthOrAccess},
+		} {
+			raw := tc.raw + summary
+			if reason, poisoned := classifyPoisonedError(raw); poisoned || reason != "" {
+				t.Errorf("count=%d: non-poisoning failure classified as %q", count, reason)
+			}
+			if got := taskfailure.Classify(raw); got != tc.want {
+				t.Errorf("count=%d: provider reason=%s, want %s", count, got, tc.want)
+			}
+		}
+		if reason, poisoned := classifyPoisonedError(`HTTP 400 {"type":"invalid_request_error","message":"Could not process image"}` + summary); !poisoned || reason != FailureReasonAPIInvalidRequest {
+			t.Errorf("count=%d: lost actual poisoned request: %q/%v", count, reason, poisoned)
+		}
+	}
+}
 
 func TestClassifyPoisonedOutput(t *testing.T) {
 	cases := []struct {
@@ -143,6 +168,28 @@ func TestClassifyPoisonedError(t *testing.T) {
 			errMsg:     `API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 213000 tokens > 200000 maximum"}}`,
 			wantOK:     true,
 			wantReason: FailureReasonAPIInvalidRequest,
+		},
+		{
+			// MUL-10116: the Claude backend's refusal marker, as reported for
+			// the captured Claude Code 2.1.280 resume. Every resume of a
+			// refused session is refused again, so it must be retired.
+			name:       "claude safeguards refusal",
+			errMsg:     agent.ClaudeModelRefusalMarker + ": the model declined this conversation, and resuming the session would send the refused message again (API Error: Opus 5.5's safeguards flagged this message (https://www.anthropic.com/legal/aup).)",
+			wantOK:     true,
+			wantReason: FailureReasonAPIInvalidRequest,
+		},
+		{
+			// Only the backend's marker counts. Claude Code's own copy, or an
+			// agent quoting it, keeps the session: a false positive would
+			// throw away a healthy conversation.
+			name:   "refusal prose without the marker",
+			errMsg: "API Error: Opus 5.5's safeguards flagged this message (https://www.anthropic.com/legal/aup). Try rephrasing the request in a new session or change your model.",
+			wantOK: false,
+		},
+		{
+			name:   "marker quoted mid-message",
+			errMsg: "tool failed: grep output mentioned " + agent.ClaudeModelRefusalMarker,
+			wantOK: false,
 		},
 		{
 			name:       "case insensitive",
@@ -387,5 +434,19 @@ func TestClassifyResumeUnsafeTimeout(t *testing.T) {
 				t.Fatalf("classifyResumeUnsafeTimeout(%q, %q) reason=%q, want %q", tc.provider, tc.errMsg, reason, tc.wantReason)
 			}
 		})
+	}
+}
+
+// MUL-10116: the error the Claude backend reports for a refusal has to end in a
+// failure reason the server refuses to resume, or the next comment on the
+// issue resumes the refused session and is refused again.
+func TestClaudeRefusalErrorRetiresSession(t *testing.T) {
+	errMsg := agent.ClaudeModelRefusalMarker + ": the model declined this conversation (API Error: Opus 5.5's safeguards flagged this message)"
+	reason, ok := classifyPoisonedError(errMsg)
+	if !ok {
+		t.Fatalf("refusal error %q was not classified", errMsg)
+	}
+	if !service.ResumeUnsafeFailure(reason, errMsg) {
+		t.Fatalf("failure_reason %q must be resume-unsafe", reason)
 	}
 }

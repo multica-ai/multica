@@ -8,6 +8,7 @@ import type { NavigationAdapter } from "../navigation/types";
 import { CurrentIssueRenderContextProvider } from "../issues/current-issue-render-context";
 
 vi.mock("../issues/components/issue-chip", () => ({
+  useChipIssue: () => undefined,
   IssueChip: ({
     issueId,
     children,

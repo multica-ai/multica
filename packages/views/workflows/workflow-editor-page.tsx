@@ -30,7 +30,7 @@ import {
   Plus,
   Trash2,
   UserRound,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import { ApiError, clientErrorMessage } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -50,12 +50,15 @@ import {
 import { useActorName } from "@multica/core/workspace/hooks";
 import { projectListOptions } from "@multica/core/projects/queries";
 import type {
+  IssueStatusEntry,
   IssueWorkflow,
   IssueWorkflowMappingPlan,
   IssueWorkflowStep,
   IssueWorkflowStepInput,
 } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -103,6 +106,14 @@ interface Draft {
   handoffs: Record<string, Handoff>;
 }
 
+/**
+ * The key a column goes by in the editor: its status, or — for a status the
+ * save creates — its draft id, so its handoff can be edited before the save.
+ */
+function columnKey(column: DraftColumn): string {
+  return "status_key" in column ? column.status_key : column.id;
+}
+
 function hasHandoff(h: Handoff | undefined): h is Handoff {
   return !!h && (h.handler.type !== "none" || !!h.next_status_key || !!h.back_status_key);
 }
@@ -141,6 +152,22 @@ function sameDraft(a: Draft, b: Draft): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+/** Points columns that would create a status at the one the catalog already has by that name. */
+function withExistingStatuses(draft: Draft, statuses: readonly IssueStatusEntry[]): Draft {
+  const used = new Set(draft.middle.flatMap((c) => ("status_key" in c ? [c.status_key] : [])));
+  let changed = false;
+  const middle = draft.middle.map((column): DraftColumn => {
+    if ("status_key" in column) return column;
+    const name = column.new_name.toLowerCase();
+    const existing = statuses.find((e) => e.name.toLowerCase() === name);
+    if (!existing || isFixedWorkflowStatus(existing.key) || used.has(existing.key)) return column;
+    used.add(existing.key);
+    changed = true;
+    return { id: column.id, status_key: existing.key };
+  });
+  return changed ? { ...draft, middle } : draft;
+}
+
 function mappingPlanFrom(err: unknown): IssueWorkflowMappingPlan | null {
   if (!(err instanceof ApiError) || err.status !== 409 || !err.body || typeof err.body !== "object") return null;
   const body = err.body as { code?: unknown; plan?: IssueWorkflowMappingPlan };
@@ -161,6 +188,8 @@ export function WorkflowEditorPage({
   seed,
   template,
   canEdit,
+  canDuplicate = canEdit,
+  canCreateStatus = canEdit,
   onBack,
   onOpen,
 }: {
@@ -169,6 +198,13 @@ export function WorkflowEditorPage({
   /** Pre-fills a new workflow from a template. */
   template?: WorkflowTemplateId | null;
   canEdit: boolean;
+  /** Duplicating creates a workflow, which any member may do. */
+  canDuplicate?: boolean;
+  /**
+   * Whether saving may add statuses to the workspace catalog: statuses are
+   * shared by every board, so only admins create them (MUL-8120).
+   */
+  canCreateStatus?: boolean;
   onBack: () => void;
   /** Navigates to another workflow's editor (after create, or to a duplicate). */
   onOpen: (target: { id: string } | { duplicateOf: string }) => void;
@@ -218,7 +254,7 @@ export function WorkflowEditorPage({
     };
     // Re-seed only when the target changes or the saved row is refreshed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [saved?.updated_at, workflowId, seed?.id, template, catalog.activeStatuses.length]);
+  }, [saved?.updated_at, workflowId, seed?.id, template]);
 
   const [draft, setDraft] = useState<Draft>(baseline);
   const [mappingPlan, setMappingPlan] = useState<IssueWorkflowMappingPlan | null>(null);
@@ -226,10 +262,19 @@ export function WorkflowEditorPage({
   const [selected, setSelected] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   useEffect(() => setDraft(baseline), [baseline]);
+  // The catalog can load or change under an open draft; that must not re-seed it.
+  useEffect(
+    () => setDraft((d) => withExistingStatuses(d, catalog.activeStatuses)),
+    [baseline, catalog.activeStatuses],
+  );
 
   const dirty = !workflowId || !sameDraft(draft, baseline);
   const pending = createWorkflow.isPending || updateWorkflow.isPending;
-  const canSave = canEdit && dirty && draft.name.trim().length > 0 && !pending;
+  // Statuses this save would create; a member must drop them or ask an admin.
+  const missingStatuses = canCreateStatus
+    ? []
+    : draft.middle.flatMap((c) => ("new_name" in c ? [c.new_name] : []));
+  const canSave = canEdit && dirty && draft.name.trim().length > 0 && !pending && missingStatuses.length === 0;
   const usedBy = saved
     ? projects.filter((p) => (saved.is_default ? !p.workflow_id : saved.project_ids.includes(p.id)))
     : [];
@@ -240,6 +285,14 @@ export function WorkflowEditorPage({
   const targetKeys = columns.flatMap((c) => ("status_key" in c ? [c.status_key] : []));
   // Next and back can only name statuses that exist before the save.
   const flow = { steps: targetKeys.map((status_key) => ({ status_key, ...NO_HANDOFF })) };
+  // The default next follows the whole draft, unsaved columns included —
+  // the order the server resolves it in once the draft is saved.
+  const draftFlow = { steps: columns.map((c) => ({ status_key: columnKey(c), ...NO_HANDOFF })) };
+  const columnLabel = (key: string) => {
+    if (!key) return "";
+    const column = draft.middle.find((c) => c.id === key && "new_name" in c);
+    return column && "new_name" in column ? column.new_name : labelOf(key);
+  };
   const selectedId = selected ?? "todo";
   const selectedColumn = columns.find((c) => c.id === selectedId && "status_key" in c && statusAcceptsHandoff(c.status_key));
   const selectedStep: IssueWorkflowStep | null =
@@ -261,7 +314,9 @@ export function WorkflowEditorPage({
   const addNew = () => {
     const name = newName?.trim();
     if (!name) return;
-    setDraft((d) => ({ ...d, middle: [...d.middle, { id: `new:${name}:${Date.now()}`, new_name: name }] }));
+    const id = `new:${name}:${Date.now()}`;
+    setDraft((d) => ({ ...d, middle: [...d.middle, { id, new_name: name }] }));
+    setSelected(id);
     setNewName(null);
   };
 
@@ -341,7 +396,8 @@ export function WorkflowEditorPage({
     { id: "cancelled", status_key: "cancelled" },
   ];
   const current = listed.find((c) => c.id === selectedId) ?? listed[1]!;
-  const nextOf = (key: string, h: Handoff | undefined) => h?.next_status_key ?? workflowNextStatus(flow, key);
+  const nextOf = (column: DraftColumn, h: Handoff | undefined) =>
+    h?.next_status_key ?? workflowNextStatus(draftFlow, columnKey(column), catalog.categoryOf);
   const card = (column: DraftColumn) => {
     const key = "status_key" in column ? column.status_key : null;
     const optional = key === "backlog" || key === "blocked";
@@ -351,7 +407,7 @@ export function WorkflowEditorPage({
       off,
       start: key === "todo",
       handoff: off ? undefined : draft.handoffs[column.id],
-      next: key && !off ? nextOf(key, draft.handoffs[column.id]) : undefined,
+      nextLabel: off ? undefined : columnLabel(nextOf(column, draft.handoffs[column.id])) || undefined,
       selected: current.id === column.id,
       onSelect: () => setSelected(column.id),
       toggle: optional
@@ -418,28 +474,30 @@ export function WorkflowEditorPage({
               </span>
             </p>
           </div>
-          {canEdit && (
+          {(canEdit || canDuplicate) && (
             <div className="flex shrink-0 items-center gap-2">
-              {dirty && workflowId && (
+              {canEdit && dirty && workflowId && (
                 <span className="text-caption text-muted-foreground">{t(($) => $.workflows.editor.unsaved)}</span>
               )}
-              {workflowId && (
+              {canDuplicate && workflowId && (
                 <Button variant="outline" className="gap-1.5" onClick={() => onOpen({ duplicateOf: workflowId })}>
                   <Copy className="size-3.5" />
                   {t(($) => $.workflows.editor.duplicate)}
                 </Button>
               )}
-              <Button onClick={() => void save()} disabled={!canSave} aria-busy={pending}>
-                {pending && <Spinner className="size-3.5" />}
-                {workflowId ? t(($) => $.workflows.editor.save) : t(($) => $.workflows.editor.create)}
-              </Button>
-              {workflowId && !isDefault && (
+              {canEdit && (
+                <Button onClick={() => void save()} disabled={!canSave} aria-busy={pending}>
+                  {pending && <Spinner className="size-3.5" />}
+                  {workflowId ? t(($) => $.workflows.editor.save) : t(($) => $.workflows.editor.create)}
+                </Button>
+              )}
+              {canEdit && workflowId && !isDefault && (
                 <DropdownMenu>
                   <DropdownMenuTrigger
                     render={
-                      <Button variant="ghost" size="icon" aria-label={t(($) => $.workflows.editor.more)}>
+                      <IconButton variant="ghost" size="icon" label={t(($) => $.workflows.editor.more)} tooltipSide="bottom">
                         <MoreHorizontal className="size-4" />
-                      </Button>
+                      </IconButton>
                     }
                   />
                   <DropdownMenuContent align="end" className="w-56">
@@ -506,11 +564,15 @@ export function WorkflowEditorPage({
                       <span className="truncate">{labelOf(key)}</span>
                     </DropdownMenuItem>
                   ))}
-                  {addable.length > 0 && <DropdownMenuSeparator />}
-                  <DropdownMenuItem onClick={() => setNewName("")}>
-                    <Plus className="size-3.5" />
-                    {t(($) => $.workflows.columns.new_status)}
-                  </DropdownMenuItem>
+                  {canCreateStatus && (
+                    <>
+                      {addable.length > 0 && <DropdownMenuSeparator />}
+                      <DropdownMenuItem onClick={() => setNewName("")}>
+                        <Plus className="size-3.5" />
+                        {t(($) => $.workflows.columns.new_status)}
+                      </DropdownMenuItem>
+                    </>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
               {newName !== null && (
@@ -534,6 +596,13 @@ export function WorkflowEditorPage({
               )}
             </div>
           )}
+          {canEdit && missingStatuses.length > 0 && (
+            <p role="alert" className="mt-2.5 text-caption leading-5 text-destructive">
+              {t(($) => $.workflows.editor.status_needs_admin, {
+                names: missingStatuses.join(t(($) => $.workflows.list_separator)),
+              })}
+            </p>
+          )}
           <p className="mt-2.5 text-caption leading-5 text-muted-foreground">{t(($) => $.workflows.editor.steps_hint)}</p>
         </div>
 
@@ -543,8 +612,9 @@ export function WorkflowEditorPage({
           off={isOff(current)}
           handoff={draft.handoffs[current.id]}
           flow={flow}
+          defaultNextLabel={columnLabel(workflowNextStatus(draftFlow, columnKey(current), catalog.categoryOf))}
           canEdit={canEdit}
-          statusOptions={middleIds.has(current.id) && "status_key" in current ? addable : null}
+          statusOptions={middleIds.has(current.id) ? addable : null}
           onReplaceStatus={(key) => replaceStatus(current, key)}
           onRemove={canEdit && middleIds.has(current.id) ? () => removeColumn(current) : undefined}
           onPatch={(patch) => patchHandoff(current.id, patch)}
@@ -603,8 +673,8 @@ interface StepCardProps {
   /** The step new issues start on. */
   start: boolean;
   handoff: Handoff | undefined;
-  /** Where the handler is told to move the issue next. */
-  next: string | undefined;
+  /** Where the handler is told to move the issue next, by label. */
+  nextLabel: string | undefined;
   selected: boolean;
   onSelect: () => void;
   toggle?: { checked: boolean; disabled: boolean; onChange: (on: boolean) => void };
@@ -637,7 +707,7 @@ function StepCard({
   off,
   start,
   handoff,
-  next,
+  nextLabel,
   selected,
   onSelect,
   toggle,
@@ -657,7 +727,7 @@ function StepCard({
   const handlerLabel = useStepHandlerLabel(null);
   const { getActorName } = useActorName();
   const label = "status_key" in column ? labelOf(column.status_key) : column.new_name;
-  const step = handoff && "status_key" in column ? { status_key: column.status_key, ...handoff } : undefined;
+  const step = handoff ? { status_key: columnKey(column), ...handoff } : undefined;
   const who = handlerLabel(step);
   const actor = stepHandlerActor(step, null);
 
@@ -673,14 +743,16 @@ function StepCard({
       )}
     >
       {sortable?.handle ? (
-        <button
-          type="button"
-          aria-label={t(($) => $.workflows.editor.reorder, { name: label })}
-          className="flex h-5 w-4 shrink-0 touch-none items-center justify-center rounded-xs cursor-grab text-muted-foreground active:cursor-grabbing"
-          {...sortable.handle}
-        >
-          <GripVertical className="size-3.5" />
-        </button>
+        <TooltipHint label={t(($) => $.workflows.editor.reorder, { name: label })}>
+          <button
+            type="button"
+            aria-label={t(($) => $.workflows.editor.reorder, { name: label })}
+            className="flex h-5 w-4 shrink-0 touch-none items-center justify-center rounded-xs cursor-grab text-muted-foreground active:cursor-grabbing"
+            {...sortable.handle}
+          >
+            <GripVertical className="size-3.5" />
+          </button>
+        </TooltipHint>
       ) : (
         <span className="h-5 w-4 shrink-0" />
       )}
@@ -715,8 +787,8 @@ function StepCard({
               <span className="shrink-0">{t(($) => $.workflows.editor.card_hand_to)}</span>
               {actor && <ActorAvatar actorType={actor.type} actorId={actor.id} size="xs" profileLink={false} />}
               <span className="min-w-0 truncate text-foreground">{actor ? getActorName(actor.type, actor.id) : who}</span>
-              {handoff?.handler.type === "agent" && next && (
-                <span className="shrink-0 truncate">· {t(($) => $.workflows.editor.card_then, { status: labelOf(next) })}</span>
+              {(handoff?.handler.type === "agent" || handoff?.handler.type === "squad") && nextLabel && (
+                <span className="shrink-0 truncate">· {t(($) => $.workflows.editor.card_then, { status: nextLabel })}</span>
               )}
             </>
           ) : (
@@ -759,6 +831,7 @@ function StepDetail({
   onRemove,
   onPatch,
   onPreview,
+  defaultNextLabel,
 }: {
   column: DraftColumn;
   off: boolean;
@@ -771,6 +844,8 @@ function StepDetail({
   onRemove?: () => void;
   onPatch: (patch: Partial<Handoff>) => void;
   onPreview?: () => void;
+  /** The default next status's label, resolved over the whole draft. */
+  defaultNextLabel: string;
 }) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
@@ -805,15 +880,15 @@ function StepDetail({
           <Badge>{t(($) => $.workflows.editor.new_badge)}</Badge>
         )}
         {onRemove && (
-          <Button
+          <IconButton
             variant="ghost"
             size="icon-sm"
             className="ml-auto text-muted-foreground"
-            aria-label={t(($) => $.workflows.editor.remove)}
+            label={t(($) => $.workflows.editor.remove)}
             onClick={onRemove}
           >
             <Trash2 className="size-3.5" />
-          </Button>
+          </IconButton>
         )}
       </header>
       <div className="space-y-6 p-5">
@@ -853,18 +928,19 @@ function StepDetail({
         <DetailField label={t(($) => $.workflows.editor.on_enter)}>
           {off ? (
             <p className="text-caption leading-5 text-muted-foreground">{t(($) => $.workflows.editor.step_off)}</p>
-          ) : key && statusAcceptsHandoff(key) ? (
+          ) : !key || statusAcceptsHandoff(key) ? (
+            // A new status is a middle column, so it always takes a handoff;
+            // the save creates the status and keeps the handoff on it.
             <HandoffFields
-              step={{ status_key: key, ...(handoff ?? NO_HANDOFF) }}
+              step={{ status_key: columnKey(column), ...(handoff ?? NO_HANDOFF) }}
               workflow={flow}
               canEdit={canEdit}
               onPatch={onPatch}
               onPreview={onPreview}
+              defaultNextLabel={defaultNextLabel}
             />
           ) : (
-            <p className="text-caption leading-5 text-muted-foreground">
-              {key ? t(($) => $.workflows.editor.no_handoff_step) : t(($) => $.workflows.editor.new_step_handoff)}
-            </p>
+            <p className="text-caption leading-5 text-muted-foreground">{t(($) => $.workflows.editor.no_handoff_step)}</p>
           )}
         </DetailField>
       </div>

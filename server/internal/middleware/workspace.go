@@ -71,7 +71,9 @@ func ResolveWorkspaceIDFromRequest(r *http.Request, queries *db.Queries) string 
 	// after stripping any client-supplied X-Actor-Source. Any other
 	// workspace identifier on the request (slug header/query, ID
 	// query, URL param) is the agent trying to widen its blast
-	// radius — ignore it.
+	// radius — ignore it. Explicit selectors that conflict with the
+	// binding were already rejected by Auth (checkTaskTokenWorkspaceTarget,
+	// GitHub #9403); this branch is the backstop.
 	if r.Header.Get("X-Actor-Source") == "task_token" {
 		return r.Header.Get("X-Workspace-ID")
 	}
@@ -241,6 +243,10 @@ func buildMiddleware(queries *db.Queries, resolve workspaceResolver, roles []str
 			})
 			if err != nil {
 				writeError(w, http.StatusNotFound, "workspace not found")
+				return
+			}
+			if member.Role == "guest" && !GuestMayRequest(r) {
+				RefuseGuest(w, r)
 				return
 			}
 

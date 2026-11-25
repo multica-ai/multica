@@ -22,7 +22,7 @@ export function ProgressRing({
       width={size}
       height={size}
       viewBox={`0 0 ${size} ${size}`}
-      className={isComplete ? "text-info" : "text-primary"}
+      className={`transition-colors duration-200 motion-reduce:transition-none ${isComplete ? "text-info" : "text-primary"}`}
       aria-hidden="true"
     >
       <circle
@@ -45,6 +45,7 @@ export function ProgressRing({
         strokeDashoffset={offset}
         strokeLinecap="round"
         transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        className="transition-[stroke-dashoffset] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none"
       />
     </svg>
   );

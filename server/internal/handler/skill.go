@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,6 +43,15 @@ func sanitizeNullBytes(s string) string {
 	return util.SanitizeTextForPostgres(s)
 }
 
+// sanitizeNullBytesPtr is sanitizeNullBytes for an optional request field.
+func sanitizeNullBytesPtr(s *string) *string {
+	if s == nil {
+		return nil
+	}
+	clean := sanitizeNullBytes(*s)
+	return &clean
+}
+
 // --- Response structs ---
 
 type SkillResponse struct {
@@ -51,6 +61,7 @@ type SkillResponse struct {
 	Description string  `json:"description"`
 	Content     string  `json:"content"`
 	Config      any     `json:"config"`
+	Revision    int64   `json:"revision"`
 	CreatedBy   *string `json:"created_by"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
@@ -142,6 +153,7 @@ type SkillWithFilesResponse struct {
 // how large the skill is and which part of it is large.
 type SkillWithFileMetadataResponse struct {
 	SkillSummaryResponse
+	Revision int64 `json:"revision"`
 	// ContentSize / ContentHash describe the SKILL.md body that `content`
 	// would have carried.
 	ContentSize int64                       `json:"content_size"`
@@ -178,6 +190,7 @@ func skillToResponse(s db.Skill) SkillResponse {
 		Description: s.Description,
 		Content:     s.Content,
 		Config:      decodeSkillConfig(s.Config),
+		Revision:    s.Revision,
 		CreatedBy:   uuidToPtr(s.CreatedBy),
 		CreatedAt:   timestampToString(s.CreatedAt),
 		UpdatedAt:   timestampToString(s.UpdatedAt),
@@ -294,6 +307,15 @@ type UpdateSkillRequest struct {
 	Content     *string                  `json:"content"`
 	Config      any                      `json:"config"`
 	Files       []CreateSkillFileRequest `json:"files,omitempty"`
+	// BaseRevision is the skill revision the client edited; the write is
+	// refused with 409 if anyone saved since. Optional: omitted keeps
+	// last-write-wins for clients that predate skill revisions.
+	BaseRevision *int64 `json:"base_revision,omitempty"`
+}
+
+type UpsertSkillFileRequest struct {
+	CreateSkillFileRequest
+	BaseRevision *int64 `json:"base_revision,omitempty"`
 }
 
 type SetAgentSkillsRequest struct {
@@ -306,19 +328,9 @@ type AddAgentSkillsRequest struct {
 
 // --- Helpers ---
 
-// validateFilePath checks that a file path is safe (no traversal, no absolute paths).
+// validateFilePath checks that a file path uses the shared supporting-file contract.
 func validateFilePath(p string) bool {
-	if p == "" {
-		return false
-	}
-	if filepath.IsAbs(p) {
-		return false
-	}
-	cleaned := filepath.Clean(p)
-	if strings.HasPrefix(cleaned, "..") {
-		return false
-	}
-	return true
+	return skillpkg.IsSafeFilePath(p)
 }
 
 func (h *Handler) loadSkillForUser(w http.ResponseWriter, r *http.Request, id string) (db.Skill, bool) {
@@ -519,6 +531,7 @@ func (h *Handler) writeSkillMetadata(w http.ResponseWriter, r *http.Request, ski
 			skill.ID, skill.WorkspaceID, skill.Name, skill.Description,
 			skill.Config, skill.CreatedBy, skill.CreatedAt, skill.UpdatedAt,
 		),
+		Revision:    skill.Revision,
 		ContentSize: int64(len(skill.Content)),
 		ContentHash: contentHash(skill.Content),
 		Files:       fileResps,
@@ -554,6 +567,10 @@ func (h *Handler) CreateSkill(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid file path: "+f.Path)
 			return
 		}
+	}
+	if err := validateSkillWriteBudget(req.Content, req.Files); err != nil {
+		writeError(w, http.StatusRequestEntityTooLarge, err.Error())
+		return
 	}
 
 	resp, err := h.createSkillWithFiles(r.Context(), skillCreateInput{
@@ -605,6 +622,41 @@ func canOverwriteSkillByLocalImport(userID string, skill db.Skill) bool {
 	return skill.CreatedBy.Valid && uuidToString(skill.CreatedBy) == userID
 }
 
+// validSkillBaseRevision rejects a base_revision no skill can have. Revisions
+// start at 1, so 0 is a client bug (an unset field sent anyway), not "skip
+// the check".
+func validSkillBaseRevision(w http.ResponseWriter, base *int64) bool {
+	if base != nil && *base <= 0 {
+		writeError(w, http.StatusBadRequest, "base_revision must be a positive revision from GET /api/skills/{id}")
+		return false
+	}
+	return true
+}
+
+// checkSkillBaseRevision must run inside the write transaction, before the
+// write. It locks the skill row and answers 409 when the caller named the
+// revision it edited and someone has saved since. With no base revision it is
+// a no-op, so clients that predate skill revisions keep last-write-wins.
+func checkSkillBaseRevision(w http.ResponseWriter, r *http.Request, qtx *db.Queries, skillID pgtype.UUID, base *int64) bool {
+	if base == nil {
+		return true
+	}
+	current, err := qtx.LockSkillForVersioning(r.Context(), skillID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "skill not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, "failed to load skill")
+		}
+		return false
+	}
+	if current.Revision != *base {
+		writeRevisionConflict(w, "skill", current.ID, *base, current.Revision)
+		return false
+	}
+	return true
+}
+
 func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	skill, ok := h.loadSkillForUser(w, r, id)
@@ -627,6 +679,9 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if !validSkillBaseRevision(w, req.BaseRevision) {
+		return
+	}
 
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
@@ -637,8 +692,17 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 
 	qtx := h.Queries.WithTx(tx)
 
+	if !checkSkillBaseRevision(w, r, qtx, skill.ID, req.BaseRevision) {
+		return
+	}
+	if err := ensureSkillVersionBaseline(r.Context(), qtx, skill.ID); err != nil {
+		slog.Warn("skill version baseline failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to update skill")
+		return
+	}
+
 	params := db.UpdateSkillParams{
-		ID: parseUUID(id),
+		ID: skill.ID,
 	}
 	if req.Name != nil {
 		params.Name = pgtype.Text{String: sanitizeNullBytes(*req.Name), Valid: true}
@@ -691,11 +755,32 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 			fileResps = append(fileResps, skillFileToResponse(sf))
 		}
 	} else {
-		files, _ := qtx.ListSkillFiles(r.Context(), skill.ID)
+		files, err := qtx.ListSkillFiles(r.Context(), skill.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list skill files")
+			return
+		}
 		fileResps = make([]SkillFileResponse, len(files))
 		for i, f := range files {
 			fileResps[i] = skillFileToResponse(f)
 		}
+	}
+	if req.Content != nil || req.Files != nil {
+		if err := validateSkillResponseBudget(SkillWithFilesResponse{
+			SkillResponse: skillToResponse(skill), Files: fileResps,
+		}); err != nil {
+			writeError(w, http.StatusRequestEntityTooLarge, err.Error())
+			return
+		}
+	}
+
+	if _, err := recordSkillVersion(r.Context(), qtx, skill.ID, skillVersionRecord{
+		Source:    skillVersionSourceUpdate,
+		CreatedBy: parseUUID(requestUserID(r)),
+	}); err != nil {
+		slog.Warn("record skill version failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to update skill")
+		return
 	}
 
 	if err := tx.Commit(r.Context()); err != nil {
@@ -781,7 +866,7 @@ func validImportOnConflict(strategy string) bool {
 const (
 	maxImportFileSize  = 1 << 20 // 1 MiB per file
 	maxImportTotalSize = 8 << 20 // 8 MiB per import bundle (sum of supporting files)
-	maxImportFileCount = 256     // max number of supporting files
+	maxImportFileCount = 512     // max number of supporting files
 )
 
 // importedSkill holds the data extracted from an external source.
@@ -899,7 +984,17 @@ type githubContentEntry struct {
 	Path        string `json:"path"`
 	Type        string `json:"type"` // "file" or "dir"
 	URL         string `json:"url"`
+	GitURL      string `json:"git_url"`
 	DownloadURL string `json:"download_url"`
+}
+
+// isSubmodule reports whether a directory-listing entry is a Git submodule.
+// For backwards compatibility the contents API lists submodules inside a
+// directory as type "file" with a null download_url; their git_url points at
+// the submodule repository's tree rather than a blob. The recursive tree path
+// skips submodules (type "commit"), so the crawl fallback must skip them too.
+func (e githubContentEntry) isSubmodule() bool {
+	return e.Type == "submodule" || (e.DownloadURL == "" && strings.Contains(e.GitURL, "/git/trees/"))
 }
 
 type githubRepoInfo struct {
@@ -1153,26 +1248,16 @@ func fetchFromClawHub(ctx context.Context, httpClient *http.Client, rawURL strin
 	}
 
 	for _, fp := range filePaths {
+		if skillpkg.IsLikelyBinaryFilePath(fp) {
+			continue
+		}
 		fileURL := fmt.Sprintf("%s/skills/%s/file?path=%s", apiBase, url.PathEscape(slug), url.QueryEscape(fp))
 		if latestVersion != "" {
 			fileURL += "&version=" + url.QueryEscape(latestVersion)
 		}
 		body, err := fetchRawFile(ctx, httpClient, fileURL)
 		if err != nil {
-			// Cap violations must abort: silently dropping a file would
-			// produce an incomplete bundle that looks valid. SKILL.md is
-			// load-bearing, so any failure on it is fatal too.
-			if isCapError(err) || fp == "SKILL.md" {
-				return nil, fmt.Errorf("clawhub import: %s: %w", fp, err)
-			}
-			// A cancelled context (overall deadline / client disconnect) is
-			// fatal for the same reason: skipping every remaining file would
-			// persist a half-populated bundle as a success.
-			if ctx.Err() != nil {
-				return nil, fmt.Errorf("clawhub import: fetch aborted at %s: %w", fp, ctx.Err())
-			}
-			slog.Warn("clawhub import: file download failed", "path", fp, "error", err)
-			continue
+			return nil, fmt.Errorf("clawhub import: %s: %w", fp, err)
 		}
 		if fp == "SKILL.md" {
 			result.content = string(body)
@@ -1283,13 +1368,9 @@ func newSkillsShImportedSkill(skillMdBody []byte, skillName, rawURL, owner, repo
 }
 
 // addSupportingFilesViaCrawl is the legacy per-directory enumeration path, used
-// as a fallback only for a truncated recursive tree (and by the github.com
-// importer). A tree-fetch failure no longer routes here — it returns a retryable
-// error instead. It lists skillDir via the contents API, recurses
-// subdirectories, and downloads each file. It stays lenient on a genuine listing
-// failure (returns with only SKILL.md, matching prior behavior under GitHub API
-// rate limiting) but treats a cancelled context as fatal so a mid-crawl deadline
-// or disconnect can't persist an incomplete bundle as a success.
+// for a truncated tree, or an unavailable tree for github.com imports. Every
+// directory and eligible file must be read before a bundle can replace local
+// content; an unavailable listing does not prove that a directory is empty.
 func addSupportingFilesViaCrawl(ctx context.Context, httpClient *http.Client, result *importedSkill, owner, repo, ref, skillDir string) error {
 	apiURL := buildGitHubContentsURL(owner, repo, skillDir, ref)
 	dirResp, err := doGitHubAPIGet(ctx, httpClient, apiURL)
@@ -1303,7 +1384,10 @@ func addSupportingFilesViaCrawl(ctx context.Context, httpClient *http.Client, re
 		if ctx.Err() != nil {
 			return fmt.Errorf("github import: directory listing aborted: %w", ctx.Err())
 		}
-		return nil
+		if err != nil {
+			return fmt.Errorf("%w: listing %s: %w", errImportSourceUnavailable, apiURL, err)
+		}
+		return fmt.Errorf("%w: listing %s: HTTP %d", errImportSourceUnavailable, apiURL, dirResp.StatusCode)
 	}
 	defer dirResp.Body.Close()
 
@@ -1316,16 +1400,15 @@ func addSupportingFilesViaCrawl(ctx context.Context, httpClient *http.Client, re
 		if ctx.Err() != nil {
 			return fmt.Errorf("github import: directory listing read aborted: %w", ctx.Err())
 		}
-		slog.Warn("github import: failed to decode top-level directory listing", "url", apiURL, "error", err)
-		return nil
+		return fmt.Errorf("%w: decoding directory %s: %w", errImportSourceUnavailable, apiURL, err)
+	}
+	if entries == nil {
+		return fmt.Errorf("%w: directory %s is not a file list", errImportSourceUnavailable, apiURL)
 	}
 
 	var allFiles []githubContentEntry
-	collectGitHubFiles(ctx, httpClient, entries, &allFiles, apiURL)
-	// collectGitHubFiles is lenient on a failed subdirectory listing; if the
-	// context was cancelled mid-crawl the collected set is incomplete, so abort.
-	if ctx.Err() != nil {
-		return fmt.Errorf("github import: directory crawl aborted: %w", ctx.Err())
+	if err := collectGitHubFiles(ctx, httpClient, entries, &allFiles, apiURL); err != nil {
+		return err
 	}
 
 	basePath := ""
@@ -1334,18 +1417,11 @@ func addSupportingFilesViaCrawl(ctx context.Context, httpClient *http.Client, re
 	}
 	for _, entry := range allFiles {
 		if entry.DownloadURL == "" {
-			continue
+			return fmt.Errorf("%w: no download URL for %s", errImportSourceUnavailable, entry.Path)
 		}
 		body, err := fetchRawFile(ctx, httpClient, entry.DownloadURL)
 		if err != nil {
-			if isCapError(err) {
-				return fmt.Errorf("github import: %s: %w", entry.Path, err)
-			}
-			if ctx.Err() != nil {
-				return fmt.Errorf("github import: fetch aborted at %s: %w", entry.Path, ctx.Err())
-			}
-			slog.Warn("github import: file download failed", "path", entry.Path, "error", err)
-			continue
+			return fmt.Errorf("github import: %s: %w", entry.Path, err)
 		}
 		relPath := strings.TrimPrefix(entry.Path, basePath)
 		if err := result.addFile(relPath, string(body)); err != nil {
@@ -1375,6 +1451,9 @@ func fetchGitHubTree(ctx context.Context, httpClient *http.Client, owner, repo, 
 	var tree githubTreeResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tree); err != nil {
 		return nil, false, err
+	}
+	if tree.Tree == nil {
+		return nil, false, fmt.Errorf("GitHub tree response has no entries")
 	}
 	return tree.Tree, tree.Truncated, nil
 }
@@ -1479,7 +1558,7 @@ func acceptConventionalSkillDir(ctx context.Context, httpClient *http.Client, ra
 // treeDownloadConcurrency bounds how many supporting files are downloaded in
 // parallel during tree-based collection. Small enough that one import cannot
 // open hundreds of sockets to GitHub at once, large enough to keep the download
-// phase well under the overall import deadline for a full (256-file) bundle.
+// phase well under the overall import deadline for a full (512-file) bundle.
 const treeDownloadConcurrency = 8
 
 // addSupportingFilesFromTree enumerates the supporting files under skillDir from
@@ -1547,7 +1626,6 @@ func addSupportingFilesFromTree(ctx context.Context, httpClient *http.Client, re
 
 	// Download concurrently, then append in the pre-sorted order.
 	contents := make([]string, len(eligible))
-	fetched := make([]bool, len(eligible))
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(treeDownloadConcurrency)
 	for i, f := range eligible {
@@ -1555,26 +1633,9 @@ func addSupportingFilesFromTree(ctx context.Context, httpClient *http.Client, re
 		g.Go(func() error {
 			body, err := fetchRawFile(gctx, httpClient, buildRawGitHubURL(rawPrefix, f.repoPath))
 			if err != nil {
-				if isCapError(err) {
-					return fmt.Errorf("github import: %s: %w", f.repoPath, err)
-				}
-				// A cancelled context (overall import deadline exceeded, or the
-				// client disconnecting) must abort, not be swallowed as a
-				// per-file skip: otherwise every remaining download fails the
-				// same way, g.Wait returns nil, and the user gets a bundle that
-				// looks complete but is silently missing files. Let it surface
-				// so importFetchErrorResponse maps the deadline to a readable
-				// 504.
-				if gctx.Err() != nil {
-					return fmt.Errorf("github import: fetch aborted at %s: %w", f.repoPath, gctx.Err())
-				}
-				// Otherwise match the legacy loop's leniency: a single failed
-				// supporting file is logged and skipped, not fatal.
-				slog.Warn("github import: file download failed", "path", f.repoPath, "error", err)
-				return nil
+				return fmt.Errorf("github import: %s: %w", f.repoPath, err)
 			}
 			contents[i] = string(body)
-			fetched[i] = true
 			return nil
 		})
 	}
@@ -1583,9 +1644,6 @@ func addSupportingFilesFromTree(ctx context.Context, httpClient *http.Client, re
 	}
 
 	for i, f := range eligible {
-		if !fetched[i] {
-			continue
-		}
 		if err := result.addFile(f.relPath, contents[i]); err != nil {
 			return err
 		}
@@ -1603,18 +1661,22 @@ func (e githubTreeEntry) size() int64 {
 }
 
 // collectGitHubFiles recursively collects file entries from a GitHub directory listing.
-func collectGitHubFiles(ctx context.Context, httpClient *http.Client, entries []githubContentEntry, out *[]githubContentEntry, parentURL string) {
+func collectGitHubFiles(ctx context.Context, httpClient *http.Client, entries []githubContentEntry, out *[]githubContentEntry, parentURL string) error {
 	for _, entry := range entries {
-		// Stop descending once the context is cancelled; the caller checks
-		// ctx.Err() afterwards and aborts rather than importing a partial crawl.
 		if ctx.Err() != nil {
-			return
+			return fmt.Errorf("github import: directory crawl aborted: %w", ctx.Err())
 		}
 		lower := strings.ToLower(entry.Name)
 		if lower == "skill.md" || lower == "license" || lower == "license.txt" || lower == "license.md" {
 			continue
 		}
+		if entry.isSubmodule() {
+			continue
+		}
 		if entry.Type == "file" {
+			if skillpkg.IsLikelyBinaryFilePath(entry.Path) {
+				continue
+			}
 			*out = append(*out, entry)
 		} else if entry.Type == "dir" {
 			// Fetch subdirectory contents
@@ -1622,35 +1684,36 @@ func collectGitHubFiles(ctx context.Context, httpClient *http.Client, entries []
 			if subURL == "" {
 				parsed, err := url.Parse(parentURL)
 				if err != nil {
-					slog.Warn("github import: invalid parent directory url", "url", parentURL, "error", err)
-					continue
+					return fmt.Errorf("%w: invalid directory URL: %w", errImportSourceUnavailable, err)
 				}
 				parsed.Path = strings.TrimSuffix(parsed.Path, "/") + "/" + entry.Name
 				subURL = parsed.String()
 			}
 			subResp, err := doGitHubAPIGet(ctx, httpClient, subURL)
 			if err != nil || subResp.StatusCode != http.StatusOK {
-				attrs := []any{"url", subURL}
 				if subResp != nil {
-					attrs = append(attrs, "status", subResp.StatusCode)
 					subResp.Body.Close()
 				}
 				if err != nil {
-					attrs = append(attrs, "error", err)
+					return fmt.Errorf("%w: listing %s: %w", errImportSourceUnavailable, subURL, err)
 				}
-				slog.Warn("github import: failed to list subdirectory", attrs...)
-				continue
+				return fmt.Errorf("%w: listing %s: HTTP %d", errImportSourceUnavailable, subURL, subResp.StatusCode)
 			}
 			var subEntries []githubContentEntry
 			if err := json.NewDecoder(subResp.Body).Decode(&subEntries); err != nil {
 				subResp.Body.Close()
-				slog.Warn("github import: failed to decode subdirectory listing", "url", subURL, "error", err)
-				continue
+				return fmt.Errorf("%w: decoding directory %s: %w", errImportSourceUnavailable, subURL, err)
 			}
 			subResp.Body.Close()
-			collectGitHubFiles(ctx, httpClient, subEntries, out, subURL)
+			if subEntries == nil {
+				return fmt.Errorf("%w: directory %s is not a file list", errImportSourceUnavailable, subURL)
+			}
+			if err := collectGitHubFiles(ctx, httpClient, subEntries, out, subURL); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
 func findSkillDirFromConventionalPrefixes(ctx context.Context, httpClient *http.Client, owner, repo, defaultBranch, rawPrefix, skillName string) (string, []byte, bool) {
@@ -2087,9 +2150,8 @@ func fetchFromGitHub(ctx context.Context, httpClient *http.Client, rawURL string
 
 	// Enumerate supporting files from a single recursive tree, checking the
 	// import caps against the tree metadata before downloading anything. Fall
-	// back to the per-directory contents crawl when the tree is unavailable or
-	// truncated (kept lenient so a rate-limited listing doesn't fail an import
-	// that already produced a valid SKILL.md).
+	// back to a complete per-directory contents crawl when the tree is unavailable
+	// or truncated. Neither path may publish a partially fetched bundle.
 	tree, truncated, treeErr := fetchGitHubTree(ctx, httpClient, spec.owner, spec.repo, spec.ref)
 	if treeErr == nil && !truncated {
 		if err := addSupportingFilesFromTree(ctx, httpClient, result, tree, rawPrefix, spec.skillDir); err != nil {
@@ -2206,13 +2268,14 @@ func skillImportConflictReason() string {
 
 func (h *Handler) createImportedSkillWithName(ctx context.Context, workspaceID, creatorID pgtype.UUID, name string, imported *importedSkill, config map[string]any, files []CreateSkillFileRequest) (SkillWithFilesResponse, error) {
 	return h.createSkillWithFiles(ctx, skillCreateInput{
-		WorkspaceID: workspaceID,
-		CreatorID:   creatorID,
-		Name:        name,
-		Description: imported.description,
-		Content:     imported.content,
-		Config:      config,
-		Files:       files,
+		VersionSource: skillVersionSourceImport,
+		WorkspaceID:   workspaceID,
+		CreatorID:     creatorID,
+		Name:          name,
+		Description:   imported.description,
+		Content:       imported.content,
+		Config:        config,
+		Files:         files,
 	})
 }
 
@@ -2534,7 +2597,7 @@ func (h *Handler) UpsertSkillFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req CreateSkillFileRequest
+	var req UpsertSkillFileRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -2548,8 +2611,48 @@ func (h *Handler) UpsertSkillFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "SKILL.md is reserved for the primary skill content")
 		return
 	}
+	if err := validateSkillWriteBudget("", []CreateSkillFileRequest{req.CreateSkillFileRequest}); err != nil {
+		writeError(w, http.StatusRequestEntityTooLarge, err.Error())
+		return
+	}
+	if !validSkillBaseRevision(w, req.BaseRevision) {
+		return
+	}
 
-	sf, err := h.Queries.UpsertSkillFile(r.Context(), db.UpsertSkillFileParams{
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	if !checkSkillBaseRevision(w, r, qtx, skill.ID, req.BaseRevision) {
+		return
+	}
+	// The baseline runs before TouchSkill: it locks the skill row (the same
+	// lock TouchSkill and UpdateSkill take, so lock order is unchanged) and
+	// stamps a pre-versioning skill's baseline with its real updated_at.
+	if err := ensureSkillVersionBaseline(r.Context(), qtx, skill.ID); err != nil {
+		slog.Warn("skill version baseline failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to upsert skill file")
+		return
+	}
+	// Touch the parent first so its row lock is taken before the file write,
+	// in the same order UpdateSkill takes them.
+	skill, err = qtx.TouchSkill(r.Context(), db.TouchSkillParams{
+		ID:          skill.ID,
+		WorkspaceID: skill.WorkspaceID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "skill not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update skill")
+		return
+	}
+	sf, err := qtx.UpsertSkillFile(r.Context(), db.UpsertSkillFileParams{
 		SkillID: skill.ID,
 		Path:    sanitizeNullBytes(req.Path),
 		Content: sanitizeNullBytes(req.Content),
@@ -2559,7 +2662,29 @@ func (h *Handler) UpsertSkillFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to upsert skill file")
 		return
 	}
+	resp, err := skillWithFilesInTx(r.Context(), qtx, skill)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list skill files")
+		return
+	}
+	if err := validateSkillResponseBudget(resp); err != nil {
+		writeError(w, http.StatusRequestEntityTooLarge, err.Error())
+		return
+	}
+	if _, err := recordSkillVersion(r.Context(), qtx, skill.ID, skillVersionRecord{
+		Source:    skillVersionSourceUpdate,
+		CreatedBy: parseUUID(requestUserID(r)),
+	}); err != nil {
+		slog.Warn("record skill version failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to upsert skill file")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit")
+		return
+	}
 
+	h.publishSkillFilesChanged(r, resp)
 	writeJSON(w, http.StatusOK, skillFileToResponse(sf))
 }
 
@@ -2585,11 +2710,98 @@ func (h *Handler) DeleteSkillFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "skill file not found")
 		return
 	}
-	if err := h.Queries.DeleteSkillFile(r.Context(), file.ID); err != nil {
+	// DELETE carries no body, so the precondition travels as a query param.
+	var baseRevision *int64
+	if raw := strings.TrimSpace(r.URL.Query().Get("base_revision")); raw != "" {
+		n, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid base_revision")
+			return
+		}
+		baseRevision = &n
+	}
+	if !validSkillBaseRevision(w, baseRevision) {
+		return
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	if !checkSkillBaseRevision(w, r, qtx, skill.ID, baseRevision) {
+		return
+	}
+	if err := ensureSkillVersionBaseline(r.Context(), qtx, skill.ID); err != nil {
+		slog.Warn("skill version baseline failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to delete skill file")
 		return
 	}
+	skill, err = qtx.TouchSkill(r.Context(), db.TouchSkillParams{
+		ID:          skill.ID,
+		WorkspaceID: skill.WorkspaceID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "skill not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update skill")
+		return
+	}
+	if err := qtx.DeleteSkillFile(r.Context(), file.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete skill file")
+		return
+	}
+	if _, err := recordSkillVersion(r.Context(), qtx, skill.ID, skillVersionRecord{
+		Source:    skillVersionSourceUpdate,
+		CreatedBy: parseUUID(requestUserID(r)),
+	}); err != nil {
+		slog.Warn("record skill version failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to delete skill file")
+		return
+	}
+	resp, err := skillWithFilesInTx(r.Context(), qtx, skill)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list skill files")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit")
+		return
+	}
+
+	h.publishSkillFilesChanged(r, resp)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// skillWithFilesInTx builds the skill:updated payload from reads inside the
+// writing transaction, so the event carries exactly the state it committed.
+func skillWithFilesInTx(ctx context.Context, qtx *db.Queries, skill db.Skill) (SkillWithFilesResponse, error) {
+	files, err := qtx.ListSkillFiles(ctx, skill.ID)
+	if err != nil {
+		return SkillWithFilesResponse{}, err
+	}
+	fileResps := make([]SkillFileResponse, len(files))
+	for i, f := range files {
+		fileResps[i] = skillFileToResponse(f)
+	}
+	return SkillWithFilesResponse{
+		SkillResponse: skillToResponse(skill),
+		Files:         fileResps,
+	}, nil
+}
+
+// publishSkillFilesChanged announces a supporting-file write the same way
+// UpdateSkill announces an edit: a file change is a change to the skill, and
+// clients holding the skill (detail page, agent skill lists) must refetch it.
+func (h *Handler) publishSkillFilesChanged(r *http.Request, resp SkillWithFilesResponse) {
+	wsID := h.resolveWorkspaceID(r)
+	actorType, actorID := h.resolveActor(r, requestUserID(r), wsID)
+	h.publish(protocol.EventSkillUpdated, wsID, actorType, actorID, map[string]any{"skill": resp})
 }
 
 // --- Agent-Skill junction ---
@@ -2638,6 +2850,9 @@ func (h *Handler) SetAgentSkills(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.validateAgentSkillIDsInWorkspace(w, r, agent, skillUUIDs) {
+		return
+	}
+	if len(skillUUIDs) > 0 && h.rejectQoderOverrides(w, r, agent, qoderOverrides{skills: len(skillUUIDs)}) {
 		return
 	}
 
@@ -2694,6 +2909,9 @@ func (h *Handler) AddAgentSkills(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.validateAgentSkillIDsInWorkspace(w, r, agent, skillUUIDs) {
+		return
+	}
+	if len(skillUUIDs) > 0 && h.rejectQoderOverrides(w, r, agent, qoderOverrides{skills: len(skillUUIDs)}) {
 		return
 	}
 

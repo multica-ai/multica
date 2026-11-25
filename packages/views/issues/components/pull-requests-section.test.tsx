@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -9,6 +10,7 @@ import enIssues from "../../locales/en/issues.json";
 
 const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 
+let queryFails = false;
 let mockAutoComplete: PRAutoComplete | null = null;
 vi.mock("@multica/core/github/queries", async () => {
   const actual = await vi.importActual<typeof import("@multica/core/github/queries")>(
@@ -18,7 +20,10 @@ vi.mock("@multica/core/github/queries", async () => {
     ...actual,
     issuePullRequestsOptions: (issueId: string) => ({
       queryKey: ["github", "pull-requests", issueId],
-      queryFn: async () => ({ pull_requests: [], auto_complete: mockAutoComplete }),
+      queryFn: async () => {
+        if (queryFails) throw new Error("Offline");
+        return { pull_requests: [], auto_complete: mockAutoComplete };
+      },
       enabled: !!issueId,
     }),
   };
@@ -46,12 +51,25 @@ vi.mock("@multica/core/paths", async (importOriginal) => ({
 
 import { PullRequestsSection } from "./pull-requests-section";
 
-function renderSection() {
+function renderSection(
+  cachedDecision?: PRAutoComplete,
+  { reveal = true, onRevealEnd }: { reveal?: boolean; onRevealEnd?: () => void } = {},
+) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  if (cachedDecision) {
+    qc.setQueryData(["github", "pull-requests", "issue-1"], { pull_requests: [], auto_complete: cachedDecision });
+  }
   return render(
     <QueryClientProvider client={qc}>
       <I18nProvider resources={TEST_RESOURCES} locale="en">
-        <PullRequestsSection issueId="issue-1" identifier="MUL-1" open onOpenChange={() => {}} />
+        <PullRequestsSection
+          issueId="issue-1"
+          identifier="MUL-1"
+          open
+          onOpenChange={() => {}}
+          reveal={reveal}
+          onRevealEnd={onRevealEnd}
+        />
       </I18nProvider>
     </QueryClientProvider>,
   );
@@ -66,6 +84,7 @@ const decision: PRAutoComplete = {
 
 describe("PullRequestsSection (MUL-7429)", () => {
   beforeEach(() => {
+    queryFails = false;
     mockAutoComplete = decision;
     mockWorkspaceSettings = {};
     apiMock.linkIssuePullRequest.mockReset();
@@ -73,10 +92,60 @@ describe("PullRequestsSection (MUL-7429)", () => {
     navigatePush.mockReset();
   });
 
+  it("stays out of the sidebar while empty until the add row reveals it", async () => {
+    const { container } = renderSection(undefined, { reveal: false });
+    await waitFor(() => expect(container).toBeEmptyDOMElement());
+  });
+
+  it("opens the link form when revealed and ends the reveal when it closes", async () => {
+    const onRevealEnd = vi.fn();
+    renderSection(undefined, { onRevealEnd });
+    expect(await screen.findByRole("textbox", { name: "Link pull request" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pull requests" })).not.toBeInTheDocument();
+    expect(screen.queryByText(enIssues.detail.pull_requests_empty_title)).not.toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Link pull request" }), { key: "Escape" });
+    await waitFor(() => expect(onRevealEnd).toHaveBeenCalled());
+  });
+
+  it("leaves the sidebar when a reveal is cancelled with nothing linked", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    mockAutoComplete = decision;
+    qc.setQueryData(["github", "pull-requests", "issue-1"], { pull_requests: [], auto_complete: decision });
+    function Revealed() {
+      const [reveal, setReveal] = useState(true);
+      return (
+        <PullRequestsSection issueId="issue-1" identifier="MUL-1" open onOpenChange={() => {}}
+          reveal={reveal} onRevealEnd={() => setReveal(false)} />
+      );
+    }
+    const { container } = render(
+      <QueryClientProvider client={qc}>
+        <I18nProvider resources={TEST_RESOURCES} locale="en">
+          <Revealed />
+        </I18nProvider>
+      </QueryClientProvider>,
+    );
+    fireEvent.keyDown(await screen.findByRole("textbox", { name: "Link pull request" }), { key: "Escape" });
+    await waitFor(() => expect(container).toBeEmptyDOMElement());
+  });
+
+  it("keeps a retry entry when loading fails with no cached PRs", async () => {
+    queryFails = true;
+    renderSection();
+    expect(await screen.findByRole("button", { name: "Could not load. Retry" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Link pull request" })).not.toBeInTheDocument();
+  });
+
+  it("retains linking after a failed refresh when cached data confirms backend support", async () => {
+    queryFails = true;
+    renderSection(decision);
+    expect(await screen.findByRole("button", { name: "Could not load. Retry" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Link pull request" })).toBeVisible();
+  });
+
   it("links a pasted PR URL", async () => {
     apiMock.linkIssuePullRequest.mockResolvedValue({ pull_requests: [], auto_complete: decision });
     renderSection();
-    fireEvent.click(await screen.findByRole("button", { name: "Link pull request" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "Link pull request" }), {
       target: { value: "https://github.com/acme/widget/pull/41" },
     });
@@ -92,7 +161,6 @@ describe("PullRequestsSection (MUL-7429)", () => {
   it("accepts a link pasted without a scheme", async () => {
     apiMock.linkIssuePullRequest.mockResolvedValue({ pull_requests: [], auto_complete: decision });
     renderSection();
-    fireEvent.click(await screen.findByRole("button", { name: "Link pull request" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "Link pull request" }), {
       target: { value: "github.com/acme/widget/pull/41/files" },
     });
@@ -105,7 +173,6 @@ describe("PullRequestsSection (MUL-7429)", () => {
   it("explains a PR Multica has not received", async () => {
     apiMock.linkIssuePullRequest.mockRejectedValue(new ApiError("not found", 404, "Not Found"));
     renderSection();
-    fireEvent.click(await screen.findByRole("button", { name: "Link pull request" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "Link pull request" }), {
       target: { value: "https://github.com/acme/widget/pull/999" },
     });
@@ -141,7 +208,6 @@ describe("PullRequestsSection (MUL-7429)", () => {
   it("drops the auto-link hint when the workspace does not auto-link PRs", async () => {
     mockWorkspaceSettings = { github_auto_link_prs_enabled: false };
     renderSection();
-    fireEvent.click(await screen.findByRole("button", { name: "Link pull request" }));
     await screen.findByRole("textbox", { name: "Link pull request" });
     expect(screen.queryByText("PRs with MUL-1 in the title or branch name link automatically.")).toBeNull();
   });
@@ -149,7 +215,7 @@ describe("PullRequestsSection (MUL-7429)", () => {
   it("hides the actions on a backend without auto-complete", async () => {
     mockAutoComplete = null;
     renderSection();
-    await screen.findByText("No linked pull requests.");
+    await waitFor(() => expect(screen.queryByText("Pull requests")).not.toBeInTheDocument());
     expect(screen.queryByRole("button", { name: "Link pull request" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Pull request automation" })).toBeNull();
   });

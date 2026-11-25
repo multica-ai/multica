@@ -79,15 +79,24 @@ export function workflowMiddleKeys(workflow: Pick<IssueWorkflow, "steps">): stri
 
 /**
  * The column a step's handler is told to move to when done: the step's own
- * choice, else the next column (skipping blocked); empty at the end.
+ * choice, else the next column, skipping blocked and closed ones; empty at the
+ * end. With `categoryOf`, it matches the agent's brief for custom statuses
+ * too: a closed column such as Won't Fix is never where finished work goes,
+ * and a done or closed column routes only where its author chose (MUL-9913).
  */
-export function workflowNextStatus(workflow: Pick<IssueWorkflow, "steps">, statusKey: string): string {
+export function workflowNextStatus(
+  workflow: Pick<IssueWorkflow, "steps">,
+  statusKey: string,
+  categoryOf?: (statusKey: string) => string,
+): string {
   const index = workflow.steps.findIndex((s) => s.status_key === statusKey);
   if (index < 0) return "";
   const own = workflow.steps[index]?.next_status_key;
   if (own) return own;
+  const category = categoryOf?.(statusKey);
+  if (category === "done" || category === "closed") return "";
   for (const s of workflow.steps.slice(index + 1)) {
-    if (s.status_key !== "blocked") return s.status_key;
+    if (s.status_key !== "blocked" && categoryOf?.(s.status_key) !== "closed") return s.status_key;
   }
   return "";
 }
@@ -106,10 +115,25 @@ export function resolveProjectWorkflow(
 }
 
 /**
+ * The workflow whose statuses an issue may take: its project's, or Default
+ * for an issue outside any project. Only for statuses — outside a project
+ * nothing hands off, so handoffs still come from `resolveProjectWorkflow`.
+ * Null while workflows or the issue's project are unknown. (MUL-8250)
+ */
+export function issueStatusWorkflow(
+  workflows: readonly IssueWorkflow[] | undefined,
+  projects: readonly Pick<Project, "id" | "workflow_id">[] | undefined,
+  issue: { project_id: string | null },
+): IssueWorkflow | null {
+  if (!issue.project_id) return defaultWorkflow(workflows);
+  return resolveProjectWorkflow(workflows, projects?.find((p) => p.id === issue.project_id));
+}
+
+/**
  * The statuses every one of `issues` may take, or null when none is limited.
- * Only a named workflow limits an issue's statuses; Default and issues outside
- * a project accept the whole catalog, as the server does. A batch status
- * change offers this set, so it never shows a status the server would skip.
+ * Each issue takes its workflow's statuses, Default's outside a project, as
+ * the server enforces. A batch status change offers this set, so it never
+ * shows a status the server would skip.
  */
 export function sharedWorkflowStatusKeys(
   workflows: readonly IssueWorkflow[] | undefined,
@@ -118,9 +142,8 @@ export function sharedWorkflowStatusKeys(
 ): Set<string> | null {
   let shared = null as Set<string> | null;
   for (const issue of issues) {
-    const project = issue.project_id ? projects?.find((p) => p.id === issue.project_id) : undefined;
-    const workflow = resolveProjectWorkflow(workflows, project);
-    if (!workflow || workflow.is_default) continue;
+    const workflow = issueStatusWorkflow(workflows, projects, issue);
+    if (!workflow) continue;
     const keys = new Set(workflow.steps.map((s) => s.status_key));
     shared = shared ? new Set([...shared].filter((key) => keys.has(key))) : keys;
   }
@@ -140,15 +163,16 @@ export function stepHandsOff(step: IssueWorkflowStep | undefined): boolean {
 }
 
 /**
- * Whether a status is allowed for issues of a project using `workflow`.
- * Default allows every status, as the server does, so an issue on a status
- * Default no longer lists can still be moved off and back.
+ * Whether issues on `workflow` may enter a status: the ones it lists, Default
+ * included (MUL-8250). An issue already on a status its workflow no longer
+ * lists keeps it, so callers exempt the issue's current status. Null —
+ * workflows still loading — allows every status.
  */
 export function workflowAllowsStatus(
   workflow: IssueWorkflow | null | undefined,
   statusKey: string,
 ): boolean {
-  if (!workflow || workflow.is_default) return true;
+  if (!workflow) return true;
   return workflow.steps.some((s) => s.status_key === statusKey);
 }
 
@@ -160,7 +184,10 @@ export function workflowAllowsStatus(
  */
 export function projectMoveMayHandOff(workflow: IssueWorkflow | null | undefined, statusKey: string): boolean {
   if (!workflow) return false;
-  if (workflowAllowsStatus(workflow, statusKey)) return stepHandsOff(workflowStep(workflow, statusKey));
+  // A move into a Default project keeps the issue's status, listed or not.
+  if (workflow.is_default || workflowAllowsStatus(workflow, statusKey)) {
+    return stepHandsOff(workflowStep(workflow, statusKey));
+  }
   return workflow.steps.some(stepHandsOff);
 }
 

@@ -5,6 +5,10 @@ export declare const NO_UNTRANSLATED_ATTRIBUTES: {
   selector: string;
   message: string;
 };
+export declare const NO_UNTRANSLATED_JSX_TEXT: {
+  selector: string;
+  message: string;
+};
 export declare const NO_UNTRANSLATED_TOAST: {
   selector: string;
   message: string;

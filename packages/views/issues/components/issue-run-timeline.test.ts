@@ -232,6 +232,50 @@ describe("buildRunTimeline", () => {
   });
 });
 
+describe("credits", () => {
+  const credits = (micros: number, provider = "qoder_cloud"): TaskUsage[] => [
+    {
+      provider,
+      model: "",
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+      credits_micros: micros,
+    },
+  ];
+
+  it("totals credits separately from USD, per timeline and per day", () => {
+    const timeline = buildRunTimeline(
+      [
+        makeTask({ id: "a", usage: credits(1_000_000) }),
+        makeTask({ id: "b", started_at: "2026-09-24T11:00:00", completed_at: "2026-09-24T11:30:00", usage: credits(500_000) }),
+        makeTask({ id: "c", started_at: "2026-09-25T11:00:00", completed_at: "2026-09-25T11:30:00", usage: usage(200_000) }),
+      ],
+      NOW,
+    );
+
+    expect(timeline.totalCredits).toEqual(new Map([["qoder_cloud", 1.5]]));
+    expect(timeline.totalCost).toBe(5);
+    expect(groupRunsByDay(timeline.runs).map((g) => g.credits)).toEqual([new Map(), new Map([["qoder_cloud", 1.5]])]);
+  });
+
+  it("keeps different providers separate in timeline and day totals", () => {
+    const timeline = buildRunTimeline([
+      makeTask({ id: "a", usage: credits(1_000_000) }),
+      makeTask({ id: "b", usage: credits(2_000_000, "other") }),
+      makeTask({ id: "c", usage: credits(500_000) }),
+    ], NOW);
+    const expected = new Map([["qoder_cloud", 1.5], ["other", 2]]);
+    expect(timeline.totalCredits).toEqual(expected);
+    expect(groupRunsByDay(timeline.runs)[0]?.credits).toEqual(expected);
+  });
+
+  it("reports no credits when no run was billed in credits", () => {
+    expect(buildRunTimeline([makeTask({ usage: usage(200_000) })], NOW).totalCredits.size).toBe(0);
+  });
+});
+
 describe("costSoFar", () => {
   it("reads the curve at each run's end, unpriced runs included", () => {
     const timeline = buildRunTimeline(

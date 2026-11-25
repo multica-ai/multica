@@ -1,0 +1,10 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "test": {
+      // app/font-stacks, text-contrast and brand-variant-cascade read Desktop's
+      // stylesheet and scan its sources; web does not depend on Desktop.
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/apps/desktop/src/**/*.{ts,tsx,css}"]
+    }
+  }
+}

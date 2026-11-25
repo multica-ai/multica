@@ -29,6 +29,7 @@ func TestBacklogToCustomUnstartedStatusTriggers(t *testing.T) {
 	t.Cleanup(func() {
 		testPool.Exec(ctx, `DELETE FROM issue_status WHERE workspace_id = $1 AND key = $2`, testWorkspaceID, parkedKey)
 	})
+	listInTestDefault(t, parkedKey)
 
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":         "Parked issue",

@@ -1,4 +1,3 @@
-import Image from "next/image";
 import { cn } from "@multica/ui/lib/utils";
 
 import { GitHubMark } from "./shared";
@@ -159,37 +158,30 @@ function CodeBuddyMark({ className }: { className?: string }) {
   );
 }
 
-// Trae (ByteDance) — official mark. The source artwork is a flat brand-green
-// PNG on transparency, so the filter pair turns it into the same white glyph
-// the vector marks render as.
-function TraeMark({ className }: { className?: string }) {
+// Raster marks are used as an alpha mask over currentColor, so they take the
+// surrounding text colour like the vector marks do on light and dark pages.
+function MaskMark({ src, className }: { src: string; className?: string }) {
   return (
-    <Image
-      src="/images/providers/trae.png"
-      alt=""
+    <span
       aria-hidden
-      width={48}
-      height={48}
-      className={cn("brightness-0 invert", className)}
+      className={cn("inline-block bg-current", className)}
+      style={{ maskImage: `url(${src})`, maskSize: "contain", maskRepeat: "no-repeat", maskPosition: "center" }}
     />
   );
 }
 
+// Trae (ByteDance) — official mark. The source artwork is a flat brand-green
+// PNG on transparency; only its shape is used.
+function TraeMark({ className }: { className?: string }) {
+  return <MaskMark src="/images/providers/trae.png" className={className} />;
+}
+
 // Hermes (Nous Research) — official mascot icon. It ships only as an opaque
 // raster with no vector or single-colour variant, so this is that artwork with
-// its luminance mapped to alpha over white: the line work survives and the mark
-// stops being the one colour photo in a row of glyphs.
+// its luminance mapped to alpha: the line work survives and the mark stops
+// being the one colour photo in a row of glyphs.
 function HermesMark({ className }: { className?: string }) {
-  return (
-    <Image
-      src="/images/providers/hermes.png"
-      alt=""
-      aria-hidden
-      width={48}
-      height={48}
-      className={className}
-    />
-  );
+  return <MaskMark src="/images/providers/hermes.png" className={className} />;
 }
 
 // Pi — official pixel-art wordmark off its near-black tile.
