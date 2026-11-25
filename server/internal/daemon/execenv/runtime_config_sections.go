@@ -581,7 +581,7 @@ func writeProjectContext(b *strings.Builder, ctx TaskContextForEnv) {
 }
 
 // writeInstructionPrecedence emits the "Agent Identity wins over the issue
-// workflow below" guardrail. Caller gates on kind == kindIssue.
+// workflow above" guardrail. Caller gates on kind == kindIssue.
 //
 // This section owns the single enumeration of the actions Agent Identity can
 // forbid. It and workflow step 3 were added together in #3802 and each carried
@@ -592,7 +592,7 @@ func writeProjectContext(b *strings.Builder, ctx TaskContextForEnv) {
 // role's "stop once the delegation is delivered" rule.
 func writeInstructionPrecedence(b *strings.Builder) {
 	b.WriteString("## Instruction Precedence\n\n")
-	b.WriteString("Agent Identity instructions have priority over the issue workflow below. ")
+	b.WriteString("Agent Identity instructions have priority over the issue workflow above. ")
 	b.WriteString("If a workflow step conflicts with Agent Identity, skip the conflicting action and continue with the remaining compatible steps. ")
 	b.WriteString("The workflow never widens what your Agent Identity allows: when it forbids changing issue status, investigating, implementing, creating issues, updating issues, delegating, or any other action, skip that action.\n\n")
 }
@@ -1120,6 +1120,12 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 		writeMentions(&b, ctx.DocsEnabled)
 	}
 	writeOutput(&b, kind, ctx)
+	// Keep the delivery rule with the rest of the critical prefix. Workflow
+	// step 4 points at this section, and a size cap would otherwise cut it
+	// off near the tail. See #11480 / #11543.
+	if kind == kindIssue {
+		writeCommentFormatting(&b)
+	}
 
 	writeWorkflowHeader(&b)
 	switch kind {
@@ -1151,10 +1157,6 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 		writeAvailableCommands(&b, ctx)
 	}
 	writeIssueBodyFormatting(&b)
-
-	if kind == kindIssue {
-		writeCommentFormatting(&b)
-	}
 
 	if kind != kindQuickCreate {
 		writeRepositories(&b, ctx)

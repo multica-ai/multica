@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -25,21 +26,68 @@ const (
 	codexRaisedProjectDocMaxBytes = 131072
 )
 
-var projectDocMaxBytesLineRe = regexp.MustCompile(`(?m)^[ \t]*project_doc_max_bytes[ \t]*=[ \t]*\S+`)
+var projectDocMaxBytesLineRe = regexp.MustCompile(`^[ \t]*project_doc_max_bytes[ \t]*=[ \t]*(\S+)`)
 
-func runtimeInstructionFileCap(provider string) int {
+// topLevelProjectDocMaxBytes reports a project_doc_max_bytes assignment that
+// appears before the first TOML table header. A key under [profiles.*] (or
+// any other table) is ignored so a profile-only setting does not look like a
+// top-level cap and skip Multica's raise, and so the warning uses the same
+// value Codex actually reads from the root table.
+func topLevelProjectDocMaxBytes(config string) (int, bool) {
+	for _, line := range strings.Split(config, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "[") {
+			return 0, false
+		}
+		m := projectDocMaxBytesLineRe.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		raw := strings.Trim(m[1], `"'`)
+		if i := strings.IndexAny(raw, " \t#"); i >= 0 {
+			raw = raw[:i]
+		}
+		n, err := strconv.Atoi(raw)
+		if err != nil {
+			// The key is present at the top level; leave it alone even if
+			// the value is not a plain integer.
+			return 0, true
+		}
+		return n, true
+	}
+	return 0, false
+}
+
+func effectiveCodexProjectDocMaxBytes(configPath string) int {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return codexDefaultProjectDocMaxBytes
+	}
+	if n, ok := topLevelProjectDocMaxBytes(string(data)); ok && n > 0 {
+		return n
+	}
+	return codexDefaultProjectDocMaxBytes
+}
+
+func runtimeInstructionFileCap(provider string, ctx TaskContextForEnv) int {
 	switch provider {
 	case "antigravity":
 		return antigravityRuleFileCap
 	case "codex":
-		return codexRaisedProjectDocMaxBytes
+		if ctx.CodexHome != "" {
+			return effectiveCodexProjectDocMaxBytes(filepath.Join(ctx.CodexHome, "config.toml"))
+		}
+		return codexDefaultProjectDocMaxBytes
 	default:
 		return 0
 	}
 }
 
-func warnIfRuntimeInstructionFileExceedsCap(path, provider string) {
-	capBytes := runtimeInstructionFileCap(provider)
+func warnIfRuntimeInstructionFileExceedsCap(path, provider string, ctx TaskContextForEnv) {
+	capBytes := runtimeInstructionFileCap(provider, ctx)
 	if capBytes <= 0 {
 		return
 	}
@@ -50,7 +98,11 @@ func warnIfRuntimeInstructionFileExceedsCap(path, provider string) {
 	if info.Size() <= int64(capBytes) {
 		return
 	}
-	slog.Warn("execenv: runtime instruction file exceeds the runtime's size cap; trailing sections may be dropped",
+	logger := ctx.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	logger.Warn("execenv: runtime instruction file exceeds the runtime's size cap; trailing sections may be dropped",
 		"path", path,
 		"provider", provider,
 		"bytes", info.Size(),
@@ -60,16 +112,17 @@ func warnIfRuntimeInstructionFileExceedsCap(path, provider string) {
 
 // ensureCodexProjectDocMaxBytes writes project_doc_max_bytes into the per-task
 // config.toml when the key is absent, so Codex does not silently truncate
-// AGENTS.md at the 32 KiB default. A value already present — copied from the
-// user's shared ~/.codex/config.toml, or written by a previous prepare — is
-// left untouched.
+// AGENTS.md at the 32 KiB default. A value already present at the top level —
+// copied from the user's shared ~/.codex/config.toml, or written by a previous
+// prepare — is left untouched. A key that only appears inside a table, such as
+// [profiles.work], does not count as a top-level setting.
 func ensureCodexProjectDocMaxBytes(configPath string, logger *slog.Logger) error {
 	data, err := os.ReadFile(configPath)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("read config.toml: %w", err)
 	}
 	existing := string(data)
-	if projectDocMaxBytesLineRe.MatchString(existing) {
+	if _, ok := topLevelProjectDocMaxBytes(existing); ok {
 		return nil
 	}
 

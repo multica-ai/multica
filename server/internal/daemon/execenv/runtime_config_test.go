@@ -504,7 +504,7 @@ func TestIssueWorkflowHonorsAgentIdentity(t *testing.T) {
 
 	for _, want := range []string{
 		"## Instruction Precedence",
-		"Agent Identity instructions have priority over the issue workflow below.",
+		"Agent Identity instructions have priority over the issue workflow above.",
 		"If a workflow step conflicts with Agent Identity, skip the conflicting action",
 		// One enumeration, in Instruction Precedence, covering every action
 		// type Agent Identity can forbid. This and workflow step 3 each used to
@@ -631,7 +631,7 @@ func TestInstructionPrecedenceOnlyAppliesToIssueWorkflow(t *testing.T) {
 			out := buildMetaSkillContent("claude", tc.ctx)
 			for _, banned := range []string{
 				"## Instruction Precedence",
-				"issue workflow below",
+				"issue workflow above",
 				"The workflow never widens what your Agent Identity allows",
 			} {
 				if strings.Contains(out, banned) {

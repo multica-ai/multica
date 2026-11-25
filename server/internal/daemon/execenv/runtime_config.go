@@ -192,7 +192,7 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) (strin
 	if err := writeRuntimeConfigFile(path, content); err != nil {
 		return content, err
 	}
-	warnIfRuntimeInstructionFileExceedsCap(path, provider)
+	warnIfRuntimeInstructionFileExceedsCap(path, provider, ctx)
 	return content, nil
 }
 

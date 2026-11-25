@@ -36,6 +36,7 @@ func TestCriticalBriefSectionsSurviveAntigravityCap(t *testing.T) {
 		"## Important: Always Use the `multica` CLI",
 		"## Mentions",
 		"## Output",
+		"## Comment Formatting",
 		"### Workflow",
 	} {
 		if strings.Contains(prefix, want) {
