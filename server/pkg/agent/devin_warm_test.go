@@ -390,6 +390,17 @@ done
 	})
 	t.Cleanup(func() { pool.Close() })
 
+	// The wedged sleeper never exits on its own, so the teardown would ride
+	// the full 3s+3s graces and make the assertion measure machine load.
+	// Shorten both (the opencodeTerminateGraceNanos relief, mirrored) so the
+	// test isolates the regression signal: cancellation must free the turn.
+	devinWarmExitGraceNanos.Store(50 * time.Millisecond.Nanoseconds())
+	devinWarmTerminateGraceNanos.Store(50 * time.Millisecond.Nanoseconds())
+	t.Cleanup(func() {
+		devinWarmExitGraceNanos.Store(0)
+		devinWarmTerminateGraceNanos.Store(0)
+	})
+
 	b, err := New("devin", Config{
 		ExecutablePath: fakeDevin,
 		Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -421,8 +432,14 @@ done
 	}
 	res := <-sess.Result
 	elapsed := time.Since(start)
-	if elapsed > 8*time.Second {
-		t.Fatalf("cancelled setup took %s to return; the blocked session/new write was not released (want <8s, ~3s)", elapsed)
+	// The regression signal is the RELEASED WRITE: before the whole-setup
+	// guard the turn returned only when the CLI exited on its own (~30s).
+	// The teardown graces are shortened for this test (the wedged sleeper
+	// never exits on its own, so their full span is pure wait): what the
+	// assertion measures is that cancellation frees the turn promptly, not
+	// the absolute teardown duration, which is load-sensitive by design.
+	if elapsed > 5*time.Second {
+		t.Fatalf("cancelled setup took %s to return; the blocked session/new write was not released (want <5s)", elapsed)
 	}
 	if res.Status != "timeout" && res.Status != "failed" && res.Status != "aborted" {
 		t.Fatalf("cancelled setup result = %+v", res)

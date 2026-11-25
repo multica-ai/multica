@@ -76,6 +76,29 @@ const (
 	devinWarmCancelGrace = 5 * time.Second
 )
 
+// devinWarmExitGraceNanos and devinWarmTerminateGraceNanos let tests shorten
+// the teardown graces — the same relief opencodeTerminateGraceNanos gives the
+// opencode warm tests. They are atomic so tests can shorten a grace without
+// racing the teardown goroutine that reads it. Zero means use the default.
+var (
+	devinWarmExitGraceNanos      atomic.Int64
+	devinWarmTerminateGraceNanos atomic.Int64
+)
+
+func devinWarmExitGraceDuration() time.Duration {
+	if n := devinWarmExitGraceNanos.Load(); n > 0 {
+		return time.Duration(n)
+	}
+	return devinWarmExitGrace
+}
+
+func devinWarmTerminateGraceDuration() time.Duration {
+	if n := devinWarmTerminateGraceNanos.Load(); n > 0 {
+		return time.Duration(n)
+	}
+	return devinWarmTerminateGrace
+}
+
 // devinACPNotify writes a JSON-RPC notification without an id (ACP
 // session/cancel and friends) — the same shape opencodeACPNotify writes.
 func devinACPNotify(c *hermesClient, method string, params any) error {
@@ -345,7 +368,7 @@ func (p *devinWarmProcess) stop(force bool) {
 		if !force {
 			select {
 			case <-p.readerDone:
-			case <-time.After(devinWarmExitGrace):
+			case <-time.After(devinWarmExitGraceDuration()):
 				force = true
 			}
 		}
@@ -353,7 +376,7 @@ func (p *devinWarmProcess) stop(force bool) {
 			signalProcessGroup(p.cmd, syscall.SIGTERM)
 			select {
 			case <-p.readerDone:
-			case <-time.After(devinWarmTerminateGrace):
+			case <-time.After(devinWarmTerminateGraceDuration()):
 			}
 		}
 		p.procCancel() // group SIGKILL; a no-op for a group that already exited
