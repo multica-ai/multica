@@ -120,3 +120,15 @@ SELECT type, COALESCE(CASE WHEN type = 'text' THEN content END, '')::text AS con
 FROM task_message
 WHERE task_id = $1 AND type IN ('text', 'tool_use', 'error')
 ORDER BY seq ASC;
+
+-- name: UpdateTaskContextUsage :exec
+-- Latest context-window occupancy for a run. Written from the
+-- transcript ingest so run lists can show the figure without reading each
+-- run's messages. @limit_tokens of 0 stores NULL: the runtime reported
+-- occupancy but no window, which must stay distinguishable from a window of
+-- zero. Reports arrive in seq order and the newest wins, so this is a plain
+-- overwrite rather than a max().
+UPDATE agent_task_queue
+SET context_used_tokens = @used_tokens,
+    context_limit_tokens = NULLIF(@limit_tokens::bigint, 0)
+WHERE id = @task_id;

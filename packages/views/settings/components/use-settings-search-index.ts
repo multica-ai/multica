@@ -151,6 +151,18 @@ export function useSettingsSearchIndex(
       },
       {
         tab: "preferences",
+        anchor: "context-usage-enabled",
+        title: t(($) => $.preferences.context_usage.enabled.title),
+        description: t(($) => $.preferences.context_usage.enabled.description),
+      },
+      {
+        tab: "preferences",
+        anchor: "context-usage-issue-row",
+        title: t(($) => $.preferences.context_usage.issue_row.title),
+        description: t(($) => $.preferences.context_usage.issue_row.description),
+      },
+      {
+        tab: "preferences",
         anchor: "running-agent-reply",
         title: t(($) => $.preferences.running_agent_reply.title),
         description: t(($) => $.preferences.running_agent_reply.hint),

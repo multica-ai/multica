@@ -393,3 +393,27 @@ func (q *Queries) ListTaskReplyFragments(ctx context.Context, taskID pgtype.UUID
 	}
 	return items, nil
 }
+
+const updateTaskContextUsage = `-- name: UpdateTaskContextUsage :exec
+UPDATE agent_task_queue
+SET context_used_tokens = $1,
+    context_limit_tokens = NULLIF($2::bigint, 0)
+WHERE id = $3
+`
+
+type UpdateTaskContextUsageParams struct {
+	UsedTokens  pgtype.Int8 `json:"used_tokens"`
+	LimitTokens int64       `json:"limit_tokens"`
+	TaskID      pgtype.UUID `json:"task_id"`
+}
+
+// Latest context-window occupancy for a run. Written from the
+// transcript ingest so run lists can show the figure without reading each
+// run's messages. @limit_tokens of 0 stores NULL: the runtime reported
+// occupancy but no window, which must stay distinguishable from a window of
+// zero. Reports arrive in seq order and the newest wins, so this is a plain
+// overwrite rather than a max().
+func (q *Queries) UpdateTaskContextUsage(ctx context.Context, arg UpdateTaskContextUsageParams) error {
+	_, err := q.db.Exec(ctx, updateTaskContextUsage, arg.UsedTokens, arg.LimitTokens, arg.TaskID)
+	return err
+}

@@ -7,6 +7,10 @@ import { api } from "@multica/core/api";
 import { chatKeys } from "@multica/core/chat/queries";
 import { issueKeys } from "@multica/core/issues/queries";
 import { TooltipProvider } from "@multica/ui/components/ui/tooltip";
+import {
+  DEFAULT_CONTEXT_USAGE_SETTINGS,
+  useContextUsageSettingsStore,
+} from "@multica/core/agents/stores";
 import type { AgentTask, TimelineEntry } from "@multica/core/types";
 import type { TaskMessagePayload } from "@multica/core/types/events";
 import { renderWithI18n } from "../../test/i18n";
@@ -592,5 +596,113 @@ describe("PlacedInlineCommentRun below a published reply", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+  });
+});
+
+describe("InlineCommentRun context window", () => {
+  // Off by default; these cases describe an issue run with it on.
+  beforeEach(() => {
+    useContextUsageSettingsStore.setState({ enabled: true, showOnIssueRow: true });
+  });
+  afterEach(() => {
+    useContextUsageSettingsStore.setState(DEFAULT_CONTEXT_USAGE_SETTINGS);
+  });
+
+  // A finished run in the timeline never fetches its transcript, so the figure
+  // has to come off the task row — otherwise it is only readable after opening
+  // the full log, which is what it used to be.
+  it("shows the run's context figure without loading its transcript", async () => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue([]);
+    setup(task({
+      status: "completed",
+      completed_at: "2026-09-07T00:01:00Z",
+      context_usage: { used_tokens: 75_200, limit_tokens: 258_400 },
+    }));
+
+    expect(await screen.findByText("29%")).toBeInTheDocument();
+    expect(screen.getByText("75.2K/258.4K")).toBeInTheDocument();
+    expect(api.listTaskMessages).not.toHaveBeenCalled();
+  });
+
+  // Every context row is state, not a step: before this the run's step list
+  // had its own renderer for them, which read "Error" under an alert icon.
+  it("keeps context rows out of the run's step list", async () => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue([
+      { task_id: id, issue_id: "issue", seq: 1, type: "text", content: "Working." },
+      { task_id: id, issue_id: "issue", seq: 2, type: "context",
+        input: { used_tokens: 90_000, limit_tokens: 200_000 } },
+      // An older daemon's event, which this client cannot read.
+      { task_id: id, issue_id: "issue", seq: 3, type: "context",
+        input: { phase: "compacted", pre_tokens: 180_000, trigger: "auto" } },
+    ]);
+    setup(task({ status: "completed", completed_at: "2026-09-07T00:01:00Z" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: /View activity/ }));
+    expect(await screen.findByText("Working.")).toBeInTheDocument();
+    expect(screen.queryByText("Error")).not.toBeInTheDocument();
+    expect(screen.queryByText("Context")).not.toBeInTheDocument();
+  });
+
+  it("skips a context event it cannot read instead of calling it an error", async () => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue([
+      { task_id: id, issue_id: "issue", seq: 1, type: "text", content: "Working." },
+      { task_id: id, issue_id: "issue", seq: 2, type: "context", input: { phase: "unknown" } },
+    ]);
+    setup(task({ status: "completed", completed_at: "2026-09-07T00:01:00Z" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: /View activity/ }));
+    expect(await screen.findByText("Working.")).toBeInTheDocument();
+    expect(screen.queryByText("Error")).not.toBeInTheDocument();
+  });
+
+  it("puts the full-log entry before the figure on the run's row", async () => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue([]);
+    setup(task({
+      status: "completed",
+      completed_at: "2026-09-07T00:01:00Z",
+      context_usage: { used_tokens: 75_200, limit_tokens: 258_400 },
+    }));
+
+    const fullLog = await screen.findByRole("button", { name: "Open full log" });
+    const figure = screen.getByText("29%");
+    expect(fullLog.compareDocumentPosition(figure) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+  });
+
+  // A finished run fetches no messages until a reader asks for them, so the
+  // history behind its chip was always empty. Opening the chip is now one of
+  // the things that asks.
+  it("loads the run's history when the chip is opened", async () => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue([
+      { task_id: id, issue_id: "issue", seq: 1, type: "context",
+        input: { used_tokens: 40_000, limit_tokens: 258_400 }, created_at: "2026-09-07T00:00:30Z" },
+      { task_id: id, issue_id: "issue", seq: 2, type: "context",
+        input: { used_tokens: 75_200, limit_tokens: 258_400 }, created_at: "2026-09-07T00:00:50Z" },
+    ]);
+    setup(task({
+      status: "completed",
+      completed_at: "2026-09-07T00:01:00Z",
+      context_usage: { used_tokens: 75_200, limit_tokens: 258_400 },
+    }));
+
+    // The row renders its figure from the task alone, fetching nothing.
+    expect(await screen.findByText("29%")).toBeInTheDocument();
+    expect(api.listTaskMessages).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole("button", { name: /context window/i }));
+
+    await waitFor(() => expect(api.listTaskMessages).toHaveBeenCalledWith(id));
+    const entries = await screen.findAllByRole("listitem");
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toHaveTextContent("29%");
+    expect(entries[1]).toHaveTextContent("15%");
+  });
+
+  it("renders nothing for a run whose runtime reported no occupancy", async () => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue([]);
+    setup(task({ status: "completed", completed_at: "2026-09-07T00:01:00Z" }));
+
+    await screen.findByRole("button", { name: /View activity/ });
+    expect(screen.queryByText(/258.4K/)).not.toBeInTheDocument();
   });
 });

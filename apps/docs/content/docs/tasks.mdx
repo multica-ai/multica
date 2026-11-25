@@ -67,6 +67,7 @@ While an agent is working, the issue header also carries a live chip such as "En
 In the execution log you can:
 
 - Click **View transcript** on a row to see the agent's messages, tool calls, and error output. For a run still in progress the transcript keeps streaming while the dialog stays open, and a **Newest first** toggle flips the event order.
+- Turn on **Settings → Preferences → Context usage** to read how full the model's context window is without opening a run: the chip then sits on the run's row in the activity timeline, and again in the transcript header next to the run's cost. A second switch there keeps it inside the run only. In chat it rides the status line while the agent works and the turn's "Replied in" row once it finishes. Click the chip for the run's context history — every change the run reported, newest first; a finished run loads its history when you open it. The chip needs both halves — the prompt and the window it is measured against — so it appears on Claude Code and Codex runs; other runtimes report no window and show no chip.
 - Stop runs that are queued, starting, waiting for a local directory, or working.
 - Retry a failed or cancelled run.
 

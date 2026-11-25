@@ -10628,6 +10628,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		}
 
 		var sessionPinned atomic.Bool
+		contextReporter := &contextUsageReporter{}
 		for {
 			select {
 			case msg, ok := <-session.Messages:
@@ -10776,6 +10777,33 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					})
 					mu.Unlock()
 					flushFirstVisible()
+				case agent.MessageContext:
+					if msg.Context == nil {
+						break
+					}
+					info := *msg.Context
+					if !contextReporter.shouldReport(info) {
+						break
+					}
+					mu.Lock()
+					sealPendingLocked()
+					s := msgSeq.Add(1)
+					batch = append(batch, TaskMessageData{
+						Seq:  int(s),
+						Type: "context",
+						// Content stays empty on purpose. Clients that predate
+						// this type (installed desktop builds, mobile) parse an
+						// unknown type as "text" and merge adjacent text rows,
+						// so any prose here would be spliced into the agent's
+						// reply. The figures live in Input only.
+						Input:     contextEventInput(info),
+						CreatedAt: observedAt,
+					})
+					mu.Unlock()
+					// Deliberately not flushFirstVisible: an occupancy figure
+					// is not the run's first visible output, and treating it
+					// as such would spend the one early flush on a row that
+					// says nothing about progress.
 				}
 			case <-drainCtx.Done():
 				goto drainDone

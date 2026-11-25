@@ -340,9 +340,11 @@ func (b *devecoBackend) processEvents(r io.Reader, ch chan<- Message) devecoEven
 			if t := event.Part.Tokens; t != nil {
 				usage.InputTokens += t.Input
 				usage.OutputTokens += t.Output
+				cacheRead, cacheWrite := int64(0), int64(0)
 				if t.Cache != nil {
-					usage.CacheReadTokens += t.Cache.Read
-					usage.CacheWriteTokens += t.Cache.Write
+					cacheRead, cacheWrite = t.Cache.Read, t.Cache.Write
+					usage.CacheReadTokens += cacheRead
+					usage.CacheWriteTokens += cacheWrite
 				}
 			}
 		}

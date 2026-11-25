@@ -84,6 +84,7 @@ import {
 import { buildRunOutcome } from "./run-outcome";
 import { RunTimeline } from "./run-timeline";
 import { ContextReceiptButton } from "./context-receipt";
+import { ContextUsageChip } from "./context-usage-chip";
 import {
   base64ByteLength,
   readImageResult,
@@ -958,6 +959,11 @@ export function AgentTranscriptDialog({
                 so "why was this one expensive" is answerable without going
                 back to the list. The split lives one click away in the ⓘ
                 popover. */}
+            {/* How much of the model's context window this run occupies —
+                the figure that explains a compaction, and the one a reader
+                checks before asking for more work in the same session. */}
+            <ContextUsageChip items={items} />
+
             {usage && (
               <span
                 className="flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-micro tabular-nums"

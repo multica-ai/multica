@@ -613,3 +613,13 @@ describe("traceToolArgSummary / traceEventHasDetail — Codex changes[]", () => 
     );
   });
 });
+
+describe("context events", () => {
+  // Nothing rides this type but occupancy, and occupancy is never a step —
+  // the timelines drop these rows before the presenter sees them. If one does
+  // reach it, it must read as the unknown event it is, not as agent text.
+  it("fall through to the generic kind", () => {
+    expect(traceEventKind({ type: "context" })).toBe("generic");
+    expect(traceEventLabel({ type: "context" })).toBe("context");
+  });
+});

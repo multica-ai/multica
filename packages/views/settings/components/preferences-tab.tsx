@@ -26,6 +26,7 @@ import {
 } from "@multica/ui/components/ui/command";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { useAuthStore } from "@multica/core/auth";
+import { useContextUsageSettingsStore } from "@multica/core/agents/stores";
 import { useChatStore } from "@multica/core/chat";
 import {
   useCommentComposerStore,
@@ -94,6 +95,18 @@ export function PreferencesTab() {
       </SettingsSection>
 
       <SettingsSection
+        title={t(($) => $.preferences.context_usage.title)}
+        description={t(($) => $.preferences.context_usage.description)}
+        scope="device"
+        anchor="context-usage"
+      >
+        <SettingsCard>
+          <ContextUsageRow />
+          <ContextUsageIssueRowRow />
+        </SettingsCard>
+      </SettingsSection>
+
+      <SettingsSection
         title={t(($) => $.issue.opening.title)}
         scope="device"
         anchor="issue-opening"
@@ -112,6 +125,51 @@ export function PreferencesTab() {
         <IssueFieldsMatrix />
       </SettingsSection>
     </SettingsTab>
+  );
+}
+
+function ContextUsageRow() {
+  const { t } = useT("settings");
+  const enabled = useContextUsageSettingsStore((state) => state.enabled);
+  const set = useContextUsageSettingsStore((state) => state.set);
+
+  return (
+    <SettingsRow
+      anchor="context-usage-enabled"
+      label={t(($) => $.preferences.context_usage.enabled.title)}
+      description={t(($) => $.preferences.context_usage.enabled.description)}
+    >
+      <Switch
+        checked={enabled}
+        onCheckedChange={(checked) => set({ enabled: checked })}
+        aria-label={t(($) => $.preferences.context_usage.enabled.title)}
+      />
+    </SettingsRow>
+  );
+}
+
+// The second level. Disabled rather than hidden while the feature is off: a
+// row that appears only after the switch above would hide the fact that an
+// issue shows the figure in two places.
+function ContextUsageIssueRowRow() {
+  const { t } = useT("settings");
+  const enabled = useContextUsageSettingsStore((state) => state.enabled);
+  const showOnIssueRow = useContextUsageSettingsStore((state) => state.showOnIssueRow);
+  const set = useContextUsageSettingsStore((state) => state.set);
+
+  return (
+    <SettingsRow
+      anchor="context-usage-issue-row"
+      label={t(($) => $.preferences.context_usage.issue_row.title)}
+      description={t(($) => $.preferences.context_usage.issue_row.description)}
+    >
+      <Switch
+        checked={enabled && showOnIssueRow}
+        disabled={!enabled}
+        onCheckedChange={(checked) => set({ showOnIssueRow: checked })}
+        aria-label={t(($) => $.preferences.context_usage.issue_row.title)}
+      />
+    </SettingsRow>
   );
 }
 

@@ -561,9 +561,11 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 				if separateReasoning && t.Reasoning > 0 {
 					usage.OutputTokens += t.Reasoning
 				}
+				cacheRead, cacheWrite := int64(0), int64(0)
 				if t.Cache != nil {
-					usage.CacheReadTokens += t.Cache.Read
-					usage.CacheWriteTokens += t.Cache.Write
+					cacheRead, cacheWrite = t.Cache.Read, t.Cache.Write
+					usage.CacheReadTokens += cacheRead
+					usage.CacheWriteTokens += cacheWrite
 				}
 			}
 			if stepReportedUsage(&event.Part) {

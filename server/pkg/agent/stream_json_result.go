@@ -21,6 +21,12 @@ type assistantTurn struct {
 	// the backend cannot tell whether the model delivered its answer inside
 	// that event, so an earlier fallback must not outlive it.
 	understood bool
+	// promptTokens is the main-session prompt this event measured, or 0 when
+	// it reported none.
+	promptTokens int64
+	// model is the model that measured promptTokens. Kept so a window that
+	// arrives after the observation can re-state it against the right model.
+	model string
 }
 
 // resolveFallback returns the empty-result fallback after this turn, given the
