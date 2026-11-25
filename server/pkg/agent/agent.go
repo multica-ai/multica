@@ -279,7 +279,28 @@ const (
 	MessageStatus     MessageType = "status"
 	MessageError      MessageType = "error"
 	MessageLog        MessageType = "log"
+	// MessageContext reports how much of the model's context window the run
+	// occupies. It is observational: a backend that cannot see it emits
+	// none, and no consumer may read its absence as "the window is empty".
+	MessageContext MessageType = "context"
 )
+
+// ContextInfo is one observation of a run's context window.
+type ContextInfo struct {
+	// UsedTokens is the prompt the provider actually sent for the latest
+	// request — fresh input plus cache reads plus cache writes. It is the
+	// window's occupancy at that moment, NOT a per-turn cost: consecutive
+	// turns re-send the same conversation, so these values must never be
+	// summed the way TokenUsage counters are.
+	UsedTokens int64
+	// LimitTokens is the window UsedTokens is measured against. Zero means
+	// no limit could be established, and consumers must then show the
+	// absolute figure with no percentage rather than assume a default — a
+	// percentage against a guessed window is worse than no percentage.
+	LimitTokens int64
+	// Model is the provider's own model identifier for this observation.
+	Model string
+}
 
 // Message is a unified event emitted by an agent during execution.
 type Message struct {
@@ -292,6 +313,7 @@ type Message struct {
 	Status    string         // agent status string (Status)
 	Level     string         // log level (Log)
 	SessionID string         // backend session id (Status), for early resume-pointer pinning
+	Context   *ContextInfo   // context-window observation (Context)
 }
 
 // TokenUsage tracks token consumption for a single model.

@@ -7,7 +7,11 @@ import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { api } from "@multica/core/api";
 import type { SupportedLocale } from "@multica/core/i18n";
 import type { AgentRuntime, AgentTask } from "@multica/core/types/agent";
-import { useTranscriptViewStore } from "@multica/core/agents/stores";
+import {
+  DEFAULT_CONTEXT_USAGE_SETTINGS,
+  useContextUsageSettingsStore,
+  useTranscriptViewStore,
+} from "@multica/core/agents/stores";
 import { renderWithI18n } from "../../test/i18n";
 import { AgentTranscriptDialog } from "./agent-transcript-dialog";
 import type { TimelineItem } from "./build-timeline";
@@ -1191,5 +1195,61 @@ describe("tool output completeness", () => {
 
     expect(screen.queryByText(/only the beginning was kept/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/cannot be confirmed|completeness/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("context window", () => {
+  // Off by default; these cases describe the surface with it on.
+  beforeEach(() => {
+    useContextUsageSettingsStore.setState({ enabled: true, showOnIssueRow: true });
+  });
+  afterEach(() => {
+    useContextUsageSettingsStore.setState(DEFAULT_CONTEXT_USAGE_SETTINGS);
+  });
+
+  const withContext: TimelineItem[] = [
+    { seq: 1, type: "context", input: { used_tokens: 10_000, limit_tokens: 200_000 } },
+    { seq: 2, type: "tool_use", tool: "terminal", input: { command: "pnpm test" } },
+    { seq: 3, type: "context", input: { used_tokens: 180_000, limit_tokens: 200_000 } },
+    // An older daemon's event, which this client cannot read.
+    { seq: 4, type: "context", input: { phase: "compacted", pre_tokens: 180_000, trigger: "auto" } },
+  ];
+
+  it("shows the newest occupancy in the header and no context step at all", async () => {
+    renderDialog(withContext);
+
+    // The header reads the newest readable snapshot (180K of 200K), not the
+    // first one and not their sum.
+    expect(await screen.findByText("90%")).toBeInTheDocument();
+    expect(screen.getByText("180K/200K")).toBeInTheDocument();
+
+    // Occupancy is state: the step list shows the run's work and none of the
+    // context rows, readable or not.
+    expect(screen.queryByText("Context")).not.toBeInTheDocument();
+    expect(await screen.findByText(/pnpm test/)).toBeInTheDocument();
+  });
+
+  it("shows no figure while the feature is off", async () => {
+    useContextUsageSettingsStore.setState(DEFAULT_CONTEXT_USAGE_SETTINGS);
+    renderDialog(withContext);
+
+    expect(await screen.findByText(/pnpm test/)).toBeInTheDocument();
+    expect(screen.queryByText("180K/200K")).not.toBeInTheDocument();
+  });
+
+  it("renders no chip for a run whose runtime reported no occupancy", () => {
+    renderDialog(items);
+    expect(screen.queryByText(/\/200K/)).not.toBeInTheDocument();
+  });
+
+  // A figure with no window is not shown: only Claude and Codex report one,
+  // and a bare token count is not something a reader can act on.
+  it("renders no chip when the window is unknown", async () => {
+    renderDialog([
+      { seq: 1, type: "context", input: { used_tokens: 12_300 } },
+      { seq: 2, type: "tool_use", tool: "terminal", input: { command: "pnpm test" } },
+    ]);
+    expect(await screen.findByText(/pnpm test/)).toBeInTheDocument();
+    expect(screen.queryByText("12.3K")).not.toBeInTheDocument();
   });
 });

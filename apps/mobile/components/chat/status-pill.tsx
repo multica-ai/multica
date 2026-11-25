@@ -99,7 +99,8 @@ function pickStage(
   let latest: TaskMessagePayload | null = null;
   for (let i = taskMessages.length - 1; i >= 0; i--) {
     const m = taskMessages[i];
-    if (m && m.type !== "error" && m.type !== "tool_result") {
+    // A context observation is state, not an activity (matches web's pill).
+    if (m && m.type !== "error" && m.type !== "tool_result" && m.type !== "context") {
       latest = m;
       break;
     }

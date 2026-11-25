@@ -834,3 +834,82 @@ func TestCachedDiscoveryStaleWhileRevalidate(t *testing.T) {
 		t.Fatalf("post-refresh hit = (%+v, %v)", c5, err)
 	}
 }
+
+// A pooled turn ends at its result event, and the CLI answers the window
+// probe after that: measured against Claude Code 2.1.330, the result lands
+// ~20ms after the assistant event while the answer takes ~180ms. The first
+// turn of a chat session therefore stated its occupancy against the derived
+// family default — `31% 62.6K/200K` on a session whose window is 1M, with
+// the second turn correct because the first turn's answer arrived during it.
+func TestClaudeWarmPoolStatesTheFirstFigureAgainstTheAnsweredWindow(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+
+	dir := t.TempDir()
+	fakeClaude := filepath.Join(dir, "claude")
+	// The script answers the probe only when it reads the request, which it
+	// cannot do before it has finished writing this turn's result — the same
+	// ordering the real CLI produces. The sleep stands in for the measured
+	// ~180ms the real answer takes, which is what makes the answer land after
+	// the turn would otherwise have finished.
+	script := `#!/bin/sh
+while IFS= read -r line; do
+  case "$line" in
+    *'"subtype":"get_usage"'*)
+      sleep 0.3
+      printf '{"type":"control_response","response":{"subtype":"success","request_id":"multica-context-window","response":{"session":{"model_usage":{"claude-opus-5-5":{"contextWindow":1000000}}}}}}\n'
+      ;;
+    *'"type":"user"'*)
+      printf '{"type":"system","subtype":"init","session_id":"claude-window-1","model":"claude-opus-5-5"}\n'
+      printf '{"type":"assistant","message":{"id":"msg-1","role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":62600}}}\n'
+      printf '{"type":"result","subtype":"success","session_id":"claude-window-1","result":"hi","is_error":false}\n'
+      ;;
+  esac
+done
+`
+	writeTestExecutable(t, fakeClaude, []byte(script))
+
+	pool := NewWarmSessionPool(WarmSessionPoolConfig{
+		IdleTTL: 30 * time.Second,
+		MaxIdle: 4,
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	defer pool.Close()
+
+	b, err := New("claude", Config{
+		ExecutablePath: fakeClaude,
+		Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		TaskID:         "task-window-1",
+		WarmPool:       pool,
+		Env:            map[string]string{"MULTICA_TASK_ID": "task-window-1"},
+	})
+	if err != nil {
+		t.Fatalf("New(claude): %v", err)
+	}
+	sess, err := b.Execute(context.Background(), "go", ExecOptions{
+		Cwd:     dir,
+		Model:   "claude-opus-5-5",
+		Timeout: 10 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	var got []ContextInfo
+	for msg := range sess.Messages {
+		if msg.Type == MessageContext && msg.Context != nil {
+			got = append(got, *msg.Context)
+		}
+	}
+	<-sess.Result
+
+	if len(got) != 1 {
+		t.Fatalf("expected one observation, got %+v", got)
+	}
+	// The window the CLI reported, not the 200K family default its model id
+	// resolves to.
+	if got[0].UsedTokens != 62_600 || got[0].LimitTokens != 1_000_000 {
+		t.Fatalf("observation = %+v, want 62600 of 1000000", got[0])
+	}
+}

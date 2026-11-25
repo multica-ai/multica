@@ -5,6 +5,7 @@ import { AlertCircle, Brain, Check, ChevronRight, CirclePause, Clock3, CornerDow
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useContextUsageSettingsStore } from "@multica/core/agents/stores";
 import { useTraceIssueLabels } from "../../common/task-transcript/use-trace-issue-labels";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useTaskMessages } from "@multica/core/chat/queries";
@@ -20,6 +21,8 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import { cn } from "@multica/ui/lib/utils";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { AgentTranscriptDialog, StepBody } from "../../common/task-transcript/agent-transcript-dialog";
+import { ContextUsageChip } from "../../common/task-transcript/context-usage-chip";
+import { taskContextUsage } from "../../common/task-transcript/context-usage";
 import { buildTimeline } from "../../common/task-transcript/build-timeline";
 import { buildSteps, groupSteps, isCallStep, isGroupRow, type TraceCallStep, type TraceRow, type TraceStep } from "../../common/task-transcript/build-steps";
 import { traceEventSummary, traceToolArgSummary } from "../../common/task-transcript/trace-event-presenter";
@@ -170,11 +173,21 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const regionId = useId();
   // Keep one disclosure button mounted across queued, live, and historical states.
   // Historical, collapsed runs still don't fetch transcripts.
-  const loadTranscript = task.status === "running" || (presentation === "inline" && expanded) || fullLogOpen;
+  // Opening the context history is the third reason to load this run's
+  // messages: a finished, collapsed run fetches none until a reader asks, and
+  // the history lives in those messages.
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const loadTranscript =
+    task.status === "running" || (presentation === "inline" && expanded) || fullLogOpen || historyOpen;
   const { data, isPending, isError, refetch } = useTaskMessages(task.id, active, loadTranscript);
   const items = useMemo(() => buildTimeline(data ?? []), [data]);
   const formatText = useTraceIssueLabels(useWorkspaceId(), task.issue_id, items, loadTranscript);
-  const steps = useMemo(() => buildSteps(items), [items]);
+  // Compactions belong to the opt-in context feature: off, they are not steps.
+  const showContext = useContextUsageSettingsStore((state) => state.enabled);
+  const steps = useMemo(
+    () => buildSteps(showContext ? items : items.filter((item) => item.type !== "context")),
+    [items, showContext],
+  );
   const rows = useMemo(() => groupSteps(steps), [steps]);
   // Messages that steered this turn, placed in its step list where it read them.
   const { data: steers = NO_STEERS } = useQuery({
@@ -225,11 +238,22 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
     </Button>} />
     <TooltipContent>{t(($) => $.inline_run.full_log)}</TooltipContent>
   </Tooltip>;
+  // How full the model's context window was, without opening the run. A
+  // historical run never loads its transcript, so the figure comes off the
+  // task row; while one is loaded (live, or expanded) the stream is newer and
+  // wins inside the chip.
+  const contextUsage = taskContextUsage(task);
   // Before the agent session starts there is no transcript to open.
   const hasTranscript = !PRE_RUN_STATUSES.includes(task.status);
   if (presentation === "header" && showCommentRunInHeader(run)) {
-    return <span className="inline-flex shrink-0" data-comment-actions data-run-id={task.id}>
+    return <span className="inline-flex shrink-0 items-center gap-1" data-comment-actions data-run-id={task.id}>
       {fullLogButton}
+      <ContextUsageChip
+        items={data}
+        usage={contextUsage}
+        surface="issue_row"
+        onOpenHistory={() => setHistoryOpen(true)}
+      />
       {transcript}
     </span>;
   }
@@ -280,6 +304,14 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
         </button>
         <span className={cn("shrink-0 whitespace-nowrap text-label tabular-nums text-muted-foreground", showIdentity && !active && "@max-[32rem]/run:hidden")}>{elapsed}</span>
         {hasTranscript && fullLogButton}
+        {/* Yields the narrow row to identity like the elapsed time beside it. */}
+        <ContextUsageChip
+          items={data}
+          usage={contextUsage}
+          surface="issue_row"
+          onOpenHistory={() => setHistoryOpen(true)}
+          className={cn(showIdentity && !active && "@max-[32rem]/run:hidden")}
+        />
         {stopButton}
         {(!hasReply || replacesFailureNotice) && ended && <Button
           size="xs" variant="outline" className={cn(showIdentity && "@max-[32rem]/run:size-6 @max-[32rem]/run:p-0")} disabled={retry.isPending || retry.isSuccess}

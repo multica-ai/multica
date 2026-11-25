@@ -46,7 +46,12 @@ import type {
   TaskMessagePayload,
 } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
-import { buildTimeline } from "../../common/task-transcript";
+import {
+  buildTimeline,
+  ContextUsageChip,
+  isContextUsageItem,
+  latestContextUsage,
+} from "../../common/task-transcript";
 import { readCommandInput, traceToolArgSummary } from "../../common/task-transcript/trace-event-presenter";
 import { OnboardingStarterCards } from "./onboarding-starter-cards";
 import { TaskStatusPill } from "./task-status-pill";
@@ -703,8 +708,15 @@ function AssistantMessage({
   // Memoized on the cache array identity: mergeTaskMessagesBySeq preserves the
   // array reference when a duplicate event arrives, so this recomputes only
   // when a genuinely new message lands.
+  // Occupancy readings are state, not steps: only the newest one is true, so
+  // the chip reads them off the raw stream and they never become rows — which
+  // also keeps them out of the fold's step count.
   const timeline: ChatTimelineItem[] = useMemo(
-    () => transformTimeline(buildTimeline(taskMessages ?? []), transformContent),
+    () =>
+      transformTimeline(
+        buildTimeline(taskMessages ?? []).filter((item) => !isContextUsageItem(item)),
+        transformContent,
+      ),
     [taskMessages, transformContent],
   );
 
@@ -775,6 +787,7 @@ function AssistantMessage({
           <MessageFooter
             message={message}
             timeline={timeline}
+            contextItems={taskMessages}
             isPending={isPending}
             transformContent={transformContent}
           />
@@ -998,11 +1011,14 @@ function NoResponseNotice() {
 function MessageFooter({
   message,
   timeline,
+  contextItems,
   isPending,
   transformContent,
 }: {
   message: ChatMessage;
   timeline: ChatTimelineItem[];
+  /** The turn's raw stream, which carries its context observations. */
+  contextItems?: readonly TaskMessagePayload[];
   isPending: boolean;
   transformContent?: (content: string) => string;
 }) {
@@ -1013,7 +1029,12 @@ function MessageFooter({
   const copyContent = extractCopyText(message, timeline, transformContent);
   const showCopy = !isPending && !isNoResponse && copyContent.trim().length > 0;
   const timeLabel = formatMessageTime(message.created_at, locale);
-  if (message.elapsed_ms == null && !showCopy && !timeLabel) return null;
+  // The turn's meta row is where the context figure lives once the turn has
+  // settled — one place for every turn. Putting it on the process fold would
+  // hide it on the turns that have no tool calls to fold, which is exactly
+  // where a reader last saw it on the status pill a second earlier.
+  const contextUsage = useMemo(() => latestContextUsage(contextItems ?? []), [contextItems]);
+  if (message.elapsed_ms == null && !showCopy && !timeLabel && !contextUsage) return null;
   return (
     <div className="flex items-center gap-1.5">
       {message.elapsed_ms != null ? (
@@ -1025,6 +1046,7 @@ function MessageFooter({
       ) : timeLabel ? (
         <div className="text-caption text-muted-foreground">{timeLabel}</div>
       ) : null}
+      <ContextUsageChip items={contextItems} />
       {showCopy && (
         <MessageCopyButton content={copyContent} />
       )}

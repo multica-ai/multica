@@ -206,6 +206,13 @@ func TestDevecoProcessEventsHappyPath(t *testing.T) {
 	if len(msgs) != 4 {
 		t.Fatalf("expected 4 messages, got %d: %+v", len(msgs), msgs)
 	}
+	// DevEco meters its steps but reports no context window, and occupancy
+	// without one is not shown — so no observation is produced at all.
+	for _, m := range msgs {
+		if m.Type == MessageContext {
+			t.Fatalf("unexpected context observation from a runtime with no window: %+v", m)
+		}
+	}
 }
 
 func TestDevecoProcessEventsToolErrorEmitsResult(t *testing.T) {

@@ -15,6 +15,10 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enAuth from "../../locales/en/auth.json";
 import enSettings from "../../locales/en/settings.json";
+import {
+  DEFAULT_CONTEXT_USAGE_SETTINGS,
+  useContextUsageSettingsStore,
+} from "@multica/core/agents/stores";
 
 const navigationState = vi.hoisted(() => ({ search: "", replace: vi.fn() }));
 vi.mock("../../navigation", () => ({
@@ -417,8 +421,8 @@ describe("PreferencesTab — Scope", () => {
   it("labels where each group of settings is stored", () => {
     render(<PreferencesTab />, { wrapper: I18nWrapper });
     expect(screen.getByText("Account · synced")).toBeInTheDocument();
-    // Opening issues, comments & chat.
-    expect(screen.getAllByText("This device only")).toHaveLength(2);
+    // Comments & chat, context usage, opening issues.
+    expect(screen.getAllByText("This device only")).toHaveLength(3);
   });
 
   it("switches what clicking a card or row opens, and says what Shift does", async () => {
@@ -434,5 +438,47 @@ describe("PreferencesTab — Scope", () => {
     await user.click(preview);
     expect(useIssueOpeningStore.getState().openMode).toBe("peek");
     expect(preview).toHaveAttribute("aria-pressed", "true");
+  });
+});
+
+describe("PreferencesTab — Context usage", () => {
+  afterEach(() => {
+    cleanup();
+    useContextUsageSettingsStore.setState(DEFAULT_CONTEXT_USAGE_SETTINGS);
+  });
+
+  it("ships the feature off and turns it on from here", async () => {
+    const user = userEvent.setup();
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    const main = screen.getByRole("switch", { name: "Show context usage" });
+    expect(main).not.toBeChecked();
+
+    await user.click(main);
+    expect(useContextUsageSettingsStore.getState().enabled).toBe(true);
+  });
+
+  it("keeps the issue-row switch unusable until the feature is on, then narrows it", async () => {
+    const user = userEvent.setup();
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    const issueRow = screen.getByRole("switch", {
+      name: "Show on the run's row in an issue",
+    });
+    // On underneath, but not reachable while the feature itself is off —
+    // a reader should still see that an issue has two places. The switch is a
+    // Base UI span, so "disabled" is the ARIA state, not the DOM property.
+    expect(issueRow).toHaveAttribute("aria-disabled", "true");
+    expect(issueRow).not.toBeChecked();
+
+    await user.click(screen.getByRole("switch", { name: "Show context usage" }));
+    expect(issueRow).not.toHaveAttribute("aria-disabled", "true");
+    expect(issueRow).toBeChecked();
+
+    await user.click(issueRow);
+    expect(useContextUsageSettingsStore.getState()).toMatchObject({
+      enabled: true,
+      showOnIssueRow: false,
+    });
   });
 });

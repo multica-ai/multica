@@ -16,3 +16,8 @@ export {
   type TranscriptFilterKey,
   type TranscriptSortDirection,
 } from "./transcript-view-store";
+export {
+  useContextUsageSettingsStore,
+  DEFAULT_CONTEXT_USAGE_SETTINGS,
+  type ContextUsageSettings,
+} from "./context-usage-store";

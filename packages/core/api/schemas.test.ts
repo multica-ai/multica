@@ -2642,6 +2642,35 @@ describe("task usage credits", () => {
   });
 });
 
+describe("task context usage", () => {
+  it("keeps the reported figure, with or without a window", () => {
+    expect(AgentTaskSchema.parse({
+      id: "run",
+      context_usage: { used_tokens: 75_200, limit_tokens: 258_400 },
+    }).context_usage).toEqual({ used_tokens: 75_200, limit_tokens: 258_400 });
+    expect(AgentTaskSchema.parse({
+      id: "run",
+      context_usage: { used_tokens: 75_200 },
+    }).context_usage).toEqual({ used_tokens: 75_200 });
+    expect(AgentTaskSchema.parse({ id: "run" }).context_usage).toBeUndefined();
+  });
+
+  it("drops a malformed window without losing the occupancy", () => {
+    expect(AgentTaskSchema.parse({
+      id: "run",
+      context_usage: { used_tokens: 75_200, limit_tokens: "big" },
+    }).context_usage).toEqual({ used_tokens: 75_200 });
+  });
+
+  it("collapses a malformed figure to unreported without failing the task", () => {
+    for (const context_usage of [{ used_tokens: "many" }, [], "full", null]) {
+      const parsed = AgentTaskSchema.parse({ id: "run", context_usage });
+      expect(parsed.id).toBe("run");
+      expect(parsed.context_usage).toBeUndefined();
+    }
+  });
+});
+
 
 describe("Issue requester compatibility", () => {
   it("preserves known null versus unknown legacy or malformed values", () => {

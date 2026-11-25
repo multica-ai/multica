@@ -94,11 +94,16 @@ function durationBetween(start?: string, end?: string): number | undefined {
 /** Fold `tool_use` / `tool_result` pairs into single steps, in stream order. */
 export function buildSteps(items: TimelineItem[]): TraceStep[] {
   const steps: TraceStep[] = [];
+
   // Separate ID and tool-name keys so a missing/unmatched ID never consumes
   // an identified call through the legacy fallback (or vice versa).
   const open = new Map<string, TraceCallStep[]>();
 
   for (const item of items) {
+    // Occupancy is state, not an event: the run reports it every few turns
+    // and only the newest one is true, so the chip reads it
+    // (`latestContextUsage`) and the step list never shows any of them.
+    if (item.type === "context") continue;
     const pairingKey = item.callId ? `id:${item.callId}` : `tool:${item.tool ?? ""}`;
     if (item.type === "tool_use") {
       const tool = item.tool ?? "";

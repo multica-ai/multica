@@ -162,6 +162,18 @@
     "sticky_comment_bar": {
       "title": "コメント欄を下部に固定"
     },
+    "context_usage": {
+      "title": "コンテキスト使用量",
+      "description": "実行がモデルのコンテキストウィンドウをどれだけ使っているか。Claude Code と Codex の実行のみ。",
+      "enabled": {
+        "title": "コンテキスト使用量を表示",
+        "description": "チャットの各ターンと issue の実行に使用量を表示します。"
+      },
+      "issue_row": {
+        "title": "issue の実行の行に表示",
+        "description": "オフにすると実行の中だけ — トランスクリプトと展開したステップに表示します。"
+      }
+    },
     "running_agent_reply": {
       "title": "実行中のエージェントに返信するとき",
       "steer": "現在の実行に追加",

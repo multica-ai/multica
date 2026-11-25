@@ -131,6 +131,20 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		resultCh:      make(chan struct{}),
 		usage:         make(map[string]TokenUsage),
 		seenUsage:     make(map[string]struct{}),
+		// The window this run's occupancy is measured against. The configured
+		// model is the only place a `[1m]` request survives — the CLI strips
+		// the modifier before it reports a model anywhere — so it is resolved
+		// first and never overridden. An alias ("sonnet"), or no model at all,
+		// resolves to nothing here and is filled in from the session's own
+		// init event, which names the concrete model the CLI picked.
+		contextLimit: ClaudeContextWindowTokens(opts.Model),
+		// The CLI knows the window it is actually using — it renders its own
+		// percentage from it — and answers `get_usage` with it per model. That
+		// answer outranks everything derived here: a model id carries at best
+		// a request (`[1m]`), and its family default is only a guess about
+		// which window that request was granted.
+		usageProbe:   newClaudeUsageProbe(),
+		windowAnswer: make(chan struct{}),
 	}
 	if warmHit {
 		turn.sessionID = proc.sessionID
@@ -225,6 +239,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			proc.terminate()
 			<-proc.procDone
 		}
+		// Before detaching: once the turn is off the process, its own answer
+		// can no longer reach it.
+		turn.awaitWindowAnswer()
 		turn.endInitializer()
 		// Detach before reading the turn's state or waiting on its control
 		// writes: a pooled process keeps emitting after its result event.
@@ -232,6 +249,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 		turn.mu.Lock()
 		turn.coalescer.flushAll()
+		// A CLI that never answered leaves the first measurement held. State
+		// it against the derived window: late and approximate beats absent.
+		turn.releaseHeldOccupancy(turn.contextLimit)
 		sawResult := turn.sawResult
 		resultIsError := turn.resultIsError
 		terminalReasonError := turn.terminalReasonError
@@ -452,6 +472,76 @@ type claudeTurn struct {
 	assistantEventCount      int
 	toolUseCount             int
 	unreadableAssistantCount int
+	contextLimit             int64
+	contextLimitDisproved    bool
+	usageProbe               *claudeUsageProbe
+	// The CLI can only answer "which window am I using" once a response
+	// exists, so a run's first measurement is made before its own window is
+	// knowable. Stated against the derived window it would read 60% on a run
+	// that is really at 12%, so it is HELD and released when the answer
+	// arrives — inside the same response. held* is that measurement;
+	// reported* is the newest one already stated, kept so a late answer can
+	// still correct it.
+	heldPrompt     int64
+	heldModel      string
+	reportedPrompt int64
+	reportedModel  string
+	reportedLimit  int64
+	// Closed when the CLI answers the window probe. The answer lands after
+	// the turn's own result event — measured against Claude Code 2.1.330, the
+	// result arrives ~20ms after the assistant event and the answer ~180ms
+	// after the question — so a turn that ends at its result (a pooled one,
+	// which is what a chat turn is) would otherwise always give up waiting.
+	windowAnswer     chan struct{}
+	windowAnswerOnce sync.Once
+}
+
+// claudeWindowAnswerGrace bounds the wait for the window answer at the end of
+// a turn. The answer takes ~180ms; this leaves room for a loaded machine
+// without holding a run open for a CLI that will never reply — and a CLI that
+// replies without a window (too old for the request) ends the wait at once.
+const claudeWindowAnswerGrace = 500 * time.Millisecond
+
+// signalWindowAnswer releases anything waiting on the probe's answer.
+func (t *claudeTurn) signalWindowAnswer() {
+	t.windowAnswerOnce.Do(func() { close(t.windowAnswer) })
+}
+
+// awaitWindowAnswer gives a held measurement its chance to be stated against
+// the reported window. Without it the figure goes out measured against the
+// derived family default — 200K on a run that is really on 1M — which is
+// exactly what the first turn of a chat session showed.
+func (t *claudeTurn) awaitWindowAnswer() {
+	t.mu.Lock()
+	waiting := t.heldPrompt > 0 && !t.usageProbe.sawReply()
+	t.mu.Unlock()
+	if !waiting {
+		return
+	}
+	timer := time.NewTimer(claudeWindowAnswerGrace)
+	defer timer.Stop()
+	select {
+	case <-t.windowAnswer:
+	case <-timer.C:
+	}
+}
+
+// stateOccupancy sends one occupancy observation and records what it stated.
+// Callers hold t.mu; the send is non-blocking.
+func (t *claudeTurn) stateOccupancy(prompt int64, model string, limit int64) {
+	t.reportedPrompt, t.reportedModel, t.reportedLimit = prompt, model, limit
+	sendContextUsage(t.msgCh, model, prompt, limit)
+}
+
+// releaseHeldOccupancy states a held measurement against the window known now.
+// Called when the answer lands, when a second response makes the wait
+// pointless, and when the turn ends — so a CLI that never answers still
+// reports, against the derived window.
+func (t *claudeTurn) releaseHeldOccupancy(limit int64) {
+	if t.heldPrompt > 0 {
+		t.stateOccupancy(t.heldPrompt, t.heldModel, limit)
+		t.heldPrompt, t.heldModel = 0, ""
+	}
 }
 
 func (t *claudeTurn) handleMessage(msg claudeSDKMessage) {
@@ -466,6 +556,35 @@ func (t *claudeTurn) handleMessage(msg claudeSDKMessage) {
 	case "assistant":
 		t.assistantEventCount++
 		turn := t.backend.handleAssistantWithStream(msg, t.msgCh, t.usage, t.seenUsage, t.coalescer)
+		// A prompt larger than the window disproves it for the whole run, not
+		// just this observation: a later, smaller prompt would otherwise be
+		// measured against the same wrong window. Nothing is stated against a
+		// disproved window, held measurements included — if 200K is not this
+		// run's window, an earlier 150K/200K was never true either.
+		if t.contextLimit > 0 && turn.promptTokens > t.contextLimit {
+			t.contextLimit = 0
+			t.contextLimitDisproved = true
+		}
+		if turn.promptTokens > 0 {
+			// A second measurement means the answer is not coming in time to
+			// spare the first one: state it now, against the best window
+			// there is, rather than hold it any longer.
+			t.releaseHeldOccupancy(t.contextLimit)
+			if t.usageProbe.answeredWindow() || t.usageProbe.spent() {
+				// The window is as good as it will get — no reason to make
+				// the reader wait for it.
+				t.stateOccupancy(turn.promptTokens, turn.model, t.contextLimit)
+			} else {
+				t.heldPrompt, t.heldModel = turn.promptTokens, turn.model
+			}
+		}
+		// Ask once the model has produced usage: before that the session has
+		// no per-model record and the CLI answers with no window at all —
+		// measured, on a fresh session and on a resumed one alike. The probe
+		// keeps asking on later responses until an answer carries one.
+		if turn.understood {
+			t.usageProbe.ask(t.proc.inputWriter, t.backend.cfg.Logger)
+		}
 		t.toolUseCount += turn.toolUses
 		if !turn.understood {
 			t.unreadableAssistantCount++
@@ -493,6 +612,13 @@ func (t *claudeTurn) handleMessage(msg claudeSDKMessage) {
 		// the main thread's own result says how the turn ended.
 		if msg.Subtype == claudeSubtypeModelRefusalNoFallback && msg.ParentToolUseID == "" {
 			t.sawRefusalNoFallback = true
+		}
+		// init names the model the CLI resolved — a concrete id even when this
+		// run asked for none. It carries no window of its own, and the `[1m]`
+		// modifier is already gone from it, so it only ever supplies the
+		// family default, and only when the configured model supplied nothing.
+		if msg.Subtype == "init" && t.contextLimit == 0 && !t.contextLimitDisproved {
+			t.contextLimit = ClaudeContextWindowTokens(msg.Model)
 		}
 		sid := t.sessionID
 		t.mu.Unlock()
@@ -602,6 +728,33 @@ func (t *claudeTurn) handleMessage(msg claudeSDKMessage) {
 			}
 		}(msg, reply)
 	case "control_response":
+		window := t.usageProbe.windowFrom(msg)
+		if t.usageProbe.sawReply() {
+			defer t.signalWindowAnswer()
+		}
+		if window > 0 {
+			// Reported, not derived: it replaces a family default and restores
+			// a window an earlier prompt appeared to disprove, which is what a
+			// 1M run looks like before this answer lands. An answer that
+			// merely confirms the derived window still matters — it is what
+			// releases the held measurement, so a correct guess must not
+			// strand it.
+			if window != t.contextLimit {
+				t.contextLimit = window
+				t.contextLimitDisproved = false
+			}
+			// The measurement that prompted the question is waiting for
+			// exactly this. Released here it is stated once and correctly:
+			// the reader never sees the derived window.
+			t.releaseHeldOccupancy(window)
+			// Nothing held means it was already stated — against a derived
+			// window, or dropped for want of one. Re-state it so a run whose
+			// occupancy then moves too little to clear the reporting step
+			// does not keep the wrong figure.
+			if t.reportedPrompt > 0 && t.reportedLimit != window {
+				t.stateOccupancy(t.reportedPrompt, t.reportedModel, window)
+			}
+		}
 		init := t.initializer
 		t.mu.Unlock()
 		if init != nil {
@@ -650,6 +803,14 @@ func (t *claudeTurn) controlReplied() {
 	}
 }
 
+// handleAssistant renders one assistant event and accounts its usage.
+//
+// The occupancy it measured is returned rather than stated: the window to
+// measure it against is often not known yet — the CLI only answers
+// `get_usage` once a response exists — so the caller holds the measurement
+// until it can state it against a real window. The assistant event's own
+// model id is no help there: it reports the base model and so loses Claude
+// Code's `[1m]` modifier, which would measure a 1M-token run against 200K.
 func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, usage map[string]TokenUsage, seenUsage map[string]struct{}) assistantTurn {
 	return b.handleAssistantWithStream(msg, ch, usage, seenUsage, nil)
 }
@@ -688,6 +849,17 @@ func (b *claudeBackend) handleAssistantWithStream(msg claudeSDKMessage, ch chan<
 		u.CacheReadTokens += content.Usage.CacheReadInputTokens
 		u.CacheWriteTokens += content.Usage.CacheCreationInputTokens
 		usage[content.Model] = u
+
+		// The same once-per-response guard decides the context observation:
+		// every block of one response shares the prompt that produced it, so
+		// re-emitting per block would report the same occupancy several times.
+		// Subagents are excluded above (ParentToolUseID), and that matters
+		// twice over here — their prompt is a different conversation, so its
+		// size says nothing about the main session's window.
+		turn.promptTokens = content.Usage.InputTokens +
+			content.Usage.CacheReadInputTokens +
+			content.Usage.CacheCreationInputTokens
+		turn.model = content.Model
 	}
 
 	for _, block := range content.Content {

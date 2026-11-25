@@ -477,6 +477,20 @@ export interface AgentTask {
    * reporting was not free, we just don't know what it cost.
    */
   usage?: TaskUsage[];
+  /**
+   * How full the model's context window was when this run last reported it.
+   *
+   * Rides the task row itself, so every surface that lists runs can show it
+   * without reading the run's transcript. `undefined` means the runtime
+   * reported nothing — only Claude and Codex report a prompt measured against
+   * a window — and must never render as 0. `limit_tokens` stays optional for
+   * rows written before the window became a requirement; a figure without one
+   * is not shown, since an absolute token count is not actionable.
+   */
+  context_usage?: {
+    used_tokens: number;
+    limit_tokens?: number;
+  };
 }
 
 /**
