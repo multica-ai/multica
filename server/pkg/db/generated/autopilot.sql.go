@@ -2377,7 +2377,7 @@ func (q *Queries) TouchAutopilotTriggerFiredAt(ctx context.Context, id pgtype.UU
 const updateAutopilot = `-- name: UpdateAutopilot :one
 UPDATE autopilot SET
     title = COALESCE($2, title),
-    description = COALESCE($3, description),
+    description = $3,
     assignee_type = COALESCE($4, assignee_type),
     assignee_id = COALESCE($5::uuid, assignee_id),
     status = COALESCE($6, status),

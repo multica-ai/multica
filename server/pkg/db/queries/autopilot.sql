@@ -66,7 +66,7 @@ INSERT INTO autopilot (
 -- name: UpdateAutopilot :one
 UPDATE autopilot SET
     title = COALESCE(sqlc.narg('title'), title),
-    description = COALESCE(sqlc.narg('description'), description),
+    description = sqlc.narg('description'),
     assignee_type = COALESCE(sqlc.narg('assignee_type'), assignee_type),
     assignee_id = COALESCE(sqlc.narg('assignee_id')::uuid, assignee_id),
     status = COALESCE(sqlc.narg('status'), status),
