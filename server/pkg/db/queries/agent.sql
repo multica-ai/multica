@@ -2163,6 +2163,7 @@ LEFT JOIN squad direct_squad
  AND direct_squad.archived_at IS NULL
  AND direct_squad.handoff_mode = 'direct'
  AND direct_squad.leader_id <> source.agent_id
+ AND direct_squad.leader_id <> failed.agent_id
  AND EXISTS (
      SELECT 1
      FROM squad_member direct_member
