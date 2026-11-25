@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  canStartShortcutSequence,
   createShortcutChord,
+  createShortcutSequence,
   formatShortcut,
   isShortcutAllowedForAction,
   isReservedShortcut,
@@ -573,5 +575,68 @@ describe("keyboard shortcut definitions", () => {
       createShortcutChord("K", { primary: true, shift: true }),
     );
     expect(parseLegacyShortcut("Bogus+K")).toBeNull();
+  });
+});
+
+describe("shortcut sequences", () => {
+  const seq = (first: string, then: string, thenModifiers = {}) =>
+    createShortcutSequence(first, createShortcutChord(then, thenModifiers));
+
+  it("binds G then a letter to the main pages, and ? to the shortcut sheet", () => {
+    expect(SHORTCUT_ACTION_BY_ID.goInbox.defaultShortcut).toEqual(seq("G", "I"));
+    expect(SHORTCUT_ACTION_BY_ID.goMyIssues.defaultShortcut).toEqual(seq("G", "M"));
+    expect(SHORTCUT_ACTION_BY_ID.goIssues.defaultShortcut).toEqual(seq("G", "T"));
+    expect(SHORTCUT_ACTION_BY_ID.goProjects.defaultShortcut).toEqual(seq("G", "P"));
+    expect(SHORTCUT_ACTION_BY_ID.goChat.defaultShortcut).toEqual(seq("G", "C"));
+    expect(SHORTCUT_ACTION_BY_ID.goAgents.defaultShortcut).toEqual(seq("G", "A"));
+    expect(SHORTCUT_ACTION_BY_ID.goSettings.defaultShortcut).toBeNull();
+    expect(SHORTCUT_ACTION_BY_ID.showShortcuts.defaultShortcut).toEqual(createShortcutChord("?", { shift: true }));
+    for (const action of SHORTCUT_ACTIONS) {
+      if (action.defaultShortcut) expect(isShortcutAllowedForAction(action.id, action.defaultShortcut)).toBe(true);
+    }
+  });
+
+  it("compares both keys", () => {
+    expect(shortcutChordEquals(seq("G", "I"), seq("G", "I"))).toBe(true);
+    expect(shortcutChordEquals(seq("G", "I"), seq("G", "M"))).toBe(false);
+    expect(shortcutChordEquals(seq("G", "I"), createShortcutChord("G"))).toBe(false);
+    expect(shortcutChordEquals(createShortcutChord("G"), seq("G", "I"))).toBe(false);
+  });
+
+  it("never matches a single event", () => {
+    expect(shortcutMatchesEvent(seq("G", "I"), keyEvent("g"))).toBe(false);
+    expect(shortcutMatchesEvent(seq("G", "I"), keyEvent("i"))).toBe(false);
+  });
+
+  it("formats as the two keys", () => {
+    expect(formatShortcut(seq("G", "I"), "macos")).toBe("G I");
+    expect(formatShortcut(seq("G", "S", { shift: true }), "windows")).toBe("G Shift+S");
+  });
+
+  it("goes only to navigation, from a bare printable key to another, Shift allowed", () => {
+    expect(isShortcutAllowedForAction("goSettings", seq("G", "S"))).toBe(true);
+    expect(isShortcutAllowedForAction("goSettings", seq("G", "S", { shift: true }))).toBe(true);
+    expect(isShortcutAllowedForAction("goSettings", seq("G", "S", { primary: true }))).toBe(false);
+    expect(isShortcutAllowedForAction("goSettings", seq("G", "S", { alt: true }))).toBe(false);
+    expect(isShortcutAllowedForAction("goSettings", seq("G", "Enter"))).toBe(false);
+    expect(isShortcutAllowedForAction("goSettings", seq("G", "Space"))).toBe(false);
+    expect(
+      isShortcutAllowedForAction("goSettings", {
+        ...createShortcutChord("G", { shift: true }),
+        then: createShortcutChord("S"),
+      }),
+    ).toBe(false);
+    expect(
+      isShortcutAllowedForAction("goSettings", createShortcutSequence("G", seq("S", "T"))),
+    ).toBe(false);
+    expect(isShortcutAllowedForAction("createIssue", seq("G", "N"))).toBe(false);
+    expect(isShortcutAllowedForAction("openSearch", seq("G", "K"))).toBe(false);
+  });
+
+  it("says which keys may start one", () => {
+    expect(canStartShortcutSequence("goInbox", createShortcutChord("G"))).toBe(true);
+    expect(canStartShortcutSequence("goInbox", createShortcutChord("G", { shift: true }))).toBe(false);
+    expect(canStartShortcutSequence("goInbox", createShortcutChord("Enter"))).toBe(false);
+    expect(canStartShortcutSequence("createIssue", createShortcutChord("G"))).toBe(false);
   });
 });

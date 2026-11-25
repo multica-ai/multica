@@ -19,6 +19,7 @@ type ModalType =
   | "issue-delete-confirm"
   | "issue-run-confirm"
   | "issue-workflow-handoff"
+  | "keyboard-shortcuts"
   | null;
 
 // Each reason is a Cloud-enforced limit whose recovery dialog offers billing

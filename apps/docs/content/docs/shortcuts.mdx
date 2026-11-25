@@ -1,6 +1,6 @@
 ---
 title: Search, shortcuts, and preferences
-description: Search and run commands with ⌘K, review and rebind keyboard shortcuts, find text inside an issue, and set personal preferences such as theme, language, and time zone.
+description: Search and run commands with ⌘K, drive issues and lists from the keyboard, review and rebind keyboard shortcuts, find text inside an issue, and set personal preferences such as theme, language, and time zone.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -27,8 +27,11 @@ Selecting a result opens it. Hold `⌘` (`Ctrl` on Windows and Linux) while clic
 
 ## Keyboard shortcuts
 
+Press `?` anywhere outside a text field to see every shortcut. The groups for the page you're on come first, marked **current page**; type in the box at the top to filter by name. The link at the bottom opens **Settings → Shortcuts**.
+
 | Action | macOS | Windows / Linux | Notes |
 |---|---|---|---|
+| Show keyboard shortcuts | `?` | `?` | |
 | Open search | `⌘K` | `Ctrl+K` | |
 | Create issue | `C` | `C` | Opens your preferred creation flow. On a project page, the new issue is prefilled with that project. |
 | Toggle left sidebar | `⌘B` | `Ctrl+B` | |
@@ -47,9 +50,56 @@ Selecting a result opens it. Hold `⌘` (`Ctrl` on Windows and Linux) while clic
 | Go back | `⌘[` | `Ctrl+[` | |
 | Go forward | `⌘]` | `Ctrl+]` | |
 
-Single-key shortcuts (`C`, `E`, `H`, `U`, `J`, `K`, `Z`) and Go back / Go forward don't fire while you're typing in an input.
+Single-key shortcuts and Go back / Go forward don't fire while you're typing in an input.
 
-The **Navigation** group also has Go to Inbox, Chat, My Issues, Issues, Projects, Autopilot, Agents, Squads, Usage, Runtimes, Skills, and Settings. None of them has a key by default; bind the ones you use. Go to Inbox opens the Inbox page; the notification list itself is a section of the Work panel, right below Pinned. Go to My Issues opens the My Issues page, which is not the same as the **My work** view in the Work panel.
+### Go to a page
+
+Press `G`, then a second key, within a second and a half:
+
+| Keys | Goes to |
+|---|---|
+| `G` `I` | Inbox |
+| `G` `M` | My Issues |
+| `G` `T` | Issues |
+| `G` `P` | Projects |
+| `G` `C` | Chat |
+| `G` `A` | Agents |
+
+The **Navigation** group in Settings also has Go to Autopilot, Squads, Usage, Runtimes, Skills, and Settings, with no key by default; bind the ones you use. Go to Inbox opens the Inbox page; the notification list itself is a section of the Work panel, right below Pinned. Go to My Issues opens the My Issues page, which is not the same as the **My work** view in the Work panel.
+
+While `G` waits for its second key, that key belongs to the sequence: `G` then `P` opens Projects instead of setting a priority. Any other key ends the wait and does what it normally does.
+
+### Act on an issue
+
+These work on the issue in front of you: the open issue page, the issue in a side preview, the issues you selected in a list, or the row the list cursor is on. Each opens the same picker as the matching command in the search box, already on that issue or selection.
+
+| Action | Key | Notes |
+|---|---|---|
+| Change status | `S` | |
+| Assign | `A` | |
+| Set priority | `P` | |
+| Edit labels | `L` | |
+| Set due date | `⇧D` | `Shift+D` on Windows and Linux. |
+| Move to project | `⇧P` | `Shift+P` on Windows and Linux. |
+| Run quick action | `Q` | On a single issue, when the workspace has active quick actions. |
+| Reply | `R` | Puts the cursor in the open issue's comment box. |
+
+Guests can only use `R`.
+
+### Move through lists and boards
+
+On an issue list, table, or board, the keys below move a cursor over the issues. They can't be rebound. Pointing at a row moves the cursor there and hides it; the next key carries on from that row.
+
+| Action | macOS | Windows / Linux | Notes |
+|---|---|---|---|
+| Move down / up | `J` / `K`, or `↓` / `↑` | `J` / `K`, or `↓` / `↑` | The first press starts at the top, or at the bottom going up. |
+| Move across board columns | `←` / `→` | `←` / `→` | On a board only. In a board's side preview, `H` / `L` do the same. |
+| Open | `↵` | `Enter` | Opens the issue the way **Opening issues** in Preferences says. |
+| Preview | `Space` | `Space` | Opens or closes the side preview. |
+| Select | `X` | `X` | Adds the issue to the selection, or takes it out. |
+| Extend selection | `⇧↓` / `⇧↑` | `Shift+↓` / `Shift+↑` | |
+| Select all | `⌘A` | `Ctrl+A` | Once the cursor is showing or something is selected. |
+| Clear selection | `Esc` | `Esc` | A second `Esc` hides the cursor. |
 
 ### Fixed system shortcuts
 
@@ -76,6 +126,8 @@ Open **Settings → Shortcuts**. Use the search box at the top to find an action
 
 Click the keys to the right of an action. When it says "Press keys", press the new combination. `Esc` cancels; `Delete` clears the action's shortcut.
 
+For a **Navigation** action you can also record two keys in a row, such as `G` then `U`. After a single letter the row waits for the second key: `↵` keeps the single letter, `Backspace` starts over.
+
 </Step>
 <Step>
 
@@ -88,7 +140,8 @@ Shortcuts are saved on the current device only. On another computer, or when you
 
 Recording rejects a few kinds of combinations and says why under the keys:
 
-- A combination already assigned to another action.
+- A combination already assigned to another action. A single key also clashes with any sequence that starts with it: while Go to Inbox is `G` then `I`, no other action can be `G` on its own.
+- A sequence on anything but a **Navigation** action, or one whose first key isn't a plain letter, digit, or symbol.
 - Combinations the browser, the desktop window, or the operating system owns, such as `⌘W`, `⌘R`, `⌘Q`, `⌘,`, editing keys like copy and paste, `⌘0`–`⌘9`, and the zoom keys. In a browser, `⌘P`, `⌘L`, `⌘T`, `⌘N`, `⌘D`, and `⌘U` are off-limits too; the desktop app allows them. On Windows and Linux, any combination with the Win / Super key is rejected.
 - Actions that also work inside an input, such as Open search, Toggle chat window, and Find in issue, need `⌘`, `Ctrl`, or `Control`, so they never fire while you type. Voice input also accepts `Option` / `Alt` with a non-printing key, such as `Space`, unless the combination is reserved.
 - **Send** can only be `↵` or `⌘↵`.
