@@ -110,7 +110,7 @@ Les motifs d'échec affichés dans le journal d'exécution et dans les [Statisti
 | `timeout` | Dépassement de la limite de durée d'exécution configurée pour le daemon | Réduisez le périmètre de la tâche, ou ajustez `agent_timeout` du daemon |
 | `iteration_limit` | Plafond d'itérations d'une exécution atteint | Réduisez le périmètre de la tâche |
 | `agent_blocked` | L'agent a signalé qu'il ne peut pas continuer | Fournissez ce que son commentaire demande |
-| `api_invalid_request` | L'API de la plateforme a rejeté une requête invalide | Relancez ; signalez le problème s'il se reproduit |
+| `api_invalid_request` | L'API du modèle a refusé cette conversation : la requête a été jugée invalide (par exemple une image illisible), ou le modèle a refusé de répondre | La prochaine exécution démarre automatiquement une nouvelle session. Si la même demande est refusée à chaque fois, reformulez-la ou changez de modèle |
 | `codex_semantic_inactivity` | Codex n'a produit aucune sortie utile pendant trop longtemps et a été jugé bloqué | Relancez, ou ajustez le délai d'inactivité de Codex |
 
 </Tab>
