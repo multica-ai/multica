@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/issueworkflow"
@@ -28,7 +29,8 @@ import (
 //     enters the column it lands on only when the caller asks for it.
 //
 // Handoffs reuse assignment wholesale: the resolved handler goes through the
-// same permission gate as a hand-picked assignee, and the run starts through
+// same permission gate as a hand-picked assignee (a handler archived or gone
+// since the step was set hands off to nobody), and the run starts through
 // the same WillEnqueueRun predicate, with the step's brief as its handoff note.
 
 // workflowHandoff is a handoff an issue write triggers.
@@ -107,12 +109,31 @@ func (h *Handler) applyIssueWorkflow(ctx context.Context, prev db.Issue, params 
 		return nil, nil
 	}
 	assigneeType, assigneeID, ok := issueworkflow.ResolveHandler(step, project, prev.CreatorType, prev.CreatorID)
-	if !ok {
+	if !ok || h.handoffTargetRetired(ctx, prev.WorkspaceID, assigneeType, assigneeID) {
 		return nil, nil
 	}
 	params.AssigneeType = pgtype.Text{String: assigneeType, Valid: true}
 	params.AssigneeID = assigneeID
 	return &workflowHandoff{def: *def, step: step, project: project}, nil
+}
+
+// handoffTargetRetired reports whether a resolved handler can no longer take
+// work: an archived agent or squad, or a user who left the workspace. Its step
+// then hands off to nobody, like a relative handler with nobody to resolve
+// to, instead of failing every write that enters the step.
+func (h *Handler) handoffTargetRetired(ctx context.Context, workspaceID pgtype.UUID, assigneeType string, assigneeID pgtype.UUID) bool {
+	switch assigneeType {
+	case "agent":
+		agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{ID: assigneeID, WorkspaceID: workspaceID})
+		return errors.Is(err, pgx.ErrNoRows) || (err == nil && agent.ArchivedAt.Valid)
+	case "squad":
+		squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{ID: assigneeID, WorkspaceID: workspaceID})
+		return errors.Is(err, pgx.ErrNoRows) || (err == nil && squad.ArchivedAt.Valid)
+	case "member":
+		_, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{UserID: assigneeID, WorkspaceID: workspaceID})
+		return errors.Is(err, pgx.ErrNoRows)
+	}
+	return false
 }
 
 // workflowStepMoved shares the step guard with the claim brief so a run is
