@@ -1,0 +1,169 @@
+{
+  "title": "Barra de comandos",
+  "description": "Busque, execute comandos ou delegue trabalho a um agente",
+  "placeholder": "Busque ou digite o que precisa ser feito...",
+  "page_placeholder": "Filtrar...",
+  "breadcrumb_aria": "Menu atual",
+  "groups": {
+    "pages": "Páginas",
+    "views": "Visualizações",
+    "commands": "Comandos",
+    "members": "Membros",
+    "agents": "Agentes",
+    "squads": "Squads",
+    "projects": "Projetos",
+    "issues": "Tarefas",
+    "autopilots": "Automações",
+    "chats": "Chats",
+    "skills": "Skills",
+    "docs": "Documentos",
+    "cancelled": "Cancelada",
+    "recent": "Recentes",
+    "workspaces": "Espaços de trabalho",
+    "new": "Novo",
+    "best_match": "Melhor correspondência",
+    "actions": "Ações"
+  },
+  "context": {
+    "current_issue": "Tarefa atual",
+    "selected_issues_one": "{{count}} tarefa selecionada",
+    "selected_issues_other": "{{count}} tarefas selecionadas",
+    "current_project": "Projeto atual",
+    "current_agent": "Agente atual",
+    "current_autopilot": "Automação atual",
+    "inbox": "Caixa de entrada",
+    "current_chat": "Chat atual"
+  },
+  "commands": {
+    "current_theme_aria": "Tema atual",
+    "current_mode_aria": "Modo atual",
+    "new_issue": "Nova tarefa",
+    "new_project": "Novo projeto",
+    "new_autopilot": "Nova automação",
+    "chat_with_agent": "Conversar com um agente",
+    "change_theme": "Alterar tema...",
+    "send_feedback": "Enviar feedback",
+    "copy_issue_link": "Copiar link da tarefa",
+    "copy_identifier": "Copiar identificador ({{identifier}})",
+    "fold_all_comments": "Recolher todos os comentários",
+    "unfold_all_comments": "Expandir todos os comentários"
+  },
+  "issue": {
+    "change_status": "Alterar status...",
+    "assign_to": "Atribuir a...",
+    "set_priority": "Definir prioridade...",
+    "run_quick_action": "Executar ação rápida...",
+    "quick_actions_available_one": "{{count}} disponível",
+    "quick_actions_available_other": "{{count}} disponíveis",
+    "add_label": "Adicionar etiqueta...",
+    "set_due_date": "Definir prazo...",
+    "move_to_project": "Mover para projeto...",
+    "set_parent": "Definir tarefa principal...",
+    "cancel_run": "Cancelar execução atual",
+    "retry_run": "Repetir última execução",
+    "create_sub_issue": "Nova subtarefa",
+    "subscribe": "Inscrever-se",
+    "unsubscribe": "Cancelar inscrição",
+    "delete": "Excluir tarefa",
+    "delete_selected_one": "Excluir {{count}} tarefa",
+    "delete_selected_other": "Excluir {{count}} tarefas"
+  },
+  "project": {
+    "change_status": "Alterar status do projeto...",
+    "new_issue": "Nova tarefa neste projeto",
+    "pin": "Fixar na barra lateral",
+    "unpin": "Desafixar da barra lateral",
+    "copy_link": "Copiar link do projeto"
+  },
+  "agent": {
+    "chat": "Conversar com {{name}}",
+    "assign_issue": "Atribuir uma tarefa a {{name}}...",
+    "new_issue": "Nova tarefa para {{name}}",
+    "pin_in_chat": "Fixar no chat",
+    "unpin_in_chat": "Desafixar do chat",
+    "settings": "Abrir configurações do agente"
+  },
+  "autopilot": {
+    "run_now": "Executar uma vez agora",
+    "pause": "Pausar",
+    "resume": "Retomar"
+  },
+  "inbox": {
+    "archive": "Arquivar",
+    "mark_unread": "Marcar como não lida",
+    "mark_all_read": "Marcar toda a caixa de entrada como lida",
+    "archive_all_read": "Arquivar todos os itens lidos da caixa de entrada"
+  },
+  "chat": {
+    "link_project": "Vincular ao projeto...",
+    "pin": "Fixar chat",
+    "unpin": "Desafixar chat",
+    "archive": "Arquivar chat"
+  },
+  "pages": {
+    "status": "Status",
+    "priority": "Prioridade",
+    "assignee": "Responsável",
+    "labels": "Etiquetas",
+    "due_date": "Prazo",
+    "project": "Projeto",
+    "parent": "Tarefa principal",
+    "quick_actions": "Ações rápidas",
+    "project_status": "Status do projeto",
+    "no_project": "Sem projeto",
+    "current": "Atual"
+  },
+  "theme": {
+    "light": "Claro",
+    "dark": "Escuro",
+    "system": "Sistema"
+  },
+  "toast": {
+    "link_copied": "Link copiado",
+    "copied_identifier": "{{identifier}} copiado",
+    "run_retried": "Execução reiniciada",
+    "run_cancelled": "Execução cancelada",
+    "subscribed": "Inscrito",
+    "unsubscribed": "Inscrição cancelada",
+    "label_added": "Etiqueta {{name}} adicionada",
+    "label_removed": "Etiqueta {{name}} removida",
+    "update_failed": "Falha ao atualizar",
+    "assigned": "{{identifier}} atribuída a {{name}}"
+  },
+  "empty": {
+    "no_results": "Nenhum resultado encontrado.",
+    "no_labels": "Nenhuma etiqueta",
+    "type_to_find_issue": "Digite para encontrar uma tarefa",
+    "type_to_find_people": "Digite para encontrar pessoas e agentes"
+  },
+  "delegate": {
+    "row": "Passar para um agente: “{{prompt}}”",
+    "hint": "Criar com agente"
+  },
+  "best": {
+    "assign": "Atribuir {{subject}} a {{name}}",
+    "chat": "Conversar com {{name}}",
+    "new_issue_in": "Nova tarefa em {{name}}"
+  },
+  "types": {
+    "issue": "Tarefa",
+    "project": "Projeto",
+    "agent": "Agente",
+    "autopilot": "Automação",
+    "squad": "Squad",
+    "member": "Membro"
+  },
+  "footer": {
+    "navigate": "Navegar",
+    "select": "Selecionar",
+    "open_in_new_tab": "Abrir em nova aba",
+    "back": "Voltar",
+    "prefix_commands": "Comandos",
+    "prefix_issues": "Tarefas",
+    "prefix_people": "Pessoas e agentes"
+  },
+  "trigger": {
+    "label": "Buscar..."
+  },
+  "untitled_doc": "Sem título"
+}

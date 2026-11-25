@@ -1,0 +1,148 @@
+{
+  "daemon_setup": {
+    "loading": "Carregando configurações de conexão...",
+    "error": "Não foi possível carregar as configurações de conexão. Verifique sua rede; tentando novamente automaticamente.",
+    "unknown": "Este servidor ainda não confirmou suas configurações de conexão. Peça ao seu administrador para atualizar o servidor.",
+    "incomplete": "As configurações de conexão estão incompletas. Peça ao seu administrador para configurar as URLs públicas deste servidor."
+  },
+  "avatar_upload": {
+    "change": "Alterar avatar",
+    "remove": "Remover",
+    "select_image": "Escolha um arquivo de imagem.",
+    "updated": "Avatar atualizado",
+    "failed": "Falha ao enviar o avatar",
+    "upload_image": "Enviar imagem",
+    "emoji_label": "Emoji",
+    "more_emojis": "Mais emojis...",
+    "emoji_loading": "Carregando...",
+    "text_icon": "Ícone de texto"
+  },
+  "avatar_crop": {
+    "title": "Editar avatar",
+    "zoom": "Zoom",
+    "zoom_in": "Ampliar",
+    "zoom_out": "Reduzir",
+    "rotate": "Girar",
+    "reset": "Redefinir",
+    "cancel": "Cancelar",
+    "apply": "Salvar",
+    "uploading": "Enviando...",
+    "loading": "Carregando...",
+    "load_failed": "Não foi possível carregar a imagem"
+  },
+  "text_avatar": {
+    "title": "Ícone de texto",
+    "preview": "Pré-visualização",
+    "text_label": "Texto",
+    "text_hint": "Até 2 caracteres (letras, números ou CJK). Caracteres extras são cortados.",
+    "color_label": "Cor",
+    "render_failed": "Não foi possível criar o ícone. Tente novamente."
+  },
+  "color_picker": {
+    "saturation": "Saturação e brilho",
+    "hue": "Matiz",
+    "hex": "Cor hexadecimal",
+    "eyedropper": "Escolher uma cor da tela",
+    "presets": "Predefinições",
+    "random": "Aleatória"
+  },
+  "save": "Salvar",
+  "cancel": "Cancelar",
+  "delete": "Excluir",
+  "confirm": "Confirmar",
+  "more_actions": "Mais ações",
+  "loading": "Carregando...",
+  "time": {
+    "just_now": "agora mesmo",
+    "minutes_ago": "há {{count}} min",
+    "hours_ago": "há {{count}} h",
+    "days_ago": "há {{count}} d"
+  },
+  "lark_bind": {
+    "page_title": "Vincule sua conta do Feishu / Lark",
+    "redeeming": "Vinculando sua conta...",
+    "needs_auth_description": "Entre para conectar sua conta do Feishu / Lark à sua conta do Multica.",
+    "sign_in": "Entrar",
+    "done_title": "Conta vinculada",
+    "done_description": "Sua próxima mensagem para o bot no Feishu / Lark irá direto para o agente. Você pode fechar esta aba.",
+    "error_title": "Não foi possível concluir a vinculação",
+    "error_admin_hint": "Se isso continuar acontecendo, peça ao administrador do espaço de trabalho para reenviar o link de vinculação pelo Lark.",
+    "error_missing_token": "O link está sem o token de vinculação. Peça ao bot para enviar um novo no Lark.",
+    "error_expired": "Este link de vinculação é inválido ou expirou (os links valem por 15 minutos). Peça ao bot para enviar um novo.",
+    "error_already_bound": "Esta conta do Feishu / Lark já está vinculada a outra conta do Multica. Desvincule-a dessa conta primeiro antes de vinculá-la aqui.",
+    "error_not_member": "Você entrou com uma conta do Multica que não é membro deste espaço de trabalho.",
+    "error_unknown": "Algo deu errado. Tente novamente e, se o problema persistir, fale com o administrador do espaço de trabalho."
+  },
+  "slack_bind": {
+    "page_title": "Vincule sua conta do Slack",
+    "redeeming": "Vinculando sua conta...",
+    "needs_auth_description": "Entre para conectar sua conta do Slack à sua conta do Multica.",
+    "sign_in": "Entrar",
+    "done_title": "Conta vinculada",
+    "done_description": "Sua próxima mensagem para o bot no Slack irá direto para o agente. Você pode fechar esta aba.",
+    "error_title": "Não foi possível concluir a vinculação",
+    "error_admin_hint": "Se isso continuar acontecendo, envie outra mensagem para o bot no Slack para obter um novo link.",
+    "error_missing_token": "O link está sem o token. Envie outra mensagem para o bot no Slack para obter um novo.",
+    "error_expired": "Este link é inválido ou expirou (os links valem por 15 minutos). Envie outra mensagem para o bot para obter um novo.",
+    "error_already_bound": "Esta conta do Slack já está vinculada a outra conta do Multica. Desvincule-a dessa conta primeiro antes de vinculá-la aqui.",
+    "error_not_member": "Você entrou com uma conta do Multica que não é membro deste espaço de trabalho.",
+    "error_unknown": "Algo deu errado. Tente novamente e, se o problema persistir, fale com o administrador do espaço de trabalho."
+  },
+  "dingtalk_bind": {
+    "page_title": "Vincule sua conta do DingTalk",
+    "redeeming": "Vinculando sua conta...",
+    "needs_auth_description": "Entre para conectar sua conta do DingTalk à sua conta do Multica.",
+    "sign_in": "Entrar",
+    "done_title": "Conta vinculada",
+    "done_description": "Sua próxima mensagem para o bot no DingTalk irá direto para o agente. Você pode fechar esta aba.",
+    "error_title": "Não foi possível concluir a vinculação",
+    "error_admin_hint": "Se isso continuar acontecendo, envie outra mensagem para o bot no DingTalk para obter um novo link.",
+    "error_missing_token": "O link está sem o token. Envie outra mensagem para o bot no DingTalk para obter um novo.",
+    "error_expired": "Este link é inválido ou expirou (os links valem por 15 minutos). Envie outra mensagem para o bot para obter um novo.",
+    "error_already_bound": "Esta conta do DingTalk já está vinculada a outra conta do Multica. Desvincule-a dessa conta primeiro antes de vinculá-la aqui.",
+    "error_not_member": "Você entrou com uma conta do Multica que não é membro deste espaço de trabalho.",
+    "error_unknown": "Algo deu errado. Tente novamente e, se o problema persistir, fale com o administrador do espaço de trabalho."
+  },
+  "telegram_bind": {
+    "page_title": "Vincule sua conta do Telegram",
+    "redeeming": "Vinculando sua conta...",
+    "needs_auth_description": "Entre para conectar sua conta do Telegram à sua conta do Multica.",
+    "sign_in": "Entrar",
+    "done_title": "Conta vinculada",
+    "done_description": "Sua próxima mensagem para o bot no Telegram irá direto para o agente. Você pode fechar esta aba.",
+    "error_title": "Não foi possível concluir a vinculação",
+    "error_admin_hint": "Se isso continuar acontecendo, envie outra mensagem para o bot no Telegram para obter um novo link.",
+    "error_missing_token": "O link está sem o token. Envie outra mensagem para o bot no Telegram para obter um novo.",
+    "error_expired": "Este link é inválido ou expirou (os links valem por 15 minutos). Envie outra mensagem para o bot para obter um novo.",
+    "error_already_bound": "Esta conta do Telegram já está vinculada a outra conta do Multica. Desvincule-a dessa conta primeiro antes de vinculá-la aqui.",
+    "error_not_member": "Você entrou com uma conta do Multica que não é membro deste espaço de trabalho.",
+    "error_unknown": "Algo deu errado. Tente novamente e, se o problema persistir, fale com o administrador do espaço de trabalho."
+  },
+  "expandable_description": {
+    "expand": "Mostrar mais",
+    "collapse": "Mostrar menos"
+  },
+  "wecom_bind": {
+    "page_title": "Vincule sua conta do WeCom",
+    "redeeming": "Vinculando sua conta...",
+    "needs_auth_description": "Entre para conectar sua conta do WeCom à sua conta do Multica.",
+    "sign_in": "Entrar",
+    "done_title": "Conta vinculada",
+    "done_description": "Sua próxima mensagem para o bot no WeCom irá direto para o agente. Você pode fechar esta aba.",
+    "error_title": "Não foi possível concluir a vinculação",
+    "error_admin_hint": "Se isso continuar acontecendo, envie outra mensagem para o bot no WeCom para obter um novo link.",
+    "error_missing_token": "O link está sem o token. Envie outra mensagem para o bot no WeCom para obter um novo.",
+    "error_expired": "Este link é inválido ou expirou (os links valem por 15 minutos). Envie outra mensagem para o bot para obter um novo.",
+    "error_already_bound": "Esta conta do WeCom já está vinculada a outra conta do Multica. Desvincule-a dessa conta primeiro antes de vinculá-la aqui.",
+    "error_not_member": "Você entrou com uma conta do Multica que não é membro deste espaço de trabalho.",
+    "error_unknown": "Algo deu errado. Tente novamente e, se o problema persistir, fale com o administrador do espaço de trabalho."
+  },
+  "not_found": {
+    "title": "Página não encontrada",
+    "description": "A página que você procura não existe ou foi movida.",
+    "back_to_multica": "Voltar ao Multica"
+  },
+  "navigation": {
+    "open_in_new_tab": "Abrir em nova aba"
+  }
+}

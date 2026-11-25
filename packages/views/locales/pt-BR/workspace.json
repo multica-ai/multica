@@ -1,0 +1,34 @@
+{
+  "create_form": {
+    "name_label": "Nome do espaço de trabalho",
+    "name_placeholder": "Meu espaço de trabalho",
+    "url_label": "URL do espaço de trabalho",
+    "url_placeholder": "meu-espaco-de-trabalho",
+    "submit": "Criar espaço de trabalho",
+    "submitting": "Criando...",
+    "errors": {
+      "slug_format": "Apenas letras minúsculas, números e hífens",
+      "slug_taken": "Essa URL de espaço de trabalho já está em uso.",
+      "slug_reserved": "Essa URL de espaço de trabalho é reservada e não pode ser usada.",
+      "slug_conflict_toast": "Escolha uma URL de espaço de trabalho diferente",
+      "create_failed": "Falha ao criar o espaço de trabalho"
+    }
+  },
+  "new_page": {
+    "back": "Voltar",
+    "log_out": "Sair",
+    "title": "Boas-vindas ao Multica",
+    "description": "Um espaço de trabalho onde você e seus colegas de equipe de IA trabalham lado a lado — assumindo tarefas, deixando comentários e compartilhando o mesmo contexto.",
+    "invite_hint": "Você pode convidar colegas de equipe assim que seu espaço de trabalho estiver pronto."
+  },
+  "creation_disabled": {
+    "title": "A criação de espaços de trabalho está desativada",
+    "description": "Esta instância do Multica não permite a criação de novos espaços de trabalho. Peça ao seu administrador um convite para um espaço de trabalho existente."
+  },
+  "no_access": {
+    "title": "Espaço de trabalho indisponível",
+    "description": "Este espaço de trabalho não existe ou você não tem acesso a ele.",
+    "go_to_workspaces": "Ir para meus espaços de trabalho",
+    "sign_in_different": "Entrar como outro usuário"
+  }
+}
