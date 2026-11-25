@@ -6,7 +6,8 @@ export type DialogLocale =
   | "ko"
   | "fr"
   | "es"
-  | "ru";
+  | "ru"
+  | "pt-BR";
 
 let appLocaleOverride: string | null = null;
 
@@ -43,5 +44,6 @@ export function resolveDialogLocale(preferredLanguage: string): DialogLocale {
   if (lang === "fr") return "fr";
   if (lang === "es") return "es";
   if (lang === "ru") return "ru";
+  if (lang === "pt") return "pt-BR";
   return "en";
 }

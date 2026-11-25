@@ -92,4 +92,14 @@ export const useCaseText: Record<SupportedLocale, UseCaseText> = {
     cardReadMore: "Читать →",
     tableOfContents: "На этой странице",
   },
+  "pt-BR": {
+    indexTitle: "Casos de uso",
+    indexSubtitle:
+      "Veja como equipes organizam pessoas e agentes juntos no Multica.",
+    indexMetadataTitle: "Casos de uso",
+    indexMetadataDescription:
+      "Veja como equipes colocam pessoas e agentes para trabalhar juntos no Multica.",
+    cardReadMore: "Ler →",
+    tableOfContents: "Nesta página",
+  },
 };

@@ -6,7 +6,8 @@ export type SupportedLocale =
   | "ja"
   | "fr"
   | "es"
-  | "ru";
+  | "ru"
+  | "pt-BR";
 
 export const SUPPORTED_LOCALES: SupportedLocale[] = [
   "en",
@@ -17,6 +18,7 @@ export const SUPPORTED_LOCALES: SupportedLocale[] = [
   "fr",
   "es",
   "ru",
+  "pt-BR",
 ];
 export const DEFAULT_LOCALE: SupportedLocale = "en";
 

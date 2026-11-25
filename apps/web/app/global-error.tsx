@@ -115,4 +115,10 @@ const EMERGENCY_COPY = {
     description: "На странице произошла непредвиденная ошибка. Попробуйте перезагрузить.",
     reload: "Перезагрузить",
   },
+  "pt-BR": {
+    title: "Algo deu errado",
+    description:
+      "A página encontrou um erro inesperado. Tente recarregar.",
+    reload: "Recarregar",
+  },
 } as const;

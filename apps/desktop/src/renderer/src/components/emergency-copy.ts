@@ -21,6 +21,7 @@ function matchSupportedLocale(raw: string): SupportedLocale {
   if (lang === "fr") return "fr";
   if (lang === "es") return "es";
   if (lang === "ru") return "ru";
+  if (lang === "pt") return "pt-BR";
   return "en";
 }
 
@@ -149,5 +150,16 @@ export const DESKTOP_EMERGENCY_COPY: Record<
     configDescriptionBefore: "Multica не удалось загрузить ",
     configDescriptionAfter:
       ". Исправьте или удалите этот файл и перезапустите приложение.",
+  },
+  "pt-BR": {
+    crashTitle: "Algo deu errado",
+    crashDescription:
+      "O Multica encontrou um erro inesperado e não pôde continuar exibindo a tela. Recarregar normalmente resolve — seu trabalho está salvo no servidor.",
+    crashFallbackError: "Ocorreu um erro inesperado.",
+    reload: "Recarregar",
+    configTitle: "Erro de configuração do desktop",
+    configDescriptionBefore: "O Multica não conseguiu carregar ",
+    configDescriptionAfter:
+      ". Corrija ou remova o arquivo e reinicie o aplicativo.",
   },
 };

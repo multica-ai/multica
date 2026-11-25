@@ -19,6 +19,7 @@ const BUNDLES: Record<SupportedLocale, ComponentType<LocaleBundleProps>> = {
   fr: dynamic<LocaleBundleProps>(() => import("./bundles/fr")),
   es: dynamic<LocaleBundleProps>(() => import("./bundles/es")),
   ru: dynamic<LocaleBundleProps>(() => import("./bundles/ru")),
+  "pt-BR": dynamic<LocaleBundleProps>(() => import("./bundles/pt-BR")),
 };
 
 export function LocaleBundle({

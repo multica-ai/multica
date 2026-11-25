@@ -150,6 +150,16 @@ const BUSY_INSTALL_COPY: Record<
     message: (count) => `На этом устройстве активно запусков: ${count}.`,
     detail: "Установка сейчас остановит демон и прервёт активные запуски.",
   },
+  "pt-BR": {
+    title: "Instalar atualização",
+    installNow: "Instalar agora",
+    cancel: "Cancelar",
+    message: (count) =>
+      count === 1
+        ? "Há 1 execução ativa neste dispositivo."
+        : `Há ${count} execuções ativas neste dispositivo.`,
+    detail: "Instalar agora para o daemon e interrompe as execuções ativas.",
+  },
 };
 
 export function createElectronBusyInstallPrompt(
