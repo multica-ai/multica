@@ -1574,7 +1574,7 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 	case "running":
 		printDaemonStatusReport(os.Stdout, label, health)
 	case "starting":
-		fmt.Fprintf(os.Stdout, "%s: starting (pid %v)\n", label, health["pid"])
+		fmt.Fprintf(os.Stdout, "%s: starting (pid %s)\n", label, formatHealthPID(health["pid"]))
 	default:
 		fmt.Fprintf(os.Stdout, "%s: stopped\n", label)
 	}
