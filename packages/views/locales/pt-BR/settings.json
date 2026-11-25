@@ -387,6 +387,9 @@
     "record_aria": "Alterar atalho para {{action}}",
     "recording": "Pressione as teclas",
     "record_hint": "Esc cancela · Delete limpa",
+    "record_sequence_hint": "Pressione uma tecla ou duas em sequência, como G depois I · Esc cancela",
+    "record_then_hint": "Pressione a segunda tecla · ↵ mantém uma tecla · Backspace recomeça",
+    "then": "depois",
     "unassigned": "Não atribuído",
     "no_results": "Nenhuma ação de atalho correspondente.",
     "conflict_error": "Já usado por {{action}}.",
@@ -490,6 +493,10 @@
         "label": "Responder",
         "description": "Focar o campo de comentário da tarefa aberta."
       },
+      "showShortcuts": {
+        "label": "Mostrar atalhos de teclado",
+        "description": "Abre a lista de atalhos, com os da página atual primeiro."
+      },
       "send": {
         "label": "Enviar",
         "description": "Também envia novas tarefas."
@@ -566,6 +573,32 @@
       "zoom_out": "Diminuir zoom",
       "reset_zoom": "Redefinir zoom",
       "close_dialog": "Fechar caixa de diálogo ou menu"
+    },
+    "cheatsheet": {
+      "title": "Atalhos de teclado",
+      "current_page": "página atual",
+      "footer_prefix": "Os atalhos ficam salvos neste dispositivo. Altere-os em ",
+      "footer_link": "Configurações › Atalhos",
+      "footer_suffix": ".",
+      "groups": {
+        "inbox": "Caixa de entrada",
+        "issue": "Tarefa",
+        "navigation": "Navegação",
+        "general": "Geral",
+        "list": "Listas e quadros",
+        "editor": "Editor"
+      },
+      "rows": {
+        "list_move": "Mover para baixo / cima",
+        "list_columns": "Mover entre colunas do quadro",
+        "list_open": "Abrir",
+        "list_peek": "Pré-visualizar",
+        "list_select": "Selecionar",
+        "list_extend": "Ampliar seleção",
+        "list_select_all": "Selecionar tudo",
+        "list_clear": "Limpar seleção",
+        "editor_leave": "Sair do campo"
+      }
     }
   },
   "chat": {
