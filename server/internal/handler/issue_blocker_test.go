@@ -97,6 +97,46 @@ func TestIssueBlockerAtomicAPIAndFilter(t *testing.T) {
 	testutil.Call(t, testHandler.UpdateIssue, req).Want(http.StatusBadRequest)
 }
 
+// A bulk insert of top-level issues took minutes under stale planner statistics
+// when every row ran the blocker checks.
+func TestIssueBlockerChecksSkipNewTopLevelIssues(t *testing.T) {
+	ctx := context.Background()
+	parent := blockerTestIssue(t, map[string]any{})
+	tx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	// Both checks fail loudly inside this transaction only.
+	if _, err := tx.Exec(ctx, `
+		CREATE OR REPLACE FUNCTION check_issue_blocker_graph(ws uuid, target uuid) RETURNS void
+		LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'blocker checks ran'; END $$;
+		CREATE OR REPLACE FUNCTION arm_issue_blocker_wakeup(ws uuid, target uuid) RETURNS void
+		LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'blocker checks ran'; END $$;
+	`); err != nil {
+		t.Fatal(err)
+	}
+	insert := func(parentID any) error {
+		sub, err := tx.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer sub.Rollback(ctx)
+		_, err = sub.Exec(ctx, `
+			INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position, number, parent_issue_id)
+			SELECT $1, 'blocker checks', 'todo', 'none', 'member', $2, 0, COALESCE(MAX(number), 0) + 1, $3::uuid
+			FROM issue WHERE workspace_id = $1
+		`, testWorkspaceID, testUserID, parentID)
+		return err
+	}
+	if err := insert(nil); err != nil {
+		t.Fatalf("top-level insert: %v", err)
+	}
+	if err := insert(parent.ID); err == nil || !strings.Contains(err.Error(), "blocker checks ran") {
+		t.Fatalf("sub-issue insert skipped the blocker checks: %v", err)
+	}
+}
+
 func TestIssueBlockerRejectsMissingReferenceAtomically(t *testing.T) {
 	title := "missing blocker " + uuid.NewString()
 	testutil.Call(t, testHandler.CreateIssue, newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{"title": title, "blocked_by": []string{uuid.NewString()}})).Want(400)
