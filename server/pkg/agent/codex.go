@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/pkg/redact"
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // codexBlockedArgs are flags hardcoded by the daemon that must not be
@@ -58,6 +59,7 @@ const (
 	// healthy turns the watchdog killed. 60s clears that evidence with margin
 	// while keeping the fast-fail value (MUL-5542).
 	defaultCodexFirstTurnNoProgressTimeout = 60 * time.Second
+	defaultCodexReconnectTimeout           = 5 * time.Minute
 	defaultCodexHandshakeTimeout           = 30 * time.Second
 	// defaultCodexTurnInterruptTimeout gives app-server a short, bounded window to
 	// finish an interrupted turn and report its final token usage before the
@@ -1207,9 +1209,19 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	var semanticObserved atomic.Bool
 	turnNotificationGate := &codexTurnNotificationGate{}
 	firstItemWait := &codexFirstItemWaitObservation{}
+	// These signals must survive bursts that fill the best-effort semantic activity channel.
+	var modelProgress, reconnectSeen atomic.Bool
+	firstReconnect := make(chan time.Time, 1)
+
 	turnDone := make(chan bool, 1) // true = aborted
 
 	observeMessage := func(msg Message) {
+		switch msg.Type {
+		case MessageText, MessageThinking:
+			if msg.Content != "" {
+				modelProgress.Store(true)
+			}
+		}
 		logCodexAgentMessage(b.cfg.Logger, msg)
 		activity := describeCodexSemanticActivity(msg)
 		if activity == "status:running" {
@@ -1272,6 +1284,12 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			outputMu.Lock()
 			output.observeFinalAnswer(text)
 			outputMu.Unlock()
+		},
+		onModelProgress: func() { modelProgress.Store(true) },
+		onReconnect: func() {
+			if !modelProgress.Load() && reconnectSeen.CompareAndSwap(false, true) {
+				firstReconnect <- time.Now()
+			}
 		},
 		onSemanticActivity: func(description string) {
 			semanticObserved.Store(true)
@@ -1552,9 +1570,48 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			firstTurnNoProgressTimerC = nil
 		}
 		defer stopFirstTurnNoProgressTimer()
+		reconnectTimeout := opts.CodexReconnectTimeout
+		if reconnectTimeout <= 0 {
+			reconnectTimeout = defaultCodexReconnectTimeout
+		}
+		var reconnectTimer *time.Timer
+		var reconnectDeadline <-chan time.Time
+		defer func() {
+			if reconnectTimer != nil {
+				reconnectTimer.Stop()
+			}
+		}()
 
 		for waitingForTurn {
 			select {
+			case started := <-firstReconnect:
+				stopFirstTurnNoProgressTimer()
+				if !modelProgress.Load() {
+					reconnectTimer = time.NewTimer(time.Until(started.Add(reconnectTimeout)))
+					reconnectDeadline = reconnectTimer.C
+				}
+			case <-reconnectDeadline:
+				reconnectDeadline = nil
+				if modelProgress.Load() || c.getTurnError() != "" {
+					continue
+				}
+				select {
+				case aborted := <-turnDone:
+					finishTurn(aborted)
+					continue
+				default:
+				}
+				if runCtx.Err() != nil {
+					finishRunContextDone()
+				} else {
+					waitingForTurn = false
+					finishFirstItemWait("reconnect_timeout")
+					finalStatus = "failed"
+					finalError = taskfailure.CodexReconnectFailure
+				}
+				if !interruptCodexTurn(c, threadID, turnDone, opts.TurnInterruptTimeout, b.cfg.Logger) {
+					proc.stopProcess()
+				}
 			case aborted := <-turnDone:
 				finishTurn(aborted)
 			case <-guardianRateLimitTrip:
@@ -1566,6 +1623,10 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 					proc.stopProcess()
 				}
 			case activity := <-semanticActivityCh:
+				if reconnectDeadline != nil && modelProgress.Load() {
+					reconnectTimer.Stop()
+					reconnectDeadline = nil
+				}
 				lastSemanticActivity = time.Now()
 				lastSemanticActivityDescription = activity
 				resetTimer(semanticTimer, semanticInactivityTimeout)
@@ -1584,6 +1645,10 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 					stopFirstTurnNoProgressTimer()
 				}
 			case <-firstTurnNoProgressTimerC:
+				if reconnectSeen.Load() {
+					stopFirstTurnNoProgressTimer()
+					continue
+				}
 				waitingForTurn = false
 				finishFirstItemWait("no_progress_timeout")
 				finalStatus = "timeout"
@@ -2295,6 +2360,8 @@ type codexClient struct {
 	// Result.Output fallbacks must use this callback rather than the last chunk.
 	onAgentMessage           func(text, phase string)
 	onSemanticActivity       func(description string)
+	onModelProgress          func()
+	onReconnect              func()
 	onTurnDone               func(aborted bool)
 	guardianRateLimitCircuit *codexGuardianRateLimitCircuit
 	onGuardianRateLimit      func()
@@ -3309,6 +3376,12 @@ func pluralizeFiles(n int) string {
 
 func (c *codexClient) handleEvent(msg map[string]any) {
 	msgType, _ := msg["type"].(string)
+	if c.onModelProgress != nil && msg["source"] != "userShell" {
+		switch msgType {
+		case "exec_command_begin", "exec_command_end", "patch_apply_begin", "patch_apply_end":
+			c.onModelProgress()
+		}
+	}
 
 	switch msgType {
 	case "task_started":
@@ -3466,6 +3539,12 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 			errMsg = extractNestedString(params, "message")
 		}
 		if errMsg != "" {
+			if willRetry && c.onReconnect != nil && codexReconnectMessage.MatchString(strings.TrimSpace(errMsg)) {
+				turnID, _ := params["turnId"].(string)
+				if active := c.activeTurnID(); active == "" || turnID == "" || active == turnID {
+					c.onReconnect()
+				}
+			}
 			c.cfg.Logger.Warn("codex error notification", "message", errMsg, "will_retry", willRetry)
 			if c.onSemanticActivity != nil {
 				if willRetry {
@@ -3477,6 +3556,13 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 			if !willRetry {
 				c.setTurnError(errMsg)
 			}
+		}
+
+	case "turn/plan/updated":
+		// A plan update is model output even though this client does not
+		// render it; count it as progress for the reconnect deadline.
+		if c.onModelProgress != nil {
+			c.onModelProgress()
 		}
 
 	case "thread/status/changed":
@@ -3650,6 +3736,9 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 	item, _ := params["item"].(map[string]any)
 	itemType, _ := item["type"].(string)
 	itemID, _ := item["id"].(string)
+	if c.onModelProgress != nil && item["source"] != "userShell" && codexModelItemProgress(method, itemType, params) {
+		c.onModelProgress()
+	}
 	if method == "item/agentMessage/delta" {
 		// Unlike item/started and item/completed, the real app-server delta
 		// schema is flat: {threadId, turnId, itemId, delta}.
@@ -3811,6 +3900,25 @@ func codexRawTokenUsageFromV2(usage map[string]any) codexRawTokenUsage {
 		CacheWriteInputTokens: codexInt64(usage, "cacheWriteInputTokens"),
 		ReasoningOutputTokens: codexInt64(usage, "reasoningOutputTokens"),
 	}
+}
+
+var codexReconnectMessage = regexp.MustCompile(`(?i)^reconnecting\.\.\.\s+(?:[0-9]+/[0-9]+|waiting for network)\b`)
+
+func codexModelItemProgress(method, itemType string, params map[string]any) bool {
+	switch method {
+	case "item/started", "item/completed":
+		switch itemType {
+		case "reasoning", "agentMessage", "plan", "commandExecution", "fileChange", "mcpToolCall",
+			"dynamicToolCall", "collabAgentToolCall", "webSearch", "imageView", "imageGeneration":
+			return true
+		}
+	// Command output deltas carry no source, so they are not counted; a model
+	// command already counts through its typed commandExecution item above.
+	case "item/reasoning/textDelta", "item/reasoning/summaryTextDelta", "item/plan/delta":
+		delta, _ := params["delta"].(string)
+		return delta != ""
+	}
+	return false
 }
 
 func isCodexItemProgressActivity(method string) bool {

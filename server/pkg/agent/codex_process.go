@@ -44,6 +44,8 @@ type codexTurnHooks struct {
 	onAgentMessage           func(text, phase string)
 	onFinalAnswer            func(text string)
 	onSemanticActivity       func(description string)
+	onModelProgress          func()
+	onReconnect              func()
 	onTurnDone               func(aborted bool)
 	guardianRateLimitCircuit *codexGuardianRateLimitCircuit
 	onGuardianRateLimit      func()
@@ -63,6 +65,8 @@ func (c *codexClient) attachTurnHooks(h codexTurnHooks) {
 	c.onAgentMessage = h.onAgentMessage
 	c.onFinalAnswer = h.onFinalAnswer
 	c.onSemanticActivity = h.onSemanticActivity
+	c.onModelProgress = h.onModelProgress
+	c.onReconnect = h.onReconnect
 	c.onTurnDone = h.onTurnDone
 	c.guardianRateLimitCircuit = h.guardianRateLimitCircuit
 	c.onGuardianRateLimit = h.onGuardianRateLimit
@@ -98,6 +102,8 @@ func (c *codexClient) detachTurnHooks() {
 	c.onAgentMessage = nil
 	c.onFinalAnswer = nil
 	c.onSemanticActivity = nil
+	c.onModelProgress = nil
+	c.onReconnect = nil
 	c.onTurnDone = nil
 	c.onGuardianRateLimit = nil
 	c.rateLimits = nil

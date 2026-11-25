@@ -97,6 +97,9 @@ func explicitContextOverflow(lower string) bool {
 	) || containsAny(lower, contextWindowExceededWitnesses...)
 }
 
+// CodexReconnectFailure is emitted when Codex only reconnects before its first model response.
+const CodexReconnectFailure = "Codex could not reach the model service (kept reconnecting); check this machine's network or the Codex gateway configuration"
+
 // Classify maps a free-form error string from the agent runtime / CLI
 // to one of the 14 agent_error.* sub-reasons. Always returns a valid
 // Reason; falls back to ReasonAgentUnknown when no rule matches and for
@@ -122,6 +125,9 @@ func explicitContextOverflow(lower string) bool {
 // failure_reason today and lets per-backend structured upgrades land
 // independently.
 func Classify(rawError string) Reason {
+	if rawError == CodexReconnectFailure {
+		return ReasonAgentProviderNetwork
+	}
 	trimmed := strings.TrimSpace(WithoutCodebuddyProtocolSummary(rawError))
 	if trimmed == "" {
 		// SQL maps NULL/empty to a separate bucket ("empty_error"),
