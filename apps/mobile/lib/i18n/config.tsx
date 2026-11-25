@@ -3,6 +3,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -63,13 +64,14 @@ const LocalePreferenceContext = createContext<LocalePreferenceContextValue>({
 
 export function MobileI18nProvider({ children }: { children: ReactNode }) {
   const [preference, setPreferenceState] = useState<LocalePreference>("system");
+  const hasSelectedPreference = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
 
     void SecureStore.getItemAsync(LOCALE_STORAGE_KEY)
       .then((stored) => {
-        if (cancelled || !stored) return;
+        if (cancelled || hasSelectedPreference.current || !stored) return;
         const locale = SUPPORTED_LOCALES.find((candidate) => candidate === stored);
         if (locale) {
           setPreferenceState(locale);
@@ -89,6 +91,7 @@ export function MobileI18nProvider({ children }: { children: ReactNode }) {
     () => ({
       preference,
       setPreference: (next) => {
+        hasSelectedPreference.current = true;
         setPreferenceState(next);
         void i18n.changeLanguage(next === "system" ? SYSTEM_LOCALE : next);
         void SecureStore.setItemAsync(LOCALE_STORAGE_KEY, next).catch(() => {
