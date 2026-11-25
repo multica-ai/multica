@@ -1,14 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  Copy,
   FolderGit,
   FolderOpen,
   GitBranch,
   Laptop,
   Link2,
   Monitor,
+  MoreHorizontal,
   Pencil,
   Plus,
   Search,
@@ -40,6 +42,21 @@ import { useConfigStore } from "@multica/core/config";
 import { Button } from "@multica/ui/components/ui/button";
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@multica/ui/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
+import {
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -51,6 +68,7 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { IconButton } from "@multica/ui/components/common/icon-button";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { cn } from "@multica/ui/lib/utils";
 import {
   isDesktopShell,
@@ -66,19 +84,29 @@ import {
 } from "./local-directory-mode-options";
 import { GithubRefField, githubRefHasError } from "./github-ref-field";
 import { localDirectoryLabel } from "./local-directory-label";
-import { buildRuntimeMachines } from "../../runtimes/components/runtime-machines";
+import {
+  buildRuntimeMachines,
+  type RuntimeMachine,
+} from "../../runtimes/components/runtime-machines";
 import { useT } from "../../i18n";
 import { githubShortLabel } from "../../common/github-url";
-import { ObjectSection, ObjectSectionCard } from "../../layout/object-page";
+import {
+  ObjectSection,
+  ObjectSectionAction,
+  ObjectSectionCard,
+  ObjectSectionEmpty,
+} from "../../layout/object-page";
 
 // Project Resources section of the project page.
 //
-// Grouped by what a resource applies to: repositories apply to every run on
-// every machine, while a local folder only applies to runs on the one machine
-// it is pinned to (at most one per machine). Add a new resource_type by:
+// One list, one Add menu. Repositories apply to every run on every machine,
+// while a local folder only applies to runs on the one machine it is pinned to
+// (at most one per machine), so a folder row names its machine. Add a new
+// resource_type by:
 //   (1) extending the server validator
 //   (2) extending ProjectResourceType in @multica/core/types
-//   (3) giving it a group here; unknown types fall through to a plain row
+//   (3) giving it a row and an Add menu entry here; unknown types fall
+//       through to a plain row
 type GithubResource = ProjectResource & { resource_ref: GithubRepoResourceRef };
 type LocalDirectoryResource = ProjectResource & {
   resource_ref: LocalDirectoryResourceRef;
@@ -134,6 +162,7 @@ const chipClassName = cn(
   "transition-colors hover:bg-surface-selected hover:text-foreground data-[popup-open]:bg-surface-selected data-[popup-open]:text-foreground",
 );
 
+
 export function ProjectResourcesSection({
   projectId,
   readOnly = false,
@@ -144,6 +173,7 @@ export function ProjectResourcesSection({
 }) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
+  const workspace = useCurrentWorkspace();
   const { data: resources = [] } = useQuery(
     projectResourcesOptions(wsId, projectId),
   );
@@ -157,48 +187,650 @@ export function ProjectResourcesSection({
   // still lists existing folders, and changing their mode or removing them
   // only rewrites the resource, which works from anywhere.
   const desktopMode = isDesktopShell();
+  const canAddFolder = desktopMode && !readOnly;
+
+  const daemonStatus = useLocalDaemonStatus();
+  const localDaemonId = daemonStatus.daemonId;
+  // Runtimes only name the machines folders live on, so a project without
+  // folders (and a guest who cannot add one) never asks for them.
+  const { data: runtimes = [] } = useQuery({
+    ...runtimeListOptions(wsId),
+    enabled: folders.length > 0 || canAddFolder,
+  });
+  // Whether this server checks execution_mode on save at all. One declared
+  // boolean, no inference — servers that predate it drop execution_mode and
+  // answer 201.
+  const serverValidatesWorktree = useConfigStore(
+    (state) => state.localWorktreeSupported,
+  );
+  // Machine names and liveness come from the runtimes each daemon registers,
+  // titled the same way as the runtimes page.
+  const machines = useMemo(
+    () =>
+      buildRuntimeMachines(runtimes, {
+        now: Date.now(),
+        localDaemonId,
+        localMachineName: daemonStatus.deviceName,
+      }),
+    [runtimes, localDaemonId, daemonStatus.deviceName],
+  );
+  const currentMachineTitle =
+    (localDaemonId ? machines.find((m) => m.daemonId === localDaemonId)?.title : undefined) ??
+    daemonStatus.deviceName ??
+    undefined;
+
+  const isCurrent = (folder: LocalDirectoryResource) =>
+    desktopMode && localDaemonId !== null && folder.resource_ref.daemon_id === localDaemonId;
+  // This computer's folder first: it is the one that applies to runs here.
+  const orderedFolders = [...folders.filter(isCurrent), ...folders.filter((f) => !isCurrent(f))];
+  const hasCurrentFolder = orderedFolders.some(isCurrent);
 
   return (
-    <ObjectSection collapsible title={t(($) => $.resources.section_header)}>
-      <ObjectSectionCard>
-        <div className="px-3 py-2.5">
-          <RepositoryGroup wsId={wsId} projectId={projectId} repos={repos} readOnly={readOnly} />
-        </div>
-        {((desktopMode && !readOnly) || folders.length > 0) && (
-          <div className="px-3 py-2.5">
-            <LocalFolderGroup
-              wsId={wsId}
-              projectId={projectId}
-              folders={folders}
-              desktopMode={desktopMode}
+    <ObjectSection
+      collapsible
+      title={t(($) => $.resources.section_header)}
+      count={resources.length > 0 ? resources.length : undefined}
+      action={
+        readOnly ? undefined : (
+          <AddResourceMenu
+            wsId={wsId}
+            projectId={projectId}
+            attachedUrls={new Set(repos.map((r) => r.resource_ref.url))}
+            workspaceRepos={workspace?.repos ?? []}
+            canAddFolder={canAddFolder}
+            hasCurrentFolder={hasCurrentFolder}
+            daemonStatus={daemonStatus}
+            runtimes={runtimes}
+            serverValidatesWorktree={serverValidatesWorktree}
+          />
+        )
+      }
+    >
+      {resources.length === 0 ? (
+        <ObjectSectionEmpty
+          icon={FolderGit}
+          description={
+            readOnly
+              ? t(($) => $.resources.empty_read_only)
+              : t(($) => $.resources.empty)
+          }
+        />
+      ) : (
+        <ObjectSectionCard>
+          {repos.map((resource) => (
+            <GithubRepoRow
+              key={resource.id}
+              resource={resource}
+              description={
+                workspace?.repos?.find((repo) => repo.url === resource.resource_ref.url)
+                  ?.description
+              }
               readOnly={readOnly}
             />
-          </div>
-        )}
-        {others.length > 0 && (
-          <div className="space-y-1.5 px-3 py-2.5">
-            {others.map((resource) => (
-              <UnknownResourceRow key={resource.id} resource={resource} readOnly={readOnly} />
-            ))}
-          </div>
-        )}
-      </ObjectSectionCard>
+          ))}
+          {orderedFolders.map((folder) => (
+            <LocalFolderRow
+              key={folder.id}
+              resource={folder}
+              current={isCurrent(folder)}
+              currentMachineTitle={currentMachineTitle}
+              machine={machines.find((m) => m.daemonId === folder.resource_ref.daemon_id)}
+              serverValidatesWorktree={serverValidatesWorktree}
+              readOnly={readOnly}
+            />
+          ))}
+          {others.map((resource) => (
+            <UnknownResourceRow key={resource.id} resource={resource} readOnly={readOnly} />
+          ))}
+        </ObjectSectionCard>
+      )}
     </ObjectSection>
   );
 }
 
-function GroupHeader({
-  label,
-  action,
-}: {
+// ---------------------------------------------------------------------------
+// Adding
+
+type PendingFolder = {
+  path: string;
   label: string;
-  action?: React.ReactNode;
+  mode: LocalDirectoryExecutionMode;
+  /** undefined = unknown (older desktop build); treated as "cannot verify". */
+  isGitRepo: boolean | undefined;
+};
+
+/**
+ * The section's one Add entry. A repository is searched or pasted in a
+ * popover anchored to the same button; a folder goes through the system
+ * picker and then a dialog that asks for the execution mode before anything
+ * is created — it is part of what the user is choosing (whether tasks edit
+ * this folder or hand back a branch), not a setting to discover afterwards.
+ */
+function AddResourceMenu({
+  wsId,
+  projectId,
+  attachedUrls,
+  workspaceRepos,
+  canAddFolder,
+  hasCurrentFolder,
+  daemonStatus,
+  runtimes,
+  serverValidatesWorktree,
+}: {
+  wsId: string;
+  projectId: string;
+  attachedUrls: Set<string>;
+  workspaceRepos: { url: string; description?: string | null }[];
+  canAddFolder: boolean;
+  hasCurrentFolder: boolean;
+  daemonStatus: LocalDaemonStatus;
+  runtimes: AgentRuntime[];
+  serverValidatesWorktree: boolean;
+}) {
+  const { t } = useT("projects");
+  const createResource = useCreateProjectResource(wsId, projectId);
+  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
+  const [repoOpen, setRepoOpen] = useState(false);
+  // The menu hands focus back to its trigger as it closes, which would pull
+  // focus out of the repository popover opening in its place.
+  const openingRepo = useRef(false);
+  const [picking, setPicking] = useState(false);
+  const [pending, setPending] = useState<PendingFolder | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const daemonId = daemonStatus.daemonId;
+  const daemonReady = daemonStatus.running && daemonId !== null;
+
+  // The server allows one folder per computer, so the entry explains why it
+  // is unavailable rather than disappearing.
+  const folderBlocker = !canAddFolder
+    ? t(($) => $.resources.add_local_desktop_only)
+    : !daemonReady
+      ? t(($) => $.resources.local_daemon_offline_hint)
+      : hasCurrentFolder
+        ? t(($) => $.resources.add_local_exists)
+        : null;
+
+  const attachRepo = async (url: string, ref?: string) => {
+    try {
+      await createResource.mutateAsync({
+        resource_type: "github_repo",
+        // Omit the key entirely when empty rather than sending "": an absent
+        // ref is what "use the default branch" looks like on the wire.
+        resource_ref: ref ? { url, ref } : { url },
+      });
+      toast.success(t(($) => $.resources.toast_attached));
+      setRepoOpen(false);
+    } catch (err) {
+      toast.error(errorMessage(err, t(($) => $.resources.toast_attach_failed)));
+    }
+  };
+
+  const pickFolder = async () => {
+    if (picking || !daemonReady) return;
+    setPicking(true);
+    try {
+      const picked = await pickDirectory();
+      if (!picked.ok) {
+        if (picked.reason && picked.reason !== "cancelled") {
+          toast.error(picked.error ?? t(($) => $.resources.toast_local_pick_failed));
+        }
+        return;
+      }
+      const path = picked.path ?? "";
+      const validation = await validateLocalDirectory(path);
+      if (!validation.ok) {
+        toast.error(
+          localValidationMessage(validation, {
+            not_absolute: t(($) => $.resources.local_validate_not_absolute),
+            not_found: t(($) => $.resources.local_validate_not_found),
+            not_a_directory: t(($) => $.resources.local_validate_not_a_directory),
+            not_readable: t(($) => $.resources.local_validate_not_readable),
+            not_writable: t(($) => $.resources.local_validate_not_writable),
+            unsupported: t(($) => $.resources.local_validate_unsupported),
+            fallback: t(($) => $.resources.toast_local_pick_failed),
+          }),
+        );
+        return;
+      }
+      setError(null);
+      setPending({
+        path,
+        label: picked.basename ?? path,
+        // Same preselection rule as the create-project flow: a git repo this
+        // daemon can actually run worktree mode on starts on parallel,
+        // anything else starts on direct. The user still confirms.
+        mode:
+          validation.is_git_repo === true &&
+          serverValidatesWorktree &&
+          runtimeAdvertisesLocalWorktree(runtimes, daemonId)
+            ? "worktree"
+            : "in_place",
+        isGitRepo: validation.is_git_repo,
+      });
+    } catch (err) {
+      toast.error(errorMessage(err, t(($) => $.resources.toast_local_pick_failed)));
+    } finally {
+      setPicking(false);
+    }
+  };
+
+  const addFolder = async () => {
+    if (!pending || !daemonId || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await createResource.mutateAsync({
+        resource_type: "local_directory",
+        resource_ref: {
+          local_path: pending.path,
+          daemon_id: daemonId,
+          label: pending.label,
+          execution_mode: pending.mode,
+        },
+      });
+      toast.success(t(($) => $.resources.toast_local_attached));
+      setPending(null);
+    } catch (err) {
+      // Keep the choice on screen: the likely failures (the one-per-machine
+      // conflict, the daemon-version gate) are things the user acts on here.
+      setError(errorMessage(err, t(($) => $.resources.toast_attach_failed)));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          ref={setAnchor}
+          render={<ObjectSectionAction icon={Plus} disabled={picking} />}
+        >
+          {t(($) => $.resources.add)}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          className="w-72"
+          finalFocus={() => {
+            const skip = openingRepo.current;
+            openingRepo.current = false;
+            return !skip;
+          }}
+        >
+          <AddMenuItem
+            icon={<FolderGit />}
+            title={t(($) => $.resources.add_repo)}
+            hint={t(($) => $.resources.add_repo_hint)}
+            onClick={() => {
+              openingRepo.current = true;
+              setRepoOpen(true);
+            }}
+          />
+          <AddMenuItem
+            icon={<FolderOpen />}
+            title={t(($) => $.resources.add_local)}
+            hint={folderBlocker ?? t(($) => $.resources.add_local_hint)}
+            disabled={folderBlocker !== null}
+            onClick={() => void pickFolder()}
+          />
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Popover open={repoOpen} onOpenChange={setRepoOpen}>
+        <PopoverContent anchor={anchor} align="end" className="w-72 p-2">
+          <AddRepositoryPanel
+            workspaceRepos={workspaceRepos}
+            attachedUrls={attachedUrls}
+            busy={createResource.isPending}
+            onAttach={attachRepo}
+          />
+        </PopoverContent>
+      </Popover>
+      <Dialog
+        open={pending !== null}
+        onOpenChange={(open) => {
+          if (!open && !saving) setPending(null);
+        }}
+      >
+        {pending && (
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>{t(($) => $.resources.local_dialog_title)}</DialogTitle>
+              <DialogDescription>
+                {t(($) => $.resources.local_dialog_description)}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex items-center gap-2 rounded-lg border py-2 pr-1.5 pl-2.5">
+              <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-body font-medium">{pending.label}</div>
+                <div className="break-all font-mono text-micro text-muted-foreground">
+                  {pending.path}
+                </div>
+              </div>
+              <Button
+                variant="ghost"
+                size="xs"
+                disabled={picking || saving}
+                onClick={() => void pickFolder()}
+              >
+                {t(($) => $.resources.local_dialog_change)}
+              </Button>
+            </div>
+            <div className="space-y-1.5">
+              <div className="text-caption font-medium text-muted-foreground">
+                {t(($) => $.resources.local_dialog_mode_label)}
+              </div>
+              <LocalDirectoryModeOptions
+                value={pending.mode}
+                onChange={(mode) => setPending({ ...pending, mode })}
+                unavailableReason={worktreeUnavailableReason(
+                  pending.isGitRepo,
+                  serverValidatesWorktree,
+                )}
+              />
+            </div>
+            {error && <InlineError message={error} />}
+            <DialogFooter>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPending(null)}
+                disabled={saving}
+              >
+                {t(($) => $.resources.mode_cancel)}
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => void addFolder()}
+                disabled={saving}
+                aria-busy={saving}
+              >
+                {t(($) => $.resources.mode_add)}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
+    </>
+  );
+}
+
+function AddMenuItem({
+  icon,
+  title,
+  hint,
+  disabled,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  hint: string;
+  disabled?: boolean;
+  onClick: () => void;
 }) {
   return (
-    <div className="flex h-6 items-center gap-1 text-micro font-medium text-muted-foreground">
-      <span className="truncate">{label}</span>
-      {action && <span className="ml-auto">{action}</span>}
+    <DropdownMenuItem
+      disabled={disabled}
+      onClick={onClick}
+      className="items-start [&_svg]:mt-0.5"
+    >
+      {icon}
+      <span className="min-w-0">
+        <span className="block">{title}</span>
+        <span className="block text-caption text-muted-foreground">{hint}</span>
+      </span>
+    </DropdownMenuItem>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Rows
+
+function ResourceRow({
+  icon: Icon,
+  dim = false,
+  name,
+  chip,
+  aside,
+  menu,
+}: {
+  icon: typeof FolderGit;
+  dim?: boolean;
+  name: React.ReactNode;
+  chip?: React.ReactNode;
+  aside?: React.ReactNode;
+  menu?: React.ReactNode;
+}) {
+  return (
+    <div
+      data-resource-row=""
+      className={cn(
+        "group/resource flex min-h-11 items-center gap-3 py-1.5 pr-2 pl-3 text-body",
+        dim && "opacity-60",
+      )}
+    >
+      <Icon className="size-4 shrink-0 text-muted-foreground" />
+      <div className="flex min-w-0 items-center gap-2">
+        {name}
+        {chip}
+      </div>
+      {/* Zero basis: takes only what the name leaves, so the name never truncates first.
+          Safe alignment clips overflow on the right instead of spilling over the chip. */}
+      <div className="flex min-w-0 flex-1 items-center justify-end-safe gap-1 overflow-hidden text-caption text-muted-foreground">
+        {aside}
+      </div>
+      {menu ?? <span aria-hidden="true" className="size-6 shrink-0" />}
     </div>
+  );
+}
+
+/** A row's ⋯ menu: one secondary action, then Remove. */
+function ResourceRowMenu({
+  resource,
+  name,
+  copyLabel,
+  copyValue,
+}: {
+  resource: ProjectResource;
+  name: string;
+  copyLabel: string;
+  copyValue: string;
+}) {
+  const { t } = useT("projects");
+  const { remove, removing } = useRemoveResource(resource);
+  const copy = async () => {
+    if (await copyText(copyValue)) toast.success(t(($) => $.resources.toast_copied));
+  };
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <IconButton
+            label={t(($) => $.resources.row_menu, { name })}
+            size="icon-xs"
+            disabled={removing}
+            aria-busy={removing}
+            className={cn(
+              "text-muted-foreground",
+              !removing &&
+                "opacity-0 group-hover/resource:opacity-100 focus-visible:opacity-100 data-[popup-open]:opacity-100 [@media(pointer:coarse)]:opacity-100",
+            )}
+          />
+        }
+      >
+        {removing ? <Spinner className="size-3" aria-hidden="true" /> : <MoreHorizontal />}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-auto min-w-40">
+        <DropdownMenuItem onClick={() => void copy()}>
+          <Copy className="size-3.5" />
+          {copyLabel}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem variant="destructive" onClick={() => void remove()}>
+          <Trash2 className="size-3.5" />
+          {t(($) => $.resources.remove_tooltip)}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function GithubRepoRow({
+  resource,
+  description,
+  readOnly,
+}: {
+  resource: GithubResource;
+  description?: string | null;
+  readOnly: boolean;
+}) {
+  const { t } = useT("projects");
+  const ref = resource.resource_ref;
+  const display = resource.label || githubShortLabel(ref.url);
+  // Workspace repository descriptions are source-of-truth metadata. They stay
+  // live here rather than being copied into the resource label, while an
+  // explicit resource label remains the user's preferred primary text.
+  const liveDescription = resource.label ? undefined : description?.trim();
+
+  return (
+    <ResourceRow
+      icon={FolderGit}
+      name={
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <a
+                href={ref.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="min-w-0 truncate font-medium hover:underline"
+              >
+                {display}
+              </a>
+            }
+          />
+          <TooltipContent side="top">{ref.url}</TooltipContent>
+        </Tooltip>
+      }
+      chip={<GithubRefChip resource={resource} readOnly={readOnly} />}
+      aside={liveDescription ? <span className="truncate">{liveDescription}</span> : undefined}
+      menu={
+        readOnly ? undefined : (
+          <ResourceRowMenu
+            resource={resource}
+            name={display}
+            copyLabel={t(($) => $.resources.copy_url)}
+            copyValue={ref.url}
+          />
+        )
+      }
+    />
+  );
+}
+
+function LocalFolderRow({
+  resource,
+  current,
+  currentMachineTitle,
+  machine,
+  serverValidatesWorktree,
+  readOnly,
+}: {
+  resource: LocalDirectoryResource;
+  current: boolean;
+  currentMachineTitle?: string;
+  machine?: RuntimeMachine;
+  serverValidatesWorktree: boolean;
+  readOnly: boolean;
+}) {
+  const { t } = useT("projects");
+  // The name is the folder's own (or whatever a label update stored); there is
+  // deliberately no rename. A folder is identified by its path (MUL-7525).
+  const display = localDirectoryLabel(resource);
+  const path = resource.resource_ref.local_path;
+  const MachineIcon = current ? Laptop : Monitor;
+  const machineTitle = current
+    ? currentMachineTitle
+    : (machine?.title ?? t(($) => $.resources.local_unknown_computer));
+  const machineNote = current
+    ? t(($) => $.resources.local_this_computer)
+    : machine !== undefined && machine.health !== "online"
+      ? t(($) => $.resources.local_offline)
+      : undefined;
+
+  return (
+    // Folders on other machines are de-emphasised but stay editable: dropping
+    // or reconfiguring a stale registration only rewrites the resource, which
+    // works from any device.
+    <ResourceRow
+      icon={FolderOpen}
+      dim={!current}
+      name={
+        <Tooltip>
+          <TooltipTrigger
+            render={<span className="min-w-0 truncate font-medium">{display}</span>}
+          />
+          <TooltipContent side="top">
+            <span className="font-mono text-micro">{path}</span>
+          </TooltipContent>
+        </Tooltip>
+      }
+      chip={
+        <ExecutionModeChip
+          resource={resource}
+          serverValidatesWorktree={serverValidatesWorktree}
+          readOnly={readOnly}
+        />
+      }
+      aside={
+        <>
+          <MachineIcon className="size-3 shrink-0" />
+          {machineTitle && <span className="truncate">{machineTitle}</span>}
+          {machineTitle && machineNote && <span aria-hidden="true">·</span>}
+          {machineNote && <span className="shrink-0">{machineNote}</span>}
+        </>
+      }
+      menu={
+        readOnly ? undefined : (
+          <ResourceRowMenu
+            resource={resource}
+            name={display}
+            copyLabel={t(($) => $.resources.copy_path)}
+            copyValue={path}
+          />
+        )
+      }
+    />
+  );
+}
+
+function UnknownResourceRow({ resource, readOnly }: { resource: ProjectResource; readOnly: boolean }) {
+  const { remove, removing } = useRemoveResource(resource);
+  const { t } = useT("projects");
+  return (
+    <ResourceRow
+      icon={FolderGit}
+      name={
+        <span className="min-w-0 truncate text-muted-foreground">
+          {resource.label || resource.resource_type}
+        </span>
+      }
+      menu={
+        readOnly ? undefined : (
+          <IconButton
+            label={t(($) => $.resources.remove_tooltip)}
+            size="icon-xs"
+            className="text-muted-foreground"
+            disabled={removing}
+            aria-busy={removing}
+            onClick={() => void remove()}
+          >
+            {removing ? <Spinner className="size-3" aria-hidden="true" /> : <Trash2 />}
+          </IconButton>
+        )
+      }
+    />
   );
 }
 
@@ -227,125 +859,6 @@ function useRemoveResource(resource: ProjectResource) {
     }
   };
   return { remove, removing: deleteResource.isPending };
-}
-
-function RemoveButton({
-  onRemove,
-  removing,
-  alwaysVisible = false,
-}: {
-  onRemove: () => void;
-  removing: boolean;
-  alwaysVisible?: boolean;
-}) {
-  const { t } = useT("projects");
-  return (
-    <TooltipHint label={t(($) => $.resources.remove_tooltip)}>
-      <button
-        type="button"
-        onClick={onRemove}
-        disabled={removing}
-        aria-busy={removing}
-        className={cn(
-          "shrink-0 rounded-sm p-0.5 transition-opacity hover:bg-accent",
-          !alwaysVisible &&
-            "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 disabled:opacity-100",
-        )}
-        aria-label={t(($) => $.resources.remove_tooltip)}
-      >
-        {removing ? (
-          <Spinner className="size-3" aria-hidden="true" />
-        ) : (
-          <Trash2 className="size-3 text-muted-foreground" />
-        )}
-      </button>
-    </TooltipHint>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Repositories
-
-function RepositoryGroup({
-  wsId,
-  projectId,
-  repos,
-  readOnly,
-}: {
-  wsId: string;
-  projectId: string;
-  repos: GithubResource[];
-  readOnly: boolean;
-}) {
-  const { t } = useT("projects");
-  const workspace = useCurrentWorkspace();
-  const createResource = useCreateProjectResource(wsId, projectId);
-  const [addOpen, setAddOpen] = useState(false);
-  const attachedUrls = new Set(repos.map((r) => r.resource_ref.url));
-
-  const handleAttach = async (url: string, ref?: string) => {
-    try {
-      await createResource.mutateAsync({
-        resource_type: "github_repo",
-        // Omit the key entirely when empty rather than sending "": an absent
-        // ref is what "use the default branch" looks like on the wire.
-        resource_ref: ref ? { url, ref } : { url },
-      });
-      toast.success(t(($) => $.resources.toast_attached));
-      setAddOpen(false);
-    } catch (err) {
-      toast.error(errorMessage(err, t(($) => $.resources.toast_attach_failed)));
-    }
-  };
-
-  return (
-    <div className="space-y-1.5">
-      <GroupHeader
-        label={t(($) => $.resources.repos_group)}
-        action={
-          readOnly ? undefined : (
-            <Popover open={addOpen} onOpenChange={setAddOpen}>
-              <PopoverTrigger
-                render={
-                  <IconButton
-                    size="icon-xs"
-                    label={t(($) => $.resources.repos_add)}
-                  >
-                    <Plus />
-                  </IconButton>
-                }
-              />
-              <PopoverContent align="end" className="w-72 p-2">
-                <AddRepositoryPanel
-                  workspaceRepos={workspace?.repos ?? []}
-                  attachedUrls={attachedUrls}
-                  busy={createResource.isPending}
-                  onAttach={handleAttach}
-                />
-              </PopoverContent>
-            </Popover>
-          )
-        }
-      />
-      {repos.length === 0 ? (
-        <p className="text-caption text-muted-foreground">
-          {t(($) => $.resources.repos_empty)}
-        </p>
-      ) : (
-        repos.map((resource) => (
-          <GithubRepoRow
-            key={resource.id}
-            resource={resource}
-            description={
-              workspace?.repos?.find((repo) => repo.url === resource.resource_ref.url)
-                ?.description
-            }
-            readOnly={readOnly}
-          />
-        ))
-      )}
-    </div>
-  );
 }
 
 /**
@@ -507,58 +1020,6 @@ function AddRepositoryPanel({
   );
 }
 
-function GithubRepoRow({
-  resource,
-  description,
-  readOnly,
-}: {
-  resource: GithubResource;
-  description?: string | null;
-  readOnly: boolean;
-}) {
-  const { remove, removing } = useRemoveResource(resource);
-  const ref = resource.resource_ref;
-  const display = resource.label || githubShortLabel(ref.url);
-  // Workspace repository descriptions are source-of-truth metadata. They stay
-  // live here rather than being copied into the resource label, while an
-  // explicit resource label remains the user's preferred primary text.
-  const liveDescription = resource.label ? undefined : description?.trim();
-
-  return (
-    <div className="group text-caption">
-      <div className="flex items-center gap-2">
-        <FolderGit className="size-3.5 shrink-0 text-muted-foreground" />
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <a
-                href={ref.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="min-w-0 flex-1 truncate hover:underline"
-              >
-                {display}
-              </a>
-            }
-          />
-          <TooltipContent side="top">{ref.url}</TooltipContent>
-        </Tooltip>
-        {!readOnly && <RemoveButton onRemove={remove} removing={removing} />}
-      </div>
-      {/* The branch gets its own line rather than a badge beside the name: a
-          custom label takes the name slot, and this panel is narrow enough
-          that an inline badge truncates the repository away. */}
-      <div className="flex min-w-0 items-center gap-1.5 pl-[1.375rem] pt-0.5">
-        <GithubRefChip resource={resource} readOnly={readOnly} />
-        {liveDescription && (
-          <span className="min-w-0 truncate text-micro text-muted-foreground">
-            {liveDescription}
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
 
 /**
  * The branch a repository's tasks start from, editable in place.
@@ -683,193 +1144,6 @@ function GithubRefChip({ resource, readOnly }: { resource: GithubResource; readO
 }
 
 // ---------------------------------------------------------------------------
-// Local folders
-
-function LocalFolderGroup({
-  wsId,
-  projectId,
-  folders,
-  desktopMode,
-  readOnly,
-}: {
-  wsId: string;
-  projectId: string;
-  folders: LocalDirectoryResource[];
-  desktopMode: boolean;
-  readOnly: boolean;
-}) {
-  const { t } = useT("projects");
-  const daemonStatus = useLocalDaemonStatus();
-  const localDaemonId = daemonStatus.daemonId;
-  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
-  // Whether this server checks execution_mode on save at all. One declared
-  // boolean, no inference — servers that predate it drop execution_mode and
-  // answer 201.
-  const serverValidatesWorktree = useConfigStore(
-    (state) => state.localWorktreeSupported,
-  );
-
-  // Machine names and liveness come from the runtimes each daemon registers,
-  // titled the same way as the runtimes page.
-  const machines = useMemo(
-    () =>
-      buildRuntimeMachines(runtimes, {
-        now: Date.now(),
-        localDaemonId,
-        localMachineName: daemonStatus.deviceName,
-      }),
-    [runtimes, localDaemonId, daemonStatus.deviceName],
-  );
-
-  const foldersByDaemon = new Map<string, LocalDirectoryResource[]>();
-  for (const folder of folders) {
-    const id = folder.resource_ref.daemon_id;
-    foldersByDaemon.set(id, [...(foldersByDaemon.get(id) ?? []), folder]);
-  }
-  const currentFolders = localDaemonId
-    ? (foldersByDaemon.get(localDaemonId) ?? [])
-    : [];
-  const otherDaemonIds = [...foldersByDaemon.keys()].filter(
-    (id) => id !== localDaemonId,
-  );
-  const currentMachine = localDaemonId
-    ? machines.find((m) => m.daemonId === localDaemonId)
-    : undefined;
-  const currentTitle = currentMachine?.title ?? daemonStatus.deviceName;
-
-  return (
-    <div className="space-y-1.5">
-      <GroupHeader label={t(($) => $.resources.local_group)} />
-      <p className="-mt-1 text-micro text-muted-foreground">
-        {t(($) => $.resources.local_group_hint)}
-      </p>
-      {desktopMode && (!readOnly || currentFolders.length > 0) && (
-        <MachineBlock
-          current
-          title={currentTitle ?? t(($) => $.resources.local_this_computer)}
-          showCurrentTag={!!currentTitle}
-        >
-          {currentFolders.length > 0 ? (
-            currentFolders.map((folder) => (
-              <LocalFolderRow
-                key={folder.id}
-                resource={folder}
-                current
-                serverValidatesWorktree={serverValidatesWorktree}
-                readOnly={readOnly}
-              />
-            ))
-          ) : (
-            <LocalFolderSlot
-              wsId={wsId}
-              projectId={projectId}
-              daemonStatus={daemonStatus}
-              runtimes={runtimes}
-              serverValidatesWorktree={serverValidatesWorktree}
-            />
-          )}
-        </MachineBlock>
-      )}
-      {otherDaemonIds.map((daemonId) => {
-        const machine = machines.find((m) => m.daemonId === daemonId);
-        return (
-          <MachineBlock
-            key={daemonId}
-            title={machine?.title ?? t(($) => $.resources.local_unknown_computer)}
-            offline={machine !== undefined && machine.health !== "online"}
-          >
-            {(foldersByDaemon.get(daemonId) ?? []).map((folder) => (
-              <LocalFolderRow
-                key={folder.id}
-                resource={folder}
-                current={false}
-                serverValidatesWorktree={serverValidatesWorktree}
-                readOnly={readOnly}
-              />
-            ))}
-          </MachineBlock>
-        );
-      })}
-    </div>
-  );
-}
-
-function MachineBlock({
-  title,
-  current = false,
-  showCurrentTag = false,
-  offline = false,
-  children,
-}: {
-  title: string;
-  current?: boolean;
-  showCurrentTag?: boolean;
-  offline?: boolean;
-  children: React.ReactNode;
-}) {
-  const { t } = useT("projects");
-  const Icon = current ? Laptop : Monitor;
-  return (
-    <div className="space-y-1">
-      <div className="flex min-w-0 items-center gap-1.5 text-micro text-muted-foreground">
-        <Icon className="size-3 shrink-0" />
-        <span className={cn("truncate", current && "text-foreground")}>{title}</span>
-        {showCurrentTag && (
-          <span className="shrink-0">{t(($) => $.resources.local_this_computer)}</span>
-        )}
-        {offline && (
-          <span className="shrink-0">· {t(($) => $.resources.local_offline)}</span>
-        )}
-      </div>
-      <div className="space-y-1.5 pl-[1.125rem]">{children}</div>
-    </div>
-  );
-}
-
-function LocalFolderRow({
-  resource,
-  current,
-  serverValidatesWorktree,
-  readOnly,
-}: {
-  resource: LocalDirectoryResource;
-  current: boolean;
-  serverValidatesWorktree: boolean;
-  readOnly: boolean;
-}) {
-  const { remove, removing } = useRemoveResource(resource);
-  // The name is the folder's own (or whatever a label update stored); there is
-  // deliberately no rename. A folder is identified by its path (MUL-7525).
-  const display = localDirectoryLabel(resource);
-
-  return (
-    // Folders on other machines are de-emphasised but stay editable: dropping
-    // or reconfiguring a stale registration only rewrites the resource, which
-    // works from any device.
-    <div className={cn("group text-caption", !current && "opacity-60")}>
-      <div className="flex items-center gap-2">
-        <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" />
-        <Tooltip>
-          <TooltipTrigger
-            render={<span className="min-w-0 flex-1 truncate">{display}</span>}
-          />
-          <TooltipContent side="top">
-            <span className="font-mono text-micro">{resource.resource_ref.local_path}</span>
-          </TooltipContent>
-        </Tooltip>
-        {!readOnly && <RemoveButton onRemove={remove} removing={removing} />}
-      </div>
-      <div className="pl-[1.375rem] pt-0.5">
-        <ExecutionModeChip
-          resource={resource}
-          serverValidatesWorktree={serverValidatesWorktree}
-          readOnly={readOnly}
-        />
-      </div>
-    </div>
-  );
-}
-
 /**
  * How runs use a folder, always visible — "direct" included — because it is
  * the first thing someone asks when a task queues (or does not). Picking an
@@ -967,187 +1241,6 @@ function ExecutionModeChip({
         {error && <InlineError message={error} />}
       </PopoverContent>
     </Popover>
-  );
-}
-
-type PendingFolder = {
-  path: string;
-  label: string;
-  mode: LocalDirectoryExecutionMode;
-  /** undefined = unknown (older desktop build); treated as "cannot verify". */
-  isGitRepo: boolean | undefined;
-};
-
-/**
- * This machine's place in the group while it has no folder. Choosing one asks
- * for the execution mode before anything is created: it is part of what the
- * user is choosing — whether tasks edit this folder or hand back a branch —
- * not a setting to discover afterwards.
- */
-function LocalFolderSlot({
-  wsId,
-  projectId,
-  daemonStatus,
-  runtimes,
-  serverValidatesWorktree,
-}: {
-  wsId: string;
-  projectId: string;
-  daemonStatus: LocalDaemonStatus;
-  runtimes: AgentRuntime[];
-  serverValidatesWorktree: boolean;
-}) {
-  const { t } = useT("projects");
-  const createResource = useCreateProjectResource(wsId, projectId);
-  const [picking, setPicking] = useState(false);
-  const [pending, setPending] = useState<PendingFolder | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const daemonId = daemonStatus.daemonId;
-  const ready = daemonStatus.running && daemonId !== null;
-
-  const pick = async () => {
-    if (picking || !ready) return;
-    setPicking(true);
-    try {
-      const picked = await pickDirectory();
-      if (!picked.ok) {
-        if (picked.reason && picked.reason !== "cancelled") {
-          toast.error(picked.error ?? t(($) => $.resources.toast_local_pick_failed));
-        }
-        return;
-      }
-      const path = picked.path ?? "";
-      const validation = await validateLocalDirectory(path);
-      if (!validation.ok) {
-        toast.error(
-          localValidationMessage(validation, {
-            not_absolute: t(($) => $.resources.local_validate_not_absolute),
-            not_found: t(($) => $.resources.local_validate_not_found),
-            not_a_directory: t(($) => $.resources.local_validate_not_a_directory),
-            not_readable: t(($) => $.resources.local_validate_not_readable),
-            not_writable: t(($) => $.resources.local_validate_not_writable),
-            unsupported: t(($) => $.resources.local_validate_unsupported),
-            fallback: t(($) => $.resources.toast_local_pick_failed),
-          }),
-        );
-        return;
-      }
-      setError(null);
-      setPending({
-        path,
-        label: picked.basename ?? path,
-        // Same preselection rule as the create-project flow: a git repo this
-        // daemon can actually run worktree mode on starts on parallel,
-        // anything else starts on direct. The user still confirms.
-        mode:
-          validation.is_git_repo === true &&
-          serverValidatesWorktree &&
-          runtimeAdvertisesLocalWorktree(runtimes, daemonId)
-            ? "worktree"
-            : "in_place",
-        isGitRepo: validation.is_git_repo,
-      });
-    } catch (err) {
-      toast.error(errorMessage(err, t(($) => $.resources.toast_local_pick_failed)));
-    } finally {
-      setPicking(false);
-    }
-  };
-
-  const add = async () => {
-    if (!pending || !daemonId || saving) return;
-    setSaving(true);
-    setError(null);
-    try {
-      await createResource.mutateAsync({
-        resource_type: "local_directory",
-        resource_ref: {
-          local_path: pending.path,
-          daemon_id: daemonId,
-          label: pending.label,
-          execution_mode: pending.mode,
-        },
-      });
-      toast.success(t(($) => $.resources.toast_local_attached));
-      setPending(null);
-    } catch (err) {
-      // Keep the choice on screen: the likely failures (the one-per-machine
-      // conflict, the daemon-version gate) are things the user acts on here.
-      setError(errorMessage(err, t(($) => $.resources.toast_attach_failed)));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (pending) {
-    return (
-      <div className="space-y-2 rounded-md border p-2">
-        <div className="flex items-start gap-2 text-caption">
-          <FolderOpen className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-          <div className="min-w-0 flex-1">
-            <div className="truncate font-medium">{pending.label}</div>
-            <div className="break-all font-mono text-micro text-muted-foreground">
-              {pending.path}
-            </div>
-          </div>
-        </div>
-        <LocalDirectoryModeOptions
-          value={pending.mode}
-          onChange={(mode) => setPending({ ...pending, mode })}
-          unavailableReason={worktreeUnavailableReason(
-            pending.isGitRepo,
-            serverValidatesWorktree,
-          )}
-        />
-        {error && <InlineError message={error} />}
-        <div className="flex justify-end gap-1.5">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setPending(null)}
-            disabled={saving}
-          >
-            {t(($) => $.resources.mode_cancel)}
-          </Button>
-          <Button size="sm" onClick={() => void add()} disabled={saving}>
-            {t(($) => $.resources.mode_add)}
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-2 rounded-md border border-dashed px-2.5 py-2">
-      <p className="text-micro text-muted-foreground">
-        {ready
-          ? t(($) => $.resources.local_slot_description)
-          : t(($) => $.resources.local_daemon_offline_hint)}
-      </p>
-      <Button
-        variant="outline"
-        size="sm"
-        className="h-7 text-caption"
-        disabled={!ready || picking}
-        onClick={() => void pick()}
-      >
-        <FolderOpen className="size-3" />
-        {t(($) => $.resources.local_pick)}
-      </Button>
-    </div>
-  );
-}
-
-function UnknownResourceRow({ resource, readOnly }: { resource: ProjectResource; readOnly: boolean }) {
-  const { remove, removing } = useRemoveResource(resource);
-  return (
-    <div className="flex items-center gap-2 text-caption text-muted-foreground">
-      <span className="truncate flex-1">
-        {resource.label || resource.resource_type}
-      </span>
-      {!readOnly && <RemoveButton onRemove={remove} removing={removing} alwaysVisible />}
-    </div>
   );
 }
 

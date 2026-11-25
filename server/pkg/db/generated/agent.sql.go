@@ -9255,6 +9255,36 @@ func (q *Queries) SettleDelegatedFailureRecoveryComment(ctx context.Context, com
 	return result.RowsAffected(), nil
 }
 
+const taskPassedWorkOn = `-- name: TaskPassedWorkOn :one
+SELECT (
+    EXISTS (
+        SELECT 1 FROM comment c
+        WHERE c.issue_id = $1::uuid AND c.source_task_id = $2::uuid
+    ) OR EXISTS (
+        SELECT 1 FROM agent_task_queue t
+        WHERE t.issue_id = $1::uuid AND t.delegated_from_task_id = $2::uuid
+    ) OR EXISTS (
+        SELECT 1 FROM issue_wakeup w
+        WHERE w.issue_id = $1::uuid AND w.source_task_id = $2::uuid AND w.enabled
+    )
+)::boolean AS passed_on
+`
+
+type TaskPassedWorkOnParams struct {
+	IssueID pgtype.UUID `json:"issue_id"`
+	TaskID  pgtype.UUID `json:"task_id"`
+}
+
+// Whether a run posted a comment on its issue, started another agent run
+// there, or left an enabled wakeup waiting on it: a squad leader run that did
+// none of these ended its squad's chain of handoffs.
+func (q *Queries) TaskPassedWorkOn(ctx context.Context, arg TaskPassedWorkOnParams) (bool, error) {
+	row := q.db.QueryRow(ctx, taskPassedWorkOn, arg.IssueID, arg.TaskID)
+	var passed_on bool
+	err := row.Scan(&passed_on)
+	return passed_on, err
+}
+
 const updateAgent = `-- name: UpdateAgent :one
 UPDATE agent SET
     name = COALESCE($2, name),

@@ -356,6 +356,10 @@ describe("InboxSection", () => {
     const actions = within(card.closest<HTMLElement>("[data-inbox-card]")!);
 
     expect(actions.getByRole("link", { name: "Open" })).toHaveAttribute("href", "/acme/inbox?issue=issue-a");
+    // Icon-only past Open, so the row fits the card's fixed width in every locale.
+    for (const name of ["Mark as read", "Snooze", "Archive"]) {
+      expect(actions.getByRole("button", { name })).toHaveTextContent(/^$/);
+    }
     fireEvent.click(actions.getByRole("button", { name: "Mark as read" }));
     expect(state.markRead).toHaveBeenCalledWith("n1", expect.any(Object));
     fireEvent.click(actions.getByRole("button", { name: "Archive" }));

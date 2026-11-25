@@ -329,6 +329,9 @@ type Result struct {
 	DurationMs int64
 	SessionID  string
 	Usage      map[string]TokenUsage // keyed by model name
+	// NoToolCallsStarted is set only for a failed prompt whose complete native
+	// turn history was observed without a tool call. Missing evidence is false.
+	NoToolCallsStarted bool
 	// ResumeRejected is positive evidence that this run's requested resume
 	// was permanently refused — the transcript is gone, the session belongs to
 	// another provider account, OR the session still exists but its history

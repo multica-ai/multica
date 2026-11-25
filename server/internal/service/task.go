@@ -5349,20 +5349,24 @@ func (s *TaskService) observeChatOutputLocalPath(task db.AgentTaskQueue, body st
 // (via classifyPoisonedError, the timeout / runtime classifier, etc.)
 // will have their value preserved untouched.
 func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) (*db.AgentTaskQueue, error) {
-	task, _, err := s.FailTaskWithTransition(ctx, taskID, errMsg, sessionID, workDir, branchName, failureReason, sessionRolloutMissing, retiredSessionID, durableWorkDir)
+	task, _, err := s.FailTaskWithTransition(ctx, taskID, protocol.TaskFailRequest{
+		Error: errMsg, SessionID: sessionID, WorkDir: workDir, BranchName: branchName, FailureReason: failureReason,
+		SessionRolloutMissing: sessionRolloutMissing, RetiredSessionID: retiredSessionID, DurableWorkDir: durableWorkDir,
+	})
 	return task, err
 }
 
 // FailTaskWithTransition is the failure counterpart to
 // CompleteTaskWithTransition. The bool is false for an idempotent replay that
 // observed an already-terminal row.
-func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) (*db.AgentTaskQueue, bool, error) {
+func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.UUID, report protocol.TaskFailRequest) (*db.AgentTaskQueue, bool, error) {
 	// Strip bytes PostgreSQL cannot store before anything else reads errMsg, so
 	// the classifier, the transaction and every downstream consumer see the one
 	// text we will actually persist (GH #7098). Kept at the service boundary
 	// rather than only in the /fail handler because failClaimedTaskBeforeLaunch
 	// reaches FailTask without going through request decoding.
-	errMsg = util.SanitizeTextForPostgres(errMsg)
+	errMsg := util.SanitizeTextForPostgres(report.Error)
+	failureReason := report.FailureReason
 
 	// MUL-2946: synthesise a refined reason from the error text whenever the
 	// caller didn't supply one. This is the last write-path guard against
@@ -5397,7 +5401,9 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		retryFireAt      pgtype.Timestamptz
 		retryMaxAttempts pgtype.Int4
 	)
-	if retryableReasons[failureReason] {
+	// Restoring a Trae session replays history, but the next prompt can still
+	// execute the same tool again. Older reporters cannot certify this turn.
+	if retryableReasons[failureReason] && (report.NoToolCallsStarted || !taskfailure.IsTraePromptStreamDisconnect(errMsg)) {
 		if parent, perr := s.Queries.GetAgentTask(ctx, taskID); perr != nil {
 			slog.Warn("fail task auto-retry: load parent failed",
 				"task_id", util.UUIDToString(taskID), "error", perr)
@@ -5436,16 +5442,16 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 			ID:             taskID,
 			Error:          pgtype.Text{String: errMsg, Valid: true},
 			FailureReason:  pgtype.Text{String: failureReason, Valid: failureReason != ""},
-			SessionID:      pgtype.Text{String: sessionID, Valid: sessionID != ""},
-			WorkDir:        pgtype.Text{String: workDir, Valid: workDir != ""},
-			DurableWorkDir: pgtype.Text{String: durableWorkDir, Valid: durableWorkDir != ""},
+			SessionID:      pgtype.Text{String: report.SessionID, Valid: report.SessionID != ""},
+			WorkDir:        pgtype.Text{String: report.WorkDir, Valid: report.WorkDir != ""},
+			DurableWorkDir: pgtype.Text{String: report.DurableWorkDir, Valid: report.DurableWorkDir != ""},
 			// A failed run can still have produced a branch: worktree mode
 			// commits whatever the agent left before tearing the worktree down,
 			// precisely so partial work survives. Dropping the name here would
 			// leave that commit with no pointer to it.
-			BranchName:            pgtype.Text{String: branchName, Valid: branchName != ""},
-			SessionRolloutMissing: sessionRolloutMissing,
-			RetiredSessionID:      pgtype.Text{String: retiredSessionID, Valid: retiredSessionID != ""},
+			BranchName:            pgtype.Text{String: report.BranchName, Valid: report.BranchName != ""},
+			SessionRolloutMissing: report.SessionRolloutMissing,
+			RetiredSessionID:      pgtype.Text{String: report.RetiredSessionID, Valid: report.RetiredSessionID != ""},
 		})
 		if errors.Is(err, pgx.ErrNoRows) && failureReason == taskfailure.ReasonProcessCleanupUnconfirmed.String() {
 			t, err = qtx.FailCancelledTaskProcessCleanup(ctx, db.FailCancelledTaskProcessCleanupParams{ID: taskID, ErrorMessage: errMsg})
@@ -5468,7 +5474,7 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		// un-upgraded daemon's agent_error.unknown row is caught by the error
 		// text too.
 		if t.ChatSessionID.Valid && ResumeUnsafeFailure(failureReason, errMsg) {
-			deadSession := sessionID
+			deadSession := report.SessionID
 			if deadSession == "" {
 				deadSession = t.SessionID.String
 			}
@@ -5486,10 +5492,10 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		// terminal status: the fresh-session retry that replaced it may well
 		// have succeeded, and the pointer would otherwise still name the
 		// transcript it retried away from.
-		if t.ChatSessionID.Valid && retiredSessionID != "" {
+		if t.ChatSessionID.Valid && report.RetiredSessionID != "" {
 			if err := qtx.ClearChatSessionSessionIfMatches(ctx, db.ClearChatSessionSessionIfMatchesParams{
 				ID:        t.ChatSessionID,
-				SessionID: pgtype.Text{String: retiredSessionID, Valid: true},
+				SessionID: pgtype.Text{String: report.RetiredSessionID, Valid: true},
 				RuntimeID: t.RuntimeID,
 			}); err != nil {
 				return fmt.Errorf("clear retired chat session resume pointer: %w", err)
@@ -5505,13 +5511,13 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 			// when there's no session_id to record, leave runtime_id untouched
 			// (NULL → COALESCE keeps the existing value).
 			var sessionRuntimeID pgtype.UUID
-			if sessionID != "" {
+			if report.SessionID != "" {
 				sessionRuntimeID = t.RuntimeID
 			}
 			if err := qtx.UpdateChatSessionSession(ctx, db.UpdateChatSessionSessionParams{
 				ID:        t.ChatSessionID,
-				SessionID: pgtype.Text{String: sessionID, Valid: sessionID != ""},
-				WorkDir:   pgtype.Text{String: workDir, Valid: workDir != ""},
+				SessionID: pgtype.Text{String: report.SessionID, Valid: report.SessionID != ""},
+				WorkDir:   pgtype.Text{String: report.WorkDir, Valid: report.WorkDir != ""},
 				RuntimeID: sessionRuntimeID,
 			}); err != nil {
 				return fmt.Errorf("update chat session resume pointer: %w", err)

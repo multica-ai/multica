@@ -50,7 +50,10 @@ export function InboxBar({ settled = false, children }: { settled?: boolean; chi
   );
 }
 
-/** The open notification's group: the issue's actions, then the notification's own (`children`). */
+/**
+ * The open notification's group: the issue's actions, then the notification's
+ * own (`children`), its filled action followed only by `…`.
+ */
 export function InboxOpenBar({
   issueActions,
   children,
@@ -150,12 +153,15 @@ export function InboxArchiveButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-/** An archived notification's group: the way back into the Inbox. */
-export function InboxArchivedBar({ onRestore }: { onRestore: () => void }) {
+/**
+ * An archived notification's group: the way back into the Inbox, which says
+ * where it is on its own, then `more` last, as in every state of the group.
+ */
+export function InboxArchivedBar({ onRestore, more }: { onRestore: () => void; more?: ReactNode }) {
   const { t } = useT("inbox");
   return (
     <InboxBar settled>
-      <InboxBarStatus icon={<Archive />} label={t(($) => $.kept.archived)} />
+      <span className="sr-only">{t(($) => $.kept.archived)}</span>
       <InboxBarButton
         icon={<ArchiveRestore />}
         label={t(($) => $.detail.restore)}
@@ -163,6 +169,7 @@ export function InboxArchivedBar({ onRestore }: { onRestore: () => void }) {
         variant="default"
         onClick={onRestore}
       />
+      {more}
     </InboxBar>
   );
 }

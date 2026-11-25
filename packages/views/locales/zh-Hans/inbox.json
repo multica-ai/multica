@@ -150,6 +150,8 @@
   },
   "kept": {
     "archived": "已归档",
+    "undo_archive": "撤销归档",
+    "unsubscribed": "已取消订阅",
     "leaves": "离开后移出收件箱",
     "filtered": "不再符合筛选",
     "changed_status": "已改为{{status}}",

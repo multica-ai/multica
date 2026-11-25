@@ -153,6 +153,8 @@
   },
   "kept": {
     "archived": "Archivée",
+    "undo_archive": "Annuler l'archivage",
+    "unsubscribed": "Désabonnement effectué",
     "leaves": "Quitte la boîte de réception quand vous passez à la suite",
     "filtered": "Ne correspond plus à vos filtres",
     "changed_status": "Statut passé à {{status}}",

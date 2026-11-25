@@ -72,7 +72,7 @@
     "comments": "Comments",
     "comments_description": "New comments on issues you're subscribed to.",
     "squad_handoffs": "Include squad handoffs",
-    "squad_handoffs_description": "Comments a squad's leader and agents pass work to each other with. @mentions of you, failed agent runs and statuses that need attention still arrive.",
+    "squad_handoffs_description": "Comments a squad's leader and agents pass work to each other with. @mentions of you, failed agent runs and the report a squad finishes with still arrive.",
     "mentions": "Mentions",
     "mentions_description": "When someone @mentions you, including @all and @squad.",
     "reactions": "Reactions",
