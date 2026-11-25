@@ -4574,8 +4574,11 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
               corners would otherwise leak scrolled text), a 16px gradient
               fade above (exactly the mt-4 gap, so at rest it sits over the
               page background and is invisible), and pb-4 so the card floats
-              off the viewport edge — with -mb-4 giving the padding back to
-              the column's py-8 so the at-rest layout doesn't shift. */}
+              off the viewport edge. The negative bottom margin swallows the
+              column's whole bottom padding, so pb-4 is the only gap below the
+              card at the end of the scroll too — any padding left under a
+              sticky box lifts it off its pinned spot over the last stretch
+              of scroll. */}
           {/* The composer dock: the Inbox's group and "Jump to latest"
               (MUL-8324, MUL-8951) float just above the composer's top edge.
               With the sticky composer the dock rides the composer itself;
@@ -4597,7 +4600,9 @@ export function IssueDetail({ issueId, onDelete, inbox, defaultSidebarOpen = tru
             className={cn(
               !inboxBar ? "mt-4" : stickyComposer ? "mt-18" : "mt-3",
               stickyComposer &&
-                "sticky bottom-0 z-10 -mb-4 bg-background pb-4 before:pointer-events-none before:absolute before:inset-x-0 before:bottom-full before:h-4 before:bg-gradient-to-t before:from-background before:to-transparent",
+                "sticky bottom-0 z-10 bg-background pb-4 before:pointer-events-none before:absolute before:inset-x-0 before:bottom-full before:h-4 before:bg-gradient-to-t before:from-background before:to-transparent",
+              // Mirrors the column's bottom padding; the composer is never sticky below `md`.
+              stickyComposer && (isPeek ? "-mb-5" : "-mb-[var(--space-xl,2rem)]"),
             )}
           >
             {/* key={id}: web's /issues/[id] route doesn't remount on
