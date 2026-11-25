@@ -1,0 +1,139 @@
+{
+  "title": "Análises",
+  "tab_usage": "Uso",
+  "header": {
+    "timezone_and_updated": "{{tz}} · atualizado {{time}}",
+    "refresh": "Atualizar"
+  },
+  "filter": {
+    "project_label": "Projeto",
+    "all_projects": "Todos os projetos",
+    "period_label": "Período",
+    "attribution_label": "Atribuição",
+    "all_attribution": "Todas as atribuições",
+    "standalone_only": "Apenas agentes individuais",
+    "squads_group": "Squads"
+  },
+  "history_limit": {
+    "note": "Seu plano cobre os últimos {{days}} dias. Faça upgrade para ver dados anteriores. Nada é excluído.",
+    "fell_back": "Exibindo os últimos {{days}} dias — o limite do seu plano atual.",
+    "view_plans": "Ver planos",
+    "locked": "Não incluído no seu plano",
+    "plan": {
+      "pro": "Pro",
+      "business": "Business"
+    }
+  },
+  "kpi": {
+    "cost_label": "Custo · {{days}}D",
+    "tokens_label": "Tokens · {{days}}D",
+    "tokens_hint": "Entrada {{input}} · Saída {{output}}",
+    "run_time_label": "Tempo de execução · {{days}}D",
+    "run_time_hint": "Em {{tasks}} execuções",
+    "tasks_label": "Execuções · {{days}}D",
+    "tasks_hint": "{{failed}} falharam",
+    "cost_squad_hint": "{{name}} no total (incl. membros delegados)",
+    "cost_squad_share_hint": "Acionado por squad {{cost}} ({{pct}}%)"
+  },
+  "dim": {
+    "label": "Intervalo",
+    "daily": "Diário",
+    "weekly": "Semanal"
+  },
+  "daily": {
+    "title_cost": "Custo diário",
+    "title_tokens": "Tokens diários",
+    "title_time": "Tempo de execução diário",
+    "title_tasks": "Execuções diárias",
+    "title_errors": "Erros diários",
+    "metric_cost": "Custo",
+    "metric_tokens": "Tokens",
+    "metric_time": "Tempo",
+    "metric_tasks": "Execuções",
+    "no_data": "Nenhum uso neste período.",
+    "metric_label": "Métrica"
+  },
+  "weekly": {
+    "title_cost": "Custo semanal",
+    "title_tokens": "Tokens semanais",
+    "title_time": "Tempo de execução semanal",
+    "title_tasks": "Execuções semanais",
+    "title_errors": "Erros semanais",
+    "partial_label": "{{range}} (parcial · {{covered}} / 7 dias)"
+  },
+  "errors": {
+    "kpi_failed_label": "Execuções com falha · {{days}}D",
+    "kpi_failed_hint": "De {{total}} execuções",
+    "kpi_rate_label": "Taxa de falha · {{days}}D",
+    "kpi_agents_label": "Agentes afetados · {{days}}D",
+    "kpi_agents_hint": "Mais afetado: {{name}} ({{count}} com falha)",
+    "tooltip_rate": "Taxa de falha",
+    "class": {
+      "auth": "Autenticação",
+      "rate_limit": "Limite de taxa",
+      "timeout": "Tempo esgotado",
+      "provider": "Provedor",
+      "runtime": "Runtime",
+      "agent": "Agente",
+      "other": "Outro"
+    },
+    "title": "Erros",
+    "summary": "{{failed}} de {{total}} execuções falharam · {{rate}}",
+    "mix_title": "Distribuição de falhas · {{failed}}",
+    "mix_label": "Distribuição de falhas",
+    "codes_label": "Códigos de erro",
+    "by_agent": "Erros por agente",
+    "sort_label": "Ordenar agentes por",
+    "sort_failed": "Falhas",
+    "sort_rate": "Taxa",
+    "header_agent": "Agente",
+    "header_failed": "Falhas",
+    "header_runs": "Execuções",
+    "header_rate": "Taxa",
+    "other_agents": "Outros agentes",
+    "low_sample": "Menos de {{count}} execuções neste período — esta taxa não é representativa.",
+    "no_data": "Nenhuma execução com falha neste período",
+    "show_reasons": "Mostrar códigos de erro",
+    "hide_reasons": "Ocultar códigos de erro",
+    "show_all": "Mostrar todos ({{count}})",
+    "show_less": "Mostrar os {{count}} principais",
+    "by_squad": "Erros por squad"
+  },
+  "leaderboard": {
+    "title": "Ranking",
+    "caption": "{{count}} agentes",
+    "caption_with_deleted": "{{count}} agentes · {{deleted}} excluídos",
+    "sort_label": "Ordenar agentes por",
+    "deleted_agents": "Agentes excluídos",
+    "other_agents": "Outros agentes",
+    "header_agent": "Agente",
+    "header_tokens": "Tokens",
+    "header_cost": "Custo",
+    "header_time": "Tempo",
+    "header_tasks": "Execuções",
+    "usage_unreported_one": "{{count}} execução não informou o uso",
+    "usage_unreported_other": "{{count}} execuções não informaram o uso",
+    "usage_unreported_pending_one": "{{count}} execução não informou o uso · os totais ainda estão sendo processados",
+    "usage_unreported_pending_other": "{{count}} execuções não informaram o uso · os totais ainda estão sendo processados",
+    "usage_totals_pending": "Os totais de uso ainda estão sendo processados",
+    "show_all": "Mostrar todos",
+    "show_less": "Mostrar os {{count}} principais",
+    "no_data": "Nenhuma atividade de agentes neste período.",
+    "group_label": "Agrupar ranking por",
+    "group_agent": "Agentes",
+    "group_squad": "Squads",
+    "header_squad": "Squad",
+    "squad_caption": "{{count}} squads",
+    "squad_members_title": "Detalhamento de membros de {{name}}",
+    "squad_members_count": "{{count}} membros envolvidos",
+    "deleted_squads": "Squads excluídos",
+    "toggle_squad_members": "Alternar membros de {{name}}"
+  },
+  "empty": {
+    "title": "Nenhum uso ainda",
+    "body": "Assim que os agentes começarem a executar, o consumo de tokens, o custo e a taxa de falha aparecerão aqui."
+  },
+  "duration": {
+    "less_than_minute": "<1m"
+  }
+}

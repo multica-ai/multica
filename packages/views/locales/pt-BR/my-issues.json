@@ -1,0 +1,45 @@
+{
+  "page": {
+    "breadcrumb": "Minhas tarefas",
+    "workspace_fallback": "Espaço de trabalho",
+    "empty_title": "Nenhuma tarefa ainda",
+    "empty_description": "As tarefas atribuídas a você, criadas por você ou que envolvem seus agentes e squads aparecerão aqui."
+  },
+  "header": {
+    "scope": {
+      "all_label": "Todas",
+      "all_description": "Atribuídas a mim, criadas por mim ou que envolvem meus agentes e squads",
+      "assigned_label": "Atribuídas",
+      "assigned_description": "Tarefas atribuídas a mim",
+      "created_label": "Criadas",
+      "created_description": "Tarefas que criei",
+      "agents_label": "Meus agentes e squads",
+      "agents_description": "Tarefas atribuídas aos meus agentes e squads"
+    },
+    "filter_button": "Filtrar",
+    "filter_status": "Status",
+    "filter_priority": "Prioridade",
+    "issue_count_one": "{{count}} tarefa",
+    "issue_count_other": "{{count}} tarefas",
+    "reset_filters": "Redefinir todos os filtros",
+    "display_settings": "Configurações de exibição",
+    "grouping": "Agrupamento",
+    "group_status": "Status",
+    "group_assignee": "Responsável",
+    "ordering": "Ordenação",
+    "ascending": "Crescente",
+    "descending": "Decrescente",
+    "card_properties": "Propriedades do cartão",
+    "view_board": "Visualização em quadro",
+    "view_list": "Visualização em lista",
+    "view_swimlane": "Visualização em raias",
+    "view_label": "Visualização",
+    "view_board_short": "Quadro",
+    "view_list_short": "Lista",
+    "view_swimlane_short": "Raias",
+    "sort_manual": "Manual"
+  },
+  "errors": {
+    "move_failed": "Falha ao mover a tarefa"
+  }
+}

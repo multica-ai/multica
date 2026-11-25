@@ -1,0 +1,105 @@
+{
+  "untitled": "Sem título",
+  "version_number": "v{{number}}",
+  "kb": "Documentos",
+  "actions": {
+    "new": "Novo",
+    "new_doc": "Novo documento",
+    "new_folder": "Nova pasta",
+    "rename": "Renomear",
+    "move": "Mover para...",
+    "delete": "Excluir",
+    "cancel": "Cancelar",
+    "history": "Histórico",
+    "more": "Mais",
+    "copy_link": "Copiar link"
+  },
+  "errors": {
+    "move": "Não foi possível mover o item",
+    "delete": "Não foi possível excluir o item",
+    "save": "Não foi possível salvar as alterações"
+  },
+  "move": {
+    "title": "Mover \"{{title}}\"",
+    "destination": "Destino",
+    "root": "Documentos (nível superior)",
+    "current": "Atual",
+    "confirm": "Mover"
+  },
+  "delete": {
+    "title": "Excluir este documento?",
+    "description": "\"{{title}}\" e todo o seu histórico serão excluídos. Esta ação não pode ser desfeita.",
+    "confirm": "Excluir",
+    "folder_title": "Excluir esta pasta?",
+    "folder_description": "Excluir \"{{title}}\"? Apenas pastas vazias podem ser excluídas. Esta ação não pode ser desfeita."
+  },
+  "tree": {
+    "more": "Mais ações para {{title}}",
+    "empty": "Nenhum documento ainda",
+    "new_doc_in": "Novo documento em {{title}}"
+  },
+  "editor": {
+    "placeholder": "Escreva ou digite / para ver os comandos...",
+    "title_label": "Título",
+    "saving": "Salvando...",
+    "saved": "Salvo",
+    "save_failed": "Não salvo · Tentar novamente",
+    "retry": "Tentar novamente",
+    "conflict": "Atualizado por {{name}}. Seu rascunho foi mantido. Recarregue para continuar.",
+    "reload": "Recarregar versão mais recente",
+    "draft": "Seu rascunho salvo",
+    "unsaved_changes": "Alterações não salvas",
+    "live": "Ao vivo",
+    "reconnecting": "Reconectando...",
+    "connecting": "Conectando...",
+    "title_save_failed": "Título não salvo",
+    "editing_now": "Editando agora"
+  },
+  "history": {
+    "title": "Histórico",
+    "current": "Atual",
+    "restore": "Restaurar esta versão",
+    "loading": "Carregando...",
+    "from_discussion": "Do comentário: {{quote}}"
+  },
+  "not_found": {
+    "title": "Documento não encontrado",
+    "description": "Ele pode ter sido excluído."
+  },
+  "edited": "Editado {{time}}",
+  "view_history": "Ver histórico",
+  "outline": "Sumário",
+  "link_copied": "Link copiado",
+  "unavailable": {
+    "title": "Documentos não está ativado neste espaço de trabalho",
+    "description": "Este espaço de trabalho não tem o recurso Documentos ativado."
+  },
+  "comments": {
+    "title": "Comentários",
+    "add": "Comentar",
+    "open": "Abertos {{count}}",
+    "resolved": "Resolvidos {{count}}",
+    "close": "Fechar comentários",
+    "quote_missing": "O texto comentado foi alterado",
+    "quote_changed": "Texto alterado",
+    "reply_placeholder": "Responda ou mencione alguém com @...",
+    "new_placeholder": "Adicione um comentário ou mencione alguém com @...",
+    "submit": "Comentar",
+    "reply": "Responder",
+    "cancel": "Cancelar",
+    "resolve": "Resolver",
+    "reopen": "Reabrir",
+    "delete": "Excluir comentário",
+    "resolved_by": "Resolvido por {{name}}",
+    "replies_one": "{{count}} resposta",
+    "replies_other": "{{count}} respostas",
+    "empty_open": "Nenhum comentário aberto. Selecione um texto e clique em Comentar para iniciar um.",
+    "empty_resolved": "Nenhum comentário resolvido.",
+    "errors": {
+      "save": "Não foi possível publicar o comentário",
+      "delete": "Não foi possível excluir o comentário",
+      "resolve": "Não foi possível atualizar o comentário"
+    },
+    "run_waiting_retry": "Aguardando nova tentativa"
+  }
+}
