@@ -82,6 +82,9 @@ func TestMain(m *testing.M) {
 	case "async_launched_tool_result":
 		runFakeClaudeAsyncLaunchedToolResult()
 		os.Exit(0)
+	case "idle_hook_after_result":
+		runFakeClaudeIdleHookAfterResult()
+		os.Exit(0)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown CLAUDE_FAKE_MODE: %q\n", mode)
 		os.Exit(2)

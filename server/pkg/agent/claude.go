@@ -878,6 +878,15 @@ func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) bool
 }
 
 func (b *claudeBackend) handleControlRequest(msg claudeSDKMessage, stdin interface{ Write([]byte) (int, error) }) {
+	// Hook callbacks expect a hook-shaped reply. The permission payload
+	// below is rejected by the CLI and can block or drop the user prompt.
+	if requestID, ok := claudeHookCallbackRequestID(msg); ok {
+		if err := writeClaudeHookSuccess(stdin, requestID, nil); err != nil {
+			b.cfg.Logger.Warn("claude: failed to write hook_callback response", "request_id", requestID, "error", err)
+		}
+		return
+	}
+
 	// Auto-approve all tool uses in autonomous/daemon mode.
 	var req claudeControlRequestPayload
 	if err := json.Unmarshal(msg.Request, &req); err != nil {

@@ -249,6 +249,29 @@ func (s *claudeSupplementSession) prepareHook(msg claudeSDKMessage) (func(io.Wri
 	}, true
 }
 
+func claudeHookCallbackRequestID(msg claudeSDKMessage) (string, bool) {
+	if msg.Type != "control_request" {
+		return "", false
+	}
+	var req struct {
+		Subtype string `json:"subtype"`
+	}
+	if json.Unmarshal(msg.Request, &req) != nil || req.Subtype != "hook_callback" {
+		return "", false
+	}
+	return msg.RequestID, true
+}
+
+func writeClaudeHookSuccess(w io.Writer, requestID string, output map[string]any) error {
+	if output == nil {
+		output = map[string]any{}
+	}
+	return writeClaudeFrame(w, map[string]any{
+		"type":     "control_response",
+		"response": map[string]any{"subtype": "success", "request_id": requestID, "response": output},
+	})
+}
+
 func writeClaudeFrame(w io.Writer, frame any) error {
 	return json.NewEncoder(w).Encode(frame)
 }

@@ -82,6 +82,50 @@ func (p *claudeProcess) dispatch(deliver func(*claudeTurn)) {
 	}
 }
 
+// dispatchMessage delivers a stdout event to the active turn. When the process
+// is idle between pooled turns, hook_callback is still answered so the CLI
+// does not block the next user prompt for 30s and then drop it (GH #11506).
+// Other events, including can_use_tool, stay dropped: they must not touch a
+// finished turn or run tools without a task.
+func (p *claudeProcess) dispatchMessage(msg claudeSDKMessage) {
+	p.turnMu.Lock()
+	defer p.turnMu.Unlock()
+	if p.activeTurn != nil {
+		p.activeTurn.handleMessage(msg)
+		return
+	}
+	requestID, ok := claudeHookCallbackRequestID(msg)
+	if !ok {
+		return
+	}
+	writer := p.inputWriter
+	logger := p.logger
+	go replyIdleClaudeHook(writer, logger, msg, requestID)
+}
+
+func replyIdleClaudeHook(w io.Writer, logger *slog.Logger, msg claudeSDKMessage, requestID string) {
+	var req struct {
+		CallbackID string `json:"callback_id"`
+		Input      struct {
+			Event string `json:"hook_event_name"`
+		} `json:"input"`
+	}
+	_ = json.Unmarshal(msg.Request, &req)
+	if logger != nil {
+		logger.Info("claude: answered hook_callback with no active turn",
+			"request_id", requestID,
+			"callback_id", req.CallbackID,
+			"hook_event", req.Input.Event,
+		)
+	}
+	if w == nil {
+		return
+	}
+	if err := writeClaudeHookSuccess(w, requestID, nil); err != nil && logger != nil {
+		logger.Warn("claude: failed to write idle hook_callback response", "request_id", requestID, "error", err)
+	}
+}
+
 func (p *claudeProcess) getErrors() (scanErr, exitErr error) {
 	p.turnMu.Lock()
 	defer p.turnMu.Unlock()
@@ -306,7 +350,7 @@ func (p *claudeProcess) readStdout() {
 			p.dispatch((*claudeTurn).noteInvalidEvent)
 			continue
 		}
-		p.dispatch(func(turn *claudeTurn) { turn.handleMessage(msg) })
+		p.dispatchMessage(msg)
 	}
 	scanErr := scanner.Err()
 	if scanErr != nil {
