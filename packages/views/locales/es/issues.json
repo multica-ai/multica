@@ -26,6 +26,7 @@
     "message": "Mensaje del agente",
     "error": "Error",
     "waiting_result": "Esperando el resultado de la herramienta...",
+    "reply_pending_call": "Sigue en curso: esperando a que termine {{step}}",
     "supplement_failure_turn_ended": "la ejecución terminó antes de la entrega",
     "supplement_failure_turn_not_started": "el agente no estaba listo",
     "supplement_failure_provider_rejected": "el agente rechazó el mensaje",

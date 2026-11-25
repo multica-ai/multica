@@ -25,6 +25,7 @@
     "message": "エージェントのメッセージ",
     "error": "エラー",
     "waiting_result": "ツールの結果を待っています...",
+    "reply_pending_call": "実行中：{{step}} の終了を待っています",
     "supplement_failure_turn_ended": "配信前に実行が終了しました",
     "supplement_failure_turn_not_started": "エージェントの準備ができていませんでした",
     "supplement_failure_provider_rejected": "エージェントがメッセージを拒否しました",

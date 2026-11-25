@@ -26,6 +26,7 @@
     "message": "Сообщение агента",
     "error": "Ошибка",
     "waiting_result": "Ожидание результата инструмента...",
+    "reply_pending_call": "Всё ещё выполняется: ожидание завершения {{step}}",
     "supplement_failure_turn_ended": "запуск завершился до доставки",
     "supplement_failure_turn_not_started": "агент не был готов",
     "supplement_failure_provider_rejected": "агент отклонил сообщение",
