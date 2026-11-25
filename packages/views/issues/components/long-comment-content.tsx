@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useLayoutEffect, useRef } from "react";
-import { ChevronDown, Download } from "@multica/ui/icons";
+import { ChevronRight, Download } from "@multica/ui/icons";
 import { UI_EASE_OUT_CSS, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { prefersReducedMotion } from "@multica/core/appearance";
@@ -9,7 +9,7 @@ import type { Attachment } from "@multica/core/types";
 import { selectExpandedLongComments, useLongCommentExpandStore } from "@multica/core/issues/stores";
 import { ReadonlyContent } from "../../editor";
 import { useT } from "../../i18n";
-import { PLAIN_TEXT_COMMENT_CHARS, isLongComment, longCommentPreview } from "../utils/long-comment";
+import { isLongComment, isPlainTextComment, longCommentPreview } from "../utils/long-comment";
 
 const TOGGLE_CLASS =
   "mt-1 flex items-center gap-1.5 text-label text-muted-foreground transition-colors hover:text-foreground";
@@ -36,8 +36,7 @@ function scrollParent(element: HTMLElement): HTMLElement | null {
  * container directly: native scrollIntoView on the issue page also scrolls
  * the desktop shell (#3929). A toggle still in view stays put.
  */
-function keepToggleInView(toggle: HTMLElement | null) {
-  const container = toggle && scrollParent(toggle);
+function keepToggleInView(toggle: HTMLElement | null, container: HTMLElement | null) {
   if (!toggle || !container) return;
   const above = container.getBoundingClientRect().top - toggle.getBoundingClientRect().top;
   if (above > 0) container.scrollTop -= above;
@@ -76,12 +75,18 @@ export function LongCommentContent({
     fromHeightRef.current = null;
     const body = bodyRef.current;
     if (from === null || !body) return;
-    if (!expanded) keepToggleInView(toggleRef.current);
+    const container = scrollParent(body);
+    if (!expanded) keepToggleInView(toggleRef.current, container);
     if (prefersReducedMotion() || !body.animate) return;
     const to = body.getBoundingClientRect().height;
-    if (Math.abs(to - from) < 1) return;
+    // Shrinking from a body taller than the viewport would only play blank
+    // frames after the scroll above; it lands instead.
+    if (Math.abs(to - from) < 1 || (!expanded && container && from > container.clientHeight)) return;
     const animation = body.animate(
-      [{ height: `${from}px`, overflow: "hidden" }, { height: `${to}px`, overflow: "hidden" }],
+      [
+        { height: `${from}px`, opacity: 0.6, overflow: "hidden" },
+        { height: `${to}px`, opacity: 1, overflow: "hidden" },
+      ],
       { duration: UI_MOTION_DURATION.standard * 1000, easing: UI_EASE_OUT_CSS },
     );
     return () => animation.cancel();
@@ -89,10 +94,10 @@ export function LongCommentContent({
 
   if (!long) return <ReadonlyContent content={content} attachments={attachments} />;
 
-  const plainText = expanded && content.length > PLAIN_TEXT_COMMENT_CHARS;
+  const plainText = expanded && isPlainTextComment(content);
   const body = plainText ? (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-muted-foreground">
+      <div data-find-ignore className="flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-muted-foreground">
         <span>{t(($) => $.comment.long.plain_text_notice)}</span>
         <button
           type="button"
@@ -119,11 +124,19 @@ export function LongCommentContent({
   return (
     <div data-long-comment={expanded ? "expanded" : "collapsed"}>
       <div ref={bodyRef}>{body}</div>
-      <button ref={toggleRef} type="button" onClick={toggle} aria-expanded={expanded} className={TOGGLE_CLASS}>
-        <ChevronDown
+      <button
+        ref={toggleRef}
+        type="button"
+        onClick={toggle}
+        aria-expanded={expanded}
+        data-long-comment-toggle
+        data-find-ignore
+        className={TOGGLE_CLASS}
+      >
+        <ChevronRight
           className={cn(
-            "h-3 w-3 shrink-0 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
-            expanded && "rotate-180",
+            "h-3 w-3 shrink-0 transition-transform duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+            expanded && "rotate-90",
           )}
         />
         <span>{expanded ? t(($) => $.comment.long.collapse) : t(($) => $.comment.long.expand)}</span>

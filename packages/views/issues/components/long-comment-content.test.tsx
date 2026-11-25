@@ -135,10 +135,19 @@ describe("LongCommentContent", () => {
     expect(scrollIntoView).not.toHaveBeenCalled();
   });
 
+  it("keeps its controls out of in-page find", () => {
+    renderComment("u".repeat(PLAIN_TEXT_COMMENT_CHARS + 1));
+    fireEvent.click(screen.getByRole("button", { name: /show full comment/i }));
+
+    expect(screen.getByRole("button", { name: /collapse comment/i }).closest("[data-find-ignore]")).not.toBeNull();
+    expect(screen.getByRole("button", { name: /download as \.txt/i }).closest("[data-find-ignore]")).not.toBeNull();
+  });
+
   it("downloads the full text", () => {
     const createObjectURL = vi.fn((_blob: Blob) => "blob:comment");
     const revokeObjectURL = vi.fn();
-    Object.assign(URL, { createObjectURL, revokeObjectURL });
+    vi.stubGlobal("URL", Object.assign(Object.create(URL), { createObjectURL, revokeObjectURL }));
+    onTestFinished(() => { vi.unstubAllGlobals(); });
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     const huge = "z".repeat(PLAIN_TEXT_COMMENT_CHARS + 1);
     renderComment(huge);
