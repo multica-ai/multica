@@ -10,14 +10,40 @@ import (
 	"log/slog"
 	"os"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 )
 
+type safeBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *safeBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *safeBuffer) Bytes() []byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]byte, b.buf.Len())
+	copy(out, b.buf.Bytes())
+	return out
+}
+
+func (b *safeBuffer) Len() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Len()
+}
+
 func TestClaudeProcessRepliesToHookWhenIdle(t *testing.T) {
 	t.Parallel()
 
-	var buf bytes.Buffer
+	var buf safeBuffer
 	proc := &claudeProcess{
 		inputWriter: &claudeInputWriter{w: &buf},
 		logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -143,7 +169,7 @@ func TestClaudeWarmPoolAnswersHookAfterResult(t *testing.T) {
 	}
 }
 
-func waitClaudeControlResponse(t *testing.T, buf *bytes.Buffer, timeout time.Duration) map[string]any {
+func waitClaudeControlResponse(t *testing.T, buf interface{ Bytes() []byte }, timeout time.Duration) map[string]any {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for {
