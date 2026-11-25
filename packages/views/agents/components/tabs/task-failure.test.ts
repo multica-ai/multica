@@ -11,6 +11,7 @@ import koAgents from "../../../locales/ko/agents.json";
 import zhHansAgents from "../../../locales/zh-Hans/agents.json";
 import ruAgents from "../../../locales/ru/agents.json";
 import zhHantAgents from "../../../locales/zh-Hant/agents.json";
+import ptBRAgents from "../../../locales/pt-BR/agents.json";
 // Generated from server/pkg/taskfailure AllReasons; the Go test
 // TestClientFailureReasonFixture keeps it in step with the backend.
 import serverFailureReasons from "./test-fixtures/server-failure-reasons.json";
@@ -34,6 +35,7 @@ const AGENT_RESOURCES = {
   fr: frAgents,
   es: esAgents,
   ru: ruAgents,
+  "pt-BR": ptBRAgents,
 } as const;
 
 function fixedT(locale: SupportedLocale): TFunction<"agents"> {
@@ -149,6 +151,7 @@ describe("cancelReasonLabel", () => {
       fr: "Annulée par le système",
       es: "Cancelada por el sistema",
       ru: "Отменено системой",
+      "pt-BR": "Cancelada pelo sistema",
     };
 
     for (const locale of Object.keys(expected) as SupportedLocale[]) {

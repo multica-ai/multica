@@ -24,6 +24,7 @@ describe("matchLocale", () => {
     expect(matchLocale(["fr"])).toBe("fr");
     expect(matchLocale(["es"])).toBe("es");
     expect(matchLocale(["ru"])).toBe("ru");
+    expect(matchLocale(["pt-BR"])).toBe("pt-BR");
   });
 
   it("collapses region-tagged BCP-47 to the supported base", () => {
@@ -37,10 +38,12 @@ describe("matchLocale", () => {
     expect(matchLocale(["es-MX"])).toBe("es");
     expect(matchLocale(["ru-RU"])).toBe("ru");
     expect(matchLocale(["ru-BY"])).toBe("ru");
+    expect(matchLocale(["pt"])).toBe("pt-BR");
+    expect(matchLocale(["pt-PT"])).toBe("pt-BR");
   });
 
   it("falls back to DEFAULT_LOCALE when no candidate matches", () => {
-    expect(matchLocale(["pt", "de"])).toBe("en");
+    expect(matchLocale(["it", "de"])).toBe("en");
   });
 
   it("Traditional-script and TW/HK tags resolve to zh-Hant, mainland tags to zh-Hans", () => {
@@ -51,9 +54,10 @@ describe("matchLocale", () => {
   });
 
   it("uses the first supported candidate when multiple appear", () => {
-    expect(matchLocale(["pt", "zh-Hans", "en"])).toBe("zh-Hans");
-    expect(matchLocale(["pt", "ko-KR", "en"])).toBe("ko");
-    expect(matchLocale(["pt", "ja-JP", "en"])).toBe("ja");
+    expect(matchLocale(["it", "zh-Hans", "en"])).toBe("zh-Hans");
+    expect(matchLocale(["it", "ko-KR", "en"])).toBe("ko");
+    expect(matchLocale(["it", "ja-JP", "en"])).toBe("ja");
+    expect(matchLocale(["it", "pt-BR", "en"])).toBe("pt-BR");
   });
 
   it("returns DEFAULT_LOCALE for malformed BCP-47 tags rather than throwing", () => {
@@ -81,7 +85,7 @@ describe("pickLocale", () => {
   it("returns DEFAULT_LOCALE when neither choice nor preference yields a match", () => {
     const adapter = makeAdapter({
       getUserChoice: () => null,
-      getSystemPreferences: () => ["pt", "de"],
+      getSystemPreferences: () => ["it", "de"],
     });
     expect(pickLocale(adapter)).toBe("en");
   });

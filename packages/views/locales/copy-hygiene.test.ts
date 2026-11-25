@@ -54,7 +54,7 @@ const ALLOWED_PLACEHOLDER_DIFFS = new Set<string>([
 describe("locale copy hygiene and parity", () => {
   const enNamespaces = Object.keys(RESOURCES.en).sort();
 
-  it("ships identical namespace sets and zero dead empty objects across all 8 locales", () => {
+  it("ships identical namespace sets and zero dead empty objects across all supported locales", () => {
     for (const locale of SUPPORTED_LOCALES) {
       const bundle = RESOURCES[locale] as Record<string, unknown>;
       expect(Object.keys(bundle).sort(), `${locale} namespaces`).toEqual(enNamespaces);
@@ -65,7 +65,7 @@ describe("locale copy hygiene and parity", () => {
     }
   });
 
-  it("keeps base keys and interpolation placeholders aligned across all 8 locales", () => {
+  it("keeps base keys and interpolation placeholders aligned across all supported locales", () => {
     const placeholderViolations: string[] = [];
 
     for (const ns of enNamespaces) {

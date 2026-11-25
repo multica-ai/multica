@@ -46,7 +46,24 @@ describe("shared language switch", () => {
       value: "ru",
       label: "Русский",
     });
+    expect(result.current.options.find(({ value }) => value === "pt-BR")).toEqual({
+      value: "pt-BR",
+      label: "Português (Brasil)",
+    });
   });
+
+  it.each(["pt-BR", "pt"])(
+    "recognizes %s and avoids persisting an unchanged Brazilian Portuguese language",
+    async (language) => {
+      state.language = language;
+      const { result } = renderHook(() => useLanguageSwitch());
+
+      expect(result.current.currentLocale).toBe("pt-BR");
+      await result.current.changeLanguage("pt-BR");
+      expect(state.persist).not.toHaveBeenCalled();
+      expect(state.updateMe).not.toHaveBeenCalled();
+    },
+  );
 
   it.each(["ru", "ru-RU"])(
     "recognizes %s and avoids persisting an unchanged language",
