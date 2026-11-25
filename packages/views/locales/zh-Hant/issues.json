@@ -1389,6 +1389,7 @@
       "cancel": "取消",
       "error": "無法建立喚醒，請檢查設定後重試。",
       "capacity_error": "此任務或工作區開啟的喚醒已達上限。",
+      "agent_error": "你無權執行這個 AI 代理。請聯絡它的擁有者開通權限，或選擇其他 AI 代理。",
       "missing_condition": "請選擇條件。",
       "missing_agent": "請選擇要喚醒的 AI 代理。",
       "missing_events": "請至少選擇一個事件。",

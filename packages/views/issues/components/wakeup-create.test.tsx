@@ -7,6 +7,13 @@ import { WakeupCreate } from "./wakeup-create";
 
 const create = vi.fn();
 let assigneeAgent = "emacs";
+const authState = { user: { id: "user-j" } };
+const shared = { owner_id: "user-o", permission_mode: "public_to", invocation_targets: [{ target_type: "workspace", target_id: null }] };
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: Object.assign((select: (s: typeof authState) => unknown) => select(authState), {
+    getState: () => authState,
+  }),
+}));
 vi.mock("./wakeup-condition-names", () => ({
   useConditionNames: () => ({ status: (key: string) => key, label: () => undefined, property: () => undefined, actor: (_type: string, id: string) => id }),
 }));
@@ -19,12 +26,14 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-query")>()),
   useQuery: ({ queryKey }: { queryKey: unknown[] }) => ({
     data: JSON.stringify(queryKey).includes("members")
-      ? [{ user_id: "user-j", name: "Jiayuan" }]
+      ? [{ user_id: "user-j", name: "Jiayuan", role: "admin" }]
       : JSON.stringify(queryKey).includes("issue-detail")
         ? { id: "issue", assignee_type: "agent", assignee_id: assigneeAgent }
         : [
-          { id: "emacs", name: "Emacs", archived_at: null, runtime_id: "rt" },
-          { id: "grok", name: "Grok", archived_at: null, runtime_id: "rt" },
+          { id: "emacs", name: "Emacs", archived_at: null, runtime_id: "rt", ...shared },
+          { id: "grok", name: "Grok", archived_at: null, runtime_id: "rt", ...shared },
+          // Someone else's private agent: even a workspace admin may not run it.
+          { id: "secret", name: "Secret", archived_at: null, runtime_id: "rt", owner_id: "user-o", permission_mode: "private", invocation_targets: [] },
         ],
   }),
 }));
@@ -130,6 +139,42 @@ describe("WakeupCreateForm", () => {
     fireEvent.change(screen.getByLabelText("唤醒后要做什么"), { target: { value: "看一下 CI" } });
     fireEvent.click(screen.getByRole("button", { name: /创建/ }));
     expect(screen.getByRole("alert")).toHaveTextContent("请选择要唤醒的智能体");
+  });
+
+  it("asks for an agent instead of preselecting an assignee this member cannot run", async () => {
+    await renderForm("secret");
+    expect(screen.getByRole("button", { name: /选择智能体/ })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /选择智能体/ }));
+    expect(await screen.findByText("Emacs")).toBeVisible();
+    expect(screen.queryByText("Secret")).toBeNull();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    await chooseCondition("在某个时间");
+    fireEvent.change(screen.getByLabelText("唤醒后要做什么"), { target: { value: "看一下 CI" } });
+    fireEvent.click(screen.getByRole("button", { name: /创建/ }));
+    expect(screen.getByRole("alert")).toHaveTextContent("请选择要唤醒的智能体");
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("points an agent refusal at the agent and keeps the draft", async () => {
+    create.mockRejectedValue(
+      new ApiError("wakeup permission denied: the agent cannot be run", 403, "Forbidden", { code: "wakeup_agent_not_invocable" }),
+    );
+    await renderForm();
+    await chooseCondition("在某个时间");
+    fireEvent.change(screen.getByLabelText("唤醒后要做什么"), { target: { value: "看一下 CI" } });
+    fireEvent.click(screen.getByRole("button", { name: /创建/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("你无权运行这个智能体");
+    expect(screen.getByLabelText("唤醒后要做什么")).toHaveValue("看一下 CI");
+    expect(screen.getByRole("form", { name: "新建唤醒" })).toBeVisible();
+  });
+
+  it("does not blame rule management for another refusal on create", async () => {
+    create.mockRejectedValue(new ApiError("wakeup permission denied", 403, "Forbidden"));
+    await renderForm();
+    await chooseCondition("在某个时间");
+    fireEvent.change(screen.getByLabelText("唤醒后要做什么"), { target: { value: "看一下 CI" } });
+    fireEvent.click(screen.getByRole("button", { name: /创建/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("无法创建唤醒，请检查设置后重试。");
   });
 
   it("gives a recurring check an end date and no timeout choice", async () => {
