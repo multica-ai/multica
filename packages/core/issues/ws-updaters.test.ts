@@ -698,27 +698,37 @@ describe("onIssueUpdated — blockers stay this reader's own", () => {
       via: "manual",
       closed: false,
     };
-    qc.setQueryData<Issue>(issueKeys.detail(WS_ID, ISSUE_ID), {
-      ...baseIssue,
+    const child: Issue = {
+      ...parentedIssue,
       blocked_by: [privateBlocker],
       blocked_count: 1,
       revision: 1,
-    });
+    };
+    const detailKey = issueKeys.detail(WS_ID, ISSUE_ID);
+    const childrenKey = issueKeys.children(WS_ID, PARENT_ISSUE_ID);
+    const listKey = issueKeys.list(WS_ID);
+    qc.setQueryData(detailKey, child);
+    qc.setQueryData(childrenKey, [child]);
+    qc.setQueryData(listKey, makeListCache(child));
 
     // The server strips cross-project private blockers from every broadcast.
     onIssueUpdated(qc, WS_ID, {
-      ...baseIssue,
+      ...child,
       title: "Renamed",
       blocked_by: [],
-      blocked_count: 1,
       revision: 2,
     });
 
-    expect(qc.getQueryData<Issue>(issueKeys.detail(WS_ID, ISSUE_ID))).toMatchObject({
+    const expected = {
       title: "Renamed",
       blocked_by: [privateBlocker],
       blocked_count: 1,
-    });
+      revision: 2,
+    };
+    expect(qc.getQueryData(detailKey)).toMatchObject(expected);
+    expect(qc.getQueryData<ListIssuesCache>(listKey)?.byStatus.unstarted?.issues[0])
+      .toMatchObject(expected);
+    expect(qc.getQueryData<Issue[]>(childrenKey)?.[0]).toMatchObject(expected);
   });
 });
 

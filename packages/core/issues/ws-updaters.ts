@@ -531,7 +531,7 @@ export function onIssueUpdated(
           (issue.revision === undefined ||
             c.revision === undefined ||
             issue.revision > c.revision)
-            ? { ...c, ...issue }
+            ? { ...c, ...patch }
             : c,
         ),
       );
