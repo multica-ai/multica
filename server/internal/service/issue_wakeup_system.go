@@ -743,7 +743,12 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	}
 	overlay := s.Tasks.buildRuntimeMCPOverlay(ctx, attr.UserID, agent)
 	source, delegatedFrom, _, _ := attributionCreateParams(attr)
-	usageSquadID := s.Tasks.resolveInheritedSquadID(ctx, issue, agent.ID, current.SquadID, delegatedFrom)
+	usageSquadID := current.SquadID
+	if !usageSquadID.Valid {
+		// System wakeups use the issue's origin for run identity. Usage
+		// inheritance from that origin requires squad membership.
+		usageSquadID = resolveIssueOriginSquadID(ctx, q, issue, agent.ID)
+	}
 	contextJSON, _ := json.Marshal(map[string]any{"wakeup_id": util.UUIDToString(w.ID), "wakeup_revision": w.Revision, "wakeup_evidence": evidence, "wakeup_system": w.SystemRule.String})
 	task, err = q.CreateWakeupTask(ctx, db.CreateWakeupTaskParams{
 		ID: dbid.NewV7(), AgentID: agent.ID, RuntimeID: agent.RuntimeID, IssueID: issue.ID, Priority: priorityToInt(issue.Priority),
