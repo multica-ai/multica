@@ -1026,6 +1026,10 @@ function SwimLaneViewImpl({
   // localCells out from under the optimistic move. Mirrors board-view /
   // list-view. settleVersion forces the resync once the lock releases.
   const isSettlingRef = useRef(false);
+  // Mirrors useDragSettle's generation stamp: the release runs after the
+  // move's table refetch lands, so a second drop can engage the lock while
+  // the first release is still in flight.
+  const settleGenerationRef = useRef(0);
   const [settleVersion, setSettleVersion] = useState(0);
 
   const issueMap = useMemo(() => {
@@ -1375,6 +1379,7 @@ function SwimLaneViewImpl({
       }
 
       isSettlingRef.current = true;
+      const generation = ++settleGenerationRef.current;
       onMoveIssue(
         activeId,
         {
@@ -1388,6 +1393,7 @@ function SwimLaneViewImpl({
           ...getMoveAnchors(finalIds, activeId),
         },
         () => {
+          if (settleGenerationRef.current !== generation) return;
           isSettlingRef.current = false;
           setSettleVersion((v) => v + 1);
         },
