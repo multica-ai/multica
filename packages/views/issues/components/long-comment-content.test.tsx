@@ -106,6 +106,35 @@ describe("LongCommentContent", () => {
     expect(animate).not.toHaveBeenCalled();
   });
 
+  it("brings the toggle back into its scroll container on collapse, without native scrollIntoView", () => {
+    const long = "v".repeat(LONG_COMMENT_CHARS + 1);
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { value: scrollIntoView, configurable: true });
+    onTestFinished(() => {
+      vi.restoreAllMocks();
+      delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    });
+    const { container } = renderWithI18n(
+      <div data-testid="scroller" style={{ overflowY: "auto" }}>
+        <LongCommentContent issueId="issue-1" commentId="c1" content={long} />
+      </div>,
+    );
+    const scroller = container.querySelector<HTMLElement>("[data-testid=scroller]")!;
+    Object.defineProperty(scroller, "scrollHeight", { value: 5_000 });
+    Object.defineProperty(scroller, "clientHeight", { value: 800 });
+    scroller.scrollTop = 3_000;
+    fireEvent.click(screen.getByRole("button", { name: /show full comment/i }));
+    // After collapsing, the toggle sits 1,200px above the container's top edge.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return { top: this === scroller ? 100 : this.tagName === "BUTTON" ? -1_100 : 0, height: 0 } as DOMRect;
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /collapse comment/i }));
+
+    expect(scroller.scrollTop).toBe(1_800);
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
   it("downloads the full text", () => {
     const createObjectURL = vi.fn((_blob: Blob) => "blob:comment");
     const revokeObjectURL = vi.fn();

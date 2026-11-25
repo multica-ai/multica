@@ -23,6 +23,26 @@ function downloadText(content: string, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
+function scrollParent(element: HTMLElement): HTMLElement | null {
+  for (let node = element.parentElement; node; node = node.parentElement) {
+    if (/(auto|scroll)/.test(getComputedStyle(node).overflowY) && node.scrollHeight > node.clientHeight) return node;
+  }
+  return null;
+}
+
+/**
+ * Collapsing a body the reader scrolled through would leave the toggle far
+ * above the viewport; bring it back to the top edge. Drives the scroll
+ * container directly: native scrollIntoView on the issue page also scrolls
+ * the desktop shell (#3929). A toggle still in view stays put.
+ */
+function keepToggleInView(toggle: HTMLElement | null) {
+  const container = toggle && scrollParent(toggle);
+  if (!toggle || !container) return;
+  const above = container.getBoundingClientRect().top - toggle.getBoundingClientRect().top;
+  if (above > 0) container.scrollTop -= above;
+}
+
 /**
  * A comment body that opens collapsed when it is long (see
  * `../utils/long-comment`). Short bodies render exactly as before.
@@ -56,9 +76,7 @@ export function LongCommentContent({
     fromHeightRef.current = null;
     const body = bodyRef.current;
     if (from === null || !body) return;
-    // Collapsing a body the reader scrolled through would leave the toggle
-    // far above the viewport; bring it back with the smallest movement.
-    if (!expanded) toggleRef.current?.scrollIntoView({ block: "nearest" });
+    if (!expanded) keepToggleInView(toggleRef.current);
     if (prefersReducedMotion() || !body.animate) return;
     const to = body.getBoundingClientRect().height;
     if (Math.abs(to - from) < 1) return;
