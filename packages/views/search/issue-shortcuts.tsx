@@ -4,8 +4,9 @@ import { useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useCommandBarContextStore } from "@multica/core/command-bar";
 import { useCurrentWorkspace } from "@multica/core/paths";
-import { useIsGuest } from "@multica/core/permissions";
+import { useAuthStore } from "@multica/core/auth";
 import { quickActionListOptions } from "@multica/core/quick-actions";
+import { memberListOptions } from "@multica/core/workspace/queries";
 import { getShortcut, shortcutMatchesEvent, type ShortcutActionId } from "@multica/core/shortcuts";
 import { isPageShortcutEvent } from "../common/page-shortcut";
 import { composerFocusFor } from "../issues/components/composer-focus";
@@ -47,20 +48,31 @@ const ISSUE_VERBS: readonly IssueVerb[] = [
  */
 export function IssueShortcuts() {
   const { t } = useT("search");
-  // Mounted with the closed palette, before the workspace may have resolved.
+  // Mounted with the closed palette on every page, before the workspace may
+  // have resolved.
   const wsId = useCurrentWorkspace()?.id ?? "";
-  // A guest (MUL-9420) only comments: every field verb stays unclaimed.
-  const guest = useIsGuest(wsId);
+  const userId = useAuthStore((s) => s.user?.id ?? null);
+  const { data: members } = useQuery({
+    ...memberListOptions(wsId),
+    enabled: wsId !== "" && userId !== null,
+  });
+  const role = members?.find((member) => member.user_id === userId)?.role ?? null;
+  // A guest (MUL-9420) only comments, and the server refuses its quick-action
+  // reads, so field verbs wait until the role is known to be a member's.
+  const canEdit = role !== null && role !== "guest";
+  const onSingleIssue = useCommandBarContextStore(
+    (s) => issueTargetFromContexts(s.entries.map((entry) => entry.context))?.kind === "single",
+  );
   const { data: quickActions = [] } = useQuery({
     ...quickActionListOptions(wsId),
-    enabled: wsId !== "" && !guest,
+    enabled: canEdit && onSingleIssue,
   });
   const hasQuickActions = quickActions.some((action) => action.status === "active");
 
   const actionFor = (verb: IssueVerb, target: IssueTarget): (() => void) | null => {
     const single = target.kind === "single" ? target.issue : null;
     if (verb === "replyToIssue") return single ? composerFocusFor(single.id) : null;
-    if (guest || wsId === "") return null;
+    if (!canEdit) return null;
     const crumb =
       target.kind === "single"
         ? target.issue.identifier

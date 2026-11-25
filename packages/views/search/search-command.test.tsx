@@ -1429,6 +1429,28 @@ describe("SearchCommand", () => {
       expect(useSearchStore.getState().open).toBe(false);
     });
 
+    it("waits for the viewer's role before claiming a field verb or reading quick actions", () => {
+      queryData.delete(JSON.stringify(memberListOptions("ws-test").queryKey));
+      registerContext({ kind: "issue", issue });
+      renderSearch();
+
+      for (const key of ["s", "a", "q"]) expect(press(key).defaultPrevented).toBe(false);
+      expect(useSearchStore.getState().open).toBe(false);
+      expect(requestedKeys).not.toContain(JSON.stringify(quickActionListOptions("ws-test").queryKey));
+    });
+
+    it("reads quick actions only with a single issue in front of the user", () => {
+      renderSearch();
+      expect(requestedKeys).not.toContain(JSON.stringify(quickActionListOptions("ws-test").queryKey));
+    });
+
+    it("reads no quick actions for a guest", () => {
+      seed(memberListOptions("ws-test"), [{ ...makeMember(ME, "Me Myself", "me@example.com"), role: "guest" }]);
+      registerContext({ kind: "issue", issue });
+      renderSearch();
+      expect(requestedKeys).not.toContain(JSON.stringify(quickActionListOptions("ws-test").queryKey));
+    });
+
     it("leaves 'q' alone when the workspace has no active quick action", () => {
       seed(quickActionListOptions("ws-test"), { quick_actions: [{ id: "qa-1", name: "Triage", status: "paused" }] });
       registerContext({ kind: "issue", issue });
