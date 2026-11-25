@@ -41,6 +41,15 @@ describe("VirtualThreadRow", () => {
     expect(screen.getByText("Unsaved draft")).toBeInTheDocument();
   });
 
+  it("unmounts an expanded long comment offscreen, since its store keeps the state", () => {
+    render(<VirtualThreadRow id="comment-long" scrollParent={document.body}>
+      {() => <button type="button" aria-expanded data-long-comment-toggle>Collapse comment</button>}
+    </VirtualThreadRow>);
+    intersect(true);
+    intersect(false);
+    expect(screen.queryByText("Collapse comment")).toBeNull();
+  });
+
   it("keeps a row mounted when an external portaled control marks it engaged", () => {
     const { rerender } = render(<VirtualThreadRow id="comment-annotated" scrollParent={document.body} engaged>
       {() => <p>Quoted reply body</p>}

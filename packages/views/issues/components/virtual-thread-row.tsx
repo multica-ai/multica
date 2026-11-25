@@ -106,9 +106,10 @@ export function VirtualThreadRow({ id, taskId, scrollParent, virtualize = true, 
     const observer = new IntersectionObserver((entries) => {
       const intersecting = entries.at(-1)?.isIntersecting ?? false;
       // Editing and open controls own transient state; don't discard it on scroll.
+      // An expanded long comment keeps its state in a store, so it may unmount.
       const engaged = forceEngagedRef.current
         || node.contains(document.activeElement)
-        || !!node.querySelector('[contenteditable="true"], [aria-expanded="true"]');
+        || !!node.querySelector('[contenteditable="true"], [aria-expanded="true"]:not([data-long-comment-toggle])');
       setVisible(intersecting || engaged);
     }, { root: scrollParent, rootMargin: "800px 0px" });
     observer.observe(node);
