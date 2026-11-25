@@ -239,6 +239,7 @@ import type {
   ConnectVCSRequest,
   ConnectVCSResponse,
   ListLarkInstallationsResponse,
+  LarkGroupSenderPolicy,
   BeginLarkInstallResponse,
   LarkInstallStatusResponse,
   RedeemLarkBindingTokenResponse,
@@ -6134,6 +6135,17 @@ export class ApiClient {
 
   async getLarkInstallStatus(workspaceId: string, sessionId: string): Promise<LarkInstallStatusResponse> {
     return this.fetch(`/api/workspaces/${workspaceId}/lark/install/${sessionId}/status`);
+  }
+
+  async updateLarkInstallation(
+    workspaceId: string,
+    installationId: string,
+    body: { group_sender_policy: LarkGroupSenderPolicy },
+  ): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/lark/installations/${installationId}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
   }
 
   async deleteLarkInstallation(workspaceId: string, installationId: string): Promise<void> {

@@ -5069,6 +5069,8 @@ export const LarkInstallationSchema = z.object({
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
   first_message_received_at: z.iso.datetime({ offset: true }).nullable().optional().catch(undefined),
+  // An unknown policy reads as the restrictive one, never as open access.
+  group_sender_policy: z.enum(["members_only", "anyone_in_chat"]).catch("members_only"),
 }).loose();
 
 export const ListLarkInstallationsResponseSchema = z.object({

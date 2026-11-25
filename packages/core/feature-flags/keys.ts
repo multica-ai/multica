@@ -1,6 +1,8 @@
 export const COMPOSIO_MCP_APPS_FLAG = "composio_mcp_apps";
 export const PLUGINS_V1_FLAG = "plugins_v1";
 export const DOCS_V1_FLAG = "docs_v1";
+// Lets a Feishu/Lark bot serve group senders outside the workspace (#11437).
+export const LARK_OPEN_GROUP_ACCESS_FLAG = "lark_open_group_access";
 export const BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG =
   "billing_workspace_subscriptions";
 // Guests (MUL-9420): free, seatless members limited to shared projects. Not a

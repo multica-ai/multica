@@ -1227,7 +1227,10 @@
     "inbound_pending": "Bound — awaiting message verification",
     "inbound_verified": "Message reception verified",
     "inbound_pending_hint": "Send this bot a message in Feishu/Lark to verify reception. If it does not arrive, check long connection mode, the im.message.receive_v1 subscription, and app publication/approval. Existing bindings may have no recorded verification yet.",
-    "inbound_verified_hint": "This binding received a valid message. This does not confirm ongoing connectivity, agent execution, or replies."
+    "inbound_verified_hint": "This binding received a valid message. This does not confirm ongoing connectivity, agent execution, or replies.",
+    "group_access_label": "Anyone in a group chat can use this bot",
+    "group_access_description": "Group members who aren't in this workspace run the agent as the person who connected the bot, with their access. Direct messages still require a workspace member.",
+    "group_access_failed": "Couldn't update who can use this bot"
   },
   "slack": {
     "section_title": "Slack",
