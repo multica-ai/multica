@@ -1577,6 +1577,7 @@ SELECT
     SELECT min(t.next_run_at)
     FROM autopilot_trigger t
     WHERE t.autopilot_id = a.id AND t.enabled AND t.kind = 'schedule'
+      AND a.status = 'active'
   )::timestamptz AS next_run_at,
   COALESCE((
     SELECT r.status
@@ -1613,6 +1614,8 @@ type ListAutopilotsRow struct {
 // next run, last-run outcome) so the page never has to N+1 into the detail
 // endpoint. trigger_kinds/next_run_at only consider ENABLED triggers — the
 // columns answer "how does this fire today", not "what is configured".
+// next_run_at is also left NULL for an autopilot that is not active: the
+// scheduler skips every trigger of a paused one.
 // last_run_status is COALESCEd to ” (never ran) because sqlc cannot infer
 // nullability through a scalar subquery; the handler maps ” back to omitted.
 func (q *Queries) ListAutopilots(ctx context.Context, arg ListAutopilotsParams) ([]ListAutopilotsRow, error) {
