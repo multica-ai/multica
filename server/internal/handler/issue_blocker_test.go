@@ -358,3 +358,55 @@ func TestIssueBlockerGuestSeesOnlyItsProjectsReferences(t *testing.T) {
 		t.Fatalf("member lost blockers: %+v", got)
 	}
 }
+
+// "Don't start yet" on the write that makes a released issue startable is an
+// answer to that release: the dependency rule must not start the run anyway.
+func TestIssueBlockerReleaseHonorsSuppressedRun(t *testing.T) {
+	agent := seededReadyAgentID(t)
+	svc := service.IssueWakeupService{Tasks: testHandler.TaskService}
+	tick := func() {
+		t.Helper()
+		if err := svc.TickWorkspaces(context.Background(), parseUUID(testWorkspaceID)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writes := map[string]func(id string, updates map[string]any){
+		"single": func(id string, updates map[string]any) {
+			updateIssueForTest(t, id, updates).Want(http.StatusOK)
+		},
+		"batch": func(id string, updates map[string]any) {
+			testutil.Call(t, testHandler.BatchUpdateIssues, newRequest("POST", "/api/issues/batch-update?workspace_id="+testWorkspaceID, map[string]any{
+				"issue_ids": []string{id}, "updates": updates,
+			})).Want(http.StatusOK)
+		},
+	}
+	for name, write := range writes {
+		t.Run(name, func(t *testing.T) {
+			prerequisite := blockerTestIssue(t, map[string]any{"status": "todo"})
+			issue := blockerTestIssue(t, map[string]any{"status": "backlog", "assignee_type": "agent", "assignee_id": agent, "blocked_by": []string{prerequisite.ID}})
+			runs := func() int {
+				return dbfx.Count(t, "SELECT count(*) FROM agent_task_queue WHERE issue_id=$1", issue.ID)
+			}
+			updateIssueForTest(t, prerequisite.ID, map[string]any{"status": "done"}).Want(http.StatusOK)
+			tick()
+			write(issue.ID, map[string]any{"status": "todo", "suppress_run": true})
+			tick()
+			if n := runs(); n != 0 {
+				t.Fatalf("suppressed promotion started %d runs", n)
+			}
+			// Later moves between active statuses are not a new release.
+			updateIssueForTest(t, issue.ID, map[string]any{"status": "in_progress"}).Want(http.StatusOK)
+			tick()
+			if n := runs(); n != 0 {
+				t.Fatalf("status move after a suppressed promotion started %d runs", n)
+			}
+			// A new wait is delivered as usual.
+			updateIssueForTest(t, prerequisite.ID, map[string]any{"status": "todo"}).Want(http.StatusOK)
+			updateIssueForTest(t, prerequisite.ID, map[string]any{"status": "done"}).Want(http.StatusOK)
+			tick()
+			if n := runs(); n != 1 {
+				t.Fatalf("new wait started %d runs, want 1", n)
+			}
+		})
+	}
+}
