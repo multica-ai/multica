@@ -51,6 +51,7 @@ import { useWarmRoute } from "../../navigation";
 import { IssueContextMenuProvider } from "../actions";
 import { IssueSurfaceActionsProvider } from "./actions-context";
 import { IssuePeekHost } from "../components/issue-peek";
+import { IssueCursorProvider } from "./issue-cursor";
 import { IssueSurfaceSelectionProvider } from "./selection-context";
 import { ColumnStatusesProvider } from "./column-statuses-context";
 import type { IssueCreateDefaults, IssueSurfaceProps } from "./types";
@@ -378,6 +379,11 @@ function IssueSurfaceContent({
             />
           )
         ) : (
+          <IssueCursorProvider
+            issues={controller.viewMode === "table" ? tableLoadedIssues : issues}
+            selectable={shouldShowBatchToolbar && controller.viewMode !== "board"}
+            enabled={controller.viewMode === "list" || controller.viewMode === "table" || controller.viewMode === "board"}
+          >
           <div className={cn("flex flex-col flex-1 min-h-0", contentClassName)}>
             {controller.viewMode === "board" && (
               <BoardView
@@ -434,6 +440,7 @@ function IssueSurfaceContent({
               />
             )}
           </div>
+          </IssueCursorProvider>
         )}
         </IssuePeekHost>
         {shouldShowBatchToolbar && (
