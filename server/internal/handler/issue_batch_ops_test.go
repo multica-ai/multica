@@ -84,6 +84,49 @@ func setIssueParent(t *testing.T, issueID, parentID string) {
 	}
 }
 
+// A blocker conflict belongs to the issue it was found on: the issues around it
+// are written and reported, like every other per-issue conflict.
+func TestBatchUpdateSkipsBlockerConflicts(t *testing.T) {
+	newIssue := func(t *testing.T, name string) string {
+		id := createTestIssue(t, "BU-blocker "+name, "todo", "low")
+		t.Cleanup(func() { deleteTestIssue(t, id) })
+		return id
+	}
+	run := func(t *testing.T, before, conflicting, after string, updates map[string]any) {
+		t.Helper()
+		status, resp, raw := batchUpdate(t, map[string]any{
+			"issue_ids": []string{before, conflicting, after},
+			"updates":   updates,
+		})
+		if status != http.StatusOK || resp.Updated != 2 {
+			t.Fatalf("batch = %d %s, want 200 with 2 updated", status, raw)
+		}
+		for _, id := range []string{before, after} {
+			if got := resultFor(t, resp, id); got.Outcome != batchOutcomeUpdated {
+				t.Fatalf("issue %s = %+v, want updated", id, got)
+			}
+		}
+		if got := resultFor(t, resp, conflicting); got.Outcome != batchOutcomeSkipped || got.Code != "blocker_conflict" || got.Message == "" {
+			t.Fatalf("conflicting issue = %+v, want skipped with blocker_conflict", got)
+		}
+	}
+
+	t.Run("blocked by itself", func(t *testing.T) {
+		a, b, c := newIssue(t, "a"), newIssue(t, "b"), newIssue(t, "c")
+		run(t, a, b, c, map[string]any{"blocked_by": []string{b}})
+	})
+	t.Run("cycle", func(t *testing.T) {
+		a, b, c, gate := newIssue(t, "a"), newIssue(t, "b"), newIssue(t, "c"), newIssue(t, "gate")
+		updateIssueForTest(t, gate, map[string]any{"blocked_by": []string{b}}).Want(http.StatusOK)
+		run(t, a, b, c, map[string]any{"blocked_by": []string{gate}})
+	})
+	t.Run("parent it blocks", func(t *testing.T) {
+		a, b, c, parent := newIssue(t, "a"), newIssue(t, "b"), newIssue(t, "c"), newIssue(t, "parent")
+		updateIssueForTest(t, parent, map[string]any{"blocked_by": []string{b}}).Want(http.StatusOK)
+		run(t, a, b, c, map[string]any{"parent_issue_id": parent})
+	})
+}
+
 // A batch that cannot apply to every issue reports, per issue, which ones it
 // skipped and why, instead of only a short count. (MUL-8882)
 func TestBatchUpdateReportsSkippedIssues(t *testing.T) {

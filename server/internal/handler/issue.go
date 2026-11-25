@@ -5363,9 +5363,14 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			issue, labelsChanged, propertiesChanged = written.issue, written.labelsChanged, written.propertiesChanged
 		}
 		if err != nil {
+			if message, ok := issueBlockerConflict(err); ok {
+				skip(issueID, identifier, "blocker_conflict", message)
+				continue
+			}
 			// The archive race is a property of the batch's shared target
 			// status, not of one issue, so every remaining item would fail the
 			// same way. Abort with 409 instead of reporting a partial update.
+			// A blocker that does not exist is shared the same way.
 			if writeIssueBlockerError(w, err) {
 				return
 			}
