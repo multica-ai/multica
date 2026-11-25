@@ -258,9 +258,10 @@ func (h *Handler) revokeMember(ctx context.Context, workspaceID, userID, memberI
 
 	// App requests waiting on the member would otherwise let a later OAuth
 	// connect, or a stale tab, resume an agent in a workspace they left.
-	if _, err := qtx.CancelPendingAppActionRequestsForApprover(ctx, db.CancelPendingAppActionRequestsForApproverParams{
+	cancelledAppRequests, err := qtx.CancelPendingAppActionRequestsForApprover(ctx, db.CancelPendingAppActionRequestsForApproverParams{
 		WorkspaceID: workspaceID, ApproverUserID: userID,
-	}); err != nil {
+	})
+	if err != nil {
 		return empty, err
 	}
 
@@ -347,6 +348,11 @@ func (h *Handler) revokeMember(ctx context.Context, workspaceID, userID, memberI
 
 	if err := tx.Commit(ctx); err != nil {
 		return empty, err
+	}
+	// After commit, like publishRevocation: admins are told about what is
+	// still waiting only once the cancellations are final.
+	if h.ConnectedApps != nil {
+		h.ConnectedApps.RequestsCancelled(ctx, cancelledAppRequests...)
 	}
 
 	return result, nil
