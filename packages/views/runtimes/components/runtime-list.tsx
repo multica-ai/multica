@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type SyntheticEvent } from "react";
 import {
   AlertTriangle,
   ExternalLink,
   Globe,
+  Lock,
   Users,
   Loader2,
   Pencil,
@@ -43,6 +44,12 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@multica/ui/components/ui/popover";
+import { cn } from "@multica/ui/lib/utils";
 import { useIntentNavigate } from "../../navigation";
 import {
   CollectionEmptyValue,
@@ -59,6 +66,7 @@ import { HealthIcon, useHealthLabel } from "./shared";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
 import { RuntimeProfilesDialog } from "./runtime-profiles-dialog";
+import { RuntimeAccessEditor, runtimeAccessScope } from "./runtime-access-editor";
 import {
   computeCostInWindow,
   pctChange,
@@ -138,8 +146,11 @@ export function buildWorkloadIndex(
 function RuntimeNameCell({
   runtime,
   machineTitle,
+  canEditVisibility,
 }: {
   runtime: AgentRuntime;
+  /** Owner-only, same rule as the detail page's isRuntimeOwner. */
+  canEditVisibility: boolean;
   /**
    * The containing machine's title. Lets a per-runtime alias surface here
    * while a machine-level rename (shared by every runtime on the daemon)
@@ -157,7 +168,7 @@ function RuntimeNameCell({
         <>
           <RuntimeKindBadge runtime={runtime} />
           <PendingRuntimeBadge runtime={runtime} />
-          <VisibilityBadge runtime={runtime} />
+          <VisibilityBadge runtime={runtime} canEdit={canEditVisibility} />
         </>
       }
     />
@@ -203,27 +214,83 @@ function PendingRuntimeBadge({ runtime }: { runtime: AgentRuntime }) {
   );
 }
 
-// Only public is worth a badge — private is the default and rendering a
-// `🔒 Private` chip on every row turns the whole column into noise.
-function VisibilityBadge({ runtime }: { runtime: AgentRuntime }) {
+// Every row shows its access scope, private included. The runtime owner
+// edits it in place through the detail page's RuntimeAccessEditor; everyone else,
+// admins included, gets the read-only hint. Clicks stay inside the badge so
+// they don't open the row's detail link.
+const VISIBILITY_ICON = { private: Lock, public: Globe, members: Users } as const;
+
+export function VisibilityBadge({
+  runtime,
+  canEdit,
+}: {
+  runtime: AgentRuntime;
+  canEdit: boolean;
+}) {
   const { t } = useT("runtimes");
-  const scope = runtime.visibility === "public" ? "public" : "members";
-  if (scope === "members" && !runtime.shared_with?.length) return null;
-  const Icon = scope === "public" ? Globe : Users;
+  const scope = runtimeAccessScope(runtime);
+  const Icon = VISIBILITY_ICON[scope];
+  const memberCount = runtime.shared_with?.length ?? 0;
+  const label =
+    scope === "members"
+      ? `${t(($) => $.detail.visibility_label.members)} (${memberCount})`
+      : t(($) => $.detail.visibility_label[scope]);
+  // The name column is narrow and badges don't shrink, so a shared runtime
+  // shows its member count next to the icon; the full label is the tooltip
+  // and accessible name.
+  const shown = scope === "members" ? String(memberCount) : label;
+  const className = cn(
+    "inline-flex shrink-0 items-center gap-0.5 rounded-xs px-1 text-micro font-medium",
+    scope === "private"
+      ? "bg-muted text-muted-foreground"
+      : "bg-info/10 text-info",
+  );
+  const content = (
+    <>
+      <Icon className="h-2.5 w-2.5" aria-hidden="true" />
+      {shown}
+    </>
+  );
+
+  if (!canEdit) {
+    return (
+      <Tooltip>
+        <TooltipTrigger render={<span className={className} aria-label={label}>{content}</span>} />
+        <TooltipContent>
+          {scope === "members" ? `${label} · ` : ""}
+          {t(($) => $.detail.visibility_hint_readonly[scope])}
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  // Only the trigger sits inside the row's DOM. The popup and the revoke
+  // dialog are portaled, and the row already ignores events whose target is
+  // outside it, so they need no stop (and Escape must still reach them).
+  const stop = (e: SyntheticEvent) => e.stopPropagation();
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <span className="inline-flex shrink-0 items-center gap-0.5 rounded-xs bg-info/10 px-1 text-micro font-medium text-info">
-            <Icon className="h-2.5 w-2.5" />
-            {t(($) => $.detail.visibility_label[scope])}
-          </span>
-        }
-      />
-      <TooltipContent>
-        {t(($) => $.detail.visibility_hint_readonly[scope])}
-      </TooltipContent>
-    </Tooltip>
+    <span className="inline-flex shrink-0" onClick={stop} onAuxClick={stop}>
+      <Popover>
+        <PopoverTrigger
+          render={
+            <button
+              type="button"
+              aria-label={`${t(($) => $.detail.diagnostics_visibility)}: ${label}`}
+              title={label}
+              className={cn(className, "cursor-pointer hover:ring-1 hover:ring-ring")}
+            >
+              {content}
+            </button>
+          }
+        />
+        {/* keepMounted: the revoke-access confirm dialog lives inside the
+            editor; unmounting the popup when focus moves to it would tear
+            the dialog down. */}
+        <PopoverContent align="start" className="w-80" keepMounted>
+          <RuntimeAccessEditor runtime={runtime} />
+        </PopoverContent>
+      </Popover>
+    </span>
   );
 }
 
@@ -628,7 +695,19 @@ export function RuntimeList({
     {
       key: "name",
       header: t(($) => $.list.col_runtime),
-      cell: (row) => <RuntimeNameCell runtime={row.runtime} machineTitle={machineTitle} />,
+      cell: (row) => (
+        <RuntimeNameCell
+          runtime={row.runtime}
+          machineTitle={machineTitle}
+          // Pending custom runtimes are client-side placeholders the server
+          // can't patch yet, so they stay read-only.
+          canEditVisibility={
+            !!user &&
+            row.runtime.owner_id === user.id &&
+            !isPendingCustomRuntime(row.runtime)
+          }
+        />
+      ),
     },
     {
       // Health folds the workload in as a suffix ("Healthy · 2 tasks") —
