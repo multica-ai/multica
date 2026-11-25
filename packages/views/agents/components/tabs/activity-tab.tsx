@@ -779,7 +779,10 @@ const RecentTaskRow = memo(function RecentTaskRow({
             the raw `task.error` (untranslated, with absolute paths, #7411)
             lives in the transcript's Run details instead. */}
         {failureLabel && (
-          <span className="hidden shrink-0 text-caption text-destructive sm:inline">
+          <span
+            className="hidden min-w-0 max-w-[50%] truncate text-caption text-destructive sm:inline"
+            title={failureLabel}
+          >
             {failureLabel}
           </span>
         )}

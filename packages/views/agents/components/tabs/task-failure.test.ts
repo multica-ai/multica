@@ -65,7 +65,7 @@ describe("FAILURE_REASON_I18N_KEYS", () => {
       "Couldn't confirm the agent process stopped",
     );
     expect(failureReasonLabel("cleanup_blocked", enT)).toBe(
-      "An earlier run's process may still be running; rerun manually",
+      "Previous run may be active; rerun manually",
     );
   });
 });
