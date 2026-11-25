@@ -4837,6 +4837,7 @@ func (h *Handler) deleteIssuesAndCollectAttachmentURLs(ctx context.Context, issu
 	}
 	defer tx.Rollback(ctx)
 	qtx := h.Queries.WithTx(tx)
+	var cancelledAppRequests []db.AppActionRequest
 	if len(issues) > 0 {
 		if err = qtx.LockIssueBlockerGraph(ctx, issues[0].WorkspaceID); err != nil {
 			return issueDeleteResult{}, err
@@ -4866,6 +4867,15 @@ func (h *Handler) deleteIssuesAndCollectAttachmentURLs(ctx context.Context, issu
 		for _, duplicate := range cleared {
 			result.ClearedDuplicates = append(result.ClearedDuplicates, clearedDuplicate{Issue: duplicate, Original: issue})
 		}
+		// An app request outlives the run that made it, but not its issue:
+		// approving it later would run the call for work that is gone.
+		withdrawn, err := qtx.CancelPendingAppActionRequestsForIssue(ctx, db.CancelPendingAppActionRequestsForIssueParams{
+			WorkspaceID: issue.WorkspaceID, IssueID: issue.ID,
+		})
+		if err != nil {
+			return issueDeleteResult{}, fmt.Errorf("cancel issue app requests: %w", err)
+		}
+		cancelledAppRequests = append(cancelledAppRequests, withdrawn...)
 		attachmentURLs, err := qtx.ListAttachmentURLsByIssueOrComments(ctx, issue.ID)
 		if err != nil {
 			return issueDeleteResult{}, fmt.Errorf("list issue attachment URLs: %w", err)
@@ -4914,6 +4924,9 @@ func (h *Handler) deleteIssuesAndCollectAttachmentURLs(ctx context.Context, issu
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return issueDeleteResult{}, fmt.Errorf("commit issue delete: %w", err)
+	}
+	if h.ConnectedApps != nil {
+		h.ConnectedApps.RequestsCancelled(ctx, cancelledAppRequests...)
 	}
 	return result, nil
 }
