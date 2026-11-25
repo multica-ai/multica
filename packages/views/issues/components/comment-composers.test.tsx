@@ -708,6 +708,47 @@ describe("comment composers", () => {
     expect(apiCancelTask.mock.invocationCallOrder[0]!).toBeLessThan(onSubmit.mock.invocationCallOrder[1]!);
   }, 15_000);
 
+  it.each(["other-thread", null])("queues a reply when the running turn trigger is %s", async (triggerCommentId) => {
+    apiListTasksByIssue.mockResolvedValue([{
+      id: "turn-elsewhere", agent_id: "agent-1", issue_id: "issue-1", status: "running", priority: 0,
+      created_at: "2026-09-23T00:00:00Z", dispatched_at: null, started_at: "2026-09-23T00:00:01Z",
+      completed_at: null, result: null, error: null, trigger_comment_id: triggerCommentId,
+      supplement_capability: "task-supplement-v1", can_supplement: true,
+    }]);
+    apiPreviewCommentTriggers.mockResolvedValue({ agents: [{ id: "agent-1", name: "Lambda", source: "mention_agent", reason: "" }] });
+    const onSubmit = vi.fn().mockResolvedValue("reply-new");
+    const { container } = renderWithProviders(
+      <ReplyInput issueId="issue-1" parentId="comment-1" avatarType="member" avatarId="user-1"
+        onSubmit={onSubmit} steerByDefault={() => false} />,
+    );
+    activateComposer("reply-composer-shell");
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "reply in this thread" } });
+    const chip = await screen.findByRole("button", { name: "Lambda trigger: Start after this run" }, { timeout: 5000 });
+    fireEvent.click(chip);
+    expect(screen.queryByText("Add to current run")).not.toBeInTheDocument();
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    fireEvent.click(getSubmitButton(container));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("reply in this thread", undefined, undefined, undefined));
+    expect(apiCancelTask).not.toHaveBeenCalled();
+  });
+
+  it("steers an assignment turn from the top-level composer", async () => {
+    apiListTasksByIssue.mockResolvedValue([{
+      id: "assignment-turn", agent_id: "agent-1", issue_id: "issue-1", status: "running", priority: 0,
+      created_at: "2026-09-23T00:00:00Z", dispatched_at: null, started_at: "2026-09-23T00:00:01Z",
+      completed_at: null, result: null, error: null, trigger_comment_id: null,
+      supplement_capability: "task-supplement-v1", can_supplement: true,
+    }]);
+    apiPreviewCommentTriggers.mockResolvedValue({ agents: [{ id: "agent-1", name: "Lambda", source: "mention_agent", reason: "" }] });
+    const { container, onSubmit } = renderCommentInput();
+    activateComposer("comment-composer-shell");
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "only deploy the backend" } });
+    await screen.findByRole("button", { name: "Lambda trigger: Add to current run" }, { timeout: 5000 });
+    fireEvent.click(getSubmitButton(container));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("only deploy the backend", undefined, undefined,
+      ["assignment-turn"]), { timeout: 5000 });
+  });
+
   it("starts after the run by default when the personal preference says so", async () => {
     useCommentComposerStore.setState({ runningAgentReply: "after_run" });
     const turn = {

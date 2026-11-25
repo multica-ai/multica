@@ -45,7 +45,7 @@ export function useRecipientActions({
   /** False for edits: an edit neither steers nor stops a run. */
   allowSteer: boolean;
   hasAttachments?: boolean;
-  /** Whether a running turn takes the message by default from this composer. */
+  /** Whether the running turn was triggered in this composer's thread. */
   steerByDefault: (task: AgentTask) => boolean;
   /** Choices reset when the composer's context changes. */
   resetKey: string;
@@ -88,7 +88,7 @@ export function useRecipientActions({
   const recipients = useMemo<RecipientEntry[]>(() => agents.map((agent) => {
     const state = agentRunState(tasks, agent.id);
     const opts = {
-      canSteer: allowSteer && !hasAttachments,
+      canSteer: allowSteer && !hasAttachments && state.kind === "running" && steerHere(state.task),
       canRestart: allowSteer,
       steerByDefault: state.kind === "running" && steerByDefault(state.task),
     };
@@ -98,11 +98,11 @@ export function useRecipientActions({
       action: resolveRecipientAction(state, chosen[agent.id], opts),
       actions: recipientActions(state, opts),
     };
-  }), [agents, tasks, chosen, allowSteer, hasAttachments, steerByDefault]);
+  }), [agents, tasks, chosen, allowSteer, hasAttachments, steerByDefault, steerHere]);
 
   // A recipient would take this in its running turn, but files cannot go there.
   const attachmentsBlockSteer = allowSteer && hasAttachments && recipients.some((r) =>
-    r.state.kind === "running" && r.state.steerable
+    r.state.kind === "running" && r.state.steerable && steerHere(r.state.task)
     && (chosen[r.agent.id] === "steer" || (!chosen[r.agent.id] && steerByDefault(r.state.task))));
 
   const setAction = useCallback((agentId: string, action: RecipientAction) => {

@@ -50,7 +50,7 @@ import { SteerBadge, SteerReceipts } from "./steer-receipts";
 import type { AgentTask, TimelineEntry, Attachment } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { isDeletedComment } from "@multica/core/issues/comment-deletion";
-import { commentSupplementReceipts, isSupplementInFlight } from "@multica/core/issues/run-steering";
+import { commentSupplementReceipts, isSupplementInFlight, isTaskTriggeredInThread } from "@multica/core/issues/run-steering";
 import { useConfigStore } from "@multica/core/config";
 import {
   orderStandaloneAttachments,
@@ -1193,11 +1193,12 @@ function CommentCardImpl({
   const isReplyTargetMissing = (id: string) => id !== entry.id
     && !replies.some((r) => r.id === id && !isDeletedComment(r));
   const replyTargetMissing = !!replyTarget && isReplyTargetMissing(replyTargetId);
-  // A reply here goes into the running turn of a run that belongs to this
-  // thread by default; another thread's turn is only reached by choice.
+  // Only a turn triggered in this thread can take a reply as live input. A
+  // deleted trigger or root no longer anchors a turn here (the server agrees).
   const steerThreadRunByDefault = useCallback(
-    (task: AgentTask) => runs.some((run) => run.task.id === task.id),
-    [runs],
+    (task: AgentTask) => !isDeletedComment(entry) && isTaskTriggeredInThread(task,
+      [entry.id, ...replies.filter((reply) => !isDeletedComment(reply)).map((reply) => reply.id)]),
+    [entry, replies],
   );
   const annotation = useCommentAnnotations({
     issueId,

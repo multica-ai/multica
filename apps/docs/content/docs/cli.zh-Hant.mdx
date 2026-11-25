@@ -137,9 +137,11 @@ multica issue rerun-task <run-id> --issue MUL-123 --fresh
 把評論插話到仍在進行中的執行，而不是排隊一個後續執行（僅限支援插話的執行；你的評論能啟動哪個 AI 代理，就能向它插話）：
 
 ```bash
-multica issue comment add MUL-123 --content-file note.md --steer <task-id>
-multica issue comment add MUL-123 --content-file note.md --steer-active
+multica issue comment add MUL-123 --content-file note.md --parent <comment-id> --steer <task-id>
+multica issue comment add MUL-123 --content-file note.md --parent <comment-id> --steer-active
 ```
+
+只有與觸發該執行的評論同一評論串的回覆才會插話到該執行；指派觸發的執行只接收頂層評論。其他評論等待後續一輪處理。
 
 如果 `issue comment add` 逾時或連線中斷，留言可能已經儲存。在智慧體執行中，直接重新執行同一條指令是安全的：CLI 會根據執行、任務、父留言、內容和附件產生冪等鍵，伺服器會回傳已儲存的留言，不會再發一則。在其他情境下，每次嘗試都傳同一個 `--idempotency-key <key>` 即可獲得同樣的保護。舊版伺服器會忽略這個鍵。
 

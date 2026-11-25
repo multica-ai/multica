@@ -184,8 +184,9 @@ func (h *Handler) agentMaySteer(ctx context.Context, target db.Agent, actorID, o
 // that has ended, has not started, or cannot take additional input is never
 // swapped for another turn of the same agent; that recipient keeps its normal
 // queued / coalesced / deferred handling, so losing a race never drops or
-// misdirects the comment. An agent author steers only agents it may invoke,
-// within the per-turn caps.
+// misdirects the comment. Only a comment in the turn's own thread steers it
+// (see commentSharesTaskThread). An agent author steers only agents it may
+// invoke, within the per-turn caps.
 func (h *Handler) steerCommentAgentTriggers(ctx context.Context, issue db.Issue, comment db.Comment, actorType, actorID, originatorUserID string, triggers []commentAgentTrigger, steer commentSteerRequest) ([]commentAgentTrigger, map[string]commentEnqueueResult) {
 	if steer.empty() || len(triggers) == 0 || (actorType != "member" && actorType != "agent") {
 		return triggers, nil
@@ -220,6 +221,12 @@ func (h *Handler) steerCommentAgentTriggers(ctx context.Context, issue db.Issue,
 			kept = append(kept, trigger)
 			continue
 		}
+		// A turn takes live input only from the thread that triggered it; any
+		// other comment keeps its normal queued handling and its own thread.
+		if !h.commentSharesTaskThread(ctx, issue, comment, taskID) {
+			kept = append(kept, trigger)
+			continue
+		}
 		// The comment is its own request id: it binds to a turn at most once.
 		var leaderSquadID pgtype.UUID
 		if trigger.Squad != nil {
@@ -248,6 +255,38 @@ func (h *Handler) steerCommentAgentTriggers(ctx context.Context, issue db.Issue,
 		h.publishCommentSupplementUpdate(ctx, issue.WorkspaceID, comment.ID)
 	}
 	return kept, steered
+}
+
+// commentSharesTaskThread reports whether comment belongs to the thread of the
+// comment that triggered the turn. Thread roots are resolved, so a reply to a
+// reply matches too. A turn with no trigger comment (an assignment run) takes
+// only top-level comments. Coalesced comments do not count: only the trigger
+// decides which thread a turn belongs to. A deleted or unresolvable trigger or
+// root never matches.
+func (h *Handler) commentSharesTaskThread(ctx context.Context, issue db.Issue, comment db.Comment, taskID pgtype.UUID) bool {
+	task, err := h.Queries.GetAgentTask(ctx, taskID)
+	if err != nil || task.IssueID != issue.ID {
+		return false
+	}
+	if !task.TriggerCommentID.Valid {
+		return !comment.ParentID.Valid
+	}
+	trigger, err := h.Queries.GetCommentInWorkspace(ctx, db.GetCommentInWorkspaceParams{
+		ID: task.TriggerCommentID, WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil || trigger.DeletedAt.Valid || trigger.IssueID != issue.ID {
+		return false
+	}
+	triggerRoot, err := h.Queries.GetThreadRoot(ctx, db.GetThreadRootParams{
+		CommentID: trigger.ID, WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil || triggerRoot.DeletedAt.Valid || triggerRoot.IssueID != issue.ID {
+		return false
+	}
+	commentRoot, err := h.Queries.GetThreadRoot(ctx, db.GetThreadRootParams{
+		CommentID: comment.ID, WorkspaceID: issue.WorkspaceID,
+	})
+	return err == nil && !commentRoot.DeletedAt.Valid && commentRoot.IssueID == issue.ID && commentRoot.ID == triggerRoot.ID
 }
 
 // bindCommentSteer locks the turn in one statement and binds in the next, in

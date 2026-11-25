@@ -51,8 +51,8 @@ interface CommentInputProps {
   annotationComposer?: AnnotationComposerSlot;
 }
 
-// A top-level comment belongs to no thread, so it takes a running turn by
-// default only when that turn has no thread of its own (an assignment run).
+// A top-level comment starts its own thread. Only a turn with no thread of
+// its own (an assignment run) can take it as live input.
 function steerTopLevelByDefault(task: AgentTask): boolean {
   return !task.trigger_comment_id;
 }

@@ -137,9 +137,11 @@ multica issue rerun-task <run-id> --issue MUL-123 --fresh
 後続の実行をキューに入れる代わりに、進行中の実行にコメントを追加する（追加メッセージを受け付ける実行のみ。コメントで起動できるエージェントに限る）:
 
 ```bash
-multica issue comment add MUL-123 --content-file note.md --steer <task-id>
-multica issue comment add MUL-123 --content-file note.md --steer-active
+multica issue comment add MUL-123 --content-file note.md --parent <comment-id> --steer <task-id>
+multica issue comment add MUL-123 --content-file note.md --parent <comment-id> --steer-active
 ```
+
+実行に追加されるのは、その実行を開始したコメントと同じスレッドの返信だけです。割り当てで開始した実行にはトップレベルコメントだけを追加できます。それ以外のコメントは次の実行を待ちます。
 
 `issue comment add` がタイムアウトしたり接続が切れたりした場合でも、コメントはすでに保存されている可能性があります。エージェントの実行中であれば、同じコマンドをそのまま再実行して問題ありません。CLI は実行、issue、親コメント、内容、添付ファイルから冪等キーを生成し、サーバーは保存済みのコメントを返して二重に投稿しません。それ以外の場面では、毎回同じ `--idempotency-key <key>` を渡すと同じ保護が得られます。古いサーバーはこのキーを無視します。
 
