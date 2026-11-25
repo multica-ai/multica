@@ -132,6 +132,7 @@ import type {
   TaskMessagePayload,
   TaskContextReceiptResponse,
   TaskTranscriptPurge,
+  TaskCodeChanges,
   RuntimeRateLimitsResponse,
   Attachment,
   ChatSession,
@@ -460,6 +461,7 @@ import {
   TaskContextReceiptResponseSchema,
   TaskTranscriptPurgeSchema,
   EMPTY_TASK_TRANSCRIPT_PURGE,
+  TaskCodeChangesSchema,
   TimelineEntriesSchema,
   UserSchema,
   WebhookDeliveryResponseSchema,
@@ -3483,6 +3485,16 @@ export class ApiClient {
     return parseWithFallback<TaskTranscriptPurge>(raw, TaskTranscriptPurgeSchema, EMPTY_TASK_TRANSCRIPT_PURGE, {
       endpoint: "DELETE /api/tasks/:id/messages",
     });
+  }
+
+  async getTaskCodeChanges(taskId: string): Promise<TaskCodeChanges> {
+    const raw = await this.fetch<unknown>(`/api/tasks/${taskId}/code-changes`);
+    return parseWithFallback<TaskCodeChanges>(
+      raw,
+      TaskCodeChangesSchema,
+      { task_id: taskId, repos: [], repos_truncated: false, updated_at: null },
+      { endpoint: "GET /api/tasks/:id/code-changes" },
+    );
   }
 
   async getTaskContextReceipt(taskId: string): Promise<TaskContextReceiptResponse> {

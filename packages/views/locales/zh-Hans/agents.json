@@ -1013,6 +1013,28 @@
     "tool_details_hidden_toolbar": "工具详情已隐藏",
     "tool_details_restricted_toolbar": "工具详情仅所有者和管理员可见"
   },
+  "code_changes": {
+    "title": "代码改动",
+    "open_tooltip": "查看代码改动",
+    "file_count_other": "{{count}} 个文件",
+    "recorded": "记录于 {{when}}",
+    "close": "关闭",
+    "load_failed": "无法加载代码改动。",
+    "none": "这次运行没有改动代码。",
+    "not_recorded": "这次运行没有记录代码改动。代码改动在运行结束时记录，只包含工作目录里的 git 仓库。",
+    "file_list": "改动的文件",
+    "files_truncated": "改动的文件太多，列表没有全部列出。",
+    "repos_truncated": "改动的仓库太多，有些没有列出。",
+    "binary": "二进制文件，没有文本 diff。",
+    "patch_truncated": "这个文件的 diff 太大，没有记录。",
+    "no_content": "内容没有改动（只改了权限或文件名）。",
+    "status": {
+      "added": "新增",
+      "modified": "修改",
+      "deleted": "删除",
+      "renamed": "重命名"
+    }
+  },
   "task_failure": {
     "cancelled_by_system": "已由系统取消",
     "cancelled_by_actor": "已由 {{name}} 取消",

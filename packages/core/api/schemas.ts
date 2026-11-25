@@ -2680,6 +2680,52 @@ export const EMPTY_TASK_TRANSCRIPT_PURGE = {
   messages_deleted: 0,
 };
 
+// Run code changes (`GET /api/tasks/:id/code-changes`). A malformed field
+// falls back on its own; a file row without a path is dropped rather than
+// failing the whole snapshot, and an unknown status reads as "modified".
+const TaskCodeChangeFileSchema = z.object({
+  path: z.string(),
+  old_path: z.string().optional().catch(undefined),
+  status: z.enum(["added", "modified", "deleted", "renamed"]).catch("modified"),
+  additions: z.number().catch(0),
+  deletions: z.number().catch(0),
+  binary: z.boolean().optional().catch(undefined),
+}).loose();
+
+const TaskCodeChangeRepoSchema = z.object({
+  path: z.string().catch("."),
+  branch: z.string().optional().catch(undefined),
+  base: z.string().catch(""),
+  head: z.string().optional().catch(undefined),
+  files: z
+    .array(z.unknown())
+    .catch([])
+    .transform((rows) =>
+      rows.flatMap((row) => {
+        const parsed = TaskCodeChangeFileSchema.safeParse(row);
+        return parsed.success ? [parsed.data] : [];
+      }),
+    ),
+  files_truncated: z.boolean().optional().catch(undefined),
+  patch: z.string().catch(""),
+  patch_truncated: z.boolean().optional().catch(undefined),
+}).loose();
+
+export const TaskCodeChangesSchema = z.object({
+  task_id: z.string().catch(""),
+  repos: z
+    .array(z.unknown())
+    .catch([])
+    .transform((rows) =>
+      rows.flatMap((row) => {
+        const parsed = TaskCodeChangeRepoSchema.safeParse(row);
+        return parsed.success ? [parsed.data] : [];
+      }),
+    ),
+  repos_truncated: z.boolean().catch(false),
+  updated_at: z.string().nullable().catch(null),
+}).loose();
+
 // Task cancellation (`POST /api/tasks/:id/cancel`) is consumed directly by
 // chat recovery. Its optional message payload must be well-formed before the
 // UI deletes a message from cache or restores text into the input.

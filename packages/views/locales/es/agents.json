@@ -1018,6 +1018,29 @@
     "tool_details_hidden_toolbar": "Detalles de herramientas ocultos",
     "tool_details_restricted_toolbar": "Detalles de herramientas visibles solo para el propietario y los administradores"
   },
+  "code_changes": {
+    "title": "Cambios de código",
+    "open_tooltip": "Ver cambios de código",
+    "file_count_one": "{{count}} archivo",
+    "file_count_other": "{{count}} archivos",
+    "recorded": "Registrado {{when}}",
+    "close": "Cerrar",
+    "load_failed": "No se pudieron cargar los cambios de código.",
+    "none": "Esta ejecución no cambió código.",
+    "not_recorded": "No hay cambios de código registrados para esta ejecución. Se registran al terminar una ejecución, para los repositorios git de su directorio de trabajo.",
+    "file_list": "Archivos cambiados",
+    "files_truncated": "Cambiaron más archivos de los que se pueden listar.",
+    "repos_truncated": "Cambiaron demasiados repositorios, así que algunos no aparecen.",
+    "binary": "Archivo binario, sin diff de texto.",
+    "patch_truncated": "El diff de este archivo era demasiado grande para registrarlo.",
+    "no_content": "Sin cambios de contenido (solo modo o nombre).",
+    "status": {
+      "added": "Añadido",
+      "modified": "Modificado",
+      "deleted": "Eliminado",
+      "renamed": "Renombrado"
+    }
+  },
   "task_failure": {
     "cancelled_by_system": "Cancelada por el sistema",
     "cancelled_by_actor": "Cancelada por {{name}}",

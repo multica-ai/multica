@@ -1043,6 +1043,29 @@
     "tool_details_hidden_toolbar": "Détails des outils masqués",
     "tool_details_restricted_toolbar": "Détails des outils visibles par le propriétaire et les administrateurs uniquement"
   },
+  "code_changes": {
+    "title": "Modifications du code",
+    "open_tooltip": "Voir les modifications du code",
+    "file_count_one": "{{count}} fichier",
+    "file_count_other": "{{count}} fichiers",
+    "recorded": "Enregistré {{when}}",
+    "close": "Fermer",
+    "load_failed": "Impossible de charger les modifications du code.",
+    "none": "Cette exécution n'a modifié aucun code.",
+    "not_recorded": "Aucune modification du code enregistrée pour cette exécution. Elles sont enregistrées à la fin d'une exécution, pour les dépôts git de son répertoire de travail.",
+    "file_list": "Fichiers modifiés",
+    "files_truncated": "Plus de fichiers ont été modifiés que la liste ne peut en afficher.",
+    "repos_truncated": "Trop de dépôts ont été modifiés, certains ne sont donc pas listés.",
+    "binary": "Fichier binaire, pas de diff texte.",
+    "patch_truncated": "Le diff de ce fichier était trop volumineux pour être enregistré.",
+    "no_content": "Aucune modification du contenu (mode ou renommage uniquement).",
+    "status": {
+      "added": "Ajouté",
+      "modified": "Modifié",
+      "deleted": "Supprimé",
+      "renamed": "Renommé"
+    }
+  },
   "task_failure": {
     "cancelled_by_system": "Annulée par le système",
     "cancelled_by_actor": "Annulée par {{name}}",

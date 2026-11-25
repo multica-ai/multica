@@ -23,6 +23,12 @@ vi.mock("../../common/task-transcript", () => ({
   ),
 }));
 
+vi.mock("../../common/task-code-changes/code-changes-dialog", () => ({
+  CodeChangesButton: ({ task }: { task: { id: string } }) => (
+    <button type="button">Code changes for {task.id}</button>
+  ),
+}));
+
 vi.mock("./terminate-task-confirm-dialog", () => ({
   TerminateTaskConfirmDialog: ({ open, onConfirm }: { open: boolean; onConfirm: () => void }) =>
     open ? <button type="button" onClick={onConfirm}>Confirm stop</button> : null,
@@ -288,6 +294,23 @@ describe("subtree execution log", () => {
     expect(await screen.findByText("MUL-9")).toBeInTheDocument();
     expect(list).toHaveBeenCalledTimes(2);
     queryClient.clear();
+  });
+});
+
+describe("code changes entry", () => {
+  it("is offered on finished runs only, since the daemon records them when a run ends", () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const finished = makeTask({ id: "finished", status: "completed", completed_at: "2026-06-08T08:02:00Z", trigger_summary: "Finished run" });
+    const running = makeTask({ id: "running", trigger_summary: "Running run" });
+    queryClient.setQueryData(issueKeys.tasks("issue-1"), [finished, running]);
+    queryClient.setQueryData([...issueKeys.tasks("issue-1"), "history"], [finished, running]);
+    renderWithI18n(
+      <QueryClientProvider client={queryClient}>
+        <ExecutionLogSection issueId="issue-1" identifier="MUL-1" />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByRole("button", { name: "Code changes for finished" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Code changes for running" })).not.toBeInTheDocument();
   });
 });
 
