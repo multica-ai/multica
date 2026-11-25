@@ -298,6 +298,12 @@ func acpNameValues(v any) []map[string]any {
 }
 
 func (b *opencodeBackend) executeACP(ctx context.Context, execPath, prompt string, opts ExecOptions) (*Session, error) {
+	// A daemon with the warm pool enabled keeps the ACP process alive across
+	// turns (opencode_warm.go); without the pool, every turn spawns and
+	// reaps its own process below.
+	if b.cfg.WarmPool != nil {
+		return b.executeWarmACP(ctx, execPath, prompt, opts)
+	}
 	usesV2 := opencodeUsesV2Contract(b.cfg)
 	cwd := opts.Cwd
 	if cwd == "" {
