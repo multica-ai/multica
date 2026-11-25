@@ -189,6 +189,21 @@ Windows 上两种常见的写文件方式会生成 Desktop 读不了的文件：
 
 上面 Windows 页签里的 PowerShell 命令可以同时避开这两个坑。
 
+### 为你的服务器打包 Desktop [#build-for-your-server]
+
+不想让用户手写 `desktop.json`，可以把服务器地址内置进 Desktop。在 Multica 仓库的检出目录中打包时，把 `MULTICA_DESKTOP_SERVER_URL` 设为用户在浏览器里打开的地址：
+
+```bash
+cd apps/desktop
+MULTICA_DESKTOP_SERVER_URL=https://multica.example.com pnpm package -- --linux --x64
+```
+
+把 `--linux --x64` 换成需要的平台和架构（`--mac`、`--win`、`--arm64`）。安装包输出到 `apps/desktop/dist/`。打包时还会编译内置的 CLI，所以需要安装 Go。
+
+Desktop 把这个地址同时用作 `apiUrl` 和 `appUrl`，并由它推导出 `wsUrl`，内置守护进程也连接这个地址。因此这个地址必须提供 Web 应用，并把 `/ws`、`/api/daemon/ws` 和 `/health` 路由到后端，[自托管快速上手](/self-host-quickstart#remote-access)里的单一 origin 示例就是这样配置的。如果采用两个域名的部署，请继续用 `desktop.json` 填写 API 地址，或者在应用域名上加上这些路由。用户电脑上的 `desktop.json` 仍然优先。地址无效时打包直接失败。
+
+内置了服务器地址的版本不会更新到官方发布版，因为官方发布版连接的是 Multica Cloud。要自己分发更新，再设置 `MULTICA_DESKTOP_UPDATE_URL`，例如 `https://multica.example.com/desktop/`，并把每次发布的安装包连同 `dist/` 里的 `latest*.yml` 文件一起放到这个地址下。不设置时自动更新关闭，手动检查会提示此版本未配置更新；用户通过新安装包覆盖安装来更新。
+
 ## Windows Defender 把 Multica 报成病毒
 
 Windows 安全中心报出 `Trojan:Script/Wacatac.B!ml` 之类的威胁，并隔离 Desktop 安装目录里的某个文件。被隔离的通常是内置的 CLI，而不是应用主程序：

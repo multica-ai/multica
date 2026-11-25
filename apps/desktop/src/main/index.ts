@@ -34,6 +34,7 @@ import { installWindowForegroundEvents, windowForeground } from "./window-foregr
 import { createRendererWebPreferences } from "./renderer-web-preferences";
 import { getAppVersion } from "./app-version";
 import { loadRuntimeConfig } from "./runtime-config-loader";
+import { BUILD_SERVER_URL, resolveUpdateFeed } from "./build-config";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
 import {
   RENDERER_ROUTE_CONTEXT_CHANNEL,
@@ -807,6 +808,7 @@ if (!gotTheLock) {
         wsUrl: viteEnv.VITE_WS_URL,
         appUrl: viteEnv.VITE_APP_URL,
       },
+      defaultServerUrl: BUILD_SERVER_URL,
     });
 
     electronApp.setAppUserModelId(
@@ -1095,6 +1097,9 @@ if (!gotTheLock) {
 
     // Register first so the update quit gate can block daemon autoStop.
     setupAutoUpdater(() => mainWindows.all(), {
+      // Self-hosted builds update from their own feed or not at all, never
+      // from the official releases (build-config.ts).
+      feed: resolveUpdateFeed(),
       // Windows only (the updater ignores it elsewhere): stop the bundled
       // daemon before the installer runs so multica.exe is replaced. #8823
       daemonGate: {

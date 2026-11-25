@@ -118,7 +118,8 @@ export function UpdatesSettingsTab() {
     : state.downloading ? t(($) => $.desktop.updates.download_failed)
       : state.reason === "network" ? t(($) => $.desktop.updates.check_network)
         : state.reason === "unavailable" ? t(($) => $.desktop.updates.check_unavailable)
-          : t(($) => $.desktop.updates.check_failed);
+          : state.reason === "not-configured" ? t(($) => $.desktop.updates.check_not_configured)
+            : t(($) => $.desktop.updates.check_failed);
 
   return (
     <SettingsTab

@@ -189,6 +189,21 @@ Windows에서 흔히 쓰는 두 가지 방법으로 파일을 만들면 Desktop�
 
 위 Windows 탭의 PowerShell 명령을 쓰면 두 문제를 모두 피할 수 있습니다.
 
+### 내 서버용 Desktop 패키징 [#build-for-your-server]
+
+사용자가 `desktop.json`을 직접 작성하지 않아도 되도록 서버 주소를 내장한 Desktop을 패키징할 수 있습니다. Multica 저장소를 체크아웃한 곳에서 패키징할 때 `MULTICA_DESKTOP_SERVER_URL`을 사용자가 브라우저에서 여는 주소로 설정합니다.
+
+```bash
+cd apps/desktop
+MULTICA_DESKTOP_SERVER_URL=https://multica.example.com pnpm package -- --linux --x64
+```
+
+`--linux --x64`는 필요한 플랫폼과 아키텍처(`--mac`, `--win`, `--arm64`)로 바꾸세요. 설치 패키지는 `apps/desktop/dist/`에 생성됩니다. 패키징할 때 내장 CLI도 컴파일하므로 Go가 설치되어 있어야 합니다.
+
+Desktop은 이 주소를 `apiUrl`과 `appUrl`로 함께 사용하고 여기서 `wsUrl`을 도출하며, 내장 데몬도 이 주소에 연결합니다. 따라서 이 주소는 웹 앱을 제공하고 `/ws`, `/api/daemon/ws`, `/health`를 backend로 라우팅해야 합니다. [자체 호스팅 빠른 시작](/self-host-quickstart#remote-access)의 단일 오리진 예시가 이렇게 구성되어 있습니다. 두 개의 도메인 구성에서는 계속 `desktop.json`에 API 주소를 쓰거나, 앱 도메인에 이 라우트를 추가하세요. 사용자 컴퓨터의 `desktop.json`이 여전히 우선합니다. 주소가 유효하지 않으면 빌드가 실패합니다.
+
+서버 주소를 내장한 빌드는 공식 릴리스로 업데이트되지 않습니다. 공식 릴리스는 Multica Cloud에 연결되기 때문입니다. 업데이트를 직접 배포하려면 `MULTICA_DESKTOP_UPDATE_URL`(예: `https://multica.example.com/desktop/`)도 설정하고, 릴리스마다 설치 패키지와 `dist/`의 `latest*.yml` 파일을 함께 그 주소에 게시하세요. 설정하지 않으면 자동 업데이트가 꺼지고, 수동 확인 시 이 빌드에는 업데이트가 설정되어 있지 않다고 표시됩니다. 사용자는 새 설치 패키지를 덮어써서 업데이트합니다.
+
 ## Windows Defender가 Multica를 바이러스로 탐지하는 경우
 
 Windows 보안이 `Trojan:Script/Wacatac.B!ml` 같은 위협을 보고하고 Desktop 설치 경로 안의 파일을 격리합니다. 격리되는 대상은 보통 앱 실행 파일이 아니라 함께 포함된 CLI입니다.

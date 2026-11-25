@@ -1528,6 +1528,7 @@
       "check_unavailable": "Impossible de rechercher les mises à jour pour le moment. Réessayez plus tard.",
       "check_network": "Impossible de joindre le service de mise à jour. Vérifiez votre connexion et réessayez.",
       "check_failed": "La recherche de mises à jour a échoué. Réessayez.",
+      "check_not_configured": "Les mises à jour ne sont pas configurées pour cette version. Demandez une version plus récente à votre administrateur.",
       "download_failed": "Le téléchargement a échoué. Vous pouvez continuer à utiliser la version actuelle et réessayer.",
       "download_ready": "La version {{version}} est prête à être installée.",
       "retry": "Réessayer",

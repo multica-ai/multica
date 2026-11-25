@@ -18,6 +18,7 @@ const ctx = vi.hoisted(() => ({
   })),
   downloadUpdate: vi.fn(),
   quitAndInstall: vi.fn(),
+  setFeedURL: vi.fn(),
   getVersion: vi.fn(() => "0.3.17"),
   appHandlers: new Map<string, Handler[]>(),
   appQuit: vi.fn(),
@@ -44,6 +45,7 @@ vi.mock("electron-updater", () => {
     checkForUpdates: ctx.checkForUpdates,
     downloadUpdate: ctx.downloadUpdate,
     quitAndInstall: ctx.quitAndInstall,
+    setFeedURL: ctx.setFeedURL,
   };
   return { autoUpdater };
 });
@@ -195,6 +197,7 @@ describe("setupAutoUpdater", () => {
     ctx.checkForUpdates.mockClear();
     ctx.downloadUpdate.mockClear();
     ctx.quitAndInstall.mockClear();
+    ctx.setFeedURL.mockClear();
     ctx.getVersion.mockClear();
   });
 
@@ -213,6 +216,70 @@ describe("setupAutoUpdater", () => {
 
     await vi.advanceTimersByTimeAsync(5_000);
     expect(ctx.checkForUpdates).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the packaged feed when no feed is configured", async () => {
+    setupAutoUpdater(() => [], { feed: { kind: "default" } });
+
+    await invokeIpc("updater:get-preferences");
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(ctx.setFeedURL).not.toHaveBeenCalled();
+    expect(ctx.checkForUpdates).toHaveBeenCalledTimes(1);
+  });
+
+  it("switches to a generic feed when the build has an update URL", async () => {
+    setupAutoUpdater(() => [], {
+      feed: { kind: "generic", url: "https://multica.example.com/desktop/" },
+    });
+
+    expect(ctx.setFeedURL).toHaveBeenCalledWith({
+      provider: "generic",
+      url: "https://multica.example.com/desktop/",
+    });
+    await invokeIpc("updater:get-preferences");
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(ctx.checkForUpdates).toHaveBeenCalledTimes(1);
+  });
+
+  describe("when updates are disabled for the build", () => {
+    it("never runs background checks", async () => {
+      setupAutoUpdater(() => [], { feed: { kind: "disabled" } });
+
+      await invokeIpc("updater:get-preferences");
+      await vi.advanceTimersByTimeAsync(2 * 60 * 60 * 1000);
+
+      expect(ctx.setFeedURL).not.toHaveBeenCalled();
+      expect(ctx.checkForUpdates).not.toHaveBeenCalled();
+    });
+
+    it("reports manual checks as not configured without contacting a feed", async () => {
+      setupAutoUpdater(() => [], { feed: { kind: "disabled" } });
+
+      await expect(invokeIpc("updater:check")).resolves.toEqual({
+        ok: false,
+        reason: "not-configured",
+        error: "Updates are not configured for this build.",
+      });
+      expect(ctx.checkForUpdates).not.toHaveBeenCalled();
+    });
+
+    it("does not start checking when automatic updates are re-enabled", async () => {
+      writeFileSync(
+        updaterPreferencesPath(ctx.userDataPath),
+        JSON.stringify({ automaticUpdates: false }),
+      );
+      setupAutoUpdater(() => [], { feed: { kind: "disabled" } });
+      await invokeIpc("updater:get-preferences");
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      await expect(
+        invokeIpc("updater:set-automatic-updates", true),
+      ).resolves.toEqual({ automaticUpdates: true });
+      await vi.advanceTimersByTimeAsync(60 * 60 * 1000 + 5_000);
+
+      expect(ctx.checkForUpdates).not.toHaveBeenCalled();
+    });
   });
 
   it("skips startup and periodic checks when automatic updates are disabled", async () => {

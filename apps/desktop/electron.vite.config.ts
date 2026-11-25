@@ -2,10 +2,38 @@ import { resolve } from "path";
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { runtimeConfigFromServerUrl } from "./src/shared/runtime-config";
+
+// Self-hosted builds (see src/main/build-config.ts): the server a packaged app
+// connects to when ~/.multica/desktop.json is absent, and an optional
+// electron-updater generic feed. Validated here so a typo fails the build
+// instead of every launch. Unset keeps the Multica Cloud defaults.
+const buildServerUrl = process.env.MULTICA_DESKTOP_SERVER_URL?.trim()
+  ? runtimeConfigFromServerUrl(process.env.MULTICA_DESKTOP_SERVER_URL).apiUrl
+  : "";
+const buildUpdateUrl = normalizeUpdateUrl(process.env.MULTICA_DESKTOP_UPDATE_URL);
+
+function normalizeUpdateUrl(value: string | undefined): string {
+  if (!value?.trim()) return "";
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    throw new Error("MULTICA_DESKTOP_UPDATE_URL must be a valid URL");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("MULTICA_DESKTOP_UPDATE_URL must use http or https");
+  }
+  return url.toString();
+}
 
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
+    define: {
+      __MULTICA_DESKTOP_SERVER_URL__: JSON.stringify(buildServerUrl),
+      __MULTICA_DESKTOP_UPDATE_URL__: JSON.stringify(buildUpdateUrl),
+    },
   },
   preload: {
     // `@electron-toolkit/preload` must be bundled INTO the preload script:
