@@ -1,16 +1,19 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useModalStore } from "@multica/core/modals";
+import { issueRouteRef, useWorkspacePaths } from "@multica/core/paths";
 import { isEditableShortcutTarget, isPortalLayerShortcutTarget } from "@multica/core/shortcuts";
 import type { Issue } from "@multica/core/types";
 import { isImeComposing } from "@multica/core/utils";
+import { useIntentNavigate } from "../../navigation";
 import { useRegisterCommandBarContext } from "../../search/register-context";
 import {
   PEEK_TARGET_ATTR,
   hasIssueInColumns,
   locateInColumns,
   useIssuePeekActions,
+  useIssuePeekClick,
   useIssuePeekColumns,
   useIssuePeekId,
   type IssuePeekColumns,
@@ -110,10 +113,23 @@ export function IssueCursorProvider({
     useMemo(() => (cursorIssue ? { kind: "issue", issue: cursorIssue, cursor: true } : null), [cursorIssue]),
   );
 
+  // Enter opens the issue as a click on it would: peek or page, per the
+  // reader's open mode. Not by clicking the row's DOM, where a table row's
+  // first link can be a pull request's.
+  const peekClick = useIssuePeekClick();
+  const intentNavigate = useIntentNavigate();
+  const paths = useWorkspacePaths();
+  const openIssue = useCallback(
+    (issue: Issue) => {
+      if (!peekClick(issue)) intentNavigate(paths.issueDetail(issueRouteRef(issue)), "push", issue.identifier);
+    },
+    [intentNavigate, paths, peekClick],
+  );
+
   // Captured, so a key the cursor takes reaches neither the hover peek's
   // Space, the focused row's own handlers nor its link's native Enter.
-  const stateRef = useRef({ enabled, columns, cursorId, shownId, peekId, peek, selection, selectable });
-  stateRef.current = { enabled, columns, cursorId, shownId, peekId, peek, selection, selectable };
+  const stateRef = useRef({ enabled, columns, cursorId, shownId, cursorIssue, peekId, peek, selection, selectable, openIssue });
+  stateRef.current = { enabled, columns, cursorId, shownId, cursorIssue, peekId, peek, selection, selectable, openIssue };
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -126,7 +142,6 @@ export function IssueCursorProvider({
         moveTo: (id) => setCursor({ id, visible: true }),
         clear: () => setCursor(null),
         anchorRef,
-        root: rootRef.current,
       });
       if (!handled) return;
       event.preventDefault();
@@ -151,7 +166,7 @@ export function IssueCursorProvider({
           // under the pointer and hides, as the row's hover shows it.
           const id = (event.target as Element).closest(`[${PEEK_TARGET_ATTR}]`)?.getAttribute(PEEK_TARGET_ATTR);
           if (id) {
-            if (id !== cursor?.id) setCursor({ id, visible: false });
+            if (id !== cursor?.id || cursor?.visible) setCursor({ id, visible: false });
           } else if (cursor?.visible) {
             setCursor({ ...cursor, visible: false });
           }
@@ -167,9 +182,11 @@ interface KeyState {
   columns: IssuePeekColumns | null;
   cursorId: string | null;
   shownId: string | null;
+  cursorIssue: Issue | null;
   peek: ReturnType<typeof useIssuePeekActions>;
   selection: IssueSurfaceSelection;
   selectable: boolean;
+  openIssue: (issue: Issue) => void;
 }
 
 function handleKey(
@@ -179,7 +196,6 @@ function handleKey(
     moveTo: (id: string) => void;
     clear: () => void;
     anchorRef: { current: string | null };
-    root: HTMLElement | null;
   },
 ): boolean {
   const columns = state.columns ?? [];
@@ -232,14 +248,10 @@ function handleKey(
       selection.toggle(shownId);
       ops.anchorRef.current = shownId;
       return true;
-    case "Enter": {
-      if (!shownId || event.shiftKey) return false;
-      const element = ops.root?.querySelector<HTMLElement>(`[${PEEK_TARGET_ATTR}="${CSS.escape(shownId)}"]`);
-      const opener = element?.querySelector<HTMLElement>("a[href]") ?? element;
-      if (!opener) return false;
-      opener.click();
+    case "Enter":
+      if (!state.cursorIssue || event.shiftKey) return false;
+      state.openIssue(state.cursorIssue);
       return true;
-    }
     case " ":
       if (!shownId || !state.peek || event.shiftKey) return false;
       state.peek.toggle(shownId);
@@ -280,9 +292,10 @@ function rangeInColumn(columns: IssuePeekColumns, from: string, to: string): str
  * trigger or field keeps its keys.
  */
 function isCursorKeyTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return true;
-  if (target === document.body) return true;
-  if (isEditableShortcutTarget(target) || isPortalLayerShortcutTarget(target)) return false;
+  // First: with a modal layer open, even the page itself is behind it.
+  if (isPortalLayerShortcutTarget(target)) return false;
+  if (!(target instanceof Element) || target === document.body) return true;
+  if (isEditableShortcutTarget(target)) return false;
   const row = target.closest(`[${PEEK_TARGET_ATTR}]`);
   if (!row || row.closest("[data-issue-peek]")) return false;
   return target === row || target.tagName === "A";
