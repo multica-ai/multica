@@ -326,6 +326,23 @@ test.describe("as a guest", () => {
     await expectClean(seen);
   });
 
+  test("an issue's field shortcuts do nothing for a guest, while R still focuses the composer", async ({ page }) => {
+    const issue = fixture.issues.review;
+    const seen = await openAsGuest(page, `/${slug}/issues/${issue.identifier}`);
+    await expect(page.getByText(issue.title).first()).toBeVisible({ timeout: 30_000 });
+    await expectClean(seen);
+
+    for (const key of ["s", "a", "p", "l", "q", "Shift+D", "Shift+P"]) {
+      await page.keyboard.press(key);
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+    }
+    await expectClean(seen);
+
+    await page.keyboard.press("r");
+    await expect(page.locator('[contenteditable="true"]:focus')).toHaveCount(1);
+    await expectClean(seen);
+  });
+
   test("a project that is not shared is not found", async ({ page }) => {
     const { id } = fixture.projects.internal;
     const seen = await openAsGuest(page, `/${slug}/projects/${id}`, { notFound: [id] });

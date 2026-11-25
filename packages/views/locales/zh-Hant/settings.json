@@ -390,8 +390,10 @@
     "send_enter_hint": "Shift+Enter 可插入段落、繼續列表，或在程式碼塊中換行。",
     "categories": {
       "general": "常規",
+      "issue": "任務",
       "navigation": "導航"
     },
+    "issue_scope": "作用於眼前的任務：預覽中的任務、列表中選取的任務，或目前開啟的任務。",
     "actions": {
       "openSearch": {
         "label": "開啟搜尋",
@@ -448,6 +450,38 @@
       "undoInboxAction": {
         "label": "復原收件箱操作",
         "description": "提示還在時，復原上一次歸檔、延後或取消訂閱；提示消失後，開啟的通知已歸檔時把它放回收件箱，在「收件箱已清空」頁復原頁面上寫明的操作。"
+      },
+      "setIssueStatus": {
+        "label": "變更狀態",
+        "description": "開啟狀態選擇。"
+      },
+      "assignIssue": {
+        "label": "指派負責人",
+        "description": "開啟負責人選擇。"
+      },
+      "setIssuePriority": {
+        "label": "設定優先級",
+        "description": "開啟優先級選擇。"
+      },
+      "setIssueLabels": {
+        "label": "編輯標籤",
+        "description": "開啟標籤選擇。"
+      },
+      "setIssueDueDate": {
+        "label": "設定截止日期",
+        "description": "開啟截止日期選擇。"
+      },
+      "moveIssueToProject": {
+        "label": "移動到專案",
+        "description": "開啟專案選擇。"
+      },
+      "runIssueQuickAction": {
+        "label": "執行快捷操作",
+        "description": "僅在單一任務且有可用的快捷操作時可用。"
+      },
+      "replyToIssue": {
+        "label": "回覆",
+        "description": "聚焦目前任務的留言框。"
       },
       "send": {
         "label": "傳送",

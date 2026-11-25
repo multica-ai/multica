@@ -390,8 +390,10 @@
     "send_enter_hint": "Shift+Enterで段落の挿入、リストの継続、コードブロック内の改行ができます。",
     "categories": {
       "general": "一般",
+      "issue": "タスク",
       "navigation": "ナビゲーション"
     },
+    "issue_scope": "目の前のタスクに作用します：プレビュー中のタスク、リストで選択したタスク、または開いているタスク。",
     "actions": {
       "openSearch": {
         "label": "検索を開く",
@@ -448,6 +450,38 @@
       "undoInboxAction": {
         "label": "インボックスの操作を取り消す",
         "description": "トーストが表示されている間は直前のアーカイブ・スヌーズ・購読解除を取り消します。トーストが消えた後は、開いている通知がアーカイブ済みならインボックスに戻し、「インボックスは空です」画面ではそこに表示された操作を取り消します。"
+      },
+      "setIssueStatus": {
+        "label": "ステータスを変更",
+        "description": "ステータスの選択を開きます。"
+      },
+      "assignIssue": {
+        "label": "担当者を設定",
+        "description": "担当者の選択を開きます。"
+      },
+      "setIssuePriority": {
+        "label": "優先度を設定",
+        "description": "優先度の選択を開きます。"
+      },
+      "setIssueLabels": {
+        "label": "ラベルを編集",
+        "description": "ラベルの選択を開きます。"
+      },
+      "setIssueDueDate": {
+        "label": "期限を設定",
+        "description": "期限の選択を開きます。"
+      },
+      "moveIssueToProject": {
+        "label": "プロジェクトに移動",
+        "description": "プロジェクトの選択を開きます。"
+      },
+      "runIssueQuickAction": {
+        "label": "クイックアクションを実行",
+        "description": "有効なクイックアクションがある単一のタスクで使えます。"
+      },
+      "replyToIssue": {
+        "label": "返信",
+        "description": "開いているタスクのコメント欄にフォーカスします。"
       },
       "send": {
         "label": "送信",
