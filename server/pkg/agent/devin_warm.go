@@ -110,14 +110,14 @@ func (b *devinBackend) devinWarmArgs(opts ExecOptions) []string {
 // excluded by computeWarmSessionFingerprint.
 func (b *devinBackend) devinWarmFingerprint(execPath string, opts ExecOptions, envMap map[string]string) string {
 	return computeWarmSessionFingerprint(WarmSessionFingerprintInput{
-		Provider:  "devin",
+		Provider:   "devin",
 		Executable: execPath,
-		Args:      b.devinWarmArgs(opts),
-		Cwd:       opts.Cwd,
-		Model:     opts.Model,
-		McpConfig: opts.McpConfig,
-		BriefHash: opts.WarmPoolBriefHash,
-		Env:       envMap,
+		Args:       b.devinWarmArgs(opts),
+		Cwd:        opts.Cwd,
+		Model:      opts.Model,
+		McpConfig:  opts.McpConfig,
+		BriefHash:  opts.WarmPoolBriefHash,
+		Env:        envMap,
 	})
 }
 
@@ -534,6 +534,20 @@ func (p *devinWarmProcess) runTurn(ctx context.Context, prompt string, opts Exec
 	firstTurn := p.currentSessionID() == ""
 	sessionID := p.currentSessionID()
 
+	// The turn's execution budget covers setup and prompt together — the
+	// one-shot path applies opts.Timeout to the whole process lifetime, so a
+	// warm first turn must not buy a fresh budget after the handshake; the
+	// handshake keeps its own shorter cap on top of it (below). A turn whose
+	// budget runs out mid-setup reports timeout and tears the process down —
+	// never a late success that could be parked.
+	turnCtx, cancelTurn := runContext(ctx, opts.Timeout)
+	turnOwned := false // flipped once the turn goroutine owns cancelTurn
+	defer func() {
+		if !turnOwned {
+			cancelTurn()
+		}
+	}()
+
 	if firstTurn {
 		// First turn on this process: handshake, authenticate if the runtime
 		// asks for it, and open the conversation. The MCP set is
@@ -554,18 +568,18 @@ func (p *devinWarmProcess) runTurn(ctx context.Context, prompt string, opts Exec
 			return nil, fmt.Errorf("devin: invalid mcp_config: %w", err)
 		}
 
-		// Bound only the setup RPCs by the handshake budget; the prompt
-		// itself is supervised by the daemon's watchdogs via ctx. The process
-		// is never cancelled through this context — it outlives the turn. A
-		// runtime that stops reading holds the synchronous setup writes (a
-		// large session/new MCP payload, a slow handshake), so the timeout
-		// closes stdin to release them. The callback stays armed across the
-		// WHOLE setup — initialize, authenticate, session/new|load and model
+		// The setup RPCs sit under two budgets: the turn's execution deadline
+		// (above) and this shorter handshake cap. The process is never
+		// cancelled through this context — it outlives the turn. A runtime
+		// that stops reading holds the synchronous setup writes (a large
+		// session/new MCP payload, a slow handshake), so the timeout closes
+		// stdin to release them. The callback stays armed across the WHOLE
+		// setup — initialize, authenticate, session/new|load and model
 		// confirmation — not just the first RPC: a turn cancelled mid-setup
 		// must not wedge on a blocked session/new write. Every failure path
 		// below tears the process down anyway; the callback firing there is a
 		// no-op.
-		setupCtx, cancelSetup := context.WithTimeout(ctx, devinWarmHandshakeTimeout)
+		setupCtx, cancelSetup := context.WithTimeout(turnCtx, devinWarmHandshakeTimeout)
 		defer cancelSetup()
 		stopBlockedSetup := context.AfterFunc(setupCtx, func() { _ = p.stdin.Close() })
 		init, err := p.client.request(setupCtx, "initialize", map[string]any{
@@ -713,13 +727,18 @@ func (p *devinWarmProcess) runTurn(ctx context.Context, prompt string, opts Exec
 	// session already carries it in the conversation history, and re-sending
 	// it every turn would repeat it (the one-shot path prepends per process,
 	// and each of its processes lives exactly one turn).
+	turnOwned = true
 	go func() {
+		defer cancelTurn()
 		defer p.turnMu.Unlock()
 		finalStatus := "completed"
 		finalError := ""
+		resumeRejected := false
 		p.streaming.Store(true)
-		promptCtx, cancel := runContext(ctx, opts.Timeout)
-		defer cancel()
+		// The prompt shares the turn's budget — setup time already spent
+		// counts against opts.Timeout (the one-shot path's whole-process
+		// deadline), so a slow handshake cannot buy the prompt a fresh one.
+		promptCtx := turnCtx
 		p.promptSent.Store(false)
 		stopBlockedWrite := context.AfterFunc(promptCtx, func() {
 			if !p.promptSent.Load() {
@@ -785,6 +804,19 @@ func (p *devinWarmProcess) runTurn(ctx context.Context, prompt string, opts Exec
 			finalStatus, finalError = "aborted", "execution cancelled"
 		case promptErr != nil:
 			finalStatus, finalError = "failed", fmt.Sprintf("devin session/prompt failed: %v", promptErr)
+			// Cold-path parity: a runtime that refuses the resumed session at
+			// prompt time has lost the conversation. Clear the id and report
+			// ResumeRejected so the daemon drops the stale pointer and
+			// retries as an explicitly fresh session; an empty session id
+			// never parks, so the wrapper tears the process down.
+			if opts.ResumeSessionID != "" && devinSessionNotFound(promptErr) {
+				p.cfg.Logger.Warn("resumed session not found at prompt time; clearing session id so the daemon retries fresh",
+					"backend", "devin",
+					"session_id", sessionID,
+				)
+				sessionID = ""
+				resumeRejected = true
+			}
 		case havePrompt && pr.stopReason == "cancelled":
 			finalStatus, finalError = "aborted", "devin cancelled the prompt"
 		}
@@ -851,12 +883,13 @@ func (p *devinWarmProcess) runTurn(ctx context.Context, prompt string, opts Exec
 		close(msgCh)
 
 		resCh <- Result{
-			Status:     finalStatus,
-			Output:     finalOutput,
-			Error:      finalError,
-			DurationMs: time.Since(startTime).Milliseconds(),
-			SessionID:  sessionID,
-			Usage:      usageMap,
+			Status:         finalStatus,
+			Output:         finalOutput,
+			Error:          finalError,
+			DurationMs:     time.Since(startTime).Milliseconds(),
+			SessionID:      sessionID,
+			Usage:          usageMap,
+			ResumeRejected: resumeRejected,
 		}
 	}()
 

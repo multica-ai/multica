@@ -47,6 +47,7 @@ while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
   case "$line" in
     *'"method":"initialize"'*)
+      if [ -n "$DEVIN_INIT_DELAY" ]; then sleep "$DEVIN_INIT_DELAY"; fi
       load='"loadSession":true'
       if [ -n "$DEVIN_NO_LOAD" ]; then load='"loadSession":false'; fi
       auth=''
@@ -80,6 +81,12 @@ while IFS= read -r line; do
       static_task="${MULTICA_TASK_ID:-EMPTY}"
       if [ -n "$DEVIN_PROMPT_FAIL" ]; then
         printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"prompt failed"}}\n' "$id"
+        continue
+      fi
+      if [ -n "$DEVIN_PROMPT_NOT_FOUND" ]; then
+        # The runtime accepted session/load but the session is gone by prompt
+        # time — the cold path's resume-rejection shape.
+        printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32016,"message":"Session not found: ses-warm-1"}}\n' "$id"
         continue
       fi
       if [ "$turn" -eq 1 ]; then
@@ -618,6 +625,182 @@ func TestDevinWarmAuthenticateAndModelConfirm(t *testing.T) {
 	if len(lines) < 3 || lines[0] != "acp" || lines[1] != "--model" || lines[2] != "swe-1.9-ultra" {
 		t.Fatalf("spawn argv = %q, want acp --model swe-1.9-ultra first", lines)
 	}
+}
+
+// A runtime that accepts session/load but refuses the session at prompt time
+// has lost the conversation: the turn must report ResumeRejected with no
+// session id — the same signal the cold path reports — so the daemon drops
+// the stale pointer and retries as an explicitly fresh session, and the
+// process never parks.
+func TestDevinWarmPromptTimeSessionNotFoundRejectsResume(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+
+	dir := t.TempDir()
+	spawnLog := filepath.Join(dir, "spawns.log")
+	turnFile := filepath.Join(dir, "turns.txt")
+
+	fakeDevin := filepath.Join(dir, "devin")
+	writeTestExecutable(t, fakeDevin, []byte(fakeDevinWarmScript(spawnLog, turnFile)))
+
+	pool := NewWarmSessionPool(WarmSessionPoolConfig{
+		IdleTTL: 30 * time.Second,
+		MaxIdle: 4,
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	t.Cleanup(func() { pool.Close() })
+
+	newBackend := func(extraEnv map[string]string) *devinBackend {
+		t.Helper()
+		env := map[string]string{
+			"MULTICA_TOKEN":        "mat_x",
+			"MULTICA_TASK_ID":      "task-1",
+			"MULTICA_AGENT_ID":     "agent-1",
+			"MULTICA_WORKSPACE_ID": "ws-1",
+		}
+		for k, v := range extraEnv {
+			env[k] = v
+		}
+		b, err := New("devin", Config{
+			ExecutablePath: fakeDevin,
+			Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+			TaskID:         "task-1",
+			BuiltinRuntime: true,
+			WarmPool:       pool,
+			Env:            env,
+		})
+		if err != nil {
+			t.Fatalf("New(devin): %v", err)
+		}
+		return b.(*devinBackend)
+	}
+	run := func(b *devinBackend, resumeID string) Result {
+		t.Helper()
+		sess, err := b.Execute(context.Background(), "hello", ExecOptions{
+			Cwd:             dir,
+			ResumeSessionID: resumeID,
+			Timeout:         10 * time.Second,
+		})
+		if err != nil {
+			t.Fatalf("Execute(resume=%q): %v", resumeID, err)
+		}
+		for range sess.Messages {
+		}
+		return <-sess.Result
+	}
+
+	// Turn 1: a good turn, parked.
+	r1 := run(newBackend(nil), "")
+	if r1.Status != "completed" || r1.SessionID != "ses-warm-1" || pool.Len() != 1 {
+		t.Fatalf("Turn 1 = %+v, pool.Len=%d", r1, pool.Len())
+	}
+	pool.Evict("devin", "ses-warm-1")
+
+	// Turn 2: the cold fallback's session/load succeeds, but the runtime
+	// refuses the session at prompt time (DEVIN_PROMPT_NOT_FOUND).
+	r2 := run(newBackend(map[string]string{"DEVIN_PROMPT_NOT_FOUND": "1"}), "ses-warm-1")
+	if r2.Status != "failed" {
+		t.Fatalf("prompt-time rejection = %+v, want failed", r2)
+	}
+	if !r2.ResumeRejected {
+		t.Fatalf("prompt-time rejection must report ResumeRejected so the daemon drops the pointer: %+v", r2)
+	}
+	if r2.SessionID != "" {
+		t.Fatalf("prompt-time rejection leaked session id %q; it must not present the refused session", r2.SessionID)
+	}
+	if pool.Len() != 0 {
+		t.Fatalf("pool.Len() after the rejected resume = %d, want 0", pool.Len())
+	}
+
+	// The daemon's fresh-session retry (no resume pointer) works normally.
+	r3 := run(newBackend(nil), "")
+	if r3.Status != "completed" || r3.SessionID != "ses-warm-1" {
+		t.Fatalf("fresh-session retry = %+v", r3)
+	}
+	if n := strings.Count(strings.TrimSpace(mustReadFile(t, spawnLog)), "\n") + 1; n != 3 {
+		t.Fatalf("expected 3 spawns (good, cold fallback, fresh retry), got %d", n)
+	}
+}
+
+// The execution budget covers setup and prompt together: a first turn whose
+// handshake eats past the budget reports timeout — never a late success that
+// could be parked. The handshake keeps its own shorter cap for the blocked-
+// write guard, but it cannot buy the turn extra time.
+func TestDevinWarmSetupConsumesExecutionTimeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+
+	dir := t.TempDir()
+	spawnLog := filepath.Join(dir, "spawns.log")
+	turnFile := filepath.Join(dir, "turns.txt")
+
+	fakeDevin := filepath.Join(dir, "devin")
+	writeTestExecutable(t, fakeDevin, []byte(fakeDevinWarmScript(spawnLog, turnFile)))
+
+	pool := NewWarmSessionPool(WarmSessionPoolConfig{
+		IdleTTL: 30 * time.Second,
+		MaxIdle: 4,
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	t.Cleanup(func() { pool.Close() })
+
+	b, err := New("devin", Config{
+		ExecutablePath: fakeDevin,
+		Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		TaskID:         "task-1",
+		BuiltinRuntime: true,
+		WarmPool:       pool,
+		Env: map[string]string{
+			"MULTICA_TOKEN":        "mat_x",
+			"MULTICA_TASK_ID":      "task-1",
+			"MULTICA_AGENT_ID":     "agent-1",
+			"MULTICA_WORKSPACE_ID": "ws-1",
+			"DEVIN_INIT_DELAY":     "0.6",
+		},
+	})
+	if err != nil {
+		t.Fatalf("New(devin): %v", err)
+	}
+	start := time.Now()
+	sess, err := b.Execute(context.Background(), "hello", ExecOptions{
+		Cwd:     dir,
+		Timeout: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	for range sess.Messages {
+	}
+	res := <-sess.Result
+	elapsed := time.Since(start)
+	if res.Status != "timeout" {
+		t.Fatalf("setup past the budget = %+v, want timeout (never a late success)", res)
+	}
+	if elapsed > time.Second {
+		t.Fatalf("timeout turn took %s to return; the handshake must not escape the execution budget", elapsed)
+	}
+	if pool.Len() != 0 {
+		t.Fatalf("pool.Len() after a timed-out turn = %d, want 0", pool.Len())
+	}
+	// And the process is really gone: a follow-up turn on the same session id
+	// would cold-start (the pool holds nothing to acquire).
+	if !pool.Close() {
+		t.Fatal("pool.Close() returned false")
+	}
+}
+
+func mustReadFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ""
+		}
+		t.Fatal(err)
+	}
+	return string(data)
 }
 
 // A runtime that no longer advertises session/load cannot restore an evicted
