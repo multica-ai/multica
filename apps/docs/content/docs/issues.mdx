@@ -121,6 +121,8 @@ Fields specific to your team, such as severity, customer, or budget, are custom 
 
 The types are text, number, select, multi-select, date, checkbox, URL, member, members, text list, and URL list. The type cannot be changed after creation. Properties can be used in filters; boards can also be grouped by a select property, and number and date properties can be used for sorting.
 
+A select property can be marked **Required**: an issue cannot be created without a value, whether from the web, desktop, mobile, the CLI, or an agent, and its value can be changed but not cleared. Issues created by autopilots or with `/issue` in chat are filed without it. **Always show on issues** keeps a property's row in the issue sidebar and its chip in the create dialog even while empty; required properties always show.
+
 Archive a property you no longer use: it disappears from pickers and filters, the values already on issues stay, and you can restore it later.
 
 ## Issues and runs
