@@ -496,7 +496,12 @@ export function onIssueUpdated(
   // stale keys for the drift a patch cannot fix (enter/leave beyond the
   // loaded window, undecidable membership, off-screen bucket counts). The
   // server has already committed, so stale keys are flushed immediately.
-  const change = applyIssueChange(qc, wsId, issue.id, issue, {
+  // A broadcast's blocked_by is not this reader's view: the server drops
+  // cross-project private blockers and fills the rest with the writer's
+  // access. Keep the cached list; a blocker change refetches it
+  // (blockers_changed).
+  const { blocked_by: _broadcastBlockers, ...patch } = issue;
+  const change = applyIssueChange(qc, wsId, issue.id, patch, {
     changed,
     baseIssue: cachedIssue,
     acceptCurrent: (current) =>
@@ -526,7 +531,7 @@ export function onIssueUpdated(
           (issue.revision === undefined ||
             c.revision === undefined ||
             issue.revision > c.revision)
-            ? { ...c, ...issue }
+            ? { ...c, ...patch }
             : c,
         ),
       );
