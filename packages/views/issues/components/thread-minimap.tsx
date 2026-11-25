@@ -91,8 +91,11 @@ function MinimapOutlineCard({
       onPointerLeave={onPointerLeave}
       onFocusCapture={onFocusCapture}
       onBlurCapture={onBlurCapture}
+      // Centered with auto margins, never a translate utility: the enter/exit
+      // animation writes `translate`, which would drop the card by half its
+      // height mid-animation and overflow the panel into a second scrollbar.
       className={cn(
-        "absolute top-1/2 right-8 max-h-[calc(100%-3rem)] w-80 max-w-[calc(100vw-4rem)] -translate-y-1/2 origin-right overflow-y-auto overscroll-contain rounded-xl bg-popover p-2 text-body text-popover-foreground shadow-lg ring-1 ring-foreground/10",
+        "absolute inset-y-0 right-8 my-auto h-fit max-h-[calc(100%-3rem)] w-80 max-w-[calc(100vw-4rem)] origin-right overflow-y-auto overscroll-contain rounded-xl bg-popover p-2 text-body text-popover-foreground shadow-lg ring-1 ring-foreground/10",
         isPresent ? "pointer-events-auto" : "pointer-events-none",
       )}
     >
