@@ -102,6 +102,43 @@ func TestIssueWakeupAPIAndTrustedOrigin(t *testing.T) {
 	}
 }
 
+// A refusal caused by the agent carries its own code, so the form can point
+// at the agent; other refusals keep the plain 403.
+func TestCreateIssueWakeupAgentNotInvocableCode(t *testing.T) {
+	issue := dbfx.Issue(t, "wake private agent")
+	owner := dbfx.User(t, "wake agent owner", "wake-agent-owner@multica.test")
+	dbfx.Member(t, testWorkspaceID, owner, "member")
+	private := dbfx.Agent(t, "someone else's private agent", testRuntimeID, testutil.Cols{"owner_id": owner})
+	runnable := dbfx.Agent(t, "wake runnable agent", testRuntimeID)
+	dbfx.Cleanup(t, "DELETE FROM issue_wakeup WHERE issue_id=$1", issue)
+	for _, tc := range []struct {
+		name string
+		body map[string]any
+		code string
+	}{
+		{"private agent", map[string]any{"agent_id": private, "kind": "at", "after_seconds": 600, "instruction": "check"}, "wakeup_agent_not_invocable"},
+		{"unknown agent", map[string]any{"agent_id": "00000000-0000-0000-0000-000000000001", "kind": "at", "after_seconds": 600, "instruction": "check"}, "wakeup_agent_not_invocable"},
+		{"departed reply actor", map[string]any{"agent_id": runnable, "kind": "event", "event_types": []string{"comment.created"}, "filter_actor_type": "member", "filter_actor_id": "00000000-0000-0000-0000-000000000002", "instruction": "check"}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			testHandler.CreateIssueWakeup(rec, withURLParam(newRequest("POST", "/", tc.body), "id", issue))
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+			}
+			var body struct {
+				Code string `json:"code"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if body.Code != tc.code {
+				t.Fatalf("code = %q, want %q", body.Code, tc.code)
+			}
+		})
+	}
+}
+
 func TestWorkspaceWakeupSummariesScopeAndBounds(t *testing.T) {
 	issue := dbfx.Issue(t, "wakeup summary")
 	agent := dbfx.Agent(t, "summary target", testRuntimeID)
