@@ -719,7 +719,7 @@ multica issue create --title "Ship release" --assignee "Lambda" --status todo --
 
 Flags: `--title` (required), `--description` / `--description-stdin` / `--description-file`, `--status`, `--priority`, `--assignee` / `--assignee-id`, `--parent`, `--stage`, `--blocked-by` (repeatable; issue key or UUID to wait for before starting), `--project`, `--start-date`, `--due-date`, `--attachment` (repeatable), `--property` (repeatable), `--allow-duplicate`, `--pr-auto-complete`. Pass `--assignee-id <uuid>` (mutually exclusive with `--assignee`) when scripting against the IDs returned by `multica workspace member list --output json` / `multica agent list --output json`.
 
-Issues with unfinished blockers (`--blocked-by`, or earlier `--stage` siblings under the same parent) do not start an agent run until all blockers reach a `done` or `closed` status (including `cancelled`) or are removed. Once unblocked, a non-`backlog` issue starts automatically (or notifies a member assignee); a `backlog` issue stays parked until it leaves `backlog`. `issue get --output json` includes `blocked_by` (each with `via: "manual"` or `"stage"`), `blocked_count`, and `blocking` (issues waiting on this one).
+For issues with unfinished blockers (`--blocked-by`, or earlier `--stage` siblings under the same parent), creating, assigning, or changing status does not start an agent run until all blockers reach a `done` or `closed` status (including `cancelled`) or are removed. Once unblocked, a non-`backlog` issue starts automatically (or notifies a member assignee); a `backlog` issue stays parked until it leaves `backlog`. `issue get --output json` includes `blocked_by` (each with `via: "manual"` or `"stage"`), `blocked_count`, and `blocking` (issues waiting on this one). Direct @-mentions and comment replies still start runs while blockers remain.
 
 ### Update Issue
 
@@ -1307,8 +1307,8 @@ multica squad update <squad-id> --instructions "Route DB tasks to Alice and UI t
 # Manage members
 multica squad member list <squad-id>
 multica squad member add <squad-id> --member-id <agent-or-member-id> --type agent --role "Owns frontend"
-multica squad member set-role <squad-id> <member-id> --role "Owns backend and migrations"
-multica squad member remove <squad-id> <member-id>
+multica squad member set-role <squad-id> --member-id <agent-or-member-id> --role "Owns backend and migrations"
+multica squad member remove <squad-id> --member-id <agent-or-member-id>
 
 # Preview the squad context each agent member receives (requires squad manage permission)
 multica squad briefs <squad-id>
@@ -1320,6 +1320,8 @@ multica squad activity <issue-id> action --reason "Delegated implementation to F
 # Archive a squad (transfers active issues/autopilots to the former leader)
 multica squad delete <squad-id>
 ```
+
+Member type flags default to `agent`; pass `--type member` to `squad member add` / `remove`, or `--member-type member` to `squad member set-role`, for a human member.
 
 `--handoff-mode` accepts `leader` (default: every member reply returns to the leader) or `direct` (members hand work to the next member by `@`-mentioning them directly without waking the leader; fixed guardrails return the issue to the leader after 3 back-and-forth rounds, 20 member handoffs in 24 hours, a failed member run, or a reply naming no next owner).
 
