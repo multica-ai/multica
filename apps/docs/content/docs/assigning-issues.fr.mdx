@@ -66,6 +66,8 @@ Lorsque la tâche a déjà un agent ou un squad comme responsable, la sortir de 
 
 Seul le statut fixe `backlog` fonctionne ainsi. Un [statut personnalisé](/issues#statuts-personnalisés) de la catégorie `unstarted` ne met **pas** le travail en attente : assigner un agent à une tâche dans ce statut lance immédiatement une exécution. Les tâches déjà en `done` ou `cancelled` lancent quand même une exécution immédiatement lorsqu'elles sont assignées ou réassignées à un agent.
 
+Une tâche qui attend des [bloqueurs](/issues#relations) non terminés (manuels ou d'étapes précédentes) ne lance pas non plus d'exécution lors de l'assignation ; elle démarre automatiquement dès que tous ses bloqueurs atteignent un statut de catégorie `done` ou `closed` (`cancelled` inclus) ou sont retirés, sauf si elle est en `backlog`.
+
 ## Droits d'assignation
 
 Votre capacité à assigner un agent dépend de son Accès :

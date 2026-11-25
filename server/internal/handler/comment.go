@@ -1510,6 +1510,9 @@ type commentTriggerComputeOptions struct {
 	// by the originator, not the immediate agent principal. Members are their
 	// own originator so this may be empty for member-authored triggers.
 	OriginatorUserID string
+	// handoffPlan collects the squad handoffs this comment records once its
+	// routing is enqueued. Nil for previews, which must not record anything.
+	handoffPlan *squadHandoffPlan
 }
 
 func commentAgentTriggerReason(trigger commentAgentTrigger) string {
@@ -1847,6 +1850,16 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Idempotency is checked after every guard above, so a replay is only
+	// served to a request that would itself be allowed to post the comment.
+	idem, ok := commentIdempotencyFromRequest(w, r, issue, parentID, req.Type, authorType, authorID)
+	if !ok {
+		return
+	}
+	if h.replayIdempotentComment(w, r, idem) {
+		return
+	}
+
 	createParams := db.CreateCommentParams{
 		ID:           dbid.NewV7(),
 		IssueID:      issue.ID,
@@ -1886,13 +1899,18 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		}
 		defer tx.Rollback(r.Context())
 		qtx := h.Queries.WithTx(tx)
+		// The receipt is claimed before anything else is locked, so a
+		// same-key retry waits here holding nothing.
+		err = idem.claim(r.Context(), qtx, createParams.ID)
 		var unboundIDs []pgtype.UUID
-		unboundIDs, err = qtx.LockUnboundAttachmentsForCommentLink(r.Context(), db.LockUnboundAttachmentsForCommentLinkParams{
-			WorkspaceID:   issue.WorkspaceID,
-			AttachmentIds: attachmentIDs,
-			UploaderType:  authorType,
-			UploaderID:    parseUUID(authorID),
-		})
+		if err == nil {
+			unboundIDs, err = qtx.LockUnboundAttachmentsForCommentLink(r.Context(), db.LockUnboundAttachmentsForCommentLinkParams{
+				WorkspaceID:   issue.WorkspaceID,
+				AttachmentIds: attachmentIDs,
+				UploaderType:  authorType,
+				UploaderID:    parseUUID(authorID),
+			})
+		}
 		if err == nil {
 			created, err = qtx.CreateComment(r.Context(), createParams)
 		}
@@ -1919,8 +1937,19 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		created, err = wakeupWrite(h, r, func(q *db.Queries) (db.CreateCommentRow, error) {
+			if err := idem.claim(r.Context(), q, createParams.ID); err != nil {
+				return db.CreateCommentRow{}, err
+			}
 			return q.CreateComment(r.Context(), createParams)
 		})
+	}
+	if errors.Is(err, errCommentIdempotencyClaimed) {
+		// A concurrent request with the same key committed first. Its
+		// transaction has finished, so its receipt is readable now.
+		if !h.replayIdempotentComment(w, r, idem) {
+			writeError(w, http.StatusConflict, "a request with this Idempotency-Key is still being processed; retry")
+		}
+		return
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		// The issue was deleted, possibly while this waited for its row lock.
@@ -2009,10 +2038,12 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 	if isNoteComment(comment.Content) {
 		return nil
 	}
+	handoffPlan := &squadHandoffPlan{}
 	triggers, targets := h.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
 		ExcludeTriggerCommentID: comment.ID,
 		AuthoringTaskID:         comment.SourceTaskID,
 		OriginatorUserID:        originatorUserID,
+		handoffPlan:             handoffPlan,
 	})
 	triggers = filterSuppressedCommentAgentTriggers(triggers, suppressAgentIDs)
 	h.noteBlockedRuntimeTargets(ctx, issue, targets)
@@ -2021,6 +2052,7 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 	for agentID, result := range steered {
 		enqueued[agentID] = result
 	}
+	h.recordSquadHandoffs(ctx, issue, comment, handoffPlan, enqueued)
 	if commentResultsTriggeredAgent(enqueued) {
 		h.archiveActorInboxOnAgentTrigger(ctx, uuidToString(issue.WorkspaceID), uuidToString(issue.ID), actorType, actorID)
 	}
@@ -2714,6 +2746,11 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 	// creator's authority by commenting on that autopilot's issue.
 
 	mentions := util.ParseMentions(content)
+	handoffAuthor := h.directSquadHandoffAuthor(ctx, issue, actorType, actorID, opts.AuthoringTaskID)
+	if opts.handoffPlan != nil {
+		opts.handoffPlan.author = handoffAuthor
+	}
+	memberHandoff := handoffAuthor != nil && !handoffAuthor.isLeader
 
 	// EXPLICIT @agent / @squad mentions are a direct request and win over the
 	// @all broadcast (MUL-5411). @all only suppresses the IMPLICIT routing
@@ -2723,7 +2760,11 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 	// `all` is neither "agent" nor "squad", so it is skipped inside
 	// resolveMentionedAgentCommentTriggers and never enqueues a run of its own.
 	if hasAgentOrSquadMention(mentions) {
-		return h.resolveMentionedAgentCommentTriggers(ctx, issue, mentions, actorType, actorID, opts)
+		triggers, targets := h.resolveMentionedAgentCommentTriggers(ctx, issue, mentions, actorType, actorID, opts)
+		if handoffAuthor != nil {
+			triggers, targets = h.applyDirectSquadHandoff(ctx, issue, handoffAuthor, triggers, targets, opts)
+		}
+		return triggers, targets
 	}
 	// A member who @mentions people (a member or @all) and no agent/squad is
 	// talking to humans, so the implicit fallbacks stay quiet. An agent's
@@ -2748,9 +2789,20 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 				return triggers, nil
 			}
 		}
+		// In direct handoff mode a member that hands the issue to a person is
+		// waiting on that person, not on the leader.
+		if memberHandoff {
+			if userID, ok := firstMemberMention(mentions); ok {
+				opts.handoffPlan.add(squadHandoffRecord{kind: squadHandoffKindHuman, toType: "member", toID: userID})
+				return nil, nil
+			}
+		}
 		if issue.AssigneeType.Valid && issue.AssigneeType.String == "squad" {
 			if trigger, ok := h.routeAssignedSquadLeaderFallback(ctx, issue, actorType, actorID, opts); ok {
 				trigger.NonLeaderAgentReply = actorType == "agent" && actorID != uuidToString(trigger.Agent.ID)
+				if memberHandoff {
+					opts.handoffPlan.add(squadHandoffRecord{kind: squadHandoffKindLeader, toType: "agent", toID: trigger.Agent.ID, agentID: trigger.Agent.ID})
+				}
 				return []commentAgentTrigger{trigger}, nil
 			}
 		}

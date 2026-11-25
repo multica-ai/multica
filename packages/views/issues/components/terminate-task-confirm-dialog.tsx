@@ -26,6 +26,7 @@ import { useT } from "../../i18n";
 interface TerminateTaskConfirmDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onOpenChangeComplete?: (open: boolean) => void;
   onConfirm: () => void;
   // Running tasks may take a few seconds to fully halt on the daemon
   // side. Queued tasks cancel immediately, so we omit the note to keep
@@ -36,15 +37,18 @@ interface TerminateTaskConfirmDialogProps {
 export function TerminateTaskConfirmDialog({
   open,
   onOpenChange,
+  onOpenChangeComplete,
   onConfirm,
   showRunningNote = false,
 }: TerminateTaskConfirmDialogProps) {
   const { t } = useT("issues");
 
-  if (!open) return null;
-
   return (
-    <AlertDialog open onOpenChange={onOpenChange}>
+    <AlertDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      onOpenChangeComplete={onOpenChangeComplete}
+    >
       <AlertDialogContent
         // Stop clicks inside the dialog from bubbling to the row /
         // banner underneath (the dialog can render inside a clickable

@@ -42,10 +42,11 @@ JSON
  *) exit 1 ;;
 esac
 `, fixture)))
-	models, err := discoverOpenCodeModels(context.Background(), Command{Path: fake})
+	catalog, err := ListModels(t.Context(), "opencode", Command{Path: fake})
 	if err != nil {
 		t.Fatal(err)
 	}
+	models := catalog.Models
 	if len(models) != 2 {
 		t.Fatalf("models = %+v", models)
 	}
@@ -176,7 +177,8 @@ case "$1" in
  *) exit 1 ;;
 esac
 `, tc.version, tc.api, tc.apiExit, tc.verbose, tc.verbose)))
-			models, err := discoverOpenCodeModels(context.Background(), Command{Path: fake})
+			catalog, err := ListModels(t.Context(), "opencode", Command{Path: fake})
+			models := catalog.Models
 			if err != nil || len(models) != 1 || models[0].ID != "p/m" ||
 				(models[0].Thinking != nil) != tc.wantThinking {
 				t.Fatalf("models = %+v, err = %v", models, err)
@@ -214,7 +216,8 @@ printf '%s\n' "$@" > "$OPENCODE_TEST_TRACE"
 echo '{"location":{"directory":"/unused"},"data":[{"providerID":"p","id":"m","variants":[{"id":"high"}]}]}'
 `))
 			prefix := append([]string{"profile", "test"}, connection...)
-			models, err := discoverOpenCodeModels(context.Background(), NewCommand(fake, prefix))
+			catalog, err := ListModels(t.Context(), "opencode", NewCommand(fake, prefix))
+			models := catalog.Models
 			if err != nil || len(models) != 1 || models[0].Thinking == nil {
 				t.Fatalf("profile discovery = %+v, %v", models, err)
 			}
@@ -259,13 +262,37 @@ exec sleep 30
 			ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 			defer cancel()
 			start := time.Now()
-			models, err := discoverOpenCodeModels(ctx, Command{Path: fake})
-			if err != nil || len(models) != 0 {
-				t.Fatalf("timed-out discovery = %+v, %v", models, err)
+			catalog, err := ListModels(ctx, "opencode", Command{Path: fake})
+			if err != nil || len(catalog.Models) != 0 {
+				t.Fatalf("timed-out discovery = %+v, %v", catalog, err)
 			}
 			if elapsed := time.Since(start); elapsed > 3*time.Second {
 				t.Fatalf("discovery exceeded caller deadline: %v", elapsed)
 			}
 		})
+	}
+}
+
+func TestDiscoverOpenCodeModelsWithCanceledContext(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell fixture")
+	}
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "started")
+	t.Setenv("OPENCODE_TEST_TRACE", marker)
+	fake := filepath.Join(dir, "opencode")
+	writeTestExecutable(t, fake, []byte(`#!/bin/sh
+: > "$OPENCODE_TEST_TRACE"
+echo 'p/m'
+`))
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	catalog, err := ListModels(ctx, "opencode", Command{Path: fake})
+	if err != nil || len(catalog.Models) != 0 {
+		t.Fatalf("canceled discovery = %+v, %v", catalog, err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("canceled discovery started a subprocess or marker check failed: %v", err)
 	}
 }

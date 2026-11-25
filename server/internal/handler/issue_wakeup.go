@@ -120,6 +120,8 @@ func wakeupError(w http.ResponseWriter, err error) {
 		writeError(w, 409, err.Error())
 	case errors.Is(err, service.ErrWakeupInput):
 		writeError(w, 400, err.Error())
+	case errors.Is(err, service.ErrWakeupAgentNotInvocable):
+		writeErrorCode(w, 403, "wakeup_agent_not_invocable", err.Error())
 	case errors.Is(err, service.ErrWakeupForbidden):
 		writeError(w, 403, "wakeup permission denied")
 	case errors.Is(err, pgx.ErrNoRows):

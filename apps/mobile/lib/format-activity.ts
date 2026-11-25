@@ -9,7 +9,7 @@
  * mobile clients in the wild must render them as a generic fallback, not
  * crash).
  */
-import type { IssuePriority, TimelineEntry } from "@multica/core/types";
+import { SQUAD_HANDOFF_ROUND_LIMIT, type IssuePriority, type TimelineEntry } from "@multica/core/types";
 import { formatDateOnly } from "@multica/core/issues/date";
 import { i18n } from "@/lib/i18n/singleton";
 import { STATUS_LABEL, isBuiltInIssueStatus } from "@/lib/issue-status";
@@ -167,7 +167,38 @@ export function formatActivity(
         return t("issues:activity.squad_evaluated");
       }
     }
+    case "squad_handoff": {
+      // Mirrors web's formatActivity + squadHandoffNote in
+      // packages/views/issues/components/activity-text.ts.
+      const name =
+        details.to_id && details.to_type
+          ? resolveActorName(details.to_type, details.to_id)
+          : "?";
+      const text =
+        details.kind === "human"
+          ? t("issues:activity.squad_handoff_human", { name })
+          : details.kind === "leader"
+            ? t("issues:activity.squad_handoff_leader", { name })
+            : t("issues:activity.squad_handoff_to", { name });
+      const note = squadHandoffNote(details);
+      return note ? `${text} · ${note}` : text;
+    }
     default:
       return entry.action ?? "";
   }
+}
+
+const SQUAD_HANDOFF_REASON: Record<string, string> = {
+  round_limit: "issues:activity.squad_handoff_reason_round_limit",
+  daily_limit: "issues:activity.squad_handoff_reason_daily_limit",
+  run_failed: "issues:activity.squad_handoff_reason_run_failed",
+};
+
+function squadHandoffNote(details: Record<string, string>): string | null {
+  if (details.kind === "leader") {
+    const key = details.reason ? SQUAD_HANDOFF_REASON[details.reason] : undefined;
+    return key ? i18n.t(key, { limit: SQUAD_HANDOFF_ROUND_LIMIT }) : null;
+  }
+  const round = Number(details.round);
+  return round >= 2 ? i18n.t("issues:activity.squad_handoff_round", { round }) : null;
 }

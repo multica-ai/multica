@@ -70,10 +70,18 @@ func (q *Queries) DeleteTaskTokensByTask(ctx context.Context, taskID pgtype.UUID
 }
 
 const getTaskTokenByHash = `-- name: GetTaskTokenByHash :one
-SELECT id, token_hash, task_id, agent_id, workspace_id, user_id, expires_at, created_at FROM task_token
-WHERE token_hash = $1 AND expires_at > now()
+SELECT tt.id, tt.token_hash, tt.task_id, tt.agent_id, tt.workspace_id, tt.user_id, tt.expires_at, tt.created_at FROM task_token tt
+JOIN agent_task_queue q ON q.id = tt.task_id
+WHERE tt.token_hash = $1
+  AND tt.expires_at > now()
+  AND q.status NOT IN ('completed', 'failed', 'cancelled')
 `
 
+// A token authenticates only while its task is live. Terminal task rows never
+// return to a live status (retries are new rows), so a token whose task is
+// completed, failed or cancelled is dead even when no path deleted it: the
+// bulk failure sweeps (runtime offline, stale tasks, daemon recovery) never
+// delete it, and the per-task deletes are best-effort (GitHub #11378).
 func (q *Queries) GetTaskTokenByHash(ctx context.Context, tokenHash string) (TaskToken, error) {
 	row := q.db.QueryRow(ctx, getTaskTokenByHash, tokenHash)
 	var i TaskToken

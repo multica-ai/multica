@@ -88,7 +88,14 @@ vi.mock("../../editor", () => ({
       />
     );
   },
-  ContentEditor: ({ placeholder }: any) => <textarea aria-label="runbook" placeholder={placeholder} />,
+  ContentEditor: ({ defaultValue, placeholder, onUpdate }: any) => (
+    <textarea
+      aria-label="runbook"
+      defaultValue={defaultValue}
+      placeholder={placeholder}
+      onChange={(e) => onUpdate?.(e.target.value)}
+    />
+  ),
 }));
 
 vi.mock("../../common/actor-avatar", () => ({
@@ -96,7 +103,11 @@ vi.mock("../../common/actor-avatar", () => ({
 }));
 
 vi.mock("./subscriber-multi-select", () => ({
-  SubscriberMultiSelect: () => <div data-testid="subscriber-multi-select" />,
+  SubscriberMultiSelect: ({ onChange }: { onChange: (ids: string[]) => void }) => (
+    <button type="button" onClick={() => onChange([])}>
+      clear subscribers
+    </button>
+  ),
 }));
 
 // Stand-in picker: renders the dialog's own trigger (so the selected project
@@ -123,13 +134,17 @@ vi.mock("./pickers/timezone-picker", () => ({
   TimezonePicker: ({ value }: { value: string }) => <div data-testid="timezone-picker">{value}</div>,
 }));
 
-import { AutopilotDialog } from "./autopilot-dialog";
+import { AutopilotDialog, type AutopilotInitial } from "./autopilot-dialog";
 
 const AUTOPILOT_ID = "ap-1";
 
-function renderEditDialog(mode: AutopilotExecutionMode, projectId: string | null) {
+function renderEditDialog(
+  mode: AutopilotExecutionMode,
+  projectId: string | null,
+  saved: Partial<AutopilotInitial> = {},
+) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return renderWithI18n(
+  const dialog = (overrides: Partial<AutopilotInitial>) => (
     <QueryClientProvider client={qc}>
       <AutopilotDialog
         mode="edit"
@@ -144,13 +159,17 @@ function renderEditDialog(mode: AutopilotExecutionMode, projectId: string | null
           assignee_id: "agent-1",
           execution_mode: mode,
           subscriber_user_ids: [],
+          ...overrides,
         }}
         triggers={[]}
         collaborators={[]}
         canManageAccess={false}
       />
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  const view = renderWithI18n(dialog(saved));
+  // Another session saved the autopilot while this dialog was open.
+  return { changeElsewhere: (next: Partial<AutopilotInitial>) => view.rerender(dialog(next)) };
 }
 
 function renderCreateDialog() {
@@ -204,10 +223,9 @@ describe("AutopilotDialog project section", () => {
     await user.click(saveButton());
 
     await waitFor(() => expect(mockUpdateAutopilot).toHaveBeenCalledTimes(1));
-    expect(mockUpdateAutopilot.mock.calls[0]?.[0]).toMatchObject({
+    expect(mockUpdateAutopilot.mock.calls[0]?.[0]).toEqual({
       id: AUTOPILOT_ID,
-      execution_mode: "run_only",
-      project_id: "proj-1",
+      title: "Push fleet repo to GitHub v2",
     });
   });
 
@@ -218,7 +236,49 @@ describe("AutopilotDialog project section", () => {
     await user.click(saveButton());
 
     await waitFor(() => expect(mockUpdateAutopilot).toHaveBeenCalledTimes(1));
-    expect(mockUpdateAutopilot.mock.calls[0]?.[0]).toMatchObject({ project_id: "proj-1" });
+    expect(mockUpdateAutopilot.mock.calls[0]?.[0]).toEqual({ id: AUTOPILOT_ID });
+  });
+
+  it("keeps fields saved elsewhere while the dialog was open", async () => {
+    const user = userEvent.setup();
+    const { changeElsewhere } = renderEditDialog("create_issue", null);
+
+    await user.type(screen.getByLabelText("title"), " v2");
+    changeElsewhere({
+      description: "New runbook",
+      project_id: "proj-1",
+      assignee_type: "squad",
+      assignee_id: "squad-1",
+      execution_mode: "run_only",
+      subscriber_user_ids: ["user-2"],
+    });
+    await user.click(saveButton());
+
+    await waitFor(() => expect(mockUpdateAutopilot).toHaveBeenCalledTimes(1));
+    expect(mockUpdateAutopilot.mock.calls[0]?.[0]).toEqual({
+      id: AUTOPILOT_ID,
+      title: "Push fleet repo to GitHub v2",
+    });
+  });
+
+  it("sends every field the user changed", async () => {
+    const user = userEvent.setup();
+    renderEditDialog("create_issue", null, { subscriber_user_ids: ["user-1"] });
+
+    await user.type(screen.getByLabelText("runbook"), "Steps");
+    await user.click(screen.getByRole("button", { name: "pick Fleet" }));
+    await user.click(screen.getByRole("button", { name: "clear subscribers" }));
+    await user.click(screen.getByRole("button", { name: /Run only/ }));
+    await user.click(saveButton());
+
+    await waitFor(() => expect(mockUpdateAutopilot).toHaveBeenCalledTimes(1));
+    expect(mockUpdateAutopilot.mock.calls[0]?.[0]).toEqual({
+      id: AUTOPILOT_ID,
+      description: "Steps",
+      project_id: "proj-1",
+      execution_mode: "run_only",
+      subscribers: [],
+    });
   });
 
   it("binds a project chosen while creating a run_only autopilot", async () => {

@@ -174,15 +174,6 @@
   }
 }
 
-@keyframes inbox-auto-advance-bar {
-  from {
-    transform: scaleX(0);
-  }
-  to {
-    transform: scaleX(1);
-  }
-}
-
 .animate-inbox-enter-next {
   animation: inbox-enter-next 160ms cubic-bezier(0.23, 1, 0.32, 1) backwards;
 }
@@ -195,16 +186,67 @@
   animation: inbox-enter-fade 130ms ease-out backwards;
 }
 
-.animate-inbox-auto-advance-bar {
-  transform-origin: left center;
-  animation: inbox-auto-advance-bar var(--inbox-advance-duration, 1400ms) linear forwards;
+@media (prefers-reduced-motion: reduce) {
+  .animate-inbox-enter-next,
+  .animate-inbox-enter-prev,
+  .animate-inbox-enter-fade {
+    animation: none;
+  }
+}
+
+/* Chat session switch / archive-advance message transition (MUL-9881).
+ * Plays once the virtualized list has landed on its live end (`hasReachedLiveEnd`),
+ * so the reader never sees Virtuoso's unmeasured scroll jump. `backwards`
+ * releases `transform` on finish so sticky/fixed descendants keep their normal
+ * containing block. */
+@keyframes chat-enter-next {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes chat-enter-prev {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes chat-enter-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-chat-enter-next {
+  animation: chat-enter-next 160ms cubic-bezier(0.23, 1, 0.32, 1) backwards;
+}
+
+.animate-chat-enter-prev {
+  animation: chat-enter-prev 160ms cubic-bezier(0.23, 1, 0.32, 1) backwards;
+}
+
+.animate-chat-enter-fade {
+  animation: chat-enter-fade 130ms ease-out backwards;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .animate-inbox-enter-next,
-  .animate-inbox-enter-prev {
-    animation-name: inbox-enter-fade;
-    animation-duration: 120ms;
+  .animate-chat-enter-next,
+  .animate-chat-enter-prev,
+  .animate-chat-enter-fade {
+    animation: none;
   }
 }
 

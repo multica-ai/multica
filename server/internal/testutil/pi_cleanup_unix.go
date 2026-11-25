@@ -41,10 +41,22 @@ func RunPiCleanupFixture() bool {
 	}
 	_, _ = io.Copy(io.Discard, os.Stdin)
 	term := make(chan os.Signal, 1)
-	if mode == "graceful" {
+	if mode == "graceful" || mode == "inprocess" {
 		signal.Notify(term, syscall.SIGTERM)
 	} else {
 		signal.Ignore(syscall.SIGTERM)
+	}
+	if mode == "inprocess" {
+		data, _ := json.Marshal([]int{os.Getpid()})
+		_ = os.WriteFile(filepath.Join(dir, "pids.json"), data, 0o600)
+		fmt.Println(`{"type":"agent_start"}`)
+		fmt.Println(`{"type":"tool_execution_start","toolName":"wait","toolCallId":"fixture"}`)
+		select {
+		case <-term:
+			_ = os.WriteFile(filepath.Join(dir, "term"), []byte("received"), 0o600)
+		case <-time.After(15 * time.Second):
+		}
+		return true
 	}
 	writer := exec.Command(os.Args[0])
 	writer.Env = append(os.Environ(), piCleanupFixtureMode+"=writer")

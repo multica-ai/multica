@@ -201,8 +201,21 @@ function docker {
     $args_ = @($args)
     if ($args_.Count -ge 1 -and $args_[0] -eq "info") { return }
     if ($args_.Count -ge 1 -and $args_[0] -eq "compose") {
+        if ($env:MULTICA_TEST_NO_COMPOSE) {
+            $global:LASTEXITCODE = 1
+            return
+        }
         if ($args_ -contains "up") {
             $script:StubStackUp = $true
+            return
+        }
+        if ($args_ -contains "config" -and $args_ -contains "--quiet") {
+            # The installer's validation step. An old Compose rejects the
+            # file's top-level `name:` here (#1401).
+            if ($env:MULTICA_TEST_COMPOSE_REJECTS_NAME) {
+                $global:LASTEXITCODE = 1
+                return "(root) Additional property name is not allowed"
+            }
             return
         }
         if ($args_ -contains "config") {
@@ -231,7 +244,10 @@ function docker {
             $global:LASTEXITCODE = 1
             return
         }
-        if ($args_ -contains "version") { return "2.30.0" }
+        if ($args_ -contains "version") {
+            if ($env:MULTICA_TEST_COMPOSE_REJECTS_NAME) { return "Docker Compose version v2.2.3" }
+            return "2.30.0"
+        }
     }
     return
 }
@@ -291,7 +307,7 @@ function Invoke-InstallerCase {
     # Control the ambient environment explicitly so a CI runner's own PORT
     # cannot leak into the matrix. Absent must mean absent: an empty string is a
     # different input, and the chain treats it as "set but no value".
-    $caseVars = @("PORT", "BACKEND_PORT", "API_PORT", "SERVER_PORT", "FRONTEND_PORT", "MULTICA_TEST_COMPOSE_CONFIG", "MULTICA_TEST_STACK_RUNNING")
+    $caseVars = @("PORT", "BACKEND_PORT", "API_PORT", "SERVER_PORT", "FRONTEND_PORT", "MULTICA_TEST_COMPOSE_CONFIG", "MULTICA_TEST_STACK_RUNNING", "MULTICA_TEST_COMPOSE_REJECTS_NAME", "MULTICA_TEST_NO_COMPOSE")
     $previous = @{}
     foreach ($key in $caseVars) {
         $previous[$key] = [System.Environment]::GetEnvironmentVariable($key)
@@ -396,5 +412,35 @@ $probe.Stop()
 $freeCase = @{ Label = "free port"; Env = @{ MULTICA_TEST_COMPOSE_CONFIG = "1" }; Mutation = @{ PORT = $free }; Backend = $free; Frontend = "3000" }
 Assert-PublishedPorts -Case $freeCase -Result (Invoke-InstallerCase -Case $freeCase)
 
+# ---------------------------------------------------------------------------
+# 5. A Compose release too old for the file's top-level `name:` (or no Compose
+#    v2 plugin at all) stops the installer before anything is pulled or
+#    started, with an error that says what to upgrade (#1401).
+# ---------------------------------------------------------------------------
+$composeCases = @(
+    @{ Label = "old compose"; Env = @{ MULTICA_TEST_COMPOSE_REJECTS_NAME = "1" }; Mutation = $null; Expect = @("Your Docker Compose is too old", "Found: Docker Compose version v2.2.3", "Additional property name is not allowed") }
+    @{ Label = "no compose v2"; Env = @{ MULTICA_TEST_NO_COMPOSE = "1" }; Mutation = $null; Expect = @("Docker Compose v2 is required") }
+)
+foreach ($case in $composeCases) {
+    $result = Invoke-InstallerCase -Case $case
+    if ($result.ExitCode -eq 0) {
+        Write-Host $result.Output
+        Fail-Test "[$($case.Label)] installer must not continue with an unusable Docker Compose"
+    }
+    foreach ($text in $case.Expect) {
+        if ($result.Output -notmatch [regex]::Escape($text)) {
+            Write-Host $result.Output
+            Fail-Test "[$($case.Label)] expected the error to contain: $text"
+        }
+    }
+    if ($result.Probes.Count -gt 0 -or $result.Output -match "Pulling official Multica images") {
+        Write-Host $result.Output
+        Fail-Test "[$($case.Label)] installer pulled or started the stack despite an unusable Docker Compose"
+    }
+}
+
 Remove-Item $runnerScript -Force -ErrorAction SilentlyContinue
 Write-Host "install.ps1 tests passed" -ForegroundColor Green
+# The expected-failure cases leave the last child's exit code in $LASTEXITCODE,
+# which `powershell -command` would report as the script's own result.
+exit 0

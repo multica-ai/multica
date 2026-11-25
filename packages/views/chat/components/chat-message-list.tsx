@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence } from "motion/react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { Virtuoso, type Components, type VirtuosoHandle } from "react-virtuoso";
@@ -19,15 +20,16 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import {
   ChevronRight,
-  ChevronDown,
   Brain,
   AlertCircle,
   AlertTriangle,
   ArrowUpRight,
-  Copy,
   RotateCw,
 } from "@multica/ui/icons";
+import { CopyCheckIcon } from "@multica/ui/components/common/copy-check-icon";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
+import { useReducedMotion } from "@multica/core/appearance";
 import { isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
 import { RichContent } from "../../rich-content";
 import { RichContentScrollRootProvider } from "../../rich-content/scroll-root";
@@ -65,6 +67,8 @@ import { ChatWakeupCards, ChatWakeupDivider, useWakeupsBySourceTask } from "./ch
 
 // ─── Public component ────────────────────────────────────────────────────
 
+export type ChatMessageEnterTransition = "next" | "prev" | "fade";
+
 interface ChatMessageListProps {
   /** Pause bottom-stick effects while a closing floating window fades out. */
   active?: boolean;
@@ -74,6 +78,13 @@ interface ChatMessageListProps {
    * (stick-to-bottom.ts). Omit to pay the settle on every mount.
    */
   revealKey?: string | null;
+  /**
+   * Subtle reveal transition played once the list has landed at the live end
+   * (`hasReachedLiveEnd`): directional glide for archive-advance (`"next"` /
+   * `"prev"`), or gentle opacity fade for direct session switches (`"fade"`).
+   * Skipped entirely under reduced motion (Appearance switch or system setting).
+   */
+  enterTransition?: ChatMessageEnterTransition | null;
   /** The list became visible to the reader — on reveal, and on each reactivation after it. */
   onRevealed?: () => void;
   messages: ChatMessage[];
@@ -196,6 +207,7 @@ const LIST_COMPONENTS: Components<ChatRenderItem, ChatListContext> = {
 export function ChatMessageList({
   active = true,
   revealKey = null,
+  enterTransition = null,
   onRevealed,
   messages,
   pendingTask,
@@ -237,6 +249,16 @@ export function ChatMessageList({
   // Soft edge fade hinting more content above/below. Kept small so it barely
   // grazes full-bleed previews (image / HTML) at the edges.
   const fadeStyle = useScrollFade(scrollRef, 16);
+  const reduceMotion = useReducedMotion();
+  const playedTransition = hasReachedLiveEnd && !reduceMotion ? enterTransition : null;
+  const enterClass =
+    playedTransition === "next"
+      ? "animate-chat-enter-next"
+      : playedTransition === "prev"
+        ? "animate-chat-enter-prev"
+        : playedTransition === "fade"
+          ? "animate-chat-enter-fade"
+          : undefined;
 
   const pendingTaskId = pendingTask?.task_id ?? null;
   const wakeupsBySourceTask = useWakeupsBySourceTask(wakeups);
@@ -366,9 +388,11 @@ export function ChatMessageList({
      *  pinned above the composer instead of scrolling with the rows. */}
     <div ref={annotations?.cardRef} {...annotations?.captureProps} className="relative flex min-h-0 flex-1 flex-col">
     {annotations?.popup}
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
     <div
       ref={setScrollContainerRef}
       data-tab-scroll-root
+      data-chat-enter-transition={playedTransition ?? undefined}
       style={fadeStyle}
       // The gutter lives on the scroll container, so it applies once to the
       // whole list — rows, header, footer — and the scrollbar still rides the
@@ -377,7 +401,7 @@ export function ChatMessageList({
       // container paints nothing for that whole window anyway — the rows are
       // not measured yet — so this costs no visible time and spares the
       // reader a frame of the wrong messages (see stick-to-bottom.ts).
-      className={cn("flex-1 overflow-y-auto", CHAT_GUTTER, !hasReachedLiveEnd && "invisible")}
+      className={cn("flex-1 overflow-y-auto", CHAT_GUTTER, !hasReachedLiveEnd && "invisible", enterClass)}
     >
       {/* Already inside the gutter + column, so this pre-mount frame renders the
        *  skeleton BODY rather than <ChatMessageSkeleton>, which brings its own
@@ -458,13 +482,18 @@ export function ChatMessageList({
       </RichContentScrollRootProvider>
       )}
     </div>
-    {jumpToLiveEnd.visible && (
-      <JumpToLiveEndButton
-        hasNewReply={jumpToLiveEnd.hasNewReply}
-        onClick={jumpToLiveEnd.jump}
-        className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2"
-      />
-    )}
+    </div>
+    <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center">
+      <AnimatePresence initial={false}>
+        {jumpToLiveEnd.visible && (
+          <JumpToLiveEndButton
+            key="jump-to-live-end"
+            hasNewReply={jumpToLiveEnd.hasNewReply}
+            onClick={jumpToLiveEnd.jump}
+          />
+        )}
+      </AnimatePresence>
+    </div>
     </div>
     </PreviewSequenceProvider>
   );
@@ -1009,8 +1038,20 @@ function MessageCopyButton({
   content: string;
 }) {
   const { t } = useT("chat");
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
   const handleCopy = async () => {
     if (await copyText(content)) {
+      setCopied(true);
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => setCopied(false), 2000);
       toast.success(t(($) => $.message_list.copied_toast));
     } else {
       toast.error(t(($) => $.message_list.copy_failed_toast));
@@ -1029,7 +1070,7 @@ function MessageCopyButton({
           />
         }
       >
-        <Copy />
+        <CopyCheckIcon copied={copied} />
       </TooltipTrigger>
       <TooltipContent side="top">
         {t(($) => $.message_list.copy_action)}
@@ -1152,11 +1193,12 @@ function FailureBubble({
           {rawError.trim() && (
             <Collapsible open={open} onOpenChange={setOpen}>
               <CollapsibleTrigger className="mt-0.5 flex items-center gap-1 text-caption text-muted-foreground hover:text-foreground transition-colors">
-                {open ? (
-                  <ChevronDown className="size-3" />
-                ) : (
-                  <ChevronRight className="size-3" />
-                )}
+                <ChevronRight
+                  className={cn(
+                    "size-3 shrink-0 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+                    open && "rotate-90",
+                  )}
+                />
                 <span>{t(($) => $.message_list.show_details)}</span>
               </CollapsibleTrigger>
               <CollapsibleContent>
@@ -1305,7 +1347,12 @@ function OuterProcessFold({
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="flex items-center gap-1 text-caption text-muted-foreground hover:text-foreground transition-colors">
-        {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+        <ChevronRight
+          className={cn(
+            "size-3 shrink-0 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+            open && "rotate-90",
+          )}
+        />
         <span>{t(($) => $.message_list.process_steps, { count: displayedStepCount })}</span>
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -1381,20 +1428,23 @@ function ToolCallRow({ item }: { item: ChatTimelineItem }) {
   });
   const hasInput = item.input && Object.keys(item.input).length > 0;
   const command = useMemo(() => readCommandInput(item.input), [item.input]);
+  const tooltip = [item.tool, summary].filter(Boolean).join(" · ");
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded-xs px-1 -mx-1 py-0.5 text-caption hover:bg-accent/30 transition-colors">
-        <ChevronRight
-          className={cn(
-            "h-3 w-3 shrink-0 text-muted-foreground transition-transform",
-            open && "rotate-90",
-            !hasInput && "invisible",
-          )}
-        />
-        <span className="font-medium text-foreground shrink-0">{item.tool}</span>
-        {summary && <span className="truncate text-muted-foreground">{summary}</span>}
-      </CollapsibleTrigger>
+      <TruncatedTooltip content={tooltip}>
+        <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded-xs px-1 -mx-1 py-0.5 text-caption hover:bg-accent/30 transition-colors">
+          <ChevronRight
+            className={cn(
+              "h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+              open && "rotate-90",
+              !hasInput && "invisible",
+            )}
+          />
+          <span className="max-w-[60%] shrink-0 truncate font-medium text-foreground">{item.tool}</span>
+          {summary && <span className="truncate text-muted-foreground">{summary}</span>}
+        </CollapsibleTrigger>
+      </TruncatedTooltip>
       {hasInput && (
         <CollapsibleContent>
           {command ? (
@@ -1431,7 +1481,10 @@ function ToolResultRow({ item }: { item: ChatTimelineItem }) {
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="flex w-full items-start gap-1.5 rounded-xs px-1 -mx-1 py-0.5 text-caption hover:bg-accent/30 transition-colors">
         <ChevronRight
-          className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform mt-0.5", open && "rotate-90")}
+          className={cn(
+            "h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none mt-0.5",
+            open && "rotate-90",
+          )}
         />
         <span className="text-muted-foreground truncate">
           {labelPrefix}{preview}

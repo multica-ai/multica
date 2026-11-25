@@ -1,9 +1,12 @@
 "use client";
 
 import { useId, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { useQuery } from "@tanstack/react-query";
+import { useReducedMotion } from "@multica/core/appearance";
 import { issueTasksOptions } from "@multica/core/issues/queries";
 import { ArrowRight, Ban, ChevronRight, XCircle } from "@multica/ui/icons";
+import { UI_EASE_OUT } from "@multica/ui/lib/motion";
 import type { AgentTask } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
@@ -1004,14 +1007,39 @@ function RunListRow({ run, issueId, showIssue, costWidth }: { run: TimelineRun; 
                 onClick={() => setExpanded((v) => !v)}
                 className="flex size-6 items-center justify-center rounded-xs text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
               >
-                <ChevronRight aria-hidden className={cn("size-3.5 transition-transform", expanded && "rotate-90")} />
+                <ChevronRight aria-hidden className={cn("size-3.5 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none", expanded && "rotate-90")} />
               </button>
             }
           />
         </span>
       </div>
-      {expanded && <RunDetails id={detailsId} run={run} reason={reason} />}
+      <RunDetailsDisclosure open={expanded}>
+        <RunDetails id={detailsId} run={run} reason={reason} />
+      </RunDetailsDisclosure>
     </div>
+  );
+}
+
+function RunDetailsDisclosure({ open, children }: { open: boolean; children: React.ReactNode }) {
+  const reduceMotion = useReducedMotion();
+  return (
+    <AnimatePresence initial={false}>
+      {open && (
+        <motion.div
+          key="run-details"
+          initial={reduceMotion ? false : { opacity: 0, height: 0, overflow: "hidden" }}
+          animate={{
+            opacity: 1,
+            height: "auto",
+            transitionEnd: { overflow: "visible" },
+          }}
+          exit={{ opacity: 0, height: 0, overflow: "hidden" }}
+          transition={{ duration: reduceMotion ? 0 : 0.18, ease: UI_EASE_OUT }}
+        >
+          {children}
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
 

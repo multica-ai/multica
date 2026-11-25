@@ -44,13 +44,13 @@ describe("IssueSidebarSections", () => {
   it("follows the saved order and leaves hidden sections out", () => {
     act(() => {
       useIssueSidebarSectionsStore.getState().setOrder(["execution_log", ...ISSUE_SIDEBAR_SECTIONS]);
-      useIssueSidebarSectionsStore.getState().setHidden("details", true);
+      useIssueSidebarSectionsStore.getState().setHidden("deliverables", true);
       useIssueSidebarSectionsStore.getState().setHidden("metadata", true);
     });
     renderSections();
 
     expect(renderedOrder().slice(0, 2)).toEqual(["execution_log", "properties"]);
-    expect(screen.queryByText("body:details")).toBeNull();
+    expect(screen.queryByText("body:deliverables")).toBeNull();
     expect(screen.getByRole("button", { name: /2 sections hidden/ })).toBeInTheDocument();
   });
 
@@ -63,13 +63,16 @@ describe("IssueSidebarSections", () => {
     expect(within(dialog).getByText("Always shown")).toBeInTheDocument();
     expect(within(dialog).getByRole("switch", { name: "Apps" }).closest("li")).toHaveTextContent("None on this issue");
 
-    fireEvent.click(within(dialog).getByRole("switch", { name: "Details" }));
-    expect(useIssueSidebarSectionsStore.getState().hidden).toEqual(["details"]);
-    expect(screen.queryByText("body:details")).toBeNull();
+    expect(within(dialog).queryByRole("switch", { name: "Details" })).toBeNull();
+    expect(within(dialog).queryByRole("switch", { name: "Sub-issues" })).toBeNull();
+
+    fireEvent.click(within(dialog).getByRole("switch", { name: "Deliverables" }));
+    expect(useIssueSidebarSectionsStore.getState().hidden).toEqual(["deliverables"]);
+    expect(screen.queryByText("body:deliverables")).toBeNull();
 
     fireEvent.click(within(dialog).getByRole("button", { name: /Reset/ }));
     expect(useIssueSidebarSectionsStore.getState().hidden).toEqual([]);
-    expect(screen.getByText("body:details")).toBeInTheDocument();
+    expect(screen.getByText("body:deliverables")).toBeInTheDocument();
   });
 
   it("opens settings from the hidden-sections hint", async () => {
@@ -79,6 +82,23 @@ describe("IssueSidebarSections", () => {
     fireEvent.click(screen.getByRole("button", { name: /1 section hidden/ }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByRole("switch", { name: "Metadata" })).not.toBeChecked();
+  });
+});
+
+describe("IssueSidebarSections extras", () => {
+  beforeEach(() => useIssueSidebarSectionsStore.getState().reset());
+
+  it("renders the add row after the sections and the footer last", () => {
+    render(
+      <I18nProvider resources={TEST_RESOURCES} locale="en">
+        <IssueSidebarSections sections={sections} available={available} addRow={<p>add-row</p>} footer={<p>footer</p>} />
+      </I18nProvider>,
+    );
+    const lastSection = screen.getByText("body:metadata");
+    const addRow = screen.getByText("add-row");
+    const footer = screen.getByText("footer");
+    expect(lastSection.compareDocumentPosition(addRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(addRow.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 

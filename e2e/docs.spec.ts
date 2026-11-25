@@ -23,7 +23,17 @@ async function docMode(page: Page): Promise<DocMode> {
 
 let api: TestApiClient;
 let slug: string;
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || `http://localhost:${process.env.PORT || "8080"}`;
+let docsEnabledPromise: Promise<boolean> | null = null;
+function isDocsEnabled() {
+  return (docsEnabledPromise ??= fetch(`${API_BASE}/api/config`)
+    .then((res) => (res.ok ? res.json() : null))
+    .then((body: { feature_flags?: { docs_v1?: boolean } } | null) => body?.feature_flags?.docs_v1 === true)
+    .catch(() => false));
+}
+
 test.beforeEach(async ({ page }) => {
+  test.skip(!(await isDocsEnabled()), "Docs is off; start the API with FF_DOCS_V1=true.");
   page.on("pageerror", (error) => {
     throw error;
   });
@@ -40,8 +50,8 @@ test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
 });
 test.afterEach(async () => {
-  await api.cleanup();
-  await api.deleteWorkspace();
+  await api?.cleanup();
+  await api?.deleteWorkspace();
 });
 
 test("Markdown autosave, folder move, immutable history and restore", async ({

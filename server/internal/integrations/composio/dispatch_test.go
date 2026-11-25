@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	sdk "github.com/multica-ai/multica/server/pkg/composio"
+	"github.com/multica-ai/multica/server/pkg/composio/composiotest"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -319,10 +320,10 @@ func TestBuildTaskOverlay_CreateSessionWireContract(t *testing.T) {
 		postedCh <- posted
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		if err := json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(composiotest.Example(t, "POST /tool_router/session", map[string]any{
 			"session_id": "trs_wire",
 			"mcp":        map[string]any{"type": "http", "url": "https://mcp.example/session/wire"},
-		}); err != nil {
+		})); err != nil {
 			t.Errorf("write response: %v", err)
 		}
 	}))

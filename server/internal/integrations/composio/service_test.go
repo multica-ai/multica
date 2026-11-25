@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -13,12 +14,15 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
 	sdk "github.com/multica-ai/multica/server/pkg/composio"
+	"github.com/multica-ai/multica/server/pkg/composio/composiotest"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // ---- fakes ---------------------------------------------------------------
 
 type fakeSDK struct {
+	// t is the test newTestService bound the fake to; matchSpec reports to it.
+	t               testing.TB
 	createLinkResp  *sdk.CreateLinkResponse
 	createLinkErr   error
 	lastCreateLink  sdk.CreateLinkRequest
@@ -34,12 +38,11 @@ type fakeSDK struct {
 	// ListConnectedAccounts echoes the requested id with acctUserID /
 	// acctAuthConfigID so success-path tests can opt in to a matching account;
 	// acctMissing returns no items, listAccountsErr forces a transport error.
-	acctUserID             string
-	acctAuthConfigID       string
-	acctNestedAuthConfigID string
-	acctMissing            bool
-	listAccountsErr        error
-	lastListAccounts       sdk.ListConnectedAccountsRequest
+	acctUserID       string
+	acctAuthConfigID string
+	acctMissing      bool
+	listAccountsErr  error
+	lastListAccounts sdk.ListConnectedAccountsRequest
 	// auth-config resolution (BeginConnect / ListToolkits connectable flag).
 	// authConfigs nil => a default single notion→ac_notion ENABLED config so
 	// existing connect tests keep resolving; set explicitly to override.
@@ -47,8 +50,23 @@ type fakeSDK struct {
 	authConfigsSet bool
 	listAuthErr    error
 	// toolkit catalog (ListToolkits).
-	toolkits        []sdk.Toolkit
-	listToolkitsErr error
+	toolkits          []sdk.Toolkit
+	listToolkitsErr   error
+	listToolkitsCalls int
+}
+
+func (f *fakeSDK) bindTest(t testing.TB) { f.t = t }
+
+// matchSpec returns v after failing the test if it sets a field Composio's
+// spec does not define for op, or gives one the wrong type.
+func matchSpec[T any](f *fakeSDK, op string, v T) T {
+	if err := composiotest.CheckFields(op, v); err != nil {
+		if f.t == nil {
+			panic(err)
+		}
+		f.t.Error(err)
+	}
+	return v
 }
 
 func (f *fakeSDK) CreateLink(_ context.Context, req sdk.CreateLinkRequest) (*sdk.CreateLinkResponse, error) {
@@ -56,10 +74,11 @@ func (f *fakeSDK) CreateLink(_ context.Context, req sdk.CreateLinkRequest) (*sdk
 	if f.createLinkErr != nil {
 		return nil, f.createLinkErr
 	}
-	if f.createLinkResp != nil {
-		return f.createLinkResp, nil
+	resp := f.createLinkResp
+	if resp == nil {
+		resp = &sdk.CreateLinkResponse{RedirectURL: "https://composio.example/redirect", ConnectedAccountID: "ca_pending"}
 	}
-	return &sdk.CreateLinkResponse{RedirectURL: "https://composio.example/redirect", ConnectedAccountID: "ca_pending"}, nil
+	return matchSpec(f, "POST /connected_accounts/link", resp), nil
 }
 
 func (f *fakeSDK) ListConnectedAccounts(_ context.Context, req sdk.ListConnectedAccountsRequest) (*sdk.ListConnectedAccountsResponse, error) {
@@ -74,12 +93,11 @@ func (f *fakeSDK) ListConnectedAccounts(_ context.Context, req sdk.ListConnected
 	if len(req.ConnectedAccountIDs) > 0 {
 		id = req.ConnectedAccountIDs[0]
 	}
-	return &sdk.ListConnectedAccountsResponse{Items: []sdk.ConnectedAccount{{
-		ID:           id,
-		UserID:       f.acctUserID,
-		AuthConfigID: f.acctAuthConfigID,
-		AuthConfig:   sdk.AuthConfigRef{ID: f.acctNestedAuthConfigID},
-	}}}, nil
+	return matchSpec(f, "GET /connected_accounts", &sdk.ListConnectedAccountsResponse{Items: []sdk.ConnectedAccount{{
+		ID:         id,
+		UserID:     f.acctUserID,
+		AuthConfig: sdk.AuthConfigRef{ID: f.acctAuthConfigID},
+	}}}), nil
 }
 
 func (f *fakeSDK) ListAuthConfigs(_ context.Context, _ sdk.ListAuthConfigsRequest) (*sdk.ListAuthConfigsResponse, error) {
@@ -95,14 +113,15 @@ func (f *fakeSDK) ListAuthConfigs(_ context.Context, _ sdk.ListAuthConfigsReques
 			IsComposioManaged: true,
 		}}
 	}
-	return &sdk.ListAuthConfigsResponse{Items: items}, nil
+	return matchSpec(f, "GET /auth_configs", &sdk.ListAuthConfigsResponse{Items: items}), nil
 }
 
 func (f *fakeSDK) ListToolkits(_ context.Context, _ sdk.ListToolkitsRequest) (*sdk.ListToolkitsResponse, error) {
+	f.listToolkitsCalls++
 	if f.listToolkitsErr != nil {
 		return nil, f.listToolkitsErr
 	}
-	return &sdk.ListToolkitsResponse{Items: f.toolkits}, nil
+	return matchSpec(f, "GET /toolkits", &sdk.ListToolkitsResponse{Items: f.toolkits}), nil
 }
 
 func (f *fakeSDK) RevokeConnection(_ context.Context, id string) error {
@@ -121,10 +140,11 @@ func (f *fakeSDK) CreateSession(_ context.Context, req sdk.CreateSessionRequest)
 	if f.createSessErr != nil {
 		return nil, f.createSessErr
 	}
-	if f.createSessResp != nil {
-		return f.createSessResp, nil
+	resp := f.createSessResp
+	if resp == nil {
+		resp = &sdk.CreateSessionResponse{MCP: sdk.MCPDescriptor{URL: "https://mcp.example/session"}}
 	}
-	return &sdk.CreateSessionResponse{MCP: sdk.MCPDescriptor{URL: "https://mcp.example/session"}}, nil
+	return matchSpec(f, "POST /tool_router/session", resp), nil
 }
 
 func (f *fakeSDK) MCPAuthHeaders() map[string]string {
@@ -215,6 +235,9 @@ func mintUUID(n byte) pgtype.UUID {
 
 func newTestService(t *testing.T, client SDK, store Store) *Service {
 	t.Helper()
+	if fake, ok := client.(interface{ bindTest(testing.TB) }); ok {
+		fake.bindTest(t)
+	}
 	svc, err := NewService(client, store, Config{
 		StateSecret:     testSecret,
 		CallbackBaseURL: "https://multica.ai",
@@ -335,8 +358,10 @@ func TestListToolkits_FiltersToConnectable(t *testing.T) {
 			{ID: "ac_slack", Toolkit: sdk.Toolkit{Slug: "slack"}, Status: "ENABLED"},
 		},
 		toolkits: []sdk.Toolkit{
-			{Slug: "github", Name: "GitHub", LogoURL: "https://logo/gh", Categories: []string{"dev"}},
-			{Slug: "notion", Name: "Notion", LogoURL: "https://logo/notion", Categories: []string{"productivity"}},
+			{Slug: "github", Name: "GitHub", Meta: map[string]any{"logo": "https://logo/gh",
+				"categories": []any{map[string]any{"id": "developer-tools", "name": "Developer Tools"}}}},
+			{Slug: "notion", Name: "Notion", Meta: map[string]any{"logo": "https://logo/notion",
+				"categories": []any{map[string]any{"id": "productivity", "name": "Productivity"}}}},
 			{Slug: "slack", Name: "Slack"},
 		},
 	}
@@ -363,12 +388,66 @@ func TestListToolkits_FiltersToConnectable(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected notion in results: %+v", tks)
 	}
-	if notion.Name != "Notion" || notion.LogoURL != "https://logo/notion" || notion.Category != "productivity" {
+	if notion.Name != "Notion" || notion.LogoURL != "https://logo/notion" || notion.Category != "Productivity" || notion.CategoryID != "productivity" {
 		t.Errorf("notion fields not mapped: %+v", notion)
 	}
 	// slack carried no upstream logo, so the composio default logo URL is derived.
 	if slack, ok := bySlug["slack"]; !ok || slack.LogoURL != "https://logos.composio.dev/api/slack" {
 		t.Errorf("slack default logo = %+v", bySlug["slack"])
+	}
+}
+
+// TestListToolkits_CachesTheUpstreamList: the toolkit list is fetched once
+// per TTL, a failed refresh serves the last list, and the auth config filter
+// still applies on every read.
+func TestListToolkits_CachesTheUpstreamList(t *testing.T) {
+	t.Parallel()
+	sdkFake := &fakeSDK{
+		authConfigsSet: true,
+		authConfigs:    []sdk.AuthConfig{{ID: "ac_notion", Toolkit: sdk.Toolkit{Slug: "notion"}, Status: "ENABLED"}},
+		toolkits:       []sdk.Toolkit{{Slug: "notion", Name: "Notion"}, {Slug: "slack", Name: "Slack"}},
+	}
+	svc := newTestService(t, sdkFake, newFakeStore())
+	now := time.Unix(1_700_000_000, 0)
+	svc.now = func() time.Time { return now }
+	slugs := func() []string {
+		t.Helper()
+		tks, err := svc.ListToolkits(context.Background())
+		if err != nil {
+			t.Fatalf("ListToolkits: %v", err)
+		}
+		out := make([]string, 0, len(tks))
+		for _, tk := range tks {
+			out = append(out, tk.Slug)
+		}
+		return out
+	}
+
+	if got := slugs(); !slices.Equal(got, []string{"notion"}) {
+		t.Fatalf("first read = %v, want [notion]", got)
+	}
+	// A new auth config shows at once, from the cached list.
+	sdkFake.authConfigs = append(sdkFake.authConfigs, sdk.AuthConfig{ID: "ac_slack", Toolkit: sdk.Toolkit{Slug: "slack"}, Status: "ENABLED"})
+	svc.invalidateAuthConfigs()
+	if got := slugs(); !slices.Equal(got, []string{"notion", "slack"}) {
+		t.Fatalf("after new auth config = %v, want [notion slack]", got)
+	}
+	if sdkFake.listToolkitsCalls != 1 {
+		t.Fatalf("toolkit fetches within TTL = %d, want 1", sdkFake.listToolkitsCalls)
+	}
+
+	now = now.Add(toolkitCacheTTL + time.Second)
+	sdkFake.listToolkitsErr = errors.New("upstream blip")
+	if got := slugs(); !slices.Equal(got, []string{"notion", "slack"}) {
+		t.Fatalf("stale read = %v, want [notion slack]", got)
+	}
+	sdkFake.listToolkitsErr = nil
+	sdkFake.toolkits = []sdk.Toolkit{{Slug: "notion", Name: "Notion"}}
+	if got := slugs(); !slices.Equal(got, []string{"notion"}) {
+		t.Fatalf("refreshed read = %v, want [notion]", got)
+	}
+	if sdkFake.listToolkitsCalls != 3 {
+		t.Fatalf("toolkit fetches = %d, want 3", sdkFake.listToolkitsCalls)
 	}
 }
 
@@ -428,29 +507,6 @@ func TestCompleteCallback_SuccessAndIdempotent(t *testing.T) {
 	}
 	if row.AuthConfigID != "ac_notion" || row.ToolkitSlug != "notion" || row.Status != "active" {
 		t.Errorf("row = %+v", row)
-	}
-}
-
-func TestCompleteCallback_AcceptsNestedAuthConfig(t *testing.T) {
-	t.Parallel()
-	store := newFakeStore()
-	userID := mintUUID(30)
-	// Composio v3.1 returns connected-account auth config under auth_config.id,
-	// not always as a top-level auth_config_id.
-	sdkFake := &fakeSDK{acctUserID: util.UUIDToString(userID), acctNestedAuthConfigID: "ac_notion"}
-	svc := newTestService(t, sdkFake, store)
-	state, _ := signState(testSecret, stateClaims{
-		UserID:       util.UUIDToString(userID),
-		ToolkitSlug:  "notion",
-		AuthConfigID: "ac_notion",
-		Exp:          time.Unix(1_700_000_000, 0).Add(time.Minute).Unix(),
-	})
-
-	if _, err := svc.CompleteCallback(context.Background(), state, "success", "ca_nested"); err != nil {
-		t.Fatalf("CompleteCallback: %v", err)
-	}
-	if len(store.rows) != 1 {
-		t.Fatalf("expected 1 row, got %d", len(store.rows))
 	}
 }
 

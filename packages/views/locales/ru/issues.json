@@ -26,6 +26,7 @@
     "message": "Сообщение агента",
     "error": "Ошибка",
     "waiting_result": "Ожидание результата инструмента...",
+    "reply_pending_call": "Всё ещё выполняется: ожидание завершения {{step}}",
     "supplement_failure_turn_ended": "запуск завершился до доставки",
     "supplement_failure_turn_not_started": "агент не был готов",
     "supplement_failure_provider_rejected": "агент отклонил сообщение",
@@ -191,7 +192,7 @@
     "section_project": "Проект",
     "section_project_status": "Статус проекта",
     "section_label": "Метка",
-    "section_relation": "Отношение ко мне",
+    "section_relation": "Связи",
     "relation_assigned": "Назначено мне",
     "relation_created": "Создано мной",
     "relation_my_agents": "Работа моих агентов",
@@ -293,7 +294,8 @@
     "advanced_conditions_many": "{{count}} условий",
     "read_state_unread": "Непрочитанные",
     "relation_subscribed": "За которыми я слежу",
-    "section_read_state": "Состояние прочтения"
+    "section_read_state": "Состояние прочтения",
+    "relation_blocked": "Заблокировано"
   },
   "display": {
     "tooltip": "Настройки отображения",
@@ -508,7 +510,6 @@
     "section_parent_issue": "Родительская задача",
     "section_pull_requests": "Pull request'ы",
     "section_metadata": "Метаданные",
-    "section_details": "Детали",
     "sidebar_settings": {
       "open": "Настроить боковую панель",
       "title": "Боковая панель",
@@ -567,9 +568,6 @@
     "prop_project": "Проект",
     "prop_labels": "Метки",
     "add_property_action": "Добавить свойство",
-    "prop_created_by": "Создано",
-    "prop_created": "Создано",
-    "prop_updated": "Обновлено",
     "activity_section": "Активность",
     "subscribe": "Подписаться",
     "unsubscribe": "Отписаться",
@@ -596,11 +594,6 @@
     "quick_jump_label": "Быстрая навигация",
     "description_nav_label": "Описание задачи",
     "sub_issues_nav_progress": "Завершено: {{done}}/{{total}}",
-    "sub_issues_show_more_one": "Показать ещё {{count}}",
-    "sub_issues_show_more_few": "Показать ещё {{count}}",
-    "sub_issues_show_more_many": "Показать ещё {{count}}",
-    "sub_issues_show_more_other": "Показать ещё {{count}}",
-    "sub_issues_show_less": "Свернуть",
     "thread_nav_label": "Перейти к треду комментариев",
     "thread_nav_resolved_label": "{{title}} (решено)",
     "thread_nav_reply_label": "{{author}}: {{title}}",
@@ -633,7 +626,34 @@
     "not_found_title": "Задача не найдена",
     "load_failed": "Не удалось загрузить задачу.",
     "load_retry": "Повторить",
-    "guest_readonly_note": "Гости могут просматривать и комментировать, но не могут менять свойства задачи."
+    "guest_readonly_note": "Гости могут просматривать и комментировать, но не могут менять свойства задачи.",
+    "open_issue_page": "Открыть страницу задачи",
+    "add_row": {
+      "wakeups": "Добавить будильник",
+      "pull_requests": "Добавить pull request",
+      "environments": "Добавить окружение",
+      "relations": "Добавить связь",
+      "pair": "Добавить {{first}} или {{second}}",
+      "many": "Добавить...",
+      "noun": {
+        "wakeups": "будильник",
+        "pull_requests": "pull request",
+        "environments": "окружение",
+        "relations": "связь"
+      },
+      "menu": {
+        "wakeups": "Будильник",
+        "pull_requests": "Pull request",
+        "environments": "Окружение",
+        "relations": "Связи"
+      }
+    },
+    "footer": {
+      "created": "Автор: {{creator}} · {{date}}",
+      "created_for": "Автор: {{creator}} от имени {{requester}} · {{date}}",
+      "created_at": "Создана: {{time}}",
+      "updated_at": "Обновлена: {{time}}"
+    }
   },
   "timeline": {
     "loading": "Загрузка...",
@@ -669,6 +689,13 @@
     "squad_leader_no_action_reason": "оценил(а): действие не требуется ({{reason}})",
     "squad_leader_failed": "оценка завершилась ошибкой",
     "squad_leader_failed_reason": "оценка завершилась ошибкой: {{reason}}",
+    "squad_handoff_to": "передал(а) {{name}}",
+    "squad_handoff_human": "попросил(а) {{name}} решить",
+    "squad_handoff_leader": "вернул(а) {{name}}",
+    "squad_handoff_round": "раунд {{round}}",
+    "squad_handoff_reason_round_limit": "достигнут лимит раундов: {{limit}}",
+    "squad_handoff_reason_daily_limit": "достигнут дневной лимит передач",
+    "squad_handoff_reason_run_failed": "запуск не удался",
     "coalesced_badge": "×{{count}}",
     "activity_count_one": "{{count}} событие",
     "activity_count_other": "{{count}} события",
@@ -938,6 +965,7 @@
   },
   "agent_live": {
     "is_working": "{{name}} работает",
+    "is_working_round": "{{label}} · раунд {{round}}",
     "is_queued": "{{name}} в очереди",
     "is_waiting_local_directory": "{{name}} ожидает локальную директорию",
     "queued_elapsed_prefix": "в очереди {{elapsed}}",
@@ -1003,8 +1031,6 @@
     "open_timeline": "Открыть таймлайн",
     "more_runs_one": "Показать ещё {{count}}",
     "more_runs_other": "Показать ещё {{count}}",
-    "strip_aria": "Стоимость каждого запуска — открыть хронологию запусков",
-    "strip_no_usage": "Использование не зафиксировано",
     "queued_count_one": "В очереди: {{count}}",
     "queued_count_other": "В очереди: {{count}}",
     "included_comments_few": "Включает {{count}} комментария",
@@ -1228,6 +1254,8 @@
     "remove_parent_issue": "Убрать родительскую задачу",
     "remove_parent_issue_success": "Родительская задача убрана",
     "add_sub_issue": "Добавить подзадачу...",
+    "add_blocker": "Ждать другую задачу...",
+    "add_blocking": "Блокировать другую задачу...",
     "delete_issue": "Удалить задачу",
     "mark_duplicate": "Отметить как дубликат...",
     "locate_in_sidebar": "Показать на боковой панели",
@@ -1536,6 +1564,7 @@
       "cancel": "Отмена",
       "error": "Не удалось создать пробуждение. Проверьте настройки и попробуйте снова.",
       "capacity_error": "В этой задаче или рабочем пространстве уже достигнут максимум включённых пробуждений.",
+      "agent_error": "Вы не можете запускать этого агента. Попросите доступ у его владельца или выберите другого агента.",
       "missing_condition": "Выберите условие.",
       "missing_agent": "Выберите агента для пробуждения.",
       "missing_events": "Выберите хотя бы одно событие.",
@@ -1594,13 +1623,6 @@
       "badge": "Системное",
       "title_stage": "Когда все подзадачи этапа {{stage}} завершатся",
       "title_all": "Когда все подзадачи завершатся",
-      "wake_assignee": "Разбудить исполнителя {{name}}",
-      "remaining_one": "Осталось: {{count}}",
-      "remaining_other": "Осталось: {{count}}",
-      "blocked_backlog": "Задача в бэклоге — пробуждение пока не сработает",
-      "blocked_member": "Исполнитель — участник; он получит уведомление во входящих",
-      "blocked_none": "Нет исполнителя-агента — будить некого",
-      "turned_off": "Выключено для этой задачи",
       "target_title": "Будит",
       "target_current": "Исполнитель (сейчас {{name}})",
       "target_none": "Исполнителя: агента или команду будит, участнику отправляет уведомление",
@@ -1615,16 +1637,19 @@
       "save_error": "Не удалось сохранить системное правило.",
       "default_on": "По умолчанию включено в этом рабочем пространстве.",
       "default_off": "По умолчанию выключено в этом рабочем пространстве.",
-      "notify_member": "Уведомить {{name}} во входящих",
       "instruction": "Что делать при пробуждении",
       "instruction_edit": "Изменить инструкцию",
       "instruction_default": "Не задано для этой задачи; используется значение по умолчанию:",
       "instruction_placeholder": "Оставьте пустым, чтобы использовать значение по умолчанию",
       "instruction_invalid": "Размер инструкций должен быть меньше 4 000 байт.",
       "paused": "Приостановлено: {{reason}}",
-      "remaining_few": "Осталось: {{count}}",
-      "remaining_many": "Осталось: {{count}}",
-      "default_change": "Изменить значение по умолчанию"
+      "default_change": "Изменить значение по умолчанию",
+      "chip_wake": "Разбудит {{name}} по завершении",
+      "chip_notify": "Уведомит {{name}} по завершении",
+      "chip_assignee": "Разбудит исполнителя по завершении",
+      "chip_off": "Будильник по завершении выключен",
+      "blocked_backlog": "Задача в бэклоге — пробуждение пока не сработает",
+      "blocked_none": "Нет исполнителя-агента — будить некого"
     },
     "cond": {
       "status": "Когда эта задача переходит в статус {{status}}",
@@ -1703,7 +1728,14 @@
     "upcoming_one": "{{count}} активное правило пробуждения",
     "upcoming_few": "{{count}} включённых правил будильника",
     "upcoming_many": "{{count}} включённых правил будильника",
-    "upcoming_other": "{{count}} включённых правил будильника"
+    "upcoming_other": "{{count}} включённых правил будильника",
+    "short": {
+      "at_time": "{{time}}",
+      "scheduled_time": "В назначенное время",
+      "hourly": "Каждый час",
+      "every_hours": "Каждые {{hours}} ч",
+      "every_seconds": "Каждые {{seconds}} с"
+    }
   },
   "duplicates": {
     "banner_prefix": "Дубликат",
@@ -1741,7 +1773,8 @@
     "issue_disabled": "Слияние PR не изменит эту задачу",
     "issue_disabled_action": "Включить",
     "waiting_to_few": "Переходит в статус {{status}}, когда {{prs}} будут смёржены",
-    "waiting_to_many": "Переходит в статус {{status}}, когда {{prs}} будут смёржены"
+    "waiting_to_many": "Переходит в статус {{status}}, когда {{prs}} будут смёржены",
+    "on_merge_to": "После мёржа → {{status}}"
   },
   "deliverables": {
     "section_title": "Результаты",
@@ -1886,7 +1919,6 @@
       "target_squad": "Команда · лидер распределяет работу",
       "target_member": "Участник",
       "instructions_hint": "Отправляются исполнителю с этим запуском вместе с описанием и комментариями задачи.",
-      "next_hint": "Исполнитель обновляет статус напрямую и возвращает задачу только на доработку, но не при блокировке. Завершение запуска никогда не меняет статус автоматически.",
       "preview_brief": "Посмотреть задание для агента",
       "preview_title": "Задание для этапа «{{status}}»",
       "preview_description": "Что получает исполнитель при входе задачи на этот этап. Для предпросмотра сохранять изменения не нужно.",
@@ -2090,8 +2122,7 @@
       "all_issues": "Все задачи",
       "my_work": "Моя работа",
       "working": "Выполняются",
-      "subscribed": "Подписки",
-      "snoozed": "Отложенные"
+      "subscribed": "Подписки"
     },
     "untitled": "Представление без названия",
     "copy_name": "{{name}} (копия)",
@@ -2182,7 +2213,8 @@
       "pending": "Ожидание",
       "approved": "Одобрено",
       "rejected": "Отклонено",
-      "rate_limited": "Лимит вызовов достигнут"
+      "rate_limited": "Лимит вызовов достигнут",
+      "quota_exceeded": "Месячный лимит исчерпан"
     }
   },
   "environments": {
@@ -2313,5 +2345,47 @@
     "focus_failed": "Не удалось переключиться на {{name}}",
     "retry": "Повторить",
     "dismiss": "Скрыть"
+  },
+  "relations": {
+    "title": "Связи",
+    "add": "Добавить связь",
+    "wait_title": "Ждать другую задачу",
+    "block_title": "Блокировать другую задачу",
+    "blocked_by": "Заблокировано",
+    "blocking": "Блокирует",
+    "stage_tag": "Этап",
+    "stage_tag_hint": "Задано этапами родительской задачи",
+    "add_blocker_hint": "Эта задача начнётся после её завершения",
+    "add_blocking_hint": "Она начнётся после завершения этой задачи",
+    "mark_duplicate_hint": "Отменяет эту задачу",
+    "blocking_picker_hint": "Выберите задачу, которая не может начаться, пока не завершится эта."
+  },
+  "waiting": {
+    "remove": "Удалить {{identifier}}",
+    "count": "Ожидание задач: {{count}}",
+    "count_one": "Ожидание задач: {{count}}",
+    "count_few": "Ожидание задач: {{count}}",
+    "count_many": "Ожидание задач: {{count}}",
+    "count_other": "Ожидание задач: {{count}}",
+    "hint": "После завершения этих задач исполнитель начнёт работу автоматически или получит уведомление.",
+    "hint_backlog": "В бэклоге задача не начнётся автоматически.",
+    "picker_hint": "Выберите задачу, которая должна завершиться раньше этой.",
+    "restricted": "Ограниченные зависимости: {{count}}",
+    "ended": "Ожидаемые задачи завершены",
+    "marker_title": "Заблокировано задачами: {{count}}",
+    "marker_title_one": "Заблокировано задачами: {{count}}",
+    "marker_title_few": "Заблокировано задачами: {{count}}",
+    "marker_title_many": "Заблокировано задачами: {{count}}",
+    "marker_title_other": "Заблокировано задачами: {{count}}",
+    "marker_ended": "Завершено {{finished}}/{{total}}",
+    "marker_more": "Ещё {{count}}",
+    "marker_more_one": "Ещё {{count}}",
+    "marker_more_few": "Ещё {{count}}",
+    "marker_more_many": "Ещё {{count}}",
+    "marker_more_other": "Ещё {{count}}",
+    "marker_auto_start": "{{name}} начнёт работу автоматически после их завершения.",
+    "marker_notify": "{{name}} получит уведомление после их завершения.",
+    "marker_unavailable": "{{name}} сейчас не может работать, поэтому после их завершения ничего не начнётся.",
+    "marker_unassigned": "Исполнитель не назначен, поэтому после их завершения ничего не начнётся."
   }
 }

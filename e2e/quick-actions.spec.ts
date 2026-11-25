@@ -96,14 +96,14 @@ test("renders assistant quick actions and sends the hidden prompt", async ({
 
     const token = api.getToken();
     if (!token) throw new Error("E2E token missing");
-    await page.addInitScript(
-      ({ authToken, activeSessionId }) => {
-        localStorage.setItem("multica_token", authToken);
-        localStorage.setItem("multica:chat:activeSessionId", activeSessionId);
-        localStorage.setItem("multica:chat:isOpen", "false");
-      },
-      { authToken: token, activeSessionId: sessionId },
-    );
+    // The ?session= deep link below opens the conversation. Seeding the
+    // un-namespaced activeSessionId key as well made the chat page take the
+    // link as already applied, so the workspace rehydration that follows
+    // cleared the session and stripped it from the URL.
+    await page.addInitScript((authToken) => {
+      localStorage.setItem("multica_token", authToken);
+      localStorage.setItem("multica:chat:isOpen", "false");
+    }, token);
 
     await page.setViewportSize({ width: 1440, height: 960 });
     await page.goto(`/${workspace.slug}/chat?session=${sessionId}`, {

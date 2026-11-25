@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { IssueView } from "@multica/core/api/schemas";
 import { myIssuesViewStore } from "@multica/core/issues/stores/my-issues-view-store";
@@ -15,6 +15,7 @@ import { IssueViewHeader } from "./view-header";
 
 const copyLink = vi.hoisted(() => vi.fn());
 const rename = vi.hoisted(() => vi.fn());
+const setVisibility = vi.hoisted(() => vi.fn());
 const active = vi.hoisted(() => ({ view: null as IssueView | null }));
 const viewer = vi.hoisted(() => ({ guest: false }));
 
@@ -33,6 +34,7 @@ vi.mock("./use-view-actions", () => ({
     canManage: () => true,
     copyLink,
     rename,
+    setVisibility,
     save: vi.fn(),
     remove: vi.fn(),
     create: vi.fn(),
@@ -102,6 +104,7 @@ function renderHeader(kind: "workspace" | "my", store: string, adapter = adapter
 beforeEach(() => {
   copyLink.mockClear();
   rename.mockClear();
+  setVisibility.mockClear();
   active.view = null;
   viewer.guest = false;
   useIssueViewRenameStore.setState({ target: null });
@@ -152,6 +155,22 @@ describe("IssueViewHeader new issue button", () => {
     viewer.guest = true;
     renderHeader("my", "header-new-issue-guest", adapterFor("/acme/my-issues"));
     expect(screen.queryByRole("button", { name: "New issue" })).toBeNull();
+  });
+});
+
+describe("IssueViewHeader visibility", () => {
+  it("keeps the visibility controls in the view's title menu", async () => {
+    active.view = savedView();
+    renderHeader("workspace", "header-visibility");
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Untitled view" }));
+    await user.click(await screen.findByRole("menuitem", { name: /^Visible to\s*Only me/ }));
+    expect(await screen.findByRole("menuitemradio", { name: "Only me" })).toHaveAttribute("aria-checked", "true");
+    // The open submenu marks its parent menu `pointer-events: none` in jsdom.
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Workspace members" }));
+
+    expect(setVisibility).toHaveBeenCalledWith(active.view, "workspace");
   });
 });
 

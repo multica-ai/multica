@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
@@ -14,6 +14,7 @@ const actions = vi.hoisted(() => ({
   edit: vi.fn(),
   remove: vi.fn(),
   canManage: vi.fn(() => true),
+  setVisibility: vi.fn(),
 }));
 
 vi.mock("../../issue-views/use-view-actions", () => ({ useIssueViewActions: () => actions }));
@@ -82,6 +83,7 @@ const SAVED_VIEW = {
 beforeEach(() => {
   actions.create.mockReset();
   actions.edit.mockReset();
+  actions.setVisibility.mockReset();
   actions.canManage.mockImplementation(() => true);
   actions.sidebar.items = [];
   useSidebarTreeStore.setState({ viewsCollapsed: false });
@@ -89,14 +91,14 @@ beforeEach(() => {
 });
 
 describe("ViewsSection", () => {
-  it("collapses from the section label", () => {
+  it("collapses from the section label", async () => {
     renderSection();
     expect(screen.getByText("All views")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Views" }));
     expect(useSidebarTreeStore.getState().viewsCollapsed).toBe(true);
-    expect(screen.queryByText("All views")).toBeNull();
     expect(screen.getByRole("button", { name: "Views" })).toHaveAttribute("aria-expanded", "false");
+    await waitFor(() => expect(screen.queryByText("All views")).toBeNull());
   });
 
   it("opens again to show a new view, named in the page header", () => {
@@ -135,6 +137,19 @@ describe("ViewsSection", () => {
     fireEvent.contextMenu(screen.getByRole("link", { name: "Not done" }));
     expect(await screen.findByRole("menuitem", { name: "Duplicate" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Edit view" })).toBeNull();
+  });
+
+  it("shares a saved project view from its right-click menu", async () => {
+    const view = { ...SAVED_VIEW, scope_type: "project", scope_id: "project-1", visibility: "private" };
+    actions.sidebar.items = [{ id: "view:v1", kind: "view", view }];
+    renderSection();
+
+    fireEvent.contextMenu(screen.getByRole("link", { name: "Not done" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^Visible to\s*Only me/ }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Workspace members" }));
+
+    expect(actions.setVisibility).toHaveBeenCalledWith(view, "workspace");
+    expect(useActiveIssueViewStore.getState().active).toEqual({});
   });
 
   // dnd-kit stops the release's click at the document without cancelling

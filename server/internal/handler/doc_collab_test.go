@@ -153,6 +153,30 @@ func TestUpdateDocGoesThroughCollabWithItsMergeBase(t *testing.T) {
 	testutil.Call(t, testHandler.UpdateDoc, withURLParam(newRequest("PATCH", "/api/docs/"+doc.ID, map[string]any{"base_revision": 9, "content": "x"}), "id", doc.ID)).Want(http.StatusConflict)
 }
 
+func TestRestoreDocThroughCollabRefusesAStaleRevision(t *testing.T) {
+	doc := createDocForTest(t)
+	testutil.Call(t, testHandler.UpdateDoc, withURLParam(newRequest("PATCH", "/api/docs/"+doc.ID, map[string]any{"base_revision": 1, "content": "# First\n\nTheirs"}), "id", doc.ID)).Want(http.StatusOK)
+
+	var got collab.WriteRequest
+	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		// Someone's pending edit was saved first, so the live revision is 3.
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"error":"revision_conflict","status":"stale","revision":3,"content":"# First\n\nTheirs, live"}`))
+	}))
+	defer service.Close()
+	useCollab(t, service.URL)
+
+	var conflict map[string]any
+	testutil.Call(t, testHandler.UpdateDoc, withURLParam(newRequest("PATCH", "/api/docs/"+doc.ID, map[string]any{"base_revision": 2, "action": "restore", "action_ref": 1}), "id", doc.ID)).Want(http.StatusConflict).JSON(&conflict)
+	if got.Action != "restore" || got.BaseRevision != 2 || got.Content == nil || *got.Content != doc.Content {
+		t.Fatalf("restore must carry the caller's revision and the version's content: %+v", got)
+	}
+	if conflict["code"] != "revision_conflict" || conflict["expected_revision"] != float64(2) || conflict["actual_revision"] != float64(3) {
+		t.Fatalf("unexpected response: %v", conflict)
+	}
+}
+
 func TestCollabTicketCarriesTheStateSavedWithTheCurrentRevision(t *testing.T) {
 	doc := createDocForTest(t)
 	service := httptest.NewServer(http.NotFoundHandler())

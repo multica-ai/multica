@@ -64,6 +64,7 @@ interface AssigneePickerProps {
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   align?: "start" | "center" | "end";
+  side?: React.ComponentProps<typeof PropertyPicker>["side"];
   /**
    * Whether a pick feeds the local ranking right away. The create-issue
    * dialog turns this off and records only the assignee it submits.
@@ -114,6 +115,7 @@ function AssigneePickerImpl({
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   align,
+  side,
   recordPicks = true,
 }: AssigneePickerProps) {
   const { t } = useT("issues");
@@ -138,6 +140,7 @@ function AssigneePickerImpl({
       }}
       width="w-64"
       align={align}
+      side={side}
       searchable
       searchPlaceholder={t(($) => $.pickers.assignee.search_placeholder)}
       onSearchChange={setFilter}

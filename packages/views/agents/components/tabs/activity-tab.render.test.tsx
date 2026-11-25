@@ -331,3 +331,22 @@ describe("AgentWorkSections windowed history", () => {
     expect(screen.queryByText("Issue issue-104")).not.toBeInTheDocument();
   });
 });
+
+describe("AgentWorkSections failure label", () => {
+  it("lets a long failure reason truncate beside the title and shows it in full on hover", async () => {
+    const failed: AgentTask = {
+      ...historyTask(0),
+      issue_id: "issue-1",
+      status: "failed",
+      failure_reason: "runtime_access_denied",
+    } as AgentTask;
+    agentTasksRef.current = () => Promise.resolve({ tasks: [failed], nextCursor: null });
+    renderTab();
+    const fullText = enAgents.task_failure.reasons.runtime_access_denied;
+    const label = await screen.findByText(fullText);
+    expect(label).toHaveAttribute("title", fullText);
+    expect(label).toHaveClass("min-w-0", "truncate");
+    expect(label).not.toHaveClass("shrink-0");
+    expect(await screen.findByText("Issue issue-1")).toBeInTheDocument();
+  });
+});

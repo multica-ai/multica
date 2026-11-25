@@ -5,6 +5,7 @@ import { forwardRef, memo, useCallback, useMemo, useState } from "react";
 import {
   ArrowUpRight,
   CircleHelp,
+  FileText,
   Hash,
   MessageSquare,
   Workflow,
@@ -520,7 +521,9 @@ function useTaskRowModel(task: AgentTask) {
         ? t(($) => $.tab_body.activity.source_chat_session)
         : task.autopilot_run_id
           ? t(($) => $.tab_body.activity.source_autopilot_run)
-          : t(($) => $.tab_body.activity.source_untracked)
+          : task.doc_id
+            ? t(($) => $.tab_body.activity.source_doc_comment)
+            : t(($) => $.tab_body.activity.source_untracked)
     : null;
   const SourceIcon = hasIssue
     ? Hash
@@ -528,14 +531,18 @@ function useTaskRowModel(task: AgentTask) {
       ? MessageSquare
       : task.autopilot_run_id
         ? Workflow
-        : CircleHelp;
+        : task.doc_id
+          ? FileText
+          : CircleHelp;
   const sourceLabel = hasIssue
     ? t(($) => $.tab_body.activity.source_issue)
     : task.chat_session_id
       ? t(($) => $.tab_body.activity.source_chat)
       : task.autopilot_run_id
         ? t(($) => $.tab_body.activity.source_autopilot)
-        : t(($) => $.tab_body.activity.source_untracked);
+        : task.doc_id
+          ? t(($) => $.tab_body.activity.source_doc)
+          : t(($) => $.tab_body.activity.source_untracked);
   const title =
     issue?.title ??
     (hasIssue
@@ -772,7 +779,10 @@ const RecentTaskRow = memo(function RecentTaskRow({
             the raw `task.error` (untranslated, with absolute paths, #7411)
             lives in the transcript's Run details instead. */}
         {failureLabel && (
-          <span className="hidden shrink-0 text-caption text-destructive sm:inline">
+          <span
+            className="hidden min-w-0 max-w-[50%] truncate text-caption text-destructive sm:inline"
+            title={failureLabel}
+          >
             {failureLabel}
           </span>
         )}

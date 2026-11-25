@@ -1,0 +1,64 @@
+---
+title: Multica 與 Linear、Jira 比較：人和 AI 代理協作的團隊怎麼選
+description: 使用 AI 程式設計代理的團隊，什麼時候繼續用 Linear 或 Jira，什麼時候把 AI 代理的工作搬進 Multica，什麼時候兩者一起用。
+---
+
+Linear 和 Jira 都可以把任務分配給 AI 代理，所以已經在用其中一個的團隊自然會問：為什麼還要加上 Multica？簡單說，兩者的差別在於 **AI 代理從哪裡來、在哪裡執行**。Linear 和 Jira 是專案管理工具，帶有自己的內建 AI 代理，也可以接入第三方 AI 代理服務。Multica 是一個工作區，它執行團隊已經在用的 AI 程式設計工具，執行在你連線的電腦上，並把每次執行都記錄在任務上。
+
+本頁關於 Linear 和 Jira 的描述來自它們截至 2026 年 11 月的公開文件；最新情況請查看 [Linear 的 AI 代理文件](https://linear.app/docs/agents-in-linear)和 [Atlassian 的發布文章](https://www.atlassian.com/blog/ai-at-work/your-jira-board-just-got-a-new-kind-of-teammate)。
+
+## 簡短回答
+
+- **繼續用 Linear 或 Jira**：如果規劃是流程的核心（週期或衝刺、路線圖、跨團隊報表），而且你想用的 AI 代理是已經接入這些工具的託管服務。
+- **用 Multica**：如果你想要一組共用的 AI 代理，基於 Claude Code、Codex、Cursor Agent 或 Copilot 等命令列工具，執行在自己的電腦或伺服器上，按 AI 代理控制存取，保留完整執行日誌，並且可以整套自託管。
+- **兩者一起用**：規劃放在 Linear 或 Jira，執行交給 AI 代理。Multica 的 AI 代理可以透過 MCP Server 讀取和更新 Linear；兩者之間沒有自動同步。
+
+## 比較
+
+| | Multica | Linear | Jira |
+|---|---|---|---|
+| 是什麼 | 人和 AI 代理一起處理任務的工作區，AI 代理執行在你的執行時上 | 帶 AI 代理平台的任務追蹤與規劃工具 | 帶 Rovo AI 代理和第三方 AI 代理的任務與專案追蹤工具 |
+| 誰來做 AI 代理的工作 | 你在 [31 種 AI 程式設計工具](/providers)上設定的 AI 代理，由 Multica 守護程序在你連線的電腦上執行 | Linear Agent，以及從 Linear 整合目錄安裝的第三方 AI 代理 | Rovo AI 代理，以及接入的第三方 AI 代理，例如 GitHub Copilot 和 Cursor |
+| AI 代理的程式碼在哪裡執行 | 你的筆電、伺服器或虛擬機，使用你自己的工具帳號 | 由各個 AI 代理整合決定，通常在供應商的雲端 | 由各個 AI 代理決定，通常在供應商的雲端 |
+| 分配任務或 @AI 代理 | 可以；AI 代理成為負責人 | 可以；AI 代理是受託方（delegate），負責人可以仍是一個人 | 可以 |
+| 按 AI 代理選擇工具和模型 | 可以，任何支援的工具都行，不同 AI 代理可以用不同工具 | 取決於安裝的 AI 代理 | 取決於 AI 代理 |
+| 控制誰能執行每個 AI 代理 | 按 AI 代理設定：**僅自己**、**整個工作區**或**指定成員** | 管理員選擇已安裝的 AI 代理能存取哪些團隊 | 在 Rovo Studio 中設定 AI 代理範圍，受 Jira 權限約束 |
+| 任務上能看到執行的什麼內容 | 完整執行日誌：工具呼叫、命令、錯誤，帶時間戳 | 任務上的 AI 代理活動；詳細程度取決於 AI 代理 | 工作項上記錄的 AI 代理操作 |
+| 在 AI 代理之間分派工作 | [小隊](/squads)：由隊長 AI 代理選擇成員；[工作流](/workflows)把每個狀態交給一個 AI 代理或一個人 | 分流規則（Triage rules）可以把新任務委託給 AI 代理 | 自動化規則和看板欄可以觸發 AI 代理 |
+| 重複性的 AI 代理工作 | [自動化](/autopilots)按排程或 webhook 執行你的任何 AI 代理 | Loops 按排程或事件執行 Linear Agent | Jira Automation 可以按排程或事件執行 AI 代理 |
+| 團隊方法複用 | 掛到 AI 代理上的 [Skills](/skills) | 工作區和團隊層級的 AI 代理指引 | Rovo Studio 中的 AI 代理指令和知識 |
+| 自託管 | 支援，使用 Docker Compose 或 Helm | 不支援 | Jira Data Center |
+| 規劃功能 | 專案、分階段的子任務、[工作流](/workflows)、自訂屬性，列表、看板、表格、甘特圖和泳道檢視 | 週期（Cycles）、專案、Initiatives、Insights | 衝刺、看板、時間軸、JQL、報表 |
+| 授權 | 原始碼可用（source-available）：在你的組織內部免費使用，包括自託管 | 專有 SaaS | 專有 |
+
+## 什麼時候 Linear 或 Jira 更合適
+
+- 你的流程依賴週期或衝刺、路線圖或組合報表。Multica 有專案、工作流和甘特圖，但沒有週期、衝刺或路線圖規劃。
+- 包括產品、設計和支援在內的大部分人都在專案管理工具裡工作，只有部分任務交給 AI 代理。
+- 你更想用託管的 AI 代理，例如 GitHub Copilot 的 coding agent 或 Cursor 的雲端 AI 代理，不想在自己的電腦上執行 AI 代理。
+- 你依賴這些工具的整合生態，或既有的企業級管理設定。
+
+## 什麼時候 Multica 更合適
+
+- **你已經在為程式設計命令列工具付費。** Multica 驅動開發者已有的 Claude Code、Codex、Cursor Agent、Copilot CLI、Kimi 等訂閱，而不是每個供應商再另外買一套 AI 代理服務。
+- **程式碼和憑據應該留在自己的機器上。** AI 代理執行在你連線的執行時上；自託管 Multica 時，工作區資料也留在你的伺服器上。見[安全模型](/security-model)。
+- **多名開發者共用同一組 AI 代理。** AI 代理、執行時和 Skills 屬於工作區，Access 決定誰能執行每個 AI 代理，看板上能看到哪個 AI 代理在做什麼。見[團隊共享 AI 代理池](/team-agent-pool)。
+- **你想確切看到 AI 代理做了什麼。** 每次執行的工具呼叫和命令都留在任務上，執行過程中還可以[插話](/mentioning-agents#給正在執行的-ai-代理插話)調整方向。
+- **審查是固定環節，而不是事後補救。** AI 代理交付到 `in_review`；[工作流](/workflows)可以把結果交給審查 AI 代理或同事，被打回時退回修改。
+
+## 和 Linear 或 Jira 一起使用
+
+很多團隊保留原本的工具做規劃，在 Multica 裡讓 AI 代理執行：
+
+1. 路線圖和跨團隊規劃繼續放在 Linear 或 Jira。
+2. 在 Multica 專案裡建立要交給 AI 代理的工程任務，並把倉庫和文件新增為[專案資源](/project-resources)。
+3. 想讓 AI 代理在工作時讀取或更新 Linear，就由工作區 `owner` 或 `admin` 在**設定 → MCP 伺服器**裡新增 Linear 的 MCP Server，並分配給這些 AI 代理。見[工作區共享的 MCP Server](/agents-create#工作區共享的-mcp-server)。
+
+Multica 不會從 Linear 或 Jira 匯入，也不會與它們同步，所以要明確每個任務由哪個系統負責。
+
+## 相關頁面
+
+- [團隊共享 AI 代理池](/team-agent-pool)：角色、Access、小隊和審查交接如何配合。
+- [Multica 與 OpenHands、Devin、Factory 比較](/compare/openhands-devin-factory)
+- [Multica 與本機 worktree 管理工具比較](/compare/worktree-managers)
+- [AI 程式設計工具對照](/providers)

@@ -18,15 +18,18 @@ import { CollectionPageState } from "../../layout/collection-page";
 import {
   aggregateDailyErrors,
   aggregateWeeklyErrors,
+  DELETED_SQUADS_ROW_ID,
   hasRateSample,
   MIN_RATE_SAMPLE,
   OFFENDER_METRIC,
   sortAgentFailures,
+  sortSquadFailures,
   type AgentFailureRow,
   type FailureClassRow,
   type FailureReasonRow,
   type FailureTotals,
   type OffenderSort,
+  type SquadFailureRow,
 } from "../utils";
 import { type Dim } from "./dashboard-shared";
 import { Segmented } from "./dashboard-shared";
@@ -84,9 +87,12 @@ export function ErrorsTab({
   classRows,
   reasonRows,
   agentRows,
+  squadRows = [],
   dailyErrors,
   weeklyErrors,
   agents,
+  squads = [],
+  allowSquadGrouping = false,
   locales,
 }: {
   days: number;
@@ -95,9 +101,12 @@ export function ErrorsTab({
   classRows: FailureClassRow[];
   reasonRows: FailureReasonRow[];
   agentRows: AgentFailureRow[];
+  squadRows?: SquadFailureRow[];
   dailyErrors: ReturnType<typeof aggregateDailyErrors>;
   weeklyErrors: ReturnType<typeof aggregateWeeklyErrors>;
   agents: { id: string; name: string }[];
+  squads?: { id: string; name: string }[];
+  allowSquadGrouping?: boolean;
   locales?: Intl.LocalesArgument;
 }) {
   const { t } = useT("usage");
@@ -182,7 +191,10 @@ export function ErrorsTab({
           />
           <OffendersCard
             agentRows={agentRows}
+            squadRows={squadRows}
             agents={agents}
+            squads={squads}
+            allowSquadGrouping={allowSquadGrouping}
             classLabel={classLabel}
           />
         </>
@@ -275,16 +287,26 @@ function FailureMixCard({
 /** Who it broke for. */
 function OffendersCard({
   agentRows,
+  squadRows,
   agents,
+  squads,
+  allowSquadGrouping,
   classLabel,
 }: {
   agentRows: AgentFailureRow[];
+  squadRows: SquadFailureRow[];
   agents: { id: string; name: string }[];
+  squads: { id: string; name: string }[];
+  allowSquadGrouping: boolean;
   classLabel: (c: FailureClass) => string;
 }) {
   const { t } = useT("usage");
+  const wsPaths = useWorkspacePaths();
   const [showAllAgents, setShowAllAgents] = useState(false);
   const [sortBy, setSortBy] = useState<OffenderSort>("failed");
+  const [groupBy, setGroupBy] = useState<"agent" | "squad">("agent");
+
+  const effectiveGroupBy = allowSquadGrouping ? groupBy : "agent";
 
   const sortOptions = useMemo(
     () => [
@@ -294,27 +316,64 @@ function OffendersCard({
     [t],
   );
 
+  const groupOptions = useMemo(
+    () => [
+      { value: "agent" as const, label: t(($) => $.leaderboard.group_agent) },
+      { value: "squad" as const, label: t(($) => $.leaderboard.group_squad) },
+    ],
+    [t],
+  );
+
   const sortedAgents = useMemo(
     () => sortAgentFailures(agentRows, sortBy),
     [agentRows, sortBy],
   );
 
-  // The leader fills the track, measured over every row rather than the
-  // visible ones so a bar means the same thing collapsed and expanded. Reading
-  // it off the leader (instead of a max over the raw rows) also keeps the Rate
-  // scale usable: a demoted small-sample row can out-rate the leader, and
-  // scaling to it would squash every meaningful bar to a sliver.
-  const leader = sortedAgents[0];
-  const maxValue = leader ? OFFENDER_METRIC[sortBy](leader) : 0;
+  const sortedSquads = useMemo(
+    () => sortSquadFailures(squadRows, sortBy),
+    [squadRows, sortBy],
+  );
+
+  const activeCount =
+    effectiveGroupBy === "squad" ? sortedSquads.length : sortedAgents.length;
+
+  const leader =
+    effectiveGroupBy === "squad" ? sortedSquads[0] : sortedAgents[0];
+  const maxValue = leader
+    ? sortBy === "failed"
+      ? leader.failed
+      : leader.rate
+    : 0;
 
   const visibleAgents = showAllAgents
     ? sortedAgents
     : sortedAgents.slice(0, TOP_OFFENDER_LIMIT);
 
+  const visibleSquads = showAllAgents
+    ? sortedSquads
+    : sortedSquads.slice(0, TOP_OFFENDER_LIMIT);
+
   return (
     <div className="rounded-lg border bg-card">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 pt-4 pb-3">
-        <h4 className="text-body font-semibold">{t(($) => $.errors.by_agent)}</h4>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <h4 className="text-body font-semibold">
+            {effectiveGroupBy === "squad"
+              ? t(($) => $.errors.by_squad)
+              : t(($) => $.errors.by_agent)}
+          </h4>
+          {allowSquadGrouping ? (
+            <Segmented
+              label={t(($) => $.leaderboard.group_label)}
+              value={effectiveGroupBy}
+              onChange={(next) => {
+                setShowAllAgents(false);
+                setGroupBy(next);
+              }}
+              options={groupOptions}
+            />
+          ) : null}
+        </div>
         <div className="flex flex-wrap items-center justify-end gap-3">
           <Segmented
             label={t(($) => $.errors.sort_label)}
@@ -322,7 +381,7 @@ function OffendersCard({
             onChange={setSortBy}
             options={sortOptions}
           />
-          {sortedAgents.length > TOP_OFFENDER_LIMIT ? (
+          {activeCount > TOP_OFFENDER_LIMIT ? (
             <button
               type="button"
               onClick={() => setShowAllAgents((v) => !v)}
@@ -330,21 +389,21 @@ function OffendersCard({
             >
               {showAllAgents
                 ? t(($) => $.errors.show_less, { count: TOP_OFFENDER_LIMIT })
-                : t(($) => $.errors.show_all, { count: sortedAgents.length })}
+                : t(($) => $.errors.show_all, { count: activeCount })}
             </button>
           ) : null}
         </div>
       </div>
       <div className="p-4 pt-0">
-        {/* Column headers, as on the leaderboard: `4 / 10 · 40%` was one
-            unlabelled blob and the reader had to guess which number was
-            which. The active metric's column is emphasised so it is
-            obvious what the ranking and the bars measure. */}
-        {sortedAgents.length > 0 ? (
+        {activeCount > 0 ? (
           <div
             className={`${OFFENDER_GRID} border-b py-2 text-caption font-medium text-muted-foreground`}
           >
-            <span>{t(($) => $.errors.header_agent)}</span>
+            <span>
+              {effectiveGroupBy === "squad"
+                ? t(($) => $.leaderboard.header_squad)
+                : t(($) => $.errors.header_agent)}
+            </span>
             <span />
             <span
               className={`text-right ${sortBy === "failed" ? "text-foreground" : ""}`}
@@ -359,17 +418,50 @@ function OffendersCard({
             </span>
           </div>
         ) : null}
-        <ul aria-label={t(($) => $.errors.by_agent)} className="divide-y">
-          {visibleAgents.map((row) => (
-            <AgentFailureItem
-              key={row.agentId}
-              row={row}
-              name={agents.find((a) => a.id === row.agentId)?.name ?? null}
-              maxValue={maxValue}
-              sortBy={sortBy}
-              classLabel={classLabel}
-            />
-          ))}
+        <ul
+          aria-label={
+            effectiveGroupBy === "squad"
+              ? t(($) => $.errors.by_squad)
+              : t(($) => $.errors.by_agent)
+          }
+          className="divide-y"
+        >
+          {effectiveGroupBy === "squad"
+            ? visibleSquads.map((row) => {
+                const isDeleted = row.squadId === DELETED_SQUADS_ROW_ID;
+                const squad = squads.find((s) => s.id === row.squadId);
+                const labelText = isDeleted
+                  ? t(($) => $.leaderboard.deleted_squads)
+                  : squad?.name ?? null;
+                return (
+                  <AgentFailureItem
+                    key={row.squadId}
+                    row={{
+                      agentId: row.squadId,
+                      failed: row.failed,
+                      total: row.total,
+                      rate: row.rate,
+                      classes: row.classes,
+                    }}
+                    name={labelText}
+                    href={squad ? wsPaths.squadDetail(squad.id) : null}
+                    italic={isDeleted || !labelText}
+                    maxValue={maxValue}
+                    sortBy={sortBy}
+                    classLabel={classLabel}
+                  />
+                );
+              })
+            : visibleAgents.map((row) => (
+                <AgentFailureItem
+                  key={row.agentId}
+                  row={row}
+                  name={agents.find((a) => a.id === row.agentId)?.name ?? null}
+                  maxValue={maxValue}
+                  sortBy={sortBy}
+                  classLabel={classLabel}
+                />
+              ))}
         </ul>
       </div>
     </div>
@@ -477,12 +569,16 @@ function ReasonList({ rows }: { rows: FailureReasonRow[] }) {
 function AgentFailureItem({
   row,
   name,
+  href,
+  italic,
   maxValue,
   sortBy,
   classLabel,
 }: {
   row: AgentFailureRow;
   name: string | null;
+  href?: string | null;
+  italic?: boolean;
   maxValue: number;
   sortBy: OffenderSort;
   classLabel: (c: FailureClass) => string;
@@ -491,37 +587,24 @@ function AgentFailureItem({
   const wsPaths = useWorkspacePaths();
 
   const segments = FAILURE_CLASSES.filter((c) => row.classes[c] > 0);
-  // Text equivalent of the stacked bar. The bar is the only place the class
-  // split is rendered, so it has to carry a name for screen readers as well as
-  // a hover affordance for everyone else.
   const composition = segments
     .map((c) => `${classLabel(c)} ${row.classes[c]}`)
     .join(" · ");
 
-  // Clamped, not just scaled: under the Rate ranking a small-sample row is
-  // demoted below the leader while still able to carry a higher rate, and an
-  // unclamped width would overflow the track.
   const value = OFFENDER_METRIC[sortBy](row);
   const pct = maxValue > 0 ? Math.min(100, (value / maxValue) * 100) : 0;
 
-  // Below MIN_RATE_SAMPLE runs the rate is arithmetic, not signal (1/1 is
-  // 100%). Those rows sort last under Rate and never take the emphasis that
-  // marks the active column, but they keep rendering and say why on hover.
   const weakSample = !hasRateSample(row);
+  const resolvedHref =
+    href !== undefined
+      ? href
+      : name
+        ? `${wsPaths.agentDetail(row.agentId)}?view=overview`
+        : null;
 
-  // The row links into the agent's Overview, whose ActivityTab lists recent
-  // runs with each failure's reason — the drill-down from "this agent is the
-  // problem" to the actual failed runs. NOT the Work tab: that one lists the
-  // issues assigned to the agent, which is a different question entirely.
-  //
-  // An agent with no resolvable name is either hard-deleted or private to
-  // someone else; either way there is no page to open and no name to show,
-  // so the row degrades to a neutral placeholder. Rendering `row.agentId`
-  // here would leak a bare UUID — and, for a private agent, leak its
-  // existence and failure profile to a member who cannot see it.
   const label = (
     <span
-      className={`block truncate text-caption${name ? "" : " italic text-muted-foreground"}`}
+      className={`block truncate text-caption${italic || !name ? " italic text-muted-foreground" : ""}`}
     >
       {name ?? t(($) => $.errors.other_agents)}
     </span>
@@ -529,9 +612,9 @@ function AgentFailureItem({
 
   return (
     <li className={`${OFFENDER_GRID} py-2`}>
-      {name ? (
+      {resolvedHref && name ? (
         <AppLink
-          href={`${wsPaths.agentDetail(row.agentId)}?view=overview`}
+          href={resolvedHref}
           newTabTitle={name}
           className="min-w-0 hover:underline"
         >

@@ -23,6 +23,8 @@ Dans l’application web ou de bureau, vous avez deux possibilités :
 | **Actions rapides** dans la barre latérale de la tâche | Un clic publie immédiatement la demande enregistrée. Si un agent ou un squad est choisi, vous lui demandez de travailler sur cette tâche. |
 | Saisir `/` dans le champ de commentaire | Choisissez une action pour insérer sa demande dans un brouillon. Adaptez-la à cette tâche, puis envoyez-la. La sélection seule ne publie rien. |
 
+Lorsque la barre latérale de la tâche est fermée, l'en-tête de la tâche affiche son statut, son responsable et un menu **Actions rapides**, pour utiliser une action sans rouvrir la barre latérale.
+
 <QuickActionDemo />
 
 Utiliser une action rapide ne change ni le responsable ni le statut de la tâche. Suivez les réponses dans la discussion et la progression de l’agent dans le [journal d’exécution](/tasks).
@@ -61,7 +63,7 @@ Rédigez la demande dans **Invite**, telle qu’elle doit être envoyée, puis e
 
 Une action d’équipe doit utiliser un agent que tous les membres peuvent appeler. Pour un squad, cette condition concerne son leader. Une action personnelle peut utiliser les agents que vous avez le droit d’appeler.
 
-« Moi uniquement » détermine qui peut voir et utiliser l’action enregistrée. Le commentaire publié dans une tâche reste visible par les personnes ayant accès à cette tâche.
+« Moi uniquement » détermine qui peut voir et utiliser l’action enregistrée. Le commentaire publié dans une tâche reste visible par les personnes ayant accès à cette tâche. Pendant l’exécution d’un agent, vos actions personnelles ne sont accessibles que pour une exécution que vous avez lancée sur un runtime qui vous appartient encore ; une exécution lancée par un autre membre ne voit que les actions d’équipe.
 
 ## Gérer les actions enregistrées
 
@@ -70,6 +72,19 @@ Dans **Paramètres → Actions rapides**, vous pouvez modifier, archiver ou rest
 Si vous ne voyez aucune action personnelle ou d’équipe, la barre latérale de la tâche n’affiche pas la section Actions rapides. La liste de la barre latérale n’est pas filtrée selon les droits d’appel : ils sont vérifiés au moment du clic.
 
 Si un clic vous indique que l’action ne peut pas s’exécuter, demandez à un administrateur de vérifier l’agent de cette action et ses droits d’appel. Si l’ordinateur de l’agent est hors ligne, le travail commencera quand il sera de nouveau en ligne ; consultez le [dépannage](/troubleshooting).
+
+## Utiliser depuis la CLI
+
+Gérez et exécutez vos actions rapides avec `multica quick-action` :
+
+```bash
+multica quick-action list
+multica quick-action create --name "Code Review" --agent Reviewer --prompt-file ./review.md
+multica quick-action run "Code Review" MUL-123 --dry-run
+multica quick-action run "Code Review" MUL-123
+```
+
+Une action peut être désignée par son UUID, un préfixe d’UUID unique ou son nom exact (insensible à la casse). `--dry-run` affiche un aperçu du commentaire sans le publier. La création, la modification, l’archivage, la restauration et la suppression sont réservés aux membres humains (`--visibility` vaut `private` par défaut ; `public` requiert le rôle `owner` ou `admin`). Voir [Utiliser la CLI](/cli) pour toutes les sous-commandes et options.
 
 ## Guides associés
 

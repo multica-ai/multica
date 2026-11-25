@@ -59,7 +59,8 @@
     "title": "Historique",
     "current": "Actuelle",
     "restore": "Restaurer cette version",
-    "loading": "Chargement..."
+    "loading": "Chargement...",
+    "from_discussion": "Depuis le commentaire : {{quote}}"
   },
   "not_found": {
     "title": "Document introuvable",
@@ -97,6 +98,7 @@
       "save": "Impossible de publier le commentaire",
       "delete": "Impossible de supprimer le commentaire",
       "resolve": "Impossible de mettre à jour le commentaire"
-    }
+    },
+    "run_waiting_retry": "En attente d'une nouvelle tentative"
   }
 }

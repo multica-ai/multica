@@ -156,6 +156,16 @@ func classifyPoisonedError(errMsg string) (string, bool) {
 		strings.Contains(lowered, "image.source.base64.data") {
 		return FailureReasonAPIInvalidRequest, true
 	}
+	// A Claude safeguards refusal stays in the transcript, so resuming the
+	// session sends the refused message again and is refused again. The
+	// Claude backend recognises the refusal from structured fields and
+	// reports it under this fixed marker; see claudeRefusalFailure. It is
+	// filed under api_invalid_request because that reason already means "the
+	// model API will not accept this conversation" and is on every resume
+	// blacklist, so the next task starts a fresh session.
+	if strings.HasPrefix(errMsg, agent.ClaudeModelRefusalMarker) {
+		return FailureReasonAPIInvalidRequest, true
+	}
 	// Both markers must be present: "400" alone is too generic (a tool
 	// could surface a 400 from anywhere) and "invalid_request_error"
 	// alone could in theory appear in non-poisoning contexts. The

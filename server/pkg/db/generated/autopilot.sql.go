@@ -315,7 +315,7 @@ SELECT
     $10,
     COALESCE($11::uuid, gen_random_uuid())
 FROM enqueue_agent
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step, usage_squad_id, doc_id, doc_thread_id, doc_comment_id
 `
 
 type CreateAutopilotTaskParams struct {
@@ -429,6 +429,10 @@ func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTa
 		&i.CancelledByName,
 		&i.IssueSnapshot,
 		&i.WorkflowStep,
+		&i.UsageSquadID,
+		&i.DocID,
+		&i.DocThreadID,
+		&i.DocCommentID,
 	)
 	return i, err
 }
@@ -521,6 +525,28 @@ type DeleteAutopilotCollaboratorParams struct {
 
 func (q *Queries) DeleteAutopilotCollaborator(ctx context.Context, arg DeleteAutopilotCollaboratorParams) error {
 	_, err := q.db.Exec(ctx, deleteAutopilotCollaborator, arg.AutopilotID, arg.UserType, arg.UserID)
+	return err
+}
+
+const deleteAutopilotCollaboratorsByMember = `-- name: DeleteAutopilotCollaboratorsByMember :exec
+DELETE FROM autopilot_collaborator AS c
+USING autopilot AS a
+WHERE c.autopilot_id = a.id
+  AND a.workspace_id = $1
+  AND c.user_type = 'member'
+  AND c.user_id = $2
+`
+
+type DeleteAutopilotCollaboratorsByMemberParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+// Collaborator grants carry no FK, so member removal must prune them in the
+// same application transaction: a re-invited user must not regain write access
+// they were granted before. Scoped to the workspace like the subscriber prune.
+func (q *Queries) DeleteAutopilotCollaboratorsByMember(ctx context.Context, arg DeleteAutopilotCollaboratorsByMemberParams) error {
+	_, err := q.db.Exec(ctx, deleteAutopilotCollaboratorsByMember, arg.WorkspaceID, arg.UserID)
 	return err
 }
 
@@ -1000,7 +1026,7 @@ func (q *Queries) GetAutopilotRunByWebhookDelivery(ctx context.Context, webhookD
 }
 
 const getAutopilotTaskByRun = `-- name: GetAutopilotTaskByRun :one
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step, usage_squad_id, doc_id, doc_thread_id, doc_comment_id FROM agent_task_queue
 WHERE autopilot_run_id = $1
 ORDER BY created_at
 LIMIT 1
@@ -1072,6 +1098,10 @@ func (q *Queries) GetAutopilotTaskByRun(ctx context.Context, autopilotRunID pgty
 		&i.CancelledByName,
 		&i.IssueSnapshot,
 		&i.WorkflowStep,
+		&i.UsageSquadID,
+		&i.DocID,
+		&i.DocThreadID,
+		&i.DocCommentID,
 	)
 	return i, err
 }
@@ -2369,7 +2399,7 @@ func (q *Queries) TouchAutopilotTriggerFiredAt(ctx context.Context, id pgtype.UU
 const updateAutopilot = `-- name: UpdateAutopilot :one
 UPDATE autopilot SET
     title = COALESCE($2, title),
-    description = COALESCE($3, description),
+    description = $3,
     assignee_type = COALESCE($4, assignee_type),
     assignee_id = COALESCE($5::uuid, assignee_id),
     status = COALESCE($6, status),

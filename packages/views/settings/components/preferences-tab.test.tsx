@@ -226,6 +226,8 @@ describe("PreferencesTab — Time zone", () => {
     supportedValuesOf?: (key: "timeZone") => string[];
   };
   const realSupportedValuesOf = intlWithValues.supportedValuesOf;
+  // On a machine set to Asia/Tokyo the "(browser)" entry matches too.
+  const TOKYO_ZONE = /^Asia\/Tokyo(?! \(browser\))/;
   beforeAll(() => {
     intlWithValues.supportedValuesOf = () => [];
   });
@@ -271,7 +273,7 @@ describe("PreferencesTab — Time zone", () => {
     const user = userEvent.setup();
     render(<PreferencesTab />, { wrapper: I18nWrapper });
 
-    await pickTimezone(user, "tokyo", /Asia\/Tokyo/);
+    await pickTimezone(user, "tokyo", TOKYO_ZONE);
 
     await waitFor(() => {
       expect(mockUpdateMe).toHaveBeenCalledWith({ timezone: "Asia/Tokyo" });
@@ -286,7 +288,7 @@ describe("PreferencesTab — Time zone", () => {
     const user = userEvent.setup();
     render(<PreferencesTab />, { wrapper: I18nWrapper });
 
-    await pickTimezone(user, "tokyo", /Asia\/Tokyo/);
+    await pickTimezone(user, "tokyo", TOKYO_ZONE);
 
     await waitFor(() => {
       expect(mockUpdateMe).toHaveBeenCalledWith({ timezone: "Asia/Tokyo" });

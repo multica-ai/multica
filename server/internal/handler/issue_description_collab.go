@@ -146,7 +146,7 @@ func (h *Handler) flushIssueDescriptionCollab(r *http.Request, issue db.Issue) d
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), docCollabFlushTimeout)
 	defer cancel()
-	if err := client.Flush(ctx, collab.IssueDocumentName(uuidToString(issue.ID))); err != nil {
+	if _, err := client.Flush(ctx, collab.IssueDocumentName(uuidToString(issue.ID))); err != nil {
 		slog.Warn("issue description collab flush failed", "issue_id", uuidToString(issue.ID), "error", err)
 		return issue
 	}
@@ -319,6 +319,31 @@ func (h *Handler) updateIssueDescriptionViaCollab(w http.ResponseWriter, r *http
 		return true, false
 	}
 	return true, true
+}
+
+// syncIssueDescriptionCollab hands a description written directly, past the
+// live session, to that session if anyone has it open, so editors see it now
+// instead of on their next save. It is merged into what they typed since.
+// Best effort: a session that misses it still folds it in when it next saves.
+func (h *Handler) syncIssueDescriptionCollab(r *http.Request, client *collab.Client, prev, issue db.Issue, actorType, actorID string) {
+	ctx, cancel := context.WithTimeout(r.Context(), docCollabFlushTimeout)
+	defer cancel()
+	document := collab.IssueDocumentName(uuidToString(issue.ID))
+	loaded, err := client.Flush(ctx, document)
+	if err == nil && loaded {
+		write := collab.WriteRequest{
+			Actor:       h.collabActor(ctx, actorType, actorID),
+			BaseContent: &prev.Description.String,
+			Content:     &issue.Description.String,
+		}
+		if task := h.wakeupSourceTaskID(r); task.Valid {
+			write.TaskID = uuidToString(task)
+		}
+		_, err = client.Write(ctx, document, write)
+	}
+	if err != nil {
+		slog.Warn("issue description collab sync failed", "issue_id", uuidToString(issue.ID), "error", err)
+	}
 }
 
 // issueUpdateOnlyDescription reports whether an UpdateIssue body changes

@@ -71,6 +71,8 @@
     "status_changes": "状态变更",
     "comments": "评论",
     "comments_description": "你订阅的任务有新评论时。",
+    "squad_handoffs": "包含小队内部交接",
+    "squad_handoffs_description": "小队队长给成员派活、成员向队长回报的评论。@你、智能体运行失败和小队收尾时的最终回报照常通知。",
     "mentions": "提及",
     "mentions_description": "有人用 @ 提到你时，包括 @all 和 @squad。",
     "reactions": "表情回应",

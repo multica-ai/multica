@@ -641,6 +641,38 @@ func (q *Queries) SetProjectWorkflow(ctx context.Context, arg SetProjectWorkflow
 	return i, err
 }
 
+const transferSquadWorkflowStepsToLeader = `-- name: TransferSquadWorkflowStepsToLeader :execrows
+UPDATE issue_workflow SET
+    steps = (
+        SELECT jsonb_agg(
+            CASE WHEN step->'handler' @> jsonb_build_object('type', 'squad', 'id', $1::text)
+                THEN jsonb_set(step, '{handler}', jsonb_build_object('type', 'agent', 'id', $2::text))
+                ELSE step
+            END ORDER BY ord)
+        FROM jsonb_array_elements(steps) WITH ORDINALITY AS s(step, ord)
+    ),
+    updated_at = now()
+WHERE workspace_id = $3::uuid
+  AND steps @> jsonb_build_array(jsonb_build_object('handler', jsonb_build_object('type', 'squad', 'id', $1::text)))
+`
+
+type TransferSquadWorkflowStepsToLeaderParams struct {
+	SquadID     string      `json:"squad_id"`
+	LeaderID    string      `json:"leader_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Mirrors TransferSquadAssignees for workflow steps: an archived squad cannot
+// be assigned, so a step still handing off to it would refuse every issue
+// that enters it. The leader agent takes the step over.
+func (q *Queries) TransferSquadWorkflowStepsToLeader(ctx context.Context, arg TransferSquadWorkflowStepsToLeaderParams) (int64, error) {
+	result, err := q.db.Exec(ctx, transferSquadWorkflowStepsToLeader, arg.SquadID, arg.LeaderID, arg.WorkspaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const updateIssueWorkflow = `-- name: UpdateIssueWorkflow :one
 UPDATE issue_workflow SET
     name = $1::text,

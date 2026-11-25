@@ -31,6 +31,7 @@ import { syncDaemonOnLogin } from "./platform/daemon-login-sync";
 import { createDesktopLocaleAdapter } from "./platform/i18n-adapter";
 import { captureEvent } from "@multica/core/analytics";
 import { AppearanceSync } from "@multica/views/common/appearance-sync";
+import { MotionProvider } from "@multica/views/common/motion-provider";
 import { RESOURCES } from "@multica/views/locales";
 import { DesktopClientUsageReporter } from "./platform/client-usage-reporter";
 import { DiagnosticRouteReporter } from "./platform/diagnostic-route-reporter";
@@ -484,53 +485,55 @@ export default function App() {
   }, [localeAdapter, locale]);
 
   return (
-    <ThemeProvider>
-      <AppearanceSync />
-      {runtimeConfigResult.ok ? (
-        <CoreProvider
-          apiBaseUrl={runtimeConfigResult.config.apiUrl}
-          wsUrl={runtimeConfigResult.config.wsUrl}
-          onLogout={
-            windowContext.kind === "main" ? handleDaemonLogout : undefined
-          }
-          onSessionExpired={
-            windowContext.kind === "main" ? handleSessionExpired : undefined
-          }
-          identity={identity}
-          locale={locale}
-          resources={resources}
-          localeAdapter={localeAdapter}
-        >
-          <DesktopAuthSessionBridge />
-          <NativeContextMenu />
-          {windowContext.kind === "main" && <DiagnosticRouteReporter />}
-          {windowContext.kind === "main" && <WorkspaceWindowBridge />}
-          {windowContext.kind === "main" && <IssueDeepLinkBridge />}
-          {windowContext.kind === "main" && (
-            <DesktopClientUsageReporter
-              apiUrl={runtimeConfigResult.config.apiUrl}
-            />
-          )}
-          {windowContext.kind === "issue" ? (
-            <IssueWindowContent />
-          ) : (
-            <AppContent />
-          )}
-          {/* Opt-in dev status bar; see "Dev Toolbar" in CONTRIBUTING.md. */}
-          {import.meta.env.DEV &&
-            import.meta.env.VITE_DEV_TOOLBAR &&
-            windowContext.kind === "main" && (
-              <DesktopDevToolbar apiUrl={runtimeConfigResult.config.apiUrl} />
+    <MotionProvider>
+      <ThemeProvider>
+        <AppearanceSync />
+        {runtimeConfigResult.ok ? (
+          <CoreProvider
+            apiBaseUrl={runtimeConfigResult.config.apiUrl}
+            wsUrl={runtimeConfigResult.config.wsUrl}
+            onLogout={
+              windowContext.kind === "main" ? handleDaemonLogout : undefined
+            }
+            onSessionExpired={
+              windowContext.kind === "main" ? handleSessionExpired : undefined
+            }
+            identity={identity}
+            locale={locale}
+            resources={resources}
+            localeAdapter={localeAdapter}
+          >
+            <DesktopAuthSessionBridge />
+            <NativeContextMenu />
+            {windowContext.kind === "main" && <DiagnosticRouteReporter />}
+            {windowContext.kind === "main" && <WorkspaceWindowBridge />}
+            {windowContext.kind === "main" && <IssueDeepLinkBridge />}
+            {windowContext.kind === "main" && (
+              <DesktopClientUsageReporter
+                apiUrl={runtimeConfigResult.config.apiUrl}
+              />
             )}
-        </CoreProvider>
-      ) : (
-        <BlockingRuntimeConfigError
-          locale={locale}
-          message={runtimeConfigResult.error.message}
-        />
-      )}
-      <Toaster />
-      {windowContext.kind === "main" && <UpdateNotification />}
-    </ThemeProvider>
+            {windowContext.kind === "issue" ? (
+              <IssueWindowContent />
+            ) : (
+              <AppContent />
+            )}
+            {/* Opt-in dev status bar; see "Dev Toolbar" in CONTRIBUTING.md. */}
+            {import.meta.env.DEV &&
+              import.meta.env.VITE_DEV_TOOLBAR &&
+              windowContext.kind === "main" && (
+                <DesktopDevToolbar apiUrl={runtimeConfigResult.config.apiUrl} />
+              )}
+          </CoreProvider>
+        ) : (
+          <BlockingRuntimeConfigError
+            locale={locale}
+            message={runtimeConfigResult.error.message}
+          />
+        )}
+        <Toaster />
+        {windowContext.kind === "main" && <UpdateNotification />}
+      </ThemeProvider>
+    </MotionProvider>
   );
 }

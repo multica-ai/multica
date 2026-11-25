@@ -26,6 +26,7 @@
     "message": "Agent message",
     "error": "Error",
     "waiting_result": "Waiting for the tool result...",
+    "reply_pending_call": "Still running: waiting for {{step}} to finish",
     "supplement_failure_turn_ended": "the run ended before delivery",
     "supplement_failure_turn_not_started": "the agent was not ready",
     "supplement_failure_provider_rejected": "the agent rejected the message",
@@ -192,7 +193,7 @@
     "section_project": "Project",
     "section_project_status": "Project status",
     "section_label": "Label",
-    "section_relation": "Relation to me",
+    "section_relation": "Relationships",
     "relation_assigned": "Assigned to me",
     "relation_created": "Created by me",
     "relation_my_agents": "My agents' work",
@@ -280,7 +281,8 @@
     "advanced_group_match_trailing": "of these",
     "advanced_group_hint": "Conditions in this group are joined with “{{word}}”",
     "advanced_add_to_group": "Add to group",
-    "advanced_turn_into_group": "Turn into group"
+    "advanced_turn_into_group": "Turn into group",
+    "relation_blocked": "Blocked"
   },
   "display": {
     "tooltip": "Display settings",
@@ -496,7 +498,6 @@
     "section_parent_issue": "Parent issue",
     "section_pull_requests": "Pull requests",
     "section_metadata": "Metadata",
-    "section_details": "Details",
     "sidebar_settings": {
       "open": "Customize sidebar",
       "title": "Sidebar",
@@ -553,9 +554,6 @@
     "prop_project": "Project",
     "prop_labels": "Labels",
     "add_property_action": "Add property",
-    "prop_created_by": "Created by",
-    "prop_created": "Created",
-    "prop_updated": "Updated",
     "activity_section": "Activity",
     "subscribe": "Subscribe",
     "unsubscribe": "Unsubscribe",
@@ -582,9 +580,6 @@
     "quick_jump_label": "Quick navigation",
     "description_nav_label": "Issue description",
     "sub_issues_nav_progress": "{{done}}/{{total}} completed",
-    "sub_issues_show_more_one": "Show {{count}} more",
-    "sub_issues_show_more_other": "Show {{count}} more",
-    "sub_issues_show_less": "Collapse",
     "thread_nav_label": "Jump to comment thread",
     "thread_nav_resolved_label": "{{title}} (resolved)",
     "thread_nav_reply_label": "{{author}}: {{title}}",
@@ -610,7 +605,34 @@
     "workdir_path_copy_failed": "Failed to copy working directory path",
     "workdir_path_unavailable": "No local working directory yet — this issue hasn't been run by a local agent",
     "pull_requests_empty_title": "No linked pull requests.",
-    "guest_readonly_note": "Guests can view and comment, but cannot change issue properties."
+    "guest_readonly_note": "Guests can view and comment, but cannot change issue properties.",
+    "open_issue_page": "Open issue page",
+    "add_row": {
+      "wakeups": "Add wakeup",
+      "pull_requests": "Add pull request",
+      "environments": "Add environment",
+      "relations": "Add relation",
+      "pair": "Add {{first}} or {{second}}",
+      "many": "Add...",
+      "noun": {
+        "wakeups": "wakeup",
+        "pull_requests": "pull request",
+        "environments": "environment",
+        "relations": "relation"
+      },
+      "menu": {
+        "wakeups": "Wakeup",
+        "pull_requests": "Pull request",
+        "environments": "Environment",
+        "relations": "Relations"
+      }
+    },
+    "footer": {
+      "created": "Created by {{creator}} · {{date}}",
+      "created_for": "Created by {{creator}} for {{requester}} · {{date}}",
+      "created_at": "Created {{time}}",
+      "updated_at": "Updated {{time}}"
+    }
   },
   "timeline": {
     "loading": "Loading...",
@@ -644,6 +666,13 @@
     "squad_leader_no_action_reason": "evaluated: no action needed ({{reason}})",
     "squad_leader_failed": "evaluation failed",
     "squad_leader_failed_reason": "evaluation failed: {{reason}}",
+    "squad_handoff_to": "handed off to {{name}}",
+    "squad_handoff_human": "asked {{name}} to decide",
+    "squad_handoff_leader": "handed back to {{name}}",
+    "squad_handoff_round": "round {{round}}",
+    "squad_handoff_reason_round_limit": "{{limit}}-round limit reached",
+    "squad_handoff_reason_daily_limit": "daily handoff limit reached",
+    "squad_handoff_reason_run_failed": "run failed",
     "coalesced_badge": "×{{count}}",
     "activity_count_one": "{{count}} activity",
     "activity_count_other": "{{count}} activities",
@@ -867,6 +896,7 @@
   },
   "agent_live": {
     "is_working": "{{name}} is working",
+    "is_working_round": "{{label}} · round {{round}}",
     "is_queued": "{{name}} is queued",
     "is_waiting_local_directory": "{{name}} is waiting for the local directory",
     "queued_elapsed_prefix": "queued for {{elapsed}}",
@@ -930,8 +960,6 @@
     "open_timeline": "Open timeline",
     "more_runs_one": "Show {{count}} more",
     "more_runs_other": "Show {{count}} more",
-    "strip_aria": "Cost per run — open the run timeline",
-    "strip_no_usage": "No usage recorded",
     "queued_count_one": "{{count}} queued",
     "queued_count_other": "{{count}} queued"
   },
@@ -1113,6 +1141,8 @@
     "remove_parent_issue": "Remove parent issue",
     "remove_parent_issue_success": "Removed parent issue",
     "add_sub_issue": "Add sub-issue...",
+    "add_blocker": "Wait for another task...",
+    "add_blocking": "Block another task...",
     "delete_issue": "Delete issue",
     "mark_duplicate": "Mark as duplicate...",
     "open_in_new_window": "Open in new window"
@@ -1419,6 +1449,7 @@
       "cancel": "Cancel",
       "error": "Could not create the wakeup. Check the settings and try again.",
       "capacity_error": "This issue or workspace already has the maximum number of enabled wakeups.",
+      "agent_error": "You can't run this agent. Ask its owner for access, or choose another agent.",
       "missing_condition": "Choose a condition.",
       "missing_agent": "Choose an agent to wake.",
       "missing_events": "Choose at least one event.",
@@ -1471,13 +1502,6 @@
       "badge": "System",
       "title_stage": "When stage {{stage}}'s sub-issues all finish",
       "title_all": "When all sub-issues finish",
-      "wake_assignee": "Wake assignee {{name}}",
-      "remaining_one": "{{count}} to go",
-      "remaining_other": "{{count}} to go",
-      "blocked_backlog": "Issue is in backlog; no wakeup for now",
-      "blocked_member": "Assignee is a member; they get an inbox notification",
-      "blocked_none": "No agent assignee; nobody is woken",
-      "turned_off": "Turned off for this issue",
       "target_title": "Wakes",
       "target_current": "Assignee (currently {{name}})",
       "target_none": "The assignee: an agent or squad is woken, a member is notified",
@@ -1492,14 +1516,19 @@
       "save_error": "Could not save the system rule.",
       "default_on": "On by default in this workspace.",
       "default_off": "Off by default in this workspace.",
-      "notify_member": "Notify {{name}} in their inbox",
       "instruction": "What to do when woken",
       "instruction_edit": "Edit instruction",
       "instruction_default": "Not set on this issue; uses the default:",
       "instruction_placeholder": "Leave empty to use the default",
       "instruction_invalid": "Instructions must be under 4,000 bytes.",
       "paused": "Paused: {{reason}}",
-      "default_change": "Change the default"
+      "default_change": "Change the default",
+      "chip_wake": "Wakes {{name}} when all finish",
+      "chip_notify": "Notifies {{name}} when all finish",
+      "chip_assignee": "Wakes the assignee when all finish",
+      "chip_off": "Sub-issue wakeup off",
+      "blocked_backlog": "Issue is in backlog; no wakeup for now",
+      "blocked_none": "No agent assignee; nobody is woken"
     },
     "cond": {
       "status": "When this issue moves to {{status}}",
@@ -1574,7 +1603,14 @@
       "rate": "more than 12 runs in an hour"
     },
     "upcoming_one": "{{count}} enabled wakeup rule",
-    "upcoming_other": "{{count}} enabled wakeup rules"
+    "upcoming_other": "{{count}} enabled wakeup rules",
+    "short": {
+      "at_time": "{{time}}",
+      "scheduled_time": "At the scheduled time",
+      "hourly": "Every hour",
+      "every_hours": "Every {{hours}} hours",
+      "every_seconds": "Every {{seconds}} seconds"
+    }
   },
   "duplicates": {
     "banner_prefix": "Duplicate of",
@@ -1610,7 +1646,8 @@
     "not_merged_action": "Remove",
     "all_merged_to": "All PRs merged. The next merged PR moves this issue to {{status}}.",
     "issue_disabled": "PR merges won’t change this issue",
-    "issue_disabled_action": "Turn on"
+    "issue_disabled_action": "Turn on",
+    "on_merge_to": "On merge → {{status}}"
   },
   "deliverables": {
     "section_title": "Deliverables",
@@ -1741,7 +1778,6 @@
       "target_squad": "Squad · leader dispatches",
       "target_member": "Member",
       "instructions_hint": "Sent to the handler with this run, alongside the issue description and comments.",
-      "next_hint": "The handler updates the status directly and sends it back only for rework, not blockers. Finishing a run never changes the status automatically.",
       "preview_brief": "Preview the agent’s brief",
       "preview_title": "Brief for the “{{status}}” step",
       "preview_description": "What the handler’s run receives when an issue enters this step. Saved changes are not required to preview.",
@@ -1923,8 +1959,7 @@
       "all_issues": "All issues",
       "my_work": "My work",
       "working": "Working",
-      "subscribed": "Subscribed",
-      "snoozed": "Snoozed"
+      "subscribed": "Subscribed"
     },
     "untitled": "Untitled view",
     "copy_name": "{{name}} (copy)",
@@ -2004,7 +2039,8 @@
       "pending": "Waiting",
       "approved": "Approved",
       "rejected": "Declined",
-      "rate_limited": "Rate limited"
+      "rate_limited": "Rate limited",
+      "quota_exceeded": "Monthly limit reached"
     }
   },
   "environments": {
@@ -2121,5 +2157,41 @@
     "focus_failed": "Couldn't switch to {{name}}",
     "retry": "Retry",
     "dismiss": "Dismiss"
+  },
+  "relations": {
+    "title": "Relations",
+    "add": "Add relation",
+    "wait_title": "Wait for another task",
+    "block_title": "Block another task",
+    "blocked_by": "Blocked by",
+    "blocking": "Blocking",
+    "stage_tag": "Stage",
+    "stage_tag_hint": "Set by the parent issue's stages",
+    "add_blocker_hint": "This task starts after it ends",
+    "add_blocking_hint": "It starts after this task ends",
+    "mark_duplicate_hint": "Cancels this task",
+    "blocking_picker_hint": "Select a task that can't start until this one ends."
+  },
+  "waiting": {
+    "remove": "Remove {{identifier}}",
+    "count": "Waiting for {{count}} tasks",
+    "hint": "After these tasks end, the assignee starts automatically or receives a notification.",
+    "hint_backlog": "Won't auto-start while in Backlog.",
+    "picker_hint": "Select a task that must end before this one can start.",
+    "restricted": "{{count}} restricted prerequisites",
+    "ended": "Waiting tasks ended",
+    "count_one": "Waiting for {{count}} task",
+    "count_other": "Waiting for {{count}} tasks",
+    "marker_title": "Blocked by {{count}} tasks",
+    "marker_title_one": "Blocked by {{count}} task",
+    "marker_title_other": "Blocked by {{count}} tasks",
+    "marker_ended": "{{finished}}/{{total}} ended",
+    "marker_more": "{{count}} more",
+    "marker_more_one": "{{count}} more",
+    "marker_more_other": "{{count}} more",
+    "marker_auto_start": "{{name}} starts automatically once these end.",
+    "marker_notify": "{{name}} is notified once these end.",
+    "marker_unavailable": "{{name}} can't run right now, so nothing starts when these end.",
+    "marker_unassigned": "No assignee, so nothing starts when these end."
   }
 }
