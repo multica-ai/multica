@@ -26,6 +26,7 @@ import {
   type SettingsSaveStatus,
 } from "../../settings/components/settings-layout";
 import { useAutoSave } from "../../settings/components/use-auto-save";
+import { useEditedValue } from "../../settings/components/use-edited-value";
 import { useT } from "../../i18n";
 import { CharCounter } from "./char-counter";
 import { ConversationStartersEditor } from "./conversation-starters-editor";
@@ -93,15 +94,15 @@ export function AgentDetailInspector({
     [agent.id, onUpdate],
   );
 
-  const [name, setName] = useState(agent.name);
-  const [description, setDescription] = useState(agent.description ?? "");
+  const nameField = useEditedValue(agent.name, agent.id);
+  const descriptionField = useEditedValue(agent.description ?? "", agent.id);
+  const name = nameField.value;
+  const description = descriptionField.value;
   const [starters, setStarters] = useState<AgentConversationStarter[]>(
     agent.conversation_starters ?? [],
   );
 
   useEffect(() => {
-    setName(agent.name);
-    setDescription(agent.description ?? "");
     setStarters(agent.conversation_starters ?? []);
     // Reset only when moving to another agent. Cache updates from this form
     // must not erase a newer local draft while an autosave is in flight.
@@ -121,9 +122,16 @@ export function AgentDetailInspector({
   );
   const saveProfile = useCallback(
     async (next: ProfileDraft) => {
-      await update({ name: next.name, description: next.description });
+      // Send only what was edited here, so the rest keeps changes made elsewhere.
+      const changes: Partial<ProfileDraft> = {};
+      if (nameField.edited) changes.name = next.name;
+      if (descriptionField.edited) changes.description = next.description;
+      if (Object.keys(changes).length === 0) return;
+      await update(changes);
+      nameField.markSaved(next.name);
+      descriptionField.markSaved(next.description);
     },
-    [update],
+    [descriptionField, nameField, update],
   );
   const profileAutoSave = useAutoSave({
     value: profileDraft,
@@ -217,7 +225,7 @@ export function AgentDetailInspector({
                     autoComplete="off"
                     aria-label={t(($) => $.inspector.name_label)}
                     value={name}
-                    onChange={(event) => setName(event.target.value)}
+                    onChange={(event) => nameField.edit(event.target.value)}
                     onBlur={profileAutoSave.flush}
                     disabled={!canEdit}
                     aria-invalid={nameInvalid || undefined}
@@ -241,7 +249,7 @@ export function AgentDetailInspector({
                     autoComplete="off"
                     aria-label={t(($) => $.inspector.description_label)}
                     value={description}
-                    onChange={(event) => setDescription(event.target.value)}
+                    onChange={(event) => descriptionField.edit(event.target.value)}
                     onBlur={profileAutoSave.flush}
                     disabled={!canEdit}
                     rows={5}
